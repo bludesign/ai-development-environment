@@ -1,207 +1,395 @@
+"Values supported for skill ai tool."
 enum SkillAiTool {
+  "Represents the cursor option."
   CURSOR
+  "Represents the GitHub copilot option."
   GITHUB_COPILOT
+  "Represents the codex option."
   CODEX
+  "Represents the claude option."
   CLAUDE
+  "Represents the opencode option."
   OPENCODE
 }
 
+"Values supported for skill."
 enum SkillScope {
+  "Limits the operation to global."
   GLOBAL
+  "Limits the operation to project."
   PROJECT
 }
 
+"Values supported for skill root."
 enum SkillRootKind {
+  "Represents the cursor option."
   CURSOR
+  "Represents the GitHub copilot option."
   GITHUB_COPILOT
+  "Represents the agents option."
   AGENTS
+  "Represents the claude option."
   CLAUDE
+  "Represents the codex legacy option."
   CODEX_LEGACY
+  "Represents the opencode option."
   OPENCODE
 }
 
+"Values supported for skill sync."
 enum SkillSyncKind {
+  "Represents the all option."
   ALL
+  "Represents the group option."
   GROUP
 }
 
+"Values supported for skill conflict resolution."
 enum SkillConflictResolution {
+  "Represents the database option."
   DATABASE
+  "Represents the target option."
   TARGET
+  "Represents the manual option."
   MANUAL
+  "Represents the delete option."
   DELETE
+  "Represents the skip option."
   SKIP
 }
 
+"Represents a skill file in the GraphQL API."
 type SkillFile {
+  "Stable identifier for this skill file."
   id: ID!
+  "Filesystem path associated with this skill file."
   path: String!
+  "Contents Base64, encoded as Base64."
   contentsBase64: String!
+  "Whether the executable condition is true for this skill file."
   executable: Boolean!
+  "The content hash associated with this skill file."
   contentHash: String!
+  "ISO 8601 timestamp when this skill file was created."
   createdAt: String!
+  "ISO 8601 timestamp when this skill file was last updated."
   updatedAt: String!
 }
 
+"Represents a skill in the GraphQL API."
 type Skill {
+  "Stable identifier for this skill."
   id: ID!
+  "Display name of this skill."
   name: String!
+  "Human-readable description of this skill."
   description: String!
+  "Whether the sync globally condition is true for this skill."
   syncGlobally: Boolean!
+  "The package hash associated with this skill."
   packageHash: String!
+  "Files associated with this skill."
   files: [SkillFile!]!
+  "Groups associated with this skill."
   groups: [SkillGroup!]!
+  "ISO 8601 timestamp when this skill was created."
   createdAt: String!
+  "ISO 8601 timestamp when this skill was last updated."
   updatedAt: String!
 }
 
+"Represents a skill group in the GraphQL API."
 type SkillGroup {
+  "Stable identifier for this skill group."
   id: ID!
+  "Display name of this skill group."
   name: String!
+  "Skills associated with this skill group."
   skills: [Skill!]!
+  "Repositories associated with this skill group."
   repositories: [CodebaseRepository!]!
+  "ISO 8601 timestamp when this skill group was created."
   createdAt: String!
+  "ISO 8601 timestamp when this skill group was last updated."
   updatedAt: String!
 }
 
+"Configurable settings for skill."
 type SkillSettings {
+  "Whether the auto sync project groups condition is true for this skill settings."
   autoSyncProjectGroups: Boolean!
+  "Whether the cursor enabled condition is true for this skill settings."
   cursorEnabled: Boolean!
+  "Whether the GitHub copilot enabled condition is true for this skill settings."
   githubCopilotEnabled: Boolean!
+  "Whether the codex enabled condition is true for this skill settings."
   codexEnabled: Boolean!
+  "Whether the claude enabled condition is true for this skill settings."
   claudeEnabled: Boolean!
+  "Whether the open code enabled condition is true for this skill settings."
   openCodeEnabled: Boolean!
+  "ISO 8601 timestamp when this skill settings was last updated."
   updatedAt: String!
 }
 
+"Represents a skill tool observation in the GraphQL API."
 type SkillToolObservation {
+  "The tool associated with this skill tool observation."
   tool: SkillAiTool!
+  "Whether this skill tool observation is configured."
   configured: Boolean!
+  "Filesystem path associated with this skill tool observation."
   homePath: String!
+  "ISO 8601 timestamp when this skill tool observation was checked."
   checkedAt: String!
+  "The agent associated with this skill tool observation."
   agent: Agent!
 }
 
+"Represents a skill installation in the GraphQL API."
 type SkillInstallation {
+  "Stable identifier for this skill installation."
   id: ID!
+  "The scope associated with this skill installation."
   scope: SkillScope!
+  "The root kind associated with this skill installation."
   rootKind: SkillRootKind!
+  "Filesystem path associated with this skill installation."
   rootPath: String!
+  "The skill name associated with this skill installation."
   skillName: String!
+  "Human-readable description of this skill installation."
   description: String!
+  "The package hash associated with this skill installation."
   packageHash: String!
+  "Number of files."
   fileCount: Int!
+  "Total, in bytes."
   totalBytes: Int!
+  "Whether the tracked condition is true for this skill installation."
   tracked: Boolean!
+  "Consumers associated with this skill installation."
   consumers: [SkillAiTool!]!
+  "ISO 8601 timestamp when this skill installation was last seen."
   lastSeenAt: String!
+  "The agent associated with this skill installation."
   agent: Agent!
+  "The codebase associated with this skill installation. May be null when unavailable or not applicable."
   codebase: Codebase
+  "The worktree associated with this skill installation. May be null when unavailable or not applicable."
   worktree: Worktree
+  "The skill associated with this skill installation. May be null when unavailable or not applicable."
   skill: Skill
 }
 
+"Represents a skills overview in the GraphQL API."
 type SkillsOverview {
+  "Skills associated with this skills overview."
   skills: [Skill!]!
+  "Groups associated with this skills overview."
   groups: [SkillGroup!]!
+  "Observations associated with this skills overview."
   observations: [SkillToolObservation!]!
+  "Installations associated with this skills overview."
   installations: [SkillInstallation!]!
+  "The settings associated with this skills overview."
   settings: SkillSettings!
+  "Repositories associated with this skills overview."
   repositories: [CodebaseRepository!]!
 }
 
+"Represents a skill sync item in the GraphQL API."
 type SkillSyncItem {
+  "Stable identifier for this skill sync item."
   id: ID!
+  "The direction associated with this skill sync item."
   direction: String!
+  "Current status of this skill sync item."
   status: String!
+  "The source hash associated with this skill sync item. May be null when unavailable or not applicable."
   sourceHash: String
+  "The target hash associated with this skill sync item. May be null when unavailable or not applicable."
   targetHash: String
+  "The resolution associated with this skill sync item. May be null when unavailable or not applicable."
   resolution: String
+  "Whether this skill sync item can didate package."
   candidatePackage: JSON
+  "Error message when this skill sync item did not complete successfully. May be null when unavailable or not applicable."
   error: String
+  "The skill associated with this skill sync item. May be null when unavailable or not applicable."
   skill: Skill
+  "The installation associated with this skill sync item. May be null when unavailable or not applicable."
   installation: SkillInstallation
+  "The agent associated with this skill sync item. May be null when unavailable or not applicable."
   agent: Agent
+  "ISO 8601 timestamp when this skill sync item was created."
   createdAt: String!
+  "ISO 8601 timestamp when this skill sync item was last updated."
   updatedAt: String!
 }
 
+"Represents a skill sync run in the GraphQL API."
 type SkillSyncRun {
+  "Stable identifier for this skill sync run."
   id: ID!
+  "Category of this skill sync run."
   kind: SkillSyncKind!
+  "Current status of this skill sync run."
   status: String!
+  "Error message when this skill sync run did not complete successfully. May be null when unavailable or not applicable."
   error: String
+  "The group associated with this skill sync run. May be null when unavailable or not applicable."
   group: SkillGroup
+  "Items associated with this skill sync run."
   items: [SkillSyncItem!]!
+  "ISO 8601 timestamp when this skill sync run was created."
   createdAt: String!
+  "ISO 8601 timestamp when this skill sync run was last updated."
   updatedAt: String!
+  "ISO 8601 timestamp when this skill sync run finished. May be null when unavailable or not applicable."
   finishedAt: String
 }
 
+"Input values for skill file."
 input SkillFileInput {
+  "The path to use for the request."
   path: String!
+  "Contents Base64, encoded as Base64."
   contentsBase64: String!
+  "Whether executable applies to the request."
   executable: Boolean! = false
 }
 
+"Values used to save a skill."
 input SaveSkillInput {
+  "Identifier of the save skill to affect."
   id: ID
+  "The name to use for the request."
   name: String!
+  "The description to use for the request."
   description: String!
+  "Whether sync globally applies to the request."
   syncGlobally: Boolean! = true
+  "Identifiers of the groups to use."
   groupIds: [ID!]! = []
+  "Files to use for the request."
   files: [SkillFileInput!]!
 }
 
+"Values used to save a skill group."
 input SaveSkillGroupInput {
+  "Identifier of the save skill group to affect."
   id: ID
+  "The name to use for the request."
   name: String!
+  "Identifiers of the skills to use."
   skillIds: [ID!]! = []
+  "Identifiers of the repositories to use."
   repositoryIds: [ID!]! = []
 }
 
+"Values used to save skill settings."
 input SaveSkillSettingsInput {
+  "Whether auto sync project groups applies to the request."
   autoSyncProjectGroups: Boolean!
+  "Whether cursor enabled applies to the request."
   cursorEnabled: Boolean!
+  "Whether GitHub copilot enabled applies to the request."
   githubCopilotEnabled: Boolean!
+  "Whether codex enabled applies to the request."
   codexEnabled: Boolean!
+  "Whether claude enabled applies to the request."
   claudeEnabled: Boolean!
+  "Whether open code enabled applies to the request."
   openCodeEnabled: Boolean!
 }
 
+"Input values for skill package."
 input SkillPackageInput {
+  "The name to use for the request."
   name: String!
+  "The description to use for the request."
   description: String!
+  "The package hash to use for the request."
   packageHash: String
+  "Files to use for the request."
   files: [SkillFileInput!]!
 }
 
+"Values used to resolve a skill sync item."
 input ResolveSkillSyncItemInput {
+  "Identifier of the item to use."
   itemId: ID!
+  "The resolution to use for the request."
   resolution: SkillConflictResolution!
+  "Identifier of the group to use."
   groupId: ID
+  "The package to use for the request."
   package: SkillPackageInput
 }
 
 extend type Query {
-  skillsOverview(search: String = ""): SkillsOverview!
-  skill(id: ID!): Skill
-  skillSyncRun(id: ID!): SkillSyncRun
+  "Returns a skills overview."
+  skillsOverview(
+    "Text used to filter matching records. Defaults to `\"\"`."
+    search: String = ""
+  ): SkillsOverview!
+  "Returns a skill, or null when it cannot be found."
+  skill("Identifier of the resource to return or affect." id: ID!): Skill
+  "Returns a skill sync run, or null when it cannot be found."
+  skillSyncRun(
+    "Identifier of the resource to return or affect."
+    id: ID!
+  ): SkillSyncRun
 }
 
 extend type Mutation {
-  saveSkill(input: SaveSkillInput!): Skill!
-  deleteSkill(id: ID!): Boolean!
-  saveSkillGroup(input: SaveSkillGroupInput!): SkillGroup!
-  deleteSkillGroup(id: ID!): Boolean!
-  saveSkillSettings(input: SaveSkillSettingsInput!): SkillSettings!
-  prepareSkillSync(kind: SkillSyncKind! = ALL, groupId: ID): SkillSyncRun!
-  skipPendingSkillSync(runId: ID!): SkillSyncRun!
-  resolveSkillSyncItem(input: ResolveSkillSyncItemInput!): SkillSyncRun!
-  applySkillSync(runId: ID!): SkillSyncRun!
+  "Saves a skill and returns the updated skill."
+  saveSkill(
+    "Values for the requested operation."
+    input: SaveSkillInput!
+  ): Skill!
+  "Deletes a skill and reports whether the operation succeeded."
+  deleteSkill(
+    "Identifier of the resource to return or affect."
+    id: ID!
+  ): Boolean!
+  "Saves a skill group and returns the updated skill group."
+  saveSkillGroup(
+    "Values for the requested operation."
+    input: SaveSkillGroupInput!
+  ): SkillGroup!
+  "Deletes a skill group and reports whether the operation succeeded."
+  deleteSkillGroup(
+    "Identifier of the resource to return or affect."
+    id: ID!
+  ): Boolean!
+  "Saves skill settings and returns the updated skill settings."
+  saveSkillSettings(
+    "Values for the requested operation."
+    input: SaveSkillSettingsInput!
+  ): SkillSettings!
+  "Prepares a skill sync and returns a skill sync run."
+  prepareSkillSync(
+    "The kind used to filter or perform the operation. Defaults to `ALL`."
+    kind: SkillSyncKind! = ALL
+    "Identifier of the group."
+    groupId: ID
+  ): SkillSyncRun!
+  "Skips a pending skill sync and returns a skill sync run."
+  skipPendingSkillSync("Identifier of the run." runId: ID!): SkillSyncRun!
+  "Resolves a skill sync item and returns a skill sync run."
+  resolveSkillSyncItem(
+    "Values for the requested operation."
+    input: ResolveSkillSyncItemInput!
+  ): SkillSyncRun!
+  "Applies a skill sync and returns a skill sync run."
+  applySkillSync("Identifier of the run." runId: ID!): SkillSyncRun!
 }
 
 extend type Subscription {
+  "Emits a skills overview whenever skills change."
   skillsChanged: SkillsOverview!
-  skillSyncRunChanged(runId: ID!): SkillSyncRun!
+  "Emits a skill sync run whenever skill sync run changes."
+  skillSyncRunChanged("Identifier of the run." runId: ID!): SkillSyncRun!
 }

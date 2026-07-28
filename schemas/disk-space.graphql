@@ -1,147 +1,260 @@
+"Values supported for disk space volume role."
 enum DiskSpaceVolumeRole {
+  "Represents the main option."
   MAIN
+  "Represents the base repo option."
   BASE_REPO
+  "Represents the derived data option."
   DERIVED_DATA
 }
 
+"Lifecycle statuses for disk space agent."
 enum DiskSpaceAgentStatus {
+  "Represents the disabled status for disk space agent."
   DISABLED
+  "Represents the stale status for disk space agent."
   STALE
+  "Represents the idle status for disk space agent."
   IDLE
+  "Represents the cleanup required status for disk space agent."
   CLEANUP_REQUIRED
+  "Represents the deleting status for disk space agent."
   DELETING
+  "Represents the pressure status for disk space agent."
   PRESSURE
+  "Represents the critical status for disk space agent."
   CRITICAL
+  "Represents the error status for disk space agent."
   ERROR
 }
 
+"Values supported for disk space pressure."
 enum DiskSpacePressureMode {
+  "Uses the normal mode."
   NORMAL
+  "Uses the manual mode."
   MANUAL
+  "Uses the automatic mode."
   AUTOMATIC
 }
 
+"Configurable settings for disk space."
 type DiskSpaceSettings {
+  "The normal threshold gi b associated with this disk space settings."
   normalThresholdGiB: Float!
+  "The pressure threshold gi b associated with this disk space settings."
   pressureThresholdGiB: Float!
+  "Poll interval, in seconds."
   pollIntervalSeconds: Int!
+  "Stale after, in seconds."
   staleAfterSeconds: Int!
 }
 
+"Represents a disk space volume in the GraphQL API."
 type DiskSpaceVolume {
+  "Stable identifier for this disk space volume."
   id: ID!
+  "Total, in bytes."
   totalBytes: Float!
+  "Free, in bytes."
   freeBytes: Float!
+  "Roles associated with this disk space volume."
   roles: [DiskSpaceVolumeRole!]!
+  "Paths associated with this disk space volume."
   paths: [String!]!
+  "Current status of this disk space volume."
   status: DiskSpaceAgentStatus!
+  "Effective threshold, in bytes."
   effectiveThresholdBytes: Float!
+  "Whether the monitored condition is true for this disk space volume."
   monitored: Boolean!
 }
 
+"Represents an agent disk space in the GraphQL API."
 type AgentDiskSpace {
+  "The agent associated with this agent disk space."
   agent: Agent!
+  "Whether this agent disk space is enabled."
   enabled: Boolean!
+  "Current status of this agent disk space."
   status: DiskSpaceAgentStatus!
+  "The pressure mode associated with this agent disk space."
   pressureMode: DiskSpacePressureMode!
+  "Whether the manual pressure mode condition is true for this agent disk space."
   manualPressureMode: Boolean!
+  "Whether the automatic pressure mode condition is true for this agent disk space."
   automaticPressureMode: Boolean!
+  "ISO 8601 timestamp when this agent disk space last reported. May be null when unavailable or not applicable."
   lastReportedAt: String
+  "The last error associated with this agent disk space. May be null when unavailable or not applicable."
   lastError: String
+  "Warnings associated with this agent disk space."
   warnings: [String!]!
+  "Volumes associated with this agent disk space."
   volumes: [DiskSpaceVolume!]!
 }
 
+"Represents a disk space overview in the GraphQL API."
 type DiskSpaceOverview {
+  "The settings associated with this disk space overview."
   settings: DiskSpaceSettings!
+  "Agents associated with this disk space overview."
   agents: [AgentDiskSpace!]!
 }
 
+"Represents an agent disk space worktree in the GraphQL API."
 type AgentDiskSpaceWorktree {
+  "Stable identifier for this agent disk space worktree."
   id: ID!
+  "The folder associated with this agent disk space worktree."
   folder: String!
 }
 
+"Configuration for agent disk space."
 type AgentDiskSpaceConfiguration {
+  "Whether this agent disk space configuration is enabled."
   enabled: Boolean!
+  "Poll interval, in seconds."
   pollIntervalSeconds: Int!
+  "Filesystem directory associated with this agent disk space configuration. May be null when unavailable or not applicable."
   baseRepoDirectory: String
+  "The derived data location mode associated with this agent disk space configuration."
   derivedDataLocationMode: DerivedDataLocationMode!
+  "Filesystem path associated with this agent disk space configuration. May be null when unavailable or not applicable."
   derivedDataPath: String
+  "Worktrees associated with this agent disk space configuration."
   worktrees: [AgentDiskSpaceWorktree!]!
 }
 
+"Input values for agent disk space volume."
 input AgentDiskSpaceVolumeInput {
+  "Identifier of the agent disk space volume to affect."
   id: ID!
+  "Identifier of the capacity to use."
   capacityId: ID
+  "Total in bytes."
   totalBytes: Float!
+  "Free in bytes."
   freeBytes: Float!
+  "Roles to use for the request."
   roles: [DiskSpaceVolumeRole!]!
+  "Paths to use for the request."
   paths: [String!]!
 }
 
+"Input values for agent disk space entry."
 input AgentDiskSpaceEntryInput {
+  "The path to use for the request."
   path: String!
+  "The root path to use for the request."
   rootPath: String!
+  "The name to use for the request."
   name: String!
+  "The kind to use for the request."
   kind: BuildDataEntryKind!
+  "The workspace path to use for the request."
   workspacePath: String
+  "The modified at to use for the request."
   modifiedAt: String!
+  "Identifier of the volume to use."
   volumeId: ID!
 }
 
+"Input values for agent disk space report."
 input AgentDiskSpaceReportInput {
+  "The observed at to use for the request."
   observedAt: String!
+  "Volumes to use for the request."
   volumes: [AgentDiskSpaceVolumeInput!]!
+  "Entries to use for the request."
   entries: [AgentDiskSpaceEntryInput!]!
+  "Warnings to use for the request."
   warnings: [String!]!
 }
 
+"Values used to update disk space settings."
 input UpdateDiskSpaceSettingsInput {
+  "The normal threshold gi b to use for the request."
   normalThresholdGiB: Float!
+  "The pressure threshold gi b to use for the request."
   pressureThresholdGiB: Float!
 }
 
+"Represents sidebar activity counts in the GraphQL API."
 type SidebarActivityCounts {
+  "The plans associated with this sidebar activity counts."
   plans: Int!
+  "The sessions associated with this sidebar activity counts."
   sessions: Int!
+  "The builds associated with this sidebar activity counts."
   builds: Int!
+  "The workflows associated with this sidebar activity counts."
   workflows: Int!
+  "The commands associated with this sidebar activity counts."
   commands: Int!
 }
 
+"Represents a sidebar usage today in the GraphQL API."
 type SidebarUsageToday {
+  "The total cost associated with this sidebar usage today. May be null when unavailable or not applicable."
   totalCost: Float
+  "ISO 8601 timestamp when this sidebar usage today collected. May be null when unavailable or not applicable."
   collectedAt: String
 }
 
+"Represents sidebar status in the GraphQL API."
 type SidebarStatus {
+  "The usage today associated with this sidebar status."
   usageToday: SidebarUsageToday!
+  "The activity associated with this sidebar status."
   activity: SidebarActivityCounts!
+  "The disk space associated with this sidebar status."
   diskSpace: DiskSpaceOverview!
 }
 
 extend type Query {
+  "Returns disk space settings."
   diskSpaceSettings: DiskSpaceSettings!
+  "Returns a disk space overview."
   diskSpaceOverview: DiskSpaceOverview!
-  agentDiskSpace(agentId: ID!): AgentDiskSpace!
+  "Returns an agent disk space."
+  agentDiskSpace("Identifier of the agent." agentId: ID!): AgentDiskSpace!
+  "Returns sidebar status."
   sidebarStatus: SidebarStatus!
+  "Returns an agent disk space configuration."
   agentDiskSpaceConfiguration: AgentDiskSpaceConfiguration!
 }
 
 extend type Mutation {
+  "Updates disk space settings and returns the updated disk space settings."
   updateDiskSpaceSettings(
+    "Values for the requested operation."
     input: UpdateDiskSpaceSettingsInput!
   ): DiskSpaceSettings!
-  setAgentDiskSpaceMonitoring(agentId: ID!, enabled: Boolean!): AgentDiskSpace!
-  setAgentDiskSpacePressureMode(
+  "Sets an agent disk space monitoring and returns the updated agent disk space."
+  setAgentDiskSpaceMonitoring(
+    "Identifier of the agent."
     agentId: ID!
+    "Whether enabled applies to the operation."
     enabled: Boolean!
   ): AgentDiskSpace!
-  reportAgentDiskSpace(input: AgentDiskSpaceReportInput!): Boolean!
+  "Sets an agent disk space pressure mode and returns the updated agent disk space."
+  setAgentDiskSpacePressureMode(
+    "Identifier of the agent."
+    agentId: ID!
+    "Whether enabled applies to the operation."
+    enabled: Boolean!
+  ): AgentDiskSpace!
+  "Reports an agent disk space and reports whether the operation succeeded."
+  reportAgentDiskSpace(
+    "Values for the requested operation."
+    input: AgentDiskSpaceReportInput!
+  ): Boolean!
 }
 
 extend type Subscription {
+  "Emits a change signal whenever disk space changes."
   diskSpaceChanged: ID!
+  "Emits a change signal whenever sidebar status changes."
   sidebarStatusChanged: Boolean!
 }

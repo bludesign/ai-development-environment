@@ -1,105 +1,201 @@
+"Values supported for external MCP transport."
 enum ExternalMcpTransport {
+  "Represents the streamable HTTP option."
   STREAMABLE_HTTP
+  "Represents the sse option."
   SSE
 }
 
+"Represents an external MCP server header in the GraphQL API."
 type ExternalMcpServerHeader {
+  "Stable identifier for this external MCP server header."
   id: ID!
+  "Display name of this external MCP server header."
   name: String!
+  "Whether the value configured condition is true for this external MCP server header."
   valueConfigured: Boolean!
 }
 
+"Represents an external MCP server in the GraphQL API."
 type ExternalMcpServer {
+  "Stable identifier for this external MCP server."
   id: ID!
+  "Display name of this external MCP server."
   name: String!
+  "URL for this external MCP server."
   url: String!
+  "The transport associated with this external MCP server."
   transport: ExternalMcpTransport!
+  "The tool name prefix associated with this external MCP server."
   toolNamePrefix: String!
+  "Headers associated with this external MCP server."
   headers: [ExternalMcpServerHeader!]!
+  "ISO 8601 timestamp when this external MCP server was created."
   createdAt: String!
+  "ISO 8601 timestamp when this external MCP server was last updated."
   updatedAt: String!
 }
 
+"Represents an external MCP server removal in the GraphQL API."
 type ExternalMcpServerRemoval {
+  "Stable identifier for this external MCP server removal."
   id: ID!
 }
 
+"Represents an MCP tool preset in the GraphQL API."
 type McpToolPreset {
+  "Stable identifier for this MCP tool preset."
   id: ID!
+  "Display name of this MCP tool preset."
   name: String!
+  "Human-readable description of this MCP tool preset."
   description: String!
+  "The icon key associated with this MCP tool preset."
   iconKey: String!
+  "Whether the enabled for plans condition is true for this MCP tool preset."
   enabledForPlans: Boolean!
+  "Whether the enabled for sessions condition is true for this MCP tool preset."
   enabledForSessions: Boolean!
+  "Tool names associated with this MCP tool preset."
   toolNames: [String!]!
+  "ISO 8601 timestamp when this MCP tool preset was created."
   createdAt: String!
+  "ISO 8601 timestamp when this MCP tool preset was last updated."
   updatedAt: String!
 }
 
+"Represents an MCP tool preset removal in the GraphQL API."
 type McpToolPresetRemoval {
+  "Stable identifier for this MCP tool preset removal."
   id: ID!
 }
 
+"Represents a tool call audit in the GraphQL API."
 type ToolCallAudit {
+  "Stable identifier for this tool call audit."
   id: ID!
+  "Identifier of the related correlation."
   correlationId: String!
+  "The caller associated with this tool call audit."
   caller: String!
+  "The source associated with this tool call audit."
   source: String!
+  "Identifier of the related group."
   groupId: String!
+  "The tool name associated with this tool call audit."
   toolName: String!
+  "The arguments sha256 associated with this tool call audit."
   argumentsSha256: String!
+  "The result status associated with this tool call audit."
   resultStatus: String!
+  "The duration ms associated with this tool call audit. May be null when unavailable or not applicable."
   durationMs: Int
+  "ISO 8601 timestamp when this tool call audit started."
   startedAt: String!
+  "ISO 8601 timestamp when this tool call audit finished. May be null when unavailable or not applicable."
   finishedAt: String
 }
 
+"The result of tool call audit clear."
 type ToolCallAuditClearResult {
+  "Number of counts."
   count: Int!
 }
 
+"Input values for external MCP server header."
 input ExternalMcpServerHeaderInput {
+  "Identifier of the external MCP server header to affect."
   id: ID
+  "The name to use for the request."
   name: String!
+  "The value to use for the request."
   value: String
 }
 
+"Input values for external MCP server."
 input ExternalMcpServerInput {
+  "The name to use for the request."
   name: String!
+  "The URL to use for the request."
   url: String!
+  "The transport to use for the request."
   transport: ExternalMcpTransport!
+  "The tool name prefix to use for the request."
   toolNamePrefix: String
+  "Headers to use for the request."
   headers: [ExternalMcpServerHeaderInput!]!
 }
 
+"Input values for MCP tool preset."
 input McpToolPresetInput {
+  "The name to use for the request."
   name: String!
+  "The description to use for the request."
   description: String
+  "The icon key to use for the request."
   iconKey: String!
+  "Whether enabled for plans applies to the request."
   enabledForPlans: Boolean!
+  "Whether enabled for sessions applies to the request."
   enabledForSessions: Boolean!
+  "Tool names to use for the request."
   toolNames: [String!]!
 }
 
 extend type Query {
+  "Returns external MCP servers."
   externalMcpServers: [ExternalMcpServer!]!
-  mcpToolPresets(kind: RunKind): [McpToolPreset!]!
+  "Returns MCP tool presets."
+  mcpToolPresets(
+    "The kind used to filter or perform the operation. Omit it to leave this dimension unfiltered."
+    kind: RunKind
+  ): [McpToolPreset!]!
+  "Returns tool call audits."
   toolCallAudits(
+    "Maximum number of records to return. Omit it to leave this dimension unfiltered."
     first: Int
+    "The tool name used to filter or perform the operation. Omit it to leave this dimension unfiltered."
     toolName: String
+    "The result status used to filter or perform the operation. Omit it to leave this dimension unfiltered."
     resultStatus: String
   ): [ToolCallAudit!]!
 }
 
 extend type Mutation {
+  "Clears tool call audits and returns a tool call audit clear result."
   clearToolCallAudits: ToolCallAuditClearResult!
-  createExternalMcpServer(input: ExternalMcpServerInput!): ExternalMcpServer!
-  updateExternalMcpServer(
-    id: ID!
+  "Creates an external MCP server and returns an external MCP server."
+  createExternalMcpServer(
+    "Values for the requested operation."
     input: ExternalMcpServerInput!
   ): ExternalMcpServer!
-  deleteExternalMcpServer(id: ID!): ExternalMcpServerRemoval!
-  createMcpToolPreset(input: McpToolPresetInput!): McpToolPreset!
-  updateMcpToolPreset(id: ID!, input: McpToolPresetInput!): McpToolPreset!
-  deleteMcpToolPreset(id: ID!): McpToolPresetRemoval!
+  "Updates an external MCP server and returns the updated external MCP server."
+  updateExternalMcpServer(
+    "Identifier of the resource to return or affect."
+    id: ID!
+    "Values for the requested operation."
+    input: ExternalMcpServerInput!
+  ): ExternalMcpServer!
+  "Deletes an external MCP server and returns an external MCP server removal."
+  deleteExternalMcpServer(
+    "Identifier of the resource to return or affect."
+    id: ID!
+  ): ExternalMcpServerRemoval!
+  "Creates an MCP tool preset and returns an MCP tool preset."
+  createMcpToolPreset(
+    "Values for the requested operation."
+    input: McpToolPresetInput!
+  ): McpToolPreset!
+  "Updates an MCP tool preset and returns the updated MCP tool preset."
+  updateMcpToolPreset(
+    "Identifier of the resource to return or affect."
+    id: ID!
+    "Values for the requested operation."
+    input: McpToolPresetInput!
+  ): McpToolPreset!
+  "Deletes an MCP tool preset and returns an MCP tool preset removal."
+  deleteMcpToolPreset(
+    "Identifier of the resource to return or affect."
+    id: ID!
+  ): McpToolPresetRemoval!
 }

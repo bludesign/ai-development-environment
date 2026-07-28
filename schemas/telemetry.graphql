@@ -1,202 +1,405 @@
+"Values supported for telemetry view."
 enum TelemetryView {
+  "Represents the console option."
   CONSOLE
+  "Represents the analytics option."
   ANALYTICS
+  "Represents the unified option."
   UNIFIED
 }
 
+"Values supported for telemetry entry."
 enum TelemetryEntryType {
+  "Represents the console option."
   CONSOLE
+  "Represents the analytics option."
   ANALYTICS
+  "Represents the separator option."
   SEPARATOR
 }
 
+"Values supported for telemetry search."
 enum TelemetrySearchMode {
+  "Uses the text mode."
   TEXT
+  "Uses the glob mode."
   GLOB
+  "Uses the regex mode."
   REGEX
 }
 
+"Values supported for telemetry filter."
 enum TelemetryFilterMode {
+  "Uses the all mode."
   ALL
+  "Uses the any mode."
   ANY
 }
 
+"Values supported for telemetry filter operator."
 enum TelemetryFilterOperator {
+  "Represents the contains option."
   CONTAINS
+  "Represents the does not contain option."
   DOES_NOT_CONTAIN
+  "Represents the is option."
   IS
+  "Represents the is not option."
   IS_NOT
+  "Represents the matches glob option."
   MATCHES_GLOB
+  "Represents the matches regex option."
   MATCHES_REGEX
+  "Represents the no regex match option."
   NO_REGEX_MATCH
+  "Represents the is empty option."
   IS_EMPTY
+  "Represents the is not empty option."
   IS_NOT_EMPTY
 }
 
+"Represents a telemetry entry in the GraphQL API."
 type TelemetryEntry {
+  "Stable identifier for this telemetry entry."
   id: ID!
+  "The entry type associated with this telemetry entry."
   entryType: TelemetryEntryType!
+  "The client time associated with this telemetry entry."
   clientTime: String!
+  "ISO 8601 timestamp when this telemetry entry received."
   receivedAt: String!
+  "The device IP associated with this telemetry entry. May be null when unavailable or not applicable."
   deviceIp: String
+  "Human-readable message associated with this telemetry entry. May be null when unavailable or not applicable."
   message: String
+  "The level associated with this telemetry entry. May be null when unavailable or not applicable."
   level: String
+  "The category associated with this telemetry entry. May be null when unavailable or not applicable."
   category: String
+  "The event name associated with this telemetry entry. May be null when unavailable or not applicable."
   eventName: String
+  "The event kind associated with this telemetry entry. May be null when unavailable or not applicable."
   eventKind: String
+  "The screen name associated with this telemetry entry. May be null when unavailable or not applicable."
   screenName: String
+  "Identifier of the related build. May be null when unavailable or not applicable."
   buildId: String
+  "Identifier of the related session. May be null when unavailable or not applicable."
   sessionId: String
+  "The attributes associated with this telemetry entry."
   attributes: JSON!
+  "The default parameters associated with this telemetry entry."
   defaultParameters: JSON!
+  "The additional parameters associated with this telemetry entry."
   additionalParameters: JSON!
+  "The highlight color associated with this telemetry entry. May be null when unavailable or not applicable."
   highlightColor: String
+  "The separator kind associated with this telemetry entry. May be null when unavailable or not applicable."
   separatorKind: String
+  "The separator name associated with this telemetry entry. May be null when unavailable or not applicable."
   separatorName: String
 }
 
+"A paginated collection of telemetry timelines."
 type TelemetryTimelinePage {
+  "Items associated with this telemetry timeline page."
   items: [TelemetryEntry!]!
+  "The next cursor associated with this telemetry timeline page. May be null when unavailable or not applicable."
   nextCursor: String
+  "Number of matchings."
   matchingCount: Int!
+  "Number of totals."
   totalCount: Int!
 }
 
+"Configurable settings for telemetry."
 type TelemetrySettings {
+  "The local base URL override associated with this telemetry settings. May be null when unavailable or not applicable."
   localBaseUrlOverride: String
+  "The remote base URL override associated with this telemetry settings. May be null when unavailable or not applicable."
   remoteBaseUrlOverride: String
+  "Whether the console collection enabled condition is true for this telemetry settings."
   consoleCollectionEnabled: Boolean!
+  "Whether the analytics collection enabled condition is true for this telemetry settings."
   analyticsCollectionEnabled: Boolean!
+  "URL for this telemetry settings."
   detectedLocalBaseUrl: String!
+  "URL for this telemetry settings."
   detectedRemoteBaseUrl: String!
+  "URL for this telemetry settings."
   effectiveLocalBaseUrl: String!
+  "URL for this telemetry settings."
   effectiveRemoteBaseUrl: String!
+  "ISO 8601 timestamp when this telemetry settings was last updated."
   updatedAt: String!
 }
 
+"Configurable settings for telemetry view."
 type TelemetryViewSettings {
+  "The view associated with this telemetry view settings."
   view: TelemetryView!
+  "Columns associated with this telemetry view settings."
   columns: [String!]!
+  "The time format associated with this telemetry view settings."
   timeFormat: String!
+  "Identifier of the related active column preset. May be null when unavailable or not applicable."
   activeColumnPresetId: ID
+  "Identifier of the related active saved filter. May be null when unavailable or not applicable."
   activeSavedFilterId: ID
 }
 
+"Represents a telemetry column preset in the GraphQL API."
 type TelemetryColumnPreset {
+  "Stable identifier for this telemetry column preset."
   id: ID!
+  "The view associated with this telemetry column preset."
   view: TelemetryView!
+  "Display name of this telemetry column preset."
   name: String!
+  "Columns associated with this telemetry column preset."
   columns: [String!]!
+  "Whether this telemetry column preset is default."
   isDefault: Boolean!
+  "ISO 8601 timestamp when this telemetry column preset was created."
   createdAt: String!
+  "ISO 8601 timestamp when this telemetry column preset was last updated."
   updatedAt: String!
 }
 
+"Represents a telemetry saved filter in the GraphQL API."
 type TelemetrySavedFilter {
+  "Stable identifier for this telemetry saved filter."
   id: ID!
+  "The view associated with this telemetry saved filter."
   view: TelemetryView!
+  "Display name of this telemetry saved filter."
   name: String!
+  "Structured definition associated with this telemetry saved filter."
   definition: JSON!
+  "ISO 8601 timestamp when this telemetry saved filter was created."
   createdAt: String!
+  "ISO 8601 timestamp when this telemetry saved filter was last updated."
   updatedAt: String!
 }
 
+"Represents a telemetry change in the GraphQL API."
 type TelemetryChange {
+  "IDs associated with this telemetry change."
   ids: [ID!]!
+  "The reason associated with this telemetry change."
   reason: String!
 }
 
+"Represents a telemetry settings change in the GraphQL API."
 type TelemetrySettingsChange {
+  "ISO 8601 timestamp when this telemetry settings change was last updated."
   updatedAt: String!
 }
 
+"Input values for telemetry filter condition."
 input TelemetryFilterConditionInput {
+  "The field to use for the request."
   field: String!
+  "The operator to use for the request."
   operator: TelemetryFilterOperator!
+  "The value to use for the request."
   value: String
+  "Whether case sensitive applies to the request."
   caseSensitive: Boolean = false
+  "Sources to use for the request."
   sources: [TelemetryEntryType!]
 }
 
+"Input values for telemetry advanced filter."
 input TelemetryAdvancedFilterInput {
+  "The mode to use for the request."
   mode: TelemetryFilterMode!
+  "Conditions to use for the request."
   conditions: [TelemetryFilterConditionInput!]!
 }
 
+"Input values for telemetry timeline."
 input TelemetryTimelineInput {
+  "The view to use for the request."
   view: TelemetryView!
+  "The first to use for the request."
   first: Int = 200
+  "The after to use for the request."
   after: String
+  "The search to use for the request."
   search: String
+  "The search mode to use for the request."
   searchMode: TelemetrySearchMode = TEXT
+  "Whether case sensitive applies to the request."
   caseSensitive: Boolean = false
+  "The quick filters to use for the request."
   quickFilters: JSON
+  "The advanced filter to use for the request."
   advancedFilter: TelemetryAdvancedFilterInput
 }
 
+"Values used to save telemetry settings."
 input SaveTelemetrySettingsInput {
+  "The local base URL override to use for the request."
   localBaseUrlOverride: String
+  "The remote base URL override to use for the request."
   remoteBaseUrlOverride: String
+  "Whether console collection enabled applies to the request."
   consoleCollectionEnabled: Boolean
+  "Whether analytics collection enabled applies to the request."
   analyticsCollectionEnabled: Boolean
 }
 
+"Values used to save telemetry view settings."
 input SaveTelemetryViewSettingsInput {
+  "The view to use for the request."
   view: TelemetryView!
+  "Columns to use for the request."
   columns: [String!]
+  "The time format to use for the request."
   timeFormat: String
+  "Identifier of the active column preset to use."
   activeColumnPresetId: ID
+  "Identifier of the active saved filter to use."
   activeSavedFilterId: ID
 }
 
+"Values used to save a telemetry column preset."
 input SaveTelemetryColumnPresetInput {
+  "Identifier of the save telemetry column preset to affect."
   id: ID
+  "The view to use for the request."
   view: TelemetryView!
+  "The name to use for the request."
   name: String!
+  "Columns to use for the request."
   columns: [String!]!
+  "Whether is default applies to the request."
   isDefault: Boolean
 }
 
+"Values used to save a telemetry filter."
 input SaveTelemetryFilterInput {
+  "Identifier of the save telemetry filter to affect."
   id: ID
+  "The view to use for the request."
   view: TelemetryView!
+  "The name to use for the request."
   name: String!
+  "Structured definition for the request."
   definition: TelemetryAdvancedFilterInput!
 }
 
 extend type Query {
-  telemetryTimeline(input: TelemetryTimelineInput!): TelemetryTimelinePage!
-  telemetryEntries(ids: [ID!]!): [TelemetryEntry!]!
-  telemetryFacets(view: TelemetryView!): JSON!
-  telemetryFields(view: TelemetryView!): [String!]!
-  telemetrySettings(requestOrigin: String): TelemetrySettings!
-  telemetryViewSettings(view: TelemetryView!): TelemetryViewSettings!
-  telemetryColumnPresets(view: TelemetryView!): [TelemetryColumnPreset!]!
-  telemetrySavedFilters(view: TelemetryView!): [TelemetrySavedFilter!]!
+  "Returns a telemetry timeline page."
+  telemetryTimeline(
+    "Values for the requested operation."
+    input: TelemetryTimelineInput!
+  ): TelemetryTimelinePage!
+  "Returns telemetry entries."
+  telemetryEntries(
+    "Identifiers of the resources to return or affect."
+    ids: [ID!]!
+  ): [TelemetryEntry!]!
+  "Returns structured JSON data for telemetry facets."
+  telemetryFacets(
+    "The view used to filter or perform the operation."
+    view: TelemetryView!
+  ): JSON!
+  "Returns strings."
+  telemetryFields(
+    "The view used to filter or perform the operation."
+    view: TelemetryView!
+  ): [String!]!
+  "Returns telemetry settings."
+  telemetrySettings(
+    "The request origin used to filter or perform the operation. Omit it to leave this dimension unfiltered."
+    requestOrigin: String
+  ): TelemetrySettings!
+  "Returns telemetry view settings."
+  telemetryViewSettings(
+    "The view used to filter or perform the operation."
+    view: TelemetryView!
+  ): TelemetryViewSettings!
+  "Returns telemetry column presets."
+  telemetryColumnPresets(
+    "The view used to filter or perform the operation."
+    view: TelemetryView!
+  ): [TelemetryColumnPreset!]!
+  "Returns telemetry saved filters."
+  telemetrySavedFilters(
+    "The view used to filter or perform the operation."
+    view: TelemetryView!
+  ): [TelemetrySavedFilter!]!
 }
 
 extend type Mutation {
+  "Saves telemetry settings and returns the updated telemetry settings."
   saveTelemetrySettings(
+    "Values for the requested operation."
     input: SaveTelemetrySettingsInput!
+    "The request origin used to filter or perform the operation."
     requestOrigin: String
   ): TelemetrySettings!
+  "Saves telemetry view settings and returns the updated telemetry view settings."
   saveTelemetryViewSettings(
+    "Values for the requested operation."
     input: SaveTelemetryViewSettingsInput!
   ): TelemetryViewSettings!
+  "Saves a telemetry column preset and returns the updated telemetry column preset."
   saveTelemetryColumnPreset(
+    "Values for the requested operation."
     input: SaveTelemetryColumnPresetInput!
   ): TelemetryColumnPreset!
-  deleteTelemetryColumnPreset(id: ID!): Boolean!
-  saveTelemetryFilter(input: SaveTelemetryFilterInput!): TelemetrySavedFilter!
-  deleteTelemetryFilter(id: ID!): Boolean!
-  addTelemetrySeparator(name: String): TelemetryEntry!
-  updateTelemetryHighlight(id: ID!, color: String): TelemetryEntry!
-  clearSelectedTelemetry(selection: JSON!): Int!
-  clearTelemetry(view: TelemetryView!, includeSeparators: Boolean = false): Int!
-  clearTelemetryBeforeLatestSeparator(view: TelemetryView!): Int!
+  "Deletes a telemetry column preset and reports whether the operation succeeded."
+  deleteTelemetryColumnPreset(
+    "Identifier of the resource to return or affect."
+    id: ID!
+  ): Boolean!
+  "Saves a telemetry filter and returns the updated telemetry saved filter."
+  saveTelemetryFilter(
+    "Values for the requested operation."
+    input: SaveTelemetryFilterInput!
+  ): TelemetrySavedFilter!
+  "Deletes a telemetry filter and reports whether the operation succeeded."
+  deleteTelemetryFilter(
+    "Identifier of the resource to return or affect."
+    id: ID!
+  ): Boolean!
+  "Adds a telemetry separator and returns a telemetry entry."
+  addTelemetrySeparator(
+    "The name used to filter or perform the operation."
+    name: String
+  ): TelemetryEntry!
+  "Updates a telemetry highlight and returns the updated telemetry entry."
+  updateTelemetryHighlight(
+    "Identifier of the resource to return or affect."
+    id: ID!
+    "The color used to filter or perform the operation."
+    color: String
+  ): TelemetryEntry!
+  "Clears selected telemetry and returns the number of affected records."
+  clearSelectedTelemetry(
+    "The selection used to filter or perform the operation."
+    selection: JSON!
+  ): Int!
+  "Clears telemetry and returns the number of affected records."
+  clearTelemetry(
+    "The view used to filter or perform the operation."
+    view: TelemetryView!
+    "Whether include separators applies to the operation. Defaults to `false`."
+    includeSeparators: Boolean = false
+  ): Int!
+  "Clears a telemetry before latest separator and returns the number of affected records."
+  clearTelemetryBeforeLatestSeparator(
+    "The view used to filter or perform the operation."
+    view: TelemetryView!
+  ): Int!
 }
 
 extend type Subscription {
+  "Emits a telemetry change whenever telemetry entries change."
   telemetryEntriesChanged: TelemetryChange!
+  "Emits a telemetry settings change whenever telemetry settings change."
   telemetrySettingsChanged: TelemetrySettingsChange!
 }

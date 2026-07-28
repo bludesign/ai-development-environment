@@ -1,430 +1,770 @@
+"Values supported for codebase project."
 enum CodebaseProjectType {
+  "Represents the iOS app option."
   IOS_APP
 }
 
+"Values supported for build source."
 enum BuildSourceKind {
+  "Represents the project option."
   PROJECT
+  "Represents the workspace option."
   WORKSPACE
+  "Represents the package option."
   PACKAGE
 }
 
+"Lifecycle statuses for build source parse."
 enum BuildSourceParseStatus {
+  "Represents the unparsed status for build source parse."
   UNPARSED
+  "Represents the parsing status for build source parse."
   PARSING
+  "Represents the valid status for build source parse."
   VALID
+  "Represents the invalid status for build source parse."
   INVALID
+  "Represents the error status for build source parse."
   ERROR
 }
 
+"Values supported for build action."
 enum BuildAction {
+  "Performs the build action."
   BUILD
+  "Performs the test action."
   TEST
+  "Performs the analyze action."
   ANALYZE
+  "Performs the archive action."
   ARCHIVE
+  "Performs the build for testing action."
   BUILD_FOR_TESTING
+  "Performs the test without building action."
   TEST_WITHOUT_BUILDING
 }
 
+"Values supported for build destination."
 enum BuildDestinationType {
+  "Represents the simulator option."
   SIMULATOR
+  "Represents the physical device option."
   PHYSICAL_DEVICE
 }
 
+"Lifecycle statuses for build."
 enum BuildStatus {
+  "Represents the queued status for build."
   QUEUED
+  "Represents the preparing status for build."
   PREPARING
+  "Represents the running status for build."
   RUNNING
+  "Represents the succeeded status for build."
   SUCCEEDED
+  "Represents the failed status for build."
   FAILED
+  "Represents the cancelled status for build."
   CANCELLED
 }
 
+"Values supported for build script failure behavior."
 enum BuildScriptFailureBehavior {
+  "Represents the fail build option."
   FAIL_BUILD
+  "Represents the continue option."
   CONTINUE
 }
 
+"Represents a build source observation in the GraphQL API."
 type BuildSourceObservation {
+  "Stable identifier for this build source observation."
   id: ID!
+  "The scope key associated with this build source observation."
   scopeKey: String!
+  "Current status of this build source observation."
   status: BuildSourceParseStatus!
+  "Schemes associated with this build source observation."
   schemes: [String!]!
+  "Configurations associated with this build source observation."
   configurations: [String!]!
+  "Test plans associated with this build source observation."
   testPlans: [String!]!
+  "Error message when this build source observation did not complete successfully. May be null when unavailable or not applicable."
   error: String
+  "Whether this build source observation is stale."
   stale: Boolean!
+  "Git commit SHA associated with this build source observation. May be null when unavailable or not applicable."
   headSha: String
+  "The Xcode version associated with this build source observation. May be null when unavailable or not applicable."
   xcodeVersion: String
+  "ISO 8601 timestamp when this build source observation last parse attempt."
   lastParseAttemptAt: String!
+  "ISO 8601 timestamp when this build source observation last parsed. May be null when unavailable or not applicable."
   lastParsedAt: String
 }
 
+"Represents a build source in the GraphQL API."
 type BuildSource {
+  "Stable identifier for this build source."
   id: ID!
+  "Category of this build source."
   kind: BuildSourceKind!
+  "Filesystem path associated with this build source."
   relativePath: String!
 }
 
+"Configuration for build."
 type BuildConfiguration {
+  "Stable identifier for this build configuration."
   id: ID!
+  "Display name of this build configuration."
   name: String!
+  "The icon key associated with this build configuration. May be null when unavailable or not applicable."
   iconKey: String
+  "The source associated with this build configuration."
   source: BuildSource!
+  "The scheme associated with this build configuration."
   scheme: String!
+  "The build configuration associated with this build configuration."
   buildConfiguration: String!
+  "The default action associated with this build configuration."
   defaultAction: BuildAction!
+  "The advanced settings associated with this build configuration."
   advancedSettings: JSON!
+  "Whether the auto export condition is true for this build configuration."
   autoExport: Boolean!
+  "The export settings associated with this build configuration. May be null when unavailable or not applicable."
   exportSettings: JSON
+  "The observation associated with this build configuration. May be null when unavailable or not applicable."
   observation: BuildSourceObservation
+  "ISO 8601 timestamp when this build configuration was created."
   createdAt: String!
+  "ISO 8601 timestamp when this build configuration was last updated."
   updatedAt: String!
 }
 
+"Represents a build script in the GraphQL API."
 type BuildScript {
+  "Stable identifier for this build script."
   id: ID!
+  "Display name of this build script."
   name: String!
+  "The pre build script associated with this build script. May be null when unavailable or not applicable."
   preBuildScript: String
+  "The post build script associated with this build script. May be null when unavailable or not applicable."
   postBuildScript: String
+  "Whether the enabled by default condition is true for this build script."
   enabledByDefault: Boolean!
+  "Timeout, in seconds."
   timeoutSeconds: Int!
+  "The failure behavior associated with this build script."
   failureBehavior: BuildScriptFailureBehavior!
+  "ISO 8601 timestamp when this build script was created."
   createdAt: String!
+  "ISO 8601 timestamp when this build script was last updated."
   updatedAt: String!
 }
 
+"Represents an allowed build script in the GraphQL API."
 type AllowedBuildScript {
+  "Zero-based position within the containing collection."
   position: Int!
+  "The script associated with this allowed build script."
   script: BuildScript!
 }
 
+"Represents a codebase project in the GraphQL API."
 type CodebaseProject {
+  "Stable identifier for this codebase project."
   id: ID!
+  "Category of this codebase project."
   type: CodebaseProjectType!
+  "The repository associated with this codebase project."
   repository: CodebaseRepository!
+  "Configurations associated with this codebase project."
   configurations: [BuildConfiguration!]!
+  "Allowed scripts associated with this codebase project."
   allowedScripts: [AllowedBuildScript!]!
+  "ISO 8601 timestamp when this codebase project was created."
   createdAt: String!
+  "ISO 8601 timestamp when this codebase project was last updated."
   updatedAt: String!
 }
 
+"Represents a build artifact in the GraphQL API."
 type BuildArtifact {
+  "Stable identifier for this build artifact."
   id: ID!
+  "Category of this build artifact."
   kind: String!
+  "Filesystem path associated with this build artifact."
   relativePath: String!
+  "Size, in bytes. May be null when unavailable or not applicable."
   sizeBytes: Float
+  "The checksum associated with this build artifact. May be null when unavailable or not applicable."
   checksum: String
+  "Additional structured metadata for this build artifact."
   metadata: JSON!
+  "ISO 8601 timestamp when this build artifact was created."
   createdAt: String!
 }
 
+"Values supported for build report."
 enum BuildReportKind {
+  "Represents the test results option."
   TEST_RESULTS
+  "Represents the code coverage option."
   CODE_COVERAGE
 }
 
+"Values supported for build report source."
 enum BuildReportSource {
+  "Represents the automatic option."
   AUTOMATIC
+  "Represents the manual option."
   MANUAL
+  "Represents the worktree option."
   WORKTREE
 }
 
+"Lifecycle statuses for build report."
 enum BuildReportStatus {
+  "Represents the pending status for build report."
   PENDING
+  "Represents the ready status for build report."
   READY
+  "Represents the failed status for build report."
   FAILED
 }
 
+"A summary of build test."
 type BuildTestSummary {
+  "The total associated with this build test summary."
   total: Int!
+  "The passed associated with this build test summary."
   passed: Int!
+  "The failed associated with this build test summary."
   failed: Int!
+  "The skipped associated with this build test summary."
   skipped: Int!
+  "The expected failures associated with this build test summary."
   expectedFailures: Int!
+  "The unknown associated with this build test summary."
   unknown: Int!
+  "Duration, in seconds."
   durationSeconds: Float!
 }
 
+"Represents a build test case in the GraphQL API."
 type BuildTestCase {
+  "The identifier associated with this build test case."
   identifier: String!
+  "Display name of this build test case."
   name: String!
+  "The plan associated with this build test case. May be null when unavailable or not applicable."
   plan: String
+  "The configuration associated with this build test case. May be null when unavailable or not applicable."
   configuration: String
+  "The bundle associated with this build test case. May be null when unavailable or not applicable."
   bundle: String
+  "The suite associated with this build test case. May be null when unavailable or not applicable."
   suite: String
+  "Structured result associated with this build test case."
   result: String!
+  "Duration, in seconds. May be null when unavailable or not applicable."
   durationSeconds: Float
+  "Tags associated with this build test case."
   tags: [String!]!
+  "Details associated with this build test case."
   details: [String!]!
 }
 
+"A summary of build coverage."
 type BuildCoverageSummary {
+  "The covered lines associated with this build coverage summary."
   coveredLines: Int!
+  "The executable lines associated with this build coverage summary."
   executableLines: Int!
+  "The line coverage associated with this build coverage summary."
   lineCoverage: Float!
+  "Number of targets."
   targetCount: Int!
+  "Number of files."
   fileCount: Int!
+  "The changed covered lines associated with this build coverage summary. May be null when unavailable or not applicable."
   changedCoveredLines: Int
+  "The changed executable lines associated with this build coverage summary. May be null when unavailable or not applicable."
   changedExecutableLines: Int
+  "The changed line coverage associated with this build coverage summary. May be null when unavailable or not applicable."
   changedLineCoverage: Float
 }
 
+"Represents a build coverage file in the GraphQL API."
 type BuildCoverageFile {
+  "The target associated with this build coverage file."
   target: String!
+  "Display name of this build coverage file."
   name: String!
+  "Filesystem path associated with this build coverage file."
   path: String!
+  "The covered lines associated with this build coverage file."
   coveredLines: Int!
+  "The executable lines associated with this build coverage file."
   executableLines: Int!
+  "The line coverage associated with this build coverage file."
   lineCoverage: Float!
 }
 
+"Represents a build changed coverage file in the GraphQL API."
 type BuildChangedCoverageFile {
+  "Filesystem path associated with this build changed coverage file."
   path: String!
+  "The change type associated with this build changed coverage file."
   changeType: String!
+  "The changed covered lines associated with this build changed coverage file."
   changedCoveredLines: Int!
+  "The changed executable lines associated with this build changed coverage file."
   changedExecutableLines: Int!
+  "The changed line coverage associated with this build changed coverage file. May be null when unavailable or not applicable."
   changedLineCoverage: Float
 }
 
+"Represents a build report in the GraphQL API."
 type BuildReport {
+  "Stable identifier for this build report."
   id: ID!
+  "Category of this build report."
   kind: BuildReportKind!
+  "The source associated with this build report."
   source: BuildReportSource!
+  "Current status of this build report."
   status: BuildReportStatus!
+  "The summary associated with this build report."
   summary: JSON!
+  "The data associated with this build report."
   data: JSON!
+  "The test summary associated with this build report. May be null when unavailable or not applicable."
   testSummary: BuildTestSummary
+  "Tests associated with this build report."
   tests: [BuildTestCase!]!
+  "The coverage summary associated with this build report. May be null when unavailable or not applicable."
   coverageSummary: BuildCoverageSummary
+  "Coverage files associated with this build report."
   coverageFiles: [BuildCoverageFile!]!
+  "Changed coverage files associated with this build report."
   changedCoverageFiles: [BuildChangedCoverageFile!]!
+  "Error message when this build report did not complete successfully. May be null when unavailable or not applicable."
   error: String
+  "The artifact associated with this build report. May be null when unavailable or not applicable."
   artifact: BuildArtifact
+  "The build associated with this build report."
   build: Build!
+  "ISO 8601 timestamp when this build report was created."
   createdAt: String!
+  "ISO 8601 timestamp when this build report was last updated."
   updatedAt: String!
+  "ISO 8601 timestamp when this build report finished. May be null when unavailable or not applicable."
   finishedAt: String
 }
 
+"Represents a build script execution in the GraphQL API."
 type BuildScriptExecution {
+  "Stable identifier for this build script execution."
   id: ID!
+  "The phase associated with this build script execution."
   phase: String!
+  "Zero-based position within the containing collection."
   position: Int!
+  "The name snapshot associated with this build script execution."
   nameSnapshot: String!
+  "The source snapshot associated with this build script execution."
   sourceSnapshot: String!
+  "Timeout, in seconds."
   timeoutSeconds: Int!
+  "The failure behavior associated with this build script execution."
   failureBehavior: BuildScriptFailureBehavior!
+  "Current status of this build script execution."
   status: String!
+  "The exit code associated with this build script execution. May be null when unavailable or not applicable."
   exitCode: Int
+  "The duration ms associated with this build script execution. May be null when unavailable or not applicable."
   durationMs: Int
+  "Whether the caused build failure condition is true for this build script execution."
   causedBuildFailure: Boolean!
+  "Filesystem path associated with this build script execution. May be null when unavailable or not applicable."
   outputRelativePath: String
+  "Error message when this build script execution did not complete successfully. May be null when unavailable or not applicable."
   error: String
 }
 
+"Represents a build deployment in the GraphQL API."
 type BuildDeployment {
+  "Stable identifier for this build deployment."
   id: ID!
+  "Identifier of the related batch."
   batchId: ID!
+  "The destination associated with this build deployment."
   destination: JSON!
+  "Current status of this build deployment."
   status: String!
+  "The command summary associated with this build deployment."
   commandSummary: String!
+  "Filesystem path associated with this build deployment. May be null when unavailable or not applicable."
   outputRelativePath: String
+  "Error message when this build deployment did not complete successfully. May be null when unavailable or not applicable."
   error: String
+  "ISO 8601 timestamp when this build deployment was created."
   createdAt: String!
+  "ISO 8601 timestamp when this build deployment started. May be null when unavailable or not applicable."
   startedAt: String
+  "ISO 8601 timestamp when this build deployment finished. May be null when unavailable or not applicable."
   finishedAt: String
 }
 
+"Represents a build export in the GraphQL API."
 type BuildExport {
+  "Stable identifier for this build export."
   id: ID!
+  "Current status of this build export."
   status: String!
+  "The settings associated with this build export."
   settings: JSON!
+  "The command summary associated with this build export."
   commandSummary: String!
+  "Filesystem path associated with this build export. May be null when unavailable or not applicable."
   outputRelativePath: String
+  "Error message when this build export did not complete successfully. May be null when unavailable or not applicable."
   error: String
+  "ISO 8601 timestamp when this build export was created."
   createdAt: String!
+  "ISO 8601 timestamp when this build export started. May be null when unavailable or not applicable."
   startedAt: String
+  "ISO 8601 timestamp when this build export finished. May be null when unavailable or not applicable."
   finishedAt: String
 }
 
+"Represents a build in the GraphQL API."
 type Build {
+  "Stable identifier for this build."
   id: ID!
+  "Identifier of the related request."
   requestId: ID!
+  "Identifier of the related job. May be null when unavailable or not applicable."
   jobId: ID
+  "Current status of this build."
   status: BuildStatus!
+  "The action associated with this build."
   action: BuildAction!
+  "The destination type associated with this build."
   destinationType: BuildDestinationType!
+  "The destination associated with this build."
   destination: JSON!
+  "The snapshot associated with this build."
   snapshot: JSON!
+  "The command summary associated with this build."
   commandSummary: String!
+  "Filesystem directory associated with this build."
   artifactDirectory: String!
+  "The error code associated with this build. May be null when unavailable or not applicable."
   errorCode: String
+  "Error message when this build did not complete successfully. May be null when unavailable or not applicable."
   error: String
+  "Whether the out of date condition is true for this build."
   outOfDate: Boolean!
+  "The agent associated with this build. May be null when unavailable or not applicable."
   agent: Agent
+  "The codebase associated with this build. May be null when unavailable or not applicable."
   codebase: Codebase
+  "The worktree associated with this build. May be null when unavailable or not applicable."
   worktree: Worktree
+  "The configuration associated with this build. May be null when unavailable or not applicable."
   configuration: BuildConfiguration
+  "Artifacts associated with this build."
   artifacts: [BuildArtifact!]!
+  "Reports associated with this build."
   reports: [BuildReport!]!
+  "Script executions associated with this build."
   scriptExecutions: [BuildScriptExecution!]!
+  "Deployments associated with this build."
   deployments: [BuildDeployment!]!
+  "Exports associated with this build."
   exports: [BuildExport!]!
+  "ISO 8601 timestamp when this build was created."
   createdAt: String!
+  "ISO 8601 timestamp when this build started. May be null when unavailable or not applicable."
   startedAt: String
+  "ISO 8601 timestamp when this build finished. May be null when unavailable or not applicable."
   finishedAt: String
+  "The duration ms associated with this build. May be null when unavailable or not applicable."
   durationMs: Float
+  "ISO 8601 timestamp when this build was last updated."
   updatedAt: String!
 }
 
+"A paginated collection of builds."
 type BuildPage {
+  "Items associated with this build page."
   items: [Build!]!
+  "The next cursor associated with this build page. May be null when unavailable or not applicable."
   nextCursor: ID
 }
 
+"Represents a build log chunk in the GraphQL API."
 type BuildLogChunk {
+  "Stable identifier for this build log chunk."
   id: ID!
+  "The scope associated with this build log chunk."
   scope: String!
+  "Identifier of the related scope."
   scopeId: ID!
+  "Monotonically increasing sequence number used for ordering."
   sequence: Int!
+  "The phase associated with this build log chunk."
   phase: String!
+  "The stream associated with this build log chunk."
   stream: AgentLogStream!
+  "Data Base64, encoded as Base64."
   dataBase64: String!
+  "The byte length associated with this build log chunk."
   byteLength: Int!
+  "ISO 8601 timestamp when this build log chunk was created."
   createdAt: String!
 }
 
+"Represents a discovered build source in the GraphQL API."
 type DiscoveredBuildSource {
+  "Category of this discovered build source."
   kind: BuildSourceKind!
+  "Filesystem path associated with this discovered build source."
   relativePath: String!
 }
 
+"Represents a build source inspection in the GraphQL API."
 type BuildSourceInspection {
+  "The source associated with this build source inspection."
   source: DiscoveredBuildSource!
+  "Schemes associated with this build source inspection."
   schemes: [String!]!
+  "Configurations associated with this build source inspection."
   configurations: [String!]!
+  "Test plans associated with this build source inspection."
   testPlans: [String!]!
+  "Signing requirements associated with this build source inspection."
   signingRequirements: [BuildSigningRequirement!]!
+  "Git commit SHA associated with this build source inspection. May be null when unavailable or not applicable."
   headSha: String
+  "The Xcode version associated with this build source inspection. May be null when unavailable or not applicable."
   xcodeVersion: String
 }
 
+"Represents a build change in the GraphQL API."
 type BuildChange {
+  "Stable identifier for this build change."
   id: ID!
 }
 
+"Values used to save a build configuration."
 input SaveBuildConfigurationInput {
+  "Identifier of the save build configuration to affect."
   id: ID
+  "Identifier of the codebase to use."
   codebaseId: ID!
+  "The name to use for the request."
   name: String!
+  "The icon key to use for the request."
   iconKey: String
+  "The source kind to use for the request."
   sourceKind: BuildSourceKind!
+  "The source path to use for the request."
   sourcePath: String!
+  "The scheme to use for the request."
   scheme: String!
+  "The build configuration to use for the request."
   buildConfiguration: String!
+  "The default action to use for the request."
   defaultAction: BuildAction!
+  "The advanced settings to use for the request."
   advancedSettings: JSON
+  "Whether auto export applies to the request."
   autoExport: Boolean = false
+  "The export settings to use for the request."
   exportSettings: JSON
 }
 
+"Values used to save a build script."
 input SaveBuildScriptInput {
+  "Identifier of the save build script to affect."
   id: ID
+  "The name to use for the request."
   name: String!
+  "The pre build script to use for the request."
   preBuildScript: String
+  "The post build script to use for the request."
   postBuildScript: String
+  "Whether enabled by default applies to the request."
   enabledByDefault: Boolean!
+  "Timeout in seconds."
   timeoutSeconds: Int
+  "The failure behavior to use for the request."
   failureBehavior: BuildScriptFailureBehavior!
 }
 
+"Values used to inspect build destinations."
 input InspectBuildDestinationsInput {
+  "Identifier of the worktree to use."
   worktreeId: ID!
+  "Identifier of the configuration to use."
   configurationId: ID!
+  "The action to use for the request."
   action: BuildAction
+  "Identifier of the request to use."
   requestId: ID!
 }
 
+"Values used to inspect a build source."
 input InspectBuildSourceInput {
+  "Identifier of the worktree to use."
   worktreeId: ID!
+  "The source kind to use for the request."
   sourceKind: BuildSourceKind!
+  "The source path to use for the request."
   sourcePath: String!
+  "The scheme to use for the request."
   scheme: String
+  "The configuration to use for the request."
   configuration: String
+  "Identifier of the request to use."
   requestId: ID!
 }
 
+"Values used to start a build."
 input StartBuildInput {
+  "Identifier of the worktree to use."
   worktreeId: ID!
+  "Identifier of the configuration to use."
   configurationId: ID!
+  "The destination to use for the request."
   destination: JSON!
+  "Identifiers of the scripts to use."
   scriptIds: [ID!]
+  "The action to use for the request."
   action: BuildAction
+  "The advanced settings to use for the request."
   advancedSettings: JSON
+  "Whether export when complete applies to the request."
   exportWhenComplete: Boolean
+  "The export settings to use for the request."
   exportSettings: JSON
+  "Identifier of the request to use."
   requestId: ID!
 }
 
+"Values used to run a build."
 input RunBuildInput {
+  "Identifier of the build to use."
   buildId: ID!
+  "Destinations to use for the request."
   destinations: [JSON!]!
+  "Identifier of the request to use."
   requestId: ID!
 }
 
+"Values used to export a build archive."
 input ExportBuildArchiveInput {
+  "Identifier of the build to use."
   buildId: ID!
+  "The settings to use for the request."
   settings: JSON!
+  "Identifier of the request to use."
   requestId: ID!
 }
 
+"Input values for build progress."
 input BuildProgressInput {
+  "Identifier of the build to use."
   buildId: ID!
+  "The status to use for the request."
   status: BuildStatus!
+  "The started at to use for the request."
   startedAt: String
+  "The error code to use for the request."
   errorCode: String
+  "The error to use for the request."
   error: String
 }
 
+"Input values for build log chunk."
 input BuildLogChunkInput {
+  "The scope to use for the request."
   scope: String!
+  "Identifier of the scope to use."
   scopeId: ID!
+  "The sequence to use for the request."
   sequence: Int!
+  "The phase to use for the request."
   phase: String!
+  "The stream to use for the request."
   stream: AgentLogStream!
+  "Data Base64, encoded as Base64."
   dataBase64: String!
+  "The byte length to use for the request."
   byteLength: Int!
+  "The created at to use for the request."
   createdAt: String!
 }
 
+"Values supported for provisioning profile."
 enum ProvisioningProfileType {
+  "Represents the development option."
   DEVELOPMENT
+  "Represents the ad hoc option."
   AD_HOC
+  "Represents the enterprise option."
   ENTERPRISE
+  "Represents the App Store option."
   APP_STORE
 }
 
+"Represents a signing team in the GraphQL API."
 type SigningTeam {
+  "Stable identifier for this signing team."
   id: ID!
+  "Display name of this signing team."
   name: String!
 }
 
+"Represents a signing identity in the GraphQL API."
 type SigningIdentity {
+  "The sha1 associated with this signing identity."
   sha1: String!
+  "Display name of this signing identity."
   name: String!
+  "Identifier of the related team. May be null when unavailable or not applicable."
   teamId: String
 }
 
+"Represents a signing profile in the GraphQL API."
 type SigningProfile {
+  "The uuid associated with this signing profile."
   uuid: ID!
+  "Display name of this signing profile."
   name: String!
+  "Identifier of the related team. May be null when unavailable or not applicable."
   teamId: String
+  "The team name associated with this signing profile. May be null when unavailable or not applicable."
   teamName: String
+  "Identifier of the related bundle."
   bundleId: String!
+  "Category of this signing profile."
   type: ProvisioningProfileType!
+  "Platforms associated with this signing profile."
   platforms: [String!]!
+  "ISO 8601 timestamp when this signing profile expires. May be null when unavailable or not applicable."
   expiresAt: String
+  "Whether this signing profile is expired."
   expired: Boolean!
+  "Whether the Xcode managed condition is true for this signing profile."
   xcodeManaged: Boolean!
   "SHA-1 fingerprints of the certificates this profile accepts."
   certificateSha1s: [String!]!
@@ -432,85 +772,223 @@ type SigningProfile {
 
 "A bundle inside an archive that needs its own provisioning profile."
 type ArchiveBundle {
+  "Identifier of the related bundle."
   bundleId: String!
+  "Display name of this archive bundle."
   name: String!
+  "Filesystem path associated with this archive bundle."
   relativePath: String!
+  "The embedded profile uuid associated with this archive bundle. May be null when unavailable or not applicable."
   embeddedProfileUuid: String
+  "The embedded profile name associated with this archive bundle. May be null when unavailable or not applicable."
   embeddedProfileName: String
 }
 
 "A signable target discovered from Xcode build settings before an archive exists."
 type BuildSigningRequirement {
+  "Identifier of the related bundle."
   bundleId: String!
+  "Display name of this build signing requirement."
   name: String!
+  "The target associated with this build signing requirement."
   target: String!
+  "The platform associated with this build signing requirement. May be null when unavailable or not applicable."
   platform: String
+  "Identifier of the related team. May be null when unavailable or not applicable."
   teamId: String
+  "The provisioning profile specifier associated with this build signing requirement. May be null when unavailable or not applicable."
   provisioningProfileSpecifier: String
 }
 
+"Represents build signing options in the GraphQL API."
 type BuildSigningOptions {
+  "Teams associated with this build signing options."
   teams: [SigningTeam!]!
+  "Identities associated with this build signing options."
   identities: [SigningIdentity!]!
+  "Profiles associated with this build signing options."
   profiles: [SigningProfile!]!
+  "Bundles associated with this build signing options."
   bundles: [ArchiveBundle!]!
 }
 
 extend type Query {
-  iosAppProject(codebaseId: ID!): CodebaseProject
-  buildSigningOptions(buildId: ID!): BuildSigningOptions!
+  "Returns a codebase project, or null when it cannot be found."
+  iosAppProject("Identifier of the codebase." codebaseId: ID!): CodebaseProject
+  "Returns build signing options."
+  buildSigningOptions(
+    "Identifier of the build."
+    buildId: ID!
+  ): BuildSigningOptions!
+  "Returns build scripts."
   buildScripts: [BuildScript!]!
+  "Returns a build page."
   builds(
+    "Maximum number of records to return. Defaults to `50`."
     first: Int = 50
+    "Cursor or identifier after which to return records. Omit it to leave this dimension unfiltered."
     after: ID
+    "The status used to filter or perform the operation. Omit it to leave this dimension unfiltered."
     status: BuildStatus
+    "Identifier of the codebase. Omit it to leave this dimension unfiltered."
     codebaseId: ID
+    "Identifier of the worktree. Omit it to leave this dimension unfiltered."
     worktreeId: ID
   ): BuildPage!
-  build(id: ID!): Build
-  buildLogChunks(buildId: ID!, after: ID, first: Int = 1000): [BuildLogChunk!]!
-  worktreeCoverageReports(worktreeId: ID!): [BuildReport!]!
+  "Returns a build, or null when it cannot be found."
+  build("Identifier of the resource to return or affect." id: ID!): Build
+  "Returns build log chunks."
+  buildLogChunks(
+    "Identifier of the build."
+    buildId: ID!
+    "Cursor or identifier after which to return records. Omit it to leave this dimension unfiltered."
+    after: ID
+    "Maximum number of records to return. Defaults to `1000`."
+    first: Int = 1000
+  ): [BuildLogChunk!]!
+  "Returns build reports."
+  worktreeCoverageReports(
+    "Identifier of the worktree."
+    worktreeId: ID!
+  ): [BuildReport!]!
 }
 
 extend type Mutation {
-  createIosAppProject(codebaseId: ID!): CodebaseProject!
+  "Creates an iOS app project and returns a codebase project."
+  createIosAppProject(
+    "Identifier of the codebase."
+    codebaseId: ID!
+  ): CodebaseProject!
+  "Saves a build configuration and returns the updated build configuration."
   saveBuildConfiguration(
+    "Values for the requested operation."
     input: SaveBuildConfigurationInput!
   ): BuildConfiguration!
-  deleteBuildConfiguration(id: ID!): Boolean!
+  "Deletes a build configuration and reports whether the operation succeeded."
+  deleteBuildConfiguration(
+    "Identifier of the resource to return or affect."
+    id: ID!
+  ): Boolean!
+  "Discovers build sources and returns discovered build sources."
   discoverBuildSources(
+    "Identifier of the worktree."
     worktreeId: ID!
+    "Identifier of the request."
     requestId: ID!
   ): [DiscoveredBuildSource!]!
-  inspectBuildSource(input: InspectBuildSourceInput!): BuildSourceInspection!
+  "Inspects a build source and returns a build source inspection."
+  inspectBuildSource(
+    "Values for the requested operation."
+    input: InspectBuildSourceInput!
+  ): BuildSourceInspection!
+  "Reparses a build configuration and returns a build source observation."
   reparseBuildConfiguration(
+    "Identifier of the configuration."
     configurationId: ID!
+    "Identifier of the worktree."
     worktreeId: ID!
+    "Identifier of the request."
     requestId: ID!
   ): BuildSourceObservation!
-  inspectBuildDestinations(input: InspectBuildDestinationsInput!): [JSON!]!
-  inspectBuildRunDestinations(buildId: ID!, requestId: ID!): [JSON!]!
-  saveBuildScript(input: SaveBuildScriptInput!): BuildScript!
-  deleteBuildScript(id: ID!): Boolean!
-  setCodebaseBuildScripts(codebaseId: ID!, scriptIds: [ID!]!): CodebaseProject!
-  startBuild(input: StartBuildInput!): Build!
-  rebuildBuild(id: ID!, requestId: ID!): Build!
-  cancelBuild(id: ID!): Build!
-  deleteBuilds(ids: [ID!]!): Int!
-  runBuild(input: RunBuildInput!): [BuildDeployment!]!
-  exportBuildArchive(input: ExportBuildArchiveInput!): BuildExport!
-  parseBuildTestResults(buildId: ID!, requestId: ID!): BuildReport!
-  generateBuildCoverageReport(buildId: ID!, requestId: ID!): BuildReport!
-  startWorktreeCoverage(input: StartBuildInput!): Build!
-  reportBuildProgress(input: BuildProgressInput!): Build!
-  appendBuildLogChunks(
+  "Inspects build destinations and returns JSON values."
+  inspectBuildDestinations(
+    "Values for the requested operation."
+    input: InspectBuildDestinationsInput!
+  ): [JSON!]!
+  "Inspects build run destinations and returns JSON values."
+  inspectBuildRunDestinations(
+    "Identifier of the build."
     buildId: ID!
+    "Identifier of the request."
+    requestId: ID!
+  ): [JSON!]!
+  "Saves a build script and returns the updated build script."
+  saveBuildScript(
+    "Values for the requested operation."
+    input: SaveBuildScriptInput!
+  ): BuildScript!
+  "Deletes a build script and reports whether the operation succeeded."
+  deleteBuildScript(
+    "Identifier of the resource to return or affect."
+    id: ID!
+  ): Boolean!
+  "Sets codebase build scripts and returns the updated codebase project."
+  setCodebaseBuildScripts(
+    "Identifier of the codebase."
+    codebaseId: ID!
+    "Identifiers of the scripts."
+    scriptIds: [ID!]!
+  ): CodebaseProject!
+  "Starts a build and returns a build."
+  startBuild(
+    "Values for the requested operation."
+    input: StartBuildInput!
+  ): Build!
+  "Rebuilds a build and returns a build."
+  rebuildBuild(
+    "Identifier of the resource to return or affect."
+    id: ID!
+    "Identifier of the request."
+    requestId: ID!
+  ): Build!
+  "Cancels a build and returns a build."
+  cancelBuild("Identifier of the resource to return or affect." id: ID!): Build!
+  "Deletes builds and returns the number of deleted records."
+  deleteBuilds(
+    "Identifiers of the resources to return or affect."
+    ids: [ID!]!
+  ): Int!
+  "Runs a build and returns build deployments."
+  runBuild(
+    "Values for the requested operation."
+    input: RunBuildInput!
+  ): [BuildDeployment!]!
+  "Exports a build archive and returns a build export."
+  exportBuildArchive(
+    "Values for the requested operation."
+    input: ExportBuildArchiveInput!
+  ): BuildExport!
+  "Parses build test results and returns a build report."
+  parseBuildTestResults(
+    "Identifier of the build."
+    buildId: ID!
+    "Identifier of the request."
+    requestId: ID!
+  ): BuildReport!
+  "Generates a build coverage report and returns a build report."
+  generateBuildCoverageReport(
+    "Identifier of the build."
+    buildId: ID!
+    "Identifier of the request."
+    requestId: ID!
+  ): BuildReport!
+  "Starts worktree coverage and returns a build."
+  startWorktreeCoverage(
+    "Values for the requested operation."
+    input: StartBuildInput!
+  ): Build!
+  "Reports build progress and returns a build."
+  reportBuildProgress(
+    "Values for the requested operation."
+    input: BuildProgressInput!
+  ): Build!
+  "Appends build log chunks and returns build log chunks."
+  appendBuildLogChunks(
+    "Identifier of the build."
+    buildId: ID!
+    "Chunks used to filter or perform the operation."
     chunks: [BuildLogChunkInput!]!
   ): [BuildLogChunk!]!
 }
 
 extend type Subscription {
+  "Emits a build change whenever builds change."
   buildsChanged: BuildChange!
-  buildChanged(id: ID!): BuildChange!
-  buildLogChunkAdded(buildId: ID!): BuildLogChunk!
+  "Emits a build change whenever build changes."
+  buildChanged(
+    "Identifier of the resource to return or affect."
+    id: ID!
+  ): BuildChange!
+  "Emits a build log chunk whenever build log chunk is added."
+  buildLogChunkAdded("Identifier of the build." buildId: ID!): BuildLogChunk!
 }

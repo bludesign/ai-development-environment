@@ -144,6 +144,20 @@
     },
     {
       "type": "shell",
+      "label": "schema:copy",
+      "group": "build",
+      "command": "npm run schema:copy -- '${input:docsDirectory}'",
+      "detail": "Generate and copy schema.graphql into the docs project"
+    },
+    {
+      "type": "shell",
+      "label": "schema:publish",
+      "group": "build",
+      "command": "npm run schema:publish",
+      "detail": "Generate and publish the GraphQL schema to Apollo GraphOS"
+    },
+    {
+      "type": "shell",
       "label": "check-translations",
       "group": "test",
       "command": "npm run check-translations",
@@ -318,7 +332,7 @@
     {
       "id": "docsDirectory",
       "type": "promptString",
-      "description": "Docs project directory to copy screenshots into",
+      "description": "Docs project directory to copy generated artifacts into",
       "default": "../ai-development-environment-docs"
     }
   ]

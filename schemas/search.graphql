@@ -1,61 +1,111 @@
+"Values supported for global search group."
 enum GlobalSearchGroup {
+  "Represents the worktrees option."
   WORKTREES
+  "Represents the tickets option."
   TICKETS
+  "Represents the pull requests option."
   PULL_REQUESTS
+  "Represents the repositories option."
   REPOSITORIES
+  "Represents the codebases option."
   CODEBASES
+  "Represents the workflows option."
   WORKFLOWS
+  "Represents the GitHub actions option."
   GITHUB_ACTIONS
+  "Represents the builds option."
   BUILDS
+  "Represents the agents jobs option."
   AGENTS_JOBS
+  "Represents the plans sessions option."
   PLANS_SESSIONS
+  "Represents the commands runs option."
   COMMANDS_RUNS
+  "Represents the skills option."
   SKILLS
+  "Represents the devices profiles option."
   DEVICES_PROFILES
 }
 
+"Values supported for global search."
 enum GlobalSearchKind {
+  "Represents the worktree option."
   WORKTREE
+  "Represents the Jira ticket option."
   JIRA_TICKET
+  "Represents the GitHub pull request option."
   GITHUB_PULL_REQUEST
+  "Represents the repository option."
   REPOSITORY
+  "Represents the codebase option."
   CODEBASE
+  "Represents the workflow option."
   WORKFLOW
+  "Represents the workflow run option."
   WORKFLOW_RUN
+  "Represents the GitHub actions run option."
   GITHUB_ACTIONS_RUN
+  "Represents the build option."
   BUILD
+  "Represents the agent option."
   AGENT
+  "Represents the agent job option."
   AGENT_JOB
+  "Represents the plan option."
   PLAN
+  "Represents the session option."
   SESSION
+  "Represents the command option."
   COMMAND
+  "Represents the command run option."
   COMMAND_RUN
+  "Represents the skill option."
   SKILL
+  "Represents the skill group option."
   SKILL_GROUP
+  "Represents the device option."
   DEVICE
+  "Represents the provisioning profile option."
   PROVISIONING_PROFILE
 }
 
+"Represents a global search item in the GraphQL API."
 type GlobalSearchItem {
+  "The key associated with this global search item."
   key: ID!
+  "Category of this global search item."
   kind: GlobalSearchKind!
+  "The group associated with this global search item."
   group: GlobalSearchGroup!
+  "Human-readable title for this global search item."
   title: String!
+  "The subtitle associated with this global search item. May be null when unavailable or not applicable."
   subtitle: String
+  "Application URL for this global search item."
   href: String!
+  "Current status of this global search item."
   status: String
+  "ISO 8601 timestamp when this global search item was last updated. May be null when unavailable or not applicable."
   updatedAt: String
+  "Childrens associated with this global search item."
   children: [GlobalSearchItem!]!
 }
 
+"Represents a global search payload in the GraphQL API."
 type GlobalSearchPayload {
+  "Items associated with this global search payload."
   items: [GlobalSearchItem!]!
 }
 
 extend type Query {
+  "Returns a global search payload."
   globalSearch(
+    "Text used to filter matching records."
     query: String!
+    "The first per group used to filter or perform the operation. Defaults to `5`."
     firstPerGroup: Int = 5
+    "The related first used to filter or perform the operation. Defaults to `3`."
     relatedFirst: Int = 3
   ): GlobalSearchPayload!
 }

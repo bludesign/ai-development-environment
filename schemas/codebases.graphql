@@ -1,308 +1,569 @@
+"States reported for codebase sync."
 enum CodebaseSyncState {
+  "Represents the in sync state for codebase sync."
   IN_SYNC
+  "Represents the ahead state for codebase sync."
   AHEAD
+  "Represents the behind state for codebase sync."
   BEHIND
+  "Represents the diverged state for codebase sync."
   DIVERGED
+  "Represents the no upstream state for codebase sync."
   NO_UPSTREAM
+  "Represents the detached state for codebase sync."
   DETACHED
+  "The codebase sync is not known."
   UNKNOWN
 }
 
+"Values supported for codebase availability."
 enum CodebaseAvailability {
+  "Represents the available option."
   AVAILABLE
+  "Represents the missing option."
   MISSING
+  "Represents the not repository option."
   NOT_REPOSITORY
+  "Represents the origin mismatch option."
   ORIGIN_MISMATCH
+  "Represents the error option."
   ERROR
 }
 
+"Values supported for codebase git operation."
 enum CodebaseGitOperation {
+  "Represents the switch branch option."
   SWITCH_BRANCH
+  "Represents the delete branch option."
   DELETE_BRANCH
+  "Represents the delete remote branch option."
   DELETE_REMOTE_BRANCH
+  "Represents the pull branch option."
   PULL_BRANCH
+  "Represents the apply stash option."
   APPLY_STASH
+  "Represents the delete stash option."
   DELETE_STASH
 }
 
+"Represents a codebase repository in the GraphQL API."
 type CodebaseRepository {
+  "Stable identifier for this codebase repository."
   id: ID!
+  "Whether this codebase repository can onical origin."
   canonicalOrigin: String!
+  "The display origin associated with this codebase repository."
   displayOrigin: String!
+  "Display name of this codebase repository."
   name: String!
+  "Human-readable description of this codebase repository."
   description: String!
+  "The Jira branch regex associated with this codebase repository. May be null when unavailable or not applicable."
   jiraBranchRegex: String
+  "Whether the keep base branch up to date condition is true for this codebase repository."
   keepBaseBranchUpToDate: Boolean!
+  "Skill groups associated with this codebase repository."
   skillGroups: [SkillGroup!]!
+  "Quick action workflows associated with this codebase repository."
   quickActionWorkflows: [Workflow!]!
+  "Codebases associated with this codebase repository."
   codebases: [Codebase!]!
+  "ISO 8601 timestamp when this codebase repository was created."
   createdAt: String!
+  "ISO 8601 timestamp when this codebase repository was last updated."
   updatedAt: String!
 }
 
+"Represents a codebase in the GraphQL API."
 type Codebase {
+  "Stable identifier for this codebase."
   id: ID!
+  "The folder associated with this codebase."
   folder: String!
+  "The observed origin associated with this codebase."
   observedOrigin: String!
+  "Git branch associated with this codebase. May be null when unavailable or not applicable."
   branch: String
+  "Git commit SHA associated with this codebase. May be null when unavailable or not applicable."
   headSha: String
+  "The upstream associated with this codebase. May be null when unavailable or not applicable."
   upstream: String
+  "The ahead associated with this codebase. May be null when unavailable or not applicable."
   ahead: Int
+  "The behind associated with this codebase. May be null when unavailable or not applicable."
   behind: Int
+  "The sync state associated with this codebase."
   syncState: CodebaseSyncState!
+  "The availability associated with this codebase."
   availability: CodebaseAvailability!
+  "The status error associated with this codebase. May be null when unavailable or not applicable."
   statusError: String
+  "Git branch associated with this codebase. May be null when unavailable or not applicable."
   defaultBranch: String
+  "Local branches associated with this codebase."
   localBranches: [String!]!
+  "Remote branches associated with this codebase."
   remoteBranches: [String!]!
+  "ISO 8601 timestamp when this codebase was last checked. May be null when unavailable or not applicable."
   lastCheckedAt: String
+  "ISO 8601 timestamp when this codebase was last fetched. May be null when unavailable or not applicable."
   lastFetchedAt: String
+  "ISO 8601 timestamp when this codebase last fetch attempt. May be null when unavailable or not applicable."
   lastFetchAttemptAt: String
+  "The last fetch error associated with this codebase. May be null when unavailable or not applicable."
   lastFetchError: String
+  "ISO 8601 timestamp when this codebase was created."
   createdAt: String!
+  "ISO 8601 timestamp when this codebase was last updated."
   updatedAt: String!
+  "The agent associated with this codebase."
   agent: Agent!
+  "The repository associated with this codebase."
   repository: CodebaseRepository!
+  "The active job associated with this codebase. May be null when unavailable or not applicable."
   activeJob: AgentJob
 }
 
+"Represents a codebase directory entry in the GraphQL API."
 type CodebaseDirectoryEntry {
+  "Display name of this codebase directory entry."
   name: String!
+  "Filesystem path associated with this codebase directory entry."
   path: String!
+  "Whether the hidden condition is true for this codebase directory entry."
   hidden: Boolean!
 }
 
+"Represents a codebase directory listing in the GraphQL API."
 type CodebaseDirectoryListing {
+  "Filesystem path associated with this codebase directory listing."
   path: String!
+  "Filesystem path associated with this codebase directory listing. May be null when unavailable or not applicable."
   parentPath: String
+  "Filesystem path associated with this codebase directory listing."
   homePath: String!
+  "Entries associated with this codebase directory listing."
   entries: [CodebaseDirectoryEntry!]!
+  "Whether this codebase directory listing is truncated."
   truncated: Boolean!
 }
 
+"Represents a codebase snapshot in the GraphQL API."
 type CodebaseSnapshot {
+  "The folder associated with this codebase snapshot."
   folder: String!
+  "The observed origin associated with this codebase snapshot. May be null when unavailable or not applicable."
   observedOrigin: String
+  "Whether this codebase snapshot can onical origin."
   canonicalOrigin: String
+  "The display origin associated with this codebase snapshot. May be null when unavailable or not applicable."
   displayOrigin: String
+  "Git branch associated with this codebase snapshot. May be null when unavailable or not applicable."
   branch: String
+  "Git commit SHA associated with this codebase snapshot. May be null when unavailable or not applicable."
   headSha: String
+  "The upstream associated with this codebase snapshot. May be null when unavailable or not applicable."
   upstream: String
+  "The ahead associated with this codebase snapshot. May be null when unavailable or not applicable."
   ahead: Int
+  "The behind associated with this codebase snapshot. May be null when unavailable or not applicable."
   behind: Int
+  "The sync state associated with this codebase snapshot."
   syncState: CodebaseSyncState!
+  "The availability associated with this codebase snapshot."
   availability: CodebaseAvailability!
+  "Error message when this codebase snapshot did not complete successfully. May be null when unavailable or not applicable."
   error: String
+  "ISO 8601 timestamp when this codebase snapshot was checked."
   checkedAt: String!
+  "ISO 8601 timestamp when this codebase snapshot was fetched. May be null when unavailable or not applicable."
   fetchedAt: String
+  "Whether the linked worktree condition is true for this codebase snapshot."
   linkedWorktree: Boolean!
 }
 
+"Represents a codebase inspection in the GraphQL API."
 type CodebaseInspection {
+  "Identifier of the related job."
   jobId: ID!
+  "The snapshot associated with this codebase inspection."
   snapshot: CodebaseSnapshot!
+  "The existing repository associated with this codebase inspection. May be null when unavailable or not applicable."
   existingRepository: CodebaseRepository
 }
 
+"Represents a codebase overview in the GraphQL API."
 type CodebaseOverview {
+  "Repositories associated with this codebase overview."
   repositories: [CodebaseRepository!]!
 }
 
+"Configurable settings for codebase."
 type CodebaseSettings {
+  "Refresh interval, in seconds."
   refreshIntervalSeconds: Int!
+  "Fetch interval, in seconds."
   fetchIntervalSeconds: Int!
+  "The default Jira branch regex associated with this codebase settings."
   defaultJiraBranchRegex: String!
+  "ISO 8601 timestamp when this codebase settings was last updated."
   updatedAt: String!
 }
 
+"Represents an agent codebase registration in the GraphQL API."
 type AgentCodebaseRegistration {
+  "Stable identifier for this agent codebase registration."
   id: ID!
+  "The folder associated with this agent codebase registration."
   folder: String!
+  "Whether this agent codebase registration can onical origin."
   canonicalOrigin: String!
+  "Git branch associated with this agent codebase registration. May be null when unavailable or not applicable."
   defaultBranch: String
+  "Whether the keep base branch up to date condition is true for this agent codebase registration."
   keepBaseBranchUpToDate: Boolean!
+  "ISO 8601 timestamp when this agent codebase registration was last fetched. May be null when unavailable or not applicable."
   lastFetchedAt: String
+  "ISO 8601 timestamp when this agent codebase registration last fetch attempt. May be null when unavailable or not applicable."
   lastFetchAttemptAt: String
+  "Worktrees associated with this agent codebase registration."
   worktrees: [AgentWorktreeConfiguration!]!
 }
 
+"Configuration for agent worktree."
 type AgentWorktreeConfiguration {
+  "Stable identifier for this agent worktree configuration."
   id: ID!
+  "The folder associated with this agent worktree configuration."
   folder: String!
+  "Git branch associated with this agent worktree configuration. May be null when unavailable or not applicable."
   branch: String
+  "Filesystem directory associated with this agent worktree configuration."
   gitDirectory: String!
+  "The base branch override associated with this agent worktree configuration. May be null when unavailable or not applicable."
   baseBranchOverride: String
 }
 
+"Configuration for agent codebase."
 type AgentCodebaseConfiguration {
+  "Refresh interval, in seconds."
   refreshIntervalSeconds: Int!
+  "Fetch interval, in seconds."
   fetchIntervalSeconds: Int!
+  "Codebases associated with this agent codebase configuration."
   codebases: [AgentCodebaseRegistration!]!
 }
 
+"Represents a codebase operation skip in the GraphQL API."
 type CodebaseOperationSkip {
+  "Identifier of the related codebase."
   codebaseId: ID!
+  "The reason associated with this codebase operation skip."
   reason: String!
 }
 
+"A batch of codebase operations processed together."
 type CodebaseOperationBatch {
+  "Jobs associated with this codebase operation batch."
   jobs: [AgentJob!]!
+  "Skippeds associated with this codebase operation batch."
   skipped: [CodebaseOperationSkip!]!
 }
 
+"Represents a codebase removal in the GraphQL API."
 type CodebaseRemoval {
+  "Stable identifier for this codebase removal."
   id: ID!
+  "Identifier of the related repository."
   repositoryId: ID!
+  "Whether the repository removed condition is true for this codebase removal."
   repositoryRemoved: Boolean!
 }
 
+"Represents a codebase overview change in the GraphQL API."
 type CodebaseOverviewChange {
+  "Identifier of the related codebase. May be null when unavailable or not applicable."
   codebaseId: ID
+  "Identifier of the related repository. May be null when unavailable or not applicable."
   repositoryId: ID
 }
 
+"Represents a codebase git branch in the GraphQL API."
 type CodebaseGitBranch {
+  "Display name of this codebase git branch."
   name: String!
+  "Whether the local condition is true for this codebase git branch."
   local: Boolean!
+  "Whether the remote condition is true for this codebase git branch."
   remote: Boolean!
+  "Whether the current condition is true for this codebase git branch."
   current: Boolean!
+  "Filesystem path associated with this codebase git branch. May be null when unavailable or not applicable."
   checkedOutPath: String
+  "The last commit message associated with this codebase git branch. May be null when unavailable or not applicable."
   lastCommitMessage: String
+  "ISO 8601 timestamp when this codebase git branch last commit. May be null when unavailable or not applicable."
   lastCommitAt: String
 }
 
+"Represents a codebase stash in the GraphQL API."
 type CodebaseStash {
+  "The oid associated with this codebase stash."
   oid: ID!
+  "The selector associated with this codebase stash."
   selector: String!
+  "Human-readable message associated with this codebase stash."
   message: String!
+  "ISO 8601 timestamp when this codebase stash was created."
   createdAt: String!
 }
 
+"Represents a codebase git state in the GraphQL API."
 type CodebaseGitState {
+  "Whether the dirty condition is true for this codebase git state."
   dirty: Boolean!
+  "Branches associated with this codebase git state."
   branches: [CodebaseGitBranch!]!
+  "Whether the branches truncated condition is true for this codebase git state."
   branchesTruncated: Boolean!
+  "Stashes associated with this codebase git state."
   stashes: [CodebaseStash!]!
+  "Whether the stashes truncated condition is true for this codebase git state."
   stashesTruncated: Boolean!
 }
 
+"Represents a codebase stash diff in the GraphQL API."
 type CodebaseStashDiff {
+  "The oid associated with this codebase stash diff."
   oid: ID!
+  "The patch associated with this codebase stash diff."
   patch: String!
+  "Whether this codebase stash diff is truncated."
   truncated: Boolean!
 }
 
+"Values used to browse an agent directory."
 input BrowseAgentDirectoryInput {
+  "Identifier of the agent to use."
   agentId: ID!
+  "The path to use for the request."
   path: String
+  "Identifier of the request to use."
   requestId: ID!
 }
 
+"Values used to inspect an agent codebase."
 input InspectAgentCodebaseInput {
+  "Identifier of the agent to use."
   agentId: ID!
+  "The folder to use for the request."
   folder: String!
+  "Identifier of the request to use."
   requestId: ID!
 }
 
+"Values used to confirm a codebase."
 input ConfirmCodebaseInput {
+  "Identifier of the inspection job to use."
   inspectionJobId: ID!
+  "The name to use for the request."
   name: String
+  "The description to use for the request."
   description: String
 }
 
+"Values used to update a codebase repository."
 input UpdateCodebaseRepositoryInput {
+  "Identifier of the update codebase repository to affect."
   id: ID!
+  "The name to use for the request."
   name: String!
+  "The description to use for the request."
   description: String!
+  "The Jira branch regex to use for the request."
   jiraBranchRegex: String
+  "Whether keep base branch up to date applies to the request."
   keepBaseBranchUpToDate: Boolean!
+  "Identifiers of the skill groups to use."
   skillGroupIds: [ID!]
 }
 
+"Values used to update codebase settings."
 input UpdateCodebaseSettingsInput {
+  "Refresh interval in seconds."
   refreshIntervalSeconds: Int!
+  "Fetch interval in seconds."
   fetchIntervalSeconds: Int!
+  "The default Jira branch regex to use for the request."
   defaultJiraBranchRegex: String!
 }
 
+"Values used to run a codebase operation."
 input RunCodebaseOperationInput {
+  "Identifiers of the codebases to use."
   codebaseIds: [ID!]!
+  "Identifier of the request to use."
   requestId: ID!
 }
 
+"Values used to inspect a codebase git state."
 input InspectCodebaseGitStateInput {
+  "Identifier of the codebase to use."
   codebaseId: ID!
+  "Identifier of the request to use."
   requestId: ID!
 }
 
+"Values used to inspect a codebase stash."
 input InspectCodebaseStashInput {
+  "Identifier of the codebase to use."
   codebaseId: ID!
+  "The stash oid to use for the request."
   stashOid: ID!
+  "Identifier of the request to use."
   requestId: ID!
 }
 
+"Values used to run a codebase git operation."
 input RunCodebaseGitOperationInput {
+  "Identifier of the codebase to use."
   codebaseId: ID!
+  "The operation to use for the request."
   operation: CodebaseGitOperation!
+  "The branch to use for the request."
   branch: String
+  "The stash oid to use for the request."
   stashOid: ID
+  "Whether stash changes applies to the request."
   stashChanges: Boolean = false
+  "Identifier of the request to use."
   requestId: ID!
 }
 
+"Input values for codebase snapshot."
 input CodebaseSnapshotInput {
+  "The folder to use for the request."
   folder: String!
+  "The observed origin to use for the request."
   observedOrigin: String
+  "The canonical origin to use for the request."
   canonicalOrigin: String
+  "The display origin to use for the request."
   displayOrigin: String
+  "The branch to use for the request."
   branch: String
+  "The head SHA to use for the request."
   headSha: String
+  "The upstream to use for the request."
   upstream: String
+  "The ahead to use for the request."
   ahead: Int
+  "The behind to use for the request."
   behind: Int
+  "The sync state to use for the request."
   syncState: CodebaseSyncState!
+  "The availability to use for the request."
   availability: CodebaseAvailability!
+  "The error to use for the request."
   error: String
+  "The checked at to use for the request."
   checkedAt: String!
+  "The fetched at to use for the request."
   fetchedAt: String
+  "Whether linked worktree applies to the request."
   linkedWorktree: Boolean!
 }
 
+"Input values for codebase status report."
 input CodebaseStatusReportInput {
+  "Identifier of the codebase to use."
   codebaseId: ID!
+  "The snapshot to use for the request."
   snapshot: CodebaseSnapshotInput!
 }
 
 extend type Query {
+  "Returns a codebase overview."
   codebaseOverview: CodebaseOverview!
-  codebaseRepository(id: ID!): CodebaseRepository
-  codebase(id: ID!): Codebase
+  "Returns a codebase repository, or null when it cannot be found."
+  codebaseRepository(
+    "Identifier of the resource to return or affect."
+    id: ID!
+  ): CodebaseRepository
+  "Returns a codebase, or null when it cannot be found."
+  codebase("Identifier of the resource to return or affect." id: ID!): Codebase
+  "Returns codebase settings."
   codebaseSettings: CodebaseSettings!
+  "Returns agent codebase registrations."
   agentCodebases: [AgentCodebaseRegistration!]!
+  "Returns an agent codebase configuration."
   agentCodebaseConfiguration: AgentCodebaseConfiguration!
 }
 
 extend type Mutation {
+  "Browses an agent directory and returns a codebase directory listing."
   browseAgentDirectory(
+    "Values for the requested operation."
     input: BrowseAgentDirectoryInput!
   ): CodebaseDirectoryListing!
-  inspectAgentCodebase(input: InspectAgentCodebaseInput!): CodebaseInspection!
-  confirmCodebase(input: ConfirmCodebaseInput!): Codebase!
+  "Inspects an agent codebase and returns a codebase inspection."
+  inspectAgentCodebase(
+    "Values for the requested operation."
+    input: InspectAgentCodebaseInput!
+  ): CodebaseInspection!
+  "Confirms a codebase and returns a codebase."
+  confirmCodebase(
+    "Values for the requested operation."
+    input: ConfirmCodebaseInput!
+  ): Codebase!
+  "Updates a codebase repository and returns the updated codebase repository."
   updateCodebaseRepository(
+    "Values for the requested operation."
     input: UpdateCodebaseRepositoryInput!
   ): CodebaseRepository!
-  updateCodebaseSettings(input: UpdateCodebaseSettingsInput!): CodebaseSettings!
-  removeCodebase(id: ID!): CodebaseRemoval!
-  refreshCodebases(input: RunCodebaseOperationInput!): CodebaseOperationBatch!
-  fetchCodebases(input: RunCodebaseOperationInput!): CodebaseOperationBatch!
+  "Updates codebase settings and returns the updated codebase settings."
+  updateCodebaseSettings(
+    "Values for the requested operation."
+    input: UpdateCodebaseSettingsInput!
+  ): CodebaseSettings!
+  "Removes a codebase and returns a codebase removal."
+  removeCodebase(
+    "Identifier of the resource to return or affect."
+    id: ID!
+  ): CodebaseRemoval!
+  "Refreshes codebases and returns a codebase operation batch."
+  refreshCodebases(
+    "Values for the requested operation."
+    input: RunCodebaseOperationInput!
+  ): CodebaseOperationBatch!
+  "Fetches codebases and returns a codebase operation batch."
+  fetchCodebases(
+    "Values for the requested operation."
+    input: RunCodebaseOperationInput!
+  ): CodebaseOperationBatch!
+  "Inspects a codebase git state and returns a codebase git state."
   inspectCodebaseGitState(
+    "Values for the requested operation."
     input: InspectCodebaseGitStateInput!
   ): CodebaseGitState!
-  inspectCodebaseStash(input: InspectCodebaseStashInput!): CodebaseStashDiff!
-  runCodebaseGitOperation(input: RunCodebaseGitOperationInput!): AgentJob!
-  reportCodebaseStatuses(reports: [CodebaseStatusReportInput!]!): [Codebase!]!
+  "Inspects a codebase stash and returns a codebase stash diff."
+  inspectCodebaseStash(
+    "Values for the requested operation."
+    input: InspectCodebaseStashInput!
+  ): CodebaseStashDiff!
+  "Runs a codebase git operation and returns an agent job."
+  runCodebaseGitOperation(
+    "Values for the requested operation."
+    input: RunCodebaseGitOperationInput!
+  ): AgentJob!
+  "Reports codebase statuses and returns codebases."
+  reportCodebaseStatuses(
+    "Reports used to filter or perform the operation."
+    reports: [CodebaseStatusReportInput!]!
+  ): [Codebase!]!
 }
 
 extend type Subscription {
+  "Emits a codebase overview change whenever codebase overview changes."
   codebaseOverviewChanged: CodebaseOverviewChange!
 }

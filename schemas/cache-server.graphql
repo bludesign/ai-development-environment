@@ -1,112 +1,194 @@
 "How a cache entry was matched against the requested keys."
 enum CacheEntryMatchType {
+  "Represents the exact primary option."
   EXACT_PRIMARY
+  "Represents the prefixed primary option."
   PREFIXED_PRIMARY
+  "Represents the exact restore option."
   EXACT_RESTORE
+  "Represents the prefixed restore option."
   PREFIXED_RESTORE
 }
 
 "A single header sent with every cache server request."
 type CacheServerHeader {
+  "Display name of this cache server header."
   name: String!
+  "Whether the value configured condition is true for this cache server header."
   valueConfigured: Boolean!
 }
 
 "Connection settings for the GitHub Actions Cache Server management API."
 type CacheServerSettings {
+  "Whether this cache server settings is configured."
   configured: Boolean!
+  "URL for this cache server settings. May be null when unavailable or not applicable."
   baseUrl: String
+  "Whether the API key configured condition is true for this cache server settings."
   apiKeyConfigured: Boolean!
+  "Headers associated with this cache server settings."
   headers: [CacheServerHeader!]!
+  "ISO 8601 timestamp when this cache server settings was last updated."
   updatedAt: String!
 }
 
 "A cache entry stored on the cache server."
 type CacheEntry {
+  "Stable identifier for this cache entry."
   id: ID!
+  "The key associated with this cache entry."
   key: String!
+  "Version reported for this cache entry."
   version: String!
+  "The scope associated with this cache entry."
   scope: String!
+  "Identifier of the related repo."
   repoId: String!
+  "ISO 8601 timestamp when this cache entry was last updated."
   updatedAt: Float!
+  "Identifier of the related location."
   locationId: String!
 }
 
 "A paginated page of cache entries."
 type CacheEntryPage {
+  "The total associated with this cache entry page."
   total: Int!
+  "Items associated with this cache entry page."
   items: [CacheEntry!]!
 }
 
 "A storage location backing one or more cache entries."
 type StorageLocation {
+  "Stable identifier for this storage location."
   id: ID!
+  "The folder name associated with this storage location."
   folderName: String!
+  "Number of parts."
   partCount: Float!
+  "ISO 8601 timestamp when this storage location merge started. May be null when unavailable or not applicable."
   mergeStartedAt: Float
+  "ISO 8601 timestamp when this storage location merged. May be null when unavailable or not applicable."
   mergedAt: Float
+  "ISO 8601 timestamp when this storage location parts deleted. May be null when unavailable or not applicable."
   partsDeletedAt: Float
+  "ISO 8601 timestamp when this storage location last downloaded. May be null when unavailable or not applicable."
   lastDownloadedAt: Float
+  "Size, in bytes. May be null when unavailable or not applicable."
   sizeBytes: Float
 }
 
 "A cache entry together with the storage location that backs it."
 type CacheEntryDetail {
+  "The entry associated with this cache entry detail."
   entry: CacheEntry!
+  "The location associated with this cache entry detail. May be null when unavailable or not applicable."
   location: StorageLocation
 }
 
 "The best matching cache entry along with how it was matched."
 type CacheEntryMatch {
+  "The match associated with this cache entry match."
   match: CacheEntry!
+  "Category of this cache entry match."
   type: CacheEntryMatchType!
 }
 
+"Input values for cache server header."
 input CacheServerHeaderInput {
+  "The name to use for the request."
   name: String!
+  "The value to use for the request."
   value: String
 }
 
+"Values used to save cache server settings."
 input SaveCacheServerSettingsInput {
+  "The base URL to use for the request."
   baseUrl: String!
+  "The API key to use for the request."
   apiKey: String
+  "Headers to use for the request."
   headers: [CacheServerHeaderInput!]
 }
 
 extend type Query {
+  "Returns cache server settings."
   cacheServerSettings: CacheServerSettings!
+  "Returns a cache entry page."
   cacheEntries(
+    "The key used to filter or perform the operation. Omit it to leave this dimension unfiltered."
     key: String
+    "The version used to filter or perform the operation. Omit it to leave this dimension unfiltered."
     version: String
+    "The scope used to filter or perform the operation. Omit it to leave this dimension unfiltered."
     scope: String
+    "Identifier of the repo. Omit it to leave this dimension unfiltered."
     repoId: String
+    "Maximum number of records on each page. Defaults to `20`."
     itemsPerPage: Int = 20
+    "One-based page number to return. Defaults to `1`."
     page: Int = 1
   ): CacheEntryPage!
-  cacheEntryDetail(id: ID!): CacheEntryDetail
-  cacheStorageLocation(id: ID!): StorageLocation
+  "Returns a cache entry detail, or null when it cannot be found."
+  cacheEntryDetail(
+    "Identifier of the resource to return or affect."
+    id: ID!
+  ): CacheEntryDetail
+  "Returns a storage location, or null when it cannot be found."
+  cacheStorageLocation(
+    "Identifier of the resource to return or affect."
+    id: ID!
+  ): StorageLocation
+  "Returns a cache entry match, or null when it cannot be found."
   cacheEntryMatch(
+    "The primary key used to filter or perform the operation."
     primaryKey: String!
+    "Restore keys used to filter or perform the operation. Omit it to leave this dimension unfiltered."
     restoreKeys: [String!]
+    "Scopes used to filter or perform the operation."
     scopes: [String!]!
+    "Identifier of the repo."
     repoId: String!
+    "The version used to filter or perform the operation."
     version: String!
   ): CacheEntryMatch
 }
 
 extend type Mutation {
+  "Saves cache server settings and returns the updated cache server settings."
   saveCacheServerSettings(
+    "Values for the requested operation."
     input: SaveCacheServerSettingsInput!
   ): CacheServerSettings!
+  "Tests a cache server connection and returns cache server settings."
   testCacheServerConnection: CacheServerSettings!
+  "Clears cache server settings and returns cache server settings."
   clearCacheServerSettings: CacheServerSettings!
-  deleteCacheEntry(id: ID!): Boolean!
-  deleteCacheEntriesByIds(ids: [ID!]!): Boolean!
+  "Deletes a cache entry and reports whether the operation succeeded."
+  deleteCacheEntry(
+    "Identifier of the resource to return or affect."
+    id: ID!
+  ): Boolean!
+  "Deletes cache entries by IDs and reports whether the operation succeeded."
+  deleteCacheEntriesByIds(
+    "Identifiers of the resources to return or affect."
+    ids: [ID!]!
+  ): Boolean!
+  "Deletes cache entries and reports whether the operation succeeded."
   deleteCacheEntries(
+    "The key used to filter or perform the operation."
     key: String
+    "The version used to filter or perform the operation."
     version: String
+    "The scope used to filter or perform the operation."
     scope: String
+    "Identifier of the repo."
     repoId: String
   ): Boolean!
-  deleteCacheStorageLocation(id: ID!): Boolean!
+  "Deletes a cache storage location and reports whether the operation succeeded."
+  deleteCacheStorageLocation(
+    "Identifier of the resource to return or affect."
+    id: ID!
+  ): Boolean!
 }

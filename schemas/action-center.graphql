@@ -1,99 +1,174 @@
+"Values supported for action center resource."
 enum ActionCenterResourceKind {
+  "Represents the plan option."
   PLAN
+  "Represents the session option."
   SESSION
+  "Represents the build option."
   BUILD
+  "Represents the workflow option."
   WORKFLOW
 }
 
+"Reasons reported for action center."
 enum ActionCenterReason {
+  "Indicates question as the reason."
   QUESTION
+  "Indicates blocked as the reason."
   BLOCKED
+  "Indicates failed as the reason."
   FAILED
+  "Indicates unrun build as the reason."
   UNRUN_BUILD
+  "Indicates active as the reason."
   ACTIVE
 }
 
+"Represents an action center worktree in the GraphQL API."
 type ActionCenterWorktree {
+  "Stable identifier for this action center worktree."
   id: ID!
+  "The folder associated with this action center worktree."
   folder: String!
+  "Git branch associated with this action center worktree. May be null when unavailable or not applicable."
   branch: String
+  "The highlight color associated with this action center worktree. May be null when unavailable or not applicable."
   highlightColor: String
 }
 
+"Represents an action center question option in the GraphQL API."
 type ActionCenterQuestionOption {
+  "Stable identifier for this action center question option."
   id: ID!
+  "Zero-based position within the containing collection."
   position: Int!
+  "Human-readable label for this action center question option."
   label: String!
+  "Human-readable description of this action center question option. May be null when unavailable or not applicable."
   description: String
 }
 
+"Represents an action center question in the GraphQL API."
 type ActionCenterQuestion {
+  "Stable identifier for this action center question."
   id: ID!
+  "Zero-based position within the containing collection."
   position: Int!
+  "The header associated with this action center question. May be null when unavailable or not applicable."
   header: String
+  "The prompt associated with this action center question."
   prompt: String!
+  "Whether the multi select condition is true for this action center question."
   multiSelect: Boolean!
+  "Whether the allow custom condition is true for this action center question."
   allowCustom: Boolean!
+  "Options associated with this action center question."
   options: [ActionCenterQuestionOption!]!
 }
 
+"A batch of action center questions processed together."
 type ActionCenterQuestionBatch {
+  "Stable identifier for this action center question batch."
   id: ID!
+  "The source kind associated with this action center question batch. May be null when unavailable or not applicable."
   sourceKind: String
+  "ISO 8601 timestamp when this action center question batch was created."
   createdAt: String!
+  "Questions associated with this action center question batch."
   questions: [ActionCenterQuestion!]!
 }
 
+"Represents an action center build run in the GraphQL API."
 type ActionCenterBuildRun {
+  "Identifier of the related build."
   buildId: ID!
+  "The destination type associated with this action center build run."
   destinationType: BuildDestinationType!
+  "The preferred destination associated with this action center build run."
   preferredDestination: JSON!
 }
 
+"Represents an action center item in the GraphQL API."
 type ActionCenterItem {
+  "The key associated with this action center item."
   key: ID!
+  "The resource kind associated with this action center item."
   resourceKind: ActionCenterResourceKind!
+  "The reason associated with this action center item."
   reason: ActionCenterReason!
+  "Identifier of the related resource."
   resourceId: ID!
+  "Application URL for this action center item."
   href: String!
+  "The display number associated with this action center item. May be null when unavailable or not applicable."
   displayNumber: Int
+  "Human-readable label for this action center item."
   label: String!
+  "The summary associated with this action center item. May be null when unavailable or not applicable."
   summary: String
+  "Current status of this action center item."
   status: String!
+  "The phase associated with this action center item. May be null when unavailable or not applicable."
   phase: String
+  "Error message when this action center item did not complete successfully. May be null when unavailable or not applicable."
   error: String
+  "ISO 8601 timestamp when this action center item was created."
   createdAt: String!
+  "ISO 8601 timestamp when this action center item was last updated."
   updatedAt: String!
+  "The worktree associated with this action center item. May be null when unavailable or not applicable."
   worktree: ActionCenterWorktree
+  "Question batches associated with this action center item."
   questionBatches: [ActionCenterQuestionBatch!]!
+  "The build run associated with this action center item. May be null when unavailable or not applicable."
   buildRun: ActionCenterBuildRun
+  "The failure fingerprint associated with this action center item. May be null when unavailable or not applicable."
   failureFingerprint: String
 }
 
+"A paginated collection of action centers."
 type ActionCenterPage {
+  "Items associated with this action center page."
   items: [ActionCenterItem!]!
+  "The next cursor associated with this action center page. May be null when unavailable or not applicable."
   nextCursor: String
+  "Number of totals."
   totalCount: Int!
+  "Number of needs attentions."
   needsAttentionCount: Int!
+  "Number of actives."
   activeCount: Int!
 }
 
+"Values used to acknowledge an action center item."
 input AcknowledgeActionCenterItemInput {
+  "The resource kind to use for the request."
   resourceKind: ActionCenterResourceKind!
+  "Identifier of the resource to use."
   resourceId: ID!
+  "The failure fingerprint to use for the request."
   failureFingerprint: String!
 }
 
 extend type Query {
-  actionCenter(first: Int = 50, after: String): ActionCenterPage!
+  "Returns an action center page."
+  actionCenter(
+    "Maximum number of records to return. Defaults to `50`."
+    first: Int = 50
+    "Cursor or identifier after which to return records. Omit it to leave this dimension unfiltered."
+    after: String
+  ): ActionCenterPage!
 }
 
 extend type Mutation {
+  "Acknowledges an action center item and reports whether the operation succeeded."
   acknowledgeActionCenterItem(
+    "Values for the requested operation."
     input: AcknowledgeActionCenterItemInput!
   ): Boolean!
 }
 
 extend type Subscription {
+  "Emits a change signal whenever action center changes."
   actionCenterChanged: Boolean!
 }

@@ -1,92 +1,164 @@
+"Values supported for workflow overlap policy."
 enum WorkflowOverlapPolicy {
+  "Represents the queue option."
   QUEUE
+  "Represents the concurrent option."
   CONCURRENT
+  "Represents the coalesce latest option."
   COALESCE_LATEST
 }
 
+"Lifecycle statuses for workflow run."
 enum WorkflowRunStatus {
+  "Represents the queued status for workflow run."
   QUEUED
+  "Represents the running status for workflow run."
   RUNNING
+  "Represents the pausing status for workflow run."
   PAUSING
+  "Represents the paused status for workflow run."
   PAUSED
+  "Represents the waiting status for workflow run."
   WAITING
+  "Represents the blocked status for workflow run."
   BLOCKED
+  "Represents the succeeded status for workflow run."
   SUCCEEDED
+  "Represents the failed status for workflow run."
   FAILED
+  "Represents the cancelled status for workflow run."
   CANCELLED
 }
 
+"Values supported for workflow quick action."
 enum WorkflowQuickActionKind {
+  "Represents the standard option."
   STANDARD
+  "Represents the merge conflict option."
   MERGE_CONFLICT
+  "Represents the GitHub actions option."
   GITHUB_ACTIONS
+  "No workflow quick action applies."
   NONE
 }
 
+"Represents a workflow in the GraphQL API."
 type Workflow {
+  "Stable identifier for this workflow."
   id: ID!
+  "Display name of this workflow."
   name: String!
+  "Human-readable description of this workflow."
   description: String!
+  "The draft definition associated with this workflow."
   draftDefinition: JSON!
+  "The draft schema version associated with this workflow."
   draftSchemaVersion: Int!
+  "Identifier of the related active version. May be null when unavailable or not applicable."
   activeVersionId: ID
+  "The active version associated with this workflow. May be null when unavailable or not applicable."
   activeVersion: WorkflowVersion
+  "Whether this workflow is enabled."
   enabled: Boolean!
+  "The overlap policy associated with this workflow."
   overlapPolicy: WorkflowOverlapPolicy!
+  "The max concurrent runs associated with this workflow."
   maxConcurrentRuns: Int!
+  "The quick action kind associated with this workflow."
   quickActionKind: WorkflowQuickActionKind!
+  "The quick action icon key associated with this workflow."
   quickActionIconKey: String!
+  "The quick action button variant associated with this workflow."
   quickActionButtonVariant: String!
+  "Quick action repositories associated with this workflow."
   quickActionRepositories: [CodebaseRepository!]!
   """
   Options the published manual trigger offers, for the menu that drops down
   under a run button. Empty when the matching trigger takes no choice. Pass the
   resource kind to read the resource trigger instead of the plain manual one.
   """
-  triggerChoices(resourceKind: String): [WorkflowTriggerChoice!]!
+  triggerChoices(
+    "The resource kind used to filter or perform the operation."
+    resourceKind: String
+  ): [WorkflowTriggerChoice!]!
   "Whether the published workflow also has a matching no-choice manual trigger."
-  hasPlainTrigger(resourceKind: String): Boolean!
+  hasPlainTrigger(
+    "The resource kind used to filter or perform the operation."
+    resourceKind: String
+  ): Boolean!
+  "ISO 8601 timestamp when this workflow was archived. May be null when unavailable or not applicable."
   archivedAt: String
+  "Versions associated with this workflow."
   versions: [WorkflowVersion!]!
+  "Number of versions."
   versionCount: Int!
+  "Number of runs."
   runCount: Int!
+  "ISO 8601 timestamp when this workflow was created."
   createdAt: String!
+  "ISO 8601 timestamp when this workflow was last updated."
   updatedAt: String!
 }
 
+"Represents a workflow version in the GraphQL API."
 type WorkflowVersion {
+  "Stable identifier for this workflow version."
   id: ID!
+  "Identifier of the related workflow."
   workflowId: ID!
+  "Version reported for this workflow version."
   version: Int!
+  "Display name of this workflow version."
   name: String!
+  "Human-readable description of this workflow version."
   description: String!
+  "The schema version associated with this workflow version."
   schemaVersion: Int!
+  "Structured definition associated with this workflow version."
   definition: JSON!
+  "The content hash associated with this workflow version."
   contentHash: String!
+  "Triggers associated with this workflow version."
   triggers: [WorkflowTrigger!]!
+  "ISO 8601 timestamp when this workflow version was published."
   publishedAt: String!
+  "ISO 8601 timestamp when this workflow version was created."
   createdAt: String!
 }
 
+"Represents a workflow trigger in the GraphQL API."
 type WorkflowTrigger {
+  "Stable identifier for this workflow trigger."
   id: ID!
+  "Identifier of the related version."
   versionId: ID!
+  "Identifier of the related node."
   nodeId: ID!
+  "Category of this workflow trigger."
   kind: String!
+  "Structured config associated with this workflow trigger."
   config: JSON!
+  "ISO 8601 timestamp when this workflow trigger was created."
   createdAt: String!
 }
 
 "One option a choice trigger offers. `key` names the trigger's output handle."
 type WorkflowTriggerChoice {
+  "The key associated with this workflow trigger choice."
   key: String!
+  "Human-readable label for this workflow trigger choice."
   label: String!
+  "Human-readable description of this workflow trigger choice."
   description: String!
 }
 
+"Represents a workflow step catalog entry in the GraphQL API."
 type WorkflowStepCatalogEntry {
+  "Category of this workflow step catalog entry."
   kind: String!
+  "The category associated with this workflow step catalog entry."
   category: String!
+  "Human-readable label for this workflow step catalog entry."
   label: String!
   "One or two sentences: what the step does."
   description: String!
@@ -95,21 +167,31 @@ type WorkflowStepCatalogEntry {
   what the step contributes to session data.
   """
   details: String!
+  "The execution associated with this workflow step catalog entry."
   execution: String!
   "JSON Schema for this kind's `config` object, derived from its field descriptors."
   configSchema: JSON!
+  "Capability flags associated with this workflow step catalog entry."
   capabilityFlags: [String!]!
+  "Required paths associated with this workflow step catalog entry."
   requiredPaths: [String!]!
+  "Provided paths associated with this workflow step catalog entry."
   providedPaths: [String!]!
   "Outgoing handle ids an edge may leave this step from."
   sourceHandles: [String!]!
+  "Whether this workflow step catalog entry mutates external."
   mutatesExternal: Boolean!
+  "Whether this workflow step catalog entry mutates worktree."
   mutatesWorktree: Boolean!
 }
 
+"Represents a workflow trigger catalog entry in the GraphQL API."
 type WorkflowTriggerCatalogEntry {
+  "Category of this workflow trigger catalog entry."
   kind: String!
+  "The category associated with this workflow trigger catalog entry."
   category: String!
+  "Human-readable label for this workflow trigger catalog entry."
   label: String!
   "One or two sentences: when this trigger fires."
   description: String!
@@ -117,286 +199,600 @@ type WorkflowTriggerCatalogEntry {
   details: String!
   "JSON Schema for this kind's `config` object, derived from its field descriptors."
   configSchema: JSON!
+  "Capability flags associated with this workflow trigger catalog entry."
   capabilityFlags: [String!]!
+  "Seed paths associated with this workflow trigger catalog entry."
   seedPaths: [String!]!
   "Outgoing handle ids. Empty for choice triggers, whose handles come from config."
   sourceHandles: [String!]!
 }
 
+"Represents a workflow catalog in the GraphQL API."
 type WorkflowCatalog {
+  "The schema version associated with this workflow catalog."
   schemaVersion: Int!
+  "The global concurrency associated with this workflow catalog."
   globalConcurrency: Int!
+  "Steps associated with this workflow catalog."
   steps: [WorkflowStepCatalogEntry!]!
+  "Triggers associated with this workflow catalog."
   triggers: [WorkflowTriggerCatalogEntry!]!
 }
 
+"Represents a workflow diagnostic in the GraphQL API."
 type WorkflowDiagnostic {
+  "The severity associated with this workflow diagnostic."
   severity: String!
+  "The code associated with this workflow diagnostic."
   code: String!
+  "Human-readable message associated with this workflow diagnostic."
   message: String!
+  "Identifier of the related node. May be null when unavailable or not applicable."
   nodeId: ID
+  "Identifier of the related trigger. May be null when unavailable or not applicable."
   triggerId: ID
+  "Filesystem path associated with this workflow diagnostic. May be null when unavailable or not applicable."
   path: String
 }
 
+"Represents a workflow validation in the GraphQL API."
 type WorkflowValidation {
+  "Whether this workflow validation is valid."
   valid: Boolean!
+  "Diagnostics associated with this workflow validation."
   diagnostics: [WorkflowDiagnostic!]!
 }
 
+"Represents a workflow run worktree ref in the GraphQL API."
 type WorkflowRunWorktreeRef {
+  "Stable identifier for this workflow run worktree ref."
   id: ID!
+  "The folder associated with this workflow run worktree ref."
   folder: String!
+  "Git branch associated with this workflow run worktree ref. May be null when unavailable or not applicable."
   branch: String
+  "The highlight color associated with this workflow run worktree ref. May be null when unavailable or not applicable."
   highlightColor: String
 }
 
+"Represents a workflow run in the GraphQL API."
 type WorkflowRun {
+  "Stable identifier for this workflow run."
   id: ID!
+  "The display number associated with this workflow run."
   displayNumber: Int!
+  "Identifier of the related workflow."
   workflowId: ID!
+  "The workflow associated with this workflow run."
   workflow: Workflow!
+  "Identifier of the related version."
   versionId: ID!
+  "Version reported for this workflow run."
   version: WorkflowVersion!
+  "Identifier of the related trigger. May be null when unavailable or not applicable."
   triggerId: ID
+  "The trigger associated with this workflow run. May be null when unavailable or not applicable."
   trigger: WorkflowTrigger
+  "Identifier of the related trigger event. May be null when unavailable or not applicable."
   triggerEventId: ID
+  "Identifier of the related parent run. May be null when unavailable or not applicable."
   parentRunId: ID
+  "The parent run associated with this workflow run. May be null when unavailable or not applicable."
   parentRun: WorkflowRun
+  "Child runs associated with this workflow run."
   childRuns: [WorkflowRun!]!
+  "The trigger kind associated with this workflow run."
   triggerKind: String!
+  "The trigger subject key associated with this workflow run."
   triggerSubjectKey: String!
+  "The trigger payload associated with this workflow run."
   triggerPayload: JSON!
+  "Current status of this workflow run."
   status: WorkflowRunStatus!
+  "The phase associated with this workflow run."
   phase: String!
+  "The generation associated with this workflow run."
   generation: Int!
+  "The session data associated with this workflow run."
   sessionData: JSON!
+  "The session revision associated with this workflow run."
   sessionRevision: Int!
+  "The worktree associated with this workflow run. May be null when unavailable or not applicable."
   worktree: WorkflowRunWorktreeRef
+  "The blocked reason associated with this workflow run. May be null when unavailable or not applicable."
   blockedReason: String
+  "Error message when this workflow run did not complete successfully. May be null when unavailable or not applicable."
   error: String
+  "ISO 8601 timestamp when this workflow run was queued."
   queuedAt: String!
+  "ISO 8601 timestamp when this workflow run started. May be null when unavailable or not applicable."
   startedAt: String
+  "ISO 8601 timestamp when this workflow run was paused. May be null when unavailable or not applicable."
   pausedAt: String
+  "ISO 8601 timestamp when this workflow run finished. May be null when unavailable or not applicable."
   finishedAt: String
+  "ISO 8601 timestamp when this workflow run was archived. May be null when unavailable or not applicable."
   archivedAt: String
+  "ISO 8601 timestamp when this workflow run was created."
   createdAt: String!
+  "ISO 8601 timestamp when this workflow run was last updated."
   updatedAt: String!
+  "Attempts associated with this workflow run."
   attempts: [WorkflowStepAttempt!]!
+  "Waits associated with this workflow run."
   waits: [WorkflowWait!]!
+  "Events associated with this workflow run."
   events: [WorkflowRunEvent!]!
+  "Resource links associated with this workflow run."
   resourceLinks: [WorkflowRunResourceLink!]!
+  "Number of attempts."
   attemptCount: Int!
+  "Number of events."
   eventCount: Int!
 }
 
+"Represents a workflow step attempt in the GraphQL API."
 type WorkflowStepAttempt {
+  "Stable identifier for this workflow step attempt."
   id: ID!
+  "Identifier of the related run."
   runId: ID!
+  "Identifier of the related node."
   nodeId: ID!
+  "Category of this workflow step attempt."
   kind: String!
+  "The generation associated with this workflow step attempt."
   generation: Int!
+  "The iteration key associated with this workflow step attempt."
   iterationKey: String!
+  "The attempt associated with this workflow step attempt."
   attempt: Int!
+  "Current status of this workflow step attempt."
   status: String!
+  "The phase associated with this workflow step attempt."
   phase: String!
+  "The input associated with this workflow step attempt. May be null when unavailable or not applicable."
   input: JSON
+  "The output associated with this workflow step attempt. May be null when unavailable or not applicable."
   output: JSON
+  "Error message when this workflow step attempt did not complete successfully. May be null when unavailable or not applicable."
   error: String
+  "Required paths associated with this workflow step attempt."
   requiredPaths: [String!]!
+  "Provided paths associated with this workflow step attempt."
   providedPaths: [String!]!
+  "The resource lock key associated with this workflow step attempt. May be null when unavailable or not applicable."
   resourceLockKey: String
+  "The idempotency key associated with this workflow step attempt."
   idempotencyKey: String!
+  "ISO 8601 timestamp when this workflow step attempt started. May be null when unavailable or not applicable."
   startedAt: String
+  "ISO 8601 timestamp when this workflow step attempt finished. May be null when unavailable or not applicable."
   finishedAt: String
+  "ISO 8601 timestamp when this workflow step attempt was superseded. May be null when unavailable or not applicable."
   supersededAt: String
+  "Identifier of the related replayed from. May be null when unavailable or not applicable."
   replayedFromId: ID
+  "ISO 8601 timestamp when this workflow step attempt was created."
   createdAt: String!
+  "ISO 8601 timestamp when this workflow step attempt was last updated."
   updatedAt: String!
+  "Waits associated with this workflow step attempt."
   waits: [WorkflowWait!]!
+  "Resource links associated with this workflow step attempt."
   resourceLinks: [WorkflowRunResourceLink!]!
+  "Question batches associated with this workflow step attempt."
   questionBatches: [RunQuestionBatch!]!
+  "Checkpoints associated with this workflow step attempt."
   checkpoints: [RunCheckpoint!]!
 }
 
+"Represents a workflow wait in the GraphQL API."
 type WorkflowWait {
+  "Stable identifier for this workflow wait."
   id: ID!
+  "Identifier of the related run."
   runId: ID!
+  "Identifier of the related attempt."
   attemptId: ID!
+  "Category of this workflow wait."
   kind: String!
+  "Current status of this workflow wait."
   status: String!
+  "The predicate associated with this workflow wait. May be null when unavailable or not applicable."
   predicate: JSON
+  "The external key associated with this workflow wait. May be null when unavailable or not applicable."
   externalKey: String
+  "The resume after associated with this workflow wait. May be null when unavailable or not applicable."
   resumeAfter: String
+  "ISO 8601 timestamp when this workflow wait times out. May be null when unavailable or not applicable."
   timeoutAt: String
+  "Structured result associated with this workflow wait. May be null when unavailable or not applicable."
   result: JSON
+  "ISO 8601 timestamp when this workflow wait was created."
   createdAt: String!
+  "ISO 8601 timestamp when this workflow wait was resolved. May be null when unavailable or not applicable."
   resolvedAt: String
+  "ISO 8601 timestamp when this workflow wait was last updated."
   updatedAt: String!
 }
 
+"An event emitted for workflow run."
 type WorkflowRunEvent {
+  "Stable identifier for this workflow run event."
   id: ID!
+  "Identifier of the related run."
   runId: ID!
+  "Identifier of the related attempt. May be null when unavailable or not applicable."
   attemptId: ID
+  "Monotonically increasing sequence number used for ordering."
   sequence: Int!
+  "Category of this workflow run event."
   type: String!
+  "Human-readable message associated with this workflow run event."
   message: String!
+  "Structured detail associated with this workflow run event. May be null when unavailable or not applicable."
   detail: JSON
+  "ISO 8601 timestamp when this workflow run event was created."
   createdAt: String!
 }
 
+"Represents a workflow run resource link in the GraphQL API."
 type WorkflowRunResourceLink {
+  "Stable identifier for this workflow run resource link."
   id: ID!
+  "Identifier of the related run."
   runId: ID!
+  "Identifier of the related attempt. May be null when unavailable or not applicable."
   attemptId: ID
+  "Category of this workflow run resource link."
   kind: String!
+  "Identifier of the related resource."
   resourceId: String!
+  "Human-readable label for this workflow run resource link. May be null when unavailable or not applicable."
   label: String
+  "URL for this workflow run resource link. May be null when unavailable or not applicable."
   url: String
+  "Additional structured metadata for this workflow run resource link. May be null when unavailable or not applicable."
   metadata: JSON
+  "ISO 8601 timestamp when this workflow run resource link was created."
   createdAt: String!
 }
 
+"A paginated collection of workflows."
 type WorkflowPage {
+  "Items associated with this workflow page."
   items: [Workflow!]!
+  "The next cursor associated with this workflow page. May be null when unavailable or not applicable."
   nextCursor: ID
+  "Number of totals."
   totalCount: Int!
 }
 
+"A paginated collection of workflow runs."
 type WorkflowRunPage {
+  "Items associated with this workflow run page."
   items: [WorkflowRun!]!
+  "The next cursor associated with this workflow run page. May be null when unavailable or not applicable."
   nextCursor: ID
+  "Number of totals."
   totalCount: Int!
 }
 
+"Represents a workflow replay external effect in the GraphQL API."
 type WorkflowReplayExternalEffect {
+  "Category of this workflow replay external effect."
   kind: String!
+  "Identifier of the related resource."
   resourceId: String!
+  "Human-readable label for this workflow replay external effect. May be null when unavailable or not applicable."
   label: String
+  "URL for this workflow replay external effect. May be null when unavailable or not applicable."
   url: String
 }
 
+"A preview of workflow replay."
 type WorkflowReplayPreview {
+  "Identifier of the related run."
   runId: ID!
+  "Identifier of the related node."
   nodeId: ID!
+  "Identifiers of the related affected nodes."
   affectedNodeIds: [ID!]!
+  "Identifiers of the related affected attempts."
   affectedAttemptIds: [ID!]!
+  "External effects associated with this workflow replay preview."
   externalEffects: [WorkflowReplayExternalEffect!]!
+  "Identifier of the related checkpoint. May be null when unavailable or not applicable."
   checkpointId: ID
+  "The git comparison associated with this workflow replay preview. May be null when unavailable or not applicable."
   gitComparison: JSON
+  "Warning associated with this workflow replay preview. May be null when unavailable or not applicable."
   warning: String
 }
 
+"Represents a workflow job secret in the GraphQL API."
 type WorkflowJobSecret {
+  "Display name of this workflow job secret."
   name: String!
+  "The value associated with this workflow job secret."
   value: String!
 }
 
+"Values used to create a workflow."
 input CreateWorkflowInput {
+  "The name to use for the request."
   name: String!
+  "The description to use for the request."
   description: String
+  "Structured definition for the request."
   definition: JSON
+  "The overlap policy to use for the request."
   overlapPolicy: WorkflowOverlapPolicy = QUEUE
+  "The max concurrent runs to use for the request."
   maxConcurrentRuns: Int = 1
 }
 
+"Values used to save a workflow draft."
 input SaveWorkflowDraftInput {
+  "Identifier of the save workflow draft to affect."
   id: ID!
+  "Structured definition for the request."
   definition: JSON!
+  "The overlap policy to use for the request."
   overlapPolicy: WorkflowOverlapPolicy
+  "The max concurrent runs to use for the request."
   maxConcurrentRuns: Int
 }
 
+"Values used to trigger a workflow."
 input TriggerWorkflowInput {
+  "Identifier of the workflow to use."
   workflowId: ID!
+  "The session data to use for the request."
   sessionData: JSON
+  "The resource kind to use for the request."
   resourceKind: String
+  "Identifier of the resource to use."
   resourceId: ID
+  "The subject key to use for the request."
   subjectKey: String
   "Key of the option picked on a choice trigger. Omit to run the plain trigger."
   choice: String
 }
 
+"Values used to set a workflow quick action."
 input SetWorkflowQuickActionInput {
+  "Identifier of the set workflow quick action to affect."
   id: ID!
+  "The kind to use for the request."
   kind: WorkflowQuickActionKind!
+  "The quick action icon key to use for the request."
   quickActionIconKey: String!
+  "The quick action button variant to use for the request."
   quickActionButtonVariant: String!
+  "Identifiers of the repositories to use."
   repositoryIds: [ID!]!
 }
 
+"Values used to import a workflow."
 input ImportWorkflowInput {
+  "Structured payload for the request."
   payload: JSON!
+  "The name to use for the request."
   name: String
 }
 
 extend type Query {
+  "Returns a workflow page."
   workflows(
+    "Text used to filter matching records. Omit it to leave this dimension unfiltered."
     search: String
+    "The archive used to filter or perform the operation. Defaults to `\"ACTIVE\"`."
     archive: String = "ACTIVE"
+    "Whether enabled applies to the operation. Omit it to leave this dimension unfiltered."
     enabled: Boolean
+    "Maximum number of records to return. Defaults to `100`."
     first: Int = 100
+    "Cursor or identifier after which to return records. Omit it to leave this dimension unfiltered."
     after: ID
   ): WorkflowPage!
-  workflow(id: ID!): Workflow
-  workflowVersion(id: ID!): WorkflowVersion
+  "Returns a workflow, or null when it cannot be found."
+  workflow("Identifier of the resource to return or affect." id: ID!): Workflow
+  "Returns a workflow version, or null when it cannot be found."
+  workflowVersion(
+    "Identifier of the resource to return or affect."
+    id: ID!
+  ): WorkflowVersion
+  "Returns a workflow catalog."
   workflowCatalog: WorkflowCatalog!
-  validateWorkflowDraft(id: ID!): WorkflowValidation!
+  "Validates a workflow draft and returns the diagnostics."
+  validateWorkflowDraft(
+    "Identifier of the resource to return or affect."
+    id: ID!
+  ): WorkflowValidation!
+  "Returns a workflow run page."
   workflowRuns(
+    "Identifier of the workflow. Omit it to leave this dimension unfiltered."
     workflowId: ID
+    "The status used to filter or perform the operation. Omit it to leave this dimension unfiltered."
     status: String
+    "Text used to filter matching records. Omit it to leave this dimension unfiltered."
     search: String
+    "The archive used to filter or perform the operation. Defaults to `\"ACTIVE\"`."
     archive: String = "ACTIVE"
+    "Maximum number of records to return. Defaults to `100`."
     first: Int = 100
+    "Cursor or identifier after which to return records. Omit it to leave this dimension unfiltered."
     after: ID
   ): WorkflowRunPage!
-  workflowRun(id: ID!): WorkflowRun
+  "Returns a workflow run, or null when it cannot be found."
+  workflowRun(
+    "Identifier of the resource to return or affect."
+    id: ID!
+  ): WorkflowRun
+  "Returns workflow run events."
   workflowRunEvents(
+    "Identifier of the run."
     runId: ID!
+    "The after sequence used to filter or perform the operation. Defaults to `-1`."
     afterSequence: Int = -1
+    "Maximum number of records to return. Defaults to `500`."
     first: Int = 500
   ): [WorkflowRunEvent!]!
-  workflowRunsForResource(kind: String!, resourceId: ID!): [WorkflowRun!]!
-  workflowsAcceptingResource(kind: String!): [Workflow!]!
+  "Returns workflow runs."
+  workflowRunsForResource(
+    "The kind used to filter or perform the operation."
+    kind: String!
+    "Identifier of the resource."
+    resourceId: ID!
+  ): [WorkflowRun!]!
+  "Returns workflows."
+  workflowsAcceptingResource(
+    "The kind used to filter or perform the operation."
+    kind: String!
+  ): [Workflow!]!
+  "Returns workflows."
   workflowQuickActions(
+    "The kind used to filter or perform the operation."
     kind: WorkflowQuickActionKind!
+    "The resource kind used to filter or perform the operation."
     resourceKind: String!
+    "Identifier of the repository. Omit it to leave this dimension unfiltered."
     repositoryId: ID
   ): [Workflow!]!
-  exportWorkflow(id: ID!, versionId: ID): JSON!
-  prepareWorkflowReplay(runId: ID!, nodeId: ID!): WorkflowReplayPreview!
-  workflowJobSecrets(jobId: ID!): [WorkflowJobSecret!]!
+  "Returns an export of a workflow."
+  exportWorkflow(
+    "Identifier of the resource to return or affect."
+    id: ID!
+    "Identifier of the version. Omit it to leave this dimension unfiltered."
+    versionId: ID
+  ): JSON!
+  "Prepares a workflow replay and returns a preview without applying changes."
+  prepareWorkflowReplay(
+    "Identifier of the run."
+    runId: ID!
+    "Identifier of the node."
+    nodeId: ID!
+  ): WorkflowReplayPreview!
+  "Returns workflow job secrets."
+  workflowJobSecrets("Identifier of the job." jobId: ID!): [WorkflowJobSecret!]!
 }
 
 extend type Mutation {
-  createWorkflow(input: CreateWorkflowInput!): Workflow!
-  saveWorkflowDraft(input: SaveWorkflowDraftInput!): Workflow!
-  importWorkflow(input: ImportWorkflowInput!): Workflow!
-  publishWorkflow(id: ID!): WorkflowVersion!
-  setWorkflowEnabled(id: ID!, enabled: Boolean!): Workflow!
-  setWorkflowQuickAction(input: SetWorkflowQuickActionInput!): Workflow!
-  archiveWorkflow(id: ID!, archived: Boolean!): Workflow!
-  deleteWorkflow(id: ID!): Boolean!
-  archiveWorkflowRuns(ids: [ID!]!, archived: Boolean!): Int!
-  deleteWorkflowRuns(ids: [ID!]!): Int!
-  triggerWorkflow(input: TriggerWorkflowInput!): WorkflowRun!
-  pauseWorkflowRun(id: ID!): WorkflowRun!
-  resumeWorkflowRun(id: ID!): WorkflowRun!
-  cancelWorkflowRun(id: ID!): WorkflowRun!
-  repairWorkflowRunData(id: ID!, patch: JSON!): WorkflowRun!
-  answerWorkflowQuestion(batchId: ID!, answers: JSON!): WorkflowRun!
+  "Creates a workflow and returns a workflow."
+  createWorkflow(
+    "Values for the requested operation."
+    input: CreateWorkflowInput!
+  ): Workflow!
+  "Saves a workflow draft and returns the updated workflow."
+  saveWorkflowDraft(
+    "Values for the requested operation."
+    input: SaveWorkflowDraftInput!
+  ): Workflow!
+  "Imports a workflow and returns a workflow."
+  importWorkflow(
+    "Values for the requested operation."
+    input: ImportWorkflowInput!
+  ): Workflow!
+  "Publishes a workflow and returns a workflow version."
+  publishWorkflow(
+    "Identifier of the resource to return or affect."
+    id: ID!
+  ): WorkflowVersion!
+  "Sets whether workflow is enabled and returns the updated workflow."
+  setWorkflowEnabled(
+    "Identifier of the resource to return or affect."
+    id: ID!
+    "Whether enabled applies to the operation."
+    enabled: Boolean!
+  ): Workflow!
+  "Sets a workflow quick action and returns the updated workflow."
+  setWorkflowQuickAction(
+    "Values for the requested operation."
+    input: SetWorkflowQuickActionInput!
+  ): Workflow!
+  "Archives a workflow and returns a workflow."
+  archiveWorkflow(
+    "Identifier of the resource to return or affect."
+    id: ID!
+    "Whether the affected resource should be archived."
+    archived: Boolean!
+  ): Workflow!
+  "Deletes a workflow and reports whether the operation succeeded."
+  deleteWorkflow(
+    "Identifier of the resource to return or affect."
+    id: ID!
+  ): Boolean!
+  "Archives workflow runs and returns the number of affected records."
+  archiveWorkflowRuns(
+    "Identifiers of the resources to return or affect."
+    ids: [ID!]!
+    "Whether the affected resource should be archived."
+    archived: Boolean!
+  ): Int!
+  "Deletes workflow runs and returns the number of deleted records."
+  deleteWorkflowRuns(
+    "Identifiers of the resources to return or affect."
+    ids: [ID!]!
+  ): Int!
+  "Triggers a workflow and returns a workflow run."
+  triggerWorkflow(
+    "Values for the requested operation."
+    input: TriggerWorkflowInput!
+  ): WorkflowRun!
+  "Pauses a workflow run and returns a workflow run."
+  pauseWorkflowRun(
+    "Identifier of the resource to return or affect."
+    id: ID!
+  ): WorkflowRun!
+  "Resumes a workflow run and returns a workflow run."
+  resumeWorkflowRun(
+    "Identifier of the resource to return or affect."
+    id: ID!
+  ): WorkflowRun!
+  "Cancels a workflow run and returns a workflow run."
+  cancelWorkflowRun(
+    "Identifier of the resource to return or affect."
+    id: ID!
+  ): WorkflowRun!
+  "Repairs workflow run data and returns a workflow run."
+  repairWorkflowRunData(
+    "Identifier of the resource to return or affect."
+    id: ID!
+    "The patch used to filter or perform the operation."
+    patch: JSON!
+  ): WorkflowRun!
+  "Answers a workflow question and returns a workflow run."
+  answerWorkflowQuestion(
+    "Identifier of the batch."
+    batchId: ID!
+    "The answers used to filter or perform the operation."
+    answers: JSON!
+  ): WorkflowRun!
+  "Replays a workflow run and returns a workflow run."
   replayWorkflowRun(
+    "Identifier of the run."
     runId: ID!
+    "Identifier of the node."
     nodeId: ID!
+    "Whether restore applies to the operation. Defaults to `false`."
     restore: Boolean = false
+    "Whether stash applies to the operation. Defaults to `false`."
     stash: Boolean = false
   ): WorkflowRun!
 }
 
 extend type Subscription {
+  "Emits a workflow whenever workflows change."
   workflowsChanged: Workflow
-  workflowRunChanged(runId: ID!): WorkflowRun!
-  workflowRunEventAdded(runId: ID!): WorkflowRunEvent!
-  workflowQuestionChanged(runId: ID!): RunQuestionBatch!
+  "Emits a workflow run whenever workflow run changes."
+  workflowRunChanged("Identifier of the run." runId: ID!): WorkflowRun!
+  "Emits a workflow run event whenever workflow run event is added."
+  workflowRunEventAdded("Identifier of the run." runId: ID!): WorkflowRunEvent!
+  "Emits a run question batch whenever workflow question changes."
+  workflowQuestionChanged(
+    "Identifier of the run."
+    runId: ID!
+  ): RunQuestionBatch!
 }

@@ -16,7 +16,11 @@
 </p>
 
 <p align="center">
-  <img src=".github/assets/worktrees.png" alt="The Worktrees page" width="100%">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset=".github/assets/worktrees-dark.png">
+    <source media="(prefers-color-scheme: light)" srcset=".github/assets/worktrees-light.png">
+    <img src=".github/assets/worktrees-light.png" alt="The Worktrees page" width="100%">
+  </picture>
 </p>
 
 ## Documentation

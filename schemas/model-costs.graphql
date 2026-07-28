@@ -1,36 +1,58 @@
 "One model's published prices, as cost per token in the upstream catalog's units."
 type ModelCostEntry {
+  "The model associated with this model cost entry."
   model: String!
+  "The provider associated with this model cost entry. May be null when unavailable or not applicable."
   provider: String
+  "The mode associated with this model cost entry. May be null when unavailable or not applicable."
   mode: String
+  "Sensitive input cost per token returned for the requested operation. May be null when unavailable or not applicable."
   inputCostPerToken: Float
+  "Sensitive output cost per token returned for the requested operation. May be null when unavailable or not applicable."
   outputCostPerToken: Float
+  "Sensitive cache read cost per token returned for the requested operation. May be null when unavailable or not applicable."
   cacheReadCostPerToken: Float
+  "Sensitive cache write cost per token returned for the requested operation. May be null when unavailable or not applicable."
   cacheWriteCostPerToken: Float
+  "The max input tokens associated with this model cost entry. May be null when unavailable or not applicable."
   maxInputTokens: Int
+  "The max output tokens associated with this model cost entry. May be null when unavailable or not applicable."
   maxOutputTokens: Int
+  "ISO 8601 timestamp when this model cost entry was last updated."
   updatedAt: String!
 }
 
 "A page of catalog entries matching a search."
 type ModelCostEntryPage {
+  "Items associated with this model cost entry page."
   items: [ModelCostEntry!]!
+  "Number of totals."
   totalCount: Int!
 }
 
 "A sortable column of the model price table."
 enum ModelCostSortKey {
+  "Represents the model option."
   MODEL
+  "Represents the provider option."
   PROVIDER
+  "Represents the input cost option."
   INPUT_COST
+  "Represents the output cost option."
   OUTPUT_COST
+  "Represents the cache read cost option."
   CACHE_READ_COST
+  "Represents the cache write cost option."
   CACHE_WRITE_COST
+  "Represents the context window option."
   CONTEXT_WINDOW
 }
 
+"Values supported for model cost sort direction."
 enum ModelCostSortDirection {
+  "Sort values in ascending order."
   ASC
+  "Sort values in descending order."
   DESC
 }
 
@@ -38,11 +60,15 @@ enum ModelCostSortDirection {
 type ModelCostCatalog {
   "The URL a refresh would fetch: the custom one when set, otherwise the default."
   url: String!
+  "URL for this model cost catalog."
   defaultUrl: String!
   "Null while the default is in use."
   customUrl: String
+  "ISO 8601 timestamp when this model cost catalog was fetched. May be null when unavailable or not applicable."
   fetchedAt: String
+  "Number of entries."
   entryCount: Int!
+  "Error message when this model cost catalog did not complete successfully. May be null when unavailable or not applicable."
   error: String
   "True when the catalog is missing or older than the daily refresh interval."
   stale: Boolean!
@@ -57,22 +83,34 @@ extend type AgentRun {
 }
 
 extend type RunModelUsage {
+  "The catalog cost associated with this run model usage. May be null when unavailable or not applicable."
   catalogCost: Float
 }
 
 extend type Query {
+  "Returns a model cost catalog."
   modelCostCatalog: ModelCostCatalog!
+  "Returns a model cost entry page."
   modelCostEntries(
+    "Text used to filter matching records. Omit it to leave this dimension unfiltered."
     search: String
+    "Maximum number of records to return. Defaults to `100`."
     first: Int = 100
+    "Number of matching records to skip. Defaults to `0`."
     offset: Int = 0
+    "The sort key used to filter or perform the operation. Defaults to `MODEL`."
     sortKey: ModelCostSortKey = MODEL
+    "The direction used to filter or perform the operation. Defaults to `ASC`."
     direction: ModelCostSortDirection = ASC
   ): ModelCostEntryPage!
 }
 
 extend type Mutation {
   "Passing null or the default URL clears the override rather than storing it."
-  saveModelCostSettings(catalogUrl: String): ModelCostCatalog!
+  saveModelCostSettings(
+    "The catalog URL used to filter or perform the operation."
+    catalogUrl: String
+  ): ModelCostCatalog!
+  "Refreshes model costs and returns a model cost catalog."
   refreshModelCosts: ModelCostCatalog!
 }

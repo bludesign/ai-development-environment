@@ -1,187 +1,379 @@
+"Represents an APNs registration in the GraphQL API."
 type ApnsRegistration {
+  "Stable identifier for this APNs registration."
   id: ID!
+  "Identifier of the related client registration."
   clientRegistrationId: String!
+  "The token masked associated with this APNs registration."
   tokenMasked: String!
+  "The topic associated with this APNs registration."
   topic: String!
+  "The environment associated with this APNs registration."
   environment: String!
+  "Supported push types associated with this APNs registration."
   supportedPushTypes: [String!]!
+  "The display name associated with this APNs registration."
   displayName: String!
+  "The device model associated with this APNs registration. May be null when unavailable or not applicable."
   deviceModel: String
+  "The OS version associated with this APNs registration. May be null when unavailable or not applicable."
   osVersion: String
+  "The app version associated with this APNs registration. May be null when unavailable or not applicable."
   appVersion: String
+  "The app build associated with this APNs registration. May be null when unavailable or not applicable."
   appBuild: String
+  "The locale associated with this APNs registration. May be null when unavailable or not applicable."
   locale: String
+  "Whether the push magic configured condition is true for this APNs registration."
   pushMagicConfigured: Boolean!
+  "Current status of this APNs registration."
   status: String!
+  "ISO 8601 timestamp when this APNs registration invalidated. May be null when unavailable or not applicable."
   invalidatedAt: String
+  "The last failure reason associated with this APNs registration. May be null when unavailable or not applicable."
   lastFailureReason: String
+  "ISO 8601 timestamp when this APNs registration last failure. May be null when unavailable or not applicable."
   lastFailureAt: String
+  "ISO 8601 timestamp when this APNs registration last registered."
   lastRegisteredAt: String!
+  "ISO 8601 timestamp when this APNs registration last sent. May be null when unavailable or not applicable."
   lastSentAt: String
+  "ISO 8601 timestamp when this APNs registration was created."
   createdAt: String!
+  "ISO 8601 timestamp when this APNs registration was last updated."
   updatedAt: String!
 }
 
+"Represents an APNs certificate credential in the GraphQL API."
 type ApnsCertificateCredential {
+  "Stable identifier for this APNs certificate credential."
   id: ID!
+  "Display name of this APNs certificate credential."
   name: String!
+  "The topic associated with this APNs certificate credential."
   topic: String!
+  "The environment associated with this APNs certificate credential."
   environment: String!
+  "The fingerprint associated with this APNs certificate credential."
   fingerprint: String!
+  "ISO 8601 timestamp when this APNs certificate credential expires. May be null when unavailable or not applicable."
   expiresAt: String
+  "ISO 8601 timestamp when this APNs certificate credential last tested. May be null when unavailable or not applicable."
   lastTestedAt: String
+  "The last error associated with this APNs certificate credential. May be null when unavailable or not applicable."
   lastError: String
+  "ISO 8601 timestamp when this APNs certificate credential was created."
   createdAt: String!
+  "ISO 8601 timestamp when this APNs certificate credential was last updated."
   updatedAt: String!
 }
 
+"Configurable settings for push notification."
 type PushNotificationSettings {
+  "Whether the token configured condition is true for this push notification settings."
   tokenConfigured: Boolean!
+  "Identifier of the related token team. May be null when unavailable or not applicable."
   tokenTeamId: String
+  "Identifier of the related token key. May be null when unavailable or not applicable."
   tokenKeyId: String
+  "The token private key fingerprint associated with this push notification settings. May be null when unavailable or not applicable."
   tokenPrivateKeyFingerprint: String
+  "ISO 8601 timestamp when this push notification settings token configured. May be null when unavailable or not applicable."
   tokenConfiguredAt: String
+  "ISO 8601 timestamp when this push notification settings token last used. May be null when unavailable or not applicable."
   tokenLastUsedAt: String
+  "The token last error associated with this push notification settings. May be null when unavailable or not applicable."
   tokenLastError: String
+  "Certificates associated with this push notification settings."
   certificates: [ApnsCertificateCredential!]!
+  "ISO 8601 timestamp when this push notification settings was last updated."
   updatedAt: String!
 }
 
+"Represents an APNs broadcast channel in the GraphQL API."
 type ApnsBroadcastChannel {
+  "Stable identifier for this APNs broadcast channel."
   id: ID!
+  "Identifier of the related channel."
   channelId: String!
+  "Identifier of the related bundle."
   bundleId: String!
+  "The environment associated with this APNs broadcast channel."
   environment: String!
+  "The storage policy associated with this APNs broadcast channel."
   storagePolicy: String!
+  "ISO 8601 timestamp when this APNs broadcast channel was created."
   createdAt: String!
+  "ISO 8601 timestamp when this APNs broadcast channel was last updated."
   updatedAt: String!
 }
 
+"Represents a push notification preset in the GraphQL API."
 type PushNotificationPreset {
+  "Stable identifier for this push notification preset."
   id: ID!
+  "Display name of this push notification preset."
   name: String!
+  "The editor associated with this push notification preset."
   editor: JSON!
+  "ISO 8601 timestamp when this push notification preset was created."
   createdAt: String!
+  "ISO 8601 timestamp when this push notification preset was last updated."
   updatedAt: String!
 }
 
+"Represents a push notification delivery in the GraphQL API."
 type PushNotificationDelivery {
+  "Stable identifier for this push notification delivery."
   id: ID!
+  "Identifier of the related registration. May be null when unavailable or not applicable."
   registrationId: ID
+  "The topic associated with this push notification delivery."
   topic: String!
+  "The environment associated with this push notification delivery."
   environment: String!
+  "Current status of this push notification delivery."
   status: String!
+  "Identifier of the related APNs. May be null when unavailable or not applicable."
   apnsId: String
+  "The response code associated with this push notification delivery. May be null when unavailable or not applicable."
   responseCode: Int
+  "The reason associated with this push notification delivery. May be null when unavailable or not applicable."
   reason: String
+  "The response timestamp associated with this push notification delivery. May be null when unavailable or not applicable."
   responseTimestamp: String
+  "The attempts associated with this push notification delivery."
   attempts: Int!
+  "The duration ms associated with this push notification delivery. May be null when unavailable or not applicable."
   durationMs: Int
+  "ISO 8601 timestamp when this push notification delivery was created."
   createdAt: String!
+  "ISO 8601 timestamp when this push notification delivery started. May be null when unavailable or not applicable."
   startedAt: String
+  "ISO 8601 timestamp when this push notification delivery finished. May be null when unavailable or not applicable."
   finishedAt: String
 }
 
+"A batch of push notifications processed together."
 type PushNotificationBatch {
+  "Stable identifier for this push notification batch."
   id: ID!
+  "Identifier of the related request."
   requestId: ID!
+  "Current status of this push notification batch."
   status: String!
+  "The editor associated with this push notification batch."
   editor: JSON!
+  "Structured payload associated with this push notification batch."
   payload: JSON!
+  "The headers associated with this push notification batch."
   headers: JSON!
+  "The target mode associated with this push notification batch."
   targetMode: String!
+  "Identifier of the related channel. May be null when unavailable or not applicable."
   channelId: ID
+  "Number of recipients."
   recipientCount: Int!
+  "Number of success."
   successCount: Int!
+  "Number of failures."
   failureCount: Int!
+  "Error message when this push notification batch did not complete successfully. May be null when unavailable or not applicable."
   error: String
+  "ISO 8601 timestamp when this push notification batch was created."
   createdAt: String!
+  "ISO 8601 timestamp when this push notification batch started. May be null when unavailable or not applicable."
   startedAt: String
+  "ISO 8601 timestamp when this push notification batch finished. May be null when unavailable or not applicable."
   finishedAt: String
+  "ISO 8601 timestamp when this push notification batch was last updated."
   updatedAt: String!
+  "Deliveries associated with this push notification batch."
   deliveries: [PushNotificationDelivery!]!
 }
 
+"A preview of push notification."
 type PushNotificationPreview {
+  "The editor associated with this push notification preview."
   editor: JSON!
+  "Structured payload associated with this push notification preview."
   payload: JSON!
+  "The headers associated with this push notification preview."
   headers: JSON!
+  "The byte length associated with this push notification preview."
   byteLength: Int!
 }
 
+"Values used to save APNs token settings."
 input SaveApnsTokenSettingsInput {
+  "Identifier of the team to use."
   teamId: String!
+  "Identifier of the key to use."
   keyId: String!
+  "The private key to use for the request."
   privateKey: String
 }
 
+"Values used to add an APNs certificate credential."
 input AddApnsCertificateCredentialInput {
+  "The name to use for the request."
   name: String!
+  "The topic to use for the request."
   topic: String!
+  "The environment to use for the request."
   environment: String!
+  "PKCS #12 Base64, encoded as Base64."
   p12Base64: String!
+  "The passphrase to use for the request."
   passphrase: String!
 }
 
+"Values used to create an APNs broadcast channel."
 input CreateApnsBroadcastChannelInput {
+  "Identifier of the channel to use."
   channelId: String
+  "Identifier of the bundle to use."
   bundleId: String!
+  "The environment to use for the request."
   environment: String!
+  "The storage policy to use for the request."
   storagePolicy: String!
 }
 
+"Values used to send a push notification."
 input SendPushNotificationInput {
+  "Identifier of the request to use."
   requestId: ID!
+  "The editor to use for the request."
   editor: JSON!
+  "The target mode to use for the request."
   targetMode: String!
+  "Identifiers of the registrations to use."
   registrationIds: [ID!]
+  "Identifier of the channel to use."
   channelId: ID
+  "The direct token to use for the request."
   directToken: String
+  "The direct token encoding to use for the request."
   directTokenEncoding: String
+  "The direct environment to use for the request."
   directEnvironment: String
 }
 
 extend type Query {
+  "Returns APNs registrations."
   apnsRegistrations: [ApnsRegistration!]!
+  "Returns push notification settings."
   pushNotificationSettings: PushNotificationSettings!
+  "Returns APNs broadcast channels."
   apnsBroadcastChannels: [ApnsBroadcastChannel!]!
+  "Returns push notification presets."
   pushNotificationPresets: [PushNotificationPreset!]!
-  pushNotificationHistory(limit: Int = 100): [PushNotificationBatch!]!
-  validatePushNotification(editor: JSON!): PushNotificationPreview!
+  "Returns push notification batches."
+  pushNotificationHistory(
+    "Maximum number of records to return. Defaults to `100`."
+    limit: Int = 100
+  ): [PushNotificationBatch!]!
+  "Validates a push notification and returns the diagnostics."
+  validatePushNotification(
+    "The editor used to filter or perform the operation."
+    editor: JSON!
+  ): PushNotificationPreview!
 }
 
 extend type Mutation {
-  renameApnsRegistration(id: ID!, displayName: String!): ApnsRegistration!
-  setApnsRegistrationActive(id: ID!, active: Boolean!): ApnsRegistration!
-  deleteApnsRegistration(id: ID!): Boolean!
+  "Renames an APNs registration and returns the updated APNs registration."
+  renameApnsRegistration(
+    "Identifier of the resource to return or affect."
+    id: ID!
+    "The display name used to filter or perform the operation."
+    displayName: String!
+  ): ApnsRegistration!
+  "Sets whether APNs registration is active and returns the updated APNs registration."
+  setApnsRegistrationActive(
+    "Identifier of the resource to return or affect."
+    id: ID!
+    "Whether active applies to the operation."
+    active: Boolean!
+  ): ApnsRegistration!
+  "Deletes an APNs registration and reports whether the operation succeeded."
+  deleteApnsRegistration(
+    "Identifier of the resource to return or affect."
+    id: ID!
+  ): Boolean!
+  "Saves APNs token settings and returns the updated push notification settings."
   saveApnsTokenSettings(
+    "Values for the requested operation."
     input: SaveApnsTokenSettingsInput!
   ): PushNotificationSettings!
+  "Clears APNs token settings and returns push notification settings."
   clearApnsTokenSettings: PushNotificationSettings!
+  "Adds an APNs certificate credential and returns push notification settings."
   addApnsCertificateCredential(
+    "Values for the requested operation."
     input: AddApnsCertificateCredentialInput!
   ): PushNotificationSettings!
-  retestApnsCertificateCredential(id: ID!): PushNotificationSettings!
-  deleteApnsCertificateCredential(id: ID!): Boolean!
+  "Retests an APNs certificate credential and returns push notification settings."
+  retestApnsCertificateCredential(
+    "Identifier of the resource to return or affect."
+    id: ID!
+  ): PushNotificationSettings!
+  "Deletes an APNs certificate credential and reports whether the operation succeeded."
+  deleteApnsCertificateCredential(
+    "Identifier of the resource to return or affect."
+    id: ID!
+  ): Boolean!
+  "Creates an APNs broadcast channel and returns an APNs broadcast channel."
   createApnsBroadcastChannel(
+    "Values for the requested operation."
     input: CreateApnsBroadcastChannelInput!
   ): ApnsBroadcastChannel!
-  deleteApnsBroadcastChannel(id: ID!): Boolean!
+  "Deletes an APNs broadcast channel and reports whether the operation succeeded."
+  deleteApnsBroadcastChannel(
+    "Identifier of the resource to return or affect."
+    id: ID!
+  ): Boolean!
+  "Saves a push notification preset and returns the updated push notification preset."
   savePushNotificationPreset(
+    "Identifier of the resource to return or affect."
     id: ID
+    "The name used to filter or perform the operation."
     name: String!
+    "The editor used to filter or perform the operation."
     editor: JSON!
   ): PushNotificationPreset!
-  deletePushNotificationPreset(id: ID!): Boolean!
-  savePushNotificationDraft(editor: JSON!): PushNotificationBatch!
+  "Deletes a push notification preset and reports whether the operation succeeded."
+  deletePushNotificationPreset(
+    "Identifier of the resource to return or affect."
+    id: ID!
+  ): Boolean!
+  "Saves a push notification draft and returns the updated push notification batch."
+  savePushNotificationDraft(
+    "The editor used to filter or perform the operation."
+    editor: JSON!
+  ): PushNotificationBatch!
+  "Sends a push notification and returns a push notification batch."
   sendPushNotification(
+    "Values for the requested operation."
     input: SendPushNotificationInput!
   ): PushNotificationBatch!
-  resendPushNotification(id: ID!, requestId: ID!): PushNotificationBatch!
-  deletePushNotificationHistory(id: ID!): Boolean!
+  "Resends a push notification and returns a push notification batch."
+  resendPushNotification(
+    "Identifier of the resource to return or affect."
+    id: ID!
+    "Identifier of the request."
+    requestId: ID!
+  ): PushNotificationBatch!
+  "Deletes push notification history and reports whether the operation succeeded."
+  deletePushNotificationHistory(
+    "Identifier of the resource to return or affect."
+    id: ID!
+  ): Boolean!
+  "Clears push notification history and returns the number of affected records."
   clearPushNotificationHistory: Int!
 }
 
 extend type Subscription {
+  "Emits a change signal whenever push notifications changes."
   pushNotificationsChanged: Boolean!
 }

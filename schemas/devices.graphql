@@ -1,158 +1,301 @@
+"Lifecycle statuses for iOS device."
 enum IosDeviceStatus {
+  "Represents the pending status for iOS device."
   PENDING
+  "Represents the registering status for iOS device."
   REGISTERING
+  "Represents the registered status for iOS device."
   REGISTERED
+  "Represents the registration failed status for iOS device."
   REGISTRATION_FAILED
+  "Represents the rejected status for iOS device."
   REJECTED
 }
 
+"Lifecycle statuses for iOS device enrollment."
 enum IosDeviceEnrollmentStatus {
+  "Represents the issued status for iOS device enrollment."
   ISSUED
+  "Represents the downloaded status for iOS device enrollment."
   DOWNLOADED
+  "Represents the completed status for iOS device enrollment."
   COMPLETED
+  "Represents the expired status for iOS device enrollment."
   EXPIRED
+  "Represents the failed status for iOS device enrollment."
   FAILED
 }
 
+"Values supported for iOS device IP source."
 enum IosDeviceIpSource {
+  "Represents the profile download option."
   PROFILE_DOWNLOAD
+  "Represents the profile response option."
   PROFILE_RESPONSE
 }
 
+"Values supported for iOS device IP header source."
 enum IosDeviceIpHeaderSource {
+  "Represents the cloudflare option."
   CLOUDFLARE
+  "Represents the forwarded option."
   FORWARDED
+  "Represents the real IP option."
   REAL_IP
 }
 
+"Represents an iOS device enrollment in the GraphQL API."
 type IosDeviceEnrollment {
+  "Stable identifier for this iOS device enrollment."
   id: ID!
+  "Current status of this iOS device enrollment."
   status: IosDeviceEnrollmentStatus!
+  "The display name associated with this iOS device enrollment."
   displayName: String!
+  "ISO 8601 timestamp when this iOS device enrollment expires."
   expiresAt: String!
+  "ISO 8601 timestamp when this iOS device enrollment downloaded. May be null when unavailable or not applicable."
   downloadedAt: String
+  "ISO 8601 timestamp when this iOS device enrollment consumed. May be null when unavailable or not applicable."
   consumedAt: String
+  "The failure code associated with this iOS device enrollment. May be null when unavailable or not applicable."
   failureCode: String
+  "ISO 8601 timestamp when this iOS device enrollment was created."
   createdAt: String!
+  "ISO 8601 timestamp when this iOS device enrollment was last updated."
   updatedAt: String!
 }
 
+"Represents an iOS device IP observation in the GraphQL API."
 type IosDeviceIpObservation {
+  "Stable identifier for this iOS device IP observation."
   id: ID!
+  "The IP address associated with this iOS device IP observation."
   ipAddress: String!
+  "The source associated with this iOS device IP observation."
   source: IosDeviceIpSource!
+  "The header source associated with this iOS device IP observation."
   headerSource: IosDeviceIpHeaderSource!
+  "ISO 8601 timestamp when this iOS device IP observation was observed."
   observedAt: String!
 }
 
+"Represents an iOS device in the GraphQL API."
 type IosDevice {
+  "Stable identifier for this iOS device."
   id: ID!
+  "The udid associated with this iOS device."
   udid: String!
+  "The masked udid associated with this iOS device."
   maskedUdid: String!
+  "The display name associated with this iOS device."
   displayName: String!
+  "The product associated with this iOS device. May be null when unavailable or not applicable."
   product: String
+  "The OS version associated with this iOS device. May be null when unavailable or not applicable."
   osVersion: String
+  "The platform associated with this iOS device."
   platform: String!
+  "Current status of this iOS device."
   status: IosDeviceStatus!
+  "Identifier of the related Apple device. May be null when unavailable or not applicable."
   appleDeviceId: ID
+  "The Apple status associated with this iOS device. May be null when unavailable or not applicable."
   appleStatus: String
+  "The registration error associated with this iOS device. May be null when unavailable or not applicable."
   registrationError: String
+  "ISO 8601 timestamp when this iOS device registered. May be null when unavailable or not applicable."
   registeredAt: String
+  "ISO 8601 timestamp when this iOS device was last seen. May be null when unavailable or not applicable."
   lastSeenAt: String
+  "The last IP address associated with this iOS device. May be null when unavailable or not applicable."
   lastIpAddress: String
+  "ISO 8601 timestamp when this iOS device was created."
   createdAt: String!
+  "ISO 8601 timestamp when this iOS device was last updated."
   updatedAt: String!
+  "Enrollments associated with this iOS device."
   enrollments: [IosDeviceEnrollment!]!
+  "IP observations associated with this iOS device."
   ipObservations: [IosDeviceIpObservation!]!
 }
 
+"A summary of iOS device."
 type IosDeviceSummary {
+  "Stable identifier for this iOS device summary."
   id: ID!
+  "The masked udid associated with this iOS device summary."
   maskedUdid: String!
+  "The display name associated with this iOS device summary."
   displayName: String!
+  "The product associated with this iOS device summary. May be null when unavailable or not applicable."
   product: String
+  "The OS version associated with this iOS device summary. May be null when unavailable or not applicable."
   osVersion: String
+  "The platform associated with this iOS device summary."
   platform: String!
+  "Current status of this iOS device summary."
   status: IosDeviceStatus!
+  "The Apple status associated with this iOS device summary. May be null when unavailable or not applicable."
   appleStatus: String
+  "ISO 8601 timestamp when this iOS device summary registered. May be null when unavailable or not applicable."
   registeredAt: String
+  "ISO 8601 timestamp when this iOS device summary was last seen. May be null when unavailable or not applicable."
   lastSeenAt: String
+  "The last IP address associated with this iOS device summary. May be null when unavailable or not applicable."
   lastIpAddress: String
+  "ISO 8601 timestamp when this iOS device summary was created."
   createdAt: String!
+  "ISO 8601 timestamp when this iOS device summary was last updated."
   updatedAt: String!
 }
 
+"Represents an iOS firmware version in the GraphQL API."
 type IosFirmwareVersion {
+  "Version reported for this iOS firmware version."
   version: String!
+  "Identifier of the related build."
   buildId: String!
+  "The file size associated with this iOS firmware version."
   fileSize: Float!
+  "URL for this iOS firmware version."
   url: String!
+  "The release date associated with this iOS firmware version."
   releaseDate: String!
+  "Whether the signed condition is true for this iOS firmware version."
   signed: Boolean!
 }
 
+"Represents an iOS device firmware in the GraphQL API."
 type IosDeviceFirmware {
+  "Display name of this iOS device firmware."
   name: String!
+  "The identifier associated with this iOS device firmware."
   identifier: String!
+  "Firmwares associated with this iOS device firmware."
   firmwares: [IosFirmwareVersion!]!
 }
 
+"Configurable settings for iOS device."
 type IosDeviceSettings {
+  "The organization name associated with this iOS device settings."
   organizationName: String!
+  "The profile identifier associated with this iOS device settings."
   profileIdentifier: String!
+  "Whether the signer configured condition is true for this iOS device settings."
   signerConfigured: Boolean!
+  "The signer fingerprint associated with this iOS device settings. May be null when unavailable or not applicable."
   signerFingerprint: String
+  "ISO 8601 timestamp when this iOS device settings signer created. May be null when unavailable or not applicable."
   signerCreatedAt: String
+  "ISO 8601 timestamp when this iOS device settings signer expires. May be null when unavailable or not applicable."
   signerExpiresAt: String
+  "Whether the App Store connect configured condition is true for this iOS device settings."
   appStoreConnectConfigured: Boolean!
+  "Identifier of the related App Store connect issuer. May be null when unavailable or not applicable."
   appStoreConnectIssuerId: String
+  "Identifier of the related App Store connect key. May be null when unavailable or not applicable."
   appStoreConnectKeyId: String
+  "Whether the App Store connect private key configured condition is true for this iOS device settings."
   appStoreConnectPrivateKeyConfigured: Boolean!
+  "The App Store connect private key fingerprint associated with this iOS device settings. May be null when unavailable or not applicable."
   appStoreConnectPrivateKeyFingerprint: String
+  "ISO 8601 timestamp when this iOS device settings App Store connect verified. May be null when unavailable or not applicable."
   appStoreConnectVerifiedAt: String
+  "ISO 8601 timestamp when this iOS device settings App Store connect last tested. May be null when unavailable or not applicable."
   appStoreConnectLastTestedAt: String
+  "The App Store connect verification error associated with this iOS device settings. May be null when unavailable or not applicable."
   appStoreConnectVerificationError: String
+  "ISO 8601 timestamp when this iOS device settings was last updated."
   updatedAt: String!
 }
 
+"Represents an iOS device change in the GraphQL API."
 type IosDeviceChange {
+  "Stable identifier for this iOS device change."
   id: ID
 }
 
+"Values used to save iOS profile settings."
 input SaveIosProfileSettingsInput {
+  "The organization name to use for the request."
   organizationName: String!
+  "The profile identifier to use for the request."
   profileIdentifier: String!
 }
 
+"Values used to save App Store connect settings."
 input SaveAppStoreConnectSettingsInput {
+  "Identifier of the issuer to use."
   issuerId: String!
+  "Identifier of the key to use."
   keyId: String!
+  "The private key to use for the request."
   privateKey: String
 }
 
 extend type Query {
-  iosDevices(status: IosDeviceStatus): [IosDeviceSummary!]!
-  iosDevice(id: ID!): IosDevice
-  iosDeviceFirmware(id: ID!): IosDeviceFirmware
+  "Returns iOS device summaries."
+  iosDevices(
+    "The status used to filter or perform the operation. Omit it to leave this dimension unfiltered."
+    status: IosDeviceStatus
+  ): [IosDeviceSummary!]!
+  "Returns an iOS device, or null when it cannot be found."
+  iosDevice(
+    "Identifier of the resource to return or affect."
+    id: ID!
+  ): IosDevice
+  "Returns an iOS device firmware, or null when it cannot be found."
+  iosDeviceFirmware(
+    "Identifier of the resource to return or affect."
+    id: ID!
+  ): IosDeviceFirmware
+  "Returns iOS device settings."
   iosDeviceSettings: IosDeviceSettings!
 }
 
 extend type Mutation {
-  renameIosDevice(id: ID!, displayName: String!): IosDevice!
-  rejectIosDevice(id: ID!): IosDevice!
-  deleteIosDevice(id: ID!): Boolean!
-  registerIosDevice(id: ID!): IosDevice!
+  "Renames an iOS device and returns the updated iOS device."
+  renameIosDevice(
+    "Identifier of the resource to return or affect."
+    id: ID!
+    "The display name used to filter or perform the operation."
+    displayName: String!
+  ): IosDevice!
+  "Rejects an iOS device and returns an iOS device."
+  rejectIosDevice(
+    "Identifier of the resource to return or affect."
+    id: ID!
+  ): IosDevice!
+  "Deletes an iOS device and reports whether the operation succeeded."
+  deleteIosDevice(
+    "Identifier of the resource to return or affect."
+    id: ID!
+  ): Boolean!
+  "Registers an iOS device and returns an iOS device."
+  registerIosDevice(
+    "Identifier of the resource to return or affect."
+    id: ID!
+  ): IosDevice!
+  "Saves iOS profile settings and returns the updated iOS device settings."
   saveIosProfileSettings(
+    "Values for the requested operation."
     input: SaveIosProfileSettingsInput!
   ): IosDeviceSettings!
+  "Regenerates an iOS profile signer and returns iOS device settings."
   regenerateIosProfileSigner: IosDeviceSettings!
+  "Saves App Store connect settings and returns the updated iOS device settings."
   saveAppStoreConnectSettings(
+    "Values for the requested operation."
     input: SaveAppStoreConnectSettingsInput!
   ): IosDeviceSettings!
+  "Tests App Store connect settings and returns iOS device settings."
   testAppStoreConnectSettings: IosDeviceSettings!
+  "Clears App Store connect settings and returns iOS device settings."
   clearAppStoreConnectSettings: IosDeviceSettings!
 }
 
 extend type Subscription {
+  "Emits an iOS device change whenever iOS devices change."
   iosDevicesChanged: IosDeviceChange!
 }
