@@ -35,7 +35,7 @@ import {
   type LucideIcon,
 } from "lucide-react";
 
-export type NavigationFeature = "actionsCache" | "webhooks";
+export type NavigationFeature = "actionsCache" | "webhooks" | "jiraWebhooks";
 export type NavigationSection =
   "dashboard" | "ai" | "debugging" | "github" | "jira" | "system";
 
@@ -306,6 +306,16 @@ export const APP_DESTINATIONS: AppDestination[] = [
     section: "jira",
     sidebar: true,
     common: true,
+  },
+  {
+    key: "jira-webhooks",
+    href: "/jira-webhooks",
+    labelKey: "webhooks",
+    aliases: ["jira webhooks"],
+    icon: Webhook,
+    section: "jira",
+    sidebar: true,
+    feature: "jiraWebhooks",
   },
   {
     key: "jira-cache",

@@ -67,11 +67,10 @@ describe("provider action tools", () => {
     const createTicket = vi.fn().mockResolvedValue({ key: "AIDE-1" });
     const addWorklog = vi.fn().mockResolvedValue({ key: "AIDE-1" });
     const linkTickets = vi.fn().mockResolvedValue({ key: "AIDE-1" });
-    const group = createJiraToolGroup({
-      createTicket,
-      addWorklog,
-      linkTickets,
-    } as never);
+    const group = createJiraToolGroup(
+      { createTicket, addWorklog, linkTickets } as never,
+      {} as never,
+    );
 
     await tool(group, "create_jira_ticket").invoke({
       projectKey: "AIDE",

@@ -17,7 +17,7 @@ import { createGitHubResolvers } from "./resolvers/github";
 import { createCacheServerResolvers } from "./resolvers/cache-server";
 import { GitHubService } from "@/services/github";
 import type { CacheServerService } from "@/services/cache-server";
-import { JiraService } from "@/services/jira";
+import { JiraService, JiraWebhookService } from "@/services/jira";
 import { CcusageService } from "@/services/ccusage";
 import { BuildDataService } from "@/services/build-data";
 import { CodebasesService } from "@/services/codebases";
@@ -72,6 +72,7 @@ export const createSchema = (
   prismaService: PrismaService,
   agentControlService: AgentControlService,
   jiraService: JiraService,
+  jiraWebhookService: JiraWebhookService,
   gitHubService: GitHubService,
   ccusageService: CcusageService,
   codebasesService: CodebasesService,
@@ -101,7 +102,7 @@ export const createSchema = (
   const resolvers = mergeResolvers([
     createHealthResolvers(prismaService),
     createAgentResolvers(agentControlService),
-    createJiraResolvers(jiraService),
+    createJiraResolvers(jiraService, jiraWebhookService),
     createGitHubResolvers(gitHubService, worktreesService),
     createCcusageResolvers(ccusageService),
     createBuildDataResolvers(buildDataService),

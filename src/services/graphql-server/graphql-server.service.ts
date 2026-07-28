@@ -71,6 +71,7 @@ class GraphQLServerService {
       this.services.prismaService,
       this.services.agentControlService,
       this.services.jiraService,
+      this.services.jiraWebhookService,
       this.services.gitHubService,
       this.services.ccusageService,
       this.services.codebasesService,

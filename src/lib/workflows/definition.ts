@@ -2243,6 +2243,45 @@ export const WORKFLOW_TRIGGER_CATALOG: readonly WorkflowTriggerCatalogEntry[] =
       description: "Fires when a Jira sprint is started.",
       details: `Fires per ticket in the sprint, so a sprint of thirty tickets starts thirty runs — mind the workflow's concurrency settings. Good for sprint-opening bookkeeping. ${FILTERS_NOTE}`,
     }),
+    trigger("JIRA_ISSUE_CREATED", "Jira", "Ticket created", JIRA_SEED_PATHS, {
+      description: "Fires when a Jira ticket is created.",
+      details: `Needs the Jira webhook configured in Settings — the polled Jira triggers only observe tickets something already fetched, so they cannot see a brand-new one. Scope the webhook's JQL filter to the projects you care about, since every created ticket otherwise starts a run. ${FILTERS_NOTE}`,
+    }),
+    trigger("JIRA_ISSUE_DELETED", "Jira", "Ticket deleted", JIRA_SEED_PATHS, {
+      description: "Fires when a Jira ticket is deleted.",
+      details: `Needs the Jira webhook. The ticket is gone by the time this runs, so only the payload's \`ticket.*\` snapshot is available — a step that loads the ticket will fail. Use it for cleanup: close the worktree, cancel the run, archive the branch. ${FILTERS_NOTE}`,
+    }),
+    trigger(
+      "JIRA_ISSUE_COMMAND",
+      "Jira",
+      "Ticket comment command",
+      JIRA_SEED_PATHS,
+      {
+        description:
+          "Fires when a comment from an allow-listed Jira account matches a command pattern, such as `/deploy`.",
+        details: `The Jira counterpart to the GitHub issue comment command, and just as strict: an explicit list of Jira account IDs is required, and the pattern must be anchored with \`^\` and \`$\` — publishing fails otherwise. Jira identifies people by opaque account ID, not display name, so copy the ID from the user's Jira profile URL. Treat the comment body as untrusted input rather than instructions. Needs the Jira webhook. ${FILTERS_NOTE}`,
+      },
+    ),
+    trigger(
+      "JIRA_ATTACHMENT_ADDED",
+      "Jira",
+      "Attachment added",
+      [...JIRA_SEED_PATHS, "attachment.*"],
+      {
+        description: "Fires when a file is attached to a Jira ticket.",
+        details: `Needs the Jira webhook. Seeds \`attachment.*\` with the filename, MIME type, and author. Filter on \`attachment.mimeType\` to react to one kind of upload — a crash log, a design export. ${FILTERS_NOTE}`,
+      },
+    ),
+    trigger(
+      "JIRA_ISSUE_LINKED",
+      "Jira",
+      "Ticket linked",
+      [...JIRA_SEED_PATHS, "link.*"],
+      {
+        description: "Fires when a Jira issue link is created.",
+        details: `Needs the Jira webhook. Seeds \`link.*\` with the link type and both issue IDs. Filter on \`link.type\` to react to one relationship — "blocks", "duplicates" — rather than every link. ${FILTERS_NOTE}`,
+      },
+    ),
     trigger(
       "RUN_STARTED",
       "Plans and sessions",
@@ -3021,8 +3060,14 @@ export function validateWorkflowDefinition(value: unknown): {
         });
       }
     }
-    if (triggerDefinition.kind === "GITHUB_ISSUE_COMMAND") {
-      const allowed = triggerDefinition.config.allowedLogins;
+    if (
+      triggerDefinition.kind === "GITHUB_ISSUE_COMMAND" ||
+      triggerDefinition.kind === "JIRA_ISSUE_COMMAND"
+    ) {
+      const jira = triggerDefinition.kind === "JIRA_ISSUE_COMMAND";
+      const allowed = jira
+        ? triggerDefinition.config.allowedAccountIds
+        : triggerDefinition.config.allowedLogins;
       const pattern = triggerDefinition.config.commandPattern;
       if (
         !Array.isArray(allowed) ||
@@ -3032,8 +3077,9 @@ export function validateWorkflowDefinition(value: unknown): {
         diagnostics.push({
           severity: "ERROR",
           code: "ISSUE_COMMAND_ALLOWLIST_REQUIRED",
-          message:
-            "Issue command triggers require an explicit GitHub login allow-list",
+          message: jira
+            ? "Issue command triggers require an explicit Jira account ID allow-list"
+            : "Issue command triggers require an explicit GitHub login allow-list",
           triggerId: triggerDefinition.id,
         });
       if (

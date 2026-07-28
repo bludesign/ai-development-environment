@@ -11,7 +11,7 @@ import {
   GitHubService,
 } from "@/services/github";
 import { CacheServerService } from "@/services/cache-server";
-import { JiraService } from "@/services/jira";
+import { JiraService, JiraWebhookService } from "@/services/jira";
 import { IosDevicesService } from "@/services/ios-devices";
 import { PrismaService } from "@/services/prisma";
 import { ToolsService } from "@/services/tools";
@@ -51,6 +51,7 @@ export type ServerServices = {
   codebasesService: CodebasesService;
   codebaseToolsService: CodebaseToolsService;
   jiraService: JiraService;
+  jiraWebhookService: JiraWebhookService;
   iosDevicesService: IosDevicesService;
   gitHubService: GitHubService;
   gitHubPipelineStatusService: GitHubPipelineStatusService;
@@ -123,6 +124,11 @@ function createServerServices(): ServerServices {
   );
   const codebaseToolsService = new CodebaseToolsService(codebasesService);
   const jiraService = new JiraService(credentialService, workflowEventsService);
+  const jiraWebhookService = new JiraWebhookService(
+    jiraService,
+    credentialService,
+    workflowEventsService,
+  );
   const iosDevicesService = new IosDevicesService(undefined, credentialService);
   const gitHubPipelineStatusService = new GitHubPipelineStatusService();
   const gitHubActionsNotificationsService =
@@ -171,6 +177,7 @@ function createServerServices(): ServerServices {
       runs: runsService,
       commands: commandsService,
       jira: jiraService,
+      jiraWebhooks: jiraWebhookService,
       github: gitHubService,
       buildData: buildDataService,
       cacheServer: cacheServerService,
@@ -265,6 +272,7 @@ function createServerServices(): ServerServices {
     codebasesService,
     codebaseToolsService,
     jiraService,
+    jiraWebhookService,
     iosDevicesService,
     gitHubService,
     gitHubPipelineStatusService,

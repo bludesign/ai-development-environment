@@ -14,6 +14,8 @@ import { githubAppSettingsUrl, SettingsPage } from "./settings-page";
 
 vi.mock("@/lib/control-plane-client", () => ({
   controlPlaneRequest: vi.fn(),
+  controlPlaneSubscriptions: vi.fn(() => ({ subscribe: vi.fn(() => vi.fn()) })),
+  onControlPlaneConnected: vi.fn(() => vi.fn()),
 }));
 
 const requestMock = vi.mocked(controlPlaneRequest);

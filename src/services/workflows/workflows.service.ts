@@ -2575,6 +2575,24 @@ export class WorkflowsService {
         return false;
       }
     }
+    if (trigger.kind === "JIRA_ISSUE_COMMAND") {
+      // Jira has no stable handle, so the allow-list is keyed on account ID.
+      const accountId = getSessionValue(payload, "comment.author.accountId");
+      const body = getSessionValue(payload, "comment.body");
+      const allow = Array.isArray(config.allowedAccountIds)
+        ? config.allowedAccountIds
+        : [];
+      if (typeof accountId !== "string" || !allow.includes(accountId)) {
+        return false;
+      }
+      if (
+        typeof body !== "string" ||
+        typeof config.commandPattern !== "string" ||
+        !new RegExp(config.commandPattern).test(body)
+      ) {
+        return false;
+      }
+    }
     if (trigger.kind === "COMMAND_OUTPUT_MATCH") {
       const output = getSessionValue(payload, "output.data");
       if (

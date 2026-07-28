@@ -59,6 +59,12 @@ const SEEDS: Seed[] = [
     createdAt: daysAgo(55),
   },
   {
+    id: "jira/default/webhook-secret",
+    kind: "jira-webhook-secret",
+    value: "acme-mock-screenshot-jira-webhook-secret",
+    createdAt: daysAgo(30),
+  },
+  {
     id: "cache-server/default/api-key",
     kind: "cache-server-api-key",
     value: "acme-cache-server-mock-api-key",

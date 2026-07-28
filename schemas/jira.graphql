@@ -692,9 +692,90 @@ input UpdateJiraTicketInput {
   dueDate: String
 }
 
+"Represents the Jira webhook configuration in the GraphQL API."
+type JiraWebhookSettings {
+  "Whether the Jira webhook is enabled and has a signing secret."
+  enabled: Boolean!
+  "Whether a Jira webhook signing secret is stored."
+  secretConfigured: Boolean!
+  "ISO 8601 timestamp when the Jira webhook secret was last generated. May be null when unavailable or not applicable."
+  configuredAt: String
+  "ISO 8601 timestamp when the most recent Jira webhook delivery arrived. May be null when unavailable or not applicable."
+  lastReceivedAt: String
+  "The outcome of the most recent Jira webhook delivery. May be null when unavailable or not applicable."
+  lastOutcome: String
+  "Error message from the most recent Jira webhook delivery. May be null when unavailable or not applicable."
+  lastError: String
+}
+
+"A newly generated Jira webhook signing secret. The secret is returned exactly once."
+type JiraWebhookSecret {
+  "The Jira webhook settings after the secret was generated."
+  settings: JiraWebhookSettings!
+  "The plaintext signing secret. Paste it into the Jira webhook configuration; it is never returned again."
+  secret: String!
+}
+
+"Represents a Jira webhook delivery in the GraphQL API."
+type JiraWebhookDelivery {
+  "Identifier of the related delivery."
+  deliveryId: ID!
+  "The Jira event associated with this delivery."
+  event: String!
+  "The issue key associated with this delivery. May be null when unavailable or not applicable."
+  issueKey: String
+  "The project key associated with this delivery. May be null when unavailable or not applicable."
+  projectKey: String
+  "How many times Jira has retried this delivery. May be null when unavailable or not applicable."
+  retryCount: Int
+  "The outcome associated with this Jira webhook delivery."
+  outcome: String!
+  "Error message when this Jira webhook delivery did not complete successfully. May be null when unavailable or not applicable."
+  error: String
+  "ISO 8601 timestamp when this Jira webhook delivery was received."
+  receivedAt: String!
+  "ISO 8601 timestamp when this Jira webhook delivery was processed. May be null when unavailable or not applicable."
+  processedAt: String
+}
+
+"A paginated collection of Jira webhook deliveries."
+type JiraWebhookDeliveryPage {
+  "Whether Jira webhooks are enabled."
+  enabled: Boolean!
+  "Items associated with this Jira webhook delivery page."
+  items: [JiraWebhookDelivery!]!
+  "The total associated with this Jira webhook delivery page."
+  total: Int!
+  "The limit associated with this Jira webhook delivery page."
+  limit: Int!
+  "The offset associated with this Jira webhook delivery page."
+  offset: Int!
+}
+
+"A Jira ticket change observed through the webhook."
+type JiraTicketChange {
+  "The issue key that changed."
+  issueKey: String!
+  "The project key the issue belongs to. May be null when unavailable or not applicable."
+  projectKey: String
+  "The Jira event that caused the change."
+  event: String!
+}
+
 extend type Query {
   "Returns Jira settings."
   jiraSettings: JiraSettings!
+  "Returns the Jira webhook configuration."
+  jiraWebhookSettings: JiraWebhookSettings!
+  "Returns whether Jira webhooks are enabled."
+  jiraWebhooksEnabled: Boolean!
+  "Returns a Jira webhook delivery page."
+  jiraWebhookDeliveries(
+    "Maximum number of records to return. Defaults to `50`."
+    limit: Int = 50
+    "Number of matching records to skip. Defaults to `0`."
+    offset: Int = 0
+  ): JiraWebhookDeliveryPage!
   "Returns Jira available projects."
   jiraAvailableProjects: [JiraAvailableProject!]!
   "Returns Jira projects."
@@ -860,4 +941,19 @@ extend type Mutation {
     "Values for the requested operation."
     input: UpdateJiraTicketInput!
   ): JiraTicketDetail!
+  "Generates a Jira webhook signing secret and returns it exactly once."
+  enableJiraWebhook: JiraWebhookSecret!
+  "Replaces the Jira webhook signing secret and returns the new one exactly once."
+  rotateJiraWebhookSecret: JiraWebhookSecret!
+  "Removes the Jira webhook signing secret and returns the updated configuration."
+  disableJiraWebhook: JiraWebhookSettings!
+  "Clears Jira webhook deliveries and reports whether the operation succeeded."
+  clearJiraWebhookDeliveries: Boolean!
+}
+
+extend type Subscription {
+  "Emits a Jira webhook delivery whenever one reaches a terminal outcome."
+  jiraWebhookDeliveryChanged: JiraWebhookDelivery!
+  "Emits a Jira ticket change whenever a webhook delivery updates a ticket."
+  jiraTicketChanged: JiraTicketChange!
 }

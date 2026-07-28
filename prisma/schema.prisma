@@ -1958,12 +1958,30 @@ model AgentAuditEvent {
 }
 
 model JiraSettings {
-  id              String   @id
-  siteUrl         String?
-  email           String?
-  cacheTtlSeconds Int      @default(300)
-  createdAt       DateTime @default(now())
-  updatedAt       DateTime @updatedAt
+  id                  String    @id
+  siteUrl             String?
+  email               String?
+  cacheTtlSeconds     Int       @default(300)
+  webhookEnabled      Boolean   @default(false)
+  webhookConfiguredAt DateTime?
+  createdAt           DateTime  @default(now())
+  updatedAt           DateTime  @updatedAt
+}
+
+model JiraWebhookDelivery {
+  deliveryId  String    @id
+  event       String
+  issueKey    String?
+  projectKey  String?
+  retryCount  Int?
+  outcome     String
+  error       String?
+  receivedAt  DateTime  @default(now())
+  processedAt DateTime?
+
+  @@index([receivedAt])
+  @@index([event, receivedAt])
+  @@index([outcome, receivedAt])
 }
 
 model JiraProject {

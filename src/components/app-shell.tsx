@@ -63,6 +63,7 @@ function useNavigationFeatures(): NavigationFeatures {
   const [features, setFeatures] = useState<NavigationFeatures>({
     actionsCache: false,
     webhooks: false,
+    jiraWebhooks: false,
   });
 
   useEffect(() => {
@@ -70,21 +71,28 @@ function useNavigationFeatures(): NavigationFeatures {
     void controlPlaneRequest<{
       cacheServerSettings: { configured: boolean };
       githubWebhooksEnabled: boolean;
+      jiraWebhooksEnabled: boolean;
     }>(`query NavigationFeatures {
       cacheServerSettings { configured }
       githubWebhooksEnabled
+      jiraWebhooksEnabled
     }`)
       .then((data) => {
         if (!cancelled) {
           setFeatures({
             actionsCache: data.cacheServerSettings.configured,
             webhooks: data.githubWebhooksEnabled,
+            jiraWebhooks: data.jiraWebhooksEnabled,
           });
         }
       })
       .catch(() => {
         if (!cancelled) {
-          setFeatures({ actionsCache: false, webhooks: false });
+          setFeatures({
+            actionsCache: false,
+            webhooks: false,
+            jiraWebhooks: false,
+          });
         }
       });
     return () => {

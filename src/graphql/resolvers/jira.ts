@@ -1,5 +1,9 @@
 import type { GraphQLContext } from "@/services/graphql-server/graphql-server.service";
-import type { JiraService } from "@/services/jira";
+import type { JiraService, JiraWebhookService } from "@/services/jira";
+import {
+  subscribeJiraTicketChanges,
+  subscribeJiraWebhookDeliveries,
+} from "@/services/jira";
 import type {
   JiraSourceKind,
   JiraTextInput,
@@ -15,11 +19,38 @@ function requireControlPlane(context: GraphQLContext): void {
   }
 }
 
-export const createJiraResolvers = (jiraService: JiraService) => ({
+export const createJiraResolvers = (
+  jiraService: JiraService,
+  jiraWebhookService: JiraWebhookService,
+) => ({
   Query: {
     jiraSettings: (_root: unknown, _args: unknown, context: GraphQLContext) => {
       requireControlPlane(context);
       return jiraService.getSettings();
+    },
+    jiraWebhookSettings: (
+      _root: unknown,
+      _args: unknown,
+      context: GraphQLContext,
+    ) => {
+      requireControlPlane(context);
+      return jiraWebhookService.getWebhookSettings();
+    },
+    jiraWebhooksEnabled: (
+      _root: unknown,
+      _args: unknown,
+      context: GraphQLContext,
+    ) => {
+      requireControlPlane(context);
+      return jiraWebhookService.webhooksEnabled();
+    },
+    jiraWebhookDeliveries: (
+      _root: unknown,
+      { limit, offset }: { limit?: number | null; offset?: number | null },
+      context: GraphQLContext,
+    ) => {
+      requireControlPlane(context);
+      return jiraWebhookService.deliveries(limit ?? 50, offset ?? 0);
     },
     jiraAvailableProjects: (
       _root: unknown,
@@ -341,6 +372,52 @@ export const createJiraResolvers = (jiraService: JiraService) => ({
     ) => {
       requireControlPlane(context);
       return jiraService.updateTicket(input);
+    },
+    enableJiraWebhook: (
+      _root: unknown,
+      _args: unknown,
+      context: GraphQLContext,
+    ) => {
+      requireControlPlane(context);
+      return jiraWebhookService.enableWebhook();
+    },
+    rotateJiraWebhookSecret: (
+      _root: unknown,
+      _args: unknown,
+      context: GraphQLContext,
+    ) => {
+      requireControlPlane(context);
+      return jiraWebhookService.rotateSecret();
+    },
+    disableJiraWebhook: (
+      _root: unknown,
+      _args: unknown,
+      context: GraphQLContext,
+    ) => {
+      requireControlPlane(context);
+      return jiraWebhookService.disableWebhook();
+    },
+    clearJiraWebhookDeliveries: (
+      _root: unknown,
+      _args: unknown,
+      context: GraphQLContext,
+    ) => {
+      requireControlPlane(context);
+      return jiraWebhookService.clearDeliveries();
+    },
+  },
+  Subscription: {
+    jiraWebhookDeliveryChanged: {
+      subscribe: (_root: unknown, _args: unknown, context: GraphQLContext) => {
+        requireControlPlane(context);
+        return subscribeJiraWebhookDeliveries();
+      },
+    },
+    jiraTicketChanged: {
+      subscribe: (_root: unknown, _args: unknown, context: GraphQLContext) => {
+        requireControlPlane(context);
+        return subscribeJiraTicketChanges();
+      },
     },
   },
 });

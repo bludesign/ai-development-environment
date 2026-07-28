@@ -83,6 +83,7 @@ export const routes: RouteEntry[] = [
   // Jira
   { name: "jira-tickets", path: "/jira/tickets" },
   { name: "jira-ticket-detail", path: `/jira/tickets/${ids.jira.issueKey}` },
+  { name: "jira-webhooks", path: "/jira-webhooks" },
   { name: "jira-cache", path: "/jira-cache" },
   {
     name: "jira-cache-ticket",

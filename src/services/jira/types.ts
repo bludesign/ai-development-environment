@@ -296,3 +296,43 @@ export type PaginatedResult<T> = {
   limit: number;
   offset: number;
 };
+
+export type JiraWebhookSettingsView = {
+  enabled: boolean;
+  secretConfigured: boolean;
+  configuredAt: string | null;
+  lastReceivedAt: string | null;
+  lastOutcome: string | null;
+  lastError: string | null;
+};
+
+export type JiraWebhookSecretView = {
+  settings: JiraWebhookSettingsView;
+  secret: string;
+};
+
+export type JiraWebhookDeliveryView = {
+  deliveryId: string;
+  event: string;
+  issueKey: string | null;
+  projectKey: string | null;
+  retryCount: number | null;
+  outcome: string;
+  error: string | null;
+  receivedAt: string;
+  processedAt: string | null;
+};
+
+export type JiraWebhookDeliveryPage = {
+  enabled: boolean;
+  items: JiraWebhookDeliveryView[];
+  total: number;
+  limit: number;
+  offset: number;
+};
+
+export type JiraTicketChange = {
+  issueKey: string;
+  projectKey: string | null;
+  event: string;
+};

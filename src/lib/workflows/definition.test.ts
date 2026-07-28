@@ -199,6 +199,37 @@ describe("workflow definition validation", () => {
     );
   });
 
+  test("secures Jira issue commands with an account-ID allow-list", () => {
+    const value = definition([node("notify", "NOTIFICATION_SEND")]);
+    value.triggers[0] = {
+      ...value.triggers[0]!,
+      kind: "JIRA_ISSUE_COMMAND",
+      config: { commandPattern: "/fix" },
+    };
+    // A Jira comment is untrusted input, so the same two guards apply as on
+    // GitHub — only keyed on account ID, since Jira has no stable handle.
+    expect(validateWorkflowDefinition(value).diagnostics).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          code: "ISSUE_COMMAND_ALLOWLIST_REQUIRED",
+          message: expect.stringContaining("Jira account ID"),
+        }),
+        expect.objectContaining({ code: "ISSUE_COMMAND_PATTERN_ANCHORED" }),
+      ]),
+    );
+
+    value.triggers[0]!.config = {
+      allowedAccountIds: ["5b10a2844c20165700ede21g"],
+      commandPattern: "^/fix$",
+    };
+    expect(validateWorkflowDefinition(value).diagnostics).not.toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ code: "ISSUE_COMMAND_ALLOWLIST_REQUIRED" }),
+        expect.objectContaining({ code: "ISSUE_COMMAND_PATTERN_ANCHORED" }),
+      ]),
+    );
+  });
+
   test("validates interpolated session paths and propagates requirements", () => {
     const value = definition([node("notify", "NOTIFICATION_SEND")]);
     value.nodes[0]!.config = {

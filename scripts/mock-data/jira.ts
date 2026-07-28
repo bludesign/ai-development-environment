@@ -137,3 +137,67 @@ export async function seedJira(prisma: PrismaClient): Promise<void> {
     ],
   });
 }
+
+export async function seedJiraWebhooks(prisma: PrismaClient): Promise<void> {
+  await prisma.jiraWebhookDelivery.deleteMany({});
+  await prisma.jiraWebhookDelivery.createMany({
+    data: [
+      {
+        deliveryId: "jira-webhook-delivery-1",
+        event: "jira:issue_updated",
+        issueKey: ISSUE_KEY,
+        projectKey: ids.jira.projectKey,
+        outcome: "PROCESSED",
+        receivedAt: minutesAgo(3),
+        processedAt: minutesAgo(3),
+      },
+      {
+        deliveryId: "jira-webhook-delivery-2",
+        event: "comment_created",
+        issueKey: ISSUE_KEY,
+        projectKey: ids.jira.projectKey,
+        outcome: "PROCESSED",
+        receivedAt: minutesAgo(9),
+        processedAt: minutesAgo(9),
+      },
+      {
+        deliveryId: "jira-webhook-delivery-3",
+        event: "jira:issue_created",
+        issueKey: `${ids.jira.projectKey}-318`,
+        projectKey: ids.jira.projectKey,
+        outcome: "PROCESSED",
+        receivedAt: minutesAgo(26),
+        processedAt: minutesAgo(26),
+      },
+      {
+        deliveryId: "jira-webhook-delivery-4",
+        event: "project_updated",
+        projectKey: ids.jira.projectKey,
+        outcome: "IGNORED",
+        error: "Unhandled Jira event project_updated",
+        receivedAt: minutesAgo(48),
+        processedAt: minutesAgo(48),
+      },
+      {
+        deliveryId: "jira-webhook-delivery-5",
+        event: "worklog_created",
+        issueKey: `${ids.jira.projectKey}-297`,
+        projectKey: ids.jira.projectKey,
+        retryCount: 1,
+        outcome: "ERROR",
+        error: "Jira accepted the update, but refreshed details timed out",
+        receivedAt: hoursAgo(5),
+        processedAt: hoursAgo(5),
+      },
+      {
+        deliveryId: "jira-webhook-delivery-6",
+        event: "sprint_started",
+        issueKey: `${ids.jira.projectKey}-284`,
+        projectKey: ids.jira.projectKey,
+        outcome: "PROCESSED",
+        receivedAt: daysAgo(1),
+        processedAt: daysAgo(1),
+      },
+    ],
+  });
+}

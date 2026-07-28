@@ -1,7 +1,7 @@
 import { describe, expect, test, vi } from "vitest";
 
 import type { GraphQLContext } from "@/services/graphql-server/graphql-server.service";
-import type { JiraService } from "@/services/jira";
+import type { JiraService, JiraWebhookService } from "@/services/jira";
 
 import { createJiraResolvers } from "./jira";
 
@@ -16,7 +16,11 @@ describe("Jira resolvers", () => {
       ticketBoard: vi.fn(),
       clearApiCalls: vi.fn(),
     } as unknown as JiraService;
-    const resolvers = createJiraResolvers(service);
+    const webhooks = {
+      getWebhookSettings: vi.fn(),
+      clearDeliveries: vi.fn(),
+    } as unknown as JiraWebhookService;
+    const resolvers = createJiraResolvers(service, webhooks);
 
     expect(() =>
       resolvers.Query.jiraSettings({}, {}, context("agent-1")),
@@ -31,9 +35,17 @@ describe("Jira resolvers", () => {
     expect(() =>
       resolvers.Mutation.clearJiraApiCalls({}, {}, context("agent-1")),
     ).toThrow("control-plane");
+    expect(() =>
+      resolvers.Query.jiraWebhookSettings({}, {}, context("agent-1")),
+    ).toThrow("control-plane");
+    expect(() =>
+      resolvers.Mutation.clearJiraWebhookDeliveries({}, {}, context("agent-1")),
+    ).toThrow("control-plane");
     expect(service.getSettings).not.toHaveBeenCalled();
     expect(service.ticketBoard).not.toHaveBeenCalled();
     expect(service.clearApiCalls).not.toHaveBeenCalled();
+    expect(webhooks.getWebhookSettings).not.toHaveBeenCalled();
+    expect(webhooks.clearDeliveries).not.toHaveBeenCalled();
   });
 
   test("passes write-only credential input to the server service", async () => {
@@ -47,7 +59,10 @@ describe("Jira resolvers", () => {
     const service = {
       saveSettings: vi.fn().mockResolvedValue(safeSettings),
     } as unknown as JiraService;
-    const mutation = createJiraResolvers(service).Mutation.saveJiraSettings;
+    const mutation = createJiraResolvers(
+      service,
+      {} as unknown as JiraWebhookService,
+    ).Mutation.saveJiraSettings;
     const input = {
       siteUrl: safeSettings.siteUrl,
       email: safeSettings.email,

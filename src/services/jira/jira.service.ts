@@ -533,6 +533,7 @@ export class JiraService {
     const saveMetadata = async (transaction: Prisma.TransactionClient) => {
       if (siteChanged) {
         await transaction.jiraProject.deleteMany();
+        await transaction.jiraWebhookDelivery.deleteMany();
       }
       if (credentialsChanged) {
         await transaction.jiraCacheEntry.deleteMany();
@@ -546,7 +547,9 @@ export class JiraService {
           email,
           cacheTtlSeconds: DEFAULT_TTL_SECONDS,
         },
-        update: { siteUrl, email },
+        update: siteChanged
+          ? { siteUrl, email, webhookEnabled: false, webhookConfiguredAt: null }
+          : { siteUrl, email },
       });
     };
     if (nextToken) {
@@ -558,20 +561,30 @@ export class JiraService {
     } else {
       await prisma.$transaction(saveMetadata);
     }
+    // The webhook secret is registered against the old site's Jira instance, so
+    // it can never verify a delivery from the new one.
+    if (siteChanged) {
+      await this.credentials.delete(CREDENTIALS.jiraWebhookSecret);
+    }
     this.clients = undefined;
     return this.getSettings();
   }
 
   async clearCredentials(): Promise<JiraSettingsView> {
-    await this.credentials.delete(
-      CREDENTIALS.jiraApiToken,
+    await this.credentials.deleteMany(
+      [CREDENTIALS.jiraApiToken, CREDENTIALS.jiraWebhookSecret],
       async (transaction) => {
         await transaction.jiraCacheEntry.deleteMany();
         await transaction.jiraCachedTicket.deleteMany();
+        await transaction.jiraWebhookDelivery.deleteMany();
         await transaction.jiraSettings.upsert({
           where: { id: SETTINGS_ID },
           create: { id: SETTINGS_ID, cacheTtlSeconds: DEFAULT_TTL_SECONDS },
-          update: { email: null },
+          update: {
+            email: null,
+            webhookEnabled: false,
+            webhookConfiguredAt: null,
+          },
         });
       },
     );

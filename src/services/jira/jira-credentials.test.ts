@@ -15,6 +15,7 @@ const transaction = vi.hoisted(() => ({
   jiraProject: { deleteMany: vi.fn(async () => ({ count: 0 })) },
   jiraCacheEntry: { deleteMany: vi.fn(async () => ({ count: 0 })) },
   jiraCachedTicket: { deleteMany: vi.fn(async () => ({ count: 0 })) },
+  jiraWebhookDelivery: { deleteMany: vi.fn(async () => ({ count: 0 })) },
   jiraSettings: {
     upsert: vi.fn(
       async ({
@@ -56,6 +57,7 @@ describe("Jira credential integration", () => {
     getText: ReturnType<typeof vi.fn>;
     setText: ReturnType<typeof vi.fn>;
     delete: ReturnType<typeof vi.fn>;
+    deleteMany: ReturnType<typeof vi.fn>;
   };
 
   beforeEach(() => {
@@ -78,10 +80,19 @@ describe("Jira credential integration", () => {
       delete: vi.fn(
         async (
           _descriptor: unknown,
-          mutation: (value: unknown) => Promise<void>,
+          mutation?: (value: unknown) => Promise<void>,
         ) => {
           token = null;
-          await mutation(transaction);
+          await mutation?.(transaction);
+        },
+      ),
+      deleteMany: vi.fn(
+        async (
+          _descriptors: unknown,
+          mutation?: (value: unknown) => Promise<void>,
+        ) => {
+          token = null;
+          await mutation?.(transaction);
         },
       ),
     };
@@ -111,7 +122,10 @@ describe("Jira credential integration", () => {
     await expect(service.clearCredentials()).resolves.toMatchObject({
       tokenConfigured: false,
     });
-    expect(credentials.delete).toHaveBeenCalledOnce();
+    // Clearing Jira credentials drops the API token and the webhook secret
+    // together, so it goes through deleteMany rather than delete.
+    expect(credentials.deleteMany).toHaveBeenCalledOnce();
+    expect(credentials.delete).not.toHaveBeenCalled();
     expect(token).toBeNull();
     expect(state.settings.email).toBeNull();
   });

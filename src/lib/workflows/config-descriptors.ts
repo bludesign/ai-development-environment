@@ -1270,6 +1270,11 @@ const ALL_TRIGGER_KINDS: WorkflowTriggerKind[] = [
   "JIRA_SOURCE_NEW_TICKET",
   "JIRA_MENTION",
   "JIRA_SPRINT_STARTED",
+  "JIRA_ISSUE_CREATED",
+  "JIRA_ISSUE_DELETED",
+  "JIRA_ISSUE_COMMAND",
+  "JIRA_ATTACHMENT_ADDED",
+  "JIRA_ISSUE_LINKED",
   "RUN_STARTED",
   "RUN_COMPLETED",
   "RUN_QUESTION_NEEDED",
@@ -1362,6 +1367,24 @@ const TRIGGER_CONFIG_DESCRIPTORS: TriggerConfigDescriptors = Object.fromEntries(
             // The matcher compiles this itself, so it has to stay a string: a
             // session binding would arrive as an object. Interpolation keeps it
             // a string, so tokens are still allowed.
+            valueModes: ["literal", "interpolation"],
+          }),
+        ]),
+      ];
+    }
+    if (kind === "JIRA_ISSUE_COMMAND") {
+      return [
+        kind,
+        triggerWithFilters([
+          // Jira identifies commenters by opaque account ID, not a handle, so
+          // the allow-list cannot be a display name.
+          stringList("allowedAccountIds", "Allowed account IDs", {
+            placeholder: "5b10a2844c20165700ede21g",
+            required: true,
+          }),
+          text("commandPattern", "Command pattern (regex)", {
+            placeholder: "^/deploy\\b$",
+            required: true,
             valueModes: ["literal", "interpolation"],
           }),
         ]),
