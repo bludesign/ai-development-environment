@@ -300,10 +300,19 @@ export type PaginatedResult<T> = {
 export type JiraWebhookSettingsView = {
   enabled: boolean;
   secretConfigured: boolean;
+  registered: boolean;
+  registrationId: string | null;
+  registeredUrl: string | null;
+  jql: string | null;
   configuredAt: string | null;
   lastReceivedAt: string | null;
   lastOutcome: string | null;
   lastError: string | null;
+};
+
+export type JiraWebhookRegistrationInput = {
+  url: string;
+  jql?: string | null;
 };
 
 export type JiraWebhookSecretView = {

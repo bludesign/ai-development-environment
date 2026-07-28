@@ -8,6 +8,7 @@ import type {
   JiraSourceKind,
   JiraTextInput,
   JiraTicketAssignmentFilter,
+  JiraWebhookRegistrationInput,
   UpdateJiraTicketInput,
 } from "@/services/jira";
 
@@ -380,6 +381,14 @@ export const createJiraResolvers = (
     ) => {
       requireControlPlane(context);
       return jiraWebhookService.enableWebhook();
+    },
+    registerJiraWebhook: (
+      _root: unknown,
+      { input }: { input: JiraWebhookRegistrationInput },
+      context: GraphQLContext,
+    ) => {
+      requireControlPlane(context);
+      return jiraWebhookService.registerWebhook(input);
     },
     rotateJiraWebhookSecret: (
       _root: unknown,

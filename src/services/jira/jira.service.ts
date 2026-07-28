@@ -1843,6 +1843,64 @@ export class JiraService {
     return this.clients;
   }
 
+  /**
+   * Calls Jira's classic webhook REST API (`/rest/webhooks/1.0/webhook`).
+   *
+   * `jira.js` only wraps the dynamic webhook API (`/rest/api/3/webhook`), which
+   * refuses anything but OAuth 2.0 and expires registrations after 30 days. The
+   * 1.0 API accepts the same basic auth as every other call in this service, so
+   * an API token belonging to a Jira admin is enough to register a webhook.
+   *
+   * Resolves to the parsed JSON body, or null when Jira answers without one
+   * (DELETE returns 204). Errors are sanitized so a token never reaches a log.
+   */
+  async webhookApiRequest<T = unknown>(
+    method: "GET" | "POST" | "PUT" | "DELETE",
+    path: string,
+    body?: unknown,
+  ): Promise<T | null> {
+    const settings = await this.requireCredentials();
+    const authorization = Buffer.from(
+      `${settings.email}:${settings.apiToken}`,
+    ).toString("base64");
+    let response: Response;
+    try {
+      response = await fetch(`${settings.siteUrl}${path}`, {
+        method,
+        headers: {
+          Accept: "application/json",
+          Authorization: `Basic ${authorization}`,
+          "Content-Type": "application/json",
+        },
+        body: body === undefined ? undefined : JSON.stringify(body),
+        signal: AbortSignal.timeout(15_000),
+      });
+    } catch (error) {
+      throw new Error(sanitizeError(error, settings.apiToken));
+    }
+    const payload = await response.text();
+    if (!response.ok) {
+      // 403 here almost always means the token's user is not a Jira admin,
+      // which is the one failure the UI cannot fix on the user's behalf.
+      const detail = payload.trim().slice(0, 300) || response.statusText;
+      throw Object.assign(
+        new Error(
+          sanitizeError(
+            `Jira rejected the webhook request with ${response.status}: ${detail}`,
+            settings.apiToken,
+          ),
+        ),
+        { status: response.status },
+      );
+    }
+    if (!payload.trim()) return null;
+    try {
+      return JSON.parse(payload) as T;
+    } catch {
+      return null;
+    }
+  }
+
   private async currentAccountId(): Promise<string> {
     const result = await this.cachedCall({
       operation: "MYSELF",

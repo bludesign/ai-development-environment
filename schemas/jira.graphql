@@ -692,12 +692,28 @@ input UpdateJiraTicketInput {
   dueDate: String
 }
 
+"Values used to register the Jira webhook over the REST API."
+input RegisterJiraWebhookInput {
+  "The public URL Jira posts deliveries to, ending in the webhook ingress path."
+  url: String!
+  "JQL scoping which issues send deliveries, such as `project in (ABC, XYZ)`. May be null to receive every issue event."
+  jql: String
+}
+
 "Represents the Jira webhook configuration in the GraphQL API."
 type JiraWebhookSettings {
   "Whether the Jira webhook is enabled and has a signing secret."
   enabled: Boolean!
   "Whether a Jira webhook signing secret is stored."
   secretConfigured: Boolean!
+  "Whether this server registered the webhook in Jira over the REST API."
+  registered: Boolean!
+  "Identifier Jira assigned to the registered webhook. May be null when unavailable or not applicable."
+  registrationId: String
+  "The delivery URL the registered webhook posts to. May be null when unavailable or not applicable."
+  registeredUrl: String
+  "The JQL filter the registered webhook is scoped with. May be null when unavailable or not applicable."
+  jql: String
   "ISO 8601 timestamp when the Jira webhook secret was last generated. May be null when unavailable or not applicable."
   configuredAt: String
   "ISO 8601 timestamp when the most recent Jira webhook delivery arrived. May be null when unavailable or not applicable."
@@ -943,6 +959,11 @@ extend type Mutation {
   ): JiraTicketDetail!
   "Generates a Jira webhook signing secret and returns it exactly once."
   enableJiraWebhook: JiraWebhookSecret!
+  "Registers the webhook in Jira over the REST API and returns the signing secret exactly once."
+  registerJiraWebhook(
+    "Values for the requested operation."
+    input: RegisterJiraWebhookInput!
+  ): JiraWebhookSecret!
   "Replaces the Jira webhook signing secret and returns the new one exactly once."
   rotateJiraWebhookSecret: JiraWebhookSecret!
   "Removes the Jira webhook signing secret and returns the updated configuration."

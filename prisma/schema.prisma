@@ -1964,6 +1964,9 @@ model JiraSettings {
   cacheTtlSeconds     Int       @default(300)
   webhookEnabled      Boolean   @default(false)
   webhookConfiguredAt DateTime?
+  webhookId           String?
+  webhookUrl          String?
+  webhookJql          String?
   createdAt           DateTime  @default(now())
   updatedAt           DateTime  @updatedAt
 }

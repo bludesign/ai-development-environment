@@ -8,7 +8,7 @@ vi.mock("@/data/prisma-client", () => ({
   getPrismaClient: mocks.getPrismaClient,
 }));
 
-import { JiraWebhookService } from "./jira-webhook.service";
+import { JIRA_WEBHOOK_PATH, JiraWebhookService } from "./jira-webhook.service";
 
 const SECRET = "jira-webhook-secret";
 
@@ -465,5 +465,197 @@ describe("Jira webhook configuration", () => {
     const service = new JiraWebhookService({} as never, {} as never);
     await expect(service.deliveries(0)).rejects.toThrow("1 to 100");
     await expect(service.deliveries(50, -1)).rejects.toThrow("non-negative");
+  });
+});
+
+describe("Jira webhook registration", () => {
+  let settingsRow: Record<string, unknown>;
+  let upsert: ReturnType<typeof vi.fn>;
+  let credentials: {
+    isConfigured: ReturnType<typeof vi.fn>;
+    setText: ReturnType<typeof vi.fn>;
+    delete: ReturnType<typeof vi.fn>;
+  };
+  let jira: { webhookApiRequest: ReturnType<typeof vi.fn> };
+
+  beforeEach(() => {
+    settingsRow = {
+      webhookEnabled: false,
+      webhookConfiguredAt: null,
+      webhookId: null,
+      webhookUrl: null,
+      webhookJql: null,
+    };
+    upsert = vi.fn(async ({ update }: { update: Record<string, unknown> }) => {
+      Object.assign(settingsRow, update);
+      return settingsRow;
+    });
+    mocks.getPrismaClient.mockResolvedValue({
+      jiraSettings: {
+        findUnique: vi.fn(async () => settingsRow),
+        upsert,
+      },
+      jiraWebhookDelivery: { findFirst: vi.fn(async () => null) },
+    });
+    credentials = {
+      isConfigured: vi.fn(async () => true),
+      setText: vi.fn(
+        async (
+          _descriptor: unknown,
+          _value: string,
+          mutation: (transaction: unknown) => Promise<void>,
+        ) => {
+          await mutation({ jiraSettings: { upsert } });
+        },
+      ),
+      delete: vi.fn(
+        async (
+          _descriptor: unknown,
+          mutation: (transaction: unknown) => Promise<void>,
+        ) => {
+          await mutation({ jiraSettings: { upsert } });
+        },
+      ),
+    };
+    jira = {
+      webhookApiRequest: vi.fn(async () => ({
+        self: "https://team.atlassian.net/rest/webhooks/1.0/webhook/72",
+      })),
+    };
+  });
+
+  const service = () =>
+    new JiraWebhookService(jira as never, credentials as never);
+
+  test("creates the webhook in Jira and stores the matching secret", async () => {
+    const result = await service().registerWebhook({
+      url: "https://aide.example.com",
+      jql: "project in (AIDE)",
+    });
+
+    expect(jira.webhookApiRequest).toHaveBeenCalledWith(
+      "POST",
+      "/rest/webhooks/1.0/webhook",
+      expect.objectContaining({
+        url: "https://aide.example.com/api/public/jira/webhook",
+        // Jira keeps the old secret when a request omits it, and the delivery
+        // handler needs the body, so both have to be sent every time.
+        secret: result.secret,
+        excludeBody: false,
+        filters: { "issue-related-events-section": "project in (AIDE)" },
+      }),
+    );
+    expect(settingsRow).toMatchObject({
+      webhookEnabled: true,
+      webhookId: "72",
+      webhookUrl: "https://aide.example.com/api/public/jira/webhook",
+      webhookJql: "project in (AIDE)",
+    });
+    expect(result.settings).toMatchObject({
+      registered: true,
+      registrationId: "72",
+    });
+  });
+
+  test("updates the existing registration instead of creating a second one", async () => {
+    settingsRow.webhookId = "72";
+    jira.webhookApiRequest.mockResolvedValue(null);
+
+    await service().registerWebhook({ url: "https://aide.example.com" });
+
+    expect(jira.webhookApiRequest).toHaveBeenCalledWith(
+      "PUT",
+      "/rest/webhooks/1.0/webhook/72",
+      expect.not.objectContaining({ filters: expect.anything() }),
+    );
+    expect(settingsRow.webhookId).toBe("72");
+  });
+
+  test("recreates a registration Jira no longer knows about", async () => {
+    settingsRow.webhookId = "70";
+    jira.webhookApiRequest
+      .mockRejectedValueOnce(
+        Object.assign(new Error("Jira rejected the webhook request with 404"), {
+          status: 404,
+        }),
+      )
+      .mockResolvedValueOnce({
+        self: "https://team.atlassian.net/rest/webhooks/1.0/webhook/73",
+      });
+
+    await service().registerWebhook({ url: "https://aide.example.com" });
+
+    expect(jira.webhookApiRequest.mock.calls.map(([method]) => method)).toEqual(
+      ["PUT", "POST"],
+    );
+    expect(settingsRow.webhookId).toBe("73");
+  });
+
+  test("keeps the stored configuration when Jira rejects the registration", async () => {
+    jira.webhookApiRequest.mockRejectedValue(
+      Object.assign(
+        new Error("Jira rejected the webhook request with 403: forbidden"),
+        { status: 403 },
+      ),
+    );
+
+    await expect(
+      service().registerWebhook({ url: "https://aide.example.com" }),
+    ).rejects.toThrow("403");
+    expect(credentials.setText).not.toHaveBeenCalled();
+    expect(settingsRow.webhookEnabled).toBe(false);
+  });
+
+  test("rotates the secret in Jira when the webhook is registered", async () => {
+    settingsRow.webhookId = "72";
+    settingsRow.webhookUrl = "https://aide.example.com/api/public/jira/webhook";
+    settingsRow.webhookJql = "project in (AIDE)";
+    jira.webhookApiRequest.mockResolvedValue(null);
+
+    const result = await service().rotateSecret();
+
+    expect(jira.webhookApiRequest).toHaveBeenCalledWith(
+      "PUT",
+      "/rest/webhooks/1.0/webhook/72",
+      expect.objectContaining({ secret: result.secret }),
+    );
+  });
+
+  test("removes the webhook from Jira when disabling", async () => {
+    settingsRow.webhookId = "72";
+    jira.webhookApiRequest.mockResolvedValue(null);
+
+    await service().disableWebhook();
+
+    expect(jira.webhookApiRequest).toHaveBeenCalledWith(
+      "DELETE",
+      "/rest/webhooks/1.0/webhook/72",
+    );
+    expect(settingsRow).toMatchObject({
+      webhookEnabled: false,
+      webhookId: null,
+      webhookUrl: null,
+    });
+  });
+
+  test("treats a webhook already deleted in Jira as disabled", async () => {
+    settingsRow.webhookId = "72";
+    jira.webhookApiRequest.mockRejectedValue(
+      Object.assign(new Error("gone"), { status: 404 }),
+    );
+
+    await expect(service().disableWebhook()).resolves.toMatchObject({
+      registered: false,
+    });
+  });
+
+  test("refuses an address Jira could never deliver to", async () => {
+    await expect(
+      service().registerWebhook({ url: "http://localhost:3000" }),
+    ).rejects.toThrow("cannot reach");
+    await expect(
+      service().registerWebhook({ url: "https://aide.example.com/elsewhere" }),
+    ).rejects.toThrow(JIRA_WEBHOOK_PATH);
+    expect(jira.webhookApiRequest).not.toHaveBeenCalled();
   });
 });

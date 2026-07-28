@@ -16,6 +16,7 @@ import type {
   JiraTicketChange,
   JiraWebhookDeliveryPage,
   JiraWebhookDeliveryView,
+  JiraWebhookRegistrationInput,
   JiraWebhookSecretView,
   JiraWebhookSettingsView,
 } from "./types";
@@ -60,6 +61,22 @@ const DIRECT_TRIGGER_KINDS: Record<string, string> = {
 };
 
 export const JIRA_WEBHOOK_PATH = "/api/public/jira/webhook";
+
+/** Jira's classic webhook API. The dynamic one needs an OAuth 2.0 app. */
+const WEBHOOK_API_PATH = "/rest/webhooks/1.0/webhook";
+
+/** The name and description Jira shows in Settings → System → WebHooks. */
+const WEBHOOK_NAME = "AI Development Environment";
+const WEBHOOK_DESCRIPTION =
+  "Registered by AI Development Environment. Drives Jira workflow triggers and live ticket updates.";
+
+const LOOPBACK_HOSTNAMES = new Set([
+  "localhost",
+  "0.0.0.0",
+  "::1",
+  "[::1]",
+  "",
+]);
 
 export const RECOMMENDED_JIRA_WEBHOOK_EVENTS = [
   "jira:issue_created",
@@ -125,6 +142,62 @@ function projectKeyOf(payload: Record<string, unknown>): string | null {
   return text(project?.key)?.toUpperCase() ?? null;
 }
 
+function statusOf(error: unknown): number | null {
+  if (typeof error !== "object" || error === null || !("status" in error)) {
+    return null;
+  }
+  return typeof error.status === "number" ? error.status : null;
+}
+
+/**
+ * Normalizes the address Jira will POST deliveries to. A bare origin gets the
+ * ingress path appended; anything else has to already end in it, so a stray
+ * value can never point Jira at an unrelated endpoint.
+ */
+export function normalizeJiraDeliveryUrl(value: string): string {
+  let url: URL;
+  try {
+    url = new URL(value.trim());
+  } catch {
+    throw new Error("Enter the public URL of this server");
+  }
+  if (url.protocol !== "https:" && url.protocol !== "http:") {
+    throw new Error("The webhook URL must use HTTP or HTTPS");
+  }
+  if (url.username || url.password || url.search || url.hash) {
+    throw new Error(
+      "The webhook URL must not include credentials, query, or fragment",
+    );
+  }
+  const host = url.hostname.toLowerCase().replace(/^\[|\]$/g, "");
+  const loopback =
+    LOOPBACK_HOSTNAMES.has(host) ||
+    host.endsWith(".local") ||
+    host.endsWith(".localhost") ||
+    /^127\./.test(host) ||
+    /^10\./.test(host) ||
+    /^192\.168\./.test(host) ||
+    /^172\.(1[6-9]|2\d|3[01])\./.test(host);
+  if (loopback) {
+    // Jira accepts a private address at registration time and then fails every
+    // delivery, so catching it here is the only way the user learns about it.
+    throw new Error(
+      `Jira cannot reach ${url.host}. Expose this server publicly, or set PUBLIC_BASE_URL to its public address.`,
+    );
+  }
+  const path = url.pathname.replace(/\/+$/, "");
+  if (!path) return `${url.origin}${JIRA_WEBHOOK_PATH}`;
+  if (path.endsWith(JIRA_WEBHOOK_PATH)) return `${url.origin}${path}`;
+  throw new Error(`The webhook URL must end with ${JIRA_WEBHOOK_PATH}`);
+}
+
+/** Jira reports the new webhook only through the `self` link it returns. */
+function webhookIdOf(self: unknown): string | null {
+  const value = text(self);
+  const id = value?.match(/\/webhook\/([^/]+)\/?$/)?.[1];
+  return id ? decodeURIComponent(id) : null;
+}
+
 function person(value: unknown): {
   accountId: string | null;
   displayName: string | null;
@@ -174,6 +247,10 @@ export class JiraWebhookService {
     return {
       enabled: settings.webhookEnabled && secretConfigured,
       secretConfigured,
+      registered: Boolean(settings.webhookId),
+      registrationId: settings.webhookId ?? null,
+      registeredUrl: settings.webhookUrl ?? null,
+      jql: settings.webhookJql ?? null,
       configuredAt: settings.webhookConfiguredAt?.toISOString() ?? null,
       lastReceivedAt: latest?.receivedAt.toISOString() ?? null,
       lastOutcome: latest?.outcome ?? null,
@@ -182,10 +259,10 @@ export class JiraWebhookService {
   }
 
   /**
-   * Jira Cloud cannot be configured remotely with an API token — the dynamic
-   * webhook REST API needs an OAuth 2.0 or Connect app. So this only mints the
-   * shared secret; the user pastes it, and the URL, into Jira's admin UI. The
-   * plaintext secret is returned exactly once and never stored in readable form.
+   * Mints the shared secret without touching Jira, for sites where the API
+   * token's user is not a Jira admin: the user pastes the secret, and the URL,
+   * into Jira's admin UI themselves. The plaintext secret is returned exactly
+   * once and never stored in readable form.
    */
   async enableWebhook(): Promise<JiraWebhookSecretView> {
     const secret = randomBytes(32).toString("base64url");
@@ -207,25 +284,165 @@ export class JiraWebhookService {
     return { settings: await this.getWebhookSettings(), secret };
   }
 
+  /**
+   * Creates the webhook in Jira and stores the matching secret, so the user
+   * never has to open Jira's admin UI. Registering again reuses the stored
+   * webhook, which is how the URL and the JQL filter get edited later.
+   *
+   * Jira is written first: a failure there leaves the previous configuration
+   * untouched rather than storing a secret Jira does not know about.
+   */
+  async registerWebhook(
+    input: JiraWebhookRegistrationInput,
+  ): Promise<JiraWebhookSecretView> {
+    const url = normalizeJiraDeliveryUrl(input.url);
+    const jql = input.jql?.trim() || null;
+    const secret = randomBytes(32).toString("base64url");
+    const prisma = await getPrismaClient();
+    const existing = await prisma.jiraSettings.findUnique({
+      where: { id: SETTINGS_ID },
+      select: { webhookId: true },
+    });
+
+    const webhookId = await this.writeToJira({
+      webhookId: existing?.webhookId ?? null,
+      url,
+      jql,
+      secret,
+    });
+
+    await this.credentials.setText(
+      CREDENTIALS.jiraWebhookSecret,
+      secret,
+      async (transaction) => {
+        await transaction.jiraSettings.upsert({
+          where: { id: SETTINGS_ID },
+          create: {
+            id: SETTINGS_ID,
+            webhookEnabled: true,
+            webhookConfiguredAt: new Date(),
+            webhookId,
+            webhookUrl: url,
+            webhookJql: jql,
+          },
+          update: {
+            webhookEnabled: true,
+            webhookConfiguredAt: new Date(),
+            webhookId,
+            webhookUrl: url,
+            webhookJql: jql,
+          },
+        });
+      },
+    );
+    return { settings: await this.getWebhookSettings(), secret };
+  }
+
   async rotateSecret(): Promise<JiraWebhookSecretView> {
     if (!(await this.credentials.isConfigured(CREDENTIALS.jiraWebhookSecret))) {
       throw new Error("The Jira webhook is not configured");
+    }
+    const prisma = await getPrismaClient();
+    const settings = await prisma.jiraSettings.findUnique({
+      where: { id: SETTINGS_ID },
+      select: { webhookId: true, webhookUrl: true, webhookJql: true },
+    });
+    // A registered webhook rotates on both sides at once; a hand-made one can
+    // only mint a new secret and wait for the user to paste it into Jira.
+    if (settings?.webhookId && settings.webhookUrl) {
+      return this.registerWebhook({
+        url: settings.webhookUrl,
+        jql: settings.webhookJql,
+      });
     }
     return this.enableWebhook();
   }
 
   async disableWebhook(): Promise<JiraWebhookSettingsView> {
+    const prisma = await getPrismaClient();
+    const settings = await prisma.jiraSettings.findUnique({
+      where: { id: SETTINGS_ID },
+      select: { webhookId: true },
+    });
+    if (settings?.webhookId) {
+      await this.deleteFromJira(settings.webhookId);
+    }
     await this.credentials.delete(
       CREDENTIALS.jiraWebhookSecret,
       async (transaction) => {
         await transaction.jiraSettings.upsert({
           where: { id: SETTINGS_ID },
           create: { id: SETTINGS_ID },
-          update: { webhookEnabled: false, webhookConfiguredAt: null },
+          update: {
+            webhookEnabled: false,
+            webhookConfiguredAt: null,
+            webhookId: null,
+            webhookUrl: null,
+            webhookJql: null,
+          },
         });
       },
     );
     return this.getWebhookSettings();
+  }
+
+  /**
+   * Creates or updates the webhook in Jira and returns its ID. A stored ID that
+   * Jira no longer knows — someone deleted the webhook by hand — falls back to
+   * creating a fresh one instead of failing the whole operation.
+   */
+  private async writeToJira(input: {
+    webhookId: string | null;
+    url: string;
+    jql: string | null;
+    secret: string;
+  }): Promise<string> {
+    const body = {
+      name: WEBHOOK_NAME,
+      description: WEBHOOK_DESCRIPTION,
+      url: input.url,
+      events: [...RECOMMENDED_JIRA_WEBHOOK_EVENTS],
+      // The delivery handler reads the payload, so Jira has to send one.
+      excludeBody: false,
+      // Omitting `secret` on a PUT keeps the old one, so rotation always sends it.
+      secret: input.secret,
+      ...(input.jql
+        ? { filters: { "issue-related-events-section": input.jql } }
+        : {}),
+    };
+
+    if (input.webhookId) {
+      const path = `${WEBHOOK_API_PATH}/${encodeURIComponent(input.webhookId)}`;
+      try {
+        await this.jira.webhookApiRequest("PUT", path, body);
+        return input.webhookId;
+      } catch (error) {
+        if (statusOf(error) !== 404) throw error;
+      }
+    }
+
+    const created = await this.jira.webhookApiRequest<{ self?: string }>(
+      "POST",
+      WEBHOOK_API_PATH,
+      body,
+    );
+    const webhookId = webhookIdOf(created?.self);
+    if (!webhookId) {
+      throw new Error("Jira did not return the ID of the new webhook");
+    }
+    return webhookId;
+  }
+
+  /** Removes the webhook from Jira, treating an already-gone one as success. */
+  private async deleteFromJira(webhookId: string): Promise<void> {
+    try {
+      await this.jira.webhookApiRequest(
+        "DELETE",
+        `${WEBHOOK_API_PATH}/${encodeURIComponent(webhookId)}`,
+      );
+    } catch (error) {
+      if (statusOf(error) !== 404) throw error;
+    }
   }
 
   // ---------------------------------------------------------------------
