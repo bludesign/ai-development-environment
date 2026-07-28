@@ -192,6 +192,8 @@
     "description": "Descripción",
     "overlapPolicy": "Política de solapamiento",
     "maxConcurrentRuns": "Máximo de ejecuciones simultáneas",
+    "completionNotifications": "Notificar cuando este flujo de trabajo finalice correctamente",
+    "completionNotificationsHelp": "Desactiva esta opción para omitir las notificaciones de finalización correcta. Las notificaciones de errores y de atención permanecen activadas.",
     "connectorLayout": "Conectores de los pasos",
     "connectorLayouts": {
       "SIDES": "En los lados",

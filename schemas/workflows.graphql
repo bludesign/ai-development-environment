@@ -64,6 +64,8 @@ type Workflow {
   overlapPolicy: WorkflowOverlapPolicy!
   "The max concurrent runs associated with this workflow."
   maxConcurrentRuns: Int!
+  "Whether successful workflow runs create completion notifications."
+  completionNotificationsEnabled: Boolean!
   "The quick action kind associated with this workflow."
   quickActionKind: WorkflowQuickActionKind!
   "The quick action icon key associated with this workflow."
@@ -531,6 +533,8 @@ input CreateWorkflowInput {
   overlapPolicy: WorkflowOverlapPolicy = QUEUE
   "The max concurrent runs to use for the request."
   maxConcurrentRuns: Int = 1
+  "Whether successful workflow runs create completion notifications."
+  completionNotificationsEnabled: Boolean = true
 }
 
 "Values used to save a workflow draft."
@@ -543,6 +547,8 @@ input SaveWorkflowDraftInput {
   overlapPolicy: WorkflowOverlapPolicy
   "The max concurrent runs to use for the request."
   maxConcurrentRuns: Int
+  "Whether successful workflow runs create completion notifications."
+  completionNotificationsEnabled: Boolean
 }
 
 "Values used to trigger a workflow."

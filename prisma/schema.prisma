@@ -2367,26 +2367,27 @@ model GitHubRepository {
 }
 
 model Workflow {
-  id                       String                          @id
-  name                     String
-  description              String                          @default("")
-  draftDefinitionJson      String
-  draftSchemaVersion       Int                             @default(1)
-  activeVersionId          String?                         @unique
-  enabled                  Boolean                         @default(false)
-  overlapPolicy            String                          @default("QUEUE")
-  maxConcurrentRuns        Int                             @default(1)
-  quickActionKind          String                          @default("NONE")
-  quickActionIconKey       String                          @default("play")
-  quickActionButtonVariant String                          @default("default")
-  archivedAt               DateTime?
-  createdAt                DateTime                        @default(now())
-  updatedAt                DateTime                        @updatedAt
-  versions                 WorkflowVersion[]               @relation("WorkflowVersions")
-  activeVersion            WorkflowVersion?                @relation("ActiveWorkflowVersion", fields: [activeVersionId], references: [id], onDelete: SetNull)
-  runs                     WorkflowRun[]
-  quickActionRepositories  WorkflowQuickActionRepository[]
-  conflictAutoSyncRules    WorktreeAutoSync[]
+  id                             String                          @id
+  name                           String
+  description                    String                          @default("")
+  draftDefinitionJson            String
+  draftSchemaVersion             Int                             @default(1)
+  activeVersionId                String?                         @unique
+  enabled                        Boolean                         @default(false)
+  overlapPolicy                  String                          @default("QUEUE")
+  maxConcurrentRuns              Int                             @default(1)
+  completionNotificationsEnabled Boolean                         @default(true)
+  quickActionKind                String                          @default("NONE")
+  quickActionIconKey             String                          @default("play")
+  quickActionButtonVariant       String                          @default("default")
+  archivedAt                     DateTime?
+  createdAt                      DateTime                        @default(now())
+  updatedAt                      DateTime                        @updatedAt
+  versions                       WorkflowVersion[]               @relation("WorkflowVersions")
+  activeVersion                  WorkflowVersion?                @relation("ActiveWorkflowVersion", fields: [activeVersionId], references: [id], onDelete: SetNull)
+  runs                           WorkflowRun[]
+  quickActionRepositories        WorkflowQuickActionRepository[]
+  conflictAutoSyncRules          WorktreeAutoSync[]
 
   @@index([archivedAt, updatedAt])
   @@index([enabled, activeVersionId])

@@ -52,6 +52,61 @@ vi.mock("@/data/prisma-client", () => ({
   getPrismaClient: async () => prisma,
 }));
 
+describe("workflow completion notifications", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    prisma.$transaction.mockImplementation(
+      async (operation: (transaction: typeof prisma) => unknown) =>
+        operation(prisma),
+    );
+  });
+
+  test("suppresses successful completion notifications without hiding failures", async () => {
+    prisma.workflowRun.findUnique.mockResolvedValue({
+      sessionDataJson: "{}",
+      workflow: { completionNotificationsEnabled: false },
+    });
+    const notification = { id: "notification-1" };
+    const recordInTransaction = vi.fn().mockResolvedValue(notification);
+    const created = vi.fn();
+    const service = new WorkflowsService(
+      new WorkflowEventsService(),
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      { recordInTransaction, created } as never,
+    ) as unknown as {
+      notifyRun(
+        runId: string,
+        typeKey: "WORKFLOW_COMPLETED" | "WORKFLOW_FAILED",
+        title: string,
+        body: string,
+        dedupeSuffix: string,
+      ): Promise<void>;
+    };
+
+    await service.notifyRun(
+      "run-1",
+      "WORKFLOW_COMPLETED",
+      "Workflow completed",
+      "Done",
+      "succeeded",
+    );
+    expect(recordInTransaction).not.toHaveBeenCalled();
+
+    await service.notifyRun(
+      "run-1",
+      "WORKFLOW_FAILED",
+      "Workflow failed",
+      "Failed",
+      "failed",
+    );
+    expect(recordInTransaction).toHaveBeenCalledOnce();
+    expect(created).toHaveBeenCalledWith(notification);
+  });
+});
+
 function subworkflowDefinition(
   name: string,
   versionId: string,

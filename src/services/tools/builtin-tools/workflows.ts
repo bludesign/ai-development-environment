@@ -137,6 +137,7 @@ const WorkflowSchema = z.object({
   enabled: z.boolean(),
   overlapPolicy: z.string(),
   maxConcurrentRuns: z.number(),
+  completionNotificationsEnabled: z.boolean(),
   activeVersionId: z.string().nullable(),
   draftSchemaVersion: z.number(),
   quickActionKind: z.enum([
@@ -630,6 +631,12 @@ export function createWorkflowToolGroup(workflows: Service): BuiltInToolGroup {
               "What happens when a run starts while one is in flight. Defaults to QUEUE.",
             ),
           maxConcurrentRuns: z.number().int().min(1).optional(),
+          completionNotificationsEnabled: z
+            .boolean()
+            .optional()
+            .describe(
+              "Whether successful runs create completion notifications. Defaults to true.",
+            ),
         }),
         outputSchema: z.object({
           workflow: WorkflowSchema,
@@ -651,7 +658,7 @@ export function createWorkflowToolGroup(workflows: Service): BuiltInToolGroup {
         name: "update_workflow_settings",
         title: "Update workflow settings",
         description:
-          "Change a workflow's name, description, or concurrency. Name and description live inside the definition, so this rewrites the draft.",
+          "Change a workflow's name, description, concurrency, or successful-run completion notifications. Name and description live inside the definition, so this rewrites the draft.",
         inputSchema: z.object({
           workflowId: z.string().min(1),
           name: z.string().min(1).max(200).optional(),
@@ -660,6 +667,12 @@ export function createWorkflowToolGroup(workflows: Service): BuiltInToolGroup {
             .enum(["QUEUE", "CONCURRENT", "COALESCE_LATEST"])
             .optional(),
           maxConcurrentRuns: z.number().int().min(1).optional(),
+          completionNotificationsEnabled: z
+            .boolean()
+            .optional()
+            .describe(
+              "Set false to suppress successful-run completion notifications for this workflow. Failure and attention notifications remain enabled.",
+            ),
         }),
         outputSchema: DefinitionResultSchema,
         annotations: WRITE_ANNOTATIONS,
@@ -675,6 +688,8 @@ export function createWorkflowToolGroup(workflows: Service): BuiltInToolGroup {
             definition: next,
             overlapPolicy: input.overlapPolicy ?? null,
             maxConcurrentRuns: input.maxConcurrentRuns ?? null,
+            completionNotificationsEnabled:
+              input.completionNotificationsEnabled ?? null,
           });
           return saveDraft(workflows, input.workflowId, next);
         },

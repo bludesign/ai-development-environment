@@ -148,6 +148,8 @@ export function workflowView(value: Record<string, unknown>) {
     enabled: value.enabled === true,
     overlapPolicy: String(value.overlapPolicy),
     maxConcurrentRuns: Number(value.maxConcurrentRuns),
+    completionNotificationsEnabled:
+      value.completionNotificationsEnabled !== false,
     activeVersionId:
       typeof value.activeVersionId === "string" ? value.activeVersionId : null,
     draftSchemaVersion: Number(value.draftSchemaVersion),

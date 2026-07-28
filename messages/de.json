@@ -192,6 +192,8 @@
     "description": "Beschreibung",
     "overlapPolicy": "Überlappungsregel",
     "maxConcurrentRuns": "Maximale parallele Läufe",
+    "completionNotifications": "Benachrichtigen, wenn dieser Workflow erfolgreich abgeschlossen wird",
+    "completionNotificationsHelp": "Deaktivieren Sie diese Option, um Benachrichtigungen über erfolgreiche Abschlüsse zu unterdrücken. Fehler- und Aufmerksamkeitsbenachrichtigungen bleiben aktiviert.",
     "connectorLayout": "Schrittverbindungen",
     "connectorLayouts": {
       "SIDES": "An den Seiten",

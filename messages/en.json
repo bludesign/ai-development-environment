@@ -192,6 +192,8 @@
     "description": "Description",
     "overlapPolicy": "Overlap policy",
     "maxConcurrentRuns": "Maximum concurrent runs",
+    "completionNotifications": "Notify when this workflow completes successfully",
+    "completionNotificationsHelp": "Turn this off to suppress successful-run completion notifications. Failure and attention notifications remain enabled.",
     "connectorLayout": "Step connectors",
     "connectorLayouts": {
       "SIDES": "On the sides",

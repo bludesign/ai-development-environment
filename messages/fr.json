@@ -192,6 +192,8 @@
     "description": "Description",
     "overlapPolicy": "Politique de chevauchement",
     "maxConcurrentRuns": "Exécutions simultanées maximales",
+    "completionNotifications": "Notifier lorsque ce workflow se termine avec succès",
+    "completionNotificationsHelp": "Désactivez cette option pour supprimer les notifications de réussite. Les notifications d’échec et d’attention restent activées.",
     "connectorLayout": "Connecteurs d'étape",
     "connectorLayouts": {
       "SIDES": "Sur les côtés",
