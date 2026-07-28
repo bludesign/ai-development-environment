@@ -14,6 +14,7 @@ import type { WorkflowEventsService } from "@/services/workflows/workflow-events
 import type { JiraService } from "./jira.service";
 import type {
   JiraTicketChange,
+  JiraWebhookChangelog,
   JiraWebhookDeliveryPage,
   JiraWebhookDeliveryView,
   JiraWebhookRegistrationInput,
@@ -121,6 +122,44 @@ function isUniqueConstraintError(error: unknown): boolean {
 
 function text(value: unknown): string | null {
   return typeof value === "string" && value.trim() ? value.trim() : null;
+}
+
+function scalarText(value: unknown): string | null {
+  if (typeof value === "string") return value.length ? value : null;
+  if (typeof value === "number" || typeof value === "boolean") {
+    return String(value);
+  }
+  return null;
+}
+
+function normalizeChangelog(value: unknown): JiraWebhookChangelog | null {
+  const changelog = record(value);
+  if (!changelog) return null;
+  const rawItems = Array.isArray(changelog.items) ? changelog.items : [];
+  return {
+    id: scalarText(changelog.id),
+    items: rawItems
+      .map(record)
+      .filter((item) => item !== null)
+      .map((item) => ({
+        field: text(item.field) ?? text(item.fieldId) ?? "Field",
+        fieldId: text(item.fieldId),
+        fieldType: text(item.fieldtype) ?? text(item.fieldType),
+        from: scalarText(item.from),
+        fromString: scalarText(item.fromString),
+        to: scalarText(item.to),
+        toString: scalarText(item.toString),
+      })),
+  };
+}
+
+function storedChangelog(value: string | null): JiraWebhookChangelog | null {
+  if (!value) return null;
+  try {
+    return normalizeChangelog(JSON.parse(value));
+  } catch {
+    return null;
+  }
 }
 
 function record(value: unknown): Record<string, unknown> | null {
@@ -531,6 +570,7 @@ export class JiraWebhookService {
           event: "unknown",
           issueKey: null,
           projectKey: null,
+          changelogJson: null,
           retryCount: retries,
           outcome: "RECEIVED",
           error: null,
@@ -573,9 +613,15 @@ export class JiraWebhookService {
       const event = text(payload.webhookEvent);
       const issueKey = issueKeyOf(payload);
       const projectKey = projectKeyOf(payload);
+      const changelog = normalizeChangelog(payload.changelog);
       await prisma.jiraWebhookDelivery.update({
         where: { deliveryId },
-        data: { event: event ?? "unknown", issueKey, projectKey },
+        data: {
+          event: event ?? "unknown",
+          issueKey,
+          projectKey,
+          changelogJson: changelog ? JSON.stringify(changelog) : null,
+        },
       });
 
       if (!event) {
@@ -597,6 +643,8 @@ export class JiraWebhookService {
       // and makes JiraService emit the existing cursor-based JIRA_* triggers.
       if (event === "jira:issue_deleted") {
         await this.jira.deleteCachedTicket(issueKey);
+      } else if (event === "jira:issue_updated") {
+        await this.jira.refreshCachedTicket(issueKey, changelog);
       } else if (ISSUE_MUTATING_EVENTS.has(event)) {
         await this.jira.refreshCachedTicket(issueKey);
       }
@@ -653,6 +701,7 @@ export class JiraWebhookService {
     const attachment = record(payload.attachment);
     const issueLink = record(payload.issueLink);
     const status = record(fields?.status);
+    const changelog = normalizeChangelog(payload.changelog);
 
     const sessionData = {
       ticket: {
@@ -692,6 +741,7 @@ export class JiraWebhookService {
           }
         : null,
       user: person(payload.user),
+      changelog,
     };
 
     const event = await this.workflowEvents.record({
@@ -718,6 +768,7 @@ function deliveryView(delivery: {
   event: string;
   issueKey: string | null;
   projectKey: string | null;
+  changelogJson: string | null;
   retryCount: number | null;
   outcome: string;
   error: string | null;
@@ -729,6 +780,7 @@ function deliveryView(delivery: {
     event: delivery.event,
     issueKey: delivery.issueKey,
     projectKey: delivery.projectKey,
+    changelog: storedChangelog(delivery.changelogJson),
     retryCount: delivery.retryCount,
     outcome: delivery.outcome,
     error: delivery.error,

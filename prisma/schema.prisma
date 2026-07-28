@@ -1972,15 +1972,16 @@ model JiraSettings {
 }
 
 model JiraWebhookDelivery {
-  deliveryId  String    @id
-  event       String
-  issueKey    String?
-  projectKey  String?
-  retryCount  Int?
-  outcome     String
-  error       String?
-  receivedAt  DateTime  @default(now())
-  processedAt DateTime?
+  deliveryId    String    @id
+  event         String
+  issueKey      String?
+  projectKey    String?
+  changelogJson String?
+  retryCount    Int?
+  outcome       String
+  error         String?
+  receivedAt    DateTime  @default(now())
+  processedAt   DateTime?
 
   @@index([receivedAt])
   @@index([event, receivedAt])

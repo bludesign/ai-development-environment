@@ -2019,6 +2019,8 @@
     "issue": "Incidencia",
     "outcome": "Resultado",
     "details": "Detalles",
+    "change": "cambio",
+    "changes": "cambios",
     "retry": "Reintento {count}",
     "processed": "Procesado",
     "showing": "Mostrando {start}–{end} de {total}",

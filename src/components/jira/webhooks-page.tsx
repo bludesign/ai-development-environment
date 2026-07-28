@@ -41,8 +41,8 @@ const PAGE_SIZE = 50;
 const firstColumn = "pl-4";
 const lastColumn = "pr-4";
 
-const DELIVERY_FIELDS =
-  "deliveryId event issueKey projectKey retryCount outcome error receivedAt processedAt";
+const DELIVERY_FIELDS = `deliveryId event issueKey projectKey retryCount outcome error receivedAt processedAt
+   changelog { id items { field fieldId fieldType from fromString to toString } }`;
 
 function humanize(value: string): string {
   return value
@@ -339,6 +339,37 @@ export function JiraWebhooksPage() {
                       <TableCell
                         className={`${lastColumn} align-top whitespace-normal`}
                       >
+                        {delivery.changelog?.items.length ? (
+                          <div className="mb-2 space-y-1.5">
+                            <p className="text-xs font-medium text-muted-foreground">
+                              {delivery.changelog.items.length}{" "}
+                              {t(
+                                delivery.changelog.items.length === 1
+                                  ? "change"
+                                  : "changes",
+                              )}
+                            </p>
+                            <ul className="space-y-1.5">
+                              {delivery.changelog.items.map((item, index) => (
+                                <li
+                                  className="rounded-md border bg-muted/20 px-2 py-1.5 text-xs"
+                                  key={`${item.fieldId ?? item.field}-${index}`}
+                                >
+                                  <p className="font-medium">{item.field}</p>
+                                  <div className="mt-0.5 flex flex-wrap items-center gap-1 text-muted-foreground">
+                                    <span className="break-all">
+                                      {item.fromString ?? item.from ?? "—"}
+                                    </span>
+                                    <span aria-hidden="true">→</span>
+                                    <span className="break-all">
+                                      {item.toString ?? item.to ?? "—"}
+                                    </span>
+                                  </div>
+                                </li>
+                              ))}
+                            </ul>
+                          </div>
+                        ) : null}
                         {delivery.error && (
                           <p className="mb-1 text-destructive">
                             {delivery.error}

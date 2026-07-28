@@ -2019,6 +2019,8 @@
     "issue": "Ticket",
     "outcome": "Résultat",
     "details": "Détails",
+    "change": "modification",
+    "changes": "modifications",
     "retry": "Tentative {count}",
     "processed": "Traité",
     "showing": "Affichage de {start} à {end} sur {total}",

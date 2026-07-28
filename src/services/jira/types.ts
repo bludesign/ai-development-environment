@@ -320,11 +320,27 @@ export type JiraWebhookSecretView = {
   secret: string;
 };
 
+export type JiraWebhookChangeItem = {
+  field: string;
+  fieldId: string | null;
+  fieldType: string | null;
+  from: string | null;
+  fromString: string | null;
+  to: string | null;
+  toString: string | null;
+};
+
+export type JiraWebhookChangelog = {
+  id: string | null;
+  items: JiraWebhookChangeItem[];
+};
+
 export type JiraWebhookDeliveryView = {
   deliveryId: string;
   event: string;
   issueKey: string | null;
   projectKey: string | null;
+  changelog: JiraWebhookChangelog | null;
   retryCount: number | null;
   outcome: string;
   error: string | null;

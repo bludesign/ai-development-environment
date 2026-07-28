@@ -38,6 +38,7 @@ import type {
   JiraBranchTicket,
   JiraTextInput,
   JiraTransition,
+  JiraWebhookChangelog,
   JiraWorklog,
   UpdateJiraTicketInput,
   PaginatedResult,
@@ -431,6 +432,7 @@ export class JiraService {
 
   private async recordTicketWorkflowEvents(
     ticket: JiraTicketDetail,
+    changelog?: JiraWebhookChangelog | null,
   ): Promise<void> {
     if (!this.workflowEvents) return;
     const latestComment = ticket.comments.at(-1) ?? null;
@@ -457,12 +459,13 @@ export class JiraService {
             author: latestComment.author,
           }
         : null,
+      ...(changelog !== undefined ? { changelog } : {}),
     };
     const observedAt = ticket.cache.fetchedAt;
     const currentAccountId = ticket.assigneeAccountId
       ? await this.currentAccountId().catch(() => null)
       : null;
-    const observations: Array<readonly [string, unknown]> = [
+    let observations: Array<readonly [string, unknown]> = [
       ["JIRA_STATUS", ticket.statusId],
       ["JIRA_LABEL", JSON.stringify([...ticket.labels].sort())],
       ["JIRA_MENTION", latestComment?.id ?? "none"],
@@ -473,6 +476,28 @@ export class JiraService {
     ];
     if (currentAccountId && currentAccountId === ticket.assigneeAccountId) {
       observations.push(["JIRA_ASSIGNED_SELF", currentAccountId]);
+    }
+    if (changelog?.items.length) {
+      const changedFields = new Set(
+        changelog.items.flatMap((item) =>
+          [item.fieldId, item.field]
+            .filter((value): value is string => Boolean(value))
+            .map((value) => value.trim().toLowerCase()),
+        ),
+      );
+      const relevantKinds = new Set(["JIRA_TICKET_UPDATED"]);
+      if (changedFields.has("status")) relevantKinds.add("JIRA_STATUS");
+      if (changedFields.has("label") || changedFields.has("labels")) {
+        relevantKinds.add("JIRA_LABEL");
+      }
+      if (changedFields.has("assignee")) {
+        relevantKinds.add("JIRA_ASSIGNED_SELF");
+      }
+      if (changedFields.has("sprint")) {
+        relevantKinds.add("JIRA_SPRINT_STARTED");
+        relevantKinds.add("JIRA_SPRINT_ENDED");
+      }
+      observations = observations.filter(([kind]) => relevantKinds.has(kind));
     }
     await Promise.allSettled(
       observations.map(([kind, cursorValue]) =>
@@ -1000,7 +1025,11 @@ export class JiraService {
     return board;
   }
 
-  async ticket(issueKey: string, force = false): Promise<JiraTicketDetail> {
+  async ticket(
+    issueKey: string,
+    force = false,
+    changelog?: JiraWebhookChangelog | null,
+  ): Promise<JiraTicketDetail> {
     const key = normalizeIssueKey(issueKey);
     const detail = await this.cachedCall<RawIssue>({
       operation: "ISSUE",
@@ -1067,7 +1096,7 @@ export class JiraService {
       cacheMeta(detail),
       combineCacheMeta(commentResults),
     );
-    await this.recordTicketWorkflowEvents(ticket);
+    await this.recordTicketWorkflowEvents(ticket, changelog);
     return ticket;
   }
 
@@ -1661,7 +1690,10 @@ export class JiraService {
     });
   }
 
-  async refreshCachedTicket(issueKey: string): Promise<JiraTicketDetail> {
+  async refreshCachedTicket(
+    issueKey: string,
+    changelog?: JiraWebhookChangelog | null,
+  ): Promise<JiraTicketDetail> {
     const prisma = await getPrismaClient();
     const links = await prisma.jiraCacheEntryIssue.findMany({
       where: { issueKey },
@@ -1672,7 +1704,7 @@ export class JiraService {
         where: { id: { in: links.map((link) => link.cacheEntryId) } },
       });
     }
-    return this.ticket(issueKey, true);
+    return this.ticket(issueKey, true, changelog);
   }
 
   async listCachedTickets(

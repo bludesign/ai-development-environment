@@ -601,6 +601,14 @@ describe("workflow catalog", () => {
     }
   });
 
+  test("Jira ticket updates advertise their webhook changelog", () => {
+    expect(
+      WORKFLOW_TRIGGER_CATALOG.find(
+        ({ kind }) => kind === "JIRA_TICKET_UPDATED",
+      )?.seedPaths,
+    ).toContain("changelog.*");
+  });
+
   test("worktree-producing steps advertise their refreshed resource context", () => {
     for (const kind of [
       "WORKTREE_CREATE",

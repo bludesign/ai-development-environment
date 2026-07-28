@@ -193,4 +193,41 @@ describe("Jira workflow events", () => {
       "Sprint 0",
     ]);
   });
+
+  test("uses webhook changelog fields to emit only relevant workflow events", async () => {
+    const record = vi.fn().mockResolvedValue({});
+    const service = new JiraService(undefined, { record } as never);
+    const runtime = service as unknown as Record<string, unknown>;
+    runtime.currentAccountId = vi.fn().mockResolvedValue("me");
+    const recordTicketWorkflowEvents = runtime.recordTicketWorkflowEvents as (
+      value: unknown,
+      changelog: unknown,
+    ) => Promise<void>;
+    const changelog = {
+      id: "10124",
+      items: [
+        {
+          field: "status",
+          fieldId: "status",
+          fieldType: "jira",
+          from: "10000",
+          fromString: "To Do",
+          to: "3",
+          toString: "In Progress",
+        },
+      ],
+    };
+
+    await recordTicketWorkflowEvents.call(service, ticket("me"), changelog);
+
+    expect(record.mock.calls.map(([input]) => input.kind).sort()).toEqual([
+      "JIRA_STATUS",
+      "JIRA_TICKET_UPDATED",
+    ]);
+    const updated = record.mock.calls.find(
+      ([input]) => input.kind === "JIRA_TICKET_UPDATED",
+    )?.[0];
+    expect(updated.payload.sessionData.changelog).toEqual(changelog);
+    expect(updated.payload.changelog).toEqual(changelog);
+  });
 });

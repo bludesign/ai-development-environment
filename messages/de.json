@@ -2019,6 +2019,8 @@
     "issue": "Vorgang",
     "outcome": "Ergebnis",
     "details": "Details",
+    "change": "Änderung",
+    "changes": "Änderungen",
     "retry": "Wiederholung {count}",
     "processed": "Verarbeitet",
     "showing": "{start}–{end} von {total}",

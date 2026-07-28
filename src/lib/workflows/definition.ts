@@ -1581,8 +1581,8 @@ const WORKTREE_SEED_PATHS = [
   "pr.*",
 ];
 
-/** Jira observations include the latest comment when one exists. */
-const JIRA_SEED_PATHS = ["ticket.*", "comment.*"];
+/** Jira observations include the latest comment and webhook changelog. */
+const JIRA_SEED_PATHS = ["ticket.*", "comment.*", "changelog.*"];
 
 /** Shared payload for pull-request webhook triggers. */
 const GITHUB_PULL_REQUEST_SEED_PATHS = [

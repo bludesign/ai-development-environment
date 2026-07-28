@@ -732,6 +732,32 @@ type JiraWebhookSecret {
   secret: String!
 }
 
+"A field change included in a Jira webhook delivery."
+type JiraWebhookChangeItem {
+  "The display name of the changed field."
+  field: String!
+  "The stable Jira field identifier, when Jira supplies one."
+  fieldId: String
+  "The Jira field type, when Jira supplies one."
+  fieldType: String
+  "The raw value before the change."
+  from: String
+  "The human-readable value before the change."
+  fromString: String
+  "The raw value after the change."
+  to: String
+  "The human-readable value after the change."
+  toString: String
+}
+
+"The changelog included in a Jira webhook delivery."
+type JiraWebhookChangelog {
+  "Jira's identifier for this changelog entry, when supplied."
+  id: ID
+  "The fields changed by this update."
+  items: [JiraWebhookChangeItem!]!
+}
+
 "Represents a Jira webhook delivery in the GraphQL API."
 type JiraWebhookDelivery {
   "Identifier of the related delivery."
@@ -742,6 +768,8 @@ type JiraWebhookDelivery {
   issueKey: String
   "The project key associated with this delivery. May be null when unavailable or not applicable."
   projectKey: String
+  "The field changes included with this delivery, when Jira supplied a changelog."
+  changelog: JiraWebhookChangelog
   "How many times Jira has retried this delivery. May be null when unavailable or not applicable."
   retryCount: Int
   "The outcome associated with this Jira webhook delivery."

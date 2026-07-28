@@ -223,6 +223,10 @@ export const SESSION_NAMESPACE_FIELDS: Record<string, NamespaceField[]> = {
     { name: "sprintNames", description: "Sprints containing the issue" },
     { name: "url", description: "Jira issue URL" },
   ],
+  changelog: [
+    { name: "id", description: "Jira webhook changelog id" },
+    { name: "items", description: "Fields changed in the Jira update" },
+  ],
   pr: [
     { name: "id", description: "Pull request id" },
     { name: "number", description: "Pull request number" },

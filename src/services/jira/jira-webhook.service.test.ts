@@ -17,6 +17,7 @@ type DeliveryRow = {
   event: string;
   issueKey: string | null;
   projectKey: string | null;
+  changelogJson: string | null;
   retryCount: number | null;
   outcome: string;
   error: string | null;
@@ -43,6 +44,20 @@ function issuePayload(overrides: Record<string, unknown> = {}) {
         assignee: { accountId: "account-2", displayName: "Grace" },
         labels: ["urgent"],
       },
+    },
+    changelog: {
+      id: "10124",
+      items: [
+        {
+          field: "status",
+          fieldtype: "jira",
+          fieldId: "status",
+          from: "10000",
+          fromString: "To Do",
+          to: "3",
+          toString: "In Review",
+        },
+      ],
     },
     ...overrides,
   };
@@ -83,6 +98,7 @@ describe("Jira webhook ingestion", () => {
         event: data.event ?? "unknown",
         issueKey: null,
         projectKey: null,
+        changelogJson: null,
         retryCount: data.retryCount ?? null,
         outcome: data.outcome!,
         error: null,
@@ -178,12 +194,41 @@ describe("Jira webhook ingestion", () => {
 
     // The refresh is what makes JiraService emit the pre-existing JIRA_*
     // cursor triggers, so it has to happen for every mutating event.
-    expect(jira.refreshCachedTicket).toHaveBeenCalledWith("AIDE-42");
+    expect(jira.refreshCachedTicket).toHaveBeenCalledWith("AIDE-42", {
+      id: "10124",
+      items: [
+        {
+          field: "status",
+          fieldId: "status",
+          fieldType: "jira",
+          from: "10000",
+          fromString: "To Do",
+          to: "3",
+          toString: "In Review",
+        },
+      ],
+    });
     expect(deliveries.get("delivery-1")).toMatchObject({
       outcome: "PROCESSED",
       event: "jira:issue_updated",
       issueKey: "AIDE-42",
       projectKey: "AIDE",
+    });
+    await expect(service().deliveries()).resolves.toMatchObject({
+      items: [
+        {
+          changelog: {
+            id: "10124",
+            items: [
+              {
+                field: "status",
+                fromString: "To Do",
+                toString: "In Review",
+              },
+            ],
+          },
+        },
+      ],
     });
   });
 

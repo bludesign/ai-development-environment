@@ -34,6 +34,20 @@ const delivery = {
   event: "jira:issue_updated",
   issueKey: "AIDE-42",
   projectKey: "AIDE",
+  changelog: {
+    id: "10124",
+    items: [
+      {
+        field: "status",
+        fieldId: "status",
+        fieldType: "jira",
+        from: "10000",
+        fromString: "To Do",
+        to: "3",
+        toString: "In Review",
+      },
+    ],
+  },
   retryCount: 2,
   outcome: "ERROR",
   error: "Jira webhook payload is invalid JSON",
@@ -74,6 +88,10 @@ describe("JiraWebhooksPage", () => {
     expect(screen.getByText("issue updated")).toBeDefined();
     expect(screen.getByText("AIDE-42")).toBeDefined();
     expect(screen.getByText("AIDE")).toBeDefined();
+    expect(screen.getByText("1 change")).toBeDefined();
+    expect(screen.getByText("status")).toBeDefined();
+    expect(screen.getByText("To Do")).toBeDefined();
+    expect(screen.getByText("In Review")).toBeDefined();
     expect(screen.getByText("Retry 2")).toBeDefined();
     expect(
       screen.getByText("Jira webhook payload is invalid JSON"),
