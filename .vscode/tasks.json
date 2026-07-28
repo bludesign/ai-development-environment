@@ -151,6 +151,13 @@
     },
     {
       "type": "shell",
+      "label": "schema:publish",
+      "group": "build",
+      "command": "npm run schema:publish",
+      "detail": "Generate and publish the GraphQL schema to Apollo GraphOS"
+    },
+    {
+      "type": "shell",
       "label": "check-translations",
       "group": "test",
       "command": "npm run check-translations",
