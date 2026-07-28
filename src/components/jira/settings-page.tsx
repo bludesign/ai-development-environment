@@ -1,7 +1,16 @@
 "use client";
 
-import { CheckCircle2, KeyRound, Save, Trash2, Unplug } from "lucide-react";
-import { useTranslations } from "next-intl";
+import {
+  CheckCircle2,
+  Copy,
+  KeyRound,
+  RefreshCw,
+  Save,
+  Trash2,
+  Unplug,
+  Webhook,
+} from "lucide-react";
+import { useLocale, useTranslations } from "next-intl";
 import { FormEvent, useCallback, useEffect, useState } from "react";
 
 import { ConfirmationDialog } from "@/components/confirmation-dialog";
@@ -13,17 +22,425 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Spinner } from "@/components/ui/spinner";
-import { controlPlaneRequest } from "@/lib/control-plane-client";
-import type { JiraSettingsView } from "@/services/jira/types";
+import { Link } from "@/i18n/navigation";
+import {
+  controlPlaneRequest,
+  controlPlaneSubscriptions,
+} from "@/lib/control-plane-client";
+import { formatDateValue } from "@/lib/date-format";
+import type {
+  JiraSettingsView,
+  JiraWebhookSecretView,
+  JiraWebhookSettingsView,
+} from "@/services/jira/types";
 
 const SETTINGS_FIELDS =
   "siteUrl email tokenConfigured cacheTtlSeconds updatedAt";
+
+const WEBHOOK_FIELDS =
+  "enabled secretConfigured registered registrationId registeredUrl jql configuredAt lastReceivedAt lastOutcome lastError";
+
+const RECOMMENDED_EVENTS = [
+  "jira:issue_created",
+  "jira:issue_updated",
+  "jira:issue_deleted",
+  "comment_created",
+  "worklog_created",
+  "attachment_created",
+  "issuelink_created",
+  "sprint_started",
+  "sprint_closed",
+].join(", ");
 
 type ConnectionResult = {
   accountId: string | null;
   displayName: string;
   emailAddress: string | null;
 };
+
+function CopyField({
+  label,
+  value,
+  copyLabel,
+  copiedLabel,
+  help,
+  mono = false,
+}: {
+  label: string;
+  value: string;
+  copyLabel: string;
+  copiedLabel: string;
+  help: string;
+  mono?: boolean;
+}) {
+  const [copied, setCopied] = useState(false);
+
+  const copy = async () => {
+    try {
+      await navigator.clipboard.writeText(value);
+      setCopied(true);
+      window.setTimeout(() => setCopied(false), 2000);
+    } catch {
+      // Clipboard access can be denied; the value stays selectable either way.
+    }
+  };
+
+  return (
+    <div>
+      <Label className="mb-1.5 block text-sm font-medium">{label}</Label>
+      <div className="flex items-center gap-2">
+        <Input
+          className={mono ? "font-mono text-xs" : undefined}
+          onFocus={(event) => event.target.select()}
+          readOnly
+          value={value}
+        />
+        <Button onClick={() => void copy()} type="button" variant="outline">
+          {copied ? <CheckCircle2 /> : <Copy />}
+          {copied ? copiedLabel : copyLabel}
+        </Button>
+      </div>
+      <p className="mt-1 text-xs text-muted-foreground">{help}</p>
+    </div>
+  );
+}
+
+/**
+ * Registers the webhook in Jira over the classic REST API, which takes the same
+ * API token as every other Jira call, and falls back to minting a bare signing
+ * secret for sites where that token's user is not a Jira admin.
+ */
+function JiraWebhookCard() {
+  const t = useTranslations("jiraSettings");
+  const tc = useTranslations("common");
+  const locale = useLocale();
+  const [webhook, setWebhook] = useState<JiraWebhookSettingsView | null>(null);
+  const [secret, setSecret] = useState<string | null>(null);
+  const [webhookUrl, setWebhookUrl] = useState("");
+  const [jql, setJql] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
+
+  const load = useCallback(async () => {
+    try {
+      const data = await controlPlaneRequest<{
+        jiraWebhookSettings: JiraWebhookSettingsView;
+      }>(`query { jiraWebhookSettings { ${WEBHOOK_FIELDS} } }`);
+      setWebhook(data.jiraWebhookSettings);
+      // Registration owns these values once it succeeds, so the fields follow
+      // what Jira actually has rather than what was last typed.
+      if (data.jiraWebhookSettings.registeredUrl) {
+        setWebhookUrl(data.jiraWebhookSettings.registeredUrl);
+      }
+      setJql(data.jiraWebhookSettings.jql ?? "");
+    } catch (value) {
+      setError(value instanceof Error ? value.message : String(value));
+    }
+  }, []);
+
+  useEffect(() => {
+    const timeout = window.setTimeout(() => {
+      setWebhookUrl(
+        `${window.location.origin.replace(/\/$/, "")}/api/public/jira/webhook`,
+      );
+      void load();
+    }, 0);
+    return () => window.clearTimeout(timeout);
+  }, [load]);
+
+  // Keep the last-delivery line honest while the user is still on the page
+  // wiring the webhook up in Jira.
+  useEffect(() => {
+    const unsubscribe = controlPlaneSubscriptions().subscribe(
+      { query: "subscription { jiraWebhookDeliveryChanged { deliveryId } }" },
+      {
+        next: () => void load(),
+        error: () => undefined,
+        complete: () => undefined,
+      },
+    );
+    return () => unsubscribe();
+  }, [load]);
+
+  const run = async (
+    mutation: string,
+    key:
+      "enableJiraWebhook" | "registerJiraWebhook" | "rotateJiraWebhookSecret",
+    successMessage: string,
+    variables?: Record<string, unknown>,
+  ) => {
+    setBusy(true);
+    try {
+      const data = await controlPlaneRequest<
+        Record<string, JiraWebhookSecretView>
+      >(mutation, variables);
+      const result = data[key]!;
+      setWebhook(result.settings);
+      setSecret(result.secret);
+      setError(null);
+      setNotice(successMessage);
+    } catch (value) {
+      setError(value instanceof Error ? value.message : String(value));
+      setNotice(null);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const disable = async () => {
+    setBusy(true);
+    try {
+      const data = await controlPlaneRequest<{
+        disableJiraWebhook: JiraWebhookSettingsView;
+      }>(`mutation { disableJiraWebhook { ${WEBHOOK_FIELDS} } }`);
+      setWebhook(data.disableJiraWebhook);
+      setSecret(null);
+      setError(null);
+      setNotice(t("webhookDisabled"));
+    } catch (value) {
+      setError(value instanceof Error ? value.message : String(value));
+      setNotice(null);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const configured = webhook?.secretConfigured ?? false;
+  const registered = webhook?.registered ?? false;
+
+  const register = () =>
+    run(
+      `mutation Register($input: RegisterJiraWebhookInput!) { registerJiraWebhook(input: $input) { secret settings { ${WEBHOOK_FIELDS} } } }`,
+      "registerJiraWebhook",
+      registered ? t("webhookReregistered") : t("webhookRegisteredNotice"),
+      { input: { url: webhookUrl, jql: jql.trim() || null } },
+    );
+
+  return (
+    <Card>
+      <CardContent className="space-y-5">
+        <div className="flex items-center justify-between gap-3">
+          <div className="flex items-center gap-2">
+            <Webhook className="size-5" />
+            <h2 className="font-semibold">{t("webhookTitle")}</h2>
+          </div>
+          <Badge
+            className={
+              configured
+                ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300"
+                : undefined
+            }
+          >
+            {registered
+              ? t("webhookRegistered")
+              : configured
+                ? t("webhookConfigured")
+                : t("webhookNotConfigured")}
+          </Badge>
+        </div>
+        <p className="text-sm text-muted-foreground">
+          {t("webhookDescription")}
+        </p>
+
+        {error && (
+          <Alert variant="destructive">
+            <AlertDescription>{error}</AlertDescription>
+          </Alert>
+        )}
+        {notice && (
+          <Alert className="border-emerald-500/30 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300">
+            <CheckCircle2 />
+            <AlertDescription className="text-current">
+              {notice}
+            </AlertDescription>
+          </Alert>
+        )}
+
+        <div>
+          <Label
+            className="mb-1.5 block text-sm font-medium"
+            htmlFor="jira-webhook-url"
+          >
+            {t("webhookUrl")}
+          </Label>
+          <Input
+            disabled={busy}
+            id="jira-webhook-url"
+            onChange={(event) => setWebhookUrl(event.target.value)}
+            value={webhookUrl}
+          />
+          <p className="mt-1 text-xs text-muted-foreground">
+            {t("webhookUrlHelp")}
+          </p>
+        </div>
+
+        <div>
+          <Label
+            className="mb-1.5 block text-sm font-medium"
+            htmlFor="jira-webhook-jql"
+          >
+            {t("webhookJql")}
+          </Label>
+          <Input
+            disabled={busy}
+            id="jira-webhook-jql"
+            onChange={(event) => setJql(event.target.value)}
+            placeholder="project in (ABC, XYZ)"
+            value={jql}
+          />
+          <p className="mt-1 text-xs text-muted-foreground">
+            {t("webhookJqlHelp")}
+          </p>
+        </div>
+
+        {secret && !registered ? (
+          <CopyField
+            copiedLabel={t("copied")}
+            copyLabel={t("copy")}
+            help={t("webhookSecretHelp")}
+            label={t("webhookSecret")}
+            mono
+            value={secret}
+          />
+        ) : (
+          <div>
+            <Label className="mb-1.5 block text-sm font-medium">
+              {t("webhookSecret")}
+            </Label>
+            <p className="text-xs text-muted-foreground">
+              {registered
+                ? t("webhookSecretRegistered")
+                : configured
+                  ? t("webhookSecretHelp")
+                  : t("webhookSecretPending")}
+            </p>
+          </div>
+        )}
+
+        {registered ? (
+          <div className="rounded-md border bg-muted/40 p-3 text-xs text-muted-foreground">
+            <p>
+              {t("webhookRegisteredAs", {
+                id: webhook?.registrationId ?? "—",
+              })}
+            </p>
+            <p className="mt-2">
+              <SettingsHelpLink href="https://developer.atlassian.com/cloud/jira/platform/webhooks/">
+                {t("webhookDocs")}
+              </SettingsHelpLink>
+            </p>
+          </div>
+        ) : (
+          <div className="rounded-md border bg-muted/40 p-3 text-xs">
+            <p className="mb-2 font-medium">{t("setupTitle")}</p>
+            <p className="mb-2 text-muted-foreground">{t("manualIntro")}</p>
+            <ol className="list-decimal space-y-1 pl-4 text-muted-foreground">
+              <li>{t("setupStep1")}</li>
+              <li>{t("setupStep2")}</li>
+              <li>{t("setupStep3", { events: RECOMMENDED_EVENTS })}</li>
+              <li>{t("setupStep4", { jql: "project in (ABC, XYZ)" })}</li>
+            </ol>
+            <p className="mt-2">
+              <SettingsHelpLink href="https://developer.atlassian.com/cloud/jira/platform/webhooks/">
+                {t("webhookDocs")}
+              </SettingsHelpLink>
+            </p>
+          </div>
+        )}
+
+        {webhook?.lastReceivedAt && (
+          <div className="text-xs text-muted-foreground">
+            <p>
+              {t("lastWebhook", {
+                date: formatDateValue(webhook.lastReceivedAt, "short", {
+                  locale,
+                }),
+                outcome: webhook.lastOutcome ?? "—",
+              })}
+            </p>
+            {webhook.lastError && (
+              <p className="mt-1 text-destructive">{webhook.lastError}</p>
+            )}
+          </div>
+        )}
+
+        <div className="flex flex-wrap items-center justify-end gap-2 border-t pt-4">
+          {configured && (
+            <Button asChild className="mr-auto" variant="link">
+              <Link href="/jira-webhooks">{t("viewDeliveries")}</Link>
+            </Button>
+          )}
+          {configured && (
+            <ConfirmationDialog
+              actionLabel={t("disableWebhook")}
+              cancelLabel={tc("cancel")}
+              description={t("confirmDisableDescription")}
+              onConfirm={disable}
+              title={t("confirmDisable")}
+              trigger={
+                <Button disabled={busy} type="button" variant="ghost">
+                  <Trash2 />
+                  {t("disableWebhook")}
+                </Button>
+              }
+            />
+          )}
+          {configured && (
+            <ConfirmationDialog
+              actionLabel={t("rotateWebhook")}
+              cancelLabel={tc("cancel")}
+              description={
+                registered
+                  ? t("confirmRotateRegisteredDescription")
+                  : t("confirmRotateDescription")
+              }
+              onConfirm={() =>
+                run(
+                  `mutation { rotateJiraWebhookSecret { secret settings { ${WEBHOOK_FIELDS} } } }`,
+                  "rotateJiraWebhookSecret",
+                  registered ? t("webhookRotatedInJira") : t("webhookRotated"),
+                )
+              }
+              title={t("confirmRotate")}
+              trigger={
+                <Button disabled={busy} type="button" variant="ghost">
+                  {busy ? <Spinner /> : <RefreshCw />}
+                  {t("rotateWebhook")}
+                </Button>
+              }
+            />
+          )}
+          {!configured && (
+            <Button
+              disabled={busy}
+              onClick={() =>
+                void run(
+                  `mutation { enableJiraWebhook { secret settings { ${WEBHOOK_FIELDS} } } }`,
+                  "enableJiraWebhook",
+                  t("webhookEnabled"),
+                )
+              }
+              type="button"
+              variant="outline"
+            >
+              {busy ? <Spinner /> : <KeyRound />}
+              {t("enableWebhook")}
+            </Button>
+          )}
+          <Button
+            disabled={busy || !webhookUrl.trim()}
+            onClick={() => void register()}
+            type="button"
+          >
+            {busy ? <Spinner /> : <Webhook />}
+            {registered ? t("updateRegistration") : t("registerWebhook")}
+          </Button>
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
 
 export function JiraSettingsPage({
   embedded = false,
@@ -320,6 +737,7 @@ export function JiraSettingsPage({
           </Card>
         </form>
       )}
+      {!loading && settings?.tokenConfigured && <JiraWebhookCard />}
       <ConfirmationDialog
         actionLabel={tc("continue")}
         cancelLabel={tc("cancel")}

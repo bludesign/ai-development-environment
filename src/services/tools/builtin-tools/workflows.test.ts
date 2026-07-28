@@ -244,6 +244,20 @@ describe("discovery tools", () => {
 });
 
 describe("authoring tools", () => {
+  test("updates successful completion notification settings", async () => {
+    const double = registry();
+    await call(double.registry, "update_workflow_settings", {
+      workflowId: "wf-1",
+      completionNotificationsEnabled: false,
+    });
+    expect(double.saveDraft).toHaveBeenCalledWith(
+      expect.objectContaining({
+        id: "wf-1",
+        completionNotificationsEnabled: false,
+      }),
+    );
+  });
+
   test("adding a step saves the draft and reports diagnostics", async () => {
     const { registry: instance, saveDraft } = registry();
     const result = await call(instance, "add_workflow_step", {

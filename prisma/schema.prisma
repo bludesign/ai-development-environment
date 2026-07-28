@@ -1958,12 +1958,34 @@ model AgentAuditEvent {
 }
 
 model JiraSettings {
-  id              String   @id
-  siteUrl         String?
-  email           String?
-  cacheTtlSeconds Int      @default(300)
-  createdAt       DateTime @default(now())
-  updatedAt       DateTime @updatedAt
+  id                  String    @id
+  siteUrl             String?
+  email               String?
+  cacheTtlSeconds     Int       @default(300)
+  webhookEnabled      Boolean   @default(false)
+  webhookConfiguredAt DateTime?
+  webhookId           String?
+  webhookUrl          String?
+  webhookJql          String?
+  createdAt           DateTime  @default(now())
+  updatedAt           DateTime  @updatedAt
+}
+
+model JiraWebhookDelivery {
+  deliveryId    String    @id
+  event         String
+  issueKey      String?
+  projectKey    String?
+  changelogJson String?
+  retryCount    Int?
+  outcome       String
+  error         String?
+  receivedAt    DateTime  @default(now())
+  processedAt   DateTime?
+
+  @@index([receivedAt])
+  @@index([event, receivedAt])
+  @@index([outcome, receivedAt])
 }
 
 model JiraProject {
@@ -2345,26 +2367,27 @@ model GitHubRepository {
 }
 
 model Workflow {
-  id                       String                          @id
-  name                     String
-  description              String                          @default("")
-  draftDefinitionJson      String
-  draftSchemaVersion       Int                             @default(1)
-  activeVersionId          String?                         @unique
-  enabled                  Boolean                         @default(false)
-  overlapPolicy            String                          @default("QUEUE")
-  maxConcurrentRuns        Int                             @default(1)
-  quickActionKind          String                          @default("NONE")
-  quickActionIconKey       String                          @default("play")
-  quickActionButtonVariant String                          @default("default")
-  archivedAt               DateTime?
-  createdAt                DateTime                        @default(now())
-  updatedAt                DateTime                        @updatedAt
-  versions                 WorkflowVersion[]               @relation("WorkflowVersions")
-  activeVersion            WorkflowVersion?                @relation("ActiveWorkflowVersion", fields: [activeVersionId], references: [id], onDelete: SetNull)
-  runs                     WorkflowRun[]
-  quickActionRepositories  WorkflowQuickActionRepository[]
-  conflictAutoSyncRules    WorktreeAutoSync[]
+  id                             String                          @id
+  name                           String
+  description                    String                          @default("")
+  draftDefinitionJson            String
+  draftSchemaVersion             Int                             @default(1)
+  activeVersionId                String?                         @unique
+  enabled                        Boolean                         @default(false)
+  overlapPolicy                  String                          @default("QUEUE")
+  maxConcurrentRuns              Int                             @default(1)
+  completionNotificationsEnabled Boolean                         @default(true)
+  quickActionKind                String                          @default("NONE")
+  quickActionIconKey             String                          @default("play")
+  quickActionButtonVariant       String                          @default("default")
+  archivedAt                     DateTime?
+  createdAt                      DateTime                        @default(now())
+  updatedAt                      DateTime                        @updatedAt
+  versions                       WorkflowVersion[]               @relation("WorkflowVersions")
+  activeVersion                  WorkflowVersion?                @relation("ActiveWorkflowVersion", fields: [activeVersionId], references: [id], onDelete: SetNull)
+  runs                           WorkflowRun[]
+  quickActionRepositories        WorkflowQuickActionRepository[]
+  conflictAutoSyncRules          WorktreeAutoSync[]
 
   @@index([archivedAt, updatedAt])
   @@index([enabled, activeVersionId])

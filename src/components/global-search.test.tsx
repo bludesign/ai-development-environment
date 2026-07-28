@@ -21,7 +21,7 @@ vi.mock("@/lib/control-plane-client", () => ({
 }));
 
 const requestMock = vi.mocked(controlPlaneRequest);
-const features = { actionsCache: false, webhooks: false };
+const features = { actionsCache: false, webhooks: false, jiraWebhooks: false };
 
 vi.stubGlobal(
   "ResizeObserver",
@@ -228,14 +228,19 @@ describe("GlobalSearch", () => {
   });
 
   test("includes gated page destinations only when their features are enabled", async () => {
-    render(<GlobalSearch features={{ actionsCache: true, webhooks: true }} />);
+    render(
+      <GlobalSearch
+        features={{ actionsCache: true, webhooks: true, jiraWebhooks: true }}
+      />,
+    );
     fireEvent.click(screen.getByRole("button", { name: "Open global search" }));
     const input = await screen.findByPlaceholderText(
       "Search pages, tickets, branches, builds…",
     );
 
     fireEvent.change(input, { target: { value: "Webhooks" } });
-    expect(await screen.findByText("Webhooks")).toBeDefined();
+    // GitHub and Jira each contribute a "Webhooks" destination.
+    expect(await screen.findAllByText("Webhooks")).toHaveLength(2);
     fireEvent.change(input, { target: { value: "Actions Cache" } });
     expect(await screen.findByText("Actions Cache")).toBeDefined();
   });

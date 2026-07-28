@@ -123,6 +123,7 @@ export type CreateWorkflowInput = {
   definition?: unknown;
   overlapPolicy?: string | null;
   maxConcurrentRuns?: number | null;
+  completionNotificationsEnabled?: boolean | null;
 };
 
 export type SaveWorkflowDraftInput = {
@@ -130,6 +131,7 @@ export type SaveWorkflowDraftInput = {
   definition: unknown;
   overlapPolicy?: string | null;
   maxConcurrentRuns?: number | null;
+  completionNotificationsEnabled?: boolean | null;
 };
 
 export type TriggerWorkflowInput = {
@@ -508,8 +510,16 @@ export class WorkflowsService {
     const prisma = await getPrismaClient();
     const run = await prisma.workflowRun.findUnique({
       where: { id: runId },
-      select: { sessionDataJson: true },
+      select: {
+        sessionDataJson: true,
+        workflow: { select: { completionNotificationsEnabled: true } },
+      },
     });
+    if (
+      typeKey === "WORKFLOW_COMPLETED" &&
+      run?.workflow.completionNotificationsEnabled === false
+    )
+      return;
     const worktree = run ? await this.runWorktree(run.sessionDataJson) : null;
     const notification = await prisma.$transaction((transaction) =>
       this.notifications!.recordInTransaction(transaction, {
@@ -654,6 +664,8 @@ export class WorkflowsService {
         draftSchemaVersion: WORKFLOW_SCHEMA_VERSION,
         overlapPolicy: policy,
         maxConcurrentRuns: concurrentRuns(input.maxConcurrentRuns, policy),
+        completionNotificationsEnabled:
+          input.completionNotificationsEnabled ?? true,
       },
     });
     publishWorkflowChanged(workflow.id);
@@ -680,6 +692,9 @@ export class WorkflowsService {
           input.maxConcurrentRuns ?? current.maxConcurrentRuns,
           policy,
         ),
+        completionNotificationsEnabled:
+          input.completionNotificationsEnabled ??
+          current.completionNotificationsEnabled,
       },
     });
     publishWorkflowChanged(input.id);
@@ -974,6 +989,7 @@ export class WorkflowsService {
         description: version?.description ?? workflow.description,
         overlapPolicy: workflow.overlapPolicy,
         maxConcurrentRuns: workflow.maxConcurrentRuns,
+        completionNotificationsEnabled: workflow.completionNotificationsEnabled,
         definition: sanitizeWorkflowExportDefinition(definition),
       },
     };
@@ -1012,6 +1028,10 @@ export class WorkflowsService {
         typeof workflow.maxConcurrentRuns === "number"
           ? workflow.maxConcurrentRuns
           : 1,
+      completionNotificationsEnabled:
+        typeof workflow.completionNotificationsEnabled === "boolean"
+          ? workflow.completionNotificationsEnabled
+          : true,
     });
   }
 
@@ -2567,6 +2587,24 @@ export class WorkflowsService {
         ? config.allowedLogins
         : [];
       if (typeof login !== "string" || !allow.includes(login)) return false;
+      if (
+        typeof body !== "string" ||
+        typeof config.commandPattern !== "string" ||
+        !new RegExp(config.commandPattern).test(body)
+      ) {
+        return false;
+      }
+    }
+    if (trigger.kind === "JIRA_ISSUE_COMMAND") {
+      // Jira has no stable handle, so the allow-list is keyed on account ID.
+      const accountId = getSessionValue(payload, "comment.author.accountId");
+      const body = getSessionValue(payload, "comment.body");
+      const allow = Array.isArray(config.allowedAccountIds)
+        ? config.allowedAccountIds
+        : [];
+      if (typeof accountId !== "string" || !allow.includes(accountId)) {
+        return false;
+      }
       if (
         typeof body !== "string" ||
         typeof config.commandPattern !== "string" ||

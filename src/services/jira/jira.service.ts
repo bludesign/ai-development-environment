@@ -38,6 +38,7 @@ import type {
   JiraBranchTicket,
   JiraTextInput,
   JiraTransition,
+  JiraWebhookChangelog,
   JiraWorklog,
   UpdateJiraTicketInput,
   PaginatedResult,
@@ -431,6 +432,7 @@ export class JiraService {
 
   private async recordTicketWorkflowEvents(
     ticket: JiraTicketDetail,
+    changelog?: JiraWebhookChangelog | null,
   ): Promise<void> {
     if (!this.workflowEvents) return;
     const latestComment = ticket.comments.at(-1) ?? null;
@@ -457,12 +459,13 @@ export class JiraService {
             author: latestComment.author,
           }
         : null,
+      ...(changelog !== undefined ? { changelog } : {}),
     };
     const observedAt = ticket.cache.fetchedAt;
     const currentAccountId = ticket.assigneeAccountId
       ? await this.currentAccountId().catch(() => null)
       : null;
-    const observations: Array<readonly [string, unknown]> = [
+    let observations: Array<readonly [string, unknown]> = [
       ["JIRA_STATUS", ticket.statusId],
       ["JIRA_LABEL", JSON.stringify([...ticket.labels].sort())],
       ["JIRA_MENTION", latestComment?.id ?? "none"],
@@ -473,6 +476,28 @@ export class JiraService {
     ];
     if (currentAccountId && currentAccountId === ticket.assigneeAccountId) {
       observations.push(["JIRA_ASSIGNED_SELF", currentAccountId]);
+    }
+    if (changelog?.items.length) {
+      const changedFields = new Set(
+        changelog.items.flatMap((item) =>
+          [item.fieldId, item.field]
+            .filter((value): value is string => Boolean(value))
+            .map((value) => value.trim().toLowerCase()),
+        ),
+      );
+      const relevantKinds = new Set(["JIRA_TICKET_UPDATED"]);
+      if (changedFields.has("status")) relevantKinds.add("JIRA_STATUS");
+      if (changedFields.has("label") || changedFields.has("labels")) {
+        relevantKinds.add("JIRA_LABEL");
+      }
+      if (changedFields.has("assignee")) {
+        relevantKinds.add("JIRA_ASSIGNED_SELF");
+      }
+      if (changedFields.has("sprint")) {
+        relevantKinds.add("JIRA_SPRINT_STARTED");
+        relevantKinds.add("JIRA_SPRINT_ENDED");
+      }
+      observations = observations.filter(([kind]) => relevantKinds.has(kind));
     }
     await Promise.allSettled(
       observations.map(([kind, cursorValue]) =>
@@ -533,6 +558,7 @@ export class JiraService {
     const saveMetadata = async (transaction: Prisma.TransactionClient) => {
       if (siteChanged) {
         await transaction.jiraProject.deleteMany();
+        await transaction.jiraWebhookDelivery.deleteMany();
       }
       if (credentialsChanged) {
         await transaction.jiraCacheEntry.deleteMany();
@@ -546,7 +572,17 @@ export class JiraService {
           email,
           cacheTtlSeconds: DEFAULT_TTL_SECONDS,
         },
-        update: { siteUrl, email },
+        update: siteChanged
+          ? {
+              siteUrl,
+              email,
+              webhookEnabled: false,
+              webhookConfiguredAt: null,
+              webhookId: null,
+              webhookUrl: null,
+              webhookJql: null,
+            }
+          : { siteUrl, email },
       });
     };
     if (nextToken) {
@@ -558,20 +594,60 @@ export class JiraService {
     } else {
       await prisma.$transaction(saveMetadata);
     }
+    // The webhook secret is registered against the old site's Jira instance, so
+    // it can never verify a delivery from the new one.
+    if (siteChanged) {
+      await this.credentials.delete(CREDENTIALS.jiraWebhookSecret);
+    }
     this.clients = undefined;
     return this.getSettings();
   }
 
   async clearCredentials(): Promise<JiraSettingsView> {
-    await this.credentials.delete(
+    const prisma = await getPrismaClient();
+    const settings = await prisma.jiraSettings.findUnique({
+      where: { id: SETTINGS_ID },
+      select: {
+        siteUrl: true,
+        email: true,
+        webhookId: true,
+      },
+    });
+    const tokenConfigured = await this.credentials.isConfigured(
       CREDENTIALS.jiraApiToken,
+    );
+    if (
+      settings?.siteUrl &&
+      settings.email &&
+      settings.webhookId &&
+      tokenConfigured
+    ) {
+      try {
+        await this.webhookApiRequest(
+          "DELETE",
+          `/rest/webhooks/1.0/webhook/${encodeURIComponent(settings.webhookId)}`,
+        );
+      } catch (error) {
+        if (errorStatus(error) !== 404) throw error;
+      }
+    }
+    await this.credentials.deleteMany(
+      [CREDENTIALS.jiraApiToken, CREDENTIALS.jiraWebhookSecret],
       async (transaction) => {
         await transaction.jiraCacheEntry.deleteMany();
         await transaction.jiraCachedTicket.deleteMany();
+        await transaction.jiraWebhookDelivery.deleteMany();
         await transaction.jiraSettings.upsert({
           where: { id: SETTINGS_ID },
           create: { id: SETTINGS_ID, cacheTtlSeconds: DEFAULT_TTL_SECONDS },
-          update: { email: null },
+          update: {
+            email: null,
+            webhookEnabled: false,
+            webhookConfiguredAt: null,
+            webhookId: null,
+            webhookUrl: null,
+            webhookJql: null,
+          },
         });
       },
     );
@@ -987,7 +1063,11 @@ export class JiraService {
     return board;
   }
 
-  async ticket(issueKey: string, force = false): Promise<JiraTicketDetail> {
+  async ticket(
+    issueKey: string,
+    force = false,
+    changelog?: JiraWebhookChangelog | null,
+  ): Promise<JiraTicketDetail> {
     const key = normalizeIssueKey(issueKey);
     const detail = await this.cachedCall<RawIssue>({
       operation: "ISSUE",
@@ -1054,7 +1134,7 @@ export class JiraService {
       cacheMeta(detail),
       combineCacheMeta(commentResults),
     );
-    await this.recordTicketWorkflowEvents(ticket);
+    await this.recordTicketWorkflowEvents(ticket, changelog);
     return ticket;
   }
 
@@ -1648,7 +1728,10 @@ export class JiraService {
     });
   }
 
-  async refreshCachedTicket(issueKey: string): Promise<JiraTicketDetail> {
+  async refreshCachedTicket(
+    issueKey: string,
+    changelog?: JiraWebhookChangelog | null,
+  ): Promise<JiraTicketDetail> {
     const prisma = await getPrismaClient();
     const links = await prisma.jiraCacheEntryIssue.findMany({
       where: { issueKey },
@@ -1659,7 +1742,76 @@ export class JiraService {
         where: { id: { in: links.map((link) => link.cacheEntryId) } },
       });
     }
-    return this.ticket(issueKey, true);
+    return this.ticket(issueKey, true, changelog);
+  }
+
+  async resolveIssueKeys(issueIds: string[]): Promise<string[]> {
+    const ids = [
+      ...new Set(issueIds.map((issueId) => issueId.trim()).filter(Boolean)),
+    ];
+    if (ids.length === 0) return [];
+    const { version3 } = await this.getClients();
+    const issues = await Promise.all(
+      ids.map((issueId) =>
+        version3.issues.getIssue<RawIssue>({
+          issueIdOrKey: issueId,
+          fields: ["key"],
+        }),
+      ),
+    );
+    return [
+      ...new Set(
+        issues.map((issue) => {
+          const key = asString(issue.key);
+          if (!key) throw new Error(`Jira issue ${issue.id ?? ""} has no key`);
+          return normalizeIssueKey(key);
+        }),
+      ),
+    ];
+  }
+
+  async refreshSprintTickets(sprintId: number): Promise<JiraTicketDetail[]> {
+    if (!Number.isSafeInteger(sprintId) || sprintId <= 0) {
+      throw new Error("Invalid Jira sprint ID");
+    }
+    const { agile } = await this.getClients();
+    const issueKeys: string[] = [];
+    let startAt = 0;
+    while (issueKeys.length < MAX_ISSUES) {
+      const maxResults = Math.min(PAGE_SIZE, MAX_ISSUES - issueKeys.length);
+      const page = await agile.sprint.getIssuesForSprint<RawSearchPage>({
+        sprintId,
+        startAt,
+        maxResults,
+        fields: ["key"],
+      });
+      const issues = page.issues ?? [];
+      issueKeys.push(
+        ...issues.flatMap((issue) => {
+          const key = asString(issue.key);
+          return key ? [normalizeIssueKey(key)] : [];
+        }),
+      );
+      const complete =
+        page.total === undefined
+          ? issues.length < maxResults
+          : startAt + issues.length >= page.total;
+      if (issues.length === 0 || complete) break;
+      startAt += issues.length;
+    }
+
+    const tickets: JiraTicketDetail[] = [];
+    const uniqueKeys = [...new Set(issueKeys)];
+    for (let index = 0; index < uniqueKeys.length; index += 5) {
+      tickets.push(
+        ...(await Promise.all(
+          uniqueKeys
+            .slice(index, index + 5)
+            .map((issueKey) => this.refreshCachedTicket(issueKey)),
+        )),
+      );
+    }
+    return tickets;
   }
 
   async listCachedTickets(
@@ -1828,6 +1980,64 @@ export class JiraService {
       agile: new AgileClient(config),
     };
     return this.clients;
+  }
+
+  /**
+   * Calls Jira's classic webhook REST API (`/rest/webhooks/1.0/webhook`).
+   *
+   * `jira.js` only wraps the dynamic webhook API (`/rest/api/3/webhook`), which
+   * refuses anything but OAuth 2.0 and expires registrations after 30 days. The
+   * 1.0 API accepts the same basic auth as every other call in this service, so
+   * an API token belonging to a Jira admin is enough to register a webhook.
+   *
+   * Resolves to the parsed JSON body, or null when Jira answers without one
+   * (DELETE returns 204). Errors are sanitized so a token never reaches a log.
+   */
+  async webhookApiRequest<T = unknown>(
+    method: "GET" | "POST" | "PUT" | "DELETE",
+    path: string,
+    body?: unknown,
+  ): Promise<T | null> {
+    const settings = await this.requireCredentials();
+    const authorization = Buffer.from(
+      `${settings.email}:${settings.apiToken}`,
+    ).toString("base64");
+    let response: Response;
+    try {
+      response = await fetch(`${settings.siteUrl}${path}`, {
+        method,
+        headers: {
+          Accept: "application/json",
+          Authorization: `Basic ${authorization}`,
+          "Content-Type": "application/json",
+        },
+        body: body === undefined ? undefined : JSON.stringify(body),
+        signal: AbortSignal.timeout(15_000),
+      });
+    } catch (error) {
+      throw new Error(sanitizeError(error, settings.apiToken));
+    }
+    const payload = await response.text();
+    if (!response.ok) {
+      // 403 here almost always means the token's user is not a Jira admin,
+      // which is the one failure the UI cannot fix on the user's behalf.
+      const detail = payload.trim().slice(0, 300) || response.statusText;
+      throw Object.assign(
+        new Error(
+          sanitizeError(
+            `Jira rejected the webhook request with ${response.status}: ${detail}`,
+            settings.apiToken,
+          ),
+        ),
+        { status: response.status },
+      );
+    }
+    if (!payload.trim()) return null;
+    try {
+      return JSON.parse(payload) as T;
+    } catch {
+      return null;
+    }
   }
 
   private async currentAccountId(): Promise<string> {

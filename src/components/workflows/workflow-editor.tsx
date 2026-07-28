@@ -49,6 +49,7 @@ import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Checkbox } from "@/components/ui/checkbox";
 import {
   Dialog,
   DialogContent,
@@ -162,7 +163,7 @@ const CATALOG_QUERY = `
       triggers { kind category label description details configSchema capabilityFlags seedPaths sourceHandles }
     }
     workflow(id: $id) {
-      id name description draftDefinition activeVersionId enabled overlapPolicy maxConcurrentRuns archivedAt
+      id name description draftDefinition activeVersionId enabled overlapPolicy maxConcurrentRuns completionNotificationsEnabled archivedAt
       versionCount runCount createdAt updatedAt
     }
   }
@@ -342,6 +343,8 @@ function WorkflowEditorInner({ workflowId }: { workflowId?: string | null }) {
   const [diagnostics, setDiagnostics] = useState<WorkflowDiagnostic[]>([]);
   const [overlapPolicy, setOverlapPolicy] = useState("QUEUE");
   const [maxConcurrentRuns, setMaxConcurrentRuns] = useState(1);
+  const [completionNotificationsEnabled, setCompletionNotificationsEnabled] =
+    useState(true);
   // Off by default: laying a workflow out means panning and zooming around a
   // canvas bigger than the pane, which a fit lock would fight.
   const [locked, setLocked] = useState(false);
@@ -396,6 +399,9 @@ function WorkflowEditorInner({ workflowId }: { workflowId?: string | null }) {
         setDefinition(next);
         setOverlapPolicy(data.workflow?.overlapPolicy ?? "QUEUE");
         setMaxConcurrentRuns(data.workflow?.maxConcurrentRuns ?? 1);
+        setCompletionNotificationsEnabled(
+          data.workflow?.completionNotificationsEnabled ?? true,
+        );
         const categoryMap = new Map(
           data.workflowCatalog.steps.map(({ kind, category }) => [
             kind,
@@ -666,7 +672,7 @@ function WorkflowEditorInner({ workflowId }: { workflowId?: string | null }) {
         }>(
           `mutation SaveWorkflow($input: SaveWorkflowDraftInput!) {
             saveWorkflowDraft(input: $input) {
-              id name description draftDefinition activeVersionId enabled overlapPolicy maxConcurrentRuns archivedAt
+              id name description draftDefinition activeVersionId enabled overlapPolicy maxConcurrentRuns completionNotificationsEnabled archivedAt
               versionCount runCount createdAt updatedAt
             }
           }`,
@@ -676,6 +682,7 @@ function WorkflowEditorInner({ workflowId }: { workflowId?: string | null }) {
               definition: next,
               overlapPolicy,
               maxConcurrentRuns,
+              completionNotificationsEnabled,
             },
           },
         );
@@ -688,7 +695,7 @@ function WorkflowEditorInner({ workflowId }: { workflowId?: string | null }) {
         }>(
           `mutation CreateWorkflow($input: CreateWorkflowInput!) {
             createWorkflow(input: $input) {
-              id name description draftDefinition activeVersionId enabled overlapPolicy maxConcurrentRuns archivedAt
+              id name description draftDefinition activeVersionId enabled overlapPolicy maxConcurrentRuns completionNotificationsEnabled archivedAt
               versionCount runCount createdAt updatedAt
             }
           }`,
@@ -699,6 +706,7 @@ function WorkflowEditorInner({ workflowId }: { workflowId?: string | null }) {
               definition: next,
               overlapPolicy,
               maxConcurrentRuns,
+              completionNotificationsEnabled,
             },
           },
         );
@@ -779,6 +787,7 @@ function WorkflowEditorInner({ workflowId }: { workflowId?: string | null }) {
             definition: { ...definition, name: `${definition.name} copy` },
             overlapPolicy,
             maxConcurrentRuns,
+            completionNotificationsEnabled,
           },
         },
       );
@@ -805,6 +814,7 @@ function WorkflowEditorInner({ workflowId }: { workflowId?: string | null }) {
               description: definition.description,
               overlapPolicy,
               maxConcurrentRuns,
+              completionNotificationsEnabled,
               definition,
             },
           };
@@ -1509,6 +1519,20 @@ function WorkflowEditorInner({ workflowId }: { workflowId?: string | null }) {
                 type="number"
                 value={maxConcurrentRuns}
               />
+            </Field>
+            <Field>
+              <label className="flex items-center gap-2 text-sm">
+                <Checkbox
+                  checked={completionNotificationsEnabled}
+                  onCheckedChange={(checked) =>
+                    setCompletionNotificationsEnabled(checked === true)
+                  }
+                />
+                {t("completionNotifications")}
+              </label>
+              <p className="text-xs text-muted-foreground">
+                {t("completionNotificationsHelp")}
+              </p>
             </Field>
             <Button
               className="w-full"

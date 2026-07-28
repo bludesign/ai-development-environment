@@ -179,6 +179,76 @@ class ResizeObserverMock {
 
 afterEach(() => cleanup());
 
+describe("workflow editor completion notifications", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    global.ResizeObserver = ResizeObserverMock;
+  });
+
+  test("enables successful completion notifications by default and saves an opt-out", async () => {
+    const definition = emptyDefinition("Notification settings");
+    const workflow = {
+      id: "workflow-1",
+      name: definition.name,
+      description: definition.description,
+      draftDefinition: definition,
+      activeVersionId: null,
+      enabled: false,
+      overlapPolicy: "QUEUE",
+      maxConcurrentRuns: 1,
+      completionNotificationsEnabled: true,
+      archivedAt: null,
+      versionCount: 0,
+      runCount: 0,
+      createdAt: "2026-07-24T00:00:00.000Z",
+      updatedAt: "2026-07-24T00:00:00.000Z",
+    };
+    request.mockImplementation(async (query, variables) => {
+      if (query.includes("workflowCatalog"))
+        return {
+          workflowCatalog: {
+            schemaVersion: 1,
+            globalConcurrency: 1,
+            steps: [],
+            triggers: [],
+          },
+          workflow,
+        } as never;
+      const input = (variables as { input: { definition: typeof definition } })
+        .input;
+      return {
+        saveWorkflowDraft: { ...workflow, draftDefinition: input.definition },
+      } as never;
+    });
+
+    render(
+      <TooltipProvider>
+        <WorkflowEditor workflowId="workflow-1" />
+      </TooltipProvider>,
+    );
+
+    fireEvent.click(await screen.findByRole("button", { name: "Settings" }));
+    const checkbox = screen.getByRole("checkbox", {
+      name: "Notify when this workflow completes successfully",
+    });
+    expect(checkbox.getAttribute("data-state")).toBe("checked");
+    fireEvent.click(checkbox);
+    fireEvent.keyDown(document.body, { key: "Escape" });
+    fireEvent.click(screen.getByRole("button", { name: "Save draft" }));
+
+    await waitFor(() =>
+      expect(request).toHaveBeenLastCalledWith(
+        expect.stringContaining("mutation SaveWorkflow"),
+        expect.objectContaining({
+          input: expect.objectContaining({
+            completionNotificationsEnabled: false,
+          }),
+        }),
+      ),
+    );
+  });
+});
+
 describe("workflow editor edge deletion", () => {
   beforeEach(() => {
     vi.clearAllMocks();

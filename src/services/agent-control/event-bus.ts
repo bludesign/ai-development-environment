@@ -91,6 +91,8 @@ export const CODEBASE_CHANGED_TOPIC = "codebase.changed";
 export const WORKTREE_CHANGED_TOPIC = "worktree.changed";
 export const GITHUB_PIPELINE_STATUS_CHANGED_TOPIC =
   "github.pipeline-status.changed";
+export const JIRA_WEBHOOK_DELIVERY_TOPIC = "jira.webhook.delivery";
+export const JIRA_TICKET_CHANGED_TOPIC = "jira.ticket.changed";
 export const SKILLS_CHANGED_TOPIC = "skills.changed";
 export const BUILDS_CHANGED_TOPIC = "builds.changed";
 export const IOS_DEVICES_CHANGED_TOPIC = "ios-devices.changed";

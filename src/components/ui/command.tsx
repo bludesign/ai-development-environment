@@ -30,6 +30,36 @@ function Command({
   );
 }
 
+/**
+ * iOS Safari keeps `position: fixed` pinned to the layout viewport, so a
+ * top-anchored panel drifts out of sight whenever the visual viewport moves
+ * against it — the URL bar collapsing, or the keyboard opening and Safari
+ * scrolling the focused field into view. Following the visual viewport keeps
+ * the panel where the user can actually see it.
+ */
+function useVisualViewport(open: boolean) {
+  const [viewport, setViewport] = React.useState<{
+    top: number;
+    height: number;
+  } | null>(null);
+
+  React.useEffect(() => {
+    const visual = window.visualViewport;
+    if (!open || !visual) return;
+    const sync = () =>
+      setViewport({ top: visual.offsetTop, height: visual.height });
+    sync();
+    visual.addEventListener("resize", sync);
+    visual.addEventListener("scroll", sync);
+    return () => {
+      visual.removeEventListener("resize", sync);
+      visual.removeEventListener("scroll", sync);
+    };
+  }, [open]);
+
+  return viewport;
+}
+
 function CommandDialog({
   title = "Command Palette",
   description = "Search for a command to run...",
@@ -43,6 +73,8 @@ function CommandDialog({
   className?: string;
   showCloseButton?: boolean;
 }) {
+  const viewport = useVisualViewport(props.open ?? false);
+
   return (
     <Dialog {...props}>
       <DialogHeader className="sr-only">
@@ -51,10 +83,25 @@ function CommandDialog({
       </DialogHeader>
       <DialogContent
         className={cn(
-          "top-1/3 translate-y-0 overflow-hidden rounded-xl! p-0",
+          // Below sm the panel sits just under the top of the *visible* area and
+          // is capped to what is left of it, so the keyboard cannot bury it. The
+          // vars are unset until the viewport is measured, and every placement
+          // utility is overridden from sm, where the panel is simply centred.
+          // The single `minmax(0,1fr)` row lets the panel's content shrink to the
+          // capped height instead of overflowing behind the keyboard.
+          "top-[calc(var(--command-viewport-top,0px)_+_max(env(safe-area-inset-top,0px),0.75rem))] max-h-[var(--command-viewport-height,85dvh)] grid-rows-[minmax(0,1fr)] translate-y-0 overflow-hidden rounded-xl! p-0 sm:top-1/2 sm:max-h-[85dvh] sm:-translate-y-1/2",
           className,
         )}
         showCloseButton={showCloseButton}
+        style={
+          viewport
+            ? ({
+                "--command-viewport-top": `${viewport.top}px`,
+                // Leave a matching gutter below the panel.
+                "--command-viewport-height": `${viewport.height - 24}px`,
+              } as React.CSSProperties)
+            : undefined
+        }
       >
         {children}
       </DialogContent>
@@ -72,7 +119,9 @@ function CommandInput({
         <CommandPrimitive.Input
           data-slot="command-input"
           className={cn(
-            "w-full text-sm outline-hidden disabled:cursor-not-allowed disabled:opacity-50",
+            // text-base below md keeps the font at 16px so iOS Safari does not
+            // zoom the page when the field takes focus, matching Input.
+            "w-full text-base outline-hidden disabled:cursor-not-allowed disabled:opacity-50 md:text-sm",
             className,
           )}
           {...props}

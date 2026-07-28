@@ -10,6 +10,7 @@ export type CredentialStorageType = (typeof CREDENTIAL_STORAGE_TYPES)[number];
 
 export const CREDENTIAL_KINDS = {
   jiraApiToken: "jira-api-token",
+  jiraWebhookSecret: "jira-webhook-secret",
   githubPersonalAccessToken: "github-personal-access-token",
   githubAppPrivateKey: "github-app-private-key",
   githubAppWebhookSecret: "github-app-webhook-secret",
@@ -36,6 +37,11 @@ export const CREDENTIALS = {
   jiraApiToken: {
     id: "jira/default/api-token",
     kind: CREDENTIAL_KINDS.jiraApiToken,
+    ownerId: "default",
+  },
+  jiraWebhookSecret: {
+    id: "jira/default/webhook-secret",
+    kind: CREDENTIAL_KINDS.jiraWebhookSecret,
     ownerId: "default",
   },
   githubPersonalAccessToken: {
@@ -195,6 +201,7 @@ export function decodeJsonCredential<T>(payload: Uint8Array): T {
 export function credentialOwnerFeature(kind: string): string {
   switch (kind) {
     case CREDENTIAL_KINDS.jiraApiToken:
+    case CREDENTIAL_KINDS.jiraWebhookSecret:
       return "Jira";
     case CREDENTIAL_KINDS.githubPersonalAccessToken:
     case CREDENTIAL_KINDS.githubAppPrivateKey:

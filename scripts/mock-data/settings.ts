@@ -220,6 +220,8 @@ export async function seedSettings(prisma: PrismaClient): Promise<void> {
       siteUrl: MOCK_API_BASE_URL,
       email: "dev-bot@acme.example.com",
       cacheTtlSeconds: 300,
+      webhookEnabled: true,
+      webhookConfiguredAt: hoursAgo(3),
     },
   });
 

@@ -85,6 +85,7 @@ import type {
 } from "@/services/jira/types";
 
 import { JIRA_TICKET_DETAIL_FIELDS } from "./ticket-graphql";
+import { useJiraTicketChanges } from "./use-jira-ticket-changes";
 import { useJiraTicketHistory } from "./ticket-history";
 
 function parseDateOnly(value: string): Date | undefined {
@@ -166,6 +167,30 @@ export function JiraTicketDetailPage({ issueKey }: { issueKey: string }) {
     setError(null);
     ticketHistory.reset();
   };
+
+  // The webhook delivery already refreshed the server-side cache, so this
+  // refetch is quiet: no busy state, or the page would blink every time
+  // someone posts a comment in Jira.
+  const reloadTicket = async () => {
+    try {
+      const data = await controlPlaneRequest<{ jiraTicket: JiraTicketDetail }>(
+        `query JiraTicketDetail($issueKey: ID!) {
+          jiraTicket(issueKey: $issueKey) { ${JIRA_TICKET_DETAIL_FIELDS} }
+        }`,
+        { issueKey },
+      );
+      ticketChanged(data.jiraTicket);
+    } catch {
+      // Leave the last good render in place; manual refresh still works.
+    }
+  };
+
+  useJiraTicketChanges(
+    (change) => {
+      if (change.issueKey === issueKey) void reloadTicket();
+    },
+    () => void reloadTicket(),
+  );
 
   const refresh = async () => {
     setBusy(true);

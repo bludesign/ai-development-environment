@@ -107,6 +107,11 @@ const jiraTriggerKinds = new Set([
   "JIRA_COMMENT_ADDED",
   "JIRA_WORKLOG_ADDED",
   "JIRA_SPRINT_ENDED",
+  "JIRA_ISSUE_CREATED",
+  "JIRA_ISSUE_DELETED",
+  "JIRA_ISSUE_COMMAND",
+  "JIRA_ATTACHMENT_ADDED",
+  "JIRA_ISSUE_LINKED",
 ]);
 const runTriggerKinds = new Set([
   "RUN_STARTED",

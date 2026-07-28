@@ -15,6 +15,8 @@ import { JiraTicketDetailPage } from "./ticket-detail-page";
 
 vi.mock("@/lib/control-plane-client", () => ({
   controlPlaneRequest: vi.fn(),
+  controlPlaneSubscriptions: vi.fn(() => ({ subscribe: vi.fn(() => vi.fn()) })),
+  onControlPlaneConnected: vi.fn(() => vi.fn()),
 }));
 
 vi.mock("./ticket-worktree-dialog", () => ({

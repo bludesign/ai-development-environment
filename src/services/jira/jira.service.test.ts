@@ -193,4 +193,95 @@ describe("Jira workflow events", () => {
       "Sprint 0",
     ]);
   });
+
+  test("uses webhook changelog fields to emit only relevant workflow events", async () => {
+    const record = vi.fn().mockResolvedValue({});
+    const service = new JiraService(undefined, { record } as never);
+    const runtime = service as unknown as Record<string, unknown>;
+    runtime.currentAccountId = vi.fn().mockResolvedValue("me");
+    const recordTicketWorkflowEvents = runtime.recordTicketWorkflowEvents as (
+      value: unknown,
+      changelog: unknown,
+    ) => Promise<void>;
+    const changelog = {
+      id: "10124",
+      items: [
+        {
+          field: "status",
+          fieldId: "status",
+          fieldType: "jira",
+          from: "10000",
+          fromString: "To Do",
+          to: "3",
+          toString: "In Progress",
+        },
+      ],
+    };
+
+    await recordTicketWorkflowEvents.call(service, ticket("me"), changelog);
+
+    expect(record.mock.calls.map(([input]) => input.kind).sort()).toEqual([
+      "JIRA_STATUS",
+      "JIRA_TICKET_UPDATED",
+    ]);
+    const updated = record.mock.calls.find(
+      ([input]) => input.kind === "JIRA_TICKET_UPDATED",
+    )?.[0];
+    expect(updated.payload.sessionData.changelog).toEqual(changelog);
+    expect(updated.payload.changelog).toEqual(changelog);
+  });
+});
+
+describe("Jira webhook event resolution", () => {
+  test("resolves distinct issue IDs to normalized keys", async () => {
+    const getIssue = vi
+      .fn()
+      .mockResolvedValueOnce({ id: "10001", key: "app-1" })
+      .mockResolvedValueOnce({ id: "10002", key: "APP-2" });
+    const service = new JiraService();
+    const runtime = service as unknown as Record<string, unknown>;
+    runtime.getClients = vi.fn().mockResolvedValue({
+      version3: { issues: { getIssue } },
+    });
+
+    await expect(
+      service.resolveIssueKeys(["10001", "10002", "10001"]),
+    ).resolves.toEqual(["APP-1", "APP-2"]);
+    expect(getIssue).toHaveBeenCalledTimes(2);
+  });
+
+  test("paginates a sprint and refreshes each distinct ticket", async () => {
+    const getIssuesForSprint = vi
+      .fn()
+      .mockResolvedValueOnce({
+        issues: [{ key: "APP-1" }, { key: "APP-2" }],
+        total: 3,
+      })
+      .mockResolvedValueOnce({
+        issues: [{ key: "APP-3" }],
+        total: 3,
+      });
+    const service = new JiraService();
+    const runtime = service as unknown as Record<string, unknown>;
+    runtime.getClients = vi.fn().mockResolvedValue({
+      agile: { sprint: { getIssuesForSprint } },
+    });
+    const refreshCachedTicket = vi.fn(async (key: string) => ({ key }));
+    runtime.refreshCachedTicket = refreshCachedTicket;
+
+    await expect(service.refreshSprintTickets(27)).resolves.toEqual([
+      { key: "APP-1" },
+      { key: "APP-2" },
+      { key: "APP-3" },
+    ]);
+    expect(getIssuesForSprint).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({ sprintId: 27, startAt: 2 }),
+    );
+    expect(refreshCachedTicket.mock.calls.map(([key]) => key)).toEqual([
+      "APP-1",
+      "APP-2",
+      "APP-3",
+    ]);
+  });
 });

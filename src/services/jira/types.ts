@@ -296,3 +296,68 @@ export type PaginatedResult<T> = {
   limit: number;
   offset: number;
 };
+
+export type JiraWebhookSettingsView = {
+  enabled: boolean;
+  secretConfigured: boolean;
+  registered: boolean;
+  registrationId: string | null;
+  registeredUrl: string | null;
+  jql: string | null;
+  configuredAt: string | null;
+  lastReceivedAt: string | null;
+  lastOutcome: string | null;
+  lastError: string | null;
+};
+
+export type JiraWebhookRegistrationInput = {
+  url: string;
+  jql?: string | null;
+};
+
+export type JiraWebhookSecretView = {
+  settings: JiraWebhookSettingsView;
+  secret: string;
+};
+
+export type JiraWebhookChangeItem = {
+  field: string;
+  fieldId: string | null;
+  fieldType: string | null;
+  from: string | null;
+  fromString: string | null;
+  to: string | null;
+  toString: string | null;
+};
+
+export type JiraWebhookChangelog = {
+  id: string | null;
+  items: JiraWebhookChangeItem[];
+};
+
+export type JiraWebhookDeliveryView = {
+  deliveryId: string;
+  event: string;
+  issueKey: string | null;
+  projectKey: string | null;
+  changelog: JiraWebhookChangelog | null;
+  retryCount: number | null;
+  outcome: string;
+  error: string | null;
+  receivedAt: string;
+  processedAt: string | null;
+};
+
+export type JiraWebhookDeliveryPage = {
+  enabled: boolean;
+  items: JiraWebhookDeliveryView[];
+  total: number;
+  limit: number;
+  offset: number;
+};
+
+export type JiraTicketChange = {
+  issueKey: string;
+  projectKey: string | null;
+  event: string;
+};

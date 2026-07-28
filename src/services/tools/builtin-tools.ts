@@ -13,7 +13,7 @@ import type { DiskSpaceService } from "@/services/disk-space";
 import type { CredentialService } from "@/services/credentials";
 import type { CommandsService } from "@/services/commands";
 import type { GitHubService } from "@/services/github";
-import type { JiraService } from "@/services/jira";
+import type { JiraService, JiraWebhookService } from "@/services/jira";
 import type { IosDevicesService } from "@/services/ios-devices";
 import type { ModelCostsService } from "@/services/model-costs";
 import type { NotificationsService } from "@/services/notifications";
@@ -121,6 +121,7 @@ export type BuiltInToolServices = {
   runs?: RunsService;
   commands?: CommandsService;
   jira?: JiraService;
+  jiraWebhooks?: JiraWebhookService;
   github?: GitHubService;
   buildData?: BuildDataService;
   cacheServer?: CacheServerService;
@@ -296,7 +297,8 @@ export function createBuiltInToolRegistry(
     groups.push(createWorktreeToolGroup(services.worktrees));
   if (services.runs) groups.push(createRunToolGroup(services.runs));
   if (services.commands) groups.push(createCommandToolGroup(services.commands));
-  if (services.jira) groups.push(createJiraToolGroup(services.jira));
+  if (services.jira && services.jiraWebhooks)
+    groups.push(createJiraToolGroup(services.jira, services.jiraWebhooks));
   if (services.github) groups.push(createGitHubToolGroup(services.github));
   if (services.skills) groups.push(createSkillToolGroup(services.skills));
   if (services.buildData)

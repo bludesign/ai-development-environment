@@ -14,6 +14,8 @@ import { githubAppSettingsUrl, SettingsPage } from "./settings-page";
 
 vi.mock("@/lib/control-plane-client", () => ({
   controlPlaneRequest: vi.fn(),
+  controlPlaneSubscriptions: vi.fn(() => ({ subscribe: vi.fn(() => vi.fn()) })),
+  onControlPlaneConnected: vi.fn(() => vi.fn()),
 }));
 
 const requestMock = vi.mocked(controlPlaneRequest);
@@ -342,5 +344,79 @@ describe("SettingsPage", () => {
     ).toBe(
       "https://github.com/organizations/bludesign/settings/apps/workflow-rerunner",
     );
+  });
+
+  test.each([
+    ["links to the delivery log once the webhook is configured", true],
+    ["hides the delivery log link until the webhook is configured", false],
+  ])("%s", async (_name, webhookConfigured) => {
+    requestMock.mockImplementation(async (query) => {
+      if (query.includes("jiraSettings")) {
+        return {
+          jiraSettings: {
+            siteUrl: null,
+            email: null,
+            tokenConfigured: false,
+            cacheTtlSeconds: 300,
+            updatedAt: new Date(0).toISOString(),
+          },
+        } as never;
+      }
+      if (query.includes("query GitHubSettings")) {
+        return {
+          githubSettings: {
+            tokenConfigured: true,
+            updatedAt: new Date(0).toISOString(),
+          },
+        } as never;
+      }
+      if (query.includes("query GitHubAppSettings")) {
+        return {
+          githubAppSettings: {
+            configured: true,
+            appId: "123",
+            installationId: "456",
+            privateKeyConfigured: true,
+            keyFingerprint: "SHA256:fingerprint",
+            appSlug: "workflow-rerunner",
+            appOwnerLogin: "bludesign",
+            appOwnerType: "Organization",
+            accountLogin: "acme",
+            repositorySelection: "selected",
+            actionsPermission: "write",
+            checksPermission: "read",
+            commitStatusesPermission: "read",
+            webhookEvents: ["workflow_run"],
+            enhancedPipelineWebhooksEnabled: false,
+            enhancedPipelineWebhooksReady: true,
+            enhancedPipelineWebhooksMissing: [],
+            verifiedAt: new Date(0).toISOString(),
+            webhookConfigured,
+            webhookUrl: "https://hooks.example/api/public/github/webhook",
+            webhookConfiguredAt: webhookConfigured
+              ? new Date(0).toISOString()
+              : null,
+            webhookLastReceivedAt: null,
+            webhookLastOutcome: null,
+            webhookLastError: null,
+            updatedAt: new Date(0).toISOString(),
+          },
+        } as never;
+      }
+      throw new Error(`Unexpected operation: ${query}`);
+    });
+
+    render(<SettingsPage />);
+
+    await screen.findByLabelText("GitHub App ID");
+    if (webhookConfigured) {
+      expect(
+        screen.getByRole("link", { name: "View deliveries" }),
+      ).toHaveProperty("href", "http://localhost:3000/webhooks");
+    } else {
+      expect(
+        screen.queryByRole("link", { name: "View deliveries" }),
+      ).toBeNull();
+    }
   });
 });

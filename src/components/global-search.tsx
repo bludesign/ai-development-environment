@@ -423,7 +423,9 @@ export function GlobalSearch({ features }: { features: NavigationFeatures }) {
             placeholder={t("placeholder")}
             value={query}
           />
-          <CommandList className="max-h-[min(60vh,32rem)]">
+          {/* Below sm the list shrinks to whatever the dialog has left after the
+              keyboard takes its share, rather than overflowing behind it. */}
+          <CommandList className="max-h-none min-h-0 flex-1 sm:max-h-[min(60vh,32rem)]">
             {loading && (
               <div
                 aria-live="polite"

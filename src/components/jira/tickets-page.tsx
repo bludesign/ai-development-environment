@@ -27,6 +27,7 @@ import {
 import { ConfirmationDialog } from "@/components/confirmation-dialog";
 import { JiraPersonAvatar } from "@/components/jira/jira-user";
 import { JiraTicketDrawer } from "@/components/jira/ticket-drawer";
+import { useJiraTicketChanges } from "@/components/jira/use-jira-ticket-changes";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -208,6 +209,18 @@ export function JiraTicketsPage() {
   const reloadBoardAfterTicketChange = useCallback(() => {
     if (selectedSource) void loadBoard(selectedSource.id);
   }, [loadBoard, selectedSource]);
+
+  // A webhook delivery already refreshed the cached ticket, so reload the board
+  // only when the change could actually be on it — otherwise every ticket in
+  // the site would refetch a board it does not belong to.
+  useJiraTicketChanges((change) => {
+    const onBoard = board?.tickets.some(
+      (ticket) => ticket.key === change.issueKey,
+    );
+    const inProject =
+      change.projectKey != null && change.projectKey === selectedProject?.key;
+    if (onBoard || inProject) reloadBoardAfterTicketChange();
+  }, reloadBoardAfterTicketChange);
 
   useEffect(() => {
     if (!selectedSource) {

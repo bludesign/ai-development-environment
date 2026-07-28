@@ -1,10 +1,13 @@
 import * as z from "zod/v4";
 
-import type { JiraService } from "@/services/jira";
+import type { JiraService, JiraWebhookService } from "@/services/jira";
 
 import {
   defineTool,
+  DESTRUCTIVE_ANNOTATIONS,
+  READ_ONLY_ANNOTATIONS,
   READ_ONLY_EXTERNAL_ANNOTATIONS,
+  WRITE_ANNOTATIONS,
   WRITE_EXTERNAL_ANNOTATIONS,
   type BuiltInToolGroup,
 } from "../builtin-tools";
@@ -12,12 +15,262 @@ import { redactSensitiveToolOutput, serviceTool } from "./service-tool";
 
 const issueInput = z.object({ issueKey: z.string().min(1) });
 const jiraText = z.object({ format: z.string().min(1), value: z.string() });
+const sourceKind = z.enum(["JQL", "BOARD"]);
 
-export function createJiraToolGroup(service: JiraService): BuiltInToolGroup {
+function createJiraAdministrationGroup(
+  service: JiraService,
+  webhooks: JiraWebhookService,
+): BuiltInToolGroup {
+  return {
+    id: "builtin:jira:administration",
+    name: "Jira Administration",
+    children: [],
+    tools: [
+      serviceTool({
+        name: "get_jira_webhook_settings",
+        title: "Get Jira webhook settings",
+        description:
+          "Get the Jira webhook configuration and the outcome of the most recent delivery.",
+        inputSchema: z.object({}),
+        service: webhooks,
+        method: "getWebhookSettings",
+        arguments: () => [],
+        resultKey: "settings",
+        annotations: READ_ONLY_ANNOTATIONS,
+      }),
+      serviceTool({
+        name: "get_jira_webhook_deliveries",
+        title: "Get Jira webhook deliveries",
+        description:
+          "List Jira webhook deliveries with their event, issue, and outcome.",
+        inputSchema: z.object({
+          limit: z.number().int().min(1).max(100).default(50),
+          offset: z.number().int().min(0).default(0),
+        }),
+        service: webhooks,
+        method: "deliveries",
+        arguments: ({ limit, offset }) => [limit, offset],
+        resultKey: "page",
+        annotations: READ_ONLY_ANNOTATIONS,
+      }),
+      serviceTool({
+        name: "clear_jira_webhook_deliveries",
+        title: "Clear Jira webhook deliveries",
+        description: "Delete the Jira webhook delivery history.",
+        inputSchema: z.object({}),
+        service: webhooks,
+        method: "clearDeliveries",
+        arguments: () => [],
+        resultKey: "cleared",
+        annotations: DESTRUCTIVE_ANNOTATIONS,
+      }),
+      defineTool({
+        name: "rotate_jira_webhook_secret",
+        title: "Rotate Jira webhook secret",
+        description:
+          "Replace the Jira webhook signing secret and return it once. For a manually configured webhook, paste the returned secret into Jira before expecting deliveries to succeed.",
+        inputSchema: z.object({}),
+        outputSchema: z.object({
+          rotated: z.boolean(),
+          secret: z.string().min(1),
+        }),
+        annotations: { ...WRITE_ANNOTATIONS, idempotentHint: false },
+        handler: async () => {
+          const result = await webhooks.rotateSecret();
+          return { rotated: true, secret: result.secret };
+        },
+      }),
+      serviceTool({
+        name: "disable_jira_webhook",
+        title: "Disable Jira webhook",
+        description:
+          "Delete the Jira webhook signing secret and stop accepting deliveries.",
+        inputSchema: z.object({}),
+        service: webhooks,
+        method: "disableWebhook",
+        arguments: () => [],
+        resultKey: "settings",
+        annotations: DESTRUCTIVE_ANNOTATIONS,
+      }),
+      serviceTool({
+        name: "get_jira_available_projects",
+        title: "Get Jira available projects",
+        description:
+          "List Jira projects that can be added, including ones not configured yet.",
+        inputSchema: z.object({}),
+        service,
+        method: "availableProjects",
+        arguments: () => [],
+        resultKey: "projects",
+        annotations: READ_ONLY_EXTERNAL_ANNOTATIONS,
+      }),
+      serviceTool({
+        name: "get_jira_project_statuses",
+        title: "Get Jira project statuses",
+        description:
+          "List the statuses available in a configured Jira project.",
+        inputSchema: z.object({ projectId: z.string().min(1) }),
+        service,
+        method: "projectStatuses",
+        arguments: ({ projectId }) => [projectId],
+        resultKey: "statuses",
+        annotations: READ_ONLY_EXTERNAL_ANNOTATIONS,
+      }),
+      serviceTool({
+        name: "add_jira_project",
+        title: "Add Jira project",
+        description: "Add a Jira project by its Jira ID.",
+        inputSchema: z.object({ jiraId: z.string().min(1) }),
+        service,
+        method: "addProject",
+        arguments: ({ jiraId }) => [jiraId],
+        resultKey: "projects",
+        annotations: WRITE_EXTERNAL_ANNOTATIONS,
+      }),
+      serviceTool({
+        name: "remove_jira_project",
+        title: "Remove Jira project",
+        description:
+          "Remove a configured Jira project along with its sources and cached tickets.",
+        inputSchema: z.object({ projectId: z.string().min(1) }),
+        service,
+        method: "removeProject",
+        arguments: ({ projectId }) => [projectId],
+        resultKey: "projects",
+        annotations: DESTRUCTIVE_ANNOTATIONS,
+      }),
+      serviceTool({
+        name: "update_jira_project_display_settings",
+        title: "Update Jira project display settings",
+        description:
+          "Set the assignment filter, completed statuses, and done status for a Jira project.",
+        inputSchema: z.object({
+          projectId: z.string().min(1),
+          ticketAssignmentFilter: z.enum([
+            "ALL",
+            "UNASSIGNED_OR_SELF",
+            "SELF_IN_PROGRESS",
+          ]),
+          hideCompletedTickets: z.boolean(),
+          completedStatusIds: z.array(z.string()),
+          doneStatusId: z.string().nullable().optional(),
+        }),
+        service,
+        method: "updateProjectDisplaySettings",
+        resultKey: "projects",
+        annotations: WRITE_ANNOTATIONS,
+      }),
+      serviceTool({
+        name: "update_jira_project_branch_naming",
+        title: "Update Jira project branch naming",
+        description:
+          "Set the branch-naming script used to derive branch names for a Jira project.",
+        inputSchema: z.object({
+          projectId: z.string().min(1),
+          branchNamingScript: z.string(),
+        }),
+        service,
+        method: "updateProjectBranchNaming",
+        arguments: ({ projectId, branchNamingScript }) => [
+          projectId,
+          branchNamingScript,
+        ],
+        resultKey: "projects",
+        annotations: WRITE_ANNOTATIONS,
+      }),
+      serviceTool({
+        name: "create_jira_source",
+        title: "Create Jira source",
+        description:
+          "Create a ticket-board source for a Jira project from a JQL query or a board URL.",
+        inputSchema: z.object({
+          projectId: z.string().min(1),
+          name: z.string().min(1),
+          kind: sourceKind,
+          value: z.string().min(1),
+        }),
+        service,
+        method: "createSource",
+        resultKey: "projects",
+        annotations: WRITE_EXTERNAL_ANNOTATIONS,
+      }),
+      serviceTool({
+        name: "update_jira_source",
+        title: "Update Jira source",
+        description: "Update a Jira ticket-board source and clear its cache.",
+        inputSchema: z.object({
+          id: z.string().min(1),
+          name: z.string().min(1),
+          kind: sourceKind,
+          value: z.string().min(1),
+        }),
+        service,
+        method: "updateSource",
+        resultKey: "projects",
+        annotations: WRITE_EXTERNAL_ANNOTATIONS,
+      }),
+      serviceTool({
+        name: "delete_jira_source",
+        title: "Delete Jira source",
+        description:
+          "Delete a Jira ticket-board source and the cached tickets only it referenced.",
+        inputSchema: z.object({ id: z.string().min(1) }),
+        service,
+        method: "deleteSource",
+        arguments: ({ id }) => [id],
+        resultKey: "projects",
+        annotations: DESTRUCTIVE_ANNOTATIONS,
+      }),
+      serviceTool({
+        name: "update_jira_cache_ttl",
+        title: "Update Jira cache TTL",
+        description:
+          "Set how long Jira API responses stay cached, in minutes (1 to 1440).",
+        inputSchema: z.object({
+          ttlMinutes: z.number().int().min(1).max(1440),
+        }),
+        service,
+        method: "updateCacheTtl",
+        arguments: ({ ttlMinutes }) => [ttlMinutes],
+        resultKey: "settings",
+        annotations: WRITE_ANNOTATIONS,
+      }),
+      serviceTool({
+        name: "refresh_jira_cached_ticket",
+        title: "Refresh Jira cached ticket",
+        description:
+          "Discard the cached copy of a Jira ticket and fetch it again from Jira.",
+        inputSchema: issueInput,
+        service,
+        method: "refreshCachedTicket",
+        arguments: ({ issueKey }) => [issueKey],
+        resultKey: "ticket",
+        annotations: WRITE_EXTERNAL_ANNOTATIONS,
+      }),
+      serviceTool({
+        name: "delete_jira_cached_ticket",
+        title: "Delete Jira cached ticket",
+        description:
+          "Remove a Jira ticket from the local cache without touching Jira.",
+        inputSchema: issueInput,
+        service,
+        method: "deleteCachedTicket",
+        arguments: ({ issueKey }) => [issueKey],
+        resultKey: "deleted",
+        annotations: DESTRUCTIVE_ANNOTATIONS,
+      }),
+    ],
+  };
+}
+
+export function createJiraToolGroup(
+  service: JiraService,
+  webhooks: JiraWebhookService,
+): BuiltInToolGroup {
   return {
     id: "builtin:jira",
     name: "Jira",
-    children: [],
+    children: [createJiraAdministrationGroup(service, webhooks)],
     tools: [
       serviceTool({
         name: "get_jira_status",
@@ -196,6 +449,18 @@ export function createJiraToolGroup(service: JiraService): BuiltInToolGroup {
         }),
         service,
         method: "updateTicket",
+        resultKey: "ticket",
+        annotations: WRITE_EXTERNAL_ANNOTATIONS,
+      }),
+      serviceTool({
+        name: "transition_jira_ticket_to_done",
+        title: "Transition Jira ticket to done",
+        description:
+          "Move a Jira ticket to the done status configured for its project.",
+        inputSchema: issueInput,
+        service,
+        method: "transitionTicketToConfiguredDone",
+        arguments: ({ issueKey }) => [issueKey],
         resultKey: "ticket",
         annotations: WRITE_EXTERNAL_ANNOTATIONS,
       }),
