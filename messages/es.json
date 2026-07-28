@@ -71,7 +71,8 @@
     "new": "Nuevo",
     "repositories": "Repositorios",
     "runs": "Ejecuciones",
-    "sync": "Sincronización"
+    "sync": "Sincronización",
+    "diffs": "Diferencias"
   },
   "globalSearch": {
     "title": "Buscar en la aplicación",
@@ -4176,5 +4177,66 @@
     "showingCount": "Mostrando {shown} de {total}",
     "sortBy": "Ordenar por {column}",
     "loadingMore": "Cargando más…"
+  },
+  "diffView": {
+    "truncated": "Diferencia recortada en 2 MiB.",
+    "binary": "Archivo binario modificado",
+    "empty": "Sin cambios de texto",
+    "largeDiff": "Esta diferencia tiene {count} líneas y no se ha dibujado.",
+    "renderAnyway": "Dibujarla de todos modos",
+    "addComment": "Comentar en esta línea",
+    "noNewline": "Sin salto de línea al final del archivo",
+    "sideBySide": "Lado a lado",
+    "overlap": "Superposición",
+    "transparency": "Transparencia de la imagen",
+    "before": "Antes",
+    "after": "Después",
+    "missingImage": "No hay imagen en este lado"
+  },
+  "diffs": {
+    "title": "Diferencias y cobertura",
+    "description": "Revisa cada cambio de un árbol de trabajo, con la cobertura sobre el código.",
+    "loading": "Cargando cambios…",
+    "loadingDiff": "Cargando la diferencia…",
+    "refresh": "Actualizar",
+    "files": "Archivos",
+    "selectWorktree": "Elige un árbol de trabajo",
+    "searchWorktrees": "Buscar árboles de trabajo…",
+    "noWorktrees": "No se encontraron árboles de trabajo",
+    "selectAWorktree": "Elige un árbol de trabajo para revisar sus cambios.",
+    "selectAFile": "Elige un archivo para ver su diferencia.",
+    "searchFiles": "Buscar archivos",
+    "searchFilesPlaceholder": "Filtrar por ruta o módulo…",
+    "sortFiles": "Ordenar archivos por",
+    "sortAscending": "Orden ascendente",
+    "sortDescending": "Orden descendente",
+    "fileCount": "{count, plural, one {# archivo} other {# archivos}}",
+    "fileListTruncated": "lista recortada",
+    "noFiles": "No hay cambios en este ámbito.",
+    "noMatchingFiles": "Ningún archivo coincide con ese filtro.",
+    "noTextChanges": "Sin cambios de texto",
+    "binaryFile": "Archivo binario modificado",
+    "diffTooLarge": "Esta diferencia supera el límite de visualización.",
+    "commits": "Confirmaciones",
+    "noCommits": "Esta rama no tiene confirmaciones más allá de su base.",
+    "unifiedView": "Vista unificada",
+    "splitView": "Vista en paralelo",
+    "toggleWrap": "Alternar el ajuste de línea",
+    "linkedPullRequest": "Solicitud de incorporación n.º {number}: {title}",
+    "scope": {
+      "STAGED": "Preparados",
+      "UNSTAGED": "Sin preparar",
+      "UNTRACKED": "Sin seguimiento",
+      "BRANCH": "Rama",
+      "COMMIT": "Confirmaciones"
+    },
+    "fileSort": {
+      "name": "Nombre",
+      "module": "Módulo",
+      "coverage": "Cobertura",
+      "additions": "Adiciones",
+      "deletions": "Eliminaciones",
+      "changeType": "Tipo de cambio"
+    }
   }
 }

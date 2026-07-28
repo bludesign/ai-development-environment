@@ -71,7 +71,8 @@
     "new": "New",
     "repositories": "Repositories",
     "runs": "Runs",
-    "sync": "Sync"
+    "sync": "Sync",
+    "diffs": "Diffs"
   },
   "globalSearch": {
     "title": "Search the app",
@@ -4176,5 +4177,66 @@
     "showingCount": "Showing {shown} of {total}",
     "sortBy": "Sort by {column}",
     "loadingMore": "Loading more…"
+  },
+  "diffView": {
+    "truncated": "Diff truncated at 2 MiB.",
+    "binary": "Binary file changed",
+    "empty": "No textual changes",
+    "largeDiff": "This diff has {count} lines and was left unrendered.",
+    "renderAnyway": "Render it anyway",
+    "addComment": "Comment on this line",
+    "noNewline": "No newline at end of file",
+    "sideBySide": "Side by side",
+    "overlap": "Overlap",
+    "transparency": "Image transparency",
+    "before": "Before",
+    "after": "After",
+    "missingImage": "No image on this side"
+  },
+  "diffs": {
+    "title": "Diffs & coverage",
+    "description": "Review every change in a worktree, with coverage overlaid on the code.",
+    "loading": "Loading changes…",
+    "loadingDiff": "Loading the diff…",
+    "refresh": "Refresh",
+    "files": "Files",
+    "selectWorktree": "Select a worktree",
+    "searchWorktrees": "Search worktrees…",
+    "noWorktrees": "No worktrees found",
+    "selectAWorktree": "Pick a worktree to review its changes.",
+    "selectAFile": "Pick a file to see its diff.",
+    "searchFiles": "Search files",
+    "searchFilesPlaceholder": "Filter by path or module…",
+    "sortFiles": "Sort files by",
+    "sortAscending": "Sort ascending",
+    "sortDescending": "Sort descending",
+    "fileCount": "{count, plural, one {# file} other {# files}}",
+    "fileListTruncated": "list truncated",
+    "noFiles": "Nothing changed in this scope.",
+    "noMatchingFiles": "No file matches that filter.",
+    "noTextChanges": "No textual changes",
+    "binaryFile": "Binary file changed",
+    "diffTooLarge": "This diff exceeds the display limit.",
+    "commits": "Commits",
+    "noCommits": "This branch has no commits beyond its base.",
+    "unifiedView": "Unified view",
+    "splitView": "Side-by-side view",
+    "toggleWrap": "Toggle line wrapping",
+    "linkedPullRequest": "Pull request #{number}: {title}",
+    "scope": {
+      "STAGED": "Staged",
+      "UNSTAGED": "Unstaged",
+      "UNTRACKED": "Untracked",
+      "BRANCH": "Branch",
+      "COMMIT": "Commits"
+    },
+    "fileSort": {
+      "name": "Name",
+      "module": "Module",
+      "coverage": "Coverage",
+      "additions": "Additions",
+      "deletions": "Deletions",
+      "changeType": "Change type"
+    }
   }
 }

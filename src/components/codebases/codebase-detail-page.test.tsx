@@ -288,7 +288,9 @@ describe("CodebaseDetailPage", () => {
     fireEvent.click(screen.getByRole("tab", { name: "Stashes (1)" }));
 
     fireEvent.click(screen.getByRole("button", { name: "Preview stash@{0}" }));
-    expect(await screen.findByText(/diff --git a\/file.ts/)).toBeDefined();
+    // The patch is parsed into per-file sections, so the path appears in the
+    // file header rather than as a raw `diff --git` line.
+    expect(await screen.findByText("file.ts")).toBeDefined();
     expect(request).toHaveBeenCalledWith(
       expect.stringContaining("mutation InspectCodebaseStash"),
       expect.objectContaining({

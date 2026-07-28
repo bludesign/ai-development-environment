@@ -39,6 +39,16 @@
   --color-popover: var(--popover);
   --color-card-foreground: var(--card-foreground);
   --color-card: var(--card);
+  --color-diff-add: var(--diff-add);
+  --color-diff-add-foreground: var(--diff-add-foreground);
+  --color-diff-add-gutter: var(--diff-add-gutter);
+  --color-diff-delete: var(--diff-delete);
+  --color-diff-delete-foreground: var(--diff-delete-foreground);
+  --color-diff-delete-gutter: var(--diff-delete-gutter);
+  --color-diff-hunk: var(--diff-hunk);
+  --color-diff-hunk-foreground: var(--diff-hunk-foreground);
+  --color-coverage-covered: var(--coverage-covered);
+  --color-coverage-uncovered: var(--coverage-uncovered);
   --radius-sm: calc(var(--radius) * 0.6);
   --radius-md: calc(var(--radius) * 0.8);
   --radius-lg: var(--radius);
@@ -82,6 +92,21 @@
   --sidebar-accent-foreground: oklch(0.205 0 0);
   --sidebar-border: oklch(0.922 0 0);
   --sidebar-ring: oklch(0.708 0 0);
+  /* Diff and coverage colors. The rest of the palette is deliberately
+     grayscale, but a diff is unreadable without hue, so these are the one
+     chromatic exception. Row fills stay pale enough for foreground text to
+     keep AA contrast; the `-gutter` variants tint the line-number column
+     more strongly so the sides stay distinguishable when wrapping is on. */
+  --diff-add: oklch(0.94 0.06 150);
+  --diff-add-foreground: oklch(0.35 0.11 150);
+  --diff-add-gutter: oklch(0.88 0.09 150);
+  --diff-delete: oklch(0.94 0.05 22);
+  --diff-delete-foreground: oklch(0.42 0.16 22);
+  --diff-delete-gutter: oklch(0.88 0.08 22);
+  --diff-hunk: oklch(0.95 0.03 250);
+  --diff-hunk-foreground: oklch(0.45 0.09 250);
+  --coverage-covered: oklch(0.72 0.15 150);
+  --coverage-uncovered: oklch(0.65 0.2 22);
 }
 
 @media (prefers-color-scheme: dark) {
@@ -118,6 +143,16 @@
     --sidebar-accent-foreground: oklch(0.985 0 0);
     --sidebar-border: oklch(1 0 0 / 10%);
     --sidebar-ring: oklch(0.556 0 0);
+    --diff-add: oklch(0.29 0.06 150);
+    --diff-add-foreground: oklch(0.87 0.14 150);
+    --diff-add-gutter: oklch(0.36 0.08 150);
+    --diff-delete: oklch(0.29 0.07 22);
+    --diff-delete-foreground: oklch(0.83 0.13 22);
+    --diff-delete-gutter: oklch(0.36 0.09 22);
+    --diff-hunk: oklch(0.3 0.04 250);
+    --diff-hunk-foreground: oklch(0.82 0.09 250);
+    --coverage-covered: oklch(0.68 0.15 150);
+    --coverage-uncovered: oklch(0.62 0.19 22);
   }
 }
 

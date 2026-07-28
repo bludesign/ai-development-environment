@@ -71,7 +71,8 @@
     "new": "Neu",
     "repositories": "Repositorys",
     "runs": "Ausführungen",
-    "sync": "Synchronisierung"
+    "sync": "Synchronisierung",
+    "diffs": "Unterschiede"
   },
   "globalSearch": {
     "title": "App durchsuchen",
@@ -4176,5 +4177,66 @@
     "showingCount": "{shown} von {total} werden angezeigt",
     "sortBy": "Nach {column} sortieren",
     "loadingMore": "Weitere werden geladen…"
+  },
+  "diffView": {
+    "truncated": "Unterschied bei 2 MiB gekürzt.",
+    "binary": "Binärdatei geändert",
+    "empty": "Keine Textänderungen",
+    "largeDiff": "Dieser Unterschied hat {count} Zeilen und wurde nicht dargestellt.",
+    "renderAnyway": "Trotzdem darstellen",
+    "addComment": "Diese Zeile kommentieren",
+    "noNewline": "Kein Zeilenumbruch am Dateiende",
+    "sideBySide": "Nebeneinander",
+    "overlap": "Überlagerung",
+    "transparency": "Bildtransparenz",
+    "before": "Vorher",
+    "after": "Nachher",
+    "missingImage": "Auf dieser Seite kein Bild"
+  },
+  "diffs": {
+    "title": "Unterschiede und Abdeckung",
+    "description": "Prüfe jede Änderung eines Arbeitsbaums, mit der Abdeckung über dem Code.",
+    "loading": "Änderungen werden geladen…",
+    "loadingDiff": "Unterschied wird geladen…",
+    "refresh": "Aktualisieren",
+    "files": "Dateien",
+    "selectWorktree": "Arbeitsbaum auswählen",
+    "searchWorktrees": "Arbeitsbäume durchsuchen…",
+    "noWorktrees": "Keine Arbeitsbäume gefunden",
+    "selectAWorktree": "Wähle einen Arbeitsbaum, um seine Änderungen zu prüfen.",
+    "selectAFile": "Wähle eine Datei, um ihren Unterschied zu sehen.",
+    "searchFiles": "Dateien durchsuchen",
+    "searchFilesPlaceholder": "Nach Pfad oder Modul filtern…",
+    "sortFiles": "Dateien sortieren nach",
+    "sortAscending": "Aufsteigend sortieren",
+    "sortDescending": "Absteigend sortieren",
+    "fileCount": "{count, plural, one {# Datei} other {# Dateien}}",
+    "fileListTruncated": "Liste gekürzt",
+    "noFiles": "In diesem Bereich hat sich nichts geändert.",
+    "noMatchingFiles": "Keine Datei passt zu diesem Filter.",
+    "noTextChanges": "Keine Textänderungen",
+    "binaryFile": "Binärdatei geändert",
+    "diffTooLarge": "Dieser Unterschied überschreitet die Anzeigegrenze.",
+    "commits": "Commits",
+    "noCommits": "Dieser Zweig hat keine Commits über seiner Basis.",
+    "unifiedView": "Vereinheitlichte Ansicht",
+    "splitView": "Nebeneinander-Ansicht",
+    "toggleWrap": "Zeilenumbruch umschalten",
+    "linkedPullRequest": "Pull Request Nr. {number}: {title}",
+    "scope": {
+      "STAGED": "Vorgemerkt",
+      "UNSTAGED": "Nicht vorgemerkt",
+      "UNTRACKED": "Unverfolgt",
+      "BRANCH": "Zweig",
+      "COMMIT": "Commits"
+    },
+    "fileSort": {
+      "name": "Name",
+      "module": "Modul",
+      "coverage": "Abdeckung",
+      "additions": "Hinzufügungen",
+      "deletions": "Löschungen",
+      "changeType": "Änderungsart"
+    }
   }
 }

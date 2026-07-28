@@ -22,6 +22,7 @@ const labels: Record<BreadcrumbLabelKey, string> = {
   coverage: "Coverage",
   credentials: "Credentials",
   devices: "Devices",
+  diffs: "Diffs",
   drafts: "Drafts",
   edit: "Edit",
   enroll: "Enroll",

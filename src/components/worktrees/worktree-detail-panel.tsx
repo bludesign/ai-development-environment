@@ -2,14 +2,16 @@
 
 import { ChevronDown, FileCode2, Images } from "lucide-react";
 import { useTranslations } from "next-intl";
-import Image from "next/image";
 import { useEffect, useState } from "react";
 
 import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
 import { DateTime } from "@/components/common/date-time";
-import { Input } from "@/components/ui/input";
-import { PatchView } from "@/components/common/patch-view";
+import {
+  ImageDiff,
+  PatchDiffView,
+  useDiffViewLabels,
+  useImageDiffLabels,
+} from "@/components/common/diff-view";
 import { Spinner } from "@/components/ui/spinner";
 import { Table, TableBody, TableCell, TableRow } from "@/components/ui/table";
 import { cn } from "@/lib/utils";
@@ -439,6 +441,8 @@ function DiffBlock({
   commitSha?: string;
 }) {
   const t = useTranslations("worktreeDetail");
+  const diffLabels = useDiffViewLabels();
+  const imageLabels = useImageDiffLabels();
   const { value, loading, error } = useDiff(
     worktreeId,
     scope,
@@ -446,6 +450,12 @@ function DiffBlock({
     previousPath ?? null,
     commitSha ?? null,
   );
+  const imageUrl = (side: "AFTER" | "BEFORE") => {
+    const params = new URLSearchParams({ scope, path, side });
+    if (previousPath) params.set("previousPath", previousPath);
+    if (commitSha) params.set("commitSha", commitSha);
+    return `/api/worktrees/${encodeURIComponent(worktreeId)}/diff-image?${params}`;
+  };
   return (
     <div className="space-y-2">
       {label && (
@@ -458,19 +468,18 @@ function DiffBlock({
       ) : error ? (
         <DiffError value={error} />
       ) : value?.image ? (
-        <ImageComparison
-          commitSha={commitSha}
-          diff={value}
-          path={path}
-          previousPath={previousPath}
-          scope={scope}
-          worktreeId={worktreeId}
+        <ImageDiff
+          after={value.afterAvailable ? imageUrl("AFTER") : null}
+          before={value.beforeAvailable ? imageUrl("BEFORE") : null}
+          labels={imageLabels}
         />
       ) : value?.patch ? (
-        <PatchView
+        <PatchDiffView
+          labels={{ ...diffLabels, truncated: t("diffLimit") }}
+          mode="UNIFIED"
           patch={value.patch}
           truncated={value.truncated}
-          truncatedLabel={t("diffLimit")}
+          wrap={false}
         />
       ) : (
         <p className="text-sm text-muted-foreground">
@@ -525,123 +534,6 @@ function useDiff(
     };
   }, [commitSha, path, previousPath, scope, worktreeId]);
   return { value, loading, error };
-}
-
-function ImageComparison({
-  worktreeId,
-  path,
-  previousPath,
-  scope,
-  commitSha,
-  diff,
-}: {
-  worktreeId: string;
-  path: string;
-  previousPath?: string | null;
-  scope: DiffScope;
-  commitSha?: string;
-  diff: WorktreeFileDiff;
-}) {
-  const t = useTranslations("worktreeDetail");
-  const [mode, setMode] = useState<"SIDE_BY_SIDE" | "OVERLAP">("SIDE_BY_SIDE");
-  const [opacity, setOpacity] = useState(50);
-  const url = (side: "BEFORE" | "AFTER") => {
-    const params = new URLSearchParams({ scope, path, side });
-    if (previousPath) params.set("previousPath", previousPath);
-    if (commitSha) params.set("commitSha", commitSha);
-    return `/api/worktrees/${encodeURIComponent(worktreeId)}/diff-image?${params}`;
-  };
-  const before = diff.beforeAvailable ? url("BEFORE") : null;
-  const after = diff.afterAvailable ? url("AFTER") : null;
-  return (
-    <div className="space-y-3">
-      <div className="flex flex-wrap items-center gap-2">
-        <Button
-          onClick={() => setMode("SIDE_BY_SIDE")}
-          size="sm"
-          variant={mode === "SIDE_BY_SIDE" ? "default" : "outline"}
-        >
-          {t("sideBySide")}
-        </Button>
-        <Button
-          onClick={() => setMode("OVERLAP")}
-          size="sm"
-          variant={mode === "OVERLAP" ? "default" : "outline"}
-        >
-          {t("overlap")}
-        </Button>
-        {mode === "OVERLAP" && (
-          <Input
-            aria-label={t("imageTransparency")}
-            className="w-48"
-            max={100}
-            min={0}
-            onChange={(event) => setOpacity(Number(event.target.value))}
-            type="range"
-            value={opacity}
-          />
-        )}
-      </div>
-      {mode === "SIDE_BY_SIDE" ? (
-        <div className="grid gap-3 md:grid-cols-2">
-          <ImageSide label={t("before")} url={before} />
-          <ImageSide label={t("after")} url={after} />
-        </div>
-      ) : (
-        <div className="relative min-h-64 overflow-hidden rounded-md border bg-[repeating-conic-gradient(#ddd_0_25%,#fff_0_50%)_0/20px_20px] dark:bg-[repeating-conic-gradient(#222_0_25%,#333_0_50%)_0/20px_20px]">
-          {before && (
-            <Image
-              alt="Before"
-              className="absolute inset-0 size-full object-contain"
-              fill
-              src={before}
-              unoptimized
-            />
-          )}
-          {after && (
-            <Image
-              alt="After"
-              className="absolute inset-0 size-full object-contain"
-              fill
-              src={after}
-              style={{ opacity: opacity / 100 }}
-              unoptimized
-            />
-          )}
-          {!before && !after && <MissingImage />}
-        </div>
-      )}
-    </div>
-  );
-}
-
-function ImageSide({ label, url }: { label: string; url: string | null }) {
-  return (
-    <div>
-      <p className="mb-1 text-xs font-medium text-muted-foreground">{label}</p>
-      <div className="flex min-h-64 items-center justify-center overflow-hidden rounded-md border bg-muted/30">
-        {url ? (
-          <Image
-            alt={label}
-            className="max-h-[36rem] max-w-full object-contain"
-            height={1024}
-            src={url}
-            unoptimized
-            width={1024}
-          />
-        ) : (
-          <MissingImage />
-        )}
-      </div>
-    </div>
-  );
-}
-
-function MissingImage() {
-  const t = useTranslations("worktreeDetail");
-  return (
-    <span className="text-sm text-muted-foreground">{t("noImageSide")}</span>
-  );
 }
 
 function LoadingDiff() {

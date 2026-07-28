@@ -29,7 +29,10 @@ import { useLocale, useTranslations } from "next-intl";
 
 import { ConfirmationDialog } from "@/components/confirmation-dialog";
 import { DateTime } from "@/components/common/date-time";
-import { ExpandablePatchView } from "@/components/common/patch-view";
+import {
+  MultiFileDiffView,
+  useDiffViewLabels,
+} from "@/components/common/diff-view";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -184,6 +187,7 @@ function QuestionBatch({
   onAnswered: () => Promise<void>;
 }) {
   const t = useTranslations("runs");
+  const diffLabels = useDiffViewLabels();
   const router = useRouter();
   const [answers, setAnswers] = useState<Record<string, string[]>>({});
   const [custom, setCustom] = useState<Record<string, string>>({});
@@ -463,8 +467,9 @@ function QuestionBatch({
             <div className="space-y-2">
               <Label>{t("rollbackDiff")}</Label>
               {batch.rollbackPatch ? (
-                <ExpandablePatchView
+                <MultiFileDiffView
                   className="max-h-64 overflow-y-auto"
+                  labels={diffLabels}
                   patch={batch.rollbackPatch}
                 />
               ) : (
@@ -510,6 +515,7 @@ export function RunDetailPage({
 }) {
   const t = useTranslations("runs");
   const labels = useRunLabels();
+  const diffLabels = useDiffViewLabels();
   const locale = useLocale();
   const router = useRouter();
   const [run, setRun] = useState<AgentRunView | null>(null);
@@ -1646,7 +1652,9 @@ export function RunDetailPage({
                 <AlertDescription>{t("planMutationWarning")}</AlertDescription>
               </Alert>
             )}
-            {finalPatch && <ExpandablePatchView patch={finalPatch} />}
+            {finalPatch && (
+              <MultiFileDiffView labels={diffLabels} patch={finalPatch} />
+            )}
             {run.checkpoints.map((checkpoint) => (
               <details className="rounded-lg border p-3" key={checkpoint.id}>
                 <summary className="cursor-pointer">
@@ -1664,7 +1672,10 @@ export function RunDetailPage({
                     HEAD {checkpoint.headSha ?? "—"}
                   </p>
                   {checkpoint.diffPatch ? (
-                    <ExpandablePatchView patch={checkpoint.diffPatch} />
+                    <MultiFileDiffView
+                      labels={diffLabels}
+                      patch={checkpoint.diffPatch}
+                    />
                   ) : checkpoint.diffSummary ? (
                     <pre className="overflow-auto rounded bg-muted p-3 text-xs whitespace-pre-wrap">
                       {checkpoint.diffSummary}

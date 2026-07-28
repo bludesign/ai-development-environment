@@ -40,7 +40,10 @@ import {
   EmptyTitle,
 } from "@/components/ui/empty";
 import { Input } from "@/components/ui/input";
-import { PatchView } from "@/components/common/patch-view";
+import {
+  MultiFileDiffView,
+  useDiffViewLabels,
+} from "@/components/common/diff-view";
 import {
   Select,
   SelectContent,
@@ -1033,6 +1036,7 @@ function StashTable({
   ) => Promise<void>;
 }) {
   const t = useTranslations("codebaseDetail");
+  const diffLabels = useDiffViewLabels();
   const [copyStates, setCopyStates] = useState<Record<string, CopyState>>({});
   const [query, setQuery] = useState("");
   const title = t("stashesTitle");
@@ -1223,11 +1227,14 @@ function StashTable({
                                   </p>
                                 )}
                                 {entry.diff?.patch ? (
-                                  <PatchView
-                                    className="max-h-[32rem]"
+                                  <MultiFileDiffView
+                                    className="max-h-[32rem] overflow-y-auto"
+                                    labels={{
+                                      ...diffLabels,
+                                      truncated: t("patchTruncated"),
+                                    }}
                                     patch={entry.diff.patch}
                                     truncated={entry.diff.truncated}
-                                    truncatedLabel={t("patchTruncated")}
                                   />
                                 ) : (
                                   <p className="text-sm text-muted-foreground">

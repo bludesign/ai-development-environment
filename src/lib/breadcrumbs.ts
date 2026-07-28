@@ -15,6 +15,7 @@ export type BreadcrumbLabelKey =
   | "coverage"
   | "credentials"
   | "devices"
+  | "diffs"
   | "drafts"
   | "edit"
   | "enroll"
@@ -67,6 +68,7 @@ const STATIC_SEGMENTS: Record<string, BreadcrumbLabelKey> = {
   coverage: "coverage",
   credentials: "credentials",
   devices: "devices",
+  diffs: "diffs",
   drafts: "drafts",
   edit: "edit",
   enroll: "enroll",
@@ -144,6 +146,7 @@ const ROUTABLE_STATIC_PATHS = new Set([
   "/credentials",
   "/devices",
   "/devices/enroll",
+  "/diffs",
   "/drafts",
   "/github-cache",
   "/jira-cache",

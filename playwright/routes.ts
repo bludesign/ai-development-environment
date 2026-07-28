@@ -42,6 +42,7 @@ export const routes: RouteEntry[] = [
   },
   { name: "worktrees", path: "/worktrees" },
   { name: "worktree-detail", path: `/worktrees/${ids.worktrees.webFeature}` },
+  { name: "diffs", path: "/diffs" },
 
   // Builds
   { name: "builds", path: "/builds" },
