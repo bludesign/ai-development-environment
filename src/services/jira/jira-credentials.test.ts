@@ -5,6 +5,11 @@ const state = vi.hoisted(() => ({
     id: "default",
     siteUrl: null as string | null,
     email: null as string | null,
+    webhookEnabled: false,
+    webhookConfiguredAt: null as Date | null,
+    webhookId: null as string | null,
+    webhookUrl: null as string | null,
+    webhookJql: null as string | null,
     cacheTtlSeconds: 300,
     createdAt: new Date(0),
     updatedAt: new Date(0),
@@ -64,6 +69,11 @@ describe("Jira credential integration", () => {
     token = null;
     state.settings.siteUrl = null;
     state.settings.email = null;
+    state.settings.webhookEnabled = false;
+    state.settings.webhookConfiguredAt = null;
+    state.settings.webhookId = null;
+    state.settings.webhookUrl = null;
+    state.settings.webhookJql = null;
     credentials = {
       isConfigured: vi.fn(async () => Boolean(token)),
       getText: vi.fn(async () => token),
@@ -128,5 +138,91 @@ describe("Jira credential integration", () => {
     expect(credentials.delete).not.toHaveBeenCalled();
     expect(token).toBeNull();
     expect(state.settings.email).toBeNull();
+  });
+
+  test("clears registration metadata when changing Jira sites", async () => {
+    const service = new JiraService(credentials as never);
+    await service.saveSettings({
+      siteUrl: "https://old.atlassian.net",
+      email: "user@example.com",
+      apiToken: "jira-secret",
+    });
+    Object.assign(state.settings, {
+      webhookEnabled: true,
+      webhookConfiguredAt: new Date(),
+      webhookId: "72",
+      webhookUrl: "https://aide.example.com/api/public/jira/webhook",
+      webhookJql: "project = OLD",
+    });
+
+    await service.saveSettings({
+      siteUrl: "https://new.atlassian.net",
+      email: "user@example.com",
+      resetSite: true,
+    });
+
+    expect(state.settings).toMatchObject({
+      webhookEnabled: false,
+      webhookConfiguredAt: null,
+      webhookId: null,
+      webhookUrl: null,
+      webhookJql: null,
+    });
+  });
+
+  test("unregisters a Jira webhook before deleting its credentials", async () => {
+    const service = new JiraService(credentials as never);
+    await service.saveSettings({
+      siteUrl: "https://example.atlassian.net",
+      email: "user@example.com",
+      apiToken: "jira-secret",
+    });
+    Object.assign(state.settings, {
+      webhookEnabled: true,
+      webhookConfiguredAt: new Date(),
+      webhookId: "72",
+      webhookUrl: "https://aide.example.com/api/public/jira/webhook",
+      webhookJql: "project = AIDE",
+    });
+    const unregister = vi
+      .spyOn(service, "webhookApiRequest")
+      .mockResolvedValue(null);
+
+    await service.clearCredentials();
+
+    expect(unregister).toHaveBeenCalledWith(
+      "DELETE",
+      "/rest/webhooks/1.0/webhook/72",
+    );
+    expect(unregister.mock.invocationCallOrder[0]).toBeLessThan(
+      credentials.deleteMany.mock.invocationCallOrder[0]!,
+    );
+    expect(state.settings).toMatchObject({
+      email: null,
+      webhookEnabled: false,
+      webhookConfiguredAt: null,
+      webhookId: null,
+      webhookUrl: null,
+      webhookJql: null,
+    });
+  });
+
+  test("preserves credentials when webhook cleanup fails", async () => {
+    const service = new JiraService(credentials as never);
+    await service.saveSettings({
+      siteUrl: "https://example.atlassian.net",
+      email: "user@example.com",
+      apiToken: "jira-secret",
+    });
+    state.settings.webhookId = "72";
+    vi.spyOn(service, "webhookApiRequest").mockRejectedValue(
+      Object.assign(new Error("Jira unavailable"), { status: 503 }),
+    );
+
+    await expect(service.clearCredentials()).rejects.toThrow(
+      "Jira unavailable",
+    );
+    expect(credentials.deleteMany).not.toHaveBeenCalled();
+    expect(token).toBe("jira-secret");
   });
 });

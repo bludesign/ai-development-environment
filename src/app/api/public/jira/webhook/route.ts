@@ -1,4 +1,5 @@
 import { getServerServices } from "@/services/server-services";
+import { JiraWebhookRequestError } from "@/services/jira";
 
 export const runtime = "nodejs";
 export const maxDuration = 30;
@@ -51,13 +52,13 @@ export async function POST(request: Request): Promise<Response> {
     const status =
       error instanceof RangeError
         ? 413
-        : /signature/i.test(message)
-          ? 401
-          : /not configured/i.test(message)
-            ? 503
-            : 400;
+        : error instanceof JiraWebhookRequestError
+          ? error.httpStatus
+          : !request.body
+            ? 400
+            : 500;
     return Response.json(
-      { error: message },
+      { error: status === 500 ? "Jira webhook processing failed" : message },
       { status, headers: { "cache-control": "no-store" } },
     );
   }

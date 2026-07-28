@@ -45,6 +45,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
+import { Link } from "@/i18n/navigation";
 import { controlPlaneRequest } from "@/lib/control-plane-client";
 import { formatDateValue } from "@/lib/date-format";
 import type {
@@ -722,7 +723,12 @@ function GitHubAppSettingsCard() {
                 </Alert>
               )}
 
-              <div className="flex flex-wrap justify-end gap-2 border-t pt-4">
+              <div className="flex flex-wrap items-center justify-end gap-2 border-t pt-4">
+                {settings?.webhookConfigured && (
+                  <Button asChild className="mr-auto" variant="link">
+                    <Link href="/webhooks">{t("viewDeliveries")}</Link>
+                  </Button>
+                )}
                 <ConfirmationDialog
                   actionLabel={t("remove")}
                   cancelLabel={tc("cancel")}

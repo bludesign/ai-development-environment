@@ -82,10 +82,13 @@ describe("Jira webhook ingestion", () => {
   let jira: {
     refreshCachedTicket: ReturnType<typeof vi.fn>;
     deleteCachedTicket: ReturnType<typeof vi.fn>;
+    resolveIssueKeys: ReturnType<typeof vi.fn>;
+    refreshSprintTickets: ReturnType<typeof vi.fn>;
   };
   let workflowEvents: { record: ReturnType<typeof vi.fn> };
   let create: ReturnType<typeof vi.fn>;
   let updateMany: ReturnType<typeof vi.fn>;
+  let deleteMany: ReturnType<typeof vi.fn>;
 
   beforeEach(() => {
     deliveries = new Map();
@@ -124,6 +127,7 @@ describe("Jira webhook ingestion", () => {
         return { count: 1 };
       },
     );
+    deleteMany = vi.fn(async () => ({ count: 0 }));
 
     mocks.getPrismaClient.mockResolvedValue({
       jiraWebhookDelivery: {
@@ -142,7 +146,7 @@ describe("Jira webhook ingestion", () => {
             return row;
           },
         ),
-        deleteMany: vi.fn(async () => ({ count: 0 })),
+        deleteMany,
         findFirst: vi.fn(async () => null),
         findMany: vi.fn(async () => [...deliveries.values()]),
         count: vi.fn(async () => deliveries.size),
@@ -163,8 +167,16 @@ describe("Jira webhook ingestion", () => {
       delete: vi.fn(async () => undefined),
     };
     jira = {
-      refreshCachedTicket: vi.fn(async () => ({ key: "AIDE-42" })),
+      refreshCachedTicket: vi.fn(async (issueKey: string) => ({
+        key: issueKey,
+        projectKey: issueKey.split("-")[0],
+      })),
       deleteCachedTicket: vi.fn(async () => true),
+      resolveIssueKeys: vi.fn(async () => ["AIDE-42", "AIDE-43"]),
+      refreshSprintTickets: vi.fn(async () => [
+        { key: "AIDE-42", projectKey: "AIDE" },
+        { key: "AIDE-43", projectKey: "AIDE" },
+      ]),
     };
     workflowEvents = { record: vi.fn(async () => ({ id: "event-1" })) };
   });
@@ -424,6 +436,7 @@ describe("Jira webhook ingestion", () => {
     const link = signed(
       issuePayload({
         webhookEvent: "issuelink_created",
+        issue: undefined,
         issueLink: {
           id: "40001",
           sourceIssueId: "10001",
@@ -440,6 +453,57 @@ describe("Jira webhook ingestion", () => {
     expect(workflowEvents.record.mock.calls[0]![0]).toMatchObject({
       kind: "JIRA_ISSUE_LINKED",
       payload: { sessionData: { link: { type: "Blocks" } } },
+    });
+    expect(jira.resolveIssueKeys).toHaveBeenCalledWith(["10001", "10002"]);
+    expect(jira.refreshCachedTicket).toHaveBeenCalledWith("AIDE-42");
+    expect(jira.refreshCachedTicket).toHaveBeenCalledWith("AIDE-43");
+  });
+
+  test.each(["sprint_started", "sprint_closed"])(
+    "refreshes every ticket for a %s payload without an issue",
+    async (webhookEvent) => {
+      const input = signed({ webhookEvent, sprint: { id: 27 } });
+
+      await expect(
+        service().handleWebhook({
+          ...input,
+          deliveryId: `delivery-${webhookEvent}`,
+          retryCount: null,
+        }),
+      ).resolves.toMatchObject({
+        outcome: "PROCESSED",
+        event: webhookEvent,
+        issueKey: null,
+      });
+
+      expect(jira.refreshSprintTickets).toHaveBeenCalledWith(27);
+      expect(deliveries.get(`delivery-${webhookEvent}`)).toMatchObject({
+        outcome: "PROCESSED",
+        issueKey: null,
+      });
+    },
+  );
+
+  test("prunes retention after ignored and failed terminal deliveries", async () => {
+    const ignored = signed(issuePayload({ webhookEvent: "project_updated" }));
+    await service().handleWebhook({
+      ...ignored,
+      deliveryId: "delivery-ignored",
+      retryCount: null,
+    });
+
+    jira.refreshCachedTicket.mockRejectedValueOnce(new Error("Jira is down"));
+    await expect(
+      service().handleWebhook({
+        ...signed(issuePayload()),
+        deliveryId: "delivery-failed",
+        retryCount: null,
+      }),
+    ).rejects.toThrow("Jira is down");
+
+    expect(deleteMany).toHaveBeenCalledTimes(2);
+    expect(deleteMany).toHaveBeenLastCalledWith({
+      where: { receivedAt: { lt: expect.any(Date) } },
     });
   });
 

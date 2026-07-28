@@ -1932,6 +1932,7 @@
     "webhookNeedsSetup": "GitHub App credentials are verified, but GitHub reports that webhooks are not enabled. Enable webhooks, select the Workflow run event, then save again.",
     "webhookUnavailable": "Webhook unavailable until this deployment has a public HTTPS origin; personal-token polling remains available.",
     "lastWebhook": "Last webhook: {date} ({outcome})",
+    "viewDeliveries": "View deliveries",
     "save": "Save and verify",
     "rotate": "Rotate key and verify",
     "test": "Test connection",

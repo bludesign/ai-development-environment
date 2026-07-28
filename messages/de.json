@@ -1932,6 +1932,7 @@
     "webhookNeedsSetup": "Die Zugangsdaten der GitHub App sind verifiziert, aber laut GitHub sind Webhooks nicht aktiviert. Aktiviere Webhooks, wähle das Ereignis Workflow run und speichere erneut.",
     "webhookUnavailable": "Der Webhook benötigt einen öffentlichen HTTPS-Ursprung; Personal-Token-Polling bleibt verfügbar.",
     "lastWebhook": "Letzter Webhook: {date} ({outcome})",
+    "viewDeliveries": "Zustellungen anzeigen",
     "save": "Speichern und verifizieren",
     "rotate": "Schlüssel rotieren und prüfen",
     "test": "Verbindung prüfen",

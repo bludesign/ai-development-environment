@@ -1932,6 +1932,7 @@
     "webhookNeedsSetup": "Las credenciales de la GitHub App están verificadas, pero GitHub indica que los webhooks no están activados. Activa los webhooks, selecciona el evento Workflow run y vuelve a guardar.",
     "webhookUnavailable": "El webhook requiere un origen HTTPS público; el sondeo con token personal sigue disponible.",
     "lastWebhook": "Último webhook: {date} ({outcome})",
+    "viewDeliveries": "Ver entregas",
     "save": "Guardar y verificar",
     "rotate": "Rotar clave y verificar",
     "test": "Probar conexión",

@@ -68,15 +68,16 @@ function createJiraAdministrationGroup(
         name: "rotate_jira_webhook_secret",
         title: "Rotate Jira webhook secret",
         description:
-          "Replace the Jira webhook signing secret. The new secret is only readable in Settings — deliveries fail until it is pasted into Jira.",
+          "Replace the Jira webhook signing secret and return it once. For a manually configured webhook, paste the returned secret into Jira before expecting deliveries to succeed.",
         inputSchema: z.object({}),
-        outputSchema: z.object({ rotated: z.boolean() }),
+        outputSchema: z.object({
+          rotated: z.boolean(),
+          secret: z.string().min(1),
+        }),
         annotations: { ...WRITE_ANNOTATIONS, idempotentHint: false },
-        // Deliberately does not return the secret: an MCP client is the wrong
-        // place to hand out a live signing key.
         handler: async () => {
-          await webhooks.rotateSecret();
-          return { rotated: true };
+          const result = await webhooks.rotateSecret();
+          return { rotated: true, secret: result.secret };
         },
       }),
       serviceTool({
@@ -147,8 +148,8 @@ function createJiraAdministrationGroup(
           projectId: z.string().min(1),
           ticketAssignmentFilter: z.enum([
             "ALL",
-            "ASSIGNED_TO_ME",
-            "UNASSIGNED",
+            "UNASSIGNED_OR_SELF",
+            "SELF_IN_PROGRESS",
           ]),
           hideCompletedTickets: z.boolean(),
           completedStatusIds: z.array(z.string()),

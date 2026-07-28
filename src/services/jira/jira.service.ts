@@ -573,7 +573,15 @@ export class JiraService {
           cacheTtlSeconds: DEFAULT_TTL_SECONDS,
         },
         update: siteChanged
-          ? { siteUrl, email, webhookEnabled: false, webhookConfiguredAt: null }
+          ? {
+              siteUrl,
+              email,
+              webhookEnabled: false,
+              webhookConfiguredAt: null,
+              webhookId: null,
+              webhookUrl: null,
+              webhookJql: null,
+            }
           : { siteUrl, email },
       });
     };
@@ -596,6 +604,33 @@ export class JiraService {
   }
 
   async clearCredentials(): Promise<JiraSettingsView> {
+    const prisma = await getPrismaClient();
+    const settings = await prisma.jiraSettings.findUnique({
+      where: { id: SETTINGS_ID },
+      select: {
+        siteUrl: true,
+        email: true,
+        webhookId: true,
+      },
+    });
+    const tokenConfigured = await this.credentials.isConfigured(
+      CREDENTIALS.jiraApiToken,
+    );
+    if (
+      settings?.siteUrl &&
+      settings.email &&
+      settings.webhookId &&
+      tokenConfigured
+    ) {
+      try {
+        await this.webhookApiRequest(
+          "DELETE",
+          `/rest/webhooks/1.0/webhook/${encodeURIComponent(settings.webhookId)}`,
+        );
+      } catch (error) {
+        if (errorStatus(error) !== 404) throw error;
+      }
+    }
     await this.credentials.deleteMany(
       [CREDENTIALS.jiraApiToken, CREDENTIALS.jiraWebhookSecret],
       async (transaction) => {
@@ -609,6 +644,9 @@ export class JiraService {
             email: null,
             webhookEnabled: false,
             webhookConfiguredAt: null,
+            webhookId: null,
+            webhookUrl: null,
+            webhookJql: null,
           },
         });
       },
@@ -1705,6 +1743,75 @@ export class JiraService {
       });
     }
     return this.ticket(issueKey, true, changelog);
+  }
+
+  async resolveIssueKeys(issueIds: string[]): Promise<string[]> {
+    const ids = [
+      ...new Set(issueIds.map((issueId) => issueId.trim()).filter(Boolean)),
+    ];
+    if (ids.length === 0) return [];
+    const { version3 } = await this.getClients();
+    const issues = await Promise.all(
+      ids.map((issueId) =>
+        version3.issues.getIssue<RawIssue>({
+          issueIdOrKey: issueId,
+          fields: ["key"],
+        }),
+      ),
+    );
+    return [
+      ...new Set(
+        issues.map((issue) => {
+          const key = asString(issue.key);
+          if (!key) throw new Error(`Jira issue ${issue.id ?? ""} has no key`);
+          return normalizeIssueKey(key);
+        }),
+      ),
+    ];
+  }
+
+  async refreshSprintTickets(sprintId: number): Promise<JiraTicketDetail[]> {
+    if (!Number.isSafeInteger(sprintId) || sprintId <= 0) {
+      throw new Error("Invalid Jira sprint ID");
+    }
+    const { agile } = await this.getClients();
+    const issueKeys: string[] = [];
+    let startAt = 0;
+    while (issueKeys.length < MAX_ISSUES) {
+      const maxResults = Math.min(PAGE_SIZE, MAX_ISSUES - issueKeys.length);
+      const page = await agile.sprint.getIssuesForSprint<RawSearchPage>({
+        sprintId,
+        startAt,
+        maxResults,
+        fields: ["key"],
+      });
+      const issues = page.issues ?? [];
+      issueKeys.push(
+        ...issues.flatMap((issue) => {
+          const key = asString(issue.key);
+          return key ? [normalizeIssueKey(key)] : [];
+        }),
+      );
+      const complete =
+        page.total === undefined
+          ? issues.length < maxResults
+          : startAt + issues.length >= page.total;
+      if (issues.length === 0 || complete) break;
+      startAt += issues.length;
+    }
+
+    const tickets: JiraTicketDetail[] = [];
+    const uniqueKeys = [...new Set(issueKeys)];
+    for (let index = 0; index < uniqueKeys.length; index += 5) {
+      tickets.push(
+        ...(await Promise.all(
+          uniqueKeys
+            .slice(index, index + 5)
+            .map((issueKey) => this.refreshCachedTicket(issueKey)),
+        )),
+      );
+    }
+    return tickets;
   }
 
   async listCachedTickets(

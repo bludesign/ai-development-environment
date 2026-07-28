@@ -1,5 +1,7 @@
 import { beforeEach, describe, expect, test, vi } from "vitest";
 
+import { JiraWebhookRequestError } from "@/services/jira";
+
 const handleWebhook = vi.hoisted(() => vi.fn());
 
 vi.mock("@/services/server-services", () => ({
@@ -86,10 +88,16 @@ describe("POST /api/public/jira/webhook", () => {
   });
 
   test.each([
-    [new Error("Jira webhook signature is invalid"), 401],
-    [new Error("Jira webhook is not configured"), 503],
-    [new Error("Jira webhook payload is invalid JSON"), 400],
-  ])("maps service errors to a safe HTTP status", async (error, status) => {
+    [
+      new JiraWebhookRequestError("Jira webhook signature is invalid", 401),
+      401,
+    ],
+    [new JiraWebhookRequestError("Jira webhook is not configured", 503), 503],
+    [
+      new JiraWebhookRequestError("Jira webhook payload is invalid JSON", 400),
+      400,
+    ],
+  ])("maps request errors to a safe HTTP status", async (error, status) => {
     handleWebhook.mockRejectedValue(error);
     const response = await POST(
       new Request("https://control.example/api/public/jira/webhook", {
@@ -99,5 +107,21 @@ describe("POST /api/public/jira/webhook", () => {
     );
     expect(response.status).toBe(status);
     expect(response.headers.get("cache-control")).toBe("no-store");
+  });
+
+  test("returns a retryable status for operational processing failures", async () => {
+    handleWebhook.mockRejectedValue(new Error("database unavailable"));
+
+    const response = await POST(
+      new Request("https://control.example/api/public/jira/webhook", {
+        method: "POST",
+        body: "{}",
+      }),
+    );
+
+    expect(response.status).toBe(500);
+    await expect(response.json()).resolves.toEqual({
+      error: "Jira webhook processing failed",
+    });
   });
 });

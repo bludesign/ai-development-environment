@@ -105,6 +105,16 @@ export type JiraWebhookResult = {
   triggersRecorded: number;
 };
 
+export class JiraWebhookRequestError extends Error {
+  constructor(
+    message: string,
+    readonly httpStatus: 400 | 401 | 503,
+  ) {
+    super(message);
+    this.name = "JiraWebhookRequestError";
+  }
+}
+
 function secureEqual(expected: string, supplied: string): boolean {
   const left = Buffer.from(expected);
   const right = Buffer.from(supplied);
@@ -179,6 +189,28 @@ function projectKeyOf(payload: Record<string, unknown>): string | null {
   const fields = record(issue?.fields);
   const project = record(fields?.project) ?? record(payload.project);
   return text(project?.key)?.toUpperCase() ?? null;
+}
+
+function projectKeyFromIssueKey(issueKey: string): string | null {
+  const separator = issueKey.lastIndexOf("-");
+  return separator > 0 ? issueKey.slice(0, separator) : null;
+}
+
+function issueLinkIssueIds(payload: Record<string, unknown>): string[] {
+  const issueLink = record(payload.issueLink);
+  return [
+    scalarText(issueLink?.sourceIssueId),
+    scalarText(issueLink?.destinationIssueId),
+  ].filter((value, index, values): value is string =>
+    Boolean(value && values.indexOf(value) === index),
+  );
+}
+
+function sprintIdOf(payload: Record<string, unknown>): number | null {
+  const value = scalarText(record(payload.sprint)?.id);
+  if (!value) return null;
+  const sprintId = Number(value);
+  return Number.isSafeInteger(sprintId) && sprintId > 0 ? sprintId : null;
 }
 
 function statusOf(error: unknown): number | null {
@@ -532,18 +564,26 @@ export class JiraWebhookService {
     const secret = await this.credentials.getText(
       CREDENTIALS.jiraWebhookSecret,
     );
-    if (!secret) throw new Error("Jira webhook is not configured");
+    if (!secret) {
+      throw new JiraWebhookRequestError("Jira webhook is not configured", 503);
+    }
     if (!input.signature?.startsWith("sha256=")) {
-      throw new Error("Jira webhook signature is missing");
+      throw new JiraWebhookRequestError(
+        "Jira webhook signature is missing",
+        401,
+      );
     }
     const expected = `sha256=${createHmac("sha256", secret)
       .update(input.body)
       .digest("hex")}`;
     if (!secureEqual(expected, input.signature)) {
-      throw new Error("Jira webhook signature is invalid");
+      throw new JiraWebhookRequestError(
+        "Jira webhook signature is invalid",
+        401,
+      );
     }
     if (!input.deliveryId?.trim()) {
-      throw new Error("Jira delivery ID is missing");
+      throw new JiraWebhookRequestError("Jira delivery ID is missing", 400);
     }
 
     const prisma = await getPrismaClient();
@@ -579,6 +619,7 @@ export class JiraWebhookService {
         },
       });
       if (retried.count === 0) {
+        await this.prune().catch(() => undefined);
         return {
           outcome: "DUPLICATE",
           event: null,
@@ -604,15 +645,19 @@ export class JiraWebhookService {
     try {
       let payload: Record<string, unknown>;
       try {
-        payload = JSON.parse(
-          Buffer.from(input.body).toString("utf8"),
-        ) as Record<string, unknown>;
+        const parsed = JSON.parse(Buffer.from(input.body).toString("utf8"));
+        const object = record(parsed);
+        if (!object) throw new Error("Payload is not an object");
+        payload = object;
       } catch {
-        throw new Error("Jira webhook payload is invalid JSON");
+        throw new JiraWebhookRequestError(
+          "Jira webhook payload is invalid JSON",
+          400,
+        );
       }
       const event = text(payload.webhookEvent);
-      const issueKey = issueKeyOf(payload);
-      const projectKey = projectKeyOf(payload);
+      let issueKey = issueKeyOf(payload);
+      let projectKey = projectKeyOf(payload);
       const changelog = normalizeChangelog(payload.changelog);
       await prisma.jiraWebhookDelivery.update({
         where: { deliveryId },
@@ -634,45 +679,101 @@ export class JiraWebhookService {
         await finish("IGNORED", `Unhandled Jira event ${event}`);
         return { outcome: "IGNORED", event, issueKey, triggersRecorded: 0 };
       }
-      if (!issueKey) {
+
+      let issueKeys = issueKey ? [issueKey] : [];
+      if (event === "issuelink_created" || event === "issuelink_deleted") {
+        const issueIds = issueLinkIssueIds(payload);
+        if (issueIds.length === 0) {
+          await finish("IGNORED", "Payload has no issue-link issue IDs");
+          return { outcome: "IGNORED", event, issueKey, triggersRecorded: 0 };
+        }
+        issueKeys = await this.jira.resolveIssueKeys(issueIds);
+        issueKey = issueKeys[0] ?? null;
+        projectKey = issueKey
+          ? (projectKey ?? projectKeyFromIssueKey(issueKey))
+          : projectKey;
+        await prisma.jiraWebhookDelivery.update({
+          where: { deliveryId },
+          data: { issueKey, projectKey },
+        });
+      }
+
+      const sprintEvent =
+        event === "sprint_started" || event === "sprint_closed";
+      if (!sprintEvent && !issueKey) {
         await finish("IGNORED", "Payload has no issue key");
         return { outcome: "IGNORED", event, issueKey, triggersRecorded: 0 };
       }
 
       // Refreshing the ticket both repopulates the cache the Jira pages read
       // and makes JiraService emit the existing cursor-based JIRA_* triggers.
+      const changedTickets: Array<{
+        key: string;
+        projectKey: string | null;
+      }> = [];
       if (event === "jira:issue_deleted") {
-        await this.jira.deleteCachedTicket(issueKey);
+        await this.jira.deleteCachedTicket(issueKey!);
+        changedTickets.push({ key: issueKey!, projectKey });
+      } else if (sprintEvent) {
+        const sprintId = sprintIdOf(payload);
+        if (!sprintId) {
+          await finish("IGNORED", "Payload has no valid sprint ID");
+          return { outcome: "IGNORED", event, issueKey, triggersRecorded: 0 };
+        }
+        const tickets = await this.jira.refreshSprintTickets(sprintId);
+        changedTickets.push(
+          ...tickets.map((ticket) => ({
+            key: ticket.key,
+            projectKey: ticket.projectKey,
+          })),
+        );
       } else if (event === "jira:issue_updated") {
-        await this.jira.refreshCachedTicket(issueKey, changelog);
+        const ticket = await this.jira.refreshCachedTicket(
+          issueKey!,
+          changelog,
+        );
+        changedTickets.push({ key: ticket.key, projectKey: ticket.projectKey });
       } else if (ISSUE_MUTATING_EVENTS.has(event)) {
-        await this.jira.refreshCachedTicket(issueKey);
+        const tickets = await Promise.all(
+          issueKeys.map((key) => this.jira.refreshCachedTicket(key)),
+        );
+        changedTickets.push(
+          ...tickets.map((ticket) => ({
+            key: ticket.key,
+            projectKey: ticket.projectKey,
+          })),
+        );
       }
 
-      const triggersRecorded = await this.recordWebhookTrigger({
-        event,
-        deliveryId,
-        issueKey,
-        projectKey,
-        retries,
-        payload,
-      });
+      const triggersRecorded = issueKey
+        ? await this.recordWebhookTrigger({
+            event,
+            deliveryId,
+            issueKey,
+            projectKey,
+            retries,
+            payload,
+          })
+        : 0;
 
-      agentEventBus.publish(JIRA_TICKET_CHANGED_TOPIC, {
-        jiraTicketChanged: {
-          issueKey,
-          projectKey,
-          event,
-        } satisfies JiraTicketChange,
-      });
+      for (const ticket of changedTickets) {
+        agentEventBus.publish(JIRA_TICKET_CHANGED_TOPIC, {
+          jiraTicketChanged: {
+            issueKey: ticket.key,
+            projectKey: ticket.projectKey,
+            event,
+          } satisfies JiraTicketChange,
+        });
+      }
 
       await finish("PROCESSED");
-      void this.prune().catch(() => undefined);
       return { outcome: "PROCESSED", event, issueKey, triggersRecorded };
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       await finish("ERROR", message);
       throw error;
+    } finally {
+      await this.prune().catch(() => undefined);
     }
   }
 
