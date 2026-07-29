@@ -307,6 +307,29 @@ describe("WorktreeDetailPage", () => {
           worktreeOverview: overview({ iosBuildConfigured: true }),
           builds: { items: [buildHistoryItem], nextCursor: null },
           worktreeCoverageReports: [coverageHistoryReport],
+          worktreeRunQueue: [
+            {
+              position: 1,
+              id: "workflow-run-4",
+              kind: "WORKFLOW",
+              displayNumber: 4,
+              name: "Exclusive review",
+              status: "QUEUED",
+              phase: "WAITING_FOR_WORKTREE",
+              worktreeId: "worktree-1",
+              worktree: {
+                id: "worktree-1",
+                folder: "/workspaces/repo-aide-43",
+                branch: "feature/AIDE-43",
+                highlightColor: "blue",
+              },
+              workflowId: "workflow-1",
+              workflowRunId: "workflow-run-4",
+              queuedAt: "2026-07-26T00:01:00.000Z",
+              exclusiveWorktree: true,
+              worktreeConcurrencyLimit: null,
+            },
+          ],
         } as never;
       }
       if (query.includes("InspectWorktree")) {
@@ -373,6 +396,17 @@ describe("WorktreeDetailPage", () => {
     );
     expect(await screen.findByText("src/worktree-details.tsx")).toBeDefined();
     expect(screen.getByText("Add worktree details")).toBeDefined();
+    const queueCard = screen
+      .getByText("Worktree queue")
+      .closest<HTMLElement>('[data-slot="card"]');
+    expect(queueCard).not.toBeNull();
+    expect(
+      within(queueCard!)
+        .getByRole("link", { name: "Workflow #4" })
+        .getAttribute("href"),
+    ).toBe("/workflows/runs/workflow-run-4");
+    expect(within(queueCard!).getByText("#1")).toBeDefined();
+    expect(within(queueCard!).getByText("Exclusive")).toBeDefined();
     const changeRow = screen.getByRole("button", {
       name: /src\/worktree-details\.tsx/,
     });

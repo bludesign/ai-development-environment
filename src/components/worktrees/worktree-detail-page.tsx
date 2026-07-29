@@ -22,6 +22,8 @@ import { useBuildTimeTicker } from "@/components/builds/use-build-time-ticker";
 import { CoverageValue } from "@/components/common/coverage-value";
 import { WorktreePipelinesCard } from "@/components/github/worktree-pipelines-card";
 import { WorkflowQuickActions } from "@/components/workflows/workflow-quick-actions";
+import { WorktreeRunQueueCard } from "@/components/workflows/worktree-run-queue-card";
+import type { WorktreeRunQueueEntry } from "@/components/workflows/types";
 import { CommandQuickActions } from "@/components/commands/command-quick-actions";
 import { CommandResourcePanel } from "@/components/commands/command-resource-panel";
 import { JiraTicketDrawer } from "@/components/jira/ticket-drawer";
@@ -132,6 +134,11 @@ const OVERVIEW_QUERY = `query WorktreeDetailOverview($worktreeId: ID!) {
       artifacts { id kind relativePath sizeBytes checksum metadata createdAt }
     }
   }
+  worktreeRunQueue(worktreeId: $worktreeId) {
+    position id kind displayNumber name status phase worktreeId workflowId workflowRunId
+    queuedAt exclusiveWorktree worktreeConcurrencyLimit
+    worktree { id folder branch highlightColor }
+  }
 }`;
 
 type CoverageHistoryReport = BuildReport & { build: BuildRecord };
@@ -157,6 +164,7 @@ export function WorktreeDetailPage({ worktreeId }: { worktreeId: string }) {
   const [coverageReports, setCoverageReports] = useState<
     CoverageHistoryReport[]
   >([]);
+  const [queue, setQueue] = useState<WorktreeRunQueueEntry[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [pipelines, setPipelines] = useState<GitHubActionsWorkflowRunView[]>(
@@ -174,6 +182,7 @@ export function WorktreeDetailPage({ worktreeId }: { worktreeId: string }) {
         worktreeOverview: WorktreeOverview;
         builds?: { items: BuildRecord[]; nextCursor: string | null };
         worktreeCoverageReports?: CoverageHistoryReport[];
+        worktreeRunQueue?: WorktreeRunQueueEntry[];
       }>(OVERVIEW_QUERY, { worktreeId });
       if (requestId !== latestOverviewLoad.current) return;
       displayedCodebaseId.current =
@@ -183,6 +192,7 @@ export function WorktreeDetailPage({ worktreeId }: { worktreeId: string }) {
       setBuilds(data.builds?.items ?? []);
       setBuildsNextCursor(data.builds?.nextCursor ?? null);
       setCoverageReports(data.worktreeCoverageReports ?? []);
+      setQueue(data.worktreeRunQueue ?? []);
       setError(null);
     } catch (value) {
       if (requestId === latestOverviewLoad.current) {
@@ -315,6 +325,19 @@ export function WorktreeDetailPage({ worktreeId }: { worktreeId: string }) {
         complete: () => undefined,
       },
     );
+    const unsubscribeAgentRuns = subscriptions.subscribe<{
+      agentRunsChanged: { id: string } | null;
+    }>(
+      {
+        query:
+          "subscription WorktreeQueueAgentRuns { agentRunsChanged { id } }",
+      },
+      {
+        next: () => void loadOverview(),
+        error: () => undefined,
+        complete: () => undefined,
+      },
+    );
     return () => {
       window.clearTimeout(initial);
       window.clearInterval(poll);
@@ -323,6 +346,7 @@ export function WorktreeDetailPage({ worktreeId }: { worktreeId: string }) {
       unsubscribeWorktrees();
       unsubscribeBuilds();
       unsubscribeWorkflows();
+      unsubscribeAgentRuns();
     };
   }, [load, loadOverview, worktreeId]);
 
@@ -411,6 +435,7 @@ export function WorktreeDetailPage({ worktreeId }: { worktreeId: string }) {
       overview={overview}
       pipelines={pipelines}
       pipelinesError={pipelinesError}
+      queue={queue}
     />
   );
 }
@@ -424,6 +449,7 @@ function LoadedWorktreeDetail({
   overview,
   pipelines,
   pipelinesError,
+  queue,
   loadError,
   onLoadMoreBuilds,
   onPipelineCancelled,
@@ -439,6 +465,7 @@ function LoadedWorktreeDetail({
   overview: WorktreeOverview;
   pipelines: GitHubActionsWorkflowRunView[];
   pipelinesError: string | null;
+  queue: WorktreeRunQueueEntry[];
   loadError: string | null;
   onLoadMoreBuilds: () => Promise<void>;
   onPipelineCancelled: (runId: string) => void;
@@ -705,6 +732,8 @@ function LoadedWorktreeDetail({
         agentCapabilities={entry.agentGroup.agent.capabilities}
         worktreeId={worktree.id}
       />
+
+      <WorktreeRunQueueCard entries={queue} scope="WORKTREE" />
 
       <WorktreePipelinesCard
         branch={worktree.branch}

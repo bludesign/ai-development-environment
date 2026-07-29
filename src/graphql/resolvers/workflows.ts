@@ -194,6 +194,14 @@ export const createWorkflowResolvers = (service: WorkflowsService) => ({
       requireControlPlane(context);
       return service.runs(args);
     },
+    worktreeRunQueue: (
+      _root: unknown,
+      args: { worktreeId?: string | null; workflowId?: string | null },
+      context: GraphQLContext,
+    ) => {
+      requireControlPlane(context);
+      return service.runQueue(args);
+    },
     workflowRun: (
       _root: unknown,
       { id }: { id: string },

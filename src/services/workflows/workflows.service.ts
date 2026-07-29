@@ -177,6 +177,28 @@ export type WorkflowReplayPreview = {
   warning: string | null;
 };
 
+export type WorktreeRunQueueEntry = {
+  position: number;
+  id: string;
+  kind: "WORKFLOW" | "PLAN" | "SESSION";
+  displayNumber: number;
+  name: string;
+  status: string;
+  phase: string;
+  worktreeId: string | null;
+  worktree: {
+    id: string;
+    folder: string;
+    branch: string | null;
+    highlightColor: string | null;
+  } | null;
+  workflowId: string | null;
+  workflowRunId: string | null;
+  queuedAt: string;
+  exclusiveWorktree: boolean;
+  worktreeConcurrencyLimit: number | null;
+};
+
 export type WorkflowWaitPollResult = {
   pending: boolean;
   result?: Record<string, unknown>;
@@ -523,6 +545,207 @@ export class WorkflowsService {
       where: { id: worktreeId },
       select: { id: true, folder: true, branch: true, highlightColor: true },
     });
+  }
+
+  private async queueForWorktree(
+    worktreeId: string,
+  ): Promise<WorktreeRunQueueEntry[]> {
+    const prisma = await getPrismaClient();
+    const [workflowRuns, agentRuns, exclusiveLease] = await Promise.all([
+      prisma.workflowRun.findMany({
+        where: { worktreeId, status: "QUEUED" },
+        orderBy: [{ queuedAt: "asc" }, { id: "asc" }],
+        select: {
+          id: true,
+          displayNumber: true,
+          status: true,
+          phase: true,
+          queuedAt: true,
+          exclusiveWorktree: true,
+          worktreeLeaseOwnerRunId: true,
+          workflowId: true,
+          workflow: { select: { name: true } },
+          worktree: {
+            select: {
+              id: true,
+              folder: true,
+              branch: true,
+              highlightColor: true,
+            },
+          },
+        },
+      }),
+      prisma.agentRun.findMany({
+        where: {
+          worktreeId,
+          origin: "MANAGED",
+          status: "QUEUED",
+          kind: { in: ["PLAN", "SESSION"] },
+        },
+        orderBy: [{ createdAt: "asc" }, { id: "asc" }],
+        select: {
+          id: true,
+          kind: true,
+          displayNumber: true,
+          status: true,
+          phase: true,
+          createdAt: true,
+          initialPrompt: true,
+          worktreeConcurrencyLimit: true,
+          worktree: {
+            select: {
+              id: true,
+              folder: true,
+              branch: true,
+              highlightColor: true,
+            },
+          },
+          workflowRun: {
+            select: {
+              id: true,
+              workflowId: true,
+              worktreeLeaseOwnerRunId: true,
+            },
+          },
+        },
+      }),
+      prisma.worktreeWorkflowLease.findUnique({
+        where: { worktreeId },
+        select: { workflowRunId: true },
+      }),
+    ]);
+    const entries = [
+      ...workflowRuns.map((run) => ({
+        id: run.id,
+        kind: "WORKFLOW" as const,
+        displayNumber: run.displayNumber,
+        name: run.workflow.name,
+        status: run.status,
+        phase: run.phase,
+        worktreeId,
+        worktree: run.worktree,
+        workflowId: run.workflowId,
+        workflowRunId: run.id,
+        queuedAt: run.queuedAt,
+        exclusiveWorktree: run.exclusiveWorktree,
+        worktreeConcurrencyLimit: null,
+        leaseOwnerRunId: run.worktreeLeaseOwnerRunId,
+      })),
+      ...agentRuns.map((run) => ({
+        id: run.id,
+        kind: run.kind as "PLAN" | "SESSION",
+        displayNumber: run.displayNumber,
+        name: run.initialPrompt,
+        status: run.status,
+        phase: run.phase,
+        worktreeId,
+        worktree: run.worktree,
+        workflowId: run.workflowRun?.workflowId ?? null,
+        workflowRunId: run.workflowRun?.id ?? null,
+        queuedAt: run.createdAt,
+        exclusiveWorktree: false,
+        worktreeConcurrencyLimit: run.worktreeConcurrencyLimit,
+        leaseOwnerRunId: run.workflowRun?.worktreeLeaseOwnerRunId ?? null,
+      })),
+    ].sort((left, right) => {
+      if (exclusiveLease) {
+        const leftOwned = left.leaseOwnerRunId === exclusiveLease.workflowRunId;
+        const rightOwned =
+          right.leaseOwnerRunId === exclusiveLease.workflowRunId;
+        if (leftOwned !== rightOwned) return leftOwned ? -1 : 1;
+      }
+      return (
+        left.queuedAt.getTime() - right.queuedAt.getTime() ||
+        left.id.localeCompare(right.id)
+      );
+    });
+    return entries.map(
+      ({ leaseOwnerRunId: _leaseOwnerRunId, ...entry }, index) => ({
+        ...entry,
+        position: index + 1,
+        queuedAt: entry.queuedAt.toISOString(),
+      }),
+    );
+  }
+
+  async runQueue(input: {
+    worktreeId?: string | null;
+    workflowId?: string | null;
+  }): Promise<WorktreeRunQueueEntry[]> {
+    if (input.worktreeId) return this.queueForWorktree(input.worktreeId);
+    if (!input.workflowId) {
+      throw new Error("A worktree or workflow is required to read its queue");
+    }
+    const prisma = await getPrismaClient();
+    const [workflowRuns, agentRuns] = await Promise.all([
+      prisma.workflowRun.findMany({
+        where: { workflowId: input.workflowId, status: "QUEUED" },
+        select: {
+          id: true,
+          worktreeId: true,
+          displayNumber: true,
+          status: true,
+          phase: true,
+          queuedAt: true,
+          exclusiveWorktree: true,
+          workflow: { select: { name: true } },
+        },
+      }),
+      prisma.agentRun.findMany({
+        where: {
+          origin: "MANAGED",
+          status: "QUEUED",
+          workflowRun: { workflowId: input.workflowId },
+        },
+        select: { id: true, worktreeId: true },
+      }),
+    ]);
+    const workflowRunIds = new Set(workflowRuns.map(({ id }) => id));
+    const agentRunIds = new Set(agentRuns.map(({ id }) => id));
+    const worktreeIds = [
+      ...new Set(
+        [...workflowRuns, ...agentRuns]
+          .map(({ worktreeId }) => worktreeId)
+          .filter((id): id is string => Boolean(id)),
+      ),
+    ];
+    const scoped = (
+      await Promise.all(worktreeIds.map((id) => this.queueForWorktree(id)))
+    )
+      .flat()
+      .filter((entry) =>
+        entry.kind === "WORKFLOW"
+          ? workflowRunIds.has(entry.id)
+          : agentRunIds.has(entry.id),
+      );
+    const withoutWorktree = workflowRuns
+      .filter(({ worktreeId }) => !worktreeId)
+      .sort(
+        (left, right) =>
+          left.queuedAt.getTime() - right.queuedAt.getTime() ||
+          left.id.localeCompare(right.id),
+      )
+      .map((run, index) => ({
+        position: index + 1,
+        id: run.id,
+        kind: "WORKFLOW" as const,
+        displayNumber: run.displayNumber,
+        name: run.workflow.name,
+        status: run.status,
+        phase: run.phase,
+        worktreeId: null,
+        worktree: null,
+        workflowId: input.workflowId!,
+        workflowRunId: run.id,
+        queuedAt: run.queuedAt.toISOString(),
+        exclusiveWorktree: run.exclusiveWorktree,
+        worktreeConcurrencyLimit: null,
+      }));
+    return [...scoped, ...withoutWorktree].sort(
+      (left, right) =>
+        new Date(left.queuedAt).getTime() -
+          new Date(right.queuedAt).getTime() || left.id.localeCompare(right.id),
+    );
   }
 
   private async notifyRun(

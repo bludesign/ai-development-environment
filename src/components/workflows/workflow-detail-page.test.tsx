@@ -105,6 +105,29 @@ describe("workflow detail read-only inspector", () => {
           updatedAt: "2026-07-26T00:00:00.000Z",
         },
         workflowRuns: { items: [] },
+        worktreeRunQueue: [
+          {
+            position: 2,
+            id: "session-3",
+            kind: "SESSION",
+            displayNumber: 3,
+            name: "Review workflow",
+            status: "QUEUED",
+            phase: "WAITING_FOR_WORKTREE",
+            worktreeId: "worktree-1",
+            worktree: {
+              id: "worktree-1",
+              folder: "/workspaces/review",
+              branch: "feature/review",
+              highlightColor: "blue",
+            },
+            workflowId: "workflow-1",
+            workflowRunId: "workflow-run-1",
+            queuedAt: "2026-07-26T00:01:00.000Z",
+            exclusiveWorktree: false,
+            worktreeConcurrencyLimit: 1,
+          },
+        ],
         workflowCatalog: {
           schemaVersion: 1,
           globalConcurrency: 1,
@@ -135,6 +158,18 @@ describe("workflow detail read-only inspector", () => {
           <WorkflowDetailPage workflowId="workflow-1" />
         </TooltipProvider>,
       );
+
+      const queueCard = (
+        await screen.findByRole("link", { name: "Session #3" })
+      ).closest<HTMLElement>('[data-slot="card"]');
+      expect(queueCard).not.toBeNull();
+      expect(
+        queueCard?.querySelector('a[href="/sessions/session-3"]')?.textContent,
+      ).toBe("Session #3");
+      expect(queueCard?.textContent).toContain("#2");
+      expect(
+        queueCard?.querySelector('a[href="/worktrees/worktree-1"]'),
+      ).toBeTruthy();
 
       fireEvent.click(
         await screen.findByRole("button", {

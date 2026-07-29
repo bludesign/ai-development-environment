@@ -217,6 +217,28 @@ export type WorkflowRun = {
   resourceLinks: WorkflowResourceLink[];
 };
 
+export type WorktreeRunQueueEntry = {
+  position: number;
+  id: string;
+  kind: "WORKFLOW" | "PLAN" | "SESSION";
+  displayNumber: number;
+  name: string;
+  status: string;
+  phase: string;
+  worktreeId: string | null;
+  worktree: {
+    id: string;
+    folder: string;
+    branch: string | null;
+    highlightColor: string | null;
+  } | null;
+  workflowId: string | null;
+  workflowRunId: string | null;
+  queuedAt: string;
+  exclusiveWorktree: boolean;
+  worktreeConcurrencyLimit: number | null;
+};
+
 export function emptyDefinition(
   name = "Untitled workflow",
 ): WorkflowDefinition {

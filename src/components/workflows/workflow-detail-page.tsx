@@ -70,6 +70,7 @@ import {
 import { WorkflowChoiceMenu } from "./workflow-choice-menu";
 import { WorkflowGraph, workflowStatusVariant } from "./workflow-graph";
 import { WorkflowReadonlyInspector } from "./workflow-readonly-inspector";
+import { WorktreeRunQueueCard } from "./worktree-run-queue-card";
 import {
   BUILD_CONFIGURATION_ICON_KEYS,
   ConfigurationIcon,
@@ -81,6 +82,7 @@ import type {
   WorkflowRun,
   WorkflowSummary,
   WorkflowVersion,
+  WorktreeRunQueueEntry,
 } from "./types";
 
 type WorkflowDetail = WorkflowSummary & {
@@ -123,6 +125,7 @@ export function WorkflowDetailPage({ workflowId }: { workflowId: string }) {
   const router = useRouter();
   const [workflow, setWorkflow] = useState<WorkflowDetail | null>(null);
   const [runs, setRuns] = useState<WorkflowRun[]>([]);
+  const [queue, setQueue] = useState<WorktreeRunQueueEntry[]>([]);
   const [catalog, setCatalog] = useState<WorkflowCatalog | null>(null);
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
@@ -147,6 +150,7 @@ export function WorkflowDetailPage({ workflowId }: { workflowId: string }) {
       const data = await controlPlaneRequest<{
         workflow: WorkflowDetail | null;
         workflowRuns: { items: WorkflowRun[] };
+        worktreeRunQueue: WorktreeRunQueueEntry[];
         workflowCatalog: WorkflowCatalog;
         codebaseOverview?: {
           repositories: Array<{
@@ -159,6 +163,11 @@ export function WorkflowDetailPage({ workflowId }: { workflowId: string }) {
         `query WorkflowOverview($id: ID!) {
         workflow(id: $id) { ${DETAIL_FIELDS} }
         workflowRuns(workflowId: $id, first: 100) { items { ${RUN_FIELDS} } }
+        worktreeRunQueue(workflowId: $id) {
+          position id kind displayNumber name status phase worktreeId workflowId workflowRunId
+          queuedAt exclusiveWorktree worktreeConcurrencyLimit
+          worktree { id folder branch highlightColor }
+        }
         workflowCatalog {
           schemaVersion globalConcurrency
           steps { kind category label description details execution configSchema capabilityFlags requiredPaths providedPaths sourceHandles mutatesExternal mutatesWorktree }
@@ -170,6 +179,7 @@ export function WorkflowDetailPage({ workflowId }: { workflowId: string }) {
       );
       setWorkflow(data.workflow);
       setRuns(data.workflowRuns.items);
+      setQueue(data.worktreeRunQueue ?? []);
       setCatalog(data.workflowCatalog);
       setRepositories(data.codebaseOverview?.repositories ?? []);
       if (data.workflow) {
@@ -193,7 +203,7 @@ export function WorkflowDetailPage({ workflowId }: { workflowId: string }) {
   useEffect(() => {
     const timer = window.setTimeout(() => void load(), 0);
     const client = controlPlaneSubscriptions();
-    const subscription = client.subscribe<{
+    const workflowSubscription = client.subscribe<{
       workflowsChanged: { id: string } | null;
     }>(
       {
@@ -206,9 +216,23 @@ export function WorkflowDetailPage({ workflowId }: { workflowId: string }) {
         complete: () => undefined,
       },
     );
+    const agentRunSubscription = client.subscribe<{
+      agentRunsChanged: { id: string } | null;
+    }>(
+      {
+        query:
+          "subscription WorkflowQueueAgentRuns { agentRunsChanged { id } }",
+      },
+      {
+        next: () => void load(),
+        error: () => undefined,
+        complete: () => undefined,
+      },
+    );
     return () => {
       window.clearTimeout(timer);
-      subscription();
+      workflowSubscription();
+      agentRunSubscription();
     };
   }, [load]);
 
@@ -603,6 +627,8 @@ export function WorkflowDetailPage({ workflowId }: { workflowId: string }) {
           </div>
         </CardContent>
       </Card>
+
+      <WorktreeRunQueueCard entries={queue} scope="WORKFLOW" />
 
       <div className="grid gap-4 xl:grid-cols-2">
         <Card>

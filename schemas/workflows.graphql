@@ -485,6 +485,38 @@ type WorkflowRunPage {
   totalCount: Int!
 }
 
+"A queued workflow, plan, or session in its effective worktree admission order."
+type WorktreeRunQueueEntry {
+  "One-based position within this worktree's displayed admission order."
+  position: Int!
+  "Stable identifier of the queued run."
+  id: ID!
+  "Whether the entry is a workflow, plan, or session."
+  kind: String!
+  "Display number within the entry's run kind."
+  displayNumber: Int!
+  "Workflow name or initial AI prompt associated with the entry."
+  name: String!
+  "Current status of the queued run."
+  status: String!
+  "Current phase of the queued run."
+  phase: String!
+  "Identifier of the worktree, when one is available."
+  worktreeId: ID
+  "Worktree associated with this queue entry."
+  worktree: WorkflowRunWorktreeRef
+  "Identifier of the workflow definition associated with the entry."
+  workflowId: ID
+  "Identifier of the workflow run that owns or launched the entry."
+  workflowRunId: ID
+  "ISO 8601 timestamp used to order the entry."
+  queuedAt: String!
+  "Whether this workflow entry will reserve the worktree when admitted."
+  exclusiveWorktree: Boolean!
+  "The plan or session's worktree concurrency limit."
+  worktreeConcurrencyLimit: Int
+}
+
 "Represents a workflow replay external effect in the GraphQL API."
 type WorkflowReplayExternalEffect {
   "Category of this workflow replay external effect."
@@ -640,6 +672,13 @@ extend type Query {
     "Cursor or identifier after which to return records. Omit it to leave this dimension unfiltered."
     after: ID
   ): WorkflowRunPage!
+  "Returns the durable queue for one worktree or the queued entries associated with one workflow."
+  worktreeRunQueue(
+    "Worktree whose combined workflow, plan, and session queue should be returned."
+    worktreeId: ID
+    "Workflow whose queued workflow runs and AI-run steps should be returned."
+    workflowId: ID
+  ): [WorktreeRunQueueEntry!]!
   "Returns a workflow run, or null when it cannot be found."
   workflowRun(
     "Identifier of the resource to return or affect."

@@ -501,18 +501,53 @@ describe("durable worktree run queues", () => {
     });
 
     const owned = await service.create({
-      ...input("PLAN", "Owned workflow plan"),
+      ...input("PLAN", "Owned workflow plan", 1),
+      workflowRunId: exclusiveRun.id,
+    });
+    const ownedQueued = await service.create({
+      ...input("PLAN", "Second owned workflow plan", 1),
       workflowRunId: exclusiveRun.id,
     });
     const unrelated = await service.create(input("PLAN", "Unrelated plan"));
     expect(owned?.status).toBe("IN_PROGRESS");
+    expect(ownedQueued).toMatchObject({
+      status: "QUEUED",
+      phase: "WAITING_FOR_WORKTREE",
+    });
     expect(unrelated).toMatchObject({
       status: "QUEUED",
       phase: "WAITING_FOR_WORKTREE",
     });
 
+    await expect(
+      workflows.runQueue({ worktreeId: "worktree-1" }),
+    ).resolves.toMatchObject([
+      { id: ownedQueued!.id, kind: "PLAN", position: 1 },
+      { id: laterPlan!.id, kind: "PLAN", position: 2 },
+      { id: regularWorkflowRun.id, kind: "WORKFLOW", position: 3 },
+      { id: unrelated!.id, kind: "PLAN", position: 4 },
+    ]);
+    await expect(
+      workflows.runQueue({ workflowId: "workflow-exclusive" }),
+    ).resolves.toMatchObject([
+      { id: ownedQueued!.id, kind: "PLAN", position: 1 },
+    ]);
+    await expect(
+      workflows.runQueue({ workflowId: "workflow-regular" }),
+    ).resolves.toMatchObject([
+      { id: regularWorkflowRun.id, kind: "WORKFLOW", position: 3 },
+    ]);
+
     const ownedAttempt = await service.beginAttempt("agent-1", owned!.id);
     await service.finishAttempt("agent-1", ownedAttempt.id, {
+      status: "COMPLETED",
+      finalOutput: "Done",
+    });
+    const ownedQueuedAttempt = await service.beginAttempt(
+      "agent-1",
+      ownedQueued!.id,
+    );
+    await service.finishAttempt("agent-1", ownedQueuedAttempt.id, {
       status: "COMPLETED",
       finalOutput: "Done",
     });
