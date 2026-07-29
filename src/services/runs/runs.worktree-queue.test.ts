@@ -131,6 +131,40 @@ describe("durable worktree run queues", () => {
     worktreeConcurrencyLimit,
   });
 
+  const revisionBatch = async (
+    runId: string,
+    id: string,
+    revisionPreparedAt: Date | null,
+  ) => {
+    await prisma.runQuestionBatch.create({
+      data: {
+        id,
+        runId,
+        status: "ANSWERED",
+        answeredAt: new Date(),
+        revisionPreparedAt,
+        questions: {
+          create: {
+            id: `${id}:question`,
+            position: 0,
+            prompt: "Which API should we use?",
+          },
+        },
+      },
+    });
+    await prisma.runCheckpoint.create({
+      data: {
+        id: `${id}:checkpoint`,
+        runId,
+        questionBatchId: id,
+        kind: "QUESTION",
+        refName: `refs/aide/${id}`,
+        worktreeTree: "tree-sha",
+      },
+    });
+    return id;
+  };
+
   test("queues a second default Session, hides its command, and promotes it FIFO", async () => {
     const first = await service.create(input("SESSION", "First session"));
     const second = await service.create(input("SESSION", "Second session"));
@@ -195,6 +229,86 @@ describe("durable worktree run queues", () => {
         { status: "QUEUED", phase: "WAITING_FOR_WORKTREE" },
       ]),
     );
+  });
+
+  test("keeps a terminal Session reservation while an answer revision is prepared", async () => {
+    const source = await service.create(
+      input("SESSION", "Session with an editable answer"),
+    );
+    await prisma.agentRun.update({
+      where: { id: source!.id },
+      data: { status: "COMPLETED", phase: "COMPLETED", finishedAt: new Date() },
+    });
+    await prisma.worktreeRunLease.delete({ where: { runId: source!.id } });
+    const batchId = await revisionBatch(source!.id, "batch-preparing", null);
+
+    await service.prepareAnswerRevision(batchId);
+
+    await expect(
+      prisma.worktreeRunLease.findUnique({ where: { runId: source!.id } }),
+    ).resolves.toMatchObject({
+      worktreeId: "worktree-1",
+      purpose: "ANSWER_REVISION",
+      reservationKey: batchId,
+    });
+
+    const waiting = await service.create(
+      input("SESSION", "Must wait for revision preparation"),
+    );
+    expect(waiting).toMatchObject({
+      status: "QUEUED",
+      phase: "WAITING_FOR_WORKTREE",
+    });
+
+    await service.reconcileQueuedRuns();
+
+    await expect(service.get(waiting!.id)).resolves.toMatchObject({
+      status: "QUEUED",
+      phase: "WAITING_FOR_WORKTREE",
+    });
+    await expect(
+      prisma.worktreeRunLease.findUnique({ where: { runId: source!.id } }),
+    ).resolves.toMatchObject({ purpose: "ANSWER_REVISION" });
+  });
+
+  test("queues an answer revision without a transferable source lease", async () => {
+    const source = await service.create(
+      input("PLAN", "Plan with an editable answer"),
+    );
+    await prisma.agentRun.update({
+      where: { id: source!.id },
+      data: { status: "COMPLETED", phase: "COMPLETED", finishedAt: new Date() },
+    });
+    await prisma.worktreeRunLease.delete({ where: { runId: source!.id } });
+    const occupyingSession = await service.create(
+      input("SESSION", "Session already using the slot"),
+    );
+    const batchId = await revisionBatch(
+      source!.id,
+      "batch-without-lease",
+      new Date(),
+    );
+
+    const replacement = await service.reviseAnswer(
+      batchId,
+      { answer: "GraphQL" },
+      false,
+    );
+
+    expect(occupyingSession?.status).toBe("IN_PROGRESS");
+    expect(replacement).toMatchObject({
+      status: "QUEUED",
+      phase: "WAITING_FOR_WORKTREE",
+      parentRunId: source!.id,
+      followUpMode: "ANSWER_REVISION",
+    });
+    await expect(
+      prisma.worktreeRunLease.findUnique({
+        where: { runId: replacement!.id },
+      }),
+    ).resolves.toBeNull();
+    const visible = await service.pendingCommands("agent-1");
+    expect(visible.map(({ runId }) => runId)).not.toContain(replacement!.id);
   });
 
   test("keeps Plan and Session pools separate and allows unlimited Plans", async () => {

@@ -112,6 +112,32 @@ const MAX_SESSION_BYTES = 2 * 1024 * 1024;
 const GLOBAL_CONCURRENCY = 4;
 const CLAIM_TTL_MS = 5 * 60_000;
 const RESOURCE_HOLD_TIMEOUT_MS = 10 * 60_000;
+const ANSWER_REVISION_LEASE_PURPOSE = "ANSWER_REVISION";
+const EXCLUSIVE_WORKTREE_IDENTITY_MUTATION_STEPS = new Set([
+  "WORKTREE_CREATE",
+  "WORKTREE_DELETE",
+  "WORKTREE_MOVE",
+  "WORKTREE_MOVE_CONTROL",
+]);
+
+function sessionWorktreeId(sessionData: SessionData): string | null {
+  const value = getSessionValue(sessionData, "worktree.id");
+  return typeof value === "string" && value ? value : null;
+}
+
+function assertExclusiveWorktreeUnchanged(
+  run: Pick<WorkflowRun, "exclusiveWorktree" | "worktreeId">,
+  sessionData: SessionData,
+): void {
+  if (
+    run.exclusiveWorktree &&
+    sessionWorktreeId(sessionData) !== run.worktreeId
+  ) {
+    throw new Error(
+      "Exclusive workflows cannot change worktrees; start a new workflow on the target worktree instead",
+    );
+  }
+}
 
 function queueEntryPrecedes(
   leftAt: Date,
@@ -3196,6 +3222,7 @@ export class WorkflowsService {
     if (identity && typeof identity === "object") {
       next = setSessionValue(next, "workflow", identity);
     }
+    assertExclusiveWorktreeUnchanged(run, next);
     const serialized = JSON.stringify(next);
     assertSize(serialized, "Workflow session data", MAX_SESSION_BYTES);
     await prisma.$transaction([
@@ -3389,6 +3416,7 @@ export class WorkflowsService {
           await transaction.worktreeRunLease.deleteMany({
             where: {
               worktreeId: run.worktreeId,
+              purpose: { not: ANSWER_REVISION_LEASE_PURPOSE },
               run: { status: { in: ["COMPLETED", "FAILED", "CANCELLED"] } },
             },
           });
@@ -4068,6 +4096,19 @@ export class WorkflowsService {
         `blocked:${attempt.id}`,
       );
       publishRunChanged(attempt.runId);
+      return;
+    }
+    if (
+      attempt.run.exclusiveWorktree &&
+      EXCLUSIVE_WORKTREE_IDENTITY_MUTATION_STEPS.has(node.kind)
+    ) {
+      await this.failAttempt(
+        attempt,
+        node,
+        new Error(
+          "Exclusive workflows cannot run steps that create, delete, or move their worktree",
+        ),
+      );
       return;
     }
     await prisma.workflowStepAttempt.update({
@@ -4780,6 +4821,7 @@ export class WorkflowsService {
               ?.resourceId ?? null,
         });
       }
+      assertExclusiveWorktreeUnchanged(run, sessionData);
       const serialized = JSON.stringify(sessionData);
       assertSize(serialized, "Workflow session data", MAX_SESSION_BYTES);
       const claimed = await transaction.workflowStepAttempt.updateMany({
@@ -5220,11 +5262,19 @@ export class WorkflowsService {
         setSessionValue({}, `steps.${node.id}.answer`, output),
       );
     }
-    await this.completeAttempt(attempt, node, {
-      output: output ?? pending.value,
-      selectedHandles: pending.selectedHandles,
-      sessionPatch,
-    });
+    try {
+      await this.completeAttempt(attempt, node, {
+        output: output ?? pending.value,
+        selectedHandles: pending.selectedHandles,
+        sessionPatch,
+      });
+    } catch (error) {
+      await this.failAttempt(
+        attempt,
+        node,
+        error instanceof Error ? error : new Error(String(error)),
+      );
+    }
   }
 
   async resolveExternalWait(
@@ -5426,6 +5476,7 @@ export class WorkflowsService {
       fromNodeId: nodeId,
       replayedAt: new Date().toISOString(),
     });
+    assertExclusiveWorktreeUnchanged(run, sessionData);
     await prisma.$transaction(async (transaction) => {
       await transaction.workflowStepAttempt.updateMany({
         where: {

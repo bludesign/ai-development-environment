@@ -804,14 +804,17 @@ model RunNumberSequence {
 }
 
 model WorktreeRunLease {
-  id         String   @id
-  worktreeId String
-  runId      String   @unique
-  acquiredAt DateTime @default(now())
-  worktree   Worktree @relation(fields: [worktreeId], references: [id], onDelete: Cascade)
-  run        AgentRun @relation(fields: [runId], references: [id], onDelete: Cascade)
+  id             String   @id
+  worktreeId     String
+  runId          String   @unique
+  purpose        String   @default("RUN")
+  reservationKey String?
+  acquiredAt     DateTime @default(now())
+  worktree       Worktree @relation(fields: [worktreeId], references: [id], onDelete: Cascade)
+  run            AgentRun @relation(fields: [runId], references: [id], onDelete: Cascade)
 
   @@index([worktreeId, acquiredAt])
+  @@index([worktreeId, purpose, acquiredAt])
 }
 
 model WorktreeRunConcurrencyLane {

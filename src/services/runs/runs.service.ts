@@ -29,6 +29,7 @@ import {
 const RUN_KINDS = ["PLAN", "SESSION"] as const;
 const PROVIDERS = ["CODEX", "CLAUDE", "OPENCODE"] as const;
 const TERMINAL_STATUSES = new Set(["COMPLETED", "CANCELLED", "FAILED"]);
+const ANSWER_REVISION_LEASE_PURPOSE = "ANSWER_REVISION";
 const ATTEMPT_TERMINAL_STATUSES = [
   "PAUSED",
   "COMPLETED",
@@ -380,6 +381,7 @@ export class RunsService {
       await transaction.worktreeRunLease.deleteMany({
         where: {
           worktreeId,
+          purpose: { not: ANSWER_REVISION_LEASE_PURPOSE },
           run: { status: { in: [...TERMINAL_STATUSES] } },
         },
       });
@@ -409,11 +411,19 @@ export class RunsService {
       let active = await transaction.worktreeRunLease.count({
         where: {
           worktreeId,
-          run: {
-            kind,
-            origin: "MANAGED",
-            status: { in: ["IN_PROGRESS", "PAUSED"] },
-          },
+          OR: [
+            {
+              run: {
+                kind,
+                origin: "MANAGED",
+                status: { in: ["IN_PROGRESS", "PAUSED"] },
+              },
+            },
+            {
+              purpose: ANSWER_REVISION_LEASE_PURPOSE,
+              run: { kind, origin: "MANAGED" },
+            },
+          ],
         },
       });
       const queued = await transaction.agentRun.findMany({
@@ -1131,7 +1141,12 @@ export class RunsService {
       if (transfersSlot) {
         await transaction.worktreeRunLease.update({
           where: { runId: options.transferLeaseFromRunId! },
-          data: { runId: id, acquiredAt: new Date() },
+          data: {
+            runId: id,
+            purpose: "RUN",
+            reservationKey: null,
+            acquiredAt: new Date(),
+          },
         });
       }
       if (attachmentIds.length) {
@@ -1623,28 +1638,76 @@ export class RunsService {
       if (!batch.checkpoint?.refName || !batch.checkpoint.worktreeTree) {
         throw new Error("The checkpoint before this question is unavailable");
       }
-      const lease = await transaction.worktreeRunLease.findUnique({
-        where: { runId: batch.runId },
-      });
-      const competingLease = lease
-        ? null
-        : await transaction.worktreeRunLease.findFirst({
-            where: {
-              worktreeId: batch.run.worktreeId,
-              run: { kind: batch.run.kind },
-            },
-          });
-      if (competingLease) {
-        throw new Error("Another Session owns this worktree");
-      }
-      if (batch.run.kind === "SESSION" && !lease) {
-        await transaction.worktreeRunLease.create({
-          data: {
-            id: randomUUID(),
+      if (batch.run.kind === "SESSION") {
+        const now = new Date();
+        await transaction.worktreeAdmissionLane.upsert({
+          where: { worktreeId: batch.run.worktreeId },
+          create: { worktreeId: batch.run.worktreeId },
+          update: { updatedAt: now },
+        });
+        await transaction.worktreeRunLease.deleteMany({
+          where: {
             worktreeId: batch.run.worktreeId,
-            runId: batch.runId,
+            purpose: { not: ANSWER_REVISION_LEASE_PURPOSE },
+            run: { status: { in: [...TERMINAL_STATUSES] } },
           },
         });
+        await transaction.worktreeWorkflowLease.deleteMany({
+          where: {
+            worktreeId: batch.run.worktreeId,
+            workflowRun: {
+              status: { in: ["SUCCEEDED", "FAILED", "CANCELLED"] },
+            },
+          },
+        });
+        const lease = await transaction.worktreeRunLease.findUnique({
+          where: { runId: batch.runId },
+        });
+        const [exclusiveLease, exclusiveBarrier, competingLease] =
+          await Promise.all([
+            transaction.worktreeWorkflowLease.findUnique({
+              where: { worktreeId: batch.run.worktreeId },
+            }),
+            transaction.workflowRun.findFirst({
+              where: {
+                worktreeId: batch.run.worktreeId,
+                status: "QUEUED",
+                parentRunId: null,
+                exclusiveWorktree: true,
+              },
+              select: { id: true },
+            }),
+            lease
+              ? null
+              : transaction.worktreeRunLease.findFirst({
+                  where: {
+                    worktreeId: batch.run.worktreeId,
+                    run: { kind: batch.run.kind },
+                  },
+                }),
+          ]);
+        if (exclusiveLease || exclusiveBarrier || competingLease) {
+          throw new Error("Another Session owns this worktree");
+        }
+        if (lease) {
+          await transaction.worktreeRunLease.update({
+            where: { runId: batch.runId },
+            data: {
+              purpose: ANSWER_REVISION_LEASE_PURPOSE,
+              reservationKey: batchId,
+            },
+          });
+        } else {
+          await transaction.worktreeRunLease.create({
+            data: {
+              id: randomUUID(),
+              worktreeId: batch.run.worktreeId,
+              runId: batch.runId,
+              purpose: ANSWER_REVISION_LEASE_PURPOSE,
+              reservationKey: batchId,
+            },
+          });
+        }
       }
       /**
        * Preparing a revision only computes the rollback preview the editor
@@ -1714,6 +1777,7 @@ export class RunsService {
       const lease = await transaction.worktreeRunLease.findUnique({
         where: { runId: batch.runId },
       });
+      const transfersSlot = lease?.worktreeId === batch.run.worktreeId;
       const revisionId = randomUUID();
       const revision = batch.answerRevisions.length;
       await transaction.runAnswerRevision.create({
@@ -1757,8 +1821,10 @@ export class RunsService {
           id: runId,
           kind: "SESSION",
           displayNumber,
-          status: "IN_PROGRESS",
-          phase: "ANSWER_REVISION_QUEUED",
+          status: transfersSlot ? "IN_PROGRESS" : "QUEUED",
+          phase: transfersSlot
+            ? "ANSWER_REVISION_QUEUED"
+            : "WAITING_FOR_WORKTREE",
           provider: batch.run.provider,
           worktreeId: batch.run.worktreeId,
           agentId: batch.run.agentId,
@@ -1768,7 +1834,10 @@ export class RunsService {
           model: batch.run.model,
           effort: batch.run.effort,
           webSearchEnabled: batch.run.webSearchEnabled,
-          worktreeConcurrencyLimit: batch.run.worktreeConcurrencyLimit,
+          worktreeConcurrencyLimit:
+            batch.run.kind === "SESSION"
+              ? batch.run.worktreeConcurrencyLimit
+              : worktreeConcurrencyLimit("SESSION", undefined),
           initialPrompt: revisedPrompt,
           parentRunId: batch.runId,
           parentRunNumber: batch.run.displayNumber,
@@ -1783,17 +1852,14 @@ export class RunsService {
           },
         },
       });
-      if (lease) {
+      if (transfersSlot) {
         await transaction.worktreeRunLease.update({
           where: { runId: batch.runId },
-          data: { runId, acquiredAt: new Date() },
-        });
-      } else {
-        await transaction.worktreeRunLease.create({
           data: {
-            id: randomUUID(),
-            worktreeId: batch.run.worktreeId,
             runId,
+            purpose: "RUN",
+            reservationKey: null,
+            acquiredAt: new Date(),
           },
         });
       }
@@ -1824,11 +1890,15 @@ export class RunsService {
         command,
         sourceRunId: batch.runId,
         sourceAgentId: batch.run.agentId,
+        transfersSlot,
       };
     });
     publishRun(result.sourceRunId);
     publishRun(result.run.id);
-    publishCommand(result.command, result.sourceAgentId);
+    if (result.transfersSlot) {
+      publishCommand(result.command, result.sourceAgentId);
+    }
+    await this.promoteQueuedLaneSafely(result.run.worktreeId!, "SESSION");
     return this.get(result.run.id);
   }
 
@@ -1924,6 +1994,14 @@ export class RunsService {
         await removeRunAttachmentFiles(paths);
       }
     } else if (updated.status === "FAILED") {
+      if (updated.type === "PREPARE_ANSWER_REVISION") {
+        await prisma.worktreeRunLease.deleteMany({
+          where: {
+            runId: updated.runId,
+            purpose: ANSWER_REVISION_LEASE_PURPOSE,
+          },
+        });
+      }
       await prisma.agentRun.updateMany({
         where: {
           id: updated.runId,
@@ -2379,7 +2457,10 @@ export class RunsService {
           });
       if (TERMINAL_STATUSES.has(persistedStatus)) {
         await transaction.worktreeRunLease.deleteMany({
-          where: { runId: run.id },
+          where: {
+            runId: run.id,
+            purpose: { not: ANSWER_REVISION_LEASE_PURPOSE },
+          },
         });
       }
       const typeKey =

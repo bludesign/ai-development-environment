@@ -117,11 +117,19 @@ describe("run command persistence", () => {
     expect(transaction.worktreeRunLease.count).toHaveBeenCalledWith({
       where: {
         worktreeId: "worktree-1",
-        run: {
-          kind: "PLAN",
-          origin: "MANAGED",
-          status: { in: ["IN_PROGRESS", "PAUSED"] },
-        },
+        OR: [
+          {
+            run: {
+              kind: "PLAN",
+              origin: "MANAGED",
+              status: { in: ["IN_PROGRESS", "PAUSED"] },
+            },
+          },
+          {
+            purpose: "ANSWER_REVISION",
+            run: { kind: "PLAN", origin: "MANAGED" },
+          },
+        ],
       },
     });
 
@@ -732,7 +740,10 @@ describe("run command persistence", () => {
     };
     const findLease = vi
       .fn()
-      .mockResolvedValueOnce({ runId: sourceRun.id })
+      .mockResolvedValueOnce({
+        runId: sourceRun.id,
+        worktreeId: sourceRun.worktreeId,
+      })
       .mockResolvedValueOnce(null);
     const updateRun = vi.fn();
     const transaction = {
@@ -741,7 +752,16 @@ describe("run command persistence", () => {
         findUnique: findLease,
         update: vi.fn().mockResolvedValue({ id: "lease-1" }),
         create: vi.fn().mockResolvedValue({ id: "lease-1" }),
+        deleteMany: vi.fn().mockResolvedValue({ count: 0 }),
+        count: vi.fn().mockResolvedValue(0),
       },
+      worktreeAdmissionLane: { upsert: vi.fn().mockResolvedValue({}) },
+      worktreeRunConcurrencyLane: { upsert: vi.fn().mockResolvedValue({}) },
+      worktreeWorkflowLease: {
+        deleteMany: vi.fn().mockResolvedValue({ count: 0 }),
+        findUnique: vi.fn().mockResolvedValue(null),
+      },
+      workflowRun: { findFirst: vi.fn().mockResolvedValue(null) },
       runAnswerRevision: {
         create: vi.fn().mockResolvedValue({ id: "revision-1" }),
       },
@@ -755,6 +775,8 @@ describe("run command persistence", () => {
           return data;
         }),
         update: updateRun,
+        findMany: vi.fn().mockResolvedValue([]),
+        updateMany: vi.fn().mockResolvedValue({ count: 0 }),
       },
       runCommand: {
         findFirst: vi.fn().mockResolvedValue(null),
@@ -803,7 +825,12 @@ describe("run command persistence", () => {
     });
     expect(transaction.worktreeRunLease.update).toHaveBeenCalledWith({
       where: { runId: sourceRun.id },
-      data: { runId: createdRunId, acquiredAt: expect.any(Date) },
+      data: {
+        runId: createdRunId,
+        purpose: "RUN",
+        reservationKey: null,
+        acquiredAt: expect.any(Date),
+      },
     });
     expect(transaction.worktreeRunLease.create).not.toHaveBeenCalled();
     expect(transaction.runCommand.create).toHaveBeenCalledWith(
