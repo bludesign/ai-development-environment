@@ -264,6 +264,7 @@ function GitHubAppSettingsCard() {
   const t = useTranslations("githubAppSettings");
   const tc = useTranslations("common");
   const locale = useLocale();
+  const credentialsReadOnly = useCredentialStoreReadOnly();
   const [settings, setSettings] = useState<GitHubAppSettingsView | null>(null);
   const [appId, setAppId] = useState("");
   const [installationId, setInstallationId] = useState("");
@@ -421,6 +422,7 @@ function GitHubAppSettingsCard() {
   const dropPemFile = (event: DragEvent<HTMLDivElement>) => {
     event.preventDefault();
     setDraggingPem(false);
+    if (credentialsReadOnly) return;
     const file = event.dataTransfer.files.item(0);
     if (file) void loadPemFile(file);
   };
@@ -516,6 +518,7 @@ function GitHubAppSettingsCard() {
                     {t("appId")}
                   </Label>
                   <Input
+                    disabled={credentialsReadOnly}
                     id="github-app-id"
                     inputMode="numeric"
                     onChange={(event) => setAppId(event.target.value)}
@@ -532,6 +535,7 @@ function GitHubAppSettingsCard() {
                     {t("installationId")}
                   </Label>
                   <Input
+                    disabled={credentialsReadOnly}
                     id="github-installation-id"
                     inputMode="numeric"
                     onChange={(event) => setInstallationId(event.target.value)}
@@ -550,6 +554,7 @@ function GitHubAppSettingsCard() {
                   {t("webhookUrl")}
                 </Label>
                 <Input
+                  disabled={credentialsReadOnly}
                   id="github-app-webhook-url"
                   onChange={(event) => {
                     setWebhookUrl(event.target.value);
@@ -640,6 +645,7 @@ function GitHubAppSettingsCard() {
                   <Textarea
                     autoComplete="new-password"
                     className="min-h-40 border-0 bg-transparent font-mono text-xs shadow-none focus-visible:ring-0 dark:bg-transparent"
+                    disabled={credentialsReadOnly}
                     id="github-app-private-key"
                     onChange={(event) => setPrivateKey(event.target.value)}
                     placeholder={
@@ -647,7 +653,9 @@ function GitHubAppSettingsCard() {
                         ? t("privateKeyPlaceholderConfigured")
                         : t("privateKeyPlaceholder")
                     }
-                    required={!settings?.privateKeyConfigured}
+                    required={
+                      !settings?.privateKeyConfigured && !credentialsReadOnly
+                    }
                     value={privateKey}
                   />
                 </div>
@@ -738,7 +746,9 @@ function GitHubAppSettingsCard() {
                   title={t("confirmRemove")}
                   trigger={
                     <Button
-                      disabled={busy || !settings?.configured}
+                      disabled={
+                        busy || !settings?.configured || credentialsReadOnly
+                      }
                       type="button"
                       variant="ghost"
                     >
@@ -756,7 +766,12 @@ function GitHubAppSettingsCard() {
                   <Unplug />
                   {t("test")}
                 </Button>
-                <Button disabled={busy} type="submit">
+                <Button
+                  disabled={
+                    busy || (credentialsReadOnly && !settings?.configured)
+                  }
+                  type="submit"
+                >
                   {busy ? (
                     <Spinner />
                   ) : privateKey && settings?.configured ? (

@@ -8,7 +8,14 @@ import {
   JIRA_TICKET_CHANGED_TOPIC,
   JIRA_WEBHOOK_DELIVERY_TOPIC,
 } from "@/services/agent-control/event-bus";
-import { CREDENTIALS, type CredentialService } from "@/services/credentials";
+import {
+  CREDENTIALS,
+  encodeJsonCredential,
+  jiraWebhookConnectionSettings,
+  readConnectionSettings,
+  type CredentialService,
+  type JiraWebhookConnectionSettings,
+} from "@/services/credentials";
 import type { WorkflowEventsService } from "@/services/workflows/workflow-events.service";
 
 import type { JiraService } from "./jira.service";
@@ -288,6 +295,14 @@ export class JiraWebhookService {
     private readonly workflowEvents?: WorkflowEventsService,
   ) {}
 
+  private async storedWebhookSettings() {
+    return readConnectionSettings(
+      this.credentials,
+      CREDENTIALS.jiraWebhookSettings,
+      jiraWebhookConnectionSettings,
+    );
+  }
+
   // ---------------------------------------------------------------------
   // Configuration
   // ---------------------------------------------------------------------
@@ -304,12 +319,13 @@ export class JiraWebhookService {
 
   async getWebhookSettings(): Promise<JiraWebhookSettingsView> {
     const prisma = await getPrismaClient();
-    const [settings, secretConfigured, latest] = await Promise.all([
+    const [settings, connection, secretConfigured, latest] = await Promise.all([
       prisma.jiraSettings.upsert({
         where: { id: SETTINGS_ID },
         create: { id: SETTINGS_ID },
         update: {},
       }),
+      this.storedWebhookSettings(),
       this.credentials.isConfigured(CREDENTIALS.jiraWebhookSecret),
       prisma.jiraWebhookDelivery.findFirst({
         orderBy: [{ receivedAt: "desc" }, { deliveryId: "desc" }],
@@ -320,8 +336,8 @@ export class JiraWebhookService {
       secretConfigured,
       registered: Boolean(settings.webhookId),
       registrationId: settings.webhookId ?? null,
-      registeredUrl: settings.webhookUrl ?? null,
-      jql: settings.webhookJql ?? null,
+      registeredUrl: connection?.value.url ?? null,
+      jql: connection?.value.jql ?? null,
       configuredAt: settings.webhookConfiguredAt?.toISOString() ?? null,
       lastReceivedAt: latest?.receivedAt.toISOString() ?? null,
       lastOutcome: latest?.outcome ?? null,
@@ -382,9 +398,18 @@ export class JiraWebhookService {
       secret,
     });
 
-    await this.credentials.setText(
-      CREDENTIALS.jiraWebhookSecret,
-      secret,
+    const connection: JiraWebhookConnectionSettings = { url, jql };
+    await this.credentials.setMany(
+      [
+        {
+          descriptor: CREDENTIALS.jiraWebhookSettings,
+          value: encodeJsonCredential(connection),
+        },
+        {
+          descriptor: CREDENTIALS.jiraWebhookSecret,
+          value: Buffer.from(secret, "utf8"),
+        },
+      ],
       async (transaction) => {
         await transaction.jiraSettings.upsert({
           where: { id: SETTINGS_ID },
@@ -393,15 +418,11 @@ export class JiraWebhookService {
             webhookEnabled: true,
             webhookConfiguredAt: new Date(),
             webhookId,
-            webhookUrl: url,
-            webhookJql: jql,
           },
           update: {
             webhookEnabled: true,
             webhookConfiguredAt: new Date(),
             webhookId,
-            webhookUrl: url,
-            webhookJql: jql,
           },
         });
       },
@@ -413,17 +434,19 @@ export class JiraWebhookService {
     if (!(await this.credentials.isConfigured(CREDENTIALS.jiraWebhookSecret))) {
       throw new Error("The Jira webhook is not configured");
     }
-    const prisma = await getPrismaClient();
-    const settings = await prisma.jiraSettings.findUnique({
-      where: { id: SETTINGS_ID },
-      select: { webhookId: true, webhookUrl: true, webhookJql: true },
-    });
+    const [settings, connection] = await Promise.all([
+      (await getPrismaClient()).jiraSettings.findUnique({
+        where: { id: SETTINGS_ID },
+        select: { webhookId: true },
+      }),
+      this.storedWebhookSettings(),
+    ]);
     // A registered webhook rotates on both sides at once; a hand-made one can
     // only mint a new secret and wait for the user to paste it into Jira.
-    if (settings?.webhookId && settings.webhookUrl) {
+    if (settings?.webhookId && connection) {
       return this.registerWebhook({
-        url: settings.webhookUrl,
-        jql: settings.webhookJql,
+        url: connection.value.url,
+        jql: connection.value.jql,
       });
     }
     return this.enableWebhook();
@@ -438,8 +461,8 @@ export class JiraWebhookService {
     if (settings?.webhookId) {
       await this.deleteFromJira(settings.webhookId);
     }
-    await this.credentials.delete(
-      CREDENTIALS.jiraWebhookSecret,
+    await this.credentials.deleteMany(
+      [CREDENTIALS.jiraWebhookSettings, CREDENTIALS.jiraWebhookSecret],
       async (transaction) => {
         await transaction.jiraSettings.upsert({
           where: { id: SETTINGS_ID },
@@ -448,8 +471,6 @@ export class JiraWebhookService {
             webhookEnabled: false,
             webhookConfiguredAt: null,
             webhookId: null,
-            webhookUrl: null,
-            webhookJql: null,
           },
         });
       },

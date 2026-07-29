@@ -6,9 +6,16 @@ import { importPKCS8 } from "jose";
 import { getPrismaClient } from "@/data/prisma-client";
 import type { Prisma } from "@/generated/prisma/client";
 import {
+  apnsCertificateCatalog,
   CREDENTIALS,
   CredentialService,
   apnsCertificateCredential,
+  apnsTokenConnectionSettings,
+  encodeJsonCredential,
+  readConnectionSettings,
+  type ApnsCertificateCatalog,
+  type ApnsCertificateCatalogEntry,
+  type ApnsTokenConnectionSettings,
 } from "@/services/credentials";
 import {
   agentEventBus,
@@ -98,6 +105,21 @@ function clean(value: string, name: string, max = 200): string {
 }
 
 export class PushNotificationsService {
+  private async storedTokenSettings() {
+    return readConnectionSettings(
+      this.credentials,
+      CREDENTIALS.apnsTokenSettings,
+      apnsTokenConnectionSettings,
+    );
+  }
+
+  private async storedCertificateCatalog() {
+    return readConnectionSettings(
+      this.credentials,
+      CREDENTIALS.apnsCertificateCatalog,
+      apnsCertificateCatalog,
+    );
+  }
   private recoveryStarted = false;
   private readonly activeBatchIds = new Set<string>();
 
@@ -283,36 +305,52 @@ export class PushNotificationsService {
 
   async settings() {
     const prisma = await getPrismaClient();
-    const [settings, certificates, tokenSecretConfigured] = await Promise.all([
-      this.rawSettings(),
-      prisma.apnsCertificateCredential.findMany({
-        orderBy: { name: "asc" },
-      }),
-      this.credentials.isConfigured(CREDENTIALS.apnsTokenPrivateKey),
-    ]);
+    const [settings, tokenSettings, certificateCatalog, tokenSecretConfigured] =
+      await Promise.all([
+        this.rawSettings(),
+        this.storedTokenSettings(),
+        this.storedCertificateCatalog(),
+        this.credentials.isConfigured(CREDENTIALS.apnsTokenPrivateKey),
+      ]);
+    const catalog = certificateCatalog?.value ?? [];
+    const certificateRows = await prisma.apnsCertificateCredential.findMany({
+      where: { id: { in: catalog.map(({ id }) => id) } },
+    });
+    const certificatesById = new Map(
+      certificateRows.map((credential) => [credential.id, credential]),
+    );
     return {
-      tokenConfigured: Boolean(
-        settings.tokenTeamId && settings.tokenKeyId && tokenSecretConfigured,
-      ),
-      tokenTeamId: settings.tokenTeamId,
-      tokenKeyId: settings.tokenKeyId,
+      tokenConfigured: Boolean(tokenSettings && tokenSecretConfigured),
+      tokenTeamId: tokenSettings?.value.teamId ?? null,
+      tokenKeyId: tokenSettings?.value.keyId ?? null,
       tokenPrivateKeyFingerprint: settings.tokenPrivateKeyFingerprint,
       tokenConfiguredAt: settings.tokenConfiguredAt,
       tokenLastUsedAt: settings.tokenLastUsedAt,
       tokenLastError: settings.tokenLastError,
-      certificates: certificates.map((credential) => ({
-        id: credential.id,
-        name: credential.name,
-        topic: credential.topic,
-        environment: credential.environment,
-        fingerprint: credential.fingerprint,
-        expiresAt: credential.expiresAt,
-        lastTestedAt: credential.lastTestedAt,
-        lastError: credential.lastError,
-        createdAt: credential.createdAt,
-        updatedAt: credential.updatedAt,
-      })),
-      updatedAt: settings.updatedAt,
+      certificates: catalog
+        .map((configuration) => {
+          const credential = certificatesById.get(configuration.id);
+          return credential
+            ? {
+                ...configuration,
+                fingerprint: credential.fingerprint,
+                expiresAt: credential.expiresAt,
+                lastTestedAt: credential.lastTestedAt,
+                lastError: credential.lastError,
+                createdAt: credential.createdAt,
+                updatedAt: credential.updatedAt,
+              }
+            : null;
+        })
+        .filter((value) => value !== null)
+        .sort((left, right) => left.name.localeCompare(right.name)),
+      updatedAt: new Date(
+        Math.max(
+          settings.updatedAt.getTime(),
+          tokenSettings?.updatedAt.getTime() ?? 0,
+          certificateCatalog?.updatedAt.getTime() ?? 0,
+        ),
+      ),
     };
   }
 
@@ -324,6 +362,7 @@ export class PushNotificationsService {
     await this.rawSettings();
     const teamId = clean(input.teamId, "Team ID", 20);
     const keyId = clean(input.keyId, "Key ID", 20);
+    const existing = await this.storedTokenSettings();
     const privateKey =
       input.privateKey?.trim() ||
       (await this.credentials.getText(CREDENTIALS.apnsTokenPrivateKey));
@@ -335,12 +374,11 @@ export class PushNotificationsService {
     } catch {
       throw new Error("The APNs .p8 key must be an ES256 PKCS#8 private key");
     }
+    const tokenSettings: ApnsTokenConnectionSettings = { teamId, keyId };
     const saveMetadata = async (transaction: Prisma.TransactionClient) => {
       await transaction.pushNotificationSettings.update({
         where: { id: SETTINGS_ID },
         data: {
-          tokenTeamId: teamId,
-          tokenKeyId: keyId,
           tokenPrivateKeyFingerprint: sha256(privateKey),
           tokenConfiguredAt: new Date(),
           tokenLastError: null,
@@ -349,12 +387,27 @@ export class PushNotificationsService {
     };
     // The key falls back to the stored one when the form omits it, so changing only the
     // team or key ID must not re-store it against a read-only Vault.
-    if (input.privateKey?.trim()) {
-      await this.credentials.setText(
-        CREDENTIALS.apnsTokenPrivateKey,
-        privateKey,
-        saveMetadata,
-      );
+    const entries = [
+      ...(!existing ||
+      JSON.stringify(existing.value) !== JSON.stringify(tokenSettings)
+        ? [
+            {
+              descriptor: CREDENTIALS.apnsTokenSettings,
+              value: encodeJsonCredential(tokenSettings),
+            },
+          ]
+        : []),
+      ...(input.privateKey?.trim()
+        ? [
+            {
+              descriptor: CREDENTIALS.apnsTokenPrivateKey,
+              value: Buffer.from(privateKey, "utf8"),
+            },
+          ]
+        : []),
+    ];
+    if (entries.length) {
+      await this.credentials.setMany(entries, saveMetadata);
     } else {
       await (await getPrismaClient()).$transaction(saveMetadata);
     }
@@ -363,15 +416,13 @@ export class PushNotificationsService {
   }
 
   async clearTokenSettings() {
-    await this.credentials.delete(
-      CREDENTIALS.apnsTokenPrivateKey,
+    await this.credentials.deleteMany(
+      [CREDENTIALS.apnsTokenSettings, CREDENTIALS.apnsTokenPrivateKey],
       async (transaction) => {
         await transaction.pushNotificationSettings.upsert({
           where: { id: SETTINGS_ID },
           create: { id: SETTINGS_ID },
           update: {
-            tokenTeamId: null,
-            tokenKeyId: null,
             tokenPrivateKeyFingerprint: null,
             tokenConfiguredAt: null,
             tokenLastUsedAt: null,
@@ -400,16 +451,35 @@ export class PushNotificationsService {
     }
     const certificate = inspectCertificateCredential(bytes, input.passphrase);
     const id = randomUUID();
-    await this.credentials.setJson<ApnsCertificateSecret>(
-      apnsCertificateCredential(id),
-      { p12Base64: input.p12Base64, passphrase: input.passphrase },
+    const existing = await this.storedCertificateCatalog();
+    const entry: ApnsCertificateCatalogEntry = {
+      id,
+      name: clean(input.name, "Credential name", 100),
+      topic: clean(input.topic, "Topic", 255),
+      environment: input.environment as "SANDBOX" | "PRODUCTION",
+    };
+    if (existing?.value.some(({ name }) => name === entry.name)) {
+      throw new Error("Credential name already exists");
+    }
+    const catalog: ApnsCertificateCatalog = [...(existing?.value ?? []), entry];
+    await this.credentials.setMany(
+      [
+        {
+          descriptor: CREDENTIALS.apnsCertificateCatalog,
+          value: encodeJsonCredential(catalog),
+        },
+        {
+          descriptor: apnsCertificateCredential(id),
+          value: encodeJsonCredential<ApnsCertificateSecret>({
+            p12Base64: input.p12Base64,
+            passphrase: input.passphrase,
+          }),
+        },
+      ],
       async (transaction) => {
         await transaction.apnsCertificateCredential.create({
           data: {
             id,
-            name: clean(input.name, "Credential name", 100),
-            topic: clean(input.topic, "Topic", 255),
-            environment: input.environment,
             fingerprint: certificate.fingerprint,
             expiresAt: certificate.expiresAt,
             lastTestedAt: new Date(),
@@ -422,8 +492,20 @@ export class PushNotificationsService {
   }
 
   async deleteCertificateCredential(id: string) {
-    await this.credentials.delete(
-      apnsCertificateCredential(id),
+    const existing = await this.storedCertificateCatalog();
+    if (!existing?.value.some((entry) => entry.id === id)) {
+      throw new Error("APNs certificate credential not found");
+    }
+    await this.credentials.setAndDeleteMany(
+      [
+        {
+          descriptor: CREDENTIALS.apnsCertificateCatalog,
+          value: encodeJsonCredential<ApnsCertificateCatalog>(
+            existing.value.filter((entry) => entry.id !== id),
+          ),
+        },
+      ],
+      [apnsCertificateCredential(id)],
       async (transaction) => {
         await transaction.apnsCertificateCredential.delete({ where: { id } });
       },
@@ -482,8 +564,8 @@ export class PushNotificationsService {
   private async tokenAuthentication(
     errorMessage = "APNs token authentication is not configured",
   ): Promise<Extract<ApnsAuthentication, { kind: "TOKEN" }>> {
-    const settings = await this.rawSettings();
-    if (!settings.tokenTeamId || !settings.tokenKeyId) {
+    const settings = await this.storedTokenSettings();
+    if (!settings) {
       throw new Error(errorMessage);
     }
     const privateKey = await this.credentials.getText(
@@ -492,8 +574,8 @@ export class PushNotificationsService {
     if (!privateKey) throw new Error(errorMessage);
     return {
       kind: "TOKEN",
-      teamId: settings.tokenTeamId,
-      keyId: settings.tokenKeyId,
+      teamId: settings.value.teamId,
+      keyId: settings.value.keyId,
       privateKey,
     };
   }
@@ -832,13 +914,21 @@ export class PushNotificationsService {
   ): Promise<ApnsAuthentication> {
     const prisma = await getPrismaClient();
     if (editor.credentialId) {
-      const credential = await prisma.apnsCertificateCredential.findUnique({
-        where: { id: editor.credentialId },
-      });
-      if (!credential) throw new Error("APNs certificate credential not found");
+      const [credential, catalog] = await Promise.all([
+        prisma.apnsCertificateCredential.findUnique({
+          where: { id: editor.credentialId },
+        }),
+        this.storedCertificateCatalog(),
+      ]);
+      const configuration = catalog?.value.find(
+        ({ id }) => id === editor.credentialId,
+      );
+      if (!credential || !configuration) {
+        throw new Error("APNs certificate credential not found");
+      }
       if (
-        credential.environment !== environment ||
-        credential.topic !== topic
+        configuration.environment !== environment ||
+        configuration.topic !== topic
       ) {
         throw new Error(
           "APNs certificate does not match the target topic/environment",

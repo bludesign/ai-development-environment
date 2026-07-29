@@ -239,6 +239,7 @@ export function CacheServerSettingsCard() {
                 <Input
                   autoComplete="url"
                   id="cache-server-base-url"
+                  disabled={credentialsReadOnly}
                   onChange={(event) => setBaseUrl(event.target.value)}
                   placeholder="http://cache-server.internal:3006/management-api"
                   required
@@ -282,6 +283,7 @@ export function CacheServerSettingsCard() {
                 <div className="flex items-center justify-between">
                   <Label className="text-sm font-medium">{t("headers")}</Label>
                   <Button
+                    disabled={credentialsReadOnly}
                     onClick={addHeader}
                     size="sm"
                     type="button"
@@ -307,6 +309,7 @@ export function CacheServerSettingsCard() {
                       <div className="flex items-center gap-2" key={index}>
                         <Input
                           aria-label={t("headerName")}
+                          disabled={credentialsReadOnly}
                           className="flex-1"
                           onChange={(event) =>
                             updateHeader(index, "name", event.target.value)
@@ -335,6 +338,7 @@ export function CacheServerSettingsCard() {
                         />
                         <Button
                           aria-label={t("removeHeader")}
+                          disabled={credentialsReadOnly}
                           onClick={() => removeHeader(index)}
                           size="icon"
                           type="button"
@@ -376,7 +380,7 @@ export function CacheServerSettingsCard() {
                   <Unplug />
                   {t("test")}
                 </Button>
-                <Button disabled={busy} type="submit">
+                <Button disabled={busy || credentialsReadOnly} type="submit">
                   {busy ? <Spinner /> : <Save />}
                   {t("save")}
                 </Button>

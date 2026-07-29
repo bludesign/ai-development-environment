@@ -290,6 +290,17 @@ vi.mock("@/services/credentials", async (importOriginal) => {
             : state.apiToken;
       }
 
+      async getJson(descriptor: { id: string }) {
+        if (!descriptor.id.endsWith("/settings") || !state.appSettings) {
+          return null;
+        }
+        return {
+          appId: state.appSettings.appId,
+          installationId: state.appSettings.installationId,
+          webhookUrl: state.appSettings.webhookUrl ?? null,
+        };
+      }
+
       async setText(
         descriptor: { id: string },
         value: string,
@@ -318,7 +329,18 @@ vi.mock("@/services/credentials", async (importOriginal) => {
         ).getPrismaClient();
         await mutation?.(prisma);
         for (const entry of entries) {
-          if (entry.descriptor.id.endsWith("/private-key")) {
+          if (entry.descriptor.id.endsWith("/settings")) {
+            const connection = JSON.parse(
+              Buffer.from(entry.value).toString("utf8"),
+            ).value as {
+              appId: string;
+              installationId: string;
+              webhookUrl: string | null;
+            };
+            if (state.appSettings) {
+              Object.assign(state.appSettings, connection);
+            }
+          } else if (entry.descriptor.id.endsWith("/private-key")) {
             if (state.appSettings) {
               state.appSettings.privateKey = Buffer.from(entry.value).toString(
                 "utf8",
@@ -364,127 +386,140 @@ vi.mock("@/services/credentials", async (importOriginal) => {
 });
 
 vi.mock("@/data/prisma-client", () => ({
-  getPrismaClient: async () => ({
-    gitHubSettings: {
-      findUnique: async () => ({
-        id: "default",
-        defaultJiraKeyRegex: String.raw`\b([A-Z]+-\d+)\b`,
-        actionsNotificationPollIntervalSeconds: 60,
-        cacheTtlSeconds: 300,
-        createdAt: new Date(0),
-        updatedAt: new Date(0),
-      }),
-      upsert: async ({
-        create,
-        update,
-      }: {
-        create: Record<string, unknown>;
-        update: Record<string, unknown>;
-      }) => ({
-        id: "default",
-        defaultJiraKeyRegex: String.raw`\b([A-Z]+-\d+)\b`,
-        actionsNotificationPollIntervalSeconds: 60,
-        cacheTtlSeconds: 300,
-        createdAt: new Date(0),
-        updatedAt: new Date(0),
-        ...create,
-        ...update,
-      }),
-    },
-    gitHubRepository: {
-      findMany: async () => state.repositories,
-      findUnique: async ({ where }: { where: { githubId?: string } }) =>
-        state.repositories.find(
-          (repository) => repository.githubId === where.githubId,
-        ) ?? null,
-    },
-    codebaseRepository: {
-      findMany: async () => state.codebaseRepositories,
-      findUnique: async ({ where }: { where: { id: string } }) =>
-        state.codebaseRepositories.find(
-          (repository) => repository.id === where.id,
-        ) ?? null,
-      findFirst: async ({ where }: { where: { canonicalOrigin: string } }) => {
-        state.codebaseRepositoryOrigins.push(where.canonicalOrigin);
-        return state.linkedCodebaseRepository?.canonicalOrigin ===
-          where.canonicalOrigin
-          ? { id: state.linkedCodebaseRepository.id }
-          : null;
+  getPrismaClient: async () => {
+    const prisma = {
+      gitHubSettings: {
+        findUnique: async () => ({
+          id: "default",
+          defaultJiraKeyRegex: String.raw`\b([A-Z]+-\d+)\b`,
+          actionsNotificationPollIntervalSeconds: 60,
+          cacheTtlSeconds: 300,
+          createdAt: new Date(0),
+          updatedAt: new Date(0),
+        }),
+        upsert: async ({
+          create,
+          update,
+        }: {
+          create: Record<string, unknown>;
+          update: Record<string, unknown>;
+        }) => ({
+          id: "default",
+          defaultJiraKeyRegex: String.raw`\b([A-Z]+-\d+)\b`,
+          actionsNotificationPollIntervalSeconds: 60,
+          cacheTtlSeconds: 300,
+          createdAt: new Date(0),
+          updatedAt: new Date(0),
+          ...create,
+          ...update,
+        }),
       },
-    },
-    worktree: {
-      findMany: async ({ where }: { where: { codebase?: unknown } }) =>
-        where.codebase
-          ? [...state.worktrees].sort(
-              (left, right) =>
-                right.updatedAt.getTime() - left.updatedAt.getTime(),
-            )
-          : [],
-      findFirst: async ({ where }: { where: { branch: string } }) =>
-        state.linkedWorktree?.branch === where.branch
-          ? {
-              id: state.linkedWorktree.id,
-              highlightColor: state.linkedWorktree.highlightColor ?? null,
-            }
-          : null,
-      findUnique: async ({ where }: { where: { id: string } }) =>
-        state.worktreeDetail?.id === where.id ? state.worktreeDetail : null,
-    },
-    codebaseSettings: {
-      findUnique: async () => ({
-        id: "default",
-        defaultJiraBranchRegex: String.raw`\b([A-Z]+-\d+)\b`,
-      }),
-    },
-    gitHubAppSettings: {
-      findUnique: async () => state.appSettings,
-      upsert: async ({
-        create,
-        update,
-      }: {
-        create: object;
-        update: object;
-      }) => {
-        const now = new Date();
-        state.appSettings = state.appSettings
-          ? { ...state.appSettings, ...update, updatedAt: now }
-          : ({ ...create, createdAt: now, updatedAt: now } as NonNullable<
-              typeof state.appSettings
-            >);
-        return state.appSettings;
+      gitHubRepository: {
+        findMany: async () => state.repositories,
+        findUnique: async ({ where }: { where: { githubId?: string } }) =>
+          state.repositories.find(
+            (repository) => repository.githubId === where.githubId,
+          ) ?? null,
       },
-      update: async ({ data }: { data: object }) => {
-        if (!state.appSettings) throw new Error("Missing settings");
-        state.appSettings = {
-          ...state.appSettings,
-          ...data,
-          updatedAt: new Date(),
-        };
-        return state.appSettings;
+      codebaseRepository: {
+        findMany: async () => state.codebaseRepositories,
+        findUnique: async ({ where }: { where: { id: string } }) =>
+          state.codebaseRepositories.find(
+            (repository) => repository.id === where.id,
+          ) ?? null,
+        findFirst: async ({
+          where,
+        }: {
+          where: { canonicalOrigin: string };
+        }) => {
+          state.codebaseRepositoryOrigins.push(where.canonicalOrigin);
+          return state.linkedCodebaseRepository?.canonicalOrigin ===
+            where.canonicalOrigin
+            ? { id: state.linkedCodebaseRepository.id }
+            : null;
+        },
       },
-      deleteMany: async () => {
-        state.appSettings = null;
-        return { count: 1 };
+      worktree: {
+        findMany: async ({ where }: { where: { codebase?: unknown } }) =>
+          where.codebase
+            ? [...state.worktrees].sort(
+                (left, right) =>
+                  right.updatedAt.getTime() - left.updatedAt.getTime(),
+              )
+            : [],
+        findFirst: async ({ where }: { where: { branch: string } }) =>
+          state.linkedWorktree?.branch === where.branch
+            ? {
+                id: state.linkedWorktree.id,
+                highlightColor: state.linkedWorktree.highlightColor ?? null,
+              }
+            : null,
+        findUnique: async ({ where }: { where: { id: string } }) =>
+          state.worktreeDetail?.id === where.id ? state.worktreeDetail : null,
       },
-    },
-    gitHubAuditEvent: {
-      create: async ({ data }: { data: Record<string, unknown> }) => {
-        state.auditEvents.push(data);
-        return data;
+      codebaseSettings: {
+        findUnique: async () => ({
+          id: "default",
+          defaultJiraBranchRegex: String.raw`\b([A-Z]+-\d+)\b`,
+        }),
       },
-    },
-    gitHubWebhookDelivery: {
-      findFirst: async () => null,
-      findMany: async ({ take, skip }: { take: number; skip: number }) =>
-        state.webhookDeliveries.slice(skip, skip + take),
-      count: async () => state.webhookDeliveries.length,
-      deleteMany: async () => {
-        const count = state.webhookDeliveries.length;
-        state.webhookDeliveries = [];
-        return { count };
+      gitHubAppSettings: {
+        findUnique: async () => state.appSettings,
+        upsert: async ({
+          create,
+          update,
+        }: {
+          create: object;
+          update: object;
+        }) => {
+          const now = new Date();
+          state.appSettings = state.appSettings
+            ? { ...state.appSettings, ...update, updatedAt: now }
+            : ({ ...create, createdAt: now, updatedAt: now } as NonNullable<
+                typeof state.appSettings
+              >);
+          return state.appSettings;
+        },
+        update: async ({ data }: { data: object }) => {
+          if (!state.appSettings) throw new Error("Missing settings");
+          state.appSettings = {
+            ...state.appSettings,
+            ...data,
+            updatedAt: new Date(),
+          };
+          return state.appSettings;
+        },
+        deleteMany: async () => {
+          state.appSettings = null;
+          return { count: 1 };
+        },
       },
-    },
-  }),
+      gitHubAuditEvent: {
+        create: async ({ data }: { data: Record<string, unknown> }) => {
+          state.auditEvents.push(data);
+          return data;
+        },
+      },
+      gitHubWebhookDelivery: {
+        findFirst: async () => null,
+        findMany: async ({ take, skip }: { take: number; skip: number }) =>
+          state.webhookDeliveries.slice(skip, skip + take),
+        count: async () => state.webhookDeliveries.length,
+        deleteMany: async () => {
+          const count = state.webhookDeliveries.length;
+          state.webhookDeliveries = [];
+          return { count };
+        },
+      },
+    };
+
+    return {
+      ...prisma,
+      $transaction: async <T>(
+        callback: (transaction: typeof prisma) => Promise<T>,
+      ) => callback(prisma),
+    };
+  },
 }));
 
 import {

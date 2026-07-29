@@ -171,6 +171,7 @@ export function PushNotificationSettingsCard() {
             <div className="space-y-2">
               <Label htmlFor="apns-team">{t("teamId")}</Label>
               <Input
+                disabled={credentialsReadOnly}
                 id="apns-team"
                 onChange={(event) => setTeamId(event.target.value)}
                 value={teamId}
@@ -179,6 +180,7 @@ export function PushNotificationSettingsCard() {
             <div className="space-y-2">
               <Label htmlFor="apns-key">{t("keyId")}</Label>
               <Input
+                disabled={credentialsReadOnly}
                 id="apns-key"
                 onChange={(event) => setKeyId(event.target.value)}
                 value={keyId}
@@ -253,7 +255,7 @@ export function PushNotificationSettingsCard() {
                 !teamId ||
                 !keyId ||
                 (!privateKey && !settings?.tokenConfigured) ||
-                (credentialsReadOnly && !settings?.tokenConfigured)
+                credentialsReadOnly
               }
               type="submit"
             >
@@ -280,6 +282,7 @@ export function PushNotificationSettingsCard() {
             <div className="space-y-2">
               <Label>{t("name")}</Label>
               <Input
+                disabled={credentialsReadOnly}
                 onChange={(event) => setName(event.target.value)}
                 value={name}
               />
@@ -287,13 +290,18 @@ export function PushNotificationSettingsCard() {
             <div className="space-y-2">
               <Label>{t("topic")}</Label>
               <Input
+                disabled={credentialsReadOnly}
                 onChange={(event) => setTopic(event.target.value)}
                 value={topic}
               />
             </div>
             <div className="space-y-2">
               <Label>{t("environment")}</Label>
-              <Select onValueChange={setEnvironment} value={environment}>
+              <Select
+                disabled={credentialsReadOnly}
+                onValueChange={setEnvironment}
+                value={environment}
+              >
                 <SelectTrigger>
                   <SelectValue />
                 </SelectTrigger>
@@ -310,6 +318,7 @@ export function PushNotificationSettingsCard() {
               <Input
                 accept=".p12,.pfx"
                 className="sr-only"
+                disabled={credentialsReadOnly}
                 onChange={(event) => {
                   const file = event.target.files?.[0];
                   if (file) void toBase64(file).then(setP12Base64);
@@ -320,6 +329,7 @@ export function PushNotificationSettingsCard() {
             <div className="space-y-2">
               <Label>{t("passphrase")}</Label>
               <Input
+                disabled={credentialsReadOnly}
                 onChange={(event) => setPassphrase(event.target.value)}
                 type="password"
                 value={passphrase}
@@ -418,7 +428,11 @@ export function PushNotificationSettingsCard() {
                 }}
                 title={t("removeCertificate")}
                 trigger={
-                  <Button size="icon-sm" variant="ghost">
+                  <Button
+                    disabled={credentialsReadOnly}
+                    size="icon-sm"
+                    variant="ghost"
+                  >
                     <Trash2 />
                   </Button>
                 }

@@ -2,12 +2,6 @@ import type { PrismaClient } from "../../src/generated/prisma/client";
 
 import { daysAgo, hoursAgo } from "./time";
 
-/**
- * Jira and the Actions cache server read their host from the database, so they use the fixed
- * local stub started by the screenshot suite.
- */
-const MOCK_API_BASE_URL = "http://127.0.0.1:4322";
-
 /** Prices are per token; the Costs page multiplies them up to a per-million-token figure. */
 const MODEL_COST_ENTRIES = [
   {
@@ -186,8 +180,6 @@ export async function seedSettings(prisma: PrismaClient): Promise<void> {
   await prisma.gitHubAppSettings.create({
     data: {
       id: "default",
-      appId: "845213",
-      installationId: "61240983",
       keyFingerprint: "SHA256:aXm4Qe1acme9development2environment8bot0key",
       appSlug: "acme-dev-bot",
       appOwnerLogin: "acme",
@@ -206,7 +198,6 @@ export async function seedSettings(prisma: PrismaClient): Promise<void> {
       ]),
       enhancedPipelineWebhooksEnabled: true,
       verifiedAt: hoursAgo(3),
-      webhookUrl: "https://dev.acme.example.com/api/github/webhook",
       webhookConfiguredAt: hoursAgo(3),
     },
   });
@@ -215,20 +206,9 @@ export async function seedSettings(prisma: PrismaClient): Promise<void> {
   await prisma.jiraSettings.create({
     data: {
       id: "default",
-      siteUrl: MOCK_API_BASE_URL,
-      email: "dev-bot@acme.example.com",
       cacheTtlSeconds: 300,
       webhookEnabled: true,
       webhookConfiguredAt: hoursAgo(3),
-    },
-  });
-
-  await prisma.cacheServerSettings.deleteMany({});
-  await prisma.cacheServerSettings.create({
-    data: {
-      id: "default",
-      baseUrl: `${MOCK_API_BASE_URL}/cache-server`,
-      headerNamesJson: JSON.stringify(["x-acme-cache", "x-acme-region"]),
     },
   });
 
@@ -265,8 +245,6 @@ export async function seedSettings(prisma: PrismaClient): Promise<void> {
       id: "default",
       organizationName: "Acme Inc.",
       profileIdentifier: "com.acme.device-enrollment",
-      appStoreConnectIssuerId: "69a6de70-acme-47e3-e053-5b8c7c11a4d1",
-      appStoreConnectKeyId: "ACME2K5J9L",
       appStoreConnectPrivateKeyFingerprint: "SHA256:acmeConnectKey1234567890",
       appStoreConnectVerifiedAt: daysAgo(12),
       appStoreConnectLastTestedAt: hoursAgo(20),
@@ -277,8 +255,6 @@ export async function seedSettings(prisma: PrismaClient): Promise<void> {
   await prisma.pushNotificationSettings.create({
     data: {
       id: "default",
-      tokenTeamId: "ACME9T4R2K",
-      tokenKeyId: "ACME7K1J9P",
       tokenPrivateKeyFingerprint: "SHA256:acmePushKey0987654321",
       tokenConfiguredAt: daysAgo(9),
       tokenLastUsedAt: hoursAgo(5),

@@ -4,7 +4,11 @@ import { createHmac, randomUUID, timingSafeEqual } from "node:crypto";
 
 import type { Prisma } from "@/generated/prisma/client";
 import { getPrismaClient } from "@/data/prisma-client";
-import { CREDENTIALS, type CredentialService } from "@/services/credentials";
+import {
+  CREDENTIALS,
+  githubAppConnectionSettings,
+  type CredentialService,
+} from "@/services/credentials";
 import type {
   NotificationRecord,
   NotificationsService,
@@ -123,6 +127,7 @@ function webhookWorkflowRun(
   ) {
     return null;
   }
+
   return {
     id: String(runId),
     workflowId: String(workflowId),
@@ -205,6 +210,13 @@ export class GitHubActionsNotificationsService {
       details: { mode: "DISABLED" },
     });
     if (startPolling) queueMicrotask(() => void this.tick());
+  }
+
+  private async appConnection() {
+    const stored = await this.credentials.getJson<unknown>(
+      CREDENTIALS.githubAppSettings,
+    );
+    return stored ? githubAppConnectionSettings(stored) : null;
   }
 
   private async recordWorkflowRunEvent(
@@ -789,20 +801,28 @@ export class GitHubActionsNotificationsService {
     let intervalSeconds = DEFAULT_INTERVAL_SECONDS;
     try {
       const prisma = await getPrismaClient();
-      const [settings, app, tokenConfigured, webhookSecretConfigured] =
-        await Promise.all([
-          prisma.gitHubSettings.upsert({
-            where: { id: "default" },
-            create: { id: "default" },
-            update: {},
-          }),
-          prisma.gitHubAppSettings.findUnique({ where: { id: "default" } }),
-          this.credentials.isConfigured(CREDENTIALS.githubPersonalAccessToken),
-          this.credentials.isConfigured(CREDENTIALS.githubAppWebhookSecret),
-        ]);
+      const [
+        settings,
+        app,
+        appConnection,
+        tokenConfigured,
+        webhookSecretConfigured,
+      ] = await Promise.all([
+        prisma.gitHubSettings.upsert({
+          where: { id: "default" },
+          create: { id: "default" },
+          update: {},
+        }),
+        prisma.gitHubAppSettings.findUnique({ where: { id: "default" } }),
+        this.appConnection(),
+        this.credentials.isConfigured(CREDENTIALS.githubPersonalAccessToken),
+        this.credentials.isConfigured(CREDENTIALS.githubAppWebhookSecret),
+      ]);
       intervalSeconds = settings.actionsNotificationPollIntervalSeconds;
       const webhookConfigured = Boolean(
-        app?.webhookUrl && app.webhookConfiguredAt && webhookSecretConfigured,
+        appConnection?.webhookUrl &&
+        app?.webhookConfiguredAt &&
+        webhookSecretConfigured,
       );
       if (webhookConfigured) {
         this.polling.configure(OPERATION_ID, {
@@ -1311,14 +1331,17 @@ export class GitHubActionsNotificationsService {
         },
       });
       if (input.event !== "workflow_run" || action !== "completed") {
-        const app = await prisma.gitHubAppSettings.findUnique({
-          where: { id: "default" },
-        });
+        const [app, appConnection] = await Promise.all([
+          prisma.gitHubAppSettings.findUnique({ where: { id: "default" } }),
+          this.appConnection(),
+        ]);
         const installation = payload.installation as
           Record<string, unknown> | undefined;
         if (
           !app ||
-          String(positiveInteger(installation?.id) ?? "") !== app.installationId
+          !appConnection ||
+          String(positiveInteger(installation?.id) ?? "") !==
+            appConnection.installationId
         ) {
           await finish("IGNORED", "Installation does not match configured App");
           return { outcome: "IGNORED", notificationCreated: false };
@@ -1349,14 +1372,17 @@ export class GitHubActionsNotificationsService {
           notificationCreated: false,
         };
       }
-      const app = await prisma.gitHubAppSettings.findUnique({
-        where: { id: "default" },
-      });
+      const [app, appConnection] = await Promise.all([
+        prisma.gitHubAppSettings.findUnique({ where: { id: "default" } }),
+        this.appConnection(),
+      ]);
       const installation = payload.installation as
         Record<string, unknown> | undefined;
       if (
         !app ||
-        String(positiveInteger(installation?.id) ?? "") !== app.installationId
+        !appConnection ||
+        String(positiveInteger(installation?.id) ?? "") !==
+          appConnection.installationId
       ) {
         await finish("IGNORED", "Installation does not match configured App");
         return { outcome: "IGNORED", notificationCreated: false };

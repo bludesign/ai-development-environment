@@ -32,11 +32,42 @@ type Seed = {
   createdAt: Date;
 };
 
+const jsonCredential = (value: unknown): string =>
+  JSON.stringify({ version: 1, value });
+
 /** Prisma's Bytes columns want a plain ArrayBuffer-backed view, not a Node Buffer. */
 const bytes = (value: Uint8Array): Uint8Array<ArrayBuffer> =>
   Uint8Array.from(value);
 
 const SEEDS: Seed[] = [
+  {
+    id: "github-app/default/settings",
+    kind: "github-app-settings",
+    value: jsonCredential({
+      appId: "845213",
+      installationId: "61240983",
+      webhookUrl: "https://dev.acme.example.com/api/github/webhook",
+    }),
+    createdAt: daysAgo(60),
+  },
+  {
+    id: "jira/default/connection-settings",
+    kind: "jira-connection-settings",
+    value: jsonCredential({
+      siteUrl: "http://127.0.0.1:4322",
+      email: "dev-bot@acme.example.com",
+    }),
+    createdAt: daysAgo(55),
+  },
+  {
+    id: "jira/default/webhook-settings",
+    kind: "jira-webhook-settings",
+    value: jsonCredential({
+      url: "https://dev.acme.example.com/api/public/jira/webhook",
+      jql: null,
+    }),
+    createdAt: daysAgo(30),
+  },
   {
     id: "github/default/personal-access-token",
     kind: "github-personal-access-token",
@@ -44,8 +75,20 @@ const SEEDS: Seed[] = [
     createdAt: daysAgo(60),
   },
   {
+    id: "cache-server/default/settings",
+    kind: "cache-server-settings",
+    value: jsonCredential({
+      baseUrl: "http://127.0.0.1:4322/cache-server",
+      headers: [
+        { name: "x-acme-cache", value: "mock-cache" },
+        { name: "x-acme-region", value: "mock-region" },
+      ],
+    }),
+    createdAt: daysAgo(45),
+  },
+  {
     // GitHubService.webhooksEnabled() gates the Webhooks page on this secret in addition to
-    // gitHubAppSettings.webhookUrl; without it the page redirects home and the screenshot
+    // GitHub App connection credential; without it the page redirects home and the screenshot
     // captures the Action Center instead.
     id: "github-app/default/webhook-secret",
     kind: "github-app-webhook-secret",
@@ -53,10 +96,22 @@ const SEEDS: Seed[] = [
     createdAt: daysAgo(60),
   },
   {
+    id: "push-notifications/default/token-settings",
+    kind: "apns-token-settings",
+    value: jsonCredential({ teamId: "ACMETEAM01", keyId: "ACMEKEY001" }),
+    createdAt: daysAgo(40),
+  },
+  {
     id: "jira/default/api-token",
     kind: "jira-api-token",
     value: "ATATT3xFfGF0AcmeMockScreenshotJiraToken00",
     createdAt: daysAgo(55),
+  },
+  {
+    id: "ios-devices/default/app-store-connect-settings",
+    kind: "app-store-connect-settings",
+    value: jsonCredential({ issuerId: "acme-issuer", keyId: "acme-key" }),
+    createdAt: daysAgo(12),
   },
   {
     id: "jira/default/webhook-secret",

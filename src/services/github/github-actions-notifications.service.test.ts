@@ -93,6 +93,15 @@ function setup(
     isConfigured: vi.fn(async (descriptor: { id: string }) =>
       descriptor.id.endsWith("private-key") ? appConfigured : true,
     ),
+    getJson: vi.fn(async (descriptor: { id: string }) =>
+      descriptor.id.endsWith("/settings") && appConfigured
+        ? {
+            appId: "123",
+            installationId: "456",
+            webhookUrl: "https://control.example/api/public/github/webhook",
+          }
+        : null,
+    ),
   };
   const pipelineStatus = {
     observeSnapshot: vi.fn(async () => ({

@@ -13,7 +13,12 @@ import {
   CredentialService,
   resetCredentialAdoptionForTests,
 } from "./credentials.service";
-import { CREDENTIALS } from "./types";
+import { jiraConnectionSettings } from "./connection-settings";
+import {
+  apnsCertificateCredential,
+  CREDENTIALS,
+  encodeJsonCredential,
+} from "./types";
 
 const CREATE_CREDENTIAL_TABLE = `
   CREATE TABLE "Credential" (
@@ -67,6 +72,39 @@ describe("CredentialService database backend", () => {
       encryptionState: "PLAINTEXT",
       warnings: [{ code: "DATABASE_UNENCRYPTED" }],
     });
+  });
+
+  test("returns decoded JSON with credential metadata timestamps", async () => {
+    const service = new CredentialService({ env: {}, prisma });
+    const value = { siteUrl: "https://jira.example.test", email: "dev@test" };
+    await service.setJson(CREDENTIALS.jiraConnectionSettings, value);
+
+    const stored = await service.getJsonWithMetadata(
+      CREDENTIALS.jiraConnectionSettings,
+    );
+    const row = await prisma.credential.findUniqueOrThrow({
+      where: { id: CREDENTIALS.jiraConnectionSettings.id },
+    });
+    expect(stored).toEqual({
+      value,
+      createdAt: row.createdAt,
+      updatedAt: row.updatedAt,
+    });
+  });
+
+  test("validates typed JSON credentials when reading them", async () => {
+    const service = new CredentialService({ env: {}, prisma });
+    await service.setJson(CREDENTIALS.jiraConnectionSettings, {
+      siteUrl: 42,
+      email: "dev@example.test",
+    });
+
+    await expect(
+      service.getValidatedJson(
+        CREDENTIALS.jiraConnectionSettings,
+        jiraConnectionSettings,
+      ),
+    ).rejects.toMatchObject({ code: "CREDENTIAL_DATA_INVALID" });
   });
 
   test("encrypts new payloads and round trips without exposing payloads in inventory", async () => {
@@ -358,7 +396,7 @@ describe("CredentialService database backend", () => {
         value: Buffer.from(`${ownerId}-api-key`),
       },
       {
-        descriptor: { ...CREDENTIALS.cacheServerHeaders, ownerId },
+        descriptor: { ...CREDENTIALS.cacheServerSettings, ownerId },
         value: Buffer.from(`${ownerId}-headers`),
       },
     ];
@@ -397,7 +435,7 @@ describe("CredentialService database backend", () => {
       ),
     ).toBe("second-api-key");
     expect(
-      Buffer.from(values.get(CREDENTIALS.cacheServerHeaders.id)!).toString(
+      Buffer.from(values.get(CREDENTIALS.cacheServerSettings.id)!).toString(
         "utf8",
       ),
     ).toBe("second-headers");
@@ -406,7 +444,7 @@ describe("CredentialService database backend", () => {
         id: {
           in: [
             CREDENTIALS.cacheServerApiKey.id,
-            CREDENTIALS.cacheServerHeaders.id,
+            CREDENTIALS.cacheServerSettings.id,
           ],
         },
       },
@@ -414,13 +452,77 @@ describe("CredentialService database backend", () => {
     expect(rows).toHaveLength(2);
     expect(rows.every((row) => row.ownerId === "second")).toBe(true);
   });
+
+  test("rolls back mixed external sets and deletes when metadata fails", async () => {
+    const values = new Map<string, Uint8Array>();
+    const service = new CredentialService({
+      env: { CREDENTIAL_STORAGE_TYPE: "keychain" },
+      platform: "darwin",
+      prisma,
+      keychainModuleLoader: async () => ({
+        AsyncEntry: class {
+          constructor(
+            readonly _service: string,
+            readonly username: string,
+          ) {}
+
+          async getSecret() {
+            return values.get(this.username);
+          }
+
+          async setSecret(value: Uint8Array) {
+            values.set(this.username, Uint8Array.from(value));
+          }
+
+          async deleteCredential() {
+            return values.delete(this.username);
+          }
+        },
+      }),
+    });
+    const bundle = apnsCertificateCredential("certificate-1");
+    await service.setMany([
+      {
+        descriptor: CREDENTIALS.apnsCertificateCatalog,
+        value: Buffer.from("old-catalog"),
+      },
+      { descriptor: bundle, value: Buffer.from("old-bundle") },
+    ]);
+
+    await expect(
+      service.setAndDeleteMany(
+        [
+          {
+            descriptor: CREDENTIALS.apnsCertificateCatalog,
+            value: Buffer.from("new-catalog"),
+          },
+        ],
+        [bundle],
+        async () => {
+          throw new Error("metadata failed");
+        },
+      ),
+    ).rejects.toThrow("metadata failed");
+    expect(
+      Buffer.from(values.get(CREDENTIALS.apnsCertificateCatalog.id)!).toString(
+        "utf8",
+      ),
+    ).toBe("old-catalog");
+    expect(Buffer.from(values.get(bundle.id)!).toString("utf8")).toBe(
+      "old-bundle",
+    );
+    expect(await prisma.credential.count()).toBe(2);
+  });
 });
 
 type VaultSecret = { kind: string; ownerId: string | null; value: string };
 
 // Serves KV v2 reads and metadata listings from a plain map so the service exercises the
 // real Vault driver, including the folder walk adoption depends on.
-function vaultBackend(secrets: Map<string, VaultSecret>) {
+function vaultBackend(
+  secrets: Map<string, VaultSecret>,
+  backendOptions: { denyList?: boolean } = {},
+) {
   const PREFIX = "/v1/secret/data/ai-development-environment/credentials/";
   const LIST_PREFIX =
     "/v1/secret/metadata/ai-development-environment/credentials";
@@ -431,6 +533,7 @@ function vaultBackend(secrets: Map<string, VaultSecret>) {
   const request = vi.fn(async (url: string, options: { method: string }) => {
     const path = new URL(url);
     if (path.searchParams.get("list") === "true") {
+      if (backendOptions.denyList) return json(403);
       const folder = path.pathname.slice(LIST_PREFIX.length).replace(/^\//, "");
       const children = new Set<string>();
       for (const id of secrets.keys()) {
@@ -527,6 +630,39 @@ describe("CredentialService vault backend", () => {
       where: { id: CREDENTIALS.jiraApiToken.id },
     });
     expect(row).toMatchObject({ storageType: "vault", payload: null });
+  });
+
+  test("lazily adopts an explicitly requested dynamic credential", async () => {
+    const descriptor = apnsCertificateCredential("certificate-7");
+    const value = { p12Base64: "bundle", passphrase: "passphrase" };
+    const request = vaultBackend(
+      new Map([
+        [
+          descriptor.id,
+          {
+            kind: descriptor.kind,
+            ownerId: descriptor.ownerId ?? null,
+            value: encodeJsonCredential(value).toString("utf8"),
+          },
+        ],
+      ]),
+      { denyList: true },
+    );
+    const service = new CredentialService({
+      env: env(),
+      prisma,
+      vaultRequest: request as never,
+      vaultDispatcherFactory: () => ({}) as never,
+    });
+
+    await expect(service.getJson(descriptor)).resolves.toEqual(value);
+    await expect(
+      prisma.credential.findUniqueOrThrow({ where: { id: descriptor.id } }),
+    ).resolves.toMatchObject({
+      kind: descriptor.kind,
+      ownerId: descriptor.ownerId,
+      storageType: "vault",
+    });
   });
 
   test("refuses to change credentials on a read-only install", async () => {

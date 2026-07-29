@@ -45,4 +45,40 @@ describe("CacheServerSettingsCard", () => {
     expect(apiKey.type).toBe("password");
     expect(apiKey.value).toBe("");
   });
+
+  test("keeps visible values but disables credential changes for a read-only store", async () => {
+    request.mockImplementation(async (operation) => {
+      if (operation.includes("CredentialStoreWritability")) {
+        return { credentialStoreStatus: { readOnly: true } } as never;
+      }
+      return {
+        cacheServerSettings: {
+          configured: true,
+          baseUrl: "https://cache.example.com/management-api",
+          apiKeyConfigured: true,
+          headers: [{ name: "X-Proxy-Token", valueConfigured: true }],
+          updatedAt: new Date(0).toISOString(),
+        },
+      } as never;
+    });
+
+    render(<CacheServerSettingsCard />);
+
+    const baseUrl = (await screen.findByDisplayValue(
+      "https://cache.example.com/management-api",
+    )) as HTMLInputElement;
+    await screen.findByText(/read-only/);
+    expect(baseUrl.disabled).toBe(true);
+    expect(
+      (screen.getByLabelText("API key") as HTMLInputElement).disabled,
+    ).toBe(true);
+    expect(
+      (screen.getByRole("button", { name: "Save" }) as HTMLButtonElement)
+        .disabled,
+    ).toBe(true);
+    expect(
+      (screen.getByRole("button", { name: "Test" }) as HTMLButtonElement)
+        .disabled,
+    ).toBe(false);
+  });
 });

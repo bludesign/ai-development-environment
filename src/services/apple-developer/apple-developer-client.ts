@@ -1,7 +1,10 @@
 import { importPKCS8, SignJWT } from "jose";
 
-import { getPrismaClient } from "@/data/prisma-client";
-import { CREDENTIALS, CredentialService } from "@/services/credentials";
+import {
+  appStoreConnectConnectionSettings,
+  CREDENTIALS,
+  CredentialService,
+} from "@/services/credentials";
 
 const API_ROOT = "https://api.appstoreconnect.apple.com";
 
@@ -38,17 +41,13 @@ export class AppleDeveloperRequestError extends Error {
 export async function storedAppleDeveloperCredentials(
   credentialService = new CredentialService(),
 ): Promise<AppleDeveloperCredentials> {
-  const prisma = await getPrismaClient();
-  const settings = await prisma.iosDeviceSettings.findUnique({
-    where: { id: "default" },
-    select: {
-      appStoreConnectIssuerId: true,
-      appStoreConnectKeyId: true,
-    },
-  });
-  if (!settings?.appStoreConnectIssuerId || !settings.appStoreConnectKeyId) {
+  const stored = await credentialService.getJson<unknown>(
+    CREDENTIALS.appStoreConnectSettings,
+  );
+  if (!stored) {
     throw new Error("App Store Connect API credentials are not configured");
   }
+  const settings = appStoreConnectConnectionSettings(stored);
   const privateKey = await credentialService.getText(
     CREDENTIALS.appStoreConnectPrivateKey,
   );
@@ -56,8 +55,8 @@ export async function storedAppleDeveloperCredentials(
     throw new Error("App Store Connect API credentials are not configured");
   }
   return {
-    issuerId: settings.appStoreConnectIssuerId,
-    keyId: settings.appStoreConnectKeyId,
+    issuerId: settings.issuerId,
+    keyId: settings.keyId,
     privateKey,
   };
 }

@@ -62,7 +62,12 @@ vi.mock("@/services/credentials", async (importOriginal) => {
       }
 
       async getJson() {
-        return state.settings ? JSON.parse(state.settings.headersJson) : null;
+        return state.settings?.baseUrl
+          ? {
+              baseUrl: state.settings.baseUrl,
+              headers: JSON.parse(state.settings.headersJson),
+            }
+          : null;
       }
 
       async setMany(
@@ -73,8 +78,8 @@ vi.mock("@/services/credentials", async (importOriginal) => {
         const apiKeyEntry = entries.find((entry) =>
           entry.descriptor.id.endsWith("/api-key"),
         );
-        const headerEntry = entries.find((entry) =>
-          entry.descriptor.id.endsWith("/headers"),
+        const settingsEntry = entries.find((entry) =>
+          entry.descriptor.id.endsWith("/settings"),
         );
         const prisma = await (
           await import("@/data/prisma-client")
@@ -86,11 +91,17 @@ vi.mock("@/services/credentials", async (importOriginal) => {
             "utf8",
           );
         }
-        if (headerEntry) {
-          const headerEnvelope = JSON.parse(
-            Buffer.from(headerEntry.value).toString("utf8"),
-          ) as { value: Array<{ name: string; value: string }> };
-          state.settings.headersJson = JSON.stringify(headerEnvelope.value);
+        if (settingsEntry) {
+          const envelope = JSON.parse(
+            Buffer.from(settingsEntry.value).toString("utf8"),
+          ) as {
+            value: {
+              baseUrl: string;
+              headers: Array<{ name: string; value: string }>;
+            };
+          };
+          state.settings.baseUrl = envelope.value.baseUrl;
+          state.settings.headersJson = JSON.stringify(envelope.value.headers);
         }
       }
 
@@ -104,6 +115,7 @@ vi.mock("@/services/credentials", async (importOriginal) => {
         await mutation?.(prisma);
         if (state.settings) {
           state.settings.apiKey = null;
+          state.settings.baseUrl = null;
           state.settings.headersJson = "[]";
         }
       }

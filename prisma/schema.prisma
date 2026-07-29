@@ -144,8 +144,6 @@ model IosDeviceSettings {
   signerFingerprint                    String?
   signerCreatedAt                      DateTime?
   signerExpiresAt                      DateTime?
-  appStoreConnectIssuerId              String?
-  appStoreConnectKeyId                 String?
   appStoreConnectPrivateKeyFingerprint String?
   appStoreConnectVerifiedAt            DateTime?
   appStoreConnectLastTestedAt          DateTime?
@@ -1680,8 +1678,6 @@ model SigningOperationItem {
 
 model PushNotificationSettings {
   id                         String    @id
-  tokenTeamId                String?
-  tokenKeyId                 String?
   tokenPrivateKeyFingerprint String?
   tokenConfiguredAt          DateTime?
   tokenLastUsedAt            DateTime?
@@ -1692,17 +1688,12 @@ model PushNotificationSettings {
 
 model ApnsCertificateCredential {
   id           String    @id
-  name         String    @unique
-  topic        String
-  environment  String
   fingerprint  String
   expiresAt    DateTime?
   lastTestedAt DateTime?
   lastError    String?
   createdAt    DateTime  @default(now())
   updatedAt    DateTime  @updatedAt
-
-  @@index([topic, environment])
 }
 
 model ApnsRegistration {
@@ -1997,14 +1988,10 @@ model AgentAuditEvent {
 
 model JiraSettings {
   id                  String    @id
-  siteUrl             String?
-  email               String?
   cacheTtlSeconds     Int       @default(300)
   webhookEnabled      Boolean   @default(false)
   webhookConfiguredAt DateTime?
   webhookId           String?
-  webhookUrl          String?
-  webhookJql          String?
   createdAt           DateTime  @default(now())
   updatedAt           DateTime  @updatedAt
 }
@@ -2205,10 +2192,6 @@ model GitHubRateLimitSnapshot {
 
 model GitHubAppSettings {
   id                              String    @id
-  appId                           String
-  installationId                  String
-  apiBaseUrl                      String    @default("https://api.github.com")
-  graphqlUrl                      String    @default("https://api.github.com/graphql")
   keyFingerprint                  String
   appSlug                         String
   appOwnerLogin                   String?
@@ -2221,7 +2204,6 @@ model GitHubAppSettings {
   webhookEventsJson               String    @default("[]")
   enhancedPipelineWebhooksEnabled Boolean   @default(false)
   verifiedAt                      DateTime
-  webhookUrl                      String?
   webhookConfiguredAt             DateTime?
   createdAt                       DateTime  @default(now())
   updatedAt                       DateTime  @updatedAt
@@ -2275,14 +2257,6 @@ model GitHubActionsPollingState {
   codebaseRepository   CodebaseRepository @relation(fields: [codebaseRepositoryId], references: [id], onDelete: Cascade)
 
   @@index([lastPollSucceededAt])
-}
-
-model CacheServerSettings {
-  id              String   @id
-  baseUrl         String?
-  headerNamesJson String   @default("[]")
-  createdAt       DateTime @default(now())
-  updatedAt       DateTime @updatedAt
 }
 
 /// Server-only metadata for long-lived application credentials. Database-backed rows keep

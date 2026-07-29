@@ -32,6 +32,40 @@ vi.mock("@/services/credentials", async (importOriginal) => {
           : credentialState.signerPrivateKey;
       }
 
+      async getJson(descriptor: { id: string }) {
+        if (!descriptor.id.endsWith("app-store-connect-settings")) return null;
+        return settings.appStoreConnectIssuerId && settings.appStoreConnectKeyId
+          ? {
+              issuerId: settings.appStoreConnectIssuerId,
+              keyId: settings.appStoreConnectKeyId,
+            }
+          : null;
+      }
+
+      async setMany(
+        entries: Array<{ descriptor: { id: string }; value: Uint8Array }>,
+        mutation?: (transaction: unknown) => Promise<void>,
+      ) {
+        await mutation?.(await getPrismaClient());
+        for (const entry of entries) {
+          if (entry.descriptor.id.endsWith("app-store-connect-settings")) {
+            const connection = JSON.parse(
+              Buffer.from(entry.value).toString("utf8"),
+            ).value as { issuerId: string; keyId: string };
+            settings.appStoreConnectIssuerId = connection.issuerId;
+            settings.appStoreConnectKeyId = connection.keyId;
+          } else if (
+            entry.descriptor.id.endsWith("app-store-connect-private-key")
+          ) {
+            credentialState.appStorePrivateKey = Buffer.from(
+              entry.value,
+            ).toString("utf8");
+            settings.appStoreConnectPrivateKey =
+              credentialState.appStorePrivateKey;
+          }
+        }
+      }
+
       async setText(
         descriptor: { id: string },
         value: string,
@@ -55,6 +89,23 @@ vi.mock("@/services/credentials", async (importOriginal) => {
         if (descriptor.id.includes("app-store-connect")) {
           credentialState.appStorePrivateKey = null;
           settings.appStoreConnectPrivateKey = null;
+        }
+      }
+
+      async deleteMany(
+        descriptors: Array<{ id: string }>,
+        mutation?: (transaction: unknown) => Promise<void>,
+      ) {
+        await mutation?.(await getPrismaClient());
+        if (
+          descriptors.some(({ id }) =>
+            id.endsWith("app-store-connect-private-key"),
+          )
+        ) {
+          credentialState.appStorePrivateKey = null;
+          settings.appStoreConnectPrivateKey = null;
+          settings.appStoreConnectIssuerId = null;
+          settings.appStoreConnectKeyId = null;
         }
       }
     },

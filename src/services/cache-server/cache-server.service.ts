@@ -1,11 +1,12 @@
 import "server-only";
 
-import { getPrismaClient } from "@/data/prisma-client";
-import type { Prisma } from "@/generated/prisma/client";
 import {
+  cacheServerConnectionSettings,
   CREDENTIALS,
   CredentialService,
   encodeJsonCredential,
+  readConnectionSettings,
+  type CacheServerConnectionSettings,
 } from "@/services/credentials";
 
 import type {
@@ -23,7 +24,6 @@ import type {
   StorageLocationView,
 } from "./types";
 
-const SETTINGS_ID = "default";
 const API_KEY_HEADER = "x-api-key";
 const DELETE_LIST_PAGE_SIZE = 100;
 
@@ -87,17 +87,6 @@ const MATCH_TYPE_MAP: Record<string, CacheEntryMatchType> = {
 function sanitizeError(message: string, apiKey: string): string {
   if (!apiKey) return message;
   return message.split(apiKey).join("[REDACTED]");
-}
-
-function parseHeaderNames(headerNamesJson: string): string[] {
-  try {
-    const parsed: unknown = JSON.parse(headerNamesJson);
-    return Array.isArray(parsed)
-      ? parsed.filter((value): value is string => typeof value === "string")
-      : [];
-  } catch {
-    return [];
-  }
 }
 
 function normalizeHeaders(
@@ -184,38 +173,28 @@ function storageLocationView(
 export class CacheServerService {
   constructor(private readonly credentials = new CredentialService()) {}
 
-  async getSettings(): Promise<CacheServerSettingsView> {
-    const prisma = await getPrismaClient();
-    const settings = await prisma.cacheServerSettings.upsert({
-      where: { id: SETTINGS_ID },
-      create: { id: SETTINGS_ID },
-      update: {},
-    });
-    const [apiKeyConfigured, headersConfigured] = await Promise.all([
-      this.credentials.isConfigured(CREDENTIALS.cacheServerApiKey),
-      this.credentials.isConfigured(CREDENTIALS.cacheServerHeaders),
-    ]);
-    return this.settingsView(settings, apiKeyConfigured, headersConfigured);
+  private async storedSettings() {
+    return readConnectionSettings(
+      this.credentials,
+      CREDENTIALS.cacheServerSettings,
+      cacheServerConnectionSettings,
+    );
   }
 
-  private settingsView(
-    settings: {
-      baseUrl: string | null;
-      headerNamesJson: string;
-      updatedAt: Date;
-    },
-    apiKeyConfigured: boolean,
-    headersConfigured: boolean,
-  ): CacheServerSettingsView {
+  async getSettings(): Promise<CacheServerSettingsView> {
+    const [settings, apiKeyConfigured] = await Promise.all([
+      this.storedSettings(),
+      this.credentials.isConfigured(CREDENTIALS.cacheServerApiKey),
+    ]);
     return {
-      configured: Boolean(settings.baseUrl && apiKeyConfigured),
-      baseUrl: settings.baseUrl,
+      configured: Boolean(settings && apiKeyConfigured),
+      baseUrl: settings?.value.baseUrl ?? null,
       apiKeyConfigured,
-      headers: parseHeaderNames(settings.headerNamesJson).map((name) => ({
+      headers: (settings?.value.headers ?? []).map(({ name }) => ({
         name,
-        valueConfigured: headersConfigured,
+        valueConfigured: true,
       })),
-      updatedAt: settings.updatedAt.toISOString(),
+      updatedAt: (settings?.updatedAt ?? new Date(0)).toISOString(),
     };
   }
 
@@ -234,25 +213,10 @@ export class CacheServerService {
     if (!nextApiKey) {
       throw new Error("A cache server API key is required");
     }
-    const headersConfigured = await this.credentials.isConfigured(
-      CREDENTIALS.cacheServerHeaders,
-    );
-    const existingHeaders = headersConfigured
-      ? ((await this.credentials.getJson<StoredCacheServerHeader[]>(
-          CREDENTIALS.cacheServerHeaders,
-        )) ?? [])
-      : [];
+    const existing = await this.storedSettings();
+    const existingHeaders = existing?.value.headers ?? [];
     const headers = normalizeHeaders(input.headers, existingHeaders);
-    const headerNamesJson = JSON.stringify(
-      headers.map((header) => header.name),
-    );
-    const saveMetadata = async (transaction: Prisma.TransactionClient) => {
-      await transaction.cacheServerSettings.upsert({
-        where: { id: SETTINGS_ID },
-        create: { id: SETTINGS_ID, baseUrl, headerNamesJson },
-        update: { baseUrl, headerNamesJson },
-      });
-    };
+    const settings: CacheServerConnectionSettings = { baseUrl, headers };
     // Re-storing an unchanged secret is pointless work everywhere and an outright failure
     // against a read-only Vault, so editing the base URL alone must not touch the store.
     const entries = [
@@ -264,35 +228,25 @@ export class CacheServerService {
             },
           ]
         : []),
-      ...(!headersConfigured ||
-      JSON.stringify(headers) !== JSON.stringify(existingHeaders)
+      ...(!existing ||
+      JSON.stringify(settings) !== JSON.stringify(existing.value)
         ? [
             {
-              descriptor: CREDENTIALS.cacheServerHeaders,
-              value: encodeJsonCredential(headers),
+              descriptor: CREDENTIALS.cacheServerSettings,
+              value: encodeJsonCredential(settings),
             },
           ]
         : []),
     ];
-    if (entries.length) {
-      await this.credentials.setMany(entries, saveMetadata);
-    } else {
-      await (await getPrismaClient()).$transaction(saveMetadata);
-    }
+    if (entries.length) await this.credentials.setMany(entries);
     return this.getSettings();
   }
 
   async clearSettings(): Promise<CacheServerSettingsView> {
-    await this.credentials.deleteMany(
-      [CREDENTIALS.cacheServerApiKey, CREDENTIALS.cacheServerHeaders],
-      async (transaction) => {
-        await transaction.cacheServerSettings.upsert({
-          where: { id: SETTINGS_ID },
-          create: { id: SETTINGS_ID },
-          update: { baseUrl: null, headerNamesJson: "[]" },
-        });
-      },
-    );
+    await this.credentials.deleteMany([
+      CREDENTIALS.cacheServerApiKey,
+      CREDENTIALS.cacheServerSettings,
+    ]);
     return this.getSettings();
   }
 
@@ -440,25 +394,16 @@ export class CacheServerService {
   }
 
   private async requireConfig(): Promise<CacheServerConfig> {
-    const prisma = await getPrismaClient();
-    const settings = await prisma.cacheServerSettings.findUnique({
-      where: { id: SETTINGS_ID },
-    });
-    if (!settings?.baseUrl) {
-      throw new Error("The cache server is not configured");
-    }
+    const settings = await this.storedSettings();
+    if (!settings) throw new Error("The cache server is not configured");
     const apiKey = await this.credentials.getText(
       CREDENTIALS.cacheServerApiKey,
     );
     if (!apiKey) throw new Error("The cache server is not configured");
-    const headers =
-      (await this.credentials.getJson<StoredCacheServerHeader[]>(
-        CREDENTIALS.cacheServerHeaders,
-      )) ?? [];
     return {
-      baseUrl: settings.baseUrl,
+      baseUrl: settings.value.baseUrl,
       apiKey,
-      headers,
+      headers: settings.value.headers,
     };
   }
 

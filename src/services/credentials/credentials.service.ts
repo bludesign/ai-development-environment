@@ -227,12 +227,54 @@ export class CredentialService {
     return this.driver();
   }
 
-  async get(descriptor: CredentialDescriptor): Promise<Buffer | null> {
-    const driver = await this.requireCurrentDriver();
+  private async recordForDescriptor(
+    driver: CredentialDriver,
+    descriptor: CredentialDescriptor,
+  ): Promise<Credential | null> {
     const prisma = await this.prisma();
-    const record = await prisma.credential.findUnique({
+    let record = await prisma.credential.findUnique({
       where: { id: descriptor.id },
     });
+    if (record || !driver.describe) return record;
+
+    const described = await driver.describe(descriptor.id);
+    if (!described) return null;
+    if (
+      described.kind !== descriptor.kind ||
+      described.ownerId !== (descriptor.ownerId ?? null)
+    ) {
+      throw new CredentialStoreOperationError(
+        `Credential ${descriptor.id} has unexpected backend metadata`,
+        "CREDENTIAL_DATA_INVALID",
+      );
+    }
+    await withCredentialMutationLocks([descriptor.id], async () => {
+      await prisma.credential.upsert({
+        where: { id: descriptor.id },
+        create: {
+          id: descriptor.id,
+          kind: descriptor.kind,
+          ownerId: descriptor.ownerId ?? null,
+          storageType: driver.storageType,
+          payload: null,
+          encrypted: false,
+        },
+        update: {},
+      });
+    });
+    record = await prisma.credential.findUnique({
+      where: { id: descriptor.id },
+    });
+    return record;
+  }
+
+  async getWithMetadata(descriptor: CredentialDescriptor): Promise<{
+    value: Buffer;
+    createdAt: Date;
+    updatedAt: Date;
+  } | null> {
+    const driver = await this.requireCurrentDriver();
+    const record = await this.recordForDescriptor(driver, descriptor);
     if (!record) return null;
     if (record.kind !== descriptor.kind) {
       throw new CredentialStoreOperationError(
@@ -255,7 +297,13 @@ export class CredentialService {
         `Credential ${descriptor.id} is missing from ${driver.storageType}; re-enter it in its owning settings form`,
       );
     }
-    return value;
+    return value
+      ? { value, createdAt: record.createdAt, updatedAt: record.updatedAt }
+      : null;
+  }
+
+  async get(descriptor: CredentialDescriptor): Promise<Buffer | null> {
+    return (await this.getWithMetadata(descriptor))?.value ?? null;
   }
 
   async getText(descriptor: CredentialDescriptor): Promise<string | null> {
@@ -268,6 +316,41 @@ export class CredentialService {
     return value ? decodeJsonCredential<T>(value) : null;
   }
 
+  async getJsonWithMetadata<T>(descriptor: CredentialDescriptor): Promise<{
+    value: T;
+    createdAt: Date;
+    updatedAt: Date;
+  } | null> {
+    const result = await this.getWithMetadata(descriptor);
+    return result
+      ? {
+          value: decodeJsonCredential<T>(result.value),
+          createdAt: result.createdAt,
+          updatedAt: result.updatedAt,
+        }
+      : null;
+  }
+
+  async getValidatedJson<T>(
+    descriptor: CredentialDescriptor,
+    validate: (value: unknown) => T,
+  ): Promise<T | null> {
+    const value = await this.getJson<unknown>(descriptor);
+    return value === null ? null : validate(value);
+  }
+
+  async getValidatedJsonWithMetadata<T>(
+    descriptor: CredentialDescriptor,
+    validate: (value: unknown) => T,
+  ): Promise<{
+    value: T;
+    createdAt: Date;
+    updatedAt: Date;
+  } | null> {
+    const stored = await this.getJsonWithMetadata<unknown>(descriptor);
+    return stored ? { ...stored, value: validate(stored.value) } : null;
+  }
+
   // Adoption runs during initialization, so a credential that only exists in the external
   // backend is invisible to a caller that reads metadata without initializing first. The
   // failure is swallowed to keep this a non-throwing probe; after the first call the
@@ -278,12 +361,18 @@ export class CredentialService {
 
   async isConfigured(descriptor: CredentialDescriptor): Promise<boolean> {
     await this.ensureInitializedForRead();
-    const record = await (
-      await this.prisma()
-    ).credential.findUnique({
-      where: { id: descriptor.id },
-      select: { kind: true, storageType: true },
-    });
+    let driver: CredentialDriver;
+    try {
+      driver = await this.driver();
+    } catch {
+      return false;
+    }
+    let record;
+    try {
+      record = await this.recordForDescriptor(driver, descriptor);
+    } catch {
+      return false;
+    }
     return Boolean(
       record &&
       record.kind === descriptor.kind &&
@@ -368,6 +457,131 @@ export class CredentialService {
           for (const entry of attempted.reverse()) {
             const oldValue = previous.get(entry.descriptor.id);
             if (oldValue) await driver.set(entry.descriptor, oldValue);
+            else await driver.delete(entry.descriptor);
+          }
+        } catch {
+          throw new Error(
+            `Credential metadata could not be saved and the ${driver.storageType} rollback also failed; re-enter the affected credentials`,
+            { cause: error },
+          );
+        }
+        throw error;
+      }
+    });
+  }
+
+  async setAndDeleteMany(
+    entries: Array<{
+      descriptor: CredentialDescriptor;
+      value: Uint8Array;
+    }>,
+    descriptors: CredentialDescriptor[],
+    mutation?: CredentialMutation,
+  ): Promise<void> {
+    const ids = [
+      ...entries.map(({ descriptor }) => descriptor.id),
+      ...descriptors.map(({ id }) => id),
+    ];
+    if (new Set(ids).size !== ids.length) {
+      throw new Error("Credential changes must use unique IDs");
+    }
+    const driver = await this.requireCurrentDriver();
+    assertWritable(driver);
+    const prisma = await this.prisma();
+    await withCredentialMutationLocks(ids, async () => {
+      if (driver instanceof DatabaseCredentialDriver) {
+        await prisma.$transaction(async (transaction) => {
+          for (const entry of entries) {
+            await driver.setInTransaction(
+              transaction,
+              entry.descriptor,
+              entry.value,
+            );
+          }
+          for (const descriptor of descriptors) {
+            await driver.deleteInTransaction(transaction, descriptor);
+          }
+          await mutation?.(transaction);
+        });
+        return;
+      }
+
+      const deleteRecords = await prisma.credential.findMany({
+        where: { id: { in: descriptors.map(({ id }) => id) } },
+        select: { id: true, kind: true, storageType: true },
+      });
+      const descriptorById = new Map(
+        descriptors.map((descriptor) => [descriptor.id, descriptor]),
+      );
+      for (const record of deleteRecords) {
+        const descriptor = descriptorById.get(record.id)!;
+        if (
+          record.kind !== descriptor.kind ||
+          record.storageType !== driver.storageType
+        ) {
+          throw new CredentialStoreOperationError(
+            `Credential ${descriptor.id} has unexpected backend metadata`,
+            "CREDENTIAL_DATA_INVALID",
+          );
+        }
+      }
+
+      const previousSets = new Map<string, Buffer | null>();
+      const previousDeletes = new Map<string, Buffer | null>();
+      for (const { descriptor } of entries) {
+        previousSets.set(descriptor.id, await driver.get(descriptor));
+      }
+      for (const descriptor of descriptors) {
+        previousDeletes.set(descriptor.id, await driver.get(descriptor));
+      }
+      const attemptedSets: typeof entries = [];
+      const attemptedDeletes: CredentialDescriptor[] = [];
+      try {
+        for (const entry of entries) {
+          attemptedSets.push(entry);
+          await driver.set(entry.descriptor, entry.value);
+        }
+        for (const descriptor of descriptors) {
+          attemptedDeletes.push(descriptor);
+          await driver.delete(descriptor);
+        }
+        await prisma.$transaction(async (transaction) => {
+          for (const { descriptor } of entries) {
+            await transaction.credential.upsert({
+              where: { id: descriptor.id },
+              create: {
+                id: descriptor.id,
+                kind: descriptor.kind,
+                ownerId: descriptor.ownerId ?? null,
+                storageType: driver.storageType,
+              },
+              update: {
+                kind: descriptor.kind,
+                ownerId: descriptor.ownerId ?? null,
+                storageType: driver.storageType,
+                payload: null,
+                encrypted: false,
+                encryptionVersion: null,
+                nonce: null,
+                authTag: null,
+                keyFingerprint: null,
+              },
+            });
+          }
+          await transaction.credential.deleteMany({
+            where: { id: { in: deleteRecords.map(({ id }) => id) } },
+          });
+          await mutation?.(transaction);
+        });
+      } catch (error) {
+        try {
+          for (const descriptor of attemptedDeletes.reverse()) {
+            const value = previousDeletes.get(descriptor.id);
+            if (value) await driver.set(descriptor, value);
+          }
+          for (const entry of attemptedSets.reverse()) {
+            const value = previousSets.get(entry.descriptor.id);
+            if (value) await driver.set(entry.descriptor, value);
             else await driver.delete(entry.descriptor);
           }
         } catch {
