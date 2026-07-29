@@ -414,7 +414,10 @@ export function DiffsPage({
           </h1>
           <p className="text-sm text-muted-foreground">{t("description")}</p>
         </div>
-        <div className="flex flex-wrap items-center gap-2">
+        <div
+          className="flex flex-wrap items-start gap-2"
+          data-slot="diffs-toolbar"
+        >
           <CoveragePicker
             loading={coverageLoading}
             onSelect={(value) =>

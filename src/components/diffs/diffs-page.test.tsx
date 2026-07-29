@@ -523,6 +523,9 @@ describe("DiffsPage", () => {
     expect(
       await screen.findByText("Measured at a different revision."),
     ).toBeTruthy();
+    expect(
+      document.querySelector('[data-slot="diffs-toolbar"]')?.className,
+    ).toContain("items-start");
   });
 
   test("flags changed working-tree contents even when HEAD has not moved", async () => {
