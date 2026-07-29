@@ -190,6 +190,22 @@ describe("DiffsPage", () => {
     expect((await paths())[0]).toContain("src/zebra.ts");
   });
 
+  test("wraps long lines until the query string opts out", async () => {
+    const wrapToggle = () =>
+      screen.getByRole("button", { name: "Toggle line wrapping" });
+    const { container, unmount } = render(<DiffsPage />);
+    // The toggle renders before the patch arrives, so wait on the diff itself.
+    await screen.findByText("new line");
+    expect(wrapToggle().getAttribute("aria-pressed")).toBe("true");
+    expect(container.querySelector(".whitespace-pre-wrap")).toBeTruthy();
+    unmount();
+
+    const opted = render(<DiffsPage initial={{ wrap: "0" }} />);
+    await screen.findByText("new line");
+    expect(wrapToggle().getAttribute("aria-pressed")).toBe("false");
+    expect(opted.container.querySelector(".whitespace-pre-wrap")).toBeNull();
+  });
+
   test("honors the initial selection from the query string", async () => {
     render(<DiffsPage initial={{ scope: "STAGED", path: "src/staged.ts" }} />);
     const list = await fileList();

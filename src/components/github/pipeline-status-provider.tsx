@@ -114,6 +114,24 @@ function mergeEqualRevisionSnapshot(
   };
 }
 
+function sameProjection(a: unknown, b: unknown): boolean {
+  if (a === b) return true;
+  if (typeof a !== "object" || typeof b !== "object" || !a || !b) return false;
+  if (Array.isArray(a) || Array.isArray(b)) {
+    if (!Array.isArray(a) || !Array.isArray(b) || a.length !== b.length) {
+      return false;
+    }
+    return a.every((item, index) => sameProjection(item, b[index]));
+  }
+  const left = a as Record<string, unknown>;
+  const right = b as Record<string, unknown>;
+  const keys = Object.keys(left);
+  if (keys.length !== Object.keys(right).length) return false;
+  return keys.every(
+    (key) => key in right && sameProjection(left[key], right[key]),
+  );
+}
+
 function latestSnapshotProjection(
   existing: GitHubPipelineStatusSnapshotView | undefined,
   incoming: GitHubPipelineStatusSnapshotView | null | undefined,
@@ -161,13 +179,15 @@ export function GitHubPipelineStatusProvider({
         const key = snapshotKey(incoming);
         const existing = current.get(key);
         if (existing && existing.revision > incoming.revision) return current;
-        const next = new Map(current);
-        next.set(
-          key,
+        const merged =
           existing && existing.revision === incoming.revision
             ? mergeEqualRevisionSnapshot(existing, incoming)
-            : incoming,
-        );
+            : incoming;
+        // Callers re-seed with a fresh object on every render; keeping the same
+        // map when nothing changed stops that from re-rendering consumers.
+        if (existing && sameProjection(existing, merged)) return current;
+        const next = new Map(current);
+        next.set(key, merged);
         return next;
       });
     },

@@ -64,6 +64,20 @@ export type DiffViewProps = {
   className?: string;
 };
 
+/**
+ * Width reserving `columns` monospace characters in a cell padded by `px-2`.
+ *
+ * The `1rem` is that padding, which `border-box` sizing folds into the width
+ * rather than adding to it. The 1% is headroom: browsers round `1ch` a hair
+ * below the font's real glyph advance — 7.219px against 7.227px for SF Mono at
+ * this size — so an exact `Nch` reserve loses to the very text it is meant to
+ * cover, and the column grows past it to fit.
+ */
+function reserveColumns(columns: number): string {
+  const reserved = Number((columns * 1.01).toFixed(2));
+  return `calc(${reserved}ch + 1rem)`;
+}
+
 function coverageClass(
   state: DiffCoverageState | null,
   stale: boolean,
@@ -127,7 +141,10 @@ function LineNumberCell({
         line?.kind === "add" && "bg-diff-add-gutter",
         line?.kind === "delete" && "bg-diff-delete-gutter",
       )}
-      style={{ minWidth: `${numberWidth + 2}ch` }}
+      // Sized from the file's widest line number, not this hunk's, so a hunk
+      // numbered in the thousands doesn't get a wider gutter than one in the
+      // tens.
+      style={{ minWidth: reserveColumns(numberWidth) }}
     >
       {actionable && (
         <button
@@ -184,6 +201,57 @@ function ContentCell({
         </span>
       )}
     </div>
+  );
+}
+
+/**
+ * A zero-height row that reserves the file's widest line in every content
+ * column.
+ *
+ * Each hunk is its own grid so it can be skipped while off screen, which also
+ * means each one sizes its content columns to its own longest line — without
+ * wrapping, hunks then end at different widths and split mode's divider lands
+ * at a different x in each. Giving every grid the same minimum contribution
+ * settles them all on the same column widths, with no measurement in JS.
+ *
+ * The width is reserved with `ch` rather than a hidden copy of the line, so
+ * nothing here can turn up in a text selection or a find-in-page.
+ */
+function ColumnSizerRow({
+  mode,
+  maxLineWidth,
+}: {
+  mode: DiffViewMode;
+  maxLineWidth: number;
+}) {
+  // Unified mode prefixes each line with a +/-/space marker; split mode doesn't.
+  const columns = maxLineWidth + (mode === "SPLIT" ? 0 : 1);
+  const content = (key: string) => (
+    <div
+      aria-hidden
+      className="h-0"
+      key={key}
+      style={{ minWidth: reserveColumns(columns) }}
+    />
+  );
+  // Empty cells hold the gutter columns' place so auto-placement stays honest;
+  // they add no width of their own.
+  const spacer = (key: string) => <div aria-hidden className="h-0" key={key} />;
+  return mode === "SPLIT" ? (
+    <>
+      {spacer("left-number")}
+      {content("left-content")}
+      {spacer("coverage")}
+      {spacer("right-number")}
+      {content("right-content")}
+    </>
+  ) : (
+    <>
+      {spacer("coverage")}
+      {spacer("old-number")}
+      {spacer("new-number")}
+      {content("content")}
+    </>
   );
 }
 
@@ -403,6 +471,10 @@ export function DiffView(props: DiffViewProps) {
           containIntrinsicSize: `auto ${(hunk.lines.length + 1) * ROW_HEIGHT_REM}rem`,
         }}
       >
+        {/* Wrapped columns are all 1fr of the container, so they need no help. */}
+        {!wrap && (
+          <ColumnSizerRow maxLineWidth={file.maxLineWidth} mode={mode} />
+        )}
         {mode === "SPLIT" ? (
           <SplitHunk hunk={hunk} numberWidth={numberWidth} props={props} />
         ) : (

@@ -1,6 +1,6 @@
 import { describe, expect, test } from "vitest";
 
-import { pairHunkRows, parseUnifiedPatch } from "./parse-patch";
+import { displayWidth, pairHunkRows, parseUnifiedPatch } from "./parse-patch";
 
 const MODIFIED = `diff --git a/src/a.ts b/src/a.ts
 index 1111111..2222222 100644
@@ -162,6 +162,46 @@ deleted file mode 100644
     const [file] = parseUnifiedPatch(MODIFIED);
     expect(file?.lineCount).toBe(5);
     expect(file?.maxLineNumber).toBe(4);
+  });
+
+  test("reports the widest line's width across every hunk", () => {
+    const [file] = parseUnifiedPatch(`diff --git a/e.ts b/e.ts
+--- a/e.ts
++++ b/e.ts
+@@ -1,2 +1,2 @@
+ const short = 1;
+-const removed = 2;
++const added = 2;
+@@ -40,1 +40,2 @@
+ const alsoShort = 3;
++const theLongestLineInTheWholeFile = 4;
+`);
+    expect(file?.maxLineWidth).toBe(
+      "const theLongestLineInTheWholeFile = 4;".length,
+    );
+  });
+
+  test("measures the widest line in rendered columns, not characters", () => {
+    const [file] = parseUnifiedPatch(`diff --git a/f.ts b/f.ts
+--- a/f.ts
++++ b/f.ts
+@@ -1,1 +1,1 @@
+-\tshort
++aaaaaaaaaaaa
+`);
+    // "\tshort" is 6 characters but 13 columns, while "aaaaaaaaaaaa" is 12 of
+    // both — a length-based measure would reserve too little room.
+    expect(file?.maxLineWidth).toBe(13);
+  });
+});
+
+describe("displayWidth", () => {
+  test("advances a tab to the next tab stop", () => {
+    expect(displayWidth("abc")).toBe(3);
+    expect(displayWidth("\t")).toBe(8);
+    expect(displayWidth("ab\tc")).toBe(9);
+    expect(displayWidth("abcdefgh\t")).toBe(16);
+    expect(displayWidth("")).toBe(0);
   });
 });
 

@@ -84,6 +84,16 @@ function PipelineDetails({ seed }: { seed: GitHubPipelineStatusSnapshotView }) {
   );
 }
 
+function UnstableSeedStatus({ onRender }: { onRender: () => void }) {
+  onRender();
+  // Mirrors callers that rebuild the seed (and its pipelines) on every render.
+  const value = useGitHubPipelineSnapshot(
+    { repositoryGithubId: "repo-loop", headSha: "sha-loop" },
+    snapshot("repo-loop", "sha-loop", 0, "PENDING"),
+  );
+  return <div>{`loop:${value?.pipelineStatus}`}</div>;
+}
+
 describe("GitHubPipelineStatusProvider", () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -205,6 +215,18 @@ describe("GitHubPipelineStatusProvider", () => {
       });
     });
     expect(screen.getByText("run-1:1:2")).toBeDefined();
+  });
+
+  test("settles when a caller re-seeds an equal snapshot every render", async () => {
+    const onRender = vi.fn();
+    render(
+      <GitHubPipelineStatusProvider>
+        <UnstableSeedStatus onRender={onRender} />
+      </GitHubPipelineStatusProvider>,
+    );
+    await waitFor(() => expect(client.observer).not.toBeNull());
+    expect(screen.getByText("loop:PENDING")).toBeDefined();
+    expect(onRender.mock.calls.length).toBeLessThan(10);
   });
 
   test("subscribes once and reconciles watched keys after reconnect", async () => {

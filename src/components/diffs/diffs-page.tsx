@@ -138,7 +138,9 @@ export function DiffsPage({
   const [mode, setMode] = useState<DiffViewMode>(
     initial.mode === "SPLIT" ? "SPLIT" : "UNIFIED",
   );
-  const [wrap, setWrap] = useState(initial.wrap === "1");
+  // Wrapping is the default, so the query string carries the opt-out. An older
+  // link saying `wrap=1` still lands on wrapped.
+  const [wrap, setWrap] = useState(initial.wrap !== "0");
   const [selectedPath, setSelectedPath] = useState(initial.path ?? "");
   const [commitSha, setCommitSha] = useState(initial.commitSha ?? "");
 
@@ -268,7 +270,7 @@ export function DiffsPage({
     if (selected) params.set("path", selected.path);
     if (scope === "COMMIT" && commitSha) params.set("commit", commitSha);
     if (mode === "SPLIT") params.set("mode", mode);
-    if (wrap) params.set("wrap", "1");
+    if (!wrap) params.set("wrap", "0");
     window.history.replaceState(null, "", `${location.pathname}?${params}`);
   }, [commitSha, mode, scope, selected, worktreeId, wrap]);
 

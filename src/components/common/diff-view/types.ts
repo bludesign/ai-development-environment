@@ -71,4 +71,9 @@ export type ParsedDiffFile = {
   lineCount: number;
   /** Widest line number in the file, used to size the gutter columns. */
   maxLineNumber: number;
+  /**
+   * Rendered column count of the file's widest line. Every hunk reserves this
+   * much room so their content columns all come out the same width.
+   */
+  maxLineWidth: number;
 };

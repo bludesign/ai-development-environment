@@ -26,6 +26,22 @@ const PATCH = `diff --git a/src/a.ts b/src/a.ts
  export { x };
 `;
 
+/**
+ * A short hunk numbered in the tens, then a wider one numbered in the
+ * thousands — the case where each hunk sized its own columns.
+ */
+const TWO_HUNK_PATCH = `diff --git a/src/b.ts b/src/b.ts
+--- a/src/b.ts
++++ b/src/b.ts
+@@ -1,2 +1,2 @@
+ const x = 1;
+-const y = 2;
++const y = 3;
+@@ -4176,1 +4176,2 @@
+ const alsoShort = 3;
++const theLongestLineInTheWholeFile = 4;
+`;
+
 function fileOf(patch: string): ParsedDiffFile {
   const [file] = parseUnifiedPatch(patch);
   if (!file) throw new Error("patch did not parse");
@@ -81,6 +97,46 @@ describe("DiffView", () => {
     rerender(<DiffView file={file} labels={labels} mode="UNIFIED" wrap />);
     expect(container.querySelector(".whitespace-pre-wrap")).toBeTruthy();
     expect(container.querySelector(".w-max")).toBeNull();
+  });
+
+  test("reserves the file's widest line in every hunk when not wrapping", () => {
+    const file = fileOf(TWO_HUNK_PATCH);
+    // The second hunk holds the widest line; the first is far shorter.
+    expect(file.maxLineWidth).toBe(39);
+    const sized = (root: HTMLElement) =>
+      [...root.querySelectorAll<HTMLElement>(".h-0")]
+        .map((cell) => cell.style.minWidth)
+        .filter(Boolean);
+
+    const { container, rerender } = render(
+      <DiffView file={file} labels={labels} mode="SPLIT" wrap={false} />,
+    );
+    // Two hunks, each reserving the same width in both of its content columns.
+    expect(sized(container)).toEqual(Array(4).fill("calc(39.39ch + 1rem)"));
+
+    // Unified mode has one content column per hunk, and its cells carry a
+    // leading +/-/space marker the reserved width has to account for.
+    rerender(
+      <DiffView file={file} labels={labels} mode="UNIFIED" wrap={false} />,
+    );
+    expect(sized(container)).toEqual(Array(2).fill("calc(40.4ch + 1rem)"));
+
+    // Wrapped columns are already the container's width, so nothing to reserve.
+    rerender(<DiffView file={file} labels={labels} mode="SPLIT" wrap />);
+    expect(sized(container)).toEqual([]);
+  });
+
+  test("sizes every gutter from the file's widest line number", () => {
+    const file = fileOf(TWO_HUNK_PATCH);
+    const { container } = render(
+      <DiffView file={file} labels={labels} mode="SPLIT" wrap={false} />,
+    );
+    const gutters = [
+      ...container.querySelectorAll<HTMLElement>(".tabular-nums"),
+    ].map((cell) => cell.style.minWidth);
+    expect(gutters.length).toBeGreaterThan(0);
+    // Four digits everywhere, including the hunk whose lines are numbered 1-3.
+    expect(new Set(gutters)).toEqual(new Set(["calc(4.04ch + 1rem)"]));
   });
 
   test("marks coverage state per line and skips deleted lines", () => {

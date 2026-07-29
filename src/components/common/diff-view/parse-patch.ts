@@ -12,6 +12,22 @@ import type {
   ParsedDiffFile,
 } from "./types";
 
+/** Columns a tab advances by, matching the browser's default `tab-size`. */
+const TAB_WIDTH = 8;
+
+/**
+ * How many columns a line occupies once rendered in the monospace grid. This is
+ * not `content.length`: a tab jumps to the next tab stop rather than one column.
+ * Double-width glyphs still count as one, so a CJK-heavy line under-measures.
+ */
+export function displayWidth(content: string): number {
+  let width = 0;
+  for (const char of content) {
+    width = char === "\t" ? width + TAB_WIDTH - (width % TAB_WIDTH) : width + 1;
+  }
+  return width;
+}
+
 /**
  * Strips git's `a/` and `b/` path prefixes. `/dev/null` becomes null so callers
  * can tell an absent side from a real path.
@@ -173,6 +189,7 @@ export function parseUnifiedPatch(patch: string): ParsedDiffFile[] {
     let deletions = 0;
     let lineCount = 0;
     let maxLineNumber = 0;
+    let maxLineWidth = 0;
     for (const hunk of hunks) {
       for (const line of hunk.lines) {
         if (line.kind === "add") additions += 1;
@@ -183,6 +200,7 @@ export function parseUnifiedPatch(patch: string): ParsedDiffFile[] {
           line.oldLine ?? 0,
           line.newLine ?? 0,
         );
+        maxLineWidth = Math.max(maxLineWidth, displayWidth(line.content));
       }
     }
     return [
@@ -197,6 +215,7 @@ export function parseUnifiedPatch(patch: string): ParsedDiffFile[] {
         hunks,
         lineCount,
         maxLineNumber,
+        maxLineWidth,
       },
     ];
   });
