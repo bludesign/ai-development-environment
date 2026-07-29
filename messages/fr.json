@@ -72,7 +72,7 @@
     "repositories": "Dépôts",
     "runs": "Exécutions",
     "sync": "Synchronisation",
-    "diffs": "Différences"
+    "changes": "Modifications"
   },
   "globalSearch": {
     "title": "Rechercher dans l’application",
@@ -3230,6 +3230,7 @@
     "testBundle": "Paquet",
     "testDuration": "Durée",
     "coverageReport": "Rapport de couverture du code",
+    "viewChangesWithCoverage": "Voir les modifications avec la couverture",
     "loadingCoverageReport": "Chargement du rapport de couverture…",
     "coverageReportNotFound": "Rapport de couverture introuvable",
     "coverageReportNotFoundDescription": "Générez d’abord un rapport de couverture depuis la page de détails de la compilation.",
@@ -4194,7 +4195,7 @@
     "missingImage": "Aucune image de ce côté"
   },
   "diffs": {
-    "title": "Différences et couverture",
+    "title": "Modifications",
     "description": "Passez en revue chaque modification d'un arbre de travail, couverture affichée sur le code.",
     "loading": "Chargement des modifications…",
     "loadingDiff": "Chargement de la différence…",

@@ -72,7 +72,7 @@
     "repositories": "Repositorys",
     "runs": "Ausführungen",
     "sync": "Synchronisierung",
-    "diffs": "Unterschiede"
+    "changes": "Änderungen"
   },
   "globalSearch": {
     "title": "App durchsuchen",
@@ -3230,6 +3230,7 @@
     "testBundle": "Testpaket",
     "testDuration": "Dauer",
     "coverageReport": "Codeabdeckungsbericht",
+    "viewChangesWithCoverage": "Änderungen mit Abdeckung anzeigen",
     "loadingCoverageReport": "Abdeckungsbericht wird geladen…",
     "coverageReportNotFound": "Abdeckungsbericht nicht gefunden",
     "coverageReportNotFoundDescription": "Erstellen Sie zuerst auf der Build-Detailseite einen Abdeckungsbericht.",
@@ -4194,7 +4195,7 @@
     "missingImage": "Auf dieser Seite kein Bild"
   },
   "diffs": {
-    "title": "Unterschiede und Abdeckung",
+    "title": "Änderungen",
     "description": "Prüfe jede Änderung eines Arbeitsbaums, mit der Abdeckung über dem Code.",
     "loading": "Änderungen werden geladen…",
     "loadingDiff": "Unterschied wird geladen…",

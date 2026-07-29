@@ -72,7 +72,7 @@
     "repositories": "Repositories",
     "runs": "Runs",
     "sync": "Sync",
-    "diffs": "Diffs"
+    "changes": "Changes"
   },
   "globalSearch": {
     "title": "Search the app",
@@ -3230,6 +3230,7 @@
     "testBundle": "Bundle",
     "testDuration": "Duration",
     "coverageReport": "Code coverage report",
+    "viewChangesWithCoverage": "View changes with coverage",
     "loadingCoverageReport": "Loading coverage report…",
     "coverageReportNotFound": "Coverage report not found",
     "coverageReportNotFoundDescription": "Generate a coverage report from the build details page first.",
@@ -4194,7 +4195,7 @@
     "missingImage": "No image on this side"
   },
   "diffs": {
-    "title": "Diffs & coverage",
+    "title": "Changes",
     "description": "Review every change in a worktree, with coverage overlaid on the code.",
     "loading": "Loading changes…",
     "loadingDiff": "Loading the diff…",

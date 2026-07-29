@@ -3,6 +3,7 @@
 import { Columns2, Rows3, WrapText } from "lucide-react";
 import { useTranslations } from "next-intl";
 
+import { CoverageValue } from "@/components/common/coverage-value";
 import {
   ImageDiff,
   PatchDiffView,
@@ -97,6 +98,15 @@ export function DiffPane({
           {file.path}
         </span>
         <Badge variant="outline">{file.changeType}</Badge>
+        {file.lineCoverage !== null && (
+          <CoverageValue
+            className="text-sm"
+            percent={(value) =>
+              typeof value === "number" ? `${Math.round(value * 100)}%` : "—"
+            }
+            value={file.lineCoverage}
+          />
+        )}
         <div className="flex items-center gap-1">
           <Button
             aria-label={t("unifiedView")}

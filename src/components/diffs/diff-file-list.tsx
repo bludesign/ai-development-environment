@@ -1,9 +1,20 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { ArrowDown, ArrowUp, FileCode2, Images, Search } from "lucide-react";
+import {
+  ArrowDown,
+  ArrowUp,
+  ChevronDown,
+  ChevronRight,
+  FileCode2,
+  Folder,
+  FolderOpen,
+  Images,
+  Search,
+} from "lucide-react";
 import { useTranslations } from "next-intl";
 
+import { CoverageValue } from "@/components/common/coverage-value";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -14,6 +25,11 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
 import type { SortDirection } from "@/components/common/sortable-table-head";
 import { cn } from "@/lib/utils";
 
@@ -31,6 +47,22 @@ const SORTS: DiffFileSort[] = [
   "deletions",
   "changeType",
 ];
+
+/** Left padding, in pixels, each level of folder nesting adds to a row. */
+const INDENT = 12;
+
+type FileNode = { type: "file"; file: DiffFileEntry };
+
+type FolderNode = {
+  type: "folder";
+  /** Displayed segment(s) — several, once a single-child chain is collapsed. */
+  label: string;
+  /** Full path of the folder, used as its key and expansion identity. */
+  path: string;
+  children: TreeNode[];
+};
+
+type TreeNode = FileNode | FolderNode;
 
 function compare(
   left: DiffFileEntry,
@@ -54,6 +86,276 @@ function compare(
   }
 }
 
+/** Whole percentages keep the ring's label narrow enough for the sidebar. */
+function percentLabel(value: unknown): string {
+  return typeof value === "number" ? `${Math.round(value * 100)}%` : "—";
+}
+
+/** The part of a path shown on the row itself; the folders own the rest. */
+function baseName(path: string): string {
+  const index = path.lastIndexOf("/");
+  return index === -1 ? path : path.slice(index + 1);
+}
+
+/**
+ * A folder whose only child is another folder carries no information of its
+ * own, so the pair renders as one row (`src/components`) — the way an editor
+ * tree does it. Groups only survive where a folder holds files, or more than
+ * one child.
+ */
+function collapseChains(node: FolderNode): FolderNode {
+  let current: FolderNode = {
+    ...node,
+    children: node.children.map((child) =>
+      child.type === "folder" ? collapseChains(child) : child,
+    ),
+  };
+  while (
+    current.children.length === 1 &&
+    current.children[0].type === "folder"
+  ) {
+    const only = current.children[0];
+    current = {
+      ...current,
+      label: `${current.label}/${only.label}`,
+      path: only.path,
+      children: only.children,
+    };
+  }
+  return current;
+}
+
+/**
+ * Groups the (already sorted) files by folder. Folders keep the order their
+ * first file appeared in, so the chosen sort still drives the list — and
+ * folders precede loose files at every level.
+ */
+function buildTree(files: DiffFileEntry[]): TreeNode[] {
+  const root: FolderNode = {
+    type: "folder",
+    label: "",
+    path: "",
+    children: [],
+  };
+
+  for (const file of files) {
+    const segments = file.path.split("/");
+    segments.pop();
+    let parent = root;
+    for (const segment of segments) {
+      const path = parent.path ? `${parent.path}/${segment}` : segment;
+      const existing = parent.children.find(
+        (child): child is FolderNode =>
+          child.type === "folder" && child.path === path,
+      );
+      if (existing) {
+        parent = existing;
+        continue;
+      }
+      const created: FolderNode = {
+        type: "folder",
+        label: segment,
+        path,
+        children: [],
+      };
+      parent.children.push(created);
+      parent = created;
+    }
+    parent.children.push({ type: "file", file });
+  }
+
+  const order = (node: FolderNode): TreeNode[] => [
+    ...node.children
+      .filter((child): child is FolderNode => child.type === "folder")
+      .map((child) => ({ ...child, children: order(child) })),
+    ...node.children.filter((child) => child.type === "file"),
+  ];
+
+  // The root is a rendering fiction, so only its children get collapsed.
+  return order(root).map((child) =>
+    child.type === "folder" ? collapseChains(child) : child,
+  );
+}
+
+function countFiles(node: TreeNode): number {
+  return node.type === "file"
+    ? 1
+    : node.children.reduce((total, child) => total + countFiles(child), 0);
+}
+
+function FileRow({
+  byCoverage,
+  depth,
+  file,
+  onSelect,
+  selected,
+  showCoverage,
+}: {
+  /** Sorting by coverage: the row trades its change counts for the ring. */
+  byCoverage: boolean;
+  depth: number;
+  file: DiffFileEntry;
+  onSelect: (file: DiffFileEntry) => void;
+  selected: boolean;
+  showCoverage: boolean;
+}) {
+  return (
+    // Names truncate in a sidebar this narrow, so hovering spells one out.
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <button
+          aria-current={selected}
+          className={cn(
+            "flex w-full items-center gap-2 rounded-md py-1.5 pr-2 text-left hover:bg-accent",
+            selected && "bg-accent",
+          )}
+          onClick={() => onSelect(file)}
+          style={{ paddingLeft: depth * INDENT + 8 }}
+          type="button"
+        >
+          {file.image ? (
+            <Images className="size-4 shrink-0 text-muted-foreground" />
+          ) : (
+            <FileCode2 className="size-4 shrink-0 text-muted-foreground" />
+          )}
+          <span className="min-w-0 flex-1">
+            <span className="block truncate font-mono text-xs">
+              {baseName(file.path)}
+            </span>
+            {/* The ring already carries the percentage when it is showing. */}
+            {(file.module ||
+              (showCoverage && !byCoverage && file.lineCoverage !== null)) && (
+              <span className="block truncate text-[0.7rem] text-muted-foreground">
+                {file.module}
+                {file.module &&
+                showCoverage &&
+                !byCoverage &&
+                file.lineCoverage !== null
+                  ? " · "
+                  : ""}
+                {showCoverage && !byCoverage && file.lineCoverage !== null
+                  ? `${Math.round(file.lineCoverage * 100)}%`
+                  : ""}
+              </span>
+            )}
+          </span>
+          {byCoverage ? (
+            <CoverageValue
+              className="shrink-0 text-[0.7rem]"
+              percent={percentLabel}
+              value={file.lineCoverage}
+            />
+          ) : (
+            <>
+              <Badge className="h-5 shrink-0 px-1.5" variant="outline">
+                {file.changeType}
+              </Badge>
+              <span className="shrink-0 text-[0.7rem] tabular-nums">
+                <span className="text-diff-add-foreground">
+                  +{file.additions ?? 0}
+                </span>{" "}
+                <span className="text-diff-delete-foreground">
+                  −{file.deletions ?? 0}
+                </span>
+              </span>
+            </>
+          )}
+        </button>
+      </TooltipTrigger>
+      <TooltipContent className="font-mono" side="right">
+        <span className="block break-all">{baseName(file.path)}</span>
+      </TooltipContent>
+    </Tooltip>
+  );
+}
+
+function TreeRows({
+  byCoverage,
+  collapsed,
+  depth,
+  nodes,
+  onSelect,
+  onToggle,
+  selectedKey,
+  showCoverage,
+}: {
+  byCoverage: boolean;
+  collapsed: (path: string) => boolean;
+  depth: number;
+  nodes: TreeNode[];
+  onSelect: (file: DiffFileEntry) => void;
+  onToggle: (path: string) => void;
+  selectedKey: string | null;
+  showCoverage: boolean;
+}) {
+  return (
+    <>
+      {nodes.map((node) => {
+        if (node.type === "file") {
+          return (
+            <li key={node.file.key}>
+              <FileRow
+                byCoverage={byCoverage}
+                depth={depth}
+                file={node.file}
+                onSelect={onSelect}
+                selected={node.file.key === selectedKey}
+                showCoverage={showCoverage}
+              />
+            </li>
+          );
+        }
+        const open = !collapsed(node.path);
+        return (
+          <li key={node.path}>
+            <button
+              aria-expanded={open}
+              className="flex w-full items-center gap-2 rounded-md py-1.5 pr-2 text-left hover:bg-accent"
+              onClick={() => onToggle(node.path)}
+              style={{ paddingLeft: depth * INDENT + 8 }}
+              type="button"
+            >
+              {open ? (
+                <ChevronDown className="size-3.5 shrink-0 text-muted-foreground" />
+              ) : (
+                <ChevronRight className="size-3.5 shrink-0 text-muted-foreground" />
+              )}
+              {open ? (
+                <FolderOpen className="size-4 shrink-0 text-muted-foreground" />
+              ) : (
+                <Folder className="size-4 shrink-0 text-muted-foreground" />
+              )}
+              <span
+                className="min-w-0 flex-1 truncate font-mono text-xs font-medium"
+                title={node.path}
+              >
+                {node.label}
+              </span>
+              <span className="shrink-0 text-[0.7rem] text-muted-foreground tabular-nums">
+                {countFiles(node)}
+              </span>
+            </button>
+            {open && (
+              <ul className="space-y-0.5">
+                <TreeRows
+                  byCoverage={byCoverage}
+                  collapsed={collapsed}
+                  depth={depth + 1}
+                  nodes={node.children}
+                  onSelect={onSelect}
+                  onToggle={onToggle}
+                  selectedKey={selectedKey}
+                  showCoverage={showCoverage}
+                />
+              </ul>
+            )}
+          </li>
+        );
+      })}
+    </>
+  );
+}
+
 export function DiffFileList({
   files,
   onSelect,
@@ -71,6 +373,7 @@ export function DiffFileList({
   const [query, setQuery] = useState("");
   const [sort, setSort] = useState<DiffFileSort>("name");
   const [direction, setDirection] = useState<SortDirection>("asc");
+  const [collapsed, setCollapsed] = useState<ReadonlySet<string>>(new Set());
 
   const visible = useMemo(() => {
     const needle = query.trim().toLocaleLowerCase();
@@ -88,6 +391,11 @@ export function DiffFileList({
     });
     return direction === "asc" ? sorted : sorted.reverse();
   }, [direction, files, query, sort]);
+
+  const tree = useMemo(() => buildTree(visible), [visible]);
+
+  // While filtering, a folder the user collapsed earlier would hide matches.
+  const searching = query.trim().length > 0;
 
   return (
     <div className="flex min-h-0 flex-col gap-2">
@@ -146,56 +454,22 @@ export function DiffFileList({
         aria-label={t("files")}
         className="min-h-0 flex-1 space-y-0.5 overflow-y-auto"
       >
-        {visible.map((file) => (
-          <li key={file.key}>
-            <button
-              aria-current={file.key === selectedKey}
-              className={cn(
-                "flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left hover:bg-accent",
-                file.key === selectedKey && "bg-accent",
-              )}
-              onClick={() => onSelect(file)}
-              type="button"
-            >
-              {file.image ? (
-                <Images className="size-4 shrink-0 text-muted-foreground" />
-              ) : (
-                <FileCode2 className="size-4 shrink-0 text-muted-foreground" />
-              )}
-              <span className="min-w-0 flex-1">
-                <span
-                  className="block truncate font-mono text-xs"
-                  title={file.path}
-                >
-                  {file.path}
-                </span>
-                {(file.module ||
-                  (showCoverage && file.lineCoverage !== null)) && (
-                  <span className="block truncate text-[0.7rem] text-muted-foreground">
-                    {file.module}
-                    {file.module && showCoverage && file.lineCoverage !== null
-                      ? " · "
-                      : ""}
-                    {showCoverage && file.lineCoverage !== null
-                      ? `${Math.round(file.lineCoverage * 100)}%`
-                      : ""}
-                  </span>
-                )}
-              </span>
-              <Badge className="h-5 shrink-0 px-1.5" variant="outline">
-                {file.changeType}
-              </Badge>
-              <span className="shrink-0 text-[0.7rem] tabular-nums">
-                <span className="text-diff-add-foreground">
-                  +{file.additions ?? 0}
-                </span>{" "}
-                <span className="text-diff-delete-foreground">
-                  −{file.deletions ?? 0}
-                </span>
-              </span>
-            </button>
-          </li>
-        ))}
+        <TreeRows
+          byCoverage={showCoverage && sort === "coverage"}
+          collapsed={(path) => !searching && collapsed.has(path)}
+          depth={0}
+          nodes={tree}
+          onSelect={onSelect}
+          onToggle={(path) =>
+            setCollapsed((current) => {
+              const next = new Set(current);
+              if (!next.delete(path)) next.add(path);
+              return next;
+            })
+          }
+          selectedKey={selectedKey}
+          showCoverage={showCoverage}
+        />
         {!visible.length && (
           <li className="px-2 py-4 text-sm text-muted-foreground">
             {files.length ? t("noMatchingFiles") : t("noFiles")}

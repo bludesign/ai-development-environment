@@ -19,6 +19,7 @@ import { RunBuildControls } from "@/components/builds/run-build-controls";
 import { WorktreeCoverageButton } from "@/components/builds/start-build-dialog";
 import type { BuildRecord, BuildReport } from "@/components/builds/types";
 import { useBuildTimeTicker } from "@/components/builds/use-build-time-ticker";
+import { CoverageValue } from "@/components/common/coverage-value";
 import { WorktreePipelinesCard } from "@/components/github/worktree-pipelines-card";
 import { WorkflowQuickActions } from "@/components/workflows/workflow-quick-actions";
 import { CommandQuickActions } from "@/components/commands/command-quick-actions";
@@ -918,13 +919,13 @@ function WorktreeCoverageCard({
                     </Badge>
                   </TableCell>
                   <TableCell>
-                    <WorktreeCoverageValue
+                    <CoverageValue
                       percent={percent}
                       value={report.summary.lineCoverage}
                     />
                   </TableCell>
                   <TableCell>
-                    <WorktreeCoverageValue
+                    <CoverageValue
                       percent={percent}
                       value={report.summary.changedLineCoverage}
                     />
@@ -948,36 +949,6 @@ function WorktreeCoverageCard({
         </Table>
       )}
     </Card>
-  );
-}
-
-function WorktreeCoverageValue({
-  percent,
-  value,
-}: {
-  percent: (value: unknown) => string;
-  value: unknown;
-}) {
-  if (typeof value !== "number") return <>—</>;
-  const normalized = Math.max(0, Math.min(1, value));
-  const color =
-    normalized >= 0.8
-      ? "text-emerald-500"
-      : normalized >= 0.5
-        ? "text-amber-500"
-        : "text-red-500";
-  return (
-    <span className="inline-flex items-center gap-1.5 tabular-nums">
-      {percent(value)}
-      <span
-        aria-hidden="true"
-        className={`size-3.5 shrink-0 rounded-full ring-1 ring-foreground/10 ${color}`}
-        data-coverage-indicator
-        style={{
-          background: `conic-gradient(currentColor ${normalized * 360}deg, var(--muted) 0deg)`,
-        }}
-      />
-    </span>
   );
 }
 

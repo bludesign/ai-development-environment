@@ -7,6 +7,7 @@ export type BreadcrumbLabelKey =
   | "buildData"
   | "builds"
   | "cache"
+  | "changes"
   | "codebases"
   | "comments"
   | "commands"
@@ -15,7 +16,6 @@ export type BreadcrumbLabelKey =
   | "coverage"
   | "credentials"
   | "devices"
-  | "diffs"
   | "drafts"
   | "edit"
   | "enroll"
@@ -60,6 +60,7 @@ const STATIC_SEGMENTS: Record<string, BreadcrumbLabelKey> = {
   "build-data": "buildData",
   builds: "builds",
   cache: "cache",
+  changes: "changes",
   codebases: "codebases",
   comments: "comments",
   commands: "commands",
@@ -68,7 +69,6 @@ const STATIC_SEGMENTS: Record<string, BreadcrumbLabelKey> = {
   coverage: "coverage",
   credentials: "credentials",
   devices: "devices",
-  diffs: "diffs",
   drafts: "drafts",
   edit: "edit",
   enroll: "enroll",
@@ -137,6 +137,7 @@ const ROUTABLE_STATIC_PATHS = new Set([
   "/analytics-events",
   "/build-data",
   "/builds",
+  "/changes",
   "/codebases",
   "/commands",
   "/commands/new",
@@ -146,7 +147,6 @@ const ROUTABLE_STATIC_PATHS = new Set([
   "/credentials",
   "/devices",
   "/devices/enroll",
-  "/diffs",
   "/drafts",
   "/github-cache",
   "/jira-cache",

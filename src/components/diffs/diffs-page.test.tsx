@@ -1,16 +1,23 @@
 import {
   cleanup,
   fireEvent,
-  render,
+  render as renderBare,
   screen,
   waitFor,
   within,
 } from "@testing-library/react";
+import type { ReactElement } from "react";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 
+import { TooltipProvider } from "@/components/ui/tooltip";
 import { controlPlaneRequest } from "@/lib/control-plane-client";
 
 import { DiffsPage } from "./diffs-page";
+
+/** The file list's tooltips need the provider the app layout supplies. */
+function render(ui: ReactElement) {
+  return renderBare(ui, { wrapper: TooltipProvider });
+}
 
 vi.mock("@/lib/control-plane-client", () => ({
   controlPlaneRequest: vi.fn(),
@@ -116,6 +123,12 @@ const detail = {
   },
 };
 
+/**
+ * Branch-scope files the detail query answers with for the running test. Reset
+ * each time, so a test that needs deeper paths can just push onto it.
+ */
+let branchChanges = detail.inspectWorktree.branchChanges;
+
 /** Two reports, one still running — only the ready one may be offered. */
 const coverageReports = {
   worktreeCoverageReports: [
@@ -170,6 +183,7 @@ const coverageReport = {
 };
 
 beforeEach(() => {
+  branchChanges = detail.inspectWorktree.branchChanges;
   request.mockImplementation(async (query) => {
     const operation = String(query);
     if (operation.includes("query DiffWorktrees")) return overview as never;
@@ -179,7 +193,9 @@ beforeEach(() => {
     if (operation.includes("query DiffCoverageReport"))
       return coverageReport as never;
     if (operation.includes("mutation DiffWorktreeDetail"))
-      return detail as never;
+      return {
+        inspectWorktree: { ...detail.inspectWorktree, branchChanges },
+      } as never;
     if (operation.includes("mutation InspectWorktreeDiff")) {
       return {
         inspectWorktreeDiff: {
@@ -211,14 +227,54 @@ async function fileList() {
   return within(await screen.findByRole("list", { name: "Files" }));
 }
 
+/** File rows in display order; folder rows carry no `aria-current`. */
+async function fileRows() {
+  return (await fileList())
+    .getAllByRole("button")
+    .filter((button) => button.hasAttribute("aria-current"))
+    .map((button) => button.textContent ?? "");
+}
+
 describe("DiffsPage", () => {
   test("defaults to the branch scope and lists its changed files", async () => {
     render(<DiffsPage />);
     const list = await fileList();
-    expect(list.getByText("src/app.ts")).toBeTruthy();
-    expect(list.getByText("src/zebra.ts")).toBeTruthy();
+    // Names lose their folders — the enclosing group owns them.
+    expect(list.getByText("src")).toBeTruthy();
+    expect(list.getByText("app.ts")).toBeTruthy();
+    expect(list.getByText("zebra.ts")).toBeTruthy();
     // Staged-only files must not leak into the branch scope.
-    expect(list.queryByText("src/staged.ts")).toBeNull();
+    expect(list.queryByText("staged.ts")).toBeNull();
+  });
+
+  test("groups nested paths and merges folders holding only a folder", async () => {
+    branchChanges = [
+      ...detail.inspectWorktree.branchChanges,
+      {
+        path: "src/components/diffs/pane.ts",
+        previousPath: null,
+        changeType: "A",
+        additions: 4,
+        deletions: 0,
+        binary: false,
+        image: false,
+      },
+    ];
+    render(<DiffsPage />);
+    const list = await fileList();
+    // `components` holds nothing but `diffs`, so the two render as one row.
+    expect(list.getByText("components/diffs")).toBeTruthy();
+    expect(list.queryByText("components")).toBeNull();
+    expect(list.getByText("pane.ts")).toBeTruthy();
+  });
+
+  test("hides a folder's files while it is collapsed", async () => {
+    render(<DiffsPage />);
+    const list = await fileList();
+    fireEvent.click(list.getByRole("button", { expanded: true }));
+    expect(list.queryByText("app.ts")).toBeNull();
+    fireEvent.click(list.getByRole("button", { expanded: false }));
+    expect(list.getByText("app.ts")).toBeTruthy();
   });
 
   test("renders the selected file's diff", async () => {
@@ -232,8 +288,8 @@ describe("DiffsPage", () => {
     await fileList();
     fireEvent.click(screen.getByRole("tab", { name: "Staged" }));
     const list = await fileList();
-    expect(list.getByText("src/staged.ts")).toBeTruthy();
-    expect(list.queryByText("src/zebra.ts")).toBeNull();
+    expect(list.getByText("staged.ts")).toBeTruthy();
+    expect(list.queryByText("zebra.ts")).toBeNull();
   });
 
   test("filters the file list by the search box", async () => {
@@ -243,19 +299,15 @@ describe("DiffsPage", () => {
       target: { value: "zebra" },
     });
     const list = await fileList();
-    expect(list.queryByText("src/app.ts")).toBeNull();
-    expect(list.getByText("src/zebra.ts")).toBeTruthy();
+    expect(list.queryByText("app.ts")).toBeNull();
+    expect(list.getByText("zebra.ts")).toBeTruthy();
   });
 
   test("reverses the file order when the sort direction toggles", async () => {
     render(<DiffsPage />);
-    const paths = async () =>
-      (await fileList())
-        .getAllByRole("button")
-        .map((button) => button.textContent ?? "");
-    expect((await paths())[0]).toContain("src/app.ts");
+    expect((await fileRows())[0]).toContain("app.ts");
     fireEvent.click(screen.getByRole("button", { name: "Sort ascending" }));
-    expect((await paths())[0]).toContain("src/zebra.ts");
+    expect((await fileRows())[0]).toContain("zebra.ts");
   });
 
   test("wraps long lines until the query string opts out", async () => {
@@ -277,8 +329,8 @@ describe("DiffsPage", () => {
   test("honors the initial selection from the query string", async () => {
     render(<DiffsPage initial={{ scope: "STAGED", path: "src/staged.ts" }} />);
     const list = await fileList();
-    expect(list.getByText("src/staged.ts")).toBeTruthy();
-    expect(list.queryByText("src/app.ts")).toBeNull();
+    expect(list.getByText("staged.ts")).toBeTruthy();
+    expect(list.queryByText("app.ts")).toBeNull();
   });
 
   test("offers a commit picker in the commit scope", async () => {
@@ -316,15 +368,37 @@ describe("DiffsPage", () => {
     await fileList();
     // The list renders as soon as the diff lands; coverage joins in afterwards.
     await waitFor(async () => {
-      const row = (await fileList()).getByText("src/app.ts").closest("button")!;
+      const row = (await fileList()).getByText("app.ts").closest("button")!;
       expect(row.textContent).toContain("AppCore");
       expect(row.textContent).toContain("50%");
     });
     // A file the report never measured stays unlabelled.
     expect(
-      (await fileList()).getByText("src/zebra.ts").closest("button")!
-        .textContent,
+      (await fileList()).getByText("zebra.ts").closest("button")!.textContent,
     ).not.toContain("%");
+  });
+
+  test("trades the change counts for coverage rings under the coverage sort", async () => {
+    render(<DiffsPage initial={{ coverageReportId: "report-1" }} />);
+    const row = async () =>
+      (await fileList()).getByText("app.ts").closest("button")!;
+    await waitFor(async () =>
+      expect((await row()).textContent).toContain("50%"),
+    );
+    expect((await row()).querySelector("[data-coverage-indicator]")).toBeNull();
+
+    fireEvent.pointerDown(
+      screen.getByRole("combobox", { name: "Sort files by" }),
+      { button: 0, ctrlKey: false, pointerType: "mouse" },
+    );
+    fireEvent.click(await screen.findByRole("option", { name: "Coverage" }));
+
+    const sorted = await row();
+    expect(sorted.querySelector("[data-coverage-indicator]")).toBeTruthy();
+    expect(sorted.textContent).toContain("50%");
+    // The change type and its line counts give way to the ring.
+    expect(sorted.textContent).not.toContain("+1");
+    expect(sorted.textContent).not.toContain("M");
   });
 
   test("offers only ready reports in the picker", async () => {
