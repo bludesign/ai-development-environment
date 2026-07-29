@@ -34,10 +34,15 @@ export type ImageDiffLabels = PixelDiffLabels & {
 /** Pixelmatch's own default colour-distance cutoff, as a percentage. */
 const DEFAULT_SENSITIVITY = 10;
 
-/** Swatches in the same shape the worktree highlight picker uses. */
+/**
+ * Swatches in the same shape the worktree highlight picker uses. Each repeats
+ * its fill for the hovered and pressed states, which the toggle's own
+ * `bg-muted` would otherwise paint over, leaving the swatch colourless.
+ */
 const COLOR_SWATCHES: Record<PixelDiffColor, string> = {
-  RED: "border-red-600 bg-red-500",
-  GREEN: "border-green-600 bg-green-500",
+  RED: "border-red-600 bg-red-500 hover:bg-red-500 data-[state=on]:bg-red-500",
+  GREEN:
+    "border-green-600 bg-green-500 hover:bg-green-500 data-[state=on]:bg-green-500",
   // Half white, half red: the mask that fades the image out behind it.
   WHITE:
     "border-red-600 bg-[linear-gradient(135deg,var(--color-white)_0_50%,var(--color-red-500)_50%_100%)]",
@@ -145,9 +150,9 @@ export function ImageDiff({
                 <ToggleGroupItem
                   aria-label={labels.colors[value]}
                   className={cn(
-                    "size-7 min-w-0 p-0",
+                    "size-7 min-w-0 p-0 hover:brightness-110",
                     COLOR_SWATCHES[value],
-                    "data-[state=on]:ring-2 data-[state=on]:ring-foreground",
+                    "data-[state=on]:ring-2 data-[state=on]:ring-white data-[state=on]:ring-inset",
                   )}
                   key={value}
                   title={labels.colors[value]}
