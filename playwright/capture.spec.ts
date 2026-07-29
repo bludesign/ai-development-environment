@@ -27,6 +27,16 @@ test.describe("app screenshots", () => {
       await setScreenshotTime(page);
       if (route.initScript) await page.addInitScript(route.initScript);
       if (route.stubWorktree) await stubWorktreeAgent(page);
+      const readyResponse = route.readyGraphqlOperation
+        ? page.waitForResponse(
+            (candidate) =>
+              candidate.url().endsWith("/api/graphql") &&
+              (candidate.request().postData() ?? "").includes(
+                route.readyGraphqlOperation!,
+              ),
+            { timeout: 45_000 },
+          )
+        : null;
       const response = await page.goto(`/en${route.path}`, {
         waitUntil: "domcontentloaded",
         timeout: 45_000,
@@ -35,6 +45,23 @@ test.describe("app screenshots", () => {
       await page
         .waitForLoadState("networkidle", { timeout: 15_000 })
         .catch(() => {});
+      if (readyResponse) {
+        const completedResponse = await readyResponse;
+        await completedResponse.finished();
+      }
+      if (route.readyTexts?.length) {
+        const terminalState = route.readyTexts
+          .slice(1)
+          .reduce(
+            (locator, text) =>
+              locator.or(page.getByText(text, { exact: true })),
+            page.getByText(route.readyTexts[0]!, { exact: true }),
+          );
+        await terminalState.first().waitFor({
+          state: "visible",
+          timeout: 30_000,
+        });
+      }
       await page.waitForTimeout(800);
       await normalizeScreenshotValues(page);
 
