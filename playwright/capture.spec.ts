@@ -1,6 +1,7 @@
 import { expect, test } from "@playwright/test";
 
 import { routes } from "./routes";
+import { setScreenshotTime } from "./screenshot-time";
 import { stubWorktreeAgent } from "./worktree-stub";
 
 /**
@@ -20,6 +21,7 @@ test.describe("app screenshots", () => {
       const pageErrors: string[] = [];
       page.on("pageerror", (error) => pageErrors.push(error.message));
 
+      await setScreenshotTime(page);
       if (route.initScript) await page.addInitScript(route.initScript);
       if (route.stubWorktree) await stubWorktreeAgent(page);
       const response = await page.goto(`/en${route.path}`, {

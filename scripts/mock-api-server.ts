@@ -21,6 +21,8 @@ import {
   type ServerResponse,
 } from "node:http";
 
+import { NOW } from "./mock-data/time";
+
 const PORT = Number(
   process.argv[process.argv.indexOf("--port") + 1] ||
     process.env.MOCK_API_PORT ||
@@ -31,7 +33,7 @@ const OWNER = "acme";
 const REPOS = ["web-app", "ios-app", "api"] as const;
 const VIEWER_LOGIN = "jane-doe";
 
-const now = Date.now();
+const now = NOW.getTime();
 const ago = (minutes: number) => new Date(now - minutes * 60_000).toISOString();
 
 /**
