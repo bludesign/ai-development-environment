@@ -34,6 +34,12 @@ Object.defineProperties(HTMLElement.prototype, {
   setPointerCapture: { configurable: true, value: () => undefined },
 });
 
+class ResizeObserverMock {
+  observe() {}
+  unobserve() {}
+  disconnect() {}
+}
+
 const PATCH = `diff --git a/src/app.ts b/src/app.ts
 --- a/src/app.ts
 +++ b/src/app.ts
@@ -58,6 +64,7 @@ const overview = {
                 relativePath: "trees/search",
                 folder: "/repos/web-search",
                 headSha: "abc1234",
+                codeStateHash: "state-current",
                 baseBranch: "main",
                 availability: "AVAILABLE",
                 pullRequest: null,
@@ -129,6 +136,24 @@ const detail = {
  */
 let branchChanges = detail.inspectWorktree.branchChanges;
 
+let commitDiff = {
+  files: [] as Array<{
+    path: string;
+    previousPath: string | null;
+    changeType: string;
+    additions: number;
+    deletions: number;
+    binary: boolean;
+    image: boolean;
+  }>,
+  patch: PATCH,
+  image: false,
+  binary: false,
+  truncated: false,
+  beforeAvailable: true,
+  afterAvailable: true,
+};
+
 /** Two reports, one still running — only the ready one may be offered. */
 const coverageReports = {
   worktreeCoverageReports: [
@@ -139,7 +164,15 @@ const coverageReports = {
       finishedAt: "2026-07-21T09:05:00.000Z",
       coverageSummary: { lineCoverage: 0.82, changedLineCoverage: 0.5 },
       // Matches the worktree head, so this report is not stale.
-      build: { id: "build-1", snapshot: { worktree: { headSha: "abc1234" } } },
+      build: {
+        id: "build-1",
+        snapshot: {
+          worktree: {
+            headSha: "abc1234",
+            codeStateHash: "state-current",
+          },
+        },
+      },
     },
     {
       id: "report-2",
@@ -147,7 +180,15 @@ const coverageReports = {
       createdAt: "2026-07-22T09:00:00.000Z",
       finishedAt: null,
       coverageSummary: null,
-      build: { id: "build-2", snapshot: { worktree: { headSha: "abc1234" } } },
+      build: {
+        id: "build-2",
+        snapshot: {
+          worktree: {
+            headSha: "abc1234",
+            codeStateHash: "state-current",
+          },
+        },
+      },
     },
   ],
 };
@@ -183,7 +224,17 @@ const coverageReport = {
 };
 
 beforeEach(() => {
+  global.ResizeObserver = ResizeObserverMock;
   branchChanges = detail.inspectWorktree.branchChanges;
+  commitDiff = {
+    files: [],
+    patch: PATCH,
+    image: false,
+    binary: false,
+    truncated: false,
+    beforeAvailable: true,
+    afterAvailable: true,
+  };
   request.mockImplementation(async (query) => {
     const operation = String(query);
     if (operation.includes("query DiffWorktrees")) return overview as never;
@@ -197,17 +248,7 @@ beforeEach(() => {
         inspectWorktree: { ...detail.inspectWorktree, branchChanges },
       } as never;
     if (operation.includes("mutation InspectWorktreeDiff")) {
-      return {
-        inspectWorktreeDiff: {
-          files: [],
-          patch: PATCH,
-          image: false,
-          binary: false,
-          truncated: false,
-          beforeAvailable: true,
-          afterAvailable: true,
-        },
-      } as never;
+      return { inspectWorktreeDiff: commitDiff } as never;
     }
     throw new Error(`unexpected operation: ${operation.slice(0, 40)}`);
   });
@@ -399,6 +440,35 @@ describe("DiffsPage", () => {
     // The change type and its line counts give way to the ring.
     expect(sorted.textContent).not.toContain("+1");
     expect(sorted.textContent).not.toContain("M");
+    expect((await fileRows())[0]).toContain("app.ts");
+
+    fireEvent.click(screen.getByRole("button", { name: "Sort ascending" }));
+    expect((await fileRows())[0]).toContain("app.ts");
+  });
+
+  test("uses the commit diff's truncation flag", async () => {
+    commitDiff = {
+      ...commitDiff,
+      files: [
+        {
+          path: "src/commit.ts",
+          previousPath: null,
+          changeType: "M",
+          additions: 2,
+          deletions: 1,
+          binary: false,
+          image: false,
+        },
+      ],
+      truncated: true,
+    };
+
+    render(
+      <DiffsPage initial={{ scope: "COMMIT", commitSha: "aaaaaaa1111" }} />,
+    );
+
+    expect(await screen.findByText(/list truncated/)).toBeTruthy();
+    expect((await fileList()).getByText("commit.ts")).toBeTruthy();
   });
 
   test("offers only ready reports in the picker", async () => {
@@ -453,6 +523,155 @@ describe("DiffsPage", () => {
     expect(
       await screen.findByText("Measured at a different revision."),
     ).toBeTruthy();
+  });
+
+  test("flags changed working-tree contents even when HEAD has not moved", async () => {
+    request.mockImplementation(async (query) => {
+      const operation = String(query);
+      if (operation.includes("query DiffWorktrees")) return overview as never;
+      if (operation.includes("query DiffCoverageReports")) {
+        return {
+          worktreeCoverageReports: [
+            {
+              ...coverageReports.worktreeCoverageReports[0],
+              build: {
+                id: "build-1",
+                snapshot: {
+                  worktree: {
+                    headSha: "abc1234",
+                    codeStateHash: "state-before-edit",
+                  },
+                },
+              },
+            },
+          ],
+        } as never;
+      }
+      if (operation.includes("query DiffCoverageReport"))
+        return coverageReport as never;
+      if (operation.includes("mutation DiffWorktreeDetail"))
+        return detail as never;
+      if (operation.includes("mutation InspectWorktreeDiff"))
+        return { inspectWorktreeDiff: commitDiff } as never;
+      throw new Error(`unexpected operation: ${operation.slice(0, 40)}`);
+    });
+
+    render(
+      <DiffsPage initial={{ scope: "STAGED", coverageReportId: "report-1" }} />,
+    );
+    expect(
+      await screen.findByText("Measured at a different revision."),
+    ).toBeTruthy();
+  });
+
+  test("compares commit coverage with the selected commit instead of HEAD", async () => {
+    render(
+      <DiffsPage
+        initial={{
+          scope: "COMMIT",
+          commitSha: "aaaaaaa1111",
+          coverageReportId: "report-1",
+        }}
+      />,
+    );
+
+    expect(
+      await screen.findByText("Measured at a different revision."),
+    ).toBeTruthy();
+  });
+
+  test("discards late detail responses after switching worktrees", async () => {
+    const firstWorktree = overview.worktreeOverview.agents[0]!.codebases[0]!;
+    const secondWorktree = {
+      ...firstWorktree.worktrees[0]!,
+      id: "w2",
+      branch: "feature/other",
+      relativePath: "trees/other",
+      folder: "/repos/web-other",
+      codeStateHash: "state-other",
+    };
+    const switchingOverview = {
+      worktreeOverview: {
+        agents: [
+          {
+            codebases: [
+              {
+                ...firstWorktree,
+                worktrees: [...firstWorktree.worktrees, secondWorktree],
+              },
+            ],
+          },
+        ],
+      },
+    };
+    let resolveStale!: (value: unknown) => void;
+    let resolveSecond!: (value: unknown) => void;
+    const staleRequest = new Promise<unknown>((resolve) => {
+      resolveStale = resolve;
+    });
+    const secondRequest = new Promise<unknown>((resolve) => {
+      resolveSecond = resolve;
+    });
+    let firstDetailRequests = 0;
+    request.mockImplementation((query, variables) => {
+      const operation = String(query);
+      if (operation.includes("query DiffWorktrees")) {
+        return Promise.resolve(switchingOverview) as never;
+      }
+      if (operation.includes("query DiffCoverageReports")) {
+        return Promise.resolve({ worktreeCoverageReports: [] }) as never;
+      }
+      if (operation.includes("mutation DiffWorktreeDetail")) {
+        const id = (variables as { id?: string } | undefined)?.id;
+        if (id === "w1") {
+          firstDetailRequests += 1;
+          return (
+            firstDetailRequests === 1 ? Promise.resolve(detail) : staleRequest
+          ) as never;
+        }
+        if (id === "w2") return secondRequest as never;
+      }
+      if (operation.includes("mutation InspectWorktreeDiff")) {
+        return Promise.resolve({ inspectWorktreeDiff: commitDiff }) as never;
+      }
+      return Promise.reject(new Error(`unexpected operation: ${operation}`));
+    });
+
+    render(<DiffsPage />);
+    expect((await fileList()).getByText("app.ts")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Refresh" }));
+    await waitFor(() => expect(firstDetailRequests).toBe(2));
+
+    fireEvent.click(
+      screen.getByRole("combobox", { name: "Select a worktree" }),
+    );
+    fireEvent.click(
+      await screen.findByRole("option", { name: /feature\/other/ }),
+    );
+    await waitFor(() => expect(screen.queryByText("app.ts")).toBeNull());
+
+    resolveStale(detail);
+    await Promise.resolve();
+    expect(screen.queryByText("app.ts")).toBeNull();
+
+    resolveSecond({
+      inspectWorktree: {
+        ...detail.inspectWorktree,
+        branchChanges: [
+          {
+            path: "src/second.ts",
+            previousPath: null,
+            changeType: "A",
+            additions: 1,
+            deletions: 0,
+            binary: false,
+            image: false,
+          },
+        ],
+      },
+    });
+    expect(await screen.findByText("second.ts")).toBeTruthy();
+    expect(screen.queryByText("app.ts")).toBeNull();
   });
 
   test("surfaces a failed load", async () => {

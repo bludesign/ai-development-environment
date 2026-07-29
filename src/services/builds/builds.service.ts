@@ -1749,6 +1749,7 @@ export class BuildsService {
    */
   async importCoverageReport(input: {
     worktreeId: string;
+    buildName?: string | null;
     reportPath: string;
     format?: string | null;
     requestId: string;
@@ -1767,6 +1768,11 @@ export class BuildsService {
     if (!(COVERAGE_REPORT_FORMATS as readonly string[]).includes(format)) {
       throw new Error("Coverage format must be AUTO, LCOV, or ISTANBUL");
     }
+    const buildName = cleanName(
+      input.buildName ?? "Coverage report",
+      "Build name",
+      200,
+    );
     const reportPath = cleanName(input.reportPath, "Coverage file", 4_000);
     const requestId = cleanName(input.requestId, "Request ID", 200);
     const requestKey = `coverage:${input.worktreeId}:${requestId}`;
@@ -1798,8 +1804,17 @@ export class BuildsService {
         name: worktree.codebase.agent.name,
         hostname: worktree.codebase.agent.hostname,
       },
+      configuration: { name: buildName },
       coverageImport: { reportPath, format, baseBranch },
       worktreeCoverage: true,
+    };
+    const hostDestination = {
+      type: "HOST",
+      id: worktree.codebase.agent.id,
+      name: worktree.codebase.agent.name,
+      platform: worktree.codebase.agent.architecture,
+      osVersion: worktree.codebase.agent.osVersion || null,
+      state: "Connected",
     };
     const build = await prisma.build.create({
       data: {
@@ -1812,7 +1827,7 @@ export class BuildsService {
         status: "RUNNING",
         action: "TEST",
         destinationType: "HOST",
-        destinationJson: JSON.stringify({ type: "HOST" }),
+        destinationJson: JSON.stringify(hostDestination),
         snapshotJson: JSON.stringify(snapshot),
         commandSummary: `Import coverage from ${reportPath}`,
         artifactDirectory: join(buildRoot, buildId),

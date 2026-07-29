@@ -73,8 +73,7 @@ function compare(
     case "module":
       return (left.module ?? "").localeCompare(right.module ?? "");
     case "coverage":
-      // Files the report says nothing about sort last in either direction.
-      return (left.lineCoverage ?? -1) - (right.lineCoverage ?? -1);
+      return (left.lineCoverage ?? 0) - (right.lineCoverage ?? 0);
     case "additions":
       return (left.additions ?? 0) - (right.additions ?? 0);
     case "deletions":
@@ -384,12 +383,19 @@ export function DiffFileList({
             (file.module ?? "").toLocaleLowerCase().includes(needle),
         )
       : files;
-    const sorted = [...matched].sort((left, right) => {
+    return [...matched].sort((left, right) => {
+      if (
+        sort === "coverage" &&
+        (left.lineCoverage === null) !== (right.lineCoverage === null)
+      ) {
+        // Missing readings stay after measured files in both directions.
+        return left.lineCoverage === null ? 1 : -1;
+      }
       const result = compare(left, right, sort);
       // Ties fall back to path so the order is stable across re-sorts.
-      return result !== 0 ? result : left.path.localeCompare(right.path);
+      if (result !== 0) return direction === "asc" ? result : -result;
+      return left.path.localeCompare(right.path);
     });
-    return direction === "asc" ? sorted : sorted.reverse();
   }, [direction, files, query, sort]);
 
   const tree = useMemo(() => buildTree(visible), [visible]);

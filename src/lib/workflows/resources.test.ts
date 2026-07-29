@@ -63,6 +63,15 @@ describe("workflow resource navigation", () => {
     ).toEqual({ href: "/worktrees/worktree-1", external: false });
   });
 
+  test("prefers a created build over its supporting worktree", () => {
+    expect(
+      preferredWorkflowResourceDestination([
+        { kind: "BUILD", resourceId: "build-1" },
+        { kind: "WORKTREE", resourceId: "worktree-1" },
+      ]),
+    ).toEqual({ href: "/builds/build-1", external: false });
+  });
+
   test("maps trigger payloads to their primary resources", () => {
     expect(
       workflowTriggerResourceLink("RUN_COMPLETED", {

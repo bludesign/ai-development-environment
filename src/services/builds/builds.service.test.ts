@@ -53,6 +53,8 @@ function worktree() {
         id: "agent-1",
         name: "Builder",
         hostname: "builder.local",
+        osVersion: "macOS 26.0",
+        architecture: "arm64",
         capabilitiesJson: JSON.stringify([
           IOS_BUILD_JOB_KIND,
           IOS_DESTINATIONS_JOB_KIND,
@@ -1237,6 +1239,7 @@ describe("BuildsService", () => {
       control(createJob),
     ).importCoverageReport({
       worktreeId: "worktree-1",
+      buildName: "Test with coverage",
       reportPath: "coverage/lcov.info",
       format: "auto",
       requestId: "request-1",
@@ -1250,13 +1253,23 @@ describe("BuildsService", () => {
           destinationType: "HOST",
           status: "RUNNING",
           commandSummary: "Import coverage from coverage/lcov.info",
+          destinationJson: expect.any(String),
         }),
       }),
     );
+    expect(JSON.parse(create.mock.calls[0]![0].data.destinationJson)).toEqual({
+      type: "HOST",
+      id: "agent-1",
+      name: "Builder",
+      platform: worktreeRecord.codebase.agent.architecture,
+      osVersion: worktreeRecord.codebase.agent.osVersion,
+      state: "Connected",
+    });
     expect(
       JSON.parse(create.mock.calls[0]![0].data.snapshotJson),
     ).toMatchObject({
       worktree: { headSha: "abc123" },
+      configuration: { name: "Test with coverage" },
       coverageImport: {
         reportPath: "coverage/lcov.info",
         format: "AUTO",

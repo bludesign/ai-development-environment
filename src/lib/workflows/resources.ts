@@ -392,6 +392,7 @@ export function workflowResourceDestination(
 
 function navigationPriority(link: WorkflowResourceLinkLike): number {
   const kind = link.kind.trim().toUpperCase();
+  if (kind === "BUILD") return 0;
   if (kind === "AGENT_JOB") return 30;
   if (kind === "COMMAND_RUN") return 30;
   if (kind === "GITHUB_WORKFLOW_RUN") return 20;

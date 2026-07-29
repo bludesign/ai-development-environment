@@ -161,6 +161,83 @@ function buildHunks(file: StructuredPatch, fileKey: string): DiffHunk[] {
 }
 
 /**
+ * Rewrites hunk counts to describe the lines that are actually present. Git
+ * output can be capped in the middle of a hunk, leaving its header's original
+ * counts larger than the visible prefix and causing jsdiff to reject the whole
+ * patch. The repaired patch is only a rendering fallback; it is never applied
+ * back to a checkout.
+ */
+function repairIncompleteHunks(patch: string): string {
+  const lines = patch.split("\n");
+  return lines
+    .map((line, index) => {
+      const header = /^@@ -(\d+)(?:,\d+)? \+(\d+)(?:,\d+)? @@(.*)$/.exec(line);
+      if (!header) return line;
+
+      let oldLines = 0;
+      let newLines = 0;
+      for (let cursor = index + 1; cursor < lines.length; cursor += 1) {
+        const candidate = lines[cursor]!;
+        if (
+          candidate.startsWith("@@ ") ||
+          candidate.startsWith("diff --git ")
+        ) {
+          break;
+        }
+        const marker = candidate.charAt(0);
+        if (marker === "+") newLines += 1;
+        else if (marker === "-") oldLines += 1;
+        else if (
+          marker === " " ||
+          (candidate === "" && cursor < lines.length - 1)
+        ) {
+          oldLines += 1;
+          newLines += 1;
+        } else if (marker !== "\\") {
+          break;
+        }
+      }
+
+      return `@@ -${header[1]},${oldLines} +${header[2]},${newLines} @@${header[3]}`;
+    })
+    .join("\n");
+}
+
+/** Splits a git patch so one malformed final file cannot hide earlier files. */
+function gitPatchSections(patch: string): string[] {
+  const lines = patch.split("\n");
+  const sections: string[] = [];
+  let current: string[] = [];
+  for (const line of lines) {
+    if (line.startsWith("diff --git ") && current.length) {
+      sections.push(current.join("\n"));
+      current = [];
+    }
+    current.push(line);
+  }
+  if (current.length) sections.push(current.join("\n"));
+  return sections;
+}
+
+function parsePatchTolerantly(patch: string): StructuredPatch[] {
+  try {
+    return parsePatch(patch);
+  } catch {
+    return gitPatchSections(patch).flatMap((section) => {
+      try {
+        return parsePatch(section);
+      } catch {
+        try {
+          return parsePatch(repairIncompleteHunks(section));
+        } catch {
+          return [];
+        }
+      }
+    });
+  }
+}
+
+/**
  * Parses a unified patch — including a multi-file `diff --git` patch — into a
  * renderable model.
  *
@@ -170,12 +247,7 @@ function buildHunks(file: StructuredPatch, fileKey: string): DiffHunk[] {
  */
 export function parseUnifiedPatch(patch: string): ParsedDiffFile[] {
   if (!patch.trim()) return [];
-  let files: StructuredPatch[];
-  try {
-    files = parsePatch(patch);
-  } catch {
-    return [];
-  }
+  const files = parsePatchTolerantly(patch);
   return files.flatMap((file, index) => {
     const newPath = stripPathPrefix(file.newFileName);
     const oldPath = stripPathPrefix(file.oldFileName);

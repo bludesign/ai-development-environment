@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { PanelLeft, RefreshCw } from "lucide-react";
 import { useTranslations } from "next-intl";
 
@@ -56,6 +56,7 @@ type OverviewResponse = {
           relativePath: string;
           folder: string;
           headSha: string | null;
+          codeStateHash: string | null;
           baseBranch: string | null;
           availability: string;
           pullRequest: DiffWorktreeOption["pullRequest"];
@@ -113,6 +114,13 @@ function filesForScope(
     }));
 }
 
+function revisionsDiffer(
+  measured: string | null | undefined,
+  displayed: string | null | undefined,
+): boolean {
+  return Boolean(measured && displayed && measured !== displayed);
+}
+
 /** Initial selection, parsed from the query string by the route. */
 export type DiffsPageInitialState = {
   worktreeId?: string;
@@ -150,13 +158,20 @@ export function DiffsPage({
     initial.coverageReportId ?? "",
   );
 
-  const [detail, setDetail] = useState<WorktreeDetail | null>(null);
-  const [branchFiles, setBranchFiles] = useState<DiffFileEntry[]>([]);
-  // Tagged with the commit it describes so a stale list is discarded by
-  // derivation rather than by resetting state from an effect.
+  // Tag detail data with its checkout. Changing the selection hides the old
+  // list immediately, before the next effect has a chance to start loading.
+  const [loadedDetail, setLoadedDetail] = useState<{
+    worktreeId: string;
+    detail: WorktreeDetail | null;
+    branchFiles: DiffFileEntry[];
+  } | null>(null);
+  // Tagged with the checkout and commit it describes so a stale list is
+  // discarded by derivation rather than by resetting state from an effect.
   const [commitDiff, setCommitDiff] = useState<{
+    worktreeId: string;
     sha: string;
     files: DiffFileEntry[];
+    truncated: boolean;
   } | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -164,6 +179,10 @@ export function DiffsPage({
   const [sheetOpen, setSheetOpen] = useState(false);
 
   const worktree = worktrees.find((entry) => entry.id === worktreeId) ?? null;
+  const detail =
+    loadedDetail?.worktreeId === worktreeId ? loadedDetail.detail : null;
+  const branchFiles =
+    loadedDetail?.worktreeId === worktreeId ? loadedDetail.branchFiles : [];
 
   const coverageReports = useCoverageReports(worktreeId);
   const coverageReport =
@@ -176,9 +195,19 @@ export function DiffsPage({
   // moved on, line numbers can no longer be trusted to line up, so the strip is
   // dimmed rather than hidden — a stale reading still beats none.
   const coverageStale = Boolean(
-    coverageReport?.headSha &&
-    worktree?.headSha &&
-    coverageReport.headSha !== worktree.headSha,
+    coverageReport &&
+    (scope === "COMMIT"
+      ? revisionsDiffer(coverageReport.headSha, commitSha)
+      : scope === "BRANCH"
+        ? revisionsDiffer(coverageReport.headSha, worktree?.headSha)
+        : coverageReport.codeStateHash || worktree?.codeStateHash
+          ? !coverageReport.codeStateHash ||
+            !worktree?.codeStateHash ||
+            revisionsDiffer(
+              coverageReport.codeStateHash,
+              worktree.codeStateHash,
+            )
+          : revisionsDiffer(coverageReport.headSha, worktree?.headSha)),
   );
 
   useEffect(() => {
@@ -202,47 +231,60 @@ export function DiffsPage({
     };
   }, []);
 
-  const loadDetail = useCallback(async () => {
-    if (!worktreeId) return;
-    setLoading(true);
-    setError(null);
-    try {
-      const data = await controlPlaneRequest<{
-        inspectWorktree: WorktreeDetail;
-      }>(DIFF_WORKTREE_DETAIL_MUTATION, {
-        id: worktreeId,
-        requestId: createClientId(),
-      });
-      setDetail(data.inspectWorktree);
-      setBranchFiles(
-        (data.inspectWorktree.branchChanges ?? []).map((file) => ({
-          ...file,
-          key: `${file.previousPath ?? ""}:${file.path}`,
-          lineCoverage: null,
-          module: null,
-        })),
-      );
-    } catch (reason) {
-      setDetail(null);
-      setBranchFiles([]);
-      setError(reason instanceof Error ? reason.message : String(reason));
-    } finally {
-      setLoading(false);
-    }
-  }, [worktreeId]);
-
   useEffect(() => {
     // Deferred so the synchronous effect body does not set state directly.
-    const timer = window.setTimeout(() => void loadDetail(), 0);
-    return () => window.clearTimeout(timer);
-  }, [loadDetail, refreshToken]);
+    if (!worktreeId) return;
+    let disposed = false;
+    const requestedWorktreeId = worktreeId;
+    const timer = window.setTimeout(() => {
+      setLoading(true);
+      setError(null);
+      void controlPlaneRequest<{
+        inspectWorktree: WorktreeDetail;
+      }>(DIFF_WORKTREE_DETAIL_MUTATION, {
+        id: requestedWorktreeId,
+        requestId: createClientId(),
+      })
+        .then((data) => {
+          if (disposed) return;
+          setLoadedDetail({
+            worktreeId: requestedWorktreeId,
+            detail: data.inspectWorktree,
+            branchFiles: (data.inspectWorktree.branchChanges ?? []).map(
+              (file) => ({
+                ...file,
+                key: `${file.previousPath ?? ""}:${file.path}`,
+                lineCoverage: null,
+                module: null,
+              }),
+            ),
+          });
+        })
+        .catch((reason) => {
+          if (disposed) return;
+          setLoadedDetail({
+            worktreeId: requestedWorktreeId,
+            detail: null,
+            branchFiles: [],
+          });
+          setError(reason instanceof Error ? reason.message : String(reason));
+        })
+        .finally(() => {
+          if (!disposed) setLoading(false);
+        });
+    }, 0);
+    return () => {
+      disposed = true;
+      window.clearTimeout(timer);
+    };
+  }, [refreshToken, worktreeId]);
 
   // The commit scope needs its own file list, fetched per selected commit.
   useEffect(() => {
     if (scope !== "COMMIT" || !worktreeId || !commitSha) return;
     let disposed = false;
     void controlPlaneRequest<{
-      inspectWorktreeDiff: { files: DiffFileEntry[] };
+      inspectWorktreeDiff: { files: DiffFileEntry[]; truncated: boolean };
     }>(INSPECT_WORKTREE_DIFF_MUTATION, {
       input: {
         worktreeId,
@@ -256,7 +298,9 @@ export function DiffsPage({
       .then((data) => {
         if (disposed) return;
         setCommitDiff({
+          worktreeId,
           sha: commitSha,
+          truncated: data.inspectWorktreeDiff.truncated,
           files: data.inspectWorktreeDiff.files.map((file) => ({
             ...file,
             key: `${file.previousPath ?? ""}:${file.path}`,
@@ -275,7 +319,17 @@ export function DiffsPage({
   }, [commitSha, scope, worktreeId, refreshToken]);
 
   const commitFiles =
-    commitDiff && commitDiff.sha === commitSha ? commitDiff.files : [];
+    commitDiff &&
+    commitDiff.worktreeId === worktreeId &&
+    commitDiff.sha === commitSha
+      ? commitDiff.files
+      : [];
+  const commitFilesTruncated = Boolean(
+    commitDiff &&
+    commitDiff.worktreeId === worktreeId &&
+    commitDiff.sha === commitSha &&
+    commitDiff.truncated,
+  );
   const files = useMemo(() => {
     const scoped = filesForScope(scope, detail, branchFiles, commitFiles);
     if (!coverageFiles.size) return scoped;
@@ -343,7 +397,9 @@ export function DiffsPage({
         truncated={
           scope === "BRANCH"
             ? (detail?.branchChangesTruncated ?? false)
-            : (detail?.changesTruncated ?? false)
+            : scope === "COMMIT"
+              ? commitFilesTruncated
+              : (detail?.changesTruncated ?? false)
         }
       />
     </div>

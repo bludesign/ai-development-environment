@@ -158,6 +158,41 @@ deleted file mode 100644
     expect(parseUnifiedPatch("not a patch at all")).toEqual([]);
   });
 
+  test("preserves the visible prefix of a hunk truncated before its declared end", () => {
+    const [file] = parseUnifiedPatch(`diff --git a/large.txt b/large.txt
+--- a/large.txt
++++ b/large.txt
+@@ -1,5 +1,5 @@
+ one
+-two
++TWO
+ three`);
+
+    expect(file?.path).toBe("large.txt");
+    expect(file?.hunks[0]?.lines.map((line) => line.content)).toEqual([
+      "one",
+      "two",
+      "TWO",
+      "three",
+    ]);
+  });
+
+  test("keeps complete files when a later file is truncated", () => {
+    const files =
+      parseUnifiedPatch(`${MODIFIED}diff --git a/large.txt b/large.txt
+--- a/large.txt
++++ b/large.txt
+@@ -1,3 +1,3 @@
+-old
++new`);
+
+    expect(files.map((file) => file.path)).toEqual(["src/a.ts", "large.txt"]);
+    expect(files[1]?.hunks[0]?.lines.map((line) => line.content)).toEqual([
+      "old",
+      "new",
+    ]);
+  });
+
   test("reports the widest line number and total rendered rows", () => {
     const [file] = parseUnifiedPatch(MODIFIED);
     expect(file?.lineCount).toBe(5);

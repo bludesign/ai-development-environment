@@ -643,6 +643,10 @@ const STEP_CONFIG_DESCRIPTORS: StepConfigDescriptors = {
   BUILD_IMPORT_COVERAGE: {
     fields: [
       resource("worktreeId", "Worktree", "worktree"),
+      text("buildName", "Build name", {
+        default: "{{workflow.name}}",
+        help: "Name shown on the build and coverage pages. Defaults to the workflow name.",
+      }),
       text("reportPath", "Coverage file", {
         required: true,
         default: "coverage/lcov.info",

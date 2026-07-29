@@ -68,6 +68,18 @@ describe("workflow config descriptors", () => {
     }
   });
 
+  test("defaults imported coverage build names to the workflow name", () => {
+    expect(
+      getConfigDescriptor("BUILD_IMPORT_COVERAGE", "step")?.fields.find(
+        ({ key }) => key === "buildName",
+      ),
+    ).toMatchObject({
+      control: "text",
+      default: "{{workflow.name}}",
+      label: "Build name",
+    });
+  });
+
   test("allows interpolation wherever the runtime resolves strings", () => {
     const interpolates = (
       kind: string,

@@ -15,6 +15,7 @@ export type DiffWorktreeOption = {
   relativePath: string;
   folder: string;
   headSha: string | null;
+  codeStateHash: string | null;
   baseBranch: string | null;
   availability: string;
   codebaseName: string;
@@ -50,10 +51,12 @@ export type DiffCoverageReportOption = {
   /** Coverage of the branch's changed lines, for the option label. */
   changedLineCoverage: number | null;
   /**
-   * Revision the report measured. Compared against the worktree head to decide
-   * whether the overlay is describing the code currently on screen.
+   * HEAD revision the report measured. Used for branch and commit diffs, and as
+   * a fallback for older working-tree reports without a complete state hash.
    */
   headSha: string | null;
+  /** Complete worktree state measured by the build, including local changes. */
+  codeStateHash: string | null;
 };
 
 /** The selected report's data for one file, keyed by worktree-relative path. */

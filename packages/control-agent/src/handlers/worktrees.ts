@@ -1130,6 +1130,26 @@ async function readBoundedFile(
   }
 }
 
+function untrackedTextPatch(path: string, contents: Buffer): string {
+  const text = contents.toString("utf8");
+  const lines = text ? text.split("\n") : [];
+  if (text.endsWith("\n")) lines.pop();
+  const patch = [
+    `diff --git a/${path} b/${path}`,
+    "new file mode 100644",
+    "--- /dev/null",
+    `+++ b/${path}`,
+  ];
+  if (lines.length) {
+    patch.push(
+      `@@ -0,0 +1,${lines.length} @@`,
+      ...lines.map((line) => `+${line}`),
+    );
+    if (!text.endsWith("\n")) patch.push("\\ No newline at end of file");
+  }
+  return patch.join("\n");
+}
+
 async function availableSide(
   side: DiffSide,
   folder: string,
@@ -1232,16 +1252,7 @@ async function inspectRequestedDiff(
       oversized = bounded.oversized;
       patch = "";
     } else {
-      patch = [
-        `diff --git a/${input.path} b/${input.path}`,
-        "new file mode 100644",
-        "--- /dev/null",
-        `+++ b/${input.path}`,
-        ...contents
-          .toString("utf8")
-          .split("\n")
-          .map((line) => `+${line}`),
-      ].join("\n");
+      patch = untrackedTextPatch(input.path, contents);
     }
   } else {
     patch = requireSuccess(

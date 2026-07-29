@@ -53,12 +53,23 @@ type ReportResponse = {
 };
 
 /** Digs the measured revision out of the build snapshot's loose JSON. */
-function snapshotHeadSha(snapshot: unknown): string | null {
-  if (!snapshot || typeof snapshot !== "object") return null;
+function snapshotRevision(snapshot: unknown): {
+  headSha: string | null;
+  codeStateHash: string | null;
+} {
+  if (!snapshot || typeof snapshot !== "object") {
+    return { headSha: null, codeStateHash: null };
+  }
   const worktree = (snapshot as Record<string, unknown>).worktree;
-  if (!worktree || typeof worktree !== "object") return null;
-  const headSha = (worktree as Record<string, unknown>).headSha;
-  return typeof headSha === "string" ? headSha : null;
+  if (!worktree || typeof worktree !== "object") {
+    return { headSha: null, codeStateHash: null };
+  }
+  const record = worktree as Record<string, unknown>;
+  return {
+    headSha: typeof record.headSha === "string" ? record.headSha : null,
+    codeStateHash:
+      typeof record.codeStateHash === "string" ? record.codeStateHash : null,
+  };
 }
 
 /**
@@ -89,17 +100,20 @@ export function useCoverageReports(worktreeId: string) {
           worktreeId,
           reports: data.worktreeCoverageReports
             .filter((report) => report.status === "READY" && report.build)
-            .map((report) => ({
-              id: report.id,
-              buildId: report.build!.id,
-              status: report.status,
-              createdAt: report.createdAt,
-              finishedAt: report.finishedAt,
-              lineCoverage: report.coverageSummary?.lineCoverage ?? null,
-              changedLineCoverage:
-                report.coverageSummary?.changedLineCoverage ?? null,
-              headSha: snapshotHeadSha(report.build!.snapshot),
-            })),
+            .map((report) => {
+              const revision = snapshotRevision(report.build!.snapshot);
+              return {
+                id: report.id,
+                buildId: report.build!.id,
+                status: report.status,
+                createdAt: report.createdAt,
+                finishedAt: report.finishedAt,
+                lineCoverage: report.coverageSummary?.lineCoverage ?? null,
+                changedLineCoverage:
+                  report.coverageSummary?.changedLineCoverage ?? null,
+                ...revision,
+              };
+            }),
         });
       })
       // A worktree with no builds is the common case, not an error worth

@@ -10,7 +10,7 @@ export const DIFF_WORKTREES_QUERY = `query DiffWorktrees {
         repository { id name displayOrigin }
         codebase { id folder defaultBranch }
         worktrees {
-          id branch relativePath folder headSha baseBranch availability
+          id branch relativePath folder headSha codeStateHash baseBranch availability
           pullRequest {
             number title url state headRefOid repositoryNameWithOwner
           }

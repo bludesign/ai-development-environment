@@ -28,7 +28,7 @@ function context(worktreeId: string): WorkflowExecutionContext {
       failurePolicy: "FAIL",
     },
     sessionData: {
-      workflow: { id: "workflow-definition" },
+      workflow: { id: "workflow-definition", name: "Test with coverage" },
       worktree: { id: "actual-worktree" },
     },
     signal: new AbortController().signal,
@@ -1099,6 +1099,7 @@ describe("coverage import workflow adapter", () => {
 
     const result = await executor.execute(
       coverageContext({
+        buildName: "Frontend coverage",
         reportPath: "coverage/coverage-final.json",
         format: "ISTANBUL",
       }),
@@ -1106,6 +1107,7 @@ describe("coverage import workflow adapter", () => {
 
     expect(importCoverageReport).toHaveBeenCalledWith({
       worktreeId: "actual-worktree",
+      buildName: "Frontend coverage",
       reportPath: "coverage/coverage-final.json",
       format: "ISTANBUL",
       requestId: "workflow-run:attempt:coverage-import",
@@ -1119,7 +1121,7 @@ describe("coverage import workflow adapter", () => {
       expect.objectContaining({
         kind: "BUILD",
         resourceId: "build-1",
-        url: "/builds/build-1/coverage",
+        url: "/builds/build-1",
       }),
       expect.objectContaining({ kind: "AGENT_JOB", resourceId: "job-1" }),
     ]);
@@ -1134,6 +1136,7 @@ describe("coverage import workflow adapter", () => {
 
     expect(importCoverageReport).toHaveBeenCalledWith(
       expect.objectContaining({
+        buildName: "Test with coverage",
         reportPath: "coverage/lcov.info",
         format: "AUTO",
       }),
