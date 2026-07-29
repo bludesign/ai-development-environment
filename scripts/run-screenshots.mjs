@@ -52,6 +52,10 @@ async function screenshotEnvironment() {
     ports.add(port);
     environment[name] = port;
   }
+  // The Jira settings fixture stores its API origin in the database. Keep it pointed at the
+  // dynamically allocated stub instead of the old fixed port, or credential-backed pages
+  // redirect to the dashboard when their first API request fails.
+  environment.MOCK_API_BASE_URL = `http://${HOST}:${environment.MOCK_API_PORT}`;
   return environment;
 }
 

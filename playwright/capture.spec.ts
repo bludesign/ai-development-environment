@@ -1,7 +1,10 @@
 import { expect, test } from "@playwright/test";
 
 import { routes } from "./routes";
-import { setScreenshotTime } from "./screenshot-time";
+import {
+  normalizeScreenshotValues,
+  setScreenshotTime,
+} from "./screenshot-time";
 import { stubWorktreeAgent } from "./worktree-stub";
 
 /**
@@ -33,6 +36,7 @@ test.describe("app screenshots", () => {
         .waitForLoadState("networkidle", { timeout: 15_000 })
         .catch(() => {});
       await page.waitForTimeout(800);
+      await normalizeScreenshotValues(page);
 
       await page.screenshot({
         path: `screenshots/${testInfo.project.name}/${route.name}.png`,
@@ -48,6 +52,12 @@ test.describe("app screenshots", () => {
         response!.status(),
         `${route.path} returned HTTP ${response!.status()}`,
       ).toBeLessThan(400);
+      const capturedUrl = new URL(page.url());
+      const expectedPath = route.path === "/" ? "/en" : `/en${route.path}`;
+      expect(
+        capturedUrl.pathname,
+        `${route.path} redirected before capture`,
+      ).toBe(new URL(expectedPath, capturedUrl.origin).pathname);
       expect(pageErrors, `${route.path} raised uncaught page errors`).toEqual(
         [],
       );

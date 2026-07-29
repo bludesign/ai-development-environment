@@ -4,6 +4,7 @@ import { randomInt } from "node:crypto";
 import { defineConfig, devices } from "@playwright/test";
 
 import {
+  SCREENSHOT_PUBLIC_ORIGIN,
   SCREENSHOT_TIME,
   SCREENSHOT_TIME_ZONE,
 } from "./playwright/screenshot-time";
@@ -139,9 +140,12 @@ export default defineConfig({
         GITHUB_GRAPHQL_URL: `${mockApiURL}/graphql`,
         // Device enrollment refuses to issue a profile unless the app is served over public
         // HTTPS. The captured page only renders the form, so a placeholder origin is enough.
-        PUBLIC_BASE_URL: "https://ade.acme.example.com",
+        PUBLIC_BASE_URL: SCREENSHOT_PUBLIC_ORIGIN,
         // Must match the key the seed encrypted mock.db's credentials with, or the app
         // rewrites every row on first use and the VACUUM that follows locks the database.
+        // Explicitly override a developer's .env too; otherwise a local Vault/Keychain choice
+        // makes every database-backed screenshot credential appear unavailable.
+        CREDENTIAL_STORAGE_TYPE: "database",
         CREDENTIAL_ENCRYPTION_KEY: MOCK_CREDENTIAL_ENCRYPTION_KEY,
       },
     },

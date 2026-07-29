@@ -117,6 +117,8 @@ export async function seedCredentials(prisma: PrismaClient): Promise<void> {
         authTag: bytes(encrypted.authTag),
         keyFingerprint: encrypted.keyFingerprint,
         createdAt: seed.createdAt,
+        // Prisma otherwise fills @updatedAt from the real seed-process clock.
+        updatedAt: seed.createdAt,
       };
     }),
   });

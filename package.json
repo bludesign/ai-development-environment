@@ -60,6 +60,7 @@
     "screenshots:run": "node scripts/run-screenshots.mjs --skip-setup",
     "screenshots:walkthrough": "node scripts/run-screenshots.mjs --skip-setup playwright/walkthrough.spec.ts",
     "screenshots:copy": "node scripts/copy-screenshots.mjs",
+    "screenshots:copy:walkthrough": "node scripts/copy-screenshots.mjs --include-videos",
     "schema:copy": "node scripts/copy-schema.mjs",
     "schema:publish": "node scripts/publish-schema.mjs",
     "full-check": "npm run generate && npm run format && npm run lint:fix && npm run type-check:generated && npm run test:run && npm run agent:test:run && npm run check-translations && npm run build:generated && npm run postbuild",

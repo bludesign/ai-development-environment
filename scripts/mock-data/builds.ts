@@ -539,6 +539,7 @@ export async function seedBuilds(prisma: PrismaClient): Promise<void> {
       errorCode: "TEST_FAILURES",
       error: "3 tests failed in AcmeAppTests",
       createdAt: minutesAgo(50),
+      updatedAt: minutesAgo(44),
       startedAt: minutesAgo(50),
       finishedAt: minutesAgo(44),
       reports: {
