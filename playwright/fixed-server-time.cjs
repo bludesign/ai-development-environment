@@ -22,5 +22,14 @@ function FixedDate(...args) {
 Object.setPrototypeOf(FixedDate, NativeDate);
 FixedDate.prototype = NativeDate.prototype;
 FixedDate.now = () => fixedTimestamp;
+// Keep these as own properties too. Next.js copies selected globals into request contexts, and
+// inherited Date statics can otherwise disappear even though they work in the parent process.
+for (const property of ["parse", "UTC"]) {
+  Object.defineProperty(
+    FixedDate,
+    property,
+    Object.getOwnPropertyDescriptor(NativeDate, property),
+  );
+}
 
 globalThis.Date = FixedDate;

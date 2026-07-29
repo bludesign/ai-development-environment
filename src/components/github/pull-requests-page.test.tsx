@@ -255,6 +255,35 @@ function configureRequests() {
 }
 
 describe("PullRequestsPage", () => {
+  test("does not retry pull-request loading after an error", async () => {
+    requestMock.mockImplementation(async (query) => {
+      if (query.includes("GitHubPullRequestConfiguration")) {
+        return {
+          githubSettings: {
+            tokenConfigured: true,
+            defaultJiraKeyRegex: String.raw`\b([A-Z][A-Z0-9_]*-\d+)\b`,
+            updatedAt: new Date(0).toISOString(),
+          },
+          githubRepositories: [repository],
+        } as never;
+      }
+      if (query.includes("query GitHubPullRequests")) {
+        throw new Error("Pull requests unavailable");
+      }
+      throw new Error(`Unexpected operation: ${query}`);
+    });
+
+    render(<PullRequestsPage />);
+
+    expect(await screen.findByText("Pull requests unavailable")).toBeDefined();
+    await act(() => new Promise((resolve) => window.setTimeout(resolve, 25)));
+    expect(
+      requestMock.mock.calls.filter(([query]) =>
+        query.includes("query GitHubPullRequests"),
+      ),
+    ).toHaveLength(1);
+  });
+
   test("tints the row of a pull request whose worktree has a highlight", async () => {
     requestMock.mockImplementation(async (query) => {
       if (query.includes("GitHubPullRequestConfiguration")) {

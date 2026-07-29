@@ -80,7 +80,15 @@ export const routes: RouteEntry[] = [
   { name: "job-detail", path: `/jobs/${ids.jobs.codebaseRefresh}` },
 
   // GitHub
-  { name: "pull-requests", path: "/pull-requests" },
+  {
+    name: "pull-requests",
+    path: "/pull-requests",
+    readyGraphqlOperation: "GitHubPullRequests",
+    readyTexts: [
+      "Add quick search to the global navigation bar",
+      "No pull requests",
+    ],
+  },
   {
     name: "pull-request-detail",
     path: `/pull-requests/${ids.pullRequests.owner}/${ids.pullRequests.repository}/${ids.pullRequests.number}`,

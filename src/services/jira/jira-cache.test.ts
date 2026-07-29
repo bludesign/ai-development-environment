@@ -198,6 +198,30 @@ describe("Jira SDK cache wrapper", () => {
     expect(state.calls.map((call) => call.source)).toEqual(["LIVE", "CACHE"]);
   });
 
+  test("can disable call logging without disabling the cache", async () => {
+    const service = new JiraService(
+      undefined,
+      undefined,
+      false,
+    ) as unknown as CacheInvoker;
+    const fetcher = vi.fn().mockResolvedValue({ values: [1, 2] });
+    const input = {
+      operation: "PROJECTS",
+      params: { startAt: 0 },
+      requestSummary: "Projects",
+      fetcher,
+    };
+
+    await expect(service.cachedCall(input)).resolves.toMatchObject({
+      source: "LIVE",
+    });
+    await expect(service.cachedCall(input)).resolves.toMatchObject({
+      source: "CACHE",
+    });
+    expect(fetcher).toHaveBeenCalledTimes(1);
+    expect(state.calls).toEqual([]);
+  });
+
   test("returns an expired response when the live request fails", async () => {
     const service = invoker();
     await service.cachedCall({

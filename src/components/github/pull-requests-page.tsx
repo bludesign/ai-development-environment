@@ -348,7 +348,8 @@ export function PullRequestsPage() {
       settings?.tokenConfigured &&
       (activeTab !== "repositories" || selectedRepositoryId) &&
       !pages[pageKey] &&
-      !loadingTabs[pageKey]
+      !loadingTabs[pageKey] &&
+      !error
     ) {
       const timeout = window.setTimeout(
         () => void loadTab(activeTab, selectedRepositoryId, pullRequestState),
@@ -358,6 +359,7 @@ export function PullRequestsPage() {
     }
   }, [
     activeTab,
+    error,
     loadTab,
     loadingTabs,
     pageKey,

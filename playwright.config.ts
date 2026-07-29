@@ -141,6 +141,9 @@ export default defineConfig({
         // Runtime GitHub calls would otherwise make the cache metrics depend on route order.
         // The seeded call history remains visible and deterministic.
         GITHUB_CACHE_LOGGING_DISABLED: "true",
+        // Jira-backed routes run in parallel and would otherwise append to the same API call
+        // history that the Jira cache screenshot displays. Keep only its seeded call history.
+        JIRA_CACHE_LOGGING_DISABLED: "true",
         // Device enrollment refuses to issue a profile unless the app is served over public
         // HTTPS. The captured page only renders the form, so a placeholder origin is enough.
         PUBLIC_BASE_URL: SCREENSHOT_PUBLIC_ORIGIN,
