@@ -316,6 +316,21 @@ beforeEach(() => {
 });
 
 describe("GitHubCache", () => {
+  test("can disable runtime call logging", async () => {
+    const cache = new GitHubCache(false);
+    await cache.query(
+      input("PAT", async () => ({
+        data: { value: 1 },
+        statusCode: 200,
+        pointCost: 7,
+        rateLimit: null,
+      })),
+    );
+
+    expect(state.calls).toEqual([]);
+    expect(state.entries).toHaveLength(1);
+  });
+
   test("uses stable variable keys and separates PAT from App entries", async () => {
     const cache = new GitHubCache();
     const fetcher = vi.fn(async () => ({

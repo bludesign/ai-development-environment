@@ -3,12 +3,10 @@ import type { PrismaClient } from "../../src/generated/prisma/client";
 import { daysAgo, hoursAgo } from "./time";
 
 /**
- * Jira and the Actions cache server read their host from the database rather than an
- * environment variable, so they point at the local stub (scripts/mock-api-server.ts) that the
- * screenshot run starts. MOCK_API_BASE_URL lets a manual seed target a different port.
+ * Jira and the Actions cache server read their host from the database, so they use the fixed
+ * local stub started by the screenshot suite.
  */
-const MOCK_API_BASE_URL =
-  process.env.MOCK_API_BASE_URL ?? "http://127.0.0.1:4322";
+const MOCK_API_BASE_URL = "http://127.0.0.1:4322";
 
 /** Prices are per token; the Costs page multiplies them up to a per-million-token figure. */
 const MODEL_COST_ENTRIES = [

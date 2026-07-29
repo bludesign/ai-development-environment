@@ -42,7 +42,7 @@ function screenshotPort(environmentVariable: string): string {
 // `npm run screenshots*` supplies OS-selected free ports. Random fallbacks also keep direct
 // `playwright test` invocations from contending for the old fixed ports.
 const PORT = screenshotPort("SCREENSHOT_PORT");
-const MOCK_API_PORT = screenshotPort("MOCK_API_PORT");
+const MOCK_API_PORT = "4322";
 const AGENT_WS_PORT = screenshotPort("AGENT_WS_PORT");
 const HOST = "127.0.0.1";
 const baseURL = `http://${HOST}:${PORT}`;
@@ -138,6 +138,9 @@ export default defineConfig({
         // Keep every GitHub call on the stub above; nothing reaches github.com.
         GITHUB_API_BASE_URL: mockApiURL,
         GITHUB_GRAPHQL_URL: `${mockApiURL}/graphql`,
+        // Runtime GitHub calls would otherwise make the cache metrics depend on route order.
+        // The seeded call history remains visible and deterministic.
+        GITHUB_CACHE_LOGGING_DISABLED: "true",
         // Device enrollment refuses to issue a profile unless the app is served over public
         // HTTPS. The captured page only renders the form, so a placeholder origin is enough.
         PUBLIC_BASE_URL: SCREENSHOT_PUBLIC_ORIGIN,

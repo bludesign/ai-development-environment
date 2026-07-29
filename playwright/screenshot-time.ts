@@ -33,5 +33,13 @@ export async function normalizeScreenshotValues(page: Page): Promise<void> {
         node.nodeValue = node.nodeValue.replaceAll(runtimeOrigin, stableOrigin);
       }
     }
+
+    for (const element of document.querySelectorAll<
+      HTMLInputElement | HTMLTextAreaElement
+    >("input, textarea")) {
+      if (element.value.includes(runtimeOrigin)) {
+        element.value = element.value.replaceAll(runtimeOrigin, stableOrigin);
+      }
+    }
   }, SCREENSHOT_PUBLIC_ORIGIN);
 }
