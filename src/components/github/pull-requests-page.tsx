@@ -175,7 +175,12 @@ export function PullRequestsPage() {
     Record<string, string | null>
   >({});
   const [configurationLoading, setConfigurationLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+  const [configurationError, setConfigurationError] = useState<string | null>(
+    null,
+  );
+  const [pageErrors, setPageErrors] = useState<Record<string, string | null>>(
+    {},
+  );
   const [managerOpen, setManagerOpen] = useState(false);
   const loadMoreTriggerRef = useRef<HTMLDivElement>(null);
   const requestGenerationsRef = useRef<Record<string, number>>({});
@@ -197,9 +202,11 @@ export function PullRequestsPage() {
           ? current
           : (data.githubRepositories[0]?.id ?? ""),
       );
-      setError(null);
+      setConfigurationError(null);
     } catch (value) {
-      setError(value instanceof Error ? value.message : String(value));
+      setConfigurationError(
+        value instanceof Error ? value.message : String(value),
+      );
     } finally {
       setConfigurationLoading(false);
     }
@@ -250,6 +257,12 @@ export function PullRequestsPage() {
         ...current,
         [pageKey]: null,
       }));
+      if (!options.append) {
+        setPageErrors((current) => ({
+          ...current,
+          [pageKey]: null,
+        }));
+      }
       try {
         const scopedRepositoryId = tab === "repositories" ? repositoryId : null;
         const scope: GitHubPullRequestScope = scopedRepositoryId
@@ -308,7 +321,10 @@ export function PullRequestsPage() {
                 }
               : data.githubPullRequests,
         }));
-        setError(null);
+        setPageErrors((current) => ({
+          ...current,
+          [pageKey]: null,
+        }));
       } catch (value) {
         if (requestGenerationsRef.current[pageKey] !== generation) return;
         const message = value instanceof Error ? value.message : String(value);
@@ -318,7 +334,10 @@ export function PullRequestsPage() {
             [pageKey]: message,
           }));
         } else {
-          setError(message);
+          setPageErrors((current) => ({
+            ...current,
+            [pageKey]: message,
+          }));
         }
       } finally {
         if (options.append) {
@@ -349,7 +368,7 @@ export function PullRequestsPage() {
       (activeTab !== "repositories" || selectedRepositoryId) &&
       !pages[pageKey] &&
       !loadingTabs[pageKey] &&
-      !error
+      !pageErrors[pageKey]
     ) {
       const timeout = window.setTimeout(
         () => void loadTab(activeTab, selectedRepositoryId, pullRequestState),
@@ -359,10 +378,10 @@ export function PullRequestsPage() {
     }
   }, [
     activeTab,
-    error,
     loadTab,
     loadingTabs,
     pageKey,
+    pageErrors,
     pages,
     pullRequestState,
     selectedRepositoryId,
@@ -385,6 +404,7 @@ export function PullRequestsPage() {
   const loading = Boolean(loadingTabs[pageKey]);
   const loadingMore = Boolean(loadingMoreTabs[pageKey]);
   const paginationError = paginationErrors[pageKey] ?? null;
+  const error = configurationError ?? pageErrors[pageKey] ?? null;
 
   useEffect(() => {
     if (
@@ -427,6 +447,7 @@ export function PullRequestsPage() {
   const repositoriesChanged = (next: GitHubRepositoryView[]) => {
     setRepositories(next);
     setPages({});
+    setPageErrors({});
     setSelectedRepositoryId((current) =>
       next.some((repository) => repository.id === current)
         ? current
@@ -437,6 +458,7 @@ export function PullRequestsPage() {
   const settingsChanged = (next: GitHubSettingsView) => {
     setSettings(next);
     setPages({});
+    setPageErrors({});
   };
 
   return (

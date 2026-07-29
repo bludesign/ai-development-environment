@@ -284,6 +284,52 @@ describe("PullRequestsPage", () => {
     ).toHaveLength(1);
   });
 
+  test("loads another tab after a pull-request page error", async () => {
+    requestMock.mockImplementation(async (query, variables) => {
+      if (query.includes("GitHubPullRequestConfiguration")) {
+        return {
+          githubSettings: {
+            tokenConfigured: true,
+            defaultJiraKeyRegex: String.raw`\b([A-Z][A-Z0-9_]*-\d+)\b`,
+            updatedAt: new Date(0).toISOString(),
+          },
+          githubRepositories: [repository],
+        } as never;
+      }
+      if (query.includes("query GitHubPullRequests")) {
+        if (variables?.scope === "MINE") {
+          throw new Error("Mine unavailable");
+        }
+        return {
+          githubPullRequests: {
+            items: [{ ...pullRequest, id: "review-1", title: "Review this" }],
+            truncated: false,
+            hasNextPage: false,
+            endCursor: null,
+          },
+        } as never;
+      }
+      throw new Error(`Unexpected operation: ${query}`);
+    });
+
+    render(<PullRequestsPage />);
+
+    expect(await screen.findByText("Mine unavailable")).toBeDefined();
+    activateTab(screen.getByRole("tab", { name: "Review requests" }));
+    expect(await screen.findByText("Review this")).toBeDefined();
+    expect(screen.queryByText("Mine unavailable")).toBeNull();
+
+    activateTab(screen.getByRole("tab", { name: "Mine" }));
+    expect(await screen.findByText("Mine unavailable")).toBeDefined();
+    expect(
+      requestMock.mock.calls.filter(
+        ([query, variables]) =>
+          query.includes("query GitHubPullRequests") &&
+          variables?.scope === "MINE",
+      ),
+    ).toHaveLength(1);
+  });
+
   test("tints the row of a pull request whose worktree has a highlight", async () => {
     requestMock.mockImplementation(async (query) => {
       if (query.includes("GitHubPullRequestConfiguration")) {
