@@ -1,3 +1,4 @@
+export * from "./adoption";
 export * from "./config";
 export * from "./credentials.service";
 export * from "./crypto";

@@ -5,6 +5,7 @@ import {
   plistDocument,
 } from "@ai-development-environment/agent-contract/plist";
 import { getPrismaClient } from "@/data/prisma-client";
+import type { Prisma } from "@/generated/prisma/client";
 import { CREDENTIALS, CredentialService } from "@/services/credentials";
 import {
   agentEventBus,
@@ -787,24 +788,31 @@ export class IosDevicesService {
       );
     }
     await this.verifyAppStoreCredentials({ issuerId, keyId, privateKey });
-    await this.credentials.setText(
-      CREDENTIALS.appStoreConnectPrivateKey,
-      privateKey,
-      async (transaction) => {
-        await transaction.iosDeviceSettings.update({
-          where: { id: SETTINGS_ID },
-          data: {
-            appStoreConnectIssuerId: issuerId,
-            appStoreConnectKeyId: keyId,
-            appStoreConnectPrivateKeyFingerprint:
-              sha256(privateKey).toUpperCase(),
-            appStoreConnectVerifiedAt: new Date(),
-            appStoreConnectLastTestedAt: new Date(),
-            appStoreConnectVerificationError: null,
-          },
-        });
-      },
-    );
+    const saveMetadata = async (transaction: Prisma.TransactionClient) => {
+      await transaction.iosDeviceSettings.update({
+        where: { id: SETTINGS_ID },
+        data: {
+          appStoreConnectIssuerId: issuerId,
+          appStoreConnectKeyId: keyId,
+          appStoreConnectPrivateKeyFingerprint:
+            sha256(privateKey).toUpperCase(),
+          appStoreConnectVerifiedAt: new Date(),
+          appStoreConnectLastTestedAt: new Date(),
+          appStoreConnectVerificationError: null,
+        },
+      });
+    };
+    // The key falls back to the stored one when the form omits it, so changing only the
+    // issuer or key ID must not re-store it against a read-only Vault.
+    if (input.privateKey?.trim()) {
+      await this.credentials.setText(
+        CREDENTIALS.appStoreConnectPrivateKey,
+        privateKey,
+        saveMetadata,
+      );
+    } else {
+      await (await getPrismaClient()).$transaction(saveMetadata);
+    }
     return this.getSettings();
   }
 

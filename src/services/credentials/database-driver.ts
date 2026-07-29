@@ -57,6 +57,7 @@ async function erasePlaintextRemnants(prisma: PrismaClient): Promise<void> {
 
 export class DatabaseCredentialDriver implements CredentialDriver {
   readonly storageType = "database" as const;
+  readonly readOnly = false;
 
   constructor(
     private readonly prisma: PrismaClient,

@@ -536,10 +536,16 @@ export class ToolsService {
         });
       }
     };
-    if (headers.length) {
+    // Renaming a server or changing its URL must not re-store an unchanged header bundle:
+    // that is wasted work on every backend and a hard failure against a read-only Vault.
+    const headersChanged =
+      JSON.stringify(headers) !== JSON.stringify(storedHeaders);
+    if (headers.length && headersChanged) {
       await this.credentials.setJson(descriptor, headers, saveMetadata);
-    } else {
+    } else if (!headers.length && storedHeaders.length) {
       await this.credentials.delete(descriptor, saveMetadata);
+    } else {
+      await prisma.$transaction(saveMetadata);
     }
     const saved = await prisma.externalMcpServer.findUniqueOrThrow({
       where: { id: serverId },

@@ -22,6 +22,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Spinner } from "@/components/ui/spinner";
+import { useCredentialStoreReadOnly } from "@/hooks/use-credential-store-read-only";
 import { Link } from "@/i18n/navigation";
 import {
   controlPlaneRequest,
@@ -449,6 +450,8 @@ export function JiraSettingsPage({
 } = {}) {
   const t = useTranslations("jiraSettings");
   const tc = useTranslations("common");
+  const tCredentials = useTranslations("credentials");
+  const credentialsReadOnly = useCredentialStoreReadOnly();
   const [settings, setSettings] = useState<JiraSettingsView | null>(null);
   const [siteUrl, setSiteUrl] = useState("");
   const [email, setEmail] = useState("");
@@ -668,6 +671,7 @@ export function JiraSettingsPage({
                 </Label>
                 <Input
                   autoComplete="new-password"
+                  disabled={credentialsReadOnly}
                   id="jira-token"
                   onChange={(event) => setApiToken(event.target.value)}
                   placeholder={
@@ -675,14 +679,16 @@ export function JiraSettingsPage({
                       ? t("tokenPlaceholderConfigured")
                       : t("tokenPlaceholder")
                   }
-                  required={!settings?.tokenConfigured}
+                  required={!settings?.tokenConfigured && !credentialsReadOnly}
                   type="password"
                   value={apiToken}
                 />
                 <p className="mt-1 text-xs text-muted-foreground">
-                  {settings?.tokenConfigured
-                    ? t("tokenKeepHelp")
-                    : t("tokenHelp")}
+                  {credentialsReadOnly
+                    ? tCredentials("readOnlyNotice")
+                    : settings?.tokenConfigured
+                      ? t("tokenKeepHelp")
+                      : t("tokenHelp")}
                 </p>
                 <p className="mt-1 text-xs text-muted-foreground">
                   {t("tokenAcquireHelp")}{" "}
@@ -710,7 +716,11 @@ export function JiraSettingsPage({
                   title={t("confirmRemove")}
                   trigger={
                     <Button
-                      disabled={busy || !settings?.tokenConfigured}
+                      disabled={
+                        busy ||
+                        !settings?.tokenConfigured ||
+                        credentialsReadOnly
+                      }
                       type="button"
                       variant="ghost"
                     >

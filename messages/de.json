@@ -906,6 +906,7 @@
     "updated": "Aktualisiert",
     "emptyTitle": "Keine Anmeldedaten gespeichert",
     "emptyDescription": "Anmeldedaten erscheinen hier, nachdem sie in den zugehörigen Einstellungen gespeichert wurden.",
+    "emptyDescriptionVault": "Unter dem konfigurierten Vault-Mount und Pfadpräfix wurden keine Anmeldedaten gefunden. Speichern Sie welche über das zugehörige Einstellungsformular oder prüfen Sie, ob Mount und Präfix zu dem Vault passen, der sie enthält.",
     "states": {
       "READY": "Bereit",
       "WARNING": "Warnung",
@@ -965,14 +966,17 @@
       "authenticationToken": "Authentifizierungs-Token",
       "additionalHeaders": "Zusätzliche Header-Namen",
       "customCa": "Benutzerdefinierte CA",
-      "tlsServerName": "TLS-Servername"
+      "tlsServerName": "TLS-Servername",
+      "vaultAccess": "Vault-Zugriff"
     },
     "detailValues": {
       "configured": "Konfiguriert",
       "notConfigured": "Nicht konfiguriert",
       "none": "Keine",
       "invalid": "Ungültig",
-      "applicationDatabase": "Anwendungsdatenbank"
+      "applicationDatabase": "Anwendungsdatenbank",
+      "readOnly": "Schreibgeschützt",
+      "readWrite": "Lesen und Schreiben"
     },
     "warningTitles": {
       "DATABASE_UNENCRYPTED": "Datenbankverschlüsselung ist deaktiviert",
@@ -982,9 +986,12 @@
       "CREDENTIAL_DATA_INVALID": "Anmeldedaten sind ungültig",
       "CREDENTIAL_STORAGE_TYPE_INVALID": "Speichertyp ist ungültig",
       "CREDENTIAL_STORE_UNAVAILABLE": "Anmeldedatenspeicher ist nicht verfügbar",
+      "CREDENTIAL_STORE_READ_ONLY": "Der Anmeldedatenspeicher ist schreibgeschützt",
       "VAULT_CONFIGURATION_INVALID": "Vault-Konfiguration ist ungültig",
       "VAULT_INSECURE_HTTP": "Vault verwendet unverschlüsseltes HTTP",
       "VAULT_TLS_VERIFICATION_DISABLED": "Vault-Zertifikatsprüfung ist deaktiviert",
+      "VAULT_READ_ONLY_IGNORED": "Die Schreibschutz-Einstellung gilt hier nicht",
+      "VAULT_ADOPTION_FAILED": "Vorhandene Anmeldedaten konnten nicht übernommen werden",
       "KEYCHAIN_UNSUPPORTED_PLATFORM": "Schlüsselbund wird auf diesem Host nicht unterstützt",
       "BACKEND_MISMATCH": "Anmeldedaten verwenden ein anderes Backend"
     },
@@ -996,12 +1003,18 @@
       "CREDENTIAL_DATA_INVALID": "Mindestens ein Anmeldedatensatz enthält ungültige Metadaten und kann nicht verwendet werden.",
       "CREDENTIAL_STORAGE_TYPE_INVALID": "CREDENTIAL_STORAGE_TYPE muss database, vault oder keychain sein.",
       "CREDENTIAL_STORE_UNAVAILABLE": "Der Anmeldedatenspeicher konnte nicht initialisiert werden. Prüfen Sie Serverkonfiguration und Protokolle.",
+      "CREDENTIAL_STORE_READ_ONLY": "Diese Installation kann Vault-Anmeldedaten lesen, aber nicht ändern. Verwalten Sie Geheimnisse über eine Installation mit Schreibzugriff oder entfernen Sie CREDENTIAL_VAULT_READ_ONLY und erteilen Sie dem Token Schreibrechte.",
       "VAULT_CONFIGURATION_INVALID": "Vault kann mit den aktuellen Umgebungsvariablen nicht initialisiert werden. Prüfen Sie Adresse, Header, Pfad und TLS-Einstellungen.",
       "VAULT_INSECURE_HTTP": "Vault-Daten, Geheimnisse und Authentifizierungs-Header sind über HTTP während der Übertragung nicht geschützt.",
       "VAULT_TLS_VERIFICATION_DISABLED": "VAULT_SKIP_VERIFY erlaubt nicht vertrauenswürdige Zertifikate und ermöglicht das Abfangen des Vault-Verkehrs.",
+      "VAULT_READ_ONLY_IGNORED": "CREDENTIAL_VAULT_READ_ONLY gilt nur für Vault-Speicher und wird vom aktuellen Backend ignoriert. Anmeldedaten dieser Installation können weiterhin geändert werden.",
+      "VAULT_ADOPTION_FAILED": "Anmeldedaten, die bereits im externen Backend liegen, konnten beim Start nicht gelesen werden und fehlen daher in dieser Übersicht. Prüfen Sie die Backend-Verbindung und die Token-Berechtigungen und starten Sie den Server neu.",
       "KEYCHAIN_UNSUPPORTED_PLATFORM": "Der macOS-Schlüsselbund ist nur verfügbar, wenn der Next.js-Host auf macOS läuft. Der Server bleibt erreichbar, Anmeldedatenvorgänge schlagen jedoch fehl.",
       "BACKEND_MISMATCH": "{count} Anmeldedateneinträge wurden mit einem anderen Backend gespeichert. Geben Sie sie in den zugehörigen Einstellungen neu ein; Werte werden nicht automatisch verschoben oder gelöscht."
-    }
+    },
+    "readOnlyBadge": "Schreibgeschützt",
+    "readOnlyNotice": "Diese Installation hat nur Lesezugriff auf Vault, daher kann dieses Geheimnis hier nicht geändert werden. Aktualisieren Sie es über eine Installation mit Schreibzugriff.",
+    "adopted": "{count} Anmeldedaten wurden beim Serverstart aus dem externen Backend übernommen."
   },
   "agents": {
     "title": "Agenten",

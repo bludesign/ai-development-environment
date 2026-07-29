@@ -3,6 +3,7 @@ import "server-only";
 import { getPrismaClient } from "@/data/prisma-client";
 import type { Credential, PrismaClient } from "@/generated/prisma/client";
 
+import { adoptExternalCredentials, type AdoptionResult } from "./adoption";
 import {
   readCredentialStoreConfig,
   type CredentialStoreConfig,
@@ -11,6 +12,7 @@ import {
 } from "./config";
 import { DatabaseCredentialDriver } from "./database-driver";
 import { CredentialStoreOperationError, type CredentialDriver } from "./driver";
+import { withCredentialMutationLocks } from "./mutation-locks";
 import {
   KeychainCredentialDriver,
   type KeychainModuleLoader,
@@ -60,6 +62,16 @@ function protection(record: {
   return record.encrypted ? "ENCRYPTED" : "PLAINTEXT";
 }
 
+// Refuse before any backend call, lock, or transaction so a read-only install cannot half
+// apply a settings save.
+function assertWritable(driver: CredentialDriver): void {
+  if (!driver.readOnly) return;
+  throw new CredentialStoreOperationError(
+    `Credential storage is read-only; ${driver.storageType} credentials cannot be changed from this install`,
+    "CREDENTIAL_STORE_READ_ONLY",
+  );
+}
+
 function uniqueIssues(issues: CredentialStoreIssue[]): CredentialStoreIssue[] {
   const seen = new Set<string>();
   return issues.filter((entry) => {
@@ -70,39 +82,24 @@ function uniqueIssues(issues: CredentialStoreIssue[]): CredentialStoreIssue[] {
   });
 }
 
-// External backends cannot participate in the Prisma transaction that owns their metadata.
-// Queue overlapping IDs across every CredentialService instance until external writes, the
-// metadata transaction, and any rollback have all completed.
-const credentialMutationTails = new Map<string, Promise<void>>();
+// Nine feature services each construct their own CredentialService, so memoizing adoption
+// on the instance would run the pass once per service. Key it by the resolved backend
+// instead, which keeps it to a single pass per process and per configuration.
+const adoptionPasses = new Map<string, Promise<AdoptionResult>>();
 
-async function withCredentialMutationLocks<T>(
-  ids: string[],
-  operation: () => Promise<T>,
-): Promise<T> {
-  const keys = [...new Set(ids)].sort();
-  if (!keys.length) return operation();
+function adoptionKey(config: CredentialStoreConfig): string {
+  if (config.storageType !== "vault") return config.storageType;
+  return [
+    config.storageType,
+    config.address.toString(),
+    config.namespace ?? "",
+    config.mount,
+    config.pathPrefix,
+  ].join("|");
+}
 
-  const predecessors = keys.flatMap((key) => {
-    const predecessor = credentialMutationTails.get(key);
-    return predecessor ? [predecessor] : [];
-  });
-  let release!: () => void;
-  const tail = new Promise<void>((resolve) => {
-    release = resolve;
-  });
-  for (const key of keys) credentialMutationTails.set(key, tail);
-
-  await Promise.all(predecessors);
-  try {
-    return await operation();
-  } finally {
-    release();
-    for (const key of keys) {
-      if (credentialMutationTails.get(key) === tail) {
-        credentialMutationTails.delete(key);
-      }
-    }
-  }
+export function resetCredentialAdoptionForTests(): void {
+  adoptionPasses.clear();
 }
 
 export class CredentialService {
@@ -114,6 +111,8 @@ export class CredentialService {
   private driverPromise: Promise<CredentialDriver> | null = null;
   private initializationPromise: Promise<void> | null = null;
   private runtimeIssue: CredentialStoreIssue | null = null;
+  private adoptionIssue: CredentialStoreIssue | null = null;
+  private adoptedCount = 0;
   private readonly keychainModuleLoader?: KeychainModuleLoader;
   private readonly vaultRequest?: VaultRequest;
   private readonly vaultDispatcherFactory?: VaultDispatcherFactory;
@@ -176,6 +175,7 @@ export class CredentialService {
       this.initializationPromise = (async () => {
         const driver = await this.driver();
         await driver.initialize();
+        await this.adopt(driver);
       })().catch((error: unknown) => {
         if (this.configResult.errors.length === 0) {
           this.runtimeIssue = this.issueForInitializationError(error);
@@ -184,6 +184,23 @@ export class CredentialService {
       });
     }
     return this.initializationPromise;
+  }
+
+  private async adopt(driver: CredentialDriver): Promise<void> {
+    const config = this.configResult.config;
+    if (!config || !driver.describe) return;
+    const key = adoptionKey(config);
+    let pass = adoptionPasses.get(key);
+    if (!pass) {
+      // Register the pass in the same tick it is created. Resolving Prisma first would let
+      // every concurrently constructed service race past the lookup and adopt in parallel.
+      pass = (async () =>
+        adoptExternalCredentials(await this.prisma(), driver))();
+      adoptionPasses.set(key, pass);
+    }
+    const result = await pass;
+    this.adoptedCount = result.adopted;
+    this.adoptionIssue = result.issue;
   }
 
   private issueForInitializationError(error: unknown): CredentialStoreIssue {
@@ -251,7 +268,16 @@ export class CredentialService {
     return value ? decodeJsonCredential<T>(value) : null;
   }
 
+  // Adoption runs during initialization, so a credential that only exists in the external
+  // backend is invisible to a caller that reads metadata without initializing first. The
+  // failure is swallowed to keep this a non-throwing probe; after the first call the
+  // memoized promise is already settled.
+  private async ensureInitializedForRead(): Promise<void> {
+    await this.ensureInitialized().catch(() => {});
+  }
+
   async isConfigured(descriptor: CredentialDescriptor): Promise<boolean> {
+    await this.ensureInitializedForRead();
     const record = await (
       await this.prisma()
     ).credential.findUnique({
@@ -285,6 +311,7 @@ export class CredentialService {
       throw new Error("Credential writes must use unique IDs");
     }
     const driver = await this.requireCurrentDriver();
+    assertWritable(driver);
     const prisma = await this.prisma();
     await withCredentialMutationLocks(ids, async () => {
       if (driver instanceof DatabaseCredentialDriver) {
@@ -460,6 +487,7 @@ export class CredentialService {
         // decrypted, so a missing, mismatched, or malformed key must not block this path.
         if (recordedStorage === "database") continue;
         const driver = await this.driverForRecordedStorage(recordedStorage);
+        assertWritable(driver);
         external.push({
           descriptor,
           driver,
@@ -500,6 +528,7 @@ export class CredentialService {
   }
 
   async list(): Promise<CredentialMetadataView[]> {
+    await this.ensureInitializedForRead();
     const rows = await (
       await this.prisma()
     ).credential.findMany({
@@ -561,6 +590,7 @@ export class CredentialService {
       ...configurationWarnings,
       ...this.configResult.errors,
       ...(this.runtimeIssue ? [this.runtimeIssue] : []),
+      ...(this.adoptionIssue ? [this.adoptionIssue] : []),
       ...mismatchIssue,
     ]);
     const hasError =
@@ -580,6 +610,10 @@ export class CredentialService {
       details: this.configResult.details,
       itemCount: rows.length,
       mismatchCount,
+      readOnly:
+        this.configResult.config?.storageType === "vault" &&
+        this.configResult.config.readOnly,
+      adoptedCount: this.adoptedCount,
       warnings,
     };
   }

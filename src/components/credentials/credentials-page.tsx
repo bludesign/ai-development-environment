@@ -42,6 +42,8 @@ type StoreStatus = {
   details: Array<{ label: string; value: string }>;
   itemCount: number;
   mismatchCount: number;
+  readOnly: boolean;
+  adoptedCount: number;
   warnings: Array<{ code: string; message: string }>;
 };
 
@@ -63,7 +65,7 @@ type CredentialsData = {
 
 const QUERY = `query CredentialsInventory {
   credentialStoreStatus {
-    storageType state encryptionState itemCount mismatchCount
+    storageType state encryptionState itemCount mismatchCount readOnly adoptedCount
     details { label value }
     warnings { code message }
   }
@@ -86,6 +88,7 @@ const detailKeys: Record<string, string> = {
   "Additional headers": "additionalHeaders",
   "Custom CA": "customCa",
   "TLS server name": "tlsServerName",
+  "Vault access": "vaultAccess",
 };
 
 const valueKeys: Record<string, string> = {
@@ -94,6 +97,8 @@ const valueKeys: Record<string, string> = {
   None: "none",
   Invalid: "invalid",
   "Application database": "applicationDatabase",
+  "Read-only": "readOnly",
+  "Read-write": "readWrite",
 };
 
 export function CredentialsPage() {
@@ -172,7 +177,10 @@ export function CredentialsPage() {
             <CardHeader>
               <CardTitle>{t("storageTitle")}</CardTitle>
               <CardDescription>{t("storageDescription")}</CardDescription>
-              <CardAction>
+              <CardAction className="flex items-center gap-2">
+                {data.credentialStoreStatus.readOnly && (
+                  <Badge variant="outline">{t("readOnlyBadge")}</Badge>
+                )}
                 <Badge variant={stateVariant(data.credentialStoreStatus.state)}>
                   {t(`states.${data.credentialStoreStatus.state}`)}
                 </Badge>
@@ -211,6 +219,13 @@ export function CredentialsPage() {
                   </div>
                 ))}
               </dl>
+              {data.credentialStoreStatus.adoptedCount > 0 && (
+                <p className="text-xs text-muted-foreground">
+                  {t("adopted", {
+                    count: data.credentialStoreStatus.adoptedCount,
+                  })}
+                </p>
+              )}
             </CardContent>
           </Card>
 
@@ -291,7 +306,13 @@ export function CredentialsPage() {
                     <KeyRound />
                   </EmptyMedia>
                   <EmptyTitle>{t("emptyTitle")}</EmptyTitle>
-                  <EmptyDescription>{t("emptyDescription")}</EmptyDescription>
+                  <EmptyDescription>
+                    {t(
+                      data.credentialStoreStatus.storageType === "VAULT"
+                        ? "emptyDescriptionVault"
+                        : "emptyDescription",
+                    )}
+                  </EmptyDescription>
                 </EmptyHeader>
               </Empty>
             )}

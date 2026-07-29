@@ -69,22 +69,27 @@ vi.mock("@/services/credentials", async (importOriginal) => {
         entries: Array<{ descriptor: { id: string }; value: Uint8Array }>,
         mutation?: (transaction: unknown) => Promise<void>,
       ) {
-        const apiKey = Buffer.from(
-          entries.find((entry) => entry.descriptor.id.endsWith("/api-key"))!
-            .value,
-        ).toString("utf8");
-        const headerEnvelope = JSON.parse(
-          Buffer.from(
-            entries.find((entry) => entry.descriptor.id.endsWith("/headers"))!
-              .value,
-          ).toString("utf8"),
-        ) as { value: Array<{ name: string; value: string }> };
+        // Unchanged secrets are omitted from the write, so each entry is optional.
+        const apiKeyEntry = entries.find((entry) =>
+          entry.descriptor.id.endsWith("/api-key"),
+        );
+        const headerEntry = entries.find((entry) =>
+          entry.descriptor.id.endsWith("/headers"),
+        );
         const prisma = await (
           await import("@/data/prisma-client")
         ).getPrismaClient();
         await mutation?.(prisma);
-        if (state.settings) {
-          state.settings.apiKey = apiKey;
+        if (!state.settings) return;
+        if (apiKeyEntry) {
+          state.settings.apiKey = Buffer.from(apiKeyEntry.value).toString(
+            "utf8",
+          );
+        }
+        if (headerEntry) {
+          const headerEnvelope = JSON.parse(
+            Buffer.from(headerEntry.value).toString("utf8"),
+          ) as { value: Array<{ name: string; value: string }> };
           state.settings.headersJson = JSON.stringify(headerEnvelope.value);
         }
       }

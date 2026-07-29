@@ -39,6 +39,8 @@ export type VaultCredentialStoreConfig = {
   caCertPath: string | null;
   tlsServerName: string | null;
   skipVerify: boolean;
+  // Read-only installs exist only for Vault; the other backends cannot express it.
+  readOnly: boolean;
 };
 
 export type KeychainCredentialStoreConfig = {
@@ -140,6 +142,23 @@ function hasHeader(headers: Record<string, string>, name: string): boolean {
   );
 }
 
+// CREDENTIAL_VAULT_READ_ONLY governs a Vault token's capabilities and means nothing to the
+// database or keychain backends. Warn instead of ignoring it, so an operator who expected
+// writes to be blocked is never left believing they are.
+function readOnlyIgnoredWarning(
+  env: CredentialEnvironment,
+  storageType: "database" | "keychain",
+): CredentialStoreIssue[] {
+  const value = env.CREDENTIAL_VAULT_READ_ONLY?.trim();
+  if (!value || value === "0" || value.toLowerCase() === "false") return [];
+  return [
+    issue(
+      "VAULT_READ_ONLY_IGNORED",
+      `CREDENTIAL_VAULT_READ_ONLY only applies to Vault storage and is ignored while CREDENTIAL_STORAGE_TYPE is ${storageType}`,
+    ),
+  ];
+}
+
 export function readCredentialStoreConfig(
   env: CredentialEnvironment = process.env,
   platform: NodeJS.Platform = process.platform,
@@ -182,6 +201,7 @@ export function readCredentialStoreConfig(
             "DATABASE_UNENCRYPTED",
             "Database credentials are stored as plaintext until CREDENTIAL_ENCRYPTION_KEY is configured",
           ),
+          ...readOnlyIgnoredWarning(env, "database"),
         ],
         errors: [],
         details: [
@@ -200,7 +220,7 @@ export function readCredentialStoreConfig(
           encryptionKey,
           keyFingerprint: credentialKeyFingerprint(encryptionKey),
         },
-        warnings: [],
+        warnings: readOnlyIgnoredWarning(env, "database"),
         errors: [],
         details: [
           { label: "Location", value: "Application database" },
@@ -212,7 +232,7 @@ export function readCredentialStoreConfig(
         requestedStorageType,
         storageType: "database",
         config: null,
-        warnings: [],
+        warnings: readOnlyIgnoredWarning(env, "database"),
         errors: [
           issue(
             "CREDENTIAL_ENCRYPTION_KEY_INVALID",
@@ -239,7 +259,7 @@ export function readCredentialStoreConfig(
         platform,
         service: "com.bludesign.ai-development-environment.credentials",
       },
-      warnings: [],
+      warnings: readOnlyIgnoredWarning(env, "keychain"),
       errors: supported
         ? []
         : [
@@ -265,6 +285,7 @@ export function readCredentialStoreConfig(
   let mount = DEFAULT_VAULT_MOUNT;
   let pathPrefix = DEFAULT_VAULT_PREFIX;
   let skipVerify = false;
+  let readOnly = false;
   try {
     if (!env.VAULT_ADDR?.trim()) throw new Error("VAULT_ADDR is required");
     address = new URL(env.VAULT_ADDR);
@@ -292,6 +313,10 @@ export function readCredentialStoreConfig(
       "CREDENTIAL_VAULT_PATH_PREFIX",
     );
     skipVerify = parseBoolean(env.VAULT_SKIP_VERIFY, "VAULT_SKIP_VERIFY");
+    readOnly = parseBoolean(
+      env.CREDENTIAL_VAULT_READ_ONLY,
+      "CREDENTIAL_VAULT_READ_ONLY",
+    );
     if (env.VAULT_TOKEN && hasHeader(headers, "x-vault-token")) {
       throw new Error(
         "VAULT_TOKEN conflicts with X-Vault-Token in CREDENTIAL_VAULT_HEADERS",
@@ -357,6 +382,7 @@ export function readCredentialStoreConfig(
       label: "TLS server name",
       value: env.VAULT_TLS_SERVER_NAME ? "Configured" : "Not configured",
     },
+    { label: "Vault access", value: readOnly ? "Read-only" : "Read-write" },
   ];
   return {
     requestedStorageType,
@@ -374,6 +400,7 @@ export function readCredentialStoreConfig(
             caCertPath: env.VAULT_CACERT || null,
             tlsServerName: env.VAULT_TLS_SERVER_NAME || null,
             skipVerify,
+            readOnly,
           }
         : null,
     warnings,

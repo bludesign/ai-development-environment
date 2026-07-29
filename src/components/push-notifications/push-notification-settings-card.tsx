@@ -20,6 +20,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Spinner } from "@/components/ui/spinner";
+import { useCredentialStoreReadOnly } from "@/hooks/use-credential-store-read-only";
 import { controlPlaneRequest } from "@/lib/control-plane-client";
 import { formatDateValue } from "@/lib/date-format";
 
@@ -60,6 +61,8 @@ const toBase64 = (file: File) =>
 export function PushNotificationSettingsCard() {
   const t = useTranslations("pushSettings");
   const tc = useTranslations("common");
+  const tCredentials = useTranslations("credentials");
+  const credentialsReadOnly = useCredentialStoreReadOnly();
   const locale = useLocale();
   const [settings, setSettings] = useState<Settings | null>(null);
   const [teamId, setTeamId] = useState("");
@@ -190,14 +193,17 @@ export function PushNotificationSettingsCard() {
           </p>
           <Label className="flex cursor-pointer items-center justify-center gap-2 rounded-xl border border-dashed p-6">
             <Upload />{" "}
-            {privateKey
-              ? t("p8Ready")
-              : settings?.tokenConfigured
-                ? t("replaceP8")
-                : t("chooseP8")}
+            {credentialsReadOnly
+              ? tCredentials("readOnlyNotice")
+              : privateKey
+                ? t("p8Ready")
+                : settings?.tokenConfigured
+                  ? t("replaceP8")
+                  : t("chooseP8")}
             <Input
               accept=".p8"
               className="sr-only"
+              disabled={credentialsReadOnly}
               onChange={(event) => {
                 const file = event.target.files?.[0];
                 if (file) void file.text().then(setPrivateKey);
@@ -231,7 +237,9 @@ export function PushNotificationSettingsCard() {
               title={t("removeToken")}
               trigger={
                 <Button
-                  disabled={busy || !settings?.tokenConfigured}
+                  disabled={
+                    busy || !settings?.tokenConfigured || credentialsReadOnly
+                  }
                   type="button"
                   variant="ghost"
                 >
@@ -244,7 +252,8 @@ export function PushNotificationSettingsCard() {
                 busy ||
                 !teamId ||
                 !keyId ||
-                (!privateKey && !settings?.tokenConfigured)
+                (!privateKey && !settings?.tokenConfigured) ||
+                (credentialsReadOnly && !settings?.tokenConfigured)
               }
               type="submit"
             >
@@ -319,7 +328,9 @@ export function PushNotificationSettingsCard() {
           </div>
           <div className="flex justify-end">
             <Button
-              disabled={busy || !name || !topic || !p12Base64}
+              disabled={
+                busy || !name || !topic || !p12Base64 || credentialsReadOnly
+              }
               type="submit"
             >
               <Save /> {t("addCertificate")}

@@ -906,6 +906,7 @@
     "updated": "Actualizado",
     "emptyTitle": "No hay credenciales guardadas",
     "emptyDescription": "Las credenciales aparecerán aquí después de guardarlas desde su formulario de configuración.",
+    "emptyDescriptionVault": "No se encontraron credenciales en el punto de montaje y el prefijo de ruta de Vault configurados. Guarda una desde su formulario de configuración o comprueba que el montaje y el prefijo coincidan con el Vault que las contiene.",
     "states": {
       "READY": "Listo",
       "WARNING": "Advertencia",
@@ -965,14 +966,17 @@
       "authenticationToken": "Token de autenticación",
       "additionalHeaders": "Nombres de cabeceras adicionales",
       "customCa": "CA personalizada",
-      "tlsServerName": "Nombre de servidor TLS"
+      "tlsServerName": "Nombre de servidor TLS",
+      "vaultAccess": "Acceso a Vault"
     },
     "detailValues": {
       "configured": "Configurado",
       "notConfigured": "Sin configurar",
       "none": "Ninguna",
       "invalid": "No válido",
-      "applicationDatabase": "Base de datos de la aplicación"
+      "applicationDatabase": "Base de datos de la aplicación",
+      "readOnly": "Solo lectura",
+      "readWrite": "Lectura y escritura"
     },
     "warningTitles": {
       "DATABASE_UNENCRYPTED": "El cifrado de la base de datos está desactivado",
@@ -982,9 +986,12 @@
       "CREDENTIAL_DATA_INVALID": "Los datos de credenciales no son válidos",
       "CREDENTIAL_STORAGE_TYPE_INVALID": "El tipo de almacenamiento no es válido",
       "CREDENTIAL_STORE_UNAVAILABLE": "El almacén de credenciales no está disponible",
+      "CREDENTIAL_STORE_READ_ONLY": "El almacén de credenciales es de solo lectura",
       "VAULT_CONFIGURATION_INVALID": "La configuración de Vault no es válida",
       "VAULT_INSECURE_HTTP": "Vault usa HTTP sin cifrar",
       "VAULT_TLS_VERIFICATION_DISABLED": "La verificación del certificado de Vault está desactivada",
+      "VAULT_READ_ONLY_IGNORED": "La opción de solo lectura no se aplica",
+      "VAULT_ADOPTION_FAILED": "No se pudieron adoptar las credenciales existentes",
       "KEYCHAIN_UNSUPPORTED_PLATFORM": "El llavero no es compatible con este host",
       "BACKEND_MISMATCH": "Hay credenciales en otro backend"
     },
@@ -996,12 +1003,18 @@
       "CREDENTIAL_DATA_INVALID": "Uno o más registros de credenciales contienen metadatos no válidos y no se pueden utilizar.",
       "CREDENTIAL_STORAGE_TYPE_INVALID": "CREDENTIAL_STORAGE_TYPE debe ser database, vault o keychain.",
       "CREDENTIAL_STORE_UNAVAILABLE": "No se pudo inicializar el almacén de credenciales. Revisa la configuración y los registros del servidor.",
+      "CREDENTIAL_STORE_READ_ONLY": "Esta instalación puede leer las credenciales de Vault, pero no modificarlas. Gestiona los secretos desde una instalación con permisos de escritura o borra CREDENTIAL_VAULT_READ_ONLY y concede capacidades de escritura al token.",
       "VAULT_CONFIGURATION_INVALID": "Vault no puede iniciarse con las variables de entorno actuales. Revisa la dirección, las cabeceras, la ruta y la configuración TLS.",
       "VAULT_INSECURE_HTTP": "El tráfico de Vault, los secretos y las cabeceras de autenticación no están protegidos durante el tránsito por HTTP.",
       "VAULT_TLS_VERIFICATION_DISABLED": "VAULT_SKIP_VERIFY permite certificados no confiables y expone el tráfico de Vault a interceptación.",
+      "VAULT_READ_ONLY_IGNORED": "CREDENTIAL_VAULT_READ_ONLY solo se aplica al almacenamiento en Vault y el backend actual lo ignora. Las credenciales de esta instalación se pueden seguir modificando.",
+      "VAULT_ADOPTION_FAILED": "Las credenciales que ya estaban en el backend externo no se pudieron leer al iniciar, por lo que faltan en este inventario. Comprueba la conexión con el backend y las capacidades del token, y reinicia el servidor.",
       "KEYCHAIN_UNSUPPORTED_PLATFORM": "El llavero de macOS solo está disponible cuando el host de Next.js se ejecuta en macOS. El servidor sigue disponible, pero las operaciones de credenciales fallarán.",
       "BACKEND_MISMATCH": "{count} credencial(es) se guardaron con otro backend. Vuelve a introducirlas desde sus formularios de configuración; los valores no se mueven ni eliminan automáticamente."
-    }
+    },
+    "readOnlyBadge": "Solo lectura",
+    "readOnlyNotice": "Esta instalación tiene acceso de solo lectura a Vault, por lo que este secreto no se puede cambiar aquí. Actualízalo desde una instalación con permisos de escritura.",
+    "adopted": "{count} credencial(es) se adoptaron del backend externo al iniciar el servidor."
   },
   "agents": {
     "title": "Agentes",

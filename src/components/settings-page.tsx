@@ -45,6 +45,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
+import { useCredentialStoreReadOnly } from "@/hooks/use-credential-store-read-only";
 import { Link } from "@/i18n/navigation";
 import { controlPlaneRequest } from "@/lib/control-plane-client";
 import { formatDateValue } from "@/lib/date-format";
@@ -777,6 +778,8 @@ function GitHubAppSettingsCard() {
 function GitHubSettingsCard() {
   const t = useTranslations("githubSettings");
   const tc = useTranslations("common");
+  const tCredentials = useTranslations("credentials");
+  const credentialsReadOnly = useCredentialStoreReadOnly();
   const [settings, setSettings] = useState<GitHubSettingsView | null>(null);
   const [apiToken, setApiToken] = useState("");
   const [pollIntervalSeconds, setPollIntervalSeconds] = useState(60);
@@ -934,6 +937,7 @@ function GitHubSettingsCard() {
                 </Label>
                 <Input
                   autoComplete="new-password"
+                  disabled={credentialsReadOnly}
                   id="github-token"
                   onChange={(event) => setApiToken(event.target.value)}
                   placeholder={
@@ -941,14 +945,16 @@ function GitHubSettingsCard() {
                       ? t("tokenPlaceholderConfigured")
                       : t("tokenPlaceholder")
                   }
-                  required={!settings?.tokenConfigured}
+                  required={!settings?.tokenConfigured && !credentialsReadOnly}
                   type="password"
                   value={apiToken}
                 />
                 <p className="mt-1 text-xs text-muted-foreground">
-                  {settings?.tokenConfigured
-                    ? t("tokenKeepHelp")
-                    : t("tokenHelp")}
+                  {credentialsReadOnly
+                    ? tCredentials("readOnlyNotice")
+                    : settings?.tokenConfigured
+                      ? t("tokenKeepHelp")
+                      : t("tokenHelp")}
                 </p>
                 <p className="mt-1 text-xs text-muted-foreground">
                   {t("tokenAcquireHelp")}{" "}
@@ -1005,7 +1011,11 @@ function GitHubSettingsCard() {
                   title={t("confirmRemove")}
                   trigger={
                     <Button
-                      disabled={busy || !settings?.tokenConfigured}
+                      disabled={
+                        busy ||
+                        !settings?.tokenConfigured ||
+                        credentialsReadOnly
+                      }
                       type="button"
                       variant="ghost"
                     >

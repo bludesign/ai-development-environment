@@ -119,9 +119,12 @@ export type CredentialStoreWarningCode =
   | "CREDENTIAL_DATA_INVALID"
   | "CREDENTIAL_STORAGE_TYPE_INVALID"
   | "CREDENTIAL_STORE_UNAVAILABLE"
+  | "CREDENTIAL_STORE_READ_ONLY"
   | "VAULT_CONFIGURATION_INVALID"
   | "VAULT_INSECURE_HTTP"
   | "VAULT_TLS_VERIFICATION_DISABLED"
+  | "VAULT_READ_ONLY_IGNORED"
+  | "VAULT_ADOPTION_FAILED"
   | "KEYCHAIN_UNSUPPORTED_PLATFORM"
   | "BACKEND_MISMATCH";
 
@@ -150,6 +153,9 @@ export type CredentialStoreStatusView = {
   details: CredentialStoreDetail[];
   itemCount: number;
   mismatchCount: number;
+  // Only a Vault-backed store can report true.
+  readOnly: boolean;
+  adoptedCount: number;
   warnings: CredentialStoreIssue[];
 };
 

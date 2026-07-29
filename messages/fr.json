@@ -906,6 +906,7 @@
     "updated": "Mis à jour",
     "emptyTitle": "Aucun identifiant stocké",
     "emptyDescription": "Les identifiants apparaissent ici après leur enregistrement depuis le formulaire de paramètres associé.",
+    "emptyDescriptionVault": "Aucun identifiant n'a été trouvé sous le point de montage et le préfixe de chemin Vault configurés. Enregistrez-en un depuis son formulaire de configuration ou vérifiez que le montage et le préfixe correspondent au Vault qui les contient.",
     "states": {
       "READY": "Prêt",
       "WARNING": "Avertissement",
@@ -965,14 +966,17 @@
       "authenticationToken": "Jeton d’authentification",
       "additionalHeaders": "Noms d’en-têtes supplémentaires",
       "customCa": "AC personnalisée",
-      "tlsServerName": "Nom du serveur TLS"
+      "tlsServerName": "Nom du serveur TLS",
+      "vaultAccess": "Accès à Vault"
     },
     "detailValues": {
       "configured": "Configuré",
       "notConfigured": "Non configuré",
       "none": "Aucun",
       "invalid": "Invalide",
-      "applicationDatabase": "Base de données de l’application"
+      "applicationDatabase": "Base de données de l’application",
+      "readOnly": "Lecture seule",
+      "readWrite": "Lecture et écriture"
     },
     "warningTitles": {
       "DATABASE_UNENCRYPTED": "Le chiffrement de la base de données est désactivé",
@@ -982,9 +986,12 @@
       "CREDENTIAL_DATA_INVALID": "Les données d’identification sont invalides",
       "CREDENTIAL_STORAGE_TYPE_INVALID": "Le type de stockage est invalide",
       "CREDENTIAL_STORE_UNAVAILABLE": "Le stockage des identifiants est indisponible",
+      "CREDENTIAL_STORE_READ_ONLY": "Le stockage des identifiants est en lecture seule",
       "VAULT_CONFIGURATION_INVALID": "La configuration de Vault est invalide",
       "VAULT_INSECURE_HTTP": "Vault utilise HTTP en clair",
       "VAULT_TLS_VERIFICATION_DISABLED": "La vérification du certificat Vault est désactivée",
+      "VAULT_READ_ONLY_IGNORED": "Le paramètre de lecture seule ne s'applique pas",
+      "VAULT_ADOPTION_FAILED": "Les identifiants existants n'ont pas pu être adoptés",
       "KEYCHAIN_UNSUPPORTED_PLATFORM": "Le trousseau n’est pas pris en charge sur cet hôte",
       "BACKEND_MISMATCH": "Des identifiants utilisent un autre backend"
     },
@@ -996,12 +1003,18 @@
       "CREDENTIAL_DATA_INVALID": "Un ou plusieurs enregistrements d’identifiants contiennent des métadonnées invalides et ne peuvent pas être utilisés.",
       "CREDENTIAL_STORAGE_TYPE_INVALID": "CREDENTIAL_STORAGE_TYPE doit être database, vault ou keychain.",
       "CREDENTIAL_STORE_UNAVAILABLE": "Le stockage des identifiants n’a pas pu être initialisé. Vérifiez la configuration et les journaux du serveur.",
+      "CREDENTIAL_STORE_READ_ONLY": "Cette installation peut lire les identifiants Vault mais pas les modifier. Gérez les secrets depuis une installation en écriture, ou supprimez CREDENTIAL_VAULT_READ_ONLY et accordez au jeton des capacités d'écriture.",
       "VAULT_CONFIGURATION_INVALID": "Vault ne peut pas être initialisé avec les variables d’environnement actuelles. Vérifiez l’adresse, les en-têtes, le chemin et les réglages TLS.",
       "VAULT_INSECURE_HTTP": "Le trafic Vault, les secrets et les en-têtes d’authentification ne sont pas protégés en transit sur HTTP.",
       "VAULT_TLS_VERIFICATION_DISABLED": "VAULT_SKIP_VERIFY autorise les certificats non approuvés et expose le trafic Vault à l’interception.",
+      "VAULT_READ_ONLY_IGNORED": "CREDENTIAL_VAULT_READ_ONLY ne s'applique qu'au stockage Vault et est ignoré par le backend actuel. Les identifiants de cette installation restent modifiables.",
+      "VAULT_ADOPTION_FAILED": "Les identifiants déjà détenus par le backend externe n'ont pas pu être lus au démarrage : ils manquent donc dans cet inventaire. Vérifiez la connexion au backend et les capacités du jeton, puis redémarrez le serveur.",
       "KEYCHAIN_UNSUPPORTED_PLATFORM": "Le trousseau macOS n’est disponible que si l’hôte Next.js s’exécute sur macOS. Le serveur reste disponible, mais les opérations sur les identifiants échoueront.",
       "BACKEND_MISMATCH": "{count} élément(s) d’identification ont été enregistrés avec un autre backend. Saisissez-les à nouveau dans leurs paramètres propriétaires ; les valeurs ne sont ni déplacées ni supprimées automatiquement."
-    }
+    },
+    "readOnlyBadge": "Lecture seule",
+    "readOnlyNotice": "Cette installation dispose d'un accès en lecture seule à Vault ; ce secret ne peut donc pas être modifié ici. Mettez-le à jour depuis une installation disposant d'un accès en écriture.",
+    "adopted": "{count} identifiant(s) ont été adoptés depuis le backend externe au démarrage du serveur."
   },
   "agents": {
     "title": "Agents",

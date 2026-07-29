@@ -20,6 +20,7 @@ const loadNativeKeychain: KeychainModuleLoader = () =>
 
 export class KeychainCredentialDriver implements CredentialDriver {
   readonly storageType = "keychain" as const;
+  readonly readOnly = false;
 
   constructor(
     private readonly config: KeychainCredentialStoreConfig,

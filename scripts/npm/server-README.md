@@ -40,6 +40,7 @@ Override with environment variables:
 | `VAULT_CACERT`                 | unset                                              |
 | `VAULT_TLS_SERVER_NAME`        | unset                                              |
 | `VAULT_SKIP_VERIFY`            | `false`                                            |
+| `CREDENTIAL_VAULT_READ_ONLY`   | `false`                                            |
 
 Only SQLite `file:` URLs are supported for `DATABASE_URL`.
 
@@ -54,11 +55,32 @@ path "secret/data/ai-development-environment/credentials/*" {
   capabilities = ["create", "read", "update"]
 }
 path "secret/metadata/ai-development-environment/credentials/*" {
-  capabilities = ["delete"]
+  capabilities = ["list", "delete"]
 }
 ```
 
-No Vault `LIST` permission is needed. macOS Keychain is dynamically loaded only on Darwin; selecting it on Linux or in Docker reports an error without crashing the app. Do not run a Keychain-backed service as root. Switching storage backends does not migrate or delete existing values: re-enter mismatched credentials through their owning settings forms. External-backend outages affect only credential-dependent features.
+`list` is optional. With it, a server discovers every credential under the prefix, including per-server MCP header bundles and APNs certificates; without it, discovery still covers each credential stored at a fixed path.
+
+### Reusing an existing Vault on a new install
+
+A server pointed at a Vault that already holds credentials adopts them when it starts: it reads what is stored under the configured mount and prefix and rebuilds the local metadata rows describing it. Nothing needs to be re-entered, and the Credentials page reports how many items were adopted. Only secrets live in Vault—non-secret settings such as the Jira site URL or GitHub App ID are still entered per install. Point two installs at the same mount and prefix and they share one set of secrets, with no coordination between them; a write from either is immediately visible to the other.
+
+Because the Vault token is the only thing gating this, treat it as the credential: anyone who can point a new install at the Vault gets a working install.
+
+### Read-only Vault installs
+
+`CREDENTIAL_VAULT_READ_ONLY=true` declares that an install must never write to Vault. Secret fields become read-only across the settings forms, and credential writes and deletions are refused before any request is sent; non-secret settings stay editable. The setting applies only when `CREDENTIAL_STORAGE_TYPE=vault`—database and keychain storage ignore it and report a warning on the Credentials page. A token that simply lacks write capabilities does not need the flag: Vault's denial is reported as the same read-only error rather than a bare HTTP 403. A read-only install needs:
+
+```hcl
+path "secret/data/ai-development-environment/credentials/*" {
+  capabilities = ["read"]
+}
+path "secret/metadata/ai-development-environment/credentials/*" {
+  capabilities = ["read", "list"]
+}
+```
+
+macOS Keychain is dynamically loaded only on Darwin; selecting it on Linux or in Docker reports an error without crashing the app. Do not run a Keychain-backed service as root. Switching storage backends does not migrate or delete existing values: re-enter mismatched credentials through their owning settings forms. External-backend outages affect only credential-dependent features.
 
 ## See also
 

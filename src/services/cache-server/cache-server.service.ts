@@ -1,6 +1,7 @@
 import "server-only";
 
 import { getPrismaClient } from "@/data/prisma-client";
+import type { Prisma } from "@/generated/prisma/client";
 import {
   CREDENTIALS,
   CredentialService,
@@ -245,25 +246,39 @@ export class CacheServerService {
     const headerNamesJson = JSON.stringify(
       headers.map((header) => header.name),
     );
-    await this.credentials.setMany(
-      [
-        {
-          descriptor: CREDENTIALS.cacheServerApiKey,
-          value: Buffer.from(nextApiKey, "utf8"),
-        },
-        {
-          descriptor: CREDENTIALS.cacheServerHeaders,
-          value: encodeJsonCredential(headers),
-        },
-      ],
-      async (transaction) => {
-        await transaction.cacheServerSettings.upsert({
-          where: { id: SETTINGS_ID },
-          create: { id: SETTINGS_ID, baseUrl, headerNamesJson },
-          update: { baseUrl, headerNamesJson },
-        });
-      },
-    );
+    const saveMetadata = async (transaction: Prisma.TransactionClient) => {
+      await transaction.cacheServerSettings.upsert({
+        where: { id: SETTINGS_ID },
+        create: { id: SETTINGS_ID, baseUrl, headerNamesJson },
+        update: { baseUrl, headerNamesJson },
+      });
+    };
+    // Re-storing an unchanged secret is pointless work everywhere and an outright failure
+    // against a read-only Vault, so editing the base URL alone must not touch the store.
+    const entries = [
+      ...(input.apiKey?.trim() || !apiKeyConfigured
+        ? [
+            {
+              descriptor: CREDENTIALS.cacheServerApiKey,
+              value: Buffer.from(nextApiKey, "utf8"),
+            },
+          ]
+        : []),
+      ...(!headersConfigured ||
+      JSON.stringify(headers) !== JSON.stringify(existingHeaders)
+        ? [
+            {
+              descriptor: CREDENTIALS.cacheServerHeaders,
+              value: encodeJsonCredential(headers),
+            },
+          ]
+        : []),
+    ];
+    if (entries.length) {
+      await this.credentials.setMany(entries, saveMetadata);
+    } else {
+      await (await getPrismaClient()).$transaction(saveMetadata);
+    }
     return this.getSettings();
   }
 

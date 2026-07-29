@@ -4,6 +4,7 @@ import { createSecureContext } from "node:tls";
 import { importPKCS8 } from "jose";
 
 import { getPrismaClient } from "@/data/prisma-client";
+import type { Prisma } from "@/generated/prisma/client";
 import {
   CREDENTIALS,
   CredentialService,
@@ -334,22 +335,29 @@ export class PushNotificationsService {
     } catch {
       throw new Error("The APNs .p8 key must be an ES256 PKCS#8 private key");
     }
-    await this.credentials.setText(
-      CREDENTIALS.apnsTokenPrivateKey,
-      privateKey,
-      async (transaction) => {
-        await transaction.pushNotificationSettings.update({
-          where: { id: SETTINGS_ID },
-          data: {
-            tokenTeamId: teamId,
-            tokenKeyId: keyId,
-            tokenPrivateKeyFingerprint: sha256(privateKey),
-            tokenConfiguredAt: new Date(),
-            tokenLastError: null,
-          },
-        });
-      },
-    );
+    const saveMetadata = async (transaction: Prisma.TransactionClient) => {
+      await transaction.pushNotificationSettings.update({
+        where: { id: SETTINGS_ID },
+        data: {
+          tokenTeamId: teamId,
+          tokenKeyId: keyId,
+          tokenPrivateKeyFingerprint: sha256(privateKey),
+          tokenConfiguredAt: new Date(),
+          tokenLastError: null,
+        },
+      });
+    };
+    // The key falls back to the stored one when the form omits it, so changing only the
+    // team or key ID must not re-store it against a read-only Vault.
+    if (input.privateKey?.trim()) {
+      await this.credentials.setText(
+        CREDENTIALS.apnsTokenPrivateKey,
+        privateKey,
+        saveMetadata,
+      );
+    } else {
+      await (await getPrismaClient()).$transaction(saveMetadata);
+    }
     this.changed();
     return this.settings();
   }
