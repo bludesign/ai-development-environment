@@ -1,14 +1,56 @@
 import path from "node:path";
+import { randomInt } from "node:crypto";
 
 import { defineConfig, devices } from "@playwright/test";
 
+import {
+  SCREENSHOT_PUBLIC_ORIGIN,
+  SCREENSHOT_TIME,
+  SCREENSHOT_TIME_ZONE,
+} from "./playwright/screenshot-time";
 import { MOCK_CREDENTIAL_ENCRYPTION_KEY } from "./scripts/mock-data/encryption-key";
 
-const PORT = process.env.SCREENSHOT_PORT ?? "4321";
-const MOCK_API_PORT = process.env.MOCK_API_PORT ?? "4322";
+const assignedPorts = new Set<number>();
+
+function screenshotPort(environmentVariable: string): string {
+  const configuredValue = process.env[environmentVariable];
+  if (configuredValue) {
+    const configuredPort = Number(configuredValue);
+    if (
+      !Number.isInteger(configuredPort) ||
+      configuredPort < 1 ||
+      configuredPort > 65_535
+    ) {
+      throw new Error(`Invalid ${environmentVariable}: ${configuredValue}`);
+    }
+    if (assignedPorts.has(configuredPort)) {
+      throw new Error(
+        `${environmentVariable} duplicates another screenshot port: ${configuredPort}`,
+      );
+    }
+    assignedPorts.add(configuredPort);
+    return String(configuredPort);
+  }
+
+  let port: number;
+  do port = randomInt(10_000, 60_000);
+  while (assignedPorts.has(port));
+  assignedPorts.add(port);
+  return String(port);
+}
+
+// `npm run screenshots*` supplies OS-selected free ports. Random fallbacks also keep direct
+// `playwright test` invocations from contending for the old fixed ports.
+const PORT = screenshotPort("SCREENSHOT_PORT");
+const MOCK_API_PORT = "4322";
+const AGENT_WS_PORT = screenshotPort("AGENT_WS_PORT");
 const HOST = "127.0.0.1";
 const baseURL = `http://${HOST}:${PORT}`;
 const mockApiURL = `http://${HOST}:${MOCK_API_PORT}`;
+const fixedServerTimePath = path.resolve(
+  process.cwd(),
+  "playwright/fixed-server-time.cjs",
+);
 
 // Absolute file URL so the standalone server resolves the same database regardless of its CWD.
 const mockDatabaseUrl = `file:${path.resolve(process.cwd(), "prisma/mock.db")}`;
@@ -30,6 +72,7 @@ export default defineConfig({
   use: {
     baseURL,
     trace: "off",
+    timezoneId: SCREENSHOT_TIME_ZONE,
   },
   projects: [
     {
@@ -83,20 +126,32 @@ export default defineConfig({
       reuseExistingServer: false,
       env: {
         SCREENSHOT_DIST_DIR: ".next-mock",
+        SCREENSHOT_TIME,
         DATABASE_URL: mockDatabaseUrl,
         NODE_ENV: "production",
-        // Use a dedicated agent WebSocket port so the capture server never collides with a
-        // separately running dev server (whose instrumentation hook binds the default 3091).
+        NODE_OPTIONS:
+          `${process.env.NODE_OPTIONS ?? ""} --require=${fixedServerTimePath}`.trim(),
+        // The instrumentation hook binds this port while Next starts. It must be unique per
+        // capture run because Playwright can run alongside dev servers and other captures.
         AGENT_WS_HOSTNAME: HOST,
-        AGENT_WS_PORT: "39091",
+        AGENT_WS_PORT,
         // Keep every GitHub call on the stub above; nothing reaches github.com.
         GITHUB_API_BASE_URL: mockApiURL,
         GITHUB_GRAPHQL_URL: `${mockApiURL}/graphql`,
+        // Runtime GitHub calls would otherwise make the cache metrics depend on route order.
+        // The seeded call history remains visible and deterministic.
+        GITHUB_CACHE_LOGGING_DISABLED: "true",
+        // Jira-backed routes run in parallel and would otherwise append to the same API call
+        // history that the Jira cache screenshot displays. Keep only its seeded call history.
+        JIRA_CACHE_LOGGING_DISABLED: "true",
         // Device enrollment refuses to issue a profile unless the app is served over public
         // HTTPS. The captured page only renders the form, so a placeholder origin is enough.
-        PUBLIC_BASE_URL: "https://ade.acme.example.com",
+        PUBLIC_BASE_URL: SCREENSHOT_PUBLIC_ORIGIN,
         // Must match the key the seed encrypted mock.db's credentials with, or the app
         // rewrites every row on first use and the VACUUM that follows locks the database.
+        // Explicitly override a developer's .env too; otherwise a local Vault/Keychain choice
+        // makes every database-backed screenshot credential appear unavailable.
+        CREDENTIAL_STORAGE_TYPE: "database",
         CREDENTIAL_ENCRYPTION_KEY: MOCK_CREDENTIAL_ENCRYPTION_KEY,
       },
     },

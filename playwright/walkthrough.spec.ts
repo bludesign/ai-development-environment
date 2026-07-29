@@ -10,6 +10,7 @@ import {
   walkthroughVideoSize,
   type WalkthroughStop,
 } from "./walkthrough";
+import { setScreenshotTime } from "./screenshot-time";
 
 /** How long a click's marker dot is left to play out before the tour moves on. */
 const DWELL = 750;
@@ -63,6 +64,7 @@ test.describe("app walkthrough", () => {
     };
 
     try {
+      await setScreenshotTime(page);
       await page.addInitScript(markClicks);
       await page.goto(localeHref(WALKTHROUGH_START), {
         waitUntil: "domcontentloaded",

@@ -227,6 +227,13 @@ function reportFor(usage: AgentUsage) {
   };
 }
 
+const TODAY_TOTAL_COST = round(
+  AGENT_USAGE.reduce((total, usage) => {
+    const models = usage.days[0];
+    return total + (models ? entryFor(usage, 0, models).totalCost : 0);
+  }, 0),
+);
+
 /**
  * Usage/cost aggregates. Per-run token usage is seeded with the runs; these rows drive the
  * sidebar summary and the ccusage collection surfaced on the Usage page.
@@ -234,12 +241,19 @@ function reportFor(usage: AgentUsage) {
 export async function seedCosts(prisma: PrismaClient): Promise<void> {
   await prisma.sidebarUsageSummary.createMany({
     data: [
-      // Kept in step with the ccusage days above: today's report totals about $258 and the
-      // trailing week about $1,851, so these read as the same spend seen from the sidebar.
+      // SystemStatusService reads this singleton. Keep it equal to the completed ccusage
+      // fixture so a collection finishing during parallel captures cannot change the footer.
+      {
+        id: "default",
+        period: dayKey(0),
+        totalCost: TODAY_TOTAL_COST,
+        collectedAt: hoursAgo(1),
+      },
+      // Named period rows document the fixture's broader summary values.
       {
         id: "sidebar-usage-day",
         period: "DAY",
-        totalCost: 258.74,
+        totalCost: TODAY_TOTAL_COST,
         collectedAt: hoursAgo(1),
       },
       {

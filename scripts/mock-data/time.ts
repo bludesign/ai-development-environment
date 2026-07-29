@@ -1,9 +1,10 @@
+import { SCREENSHOT_TIME } from "../../playwright/screenshot-time";
+
 /**
- * Deterministic-ish time helpers for the mock seed. Everything is anchored to a single
- * `NOW` captured when the seed starts, so relative labels ("2 days ago") stay consistent
- * within a run and freshly-seeded agents remain inside their online window.
+ * Deterministic time helpers for the screenshot seed. The browser and screenshot server use
+ * this same instant, so dates, day groups, relative labels, and agent freshness stay stable.
  */
-export const NOW = new Date();
+export const NOW = new Date(SCREENSHOT_TIME);
 
 const MINUTE_MS = 60_000;
 const HOUR_MS = 60 * MINUTE_MS;

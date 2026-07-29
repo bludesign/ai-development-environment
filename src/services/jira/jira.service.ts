@@ -428,6 +428,8 @@ export class JiraService {
   constructor(
     private readonly credentials = new CredentialService(),
     private readonly workflowEvents?: WorkflowEventsService,
+    private readonly recordCallLogs = process.env
+      .JIRA_CACHE_LOGGING_DISABLED !== "true",
   ) {}
 
   private async recordTicketWorkflowEvents(
@@ -2248,6 +2250,7 @@ export class JiraService {
     servedStale?: boolean;
     sourceId?: string | null;
   }) {
+    if (!this.recordCallLogs) return;
     const prisma = await getPrismaClient();
     await prisma.jiraApiCallLog.create({
       data: {

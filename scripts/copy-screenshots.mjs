@@ -4,10 +4,13 @@
  *
  *   npm run screenshots:copy               # prompts for the docs directory
  *   npm run screenshots:copy -- ../elsewhere
+ *   npm run screenshots:copy:walkthrough   # includes regenerated WebM recordings
  *
  * Only the desktop projects are copied — the docs site renders one asset per theme and
  * swaps them with `dark:hidden` / `hidden dark:block`, so `desktop-light` maps onto
- * `images/light/` and `desktop-dark` onto `images/dark/`. Mobile captures stay local.
+ * `images/light/` and `desktop-dark` onto `images/dark/`. Mobile captures stay local. The
+ * walkthrough videos are opt-in because live browser recordings have variable frame timing
+ * and therefore produce a different binary on every run even when the UI is unchanged.
  */
 import { cp, mkdir, readdir } from "node:fs/promises";
 import { basename, resolve } from "node:path";
@@ -25,13 +28,20 @@ const PROJECT_DESTINATIONS = [
   { project: "desktop-dark", destination: "images/dark" },
 ];
 
-// The route stills are PNGs; the walkthrough screencast from walkthrough.spec.ts is a WebM.
-// Both live in the same per-theme directory, and the docs pages pick whichever they need.
-const PUBLISHED_EXTENSIONS = [".png", ".webm"];
+const INCLUDE_VIDEOS_FLAG = "--include-videos";
+const argumentsToParse = process.argv.slice(2);
+const includeVideos = argumentsToParse.includes(INCLUDE_VIDEOS_FLAG);
+const targetArgument = argumentsToParse.find(
+  (argument) => argument !== INCLUDE_VIDEOS_FLAG,
+);
+
+// The route stills are stable PNGs. Walkthrough WebMs share the same per-theme directory but
+// are copied only for an intentional recording update.
+const publishedExtensions = includeVideos ? [".png", ".webm"] : [".png"];
 
 const sourceRoot = resolve(process.cwd(), "screenshots");
 
-const target = await selectDocsDirectory();
+const target = await selectDocsDirectory({ argument: targetArgument ?? "" });
 const targetRoot = resolveDocsDirectoryPath(target);
 
 // Mistyping the prompt is ordinary, not exceptional, so these exit with a readable message
@@ -62,7 +72,7 @@ for (const { project, destination } of PROJECT_DESTINATIONS) {
   await mkdir(targetDirectory, { recursive: true });
 
   const captures = (await readdir(sourceDirectory)).filter((name) =>
-    PUBLISHED_EXTENSIONS.some((extension) => name.endsWith(extension)),
+    publishedExtensions.some((extension) => name.endsWith(extension)),
   );
   for (const name of captures) {
     await cp(resolve(sourceDirectory, name), resolve(targetDirectory, name));

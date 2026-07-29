@@ -87,6 +87,7 @@ export async function seedSkills(prisma: PrismaClient): Promise<void> {
       syncGlobally: true,
       packageHash: "sha256-lint-guardrails-0001",
       createdAt: daysAgo(40),
+      updatedAt: daysAgo(4),
       files: {
         create: [
           {
@@ -110,6 +111,7 @@ export async function seedSkills(prisma: PrismaClient): Promise<void> {
       syncGlobally: true,
       packageHash: "sha256-doc-writer-0001",
       createdAt: daysAgo(38),
+      updatedAt: daysAgo(6),
       files: {
         create: [
           {
@@ -133,6 +135,7 @@ export async function seedSkills(prisma: PrismaClient): Promise<void> {
       syncGlobally: false,
       packageHash: "sha256-test-author-0001",
       createdAt: daysAgo(20),
+      updatedAt: daysAgo(2),
       files: {
         create: [
           {
@@ -157,6 +160,7 @@ export async function seedSkills(prisma: PrismaClient): Promise<void> {
         syncGlobally: skill.syncGlobally,
         packageHash: `sha256-${skill.name}-0001`,
         createdAt: daysAgo(skill.createdDaysAgo),
+        updatedAt: daysAgo(Math.max(1, skill.createdDaysAgo - 3)),
         files: {
           create: [
             {
@@ -176,6 +180,7 @@ export async function seedSkills(prisma: PrismaClient): Promise<void> {
       id: ids.skillGroups.core,
       name: "Core Engineering",
       createdAt: daysAgo(40),
+      updatedAt: daysAgo(1),
       skills: {
         create: [
           { skillId: ids.skills.lint },

@@ -10,6 +10,10 @@ export type RouteEntry = {
   path: string;
   /** Full-page capture by default; set false for pages better shown at viewport height. */
   fullPage?: boolean;
+  /** Client GraphQL operation that must finish before the screenshot is written. */
+  readyGraphqlOperation?: string;
+  /** One of these terminal-state texts must render after the ready operation finishes. */
+  readyTexts?: string[];
   /**
    * JavaScript evaluated before any of the page's own scripts run. Only for pages whose data
    * depends on an id the client mints at random; see the `usage` route.
@@ -76,14 +80,30 @@ export const routes: RouteEntry[] = [
   { name: "job-detail", path: `/jobs/${ids.jobs.codebaseRefresh}` },
 
   // GitHub
-  { name: "pull-requests", path: "/pull-requests" },
+  {
+    name: "pull-requests",
+    path: "/pull-requests",
+    readyGraphqlOperation: "GitHubPullRequests",
+    readyTexts: [
+      "Add quick search to the global navigation bar",
+      "No pull requests",
+    ],
+  },
   {
     name: "pull-request-detail",
     path: `/pull-requests/${ids.pullRequests.owner}/${ids.pullRequests.repository}/${ids.pullRequests.number}`,
   },
   { name: "actions", path: "/actions" },
   { name: "actions-cache", path: "/actions-cache" },
-  { name: "comments", path: "/comments" },
+  {
+    name: "comments",
+    path: "/comments",
+    readyGraphqlOperation: "GitHubReviewThreads",
+    readyTexts: [
+      "This debounce is recreated on every render — move it into a ref so typing does not reset the timer.",
+      "No review comments",
+    ],
+  },
   { name: "webhooks", path: "/webhooks" },
   { name: "polling", path: "/polling" },
   { name: "github-cache", path: "/github-cache" },

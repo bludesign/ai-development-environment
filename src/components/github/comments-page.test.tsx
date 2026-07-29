@@ -1,4 +1,5 @@
 import {
+  act,
   cleanup,
   fireEvent,
   render,
@@ -164,6 +165,35 @@ afterEach(() => {
 });
 
 describe("CommentsPage", () => {
+  test("does not retry review-thread loading after an error", async () => {
+    request.mockImplementation(async (query) => {
+      if (query.includes("GitHubCommentsConfiguration")) {
+        return {
+          githubSettings: {
+            tokenConfigured: true,
+            updatedAt: new Date(0).toISOString(),
+          },
+        } as never;
+      }
+      if (query.includes("query GitHubReviewThreads")) {
+        throw new Error("Review comments unavailable");
+      }
+      throw new Error(`Unexpected operation: ${query}`);
+    });
+
+    render(<CommentsPage />);
+
+    expect(
+      await screen.findByText("Review comments unavailable"),
+    ).toBeDefined();
+    await act(() => new Promise((resolve) => window.setTimeout(resolve, 25)));
+    expect(
+      request.mock.calls.filter(([query]) =>
+        query.includes("query GitHubReviewThreads"),
+      ),
+    ).toHaveLength(1);
+  });
+
   test("tints the thread card and table row for a highlighted worktree", async () => {
     const tinted = thread("tinted", {
       author: "octocat",

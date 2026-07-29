@@ -156,6 +156,11 @@ export class GitHubCache {
   private cacheGeneration = 0;
   private lastPrunedAt = 0;
 
+  constructor(
+    private readonly recordCallLogs = process.env
+      .GITHUB_CACHE_LOGGING_DISABLED !== "true",
+  ) {}
+
   private cacheKey(input: {
     authentication: GitHubAuthentication;
     endpoint: string;
@@ -924,6 +929,7 @@ export class GitHubCache {
     pointsAvoided?: number;
     rateLimit?: GitHubRateLimitMetadata | null;
   }): Promise<void> {
+    if (!this.recordCallLogs) return;
     await this.pruneLogs();
     const prisma = await getPrismaClient();
     await prisma.gitHubApiCallLog.create({

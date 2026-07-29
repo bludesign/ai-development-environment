@@ -157,10 +157,10 @@ export function CommentsPage({
   }, []);
 
   useEffect(() => {
-    if (!settings?.tokenConfigured || page || loading) return;
+    if (!settings?.tokenConfigured || page || loading || error) return;
     const timeout = window.setTimeout(() => void load(), 0);
     return () => window.clearTimeout(timeout);
-  }, [load, loading, page, settings?.tokenConfigured]);
+  }, [error, load, loading, page, settings?.tokenConfigured]);
 
   useEffect(() => {
     const syncFromUrl = () =>

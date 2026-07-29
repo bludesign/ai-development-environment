@@ -1210,6 +1210,7 @@ export async function seedRuns(prisma: PrismaClient): Promise<void> {
       toolCallCount: 3,
       startedAt: minutesAgo(26),
       createdAt: minutesAgo(28),
+      updatedAt: minutesAgo(21),
       attempts: {
         create: [
           {
