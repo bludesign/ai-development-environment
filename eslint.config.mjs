@@ -18,6 +18,8 @@ const eslintConfig = defineConfig([
     "packages/*/dist/**",
     // npm publish staging output (assembled by scripts/prepare-npm-server-package.mjs).
     ".npm-staging/**",
+    // Vitest coverage output, including istanbul's bundled HTML report scripts.
+    "coverage/**",
   ]),
   // An underscore prefix is the codebase's marker for "deliberately unused": resolver roots,
   // event handler args, mocks, discarded destructured fields, and ignored catch bindings.

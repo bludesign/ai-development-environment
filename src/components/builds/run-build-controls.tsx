@@ -17,7 +17,7 @@ import { Spinner } from "@/components/ui/spinner";
 import { createClientId } from "@/lib/browser-utils";
 import { controlPlaneRequest } from "@/lib/control-plane-client";
 
-import type { BuildDestination } from "./types";
+import type { BuildDestination, BuildRecord } from "./types";
 
 export function RunBuildControls({
   buildId,
@@ -29,7 +29,7 @@ export function RunBuildControls({
   compact = false,
 }: {
   buildId: string;
-  destinationType: BuildDestination["type"];
+  destinationType: BuildRecord["destinationType"];
   preferredDestination?: BuildDestination | null;
   onCompleted?: () => void | Promise<void>;
   onError: (error: string | null) => void;

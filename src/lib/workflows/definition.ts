@@ -1034,6 +1034,20 @@ export const WORKFLOW_STEP_CATALOG: readonly WorkflowCatalogEntry[] = [
     },
   ),
   step(
+    "BUILD_IMPORT_COVERAGE",
+    "Builds",
+    "Import coverage report",
+    "SERVER",
+    ["worktree.id"],
+    ["build.id", "build.coverageSummary"],
+    {
+      description:
+        "Reads a coverage file a test command wrote in the worktree and records it as a coverage report.",
+      details:
+        "Pair it with a Terminal command step that runs the test suite first: this step only reads what that run left behind, at the path given in `Coverage file`. LCOV and Istanbul (`coverage-final.json`) are both understood, and AUTO tells them apart by the file itself. Runs as an agent job and waits. The report is attached to a new build record of its own, so it shows up on that build's coverage page and in the coverage picker on Changes; changed-line coverage is measured against the worktree's base branch, and is left out when that branch cannot be resolved. Writes the totals to `build.coverageSummary` and the new id to `build.id` — follow with Read code coverage for the per-file breakdown. Fails when the file is missing, unreadable, or describes no files.",
+    },
+  ),
+  step(
     "BUILD_EXPORT",
     "Builds",
     "Export archive",

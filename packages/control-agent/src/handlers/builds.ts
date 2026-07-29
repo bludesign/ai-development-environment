@@ -2136,17 +2136,17 @@ function changeTypesFromStatus(value: string): Map<string, string> {
   return result;
 }
 
-async function snapshotCoverageChanges(
-  input: BuildJobPayload,
+export async function snapshotCoverageChanges(
+  baseBranch: string | null | undefined,
   folder: string,
   timeoutMs: number,
   signal: AbortSignal,
 ): Promise<CoverageChange[]> {
-  if (!input.baseBranch) throw new Error("A base branch is required");
+  if (!baseBranch) throw new Error("A base branch is required");
   const base = requireSuccess(
     await gitCommand(
       folder,
-      ["merge-base", `refs/remotes/origin/${input.baseBranch}`, "HEAD"],
+      ["merge-base", `refs/remotes/origin/${baseBranch}`, "HEAD"],
       timeoutMs,
       signal,
     ),
@@ -2646,7 +2646,7 @@ export const runIosBuild: AgentJobHandler = async (
         if (input.worktreeCoverage) {
           try {
             coverageChanges = await snapshotCoverageChanges(
-              input,
+              input.baseBranch,
               folder,
               Math.min(timeoutMs, 60_000),
               signal,

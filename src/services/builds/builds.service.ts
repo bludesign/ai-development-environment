@@ -32,6 +32,10 @@ import {
   type BuildSigningRequirement,
   type BuildSourceKind,
 } from "@ai-development-environment/agent-contract/builds";
+import {
+  COVERAGE_IMPORT_JOB_KIND,
+  COVERAGE_REPORT_FORMATS,
+} from "@ai-development-environment/agent-contract/coverage";
 
 import { getPrismaClient } from "@/data/prisma-client";
 import type { Prisma } from "@/generated/prisma/client";
@@ -427,6 +431,10 @@ export class BuildsService {
       IOS_COVERAGE_REPORT_JOB_KIND,
       (job) => this.projectGeneratedReportCompletion(job),
     );
+    this.agentControl.registerCompletionHandler(
+      COVERAGE_IMPORT_JOB_KIND,
+      (job) => this.importedCoverageCompletion(job),
+    );
   }
 
   private publish(buildId: string): void {
@@ -441,7 +449,11 @@ export class BuildsService {
     });
   }
 
-  private async requireWorktree(worktreeId: string, capability: string) {
+  private async requireWorktree(
+    worktreeId: string,
+    capability: string,
+    capabilityError = "Agent must be updated to use iOS builds",
+  ) {
     const prisma = await getPrismaClient();
     const worktree = await prisma.worktree.findUnique({
       where: { id: worktreeId },
@@ -458,7 +470,7 @@ export class BuildsService {
     }
     if (!online(worktree.codebase.agent)) throw new Error("Agent is offline");
     if (!capabilities(worktree.codebase.agent).includes(capability)) {
-      throw new Error("Agent must be updated to use iOS builds");
+      throw new Error(capabilityError);
     }
     return worktree;
   }
@@ -1724,6 +1736,188 @@ export class BuildsService {
       },
       worktreeCoverage: true,
     });
+  }
+
+  /**
+   * Records a coverage file a test runner already wrote as a coverage report.
+   *
+   * The coverage pages are build-scoped, so the import gets a build of its own:
+   * a `HOST` record that ran no device build, carrying the same worktree
+   * snapshot a real build carries so the picker can show which revision was
+   * measured. The agent job does the reading and parsing — the file lives on
+   * the machine the worktree does.
+   */
+  async importCoverageReport(input: {
+    worktreeId: string;
+    reportPath: string;
+    format?: string | null;
+    requestId: string;
+  }) {
+    const prisma = await getPrismaClient();
+    const worktree = await this.requireWorktree(
+      input.worktreeId,
+      COVERAGE_IMPORT_JOB_KIND,
+      "Agent must be updated to import coverage reports",
+    );
+    // Null is meaningful downstream: the agent skips the changed-line half of
+    // the report rather than failing when there is no base branch to diff.
+    const baseBranch =
+      worktree.baseBranchOverride ?? worktree.codebase.defaultBranch ?? null;
+    const format = (input.format || "AUTO").toUpperCase();
+    if (!(COVERAGE_REPORT_FORMATS as readonly string[]).includes(format)) {
+      throw new Error("Coverage format must be AUTO, LCOV, or ISTANBUL");
+    }
+    const reportPath = cleanName(input.reportPath, "Coverage file", 4_000);
+    const requestId = cleanName(input.requestId, "Request ID", 200);
+    const requestKey = `coverage:${input.worktreeId}:${requestId}`;
+    const existing = await prisma.build.findUnique({ where: { requestKey } });
+    if (existing) return existing;
+    const buildId = randomUUID();
+    const buildRoot = effectiveBuildsDirectory(worktree.codebase.agent);
+    if (!buildRoot) {
+      throw new Error("The agent builds directory is unavailable");
+    }
+    const snapshot = {
+      repository: {
+        id: worktree.codebase.repository.id,
+        name: worktree.codebase.repository.name,
+        canonicalOrigin: worktree.codebase.repository.canonicalOrigin,
+      },
+      codebase: { id: worktree.codebase.id, folder: worktree.codebase.folder },
+      worktree: {
+        id: worktree.id,
+        folder: worktree.folder,
+        branch: worktree.branch,
+        headSha: worktree.headSha,
+        codeStateHash: worktree.codeStateHash,
+        hasStagedChanges: worktree.hasStagedChanges,
+        hasUnstagedChanges: worktree.hasUnstagedChanges,
+      },
+      agent: {
+        id: worktree.codebase.agent.id,
+        name: worktree.codebase.agent.name,
+        hostname: worktree.codebase.agent.hostname,
+      },
+      coverageImport: { reportPath, format, baseBranch },
+      worktreeCoverage: true,
+    };
+    const build = await prisma.build.create({
+      data: {
+        id: buildId,
+        requestKey,
+        requestId,
+        agentId: worktree.codebase.agentId,
+        codebaseId: worktree.codebaseId,
+        worktreeId: worktree.id,
+        status: "RUNNING",
+        action: "TEST",
+        destinationType: "HOST",
+        destinationJson: JSON.stringify({ type: "HOST" }),
+        snapshotJson: JSON.stringify(snapshot),
+        commandSummary: `Import coverage from ${reportPath}`,
+        artifactDirectory: join(buildRoot, buildId),
+        startedAt: new Date(),
+      },
+    });
+    await prisma.buildReport.create({
+      data: {
+        id: randomUUID(),
+        buildId,
+        kind: "CODE_COVERAGE",
+        source: "WORKTREE",
+        status: "PENDING",
+      },
+    });
+    this.publish(buildId);
+    const job = await this.agentControl.createJob({
+      agentId: worktree.codebase.agentId,
+      codebaseId: worktree.codebaseId,
+      worktreeId: worktree.id,
+      kind: COVERAGE_IMPORT_JOB_KIND,
+      payload: {
+        buildId,
+        codebaseId: worktree.codebaseId,
+        worktreeId: worktree.id,
+        folder: worktree.folder,
+        reportPath,
+        format,
+        baseBranch,
+      },
+      idempotencyKey: `coverage:import:${requestId}:${buildId}`,
+      timeoutSeconds: 300,
+      visibility: "SYSTEM",
+    });
+    await prisma.build.update({
+      where: { id: buildId },
+      data: { jobId: job.id },
+    });
+    return { ...build, jobId: job.id };
+  }
+
+  /**
+   * Lands an imported coverage report, or marks the build failed when the agent
+   * could not read the file. Unlike a generated report there is no build to
+   * fall back on — the build record exists only to carry this report.
+   */
+  private async importedCoverageCompletion(job: {
+    id: string;
+    status: string;
+    payloadJson: string;
+    resultJson: string | null;
+    error: string | null;
+  }) {
+    const payload = objectValue(
+      parseJson(job.payloadJson, {}),
+      "coverage import payload",
+    );
+    if (typeof payload.buildId !== "string") return;
+    const buildId = payload.buildId;
+    const result = objectValue(
+      parseJson(job.resultJson, {}),
+      "coverage import result",
+    );
+    const succeeded =
+      job.status === "SUCCEEDED" &&
+      Boolean(result.report) &&
+      typeof result.report === "object";
+    const prisma = await getPrismaClient();
+    await prisma.$transaction(async (transaction) => {
+      if (succeeded) {
+        await this.upsertReportProjection(
+          transaction,
+          buildId,
+          result.report,
+          "WORKTREE",
+        );
+      } else {
+        await transaction.buildReport.upsert({
+          where: { buildId_kind: { buildId, kind: "CODE_COVERAGE" } },
+          create: {
+            id: randomUUID(),
+            buildId,
+            kind: "CODE_COVERAGE",
+            source: "WORKTREE",
+            status: "FAILED",
+            error: job.error || "Coverage import failed",
+            finishedAt: new Date(),
+          },
+          update: {
+            status: "FAILED",
+            error: job.error || "Coverage import failed",
+            finishedAt: new Date(),
+          },
+        });
+      }
+      await transaction.build.update({
+        where: { id: buildId },
+        data: {
+          status: succeeded ? "SUCCEEDED" : "FAILED",
+          error: succeeded ? null : job.error || "Coverage import failed",
+          finishedAt: new Date(),
+        },
+      });
+    });
+    this.publish(buildId);
   }
 
   async generateReport(

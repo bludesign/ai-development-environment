@@ -13,6 +13,8 @@ import {
   GetBuildOutputSchema,
   GetBuildsInputSchema,
   GetBuildsOutputSchema,
+  ImportCoverageReportToolInputSchema,
+  ImportCoverageReportToolOutputSchema,
   RunBuildToolInputSchema,
   RunBuildToolOutputSchema,
   StartBuildToolInputSchema,
@@ -99,6 +101,18 @@ export function createBuildToolGroup(builds: BuildsService): BuiltInToolGroup {
         annotations: WRITE_ANNOTATIONS,
         handler: async (input) => ({
           build: await builds.startBuild(input as never),
+        }),
+      }),
+      defineTool({
+        name: "import_coverage_report",
+        title: "Import coverage report",
+        description:
+          "Record a coverage file from a worktree as a coverage report.",
+        inputSchema: ImportCoverageReportToolInputSchema,
+        outputSchema: ImportCoverageReportToolOutputSchema,
+        annotations: WRITE_ANNOTATIONS,
+        handler: async (input) => ({
+          build: await builds.importCoverageReport(input),
         }),
       }),
       defineTool({

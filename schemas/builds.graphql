@@ -50,6 +50,8 @@ enum BuildDestinationType {
   SIMULATOR
   "Represents the physical device option."
   PHYSICAL_DEVICE
+  "Represents the agent host itself, for records that ran no device build — an imported coverage report."
+  HOST
 }
 
 "Lifecycle statuses for build."
