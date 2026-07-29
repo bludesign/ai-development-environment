@@ -25,6 +25,7 @@ import { createClientId } from "@/lib/browser-utils";
 import { controlPlaneRequest } from "@/lib/control-plane-client";
 
 import { CommitPicker } from "./commit-picker";
+import { CoveragePicker, NO_COVERAGE_REPORT } from "./coverage-picker";
 import { DiffFileList } from "./diff-file-list";
 import { DiffPane } from "./diff-pane";
 import {
@@ -33,6 +34,7 @@ import {
   INSPECT_WORKTREE_DIFF_MUTATION,
 } from "./diffs-graphql";
 import type { DiffFileEntry, DiffScope, DiffWorktreeOption } from "./types";
+import { useCoverageReport, useCoverageReports } from "./use-coverage-report";
 
 const SCOPES: DiffScope[] = [
   "STAGED",
@@ -117,6 +119,7 @@ export type DiffsPageInitialState = {
   scope?: string;
   path?: string;
   commitSha?: string;
+  coverageReportId?: string;
   mode?: string;
   wrap?: string;
 };
@@ -143,6 +146,9 @@ export function DiffsPage({
   const [wrap, setWrap] = useState(initial.wrap !== "0");
   const [selectedPath, setSelectedPath] = useState(initial.path ?? "");
   const [commitSha, setCommitSha] = useState(initial.commitSha ?? "");
+  const [coverageReportId, setCoverageReportId] = useState(
+    initial.coverageReportId ?? "",
+  );
 
   const [detail, setDetail] = useState<WorktreeDetail | null>(null);
   const [branchFiles, setBranchFiles] = useState<DiffFileEntry[]>([]);
@@ -158,6 +164,22 @@ export function DiffsPage({
   const [sheetOpen, setSheetOpen] = useState(false);
 
   const worktree = worktrees.find((entry) => entry.id === worktreeId) ?? null;
+
+  const coverageReports = useCoverageReports(worktreeId);
+  const coverageReport =
+    coverageReports.find((entry) => entry.id === coverageReportId) ?? null;
+  const { files: coverageFiles, loading: coverageLoading } = useCoverageReport(
+    coverageReport,
+    worktree?.folder ?? null,
+  );
+  // The overlay describes the revision the build measured. When the worktree has
+  // moved on, line numbers can no longer be trusted to line up, so the strip is
+  // dimmed rather than hidden — a stale reading still beats none.
+  const coverageStale = Boolean(
+    coverageReport?.headSha &&
+    worktree?.headSha &&
+    coverageReport.headSha !== worktree.headSha,
+  );
 
   useEffect(() => {
     let disposed = false;
@@ -254,13 +276,35 @@ export function DiffsPage({
 
   const commitFiles =
     commitDiff && commitDiff.sha === commitSha ? commitDiff.files : [];
-  const files = useMemo(
-    () => filesForScope(scope, detail, branchFiles, commitFiles),
+  const files = useMemo(() => {
+    const scoped = filesForScope(scope, detail, branchFiles, commitFiles);
+    if (!coverageFiles.size) return scoped;
+    return scoped.map((file) => {
+      const entry = coverageFiles.get(file.path);
+      return entry
+        ? { ...file, lineCoverage: entry.lineCoverage, module: entry.module }
+        : file;
+    });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [branchFiles, commitDiff, commitSha, detail, scope],
-  );
+  }, [branchFiles, commitDiff, commitSha, coverageFiles, detail, scope]);
   const selected =
     files.find((file) => file.path === selectedPath) ?? files[0] ?? null;
+
+  // Resolved against the new revision, which is what the diff's `newLine`
+  // numbers count in. Files the report never measured get no lookup at all, so
+  // the strip stays blank rather than claiming everything is uncovered.
+  const coverage = useMemo(() => {
+    const entry = selected ? coverageFiles.get(selected.path) : undefined;
+    if (!entry || (!entry.covered.size && !entry.uncovered.size)) {
+      return undefined;
+    }
+    return (newLine: number): "covered" | "uncovered" | null =>
+      entry.covered.has(newLine)
+        ? "covered"
+        : entry.uncovered.has(newLine)
+          ? "uncovered"
+          : null;
+  }, [coverageFiles, selected]);
 
   // Keep the URL in step so a diff view is linkable and survives reload.
   useEffect(() => {
@@ -269,10 +313,11 @@ export function DiffsPage({
     params.set("scope", scope);
     if (selected) params.set("path", selected.path);
     if (scope === "COMMIT" && commitSha) params.set("commit", commitSha);
+    if (coverageReportId) params.set("coverage", coverageReportId);
     if (mode === "SPLIT") params.set("mode", mode);
     if (!wrap) params.set("wrap", "0");
     window.history.replaceState(null, "", `${location.pathname}?${params}`);
-  }, [commitSha, mode, scope, selected, worktreeId, wrap]);
+  }, [commitSha, coverageReportId, mode, scope, selected, worktreeId, wrap]);
 
   const sidebar = (
     <div className="flex min-h-0 flex-col gap-3">
@@ -294,7 +339,7 @@ export function DiffsPage({
           setSheetOpen(false);
         }}
         selectedKey={selected?.key ?? null}
-        showCoverage={false}
+        showCoverage={Boolean(coverageReport)}
         truncated={
           scope === "BRANCH"
             ? (detail?.branchChangesTruncated ?? false)
@@ -333,6 +378,15 @@ export function DiffsPage({
             placeholder={t("selectWorktree")}
             searchPlaceholder={t("searchWorktrees")}
             value={worktreeId}
+          />
+          <CoveragePicker
+            loading={coverageLoading}
+            onSelect={(value) =>
+              setCoverageReportId(value === NO_COVERAGE_REPORT ? "" : value)
+            }
+            reports={coverageReports}
+            selectedId={coverageReportId}
+            stale={coverageStale}
           />
           <Button
             aria-label={t("refresh")}
@@ -399,6 +453,8 @@ export function DiffsPage({
           </div>
           <DiffPane
             commitSha={scope === "COMMIT" ? commitSha || null : null}
+            coverage={coverage}
+            coverageStale={coverageStale}
             file={selected}
             mode={mode}
             onModeChange={setMode}

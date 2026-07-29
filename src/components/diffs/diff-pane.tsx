@@ -9,6 +9,7 @@ import {
   useDiffViewLabels,
   useImageDiffLabels,
   type DiffViewMode,
+  type LineCoverageLookup,
 } from "@/components/common/diff-view";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -25,6 +26,8 @@ import { useDiffRequest } from "./use-diff-request";
  */
 export function DiffPane({
   commitSha,
+  coverage,
+  coverageStale,
   file,
   mode,
   onModeChange,
@@ -35,6 +38,9 @@ export function DiffPane({
   wrap,
 }: {
   commitSha: string | null;
+  /** Absent when no report is selected, or when it never measured this file. */
+  coverage?: LineCoverageLookup;
+  coverageStale: boolean;
   file: DiffFileEntry | null;
   mode: DiffViewMode;
   onModeChange: (mode: DiffViewMode) => void;
@@ -142,6 +148,8 @@ export function DiffPane({
         />
       ) : value?.patch ? (
         <PatchDiffView
+          coverage={coverage}
+          coverageStale={coverageStale}
           labels={diffLabels}
           mode={mode}
           patch={value.patch}

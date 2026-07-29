@@ -18,6 +18,7 @@ export default async function DiffsRoute({
         scope: first(params.scope),
         path: first(params.path),
         commitSha: first(params.commit),
+        coverageReportId: first(params.coverage),
         mode: first(params.mode),
         wrap: first(params.wrap),
       }}

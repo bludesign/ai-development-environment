@@ -33,6 +33,14 @@ const json = (value: string, fallback: unknown) => {
   }
 };
 
+/**
+ * Reports written before per-line coverage was recorded carry no line numbers,
+ * and the schema promises non-null lists, so they are defaulted here rather
+ * than by backfilling every stored report.
+ */
+const lineNumbers = (value: unknown): number[] =>
+  Array.isArray(value) ? value.filter((line) => typeof line === "number") : [];
+
 export const createBuildResolvers = (service: BuildsService) => ({
   CodebaseProject: {
     createdAt: (value: { createdAt: Date }) => value.createdAt.toISOString(),
@@ -128,7 +136,15 @@ export const createBuildResolvers = (service: BuildsService) => ({
           : await service.reportData(value.id),
         {},
       ) as { changedFiles?: unknown };
-      return Array.isArray(data.changedFiles) ? data.changedFiles : [];
+      if (!Array.isArray(data.changedFiles)) return [];
+      return data.changedFiles.map((file) => {
+        const entry = (file ?? {}) as Record<string, unknown>;
+        return {
+          ...entry,
+          coveredLineNumbers: lineNumbers(entry.coveredLineNumbers),
+          uncoveredLineNumbers: lineNumbers(entry.uncoveredLineNumbers),
+        };
+      });
     },
     build: (value: { buildId: string; build?: unknown }) =>
       value.build ?? service.getBuild(value.buildId),

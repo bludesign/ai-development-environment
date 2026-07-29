@@ -328,6 +328,10 @@ type BuildChangedCoverageFile {
   changedExecutableLines: Int!
   "The changed line coverage associated with this build changed coverage file. May be null when unavailable or not applicable."
   changedLineCoverage: Float
+  "Executable line numbers the test run executed, across the whole file rather than only its changed lines. Empty for reports generated before per-line coverage was recorded."
+  coveredLineNumbers: [Int!]!
+  "Executable line numbers the test run never executed, across the whole file rather than only its changed lines. Empty for reports generated before per-line coverage was recorded."
+  uncoveredLineNumbers: [Int!]!
 }
 
 "Represents a build report in the GraphQL API."

@@ -27,6 +27,7 @@ import {
 } from "@/components/ui/table";
 import { Link } from "@/i18n/navigation";
 import { controlPlaneRequest } from "@/lib/control-plane-client";
+import { relativeCoveragePath } from "@/lib/coverage-paths";
 
 import type { BuildReport } from "./types";
 
@@ -68,18 +69,6 @@ type ChangedCoverageSort = {
 
 function uncoveredLines(file: CoverageFile): number {
   return Math.max(0, file.executableLines - file.coveredLines);
-}
-
-function relativeCoveragePath(path: string, worktreeFolder: string | null) {
-  const normalizedPath = path.replaceAll("\\", "/");
-  const normalizedRoot = worktreeFolder
-    ?.replaceAll("\\", "/")
-    .replace(/\/$/, "");
-  if (!normalizedRoot) return normalizedPath;
-  if (normalizedPath === normalizedRoot) return ".";
-  return normalizedPath.startsWith(`${normalizedRoot}/`)
-    ? normalizedPath.slice(normalizedRoot.length + 1)
-    : normalizedPath;
 }
 
 function coverageFileName(path: string) {

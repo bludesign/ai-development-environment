@@ -2201,6 +2201,63 @@ async function snapshotCoverageChanges(
   }));
 }
 
+/** One file's per-line coverage, as read out of an `xccov` archive view. */
+export type FileCoverageLines = {
+  /** Executable lines the run executed, across the whole file. */
+  coveredLineNumbers: number[];
+  /** Executable lines the run never executed, across the whole file. */
+  uncoveredLineNumbers: number[];
+  /** Executed lines among `changedLines` only. */
+  changedCovered: number;
+  /** Executable lines among `changedLines` only. */
+  changedExecutable: number;
+};
+
+const EMPTY_COVERAGE_LINES: FileCoverageLines = {
+  coveredLineNumbers: [],
+  uncoveredLineNumbers: [],
+  changedCovered: 0,
+  changedExecutable: 0,
+};
+
+/**
+ * Splits an `xccov view --file` line array into covered and uncovered line
+ * numbers, while counting the changed-line subset the summary reports on.
+ *
+ * The whole file is recorded, not just the changed lines: the diff viewer
+ * paints context lines too, and this is the only pass that ever sees per-line
+ * data — the archive never leaves the build machine. The counters stay scoped
+ * to `changedLines`, which is what `changedLineCoverage` has always meant.
+ */
+export function fileCoverageLines(
+  lineData: unknown,
+  changedLines: number[],
+): FileCoverageLines {
+  if (!Array.isArray(lineData)) return EMPTY_COVERAGE_LINES;
+  const changed = new Set(changedLines);
+  const coveredLineNumbers: number[] = [];
+  const uncoveredLineNumbers: number[] = [];
+  let changedCovered = 0;
+  let changedExecutable = 0;
+  for (const rawLine of lineData) {
+    const line = jsonObject(rawLine);
+    if (line?.isExecutable !== true || typeof line.line !== "number") continue;
+    const executed =
+      typeof line.executionCount === "number" && line.executionCount > 0;
+    (executed ? coveredLineNumbers : uncoveredLineNumbers).push(line.line);
+    if (changed.has(line.line)) {
+      changedExecutable += 1;
+      if (executed) changedCovered += 1;
+    }
+  }
+  return {
+    coveredLineNumbers: coveredLineNumbers.sort((a, b) => a - b),
+    uncoveredLineNumbers: uncoveredLineNumbers.sort((a, b) => a - b),
+    changedCovered,
+    changedExecutable,
+  };
+}
+
 async function addChangedCoverage(
   report: GeneratedBuildReport,
   changes: CoverageChange[],
@@ -2223,8 +2280,7 @@ async function addChangedCoverage(
       (candidate) =>
         relative(folder, candidate).split(sep).join("/") === change.path,
     );
-    let covered = 0;
-    let executable = 0;
+    let lines = EMPTY_COVERAGE_LINES;
     if (coveragePath && change.lines.length) {
       const temporary = join(
         input.artifactDirectory,
@@ -2252,39 +2308,24 @@ async function addChangedCoverage(
           const parsed = jsonObject(
             JSON.parse(await readFile(temporary, "utf8")),
           );
-          const lineData = parsed?.[coveragePath];
-          if (Array.isArray(lineData)) {
-            const changed = new Set(change.lines);
-            for (const rawLine of lineData) {
-              const line = jsonObject(rawLine);
-              if (
-                line?.isExecutable === true &&
-                typeof line.line === "number" &&
-                changed.has(line.line)
-              ) {
-                executable += 1;
-                if (
-                  typeof line.executionCount === "number" &&
-                  line.executionCount > 0
-                ) {
-                  covered += 1;
-                }
-              }
-            }
-          }
+          lines = fileCoverageLines(parsed?.[coveragePath], change.lines);
         }
       } finally {
         await rm(temporary, { force: true });
       }
     }
-    changedCoveredLines += covered;
-    changedExecutableLines += executable;
+    changedCoveredLines += lines.changedCovered;
+    changedExecutableLines += lines.changedExecutable;
     changedFiles.push({
       path: change.path,
       changeType: change.changeType,
-      changedCoveredLines: covered,
-      changedExecutableLines: executable,
-      changedLineCoverage: executable ? covered / executable : null,
+      changedCoveredLines: lines.changedCovered,
+      changedExecutableLines: lines.changedExecutable,
+      changedLineCoverage: lines.changedExecutable
+        ? lines.changedCovered / lines.changedExecutable
+        : null,
+      coveredLineNumbers: lines.coveredLineNumbers,
+      uncoveredLineNumbers: lines.uncoveredLineNumbers,
     });
   }
   const summary = {

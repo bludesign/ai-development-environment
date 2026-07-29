@@ -38,3 +38,30 @@ export const DIFF_WORKTREE_DETAIL_MUTATION = `mutation DiffWorktreeDetail($id: I
     commitsTruncated changesTruncated branchChangesTruncated
   }
 }`;
+
+/**
+ * The coverage picker's options. Deliberately excludes the per-file payloads:
+ * a worktree keeps up to fifty reports, and only the selected one is ever read.
+ */
+export const DIFF_COVERAGE_REPORTS_QUERY = `query DiffCoverageReports($worktreeId: ID!) {
+  worktreeCoverageReports(worktreeId: $worktreeId) {
+    id status createdAt finishedAt
+    coverageSummary { lineCoverage changedLineCoverage }
+    build { id snapshot }
+  }
+}`;
+
+/**
+ * The selected report's file data. There is no report-by-id query, so this goes
+ * through the owning build and picks the report out of its list.
+ */
+export const DIFF_COVERAGE_REPORT_QUERY = `query DiffCoverageReport($buildId: ID!) {
+  build(id: $buildId) {
+    id
+    reports {
+      id kind status
+      coverageFiles { target path lineCoverage }
+      changedCoverageFiles { path coveredLineNumbers uncoveredLineNumbers }
+    }
+  }
+}`;

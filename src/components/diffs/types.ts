@@ -38,6 +38,36 @@ export type DiffFileEntry = WorktreeDiffFile & {
   module: string | null;
 };
 
+/** One option in the coverage picker — enough to label and locate a report. */
+export type DiffCoverageReportOption = {
+  id: string;
+  buildId: string;
+  status: string;
+  createdAt: string;
+  finishedAt: string | null;
+  /** Overall coverage across the whole project, for the option label. */
+  lineCoverage: number | null;
+  /** Coverage of the branch's changed lines, for the option label. */
+  changedLineCoverage: number | null;
+  /**
+   * Revision the report measured. Compared against the worktree head to decide
+   * whether the overlay is describing the code currently on screen.
+   */
+  headSha: string | null;
+};
+
+/** The selected report's data for one file, keyed by worktree-relative path. */
+export type DiffCoverageFile = {
+  /** Whole-file coverage, or null when the report does not cover the file. */
+  lineCoverage: number | null;
+  /** Owning build target. */
+  module: string | null;
+  /** Executable lines the test run executed, in the report's revision. */
+  covered: Set<number>;
+  /** Executable lines the test run never executed. */
+  uncovered: Set<number>;
+};
+
 /** A commit in the branch's history, for the COMMIT scope picker. */
 export type DiffCommit = {
   sha: string;

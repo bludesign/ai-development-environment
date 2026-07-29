@@ -3,6 +3,7 @@ import {
   fireEvent,
   render,
   screen,
+  waitFor,
   within,
 } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
@@ -16,6 +17,15 @@ vi.mock("@/lib/control-plane-client", () => ({
 }));
 
 const request = vi.mocked(controlPlaneRequest);
+
+// The coverage picker is a Radix select, which drives pointer capture APIs jsdom
+// does not implement.
+Object.defineProperties(HTMLElement.prototype, {
+  hasPointerCapture: { configurable: true, value: () => false },
+  releasePointerCapture: { configurable: true, value: () => undefined },
+  scrollIntoView: { configurable: true, value: () => undefined },
+  setPointerCapture: { configurable: true, value: () => undefined },
+});
 
 const PATCH = `diff --git a/src/app.ts b/src/app.ts
 --- a/src/app.ts
@@ -106,10 +116,68 @@ const detail = {
   },
 };
 
+/** Two reports, one still running — only the ready one may be offered. */
+const coverageReports = {
+  worktreeCoverageReports: [
+    {
+      id: "report-1",
+      status: "READY",
+      createdAt: "2026-07-21T09:00:00.000Z",
+      finishedAt: "2026-07-21T09:05:00.000Z",
+      coverageSummary: { lineCoverage: 0.82, changedLineCoverage: 0.5 },
+      // Matches the worktree head, so this report is not stale.
+      build: { id: "build-1", snapshot: { worktree: { headSha: "abc1234" } } },
+    },
+    {
+      id: "report-2",
+      status: "PENDING",
+      createdAt: "2026-07-22T09:00:00.000Z",
+      finishedAt: null,
+      coverageSummary: null,
+      build: { id: "build-2", snapshot: { worktree: { headSha: "abc1234" } } },
+    },
+  ],
+};
+
+/**
+ * The patch's new revision has `keep` on line 1 and `new line` on line 2, so
+ * this report marks the first covered and the second uncovered.
+ */
+const coverageReport = {
+  build: {
+    reports: [
+      {
+        id: "report-1",
+        kind: "CODE_COVERAGE",
+        status: "READY",
+        coverageFiles: [
+          {
+            target: "AppCore",
+            path: "/repos/web-search/src/app.ts",
+            lineCoverage: 0.5,
+          },
+        ],
+        changedCoverageFiles: [
+          {
+            path: "src/app.ts",
+            coveredLineNumbers: [1],
+            uncoveredLineNumbers: [2],
+          },
+        ],
+      },
+    ],
+  },
+};
+
 beforeEach(() => {
   request.mockImplementation(async (query) => {
     const operation = String(query);
     if (operation.includes("query DiffWorktrees")) return overview as never;
+    // Checked before the singular query, whose name is a prefix of this one.
+    if (operation.includes("query DiffCoverageReports"))
+      return coverageReports as never;
+    if (operation.includes("query DiffCoverageReport"))
+      return coverageReport as never;
     if (operation.includes("mutation DiffWorktreeDetail"))
       return detail as never;
     if (operation.includes("mutation InspectWorktreeDiff")) {
@@ -217,6 +285,100 @@ describe("DiffsPage", () => {
     render(<DiffsPage initial={{ scope: "COMMIT" }} />);
     expect(await screen.findByText("Add search")).toBeTruthy();
     expect(screen.getByText("aaaaaaa")).toBeTruthy();
+  });
+
+  test("leaves the coverage strip blank until a report is chosen", async () => {
+    const { container } = render(<DiffsPage />);
+    await screen.findByText("new line");
+    expect(container.querySelector("[data-coverage]")).toBeNull();
+  });
+
+  test("overlays the selected report's coverage on the diff", async () => {
+    const { container } = render(
+      <DiffsPage initial={{ coverageReportId: "report-1" }} />,
+    );
+    await screen.findByText("new line");
+    const covered = await screen.findByText("keep");
+    // The strip sits beside the line it describes, in the same grid row.
+    expect(
+      container.querySelectorAll('[data-coverage="covered"]'),
+    ).toHaveLength(1);
+    expect(
+      container.querySelectorAll('[data-coverage="uncovered"]'),
+    ).toHaveLength(1);
+    expect(covered).toBeTruthy();
+    // A deleted line has no line number in the new revision, so it stays blank.
+    expect(container.querySelectorAll("[data-coverage]")).toHaveLength(2);
+  });
+
+  test("joins the report's file coverage into the sidebar", async () => {
+    render(<DiffsPage initial={{ coverageReportId: "report-1" }} />);
+    await fileList();
+    // The list renders as soon as the diff lands; coverage joins in afterwards.
+    await waitFor(async () => {
+      const row = (await fileList()).getByText("src/app.ts").closest("button")!;
+      expect(row.textContent).toContain("AppCore");
+      expect(row.textContent).toContain("50%");
+    });
+    // A file the report never measured stays unlabelled.
+    expect(
+      (await fileList()).getByText("src/zebra.ts").closest("button")!
+        .textContent,
+    ).not.toContain("%");
+  });
+
+  test("offers only ready reports in the picker", async () => {
+    render(<DiffsPage />);
+    await fileList();
+    fireEvent.pointerDown(
+      screen.getByRole("combobox", { name: "Coverage report" }),
+      { button: 0, ctrlKey: false, pointerType: "mouse" },
+    );
+    expect(
+      await screen.findByRole("option", { name: /82% overall/ }),
+    ).toBeTruthy();
+    expect(screen.getAllByRole("option")).toHaveLength(2);
+  });
+
+  test("selecting a report from the picker paints the gutter", async () => {
+    const { container } = render(<DiffsPage />);
+    await screen.findByText("new line");
+    fireEvent.pointerDown(
+      screen.getByRole("combobox", { name: "Coverage report" }),
+      { button: 0, ctrlKey: false, pointerType: "mouse" },
+    );
+    fireEvent.click(await screen.findByRole("option", { name: /82% overall/ }));
+    await screen.findByText("new line");
+    expect(container.querySelector('[data-coverage="uncovered"]')).toBeTruthy();
+  });
+
+  test("flags a report measured at a different revision", async () => {
+    request.mockImplementation(async (query) => {
+      const operation = String(query);
+      if (operation.includes("query DiffWorktrees")) return overview as never;
+      if (operation.includes("query DiffCoverageReports")) {
+        return {
+          worktreeCoverageReports: [
+            {
+              ...coverageReports.worktreeCoverageReports[0],
+              build: {
+                id: "build-1",
+                snapshot: { worktree: { headSha: "0000000" } },
+              },
+            },
+          ],
+        } as never;
+      }
+      if (operation.includes("query DiffCoverageReport"))
+        return coverageReport as never;
+      if (operation.includes("mutation DiffWorktreeDetail"))
+        return detail as never;
+      throw new Error(`unexpected operation: ${operation.slice(0, 40)}`);
+    });
+    render(<DiffsPage initial={{ coverageReportId: "report-1" }} />);
+    expect(
+      await screen.findByText("Measured at a different revision."),
+    ).toBeTruthy();
   });
 
   test("surfaces a failed load", async () => {
