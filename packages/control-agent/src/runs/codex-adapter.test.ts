@@ -2,6 +2,7 @@ import { describe, expect, test } from "vitest";
 
 import {
   codexAppServerArgs,
+  codexCompletedFinalAnswer,
   codexRunConfig,
   codexVersionFromUserAgent,
   supportedCodexVersion,
@@ -53,4 +54,31 @@ describe("Codex app-server protocol guard", () => {
     "rejects an unparseable user agent: %s",
     (value) => expect(codexVersionFromUserAgent(value)).toBeNull(),
   );
+
+  test("extracts only the completed final answer", () => {
+    expect(
+      codexCompletedFinalAnswer({
+        method: "item/completed",
+        params: {
+          item: {
+            type: "agentMessage",
+            text: "Still working.",
+            phase: "commentary",
+          },
+        },
+      }),
+    ).toBeUndefined();
+    expect(
+      codexCompletedFinalAnswer({
+        method: "item/completed",
+        params: {
+          item: {
+            type: "agentMessage",
+            text: "Fixed the issue.",
+            phase: "final_answer",
+          },
+        },
+      }),
+    ).toBe("Fixed the issue.");
+  });
 });

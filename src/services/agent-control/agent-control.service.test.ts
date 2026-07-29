@@ -107,6 +107,32 @@ describe("AgentControlService.claimJob", () => {
 });
 
 describe("agent job validation", () => {
+  test("validates coverage import payloads", () => {
+    expect(SUPPORTED_AGENT_JOBS).toContain("coverage.import");
+    expect(() =>
+      validateJob("coverage.import", {
+        buildId: "build-1",
+        codebaseId: "codebase-1",
+        worktreeId: "worktree-1",
+        folder: "/tmp/worktree-1",
+        reportPath: "coverage/lcov.info",
+        format: "LCOV",
+        baseBranch: "main",
+      }),
+    ).not.toThrow();
+    expect(() =>
+      validateJob("coverage.import", {
+        buildId: "build-1",
+        codebaseId: "codebase-1",
+        worktreeId: "worktree-1",
+        folder: "/tmp/worktree-1",
+        reportPath: "../lcov.info",
+        format: "LCOV",
+        baseBranch: "main",
+      }),
+    ).toThrow("reportPath must stay inside the worktree");
+  });
+
   test("validates iOS artifact download payloads", () => {
     expect(SUPPORTED_AGENT_JOBS).toContain(IOS_ARTIFACT_DOWNLOAD_JOB_KIND);
     expect(() =>

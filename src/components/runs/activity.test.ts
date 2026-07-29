@@ -215,6 +215,68 @@ describe("describeActivity", () => {
     );
   });
 
+  test("summarizes completed file changes by path", () => {
+    const descriptor = describeActivity(
+      codex("item/completed", {
+        item: {
+          type: "fileChange",
+          status: "completed",
+          changes: [
+            { path: "src/app.ts", kind: { type: "update" } },
+            { path: "src/app.test.ts", kind: { type: "create" } },
+          ],
+        },
+      }),
+    );
+    expect(descriptor.line).toBe("2 files changed");
+    expect(descriptor.detailRows).toContainEqual({
+      label: "src/app.test.ts",
+      value: "Create",
+    });
+  });
+
+  test("summarizes an aggregate Codex diff", () => {
+    const descriptor = describeActivity(
+      codex("turn/diff/updated", {
+        turnId: "turn-1",
+        diff: [
+          "diff --git a/src/app.ts b/src/app.ts",
+          "--- a/src/app.ts",
+          "+++ b/src/app.ts",
+          "@@ -1 +1,2 @@",
+          "-old",
+          "+new",
+          "+extra",
+        ].join("\n"),
+      }),
+    );
+    expect(descriptor.line).toBe("1 file changed · +2 -1");
+    expect(descriptor.detailRows).toContainEqual({
+      label: "Files",
+      value: "src/app.ts",
+    });
+  });
+
+  test("uses the logical command action instead of its shell wrapper", () => {
+    const descriptor = describeActivity(
+      codex("item/completed", {
+        item: {
+          type: "commandExecution",
+          command: '/bin/zsh -lc "git status"',
+          commandActions: [{ type: "unknown", command: "git status" }],
+          status: "completed",
+          exitCode: 0,
+        },
+      }),
+    );
+    expect(descriptor.line).toBe("git status");
+    expect(descriptor.detailRows).toEqual([
+      { label: "Status", value: "Completed" },
+      { label: "Exit code", value: "0" },
+      { label: "Command", value: "git status" },
+    ]);
+  });
+
   test("falls back to the item type when it carries no text", () => {
     const descriptor = describeActivity(
       codex("item/started", {
@@ -391,6 +453,7 @@ describe("groupActivity", () => {
     expect(group.kind).toBe("group");
     if (group.kind !== "group") return;
     expect(group.children).toHaveLength(4);
+    expect(group.detailMode).toBe("representative");
     expect(group.representative.id).toBe("d");
     expect(itemGroupTitle(group.representative)).toBe("Agent Message");
     expect(describeActivity(group.representative).line).toBe(
@@ -421,11 +484,72 @@ describe("groupActivity", () => {
         { id: "c", sequence: 4 },
       ),
     ]);
-    expect(nodes.map((node) => node.kind)).toEqual([
-      "single",
-      "group",
-      "single",
+    expect(nodes.map((node) => node.kind)).toEqual(["single", "single"]);
+  });
+
+  test("drops empty reasoning and redundant cumulative snapshots", () => {
+    const diff = "diff --git a/a.ts b/a.ts\n--- a/a.ts\n+++ b/a.ts\n";
+    const nodes = groupActivity([
+      codex(
+        "item/started",
+        { item: { type: "reasoning", id: "rs_1", summary: [], content: [] } },
+        { id: "reason-start", sequence: 1 },
+      ),
+      codex(
+        "item/completed",
+        { item: { type: "reasoning", id: "rs_1", summary: [], content: [] } },
+        { id: "reason-end", sequence: 2 },
+      ),
+      codex(
+        "thread/tokenUsage/updated",
+        { turnId: "turn-1", tokenUsage: { total: { totalTokens: 10 } } },
+        { id: "usage-1", sequence: 3 },
+      ),
+      codex(
+        "thread/tokenUsage/updated",
+        { turnId: "turn-1", tokenUsage: { total: { totalTokens: 20 } } },
+        { id: "usage-2", sequence: 4 },
+      ),
+      codex(
+        "turn/diff/updated",
+        { turnId: "turn-1", diff },
+        { id: "diff-1", sequence: 5 },
+      ),
+      codex(
+        "turn/diff/updated",
+        { turnId: "turn-1", diff },
+        { id: "diff-2", sequence: 6 },
+      ),
     ]);
+    expect(nodes).toHaveLength(2);
+    expect(nodes.map((node) => node.key)).toEqual(["usage-2", "diff-1"]);
+  });
+
+  test("labels phased Codex messages by their role in the turn", () => {
+    expect(
+      itemGroupTitle(
+        codex("item/completed", {
+          item: {
+            type: "agentMessage",
+            id: "msg-1",
+            text: "Working",
+            phase: "commentary",
+          },
+        }),
+      ),
+    ).toBe("Commentary");
+    expect(
+      itemGroupTitle(
+        codex("item/completed", {
+          item: {
+            type: "agentMessage",
+            id: "msg-2",
+            text: "Done",
+            phase: "final_answer",
+          },
+        }),
+      ),
+    ).toBe("Final Answer");
   });
 
   test("combines OpenCode deltas by part id into one rendered result", () => {

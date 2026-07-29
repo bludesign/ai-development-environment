@@ -1819,39 +1819,75 @@ export class BuildsService {
         startedAt: new Date(),
       },
     });
-    await prisma.buildReport.create({
-      data: {
-        id: randomUUID(),
-        buildId,
-        kind: "CODE_COVERAGE",
-        source: "WORKTREE",
-        status: "PENDING",
-      },
-    });
-    this.publish(buildId);
-    const job = await this.agentControl.createJob({
-      agentId: worktree.codebase.agentId,
-      codebaseId: worktree.codebaseId,
-      worktreeId: worktree.id,
-      kind: COVERAGE_IMPORT_JOB_KIND,
-      payload: {
-        buildId,
+    let queuedJobId: string | null = null;
+    try {
+      await prisma.buildReport.create({
+        data: {
+          id: randomUUID(),
+          buildId,
+          kind: "CODE_COVERAGE",
+          source: "WORKTREE",
+          status: "PENDING",
+        },
+      });
+      this.publish(buildId);
+      const job = await this.agentControl.createJob({
+        agentId: worktree.codebase.agentId,
         codebaseId: worktree.codebaseId,
         worktreeId: worktree.id,
-        folder: worktree.folder,
-        reportPath,
-        format,
-        baseBranch,
-      },
-      idempotencyKey: `coverage:import:${requestId}:${buildId}`,
-      timeoutSeconds: 300,
-      visibility: "SYSTEM",
-    });
-    await prisma.build.update({
-      where: { id: buildId },
-      data: { jobId: job.id },
-    });
-    return { ...build, jobId: job.id };
+        kind: COVERAGE_IMPORT_JOB_KIND,
+        payload: {
+          buildId,
+          codebaseId: worktree.codebaseId,
+          worktreeId: worktree.id,
+          folder: worktree.folder,
+          reportPath,
+          format,
+          baseBranch,
+        },
+        idempotencyKey: `coverage:import:${requestId}:${buildId}`,
+        timeoutSeconds: 300,
+        visibility: "SYSTEM",
+      });
+      queuedJobId = job.id;
+      await prisma.build.update({
+        where: { id: buildId },
+        data: { jobId: job.id },
+      });
+      return { ...build, jobId: job.id };
+    } catch (error) {
+      if (queuedJobId) {
+        await this.agentControl.cancelJob(queuedJobId).catch(() => undefined);
+      }
+      const message = error instanceof Error ? error.message : String(error);
+      const finishedAt = new Date();
+      await prisma.$transaction(async (transaction) => {
+        await transaction.buildReport.upsert({
+          where: { buildId_kind: { buildId, kind: "CODE_COVERAGE" } },
+          create: {
+            id: randomUUID(),
+            buildId,
+            kind: "CODE_COVERAGE",
+            source: "WORKTREE",
+            status: "FAILED",
+            error: message,
+            finishedAt,
+          },
+          update: { status: "FAILED", error: message, finishedAt },
+        });
+        await transaction.build.update({
+          where: { id: buildId },
+          data: {
+            status: "FAILED",
+            errorCode: "QUEUE_FAILED",
+            error: message,
+            finishedAt,
+          },
+        });
+      });
+      this.publish(buildId);
+      throw error;
+    }
   }
 
   /**

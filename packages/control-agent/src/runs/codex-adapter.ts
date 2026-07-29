@@ -379,6 +379,18 @@ function answerMap(questions: ProviderQuestion[], value: unknown) {
   );
 }
 
+export function codexCompletedFinalAnswer(
+  message: JsonRpcMessage,
+): string | undefined {
+  if (message.method !== "item/completed") return undefined;
+  const item = asRecord(asRecord(message.params).item);
+  return item.type === "agentMessage" &&
+    item.phase === "final_answer" &&
+    typeof item.text === "string"
+    ? item.text
+    : undefined;
+}
+
 export class CodexAdapter implements ProviderAdapter {
   readonly key = "CODEX" as const;
   readonly capabilities = {
@@ -467,6 +479,8 @@ export class CodexAdapter implements ProviderAdapter {
     let turnId = "";
     let stopReason: "PAUSED" | "CANCELLED" | null = null;
     let finalOutput = "";
+    let completedFinalAnswer: string | undefined;
+    const currentFinalOutput = () => completedFinalAnswer ?? finalOutput;
     let lastUsageSignature = "";
     const pendingQuestions = new Map<
       string,
@@ -484,10 +498,10 @@ export class CodexAdapter implements ProviderAdapter {
           unsubscribe();
           resolveCompletion(
             stopReason
-              ? { status: stopReason, finalOutput }
+              ? { status: stopReason, finalOutput: currentFinalOutput() }
               : {
                   status: "FAILED",
-                  finalOutput,
+                  finalOutput: currentFinalOutput(),
                   error:
                     firstString(params.message) ||
                     "Codex app-server disconnected",
@@ -528,6 +542,8 @@ export class CodexAdapter implements ProviderAdapter {
         ) {
           finalOutput += params.delta;
         }
+        completedFinalAnswer =
+          codexCompletedFinalAnswer(message) ?? completedFinalAnswer;
         if (message.method === "thread/tokenUsage/updated") {
           const usage = asRecord(params.tokenUsage ?? params.usage);
           const total = asRecord(usage.total ?? usage);
@@ -553,20 +569,27 @@ export class CodexAdapter implements ProviderAdapter {
           const turn = asRecord(params.turn);
           const status = String(turn.status ?? "completed").toLowerCase();
           if (stopReason)
-            resolveCompletion({ status: stopReason, finalOutput });
+            resolveCompletion({
+              status: stopReason,
+              finalOutput: currentFinalOutput(),
+            });
           else if (status.includes("fail")) {
             resolveCompletion({
               status: "FAILED",
-              finalOutput,
+              finalOutput: currentFinalOutput(),
               error: firstString(turn.error) || "Codex turn failed",
             });
-          } else resolveCompletion({ status: "COMPLETED", finalOutput });
+          } else
+            resolveCompletion({
+              status: "COMPLETED",
+              finalOutput: currentFinalOutput(),
+            });
         }
       })().catch((error) => {
         unsubscribe();
         resolveCompletion({
           status: "FAILED",
-          finalOutput,
+          finalOutput: currentFinalOutput(),
           error: error instanceof Error ? error.message : String(error),
         });
       });

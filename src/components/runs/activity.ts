@@ -288,8 +288,15 @@ function activityIcon(event: RunEventView): LucideIcon {
  * command, or, failing anything printable, the item's type as words.
  */
 function itemLine(item: Record<string, unknown>): string {
+  const actions = Array.isArray(item.commandActions)
+    ? item.commandActions.map(asRecord)
+    : [];
+  const actionCommand = actions
+    .map((action) => text(action.command))
+    .find((command): command is string => Boolean(command));
   const value =
     text(item.text) ??
+    actionCommand ??
     text(item.command) ??
     text(item.message) ??
     firstArrayText(item.summary) ??
@@ -309,6 +316,32 @@ function firstArrayText(value: unknown): string | null {
     if (nested) return nested;
   }
   return null;
+}
+
+function unifiedDiffDetails(
+  diff: string,
+  number: (value: number) => string,
+): { line: string; detailRows: ActivityDetailRow[] } {
+  const files = [...diff.matchAll(/^diff --git a\/(.+) b\/(.+)$/gm)].map(
+    (match) => match[2]!,
+  );
+  const lines = diff.split("\n");
+  const additions = lines.filter(
+    (line) => line.startsWith("+") && !line.startsWith("+++"),
+  ).length;
+  const deletions = lines.filter(
+    (line) => line.startsWith("-") && !line.startsWith("---"),
+  ).length;
+  const fileLabel = `${number(files.length)} ${files.length === 1 ? "file" : "files"} changed`;
+  const detailRows: ActivityDetailRow[] = [
+    { label: "Files", value: files.length ? files.join("\n") : "Unknown" },
+    { label: "Additions", value: number(additions) },
+    { label: "Deletions", value: number(deletions) },
+  ];
+  return {
+    line: `${fileLabel} · +${number(additions)} -${number(deletions)}`,
+    detailRows,
+  };
 }
 
 /** A compact single-line JSON rendering for events without a parsed shape. */
@@ -399,6 +432,13 @@ function describeCodex(
     return { line, detailRows };
   }
 
+  if (method === "turn/diff/updated") {
+    const diff = text(params.diff) ?? "";
+    return diff
+      ? unifiedDiffDetails(diff, number)
+      : { line: "No file changes", detailRows: [] };
+  }
+
   if (/^turn\//i.test(method)) {
     const turn = asRecord(params.turn);
     const status = text(turn.status);
@@ -486,6 +526,51 @@ function describeCodex(
 
   if (method.startsWith("item/") && params.item) {
     const item = asRecord(params.item);
+    if (item.type === "commandExecution") {
+      const command = itemLine(item);
+      const status = text(item.status);
+      const exitCode = finiteNumber(item.exitCode);
+      const duration = finiteNumber(item.durationMs);
+      const detailRows: ActivityDetailRow[] = [];
+      if (status)
+        detailRows.push({
+          label: "Status",
+          value: formatMethodTitle(status),
+        });
+      if (exitCode !== null)
+        detailRows.push({ label: "Exit code", value: number(exitCode) });
+      if (duration !== null)
+        detailRows.push({ label: "Duration", value: formatDuration(duration) });
+      if (text(item.cwd))
+        detailRows.push({ label: "Working directory", value: text(item.cwd)! });
+      if (command) detailRows.push({ label: "Command", value: command });
+      if (text(item.aggregatedOutput))
+        detailRows.push({
+          label: "Output",
+          value: text(item.aggregatedOutput)!,
+        });
+      return { line: command, detailRows };
+    }
+    if (item.type === "fileChange") {
+      const changes = Array.isArray(item.changes) ? item.changes : [];
+      const detailRows = changes.map((value) => {
+        const change = asRecord(value);
+        const kind = asRecord(change.kind);
+        return {
+          label: text(change.path) ?? "File",
+          value: formatMethodTitle(text(kind.type) ?? "changed"),
+        };
+      });
+      if (text(item.status))
+        detailRows.unshift({
+          label: "Status",
+          value: formatMethodTitle(text(item.status)!),
+        });
+      return {
+        line: `${number(changes.length)} ${changes.length === 1 ? "file" : "files"} changed`,
+        detailRows,
+      };
+    }
     const detailRows = primitiveRows(item, new Set(["id"]));
     return { line: itemLine(item), detailRows };
   }
@@ -1072,12 +1157,17 @@ export function describeActivity(
 }
 
 /**
- * The title for a grouped item row (and standalone item events): the item's own
- * type as words — `agentMessage` reads `Agent Message` — falling back to the
- * method when the notification carries no typed item.
+ * The title for a grouped item row (and standalone item events): phased agent
+ * messages read `Commentary` or `Final Answer`; other items use their type as
+ * words, falling back to the method when no typed item is available.
  */
 export function itemGroupTitle(event: RunEventView): string {
   const type = itemType(event);
+  if (type === "agentMessage") {
+    const phase = text(asRecord(codexParams(event).item).phase);
+    if (phase === "commentary") return "Commentary";
+    if (phase === "final_answer") return "Final Answer";
+  }
   if (type) return formatMethodTitle(type);
   const openType = opencodeEventType(event);
   if (openType === "message.part.updated") {
@@ -1111,7 +1201,7 @@ export type ActivityNode =
       /** The event whose parsed content best represents the finished item. */
       representative: RunEventView;
       children: RunEventView[];
-      /** Codex exposes its lifecycle; OpenCode exposes the combined result. */
+      /** Whether expansion shows transport events or the logical result. */
       detailMode: "children" | "representative";
     };
 
@@ -1148,9 +1238,9 @@ function combinedOpenCodeText(
 
 /**
  * Folds provider lifecycles into logical rows. Codex uses its item id from
- * `item/started` through completion. OpenCode uses the stable part id carried by
- * text deltas and tool updates; text is combined into one rendered result while
- * tool updates retain the final completed state.
+ * `item/started` through completion and exposes the authoritative completed
+ * item. OpenCode uses the stable part id carried by text deltas and tool
+ * updates; text is combined while tool updates retain the completed state.
  */
 export function groupActivity(events: RunEventView[]): ActivityNode[] {
   const nodes: ActivityNode[] = [];
@@ -1161,8 +1251,15 @@ export function groupActivity(events: RunEventView[]): ActivityNode[] {
   >();
   const messagePartIds = new Map<string, string[]>();
   const messageFinishes = new Map<string, string>();
+  const latestTokenUsage = new Map<string, string>();
+  const seenDiffSnapshots = new Set<string>();
 
   for (const event of events) {
+    if (codexMethod(event) === "thread/tokenUsage/updated") {
+      const params = codexParams(event);
+      const key = text(params.turnId) ?? text(params.threadId) ?? "thread";
+      latestTokenUsage.set(key, event.id);
+    }
     const openType = opencodeEventType(event);
     if (openType === "message.part.delta") {
       const messageId = opencodeMessageId(event);
@@ -1182,6 +1279,17 @@ export function groupActivity(events: RunEventView[]): ActivityNode[] {
 
   for (const event of events) {
     const method = codexMethod(event);
+    if (method === "thread/tokenUsage/updated") {
+      const params = codexParams(event);
+      const key = text(params.turnId) ?? text(params.threadId) ?? "thread";
+      if (latestTokenUsage.get(key) !== event.id) continue;
+    }
+    if (method === "turn/diff/updated") {
+      const params = codexParams(event);
+      const signature = `${text(params.turnId) ?? "turn"}\0${text(params.diff) ?? ""}`;
+      if (seenDiffSnapshots.has(signature)) continue;
+      seenDiffSnapshots.add(signature);
+    }
     const id = method?.startsWith("item/") ? eventItemId(event) : null;
     if (method === "item/started" && id) {
       const group = {
@@ -1190,7 +1298,7 @@ export function groupActivity(events: RunEventView[]): ActivityNode[] {
         head: event,
         representative: event,
         children: [event],
-        detailMode: "children" as const,
+        detailMode: "representative" as const,
       };
       nodes.push(group);
       openCodex.set(id, group);
@@ -1260,5 +1368,12 @@ export function groupActivity(events: RunEventView[]): ActivityNode[] {
 
     nodes.push({ kind: "single", key: event.id, event });
   }
-  return nodes;
+  return nodes.filter((node) => {
+    if (node.kind !== "group") return true;
+    const item = asRecord(codexParams(node.representative).item);
+    if (item.type !== "reasoning") return true;
+    if (firstArrayText(item.summary) || firstArrayText(item.content))
+      return true;
+    return node.children.some((child) => text(codexParams(child).delta));
+  });
 }
