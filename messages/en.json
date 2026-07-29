@@ -906,6 +906,7 @@
     "updated": "Updated",
     "emptyTitle": "No credentials stored",
     "emptyDescription": "Credentials appear here after they are saved from an owning settings form.",
+    "emptyDescriptionVault": "No credentials were found under the configured Vault mount and path prefix. Save one from its owning settings form, or check that the mount and prefix match the Vault holding them.",
     "states": {
       "READY": "Ready",
       "WARNING": "Warning",
@@ -965,14 +966,17 @@
       "authenticationToken": "Authentication token",
       "additionalHeaders": "Additional header names",
       "customCa": "Custom CA",
-      "tlsServerName": "TLS server name"
+      "tlsServerName": "TLS server name",
+      "vaultAccess": "Vault access"
     },
     "detailValues": {
       "configured": "Configured",
       "notConfigured": "Not configured",
       "none": "None",
       "invalid": "Invalid",
-      "applicationDatabase": "Application database"
+      "applicationDatabase": "Application database",
+      "readOnly": "Read-only",
+      "readWrite": "Read-write"
     },
     "warningTitles": {
       "DATABASE_UNENCRYPTED": "Database encryption is disabled",
@@ -982,9 +986,12 @@
       "CREDENTIAL_DATA_INVALID": "Credential data is invalid",
       "CREDENTIAL_STORAGE_TYPE_INVALID": "Storage type is invalid",
       "CREDENTIAL_STORE_UNAVAILABLE": "Credential store is unavailable",
+      "CREDENTIAL_STORE_READ_ONLY": "Credential storage is read-only",
       "VAULT_CONFIGURATION_INVALID": "Vault configuration is invalid",
       "VAULT_INSECURE_HTTP": "Vault uses plaintext HTTP",
       "VAULT_TLS_VERIFICATION_DISABLED": "Vault certificate verification is disabled",
+      "VAULT_READ_ONLY_IGNORED": "Read-only setting does not apply",
+      "VAULT_ADOPTION_FAILED": "Existing credentials could not be adopted",
       "KEYCHAIN_UNSUPPORTED_PLATFORM": "Keychain is unsupported on this host",
       "BACKEND_MISMATCH": "Credentials use another backend"
     },
@@ -996,12 +1003,18 @@
       "CREDENTIAL_DATA_INVALID": "One or more credential records contain invalid metadata and cannot be used.",
       "CREDENTIAL_STORAGE_TYPE_INVALID": "CREDENTIAL_STORAGE_TYPE must be database, vault, or keychain.",
       "CREDENTIAL_STORE_UNAVAILABLE": "The credential store could not be initialized. Review the server configuration and logs.",
+      "CREDENTIAL_STORE_READ_ONLY": "This install can read Vault credentials but not change them. Manage secrets from a read-write install, or clear CREDENTIAL_VAULT_READ_ONLY and grant the token write capabilities.",
       "VAULT_CONFIGURATION_INVALID": "Vault cannot be initialized with the current environment variables. Review the Vault address, headers, path, and TLS settings.",
       "VAULT_INSECURE_HTTP": "Vault traffic, secret payloads, and authentication headers are not protected in transit over HTTP.",
       "VAULT_TLS_VERIFICATION_DISABLED": "VAULT_SKIP_VERIFY allows untrusted certificates and exposes Vault traffic to interception.",
+      "VAULT_READ_ONLY_IGNORED": "CREDENTIAL_VAULT_READ_ONLY applies only to Vault storage and is ignored by the current backend. Credentials on this install can still be changed.",
+      "VAULT_ADOPTION_FAILED": "Credentials already held by the external backend could not be read at startup, so they are missing from this inventory. Check the backend connection and token capabilities, then restart the server.",
       "KEYCHAIN_UNSUPPORTED_PLATFORM": "macOS Keychain is available only when the Next.js host runs on macOS. The server remains available, but credential operations will fail.",
       "BACKEND_MISMATCH": "{count} credential item(s) were recorded with another backend. Re-enter them through their owning settings forms; values are not moved or deleted automatically."
-    }
+    },
+    "readOnlyBadge": "Read-only",
+    "readOnlyNotice": "This install has read-only access to Vault, so this secret cannot be changed here. Update it from a read-write install.",
+    "adopted": "{count} credential(s) were adopted from the external backend when the server started."
   },
   "agents": {
     "title": "Agents",

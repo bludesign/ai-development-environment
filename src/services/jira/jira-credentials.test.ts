@@ -57,9 +57,13 @@ import { JiraService } from "./jira.service";
 
 describe("Jira credential integration", () => {
   let token: string | null;
+  let connection: { siteUrl: string; email: string } | null;
   let credentials: {
     isConfigured: ReturnType<typeof vi.fn>;
     getText: ReturnType<typeof vi.fn>;
+    getJson: ReturnType<typeof vi.fn>;
+    setMany: ReturnType<typeof vi.fn>;
+    setAndDeleteMany: ReturnType<typeof vi.fn>;
     setText: ReturnType<typeof vi.fn>;
     delete: ReturnType<typeof vi.fn>;
     deleteMany: ReturnType<typeof vi.fn>;
@@ -67,6 +71,7 @@ describe("Jira credential integration", () => {
 
   beforeEach(() => {
     token = null;
+    connection = null;
     state.settings.siteUrl = null;
     state.settings.email = null;
     state.settings.webhookEnabled = false;
@@ -77,6 +82,47 @@ describe("Jira credential integration", () => {
     credentials = {
       isConfigured: vi.fn(async () => Boolean(token)),
       getText: vi.fn(async () => token),
+      getJson: vi.fn(async (descriptor: { id: string }) =>
+        descriptor.id.endsWith("/connection-settings") ? connection : null,
+      ),
+      setMany: vi.fn(
+        async (
+          entries: Array<{ descriptor: { id: string }; value: Uint8Array }>,
+          mutation?: (value: unknown) => Promise<void>,
+        ) => {
+          for (const entry of entries) {
+            if (entry.descriptor.id.endsWith("/connection-settings")) {
+              connection = JSON.parse(
+                Buffer.from(entry.value).toString("utf8"),
+              ).value;
+            } else if (entry.descriptor.id.endsWith("/api-token")) {
+              token = Buffer.from(entry.value).toString("utf8");
+            }
+          }
+          await mutation?.(transaction);
+        },
+      ),
+      setAndDeleteMany: vi.fn(
+        async (
+          entries: Array<{
+            descriptor: { id: string };
+            value: Uint8Array;
+          }>,
+          _descriptors: Array<{ id: string }>,
+          mutation?: (value: unknown) => Promise<void>,
+        ) => {
+          for (const entry of entries) {
+            if (entry.descriptor.id.endsWith("/connection-settings")) {
+              connection = JSON.parse(
+                Buffer.from(entry.value).toString("utf8"),
+              ).value;
+            } else if (entry.descriptor.id.endsWith("/api-token")) {
+              token = Buffer.from(entry.value).toString("utf8");
+            }
+          }
+          await mutation?.(transaction);
+        },
+      ),
       setText: vi.fn(
         async (
           _descriptor: unknown,
@@ -92,16 +138,22 @@ describe("Jira credential integration", () => {
           _descriptor: unknown,
           mutation?: (value: unknown) => Promise<void>,
         ) => {
-          token = null;
           await mutation?.(transaction);
         },
       ),
       deleteMany: vi.fn(
         async (
-          _descriptors: unknown,
+          descriptors: Array<{ id: string }>,
           mutation?: (value: unknown) => Promise<void>,
         ) => {
-          token = null;
+          if (descriptors.some(({ id }) => id.endsWith("/api-token"))) {
+            token = null;
+          }
+          if (
+            descriptors.some(({ id }) => id.endsWith("/connection-settings"))
+          ) {
+            connection = null;
+          }
           await mutation?.(transaction);
         },
       ),
@@ -117,7 +169,7 @@ describe("Jira credential integration", () => {
         apiToken: "jira-secret",
       }),
     ).resolves.toMatchObject({ tokenConfigured: true });
-    expect(credentials.setText).toHaveBeenCalledOnce();
+    expect(credentials.setMany).toHaveBeenCalledOnce();
     expect(token).toBe("jira-secret");
     expect(state.settings).not.toHaveProperty("apiToken");
 
@@ -137,7 +189,7 @@ describe("Jira credential integration", () => {
     expect(credentials.deleteMany).toHaveBeenCalledOnce();
     expect(credentials.delete).not.toHaveBeenCalled();
     expect(token).toBeNull();
-    expect(state.settings.email).toBeNull();
+    expect(connection).toBeNull();
   });
 
   test("clears registration metadata when changing Jira sites", async () => {
@@ -165,8 +217,6 @@ describe("Jira credential integration", () => {
       webhookEnabled: false,
       webhookConfiguredAt: null,
       webhookId: null,
-      webhookUrl: null,
-      webhookJql: null,
     });
   });
 
@@ -198,12 +248,9 @@ describe("Jira credential integration", () => {
       credentials.deleteMany.mock.invocationCallOrder[0]!,
     );
     expect(state.settings).toMatchObject({
-      email: null,
       webhookEnabled: false,
       webhookConfiguredAt: null,
       webhookId: null,
-      webhookUrl: null,
-      webhookJql: null,
     });
   });
 

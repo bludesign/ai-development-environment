@@ -103,8 +103,54 @@ describe("push notification credential integration", () => {
       ),
       getText: vi.fn(async () => tokenSecret),
       getJson: vi.fn(
-        async (descriptor: { ownerId?: string | null }) =>
-          certificateSecrets.get(descriptor.ownerId ?? "") ?? null,
+        async (descriptor: { id: string; ownerId?: string | null }) => {
+          if (descriptor.id.endsWith("/token-settings")) {
+            return state.settings.tokenTeamId && state.settings.tokenKeyId
+              ? {
+                  teamId: state.settings.tokenTeamId,
+                  keyId: state.settings.tokenKeyId,
+                }
+              : null;
+          }
+          if (descriptor.id.endsWith("/certificate-catalog")) {
+            return state.certificates.map(
+              ({ id, name, topic, environment }) => ({
+                id,
+                name,
+                topic,
+                environment,
+              }),
+            );
+          }
+          return certificateSecrets.get(descriptor.ownerId ?? "") ?? null;
+        },
+      ),
+      setMany: vi.fn(
+        async (
+          entries: Array<{
+            descriptor: { id: string; ownerId?: string | null };
+            value: Uint8Array;
+          }>,
+          mutation?: (value: unknown) => Promise<void>,
+        ) => {
+          for (const entry of entries) {
+            if (entry.descriptor.id.endsWith("/token-settings")) {
+              const value = JSON.parse(
+                Buffer.from(entry.value).toString("utf8"),
+              ).value;
+              state.settings.tokenTeamId = value.teamId;
+              state.settings.tokenKeyId = value.keyId;
+            } else if (entry.descriptor.id.endsWith("token-private-key")) {
+              tokenSecret = Buffer.from(entry.value).toString("utf8");
+            } else if (entry.descriptor.ownerId) {
+              const value = JSON.parse(
+                Buffer.from(entry.value).toString("utf8"),
+              ).value;
+              certificateSecrets.set(entry.descriptor.ownerId, value);
+            }
+          }
+          await mutation?.(transaction);
+        },
       ),
       setText: vi.fn(
         async (
@@ -119,11 +165,53 @@ describe("push notification credential integration", () => {
       delete: vi.fn(
         async (
           descriptor: { id: string; ownerId?: string | null },
-          mutation: (value: unknown) => Promise<void>,
+          mutation?: (value: unknown) => Promise<void>,
         ) => {
           if (descriptor.id.includes("token-private-key")) tokenSecret = null;
           else certificateSecrets.delete(descriptor.ownerId ?? "");
-          await mutation(transaction);
+          await mutation?.(transaction);
+        },
+      ),
+      deleteMany: vi.fn(
+        async (
+          descriptors: Array<{ id: string }>,
+          mutation?: (value: unknown) => Promise<void>,
+        ) => {
+          if (descriptors.some(({ id }) => id.endsWith("token-private-key"))) {
+            tokenSecret = null;
+            state.settings.tokenTeamId = null;
+            state.settings.tokenKeyId = null;
+          }
+          await mutation?.(transaction);
+        },
+      ),
+      setJson: vi.fn(
+        async (
+          _descriptor: unknown,
+          catalog: Array<{
+            id: string;
+            name: string;
+            topic: string;
+            environment: string;
+          }>,
+          mutation?: (value: unknown) => Promise<void>,
+        ) => {
+          state.certificates = state.certificates.filter((certificate) =>
+            catalog.some(({ id }) => id === certificate.id),
+          );
+          await mutation?.(transaction);
+        },
+      ),
+      setAndDeleteMany: vi.fn(
+        async (
+          _entries: Array<{ value: Uint8Array }>,
+          descriptors: Array<{ ownerId?: string | null }>,
+          mutation?: (value: unknown) => Promise<void>,
+        ) => {
+          for (const descriptor of descriptors) {
+            certificateSecrets.delete(descriptor.ownerId ?? "");
+          }
+          await mutation?.(transaction);
         },
       ),
     };
@@ -139,7 +227,7 @@ describe("push notification credential integration", () => {
       keyId: "KEY123",
       privateKey,
     });
-    expect(credentials.setText).toHaveBeenCalledOnce();
+    expect(credentials.setMany).toHaveBeenCalledOnce();
     expect(tokenSecret).toBe(privateKey);
     expect(state.settings).not.toHaveProperty("tokenPrivateKey");
     await expect(service.settings()).resolves.toMatchObject({
@@ -147,7 +235,7 @@ describe("push notification credential integration", () => {
     });
 
     await service.clearTokenSettings();
-    expect(credentials.delete).toHaveBeenCalled();
+    expect(credentials.deleteMany).toHaveBeenCalled();
     expect(tokenSecret).toBeNull();
     await expect(service.settings()).resolves.toMatchObject({
       tokenConfigured: false,
@@ -198,7 +286,7 @@ describe("push notification credential integration", () => {
     expect(certificate).not.toHaveProperty("p12Base64");
 
     await service.deleteCertificateCredential(certificate.id);
-    expect(credentials.delete).toHaveBeenCalled();
+    expect(credentials.setAndDeleteMany).toHaveBeenCalled();
     expect(certificateSecrets.has(certificate.id)).toBe(false);
     expect(state.certificates).toEqual([]);
   });

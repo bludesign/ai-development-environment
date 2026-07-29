@@ -36,6 +36,12 @@ vi.mock("@/services/credentials", async (importOriginal) => {
       async getText() {
         return "secret-token";
       }
+      async getJson() {
+        return {
+          siteUrl: "https://example.atlassian.net",
+          email: "user@example.com",
+        };
+      }
     },
   };
 });

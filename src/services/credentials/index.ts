@@ -1,4 +1,6 @@
+export * from "./adoption";
 export * from "./config";
+export * from "./connection-settings";
 export * from "./credentials.service";
 export * from "./crypto";
 export * from "./database-driver";

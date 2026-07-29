@@ -19,6 +19,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Spinner } from "@/components/ui/spinner";
+import { useCredentialStoreReadOnly } from "@/hooks/use-credential-store-read-only";
 import { controlPlaneRequest } from "@/lib/control-plane-client";
 import {
   CACHE_SERVER_SETTINGS_FIELDS,
@@ -34,6 +35,8 @@ type CacheServerHeaderDraft = {
 export function CacheServerSettingsCard() {
   const t = useTranslations("cacheServerSettings");
   const tc = useTranslations("common");
+  const tCredentials = useTranslations("credentials");
+  const credentialsReadOnly = useCredentialStoreReadOnly();
   const [settings, setSettings] = useState<CacheServerSettingsView | null>(
     null,
   );
@@ -236,6 +239,7 @@ export function CacheServerSettingsCard() {
                 <Input
                   autoComplete="url"
                   id="cache-server-base-url"
+                  disabled={credentialsReadOnly}
                   onChange={(event) => setBaseUrl(event.target.value)}
                   placeholder="http://cache-server.internal:3006/management-api"
                   required
@@ -255,6 +259,7 @@ export function CacheServerSettingsCard() {
                 </Label>
                 <Input
                   autoComplete="new-password"
+                  disabled={credentialsReadOnly}
                   id="cache-server-api-key"
                   onChange={(event) => setApiKey(event.target.value)}
                   placeholder={
@@ -262,20 +267,23 @@ export function CacheServerSettingsCard() {
                       ? t("apiKeyPlaceholderConfigured")
                       : t("apiKeyPlaceholder")
                   }
-                  required={!settings?.apiKeyConfigured}
+                  required={!settings?.apiKeyConfigured && !credentialsReadOnly}
                   type="password"
                   value={apiKey}
                 />
                 <p className="mt-1 text-xs text-muted-foreground">
-                  {settings?.apiKeyConfigured
-                    ? t("apiKeyKeepHelp")
-                    : t("apiKeyHelp")}
+                  {credentialsReadOnly
+                    ? tCredentials("readOnlyNotice")
+                    : settings?.apiKeyConfigured
+                      ? t("apiKeyKeepHelp")
+                      : t("apiKeyHelp")}
                 </p>
               </div>
               <div className="space-y-2">
                 <div className="flex items-center justify-between">
                   <Label className="text-sm font-medium">{t("headers")}</Label>
                   <Button
+                    disabled={credentialsReadOnly}
                     onClick={addHeader}
                     size="sm"
                     type="button"
@@ -301,6 +309,7 @@ export function CacheServerSettingsCard() {
                       <div className="flex items-center gap-2" key={index}>
                         <Input
                           aria-label={t("headerName")}
+                          disabled={credentialsReadOnly}
                           className="flex-1"
                           onChange={(event) =>
                             updateHeader(index, "name", event.target.value)
@@ -312,6 +321,7 @@ export function CacheServerSettingsCard() {
                           aria-label={t("headerValue")}
                           autoComplete="new-password"
                           className="flex-1"
+                          disabled={credentialsReadOnly}
                           onChange={(event) =>
                             updateHeader(index, "value", event.target.value)
                           }
@@ -320,12 +330,15 @@ export function CacheServerSettingsCard() {
                               ? t("headerValuePlaceholderConfigured")
                               : t("headerValue")
                           }
-                          required={!header.valueConfigured}
+                          required={
+                            !header.valueConfigured && !credentialsReadOnly
+                          }
                           type="password"
                           value={header.value}
                         />
                         <Button
                           aria-label={t("removeHeader")}
+                          disabled={credentialsReadOnly}
                           onClick={() => removeHeader(index)}
                           size="icon"
                           type="button"
@@ -347,7 +360,9 @@ export function CacheServerSettingsCard() {
                   title={t("confirmRemove")}
                   trigger={
                     <Button
-                      disabled={busy || !settings?.configured}
+                      disabled={
+                        busy || !settings?.configured || credentialsReadOnly
+                      }
                       type="button"
                       variant="ghost"
                     >
@@ -365,7 +380,7 @@ export function CacheServerSettingsCard() {
                   <Unplug />
                   {t("test")}
                 </Button>
-                <Button disabled={busy} type="submit">
+                <Button disabled={busy || credentialsReadOnly} type="submit">
                   {busy ? <Spinner /> : <Save />}
                   {t("save")}
                 </Button>

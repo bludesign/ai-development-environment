@@ -9,8 +9,16 @@ import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 
 import { PrismaClient } from "@/generated/prisma/client";
 
-import { CredentialService } from "./credentials.service";
-import { CREDENTIALS } from "./types";
+import {
+  CredentialService,
+  resetCredentialAdoptionForTests,
+} from "./credentials.service";
+import { jiraConnectionSettings } from "./connection-settings";
+import {
+  apnsCertificateCredential,
+  CREDENTIALS,
+  encodeJsonCredential,
+} from "./types";
 
 const CREATE_CREDENTIAL_TABLE = `
   CREATE TABLE "Credential" (
@@ -64,6 +72,39 @@ describe("CredentialService database backend", () => {
       encryptionState: "PLAINTEXT",
       warnings: [{ code: "DATABASE_UNENCRYPTED" }],
     });
+  });
+
+  test("returns decoded JSON with credential metadata timestamps", async () => {
+    const service = new CredentialService({ env: {}, prisma });
+    const value = { siteUrl: "https://jira.example.test", email: "dev@test" };
+    await service.setJson(CREDENTIALS.jiraConnectionSettings, value);
+
+    const stored = await service.getJsonWithMetadata(
+      CREDENTIALS.jiraConnectionSettings,
+    );
+    const row = await prisma.credential.findUniqueOrThrow({
+      where: { id: CREDENTIALS.jiraConnectionSettings.id },
+    });
+    expect(stored).toEqual({
+      value,
+      createdAt: row.createdAt,
+      updatedAt: row.updatedAt,
+    });
+  });
+
+  test("validates typed JSON credentials when reading them", async () => {
+    const service = new CredentialService({ env: {}, prisma });
+    await service.setJson(CREDENTIALS.jiraConnectionSettings, {
+      siteUrl: 42,
+      email: "dev@example.test",
+    });
+
+    await expect(
+      service.getValidatedJson(
+        CREDENTIALS.jiraConnectionSettings,
+        jiraConnectionSettings,
+      ),
+    ).rejects.toMatchObject({ code: "CREDENTIAL_DATA_INVALID" });
   });
 
   test("encrypts new payloads and round trips without exposing payloads in inventory", async () => {
@@ -355,7 +396,7 @@ describe("CredentialService database backend", () => {
         value: Buffer.from(`${ownerId}-api-key`),
       },
       {
-        descriptor: { ...CREDENTIALS.cacheServerHeaders, ownerId },
+        descriptor: { ...CREDENTIALS.cacheServerSettings, ownerId },
         value: Buffer.from(`${ownerId}-headers`),
       },
     ];
@@ -394,7 +435,7 @@ describe("CredentialService database backend", () => {
       ),
     ).toBe("second-api-key");
     expect(
-      Buffer.from(values.get(CREDENTIALS.cacheServerHeaders.id)!).toString(
+      Buffer.from(values.get(CREDENTIALS.cacheServerSettings.id)!).toString(
         "utf8",
       ),
     ).toBe("second-headers");
@@ -403,12 +444,302 @@ describe("CredentialService database backend", () => {
         id: {
           in: [
             CREDENTIALS.cacheServerApiKey.id,
-            CREDENTIALS.cacheServerHeaders.id,
+            CREDENTIALS.cacheServerSettings.id,
           ],
         },
       },
     });
     expect(rows).toHaveLength(2);
     expect(rows.every((row) => row.ownerId === "second")).toBe(true);
+  });
+
+  test("rolls back mixed external sets and deletes when metadata fails", async () => {
+    const values = new Map<string, Uint8Array>();
+    const service = new CredentialService({
+      env: { CREDENTIAL_STORAGE_TYPE: "keychain" },
+      platform: "darwin",
+      prisma,
+      keychainModuleLoader: async () => ({
+        AsyncEntry: class {
+          constructor(
+            readonly _service: string,
+            readonly username: string,
+          ) {}
+
+          async getSecret() {
+            return values.get(this.username);
+          }
+
+          async setSecret(value: Uint8Array) {
+            values.set(this.username, Uint8Array.from(value));
+          }
+
+          async deleteCredential() {
+            return values.delete(this.username);
+          }
+        },
+      }),
+    });
+    const bundle = apnsCertificateCredential("certificate-1");
+    await service.setMany([
+      {
+        descriptor: CREDENTIALS.apnsCertificateCatalog,
+        value: Buffer.from("old-catalog"),
+      },
+      { descriptor: bundle, value: Buffer.from("old-bundle") },
+    ]);
+
+    await expect(
+      service.setAndDeleteMany(
+        [
+          {
+            descriptor: CREDENTIALS.apnsCertificateCatalog,
+            value: Buffer.from("new-catalog"),
+          },
+        ],
+        [bundle],
+        async () => {
+          throw new Error("metadata failed");
+        },
+      ),
+    ).rejects.toThrow("metadata failed");
+    expect(
+      Buffer.from(values.get(CREDENTIALS.apnsCertificateCatalog.id)!).toString(
+        "utf8",
+      ),
+    ).toBe("old-catalog");
+    expect(Buffer.from(values.get(bundle.id)!).toString("utf8")).toBe(
+      "old-bundle",
+    );
+    expect(await prisma.credential.count()).toBe(2);
+  });
+});
+
+type VaultSecret = { kind: string; ownerId: string | null; value: string };
+
+// Serves KV v2 reads and metadata listings from a plain map so the service exercises the
+// real Vault driver, including the folder walk adoption depends on.
+function vaultBackend(
+  secrets: Map<string, VaultSecret>,
+  backendOptions: { denyList?: boolean } = {},
+) {
+  const PREFIX = "/v1/secret/data/ai-development-environment/credentials/";
+  const LIST_PREFIX =
+    "/v1/secret/metadata/ai-development-environment/credentials";
+  const json = (statusCode: number, body: unknown = {}) => ({
+    statusCode,
+    body: { text: async () => JSON.stringify(body) },
+  });
+  const request = vi.fn(async (url: string, options: { method: string }) => {
+    const path = new URL(url);
+    if (path.searchParams.get("list") === "true") {
+      if (backendOptions.denyList) return json(403);
+      const folder = path.pathname.slice(LIST_PREFIX.length).replace(/^\//, "");
+      const children = new Set<string>();
+      for (const id of secrets.keys()) {
+        if (folder && !id.startsWith(`${folder}/`)) continue;
+        const rest = folder ? id.slice(folder.length + 1) : id;
+        const [head, ...tail] = rest.split("/");
+        children.add(tail.length ? `${head}/` : head);
+      }
+      return children.size
+        ? json(200, { data: { keys: [...children] } })
+        : json(404);
+    }
+    const id = decodeURIComponent(path.pathname.slice(PREFIX.length));
+    if (options.method !== "GET") return json(204);
+    const secret = secrets.get(id);
+    return secret
+      ? json(200, {
+          data: {
+            data: {
+              value: Buffer.from(secret.value).toString("base64"),
+              version: 1,
+              kind: secret.kind,
+              ownerId: secret.ownerId,
+            },
+          },
+        })
+      : json(404);
+  });
+  return request;
+}
+
+describe("CredentialService vault backend", () => {
+  let directory: string;
+  let prisma: InstanceType<typeof PrismaClient>;
+
+  beforeEach(async () => {
+    resetCredentialAdoptionForTests();
+    directory = await mkdtemp(join(tmpdir(), "ade-credentials-vault-"));
+    prisma = new PrismaClient({
+      adapter: new PrismaBetterSqlite3({ url: join(directory, "test.db") }),
+    });
+    await prisma.$executeRawUnsafe(CREATE_CREDENTIAL_TABLE);
+  });
+
+  afterEach(async () => {
+    await prisma.$disconnect();
+    await rm(directory, { recursive: true, force: true });
+  });
+
+  const env = (overrides: Record<string, string> = {}) => ({
+    CREDENTIAL_STORAGE_TYPE: "vault",
+    VAULT_ADDR: "https://vault.test",
+    VAULT_TOKEN: "vault-token-secret",
+    ...overrides,
+  });
+
+  test("adopts credentials Vault already holds on a cold database", async () => {
+    const request = vaultBackend(
+      new Map([
+        [
+          CREDENTIALS.jiraApiToken.id,
+          {
+            kind: CREDENTIALS.jiraApiToken.kind,
+            ownerId: "default",
+            value: "jira-secret",
+          },
+        ],
+      ]),
+    );
+    const service = new CredentialService({
+      env: env(),
+      prisma,
+      vaultRequest: request as never,
+      vaultDispatcherFactory: () => ({}) as never,
+    });
+
+    await expect(service.isConfigured(CREDENTIALS.jiraApiToken)).resolves.toBe(
+      true,
+    );
+    await expect(service.getText(CREDENTIALS.jiraApiToken)).resolves.toBe(
+      "jira-secret",
+    );
+    await expect(
+      service.isConfigured(CREDENTIALS.githubPersonalAccessToken),
+    ).resolves.toBe(false);
+    await expect(service.status()).resolves.toMatchObject({
+      storageType: "vault",
+      readOnly: false,
+      adoptedCount: 1,
+      itemCount: 1,
+      mismatchCount: 0,
+    });
+    const row = await prisma.credential.findUniqueOrThrow({
+      where: { id: CREDENTIALS.jiraApiToken.id },
+    });
+    expect(row).toMatchObject({ storageType: "vault", payload: null });
+  });
+
+  test("lazily adopts an explicitly requested dynamic credential", async () => {
+    const descriptor = apnsCertificateCredential("certificate-7");
+    const value = { p12Base64: "bundle", passphrase: "passphrase" };
+    const request = vaultBackend(
+      new Map([
+        [
+          descriptor.id,
+          {
+            kind: descriptor.kind,
+            ownerId: descriptor.ownerId ?? null,
+            value: encodeJsonCredential(value).toString("utf8"),
+          },
+        ],
+      ]),
+      { denyList: true },
+    );
+    const service = new CredentialService({
+      env: env(),
+      prisma,
+      vaultRequest: request as never,
+      vaultDispatcherFactory: () => ({}) as never,
+    });
+
+    await expect(service.getJson(descriptor)).resolves.toEqual(value);
+    await expect(
+      prisma.credential.findUniqueOrThrow({ where: { id: descriptor.id } }),
+    ).resolves.toMatchObject({
+      kind: descriptor.kind,
+      ownerId: descriptor.ownerId,
+      storageType: "vault",
+    });
+  });
+
+  test("refuses to change credentials on a read-only install", async () => {
+    const request = vaultBackend(
+      new Map([
+        [
+          CREDENTIALS.jiraApiToken.id,
+          {
+            kind: CREDENTIALS.jiraApiToken.kind,
+            ownerId: "default",
+            value: "jira-secret",
+          },
+        ],
+      ]),
+    );
+    const service = new CredentialService({
+      env: env({ CREDENTIAL_VAULT_READ_ONLY: "true" }),
+      prisma,
+      vaultRequest: request as never,
+      vaultDispatcherFactory: () => ({}) as never,
+    });
+
+    await expect(service.getText(CREDENTIALS.jiraApiToken)).resolves.toBe(
+      "jira-secret",
+    );
+    await expect(service.assertWritable()).rejects.toMatchObject({
+      code: "CREDENTIAL_STORE_READ_ONLY",
+    });
+    await expect(
+      service.setText(CREDENTIALS.jiraApiToken, "replacement"),
+    ).rejects.toMatchObject({ code: "CREDENTIAL_STORE_READ_ONLY" });
+    await expect(
+      service.delete(CREDENTIALS.jiraApiToken),
+    ).rejects.toMatchObject({ code: "CREDENTIAL_STORE_READ_ONLY" });
+    await expect(service.status()).resolves.toMatchObject({ readOnly: true });
+    expect(
+      request.mock.calls.every(([, options]) => options.method === "GET"),
+    ).toBe(true);
+    await expect(service.getText(CREDENTIALS.jiraApiToken)).resolves.toBe(
+      "jira-secret",
+    );
+  });
+
+  test("runs one adoption pass no matter how many services are constructed", async () => {
+    const request = vaultBackend(
+      new Map([
+        [
+          CREDENTIALS.jiraApiToken.id,
+          {
+            kind: CREDENTIALS.jiraApiToken.kind,
+            ownerId: "default",
+            value: "jira-secret",
+          },
+        ],
+      ]),
+    );
+    const build = () =>
+      new CredentialService({
+        env: env(),
+        prisma,
+        vaultRequest: request as never,
+        vaultDispatcherFactory: () => ({}) as never,
+      });
+
+    await Promise.all([
+      build().isConfigured(CREDENTIALS.jiraApiToken),
+      build().isConfigured(CREDENTIALS.jiraApiToken),
+      build().list(),
+    ]);
+
+    const listCalls = request.mock.calls.filter(([url]) =>
+      String(url).includes("list=true"),
+    );
+    expect(listCalls.length).toBeGreaterThan(0);
+    const rootListCalls = listCalls.filter(([url]) =>
+      String(url).endsWith("credentials?list=true"),
+    );
+    expect(rootListCalls).toHaveLength(1);
   });
 });

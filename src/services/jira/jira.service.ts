@@ -6,7 +6,14 @@ import { AgileClient, Version3Client } from "jira.js";
 
 import { getPrismaClient } from "@/data/prisma-client";
 import type { Prisma } from "@/generated/prisma/client";
-import { CREDENTIALS, CredentialService } from "@/services/credentials";
+import {
+  CREDENTIALS,
+  CredentialService,
+  encodeJsonCredential,
+  jiraConnectionSettings,
+  readConnectionSettings,
+  type JiraConnectionSettings,
+} from "@/services/credentials";
 import type { WorkflowEventsService } from "@/services/workflows/workflow-events.service";
 
 import type {
@@ -432,6 +439,14 @@ export class JiraService {
       .JIRA_CACHE_LOGGING_DISABLED !== "true",
   ) {}
 
+  private async storedConnection() {
+    return readConnectionSettings(
+      this.credentials,
+      CREDENTIALS.jiraConnectionSettings,
+      jiraConnectionSettings,
+    );
+  }
+
   private async recordTicketWorkflowEvents(
     ticket: JiraTicketDetail,
     changelog?: JiraWebhookChangelog | null,
@@ -515,19 +530,26 @@ export class JiraService {
 
   async getSettings(): Promise<JiraSettingsView> {
     const prisma = await getPrismaClient();
-    const settings = await prisma.jiraSettings.upsert({
-      where: { id: SETTINGS_ID },
-      create: { id: SETTINGS_ID, cacheTtlSeconds: DEFAULT_TTL_SECONDS },
-      update: {},
-    });
+    const [settings, connection, tokenConfigured] = await Promise.all([
+      prisma.jiraSettings.upsert({
+        where: { id: SETTINGS_ID },
+        create: { id: SETTINGS_ID, cacheTtlSeconds: DEFAULT_TTL_SECONDS },
+        update: {},
+      }),
+      this.storedConnection(),
+      this.credentials.isConfigured(CREDENTIALS.jiraApiToken),
+    ]);
     return {
-      siteUrl: settings.siteUrl,
-      email: settings.email,
-      tokenConfigured: await this.credentials.isConfigured(
-        CREDENTIALS.jiraApiToken,
-      ),
+      siteUrl: connection?.value.siteUrl ?? null,
+      email: connection?.value.email ?? null,
+      tokenConfigured: Boolean(connection && tokenConfigured),
       cacheTtlSeconds: settings.cacheTtlSeconds,
-      updatedAt: settings.updatedAt.toISOString(),
+      updatedAt: new Date(
+        Math.max(
+          settings.updatedAt.getTime(),
+          connection?.updatedAt.getTime() ?? 0,
+        ),
+      ).toISOString(),
     };
   }
 
@@ -542,20 +564,20 @@ export class JiraService {
     const email = input.email.trim();
     if (!/^\S+@\S+\.\S+$/.test(email))
       throw new Error("A valid Jira email is required");
-    const existing = await prisma.jiraSettings.findUnique({
-      where: { id: SETTINGS_ID },
-    });
+    const existing = await this.storedConnection();
     const nextToken = input.apiToken?.trim() || null;
     const siteChanged = Boolean(
-      existing?.siteUrl && existing.siteUrl !== siteUrl,
+      existing?.value.siteUrl && existing.value.siteUrl !== siteUrl,
     );
     if (siteChanged && !input.resetSite) {
       throw new Error("Changing the Jira site requires resetSite=true");
     }
     const credentialsChanged =
-      existing?.siteUrl !== siteUrl ||
-      existing?.email !== email ||
+      existing?.value.siteUrl !== siteUrl ||
+      existing?.value.email !== email ||
       Boolean(nextToken);
+
+    const nextConnection: JiraConnectionSettings = { siteUrl, email };
 
     const saveMetadata = async (transaction: Prisma.TransactionClient) => {
       if (siteChanged) {
@@ -570,36 +592,50 @@ export class JiraService {
         where: { id: SETTINGS_ID },
         create: {
           id: SETTINGS_ID,
-          siteUrl,
-          email,
           cacheTtlSeconds: DEFAULT_TTL_SECONDS,
         },
         update: siteChanged
           ? {
-              siteUrl,
-              email,
               webhookEnabled: false,
               webhookConfiguredAt: null,
               webhookId: null,
-              webhookUrl: null,
-              webhookJql: null,
             }
-          : { siteUrl, email },
+          : {},
       });
     };
-    if (nextToken) {
-      await this.credentials.setText(
-        CREDENTIALS.jiraApiToken,
-        nextToken,
-        saveMetadata,
-      );
+    const entries = [
+      ...(!existing ||
+      JSON.stringify(existing.value) !== JSON.stringify(nextConnection)
+        ? [
+            {
+              descriptor: CREDENTIALS.jiraConnectionSettings,
+              value: encodeJsonCredential(nextConnection),
+            },
+          ]
+        : []),
+      ...(nextToken
+        ? [
+            {
+              descriptor: CREDENTIALS.jiraApiToken,
+              value: Buffer.from(nextToken, "utf8"),
+            },
+          ]
+        : []),
+    ];
+    if (entries.length) {
+      if (siteChanged) {
+        // The webhook secret is registered against the old site's Jira instance, so it
+        // must roll back with the new connection and site-scoped Prisma cleanup.
+        await this.credentials.setAndDeleteMany(
+          entries,
+          [CREDENTIALS.jiraWebhookSecret, CREDENTIALS.jiraWebhookSettings],
+          saveMetadata,
+        );
+      } else {
+        await this.credentials.setMany(entries, saveMetadata);
+      }
     } else {
       await prisma.$transaction(saveMetadata);
-    }
-    // The webhook secret is registered against the old site's Jira instance, so
-    // it can never verify a delivery from the new one.
-    if (siteChanged) {
-      await this.credentials.delete(CREDENTIALS.jiraWebhookSecret);
     }
     this.clients = undefined;
     return this.getSettings();
@@ -607,21 +643,22 @@ export class JiraService {
 
   async clearCredentials(): Promise<JiraSettingsView> {
     const prisma = await getPrismaClient();
-    const settings = await prisma.jiraSettings.findUnique({
-      where: { id: SETTINGS_ID },
-      select: {
-        siteUrl: true,
-        email: true,
-        webhookId: true,
-      },
-    });
+    const [settings, connection] = await Promise.all([
+      prisma.jiraSettings.findUnique({
+        where: { id: SETTINGS_ID },
+        select: {
+          webhookId: true,
+        },
+      }),
+      this.storedConnection(),
+    ]);
     const tokenConfigured = await this.credentials.isConfigured(
       CREDENTIALS.jiraApiToken,
     );
     if (
-      settings?.siteUrl &&
-      settings.email &&
-      settings.webhookId &&
+      connection?.value.siteUrl &&
+      connection.value.email &&
+      settings?.webhookId &&
       tokenConfigured
     ) {
       try {
@@ -634,7 +671,12 @@ export class JiraService {
       }
     }
     await this.credentials.deleteMany(
-      [CREDENTIALS.jiraApiToken, CREDENTIALS.jiraWebhookSecret],
+      [
+        CREDENTIALS.jiraConnectionSettings,
+        CREDENTIALS.jiraApiToken,
+        CREDENTIALS.jiraWebhookSettings,
+        CREDENTIALS.jiraWebhookSecret,
+      ],
       async (transaction) => {
         await transaction.jiraCacheEntry.deleteMany();
         await transaction.jiraCachedTicket.deleteMany();
@@ -643,12 +685,9 @@ export class JiraService {
           where: { id: SETTINGS_ID },
           create: { id: SETTINGS_ID, cacheTtlSeconds: DEFAULT_TTL_SECONDS },
           update: {
-            email: null,
             webhookEnabled: false,
             webhookConfiguredAt: null,
             webhookId: null,
-            webhookUrl: null,
-            webhookJql: null,
           },
         });
       },
@@ -1941,10 +1980,11 @@ export class JiraService {
 
   private async requireCredentials() {
     const prisma = await getPrismaClient();
-    const settings = await prisma.jiraSettings.findUnique({
-      where: { id: SETTINGS_ID },
-    });
-    if (!settings?.siteUrl || !settings.email) {
+    const [settings, connection] = await Promise.all([
+      prisma.jiraSettings.findUnique({ where: { id: SETTINGS_ID } }),
+      this.storedConnection(),
+    ]);
+    if (!connection) {
       throw new Error(
         "Configure the Jira site, email, and API token in Settings first",
       );
@@ -1956,10 +1996,10 @@ export class JiraService {
       );
     }
     return {
-      siteUrl: settings.siteUrl,
-      email: settings.email,
+      siteUrl: connection.value.siteUrl,
+      email: connection.value.email,
       apiToken,
-      cacheTtlSeconds: settings.cacheTtlSeconds,
+      cacheTtlSeconds: settings?.cacheTtlSeconds ?? DEFAULT_TTL_SECONDS,
     };
   }
 

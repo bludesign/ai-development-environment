@@ -1,7 +1,15 @@
 import { randomBytes, randomUUID } from "node:crypto";
 
 import { getPrismaClient } from "@/data/prisma-client";
-import { CREDENTIALS, CredentialService } from "@/services/credentials";
+import type { Prisma } from "@/generated/prisma/client";
+import {
+  CREDENTIALS,
+  CredentialService,
+  encodeJsonCredential,
+  githubAppConnectionSettings,
+  readConnectionSettings,
+  type GitHubAppConnectionSettings,
+} from "@/services/credentials";
 import {
   cancelGitHubActionsWorkflow,
   clearGitHubAppTokenCache,
@@ -679,6 +687,7 @@ export function normalizeGitHubRepositoryName(value: string): {
   ) {
     throw new Error("Repository must use the owner/name format");
   }
+
   return { owner: parts[0], name: parts[1] };
 }
 
@@ -1106,6 +1115,14 @@ export class GitHubService {
   ) {
     if (startAutoRetry)
       this.autoRetryService = new GitHubAutoRetryService(this, this.polling);
+  }
+
+  private async storedAppConnection() {
+    return readConnectionSettings(
+      this.credentials,
+      CREDENTIALS.githubAppSettings,
+      githubAppConnectionSettings,
+    );
   }
 
   private autoRetry(): GitHubAutoRetryService {
@@ -1810,8 +1827,6 @@ export class GitHubService {
 
   private appSettingsView(
     settings: {
-      appId: string;
-      installationId: string;
       keyFingerprint: string;
       appSlug: string;
       appOwnerLogin: string | null;
@@ -1824,8 +1839,11 @@ export class GitHubService {
       webhookEventsJson: string;
       enhancedPipelineWebhooksEnabled: boolean;
       verifiedAt: Date;
-      webhookUrl: string | null;
       webhookConfiguredAt: Date | null;
+      updatedAt: Date;
+    } | null,
+    connection: {
+      value: GitHubAppConnectionSettings;
       updatedAt: Date;
     } | null,
     privateKeyConfigured: boolean,
@@ -1840,8 +1858,8 @@ export class GitHubService {
       ? jsonStringArray(settings.webhookEventsJson)
       : [];
     const webhookConfigured = Boolean(
-      settings?.webhookUrl &&
-      settings.webhookConfiguredAt &&
+      connection?.value.webhookUrl &&
+      settings?.webhookConfiguredAt &&
       webhookSecretConfigured,
     );
     const enhancedPipelineWebhooksMissing = settings
@@ -1854,9 +1872,9 @@ export class GitHubService {
         })
       : ["Configure and verify the GitHub App"];
     return {
-      configured: Boolean(settings && privateKeyConfigured),
-      appId: settings?.appId ?? null,
-      installationId: settings?.installationId ?? null,
+      configured: Boolean(settings && connection && privateKeyConfigured),
+      appId: connection?.value.appId ?? null,
+      installationId: connection?.value.installationId ?? null,
       privateKeyConfigured,
       keyFingerprint: settings?.keyFingerprint ?? null,
       appSlug: settings?.appSlug ?? null,
@@ -1875,12 +1893,20 @@ export class GitHubService {
       enhancedPipelineWebhooksMissing,
       verifiedAt: settings?.verifiedAt.toISOString() ?? null,
       webhookConfigured,
-      webhookUrl: settings?.webhookUrl ?? null,
+      webhookUrl: connection?.value.webhookUrl ?? null,
       webhookConfiguredAt: settings?.webhookConfiguredAt?.toISOString() ?? null,
       webhookLastReceivedAt: lastDelivery?.receivedAt.toISOString() ?? null,
       webhookLastOutcome: lastDelivery?.outcome ?? null,
       webhookLastError: lastDelivery?.error ?? null,
-      updatedAt: settings?.updatedAt.toISOString() ?? null,
+      updatedAt:
+        settings || connection
+          ? new Date(
+              Math.max(
+                settings?.updatedAt.getTime() ?? 0,
+                connection?.updatedAt.getTime() ?? 0,
+              ),
+            ).toISOString()
+          : null,
     };
   }
 
@@ -1888,6 +1914,7 @@ export class GitHubService {
     const prisma = await getPrismaClient();
     const [
       storedSettings,
+      connection,
       privateKeyConfigured,
       webhookSecretConfigured,
       lastDelivery,
@@ -1895,6 +1922,7 @@ export class GitHubService {
       prisma.gitHubAppSettings.findUnique({
         where: { id: GITHUB_APP_SETTINGS_ID },
       }),
+      this.storedAppConnection(),
       this.credentials.isConfigured(CREDENTIALS.githubAppPrivateKey),
       this.credentials.isConfigured(CREDENTIALS.githubAppWebhookSecret),
       prisma.gitHubWebhookDelivery.findFirst({
@@ -1927,6 +1955,7 @@ export class GitHubService {
     }
     return this.appSettingsView(
       settings,
+      connection,
       privateKeyConfigured,
       webhookSecretConfigured,
       lastDelivery,
@@ -1934,15 +1963,18 @@ export class GitHubService {
   }
 
   async webhooksEnabled(): Promise<boolean> {
-    const [settings, secretConfigured] = await Promise.all([
+    const [settings, connection, secretConfigured] = await Promise.all([
       (await getPrismaClient()).gitHubAppSettings.findUnique({
         where: { id: GITHUB_APP_SETTINGS_ID },
-        select: { webhookUrl: true, webhookConfiguredAt: true },
+        select: { webhookConfiguredAt: true },
       }),
+      this.storedAppConnection(),
       this.credentials.isConfigured(CREDENTIALS.githubAppWebhookSecret),
     ]);
     return Boolean(
-      settings?.webhookUrl && settings.webhookConfiguredAt && secretConfigured,
+      connection?.value.webhookUrl &&
+      settings?.webhookConfiguredAt &&
+      secretConfigured,
     );
   }
 
@@ -1999,7 +2031,7 @@ export class GitHubService {
     const settings = await prisma.gitHubAppSettings.findUnique({
       where: { id: GITHUB_APP_SETTINGS_ID },
     });
-    if (!settings) {
+    if (!settings || !(await this.storedAppConnection())) {
       throw new GitHubAppError(
         "GITHUB_APP_NOT_CONFIGURED",
         "A verified GitHub App is required to manage GitHub Actions workflows",
@@ -2009,29 +2041,26 @@ export class GitHubService {
   }
 
   private async appCredentials(settings: {
-    appId: string;
-    installationId: string;
-    apiBaseUrl: string;
-    graphqlUrl: string;
     keyFingerprint: string;
   }): Promise<GitHubAppCredentials> {
-    const privateKey = await this.credentials.getText(
-      CREDENTIALS.githubAppPrivateKey,
-    );
-    if (!privateKey) {
+    const [connection, privateKey] = await Promise.all([
+      this.storedAppConnection(),
+      this.credentials.getText(CREDENTIALS.githubAppPrivateKey),
+    ]);
+    if (!connection || !privateKey) {
       throw new GitHubAppError(
         "GITHUB_APP_NOT_CONFIGURED",
         "A verified GitHub App is required to manage GitHub Actions workflows",
       );
     }
     return {
-      appId: settings.appId,
-      installationId: settings.installationId,
+      appId: connection.value.appId,
+      installationId: connection.value.installationId,
       privateKey,
-      apiBaseUrl: settings.apiBaseUrl,
-      graphqlUrl: settings.graphqlUrl,
+      apiBaseUrl: GITHUB_API_BASE_URL,
+      graphqlUrl: GITHUB_GRAPHQL_URL,
       keyFingerprint: settings.keyFingerprint,
-      ...this.appTransportObservers(settings.graphqlUrl),
+      ...this.appTransportObservers(GITHUB_GRAPHQL_URL),
     };
   }
 
@@ -2115,14 +2144,17 @@ export class GitHubService {
     requestOrigin: string | null = null,
   ): Promise<GitHubAppSettingsView> {
     const prisma = await getPrismaClient();
-    const existing = await prisma.gitHubAppSettings.findUnique({
-      where: { id: GITHUB_APP_SETTINGS_ID },
-    });
+    const [existing, existingConnection] = await Promise.all([
+      prisma.gitHubAppSettings.findUnique({
+        where: { id: GITHUB_APP_SETTINGS_ID },
+      }),
+      this.storedAppConnection(),
+    ]);
     const replacementPrivateKey = input.privateKey?.trim() || null;
     try {
       if (
         existing &&
-        existing.appId !== input.appId.trim() &&
+        existingConnection?.value.appId !== input.appId.trim() &&
         !replacementPrivateKey
       ) {
         throw new GitHubAppError(
@@ -2142,7 +2174,7 @@ export class GitHubService {
       const webhookUrl = this.webhookUrl(
         input.webhookUrl !== undefined
           ? input.webhookUrl
-          : (existing?.webhookUrl ?? undefined),
+          : (existingConnection?.value.webhookUrl ?? undefined),
         requestOrigin,
       );
       clearGitHubAppTokenCache();
@@ -2179,16 +2211,52 @@ export class GitHubService {
       const webhookSecret = webhookUrl
         ? (existingWebhookSecret ?? randomBytes(32).toString("base64url"))
         : existingWebhookSecret;
-      let storedWebhookUrl = existing?.webhookUrl ?? null;
+      let storedWebhookUrl = existingConnection?.value.webhookUrl ?? null;
       let webhookConfiguredAt = existing?.webhookConfiguredAt ?? null;
       const webhookShouldBeConfigured =
         Boolean(webhookUrl) &&
-        (input.webhookUrl !== undefined || !existing?.webhookUrl);
+        (input.webhookUrl !== undefined ||
+          !existingConnection?.value.webhookUrl);
       if (webhookShouldBeConfigured || input.webhookUrl !== undefined) {
         storedWebhookUrl = webhookUrl;
         webhookConfiguredAt = null;
       }
+      const connection: GitHubAppConnectionSettings = {
+        appId: verification.appId,
+        installationId: verification.installationId,
+        webhookUrl: storedWebhookUrl,
+      };
+      const credentialEntries = [
+        ...(!existingConnection ||
+        JSON.stringify(existingConnection.value) !== JSON.stringify(connection)
+          ? [
+              {
+                descriptor: CREDENTIALS.githubAppSettings,
+                value: encodeJsonCredential(connection),
+              },
+            ]
+          : []),
+        ...(replacementPrivateKey
+          ? [
+              {
+                descriptor: CREDENTIALS.githubAppPrivateKey,
+                value: Buffer.from(privateKey, "utf8"),
+              },
+            ]
+          : []),
+        ...(webhookSecret && webhookSecret !== existingWebhookSecret
+          ? [
+              {
+                descriptor: CREDENTIALS.githubAppWebhookSecret,
+                value: Buffer.from(webhookSecret, "utf8"),
+              },
+            ]
+          : []),
+      ];
       if (webhookShouldBeConfigured && webhookUrl && webhookSecret) {
+        if (credentialEntries.length) {
+          await this.credentials.assertWritable();
+        }
         const configuration = await configureGitHubAppWebhook(credentials, {
           url: webhookUrl,
           secret: webhookSecret,
@@ -2209,26 +2277,8 @@ export class GitHubService {
           );
         }
       }
-      const credentialEntries = [
-        {
-          descriptor: CREDENTIALS.githubAppPrivateKey,
-          value: Buffer.from(privateKey, "utf8"),
-        },
-        ...(webhookSecret
-          ? [
-              {
-                descriptor: CREDENTIALS.githubAppWebhookSecret,
-                value: Buffer.from(webhookSecret, "utf8"),
-              },
-            ]
-          : []),
-      ];
-      await this.credentials.setMany(credentialEntries, async (transaction) => {
+      const saveMetadata = async (transaction: Prisma.TransactionClient) => {
         const data = {
-          appId: verification.appId,
-          installationId: verification.installationId,
-          apiBaseUrl: GITHUB_API_BASE_URL,
-          graphqlUrl: GITHUB_GRAPHQL_URL,
           keyFingerprint: verification.keyFingerprint,
           appSlug: verification.appSlug,
           appOwnerLogin: verification.appOwnerLogin,
@@ -2241,7 +2291,6 @@ export class GitHubService {
           webhookEventsJson: JSON.stringify(verification.webhookEvents),
           enhancedPipelineWebhooksEnabled,
           verifiedAt: verification.verifiedAt,
-          webhookUrl: storedWebhookUrl,
           webhookConfiguredAt,
         };
         await transaction.gitHubAppSettings.upsert({
@@ -2249,7 +2298,12 @@ export class GitHubService {
           create: { id: GITHUB_APP_SETTINGS_ID, ...data },
           update: data,
         });
-      });
+      };
+      if (credentialEntries.length) {
+        await this.credentials.setMany(credentialEntries, saveMetadata);
+      } else {
+        await prisma.$transaction(saveMetadata);
+      }
       await this.audit(auditContext, {
         operation: "GITHUB_APP_SETTINGS_SAVE",
         outcome: "SUCCESS",
@@ -2378,7 +2432,11 @@ export class GitHubService {
     auditContext: GitHubAuditContext,
   ): Promise<GitHubAppSettingsView> {
     await this.credentials.deleteMany(
-      [CREDENTIALS.githubAppPrivateKey, CREDENTIALS.githubAppWebhookSecret],
+      [
+        CREDENTIALS.githubAppSettings,
+        CREDENTIALS.githubAppPrivateKey,
+        CREDENTIALS.githubAppWebhookSecret,
+      ],
       async (transaction) => {
         await transaction.gitHubAppSettings.deleteMany({
           where: { id: GITHUB_APP_SETTINGS_ID },

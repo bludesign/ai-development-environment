@@ -23,6 +23,7 @@ function config(
     caCertPath: null,
     tlsServerName: null,
     skipVerify: false,
+    readOnly: false,
     ...overrides,
   };
 }
@@ -101,6 +102,7 @@ describe("VaultCredentialDriver", () => {
         value: Buffer.from("pat").toString("base64"),
         version: 1,
         kind: CREDENTIALS.githubPersonalAccessToken.kind,
+        ownerId: CREDENTIALS.githubPersonalAccessToken.ownerId,
       },
     });
     expect(request.mock.calls[1][0]).toContain(
@@ -123,6 +125,158 @@ describe("VaultCredentialDriver", () => {
     const failure = driver.get(CREDENTIALS.jiraApiToken);
     await expect(failure).rejects.toThrow("HTTP 403");
     await expect(failure).rejects.not.toThrow("vault-token-secret");
+  });
+
+  test("describes stored credentials without returning the secret", async () => {
+    const request = vi.fn().mockResolvedValue(
+      response(200, {
+        data: {
+          data: {
+            value: Buffer.from("jira-secret").toString("base64"),
+            version: 1,
+            kind: CREDENTIALS.jiraApiToken.kind,
+            ownerId: "default",
+          },
+        },
+      }),
+    );
+    const driver = new VaultCredentialDriver(
+      config(),
+      request as never,
+      () => ({}) as never,
+    );
+
+    const described = await driver.describe(CREDENTIALS.jiraApiToken.id);
+    expect(described).toEqual({
+      id: CREDENTIALS.jiraApiToken.id,
+      kind: CREDENTIALS.jiraApiToken.kind,
+      ownerId: "default",
+    });
+    expect(JSON.stringify(described)).not.toContain("jira-secret");
+  });
+
+  test("recovers the owner from the path when the payload predates it", async () => {
+    const request = vi.fn().mockResolvedValue(
+      response(200, {
+        data: {
+          data: {
+            value: Buffer.from("headers").toString("base64"),
+            version: 1,
+            kind: "external-mcp-server-headers",
+          },
+        },
+      }),
+    );
+    const driver = new VaultCredentialDriver(
+      config(),
+      request as never,
+      () => ({}) as never,
+    );
+
+    await expect(
+      driver.describe("external-mcp-server/server-7/headers"),
+    ).resolves.toEqual({
+      id: "external-mcp-server/server-7/headers",
+      kind: "external-mcp-server-headers",
+      ownerId: "server-7",
+    });
+  });
+
+  test("rejects payloads whose kind is not a known credential", async () => {
+    const request = vi.fn().mockResolvedValue(
+      response(200, {
+        data: {
+          data: {
+            value: Buffer.from("someone-elses-secret").toString("base64"),
+            version: 1,
+            kind: "unrelated-application-secret",
+          },
+        },
+      }),
+    );
+    const driver = new VaultCredentialDriver(
+      config(),
+      request as never,
+      () => ({}) as never,
+    );
+
+    await expect(driver.describe("unrelated/default/secret")).rejects.toThrow(
+      "invalid credential payload",
+    );
+  });
+
+  test("walks nested KV metadata folders when listing", async () => {
+    const request = vi
+      .fn()
+      .mockResolvedValueOnce(response(200, { data: { keys: ["jira/"] } }))
+      .mockResolvedValueOnce(response(200, { data: { keys: ["default/"] } }))
+      .mockResolvedValueOnce(response(200, { data: { keys: ["api-token"] } }))
+      .mockResolvedValue(response(404));
+    const driver = new VaultCredentialDriver(
+      config(),
+      request as never,
+      () => ({}) as never,
+    );
+
+    await expect(driver.list()).resolves.toEqual(["jira/default/api-token"]);
+    expect(request.mock.calls[0][0]).toBe(
+      "https://vault.test:8200/base/v1/secret/metadata/ai-development-environment/credentials?list=true",
+    );
+    expect(request.mock.calls[2][0]).toContain(
+      "/metadata/ai-development-environment/credentials/jira/default?list=true",
+    );
+  });
+
+  test("counts folders toward the metadata traversal cap", async () => {
+    const request = vi.fn().mockResolvedValue(
+      response(200, {
+        data: {
+          keys: Array.from({ length: 600 }, (_, index) => `folder-${index}/`),
+        },
+      }),
+    );
+    const driver = new VaultCredentialDriver(
+      config(),
+      request as never,
+      () => ({}) as never,
+    );
+
+    await expect(driver.list()).resolves.toEqual([]);
+    expect(request).toHaveBeenCalledOnce();
+  });
+
+  test("refuses writes and deletes on a read-only install", async () => {
+    const request = vi.fn();
+    const driver = new VaultCredentialDriver(
+      config({ readOnly: true }),
+      request as never,
+      () => ({}) as never,
+    );
+
+    await expect(
+      driver.set(CREDENTIALS.jiraApiToken, Buffer.from("token")),
+    ).rejects.toThrow("read-only Vault");
+    await expect(driver.delete(CREDENTIALS.jiraApiToken)).rejects.toThrow(
+      "read-only Vault",
+    );
+    expect(request).not.toHaveBeenCalled();
+  });
+
+  test("reports a denied write as read-only access rather than a bare 403", async () => {
+    const request = vi
+      .fn()
+      .mockResolvedValue(response(403, { errors: ["permission denied"] }));
+    const driver = new VaultCredentialDriver(
+      config(),
+      request as never,
+      () => ({}) as never,
+    );
+
+    const failure = driver.set(CREDENTIALS.jiraApiToken, Buffer.from("token"));
+    await expect(failure).rejects.toThrow("read-only access");
+    await expect(failure).rejects.toMatchObject({
+      code: "CREDENTIAL_STORE_READ_ONLY",
+    });
   });
 
   test("sanitizes transport errors and configures CA, SNI, and verification", async () => {

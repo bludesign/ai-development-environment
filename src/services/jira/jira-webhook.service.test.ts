@@ -543,6 +543,7 @@ describe("Jira webhook configuration", () => {
     const upsert = vi.fn(async () => ({}));
     const credentials = {
       isConfigured: vi.fn(async () => true),
+      getJson: vi.fn(async () => null),
       setText: vi.fn(
         async (
           _descriptor: unknown,
@@ -579,11 +580,16 @@ describe("Jira webhook configuration", () => {
 
 describe("Jira webhook registration", () => {
   let settingsRow: Record<string, unknown>;
+  let webhookConnection: { url: string; jql: string | null } | null;
   let upsert: ReturnType<typeof vi.fn>;
   let credentials: {
+    assertWritable: ReturnType<typeof vi.fn>;
     isConfigured: ReturnType<typeof vi.fn>;
     setText: ReturnType<typeof vi.fn>;
+    getJson: ReturnType<typeof vi.fn>;
+    setMany: ReturnType<typeof vi.fn>;
     delete: ReturnType<typeof vi.fn>;
+    deleteMany: ReturnType<typeof vi.fn>;
   };
   let jira: { webhookApiRequest: ReturnType<typeof vi.fn> };
 
@@ -595,6 +601,7 @@ describe("Jira webhook registration", () => {
       webhookUrl: null,
       webhookJql: null,
     };
+    webhookConnection = null;
     upsert = vi.fn(async ({ update }: { update: Record<string, unknown> }) => {
       Object.assign(settingsRow, update);
       return settingsRow;
@@ -607,7 +614,25 @@ describe("Jira webhook registration", () => {
       jiraWebhookDelivery: { findFirst: vi.fn(async () => null) },
     });
     credentials = {
+      assertWritable: vi.fn(async () => undefined),
       isConfigured: vi.fn(async () => true),
+      getJson: vi.fn(async () => webhookConnection),
+      setMany: vi.fn(
+        async (
+          entries: Array<{ descriptor: { id: string }; value: Uint8Array }>,
+          mutation: (transaction: unknown) => Promise<void>,
+        ) => {
+          const settings = entries.find(({ descriptor }) =>
+            descriptor.id.endsWith("/webhook-settings"),
+          );
+          if (settings) {
+            webhookConnection = JSON.parse(
+              Buffer.from(settings.value).toString("utf8"),
+            ).value;
+          }
+          await mutation({ jiraSettings: { upsert } });
+        },
+      ),
       setText: vi.fn(
         async (
           _descriptor: unknown,
@@ -622,6 +647,15 @@ describe("Jira webhook registration", () => {
           _descriptor: unknown,
           mutation: (transaction: unknown) => Promise<void>,
         ) => {
+          await mutation({ jiraSettings: { upsert } });
+        },
+      ),
+      deleteMany: vi.fn(
+        async (
+          _descriptors: unknown,
+          mutation: (transaction: unknown) => Promise<void>,
+        ) => {
+          webhookConnection = null;
           await mutation({ jiraSettings: { upsert } });
         },
       ),
@@ -657,8 +691,10 @@ describe("Jira webhook registration", () => {
     expect(settingsRow).toMatchObject({
       webhookEnabled: true,
       webhookId: "72",
-      webhookUrl: "https://aide.example.com/api/public/jira/webhook",
-      webhookJql: "project in (AIDE)",
+    });
+    expect(webhookConnection).toEqual({
+      url: "https://aide.example.com/api/public/jira/webhook",
+      jql: "project in (AIDE)",
     });
     expect(result.settings).toMatchObject({
       registered: true,
@@ -711,14 +747,30 @@ describe("Jira webhook registration", () => {
     await expect(
       service().registerWebhook({ url: "https://aide.example.com" }),
     ).rejects.toThrow("403");
-    expect(credentials.setText).not.toHaveBeenCalled();
+    expect(credentials.setMany).not.toHaveBeenCalled();
     expect(settingsRow.webhookEnabled).toBe(false);
+  });
+
+  test("rejects read-only registration before changing Jira", async () => {
+    credentials.assertWritable.mockRejectedValue(
+      Object.assign(new Error("Credential storage is read-only"), {
+        code: "CREDENTIAL_STORE_READ_ONLY",
+      }),
+    );
+
+    await expect(
+      service().registerWebhook({ url: "https://aide.example.com" }),
+    ).rejects.toMatchObject({ code: "CREDENTIAL_STORE_READ_ONLY" });
+    expect(jira.webhookApiRequest).not.toHaveBeenCalled();
+    expect(credentials.setMany).not.toHaveBeenCalled();
   });
 
   test("rotates the secret in Jira when the webhook is registered", async () => {
     settingsRow.webhookId = "72";
-    settingsRow.webhookUrl = "https://aide.example.com/api/public/jira/webhook";
-    settingsRow.webhookJql = "project in (AIDE)";
+    webhookConnection = {
+      url: "https://aide.example.com/api/public/jira/webhook",
+      jql: "project in (AIDE)",
+    };
     jira.webhookApiRequest.mockResolvedValue(null);
 
     const result = await service().rotateSecret();
@@ -743,8 +795,23 @@ describe("Jira webhook registration", () => {
     expect(settingsRow).toMatchObject({
       webhookEnabled: false,
       webhookId: null,
-      webhookUrl: null,
     });
+    expect(webhookConnection).toBeNull();
+  });
+
+  test("rejects read-only disablement before changing Jira", async () => {
+    settingsRow.webhookId = "72";
+    credentials.assertWritable.mockRejectedValue(
+      Object.assign(new Error("Credential storage is read-only"), {
+        code: "CREDENTIAL_STORE_READ_ONLY",
+      }),
+    );
+
+    await expect(service().disableWebhook()).rejects.toMatchObject({
+      code: "CREDENTIAL_STORE_READ_ONLY",
+    });
+    expect(jira.webhookApiRequest).not.toHaveBeenCalled();
+    expect(credentials.deleteMany).not.toHaveBeenCalled();
   });
 
   test("treats a webhook already deleted in Jira as disabled", async () => {

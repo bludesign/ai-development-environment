@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react";
+import { cleanup, render, screen, within } from "@testing-library/react";
 import { beforeEach, describe, expect, test, vi } from "vitest";
 
 const request = vi.hoisted(() => vi.fn());
@@ -10,6 +10,7 @@ import { CredentialsPage } from "./credentials-page";
 
 describe("CredentialsPage", () => {
   beforeEach(() => {
+    cleanup();
     request.mockReset();
   });
 
@@ -82,5 +83,61 @@ describe("CredentialsPage", () => {
       await screen.findByText("Keychain is unsupported on this host"),
     ).toBeTruthy();
     expect(screen.getByText("No credentials stored")).toBeTruthy();
+  });
+
+  test("marks a read-only Vault and reports adopted credentials", async () => {
+    request.mockResolvedValue({
+      credentialStoreStatus: {
+        storageType: "VAULT",
+        state: "READY",
+        encryptionState: "EXTERNAL",
+        details: [
+          { label: "Address", value: "https://vault.test/" },
+          { label: "Vault access", value: "Read-only" },
+        ],
+        itemCount: 2,
+        mismatchCount: 0,
+        readOnly: true,
+        adoptedCount: 2,
+        warnings: [],
+      },
+      credentials: [],
+    });
+    render(<CredentialsPage />);
+
+    // The badge and the Vault access detail both read "Read-only".
+    expect(await screen.findAllByText("Read-only")).toHaveLength(2);
+    expect(screen.getByText("Vault access")).toBeTruthy();
+    expect(
+      screen.getByText(
+        "2 credential(s) were adopted from the external backend when the server started.",
+      ),
+    ).toBeTruthy();
+  });
+
+  test("explains an empty inventory in terms of the configured Vault path", async () => {
+    request.mockResolvedValue({
+      credentialStoreStatus: {
+        storageType: "VAULT",
+        state: "READY",
+        encryptionState: "EXTERNAL",
+        details: [],
+        itemCount: 0,
+        mismatchCount: 0,
+        readOnly: false,
+        adoptedCount: 0,
+        warnings: [],
+      },
+      credentials: [],
+    });
+    render(<CredentialsPage />);
+
+    expect(
+      await screen.findByText(/No credentials were found under the configured/),
+    ).toBeTruthy();
+    expect(screen.queryByText("Read-only")).toBeNull();
+    expect(
+      within(document.body).queryByText(/were adopted from the external/),
+    ).toBeNull();
   });
 });

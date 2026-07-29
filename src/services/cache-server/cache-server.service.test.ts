@@ -62,30 +62,46 @@ vi.mock("@/services/credentials", async (importOriginal) => {
       }
 
       async getJson() {
-        return state.settings ? JSON.parse(state.settings.headersJson) : null;
+        return state.settings?.baseUrl
+          ? {
+              baseUrl: state.settings.baseUrl,
+              headers: JSON.parse(state.settings.headersJson),
+            }
+          : null;
       }
 
       async setMany(
         entries: Array<{ descriptor: { id: string }; value: Uint8Array }>,
         mutation?: (transaction: unknown) => Promise<void>,
       ) {
-        const apiKey = Buffer.from(
-          entries.find((entry) => entry.descriptor.id.endsWith("/api-key"))!
-            .value,
-        ).toString("utf8");
-        const headerEnvelope = JSON.parse(
-          Buffer.from(
-            entries.find((entry) => entry.descriptor.id.endsWith("/headers"))!
-              .value,
-          ).toString("utf8"),
-        ) as { value: Array<{ name: string; value: string }> };
+        // Unchanged secrets are omitted from the write, so each entry is optional.
+        const apiKeyEntry = entries.find((entry) =>
+          entry.descriptor.id.endsWith("/api-key"),
+        );
+        const settingsEntry = entries.find((entry) =>
+          entry.descriptor.id.endsWith("/settings"),
+        );
         const prisma = await (
           await import("@/data/prisma-client")
         ).getPrismaClient();
         await mutation?.(prisma);
-        if (state.settings) {
-          state.settings.apiKey = apiKey;
-          state.settings.headersJson = JSON.stringify(headerEnvelope.value);
+        if (!state.settings) return;
+        if (apiKeyEntry) {
+          state.settings.apiKey = Buffer.from(apiKeyEntry.value).toString(
+            "utf8",
+          );
+        }
+        if (settingsEntry) {
+          const envelope = JSON.parse(
+            Buffer.from(settingsEntry.value).toString("utf8"),
+          ) as {
+            value: {
+              baseUrl: string;
+              headers: Array<{ name: string; value: string }>;
+            };
+          };
+          state.settings.baseUrl = envelope.value.baseUrl;
+          state.settings.headersJson = JSON.stringify(envelope.value.headers);
         }
       }
 
@@ -99,6 +115,7 @@ vi.mock("@/services/credentials", async (importOriginal) => {
         await mutation?.(prisma);
         if (state.settings) {
           state.settings.apiKey = null;
+          state.settings.baseUrl = null;
           state.settings.headersJson = "[]";
         }
       }

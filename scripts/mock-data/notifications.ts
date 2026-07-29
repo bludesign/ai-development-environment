@@ -200,10 +200,7 @@ export async function seedNotifications(prisma: PrismaClient): Promise<void> {
 
   await prisma.apnsCertificateCredential.create({
     data: {
-      id: "apns-cert-acme",
-      name: "Acme Production APNs",
-      topic: "com.acme.app",
-      environment: "PRODUCTION",
+      id: ids.push.certificate,
       fingerprint: "SHA256:acmeApnsCert1234567890",
       expiresAt: daysAgo(-320),
       lastTestedAt: hoursAgo(12),

@@ -264,4 +264,87 @@ describe("credential storage migration", () => {
       database.close();
     }
   });
+
+  test("drops connection columns without backfilling credential rows", async () => {
+    const directory = await mkdtemp(
+      join(tmpdir(), "ade-connection-migration-"),
+    );
+    directories.push(directory);
+    const database = new Database(join(directory, "connection.db"));
+    try {
+      database.exec(`
+        CREATE TABLE "Credential" (
+          "id" TEXT PRIMARY KEY, "kind" TEXT NOT NULL,
+          "ownerId" TEXT, "storageType" TEXT NOT NULL
+        );
+        CREATE TABLE "IosDeviceSettings" (
+          "id" TEXT PRIMARY KEY, "organizationName" TEXT NOT NULL,
+          "appStoreConnectIssuerId" TEXT, "appStoreConnectKeyId" TEXT
+        );
+        CREATE TABLE "PushNotificationSettings" (
+          "id" TEXT PRIMARY KEY, "tokenTeamId" TEXT, "tokenKeyId" TEXT
+        );
+        CREATE TABLE "ApnsCertificateCredential" (
+          "id" TEXT PRIMARY KEY, "name" TEXT NOT NULL,
+          "topic" TEXT NOT NULL, "environment" TEXT NOT NULL,
+          "fingerprint" TEXT NOT NULL
+        );
+        CREATE UNIQUE INDEX "ApnsCertificateCredential_name_key"
+          ON "ApnsCertificateCredential"("name");
+        CREATE INDEX "ApnsCertificateCredential_topic_environment_idx"
+          ON "ApnsCertificateCredential"("topic", "environment");
+        CREATE TABLE "JiraSettings" (
+          "id" TEXT PRIMARY KEY, "siteUrl" TEXT, "email" TEXT,
+          "webhookUrl" TEXT, "webhookJql" TEXT,
+          "cacheTtlSeconds" INTEGER NOT NULL
+        );
+        CREATE TABLE "GitHubAppSettings" (
+          "id" TEXT PRIMARY KEY, "appId" TEXT NOT NULL,
+          "installationId" TEXT NOT NULL, "apiBaseUrl" TEXT NOT NULL,
+          "graphqlUrl" TEXT NOT NULL, "webhookUrl" TEXT,
+          "keyFingerprint" TEXT NOT NULL
+        );
+        CREATE TABLE "CacheServerSettings" (
+          "id" TEXT PRIMARY KEY, "baseUrl" TEXT
+        );
+        INSERT INTO "Credential" VALUES
+          ('existing/secret', 'jira-api-token', 'default', 'database');
+      `);
+      const migration = await readFile(
+        join(
+          process.cwd(),
+          "prisma/migrations/20260729180000_credential_back_connection_settings/migration.sql",
+        ),
+        "utf8",
+      );
+      database.exec(migration);
+
+      const columns = (table: string) =>
+        (
+          database.prepare(`PRAGMA table_info(${table})`).all() as Array<{
+            name: string;
+          }>
+        ).map(({ name }) => name);
+      expect(columns("IosDeviceSettings")).toEqual(["id", "organizationName"]);
+      expect(columns("PushNotificationSettings")).toEqual(["id"]);
+      expect(columns("ApnsCertificateCredential")).toEqual([
+        "id",
+        "fingerprint",
+      ]);
+      expect(columns("JiraSettings")).toEqual(["id", "cacheTtlSeconds"]);
+      expect(columns("GitHubAppSettings")).toEqual(["id", "keyFingerprint"]);
+      expect(
+        database
+          .prepare(
+            "SELECT COUNT(*) AS count FROM sqlite_master WHERE type = 'table' AND name = 'CacheServerSettings'",
+          )
+          .get(),
+      ).toEqual({ count: 0 });
+      expect(
+        database.prepare("SELECT COUNT(*) AS count FROM Credential").get(),
+      ).toEqual({ count: 1 });
+    } finally {
+      database.close();
+    }
+  });
 });

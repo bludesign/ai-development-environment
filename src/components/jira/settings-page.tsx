@@ -22,6 +22,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Spinner } from "@/components/ui/spinner";
+import { useCredentialStoreReadOnly } from "@/hooks/use-credential-store-read-only";
 import { Link } from "@/i18n/navigation";
 import {
   controlPlaneRequest,
@@ -114,6 +115,7 @@ function JiraWebhookCard() {
   const t = useTranslations("jiraSettings");
   const tc = useTranslations("common");
   const locale = useLocale();
+  const credentialsReadOnly = useCredentialStoreReadOnly();
   const [webhook, setWebhook] = useState<JiraWebhookSettingsView | null>(null);
   const [secret, setSecret] = useState<string | null>(null);
   const [webhookUrl, setWebhookUrl] = useState("");
@@ -265,7 +267,7 @@ function JiraWebhookCard() {
             {t("webhookUrl")}
           </Label>
           <Input
-            disabled={busy}
+            disabled={busy || credentialsReadOnly}
             id="jira-webhook-url"
             onChange={(event) => setWebhookUrl(event.target.value)}
             value={webhookUrl}
@@ -283,7 +285,7 @@ function JiraWebhookCard() {
             {t("webhookJql")}
           </Label>
           <Input
-            disabled={busy}
+            disabled={busy || credentialsReadOnly}
             id="jira-webhook-jql"
             onChange={(event) => setJql(event.target.value)}
             placeholder="project in (ABC, XYZ)"
@@ -379,7 +381,11 @@ function JiraWebhookCard() {
               onConfirm={disable}
               title={t("confirmDisable")}
               trigger={
-                <Button disabled={busy} type="button" variant="ghost">
+                <Button
+                  disabled={busy || credentialsReadOnly}
+                  type="button"
+                  variant="ghost"
+                >
                   <Trash2 />
                   {t("disableWebhook")}
                 </Button>
@@ -404,7 +410,11 @@ function JiraWebhookCard() {
               }
               title={t("confirmRotate")}
               trigger={
-                <Button disabled={busy} type="button" variant="ghost">
+                <Button
+                  disabled={busy || credentialsReadOnly}
+                  type="button"
+                  variant="ghost"
+                >
                   {busy ? <Spinner /> : <RefreshCw />}
                   {t("rotateWebhook")}
                 </Button>
@@ -413,7 +423,7 @@ function JiraWebhookCard() {
           )}
           {!configured && (
             <Button
-              disabled={busy}
+              disabled={busy || credentialsReadOnly}
               onClick={() =>
                 void run(
                   `mutation { enableJiraWebhook { secret settings { ${WEBHOOK_FIELDS} } } }`,
@@ -429,7 +439,7 @@ function JiraWebhookCard() {
             </Button>
           )}
           <Button
-            disabled={busy || !webhookUrl.trim()}
+            disabled={busy || credentialsReadOnly || !webhookUrl.trim()}
             onClick={() => void register()}
             type="button"
           >
@@ -449,6 +459,8 @@ export function JiraSettingsPage({
 } = {}) {
   const t = useTranslations("jiraSettings");
   const tc = useTranslations("common");
+  const tCredentials = useTranslations("credentials");
+  const credentialsReadOnly = useCredentialStoreReadOnly();
   const [settings, setSettings] = useState<JiraSettingsView | null>(null);
   const [siteUrl, setSiteUrl] = useState("");
   const [email, setEmail] = useState("");
@@ -630,6 +642,7 @@ export function JiraSettingsPage({
                 <Input
                   autoComplete="url"
                   id="jira-site-url"
+                  disabled={credentialsReadOnly}
                   onChange={(event) => setSiteUrl(event.target.value)}
                   placeholder="https://example.atlassian.net"
                   required
@@ -650,6 +663,7 @@ export function JiraSettingsPage({
                 <Input
                   autoComplete="username"
                   id="jira-email"
+                  disabled={credentialsReadOnly}
                   onChange={(event) => setEmail(event.target.value)}
                   required
                   type="email"
@@ -668,6 +682,7 @@ export function JiraSettingsPage({
                 </Label>
                 <Input
                   autoComplete="new-password"
+                  disabled={credentialsReadOnly}
                   id="jira-token"
                   onChange={(event) => setApiToken(event.target.value)}
                   placeholder={
@@ -675,14 +690,16 @@ export function JiraSettingsPage({
                       ? t("tokenPlaceholderConfigured")
                       : t("tokenPlaceholder")
                   }
-                  required={!settings?.tokenConfigured}
+                  required={!settings?.tokenConfigured && !credentialsReadOnly}
                   type="password"
                   value={apiToken}
                 />
                 <p className="mt-1 text-xs text-muted-foreground">
-                  {settings?.tokenConfigured
-                    ? t("tokenKeepHelp")
-                    : t("tokenHelp")}
+                  {credentialsReadOnly
+                    ? tCredentials("readOnlyNotice")
+                    : settings?.tokenConfigured
+                      ? t("tokenKeepHelp")
+                      : t("tokenHelp")}
                 </p>
                 <p className="mt-1 text-xs text-muted-foreground">
                   {t("tokenAcquireHelp")}{" "}
@@ -710,7 +727,11 @@ export function JiraSettingsPage({
                   title={t("confirmRemove")}
                   trigger={
                     <Button
-                      disabled={busy || !settings?.tokenConfigured}
+                      disabled={
+                        busy ||
+                        !settings?.tokenConfigured ||
+                        credentialsReadOnly
+                      }
                       type="button"
                       variant="ghost"
                     >
@@ -728,7 +749,7 @@ export function JiraSettingsPage({
                   <Unplug />
                   {t("test")}
                 </Button>
-                <Button disabled={busy} type="submit">
+                <Button disabled={busy || credentialsReadOnly} type="submit">
                   {busy ? <Spinner /> : <Save />}
                   {t("save")}
                 </Button>

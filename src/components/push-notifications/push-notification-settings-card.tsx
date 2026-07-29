@@ -20,6 +20,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Spinner } from "@/components/ui/spinner";
+import { useCredentialStoreReadOnly } from "@/hooks/use-credential-store-read-only";
 import { controlPlaneRequest } from "@/lib/control-plane-client";
 import { formatDateValue } from "@/lib/date-format";
 
@@ -60,6 +61,8 @@ const toBase64 = (file: File) =>
 export function PushNotificationSettingsCard() {
   const t = useTranslations("pushSettings");
   const tc = useTranslations("common");
+  const tCredentials = useTranslations("credentials");
+  const credentialsReadOnly = useCredentialStoreReadOnly();
   const locale = useLocale();
   const [settings, setSettings] = useState<Settings | null>(null);
   const [teamId, setTeamId] = useState("");
@@ -168,6 +171,7 @@ export function PushNotificationSettingsCard() {
             <div className="space-y-2">
               <Label htmlFor="apns-team">{t("teamId")}</Label>
               <Input
+                disabled={credentialsReadOnly}
                 id="apns-team"
                 onChange={(event) => setTeamId(event.target.value)}
                 value={teamId}
@@ -176,6 +180,7 @@ export function PushNotificationSettingsCard() {
             <div className="space-y-2">
               <Label htmlFor="apns-key">{t("keyId")}</Label>
               <Input
+                disabled={credentialsReadOnly}
                 id="apns-key"
                 onChange={(event) => setKeyId(event.target.value)}
                 value={keyId}
@@ -190,14 +195,17 @@ export function PushNotificationSettingsCard() {
           </p>
           <Label className="flex cursor-pointer items-center justify-center gap-2 rounded-xl border border-dashed p-6">
             <Upload />{" "}
-            {privateKey
-              ? t("p8Ready")
-              : settings?.tokenConfigured
-                ? t("replaceP8")
-                : t("chooseP8")}
+            {credentialsReadOnly
+              ? tCredentials("readOnlyNotice")
+              : privateKey
+                ? t("p8Ready")
+                : settings?.tokenConfigured
+                  ? t("replaceP8")
+                  : t("chooseP8")}
             <Input
               accept=".p8"
               className="sr-only"
+              disabled={credentialsReadOnly}
               onChange={(event) => {
                 const file = event.target.files?.[0];
                 if (file) void file.text().then(setPrivateKey);
@@ -231,7 +239,9 @@ export function PushNotificationSettingsCard() {
               title={t("removeToken")}
               trigger={
                 <Button
-                  disabled={busy || !settings?.tokenConfigured}
+                  disabled={
+                    busy || !settings?.tokenConfigured || credentialsReadOnly
+                  }
                   type="button"
                   variant="ghost"
                 >
@@ -244,7 +254,8 @@ export function PushNotificationSettingsCard() {
                 busy ||
                 !teamId ||
                 !keyId ||
-                (!privateKey && !settings?.tokenConfigured)
+                (!privateKey && !settings?.tokenConfigured) ||
+                credentialsReadOnly
               }
               type="submit"
             >
@@ -271,6 +282,7 @@ export function PushNotificationSettingsCard() {
             <div className="space-y-2">
               <Label>{t("name")}</Label>
               <Input
+                disabled={credentialsReadOnly}
                 onChange={(event) => setName(event.target.value)}
                 value={name}
               />
@@ -278,13 +290,18 @@ export function PushNotificationSettingsCard() {
             <div className="space-y-2">
               <Label>{t("topic")}</Label>
               <Input
+                disabled={credentialsReadOnly}
                 onChange={(event) => setTopic(event.target.value)}
                 value={topic}
               />
             </div>
             <div className="space-y-2">
               <Label>{t("environment")}</Label>
-              <Select onValueChange={setEnvironment} value={environment}>
+              <Select
+                disabled={credentialsReadOnly}
+                onValueChange={setEnvironment}
+                value={environment}
+              >
                 <SelectTrigger>
                   <SelectValue />
                 </SelectTrigger>
@@ -301,6 +318,7 @@ export function PushNotificationSettingsCard() {
               <Input
                 accept=".p12,.pfx"
                 className="sr-only"
+                disabled={credentialsReadOnly}
                 onChange={(event) => {
                   const file = event.target.files?.[0];
                   if (file) void toBase64(file).then(setP12Base64);
@@ -311,6 +329,7 @@ export function PushNotificationSettingsCard() {
             <div className="space-y-2">
               <Label>{t("passphrase")}</Label>
               <Input
+                disabled={credentialsReadOnly}
                 onChange={(event) => setPassphrase(event.target.value)}
                 type="password"
                 value={passphrase}
@@ -319,7 +338,9 @@ export function PushNotificationSettingsCard() {
           </div>
           <div className="flex justify-end">
             <Button
-              disabled={busy || !name || !topic || !p12Base64}
+              disabled={
+                busy || !name || !topic || !p12Base64 || credentialsReadOnly
+              }
               type="submit"
             >
               <Save /> {t("addCertificate")}
@@ -407,7 +428,11 @@ export function PushNotificationSettingsCard() {
                 }}
                 title={t("removeCertificate")}
                 trigger={
-                  <Button size="icon-sm" variant="ghost">
+                  <Button
+                    disabled={credentialsReadOnly}
+                    size="icon-sm"
+                    variant="ghost"
+                  >
                     <Trash2 />
                   </Button>
                 }

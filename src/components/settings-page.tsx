@@ -45,6 +45,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
+import { useCredentialStoreReadOnly } from "@/hooks/use-credential-store-read-only";
 import { Link } from "@/i18n/navigation";
 import { controlPlaneRequest } from "@/lib/control-plane-client";
 import { formatDateValue } from "@/lib/date-format";
@@ -263,6 +264,7 @@ function GitHubAppSettingsCard() {
   const t = useTranslations("githubAppSettings");
   const tc = useTranslations("common");
   const locale = useLocale();
+  const credentialsReadOnly = useCredentialStoreReadOnly();
   const [settings, setSettings] = useState<GitHubAppSettingsView | null>(null);
   const [appId, setAppId] = useState("");
   const [installationId, setInstallationId] = useState("");
@@ -420,6 +422,7 @@ function GitHubAppSettingsCard() {
   const dropPemFile = (event: DragEvent<HTMLDivElement>) => {
     event.preventDefault();
     setDraggingPem(false);
+    if (credentialsReadOnly) return;
     const file = event.dataTransfer.files.item(0);
     if (file) void loadPemFile(file);
   };
@@ -515,6 +518,7 @@ function GitHubAppSettingsCard() {
                     {t("appId")}
                   </Label>
                   <Input
+                    disabled={credentialsReadOnly}
                     id="github-app-id"
                     inputMode="numeric"
                     onChange={(event) => setAppId(event.target.value)}
@@ -531,6 +535,7 @@ function GitHubAppSettingsCard() {
                     {t("installationId")}
                   </Label>
                   <Input
+                    disabled={credentialsReadOnly}
                     id="github-installation-id"
                     inputMode="numeric"
                     onChange={(event) => setInstallationId(event.target.value)}
@@ -549,6 +554,7 @@ function GitHubAppSettingsCard() {
                   {t("webhookUrl")}
                 </Label>
                 <Input
+                  disabled={credentialsReadOnly}
                   id="github-app-webhook-url"
                   onChange={(event) => {
                     setWebhookUrl(event.target.value);
@@ -639,6 +645,7 @@ function GitHubAppSettingsCard() {
                   <Textarea
                     autoComplete="new-password"
                     className="min-h-40 border-0 bg-transparent font-mono text-xs shadow-none focus-visible:ring-0 dark:bg-transparent"
+                    disabled={credentialsReadOnly}
                     id="github-app-private-key"
                     onChange={(event) => setPrivateKey(event.target.value)}
                     placeholder={
@@ -646,7 +653,9 @@ function GitHubAppSettingsCard() {
                         ? t("privateKeyPlaceholderConfigured")
                         : t("privateKeyPlaceholder")
                     }
-                    required={!settings?.privateKeyConfigured}
+                    required={
+                      !settings?.privateKeyConfigured && !credentialsReadOnly
+                    }
                     value={privateKey}
                   />
                 </div>
@@ -737,7 +746,9 @@ function GitHubAppSettingsCard() {
                   title={t("confirmRemove")}
                   trigger={
                     <Button
-                      disabled={busy || !settings?.configured}
+                      disabled={
+                        busy || !settings?.configured || credentialsReadOnly
+                      }
                       type="button"
                       variant="ghost"
                     >
@@ -755,7 +766,12 @@ function GitHubAppSettingsCard() {
                   <Unplug />
                   {t("test")}
                 </Button>
-                <Button disabled={busy} type="submit">
+                <Button
+                  disabled={
+                    busy || (credentialsReadOnly && !settings?.configured)
+                  }
+                  type="submit"
+                >
                   {busy ? (
                     <Spinner />
                   ) : privateKey && settings?.configured ? (
@@ -777,6 +793,8 @@ function GitHubAppSettingsCard() {
 function GitHubSettingsCard() {
   const t = useTranslations("githubSettings");
   const tc = useTranslations("common");
+  const tCredentials = useTranslations("credentials");
+  const credentialsReadOnly = useCredentialStoreReadOnly();
   const [settings, setSettings] = useState<GitHubSettingsView | null>(null);
   const [apiToken, setApiToken] = useState("");
   const [pollIntervalSeconds, setPollIntervalSeconds] = useState(60);
@@ -934,6 +952,7 @@ function GitHubSettingsCard() {
                 </Label>
                 <Input
                   autoComplete="new-password"
+                  disabled={credentialsReadOnly}
                   id="github-token"
                   onChange={(event) => setApiToken(event.target.value)}
                   placeholder={
@@ -941,14 +960,16 @@ function GitHubSettingsCard() {
                       ? t("tokenPlaceholderConfigured")
                       : t("tokenPlaceholder")
                   }
-                  required={!settings?.tokenConfigured}
+                  required={!settings?.tokenConfigured && !credentialsReadOnly}
                   type="password"
                   value={apiToken}
                 />
                 <p className="mt-1 text-xs text-muted-foreground">
-                  {settings?.tokenConfigured
-                    ? t("tokenKeepHelp")
-                    : t("tokenHelp")}
+                  {credentialsReadOnly
+                    ? tCredentials("readOnlyNotice")
+                    : settings?.tokenConfigured
+                      ? t("tokenKeepHelp")
+                      : t("tokenHelp")}
                 </p>
                 <p className="mt-1 text-xs text-muted-foreground">
                   {t("tokenAcquireHelp")}{" "}
@@ -1005,7 +1026,11 @@ function GitHubSettingsCard() {
                   title={t("confirmRemove")}
                   trigger={
                     <Button
-                      disabled={busy || !settings?.tokenConfigured}
+                      disabled={
+                        busy ||
+                        !settings?.tokenConfigured ||
+                        credentialsReadOnly
+                      }
                       type="button"
                       variant="ghost"
                     >

@@ -79,6 +79,60 @@ describe("credential store configuration", () => {
     expect(result.errors[0]?.code).toBe("VAULT_CONFIGURATION_INVALID");
   });
 
+  test("treats read-only access as a Vault-only setting", () => {
+    const vault = readCredentialStoreConfig({
+      CREDENTIAL_STORAGE_TYPE: "vault",
+      VAULT_ADDR: "https://vault.test",
+      CREDENTIAL_VAULT_READ_ONLY: "true",
+    });
+    expect(vault.config).toMatchObject({
+      storageType: "vault",
+      readOnly: true,
+    });
+    expect(vault.warnings).toEqual([]);
+    expect(vault.details).toContainEqual({
+      label: "Vault access",
+      value: "Read-only",
+    });
+
+    const writable = readCredentialStoreConfig({
+      CREDENTIAL_STORAGE_TYPE: "vault",
+      VAULT_ADDR: "https://vault.test",
+    });
+    expect(writable.config).toMatchObject({ readOnly: false });
+    expect(writable.details).toContainEqual({
+      label: "Vault access",
+      value: "Read-write",
+    });
+  });
+
+  test.each(["database", "keychain"] as const)(
+    "warns that read-only access is ignored by %s storage",
+    (storageType) => {
+      const result = readCredentialStoreConfig(
+        {
+          CREDENTIAL_STORAGE_TYPE: storageType,
+          CREDENTIAL_VAULT_READ_ONLY: "true",
+        },
+        "darwin",
+      );
+      expect(result.warnings.map(({ code }) => code)).toContain(
+        "VAULT_READ_ONLY_IGNORED",
+      );
+      expect(result.config).not.toHaveProperty("readOnly");
+    },
+  );
+
+  test("rejects an unparseable read-only flag", () => {
+    const result = readCredentialStoreConfig({
+      CREDENTIAL_STORAGE_TYPE: "vault",
+      VAULT_ADDR: "https://vault.test",
+      CREDENTIAL_VAULT_READ_ONLY: "yes",
+    });
+    expect(result.config).toBeNull();
+    expect(result.errors[0]?.code).toBe("VAULT_CONFIGURATION_INVALID");
+  });
+
   test("reports Keychain as unsupported on Linux without loading it", () => {
     const result = readCredentialStoreConfig(
       { CREDENTIAL_STORAGE_TYPE: "keychain" },

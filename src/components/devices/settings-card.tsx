@@ -23,6 +23,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Spinner } from "@/components/ui/spinner";
 import { Textarea } from "@/components/ui/textarea";
+import { useCredentialStoreReadOnly } from "@/hooks/use-credential-store-read-only";
 import { controlPlaneRequest } from "@/lib/control-plane-client";
 import { formatDateValue } from "@/lib/date-format";
 
@@ -33,6 +34,7 @@ export function IosDeviceSettingsCard() {
   const t = useTranslations("iosDeviceSettings");
   const tc = useTranslations("common");
   const locale = useLocale();
+  const credentialsReadOnly = useCredentialStoreReadOnly();
   const [settings, setSettings] = useState<IosDeviceSettings | null>(null);
   const [organizationName, setOrganizationName] = useState("");
   const [profileIdentifier, setProfileIdentifier] = useState("");
@@ -227,6 +229,7 @@ export function IosDeviceSettingsCard() {
   const dropP8File = (event: DragEvent<HTMLDivElement>) => {
     event.preventDefault();
     setDraggingP8(false);
+    if (credentialsReadOnly) return;
     const file = event.dataTransfer.files.item(0);
     if (file) void loadP8File(file);
   };
@@ -398,6 +401,7 @@ export function IosDeviceSettingsCard() {
                   <Input
                     autoCapitalize="none"
                     id="app-store-issuer-id"
+                    disabled={credentialsReadOnly}
                     maxLength={100}
                     onChange={(event) => setIssuerId(event.target.value)}
                     required
@@ -410,6 +414,7 @@ export function IosDeviceSettingsCard() {
                   <Input
                     autoCapitalize="characters"
                     id="app-store-key-id"
+                    disabled={credentialsReadOnly}
                     maxLength={100}
                     onChange={(event) => setKeyId(event.target.value)}
                     required
@@ -446,18 +451,23 @@ export function IosDeviceSettingsCard() {
                     autoComplete="new-password"
                     className="min-h-36 border-0 bg-transparent font-mono text-xs shadow-none focus-visible:ring-0 dark:bg-transparent"
                     id="app-store-private-key"
+                    disabled={credentialsReadOnly}
                     onChange={(event) => setPrivateKey(event.target.value)}
                     placeholder={
                       settings?.appStoreConnectPrivateKeyConfigured
                         ? t("privateKeyConfiguredPlaceholder")
                         : t("privateKeyPlaceholder")
                     }
-                    required={!settings?.appStoreConnectPrivateKeyConfigured}
+                    required={
+                      !settings?.appStoreConnectPrivateKeyConfigured &&
+                      !credentialsReadOnly
+                    }
                     value={privateKey}
                   />
                   <Input
                     accept=".p8,application/pkcs8,text/plain"
                     aria-label={t("chooseP8")}
+                    disabled={credentialsReadOnly}
                     className="mt-2 h-auto text-xs"
                     onChange={(event) => {
                       const file = event.target.files?.item(0);
@@ -522,7 +532,8 @@ export function IosDeviceSettingsCard() {
                     <Button
                       disabled={
                         appleBusy ||
-                        !settings?.appStoreConnectPrivateKeyConfigured
+                        !settings?.appStoreConnectPrivateKeyConfigured ||
+                        credentialsReadOnly
                       }
                       type="button"
                       variant="ghost"
@@ -541,7 +552,10 @@ export function IosDeviceSettingsCard() {
                 >
                   <RefreshCw /> {t("retest")}
                 </Button>
-                <Button disabled={appleBusy} type="submit">
+                <Button
+                  disabled={appleBusy || credentialsReadOnly}
+                  type="submit"
+                >
                   {appleBusy ? <Spinner /> : <Save />} {t("saveAndVerify")}
                 </Button>
               </div>
