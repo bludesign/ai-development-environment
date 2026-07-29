@@ -111,6 +111,7 @@ export type WorkflowSummary = {
   overlapPolicy: "QUEUE" | "CONCURRENT" | "COALESCE_LATEST";
   maxConcurrentRuns: number;
   completionNotificationsEnabled: boolean;
+  exclusiveWorktree: boolean;
   quickActionKind: "STANDARD" | "MERGE_CONFLICT" | "GITHUB_ACTIONS" | "NONE";
   quickActionIconKey: string;
   quickActionButtonVariant: "default" | "outline" | "secondary" | "destructive";
@@ -214,6 +215,28 @@ export type WorkflowRun = {
     createdAt: string;
   }>;
   resourceLinks: WorkflowResourceLink[];
+};
+
+export type WorktreeRunQueueEntry = {
+  position: number;
+  id: string;
+  kind: "WORKFLOW" | "PLAN" | "SESSION";
+  displayNumber: number;
+  name: string;
+  status: string;
+  phase: string;
+  worktreeId: string | null;
+  worktree: {
+    id: string;
+    folder: string;
+    branch: string | null;
+    highlightColor: string | null;
+  } | null;
+  workflowId: string | null;
+  workflowRunId: string | null;
+  queuedAt: string;
+  exclusiveWorktree: boolean;
+  worktreeConcurrencyLimit: number | null;
 };
 
 export function emptyDefinition(

@@ -175,6 +175,28 @@ describe("Action Center index", () => {
     ).resolves.toMatchObject({ rows: [], totalCount: 0 });
   });
 
+  test("shows worktree-queued agent runs as active", async () => {
+    await prisma.$executeRawUnsafe(
+      `INSERT INTO AgentRun (
+        id, kind, status, phase, updatedAt, finishedAt, archivedAt
+      ) VALUES ('session-queued', 'SESSION', 'QUEUED', 'WAITING_FOR_WORKTREE', ?, NULL, NULL)`,
+      timestamp(12),
+    );
+
+    await expect(
+      queryActionCenterIndex(prisma, { first: 10, cursor: null }),
+    ).resolves.toMatchObject({
+      rows: [
+        expect.objectContaining({
+          resourceId: "session-queued",
+          reason: "ACTIVE",
+        }),
+      ],
+      totalCount: 1,
+      activeCount: 1,
+    });
+  });
+
   test("paginates the mixed feed and excludes current acknowledgements", async () => {
     await prisma.$executeRawUnsafe(
       `INSERT INTO AgentRun (

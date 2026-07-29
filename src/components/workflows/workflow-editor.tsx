@@ -163,7 +163,7 @@ const CATALOG_QUERY = `
       triggers { kind category label description details configSchema capabilityFlags seedPaths sourceHandles }
     }
     workflow(id: $id) {
-      id name description draftDefinition activeVersionId enabled overlapPolicy maxConcurrentRuns completionNotificationsEnabled archivedAt
+      id name description draftDefinition activeVersionId enabled overlapPolicy maxConcurrentRuns completionNotificationsEnabled exclusiveWorktree archivedAt
       versionCount runCount createdAt updatedAt
     }
   }
@@ -345,6 +345,7 @@ function WorkflowEditorInner({ workflowId }: { workflowId?: string | null }) {
   const [maxConcurrentRuns, setMaxConcurrentRuns] = useState(1);
   const [completionNotificationsEnabled, setCompletionNotificationsEnabled] =
     useState(true);
+  const [exclusiveWorktree, setExclusiveWorktree] = useState(false);
   // Off by default: laying a workflow out means panning and zooming around a
   // canvas bigger than the pane, which a fit lock would fight.
   const [locked, setLocked] = useState(false);
@@ -402,6 +403,7 @@ function WorkflowEditorInner({ workflowId }: { workflowId?: string | null }) {
         setCompletionNotificationsEnabled(
           data.workflow?.completionNotificationsEnabled ?? true,
         );
+        setExclusiveWorktree(data.workflow?.exclusiveWorktree ?? false);
         const categoryMap = new Map(
           data.workflowCatalog.steps.map(({ kind, category }) => [
             kind,
@@ -672,7 +674,7 @@ function WorkflowEditorInner({ workflowId }: { workflowId?: string | null }) {
         }>(
           `mutation SaveWorkflow($input: SaveWorkflowDraftInput!) {
             saveWorkflowDraft(input: $input) {
-              id name description draftDefinition activeVersionId enabled overlapPolicy maxConcurrentRuns completionNotificationsEnabled archivedAt
+              id name description draftDefinition activeVersionId enabled overlapPolicy maxConcurrentRuns completionNotificationsEnabled exclusiveWorktree archivedAt
               versionCount runCount createdAt updatedAt
             }
           }`,
@@ -683,6 +685,7 @@ function WorkflowEditorInner({ workflowId }: { workflowId?: string | null }) {
               overlapPolicy,
               maxConcurrentRuns,
               completionNotificationsEnabled,
+              exclusiveWorktree,
             },
           },
         );
@@ -695,7 +698,7 @@ function WorkflowEditorInner({ workflowId }: { workflowId?: string | null }) {
         }>(
           `mutation CreateWorkflow($input: CreateWorkflowInput!) {
             createWorkflow(input: $input) {
-              id name description draftDefinition activeVersionId enabled overlapPolicy maxConcurrentRuns completionNotificationsEnabled archivedAt
+              id name description draftDefinition activeVersionId enabled overlapPolicy maxConcurrentRuns completionNotificationsEnabled exclusiveWorktree archivedAt
               versionCount runCount createdAt updatedAt
             }
           }`,
@@ -707,6 +710,7 @@ function WorkflowEditorInner({ workflowId }: { workflowId?: string | null }) {
               overlapPolicy,
               maxConcurrentRuns,
               completionNotificationsEnabled,
+              exclusiveWorktree,
             },
           },
         );
@@ -788,6 +792,7 @@ function WorkflowEditorInner({ workflowId }: { workflowId?: string | null }) {
             overlapPolicy,
             maxConcurrentRuns,
             completionNotificationsEnabled,
+            exclusiveWorktree,
           },
         },
       );
@@ -815,6 +820,7 @@ function WorkflowEditorInner({ workflowId }: { workflowId?: string | null }) {
               overlapPolicy,
               maxConcurrentRuns,
               completionNotificationsEnabled,
+              exclusiveWorktree,
               definition,
             },
           };
@@ -1519,6 +1525,20 @@ function WorkflowEditorInner({ workflowId }: { workflowId?: string | null }) {
                 type="number"
                 value={maxConcurrentRuns}
               />
+            </Field>
+            <Field>
+              <label className="flex items-center gap-2 text-sm">
+                <Checkbox
+                  checked={exclusiveWorktree}
+                  onCheckedChange={(checked) =>
+                    setExclusiveWorktree(checked === true)
+                  }
+                />
+                {t("exclusiveWorktree")}
+              </label>
+              <p className="text-xs text-muted-foreground">
+                {t("exclusiveWorktreeHelp")}
+              </p>
             </Field>
             <Field>
               <label className="flex items-center gap-2 text-sm">

@@ -14,6 +14,7 @@ import { useTranslations } from "next-intl";
 
 import { DateTime } from "@/components/common/date-time";
 import { RunBuildControls } from "@/components/builds/run-build-controls";
+import { useRunLabels } from "@/components/runs/run-labels";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -83,6 +84,7 @@ export function ActionCenterItem({
   compact?: boolean;
 }) {
   const t = useTranslations("actionCenter");
+  const runLabels = useRunLabels();
   const { acknowledge, refresh, reportError } = useActionCenter();
   const [acknowledging, setAcknowledging] = useState(false);
   const Icon = KIND_ICONS[item.resourceKind];
@@ -96,6 +98,16 @@ export function ActionCenterItem({
     item.resourceKind === "WORKFLOW" &&
     item.worktree &&
     item.summary === `WORKTREE:${item.worktree.id}`;
+  const agentRun =
+    item.resourceKind === "PLAN" || item.resourceKind === "SESSION";
+  const statusLabel = agentRun
+    ? runLabels.status(item.status)
+    : formatEnumLabel(item.status);
+  const phaseLabel = item.phase
+    ? agentRun
+      ? runLabels.phase(item.phase)
+      : formatEnumLabel(item.phase)
+    : null;
 
   const acknowledgeFailure = async () => {
     setAcknowledging(true);
@@ -200,6 +212,12 @@ export function ActionCenterItem({
             {question.header || question.prompt}
           </p>
         )}
+        {agentRun && item.status === "QUEUED" && (
+          <p className="truncate text-xs leading-tight text-muted-foreground">
+            {statusLabel}
+            {phaseLabel && item.phase !== item.status ? ` · ${phaseLabel}` : ""}
+          </p>
+        )}
         {item.error && (
           <p className="line-clamp-2 break-words text-xs leading-tight text-destructive">
             {item.error}
@@ -260,9 +278,9 @@ export function ActionCenterItem({
           >
             {t(`reasons.${item.reason}`)}
           </Badge>
-          <Badge variant="secondary">{formatEnumLabel(item.status)}</Badge>
+          <Badge variant="secondary">{statusLabel}</Badge>
           {item.phase && item.phase !== item.status && (
-            <Badge variant="outline">{formatEnumLabel(item.phase)}</Badge>
+            <Badge variant="outline">{phaseLabel}</Badge>
           )}
           <span className="text-xs text-muted-foreground">
             <DateTime value={item.updatedAt} />

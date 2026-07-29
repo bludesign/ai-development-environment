@@ -1191,7 +1191,7 @@ export const WORKFLOW_STEP_CATALOG: readonly WorkflowCatalogEntry[] = [
       description:
         "Starts an AI planning run against the worktree and waits for the plan to be produced.",
       details:
-        "Requires a worktree, a provider/model, and a prompt. Planning inspects the code but does not change it — use Run AI session and wait to actually make edits, or follow with Run completed plan. If the run asks a question it parks until someone answers, so pair long workflows with a question-needed trigger. Writes the run under `run.<stepId>.*`, which later steps reference by this step's id.",
+        "Requires a worktree, a provider/model, and a prompt. Plans use a separate FIFO worktree queue and allow unlimited concurrent plans by default; set the worktree concurrency limit to 1–32 to cap them, or 0 for unlimited. Planning inspects the code but does not change it — use Run AI session and wait to actually make edits, or follow with Run completed plan. If the run asks a question it parks until someone answers, so pair long workflows with a question-needed trigger. Writes the run under `run.<stepId>.*`, which later steps reference by this step's id.",
     },
   ),
   step(
@@ -1205,7 +1205,7 @@ export const WORKFLOW_STEP_CATALOG: readonly WorkflowCatalogEntry[] = [
       description:
         "Starts an AI coding session against the worktree and waits for it to finish.",
       details:
-        "The workhorse step: the agent edits files in the worktree, so the tree is dirty afterwards and the changes still need committing and pushing. Requires a worktree, a provider/model, and a prompt; attachments and web search are optional. Parks on questions until answered. Writes `run.<stepId>.*`.",
+        "The workhorse step: the agent edits files in the worktree, so the tree is dirty afterwards and the changes still need committing and pushing. Sessions use a separate FIFO worktree queue with one active session by default; set the worktree concurrency limit to 2–32 for parallel sessions or 0 for unlimited. Requires a worktree, a provider/model, and a prompt; attachments and web search are optional. Parks on questions until answered. Writes `run.<stepId>.*`.",
       mutatesWorktree: true,
     },
   ),
@@ -1220,7 +1220,7 @@ export const WORKFLOW_STEP_CATALOG: readonly WorkflowCatalogEntry[] = [
       description:
         "Executes a plan that has already been produced, turning it into real code changes.",
       details:
-        "Takes the plan's run id — usually `run.<planStepId>.id` from an earlier Create plan step. The plan must have completed. This is the half of the plan/execute split that touches the worktree. Writes a new run under `run.<stepId>.*`.",
+        "Takes the plan's run id — usually `run.<planStepId>.id` from an earlier Create plan step. The plan must have completed. The resulting Session joins the worktree's FIFO Session queue, which allows one active Session by default; use 0 for unlimited or 2–32 for a larger limit. This is the half of the plan/execute split that touches the worktree. Writes a new run under `run.<stepId>.*`.",
       mutatesWorktree: true,
     },
   ),
@@ -1235,7 +1235,7 @@ export const WORKFLOW_STEP_CATALOG: readonly WorkflowCatalogEntry[] = [
       description:
         "Starts a new AI run that continues from an existing one, resuming its context or starting fresh.",
       details:
-        'RESUME keeps the previous conversation, FRESH starts over in the same worktree, and RESEND replays the original prompt. Needs the source run id plus a new prompt. The natural step for "fix the review comments" loops after a first session. Writes `run.<stepId>.*`.',
+        'RESUME keeps the previous conversation, FRESH starts over in the same worktree, and RESEND replays the original prompt. The new run joins the source kind\'s separate FIFO worktree queue and defaults to unlimited concurrency for Plans or one active run for Sessions; use 0 for unlimited or 1–32 for a finite limit. Needs the source run id plus a new prompt. The natural step for "fix the review comments" loops after a first session. Writes `run.<stepId>.*`.',
     },
   ),
   step(

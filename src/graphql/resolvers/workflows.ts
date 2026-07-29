@@ -97,6 +97,7 @@ export const createWorkflowResolvers = (service: WorkflowsService) => ({
       JSON.parse(value.sessionDataJson),
     worktree: (value: { sessionDataJson: string }) =>
       service.runWorktree(value.sessionDataJson),
+    queue: (value: { id: string }) => service.runQueueForWorkflowRun(value.id),
     attemptCount: (value: {
       _count?: { attempts?: number };
       attempts?: unknown[];
@@ -193,6 +194,14 @@ export const createWorkflowResolvers = (service: WorkflowsService) => ({
     ) => {
       requireControlPlane(context);
       return service.runs(args);
+    },
+    worktreeRunQueue: (
+      _root: unknown,
+      args: { worktreeId?: string | null; workflowId?: string | null },
+      context: GraphQLContext,
+    ) => {
+      requireControlPlane(context);
+      return service.runQueue(args);
     },
     workflowRun: (
       _root: unknown,

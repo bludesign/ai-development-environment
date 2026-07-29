@@ -1,4 +1,5 @@
 const PRIORITIZED_STATUSES = new Set([
+  "QUEUED",
   "RUNNING",
   "BLOCKED",
   "PAUSED",

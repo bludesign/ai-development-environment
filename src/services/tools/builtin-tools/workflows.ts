@@ -138,6 +138,7 @@ const WorkflowSchema = z.object({
   overlapPolicy: z.string(),
   maxConcurrentRuns: z.number(),
   completionNotificationsEnabled: z.boolean(),
+  exclusiveWorktree: z.boolean(),
   activeVersionId: z.string().nullable(),
   draftSchemaVersion: z.number(),
   quickActionKind: z.enum([
@@ -637,6 +638,12 @@ export function createWorkflowToolGroup(workflows: Service): BuiltInToolGroup {
             .describe(
               "Whether successful runs create completion notifications. Defaults to true.",
             ),
+          exclusiveWorktree: z
+            .boolean()
+            .optional()
+            .describe(
+              "Reserve a run's worktree and queue other workflows, plans, and sessions until it finishes. Defaults to false.",
+            ),
         }),
         outputSchema: z.object({
           workflow: WorkflowSchema,
@@ -658,7 +665,7 @@ export function createWorkflowToolGroup(workflows: Service): BuiltInToolGroup {
         name: "update_workflow_settings",
         title: "Update workflow settings",
         description:
-          "Change a workflow's name, description, concurrency, or successful-run completion notifications. Name and description live inside the definition, so this rewrites the draft.",
+          "Change a workflow's name, description, concurrency, worktree exclusivity, or successful-run completion notifications. Name and description live inside the definition, so this rewrites the draft.",
         inputSchema: z.object({
           workflowId: z.string().min(1),
           name: z.string().min(1).max(200).optional(),
@@ -672,6 +679,12 @@ export function createWorkflowToolGroup(workflows: Service): BuiltInToolGroup {
             .optional()
             .describe(
               "Set false to suppress successful-run completion notifications for this workflow. Failure and attention notifications remain enabled.",
+            ),
+          exclusiveWorktree: z
+            .boolean()
+            .optional()
+            .describe(
+              "Reserve the worktree for each top-level run of this workflow.",
             ),
         }),
         outputSchema: DefinitionResultSchema,
@@ -690,6 +703,7 @@ export function createWorkflowToolGroup(workflows: Service): BuiltInToolGroup {
             maxConcurrentRuns: input.maxConcurrentRuns ?? null,
             completionNotificationsEnabled:
               input.completionNotificationsEnabled ?? null,
+            exclusiveWorktree: input.exclusiveWorktree ?? null,
           });
           return saveDraft(workflows, input.workflowId, next);
         },

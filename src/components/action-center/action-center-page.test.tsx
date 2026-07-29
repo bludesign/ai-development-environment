@@ -139,8 +139,8 @@ const active = {
   href: "/sessions/session-active",
   displayNumber: 9,
   label: "Continue implementation.",
-  status: "IN_PROGRESS",
-  phase: "RUNNING",
+  status: "QUEUED",
+  phase: "WAITING_FOR_WORKTREE",
   questionBatches: [],
 };
 
@@ -220,6 +220,10 @@ describe("ActionCenterPage", () => {
     expect(
       within(activeCard as HTMLElement).getByText("Active").className,
     ).toContain("bg-emerald-500/10");
+    expect(within(activeCard as HTMLElement).getByText("Queued")).toBeDefined();
+    expect(
+      within(activeCard as HTMLElement).getByText("Waiting for worktree"),
+    ).toBeDefined();
 
     const workflowCard = screen
       .getByRole("link", { name: "Deploy application #8" })
@@ -310,6 +314,7 @@ describe("MiniActionCenter", () => {
     );
 
     expect(await screen.findByText("Approach")).toBeDefined();
+    expect(screen.getByText("Queued · Waiting for worktree")).toBeDefined();
     expect(screen.queryByRole("radio", { name: "Recommended" })).toBeNull();
     expect(screen.queryByRole("button", { name: "Submit answer" })).toBeNull();
     expect(

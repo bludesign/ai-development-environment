@@ -326,6 +326,18 @@ const runInputFields = (
   modelField(),
   bool("webSearchEnabled", "Enable web search"),
   mcpPresets(kind),
+  num("worktreeConcurrencyLimit", "Worktree concurrency limit", {
+    default: kind === "PLAN" ? 0 : kind === "SESSION" ? 1 : undefined,
+    minimum: 0,
+    maximum: 32,
+    integer: true,
+    help:
+      kind === "PLAN"
+        ? "Maximum plans admitted on this worktree. Use 0 for unlimited."
+        : kind === "SESSION"
+          ? "Maximum sessions admitted on this worktree. Use 0 for unlimited."
+          : "Maximum same-kind runs admitted on this worktree. Use 0 for unlimited; leave empty for the source kind's default.",
+  }),
   multiline("prompt", "Prompt", { required: true }),
   stringList("attachmentIds", "Attachment IDs"),
 ];
@@ -925,7 +937,17 @@ const STEP_CONFIG_DESCRIPTORS: StepConfigDescriptors = {
   RUN_CREATE_PLAN: { fields: runInputFields("PLAN") },
   RUN_CREATE_SESSION: { fields: runInputFields("SESSION") },
   RUN_PLAY_PLAN: {
-    fields: [text("runId", "Plan run ID"), mcpPresets("SESSION")],
+    fields: [
+      text("runId", "Plan run ID"),
+      mcpPresets("SESSION"),
+      num("worktreeConcurrencyLimit", "Worktree concurrency limit", {
+        default: 1,
+        minimum: 0,
+        maximum: 32,
+        integer: true,
+        help: "Maximum sessions admitted on this worktree. Use 0 for unlimited.",
+      }),
+    ],
   },
   RUN_FOLLOW_UP: {
     fields: [

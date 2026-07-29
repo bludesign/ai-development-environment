@@ -10,6 +10,7 @@ describe("useRunLabels", () => {
     const t = labels();
     expect(t.phase("IMPORTED_SYNCED")).toBe("Imported and synced");
     expect(t.phase("WAITING_FOR_ANSWER")).toBe("Waiting for answer");
+    expect(t.phase("WAITING_FOR_WORKTREE")).toBe("Waiting for worktree");
     expect(t.phase("SUPERSEDED_BY_FOLLOW_UP")).toBe("Superseded by follow-up");
     expect(t.phase("PREPARE_ANSWER_REVISION_FAILED")).toBe(
       "Prepare revision failed",
@@ -18,6 +19,7 @@ describe("useRunLabels", () => {
 
   test("localizes statuses, checkpoint kinds, follow-up modes, and tool calls", () => {
     const t = labels();
+    expect(t.status("QUEUED")).toBe("Queued");
     expect(t.status("COMPLETED")).toBe("Completed");
     expect(t.checkpointKind("PRE_ANSWER_REVISION")).toBe(
       "Before answer revision",

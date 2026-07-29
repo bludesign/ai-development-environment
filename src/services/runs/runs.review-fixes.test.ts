@@ -373,6 +373,15 @@ describe("run review regressions", () => {
     const reaped = await new RunsService().reapOrphanedRuns(now);
 
     expect(reaped).toBe(2);
+    expect(prisma.agentRun.findMany).toHaveBeenCalledWith({
+      where: { status: "IN_PROGRESS" },
+      select: {
+        id: true,
+        agentId: true,
+        worktreeId: true,
+        kind: true,
+      },
+    });
     expect(transaction.agentRun.updateMany).toHaveBeenCalledWith({
       where: {
         id: { in: ["run-offline", "run-orphan"] },

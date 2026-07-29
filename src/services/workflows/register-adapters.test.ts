@@ -126,6 +126,46 @@ describe("workflow run adapters", () => {
     );
   });
 
+  test("forwards configured worktree concurrency to created runs", async () => {
+    const create = vi
+      .fn()
+      .mockResolvedValue({ id: "agent-run", kind: "SESSION" });
+    const executor = executorWithCreate(create);
+    const input = context("actual-worktree");
+    input.node.config.worktreeConcurrencyLimit = 2;
+
+    await executor.execute(input);
+
+    expect(create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        worktreeConcurrencyLimit: 2,
+        workflowRunId: "workflow-run",
+      }),
+    );
+  });
+
+  test("forwards configured worktree concurrency when playing a plan", async () => {
+    const playPlan = vi
+      .fn()
+      .mockResolvedValue({ id: "session-run", kind: "SESSION" });
+    const executor = new WorkflowStepExecutor();
+    registerWorkflowAdapters(
+      { registerWaitPoller: vi.fn() } as unknown as WorkflowsService,
+      executor,
+      { runs: { playPlan } } as unknown as WorkflowAdapterServices,
+    );
+    const input = context("actual-worktree");
+    input.node = {
+      ...input.node,
+      kind: "RUN_PLAY_PLAN",
+      config: { runId: "plan-run", worktreeConcurrencyLimit: 0 },
+    };
+
+    await executor.execute(input);
+
+    expect(playPlan).toHaveBeenCalledWith("plan-run", [], 0, "workflow-run");
+  });
+
   test("links created runs to their internal detail pages", async () => {
     const create = vi
       .fn()
@@ -432,6 +472,23 @@ describe("workflow wait pollers", () => {
     );
     return registered;
   }
+
+  test("keeps workflow steps pending while an agent run is queued", async () => {
+    const registered = pollers({
+      runs: {
+        get: vi.fn().mockResolvedValue({
+          id: "session-queued",
+          kind: "SESSION",
+          status: "QUEUED",
+          phase: "WAITING_FOR_WORKTREE",
+        }),
+      } as unknown as WorkflowAdapterServices["runs"],
+    });
+
+    await expect(
+      registered.get("AGENT_RUN")?.("session-queued"),
+    ).resolves.toEqual({ pending: true, pollAfterSeconds: 3 });
+  });
 
   test("hydrates the destination context after moving a worktree", async () => {
     const richContext = {

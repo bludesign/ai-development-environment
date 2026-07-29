@@ -195,6 +195,8 @@ function NumberField({ field, value, onChange, sessionPaths }: FieldProps) {
       {(current, onLiteral, controlId) => (
         <Input
           id={controlId}
+          max={field.maximum}
+          min={field.minimum}
           onChange={(event) =>
             onLiteral(
               event.target.value === ""
@@ -203,6 +205,7 @@ function NumberField({ field, value, onChange, sessionPaths }: FieldProps) {
             )
           }
           placeholder={field.placeholder}
+          step={field.integer ? 1 : undefined}
           type="number"
           value={
             typeof current === "number" && Number.isFinite(current)

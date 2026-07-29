@@ -35,7 +35,11 @@ const prisma = vi.hoisted(() => ({
     createMany: vi.fn(),
     findMany: vi.fn(),
   },
-  workflowStepAttempt: { update: vi.fn(), updateMany: vi.fn() },
+  workflowStepAttempt: {
+    findUnique: vi.fn(),
+    update: vi.fn(),
+    updateMany: vi.fn(),
+  },
   workflowWait: { create: vi.fn(), findMany: vi.fn(), updateMany: vi.fn() },
   workflowTriggerState: { findUnique: vi.fn(), upsert: vi.fn() },
   workflowTriggerEvent: {
@@ -1198,6 +1202,89 @@ describe("workflow runtime lifecycle guards", () => {
 
     expect(prisma.workflowRun.update).not.toHaveBeenCalled();
     expect(prisma.workflowRunEvent.create).not.toHaveBeenCalled();
+  });
+
+  test("rejects a session patch that changes an exclusive run's worktree", async () => {
+    prisma.workflowRun.findUnique.mockResolvedValue({
+      id: "run-1",
+      status: "RUNNING",
+      exclusiveWorktree: true,
+      worktreeId: "worktree-1",
+      sessionDataJson: JSON.stringify({ worktree: { id: "worktree-1" } }),
+    });
+    const service = new WorkflowsService(new WorkflowEventsService());
+
+    await expect(
+      internals(service).completeAttempt(
+        { id: "attempt-1", runId: "run-1", iterationKey: "" },
+        { id: "move", name: "Move worktree" },
+        { sessionPatch: { worktree: { id: "worktree-2" } } },
+      ),
+    ).rejects.toThrow(/Exclusive workflows cannot change worktrees/);
+
+    expect(prisma.workflowStepAttempt.updateMany).not.toHaveBeenCalled();
+    expect(prisma.workflowRun.update).not.toHaveBeenCalled();
+  });
+
+  test("rejects a worktree move before an exclusive run executes it", async () => {
+    const definition = emptyWorkflowDefinition("Exclusive move");
+    definition.nodes = [
+      {
+        id: "move",
+        kind: "WORKTREE_MOVE",
+        name: "Move worktree",
+        position: { x: 0, y: 0 },
+        config: {},
+        requiredPaths: [],
+        providedPaths: [],
+        retry: {
+          maxAttempts: 1,
+          strategy: "EXPONENTIAL",
+          delaySeconds: 1,
+        },
+        failurePolicy: "FAIL",
+      },
+    ];
+    prisma.workflowStepAttempt.findUnique.mockResolvedValue({
+      id: "attempt-1",
+      runId: "run-1",
+      nodeId: "move",
+      status: "RUNNING",
+      iterationKey: "",
+      run: {
+        id: "run-1",
+        status: "RUNNING",
+        exclusiveWorktree: true,
+        worktreeId: "worktree-1",
+        sessionDataJson: JSON.stringify({ worktree: { id: "worktree-1" } }),
+        version: { definitionJson: JSON.stringify(definition) },
+      },
+    });
+    const execute = vi.fn();
+    const service = new WorkflowsService(new WorkflowEventsService(), {
+      execute,
+    } as never);
+    const serviceInternals = service as unknown as {
+      executeAttempt(id: string, signal: AbortSignal): Promise<void>;
+      failAttempt(...args: unknown[]): Promise<void>;
+    };
+    const failAttempt = vi
+      .spyOn(serviceInternals, "failAttempt")
+      .mockResolvedValue(undefined);
+
+    await serviceInternals.executeAttempt(
+      "attempt-1",
+      new AbortController().signal,
+    );
+
+    expect(execute).not.toHaveBeenCalled();
+    expect(failAttempt).toHaveBeenCalledWith(
+      expect.objectContaining({ id: "attempt-1" }),
+      expect.objectContaining({ kind: "WORKTREE_MOVE" }),
+      expect.objectContaining({
+        message: expect.stringMatching(/Exclusive workflows cannot run steps/),
+      }),
+    );
   });
 
   test("schedules a retry without overriding a pausing lifecycle", async () => {

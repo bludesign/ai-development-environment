@@ -69,12 +69,13 @@ beforeEach(() => {
   request.mockResolvedValue({
     agentRuns: {
       items: [
-        run("complete", 303, "COMPLETED", timestamp),
+        run("complete", 404, "COMPLETED", timestamp),
+        run("queued", 303, "QUEUED", timestamp),
         run("in-progress", 202, "IN_PROGRESS", timestamp),
         run("paused", 101, "PAUSED", timestamp),
       ],
       nextCursor: null,
-      totalCount: 3,
+      totalCount: 4,
     },
   } as never);
 });
@@ -97,9 +98,10 @@ describe("RunsPage", () => {
 
       const runLinks = await screen.findAllByRole("link", { name: /^#\d+$/ });
       expect(runLinks.map((link) => link.textContent)).toEqual([
+        "#303",
         "#202",
         "#101",
-        "#303",
+        "#404",
       ]);
       expect(screen.getAllByRole("cell", { name: "Active" })).toHaveLength(1);
       expect(

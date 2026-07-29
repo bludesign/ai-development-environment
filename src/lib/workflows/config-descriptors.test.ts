@@ -68,6 +68,37 @@ describe("workflow config descriptors", () => {
     }
   });
 
+  test("uses kind-specific worktree concurrency defaults for AI runs", () => {
+    const concurrency = (kind: string) =>
+      getConfigDescriptor(kind, "step")?.fields.find(
+        ({ key }) => key === "worktreeConcurrencyLimit",
+      );
+
+    expect(concurrency("RUN_CREATE_PLAN")).toMatchObject({
+      control: "number",
+      default: 0,
+      minimum: 0,
+      maximum: 32,
+      integer: true,
+    });
+    for (const kind of ["RUN_CREATE_SESSION", "RUN_PLAY_PLAN"]) {
+      expect(concurrency(kind)).toMatchObject({
+        control: "number",
+        default: 1,
+        minimum: 0,
+        maximum: 32,
+        integer: true,
+      });
+    }
+    expect(concurrency("RUN_FOLLOW_UP")).toMatchObject({
+      control: "number",
+      default: undefined,
+      minimum: 0,
+      maximum: 32,
+      integer: true,
+    });
+  });
+
   test("defaults imported coverage build names to the workflow name", () => {
     expect(
       getConfigDescriptor("BUILD_IMPORT_COVERAGE", "step")?.fields.find(

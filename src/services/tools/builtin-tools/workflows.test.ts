@@ -244,16 +244,18 @@ describe("discovery tools", () => {
 });
 
 describe("authoring tools", () => {
-  test("updates successful completion notification settings", async () => {
+  test("updates completion notification and worktree exclusivity settings", async () => {
     const double = registry();
     await call(double.registry, "update_workflow_settings", {
       workflowId: "wf-1",
       completionNotificationsEnabled: false,
+      exclusiveWorktree: true,
     });
     expect(double.saveDraft).toHaveBeenCalledWith(
       expect.objectContaining({
         id: "wf-1",
         completionNotificationsEnabled: false,
+        exclusiveWorktree: true,
       }),
     );
   });

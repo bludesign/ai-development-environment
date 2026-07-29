@@ -282,6 +282,110 @@ describe("workflow question answers", () => {
     expect(header?.className).toContain("border-l-violet-500");
   });
 
+  test("shows the worktree queue at the top while the run is queued", async () => {
+    request.mockResolvedValue({
+      workflowRun: {
+        ...pendingRun,
+        status: "QUEUED",
+        phase: "WAITING_FOR_WORKTREE",
+        attempts: [],
+        worktree: {
+          id: "worktree-1",
+          folder: "/tmp/feature",
+          branch: "feature/APP-42",
+          highlightColor: null,
+        },
+        queue: [
+          {
+            position: 1,
+            id: "session-2",
+            kind: "SESSION",
+            displayNumber: 2,
+            name: "Earlier work",
+            status: "QUEUED",
+            phase: "WAITING_FOR_WORKTREE",
+            worktreeId: "worktree-1",
+            worktree: {
+              id: "worktree-1",
+              folder: "/tmp/feature",
+              branch: "feature/APP-42",
+              highlightColor: null,
+            },
+            workflowId: null,
+            workflowRunId: null,
+            queuedAt: "2026-07-24T11:59:00.000Z",
+            exclusiveWorktree: false,
+            worktreeConcurrencyLimit: 1,
+          },
+          {
+            position: 2,
+            id: "run-1",
+            kind: "WORKFLOW",
+            displayNumber: 7,
+            name: "Release",
+            status: "QUEUED",
+            phase: "WAITING_FOR_WORKTREE",
+            worktreeId: "worktree-1",
+            worktree: {
+              id: "worktree-1",
+              folder: "/tmp/feature",
+              branch: "feature/APP-42",
+              highlightColor: null,
+            },
+            workflowId: "workflow-1",
+            workflowRunId: "run-1",
+            queuedAt: "2026-07-24T12:00:00.000Z",
+            exclusiveWorktree: true,
+            worktreeConcurrencyLimit: null,
+          },
+        ],
+      },
+    });
+    render(
+      <TooltipProvider>
+        <WorkflowRunPage runId="run-1" />
+      </TooltipProvider>,
+    );
+
+    const currentLink = await screen.findByRole("link", {
+      name: "Workflow #7",
+    });
+    const queueCard = currentLink.closest<HTMLElement>('[data-slot="card"]');
+    expect(queueCard).not.toBeNull();
+    expect(queueCard?.textContent).toContain("#2");
+    expect(queueCard?.textContent).toContain("Current run");
+    expect(queueCard?.textContent).toContain("Session #2");
+    const graph = screen.getByText("Workflow graph");
+    expect(
+      queueCard!.compareDocumentPosition(graph) &
+        Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+  });
+
+  test("shows the linked worktree branch instead of its resource ID", async () => {
+    request.mockResolvedValue({
+      workflowRun: {
+        ...pendingRun,
+        triggerKind: "RESOURCE_MANUAL_CHOICE",
+        triggerSubjectKey: "WORKTREE:worktree-1",
+        worktree: {
+          id: "worktree-1",
+          folder: "/tmp/feature",
+          branch: "feature/APP-42",
+          highlightColor: null,
+        },
+      },
+    });
+    render(
+      <TooltipProvider>
+        <WorkflowRunPage runId="run-1" />
+      </TooltipProvider>,
+    );
+
+    expect(await screen.findByText(/feature\/APP-42$/)).not.toBeNull();
+    expect(screen.queryByText(/WORKTREE:worktree-1/)).toBeNull();
+  });
+
   test("leaves the header untinted when no worktree is linked", async () => {
     render(
       <TooltipProvider>

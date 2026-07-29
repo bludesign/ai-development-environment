@@ -6,16 +6,21 @@ import {
 } from "./active-table-order";
 
 describe("active table ordering", () => {
-  test.each(["RUNNING", "BLOCKED", "PAUSED", "WAITING", "IN_PROGRESS"])(
-    "prioritizes %s",
-    (status) => {
-      expect(hasPrioritizedTableStatus(status)).toBe(true);
-    },
-  );
+  test.each([
+    "QUEUED",
+    "RUNNING",
+    "BLOCKED",
+    "PAUSED",
+    "WAITING",
+    "IN_PROGRESS",
+  ])("prioritizes %s", (status) => {
+    expect(hasPrioritizedTableStatus(status)).toBe(true);
+  });
 
   test("moves active rows first without changing order within either tier", () => {
     const rows = [
       { id: "newest-complete", status: "COMPLETED" },
+      { id: "queued", status: "QUEUED" },
       { id: "waiting", status: "WAITING" },
       { id: "older-complete", status: "SUCCEEDED" },
       { id: "running", status: "RUNNING" },
@@ -23,6 +28,7 @@ describe("active table ordering", () => {
     ];
 
     expect(prioritizeActiveTableRows(rows).map(({ id }) => id)).toEqual([
+      "queued",
       "waiting",
       "running",
       "newest-complete",

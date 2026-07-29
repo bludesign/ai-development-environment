@@ -8,6 +8,8 @@ enum RunKind {
 
 "Lifecycle statuses for run."
 enum RunStatus {
+  "Represents the queued status for run."
+  QUEUED
   "Represents the in progress status for run."
   IN_PROGRESS
   "Represents the paused status for run."
@@ -340,6 +342,8 @@ type AgentRun {
   mcpPresetIds: [ID!]!
   "MCP tool names associated with this agent run."
   mcpToolNames: [String!]!
+  "Maximum same-kind runs admitted on this worktree. Zero means unlimited."
+  worktreeConcurrencyLimit: Int!
   "The initial prompt associated with this agent run."
   initialPrompt: String!
   "The final output associated with this agent run. May be null when unavailable or not applicable."
@@ -594,6 +598,8 @@ input RunConfigurationInput {
   followUpMode: String
   "The context mode to use for the request."
   contextMode: String
+  "Maximum same-kind runs admitted on the worktree. Zero means unlimited; omitted uses the run-kind default."
+  worktreeConcurrencyLimit: Int
 }
 
 "Values used to save a run draft."
@@ -860,6 +866,8 @@ extend type Mutation {
     planId: ID!
     "Identifiers of the MCP presets. Defaults to `[]`."
     mcpPresetIds: [ID!] = []
+    "Maximum sessions admitted on the worktree. Zero means unlimited; omitted defaults to one."
+    worktreeConcurrencyLimit: Int
   ): AgentRun!
   "Creates a run follow up and returns an agent run."
   createRunFollowUp(

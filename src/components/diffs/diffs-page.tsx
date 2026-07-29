@@ -183,6 +183,9 @@ export function DiffsPage({
     loadedDetail?.worktreeId === worktreeId ? loadedDetail.detail : null;
   const branchFiles =
     loadedDetail?.worktreeId === worktreeId ? loadedDetail.branchFiles : [];
+  const detailPending = Boolean(
+    worktreeId && loadedDetail?.worktreeId !== worktreeId,
+  );
 
   const coverageReports = useCoverageReports(worktreeId);
   const coverageReport =
@@ -481,7 +484,7 @@ export function DiffsPage({
 
       {!worktreeId ? (
         <p className="text-sm text-muted-foreground">{t("selectAWorktree")}</p>
-      ) : loading && !detail ? (
+      ) : (loading || detailPending) && !detail ? (
         <p className="flex items-center gap-2 text-sm text-muted-foreground">
           <Spinner /> {t("loading")}
         </p>

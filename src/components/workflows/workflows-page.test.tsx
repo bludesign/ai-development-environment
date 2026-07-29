@@ -142,14 +142,15 @@ describe("WorkflowsPage", () => {
     );
   });
 
-  test("shows waiting and paused runs before newer completed runs", async () => {
+  test("shows queued, waiting, and paused runs before newer completed runs", async () => {
     request.mockImplementationOnce(
       async () =>
         ({
           workflows: { items: [] },
           workflowRuns: {
             items: [
-              workflowRun("complete", 303, null),
+              workflowRun("complete", 404, null),
+              workflowRun("queued", 303, null, "QUEUED", timestamp),
               workflowRun("paused", 202, null, "PAUSED", timestamp),
               workflowRun("waiting", 101, null, "WAITING", timestamp),
             ],
@@ -161,9 +162,10 @@ describe("WorkflowsPage", () => {
 
     const runLinks = await screen.findAllByRole("link", { name: /^#\d+$/ });
     expect(runLinks.map((link) => link.textContent)).toEqual([
+      "#303",
       "#202",
       "#101",
-      "#303",
+      "#404",
     ]);
     expect(screen.getAllByRole("cell", { name: "Active" })).toHaveLength(1);
     expect(screen.getAllByRole("cell", { name: /July 25, 2026/ })).toHaveLength(

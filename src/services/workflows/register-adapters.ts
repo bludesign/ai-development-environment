@@ -1128,7 +1128,7 @@ function registerWaitPollers(
   workflows.registerWaitPoller("AGENT_RUN", async (runId) => {
     const run = await services.runs.get(runId);
     if (!run) return { pending: false, error: "Plan or session disappeared" };
-    if (new Set(["IN_PROGRESS", "PAUSED"]).has(run.status)) {
+    if (new Set(["QUEUED", "IN_PROGRESS", "PAUSED"]).has(run.status)) {
       return { pending: true, pollAfterSeconds: 3 };
     }
     return {
@@ -2549,6 +2549,8 @@ function createRunInput(
   context: WorkflowExecutionContext,
   kind: "PLAN" | "SESSION",
 ): RunConfigurationInput {
+  const configuredConcurrencyLimit =
+    context.node.config.worktreeConcurrencyLimit;
   return {
     kind,
     worktreeId: runWorktreeId(context),
@@ -2568,6 +2570,11 @@ function createRunInput(
     mcpPresetIds: Array.isArray(context.node.config.mcpPresetIds)
       ? context.node.config.mcpPresetIds.map(String)
       : [],
+    worktreeConcurrencyLimit:
+      typeof configuredConcurrencyLimit === "number"
+        ? configuredConcurrencyLimit
+        : undefined,
+    workflowRunId: context.run.id,
   };
 }
 
@@ -2586,11 +2593,17 @@ function registerRunAdapters(
     return runResult(context, run as unknown as Record<string, unknown>, true);
   });
   executor.register("RUN_PLAY_PLAN", async (context) => {
+    const configuredConcurrencyLimit =
+      context.node.config.worktreeConcurrencyLimit;
     const run = await services.runs.playPlan(
       agentRunId(context),
       Array.isArray(context.node.config.mcpPresetIds)
         ? context.node.config.mcpPresetIds.map(String)
         : [],
+      typeof configuredConcurrencyLimit === "number"
+        ? configuredConcurrencyLimit
+        : undefined,
+      context.run.id,
     );
     if (!run) throw new Error("Plan could not be played");
     return runResult(context, run as unknown as Record<string, unknown>, true);

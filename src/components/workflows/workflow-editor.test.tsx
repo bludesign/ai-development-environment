@@ -233,6 +233,11 @@ describe("workflow editor completion notifications", () => {
     });
     expect(checkbox.getAttribute("data-state")).toBe("checked");
     fireEvent.click(checkbox);
+    const exclusive = screen.getByRole("checkbox", {
+      name: "Reserve the worktree for this workflow",
+    });
+    expect(exclusive.getAttribute("data-state")).toBe("unchecked");
+    fireEvent.click(exclusive);
     fireEvent.keyDown(document.body, { key: "Escape" });
     fireEvent.click(screen.getByRole("button", { name: "Save draft" }));
 
@@ -242,6 +247,7 @@ describe("workflow editor completion notifications", () => {
         expect.objectContaining({
           input: expect.objectContaining({
             completionNotificationsEnabled: false,
+            exclusiveWorktree: true,
           }),
         }),
       ),

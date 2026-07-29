@@ -1,4 +1,4 @@
-import { describe, expect, test } from "vitest";
+import { describe, expect, test, vi } from "vitest";
 
 import { emptyWorkflowDefinition } from "@/lib/workflows/definition";
 import type { WorkflowsService } from "@/services/workflows";
@@ -24,5 +24,34 @@ describe("workflow trigger metadata", () => {
     expect(resolver(workflow, { resourceKind: "worktree" })).toBe(true);
     expect(resolver(workflow, { resourceKind: "PULL_REQUEST" })).toBe(false);
     expect(resolver({ activeVersion: null }, {})).toBe(false);
+  });
+
+  test("forwards worktree and workflow queue scopes", async () => {
+    const runQueue = vi.fn().mockResolvedValue([]);
+    const runQueueForWorkflowRun = vi.fn().mockResolvedValue([]);
+    const resolver = createWorkflowResolvers({
+      runQueue,
+      runQueueForWorkflowRun,
+    } as unknown as WorkflowsService).Query.worktreeRunQueue;
+
+    await expect(
+      resolver(undefined, { worktreeId: "worktree-1" }, {} as never),
+    ).resolves.toEqual([]);
+    await expect(
+      resolver(undefined, { workflowId: "workflow-1" }, {} as never),
+    ).resolves.toEqual([]);
+    expect(runQueue).toHaveBeenNthCalledWith(1, {
+      worktreeId: "worktree-1",
+    });
+    expect(runQueue).toHaveBeenNthCalledWith(2, {
+      workflowId: "workflow-1",
+    });
+
+    await expect(
+      createWorkflowResolvers({
+        runQueueForWorkflowRun,
+      } as unknown as WorkflowsService).WorkflowRun.queue({ id: "run-1" }),
+    ).resolves.toEqual([]);
+    expect(runQueueForWorkflowRun).toHaveBeenCalledWith("run-1");
   });
 });

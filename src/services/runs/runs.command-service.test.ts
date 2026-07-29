@@ -18,12 +18,22 @@ describe("run command persistence", () => {
 
   test("loads the relations required to start or resume a provider run", async () => {
     const findMany = vi.fn().mockResolvedValue([]);
-    mocks.getPrismaClient.mockResolvedValue({ runCommand: { findMany } });
+    mocks.getPrismaClient.mockResolvedValue({
+      agentRun: { findMany: vi.fn().mockResolvedValue([]) },
+      runCommand: { findMany },
+    });
 
     await new RunsService().pendingCommands("agent-1");
 
     expect(findMany).toHaveBeenCalledWith(
       expect.objectContaining({
+        where: {
+          agentId: "agent-1",
+          OR: [
+            { status: "RUNNING" },
+            { status: "QUEUED", run: { status: { not: "QUEUED" } } },
+          ],
+        },
         include: {
           run: {
             include: {
@@ -39,6 +49,210 @@ describe("run command persistence", () => {
     );
   });
 
+  test("admits unlimited runs and stops at a blocked FIFO head", async () => {
+    const promoted: string[] = [];
+    let active = 7;
+    const queued = [
+      {
+        id: "plan-unlimited-1",
+        agentId: "agent-1",
+        createdAt: new Date(0),
+        worktreeConcurrencyLimit: 0,
+        workflowRun: null,
+      },
+      {
+        id: "plan-unlimited-2",
+        agentId: "agent-1",
+        createdAt: new Date(1),
+        worktreeConcurrencyLimit: 0,
+        workflowRun: null,
+      },
+    ];
+    const transaction = {
+      worktreeAdmissionLane: {
+        upsert: vi.fn().mockResolvedValue({}),
+      },
+      worktreeRunConcurrencyLane: {
+        upsert: vi.fn().mockResolvedValue({}),
+      },
+      worktreeWorkflowLease: {
+        deleteMany: vi.fn().mockResolvedValue({ count: 0 }),
+        findUnique: vi.fn().mockResolvedValue(null),
+      },
+      workflowRun: { findFirst: vi.fn().mockResolvedValue(null) },
+      worktreeRunLease: {
+        deleteMany: vi.fn().mockResolvedValue({ count: 0 }),
+        count: vi.fn(async () => active),
+        create: vi.fn(async ({ data }: { data: { runId: string } }) => {
+          promoted.push(data.runId);
+          active += 1;
+          return data;
+        }),
+      },
+      agentRun: {
+        findMany: vi.fn().mockImplementation(async () => queued),
+        updateMany: vi.fn().mockResolvedValue({ count: 1 }),
+      },
+      runCommand: {
+        findFirst: vi
+          .fn()
+          .mockImplementation(async ({ where }) => ({ id: where.runId })),
+      },
+    };
+    const prisma = {
+      agentRun: {
+        findMany: vi
+          .fn()
+          .mockResolvedValue([{ worktreeId: "worktree-1", kind: "PLAN" }]),
+      },
+      $transaction: vi.fn(
+        async (callback: (value: typeof transaction) => unknown) =>
+          callback(transaction),
+      ),
+    };
+    mocks.getPrismaClient.mockResolvedValue(prisma);
+
+    await expect(new RunsService().reconcileQueuedRuns()).resolves.toBe(2);
+    expect(promoted).toEqual(["plan-unlimited-1", "plan-unlimited-2"]);
+    expect(transaction.worktreeRunLease.count).toHaveBeenCalledWith({
+      where: {
+        worktreeId: "worktree-1",
+        OR: [
+          {
+            run: {
+              kind: "PLAN",
+              origin: "MANAGED",
+              status: { in: ["IN_PROGRESS", "PAUSED"] },
+            },
+          },
+          {
+            purpose: "ANSWER_REVISION",
+            run: { kind: "PLAN", origin: "MANAGED" },
+          },
+        ],
+      },
+    });
+
+    promoted.length = 0;
+    active = 1;
+    queued.splice(
+      0,
+      queued.length,
+      {
+        id: "session-blocked-head",
+        agentId: "agent-1",
+        createdAt: new Date(2),
+        worktreeConcurrencyLimit: 1,
+        workflowRun: null,
+      },
+      {
+        id: "session-unlimited-later",
+        agentId: "agent-1",
+        createdAt: new Date(3),
+        worktreeConcurrencyLimit: 0,
+        workflowRun: null,
+      },
+    );
+    prisma.agentRun.findMany.mockResolvedValue([
+      { worktreeId: "worktree-1", kind: "SESSION" },
+    ]);
+
+    await expect(new RunsService().reconcileQueuedRuns()).resolves.toBe(0);
+    expect(promoted).toEqual([]);
+    expect(transaction.agentRun.updateMany).toHaveBeenCalledTimes(2);
+  });
+
+  test("uses each queued run's finite limit as it reaches the head", async () => {
+    let active = 1;
+    const transaction = {
+      worktreeAdmissionLane: {
+        upsert: vi.fn().mockResolvedValue({}),
+      },
+      worktreeRunConcurrencyLane: {
+        upsert: vi.fn().mockResolvedValue({}),
+      },
+      worktreeWorkflowLease: {
+        deleteMany: vi.fn().mockResolvedValue({ count: 0 }),
+        findUnique: vi.fn().mockResolvedValue(null),
+      },
+      workflowRun: { findFirst: vi.fn().mockResolvedValue(null) },
+      worktreeRunLease: {
+        deleteMany: vi.fn().mockResolvedValue({ count: 0 }),
+        count: vi.fn(async () => active),
+        create: vi.fn(async () => {
+          active += 1;
+          return {};
+        }),
+      },
+      agentRun: {
+        findMany: vi.fn().mockResolvedValue([
+          {
+            id: "session-second",
+            agentId: "agent-1",
+            createdAt: new Date(0),
+            worktreeConcurrencyLimit: 2,
+            workflowRun: null,
+          },
+          {
+            id: "session-third",
+            agentId: "agent-1",
+            createdAt: new Date(1),
+            worktreeConcurrencyLimit: 2,
+            workflowRun: null,
+          },
+        ]),
+        updateMany: vi.fn().mockResolvedValue({ count: 1 }),
+      },
+      runCommand: {
+        findFirst: vi
+          .fn()
+          .mockImplementation(async ({ where }) => ({ id: where.runId })),
+      },
+    };
+    mocks.getPrismaClient.mockResolvedValue({
+      agentRun: {
+        findMany: vi
+          .fn()
+          .mockResolvedValue([{ worktreeId: "worktree-1", kind: "SESSION" }]),
+      },
+      $transaction: vi.fn(
+        async (callback: (value: typeof transaction) => unknown) =>
+          callback(transaction),
+      ),
+    });
+
+    await expect(new RunsService().reconcileQueuedRuns()).resolves.toBe(1);
+    expect(transaction.agentRun.updateMany).toHaveBeenCalledTimes(1);
+    expect(transaction.worktreeRunLease.create).toHaveBeenCalledWith({
+      data: {
+        id: expect.any(String),
+        worktreeId: "worktree-1",
+        runId: "session-second",
+      },
+    });
+  });
+
+  test("does not let an agent claim a non-admitted start command", async () => {
+    const updateMany = vi.fn();
+    mocks.getPrismaClient.mockResolvedValue({
+      runCommand: {
+        findUnique: vi.fn().mockResolvedValue({
+          id: "command-queued",
+          agentId: "agent-1",
+          status: "QUEUED",
+          type: "START",
+          run: { worktreeId: "worktree-1", status: "QUEUED" },
+        }),
+        updateMany,
+      },
+    });
+
+    await expect(
+      new RunsService().claimCommand("agent-1", "command-queued"),
+    ).rejects.toThrow("Run command is waiting for the worktree");
+    expect(updateMany).not.toHaveBeenCalled();
+  });
+
   test("terminalizes a cancelled run even when no attempt was created", async () => {
     const command = {
       id: "command-1",
@@ -47,6 +261,7 @@ describe("run command persistence", () => {
       type: "CANCEL",
       status: "RUNNING",
       error: null,
+      run: { worktreeId: null, kind: "SESSION" },
     };
     const prisma = {
       runCommand: {
@@ -212,6 +427,7 @@ describe("run command persistence", () => {
       type: "START",
       status: "RUNNING",
       error: null,
+      run: { worktreeId: null, kind: "SESSION" },
     };
     const prisma = {
       runCommand: {
@@ -498,6 +714,7 @@ describe("run command persistence", () => {
       model: "gpt-5.6-sol",
       effort: "high",
       webSearchEnabled: true,
+      worktreeConcurrencyLimit: 2,
       inputs: [{ kind: "INITIAL", prompt: "Build the feature" }],
       events: [
         {
@@ -523,16 +740,28 @@ describe("run command persistence", () => {
     };
     const findLease = vi
       .fn()
-      .mockResolvedValueOnce({ runId: sourceRun.id })
+      .mockResolvedValueOnce({
+        runId: sourceRun.id,
+        worktreeId: sourceRun.worktreeId,
+      })
       .mockResolvedValueOnce(null);
     const updateRun = vi.fn();
     const transaction = {
       runQuestionBatch: { findUnique: vi.fn().mockResolvedValue(batch) },
       worktreeRunLease: {
         findUnique: findLease,
-        deleteMany: vi.fn().mockResolvedValue({ count: 1 }),
+        update: vi.fn().mockResolvedValue({ id: "lease-1" }),
         create: vi.fn().mockResolvedValue({ id: "lease-1" }),
+        deleteMany: vi.fn().mockResolvedValue({ count: 0 }),
+        count: vi.fn().mockResolvedValue(0),
       },
+      worktreeAdmissionLane: { upsert: vi.fn().mockResolvedValue({}) },
+      worktreeRunConcurrencyLane: { upsert: vi.fn().mockResolvedValue({}) },
+      worktreeWorkflowLease: {
+        deleteMany: vi.fn().mockResolvedValue({ count: 0 }),
+        findUnique: vi.fn().mockResolvedValue(null),
+      },
+      workflowRun: { findFirst: vi.fn().mockResolvedValue(null) },
       runAnswerRevision: {
         create: vi.fn().mockResolvedValue({ id: "revision-1" }),
       },
@@ -546,6 +775,8 @@ describe("run command persistence", () => {
           return data;
         }),
         update: updateRun,
+        findMany: vi.fn().mockResolvedValue([]),
+        updateMany: vi.fn().mockResolvedValue({ count: 0 }),
       },
       runCommand: {
         findFirst: vi.fn().mockResolvedValue(null),
@@ -581,6 +812,7 @@ describe("run command persistence", () => {
         parentRunNumber: sourceRun.displayNumber,
         followUpMode: "ANSWER_REVISION",
         phase: "ANSWER_REVISION_QUEUED",
+        worktreeConcurrencyLimit: 2,
       }),
     );
     expect(updateRun).toHaveBeenCalledWith({
@@ -591,12 +823,16 @@ describe("run command persistence", () => {
         finishedAt: expect.any(Date),
       },
     });
-    expect(transaction.worktreeRunLease.create).toHaveBeenCalledWith({
+    expect(transaction.worktreeRunLease.update).toHaveBeenCalledWith({
+      where: { runId: sourceRun.id },
       data: {
-        worktreeId: sourceRun.worktreeId,
         runId: createdRunId,
+        purpose: "RUN",
+        reservationKey: null,
+        acquiredAt: expect.any(Date),
       },
     });
+    expect(transaction.worktreeRunLease.create).not.toHaveBeenCalled();
     expect(transaction.runCommand.create).toHaveBeenCalledWith(
       expect.objectContaining({
         data: expect.objectContaining({

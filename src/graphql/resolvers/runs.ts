@@ -214,11 +214,20 @@ export const createRunResolvers = (service: RunsService) => ({
       {
         planId,
         mcpPresetIds,
-      }: { planId: string; mcpPresetIds?: string[] | null },
+        worktreeConcurrencyLimit,
+      }: {
+        planId: string;
+        mcpPresetIds?: string[] | null;
+        worktreeConcurrencyLimit?: number | null;
+      },
       context: GraphQLContext,
     ) => {
       requireControlPlane(context);
-      return service.playPlan(planId, mcpPresetIds ?? []);
+      return service.playPlan(
+        planId,
+        mcpPresetIds ?? [],
+        worktreeConcurrencyLimit,
+      );
     },
     createRunFollowUp: (
       _root: unknown,
