@@ -134,6 +134,7 @@ export const ids = {
   },
   push: {
     batch: "push-batch-release",
+    certificate: "apns-cert-acme",
     registration: "apns-registration-1",
     preset: "push-preset-release",
   },

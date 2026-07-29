@@ -7,6 +7,7 @@ import {
 import type { CredentialKind } from "../../src/services/credentials/types";
 
 import { MOCK_CREDENTIAL_ENCRYPTION_KEY } from "./encryption-key";
+import { ids } from "./ids";
 import { daysAgo } from "./time";
 
 /**
@@ -28,6 +29,7 @@ import { daysAgo } from "./time";
 type Seed = {
   id: string;
   kind: CredentialKind;
+  ownerId?: string;
   value: string;
   createdAt: Date;
 };
@@ -102,6 +104,29 @@ const SEEDS: Seed[] = [
     createdAt: daysAgo(40),
   },
   {
+    id: "push-notifications/default/certificate-catalog",
+    kind: "apns-certificate-catalog",
+    value: jsonCredential([
+      {
+        id: ids.push.certificate,
+        name: "Acme Production APNs",
+        topic: "com.acme.app",
+        environment: "PRODUCTION",
+      },
+    ]),
+    createdAt: daysAgo(40),
+  },
+  {
+    id: `apns-certificate/${ids.push.certificate}/bundle`,
+    kind: "apns-certificate-bundle",
+    ownerId: ids.push.certificate,
+    value: jsonCredential({
+      p12Base64: "bW9jay1hcG5zLWNlcnRpZmljYXRl",
+      passphrase: "mock-passphrase",
+    }),
+    createdAt: daysAgo(40),
+  },
+  {
     id: "jira/default/api-token",
     kind: "jira-api-token",
     value: "ATATT3xFfGF0AcmeMockScreenshotJiraToken00",
@@ -163,7 +188,7 @@ export async function seedCredentials(prisma: PrismaClient): Promise<void> {
       return {
         id: seed.id,
         kind: seed.kind,
-        ownerId: "default",
+        ownerId: seed.ownerId ?? "default",
         storageType: "database",
         payload: bytes(encrypted.payload),
         encrypted: true,
