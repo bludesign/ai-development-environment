@@ -1,12 +1,21 @@
 // @vitest-environment node
 import { existsSync, readFileSync, readdirSync } from "node:fs";
-import { mkdtemp, rm } from "node:fs/promises";
+import { copyFile, mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 
 import { PrismaBetterSqlite3 } from "@prisma/adapter-better-sqlite3";
 import Database from "better-sqlite3";
-import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
+import {
+  afterAll,
+  afterEach,
+  beforeAll,
+  beforeEach,
+  describe,
+  expect,
+  test,
+  vi,
+} from "vitest";
 
 const mocks = vi.hoisted(() => ({
   getPrismaClient: vi.fn(),
@@ -24,20 +33,34 @@ import { WorkflowsService } from "@/services/workflows/workflows.service";
 import { RunsService } from "./runs.service";
 
 describe("durable worktree run queues", () => {
+  let templateDirectory: string;
+  let templateDatabasePath: string;
   let directory: string;
   let prisma: InstanceType<typeof PrismaClient>;
   let service: RunsService;
 
-  beforeEach(async () => {
-    directory = await mkdtemp(join(tmpdir(), "aide-worktree-queue-"));
-    const databasePath = join(directory, "test.db");
-    const database = new Database(databasePath);
+  beforeAll(async () => {
+    templateDirectory = await mkdtemp(
+      join(tmpdir(), "aide-worktree-queue-template-"),
+    );
+    templateDatabasePath = join(templateDirectory, "template.db");
+    const database = new Database(templateDatabasePath);
     const migrationsRoot = resolve(process.cwd(), "prisma/migrations");
     for (const migration of readdirSync(migrationsRoot).toSorted()) {
       const path = join(migrationsRoot, migration, "migration.sql");
       if (existsSync(path)) database.exec(readFileSync(path, "utf8"));
     }
     database.close();
+  }, 60_000);
+
+  afterAll(async () => {
+    await rm(templateDirectory, { recursive: true, force: true });
+  });
+
+  beforeEach(async () => {
+    directory = await mkdtemp(join(tmpdir(), "aide-worktree-queue-"));
+    const databasePath = join(directory, "test.db");
+    await copyFile(templateDatabasePath, databasePath);
 
     prisma = new PrismaClient({
       adapter: new PrismaBetterSqlite3({ url: databasePath }),
