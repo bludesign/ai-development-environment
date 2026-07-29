@@ -1,6 +1,9 @@
 import { afterEach, describe, expect, test, vi } from "vitest";
 
-import type { CommandOutputChunk } from "@ai-development-environment/agent-contract/commands";
+import {
+  MAX_COMMAND_OUTPUT_BATCH_CHUNKS,
+  type CommandOutputChunk,
+} from "@ai-development-environment/agent-contract/commands";
 
 import { runCommand } from "./commands.js";
 import type { AgentJobHandlerContext } from "./index.js";
@@ -104,6 +107,59 @@ describe("saved command handler", () => {
     expect(errors).toHaveBeenCalledWith(
       "Could not append command output; retrying in 500ms:",
       "temporary upload failure",
+    );
+  });
+
+  test("splits chatty output into batches the control plane accepts", async () => {
+    const sizes: number[] = [];
+    const sequences: number[] = [];
+    const result = await runCommand(
+      payload("for i in $(seq 1 3000); do printf 'line %s\\n' \"$i\"; done"),
+      0,
+      new AbortController().signal,
+      vi.fn(),
+      context(async (_attemptId, chunks) => {
+        sizes.push(chunks.length);
+        sequences.push(...chunks.map((chunk) => chunk.sequence));
+      }),
+    );
+
+    // The control plane rejects oversized batches outright. How the pipe
+    // coalesces these writes is up to the OS, so assert the invariant that
+    // has to hold for every batch rather than an exact split.
+    expect(Math.max(...sizes)).toBeLessThanOrEqual(
+      MAX_COMMAND_OUTPUT_BATCH_CHUNKS,
+    );
+    expect(sequences).toEqual([...sequences].sort((a, b) => a - b));
+    expect(result.exitCode).toBe(0);
+  });
+
+  test("stops retrying output the control plane keeps rejecting", async () => {
+    const errors = vi.spyOn(console, "error").mockImplementation(() => {});
+    vi.spyOn(globalThis, "setTimeout").mockImplementation(((
+      callback: () => void,
+    ) => {
+      const handle = { unref: () => handle };
+      queueMicrotask(callback);
+      return handle;
+    }) as unknown as typeof setTimeout);
+    const append = vi.fn().mockRejectedValue(new Error("batch rejected"));
+
+    // A permanently invalid batch must not spin forever: the upload chain has
+    // to settle so the command can finish rather than hang on backpressure.
+    const result = await runCommand(
+      payload("printf first"),
+      0,
+      new AbortController().signal,
+      vi.fn(),
+      context(append),
+    );
+
+    expect(append).toHaveBeenCalledTimes(8);
+    expect(result.exitCode).toBe(0);
+    expect(errors).toHaveBeenLastCalledWith(
+      "Dropping 1 command output chunk(s) after 8 failed attempts:",
+      "batch rejected",
     );
   });
 

@@ -2,7 +2,10 @@ import "server-only";
 
 import { randomUUID } from "node:crypto";
 
-import { COMMAND_RUN_JOB_KIND } from "@ai-development-environment/agent-contract/commands";
+import {
+  COMMAND_RUN_JOB_KIND,
+  MAX_COMMAND_OUTPUT_BATCH_CHUNKS,
+} from "@ai-development-environment/agent-contract/commands";
 
 import { getPrismaClient } from "@/data/prisma-client";
 import {
@@ -889,8 +892,10 @@ export class CommandsService {
       createdAt: string;
     }>,
   ) {
-    if (!chunks.length || chunks.length > 200) {
-      throw new Error("Output batches must contain 1 to 200 chunks");
+    if (!chunks.length || chunks.length > MAX_COMMAND_OUTPUT_BATCH_CHUNKS) {
+      throw new Error(
+        `Output batches must contain 1 to ${MAX_COMMAND_OUTPUT_BATCH_CHUNKS} chunks`,
+      );
     }
     const prisma = await getPrismaClient();
     const attempt = await prisma.commandRunAttempt.findUnique({

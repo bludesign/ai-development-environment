@@ -1,5 +1,7 @@
 export const COMMAND_RUN_JOB_KIND = "command.run";
 
+export const MAX_COMMAND_OUTPUT_BATCH_CHUNKS = 200;
+
 export type CommandRunTargetKind = "AGENT_HOME" | "WORKTREE";
 
 export type CommandRunPayload = {

@@ -4,6 +4,7 @@ import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 
 import {
+  MAX_COMMAND_OUTPUT_BATCH_CHUNKS,
   parseCommandRunPayload,
   type CommandOutputChunk,
 } from "@ai-development-environment/agent-contract/commands";
@@ -13,6 +14,7 @@ import type { AgentJobHandler } from "./index.js";
 
 const MAX_BATCH_BYTES = 128 * 1024;
 const FLUSH_DELAY_MS = 25;
+const MAX_UPLOAD_ATTEMPTS = 8;
 
 export const runCommand: AgentJobHandler = async (
   rawPayload,
@@ -41,6 +43,7 @@ export const runCommand: AgentJobHandler = async (
   let sequence = 0;
   let queuedBytes = 0;
   let pending: CommandOutputChunk[] = [];
+  let pendingBytes = 0;
   let timer: ReturnType<typeof setTimeout> | undefined;
   let uploadChain = Promise.resolve();
 
@@ -59,7 +62,19 @@ export const runCommand: AgentJobHandler = async (
           // not keep the agent (and its command cleanup) alive retrying output
           // that can no longer be delivered.
           if (signal.aborted) return;
-          const delay = Math.min(30_000, 500 * 2 ** Math.min(retry++, 6));
+          // A rejected batch can be permanently invalid rather than a
+          // transient outage. Retrying it forever would never settle
+          // uploadChain, leaving the child's streams paused by backpressure
+          // and the command hung with no output. Give up and drop the batch.
+          if (++retry >= MAX_UPLOAD_ATTEMPTS) {
+            queuedBytes -= bytes;
+            console.error(
+              `Dropping ${chunks.length} command output chunk(s) after ${retry} failed attempts:`,
+              error instanceof Error ? error.message : error,
+            );
+            return;
+          }
+          const delay = Math.min(30_000, 500 * 2 ** Math.min(retry - 1, 6));
           console.error(
             `Could not append command output; retrying in ${delay}ms:`,
             error instanceof Error ? error.message : error,
@@ -87,6 +102,7 @@ export const runCommand: AgentJobHandler = async (
     timer = undefined;
     const batch = pending;
     pending = [];
+    pendingBytes = 0;
     upload(batch);
   };
   const enqueue = (stream: CommandOutputChunk["stream"], bytes: Buffer) => {
@@ -98,10 +114,14 @@ export const runCommand: AgentJobHandler = async (
       createdAt: new Date().toISOString(),
     };
     pending.push(chunk);
+    pendingBytes += bytes.length;
     queuedBytes += bytes.length;
+    // A chatty process can emit hundreds of small writes inside one flush
+    // window, so cap the batch by chunk count as well as by bytes — the
+    // control plane rejects batches above MAX_COMMAND_OUTPUT_BATCH_CHUNKS.
     if (
-      pending.reduce((total, item) => total + item.byteLength, 0) >=
-      MAX_BATCH_BYTES
+      pendingBytes >= MAX_BATCH_BYTES ||
+      pending.length >= MAX_COMMAND_OUTPUT_BATCH_CHUNKS
     ) {
       flush();
     } else if (!timer) {

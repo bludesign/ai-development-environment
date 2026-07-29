@@ -192,12 +192,11 @@ describe("ActionCenterPage", () => {
   test("renders prioritized items with resource and worktree links", async () => {
     renderPage();
 
+    const planLink = await screen.findByRole("link", { name: "Plan #4" });
     expect(
-      await screen.findByRole("heading", { name: "Action Center" }),
+      screen.getByRole("heading", { name: "Action Center" }),
     ).toBeDefined();
-    expect(
-      screen.getByRole("link", { name: "Plan #4" }).getAttribute("href"),
-    ).toBe("/plans/plan-1");
+    expect(planLink.getAttribute("href")).toBe("/plans/plan-1");
     expect(
       screen
         .getAllByRole("link", { name: /feature-aide/ })[0]
