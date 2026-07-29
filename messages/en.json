@@ -4190,6 +4190,13 @@
     "sideBySide": "Side by side",
     "overlap": "Overlap",
     "transparency": "Image transparency",
+    "difference": "Difference",
+    "sensitivity": "Difference sensitivity",
+    "differenceSummary": "{percent}% of pixels differ",
+    "comparingPixels": "Comparing pixels…",
+    "differenceNeedsBothSides": "Both revisions are needed to compare pixels",
+    "differenceFailed": "These images could not be compared",
+    "imagesIdentical": "No pixels differ",
     "before": "Before",
     "after": "After",
     "missingImage": "No image on this side"

@@ -37,7 +37,15 @@ export function useImageDiffLabels(): ImageDiffLabels {
     () => ({
       sideBySide: t("sideBySide"),
       overlap: t("overlap"),
+      difference: t("difference"),
       transparency: t("transparency"),
+      sensitivity: t("sensitivity"),
+      differenceSummary: (percent: string) =>
+        t("differenceSummary", { percent }),
+      comparing: t("comparingPixels"),
+      needsBothSides: t("differenceNeedsBothSides"),
+      failed: t("differenceFailed"),
+      identical: t("imagesIdentical"),
       before: t("before"),
       after: t("after"),
       missing: t("missingImage"),

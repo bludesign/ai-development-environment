@@ -4190,6 +4190,13 @@
     "sideBySide": "Côte à côte",
     "overlap": "Superposition",
     "transparency": "Transparence de l'image",
+    "difference": "Différence",
+    "sensitivity": "Sensibilité de la différence",
+    "differenceSummary": "{percent} % des pixels diffèrent",
+    "comparingPixels": "Comparaison des pixels…",
+    "differenceNeedsBothSides": "Les deux révisions sont nécessaires pour comparer les pixels",
+    "differenceFailed": "Ces images n’ont pas pu être comparées",
+    "imagesIdentical": "Aucun pixel ne diffère",
     "before": "Avant",
     "after": "Après",
     "missingImage": "Aucune image de ce côté"

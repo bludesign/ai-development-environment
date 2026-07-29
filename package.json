@@ -107,6 +107,7 @@
     "next": "16.2.10",
     "next-intl": "4.13.2",
     "pdfkit": "0.19.1",
+    "pixelmatch": "^7.2.0",
     "pkijs": "3.4.0",
     "quickjs-emscripten": "0.32.0",
     "radix-ui": "1.6.4",
