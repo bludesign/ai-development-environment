@@ -56,18 +56,30 @@ describe("run command persistence", () => {
       {
         id: "plan-unlimited-1",
         agentId: "agent-1",
+        createdAt: new Date(0),
         worktreeConcurrencyLimit: 0,
+        workflowRun: null,
       },
       {
         id: "plan-unlimited-2",
         agentId: "agent-1",
+        createdAt: new Date(1),
         worktreeConcurrencyLimit: 0,
+        workflowRun: null,
       },
     ];
     const transaction = {
+      worktreeAdmissionLane: {
+        upsert: vi.fn().mockResolvedValue({}),
+      },
       worktreeRunConcurrencyLane: {
         upsert: vi.fn().mockResolvedValue({}),
       },
+      worktreeWorkflowLease: {
+        deleteMany: vi.fn().mockResolvedValue({ count: 0 }),
+        findUnique: vi.fn().mockResolvedValue(null),
+      },
+      workflowRun: { findFirst: vi.fn().mockResolvedValue(null) },
       worktreeRunLease: {
         deleteMany: vi.fn().mockResolvedValue({ count: 0 }),
         count: vi.fn(async () => active),
@@ -121,12 +133,16 @@ describe("run command persistence", () => {
       {
         id: "session-blocked-head",
         agentId: "agent-1",
+        createdAt: new Date(2),
         worktreeConcurrencyLimit: 1,
+        workflowRun: null,
       },
       {
         id: "session-unlimited-later",
         agentId: "agent-1",
+        createdAt: new Date(3),
         worktreeConcurrencyLimit: 0,
+        workflowRun: null,
       },
     );
     prisma.agentRun.findMany.mockResolvedValue([
@@ -141,9 +157,17 @@ describe("run command persistence", () => {
   test("uses each queued run's finite limit as it reaches the head", async () => {
     let active = 1;
     const transaction = {
+      worktreeAdmissionLane: {
+        upsert: vi.fn().mockResolvedValue({}),
+      },
       worktreeRunConcurrencyLane: {
         upsert: vi.fn().mockResolvedValue({}),
       },
+      worktreeWorkflowLease: {
+        deleteMany: vi.fn().mockResolvedValue({ count: 0 }),
+        findUnique: vi.fn().mockResolvedValue(null),
+      },
+      workflowRun: { findFirst: vi.fn().mockResolvedValue(null) },
       worktreeRunLease: {
         deleteMany: vi.fn().mockResolvedValue({ count: 0 }),
         count: vi.fn(async () => active),
@@ -157,12 +181,16 @@ describe("run command persistence", () => {
           {
             id: "session-second",
             agentId: "agent-1",
+            createdAt: new Date(0),
             worktreeConcurrencyLimit: 2,
+            workflowRun: null,
           },
           {
             id: "session-third",
             agentId: "agent-1",
+            createdAt: new Date(1),
             worktreeConcurrencyLimit: 2,
+            workflowRun: null,
           },
         ]),
         updateMany: vi.fn().mockResolvedValue({ count: 1 }),

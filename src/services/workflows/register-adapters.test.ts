@@ -137,7 +137,10 @@ describe("workflow run adapters", () => {
     await executor.execute(input);
 
     expect(create).toHaveBeenCalledWith(
-      expect.objectContaining({ worktreeConcurrencyLimit: 2 }),
+      expect.objectContaining({
+        worktreeConcurrencyLimit: 2,
+        workflowRunId: "workflow-run",
+      }),
     );
   });
 
@@ -160,7 +163,7 @@ describe("workflow run adapters", () => {
 
     await executor.execute(input);
 
-    expect(playPlan).toHaveBeenCalledWith("plan-run", [], 0);
+    expect(playPlan).toHaveBeenCalledWith("plan-run", [], 0, "workflow-run");
   });
 
   test("links created runs to their internal detail pages", async () => {

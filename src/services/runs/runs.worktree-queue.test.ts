@@ -17,6 +17,9 @@ vi.mock("@/data/prisma-client", () => ({
 }));
 
 import { PrismaClient } from "@/generated/prisma/client";
+import { emptyWorkflowDefinition } from "@/lib/workflows/definition";
+import { WorkflowEventsService } from "@/services/workflows/workflow-events.service";
+import { WorkflowsService } from "@/services/workflows/workflows.service";
 
 import { RunsService } from "./runs.service";
 
@@ -338,5 +341,173 @@ describe("durable worktree run queues", () => {
       ).rejects.toThrow("Worktree concurrency limit must be between 0 and 32");
     }
     await expect(prisma.agentRun.count()).resolves.toBe(0);
+  });
+
+  test("gives an exclusive workflow the whole worktree while admitting its own runs", async () => {
+    const definition = emptyWorkflowDefinition("Exclusive workflow");
+    await prisma.workflow.create({
+      data: {
+        id: "workflow-exclusive",
+        name: definition.name,
+        description: definition.description,
+        draftDefinitionJson: JSON.stringify(definition),
+        exclusiveWorktree: true,
+      },
+    });
+    await prisma.workflowVersion.create({
+      data: {
+        id: "workflow-version-exclusive",
+        workflowId: "workflow-exclusive",
+        version: 1,
+        name: definition.name,
+        description: definition.description,
+        schemaVersion: definition.schemaVersion,
+        definitionJson: JSON.stringify(definition),
+        contentHash: "exclusive-workflow-definition",
+      },
+    });
+    await prisma.workflow.update({
+      where: { id: "workflow-exclusive" },
+      data: {
+        activeVersionId: "workflow-version-exclusive",
+        enabled: true,
+      },
+    });
+
+    const blocker = await service.create(input("SESSION", "Earlier work"));
+    const exclusiveRun = await prisma.workflowRun.create({
+      data: {
+        id: "workflow-run-exclusive",
+        displayNumber: 0,
+        workflowId: "workflow-exclusive",
+        versionId: "workflow-version-exclusive",
+        idempotencyKey: "workflow-run-exclusive",
+        triggerKind: "MANUAL",
+        triggerSubjectKey: "manual",
+        triggerPayloadJson: "{}",
+        sessionDataJson: JSON.stringify({
+          workflow: { id: "workflow-exclusive" },
+          worktree: { id: "worktree-1" },
+        }),
+        worktreeId: "worktree-1",
+        worktreeLeaseOwnerRunId: "workflow-run-exclusive",
+        exclusiveWorktree: true,
+        phase: "WAITING_FOR_WORKTREE",
+      },
+    });
+    const workflows = new WorkflowsService(
+      new WorkflowEventsService(),
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      service,
+    );
+    const workflowInternals = workflows as unknown as {
+      startQueuedRuns(): Promise<void>;
+    };
+
+    await workflowInternals.startQueuedRuns();
+    await expect(
+      prisma.workflowRun.findUnique({ where: { id: exclusiveRun.id } }),
+    ).resolves.toMatchObject({
+      status: "QUEUED",
+      phase: "WAITING_FOR_WORKTREE",
+    });
+    const laterPlan = await service.create(
+      input("PLAN", "Created behind exclusive barrier"),
+    );
+    expect(laterPlan).toMatchObject({
+      status: "QUEUED",
+      phase: "WAITING_FOR_WORKTREE",
+    });
+
+    const blockerAttempt = await service.beginAttempt("agent-1", blocker!.id);
+    await service.finishAttempt("agent-1", blockerAttempt.id, {
+      status: "COMPLETED",
+      finalOutput: "Done",
+    });
+    await expect(
+      prisma.worktreeWorkflowLease.findUnique({
+        where: { worktreeId: "worktree-1" },
+      }),
+    ).resolves.toMatchObject({ workflowRunId: exclusiveRun.id });
+
+    await prisma.workflow.create({
+      data: {
+        id: "workflow-regular",
+        name: "Regular workflow",
+        draftDefinitionJson: JSON.stringify(definition),
+      },
+    });
+    await prisma.workflowVersion.create({
+      data: {
+        id: "workflow-version-regular",
+        workflowId: "workflow-regular",
+        version: 1,
+        name: "Regular workflow",
+        schemaVersion: definition.schemaVersion,
+        definitionJson: JSON.stringify(definition),
+        contentHash: "regular-workflow-definition",
+      },
+    });
+    const regularWorkflowRun = await prisma.workflowRun.create({
+      data: {
+        id: "workflow-run-regular",
+        displayNumber: 1,
+        workflowId: "workflow-regular",
+        versionId: "workflow-version-regular",
+        idempotencyKey: "workflow-run-regular",
+        triggerKind: "MANUAL",
+        triggerSubjectKey: "manual",
+        triggerPayloadJson: "{}",
+        sessionDataJson: JSON.stringify({
+          workflow: { id: "workflow-regular" },
+          worktree: { id: "worktree-1" },
+        }),
+        worktreeId: "worktree-1",
+      },
+    });
+    await workflowInternals.startQueuedRuns();
+    await expect(
+      prisma.workflowRun.findUnique({ where: { id: regularWorkflowRun.id } }),
+    ).resolves.toMatchObject({
+      status: "QUEUED",
+      phase: "WAITING_FOR_WORKTREE",
+    });
+
+    const owned = await service.create({
+      ...input("PLAN", "Owned workflow plan"),
+      workflowRunId: exclusiveRun.id,
+    });
+    const unrelated = await service.create(input("PLAN", "Unrelated plan"));
+    expect(owned?.status).toBe("IN_PROGRESS");
+    expect(unrelated).toMatchObject({
+      status: "QUEUED",
+      phase: "WAITING_FOR_WORKTREE",
+    });
+
+    const ownedAttempt = await service.beginAttempt("agent-1", owned!.id);
+    await service.finishAttempt("agent-1", ownedAttempt.id, {
+      status: "COMPLETED",
+      finalOutput: "Done",
+    });
+    await workflows.lifecycle(exclusiveRun.id, "CANCEL");
+
+    await expect(
+      prisma.worktreeWorkflowLease.findUnique({
+        where: { worktreeId: "worktree-1" },
+      }),
+    ).resolves.toBeNull();
+    await expect(service.get(unrelated!.id)).resolves.toMatchObject({
+      status: "IN_PROGRESS",
+    });
+    await expect(service.get(laterPlan!.id)).resolves.toMatchObject({
+      status: "IN_PROGRESS",
+    });
+    await expect(
+      prisma.workflowRun.findUnique({ where: { id: regularWorkflowRun.id } }),
+    ).resolves.toMatchObject({ status: "RUNNING" });
   });
 });

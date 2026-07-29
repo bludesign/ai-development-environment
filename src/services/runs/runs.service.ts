@@ -65,6 +65,8 @@ export type RunConfigurationInput = {
   followUpMode?: string | null;
   contextMode?: string | null;
   worktreeConcurrencyLimit?: number | null;
+  /** Internal owner used to admit steps launched by an exclusive workflow. */
+  workflowRunId?: string | null;
 };
 
 export type SaveRunDraftInput = Omit<
@@ -75,6 +77,7 @@ export type SaveRunDraftInput = Omit<
   | "followUpMode"
   | "contextMode"
   | "worktreeConcurrencyLimit"
+  | "workflowRunId"
 > & { id?: string | null };
 
 export type RunEventInput = {
@@ -155,6 +158,16 @@ function worktreeConcurrencyLimit(
     throw new Error("Worktree concurrency limit must be between 0 and 32");
   }
   return result;
+}
+
+function queueEntryPrecedes(
+  leftAt: Date,
+  leftId: string,
+  rightAt: Date,
+  rightId: string,
+): boolean {
+  const difference = leftAt.getTime() - rightAt.getTime();
+  return difference < 0 || (difference === 0 && leftId < rightId);
 }
 
 function parseDate(value: string | null | undefined): Date | undefined {
@@ -322,6 +335,7 @@ function jobResultObject(job: {
 export class RunsService {
   private reaperTimer?: ReturnType<typeof setInterval>;
   private mcpPresetResolver?: RunMcpPresetResolver;
+  private worktreeAdmissionPromoter?: (worktreeId: string) => Promise<void>;
 
   constructor(
     private readonly notifications?: NotificationsService,
@@ -333,11 +347,18 @@ export class RunsService {
     this.mcpPresetResolver = resolver;
   }
 
+  setWorktreeAdmissionPromoter(
+    promoter: (worktreeId: string) => Promise<void>,
+  ): void {
+    this.worktreeAdmissionPromoter = promoter;
+  }
+
   /**
-   * Admit queued runs for one worktree/kind lane. The lane upsert is the first
-   * write in the transaction, which serializes competing admissions in SQLite.
-   * Each queued run brings its own threshold; zero is unlimited, and a blocked
-   * head prevents younger entries from overtaking it.
+   * Admit queued runs for one worktree/kind lane. The worktree-wide lane is the
+   * first write in the transaction, which serializes workflow-exclusive and
+   * per-kind admissions in SQLite. Each queued run brings its own threshold;
+   * zero is unlimited, and a blocked head prevents younger entries from
+   * overtaking it unless an exclusive workflow is admitting its own steps.
    */
   private async promoteQueuedLane(
     worktreeId: string,
@@ -346,6 +367,11 @@ export class RunsService {
     const prisma = await getPrismaClient();
     const admitted = await prisma.$transaction(async (transaction) => {
       const now = new Date();
+      await transaction.worktreeAdmissionLane.upsert({
+        where: { worktreeId },
+        create: { worktreeId },
+        update: { updatedAt: now },
+      });
       await transaction.worktreeRunConcurrencyLane.upsert({
         where: { worktreeId_kind: { worktreeId, kind } },
         create: { worktreeId, kind },
@@ -357,6 +383,29 @@ export class RunsService {
           run: { status: { in: [...TERMINAL_STATUSES] } },
         },
       });
+      await transaction.worktreeWorkflowLease.deleteMany({
+        where: {
+          worktreeId,
+          workflowRun: { status: { in: ["SUCCEEDED", "FAILED", "CANCELLED"] } },
+        },
+      });
+      const exclusiveLease = await transaction.worktreeWorkflowLease.findUnique(
+        {
+          where: { worktreeId },
+        },
+      );
+      const exclusiveBarrier = exclusiveLease
+        ? null
+        : await transaction.workflowRun.findFirst({
+            where: {
+              worktreeId,
+              status: "QUEUED",
+              parentRunId: null,
+              exclusiveWorktree: true,
+            },
+            orderBy: [{ queuedAt: "asc" }, { id: "asc" }],
+            select: { id: true, queuedAt: true },
+          });
       let active = await transaction.worktreeRunLease.count({
         where: {
           worktreeId,
@@ -378,7 +427,11 @@ export class RunsService {
         select: {
           id: true,
           agentId: true,
+          createdAt: true,
           worktreeConcurrencyLimit: true,
+          workflowRun: {
+            select: { worktreeLeaseOwnerRunId: true },
+          },
         },
       });
       const promoted: Array<{
@@ -386,7 +439,25 @@ export class RunsService {
         agentId: string;
         command: unknown;
       }> = [];
-      for (const run of queued) {
+      const eligible = exclusiveLease
+        ? queued.filter(
+            (run) =>
+              run.workflowRun?.worktreeLeaseOwnerRunId ===
+              exclusiveLease.workflowRunId,
+          )
+        : queued;
+      for (const run of eligible) {
+        if (
+          exclusiveBarrier &&
+          queueEntryPrecedes(
+            exclusiveBarrier.queuedAt,
+            exclusiveBarrier.id,
+            run.createdAt,
+            run.id,
+          )
+        ) {
+          break;
+        }
         if (
           run.worktreeConcurrencyLimit !== 0 &&
           active >= run.worktreeConcurrencyLimit
@@ -426,6 +497,7 @@ export class RunsService {
   ): Promise<void> {
     try {
       await this.promoteQueuedLane(worktreeId, kind);
+      await this.worktreeAdmissionPromoter?.(worktreeId);
     } catch (error) {
       console.error(
         `Could not promote ${kind.toLowerCase()} queue for ${worktreeId}:`,
@@ -1038,6 +1110,7 @@ export class RunsService {
           mcpPresetIdsJson: JSON.stringify(mcp.presetIds),
           mcpToolNamesJson: JSON.stringify(mcp.toolNames),
           worktreeConcurrencyLimit: concurrencyLimit,
+          workflowRunId: input.workflowRunId ?? null,
           initialPrompt: prompt,
           sourcePlanId: sourcePlan?.id,
           sourcePlanNumber: sourcePlan?.displayNumber,
@@ -1100,6 +1173,7 @@ export class RunsService {
     planId: string,
     mcpPresetIds: string[] = [],
     concurrencyLimit?: number | null,
+    workflowRunId?: string | null,
   ) {
     const plan = await this.get(planId);
     if (!plan) throw new Error("Plan not found");
@@ -1121,6 +1195,7 @@ export class RunsService {
       attachmentIds: [],
       mcpPresetIds,
       worktreeConcurrencyLimit: concurrencyLimit,
+      workflowRunId,
     });
   }
 
@@ -1186,6 +1261,7 @@ export class RunsService {
         jiraIssueKey: input.jiraIssueKey ?? source.jiraIssueKey,
         parentRunId: source.id,
         followUpMode: mode,
+        workflowRunId: input.workflowRunId ?? source.workflowRunId,
         prompt,
       },
       { transferLeaseFromRunId: transfer },

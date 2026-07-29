@@ -66,6 +66,8 @@ type Workflow {
   maxConcurrentRuns: Int!
   "Whether successful workflow runs create completion notifications."
   completionNotificationsEnabled: Boolean!
+  "Whether each top-level run reserves its worktree for this workflow."
+  exclusiveWorktree: Boolean!
   "The quick action kind associated with this workflow."
   quickActionKind: WorkflowQuickActionKind!
   "The quick action icon key associated with this workflow."
@@ -293,6 +295,8 @@ type WorkflowRun {
   status: WorkflowRunStatus!
   "The phase associated with this workflow run."
   phase: String!
+  "Whether this run was configured to reserve its worktree exclusively."
+  exclusiveWorktree: Boolean!
   "The generation associated with this workflow run."
   generation: Int!
   "The session data associated with this workflow run."
@@ -535,6 +539,8 @@ input CreateWorkflowInput {
   maxConcurrentRuns: Int = 1
   "Whether successful workflow runs create completion notifications."
   completionNotificationsEnabled: Boolean = true
+  "Queue other workflows, plans, and sessions while this workflow owns a worktree."
+  exclusiveWorktree: Boolean = false
 }
 
 "Values used to save a workflow draft."
@@ -549,6 +555,8 @@ input SaveWorkflowDraftInput {
   maxConcurrentRuns: Int
   "Whether successful workflow runs create completion notifications."
   completionNotificationsEnabled: Boolean
+  "Queue other workflows, plans, and sessions while this workflow owns a worktree."
+  exclusiveWorktree: Boolean
 }
 
 "Values used to trigger a workflow."

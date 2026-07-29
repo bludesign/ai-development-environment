@@ -150,6 +150,7 @@ export function workflowView(value: Record<string, unknown>) {
     maxConcurrentRuns: Number(value.maxConcurrentRuns),
     completionNotificationsEnabled:
       value.completionNotificationsEnabled !== false,
+    exclusiveWorktree: value.exclusiveWorktree === true,
     activeVersionId:
       typeof value.activeVersionId === "string" ? value.activeVersionId : null,
     draftSchemaVersion: Number(value.draftSchemaVersion),

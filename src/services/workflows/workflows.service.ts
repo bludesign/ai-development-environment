@@ -113,6 +113,16 @@ const GLOBAL_CONCURRENCY = 4;
 const CLAIM_TTL_MS = 5 * 60_000;
 const RESOURCE_HOLD_TIMEOUT_MS = 10 * 60_000;
 
+function queueEntryPrecedes(
+  leftAt: Date,
+  leftId: string,
+  rightAt: Date,
+  rightId: string,
+): boolean {
+  const difference = leftAt.getTime() - rightAt.getTime();
+  return difference < 0 || (difference === 0 && leftId < rightId);
+}
+
 type WorkflowWithActiveVersion = Workflow & {
   activeVersion: WorkflowVersion | null;
 };
@@ -124,6 +134,7 @@ export type CreateWorkflowInput = {
   overlapPolicy?: string | null;
   maxConcurrentRuns?: number | null;
   completionNotificationsEnabled?: boolean | null;
+  exclusiveWorktree?: boolean | null;
 };
 
 export type SaveWorkflowDraftInput = {
@@ -132,6 +143,7 @@ export type SaveWorkflowDraftInput = {
   overlapPolicy?: string | null;
   maxConcurrentRuns?: number | null;
   completionNotificationsEnabled?: boolean | null;
+  exclusiveWorktree?: boolean | null;
 };
 
 export type TriggerWorkflowInput = {
@@ -404,6 +416,9 @@ export class WorkflowsService {
     private readonly commandsService?: CommandsService,
     private readonly jiraService?: JiraService,
   ) {
+    this.runsService?.setWorktreeAdmissionPromoter(async () => {
+      await this.startQueuedRuns();
+    });
     if (this.agentControl) {
       this.executor.register("TERMINAL_RUN", (context) =>
         this.startTerminalJob(context),
@@ -474,6 +489,21 @@ export class WorkflowsService {
         this.commandsService!.terminateRun(resourceId),
       ),
     );
+  }
+
+  private async promoteWorktreeAdmissions(
+    worktreeId: string | null,
+  ): Promise<void> {
+    if (!worktreeId) return;
+    try {
+      await this.runsService?.reconcileQueuedRuns();
+      await this.startQueuedRuns();
+    } catch (error) {
+      console.error(
+        `Could not promote worktree queue for ${worktreeId}:`,
+        error instanceof Error ? error.message : error,
+      );
+    }
   }
 
   /**
@@ -666,6 +696,7 @@ export class WorkflowsService {
         maxConcurrentRuns: concurrentRuns(input.maxConcurrentRuns, policy),
         completionNotificationsEnabled:
           input.completionNotificationsEnabled ?? true,
+        exclusiveWorktree: input.exclusiveWorktree ?? false,
       },
     });
     publishWorkflowChanged(workflow.id);
@@ -695,6 +726,7 @@ export class WorkflowsService {
         completionNotificationsEnabled:
           input.completionNotificationsEnabled ??
           current.completionNotificationsEnabled,
+        exclusiveWorktree: input.exclusiveWorktree ?? current.exclusiveWorktree,
       },
     });
     publishWorkflowChanged(input.id);
@@ -990,6 +1022,7 @@ export class WorkflowsService {
         overlapPolicy: workflow.overlapPolicy,
         maxConcurrentRuns: workflow.maxConcurrentRuns,
         completionNotificationsEnabled: workflow.completionNotificationsEnabled,
+        exclusiveWorktree: workflow.exclusiveWorktree,
         definition: sanitizeWorkflowExportDefinition(definition),
       },
     };
@@ -1032,6 +1065,10 @@ export class WorkflowsService {
         typeof workflow.completionNotificationsEnabled === "boolean"
           ? workflow.completionNotificationsEnabled
           : true,
+      exclusiveWorktree:
+        typeof workflow.exclusiveWorktree === "boolean"
+          ? workflow.exclusiveWorktree
+          : false,
     });
   }
 
@@ -2390,6 +2427,29 @@ export class WorkflowsService {
       );
       const serializedSession = JSON.stringify(sessionData);
       assertSize(serializedSession, "Workflow session data", MAX_SESSION_BYTES);
+      const requestedWorktreeId = getSessionValue(sessionData, "worktree.id");
+      const worktreeId =
+        typeof requestedWorktreeId === "string" && requestedWorktreeId
+          ? ((
+              await transaction.worktree.findUnique({
+                where: { id: requestedWorktreeId },
+                select: { id: true },
+              })
+            )?.id ?? null)
+          : null;
+      const parent = parentRunId
+        ? await transaction.workflowRun.findUnique({
+            where: { id: parentRunId },
+            select: { worktreeId: true, worktreeLeaseOwnerRunId: true },
+          })
+        : null;
+      const inheritedLeaseOwner =
+        parent?.worktreeId === worktreeId
+          ? parent.worktreeLeaseOwnerRunId
+          : null;
+      const worktreeLeaseOwnerRunId =
+        inheritedLeaseOwner ??
+        (!parentRunId && workflow.exclusiveWorktree && worktreeId ? id : null);
       const run = await transaction.workflowRun.create({
         data: {
           id,
@@ -2399,11 +2459,15 @@ export class WorkflowsService {
           triggerId: trigger?.id ?? null,
           triggerEventId,
           parentRunId,
+          worktreeId,
+          worktreeLeaseOwnerRunId,
+          exclusiveWorktree: workflow.exclusiveWorktree,
           idempotencyKey,
           triggerKind,
           triggerSubjectKey: subjectKey,
           triggerPayloadJson: JSON.stringify(payload),
           sessionDataJson: serializedSession,
+          phase: worktreeLeaseOwnerRunId ? "WAITING_FOR_WORKTREE" : "QUEUED",
         },
       });
       const triggerLink = workflowTriggerResourceLink(triggerKind, payload);
@@ -2862,6 +2926,9 @@ export class WorkflowsService {
         await transaction.workflowResourceLease.deleteMany({
           where: { runId },
         });
+        await transaction.worktreeWorkflowLease.deleteMany({
+          where: { workflowRunId: runId },
+        });
         return true;
       });
       if (!cancelled) return this.run(runId);
@@ -2871,6 +2938,7 @@ export class WorkflowsService {
         "RUN_CANCELLED",
         "Workflow cancelled",
       );
+      await this.promoteWorktreeAdmissions(run.worktreeId);
     }
     publishRunChanged(runId);
     return this.run(runId);
@@ -3039,24 +3107,10 @@ export class WorkflowsService {
     const queued = await prisma.workflowRun.findMany({
       where: { status: "QUEUED" },
       include: { workflow: true, version: true },
-      orderBy: { queuedAt: "asc" },
-      take: 50,
+      orderBy: [{ queuedAt: "asc" }, { id: "asc" }],
+      take: 200,
     });
     for (const run of queued) {
-      const limit =
-        run.workflow.overlapPolicy === "CONCURRENT"
-          ? run.workflow.maxConcurrentRuns
-          : 1;
-      const active = await prisma.workflowRun.count({
-        where: {
-          workflowId: run.workflowId,
-          id: { not: run.id },
-          status: {
-            in: ACTIVE_RUN_STATUSES.filter((status) => status !== "QUEUED"),
-          },
-        },
-      });
-      if (active >= limit) continue;
       const definition = parseWorkflowDefinition(
         json(run.version.definitionJson),
       );
@@ -3067,6 +3121,147 @@ export class WorkflowsService {
         startedAt.toISOString(),
       );
       const started = await prisma.$transaction(async (transaction) => {
+        const limit =
+          run.workflow.overlapPolicy === "CONCURRENT"
+            ? run.workflow.maxConcurrentRuns
+            : 1;
+        const active = await transaction.workflowRun.count({
+          where: {
+            workflowId: run.workflowId,
+            id: { not: run.id },
+            status: {
+              in: ACTIVE_RUN_STATUSES.filter((status) => status !== "QUEUED"),
+            },
+          },
+        });
+        if (active >= limit) return false;
+
+        if (run.worktreeId) {
+          await transaction.worktreeAdmissionLane.upsert({
+            where: { worktreeId: run.worktreeId },
+            create: { worktreeId: run.worktreeId },
+            update: { updatedAt: startedAt },
+          });
+          await transaction.worktreeWorkflowLease.deleteMany({
+            where: {
+              worktreeId: run.worktreeId,
+              workflowRun: { status: { in: [...TERMINAL_RUN_STATUSES] } },
+            },
+          });
+          await transaction.worktreeRunLease.deleteMany({
+            where: {
+              worktreeId: run.worktreeId,
+              run: { status: { in: ["COMPLETED", "FAILED", "CANCELLED"] } },
+            },
+          });
+
+          const lease = await transaction.worktreeWorkflowLease.findUnique({
+            where: { worktreeId: run.worktreeId },
+          });
+          if (lease && run.worktreeLeaseOwnerRunId !== lease.workflowRunId) {
+            await transaction.workflowRun.updateMany({
+              where: { id: run.id, status: "QUEUED" },
+              data: { phase: "WAITING_FOR_WORKTREE" },
+            });
+            return false;
+          }
+
+          if (!lease) {
+            const barrier = await transaction.workflowRun.findFirst({
+              where: {
+                worktreeId: run.worktreeId,
+                status: "QUEUED",
+                parentRunId: null,
+                exclusiveWorktree: true,
+              },
+              orderBy: [{ queuedAt: "asc" }, { id: "asc" }],
+              select: { id: true, queuedAt: true },
+            });
+            if (
+              barrier &&
+              barrier.id !== run.id &&
+              queueEntryPrecedes(
+                barrier.queuedAt,
+                barrier.id,
+                run.queuedAt,
+                run.id,
+              )
+            ) {
+              await transaction.workflowRun.updateMany({
+                where: { id: run.id, status: "QUEUED" },
+                data: { phase: "WAITING_FOR_WORKTREE" },
+              });
+              return false;
+            }
+
+            if (run.worktreeLeaseOwnerRunId === run.id) {
+              const [
+                activeAgentRuns,
+                activeWorkflows,
+                earlierAgentRun,
+                earlierWorkflow,
+              ] = await Promise.all([
+                transaction.worktreeRunLease.count({
+                  where: { worktreeId: run.worktreeId },
+                }),
+                transaction.workflowRun.count({
+                  where: {
+                    worktreeId: run.worktreeId,
+                    id: { not: run.id },
+                    status: {
+                      in: ACTIVE_RUN_STATUSES.filter(
+                        (status) => status !== "QUEUED",
+                      ),
+                    },
+                  },
+                }),
+                transaction.agentRun.findFirst({
+                  where: {
+                    worktreeId: run.worktreeId,
+                    origin: "MANAGED",
+                    status: "QUEUED",
+                    OR: [
+                      { createdAt: { lt: run.queuedAt } },
+                      { createdAt: run.queuedAt, id: { lt: run.id } },
+                    ],
+                  },
+                  select: { id: true },
+                }),
+                transaction.workflowRun.findFirst({
+                  where: {
+                    worktreeId: run.worktreeId,
+                    status: "QUEUED",
+                    id: { not: run.id },
+                    OR: [
+                      { queuedAt: { lt: run.queuedAt } },
+                      { queuedAt: run.queuedAt, id: { lt: run.id } },
+                    ],
+                  },
+                  select: { id: true },
+                }),
+              ]);
+              if (
+                activeAgentRuns ||
+                activeWorkflows ||
+                earlierAgentRun ||
+                earlierWorkflow
+              ) {
+                await transaction.workflowRun.updateMany({
+                  where: { id: run.id, status: "QUEUED" },
+                  data: { phase: "WAITING_FOR_WORKTREE" },
+                });
+                return false;
+              }
+              await transaction.worktreeWorkflowLease.create({
+                data: {
+                  worktreeId: run.worktreeId,
+                  workflowRunId: run.id,
+                },
+              });
+            }
+          }
+        }
+
         const claimed = await transaction.workflowRun.updateMany({
           where: { id: run.id, status: "QUEUED" },
           data: {
@@ -3078,24 +3273,36 @@ export class WorkflowsService {
           },
         });
         if (!claimed.count) return false;
-        await transaction.workflowStepAttempt.createMany({
-          data: definition.nodes.map((node) => ({
-            id: randomUUID(),
-            runId: run.id,
-            nodeId: node.id,
-            kind: node.kind,
-            generation: run.generation,
-            iterationKey: "",
-            attempt: 0,
-            requiredPathsJson: JSON.stringify(nodeRequiredPaths(node)),
-            providedPathsJson: JSON.stringify(nodeProvidedPaths(node)),
-            idempotencyKey: `${run.id}:${node.id}:${run.generation}::0`,
-          })),
+        const existingAttempts = await transaction.workflowStepAttempt.count({
+          where: { runId: run.id, generation: run.generation },
         });
+        if (!existingAttempts) {
+          await transaction.workflowStepAttempt.createMany({
+            data: definition.nodes.map((node) => ({
+              id: randomUUID(),
+              runId: run.id,
+              nodeId: node.id,
+              kind: node.kind,
+              generation: run.generation,
+              iterationKey: "",
+              attempt: 0,
+              requiredPathsJson: JSON.stringify(nodeRequiredPaths(node)),
+              providedPathsJson: JSON.stringify(nodeProvidedPaths(node)),
+              idempotencyKey: `${run.id}:${node.id}:${run.generation}::0`,
+            })),
+          });
+        }
         return true;
       });
       if (started) {
-        await this.appendEvent(run.id, null, "RUN_STARTED", "Workflow started");
+        if (!run.startedAt) {
+          await this.appendEvent(
+            run.id,
+            null,
+            "RUN_STARTED",
+            "Workflow started",
+          );
+        }
         publishRunChanged(run.id);
       }
     }
@@ -3419,6 +3626,9 @@ export class WorkflowsService {
       await transaction.workflowResourceLease.deleteMany({
         where: { runId: run.id },
       });
+      await transaction.worktreeWorkflowLease.deleteMany({
+        where: { workflowRunId: run.id },
+      });
       return true;
     });
     if (!finished) return;
@@ -3452,6 +3662,7 @@ export class WorkflowsService {
       error || `Workflow run ${run.displayNumber} ${status.toLowerCase()}`,
       status.toLowerCase(),
     );
+    await this.promoteWorktreeAdmissions(run.worktreeId);
     publishRunChanged(run.id);
   }
 
@@ -5027,8 +5238,9 @@ export class WorkflowsService {
           generation: nextGeneration,
           sessionDataJson: JSON.stringify(sessionData),
           sessionRevision: { increment: 1 },
-          status: "RUNNING",
-          phase: "REPLAYING",
+          status: run.worktreeId ? "QUEUED" : "RUNNING",
+          phase: run.worktreeId ? "WAITING_FOR_WORKTREE" : "REPLAYING",
+          queuedAt: run.worktreeId ? new Date() : run.queuedAt,
           blockedReason: null,
           error: null,
           pausedAt: null,
@@ -5043,6 +5255,7 @@ export class WorkflowsService {
       `Replaying from step ${nodeId}`,
       { generation: nextGeneration, affectedNodeIds: preview.affectedNodeIds },
     );
+    if (run.worktreeId) await this.startQueuedRuns();
     publishRunChanged(runId);
     return this.run(runId);
   }

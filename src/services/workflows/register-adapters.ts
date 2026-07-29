@@ -2574,6 +2574,7 @@ function createRunInput(
       typeof configuredConcurrencyLimit === "number"
         ? configuredConcurrencyLimit
         : undefined,
+    workflowRunId: context.run.id,
   };
 }
 
@@ -2602,6 +2603,7 @@ function registerRunAdapters(
       typeof configuredConcurrencyLimit === "number"
         ? configuredConcurrencyLimit
         : undefined,
+      context.run.id,
     );
     if (!run) throw new Error("Plan could not be played");
     return runResult(context, run as unknown as Record<string, unknown>, true);

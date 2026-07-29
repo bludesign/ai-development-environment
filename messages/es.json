@@ -193,6 +193,8 @@
     "description": "Descripción",
     "overlapPolicy": "Política de solapamiento",
     "maxConcurrentRuns": "Máximo de ejecuciones simultáneas",
+    "exclusiveWorktree": "Reservar el árbol de trabajo para este flujo",
+    "exclusiveWorktreeHelp": "La ejecución espera a que termine el trabajo anterior y luego pone en cola otros flujos, planes y sesiones de este árbol hasta completarse. Sus propios pasos continúan normalmente.",
     "completionNotifications": "Notificar cuando este flujo de trabajo finalice correctamente",
     "completionNotificationsHelp": "Desactiva esta opción para omitir las notificaciones de finalización correcta. Las notificaciones de errores y de atención permanecen activadas.",
     "connectorLayout": "Conectores de los pasos",

@@ -193,6 +193,8 @@
     "description": "Description",
     "overlapPolicy": "Politique de chevauchement",
     "maxConcurrentRuns": "Exécutions simultanées maximales",
+    "exclusiveWorktree": "Réserver l’arbre de travail à ce workflow",
+    "exclusiveWorktreeHelp": "L’exécution attend la fin des travaux antérieurs, puis met en file les autres workflows, plans et sessions de cet arbre jusqu’à sa fin. Ses propres étapes continuent normalement.",
     "completionNotifications": "Notifier lorsque ce workflow se termine avec succès",
     "completionNotificationsHelp": "Désactivez cette option pour supprimer les notifications de réussite. Les notifications d’échec et d’attention restent activées.",
     "connectorLayout": "Connecteurs d'étape",

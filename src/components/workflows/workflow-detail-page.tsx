@@ -89,7 +89,7 @@ type WorkflowDetail = WorkflowSummary & {
 };
 
 const DETAIL_FIELDS = `
-  id name description draftDefinition activeVersionId enabled overlapPolicy maxConcurrentRuns archivedAt quickActionKind quickActionIconKey quickActionButtonVariant
+  id name description draftDefinition activeVersionId enabled overlapPolicy maxConcurrentRuns completionNotificationsEnabled exclusiveWorktree archivedAt quickActionKind quickActionIconKey quickActionButtonVariant
   hasPlainTrigger
   triggerChoices { key label description }
   quickActionRepositories { id name displayOrigin }
@@ -374,7 +374,7 @@ export function WorkflowDetailPage({ workflowId }: { workflowId: string }) {
         </Alert>
       )}
 
-      <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+      <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-5">
         <Card>
           <CardHeader>
             <CardTitle>{t("publishedVersion")}</CardTitle>
@@ -409,6 +409,16 @@ export function WorkflowDetailPage({ workflowId }: { workflowId: string }) {
           </CardHeader>
           <CardContent className="text-2xl font-semibold">
             {workflow.maxConcurrentRuns}
+          </CardContent>
+        </Card>
+        <Card>
+          <CardHeader>
+            <CardTitle>{t("exclusiveWorktree")}</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <Badge variant="outline">
+              {workflow.exclusiveWorktree ? t("enabled") : t("disabled")}
+            </Badge>
           </CardContent>
         </Card>
       </div>

@@ -111,6 +111,7 @@ export type WorkflowSummary = {
   overlapPolicy: "QUEUE" | "CONCURRENT" | "COALESCE_LATEST";
   maxConcurrentRuns: number;
   completionNotificationsEnabled: boolean;
+  exclusiveWorktree: boolean;
   quickActionKind: "STANDARD" | "MERGE_CONFLICT" | "GITHUB_ACTIONS" | "NONE";
   quickActionIconKey: string;
   quickActionButtonVariant: "default" | "outline" | "secondary" | "destructive";
