@@ -305,6 +305,8 @@ type WorkflowRun {
   sessionRevision: Int!
   "The worktree associated with this workflow run. May be null when unavailable or not applicable."
   worktree: WorkflowRunWorktreeRef
+  "Effective admission queue while this run is queued, including work ahead of it. Empty after admission."
+  queue: [WorktreeRunQueueEntry!]!
   "The blocked reason associated with this workflow run. May be null when unavailable or not applicable."
   blockedReason: String
   "Error message when this workflow run did not complete successfully. May be null when unavailable or not applicable."

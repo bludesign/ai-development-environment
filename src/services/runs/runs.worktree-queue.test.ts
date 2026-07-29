@@ -537,6 +537,14 @@ describe("durable worktree run queues", () => {
     ).resolves.toMatchObject([
       { id: regularWorkflowRun.id, kind: "WORKFLOW", position: 3 },
     ]);
+    await expect(
+      workflows.runQueueForWorkflowRun(regularWorkflowRun.id),
+    ).resolves.toMatchObject([
+      { id: ownedQueued!.id, kind: "PLAN", position: 1 },
+      { id: laterPlan!.id, kind: "PLAN", position: 2 },
+      { id: regularWorkflowRun.id, kind: "WORKFLOW", position: 3 },
+      { id: unrelated!.id, kind: "PLAN", position: 4 },
+    ]);
 
     const ownedAttempt = await service.beginAttempt("agent-1", owned!.id);
     await service.finishAttempt("agent-1", ownedAttempt.id, {

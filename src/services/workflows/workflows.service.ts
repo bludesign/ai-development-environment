@@ -748,6 +748,21 @@ export class WorkflowsService {
     );
   }
 
+  async runQueueForWorkflowRun(
+    workflowRunId: string,
+  ): Promise<WorktreeRunQueueEntry[]> {
+    const prisma = await getPrismaClient();
+    const run = await prisma.workflowRun.findUnique({
+      where: { id: workflowRunId },
+      select: { status: true, worktreeId: true, workflowId: true },
+    });
+    if (!run || run.status !== "QUEUED") return [];
+    if (run.worktreeId) return this.queueForWorktree(run.worktreeId);
+    return (await this.runQueue({ workflowId: run.workflowId })).filter(
+      ({ worktreeId }) => !worktreeId,
+    );
+  }
+
   private async notifyRun(
     runId: string,
     typeKey:

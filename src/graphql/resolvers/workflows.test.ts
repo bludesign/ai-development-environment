@@ -28,8 +28,10 @@ describe("workflow trigger metadata", () => {
 
   test("forwards worktree and workflow queue scopes", async () => {
     const runQueue = vi.fn().mockResolvedValue([]);
+    const runQueueForWorkflowRun = vi.fn().mockResolvedValue([]);
     const resolver = createWorkflowResolvers({
       runQueue,
+      runQueueForWorkflowRun,
     } as unknown as WorkflowsService).Query.worktreeRunQueue;
 
     await expect(
@@ -44,5 +46,12 @@ describe("workflow trigger metadata", () => {
     expect(runQueue).toHaveBeenNthCalledWith(2, {
       workflowId: "workflow-1",
     });
+
+    await expect(
+      createWorkflowResolvers({
+        runQueueForWorkflowRun,
+      } as unknown as WorkflowsService).WorkflowRun.queue({ id: "run-1" }),
+    ).resolves.toEqual([]);
+    expect(runQueueForWorkflowRun).toHaveBeenCalledWith("run-1");
   });
 });

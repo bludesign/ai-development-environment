@@ -36,11 +36,13 @@ function entryHref(entry: WorktreeRunQueueEntry): string {
 }
 
 export function WorktreeRunQueueCard({
+  currentEntryId,
   entries,
   scope,
 }: {
+  currentEntryId?: string;
   entries: WorktreeRunQueueEntry[];
-  scope: "WORKFLOW" | "WORKTREE";
+  scope: "RUN" | "WORKFLOW" | "WORKTREE";
 }) {
   const t = useTranslations("workflows");
   const kindT = useTranslations("actionCenter.kinds");
@@ -56,7 +58,9 @@ export function WorktreeRunQueueCard({
         <CardDescription>
           {scope === "WORKTREE"
             ? t("worktreeQueueDescription")
-            : t("workflowQueueDescription")}
+            : scope === "RUN"
+              ? t("runQueueDescription")
+              : t("workflowQueueDescription")}
         </CardDescription>
       </CardHeader>
       {!entries.length ? (
@@ -81,53 +85,62 @@ export function WorktreeRunQueueCard({
               </TableRow>
             </TableHeader>
             <TableBody>
-              {entries.map((entry) => (
-                <TableRow key={`${entry.kind}:${entry.id}`}>
-                  <TableCell className="font-mono font-semibold">
-                    #{entry.position}
-                  </TableCell>
-                  <TableCell>
-                    <Link
-                      className="font-medium hover:underline"
-                      href={entryHref(entry)}
-                    >
-                      {kindT(entry.kind)} #{entry.displayNumber}
-                    </Link>
-                    <p className="max-w-72 truncate text-xs text-muted-foreground">
-                      {entry.name}
-                    </p>
-                  </TableCell>
-                  <TableCell>
-                    <div className="flex flex-wrap gap-1">
-                      <Badge variant="outline">
-                        {entry.kind === "WORKFLOW"
-                          ? formatEnumLabel(entry.phase)
-                          : runLabels.phase(entry.phase)}
-                      </Badge>
-                      {entry.exclusiveWorktree && (
-                        <Badge variant="secondary">{t("exclusive")}</Badge>
-                      )}
-                    </div>
-                  </TableCell>
-                  {showWorktree && (
-                    <TableCell>
-                      {entry.worktree ? (
-                        <Link
-                          className="font-mono text-xs hover:underline"
-                          href={`/worktrees/${entry.worktree.id}`}
-                        >
-                          {entry.worktree.branch ?? entry.worktree.folder}
-                        </Link>
-                      ) : (
-                        "—"
-                      )}
+              {entries.map((entry) => {
+                const current = entry.id === currentEntryId;
+                return (
+                  <TableRow
+                    className={current ? "bg-primary/5" : undefined}
+                    key={`${entry.kind}:${entry.id}`}
+                  >
+                    <TableCell className="font-mono font-semibold">
+                      #{entry.position}
                     </TableCell>
-                  )}
-                  <TableCell className="text-muted-foreground">
-                    <DateTime kind="relative" value={entry.queuedAt} />
-                  </TableCell>
-                </TableRow>
-              ))}
+                    <TableCell>
+                      <Link
+                        className="font-medium hover:underline"
+                        href={entryHref(entry)}
+                      >
+                        {kindT(entry.kind)} #{entry.displayNumber}
+                      </Link>
+                      <p className="max-w-72 truncate text-xs text-muted-foreground">
+                        {entry.name}
+                      </p>
+                    </TableCell>
+                    <TableCell>
+                      <div className="flex flex-wrap gap-1">
+                        <Badge variant="outline">
+                          {entry.kind === "WORKFLOW"
+                            ? formatEnumLabel(entry.phase)
+                            : runLabels.phase(entry.phase)}
+                        </Badge>
+                        {entry.exclusiveWorktree && (
+                          <Badge variant="secondary">{t("exclusive")}</Badge>
+                        )}
+                        {current && (
+                          <Badge variant="secondary">{t("currentRun")}</Badge>
+                        )}
+                      </div>
+                    </TableCell>
+                    {showWorktree && (
+                      <TableCell>
+                        {entry.worktree ? (
+                          <Link
+                            className="font-mono text-xs hover:underline"
+                            href={`/worktrees/${entry.worktree.id}`}
+                          >
+                            {entry.worktree.branch ?? entry.worktree.folder}
+                          </Link>
+                        ) : (
+                          "—"
+                        )}
+                      </TableCell>
+                    )}
+                    <TableCell className="text-muted-foreground">
+                      <DateTime kind="relative" value={entry.queuedAt} />
+                    </TableCell>
+                  </TableRow>
+                );
+              })}
             </TableBody>
           </Table>
         </div>

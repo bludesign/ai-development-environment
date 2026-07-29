@@ -81,13 +81,19 @@ import { workflowResourceDestination } from "@/lib/workflows/resources";
 import { useOpenWorkflowDestination } from "./use-workflow-destination";
 import { WorkflowGraph, workflowStatusVariant } from "./workflow-graph";
 import { useWorkflowLabels } from "./workflow-labels";
-import type { WorkflowRun } from "./types";
+import { WorktreeRunQueueCard } from "./worktree-run-queue-card";
+import type { WorkflowRun, WorktreeRunQueueEntry } from "./types";
 
 const RUN_DETAIL_FIELDS = `
   id displayNumber workflowId versionId triggerKind triggerSubjectKey status phase generation
   sessionData sessionRevision blockedReason error queuedAt startedAt pausedAt finishedAt createdAt updatedAt
   workflow { id name }
   worktree { id folder branch highlightColor }
+  queue {
+    position id kind displayNumber name status phase worktreeId workflowId workflowRunId
+    queuedAt exclusiveWorktree worktreeConcurrencyLimit
+    worktree { id folder branch highlightColor }
+  }
   trigger { nodeId }
   version { id workflowId version name description schemaVersion definition contentHash publishedAt }
   attempts {
@@ -123,6 +129,10 @@ type ReplayPreview = {
   warning: string | null;
 };
 
+type WorkflowRunDetail = WorkflowRun & {
+  queue?: WorktreeRunQueueEntry[];
+};
+
 export type WorkflowQuestion = {
   id: string;
   header?: string | null;
@@ -155,11 +165,18 @@ function jsonText(value: unknown) {
   return JSON.stringify(value, null, 2);
 }
 
+function triggerSubjectLabel(run: WorkflowRun): string {
+  if (run.worktree && run.triggerSubjectKey === `WORKTREE:${run.worktree.id}`) {
+    return run.worktree.branch ?? run.worktree.folder;
+  }
+  return run.triggerSubjectKey;
+}
+
 export function WorkflowRunPage({ runId }: { runId: string }) {
   const t = useTranslations("workflows");
   const labels = useWorkflowLabels();
   const openDestination = useOpenWorkflowDestination();
-  const [run, setRun] = useState<WorkflowRun | null>(null);
+  const [run, setRun] = useState<WorkflowRunDetail | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -178,7 +195,7 @@ export function WorkflowRunPage({ runId }: { runId: string }) {
   const load = useCallback(async () => {
     try {
       const data = await controlPlaneRequest<{
-        workflowRun: WorkflowRun | null;
+        workflowRun: WorkflowRunDetail | null;
       }>(
         `query WorkflowRunDetail($id: ID!) { workflowRun(id: $id) { ${RUN_DETAIL_FIELDS} } }`,
         { id: runId },
@@ -224,6 +241,36 @@ export function WorkflowRunPage({ runId }: { runId: string }) {
       subscriptions.forEach((subscription) => subscription());
     };
   }, [load, runId]);
+
+  useEffect(() => {
+    if (run?.status !== "QUEUED") return;
+    const client = controlPlaneSubscriptions();
+    const subscriptions = [
+      client.subscribe<{ workflowsChanged: { id: string } | null }>(
+        {
+          query:
+            "subscription QueuedWorkflowRunQueueChanges { workflowsChanged { id } }",
+        },
+        {
+          next: () => void load(),
+          error: () => undefined,
+          complete: () => undefined,
+        },
+      ),
+      client.subscribe<{ agentRunsChanged: { id: string } | null }>(
+        {
+          query:
+            "subscription QueuedWorkflowAgentRunChanges { agentRunsChanged { id } }",
+        },
+        {
+          next: () => void load(),
+          error: () => undefined,
+          complete: () => undefined,
+        },
+      ),
+    ];
+    return () => subscriptions.forEach((subscription) => subscription());
+  }, [load, run?.status]);
 
   const lifecycle = async (action: "pause" | "resume" | "cancel") => {
     setBusy(true);
@@ -391,7 +438,7 @@ export function WorkflowRunPage({ runId }: { runId: string }) {
               </Badge>
             </div>
             <p className="mt-1 text-sm text-muted-foreground">
-              {labels.kind(run.triggerKind)} · {run.triggerSubjectKey}
+              {labels.kind(run.triggerKind)} · {triggerSubjectLabel(run)}
             </p>
           </div>
         </div>
@@ -443,6 +490,14 @@ export function WorkflowRunPage({ runId }: { runId: string }) {
         <Alert variant="destructive">
           <AlertDescription>{run.blockedReason ?? run.error}</AlertDescription>
         </Alert>
+      )}
+
+      {run.status === "QUEUED" && (
+        <WorktreeRunQueueCard
+          currentEntryId={run.id}
+          entries={run.queue ?? []}
+          scope="RUN"
+        />
       )}
 
       <Card>
