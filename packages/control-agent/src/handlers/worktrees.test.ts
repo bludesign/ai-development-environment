@@ -392,6 +392,35 @@ describe("worktree inventory and inspection", () => {
     expect(result.diff).toMatchObject({ patch: "", truncated: true });
   });
 
+  test("returns a renderable hunk for an untracked text file", async () => {
+    const folder = await repository();
+    await writeFile(join(folder, "notes.txt"), "first\nsecond\n");
+    const gitDirectory = await realpath(join(folder, ".git"));
+
+    const result = (await inspectWorktreeDiff(
+      {
+        codebaseId: "codebase-1",
+        folder,
+        gitDirectory,
+        expectedOrigin: "github.com/openai/codex",
+        baseBranch: "main",
+        scope: "UNTRACKED",
+        path: "notes.txt",
+        previousPath: null,
+        commitSha: null,
+        uploadId: null,
+        side: null,
+      },
+      10_000,
+      new AbortController().signal,
+      async () => undefined,
+    )) as unknown as { diff: { patch: string; truncated: boolean } };
+
+    expect(result.diff.truncated).toBe(false);
+    expect(result.diff.patch).toContain("@@ -0,0 +1,2 @@");
+    expect(result.diff.patch).toContain("+first\n+second");
+  });
+
   test("stages changes through the allow-listed operation handler", async () => {
     const folder = await repository();
     await writeFile(join(folder, "new.txt"), "new\n");

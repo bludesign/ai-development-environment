@@ -15,6 +15,11 @@ export type RouteEntry = {
    * depends on an id the client mints at random; see the `usage` route.
    */
   initScript?: string;
+  /**
+   * Answer the worktree inspection mutations from a fixture instead of the (absent) agent.
+   * Only for pages whose whole body is a live diff; see playwright/worktree-stub.ts.
+   */
+  stubWorktree?: boolean;
 };
 
 export const routes: RouteEntry[] = [
@@ -42,6 +47,13 @@ export const routes: RouteEntry[] = [
   },
   { name: "worktrees", path: "/worktrees" },
   { name: "worktree-detail", path: `/worktrees/${ids.worktrees.webFeature}` },
+  {
+    // Pinned to the worktree the seeded coverage report measured, with that report selected,
+    // so the capture shows the coverage overlay rather than an unannotated diff.
+    name: "changes",
+    path: `/changes?worktree=${ids.worktrees.iosMain}&scope=BRANCH&coverage=report-archive-coverage&path=AcmeApp/Search/SearchCoordinator.swift`,
+    stubWorktree: true,
+  },
 
   // Builds
   { name: "builds", path: "/builds" },

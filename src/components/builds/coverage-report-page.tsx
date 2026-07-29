@@ -1,9 +1,16 @@
 "use client";
 
-import { ArrowLeft, ChevronDown, ChevronRight, Search } from "lucide-react";
+import {
+  ArrowLeft,
+  ChevronDown,
+  ChevronRight,
+  GitCompare,
+  Search,
+} from "lucide-react";
 import { useLocale, useTranslations } from "next-intl";
 import { useCallback, useEffect, useMemo, useState } from "react";
 
+import { CoverageValue } from "@/components/common/coverage-value";
 import { SortableTableHead } from "@/components/common/sortable-table-head";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
@@ -27,6 +34,7 @@ import {
 } from "@/components/ui/table";
 import { Link } from "@/i18n/navigation";
 import { controlPlaneRequest } from "@/lib/control-plane-client";
+import { relativeCoveragePath } from "@/lib/coverage-paths";
 
 import type { BuildReport } from "./types";
 
@@ -70,18 +78,6 @@ function uncoveredLines(file: CoverageFile): number {
   return Math.max(0, file.executableLines - file.coveredLines);
 }
 
-function relativeCoveragePath(path: string, worktreeFolder: string | null) {
-  const normalizedPath = path.replaceAll("\\", "/");
-  const normalizedRoot = worktreeFolder
-    ?.replaceAll("\\", "/")
-    .replace(/\/$/, "");
-  if (!normalizedRoot) return normalizedPath;
-  if (normalizedPath === normalizedRoot) return ".";
-  return normalizedPath.startsWith(`${normalizedRoot}/`)
-    ? normalizedPath.slice(normalizedRoot.length + 1)
-    : normalizedPath;
-}
-
 function coverageFileName(path: string) {
   return path.replaceAll("\\", "/").split("/").filter(Boolean).at(-1) ?? path;
 }
@@ -92,6 +88,7 @@ export function CoverageReportPage({ buildId }: { buildId: string }) {
   const [report, setReport] = useState<BuildReport | null>(null);
   const [buildName, setBuildName] = useState(buildId);
   const [worktreeFolder, setWorktreeFolder] = useState<string | null>(null);
+  const [worktreeId, setWorktreeId] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [search, setSearch] = useState("");
@@ -107,11 +104,13 @@ export function CoverageReportPage({ buildId }: { buildId: string }) {
           id: string;
           snapshot: Record<string, unknown>;
           reports: BuildReport[];
+          worktree: { id: string } | null;
         } | null;
       }>(
         `query CoverageReport($id: ID!) {
           build(id: $id) {
             id snapshot
+            worktree { id }
             reports {
               id kind source status summary data error createdAt updatedAt finishedAt
               artifact { id kind relativePath sizeBytes checksum metadata createdAt }
@@ -130,6 +129,7 @@ export function CoverageReportPage({ buildId }: { buildId: string }) {
         { folder?: string } | undefined;
       setBuildName(configuration?.name ?? buildId);
       setWorktreeFolder(worktree?.folder ?? null);
+      setWorktreeId(data.build?.worktree?.id ?? null);
       setError(null);
     } catch (value) {
       setError(value instanceof Error ? value.message : String(value));
@@ -241,11 +241,23 @@ export function CoverageReportPage({ buildId }: { buildId: string }) {
           <AlertDescription>{report.error}</AlertDescription>
         </Alert>
       )}
-      <div>
-        <h1 className="text-2xl font-semibold">{buildName}</h1>
-        <p className="mt-1 text-sm text-muted-foreground">
-          {t("coverageReport")}
-        </p>
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <h1 className="text-2xl font-semibold">{buildName}</h1>
+          <p className="mt-1 text-sm text-muted-foreground">
+            {t("coverageReport")}
+          </p>
+        </div>
+        {/* The changes page can overlay this very report, so hand it both ids. */}
+        {worktreeId && (
+          <Button asChild variant="outline">
+            <Link
+              href={`/changes?worktree=${encodeURIComponent(worktreeId)}&scope=BRANCH&coverage=${encodeURIComponent(report.id)}`}
+            >
+              <GitCompare /> {t("viewChangesWithCoverage")}
+            </Link>
+          </Button>
+        )}
       </div>
       <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
         <Metric
@@ -454,40 +466,6 @@ function SortableCoverageHead({
       label={label}
       onSort={() => onSort(sortKey)}
     />
-  );
-}
-
-function CoverageValue({
-  value,
-  percent,
-  size = "compact",
-}: {
-  value: number | null;
-  percent: (value: unknown) => string;
-  size?: "compact" | "metric";
-}) {
-  if (typeof value !== "number") return <>—</>;
-  const normalized = Math.max(0, Math.min(1, value));
-  const color =
-    normalized >= 0.8
-      ? "text-emerald-500"
-      : normalized >= 0.5
-        ? "text-amber-500"
-        : "text-red-500";
-  return (
-    <span
-      className={`inline-flex items-center justify-end tabular-nums ${size === "metric" ? "gap-2 text-2xl font-semibold" : "gap-1.5"}`}
-    >
-      {percent(value)}
-      <span
-        aria-hidden="true"
-        className={`${size === "metric" ? "size-7" : "size-3.5"} shrink-0 rounded-full ring-1 ring-foreground/10 ${color}`}
-        data-coverage-indicator
-        style={{
-          background: `conic-gradient(currentColor ${normalized * 360}deg, var(--muted) 0deg)`,
-        }}
-      />
-    </span>
   );
 }
 

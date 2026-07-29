@@ -11,6 +11,7 @@ import {
   IOS_RUN_DESTINATIONS_JOB_KIND,
   type BuildDestination,
 } from "@ai-development-environment/agent-contract/builds";
+import { COVERAGE_IMPORT_JOB_KIND } from "@ai-development-environment/agent-contract/coverage";
 import {
   BUILDS_CHANGED_TOPIC,
   agentEventBus,
@@ -52,6 +53,8 @@ function worktree() {
         id: "agent-1",
         name: "Builder",
         hostname: "builder.local",
+        osVersion: "macOS 26.0",
+        architecture: "arm64",
         capabilitiesJson: JSON.stringify([
           IOS_BUILD_JOB_KIND,
           IOS_DESTINATIONS_JOB_KIND,
@@ -105,10 +108,14 @@ function observation() {
   };
 }
 
-function control(createJob = vi.fn().mockResolvedValue({ id: "job-1" })) {
+function control(
+  createJob = vi.fn().mockResolvedValue({ id: "job-1" }),
+  cancelJob = vi.fn().mockResolvedValue({}),
+) {
   return {
     registerCompletionHandler: vi.fn(),
     createJob,
+    cancelJob,
   } as unknown as AgentControlService;
 }
 
@@ -1202,5 +1209,286 @@ describe("BuildsService", () => {
         },
       ]),
     ).rejects.toThrow("Log byte length is invalid");
+  });
+  test("imports a coverage report as its own host build and job", async () => {
+    const worktreeRecord = {
+      ...worktree(),
+      baseBranchOverride: null,
+      codebase: {
+        ...worktree().codebase,
+        defaultBranch: "main",
+        agent: {
+          ...worktree().codebase.agent,
+          capabilitiesJson: JSON.stringify([COVERAGE_IMPORT_JOB_KIND]),
+        },
+      },
+    };
+    const create = vi
+      .fn()
+      .mockImplementation(({ data }) => Promise.resolve(data));
+    const reportCreate = vi.fn().mockResolvedValue({});
+    const update = vi.fn().mockResolvedValue({});
+    const createJob = vi.fn().mockResolvedValue({ id: "coverage-job" });
+    getPrismaClient.mockResolvedValue({
+      worktree: { findUnique: vi.fn().mockResolvedValue(worktreeRecord) },
+      build: { findUnique: vi.fn().mockResolvedValue(null), create, update },
+      buildReport: { create: reportCreate },
+    });
+
+    const build = await new BuildsService(
+      control(createJob),
+    ).importCoverageReport({
+      worktreeId: "worktree-1",
+      buildName: "Test with coverage",
+      reportPath: "coverage/lcov.info",
+      format: "auto",
+      requestId: "request-1",
+    });
+
+    expect(create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          requestKey: "coverage:worktree-1:request-1",
+          action: "TEST",
+          destinationType: "HOST",
+          status: "RUNNING",
+          commandSummary: "Import coverage from coverage/lcov.info",
+          destinationJson: expect.any(String),
+        }),
+      }),
+    );
+    expect(JSON.parse(create.mock.calls[0]![0].data.destinationJson)).toEqual({
+      type: "HOST",
+      id: "agent-1",
+      name: "Builder",
+      platform: worktreeRecord.codebase.agent.architecture,
+      osVersion: worktreeRecord.codebase.agent.osVersion,
+      state: "Connected",
+    });
+    expect(
+      JSON.parse(create.mock.calls[0]![0].data.snapshotJson),
+    ).toMatchObject({
+      worktree: { headSha: "abc123" },
+      configuration: { name: "Test with coverage" },
+      coverageImport: {
+        reportPath: "coverage/lcov.info",
+        format: "AUTO",
+        baseBranch: "main",
+      },
+    });
+    expect(reportCreate).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        kind: "CODE_COVERAGE",
+        source: "WORKTREE",
+        status: "PENDING",
+      }),
+    });
+    expect(createJob).toHaveBeenCalledWith(
+      expect.objectContaining({
+        kind: COVERAGE_IMPORT_JOB_KIND,
+        payload: expect.objectContaining({
+          folder: "/agent/repository",
+          reportPath: "coverage/lcov.info",
+          format: "AUTO",
+          baseBranch: "main",
+        }),
+        visibility: "SYSTEM",
+      }),
+    );
+    expect(update).toHaveBeenCalledWith({
+      where: { id: build.id },
+      data: { jobId: "coverage-job" },
+    });
+    expect(build.jobId).toBe("coverage-job");
+  });
+
+  test("fails the coverage build and report when the job cannot be queued", async () => {
+    const worktreeRecord = {
+      ...worktree(),
+      baseBranchOverride: null,
+      codebase: {
+        ...worktree().codebase,
+        defaultBranch: "main",
+        agent: {
+          ...worktree().codebase.agent,
+          capabilitiesJson: JSON.stringify([COVERAGE_IMPORT_JOB_KIND]),
+        },
+      },
+    };
+    const create = vi
+      .fn()
+      .mockImplementation(({ data }) => Promise.resolve(data));
+    const reportUpsert = vi.fn().mockResolvedValue({});
+    const buildUpdate = vi.fn().mockResolvedValue({});
+    const transaction = {
+      buildReport: { upsert: reportUpsert },
+      build: { update: buildUpdate },
+    };
+    getPrismaClient.mockResolvedValue({
+      worktree: { findUnique: vi.fn().mockResolvedValue(worktreeRecord) },
+      build: {
+        findUnique: vi.fn().mockResolvedValue(null),
+        create,
+      },
+      buildReport: { create: vi.fn().mockResolvedValue({}) },
+      $transaction: vi.fn((callback) => callback(transaction)),
+    });
+    const service = new BuildsService(
+      control(vi.fn().mockRejectedValue(new Error("Agent queue unavailable"))),
+    );
+
+    await expect(
+      service.importCoverageReport({
+        worktreeId: "worktree-1",
+        reportPath: "coverage/lcov.info",
+        format: "LCOV",
+        requestId: "request-1",
+      }),
+    ).rejects.toThrow("Agent queue unavailable");
+
+    const buildId = create.mock.calls[0]![0].data.id;
+    expect(reportUpsert).toHaveBeenCalledWith({
+      where: { buildId_kind: { buildId, kind: "CODE_COVERAGE" } },
+      create: expect.objectContaining({
+        buildId,
+        kind: "CODE_COVERAGE",
+        source: "WORKTREE",
+        status: "FAILED",
+        error: "Agent queue unavailable",
+        finishedAt: expect.any(Date),
+      }),
+      update: {
+        status: "FAILED",
+        error: "Agent queue unavailable",
+        finishedAt: expect.any(Date),
+      },
+    });
+    expect(buildUpdate).toHaveBeenCalledWith({
+      where: { id: buildId },
+      data: {
+        status: "FAILED",
+        errorCode: "QUEUE_FAILED",
+        error: "Agent queue unavailable",
+        finishedAt: expect.any(Date),
+      },
+    });
+  });
+
+  test("cancels a coverage job that cannot be attached to its build", async () => {
+    const worktreeRecord = {
+      ...worktree(),
+      baseBranchOverride: null,
+      codebase: {
+        ...worktree().codebase,
+        defaultBranch: "main",
+        agent: {
+          ...worktree().codebase.agent,
+          capabilitiesJson: JSON.stringify([COVERAGE_IMPORT_JOB_KIND]),
+        },
+      },
+    };
+    const create = vi
+      .fn()
+      .mockImplementation(({ data }) => Promise.resolve(data));
+    const reportUpsert = vi.fn().mockResolvedValue({});
+    const transactionBuildUpdate = vi.fn().mockResolvedValue({});
+    const cancelJob = vi.fn().mockResolvedValue({});
+    getPrismaClient.mockResolvedValue({
+      worktree: { findUnique: vi.fn().mockResolvedValue(worktreeRecord) },
+      build: {
+        findUnique: vi.fn().mockResolvedValue(null),
+        create,
+        update: vi.fn().mockRejectedValue(new Error("Build attachment failed")),
+      },
+      buildReport: { create: vi.fn().mockResolvedValue({}) },
+      $transaction: vi.fn((callback) =>
+        callback({
+          buildReport: { upsert: reportUpsert },
+          build: { update: transactionBuildUpdate },
+        }),
+      ),
+    });
+    const service = new BuildsService(
+      control(vi.fn().mockResolvedValue({ id: "coverage-job" }), cancelJob),
+    );
+
+    await expect(
+      service.importCoverageReport({
+        worktreeId: "worktree-1",
+        reportPath: "coverage/lcov.info",
+        format: "LCOV",
+        requestId: "request-1",
+      }),
+    ).rejects.toThrow("Build attachment failed");
+
+    expect(cancelJob).toHaveBeenCalledWith("coverage-job");
+    expect(reportUpsert).toHaveBeenCalledWith(
+      expect.objectContaining({
+        update: expect.objectContaining({
+          status: "FAILED",
+          error: "Build attachment failed",
+        }),
+      }),
+    );
+    expect(transactionBuildUpdate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          status: "FAILED",
+          errorCode: "QUEUE_FAILED",
+          error: "Build attachment failed",
+        }),
+      }),
+    );
+  });
+
+  test("rejects an unknown coverage format and an agent without the job", async () => {
+    const outdated = {
+      ...worktree(),
+      baseBranchOverride: null,
+      codebase: {
+        ...worktree().codebase,
+        defaultBranch: "main",
+        agent: {
+          ...worktree().codebase.agent,
+          capabilitiesJson: JSON.stringify([IOS_BUILD_JOB_KIND]),
+        },
+      },
+    };
+    getPrismaClient.mockResolvedValue({
+      worktree: { findUnique: vi.fn().mockResolvedValue(outdated) },
+    });
+    const service = new BuildsService(control());
+
+    await expect(
+      service.importCoverageReport({
+        worktreeId: "worktree-1",
+        reportPath: "coverage/lcov.info",
+        format: "COBERTURA",
+        requestId: "request-1",
+      }),
+    ).rejects.toThrow("Agent must be updated to import coverage reports");
+
+    getPrismaClient.mockResolvedValue({
+      worktree: {
+        findUnique: vi.fn().mockResolvedValue({
+          ...outdated,
+          codebase: {
+            ...outdated.codebase,
+            agent: {
+              ...outdated.codebase.agent,
+              capabilitiesJson: JSON.stringify([COVERAGE_IMPORT_JOB_KIND]),
+            },
+          },
+        }),
+      },
+    });
+    await expect(
+      service.importCoverageReport({
+        worktreeId: "worktree-1",
+        reportPath: "coverage/lcov.info",
+        format: "COBERTURA",
+        requestId: "request-1",
+      }),
+    ).rejects.toThrow("AUTO, LCOV, or ISTANBUL");
   });
 });

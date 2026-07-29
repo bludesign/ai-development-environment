@@ -56,6 +56,17 @@ export const StartBuildToolInputSchema = z.object({
 });
 export const StartBuildToolOutputSchema = z.object({ build: z.unknown() });
 
+export const ImportCoverageReportToolInputSchema = z.object({
+  worktreeId: z.string().min(1),
+  /** Coverage file to read, relative to the worktree folder. */
+  reportPath: z.string().min(1).max(4_000),
+  format: z.enum(["AUTO", "LCOV", "ISTANBUL"]).default("AUTO"),
+  requestId: z.string().min(1),
+});
+export const ImportCoverageReportToolOutputSchema = z.object({
+  build: z.unknown(),
+});
+
 export const CancelBuildToolInputSchema = z.object({
   buildId: z.string().min(1),
   requestId: z.string().min(1),

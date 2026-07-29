@@ -238,9 +238,9 @@ function ActivityRow({
 }
 
 /**
- * Renders the grouped activity feed as `<TableBody>` rows. Codex item lifecycles
- * expose their underlying notifications; OpenCode text and tool lifecycles
- * expand directly into their combined or completed structured result.
+ * Renders the grouped activity feed as `<TableBody>` rows. Provider lifecycle
+ * notifications expand into their combined or completed structured result so
+ * transport-level chunks do not obscure the logical activity.
  */
 export function ActivityRows({ events }: { events: RunEventView[] }) {
   const t = useTranslations("runs");
@@ -312,9 +312,11 @@ export function ActivityRows({ events }: { events: RunEventView[] }) {
                   <span className="min-w-0 truncate">
                     {descriptor.line || node.representative.summary}
                   </span>
-                  <span className="shrink-0 text-muted-foreground">
-                    {node.children.length}
-                  </span>
+                  {node.detailMode === "children" && (
+                    <span className="shrink-0 text-muted-foreground">
+                      {node.children.length}
+                    </span>
+                  )}
                 </span>
               </TableCell>
               <TableCell className="h-8 overflow-hidden py-1">

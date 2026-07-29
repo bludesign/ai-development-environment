@@ -39,6 +39,7 @@ import {
   simulatorAppArguments,
   archiveApplicationProperties,
   exportedArtifacts,
+  fileCoverageLines,
   simulatorDestinations,
   signingRequirementsFromBuildSettings,
   testPlanNames,
@@ -998,5 +999,66 @@ describe("iOS archive export artifacts", () => {
         AbortSignal.timeout(10_000),
       ),
     ).resolves.toEqual([]);
+  });
+});
+
+describe("per-file coverage lines", () => {
+  const line = (
+    number: number,
+    executable: boolean,
+    executionCount?: number,
+  ) => ({
+    line: number,
+    isExecutable: executable,
+    ...(executionCount === undefined ? {} : { executionCount }),
+  });
+
+  test("splits executable lines into covered and uncovered", () => {
+    expect(
+      fileCoverageLines(
+        [line(1, true, 3), line(2, true, 0), line(3, true, 1)],
+        [],
+      ),
+    ).toEqual({
+      coveredLineNumbers: [1, 3],
+      uncoveredLineNumbers: [2],
+      changedCovered: 0,
+      changedExecutable: 0,
+    });
+  });
+
+  test("records the whole file while counting only the changed lines", () => {
+    const result = fileCoverageLines(
+      [line(10, true, 1), line(11, true, 0), line(12, true, 5)],
+      [11, 12],
+    );
+    // Line 10 is outside the change but still needs a colour in the gutter.
+    expect(result.coveredLineNumbers).toEqual([10, 12]);
+    expect(result.uncoveredLineNumbers).toEqual([11]);
+    expect(result.changedExecutable).toBe(2);
+    expect(result.changedCovered).toBe(1);
+  });
+
+  test("ignores non-executable lines and returns sorted numbers", () => {
+    expect(
+      fileCoverageLines(
+        [line(9, true, 1), line(4, false), line(2, true, 0), line(7, true, 0)],
+        [],
+      ),
+    ).toMatchObject({
+      coveredLineNumbers: [9],
+      uncoveredLineNumbers: [2, 7],
+    });
+  });
+
+  test("treats a missing or malformed line array as no coverage", () => {
+    for (const value of [undefined, null, {}, "nope"]) {
+      expect(fileCoverageLines(value, [1, 2])).toEqual({
+        coveredLineNumbers: [],
+        uncoveredLineNumbers: [],
+        changedCovered: 0,
+        changedExecutable: 0,
+      });
+    }
   });
 });

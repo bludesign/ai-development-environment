@@ -640,6 +640,25 @@ const STEP_CONFIG_DESCRIPTORS: StepConfigDescriptors = {
   BUILD_READ_COVERAGE: {
     fields: [text("buildId", "Build ID")],
   },
+  BUILD_IMPORT_COVERAGE: {
+    fields: [
+      resource("worktreeId", "Worktree", "worktree"),
+      text("buildName", "Build name", {
+        default: "{{workflow.name}}",
+        help: "Name shown on the build and coverage pages. Defaults to the workflow name.",
+      }),
+      text("reportPath", "Coverage file", {
+        required: true,
+        default: "coverage/lcov.info",
+        help: "Path inside the worktree, written by whichever test command ran first.",
+      }),
+      enumField(
+        "format",
+        "Coverage format",
+        staticOptions(["AUTO", "LCOV", "ISTANBUL"]),
+      ),
+    ],
+  },
   BUILD_EXPORT: {
     fields: [
       text("buildId", "Build ID"),
@@ -1123,6 +1142,7 @@ const POLLED_WAIT_STEP_KINDS: readonly WorkflowStepKind[] = [
   "CODEBASE_FETCH_REFRESH",
   "CODEBASE_GIT_OPERATION",
   "BUILD_START",
+  "BUILD_IMPORT_COVERAGE",
   "BUILD_EXPORT",
   "BUILD_DEPLOY",
   "DISK_SPACE_REFRESH",

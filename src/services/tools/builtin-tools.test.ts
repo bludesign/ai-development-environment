@@ -212,7 +212,7 @@ describe("built-in tool registry", () => {
       ]),
     );
     const tools = expanded.definitions();
-    expect(tools).toHaveLength(295);
+    expect(tools).toHaveLength(296);
     expect(new Set(tools.map(({ name }) => name)).size).toBe(tools.length);
     expect(tools.every(({ annotations }) => Boolean(annotations))).toBe(true);
   });

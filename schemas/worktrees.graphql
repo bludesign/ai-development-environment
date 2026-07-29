@@ -202,6 +202,8 @@ type Worktree {
   branch: String
   "Git commit SHA associated with this worktree. May be null when unavailable or not applicable."
   headSha: String
+  "Hash of the complete worktree code state, including local changes. May be null when unavailable or not applicable."
+  codeStateHash: String
   "The upstream associated with this worktree. May be null when unavailable or not applicable."
   upstream: String
   "The ahead associated with this worktree. May be null when unavailable or not applicable."

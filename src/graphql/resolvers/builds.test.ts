@@ -32,6 +32,51 @@ describe("build resolver authorization", () => {
     expect(service.reportData).toHaveBeenCalledWith("report-1");
   });
 
+  test("defaults per-line coverage for reports recorded without it", async () => {
+    const service = {
+      reportData: vi.fn().mockResolvedValue(
+        JSON.stringify({
+          changedFiles: [
+            // Written before per-line coverage existed.
+            { path: "Legacy.swift", changedLineCoverage: 0.5 },
+            {
+              path: "Current.swift",
+              coveredLineNumbers: [2, 4],
+              uncoveredLineNumbers: [3],
+            },
+            // A malformed list must not reach the non-null schema field.
+            { path: "Broken.swift", coveredLineNumbers: "nope" },
+          ],
+        }),
+      ),
+    } as unknown as BuildsService;
+    const resolvers = createBuildResolvers(service);
+
+    await expect(
+      resolvers.BuildReport.changedCoverageFiles({
+        id: "report-1",
+        kind: "CODE_COVERAGE",
+      }),
+    ).resolves.toEqual([
+      {
+        path: "Legacy.swift",
+        changedLineCoverage: 0.5,
+        coveredLineNumbers: [],
+        uncoveredLineNumbers: [],
+      },
+      {
+        path: "Current.swift",
+        coveredLineNumbers: [2, 4],
+        uncoveredLineNumbers: [3],
+      },
+      {
+        path: "Broken.swift",
+        coveredLineNumbers: [],
+        uncoveredLineNumbers: [],
+      },
+    ]);
+  });
+
   test("keeps build configuration and execution operations on the control plane", async () => {
     const service = {
       builds: vi.fn().mockResolvedValue({ items: [], nextCursor: null }),

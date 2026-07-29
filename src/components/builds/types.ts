@@ -99,7 +99,9 @@ export type BuildRecord = {
   status:
     "QUEUED" | "PREPARING" | "RUNNING" | "SUCCEEDED" | "FAILED" | "CANCELLED";
   action: BuildAction;
-  destinationType: "SIMULATOR" | "PHYSICAL_DEVICE";
+  // HOST covers records that ran no device build, such as an imported
+  // coverage report; no build destination ever carries it.
+  destinationType: "SIMULATOR" | "PHYSICAL_DEVICE" | "HOST";
   destination: BuildDestination;
   snapshot: Record<string, unknown>;
   commandSummary: string;

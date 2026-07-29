@@ -7,6 +7,7 @@ export type BreadcrumbLabelKey =
   | "buildData"
   | "builds"
   | "cache"
+  | "changes"
   | "codebases"
   | "comments"
   | "commands"
@@ -59,6 +60,7 @@ const STATIC_SEGMENTS: Record<string, BreadcrumbLabelKey> = {
   "build-data": "buildData",
   builds: "builds",
   cache: "cache",
+  changes: "changes",
   codebases: "codebases",
   comments: "comments",
   commands: "commands",
@@ -135,6 +137,7 @@ const ROUTABLE_STATIC_PATHS = new Set([
   "/analytics-events",
   "/build-data",
   "/builds",
+  "/changes",
   "/codebases",
   "/commands",
   "/commands/new",

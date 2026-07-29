@@ -14,6 +14,7 @@ const labels: Record<BreadcrumbLabelKey, string> = {
   buildData: "Build Data",
   builds: "Builds",
   cache: "Cache",
+  changes: "Changes",
   codebases: "Codebases",
   comments: "Comments",
   commands: "Commands",

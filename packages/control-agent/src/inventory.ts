@@ -14,6 +14,7 @@ import { IOS_BUILD_JOB_KINDS } from "@ai-development-environment/agent-contract/
 import { SIGNING_ASSET_JOB_KINDS } from "@ai-development-environment/agent-contract/signing-assets";
 import { WORKFLOW_JOB_KINDS } from "@ai-development-environment/agent-contract/workflows";
 import { COMMAND_RUN_JOB_KIND } from "@ai-development-environment/agent-contract/commands";
+import { COVERAGE_JOB_KINDS } from "@ai-development-environment/agent-contract/coverage";
 
 export const AGENT_VERSION = "0.1.0";
 export const AGENT_CAPABILITIES = [
@@ -25,6 +26,7 @@ export const AGENT_CAPABILITIES = [
   ...WORKTREE_JOB_KINDS,
   ...SKILL_JOB_KINDS,
   ...IOS_BUILD_JOB_KINDS,
+  ...COVERAGE_JOB_KINDS,
   ...SIGNING_ASSET_JOB_KINDS,
   "runs.protocol.v1",
   "runs.provider.codex",

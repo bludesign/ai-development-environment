@@ -1,6 +1,7 @@
 import { expect, test } from "@playwright/test";
 
 import { routes } from "./routes";
+import { stubWorktreeAgent } from "./worktree-stub";
 
 /**
  * Captures one screenshot per route for the active Playwright project (viewport + color
@@ -20,6 +21,7 @@ test.describe("app screenshots", () => {
       page.on("pageerror", (error) => pageErrors.push(error.message));
 
       if (route.initScript) await page.addInitScript(route.initScript);
+      if (route.stubWorktree) await stubWorktreeAgent(page);
       const response = await page.goto(`/en${route.path}`, {
         waitUntil: "domcontentloaded",
         timeout: 45_000,

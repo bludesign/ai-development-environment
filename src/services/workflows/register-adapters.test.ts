@@ -28,7 +28,7 @@ function context(worktreeId: string): WorkflowExecutionContext {
       failurePolicy: "FAIL",
     },
     sessionData: {
-      workflow: { id: "workflow-definition" },
+      workflow: { id: "workflow-definition", name: "Test with coverage" },
       worktree: { id: "actual-worktree" },
     },
     signal: new AbortController().signal,
@@ -1063,5 +1063,85 @@ describe("custom command workflow adapter", () => {
       ),
     ).toBe(1);
     expect(result.wait?.timeoutAt).toBeNull();
+  });
+});
+
+describe("coverage import workflow adapter", () => {
+  function coverageExecutor(
+    importCoverageReport = vi
+      .fn()
+      .mockResolvedValue({ id: "build-1", jobId: "job-1" }),
+  ) {
+    const executor = new WorkflowStepExecutor();
+    registerWorkflowAdapters(
+      { registerWaitPoller: vi.fn() } as unknown as WorkflowsService,
+      executor,
+      {
+        builds: { importCoverageReport },
+      } as unknown as WorkflowAdapterServices,
+    );
+    return { executor, importCoverageReport };
+  }
+
+  function coverageContext(config: Record<string, unknown> = {}) {
+    const input = context("actual-worktree");
+    input.node = {
+      ...input.node,
+      id: "coverage",
+      kind: "BUILD_IMPORT_COVERAGE",
+      config,
+    } as never;
+    return input;
+  }
+
+  test("imports the configured file and waits on the agent job", async () => {
+    const { executor, importCoverageReport } = coverageExecutor();
+
+    const result = await executor.execute(
+      coverageContext({
+        buildName: "Frontend coverage",
+        reportPath: "coverage/coverage-final.json",
+        format: "ISTANBUL",
+      }),
+    );
+
+    expect(importCoverageReport).toHaveBeenCalledWith({
+      worktreeId: "actual-worktree",
+      buildName: "Frontend coverage",
+      reportPath: "coverage/coverage-final.json",
+      format: "ISTANBUL",
+      requestId: "workflow-run:attempt:coverage-import",
+    });
+    expect(result.sessionPatch).toEqual({ build: { id: "build-1" } });
+    expect(result.wait).toEqual(
+      expect.objectContaining({ kind: "AGENT_JOB", externalKey: "job-1" }),
+    );
+    expect(result.links).toEqual([
+      expect.objectContaining({ kind: "WORKTREE" }),
+      expect.objectContaining({
+        kind: "BUILD",
+        resourceId: "build-1",
+        url: "/builds/build-1",
+      }),
+      expect.objectContaining({ kind: "AGENT_JOB", resourceId: "job-1" }),
+    ]);
+  });
+
+  test("defaults the path and format, and skips the wait without a job", async () => {
+    const { executor, importCoverageReport } = coverageExecutor(
+      vi.fn().mockResolvedValue({ id: "build-2" }),
+    );
+
+    const result = await executor.execute(coverageContext());
+
+    expect(importCoverageReport).toHaveBeenCalledWith(
+      expect.objectContaining({
+        buildName: "Test with coverage",
+        reportPath: "coverage/lcov.info",
+        format: "AUTO",
+      }),
+    );
+    expect(result.wait).toBeUndefined();
+    expect(result.sessionPatch).toEqual({ build: { id: "build-2" } });
   });
 });

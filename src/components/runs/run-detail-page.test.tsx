@@ -305,7 +305,10 @@ describe("RunDetailPage", () => {
       (element) => element.closest("button"),
     )!;
     fireEvent.click(changedFile.closest("button")!);
-    expect(await screen.findByText("+new")).toBeDefined();
+    // The +/- marker is a separate, unselectable span, so the added line's
+    // content is its own text node.
+    expect(await screen.findByText("new")).toBeDefined();
+    expect(screen.getByText("old")).toBeDefined();
   });
 
   test("loads activity beyond the first 500 events", async () => {

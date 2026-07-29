@@ -109,7 +109,7 @@ describe("ActivityRows", () => {
     expect(screen.getByText(/12,774/)).toBeDefined();
   });
 
-  test("folds an item lifecycle into one expandable group", () => {
+  test("folds an item lifecycle into one expandable logical result", () => {
     renderRows([
       codexEvent(
         "item/started",
@@ -126,19 +126,24 @@ describe("ActivityRows", () => {
       codexEvent(
         "item/completed",
         {
-          item: { type: "agentMessage", id: "m", text: "You chose: REST API." },
+          item: {
+            type: "agentMessage",
+            id: "m",
+            text: "You chose: REST API.",
+            phase: "final_answer",
+          },
         },
         "d",
         3,
       ),
     ]);
-    expect(screen.getByText("Agent Message")).toBeDefined();
-    // Children stay hidden until the group is expanded.
+    expect(screen.getByText("Final Answer")).toBeDefined();
     expect(screen.queryByText("Item Agent Message Delta")).toBeNull();
     fireEvent.click(screen.getByText("You chose: REST API."));
-    expect(screen.getByText("Item Agent Message Delta")).toBeDefined();
-    expect(screen.getByText("Item Started")).toBeDefined();
-    expect(screen.getByText("Item Completed")).toBeDefined();
+    expect(screen.queryByText("Item Agent Message Delta")).toBeNull();
+    expect(screen.queryByText("Item Started")).toBeNull();
+    expect(screen.queryByText("Item Completed")).toBeNull();
+    expect(screen.getByText("final_answer")).toBeDefined();
   });
 
   test("shows only the raw payload with a copy button when nothing is parsed", () => {

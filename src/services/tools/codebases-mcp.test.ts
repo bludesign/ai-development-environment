@@ -159,6 +159,7 @@ describe("codebases MCP server", () => {
       "get_build_configurations",
       "get_build_destinations",
       "start_build",
+      "import_coverage_report",
       "cancel_build",
       "run_build",
       "export_build_archive",

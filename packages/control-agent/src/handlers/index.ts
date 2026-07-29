@@ -17,7 +17,10 @@ import {
   type CommandOutputChunk,
 } from "@ai-development-environment/agent-contract/commands";
 
+import { COVERAGE_IMPORT_JOB_KIND } from "@ai-development-environment/agent-contract/coverage";
+
 import { runCommand } from "./commands.js";
+import { importCoverageReport } from "./coverage.js";
 import { inspectIosSigning } from "./signing.js";
 import { runCcusage } from "./ccusage.js";
 import { deleteBuildData, scanBuildData, sizeBuildData } from "./build-data.js";
@@ -199,6 +202,7 @@ export const handlers: Readonly<Record<string, AgentJobHandler>> = {
   [IOS_TEST_RESULTS_JOB_KIND]: generateIosBuildReport,
   [IOS_COVERAGE_REPORT_JOB_KIND]: generateIosBuildReport,
   [IOS_SIGNING_INSPECT_JOB_KIND]: inspectIosSigning,
+  [COVERAGE_IMPORT_JOB_KIND]: importCoverageReport,
   [SIGNING_ASSETS_SCAN_JOB_KIND]: scanSigningAssets,
   [SIGNING_PROFILE_READ_JOB_KIND]: readSigningProfile,
   [SIGNING_PROFILE_INSTALL_JOB_KIND]: installSigningProfile,

@@ -2355,6 +2355,44 @@ function registerBuildAdapters(
       links: [buildLink(id, `/builds/${id}/coverage`)],
     };
   });
+  executor.register("BUILD_IMPORT_COVERAGE", async (context) => {
+    const worktree = worktreeId(context);
+    const build = await services.builds.importCoverageReport({
+      worktreeId: worktree,
+      buildName:
+        optionalText(context.node.config.buildName, 200) ??
+        optionalText(
+          getSessionValue(context.sessionData, "workflow.name"),
+          200,
+        ) ??
+        "Coverage report",
+      reportPath: text(
+        context.node.config.reportPath ?? "coverage/lcov.info",
+        "Coverage file",
+        4_000,
+      ),
+      format: optionalText(context.node.config.format) ?? "AUTO",
+      requestId: requestId(context, "coverage-import"),
+    });
+    const links = [
+      worktreeLink(worktree),
+      buildLink(build.id, `/builds/${build.id}`),
+    ];
+    // The build exists either way; without a job the import already ran, so the
+    // step has nothing left to wait on.
+    return "jobId" in build && typeof build.jobId === "string"
+      ? jobResult(
+          context,
+          { id: build.jobId, timeoutSeconds: 300 },
+          { build: { id: build.id } },
+          links,
+        )
+      : {
+          output: build,
+          sessionPatch: { build: { id: build.id } },
+          links,
+        };
+  });
   executor.register("BUILD_EXPORT", async (context) => {
     const id = buildId(context);
     const result = await services.builds.exportArchive({
