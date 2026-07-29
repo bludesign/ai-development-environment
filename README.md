@@ -51,6 +51,16 @@ npm install -g @ai-development-environment/server @ai-development-environment/co
 ai-development-environment
 ```
 
+Or from docker:
+
+```bash
+docker run --name ai-development-environment \
+  --publish 3090:3090 \
+  --publish 3091:3091 \
+  --volume ./data:/data \
+  ghcr.io/bludesign/ai-development-environment:latest
+```
+
 Full instructions, including enrolling a control agent, are in the [Quickstart](https://ai-development-environment.mintlify.app/quickstart).
 
 ## License
