@@ -4226,7 +4226,6 @@
     "linkedPullRequest": "Pull request #{number}: {title}",
     "selectCoverageReport": "Coverage report",
     "noCoverageOverlay": "No coverage overlay",
-    "noCoverageReports": "No coverage reports for this worktree yet.",
     "coverageStale": "Measured at a different revision.",
     "coverageOverall": "{percent} overall",
     "coverageChanged": "{percent} changed",

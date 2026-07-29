@@ -359,6 +359,15 @@ export function DiffsPage({
           <p className="text-sm text-muted-foreground">{t("description")}</p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
+          <CoveragePicker
+            loading={coverageLoading}
+            onSelect={(value) =>
+              setCoverageReportId(value === NO_COVERAGE_REPORT ? "" : value)
+            }
+            reports={coverageReports}
+            selectedId={coverageReportId}
+            stale={coverageStale}
+          />
           <SearchableSelect
             ariaLabel={t("selectWorktree")}
             className="w-72"
@@ -378,15 +387,6 @@ export function DiffsPage({
             placeholder={t("selectWorktree")}
             searchPlaceholder={t("searchWorktrees")}
             value={worktreeId}
-          />
-          <CoveragePicker
-            loading={coverageLoading}
-            onSelect={(value) =>
-              setCoverageReportId(value === NO_COVERAGE_REPORT ? "" : value)
-            }
-            reports={coverageReports}
-            selectedId={coverageReportId}
-            stale={coverageStale}
           />
           <Button
             aria-label={t("refresh")}

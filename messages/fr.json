@@ -4226,7 +4226,6 @@
     "linkedPullRequest": "Demande de tirage n° {number} : {title}",
     "selectCoverageReport": "Rapport de couverture",
     "noCoverageOverlay": "Aucune superposition de couverture",
-    "noCoverageReports": "Aucun rapport de couverture pour cet arbre de travail.",
     "coverageStale": "Mesuré sur une autre révision.",
     "coverageOverall": "{percent} global",
     "coverageChanged": "{percent} modifié",

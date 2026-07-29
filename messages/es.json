@@ -4226,7 +4226,6 @@
     "linkedPullRequest": "Solicitud de incorporación n.º {number}: {title}",
     "selectCoverageReport": "Informe de cobertura",
     "noCoverageOverlay": "Sin superposición de cobertura",
-    "noCoverageReports": "Todavía no hay informes de cobertura para este worktree.",
     "coverageStale": "Medido en otra revisión.",
     "coverageOverall": "{percent} total",
     "coverageChanged": "{percent} modificado",

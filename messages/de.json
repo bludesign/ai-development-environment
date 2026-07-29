@@ -4226,7 +4226,6 @@
     "linkedPullRequest": "Pull Request Nr. {number}: {title}",
     "selectCoverageReport": "Abdeckungsbericht",
     "noCoverageOverlay": "Keine Abdeckung einblenden",
-    "noCoverageReports": "Für diesen Worktree gibt es noch keine Abdeckungsberichte.",
     "coverageStale": "Bei einem anderen Stand gemessen.",
     "coverageOverall": "{percent} gesamt",
     "coverageChanged": "{percent} geändert",

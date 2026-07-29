@@ -40,6 +40,9 @@ export function CoveragePicker({
   const t = useTranslations("diffs");
   const locale = useLocale();
 
+  // Nothing to overlay: the picker would only offer "no overlay", so hide it.
+  if (!reports.length) return null;
+
   const label = (report: DiffCoverageReportOption) => {
     const measured = formatDateValue(
       report.finishedAt ?? report.createdAt,
@@ -57,7 +60,7 @@ export function CoveragePicker({
   };
 
   return (
-    <div className="flex flex-col items-end gap-1">
+    <div className="flex flex-col items-start gap-1">
       <Select onValueChange={onSelect} value={selectedId || NO_COVERAGE_REPORT}>
         <SelectTrigger aria-label={t("selectCoverageReport")} className="w-72">
           <SelectValue placeholder={t("noCoverageOverlay")} />
@@ -75,10 +78,6 @@ export function CoveragePicker({
       </Select>
       {loading ? (
         <p className="text-xs text-muted-foreground">{t("loadingCoverage")}</p>
-      ) : !reports.length ? (
-        <p className="text-xs text-muted-foreground">
-          {t("noCoverageReports")}
-        </p>
       ) : stale ? (
         <p className="text-xs text-muted-foreground">{t("coverageStale")}</p>
       ) : null}
