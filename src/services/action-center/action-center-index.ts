@@ -49,7 +49,7 @@ const CANDIDATES_SQL = `
     FROM AgentRun AS run
     WHERE run.archivedAt IS NULL
       AND run.kind IN ('PLAN', 'SESSION')
-      AND run.status IN ('IN_PROGRESS', 'PAUSED', 'FAILED')
+      AND run.status IN ('QUEUED', 'IN_PROGRESS', 'PAUSED', 'FAILED')
   ),
   workflow_candidates AS (
     SELECT

@@ -261,35 +261,35 @@ model CodebaseSettings {
 }
 
 model Worktree {
-  id                       String                     @id
+  id                       String                       @id
   codebaseId               String
   gitDirectory             String
   folder                   String
   relativePath             String
-  primary                  Boolean                    @default(false)
+  primary                  Boolean                      @default(false)
   branch                   String?
   headSha                  String?
   codeStateHash            String?
   upstream                 String?
   ahead                    Int?
   behind                   Int?
-  syncState                String                     @default("UNKNOWN")
+  syncState                String                       @default("UNKNOWN")
   baseBranchOverride       String?
   baseAhead                Int?
   baseBehind               Int?
-  hasStagedChanges         Boolean                    @default(false)
-  hasUnstagedChanges       Boolean                    @default(false)
-  rebaseInProgress         Boolean                    @default(false)
-  hasConflicts             Boolean                    @default(false)
-  pushStatus               String                     @default("UNKNOWN")
+  hasStagedChanges         Boolean                      @default(false)
+  hasUnstagedChanges       Boolean                      @default(false)
+  rebaseInProgress         Boolean                      @default(false)
+  hasConflicts             Boolean                      @default(false)
+  pushStatus               String                       @default("UNKNOWN")
   highlightColor           String?
-  availability             String                     @default("AVAILABLE")
+  availability             String                       @default("AVAILABLE")
   statusError              String?
   lastCheckedAt            DateTime?
   missingAt                DateTime?
-  createdAt                DateTime                   @default(now())
-  updatedAt                DateTime                   @updatedAt
-  codebase                 Codebase                   @relation(fields: [codebaseId], references: [id], onDelete: Cascade)
+  createdAt                DateTime                     @default(now())
+  updatedAt                DateTime                     @updatedAt
+  codebase                 Codebase                     @relation(fields: [codebaseId], references: [id], onDelete: Cascade)
   tags                     WorktreeTagAssignment[]
   buildDataDeletionHistory BuildDataDeletionHistory[]
   skillInstallations       SkillInstallation[]
@@ -299,7 +299,8 @@ model Worktree {
   notifications            AppNotification[]
   runs                     AgentRun[]
   runDrafts                RunDraft[]
-  runLease                 WorktreeRunLease?
+  runLeases                WorktreeRunLease[]
+  runConcurrencyLanes      WorktreeRunConcurrencyLane[]
   commandRuns              CommandRun[]
   derivedDataCleanupLease  DerivedDataCleanupLease?
   autoSync                 WorktreeAutoSync?
@@ -440,68 +441,70 @@ model WorktreeAutoMerge {
 }
 
 model AgentRun {
-  id                  String             @id
-  kind                String
-  displayNumber       Int
-  status              String             @default("IN_PROGRESS")
-  phase               String             @default("QUEUED")
-  origin              String             @default("MANAGED")
-  provider            String
-  providerVersion     String?
-  worktreeId          String?
-  agentId             String?
-  jiraIssueKey        String?
-  repositoryName      String
-  branch              String?
-  model               String
-  effort              String?
-  webSearchEnabled    Boolean            @default(false)
-  mcpPresetIdsJson    String             @default("[]")
-  mcpToolNamesJson    String             @default("[]")
-  initialPrompt       String
-  finalOutput         String?
-  error               String?
-  estimatedCost       Float?
-  pricingSource       String?
-  pricingUpdatedAt    DateTime?
-  inputTokens         Int                @default(0)
-  outputTokens        Int                @default(0)
-  reasoningTokens     Int                @default(0)
-  cacheReadTokens     Int                @default(0)
-  cacheWriteTokens    Int                @default(0)
-  toolCallCount       Int                @default(0)
-  sourcePlanId        String?            @unique
-  sourcePlanNumber    Int?
-  playedAt            DateTime?
-  playedSessionNumber Int?
-  parentRunId         String?
-  parentRunNumber     Int?
-  followUpMode        String?
-  archivedAt          DateTime?
-  nativeArchivedAt    DateTime?
-  startedAt           DateTime?
-  finishedAt          DateTime?
-  createdAt           DateTime           @default(now())
-  updatedAt           DateTime           @updatedAt
-  worktree            Worktree?          @relation(fields: [worktreeId], references: [id], onDelete: SetNull)
-  agent               Agent?             @relation(fields: [agentId], references: [id], onDelete: SetNull)
-  sourcePlan          AgentRun?          @relation("PlanSession", fields: [sourcePlanId], references: [id], onDelete: SetNull)
-  playedSession       AgentRun?          @relation("PlanSession")
-  parentRun           AgentRun?          @relation("RunFollowUps", fields: [parentRunId], references: [id], onDelete: SetNull)
-  followUps           AgentRun[]         @relation("RunFollowUps")
-  attempts            RunAttempt[]
-  inputs              RunInput[]
-  events              RunEvent[]
-  toolCalls           RunToolCall[]
-  modelUsage          RunModelUsage[]
-  questionBatches     RunQuestionBatch[]
-  checkpoints         RunCheckpoint[]
-  commands            RunCommand[]
-  lease               WorktreeRunLease?
+  id                       String             @id
+  kind                     String
+  displayNumber            Int
+  status                   String             @default("IN_PROGRESS")
+  phase                    String             @default("QUEUED")
+  origin                   String             @default("MANAGED")
+  provider                 String
+  providerVersion          String?
+  worktreeId               String?
+  agentId                  String?
+  jiraIssueKey             String?
+  repositoryName           String
+  branch                   String?
+  model                    String
+  effort                   String?
+  webSearchEnabled         Boolean            @default(false)
+  mcpPresetIdsJson         String             @default("[]")
+  mcpToolNamesJson         String             @default("[]")
+  worktreeConcurrencyLimit Int                @default(0)
+  initialPrompt            String
+  finalOutput              String?
+  error                    String?
+  estimatedCost            Float?
+  pricingSource            String?
+  pricingUpdatedAt         DateTime?
+  inputTokens              Int                @default(0)
+  outputTokens             Int                @default(0)
+  reasoningTokens          Int                @default(0)
+  cacheReadTokens          Int                @default(0)
+  cacheWriteTokens         Int                @default(0)
+  toolCallCount            Int                @default(0)
+  sourcePlanId             String?            @unique
+  sourcePlanNumber         Int?
+  playedAt                 DateTime?
+  playedSessionNumber      Int?
+  parentRunId              String?
+  parentRunNumber          Int?
+  followUpMode             String?
+  archivedAt               DateTime?
+  nativeArchivedAt         DateTime?
+  startedAt                DateTime?
+  finishedAt               DateTime?
+  createdAt                DateTime           @default(now())
+  updatedAt                DateTime           @updatedAt
+  worktree                 Worktree?          @relation(fields: [worktreeId], references: [id], onDelete: SetNull)
+  agent                    Agent?             @relation(fields: [agentId], references: [id], onDelete: SetNull)
+  sourcePlan               AgentRun?          @relation("PlanSession", fields: [sourcePlanId], references: [id], onDelete: SetNull)
+  playedSession            AgentRun?          @relation("PlanSession")
+  parentRun                AgentRun?          @relation("RunFollowUps", fields: [parentRunId], references: [id], onDelete: SetNull)
+  followUps                AgentRun[]         @relation("RunFollowUps")
+  attempts                 RunAttempt[]
+  inputs                   RunInput[]
+  events                   RunEvent[]
+  toolCalls                RunToolCall[]
+  modelUsage               RunModelUsage[]
+  questionBatches          RunQuestionBatch[]
+  checkpoints              RunCheckpoint[]
+  commands                 RunCommand[]
+  lease                    WorktreeRunLease?
 
   @@unique([kind, displayNumber])
   @@index([kind, archivedAt, createdAt])
   @@index([worktreeId, status, createdAt])
+  @@index([worktreeId, kind, status, createdAt])
   @@index([agentId, provider, createdAt])
   @@index([parentRunId, createdAt])
 }
@@ -795,11 +798,23 @@ model RunNumberSequence {
 }
 
 model WorktreeRunLease {
-  worktreeId String   @id
+  id         String   @id
+  worktreeId String
   runId      String   @unique
   acquiredAt DateTime @default(now())
   worktree   Worktree @relation(fields: [worktreeId], references: [id], onDelete: Cascade)
   run        AgentRun @relation(fields: [runId], references: [id], onDelete: Cascade)
+
+  @@index([worktreeId, acquiredAt])
+}
+
+model WorktreeRunConcurrencyLane {
+  worktreeId String
+  kind       String
+  updatedAt  DateTime @updatedAt
+  worktree   Worktree @relation(fields: [worktreeId], references: [id], onDelete: Cascade)
+
+  @@id([worktreeId, kind])
 }
 
 model RunProviderSync {

@@ -104,6 +104,20 @@ describe("interactive step configuration", () => {
     expect(screen.getAllByText(/\{\{worktree\.baseBranch\}\}/).length).toBe(1);
   });
 
+  test("renders bounded integer worktree concurrency controls", () => {
+    render(<Harness config={{}} kind="RUN_CREATE_SESSION" />);
+
+    const input = screen.getByRole("spinbutton", {
+      name: "Worktree concurrency limit",
+    });
+    expect(input.getAttribute("min")).toBe("0");
+    expect(input.getAttribute("max")).toBe("32");
+    expect(input.getAttribute("step")).toBe("1");
+
+    fireEvent.change(input, { target: { value: "2" } });
+    expect(config().worktreeConcurrencyLimit).toBe(2);
+  });
+
   test("preserves structured terminal credential entries while editing", () => {
     const credentials = [
       {

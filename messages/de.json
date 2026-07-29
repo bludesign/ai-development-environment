@@ -616,7 +616,8 @@
       "STEER_FAILED": "Steuerung fehlgeschlagen",
       "SUPERSEDED_BY_ANSWER_REVISION": "Durch Antwortkorrektur ersetzt",
       "SUPERSEDED_BY_FOLLOW_UP": "Durch Folgelauf ersetzt",
-      "WAITING_FOR_ANSWER": "Wartet auf Antwort"
+      "WAITING_FOR_ANSWER": "Wartet auf Antwort",
+      "WAITING_FOR_WORKTREE": "Wartet auf Arbeitsbaum"
     },
     "pinPreset": "Als Voreinstellung anheften",
     "plan": "Plan",
@@ -675,7 +676,8 @@
       "COMPLETED": "Abgeschlossen",
       "FAILED": "Fehlgeschlagen",
       "IN_PROGRESS": "In Bearbeitung",
-      "PAUSED": "Pausiert"
+      "PAUSED": "Pausiert",
+      "QUEUED": "In Warteschlange"
     },
     "stashBeforeRollback": "Aktuelle versionierte und nicht versionierte Änderungen vor der Wiederherstellung stashen",
     "stashCreated": "Stash erstellt",

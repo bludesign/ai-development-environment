@@ -64,11 +64,17 @@ export type RunConfigurationInput = {
   parentRunId?: string | null;
   followUpMode?: string | null;
   contextMode?: string | null;
+  worktreeConcurrencyLimit?: number | null;
 };
 
 export type SaveRunDraftInput = Omit<
   RunConfigurationInput,
-  "draftId" | "sourcePlanId" | "parentRunId" | "followUpMode" | "contextMode"
+  | "draftId"
+  | "sourcePlanId"
+  | "parentRunId"
+  | "followUpMode"
+  | "contextMode"
+  | "worktreeConcurrencyLimit"
 > & { id?: string | null };
 
 export type RunEventInput = {
@@ -138,6 +144,17 @@ function optionalText(
 
 function optionalJiraIssueKey(value: string | null | undefined): string | null {
   return optionalText(value, 100)?.toUpperCase() ?? null;
+}
+
+function worktreeConcurrencyLimit(
+  kind: RunKind,
+  value: number | null | undefined,
+): number {
+  const result = value ?? (kind === "SESSION" ? 1 : 0);
+  if (!Number.isInteger(result) || result < 0 || result > 32) {
+    throw new Error("Worktree concurrency limit must be between 0 and 32");
+  }
+  return result;
 }
 
 function parseDate(value: string | null | undefined): Date | undefined {
@@ -316,6 +333,132 @@ export class RunsService {
     this.mcpPresetResolver = resolver;
   }
 
+  /**
+   * Admit queued runs for one worktree/kind lane. The lane upsert is the first
+   * write in the transaction, which serializes competing admissions in SQLite.
+   * Each queued run brings its own threshold; zero is unlimited, and a blocked
+   * head prevents younger entries from overtaking it.
+   */
+  private async promoteQueuedLane(
+    worktreeId: string,
+    kind: RunKind,
+  ): Promise<number> {
+    const prisma = await getPrismaClient();
+    const admitted = await prisma.$transaction(async (transaction) => {
+      const now = new Date();
+      await transaction.worktreeRunConcurrencyLane.upsert({
+        where: { worktreeId_kind: { worktreeId, kind } },
+        create: { worktreeId, kind },
+        update: { updatedAt: now },
+      });
+      await transaction.worktreeRunLease.deleteMany({
+        where: {
+          worktreeId,
+          run: { status: { in: [...TERMINAL_STATUSES] } },
+        },
+      });
+      let active = await transaction.worktreeRunLease.count({
+        where: {
+          worktreeId,
+          run: {
+            kind,
+            origin: "MANAGED",
+            status: { in: ["IN_PROGRESS", "PAUSED"] },
+          },
+        },
+      });
+      const queued = await transaction.agentRun.findMany({
+        where: {
+          worktreeId,
+          kind,
+          origin: "MANAGED",
+          status: "QUEUED",
+        },
+        orderBy: [{ createdAt: "asc" }, { id: "asc" }],
+        select: {
+          id: true,
+          agentId: true,
+          worktreeConcurrencyLimit: true,
+        },
+      });
+      const promoted: Array<{
+        runId: string;
+        agentId: string;
+        command: unknown;
+      }> = [];
+      for (const run of queued) {
+        if (
+          run.worktreeConcurrencyLimit !== 0 &&
+          active >= run.worktreeConcurrencyLimit
+        ) {
+          break;
+        }
+        const claimed = await transaction.agentRun.updateMany({
+          where: { id: run.id, status: "QUEUED" },
+          data: { status: "IN_PROGRESS", phase: "QUEUED" },
+        });
+        if (!claimed.count) continue;
+        await transaction.worktreeRunLease.create({
+          data: { id: randomUUID(), worktreeId, runId: run.id },
+        });
+        active += 1;
+        const command = await transaction.runCommand.findFirst({
+          where: { runId: run.id, status: "QUEUED" },
+          orderBy: { sequence: "asc" },
+          include: runCommandInclude,
+        });
+        if (command && run.agentId) {
+          promoted.push({ runId: run.id, agentId: run.agentId, command });
+        }
+      }
+      return promoted;
+    });
+    for (const run of admitted) {
+      publishRun(run.runId);
+      publishCommand(run.command, run.agentId);
+    }
+    return admitted.length;
+  }
+
+  private async promoteQueuedLaneSafely(
+    worktreeId: string,
+    kind: RunKind,
+  ): Promise<void> {
+    try {
+      await this.promoteQueuedLane(worktreeId, kind);
+    } catch (error) {
+      console.error(
+        `Could not promote ${kind.toLowerCase()} queue for ${worktreeId}:`,
+        error instanceof Error ? error.message : error,
+      );
+    }
+  }
+
+  /** Reconcile durable queues after startup or a missed release notification. */
+  async reconcileQueuedRuns(agentId?: string): Promise<number> {
+    const prisma = await getPrismaClient();
+    const queued = await prisma.agentRun.findMany({
+      where: {
+        origin: "MANAGED",
+        status: "QUEUED",
+        worktreeId: { not: null },
+        ...(agentId ? { agentId } : {}),
+      },
+      select: { worktreeId: true, kind: true },
+      distinct: ["worktreeId", "kind"],
+    });
+    let promoted = 0;
+    for (const lane of queued) {
+      if (
+        lane.worktreeId &&
+        (lane.kind === "PLAN" || lane.kind === "SESSION")
+      ) {
+        promoted += await this.promoteQueuedLane(lane.worktreeId, lane.kind);
+      }
+    }
+    return promoted;
+  }
+
   private async waitForJob(jobId: string) {
     const events = agentEventBus.iterate(agentJobChangedTopic(jobId));
     const deadline = Date.now() + SESSION_FILE_JOB_TIMEOUT_MS;
@@ -433,8 +576,8 @@ export class RunsService {
   async reapOrphanedRuns(now = Date.now()): Promise<number> {
     const prisma = await getPrismaClient();
     const active = await prisma.agentRun.findMany({
-      where: { status: { in: ["QUEUED", "IN_PROGRESS"] } },
-      select: { id: true, agentId: true },
+      where: { status: "IN_PROGRESS" },
+      select: { id: true, agentId: true, worktreeId: true, kind: true },
     });
     if (!active.length) return 0;
     const agentIds = [
@@ -503,6 +646,19 @@ export class RunsService {
       });
     });
     for (const id of orphanedIds) publishRun(id);
+    const lanes = new Set(
+      active
+        .filter((run) => orphanedIds.includes(run.id) && run.worktreeId)
+        .map((run) => `${run.worktreeId}:${run.kind}`),
+    );
+    for (const lane of lanes) {
+      const separator = lane.lastIndexOf(":");
+      const worktreeId = lane.slice(0, separator);
+      const kind = lane.slice(separator + 1);
+      if (kind === "PLAN" || kind === "SESSION") {
+        await this.promoteQueuedLaneSafely(worktreeId, kind);
+      }
+    }
     return orphanedIds.length;
   }
 
@@ -804,6 +960,10 @@ export class RunsService {
     options: { transferLeaseFromRunId?: string } = {},
   ) {
     const kind = enumValue(RUN_KINDS, input.kind, "Run kind");
+    const concurrencyLimit = worktreeConcurrencyLimit(
+      kind,
+      input.worktreeConcurrencyLimit,
+    );
     const provider = enumValue(PROVIDERS, input.provider, "Provider");
     const prompt = requiredText(input.prompt, "Prompt", 200_000);
     const model = requiredText(input.model, "Model", 200);
@@ -842,33 +1002,21 @@ export class RunsService {
             where: { id: input.parentRunId },
           })
         : null;
-
-      if (kind === "SESSION") {
-        if (options.transferLeaseFromRunId) {
-          await transaction.worktreeRunLease.deleteMany({
-            where: {
-              worktreeId: worktree.id,
-              runId: options.transferLeaseFromRunId,
-            },
-          });
-          await transaction.agentRun.update({
-            where: { id: options.transferLeaseFromRunId },
-            data: {
-              status: "CANCELLED",
-              phase: "SUPERSEDED_BY_FOLLOW_UP",
-              finishedAt: new Date(),
-            },
-          });
-        }
-        const lease = await transaction.worktreeRunLease.findUnique({
-          where: { worktreeId: worktree.id },
-          include: { run: true },
+      const transferredLease = options.transferLeaseFromRunId
+        ? await transaction.worktreeRunLease.findUnique({
+            where: { runId: options.transferLeaseFromRunId },
+          })
+        : null;
+      const transfersSlot = transferredLease?.worktreeId === worktree.id;
+      if (options.transferLeaseFromRunId) {
+        await transaction.agentRun.update({
+          where: { id: options.transferLeaseFromRunId },
+          data: {
+            status: "CANCELLED",
+            phase: "SUPERSEDED_BY_FOLLOW_UP",
+            finishedAt: new Date(),
+          },
         });
-        if (lease) {
-          throw new Error(
-            `Session #${lease.run.displayNumber} already owns this worktree`,
-          );
-        }
       }
 
       const run = await transaction.agentRun.create({
@@ -876,6 +1024,8 @@ export class RunsService {
           id,
           kind,
           displayNumber,
+          status: transfersSlot ? "IN_PROGRESS" : "QUEUED",
+          phase: transfersSlot ? "QUEUED" : "WAITING_FOR_WORKTREE",
           provider,
           worktreeId: worktree.id,
           agentId: worktree.codebase.agentId,
@@ -887,6 +1037,7 @@ export class RunsService {
           webSearchEnabled: input.webSearchEnabled !== false,
           mcpPresetIdsJson: JSON.stringify(mcp.presetIds),
           mcpToolNamesJson: JSON.stringify(mcp.toolNames),
+          worktreeConcurrencyLimit: concurrencyLimit,
           initialPrompt: prompt,
           sourcePlanId: sourcePlan?.id,
           sourcePlanNumber: sourcePlan?.displayNumber,
@@ -904,9 +1055,10 @@ export class RunsService {
           data: { playedAt: new Date(), playedSessionNumber: displayNumber },
         });
       }
-      if (kind === "SESSION") {
-        await transaction.worktreeRunLease.create({
-          data: { worktreeId: worktree.id, runId: id },
+      if (transfersSlot) {
+        await transaction.worktreeRunLease.update({
+          where: { runId: options.transferLeaseFromRunId! },
+          data: { runId: id, acquiredAt: new Date() },
         });
       }
       if (attachmentIds.length) {
@@ -932,14 +1084,23 @@ export class RunsService {
           followUpMode: input.followUpMode ?? null,
         },
       });
-      return { run, command };
+      return { run, command, transfersSlot };
     });
     publishRun(result.run.id);
-    publishCommand(result.command, result.run.agentId!);
+    if (options.transferLeaseFromRunId)
+      publishRun(options.transferLeaseFromRunId);
+    if (result.transfersSlot) {
+      publishCommand(result.command, result.run.agentId!);
+    }
+    await this.promoteQueuedLaneSafely(worktree.id, kind);
     return this.get(result.run.id);
   }
 
-  async playPlan(planId: string, mcpPresetIds: string[] = []) {
+  async playPlan(
+    planId: string,
+    mcpPresetIds: string[] = [],
+    concurrencyLimit?: number | null,
+  ) {
     const plan = await this.get(planId);
     if (!plan) throw new Error("Plan not found");
     if (plan.playedAt) throw new Error("This plan has already been run");
@@ -959,6 +1120,7 @@ export class RunsService {
       contextMode: "NATIVE",
       attachmentIds: [],
       mcpPresetIds,
+      worktreeConcurrencyLimit: concurrencyLimit,
     });
   }
 
@@ -1131,6 +1293,9 @@ export class RunsService {
         await removeRunAttachmentFiles(paths);
       }
       publishRun(run.id);
+      if (run.worktreeId && (run.kind === "PLAN" || run.kind === "SESSION")) {
+        await this.promoteQueuedLaneSafely(run.worktreeId, run.kind);
+      }
       affected += 1;
     }
     return affected;
@@ -1165,6 +1330,23 @@ export class RunsService {
       }
       if (TERMINAL_STATUSES.has(run.status))
         throw new Error("Run is already finished");
+      if (type === "CANCEL" && run.status === "QUEUED") {
+        const finishedAt = new Date();
+        const cancelled = await transaction.agentRun.update({
+          where: { id: runId },
+          data: { status: "CANCELLED", phase: "CANCELLED", finishedAt },
+        });
+        await transaction.runCommand.updateMany({
+          where: { runId, status: "QUEUED" },
+          data: {
+            status: "CANCELLED",
+            error: "Run was cancelled before it started",
+            finishedAt,
+          },
+        });
+        await transaction.worktreeRunLease.deleteMany({ where: { runId } });
+        return { run: cancelled, command: null };
+      }
       if (type === "PAUSE" && run.status !== "IN_PROGRESS") {
         throw new Error("Only an in-progress run can be paused");
       }
@@ -1218,6 +1400,16 @@ export class RunsService {
     });
     publishRun(runId);
     if (result.command) publishCommand(result.command, result.run.agentId!);
+    if (
+      type === "CANCEL" &&
+      result.run.worktreeId &&
+      (result.run.kind === "PLAN" || result.run.kind === "SESSION")
+    ) {
+      await this.promoteQueuedLaneSafely(
+        result.run.worktreeId,
+        result.run.kind,
+      );
+    }
     return this.get(runId);
   }
 
@@ -1356,14 +1548,26 @@ export class RunsService {
         throw new Error("The checkpoint before this question is unavailable");
       }
       const lease = await transaction.worktreeRunLease.findUnique({
-        where: { worktreeId: batch.run.worktreeId },
+        where: { runId: batch.runId },
       });
-      if (lease && lease.runId !== batch.runId) {
+      const competingLease = lease
+        ? null
+        : await transaction.worktreeRunLease.findFirst({
+            where: {
+              worktreeId: batch.run.worktreeId,
+              run: { kind: batch.run.kind },
+            },
+          });
+      if (competingLease) {
         throw new Error("Another Session owns this worktree");
       }
       if (batch.run.kind === "SESSION" && !lease) {
         await transaction.worktreeRunLease.create({
-          data: { worktreeId: batch.run.worktreeId, runId: batch.runId },
+          data: {
+            id: randomUUID(),
+            worktreeId: batch.run.worktreeId,
+            runId: batch.runId,
+          },
         });
       }
       /**
@@ -1432,11 +1636,8 @@ export class RunsService {
         throw new Error("The answer revision is not ready");
       }
       const lease = await transaction.worktreeRunLease.findUnique({
-        where: { worktreeId: batch.run.worktreeId },
+        where: { runId: batch.runId },
       });
-      if (lease && lease.runId !== batch.runId) {
-        throw new Error("Another Session owns this worktree");
-      }
       const revisionId = randomUUID();
       const revision = batch.answerRevisions.length;
       await transaction.runAnswerRevision.create({
@@ -1491,6 +1692,7 @@ export class RunsService {
           model: batch.run.model,
           effort: batch.run.effort,
           webSearchEnabled: batch.run.webSearchEnabled,
+          worktreeConcurrencyLimit: batch.run.worktreeConcurrencyLimit,
           initialPrompt: revisedPrompt,
           parentRunId: batch.runId,
           parentRunNumber: batch.run.displayNumber,
@@ -1505,19 +1707,20 @@ export class RunsService {
           },
         },
       });
-      await transaction.worktreeRunLease.deleteMany({
-        where: {
-          worktreeId: batch.run.worktreeId,
-          runId: batch.runId,
-        },
-      });
-      const competingLease = await transaction.worktreeRunLease.findUnique({
-        where: { worktreeId: batch.run.worktreeId },
-      });
-      if (competingLease) throw new Error("Another Session owns this worktree");
-      await transaction.worktreeRunLease.create({
-        data: { worktreeId: batch.run.worktreeId, runId },
-      });
+      if (lease) {
+        await transaction.worktreeRunLease.update({
+          where: { runId: batch.runId },
+          data: { runId, acquiredAt: new Date() },
+        });
+      } else {
+        await transaction.worktreeRunLease.create({
+          data: {
+            id: randomUUID(),
+            worktreeId: batch.run.worktreeId,
+            runId,
+          },
+        });
+      }
       await transaction.agentRun.update({
         where: { id: batch.runId },
         data: {
@@ -1554,9 +1757,16 @@ export class RunsService {
   }
 
   async pendingCommands(agentId: string) {
+    await this.reconcileQueuedRuns(agentId);
     const prisma = await getPrismaClient();
     return prisma.runCommand.findMany({
-      where: { agentId, status: { in: ["QUEUED", "RUNNING"] } },
+      where: {
+        agentId,
+        OR: [
+          { status: "RUNNING" },
+          { status: "QUEUED", run: { status: { not: "QUEUED" } } },
+        ],
+      },
       orderBy: [{ createdAt: "asc" }, { sequence: "asc" }],
       take: 200,
       include: runCommandInclude,
@@ -1570,11 +1780,21 @@ export class RunsService {
       select: {
         agentId: true,
         status: true,
-        run: { select: { worktreeId: true } },
+        type: true,
+        run: { select: { worktreeId: true, status: true } },
       },
     });
     if (!queued || queued.agentId !== agentId) {
       throw new Error("Run command not found");
+    }
+    if (
+      queued.status === "QUEUED" &&
+      queued.run.status === "QUEUED" &&
+      new Set(["START", "PLAY_PLAN", "CONTINUE", "REVISE_ANSWER"]).has(
+        queued.type,
+      )
+    ) {
+      throw new Error("Run command is waiting for the worktree");
     }
     if (queued.status === "QUEUED" && queued.run.worktreeId) {
       await this.diskSpace?.assertWorktreeCanStart(queued.run.worktreeId);
@@ -1603,6 +1823,7 @@ export class RunsService {
     const prisma = await getPrismaClient();
     const command = await prisma.runCommand.findUnique({
       where: { id: commandId },
+      include: { run: { select: { worktreeId: true, kind: true } } },
     });
     if (!command || command.agentId !== agentId)
       throw new Error("Run command not found");
@@ -1670,6 +1891,15 @@ export class RunsService {
       }
     }
     publishRun(updated.runId);
+    if (
+      command.run.worktreeId &&
+      (command.run.kind === "PLAN" || command.run.kind === "SESSION")
+    ) {
+      await this.promoteQueuedLaneSafely(
+        command.run.worktreeId,
+        command.run.kind,
+      );
+    }
     return updated;
   }
 
@@ -1681,6 +1911,8 @@ export class RunsService {
     });
     if (!run || run.agentId !== agentId)
       throw new Error("Run not found for this agent");
+    if (run.status === "QUEUED")
+      throw new Error("Run is waiting for the worktree");
     if (TERMINAL_STATUSES.has(run.status))
       throw new Error("Run is already finished");
     const generation = run.attempts.length;
@@ -2105,6 +2337,16 @@ export class RunsService {
     });
     this.notifications?.created(result.notification);
     publishRun(result.run.id);
+    if (
+      TERMINAL_STATUSES.has(result.run.status) &&
+      result.run.worktreeId &&
+      (result.run.kind === "PLAN" || result.run.kind === "SESSION")
+    ) {
+      await this.promoteQueuedLaneSafely(
+        result.run.worktreeId,
+        result.run.kind,
+      );
+    }
     return this.get(result.run.id);
   }
 
@@ -2348,8 +2590,15 @@ export class RunsService {
         if (existing.run.origin === "IMPORTED") {
           const collision =
             existing.run.kind === "SESSION" && importedStatus === "IN_PROGRESS"
-              ? await prisma.worktreeRunLease.findUnique({
-                  where: { worktreeId: existing.run.worktreeId ?? "" },
+              ? await prisma.worktreeRunLease.findFirst({
+                  where: {
+                    worktreeId: existing.run.worktreeId ?? "",
+                    run: {
+                      kind: "SESSION",
+                      origin: "MANAGED",
+                      status: { in: ["IN_PROGRESS", "PAUSED"] },
+                    },
+                  },
                 })
               : null;
           await prisma.$transaction([
@@ -2393,8 +2642,15 @@ export class RunsService {
       const kind = record.kind?.toUpperCase() === "PLAN" ? "PLAN" : "SESSION";
       const collision =
         kind === "SESSION" && importedStatus === "IN_PROGRESS"
-          ? await prisma.worktreeRunLease.findUnique({
-              where: { worktreeId: worktree.id },
+          ? await prisma.worktreeRunLease.findFirst({
+              where: {
+                worktreeId: worktree.id,
+                run: {
+                  kind: "SESSION",
+                  origin: "MANAGED",
+                  status: { in: ["IN_PROGRESS", "PAUSED"] },
+                },
+              },
             })
           : null;
       const displayNumber = await prisma.$transaction((transaction) =>
@@ -2417,6 +2673,7 @@ export class RunsService {
           branch: record.branch ?? worktree.branch,
           model: record.model || "unknown",
           effort: optionalText(record.effort, 100),
+          worktreeConcurrencyLimit: worktreeConcurrencyLimit(kind, undefined),
           initialPrompt: record.prompt?.trim() || "Imported provider history",
           finalOutput: optionalText(record.finalOutput, 2_000_000),
           archivedAt: record.archived ? new Date() : null,

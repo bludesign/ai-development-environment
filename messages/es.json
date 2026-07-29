@@ -616,7 +616,8 @@
       "STEER_FAILED": "Error al guiar",
       "SUPERSEDED_BY_ANSWER_REVISION": "Reemplazado por la revisión de la respuesta",
       "SUPERSEDED_BY_FOLLOW_UP": "Reemplazado por un seguimiento",
-      "WAITING_FOR_ANSWER": "Esperando respuesta"
+      "WAITING_FOR_ANSWER": "Esperando respuesta",
+      "WAITING_FOR_WORKTREE": "Esperando el árbol de trabajo"
     },
     "pinPreset": "Fijar como preajuste",
     "plan": "Plan",
@@ -675,7 +676,8 @@
       "COMPLETED": "Completado",
       "FAILED": "Fallido",
       "IN_PROGRESS": "En curso",
-      "PAUSED": "Pausado"
+      "PAUSED": "Pausado",
+      "QUEUED": "En cola"
     },
     "stashBeforeRollback": "Guardar en el stash los cambios actuales, con y sin seguimiento, antes de restaurar",
     "stashCreated": "Stash creado",

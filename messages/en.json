@@ -616,7 +616,8 @@
       "STEER_FAILED": "Steer failed",
       "SUPERSEDED_BY_ANSWER_REVISION": "Superseded by answer revision",
       "SUPERSEDED_BY_FOLLOW_UP": "Superseded by follow-up",
-      "WAITING_FOR_ANSWER": "Waiting for answer"
+      "WAITING_FOR_ANSWER": "Waiting for answer",
+      "WAITING_FOR_WORKTREE": "Waiting for worktree"
     },
     "pinPreset": "Pin as preset",
     "plan": "Plan",
@@ -675,7 +676,8 @@
       "COMPLETED": "Completed",
       "FAILED": "Failed",
       "IN_PROGRESS": "In progress",
-      "PAUSED": "Paused"
+      "PAUSED": "Paused",
+      "QUEUED": "Queued"
     },
     "stashBeforeRollback": "Stash current tracked and untracked changes before restoring",
     "stashCreated": "Stash created",

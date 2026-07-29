@@ -616,7 +616,8 @@
       "STEER_FAILED": "Échec du pilotage",
       "SUPERSEDED_BY_ANSWER_REVISION": "Remplacé par la révision de la réponse",
       "SUPERSEDED_BY_FOLLOW_UP": "Remplacé par un suivi",
-      "WAITING_FOR_ANSWER": "En attente de réponse"
+      "WAITING_FOR_ANSWER": "En attente de réponse",
+      "WAITING_FOR_WORKTREE": "En attente de l’arborescence"
     },
     "pinPreset": "Épingler comme préréglage",
     "plan": "Plan de travail",
@@ -675,7 +676,8 @@
       "COMPLETED": "Terminé",
       "FAILED": "Échec",
       "IN_PROGRESS": "En cours",
-      "PAUSED": "En pause"
+      "PAUSED": "En pause",
+      "QUEUED": "En file d’attente"
     },
     "stashBeforeRollback": "Mettre de côté les modifications suivies et non suivies avant la restauration",
     "stashCreated": "Mise de côté créée",

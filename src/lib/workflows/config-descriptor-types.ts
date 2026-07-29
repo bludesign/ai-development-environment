@@ -81,6 +81,9 @@ export type ConfigFieldDescriptor = {
   default?: unknown;
   placeholder?: string;
   help?: string;
+  minimum?: number;
+  maximum?: number;
+  integer?: boolean;
   /** Render multi-line text for the `text` control. */
   multiline?: boolean;
   /** Value type for entries in a `record` control. Defaults to strings. */

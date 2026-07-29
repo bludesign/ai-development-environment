@@ -124,6 +124,28 @@ describe("configSchemaForKind", () => {
     }
   });
 
+  test("run-producing steps constrain worktree concurrency limits", () => {
+    const expectedDefaults: Record<string, number | undefined> = {
+      RUN_CREATE_PLAN: 0,
+      RUN_CREATE_SESSION: 1,
+      RUN_PLAY_PLAN: 1,
+      RUN_FOLLOW_UP: undefined,
+    };
+    for (const [kind, defaultValue] of Object.entries(expectedDefaults)) {
+      const limit = properties(kind, "step").worktreeConcurrencyLimit!;
+      expect(native(limit)).toMatchObject({
+        type: "integer",
+        minimum: 0,
+        maximum: 32,
+      });
+      if (defaultValue === undefined) {
+        expect(limit).not.toHaveProperty("default");
+      } else {
+        expect(limit).toHaveProperty("default", defaultValue);
+      }
+    }
+  });
+
   test("conditions carry a recursive definition", () => {
     const schema = configSchemaForKind("CONTROL_IF", "step");
     const condition = (schema.properties as Record<string, JsonSchema>)

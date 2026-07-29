@@ -125,7 +125,11 @@ function optionSourceDescription(source: ConfigOptionSource): string | null {
 function baseSchema(field: ConfigFieldDescriptor): JsonSchema {
   switch (field.control) {
     case "number":
-      return { type: "number" };
+      return {
+        type: field.integer ? "integer" : "number",
+        ...(field.minimum === undefined ? {} : { minimum: field.minimum }),
+        ...(field.maximum === undefined ? {} : { maximum: field.maximum }),
+      };
     case "boolean":
       return { type: "boolean" };
     case "enum": {
