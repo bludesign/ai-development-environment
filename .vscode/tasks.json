@@ -116,6 +116,13 @@
     },
     {
       "type": "shell",
+      "label": "test-coverage",
+      "group": "test",
+      "command": "npm run test:coverage",
+      "detail": "Run Vitest once with coverage and write the reports to coverage/"
+    },
+    {
+      "type": "shell",
       "label": "screenshots",
       "group": "test",
       "command": "npm run screenshots",
