@@ -5,9 +5,14 @@ import Image from "next/image";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { cn } from "@/lib/utils";
 
-import { PixelDiff, type PixelDiffLabels } from "./pixel-diff";
+import {
+  PixelDiff,
+  type PixelDiffColor,
+  type PixelDiffLabels,
+} from "./pixel-diff";
 
 export type ImageDiffLabels = PixelDiffLabels & {
   sideBySide: string;
@@ -16,6 +21,10 @@ export type ImageDiffLabels = PixelDiffLabels & {
   transparency: string;
   /** Accessible label for the pixel-difference sensitivity slider. */
   sensitivity: string;
+  /** Accessible label for the pixel-difference colour picker. */
+  differenceColor: string;
+  /** The colours that picker offers. */
+  colors: Record<PixelDiffColor, string>;
   before: string;
   after: string;
   /** Shown when one side of the comparison does not exist. */
@@ -24,6 +33,17 @@ export type ImageDiffLabels = PixelDiffLabels & {
 
 /** Pixelmatch's own default colour-distance cutoff, as a percentage. */
 const DEFAULT_SENSITIVITY = 10;
+
+/** Swatches in the same shape the worktree highlight picker uses. */
+const COLOR_SWATCHES: Record<PixelDiffColor, string> = {
+  RED: "border-red-600 bg-red-500",
+  GREEN: "border-green-600 bg-green-500",
+  // Half white, half red: the mask that fades the image out behind it.
+  WHITE:
+    "border-red-600 bg-[linear-gradient(135deg,var(--color-white)_0_50%,var(--color-red-500)_50%_100%)]",
+};
+
+const COLORS = Object.keys(COLOR_SWATCHES) as PixelDiffColor[];
 
 /**
  * Compares two image revisions side by side, stacked with an opacity slider, or
@@ -47,6 +67,7 @@ export function ImageDiff({
   );
   const [opacity, setOpacity] = useState(50);
   const [sensitivity, setSensitivity] = useState(DEFAULT_SENSITIVITY);
+  const [color, setColor] = useState<PixelDiffColor>("RED");
   // `fill` images have no intrinsic size, so the overlap box has to be told its
   // proportions or it collapses to `min-h-64` and letterboxes a wide image
   // instead of spanning the pane. Measure the base image once it decodes, keyed
@@ -99,15 +120,42 @@ export function ImageDiff({
           />
         )}
         {mode === "DIFFERENCE" && (
-          <Input
-            aria-label={labels.sensitivity}
-            className="w-48"
-            max={50}
-            min={0}
-            onChange={(event) => setSensitivity(Number(event.target.value))}
-            type="range"
-            value={sensitivity}
-          />
+          <>
+            <Input
+              aria-label={labels.sensitivity}
+              className="w-48"
+              max={50}
+              min={0}
+              onChange={(event) => setSensitivity(Number(event.target.value))}
+              type="range"
+              value={sensitivity}
+            />
+            <ToggleGroup
+              aria-label={labels.differenceColor}
+              onValueChange={(value) => {
+                if (value) setColor(value as PixelDiffColor);
+              }}
+              size="sm"
+              spacing={1}
+              type="single"
+              value={color}
+              variant="outline"
+            >
+              {COLORS.map((value) => (
+                <ToggleGroupItem
+                  aria-label={labels.colors[value]}
+                  className={cn(
+                    "size-7 min-w-0 p-0",
+                    COLOR_SWATCHES[value],
+                    "data-[state=on]:ring-2 data-[state=on]:ring-foreground",
+                  )}
+                  key={value}
+                  title={labels.colors[value]}
+                  value={value}
+                />
+              ))}
+            </ToggleGroup>
+          </>
         )}
       </div>
       {mode === "SIDE_BY_SIDE" ? (
@@ -127,6 +175,7 @@ export function ImageDiff({
         <PixelDiff
           after={after}
           before={before}
+          color={color}
           labels={labels}
           threshold={sensitivity / 100}
         />

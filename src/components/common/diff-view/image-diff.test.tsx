@@ -40,6 +40,8 @@ const labels: ImageDiffLabels = {
   difference: "Difference",
   transparency: "Image transparency",
   sensitivity: "Difference sensitivity",
+  differenceColor: "Difference colour",
+  colors: { RED: "Red", GREEN: "Green", WHITE: "Red on faded white" },
   differenceSummary: (percent: string) => `${percent}% of pixels differ`,
   comparing: "Comparing pixels",
   needsBothSides: "Both revisions are needed",
@@ -111,5 +113,24 @@ describe("ImageDiff", () => {
     fireEvent.click(screen.getByRole("button", { name: "Difference" }));
     expect(screen.getByLabelText("Difference sensitivity")).toBeDefined();
     expect(screen.queryByLabelText("Image transparency")).toBeNull();
+  });
+
+  test("offers the mask colours only in difference mode", () => {
+    render(
+      <ImageDiff after="/after.png" before="/before.png" labels={labels} />,
+    );
+    expect(screen.queryByLabelText("Difference colour")).toBeNull();
+
+    fireEvent.click(screen.getByRole("button", { name: "Difference" }));
+    const red = screen.getByRole("radio", { name: "Red" });
+    const green = screen.getByRole("radio", { name: "Green" });
+    expect(
+      screen.getByRole("radio", { name: "Red on faded white" }),
+    ).toBeDefined();
+    expect(red.getAttribute("data-state")).toBe("on");
+
+    fireEvent.click(green);
+    expect(green.getAttribute("data-state")).toBe("on");
+    expect(red.getAttribute("data-state")).toBe("off");
   });
 });

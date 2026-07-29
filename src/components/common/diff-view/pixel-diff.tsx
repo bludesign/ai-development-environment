@@ -6,6 +6,23 @@ import Image from "next/image";
 
 import { Spinner } from "@/components/ui/spinner";
 
+/**
+ * How the mask paints changed pixels. `RED` and `GREEN` mark them over the
+ * "after" revision in full colour; `WHITE` is pixelmatch's own rendering, which
+ * fades everything that matched towards white and marks the rest in red.
+ */
+export type PixelDiffColor = "GREEN" | "RED" | "WHITE";
+
+/** Tailwind's `red-500` and `green-500`, so the swatches match the mask. */
+const MASK_COLORS: Record<PixelDiffColor, [number, number, number]> = {
+  GREEN: [34, 197, 94],
+  RED: [239, 68, 68],
+  WHITE: [239, 68, 68],
+};
+
+/** How much of the original survives in `WHITE`, on pixelmatch's 0–1 scale. */
+const FADED_ALPHA = 0.2;
+
 export type PixelDiffLabels = {
   /** Accessible label for the rendered difference mask. */
   difference: string;
@@ -37,8 +54,9 @@ type Result = {
 };
 
 /**
- * Renders a pixelmatch mask of everything that changed between two image
- * revisions.
+ * Marks everything that changed between two image revisions with a pixelmatch
+ * mask, painted over the "after" revision unless `color` asks for pixelmatch's
+ * own faded rendering.
  *
  * Sides of differing size are compared on a canvas sized to the larger of the
  * two, so the extra rows or columns show up as changed rather than failing the
@@ -47,24 +65,27 @@ type Result = {
 export function PixelDiff({
   after,
   before,
+  color,
   labels,
   threshold,
 }: {
   after: string | null;
   before: string | null;
+  color: PixelDiffColor;
   labels: PixelDiffLabels;
   threshold: number;
 }) {
-  // Keyed by source rather than reset in the effect: a fresh threshold should
-  // keep the previous mask on screen while it recomputes — dragging the
+  // Keyed by source rather than reset in the effect: a new threshold or colour
+  // should keep the previous mask on screen while it recomputes — dragging the
   // sensitivity slider would otherwise flash the spinner on every step — but a
   // different file must never show the mask belonging to the last one.
   const sourceKey = `${before ?? ""}|${after ?? ""}`;
+  const settingsKey = `${threshold}|${color}`;
   const [state, setState] = useState<{
     failed: boolean;
     result: Result | null;
+    settings: string;
     source: string;
-    threshold: number;
   } | null>(null);
   const current = state?.source === sourceKey ? state : null;
 
@@ -72,18 +93,19 @@ export function PixelDiff({
     if (!after || !before) return;
     let cancelled = false;
     const source = `${before}|${after}`;
-    compare(before, after, threshold)
+    const settings = `${threshold}|${color}`;
+    compare(before, after, threshold, color)
       .then((result) => {
-        if (!cancelled) setState({ failed: false, result, source, threshold });
+        if (!cancelled) setState({ failed: false, result, settings, source });
       })
       .catch(() => {
         if (!cancelled)
-          setState({ failed: true, result: null, source, threshold });
+          setState({ failed: true, result: null, settings, source });
       });
     return () => {
       cancelled = true;
     };
-  }, [after, before, threshold]);
+  }, [after, before, color, threshold]);
 
   if (!after || !before) {
     return <Message text={labels.needsBothSides} />;
@@ -100,7 +122,7 @@ export function PixelDiff({
     );
   }
 
-  const stale = current.threshold !== threshold;
+  const stale = current.settings !== settingsKey;
   const percent = ((result.changed / result.total) * 100).toFixed(2);
   return (
     <div className="space-y-2">
@@ -137,6 +159,7 @@ async function compare(
   before: string,
   after: string,
   threshold: number,
+  color: PixelDiffColor,
 ): Promise<Result> {
   const [beforeImage, afterImage] = await Promise.all([
     loadImage(before),
@@ -164,18 +187,46 @@ async function compare(
 
   const beforeData = toImageData(beforeImage, width, height, scale);
   const afterData = toImageData(afterImage, width, height, scale);
-  const output = new ImageData(width, height);
+  // Away from `WHITE`, `diffMask` leaves everything that matched transparent so
+  // the mask can be composited over the real "after" pixels, rather than over
+  // pixelmatch's washed-out greyscale — which buries the context the reader
+  // needs to tell *where* in the screenshot the marks are landing.
+  const faded = color === "WHITE";
+  const mask = new ImageData(width, height);
   const changed = pixelmatch(
     beforeData.data,
     afterData.data,
-    output.data,
+    mask.data,
     width,
     height,
-    { alpha: 0.2, includeAA: false, threshold },
+    {
+      alpha: FADED_ALPHA,
+      diffColor: MASK_COLORS[color],
+      // Both directions of change get the selected colour; the alternate colour
+      // is pixelmatch's way of splitting darker-than from lighter-than, which
+      // would defeat the point of choosing one.
+      diffColorAlt: MASK_COLORS[color],
+      diffMask: !faded,
+      includeAA: false,
+      threshold,
+    },
   );
 
   const canvas = createCanvas(width, height);
-  canvas.context.putImageData(output, 0, 0);
+  if (faded) {
+    canvas.context.putImageData(mask, 0, 0);
+  } else {
+    canvas.context.drawImage(
+      afterImage,
+      0,
+      0,
+      Math.max(1, Math.round(afterImage.naturalWidth * scale)),
+      Math.max(1, Math.round(afterImage.naturalHeight * scale)),
+    );
+    const maskCanvas = createCanvas(width, height);
+    maskCanvas.context.putImageData(mask, 0, 0);
+    canvas.context.drawImage(maskCanvas.element, 0, 0);
+  }
   return {
     changed,
     height,

@@ -40,6 +40,12 @@ export function useImageDiffLabels(): ImageDiffLabels {
       difference: t("difference"),
       transparency: t("transparency"),
       sensitivity: t("sensitivity"),
+      differenceColor: t("differenceColor"),
+      colors: {
+        RED: t("differenceColorRed"),
+        GREEN: t("differenceColorGreen"),
+        WHITE: t("differenceColorWhite"),
+      },
       differenceSummary: (percent: string) =>
         t("differenceSummary", { percent }),
       comparing: t("comparingPixels"),
