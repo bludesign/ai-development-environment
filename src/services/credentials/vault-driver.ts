@@ -239,13 +239,15 @@ export class VaultCredentialDriver implements CredentialDriver {
 
   async list(): Promise<string[]> {
     const found: string[] = [];
+    let visitedEntries = 0;
     const pending: Array<{ path: string; depth: number }> = [
       { path: "", depth: 0 },
     ];
-    while (pending.length) {
+    while (pending.length && visitedEntries < VAULT_MAX_LIST_ENTRIES) {
       const { path, depth } = pending.shift()!;
       for (const key of await this.listKeys(path)) {
-        if (found.length >= VAULT_MAX_LIST_ENTRIES) return found;
+        if (visitedEntries >= VAULT_MAX_LIST_ENTRIES) return found;
+        visitedEntries += 1;
         const child = path
           ? `${path}/${key.replace(/\/$/, "")}`
           : key.replace(/\/$/, "");

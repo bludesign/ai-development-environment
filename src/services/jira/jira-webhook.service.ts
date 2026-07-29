@@ -385,6 +385,7 @@ export class JiraWebhookService {
     const url = normalizeJiraDeliveryUrl(input.url);
     const jql = input.jql?.trim() || null;
     const secret = randomBytes(32).toString("base64url");
+    await this.credentials.assertWritable();
     const prisma = await getPrismaClient();
     const existing = await prisma.jiraSettings.findUnique({
       where: { id: SETTINGS_ID },
@@ -453,6 +454,7 @@ export class JiraWebhookService {
   }
 
   async disableWebhook(): Promise<JiraWebhookSettingsView> {
+    await this.credentials.assertWritable();
     const prisma = await getPrismaClient();
     const settings = await prisma.jiraSettings.findUnique({
       where: { id: SETTINGS_ID },

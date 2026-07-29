@@ -688,6 +688,9 @@ describe("CredentialService vault backend", () => {
     await expect(service.getText(CREDENTIALS.jiraApiToken)).resolves.toBe(
       "jira-secret",
     );
+    await expect(service.assertWritable()).rejects.toMatchObject({
+      code: "CREDENTIAL_STORE_READ_ONLY",
+    });
     await expect(
       service.setText(CREDENTIALS.jiraApiToken, "replacement"),
     ).rejects.toMatchObject({ code: "CREDENTIAL_STORE_READ_ONLY" });

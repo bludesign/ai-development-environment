@@ -380,6 +380,15 @@ export class CredentialService {
     );
   }
 
+  /**
+   * Fails before a feature mutates a remote system when that mutation must be
+   * followed by a credential write. The write methods repeat this check so the
+   * preflight is not a substitute for enforcement at the storage boundary.
+   */
+  async assertWritable(): Promise<void> {
+    assertWritable(await this.requireCurrentDriver());
+  }
+
   async set(
     descriptor: CredentialDescriptor,
     value: Uint8Array,

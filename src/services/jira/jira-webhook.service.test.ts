@@ -583,6 +583,7 @@ describe("Jira webhook registration", () => {
   let webhookConnection: { url: string; jql: string | null } | null;
   let upsert: ReturnType<typeof vi.fn>;
   let credentials: {
+    assertWritable: ReturnType<typeof vi.fn>;
     isConfigured: ReturnType<typeof vi.fn>;
     setText: ReturnType<typeof vi.fn>;
     getJson: ReturnType<typeof vi.fn>;
@@ -613,6 +614,7 @@ describe("Jira webhook registration", () => {
       jiraWebhookDelivery: { findFirst: vi.fn(async () => null) },
     });
     credentials = {
+      assertWritable: vi.fn(async () => undefined),
       isConfigured: vi.fn(async () => true),
       getJson: vi.fn(async () => webhookConnection),
       setMany: vi.fn(
@@ -749,6 +751,20 @@ describe("Jira webhook registration", () => {
     expect(settingsRow.webhookEnabled).toBe(false);
   });
 
+  test("rejects read-only registration before changing Jira", async () => {
+    credentials.assertWritable.mockRejectedValue(
+      Object.assign(new Error("Credential storage is read-only"), {
+        code: "CREDENTIAL_STORE_READ_ONLY",
+      }),
+    );
+
+    await expect(
+      service().registerWebhook({ url: "https://aide.example.com" }),
+    ).rejects.toMatchObject({ code: "CREDENTIAL_STORE_READ_ONLY" });
+    expect(jira.webhookApiRequest).not.toHaveBeenCalled();
+    expect(credentials.setMany).not.toHaveBeenCalled();
+  });
+
   test("rotates the secret in Jira when the webhook is registered", async () => {
     settingsRow.webhookId = "72";
     webhookConnection = {
@@ -781,6 +797,21 @@ describe("Jira webhook registration", () => {
       webhookId: null,
     });
     expect(webhookConnection).toBeNull();
+  });
+
+  test("rejects read-only disablement before changing Jira", async () => {
+    settingsRow.webhookId = "72";
+    credentials.assertWritable.mockRejectedValue(
+      Object.assign(new Error("Credential storage is read-only"), {
+        code: "CREDENTIAL_STORE_READ_ONLY",
+      }),
+    );
+
+    await expect(service().disableWebhook()).rejects.toMatchObject({
+      code: "CREDENTIAL_STORE_READ_ONLY",
+    });
+    expect(jira.webhookApiRequest).not.toHaveBeenCalled();
+    expect(credentials.deleteMany).not.toHaveBeenCalled();
   });
 
   test("treats a webhook already deleted in Jira as disabled", async () => {

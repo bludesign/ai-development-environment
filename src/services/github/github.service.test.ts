@@ -5,6 +5,8 @@ import { GITHUB_REST_OPERATIONS } from "./github-rest-operations";
 const state = vi.hoisted(() => ({
   apiToken: "secret-token" as string | null,
   webhookSecret: null as string | null,
+  credentialStoreReadOnly: false,
+  credentialWritabilityChecks: 0,
   appSettings: {
     id: "default",
     appId: "123",
@@ -274,6 +276,15 @@ vi.mock("@/services/credentials", async (importOriginal) => {
   return {
     ...original,
     CredentialService: class {
+      async assertWritable() {
+        state.credentialWritabilityChecks += 1;
+        if (state.credentialStoreReadOnly) {
+          throw Object.assign(new Error("Credential storage is read-only"), {
+            code: "CREDENTIAL_STORE_READ_ONLY",
+          });
+        }
+      }
+
       async isConfigured(descriptor: { id: string }) {
         return descriptor.id.endsWith("/private-key")
           ? Boolean(state.appSettings?.privateKey)
@@ -748,6 +759,8 @@ beforeEach(() => {
   cacheClient.recordRestCall.mockResolvedValue(undefined);
   state.apiToken = "secret-token";
   state.webhookSecret = null;
+  state.credentialStoreReadOnly = false;
+  state.credentialWritabilityChecks = 0;
   state.repositories = [
     {
       id: "local-repository-1",
@@ -2725,6 +2738,26 @@ describe("GitHub service", () => {
         url: "https://hooks.example/github-actions",
       }),
     );
+  });
+
+  test("rejects a read-only webhook change before reconfiguring GitHub", async () => {
+    state.credentialStoreReadOnly = true;
+
+    await expect(
+      new GitHubService().saveAppSettings(
+        {
+          appId: "123",
+          installationId: "456",
+          privateKey: null,
+          webhookUrl: "https://hooks.example/github-actions",
+        },
+        { actor: "control-plane", ipAddress: null },
+      ),
+    ).rejects.toMatchObject({ code: "CREDENTIAL_STORE_READ_ONLY" });
+    expect(state.credentialWritabilityChecks).toBe(1);
+    expect(appClient.configureWebhook).not.toHaveBeenCalled();
+    expect(state.appSettings?.webhookUrl ?? null).toBeNull();
+    expect(state.webhookSecret).toBeNull();
   });
 
   test("saves verified App settings when GitHub reports that webhooks are disabled", async () => {

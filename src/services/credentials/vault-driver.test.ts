@@ -227,6 +227,24 @@ describe("VaultCredentialDriver", () => {
     );
   });
 
+  test("counts folders toward the metadata traversal cap", async () => {
+    const request = vi.fn().mockResolvedValue(
+      response(200, {
+        data: {
+          keys: Array.from({ length: 600 }, (_, index) => `folder-${index}/`),
+        },
+      }),
+    );
+    const driver = new VaultCredentialDriver(
+      config(),
+      request as never,
+      () => ({}) as never,
+    );
+
+    await expect(driver.list()).resolves.toEqual([]);
+    expect(request).toHaveBeenCalledOnce();
+  });
+
   test("refuses writes and deletes on a read-only install", async () => {
     const request = vi.fn();
     const driver = new VaultCredentialDriver(

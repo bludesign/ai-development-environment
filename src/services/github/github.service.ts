@@ -2221,27 +2221,6 @@ export class GitHubService {
         storedWebhookUrl = webhookUrl;
         webhookConfiguredAt = null;
       }
-      if (webhookShouldBeConfigured && webhookUrl && webhookSecret) {
-        const configuration = await configureGitHubAppWebhook(credentials, {
-          url: webhookUrl,
-          secret: webhookSecret,
-        });
-        webhookConfiguredAt = configuration.configured ? new Date() : null;
-      }
-      if (enhancedPipelineWebhooksEnabled) {
-        const missing = enhancedPipelineWebhookRequirements({
-          webhookConfigured: Boolean(webhookConfiguredAt && webhookUrl),
-          actionsPermission: verification.actionsPermission,
-          checksPermission: verification.checksPermission,
-          commitStatusesPermission: verification.commitStatusesPermission,
-          webhookEvents: verification.webhookEvents,
-        });
-        if (missing.length > 0) {
-          throw new Error(
-            `Enhanced pipeline webhooks are not ready: ${missing.join("; ")}`,
-          );
-        }
-      }
       const connection: GitHubAppConnectionSettings = {
         appId: verification.appId,
         installationId: verification.installationId,
@@ -2274,6 +2253,30 @@ export class GitHubService {
             ]
           : []),
       ];
+      if (webhookShouldBeConfigured && webhookUrl && webhookSecret) {
+        if (credentialEntries.length) {
+          await this.credentials.assertWritable();
+        }
+        const configuration = await configureGitHubAppWebhook(credentials, {
+          url: webhookUrl,
+          secret: webhookSecret,
+        });
+        webhookConfiguredAt = configuration.configured ? new Date() : null;
+      }
+      if (enhancedPipelineWebhooksEnabled) {
+        const missing = enhancedPipelineWebhookRequirements({
+          webhookConfigured: Boolean(webhookConfiguredAt && webhookUrl),
+          actionsPermission: verification.actionsPermission,
+          checksPermission: verification.checksPermission,
+          commitStatusesPermission: verification.commitStatusesPermission,
+          webhookEvents: verification.webhookEvents,
+        });
+        if (missing.length > 0) {
+          throw new Error(
+            `Enhanced pipeline webhooks are not ready: ${missing.join("; ")}`,
+          );
+        }
+      }
       const saveMetadata = async (transaction: Prisma.TransactionClient) => {
         const data = {
           keyFingerprint: verification.keyFingerprint,

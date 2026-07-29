@@ -104,6 +104,28 @@ function clean(value: string, name: string, max = 200): string {
   return text;
 }
 
+// The catalog and the per-certificate bundles are committed together, but the catalog
+// must be read before that credential mutation begins. Queue the complete read-modify-write
+// sequence across service instances so concurrent additions or deletions cannot overwrite
+// one another with catalogs derived from the same snapshot.
+let certificateCatalogMutationTail = Promise.resolve();
+
+async function withCertificateCatalogMutation<T>(
+  operation: () => Promise<T>,
+): Promise<T> {
+  const predecessor = certificateCatalogMutationTail;
+  let release!: () => void;
+  certificateCatalogMutationTail = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  await predecessor;
+  try {
+    return await operation();
+  } finally {
+    release();
+  }
+}
+
 export class PushNotificationsService {
   private async storedTokenSettings() {
     return readConnectionSettings(
@@ -451,65 +473,74 @@ export class PushNotificationsService {
     }
     const certificate = inspectCertificateCredential(bytes, input.passphrase);
     const id = randomUUID();
-    const existing = await this.storedCertificateCatalog();
     const entry: ApnsCertificateCatalogEntry = {
       id,
       name: clean(input.name, "Credential name", 100),
       topic: clean(input.topic, "Topic", 255),
       environment: input.environment as "SANDBOX" | "PRODUCTION",
     };
-    if (existing?.value.some(({ name }) => name === entry.name)) {
-      throw new Error("Credential name already exists");
-    }
-    const catalog: ApnsCertificateCatalog = [...(existing?.value ?? []), entry];
-    await this.credentials.setMany(
-      [
-        {
-          descriptor: CREDENTIALS.apnsCertificateCatalog,
-          value: encodeJsonCredential(catalog),
-        },
-        {
-          descriptor: apnsCertificateCredential(id),
-          value: encodeJsonCredential<ApnsCertificateSecret>({
-            p12Base64: input.p12Base64,
-            passphrase: input.passphrase,
-          }),
-        },
-      ],
-      async (transaction) => {
-        await transaction.apnsCertificateCredential.create({
-          data: {
-            id,
-            fingerprint: certificate.fingerprint,
-            expiresAt: certificate.expiresAt,
-            lastTestedAt: new Date(),
+    await withCertificateCatalogMutation(async () => {
+      const existing = await this.storedCertificateCatalog();
+      if (existing?.value.some(({ name }) => name === entry.name)) {
+        throw new Error("Credential name already exists");
+      }
+      const catalog: ApnsCertificateCatalog = [
+        ...(existing?.value ?? []),
+        entry,
+      ];
+      await this.credentials.setMany(
+        [
+          {
+            descriptor: CREDENTIALS.apnsCertificateCatalog,
+            value: encodeJsonCredential(catalog),
           },
-        });
-      },
-    );
+          {
+            descriptor: apnsCertificateCredential(id),
+            value: encodeJsonCredential<ApnsCertificateSecret>({
+              p12Base64: input.p12Base64,
+              passphrase: input.passphrase,
+            }),
+          },
+        ],
+        async (transaction) => {
+          await transaction.apnsCertificateCredential.create({
+            data: {
+              id,
+              fingerprint: certificate.fingerprint,
+              expiresAt: certificate.expiresAt,
+              lastTestedAt: new Date(),
+            },
+          });
+        },
+      );
+    });
     this.changed();
     return this.settings();
   }
 
   async deleteCertificateCredential(id: string) {
-    const existing = await this.storedCertificateCatalog();
-    if (!existing?.value.some((entry) => entry.id === id)) {
-      throw new Error("APNs certificate credential not found");
-    }
-    await this.credentials.setAndDeleteMany(
-      [
-        {
-          descriptor: CREDENTIALS.apnsCertificateCatalog,
-          value: encodeJsonCredential<ApnsCertificateCatalog>(
-            existing.value.filter((entry) => entry.id !== id),
-          ),
+    await withCertificateCatalogMutation(async () => {
+      const existing = await this.storedCertificateCatalog();
+      if (!existing?.value.some((entry) => entry.id === id)) {
+        throw new Error("APNs certificate credential not found");
+      }
+      await this.credentials.setAndDeleteMany(
+        [
+          {
+            descriptor: CREDENTIALS.apnsCertificateCatalog,
+            value: encodeJsonCredential<ApnsCertificateCatalog>(
+              existing.value.filter((entry) => entry.id !== id),
+            ),
+          },
+        ],
+        [apnsCertificateCredential(id)],
+        async (transaction) => {
+          await transaction.apnsCertificateCredential.delete({
+            where: { id },
+          });
         },
-      ],
-      [apnsCertificateCredential(id)],
-      async (transaction) => {
-        await transaction.apnsCertificateCredential.delete({ where: { id } });
-      },
-    );
+      );
+    });
     this.changed();
     return true;
   }
