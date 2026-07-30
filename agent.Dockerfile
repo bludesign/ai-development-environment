@@ -54,11 +54,15 @@ WORKDIR /app
 COPY --from=runtime-dependencies /app/node_modules ./node_modules
 COPY --from=builder --chown=node:node /app/packages/control-agent/package.json ./package.json
 COPY --from=builder --chown=node:node /app/packages/control-agent/dist ./dist
+COPY --chmod=755 scripts/docker/entrypoint.sh /usr/local/bin/entrypoint.sh
 
 RUN mkdir -p /data /workspace \
     && chown node:node /data /workspace /home/node
 
-USER node
+# The entrypoint starts as root only to take ownership of bind-mounted volumes, then drops
+# to `node` before exec'ing the command below. Pass `--user` to skip that and run as a
+# caller-chosen identity instead.
+ENV ENTRYPOINT_OWNED_PATHS="/data /home/node /workspace"
 
 VOLUME ["/data", "/home/node"]
 
@@ -69,5 +73,5 @@ HEALTHCHECK --interval=30s --timeout=15s --start-period=15s --retries=3 \
 
 STOPSIGNAL SIGTERM
 
-ENTRYPOINT ["tini", "--", "node", "/app/dist/control-agent.js"]
+ENTRYPOINT ["/usr/local/bin/entrypoint.sh", "tini", "--", "node", "/app/dist/control-agent.js"]
 CMD ["run"]

@@ -26,6 +26,15 @@ ENV NODE_ENV=production \
 
 WORKDIR /app
 
+# Prisma probes libssl to choose a schema-engine build, and node:*-bookworm-slim ships
+# without it, so the CLI warns and falls back to the openssl-1.1.x engine. libssl3 lets
+# @prisma/engines resolve the correct debian-openssl-3.0.x engine during npm install.
+# Debian security revisions intentionally follow the pinned base image.
+# hadolint ignore=DL3008
+RUN apt-get update \
+    && apt-get install --yes --no-install-recommends libssl3 \
+    && rm -rf /var/lib/apt/lists/*
+
 COPY --from=builder /app/.npm-staging/server ./
 
 # The staged server manifest installs native modules for the target platform while keeping
@@ -36,6 +45,7 @@ FROM node:24.18.0-bookworm-slim AS runner
 
 ENV NODE_ENV=production \
     NEXT_TELEMETRY_DISABLED=1 \
+    HOME=/home/node \
     HOSTNAME=0.0.0.0 \
     PORT=3090 \
     AGENT_WS_HOSTNAME=0.0.0.0 \
@@ -47,12 +57,22 @@ LABEL org.opencontainers.image.source="https://github.com/bludesign/ai-developme
 
 WORKDIR /app
 
+# `bin/ai-development-environment.js` shells out to `prisma migrate deploy` on boot, which
+# probes libssl again; without it the CLI warns and loads the wrong schema engine.
+# Debian security revisions intentionally follow the pinned base image.
+# hadolint ignore=DL3008
+RUN apt-get update \
+    && apt-get install --yes --no-install-recommends libssl3 \
+    && rm -rf /var/lib/apt/lists/*
+
 COPY --from=runtime-dependencies --chown=node:node /app ./
+COPY --chmod=755 scripts/docker/entrypoint.sh /usr/local/bin/entrypoint.sh
 
-RUN mkdir -p /data && chown node:node /data
+RUN mkdir -p /data && chown node:node /data /home/node
 
-USER node
-
+# The entrypoint starts as root only to take ownership of a bind-mounted /data, then drops
+# to `node` before exec'ing the command below. Pass `--user` to skip that and run as a
+# caller-chosen identity instead.
 VOLUME ["/data"]
 
 EXPOSE 3090 3091
@@ -62,4 +82,5 @@ HEALTHCHECK --interval=30s --timeout=5s --start-period=30s --retries=3 \
 
 STOPSIGNAL SIGTERM
 
+ENTRYPOINT ["/usr/local/bin/entrypoint.sh"]
 CMD ["node", "bin/ai-development-environment.js"]
