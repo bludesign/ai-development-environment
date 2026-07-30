@@ -1,4 +1,6 @@
 import type { AgentConfig } from "./config.js";
+import { agentEndpoints, configForEndpoint } from "./config.js";
+import { selectAgentEndpoint } from "./endpoint-selection.js";
 import {
   DEFAULT_AGENT_HEARTBEAT_INTERVAL_SECONDS,
   DEFAULT_AGENT_JOB_RECONCILIATION_INTERVAL_SECONDS,
@@ -33,9 +35,15 @@ function configuredIntervalMs(
   );
 }
 
-export async function runAgent(
+// Heartbeats are the cheapest signal that the active address stopped working.
+// Three in a row is long enough to ride out a restart of the control plane but
+// short enough that a laptop leaving the network fails over within a minute.
+const UNHEALTHY_HEARTBEAT_FAILURES = 3;
+
+export async function runAgentSession(
   config: AgentConfig,
   signal: AbortSignal,
+  onUnhealthy?: () => void,
 ): Promise<void> {
   const client = new AgentGraphQLClient(
     config.server,
@@ -59,6 +67,7 @@ export async function runAgent(
   let diskSpaceRunning = false;
   let diskSpaceIntervalMs = DISK_SPACE_POLL_INTERVAL_SECONDS * 1_000;
   let startupRecoveryPending = true;
+  let heartbeatFailures = 0;
   const interruptedJobs = new Set<string>();
 
   const reconcileJobs = async (recoverInterrupted: boolean) => {
@@ -147,11 +156,18 @@ export async function runAgent(
     heartbeatTimer = undefined;
     try {
       await client.heartbeat(collectInventory());
+      heartbeatFailures = 0;
     } catch (error) {
+      heartbeatFailures += 1;
       console.error(
         "Heartbeat failed:",
         error instanceof Error ? error.message : error,
       );
+      if (heartbeatFailures >= UNHEALTHY_HEARTBEAT_FAILURES && onUnhealthy) {
+        heartbeatFailures = 0;
+        // Aborts this session; the supervisor then re-selects an endpoint.
+        onUnhealthy();
+      }
     } finally {
       heartbeatRunning = false;
       scheduleHeartbeat();
@@ -302,4 +318,45 @@ export async function runAgent(
   await subscriptionClient.dispose();
   await executor.cancelAll();
   await runManager.close();
+}
+
+/**
+ * Runs the agent against whichever configured endpoint is answering. With a
+ * single endpoint this is one uninterrupted session; with a local and a remote
+ * address the session is torn down and rebuilt on the other address whenever
+ * the active one stops responding.
+ */
+export async function runAgent(
+  config: AgentConfig,
+  signal: AbortSignal,
+): Promise<void> {
+  const failoverEnabled = agentEndpoints(config).length > 1;
+  while (!signal.aborted) {
+    const endpoint = await selectAgentEndpoint(config, signal);
+    if (signal.aborted) break;
+    if (failoverEnabled) {
+      console.log(
+        `Using the ${endpoint.kind} control plane at ${endpoint.server}`,
+      );
+    }
+    const session = new AbortController();
+    const abortSession = () => session.abort();
+    signal.addEventListener("abort", abortSession, { once: true });
+    try {
+      await runAgentSession(
+        configForEndpoint(config, endpoint),
+        session.signal,
+        failoverEnabled
+          ? () => {
+              console.log(
+                `The ${endpoint.kind} control plane stopped responding; switching endpoints`,
+              );
+              session.abort();
+            }
+          : undefined,
+      );
+    } finally {
+      signal.removeEventListener("abort", abortSession);
+    }
+  }
 }

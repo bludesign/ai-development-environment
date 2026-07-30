@@ -21,6 +21,36 @@ control-agent enroll \
 control-agent run
 ```
 
+### Local and remote endpoints
+
+One control plane is often reachable at two addresses — a LAN address at the desk and a public or VPN address elsewhere. Configure both and the agent prefers the local one, falling back to the remote one when the local address stops answering:
+
+```bash
+control-agent enroll \
+  --server http://192.168.1.10:3090 \
+  --remote-server https://control.example.com \
+  --enrollment-token <one-time-token>
+```
+
+Change the addresses on an enrolled agent, or print the current ones by passing no flags:
+
+```bash
+control-agent endpoints
+control-agent endpoints --remote-server https://control.example.com
+control-agent endpoints --clear-remote
+```
+
+The websocket address of each endpoint is derived from its server URL unless `--websocket-server` or `--remote-websocket-server` sets it explicitly.
+
+### Enrollment
+
+```bash
+control-agent enrollment
+control-agent unenroll
+```
+
+`enrollment` reports whether this machine is enrolled and whether each configured endpoint answers for it. `unenroll` removes the local credential; the control plane still lists the agent until it is deleted there.
+
 Diagnostics:
 
 ```bash

@@ -964,3 +964,132 @@ describe("command reconciliation", () => {
     expect(recordInTransaction).not.toHaveBeenCalled();
   });
 });
+
+describe("CommandsService command definition portability", () => {
+  beforeEach(() => vi.clearAllMocks());
+
+  test("exports a scoped command with its target named rather than referenced", async () => {
+    getPrismaClient.mockResolvedValue({
+      commandDefinition: {
+        findUnique: vi.fn().mockResolvedValue({
+          id: "command-1",
+          name: "Build",
+          description: "Builds the app",
+          script: "make build",
+          targetKind: "REPOSITORY_WORKTREE",
+          targetAgentId: null,
+          targetRepositoryId: "repository-1",
+          targetAgent: null,
+          targetRepository: { id: "repository-1", name: "storefront" },
+          restartPolicy: "ON_FAILURE",
+          restartLimit: 2,
+          quickActionEnabled: true,
+          quickActionIconKey: "hammer",
+          quickActionButtonVariant: "default",
+          notificationsEnabled: false,
+        }),
+      },
+    });
+
+    const exported = await new CommandsService(agentControl()).exportDefinition(
+      "command-1",
+    );
+
+    expect(exported.format).toBe("aide.command.export");
+    expect(exported.command).toMatchObject({
+      name: "Build",
+      script: "make build",
+      targetKind: "REPOSITORY_WORKTREE",
+      targetRepositoryName: "storefront",
+      restartPolicy: "ON_FAILURE",
+      restartLimit: 2,
+      quickActionEnabled: true,
+      notificationsEnabled: false,
+    });
+    expect(exported.command).not.toHaveProperty("targetRepositoryId");
+  });
+
+  test("re-links an imported target by name", async () => {
+    const create = vi
+      .fn()
+      .mockImplementation(({ data }) => ({ id: "command-2", ...data }));
+    getPrismaClient.mockResolvedValue({
+      agent: { findFirst: vi.fn().mockResolvedValue({ id: "agent-9" }) },
+      commandDefinition: { create },
+    });
+
+    await new CommandsService(agentControl()).importDefinition({
+      payload: {
+        format: "aide.command.export",
+        command: {
+          name: "Restart",
+          script: "brew services restart aide",
+          targetKind: "SPECIFIC_AGENT_HOME",
+          targetAgentName: "studio-mac",
+        },
+      },
+    });
+
+    expect(create.mock.calls[0][0].data).toMatchObject({
+      name: "Restart",
+      targetKind: "SPECIFIC_AGENT_HOME",
+      targetAgentId: "agent-9",
+    });
+  });
+
+  test("widens an imported target that this install does not have", async () => {
+    const create = vi
+      .fn()
+      .mockImplementation(({ data }) => ({ id: "command-3", ...data }));
+    getPrismaClient.mockResolvedValue({
+      codebaseRepository: { findFirst: vi.fn().mockResolvedValue(null) },
+      commandDefinition: { create },
+    });
+
+    await new CommandsService(agentControl()).importDefinition({
+      payload: {
+        name: "Test",
+        script: "npm test",
+        targetKind: "REPOSITORY_WORKTREE",
+        targetRepositoryName: "missing",
+      },
+    });
+
+    expect(create.mock.calls[0][0].data).toMatchObject({
+      targetKind: "ANY_WORKTREE",
+      targetRepositoryId: null,
+    });
+  });
+
+  test("keeps commands that have run history out of delete", async () => {
+    const del = vi.fn();
+    getPrismaClient.mockResolvedValue({
+      commandDefinition: {
+        findUnique: vi.fn().mockResolvedValue({ id: "command-1" }),
+        delete: del,
+      },
+      commandRun: { count: vi.fn().mockResolvedValue(3) },
+    });
+
+    await expect(
+      new CommandsService(agentControl()).deleteDefinition("command-1"),
+    ).rejects.toThrow("Archive commands that have run history");
+    expect(del).not.toHaveBeenCalled();
+  });
+
+  test("deletes a command with no run history", async () => {
+    const del = vi.fn().mockResolvedValue({ id: "command-1" });
+    getPrismaClient.mockResolvedValue({
+      commandDefinition: {
+        findUnique: vi.fn().mockResolvedValue({ id: "command-1" }),
+        delete: del,
+      },
+      commandRun: { count: vi.fn().mockResolvedValue(0) },
+    });
+
+    await expect(
+      new CommandsService(agentControl()).deleteDefinition("command-1"),
+    ).resolves.toBe(true);
+    expect(del).toHaveBeenCalledWith({ where: { id: "command-1" } });
+  });
+});

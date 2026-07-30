@@ -154,6 +154,7 @@ import {
   ccusageCollectionChangedTopic,
 } from "./event-bus";
 
+const MAX_AGENT_NAME_LENGTH = 200;
 const ACTIVE_JOB_STATUSES = ["QUEUED", "RUNNING", "CANCELLING"];
 const FINAL_JOB_STATUSES = new Set([
   "SUCCEEDED",
@@ -819,6 +820,22 @@ export class AgentControlService {
     // usage/build-data links, skill installations, and audit events.
     await prisma.agent.delete({ where: { id } });
     return true;
+  }
+
+  async renameAgent(agentId: string, name: string) {
+    const trimmed = name.trim();
+    if (!trimmed || trimmed.length > MAX_AGENT_NAME_LENGTH) {
+      throw new Error(
+        `Agent name must be between 1 and ${MAX_AGENT_NAME_LENGTH} characters`,
+      );
+    }
+    const prisma = await getPrismaClient();
+    const agent = await prisma.agent.update({
+      where: { id: agentId },
+      data: { name: trimmed },
+    });
+    publishAgent(agent);
+    return agent;
   }
 
   async updateBaseRepoDirectory(

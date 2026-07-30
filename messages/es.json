@@ -487,7 +487,11 @@
     "selectAll": "Seleccionar todo",
     "selectDay": "Seleccionar todo del {day}",
     "selectRun": "Seleccionar ejecución #{id}",
-    "selectedRuns": "{count, plural, one {# ejecución seleccionada} other {# ejecuciones seleccionadas}}"
+    "selectedRuns": "{count, plural, one {# ejecución seleccionada} other {# ejecuciones seleccionadas}}",
+    "selectedWorkflows": "{count, plural, =0 {Ningún flujo de trabajo seleccionado} one {# flujo de trabajo seleccionado} other {# flujos de trabajo seleccionados}}",
+    "selectWorkflow": "Seleccionar {name}",
+    "deleteWorkflowTitle": "¿Eliminar flujos de trabajo?",
+    "deleteWorkflowDescription": "{count, plural, one {Este flujo de trabajo se elimina de forma permanente. Los flujos de trabajo con historial de ejecuciones deben archivarse en su lugar.} other {Estos # flujos de trabajo se eliminan de forma permanente. Los flujos de trabajo con historial de ejecuciones deben archivarse en su lugar.}}"
   },
   "runs": {
     "actions": "Acciones",
@@ -1186,7 +1190,10 @@
     "useAgentDefault": "Usar valor predeterminado del repositorio base",
     "deleteAgent": "Eliminar agente",
     "deleteAgentTitle": "¿Eliminar este agente?",
-    "deleteAgentDescription": "Eliminar permanentemente {name} y todos sus trabajos y registros de bases de código. Esta acción no se puede deshacer."
+    "deleteAgentDescription": "Eliminar permanentemente {name} y todos sus trabajos y registros de bases de código. Esta acción no se puede deshacer.",
+    "renameAgent": "Renombrar agente",
+    "agentName": "Nombre del agente",
+    "saveName": "Guardar"
   },
   "diskSpace": {
     "title": "Monitor de espacio en disco",
@@ -4198,7 +4205,14 @@
     "originRerun": "Reejecución",
     "attemptDivider": "Intento {number}",
     "exitCode": "Salida {code}",
-    "targetUnavailable": "Destino no disponible"
+    "targetUnavailable": "Destino no disponible",
+    "import": "Importar",
+    "export": "Exportar",
+    "selectAllCommands": "Seleccionar todo",
+    "selectCommand": "Seleccionar {name}",
+    "selectedCommands": "{count, plural, =0 {Ningún comando seleccionado} one {# comando seleccionado} other {# comandos seleccionados}}",
+    "deleteCommandsTitle": "¿Eliminar comandos?",
+    "deleteCommandsDescription": "{count, plural, one {Este comando se elimina de forma permanente. Los comandos con historial de ejecuciones deben archivarse en su lugar.} other {Estos # comandos se eliminan de forma permanente. Los comandos con historial de ejecuciones deben archivarse en su lugar.}}"
   },
   "costs": {
     "title": "Costes",

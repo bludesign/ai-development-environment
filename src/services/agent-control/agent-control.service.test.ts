@@ -354,6 +354,40 @@ describe("AgentControlService.updateBaseRepoDirectory", () => {
   });
 });
 
+describe("AgentControlService.renameAgent", () => {
+  test("trims the new name before storing it", async () => {
+    const update = vi
+      .fn()
+      .mockImplementation(({ data }) => ({ id: "agent-1", ...data }));
+    getPrismaClient.mockResolvedValue({ agent: { update } });
+
+    const agent = await new AgentControlService().renameAgent(
+      "agent-1",
+      "  Studio Mac  ",
+    );
+
+    expect(agent.name).toBe("Studio Mac");
+    expect(update).toHaveBeenCalledWith({
+      where: { id: "agent-1" },
+      data: { name: "Studio Mac" },
+    });
+  });
+
+  test("rejects a blank or oversized name without touching the record", async () => {
+    const update = vi.fn();
+    getPrismaClient.mockResolvedValue({ agent: { update } });
+    const service = new AgentControlService();
+
+    await expect(service.renameAgent("agent-1", "   ")).rejects.toThrow(
+      "between 1 and 200 characters",
+    );
+    await expect(
+      service.renameAgent("agent-1", "a".repeat(201)),
+    ).rejects.toThrow("between 1 and 200 characters");
+    expect(update).not.toHaveBeenCalled();
+  });
+});
+
 describe("AgentControlService.deleteAgent", () => {
   test("deletes an existing agent and reports success", async () => {
     const findUnique = vi.fn().mockResolvedValue({ id: "agent-1" });

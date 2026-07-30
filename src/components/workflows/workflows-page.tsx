@@ -3,6 +3,7 @@
 import {
   Archive,
   CirclePlay,
+  Download,
   FilePenLine,
   FileUp,
   GitFork,
@@ -78,6 +79,7 @@ import {
   TooltipTrigger,
 } from "@/components/ui/tooltip";
 import { Link, useRouter } from "@/i18n/navigation";
+import { downloadJsonFiles, exportFileStem } from "@/lib/browser-utils";
 import {
   controlPlaneRequest,
   controlPlaneSubscriptions,
@@ -126,6 +128,7 @@ export function WorkflowsPage() {
   const [editMode, setEditMode] = useState(false);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [deleteIds, setDeleteIds] = useState<string[]>([]);
+  const [deleteWorkflowIds, setDeleteWorkflowIds] = useState<string[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -276,19 +279,74 @@ export function WorkflowsPage() {
     }
   };
 
-  const importWorkflow = async (file: File) => {
+  // Importing one file opens it for editing straight away; importing several
+  // stays on the list, where the new cards are the useful result.
+  const importWorkflows = async (files: File[]) => {
+    const imported: string[] = [];
     try {
-      const payload = JSON.parse(await file.text()) as unknown;
-      const data = await controlPlaneRequest<{
-        importWorkflow: { id: string };
-      }>(
-        `mutation ImportWorkflow($input: ImportWorkflowInput!) { importWorkflow(input: $input) { id } }`,
-        { input: { payload } },
+      for (const file of files) {
+        const payload = JSON.parse(await file.text()) as unknown;
+        const data = await controlPlaneRequest<{
+          importWorkflow: { id: string };
+        }>(
+          `mutation ImportWorkflow($input: ImportWorkflowInput!) { importWorkflow(input: $input) { id } }`,
+          { input: { payload } },
+        );
+        imported.push(data.importWorkflow.id);
+      }
+      setError(null);
+      if (files.length === 1 && imported.length === 1) {
+        router.push(`/workflows/${imported[0]}/edit`);
+        return;
+      }
+      setTab("workflows");
+      await load();
+    } catch (value) {
+      setError(value instanceof Error ? value.message : String(value));
+      if (imported.length) await load();
+    }
+  };
+
+  const exportWorkflows = async (ids: string[]) => {
+    try {
+      const files = await Promise.all(
+        ids.map(async (id) => {
+          const data = await controlPlaneRequest<{ exportWorkflow: unknown }>(
+            `query ExportWorkflow($id: ID!) { exportWorkflow(id: $id) }`,
+            { id },
+          );
+          const name =
+            workflows.find((workflow) => workflow.id === id)?.name ?? id;
+          return {
+            value: data.exportWorkflow,
+            filename: `${exportFileStem(name)}.workflow.json`,
+          };
+        }),
       );
-      router.push(`/workflows/${data.importWorkflow.id}/edit`);
+      setError(null);
+      await downloadJsonFiles(files);
     } catch (value) {
       setError(value instanceof Error ? value.message : String(value));
     }
+  };
+
+  // `deleteWorkflow` refuses definitions with run history, so a partial
+  // selection reports what stopped it while keeping the successes.
+  const deleteWorkflows = async (ids: string[]) => {
+    let failure: string | null = null;
+    for (const id of ids) {
+      try {
+        await controlPlaneRequest(
+          `mutation DeleteWorkflow($id: ID!) { deleteWorkflow(id: $id) }`,
+          { id },
+        );
+      } catch (value) {
+        failure ??= value instanceof Error ? value.message : String(value);
+      }
+    }
+    setSelected(new Set());
+    setError(failure);
+    await load();
   };
 
   return (
@@ -306,9 +364,10 @@ export function WorkflowsPage() {
           <input
             accept="application/json,.json"
             className="hidden"
+            multiple
             onChange={(event) => {
-              const file = event.target.files?.[0];
-              if (file) void importWorkflow(file);
+              const files = [...(event.target.files ?? [])];
+              if (files.length) void importWorkflows(files);
               event.target.value = "";
             }}
             ref={fileRef}
@@ -331,7 +390,11 @@ export function WorkflowsPage() {
       )}
       <div className="flex flex-wrap items-center justify-between gap-3">
         <Tabs
-          onValueChange={(value) => setTab(value as "runs" | "workflows")}
+          onValueChange={(value) => {
+            setTab(value as "runs" | "workflows");
+            setEditMode(false);
+            setSelected(new Set());
+          }}
           value={tab}
         >
           <TabsList>
@@ -351,38 +414,35 @@ export function WorkflowsPage() {
               value={search}
             />
           </InputGroup>
-          {/* Archiving and bulk selection only exist for runs, so their
-              controls follow the tab rather than sitting inert over a grid of
-              workflow cards. */}
+          {/* The archive filter only applies to runs, but both tabs support a
+              multi-selection mode, so the edit toggle sits outside it. */}
           {tab === "runs" && (
-            <>
-              <Select
-                onValueChange={(value) => {
-                  setRunArchiveFilter(value ?? "ACTIVE");
-                  setSelected(new Set());
-                }}
-                value={runArchiveFilter}
-              >
-                <SelectTrigger aria-label={t("archiveFilter")}>
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="ACTIVE">{t("active")}</SelectItem>
-                  <SelectItem value="ARCHIVED">{t("archived")}</SelectItem>
-                  <SelectItem value="ALL">{t("all")}</SelectItem>
-                </SelectContent>
-              </Select>
-              <Button
-                onClick={() => {
-                  setEditMode((value) => !value);
-                  setSelected(new Set());
-                }}
-                variant="outline"
-              >
-                <FilePenLine /> {editMode ? t("done") : t("editRuns")}
-              </Button>
-            </>
+            <Select
+              onValueChange={(value) => {
+                setRunArchiveFilter(value ?? "ACTIVE");
+                setSelected(new Set());
+              }}
+              value={runArchiveFilter}
+            >
+              <SelectTrigger aria-label={t("archiveFilter")}>
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="ACTIVE">{t("active")}</SelectItem>
+                <SelectItem value="ARCHIVED">{t("archived")}</SelectItem>
+                <SelectItem value="ALL">{t("all")}</SelectItem>
+              </SelectContent>
+            </Select>
           )}
+          <Button
+            onClick={() => {
+              setEditMode((value) => !value);
+              setSelected(new Set());
+            }}
+            variant="outline"
+          >
+            <FilePenLine /> {editMode ? t("done") : t("editRuns")}
+          </Button>
           <Tooltip>
             <TooltipTrigger asChild>
               <Button
@@ -398,6 +458,35 @@ export function WorkflowsPage() {
           </Tooltip>
         </div>
       </div>
+      {tab === "workflows" && editMode && (
+        <div className="flex flex-wrap items-center gap-2 rounded-lg border bg-muted/30 p-3">
+          <SelectAllCheckbox
+            ids={filteredWorkflows.map(({ id }) => id)}
+            label={t("selectAll")}
+            onChange={setSelected}
+            selected={selected}
+          />
+          <span className="mr-auto text-sm text-muted-foreground">
+            {t("selectedWorkflows", { count: selected.size })}
+          </span>
+          <Button
+            disabled={selected.size === 0}
+            onClick={() => void exportWorkflows([...selected])}
+            size="sm"
+            variant="outline"
+          >
+            <Download /> {t("export")}
+          </Button>
+          <Button
+            disabled={selected.size === 0}
+            onClick={() => setDeleteWorkflowIds([...selected])}
+            size="sm"
+            variant="destructive"
+          >
+            <Trash2 /> {t("delete")}
+          </Button>
+        </div>
+      )}
       {tab === "runs" && editMode && selected.size > 0 && (
         <div className="flex flex-wrap gap-2 rounded-lg border bg-muted/30 p-3">
           <span className="mr-auto text-sm text-muted-foreground">
@@ -455,15 +544,38 @@ export function WorkflowsPage() {
         filteredWorkflows.length ? (
           <div className="grid gap-4 lg:grid-cols-2 2xl:grid-cols-3">
             {filteredWorkflows.map((workflow) => (
-              <Card key={workflow.id}>
+              <Card
+                className={cn(
+                  editMode && "cursor-pointer",
+                  editMode &&
+                    selected.has(workflow.id) &&
+                    "ring-2 ring-ring ring-offset-2 ring-offset-background",
+                )}
+                key={workflow.id}
+                /* In edit mode the whole card is the selection target; the
+                   checkbox and the links inside it keep their own behaviour. */
+                onClick={(event) => {
+                  if (!editMode || !isRowActivation(event)) return;
+                  toggleSelected(workflow.id);
+                }}
+              >
                 {/* `CardAction` parks the menu in the header's own top-right
                     cell. Overriding the header to `flex-row` did not: the
                     header is a grid, so `flex-direction` never applied and the
                     menu dropped to a second row under the description. */}
                 <CardHeader>
-                  <CardTitle className="truncate">
+                  <CardTitle className="flex min-w-0 items-center gap-2">
+                    {editMode && (
+                      <Checkbox
+                        aria-label={t("selectWorkflow", {
+                          name: workflow.name,
+                        })}
+                        checked={selected.has(workflow.id)}
+                        onCheckedChange={() => toggleSelected(workflow.id)}
+                      />
+                    )}
                     <Link
-                      className="hover:underline"
+                      className="truncate hover:underline"
                       href={`/workflows/${workflow.id}`}
                     >
                       {workflow.name}
@@ -493,6 +605,11 @@ export function WorkflowsPage() {
                           <Link href={`/workflows/${workflow.id}/edit`}>
                             {t("edit")}
                           </Link>
+                        </DropdownMenuItem>
+                        <DropdownMenuItem
+                          onClick={() => void exportWorkflows([workflow.id])}
+                        >
+                          <Download /> {t("export")}
                         </DropdownMenuItem>
                         <DropdownMenuItem
                           onClick={() =>
@@ -782,6 +899,19 @@ export function WorkflowsPage() {
         }}
         open={deleteIds.length > 0}
         title={t("deleteRunTitle")}
+      />
+      <ConfirmationDialog
+        actionLabel={t("delete")}
+        cancelLabel={t("cancel")}
+        description={t("deleteWorkflowDescription", {
+          count: deleteWorkflowIds.length,
+        })}
+        onConfirm={() => void deleteWorkflows(deleteWorkflowIds)}
+        onOpenChange={(open) => {
+          if (!open) setDeleteWorkflowIds([]);
+        }}
+        open={deleteWorkflowIds.length > 0}
+        title={t("deleteWorkflowTitle")}
       />
     </div>
   );

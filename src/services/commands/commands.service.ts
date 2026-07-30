@@ -36,6 +36,9 @@ const ACTIVE_RUN_STATUSES = [
 const FINAL_RUN_STATUSES = ["SUCCEEDED", "FAILED", "CANCELLED"] as const;
 const RESTART_DELAY_MS = 1_000;
 const STABLE_ATTEMPT_MS = 60_000;
+const EXPORT_FORMAT = "aide.command.export";
+const EXPORT_SCHEMA_VERSION = 1;
+const MAX_IMPORT_BYTES = 2 * 1024 * 1024;
 
 export type CommandDefinitionInput = {
   name: string;
@@ -124,6 +127,16 @@ function text(value: string, label: string, maximum: number): string {
   if (normalized.length > maximum) throw new Error(`${label} is too long`);
   return normalized;
 }
+
+function importObject(value: unknown, label: string): Record<string, unknown> {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new Error(`${label} must be an object`);
+  }
+  return value as Record<string, unknown>;
+}
+
+const importedText = (value: unknown): string | null =>
+  typeof value === "string" && value.trim() ? value.trim() : null;
 
 function capabilities(value: string): string[] {
   try {
@@ -295,6 +308,137 @@ export class CommandsService {
     });
     publishDefinition(definition);
     return definition;
+  }
+
+  async deleteDefinition(id: string) {
+    const prisma = await getPrismaClient();
+    const definition = await prisma.commandDefinition.findUnique({
+      where: { id },
+    });
+    if (!definition) return false;
+    if (await prisma.commandRun.count({ where: { commandId: id } })) {
+      throw new Error(
+        "Archive commands that have run history instead of deleting them",
+      );
+    }
+    await prisma.commandDefinition.delete({ where: { id } });
+    publishDefinition(definition);
+    return true;
+  }
+
+  async exportDefinition(id: string) {
+    const definition = await this.getDefinition(id);
+    if (!definition) throw new Error("Command not found");
+    return {
+      format: EXPORT_FORMAT,
+      schemaVersion: EXPORT_SCHEMA_VERSION,
+      exportedAt: new Date().toISOString(),
+      command: {
+        name: definition.name,
+        description: definition.description,
+        script: definition.script,
+        targetKind: definition.targetKind,
+        // Identifiers are per-install, so a scoped target travels by name and
+        // is resolved again on import.
+        targetAgentName: definition.targetAgent?.name ?? null,
+        targetRepositoryName: definition.targetRepository?.name ?? null,
+        restartPolicy: definition.restartPolicy,
+        restartLimit: definition.restartLimit,
+        quickActionEnabled: definition.quickActionEnabled,
+        quickActionIconKey: definition.quickActionIconKey,
+        quickActionButtonVariant: definition.quickActionButtonVariant,
+        notificationsEnabled: definition.notificationsEnabled,
+      },
+    };
+  }
+
+  /**
+   * Matches an exported agent or repository target to a local record. A target
+   * that no longer exists widens to the unscoped equivalent rather than
+   * failing the import, which is the usual outcome across two installs.
+   */
+  private async resolveImportTarget(command: Record<string, unknown>) {
+    const targetKind = enumValue(
+      TARGETS,
+      importedText(command.targetKind) ?? "ANY_AGENT_HOME",
+      "Target scope",
+    );
+    const prisma = await getPrismaClient();
+    if (targetKind === "SPECIFIC_AGENT_HOME") {
+      const name = importedText(command.targetAgentName);
+      const agent = name
+        ? await prisma.agent.findFirst({ where: { name } })
+        : null;
+      return agent
+        ? { targetKind, targetAgentId: agent.id, targetRepositoryId: null }
+        : {
+            targetKind: "ANY_AGENT_HOME" as const,
+            targetAgentId: null,
+            targetRepositoryId: null,
+          };
+    }
+    if (targetKind === "REPOSITORY_WORKTREE") {
+      const name = importedText(command.targetRepositoryName);
+      const repository = name
+        ? await prisma.codebaseRepository.findFirst({ where: { name } })
+        : null;
+      return repository
+        ? {
+            targetKind,
+            targetAgentId: null,
+            targetRepositoryId: repository.id,
+          }
+        : {
+            targetKind: "ANY_WORKTREE" as const,
+            targetAgentId: null,
+            targetRepositoryId: null,
+          };
+    }
+    return { targetKind, targetAgentId: null, targetRepositoryId: null };
+  }
+
+  async importDefinition(input: { payload: unknown; name?: string | null }) {
+    const raw =
+      typeof input.payload === "string"
+        ? input.payload
+        : JSON.stringify(input.payload);
+    if (Buffer.byteLength(raw, "utf8") > MAX_IMPORT_BYTES) {
+      throw new Error("Command import is too large");
+    }
+    const object = importObject(
+      typeof input.payload === "string" ? JSON.parse(raw) : input.payload,
+      "Command import",
+    );
+    // A bare command definition is accepted alongside a wrapped export so a
+    // hand-written file does not need the envelope.
+    const command =
+      object.format === EXPORT_FORMAT
+        ? importObject(object.command, "Exported command")
+        : object;
+    const target = await this.resolveImportTarget(command);
+    const name = input.name?.trim() || importedText(command.name);
+    if (!name) throw new Error("Name is required");
+    const script = importedText(command.script);
+    if (!script) throw new Error("Script is required");
+    return this.createDefinition({
+      name,
+      description:
+        typeof command.description === "string" ? command.description : "",
+      script,
+      ...target,
+      restartPolicy: importedText(command.restartPolicy) ?? "NEVER",
+      restartLimit:
+        command.restartLimit === null ||
+        typeof command.restartLimit === "number"
+          ? (command.restartLimit as number | null)
+          : 3,
+      quickActionEnabled: command.quickActionEnabled === true,
+      quickActionIconKey:
+        importedText(command.quickActionIconKey) ?? "terminal",
+      quickActionButtonVariant:
+        importedText(command.quickActionButtonVariant) ?? "default",
+      notificationsEnabled: command.notificationsEnabled !== false,
+    });
   }
 
   async archiveDefinition(id: string, archived: boolean) {

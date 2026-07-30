@@ -17,6 +17,37 @@ export function createClientId(): string {
   return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
 }
 
+/** Turns a display name into the file-name-safe stem used by exports. */
+export function exportFileStem(name: string): string {
+  return name.replaceAll(/[^a-z0-9]+/gi, "-").toLowerCase() || "export";
+}
+
+export function downloadJson(value: unknown, filename: string): void {
+  const url = URL.createObjectURL(
+    new Blob([JSON.stringify(value, null, 2)], { type: "application/json" }),
+  );
+  const anchor = document.createElement("a");
+  anchor.href = url;
+  anchor.download = filename;
+  anchor.click();
+  URL.revokeObjectURL(url);
+}
+
+/**
+ * Saves several exports one after another. Browsers drop downloads fired in
+ * the same tick, so each file is handed over on its own frame.
+ */
+export async function downloadJsonFiles(
+  files: Array<{ value: unknown; filename: string }>,
+): Promise<void> {
+  for (const [index, file] of files.entries()) {
+    if (index > 0) {
+      await new Promise((resolve) => setTimeout(resolve, 150));
+    }
+    downloadJson(file.value, file.filename);
+  }
+}
+
 export async function copyText(value: string): Promise<void> {
   if (navigator.clipboard?.writeText) {
     try {

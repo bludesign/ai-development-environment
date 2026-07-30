@@ -5,10 +5,22 @@ import { dirname, join } from "node:path";
 export type AgentConfig = {
   server: string;
   websocketServer: string;
+  // The same control plane reachable from outside the local network. It is the
+  // fallback the agent falls back to when the local address stops answering.
+  remoteServer?: string | null;
+  remoteWebSocketServer?: string | null;
   agentId: string;
   credential: string;
   name: string;
   headers?: Record<string, string>;
+};
+
+export type AgentEndpointKind = "local" | "remote";
+
+export type AgentEndpoint = {
+  kind: AgentEndpointKind;
+  server: string;
+  websocketServer: string;
 };
 
 export const configPath = () =>
@@ -35,6 +47,48 @@ export function defaultWebSocketServer(server: string): string {
   url.search = "";
   url.hash = "";
   return url.toString();
+}
+
+/**
+ * The addresses this agent may use, most preferred first. The local address is
+ * tried before the remote one so an agent sitting on the same network as the
+ * control plane never routes through the public entry point.
+ */
+export function agentEndpoints(config: AgentConfig): AgentEndpoint[] {
+  const endpoints: AgentEndpoint[] = [
+    {
+      kind: "local",
+      server: config.server,
+      websocketServer: config.websocketServer,
+    },
+  ];
+  if (config.remoteServer) {
+    endpoints.push({
+      kind: "remote",
+      server: config.remoteServer,
+      websocketServer:
+        config.remoteWebSocketServer ??
+        defaultWebSocketServer(config.remoteServer),
+    });
+  }
+  return endpoints;
+}
+
+/**
+ * Pins a configuration to one endpoint. The alternates are dropped so nothing
+ * downstream mistakes the active address for the configured local one.
+ */
+export function configForEndpoint(
+  config: AgentConfig,
+  endpoint: AgentEndpoint,
+): AgentConfig {
+  return {
+    ...config,
+    server: endpoint.server,
+    websocketServer: endpoint.websocketServer,
+    remoteServer: null,
+    remoteWebSocketServer: null,
+  };
 }
 
 export async function loadConfig(path = configPath()): Promise<AgentConfig> {

@@ -487,7 +487,11 @@
     "selectAll": "Alle auswählen",
     "selectDay": "Alles vom {day} auswählen",
     "selectRun": "Lauf #{id} auswählen",
-    "selectedRuns": "{count, plural, one {# Lauf ausgewählt} other {# Läufe ausgewählt}}"
+    "selectedRuns": "{count, plural, one {# Lauf ausgewählt} other {# Läufe ausgewählt}}",
+    "selectedWorkflows": "{count, plural, =0 {Keine Workflows ausgewählt} one {# Workflow ausgewählt} other {# Workflows ausgewählt}}",
+    "selectWorkflow": "{name} auswählen",
+    "deleteWorkflowTitle": "Workflows löschen?",
+    "deleteWorkflowDescription": "{count, plural, one {Dieser Workflow wird dauerhaft gelöscht. Workflows mit Ausführungsverlauf müssen stattdessen archiviert werden.} other {Diese # Workflows werden dauerhaft gelöscht. Workflows mit Ausführungsverlauf müssen stattdessen archiviert werden.}}"
   },
   "runs": {
     "actions": "Aktionen",
@@ -1186,7 +1190,10 @@
     "useAgentDefault": "Basis-Repository-Standard verwenden",
     "deleteAgent": "Agent löschen",
     "deleteAgentTitle": "Diesen Agenten löschen?",
-    "deleteAgentDescription": "{name} und alle zugehörigen Jobs und Codebasis-Registrierungen dauerhaft löschen. Dies kann nicht rückgängig gemacht werden."
+    "deleteAgentDescription": "{name} und alle zugehörigen Jobs und Codebasis-Registrierungen dauerhaft löschen. Dies kann nicht rückgängig gemacht werden.",
+    "renameAgent": "Agent umbenennen",
+    "agentName": "Agentname",
+    "saveName": "Speichern"
   },
   "diskSpace": {
     "title": "Speicherplatzüberwachung",
@@ -4198,7 +4205,14 @@
     "originRerun": "Erneute Ausführung",
     "attemptDivider": "Versuch {number}",
     "exitCode": "Endcode {code}",
-    "targetUnavailable": "Ziel nicht verfügbar"
+    "targetUnavailable": "Ziel nicht verfügbar",
+    "import": "Importieren",
+    "export": "Exportieren",
+    "selectAllCommands": "Alle auswählen",
+    "selectCommand": "{name} auswählen",
+    "selectedCommands": "{count, plural, =0 {Keine Befehle ausgewählt} one {# Befehl ausgewählt} other {# Befehle ausgewählt}}",
+    "deleteCommandsTitle": "Befehle löschen?",
+    "deleteCommandsDescription": "{count, plural, one {Dieser Befehl wird dauerhaft gelöscht. Befehle mit Ausführungsverlauf müssen stattdessen archiviert werden.} other {Diese # Befehle werden dauerhaft gelöscht. Befehle mit Ausführungsverlauf müssen stattdessen archiviert werden.}}"
   },
   "costs": {
     "title": "Kosten",

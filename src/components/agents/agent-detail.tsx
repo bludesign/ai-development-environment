@@ -22,6 +22,7 @@ import {
   ChevronDown,
   ChevronRight,
   Copy,
+  Pencil,
   Search,
   Trash2,
   Wrench,
@@ -156,6 +157,9 @@ export function AgentDetail({ agentId }: { agentId: string }) {
   const [deleting, setDeleting] = useState(false);
   const [directoryBusy, setDirectoryBusy] = useState(false);
   const [directoryError, setDirectoryError] = useState<string | null>(null);
+  const [renameValue, setRenameValue] = useState<string | null>(null);
+  const [renameBusy, setRenameBusy] = useState(false);
+  const [renameError, setRenameError] = useState<string | null>(null);
   const latestLoad = useRef(0);
   const load = useCallback(async () => {
     const loadId = ++latestLoad.current;
@@ -330,6 +334,28 @@ export function AgentDetail({ agentId }: { agentId: string }) {
     }
   };
 
+  const renameAgent = async (event: FormEvent) => {
+    event.preventDefault();
+    const name = renameValue?.trim();
+    if (!name) return;
+    setRenameBusy(true);
+    setRenameError(null);
+    try {
+      const data = await controlPlaneRequest<{ renameAgent: Agent }>(
+        `mutation RenameAgent($agentId: ID!, $name: String!) {
+          renameAgent(agentId: $agentId, name: $name) { ${AGENT_FIELDS} }
+        }`,
+        { agentId, name },
+      );
+      setAgent(data.renameAgent);
+      setRenameValue(null);
+    } catch (value) {
+      setRenameError(value instanceof Error ? value.message : String(value));
+    } finally {
+      setRenameBusy(false);
+    }
+  };
+
   const handleJobChanged = useCallback((changed: AgentJob, select = false) => {
     setJobs((current) => upsertJob(current, changed));
     if (select) setSelectedJobId(changed.id);
@@ -392,11 +418,58 @@ export function AgentDetail({ agentId }: { agentId: string }) {
       <div className="flex flex-wrap items-start justify-between gap-4">
         <div>
           <div className="flex flex-wrap items-center gap-2">
-            <h1 className="text-2xl font-semibold tracking-tight">
-              {agent.name}
-            </h1>
+            {renameValue === null ? (
+              <>
+                <h1 className="text-2xl font-semibold tracking-tight">
+                  {agent.name}
+                </h1>
+                <Button
+                  aria-label={t("renameAgent")}
+                  onClick={() => {
+                    setRenameError(null);
+                    setRenameValue(agent.name);
+                  }}
+                  size="icon-sm"
+                  variant="ghost"
+                >
+                  <Pencil />
+                </Button>
+              </>
+            ) : (
+              <form
+                className="flex flex-wrap items-center gap-2"
+                onSubmit={(event) => void renameAgent(event)}
+              >
+                <Input
+                  aria-label={t("agentName")}
+                  autoFocus
+                  className="w-64"
+                  disabled={renameBusy}
+                  maxLength={200}
+                  onChange={(event) => setRenameValue(event.target.value)}
+                  value={renameValue}
+                />
+                <Button disabled={renameBusy || !renameValue.trim()}>
+                  {renameBusy ? <Spinner /> : <Check />} {t("saveName")}
+                </Button>
+                <Button
+                  disabled={renameBusy}
+                  onClick={() => {
+                    setRenameValue(null);
+                    setRenameError(null);
+                  }}
+                  type="button"
+                  variant="outline"
+                >
+                  {common("cancel")}
+                </Button>
+              </form>
+            )}
             <StatusBadge status={agent.connectionStatus} />
           </div>
+          {renameError && (
+            <p className="mt-1 text-sm text-destructive">{renameError}</p>
+          )}
           <p className="mt-1 text-sm text-muted-foreground">
             {agent.hostname} · {agent.osVersion} · {agent.architecture}
           </p>

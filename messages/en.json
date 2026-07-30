@@ -487,7 +487,11 @@
     "selectAll": "Select all",
     "selectDay": "Select everything from {day}",
     "selectRun": "Select run #{id}",
-    "selectedRuns": "{count, plural, one {# run selected} other {# runs selected}}"
+    "selectedRuns": "{count, plural, one {# run selected} other {# runs selected}}",
+    "selectedWorkflows": "{count, plural, =0 {No workflows selected} one {# workflow selected} other {# workflows selected}}",
+    "selectWorkflow": "Select {name}",
+    "deleteWorkflowTitle": "Delete workflows?",
+    "deleteWorkflowDescription": "{count, plural, one {This workflow is deleted permanently. Workflows with run history must be archived instead.} other {These # workflows are deleted permanently. Workflows with run history must be archived instead.}}"
   },
   "runs": {
     "actions": "Actions",
@@ -1186,7 +1190,10 @@
     "useAgentDefault": "Use base repository default",
     "deleteAgent": "Delete agent",
     "deleteAgentTitle": "Delete this agent?",
-    "deleteAgentDescription": "Permanently delete {name} and all of its jobs and codebase registrations. This cannot be undone."
+    "deleteAgentDescription": "Permanently delete {name} and all of its jobs and codebase registrations. This cannot be undone.",
+    "renameAgent": "Rename agent",
+    "agentName": "Agent name",
+    "saveName": "Save"
   },
   "diskSpace": {
     "title": "Disk Space Monitor",
@@ -4198,7 +4205,14 @@
     "originRerun": "Rerun",
     "attemptDivider": "Attempt {number}",
     "exitCode": "Exit {code}",
-    "targetUnavailable": "Target unavailable"
+    "targetUnavailable": "Target unavailable",
+    "import": "Import",
+    "export": "Export",
+    "selectAllCommands": "Select all",
+    "selectCommand": "Select {name}",
+    "selectedCommands": "{count, plural, =0 {No commands selected} one {# command selected} other {# commands selected}}",
+    "deleteCommandsTitle": "Delete commands?",
+    "deleteCommandsDescription": "{count, plural, one {This command is deleted permanently. Commands with run history must be archived instead.} other {These # commands are deleted permanently. Commands with run history must be archived instead.}}"
   },
   "costs": {
     "title": "Costs",

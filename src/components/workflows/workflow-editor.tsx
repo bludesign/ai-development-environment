@@ -105,6 +105,7 @@ import {
   TooltipTrigger,
 } from "@/components/ui/tooltip";
 import { useRouter } from "@/i18n/navigation";
+import { downloadJson, exportFileStem } from "@/lib/browser-utils";
 import { controlPlaneRequest } from "@/lib/control-plane-client";
 import {
   computeWorkflowPathAvailability,
@@ -171,17 +172,6 @@ const CATALOG_QUERY = `
 
 function clientId(prefix: string) {
   return `${prefix}-${crypto.randomUUID()}`;
-}
-
-function downloadJson(value: unknown, filename: string) {
-  const url = URL.createObjectURL(
-    new Blob([JSON.stringify(value, null, 2)], { type: "application/json" }),
-  );
-  const anchor = document.createElement("a");
-  anchor.href = url;
-  anchor.download = filename;
-  anchor.click();
-  URL.revokeObjectURL(url);
 }
 
 function groupByCategory<T extends { category: string }>(entries: T[]) {
@@ -824,10 +814,7 @@ function WorkflowEditorInner({ workflowId }: { workflowId?: string | null }) {
               definition,
             },
           };
-      downloadJson(
-        value,
-        `${definition.name.replaceAll(/[^a-z0-9]+/gi, "-").toLowerCase()}.workflow.json`,
-      );
+      downloadJson(value, `${exportFileStem(definition.name)}.workflow.json`);
     } catch (value) {
       setError(value instanceof Error ? value.message : String(value));
     }

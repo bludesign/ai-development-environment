@@ -270,9 +270,7 @@ export function DevicesPage() {
                   <TableCell>
                     <div>{device.product ?? t("unavailable")}</div>
                     <div className="text-xs text-muted-foreground">
-                      {device.osVersion
-                        ? `iOS ${device.osVersion}`
-                        : t("unavailable")}
+                      {device.osVersion ?? t("unavailable")}
                     </div>
                   </TableCell>
                   <TableCell className="font-mono text-xs">

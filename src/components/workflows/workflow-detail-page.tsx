@@ -62,6 +62,7 @@ import {
   TooltipTrigger,
 } from "@/components/ui/tooltip";
 import { Link, useRouter } from "@/i18n/navigation";
+import { downloadJson, exportFileStem } from "@/lib/browser-utils";
 import {
   controlPlaneRequest,
   controlPlaneSubscriptions,
@@ -106,17 +107,6 @@ const RUN_FIELDS = `
   workflow { id name }
   version { id workflowId version name description schemaVersion definition contentHash publishedAt }
 `;
-
-function downloadJson(value: unknown, filename: string) {
-  const url = URL.createObjectURL(
-    new Blob([JSON.stringify(value, null, 2)], { type: "application/json" }),
-  );
-  const anchor = document.createElement("a");
-  anchor.href = url;
-  anchor.download = filename;
-  anchor.click();
-  URL.revokeObjectURL(url);
-}
 
 export function WorkflowDetailPage({ workflowId }: { workflowId: string }) {
   const t = useTranslations("workflows");
@@ -300,7 +290,7 @@ export function WorkflowDetailPage({ workflowId }: { workflowId: string }) {
       );
       downloadJson(
         data.exportWorkflow,
-        `${workflow.name.replaceAll(/[^a-z0-9]+/gi, "-").toLowerCase()}.workflow.json`,
+        `${exportFileStem(workflow.name)}.workflow.json`,
       );
     } catch (value) {
       setError(value instanceof Error ? value.message : String(value));
