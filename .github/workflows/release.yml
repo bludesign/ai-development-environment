@@ -25,7 +25,7 @@ jobs:
       tag: ${{ steps.tag.outputs.tag }}
     steps:
       - name: Checkout pushed code
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           fetch-depth: 0
           ref: ${{ github.sha }}
@@ -79,7 +79,7 @@ jobs:
       contents: write
     steps:
       - name: Checkout code
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           fetch-depth: 0
 
@@ -110,7 +110,7 @@ jobs:
           echo "tag=$tag" >> "$GITHUB_OUTPUT"
 
       - name: Create GitHub release
-        uses: actions/github-script@v8
+        uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd # v8
         env:
           RELEASE_TAG: ${{ steps.release.outputs.tag }}
         with:
@@ -141,7 +141,7 @@ jobs:
             });
 
       - name: Update Homebrew formula
-        uses: mislav/bump-homebrew-formula-action@v4
+        uses: mislav/bump-homebrew-formula-action@f865c8b0dbebd6e263cc06782a0e974c61cf12d2 # v4
         with:
           formula-name: ai-development-environment
           tag-name: ${{ steps.release.outputs.tag }}
@@ -155,7 +155,7 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Update control agent formula
-        uses: actions/github-script@v8
+        uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd # v8
         env:
           RELEASE_TAG: ${{ steps.release.outputs.tag }}
         with:
@@ -230,7 +230,7 @@ jobs:
       id-token: write
     steps:
       - name: Checkout code
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           fetch-depth: 0
 
@@ -265,7 +265,7 @@ jobs:
         run: git checkout "refs/tags/${{ steps.release.outputs.tag }}"
 
       - name: Set up Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: 24
           registry-url: https://registry.npmjs.org
@@ -306,14 +306,16 @@ jobs:
       contents: read
       packages: write
       attestations: write
+      artifact-metadata: write
       id-token: write
     env:
       REGISTRY: ghcr.io
       IMAGE_NAME: ${{ github.repository }}
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v7
+      - name: Checkout release tag
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
+          ref: ${{ github.event_name == 'push' && needs.tag.outputs.tag || inputs.tag }}
           fetch-depth: 0
 
       - name: Resolve release tag
@@ -334,7 +336,6 @@ jobs:
             exit 1
           fi
 
-          git fetch --force --tags origin
           if ! git rev-parse --verify --quiet "refs/tags/$tag" >/dev/null; then
             echo "Release tag does not exist: $tag" >&2
             exit 1
@@ -352,17 +353,14 @@ jobs:
             echo "latest=false" >> "$GITHUB_OUTPUT"
           fi
 
-      - name: Checkout release tag
-        run: git checkout "refs/tags/${{ steps.release.outputs.tag }}"
-
       - name: Set up QEMU
-        uses: docker/setup-qemu-action@v4
+        uses: docker/setup-qemu-action@96fe6ef7f33517b61c61be40b68a1882f3264fb8 # v4
 
       - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v4
+        uses: docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c # v4
 
       - name: Log in to GitHub Container Registry
-        uses: docker/login-action@v4
+        uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4
         with:
           registry: ${{ env.REGISTRY }}
           username: ${{ github.actor }}
@@ -370,7 +368,7 @@ jobs:
 
       - name: Extract Docker metadata
         id: metadata
-        uses: docker/metadata-action@v6
+        uses: docker/metadata-action@dc802804100637a589fabce1cb79ff13a1411302 # v6
         with:
           images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
           tags: |
@@ -379,7 +377,7 @@ jobs:
 
       - name: Build and publish Docker image
         id: publish
-        uses: docker/build-push-action@v7
+        uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7
         with:
           context: .
           platforms: linux/amd64,linux/arm64
@@ -392,7 +390,7 @@ jobs:
           sbom: true
 
       - name: Generate artifact attestation
-        uses: actions/attest@v4
+        uses: actions/attest@508db95dd578ae2727ebd6217d5ba78e4fbda05d # v4
         with:
           subject-name: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
           subject-digest: ${{ steps.publish.outputs.digest }}
