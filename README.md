@@ -25,16 +25,14 @@
 
 ## Documentation
 
-Everything lives at **[ai-development-environment.mintlify.app](https://ai-development-environment.mintlify.app/)**.
+Everything lives at [ai-development-environment.mintlify.app](https://ai-development-environment.mintlify.app/).
 
-|                                                                                             |                                                                    |
-| ------------------------------------------------------------------------------------------- | ------------------------------------------------------------------ |
-| [Introduction](https://ai-development-environment.mintlify.app/)                            | What the product does and how the pieces fit together              |
-| [Quickstart](https://ai-development-environment.mintlify.app/quickstart)                    | Install via Homebrew, npm, or from source, and enroll an agent     |
-| [Local development](https://ai-development-environment.mintlify.app/reference/development)  | Running from source, the command list, and the screenshot pipeline |
-| [APIs](https://ai-development-environment.mintlify.app/reference/api)                       | GraphQL, the codebase REST endpoints, and MCP                      |
-| [Database](https://ai-development-environment.mintlify.app/reference/database)              | Prisma, migrations, and reclaiming space                           |
-| [Hosting and networking](https://ai-development-environment.mintlify.app/reference/hosting) | Public HTTPS, Cloudflare Access, and reverse proxies               |
+- [Introduction](/) — What the product does and how the pieces fit together
+- [Quickstart](/quickstart) — Install via Homebrew, npm, or from source, and enroll an agent
+- [Local development](/reference/development) — Run from source, browse commands, and use the screenshot pipeline
+- [APIs](/reference/api) — GraphQL, codebase REST endpoints, and MCP
+- [Database](/reference/database) — Prisma, migrations, and reclaiming space
+- [Hosting and networking](/reference/hosting) — Public HTTPS, Cloudflare Access, and reverse proxies
 
 ## Install
 
@@ -49,6 +47,16 @@ Or from npm:
 ```bash
 npm install -g @ai-development-environment/server @ai-development-environment/control-agent
 ai-development-environment
+```
+
+Or from docker:
+
+```bash
+docker run --name ai-development-environment \
+  --publish 3090:3090 \
+  --publish 3091:3091 \
+  --volume ./data:/data \
+  ghcr.io/bludesign/ai-development-environment:latest
 ```
 
 Full instructions, including enrolling a control agent, are in the [Quickstart](https://ai-development-environment.mintlify.app/quickstart).

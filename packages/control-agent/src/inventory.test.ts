@@ -1,6 +1,11 @@
 import { describe, expect, test } from "vitest";
 
-import { AGENT_CAPABILITIES, collectInventory } from "./inventory.js";
+import {
+  AGENT_CAPABILITIES,
+  capabilitiesForPlatform,
+  collectInventory,
+  operatingSystemVersion,
+} from "./inventory.js";
 
 describe("agent inventory", () => {
   test("reports live hardware, memory, and disk inventory", () => {
@@ -23,5 +28,19 @@ describe("agent inventory", () => {
     expect(collectInventory().capabilities).toContain(
       "codebase.reconcile.requested",
     );
+  });
+
+  test("reports the operating system instead of assuming macOS", () => {
+    expect(operatingSystemVersion("darwin", "25.0.0")).toBe("macOS 25.0.0");
+    expect(operatingSystemVersion("linux", "6.8.0")).toBe("Linux 6.8.0");
+  });
+
+  test("does not advertise macOS-only jobs on Linux", () => {
+    const capabilities = capabilitiesForPlatform("linux");
+    expect(capabilities).not.toContain("buildData.scan");
+    expect(capabilities).not.toContain("ios.build.run");
+    expect(capabilities).not.toContain("ios.signing.assets.scan");
+    expect(capabilities).toContain("codebase.refresh");
+    expect(capabilities).toContain("runs.protocol.v1");
   });
 });

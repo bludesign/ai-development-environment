@@ -1,5 +1,13 @@
 import { statfsSync } from "node:fs";
-import { arch, cpus, freemem, hostname, release, totalmem } from "node:os";
+import {
+  arch,
+  cpus,
+  freemem,
+  hostname,
+  platform,
+  release,
+  totalmem,
+} from "node:os";
 
 import { CCUSAGE_REPORT_JOB_KIND } from "@ai-development-environment/agent-contract";
 import { BUILD_DATA_JOB_KINDS } from "@ai-development-environment/agent-contract/build-data";
@@ -16,25 +24,55 @@ import { WORKFLOW_JOB_KINDS } from "@ai-development-environment/agent-contract/w
 import { COMMAND_RUN_JOB_KIND } from "@ai-development-environment/agent-contract/commands";
 import { COVERAGE_JOB_KINDS } from "@ai-development-environment/agent-contract/coverage";
 
-export const AGENT_VERSION = "0.1.0";
-export const AGENT_CAPABILITIES = [
+export const AGENT_VERSION = process.env.CONTROL_AGENT_VERSION ?? "0.1.0";
+
+const PORTABLE_AGENT_CAPABILITIES = [
   COMMAND_RUN_JOB_KIND,
   CCUSAGE_REPORT_JOB_KIND,
-  ...BUILD_DATA_JOB_KINDS,
   ...CODEBASE_JOB_KINDS,
   CODEBASE_RECONCILE_EVENT_CAPABILITY,
   ...WORKTREE_JOB_KINDS,
   ...SKILL_JOB_KINDS,
-  ...IOS_BUILD_JOB_KINDS,
   ...COVERAGE_JOB_KINDS,
-  ...SIGNING_ASSET_JOB_KINDS,
   "runs.protocol.v1",
   "runs.provider.codex",
   "runs.provider.claude",
   "runs.provider.opencode",
   RUN_SESSION_READ_JOB_KIND,
   ...WORKFLOW_JOB_KINDS,
-];
+] as const;
+
+const MACOS_AGENT_CAPABILITIES = [
+  ...BUILD_DATA_JOB_KINDS,
+  ...IOS_BUILD_JOB_KINDS,
+  ...SIGNING_ASSET_JOB_KINDS,
+] as const;
+
+export function capabilitiesForPlatform(
+  targetPlatform: NodeJS.Platform,
+): string[] {
+  return [
+    ...PORTABLE_AGENT_CAPABILITIES,
+    ...(targetPlatform === "darwin" ? MACOS_AGENT_CAPABILITIES : []),
+  ];
+}
+
+export function operatingSystemVersion(
+  targetPlatform: NodeJS.Platform,
+  kernelRelease: string,
+): string {
+  const name =
+    targetPlatform === "darwin"
+      ? "macOS"
+      : targetPlatform === "win32"
+        ? "Windows"
+        : targetPlatform === "linux"
+          ? "Linux"
+          : targetPlatform;
+  return `${name} ${kernelRelease}`;
+}
+
+export const AGENT_CAPABILITIES = capabilitiesForPlatform(process.platform);
 
 export type AgentInventory = {
   hostname: string;
@@ -55,7 +93,7 @@ export function collectInventory(): AgentInventory {
   return {
     hostname: hostname(),
     version: AGENT_VERSION,
-    osVersion: `macOS ${release()}`,
+    osVersion: operatingSystemVersion(platform(), release()),
     architecture: arch(),
     cpuModel: (cpus()[0]?.model ?? "Unknown").replace(/^Apple\s+/, ""),
     memoryTotalBytes: totalmem(),

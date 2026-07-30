@@ -237,6 +237,7 @@ const manifest = {
     prisma: prismaVersion,
     sharp: sharpVersion,
   },
+  allowScripts: rootPackage.allowScripts,
   publishConfig: { access: "public" },
 };
 writeFileSync(
