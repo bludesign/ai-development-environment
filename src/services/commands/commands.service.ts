@@ -356,6 +356,13 @@ export class CommandsService {
    * Matches an exported agent or repository target to a local record. A target
    * that no longer exists widens to the unscoped equivalent rather than
    * failing the import, which is the usual outcome across two installs.
+   *
+   * Widening is reported back because it changes where the script may run: a
+   * command pinned to one machine becomes eligible on every agent, so the
+   * caller has to decide whether it still deserves a one-click quick action.
+   *
+   * Names are not unique, so lookups are ordered to make the chosen record
+   * deterministic instead of leaving it to whatever the database returns first.
    */
   private async resolveImportTarget(command: Record<string, unknown>) {
     const targetKind = enumValue(
@@ -367,55 +374,76 @@ export class CommandsService {
     if (targetKind === "SPECIFIC_AGENT_HOME") {
       const name = importedText(command.targetAgentName);
       const agent = name
-        ? await prisma.agent.findFirst({ where: { name } })
+        ? await prisma.agent.findFirst({
+            where: { name },
+            orderBy: { id: "asc" },
+          })
         : null;
       return agent
-        ? { targetKind, targetAgentId: agent.id, targetRepositoryId: null }
+        ? {
+            targetKind,
+            targetAgentId: agent.id,
+            targetRepositoryId: null,
+            widened: false,
+          }
         : {
             targetKind: "ANY_AGENT_HOME" as const,
             targetAgentId: null,
             targetRepositoryId: null,
+            widened: true,
           };
     }
     if (targetKind === "REPOSITORY_WORKTREE") {
       const name = importedText(command.targetRepositoryName);
       const repository = name
-        ? await prisma.codebaseRepository.findFirst({ where: { name } })
+        ? await prisma.codebaseRepository.findFirst({
+            where: { name },
+            orderBy: { id: "asc" },
+          })
         : null;
       return repository
         ? {
             targetKind,
             targetAgentId: null,
             targetRepositoryId: repository.id,
+            widened: false,
           }
         : {
             targetKind: "ANY_WORKTREE" as const,
             targetAgentId: null,
             targetRepositoryId: null,
+            widened: true,
           };
     }
-    return { targetKind, targetAgentId: null, targetRepositoryId: null };
+    return {
+      targetKind,
+      targetAgentId: null,
+      targetRepositoryId: null,
+      widened: false,
+    };
   }
 
   async importDefinition(input: { payload: unknown; name?: string | null }) {
-    const raw =
-      typeof input.payload === "string"
-        ? input.payload
-        : JSON.stringify(input.payload);
-    if (Buffer.byteLength(raw, "utf8") > MAX_IMPORT_BYTES) {
-      throw new Error("Command import is too large");
+    // Only a string payload is worth measuring: it is still unparsed, so the
+    // limit saves the parse. An object payload came through the `JSON` scalar
+    // already materialized, and measuring it would mean serializing the whole
+    // thing back just to look at its size — `normalizeDefinition` bounds every
+    // field that actually reaches the database anyway.
+    let payload = input.payload;
+    if (typeof payload === "string") {
+      if (Buffer.byteLength(payload, "utf8") > MAX_IMPORT_BYTES) {
+        throw new Error("Command import is too large");
+      }
+      payload = JSON.parse(payload);
     }
-    const object = importObject(
-      typeof input.payload === "string" ? JSON.parse(raw) : input.payload,
-      "Command import",
-    );
+    const object = importObject(payload, "Command import");
     // A bare command definition is accepted alongside a wrapped export so a
     // hand-written file does not need the envelope.
     const command =
       object.format === EXPORT_FORMAT
         ? importObject(object.command, "Exported command")
         : object;
-    const target = await this.resolveImportTarget(command);
+    const { widened, ...target } = await this.resolveImportTarget(command);
     const name = input.name?.trim() || importedText(command.name);
     if (!name) throw new Error("Name is required");
     const script = importedText(command.script);
@@ -432,7 +460,11 @@ export class CommandsService {
         typeof command.restartLimit === "number"
           ? (command.restartLimit as number | null)
           : 3,
-      quickActionEnabled: command.quickActionEnabled === true,
+      // A widened target means this script was pinned to a machine or
+      // repository that does not exist here. Running it anywhere is a decision
+      // for whoever imported it, so the one-click button stays off until they
+      // pick a target themselves.
+      quickActionEnabled: !widened && command.quickActionEnabled === true,
       quickActionIconKey:
         importedText(command.quickActionIconKey) ?? "terminal",
       quickActionButtonVariant:

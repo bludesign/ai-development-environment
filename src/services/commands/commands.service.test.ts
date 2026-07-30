@@ -1061,6 +1061,104 @@ describe("CommandsService command definition portability", () => {
     });
   });
 
+  test("turns off the quick action when a target had to be widened", async () => {
+    const create = vi
+      .fn()
+      .mockImplementation(({ data }) => ({ id: "command-4", ...data }));
+    getPrismaClient.mockResolvedValue({
+      agent: { findFirst: vi.fn().mockResolvedValue(null) },
+      commandDefinition: { create },
+    });
+
+    await new CommandsService(agentControl()).importDefinition({
+      payload: {
+        name: "Restart",
+        script: "brew services restart aide",
+        targetKind: "SPECIFIC_AGENT_HOME",
+        targetAgentName: "studio-mac",
+        quickActionEnabled: true,
+      },
+    });
+
+    // Widening made this runnable on every agent; a one-click button for that
+    // is the user's call, not the importer's.
+    expect(create.mock.calls[0][0].data).toMatchObject({
+      targetKind: "ANY_AGENT_HOME",
+      quickActionEnabled: false,
+    });
+  });
+
+  test("keeps the quick action when the target resolved exactly", async () => {
+    const create = vi
+      .fn()
+      .mockImplementation(({ data }) => ({ id: "command-5", ...data }));
+    getPrismaClient.mockResolvedValue({
+      agent: { findFirst: vi.fn().mockResolvedValue({ id: "agent-9" }) },
+      commandDefinition: { create },
+    });
+
+    await new CommandsService(agentControl()).importDefinition({
+      payload: {
+        name: "Restart",
+        script: "brew services restart aide",
+        targetKind: "SPECIFIC_AGENT_HOME",
+        targetAgentName: "studio-mac",
+        quickActionEnabled: true,
+      },
+    });
+
+    expect(create.mock.calls[0][0].data).toMatchObject({
+      targetAgentId: "agent-9",
+      quickActionEnabled: true,
+    });
+  });
+
+  test("orders name lookups so a duplicated name resolves deterministically", async () => {
+    const findFirst = vi.fn().mockResolvedValue({ id: "agent-9" });
+    getPrismaClient.mockResolvedValue({
+      agent: { findFirst },
+      commandDefinition: {
+        create: vi.fn().mockImplementation(({ data }) => ({
+          id: "command-6",
+          ...data,
+        })),
+      },
+    });
+
+    await new CommandsService(agentControl()).importDefinition({
+      payload: {
+        name: "Restart",
+        script: "brew services restart aide",
+        targetKind: "SPECIFIC_AGENT_HOME",
+        targetAgentName: "studio-mac",
+      },
+    });
+
+    // Agent names are not unique, so the query has to pick the same record
+    // every time rather than whatever the database happens to return first.
+    expect(findFirst).toHaveBeenCalledWith({
+      where: { name: "studio-mac" },
+      orderBy: { id: "asc" },
+    });
+  });
+
+  test("parses and bounds a payload handed over as a JSON string", async () => {
+    const create = vi
+      .fn()
+      .mockImplementation(({ data }) => ({ id: "command-7", ...data }));
+    getPrismaClient.mockResolvedValue({ commandDefinition: { create } });
+    const service = new CommandsService(agentControl());
+
+    await service.importDefinition({
+      payload: JSON.stringify({ name: "Test", script: "npm test" }),
+    });
+    expect(create.mock.calls[0][0].data).toMatchObject({ name: "Test" });
+
+    await expect(
+      service.importDefinition({ payload: "x".repeat(2 * 1024 * 1024 + 1) }),
+    ).rejects.toThrow("too large");
+  });
+
   test("keeps commands that have run history out of delete", async () => {
     const del = vi.fn();
     getPrismaClient.mockResolvedValue({

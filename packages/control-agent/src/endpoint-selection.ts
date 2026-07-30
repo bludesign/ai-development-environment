@@ -33,8 +33,8 @@ export const probeEndpoint: EndpointProbe = async (endpoint, config) => {
 
 /**
  * Picks the first endpoint that answers for this agent. When none does the
- * local endpoint is returned anyway — the session retries on its own, and the
- * heartbeat watchdog asks for a fresh selection once it gives up on it.
+ * local endpoint is returned anyway, and the session retries against it until
+ * the control plane comes back.
  */
 export async function selectAgentEndpoint(
   config: AgentConfig,
@@ -48,4 +48,30 @@ export async function selectAgentEndpoint(
     if (await probe(endpoint, config)) return endpoint;
   }
   return endpoints[0];
+}
+
+/**
+ * The first endpoint other than the active one that answers for this agent, or
+ * `undefined` when none does.
+ *
+ * Failing over tears the session down, which cancels every job it supervises,
+ * so the watchdog needs to know the difference between "this address stopped
+ * working" and "the control plane is down". Only the first is worth acting on:
+ * with nothing else answering there is nowhere better to go, and the running
+ * session should be left to reconnect on its own.
+ */
+export async function findHealthyAlternate(
+  config: AgentConfig,
+  active: AgentEndpoint,
+  signal: AbortSignal,
+  probe: EndpointProbe = probeEndpoint,
+): Promise<AgentEndpoint | undefined> {
+  for (const endpoint of agentEndpoints(config)) {
+    if (signal.aborted) break;
+    // Compared by address rather than by kind: an agent that lists the same
+    // URL twice has no alternate to move to, whatever the entries are called.
+    if (endpoint.server === active.server) continue;
+    if (await probe(endpoint, config)) return endpoint;
+  }
+  return undefined;
 }

@@ -359,7 +359,12 @@ describe("AgentControlService.renameAgent", () => {
     const update = vi
       .fn()
       .mockImplementation(({ data }) => ({ id: "agent-1", ...data }));
-    getPrismaClient.mockResolvedValue({ agent: { update } });
+    getPrismaClient.mockResolvedValue({
+      agent: {
+        findUnique: vi.fn().mockResolvedValue({ id: "agent-1" }),
+        update,
+      },
+    });
 
     const agent = await new AgentControlService().renameAgent(
       "agent-1",
@@ -375,7 +380,12 @@ describe("AgentControlService.renameAgent", () => {
 
   test("rejects a blank or oversized name without touching the record", async () => {
     const update = vi.fn();
-    getPrismaClient.mockResolvedValue({ agent: { update } });
+    getPrismaClient.mockResolvedValue({
+      agent: {
+        findUnique: vi.fn().mockResolvedValue({ id: "agent-1" }),
+        update,
+      },
+    });
     const service = new AgentControlService();
 
     await expect(service.renameAgent("agent-1", "   ")).rejects.toThrow(
@@ -384,6 +394,18 @@ describe("AgentControlService.renameAgent", () => {
     await expect(
       service.renameAgent("agent-1", "a".repeat(201)),
     ).rejects.toThrow("between 1 and 200 characters");
+    expect(update).not.toHaveBeenCalled();
+  });
+
+  test("reports a missing agent rather than leaking a database error", async () => {
+    const update = vi.fn();
+    getPrismaClient.mockResolvedValue({
+      agent: { findUnique: vi.fn().mockResolvedValue(null), update },
+    });
+
+    await expect(
+      new AgentControlService().renameAgent("agent-gone", "Studio Mac"),
+    ).rejects.toThrow("Agent not found");
     expect(update).not.toHaveBeenCalled();
   });
 });

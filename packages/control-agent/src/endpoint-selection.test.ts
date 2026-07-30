@@ -5,7 +5,10 @@ import {
   configForEndpoint,
   type AgentConfig,
 } from "./config.js";
-import { selectAgentEndpoint } from "./endpoint-selection.js";
+import {
+  findHealthyAlternate,
+  selectAgentEndpoint,
+} from "./endpoint-selection.js";
 
 const config: AgentConfig = {
   server: "http://127.0.0.1:3090",
@@ -87,6 +90,54 @@ describe("selectAgentEndpoint", () => {
       probe,
     );
     expect(endpoint.kind).toBe("local");
+    expect(probe).not.toHaveBeenCalled();
+  });
+});
+
+describe("findHealthyAlternate", () => {
+  const [local, remote] = agentEndpoints(config);
+
+  test("returns the other endpoint when it answers", async () => {
+    const probe = vi.fn().mockResolvedValue(true);
+    await expect(
+      findHealthyAlternate(config, local, new AbortController().signal, probe),
+    ).resolves.toEqual(remote);
+    // The active endpoint is never probed; only the alternates are.
+    expect(probe).toHaveBeenCalledTimes(1);
+    expect(probe.mock.calls[0][0]).toEqual(remote);
+  });
+
+  test("returns nothing when the whole control plane is down", async () => {
+    const probe = vi.fn().mockResolvedValue(false);
+    await expect(
+      findHealthyAlternate(config, local, new AbortController().signal, probe),
+    ).resolves.toBeUndefined();
+  });
+
+  test("returns nothing when there is no other endpoint to move to", async () => {
+    const probe = vi.fn().mockResolvedValue(true);
+    await expect(
+      findHealthyAlternate(
+        { ...config, remoteServer: null },
+        local,
+        new AbortController().signal,
+        probe,
+      ),
+    ).resolves.toBeUndefined();
+    expect(probe).not.toHaveBeenCalled();
+  });
+
+  test("treats a duplicated address as no alternate at all", async () => {
+    const duplicated = { ...config, remoteServer: config.server };
+    const probe = vi.fn().mockResolvedValue(true);
+    await expect(
+      findHealthyAlternate(
+        duplicated,
+        agentEndpoints(duplicated)[0],
+        new AbortController().signal,
+        probe,
+      ),
+    ).resolves.toBeUndefined();
     expect(probe).not.toHaveBeenCalled();
   });
 });

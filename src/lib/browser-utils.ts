@@ -17,9 +17,19 @@ export function createClientId(): string {
   return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
 }
 
-/** Turns a display name into the file-name-safe stem used by exports. */
+/**
+ * Turns a display name into the file-name-safe stem used by exports. Runs of
+ * unsafe characters collapse to a single dash, and leading and trailing dashes
+ * are dropped so a name like "!!!" falls back to the placeholder instead of
+ * producing a file called "-.json".
+ */
 export function exportFileStem(name: string): string {
-  return name.replaceAll(/[^a-z0-9]+/gi, "-").toLowerCase() || "export";
+  return (
+    name
+      .replaceAll(/[^a-z0-9]+/gi, "-")
+      .replaceAll(/^-+|-+$/g, "")
+      .toLowerCase() || "export"
+  );
 }
 
 export function downloadJson(value: unknown, filename: string): void {

@@ -830,6 +830,10 @@ export class AgentControlService {
       );
     }
     const prisma = await getPrismaClient();
+    // Checked first so a stale identifier reports itself instead of surfacing
+    // a raw Prisma "record not found" through the API.
+    const existing = await prisma.agent.findUnique({ where: { id: agentId } });
+    if (!existing) throw new Error("Agent not found");
     const agent = await prisma.agent.update({
       where: { id: agentId },
       data: { name: trimmed },

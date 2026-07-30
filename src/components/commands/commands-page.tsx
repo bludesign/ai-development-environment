@@ -269,8 +269,9 @@ export function CommandsPage() {
   // stays on the list, where the new cards are the useful result.
   const importCommands = async (files: File[]) => {
     const imported: string[] = [];
-    try {
-      for (const file of files) {
+    const failures: string[] = [];
+    for (const file of files) {
+      try {
         const payload = JSON.parse(await file.text()) as unknown;
         const data = await controlPlaneRequest<{
           importCommandDefinition: { id: string };
@@ -279,17 +280,22 @@ export function CommandsPage() {
           { input: { payload } },
         );
         imported.push(data.importCommandDefinition.id);
+      } catch (value) {
+        // One unreadable file should not cost the user the rest of the batch,
+        // and the message has to name it to be actionable.
+        failures.push(
+          `${file.name}: ${value instanceof Error ? value.message : String(value)}`,
+        );
       }
-      setError(null);
-      if (files.length === 1 && imported.length === 1) {
-        router.push(`/commands/${imported[0]}/edit`);
-        return;
-      }
+    }
+    setError(failures.length ? failures.join("\n") : null);
+    if (files.length === 1 && imported.length === 1) {
+      router.push(`/commands/${imported[0]}/edit`);
+      return;
+    }
+    if (imported.length) {
       setTab("definitions");
       await load();
-    } catch (value) {
-      setError(value instanceof Error ? value.message : String(value));
-      if (imported.length) await load();
     }
   };
 
@@ -415,7 +421,10 @@ export function CommandsPage() {
       </div>
       {error && (
         <Alert variant="destructive">
-          <AlertDescription>{error}</AlertDescription>
+          {/* A batch import reports one line per file that failed. */}
+          <AlertDescription className="whitespace-pre-line">
+            {error}
+          </AlertDescription>
         </Alert>
       )}
       <div className="flex flex-wrap items-center justify-between gap-3">

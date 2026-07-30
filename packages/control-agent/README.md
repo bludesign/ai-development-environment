@@ -23,7 +23,7 @@ control-agent run
 
 ### Local and remote endpoints
 
-One control plane is often reachable at two addresses — a LAN address at the desk and a public or VPN address elsewhere. Configure both and the agent prefers the local one, falling back to the remote one when the local address stops answering:
+One control plane is often reachable at two addresses — a LAN address at the desk and a public or VPN address elsewhere. Configure both and the agent prefers the local one, moving to the remote one when the local address stops answering and the remote one is confirmed to be answering. A control plane that is down at _every_ configured address is not a failover: the agent keeps its session and the jobs running under it, and reconnects when the server comes back.
 
 ```bash
 control-agent enroll \
@@ -41,6 +41,12 @@ control-agent endpoints --clear-remote
 ```
 
 The websocket address of each endpoint is derived from its server URL unless `--websocket-server` or `--remote-websocket-server` sets it explicitly.
+
+Changing a server address re-derives its websocket address, because one stored against the old server no longer points anywhere useful. If the websocket is served from somewhere other than `/graphql` on the same host and port — behind a reverse proxy, say — pass it alongside the new server address:
+
+```bash
+control-agent endpoints --server http://192.168.1.20:3090 --websocket-server ws://192.168.1.20:3092/graphql
+```
 
 ### Enrollment
 
