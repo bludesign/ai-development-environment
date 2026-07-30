@@ -42,7 +42,8 @@ ENV NODE_ENV=production \
     AGENT_WS_PORT=3091 \
     DATABASE_URL=file:/data/production.db
 
-LABEL org.opencontainers.image.source="https://github.com/bludesign/ai-development-environment"
+LABEL org.opencontainers.image.source="https://github.com/bludesign/ai-development-environment" \
+      org.opencontainers.image.description="Self-hosted Next.js control plane for AI-assisted development across your Macs."
 
 WORKDIR /app
 
