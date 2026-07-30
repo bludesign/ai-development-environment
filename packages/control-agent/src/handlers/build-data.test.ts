@@ -325,4 +325,31 @@ describe("Build Data agent handlers", () => {
       report.warnings.some((warning) => warning.startsWith(`${missing}:`)),
     ).toBe(true);
   });
+
+  test("monitors the parent volume before a Derived Data directory exists", async () => {
+    const root = await temporaryDirectory();
+    const relativePath = join("Library", "Developer", "Xcode", "DerivedData");
+    const missing = join(root, relativePath);
+    const report = await collectAgentDiskSpace(
+      {
+        enabled: true,
+        pollIntervalSeconds: 60,
+        baseRepoDirectory: null,
+        derivedDataLocationMode: "ABSOLUTE",
+        derivedDataPath: missing,
+        worktrees: [],
+      },
+      signal(),
+    );
+
+    const derivedDataVolume = report.volumes.find((volume) =>
+      volume.roles.includes("DERIVED_DATA"),
+    );
+    expect(derivedDataVolume?.paths).toContain(
+      join(await realpath(root), relativePath),
+    );
+    expect(
+      report.warnings.some((warning) => warning.startsWith(`${missing}:`)),
+    ).toBe(false);
+  });
 });

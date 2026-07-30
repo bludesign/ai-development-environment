@@ -64,7 +64,7 @@ export function WorktreeRunQueueCard({
         </CardDescription>
       </CardHeader>
       {!entries.length ? (
-        <CardContent className="pb-6">
+        <CardContent className="py-6">
           <Empty className="border py-8">
             <EmptyHeader>
               <EmptyTitle>{t("queueEmpty")}</EmptyTitle>

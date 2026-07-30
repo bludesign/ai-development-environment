@@ -525,52 +525,6 @@ export function AgentDetail({ agentId }: { agentId: string }) {
         />
       )}
 
-      <Card className="gap-0 py-0">
-        <CardHeader>
-          <CardTitle>{t("capabilities")}</CardTitle>
-          <CardDescription>{t("capabilitiesDescription")}</CardDescription>
-        </CardHeader>
-        <div className="border-b p-4">
-          <div className="relative">
-            <Search className="pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2 text-muted-foreground" />
-            <Input
-              aria-label={t("searchCapabilities")}
-              className="pl-9"
-              onChange={(event) => setCapabilityQuery(event.target.value)}
-              placeholder={t("searchCapabilitiesPlaceholder")}
-              type="search"
-              value={capabilityQuery}
-            />
-          </div>
-        </div>
-        {visibleCapabilities.length === 0 ? (
-          <p className="p-4 text-sm text-muted-foreground">
-            {t("noMatchingCapabilities")}
-          </p>
-        ) : (
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead className="w-10" />
-                <TableHead>{t("capability")}</TableHead>
-                <TableHead>{t("kind")}</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {visibleCapabilities.map((capability) => (
-                <CapabilityRow
-                  agentId={agent.id}
-                  capability={capability}
-                  key={capability}
-                  offline={agent.connectionStatus !== "ONLINE"}
-                  onJobChanged={handleJobChanged}
-                />
-              ))}
-            </TableBody>
-          </Table>
-        )}
-      </Card>
-
       <AgentCodebasesCard codebases={codebases} />
 
       <Card>
@@ -635,6 +589,52 @@ export function AgentDetail({ agentId }: { agentId: string }) {
         key={`${agent.id}:${agent.buildsDirectory ?? "default"}:${agent.defaultBuildsDirectory ?? ""}`}
         onSaved={setAgent}
       />
+
+      <Card className="gap-0 py-0">
+        <CardHeader>
+          <CardTitle>{t("capabilities")}</CardTitle>
+          <CardDescription>{t("capabilitiesDescription")}</CardDescription>
+        </CardHeader>
+        <div className="border-b p-4">
+          <div className="relative">
+            <Search className="pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2 text-muted-foreground" />
+            <Input
+              aria-label={t("searchCapabilities")}
+              className="pl-9"
+              onChange={(event) => setCapabilityQuery(event.target.value)}
+              placeholder={t("searchCapabilitiesPlaceholder")}
+              type="search"
+              value={capabilityQuery}
+            />
+          </div>
+        </div>
+        {visibleCapabilities.length === 0 ? (
+          <p className="p-4 text-sm text-muted-foreground">
+            {t("noMatchingCapabilities")}
+          </p>
+        ) : (
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead className="w-10" />
+                <TableHead>{t("capability")}</TableHead>
+                <TableHead>{t("kind")}</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {visibleCapabilities.map((capability) => (
+                <CapabilityRow
+                  agentId={agent.id}
+                  capability={capability}
+                  key={capability}
+                  offline={agent.connectionStatus !== "ONLINE"}
+                  onJobChanged={handleJobChanged}
+                />
+              ))}
+            </TableBody>
+          </Table>
+        )}
+      </Card>
 
       {selectedJobId && (
         <JobMonitor key={selectedJobId} compact jobId={selectedJobId} />

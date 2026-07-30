@@ -379,16 +379,50 @@ async function inspectVolume(
   configuredPath: string,
   role: DiskSpaceVolumeRole,
   signal: AbortSignal,
-): Promise<{ canonicalPath: string; volume: MutableVolume }> {
+  allowMissing: boolean,
+): Promise<{
+  canonicalPath: string;
+  inspectionPath: string;
+  volume: MutableVolume;
+}> {
   signal.throwIfAborted();
-  const canonicalPath = await realpath(configuredPath);
+  let canonicalPath: string;
+  let inspectionPath: string;
+  try {
+    canonicalPath = await realpath(configuredPath);
+    inspectionPath = canonicalPath;
+  } catch (error) {
+    if (!allowMissing || (error as NodeJS.ErrnoException).code !== "ENOENT") {
+      throw error;
+    }
+
+    const missingSegments: string[] = [];
+    let candidate = resolve(configuredPath);
+    for (;;) {
+      signal.throwIfAborted();
+      const parent = dirname(candidate);
+      if (parent === candidate) throw error;
+      missingSegments.unshift(basename(candidate));
+      candidate = parent;
+      try {
+        inspectionPath = await realpath(candidate);
+        canonicalPath = join(inspectionPath, ...missingSegments);
+        break;
+      } catch (parentError) {
+        if ((parentError as NodeJS.ErrnoException).code !== "ENOENT") {
+          throw parentError;
+        }
+      }
+    }
+  }
   const [information, filesystem] = await Promise.all([
-    stat(canonicalPath),
-    statfs(canonicalPath, { bigint: true }),
+    stat(inspectionPath),
+    statfs(inspectionPath, { bigint: true }),
   ]);
   const id = String(information.dev);
   return {
     canonicalPath,
+    inspectionPath,
     volume: {
       id,
       capacityId: id,
@@ -422,7 +456,12 @@ export async function collectAgentDiskSpace(
   for (const request of requested) {
     signal.throwIfAborted();
     try {
-      const inspected = await inspectVolume(request.path, request.role, signal);
+      const inspected = await inspectVolume(
+        request.path,
+        request.role,
+        signal,
+        request.role === "DERIVED_DATA",
+      );
       const existing = volumes.get(inspected.volume.id);
       if (existing) {
         existing.roles.add(request.role);
@@ -431,7 +470,7 @@ export async function collectAgentDiskSpace(
         existing.freeBytes = inspected.volume.freeBytes;
       } else {
         inspected.volume.capacityId = await sharedCapacityId(
-          inspected.canonicalPath,
+          inspected.inspectionPath,
           inspected.volume.id,
           signal,
         );

@@ -191,6 +191,12 @@ describe("AgentDetail", () => {
     expect(await screen.findByText("M4 Pro")).toBeDefined();
     expect(screen.getByText("Project Atlas")).toBeDefined();
     expect(screen.getByText("/Users/test/atlas")).toBeDefined();
+    const buildsDirectory = screen.getByText("Builds directory");
+    const capabilities = screen.getByText("Capabilities");
+    expect(
+      buildsDirectory.compareDocumentPosition(capabilities) &
+        Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
     fireEvent.change(
       screen.getByRole("searchbox", { name: "Search capabilities" }),
       { target: { value: "ccusage" } },
