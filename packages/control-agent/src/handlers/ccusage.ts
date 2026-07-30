@@ -5,6 +5,7 @@ import {
   type CcusageReport,
 } from "@ai-development-environment/agent-contract";
 
+import { findExecutable } from "../executable-lookup.js";
 import {
   runProcess,
   type ProcessLog,
@@ -34,12 +35,20 @@ export async function runCcusage(
   onLog: (log: ProcessLog) => Promise<void>,
 ): Promise<CcusageProcessResult> {
   validateCcusagePayload(payload);
+  const command = findExecutable("ccusage", {
+    overrideVariable: "CONTROL_AGENT_CCUSAGE_EXECUTABLE",
+  });
+  if (!command) {
+    throw new Error(
+      "ccusage was not found. Install it (brew install ccusage, or npm install -g ccusage) or set CONTROL_AGENT_CCUSAGE_EXECUTABLE to its full path.",
+    );
+  }
   const stdout: string[] = [];
   let stdoutBytes = 0;
   let exceededLimit = false;
 
   const result = await runProcess({
-    command: "ccusage",
+    command,
     args: ["--json"],
     timeoutMs,
     signal,

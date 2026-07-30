@@ -1,7 +1,9 @@
 import { beforeEach, describe, expect, test, vi } from "vitest";
 
 vi.mock("../process-runner.js", () => ({ runProcess: vi.fn() }));
+vi.mock("../executable-lookup.js", () => ({ findExecutable: vi.fn() }));
 
+import { findExecutable } from "../executable-lookup.js";
 import { runProcess } from "../process-runner.js";
 
 import {
@@ -11,6 +13,7 @@ import {
 } from "./ccusage.js";
 
 const runProcessMock = vi.mocked(runProcess);
+const findExecutableMock = vi.mocked(findExecutable);
 
 const processResult = {
   exitCode: 0,
@@ -57,6 +60,8 @@ const validReport = {
 describe("ccusage handler", () => {
   beforeEach(() => {
     runProcessMock.mockReset();
+    findExecutableMock.mockReset();
+    findExecutableMock.mockReturnValue("/opt/homebrew/bin/ccusage");
   });
 
   test("accepts only an empty object payload", () => {
@@ -93,7 +98,10 @@ describe("ccusage handler", () => {
     );
 
     expect(runProcessMock).toHaveBeenCalledWith(
-      expect.objectContaining({ command: "ccusage", args: ["--json"] }),
+      expect.objectContaining({
+        command: "/opt/homebrew/bin/ccusage",
+        args: ["--json"],
+      }),
     );
     expect(result).toEqual({ ...processResult, report: validReport });
     expect(onLog).toHaveBeenCalledTimes(1);
@@ -151,6 +159,13 @@ describe("ccusage handler", () => {
   });
 
   test("surfaces a missing ccusage executable", async () => {
+    findExecutableMock.mockReturnValue(undefined);
+    await expect(
+      runCcusage({}, 120_000, new AbortController().signal, vi.fn()),
+    ).rejects.toThrow("ccusage was not found");
+    expect(runProcessMock).not.toHaveBeenCalled();
+
+    findExecutableMock.mockReturnValue("/opt/homebrew/bin/ccusage");
     runProcessMock.mockRejectedValue(new Error("spawn ccusage ENOENT"));
     await expect(
       runCcusage({}, 120_000, new AbortController().signal, vi.fn()),
