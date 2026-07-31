@@ -234,8 +234,9 @@ export function ActionCenterItem({
   return (
     <Card
       className={cn(
-        "min-w-0 border-l-4",
-        color ? worktreeHighlightAccentClasses[color] : "border-l-transparent",
+        "min-w-0",
+        color && "border-l-4",
+        color && worktreeHighlightAccentClasses[color],
         color && worktreeHighlightBackgroundClasses[color],
       )}
     >

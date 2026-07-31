@@ -241,6 +241,14 @@ describe("ActionCenterPage", () => {
     expect(
       within(workflowCard as HTMLElement).queryByText("WORKTREE:worktree-1"),
     ).toBeNull();
+    expect(workflowCard?.className).toContain("border-l-4");
+
+    const failedCard = screen
+      .getByRole("link", { name: "Debug" })
+      .closest('[data-slot="card"]');
+    expect(failedCard).not.toBeNull();
+    expect(failedCard?.className).not.toContain("border-l-4");
+    expect(failedCard?.className).not.toContain("border-l-transparent");
   });
 
   test("answers plan and workflow questions with their existing mutations", async () => {
