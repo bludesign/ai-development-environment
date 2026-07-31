@@ -108,6 +108,14 @@ export const createCommandResolvers = (service: CommandsService) => ({
         args.first,
       );
     },
+    exportCommandDefinition: (
+      _root: unknown,
+      { id }: { id: string },
+      context: GraphQLContext,
+    ) => {
+      requireControlPlane(context);
+      return service.exportDefinition(id);
+    },
     eligibleCommandsForAgent: (
       _root: unknown,
       { agentId }: { agentId: string },
@@ -141,6 +149,22 @@ export const createCommandResolvers = (service: CommandsService) => ({
     ) => {
       requireControlPlane(context);
       return service.updateDefinition(id, input);
+    },
+    importCommandDefinition: (
+      _root: unknown,
+      { input }: { input: { payload: unknown; name?: string | null } },
+      context: GraphQLContext,
+    ) => {
+      requireControlPlane(context);
+      return service.importDefinition(input);
+    },
+    deleteCommandDefinition: (
+      _root: unknown,
+      { id }: { id: string },
+      context: GraphQLContext,
+    ) => {
+      requireControlPlane(context);
+      return service.deleteDefinition(id);
     },
     archiveCommandDefinition: (
       _root: unknown,

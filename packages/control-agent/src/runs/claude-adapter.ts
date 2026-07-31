@@ -1,7 +1,4 @@
 import { randomUUID } from "node:crypto";
-import { accessSync, constants } from "node:fs";
-import { homedir } from "node:os";
-import { delimiter, join } from "node:path";
 
 import {
   deleteSession,
@@ -11,6 +8,11 @@ import {
   type Query,
   type SDKUserMessage,
 } from "@anthropic-ai/claude-agent-sdk";
+
+import {
+  findExecutable,
+  type ExecutableLookupOptions,
+} from "../executable-lookup.js";
 
 import {
   answerArrays,
@@ -29,42 +31,13 @@ import {
   type StagedAttachment,
 } from "./provider.js";
 
-type ClaudeExecutableLookupOptions = {
-  env?: NodeJS.ProcessEnv;
-  home?: string;
-  platform?: NodeJS.Platform;
-  isExecutable?: (path: string) => boolean;
-};
-
-function isExecutable(path: string): boolean {
-  try {
-    accessSync(path, constants.X_OK);
-    return true;
-  } catch {
-    return false;
-  }
-}
-
 export function findClaudeCodeExecutable(
-  options: ClaudeExecutableLookupOptions = {},
+  options: ExecutableLookupOptions = {},
 ): string | undefined {
-  const env = options.env ?? process.env;
-  const home = options.home ?? homedir();
-  const platform = options.platform ?? process.platform;
-  const executable = platform === "win32" ? "claude.exe" : "claude";
-  const candidates = [
-    env.CONTROL_AGENT_CLAUDE_EXECUTABLE?.trim(),
-    ...(env.PATH ?? "")
-      .split(delimiter)
-      .filter(Boolean)
-      .map((directory) => join(directory, executable)),
-    join(home, ".local", "bin", executable),
-    ...(platform === "darwin"
-      ? ["/opt/homebrew/bin/claude", "/usr/local/bin/claude"]
-      : []),
-  ].filter((candidate): candidate is string => Boolean(candidate));
-  const canExecute = options.isExecutable ?? isExecutable;
-  return [...new Set(candidates)].find(canExecute);
+  return findExecutable("claude", {
+    ...options,
+    overrideVariable: "CONTROL_AGENT_CLAUDE_EXECUTABLE",
+  });
 }
 
 class MessageQueue implements AsyncIterable<SDKUserMessage> {

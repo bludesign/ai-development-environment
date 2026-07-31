@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
   heartbeat: vi.fn(),
+  self: vi.fn(),
   cadenceSettings: vi.fn(),
   pendingJobs: vi.fn(),
   completeJob: vi.fn(),
@@ -17,6 +18,15 @@ const mocks = vi.hoisted(() => ({
 
 vi.mock("./graphql-client.js", () => ({
   AgentGraphQLClient: class {
+    // Endpoint probes are the only thing that varies by address, so the mock
+    // keeps the server it was built with and hands it to `self`.
+    server: string;
+    constructor(server: string) {
+      this.server = server;
+    }
+    self() {
+      return mocks.self(this.server);
+    }
     heartbeat(...args: unknown[]) {
       return mocks.heartbeat(...args);
     }
@@ -104,7 +114,9 @@ beforeEach(() => {
   mocks.dispose.mockResolvedValue(undefined);
   mocks.codebaseReconcile.mockResolvedValue(undefined);
   mocks.codebaseIntervalMs = 30_000;
+  mocks.self.mockResolvedValue({ agentSelf: { id: "agent-1" } });
   vi.spyOn(console, "error").mockImplementation(() => undefined);
+  vi.spyOn(console, "log").mockImplementation(() => undefined);
 });
 
 afterEach(() => vi.useRealTimers());
@@ -272,6 +284,81 @@ describe("runAgent startup reconciliation", () => {
     await vi.waitFor(() =>
       expect(mocks.codebaseReconcile).toHaveBeenCalledTimes(2),
     );
+
+    controller.abort();
+    await expect(running).resolves.toBeUndefined();
+  });
+});
+
+describe("runAgent endpoint failover", () => {
+  const failoverConfig: AgentConfig = {
+    ...config,
+    remoteServer: "https://remote.test",
+  };
+
+  /** Restricts which addresses answer a probe for this agent. */
+  function onlyHealthy(...servers: string[]) {
+    mocks.self.mockImplementation((server: string) =>
+      servers.includes(server)
+        ? Promise.resolve({ agentSelf: { id: "agent-1" } })
+        : Promise.reject(new Error("unreachable")),
+    );
+  }
+
+  test("keeps the session and its jobs when no other endpoint answers", async () => {
+    vi.useFakeTimers();
+    onlyHealthy(config.server);
+    const controller = new AbortController();
+    const running = runAgent(failoverConfig, controller.signal);
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect(mocks.subscribe).toHaveBeenCalledOnce();
+
+    // The control plane goes away entirely rather than moving addresses, so
+    // there is nowhere to fail over to and the running work must survive.
+    onlyHealthy();
+    mocks.heartbeat.mockRejectedValue(new Error("unreachable"));
+    await vi.advanceTimersByTimeAsync(120_000);
+
+    expect(mocks.cancelAll).not.toHaveBeenCalled();
+    expect(mocks.dispose).not.toHaveBeenCalled();
+    expect(mocks.subscribe).toHaveBeenCalledOnce();
+
+    controller.abort();
+    await expect(running).resolves.toBeUndefined();
+  });
+
+  test("moves to the remote endpoint once it is the one answering", async () => {
+    vi.useFakeTimers();
+    onlyHealthy(config.server);
+    const controller = new AbortController();
+    const running = runAgent(failoverConfig, controller.signal);
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect(mocks.subscribe).toHaveBeenCalledOnce();
+
+    onlyHealthy("https://remote.test");
+    mocks.heartbeat.mockRejectedValue(new Error("unreachable"));
+    await vi.advanceTimersByTimeAsync(120_000);
+
+    expect(mocks.cancelAll).toHaveBeenCalledOnce();
+    expect(mocks.subscribe).toHaveBeenCalledTimes(2);
+
+    controller.abort();
+    await expect(running).resolves.toBeUndefined();
+  });
+
+  test("never tears down a session when only one endpoint is configured", async () => {
+    vi.useFakeTimers();
+    onlyHealthy();
+    const controller = new AbortController();
+    const running = runAgent(config, controller.signal);
+    await vi.advanceTimersByTimeAsync(1_000);
+
+    mocks.heartbeat.mockRejectedValue(new Error("unreachable"));
+    await vi.advanceTimersByTimeAsync(120_000);
+
+    expect(mocks.self).not.toHaveBeenCalled();
+    expect(mocks.cancelAll).not.toHaveBeenCalled();
+    expect(mocks.subscribe).toHaveBeenCalledOnce();
 
     controller.abort();
     await expect(running).resolves.toBeUndefined();

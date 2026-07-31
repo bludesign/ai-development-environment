@@ -83,6 +83,20 @@ describe("agent read ownership", () => {
     ).resolves.toEqual({ id: "agent-1" });
   });
 
+  test("only the control plane can rename an agent", async () => {
+    const service = {
+      renameAgent: vi.fn().mockResolvedValue({ id: "agent-1" }),
+    } as unknown as AgentControlService;
+    const mutation = createAgentResolvers(service).Mutation.renameAgent;
+
+    expect(() =>
+      mutation({}, { agentId: "agent-1", name: "Studio" }, context("agent-1")),
+    ).toThrow("cannot perform control-plane operations");
+    await expect(
+      mutation({}, { agentId: "agent-1", name: "Studio" }, context(null)),
+    ).resolves.toEqual({ id: "agent-1" });
+  });
+
   test("requires saved commands to use the command run API", () => {
     const service = { createJob: vi.fn() } as unknown as AgentControlService;
     const mutation = createAgentResolvers(service).Mutation.createAgentJob;

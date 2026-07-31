@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, test, vi } from "vitest";
 
-import { createClientId } from "./browser-utils";
+import { createClientId, exportFileStem } from "./browser-utils";
 
 afterEach(() => vi.unstubAllGlobals());
 
@@ -14,5 +14,20 @@ describe("createClientId", () => {
     });
 
     expect(createClientId()).toBe("0a".repeat(16));
+  });
+});
+
+describe("exportFileStem", () => {
+  test("collapses unsafe runs into single dashes", () => {
+    expect(exportFileStem("Nightly Build — v2")).toBe("nightly-build-v2");
+  });
+
+  test("trims the dashes an unsafe edge would otherwise leave behind", () => {
+    expect(exportFileStem("[Release]")).toBe("release");
+  });
+
+  test("falls back when a name has nothing safe left in it", () => {
+    expect(exportFileStem("!!!")).toBe("export");
+    expect(exportFileStem("")).toBe("export");
   });
 });

@@ -9,6 +9,7 @@ import {
 import type { AnchorHTMLAttributes, ReactNode } from "react";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 
+import { downloadJsonFiles } from "@/lib/browser-utils";
 import {
   controlPlaneRequest,
   controlPlaneSubscriptions,
@@ -19,6 +20,10 @@ import { CommandsPage } from "./commands-page";
 vi.mock("@/lib/control-plane-client", () => ({
   controlPlaneRequest: vi.fn(),
   controlPlaneSubscriptions: vi.fn(),
+}));
+vi.mock("@/lib/browser-utils", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/lib/browser-utils")>()),
+  downloadJsonFiles: vi.fn(),
 }));
 vi.mock("@/i18n/navigation", () => ({
   Link: ({
@@ -84,6 +89,27 @@ function commandRun({
   };
 }
 
+function commandDefinition(id: string, name: string) {
+  return {
+    id,
+    name,
+    description: "",
+    script: "echo hi",
+    targetKind: "ANY_AGENT_HOME",
+    targetAgentId: null,
+    targetRepositoryId: null,
+    restartPolicy: "NEVER",
+    restartLimit: 3,
+    quickActionEnabled: false,
+    quickActionIconKey: "terminal",
+    quickActionButtonVariant: "default",
+    notificationsEnabled: true,
+    archivedAt: null,
+    createdAt: timestamp,
+    updatedAt: timestamp,
+  };
+}
+
 beforeEach(() => {
   push.mockReset();
   subscriptions.mockReturnValue({ subscribe: vi.fn(() => vi.fn()) } as never);
@@ -121,6 +147,57 @@ describe("CommandsPage", () => {
     fireEvent.click(screen.getByRole("tab", { name: "Definitions" }));
     expect(container.querySelectorAll('[data-slot="skeleton"]')).toHaveLength(
       15,
+    );
+  });
+
+  test("exports and deletes every command selected in edit mode", async () => {
+    request.mockImplementation(async (query) => {
+      const text = String(query);
+      if (text.includes("query CommandManagement")) {
+        return {
+          commandDefinitions: [
+            commandDefinition("command-1", "Development Server"),
+            commandDefinition("command-2", "Reset Database"),
+          ],
+          agents: [],
+          worktreeOverview: { agents: [] },
+          commandRuns: { nodes: [] },
+        } as never;
+      }
+      if (text.includes("query ExportCommand")) {
+        return {
+          exportCommandDefinition: { format: "aide.command.export" },
+        } as never;
+      }
+      if (text.includes("mutation DeleteCommand")) {
+        return { deleteCommandDefinition: true } as never;
+      }
+      throw new Error(`Unexpected request: ${text}`);
+    });
+    render(<CommandsPage />);
+
+    fireEvent.click(await screen.findByRole("tab", { name: "Definitions" }));
+    expect(await screen.findByText("Development Server")).toBeDefined();
+    fireEvent.click(screen.getByRole("button", { name: "Edit" }));
+    fireEvent.click(screen.getByRole("checkbox", { name: "Select all" }));
+
+    fireEvent.click(screen.getByRole("button", { name: "Export" }));
+    await waitFor(() =>
+      expect(vi.mocked(downloadJsonFiles)).toHaveBeenCalledWith([
+        expect.objectContaining({
+          filename: "development-server.command.json",
+        }),
+        expect.objectContaining({ filename: "reset-database.command.json" }),
+      ]),
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Delete" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Delete" }));
+    await waitFor(() =>
+      expect(request).toHaveBeenCalledWith(
+        expect.stringContaining("mutation DeleteCommand"),
+        { id: "command-2" },
+      ),
     );
   });
 

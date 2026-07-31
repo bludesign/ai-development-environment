@@ -266,6 +266,14 @@ input CommandDefinitionInput {
   notificationsEnabled: Boolean = true
 }
 
+"Values used to import a command definition."
+input ImportCommandDefinitionInput {
+  "The payload to use for the request."
+  payload: JSON!
+  "The name to use for the request."
+  name: String
+}
+
 "Values used to start a command run."
 input StartCommandRunInput {
   "Identifier of the command to use."
@@ -350,6 +358,11 @@ extend type Query {
     "Maximum number of records to return. Defaults to `1000`."
     first: Int = 1000
   ): [CommandRunOutputChunk!]!
+  "Returns an export of a command definition."
+  exportCommandDefinition(
+    "Identifier of the resource to return or affect."
+    id: ID!
+  ): JSON!
   "Returns command definitions eligible for the specified agent."
   eligibleCommandsForAgent(
     "Identifier of the agent."
@@ -375,6 +388,16 @@ extend type Mutation {
     "Values for the requested operation."
     input: CommandDefinitionInput!
   ): CommandDefinition!
+  "Imports a command definition and returns a command definition."
+  importCommandDefinition(
+    "Values for the requested operation."
+    input: ImportCommandDefinitionInput!
+  ): CommandDefinition!
+  "Deletes a command definition and reports whether the operation succeeded."
+  deleteCommandDefinition(
+    "Identifier of the resource to return or affect."
+    id: ID!
+  ): Boolean!
   "Archives a command definition and returns a command definition."
   archiveCommandDefinition(
     "Identifier of the resource to return or affect."

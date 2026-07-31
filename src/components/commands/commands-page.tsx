@@ -3,7 +3,9 @@
 import {
   Archive,
   CircleStop,
+  Download,
   FilePenLine,
+  FileUp,
   MoreHorizontal,
   Play,
   Plus,
@@ -15,7 +17,14 @@ import {
   Undo2,
 } from "lucide-react";
 import { useLocale, useTranslations } from "next-intl";
-import { Fragment, useCallback, useEffect, useMemo, useState } from "react";
+import {
+  Fragment,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 
 import { ConfirmationDialog } from "@/components/confirmation-dialog";
 import { DateTime } from "@/components/common/date-time";
@@ -50,6 +59,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { Link, useRouter } from "@/i18n/navigation";
+import { downloadJsonFiles, exportFileStem } from "@/lib/browser-utils";
 import {
   controlPlaneRequest,
   controlPlaneSubscriptions,
@@ -99,6 +109,8 @@ export function CommandsPage() {
   const [editMode, setEditMode] = useState(false);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [deleteIds, setDeleteIds] = useState<string[]>([]);
+  const [deleteDefinitionIds, setDeleteDefinitionIds] = useState<string[]>([]);
+  const fileRef = useRef<HTMLInputElement>(null);
   const [targetCommand, setTargetCommand] = useState<CommandDefinition | null>(
     null,
   );
@@ -245,6 +257,92 @@ export function CommandsPage() {
       setError(value instanceof Error ? value.message : String(value));
     }
   };
+  const toggleSelected = (id: string) =>
+    setSelected((current) => {
+      const next = new Set(current);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+
+  // Importing one file opens it for editing straight away; importing several
+  // stays on the list, where the new cards are the useful result.
+  const importCommands = async (files: File[]) => {
+    const imported: string[] = [];
+    const failures: string[] = [];
+    for (const file of files) {
+      try {
+        const payload = JSON.parse(await file.text()) as unknown;
+        const data = await controlPlaneRequest<{
+          importCommandDefinition: { id: string };
+        }>(
+          "mutation ImportCommand($input: ImportCommandDefinitionInput!) { importCommandDefinition(input: $input) { id } }",
+          { input: { payload } },
+        );
+        imported.push(data.importCommandDefinition.id);
+      } catch (value) {
+        // One unreadable file should not cost the user the rest of the batch,
+        // and the message has to name it to be actionable.
+        failures.push(
+          `${file.name}: ${value instanceof Error ? value.message : String(value)}`,
+        );
+      }
+    }
+    setError(failures.length ? failures.join("\n") : null);
+    if (files.length === 1 && imported.length === 1) {
+      router.push(`/commands/${imported[0]}/edit`);
+      return;
+    }
+    if (imported.length) {
+      setTab("definitions");
+      await load();
+    }
+  };
+
+  const exportCommands = async (ids: string[]) => {
+    try {
+      const files = await Promise.all(
+        ids.map(async (id) => {
+          const data = await controlPlaneRequest<{
+            exportCommandDefinition: unknown;
+          }>(
+            "query ExportCommand($id: ID!) { exportCommandDefinition(id: $id) }",
+            { id },
+          );
+          const name =
+            definitions.find((definition) => definition.id === id)?.name ?? id;
+          return {
+            value: data.exportCommandDefinition,
+            filename: `${exportFileStem(name)}.command.json`,
+          };
+        }),
+      );
+      setError(null);
+      await downloadJsonFiles(files);
+    } catch (value) {
+      setError(value instanceof Error ? value.message : String(value));
+    }
+  };
+
+  // `deleteCommandDefinition` refuses commands with run history, so a partial
+  // selection reports what stopped it while keeping the successes.
+  const deleteDefinitions = async (ids: string[]) => {
+    let failure: string | null = null;
+    for (const id of ids) {
+      try {
+        await controlPlaneRequest(
+          "mutation DeleteCommand($id: ID!) { deleteCommandDefinition(id: $id) }",
+          { id },
+        );
+      } catch (value) {
+        failure ??= value instanceof Error ? value.message : String(value);
+      }
+    }
+    setSelected(new Set());
+    setError(failure);
+    await load();
+  };
+
   const launch = async (
     command: CommandDefinition,
     target: { agentId?: string; worktreeId?: string },
@@ -293,9 +391,25 @@ export function CommandsPage() {
           <p className="text-sm text-muted-foreground">{t("description")}</p>
         </div>
         <div className="flex flex-wrap gap-2">
+          <input
+            accept="application/json,.json"
+            className="hidden"
+            multiple
+            onChange={(event) => {
+              const files = [...(event.target.files ?? [])];
+              if (files.length) void importCommands(files);
+              event.target.value = "";
+            }}
+            ref={fileRef}
+            type="file"
+          />
           <Button onClick={() => setCustomOpen(true)} variant="outline">
             <TerminalSquare />
             {t("runCustom")}
+          </Button>
+          <Button onClick={() => fileRef.current?.click()} variant="outline">
+            <FileUp />
+            {t("import")}
           </Button>
           <Button asChild>
             <Link href="/commands/new">
@@ -307,13 +421,20 @@ export function CommandsPage() {
       </div>
       {error && (
         <Alert variant="destructive">
-          <AlertDescription>{error}</AlertDescription>
+          {/* A batch import reports one line per file that failed. */}
+          <AlertDescription className="whitespace-pre-line">
+            {error}
+          </AlertDescription>
         </Alert>
       )}
       <div className="flex flex-wrap items-center justify-between gap-3">
         <Tabs
           value={tab}
-          onValueChange={(value) => setTab(value as typeof tab)}
+          onValueChange={(value) => {
+            setTab(value as typeof tab);
+            setEditMode(false);
+            setSelected(new Set());
+          }}
         >
           <TabsList>
             <TabsTrigger value="runs">{t("runs")}</TabsTrigger>
@@ -331,32 +452,30 @@ export function CommandsPage() {
             />
           </div>
           {tab === "runs" && (
-            <>
-              <Select
-                value={archive}
-                onValueChange={(value) => setArchive(value ?? "ACTIVE")}
-              >
-                <SelectTrigger className="w-32">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="ACTIVE">{t("active")}</SelectItem>
-                  <SelectItem value="ARCHIVED">{t("archived")}</SelectItem>
-                  <SelectItem value="ALL">{t("all")}</SelectItem>
-                </SelectContent>
-              </Select>
-              <Button
-                variant="outline"
-                onClick={() => {
-                  setEditMode(!editMode);
-                  setSelected(new Set());
-                }}
-              >
-                <FilePenLine />
-                {editMode ? t("done") : t("edit")}
-              </Button>
-            </>
+            <Select
+              value={archive}
+              onValueChange={(value) => setArchive(value ?? "ACTIVE")}
+            >
+              <SelectTrigger className="w-32">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="ACTIVE">{t("active")}</SelectItem>
+                <SelectItem value="ARCHIVED">{t("archived")}</SelectItem>
+                <SelectItem value="ALL">{t("all")}</SelectItem>
+              </SelectContent>
+            </Select>
           )}
+          <Button
+            variant="outline"
+            onClick={() => {
+              setEditMode(!editMode);
+              setSelected(new Set());
+            }}
+          >
+            <FilePenLine />
+            {editMode ? t("done") : t("edit")}
+          </Button>
           <Button
             aria-label={t("refresh")}
             size="icon"
@@ -367,6 +486,38 @@ export function CommandsPage() {
           </Button>
         </div>
       </div>
+
+      {tab === "definitions" && editMode && (
+        <div className="flex flex-wrap items-center gap-2 rounded-lg border p-3">
+          <SelectAllCheckbox
+            ids={filteredDefinitions.map((definition) => definition.id)}
+            label={t("selectAllCommands")}
+            onChange={setSelected}
+            selected={selected}
+          />
+          <span className="mr-auto text-sm text-muted-foreground">
+            {t("selectedCommands", { count: selected.size })}
+          </span>
+          <Button
+            disabled={selected.size === 0}
+            onClick={() => void exportCommands([...selected])}
+            size="sm"
+            variant="outline"
+          >
+            <Download />
+            {t("export")}
+          </Button>
+          <Button
+            disabled={selected.size === 0}
+            onClick={() => setDeleteDefinitionIds([...selected])}
+            size="sm"
+            variant="destructive"
+          >
+            <Trash2 />
+            {t("delete")}
+          </Button>
+        </div>
+      )}
 
       {tab === "runs" && editMode && selected.size > 0 && (
         <div className="flex items-center gap-2 rounded-lg border p-3">
@@ -658,13 +809,36 @@ export function CommandsPage() {
           {filteredDefinitions.map((definition) => (
             <Card
               key={definition.id}
-              className={definition.archivedAt ? "opacity-60" : ""}
+              className={cn(
+                definition.archivedAt && "opacity-60",
+                editMode && "cursor-pointer",
+                editMode &&
+                  selected.has(definition.id) &&
+                  "ring-2 ring-ring ring-offset-2 ring-offset-background",
+              )}
+              /* In edit mode the whole card is the selection target; the
+                 checkbox and the links inside it keep their own behaviour. */
+              onClick={(event) => {
+                if (!editMode || !isRowActivation(event)) return;
+                toggleSelected(definition.id);
+              }}
             >
               <CardHeader>
                 <div className="flex items-start gap-3">
-                  <div className="rounded-lg bg-muted p-2">
-                    <TerminalSquare />
-                  </div>
+                  {editMode ? (
+                    <Checkbox
+                      aria-label={t("selectCommand", {
+                        name: definition.name,
+                      })}
+                      checked={selected.has(definition.id)}
+                      className="mt-2"
+                      onCheckedChange={() => toggleSelected(definition.id)}
+                    />
+                  ) : (
+                    <div className="rounded-lg bg-muted p-2">
+                      <TerminalSquare />
+                    </div>
+                  )}
                   <div className="min-w-0 flex-1">
                     <CardTitle>{definition.name}</CardTitle>
                     <p className="mt-1 line-clamp-2 text-sm text-muted-foreground">
@@ -744,6 +918,19 @@ export function CommandsPage() {
             { ids: deleteIds },
           )
         }
+      />
+      <ConfirmationDialog
+        open={deleteDefinitionIds.length > 0}
+        onOpenChange={(open) => {
+          if (!open) setDeleteDefinitionIds([]);
+        }}
+        title={t("deleteCommandsTitle")}
+        description={t("deleteCommandsDescription", {
+          count: deleteDefinitionIds.length,
+        })}
+        actionLabel={t("delete")}
+        cancelLabel={t("cancel")}
+        onConfirm={() => void deleteDefinitions(deleteDefinitionIds)}
       />
     </div>
   );

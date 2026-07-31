@@ -91,8 +91,50 @@ describe("workflow run graph projection", () => {
     expect(build?.data.status).toBe("RUNNING");
     expect(build?.data.attemptLabel).toContain("1 retry");
     expect(build?.data.attemptLabel).toContain("1 iterations");
-    expect(build?.data.attemptLabel).toContain("generation 2");
+    expect(build?.data.attemptLabel).toContain("Generation 2");
+    expect(build?.data.reused).toBe(false);
     expect(edges[0]?.source).toBe("manual");
+  });
+
+  test("marks steps a replay carried forward instead of re-running", () => {
+    const definition = emptyDefinition("Graph");
+    definition.nodes.push({
+      id: "build",
+      kind: "BUILD_START",
+      name: "Build",
+      position: { x: 200, y: 100 },
+      config: {},
+      requiredPaths: [],
+      providedPaths: [],
+      retry: { maxAttempts: 3, strategy: "FIXED", delaySeconds: 1 },
+      failurePolicy: "FAIL",
+    });
+    const carriedForward: WorkflowAttempt = {
+      id: "carried",
+      nodeId: "build",
+      kind: "BUILD_START",
+      generation: 1,
+      iterationKey: "",
+      attempt: 0,
+      status: "SUCCEEDED",
+      phase: "REUSED_FROM_PRIOR_GENERATION",
+      input: null,
+      output: null,
+      error: null,
+      startedAt: null,
+      finishedAt: null,
+      supersededAt: null,
+      resourceLinks: [],
+    };
+    const { nodes } = workflowFlowElements(definition, {
+      attempts: [carriedForward],
+      generation: 1,
+    });
+    const build = nodes.find(({ id }) => id === "build");
+    expect(build?.data.reused).toBe(true);
+    // The generation belongs to the replay, not to this step's result, so the
+    // card says "reused" rather than claiming the step ran in generation 1.
+    expect(build?.data.attemptLabel).toBeNull();
   });
 
   test("attaches node diagnostics for editor highlighting", () => {

@@ -342,6 +342,10 @@
       "SUPERSEDED": "Reemplazado",
       "TIMED_OUT": "Tiempo agotado"
     },
+    "phases": {
+      "REUSED_FROM_PRIOR_GENERATION": "Reutilizado",
+      "REPLAY_PENDING": "En cola para repetirse"
+    },
     "eventTypes": {
       "RUN_STARTED": "Ejecución iniciada",
       "RUN_PAUSING": "Pausando la ejecución",
@@ -413,6 +417,9 @@
     "selectReplayStep": "Seleccionar un paso",
     "prepareReplay": "Preparar repetición",
     "replayAffected": "{count, plural, one {Se repetirá # paso} other {Se repetirán # pasos}}",
+    "replayReusedNote": "{count, plural, =0 {Se repetirán todos los pasos del flujo de trabajo.} one {# paso más conserva su resultado actual y no se ejecuta de nuevo.} other {# pasos más conservan sus resultados actuales y no se ejecutan de nuevo.}}",
+    "reusedStep": "Reutilizado",
+    "reusedStepDescription": "Heredado de la generación anterior. Este paso no se ejecutó de nuevo.",
     "externalEffectsWarning": "Los efectos externos se conservan y no se revertirán:",
     "replayWithoutRestore": "Repetir sin restaurar Git",
     "restoreAndReplay": "Restaurar Git y repetir",
@@ -425,6 +432,7 @@
     "noResources": "No hay recursos enlazados.",
     "open": "Abrir",
     "step": "Paso",
+    "phase": "Fase",
     "iteration": "Iteración",
     "attempt": "Intento",
     "duration": "Duración",
@@ -487,7 +495,11 @@
     "selectAll": "Seleccionar todo",
     "selectDay": "Seleccionar todo del {day}",
     "selectRun": "Seleccionar ejecución #{id}",
-    "selectedRuns": "{count, plural, one {# ejecución seleccionada} other {# ejecuciones seleccionadas}}"
+    "selectedRuns": "{count, plural, one {# ejecución seleccionada} other {# ejecuciones seleccionadas}}",
+    "selectedWorkflows": "{count, plural, =0 {Ningún flujo de trabajo seleccionado} one {# flujo de trabajo seleccionado} other {# flujos de trabajo seleccionados}}",
+    "selectWorkflow": "Seleccionar {name}",
+    "deleteWorkflowTitle": "¿Eliminar flujos de trabajo?",
+    "deleteWorkflowDescription": "{count, plural, one {Este flujo de trabajo se elimina de forma permanente. Los flujos de trabajo con historial de ejecuciones deben archivarse en su lugar.} other {Estos # flujos de trabajo se eliminan de forma permanente. Los flujos de trabajo con historial de ejecuciones deben archivarse en su lugar.}}"
   },
   "runs": {
     "actions": "Acciones",
@@ -1186,7 +1198,10 @@
     "useAgentDefault": "Usar valor predeterminado del repositorio base",
     "deleteAgent": "Eliminar agente",
     "deleteAgentTitle": "¿Eliminar este agente?",
-    "deleteAgentDescription": "Eliminar permanentemente {name} y todos sus trabajos y registros de bases de código. Esta acción no se puede deshacer."
+    "deleteAgentDescription": "Eliminar permanentemente {name} y todos sus trabajos y registros de bases de código. Esta acción no se puede deshacer.",
+    "renameAgent": "Renombrar agente",
+    "agentName": "Nombre del agente",
+    "saveName": "Guardar"
   },
   "diskSpace": {
     "title": "Monitor de espacio en disco",
@@ -4198,7 +4213,14 @@
     "originRerun": "Reejecución",
     "attemptDivider": "Intento {number}",
     "exitCode": "Salida {code}",
-    "targetUnavailable": "Destino no disponible"
+    "targetUnavailable": "Destino no disponible",
+    "import": "Importar",
+    "export": "Exportar",
+    "selectAllCommands": "Seleccionar todo",
+    "selectCommand": "Seleccionar {name}",
+    "selectedCommands": "{count, plural, =0 {Ningún comando seleccionado} one {# comando seleccionado} other {# comandos seleccionados}}",
+    "deleteCommandsTitle": "¿Eliminar comandos?",
+    "deleteCommandsDescription": "{count, plural, one {Este comando se elimina de forma permanente. Los comandos con historial de ejecuciones deben archivarse en su lugar.} other {Estos # comandos se eliminan de forma permanente. Los comandos con historial de ejecuciones deben archivarse en su lugar.}}"
   },
   "costs": {
     "title": "Costes",

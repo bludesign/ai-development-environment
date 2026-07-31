@@ -9,6 +9,7 @@ import type { AnchorHTMLAttributes, ReactNode } from "react";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 
 import { TooltipProvider } from "@/components/ui/tooltip";
+import { downloadJsonFiles } from "@/lib/browser-utils";
 import {
   controlPlaneRequest,
   controlPlaneSubscriptions,
@@ -19,6 +20,11 @@ import { WorkflowsPage } from "./workflows-page";
 vi.mock("@/lib/control-plane-client", () => ({
   controlPlaneRequest: vi.fn(),
   controlPlaneSubscriptions: vi.fn(),
+}));
+
+vi.mock("@/lib/browser-utils", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/lib/browser-utils")>()),
+  downloadJsonFiles: vi.fn(),
 }));
 
 vi.mock("@/i18n/navigation", () => ({
@@ -78,6 +84,41 @@ function workflowRun(
   };
 }
 
+function workflowSummary(id: string, name: string) {
+  return {
+    id,
+    name,
+    description: "",
+    draftDefinition: {
+      format: "aide.workflow",
+      schemaVersion: 1,
+      name,
+      description: "",
+      triggers: [],
+      nodes: [],
+      edges: [],
+      editor: {},
+    },
+    activeVersionId: null,
+    enabled: true,
+    overlapPolicy: "QUEUE",
+    maxConcurrentRuns: 1,
+    completionNotificationsEnabled: true,
+    exclusiveWorktree: false,
+    quickActionKind: "NONE",
+    quickActionIconKey: "zap",
+    quickActionButtonVariant: "default",
+    quickActionRepositories: [],
+    triggerChoices: [],
+    hasPlainTrigger: true,
+    archivedAt: null,
+    versionCount: 1,
+    runCount: 0,
+    createdAt: timestamp,
+    updatedAt: timestamp,
+  };
+}
+
 function renderPage() {
   return render(
     <TooltipProvider>
@@ -120,6 +161,61 @@ afterEach(() => {
 });
 
 describe("WorkflowsPage", () => {
+  test("exports and deletes every workflow selected in edit mode", async () => {
+    request.mockImplementation(async (query) => {
+      const text = String(query);
+      if (text.includes("query WorkflowManagement")) {
+        return {
+          workflows: {
+            items: [
+              workflowSummary("workflow-1", "Nightly Build"),
+              workflowSummary("workflow-2", "Release"),
+            ],
+          },
+          workflowRuns: { items: [] },
+        } as never;
+      }
+      if (text.includes("query ExportWorkflow")) {
+        return { exportWorkflow: { format: "aide.workflow.export" } } as never;
+      }
+      if (text.includes("mutation DeleteWorkflow")) {
+        return { deleteWorkflow: true } as never;
+      }
+      throw new Error(`Unexpected request: ${text}`);
+    });
+    renderPage();
+
+    fireEvent.click(await screen.findByRole("tab", { name: "Workflows" }));
+    expect(
+      await screen.findByRole("link", { name: "Nightly Build" }),
+    ).toBeDefined();
+    fireEvent.click(screen.getByRole("button", { name: "Edit" }));
+    fireEvent.click(screen.getByRole("checkbox", { name: "Select all" }));
+
+    expect(
+      screen
+        .getByRole("checkbox", { name: "Select Nightly Build" })
+        .getAttribute("aria-checked"),
+    ).toBe("true");
+
+    fireEvent.click(screen.getByRole("button", { name: "Export" }));
+    await waitFor(() =>
+      expect(vi.mocked(downloadJsonFiles)).toHaveBeenCalledWith([
+        expect.objectContaining({ filename: "nightly-build.workflow.json" }),
+        expect.objectContaining({ filename: "release.workflow.json" }),
+      ]),
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Delete" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Delete" }));
+    await waitFor(() =>
+      expect(request).toHaveBeenCalledWith(
+        expect.stringContaining("mutation DeleteWorkflow"),
+        { id: "workflow-2" },
+      ),
+    );
+  });
+
   test("clears selected runs when the archive filter changes", async () => {
     renderPage();
     expect(await screen.findByRole("link", { name: "#101" })).toBeDefined();

@@ -296,6 +296,14 @@ export const createAgentResolvers = (
         (await agentControlService.requestCodebaseReconcile([agentId])) === 1
       );
     },
+    renameAgent: (
+      _root: unknown,
+      { agentId, name }: { agentId: string; name: string },
+      context: GraphQLContext,
+    ) => {
+      requireControlPlane(context);
+      return agentControlService.renameAgent(agentId, name);
+    },
     updateAgentBaseRepoDirectory: (
       _root: unknown,
       {

@@ -395,6 +395,13 @@ type Mutation {
     "Identifier of the agent."
     agentId: ID!
   ): Boolean!
+  "Renames an agent and returns the updated agent."
+  renameAgent(
+    "Identifier of the agent."
+    agentId: ID!
+    "The name to use for the request."
+    name: String!
+  ): Agent!
   "Updates an agent base repo directory and returns the updated agent."
   updateAgentBaseRepoDirectory(
     "Identifier of the agent."
