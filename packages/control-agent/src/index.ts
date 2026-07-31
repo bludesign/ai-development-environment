@@ -12,6 +12,7 @@ import {
 import { runAgent } from "./agent-runtime.js";
 import { runDevelopmentAgent } from "./dev-runtime.js";
 import { probeEndpoint } from "./endpoint-selection.js";
+import { repairToolPath } from "./executable-lookup.js";
 import { AgentGraphQLClient } from "./graphql-client.js";
 import { collectInventory } from "./inventory.js";
 import { redactedRequestHeaders, requestHeaders } from "./request-headers.js";
@@ -269,6 +270,10 @@ async function doctor(): Promise<void> {
 }
 
 async function main(): Promise<void> {
+  // Runs before any command so every child process — ours and the ones third
+  // party SDKs spawn by bare name — inherits a PATH that includes the usual
+  // tool directories, which the launchd service PATH omits.
+  repairToolPath();
   const [command, ...args] = process.argv.slice(2);
   if (!command || command === "help" || command === "--help") {
     usage();

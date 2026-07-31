@@ -6,9 +6,16 @@ const sdk = vi.hoisted(() => ({
   createOpencode: vi.fn(),
 }));
 
+const executableLookup = vi.hoisted(() => ({
+  findExecutable: vi.fn(() => "/usr/local/bin/opencode"),
+  prependPathDirectory: vi.fn(),
+}));
+
 vi.mock("@opencode-ai/sdk/v2", () => ({
   createOpencode: sdk.createOpencode,
 }));
+
+vi.mock("../executable-lookup.js", () => executableLookup);
 
 import { OpenCodeAdapter } from "./opencode-adapter.js";
 

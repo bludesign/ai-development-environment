@@ -1385,6 +1385,10 @@ export async function seedRuns(prisma: PrismaClient): Promise<void> {
       prompt:
         "Refactor the checkout flow to extract a reusable payment form component.",
       createdAt: hoursAgo(3),
+      // Same reason as the historical drafts below: `@updatedAt` would stamp the seed's own
+      // wall clock, and this row sorts first, so its age label and day group would move on
+      // every seed.
+      updatedAt: hoursAgo(3),
     },
   });
 

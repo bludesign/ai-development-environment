@@ -9,6 +9,8 @@ import { join } from "node:path";
 import { createInterface } from "node:readline";
 import { promisify } from "node:util";
 
+import { findExecutable } from "../executable-lookup.js";
+
 import {
   answerArrays,
   asRecord,
@@ -123,10 +125,25 @@ class CodexAppServer {
     return this.initialized;
   }
 
+  // The service PATH omits Homebrew and npm, so resolve the install once and
+  // use the absolute path for every codex invocation.
+  private executable(): string {
+    const executable = findExecutable("codex", {
+      overrideVariable: "CONTROL_AGENT_CODEX_EXECUTABLE",
+    });
+    if (!executable) {
+      throw new Error(
+        "codex was not found. Install it (brew install codex, or npm install -g @openai/codex) or set CONTROL_AGENT_CODEX_EXECUTABLE to its full path.",
+      );
+    }
+    return executable;
+  }
+
   private async start(): Promise<void> {
-    const modelCatalogPath = await this.createBundledModelCatalog();
+    const executable = this.executable();
+    const modelCatalogPath = await this.createBundledModelCatalog(executable);
     const modelCatalogDirectory = this.modelCatalogDirectory;
-    const child = spawn("codex", codexAppServerArgs(modelCatalogPath), {
+    const child = spawn(executable, codexAppServerArgs(modelCatalogPath), {
       stdio: ["pipe", "pipe", "pipe"],
       env: process.env,
     });
@@ -200,14 +217,14 @@ class CodexAppServer {
     }
   }
 
-  private async createBundledModelCatalog(): Promise<string> {
+  private async createBundledModelCatalog(executable: string): Promise<string> {
     const directory = await mkdtemp(join(tmpdir(), "aide-codex-models-"));
     try {
       // App-server expects a rich remote catalog that OpenAI-compatible model
       // proxies do not expose. A startup catalog avoids that incompatible
       // refresh without changing the configured provider used for inference.
       const { stdout } = await execFileAsync(
-        "codex",
+        executable,
         ["debug", "models", "--bundled"],
         {
           encoding: "utf8",
