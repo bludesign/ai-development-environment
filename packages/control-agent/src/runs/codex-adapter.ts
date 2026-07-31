@@ -9,6 +9,8 @@ import { join } from "node:path";
 import { createInterface } from "node:readline";
 import { promisify } from "node:util";
 
+import { findExecutable } from "../executable-lookup.js";
+
 import {
   answerArrays,
   asRecord,
@@ -126,7 +128,16 @@ class CodexAppServer {
   private async start(): Promise<void> {
     const modelCatalogPath = await this.createBundledModelCatalog();
     const modelCatalogDirectory = this.modelCatalogDirectory;
-    const child = spawn("codex", codexAppServerArgs(modelCatalogPath), {
+    const executable = findExecutable("codex", {
+      overrideVariable: "CONTROL_AGENT_CODEX_EXECUTABLE",
+    });
+    if (!executable) {
+      await this.removeBundledModelCatalog(modelCatalogDirectory);
+      throw new Error(
+        "codex was not found. Install it (brew install codex, or npm install -g @openai/codex) or set CONTROL_AGENT_CODEX_EXECUTABLE to its full path.",
+      );
+    }
+    const child = spawn(executable, codexAppServerArgs(modelCatalogPath), {
       stdio: ["pipe", "pipe", "pipe"],
       env: process.env,
     });

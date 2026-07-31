@@ -1,6 +1,9 @@
+import { dirname } from "node:path";
 import { pathToFileURL } from "node:url";
 
 import { createOpencode, type OpencodeClient } from "@opencode-ai/sdk/v2";
+
+import { findExecutable, prependPathDirectory } from "../executable-lookup.js";
 
 import {
   answerArrays,
@@ -220,7 +223,21 @@ export class OpenCodeAdapter implements ProviderAdapter {
   private runtime?: Awaited<ReturnType<typeof createOpencode>>;
 
   private async client(): Promise<OpencodeClient> {
-    this.runtime ??= await createOpencode();
+    // The SDK spawns `opencode` by bare name through cross-spawn, so the only
+    // lever is the PATH it inherits. Resolve first to fail with instructions
+    // instead of an opaque ENOENT, and to honor an explicitly pinned install.
+    if (!this.runtime) {
+      const executable = findExecutable("opencode", {
+        overrideVariable: "CONTROL_AGENT_OPENCODE_EXECUTABLE",
+      });
+      if (!executable) {
+        throw new Error(
+          "opencode was not found. Install it (brew install sst/tap/opencode, or npm install -g opencode-ai) or set CONTROL_AGENT_OPENCODE_EXECUTABLE to its full path.",
+        );
+      }
+      prependPathDirectory(dirname(executable));
+      this.runtime = await createOpencode();
+    }
     return this.runtime.client;
   }
 
