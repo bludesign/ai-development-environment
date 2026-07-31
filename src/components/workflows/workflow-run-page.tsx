@@ -82,7 +82,11 @@ import { useOpenWorkflowDestination } from "./use-workflow-destination";
 import { WorkflowGraph, workflowStatusVariant } from "./workflow-graph";
 import { useWorkflowLabels } from "./workflow-labels";
 import { WorktreeRunQueueCard } from "./worktree-run-queue-card";
-import type { WorkflowRun, WorktreeRunQueueEntry } from "./types";
+import {
+  WORKFLOW_REUSED_PHASE,
+  type WorkflowRun,
+  type WorktreeRunQueueEntry,
+} from "./types";
 
 const RUN_DETAIL_FIELDS = `
   id displayNumber workflowId versionId triggerKind triggerSubjectKey status phase generation
@@ -719,7 +723,23 @@ export function WorkflowRunPage({ runId }: { runId: string }) {
                   })}
                 </p>
                 <p className="text-sm text-muted-foreground">
-                  {preview.affectedNodeIds.join(", ")}
+                  {preview.affectedNodeIds
+                    .map((nodeId) => {
+                      const node = run.version.definition.nodes.find(
+                        ({ id }) => id === nodeId,
+                      );
+                      return node
+                        ? (node.name ?? labels.kind(node.kind))
+                        : nodeId;
+                    })
+                    .join(", ")}
+                </p>
+                <p className="text-sm text-muted-foreground">
+                  {t("replayReusedNote", {
+                    count:
+                      run.version.definition.nodes.length -
+                      preview.affectedNodeIds.length,
+                  })}
                 </p>
                 {preview.warning && (
                   <Alert variant="destructive">
@@ -838,6 +858,7 @@ export function WorkflowRunPage({ runId }: { runId: string }) {
                     <TableRow>
                       <TableHead>{t("step")}</TableHead>
                       <TableHead>{t("status")}</TableHead>
+                      <TableHead>{t("phase")}</TableHead>
                       <TableHead>{t("generation")}</TableHead>
                       <TableHead>{t("iteration")}</TableHead>
                       <TableHead>{t("attempt")}</TableHead>
@@ -848,7 +869,12 @@ export function WorkflowRunPage({ runId }: { runId: string }) {
                   <TableBody>
                     {run.attempts.map((attempt) => (
                       <TableRow
-                        className={attempt.supersededAt ? "opacity-55" : ""}
+                        className={
+                          attempt.supersededAt ||
+                          attempt.phase === WORKFLOW_REUSED_PHASE
+                            ? "opacity-55"
+                            : ""
+                        }
                         key={attempt.id}
                       >
                         <TableCell>
@@ -865,6 +891,9 @@ export function WorkflowRunPage({ runId }: { runId: string }) {
                           >
                             {labels.status(attempt.status)}
                           </Badge>
+                        </TableCell>
+                        <TableCell className="text-xs text-muted-foreground">
+                          {labels.phase(attempt.phase)}
                         </TableCell>
                         <TableCell>{attempt.generation}</TableCell>
                         <TableCell>{attempt.iterationKey || "—"}</TableCell>

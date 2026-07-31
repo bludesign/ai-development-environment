@@ -169,6 +169,18 @@ describe("DevicesPage", () => {
     await waitFor(() => expect(request).toHaveBeenCalledTimes(2));
   });
 
+  test("names the hardware and reads the build as a software version", async () => {
+    request.mockResolvedValue({
+      iosDevices: [device({ product: "iPhone16,2", osVersion: "23F84" })],
+    } as never);
+    render(<DevicesPage />);
+
+    expect(await screen.findByText("iPhone 15 Pro Max")).toBeDefined();
+    expect(screen.getByText("26.5")).toBeDefined();
+    expect(screen.queryByText("iPhone16,2")).toBeNull();
+    expect(screen.queryByText("23F84")).toBeNull();
+  });
+
   test("does not apply a response from a previously selected status", async () => {
     let resolveAll!: (value: unknown) => void;
     let resolvePending!: (value: unknown) => void;

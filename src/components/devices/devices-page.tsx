@@ -33,6 +33,10 @@ import {
 } from "@/components/ui/table";
 import { Link, useRouter } from "@/i18n/navigation";
 import {
+  formatAppleOsVersion,
+  formatAppleProductName,
+} from "@/lib/apple-device";
+import {
   controlPlaneRequest,
   controlPlaneSubscriptions,
 } from "@/lib/control-plane-client";
@@ -268,9 +272,15 @@ export function DevicesPage() {
                     />
                   </TableCell>
                   <TableCell>
-                    <div>{device.product || t("unavailable")}</div>
+                    <div>
+                      {device.product
+                        ? formatAppleProductName(device.product)
+                        : t("unavailable")}
+                    </div>
                     <div className="text-xs text-muted-foreground">
-                      {device.osVersion || t("unavailable")}
+                      {device.osVersion
+                        ? formatAppleOsVersion(device.osVersion)
+                        : t("unavailable")}
                     </div>
                   </TableCell>
                   <TableCell className="font-mono text-xs">

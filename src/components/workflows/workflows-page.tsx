@@ -2,12 +2,14 @@
 
 import {
   Archive,
+  CirclePause,
   CirclePlay,
   Download,
   FilePenLine,
   FileUp,
   GitFork,
   MoreHorizontal,
+  Pencil,
   Plus,
   RefreshCw,
   Search,
@@ -555,17 +557,20 @@ export function WorkflowsPage() {
             {filteredWorkflows.map((workflow) => (
               <Card
                 className={cn(
-                  editMode && "cursor-pointer",
+                  "cursor-pointer transition-colors hover:bg-muted/30",
                   editMode &&
                     selected.has(workflow.id) &&
                     "ring-2 ring-ring ring-offset-2 ring-offset-background",
                 )}
                 key={workflow.id}
-                /* In edit mode the whole card is the selection target; the
-                   checkbox and the links inside it keep their own behaviour. */
+                /* The whole card opens the workflow — in edit mode it is the
+                   selection target instead, so it toggles rather than
+                   navigating away mid-selection. The checkbox, menu, and links
+                   inside it keep their own behaviour. */
                 onClick={(event) => {
-                  if (!editMode || !isRowActivation(event)) return;
-                  toggleSelected(workflow.id);
+                  if (!isRowActivation(event)) return;
+                  if (editMode) toggleSelected(workflow.id);
+                  else router.push(`/workflows/${workflow.id}`);
                 }}
               >
                 {/* `CardAction` parks the menu in the header's own top-right
@@ -583,8 +588,11 @@ export function WorkflowsPage() {
                         onCheckedChange={() => toggleSelected(workflow.id)}
                       />
                     )}
+                    {/* The card itself carries the hover highlight and the
+                        click target; the title stays a link only so keyboard
+                        and middle-click users can still reach the workflow. */}
                     <Link
-                      className="truncate hover:underline"
+                      className="truncate"
                       href={`/workflows/${workflow.id}`}
                     >
                       {workflow.name}
@@ -612,7 +620,7 @@ export function WorkflowsPage() {
                       <DropdownMenuContent align="end">
                         <DropdownMenuItem asChild>
                           <Link href={`/workflows/${workflow.id}/edit`}>
-                            {t("edit")}
+                            <Pencil /> {t("edit")}
                           </Link>
                         </DropdownMenuItem>
                         <DropdownMenuItem
@@ -625,6 +633,7 @@ export function WorkflowsPage() {
                             void mutateWorkflow(workflow, "enabled")
                           }
                         >
+                          {workflow.enabled ? <CirclePause /> : <CirclePlay />}{" "}
                           {workflow.enabled
                             ? t("pauseDefinition")
                             : t("enable")}

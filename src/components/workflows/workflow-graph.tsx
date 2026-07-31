@@ -17,7 +17,14 @@ import {
   type NodeChange,
   type NodeProps,
 } from "@xyflow/react";
-import { Copy, ExternalLink, Pencil, RotateCcw, Trash2 } from "lucide-react";
+import {
+  Copy,
+  ExternalLink,
+  History,
+  Pencil,
+  RotateCcw,
+  Trash2,
+} from "lucide-react";
 import { useTranslations } from "next-intl";
 import {
   createContext,
@@ -53,11 +60,12 @@ import {
 } from "./workflow-fit-lock";
 import { workflowCategory, WorkflowCategoryIcon } from "./workflow-icons";
 import { useWorkflowLabels } from "./workflow-labels";
-import type {
-  WorkflowAttempt,
-  WorkflowDefinition,
-  WorkflowDiagnostic,
-  WorkflowHandleLayout,
+import {
+  WORKFLOW_REUSED_PHASE,
+  type WorkflowAttempt,
+  type WorkflowDefinition,
+  type WorkflowDiagnostic,
+  type WorkflowHandleLayout,
 } from "./types";
 import {
   basicLayoutTranslateExtent,
@@ -77,6 +85,12 @@ type WorkflowNodeData = {
   status: string | null;
   phase: string | null;
   attemptLabel: string | null;
+  /**
+   * The step was carried over from an earlier generation rather than executed
+   * in this one. A replay writes a row for every step of the graph, so without
+   * this the whole graph claims the generation the replay created.
+   */
+  reused: boolean;
   diagnostics: WorkflowDiagnostic[];
   provides: string[];
   currentPage: boolean;
@@ -211,15 +225,23 @@ function WorkflowCard({ data, id, selected }: NodeProps<WorkflowFlowNode>) {
           </span>
         )}
       </div>
-      {(data.status || data.attemptLabel) && (
+      {(data.status || data.attemptLabel || data.reused) && (
         <div className="mt-2 flex flex-wrap items-center gap-1.5">
           {data.status && (
             <Badge
-              className="text-[10px]"
+              className={cn("text-[10px]", data.reused && "opacity-60")}
               variant={workflowStatusVariant(data.status)}
             >
               {labels.status(data.status)}
             </Badge>
+          )}
+          {data.reused && (
+            <span
+              className="inline-flex items-center gap-1 text-[10px] text-muted-foreground"
+              title={t("reusedStepDescription")}
+            >
+              <History className="size-3" /> {t("reusedStep")}
+            </span>
           )}
           {data.attemptLabel && (
             <span className="inline-flex items-center gap-1 text-[10px] text-muted-foreground">
@@ -508,6 +530,7 @@ export function workflowFlowElements(
         status: null,
         phase: null,
         attemptLabel: null,
+        reused: false,
         diagnostics: diagnostics.filter(
           ({ triggerId }) => triggerId === trigger.id,
         ),
@@ -525,12 +548,13 @@ export function workflowFlowElements(
       const iterationCount = values.filter(
         ({ iterationKey }) => iterationKey,
       ).length;
+      const reused = base?.phase === WORKFLOW_REUSED_PHASE;
       const labelParts = [
         retryCount
           ? `${retryCount} retr${retryCount === 1 ? "y" : "ies"}`
           : null,
         iterationCount ? `${iterationCount} iterations` : null,
-        base && options.generation && options.generation > 0
+        base && !reused && options.generation && options.generation > 0
           ? `generation ${base.generation}`
           : null,
       ].filter(Boolean);
@@ -551,6 +575,7 @@ export function workflowFlowElements(
           status: base?.status ?? null,
           phase: base?.phase ?? null,
           attemptLabel: labelParts.length ? labelParts.join(" · ") : null,
+          reused,
           diagnostics: diagnostics.filter(({ nodeId }) => nodeId === node.id),
           provides: options.provides?.get(node.id) ?? [],
           currentPage: options.currentPageNodeIds?.has(node.id) ?? false,

@@ -143,6 +143,15 @@ export type WorkflowVersion = {
   publishedAt: string;
 };
 
+/**
+ * The phase `WorkflowsService.replay` stamps on the steps it copies forward
+ * from the previous generation instead of re-running. A replay writes a row for
+ * every step of the graph, so this is what separates the steps it actually
+ * re-ran from the ones that only carry an older result under the new
+ * generation number.
+ */
+export const WORKFLOW_REUSED_PHASE = "REUSED_FROM_PRIOR_GENERATION";
+
 export type WorkflowAttempt = {
   id: string;
   nodeId: string;

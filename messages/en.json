@@ -342,6 +342,10 @@
       "SUPERSEDED": "Superseded",
       "TIMED_OUT": "Timed out"
     },
+    "phases": {
+      "REUSED_FROM_PRIOR_GENERATION": "Reused",
+      "REPLAY_PENDING": "Queued for replay"
+    },
     "eventTypes": {
       "RUN_STARTED": "Run started",
       "RUN_PAUSING": "Run pausing",
@@ -413,6 +417,9 @@
     "selectReplayStep": "Select a step",
     "prepareReplay": "Prepare replay",
     "replayAffected": "{count, plural, one {# step will replay} other {# steps will replay}}",
+    "replayReusedNote": "{count, plural, =0 {Every step of the workflow replays.} one {# other step keeps its current result and is not run again.} other {# other steps keep their current results and are not run again.}}",
+    "reusedStep": "Reused",
+    "reusedStepDescription": "Carried over from the previous generation. This step was not run again.",
     "externalEffectsWarning": "External effects are retained and will not be reversed:",
     "replayWithoutRestore": "Replay without Git restore",
     "restoreAndReplay": "Restore Git and replay",
@@ -425,6 +432,7 @@
     "noResources": "No linked resources.",
     "open": "Open",
     "step": "Step",
+    "phase": "Phase",
     "iteration": "Iteration",
     "attempt": "Attempt",
     "duration": "Duration",

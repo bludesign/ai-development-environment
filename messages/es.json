@@ -342,6 +342,10 @@
       "SUPERSEDED": "Reemplazado",
       "TIMED_OUT": "Tiempo agotado"
     },
+    "phases": {
+      "REUSED_FROM_PRIOR_GENERATION": "Reutilizado",
+      "REPLAY_PENDING": "En cola para repetirse"
+    },
     "eventTypes": {
       "RUN_STARTED": "Ejecución iniciada",
       "RUN_PAUSING": "Pausando la ejecución",
@@ -413,6 +417,9 @@
     "selectReplayStep": "Seleccionar un paso",
     "prepareReplay": "Preparar repetición",
     "replayAffected": "{count, plural, one {Se repetirá # paso} other {Se repetirán # pasos}}",
+    "replayReusedNote": "{count, plural, =0 {Se repetirán todos los pasos del flujo de trabajo.} one {# paso más conserva su resultado actual y no se ejecuta de nuevo.} other {# pasos más conservan sus resultados actuales y no se ejecutan de nuevo.}}",
+    "reusedStep": "Reutilizado",
+    "reusedStepDescription": "Heredado de la generación anterior. Este paso no se ejecutó de nuevo.",
     "externalEffectsWarning": "Los efectos externos se conservan y no se revertirán:",
     "replayWithoutRestore": "Repetir sin restaurar Git",
     "restoreAndReplay": "Restaurar Git y repetir",
@@ -425,6 +432,7 @@
     "noResources": "No hay recursos enlazados.",
     "open": "Abrir",
     "step": "Paso",
+    "phase": "Fase",
     "iteration": "Iteración",
     "attempt": "Intento",
     "duration": "Duración",

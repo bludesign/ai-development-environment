@@ -11,6 +11,10 @@ import { formatKindLabel } from "@/lib/enum-label";
  * project defines itself, so each has a `workflows.*` message key and renders
  * localized.
  *
+ * Step phases are the in-between case: the scheduler coins them freely, so only
+ * the few worth wording carefully (the replay phases, which decide whether a
+ * step re-ran) carry a message key, and the rest title-case like a kind.
+ *
  * Step and trigger kinds are the open-ended set — the catalog in
  * `src/lib/workflows/definition.ts` grows with every integration, and its
  * labels are already served in English — so they fall back to a title-cased
@@ -25,6 +29,7 @@ export function useWorkflowLabels() {
   return {
     status: (value: string) =>
       lookup("statuses", value) ?? formatKindLabel(value),
+    phase: (value: string) => lookup("phases", value) ?? formatKindLabel(value),
     eventType: (value: string) =>
       lookup("eventTypes", value) ?? formatKindLabel(value),
     diagnosticCode: (value: string) =>

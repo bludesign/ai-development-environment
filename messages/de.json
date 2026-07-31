@@ -342,6 +342,10 @@
       "SUPERSEDED": "Ersetzt",
       "TIMED_OUT": "Zeitüberschreitung"
     },
+    "phases": {
+      "REUSED_FROM_PRIOR_GENERATION": "Wiederverwendet",
+      "REPLAY_PENDING": "Für Wiederholung eingeplant"
+    },
     "eventTypes": {
       "RUN_STARTED": "Lauf gestartet",
       "RUN_PAUSING": "Lauf wird pausiert",
@@ -413,6 +417,9 @@
     "selectReplayStep": "Schritt auswählen",
     "prepareReplay": "Wiederholung vorbereiten",
     "replayAffected": "{count, plural, one {# Schritt wird wiederholt} other {# Schritte werden wiederholt}}",
+    "replayReusedNote": "{count, plural, =0 {Alle Schritte des Workflows werden wiederholt.} one {# weiterer Schritt behält sein bisheriges Ergebnis und wird nicht erneut ausgeführt.} other {# weitere Schritte behalten ihre bisherigen Ergebnisse und werden nicht erneut ausgeführt.}}",
+    "reusedStep": "Wiederverwendet",
+    "reusedStepDescription": "Aus der vorherigen Generation übernommen. Dieser Schritt wurde nicht erneut ausgeführt.",
     "externalEffectsWarning": "Externe Effekte bleiben erhalten und werden nicht rückgängig gemacht:",
     "replayWithoutRestore": "Ohne Git-Wiederherstellung wiederholen",
     "restoreAndReplay": "Git wiederherstellen und wiederholen",
@@ -425,6 +432,7 @@
     "noResources": "Keine verknüpften Ressourcen.",
     "open": "Öffnen",
     "step": "Schritt",
+    "phase": "Phase",
     "iteration": "Iteration",
     "attempt": "Versuch",
     "duration": "Dauer",
