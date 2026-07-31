@@ -91,7 +91,7 @@ describe("workflow run graph projection", () => {
     expect(build?.data.status).toBe("RUNNING");
     expect(build?.data.attemptLabel).toContain("1 retry");
     expect(build?.data.attemptLabel).toContain("1 iterations");
-    expect(build?.data.attemptLabel).toContain("generation 2");
+    expect(build?.data.attemptLabel).toContain("Generation 2");
     expect(build?.data.reused).toBe(false);
     expect(edges[0]?.source).toBe("manual");
   });

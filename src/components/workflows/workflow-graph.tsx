@@ -555,7 +555,7 @@ export function workflowFlowElements(
           : null,
         iterationCount ? `${iterationCount} iterations` : null,
         base && !reused && options.generation && options.generation > 0
-          ? `generation ${base.generation}`
+          ? `Generation ${base.generation}`
           : null,
       ].filter(Boolean);
       return {
