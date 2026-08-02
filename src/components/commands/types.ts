@@ -62,6 +62,35 @@ export type CommandRunAttempt = {
   finishedAt: string | null;
 };
 
+export type CommandRunQueueReason =
+  | "NOT_QUEUED"
+  | "WAITING_FOR_AGENT"
+  | "AGENT_OFFLINE"
+  | "WAITING_FOR_PREDECESSOR"
+  | "RESTART_DELAY"
+  | "TARGET_BUSY"
+  | "QUEUED_BEHIND"
+  | "READY";
+
+export type CommandRunQueueEntry = {
+  id: string;
+  displayNumber: number;
+  name: string;
+  status: string;
+  concurrency: CommandConcurrency;
+  queuedAt: string;
+  holdingTarget: boolean;
+  blocking: boolean;
+  currentRun: boolean;
+};
+
+export type CommandRunQueue = {
+  reason: CommandRunQueueReason;
+  position: number;
+  waitingCount: number;
+  entries: CommandRunQueueEntry[];
+};
+
 export type CommandRun = {
   id: string;
   displayNumber: number;
@@ -96,6 +125,8 @@ export type CommandRun = {
   exitCode: number | null;
   signal: string | null;
   attempts: CommandRunAttempt[];
+  /** Only queried where it is rendered; each run resolves its own queue. */
+  queue?: CommandRunQueue;
   queuedAt: string;
   startedAt: string | null;
   finishedAt: string | null;
@@ -126,6 +157,19 @@ export const COMMAND_RUN_FIELDS = `
   attempts { id attempt status exitCode signal error startedAt finishedAt }
 `;
 
+// Resolving a queue costs one query per run, so it is asked for on the run
+// detail page rather than folded into COMMAND_RUN_FIELDS and paid for by every
+// row of the runs list.
+export const COMMAND_RUN_QUEUE_FIELDS = `
+  queue {
+    reason position waitingCount
+    entries {
+      id displayNumber name status concurrency queuedAt
+      holdingTarget blocking currentRun
+    }
+  }
+`;
+
 export const activeCommandRun = (status: string) =>
   ["QUEUED", "RUNNING", "RESTARTING", "CANCELLING"].includes(status);
 
@@ -149,6 +193,25 @@ export const commandStatusKey = (status: string) => {
       return "statusTimedOut" as const;
     default:
       return "status" as const;
+  }
+};
+
+export const commandQueueReasonKey = (reason: CommandRunQueueReason) => {
+  switch (reason) {
+    case "WAITING_FOR_AGENT":
+      return "queuedWaitingForAgent" as const;
+    case "AGENT_OFFLINE":
+      return "queuedAgentOffline" as const;
+    case "WAITING_FOR_PREDECESSOR":
+      return "queuedWaitingForPredecessor" as const;
+    case "RESTART_DELAY":
+      return "queuedRestartDelay" as const;
+    case "TARGET_BUSY":
+      return "queuedTargetBusy" as const;
+    case "QUEUED_BEHIND":
+      return "queuedBehind" as const;
+    default:
+      return "queuedReady" as const;
   }
 };
 

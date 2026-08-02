@@ -7,6 +7,7 @@ import {
   CommandsService,
   admitCommandRun,
   evaluateCommandRestart,
+  evaluateCommandRunQueue,
 } from "./commands.service";
 
 const agentControl = () =>
@@ -272,6 +273,162 @@ describe("command concurrency admission", () => {
         waiting: [peer("exclusive", "EXCLUSIVE", 1)],
       }),
     ).toBe(true);
+  });
+});
+
+describe("command run queue explanation", () => {
+  const at = (minute: number) => new Date(`2026-08-02T10:0${minute}:00Z`);
+  const member = (
+    id: string,
+    concurrency: string,
+    minute: number,
+    holdingTarget = false,
+  ) => ({
+    id,
+    displayNumber: Number(id.replace(/\D/g, "")) || 1,
+    name: "Tailscale",
+    status: holdingTarget ? "RUNNING" : "QUEUED",
+    concurrency,
+    queuedAt: at(minute),
+    holdingTarget,
+  });
+  const evaluate = (
+    overrides: Partial<Parameters<typeof evaluateCommandRunQueue>[0]> = {},
+    candidate: Partial<
+      Parameters<typeof evaluateCommandRunQueue>[0]["candidate"]
+    > = {},
+  ) =>
+    evaluateCommandRunQueue({
+      candidate: {
+        ...member("run-2", "NON_EXCLUSIVE", 2),
+        stopRequested: false,
+        ...candidate,
+      },
+      peers: [],
+      agentOnline: true,
+      predecessorPending: false,
+      restartPending: false,
+      ...overrides,
+    });
+
+  test("blames the offline agent when the job is waiting with nobody to claim it", () => {
+    // The failure this exists for: the job was created, so nothing is blocked
+    // on concurrency, and the run sits in QUEUED until the agent comes back.
+    const queue = evaluate({ agentOnline: false }, { holdingTarget: true });
+    expect(queue.reason).toBe("AGENT_OFFLINE");
+    expect(queue.position).toBe(0);
+  });
+
+  test("separates a job the agent has not picked up yet from an offline agent", () => {
+    expect(evaluate({}, { holdingTarget: true }).reason).toBe(
+      "WAITING_FOR_AGENT",
+    );
+  });
+
+  test("reports the holder that owns the target", () => {
+    const queue = evaluate({
+      peers: [member("run-1", "EXCLUSIVE", 1, true)],
+    });
+    expect(queue.reason).toBe("TARGET_BUSY");
+    expect(
+      queue.entries.filter((entry) => entry.blocking).map((entry) => entry.id),
+    ).toEqual(["run-1"]);
+  });
+
+  test("reports the exclusive run queued ahead and this run's place in line", () => {
+    const queue = evaluate({ peers: [member("run-1", "EXCLUSIVE", 1)] });
+    expect(queue.reason).toBe("QUEUED_BEHIND");
+    expect(queue.position).toBe(2);
+    expect(queue.waitingCount).toBe(2);
+  });
+
+  test("keeps a shared run out of the way of other shared runs", () => {
+    const queue = evaluate({ peers: [member("run-1", "NON_EXCLUSIVE", 1)] });
+    expect(queue.reason).toBe("READY");
+    expect(queue.entries.every((entry) => !entry.blocking)).toBe(true);
+  });
+
+  test("prefers the predecessor and the restart delay over concurrency", () => {
+    expect(evaluate({ predecessorPending: true }).reason).toBe(
+      "WAITING_FOR_PREDECESSOR",
+    );
+    expect(evaluate({ restartPending: true }).reason).toBe("RESTART_DELAY");
+  });
+
+  test("reports nothing for a run that is no longer waiting", () => {
+    expect(evaluate({}, { status: "RUNNING" }).reason).toBe("NOT_QUEUED");
+    expect(evaluate({}, { stopRequested: true }).reason).toBe("NOT_QUEUED");
+  });
+
+  test("lists holders first and the rest in the order the dispatcher uses", () => {
+    const queue = evaluate({
+      peers: [
+        member("run-3", "NON_EXCLUSIVE", 3),
+        member("run-1", "NON_EXCLUSIVE", 1, true),
+        member("run-0", "NON_EXCLUSIVE", 0),
+      ],
+    });
+    expect(queue.entries.map((entry) => entry.id)).toEqual([
+      "run-1",
+      "run-0",
+      "run-2",
+      "run-3",
+    ]);
+    expect(queue.entries.filter((entry) => entry.currentRun)).toHaveLength(1);
+  });
+});
+
+describe("CommandsService.runQueue", () => {
+  beforeEach(() => vi.clearAllMocks());
+
+  const queueFor = async (
+    agent: { lastSeenAt: Date | null; disconnectedAt: Date | null } | null,
+  ) => {
+    const findUnique = vi.fn().mockResolvedValue({
+      id: "run-1",
+      displayNumber: 13,
+      snapshotName: "Tailscale",
+      status: "QUEUED",
+      snapshotConcurrency: "NON_EXCLUSIVE",
+      queuedAt: new Date("2026-08-02T22:15:41.585Z"),
+      stopRequested: false,
+      nextRestartAt: null,
+      agentId: "agent-1",
+      worktreeId: "worktree-1",
+      agent,
+      predecessor: null,
+      attempts: [{ agentJobId: "job-1", completionProcessedAt: null }],
+    });
+    getPrismaClient.mockResolvedValue({
+      commandRun: { findUnique, findMany: vi.fn().mockResolvedValue([]) },
+    });
+    return new CommandsService(agentControl()).runQueue("run-1");
+  };
+
+  test("reports an agent that stopped heartbeating as offline", async () => {
+    const queue = await queueFor({
+      lastSeenAt: new Date(Date.now() - 10 * 60_000),
+      disconnectedAt: null,
+    });
+    expect(queue.reason).toBe("AGENT_OFFLINE");
+    expect(queue.entries).toHaveLength(1);
+    expect(queue.entries[0]).toMatchObject({
+      displayNumber: 13,
+      currentRun: true,
+      holdingTarget: true,
+    });
+  });
+
+  test("reports a connected agent that has not claimed the job yet", async () => {
+    const queue = await queueFor({
+      lastSeenAt: new Date(),
+      disconnectedAt: null,
+    });
+    expect(queue.reason).toBe("WAITING_FOR_AGENT");
+  });
+
+  test("reports a deleted agent as offline rather than throwing", async () => {
+    expect((await queueFor(null)).reason).toBe("AGENT_OFFLINE");
   });
 });
 

@@ -574,6 +574,122 @@ describe("CommandRunPage", () => {
     expect(terminalTitle.querySelector("svg")).toBeNull();
   });
 
+  test("explains an offline agent instead of leaving the run silently queued", async () => {
+    request.mockImplementation(async (query) => {
+      if (query.includes("CommandRunDetail")) {
+        return {
+          commandRun: {
+            ...run,
+            status: "QUEUED",
+            startedAt: null,
+            finishedAt: null,
+            queue: {
+              reason: "AGENT_OFFLINE",
+              position: 0,
+              waitingCount: 0,
+              entries: [
+                {
+                  id: "run-1",
+                  displayNumber: 42,
+                  name: "Color output",
+                  status: "QUEUED",
+                  concurrency: "NON_EXCLUSIVE",
+                  queuedAt: timestamp,
+                  holdingTarget: true,
+                  blocking: false,
+                  currentRun: true,
+                },
+              ],
+            },
+          },
+        } as never;
+      }
+      if (query.includes("CommandOutput")) {
+        return { commandRunOutput: [] } as never;
+      }
+      throw new Error(`Unexpected request: ${query}`);
+    });
+
+    render(<CommandRunPage runId="run-1" />);
+
+    const reason = await screen.findByTestId("command-run-queue-reason");
+    expect(reason.textContent).toContain("Waiting to start");
+    expect(reason.textContent).toContain("Studio is offline");
+    expect(screen.getByText("This run")).toBeDefined();
+    expect(screen.getByText("Holds the target")).toBeDefined();
+  });
+
+  test("lists the runs ahead of a run waiting for its target", async () => {
+    request.mockImplementation(async (query) => {
+      if (query.includes("CommandRunDetail")) {
+        return {
+          commandRun: {
+            ...run,
+            status: "QUEUED",
+            startedAt: null,
+            finishedAt: null,
+            queue: {
+              reason: "QUEUED_BEHIND",
+              position: 2,
+              waitingCount: 2,
+              entries: [
+                {
+                  id: "run-9",
+                  displayNumber: 9,
+                  name: "Migrate",
+                  status: "QUEUED",
+                  concurrency: "EXCLUSIVE",
+                  queuedAt: timestamp,
+                  holdingTarget: false,
+                  blocking: true,
+                  currentRun: false,
+                },
+                {
+                  id: "run-1",
+                  displayNumber: 42,
+                  name: "Color output",
+                  status: "QUEUED",
+                  concurrency: "NON_EXCLUSIVE",
+                  queuedAt: timestamp,
+                  holdingTarget: false,
+                  blocking: false,
+                  currentRun: true,
+                },
+              ],
+            },
+          },
+        } as never;
+      }
+      if (query.includes("CommandOutput")) {
+        return { commandRunOutput: [] } as never;
+      }
+      throw new Error(`Unexpected request: ${query}`);
+    });
+
+    render(<CommandRunPage runId="run-1" />);
+
+    const queueCard = await screen.findByTestId("command-run-queue");
+    expect(queueCard.textContent).toContain("Position 2 of 2");
+    expect(queueCard.textContent).toContain("Migrate");
+    expect(queueCard.textContent).toContain("Blocking");
+    expect(
+      queueCard.querySelector('a[href="/commands/runs/run-9"]'),
+    ).not.toBeNull();
+    // The run being inspected is already open, so it is the one row that is
+    // listed without a link back to itself.
+    expect(
+      queueCard.querySelector('a[href="/commands/runs/run-1"]'),
+    ).toBeNull();
+  });
+
+  test("keeps the queue out of the way of a finished run", async () => {
+    render(<CommandRunPage runId="run-1" />);
+
+    await screen.findByText("Attempts");
+    expect(screen.queryByTestId("command-run-queue-reason")).toBeNull();
+    expect(screen.queryByTestId("command-run-queue")).toBeNull();
+  });
+
   test("uses a standard table card for attempts and copies the command snapshot", async () => {
     render(<CommandRunPage runId="run-1" />);
 

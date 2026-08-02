@@ -4235,7 +4235,22 @@
     "selectCommand": "{name} auswählen",
     "selectedCommands": "{count, plural, =0 {Keine Befehle ausgewählt} one {# Befehl ausgewählt} other {# Befehle ausgewählt}}",
     "deleteCommandsTitle": "Befehle löschen?",
-    "deleteCommandsDescription": "{count, plural, one {Dieser Befehl wird dauerhaft gelöscht. Befehle mit Ausführungsverlauf müssen stattdessen archiviert werden.} other {Diese # Befehle werden dauerhaft gelöscht. Befehle mit Ausführungsverlauf müssen stattdessen archiviert werden.}}"
+    "deleteCommandsDescription": "{count, plural, one {Dieser Befehl wird dauerhaft gelöscht. Befehle mit Ausführungsverlauf müssen stattdessen archiviert werden.} other {Diese # Befehle werden dauerhaft gelöscht. Befehle mit Ausführungsverlauf müssen stattdessen archiviert werden.}}",
+    "queue": "Warteschlange",
+    "queued": "Eingereiht",
+    "queuedTitle": "Wartet auf den Start",
+    "queueDescription": "Alle Befehlsausführungen, die um dieses Ziel konkurrieren.",
+    "queuePosition": "Position {position} von {waiting} in der Warteschlange für dieses Ziel.",
+    "queuedWaitingForAgent": "Die Ausführung wurde an {agent} übergeben und wartet darauf, dass der Agent sie übernimmt.",
+    "queuedAgentOffline": "{agent} ist offline, daher kann niemand diese Ausführung übernehmen. Sie startet, sobald der Agent wieder verbunden ist.",
+    "queuedWaitingForPredecessor": "Wartet darauf, dass Ausführung #{predecessor} endet, die diese Ausführung ersetzt.",
+    "queuedRestartDelay": "Wartet auf das Ablaufen der Neustartverzögerung vor dem nächsten Versuch.",
+    "queuedTargetBusy": "{blocking, plural, one {# Ausführung belegt} other {# Ausführungen belegen}} das benötigte Ziel.",
+    "queuedBehind": "{blocking, plural, one {# Ausführung steht} other {# Ausführungen stehen}} für dieses Ziel vor dieser in der Warteschlange.",
+    "queuedReady": "Nichts blockiert diese Ausführung; sie startet beim nächsten Versand.",
+    "thisRun": "Diese Ausführung",
+    "holdingTarget": "Belegt das Ziel",
+    "blocking": "Blockiert"
   },
   "costs": {
     "title": "Kosten",

@@ -40,7 +40,11 @@ export const createCommandResolvers = (service: CommandsService) => ({
     finishedAt: (value: { finishedAt?: Date | null }) => iso(value.finishedAt),
     nextRestartAt: (value: { nextRestartAt?: Date | null }) =>
       iso(value.nextRestartAt),
+    queue: (value: { id: string }) => service.runQueue(value.id),
     ...dates,
+  },
+  CommandRunQueueEntry: {
+    queuedAt: (value: { queuedAt: Date }) => value.queuedAt.toISOString(),
   },
   CommandRunAttempt: {
     startedAt: (value: { startedAt?: Date | null }) => iso(value.startedAt),

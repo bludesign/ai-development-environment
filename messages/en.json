@@ -4235,7 +4235,22 @@
     "selectCommand": "Select {name}",
     "selectedCommands": "{count, plural, =0 {No commands selected} one {# command selected} other {# commands selected}}",
     "deleteCommandsTitle": "Delete commands?",
-    "deleteCommandsDescription": "{count, plural, one {This command is deleted permanently. Commands with run history must be archived instead.} other {These # commands are deleted permanently. Commands with run history must be archived instead.}}"
+    "deleteCommandsDescription": "{count, plural, one {This command is deleted permanently. Commands with run history must be archived instead.} other {These # commands are deleted permanently. Commands with run history must be archived instead.}}",
+    "queue": "Queue",
+    "queued": "Queued",
+    "queuedTitle": "Waiting to start",
+    "queueDescription": "Every command run competing for this target.",
+    "queuePosition": "Position {position} of {waiting} in the queue for this target.",
+    "queuedWaitingForAgent": "The run was handed to {agent} and waits for the agent to pick it up.",
+    "queuedAgentOffline": "{agent} is offline, so nothing can pick this run up. It starts once the agent reconnects.",
+    "queuedWaitingForPredecessor": "Waiting for run #{predecessor}, which this run replaces, to finish.",
+    "queuedRestartDelay": "Waiting for the restart delay to elapse before the next attempt.",
+    "queuedTargetBusy": "{blocking, plural, one {# run holds} other {# runs hold}} the target this run needs.",
+    "queuedBehind": "{blocking, plural, one {# run is} other {# runs are}} queued ahead of this one for the target.",
+    "queuedReady": "Nothing is blocking this run; it starts on the next dispatch.",
+    "thisRun": "This run",
+    "holdingTarget": "Holds the target",
+    "blocking": "Blocking"
   },
   "costs": {
     "title": "Costs",

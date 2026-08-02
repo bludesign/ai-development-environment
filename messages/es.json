@@ -4235,7 +4235,22 @@
     "selectCommand": "Seleccionar {name}",
     "selectedCommands": "{count, plural, =0 {Ningún comando seleccionado} one {# comando seleccionado} other {# comandos seleccionados}}",
     "deleteCommandsTitle": "¿Eliminar comandos?",
-    "deleteCommandsDescription": "{count, plural, one {Este comando se elimina de forma permanente. Los comandos con historial de ejecuciones deben archivarse en su lugar.} other {Estos # comandos se eliminan de forma permanente. Los comandos con historial de ejecuciones deben archivarse en su lugar.}}"
+    "deleteCommandsDescription": "{count, plural, one {Este comando se elimina de forma permanente. Los comandos con historial de ejecuciones deben archivarse en su lugar.} other {Estos # comandos se eliminan de forma permanente. Los comandos con historial de ejecuciones deben archivarse en su lugar.}}",
+    "queue": "Cola",
+    "queued": "En cola",
+    "queuedTitle": "Esperando para iniciar",
+    "queueDescription": "Todas las ejecuciones de comandos que compiten por este destino.",
+    "queuePosition": "Posición {position} de {waiting} en la cola de este destino.",
+    "queuedWaitingForAgent": "La ejecución se entregó a {agent} y espera a que el agente la tome.",
+    "queuedAgentOffline": "{agent} está sin conexión, así que nadie puede tomar esta ejecución. Se iniciará cuando el agente vuelva a conectarse.",
+    "queuedWaitingForPredecessor": "Esperando a que termine la ejecución n.º {predecessor}, a la que esta reemplaza.",
+    "queuedRestartDelay": "Esperando a que transcurra el retardo de reinicio antes del siguiente intento.",
+    "queuedTargetBusy": "{blocking, plural, one {# ejecución ocupa} other {# ejecuciones ocupan}} el destino que necesita esta ejecución.",
+    "queuedBehind": "{blocking, plural, one {Hay # ejecución} other {Hay # ejecuciones}} por delante de esta en la cola de este destino.",
+    "queuedReady": "Nada bloquea esta ejecución; se iniciará en el próximo envío.",
+    "thisRun": "Esta ejecución",
+    "holdingTarget": "Ocupa el destino",
+    "blocking": "Bloquea"
   },
   "costs": {
     "title": "Costes",

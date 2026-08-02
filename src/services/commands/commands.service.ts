@@ -15,6 +15,7 @@ import {
   COMMANDS_CHANGED_TOPIC,
   SIDEBAR_STATUS_CHANGED_TOPIC,
   agentEventBus,
+  agentOnlineWindowMs,
   commandRunChangedTopic,
   commandRunOutputTopic,
   type AgentControlService,
@@ -179,6 +180,118 @@ export function admitCommandRun(input: {
     !holders.some((peer) => peer.concurrency === "EXCLUSIVE") &&
     !ahead.some((peer) => peer.concurrency === "EXCLUSIVE")
   );
+}
+
+/** One run competing for a target, as shown in a run's queue. */
+export type CommandQueueMember = CommandConcurrencyPeer & {
+  displayNumber: number;
+  name: string;
+  status: string;
+  /** True once the run owns the target: its attempt has a job still in flight. */
+  holdingTarget: boolean;
+};
+
+export type CommandRunQueueReason =
+  | "NOT_QUEUED"
+  | "WAITING_FOR_AGENT"
+  | "AGENT_OFFLINE"
+  | "WAITING_FOR_PREDECESSOR"
+  | "RESTART_DELAY"
+  | "TARGET_BUSY"
+  | "QUEUED_BEHIND"
+  | "READY";
+
+export type CommandRunQueueEntry = CommandQueueMember & {
+  blocking: boolean;
+  currentRun: boolean;
+};
+
+export type CommandRunQueue = {
+  reason: CommandRunQueueReason;
+  position: number;
+  waitingCount: number;
+  entries: CommandRunQueueEntry[];
+};
+
+const QUEUEABLE_RUN_STATUSES = ["QUEUED", "RESTARTING"];
+
+// The same order {@link admitCommandRun} uses to decide who goes first, so the
+// list the run detail page renders is the order the dispatcher will follow.
+const byQueueOrder = (left: CommandQueueMember, right: CommandQueueMember) =>
+  left.queuedAt.getTime() - right.queuedAt.getTime() ||
+  left.id.localeCompare(right.id);
+
+/**
+ * Explains why a run has not started and reconstructs the wait line for its
+ * target. The blocking peers are exactly the ones {@link admitCommandRun}
+ * consults, so a run reported as `TARGET_BUSY` or `QUEUED_BEHIND` names the
+ * runs that will actually be waited on.
+ *
+ * A run that already handed its work to an agent is no longer in the line: it
+ * is either waiting for that agent to pick the job up or waiting for an agent
+ * that is not connected, which is the difference between `WAITING_FOR_AGENT`
+ * and `AGENT_OFFLINE`.
+ */
+export function evaluateCommandRunQueue(input: {
+  candidate: CommandQueueMember & { stopRequested: boolean };
+  peers: CommandQueueMember[];
+  agentOnline: boolean;
+  predecessorPending: boolean;
+  restartPending: boolean;
+}): CommandRunQueue {
+  const { candidate } = input;
+  const competing = candidate.concurrency !== "EXCLUDED";
+  const heldByPeers = input.peers.filter((peer) => peer.holdingTarget);
+  // The candidate belongs to whichever group it is in, so the rendered list is
+  // the whole picture for the target rather than everyone except the run being
+  // looked at.
+  const holders = [
+    ...heldByPeers,
+    ...(candidate.holdingTarget ? [candidate] : []),
+  ].sort(byQueueOrder);
+  const line = [
+    ...input.peers.filter((peer) => !peer.holdingTarget),
+    ...(candidate.holdingTarget ? [] : [candidate]),
+  ].sort(byQueueOrder);
+  const index = line.findIndex((peer) => peer.id === candidate.id);
+  const ahead = index < 0 ? [] : line.slice(0, index);
+  const blocks = (peer: CommandQueueMember) =>
+    competing &&
+    peer.concurrency !== "EXCLUDED" &&
+    (candidate.concurrency === "EXCLUSIVE" || peer.concurrency === "EXCLUSIVE");
+  const blockingHolders = heldByPeers.filter(blocks);
+  const blockingAhead = ahead.filter(blocks);
+  const reason = ((): CommandRunQueueReason => {
+    if (
+      candidate.stopRequested ||
+      !QUEUEABLE_RUN_STATUSES.includes(candidate.status)
+    ) {
+      return "NOT_QUEUED";
+    }
+    if (candidate.holdingTarget)
+      return input.agentOnline ? "WAITING_FOR_AGENT" : "AGENT_OFFLINE";
+    if (input.predecessorPending) return "WAITING_FOR_PREDECESSOR";
+    if (input.restartPending) return "RESTART_DELAY";
+    if (blockingHolders.length) return "TARGET_BUSY";
+    if (blockingAhead.length) return "QUEUED_BEHIND";
+    if (!input.agentOnline) return "AGENT_OFFLINE";
+    return "READY";
+  })();
+  const blocking = new Set(
+    reason === "TARGET_BUSY" || reason === "QUEUED_BEHIND"
+      ? [...blockingHolders, ...blockingAhead].map((peer) => peer.id)
+      : [],
+  );
+  return {
+    reason,
+    position: index < 0 ? 0 : index + 1,
+    waitingCount: line.length,
+    entries: [...holders, ...line].map((peer) => ({
+      ...peer,
+      blocking: blocking.has(peer.id),
+      currentRun: peer.id === candidate.id,
+    })),
+  };
 }
 
 function enumValue<T extends readonly string[]>(
@@ -676,6 +789,76 @@ export class CommandsService {
     });
   }
 
+  /**
+   * Explains why a run has not started yet. The queue is derived on read
+   * rather than stored: it is a view of the same rows the dispatcher consults,
+   * so it cannot drift from the decision the dispatcher will actually make.
+   */
+  async runQueue(runId: string): Promise<CommandRunQueue> {
+    const prisma = await getPrismaClient();
+    const run = await prisma.commandRun.findUnique({
+      where: { id: runId },
+      include: {
+        agent: {
+          select: {
+            lastSeenAt: true,
+            disconnectedAt: true,
+            heartbeatIntervalSeconds: true,
+          },
+        },
+        predecessor: { select: { status: true } },
+        attempts: {
+          select: { agentJobId: true, completionProcessedAt: true },
+          orderBy: { attempt: "desc" },
+          take: 1,
+        },
+      },
+    });
+    if (!run) {
+      return {
+        reason: "NOT_QUEUED",
+        position: 0,
+        waitingCount: 0,
+        entries: [],
+      };
+    }
+    const attempt = run.attempts[0];
+    const agentOnline = Boolean(
+      run.agent?.lastSeenAt &&
+      !run.agent.disconnectedAt &&
+      Date.now() - run.agent.lastSeenAt.getTime() <=
+        agentOnlineWindowMs(run.agent),
+    );
+    return evaluateCommandRunQueue({
+      candidate: {
+        id: run.id,
+        displayNumber: run.displayNumber,
+        name: run.snapshotName,
+        status: run.status,
+        concurrency: run.snapshotConcurrency,
+        queuedAt: run.queuedAt,
+        stopRequested: run.stopRequested,
+        holdingTarget: Boolean(
+          attempt?.agentJobId && !attempt.completionProcessedAt,
+        ),
+      },
+      peers:
+        run.snapshotConcurrency === "EXCLUDED"
+          ? []
+          : await this.targetPeers(run),
+      agentOnline,
+      predecessorPending: Boolean(
+        run.predecessor &&
+        !FINAL_RUN_STATUSES.includes(run.predecessor.status as never),
+      ),
+      restartPending: Boolean(
+        run.status === "RESTARTING" &&
+        run.nextRestartAt &&
+        run.nextRestartAt.getTime() > Date.now(),
+      ),
+    });
+  }
+
   async listOutput(
     runId: string,
     afterAttempt = 0,
@@ -915,19 +1098,15 @@ export class CommandsService {
   }
 
   /**
-   * Reads the other runs sharing this run's target and asks
-   * {@link admitCommandRun} whether the target is free. A run that is turned
-   * away keeps its current status — `QUEUED` or `RESTARTING` — and the
-   * reconcile loop offers it the target again on the next tick.
+   * Reads the other active runs sharing this run's target. `EXCLUDED` runs are
+   * left out because they neither wait nor make anything wait, so they are
+   * absent from admission and from the queue the run detail page renders.
    */
-  private async admitRun(run: {
+  private async targetPeers(run: {
     id: string;
-    snapshotConcurrency: string;
-    queuedAt: Date;
     agentId: string | null;
     worktreeId: string | null;
-  }): Promise<boolean> {
-    if (run.snapshotConcurrency === "EXCLUDED") return true;
+  }): Promise<CommandQueueMember[]> {
     const prisma = await getPrismaClient();
     const peers = await prisma.commandRun.findMany({
       where: {
@@ -942,6 +1121,9 @@ export class CommandsService {
       },
       select: {
         id: true,
+        displayNumber: true,
+        snapshotName: true,
+        status: true,
         snapshotConcurrency: true,
         queuedAt: true,
         attempts: {
@@ -951,21 +1133,39 @@ export class CommandsService {
         },
       },
     });
-    const holders: CommandConcurrencyPeer[] = [];
-    const waiting: CommandConcurrencyPeer[] = [];
-    for (const peer of peers) {
+    return peers.map((peer) => {
       const attempt = peer.attempts[0];
-      const entry = {
+      return {
         id: peer.id,
+        displayNumber: peer.displayNumber,
+        name: peer.snapshotName,
+        status: peer.status,
         concurrency: peer.snapshotConcurrency,
         queuedAt: peer.queuedAt,
+        holdingTarget: Boolean(
+          attempt?.agentJobId && !attempt.completionProcessedAt,
+        ),
       };
-      if (attempt?.agentJobId && !attempt.completionProcessedAt) {
-        holders.push(entry);
-      } else {
-        waiting.push(entry);
-      }
-    }
+    });
+  }
+
+  /**
+   * Reads the other runs sharing this run's target and asks
+   * {@link admitCommandRun} whether the target is free. A run that is turned
+   * away keeps its current status — `QUEUED` or `RESTARTING` — and the
+   * reconcile loop offers it the target again on the next tick.
+   */
+  private async admitRun(run: {
+    id: string;
+    snapshotConcurrency: string;
+    queuedAt: Date;
+    agentId: string | null;
+    worktreeId: string | null;
+  }): Promise<boolean> {
+    if (run.snapshotConcurrency === "EXCLUDED") return true;
+    const peers = await this.targetPeers(run);
+    const holders = peers.filter((peer) => peer.holdingTarget);
+    const waiting = peers.filter((peer) => !peer.holdingTarget);
     return admitCommandRun({
       candidate: {
         id: run.id,
