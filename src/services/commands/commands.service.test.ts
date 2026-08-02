@@ -3,13 +3,53 @@ import { beforeEach, describe, expect, test, vi } from "vitest";
 const getPrismaClient = vi.hoisted(() => vi.fn());
 vi.mock("@/data/prisma-client", () => ({ getPrismaClient }));
 
-import { CommandsService, evaluateCommandRestart } from "./commands.service";
+import {
+  CommandsService,
+  admitCommandRun,
+  evaluateCommandRestart,
+  evaluateCommandRunQueue,
+} from "./commands.service";
 
 const agentControl = () =>
   ({
     registerCompletionHandler: vi.fn(),
     registerConnectionHandler: vi.fn(),
   }) as never;
+
+describe("CommandsService.listRuns", () => {
+  test("filters statuses in the database before pagination", async () => {
+    const findMany = vi.fn().mockResolvedValue([]);
+    const count = vi.fn().mockResolvedValue(0);
+    getPrismaClient.mockResolvedValue({
+      commandRun: { findMany, count },
+    });
+
+    await new CommandsService(agentControl()).listRuns({
+      agentId: "agent-1",
+      statuses: ["QUEUED", "RUNNING", "RESTARTING", "CANCELLING"],
+      first: 50,
+    });
+
+    expect(findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          agentId: "agent-1",
+          status: {
+            in: ["QUEUED", "RUNNING", "RESTARTING", "CANCELLING"],
+          },
+        }),
+        take: 51,
+      }),
+    );
+    expect(count).toHaveBeenCalledWith({
+      where: expect.objectContaining({
+        status: {
+          in: ["QUEUED", "RUNNING", "RESTARTING", "CANCELLING"],
+        },
+      }),
+    });
+  });
+});
 
 describe("command restart policy", () => {
   test.each([
@@ -79,6 +119,485 @@ describe("command restart policy", () => {
         manualStop: true,
       }),
     ).toEqual({ restart: false, restartCount: 4, exhausted: false });
+  });
+});
+
+describe("CommandsService.terminateRun", () => {
+  beforeEach(() => vi.clearAllMocks());
+
+  const terminateWith = async (job: { status: string } | null) => {
+    const update = vi
+      .fn()
+      .mockResolvedValue({ id: "run-1", status: "CANCELLING" });
+    getPrismaClient.mockResolvedValue({
+      commandRun: {
+        findUnique: vi
+          .fn()
+          .mockResolvedValueOnce({
+            id: "run-1",
+            status: "RESTARTING",
+            attempts: [{ id: "attempt-3", agentJobId: job ? "job-3" : null }],
+          })
+          .mockResolvedValue(null),
+        update,
+      },
+    });
+    const cancelJob = vi.fn().mockResolvedValue(job);
+    const service = new CommandsService({
+      registerCompletionHandler: vi.fn(),
+      registerConnectionHandler: vi.fn(),
+      cancelJob,
+    } as never);
+    await service.terminateRun("run-1");
+    return { update, cancelJob };
+  };
+
+  test("closes out a run whose newest attempt already finished", async () => {
+    // Terminating a run waiting to restart used to leave it in CANCELLING:
+    // cancelJob is a no-op on a job that already failed, and nothing else
+    // finished the run.
+    const { update } = await terminateWith({ status: "FAILED" });
+    expect(update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({ status: "CANCELLED" }),
+      }),
+    );
+  });
+
+  test("waits for the agent when the cancel reached a live job", async () => {
+    const { update, cancelJob } = await terminateWith({ status: "CANCELLING" });
+    expect(cancelJob).toHaveBeenCalledWith("job-3");
+    expect(
+      update.mock.calls.some(
+        ([call]) =>
+          (call as { data: { status: string } }).data.status === "CANCELLED",
+      ),
+    ).toBe(false);
+  });
+});
+
+describe("command concurrency admission", () => {
+  const at = (minute: number) => new Date(`2026-08-02T10:0${minute}:00Z`);
+  const peer = (id: string, concurrency: string, minute: number) => ({
+    id,
+    concurrency,
+    queuedAt: at(minute),
+  });
+
+  test("lets non-exclusive runs share a target", () => {
+    expect(
+      admitCommandRun({
+        candidate: peer("candidate", "NON_EXCLUSIVE", 1),
+        holders: [peer("holder", "NON_EXCLUSIVE", 0)],
+        waiting: [],
+      }),
+    ).toBe(true);
+  });
+
+  test("holds an exclusive run while any non-excluded run owns the target", () => {
+    expect(
+      admitCommandRun({
+        candidate: peer("candidate", "EXCLUSIVE", 1),
+        holders: [peer("holder", "NON_EXCLUSIVE", 0)],
+        waiting: [],
+      }),
+    ).toBe(false);
+  });
+
+  test("holds a non-exclusive run while an exclusive run owns the target", () => {
+    expect(
+      admitCommandRun({
+        candidate: peer("candidate", "NON_EXCLUSIVE", 1),
+        holders: [peer("holder", "EXCLUSIVE", 0)],
+        waiting: [],
+      }),
+    ).toBe(false);
+  });
+
+  test("admits an excluded run against an exclusive holder", () => {
+    expect(
+      admitCommandRun({
+        candidate: peer("candidate", "EXCLUDED", 1),
+        holders: [peer("holder", "EXCLUSIVE", 0)],
+        waiting: [peer("older", "EXCLUSIVE", 0)],
+      }),
+    ).toBe(true);
+  });
+
+  test("ignores excluded runs when deciding for everyone else", () => {
+    expect(
+      admitCommandRun({
+        candidate: peer("candidate", "EXCLUSIVE", 1),
+        holders: [peer("holder", "EXCLUDED", 0)],
+        waiting: [peer("older", "EXCLUDED", 0)],
+      }),
+    ).toBe(true);
+  });
+
+  test("admits only the oldest of two exclusive runs racing for a free target", () => {
+    const older = peer("older", "EXCLUSIVE", 0);
+    const newer = peer("newer", "EXCLUSIVE", 1);
+    expect(
+      admitCommandRun({ candidate: older, holders: [], waiting: [newer] }),
+    ).toBe(true);
+    expect(
+      admitCommandRun({ candidate: newer, holders: [], waiting: [older] }),
+    ).toBe(false);
+  });
+
+  test("breaks a tied queue timestamp by id so both runs agree on the winner", () => {
+    const first = { id: "run-a", concurrency: "EXCLUSIVE", queuedAt: at(0) };
+    const second = { id: "run-b", concurrency: "EXCLUSIVE", queuedAt: at(0) };
+    expect(
+      admitCommandRun({ candidate: first, holders: [], waiting: [second] }),
+    ).toBe(true);
+    expect(
+      admitCommandRun({ candidate: second, holders: [], waiting: [first] }),
+    ).toBe(false);
+  });
+
+  test("makes a shared run yield to an exclusive run queued ahead of it", () => {
+    // Without this a steady stream of non-exclusive work would keep the target
+    // occupied and the exclusive run would never reach the front.
+    expect(
+      admitCommandRun({
+        candidate: peer("candidate", "NON_EXCLUSIVE", 2),
+        holders: [],
+        waiting: [peer("exclusive", "EXCLUSIVE", 1)],
+      }),
+    ).toBe(false);
+    expect(
+      admitCommandRun({
+        candidate: peer("candidate", "NON_EXCLUSIVE", 0),
+        holders: [],
+        waiting: [peer("exclusive", "EXCLUSIVE", 1)],
+      }),
+    ).toBe(true);
+  });
+});
+
+describe("command run queue explanation", () => {
+  const at = (minute: number) => new Date(`2026-08-02T10:0${minute}:00Z`);
+  const member = (
+    id: string,
+    concurrency: string,
+    minute: number,
+    holdingTarget = false,
+  ) => ({
+    id,
+    displayNumber: Number(id.replace(/\D/g, "")) || 1,
+    name: "Tailscale",
+    status: holdingTarget ? "RUNNING" : "QUEUED",
+    concurrency,
+    queuedAt: at(minute),
+    holdingTarget,
+  });
+  const evaluate = (
+    overrides: Partial<Parameters<typeof evaluateCommandRunQueue>[0]> = {},
+    candidate: Partial<
+      Parameters<typeof evaluateCommandRunQueue>[0]["candidate"]
+    > = {},
+  ) =>
+    evaluateCommandRunQueue({
+      candidate: {
+        ...member("run-2", "NON_EXCLUSIVE", 2),
+        stopRequested: false,
+        ...candidate,
+      },
+      peers: [],
+      agentOnline: true,
+      predecessorPending: false,
+      restartPending: false,
+      ...overrides,
+    });
+
+  test("blames the offline agent when the job is waiting with nobody to claim it", () => {
+    // The failure this exists for: the job was created, so nothing is blocked
+    // on concurrency, and the run sits in QUEUED until the agent comes back.
+    const queue = evaluate({ agentOnline: false }, { holdingTarget: true });
+    expect(queue.reason).toBe("AGENT_OFFLINE");
+    expect(queue.position).toBe(0);
+  });
+
+  test("separates a job the agent has not picked up yet from an offline agent", () => {
+    expect(evaluate({}, { holdingTarget: true }).reason).toBe(
+      "WAITING_FOR_AGENT",
+    );
+  });
+
+  test("reports the holder that owns the target", () => {
+    const queue = evaluate({
+      peers: [member("run-1", "EXCLUSIVE", 1, true)],
+    });
+    expect(queue.reason).toBe("TARGET_BUSY");
+    expect(
+      queue.entries.filter((entry) => entry.blocking).map((entry) => entry.id),
+    ).toEqual(["run-1"]);
+  });
+
+  test("reports the exclusive run queued ahead and this run's place in line", () => {
+    const queue = evaluate({ peers: [member("run-1", "EXCLUSIVE", 1)] });
+    expect(queue.reason).toBe("QUEUED_BEHIND");
+    expect(queue.position).toBe(2);
+    expect(queue.waitingCount).toBe(2);
+  });
+
+  test("keeps a shared run out of the way of other shared runs", () => {
+    const queue = evaluate({ peers: [member("run-1", "NON_EXCLUSIVE", 1)] });
+    expect(queue.reason).toBe("READY");
+    expect(queue.entries.every((entry) => !entry.blocking)).toBe(true);
+  });
+
+  test("prefers the predecessor and the restart delay over concurrency", () => {
+    expect(evaluate({ predecessorPending: true }).reason).toBe(
+      "WAITING_FOR_PREDECESSOR",
+    );
+    expect(evaluate({ restartPending: true }).reason).toBe("RESTART_DELAY");
+  });
+
+  test("reports nothing for a run that is no longer waiting", () => {
+    expect(evaluate({}, { status: "RUNNING" }).reason).toBe("NOT_QUEUED");
+    expect(evaluate({}, { stopRequested: true }).reason).toBe("NOT_QUEUED");
+  });
+
+  test("lists holders first and the rest in the order the dispatcher uses", () => {
+    const queue = evaluate({
+      peers: [
+        member("run-3", "NON_EXCLUSIVE", 3),
+        member("run-1", "NON_EXCLUSIVE", 1, true),
+        member("run-0", "NON_EXCLUSIVE", 0),
+      ],
+    });
+    expect(queue.entries.map((entry) => entry.id)).toEqual([
+      "run-1",
+      "run-0",
+      "run-2",
+      "run-3",
+    ]);
+    expect(queue.entries.filter((entry) => entry.currentRun)).toHaveLength(1);
+  });
+});
+
+describe("CommandsService.runQueue", () => {
+  beforeEach(() => vi.clearAllMocks());
+
+  const queueFor = async (
+    agent: { lastSeenAt: Date | null; disconnectedAt: Date | null } | null,
+  ) => {
+    const findUnique = vi.fn().mockResolvedValue({
+      id: "run-1",
+      displayNumber: 13,
+      snapshotName: "Tailscale",
+      status: "QUEUED",
+      snapshotConcurrency: "NON_EXCLUSIVE",
+      queuedAt: new Date("2026-08-02T22:15:41.585Z"),
+      stopRequested: false,
+      nextRestartAt: null,
+      agentId: "agent-1",
+      worktreeId: "worktree-1",
+      agent,
+      predecessor: null,
+      attempts: [{ agentJobId: "job-1", completionProcessedAt: null }],
+    });
+    getPrismaClient.mockResolvedValue({
+      commandRun: { findUnique, findMany: vi.fn().mockResolvedValue([]) },
+    });
+    return new CommandsService(agentControl()).runQueue("run-1");
+  };
+
+  test("reports an agent that stopped heartbeating as offline", async () => {
+    const queue = await queueFor({
+      lastSeenAt: new Date(Date.now() - 10 * 60_000),
+      disconnectedAt: null,
+    });
+    expect(queue.reason).toBe("AGENT_OFFLINE");
+    expect(queue.entries).toHaveLength(1);
+    expect(queue.entries[0]).toMatchObject({
+      displayNumber: 13,
+      currentRun: true,
+      holdingTarget: true,
+    });
+  });
+
+  test("reports a connected agent that has not claimed the job yet", async () => {
+    const queue = await queueFor({
+      lastSeenAt: new Date(),
+      disconnectedAt: null,
+    });
+    expect(queue.reason).toBe("WAITING_FOR_AGENT");
+  });
+
+  test("reports a deleted agent as offline rather than throwing", async () => {
+    expect((await queueFor(null)).reason).toBe("AGENT_OFFLINE");
+  });
+});
+
+describe("command concurrency dispatch", () => {
+  beforeEach(() => vi.clearAllMocks());
+
+  const dispatchWith = async (input: {
+    candidate: string;
+    peers: Array<{
+      id: string;
+      snapshotConcurrency: string;
+      queuedAt: Date;
+      attempts: Array<{
+        agentJobId: string | null;
+        completionProcessedAt: Date | null;
+      }>;
+    }>;
+  }) => {
+    const createAttempt = vi.fn().mockResolvedValue({
+      id: "attempt-1",
+      agentJobId: null,
+      status: "QUEUED",
+    });
+    const findMany = vi.fn().mockResolvedValue(input.peers);
+    getPrismaClient.mockResolvedValue({
+      commandRun: {
+        findUnique: vi.fn().mockResolvedValue({
+          id: "run-1",
+          status: "QUEUED",
+          stopRequested: false,
+          predecessorRunId: null,
+          snapshotTargetKind: "ANY_WORKTREE",
+          snapshotScript: "printf safe",
+          snapshotConcurrency: input.candidate,
+          queuedAt: new Date("2026-08-02T10:05:00Z"),
+          agentId: "agent-1",
+          agent: { capabilitiesJson: '["command.run"]' },
+          worktreeId: "worktree-1",
+          worktree: { missingAt: null, codebase: { agentId: "agent-1" } },
+          startedAt: null,
+          attempts: [],
+        }),
+        findMany,
+        update: vi.fn().mockResolvedValue({ id: "run-1", status: "QUEUED" }),
+      },
+      commandRunAttempt: {
+        findUnique: vi.fn(),
+        create: createAttempt,
+        update: vi
+          .fn()
+          .mockResolvedValue({ id: "attempt-1", agentJobId: "job-1" }),
+      },
+    });
+    const createJob = vi
+      .fn()
+      .mockResolvedValue({ id: "job-1", status: "QUEUED" });
+    const service = new CommandsService({
+      registerCompletionHandler: vi.fn(),
+      registerConnectionHandler: vi.fn(),
+      createJob,
+    } as never);
+    await (
+      service as unknown as { dispatch: (runId: string) => Promise<void> }
+    ).dispatch("run-1");
+    return { createJob, createAttempt, findMany };
+  };
+
+  const holder = (id: string, concurrency: string) => ({
+    id,
+    snapshotConcurrency: concurrency,
+    queuedAt: new Date("2026-08-02T10:00:00Z"),
+    attempts: [{ agentJobId: "job-held", completionProcessedAt: null }],
+  });
+
+  test("queues an exclusive run rather than failing it when the target is busy", async () => {
+    const { createJob, createAttempt } = await dispatchWith({
+      candidate: "EXCLUSIVE",
+      peers: [holder("run-0", "NON_EXCLUSIVE")],
+    });
+    expect(createJob).not.toHaveBeenCalled();
+    // The attempt row is withheld too, so a blocked run does not burn an
+    // attempt number on every reconcile tick.
+    expect(createAttempt).not.toHaveBeenCalled();
+  });
+
+  test("starts a non-exclusive run beside another non-exclusive run", async () => {
+    const { createJob } = await dispatchWith({
+      candidate: "NON_EXCLUSIVE",
+      peers: [holder("run-0", "NON_EXCLUSIVE")],
+    });
+    expect(createJob).toHaveBeenCalledTimes(1);
+  });
+
+  test("starts an excluded run without consulting the target at all", async () => {
+    const { createJob, findMany } = await dispatchWith({
+      candidate: "EXCLUDED",
+      peers: [holder("run-0", "EXCLUSIVE")],
+    });
+    expect(createJob).toHaveBeenCalledTimes(1);
+    expect(findMany).not.toHaveBeenCalled();
+  });
+
+  test("treats a queued peer without a job as waiting rather than holding", async () => {
+    const { createJob } = await dispatchWith({
+      candidate: "EXCLUSIVE",
+      peers: [
+        {
+          id: "run-0",
+          snapshotConcurrency: "NON_EXCLUSIVE",
+          // Queued after the candidate, so it is behind it in line and the
+          // candidate may still take the free target.
+          queuedAt: new Date("2026-08-02T10:06:00Z"),
+          attempts: [{ agentJobId: null, completionProcessedAt: null }],
+        },
+      ],
+    });
+    expect(createJob).toHaveBeenCalledTimes(1);
+  });
+
+  test("keeps a run queued when the codebase is held by other work", async () => {
+    const createAttempt = vi.fn().mockResolvedValue({
+      id: "attempt-1",
+      agentJobId: null,
+      status: "QUEUED",
+    });
+    const updateRun = vi.fn();
+    getPrismaClient.mockResolvedValue({
+      commandRun: {
+        findUnique: vi.fn().mockResolvedValue({
+          id: "run-1",
+          status: "QUEUED",
+          stopRequested: false,
+          predecessorRunId: null,
+          snapshotTargetKind: "ANY_WORKTREE",
+          snapshotScript: "printf safe",
+          snapshotConcurrency: "NON_EXCLUSIVE",
+          queuedAt: new Date("2026-08-02T10:05:00Z"),
+          agentId: "agent-1",
+          agent: { capabilitiesJson: '["command.run"]' },
+          worktreeId: "worktree-1",
+          worktree: { missingAt: null, codebase: { agentId: "agent-1" } },
+          startedAt: null,
+          attempts: [],
+        }),
+        findMany: vi.fn().mockResolvedValue([]),
+        update: updateRun,
+      },
+      commandRunAttempt: {
+        findUnique: vi.fn(),
+        create: createAttempt,
+        update: vi.fn(),
+      },
+    });
+    const busy = Object.assign(
+      new Error("Another operation is active for this codebase"),
+      { name: "CodebaseBusyError" },
+    );
+    const service = new CommandsService({
+      registerCompletionHandler: vi.fn(),
+      registerConnectionHandler: vi.fn(),
+      createJob: vi.fn().mockRejectedValue(busy),
+    } as never);
+
+    await expect(
+      (
+        service as unknown as { dispatch: (runId: string) => Promise<void> }
+      ).dispatch("run-1"),
+    ).resolves.toBeUndefined();
+    expect(updateRun).not.toHaveBeenCalled();
   });
 });
 
@@ -600,6 +1119,145 @@ describe("command reconciliation", () => {
     expect(dispatch).toHaveBeenCalledWith("run-1");
   });
 
+  test.each([
+    ["FAILED", "a restart waiting after a failed attempt"],
+    ["SUCCEEDED", "a restart waiting after a clean attempt"],
+    ["TIMED_OUT", "a restart waiting after a timed-out attempt"],
+    ["CANCELLED", "an attempt the agent already cancelled"],
+  ])(
+    "finishes a stop request whose newest job is %s (%s)",
+    async (jobStatus) => {
+      // The agent cannot cancel a job that already reported back, so a stop
+      // requested between attempts left the run stuck in CANCELLING forever.
+      const update = vi
+        .fn()
+        .mockResolvedValue({ id: "run-1", status: "CANCELLED" });
+      const cancelJob = vi.fn();
+      getPrismaClient.mockResolvedValue({
+        commandRun: {
+          findMany: vi.fn().mockResolvedValue([
+            {
+              id: "run-1",
+              status: "CANCELLING",
+              stopRequested: true,
+              nextRestartAt: null,
+              attempts: [
+                {
+                  id: "attempt-3",
+                  status: jobStatus,
+                  agentJobId: "job-3",
+                  agentJob: { id: "job-3", status: jobStatus },
+                  completionProcessedAt: new Date(),
+                },
+              ],
+            },
+          ]),
+          findUnique: vi.fn().mockResolvedValue(null),
+          update,
+        },
+      });
+      const service = new CommandsService({
+        registerCompletionHandler: vi.fn(),
+        registerConnectionHandler: vi.fn(),
+        cancelJob,
+      } as never);
+
+      await service.reconcile();
+
+      expect(cancelJob).not.toHaveBeenCalled();
+      expect(update).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { id: "run-1" },
+          data: expect.objectContaining({ status: "CANCELLED" }),
+        }),
+      );
+    },
+  );
+
+  test("still asks the agent to cancel a job that is running", async () => {
+    const cancelJob = vi.fn().mockResolvedValue({ id: "job-1" });
+    const update = vi.fn();
+    getPrismaClient.mockResolvedValue({
+      commandRun: {
+        findMany: vi.fn().mockResolvedValue([
+          {
+            id: "run-1",
+            status: "CANCELLING",
+            stopRequested: true,
+            nextRestartAt: null,
+            attempts: [
+              {
+                id: "attempt-1",
+                status: "RUNNING",
+                agentJobId: "job-1",
+                agentJob: { id: "job-1", status: "RUNNING" },
+                completionProcessedAt: null,
+              },
+            ],
+          },
+        ]),
+        findUnique: vi.fn().mockResolvedValue(null),
+        update,
+      },
+    });
+    const service = new CommandsService({
+      registerCompletionHandler: vi.fn(),
+      registerConnectionHandler: vi.fn(),
+      cancelJob,
+    } as never);
+
+    await service.reconcile();
+
+    expect(cancelJob).toHaveBeenCalledWith("job-1");
+    expect(update).not.toHaveBeenCalled();
+  });
+
+  test("finishes a stop request for a run that never reached a job", async () => {
+    // A run held back by concurrency has no job to cancel, so terminating it
+    // has to close it out directly.
+    const update = vi
+      .fn()
+      .mockResolvedValue({ id: "run-1", status: "CANCELLED" });
+    const cancelJob = vi.fn();
+    getPrismaClient.mockResolvedValue({
+      commandRun: {
+        findMany: vi.fn().mockResolvedValue([
+          {
+            id: "run-1",
+            status: "CANCELLING",
+            stopRequested: true,
+            nextRestartAt: null,
+            attempts: [
+              {
+                id: "attempt-1",
+                status: "QUEUED",
+                agentJobId: null,
+                agentJob: null,
+                completionProcessedAt: null,
+              },
+            ],
+          },
+        ]),
+        findUnique: vi.fn().mockResolvedValue(null),
+        update,
+      },
+    });
+    const service = new CommandsService({
+      registerCompletionHandler: vi.fn(),
+      registerConnectionHandler: vi.fn(),
+      cancelJob,
+    } as never);
+
+    await service.reconcile();
+
+    expect(cancelJob).not.toHaveBeenCalled();
+    expect(update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({ status: "CANCELLED" }),
+      }),
+    );
+  });
+
   test("resumes queued dispatch with an incomplete attempt", async () => {
     getPrismaClient.mockResolvedValue({
       commandRun: {
@@ -793,8 +1451,11 @@ describe("command reconciliation", () => {
           worktreeId: null,
           worktree: null,
           startedAt: null,
+          queuedAt: new Date("2026-08-02T10:00:00Z"),
+          snapshotConcurrency: "NON_EXCLUSIVE",
           attempts: [incompleteAttempt],
         }),
+        findMany: vi.fn().mockResolvedValue([]),
         update: vi.fn().mockResolvedValue({ id: "run-1", status: "QUEUED" }),
       },
       commandRunAttempt: {

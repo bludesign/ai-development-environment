@@ -9,6 +9,7 @@ import {
 import { AgentGraphQLClient } from "./graphql-client.js";
 import { collectInventory, type AgentInventory } from "./inventory.js";
 import { runAgent } from "./agent-runtime.js";
+import { reapOrphanedCommandProcesses } from "./command-processes.js";
 
 const DEFAULT_SERVER_WAIT_MS = 120_000;
 const SERVER_RETRY_MS = 500;
@@ -164,5 +165,6 @@ export async function runDevelopmentAgent(
   signal: AbortSignal,
 ): Promise<void> {
   const config = await prepareDevelopmentAgent(options, signal);
+  await reapOrphanedCommandProcesses(config.agentId, signal);
   await runAgent(config, signal);
 }

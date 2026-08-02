@@ -10,6 +10,7 @@ import {
   type AgentConfig,
 } from "./config.js";
 import { runAgent } from "./agent-runtime.js";
+import { reapOrphanedCommandProcesses } from "./command-processes.js";
 import { runDevelopmentAgent } from "./dev-runtime.js";
 import { probeEndpoint } from "./endpoint-selection.js";
 import { repairToolPath } from "./executable-lookup.js";
@@ -309,7 +310,12 @@ async function main(): Promise<void> {
           controller.signal,
         );
       }
-      return await runAgent(await loadConfig(), controller.signal);
+      const config = await loadConfig();
+      // Commands run detached so their whole tree can be stopped as one
+      // process group. Scope recovery to this enrollment so a development or
+      // second enrolled agent under the same OS account remains untouched.
+      await reapOrphanedCommandProcesses(config.agentId, controller.signal);
+      return await runAgent(config, controller.signal);
     } finally {
       for (const signal of shutdownSignals) process.off(signal, stop);
     }

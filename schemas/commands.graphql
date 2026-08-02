@@ -20,6 +20,16 @@ enum CommandRestartPolicy {
   ALWAYS
 }
 
+"Values supported for command concurrency."
+enum CommandConcurrency {
+  "Represents the exclusive option, which runs alone on its target."
+  EXCLUSIVE
+  "Represents the non exclusive option, which shares its target with other non exclusive runs."
+  NON_EXCLUSIVE
+  "Represents the excluded option, which ignores concurrency entirely."
+  EXCLUDED
+}
+
 "Lifecycle statuses for command run."
 enum CommandRunStatus {
   "Represents the queued status for command run."
@@ -74,6 +84,8 @@ type CommandDefinition {
   restartPolicy: CommandRestartPolicy!
   "The restart limit associated with this command definition. May be null when unavailable or not applicable."
   restartLimit: Int
+  "The concurrency mode deciding whether runs of this command may share their target."
+  concurrency: CommandConcurrency!
   "Whether the quick action enabled condition is true for this command definition."
   quickActionEnabled: Boolean!
   "The quick action icon key associated with this command definition."
@@ -118,6 +130,60 @@ type CommandRunAttempt {
   createdAt: String!
   "ISO 8601 timestamp when this command run attempt was last updated."
   updatedAt: String!
+}
+
+"Reasons a command run has not started yet."
+enum CommandRunQueueReason {
+  "Represents a run that is not waiting because it is already running, finishing, or finished."
+  NOT_QUEUED
+  "Represents a run that was handed to its agent and waits for the agent to pick it up."
+  WAITING_FOR_AGENT
+  "Represents a run whose agent is offline."
+  AGENT_OFFLINE
+  "Represents a run that replaces an earlier run which has not finished yet."
+  WAITING_FOR_PREDECESSOR
+  "Represents a run waiting for its restart delay to elapse."
+  RESTART_DELAY
+  "Represents a run whose target is held by another run."
+  TARGET_BUSY
+  "Represents a run that has to let runs queued ahead of it take the target first."
+  QUEUED_BEHIND
+  "Represents a run with nothing left blocking it, which starts on the next dispatch."
+  READY
+}
+
+"Represents one command run competing for the target of the inspected run."
+type CommandRunQueueEntry {
+  "Stable identifier for this command run queue entry."
+  id: ID!
+  "The display number associated with this command run queue entry."
+  displayNumber: Int!
+  "Display name of this command run queue entry."
+  name: String!
+  "Current status of this command run queue entry."
+  status: CommandRunStatus!
+  "The concurrency mode deciding whether this entry may share the target."
+  concurrency: CommandConcurrency!
+  "ISO 8601 timestamp when this command run queue entry was queued."
+  queuedAt: String!
+  "Whether this entry already holds the target."
+  holdingTarget: Boolean!
+  "Whether this entry is one of the reasons the inspected run cannot start."
+  blocking: Boolean!
+  "Whether this entry is the inspected run itself."
+  currentRun: Boolean!
+}
+
+"Explains why a command run has not started, and which runs compete for its target."
+type CommandRunQueue {
+  "The reason this command run has not started."
+  reason: CommandRunQueueReason!
+  "Position of the run in the wait line for its target, or 0 when it is not waiting."
+  position: Int!
+  "Number of runs waiting for the target, including this one when it waits."
+  waitingCount: Int!
+  "Every run competing for the target: holders first, then the wait line in queue order."
+  entries: [CommandRunQueueEntry!]!
 }
 
 "Represents a command run output chunk in the GraphQL API."
@@ -166,6 +232,8 @@ type CommandRun {
   snapshotRestartPolicy: CommandRestartPolicy!
   "The snapshot restart limit associated with this command run. May be null when unavailable or not applicable."
   snapshotRestartLimit: Int
+  "The snapshot concurrency associated with this command run."
+  snapshotConcurrency: CommandConcurrency!
   "Whether the snapshot notifications enabled condition is true for this command run."
   snapshotNotificationsEnabled: Boolean!
   "The snapshot associated with this command run."
@@ -206,6 +274,8 @@ type CommandRun {
   signal: String
   "Attempts associated with this command run."
   attempts: [CommandRunAttempt!]!
+  "Explains why this command run has not started, and lists the runs competing for its target."
+  queue: CommandRunQueue!
   "ISO 8601 timestamp when this command run was queued."
   queuedAt: String!
   "ISO 8601 timestamp when this command run started. May be null when unavailable or not applicable."
@@ -256,6 +326,8 @@ input CommandDefinitionInput {
   restartPolicy: CommandRestartPolicy = NEVER
   "The restart limit to use for the request."
   restartLimit: Int = 3
+  "The concurrency mode to use for the request."
+  concurrency: CommandConcurrency = NON_EXCLUSIVE
   "Whether quick action enabled applies to the request."
   quickActionEnabled: Boolean = false
   "The quick action icon key to use for the request."
@@ -337,6 +409,8 @@ extend type Query {
     agentId: ID
     "Identifier of the worktree. Omit it to leave this dimension unfiltered."
     worktreeId: ID
+    "Statuses to include. Omit them to leave this dimension unfiltered."
+    statuses: [CommandRunStatus!]
     "Maximum number of records to return. Defaults to `50`."
     first: Int = 50
     "Cursor or identifier after which to return records. Omit it to leave this dimension unfiltered."
@@ -451,8 +525,13 @@ extend type Mutation {
 extend type Subscription {
   "Emits a command definition whenever commands change."
   commandsChanged: CommandDefinition
-  "Emits a command run whenever command runs change."
-  commandRunsChanged: CommandRun!
+  "Emits a command run whenever matching command runs change."
+  commandRunsChanged(
+    "Identifier of the agent. Omit it to leave this dimension unfiltered."
+    agentId: ID
+    "Identifier of the worktree. Omit it to leave this dimension unfiltered."
+    worktreeId: ID
+  ): CommandRun!
   "Emits a command run whenever command run changes."
   commandRunChanged("Identifier of the run." runId: ID!): CommandRun!
   "Emits a command run output chunk whenever command run output is added."

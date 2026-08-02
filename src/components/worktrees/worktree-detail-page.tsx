@@ -582,6 +582,7 @@ function LoadedWorktreeDetail({
     worktree,
     group: entry.group,
     allTags: overview.tags,
+    agentName: entry.agentGroup.agent.name,
     baseRepoDirectory: entry.agentGroup.agent.baseRepoDirectory,
     branchManagementEnabled:
       entry.agentGroup.agent.connectionStatus === "ONLINE" &&

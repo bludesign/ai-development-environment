@@ -8,12 +8,14 @@ import {
 } from "@ai-development-environment/agent-contract/commands";
 
 import { getPrismaClient } from "@/data/prisma-client";
+import { isCodebaseBusyError } from "@/lib/codebase-busy";
 import {
   COMMAND_RUNS_CHANGED_TOPIC,
   COMMAND_RUN_OUTPUT_CHANGED_TOPIC,
   COMMANDS_CHANGED_TOPIC,
   SIDEBAR_STATUS_CHANGED_TOPIC,
   agentEventBus,
+  agentOnlineWindowMs,
   commandRunChangedTopic,
   commandRunOutputTopic,
   type AgentControlService,
@@ -27,6 +29,7 @@ const TARGETS = [
   "REPOSITORY_WORKTREE",
 ] as const;
 const RESTART_POLICIES = ["NEVER", "ON_FAILURE", "ALWAYS"] as const;
+const CONCURRENCY_MODES = ["EXCLUSIVE", "NON_EXCLUSIVE", "EXCLUDED"] as const;
 const ACTIVE_RUN_STATUSES = [
   "QUEUED",
   "RUNNING",
@@ -34,6 +37,21 @@ const ACTIVE_RUN_STATUSES = [
   "CANCELLING",
 ] as const;
 const FINAL_RUN_STATUSES = ["SUCCEEDED", "FAILED", "CANCELLED"] as const;
+const TERMINAL_JOB_STATUSES = [
+  "SUCCEEDED",
+  "FAILED",
+  "CANCELLED",
+  "TIMED_OUT",
+] as const;
+
+/**
+ * A stop request can only be carried out by the agent while its job is still
+ * live. Once the job has reported back — or was never created — there is
+ * nothing left to cancel and the run has to be finished directly, otherwise it
+ * sits in `CANCELLING` waiting for a completion that will never arrive.
+ */
+const cancellableJob = (job: { status: string } | null | undefined) =>
+  Boolean(job && !TERMINAL_JOB_STATUSES.includes(job.status as never));
 const RESTART_DELAY_MS = 1_000;
 const STABLE_ATTEMPT_MS = 60_000;
 const EXPORT_FORMAT = "aide.command.export";
@@ -49,6 +67,7 @@ export type CommandDefinitionInput = {
   targetRepositoryId?: string | null;
   restartPolicy?: string | null;
   restartLimit?: number | null;
+  concurrency?: string | null;
   quickActionEnabled?: boolean | null;
   quickActionIconKey?: string | null;
   quickActionButtonVariant?: string | null;
@@ -107,6 +126,172 @@ export function evaluateCommandRestart(input: {
     (input.durationMs >= STABLE_ATTEMPT_MS ? 0 : input.restartCount) + 1;
   const exhausted = input.limit !== null && restartCount > input.limit;
   return { restart: !exhausted, restartCount, exhausted };
+}
+
+export type CommandConcurrencyPeer = {
+  id: string;
+  concurrency: string;
+  queuedAt: Date;
+};
+
+/**
+ * Decides whether a waiting run may take its target now.
+ *
+ * A target is either one worktree or one agent home, and the modes behave like
+ * a reader-writer lock over it: `EXCLUSIVE` runs alone, `NON_EXCLUSIVE` runs
+ * alongside other `NON_EXCLUSIVE` runs, and `EXCLUDED` neither waits nor makes
+ * anything else wait.
+ *
+ * `holders` are runs that already own the target — they have a dispatched
+ * attempt that has not reported back. `waiting` are runs queued for the same
+ * target with nothing dispatched yet, including the candidate itself.
+ *
+ * Queue order breaks the two ways this could starve. An `EXCLUSIVE` run waits
+ * until it is the oldest waiter, so two of them cannot both decide the target
+ * is free; a `NON_EXCLUSIVE` run yields to any `EXCLUSIVE` run queued ahead of
+ * it, so a steady stream of shared work cannot hold the target forever.
+ */
+export function admitCommandRun(input: {
+  candidate: CommandConcurrencyPeer;
+  holders: Array<Pick<CommandConcurrencyPeer, "id" | "concurrency">>;
+  waiting: CommandConcurrencyPeer[];
+}): boolean {
+  if (input.candidate.concurrency === "EXCLUDED") return true;
+  const holders = input.holders.filter(
+    (peer) => peer.concurrency !== "EXCLUDED" && peer.id !== input.candidate.id,
+  );
+  // Ties on the queue timestamp are broken by id so every waiter agrees on the
+  // same order; SQLite timestamps are coarse enough for runs started together
+  // to share one.
+  const ahead = input.waiting
+    .filter(
+      (peer) =>
+        peer.concurrency !== "EXCLUDED" && peer.id !== input.candidate.id,
+    )
+    .filter((peer) => {
+      const delta =
+        peer.queuedAt.getTime() - input.candidate.queuedAt.getTime();
+      return delta !== 0 ? delta < 0 : peer.id < input.candidate.id;
+    });
+  if (input.candidate.concurrency === "EXCLUSIVE") {
+    return holders.length === 0 && ahead.length === 0;
+  }
+  return (
+    !holders.some((peer) => peer.concurrency === "EXCLUSIVE") &&
+    !ahead.some((peer) => peer.concurrency === "EXCLUSIVE")
+  );
+}
+
+/** One run competing for a target, as shown in a run's queue. */
+export type CommandQueueMember = CommandConcurrencyPeer & {
+  displayNumber: number;
+  name: string;
+  status: string;
+  /** True once the run owns the target: its attempt has a job still in flight. */
+  holdingTarget: boolean;
+};
+
+export type CommandRunQueueReason =
+  | "NOT_QUEUED"
+  | "WAITING_FOR_AGENT"
+  | "AGENT_OFFLINE"
+  | "WAITING_FOR_PREDECESSOR"
+  | "RESTART_DELAY"
+  | "TARGET_BUSY"
+  | "QUEUED_BEHIND"
+  | "READY";
+
+export type CommandRunQueueEntry = CommandQueueMember & {
+  blocking: boolean;
+  currentRun: boolean;
+};
+
+export type CommandRunQueue = {
+  reason: CommandRunQueueReason;
+  position: number;
+  waitingCount: number;
+  entries: CommandRunQueueEntry[];
+};
+
+const QUEUEABLE_RUN_STATUSES = ["QUEUED", "RESTARTING"];
+
+// The same order {@link admitCommandRun} uses to decide who goes first, so the
+// list the run detail page renders is the order the dispatcher will follow.
+const byQueueOrder = (left: CommandQueueMember, right: CommandQueueMember) =>
+  left.queuedAt.getTime() - right.queuedAt.getTime() ||
+  left.id.localeCompare(right.id);
+
+/**
+ * Explains why a run has not started and reconstructs the wait line for its
+ * target. The blocking peers are exactly the ones {@link admitCommandRun}
+ * consults, so a run reported as `TARGET_BUSY` or `QUEUED_BEHIND` names the
+ * runs that will actually be waited on.
+ *
+ * A run that already handed its work to an agent is no longer in the line: it
+ * is either waiting for that agent to pick the job up or waiting for an agent
+ * that is not connected, which is the difference between `WAITING_FOR_AGENT`
+ * and `AGENT_OFFLINE`.
+ */
+export function evaluateCommandRunQueue(input: {
+  candidate: CommandQueueMember & { stopRequested: boolean };
+  peers: CommandQueueMember[];
+  agentOnline: boolean;
+  predecessorPending: boolean;
+  restartPending: boolean;
+}): CommandRunQueue {
+  const { candidate } = input;
+  const competing = candidate.concurrency !== "EXCLUDED";
+  const heldByPeers = input.peers.filter((peer) => peer.holdingTarget);
+  // The candidate belongs to whichever group it is in, so the rendered list is
+  // the whole picture for the target rather than everyone except the run being
+  // looked at.
+  const holders = [
+    ...heldByPeers,
+    ...(candidate.holdingTarget ? [candidate] : []),
+  ].sort(byQueueOrder);
+  const line = [
+    ...input.peers.filter((peer) => !peer.holdingTarget),
+    ...(candidate.holdingTarget ? [] : [candidate]),
+  ].sort(byQueueOrder);
+  const index = line.findIndex((peer) => peer.id === candidate.id);
+  const ahead = index < 0 ? [] : line.slice(0, index);
+  const blocks = (peer: CommandQueueMember) =>
+    competing &&
+    peer.concurrency !== "EXCLUDED" &&
+    (candidate.concurrency === "EXCLUSIVE" || peer.concurrency === "EXCLUSIVE");
+  const blockingHolders = heldByPeers.filter(blocks);
+  const blockingAhead = ahead.filter(blocks);
+  const reason = ((): CommandRunQueueReason => {
+    if (
+      candidate.stopRequested ||
+      !QUEUEABLE_RUN_STATUSES.includes(candidate.status)
+    ) {
+      return "NOT_QUEUED";
+    }
+    if (candidate.holdingTarget)
+      return input.agentOnline ? "WAITING_FOR_AGENT" : "AGENT_OFFLINE";
+    if (input.predecessorPending) return "WAITING_FOR_PREDECESSOR";
+    if (input.restartPending) return "RESTART_DELAY";
+    if (blockingHolders.length) return "TARGET_BUSY";
+    if (blockingAhead.length) return "QUEUED_BEHIND";
+    if (!input.agentOnline) return "AGENT_OFFLINE";
+    return "READY";
+  })();
+  const blocking = new Set(
+    reason === "TARGET_BUSY" || reason === "QUEUED_BEHIND"
+      ? [...blockingHolders, ...blockingAhead].map((peer) => peer.id)
+      : [],
+  );
+  return {
+    reason,
+    position: index < 0 ? 0 : index + 1,
+    waitingCount: line.length,
+    entries: [...holders, ...line].map((peer) => ({
+      ...peer,
+      blocking: blocking.has(peer.id),
+      currentRun: peer.id === candidate.id,
+    })),
+  };
 }
 
 function enumValue<T extends readonly string[]>(
@@ -180,6 +365,7 @@ function publishRun(run: { id: string }): void {
 export class CommandsService {
   private timer: ReturnType<typeof setInterval> | null = null;
   private reconciliation: Promise<void> | null = null;
+  private dispatchChain: Promise<unknown> = Promise.resolve();
 
   constructor(
     private readonly agentControl: AgentControlService,
@@ -274,6 +460,11 @@ export class CommandsService {
       targetRepositoryId: input.targetRepositoryId ?? null,
       restartPolicy,
       restartLimit,
+      concurrency: enumValue(
+        CONCURRENCY_MODES,
+        input.concurrency ?? "NON_EXCLUSIVE",
+        "Concurrency",
+      ),
       quickActionEnabled: input.quickActionEnabled ?? false,
       quickActionIconKey: text(
         input.quickActionIconKey ?? "terminal",
@@ -344,6 +535,7 @@ export class CommandsService {
         targetRepositoryName: definition.targetRepository?.name ?? null,
         restartPolicy: definition.restartPolicy,
         restartLimit: definition.restartLimit,
+        concurrency: definition.concurrency,
         quickActionEnabled: definition.quickActionEnabled,
         quickActionIconKey: definition.quickActionIconKey,
         quickActionButtonVariant: definition.quickActionButtonVariant,
@@ -460,6 +652,7 @@ export class CommandsService {
         typeof command.restartLimit === "number"
           ? (command.restartLimit as number | null)
           : 3,
+      concurrency: importedText(command.concurrency) ?? "NON_EXCLUSIVE",
       // A widened target means this script was pinned to a machine or
       // repository that does not exist here. Running it anywhere is a decision
       // for whoever imported it, so the one-click button stays off until they
@@ -529,6 +722,7 @@ export class CommandsService {
     after?: string | null;
     agentId?: string | null;
     worktreeId?: string | null;
+    statuses?: string[] | null;
   }) {
     const prisma = await getPrismaClient();
     const take = Math.max(1, Math.min(input.first ?? 50, 200));
@@ -537,6 +731,7 @@ export class CommandsService {
       ...(input.includeArchived ? {} : { archivedAt: null }),
       ...(input.agentId ? { agentId: input.agentId } : {}),
       ...(input.worktreeId ? { worktreeId: input.worktreeId } : {}),
+      ...(input.statuses?.length ? { status: { in: input.statuses } } : {}),
       ...(search
         ? {
             OR: [
@@ -591,6 +786,76 @@ export class CommandsService {
         predecessor: true,
         successor: true,
       },
+    });
+  }
+
+  /**
+   * Explains why a run has not started yet. The queue is derived on read
+   * rather than stored: it is a view of the same rows the dispatcher consults,
+   * so it cannot drift from the decision the dispatcher will actually make.
+   */
+  async runQueue(runId: string): Promise<CommandRunQueue> {
+    const prisma = await getPrismaClient();
+    const run = await prisma.commandRun.findUnique({
+      where: { id: runId },
+      include: {
+        agent: {
+          select: {
+            lastSeenAt: true,
+            disconnectedAt: true,
+            heartbeatIntervalSeconds: true,
+          },
+        },
+        predecessor: { select: { status: true } },
+        attempts: {
+          select: { agentJobId: true, completionProcessedAt: true },
+          orderBy: { attempt: "desc" },
+          take: 1,
+        },
+      },
+    });
+    if (!run) {
+      return {
+        reason: "NOT_QUEUED",
+        position: 0,
+        waitingCount: 0,
+        entries: [],
+      };
+    }
+    const attempt = run.attempts[0];
+    const agentOnline = Boolean(
+      run.agent?.lastSeenAt &&
+      !run.agent.disconnectedAt &&
+      Date.now() - run.agent.lastSeenAt.getTime() <=
+        agentOnlineWindowMs(run.agent),
+    );
+    return evaluateCommandRunQueue({
+      candidate: {
+        id: run.id,
+        displayNumber: run.displayNumber,
+        name: run.snapshotName,
+        status: run.status,
+        concurrency: run.snapshotConcurrency,
+        queuedAt: run.queuedAt,
+        stopRequested: run.stopRequested,
+        holdingTarget: Boolean(
+          attempt?.agentJobId && !attempt.completionProcessedAt,
+        ),
+      },
+      peers:
+        run.snapshotConcurrency === "EXCLUDED"
+          ? []
+          : await this.targetPeers(run),
+      agentOnline,
+      predecessorPending: Boolean(
+        run.predecessor &&
+        !FINAL_RUN_STATUSES.includes(run.predecessor.status as never),
+      ),
+      restartPending: Boolean(
+        run.status === "RESTARTING" &&
+        run.nextRestartAt &&
+        run.nextRestartAt.getTime() > Date.now(),
+      ),
     });
   }
 
@@ -714,6 +979,7 @@ export class CommandsService {
             snapshotTargetKind: definition.targetKind,
             snapshotRestartPolicy: definition.restartPolicy,
             snapshotRestartLimit: definition.restartLimit,
+            snapshotConcurrency: definition.concurrency,
             snapshotNotificationsEnabled: definition.notificationsEnabled,
             snapshotJson: JSON.stringify(definition),
             agentId: agent.id,
@@ -771,6 +1037,10 @@ export class CommandsService {
       targetKind,
       restartPolicy: "NEVER",
       restartLimit: null,
+      // A one-off script the user just typed should start rather than sit in a
+      // queue, but it still yields to a command that asked for the target
+      // alone.
+      concurrency: "NON_EXCLUSIVE",
       notificationsEnabled: true,
     };
     let run: Awaited<ReturnType<typeof prisma.commandRun.create>>;
@@ -795,6 +1065,7 @@ export class CommandsService {
             snapshotTargetKind: snapshot.targetKind,
             snapshotRestartPolicy: snapshot.restartPolicy,
             snapshotRestartLimit: snapshot.restartLimit,
+            snapshotConcurrency: snapshot.concurrency,
             snapshotNotificationsEnabled: snapshot.notificationsEnabled,
             snapshotJson: JSON.stringify(snapshot),
             agentId: agent.id,
@@ -826,7 +1097,101 @@ export class CommandsService {
     return this.getRun(run.id);
   }
 
-  private async dispatch(runId: string): Promise<void> {
+  /**
+   * Reads the other active runs sharing this run's target. `EXCLUDED` runs are
+   * left out because they neither wait nor make anything wait, so they are
+   * absent from admission and from the queue the run detail page renders.
+   */
+  private async targetPeers(run: {
+    id: string;
+    agentId: string | null;
+    worktreeId: string | null;
+  }): Promise<CommandQueueMember[]> {
+    const prisma = await getPrismaClient();
+    const peers = await prisma.commandRun.findMany({
+      where: {
+        id: { not: run.id },
+        status: { in: [...ACTIVE_RUN_STATUSES] },
+        snapshotConcurrency: { not: "EXCLUDED" },
+        // An agent-home run shares the home directory with other home runs on
+        // the same agent; a worktree run shares only that worktree.
+        ...(run.worktreeId
+          ? { worktreeId: run.worktreeId }
+          : { agentId: run.agentId, worktreeId: null }),
+      },
+      select: {
+        id: true,
+        displayNumber: true,
+        snapshotName: true,
+        status: true,
+        snapshotConcurrency: true,
+        queuedAt: true,
+        attempts: {
+          select: { agentJobId: true, completionProcessedAt: true },
+          orderBy: { attempt: "desc" },
+          take: 1,
+        },
+      },
+    });
+    return peers.map((peer) => {
+      const attempt = peer.attempts[0];
+      return {
+        id: peer.id,
+        displayNumber: peer.displayNumber,
+        name: peer.snapshotName,
+        status: peer.status,
+        concurrency: peer.snapshotConcurrency,
+        queuedAt: peer.queuedAt,
+        holdingTarget: Boolean(
+          attempt?.agentJobId && !attempt.completionProcessedAt,
+        ),
+      };
+    });
+  }
+
+  /**
+   * Reads the other runs sharing this run's target and asks
+   * {@link admitCommandRun} whether the target is free. A run that is turned
+   * away keeps its current status — `QUEUED` or `RESTARTING` — and the
+   * reconcile loop offers it the target again on the next tick.
+   */
+  private async admitRun(run: {
+    id: string;
+    snapshotConcurrency: string;
+    queuedAt: Date;
+    agentId: string | null;
+    worktreeId: string | null;
+  }): Promise<boolean> {
+    if (run.snapshotConcurrency === "EXCLUDED") return true;
+    const peers = await this.targetPeers(run);
+    const holders = peers.filter((peer) => peer.holdingTarget);
+    const waiting = peers.filter((peer) => !peer.holdingTarget);
+    return admitCommandRun({
+      candidate: {
+        id: run.id,
+        concurrency: run.snapshotConcurrency,
+        queuedAt: run.queuedAt,
+      },
+      holders,
+      waiting,
+    });
+  }
+
+  /**
+   * Admission reads the runs sharing a target and then claims it by creating a
+   * job. Two dispatches interleaving between those steps would both see a free
+   * target and both start, so dispatches are serialized against each other.
+   */
+  private dispatch(runId: string): Promise<void> {
+    const next = this.dispatchChain.then(
+      () => this.dispatchRun(runId),
+      () => this.dispatchRun(runId),
+    );
+    this.dispatchChain = next.catch(() => undefined);
+    return next;
+  }
+
+  private async dispatchRun(runId: string): Promise<void> {
     const prisma = await getPrismaClient();
     const run = await prisma.commandRun.findUnique({
       where: { id: runId },
@@ -891,6 +1256,15 @@ export class CommandsService {
         !latest || candidate.attempt > latest.attempt ? candidate : latest,
       null,
     );
+    // A run already owns its target once an attempt has a job that has not
+    // reported back, so only work that is about to claim the target is
+    // admitted. Checking before the attempt row is written matters for a
+    // restart: its previous attempt is complete, so a blocked restart would
+    // otherwise mint a fresh attempt on every reconcile tick.
+    const holding = Boolean(
+      latestAttempt?.agentJobId && !latestAttempt.completionProcessedAt,
+    );
+    if (!holding && !(await this.admitRun(run))) return;
     const reuseLatestAttempt =
       latestAttempt &&
       !latestAttempt.agentJobId &&
@@ -918,22 +1292,32 @@ export class CommandsService {
       }
     }
     if (!attempt.agentJobId) {
-      const job = await this.agentControl.createJob({
-        agentId: run.agentId,
-        kind: COMMAND_RUN_JOB_KIND,
-        payload: {
-          commandRunId: run.id,
-          attemptId: attempt.id,
-          targetKind: run.worktreeId ? "WORKTREE" : "AGENT_HOME",
-          cwd: run.worktree?.folder ?? null,
-          script: run.snapshotScript,
-        },
-        idempotencyKey: `command-run:${run.id}:attempt:${attemptNumber}`,
-        timeoutSeconds: 0,
-        worktreeId: run.worktreeId,
-        codebaseId: run.worktree?.codebaseId ?? null,
-        visibility: "SYSTEM",
-      });
+      let job;
+      try {
+        job = await this.agentControl.createJob({
+          agentId: run.agentId,
+          kind: COMMAND_RUN_JOB_KIND,
+          payload: {
+            commandRunId: run.id,
+            attemptId: attempt.id,
+            targetKind: run.worktreeId ? "WORKTREE" : "AGENT_HOME",
+            cwd: run.worktree?.folder ?? null,
+            script: run.snapshotScript,
+          },
+          idempotencyKey: `command-run:${run.id}:attempt:${attemptNumber}`,
+          timeoutSeconds: 0,
+          worktreeId: run.worktreeId,
+          codebaseId: run.worktree?.codebaseId ?? null,
+          visibility: "SYSTEM",
+        });
+      } catch (error) {
+        // The codebase can still be held by git or worktree work that the
+        // command modes know nothing about. Waiting for it is the same answer
+        // concurrency gives, so the run stays queued for the next tick rather
+        // than failing on a busy repository.
+        if (!isCodebaseBusyError(error)) throw error;
+        return;
+      }
       attempt = await prisma.commandRunAttempt.update({
         where: { id: attempt.id },
         data: { agentJobId: job.id, status: job.status },
@@ -980,9 +1364,13 @@ export class CommandsService {
       where: { id },
       data: { stopRequested: true, status: "CANCELLING", nextRestartAt: null },
     });
+    // Between attempts — a run waiting to restart, or one still queued for its
+    // target — the newest attempt is already finished or has no job at all, so
+    // asking the agent to cancel it does nothing and the run has to be closed
+    // out here.
     const jobId = run.attempts[0]?.agentJobId;
-    if (jobId) await this.agentControl.cancelJob(jobId);
-    else await this.finishCancelled(id);
+    const job = jobId ? await this.agentControl.cancelJob(jobId) : null;
+    if (!cancellableJob(job)) await this.finishCancelled(id);
     publishRun(updated);
     return this.getRun(id);
   }
@@ -1014,6 +1402,7 @@ export class CommandsService {
           snapshotTargetKind: original.snapshotTargetKind,
           snapshotRestartPolicy: original.snapshotRestartPolicy,
           snapshotRestartLimit: original.snapshotRestartLimit,
+          snapshotConcurrency: original.snapshotConcurrency,
           snapshotNotificationsEnabled: original.snapshotNotificationsEnabled,
           snapshotJson: original.snapshotJson,
           agentId: original.agentId,
@@ -1308,15 +1697,10 @@ export class CommandsService {
     for (const run of runs) {
       const attempt = run.attempts[0];
       if (run.stopRequested) {
-        if (
-          attempt?.agentJobId &&
-          attempt.agentJob &&
-          !["SUCCEEDED", "FAILED", "CANCELLED", "TIMED_OUT"].includes(
-            attempt.agentJob.status,
-          )
-        ) {
-          await this.agentControl.cancelJob(attempt.agentJobId);
-        } else if (!attempt || attempt.agentJob?.status === "CANCELLED") {
+        const job = attempt?.agentJob ?? null;
+        if (job && cancellableJob(job)) {
+          await this.agentControl.cancelJob(job.id);
+        } else {
           await this.finishCancelled(run.id);
         }
         continue;

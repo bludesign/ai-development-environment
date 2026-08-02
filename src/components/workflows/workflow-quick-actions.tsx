@@ -9,6 +9,7 @@ import { Spinner } from "@/components/ui/spinner";
 import { ConfigurationIcon } from "@/components/builds/configuration-icon";
 import { Link } from "@/i18n/navigation";
 import { controlPlaneRequest } from "@/lib/control-plane-client";
+import { cn } from "@/lib/utils";
 
 import {
   WorkflowChoiceMenu,
@@ -31,10 +32,12 @@ export function WorkflowQuickActions({
   worktreeId,
   sessionData,
   workflows,
+  className,
 }: {
   worktreeId: string;
   sessionData: Record<string, unknown>;
   workflows: QuickActionWorkflow[];
+  className?: string;
 }) {
   const t = useTranslations("workflows");
   const [triggering, setTriggering] = useState<string | null>(null);
@@ -100,7 +103,7 @@ export function WorkflowQuickActions({
   if (!workflows.length && !error) return null;
 
   return (
-    <div className="w-full space-y-2">
+    <div className={cn("w-full space-y-2", className)}>
       <div className="flex flex-wrap gap-2">
         {workflows.map((workflow) => {
           const startedRunId = startedRuns[workflow.id];

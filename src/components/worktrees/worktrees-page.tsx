@@ -145,6 +145,7 @@ import {
   type WorktreeBranchSelection,
   type WorktreeBranchTarget,
 } from "./worktree-branch-form";
+import { QuickActionsRow } from "./quick-actions-row";
 import { WorktreeDetailPanel } from "./worktree-detail-panel";
 import { CODEBASE_FIELDS, WORKTREE_FIELDS } from "./worktree-graphql";
 import {
@@ -192,8 +193,15 @@ const COLORS = [
   "purple",
   "fuchsia",
   "pink",
+  "lavender",
+  "maroon",
+  "brown",
+  "olive",
+  "navy",
 ] as const;
 const LAYOUT_KEY = "worktrees-layout";
+const GROUP_BY_KEY = "worktrees-group-by";
+const FILTERS_KEY = "worktrees-filters";
 const ALL_FILTER_VALUE = "__all__";
 
 export type WorktreeListFilters = {
@@ -201,6 +209,39 @@ export type WorktreeListFilters = {
   agentId: string | null;
   repositoryId: string | null;
 };
+
+type StoredFilters = {
+  query: string;
+  agentId: string;
+  repositoryId: string;
+};
+
+function readStoredFilters(): StoredFilters {
+  const fallback: StoredFilters = {
+    query: "",
+    agentId: ALL_FILTER_VALUE,
+    repositoryId: ALL_FILTER_VALUE,
+  };
+  if (typeof window === "undefined") return fallback;
+  try {
+    const raw = window.localStorage.getItem(FILTERS_KEY);
+    if (!raw) return fallback;
+    const parsed: unknown = JSON.parse(raw);
+    if (!parsed || typeof parsed !== "object") return fallback;
+    const stored = parsed as Record<string, unknown>;
+    return {
+      query: typeof stored.query === "string" ? stored.query : fallback.query,
+      agentId:
+        typeof stored.agentId === "string" ? stored.agentId : fallback.agentId,
+      repositoryId:
+        typeof stored.repositoryId === "string"
+          ? stored.repositoryId
+          : fallback.repositoryId,
+    };
+  } catch {
+    return fallback;
+  }
+}
 
 function matchesWorktreeSearch(values: Array<unknown>, query: string) {
   return values.some(
@@ -276,6 +317,34 @@ export function filterWorktreeAgentGroups(
   });
 }
 
+export type WorktreeRepositoryGroup = {
+  repository: WorktreeCodebaseGroup["repository"];
+  entries: Array<{
+    agentGroup: WorktreeAgentGroup;
+    group: WorktreeCodebaseGroup;
+  }>;
+};
+
+export function groupWorktreesByRepository(
+  agents: WorktreeAgentGroup[],
+): WorktreeRepositoryGroup[] {
+  const repositories = new Map<string, WorktreeRepositoryGroup>();
+  agents.forEach((agentGroup) =>
+    agentGroup.codebases.forEach((group) => {
+      const existing = repositories.get(group.repository.id);
+      if (existing) existing.entries.push({ agentGroup, group });
+      else
+        repositories.set(group.repository.id, {
+          repository: group.repository,
+          entries: [{ agentGroup, group }],
+        });
+    }),
+  );
+  return [...repositories.values()].sort((left, right) =>
+    left.repository.name.localeCompare(right.repository.name),
+  );
+}
+
 export function displayedWorktreePath(
   folder: string,
   baseRepoDirectory: string | null | undefined,
@@ -316,6 +385,7 @@ function replaceIssueParam(issueKey: string | null) {
 }
 
 type Layout = "cards" | "table";
+type GroupBy = "agent" | "repository";
 type Operation =
   | "OPEN_EDITOR"
   | "FORCE_PUSH"
@@ -372,6 +442,15 @@ const tagColorClasses: Record<string, string> = {
   fuchsia:
     "border-fuchsia-500/40 bg-fuchsia-500/15 text-fuchsia-700 dark:text-fuchsia-300",
   pink: "border-pink-500/40 bg-pink-500/15 text-pink-700 dark:text-pink-300",
+  lavender:
+    "border-lavender-500/40 bg-lavender-500/15 text-lavender-700 dark:text-lavender-300",
+  maroon:
+    "border-maroon-500/40 bg-maroon-500/15 text-maroon-700 dark:text-maroon-300",
+  brown:
+    "border-brown-500/40 bg-brown-500/15 text-brown-700 dark:text-brown-300",
+  olive:
+    "border-olive-500/40 bg-olive-500/15 text-olive-700 dark:text-olive-300",
+  navy: "border-navy-500/40 bg-navy-500/15 text-navy-700 dark:text-navy-300",
 };
 
 const colorSwatchClasses: Record<string, string> = {
@@ -394,6 +473,44 @@ const colorSwatchClasses: Record<string, string> = {
   purple: "border-purple-600 bg-purple-500",
   fuchsia: "border-fuchsia-600 bg-fuchsia-500",
   pink: "border-pink-600 bg-pink-500",
+  lavender: "border-lavender-600 bg-lavender-500",
+  maroon: "border-maroon-600 bg-maroon-500",
+  brown: "border-brown-600 bg-brown-500",
+  olive: "border-olive-600 bg-olive-500",
+  navy: "border-navy-600 bg-navy-500",
+};
+
+/**
+ * Swatches sit on a toggle, whose hover and selected states both paint
+ * `bg-muted` — which would wash the swatch out to gray exactly when the user is
+ * pointing at or has picked it. These pin the fill to the swatch's own color in
+ * those states so selection reads purely as the ring around it.
+ */
+const colorSwatchStateClasses: Record<string, string> = {
+  gray: "hover:bg-slate-500 data-[state=on]:bg-slate-500",
+  stone: "hover:bg-stone-500 data-[state=on]:bg-stone-500",
+  red: "hover:bg-red-500 data-[state=on]:bg-red-500",
+  rose: "hover:bg-rose-500 data-[state=on]:bg-rose-500",
+  orange: "hover:bg-orange-500 data-[state=on]:bg-orange-500",
+  amber: "hover:bg-amber-500 data-[state=on]:bg-amber-500",
+  yellow: "hover:bg-yellow-500 data-[state=on]:bg-yellow-500",
+  lime: "hover:bg-lime-500 data-[state=on]:bg-lime-500",
+  green: "hover:bg-green-500 data-[state=on]:bg-green-500",
+  emerald: "hover:bg-emerald-500 data-[state=on]:bg-emerald-500",
+  teal: "hover:bg-teal-500 data-[state=on]:bg-teal-500",
+  cyan: "hover:bg-cyan-500 data-[state=on]:bg-cyan-500",
+  sky: "hover:bg-sky-500 data-[state=on]:bg-sky-500",
+  blue: "hover:bg-blue-500 data-[state=on]:bg-blue-500",
+  indigo: "hover:bg-indigo-500 data-[state=on]:bg-indigo-500",
+  violet: "hover:bg-violet-500 data-[state=on]:bg-violet-500",
+  purple: "hover:bg-purple-500 data-[state=on]:bg-purple-500",
+  fuchsia: "hover:bg-fuchsia-500 data-[state=on]:bg-fuchsia-500",
+  pink: "hover:bg-pink-500 data-[state=on]:bg-pink-500",
+  lavender: "hover:bg-lavender-500 data-[state=on]:bg-lavender-500",
+  maroon: "hover:bg-maroon-500 data-[state=on]:bg-maroon-500",
+  brown: "hover:bg-brown-500 data-[state=on]:bg-brown-500",
+  olive: "hover:bg-olive-500 data-[state=on]:bg-olive-500",
+  navy: "hover:bg-navy-500 data-[state=on]:bg-navy-500",
 };
 
 function reviewClass(value: string) {
@@ -416,6 +533,11 @@ export function WorktreesPage() {
     const saved = window.localStorage.getItem(LAYOUT_KEY);
     return saved === "table" ? "table" : "cards";
   });
+  const [groupBy, setGroupBy] = useState<GroupBy>(() => {
+    if (typeof window === "undefined") return "agent";
+    const saved = window.localStorage.getItem(GROUP_BY_KEY);
+    return saved === "repository" ? "repository" : "agent";
+  });
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -423,9 +545,12 @@ export function WorktreesPage() {
   const [inspectionRefreshToken, setInspectionRefreshToken] = useState(0);
   const [tagManagerOpen, setTagManagerOpen] = useState(false);
   const [hiddenOpen, setHiddenOpen] = useState(false);
-  const [query, setQuery] = useState("");
-  const [agentFilter, setAgentFilter] = useState(ALL_FILTER_VALUE);
-  const [repositoryFilter, setRepositoryFilter] = useState(ALL_FILTER_VALUE);
+  const [storedFilters] = useState(readStoredFilters);
+  const [query, setQuery] = useState(storedFilters.query);
+  const [agentFilter, setAgentFilter] = useState(storedFilters.agentId);
+  const [repositoryFilter, setRepositoryFilter] = useState(
+    storedFilters.repositoryId,
+  );
   const latestLoad = useRef(0);
 
   const load = useCallback(async () => {
@@ -528,6 +653,17 @@ export function WorktreesPage() {
     return () => window.removeEventListener("popstate", syncIssueFromUrl);
   }, []);
 
+  useEffect(() => {
+    window.localStorage.setItem(
+      FILTERS_KEY,
+      JSON.stringify({
+        query,
+        agentId: agentFilter,
+        repositoryId: repositoryFilter,
+      } satisfies StoredFilters),
+    );
+  }, [agentFilter, query, repositoryFilter]);
+
   const selectJiraIssue = (issueKey: string | null) => {
     replaceIssueParam(issueKey);
     setJiraIssueKey(issueKey);
@@ -536,6 +672,11 @@ export function WorktreesPage() {
   const setLayoutAndRemember = (next: Layout) => {
     setLayout(next);
     window.localStorage.setItem(LAYOUT_KEY, next);
+  };
+
+  const setGroupByAndRemember = (next: GroupBy) => {
+    setGroupBy(next);
+    window.localStorage.setItem(GROUP_BY_KEY, next);
   };
 
   const refresh = async () => {
@@ -626,20 +767,41 @@ export function WorktreesPage() {
       left.name.localeCompare(right.name),
     );
   }, [overview]);
+  // A remembered filter can point at an agent or repository that no longer
+  // exists, so ignore it until the saved selection is available again.
+  const activeAgentFilter =
+    !overview ||
+    agentFilter === ALL_FILTER_VALUE ||
+    overview.agents.some((agentGroup) => agentGroup.agent.id === agentFilter)
+      ? agentFilter
+      : ALL_FILTER_VALUE;
+  const activeRepositoryFilter =
+    !overview ||
+    repositoryFilter === ALL_FILTER_VALUE ||
+    repositoryOptions.some((repository) => repository.id === repositoryFilter)
+      ? repositoryFilter
+      : ALL_FILTER_VALUE;
   const filteredAgents = useMemo(
     () =>
       filterWorktreeAgentGroups(overview?.agents ?? [], {
         query,
-        agentId: agentFilter === ALL_FILTER_VALUE ? null : agentFilter,
+        agentId:
+          activeAgentFilter === ALL_FILTER_VALUE ? null : activeAgentFilter,
         repositoryId:
-          repositoryFilter === ALL_FILTER_VALUE ? null : repositoryFilter,
+          activeRepositoryFilter === ALL_FILTER_VALUE
+            ? null
+            : activeRepositoryFilter,
       }),
-    [agentFilter, overview, query, repositoryFilter],
+    [activeAgentFilter, activeRepositoryFilter, overview, query],
+  );
+  const repositoryGroups = useMemo(
+    () => groupWorktreesByRepository(filteredAgents),
+    [filteredAgents],
   );
   const filtersActive =
     Boolean(query.trim()) ||
-    agentFilter !== ALL_FILTER_VALUE ||
-    repositoryFilter !== ALL_FILTER_VALUE;
+    activeAgentFilter !== ALL_FILTER_VALUE ||
+    activeRepositoryFilter !== ALL_FILTER_VALUE;
 
   return (
     <section className="flex w-full flex-col gap-6">
@@ -671,6 +833,24 @@ export function WorktreesPage() {
           <Button onClick={() => setHiddenOpen(true)} variant="outline">
             <Archive /> {t("hidden", { count: overview?.hiddenCount ?? 0 })}
           </Button>
+          <Select
+            onValueChange={(value) => {
+              if (value === "agent" || value === "repository") {
+                setGroupByAndRemember(value);
+              }
+            }}
+            value={groupBy}
+          >
+            <SelectTrigger aria-label={t("groupBy")}>
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="agent">{t("groupByAgent")}</SelectItem>
+              <SelectItem value="repository">
+                {t("groupByRepository")}
+              </SelectItem>
+            </SelectContent>
+          </Select>
           <ToggleGroup
             aria-label={`${t("cards")} / ${t("table")}`}
             onValueChange={(value) => {
@@ -678,7 +858,6 @@ export function WorktreesPage() {
                 setLayoutAndRemember(value);
               }
             }}
-            size="sm"
             spacing={0}
             type="single"
             value={layout}
@@ -731,7 +910,7 @@ export function WorktreesPage() {
             />
           </div>
           <div className="min-w-0 flex-[1_1_12rem]">
-            <Select onValueChange={setAgentFilter} value={agentFilter}>
+            <Select onValueChange={setAgentFilter} value={activeAgentFilter}>
               <SelectTrigger aria-label={t("filterByAgent")} className="w-full">
                 <SelectValue />
               </SelectTrigger>
@@ -753,7 +932,7 @@ export function WorktreesPage() {
           <div className="min-w-0 flex-[1_1_12rem]">
             <Select
               onValueChange={setRepositoryFilter}
-              value={repositoryFilter}
+              value={activeRepositoryFilter}
             >
               <SelectTrigger
                 aria-label={t("filterByRepository")}
@@ -821,6 +1000,23 @@ export function WorktreesPage() {
             </EmptyDescription>
           </EmptyHeader>
         </Empty>
+      ) : groupBy === "repository" ? (
+        repositoryGroups.map((repositoryGroup) => (
+          <RepositorySection
+            allTags={overview.tags}
+            editorVariant={overview.settings.editorVariant}
+            inspectionRefreshToken={inspectionRefreshToken}
+            key={repositoryGroup.repository.id}
+            layout={layout}
+            onError={setError}
+            onManageTags={() => setTagManagerOpen(true)}
+            onOpenTicket={(issueKey) => selectJiraIssue(issueKey)}
+            onReload={load}
+            onUpdate={updateLocalWorktree}
+            overview={overview}
+            repositoryGroup={repositoryGroup}
+          />
+        ))
       ) : (
         filteredAgents.map((agentGroup) => (
           <AgentSection
@@ -1083,20 +1279,7 @@ function CreateWorktreeCard({
   );
 }
 
-function AgentSection({
-  agentGroup,
-  layout,
-  allTags,
-  editorVariant,
-  inspectionRefreshToken,
-  onReload,
-  onUpdate,
-  onError,
-  onManageTags,
-  onOpenTicket,
-  overview,
-}: {
-  agentGroup: WorktreeAgentGroup;
+type WorktreeSectionProps = {
   layout: Layout;
   allTags: WorktreeTag[];
   editorVariant: WorktreeOverview["settings"]["editorVariant"];
@@ -1107,36 +1290,62 @@ function AgentSection({
   onManageTags: () => void;
   onOpenTicket: (issueKey: string) => void;
   overview: WorktreeOverview;
-}) {
+};
+
+function AgentStatusBadge({ agent }: { agent: WorktreeAgentGroup["agent"] }) {
   const t = useTranslations("worktrees");
-  const liveUpdatesEnabled =
-    agentGroup.agent.connectionStatus === "ONLINE" &&
-    agentGroup.agent.capabilities.includes("worktree.watch");
-  const branchManagementEnabled =
-    agentGroup.agent.connectionStatus === "ONLINE" &&
-    agentGroup.agent.capabilities.includes("worktree.branch");
+  const online = agent.connectionStatus === "ONLINE";
+  return (
+    <Badge variant={online ? "success" : "secondary"}>
+      {online ? t("online") : t("offline")}
+    </Badge>
+  );
+}
+
+function CodebaseWorktrees({
+  agentGroup,
+  group,
+  layout,
+  ...props
+}: WorktreeSectionProps & {
+  agentGroup: WorktreeAgentGroup;
+  group: WorktreeCodebaseGroup;
+}) {
+  const shared = {
+    ...props,
+    agentName: agentGroup.agent.name,
+    baseRepoDirectory: agentGroup.agent.baseRepoDirectory,
+    branchManagementEnabled:
+      agentGroup.agent.connectionStatus === "ONLINE" &&
+      agentGroup.agent.capabilities.includes("worktree.branch"),
+    group,
+    liveUpdatesEnabled:
+      agentGroup.agent.connectionStatus === "ONLINE" &&
+      agentGroup.agent.capabilities.includes("worktree.watch"),
+  };
+  if (layout !== "cards") return <WorktreeTable {...shared} />;
+  return (
+    <div className="space-y-3">
+      {group.worktrees.map((worktree) => (
+        <WorktreeCard {...shared} key={worktree.id} worktree={worktree} />
+      ))}
+    </div>
+  );
+}
+
+function AgentSection({
+  agentGroup,
+  ...props
+}: WorktreeSectionProps & { agentGroup: WorktreeAgentGroup }) {
   return (
     <section className="space-y-4">
       <div className="flex items-center gap-2 border-b pb-2">
         <h2 className="text-lg font-semibold">{agentGroup.agent.name}</h2>
-        <Badge
-          variant={
-            agentGroup.agent.connectionStatus === "ONLINE"
-              ? "success"
-              : "secondary"
-          }
-        >
-          {agentGroup.agent.connectionStatus === "ONLINE"
-            ? t("online")
-            : t("offline")}
-        </Badge>
-        <span className="text-xs text-muted-foreground">
-          {agentGroup.agent.hostname}
-        </span>
+        <AgentStatusBadge agent={agentGroup.agent} />
       </div>
       {agentGroup.codebases.map((group) => (
         <section className="space-y-3" key={group.codebase.id}>
-          <div className="flex flex-wrap items-center justify-between gap-3">
+          <div className="flex flex-wrap items-end justify-between gap-3">
             <div>
               <h3 className="font-medium">{group.repository.name}</h3>
               <p className="font-mono text-xs text-muted-foreground">
@@ -1145,45 +1354,37 @@ function AgentSection({
             </div>
             <FetchAge codebase={group.codebase} />
           </div>
-          {layout === "cards" ? (
-            <div className="space-y-3">
-              {group.worktrees.map((worktree) => (
-                <WorktreeCard
-                  allTags={allTags}
-                  baseRepoDirectory={agentGroup.agent.baseRepoDirectory}
-                  branchManagementEnabled={branchManagementEnabled}
-                  editorVariant={editorVariant}
-                  group={group}
-                  inspectionRefreshToken={inspectionRefreshToken}
-                  key={worktree.id}
-                  liveUpdatesEnabled={liveUpdatesEnabled}
-                  onError={onError}
-                  onManageTags={onManageTags}
-                  onOpenTicket={onOpenTicket}
-                  onReload={onReload}
-                  onUpdate={onUpdate}
-                  overview={overview}
-                  worktree={worktree}
-                />
-              ))}
+          <CodebaseWorktrees {...props} agentGroup={agentGroup} group={group} />
+        </section>
+      ))}
+    </section>
+  );
+}
+
+function RepositorySection({
+  repositoryGroup,
+  ...props
+}: WorktreeSectionProps & { repositoryGroup: WorktreeRepositoryGroup }) {
+  return (
+    <section className="space-y-4">
+      <div className="flex flex-wrap items-center gap-2 border-b pb-2">
+        <h2 className="text-lg font-semibold">
+          {repositoryGroup.repository.name}
+        </h2>
+        <span className="font-mono text-xs text-muted-foreground">
+          {repositoryGroup.repository.displayOrigin}
+        </span>
+      </div>
+      {repositoryGroup.entries.map(({ agentGroup, group }) => (
+        <section className="space-y-3" key={group.codebase.id}>
+          <div className="flex flex-wrap items-end justify-between gap-3">
+            <div className="flex flex-wrap items-center gap-2">
+              <h3 className="font-medium">{agentGroup.agent.name}</h3>
+              <AgentStatusBadge agent={agentGroup.agent} />
             </div>
-          ) : (
-            <WorktreeTable
-              allTags={allTags}
-              baseRepoDirectory={agentGroup.agent.baseRepoDirectory}
-              branchManagementEnabled={branchManagementEnabled}
-              editorVariant={editorVariant}
-              group={group}
-              inspectionRefreshToken={inspectionRefreshToken}
-              liveUpdatesEnabled={liveUpdatesEnabled}
-              onError={onError}
-              onManageTags={onManageTags}
-              onOpenTicket={onOpenTicket}
-              onReload={onReload}
-              onUpdate={onUpdate}
-              overview={overview}
-            />
-          )}
+            <FetchAge codebase={group.codebase} />
+          </div>
+          <CodebaseWorktrees {...props} agentGroup={agentGroup} group={group} />
         </section>
       ))}
     </section>
@@ -1326,10 +1527,9 @@ function WorktreeCard(props: WorktreeItemProps) {
         </CardTitle>
         <CardAction className="col-start-1 row-span-1 row-start-auto flex max-w-full flex-wrap items-center justify-start gap-1 justify-self-start @md/card-header:col-start-2 @md/card-header:row-span-2 @md/card-header:row-start-1 @md/card-header:justify-end @md/card-header:justify-self-end">
           <OriginStatusBadges worktree={worktree} />
-          {worktree.hasUnstagedChanges && (
+          {(worktree.hasStagedChanges || worktree.hasUnstagedChanges) && (
             <Badge variant="destructive">{t("dirty")}</Badge>
           )}
-          <WorktreeDetailsLink worktree={worktree} />
           <WorktreeMenus {...liveProps} />
         </CardAction>
       </CardHeader>
@@ -1363,38 +1563,46 @@ function WorktreeCard(props: WorktreeItemProps) {
             if (expanded) await refreshInspection();
           }}
         />
-        <WorkflowQuickActions
-          sessionData={{
-            worktree: {
-              id: worktree.id,
-              path: worktree.folder,
-              branch: worktree.branch,
-              baseBranch: worktree.baseBranch,
-              headSha: worktree.headSha,
-            },
-            codebase: {
-              id: props.group.codebase.id,
-              folder: props.group.codebase.folder,
-            },
-            repo: {
-              id: props.group.repository.id,
-              name: props.group.repository.name,
-              url: props.group.repository.displayOrigin,
-              displayOrigin: props.group.repository.displayOrigin,
-            },
-          }}
-          worktreeId={worktree.id}
-          workflows={props.group.quickActions ?? []}
-        />
-        <CommandQuickActions
-          agentCapabilities={
-            props.overview.agents.find((agentGroup) =>
-              agentGroup.codebases.some(
-                (group) => group.codebase.id === props.group.codebase.id,
-              ),
-            )?.agent.capabilities ?? []
+        <QuickActionsRow
+          first={
+            <WorkflowQuickActions
+              className="w-auto"
+              sessionData={{
+                worktree: {
+                  id: worktree.id,
+                  path: worktree.folder,
+                  branch: worktree.branch,
+                  baseBranch: worktree.baseBranch,
+                  headSha: worktree.headSha,
+                },
+                codebase: {
+                  id: props.group.codebase.id,
+                  folder: props.group.codebase.folder,
+                },
+                repo: {
+                  id: props.group.repository.id,
+                  name: props.group.repository.name,
+                  url: props.group.repository.displayOrigin,
+                  displayOrigin: props.group.repository.displayOrigin,
+                },
+              }}
+              worktreeId={worktree.id}
+              workflows={props.group.quickActions ?? []}
+            />
           }
-          worktreeId={worktree.id}
+          second={
+            <CommandQuickActions
+              agentCapabilities={
+                props.overview.agents.find((agentGroup) =>
+                  agentGroup.codebases.some(
+                    (group) => group.codebase.id === props.group.codebase.id,
+                  ),
+                )?.agent.capabilities ?? []
+              }
+              className="w-auto"
+              worktreeId={worktree.id}
+            />
+          }
         />
       </CardFooter>
     </Card>
@@ -1405,6 +1613,7 @@ export type WorktreeItemProps = {
   worktree: Worktree;
   group: WorktreeCodebaseGroup;
   allTags: WorktreeTag[];
+  agentName: string;
   baseRepoDirectory: string | null;
   branchManagementEnabled: boolean;
   editorVariant: WorktreeOverview["settings"]["editorVariant"];
@@ -1498,6 +1707,7 @@ export function WorktreeMetadata(
   const {
     worktree,
     group,
+    agentName,
     baseRepoDirectory,
     detailsExpanded,
     onToggleDetails,
@@ -1515,6 +1725,8 @@ export function WorktreeMetadata(
       </div>
       <MetadataRow label={t("upToDate")}>
         <BaseFreshnessBadge worktree={worktree} />
+        <span className="pl-6 text-xs text-muted-foreground">{t("agent")}</span>
+        <Badge variant="outline">{agentName}</Badge>
       </MetadataRow>
       <WorktreeTagsMenu {...props} />
       <MetadataRow label={t("pullRequest")}>
@@ -1691,6 +1903,7 @@ export function PullRequestBadges({
   onToggleDetails?: () => void;
 }) {
   const t = useTranslations("worktrees");
+  const commits = worktree.baseAhead ?? 0;
   return (
     <>
       {worktree.pullRequest ? (
@@ -1726,24 +1939,25 @@ export function PullRequestBadges({
             </Link>
           </Badge>
         </>
-      ) : (
+      ) : commits === 0 ? (
         <span className="text-muted-foreground">—</span>
-      )}
-      {onToggleDetails ? (
-        <Badge asChild variant="secondary">
-          <button
-            aria-expanded={detailsExpanded}
-            onClick={onToggleDetails}
-            type="button"
-          >
-            {t("branchCommits", { count: worktree.baseAhead ?? 0 })}
-          </button>
-        </Badge>
-      ) : (
-        <Badge variant="secondary">
-          {t("branchCommits", { count: worktree.baseAhead ?? 0 })}
-        </Badge>
-      )}
+      ) : null}
+      {commits > 0 &&
+        (onToggleDetails ? (
+          <Badge asChild variant="secondary">
+            <button
+              aria-expanded={detailsExpanded}
+              onClick={onToggleDetails}
+              type="button"
+            >
+              {t("branchCommits", { count: commits })}
+            </button>
+          </Badge>
+        ) : (
+          <Badge variant="secondary">
+            {t("branchCommits", { count: commits })}
+          </Badge>
+        ))}
     </>
   );
 }
@@ -1794,25 +2008,27 @@ export function OriginStatusBadges({ worktree }: { worktree: Worktree }) {
       </Badge>
     );
   }
-  if (worktree.ahead !== null || worktree.behind !== null) {
+  const ahead = worktree.ahead ?? 0;
+  const behind = worktree.behind ?? 0;
+  if (ahead > 0 || behind > 0) {
     return (
       <>
-        {worktree.ahead !== null && (
+        {ahead > 0 && (
           <Badge
             className="border-blue-500/30 bg-blue-500/10 text-blue-700 dark:text-blue-300"
             variant="outline"
           >
             <ArrowUp data-icon="inline-start" />
-            {t("ahead", { count: worktree.ahead })}
+            {t("ahead", { count: ahead })}
           </Badge>
         )}
-        {worktree.behind !== null && (
+        {behind > 0 && (
           <Badge
             className="border-blue-500/30 bg-blue-500/10 text-blue-700 dark:text-blue-300"
             variant="outline"
           >
             <ArrowDown data-icon="inline-start" />
-            {t("behind", { count: worktree.behind })}
+            {t("behind", { count: behind })}
           </Badge>
         )}
       </>
@@ -2276,36 +2492,45 @@ export function WorktreeMenus(
               <Plus /> {t("manageTags")}
             </DropdownMenuItem>
             <DropdownMenuSeparator />
-            <DropdownMenuLabel className="flex items-center gap-1.5 leading-none">
-              <Paintbrush className="size-3" />
-              <span>{t("highlight")}</span>
+            <DropdownMenuLabel className="flex items-center justify-between gap-1.5 py-0 leading-none">
+              <span className="flex items-center gap-1.5">
+                <Paintbrush className="size-3" />
+                <span>{t("highlight")}</span>
+              </span>
+              <Button
+                aria-label={t("clearHighlight")}
+                className="size-6"
+                disabled={!worktree.highlightColor}
+                onClick={(event) => {
+                  event.stopPropagation();
+                  void highlight(null);
+                }}
+                size="icon-sm"
+                variant="ghost"
+              >
+                <Trash2 className="size-3" />
+              </Button>
             </DropdownMenuLabel>
             <ToggleGroup
               aria-label={t("highlight")}
-              className="grid grid-cols-7 gap-1 p-2"
+              className="grid w-full grid-cols-8 gap-1 px-1.5 pb-1"
               onClick={(event) => event.stopPropagation()}
               onValueChange={(value) => {
-                if (value) void highlight(value === "__none__" ? null : value);
+                if (value) void highlight(value);
               }}
               size="sm"
               spacing={1}
               type="single"
-              value={worktree.highlightColor ?? "__none__"}
+              value={worktree.highlightColor ?? ""}
               variant="outline"
             >
-              <ToggleGroupItem
-                aria-label={t("clearHighlight")}
-                className="size-7 min-w-0 p-0"
-                value="__none__"
-              >
-                <Trash2 className="size-3" />
-              </ToggleGroupItem>
               {COLORS.map((color) => (
                 <ToggleGroupItem
                   aria-label={color}
                   className={cn(
-                    "size-7 min-w-0 p-0",
+                    "aspect-square h-auto w-full min-w-0 p-0",
                     colorSwatchClasses[color],
+                    colorSwatchStateClasses[color],
                     "data-[state=on]:ring-2 data-[state=on]:ring-foreground",
                   )}
                   key={color}
@@ -3143,7 +3368,7 @@ function WorktreeTableRows(props: WorktreeItemProps) {
         <TableCell>
           <div className="flex flex-wrap items-center gap-1">
             <OriginStatusBadges worktree={worktree} />
-            {worktree.hasUnstagedChanges && (
+            {(worktree.hasStagedChanges || worktree.hasUnstagedChanges) && (
               <Badge variant="destructive">{t("dirty")}</Badge>
             )}
           </div>
@@ -3321,7 +3546,7 @@ export function TagManagerDialog({
           />
           <ToggleGroup
             aria-label={t("highlight")}
-            className="grid grid-cols-12 gap-1"
+            className="grid w-full grid-cols-12 gap-1"
             onValueChange={(value) => {
               if (value) setColor(value);
             }}
@@ -3335,8 +3560,9 @@ export function TagManagerDialog({
               <ToggleGroupItem
                 aria-label={item}
                 className={cn(
-                  "size-7 min-w-0 p-0",
+                  "aspect-square h-auto w-full min-w-0 p-0",
                   colorSwatchClasses[item],
+                  colorSwatchStateClasses[item],
                   "data-[state=on]:ring-2 data-[state=on]:ring-foreground",
                 )}
                 key={item}

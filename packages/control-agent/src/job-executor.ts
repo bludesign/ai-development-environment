@@ -65,6 +65,7 @@ export class JobExecutor {
           controller.signal,
           (log) => this.client.appendLog(claimed.id, log).then(() => undefined),
           {
+            agentId: claimed.agentId,
             reportWorktreeActivity: (input) =>
               this.client.reportWorktreeActivity(input),
             reportBuildProgress: (input) =>

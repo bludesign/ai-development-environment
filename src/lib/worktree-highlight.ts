@@ -28,6 +28,15 @@ export const worktreeHighlightSurfaceClasses: Record<string, string> = {
   fuchsia:
     "border-fuchsia-500/30 bg-fuchsia-500/10 hover:border-fuchsia-500/50 hover:bg-fuchsia-500/20",
   pink: "border-pink-500/30 bg-pink-500/10 hover:border-pink-500/50 hover:bg-pink-500/20",
+  lavender:
+    "border-lavender-500/30 bg-lavender-500/10 hover:border-lavender-500/50 hover:bg-lavender-500/20",
+  maroon:
+    "border-maroon-500/30 bg-maroon-500/10 hover:border-maroon-500/50 hover:bg-maroon-500/20",
+  brown:
+    "border-brown-500/30 bg-brown-500/10 hover:border-brown-500/50 hover:bg-brown-500/20",
+  olive:
+    "border-olive-500/30 bg-olive-500/10 hover:border-olive-500/50 hover:bg-olive-500/20",
+  navy: "border-navy-500/30 bg-navy-500/10 hover:border-navy-500/50 hover:bg-navy-500/20",
 };
 
 export const worktreeHighlightBackgroundClasses: Record<string, string> = {
@@ -50,6 +59,11 @@ export const worktreeHighlightBackgroundClasses: Record<string, string> = {
   purple: "bg-purple-500/10 hover:bg-purple-500/20",
   fuchsia: "bg-fuchsia-500/10 hover:bg-fuchsia-500/20",
   pink: "bg-pink-500/10 hover:bg-pink-500/20",
+  lavender: "bg-lavender-500/10 hover:bg-lavender-500/20",
+  maroon: "bg-maroon-500/10 hover:bg-maroon-500/20",
+  brown: "bg-brown-500/10 hover:bg-brown-500/20",
+  olive: "bg-olive-500/10 hover:bg-olive-500/20",
+  navy: "bg-navy-500/10 hover:bg-navy-500/20",
 };
 
 /**
@@ -79,6 +93,11 @@ export const worktreeHighlightInsetAccentClasses: Record<string, string> = {
   purple: "shadow-[inset_4px_0_0_var(--color-purple-500)]",
   fuchsia: "shadow-[inset_4px_0_0_var(--color-fuchsia-500)]",
   pink: "shadow-[inset_4px_0_0_var(--color-pink-500)]",
+  lavender: "shadow-[inset_4px_0_0_var(--color-lavender-500)]",
+  maroon: "shadow-[inset_4px_0_0_var(--color-maroon-500)]",
+  brown: "shadow-[inset_4px_0_0_var(--color-brown-500)]",
+  olive: "shadow-[inset_4px_0_0_var(--color-olive-500)]",
+  navy: "shadow-[inset_4px_0_0_var(--color-navy-500)]",
 };
 
 /**
@@ -106,6 +125,11 @@ export const worktreeHighlightArrivalClasses: Record<string, string> = {
   purple: "bg-purple-500/30 ring-purple-500/50 hover:bg-purple-500/30",
   fuchsia: "bg-fuchsia-500/30 ring-fuchsia-500/50 hover:bg-fuchsia-500/30",
   pink: "bg-pink-500/30 ring-pink-500/50 hover:bg-pink-500/30",
+  lavender: "bg-lavender-500/30 ring-lavender-500/50 hover:bg-lavender-500/30",
+  maroon: "bg-maroon-500/30 ring-maroon-500/50 hover:bg-maroon-500/30",
+  brown: "bg-brown-500/30 ring-brown-500/50 hover:bg-brown-500/30",
+  olive: "bg-olive-500/30 ring-olive-500/50 hover:bg-olive-500/30",
+  navy: "bg-navy-500/30 ring-navy-500/50 hover:bg-navy-500/30",
 };
 
 export const worktreeHighlightAccentClasses: Record<string, string> = {
@@ -128,4 +152,9 @@ export const worktreeHighlightAccentClasses: Record<string, string> = {
   purple: "border-l-purple-500",
   fuchsia: "border-l-fuchsia-500",
   pink: "border-l-pink-500",
+  lavender: "border-l-lavender-500",
+  maroon: "border-l-maroon-500",
+  brown: "border-l-brown-500",
+  olive: "border-l-olive-500",
+  navy: "border-l-navy-500",
 };

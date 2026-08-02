@@ -6,6 +6,7 @@ import {
   Copy,
   ExternalLink,
   FilePenLine,
+  Hourglass,
   RotateCcw,
 } from "lucide-react";
 import { useLocale, useTranslations } from "next-intl";
@@ -24,6 +25,7 @@ import {
   Card,
   CardAction,
   CardContent,
+  CardDescription,
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
@@ -50,11 +52,15 @@ import {
 
 import {
   COMMAND_RUN_FIELDS,
+  COMMAND_RUN_QUEUE_FIELDS,
   activeCommandRun,
+  commandConcurrencyKey,
   commandOriginKey,
+  commandQueueReasonKey,
   commandRestartKey,
   commandStatusKey,
   type CommandRun,
+  type CommandRunQueue,
 } from "./types";
 
 type OutputChunk = {
@@ -70,6 +76,7 @@ type OutputChunk = {
 const OUTPUT_FIELDS =
   "id attemptId attemptNumber sequence stream dataBase64 byteLength createdAt";
 const EMPTY_OUTPUT: OutputChunk[] = [];
+const QUEUE_REFRESH_MS = 15_000;
 
 function formatDuration(milliseconds: number): string {
   const totalSeconds = Math.max(0, Math.floor(milliseconds / 1_000));
@@ -135,7 +142,7 @@ export function CommandRunPage({ runId }: { runId: string }) {
   const loadRun = useCallback(async () => {
     try {
       const data = await controlPlaneRequest<{ commandRun: CommandRun | null }>(
-        `query CommandRunDetail($id: ID!) { commandRun(id: $id) { ${COMMAND_RUN_FIELDS} predecessor { id displayNumber } successor { id displayNumber } } }`,
+        `query CommandRunDetail($id: ID!) { commandRun(id: $id) { ${COMMAND_RUN_FIELDS} ${COMMAND_RUN_QUEUE_FIELDS} predecessor { id displayNumber } successor { id displayNumber } } }`,
         { id: runId },
       );
       setRun(data.commandRun);
@@ -242,6 +249,19 @@ export function CommandRunPage({ runId }: { runId: string }) {
     };
   }, [loadRun, runId]);
 
+  const queue: CommandRunQueue | null =
+    run?.queue && run.queue.reason !== "NOT_QUEUED" ? run.queue : null;
+
+  // A run only publishes a change when its own row changes, and most of what
+  // holds a run back happens elsewhere: an agent stops answering, a peer takes
+  // the target. Re-read while the run waits so the explanation stays true.
+  const waiting = queue !== null;
+  useEffect(() => {
+    if (!waiting) return;
+    const timer = window.setInterval(() => void loadRun(), QUEUE_REFRESH_MS);
+    return () => window.clearInterval(timer);
+  }, [loadRun, waiting]);
+
   const mutate = async (kind: "terminate" | "rerun") => {
     setMutating(true);
     try {
@@ -295,6 +315,15 @@ export function CommandRunPage({ runId }: { runId: string }) {
       </Alert>
     );
   const highlighted = run.worktree?.highlightColor;
+  // Every message takes what it needs out of this one bag, so the reason and
+  // the wording that explains it stay in a single switch in `types.ts`.
+  const queueValues = {
+    agent: run.agentName,
+    predecessor: run.predecessor?.displayNumber ?? 0,
+    position: queue?.position ?? 0,
+    waiting: queue?.waitingCount ?? 0,
+    blocking: queue?.entries.filter((entry) => entry.blocking).length ?? 0,
+  };
 
   return (
     <div className="space-y-5">
@@ -363,6 +392,18 @@ export function CommandRunPage({ runId }: { runId: string }) {
         <Alert variant="destructive">
           <AlertTitle>{t("runError")}</AlertTitle>
           <AlertDescription>{run.error}</AlertDescription>
+        </Alert>
+      )}
+      {queue && (
+        <Alert
+          data-testid="command-run-queue-reason"
+          variant={queue.reason === "AGENT_OFFLINE" ? "destructive" : "default"}
+        >
+          <Hourglass />
+          <AlertTitle>{t("queuedTitle")}</AlertTitle>
+          <AlertDescription>
+            {t(commandQueueReasonKey(queue.reason), queueValues)}
+          </AlertDescription>
         </Alert>
       )}
       <Card>
@@ -457,6 +498,74 @@ export function CommandRunPage({ runId }: { runId: string }) {
         sourceKey={runId}
         title={t("terminalOutput")}
       />
+      {queue && queue.entries.length > 0 && (
+        <Card className="gap-0 py-0" data-testid="command-run-queue">
+          <CardHeader>
+            <CardTitle>{t("queue")}</CardTitle>
+            <CardDescription>
+              {queue.position > 0
+                ? t("queuePosition", queueValues)
+                : t("queueDescription")}
+            </CardDescription>
+          </CardHeader>
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead>#</TableHead>
+                <TableHead>{t("name")}</TableHead>
+                <TableHead>{t("status")}</TableHead>
+                <TableHead>{t("concurrency")}</TableHead>
+                <TableHead>{t("queued")}</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {queue.entries.map((entry) => (
+                <TableRow
+                  className={cn(entry.currentRun && "bg-muted/50")}
+                  key={entry.id}
+                >
+                  <TableCell>
+                    {entry.currentRun ? (
+                      entry.displayNumber
+                    ) : (
+                      <Button asChild className="h-auto px-0" variant="link">
+                        <Link href={`/commands/runs/${entry.id}`}>
+                          {entry.displayNumber}
+                        </Link>
+                      </Button>
+                    )}
+                  </TableCell>
+                  <TableCell>
+                    <div className="flex flex-wrap items-center gap-2">
+                      <span className="break-words">{entry.name}</span>
+                      {entry.currentRun && (
+                        <Badge variant="outline">{t("thisRun")}</Badge>
+                      )}
+                      {entry.holdingTarget && (
+                        <Badge variant="secondary">{t("holdingTarget")}</Badge>
+                      )}
+                      {entry.blocking && (
+                        <Badge variant="destructive">{t("blocking")}</Badge>
+                      )}
+                    </div>
+                  </TableCell>
+                  <TableCell>
+                    <Badge variant="outline">
+                      {t(commandStatusKey(entry.status))}
+                    </Badge>
+                  </TableCell>
+                  <TableCell>
+                    {t(commandConcurrencyKey(entry.concurrency))}
+                  </TableCell>
+                  <TableCell>
+                    <DateTime value={entry.queuedAt} />
+                  </TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+        </Card>
+      )}
       <Card className="gap-0 py-0">
         <CardHeader>
           <CardTitle>{t("attempts")}</CardTitle>

@@ -2427,6 +2427,7 @@ model CommandDefinition {
   targetRepositoryId       String?
   restartPolicy            String              @default("NEVER")
   restartLimit             Int?                @default(3)
+  concurrency              String              @default("NON_EXCLUSIVE")
   quickActionEnabled       Boolean             @default(false)
   quickActionIconKey       String              @default("terminal")
   quickActionButtonVariant String              @default("default")
@@ -2456,6 +2457,7 @@ model CommandRun {
   snapshotTargetKind           String
   snapshotRestartPolicy        String              @default("NEVER")
   snapshotRestartLimit         Int?
+  snapshotConcurrency          String              @default("NON_EXCLUSIVE")
   snapshotNotificationsEnabled Boolean             @default(true)
   snapshotJson                 String              @default("{}")
   agentId                      String?

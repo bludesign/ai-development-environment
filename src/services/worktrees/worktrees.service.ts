@@ -32,7 +32,10 @@ import {
 
 import { getPrismaClient } from "@/data/prisma-client";
 import type { Prisma } from "@/generated/prisma/client";
-import { CodebaseBusyError } from "@/lib/codebase-busy";
+import {
+  CodebaseBusyError,
+  isActiveCodebaseJobConflict,
+} from "@/lib/codebase-busy";
 import {
   isResourceTriggerKind,
   workflowResourceKind,
@@ -92,6 +95,11 @@ export const WORKTREE_COLORS = [
   "purple",
   "fuchsia",
   "pink",
+  "lavender",
+  "maroon",
+  "brown",
+  "olive",
+  "navy",
 ] as const;
 
 const worktreeInclude = {
@@ -368,19 +376,6 @@ function resultObject(job: {
     throw new Error("Worktree job returned an invalid result");
   }
   return value as Record<string, unknown>;
-}
-
-function activeCodebaseJobConflict(error: unknown): boolean {
-  if (!error || typeof error !== "object") return false;
-  const value = error as {
-    code?: unknown;
-    meta?: { target?: unknown };
-  };
-  if (value.code !== "P2002") return false;
-  const target = value.meta?.target;
-  return Array.isArray(target)
-    ? target.includes("codebaseId")
-    : typeof target === "string" && target.includes("codebaseId");
 }
 
 export class WorktreesService {
@@ -2460,7 +2455,7 @@ export class WorktreesService {
       try {
         return await this.agentControl.createJob(input);
       } catch (error) {
-        if (!activeCodebaseJobConflict(error)) throw error;
+        if (!isActiveCodebaseJobConflict(error)) throw error;
       }
     }
     throw new CodebaseBusyError();

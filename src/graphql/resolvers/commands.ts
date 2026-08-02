@@ -40,7 +40,11 @@ export const createCommandResolvers = (service: CommandsService) => ({
     finishedAt: (value: { finishedAt?: Date | null }) => iso(value.finishedAt),
     nextRestartAt: (value: { nextRestartAt?: Date | null }) =>
       iso(value.nextRestartAt),
+    queue: (value: { id: string }) => service.runQueue(value.id),
     ...dates,
+  },
+  CommandRunQueueEntry: {
+    queuedAt: (value: { queuedAt: Date }) => value.queuedAt.toISOString(),
   },
   CommandRunAttempt: {
     startedAt: (value: { startedAt?: Date | null }) => iso(value.startedAt),
@@ -252,9 +256,24 @@ export const createCommandResolvers = (service: CommandsService) => ({
       },
     },
     commandRunsChanged: {
-      subscribe: (_root: unknown, _args: unknown, context: GraphQLContext) => {
+      subscribe: (
+        _root: unknown,
+        args: { agentId?: string | null; worktreeId?: string | null },
+        context: GraphQLContext,
+      ) => {
         requireControlPlane(context);
-        return agentEventBus.iterate(COMMAND_RUNS_CHANGED_TOPIC);
+        return agentEventBus.iterate<{
+          commandRunsChanged: {
+            agentId: string | null;
+            worktreeId: string | null;
+          };
+        }>(COMMAND_RUNS_CHANGED_TOPIC, (payload) => {
+          const run = payload.commandRunsChanged;
+          return (
+            (!args.agentId || run.agentId === args.agentId) &&
+            (!args.worktreeId || run.worktreeId === args.worktreeId)
+          );
+        });
       },
     },
     commandRunChanged: {

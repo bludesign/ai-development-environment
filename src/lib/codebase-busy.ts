@@ -17,3 +17,27 @@ export class CodebaseBusyError extends Error {
 export function isCodebaseBusyError(error: unknown): boolean {
   return error instanceof Error && error.name === "CodebaseBusyError";
 }
+
+/**
+ * Recognises the raw Prisma violation of `AgentJob_codebaseId_active_key`, which
+ * surfaces as a P2002 naming `codebaseId` as its only target. Job creation
+ * translates it into {@link CodebaseBusyError}, so callers that sit above that
+ * translation should prefer {@link isCodebaseBusyError}; this stays available for
+ * code that talks to Prisma directly.
+ */
+export function isActiveCodebaseJobConflict(error: unknown): boolean {
+  if (isCodebaseBusyError(error)) return true;
+  if (
+    error instanceof Error &&
+    error.message.includes("AgentJob_codebaseId_active_key")
+  ) {
+    return true;
+  }
+  if (!error || typeof error !== "object") return false;
+  const value = error as { code?: unknown; meta?: { target?: unknown } };
+  if (value.code !== "P2002") return false;
+  const target = value.meta?.target;
+  return Array.isArray(target)
+    ? target.includes("codebaseId")
+    : typeof target === "string" && target.includes("codebaseId");
+}
