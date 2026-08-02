@@ -1475,7 +1475,7 @@ function WorktreeCard(props: WorktreeItemProps) {
         </CardTitle>
         <CardAction className="col-start-1 row-span-1 row-start-auto flex max-w-full flex-wrap items-center justify-start gap-1 justify-self-start @md/card-header:col-start-2 @md/card-header:row-span-2 @md/card-header:row-start-1 @md/card-header:justify-end @md/card-header:justify-self-end">
           <OriginStatusBadges worktree={worktree} />
-          {worktree.hasUnstagedChanges && (
+          {(worktree.hasStagedChanges || worktree.hasUnstagedChanges) && (
             <Badge variant="destructive">{t("dirty")}</Badge>
           )}
           <WorktreeMenus {...liveProps} />
@@ -3307,7 +3307,7 @@ function WorktreeTableRows(props: WorktreeItemProps) {
         <TableCell>
           <div className="flex flex-wrap items-center gap-1">
             <OriginStatusBadges worktree={worktree} />
-            {worktree.hasUnstagedChanges && (
+            {(worktree.hasStagedChanges || worktree.hasUnstagedChanges) && (
               <Badge variant="destructive">{t("dirty")}</Badge>
             )}
           </div>

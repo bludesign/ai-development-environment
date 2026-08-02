@@ -609,6 +609,22 @@ describe("WorktreesPage", () => {
     );
   });
 
+  test("marks a worktree dirty when every change is staged", async () => {
+    const response = (await request("query Fixture")) as unknown as {
+      worktreeOverview: WorktreeOverview;
+    };
+    const worktree =
+      response.worktreeOverview.agents[0]!.codebases[0]!.worktrees[0]!;
+    worktree.hasStagedChanges = true;
+    worktree.hasUnstagedChanges = false;
+    request.mockClear();
+
+    render(<WorktreesPage />);
+    await screen.findByText("feature/AIDE-24");
+
+    expect(screen.getByText("Dirty")).toBeDefined();
+  });
+
   test("keeps the change branch popover open with an agent-relative path", async () => {
     render(<WorktreesPage />);
     await screen.findByText("feature/AIDE-24");
