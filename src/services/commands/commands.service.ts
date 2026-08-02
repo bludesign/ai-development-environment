@@ -8,6 +8,7 @@ import {
 } from "@ai-development-environment/agent-contract/commands";
 
 import { getPrismaClient } from "@/data/prisma-client";
+import { isCodebaseBusyError } from "@/lib/codebase-busy";
 import {
   COMMAND_RUNS_CHANGED_TOPIC,
   COMMAND_RUN_OUTPUT_CHANGED_TOPIC,
@@ -27,6 +28,7 @@ const TARGETS = [
   "REPOSITORY_WORKTREE",
 ] as const;
 const RESTART_POLICIES = ["NEVER", "ON_FAILURE", "ALWAYS"] as const;
+const CONCURRENCY_MODES = ["EXCLUSIVE", "NON_EXCLUSIVE", "EXCLUDED"] as const;
 const ACTIVE_RUN_STATUSES = [
   "QUEUED",
   "RUNNING",
@@ -49,6 +51,7 @@ export type CommandDefinitionInput = {
   targetRepositoryId?: string | null;
   restartPolicy?: string | null;
   restartLimit?: number | null;
+  concurrency?: string | null;
   quickActionEnabled?: boolean | null;
   quickActionIconKey?: string | null;
   quickActionButtonVariant?: string | null;
@@ -107,6 +110,60 @@ export function evaluateCommandRestart(input: {
     (input.durationMs >= STABLE_ATTEMPT_MS ? 0 : input.restartCount) + 1;
   const exhausted = input.limit !== null && restartCount > input.limit;
   return { restart: !exhausted, restartCount, exhausted };
+}
+
+export type CommandConcurrencyPeer = {
+  id: string;
+  concurrency: string;
+  queuedAt: Date;
+};
+
+/**
+ * Decides whether a waiting run may take its target now.
+ *
+ * A target is either one worktree or one agent home, and the modes behave like
+ * a reader-writer lock over it: `EXCLUSIVE` runs alone, `NON_EXCLUSIVE` runs
+ * alongside other `NON_EXCLUSIVE` runs, and `EXCLUDED` neither waits nor makes
+ * anything else wait.
+ *
+ * `holders` are runs that already own the target — they have a dispatched
+ * attempt that has not reported back. `waiting` are runs queued for the same
+ * target with nothing dispatched yet, including the candidate itself.
+ *
+ * Queue order breaks the two ways this could starve. An `EXCLUSIVE` run waits
+ * until it is the oldest waiter, so two of them cannot both decide the target
+ * is free; a `NON_EXCLUSIVE` run yields to any `EXCLUSIVE` run queued ahead of
+ * it, so a steady stream of shared work cannot hold the target forever.
+ */
+export function admitCommandRun(input: {
+  candidate: CommandConcurrencyPeer;
+  holders: Array<Pick<CommandConcurrencyPeer, "id" | "concurrency">>;
+  waiting: CommandConcurrencyPeer[];
+}): boolean {
+  if (input.candidate.concurrency === "EXCLUDED") return true;
+  const holders = input.holders.filter(
+    (peer) => peer.concurrency !== "EXCLUDED" && peer.id !== input.candidate.id,
+  );
+  // Ties on the queue timestamp are broken by id so every waiter agrees on the
+  // same order; SQLite timestamps are coarse enough for runs started together
+  // to share one.
+  const ahead = input.waiting
+    .filter(
+      (peer) =>
+        peer.concurrency !== "EXCLUDED" && peer.id !== input.candidate.id,
+    )
+    .filter((peer) => {
+      const delta =
+        peer.queuedAt.getTime() - input.candidate.queuedAt.getTime();
+      return delta !== 0 ? delta < 0 : peer.id < input.candidate.id;
+    });
+  if (input.candidate.concurrency === "EXCLUSIVE") {
+    return holders.length === 0 && ahead.length === 0;
+  }
+  return (
+    !holders.some((peer) => peer.concurrency === "EXCLUSIVE") &&
+    !ahead.some((peer) => peer.concurrency === "EXCLUSIVE")
+  );
 }
 
 function enumValue<T extends readonly string[]>(
@@ -180,6 +237,7 @@ function publishRun(run: { id: string }): void {
 export class CommandsService {
   private timer: ReturnType<typeof setInterval> | null = null;
   private reconciliation: Promise<void> | null = null;
+  private dispatchChain: Promise<unknown> = Promise.resolve();
 
   constructor(
     private readonly agentControl: AgentControlService,
@@ -274,6 +332,11 @@ export class CommandsService {
       targetRepositoryId: input.targetRepositoryId ?? null,
       restartPolicy,
       restartLimit,
+      concurrency: enumValue(
+        CONCURRENCY_MODES,
+        input.concurrency ?? "NON_EXCLUSIVE",
+        "Concurrency",
+      ),
       quickActionEnabled: input.quickActionEnabled ?? false,
       quickActionIconKey: text(
         input.quickActionIconKey ?? "terminal",
@@ -344,6 +407,7 @@ export class CommandsService {
         targetRepositoryName: definition.targetRepository?.name ?? null,
         restartPolicy: definition.restartPolicy,
         restartLimit: definition.restartLimit,
+        concurrency: definition.concurrency,
         quickActionEnabled: definition.quickActionEnabled,
         quickActionIconKey: definition.quickActionIconKey,
         quickActionButtonVariant: definition.quickActionButtonVariant,
@@ -460,6 +524,7 @@ export class CommandsService {
         typeof command.restartLimit === "number"
           ? (command.restartLimit as number | null)
           : 3,
+      concurrency: importedText(command.concurrency) ?? "NON_EXCLUSIVE",
       // A widened target means this script was pinned to a machine or
       // repository that does not exist here. Running it anywhere is a decision
       // for whoever imported it, so the one-click button stays off until they
@@ -714,6 +779,7 @@ export class CommandsService {
             snapshotTargetKind: definition.targetKind,
             snapshotRestartPolicy: definition.restartPolicy,
             snapshotRestartLimit: definition.restartLimit,
+            snapshotConcurrency: definition.concurrency,
             snapshotNotificationsEnabled: definition.notificationsEnabled,
             snapshotJson: JSON.stringify(definition),
             agentId: agent.id,
@@ -771,6 +837,10 @@ export class CommandsService {
       targetKind,
       restartPolicy: "NEVER",
       restartLimit: null,
+      // A one-off script the user just typed should start rather than sit in a
+      // queue, but it still yields to a command that asked for the target
+      // alone.
+      concurrency: "NON_EXCLUSIVE",
       notificationsEnabled: true,
     };
     let run: Awaited<ReturnType<typeof prisma.commandRun.create>>;
@@ -795,6 +865,7 @@ export class CommandsService {
             snapshotTargetKind: snapshot.targetKind,
             snapshotRestartPolicy: snapshot.restartPolicy,
             snapshotRestartLimit: snapshot.restartLimit,
+            snapshotConcurrency: snapshot.concurrency,
             snapshotNotificationsEnabled: snapshot.notificationsEnabled,
             snapshotJson: JSON.stringify(snapshot),
             agentId: agent.id,
@@ -826,7 +897,84 @@ export class CommandsService {
     return this.getRun(run.id);
   }
 
-  private async dispatch(runId: string): Promise<void> {
+  /**
+   * Reads the other runs sharing this run's target and asks
+   * {@link admitCommandRun} whether the target is free. A run that is turned
+   * away keeps its current status — `QUEUED` or `RESTARTING` — and the
+   * reconcile loop offers it the target again on the next tick.
+   */
+  private async admitRun(run: {
+    id: string;
+    snapshotConcurrency: string;
+    queuedAt: Date;
+    agentId: string | null;
+    worktreeId: string | null;
+  }): Promise<boolean> {
+    if (run.snapshotConcurrency === "EXCLUDED") return true;
+    const prisma = await getPrismaClient();
+    const peers = await prisma.commandRun.findMany({
+      where: {
+        id: { not: run.id },
+        status: { in: [...ACTIVE_RUN_STATUSES] },
+        snapshotConcurrency: { not: "EXCLUDED" },
+        // An agent-home run shares the home directory with other home runs on
+        // the same agent; a worktree run shares only that worktree.
+        ...(run.worktreeId
+          ? { worktreeId: run.worktreeId }
+          : { agentId: run.agentId, worktreeId: null }),
+      },
+      select: {
+        id: true,
+        snapshotConcurrency: true,
+        queuedAt: true,
+        attempts: {
+          select: { agentJobId: true, completionProcessedAt: true },
+          orderBy: { attempt: "desc" },
+          take: 1,
+        },
+      },
+    });
+    const holders: CommandConcurrencyPeer[] = [];
+    const waiting: CommandConcurrencyPeer[] = [];
+    for (const peer of peers) {
+      const attempt = peer.attempts[0];
+      const entry = {
+        id: peer.id,
+        concurrency: peer.snapshotConcurrency,
+        queuedAt: peer.queuedAt,
+      };
+      if (attempt?.agentJobId && !attempt.completionProcessedAt) {
+        holders.push(entry);
+      } else {
+        waiting.push(entry);
+      }
+    }
+    return admitCommandRun({
+      candidate: {
+        id: run.id,
+        concurrency: run.snapshotConcurrency,
+        queuedAt: run.queuedAt,
+      },
+      holders,
+      waiting,
+    });
+  }
+
+  /**
+   * Admission reads the runs sharing a target and then claims it by creating a
+   * job. Two dispatches interleaving between those steps would both see a free
+   * target and both start, so dispatches are serialized against each other.
+   */
+  private dispatch(runId: string): Promise<void> {
+    const next = this.dispatchChain.then(
+      () => this.dispatchRun(runId),
+      () => this.dispatchRun(runId),
+    );
+    this.dispatchChain = next.catch(() => undefined);
+    return next;
+  }
+
+  private async dispatchRun(runId: string): Promise<void> {
     const prisma = await getPrismaClient();
     const run = await prisma.commandRun.findUnique({
       where: { id: runId },
@@ -891,6 +1039,15 @@ export class CommandsService {
         !latest || candidate.attempt > latest.attempt ? candidate : latest,
       null,
     );
+    // A run already owns its target once an attempt has a job that has not
+    // reported back, so only work that is about to claim the target is
+    // admitted. Checking before the attempt row is written matters for a
+    // restart: its previous attempt is complete, so a blocked restart would
+    // otherwise mint a fresh attempt on every reconcile tick.
+    const holding = Boolean(
+      latestAttempt?.agentJobId && !latestAttempt.completionProcessedAt,
+    );
+    if (!holding && !(await this.admitRun(run))) return;
     const reuseLatestAttempt =
       latestAttempt &&
       !latestAttempt.agentJobId &&
@@ -918,22 +1075,32 @@ export class CommandsService {
       }
     }
     if (!attempt.agentJobId) {
-      const job = await this.agentControl.createJob({
-        agentId: run.agentId,
-        kind: COMMAND_RUN_JOB_KIND,
-        payload: {
-          commandRunId: run.id,
-          attemptId: attempt.id,
-          targetKind: run.worktreeId ? "WORKTREE" : "AGENT_HOME",
-          cwd: run.worktree?.folder ?? null,
-          script: run.snapshotScript,
-        },
-        idempotencyKey: `command-run:${run.id}:attempt:${attemptNumber}`,
-        timeoutSeconds: 0,
-        worktreeId: run.worktreeId,
-        codebaseId: run.worktree?.codebaseId ?? null,
-        visibility: "SYSTEM",
-      });
+      let job;
+      try {
+        job = await this.agentControl.createJob({
+          agentId: run.agentId,
+          kind: COMMAND_RUN_JOB_KIND,
+          payload: {
+            commandRunId: run.id,
+            attemptId: attempt.id,
+            targetKind: run.worktreeId ? "WORKTREE" : "AGENT_HOME",
+            cwd: run.worktree?.folder ?? null,
+            script: run.snapshotScript,
+          },
+          idempotencyKey: `command-run:${run.id}:attempt:${attemptNumber}`,
+          timeoutSeconds: 0,
+          worktreeId: run.worktreeId,
+          codebaseId: run.worktree?.codebaseId ?? null,
+          visibility: "SYSTEM",
+        });
+      } catch (error) {
+        // The codebase can still be held by git or worktree work that the
+        // command modes know nothing about. Waiting for it is the same answer
+        // concurrency gives, so the run stays queued for the next tick rather
+        // than failing on a busy repository.
+        if (!isCodebaseBusyError(error)) throw error;
+        return;
+      }
       attempt = await prisma.commandRunAttempt.update({
         where: { id: attempt.id },
         data: { agentJobId: job.id, status: job.status },
@@ -1014,6 +1181,7 @@ export class CommandsService {
           snapshotTargetKind: original.snapshotTargetKind,
           snapshotRestartPolicy: original.snapshotRestartPolicy,
           snapshotRestartLimit: original.snapshotRestartLimit,
+          snapshotConcurrency: original.snapshotConcurrency,
           snapshotNotificationsEnabled: original.snapshotNotificationsEnabled,
           snapshotJson: original.snapshotJson,
           agentId: original.agentId,

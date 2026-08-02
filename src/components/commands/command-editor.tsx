@@ -19,8 +19,16 @@ import {
   DropdownMenuRadioItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import { FieldLabel } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
+import {
+  Item,
+  ItemContent,
+  ItemDescription,
+  ItemTitle,
+} from "@/components/ui/item";
 import { Label } from "@/components/ui/label";
+import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import {
   Select,
   SelectContent,
@@ -33,8 +41,11 @@ import { useRouter } from "@/i18n/navigation";
 import { controlPlaneRequest } from "@/lib/control-plane-client";
 
 import {
+  COMMAND_CONCURRENCY_MODES,
   COMMAND_DEFINITION_FIELDS,
+  commandConcurrencyKey,
   type CommandAgent,
+  type CommandConcurrency,
   type CommandDefinition,
 } from "./types";
 
@@ -48,6 +59,7 @@ type Form = {
   restartPolicy: CommandDefinition["restartPolicy"];
   restartLimit: string;
   unlimitedRestarts: boolean;
+  concurrency: CommandConcurrency;
   quickActionEnabled: boolean;
   quickActionIconKey: string;
   quickActionButtonVariant: string;
@@ -64,6 +76,7 @@ const initial: Form = {
   restartPolicy: "NEVER",
   restartLimit: "3",
   unlimitedRestarts: false,
+  concurrency: "NON_EXCLUSIVE",
   quickActionEnabled: false,
   quickActionIconKey: "terminal",
   quickActionButtonVariant: "default",
@@ -118,6 +131,7 @@ export function CommandEditor({ commandId }: { commandId?: string }) {
             restartPolicy: value.restartPolicy,
             restartLimit: String(value.restartLimit ?? 3),
             unlimitedRestarts: value.restartLimit === null,
+            concurrency: value.concurrency,
             quickActionEnabled: value.quickActionEnabled,
             quickActionIconKey: value.quickActionIconKey,
             quickActionButtonVariant: value.quickActionButtonVariant,
@@ -148,6 +162,7 @@ export function CommandEditor({ commandId }: { commandId?: string }) {
             : null,
         restartPolicy: form.restartPolicy,
         restartLimit: form.unlimitedRestarts ? null : Number(form.restartLimit),
+        concurrency: form.concurrency,
         quickActionEnabled: form.quickActionEnabled,
         quickActionIconKey: form.quickActionIconKey,
         quickActionButtonVariant: form.quickActionButtonVariant,
@@ -373,6 +388,43 @@ export function CommandEditor({ commandId }: { commandId?: string }) {
           </CardContent>
         </Card>
       </div>
+      <Card>
+        <CardHeader>
+          <CardTitle>{t("concurrency")}</CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <p className="text-xs text-muted-foreground">
+            {t("concurrencyHelp")}
+          </p>
+          <RadioGroup
+            onValueChange={(value) =>
+              update("concurrency", value as CommandConcurrency)
+            }
+            value={form.concurrency}
+          >
+            {COMMAND_CONCURRENCY_MODES.map((mode) => {
+              const id = `command-concurrency-${mode}`;
+              return (
+                <FieldLabel
+                  className="w-full cursor-pointer"
+                  htmlFor={id}
+                  key={mode}
+                >
+                  <Item size="sm" variant="outline">
+                    <RadioGroupItem id={id} value={mode} />
+                    <ItemContent>
+                      <ItemTitle>{t(commandConcurrencyKey(mode))}</ItemTitle>
+                      <ItemDescription>
+                        {t(`${commandConcurrencyKey(mode)}Help` as never)}
+                      </ItemDescription>
+                    </ItemContent>
+                  </Item>
+                </FieldLabel>
+              );
+            })}
+          </RadioGroup>
+        </CardContent>
+      </Card>
       <Card>
         <CardHeader>
           <CardTitle>{t("notifications")}</CardTitle>

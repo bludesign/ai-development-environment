@@ -20,6 +20,16 @@ enum CommandRestartPolicy {
   ALWAYS
 }
 
+"Values supported for command concurrency."
+enum CommandConcurrency {
+  "Represents the exclusive option, which runs alone on its target."
+  EXCLUSIVE
+  "Represents the non exclusive option, which shares its target with other non exclusive runs."
+  NON_EXCLUSIVE
+  "Represents the excluded option, which ignores concurrency entirely."
+  EXCLUDED
+}
+
 "Lifecycle statuses for command run."
 enum CommandRunStatus {
   "Represents the queued status for command run."
@@ -74,6 +84,8 @@ type CommandDefinition {
   restartPolicy: CommandRestartPolicy!
   "The restart limit associated with this command definition. May be null when unavailable or not applicable."
   restartLimit: Int
+  "The concurrency mode deciding whether runs of this command may share their target."
+  concurrency: CommandConcurrency!
   "Whether the quick action enabled condition is true for this command definition."
   quickActionEnabled: Boolean!
   "The quick action icon key associated with this command definition."
@@ -166,6 +178,8 @@ type CommandRun {
   snapshotRestartPolicy: CommandRestartPolicy!
   "The snapshot restart limit associated with this command run. May be null when unavailable or not applicable."
   snapshotRestartLimit: Int
+  "The snapshot concurrency associated with this command run."
+  snapshotConcurrency: CommandConcurrency!
   "Whether the snapshot notifications enabled condition is true for this command run."
   snapshotNotificationsEnabled: Boolean!
   "The snapshot associated with this command run."
@@ -256,6 +270,8 @@ input CommandDefinitionInput {
   restartPolicy: CommandRestartPolicy = NEVER
   "The restart limit to use for the request."
   restartLimit: Int = 3
+  "The concurrency mode to use for the request."
+  concurrency: CommandConcurrency = NON_EXCLUSIVE
   "Whether quick action enabled applies to the request."
   quickActionEnabled: Boolean = false
   "The quick action icon key to use for the request."

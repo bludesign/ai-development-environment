@@ -17,6 +17,14 @@ export type CommandWorktree = {
   agentName?: string;
 };
 
+export type CommandConcurrency = "EXCLUSIVE" | "NON_EXCLUSIVE" | "EXCLUDED";
+
+export const COMMAND_CONCURRENCY_MODES: CommandConcurrency[] = [
+  "EXCLUSIVE",
+  "NON_EXCLUSIVE",
+  "EXCLUDED",
+];
+
 export type CommandDefinition = {
   id: string;
   name: string;
@@ -33,6 +41,7 @@ export type CommandDefinition = {
   targetRepository: { id: string; name: string; displayOrigin: string } | null;
   restartPolicy: "NEVER" | "ON_FAILURE" | "ALWAYS";
   restartLimit: number | null;
+  concurrency: CommandConcurrency;
   quickActionEnabled: boolean;
   quickActionIconKey: string;
   quickActionButtonVariant: string;
@@ -66,6 +75,7 @@ export type CommandRun = {
   snapshotTargetKind: string;
   snapshotRestartPolicy: string;
   snapshotRestartLimit: number | null;
+  snapshotConcurrency: CommandConcurrency;
   snapshotNotificationsEnabled: boolean;
   snapshot: Record<string, unknown>;
   agentId: string | null;
@@ -96,7 +106,7 @@ export type CommandRun = {
 
 export const COMMAND_DEFINITION_FIELDS = `
   id name description script targetKind targetAgentId targetRepositoryId
-  restartPolicy restartLimit quickActionEnabled quickActionIconKey quickActionButtonVariant
+  restartPolicy restartLimit concurrency quickActionEnabled quickActionIconKey quickActionButtonVariant
   notificationsEnabled
   archivedAt createdAt updatedAt
   targetAgent { id name hostname connectionStatus capabilities }
@@ -106,7 +116,7 @@ export const COMMAND_DEFINITION_FIELDS = `
 export const COMMAND_RUN_FIELDS = `
   id displayNumber commandId origin status snapshotName snapshotDescription
   snapshotScript snapshotTargetKind snapshotRestartPolicy snapshotRestartLimit
-  snapshotNotificationsEnabled snapshot
+  snapshotConcurrency snapshotNotificationsEnabled snapshot
   agentId worktreeId agentName agentHostname worktreePath worktreeBranch
   restartCount stopRequested nextRestartAt predecessorRunId error exitCode signal
   queuedAt startedAt finishedAt archivedAt createdAt updatedAt
@@ -165,6 +175,17 @@ export const commandTargetKey = (target: string) => {
       return "repositoryWorktree" as const;
     default:
       return "anyWorktree" as const;
+  }
+};
+
+export const commandConcurrencyKey = (mode: string) => {
+  switch (mode) {
+    case "EXCLUSIVE":
+      return "concurrencyExclusive" as const;
+    case "EXCLUDED":
+      return "concurrencyExcluded" as const;
+    default:
+      return "concurrencyNonExclusive" as const;
   }
 };
 
