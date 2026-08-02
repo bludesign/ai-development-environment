@@ -141,6 +141,24 @@ describe("CommandQuickActions", () => {
     ).toBeNull();
   });
 
+  test("asks the server for active runs before applying the page limit", async () => {
+    respondWith([]);
+    render(
+      <CommandQuickActions
+        agentCapabilities={["command.run"]}
+        agentId="agent-1"
+      />,
+    );
+
+    await screen.findByRole("button", { name: /Serve/ });
+    const query = request.mock.calls.find(([operation]) =>
+      operation.includes("commandRuns("),
+    )?.[0];
+    expect(query).toContain(
+      "statuses: [QUEUED, RUNNING, RESTARTING, CANCELLING]",
+    );
+  });
+
   test("terminates the run the menu was opened for", async () => {
     respondWith([
       { id: "run-1", displayNumber: 7, status: "RUNNING", commandId: "quick" },

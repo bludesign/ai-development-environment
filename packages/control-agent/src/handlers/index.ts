@@ -121,6 +121,7 @@ import {
 import type { BuildLogChunk } from "@ai-development-environment/agent-contract/builds";
 
 export type AgentJobHandlerContext = {
+  agentId: string;
   reportWorktreeActivity: (input: WorktreeActivityReport) => Promise<unknown>;
   reportBuildProgress?: (input: {
     buildId: string;

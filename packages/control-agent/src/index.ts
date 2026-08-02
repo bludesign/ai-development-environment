@@ -291,11 +291,6 @@ async function main(): Promise<void> {
     const stop = () => controller.abort();
     const shutdownSignals: NodeJS.Signals[] = ["SIGINT", "SIGTERM", "SIGHUP"];
     for (const signal of shutdownSignals) process.once(signal, stop);
-    // Commands run detached so their whole tree can be stopped as one process
-    // group, which also means they survive an agent that was killed instead of
-    // asked to stop. Clearing them here — before any job is claimed — keeps a
-    // restarted run from colliding with the copy that never went away.
-    await reapOrphanedCommandProcesses(controller.signal);
     try {
       if (command === "dev") {
         const options = flags(args).values;
@@ -315,7 +310,12 @@ async function main(): Promise<void> {
           controller.signal,
         );
       }
-      return await runAgent(await loadConfig(), controller.signal);
+      const config = await loadConfig();
+      // Commands run detached so their whole tree can be stopped as one
+      // process group. Scope recovery to this enrollment so a development or
+      // second enrolled agent under the same OS account remains untouched.
+      await reapOrphanedCommandProcesses(config.agentId, controller.signal);
+      return await runAgent(config, controller.signal);
     } finally {
       for (const signal of shutdownSignals) process.off(signal, stop);
     }

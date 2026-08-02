@@ -684,6 +684,7 @@ esac
         new AbortController().signal,
         async () => undefined,
         {
+          agentId: "agent-1",
           reportWorktreeActivity: async () => undefined,
           uploadBuildArtifact: async (input) => {
             expect(input).toMatchObject({
@@ -780,6 +781,7 @@ export default async function hook(build) {
         new AbortController().signal,
         async () => undefined,
         {
+          agentId: "agent-1",
           reportWorktreeActivity: async () => undefined,
           reportBuildProgress: async () => undefined,
           appendBuildLogChunks: async (_buildId, batch) => {

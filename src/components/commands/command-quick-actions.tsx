@@ -97,7 +97,7 @@ export function CommandQuickActions({
           nodes: Array<ActiveRun & { commandId: string | null }>;
         };
       }>(
-        `query QuickActionRuns($id: ID!) { commandRuns(${agentId ? "agentId" : "worktreeId"}: $id, first: 50) { nodes { ${RUN_STATUS_FIELDS} commandId } } }`,
+        `query QuickActionRuns($id: ID!) { commandRuns(${agentId ? "agentId" : "worktreeId"}: $id, statuses: [QUEUED, RUNNING, RESTARTING, CANCELLING], first: 50) { nodes { ${RUN_STATUS_FIELDS} commandId } } }`,
         { id: agentId ?? worktreeId },
       );
       const grouped: Record<string, ActiveRun[]> = {};
@@ -123,7 +123,10 @@ export function CommandQuickActions({
     const initial = window.setTimeout(() => void loadRuns(), 0);
     const client = controlPlaneSubscriptions();
     const dispose = client.subscribe(
-      { query: "subscription QuickActionRuns { commandRunsChanged { id } }" },
+      {
+        query: `subscription QuickActionRuns($id: ID!) { commandRunsChanged(${agentId ? "agentId" : "worktreeId"}: $id) { id } }`,
+        variables: { id: agentId ?? worktreeId },
+      },
       {
         next: () => void loadRuns(),
         error: () => undefined,
@@ -134,7 +137,7 @@ export function CommandQuickActions({
       window.clearTimeout(initial);
       dispose();
     };
-  }, [loadRuns]);
+  }, [agentId, loadRuns, worktreeId]);
 
   const mutate = async (query: string, variables: Record<string, unknown>) => {
     try {

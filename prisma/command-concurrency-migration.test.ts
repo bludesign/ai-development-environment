@@ -13,13 +13,17 @@ afterEach(() => {
 });
 
 const migration = () =>
-  readFileSync(
-    resolve(
-      process.cwd(),
-      "prisma/migrations/20260802120000_add_command_concurrency/migration.sql",
-    ),
-    "utf8",
-  );
+  [
+    "20260802120000_add_command_concurrency",
+    "20260802140000_add_command_cross_kind_guards",
+  ]
+    .map((name) =>
+      readFileSync(
+        resolve(process.cwd(), `prisma/migrations/${name}/migration.sql`),
+        "utf8",
+      ),
+    )
+    .join("\n");
 
 function seed(): Database.Database {
   const instance = new Database(":memory:");
@@ -119,7 +123,7 @@ describe("command concurrency migration", () => {
     ).toEqual({ snapshotConcurrency: "NON_EXCLUSIVE" });
   });
 
-  test("releases the codebase guard for command runs but keeps it for git work", () => {
+  test("allows command peers but atomically excludes repository work", () => {
     database = seed();
     const active = database.prepare(
       `INSERT INTO "AgentJob" ("id", "kind", "status", "codebaseId") VALUES (?, ?, 'RUNNING', 'codebase-1')`,
@@ -131,16 +135,50 @@ describe("command concurrency migration", () => {
 
     database.exec(migration());
 
-    // Two command runs may now hold the same codebase; their concurrency is
-    // decided by the command's own mode instead.
+    // Two command runs may hold the same codebase; their concurrency is
+    // decided by the command's own mode.
     expect(() => active.run("command-b", "command.run")).not.toThrow();
-    // Git work still takes the codebase alone.
-    active.run("git-a", "codebase.git.inspect");
-    expect(() => active.run("git-b", "codebase.git.mutate")).toThrow(
+    // Repository work cannot enter after a command already owns the codebase.
+    expect(() => active.run("git-a", "codebase.git.inspect")).toThrow(
+      /AgentJob_codebaseId_active_key/,
+    );
+
+    const onSecondCodebase = database.prepare(
+      `INSERT INTO "AgentJob" ("id", "kind", "status", "codebaseId") VALUES (?, ?, 'RUNNING', 'codebase-2')`,
+    );
+    onSecondCodebase.run("git-b", "codebase.git.inspect");
+    // The opposite scheduling order is guarded as well.
+    expect(() => onSecondCodebase.run("command-c", "command.run")).toThrow(
+      /AgentJob_codebaseId_active_key/,
+    );
+    expect(() => onSecondCodebase.run("git-c", "codebase.git.mutate")).toThrow(
       /UNIQUE constraint failed/,
     );
     // iOS jobs stay exempt as before.
     active.run("ios-a", "ios.build.run");
     expect(() => active.run("ios-b", "ios.build.run")).not.toThrow();
+  });
+
+  test("applies the cross-kind guard when an existing job becomes active", () => {
+    database = seed();
+    database.exec(migration());
+    database
+      .prepare(
+        `INSERT INTO "AgentJob" ("id", "kind", "status", "codebaseId") VALUES ('command-a', 'command.run', 'RUNNING', 'codebase-1')`,
+      )
+      .run();
+    database
+      .prepare(
+        `INSERT INTO "AgentJob" ("id", "kind", "status", "codebaseId") VALUES ('git-a', 'codebase.git.inspect', 'SUCCEEDED', 'codebase-1')`,
+      )
+      .run();
+
+    expect(() =>
+      database!
+        .prepare(
+          `UPDATE "AgentJob" SET "status" = 'QUEUED' WHERE "id" = 'git-a'`,
+        )
+        .run(),
+    ).toThrow(/AgentJob_codebaseId_active_key/);
   });
 });

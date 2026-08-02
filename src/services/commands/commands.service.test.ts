@@ -15,6 +15,41 @@ const agentControl = () =>
     registerConnectionHandler: vi.fn(),
   }) as never;
 
+describe("CommandsService.listRuns", () => {
+  test("filters statuses in the database before pagination", async () => {
+    const findMany = vi.fn().mockResolvedValue([]);
+    const count = vi.fn().mockResolvedValue(0);
+    getPrismaClient.mockResolvedValue({
+      commandRun: { findMany, count },
+    });
+
+    await new CommandsService(agentControl()).listRuns({
+      agentId: "agent-1",
+      statuses: ["QUEUED", "RUNNING", "RESTARTING", "CANCELLING"],
+      first: 50,
+    });
+
+    expect(findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          agentId: "agent-1",
+          status: {
+            in: ["QUEUED", "RUNNING", "RESTARTING", "CANCELLING"],
+          },
+        }),
+        take: 51,
+      }),
+    );
+    expect(count).toHaveBeenCalledWith({
+      where: expect.objectContaining({
+        status: {
+          in: ["QUEUED", "RUNNING", "RESTARTING", "CANCELLING"],
+        },
+      }),
+    });
+  });
+});
+
 describe("command restart policy", () => {
   test.each([
     ["NEVER", true, false],

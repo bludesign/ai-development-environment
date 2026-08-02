@@ -4,7 +4,7 @@ const captureCommand = vi.hoisted(() => vi.fn());
 vi.mock("./capture-command.js", () => ({ captureCommand }));
 
 import {
-  COMMAND_SCRIPT_PREFIX,
+  commandScriptPrefix,
   parseCommandProcesses,
   reapOrphanedCommandProcesses,
 } from "./command-processes.js";
@@ -57,11 +57,11 @@ describe("reapOrphanedCommandProcesses", () => {
 
   test("matches command scripts by the path they run from", async () => {
     captureCommand.mockResolvedValue(capture(""));
-    await reapOrphanedCommandProcesses();
+    await reapOrphanedCommandProcesses("agent-1");
     expect(captureCommand).toHaveBeenCalledWith(
       expect.objectContaining({
         args: expect.arrayContaining([
-          expect.stringContaining(COMMAND_SCRIPT_PREFIX),
+          expect.stringContaining(commandScriptPrefix("agent-1")),
         ]),
       }),
     );
@@ -69,7 +69,7 @@ describe("reapOrphanedCommandProcesses", () => {
 
   test("does nothing when no command process is left behind", async () => {
     captureCommand.mockResolvedValue(capture(""));
-    await expect(reapOrphanedCommandProcesses()).resolves.toEqual([]);
+    await expect(reapOrphanedCommandProcesses("agent-1")).resolves.toEqual([]);
     expect(kill).not.toHaveBeenCalled();
     // Nothing matched, so there is no reason to describe processes either.
     expect(captureCommand).toHaveBeenCalledTimes(1);
@@ -81,7 +81,7 @@ describe("reapOrphanedCommandProcesses", () => {
       .mockResolvedValueOnce(capture("4101\n4102\n"))
       .mockResolvedValueOnce(capture("4101 4101\n4102 4101\n"));
 
-    const reaped = reapOrphanedCommandProcesses();
+    const reaped = reapOrphanedCommandProcesses("agent-1");
     await vi.waitFor(() => expect(kill).toHaveBeenCalledWith(-4101, "SIGTERM"));
     await vi.advanceTimersByTimeAsync(5_000);
 
@@ -101,13 +101,27 @@ describe("reapOrphanedCommandProcesses", () => {
       throw Object.assign(new Error("No such process"), { code: "ESRCH" });
     });
 
-    await expect(reapOrphanedCommandProcesses()).resolves.toEqual([]);
+    await expect(reapOrphanedCommandProcesses("agent-1")).resolves.toEqual([]);
     expect(kill).toHaveBeenCalledTimes(1);
   });
 
   test("starts the agent anyway when the lookup itself fails", async () => {
     captureCommand.mockRejectedValue(new Error("pgrep is missing"));
-    await expect(reapOrphanedCommandProcesses()).resolves.toEqual([]);
+    await expect(reapOrphanedCommandProcesses("agent-1")).resolves.toEqual([]);
     expect(kill).not.toHaveBeenCalled();
+  });
+
+  test("uses a distinct process marker for each enrolled agent", async () => {
+    captureCommand.mockResolvedValue(capture(""));
+
+    await reapOrphanedCommandProcesses("agent-1");
+    await reapOrphanedCommandProcesses("agent-2");
+
+    const patterns = captureCommand.mock.calls.map(
+      ([call]) => (call as { args: string[] }).args[1],
+    );
+    expect(patterns[0]).toContain(commandScriptPrefix("agent-1"));
+    expect(patterns[1]).toContain(commandScriptPrefix("agent-2"));
+    expect(patterns[0]).not.toBe(patterns[1]);
   });
 });

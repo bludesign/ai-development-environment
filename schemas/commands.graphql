@@ -353,6 +353,8 @@ extend type Query {
     agentId: ID
     "Identifier of the worktree. Omit it to leave this dimension unfiltered."
     worktreeId: ID
+    "Statuses to include. Omit them to leave this dimension unfiltered."
+    statuses: [CommandRunStatus!]
     "Maximum number of records to return. Defaults to `50`."
     first: Int = 50
     "Cursor or identifier after which to return records. Omit it to leave this dimension unfiltered."
@@ -467,8 +469,13 @@ extend type Mutation {
 extend type Subscription {
   "Emits a command definition whenever commands change."
   commandsChanged: CommandDefinition
-  "Emits a command run whenever command runs change."
-  commandRunsChanged: CommandRun!
+  "Emits a command run whenever matching command runs change."
+  commandRunsChanged(
+    "Identifier of the agent. Omit it to leave this dimension unfiltered."
+    agentId: ID
+    "Identifier of the worktree. Omit it to leave this dimension unfiltered."
+    worktreeId: ID
+  ): CommandRun!
   "Emits a command run whenever command run changes."
   commandRunChanged("Identifier of the run." runId: ID!): CommandRun!
   "Emits a command run output chunk whenever command run output is added."

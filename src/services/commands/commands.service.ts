@@ -609,6 +609,7 @@ export class CommandsService {
     after?: string | null;
     agentId?: string | null;
     worktreeId?: string | null;
+    statuses?: string[] | null;
   }) {
     const prisma = await getPrismaClient();
     const take = Math.max(1, Math.min(input.first ?? 50, 200));
@@ -617,6 +618,7 @@ export class CommandsService {
       ...(input.includeArchived ? {} : { archivedAt: null }),
       ...(input.agentId ? { agentId: input.agentId } : {}),
       ...(input.worktreeId ? { worktreeId: input.worktreeId } : {}),
+      ...(input.statuses?.length ? { status: { in: input.statuses } } : {}),
       ...(search
         ? {
             OR: [

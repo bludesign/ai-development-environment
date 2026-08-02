@@ -9,7 +9,7 @@ import {
   type CommandOutputChunk,
 } from "@ai-development-environment/agent-contract/commands";
 
-import { COMMAND_SCRIPT_PREFIX } from "../command-processes.js";
+import { commandScriptPrefix } from "../command-processes.js";
 import type { ProcessResult } from "../process-runner.js";
 import type { AgentJobHandler } from "./index.js";
 
@@ -29,7 +29,9 @@ export const runCommand: AgentJobHandler = async (
     throw new Error("Command output uploader is unavailable");
   }
 
-  const directory = await mkdtemp(join(tmpdir(), COMMAND_SCRIPT_PREFIX));
+  const directory = await mkdtemp(
+    join(tmpdir(), commandScriptPrefix(context.agentId)),
+  );
   const scriptPath = join(directory, "command.sh");
   await writeFile(scriptPath, payload.script, {
     encoding: "utf8",

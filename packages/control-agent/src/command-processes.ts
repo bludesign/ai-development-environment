@@ -1,3 +1,5 @@
+import { createHash } from "node:crypto";
+
 import { captureCommand } from "./capture-command.js";
 
 /**
@@ -7,8 +9,23 @@ import { captureCommand } from "./capture-command.js";
  */
 export const COMMAND_SCRIPT_PREFIX = "aide-command-";
 
-const SCRIPT_PATTERN = `${COMMAND_SCRIPT_PREFIX}[^/]*/command\\.sh`;
 const TERMINATE_GRACE_MS = 5_000;
+
+/**
+ * Returns the temporary-directory prefix reserved for one enrolled agent.
+ * Hashing keeps arbitrary agent ids path- and regular-expression-safe while
+ * leaving a stable marker that survives a restart of that agent.
+ */
+export function commandScriptPrefix(agentId: string): string {
+  const marker = createHash("sha256")
+    .update(agentId)
+    .digest("hex")
+    .slice(0, 16);
+  return `${COMMAND_SCRIPT_PREFIX}${marker}-`;
+}
+
+const scriptPattern = (agentId: string) =>
+  `${commandScriptPrefix(agentId)}[^/]*/command\\.sh`;
 
 export type OrphanedCommandProcess = { pid: number; processGroup: number };
 
@@ -44,13 +61,14 @@ export function parseCommandProcesses(
 }
 
 async function listCommandProcesses(
+  agentId: string,
   signal: AbortSignal,
 ): Promise<OrphanedCommandProcess[]> {
   // `pgrep -f` matches the full command line and never matches itself. Its
   // exit code is 1 when nothing matched, which is the ordinary case.
   const found = await captureCommand({
     command: "/usr/bin/pgrep",
-    args: ["-f", SCRIPT_PATTERN],
+    args: ["-f", scriptPattern(agentId)],
     timeoutMs: 5_000,
     signal,
   });
@@ -99,12 +117,13 @@ function signalGroup(processGroup: number, name: NodeJS.Signals): boolean {
  * spawned: every match at that moment is by definition an orphan.
  */
 export async function reapOrphanedCommandProcesses(
+  agentId: string,
   signal: AbortSignal = new AbortController().signal,
 ): Promise<OrphanedCommandProcess[]> {
   if (process.platform === "win32") return [];
   let orphans: OrphanedCommandProcess[];
   try {
-    orphans = await listCommandProcesses(signal);
+    orphans = await listCommandProcesses(agentId, signal);
   } catch (error) {
     console.error(
       "Could not look for orphaned command processes:",

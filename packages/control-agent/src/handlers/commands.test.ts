@@ -12,6 +12,7 @@ function context(
   append: (attemptId: string, chunks: CommandOutputChunk[]) => Promise<unknown>,
 ): AgentJobHandlerContext {
   return {
+    agentId: "agent-1",
     reportWorktreeActivity: vi.fn(),
     appendCommandOutput: append,
   };

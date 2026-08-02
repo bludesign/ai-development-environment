@@ -492,7 +492,7 @@ describe("worktree inventory and inspection", () => {
       10_000,
       new AbortController().signal,
       async () => undefined,
-      { reportWorktreeActivity },
+      { agentId: "agent-1", reportWorktreeActivity },
     );
     await writeFile(join(folder, "watched.txt"), "one\ntwo\n");
 
@@ -572,7 +572,7 @@ describe("worktree inventory and inspection", () => {
       10_000,
       new AbortController().signal,
       async () => undefined,
-      { reportWorktreeActivity },
+      { agentId: "agent-1", reportWorktreeActivity },
     );
     await vi.waitFor(() => expect(reportWorktreeActivity).toHaveBeenCalled());
     await git(folder, "branch", "alternate");
@@ -709,7 +709,7 @@ describe("worktree inventory and inspection", () => {
       10_000,
       new AbortController().signal,
       async () => undefined,
-      { reportWorktreeActivity },
+      { agentId: "agent-1", reportWorktreeActivity },
     );
     await vi.waitFor(() => expect(reportWorktreeActivity).toHaveBeenCalled(), {
       timeout: 3_000,

@@ -27,6 +27,12 @@ export function isCodebaseBusyError(error: unknown): boolean {
  */
 export function isActiveCodebaseJobConflict(error: unknown): boolean {
   if (isCodebaseBusyError(error)) return true;
+  if (
+    error instanceof Error &&
+    error.message.includes("AgentJob_codebaseId_active_key")
+  ) {
+    return true;
+  }
   if (!error || typeof error !== "object") return false;
   const value = error as { code?: unknown; meta?: { target?: unknown } };
   if (value.code !== "P2002") return false;

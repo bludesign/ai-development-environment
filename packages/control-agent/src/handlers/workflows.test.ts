@@ -61,6 +61,7 @@ describe("workflow terminal handler", () => {
         logs.push(log.message);
       },
       {
+        agentId: "agent-1",
         reportWorktreeActivity: async () => undefined,
         claimWorkflowJobSecrets: async () => [
           { name: "WORKFLOW_SECRET", value: "top-secret-value" },
