@@ -193,6 +193,11 @@ const COLORS = [
   "purple",
   "fuchsia",
   "pink",
+  "lavender",
+  "maroon",
+  "brown",
+  "olive",
+  "navy",
 ] as const;
 const LAYOUT_KEY = "worktrees-layout";
 const GROUP_BY_KEY = "worktrees-group-by";
@@ -437,6 +442,15 @@ const tagColorClasses: Record<string, string> = {
   fuchsia:
     "border-fuchsia-500/40 bg-fuchsia-500/15 text-fuchsia-700 dark:text-fuchsia-300",
   pink: "border-pink-500/40 bg-pink-500/15 text-pink-700 dark:text-pink-300",
+  lavender:
+    "border-lavender-500/40 bg-lavender-500/15 text-lavender-700 dark:text-lavender-300",
+  maroon:
+    "border-maroon-500/40 bg-maroon-500/15 text-maroon-700 dark:text-maroon-300",
+  brown:
+    "border-brown-500/40 bg-brown-500/15 text-brown-700 dark:text-brown-300",
+  olive:
+    "border-olive-500/40 bg-olive-500/15 text-olive-700 dark:text-olive-300",
+  navy: "border-navy-500/40 bg-navy-500/15 text-navy-700 dark:text-navy-300",
 };
 
 const colorSwatchClasses: Record<string, string> = {
@@ -459,6 +473,44 @@ const colorSwatchClasses: Record<string, string> = {
   purple: "border-purple-600 bg-purple-500",
   fuchsia: "border-fuchsia-600 bg-fuchsia-500",
   pink: "border-pink-600 bg-pink-500",
+  lavender: "border-lavender-600 bg-lavender-500",
+  maroon: "border-maroon-600 bg-maroon-500",
+  brown: "border-brown-600 bg-brown-500",
+  olive: "border-olive-600 bg-olive-500",
+  navy: "border-navy-600 bg-navy-500",
+};
+
+/**
+ * Swatches sit on a toggle, whose hover and selected states both paint
+ * `bg-muted` — which would wash the swatch out to gray exactly when the user is
+ * pointing at or has picked it. These pin the fill to the swatch's own color in
+ * those states so selection reads purely as the ring around it.
+ */
+const colorSwatchStateClasses: Record<string, string> = {
+  gray: "hover:bg-slate-500 data-[state=on]:bg-slate-500",
+  stone: "hover:bg-stone-500 data-[state=on]:bg-stone-500",
+  red: "hover:bg-red-500 data-[state=on]:bg-red-500",
+  rose: "hover:bg-rose-500 data-[state=on]:bg-rose-500",
+  orange: "hover:bg-orange-500 data-[state=on]:bg-orange-500",
+  amber: "hover:bg-amber-500 data-[state=on]:bg-amber-500",
+  yellow: "hover:bg-yellow-500 data-[state=on]:bg-yellow-500",
+  lime: "hover:bg-lime-500 data-[state=on]:bg-lime-500",
+  green: "hover:bg-green-500 data-[state=on]:bg-green-500",
+  emerald: "hover:bg-emerald-500 data-[state=on]:bg-emerald-500",
+  teal: "hover:bg-teal-500 data-[state=on]:bg-teal-500",
+  cyan: "hover:bg-cyan-500 data-[state=on]:bg-cyan-500",
+  sky: "hover:bg-sky-500 data-[state=on]:bg-sky-500",
+  blue: "hover:bg-blue-500 data-[state=on]:bg-blue-500",
+  indigo: "hover:bg-indigo-500 data-[state=on]:bg-indigo-500",
+  violet: "hover:bg-violet-500 data-[state=on]:bg-violet-500",
+  purple: "hover:bg-purple-500 data-[state=on]:bg-purple-500",
+  fuchsia: "hover:bg-fuchsia-500 data-[state=on]:bg-fuchsia-500",
+  pink: "hover:bg-pink-500 data-[state=on]:bg-pink-500",
+  lavender: "hover:bg-lavender-500 data-[state=on]:bg-lavender-500",
+  maroon: "hover:bg-maroon-500 data-[state=on]:bg-maroon-500",
+  brown: "hover:bg-brown-500 data-[state=on]:bg-brown-500",
+  olive: "hover:bg-olive-500 data-[state=on]:bg-olive-500",
+  navy: "hover:bg-navy-500 data-[state=on]:bg-navy-500",
 };
 
 function reviewClass(value: string) {
@@ -2440,36 +2492,45 @@ export function WorktreeMenus(
               <Plus /> {t("manageTags")}
             </DropdownMenuItem>
             <DropdownMenuSeparator />
-            <DropdownMenuLabel className="flex items-center gap-1.5 leading-none">
-              <Paintbrush className="size-3" />
-              <span>{t("highlight")}</span>
+            <DropdownMenuLabel className="flex items-center justify-between gap-1.5 py-0 leading-none">
+              <span className="flex items-center gap-1.5">
+                <Paintbrush className="size-3" />
+                <span>{t("highlight")}</span>
+              </span>
+              <Button
+                aria-label={t("clearHighlight")}
+                className="size-6"
+                disabled={!worktree.highlightColor}
+                onClick={(event) => {
+                  event.stopPropagation();
+                  void highlight(null);
+                }}
+                size="icon-sm"
+                variant="ghost"
+              >
+                <Trash2 className="size-3" />
+              </Button>
             </DropdownMenuLabel>
             <ToggleGroup
               aria-label={t("highlight")}
-              className="grid grid-cols-7 gap-1 p-2"
+              className="grid w-full grid-cols-8 gap-1 px-1.5 pb-1"
               onClick={(event) => event.stopPropagation()}
               onValueChange={(value) => {
-                if (value) void highlight(value === "__none__" ? null : value);
+                if (value) void highlight(value);
               }}
               size="sm"
               spacing={1}
               type="single"
-              value={worktree.highlightColor ?? "__none__"}
+              value={worktree.highlightColor ?? ""}
               variant="outline"
             >
-              <ToggleGroupItem
-                aria-label={t("clearHighlight")}
-                className="size-7 min-w-0 p-0"
-                value="__none__"
-              >
-                <Trash2 className="size-3" />
-              </ToggleGroupItem>
               {COLORS.map((color) => (
                 <ToggleGroupItem
                   aria-label={color}
                   className={cn(
-                    "size-7 min-w-0 p-0",
+                    "aspect-square h-auto w-full min-w-0 p-0",
                     colorSwatchClasses[color],
+                    colorSwatchStateClasses[color],
                     "data-[state=on]:ring-2 data-[state=on]:ring-foreground",
                   )}
                   key={color}
@@ -3485,7 +3546,7 @@ export function TagManagerDialog({
           />
           <ToggleGroup
             aria-label={t("highlight")}
-            className="grid grid-cols-12 gap-1"
+            className="grid w-full grid-cols-12 gap-1"
             onValueChange={(value) => {
               if (value) setColor(value);
             }}
@@ -3499,8 +3560,9 @@ export function TagManagerDialog({
               <ToggleGroupItem
                 aria-label={item}
                 className={cn(
-                  "size-7 min-w-0 p-0",
+                  "aspect-square h-auto w-full min-w-0 p-0",
                   colorSwatchClasses[item],
+                  colorSwatchStateClasses[item],
                   "data-[state=on]:ring-2 data-[state=on]:ring-foreground",
                 )}
                 key={item}

@@ -58,6 +58,34 @@
   --radius-4xl: calc(var(--radius) * 2.6);
 }
 
+/* Extra hues for worktree highlights and tag colors. Tailwind's palette has no
+   brown, olive, maroon, navy, or pastel purple, and every family it does ship
+   is already spoken for by an existing highlight color. Shades follow the
+   lightness/chroma ramp Tailwind uses for 300/500/600/700 so these mix with the
+   built-in colors in the same swatch grid. */
+@theme {
+  --color-brown-300: oklch(0.79 0.062 55);
+  --color-brown-500: oklch(0.58 0.078 55);
+  --color-brown-600: oklch(0.5 0.072 55);
+  --color-brown-700: oklch(0.43 0.062 55);
+  --color-olive-300: oklch(0.81 0.082 110);
+  --color-olive-500: oklch(0.62 0.098 110);
+  --color-olive-600: oklch(0.54 0.09 110);
+  --color-olive-700: oklch(0.46 0.078 110);
+  --color-maroon-300: oklch(0.74 0.1 18);
+  --color-maroon-500: oklch(0.51 0.145 18);
+  --color-maroon-600: oklch(0.44 0.135 18);
+  --color-maroon-700: oklch(0.38 0.115 18);
+  --color-navy-300: oklch(0.74 0.09 264);
+  --color-navy-500: oklch(0.47 0.145 264);
+  --color-navy-600: oklch(0.4 0.135 264);
+  --color-navy-700: oklch(0.34 0.115 264);
+  --color-lavender-300: oklch(0.86 0.06 300);
+  --color-lavender-500: oklch(0.72 0.105 300);
+  --color-lavender-600: oklch(0.64 0.12 300);
+  --color-lavender-700: oklch(0.55 0.11 300);
+}
+
 :root {
   color-scheme: light;
   --background: oklch(1 0 0);

@@ -143,6 +143,10 @@ import {
 } from "@ai-development-environment/agent-contract/workflows";
 
 import { getPrismaClient } from "@/data/prisma-client";
+import {
+  CodebaseBusyError,
+  isActiveCodebaseJobConflict,
+} from "@/lib/codebase-busy";
 
 import {
   AGENT_CHANGED_TOPIC,
@@ -1018,7 +1022,14 @@ export class AgentControlService {
           },
         },
       });
-      if (!concurrent) throw error;
+      if (!concurrent) {
+        // The create can also trip `AgentJob_codebaseId_active_key`, the partial
+        // unique index that keeps one non-iOS job active per codebase. That is a
+        // busy codebase rather than an idempotency race, and callers such as the
+        // workflow runtime hold the work and retry on CodebaseBusyError.
+        if (isActiveCodebaseJobConflict(error)) throw new CodebaseBusyError();
+        throw error;
+      }
       if (
         input.ccusageCollectionId &&
         concurrent.ccusageCollectionId !== input.ccusageCollectionId

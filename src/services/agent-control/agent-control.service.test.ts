@@ -2,6 +2,8 @@ import { beforeEach, describe, expect, test, vi } from "vitest";
 
 import { IOS_ARTIFACT_DOWNLOAD_JOB_KIND } from "@ai-development-environment/agent-contract/builds";
 
+import { CodebaseBusyError } from "@/lib/codebase-busy";
+
 const getPrismaClient = vi.hoisted(() => vi.fn());
 
 vi.mock("@/data/prisma-client", () => ({ getPrismaClient }));
@@ -103,6 +105,78 @@ describe("AgentControlService.claimJob", () => {
     expect(deleteMany).toHaveBeenCalledWith({
       where: { jobId: null, expiresAt: { lte: expect.any(Date) } },
     });
+  });
+});
+
+describe("AgentControlService.createJob", () => {
+  beforeEach(() => vi.clearAllMocks());
+
+  const gitInspect = {
+    agentId: "agent-1",
+    codebaseId: "codebase-1",
+    kind: "codebase.git.inspect",
+    payload: {
+      action: "STATE",
+      codebaseId: "codebase-1",
+      folder: "/repo",
+      expectedOrigin: "github.com/openai/codex",
+    },
+    idempotencyKey: "codebase:git:state:request-1:codebase-1",
+  };
+
+  test("reports a busy codebase instead of leaking the unique violation", async () => {
+    // AgentJob_codebaseId_active_key keeps one non-iOS job active per codebase.
+    // Tripping it used to escape as a raw Prisma P2002, which reached the UI as
+    // an "Invalid prisma.agentJob.create() invocation" stack trace.
+    const conflict = Object.assign(
+      new Error("Unique constraint failed on the fields: (`codebaseId`)"),
+      { code: "P2002", meta: { target: ["codebaseId"] } },
+    );
+    getPrismaClient.mockResolvedValue({
+      agentJob: {
+        findUnique: vi.fn().mockResolvedValue(null),
+        create: vi.fn().mockRejectedValue(conflict),
+      },
+    });
+
+    await expect(
+      new AgentControlService().createJob(gitInspect),
+    ).rejects.toThrow(CodebaseBusyError);
+  });
+
+  test("still rethrows unrelated create failures", async () => {
+    const failure = new Error("database is locked");
+    getPrismaClient.mockResolvedValue({
+      agentJob: {
+        findUnique: vi.fn().mockResolvedValue(null),
+        create: vi.fn().mockRejectedValue(failure),
+      },
+    });
+
+    await expect(
+      new AgentControlService().createJob(gitInspect),
+    ).rejects.toThrow("database is locked");
+  });
+
+  test("returns the winner of an idempotency race rather than a busy error", async () => {
+    const winner = { id: "job-1", ccusageCollectionId: null };
+    const conflict = Object.assign(new Error("Unique constraint failed"), {
+      code: "P2002",
+      meta: { target: ["agentId", "idempotencyKey"] },
+    });
+    getPrismaClient.mockResolvedValue({
+      agentJob: {
+        findUnique: vi
+          .fn()
+          .mockResolvedValueOnce(null)
+          .mockResolvedValueOnce(winner),
+        create: vi.fn().mockRejectedValue(conflict),
+      },
+    });
+
+    await expect(new AgentControlService().createJob(gitInspect)).resolves.toBe(
+      winner,
+    );
   });
 });
 
