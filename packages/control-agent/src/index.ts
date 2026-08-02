@@ -10,6 +10,7 @@ import {
   type AgentConfig,
 } from "./config.js";
 import { runAgent } from "./agent-runtime.js";
+import { reapOrphanedCommandProcesses } from "./command-processes.js";
 import { runDevelopmentAgent } from "./dev-runtime.js";
 import { probeEndpoint } from "./endpoint-selection.js";
 import { repairToolPath } from "./executable-lookup.js";
@@ -290,6 +291,11 @@ async function main(): Promise<void> {
     const stop = () => controller.abort();
     const shutdownSignals: NodeJS.Signals[] = ["SIGINT", "SIGTERM", "SIGHUP"];
     for (const signal of shutdownSignals) process.once(signal, stop);
+    // Commands run detached so their whole tree can be stopped as one process
+    // group, which also means they survive an agent that was killed instead of
+    // asked to stop. Clearing them here — before any job is claimed — keeps a
+    // restarted run from colliding with the copy that never went away.
+    await reapOrphanedCommandProcesses(controller.signal);
     try {
       if (command === "dev") {
         const options = flags(args).values;
