@@ -86,6 +86,60 @@ describe("command restart policy", () => {
   });
 });
 
+describe("CommandsService.terminateRun", () => {
+  beforeEach(() => vi.clearAllMocks());
+
+  const terminateWith = async (job: { status: string } | null) => {
+    const update = vi
+      .fn()
+      .mockResolvedValue({ id: "run-1", status: "CANCELLING" });
+    getPrismaClient.mockResolvedValue({
+      commandRun: {
+        findUnique: vi
+          .fn()
+          .mockResolvedValueOnce({
+            id: "run-1",
+            status: "RESTARTING",
+            attempts: [{ id: "attempt-3", agentJobId: job ? "job-3" : null }],
+          })
+          .mockResolvedValue(null),
+        update,
+      },
+    });
+    const cancelJob = vi.fn().mockResolvedValue(job);
+    const service = new CommandsService({
+      registerCompletionHandler: vi.fn(),
+      registerConnectionHandler: vi.fn(),
+      cancelJob,
+    } as never);
+    await service.terminateRun("run-1");
+    return { update, cancelJob };
+  };
+
+  test("closes out a run whose newest attempt already finished", async () => {
+    // Terminating a run waiting to restart used to leave it in CANCELLING:
+    // cancelJob is a no-op on a job that already failed, and nothing else
+    // finished the run.
+    const { update } = await terminateWith({ status: "FAILED" });
+    expect(update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({ status: "CANCELLED" }),
+      }),
+    );
+  });
+
+  test("waits for the agent when the cancel reached a live job", async () => {
+    const { update, cancelJob } = await terminateWith({ status: "CANCELLING" });
+    expect(cancelJob).toHaveBeenCalledWith("job-3");
+    expect(
+      update.mock.calls.some(
+        ([call]) =>
+          (call as { data: { status: string } }).data.status === "CANCELLED",
+      ),
+    ).toBe(false);
+  });
+});
+
 describe("command concurrency admission", () => {
   const at = (minute: number) => new Date(`2026-08-02T10:0${minute}:00Z`);
   const peer = (id: string, concurrency: string, minute: number) => ({
@@ -871,6 +925,145 @@ describe("command reconciliation", () => {
     await service.reconcile();
 
     expect(dispatch).toHaveBeenCalledWith("run-1");
+  });
+
+  test.each([
+    ["FAILED", "a restart waiting after a failed attempt"],
+    ["SUCCEEDED", "a restart waiting after a clean attempt"],
+    ["TIMED_OUT", "a restart waiting after a timed-out attempt"],
+    ["CANCELLED", "an attempt the agent already cancelled"],
+  ])(
+    "finishes a stop request whose newest job is %s (%s)",
+    async (jobStatus) => {
+      // The agent cannot cancel a job that already reported back, so a stop
+      // requested between attempts left the run stuck in CANCELLING forever.
+      const update = vi
+        .fn()
+        .mockResolvedValue({ id: "run-1", status: "CANCELLED" });
+      const cancelJob = vi.fn();
+      getPrismaClient.mockResolvedValue({
+        commandRun: {
+          findMany: vi.fn().mockResolvedValue([
+            {
+              id: "run-1",
+              status: "CANCELLING",
+              stopRequested: true,
+              nextRestartAt: null,
+              attempts: [
+                {
+                  id: "attempt-3",
+                  status: jobStatus,
+                  agentJobId: "job-3",
+                  agentJob: { id: "job-3", status: jobStatus },
+                  completionProcessedAt: new Date(),
+                },
+              ],
+            },
+          ]),
+          findUnique: vi.fn().mockResolvedValue(null),
+          update,
+        },
+      });
+      const service = new CommandsService({
+        registerCompletionHandler: vi.fn(),
+        registerConnectionHandler: vi.fn(),
+        cancelJob,
+      } as never);
+
+      await service.reconcile();
+
+      expect(cancelJob).not.toHaveBeenCalled();
+      expect(update).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { id: "run-1" },
+          data: expect.objectContaining({ status: "CANCELLED" }),
+        }),
+      );
+    },
+  );
+
+  test("still asks the agent to cancel a job that is running", async () => {
+    const cancelJob = vi.fn().mockResolvedValue({ id: "job-1" });
+    const update = vi.fn();
+    getPrismaClient.mockResolvedValue({
+      commandRun: {
+        findMany: vi.fn().mockResolvedValue([
+          {
+            id: "run-1",
+            status: "CANCELLING",
+            stopRequested: true,
+            nextRestartAt: null,
+            attempts: [
+              {
+                id: "attempt-1",
+                status: "RUNNING",
+                agentJobId: "job-1",
+                agentJob: { id: "job-1", status: "RUNNING" },
+                completionProcessedAt: null,
+              },
+            ],
+          },
+        ]),
+        findUnique: vi.fn().mockResolvedValue(null),
+        update,
+      },
+    });
+    const service = new CommandsService({
+      registerCompletionHandler: vi.fn(),
+      registerConnectionHandler: vi.fn(),
+      cancelJob,
+    } as never);
+
+    await service.reconcile();
+
+    expect(cancelJob).toHaveBeenCalledWith("job-1");
+    expect(update).not.toHaveBeenCalled();
+  });
+
+  test("finishes a stop request for a run that never reached a job", async () => {
+    // A run held back by concurrency has no job to cancel, so terminating it
+    // has to close it out directly.
+    const update = vi
+      .fn()
+      .mockResolvedValue({ id: "run-1", status: "CANCELLED" });
+    const cancelJob = vi.fn();
+    getPrismaClient.mockResolvedValue({
+      commandRun: {
+        findMany: vi.fn().mockResolvedValue([
+          {
+            id: "run-1",
+            status: "CANCELLING",
+            stopRequested: true,
+            nextRestartAt: null,
+            attempts: [
+              {
+                id: "attempt-1",
+                status: "QUEUED",
+                agentJobId: null,
+                agentJob: null,
+                completionProcessedAt: null,
+              },
+            ],
+          },
+        ]),
+        findUnique: vi.fn().mockResolvedValue(null),
+        update,
+      },
+    });
+    const service = new CommandsService({
+      registerCompletionHandler: vi.fn(),
+      registerConnectionHandler: vi.fn(),
+      cancelJob,
+    } as never);
+
+    await service.reconcile();
+
+    expect(cancelJob).not.toHaveBeenCalled();
+    expect(update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({ status: "CANCELLED" }),
+      }),
+    );
   });
 
   test("resumes queued dispatch with an incomplete attempt", async () => {

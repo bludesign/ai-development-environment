@@ -36,6 +36,21 @@ const ACTIVE_RUN_STATUSES = [
   "CANCELLING",
 ] as const;
 const FINAL_RUN_STATUSES = ["SUCCEEDED", "FAILED", "CANCELLED"] as const;
+const TERMINAL_JOB_STATUSES = [
+  "SUCCEEDED",
+  "FAILED",
+  "CANCELLED",
+  "TIMED_OUT",
+] as const;
+
+/**
+ * A stop request can only be carried out by the agent while its job is still
+ * live. Once the job has reported back — or was never created — there is
+ * nothing left to cancel and the run has to be finished directly, otherwise it
+ * sits in `CANCELLING` waiting for a completion that will never arrive.
+ */
+const cancellableJob = (job: { status: string } | null | undefined) =>
+  Boolean(job && !TERMINAL_JOB_STATUSES.includes(job.status as never));
 const RESTART_DELAY_MS = 1_000;
 const STABLE_ATTEMPT_MS = 60_000;
 const EXPORT_FORMAT = "aide.command.export";
@@ -1147,9 +1162,13 @@ export class CommandsService {
       where: { id },
       data: { stopRequested: true, status: "CANCELLING", nextRestartAt: null },
     });
+    // Between attempts — a run waiting to restart, or one still queued for its
+    // target — the newest attempt is already finished or has no job at all, so
+    // asking the agent to cancel it does nothing and the run has to be closed
+    // out here.
     const jobId = run.attempts[0]?.agentJobId;
-    if (jobId) await this.agentControl.cancelJob(jobId);
-    else await this.finishCancelled(id);
+    const job = jobId ? await this.agentControl.cancelJob(jobId) : null;
+    if (!cancellableJob(job)) await this.finishCancelled(id);
     publishRun(updated);
     return this.getRun(id);
   }
@@ -1476,15 +1495,10 @@ export class CommandsService {
     for (const run of runs) {
       const attempt = run.attempts[0];
       if (run.stopRequested) {
-        if (
-          attempt?.agentJobId &&
-          attempt.agentJob &&
-          !["SUCCEEDED", "FAILED", "CANCELLED", "TIMED_OUT"].includes(
-            attempt.agentJob.status,
-          )
-        ) {
-          await this.agentControl.cancelJob(attempt.agentJobId);
-        } else if (!attempt || attempt.agentJob?.status === "CANCELLED") {
+        const job = attempt?.agentJob ?? null;
+        if (job && cancellableJob(job)) {
+          await this.agentControl.cancelJob(job.id);
+        } else {
           await this.finishCancelled(run.id);
         }
         continue;
