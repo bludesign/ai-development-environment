@@ -17,6 +17,7 @@ import {
 import { Spinner } from "@/components/ui/spinner";
 import { Link } from "@/i18n/navigation";
 import { controlPlaneRequest } from "@/lib/control-plane-client";
+import { cn } from "@/lib/utils";
 
 import { COMMAND_DEFINITION_FIELDS, type CommandDefinition } from "./types";
 
@@ -26,12 +27,14 @@ export function CommandQuickActions({
   agentCapabilities,
   title,
   description,
+  className,
 }: {
   agentId?: string;
   worktreeId?: string;
   agentCapabilities: string[];
   title?: string;
   description?: string;
+  className?: string;
 }) {
   const t = useTranslations("commands");
   const [commands, setCommands] = useState<CommandDefinition[]>([]);
@@ -95,7 +98,7 @@ export function CommandQuickActions({
   if (!commands.length && !error) return null;
   const actions = (
     <div
-      className="w-full space-y-2"
+      className={cn("w-full space-y-2", className)}
       onClick={(event) => event.stopPropagation()}
     >
       <div className="flex flex-wrap gap-2">

@@ -482,16 +482,15 @@ describe("WorktreesPage", () => {
     const branchButton = await screen.findByRole("button", {
       name: "feature/AIDE-24",
     });
-    const cardDetailsLink = screen.getByRole("link", {
-      name: "Open details for feature/AIDE-24",
-    });
     const card = branchButton.closest('[data-slot="card"]');
     expect(card?.className).toContain("hover:bg-blue-500/20");
     expect(card?.className).toContain("hover:border-blue-500/50");
     expect(branchButton.getAttribute("aria-expanded")).toBe("false");
-    expect(cardDetailsLink.getAttribute("href")).toBe("/worktrees/worktree-1");
-    cardDetailsLink.focus();
-    expect(document.activeElement).toBe(cardDetailsLink);
+    expect(
+      screen.queryByRole("link", {
+        name: "Open details for feature/AIDE-24",
+      }),
+    ).toBeNull();
 
     fireEvent.click(branchButton);
     expect(branchButton.getAttribute("aria-expanded")).toBe("true");
@@ -1127,5 +1126,117 @@ describe("WorktreesPage", () => {
     );
     expect(tableLayout.getAttribute("aria-checked")).toBe("true");
     expect(screen.getByRole("columnheader", { name: "Branch" })).toBeDefined();
+  });
+
+  test("only badges the non-zero side of the origin comparison", async () => {
+    const response = (await request("query Fixture")) as unknown as {
+      worktreeOverview: WorktreeOverview;
+    };
+    const worktree =
+      response.worktreeOverview.agents[0]!.codebases[0]!.worktrees[0]!;
+    worktree.ahead = 0;
+    worktree.behind = 24;
+    worktree.syncState = "BEHIND";
+    request.mockClear();
+
+    render(<WorktreesPage />);
+    await screen.findByText("feature/AIDE-24");
+    expect(screen.getByText("24 behind")).toBeDefined();
+    expect(screen.queryByText("0 ahead")).toBeNull();
+  });
+
+  test("falls back to a dash only when the pull request row is empty", async () => {
+    const response = (await request("query Fixture")) as unknown as {
+      worktreeOverview: WorktreeOverview;
+    };
+    const worktree =
+      response.worktreeOverview.agents[0]!.codebases[0]!.worktrees[0]!;
+    worktree.pullRequest = null;
+    request.mockClear();
+
+    render(<WorktreesPage />);
+    await screen.findByText("feature/AIDE-24");
+    expect(screen.getByRole("button", { name: "Commits: 1" })).toBeDefined();
+    expect(screen.queryByText("—")).toBeNull();
+
+    worktree.baseAhead = 0;
+    cleanup();
+    render(<WorktreesPage />);
+    await screen.findByText("feature/AIDE-24");
+    expect(screen.getByText("—")).toBeDefined();
+    expect(screen.queryByRole("button", { name: "Commits: 0" })).toBeNull();
+  });
+
+  test("names the agent on the card instead of its hostname", async () => {
+    render(<WorktreesPage />);
+    await screen.findByText("feature/AIDE-24");
+    expect(screen.getByText("Agent")).toBeDefined();
+    expect(screen.getAllByText("Studio Mac")).toHaveLength(2);
+    expect(screen.queryByText("studio.local")).toBeNull();
+  });
+
+  test("groups by repository and remembers the choice", async () => {
+    render(<WorktreesPage />);
+    await screen.findByText("feature/AIDE-24");
+    expect(
+      screen.getByRole("heading", { level: 2, name: "Studio Mac" }),
+    ).toBeDefined();
+
+    fireEvent.click(screen.getByRole("combobox", { name: "Group worktrees" }));
+    fireEvent.click(
+      await screen.findByRole("option", { name: "Group by repository" }),
+    );
+
+    await waitFor(() =>
+      expect(window.localStorage.getItem("worktrees-group-by")).toBe(
+        "repository",
+      ),
+    );
+    expect(
+      screen.getByRole("heading", { level: 2, name: "Codex" }),
+    ).toBeDefined();
+    expect(
+      screen.getByRole("heading", { level: 3, name: "Studio Mac" }),
+    ).toBeDefined();
+  });
+
+  test("remembers the search and filter selections", async () => {
+    render(<WorktreesPage />);
+    await screen.findByText("feature/AIDE-24");
+    fireEvent.change(
+      screen.getByRole("searchbox", { name: "Search worktrees" }),
+      {
+        target: { value: "nothing-matches" },
+      },
+    );
+    await waitFor(() =>
+      expect(
+        JSON.parse(window.localStorage.getItem("worktrees-filters") ?? "{}"),
+      ).toMatchObject({ query: "nothing-matches" }),
+    );
+
+    cleanup();
+    render(<WorktreesPage />);
+    expect(await screen.findByText("No matching worktrees")).toBeDefined();
+    expect(
+      (
+        screen.getByRole("searchbox", {
+          name: "Search worktrees",
+        }) as HTMLInputElement
+      ).value,
+    ).toBe("nothing-matches");
+  });
+
+  test("ignores a remembered filter whose agent is gone", async () => {
+    window.localStorage.setItem(
+      "worktrees-filters",
+      JSON.stringify({
+        query: "",
+        agentId: "agent-removed",
+        repositoryId: "__all__",
+      }),
+    );
+    render(<WorktreesPage />);
+    expect(await screen.findByText("feature/AIDE-24")).toBeDefined();
   });
 });
