@@ -243,7 +243,10 @@ describe("APNs notification delivery", () => {
         upsert,
       },
     });
-    const service = new NotificationsService(credentials(), apnsClient(vi.fn()));
+    const service = new NotificationsService(
+      credentials(),
+      apnsClient(vi.fn()),
+    );
 
     await service.savePreference({
       typeKey: "RUN_COMPLETED",

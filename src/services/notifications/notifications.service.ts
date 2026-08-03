@@ -221,7 +221,9 @@ export class NotificationsService {
       where: { typeKey: definition.key },
     });
     const apnsEnabled =
-      input.apnsEnabled ?? existing?.apnsEnabled ?? definition.defaultApnsEnabled;
+      input.apnsEnabled ??
+      existing?.apnsEnabled ??
+      definition.defaultApnsEnabled;
     const saved = await prisma.notificationPreference.upsert({
       where: { typeKey: definition.key },
       create: {
