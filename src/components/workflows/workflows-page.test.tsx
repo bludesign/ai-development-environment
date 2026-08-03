@@ -268,4 +268,56 @@ describe("WorkflowsPage", () => {
       1,
     );
   });
+
+  test("links a run's worktree and agent without showing generation", async () => {
+    request.mockImplementationOnce(
+      async () =>
+        ({
+          workflows: { items: [] },
+          workflowRuns: {
+            items: [
+              {
+                ...workflowRun("linked", 505, null),
+                worktree: {
+                  id: "worktree-1",
+                  folder: "/tmp/repository/feature",
+                  branch: "feature/AIDE-505",
+                  highlightColor: null,
+                },
+                agent: { id: "agent-1", name: "Studio Mac" },
+              },
+            ],
+          },
+        }) as never,
+    );
+
+    renderPage();
+
+    expect(
+      (
+        await screen.findByRole("link", { name: "feature/AIDE-505" })
+      ).getAttribute("href"),
+    ).toBe("/worktrees/worktree-1");
+    expect(
+      screen.getByRole("link", { name: "Studio Mac" }).getAttribute("href"),
+    ).toBe("/agents/agent-1");
+    expect(screen.queryByRole("columnheader", { name: "Generation" })).toBe(
+      null,
+    );
+    expect(
+      screen
+        .getAllByRole("columnheader")
+        .map((header) => header.textContent)
+        .filter(Boolean),
+    ).toEqual([
+      "Run",
+      "Workflow",
+      "Status",
+      "Trigger",
+      "Agent",
+      "Worktree",
+      "Started",
+      "Actions",
+    ]);
+  });
 });

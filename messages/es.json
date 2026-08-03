@@ -163,6 +163,8 @@
     "status": "Estado",
     "trigger": "Desencadenador",
     "generation": "Generación",
+    "worktree": "Árbol de trabajo",
+    "agent": "Agente",
     "started": "Iniciado",
     "queued": "En cola",
     "worktreeQueue": "Cola del árbol de trabajo",

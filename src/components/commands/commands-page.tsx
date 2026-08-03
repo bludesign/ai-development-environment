@@ -704,11 +704,15 @@ export function CommandsPage() {
                           {t(commandStatusKey(run.status))}
                         </Badge>
                       </TableCell>
-                      <TableCell>
+                      <TableCell className="whitespace-normal">
                         {run.agentId ? (
                           <Link
-                            className={cn(rowLinkClass, "inline-block")}
+                            className={cn(
+                              rowLinkClass,
+                              "inline whitespace-normal break-words",
+                            )}
                             href={`/agents/${run.agentId}`}
+                            title={run.agentName}
                           >
                             {run.agentName}
                           </Link>

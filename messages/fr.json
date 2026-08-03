@@ -163,6 +163,8 @@
     "status": "État",
     "trigger": "Déclencheur",
     "generation": "Génération",
+    "worktree": "Arbre de travail",
+    "agent": "Agent",
     "started": "Démarré",
     "queued": "En attente",
     "worktreeQueue": "File de l’arbre de travail",

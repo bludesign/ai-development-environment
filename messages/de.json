@@ -163,6 +163,8 @@
     "status": "Status",
     "trigger": "Auslöser",
     "generation": "Generation",
+    "worktree": "Arbeitsbaum",
+    "agent": "Agent",
     "started": "Gestartet",
     "queued": "In Warteschlange",
     "worktreeQueue": "Arbeitsbaum-Warteschlange",

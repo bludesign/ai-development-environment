@@ -935,7 +935,10 @@ describe("WorktreesPage", () => {
     const detail = screen.getByTestId("worktree-detail");
     expect(detail.className).toContain("space-y-4");
     expect(detail.className).not.toContain("grid-cols-2");
-    expect(screen.getByText("Keep worktree details compact")).toBeDefined();
+    const commitMessage = screen.getByText("Keep worktree details compact");
+    expect(commitMessage.className).toContain("whitespace-normal");
+    expect(commitMessage.className).toContain("break-words");
+    expect(commitMessage.className).not.toContain("truncate");
     expect(
       screen.getByTitle("src/components/worktrees/worktrees-page.tsx"),
     ).toBeDefined();

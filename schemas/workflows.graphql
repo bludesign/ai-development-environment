@@ -305,6 +305,8 @@ type WorkflowRun {
   sessionRevision: Int!
   "The worktree associated with this workflow run. May be null when unavailable or not applicable."
   worktree: WorkflowRunWorktreeRef
+  "The agent this workflow run executed on. May be null when the run did not target an agent or the agent is no longer available."
+  agent: Agent
   "Effective admission queue while this run is queued, including work ahead of it. Empty after admission."
   queue: [WorktreeRunQueueEntry!]!
   "The blocked reason associated with this workflow run. May be null when unavailable or not applicable."

@@ -213,6 +213,28 @@ describe("CommandsPage", () => {
     ).toBe("/worktrees/worktree-1");
   });
 
+  test("wraps long agent names instead of truncating them", async () => {
+    const longAgentName =
+      "A very long build agent name that should remain completely visible";
+    request.mockResolvedValue({
+      commandDefinitions: [],
+      agents: [],
+      worktreeOverview: { agents: [] },
+      commandRuns: {
+        nodes: [{ ...commandRun(), agentName: longAgentName }],
+      },
+    } as never);
+
+    render(<CommandsPage />);
+
+    const agentLink = await screen.findByRole("link", { name: longAgentName });
+    expect(agentLink.textContent).toBe(longAgentName);
+    expect(agentLink.className).toContain("whitespace-normal");
+    expect(agentLink.className).toContain("break-words");
+    expect(agentLink.className).not.toContain("truncate");
+    expect(agentLink.closest("td")?.className).toContain("whitespace-normal");
+  });
+
   test("opens a run from the row and uses session-style link highlights", async () => {
     render(<CommandsPage />);
 

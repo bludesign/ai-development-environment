@@ -13,6 +13,7 @@ const prisma = vi.hoisted(() => ({
   workflow: { findUnique: vi.fn(), findMany: vi.fn(), update: vi.fn() },
   codebaseRepository: { count: vi.fn() },
   worktree: { findUnique: vi.fn(), findFirst: vi.fn() },
+  agent: { findUnique: vi.fn() },
   codebase: { findUnique: vi.fn() },
   build: { findUnique: vi.fn() },
   agentRun: { findUnique: vi.fn() },
@@ -1942,5 +1943,44 @@ describe("workflow run worktree tint", () => {
       await service.runWorktree(JSON.stringify({ codebase: { id: "code-1" } })),
     ).toBeNull();
     expect(prisma.worktree.findUnique).not.toHaveBeenCalled();
+  });
+});
+
+describe("workflow run agent", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  test("resolves the snapshotted agent from session data", async () => {
+    prisma.agent.findUnique.mockResolvedValue({
+      id: "agent-1",
+      name: "Studio Mac",
+    });
+    const service = new WorkflowsService(new WorkflowEventsService());
+
+    const agent = await service.runAgent(
+      JSON.stringify({ agent: { id: "agent-1" } }),
+    );
+
+    expect(prisma.agent.findUnique).toHaveBeenCalledWith({
+      where: { id: "agent-1" },
+    });
+    expect(agent).toMatchObject({ id: "agent-1", name: "Studio Mac" });
+    expect(prisma.worktree.findUnique).not.toHaveBeenCalled();
+  });
+
+  test("falls back to the worktree owner for older session data", async () => {
+    prisma.worktree.findUnique.mockResolvedValue({
+      codebase: { agent: { id: "agent-2", name: "Build Mac" } },
+    });
+    const service = new WorkflowsService(new WorkflowEventsService());
+
+    await expect(
+      service.runAgent(JSON.stringify({ worktree: { id: "worktree-1" } })),
+    ).resolves.toMatchObject({ id: "agent-2", name: "Build Mac" });
+    expect(prisma.worktree.findUnique).toHaveBeenCalledWith({
+      where: { id: "worktree-1" },
+      select: { codebase: { select: { agent: true } } },
+    });
   });
 });

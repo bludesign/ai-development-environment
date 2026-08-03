@@ -205,6 +205,7 @@ export type WorkflowRun = {
     branch: string | null;
     highlightColor: string | null;
   } | null;
+  agent?: { id: string; name: string } | null;
   blockedReason: string | null;
   error: string | null;
   queuedAt: string;

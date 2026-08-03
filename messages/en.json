@@ -163,6 +163,8 @@
     "status": "Status",
     "trigger": "Trigger",
     "generation": "Generation",
+    "worktree": "Worktree",
+    "agent": "Agent",
     "started": "Started",
     "queued": "Queued",
     "worktreeQueue": "Worktree queue",

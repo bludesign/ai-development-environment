@@ -248,7 +248,7 @@ function InlineWorktreeDetail({ detail }: { detail: WorktreeDetail }) {
                     </TableCell>
                     <TableCell className="max-w-0 px-2 py-1.5">
                       <div className="flex min-w-0 items-baseline gap-2">
-                        <span className="truncate font-medium">
+                        <span className="min-w-0 flex-1 break-words whitespace-normal font-medium">
                           {commit.subject}
                         </span>
                         <span className="shrink-0 text-muted-foreground">

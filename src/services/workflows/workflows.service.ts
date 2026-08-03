@@ -573,6 +573,29 @@ export class WorkflowsService {
     });
   }
 
+  /**
+   * Prefer the agent snapshot placed in session data when the workflow was
+   * triggered. Worktrees can subsequently move, so their current owner is only
+   * a fallback for older runs whose session did not include agent metadata.
+   */
+  async runAgent(sessionDataJson: string) {
+    const sessionData = json<SessionData>(sessionDataJson);
+    const sessionAgentId =
+      getSessionValue(sessionData, "agent.id") ??
+      getSessionValue(sessionData, "codebase.agentId");
+    const prisma = await getPrismaClient();
+    if (typeof sessionAgentId === "string" && sessionAgentId) {
+      return prisma.agent.findUnique({ where: { id: sessionAgentId } });
+    }
+    const worktreeId = getSessionValue(sessionData, "worktree.id");
+    if (typeof worktreeId !== "string" || !worktreeId) return null;
+    const worktree = await prisma.worktree.findUnique({
+      where: { id: worktreeId },
+      select: { codebase: { select: { agent: true } } },
+    });
+    return worktree?.codebase.agent ?? null;
+  }
+
   private async queueForWorktree(
     worktreeId: string,
   ): Promise<WorktreeRunQueueEntry[]> {
