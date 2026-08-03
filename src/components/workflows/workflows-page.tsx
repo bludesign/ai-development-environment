@@ -100,7 +100,7 @@ import { useWorkflowLabels } from "./workflow-labels";
 import type { WorkflowRun, WorkflowSummary } from "./types";
 
 const WORKFLOW_FIELDS = `
-  id name description draftDefinition activeVersionId enabled overlapPolicy maxConcurrentRuns completionNotificationsEnabled exclusiveWorktree archivedAt quickActionKind quickActionIconKey quickActionButtonVariant
+  id name description draftDefinition activeVersionId enabled overlapPolicy overlapScope maxConcurrentRuns completionNotificationsEnabled exclusiveWorktree archivedAt quickActionKind quickActionIconKey quickActionButtonVariant
   quickActionRepositories { id name displayOrigin }
   hasPlainTrigger
   triggerChoices { key label description }
@@ -108,9 +108,11 @@ const WORKFLOW_FIELDS = `
 `;
 
 const RUN_FIELDS = `
-  id displayNumber workflowId triggerKind triggerSubjectKey status phase generation
+  id displayNumber workflowId triggerKind triggerSubjectKey status phase
   blockedReason error queuedAt startedAt pausedAt finishedAt archivedAt createdAt
   workflow { id name }
+  worktree { id folder branch highlightColor }
+  agent { id name }
   version { id workflowId version name description schemaVersion definition contentHash publishedAt }
 `;
 
@@ -188,7 +190,7 @@ export function WorkflowsPage() {
     () =>
       prioritizeActiveTableRows(
         runs.filter((run) =>
-          `${run.displayNumber} ${run.workflow.name} ${run.status} ${run.triggerKind}`
+          `${run.displayNumber} ${run.workflow.name} ${run.status} ${run.triggerKind} ${run.worktree?.branch ?? ""} ${run.worktree?.folder ?? ""} ${run.agent?.name ?? ""}`
             .toLowerCase()
             .includes(search.toLowerCase()),
         ),
@@ -660,10 +662,12 @@ export function WorkflowsPage() {
                       {t("versionCount", { count: workflow.versionCount })}
                     </Badge>
                     <Badge variant="outline">
-                      {labels.overlapPolicy(workflow.overlapPolicy)}
+                      {`${labels.overlapPolicy(
+                        workflow.overlapPolicy,
+                      )} · ${labels.overlapScope(workflow.overlapScope)}`}
                     </Badge>
                     {workflow.exclusiveWorktree && (
-                      <Badge variant="outline">{t("exclusiveWorktree")}</Badge>
+                      <Badge variant="outline">{t("reservesWorktree")}</Badge>
                     )}
                     {workflow.quickActionKind !== "NONE" && (
                       <Badge variant="outline">
@@ -714,7 +718,7 @@ export function WorkflowsPage() {
           <Table
             className={cn(
               "table-fixed",
-              editMode ? "min-w-[51rem]" : "min-w-[48rem]",
+              editMode ? "min-w-[61rem]" : "min-w-[58rem]",
             )}
           >
             <TableHeader>
@@ -730,12 +734,13 @@ export function WorkflowsPage() {
                   </TableHead>
                 )}
                 <TableHead className="w-[8%]">{t("run")}</TableHead>
-                <TableHead className="w-[22%]">{t("workflow")}</TableHead>
-                <TableHead className="w-[13%]">{t("status")}</TableHead>
-                <TableHead className="w-[19%]">{t("trigger")}</TableHead>
-                <TableHead className="w-[10%]">{t("generation")}</TableHead>
-                <TableHead className="w-[16%]">{t("started")}</TableHead>
-                <TableHead className="w-[12%] text-right">
+                <TableHead className="w-[18%]">{t("workflow")}</TableHead>
+                <TableHead className="w-[12%]">{t("status")}</TableHead>
+                <TableHead className="w-[15%]">{t("trigger")}</TableHead>
+                <TableHead className="w-[13%]">{t("agent")}</TableHead>
+                <TableHead className="w-[14%]">{t("worktree")}</TableHead>
+                <TableHead className="w-[12%]">{t("started")}</TableHead>
+                <TableHead className="w-[8%] text-right">
                   {t("actions")}
                 </TableHead>
               </TableRow>
@@ -765,7 +770,7 @@ export function WorkflowsPage() {
                     )}
                     <TableCell
                       className="py-1.5 text-xs font-normal text-muted-foreground"
-                      colSpan={7}
+                      colSpan={8}
                     >
                       {group.prioritized
                         ? t("active")
@@ -844,7 +849,38 @@ export function WorkflowsPage() {
                       >
                         {labels.kind(run.triggerKind)}
                       </TableCell>
-                      <TableCell>{run.generation}</TableCell>
+                      <TableCell>
+                        {run.agent ? (
+                          <Link
+                            className={cn(
+                              rowLinkClass,
+                              "block min-w-0 truncate",
+                            )}
+                            href={`/agents/${run.agent.id}`}
+                            title={run.agent.name}
+                          >
+                            {run.agent.name}
+                          </Link>
+                        ) : (
+                          <span className="text-muted-foreground">—</span>
+                        )}
+                      </TableCell>
+                      <TableCell>
+                        {run.worktree ? (
+                          <Link
+                            className={cn(
+                              rowLinkClass,
+                              "block min-w-0 truncate",
+                            )}
+                            href={`/worktrees/${run.worktree.id}`}
+                            title={run.worktree.folder}
+                          >
+                            {run.worktree.branch ?? run.worktree.folder}
+                          </Link>
+                        ) : (
+                          <span className="text-muted-foreground">—</span>
+                        )}
+                      </TableCell>
                       <TableCell>
                         {run.startedAt ? (
                           <DateTime

@@ -766,12 +766,14 @@ export function ExportSettingsForm({
             return (
               <div className="rounded-lg border p-3" key={requirement.bundleId}>
                 <div className="mb-2 flex items-start justify-between gap-2">
-                  <div>
-                    <p className="font-medium">{requirement.name}</p>
-                    <p className="break-all font-mono text-xs text-muted-foreground">
+                  <div className="min-w-0 flex-1">
+                    <p className="font-medium [overflow-wrap:anywhere]">
+                      {requirement.name}
+                    </p>
+                    <p className="font-mono text-xs text-muted-foreground [overflow-wrap:anywhere]">
                       {requirement.bundleId}
                     </p>
-                    <p className="text-xs text-muted-foreground">
+                    <p className="text-xs text-muted-foreground [overflow-wrap:anywhere]">
                       {[
                         requirement.target,
                         requirement.platform,

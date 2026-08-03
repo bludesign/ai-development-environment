@@ -523,6 +523,15 @@ const STEP_CONFIG_DESCRIPTORS: StepConfigDescriptors = {
       bool("stashOnFailure", "Stash on failure"),
     ],
   },
+  WORKTREE_COMMIT: {
+    fields: [
+      resource("worktreeId", "Worktree", "worktree"),
+      multiline("message", "Commit message", { required: true }),
+      bool("signed", "Signed commit"),
+      bool("stageAll", "Stage all", { default: true }),
+      json("paths", "Selected paths"),
+    ],
+  },
   WORKTREE_REFRESH_PULL_REQUEST: {
     fields: [resource("worktreeId", "Worktree", "worktree")],
   },

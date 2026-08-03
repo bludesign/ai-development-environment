@@ -8,10 +8,13 @@ import {
   Check,
   ChevronDown,
   ChevronRight,
+  ClipboardList,
   Code2,
+  Download,
   ExternalLink,
   FolderGit2,
   GitBranch,
+  GitCommitHorizontal,
   GitMerge,
   GitPullRequest,
   Grid2X2,
@@ -26,6 +29,7 @@ import {
   Save,
   Search,
   Tags,
+  Terminal,
   Trash2,
   Upload,
 } from "lucide-react";
@@ -42,7 +46,7 @@ import {
 
 import { AGENT_FIELDS } from "@/components/agents/graphql-fields";
 import { buildStatusVariant } from "@/components/builds/build-format";
-import { RebuildButton } from "@/components/builds/rebuild-button";
+import { useRebuildBuild } from "@/components/builds/rebuild-button";
 import { RunBuildControls } from "@/components/builds/run-build-controls";
 import { StartBuildButton } from "@/components/builds/start-build-dialog";
 import {
@@ -130,6 +134,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
+import { Textarea } from "@/components/ui/textarea";
 import { createClientId } from "@/lib/browser-utils";
 import { formatDateValue } from "@/lib/date-format";
 import { worktreeHighlightSurfaceClasses } from "@/lib/worktree-highlight";
@@ -392,6 +397,7 @@ type Operation =
   | "SYNC"
   | "REBASE"
   | "CANCEL_REBASE"
+  | "PULL"
   | "PUSH"
   | "RESET"
   | "STASH_ALL"
@@ -1773,13 +1779,38 @@ function LatestBuildRow({
   const runnable =
     build.status === "SUCCEEDED" &&
     build.artifacts.some((artifact) => artifact.kind === "RUNNABLE_APP");
+  const { rebuild, rebuilding } = useRebuildBuild({
+    buildId: build.id,
+    onCompleted: () => onCompleted(),
+    onError,
+  });
   return (
     <MetadataRow label={t("latestBuild")}>
-      <Badge asChild variant="outline">
-        <Link href={`/builds/${build.id}`}>
-          {buildsT(`actions.${build.action}`)}
-        </Link>
-      </Badge>
+      <DropdownMenu>
+        <DropdownMenuTrigger asChild>
+          <Badge asChild variant="outline">
+            <button type="button">
+              {buildsT(`actions.${build.action}`)}
+              <ChevronDown />
+            </button>
+          </Badge>
+        </DropdownMenuTrigger>
+        <DropdownMenuContent align="start" className="w-36">
+          <DropdownMenuItem asChild>
+            <Link href={`/builds/${build.id}`}>
+              <ExternalLink />
+              {buildsT("viewBuild")}
+            </Link>
+          </DropdownMenuItem>
+          <DropdownMenuItem
+            disabled={rebuilding}
+            onSelect={() => void rebuild()}
+          >
+            {rebuilding ? <Spinner /> : <RotateCcw />}
+            {buildsT("rebuild")}
+          </DropdownMenuItem>
+        </DropdownMenuContent>
+      </DropdownMenu>
       <Badge variant={buildStatusVariant(build.status)}>
         {buildsT(`statuses.${build.status}`)}
       </Badge>
@@ -1791,12 +1822,6 @@ function LatestBuildRow({
           {buildsT("outOfDate")}
         </Badge>
       )}
-      <RebuildButton
-        buildId={build.id}
-        onCompleted={() => onCompleted()}
-        onError={onError}
-        size="sm"
-      />
       {runnable && (
         <RunBuildControls
           buildId={build.id}
@@ -2258,6 +2283,7 @@ export function WorktreeMenus(
   const {
     worktree,
     allTags,
+    editorVariant,
     onUpdate,
     onError,
     onManageTags,
@@ -2267,6 +2293,7 @@ export function WorktreeMenus(
   } = props;
   const t = useTranslations("worktrees");
   const [changeOpen, setChangeOpen] = useState(false);
+  const [commitOpen, setCommitOpen] = useState(false);
   const [moveOpen, setMoveOpen] = useState(false);
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [changeBusy, setChangeBusy] = useState(false);
@@ -2442,6 +2469,32 @@ export function WorktreeMenus(
             >
               <GitBranch /> {t("changeBranch")}
             </DropdownMenuItem>
+            <DropdownMenuItem
+              disabled={
+                worktree.availability !== "AVAILABLE" ||
+                Boolean(worktree.activeJob) ||
+                worktree.rebaseInProgress ||
+                !sourceAgent?.agent.capabilities.includes("worktree.commit") ||
+                (!worktree.hasStagedChanges && !worktree.hasUnstagedChanges)
+              }
+              onSelect={() => setCommitOpen(true)}
+            >
+              <GitCommitHorizontal /> {t("commit")}
+            </DropdownMenuItem>
+            {editorVariant !== "NONE" && (
+              <OperationMenuItem
+                icon={<Code2 />}
+                label={
+                  editorVariant === "CODE_INSIDERS"
+                    ? t("openInsiders")
+                    : t("openCode")
+                }
+                operation="OPEN_EDITOR"
+                // The editor opens on the agent, so the menu's own reload is
+                // all there is to wait for.
+                props={{ ...props, onCompleted: props.onReload }}
+              />
+            )}
             <DropdownMenuItem asChild>
               <Link href={`/codebases/${props.group.codebase.id}`}>
                 <Code2 /> {t("viewCodebase")}
@@ -2609,6 +2662,14 @@ export function WorktreeMenus(
           )}
         />
       )}
+      {commitOpen && (
+        <CommitWorktreeDialog
+          onOpenChange={setCommitOpen}
+          onReload={props.onReload}
+          open={commitOpen}
+          worktree={worktree}
+        />
+      )}
       {!worktree.primary && deleteOpen && (
         <DeleteWorktreeDialog
           onOpenChange={setDeleteOpen}
@@ -2617,6 +2678,173 @@ export function WorktreeMenus(
         />
       )}
     </>
+  );
+}
+
+function CommitWorktreeDialog({
+  worktree,
+  open,
+  onOpenChange,
+  onReload,
+}: {
+  worktree: Worktree;
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  onReload: () => Promise<void>;
+}) {
+  const t = useTranslations("worktrees");
+  const [detail, setDetail] = useState<WorktreeDetail | null>(null);
+  const [message, setMessage] = useState("");
+  const [signed, setSigned] = useState(false);
+  const [stageAll, setStageAll] = useState(true);
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    void inspectWorktree(worktree.id)
+      .then((next) => {
+        if (cancelled) return;
+        setDetail(next);
+        setSigned(next.commitSigningEnabled === true);
+        setSelected(
+          new Set(
+            next.changes
+              .filter((change) => change.staged)
+              .map((change) => change.path),
+          ),
+        );
+      })
+      .catch((value) => {
+        if (!cancelled)
+          setError(value instanceof Error ? value.message : String(value));
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [worktree.id]);
+
+  const submit = async () => {
+    setBusy(true);
+    setError(null);
+    try {
+      const data = await controlPlaneRequest<{
+        commitWorktree: { id: string };
+      }>(
+        `mutation CommitWorktree($input: CommitWorktreeInput!) {
+          commitWorktree(input: $input) { id }
+        }`,
+        {
+          input: {
+            worktreeId: worktree.id,
+            message,
+            signed,
+            stageAll,
+            paths: stageAll ? [] : [...selected],
+            requestId: createClientId(),
+          },
+        },
+      );
+      await waitForWorktreeJob(data.commitWorktree.id);
+      await onReload();
+      onOpenChange(false);
+    } catch (value) {
+      setError(value instanceof Error ? value.message : String(value));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <Dialog onOpenChange={onOpenChange} open={open}>
+      <DialogContent className="max-h-[min(42rem,calc(100vh-2rem))] overflow-y-auto sm:max-w-lg">
+        <DialogHeader>
+          <DialogTitle>{t("commitTitle")}</DialogTitle>
+          <DialogDescription>{t("commitDescription")}</DialogDescription>
+        </DialogHeader>
+        <div className="space-y-4">
+          <div className="space-y-1.5">
+            <Label htmlFor="worktree-commit-message">
+              {t("commitMessage")}
+            </Label>
+            <Textarea
+              autoFocus
+              id="worktree-commit-message"
+              onChange={(event) => setMessage(event.target.value)}
+              placeholder={t("commitMessagePlaceholder")}
+              rows={4}
+              value={message}
+            />
+          </div>
+          <label className="flex items-center gap-2 text-sm">
+            <Checkbox
+              checked={signed}
+              onCheckedChange={(checked) => setSigned(Boolean(checked))}
+            />
+            {t("signedCommit")}
+          </label>
+          <label className="flex items-center gap-2 text-sm">
+            <Checkbox
+              checked={stageAll}
+              onCheckedChange={(checked) => setStageAll(Boolean(checked))}
+            />
+            {t("stageAll")}
+          </label>
+          {!stageAll && detail && (
+            <div className="max-h-64 space-y-1 overflow-y-auto rounded-md border p-2">
+              {detail.changes.map((change) => (
+                <label
+                  className="flex items-start gap-2 rounded px-2 py-1.5 text-sm hover:bg-muted"
+                  key={change.path}
+                >
+                  <Checkbox
+                    checked={selected.has(change.path)}
+                    onCheckedChange={(checked) => {
+                      setSelected((current) => {
+                        const next = new Set(current);
+                        if (checked) next.add(change.path);
+                        else next.delete(change.path);
+                        return next;
+                      });
+                    }}
+                  />
+                  <span className="break-all font-mono text-xs">
+                    {change.path}
+                  </span>
+                </label>
+              ))}
+            </div>
+          )}
+          {!detail && !error && <Spinner />}
+          {error && (
+            <Alert variant="destructive">
+              <AlertDescription>{error}</AlertDescription>
+            </Alert>
+          )}
+        </div>
+        <DialogFooter>
+          <Button
+            disabled={busy}
+            onClick={() => onOpenChange(false)}
+            variant="outline"
+          >
+            {t("cancel")}
+          </Button>
+          <Button
+            disabled={
+              busy ||
+              !detail ||
+              !message.trim() ||
+              (!stageAll && selected.size === 0)
+            }
+            onClick={() => void submit()}
+          >
+            {busy && <Spinner />} {t("commit")}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   );
 }
 
@@ -3007,7 +3235,7 @@ function DeleteWorktreeDialog({
 export function ActionRow(
   props: WorktreeItemProps & { onCompleted: () => Promise<void> },
 ) {
-  const { worktree, editorVariant } = props;
+  const { worktree } = props;
   const t = useTranslations("worktrees");
   const unavailable =
     worktree.availability !== "AVAILABLE" ||
@@ -3029,6 +3257,10 @@ export function ActionRow(
     agent.connectionStatus !== "ONLINE" ||
     !agent.capabilities.includes("ios.build.run") ||
     props.group.iosBuildConfigured === false;
+  const runUnavailable =
+    worktree.availability !== "AVAILABLE" ||
+    !agent ||
+    agent.connectionStatus !== "ONLINE";
   return (
     <div className="flex flex-wrap gap-2">
       <StartBuildButton
@@ -3052,25 +3284,34 @@ export function ActionRow(
         }
         worktreeId={worktree.id}
       />
-      {editorVariant !== "NONE" && (
-        <OperationButton
-          icon={<Code2 />}
-          label={
-            editorVariant === "CODE_INSIDERS"
-              ? t("openInsiders")
-              : t("openCode")
-          }
-          operation="OPEN_EDITOR"
-          props={props}
-        />
+      {runUnavailable ? (
+        <Button disabled size="sm" variant="outline">
+          <Terminal /> {t("newSession")}
+        </Button>
+      ) : (
+        <Button asChild size="sm" variant="outline">
+          <Link href={`/runs/new?kind=session&worktree=${worktree.id}`}>
+            <Terminal /> {t("newSession")}
+          </Link>
+        </Button>
+      )}
+      {runUnavailable ? (
+        <Button disabled size="sm" variant="outline">
+          <ClipboardList /> {t("newPlan")}
+        </Button>
+      ) : (
+        <Button asChild size="sm" variant="outline">
+          <Link href={`/runs/new?kind=plan&worktree=${worktree.id}`}>
+            <ClipboardList /> {t("newPlan")}
+          </Link>
+        </Button>
       )}
       <OperationButton
-        confirm
-        icon={<Upload />}
-        label={t("forcePush")}
-        operation="FORCE_PUSH"
+        icon={<Download />}
+        label={t("pull")}
+        operation="PULL"
         props={props}
-        disabled={unavailable || !worktree.upstream}
+        disabled={unavailable || !worktree.upstream || worktree.behind === 0}
       />
       <OperationButton
         confirm
@@ -3102,32 +3343,6 @@ export function ActionRow(
         props={props}
         disabled={unavailable || !worktree.branch}
       />
-      <OperationButton
-        confirm
-        icon={<RotateCcw />}
-        label={t("reset")}
-        operation="RESET"
-        props={props}
-        disabled={unavailable || !worktree.upstream}
-      />
-      <OperationButton
-        icon={<Archive />}
-        label={t("stashAll")}
-        operation="STASH_ALL"
-        props={props}
-        disabled={unavailable || !changeActions.hasChanges}
-      />
-      <OperationButton
-        icon={<Check />}
-        label={
-          changeActions.stageOperation === "UNSTAGE_ALL"
-            ? t("unstageAll")
-            : t("stageAll")
-        }
-        operation={changeActions.stageOperation}
-        props={props}
-        disabled={unavailable || !changeActions.hasChanges}
-      />
       <AutoSyncButton
         conflictWorkflows={props.group.mergeConflictQuickActions ?? []}
         disabled={unavailable || !worktree.upstream || !worktree.baseBranch}
@@ -3142,6 +3357,50 @@ export function ActionRow(
         onError={props.onError}
         worktree={worktree}
       />
+      {/* The operations that discard or rewrite work, kept off the row itself. */}
+      <DropdownMenu>
+        <DropdownMenuTrigger asChild>
+          <Button size="sm" variant="outline">
+            <MoreHorizontal /> {t("moreActions")}
+          </Button>
+        </DropdownMenuTrigger>
+        <DropdownMenuContent align="end">
+          <OperationMenuItem
+            confirm
+            icon={<Upload />}
+            label={t("forcePush")}
+            operation="FORCE_PUSH"
+            props={props}
+            disabled={unavailable || !worktree.upstream}
+          />
+          <OperationMenuItem
+            confirm
+            icon={<RotateCcw />}
+            label={t("reset")}
+            operation="RESET"
+            props={props}
+            disabled={unavailable || !worktree.upstream}
+          />
+          <OperationMenuItem
+            icon={<Archive />}
+            label={t("stashAll")}
+            operation="STASH_ALL"
+            props={props}
+            disabled={unavailable || !changeActions.hasChanges}
+          />
+          <OperationMenuItem
+            icon={<Check />}
+            label={
+              changeActions.stageOperation === "UNSTAGE_ALL"
+                ? t("unstageAll")
+                : t("stageAll")
+            }
+            operation={changeActions.stageOperation}
+            props={props}
+            disabled={unavailable || !changeActions.hasChanges}
+          />
+        </DropdownMenuContent>
+      </DropdownMenu>
       {worktree.activeJob && (
         <span className="flex items-center gap-1 text-xs text-muted-foreground">
           <Spinner /> {t("operationRunning")}
@@ -3151,22 +3410,25 @@ export function ActionRow(
   );
 }
 
-function OperationButton({
-  props,
-  operation,
-  label,
-  icon,
-  confirm = false,
-  disabled = false,
-}: {
+type OperationProps = {
   props: WorktreeItemProps & { onCompleted: () => Promise<void> };
   operation: Operation;
   label: string;
   icon: React.ReactNode;
   confirm?: boolean;
   disabled?: boolean;
-}) {
-  const t = useTranslations("worktrees");
+};
+
+/**
+ * Runs one worktree operation, arming a confirmation first when the operation
+ * discards work. Shared by the row's buttons and the overflow menu's items, so
+ * an operation behaves the same wherever it is offered.
+ */
+function useWorktreeOperation({
+  props,
+  operation,
+  confirm = false,
+}: Pick<OperationProps, "props" | "operation" | "confirm">) {
   const [armed, setArmed] = useState(false);
   const [busy, setBusy] = useState(false);
   const timer = useRef<number | null>(null);
@@ -3212,6 +3474,25 @@ function OperationButton({
       setBusy(false);
     }
   };
+
+  return { armed, busy, run };
+}
+
+function OperationButton({
+  props,
+  operation,
+  label,
+  icon,
+  confirm = false,
+  disabled = false,
+}: OperationProps) {
+  const t = useTranslations("worktrees");
+  const { armed, busy, run } = useWorktreeOperation({
+    props,
+    operation,
+    confirm,
+  });
+
   return (
     <Button
       disabled={disabled || busy}
@@ -3222,6 +3503,38 @@ function OperationButton({
       {busy ? <Spinner /> : armed ? <Check /> : icon}{" "}
       {armed ? t("confirmAction") : label}
     </Button>
+  );
+}
+
+function OperationMenuItem({
+  props,
+  operation,
+  label,
+  icon,
+  confirm = false,
+  disabled = false,
+}: OperationProps) {
+  const t = useTranslations("worktrees");
+  const { armed, busy, run } = useWorktreeOperation({
+    props,
+    operation,
+    confirm,
+  });
+
+  return (
+    <DropdownMenuItem
+      disabled={disabled || busy}
+      onSelect={(event) => {
+        // The first select on a confirming operation only arms it, so the menu
+        // has to stay open for the second one.
+        if (confirm && !armed) event.preventDefault();
+        void run();
+      }}
+      variant={armed ? "destructive" : "default"}
+    >
+      {busy ? <Spinner /> : armed ? <Check /> : icon}
+      {armed ? t("confirmAction") : label}
+    </DropdownMenuItem>
   );
 }
 

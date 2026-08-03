@@ -10,12 +10,18 @@ import { WorkflowsService } from "./workflows.service";
 
 const prisma = vi.hoisted(() => ({
   $transaction: vi.fn(),
-  workflow: { findUnique: vi.fn(), findMany: vi.fn(), update: vi.fn() },
+  workflow: {
+    findUnique: vi.fn(),
+    findMany: vi.fn(),
+    create: vi.fn(),
+    update: vi.fn(),
+  },
   codebaseRepository: { count: vi.fn() },
   worktree: { findUnique: vi.fn(), findFirst: vi.fn() },
+  agent: { findUnique: vi.fn() },
   codebase: { findUnique: vi.fn() },
   build: { findUnique: vi.fn() },
-  agentRun: { findUnique: vi.fn() },
+  agentRun: { findUnique: vi.fn(), findFirst: vi.fn() },
   workflowQuickActionRepository: {
     deleteMany: vi.fn(),
     createMany: vi.fn(),
@@ -28,7 +34,15 @@ const prisma = vi.hoisted(() => ({
     update: vi.fn(),
     updateMany: vi.fn(),
     findMany: vi.fn(),
+    count: vi.fn(),
   },
+  worktreeAdmissionLane: { upsert: vi.fn() },
+  worktreeWorkflowLease: {
+    findUnique: vi.fn(),
+    create: vi.fn(),
+    deleteMany: vi.fn(),
+  },
+  worktreeRunLease: { count: vi.fn(), deleteMany: vi.fn() },
   workflowRunNumberSequence: { upsert: vi.fn() },
   workflowRunResourceLink: {
     create: vi.fn(),
@@ -39,6 +53,8 @@ const prisma = vi.hoisted(() => ({
     findUnique: vi.fn(),
     update: vi.fn(),
     updateMany: vi.fn(),
+    count: vi.fn(),
+    createMany: vi.fn(),
   },
   workflowWait: { create: vi.fn(), findMany: vi.fn(), updateMany: vi.fn() },
   workflowTriggerState: { findUnique: vi.fn(), upsert: vi.fn() },
@@ -1613,6 +1629,230 @@ describe("workflow runtime lifecycle guards", () => {
   });
 });
 
+describe("workflow overlap settings", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    prisma.workflow.create.mockImplementation(
+      async ({ data }: { data: Record<string, unknown> }) => data,
+    );
+    prisma.workflow.findUnique.mockResolvedValue({ id: "workflow-1" });
+  });
+
+  test("counts overlap per worktree unless a workflow asks for global", async () => {
+    const service = new WorkflowsService(new WorkflowEventsService());
+
+    await service.create({ name: "Commit" });
+    await service.create({ name: "Deploy", overlapScope: "global" });
+
+    expect(prisma.workflow.create.mock.calls[0]?.[0].data).toMatchObject({
+      overlapScope: "WORKTREE",
+    });
+    expect(prisma.workflow.create.mock.calls[1]?.[0].data).toMatchObject({
+      overlapScope: "GLOBAL",
+    });
+    await expect(
+      service.create({ name: "Broken", overlapScope: "REPOSITORY" }),
+    ).rejects.toThrow(/overlap scope is not supported/);
+  });
+
+  test("reads the scope of an export written before the setting existed", async () => {
+    const service = new WorkflowsService(new WorkflowEventsService());
+    const exported = (exclusiveWorktree: boolean) => ({
+      format: "aide.workflow.export",
+      schemaVersion: 1,
+      workflow: {
+        name: "Commit",
+        overlapPolicy: "QUEUE",
+        exclusiveWorktree,
+        definition: emptyWorkflowDefinition("Commit"),
+      },
+    });
+
+    await service.import({ payload: exported(true) });
+    await service.import({ payload: exported(false) });
+
+    expect(prisma.workflow.create.mock.calls[0]?.[0].data).toMatchObject({
+      overlapScope: "WORKTREE",
+      exclusiveWorktree: true,
+    });
+    expect(prisma.workflow.create.mock.calls[1]?.[0].data).toMatchObject({
+      overlapScope: "GLOBAL",
+      exclusiveWorktree: false,
+    });
+  });
+});
+
+describe("workflow queue admission", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    prisma.$transaction.mockImplementation(
+      async (
+        operation: unknown[] | ((transaction: typeof prisma) => unknown),
+      ) =>
+        typeof operation === "function"
+          ? operation(prisma)
+          : Promise.all(operation),
+    );
+    prisma.workflowRunEvent.findFirst.mockResolvedValue(null);
+    prisma.workflowRunEvent.create.mockResolvedValue({ id: "event-1" });
+    prisma.workflowRun.updateMany.mockResolvedValue({ count: 1 });
+    prisma.workflowStepAttempt.count.mockResolvedValue(0);
+    prisma.worktreeAdmissionLane.upsert.mockResolvedValue({});
+    prisma.worktreeWorkflowLease.deleteMany.mockResolvedValue({ count: 0 });
+    prisma.worktreeWorkflowLease.findUnique.mockResolvedValue(null);
+    prisma.worktreeWorkflowLease.create.mockResolvedValue({});
+    prisma.worktreeRunLease.deleteMany.mockResolvedValue({ count: 0 });
+    prisma.worktreeRunLease.count.mockResolvedValue(0);
+    prisma.workflowRun.findFirst.mockResolvedValue(null);
+    prisma.agentRun.findFirst.mockResolvedValue(null);
+  });
+
+  function internals(service: WorkflowsService) {
+    return service as unknown as Record<
+      string,
+      (...args: unknown[]) => Promise<unknown>
+    >;
+  }
+
+  function queuedRun(overrides: Record<string, unknown>) {
+    return {
+      id: "run-2",
+      workflowId: "workflow-1",
+      worktreeId: "worktree-2",
+      worktreeLeaseOwnerRunId: "run-2",
+      exclusiveWorktree: true,
+      parentRunId: null,
+      generation: 0,
+      startedAt: null,
+      queuedAt: new Date("2026-08-03T12:00:00.000Z"),
+      sessionDataJson: "{}",
+      workflow: {
+        overlapPolicy: "QUEUE",
+        overlapScope: "WORKTREE",
+        maxConcurrentRuns: 1,
+      },
+      version: {
+        definitionJson: JSON.stringify(emptyWorkflowDefinition("Commit")),
+      },
+      ...overrides,
+    };
+  }
+
+  test("starts a worktree-scoped run while the workflow runs on another worktree", async () => {
+    prisma.workflowRun.findMany.mockResolvedValue([queuedRun({})]);
+    // One run of this workflow is already going on worktree-1.
+    prisma.workflowRun.count.mockImplementation(
+      async ({ where }: { where: { worktreeId?: string } }) =>
+        where.worktreeId === "worktree-2" ? 0 : 1,
+    );
+    const service = new WorkflowsService(new WorkflowEventsService());
+
+    await internals(service).startQueuedRuns();
+
+    expect(prisma.workflowRun.count.mock.calls[0]?.[0].where).toMatchObject({
+      workflowId: "workflow-1",
+      worktreeId: "worktree-2",
+    });
+    expect(prisma.worktreeWorkflowLease.create).toHaveBeenCalledWith({
+      data: { worktreeId: "worktree-2", workflowRunId: "run-2" },
+    });
+    expect(prisma.workflowRun.updateMany).toHaveBeenCalledWith({
+      where: { id: "run-2", status: "QUEUED" },
+      data: expect.objectContaining({ status: "RUNNING" }),
+    });
+  });
+
+  test("holds a second worktree-scoped run queued on the worktree it shares", async () => {
+    prisma.workflowRun.findMany.mockResolvedValue([queuedRun({})]);
+    prisma.workflowRun.count.mockResolvedValue(1);
+    const service = new WorkflowsService(new WorkflowEventsService());
+
+    await internals(service).startQueuedRuns();
+
+    expect(prisma.worktreeWorkflowLease.create).not.toHaveBeenCalled();
+    expect(prisma.workflowRun.updateMany).not.toHaveBeenCalled();
+  });
+
+  test("counts a worktree-scoped run with no worktree against the runs that have none", async () => {
+    prisma.workflowRun.findMany.mockResolvedValue([
+      queuedRun({ worktreeId: null, worktreeLeaseOwnerRunId: null }),
+    ]);
+    prisma.workflowRun.count.mockResolvedValue(0);
+    const service = new WorkflowsService(new WorkflowEventsService());
+
+    await internals(service).startQueuedRuns();
+
+    expect(prisma.workflowRun.count.mock.calls[0]?.[0].where).toMatchObject({
+      worktreeId: null,
+    });
+    expect(prisma.workflowRun.updateMany).toHaveBeenCalledWith({
+      where: { id: "run-2", status: "QUEUED" },
+      data: expect.objectContaining({ status: "RUNNING" }),
+    });
+  });
+
+  test("keeps a globally scoped workflow serialized across worktrees", async () => {
+    prisma.workflowRun.findMany.mockResolvedValue([
+      queuedRun({
+        exclusiveWorktree: false,
+        worktreeLeaseOwnerRunId: null,
+        workflow: {
+          overlapPolicy: "QUEUE",
+          overlapScope: "GLOBAL",
+          maxConcurrentRuns: 1,
+        },
+      }),
+    ]);
+    prisma.workflowRun.count.mockResolvedValue(1);
+    const service = new WorkflowsService(new WorkflowEventsService());
+
+    await internals(service).startQueuedRuns();
+
+    expect(
+      prisma.workflowRun.count.mock.calls[0]?.[0].where,
+    ).not.toHaveProperty("worktreeId");
+    expect(prisma.workflowRun.updateMany).not.toHaveBeenCalled();
+  });
+
+  test("coalesces the latest trigger only within the run's own worktree", async () => {
+    const version = { id: "version-1", name: "Coalescing workflow" };
+    prisma.workflowRun.findUnique.mockResolvedValue(null);
+    prisma.workflowRun.findFirst.mockResolvedValue(null);
+    prisma.worktree.findUnique.mockResolvedValue({ id: "worktree-2" });
+    prisma.workflowRunNumberSequence.upsert.mockResolvedValue({ nextValue: 4 });
+    prisma.workflowRun.create.mockImplementation(
+      async ({ data }: { data: Record<string, unknown> }) => data,
+    );
+    const service = new WorkflowsService(new WorkflowEventsService());
+
+    await internals(service).createRunForTrigger(
+      {
+        id: "workflow-1",
+        overlapPolicy: "COALESCE_LATEST",
+        overlapScope: "WORKTREE",
+        activeVersion: version,
+      },
+      version,
+      null,
+      null,
+      "RESOURCE_MANUAL",
+      "WORKTREE:worktree-2",
+      { sessionData: { worktree: { id: "worktree-2" } } },
+      "idempotency-3",
+    );
+
+    expect(prisma.workflowRun.findFirst).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          workflowId: "workflow-1",
+          status: "QUEUED",
+          worktreeId: "worktree-2",
+        }),
+      }),
+    );
+  });
+});
+
 describe("workflow trigger interpolation", () => {
   beforeEach(() => vi.clearAllMocks());
 
@@ -1942,5 +2182,44 @@ describe("workflow run worktree tint", () => {
       await service.runWorktree(JSON.stringify({ codebase: { id: "code-1" } })),
     ).toBeNull();
     expect(prisma.worktree.findUnique).not.toHaveBeenCalled();
+  });
+});
+
+describe("workflow run agent", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  test("resolves the snapshotted agent from session data", async () => {
+    prisma.agent.findUnique.mockResolvedValue({
+      id: "agent-1",
+      name: "Studio Mac",
+    });
+    const service = new WorkflowsService(new WorkflowEventsService());
+
+    const agent = await service.runAgent(
+      JSON.stringify({ agent: { id: "agent-1" } }),
+    );
+
+    expect(prisma.agent.findUnique).toHaveBeenCalledWith({
+      where: { id: "agent-1" },
+    });
+    expect(agent).toMatchObject({ id: "agent-1", name: "Studio Mac" });
+    expect(prisma.worktree.findUnique).not.toHaveBeenCalled();
+  });
+
+  test("falls back to the worktree owner for older session data", async () => {
+    prisma.worktree.findUnique.mockResolvedValue({
+      codebase: { agent: { id: "agent-2", name: "Build Mac" } },
+    });
+    const service = new WorkflowsService(new WorkflowEventsService());
+
+    await expect(
+      service.runAgent(JSON.stringify({ worktree: { id: "worktree-1" } })),
+    ).resolves.toMatchObject({ id: "agent-2", name: "Build Mac" });
+    expect(prisma.worktree.findUnique).toHaveBeenCalledWith({
+      where: { id: "worktree-1" },
+      select: { codebase: { select: { agent: true } } },
+    });
   });
 });

@@ -92,7 +92,7 @@ type WorkflowDetail = WorkflowSummary & {
 };
 
 const DETAIL_FIELDS = `
-  id name description draftDefinition activeVersionId enabled overlapPolicy maxConcurrentRuns completionNotificationsEnabled exclusiveWorktree archivedAt quickActionKind quickActionIconKey quickActionButtonVariant
+  id name description draftDefinition activeVersionId enabled overlapPolicy overlapScope maxConcurrentRuns completionNotificationsEnabled exclusiveWorktree archivedAt quickActionKind quickActionIconKey quickActionButtonVariant
   hasPlainTrigger
   triggerChoices { key label description }
   quickActionRepositories { id name displayOrigin }
@@ -388,7 +388,7 @@ export function WorkflowDetailPage({ workflowId }: { workflowId: string }) {
         </Alert>
       )}
 
-      <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-5">
+      <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
         <Card>
           <CardHeader>
             <CardTitle>{t("publishedVersion")}</CardTitle>
@@ -411,23 +411,23 @@ export function WorkflowDetailPage({ workflowId }: { workflowId: string }) {
           <CardHeader>
             <CardTitle>{t("overlapPolicy")}</CardTitle>
           </CardHeader>
-          <CardContent>
+          <CardContent className="flex flex-wrap gap-1.5">
             <Badge variant="outline">
               {labels.overlapPolicy(workflow.overlapPolicy)}
             </Badge>
+            <Badge variant="outline">
+              {labels.overlapScope(workflow.overlapScope)}
+            </Badge>
+            {workflow.overlapPolicy === "CONCURRENT" && (
+              <Badge variant="outline">
+                {`${t("maxConcurrentRuns")}: ${workflow.maxConcurrentRuns}`}
+              </Badge>
+            )}
           </CardContent>
         </Card>
         <Card>
           <CardHeader>
-            <CardTitle>{t("maxConcurrentRuns")}</CardTitle>
-          </CardHeader>
-          <CardContent className="text-2xl font-semibold">
-            {workflow.maxConcurrentRuns}
-          </CardContent>
-        </Card>
-        <Card>
-          <CardHeader>
-            <CardTitle>{t("exclusiveWorktree")}</CardTitle>
+            <CardTitle>{t("worktreeReservation")}</CardTitle>
           </CardHeader>
           <CardContent>
             <Badge variant="outline">

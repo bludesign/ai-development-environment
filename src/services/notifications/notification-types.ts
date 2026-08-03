@@ -7,6 +7,7 @@ export const NOTIFICATION_TYPES = {
     defaultSidebarEnabled: true,
     defaultBrowserEnabled: true,
     defaultWebPushEnabled: false,
+    defaultApnsEnabled: true,
   },
   IOS_BUILD_FAILED: {
     key: "IOS_BUILD_FAILED",
@@ -16,6 +17,7 @@ export const NOTIFICATION_TYPES = {
     defaultSidebarEnabled: true,
     defaultBrowserEnabled: true,
     defaultWebPushEnabled: false,
+    defaultApnsEnabled: true,
   },
   COMMAND_RUN_SUCCEEDED: {
     key: "COMMAND_RUN_SUCCEEDED",
@@ -25,6 +27,7 @@ export const NOTIFICATION_TYPES = {
     defaultSidebarEnabled: true,
     defaultBrowserEnabled: true,
     defaultWebPushEnabled: false,
+    defaultApnsEnabled: true,
   },
   COMMAND_RUN_FAILED: {
     key: "COMMAND_RUN_FAILED",
@@ -34,6 +37,7 @@ export const NOTIFICATION_TYPES = {
     defaultSidebarEnabled: true,
     defaultBrowserEnabled: true,
     defaultWebPushEnabled: false,
+    defaultApnsEnabled: true,
   },
   GITHUB_ACTIONS_SUCCEEDED: {
     key: "GITHUB_ACTIONS_SUCCEEDED",
@@ -43,6 +47,7 @@ export const NOTIFICATION_TYPES = {
     defaultSidebarEnabled: true,
     defaultBrowserEnabled: true,
     defaultWebPushEnabled: false,
+    defaultApnsEnabled: true,
   },
   GITHUB_ACTIONS_FAILED: {
     key: "GITHUB_ACTIONS_FAILED",
@@ -52,6 +57,7 @@ export const NOTIFICATION_TYPES = {
     defaultSidebarEnabled: true,
     defaultBrowserEnabled: true,
     defaultWebPushEnabled: false,
+    defaultApnsEnabled: true,
   },
   RUN_NEEDS_ANSWER: {
     key: "RUN_NEEDS_ANSWER",
@@ -61,6 +67,7 @@ export const NOTIFICATION_TYPES = {
     defaultSidebarEnabled: true,
     defaultBrowserEnabled: true,
     defaultWebPushEnabled: false,
+    defaultApnsEnabled: true,
   },
   RUN_COMPLETED: {
     key: "RUN_COMPLETED",
@@ -70,6 +77,7 @@ export const NOTIFICATION_TYPES = {
     defaultSidebarEnabled: true,
     defaultBrowserEnabled: true,
     defaultWebPushEnabled: false,
+    defaultApnsEnabled: true,
   },
   RUN_FAILED: {
     key: "RUN_FAILED",
@@ -79,6 +87,7 @@ export const NOTIFICATION_TYPES = {
     defaultSidebarEnabled: true,
     defaultBrowserEnabled: true,
     defaultWebPushEnabled: false,
+    defaultApnsEnabled: true,
   },
   RUN_CANCELLED: {
     key: "RUN_CANCELLED",
@@ -88,6 +97,7 @@ export const NOTIFICATION_TYPES = {
     defaultSidebarEnabled: true,
     defaultBrowserEnabled: false,
     defaultWebPushEnabled: false,
+    defaultApnsEnabled: false,
   },
   RUN_RECOVERY_PAUSED: {
     key: "RUN_RECOVERY_PAUSED",
@@ -98,6 +108,7 @@ export const NOTIFICATION_TYPES = {
     defaultSidebarEnabled: true,
     defaultBrowserEnabled: true,
     defaultWebPushEnabled: false,
+    defaultApnsEnabled: true,
   },
   WORKFLOW_MESSAGE: {
     key: "WORKFLOW_MESSAGE",
@@ -107,6 +118,7 @@ export const NOTIFICATION_TYPES = {
     defaultSidebarEnabled: true,
     defaultBrowserEnabled: true,
     defaultWebPushEnabled: false,
+    defaultApnsEnabled: true,
   },
   WORKFLOW_NEEDS_ATTENTION: {
     key: "WORKFLOW_NEEDS_ATTENTION",
@@ -116,6 +128,7 @@ export const NOTIFICATION_TYPES = {
     defaultSidebarEnabled: true,
     defaultBrowserEnabled: true,
     defaultWebPushEnabled: false,
+    defaultApnsEnabled: true,
   },
   WORKFLOW_COMPLETED: {
     key: "WORKFLOW_COMPLETED",
@@ -125,6 +138,7 @@ export const NOTIFICATION_TYPES = {
     defaultSidebarEnabled: true,
     defaultBrowserEnabled: true,
     defaultWebPushEnabled: false,
+    defaultApnsEnabled: true,
   },
   WORKFLOW_FAILED: {
     key: "WORKFLOW_FAILED",
@@ -134,6 +148,7 @@ export const NOTIFICATION_TYPES = {
     defaultSidebarEnabled: true,
     defaultBrowserEnabled: true,
     defaultWebPushEnabled: false,
+    defaultApnsEnabled: true,
   },
   WORKFLOW_RECOVERY_PAUSED: {
     key: "WORKFLOW_RECOVERY_PAUSED",
@@ -143,6 +158,7 @@ export const NOTIFICATION_TYPES = {
     defaultSidebarEnabled: true,
     defaultBrowserEnabled: true,
     defaultWebPushEnabled: false,
+    defaultApnsEnabled: true,
   },
 } as const;
 

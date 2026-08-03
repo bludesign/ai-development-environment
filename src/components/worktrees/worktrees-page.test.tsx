@@ -395,9 +395,7 @@ describe("WorktreesPage", () => {
     expect(screen.getByText("Commits: 1")).toBeDefined();
     expect(screen.getByText("In sync")).toBeDefined();
     expect(screen.getByText("Latest build")).toBeDefined();
-    expect(
-      screen.getByRole("link", { name: "Build" }).getAttribute("href"),
-    ).toBe("/builds/build-1");
+    const latestBuildRow = screen.getByText("Latest build").parentElement!;
     expect(screen.getByText("Succeeded")).toBeDefined();
     expect(screen.getByText("Out of date")).toBeDefined();
     expect(screen.getByRole("button", { name: /1 devices/ })).toBeDefined();
@@ -405,10 +403,22 @@ describe("WorktreesPage", () => {
       (screen.getByRole("button", { name: "Run" }) as HTMLButtonElement)
         .disabled,
     ).toBe(false);
+    expect(
+      within(latestBuildRow).queryByRole("button", { name: "Rebuild" }),
+    ).toBeNull();
+    fireEvent.pointerDown(
+      within(latestBuildRow).getByRole("button", { name: "Build" }),
+      { button: 0, ctrlKey: false },
+    );
+    expect(
+      (
+        await screen.findByRole("menuitem", { name: "View build" })
+      ).getAttribute("href"),
+    ).toBe("/builds/build-1");
     request.mockResolvedValueOnce({
       rebuildBuild: { id: "build-rebuilt", status: "QUEUED" },
     } as never);
-    fireEvent.click(screen.getByRole("button", { name: "Rebuild" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Rebuild" }));
     await waitFor(() =>
       expect(request).toHaveBeenCalledWith(
         expect.stringContaining("mutation RebuildBuild"),
@@ -419,14 +429,21 @@ describe("WorktreesPage", () => {
       (screen.getByRole("button", { name: "Sync" }) as HTMLButtonElement)
         .disabled,
     ).toBe(true);
-    expect(
-      (screen.getByRole("button", { name: "Stash all" }) as HTMLButtonElement)
-        .disabled,
-    ).toBe(true);
-    expect(
-      (screen.getByRole("button", { name: "Stage all" }) as HTMLButtonElement)
-        .disabled,
-    ).toBe(true);
+    // Stash and stage moved behind the row's overflow menu.
+    fireEvent.pointerDown(screen.getByRole("button", { name: "More" }), {
+      button: 0,
+      ctrlKey: false,
+    });
+    for (const name of ["Stash all", "Stage all"]) {
+      expect(
+        (await screen.findByRole("menuitem", { name })).hasAttribute(
+          "data-disabled",
+        ),
+      ).toBe(true);
+    }
+    fireEvent.keyDown(document.activeElement ?? document.body, {
+      key: "Escape",
+    });
     const card = screen
       .getByRole("button", { name: "feature/AIDE-24" })
       .closest('[data-slot="card"]');
@@ -587,9 +604,11 @@ describe("WorktreesPage", () => {
 
     const menuItems = screen.getAllByRole("menuitem");
     expect(
-      menuItems.slice(0, 4).map((item) => item.textContent?.trim()),
+      menuItems.slice(0, 6).map((item) => item.textContent?.trim()),
     ).toEqual([
       "Change branch",
+      "Commit",
+      "Open in VS Code",
       "View codebase",
       "View repository",
       "Refresh pull request",
@@ -605,6 +624,72 @@ describe("WorktreesPage", () => {
       expect(request).toHaveBeenCalledWith(
         expect.stringContaining("mutation RefreshWorktreePullRequest"),
         { id: "worktree-1" },
+      ),
+    );
+  });
+
+  test("starts a session or plan on the card's own worktree", async () => {
+    render(<WorktreesPage />);
+    await screen.findByText("feature/AIDE-24");
+
+    expect(
+      screen.getByRole("link", { name: "New session" }).getAttribute("href"),
+    ).toBe("/runs/new?kind=session&worktree=worktree-1");
+    expect(
+      screen.getByRole("link", { name: "New plan" }).getAttribute("href"),
+    ).toBe("/runs/new?kind=plan&worktree=worktree-1");
+  });
+
+  test("does not link to a new run from an unavailable worktree", async () => {
+    const response = (await request("query Fixture")) as unknown as {
+      worktreeOverview: WorktreeOverview;
+    };
+    response.worktreeOverview.agents[0]!.codebases[0]!.worktrees[0]!.availability =
+      "MISSING";
+    request.mockClear();
+
+    render(<WorktreesPage />);
+    await screen.findByText("feature/AIDE-24");
+
+    expect(screen.queryByRole("link", { name: "New session" })).toBeNull();
+    expect(screen.queryByRole("link", { name: "New plan" })).toBeNull();
+    expect(
+      (screen.getByRole("button", { name: "New session" }) as HTMLButtonElement)
+        .disabled,
+    ).toBe(true);
+    expect(
+      (screen.getByRole("button", { name: "New plan" }) as HTMLButtonElement)
+        .disabled,
+    ).toBe(true);
+  });
+
+  test("pulls the branch onto its upstream", async () => {
+    const response = (await request("query Fixture")) as unknown as {
+      worktreeOverview: WorktreeOverview;
+    };
+    const worktree =
+      response.worktreeOverview.agents[0]!.codebases[0]!.worktrees[0]!;
+    worktree.upstream = "origin/feature/AIDE-24";
+    worktree.behind = 2;
+    request.mockClear();
+
+    render(<WorktreesPage />);
+    await screen.findByText("feature/AIDE-24");
+    request.mockResolvedValueOnce({
+      runWorktreeOperation: { id: "job-1" },
+    } as never);
+    fireEvent.click(screen.getByRole("button", { name: "Pull" }));
+
+    await waitFor(() =>
+      expect(request).toHaveBeenCalledWith(
+        expect.stringContaining("mutation RunWorktreeOperation"),
+        {
+          input: {
+            worktreeId: "worktree-1",
+            operation: "PULL",
+            requestId: expect.any(String),
+          },
+        },
       ),
     );
   });
@@ -769,15 +854,26 @@ describe("WorktreesPage", () => {
   test("uses shadcn items and an empty state in the hidden worktrees dialog", async () => {
     render(<WorktreesPage />);
     await screen.findByText("feature/AIDE-24");
-    request.mockResolvedValueOnce({
-      hiddenWorktrees: [
-        {
-          id: "hidden-1",
-          branch: "feature/hidden",
-          folder: "/workspaces/hidden",
-        },
-      ],
-    } as never);
+    const overviewResponse = await request.mock.results[0]?.value;
+    // The card's quick actions load their runs on a timer, so a queued `once`
+    // response can land on that request instead of the dialog's. Answering by
+    // operation keeps the dialog's data off the call order.
+    let hidden = [
+      {
+        id: "hidden-1",
+        branch: "feature/hidden",
+        folder: "/workspaces/hidden",
+      },
+    ];
+    request.mockImplementation(async (query) => {
+      if (query.includes("query HiddenWorktrees"))
+        return { hiddenWorktrees: hidden } as never;
+      if (query.includes("mutation PurgeHidden")) {
+        hidden = [];
+        return { purgeHiddenWorktree: true } as never;
+      }
+      return overviewResponse as never;
+    });
 
     fireEvent.click(screen.getByRole("button", { name: "Hidden (0)" }));
     const dialog = await screen.findByRole("dialog", {
@@ -789,8 +885,6 @@ describe("WorktreesPage", () => {
       ),
     ).not.toBeNull();
 
-    request.mockResolvedValueOnce({ purgeHiddenWorktree: true } as never);
-    request.mockResolvedValueOnce({ hiddenWorktrees: [] } as never);
     fireEvent.click(within(dialog).getByRole("button", { name: "Purge" }));
 
     const emptyMessage = await within(dialog).findByText(
@@ -924,7 +1018,10 @@ describe("WorktreesPage", () => {
     const detail = screen.getByTestId("worktree-detail");
     expect(detail.className).toContain("space-y-4");
     expect(detail.className).not.toContain("grid-cols-2");
-    expect(screen.getByText("Keep worktree details compact")).toBeDefined();
+    const commitMessage = screen.getByText("Keep worktree details compact");
+    expect(commitMessage.className).toContain("whitespace-normal");
+    expect(commitMessage.className).toContain("break-words");
+    expect(commitMessage.className).not.toContain("truncate");
     expect(
       screen.getByTitle("src/components/worktrees/worktrees-page.tsx"),
     ).toBeDefined();

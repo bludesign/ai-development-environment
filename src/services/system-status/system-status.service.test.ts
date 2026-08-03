@@ -144,6 +144,36 @@ describe("SystemStatusService", () => {
     });
   });
 
+  test("polls without collecting when collection is disabled", async () => {
+    vi.stubEnv("SIDEBAR_USAGE_COLLECTION_DISABLED", "true");
+    getPrismaClient.mockResolvedValue({
+      ccusageCollection: { findMany: vi.fn().mockResolvedValue([]) },
+    });
+    const collect = vi.fn();
+    const polling = {
+      register: vi.fn(),
+      schedule: vi.fn(),
+      run: vi.fn(async (_id: string, work: () => Promise<unknown>) => {
+        await work();
+      }),
+    } as unknown as PollingService;
+    const { ccusage, diskSpace } = dependencies();
+    (ccusage as unknown as { collect: unknown }).collect = collect;
+    const service = new SystemStatusService(ccusage, diskSpace, polling);
+
+    service.startRuntime();
+
+    // The operation still reports on its own cadence, so the Polling page
+    // describes it the way a real deployment sees it.
+    expect(polling.register).toHaveBeenCalledWith(
+      expect.objectContaining({ id: "sidebar-usage", enabled: true }),
+    );
+    await vi.waitFor(() => expect(polling.run).toHaveBeenCalledOnce());
+    expect(collect).not.toHaveBeenCalled();
+    service.stopRuntime();
+    vi.unstubAllEnvs();
+  });
+
   test("starts polling when interrupted-collection cleanup fails", async () => {
     const cleanupError = new Error("CcusageCollection table does not exist");
     getPrismaClient.mockResolvedValue({

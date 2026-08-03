@@ -60,8 +60,11 @@ import {
 import { Empty, EmptyHeader, EmptyTitle } from "@/components/ui/empty";
 import {
   Field,
+  FieldDescription,
   FieldGroup,
   FieldLabel,
+  FieldLegend,
+  FieldSet,
   FieldTitle,
 } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
@@ -164,7 +167,7 @@ const CATALOG_QUERY = `
       triggers { kind category label description details configSchema capabilityFlags seedPaths sourceHandles }
     }
     workflow(id: $id) {
-      id name description draftDefinition activeVersionId enabled overlapPolicy maxConcurrentRuns completionNotificationsEnabled exclusiveWorktree archivedAt
+      id name description draftDefinition activeVersionId enabled overlapPolicy overlapScope maxConcurrentRuns completionNotificationsEnabled exclusiveWorktree archivedAt
       versionCount runCount createdAt updatedAt
     }
   }
@@ -332,6 +335,7 @@ function WorkflowEditorInner({ workflowId }: { workflowId?: string | null }) {
   const [notice, setNotice] = useState<string | null>(null);
   const [diagnostics, setDiagnostics] = useState<WorkflowDiagnostic[]>([]);
   const [overlapPolicy, setOverlapPolicy] = useState("QUEUE");
+  const [overlapScope, setOverlapScope] = useState("WORKTREE");
   const [maxConcurrentRuns, setMaxConcurrentRuns] = useState(1);
   const [completionNotificationsEnabled, setCompletionNotificationsEnabled] =
     useState(true);
@@ -389,6 +393,7 @@ function WorkflowEditorInner({ workflowId }: { workflowId?: string | null }) {
         setWorkflow(data.workflow);
         setDefinition(next);
         setOverlapPolicy(data.workflow?.overlapPolicy ?? "QUEUE");
+        setOverlapScope(data.workflow?.overlapScope ?? "WORKTREE");
         setMaxConcurrentRuns(data.workflow?.maxConcurrentRuns ?? 1);
         setCompletionNotificationsEnabled(
           data.workflow?.completionNotificationsEnabled ?? true,
@@ -664,7 +669,7 @@ function WorkflowEditorInner({ workflowId }: { workflowId?: string | null }) {
         }>(
           `mutation SaveWorkflow($input: SaveWorkflowDraftInput!) {
             saveWorkflowDraft(input: $input) {
-              id name description draftDefinition activeVersionId enabled overlapPolicy maxConcurrentRuns completionNotificationsEnabled exclusiveWorktree archivedAt
+              id name description draftDefinition activeVersionId enabled overlapPolicy overlapScope maxConcurrentRuns completionNotificationsEnabled exclusiveWorktree archivedAt
               versionCount runCount createdAt updatedAt
             }
           }`,
@@ -673,6 +678,7 @@ function WorkflowEditorInner({ workflowId }: { workflowId?: string | null }) {
               id: workflow.id,
               definition: next,
               overlapPolicy,
+              overlapScope,
               maxConcurrentRuns,
               completionNotificationsEnabled,
               exclusiveWorktree,
@@ -688,7 +694,7 @@ function WorkflowEditorInner({ workflowId }: { workflowId?: string | null }) {
         }>(
           `mutation CreateWorkflow($input: CreateWorkflowInput!) {
             createWorkflow(input: $input) {
-              id name description draftDefinition activeVersionId enabled overlapPolicy maxConcurrentRuns completionNotificationsEnabled exclusiveWorktree archivedAt
+              id name description draftDefinition activeVersionId enabled overlapPolicy overlapScope maxConcurrentRuns completionNotificationsEnabled exclusiveWorktree archivedAt
               versionCount runCount createdAt updatedAt
             }
           }`,
@@ -698,6 +704,7 @@ function WorkflowEditorInner({ workflowId }: { workflowId?: string | null }) {
               description: next.description,
               definition: next,
               overlapPolicy,
+              overlapScope,
               maxConcurrentRuns,
               completionNotificationsEnabled,
               exclusiveWorktree,
@@ -780,6 +787,7 @@ function WorkflowEditorInner({ workflowId }: { workflowId?: string | null }) {
             description: definition.description,
             definition: { ...definition, name: `${definition.name} copy` },
             overlapPolicy,
+            overlapScope,
             maxConcurrentRuns,
             completionNotificationsEnabled,
             exclusiveWorktree,
@@ -808,6 +816,7 @@ function WorkflowEditorInner({ workflowId }: { workflowId?: string | null }) {
               name: definition.name,
               description: definition.description,
               overlapPolicy,
+              overlapScope,
               maxConcurrentRuns,
               completionNotificationsEnabled,
               exclusiveWorktree,
@@ -1382,165 +1391,227 @@ function WorkflowEditorInner({ workflowId }: { workflowId?: string | null }) {
       </div>
 
       <Dialog onOpenChange={setSettingsOpen} open={settingsOpen}>
-        <DialogContent>
+        <DialogContent className="sm:max-w-2xl">
           <DialogHeader>
             <DialogTitle>{t("workflowSettings")}</DialogTitle>
             <DialogDescription>{t("editorDescription")}</DialogDescription>
           </DialogHeader>
-          <FieldGroup className="gap-3">
-            <Field>
-              <FieldLabel htmlFor="workflow-name">{t("name")}</FieldLabel>
-              <Input
-                id="workflow-name"
-                onChange={(event) =>
-                  setDefinition((current) => ({
-                    ...current,
-                    name: event.target.value,
-                  }))
-                }
-                value={definition.name}
-              />
-            </Field>
-            <Field>
-              <FieldLabel htmlFor="workflow-description">
-                {t("description")}
-              </FieldLabel>
-              <Textarea
-                id="workflow-description"
-                onChange={(event) =>
-                  setDefinition((current) => ({
-                    ...current,
-                    description: event.target.value,
-                  }))
-                }
-                value={definition.description}
-              />
-            </Field>
-            <Field>
-              <FieldLabel htmlFor="workflow-overlap-policy">
-                {t("overlapPolicy")}
-              </FieldLabel>
-              <Select onValueChange={setOverlapPolicy} value={overlapPolicy}>
-                <SelectTrigger className="w-full" id="workflow-overlap-policy">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="QUEUE">{t("overlap.QUEUE")}</SelectItem>
-                  <SelectItem value="CONCURRENT">
-                    {t("overlap.CONCURRENT")}
-                  </SelectItem>
-                  <SelectItem value="COALESCE_LATEST">
-                    {t("overlap.COALESCE_LATEST")}
-                  </SelectItem>
-                </SelectContent>
-              </Select>
-            </Field>
-            <Field>
-              <FieldLabel htmlFor="workflow-display-layout">
-                {t("displayLayout")}
-              </FieldLabel>
-              <Select
-                onValueChange={(value) => {
-                  const displayLayout = value as WorkflowDisplayLayout;
-                  commitDefinition({
-                    ...definition,
-                    editor: { ...definition.editor, displayLayout },
-                  });
-                  if (displayLayout === "REGULAR") {
-                    setBasicPreview(false);
-                    setPreviewSelectedId(null);
-                  }
-                }}
-                value={displayLayout}
-              >
-                <SelectTrigger className="w-full" id="workflow-display-layout">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="REGULAR">
-                    {t("displayLayouts.REGULAR")}
-                  </SelectItem>
-                  <SelectItem value="BASIC">
-                    {t("displayLayouts.BASIC")}
-                  </SelectItem>
-                </SelectContent>
-              </Select>
-              <p className="text-xs text-muted-foreground">
-                {t(`displayLayoutHelp.${displayLayout}`)}
-              </p>
-            </Field>
-            <Field>
-              <FieldLabel htmlFor="workflow-handle-layout">
-                {t("connectorLayout")}
-              </FieldLabel>
-              <Select
-                onValueChange={(value) =>
-                  commitDefinition({
-                    ...definition,
-                    editor: {
-                      ...definition.editor,
-                      handleLayout: value as WorkflowHandleLayout,
-                    },
-                  })
-                }
-                value={definition.editor.handleLayout ?? "SIDES"}
-              >
-                <SelectTrigger className="w-full" id="workflow-handle-layout">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="SIDES">
-                    {t("connectorLayouts.SIDES")}
-                  </SelectItem>
-                  <SelectItem value="TOP_BOTTOM">
-                    {t("connectorLayouts.TOP_BOTTOM")}
-                  </SelectItem>
-                </SelectContent>
-              </Select>
-            </Field>
-            <Field>
-              <FieldLabel htmlFor="workflow-concurrency">
-                {t("maxConcurrentRuns")}
-              </FieldLabel>
-              <Input
-                id="workflow-concurrency"
-                max={32}
-                min={1}
-                onChange={(event) =>
-                  setMaxConcurrentRuns(Number(event.target.value))
-                }
-                type="number"
-                value={maxConcurrentRuns}
-              />
-            </Field>
-            <Field>
-              <label className="flex items-center gap-2 text-sm">
-                <Checkbox
-                  checked={exclusiveWorktree}
-                  onCheckedChange={(checked) =>
-                    setExclusiveWorktree(checked === true)
-                  }
-                />
-                {t("exclusiveWorktree")}
-              </label>
-              <p className="text-xs text-muted-foreground">
-                {t("exclusiveWorktreeHelp")}
-              </p>
-            </Field>
-            <Field>
-              <label className="flex items-center gap-2 text-sm">
-                <Checkbox
-                  checked={completionNotificationsEnabled}
-                  onCheckedChange={(checked) =>
-                    setCompletionNotificationsEnabled(checked === true)
-                  }
-                />
-                {t("completionNotifications")}
-              </label>
-              <p className="text-xs text-muted-foreground">
-                {t("completionNotificationsHelp")}
-              </p>
-            </Field>
+          <FieldGroup className="gap-5">
+            <FieldSet>
+              <FieldLegend variant="label">{t("detailsSection")}</FieldLegend>
+              <FieldGroup className="gap-3">
+                <Field>
+                  <FieldLabel htmlFor="workflow-name">{t("name")}</FieldLabel>
+                  <Input
+                    id="workflow-name"
+                    onChange={(event) =>
+                      setDefinition((current) => ({
+                        ...current,
+                        name: event.target.value,
+                      }))
+                    }
+                    value={definition.name}
+                  />
+                </Field>
+                <Field>
+                  <FieldLabel htmlFor="workflow-description">
+                    {t("description")}
+                  </FieldLabel>
+                  <Textarea
+                    id="workflow-description"
+                    onChange={(event) =>
+                      setDefinition((current) => ({
+                        ...current,
+                        description: event.target.value,
+                      }))
+                    }
+                    value={definition.description}
+                  />
+                </Field>
+              </FieldGroup>
+            </FieldSet>
+            <FieldSet>
+              <FieldLegend variant="label">{t("runningSection")}</FieldLegend>
+              <FieldDescription>{t("runningSectionHelp")}</FieldDescription>
+              <FieldGroup className="gap-3">
+                <Field>
+                  <FieldLabel htmlFor="workflow-overlap-policy">
+                    {t("overlapPolicy")}
+                  </FieldLabel>
+                  <Select
+                    onValueChange={setOverlapPolicy}
+                    value={overlapPolicy}
+                  >
+                    <SelectTrigger
+                      className="w-full"
+                      id="workflow-overlap-policy"
+                    >
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="QUEUE">
+                        {t("overlap.QUEUE")}
+                      </SelectItem>
+                      <SelectItem value="CONCURRENT">
+                        {t("overlap.CONCURRENT")}
+                      </SelectItem>
+                      <SelectItem value="COALESCE_LATEST">
+                        {t("overlap.COALESCE_LATEST")}
+                      </SelectItem>
+                    </SelectContent>
+                  </Select>
+                  <FieldDescription>
+                    {t(`overlapHelp.${overlapPolicy}`)}
+                  </FieldDescription>
+                </Field>
+                {overlapPolicy === "CONCURRENT" && (
+                  <Field>
+                    <FieldLabel htmlFor="workflow-concurrency">
+                      {t("maxConcurrentRuns")}
+                    </FieldLabel>
+                    <Input
+                      id="workflow-concurrency"
+                      max={32}
+                      min={1}
+                      onChange={(event) =>
+                        setMaxConcurrentRuns(Number(event.target.value))
+                      }
+                      type="number"
+                      value={maxConcurrentRuns}
+                    />
+                    <FieldDescription>
+                      {t("maxConcurrentRunsHelp")}
+                    </FieldDescription>
+                  </Field>
+                )}
+                <Field>
+                  <FieldLabel htmlFor="workflow-overlap-scope">
+                    {t("overlapScope")}
+                  </FieldLabel>
+                  <Select onValueChange={setOverlapScope} value={overlapScope}>
+                    <SelectTrigger
+                      className="w-full"
+                      id="workflow-overlap-scope"
+                    >
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="WORKTREE">
+                        {t("overlapScopes.WORKTREE")}
+                      </SelectItem>
+                      <SelectItem value="GLOBAL">
+                        {t("overlapScopes.GLOBAL")}
+                      </SelectItem>
+                    </SelectContent>
+                  </Select>
+                  <FieldDescription>
+                    {t(`overlapScopeHelp.${overlapScope}`)}
+                  </FieldDescription>
+                </Field>
+                <Field>
+                  <label className="flex items-center gap-2 text-sm">
+                    <Checkbox
+                      checked={exclusiveWorktree}
+                      onCheckedChange={(checked) =>
+                        setExclusiveWorktree(checked === true)
+                      }
+                    />
+                    {t("exclusiveWorktree")}
+                  </label>
+                  <FieldDescription>
+                    {t("exclusiveWorktreeHelp")}
+                  </FieldDescription>
+                </Field>
+                <Field>
+                  <label className="flex items-center gap-2 text-sm">
+                    <Checkbox
+                      checked={completionNotificationsEnabled}
+                      onCheckedChange={(checked) =>
+                        setCompletionNotificationsEnabled(checked === true)
+                      }
+                    />
+                    {t("completionNotifications")}
+                  </label>
+                  <FieldDescription>
+                    {t("completionNotificationsHelp")}
+                  </FieldDescription>
+                </Field>
+              </FieldGroup>
+            </FieldSet>
+            <FieldSet>
+              <FieldLegend variant="label">{t("canvasSection")}</FieldLegend>
+              <FieldGroup className="gap-3">
+                <Field>
+                  <FieldLabel htmlFor="workflow-display-layout">
+                    {t("displayLayout")}
+                  </FieldLabel>
+                  <Select
+                    onValueChange={(value) => {
+                      const displayLayout = value as WorkflowDisplayLayout;
+                      commitDefinition({
+                        ...definition,
+                        editor: { ...definition.editor, displayLayout },
+                      });
+                      if (displayLayout === "REGULAR") {
+                        setBasicPreview(false);
+                        setPreviewSelectedId(null);
+                      }
+                    }}
+                    value={displayLayout}
+                  >
+                    <SelectTrigger
+                      className="w-full"
+                      id="workflow-display-layout"
+                    >
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="REGULAR">
+                        {t("displayLayouts.REGULAR")}
+                      </SelectItem>
+                      <SelectItem value="BASIC">
+                        {t("displayLayouts.BASIC")}
+                      </SelectItem>
+                    </SelectContent>
+                  </Select>
+                  <FieldDescription>
+                    {t(`displayLayoutHelp.${displayLayout}`)}
+                  </FieldDescription>
+                </Field>
+                <Field>
+                  <FieldLabel htmlFor="workflow-handle-layout">
+                    {t("connectorLayout")}
+                  </FieldLabel>
+                  <Select
+                    onValueChange={(value) =>
+                      commitDefinition({
+                        ...definition,
+                        editor: {
+                          ...definition.editor,
+                          handleLayout: value as WorkflowHandleLayout,
+                        },
+                      })
+                    }
+                    value={definition.editor.handleLayout ?? "SIDES"}
+                  >
+                    <SelectTrigger
+                      className="w-full"
+                      id="workflow-handle-layout"
+                    >
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="SIDES">
+                        {t("connectorLayouts.SIDES")}
+                      </SelectItem>
+                      <SelectItem value="TOP_BOTTOM">
+                        {t("connectorLayouts.TOP_BOTTOM")}
+                      </SelectItem>
+                    </SelectContent>
+                  </Select>
+                </Field>
+              </FieldGroup>
+            </FieldSet>
             <Button
               className="w-full"
               onClick={() => void validate()}

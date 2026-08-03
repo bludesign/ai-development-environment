@@ -68,8 +68,11 @@ import {
 
 import {
   APP_NOTIFICATION_FIELDS,
+  NOTIFICATION_DEVICE_FIELDS,
   type AppNotificationView,
+  type NotificationApnsStateView,
   type NotificationChangeView,
+  type NotificationDeviceView,
   type NotificationPreferenceView,
   type WebPushStateView,
   type WebPushSubscriptionView,
@@ -77,10 +80,18 @@ import {
 
 const PAGE_SIZE = 100;
 const PREFERENCE_FIELDS = `
-  key category label description sidebarEnabled browserEnabled webPushEnabled updatedAt
+  key category label description sidebarEnabled browserEnabled webPushEnabled apnsEnabled
+  updatedAt
 `;
 
 type TimeRange = { key: string; start: string; end: string };
+
+const CHANNEL_LABEL_KEYS = {
+  sidebarEnabled: "sidebarChannel",
+  browserEnabled: "browserChannel",
+  webPushEnabled: "pushChannel",
+  apnsEnabled: "apnsChannel",
+} as const;
 
 /**
  * The table runs edge to edge inside its card, so its outer columns reproduce
@@ -186,6 +197,12 @@ export function NotificationsPage() {
   const [webPushSubscriptions, setWebPushSubscriptions] = useState<
     WebPushSubscriptionView[]
   >([]);
+  const [apnsState, setApnsState] = useState<NotificationApnsStateView | null>(
+    null,
+  );
+  const [devices, setDevices] = useState<NotificationDeviceView[]>([]);
+  const [deviceBusy, setDeviceBusy] = useState<string | null>(null);
+  const [testedDevice, setTestedDevice] = useState<string | null>(null);
   const [nextCursor, setNextCursor] = useState<string | null>(null);
   const [totalCount, setTotalCount] = useState(0);
   const [loading, setLoading] = useState(true);
@@ -224,6 +241,8 @@ export function NotificationsPage() {
         notificationPreferences: NotificationPreferenceView[];
         webPushState: WebPushStateView;
         webPushSubscriptions: WebPushSubscriptionView[];
+        notificationApnsState?: NotificationApnsStateView;
+        notificationDevices?: NotificationDeviceView[];
       }>(`query NotificationsPage {
         notifications(first: ${PAGE_SIZE}) {
           items { ${APP_NOTIFICATION_FIELDS} }
@@ -234,6 +253,8 @@ export function NotificationsPage() {
         webPushSubscriptions {
           id endpoint expirationTime locale userAgent lastSeenAt createdAt updatedAt
         }
+        notificationApnsState { configured deviceCount }
+        notificationDevices { ${NOTIFICATION_DEVICE_FIELDS} }
       }`);
       setNotifications(data.notifications.items);
       setNextCursor(data.notifications.nextCursor);
@@ -241,6 +262,10 @@ export function NotificationsPage() {
       setPreferences(data.notificationPreferences);
       setWebPushState(data.webPushState);
       setWebPushSubscriptions(data.webPushSubscriptions);
+      // Tolerated as absent so the page still renders against a control plane that predates the
+      // native channel rather than blanking out on a missing field.
+      setApnsState(data.notificationApnsState ?? null);
+      setDevices(data.notificationDevices ?? []);
       setError(null);
     } catch (value) {
       setError(value instanceof Error ? value.message : String(value));
@@ -325,7 +350,8 @@ export function NotificationsPage() {
           } else if (
             change.kind === "DELETED" ||
             change.kind === "HISTORY_CLEARED" ||
-            change.kind === "PREFERENCES_UPDATED"
+            change.kind === "PREFERENCES_UPDATED" ||
+            change.kind === "DEVICES_CHANGED"
           ) {
             void refresh();
           }
@@ -523,7 +549,8 @@ export function NotificationsPage() {
 
   const updatePreference = async (
     preference: NotificationPreferenceView,
-    channel: "sidebarEnabled" | "browserEnabled" | "webPushEnabled",
+    channel:
+      "sidebarEnabled" | "browserEnabled" | "webPushEnabled" | "apnsEnabled",
     enabled: boolean,
   ) => {
     const next = { ...preference, [channel]: enabled };
@@ -544,6 +571,7 @@ export function NotificationsPage() {
             sidebarEnabled: next.sidebarEnabled,
             browserEnabled: next.browserEnabled,
             webPushEnabled: next.webPushEnabled,
+            apnsEnabled: next.apnsEnabled,
           },
         },
       );
@@ -730,6 +758,51 @@ export function NotificationsPage() {
       await refresh();
     } finally {
       setSubscriptionBusy(null);
+    }
+  };
+
+  const testDevice = async (id: string) => {
+    setDeviceBusy(`test:${id}`);
+    setTestedDevice(null);
+    try {
+      await controlPlaneRequest(
+        `mutation TestNotificationDevice($id: ID!) {
+          testNotificationDevice(id: $id)
+        }`,
+        { id },
+      );
+      setTestedDevice(id);
+      setError(null);
+    } catch (value) {
+      setError(value instanceof Error ? value.message : String(value));
+      await refresh();
+    } finally {
+      setDeviceBusy(null);
+    }
+  };
+
+  const deleteDevice = async (id: string) => {
+    setDeviceBusy(`delete:${id}`);
+    try {
+      await controlPlaneRequest(
+        `mutation DeleteNotificationDevice($id: ID!) {
+          deleteNotificationDevice(id: $id)
+        }`,
+        { id },
+      );
+      setDevices((current) => current.filter((entry) => entry.id !== id));
+      setApnsState((current) =>
+        current
+          ? { ...current, deviceCount: Math.max(0, current.deviceCount - 1) }
+          : current,
+      );
+      setTestedDevice((current) => (current === id ? null : current));
+      setError(null);
+    } catch (value) {
+      setError(value instanceof Error ? value.message : String(value));
+      await refresh();
+    } finally {
+      setDeviceBusy(null);
     }
   };
 
@@ -1015,6 +1088,11 @@ export function NotificationsPage() {
                                     {t("pushChannel")}
                                   </Badge>
                                 )}
+                                {notification.apnsRequested && (
+                                  <Badge variant="outline">
+                                    {t("apnsChannel")}
+                                  </Badge>
+                                )}
                               </div>
                             </TableCell>
                             <TableCell
@@ -1135,6 +1213,39 @@ export function NotificationsPage() {
                 </div>
               </div>
 
+              {/*
+               * The native channel has no switch here: a device opts itself in from the iOS
+               * app's own notification preferences, so this reports what the server can see.
+               */}
+              <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border p-3">
+                <div>
+                  <p className="font-medium">{t("nativeApns")}</p>
+                  <p className="text-xs text-muted-foreground">
+                    {!apnsState?.configured
+                      ? t("apnsNotConfigured")
+                      : apnsState.deviceCount === 0
+                        ? t("apnsNoDevices")
+                        : t("apnsReady")}
+                  </p>
+                  {apnsState && apnsState.deviceCount > 0 && (
+                    <p className="mt-1 text-[11px] text-muted-foreground">
+                      {t("deviceCount", { count: apnsState.deviceCount })}
+                    </p>
+                  )}
+                </div>
+                {apnsState?.configured ? (
+                  apnsState.deviceCount > 0 && (
+                    <Badge className="border-emerald-500/30 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300">
+                      <CheckCircle2 /> {t("enabled")}
+                    </Badge>
+                  )
+                ) : (
+                  <Button asChild size="sm" type="button" variant="outline">
+                    <Link href="/settings">{t("configureApns")}</Link>
+                  </Button>
+                )}
+              </div>
+
               {isIos && !isStandalone && (
                 <Alert>
                   <AlertDescription>{t("iosInstallHelp")}</AlertDescription>
@@ -1164,6 +1275,9 @@ export function NotificationsPage() {
                     <TableHead className="w-24 text-center">
                       {t("pushChannel")}
                     </TableHead>
+                    <TableHead className="w-24 text-center">
+                      {t("apnsChannel")}
+                    </TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
@@ -1172,7 +1286,7 @@ export function NotificationsPage() {
                       <TableRow className="bg-muted/20 hover:bg-muted/20">
                         <TableCell
                           className="py-1.5 pl-4 text-xs font-medium text-muted-foreground"
-                          colSpan={4}
+                          colSpan={5}
                         >
                           {t(`categories.${category}`)}
                         </TableCell>
@@ -1192,6 +1306,7 @@ export function NotificationsPage() {
                               "sidebarEnabled",
                               "browserEnabled",
                               "webPushEnabled",
+                              "apnsEnabled",
                             ] as const
                           ).map((channel) => (
                             <TableCell
@@ -1200,13 +1315,7 @@ export function NotificationsPage() {
                             >
                               <Checkbox
                                 aria-label={t("toggleChannel", {
-                                  channel: t(
-                                    channel === "sidebarEnabled"
-                                      ? "sidebarChannel"
-                                      : channel === "browserEnabled"
-                                        ? "browserChannel"
-                                        : "pushChannel",
-                                  ),
+                                  channel: t(CHANNEL_LABEL_KEYS[channel]),
                                   type: t(`types.${preference.key}.title`),
                                 })}
                                 checked={preference[channel]}
@@ -1345,6 +1454,131 @@ export function NotificationsPage() {
                                     ),
                                   })}
                                   disabled={subscriptionBusy !== null}
+                                  size="icon-sm"
+                                  title={t("remove")}
+                                  type="button"
+                                  variant="ghost"
+                                >
+                                  {deleting ? <Spinner /> : <Trash2 />}
+                                </Button>
+                              }
+                            />
+                          </div>
+                        </TableCell>
+                      </TableRow>
+                    );
+                  })
+                )}
+              </TableBody>
+            </Table>
+          </Card>
+
+          <Card className="gap-0 overflow-hidden py-0">
+            <CardHeader className="border-b">
+              <div className="flex flex-wrap items-start justify-between gap-3">
+                <div>
+                  <CardTitle>{t("registeredDevices")}</CardTitle>
+                  <CardDescription>
+                    {t("registeredDevicesDescription")}
+                  </CardDescription>
+                </div>
+                <Badge variant="outline">
+                  {t("deviceCount", { count: devices.length })}
+                </Badge>
+              </div>
+            </CardHeader>
+            <Table>
+              <TableHeader>
+                <TableRow className="hover:bg-transparent">
+                  <TableHead className="pl-4">{t("device")}</TableHead>
+                  <TableHead>{t("appVersion")}</TableHead>
+                  <TableHead>{t("environment")}</TableHead>
+                  <TableHead>{t("lastRegistered")}</TableHead>
+                  <TableHead className="pr-4 text-right">
+                    {t("actions")}
+                  </TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {devices.length === 0 ? (
+                  <TableRow>
+                    <TableCell
+                      className="py-10 text-center text-muted-foreground"
+                      colSpan={5}
+                    >
+                      {t("noRegisteredDevices")}
+                    </TableCell>
+                  </TableRow>
+                ) : (
+                  devices.map((entry) => {
+                    const testing = deviceBusy === `test:${entry.id}`;
+                    const deleting = deviceBusy === `delete:${entry.id}`;
+                    const tested = testedDevice === entry.id;
+                    return (
+                      <TableRow key={entry.id}>
+                        <TableCell className="max-w-sm pl-4">
+                          <div className="flex items-center gap-2">
+                            <span className="font-medium">
+                              {entry.displayName}
+                            </span>
+                            {entry.status !== "ACTIVE" && (
+                              <Badge variant="secondary">
+                                {t("deviceInactive")}
+                              </Badge>
+                            )}
+                          </div>
+                          <p className="text-xs text-muted-foreground">
+                            {[entry.deviceModel, entry.osVersion]
+                              .filter(Boolean)
+                              .join(" · ") || entry.tokenMasked}
+                          </p>
+                          {entry.lastFailureReason && (
+                            <p className="text-xs text-destructive">
+                              {entry.lastFailureReason}
+                            </p>
+                          )}
+                        </TableCell>
+                        <TableCell>
+                          {entry.appVersion
+                            ? `${entry.appVersion}${entry.appBuild ? ` (${entry.appBuild})` : ""}`
+                            : "—"}
+                        </TableCell>
+                        <TableCell>
+                          <span title={entry.topic}>{entry.environment}</span>
+                        </TableCell>
+                        <TableCell className="text-muted-foreground">
+                          <DateTime value={entry.lastRegisteredAt} />
+                        </TableCell>
+                        <TableCell className="pr-4">
+                          <div className="flex justify-end gap-1">
+                            <Button
+                              disabled={deviceBusy !== null}
+                              onClick={() => void testDevice(entry.id)}
+                              size="sm"
+                              type="button"
+                              variant="outline"
+                            >
+                              {testing ? (
+                                <Spinner />
+                              ) : tested ? (
+                                <CheckCircle2 />
+                              ) : (
+                                <Send />
+                              )}
+                              {tested ? t("testSent") : t("test")}
+                            </Button>
+                            <ConfirmationDialog
+                              actionLabel={t("remove")}
+                              cancelLabel={t("cancel")}
+                              description={t("removeDeviceDescription")}
+                              onConfirm={() => deleteDevice(entry.id)}
+                              title={t("removeDeviceTitle")}
+                              trigger={
+                                <Button
+                                  aria-label={t("removeDevice", {
+                                    device: entry.displayName,
+                                  })}
+                                  disabled={deviceBusy !== null}
                                   size="icon-sm"
                                   title={t("remove")}
                                   type="button"

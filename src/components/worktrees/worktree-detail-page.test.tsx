@@ -363,9 +363,16 @@ describe("WorktreeDetailPage", () => {
     expect(screen.getByText("/workspaces/repo-aide-43")).toBeDefined();
     expect(screen.getByText("1234567890abcdef")).toBeDefined();
     expect(screen.getByText("Latest build")).toBeDefined();
-    expect(
-      screen.getByRole("link", { name: "Build" }).getAttribute("href"),
-    ).toBe("/builds/build-1");
+    const latestBuildRow = screen.getByText("Latest build").parentElement!;
+    fireEvent.pointerDown(
+      within(latestBuildRow).getByRole("button", { name: "Build" }),
+      { button: 0, ctrlKey: false },
+    );
+    const viewLatestBuild = await screen.findByRole("menuitem", {
+      name: "View build",
+    });
+    expect(viewLatestBuild.getAttribute("href")).toBe("/builds/build-1");
+    fireEvent.keyDown(viewLatestBuild, { key: "Escape" });
     expect(screen.getAllByText("Succeeded")).toHaveLength(2);
     const buildsCard = screen
       .getByText("Builds")
@@ -448,15 +455,15 @@ describe("WorktreeDetailPage", () => {
     expect(within(coverageCard!).getByText("75%")).toBeDefined();
     expect(within(coverageCard!).getByText("50%")).toBeDefined();
     expect(
-      screen.getByRole("button", { name: "Open in VS Code" }),
-    ).toBeDefined();
-    expect(
       screen.getByRole("button", { name: "Customize worktree" }),
     ).toBeDefined();
     fireEvent.pointerDown(
       screen.getByRole("button", { name: "Customize worktree" }),
       { button: 0, ctrlKey: false },
     );
+    expect(
+      await screen.findByRole("menuitem", { name: "Open in VS Code" }),
+    ).toBeDefined();
     expect(
       (
         await screen.findByRole("menuitem", { name: "View codebase" })
@@ -740,8 +747,13 @@ describe("WorktreeDetailPage", () => {
     expect(
       screen.getByText("Commits and changes could not be loaded."),
     ).toBeDefined();
+    // The management controls stay reachable even though the inspection failed.
+    fireEvent.pointerDown(
+      screen.getAllByRole("button", { name: "Customize worktree" })[0]!,
+      { button: 0, ctrlKey: false },
+    );
     expect(
-      screen.getByRole("button", { name: "Open in VS Code" }),
+      await screen.findByRole("menuitem", { name: "Open in VS Code" }),
     ).toBeDefined();
   });
 

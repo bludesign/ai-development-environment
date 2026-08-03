@@ -97,6 +97,8 @@ export const createWorkflowResolvers = (service: WorkflowsService) => ({
       JSON.parse(value.sessionDataJson),
     worktree: (value: { sessionDataJson: string }) =>
       service.runWorktree(value.sessionDataJson),
+    agent: (value: { sessionDataJson: string }) =>
+      service.runAgent(value.sessionDataJson),
     queue: (value: { id: string }) => service.runQueueForWorkflowRun(value.id),
     attemptCount: (value: {
       _count?: { attempts?: number };

@@ -239,6 +239,7 @@ export async function seedWorkflows(prisma: PrismaClient): Promise<void> {
       draftSchemaVersion: 1,
       enabled: true,
       overlapPolicy: "QUEUE",
+      overlapScope: "WORKTREE",
       maxConcurrentRuns: 1,
       quickActionKind: "STANDARD",
       quickActionIconKey: "sparkles",

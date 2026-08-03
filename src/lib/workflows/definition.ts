@@ -772,6 +772,21 @@ export const WORKFLOW_STEP_CATALOG: readonly WorkflowCatalogEntry[] = [
     },
   ),
   step(
+    "WORKTREE_COMMIT",
+    "Worktrees",
+    "Commit worktree changes",
+    "SERVER",
+    ["worktree.id"],
+    WORKTREE_CONTEXT_PATHS,
+    {
+      description:
+        "Stages selected worktree changes and creates a Git commit on the agent.",
+      details:
+        "Stage all defaults on. Disable it and provide an exact list of changed paths for a partial commit; paths omitted from that list are left uncommitted. Signed commits follow effective Git configuration when the signed option is omitted. Dispatches an agent job, waits for completion, and refreshes worktree context.",
+      mutatesWorktree: true,
+    },
+  ),
+  step(
     "WORKTREE_REFRESH_PULL_REQUEST",
     "Worktrees",
     "Refresh pull request",

@@ -8,6 +8,14 @@ enum WorkflowOverlapPolicy {
   COALESCE_LATEST
 }
 
+"The set of runs an overlap policy is measured against."
+enum WorkflowOverlapScope {
+  "The policy counts runs on the same worktree, so worktrees never wait on each other."
+  WORKTREE
+  "The policy counts every run of the workflow, whichever worktree it belongs to."
+  GLOBAL
+}
+
 "Lifecycle statuses for workflow run."
 enum WorkflowRunStatus {
   "Represents the queued status for workflow run."
@@ -62,6 +70,8 @@ type Workflow {
   enabled: Boolean!
   "The overlap policy associated with this workflow."
   overlapPolicy: WorkflowOverlapPolicy!
+  "The set of runs the overlap policy is measured against."
+  overlapScope: WorkflowOverlapScope!
   "The max concurrent runs associated with this workflow."
   maxConcurrentRuns: Int!
   "Whether successful workflow runs create completion notifications."
@@ -305,6 +315,8 @@ type WorkflowRun {
   sessionRevision: Int!
   "The worktree associated with this workflow run. May be null when unavailable or not applicable."
   worktree: WorkflowRunWorktreeRef
+  "The agent this workflow run executed on. May be null when the run did not target an agent or the agent is no longer available."
+  agent: Agent
   "Effective admission queue while this run is queued, including work ahead of it. Empty after admission."
   queue: [WorktreeRunQueueEntry!]!
   "The blocked reason associated with this workflow run. May be null when unavailable or not applicable."
@@ -569,6 +581,8 @@ input CreateWorkflowInput {
   definition: JSON
   "The overlap policy to use for the request."
   overlapPolicy: WorkflowOverlapPolicy = QUEUE
+  "The set of runs the overlap policy is measured against."
+  overlapScope: WorkflowOverlapScope = WORKTREE
   "The max concurrent runs to use for the request."
   maxConcurrentRuns: Int = 1
   "Whether successful workflow runs create completion notifications."
@@ -585,6 +599,8 @@ input SaveWorkflowDraftInput {
   definition: JSON!
   "The overlap policy to use for the request."
   overlapPolicy: WorkflowOverlapPolicy
+  "The set of runs the overlap policy is measured against."
+  overlapScope: WorkflowOverlapScope
   "The max concurrent runs to use for the request."
   maxConcurrentRuns: Int
   "Whether successful workflow runs create completion notifications."

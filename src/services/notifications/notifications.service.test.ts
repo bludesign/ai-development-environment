@@ -65,6 +65,7 @@ describe("NotificationsService", () => {
       sidebarRequested: true,
       browserRequested: true,
       webPushRequested: false,
+      apnsRequested: true,
       highlightColor: "blue",
     });
     expect(create).toHaveBeenCalledOnce();
@@ -80,6 +81,7 @@ describe("NotificationsService", () => {
             sidebarEnabled: false,
             browserEnabled: false,
             webPushEnabled: false,
+            apnsEnabled: false,
           }),
         },
         appNotification: { findUnique: vi.fn(), create },
@@ -182,6 +184,7 @@ describe("NotificationsService", () => {
       sidebarRequested: true,
       browserRequested: true,
       webPushRequested: true,
+      apnsRequested: false,
       sidebarDismissedAt: null,
       createdAt: new Date(0),
       updatedAt: new Date(0),

@@ -21,7 +21,7 @@ export type RouteEntry = {
   initScript?: string;
   /**
    * Answer the worktree inspection mutations from a fixture instead of the (absent) agent.
-   * Only for pages whose whole body is a live diff; see playwright/worktree-stub.ts.
+   * For pages that inspect a checkout live; see playwright/worktree-stub.ts.
    */
   stubWorktree?: boolean;
 };
@@ -50,7 +50,16 @@ export const routes: RouteEntry[] = [
     path: `/codebases/repositories/${ids.repositories.web}`,
   },
   { name: "worktrees", path: "/worktrees" },
-  { name: "worktree-detail", path: `/worktrees/${ids.worktrees.webFeature}` },
+  {
+    // The page inspects the checkout on load, which queues a job for the Mac that owns it and
+    // leaves it QUEUED for the rest of the capture: the page then photographs its "operation in
+    // progress" fallback, and the Polling page counts the job as pending reconciliation work.
+    // The stub answers the inspection instead, so the commits and changes render and no job is
+    // dispatched.
+    name: "worktree-detail",
+    path: `/worktrees/${ids.worktrees.webFeature}`,
+    stubWorktree: true,
+  },
   {
     // Pinned to the worktree the seeded coverage report measured, with that report selected,
     // so the capture shows the coverage overlay rather than an unannotated diff.
@@ -63,7 +72,20 @@ export const routes: RouteEntry[] = [
   { name: "builds", path: "/builds" },
   { name: "build-detail", path: `/builds/${ids.builds.archive}` },
   { name: "build-coverage", path: `/builds/${ids.builds.archive}/coverage` },
-  { name: "build-data", path: "/build-data" },
+  {
+    name: "build-data",
+    path: "/build-data",
+    // The page starts a Derived Data scan under a request id from `createClientId()` and waits
+    // for every online agent to answer. No agent is connected during a capture, so a random id
+    // photographs the queued progress card and leaves three QUEUED jobs behind — jobs the
+    // Polling page counts as pending reconciliation work, making that count depend on how many
+    // captures ran first. Pinning the id to the finished collection the seed wrote
+    // (scripts/mock-data/build-data.ts) returns a completed scan and dispatches nothing.
+    initScript: `Object.defineProperty(crypto, "randomUUID", {
+      configurable: true,
+      value: () => "${ids.buildDataCollections.captured}",
+    });`,
+  },
 
   // Commands
   { name: "commands", path: "/commands" },

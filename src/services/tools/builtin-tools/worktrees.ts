@@ -1,5 +1,10 @@
 import * as z from "zod/v4";
 
+import {
+  WORKTREE_GIT_OPERATIONS,
+  WORKTREE_OPERATIONS,
+} from "@ai-development-environment/agent-contract/worktrees";
+
 import type { WorktreesService } from "@/services/worktrees";
 
 import {
@@ -156,6 +161,22 @@ export function createWorktreeToolGroup(
         annotations: WRITE_ANNOTATIONS,
       }),
       serviceTool({
+        name: "commit_worktree",
+        title: "Commit worktree changes",
+        description:
+          "Stage all or an exact set of changed paths and create a Git commit in a worktree.",
+        inputSchema: requestInput.extend({
+          message: z.string().trim().min(1).max(50_000),
+          signed: z.boolean().nullable().optional(),
+          stageAll: z.boolean().default(true),
+          paths: z.array(z.string().min(1)).max(500).default([]),
+        }),
+        service,
+        method: "commitWorktree",
+        resultKey: "job",
+        annotations: WRITE_ANNOTATIONS,
+      }),
+      serviceTool({
         name: "move_worktree",
         title: "Move worktree",
         description:
@@ -212,7 +233,11 @@ export function createWorktreeToolGroup(
         name: "run_worktree_operation",
         title: "Run worktree operation",
         description: "Run a supported high-level operation in a worktree.",
-        inputSchema: requestInput.extend({ operation: z.string().min(1) }),
+        // Named rather than free text, so a caller can see which operations
+        // exist instead of guessing and being turned away by the service.
+        inputSchema: requestInput.extend({
+          operation: z.enum(WORKTREE_OPERATIONS),
+        }),
         service,
         method: "runOperation",
         arguments: (value) => [
@@ -228,7 +253,7 @@ export function createWorktreeToolGroup(
         title: "Run worktree Git operation",
         description: "Run a supported Git operation in a worktree.",
         inputSchema: requestInput.extend({
-          operation: z.string().min(1),
+          operation: z.enum(WORKTREE_GIT_OPERATIONS),
           branch: z.string().nullable().optional(),
           stashOid: z.string().nullable().optional(),
           stashChanges: z.boolean().nullable().optional(),

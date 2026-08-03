@@ -109,6 +109,7 @@ export type WorkflowSummary = {
   activeVersionId: string | null;
   enabled: boolean;
   overlapPolicy: "QUEUE" | "CONCURRENT" | "COALESCE_LATEST";
+  overlapScope: "WORKTREE" | "GLOBAL";
   maxConcurrentRuns: number;
   completionNotificationsEnabled: boolean;
   exclusiveWorktree: boolean;
@@ -205,6 +206,7 @@ export type WorkflowRun = {
     branch: string | null;
     highlightColor: string | null;
   } | null;
+  agent?: { id: string; name: string } | null;
   blockedReason: string | null;
   error: string | null;
   queuedAt: string;

@@ -704,11 +704,15 @@ export function CommandsPage() {
                           {t(commandStatusKey(run.status))}
                         </Badge>
                       </TableCell>
-                      <TableCell>
+                      <TableCell className="whitespace-normal">
                         {run.agentId ? (
                           <Link
-                            className={cn(rowLinkClass, "inline-block")}
+                            className={cn(
+                              rowLinkClass,
+                              "inline whitespace-normal break-words",
+                            )}
                             href={`/agents/${run.agentId}`}
+                            title={run.agentName}
                           >
                             {run.agentName}
                           </Link>
@@ -716,14 +720,19 @@ export function CommandsPage() {
                           run.agentName
                         )}
                       </TableCell>
-                      <TableCell>
+                      <TableCell className="whitespace-normal">
                         {run.worktreeId ? (
                           <Link
                             className={cn(
                               rowLinkClass,
-                              "inline-block max-w-48 truncate",
+                              "inline whitespace-normal break-words",
                             )}
                             href={`/worktrees/${run.worktreeId}`}
+                            title={
+                              run.worktreeBranch ||
+                              run.worktreePath ||
+                              undefined
+                            }
                           >
                             {run.worktreeBranch || run.worktreePath}
                           </Link>

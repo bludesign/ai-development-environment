@@ -144,6 +144,12 @@ export default defineConfig({
         // Jira-backed routes run in parallel and would otherwise append to the same API call
         // history that the Jira cache screenshot displays. Keep only its seeded call history.
         JIRA_CACHE_LOGGING_DISABLED: "true",
+        // Collecting sidebar usage queues a ccusage job per agent and waits out the collection
+        // deadline. No agent answers during a capture, so those jobs sit queued for part of
+        // every cycle and the Polling page's pending job counts would depend on when each
+        // route was photographed. The poll still runs and reports on schedule; only the
+        // collection is skipped, and the sidebar shows the seeded usage summary.
+        SIDEBAR_USAGE_COLLECTION_DISABLED: "true",
         // Device enrollment refuses to issue a profile unless the app is served over public
         // HTTPS. The captured page only renders the form, so a placeholder origin is enough.
         PUBLIC_BASE_URL: SCREENSHOT_PUBLIC_ORIGIN,

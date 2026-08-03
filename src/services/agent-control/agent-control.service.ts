@@ -95,8 +95,10 @@ import {
   WORKTREE_MOVE_CHECKOUT_JOB_KIND,
   WORKTREE_MOVE_PUSH_JOB_KIND,
   WORKTREE_OPERATION_JOB_KIND,
+  WORKTREE_COMMIT_JOB_KIND,
   WORKTREE_WATCH_JOB_KIND,
   worktreeJobPayload,
+  worktreeCommitJobPayload,
   worktreeAutoSyncJobPayload,
   worktreeBranchJobPayload,
   worktreeDeleteJobPayload,
@@ -290,6 +292,10 @@ export function validateJob(kind: string, payload: unknown): void {
   }
   if (kind === WORKTREE_BRANCH_JOB_KIND) {
     worktreeBranchJobPayload(value);
+    return;
+  }
+  if (kind === WORKTREE_COMMIT_JOB_KIND) {
+    worktreeCommitJobPayload(value);
     return;
   }
   if (kind === WORKTREE_MOVE_PUSH_JOB_KIND) {

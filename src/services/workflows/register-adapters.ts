@@ -1973,6 +1973,26 @@ function registerWorktreeAdapters(
       [worktreeLink(id)],
     );
   });
+  executor.register("WORKTREE_COMMIT", async (context) => {
+    const id = worktreeId(context);
+    const stageAll = context.node.config.stageAll !== false;
+    const configuredPaths = context.node.config.paths;
+    const paths = Array.isArray(configuredPaths)
+      ? configuredPaths.map((path) => text(path, "Selected path", 2_000))
+      : [];
+    const job = await services.worktrees.commitWorktree({
+      worktreeId: id,
+      message: text(context.node.config.message, "Commit message", 50_000),
+      signed:
+        typeof context.node.config.signed === "boolean"
+          ? context.node.config.signed
+          : null,
+      stageAll,
+      paths,
+      requestId: requestId(context, "commit"),
+    });
+    return jobResult(context, job, undefined, [worktreeLink(id)]);
+  });
   executor.register("WORKTREE_REFRESH_PULL_REQUEST", async (context) => {
     const id = worktreeId(context);
     const worktree = await services.worktrees.refreshPullRequest(id);
