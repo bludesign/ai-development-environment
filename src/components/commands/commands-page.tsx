@@ -720,14 +720,19 @@ export function CommandsPage() {
                           run.agentName
                         )}
                       </TableCell>
-                      <TableCell>
+                      <TableCell className="whitespace-normal">
                         {run.worktreeId ? (
                           <Link
                             className={cn(
                               rowLinkClass,
-                              "inline-block max-w-48 truncate",
+                              "inline whitespace-normal break-words",
                             )}
                             href={`/worktrees/${run.worktreeId}`}
+                            title={
+                              run.worktreeBranch ||
+                              run.worktreePath ||
+                              undefined
+                            }
                           >
                             {run.worktreeBranch || run.worktreePath}
                           </Link>

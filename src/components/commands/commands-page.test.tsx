@@ -235,6 +235,37 @@ describe("CommandsPage", () => {
     expect(agentLink.closest("td")?.className).toContain("whitespace-normal");
   });
 
+  test("wraps long worktree names instead of truncating them", async () => {
+    const longWorktreeName =
+      "feature/AIDE-1234-a-very-long-worktree-branch-that-remains-visible";
+    request.mockResolvedValue({
+      commandDefinitions: [],
+      agents: [],
+      worktreeOverview: { agents: [] },
+      commandRuns: {
+        nodes: [
+          {
+            ...commandRun(),
+            worktreeBranch: longWorktreeName,
+          },
+        ],
+      },
+    } as never);
+
+    render(<CommandsPage />);
+
+    const worktreeLink = await screen.findByRole("link", {
+      name: longWorktreeName,
+    });
+    expect(worktreeLink.textContent).toBe(longWorktreeName);
+    expect(worktreeLink.className).toContain("whitespace-normal");
+    expect(worktreeLink.className).toContain("break-words");
+    expect(worktreeLink.className).not.toContain("truncate");
+    expect(worktreeLink.closest("td")?.className).toContain(
+      "whitespace-normal",
+    );
+  });
+
   test("opens a run from the row and uses session-style link highlights", async () => {
     render(<CommandsPage />);
 
