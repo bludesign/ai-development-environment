@@ -395,6 +395,10 @@ export class WorktreesService {
       (job) => this.projectOperation(job),
     );
     this.agentControl.registerCompletionHandler(
+      WORKTREE_COMMIT_JOB_KIND,
+      (job) => this.projectOperation(job),
+    );
+    this.agentControl.registerCompletionHandler(
       WORKTREE_AUTO_SYNC_JOB_KIND,
       (job) => this.projectOperation(job),
     );

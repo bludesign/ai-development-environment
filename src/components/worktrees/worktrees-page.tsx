@@ -3257,6 +3257,10 @@ export function ActionRow(
     agent.connectionStatus !== "ONLINE" ||
     !agent.capabilities.includes("ios.build.run") ||
     props.group.iosBuildConfigured === false;
+  const runUnavailable =
+    worktree.availability !== "AVAILABLE" ||
+    !agent ||
+    agent.connectionStatus !== "ONLINE";
   return (
     <div className="flex flex-wrap gap-2">
       <StartBuildButton
@@ -3280,16 +3284,28 @@ export function ActionRow(
         }
         worktreeId={worktree.id}
       />
-      <Button asChild size="sm" variant="outline">
-        <Link href={`/runs/new?kind=session&worktree=${worktree.id}`}>
+      {runUnavailable ? (
+        <Button disabled size="sm" variant="outline">
           <Terminal /> {t("newSession")}
-        </Link>
-      </Button>
-      <Button asChild size="sm" variant="outline">
-        <Link href={`/runs/new?kind=plan&worktree=${worktree.id}`}>
+        </Button>
+      ) : (
+        <Button asChild size="sm" variant="outline">
+          <Link href={`/runs/new?kind=session&worktree=${worktree.id}`}>
+            <Terminal /> {t("newSession")}
+          </Link>
+        </Button>
+      )}
+      {runUnavailable ? (
+        <Button disabled size="sm" variant="outline">
           <ClipboardList /> {t("newPlan")}
-        </Link>
-      </Button>
+        </Button>
+      ) : (
+        <Button asChild size="sm" variant="outline">
+          <Link href={`/runs/new?kind=plan&worktree=${worktree.id}`}>
+            <ClipboardList /> {t("newPlan")}
+          </Link>
+        </Button>
+      )}
       <OperationButton
         icon={<Download />}
         label={t("pull")}

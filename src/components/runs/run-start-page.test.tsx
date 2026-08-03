@@ -205,6 +205,47 @@ describe("RunStartPage", () => {
     );
   });
 
+  test("rejects an unavailable worktree sent through the URL", async () => {
+    request.mockImplementation(async (query) => {
+      const operation = String(query);
+      if (operation.includes("query RunProviderCatalog")) {
+        return { runProviderCatalog: pageData.runProviderCatalog } as never;
+      }
+      return {
+        ...pageData,
+        worktreeOverview: {
+          agents: pageData.worktreeOverview.agents.map((agent) => ({
+            ...agent,
+            codebases: agent.codebases.map((codebase) => ({
+              ...codebase,
+              worktrees: codebase.worktrees.map((worktree) => ({
+                ...worktree,
+                availability: "MISSING",
+              })),
+            })),
+          })),
+        },
+      } as never;
+    });
+
+    render(
+      <RunStartPage initialKind="SESSION" initialWorktreeId="worktree-1" />,
+    );
+
+    expect(
+      await screen.findByRole("button", { name: "Select a worktree" }),
+    ).toBeDefined();
+    expect(screen.queryByText("/workspace/widgets")).toBeNull();
+    expect(
+      request.mock.calls.some(
+        ([operation, variables]) =>
+          String(operation).includes("query RunProviderCatalog") &&
+          (variables as { worktreeId?: string } | undefined)?.worktreeId ===
+            "worktree-1",
+      ),
+    ).toBe(false);
+  });
+
   test("picks a worktree from a dialog on a phone", async () => {
     setViewportWidth(390);
     render(<RunStartPage initialKind="PLAN" />);

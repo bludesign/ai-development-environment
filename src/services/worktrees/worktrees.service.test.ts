@@ -6,6 +6,7 @@ vi.mock("@/data/prisma-client", () => ({ getPrismaClient }));
 import type { AgentControlService } from "@/services/agent-control";
 import {
   WORKTREE_BRANCH_JOB_KIND,
+  WORKTREE_COMMIT_JOB_KIND,
   WORKTREE_AUTO_SYNC_JOB_KIND,
   WORKTREE_DIFF_ASSET_JOB_KIND,
   WORKTREE_GIT_INSPECT_JOB_KIND,
@@ -1132,6 +1133,62 @@ describe("WorktreesService", () => {
       resultJson: null,
     });
     expect(record).not.toHaveBeenCalled();
+  });
+
+  test("projects a successful commit's returned worktree inventory", async () => {
+    const handlers = new Map<string, (job: never) => Promise<void>>();
+    const control = {
+      registerCompletionHandler: vi.fn((kind, handler) =>
+        handlers.set(kind, handler),
+      ),
+    } as unknown as AgentControlService;
+    const updateMany = vi.fn().mockResolvedValue({ count: 1 });
+    getPrismaClient.mockResolvedValue({
+      worktree: {
+        findUnique: vi.fn().mockResolvedValue({
+          id: "worktree-1",
+          codebaseId: "codebase-1",
+        }),
+        updateMany,
+      },
+    });
+    const publish = vi.spyOn(agentEventBus, "publish");
+    service(control);
+    const item = {
+      ...report().worktrees[0]!,
+      headSha: "def",
+      ahead: 2,
+      hasStagedChanges: false,
+      hasUnstagedChanges: false,
+      checkedAt: new Date(4).toISOString(),
+    };
+
+    await handlers.get(WORKTREE_COMMIT_JOB_KIND)!({
+      worktreeId: "worktree-1",
+      status: "SUCCEEDED",
+      resultJson: JSON.stringify({ worktree: item }),
+    } as never);
+
+    expect(updateMany).toHaveBeenCalledWith({
+      where: {
+        id: "worktree-1",
+        OR: [{ lastCheckedAt: null }, { lastCheckedAt: { lt: new Date(4) } }],
+      },
+      data: expect.objectContaining({
+        headSha: "def",
+        ahead: 2,
+        hasStagedChanges: false,
+        hasUnstagedChanges: false,
+        lastCheckedAt: new Date(4),
+      }),
+    });
+    expect(publish).toHaveBeenCalledWith(WORKTREE_CHANGED_TOPIC, {
+      worktreeOverviewChanged: {
+        worktreeId: "worktree-1",
+        codebaseId: "codebase-1",
+      },
+    });
+    publish.mockRestore();
   });
 
   test("returns null when the worktree is missing or has no ticket", async () => {

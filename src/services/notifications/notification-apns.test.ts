@@ -171,7 +171,7 @@ describe("APNs notification delivery", () => {
     await service.deliverApns(notification());
 
     expect(updateMany).toHaveBeenCalledWith({
-      where: { id: "device-1" },
+      where: { id: "device-1", token: TOKEN },
       data: expect.objectContaining({
         status: "INACTIVE",
         lastFailureReason: "Unregistered",
@@ -195,7 +195,7 @@ describe("APNs notification delivery", () => {
     await service.deliverApns(notification());
 
     expect(updateMany).toHaveBeenCalledWith({
-      where: { id: "device-1" },
+      where: { id: "device-1", token: TOKEN },
       data: expect.not.objectContaining({ status: "INACTIVE" }),
     });
   });
@@ -212,6 +212,34 @@ describe("APNs notification delivery", () => {
 
     expect(findMany).not.toHaveBeenCalled();
     expect(send).not.toHaveBeenCalled();
+  });
+
+  test("keeps the serialized alert within APNs's four-kibibyte limit", async () => {
+    const send = vi.fn().mockResolvedValue({ status: 200, reason: null });
+    getPrismaClient.mockResolvedValue({
+      notificationDevice: {
+        findMany: vi.fn().mockResolvedValue([device()]),
+        updateMany: vi.fn().mockResolvedValue({ count: 1 }),
+      },
+    });
+    const service = new NotificationsService(credentials(), apnsClient(send));
+
+    await service.deliverApns(
+      notification({
+        title: "🚀".repeat(240),
+        body: "界".repeat(1_000),
+        href: `/${"路".repeat(1_999)}`,
+      }),
+    );
+
+    const sent = send.mock.calls[0]![0] as { payload: Record<string, unknown> };
+    expect(
+      Buffer.byteLength(JSON.stringify(sent.payload), "utf8"),
+    ).toBeLessThanOrEqual(4_096);
+    expect(sent.payload).toMatchObject({
+      aps: { alert: { title: expect.any(String), body: expect.any(String) } },
+      href: expect.any(String),
+    });
   });
 
   test("does not send when the provider key is missing", async () => {

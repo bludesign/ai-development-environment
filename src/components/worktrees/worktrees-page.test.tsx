@@ -640,6 +640,29 @@ describe("WorktreesPage", () => {
     ).toBe("/runs/new?kind=plan&worktree=worktree-1");
   });
 
+  test("does not link to a new run from an unavailable worktree", async () => {
+    const response = (await request("query Fixture")) as unknown as {
+      worktreeOverview: WorktreeOverview;
+    };
+    response.worktreeOverview.agents[0]!.codebases[0]!.worktrees[0]!.availability =
+      "MISSING";
+    request.mockClear();
+
+    render(<WorktreesPage />);
+    await screen.findByText("feature/AIDE-24");
+
+    expect(screen.queryByRole("link", { name: "New session" })).toBeNull();
+    expect(screen.queryByRole("link", { name: "New plan" })).toBeNull();
+    expect(
+      (screen.getByRole("button", { name: "New session" }) as HTMLButtonElement)
+        .disabled,
+    ).toBe(true);
+    expect(
+      (screen.getByRole("button", { name: "New plan" }) as HTMLButtonElement)
+        .disabled,
+    ).toBe(true);
+  });
+
   test("pulls the branch onto its upstream", async () => {
     const response = (await request("query Fixture")) as unknown as {
       worktreeOverview: WorktreeOverview;

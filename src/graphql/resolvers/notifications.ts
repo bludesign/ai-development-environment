@@ -33,6 +33,11 @@ export const createNotificationsResolvers = (
     updatedAt: (value: { updatedAt: Date }) => value.updatedAt.toISOString(),
   },
   NotificationDevice: {
+    tokenMasked: (value: { tokenMasked?: string; token?: string }) =>
+      value.tokenMasked ??
+      (value.token
+        ? `${value.token.slice(0, 8)}…${value.token.slice(-8)}`
+        : "—"),
     lastFailureAt: (value: { lastFailureAt: Date | null }) =>
       iso(value.lastFailureAt),
     lastDeliveredAt: (value: { lastDeliveredAt: Date | null }) =>

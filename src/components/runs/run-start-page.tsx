@@ -68,6 +68,10 @@ type WorktreeOption = {
   capabilities: string[];
 };
 
+function worktreeSelectable(worktree: WorktreeOption): boolean {
+  return worktree.agentOnline && worktree.availability === "AVAILABLE";
+}
+
 const JIRA_ISSUE_KEY_PATTERN = /^[A-Z][A-Z0-9_]*-\d+$/;
 
 type TicketPreviewState = {
@@ -94,7 +98,7 @@ export function RunStartPage({
   const [kind, setKind] = useState(initialKind);
   const [worktrees, setWorktrees] = useState<WorktreeOption[]>([]);
   const [catalog, setCatalog] = useState<ProviderCatalogEntry[]>([]);
-  const [worktreeId, setWorktreeId] = useState(initialWorktreeId ?? "");
+  const [worktreeId, setWorktreeId] = useState("");
   const [jiraIssueKey, setJiraIssueKey] = useState("");
   const [ticketPreview, setTicketPreview] = useState<TicketPreviewState>({
     key: "",
@@ -168,8 +172,14 @@ export function RunStartPage({
       setWorktrees(options);
       // Arriving from a worktree carries its ticket over, the same way picking
       // one here does. A draft's own key wins below.
-      const preselected = options.find(({ id }) => id === initialWorktreeId);
-      if (preselected?.ticketKey) setJiraIssueKey(preselected.ticketKey);
+      const preselected = options.find(
+        (option) =>
+          option.id === initialWorktreeId && worktreeSelectable(option),
+      );
+      if (!data.runDraft) {
+        setWorktreeId(preselected?.id ?? "");
+        setJiraIssueKey(preselected?.ticketKey ?? "");
+      }
       if (data.runDraft) {
         const draft = data.runDraft;
         setKind(draft.kind);
@@ -262,7 +272,8 @@ export function RunStartPage({
   const providerUsable = Boolean(
     selectedProvider?.available &&
     selectedProvider.models.some(({ id }) => id === model) &&
-    selectedWorktree?.agentOnline &&
+    selectedWorktree &&
+    worktreeSelectable(selectedWorktree) &&
     selectedWorktree.capabilities.includes(
       `runs.provider.${provider.toLowerCase()}`,
     ),
@@ -331,9 +342,7 @@ export function RunStartPage({
         {worktrees.map((worktree) => (
           <CommandItem
             data-checked={worktree.id === worktreeId}
-            disabled={
-              !worktree.agentOnline || worktree.availability !== "AVAILABLE"
-            }
+            disabled={!worktreeSelectable(worktree)}
             key={worktree.id}
             onSelect={() => {
               selectWorktree(worktree.id);

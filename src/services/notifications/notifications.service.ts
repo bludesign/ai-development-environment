@@ -37,6 +37,7 @@ const MAX_SELECTION_RANGES = 366;
 const DEFAULT_SIDEBAR_LIMIT = 50;
 const VAPID_SETTINGS_ID = "default";
 const APNS_ALERT_TTL_SECONDS = 60 * 60;
+const APNS_PAYLOAD_MAX_BYTES = 4 * 1_024;
 
 // APNs reports a token the device no longer honours through these reasons. Every other failure is
 // transient or a provider-side mistake, so the device keeps its ACTIVE status and gets retried.
@@ -162,6 +163,81 @@ function statusCode(value: unknown): number | null {
   if (!value || typeof value !== "object") return null;
   const code = (value as { statusCode?: unknown }).statusCode;
   return typeof code === "number" ? code : null;
+}
+
+type ApnsAlertInput = {
+  id: string;
+  title: string;
+  body: string;
+  href: string;
+  typeKey: string;
+};
+
+function apnsPayloadBytes(payload: Record<string, unknown>): number {
+  return Buffer.byteLength(JSON.stringify(payload), "utf8");
+}
+
+function fitApnsPayloadValue(
+  value: string,
+  suffix: string,
+  payloadWithValue: (candidate: string) => Record<string, unknown>,
+): string {
+  if (apnsPayloadBytes(payloadWithValue(value)) <= APNS_PAYLOAD_MAX_BYTES) {
+    return value;
+  }
+  const characters = Array.from(value);
+  const candidate = (length: number) =>
+    length === 0 ? "" : `${characters.slice(0, length).join("")}${suffix}`;
+  let low = 0;
+  let high = characters.length - 1;
+  while (low < high) {
+    const middle = Math.ceil((low + high) / 2);
+    if (
+      apnsPayloadBytes(payloadWithValue(candidate(middle))) <=
+      APNS_PAYLOAD_MAX_BYTES
+    ) {
+      low = middle;
+    } else {
+      high = middle - 1;
+    }
+  }
+  return candidate(low);
+}
+
+function apnsAlertPayload(input: ApnsAlertInput): Record<string, unknown> {
+  let title = input.title;
+  let body = input.body;
+  let href = input.href;
+  const build = (
+    nextTitle = title,
+    nextBody = body,
+    nextHref = href,
+  ): Record<string, unknown> => ({
+    aps: {
+      alert: { title: nextTitle, body: nextBody },
+      sound: "default",
+      "thread-id": input.typeKey,
+      "interruption-level": "active",
+    },
+    notificationId: input.id,
+    typeKey: input.typeKey,
+    href: nextHref,
+  });
+
+  body = fitApnsPayloadValue(body, "…", (candidate) =>
+    build(title, candidate, href),
+  );
+  href = fitApnsPayloadValue(href, "", (candidate) =>
+    build(title, body, candidate),
+  );
+  title = fitApnsPayloadValue(title, "…", (candidate) =>
+    build(candidate, body, href),
+  );
+  const result = build();
+  if (apnsPayloadBytes(result) > APNS_PAYLOAD_MAX_BYTES) {
+    throw new Error("APNs payload exceeds the 4096-byte alert limit");
+  }
+  return result;
 }
 
 export class NotificationsService {
@@ -818,17 +894,7 @@ export class NotificationsService {
         environment: device.environment as ApnsEnvironment,
         authentication,
         deviceToken: device.token,
-        payload: {
-          aps: {
-            alert: { title: payload.title, body: payload.body },
-            sound: "default",
-            "thread-id": payload.typeKey,
-            "interruption-level": "active",
-          },
-          notificationId: payload.id,
-          typeKey: payload.typeKey,
-          href: payload.href,
-        },
+        payload: apnsAlertPayload(payload),
         headers: {
           "apns-topic": device.topic,
           "apns-push-type": "alert",
@@ -843,7 +909,7 @@ export class NotificationsService {
       });
     } catch (error) {
       await prisma.notificationDevice.updateMany({
-        where: { id: device.id },
+        where: { id: device.id, token: device.token },
         data: {
           lastFailureReason:
             error instanceof Error ? error.message.slice(0, 200) : "SendFailed",
@@ -855,7 +921,7 @@ export class NotificationsService {
 
     if (response.status === 200) {
       await prisma.notificationDevice.updateMany({
-        where: { id: device.id },
+        where: { id: device.id, token: device.token },
         data: {
           lastDeliveredAt: now,
           lastFailureReason: null,
@@ -867,15 +933,15 @@ export class NotificationsService {
 
     const reason = response.reason ?? `HTTP ${response.status}`;
     const dead = response.status === 410 || APNS_DEAD_TOKEN_REASONS.has(reason);
-    await prisma.notificationDevice.updateMany({
-      where: { id: device.id },
+    const updated = await prisma.notificationDevice.updateMany({
+      where: { id: device.id, token: device.token },
       data: {
         lastFailureReason: reason,
         lastFailureAt: now,
         ...(dead ? { status: "INACTIVE" } : {}),
       },
     });
-    if (dead) {
+    if (dead && updated.count > 0) {
       this.publish({
         kind: "DEVICES_CHANGED",
         notification: null,
