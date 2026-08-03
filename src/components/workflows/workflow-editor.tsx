@@ -1391,7 +1391,7 @@ function WorkflowEditorInner({ workflowId }: { workflowId?: string | null }) {
       </div>
 
       <Dialog onOpenChange={setSettingsOpen} open={settingsOpen}>
-        <DialogContent>
+        <DialogContent className="sm:max-w-2xl">
           <DialogHeader>
             <DialogTitle>{t("workflowSettings")}</DialogTitle>
             <DialogDescription>{t("editorDescription")}</DialogDescription>

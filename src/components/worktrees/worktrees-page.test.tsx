@@ -831,15 +831,26 @@ describe("WorktreesPage", () => {
   test("uses shadcn items and an empty state in the hidden worktrees dialog", async () => {
     render(<WorktreesPage />);
     await screen.findByText("feature/AIDE-24");
-    request.mockResolvedValueOnce({
-      hiddenWorktrees: [
-        {
-          id: "hidden-1",
-          branch: "feature/hidden",
-          folder: "/workspaces/hidden",
-        },
-      ],
-    } as never);
+    const overviewResponse = await request.mock.results[0]?.value;
+    // The card's quick actions load their runs on a timer, so a queued `once`
+    // response can land on that request instead of the dialog's. Answering by
+    // operation keeps the dialog's data off the call order.
+    let hidden = [
+      {
+        id: "hidden-1",
+        branch: "feature/hidden",
+        folder: "/workspaces/hidden",
+      },
+    ];
+    request.mockImplementation(async (query) => {
+      if (query.includes("query HiddenWorktrees"))
+        return { hiddenWorktrees: hidden } as never;
+      if (query.includes("mutation PurgeHidden")) {
+        hidden = [];
+        return { purgeHiddenWorktree: true } as never;
+      }
+      return overviewResponse as never;
+    });
 
     fireEvent.click(screen.getByRole("button", { name: "Hidden (0)" }));
     const dialog = await screen.findByRole("dialog", {
@@ -851,8 +862,6 @@ describe("WorktreesPage", () => {
       ),
     ).not.toBeNull();
 
-    request.mockResolvedValueOnce({ purgeHiddenWorktree: true } as never);
-    request.mockResolvedValueOnce({ hiddenWorktrees: [] } as never);
     fireEvent.click(within(dialog).getByRole("button", { name: "Purge" }));
 
     const emptyMessage = await within(dialog).findByText(
