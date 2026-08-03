@@ -113,6 +113,15 @@ export class SystemStatusService {
     period: string;
     successfulAgents: number;
   }> {
+    // Collecting dispatches a ccusage job to every online agent and holds them until the
+    // collection's deadline, so anything counting queued work sees a number that depends on
+    // where in the 5-minute cycle it looked. Screenshot captures skip the collection and let
+    // the sidebar read its seeded summary; the poll itself still runs on schedule so the
+    // Polling page describes the operation the way a real deployment sees it. See
+    // playwright.config.ts.
+    if (process.env.SIDEBAR_USAGE_COLLECTION_DISABLED === "true") {
+      return { period: localDay(), successfulAgents: 0 };
+    }
     const id = `sidebar-usage:${randomUUID()}`;
     try {
       const snapshot = await this.ccusage.collect(id);

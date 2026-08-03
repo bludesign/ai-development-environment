@@ -11,6 +11,7 @@ import {
   type WalkthroughStop,
 } from "./walkthrough";
 import { setScreenshotTime } from "./screenshot-time";
+import { stubWorktreeAgent } from "./worktree-stub";
 
 /** How long a click's marker dot is left to play out before the tour moves on. */
 const DWELL = 750;
@@ -65,6 +66,10 @@ test.describe("app walkthrough", () => {
 
     try {
       await setScreenshotTime(page);
+      // The worktree stop inspects its checkout on arrival. Answering that from the fixture
+      // films the commits and changes rather than a spinner, and leaves no queued job behind
+      // for the route captures running alongside this tour to count.
+      await stubWorktreeAgent(page);
       await page.addInitScript(markClicks);
       await page.goto(localeHref(WALKTHROUGH_START), {
         waitUntil: "domcontentloaded",
@@ -98,7 +103,7 @@ async function visit(tour: Tour, stop: WalkthroughStop): Promise<void> {
   if (stop.via === "nav") {
     await press(tour, await openNavigation(tour, href));
   } else {
-    await pressCard(tour, href);
+    await pressCard(tour, stop.title);
   }
   await tour.page.waitForTimeout(DWELL);
 
@@ -131,8 +136,8 @@ async function openNavigation(tour: Tour, href: string): Promise<Locator> {
 }
 
 /**
- * Clicks the worktree card that owns a detail href — the card is identified by the link to that
- * page it contains — on a part of it that navigates.
+ * Clicks the worktree card titled with a branch — the card holds no link to its detail page, so
+ * the title is what identifies it — on a part of it that navigates.
  *
  * A card carries the reader to its detail page when any plain part of its surface is clicked,
  * but which parts are plain depends on how it has wrapped: the desktop layout leaves its middle
@@ -141,10 +146,10 @@ async function openNavigation(tour: Tour, href: string): Promise<Locator> {
  * handler does, and sweeps outward from the middle so the click lands as close to centre as the
  * layout allows.
  */
-async function pressCard(tour: Tour, href: string): Promise<void> {
+async function pressCard(tour: Tour, title: string): Promise<void> {
   const card = tour.page
     .locator('main [data-slot="card"]')
-    .filter({ has: tour.page.locator(`a[href="${href}"]`) })
+    .filter({ has: tour.page.getByRole("button", { name: title }) })
     .first();
   await card.scrollIntoViewIfNeeded();
 
@@ -166,7 +171,7 @@ async function pressCard(tour: Tour, href: string): Promise<void> {
 
   expect(
     position,
-    `no part of the ${href} card's surface navigates; every candidate point is interactive`,
+    `no part of the ${title} card's surface navigates; every candidate point is interactive`,
   ).not.toBeNull();
 
   if (tour.compact) {

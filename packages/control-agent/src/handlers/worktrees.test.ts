@@ -638,6 +638,85 @@ describe("worktree inventory and inspection", () => {
     );
   });
 
+  test("fast-forwards the branch onto its upstream", async () => {
+    const folder = await repository();
+    const remote = await localRemote();
+    const remoteUrl = `ssh://git@example.test${remote}`;
+    await useHostedRemote(folder, remote, remoteUrl);
+    await git(folder, "config", "commit.gpgsign", "false");
+    await git(folder, "push", "-u", "origin", "main");
+    await writeFile(join(folder, "base.txt"), "base\n");
+    await git(folder, "add", "base.txt");
+    await git(folder, "commit", "-m", "Advance base");
+    const advanced = (await git(folder, "rev-parse", "HEAD")).stdout.trim();
+    await git(folder, "push", "origin", "main");
+    // Rewind the checkout so it is behind the upstream it just published.
+    await git(folder, "reset", "--hard", "HEAD~1");
+    const gitDirectory = await realpath(
+      (
+        await git(folder, "rev-parse", "--path-format=absolute", "--git-dir")
+      ).stdout.trim(),
+    );
+
+    const result = await operateWorktree(
+      {
+        codebaseId: "codebase-1",
+        folder,
+        gitDirectory,
+        expectedOrigin: normalizeGitOrigin(remoteUrl).canonicalOrigin,
+        baseBranch: "main",
+        operation: "PULL",
+      },
+      10_000,
+      new AbortController().signal,
+      async () => undefined,
+    );
+
+    expect(result.exitCode).toBe(0);
+    expect((await git(folder, "rev-parse", "HEAD")).stdout.trim()).toBe(
+      advanced,
+    );
+  }, 15_000);
+
+  test("refuses to pull a branch that has diverged from its upstream", async () => {
+    const folder = await repository();
+    const remote = await localRemote();
+    const remoteUrl = `ssh://git@example.test${remote}`;
+    await useHostedRemote(folder, remote, remoteUrl);
+    await git(folder, "config", "commit.gpgsign", "false");
+    await git(folder, "push", "-u", "origin", "main");
+    await writeFile(join(folder, "remote.txt"), "remote\n");
+    await git(folder, "add", "remote.txt");
+    await git(folder, "commit", "-m", "Advance remote");
+    await git(folder, "push", "origin", "main");
+    await git(folder, "reset", "--hard", "HEAD~1");
+    await writeFile(join(folder, "local.txt"), "local\n");
+    await git(folder, "add", "local.txt");
+    await git(folder, "commit", "-m", "Advance local");
+    const gitDirectory = await realpath(
+      (
+        await git(folder, "rev-parse", "--path-format=absolute", "--git-dir")
+      ).stdout.trim(),
+    );
+
+    await expect(
+      operateWorktree(
+        {
+          codebaseId: "codebase-1",
+          folder,
+          gitDirectory,
+          expectedOrigin: normalizeGitOrigin(remoteUrl).canonicalOrigin,
+          baseBranch: "main",
+          operation: "PULL",
+        },
+        10_000,
+        new AbortController().signal,
+        async () => undefined,
+      ),
+      // Git's own explanation, which names the divergence, survives to the UI.
+    ).rejects.toThrow(/fast-forward/);
+  }, 15_000);
+
   test("blocks sync when the worktree is dirty", async () => {
     const folder = await repository();
     await git(folder, "checkout", "-b", "feature/dirty");

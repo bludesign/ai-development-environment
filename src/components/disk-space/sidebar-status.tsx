@@ -23,6 +23,7 @@ import {
   PopoverTrigger,
 } from "@/components/ui/popover";
 import { Spinner } from "@/components/ui/spinner";
+import { useSidebar } from "@/components/ui/sidebar";
 import { Link } from "@/i18n/navigation";
 import {
   controlPlaneRequest,
@@ -85,6 +86,7 @@ export function SidebarStatusFooter() {
   const shell = useTranslations("shell");
   const locale = useLocale();
   const actionCenter = useOptionalActionCenter();
+  const { isMobile, setOpenMobile } = useSidebar();
   const [status, setStatus] = useState<SidebarStatusData | null>(null);
   const [history, setHistory] = useState<HistoryItem[]>([]);
   const [busy, setBusy] = useState<string | null>(null);
@@ -200,11 +202,21 @@ export function SidebarStatusFooter() {
     },
   ] as const;
 
+  /**
+   * The footer navigates from inside the mobile navigation sheet, which stays
+   * open over the page it just moved to. The menu entries above close it on the
+   * way out; every link down here does the same.
+   */
+  const closeMobileNavigation = () => {
+    if (isMobile) setOpenMobile(false);
+  };
+
   return (
     <div className="space-y-2 border-t border-sidebar-border p-2">
       <Link
         className="flex items-center justify-between rounded-md px-2 py-1.5 text-xs hover:bg-sidebar-accent"
         href="/usage"
+        onClick={closeMobileNavigation}
       >
         <span className="flex items-center gap-2">
           <CircleDollarSign className="size-3.5" />
@@ -225,6 +237,7 @@ export function SidebarStatusFooter() {
             className="flex items-center justify-between rounded-md px-2 py-1 text-xs hover:bg-sidebar-accent"
             href={href}
             key={key}
+            onClick={closeMobileNavigation}
           >
             <span className="flex items-center gap-1.5">
               <Icon className="size-3.5" />
@@ -300,7 +313,11 @@ export function SidebarStatusFooter() {
           <PopoverHeader>
             <div className="flex items-center justify-between gap-2">
               <PopoverTitle>
-                <Link className="hover:underline" href="/build-data">
+                <Link
+                  className="hover:underline"
+                  href="/build-data"
+                  onClick={closeMobileNavigation}
+                >
                   {t("freeDiskSpace")}
                 </Link>
               </PopoverTitle>
@@ -336,6 +353,7 @@ export function SidebarStatusFooter() {
                   <Link
                     className="font-medium hover:underline"
                     href={`/agents/${agent.agent.id}`}
+                    onClick={closeMobileNavigation}
                   >
                     {agent.agent.name}
                   </Link>

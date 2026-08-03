@@ -455,15 +455,15 @@ describe("WorktreeDetailPage", () => {
     expect(within(coverageCard!).getByText("75%")).toBeDefined();
     expect(within(coverageCard!).getByText("50%")).toBeDefined();
     expect(
-      screen.getByRole("button", { name: "Open in VS Code" }),
-    ).toBeDefined();
-    expect(
       screen.getByRole("button", { name: "Customize worktree" }),
     ).toBeDefined();
     fireEvent.pointerDown(
       screen.getByRole("button", { name: "Customize worktree" }),
       { button: 0, ctrlKey: false },
     );
+    expect(
+      await screen.findByRole("menuitem", { name: "Open in VS Code" }),
+    ).toBeDefined();
     expect(
       (
         await screen.findByRole("menuitem", { name: "View codebase" })
@@ -747,8 +747,13 @@ describe("WorktreeDetailPage", () => {
     expect(
       screen.getByText("Commits and changes could not be loaded."),
     ).toBeDefined();
+    // The management controls stay reachable even though the inspection failed.
+    fireEvent.pointerDown(
+      screen.getAllByRole("button", { name: "Customize worktree" })[0]!,
+      { button: 0, ctrlKey: false },
+    );
     expect(
-      screen.getByRole("button", { name: "Open in VS Code" }),
+      await screen.findByRole("menuitem", { name: "Open in VS Code" }),
     ).toBeDefined();
   });
 

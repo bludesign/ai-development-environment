@@ -13,6 +13,8 @@ import {
   controlPlaneSubscriptions,
 } from "@/lib/control-plane-client";
 
+import { SidebarProvider, useSidebar } from "@/components/ui/sidebar";
+
 import { SidebarStatusFooter } from "./sidebar-status";
 
 vi.mock("@/lib/control-plane-client", () => ({
@@ -37,6 +39,43 @@ vi.mock("@/i18n/navigation", () => ({
 
 const request = vi.mocked(controlPlaneRequest);
 const subscriptions = vi.mocked(controlPlaneSubscriptions);
+
+/** jsdom ships no `matchMedia`, and the sidebar asks it for the viewport. */
+function setViewportWidth(width: number) {
+  Object.defineProperty(window, "matchMedia", {
+    configurable: true,
+    value: vi.fn((query: string) => ({
+      addEventListener: vi.fn(),
+      addListener: vi.fn(),
+      dispatchEvent: vi.fn(),
+      matches: width < 768,
+      media: query,
+      onchange: null,
+      removeEventListener: vi.fn(),
+      removeListener: vi.fn(),
+    })),
+  });
+}
+
+/** Reports the mobile sheet's state, and opens it, from inside the provider. */
+function SidebarProbe() {
+  const { openMobile, setOpenMobile } = useSidebar();
+
+  return (
+    <button onClick={() => setOpenMobile(true)} type="button">
+      {openMobile ? "sheet open" : "sheet closed"}
+    </button>
+  );
+}
+
+function renderFooter() {
+  return render(
+    <SidebarProvider defaultOpen>
+      <SidebarProbe />
+      <SidebarStatusFooter />
+    </SidebarProvider>,
+  );
+}
 
 const sidebarStatus = {
   usageToday: { totalCost: 1.25, collectedAt: null },
@@ -87,6 +126,7 @@ const sidebarStatus = {
 
 describe("SidebarStatusFooter", () => {
   beforeEach(() => {
+    setViewportWidth(1280);
     subscriptions.mockReturnValue({ subscribe: vi.fn(() => vi.fn()) } as never);
     request.mockImplementation(async (query) => {
       const operation = String(query);
@@ -112,7 +152,7 @@ describe("SidebarStatusFooter", () => {
   });
 
   test("links to Build Data and renders active pressure controls in yellow", async () => {
-    render(<SidebarStatusFooter />);
+    renderFooter();
 
     await screen.findByText("$1.25");
     fireEvent.click(screen.getByRole("button", { name: /Free Disk Space/ }));
@@ -150,7 +190,7 @@ describe("SidebarStatusFooter", () => {
   });
 
   test("leads the activity grid with Action Center items", async () => {
-    render(<SidebarStatusFooter />);
+    renderFooter();
 
     await screen.findByText("$1.25");
     const activity = ["Actions", "Workflows", "Plans", "Sessions", "Builds"];
@@ -170,6 +210,29 @@ describe("SidebarStatusFooter", () => {
     expect(
       screen.getByRole("link", { name: /Commands/ }).textContent,
     ).toContain("5");
+  });
+
+  test("closes the mobile navigation when a counter is followed", async () => {
+    setViewportWidth(390);
+    renderFooter();
+
+    await screen.findByText("$1.25");
+    fireEvent.click(screen.getByRole("button", { name: "sheet closed" }));
+    expect(screen.getByRole("button", { name: "sheet open" })).toBeTruthy();
+
+    fireEvent.click(screen.getByRole("link", { name: /Workflows/ }));
+
+    expect(screen.getByRole("button", { name: "sheet closed" })).toBeTruthy();
+  });
+
+  test("keeps the sidebar open on a desktop viewport", async () => {
+    renderFooter();
+
+    await screen.findByText("$1.25");
+    fireEvent.click(screen.getByRole("button", { name: "sheet closed" }));
+    fireEvent.click(screen.getByRole("link", { name: /Workflows/ }));
+
+    expect(screen.getByRole("button", { name: "sheet open" })).toBeTruthy();
   });
 
   test("fills multi-agent circles with used disk space", async () => {
@@ -199,7 +262,7 @@ describe("SidebarStatusFooter", () => {
       } as never;
     });
 
-    render(<SidebarStatusFooter />);
+    renderFooter();
 
     const circle = await screen.findByLabelText(
       "Builder · Derived Data: 100 GiB free",

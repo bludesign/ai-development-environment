@@ -64,6 +64,7 @@ export const WORKTREE_OPERATIONS = [
   "SYNC",
   "REBASE",
   "CANCEL_REBASE",
+  "PULL",
   "PUSH",
   "RESET",
   "STASH_ALL",

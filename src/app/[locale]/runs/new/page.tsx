@@ -6,6 +6,7 @@ export default async function RunNewRoute({
   searchParams: Promise<{
     kind?: string | string[];
     draft?: string | string[];
+    worktree?: string | string[];
   }>;
 }) {
   const values = await searchParams;
@@ -13,10 +14,14 @@ export default async function RunNewRoute({
   const draftValue = Array.isArray(values.draft)
     ? values.draft[0]
     : values.draft;
+  const worktreeValue = Array.isArray(values.worktree)
+    ? values.worktree[0]
+    : values.worktree;
   return (
     <RunStartPage
       draftId={draftValue ?? null}
       initialKind={kindValue?.toLowerCase() === "session" ? "SESSION" : "PLAN"}
+      initialWorktreeId={worktreeValue ?? null}
     />
   );
 }

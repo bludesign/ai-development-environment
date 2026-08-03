@@ -2633,6 +2633,17 @@ export const operateWorktree: AgentJobHandler = async (
       await runGit(["rebase", "--abort"], "Could not cancel rebase");
       break;
     }
+    case "PULL": {
+      if (!branch || !upstream)
+        throw new Error("Pull requires a branch with an upstream");
+      const remote = upstream.split("/")[0] || "origin";
+      await runGit(["fetch", remote], `Could not fetch ${remote}`);
+      // A fast-forward only, rather than `git pull`, whose merge-or-rebase
+      // behaviour follows the checkout's own config. Diverged branches stop
+      // here with Git's own message; Sync and Rebase are the ways through.
+      await runGit(["merge", "--ff-only", "@{upstream}"], "Pull failed");
+      break;
+    }
     case "PUSH":
       if (!branch) throw new Error("Push requires a branch");
       await runGit(

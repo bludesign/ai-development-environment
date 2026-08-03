@@ -74,8 +74,23 @@ const pageData = {
   ],
 };
 
+/** jsdom ships no `matchMedia`, and the worktree field asks it for the viewport. */
+function setViewportWidth(width: number) {
+  window.matchMedia = vi.fn().mockImplementation((query: string) => ({
+    addEventListener: vi.fn(),
+    addListener: vi.fn(),
+    dispatchEvent: vi.fn(),
+    matches: width < 768,
+    media: query,
+    onchange: null,
+    removeEventListener: vi.fn(),
+    removeListener: vi.fn(),
+  }));
+}
+
 beforeEach(() => {
   window.localStorage.clear();
+  setViewportWidth(1280);
   vi.stubGlobal(
     "ResizeObserver",
     class {
@@ -168,6 +183,48 @@ describe("RunStartPage", () => {
         ),
       ).toBe(true),
     );
+  });
+
+  test("opens with the worktree a card sent it to", async () => {
+    render(
+      <RunStartPage initialKind="SESSION" initialWorktreeId="worktree-1" />,
+    );
+
+    expect(
+      await screen.findByRole("button", { name: /widgets · main · Builder/ }),
+    ).toBeDefined();
+    await waitFor(() =>
+      expect(
+        request.mock.calls.some(
+          ([query, variables]) =>
+            String(query).includes("query RunProviderCatalog") &&
+            (variables as { worktreeId?: string } | undefined)?.worktreeId ===
+              "worktree-1",
+        ),
+      ).toBe(true),
+    );
+  });
+
+  test("picks a worktree from a dialog on a phone", async () => {
+    setViewportWidth(390);
+    render(<RunStartPage initialKind="PLAN" />);
+
+    fireEvent.click(
+      await screen.findByRole("button", { name: "Select a worktree" }),
+    );
+
+    // The popover would be anchored to the field and can be pushed off-screen by
+    // the keyboard; the dialog follows the visible viewport instead.
+    const dialog = await screen.findByRole("dialog");
+    fireEvent.click(
+      await within(dialog).findByRole("option", {
+        name: "widgets · main · Builder",
+      }),
+    );
+
+    expect(
+      screen.getByRole("button", { name: /widgets · main · Builder/ }),
+    ).toBeDefined();
   });
 
   test("loads a Jira ticket card from a typed ticket key", async () => {

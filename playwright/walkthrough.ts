@@ -15,14 +15,26 @@ export type WalkthroughStop = {
   name: string;
   /** Locale-relative path, as in `routes.ts`; `localeHref` prefixes the locale. */
   path: string;
-  /**
-   * How the stop is reached from the previous one. `nav` clicks the primary navigation entry
-   * whose href matches `path`; `card` clicks the card that links to `path` the way a reader
-   * would — a worktree card navigates to its own detail page when any plain part of its surface
-   * is clicked, and the tour aims as near the middle as the layout leaves clear.
-   */
-  via: "nav" | "card";
-};
+} & (
+  | {
+      /** Clicks the primary navigation entry whose href matches `path`. */
+      via: "nav";
+    }
+  | {
+      /**
+       * Clicks the card the way a reader would — a worktree card navigates to its own detail
+       * page when any plain part of its surface is clicked, and the tour aims as near the
+       * middle as the layout leaves clear.
+       */
+      via: "card";
+      /**
+       * Heading the card is found by. The card carries no link to `path` — its surface handler
+       * does the navigating — so the tour identifies it by the branch it is titled with, and
+       * the URL assertion afterwards is what proves the click landed on the right one.
+       */
+      title: string;
+    }
+);
 
 /**
  * The guided tour recorded for the docs landing page, in order. Detail stops reference the
@@ -37,6 +49,7 @@ export const WALKTHROUGH_STOPS: WalkthroughStop[] = [
     name: "worktree-detail",
     path: `/worktrees/${ids.worktrees.apiFeature}`,
     via: "card",
+    title: "feature/oauth-device-flow",
   },
   { name: "sessions", path: "/sessions", via: "nav" },
   { name: "action-center", path: WALKTHROUGH_START, via: "nav" },

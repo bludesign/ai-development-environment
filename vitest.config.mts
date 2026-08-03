@@ -54,6 +54,10 @@ export default defineConfig({
     // assertions vacuously equal.
     env: { TZ: "America/New_York" },
     environment: "jsdom",
+    // The GitHub runners are slow enough that tests which finish in well under a
+    // second locally were tripping Vitest's 5s default and failing the workflow.
+    testTimeout: 20_000,
+    hookTimeout: 20_000,
     exclude: [
       ...configDefaults.exclude,
       "packages/control-agent/**",

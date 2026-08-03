@@ -20,6 +20,8 @@ enum WorktreeOperation {
   REBASE
   "Represents the cancel rebase option."
   CANCEL_REBASE
+  "Represents the pull option."
+  PULL
   "Represents the push option."
   PUSH
   "Represents the reset option."

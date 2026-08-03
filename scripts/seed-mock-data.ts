@@ -25,6 +25,7 @@ import { seedGitHub } from "./mock-data/github";
 import { seedJira, seedJiraWebhooks } from "./mock-data/jira";
 import { seedWorkflows } from "./mock-data/workflows";
 import { seedCosts } from "./mock-data/costs";
+import { seedBuildData } from "./mock-data/build-data";
 
 type Seeder = {
   name: string;
@@ -50,6 +51,7 @@ const seeders: Seeder[] = [
   { name: "jira-webhooks", run: seedJiraWebhooks },
   { name: "workflows", run: seedWorkflows },
   { name: "costs", run: seedCosts },
+  { name: "build-data", run: seedBuildData },
 ];
 
 async function main(): Promise<void> {

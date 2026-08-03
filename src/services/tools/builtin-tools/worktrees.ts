@@ -1,5 +1,10 @@
 import * as z from "zod/v4";
 
+import {
+  WORKTREE_GIT_OPERATIONS,
+  WORKTREE_OPERATIONS,
+} from "@ai-development-environment/agent-contract/worktrees";
+
 import type { WorktreesService } from "@/services/worktrees";
 
 import {
@@ -228,7 +233,11 @@ export function createWorktreeToolGroup(
         name: "run_worktree_operation",
         title: "Run worktree operation",
         description: "Run a supported high-level operation in a worktree.",
-        inputSchema: requestInput.extend({ operation: z.string().min(1) }),
+        // Named rather than free text, so a caller can see which operations
+        // exist instead of guessing and being turned away by the service.
+        inputSchema: requestInput.extend({
+          operation: z.enum(WORKTREE_OPERATIONS),
+        }),
         service,
         method: "runOperation",
         arguments: (value) => [
@@ -244,7 +253,7 @@ export function createWorktreeToolGroup(
         title: "Run worktree Git operation",
         description: "Run a supported Git operation in a worktree.",
         inputSchema: requestInput.extend({
-          operation: z.string().min(1),
+          operation: z.enum(WORKTREE_GIT_OPERATIONS),
           branch: z.string().nullable().optional(),
           stashOid: z.string().nullable().optional(),
           stashChanges: z.boolean().nullable().optional(),

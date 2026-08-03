@@ -23,6 +23,7 @@ import {
 import { Checkbox } from "@/components/ui/checkbox";
 import {
   Command,
+  CommandDialog,
   CommandEmpty,
   CommandInput,
   CommandItem,
@@ -38,6 +39,7 @@ import {
 import { Spinner } from "@/components/ui/spinner";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Textarea } from "@/components/ui/textarea";
+import { useIsMobile } from "@/hooks/use-mobile";
 import { useRouter } from "@/i18n/navigation";
 import { controlPlaneRequest } from "@/lib/control-plane-client";
 import { cn } from "@/lib/utils";
@@ -78,17 +80,21 @@ type TicketPreviewState = {
 export function RunStartPage({
   initialKind,
   draftId,
+  initialWorktreeId,
 }: {
   initialKind: "PLAN" | "SESSION";
   draftId?: string | null;
+  /** Preselected worktree, as the worktree cards' New session and New plan links pass. */
+  initialWorktreeId?: string | null;
 }) {
   const t = useTranslations("runs");
   const jiraT = useTranslations("jiraTickets");
   const router = useRouter();
+  const isMobile = useIsMobile();
   const [kind, setKind] = useState(initialKind);
   const [worktrees, setWorktrees] = useState<WorktreeOption[]>([]);
   const [catalog, setCatalog] = useState<ProviderCatalogEntry[]>([]);
-  const [worktreeId, setWorktreeId] = useState("");
+  const [worktreeId, setWorktreeId] = useState(initialWorktreeId ?? "");
   const [jiraIssueKey, setJiraIssueKey] = useState("");
   const [ticketPreview, setTicketPreview] = useState<TicketPreviewState>({
     key: "",
@@ -147,8 +153,8 @@ export function RunStartPage({
       }`,
         draftId ? { draftId } : undefined,
       );
-      setWorktrees(
-        data.worktreeOverview.agents.flatMap(({ agent, codebases }) =>
+      const options = data.worktreeOverview.agents.flatMap(
+        ({ agent, codebases }) =>
           codebases.flatMap(({ repository, worktrees }) =>
             worktrees.map((worktree) => ({
               ...worktree,
@@ -158,8 +164,12 @@ export function RunStartPage({
               capabilities: agent.capabilities,
             })),
           ),
-        ),
       );
+      setWorktrees(options);
+      // Arriving from a worktree carries its ticket over, the same way picking
+      // one here does. A draft's own key wins below.
+      const preselected = options.find(({ id }) => id === initialWorktreeId);
+      if (preselected?.ticketKey) setJiraIssueKey(preselected.ticketKey);
       if (data.runDraft) {
         const draft = data.runDraft;
         setKind(draft.kind);
@@ -179,7 +189,7 @@ export function RunStartPage({
     } finally {
       setLoading(false);
     }
-  }, [draftId]);
+  }, [draftId, initialWorktreeId]);
 
   useEffect(() => {
     const timer = window.setTimeout(() => void load(), 0);
@@ -286,6 +296,59 @@ export function RunStartPage({
       setJiraIssueKey("");
     }
   };
+
+  /**
+   * A worktree row is three names long, so the button holding one is the widest
+   * thing on the form. `min-w-0` is what lets it truncate: without it the flex
+   * and grid boxes around the label take their automatic minimum from the whole
+   * unbroken string and the field — and the popover sized to match it — grow
+   * past the edge of a phone screen.
+   */
+  const worktreeTrigger = (
+    <>
+      <span
+        className={cn(
+          "min-w-0 truncate",
+          !selectedWorktree && "text-muted-foreground",
+        )}
+      >
+        {selectedWorktree
+          ? worktreeLabel(selectedWorktree)
+          : t("selectWorktree")}
+      </span>
+      <ChevronsUpDown className="shrink-0 text-muted-foreground" />
+    </>
+  );
+
+  const worktreeCommand = (
+    <Command>
+      <CommandInput placeholder={t("searchWorktrees")} />
+      {/* Height comes from whatever holds the list — the popover's collision
+          clamp or the dialog's visible-viewport cap — so it scrolls inside
+          rather than running off the screen. */}
+      <CommandList className="max-h-none min-h-0 flex-1">
+        <CommandEmpty>{t("empty", { kind: t("worktree") })}</CommandEmpty>
+        {worktrees.map((worktree) => (
+          <CommandItem
+            data-checked={worktree.id === worktreeId}
+            disabled={
+              !worktree.agentOnline || worktree.availability !== "AVAILABLE"
+            }
+            key={worktree.id}
+            onSelect={() => {
+              selectWorktree(worktree.id);
+              setWorktreeOpen(false);
+            }}
+            value={worktreeTerms(worktree)}
+          >
+            <span className="min-w-0 flex-1 truncate">
+              {worktreeLabel(worktree)}
+            </span>
+          </CommandItem>
+        ))}
+      </CommandList>
+    </Command>
+  );
 
   const uploadFiles = async (files: File[]) => {
     if (!files.length) return;
@@ -414,61 +477,53 @@ export function RunStartPage({
             </Tabs>
           </div>
           <div className="grid gap-4 md:grid-cols-2">
-            <div className="space-y-2">
+            <div className="min-w-0 space-y-2">
               <Label>{t("worktree")}</Label>
-              <Popover onOpenChange={setWorktreeOpen} open={worktreeOpen}>
-                <PopoverTrigger asChild>
+              {isMobile ? (
+                <>
                   <Button
-                    className="w-full justify-between font-normal"
+                    className="w-full min-w-0 justify-between font-normal"
+                    onClick={() => setWorktreeOpen(true)}
                     type="button"
                     variant="outline"
                   >
-                    <span
-                      className={cn(
-                        "truncate",
-                        !selectedWorktree && "text-muted-foreground",
-                      )}
-                    >
-                      {selectedWorktree
-                        ? worktreeLabel(selectedWorktree)
-                        : t("selectWorktree")}
-                    </span>
-                    <ChevronsUpDown className="text-muted-foreground" />
+                    {worktreeTrigger}
                   </Button>
-                </PopoverTrigger>
-                <PopoverContent
-                  align="start"
-                  className="w-(--radix-popover-trigger-width) p-0"
-                >
-                  <Command>
-                    <CommandInput placeholder={t("searchWorktrees")} />
-                    <CommandList>
-                      <CommandEmpty>
-                        {t("empty", { kind: t("worktree") })}
-                      </CommandEmpty>
-                      {worktrees.map((worktree) => (
-                        <CommandItem
-                          data-checked={worktree.id === worktreeId}
-                          disabled={
-                            !worktree.agentOnline ||
-                            worktree.availability !== "AVAILABLE"
-                          }
-                          key={worktree.id}
-                          onSelect={() => {
-                            selectWorktree(worktree.id);
-                            setWorktreeOpen(false);
-                          }}
-                          value={worktreeTerms(worktree)}
-                        >
-                          <span className="min-w-0 flex-1 truncate">
-                            {worktreeLabel(worktree)}
-                          </span>
-                        </CommandItem>
-                      ))}
-                    </CommandList>
-                  </Command>
-                </PopoverContent>
-              </Popover>
+                  {/*
+                   * A popover is anchored to the field, and the search box it
+                   * opens takes focus: on a phone the keyboard then covers the
+                   * space the list was measured against and pushes the list off
+                   * the top of the screen. The command dialog follows the
+                   * visible viewport instead, so the keyboard cannot bury it.
+                   */}
+                  <CommandDialog
+                    description={t("searchWorktrees")}
+                    onOpenChange={setWorktreeOpen}
+                    open={worktreeOpen}
+                    title={t("worktree")}
+                  >
+                    {worktreeCommand}
+                  </CommandDialog>
+                </>
+              ) : (
+                <Popover onOpenChange={setWorktreeOpen} open={worktreeOpen}>
+                  <PopoverTrigger asChild>
+                    <Button
+                      className="w-full min-w-0 justify-between font-normal"
+                      type="button"
+                      variant="outline"
+                    >
+                      {worktreeTrigger}
+                    </Button>
+                  </PopoverTrigger>
+                  <PopoverContent
+                    align="start"
+                    className="max-h-[min(24rem,var(--radix-popover-content-available-height))] w-(--radix-popover-trigger-width) overflow-hidden p-0"
+                  >
+                    {worktreeCommand}
+                  </PopoverContent>
+                </Popover>
+              )}
               {selectedWorktree && (
                 <p
                   className="truncate font-mono text-xs text-muted-foreground"

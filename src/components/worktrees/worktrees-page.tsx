@@ -8,7 +8,9 @@ import {
   Check,
   ChevronDown,
   ChevronRight,
+  ClipboardList,
   Code2,
+  Download,
   ExternalLink,
   FolderGit2,
   GitBranch,
@@ -27,6 +29,7 @@ import {
   Save,
   Search,
   Tags,
+  Terminal,
   Trash2,
   Upload,
 } from "lucide-react";
@@ -394,6 +397,7 @@ type Operation =
   | "SYNC"
   | "REBASE"
   | "CANCEL_REBASE"
+  | "PULL"
   | "PUSH"
   | "RESET"
   | "STASH_ALL"
@@ -2279,6 +2283,7 @@ export function WorktreeMenus(
   const {
     worktree,
     allTags,
+    editorVariant,
     onUpdate,
     onError,
     onManageTags,
@@ -2476,6 +2481,20 @@ export function WorktreeMenus(
             >
               <GitCommitHorizontal /> {t("commit")}
             </DropdownMenuItem>
+            {editorVariant !== "NONE" && (
+              <OperationMenuItem
+                icon={<Code2 />}
+                label={
+                  editorVariant === "CODE_INSIDERS"
+                    ? t("openInsiders")
+                    : t("openCode")
+                }
+                operation="OPEN_EDITOR"
+                // The editor opens on the agent, so the menu's own reload is
+                // all there is to wait for.
+                props={{ ...props, onCompleted: props.onReload }}
+              />
+            )}
             <DropdownMenuItem asChild>
               <Link href={`/codebases/${props.group.codebase.id}`}>
                 <Code2 /> {t("viewCodebase")}
@@ -3216,7 +3235,7 @@ function DeleteWorktreeDialog({
 export function ActionRow(
   props: WorktreeItemProps & { onCompleted: () => Promise<void> },
 ) {
-  const { worktree, editorVariant } = props;
+  const { worktree } = props;
   const t = useTranslations("worktrees");
   const unavailable =
     worktree.availability !== "AVAILABLE" ||
@@ -3261,25 +3280,22 @@ export function ActionRow(
         }
         worktreeId={worktree.id}
       />
-      {editorVariant !== "NONE" && (
-        <OperationButton
-          icon={<Code2 />}
-          label={
-            editorVariant === "CODE_INSIDERS"
-              ? t("openInsiders")
-              : t("openCode")
-          }
-          operation="OPEN_EDITOR"
-          props={props}
-        />
-      )}
+      <Button asChild size="sm" variant="outline">
+        <Link href={`/runs/new?kind=session&worktree=${worktree.id}`}>
+          <Terminal /> {t("newSession")}
+        </Link>
+      </Button>
+      <Button asChild size="sm" variant="outline">
+        <Link href={`/runs/new?kind=plan&worktree=${worktree.id}`}>
+          <ClipboardList /> {t("newPlan")}
+        </Link>
+      </Button>
       <OperationButton
-        confirm
-        icon={<Upload />}
-        label={t("forcePush")}
-        operation="FORCE_PUSH"
+        icon={<Download />}
+        label={t("pull")}
+        operation="PULL"
         props={props}
-        disabled={unavailable || !worktree.upstream}
+        disabled={unavailable || !worktree.upstream || worktree.behind === 0}
       />
       <OperationButton
         confirm
@@ -3311,32 +3327,6 @@ export function ActionRow(
         props={props}
         disabled={unavailable || !worktree.branch}
       />
-      <OperationButton
-        confirm
-        icon={<RotateCcw />}
-        label={t("reset")}
-        operation="RESET"
-        props={props}
-        disabled={unavailable || !worktree.upstream}
-      />
-      <OperationButton
-        icon={<Archive />}
-        label={t("stashAll")}
-        operation="STASH_ALL"
-        props={props}
-        disabled={unavailable || !changeActions.hasChanges}
-      />
-      <OperationButton
-        icon={<Check />}
-        label={
-          changeActions.stageOperation === "UNSTAGE_ALL"
-            ? t("unstageAll")
-            : t("stageAll")
-        }
-        operation={changeActions.stageOperation}
-        props={props}
-        disabled={unavailable || !changeActions.hasChanges}
-      />
       <AutoSyncButton
         conflictWorkflows={props.group.mergeConflictQuickActions ?? []}
         disabled={unavailable || !worktree.upstream || !worktree.baseBranch}
@@ -3351,6 +3341,50 @@ export function ActionRow(
         onError={props.onError}
         worktree={worktree}
       />
+      {/* The operations that discard or rewrite work, kept off the row itself. */}
+      <DropdownMenu>
+        <DropdownMenuTrigger asChild>
+          <Button size="sm" variant="outline">
+            <MoreHorizontal /> {t("moreActions")}
+          </Button>
+        </DropdownMenuTrigger>
+        <DropdownMenuContent align="end">
+          <OperationMenuItem
+            confirm
+            icon={<Upload />}
+            label={t("forcePush")}
+            operation="FORCE_PUSH"
+            props={props}
+            disabled={unavailable || !worktree.upstream}
+          />
+          <OperationMenuItem
+            confirm
+            icon={<RotateCcw />}
+            label={t("reset")}
+            operation="RESET"
+            props={props}
+            disabled={unavailable || !worktree.upstream}
+          />
+          <OperationMenuItem
+            icon={<Archive />}
+            label={t("stashAll")}
+            operation="STASH_ALL"
+            props={props}
+            disabled={unavailable || !changeActions.hasChanges}
+          />
+          <OperationMenuItem
+            icon={<Check />}
+            label={
+              changeActions.stageOperation === "UNSTAGE_ALL"
+                ? t("unstageAll")
+                : t("stageAll")
+            }
+            operation={changeActions.stageOperation}
+            props={props}
+            disabled={unavailable || !changeActions.hasChanges}
+          />
+        </DropdownMenuContent>
+      </DropdownMenu>
       {worktree.activeJob && (
         <span className="flex items-center gap-1 text-xs text-muted-foreground">
           <Spinner /> {t("operationRunning")}
@@ -3360,22 +3394,25 @@ export function ActionRow(
   );
 }
 
-function OperationButton({
-  props,
-  operation,
-  label,
-  icon,
-  confirm = false,
-  disabled = false,
-}: {
+type OperationProps = {
   props: WorktreeItemProps & { onCompleted: () => Promise<void> };
   operation: Operation;
   label: string;
   icon: React.ReactNode;
   confirm?: boolean;
   disabled?: boolean;
-}) {
-  const t = useTranslations("worktrees");
+};
+
+/**
+ * Runs one worktree operation, arming a confirmation first when the operation
+ * discards work. Shared by the row's buttons and the overflow menu's items, so
+ * an operation behaves the same wherever it is offered.
+ */
+function useWorktreeOperation({
+  props,
+  operation,
+  confirm = false,
+}: Pick<OperationProps, "props" | "operation" | "confirm">) {
   const [armed, setArmed] = useState(false);
   const [busy, setBusy] = useState(false);
   const timer = useRef<number | null>(null);
@@ -3421,6 +3458,25 @@ function OperationButton({
       setBusy(false);
     }
   };
+
+  return { armed, busy, run };
+}
+
+function OperationButton({
+  props,
+  operation,
+  label,
+  icon,
+  confirm = false,
+  disabled = false,
+}: OperationProps) {
+  const t = useTranslations("worktrees");
+  const { armed, busy, run } = useWorktreeOperation({
+    props,
+    operation,
+    confirm,
+  });
+
   return (
     <Button
       disabled={disabled || busy}
@@ -3431,6 +3487,38 @@ function OperationButton({
       {busy ? <Spinner /> : armed ? <Check /> : icon}{" "}
       {armed ? t("confirmAction") : label}
     </Button>
+  );
+}
+
+function OperationMenuItem({
+  props,
+  operation,
+  label,
+  icon,
+  confirm = false,
+  disabled = false,
+}: OperationProps) {
+  const t = useTranslations("worktrees");
+  const { armed, busy, run } = useWorktreeOperation({
+    props,
+    operation,
+    confirm,
+  });
+
+  return (
+    <DropdownMenuItem
+      disabled={disabled || busy}
+      onSelect={(event) => {
+        // The first select on a confirming operation only arms it, so the menu
+        // has to stay open for the second one.
+        if (confirm && !armed) event.preventDefault();
+        void run();
+      }}
+      variant={armed ? "destructive" : "default"}
+    >
+      {busy ? <Spinner /> : armed ? <Check /> : icon}
+      {armed ? t("confirmAction") : label}
+    </DropdownMenuItem>
   );
 }
 

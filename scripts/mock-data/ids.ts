@@ -149,6 +149,15 @@ export const ids = {
      */
     captured: "0f1e2d3c-4b5a-4697-8899-aabbccddeeff",
   },
+  buildDataCollections: {
+    /**
+     * Doubles as the Build Data page's collection request id — playwright/routes.ts pins the
+     * page's client-generated id to this value so it resolves the seeded, already-finished
+     * scan instead of dispatching fresh scan jobs no agent can answer. Those jobs would stay
+     * QUEUED for the rest of the capture and show up in the Polling page's pending job counts.
+     */
+    captured: "1a2b3c4d-5e6f-4a7b-8c9d-0e1f2a3b4c5d",
+  },
 } as const;
 
 /** Display numbers must be unique per their scope; kept here so the seed stays consistent. */

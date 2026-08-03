@@ -429,14 +429,21 @@ describe("WorktreesPage", () => {
       (screen.getByRole("button", { name: "Sync" }) as HTMLButtonElement)
         .disabled,
     ).toBe(true);
-    expect(
-      (screen.getByRole("button", { name: "Stash all" }) as HTMLButtonElement)
-        .disabled,
-    ).toBe(true);
-    expect(
-      (screen.getByRole("button", { name: "Stage all" }) as HTMLButtonElement)
-        .disabled,
-    ).toBe(true);
+    // Stash and stage moved behind the row's overflow menu.
+    fireEvent.pointerDown(screen.getByRole("button", { name: "More" }), {
+      button: 0,
+      ctrlKey: false,
+    });
+    for (const name of ["Stash all", "Stage all"]) {
+      expect(
+        (await screen.findByRole("menuitem", { name })).hasAttribute(
+          "data-disabled",
+        ),
+      ).toBe(true);
+    }
+    fireEvent.keyDown(document.activeElement ?? document.body, {
+      key: "Escape",
+    });
     const card = screen
       .getByRole("button", { name: "feature/AIDE-24" })
       .closest('[data-slot="card"]');
@@ -597,10 +604,11 @@ describe("WorktreesPage", () => {
 
     const menuItems = screen.getAllByRole("menuitem");
     expect(
-      menuItems.slice(0, 5).map((item) => item.textContent?.trim()),
+      menuItems.slice(0, 6).map((item) => item.textContent?.trim()),
     ).toEqual([
       "Change branch",
       "Commit",
+      "Open in VS Code",
       "View codebase",
       "View repository",
       "Refresh pull request",
@@ -616,6 +624,49 @@ describe("WorktreesPage", () => {
       expect(request).toHaveBeenCalledWith(
         expect.stringContaining("mutation RefreshWorktreePullRequest"),
         { id: "worktree-1" },
+      ),
+    );
+  });
+
+  test("starts a session or plan on the card's own worktree", async () => {
+    render(<WorktreesPage />);
+    await screen.findByText("feature/AIDE-24");
+
+    expect(
+      screen.getByRole("link", { name: "New session" }).getAttribute("href"),
+    ).toBe("/runs/new?kind=session&worktree=worktree-1");
+    expect(
+      screen.getByRole("link", { name: "New plan" }).getAttribute("href"),
+    ).toBe("/runs/new?kind=plan&worktree=worktree-1");
+  });
+
+  test("pulls the branch onto its upstream", async () => {
+    const response = (await request("query Fixture")) as unknown as {
+      worktreeOverview: WorktreeOverview;
+    };
+    const worktree =
+      response.worktreeOverview.agents[0]!.codebases[0]!.worktrees[0]!;
+    worktree.upstream = "origin/feature/AIDE-24";
+    worktree.behind = 2;
+    request.mockClear();
+
+    render(<WorktreesPage />);
+    await screen.findByText("feature/AIDE-24");
+    request.mockResolvedValueOnce({
+      runWorktreeOperation: { id: "job-1" },
+    } as never);
+    fireEvent.click(screen.getByRole("button", { name: "Pull" }));
+
+    await waitFor(() =>
+      expect(request).toHaveBeenCalledWith(
+        expect.stringContaining("mutation RunWorktreeOperation"),
+        {
+          input: {
+            worktreeId: "worktree-1",
+            operation: "PULL",
+            requestId: expect.any(String),
+          },
+        },
       ),
     );
   });
