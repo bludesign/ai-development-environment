@@ -208,9 +208,26 @@
     "name": "Name",
     "description": "Beschreibung",
     "overlapPolicy": "Überlappungsregel",
+    "overlapScope": "Überlappungsbereich",
+    "overlapHelp": {
+      "QUEUE": "Jeder Auslöser erzeugt einen Lauf; die Läufe starten nacheinander in der Reihenfolge der Warteschlange.",
+      "CONCURRENT": "Läufe starten sofort beim Auslösen, bis zum Maximum unten.",
+      "COALESCE_LATEST": "Solange ein Lauf noch auf den Start wartet, ersetzt ihn der nächste Auslöser, statt einen zweiten Lauf anzulegen."
+    },
+    "overlapScopeHelp": {
+      "WORKTREE": "Pro Arbeitsbaum gezählt: Ein Lauf in einem Arbeitsbaum wartet nie auf einen Lauf in einem anderen. Läufe ohne Arbeitsbaum teilen sich eine eigene Warteschlange.",
+      "GLOBAL": "Über den gesamten Workflow gezählt: Die Läufe warten aufeinander, unabhängig vom Arbeitsbaum."
+    },
+    "maxConcurrentRunsHelp": "Wie viele Läufe dieses Workflows innerhalb des Bereichs unten gleichzeitig laufen dürfen.",
+    "detailsSection": "Details",
+    "runningSection": "Ausführung",
+    "runningSectionHelp": "Wie sich Läufe dieses Workflows zueinander verhalten und was ein Lauf während der Arbeit belegt.",
+    "canvasSection": "Arbeitsfläche",
+    "worktreeReservation": "Arbeitsbaum-Reservierung",
+    "reservesWorktree": "Reserviert Arbeitsbaum",
     "maxConcurrentRuns": "Maximale parallele Läufe",
     "exclusiveWorktree": "Arbeitsbaum für diesen Workflow reservieren",
-    "exclusiveWorktreeHelp": "Der Lauf wartet auf frühere Arbeit und stellt danach andere Workflows, Pläne und Sitzungen in diesem Arbeitsbaum bis zum Abschluss in die Warteschlange. Eigene Schritte laufen normal weiter.",
+    "exclusiveWorktreeHelp": "Zusätzlich zur Überlappungsregel, die nur die eigenen Läufe dieses Workflows zählt: Ein reservierter Arbeitsbaum hält außerdem andere Workflows, Pläne und Sitzungen zurück, bis der Lauf fertig ist. Der Lauf selbst wartet auf bereits laufende Arbeit, seine eigenen Schritte laufen normal weiter.",
     "completionNotifications": "Benachrichtigen, wenn dieser Workflow erfolgreich abgeschlossen wird",
     "completionNotificationsHelp": "Deaktivieren Sie diese Option, um Benachrichtigungen über erfolgreiche Abschlüsse zu unterdrücken. Fehler- und Aufmerksamkeitsbenachrichtigungen bleiben aktiviert.",
     "connectorLayout": "Schrittverbindungen",
@@ -323,6 +340,10 @@
       "QUEUE": "Warteschlange",
       "CONCURRENT": "Parallel",
       "COALESCE_LATEST": "Nur neuestes"
+    },
+    "overlapScopes": {
+      "WORKTREE": "Pro Arbeitsbaum",
+      "GLOBAL": "Jeder Arbeitsbaum"
     },
     "failure": {
       "FAIL": "Workflow fehlschlagen lassen",

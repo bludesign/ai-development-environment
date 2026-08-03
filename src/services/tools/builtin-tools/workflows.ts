@@ -136,6 +136,7 @@ const WorkflowSchema = z.object({
   description: z.string(),
   enabled: z.boolean(),
   overlapPolicy: z.string(),
+  overlapScope: z.string(),
   maxConcurrentRuns: z.number(),
   completionNotificationsEnabled: z.boolean(),
   exclusiveWorktree: z.boolean(),
@@ -631,6 +632,12 @@ export function createWorkflowToolGroup(workflows: Service): BuiltInToolGroup {
             .describe(
               "What happens when a run starts while one is in flight. Defaults to QUEUE.",
             ),
+          overlapScope: z
+            .enum(["WORKTREE", "GLOBAL"])
+            .optional()
+            .describe(
+              "Which runs the overlap policy counts: WORKTREE keeps a queue per worktree so worktrees never wait on each other, GLOBAL counts every run of the workflow. Defaults to WORKTREE.",
+            ),
           maxConcurrentRuns: z.number().int().min(1).optional(),
           completionNotificationsEnabled: z
             .boolean()
@@ -673,6 +680,12 @@ export function createWorkflowToolGroup(workflows: Service): BuiltInToolGroup {
           overlapPolicy: z
             .enum(["QUEUE", "CONCURRENT", "COALESCE_LATEST"])
             .optional(),
+          overlapScope: z
+            .enum(["WORKTREE", "GLOBAL"])
+            .optional()
+            .describe(
+              "Which runs the overlap policy counts: WORKTREE keeps a queue per worktree, GLOBAL counts every run of the workflow.",
+            ),
           maxConcurrentRuns: z.number().int().min(1).optional(),
           completionNotificationsEnabled: z
             .boolean()
@@ -700,6 +713,7 @@ export function createWorkflowToolGroup(workflows: Service): BuiltInToolGroup {
             id: input.workflowId,
             definition: next,
             overlapPolicy: input.overlapPolicy ?? null,
+            overlapScope: input.overlapScope ?? null,
             maxConcurrentRuns: input.maxConcurrentRuns ?? null,
             completionNotificationsEnabled:
               input.completionNotificationsEnabled ?? null,

@@ -208,9 +208,26 @@
     "name": "Name",
     "description": "Description",
     "overlapPolicy": "Overlap policy",
+    "overlapScope": "Overlap scope",
+    "overlapHelp": {
+      "QUEUE": "Every trigger creates a run, and runs start one at a time in the order they were queued.",
+      "CONCURRENT": "Runs start as soon as they are triggered, up to the maximum below.",
+      "COALESCE_LATEST": "While a run is still waiting to start, the next trigger replaces it instead of adding a second run."
+    },
+    "overlapScopeHelp": {
+      "WORKTREE": "Counted per worktree, so a run on one worktree never waits for a run on another. Runs that belong to no worktree share a queue of their own.",
+      "GLOBAL": "Counted across the whole workflow, so its runs wait for each other no matter which worktree they belong to."
+    },
+    "maxConcurrentRunsHelp": "How many runs of this workflow may be in flight at once inside the scope below.",
+    "detailsSection": "Details",
+    "runningSection": "Running",
+    "runningSectionHelp": "How runs of this workflow line up against each other, and what a run holds while it works.",
+    "canvasSection": "Canvas",
+    "worktreeReservation": "Worktree reservation",
+    "reservesWorktree": "Reserves worktree",
     "maxConcurrentRuns": "Maximum concurrent runs",
     "exclusiveWorktree": "Reserve the worktree for this workflow",
-    "exclusiveWorktreeHelp": "The run waits for earlier work to finish, then queues other workflows, plans, and sessions on this worktree until it completes. Its own steps continue normally.",
+    "exclusiveWorktreeHelp": "Beyond the overlap policy, which only counts this workflow's own runs: a reserved worktree also holds back other workflows, plans, and sessions until the run finishes. The run itself waits for work already under way before it starts, and its own steps continue normally.",
     "completionNotifications": "Notify when this workflow completes successfully",
     "completionNotificationsHelp": "Turn this off to suppress successful-run completion notifications. Failure and attention notifications remain enabled.",
     "connectorLayout": "Step connectors",
@@ -323,6 +340,10 @@
       "QUEUE": "Queue",
       "CONCURRENT": "Concurrent",
       "COALESCE_LATEST": "Latest only"
+    },
+    "overlapScopes": {
+      "WORKTREE": "Per worktree",
+      "GLOBAL": "Every worktree"
     },
     "failure": {
       "FAIL": "Fail workflow",

@@ -158,6 +158,7 @@ export type CreateWorkflowInput = {
   description?: string | null;
   definition?: unknown;
   overlapPolicy?: string | null;
+  overlapScope?: string | null;
   maxConcurrentRuns?: number | null;
   completionNotificationsEnabled?: boolean | null;
   exclusiveWorktree?: boolean | null;
@@ -167,6 +168,7 @@ export type SaveWorkflowDraftInput = {
   id: string;
   definition: unknown;
   overlapPolicy?: string | null;
+  overlapScope?: string | null;
   maxConcurrentRuns?: number | null;
   completionNotificationsEnabled?: boolean | null;
   exclusiveWorktree?: boolean | null;
@@ -319,6 +321,26 @@ function overlapPolicy(value: string | null | undefined): string {
     throw new Error("Workflow overlap policy is not supported");
   }
   return normalized;
+}
+
+function overlapScope(value: string | null | undefined): string {
+  const normalized = value?.trim().toUpperCase() || "WORKTREE";
+  if (!new Set(["WORKTREE", "GLOBAL"]).has(normalized)) {
+    throw new Error("Workflow overlap scope is not supported");
+  }
+  return normalized;
+}
+
+/**
+ * The runs an overlap policy is measured against. `WORKTREE` keeps each
+ * worktree's runs in their own queue — two worktrees never wait on each other,
+ * and runs that belong to no worktree share a queue of their own.
+ */
+function overlapScopeFilter(
+  scope: string,
+  worktreeId: string | null,
+): { worktreeId?: string | null } {
+  return scope === "WORKTREE" ? { worktreeId } : {};
 }
 
 function concurrentRuns(
@@ -980,6 +1002,7 @@ export class WorkflowsService {
         draftDefinitionJson: serialized,
         draftSchemaVersion: WORKFLOW_SCHEMA_VERSION,
         overlapPolicy: policy,
+        overlapScope: overlapScope(input.overlapScope),
         maxConcurrentRuns: concurrentRuns(input.maxConcurrentRuns, policy),
         completionNotificationsEnabled:
           input.completionNotificationsEnabled ?? true,
@@ -1006,6 +1029,7 @@ export class WorkflowsService {
         draftDefinitionJson: serialized,
         draftSchemaVersion: definition.schemaVersion,
         overlapPolicy: policy,
+        overlapScope: overlapScope(input.overlapScope ?? current.overlapScope),
         maxConcurrentRuns: concurrentRuns(
           input.maxConcurrentRuns ?? current.maxConcurrentRuns,
           policy,
@@ -1307,6 +1331,7 @@ export class WorkflowsService {
         name: version?.name ?? workflow.name,
         description: version?.description ?? workflow.description,
         overlapPolicy: workflow.overlapPolicy,
+        overlapScope: workflow.overlapScope,
         maxConcurrentRuns: workflow.maxConcurrentRuns,
         completionNotificationsEnabled: workflow.completionNotificationsEnabled,
         exclusiveWorktree: workflow.exclusiveWorktree,
@@ -1344,6 +1369,14 @@ export class WorkflowsService {
         typeof workflow.overlapPolicy === "string"
           ? workflow.overlapPolicy
           : "QUEUE",
+      // Exports taken before the scope existed reserved worktrees per worktree
+      // and counted everything else globally, so they import that way.
+      overlapScope:
+        typeof workflow.overlapScope === "string"
+          ? workflow.overlapScope
+          : workflow.exclusiveWorktree === true
+            ? "WORKTREE"
+            : "GLOBAL",
       maxConcurrentRuns:
         typeof workflow.maxConcurrentRuns === "number"
           ? workflow.maxConcurrentRuns
@@ -2662,12 +2695,27 @@ export class WorkflowsService {
         where: { idempotencyKey },
       });
       if (existing) return attachDelivery(existing);
+      const sessionSeed = parseObject(
+        payload.sessionData ?? {},
+        "Session data",
+      );
+      const requestedWorktreeId = getSessionValue(sessionSeed, "worktree.id");
+      const worktreeId =
+        typeof requestedWorktreeId === "string" && requestedWorktreeId
+          ? ((
+              await transaction.worktree.findUnique({
+                where: { id: requestedWorktreeId },
+                select: { id: true },
+              })
+            )?.id ?? null)
+          : null;
       if (workflow.overlapPolicy === "COALESCE_LATEST") {
         const queued = await transaction.workflowRun.findFirst({
           where: {
             workflowId: workflow.id,
             triggerSubjectKey: subjectKey,
             status: "QUEUED",
+            ...overlapScopeFilter(workflow.overlapScope, worktreeId),
           },
           orderBy: { queuedAt: "desc" },
         });
@@ -2686,10 +2734,6 @@ export class WorkflowsService {
         }
       }
       const id = randomUUID();
-      const sessionSeed = parseObject(
-        payload.sessionData ?? {},
-        "Session data",
-      );
       const sessionData = mergeSessionData(
         {
           workflow: {
@@ -2714,16 +2758,6 @@ export class WorkflowsService {
       );
       const serializedSession = JSON.stringify(sessionData);
       assertSize(serializedSession, "Workflow session data", MAX_SESSION_BYTES);
-      const requestedWorktreeId = getSessionValue(sessionData, "worktree.id");
-      const worktreeId =
-        typeof requestedWorktreeId === "string" && requestedWorktreeId
-          ? ((
-              await transaction.worktree.findUnique({
-                where: { id: requestedWorktreeId },
-                select: { id: true },
-              })
-            )?.id ?? null)
-          : null;
       const parent = parentRunId
         ? await transaction.workflowRun.findUnique({
             where: { id: parentRunId },
@@ -3417,6 +3451,7 @@ export class WorkflowsService {
           where: {
             workflowId: run.workflowId,
             id: { not: run.id },
+            ...overlapScopeFilter(run.workflow.overlapScope, run.worktreeId),
             status: {
               in: ACTIVE_RUN_STATUSES.filter((status) => status !== "QUEUED"),
             },

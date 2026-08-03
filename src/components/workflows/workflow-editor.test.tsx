@@ -255,6 +255,77 @@ describe("workflow editor completion notifications", () => {
   });
 });
 
+describe("workflow editor overlap settings", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    global.ResizeObserver = ResizeObserverMock;
+  });
+
+  test("explains the saved scope and hides the limit until runs may overlap", async () => {
+    const definition = emptyDefinition("Overlap settings");
+    const workflow = {
+      id: "workflow-1",
+      name: definition.name,
+      description: definition.description,
+      draftDefinition: definition,
+      activeVersionId: null,
+      enabled: false,
+      overlapPolicy: "QUEUE",
+      overlapScope: "GLOBAL",
+      maxConcurrentRuns: 1,
+      completionNotificationsEnabled: true,
+      archivedAt: null,
+      versionCount: 0,
+      runCount: 0,
+      createdAt: "2026-08-03T00:00:00.000Z",
+      updatedAt: "2026-08-03T00:00:00.000Z",
+    };
+    request.mockImplementation(async (query, variables) => {
+      if (query.includes("workflowCatalog"))
+        return {
+          workflowCatalog: {
+            schemaVersion: 1,
+            globalConcurrency: 1,
+            steps: [],
+            triggers: [],
+          },
+          workflow,
+        } as never;
+      const input = (variables as { input: { definition: typeof definition } })
+        .input;
+      return {
+        saveWorkflowDraft: { ...workflow, draftDefinition: input.definition },
+      } as never;
+    });
+
+    render(
+      <TooltipProvider>
+        <WorkflowEditor workflowId="workflow-1" />
+      </TooltipProvider>,
+    );
+
+    fireEvent.click(await screen.findByRole("button", { name: "Settings" }));
+    expect(
+      screen.getByText(
+        "Counted across the whole workflow, so its runs wait for each other no matter which worktree they belong to.",
+      ),
+    ).toBeTruthy();
+    // The limit only means anything once the policy lets runs overlap.
+    expect(screen.queryByLabelText("Maximum concurrent runs")).toBeNull();
+    fireEvent.keyDown(document.body, { key: "Escape" });
+    fireEvent.click(screen.getByRole("button", { name: "Save draft" }));
+
+    await waitFor(() =>
+      expect(request).toHaveBeenLastCalledWith(
+        expect.stringContaining("mutation SaveWorkflow"),
+        expect.objectContaining({
+          input: expect.objectContaining({ overlapScope: "GLOBAL" }),
+        }),
+      ),
+    );
+  });
+});
+
 describe("workflow editor edge deletion", () => {
   beforeEach(() => {
     vi.clearAllMocks();

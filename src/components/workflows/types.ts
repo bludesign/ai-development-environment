@@ -109,6 +109,7 @@ export type WorkflowSummary = {
   activeVersionId: string | null;
   enabled: boolean;
   overlapPolicy: "QUEUE" | "CONCURRENT" | "COALESCE_LATEST";
+  overlapScope: "WORKTREE" | "GLOBAL";
   maxConcurrentRuns: number;
   completionNotificationsEnabled: boolean;
   exclusiveWorktree: boolean;

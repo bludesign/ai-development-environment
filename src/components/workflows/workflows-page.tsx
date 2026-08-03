@@ -100,7 +100,7 @@ import { useWorkflowLabels } from "./workflow-labels";
 import type { WorkflowRun, WorkflowSummary } from "./types";
 
 const WORKFLOW_FIELDS = `
-  id name description draftDefinition activeVersionId enabled overlapPolicy maxConcurrentRuns completionNotificationsEnabled exclusiveWorktree archivedAt quickActionKind quickActionIconKey quickActionButtonVariant
+  id name description draftDefinition activeVersionId enabled overlapPolicy overlapScope maxConcurrentRuns completionNotificationsEnabled exclusiveWorktree archivedAt quickActionKind quickActionIconKey quickActionButtonVariant
   quickActionRepositories { id name displayOrigin }
   hasPlainTrigger
   triggerChoices { key label description }
@@ -662,10 +662,12 @@ export function WorkflowsPage() {
                       {t("versionCount", { count: workflow.versionCount })}
                     </Badge>
                     <Badge variant="outline">
-                      {labels.overlapPolicy(workflow.overlapPolicy)}
+                      {`${labels.overlapPolicy(
+                        workflow.overlapPolicy,
+                      )} · ${labels.overlapScope(workflow.overlapScope)}`}
                     </Badge>
                     {workflow.exclusiveWorktree && (
-                      <Badge variant="outline">{t("exclusiveWorktree")}</Badge>
+                      <Badge variant="outline">{t("reservesWorktree")}</Badge>
                     )}
                     {workflow.quickActionKind !== "NONE" && (
                       <Badge variant="outline">

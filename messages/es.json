@@ -208,9 +208,26 @@
     "name": "Nombre",
     "description": "Descripción",
     "overlapPolicy": "Política de solapamiento",
+    "overlapScope": "Alcance del solapamiento",
+    "overlapHelp": {
+      "QUEUE": "Cada evento crea una ejecución, y las ejecuciones empiezan de una en una en el orden en que se pusieron en cola.",
+      "CONCURRENT": "Las ejecuciones empiezan en cuanto se activan, hasta el máximo indicado abajo.",
+      "COALESCE_LATEST": "Mientras una ejecución sigue esperando para empezar, el siguiente evento la sustituye en lugar de añadir otra."
+    },
+    "overlapScopeHelp": {
+      "WORKTREE": "Se cuenta por árbol de trabajo, así que una ejecución en un árbol nunca espera a otra de un árbol distinto. Las ejecuciones sin árbol comparten su propia cola.",
+      "GLOBAL": "Se cuenta en todo el flujo, así que sus ejecuciones se esperan entre sí sea cual sea el árbol de trabajo."
+    },
+    "maxConcurrentRunsHelp": "Cuántas ejecuciones de este flujo pueden estar en curso a la vez dentro del alcance de abajo.",
+    "detailsSection": "Detalles",
+    "runningSection": "Ejecución",
+    "runningSectionHelp": "Cómo se ordenan entre sí las ejecuciones de este flujo y qué reserva una ejecución mientras trabaja.",
+    "canvasSection": "Lienzo",
+    "worktreeReservation": "Reserva del árbol de trabajo",
+    "reservesWorktree": "Reserva el árbol",
     "maxConcurrentRuns": "Máximo de ejecuciones simultáneas",
     "exclusiveWorktree": "Reservar el árbol de trabajo para este flujo",
-    "exclusiveWorktreeHelp": "La ejecución espera a que termine el trabajo anterior y luego pone en cola otros flujos, planes y sesiones de este árbol hasta completarse. Sus propios pasos continúan normalmente.",
+    "exclusiveWorktreeHelp": "Más allá de la política de solapamiento, que solo cuenta las ejecuciones de este flujo: un árbol reservado también retiene otros flujos, planes y sesiones hasta que la ejecución termina. La ejecución espera al trabajo ya en curso antes de empezar y sus propios pasos continúan con normalidad.",
     "completionNotifications": "Notificar cuando este flujo de trabajo finalice correctamente",
     "completionNotificationsHelp": "Desactiva esta opción para omitir las notificaciones de finalización correcta. Las notificaciones de errores y de atención permanecen activadas.",
     "connectorLayout": "Conectores de los pasos",
@@ -323,6 +340,10 @@
       "QUEUE": "En cola",
       "CONCURRENT": "Concurrente",
       "COALESCE_LATEST": "Solo el último"
+    },
+    "overlapScopes": {
+      "WORKTREE": "Por árbol de trabajo",
+      "GLOBAL": "Todos los árboles"
     },
     "failure": {
       "FAIL": "Hacer fallar el flujo",

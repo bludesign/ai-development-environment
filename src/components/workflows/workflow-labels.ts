@@ -36,6 +36,8 @@ export function useWorkflowLabels() {
       lookup("diagnosticCodes", value) ?? formatKindLabel(value),
     overlapPolicy: (value: string) =>
       lookup("overlapPolicies", value) ?? formatKindLabel(value),
+    overlapScope: (value: string) =>
+      lookup("overlapScopes", value) ?? formatKindLabel(value),
     kind: (value: string) => formatKindLabel(value),
   };
 }

@@ -147,6 +147,7 @@ export function workflowView(value: Record<string, unknown>) {
     description: String(value.description ?? ""),
     enabled: value.enabled === true,
     overlapPolicy: String(value.overlapPolicy),
+    overlapScope: String(value.overlapScope ?? "WORKTREE"),
     maxConcurrentRuns: Number(value.maxConcurrentRuns),
     completionNotificationsEnabled:
       value.completionNotificationsEnabled !== false,

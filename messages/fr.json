@@ -208,9 +208,26 @@
     "name": "Nom",
     "description": "Description",
     "overlapPolicy": "Politique de chevauchement",
+    "overlapScope": "Portée du chevauchement",
+    "overlapHelp": {
+      "QUEUE": "Chaque déclenchement crée une exécution, et les exécutions démarrent une à une dans leur ordre de mise en file.",
+      "CONCURRENT": "Les exécutions démarrent dès le déclenchement, jusqu’au maximum ci-dessous.",
+      "COALESCE_LATEST": "Tant qu’une exécution attend de démarrer, le déclenchement suivant la remplace au lieu d’en ajouter une seconde."
+    },
+    "overlapScopeHelp": {
+      "WORKTREE": "Compté par arbre de travail : une exécution sur un arbre n’attend jamais une exécution sur un autre. Les exécutions sans arbre partagent leur propre file.",
+      "GLOBAL": "Compté sur l’ensemble du workflow : ses exécutions s’attendent les unes les autres, quel que soit l’arbre de travail."
+    },
+    "maxConcurrentRunsHelp": "Combien d’exécutions de ce workflow peuvent être en cours en même temps dans la portée ci-dessous.",
+    "detailsSection": "Détails",
+    "runningSection": "Exécution",
+    "runningSectionHelp": "Comment les exécutions de ce workflow s’ordonnent entre elles, et ce qu’une exécution retient pendant son travail.",
+    "canvasSection": "Canevas",
+    "worktreeReservation": "Réservation de l’arbre de travail",
+    "reservesWorktree": "Réserve l’arbre",
     "maxConcurrentRuns": "Exécutions simultanées maximales",
     "exclusiveWorktree": "Réserver l’arbre de travail à ce workflow",
-    "exclusiveWorktreeHelp": "L’exécution attend la fin des travaux antérieurs, puis met en file les autres workflows, plans et sessions de cet arbre jusqu’à sa fin. Ses propres étapes continuent normalement.",
+    "exclusiveWorktreeHelp": "Au-delà de la politique de chevauchement, qui ne compte que les exécutions de ce workflow : un arbre réservé met aussi en attente les autres workflows, plans et sessions jusqu’à la fin de l’exécution. L’exécution attend le travail déjà en cours avant de démarrer, et ses propres étapes se poursuivent normalement.",
     "completionNotifications": "Notifier lorsque ce workflow se termine avec succès",
     "completionNotificationsHelp": "Désactivez cette option pour supprimer les notifications de réussite. Les notifications d’échec et d’attention restent activées.",
     "connectorLayout": "Connecteurs d'étape",
@@ -323,6 +340,10 @@
       "QUEUE": "File d'attente",
       "CONCURRENT": "Simultané",
       "COALESCE_LATEST": "Dernier uniquement"
+    },
+    "overlapScopes": {
+      "WORKTREE": "Par arbre de travail",
+      "GLOBAL": "Tous les arbres"
     },
     "failure": {
       "FAIL": "Faire échouer le workflow",

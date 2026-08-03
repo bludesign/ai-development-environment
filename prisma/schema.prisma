@@ -2417,6 +2417,7 @@ model Workflow {
   activeVersionId                String?                         @unique
   enabled                        Boolean                         @default(false)
   overlapPolicy                  String                          @default("QUEUE")
+  overlapScope                   String                          @default("WORKTREE")
   maxConcurrentRuns              Int                             @default(1)
   completionNotificationsEnabled Boolean                         @default(true)
   exclusiveWorktree              Boolean                         @default(false)
