@@ -9,18 +9,15 @@ import { Spinner } from "@/components/ui/spinner";
 import { createClientId } from "@/lib/browser-utils";
 import { controlPlaneRequest } from "@/lib/control-plane-client";
 
-export function RebuildButton({
+export function useRebuildBuild({
   buildId,
   onCompleted,
   onError,
-  size = "default",
 }: {
   buildId: string;
   onCompleted?: (build: { id: string; status: string }) => void | Promise<void>;
   onError: (error: string | null) => void;
-  size?: "sm" | "default";
 }) {
-  const t = useTranslations("builds");
   const [rebuilding, setRebuilding] = useState(false);
 
   const rebuild = async () => {
@@ -42,6 +39,27 @@ export function RebuildButton({
       setRebuilding(false);
     }
   };
+
+  return { rebuild, rebuilding };
+}
+
+export function RebuildButton({
+  buildId,
+  onCompleted,
+  onError,
+  size = "default",
+}: {
+  buildId: string;
+  onCompleted?: (build: { id: string; status: string }) => void | Promise<void>;
+  onError: (error: string | null) => void;
+  size?: "sm" | "default";
+}) {
+  const t = useTranslations("builds");
+  const { rebuild, rebuilding } = useRebuildBuild({
+    buildId,
+    onCompleted,
+    onError,
+  });
 
   return (
     <Button

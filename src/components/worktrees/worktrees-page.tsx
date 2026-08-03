@@ -42,7 +42,7 @@ import {
 
 import { AGENT_FIELDS } from "@/components/agents/graphql-fields";
 import { buildStatusVariant } from "@/components/builds/build-format";
-import { RebuildButton } from "@/components/builds/rebuild-button";
+import { useRebuildBuild } from "@/components/builds/rebuild-button";
 import { RunBuildControls } from "@/components/builds/run-build-controls";
 import { StartBuildButton } from "@/components/builds/start-build-dialog";
 import {
@@ -1773,13 +1773,38 @@ function LatestBuildRow({
   const runnable =
     build.status === "SUCCEEDED" &&
     build.artifacts.some((artifact) => artifact.kind === "RUNNABLE_APP");
+  const { rebuild, rebuilding } = useRebuildBuild({
+    buildId: build.id,
+    onCompleted: () => onCompleted(),
+    onError,
+  });
   return (
     <MetadataRow label={t("latestBuild")}>
-      <Badge asChild variant="outline">
-        <Link href={`/builds/${build.id}`}>
-          {buildsT(`actions.${build.action}`)}
-        </Link>
-      </Badge>
+      <DropdownMenu>
+        <DropdownMenuTrigger asChild>
+          <Badge asChild variant="outline">
+            <button type="button">
+              {buildsT(`actions.${build.action}`)}
+              <ChevronDown />
+            </button>
+          </Badge>
+        </DropdownMenuTrigger>
+        <DropdownMenuContent align="start" className="w-36">
+          <DropdownMenuItem asChild>
+            <Link href={`/builds/${build.id}`}>
+              <ExternalLink />
+              {buildsT("viewBuild")}
+            </Link>
+          </DropdownMenuItem>
+          <DropdownMenuItem
+            disabled={rebuilding}
+            onSelect={() => void rebuild()}
+          >
+            {rebuilding ? <Spinner /> : <RotateCcw />}
+            {buildsT("rebuild")}
+          </DropdownMenuItem>
+        </DropdownMenuContent>
+      </DropdownMenu>
       <Badge variant={buildStatusVariant(build.status)}>
         {buildsT(`statuses.${build.status}`)}
       </Badge>
@@ -1791,12 +1816,6 @@ function LatestBuildRow({
           {buildsT("outOfDate")}
         </Badge>
       )}
-      <RebuildButton
-        buildId={build.id}
-        onCompleted={() => onCompleted()}
-        onError={onError}
-        size="sm"
-      />
       {runnable && (
         <RunBuildControls
           buildId={build.id}

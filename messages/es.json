@@ -3209,6 +3209,7 @@
     "startBuild": "Iniciar compilación",
     "startBuildDescription": "Elige una configuración guardada y un destino. El comando se ejecuta desde la raíz de este worktree.",
     "configuration": "Configuración",
+    "agent": "Agente",
     "configurationInvalid": "El origen, esquema o configuración guardados no están disponibles en este worktree.",
     "noConfigurations": "Crea una configuración de compilación de iOS válida en los ajustes del repositorio antes de iniciar una compilación.",
     "reparse": "Volver a analizar",

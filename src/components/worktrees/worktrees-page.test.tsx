@@ -395,9 +395,7 @@ describe("WorktreesPage", () => {
     expect(screen.getByText("Commits: 1")).toBeDefined();
     expect(screen.getByText("In sync")).toBeDefined();
     expect(screen.getByText("Latest build")).toBeDefined();
-    expect(
-      screen.getByRole("link", { name: "Build" }).getAttribute("href"),
-    ).toBe("/builds/build-1");
+    const latestBuildRow = screen.getByText("Latest build").parentElement!;
     expect(screen.getByText("Succeeded")).toBeDefined();
     expect(screen.getByText("Out of date")).toBeDefined();
     expect(screen.getByRole("button", { name: /1 devices/ })).toBeDefined();
@@ -405,10 +403,22 @@ describe("WorktreesPage", () => {
       (screen.getByRole("button", { name: "Run" }) as HTMLButtonElement)
         .disabled,
     ).toBe(false);
+    expect(
+      within(latestBuildRow).queryByRole("button", { name: "Rebuild" }),
+    ).toBeNull();
+    fireEvent.pointerDown(
+      within(latestBuildRow).getByRole("button", { name: "Build" }),
+      { button: 0, ctrlKey: false },
+    );
+    expect(
+      (
+        await screen.findByRole("menuitem", { name: "View build" })
+      ).getAttribute("href"),
+    ).toBe("/builds/build-1");
     request.mockResolvedValueOnce({
       rebuildBuild: { id: "build-rebuilt", status: "QUEUED" },
     } as never);
-    fireEvent.click(screen.getByRole("button", { name: "Rebuild" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Rebuild" }));
     await waitFor(() =>
       expect(request).toHaveBeenCalledWith(
         expect.stringContaining("mutation RebuildBuild"),

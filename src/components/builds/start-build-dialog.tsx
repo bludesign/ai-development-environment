@@ -62,6 +62,12 @@ type PriorBuildForTesting = {
   createdAt: string;
 };
 
+type BuildAgent = {
+  id: string;
+  name: string;
+  hostname: string;
+};
+
 const PROJECT_FIELDS = `
   id type
   configurations {
@@ -253,6 +259,7 @@ function StartBuildDialog({
   const t = useTranslations("builds");
   const locale = useLocale();
   const [project, setProject] = useState<IosAppProject | null>(null);
+  const [agent, setAgent] = useState<BuildAgent | null>(null);
   const [priorBuilds, setPriorBuilds] = useState<PriorBuildForTesting[]>([]);
   const [configurationId, setConfigurationId] = useState("");
   const [action, setAction] = useState<BuildAction>("BUILD");
@@ -286,10 +293,12 @@ function StartBuildDialog({
     let disposed = false;
     void controlPlaneRequest<{
       iosAppProject: IosAppProject | null;
+      codebase: { agent: BuildAgent } | null;
       builds: { items: PriorBuildForTesting[] };
     }>(
       `query StartBuildProject($codebaseId: ID!, $worktreeId: ID!) {
         iosAppProject(codebaseId: $codebaseId) { ${PROJECT_FIELDS} }
+        codebase(id: $codebaseId) { agent { id name hostname } }
         builds(first: 50, status: SUCCEEDED, worktreeId: $worktreeId) {
           items { id action destinationType snapshot createdAt }
         }
@@ -299,6 +308,7 @@ function StartBuildDialog({
       .then((data) => {
         if (disposed) return;
         setProject(data.iosAppProject);
+        setAgent(data.codebase?.agent ?? null);
         setPriorBuilds(data.builds.items);
         const first = data.iosAppProject?.configurations[0];
         if (first) {
@@ -635,14 +645,25 @@ function StartBuildDialog({
               <Card>
                 <CardContent className="space-y-2 text-sm">
                   <div className="flex items-center justify-between gap-2">
-                    <div>
-                      <p className="font-mono text-xs">
+                    <div className="min-w-0 flex-1">
+                      <p
+                        className="truncate font-mono text-xs"
+                        title={configuration.source.relativePath}
+                      >
                         {configuration.source.relativePath}
                       </p>
                       <p className="text-xs text-muted-foreground">
                         {configuration.scheme} ·{" "}
                         {configuration.buildConfiguration}
                       </p>
+                      {agent && (
+                        <p
+                          className="truncate text-xs text-muted-foreground"
+                          title={`${agent.name} (${agent.hostname})`}
+                        >
+                          {t("agent")}: {agent.name}
+                        </p>
+                      )}
                     </div>
                     <Button
                       disabled={preparing}

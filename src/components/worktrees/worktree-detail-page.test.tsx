@@ -363,9 +363,16 @@ describe("WorktreeDetailPage", () => {
     expect(screen.getByText("/workspaces/repo-aide-43")).toBeDefined();
     expect(screen.getByText("1234567890abcdef")).toBeDefined();
     expect(screen.getByText("Latest build")).toBeDefined();
-    expect(
-      screen.getByRole("link", { name: "Build" }).getAttribute("href"),
-    ).toBe("/builds/build-1");
+    const latestBuildRow = screen.getByText("Latest build").parentElement!;
+    fireEvent.pointerDown(
+      within(latestBuildRow).getByRole("button", { name: "Build" }),
+      { button: 0, ctrlKey: false },
+    );
+    const viewLatestBuild = await screen.findByRole("menuitem", {
+      name: "View build",
+    });
+    expect(viewLatestBuild.getAttribute("href")).toBe("/builds/build-1");
+    fireEvent.keyDown(viewLatestBuild, { key: "Escape" });
     expect(screen.getAllByText("Succeeded")).toHaveLength(2);
     const buildsCard = screen
       .getByText("Builds")

@@ -58,6 +58,13 @@ beforeEach(() => {
     if (operation.includes("query StartBuildProject")) {
       return {
         builds: { items: [] },
+        codebase: {
+          agent: {
+            id: "agent-1",
+            name: "Build Mac",
+            hostname: "build-mac.local",
+          },
+        },
         iosAppProject: {
           id: "project-1",
           type: "IOS_APP",
@@ -244,6 +251,11 @@ describe("StartBuildDialog", () => {
     const dialog = await screen.findByRole("dialog");
     expect(dialog.className).toContain("sm:max-w-5xl");
     expect(await screen.findByText("Development")).toBeDefined();
+    const sourcePath = screen.getByText("App.xcworkspace");
+    expect(sourcePath.className).toContain("truncate");
+    expect(sourcePath.parentElement?.className).toContain("min-w-0");
+    expect(sourcePath.getAttribute("title")).toBe("App.xcworkspace");
+    expect(screen.getByText("Agent: Build Mac")).toBeDefined();
 
     const actionField = within(dialog).getByText("Action").parentElement!;
     const actionSelect = within(actionField).getByRole("combobox");
@@ -308,6 +320,8 @@ describe("StartBuildDialog", () => {
     const [manualBundleId] = await screen.findAllByText(
       "com.example.app.MissingExtension",
     );
+    expect(manualBundleId.className).toContain("[overflow-wrap:anywhere]");
+    expect(manualBundleId.parentElement?.className).toContain("min-w-0");
     const manualBundleCard = manualBundleId.closest(
       "div.rounded-lg",
     ) as HTMLElement;

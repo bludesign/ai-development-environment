@@ -3209,6 +3209,7 @@
     "startBuild": "Start Build",
     "startBuildDescription": "Choose one saved configuration and destination. The command runs from this worktree root.",
     "configuration": "Configuration",
+    "agent": "Agent",
     "configurationInvalid": "The saved source, scheme, or configuration is unavailable in this worktree.",
     "noConfigurations": "Create a valid iOS build configuration in repository settings before starting a build.",
     "reparse": "Reparse",
