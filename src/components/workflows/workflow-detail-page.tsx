@@ -411,40 +411,28 @@ export function WorkflowDetailPage({ workflowId }: { workflowId: string }) {
           <CardHeader>
             <CardTitle>{t("overlapPolicy")}</CardTitle>
           </CardHeader>
-          <CardContent className="flex flex-col gap-2">
-            <div className="flex flex-wrap gap-1.5">
+          <CardContent className="flex flex-wrap gap-1.5">
+            <Badge variant="outline">
+              {labels.overlapPolicy(workflow.overlapPolicy)}
+            </Badge>
+            <Badge variant="outline">
+              {labels.overlapScope(workflow.overlapScope)}
+            </Badge>
+            {workflow.overlapPolicy === "CONCURRENT" && (
               <Badge variant="outline">
-                {labels.overlapPolicy(workflow.overlapPolicy)}
+                {`${t("maxConcurrentRuns")}: ${workflow.maxConcurrentRuns}`}
               </Badge>
-              <Badge variant="outline">
-                {labels.overlapScope(workflow.overlapScope)}
-              </Badge>
-              {workflow.overlapPolicy === "CONCURRENT" && (
-                <Badge variant="outline">
-                  {`${t("maxConcurrentRuns")}: ${workflow.maxConcurrentRuns}`}
-                </Badge>
-              )}
-            </div>
-            <p className="text-xs text-muted-foreground">
-              {`${t(`overlapHelp.${workflow.overlapPolicy}`)} ${t(
-                `overlapScopeHelp.${workflow.overlapScope}`,
-              )}`}
-            </p>
+            )}
           </CardContent>
         </Card>
         <Card>
           <CardHeader>
             <CardTitle>{t("worktreeReservation")}</CardTitle>
           </CardHeader>
-          <CardContent className="flex flex-col gap-2">
-            <div>
-              <Badge variant="outline">
-                {workflow.exclusiveWorktree ? t("enabled") : t("disabled")}
-              </Badge>
-            </div>
-            <p className="text-xs text-muted-foreground">
-              {t("exclusiveWorktreeHelp")}
-            </p>
+          <CardContent>
+            <Badge variant="outline">
+              {workflow.exclusiveWorktree ? t("enabled") : t("disabled")}
+            </Badge>
           </CardContent>
         </Card>
       </div>
