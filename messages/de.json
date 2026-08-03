@@ -892,7 +892,25 @@
       "GITHUB": "GitHub",
       "RUNS": "Pläne und Sitzungen",
       "WORKFLOWS": "Workflows"
-    }
+    },
+    "apnsChannel": "Nativ",
+    "nativeApns": "Native Benachrichtigungen",
+    "apnsNotConfigured": "Hinterlegen Sie den APNs-Anbieterschlüssel in den Einstellungen, bevor Geräte Benachrichtigungen empfangen können.",
+    "apnsNoDevices": "Registrieren Sie ein Gerät in der iOS-App, um Benachrichtigungen nativ zu empfangen.",
+    "apnsReady": "Registrierte Geräte erhalten Benachrichtigungen über den Apple-Push-Benachrichtigungsdienst.",
+    "configureApns": "Einrichten",
+    "deviceCount": "{count, plural, one {# registriertes Gerät} other {# registrierte Geräte}}",
+    "registeredDevices": "Registrierte Geräte",
+    "registeredDevicesDescription": "Senden Sie eine Testbenachrichtigung oder entfernen Sie Geräte, die keine mehr erhalten sollen.",
+    "noRegisteredDevices": "Für native Benachrichtigungen ist kein Gerät registriert.",
+    "device": "Gerät",
+    "appVersion": "App-Version",
+    "environment": "Umgebung",
+    "lastRegistered": "Zuletzt registriert",
+    "deviceInactive": "Inaktiv",
+    "removeDevice": "{device} entfernen",
+    "removeDeviceTitle": "Dieses registrierte Gerät entfernen?",
+    "removeDeviceDescription": "Dieses Gerät erhält keine nativen Benachrichtigungen mehr. Es kann sich über die App erneut registrieren."
   },
   "credentialEncryption": {
     "title": "Datenbank-Anmeldedaten sind nicht verschlüsselt",

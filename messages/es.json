@@ -892,7 +892,25 @@
       "GITHUB": "GitHub",
       "RUNS": "Planes y sesiones",
       "WORKFLOWS": "Flujos de trabajo"
-    }
+    },
+    "apnsChannel": "Nativa",
+    "nativeApns": "Notificaciones nativas",
+    "apnsNotConfigured": "Añade la clave del proveedor APNs en Configuración antes de que los dispositivos puedan recibir notificaciones.",
+    "apnsNoDevices": "Registra un dispositivo desde la app de iOS para recibir notificaciones de forma nativa.",
+    "apnsReady": "Los dispositivos registrados reciben notificaciones mediante el servicio de notificaciones push de Apple.",
+    "configureApns": "Configurar",
+    "deviceCount": "{count, plural, one {# dispositivo registrado} other {# dispositivos registrados}}",
+    "registeredDevices": "Dispositivos registrados",
+    "registeredDevicesDescription": "Envía una notificación de prueba o elimina los dispositivos que ya no deban recibirlas.",
+    "noRegisteredDevices": "No hay dispositivos registrados para notificaciones nativas.",
+    "device": "Dispositivo",
+    "appVersion": "Versión de la app",
+    "environment": "Entorno",
+    "lastRegistered": "Último registro",
+    "deviceInactive": "Inactivo",
+    "removeDevice": "Eliminar {device}",
+    "removeDeviceTitle": "¿Eliminar este dispositivo registrado?",
+    "removeDeviceDescription": "Este dispositivo dejará de recibir notificaciones nativas. Puede volver a registrarse desde la app."
   },
   "credentialEncryption": {
     "title": "Las credenciales de la base de datos no están cifradas",

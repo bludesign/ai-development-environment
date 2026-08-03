@@ -5,6 +5,7 @@ import {
   render,
   screen,
   waitFor,
+  within,
 } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 
@@ -50,6 +51,7 @@ const notification = {
   sidebarRequested: true,
   browserRequested: true,
   webPushRequested: false,
+  apnsRequested: false,
   sidebarDismissedAt: null,
   createdAt: now,
   updatedAt: now,
@@ -64,6 +66,7 @@ const preferences = [
     sidebarEnabled: true,
     browserEnabled: true,
     webPushEnabled: false,
+    apnsEnabled: true,
     updatedAt: null,
   },
   {
@@ -74,6 +77,7 @@ const preferences = [
     sidebarEnabled: true,
     browserEnabled: true,
     webPushEnabled: false,
+    apnsEnabled: true,
     updatedAt: null,
   },
 ];
@@ -90,6 +94,28 @@ const webPushSubscription = {
   updatedAt: now,
 };
 let serverPushSubscriptions = [webPushSubscription];
+
+const notificationDevice = {
+  id: "device-1",
+  clientRegistrationId: "ios-app-1",
+  tokenMasked: "AAAAAAAA…AAAAAAAA",
+  topic: "com.bludesign.aidevelopmentenvironment",
+  environment: "PRODUCTION",
+  displayName: "Test iPhone",
+  deviceModel: "iPhone",
+  osVersion: "26.0",
+  appVersion: "1.0.0",
+  appBuild: "1",
+  locale: "en-US",
+  status: "ACTIVE",
+  lastFailureReason: null,
+  lastFailureAt: null,
+  lastRegisteredAt: now,
+  lastDeliveredAt: null,
+  createdAt: now,
+  updatedAt: now,
+};
+let serverDevices = [notificationDevice];
 
 const originalServiceWorker = Object.getOwnPropertyDescriptor(
   navigator,
@@ -110,6 +136,7 @@ function installServiceWorker(value: ServiceWorkerContainer) {
 beforeEach(() => {
   nextChange = null;
   serverPushSubscriptions = [webPushSubscription];
+  serverDevices = [notificationDevice];
   Object.defineProperty(window, "matchMedia", {
     configurable: true,
     value: vi.fn(() => ({ matches: false })),
@@ -137,6 +164,8 @@ beforeEach(() => {
           subscriptionCount: 1,
         },
         webPushSubscriptions: serverPushSubscriptions,
+        notificationApnsState: { configured: true, deviceCount: 1 },
+        notificationDevices: serverDevices,
       } as never;
     }
     if (operation.includes("mutation SaveNotificationPreference")) {
@@ -166,6 +195,9 @@ beforeEach(() => {
           subscriptionCount: serverPushSubscriptions.length,
         },
       } as never;
+    }
+    if (operation.includes("mutation TestNotificationDevice")) {
+      return { testNotificationDevice: true } as never;
     }
     if (operation.includes("mutation RegisterWebPushSubscription")) {
       return {
@@ -218,6 +250,7 @@ describe("NotificationsPage", () => {
             sidebarEnabled: true,
             browserEnabled: true,
             webPushEnabled: true,
+            apnsEnabled: true,
           },
         },
       ),
@@ -350,8 +383,11 @@ describe("NotificationsPage", () => {
     renderPage();
 
     fireEvent.click(await screen.findByRole("tab", { name: "Settings" }));
-    expect(await screen.findByText("Chrome · macOS")).toBeDefined();
-    fireEvent.click(screen.getByRole("button", { name: "Test" }));
+    const browserRow = (await screen.findByText("Chrome · macOS")).closest(
+      "tr",
+    );
+    expect(browserRow).not.toBeNull();
+    fireEvent.click(within(browserRow!).getByRole("button", { name: "Test" }));
 
     await waitFor(() =>
       expect(request).toHaveBeenCalledWith(
@@ -359,7 +395,61 @@ describe("NotificationsPage", () => {
         { id: "subscription-1" },
       ),
     );
-    expect(screen.getByRole("button", { name: "Sent" })).toBeDefined();
+    expect(
+      within(browserRow!).getByRole("button", { name: "Sent" }),
+    ).toBeDefined();
+  });
+
+  test("sends a test notification to a registered device", async () => {
+    renderPage();
+
+    fireEvent.click(await screen.findByRole("tab", { name: "Settings" }));
+    const deviceRow = (await screen.findByText("Test iPhone")).closest("tr");
+    expect(deviceRow).not.toBeNull();
+    fireEvent.click(within(deviceRow!).getByRole("button", { name: "Test" }));
+
+    await waitFor(() =>
+      expect(request).toHaveBeenCalledWith(
+        expect.stringContaining("mutation TestNotificationDevice"),
+        { id: "device-1" },
+      ),
+    );
+    expect(
+      within(deviceRow!).getByRole("button", { name: "Sent" }),
+    ).toBeDefined();
+  });
+
+  test("tells the user to configure APNs before devices can be reached", async () => {
+    request.mockImplementation(async (query) => {
+      const operation = String(query);
+      if (operation.includes("query NotificationsPage")) {
+        return {
+          notifications: { items: [], nextCursor: null, totalCount: 0 },
+          notificationPreferences: preferences,
+          webPushState: {
+            configured: false,
+            publicKey: null,
+            subscriptionCount: 0,
+          },
+          webPushSubscriptions: [],
+          notificationApnsState: { configured: false, deviceCount: 0 },
+          notificationDevices: [],
+        } as never;
+      }
+      throw new Error(`Unexpected request: ${operation}`);
+    });
+    renderPage();
+
+    fireEvent.click(await screen.findByRole("tab", { name: "Settings" }));
+
+    expect(
+      await screen.findByText(
+        "Add the APNs provider key in Settings before devices can receive notifications.",
+      ),
+    ).toBeDefined();
+    expect(
+      screen.getByText("No devices are registered for native notifications."),
+    ).toBeDefined();
   });
 
   test("waits for an active service worker before creating a subscription", async () => {

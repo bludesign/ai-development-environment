@@ -24,6 +24,8 @@ type AppNotification {
   browserRequested: Boolean!
   "Whether the web push requested condition is true for this app notification."
   webPushRequested: Boolean!
+  "Whether native APNs delivery was requested for this app notification."
+  apnsRequested: Boolean!
   "ISO 8601 timestamp when this app notification sidebar dismissed. May be null when unavailable or not applicable."
   sidebarDismissedAt: String
   "ISO 8601 timestamp when this app notification was created."
@@ -58,6 +60,8 @@ type NotificationPreference {
   browserEnabled: Boolean!
   "Whether the web push enabled condition is true for this notification preference."
   webPushEnabled: Boolean!
+  "Whether native APNs delivery is enabled for this notification preference."
+  apnsEnabled: Boolean!
   "ISO 8601 timestamp when this notification preference was last updated. May be null when unavailable or not applicable."
   updatedAt: String
 }
@@ -70,6 +74,54 @@ type WebPushState {
   publicKey: String
   "Number of subscriptions."
   subscriptionCount: Int!
+}
+
+"Represents the native APNs delivery state in the GraphQL API."
+type NotificationApnsState {
+  "Whether this control plane holds the APNs provider credentials needed to deliver."
+  configured: Boolean!
+  "Number of active registered devices."
+  deviceCount: Int!
+}
+
+"An iOS device registered to receive this control plane's notifications over APNs."
+type NotificationDevice {
+  "Stable identifier for this notification device."
+  id: ID!
+  "The client registration identifier this device reports."
+  clientRegistrationId: String!
+  "Abbreviated APNs device token, enough to tell two devices apart."
+  tokenMasked: String!
+  "The APNs topic, which is the app's bundle identifier."
+  topic: String!
+  "The APNs environment associated with this notification device."
+  environment: String!
+  "Human-readable name for this notification device."
+  displayName: String!
+  "The device model associated with this notification device. May be null when unavailable or not applicable."
+  deviceModel: String
+  "The operating system version associated with this notification device. May be null when unavailable or not applicable."
+  osVersion: String
+  "The app version associated with this notification device. May be null when unavailable or not applicable."
+  appVersion: String
+  "The app build associated with this notification device. May be null when unavailable or not applicable."
+  appBuild: String
+  "The locale associated with this notification device. May be null when unavailable or not applicable."
+  locale: String
+  "The delivery status associated with this notification device."
+  status: String!
+  "Reason APNs last rejected a delivery. May be null when unavailable or not applicable."
+  lastFailureReason: String
+  "ISO 8601 timestamp when APNs last rejected a delivery. May be null when unavailable or not applicable."
+  lastFailureAt: String
+  "ISO 8601 timestamp when this notification device last registered."
+  lastRegisteredAt: String!
+  "ISO 8601 timestamp when this notification device last received a delivery. May be null when unavailable or not applicable."
+  lastDeliveredAt: String
+  "ISO 8601 timestamp when this notification device was created."
+  createdAt: String!
+  "ISO 8601 timestamp when this notification device was last updated."
+  updatedAt: String!
 }
 
 "Represents a web push subscription in the GraphQL API."
@@ -106,6 +158,8 @@ enum NotificationChangeKind {
   HISTORY_CLEARED
   "Represents the preferences updated option."
   PREFERENCES_UPDATED
+  "Represents the devices changed option."
+  DEVICES_CHANGED
 }
 
 "Represents a notification change in the GraphQL API."
@@ -128,6 +182,8 @@ input SaveNotificationPreferenceInput {
   browserEnabled: Boolean!
   "Whether web push enabled applies to the request."
   webPushEnabled: Boolean!
+  "Whether native APNs delivery applies to the request. Omit it to leave the channel unchanged."
+  apnsEnabled: Boolean
 }
 
 "Input values for notification time range."
@@ -187,6 +243,10 @@ extend type Query {
   webPushState: WebPushState!
   "Returns web push subscriptions."
   webPushSubscriptions: [WebPushSubscription!]!
+  "Returns the native APNs delivery state."
+  notificationApnsState: NotificationApnsState!
+  "Returns the iOS devices registered for native notification delivery."
+  notificationDevices: [NotificationDevice!]!
 }
 
 extend type Mutation {
@@ -228,6 +288,23 @@ extend type Mutation {
   ): Boolean!
   "Tests a web push subscription and reports whether the operation succeeded."
   testWebPushSubscription(
+    "Identifier of the resource to return or affect."
+    id: ID!
+  ): Boolean!
+  "Renames a notification device and returns the updated notification device."
+  renameNotificationDevice(
+    "Identifier of the resource to return or affect."
+    id: ID!
+    "The display name to use for the request."
+    displayName: String!
+  ): NotificationDevice!
+  "Deletes a notification device and reports whether the operation succeeded."
+  deleteNotificationDevice(
+    "Identifier of the resource to return or affect."
+    id: ID!
+  ): Boolean!
+  "Tests a notification device and reports whether the operation succeeded."
+  testNotificationDevice(
     "Identifier of the resource to return or affect."
     id: ID!
   ): Boolean!

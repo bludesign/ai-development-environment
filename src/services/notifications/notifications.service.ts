@@ -1,4 +1,4 @@
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 
 import type { Prisma } from "@/generated/prisma/client";
 import { getPrismaClient } from "@/data/prisma-client";
@@ -6,9 +6,25 @@ import {
   APP_NOTIFICATIONS_CHANGED_TOPIC,
   agentEventBus,
 } from "@/services/agent-control";
-import { CREDENTIALS, type CredentialService } from "@/services/credentials";
+import {
+  apnsTokenConnectionSettings,
+  CREDENTIALS,
+  readConnectionSettings,
+  type CredentialService,
+} from "@/services/credentials";
+// Imported from the modules directly rather than the package index: the index also pulls in
+// PushNotificationsService, whose constructor starts recovery polling the moment it is built.
+import {
+  ApnsClient,
+  type ApnsAuthentication,
+} from "@/services/push-notifications/apns-client";
+import type { ApnsEnvironment } from "@/services/push-notifications/validation";
 import webpush from "web-push";
 
+import {
+  parseNotificationDeviceInput,
+  type NotificationDeviceInput,
+} from "./notification-devices";
 import {
   notificationType,
   notificationTypeDefinitions,
@@ -20,6 +36,15 @@ const MAX_SELECTION_IDS = 5_000;
 const MAX_SELECTION_RANGES = 366;
 const DEFAULT_SIDEBAR_LIMIT = 50;
 const VAPID_SETTINGS_ID = "default";
+const APNS_ALERT_TTL_SECONDS = 60 * 60;
+
+// APNs reports a token the device no longer honours through these reasons. Every other failure is
+// transient or a provider-side mistake, so the device keeps its ACTIVE status and gets retried.
+const APNS_DEAD_TOKEN_REASONS = new Set([
+  "BadDeviceToken",
+  "DeviceTokenNotForTopic",
+  "Unregistered",
+]);
 
 export type NotificationRecord = {
   id: string;
@@ -35,6 +60,7 @@ export type NotificationRecord = {
   sidebarRequested: boolean;
   browserRequested: boolean;
   webPushRequested: boolean;
+  apnsRequested: boolean;
   sidebarDismissedAt: Date | null;
   createdAt: Date;
   updatedAt: Date;
@@ -46,7 +72,8 @@ export type NotificationChangeKind =
   | "SIDEBAR_CLEARED"
   | "DELETED"
   | "HISTORY_CLEARED"
-  | "PREFERENCES_UPDATED";
+  | "PREFERENCES_UPDATED"
+  | "DEVICES_CHANGED";
 
 export type NotificationChange = {
   kind: NotificationChangeKind;
@@ -140,7 +167,10 @@ function statusCode(value: unknown): number | null {
 export class NotificationsService {
   private vapidPreparation: Promise<{ publicKey: string }> | null = null;
 
-  constructor(private readonly credentialService: CredentialService) {}
+  constructor(
+    private readonly credentialService: CredentialService,
+    private readonly apns: ApnsClient = new ApnsClient(),
+  ) {}
 
   private publish(change: NotificationChange): void {
     agentEventBus.publish(APP_NOTIFICATIONS_CHANGED_TOPIC, {
@@ -168,6 +198,7 @@ export class NotificationsService {
           preference?.browserEnabled ?? definition.defaultBrowserEnabled,
         webPushEnabled:
           preference?.webPushEnabled ?? definition.defaultWebPushEnabled,
+        apnsEnabled: preference?.apnsEnabled ?? definition.defaultApnsEnabled,
         updatedAt: preference?.updatedAt ?? null,
       };
     });
@@ -178,10 +209,19 @@ export class NotificationsService {
     sidebarEnabled: boolean;
     browserEnabled: boolean;
     webPushEnabled: boolean;
+    apnsEnabled?: boolean | null;
   }) {
     const definition = notificationType(input.typeKey);
     if (!definition) throw new Error("Unknown notification type");
     const prisma = await getPrismaClient();
+    // Clients written before the APNs channel existed omit the field entirely, and every save
+    // sends the whole preference. Leave the stored choice alone rather than resetting it to a
+    // default, so an old client editing the browser switch cannot silently re-enable APNs.
+    const existing = await prisma.notificationPreference.findUnique({
+      where: { typeKey: definition.key },
+    });
+    const apnsEnabled =
+      input.apnsEnabled ?? existing?.apnsEnabled ?? definition.defaultApnsEnabled;
     const saved = await prisma.notificationPreference.upsert({
       where: { typeKey: definition.key },
       create: {
@@ -189,11 +229,13 @@ export class NotificationsService {
         sidebarEnabled: input.sidebarEnabled,
         browserEnabled: input.browserEnabled,
         webPushEnabled: input.webPushEnabled,
+        apnsEnabled,
       },
       update: {
         sidebarEnabled: input.sidebarEnabled,
         browserEnabled: input.browserEnabled,
         webPushEnabled: input.webPushEnabled,
+        apnsEnabled,
       },
     });
     this.publish({
@@ -219,8 +261,16 @@ export class NotificationsService {
       preference?.browserEnabled ?? definition.defaultBrowserEnabled;
     const webPushRequested =
       preference?.webPushEnabled ?? definition.defaultWebPushEnabled;
-    if (!sidebarRequested && !browserRequested && !webPushRequested)
+    const apnsRequested =
+      preference?.apnsEnabled ?? definition.defaultApnsEnabled;
+    if (
+      !sidebarRequested &&
+      !browserRequested &&
+      !webPushRequested &&
+      !apnsRequested
+    ) {
       return null;
+    }
 
     const dedupeKey = cleanText(input.dedupeKey, "Deduplication key", 500);
     const existing = await transaction.appNotification.findUnique({
@@ -242,6 +292,7 @@ export class NotificationsService {
         sidebarRequested,
         browserRequested,
         webPushRequested,
+        apnsRequested,
       },
     });
   }
@@ -256,6 +307,11 @@ export class NotificationsService {
     if (notification.webPushRequested) {
       void this.deliverWebPush(notification).catch((error: unknown) => {
         console.error("Web Push delivery failed:", error);
+      });
+    }
+    if (notification.apnsRequested) {
+      void this.deliverApns(notification).catch((error: unknown) => {
+        console.error("APNs delivery failed:", error);
       });
     }
   }
@@ -580,6 +636,316 @@ export class NotificationsService {
       }
       throw error;
     }
+  }
+
+  async apnsState() {
+    const prisma = await getPrismaClient();
+    const [settings, deviceCount] = await Promise.all([
+      readConnectionSettings(
+        this.credentialService,
+        CREDENTIALS.apnsTokenSettings,
+        apnsTokenConnectionSettings,
+      ),
+      prisma.notificationDevice.count({ where: { status: "ACTIVE" } }),
+    ]);
+    const privateKeyConfigured = await this.credentialService.isConfigured(
+      CREDENTIALS.apnsTokenPrivateKey,
+    );
+    return {
+      configured: Boolean(settings && privateKeyConfigured),
+      deviceCount,
+    };
+  }
+
+  async notificationDevices() {
+    const prisma = await getPrismaClient();
+    const rows = await prisma.notificationDevice.findMany({
+      orderBy: [{ status: "asc" }, { lastRegisteredAt: "desc" }],
+    });
+    return rows.map(({ token, tokenHash: _tokenHash, ...row }) => ({
+      ...row,
+      // The full token is a credential for pushing to that device; the list only needs enough
+      // to tell two phones apart.
+      tokenMasked: `${token.slice(0, 8)}…${token.slice(-8)}`,
+    }));
+  }
+
+  async registerDevice(value: unknown, ipAddress: string | null) {
+    const input = parseNotificationDeviceInput(value);
+    return this.registerDeviceValidated(input, ipAddress);
+  }
+
+  private async registerDeviceValidated(
+    input: NotificationDeviceInput,
+    ipAddress: string | null,
+  ) {
+    const prisma = await getPrismaClient();
+    const tokenHash = createHash("sha256").update(input.token).digest("hex");
+    const now = new Date();
+    const data = {
+      token: input.token,
+      tokenHash,
+      topic: input.topic,
+      environment: input.environment,
+      displayName: input.displayName,
+      deviceModel: input.deviceModel,
+      osVersion: input.osVersion,
+      appVersion: input.appVersion,
+      appBuild: input.appBuild,
+      locale: input.locale,
+      lastIpAddress: ipAddress,
+      status: "ACTIVE",
+      lastFailureReason: null,
+      lastFailureAt: null,
+      lastRegisteredAt: now,
+    };
+    const result = await prisma.$transaction(async (tx) => {
+      const existing = await tx.notificationDevice.findUnique({
+        where: { clientRegistrationId: input.clientRegistrationId },
+      });
+      // APNs recycles a device token when an app is reinstalled or restored onto another phone.
+      // Whichever registration last claimed the token owns it, so drop the stale holder rather
+      // than letting the unique index reject the fresh registration.
+      const tokenOwner = await tx.notificationDevice.findUnique({
+        where: { tokenHash },
+      });
+      if (tokenOwner && tokenOwner.id !== existing?.id) {
+        await tx.notificationDevice.delete({ where: { id: tokenOwner.id } });
+      }
+      const device = existing
+        ? await tx.notificationDevice.update({
+            where: { id: existing.id },
+            data,
+          })
+        : await tx.notificationDevice.create({
+            data: {
+              id: randomUUID(),
+              clientRegistrationId: input.clientRegistrationId,
+              ...data,
+            },
+          });
+      return { device, created: !existing };
+    });
+    this.publish({
+      kind: "DEVICES_CHANGED",
+      notification: null,
+      notificationId: null,
+    });
+    return result;
+  }
+
+  async deleteNotificationDevice(idValue: string): Promise<boolean> {
+    const id = cleanText(idValue, "Notification device", 200);
+    const prisma = await getPrismaClient();
+    const result = await prisma.notificationDevice.deleteMany({
+      where: { id },
+    });
+    if (result.count) {
+      this.publish({
+        kind: "DEVICES_CHANGED",
+        notification: null,
+        notificationId: null,
+      });
+    }
+    return result.count > 0;
+  }
+
+  async renameNotificationDevice(idValue: string, displayNameValue: string) {
+    const id = cleanText(idValue, "Notification device", 200);
+    const displayName = cleanText(displayNameValue, "Display name", 120);
+    const prisma = await getPrismaClient();
+    const device = await prisma.notificationDevice.update({
+      where: { id },
+      data: { displayName },
+    });
+    this.publish({
+      kind: "DEVICES_CHANGED",
+      notification: null,
+      notificationId: null,
+    });
+    return device;
+  }
+
+  private async apnsAuthentication(): Promise<
+    Extract<ApnsAuthentication, { kind: "TOKEN" }>
+  > {
+    const settings = await readConnectionSettings(
+      this.credentialService,
+      CREDENTIALS.apnsTokenSettings,
+      apnsTokenConnectionSettings,
+    );
+    const privateKey = await this.credentialService.getText(
+      CREDENTIALS.apnsTokenPrivateKey,
+    );
+    if (!settings || !privateKey) {
+      throw new Error(
+        "APNs token authentication is not configured. Add the team ID, key ID, and .p8 key under Settings.",
+      );
+    }
+    return {
+      kind: "TOKEN",
+      teamId: settings.value.teamId,
+      keyId: settings.value.keyId,
+      privateKey,
+    };
+  }
+
+  private async sendApns(
+    device: {
+      id: string;
+      token: string;
+      topic: string;
+      environment: string;
+      displayName: string;
+    },
+    authentication: Extract<ApnsAuthentication, { kind: "TOKEN" }>,
+    payload: {
+      id: string;
+      title: string;
+      body: string;
+      href: string;
+      typeKey: string;
+      collapseId?: string;
+    },
+  ): Promise<boolean> {
+    const prisma = await getPrismaClient();
+    const now = new Date();
+    let response: Awaited<ReturnType<ApnsClient["send"]>>;
+    try {
+      response = await this.apns.send({
+        environment: device.environment as ApnsEnvironment,
+        authentication,
+        deviceToken: device.token,
+        payload: {
+          aps: {
+            alert: { title: payload.title, body: payload.body },
+            sound: "default",
+            "thread-id": payload.typeKey,
+            "interruption-level": "active",
+          },
+          notificationId: payload.id,
+          typeKey: payload.typeKey,
+          href: payload.href,
+        },
+        headers: {
+          "apns-topic": device.topic,
+          "apns-push-type": "alert",
+          "apns-priority": "10",
+          "apns-expiration": String(
+            Math.floor(now.getTime() / 1_000) + APNS_ALERT_TTL_SECONDS,
+          ),
+          ...(payload.collapseId
+            ? { "apns-collapse-id": payload.collapseId.slice(0, 64) }
+            : {}),
+        },
+      });
+    } catch (error) {
+      await prisma.notificationDevice.updateMany({
+        where: { id: device.id },
+        data: {
+          lastFailureReason:
+            error instanceof Error ? error.message.slice(0, 200) : "SendFailed",
+          lastFailureAt: now,
+        },
+      });
+      throw error;
+    }
+
+    if (response.status === 200) {
+      await prisma.notificationDevice.updateMany({
+        where: { id: device.id },
+        data: {
+          lastDeliveredAt: now,
+          lastFailureReason: null,
+          lastFailureAt: null,
+        },
+      });
+      return true;
+    }
+
+    const reason = response.reason ?? `HTTP ${response.status}`;
+    const dead = response.status === 410 || APNS_DEAD_TOKEN_REASONS.has(reason);
+    await prisma.notificationDevice.updateMany({
+      where: { id: device.id },
+      data: {
+        lastFailureReason: reason,
+        lastFailureAt: now,
+        ...(dead ? { status: "INACTIVE" } : {}),
+      },
+    });
+    if (dead) {
+      this.publish({
+        kind: "DEVICES_CHANGED",
+        notification: null,
+        notificationId: null,
+      });
+    }
+    return false;
+  }
+
+  async testNotificationDevice(idValue: string): Promise<boolean> {
+    const id = cleanText(idValue, "Notification device", 200);
+    const prisma = await getPrismaClient();
+    const device = await prisma.notificationDevice.findUnique({
+      where: { id },
+    });
+    if (!device) throw new Error("Notification device was not found");
+    const authentication = await this.apnsAuthentication();
+    const delivered = await this.sendApns(device, authentication, {
+      id: `test:${Date.now()}`,
+      title: "Test notification",
+      body: "Native notifications are working on this device.",
+      href: "/notifications",
+      typeKey: "TEST",
+    });
+    if (!delivered) {
+      const refreshed = await prisma.notificationDevice.findUnique({
+        where: { id },
+      });
+      throw new Error(
+        refreshed?.lastFailureReason
+          ? `APNs rejected the notification: ${refreshed.lastFailureReason}`
+          : "APNs rejected the notification",
+      );
+    }
+    return true;
+  }
+
+  async deliverApns(notification: NotificationRecord): Promise<void> {
+    if (!notification.apnsRequested) return;
+    const prisma = await getPrismaClient();
+    const devices = await prisma.notificationDevice.findMany({
+      where: { status: "ACTIVE" },
+    });
+    if (!devices.length) return;
+    // A missing provider key is a configuration state, not a per-notification failure. Report it
+    // once and move on rather than throwing for every notification the server raises.
+    let authentication: Extract<ApnsAuthentication, { kind: "TOKEN" }>;
+    try {
+      authentication = await this.apnsAuthentication();
+    } catch (error) {
+      console.error("APNs delivery skipped:", error);
+      return;
+    }
+    await Promise.allSettled(
+      devices.map(async (device) => {
+        try {
+          await this.sendApns(device, authentication, {
+            id: notification.id,
+            title: notification.title,
+            body: notification.body,
+            href: notification.href,
+            typeKey: notification.typeKey,
+            collapseId: notification.dedupeKey,
+          });
+        } catch (error) {
+          console.error(
+            `APNs delivery to ${device.displayName} failed:`,
+            error,
+          );
+        }
+      }),
+    );
   }
 
   async deliverWebPush(notification: NotificationRecord): Promise<void> {

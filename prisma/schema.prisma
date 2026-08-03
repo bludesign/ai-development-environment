@@ -872,6 +872,7 @@ model AppNotification {
   sidebarRequested   Boolean
   browserRequested   Boolean
   webPushRequested   Boolean
+  apnsRequested      Boolean   @default(false)
   sidebarDismissedAt DateTime?
   createdAt          DateTime  @default(now())
   updatedAt          DateTime  @updatedAt
@@ -888,8 +889,37 @@ model NotificationPreference {
   sidebarEnabled Boolean
   browserEnabled Boolean
   webPushEnabled Boolean
+  apnsEnabled    Boolean  @default(false)
   createdAt      DateTime @default(now())
   updatedAt      DateTime @updatedAt
+}
+
+// Devices that receive this control plane's own notifications over APNs. Distinct from
+// `ApnsRegistration`, which belongs to the push-notifications test console and holds devices
+// belonging to whatever apps are being built with this server.
+model NotificationDevice {
+  id                   String    @id
+  clientRegistrationId String    @unique
+  token                String
+  tokenHash            String    @unique
+  topic                String
+  environment          String
+  displayName          String
+  deviceModel          String?
+  osVersion            String?
+  appVersion           String?
+  appBuild             String?
+  locale               String?
+  lastIpAddress        String?
+  status               String    @default("ACTIVE")
+  lastFailureReason    String?
+  lastFailureAt        DateTime?
+  lastRegisteredAt     DateTime  @default(now())
+  lastDeliveredAt      DateTime?
+  createdAt            DateTime  @default(now())
+  updatedAt            DateTime  @updatedAt
+
+  @@index([status, lastRegisteredAt])
 }
 
 model WebPushSettings {

@@ -32,6 +32,16 @@ export const createNotificationsResolvers = (
     createdAt: (value: { createdAt: Date }) => value.createdAt.toISOString(),
     updatedAt: (value: { updatedAt: Date }) => value.updatedAt.toISOString(),
   },
+  NotificationDevice: {
+    lastFailureAt: (value: { lastFailureAt: Date | null }) =>
+      iso(value.lastFailureAt),
+    lastDeliveredAt: (value: { lastDeliveredAt: Date | null }) =>
+      iso(value.lastDeliveredAt),
+    lastRegisteredAt: (value: { lastRegisteredAt: Date }) =>
+      value.lastRegisteredAt.toISOString(),
+    createdAt: (value: { createdAt: Date }) => value.createdAt.toISOString(),
+    updatedAt: (value: { updatedAt: Date }) => value.updatedAt.toISOString(),
+  },
   Query: {
     notifications: (
       _root: unknown,
@@ -68,6 +78,22 @@ export const createNotificationsResolvers = (
     ) => {
       requireControlPlane(context);
       return service.webPushSubscriptions();
+    },
+    notificationApnsState: (
+      _root: unknown,
+      _args: unknown,
+      context: GraphQLContext,
+    ) => {
+      requireControlPlane(context);
+      return service.apnsState();
+    },
+    notificationDevices: (
+      _root: unknown,
+      _args: unknown,
+      context: GraphQLContext,
+    ) => {
+      requireControlPlane(context);
+      return service.notificationDevices();
     },
   },
   Mutation: {
@@ -154,6 +180,30 @@ export const createNotificationsResolvers = (
     ) => {
       requireControlPlane(context);
       return service.testWebPushSubscription(id);
+    },
+    renameNotificationDevice: (
+      _root: unknown,
+      { id, displayName }: { id: string; displayName: string },
+      context: GraphQLContext,
+    ) => {
+      requireControlPlane(context);
+      return service.renameNotificationDevice(id, displayName);
+    },
+    deleteNotificationDevice: (
+      _root: unknown,
+      { id }: { id: string },
+      context: GraphQLContext,
+    ) => {
+      requireControlPlane(context);
+      return service.deleteNotificationDevice(id);
+    },
+    testNotificationDevice: (
+      _root: unknown,
+      { id }: { id: string },
+      context: GraphQLContext,
+    ) => {
+      requireControlPlane(context);
+      return service.testNotificationDevice(id);
     },
   },
   Subscription: {
