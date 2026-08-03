@@ -12,6 +12,7 @@ import {
   ExternalLink,
   FolderGit2,
   GitBranch,
+  GitCommitHorizontal,
   GitMerge,
   GitPullRequest,
   Grid2X2,
@@ -130,6 +131,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
+import { Textarea } from "@/components/ui/textarea";
 import { createClientId } from "@/lib/browser-utils";
 import { formatDateValue } from "@/lib/date-format";
 import { worktreeHighlightSurfaceClasses } from "@/lib/worktree-highlight";
@@ -2286,6 +2288,7 @@ export function WorktreeMenus(
   } = props;
   const t = useTranslations("worktrees");
   const [changeOpen, setChangeOpen] = useState(false);
+  const [commitOpen, setCommitOpen] = useState(false);
   const [moveOpen, setMoveOpen] = useState(false);
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [changeBusy, setChangeBusy] = useState(false);
@@ -2461,6 +2464,18 @@ export function WorktreeMenus(
             >
               <GitBranch /> {t("changeBranch")}
             </DropdownMenuItem>
+            <DropdownMenuItem
+              disabled={
+                worktree.availability !== "AVAILABLE" ||
+                Boolean(worktree.activeJob) ||
+                worktree.rebaseInProgress ||
+                !sourceAgent?.agent.capabilities.includes("worktree.commit") ||
+                (!worktree.hasStagedChanges && !worktree.hasUnstagedChanges)
+              }
+              onSelect={() => setCommitOpen(true)}
+            >
+              <GitCommitHorizontal /> {t("commit")}
+            </DropdownMenuItem>
             <DropdownMenuItem asChild>
               <Link href={`/codebases/${props.group.codebase.id}`}>
                 <Code2 /> {t("viewCodebase")}
@@ -2628,6 +2643,14 @@ export function WorktreeMenus(
           )}
         />
       )}
+      {commitOpen && (
+        <CommitWorktreeDialog
+          onOpenChange={setCommitOpen}
+          onReload={props.onReload}
+          open={commitOpen}
+          worktree={worktree}
+        />
+      )}
       {!worktree.primary && deleteOpen && (
         <DeleteWorktreeDialog
           onOpenChange={setDeleteOpen}
@@ -2636,6 +2659,173 @@ export function WorktreeMenus(
         />
       )}
     </>
+  );
+}
+
+function CommitWorktreeDialog({
+  worktree,
+  open,
+  onOpenChange,
+  onReload,
+}: {
+  worktree: Worktree;
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  onReload: () => Promise<void>;
+}) {
+  const t = useTranslations("worktrees");
+  const [detail, setDetail] = useState<WorktreeDetail | null>(null);
+  const [message, setMessage] = useState("");
+  const [signed, setSigned] = useState(false);
+  const [stageAll, setStageAll] = useState(true);
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    void inspectWorktree(worktree.id)
+      .then((next) => {
+        if (cancelled) return;
+        setDetail(next);
+        setSigned(next.commitSigningEnabled === true);
+        setSelected(
+          new Set(
+            next.changes
+              .filter((change) => change.staged)
+              .map((change) => change.path),
+          ),
+        );
+      })
+      .catch((value) => {
+        if (!cancelled)
+          setError(value instanceof Error ? value.message : String(value));
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [worktree.id]);
+
+  const submit = async () => {
+    setBusy(true);
+    setError(null);
+    try {
+      const data = await controlPlaneRequest<{
+        commitWorktree: { id: string };
+      }>(
+        `mutation CommitWorktree($input: CommitWorktreeInput!) {
+          commitWorktree(input: $input) { id }
+        }`,
+        {
+          input: {
+            worktreeId: worktree.id,
+            message,
+            signed,
+            stageAll,
+            paths: stageAll ? [] : [...selected],
+            requestId: createClientId(),
+          },
+        },
+      );
+      await waitForWorktreeJob(data.commitWorktree.id);
+      await onReload();
+      onOpenChange(false);
+    } catch (value) {
+      setError(value instanceof Error ? value.message : String(value));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <Dialog onOpenChange={onOpenChange} open={open}>
+      <DialogContent className="max-h-[min(42rem,calc(100vh-2rem))] overflow-y-auto sm:max-w-lg">
+        <DialogHeader>
+          <DialogTitle>{t("commitTitle")}</DialogTitle>
+          <DialogDescription>{t("commitDescription")}</DialogDescription>
+        </DialogHeader>
+        <div className="space-y-4">
+          <div className="space-y-1.5">
+            <Label htmlFor="worktree-commit-message">
+              {t("commitMessage")}
+            </Label>
+            <Textarea
+              autoFocus
+              id="worktree-commit-message"
+              onChange={(event) => setMessage(event.target.value)}
+              placeholder={t("commitMessagePlaceholder")}
+              rows={4}
+              value={message}
+            />
+          </div>
+          <label className="flex items-center gap-2 text-sm">
+            <Checkbox
+              checked={signed}
+              onCheckedChange={(checked) => setSigned(Boolean(checked))}
+            />
+            {t("signedCommit")}
+          </label>
+          <label className="flex items-center gap-2 text-sm">
+            <Checkbox
+              checked={stageAll}
+              onCheckedChange={(checked) => setStageAll(Boolean(checked))}
+            />
+            {t("stageAll")}
+          </label>
+          {!stageAll && detail && (
+            <div className="max-h-64 space-y-1 overflow-y-auto rounded-md border p-2">
+              {detail.changes.map((change) => (
+                <label
+                  className="flex items-start gap-2 rounded px-2 py-1.5 text-sm hover:bg-muted"
+                  key={change.path}
+                >
+                  <Checkbox
+                    checked={selected.has(change.path)}
+                    onCheckedChange={(checked) => {
+                      setSelected((current) => {
+                        const next = new Set(current);
+                        if (checked) next.add(change.path);
+                        else next.delete(change.path);
+                        return next;
+                      });
+                    }}
+                  />
+                  <span className="break-all font-mono text-xs">
+                    {change.path}
+                  </span>
+                </label>
+              ))}
+            </div>
+          )}
+          {!detail && !error && <Spinner />}
+          {error && (
+            <Alert variant="destructive">
+              <AlertDescription>{error}</AlertDescription>
+            </Alert>
+          )}
+        </div>
+        <DialogFooter>
+          <Button
+            disabled={busy}
+            onClick={() => onOpenChange(false)}
+            variant="outline"
+          >
+            {t("cancel")}
+          </Button>
+          <Button
+            disabled={
+              busy ||
+              !detail ||
+              !message.trim() ||
+              (!stageAll && selected.size === 0)
+            }
+            onClick={() => void submit()}
+          >
+            {busy && <Spinner />} {t("commit")}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   );
 }
 

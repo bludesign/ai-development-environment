@@ -8,6 +8,7 @@ import {
   parseWorktreeInventoryItem,
   validGitBranchName,
   WORKTREE_BRANCH_JOB_KIND,
+  WORKTREE_COMMIT_JOB_KIND,
   WORKTREE_AUTO_SYNC_JOB_KIND,
   WORKTREE_DELETE_JOB_KIND,
   WORKTREE_GIT_INSPECT_JOB_KIND,
@@ -2293,6 +2294,42 @@ export class WorktreesService {
       },
       idempotencyKey: `worktree:operation:${requestId}:${id}`,
       timeoutSeconds: operation === "OPEN_EDITOR" ? 30 : 600,
+    });
+  }
+
+  async commitWorktree(input: {
+    worktreeId: string;
+    message: string;
+    signed?: boolean | null;
+    stageAll?: boolean | null;
+    paths?: string[] | null;
+    requestId: string;
+  }) {
+    if (!input.requestId.trim()) throw new Error("requestId is required");
+    if (!input.message.trim()) throw new Error("Commit message is required");
+    const stageAll = input.stageAll !== false;
+    const paths = input.paths ?? [];
+    if (!stageAll && paths.length === 0) {
+      throw new Error("A partial commit requires at least one path");
+    }
+    const worktree = await this.requireRunnable(
+      input.worktreeId,
+      WORKTREE_COMMIT_JOB_KIND,
+    );
+    return this.agentControl.createJob({
+      agentId: worktree.codebase.agentId,
+      codebaseId: worktree.codebaseId,
+      worktreeId: worktree.id,
+      kind: WORKTREE_COMMIT_JOB_KIND,
+      payload: {
+        ...this.payload(worktree),
+        message: input.message,
+        signed: input.signed ?? null,
+        stageAll,
+        paths,
+      },
+      idempotencyKey: `worktree:commit:${input.requestId}:${input.worktreeId}`,
+      timeoutSeconds: 120,
     });
   }
 

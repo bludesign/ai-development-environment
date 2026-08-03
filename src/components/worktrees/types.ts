@@ -193,6 +193,7 @@ export type WorktreeDetail = {
   commitsTruncated: boolean;
   changesTruncated: boolean;
   branchChangesTruncated?: boolean;
+  commitSigningEnabled?: boolean;
 };
 
 export type WorktreeDiffFile = {

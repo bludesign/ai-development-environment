@@ -18,6 +18,7 @@ import { normalizeGitOrigin } from "@ai-development-environment/agent-contract/c
 import {
   autoSyncWorktree,
   branchWorktree,
+  commitWorktree,
   checkoutMovedWorktree,
   closeAllWorktreeWatches,
   deleteWorktree,
@@ -466,6 +467,51 @@ describe("worktree inventory and inspection", () => {
     expect(unstageResult.exitCode).toBe(0);
     expect((await git(folder, "status", "--porcelain")).stdout).toContain(
       "?? new.txt",
+    );
+  });
+
+  test("commits exactly the selected paths while preserving other changes", async () => {
+    const folder = await repository();
+    await writeFile(join(folder, "README.md"), "selected\n");
+    await writeFile(join(folder, "other.txt"), "not selected\n");
+    await git(folder, "add", "other.txt");
+    const gitDirectory = await realpath(
+      (
+        await git(folder, "rev-parse", "--path-format=absolute", "--git-dir")
+      ).stdout.trim(),
+    );
+
+    const result = (await commitWorktree(
+      {
+        codebaseId: "codebase-1",
+        folder,
+        gitDirectory,
+        expectedOrigin: "github.com/openai/codex",
+        baseBranch: "main",
+        message: "Commit selected file",
+        signed: false,
+        stageAll: false,
+        paths: ["README.md"],
+      },
+      10_000,
+      new AbortController().signal,
+      async () => undefined,
+    )) as Awaited<ReturnType<typeof commitWorktree>> & {
+      commit: { sha: string; subject: string; signed: boolean };
+    };
+
+    expect(result.exitCode).toBe(0);
+    expect(result.commit).toMatchObject({
+      subject: "Commit selected file",
+      signed: false,
+    });
+    expect(
+      (
+        await git(folder, "show", "--format=", "--name-only", "HEAD")
+      ).stdout.trim(),
+    ).toBe("README.md");
+    expect((await git(folder, "status", "--porcelain")).stdout).toContain(
+      "?? other.txt",
     );
   });
 

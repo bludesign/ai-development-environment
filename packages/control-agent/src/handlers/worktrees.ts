@@ -8,6 +8,7 @@ import { normalizeGitOrigin } from "@ai-development-environment/agent-contract/c
 import {
   worktreeBranchJobPayload,
   worktreeAutoSyncJobPayload,
+  worktreeCommitJobPayload,
   worktreeDeleteJobPayload,
   worktreeDiffPayload,
   worktreeGitInspectPayload,
@@ -937,11 +938,18 @@ export async function inspectWorktreeDetail(
   timeoutMs: number,
   signal: AbortSignal,
 ): Promise<WorktreeDetail> {
-  const [commitResult, changeResult, branchResult] = await Promise.all([
-    inspectCommits(folder, baseBranch, timeoutMs, signal),
-    inspectChanges(folder, timeoutMs, signal),
-    inspectBranchChanges(folder, baseBranch, timeoutMs, signal),
-  ]);
+  const [commitResult, changeResult, branchResult, signingResult] =
+    await Promise.all([
+      inspectCommits(folder, baseBranch, timeoutMs, signal),
+      inspectChanges(folder, timeoutMs, signal),
+      inspectBranchChanges(folder, baseBranch, timeoutMs, signal),
+      git(
+        folder,
+        ["config", "--bool", "--get", "commit.gpgsign"],
+        timeoutMs,
+        signal,
+      ),
+    ]);
   return {
     commits: commitResult.commits,
     changes: changeResult.changes,
@@ -949,6 +957,8 @@ export async function inspectWorktreeDetail(
     commitsTruncated: commitResult.truncated,
     changesTruncated: changeResult.truncated,
     branchChangesTruncated: branchResult.truncated,
+    commitSigningEnabled:
+      signingResult.exitCode === 0 && signingResult.stdout.trim() === "true",
   };
 }
 
@@ -1591,6 +1601,108 @@ export const inspectWorktreeGit: AgentJobHandler = async (
       folder,
       input.stashOid,
       timeoutMs,
+      signal,
+    ),
+  };
+};
+
+export const commitWorktree: AgentJobHandler = async (
+  payload,
+  timeoutMs,
+  signal,
+) => {
+  const input = worktreeCommitJobPayload(payload);
+  const folder = await validateWorktree(input, timeoutMs, signal);
+  const runGit = async (args: string[], fallback: string) =>
+    requireSuccess(await git(folder, args, timeoutMs, signal), fallback);
+
+  if (input.stageAll) {
+    await runGit(["add", "--all"], "Could not stage worktree changes");
+  } else {
+    const current = await inspectChanges(folder, timeoutMs, signal);
+    const byPath = new Map(
+      current.changes.map((change) => [change.path, change]),
+    );
+    const selected = input.paths.map((path) => {
+      const change = byPath.get(path);
+      if (!change) throw new Error(`Worktree change no longer exists: ${path}`);
+      return change;
+    });
+    const head = await git(
+      folder,
+      ["rev-parse", "--verify", "HEAD"],
+      timeoutMs,
+      signal,
+    );
+    if (head.exitCode === 0) {
+      await runGit(
+        ["reset", "--mixed", "HEAD", "--"],
+        "Could not reset the Git index",
+      );
+    } else {
+      await runGit(
+        ["rm", "--cached", "-r", "--ignore-unmatch", "."],
+        "Could not reset the Git index",
+      );
+    }
+    const selectedPaths = [
+      ...new Set(
+        selected.flatMap((change) =>
+          change.previousPath
+            ? [change.previousPath, change.path]
+            : [change.path],
+        ),
+      ),
+    ];
+    await runGit(
+      ["--literal-pathspecs", "add", "--all", "--", ...selectedPaths],
+      "Could not stage selected worktree changes",
+    );
+  }
+
+  const staged = await git(
+    folder,
+    ["diff", "--cached", "--quiet", "--exit-code"],
+    timeoutMs,
+    signal,
+  );
+  if (staged.exitCode === 0) throw new Error("No staged changes to commit");
+  if (staged.exitCode !== 1)
+    requireSuccess(staged, "Could not inspect staged changes");
+
+  let signed = input.signed;
+  if (signed === null) {
+    const configured = await git(
+      folder,
+      ["config", "--bool", "--get", "commit.gpgsign"],
+      timeoutMs,
+      signal,
+    );
+    signed = configured.exitCode === 0 && configured.stdout.trim() === "true";
+  }
+  await runGit(
+    ["commit", signed ? "--gpg-sign" : "--no-gpg-sign", "-m", input.message],
+    "Commit failed",
+  );
+  const sha = runGit(["rev-parse", "HEAD"], "Could not read the new commit");
+  const subject = runGit(
+    ["log", "-1", "--format=%s"],
+    "Could not read the new commit subject",
+  );
+  const [shaResult, subjectResult] = await Promise.all([sha, subject]);
+  return {
+    ...successfulProcess,
+    commit: {
+      sha: shaResult.stdout.trim(),
+      subject: subjectResult.stdout.trim(),
+      signed,
+    },
+    worktree: await inspectWorktreeItem(
+      folder,
+      folder,
+      input.baseBranch,
+      false,
+      Math.min(timeoutMs, 30_000),
       signal,
     ),
   };

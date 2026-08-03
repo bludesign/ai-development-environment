@@ -597,9 +597,10 @@ describe("WorktreesPage", () => {
 
     const menuItems = screen.getAllByRole("menuitem");
     expect(
-      menuItems.slice(0, 4).map((item) => item.textContent?.trim()),
+      menuItems.slice(0, 5).map((item) => item.textContent?.trim()),
     ).toEqual([
       "Change branch",
+      "Commit",
       "View codebase",
       "View repository",
       "Refresh pull request",

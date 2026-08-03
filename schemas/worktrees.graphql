@@ -464,6 +464,8 @@ type WorktreeDetail {
   changesTruncated: Boolean!
   "Whether the branch changes truncated condition is true for this worktree detail."
   branchChangesTruncated: Boolean!
+  "Whether effective Git configuration enables commit signing by default."
+  commitSigningEnabled: Boolean!
 }
 
 "Represents a worktree overview change in the GraphQL API."
@@ -648,6 +650,22 @@ input RunWorktreeOperationInput {
   requestId: ID!
 }
 
+"Values used to commit worktree changes."
+input CommitWorktreeInput {
+  "Identifier of the worktree to commit."
+  worktreeId: ID!
+  "Commit message to record."
+  message: String!
+  "Whether to sign the commit. Null follows effective Git configuration."
+  signed: Boolean
+  "Whether all current changes should be staged before committing."
+  stageAll: Boolean! = true
+  "Exact changed paths to commit when stageAll is false."
+  paths: [String!]! = []
+  "Identifier used to make the request idempotent."
+  requestId: ID!
+}
+
 "Input values for worktree branch selection."
 input WorktreeBranchSelectionInput {
   "The mode to use for the request."
@@ -811,6 +829,11 @@ extend type Mutation {
   runWorktreeOperation(
     "Values for the requested operation."
     input: RunWorktreeOperationInput!
+  ): AgentJob!
+  "Stages and commits selected worktree changes and returns an agent job."
+  commitWorktree(
+    "Values for the requested commit."
+    input: CommitWorktreeInput!
   ): AgentJob!
   "Creates a worktree and returns an agent job."
   createWorktree(

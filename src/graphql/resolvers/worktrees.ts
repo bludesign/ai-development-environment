@@ -71,6 +71,10 @@ export const createWorktreeResolvers = (
   WorktreeSettings: {
     updatedAt: (value: { updatedAt: Date }) => value.updatedAt.toISOString(),
   },
+  WorktreeDetail: {
+    commitSigningEnabled: (value: { commitSigningEnabled?: boolean }) =>
+      value.commitSigningEnabled === true,
+  },
   WorktreeMove: {
     createdAt: (value: { createdAt: Date }) => value.createdAt.toISOString(),
     updatedAt: (value: { updatedAt: Date }) => value.updatedAt.toISOString(),
@@ -224,6 +228,25 @@ export const createWorktreeResolvers = (
         input.operation,
         input.requestId,
       );
+    },
+    commitWorktree: (
+      _root: unknown,
+      {
+        input,
+      }: {
+        input: {
+          worktreeId: string;
+          message: string;
+          signed?: boolean | null;
+          stageAll: boolean;
+          paths: string[];
+          requestId: string;
+        };
+      },
+      context: GraphQLContext,
+    ) => {
+      requireControlPlane(context);
+      return service.commitWorktree(input);
     },
     createWorktree: (
       _root: unknown,

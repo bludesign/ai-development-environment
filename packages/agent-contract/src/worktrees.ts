@@ -6,6 +6,7 @@ import type {
 
 export const WORKTREE_INSPECT_JOB_KIND = "worktree.inspect";
 export const WORKTREE_OPERATION_JOB_KIND = "worktree.operation";
+export const WORKTREE_COMMIT_JOB_KIND = "worktree.commit";
 export const WORKTREE_AUTO_SYNC_JOB_KIND = "worktree.auto-sync";
 export const WORKTREE_GIT_INSPECT_JOB_KIND = "worktree.git.inspect";
 export const WORKTREE_GIT_OPERATION_JOB_KIND = "worktree.git.operation";
@@ -19,6 +20,7 @@ export const WORKTREE_DIFF_ASSET_JOB_KIND = "worktree.diff.asset";
 export const WORKTREE_JOB_KINDS = [
   WORKTREE_INSPECT_JOB_KIND,
   WORKTREE_OPERATION_JOB_KIND,
+  WORKTREE_COMMIT_JOB_KIND,
   WORKTREE_AUTO_SYNC_JOB_KIND,
   WORKTREE_GIT_INSPECT_JOB_KIND,
   WORKTREE_GIT_OPERATION_JOB_KIND,
@@ -203,6 +205,19 @@ export type WorktreeDetail = {
   commitsTruncated: boolean;
   changesTruncated: boolean;
   branchChangesTruncated: boolean;
+  commitSigningEnabled: boolean;
+};
+
+export type WorktreeCommitJobPayload = {
+  codebaseId: string;
+  folder: string;
+  gitDirectory: string;
+  expectedOrigin: string;
+  baseBranch: string | null;
+  message: string;
+  signed: boolean | null;
+  stageAll: boolean;
+  paths: string[];
 };
 
 export const WORKTREE_DIFF_SCOPES = [
@@ -773,6 +788,74 @@ export function worktreeDeleteJobPayload(value: unknown): {
     deleteRemoteBranch: payload.deleteRemoteBranch,
     requireClean: payload.requireClean,
     expectedHeadSha,
+  };
+}
+
+export function worktreeCommitJobPayload(
+  value: unknown,
+): WorktreeCommitJobPayload {
+  const payload = objectValue(value, "worktree commit payload");
+  const allowed = new Set([
+    "codebaseId",
+    "folder",
+    "gitDirectory",
+    "expectedOrigin",
+    "baseBranch",
+    "message",
+    "signed",
+    "stageAll",
+    "paths",
+  ]);
+  const unexpected = Object.keys(payload).find((key) => !allowed.has(key));
+  if (unexpected) {
+    throw new Error(`Unexpected worktree commit payload field: ${unexpected}`);
+  }
+  const message = stringValue(
+    payload.message,
+    "worktree commit payload.message",
+  );
+  if (!message.trim()) throw new Error("Commit message must not be blank");
+  if (message.length > 50_000) throw new Error("Commit message is too long");
+  if (payload.signed !== null && typeof payload.signed !== "boolean") {
+    throw new Error("worktree commit payload.signed must be a boolean or null");
+  }
+  if (typeof payload.stageAll !== "boolean") {
+    throw new Error("worktree commit payload.stageAll must be a boolean");
+  }
+  if (!Array.isArray(payload.paths) || payload.paths.length > 500) {
+    throw new Error("worktree commit payload.paths is invalid");
+  }
+  const paths = payload.paths.map((path, index) =>
+    safeRelativePath(path, `worktree commit payload.paths[${index}]`),
+  );
+  if (new Set(paths).size !== paths.length) {
+    throw new Error("worktree commit payload.paths must be unique");
+  }
+  if (!payload.stageAll && paths.length === 0) {
+    throw new Error("A partial commit requires at least one path");
+  }
+  return {
+    codebaseId: stringValue(
+      payload.codebaseId,
+      "worktree commit payload.codebaseId",
+    ),
+    folder: stringValue(payload.folder, "worktree commit payload.folder"),
+    gitDirectory: stringValue(
+      payload.gitDirectory,
+      "worktree commit payload.gitDirectory",
+    ),
+    expectedOrigin: stringValue(
+      payload.expectedOrigin,
+      "worktree commit payload.expectedOrigin",
+    ),
+    baseBranch: nullableString(
+      payload.baseBranch,
+      "worktree commit payload.baseBranch",
+    ),
+    message,
+    signed: payload.signed as boolean | null,
+    stageAll: payload.stageAll,
+    paths,
   };
 }
 

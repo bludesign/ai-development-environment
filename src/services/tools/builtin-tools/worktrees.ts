@@ -156,6 +156,22 @@ export function createWorktreeToolGroup(
         annotations: WRITE_ANNOTATIONS,
       }),
       serviceTool({
+        name: "commit_worktree",
+        title: "Commit worktree changes",
+        description:
+          "Stage all or an exact set of changed paths and create a Git commit in a worktree.",
+        inputSchema: requestInput.extend({
+          message: z.string().trim().min(1).max(50_000),
+          signed: z.boolean().nullable().optional(),
+          stageAll: z.boolean().default(true),
+          paths: z.array(z.string().min(1)).max(500).default([]),
+        }),
+        service,
+        method: "commitWorktree",
+        resultKey: "job",
+        annotations: WRITE_ANNOTATIONS,
+      }),
+      serviceTool({
         name: "move_worktree",
         title: "Move worktree",
         description:
