@@ -32,14 +32,18 @@ import { RunsService } from "@/services/runs";
 import { AppsService } from "./apps.service";
 
 describe("AppsService", () => {
-  let templateDirectory: string;
-  let templateDatabasePath: string;
+  // Stays on disk: seeding `:memory:` would mean replaying every migration
+  // through Prisma per test, and the migrations include triggers that cannot be
+  // split into single statements. One directory serves the whole file so each
+  // test costs a copy rather than a mkdtemp plus a recursive remove.
   let directory: string;
+  let templateDatabasePath: string;
+  let databaseCount = 0;
   let prisma: InstanceType<typeof PrismaClient>;
 
   beforeAll(async () => {
-    templateDirectory = await mkdtemp(join(tmpdir(), "aide-apps-template-"));
-    templateDatabasePath = join(templateDirectory, "template.db");
+    directory = await mkdtemp(join(tmpdir(), "aide-apps-"));
+    templateDatabasePath = join(directory, "template.db");
     const database = new Database(templateDatabasePath);
     database.pragma("foreign_keys = ON");
     const migrationsRoot = resolve(process.cwd(), "prisma/migrations");
@@ -51,12 +55,11 @@ describe("AppsService", () => {
   }, 60_000);
 
   afterAll(async () => {
-    await rm(templateDirectory, { recursive: true, force: true });
+    await rm(directory, { recursive: true, force: true });
   });
 
   beforeEach(async () => {
-    directory = await mkdtemp(join(tmpdir(), "aide-apps-"));
-    const databasePath = join(directory, "test.db");
+    const databasePath = join(directory, `test-${(databaseCount += 1)}.db`);
     await copyFile(templateDatabasePath, databasePath);
     prisma = new PrismaClient({
       adapter: new PrismaBetterSqlite3({ url: databasePath }),
@@ -153,7 +156,6 @@ describe("AppsService", () => {
 
   afterEach(async () => {
     await prisma.$disconnect();
-    await rm(directory, { recursive: true, force: true });
     vi.clearAllMocks();
   });
 

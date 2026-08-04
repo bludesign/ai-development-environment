@@ -1,8 +1,4 @@
 // @vitest-environment node
-import { mkdtemp, rm } from "node:fs/promises";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
-
 import { PrismaBetterSqlite3 } from "@prisma/adapter-better-sqlite3";
 import { afterEach, beforeEach, describe, expect, test } from "vitest";
 
@@ -75,22 +71,20 @@ const timestamp = (hour: number) =>
   `2026-07-26T${String(hour).padStart(2, "0")}:00:00.000Z`;
 
 describe("Action Center index", () => {
-  let directory: string;
   let prisma: InstanceType<typeof PrismaClient>;
 
   beforeEach(async () => {
-    directory = await mkdtemp(join(tmpdir(), "aide-action-center-"));
+    // In-memory: the assertions only read rows back through Prisma, and a temp
+    // directory plus an on-disk database made this suite the first casualty
+    // whenever a loaded CI runner stalled on filesystem I/O.
     prisma = new PrismaClient({
-      adapter: new PrismaBetterSqlite3({
-        url: join(directory, "test.db"),
-      }),
+      adapter: new PrismaBetterSqlite3({ url: ":memory:" }),
     });
     for (const table of TABLES) await prisma.$executeRawUnsafe(table);
   });
 
   afterEach(async () => {
     await prisma.$disconnect();
-    await rm(directory, { recursive: true, force: true });
   });
 
   async function addBuild(input: {

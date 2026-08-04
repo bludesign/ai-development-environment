@@ -42,6 +42,8 @@ describe("CredentialService database backend", () => {
   let prisma: InstanceType<typeof PrismaClient>;
 
   beforeEach(async () => {
+    // On disk, not `:memory:`: the plaintext sweep test reads the raw database
+    // and WAL bytes back to prove the secret is gone from the files themselves.
     directory = await mkdtemp(join(tmpdir(), "ade-credentials-"));
     databasePath = join(directory, "test.db");
     prisma = new PrismaClient({
@@ -566,21 +568,18 @@ function vaultBackend(
 }
 
 describe("CredentialService vault backend", () => {
-  let directory: string;
   let prisma: InstanceType<typeof PrismaClient>;
 
   beforeEach(async () => {
     resetCredentialAdoptionForTests();
-    directory = await mkdtemp(join(tmpdir(), "ade-credentials-vault-"));
     prisma = new PrismaClient({
-      adapter: new PrismaBetterSqlite3({ url: join(directory, "test.db") }),
+      adapter: new PrismaBetterSqlite3({ url: ":memory:" }),
     });
     await prisma.$executeRawUnsafe(CREATE_CREDENTIAL_TABLE);
   });
 
   afterEach(async () => {
     await prisma.$disconnect();
-    await rm(directory, { recursive: true, force: true });
   });
 
   const env = (overrides: Record<string, string> = {}) => ({
