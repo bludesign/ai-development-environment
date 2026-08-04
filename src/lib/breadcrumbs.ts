@@ -4,6 +4,7 @@ export type BreadcrumbLabelKey =
   | "actionsCache"
   | "agents"
   | "analyticsEvents"
+  | "apps"
   | "buildData"
   | "builds"
   | "cache"
@@ -57,6 +58,7 @@ const STATIC_SEGMENTS: Record<string, BreadcrumbLabelKey> = {
   "actions-cache": "actionsCache",
   agents: "agents",
   "analytics-events": "analyticsEvents",
+  apps: "apps",
   "build-data": "buildData",
   builds: "builds",
   cache: "cache",
@@ -135,6 +137,7 @@ const ROUTABLE_STATIC_PATHS = new Set([
   "/actions-cache",
   "/agents",
   "/analytics-events",
+  "/apps",
   "/build-data",
   "/builds",
   "/changes",
@@ -172,6 +175,7 @@ const ROUTABLE_STATIC_PATHS = new Set([
 ]);
 
 const ROUTABLE_DYNAMIC_PATHS = [
+  /^\/apps\/[^/]+$/,
   /^\/agents\/[^/]+$/,
   /^\/builds\/[^/]+$/,
   /^\/codebases\/(?!repositories(?:\/|$))[^/]+$/,

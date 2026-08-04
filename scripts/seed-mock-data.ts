@@ -11,6 +11,7 @@ import { createMockPrismaClient, mockDatabasePath } from "./mock-data/prisma";
 import { seedSettings } from "./mock-data/settings";
 import { seedAgents } from "./mock-data/agents";
 import { seedCodebases } from "./mock-data/codebases";
+import { seedApps } from "./mock-data/apps";
 import { seedRuns } from "./mock-data/runs";
 import { seedBuilds } from "./mock-data/builds";
 import { seedDevices } from "./mock-data/devices";
@@ -36,6 +37,7 @@ const seeders: Seeder[] = [
   { name: "settings", run: seedSettings },
   { name: "agents", run: seedAgents },
   { name: "codebases", run: seedCodebases },
+  { name: "apps", run: seedApps },
   { name: "runs", run: seedRuns },
   { name: "builds", run: seedBuilds },
   { name: "devices", run: seedDevices },

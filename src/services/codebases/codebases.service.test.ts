@@ -557,6 +557,9 @@ describe("CodebasesService", () => {
       codebaseRepository: {
         delete: vi.fn().mockResolvedValue({}),
       },
+      appRepository: {
+        count: vi.fn().mockResolvedValue(0),
+      },
     };
     const prisma = {
       $transaction: vi.fn((callback) => callback(transaction)),
@@ -590,6 +593,9 @@ describe("CodebasesService", () => {
       },
       codebaseRepository: {
         delete: vi.fn().mockResolvedValue({}),
+      },
+      appRepository: {
+        count: vi.fn().mockResolvedValue(0),
       },
     };
     const prisma = {

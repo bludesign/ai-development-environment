@@ -208,8 +208,32 @@ model CodebaseRepository {
   githubPollingState     GitHubActionsPollingState?
   quickActionWorkflows   WorkflowQuickActionRepository[]
   commandDefinitions     CommandDefinition[]
+  apps                   AppRepository[]
 
   @@index([name])
+}
+
+model App {
+  id             String          @id
+  name           String
+  normalizedName String          @unique
+  description    String          @default("")
+  createdAt      DateTime        @default(now())
+  updatedAt      DateTime        @updatedAt
+  repositories   AppRepository[]
+
+  @@index([name])
+}
+
+model AppRepository {
+  appId        String
+  repositoryId String
+  createdAt    DateTime           @default(now())
+  app          App                @relation(fields: [appId], references: [id], onDelete: Cascade)
+  repository   CodebaseRepository @relation(fields: [repositoryId], references: [id], onDelete: Cascade)
+
+  @@id([appId, repositoryId])
+  @@index([repositoryId, appId])
 }
 
 model Codebase {

@@ -4,6 +4,10 @@
  * Names are intentionally generic ("Acme") for public-facing screenshots.
  */
 export const ids = {
+  apps: {
+    customerPortal: "app-acme-customer-portal",
+    mobileSuite: "app-acme-mobile-suite",
+  },
   agents: {
     studio: "agent-studio-mac",
     build: "agent-build-mac",

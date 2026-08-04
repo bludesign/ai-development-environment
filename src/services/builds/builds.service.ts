@@ -2141,6 +2141,7 @@ export class BuildsService {
       status?: string | null;
       codebaseId?: string | null;
       worktreeId?: string | null;
+      appId?: string | null;
     } = {},
   ) {
     const prisma = await getPrismaClient();
@@ -2150,6 +2151,28 @@ export class BuildsService {
         ...(input.status ? { status: input.status } : {}),
         ...(input.codebaseId ? { codebaseId: input.codebaseId } : {}),
         ...(input.worktreeId ? { worktreeId: input.worktreeId } : {}),
+        ...(input.appId
+          ? {
+              OR: [
+                {
+                  codebase: {
+                    repository: {
+                      apps: { some: { appId: input.appId } },
+                    },
+                  },
+                },
+                {
+                  worktree: {
+                    codebase: {
+                      repository: {
+                        apps: { some: { appId: input.appId } },
+                      },
+                    },
+                  },
+                },
+              ],
+            }
+          : {}),
       },
       orderBy: [{ createdAt: "desc" }, { id: "desc" }],
       ...(input.after ? { cursor: { id: input.after }, skip: 1 } : {}),

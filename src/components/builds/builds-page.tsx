@@ -111,7 +111,7 @@ const STATUSES = [
   "CANCELLED",
 ] as const;
 
-export function BuildsPage() {
+export function BuildsPage({ appId }: { appId?: string }) {
   const t = useTranslations("builds");
   const locale = useLocale();
   const router = useRouter();
@@ -138,14 +138,18 @@ export function BuildsPage() {
           builds: { items: BuildRecord[]; nextCursor: string | null };
           buildScripts: BuildScript[];
         }>(
-          `query BuildsPage($after: ID, $status: BuildStatus) {
-            builds(first: 50, after: $after, status: $status) {
+          `query BuildsPage($after: ID, $status: BuildStatus, $appId: ID) {
+            builds(first: 50, after: $after, status: $status, appId: $appId) {
               items { ${BUILD_LIST_FIELDS} }
               nextCursor
             }
             buildScripts { ${SCRIPT_FIELDS} }
           }`,
-          { after: after ?? null, status: status === "ALL" ? null : status },
+          {
+            after: after ?? null,
+            status: status === "ALL" ? null : status,
+            appId: appId ?? null,
+          },
         );
         setBuilds((current) =>
           after ? [...current, ...data.builds.items] : data.builds.items,
@@ -160,7 +164,7 @@ export function BuildsPage() {
         setLoadingMore(false);
       }
     },
-    [status],
+    [appId, status],
   );
 
   useEffect(() => {
@@ -262,9 +266,11 @@ export function BuildsPage() {
           <TabsTrigger value="history">
             <Hammer /> {t("history")}
           </TabsTrigger>
-          <TabsTrigger value="scripts">
-            <ScrollText /> {t("buildScripts")}
-          </TabsTrigger>
+          {!appId && (
+            <TabsTrigger value="scripts">
+              <ScrollText /> {t("buildScripts")}
+            </TabsTrigger>
+          )}
         </TabsList>
         <TabsContent className="space-y-4" value="history">
           <div className="flex flex-wrap justify-end gap-2">
@@ -532,80 +538,86 @@ export function BuildsPage() {
             </div>
           )}
         </TabsContent>
-        <TabsContent className="space-y-4" value="scripts">
-          <div className="flex justify-end">
-            <Button
-              onClick={() => {
-                setEditingScript(null);
-                setScriptOpen(true);
-              }}
-            >
-              <Plus /> {t("newScript")}
-            </Button>
-          </div>
-          {!scripts.length ? (
-            <Empty className="border py-12">
-              <EmptyHeader>
-                <EmptyMedia variant="icon">
-                  <ScrollText />
-                </EmptyMedia>
-                <EmptyTitle>{t("noScripts")}</EmptyTitle>
-                <EmptyDescription>{t("noScriptsDescription")}</EmptyDescription>
-              </EmptyHeader>
-            </Empty>
-          ) : (
-            <div className="grid gap-3 lg:grid-cols-2">
-              {scripts.map((script) => (
-                <Card key={script.id}>
-                  <CardHeader>
-                    <CardTitle className="flex items-center justify-between gap-2">
-                      <span>{script.name}</span>
-                      {script.enabledByDefault && (
-                        <Badge>{t("defaultEnabled")}</Badge>
-                      )}
-                    </CardTitle>
-                  </CardHeader>
-                  <CardContent className="space-y-3">
-                    <div className="flex flex-wrap gap-2 text-xs text-muted-foreground">
-                      {script.preBuildScript && (
-                        <Badge variant="outline">{t("preBuild")}</Badge>
-                      )}
-                      {script.postBuildScript && (
-                        <Badge variant="outline">{t("postBuild")}</Badge>
-                      )}
-                      <span>
-                        {t("timeoutSeconds", { count: script.timeoutSeconds })}
-                      </span>
-                      <span>
-                        {t(`failureBehaviors.${script.failureBehavior}`)}
-                      </span>
-                    </div>
-                    <div className="flex justify-end gap-2">
-                      <Button
-                        onClick={() => {
-                          setEditingScript(script);
-                          setScriptOpen(true);
-                        }}
-                        size="sm"
-                        variant="outline"
-                      >
-                        {t("edit")}
-                      </Button>
-                      <Button
-                        aria-label={t("deleteScript")}
-                        onClick={() => void deleteScript(script.id)}
-                        size="icon-sm"
-                        variant="destructive"
-                      >
-                        <Trash2 />
-                      </Button>
-                    </div>
-                  </CardContent>
-                </Card>
-              ))}
+        {!appId && (
+          <TabsContent className="space-y-4" value="scripts">
+            <div className="flex justify-end">
+              <Button
+                onClick={() => {
+                  setEditingScript(null);
+                  setScriptOpen(true);
+                }}
+              >
+                <Plus /> {t("newScript")}
+              </Button>
             </div>
-          )}
-        </TabsContent>
+            {!scripts.length ? (
+              <Empty className="border py-12">
+                <EmptyHeader>
+                  <EmptyMedia variant="icon">
+                    <ScrollText />
+                  </EmptyMedia>
+                  <EmptyTitle>{t("noScripts")}</EmptyTitle>
+                  <EmptyDescription>
+                    {t("noScriptsDescription")}
+                  </EmptyDescription>
+                </EmptyHeader>
+              </Empty>
+            ) : (
+              <div className="grid gap-3 lg:grid-cols-2">
+                {scripts.map((script) => (
+                  <Card key={script.id}>
+                    <CardHeader>
+                      <CardTitle className="flex items-center justify-between gap-2">
+                        <span>{script.name}</span>
+                        {script.enabledByDefault && (
+                          <Badge>{t("defaultEnabled")}</Badge>
+                        )}
+                      </CardTitle>
+                    </CardHeader>
+                    <CardContent className="space-y-3">
+                      <div className="flex flex-wrap gap-2 text-xs text-muted-foreground">
+                        {script.preBuildScript && (
+                          <Badge variant="outline">{t("preBuild")}</Badge>
+                        )}
+                        {script.postBuildScript && (
+                          <Badge variant="outline">{t("postBuild")}</Badge>
+                        )}
+                        <span>
+                          {t("timeoutSeconds", {
+                            count: script.timeoutSeconds,
+                          })}
+                        </span>
+                        <span>
+                          {t(`failureBehaviors.${script.failureBehavior}`)}
+                        </span>
+                      </div>
+                      <div className="flex justify-end gap-2">
+                        <Button
+                          onClick={() => {
+                            setEditingScript(script);
+                            setScriptOpen(true);
+                          }}
+                          size="sm"
+                          variant="outline"
+                        >
+                          {t("edit")}
+                        </Button>
+                        <Button
+                          aria-label={t("deleteScript")}
+                          onClick={() => void deleteScript(script.id)}
+                          size="icon-sm"
+                          variant="destructive"
+                        >
+                          <Trash2 />
+                        </Button>
+                      </div>
+                    </CardContent>
+                  </Card>
+                ))}
+              </div>
+            )}
+          </TabsContent>
+        )}
       </Tabs>
       {scriptOpen && (
         <BuildScriptDialog

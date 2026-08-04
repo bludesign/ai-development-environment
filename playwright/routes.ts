@@ -30,6 +30,20 @@ export const routes: RouteEntry[] = [
   // Overview / action center
   { name: "dashboard", path: "/" },
 
+  // Apps
+  {
+    name: "apps",
+    path: "/apps",
+    readyGraphqlOperation: "AppsPage",
+    readyTexts: ["Customer Portal"],
+  },
+  {
+    name: "app-detail",
+    path: `/apps/${ids.apps.customerPortal}`,
+    readyGraphqlOperation: "AppDetail",
+    readyTexts: ["Customer Portal"],
+  },
+
   // Agents
   { name: "agents", path: "/agents" },
   { name: "agent-detail", path: `/agents/${ids.agents.studio}` },

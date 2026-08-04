@@ -1,0 +1,82 @@
+"A product grouping that owns one or more repositories."
+type App {
+  "Stable identifier for this app."
+  id: ID!
+  "Display name for this app."
+  name: String!
+  "Optional longer description for this app."
+  description: String!
+  "Repositories assigned to this app."
+  repositories: [CodebaseRepository!]!
+  "Resource totals scoped to this app."
+  counts: AppCounts!
+  "ISO 8601 timestamp when this app was created."
+  createdAt: String!
+  "ISO 8601 timestamp when this app was last updated."
+  updatedAt: String!
+}
+
+"Resource totals for an app."
+type AppCounts {
+  "Number of assigned repositories."
+  repositories: Int!
+  "Number of repository checkouts."
+  codebases: Int!
+  "Number of visible worktrees."
+  worktrees: Int!
+  "Number of active plans."
+  plans: Int!
+  "Number of active sessions."
+  sessions: Int!
+  "Number of builds."
+  builds: Int!
+}
+
+"Values used to create an app."
+input CreateAppInput {
+  "Display name for the app."
+  name: String!
+  "Optional longer description for the app."
+  description: String
+  "Identifiers of repositories assigned to the app."
+  repositoryIds: [ID!]!
+}
+
+"Values used to update an app."
+input UpdateAppInput {
+  "Identifier of the app to update."
+  id: ID!
+  "Display name for the app."
+  name: String!
+  "Optional longer description for the app."
+  description: String
+  "Identifiers of repositories assigned to the app."
+  repositoryIds: [ID!]!
+}
+
+"Represents an app change."
+type AppChange {
+  "Identifier of the app that changed, or null when the collection changed."
+  id: ID
+}
+
+extend type Query {
+  "Returns all apps."
+  apps: [App!]!
+  "Returns an app, or null when it cannot be found."
+  app("Identifier of the app." id: ID!): App
+}
+
+extend type Mutation {
+  "Creates an app."
+  createApp("Values for the requested operation." input: CreateAppInput!): App!
+  "Updates an app."
+  updateApp("Values for the requested operation." input: UpdateAppInput!): App!
+  "Deletes an app without deleting its repositories or resources."
+  deleteApp("Identifier of the app." id: ID!): AppChange!
+}
+
+extend type Subscription {
+  "Emits after the app collection changes."
+  appsChanged: AppChange!
+}

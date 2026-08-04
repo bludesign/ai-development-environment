@@ -750,6 +750,7 @@ export class RunsService {
     archive?: string | null;
     provider?: string | null;
     origin?: string | null;
+    appId?: string | null;
     first?: number | null;
     after?: string | null;
   }) {
@@ -768,6 +769,17 @@ export class RunsService {
         ? { provider: input.provider.trim().toUpperCase() }
         : {}),
       ...(input.origin ? { origin: input.origin.trim().toUpperCase() } : {}),
+      ...(input.appId
+        ? {
+            worktree: {
+              codebase: {
+                repository: {
+                  apps: { some: { appId: input.appId } },
+                },
+              },
+            },
+          }
+        : {}),
       ...(search
         ? {
             OR: [

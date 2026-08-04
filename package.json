@@ -51,7 +51,7 @@
     "test:standalone-credentials": "node scripts/test-standalone-credentials.mjs",
     "check-translations": "npx tsx scripts/check-translations.ts",
     "telemetry:mock": "tsx scripts/send-mock-telemetry.ts",
-    "mock:db": "rm -f prisma/mock.db prisma/mock.db-shm prisma/mock.db-wal && DATABASE_URL=file:./prisma/mock.db prisma migrate deploy",
+    "mock:db": "rm -f prisma/mock.db prisma/mock.db-shm prisma/mock.db-wal && node -e \"const fs=require('node:fs');fs.closeSync(fs.openSync('prisma/mock.db','w'))\" && DATABASE_URL=file:./prisma/mock.db prisma migrate deploy",
     "mock:seed": "DATABASE_URL=file:./prisma/mock.db tsx scripts/seed-mock-data.ts",
     "mock:reset": "npm run generate:prisma && npm run mock:db && npm run mock:seed",
     "screenshots:build": "SCREENSHOT_DIST_DIR=.next-mock AGENT_WS_HOSTNAME=127.0.0.1 next build",
