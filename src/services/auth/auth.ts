@@ -10,7 +10,7 @@ import {
   oneTimeToken,
 } from "better-auth/plugins";
 
-import { betterAuthBaseURL } from "@/lib/app-origins";
+import { betterAuthBaseURL, originFromRequest } from "@/lib/app-origins";
 import { getPrismaClient } from "@/data/prisma-client";
 
 import {
@@ -68,11 +68,27 @@ function createAuth(
     // which is also what Better Auth derives its trusted origins from — so the
     // CSRF check and the callbackURL/redirectTo check follow APP_ORIGINS too.
     baseURL: betterAuthBaseURL(runtime.origins),
+    // Adds to whatever the baseURL already implies, rather than replacing it, so
+    // this contributes nothing unless nothing was configured.
+    //
+    // With no allowlist there is no static base URL to derive a trusted origin
+    // from, so it is computed per request from the host the request arrived on. A
+    // function rather than an array because Better Auth resolves the array form
+    // once at startup; only the function form is re-evaluated per request.
+    //
+    // The CSRF property survives: the trusted set is exactly the request's own
+    // origin, so a cross-site POST carrying a victim's cookie still arrives with a
+    // foreign `Origin` and is rejected. Browsers cannot forge `Host`.
+    trustedOrigins: (request?: Request) => {
+      if (!request || runtime.origins.mode !== "inferred") return [];
+      const origin = originFromRequest(request, runtime.trustProxyHeaders);
+      return origin ? [origin] : [];
+    },
     secret: runtime.secret,
-    // Honour x-forwarded-host only when an operator has declared a proxy in front.
-    // The allowlist is still what constrains the value.
-    trustedProxyHeaders: runtime.trustProxyHeaders,
     advanced: {
+      // Honour x-forwarded-host only when an operator has declared a proxy in
+      // front. The allowlist is still what constrains the value.
+      trustedProxyHeaders: runtime.trustProxyHeaders,
       // With a per-request baseURL the Secure flag would otherwise follow whichever
       // scheme the request arrived on, so one plaintext origin in the allowlist
       // could hand out a session cookie without it.
