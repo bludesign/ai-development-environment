@@ -14,7 +14,10 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { controlPlaneRequest } from "@/lib/control-plane-client";
+import {
+  controlPlaneRequest,
+  controlPlaneSubscriptions,
+} from "@/lib/control-plane-client";
 
 type BuildWorktree = {
   id: string;
@@ -96,7 +99,34 @@ export function AppBuildLauncher({ appId }: { appId: string }) {
 
   useEffect(() => {
     const timer = window.setTimeout(() => void load(), 0);
-    return () => window.clearTimeout(timer);
+    const subscriptions = controlPlaneSubscriptions();
+    const unsubscribeCodebases = subscriptions.subscribe(
+      {
+        query:
+          "subscription AppBuildCodebasesChanged { codebaseOverviewChanged { codebaseId repositoryId } }",
+      },
+      {
+        next: () => void load(),
+        error: () => undefined,
+        complete: () => undefined,
+      },
+    );
+    const unsubscribeWorktrees = subscriptions.subscribe(
+      {
+        query:
+          "subscription AppBuildWorktreesChanged { worktreeOverviewChanged { worktreeId codebaseId } }",
+      },
+      {
+        next: () => void load(),
+        error: () => undefined,
+        complete: () => undefined,
+      },
+    );
+    return () => {
+      window.clearTimeout(timer);
+      unsubscribeCodebases();
+      unsubscribeWorktrees();
+    };
   }, [load]);
 
   const selected = useMemo(

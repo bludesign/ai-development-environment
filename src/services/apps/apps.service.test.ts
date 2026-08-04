@@ -25,7 +25,9 @@ vi.mock("@/data/prisma-client", () => ({
 
 import { PrismaClient } from "@/generated/prisma/client";
 import type { AgentControlService } from "@/services/agent-control";
+import { BuildsService } from "@/services/builds";
 import { CodebasesService } from "@/services/codebases";
+import { RunsService } from "@/services/runs";
 
 import { AppsService } from "./apps.service";
 
@@ -113,6 +115,7 @@ describe("AppsService", () => {
           displayNumber: 1,
           provider: "CODEX",
           worktreeId: "worktree-1",
+          repositoryId: "repository-1",
           repositoryName: "Web",
           model: "gpt-test",
           initialPrompt: "Plan",
@@ -123,6 +126,7 @@ describe("AppsService", () => {
           displayNumber: 1,
           provider: "CODEX",
           worktreeId: "worktree-1",
+          repositoryId: "repository-1",
           repositoryName: "Web",
           model: "gpt-test",
           initialPrompt: "Build",
@@ -136,6 +140,7 @@ describe("AppsService", () => {
         requestId: "request-1",
         codebaseId: "codebase-1",
         worktreeId: "worktree-1",
+        repositoryId: "repository-1",
         action: "BUILD",
         destinationType: "SIMULATOR",
         destinationJson: "{}",
@@ -201,6 +206,30 @@ describe("AppsService", () => {
         where: { id: "repository-1" },
       }),
     ).not.toBeNull();
+    await expect(service.get(app.id)).resolves.toMatchObject({
+      counts: {
+        repositories: 1,
+        codebases: 0,
+        worktrees: 0,
+        plans: 1,
+        sessions: 1,
+        builds: 1,
+      },
+    });
+    await expect(
+      new RunsService().list({ kind: "PLAN", appId: app.id }),
+    ).resolves.toMatchObject({
+      items: [{ id: "plan-1", worktreeId: null }],
+      totalCount: 1,
+    });
+    const buildControl = {
+      registerCompletionHandler: vi.fn(),
+    } as unknown as AgentControlService;
+    await expect(
+      new BuildsService(buildControl).builds({ appId: app.id }),
+    ).resolves.toMatchObject({
+      items: [{ id: "build-1", codebaseId: null, worktreeId: null }],
+    });
 
     const updated = await service.update({
       id: app.id,

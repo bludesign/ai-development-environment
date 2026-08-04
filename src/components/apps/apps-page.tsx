@@ -24,14 +24,12 @@ import {
 } from "@/components/ui/empty";
 import { Spinner } from "@/components/ui/spinner";
 import { Link, useRouter } from "@/i18n/navigation";
-import {
-  controlPlaneRequest,
-  controlPlaneSubscriptions,
-} from "@/lib/control-plane-client";
+import { controlPlaneRequest } from "@/lib/control-plane-client";
 import { isRowActivation } from "@/lib/row-activation";
 
 import type { AppDetailView } from "./app-detail-page";
 import { AppEditorDialog } from "./app-editor-dialog";
+import { subscribeToAppSummaryChanges } from "./app-summary-subscriptions";
 import {
   APP_FIELDS,
   APP_REPOSITORY_FIELDS,
@@ -69,14 +67,7 @@ export function AppsPage() {
 
   useEffect(() => {
     const timer = window.setTimeout(() => void load(), 0);
-    const unsubscribe = controlPlaneSubscriptions().subscribe(
-      { query: `subscription AppsChanged { appsChanged { id } }` },
-      {
-        next: () => void load(),
-        error: () => undefined,
-        complete: () => undefined,
-      },
-    );
+    const unsubscribe = subscribeToAppSummaryChanges(() => void load());
     return () => {
       window.clearTimeout(timer);
       unsubscribe();

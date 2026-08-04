@@ -209,6 +209,8 @@ model CodebaseRepository {
   quickActionWorkflows   WorkflowQuickActionRepository[]
   commandDefinitions     CommandDefinition[]
   apps                   AppRepository[]
+  runs                   AgentRun[]
+  builds                 Build[]
 
   @@index([name])
 }
@@ -466,25 +468,26 @@ model WorktreeAutoMerge {
 }
 
 model AgentRun {
-  id                       String             @id
+  id                       String              @id
   kind                     String
   displayNumber            Int
-  status                   String             @default("IN_PROGRESS")
-  phase                    String             @default("QUEUED")
-  origin                   String             @default("MANAGED")
+  status                   String              @default("IN_PROGRESS")
+  phase                    String              @default("QUEUED")
+  origin                   String              @default("MANAGED")
   provider                 String
   providerVersion          String?
   worktreeId               String?
+  repositoryId             String?
   agentId                  String?
   jiraIssueKey             String?
   repositoryName           String
   branch                   String?
   model                    String
   effort                   String?
-  webSearchEnabled         Boolean            @default(false)
-  mcpPresetIdsJson         String             @default("[]")
-  mcpToolNamesJson         String             @default("[]")
-  worktreeConcurrencyLimit Int                @default(0)
+  webSearchEnabled         Boolean             @default(false)
+  mcpPresetIdsJson         String              @default("[]")
+  mcpToolNamesJson         String              @default("[]")
+  worktreeConcurrencyLimit Int                 @default(0)
   workflowRunId            String?
   initialPrompt            String
   finalOutput              String?
@@ -492,13 +495,13 @@ model AgentRun {
   estimatedCost            Float?
   pricingSource            String?
   pricingUpdatedAt         DateTime?
-  inputTokens              Int                @default(0)
-  outputTokens             Int                @default(0)
-  reasoningTokens          Int                @default(0)
-  cacheReadTokens          Int                @default(0)
-  cacheWriteTokens         Int                @default(0)
-  toolCallCount            Int                @default(0)
-  sourcePlanId             String?            @unique
+  inputTokens              Int                 @default(0)
+  outputTokens             Int                 @default(0)
+  reasoningTokens          Int                 @default(0)
+  cacheReadTokens          Int                 @default(0)
+  cacheWriteTokens         Int                 @default(0)
+  toolCallCount            Int                 @default(0)
+  sourcePlanId             String?             @unique
   sourcePlanNumber         Int?
   playedAt                 DateTime?
   playedSessionNumber      Int?
@@ -509,15 +512,16 @@ model AgentRun {
   nativeArchivedAt         DateTime?
   startedAt                DateTime?
   finishedAt               DateTime?
-  createdAt                DateTime           @default(now())
-  updatedAt                DateTime           @updatedAt
-  worktree                 Worktree?          @relation(fields: [worktreeId], references: [id], onDelete: SetNull)
-  workflowRun              WorkflowRun?       @relation(fields: [workflowRunId], references: [id], onDelete: SetNull)
-  agent                    Agent?             @relation(fields: [agentId], references: [id], onDelete: SetNull)
-  sourcePlan               AgentRun?          @relation("PlanSession", fields: [sourcePlanId], references: [id], onDelete: SetNull)
-  playedSession            AgentRun?          @relation("PlanSession")
-  parentRun                AgentRun?          @relation("RunFollowUps", fields: [parentRunId], references: [id], onDelete: SetNull)
-  followUps                AgentRun[]         @relation("RunFollowUps")
+  createdAt                DateTime            @default(now())
+  updatedAt                DateTime            @updatedAt
+  worktree                 Worktree?           @relation(fields: [worktreeId], references: [id], onDelete: SetNull)
+  repository               CodebaseRepository? @relation(fields: [repositoryId], references: [id], onDelete: SetNull)
+  workflowRun              WorkflowRun?        @relation(fields: [workflowRunId], references: [id], onDelete: SetNull)
+  agent                    Agent?              @relation(fields: [agentId], references: [id], onDelete: SetNull)
+  sourcePlan               AgentRun?           @relation("PlanSession", fields: [sourcePlanId], references: [id], onDelete: SetNull)
+  playedSession            AgentRun?           @relation("PlanSession")
+  parentRun                AgentRun?           @relation("RunFollowUps", fields: [parentRunId], references: [id], onDelete: SetNull)
+  followUps                AgentRun[]          @relation("RunFollowUps")
   attempts                 RunAttempt[]
   inputs                   RunInput[]
   events                   RunEvent[]
@@ -532,6 +536,7 @@ model AgentRun {
   @@index([kind, archivedAt, createdAt])
   @@index([worktreeId, status, createdAt])
   @@index([worktreeId, kind, status, createdAt])
+  @@index([repositoryId, kind, archivedAt, createdAt])
   @@index([workflowRunId, createdAt])
   @@index([agentId, provider, createdAt])
   @@index([parentRunId, createdAt])
@@ -1288,6 +1293,7 @@ model Build {
   agentId           String?
   codebaseId        String?
   worktreeId        String?
+  repositoryId      String?
   configurationId   String?
   jobId             String?
   status            String                 @default("QUEUED")
@@ -1306,6 +1312,7 @@ model Build {
   agent             Agent?                 @relation(fields: [agentId], references: [id], onDelete: SetNull)
   codebase          Codebase?              @relation(fields: [codebaseId], references: [id], onDelete: SetNull)
   worktree          Worktree?              @relation(fields: [worktreeId], references: [id], onDelete: SetNull)
+  repository        CodebaseRepository?    @relation(fields: [repositoryId], references: [id], onDelete: SetNull)
   configuration     BuildConfiguration?    @relation(fields: [configurationId], references: [id], onDelete: SetNull)
   job               AgentJob?              @relation(fields: [jobId], references: [id], onDelete: SetNull)
   artifacts         BuildArtifact[]
@@ -1319,6 +1326,7 @@ model Build {
   @@index([agentId, createdAt])
   @@index([codebaseId, createdAt])
   @@index([worktreeId, createdAt])
+  @@index([repositoryId, createdAt])
   @@index([jobId])
 }
 

@@ -196,27 +196,18 @@ export class AppsService {
         where: {
           kind: "PLAN",
           archivedAt: null,
-          worktree: { codebase: { repositoryId: repositoryScope } },
+          repositoryId: repositoryScope,
         },
       }),
       prisma.agentRun.count({
         where: {
           kind: "SESSION",
           archivedAt: null,
-          worktree: { codebase: { repositoryId: repositoryScope } },
+          repositoryId: repositoryScope,
         },
       }),
       prisma.build.count({
-        where: {
-          OR: [
-            { codebase: { repositoryId: repositoryScope } },
-            {
-              worktree: {
-                codebase: { repositoryId: repositoryScope },
-              },
-            },
-          ],
-        },
+        where: { repositoryId: repositoryScope },
       }),
     ]);
 

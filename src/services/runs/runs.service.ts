@@ -771,12 +771,8 @@ export class RunsService {
       ...(input.origin ? { origin: input.origin.trim().toUpperCase() } : {}),
       ...(input.appId
         ? {
-            worktree: {
-              codebase: {
-                repository: {
-                  apps: { some: { appId: input.appId } },
-                },
-              },
+            repository: {
+              apps: { some: { appId: input.appId } },
             },
           }
         : {}),
@@ -1122,6 +1118,7 @@ export class RunsService {
           phase: transfersSlot ? "QUEUED" : "WAITING_FOR_WORKTREE",
           provider,
           worktreeId: worktree.id,
+          repositoryId: worktree.codebase.repository.id,
           agentId: worktree.codebase.agentId,
           jiraIssueKey: optionalJiraIssueKey(input.jiraIssueKey),
           repositoryName: worktree.codebase.repository.name,
@@ -1839,6 +1836,7 @@ export class RunsService {
             : "WAITING_FOR_WORKTREE",
           provider: batch.run.provider,
           worktreeId: batch.run.worktreeId,
+          repositoryId: batch.run.repositoryId,
           agentId: batch.run.agentId,
           jiraIssueKey: batch.run.jiraIssueKey,
           repositoryName: batch.run.repositoryName,
@@ -2836,6 +2834,7 @@ export class RunsService {
           origin: "IMPORTED",
           provider,
           worktreeId: worktree.id,
+          repositoryId: worktree.codebase.repository.id,
           agentId,
           jiraIssueKey: optionalJiraIssueKey(record.jiraIssueKey),
           repositoryName: worktree.codebase.repository.name,

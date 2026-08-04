@@ -36,14 +36,12 @@ import {
 } from "@/components/ui/empty";
 import { Spinner } from "@/components/ui/spinner";
 import { Link, useRouter } from "@/i18n/navigation";
-import {
-  controlPlaneRequest,
-  controlPlaneSubscriptions,
-} from "@/lib/control-plane-client";
+import { controlPlaneRequest } from "@/lib/control-plane-client";
 import { cn } from "@/lib/utils";
 
 import { AppBuildLauncher } from "./app-build-launcher";
 import { AppEditorDialog } from "./app-editor-dialog";
+import { subscribeToAppSummaryChanges } from "./app-summary-subscriptions";
 import {
   APP_FIELDS,
   APP_REPOSITORY_FIELDS,
@@ -106,14 +104,7 @@ export function AppDetailPage({
 
   useEffect(() => {
     const timer = window.setTimeout(() => void load(), 0);
-    const unsubscribe = controlPlaneSubscriptions().subscribe(
-      { query: `subscription AppDetailChanged { appsChanged { id } }` },
-      {
-        next: () => void load(),
-        error: () => undefined,
-        complete: () => undefined,
-      },
-    );
+    const unsubscribe = subscribeToAppSummaryChanges(() => void load());
     return () => {
       window.clearTimeout(timer);
       unsubscribe();
@@ -156,6 +147,8 @@ export function AppDetailPage({
       </Empty>
     );
   }
+
+  const scopeKey = `${app.id}:${app.updatedAt}`;
 
   return (
     <section className="mx-auto flex w-full max-w-[1500px] flex-col gap-6">
@@ -208,11 +201,17 @@ export function AppDetailPage({
 
       {view === "overview" && <AppOverview app={app} />}
       {view === "repositories" && <AppRepositories app={app} />}
-      {view === "worktrees" && <WorktreesPage appId={app.id} />}
-      {view === "plans" && <RunsPage appId={app.id} kind="PLAN" />}
-      {view === "sessions" && <RunsPage appId={app.id} kind="SESSION" />}
+      {view === "worktrees" && (
+        <WorktreesPage appId={app.id} key={`${scopeKey}:worktrees`} />
+      )}
+      {view === "plans" && (
+        <RunsPage appId={app.id} key={`${scopeKey}:plans`} kind="PLAN" />
+      )}
+      {view === "sessions" && (
+        <RunsPage appId={app.id} key={`${scopeKey}:sessions`} kind="SESSION" />
+      )}
       {view === "builds" && (
-        <div className="space-y-6">
+        <div className="space-y-6" key={`${scopeKey}:builds`}>
           <AppBuildLauncher appId={app.id} />
           <BuildsPage appId={app.id} />
         </div>

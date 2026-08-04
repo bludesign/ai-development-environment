@@ -1516,6 +1516,7 @@ export class BuildsService {
         agentId: worktree.codebase.agentId,
         codebaseId: worktree.codebaseId,
         worktreeId: worktree.id,
+        repositoryId: worktree.codebase.repository.id,
         configurationId: configuration.id,
         status: "QUEUED",
         action,
@@ -1824,6 +1825,7 @@ export class BuildsService {
         agentId: worktree.codebase.agentId,
         codebaseId: worktree.codebaseId,
         worktreeId: worktree.id,
+        repositoryId: worktree.codebase.repository.id,
         status: "RUNNING",
         action: "TEST",
         destinationType: "HOST",
@@ -2153,24 +2155,9 @@ export class BuildsService {
         ...(input.worktreeId ? { worktreeId: input.worktreeId } : {}),
         ...(input.appId
           ? {
-              OR: [
-                {
-                  codebase: {
-                    repository: {
-                      apps: { some: { appId: input.appId } },
-                    },
-                  },
-                },
-                {
-                  worktree: {
-                    codebase: {
-                      repository: {
-                        apps: { some: { appId: input.appId } },
-                      },
-                    },
-                  },
-                },
-              ],
+              repository: {
+                apps: { some: { appId: input.appId } },
+              },
             }
           : {}),
       },
