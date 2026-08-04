@@ -1,4 +1,5 @@
 import { execFile } from "node:child_process";
+import { randomBytes } from "node:crypto";
 import {
   lstat,
   mkdtemp,
@@ -128,5 +129,30 @@ describe("Git run checkpoints", () => {
       "base unstaged\n",
     );
     await expect(lstat(join(cwd, "later.txt"))).rejects.toThrow();
+  });
+
+  test("truncates a worktree diff that is larger than the control plane limit", async () => {
+    const cwd = await repository();
+    await writeFile(join(cwd, "huge.txt"), "committed line\n".repeat(3e5));
+    await git(cwd, "add", "huge.txt");
+    await git(cwd, "commit", "-m", "huge base");
+    await writeFile(
+      join(cwd, "huge.txt"),
+      "large worktree change\n".repeat(3e5),
+    );
+    // Incompressible, so the binary hunk stays far past execFile's old buffer.
+    await writeFile(join(cwd, "huge.bin"), randomBytes(12e6));
+
+    const checkpoint = await captureGitCheckpoint(cwd, "run-3", "START");
+
+    expect(checkpoint.worktreeTree).toMatch(/^[a-f0-9]{40}$/);
+    expect(checkpoint.diffPatch).toContain("[Truncated after");
+    expect(checkpoint.diffPatch!.length).toBeLessThanOrEqual(2_000_000);
+    expect(checkpoint.manifestJson.length).toBeLessThanOrEqual(2_000_000);
+    expect(checkpoint.diffSummary!.length).toBeLessThanOrEqual(500_000);
+
+    const current = await captureGitCheckpoint(cwd, "run-3", "FINAL");
+    const preview = await compareGitCheckpoint(cwd, checkpoint, current);
+    expect(preview.rollbackPatch.length).toBeLessThanOrEqual(2_000_000);
   });
 });
