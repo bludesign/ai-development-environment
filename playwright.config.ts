@@ -8,7 +8,7 @@ import {
   SCREENSHOT_TIME,
   SCREENSHOT_TIME_ZONE,
 } from "./playwright/screenshot-time";
-import { MOCK_CREDENTIAL_ENCRYPTION_KEY } from "./scripts/mock-data/encryption-key";
+import { MOCK_APP_SECRET } from "./scripts/mock-data/encryption-key";
 import { screenshotSessionToken } from "./scripts/mock-data/auth";
 
 const assignedPorts = new Set<number>();
@@ -154,15 +154,14 @@ export default defineConfig({
         // Device enrollment refuses to issue a profile unless the app is served over public
         // HTTPS. The captured page only renders the form, so a placeholder origin is enough.
         PUBLIC_BASE_URL: SCREENSHOT_PUBLIC_ORIGIN,
-        // Must match the key the seed encrypted mock.db's credentials with, or the app
+        // Must match the secret the seed encrypted mock.db's credentials with, or the app
         // rewrites every row on first use and the VACUUM that follows locks the database.
         // Explicitly override a developer's .env too; otherwise a local Vault/Keychain choice
         // makes every database-backed screenshot credential appear unavailable.
         CREDENTIAL_STORAGE_TYPE: "database",
-        CREDENTIAL_ENCRYPTION_KEY: MOCK_CREDENTIAL_ENCRYPTION_KEY,
-        BETTER_AUTH_SECRET:
-          "screenshot-better-auth-secret-at-least-thirty-two-characters",
-        BETTER_AUTH_URL: baseURL,
+        // One root for every derived secret; must match what the seed encrypted with.
+        APP_SECRET: MOCK_APP_SECRET,
+        APP_ORIGINS: new URL(baseURL).host,
         AUTH_MODE: "password",
         SCREENSHOT_SESSION_TOKEN: screenshotSessionToken,
       },

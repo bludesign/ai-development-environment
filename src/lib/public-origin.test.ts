@@ -32,7 +32,7 @@ describe("resolvePublicOrigin", () => {
   test("falls through to headers when PUBLIC_BASE_URL is unparseable", () => {
     const resolved = resolvePublicOrigin(
       headers({ "x-forwarded-proto": "https", host: "tunnel.example.com" }),
-      { PUBLIC_BASE_URL: "not a url" },
+      { PUBLIC_BASE_URL: "not a url", APP_ORIGINS: "tunnel.example.com" },
     );
     expect(resolved).toMatchObject({
       origin: "https://tunnel.example.com",
@@ -43,6 +43,7 @@ describe("resolvePublicOrigin", () => {
   test("falls through when PUBLIC_BASE_URL uses an unsupported scheme", () => {
     const resolved = resolvePublicOrigin(headers({ host: "local.test" }), {
       PUBLIC_BASE_URL: "ftp://builds.example.com",
+      APP_ORIGINS: "local.test",
     });
     expect(resolved).toMatchObject({ origin: "http://local.test" });
   });
@@ -53,7 +54,7 @@ describe("resolvePublicOrigin", () => {
         "x-forwarded-proto": "https, http",
         "x-forwarded-host": "outer.example.com, inner.internal",
       }),
-      {},
+      { APP_ORIGINS: "outer.example.com" },
     );
     expect(resolved?.origin).toBe("https://outer.example.com");
   });
@@ -65,9 +66,58 @@ describe("resolvePublicOrigin", () => {
         "x-forwarded-host": "public.example.com",
         host: "127.0.0.1:3000",
       }),
-      {},
+      { APP_ORIGINS: "public.example.com" },
     );
     expect(resolved?.origin).toBe("https://public.example.com");
+  });
+
+  test("ignores a Host header that APP_ORIGINS does not trust", () => {
+    expect(
+      resolvePublicOrigin(headers({ host: "attacker.test" }), {
+        APP_ORIGINS: "builds.example.com",
+      }),
+    ).toBeNull();
+  });
+
+  test("ignores a spoofed x-forwarded-host", () => {
+    expect(
+      resolvePublicOrigin(
+        headers({
+          "x-forwarded-proto": "https",
+          "x-forwarded-host": "attacker.test",
+        }),
+        { APP_ORIGINS: "builds.example.com" },
+      ),
+    ).toBeNull();
+  });
+
+  test("does not fall back to the Host header when the forwarded host is untrusted", () => {
+    expect(
+      resolvePublicOrigin(
+        headers({
+          "x-forwarded-proto": "https",
+          "x-forwarded-host": "attacker.test",
+          host: "attacker.test",
+        }),
+        { APP_ORIGINS: "builds.example.com" },
+      ),
+    ).toBeNull();
+  });
+
+  test("a wildcard entry still admits its subdomains", () => {
+    expect(
+      resolvePublicOrigin(headers({ host: "box.hare-bull.ts.net" }), {
+        APP_ORIGINS: "*.hare-bull.ts.net",
+      })?.origin,
+    ).toBe("http://box.hare-bull.ts.net");
+  });
+
+  test("returns null rather than trusting everything when APP_ORIGINS is invalid", () => {
+    expect(
+      resolvePublicOrigin(headers({ host: "attacker.test" }), {
+        APP_ORIGINS: "*",
+      }),
+    ).toBeNull();
   });
 
   test("reports insecure when only a host header is present", () => {
@@ -106,14 +156,16 @@ describe("resolvePublicOrigin", () => {
     ["mac-studio.local", true],
     ["builds.example.com", false],
   ])("classifies %s loopback as %s", (host, loopback) => {
-    const resolved = resolvePublicOrigin(headers({ host }), {});
+    const resolved = resolvePublicOrigin(headers({ host }), {
+      APP_ORIGINS: String(host),
+    });
     expect(resolved?.loopback).toBe(loopback);
   });
 
   test("treats a secure public origin as installable", () => {
     const resolved = resolvePublicOrigin(
       headers({ "x-forwarded-proto": "https", host: "builds.example.com" }),
-      {},
+      { APP_ORIGINS: "builds.example.com" },
     );
     expect(resolved).toMatchObject({ secure: true, loopback: false });
   });

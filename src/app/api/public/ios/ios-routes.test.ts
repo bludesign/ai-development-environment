@@ -1,5 +1,5 @@
 // @vitest-environment node
-import { beforeEach, describe, expect, test, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
   completeEnrollment: vi.fn(),
@@ -30,7 +30,11 @@ function proxyHeaders(extra: Record<string, string> = {}) {
   };
 }
 
+// These routes resolve their public origin from forwarded headers, which are now
+// only believed when APP_ORIGINS lists the host.
 beforeEach(() => {
+  process.env.APP_ORIGINS =
+    "devices.example.com,192.168.1.20,192.168.1.20:3000";
   vi.clearAllMocks();
   requireUserRequest.mockResolvedValue(null);
   mocks.completeEnrollment.mockResolvedValue({ id: deviceId });
@@ -40,6 +44,10 @@ beforeEach(() => {
     token: "test-token",
     expiresAt: new Date(Date.now() + 60_000),
   });
+});
+
+afterEach(() => {
+  delete process.env.APP_ORIGINS;
 });
 
 describe("iOS enrollment routes", () => {

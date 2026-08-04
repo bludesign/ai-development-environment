@@ -6,30 +6,68 @@ import { describe, expect, test } from "vitest";
 import { readCredentialStoreConfig } from "./config";
 
 describe("credential store configuration", () => {
-  test("defaults to plaintext database storage with a warning", () => {
-    const result = readCredentialStoreConfig({}, "linux");
-    expect(result.storageType).toBe("database");
-    expect(result.config).toMatchObject({
-      storageType: "database",
-      encryptionKey: null,
-    });
-    expect(result.warnings.map(({ code }) => code)).toContain(
-      "DATABASE_UNENCRYPTED",
+  test("derives the database encryption key from APP_SECRET", () => {
+    const result = readCredentialStoreConfig(
+      { APP_SECRET: randomBytes(32).toString("base64") },
+      "linux",
     );
+    expect(result.storageType).toBe("database");
+    expect(result.errors).toEqual([]);
+    expect(result.config).toMatchObject({ storageType: "database" });
+    const config = result.config as { encryptionKey: Buffer };
+    expect(config.encryptionKey).toHaveLength(32);
   });
 
-  test("accepts a valid encryption key and rejects an invalid one", () => {
-    const valid = readCredentialStoreConfig({
-      CREDENTIAL_ENCRYPTION_KEY: randomBytes(32).toString("base64"),
-    });
-    expect(valid.errors).toEqual([]);
-    expect(valid.config).toMatchObject({ storageType: "database" });
+  test("database storage has no plaintext mode", () => {
+    const result = readCredentialStoreConfig({}, "linux");
+    expect(result.config).toBeNull();
+    expect(result.errors[0]?.code).toBe("APP_SECRET_INVALID");
+  });
 
-    const invalid = readCredentialStoreConfig({
-      CREDENTIAL_ENCRYPTION_KEY: "not-base64",
+  test("rejects an APP_SECRET that is not exactly 32 bytes", () => {
+    const result = readCredentialStoreConfig({ APP_SECRET: "not-base64" });
+    expect(result.config).toBeNull();
+    expect(result.errors[0]?.code).toBe("APP_SECRET_INVALID");
+  });
+
+  test("refuses to open the database store with the build-phase placeholder", () => {
+    const result = readCredentialStoreConfig({
+      NEXT_PHASE: "phase-production-build",
     });
-    expect(invalid.config).toBeNull();
-    expect(invalid.errors[0]?.code).toBe("CREDENTIAL_ENCRYPTION_KEY_INVALID");
+    expect(result.config).toBeNull();
+    expect(result.errors[0]?.code).toBe("APP_SECRET_INVALID");
+  });
+
+  test("derives previous keys from APP_SECRET_PREVIOUS for rotation", () => {
+    const result = readCredentialStoreConfig({
+      APP_SECRET: randomBytes(32).toString("base64"),
+      APP_SECRET_PREVIOUS: `${randomBytes(32).toString("base64")},${randomBytes(32).toString("base64")}`,
+    });
+    expect(result.config).toMatchObject({ storageType: "database" });
+    expect(
+      (result.config as { previousKeys: Buffer[] }).previousKeys,
+    ).toHaveLength(2);
+  });
+
+  test("Vault storage needs no APP_SECRET", () => {
+    const result = readCredentialStoreConfig({
+      CREDENTIAL_STORAGE_TYPE: "vault",
+      VAULT_ADDR: "https://vault.test",
+      VAULT_TOKEN: "token",
+    });
+    expect(result.errors).toEqual([]);
+    expect(result.config).toMatchObject({ storageType: "vault" });
+    expect(result.config).not.toHaveProperty("encryptionKey");
+  });
+
+  test("Keychain storage needs no APP_SECRET", () => {
+    const result = readCredentialStoreConfig(
+      { CREDENTIAL_STORAGE_TYPE: "keychain" },
+      "darwin",
+    );
+    expect(result.errors).toEqual([]);
+    expect(result.config).toMatchObject({ storageType: "keychain" });
+    expect(result.config).not.toHaveProperty("encryptionKey");
   });
 
   test("parses Vault headers and reports insecure transport settings", () => {
@@ -113,6 +151,7 @@ describe("credential store configuration", () => {
         {
           CREDENTIAL_STORAGE_TYPE: storageType,
           CREDENTIAL_VAULT_READ_ONLY: "true",
+          APP_SECRET: randomBytes(32).toString("base64"),
         },
         "darwin",
       );

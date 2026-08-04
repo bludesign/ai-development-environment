@@ -1,4 +1,6 @@
-import { afterEach, beforeEach, describe, expect, test } from "vitest";
+import { randomBytes } from "node:crypto";
+
+import { describe, expect, test } from "vitest";
 
 import {
   ARTIFACT_TOKEN_TTL_MS,
@@ -6,13 +8,8 @@ import {
   verifyArtifactToken,
 } from "./artifact-token";
 
-beforeEach(() => {
-  process.env.OTA_TOKEN_SECRET = "test-secret";
-});
-
-afterEach(() => {
-  delete process.env.OTA_TOKEN_SECRET;
-});
+// The signing key is derived from the APP_SECRET that vitest.config.mts pins for
+// the whole suite, so no per-test environment setup is needed.
 
 describe("artifact tokens", () => {
   test("stays valid for the artifact cache and resume window", () => {
@@ -63,11 +60,19 @@ describe("artifact tokens", () => {
     );
   });
 
-  test("rejects a token signed with a different secret", () => {
+  test("stops honouring links after an APP_SECRET rotation", () => {
     const { token, expires } = signArtifactToken("artifact-1");
-    process.env.OTA_TOKEN_SECRET = "another-secret";
+    const original = process.env.APP_SECRET;
+    process.env.APP_SECRET = randomBytes(32).toString("base64");
+    try {
+      expect(verifyArtifactToken("artifact-1", token, String(expires))).toBe(
+        false,
+      );
+    } finally {
+      process.env.APP_SECRET = original;
+    }
     expect(verifyArtifactToken("artifact-1", token, String(expires))).toBe(
-      false,
+      true,
     );
   });
 

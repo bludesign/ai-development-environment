@@ -1,5 +1,6 @@
 import { APIError } from "better-auth/api";
 
+import { isTrustedOrigin } from "@/lib/app-origins";
 import {
   getAuth,
   getAuthRuntimeConfig,
@@ -28,9 +29,14 @@ export async function GET(request: Request): Promise<Response> {
   const callback = mobileCallback(
     new URL(request.url).searchParams.get("callback"),
   );
+  // Complete the flow on whichever trusted origin the device actually reached, so
+  // a phone on the tailnet is not bounced to the canonical origin mid-sign-in.
+  const requestOrigin = new URL(request.url).origin;
   const completion = new URL(
     "/api/auth/mobile/oauth/complete",
-    runtime.baseURL,
+    isTrustedOrigin(runtime.origins, requestOrigin)
+      ? requestOrigin
+      : runtime.baseURL,
   );
   completion.searchParams.set("callback", callback);
 

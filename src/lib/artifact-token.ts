@@ -1,22 +1,18 @@
-import { createHmac, randomBytes, timingSafeEqual } from "node:crypto";
+import { createHmac, timingSafeEqual } from "node:crypto";
+
+import { getAppSecrets } from "./app-secret";
 
 // Match the cache's useful lifetime so a slow or interrupted iOS installation
 // can resume with the token embedded in its original manifest.
 export const ARTIFACT_TOKEN_TTL_MS = 6 * 60 * 60_000;
 
-let generatedSecret: string | null = null;
-
 /**
- * A per-process fallback keeps links unguessable without requiring configuration.
- * Outstanding links stop working on restart, which is acceptable for temporary
- * installation links and avoids persisting a secret this server has nowhere to
- * put.
+ * Derived from APP_SECRET, so links survive a restart. They still stop working
+ * after an APP_SECRET rotation, which is acceptable for links that expire in
+ * hours anyway.
  */
 function secret(): string {
-  const configured = process.env.OTA_TOKEN_SECRET?.trim();
-  if (configured) return configured;
-  generatedSecret ??= randomBytes(32).toString("hex");
-  return generatedSecret;
+  return getAppSecrets().otaTokenSecret;
 }
 
 function sign(artifactId: string, expiresAt: number): string {

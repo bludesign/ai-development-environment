@@ -986,13 +986,6 @@
     "removeDeviceTitle": "Remove this registered device?",
     "removeDeviceDescription": "This device will stop receiving native notifications. It can register again from the app."
   },
-  "credentialEncryption": {
-    "title": "Database credentials are not encrypted",
-    "description": "Secrets stored in the application database are currently plaintext. Generate a 32-byte key with this command:",
-    "instructionsPrefix": "Set the generated value as",
-    "instructionsSuffix": "in the server environment, then restart the server. Existing plaintext credential rows are encrypted together after restart.",
-    "backup": "Back up this key securely and retain it for the lifetime of the encrypted rows. Losing or changing it makes those credentials unreadable."
-  },
   "credentials": {
     "title": "Credentials",
     "description": "Review the active credential backend, protection status, and a metadata-only inventory. Secret values are never shown here.",
@@ -1085,10 +1078,8 @@
       "readWrite": "Read-write"
     },
     "warningTitles": {
-      "DATABASE_UNENCRYPTED": "Database encryption is disabled",
-      "CREDENTIAL_ENCRYPTION_KEY_INVALID": "Encryption key is invalid",
-      "CREDENTIAL_ENCRYPTION_KEY_MISSING": "Encryption key is missing",
-      "CREDENTIAL_ENCRYPTION_KEY_MISMATCH": "Encryption key does not match",
+      "APP_SECRET_INVALID": "APP_SECRET is invalid",
+      "CREDENTIAL_KEY_MISMATCH": "APP_SECRET does not match stored credentials",
       "CREDENTIAL_DATA_INVALID": "Credential data is invalid",
       "CREDENTIAL_STORAGE_TYPE_INVALID": "Storage type is invalid",
       "CREDENTIAL_STORE_UNAVAILABLE": "Credential store is unavailable",
@@ -1102,10 +1093,8 @@
       "BACKEND_MISMATCH": "Credentials use another backend"
     },
     "warnings": {
-      "DATABASE_UNENCRYPTED": "Database credential payloads are stored as plaintext until an encryption key is configured.",
-      "CREDENTIAL_ENCRYPTION_KEY_INVALID": "CREDENTIAL_ENCRYPTION_KEY must be strict base64 encoding of exactly 32 bytes. Fix it and restart the server; plaintext fallback is disabled when an invalid key is present.",
-      "CREDENTIAL_ENCRYPTION_KEY_MISSING": "Encrypted credential rows exist, but the encryption key is missing. Restore the original key and restart the server.",
-      "CREDENTIAL_ENCRYPTION_KEY_MISMATCH": "The configured key does not match existing encrypted rows. Restore the original key and restart the server.",
+      "APP_SECRET_INVALID": "APP_SECRET must be base64 or hex encoding of exactly 32 random bytes. Generate one with `openssl rand -base64 32`, then restart the server.",
+      "CREDENTIAL_KEY_MISMATCH": "Stored credentials were encrypted with a different APP_SECRET. Restore the original value, or set APP_SECRET_PREVIOUS to it so they are re-encrypted on the next start.",
       "CREDENTIAL_DATA_INVALID": "One or more credential records contain invalid metadata and cannot be used.",
       "CREDENTIAL_STORAGE_TYPE_INVALID": "CREDENTIAL_STORAGE_TYPE must be database, vault, or keychain.",
       "CREDENTIAL_STORE_UNAVAILABLE": "The credential store could not be initialized. Review the server configuration and logs.",

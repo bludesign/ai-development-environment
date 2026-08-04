@@ -986,13 +986,6 @@
     "removeDeviceTitle": "Dieses registrierte Gerät entfernen?",
     "removeDeviceDescription": "Dieses Gerät erhält keine nativen Benachrichtigungen mehr. Es kann sich über die App erneut registrieren."
   },
-  "credentialEncryption": {
-    "title": "Datenbank-Anmeldedaten sind nicht verschlüsselt",
-    "description": "Geheimnisse in der Anwendungsdatenbank werden derzeit im Klartext gespeichert. Erzeugen Sie mit diesem Befehl einen 32-Byte-Schlüssel:",
-    "instructionsPrefix": "Setzen Sie den erzeugten Wert als",
-    "instructionsSuffix": "in der Serverumgebung und starten Sie den Server neu. Vorhandene Klartext-Anmeldedaten werden nach dem Neustart gemeinsam verschlüsselt.",
-    "backup": "Sichern Sie diesen Schlüssel geschützt und bewahren Sie ihn während der gesamten Lebensdauer der verschlüsselten Einträge auf. Bei Verlust oder Änderung werden diese Anmeldedaten unlesbar."
-  },
   "credentials": {
     "title": "Anmeldedaten",
     "description": "Prüfen Sie das aktive Backend, den Schutzstatus und ein reines Metadaten-Inventar. Geheimwerte werden hier nie angezeigt.",
@@ -1085,10 +1078,8 @@
       "readWrite": "Lesen und Schreiben"
     },
     "warningTitles": {
-      "DATABASE_UNENCRYPTED": "Datenbankverschlüsselung ist deaktiviert",
-      "CREDENTIAL_ENCRYPTION_KEY_INVALID": "Verschlüsselungsschlüssel ist ungültig",
-      "CREDENTIAL_ENCRYPTION_KEY_MISSING": "Verschlüsselungsschlüssel fehlt",
-      "CREDENTIAL_ENCRYPTION_KEY_MISMATCH": "Verschlüsselungsschlüssel stimmt nicht überein",
+      "APP_SECRET_INVALID": "APP_SECRET ist ungültig",
+      "CREDENTIAL_KEY_MISMATCH": "APP_SECRET passt nicht zu gespeicherten Anmeldedaten",
       "CREDENTIAL_DATA_INVALID": "Anmeldedaten sind ungültig",
       "CREDENTIAL_STORAGE_TYPE_INVALID": "Speichertyp ist ungültig",
       "CREDENTIAL_STORE_UNAVAILABLE": "Anmeldedatenspeicher ist nicht verfügbar",
@@ -1102,10 +1093,8 @@
       "BACKEND_MISMATCH": "Anmeldedaten verwenden ein anderes Backend"
     },
     "warnings": {
-      "DATABASE_UNENCRYPTED": "Anmeldedaten werden im Klartext gespeichert, bis ein Verschlüsselungsschlüssel konfiguriert ist.",
-      "CREDENTIAL_ENCRYPTION_KEY_INVALID": "CREDENTIAL_ENCRYPTION_KEY muss eine strikte Base64-Kodierung von genau 32 Byte sein. Korrigieren Sie den Wert und starten Sie neu; bei einem ungültigen Schlüssel gibt es keinen Klartext-Rückfall.",
-      "CREDENTIAL_ENCRYPTION_KEY_MISSING": "Verschlüsselte Einträge sind vorhanden, aber der Schlüssel fehlt. Stellen Sie den ursprünglichen Schlüssel wieder her und starten Sie den Server neu.",
-      "CREDENTIAL_ENCRYPTION_KEY_MISMATCH": "Der konfigurierte Schlüssel passt nicht zu vorhandenen Einträgen. Stellen Sie den ursprünglichen Schlüssel wieder her und starten Sie neu.",
+      "APP_SECRET_INVALID": "APP_SECRET muss eine Base64- oder Hex-Kodierung von genau 32 zufälligen Bytes sein. Erzeugen Sie einen Wert mit `openssl rand -base64 32` und starten Sie den Server neu.",
+      "CREDENTIAL_KEY_MISMATCH": "Gespeicherte Anmeldedaten wurden mit einem anderen APP_SECRET verschlüsselt. Stellen Sie den ursprünglichen Wert wieder her oder setzen Sie ihn als APP_SECRET_PREVIOUS, damit sie beim nächsten Start neu verschlüsselt werden.",
       "CREDENTIAL_DATA_INVALID": "Mindestens ein Anmeldedatensatz enthält ungültige Metadaten und kann nicht verwendet werden.",
       "CREDENTIAL_STORAGE_TYPE_INVALID": "CREDENTIAL_STORAGE_TYPE muss database, vault oder keychain sein.",
       "CREDENTIAL_STORE_UNAVAILABLE": "Der Anmeldedatenspeicher konnte nicht initialisiert werden. Prüfen Sie Serverkonfiguration und Protokolle.",

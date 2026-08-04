@@ -4,8 +4,8 @@ import { getAuthRuntimeConfig } from "./auth-config";
 
 const base = {
   NODE_ENV: "production",
-  BETTER_AUTH_SECRET: "a-secure-auth-secret-that-is-long-enough",
-  BETTER_AUTH_URL: "https://control.example.com/path-is-ignored",
+  APP_SECRET: "zhDyTms26c9u15SUcFxkhS8S+dCRnouxjPbQMb/haB8=",
+  APP_ORIGINS: "control.example.com",
 };
 
 describe("authentication environment configuration", () => {
@@ -140,12 +140,11 @@ describe("authentication environment configuration", () => {
         AUTH_OAUTH_USER_INFO_URL: "https://identity.example.com/userinfo",
       },
     ],
-    [
-      {
-        ...base,
-        BETTER_AUTH_SECRET: "too-short",
-      },
-    ],
+    [{ ...base, APP_SECRET: "too-short" }],
+    [{ ...base, APP_SECRET: undefined }],
+    [{ ...base, APP_ORIGINS: undefined }],
+    [{ ...base, APP_ORIGINS: "*.example.com" }],
+    [{ ...base, TRUST_PROXY_HEADERS: "maybe" }],
   ])("rejects invalid or partial settings", (environment) => {
     expect(() => getAuthRuntimeConfig(environment)).toThrow();
   });

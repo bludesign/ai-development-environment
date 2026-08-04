@@ -10,6 +10,7 @@ import {
   oneTimeToken,
 } from "better-auth/plugins";
 
+import { betterAuthBaseURL } from "@/lib/app-origins";
 import { getPrismaClient } from "@/data/prisma-client";
 
 import {
@@ -62,8 +63,21 @@ function createAuth(
 
   return betterAuth({
     appName: "AI Development Environment",
-    baseURL: runtime.baseURL,
+    // A single exact origin pins baseURL statically so no host-header logic runs.
+    // Anything broader resolves per request against the APP_ORIGINS allowlist,
+    // which is also what Better Auth derives its trusted origins from — so the
+    // CSRF check and the callbackURL/redirectTo check follow APP_ORIGINS too.
+    baseURL: betterAuthBaseURL(runtime.origins),
     secret: runtime.secret,
+    // Honour x-forwarded-host only when an operator has declared a proxy in front.
+    // The allowlist is still what constrains the value.
+    trustedProxyHeaders: runtime.trustProxyHeaders,
+    advanced: {
+      // With a per-request baseURL the Secure flag would otherwise follow whichever
+      // scheme the request arrived on, so one plaintext origin in the allowlist
+      // could hand out a session cookie without it.
+      useSecureCookies: runtime.origins.allHttps,
+    },
     database: prismaAdapter(prisma, { provider: "sqlite" }),
     emailAndPassword: {
       enabled: passwordAuthenticationEnabled(runtime.mode),

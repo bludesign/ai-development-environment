@@ -986,13 +986,6 @@
     "removeDeviceTitle": "¿Eliminar este dispositivo registrado?",
     "removeDeviceDescription": "Este dispositivo dejará de recibir notificaciones nativas. Puede volver a registrarse desde la app."
   },
-  "credentialEncryption": {
-    "title": "Las credenciales de la base de datos no están cifradas",
-    "description": "Los secretos guardados en la base de datos de la aplicación están actualmente en texto plano. Genera una clave de 32 bytes con este comando:",
-    "instructionsPrefix": "Configura el valor generado como",
-    "instructionsSuffix": "en el entorno del servidor y reinícialo. Las credenciales existentes en texto plano se cifrarán juntas después del reinicio.",
-    "backup": "Guarda una copia segura de esta clave durante toda la vida de las filas cifradas. Si se pierde o cambia, esas credenciales quedarán ilegibles."
-  },
   "credentials": {
     "title": "Credenciales",
     "description": "Consulta el backend activo, el estado de protección y un inventario que solo contiene metadatos. Los valores secretos nunca se muestran aquí.",
@@ -1085,10 +1078,8 @@
       "readWrite": "Lectura y escritura"
     },
     "warningTitles": {
-      "DATABASE_UNENCRYPTED": "El cifrado de la base de datos está desactivado",
-      "CREDENTIAL_ENCRYPTION_KEY_INVALID": "La clave de cifrado no es válida",
-      "CREDENTIAL_ENCRYPTION_KEY_MISSING": "Falta la clave de cifrado",
-      "CREDENTIAL_ENCRYPTION_KEY_MISMATCH": "La clave de cifrado no coincide",
+      "APP_SECRET_INVALID": "APP_SECRET no es válido",
+      "CREDENTIAL_KEY_MISMATCH": "APP_SECRET no coincide con las credenciales almacenadas",
       "CREDENTIAL_DATA_INVALID": "Los datos de credenciales no son válidos",
       "CREDENTIAL_STORAGE_TYPE_INVALID": "El tipo de almacenamiento no es válido",
       "CREDENTIAL_STORE_UNAVAILABLE": "El almacén de credenciales no está disponible",
@@ -1102,10 +1093,8 @@
       "BACKEND_MISMATCH": "Hay credenciales en otro backend"
     },
     "warnings": {
-      "DATABASE_UNENCRYPTED": "Las credenciales de la base de datos se guardan en texto plano hasta que se configure una clave de cifrado.",
-      "CREDENTIAL_ENCRYPTION_KEY_INVALID": "CREDENTIAL_ENCRYPTION_KEY debe ser una codificación Base64 estricta de exactamente 32 bytes. Corrígela y reinicia el servidor; una clave no válida nunca usa texto plano como alternativa.",
-      "CREDENTIAL_ENCRYPTION_KEY_MISSING": "Hay credenciales cifradas, pero falta la clave. Restaura la clave original y reinicia el servidor.",
-      "CREDENTIAL_ENCRYPTION_KEY_MISMATCH": "La clave configurada no coincide con las credenciales existentes. Restaura la clave original y reinicia el servidor.",
+      "APP_SECRET_INVALID": "APP_SECRET debe ser una codificación Base64 o hexadecimal de exactamente 32 bytes aleatorios. Genere uno con `openssl rand -base64 32` y reinicie el servidor.",
+      "CREDENTIAL_KEY_MISMATCH": "Las credenciales almacenadas se cifraron con otro APP_SECRET. Restaure el valor original, o asígnelo a APP_SECRET_PREVIOUS para que se vuelvan a cifrar en el próximo inicio.",
       "CREDENTIAL_DATA_INVALID": "Uno o más registros de credenciales contienen metadatos no válidos y no se pueden utilizar.",
       "CREDENTIAL_STORAGE_TYPE_INVALID": "CREDENTIAL_STORAGE_TYPE debe ser database, vault o keychain.",
       "CREDENTIAL_STORE_UNAVAILABLE": "No se pudo inicializar el almacén de credenciales. Revisa la configuración y los registros del servidor.",

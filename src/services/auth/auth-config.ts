@@ -1,3 +1,7 @@
+import type { AppOrigins } from "@/lib/app-origins";
+import { resolveAppOrigins } from "@/lib/app-origins";
+import { getAppSecrets } from "@/lib/app-secret";
+
 export type AuthMode = "password" | "oidc" | "both";
 
 export type OAuthProviderConfig = {
@@ -15,7 +19,15 @@ export type OAuthProviderConfig = {
 
 export type AuthRuntimeConfig = {
   secret: string;
+  /** The full allowlist; Better Auth resolves its base URL per request from it. */
+  origins: AppOrigins;
+  /**
+   * Canonical absolute origin, for links built without a request in hand. Routes
+   * that do have a request should prefer its origin when the allowlist trusts it.
+   */
   baseURL: string;
+  /** Whether `x-forwarded-host`/`x-forwarded-proto` may be believed. */
+  trustProxyHeaders: boolean;
   mode: AuthMode;
   provider: OAuthProviderConfig | null;
 };
@@ -23,8 +35,6 @@ export type AuthRuntimeConfig = {
 type AuthEnvironment = {
   readonly [name: string]: string | undefined;
 };
-
-const DEVELOPMENT_SECRET = "aide-development-only-better-auth-secret-change-me";
 
 function value(environment: AuthEnvironment, name: string): string | undefined {
   const configured = environment[name]?.trim();
@@ -37,6 +47,17 @@ function required(environment: AuthEnvironment, name: string): string {
   return configured;
 }
 
+/**
+ * Forwarded headers are client-controlled unless something in front strips them,
+ * so believing them is opt-in rather than inferred from the deployment shape.
+ */
+function trustProxyHeaders(environment: AuthEnvironment): boolean {
+  const configured = value(environment, "TRUST_PROXY_HEADERS")?.toLowerCase();
+  if (!configured || configured === "false" || configured === "0") return false;
+  if (configured === "true" || configured === "1") return true;
+  throw new Error("TRUST_PROXY_HEADERS must be true, false, 1, or 0.");
+}
+
 function authMode(environment: AuthEnvironment): AuthMode {
   const configured = value(environment, "AUTH_MODE") ?? "password";
   if (
@@ -47,35 +68,6 @@ function authMode(environment: AuthEnvironment): AuthMode {
     throw new Error('AUTH_MODE must be "password", "oidc", or "both".');
   }
   return configured;
-}
-
-function authSecret(environment: AuthEnvironment): string {
-  const configured = value(environment, "BETTER_AUTH_SECRET");
-  if (configured) {
-    if (configured.length < 32) {
-      throw new Error(
-        "BETTER_AUTH_SECRET must contain at least 32 characters.",
-      );
-    }
-    return configured;
-  }
-
-  const isProductionBuild = environment.NEXT_PHASE === "phase-production-build";
-  if (environment.NODE_ENV !== "production" || isProductionBuild) {
-    return DEVELOPMENT_SECRET;
-  }
-  throw new Error("BETTER_AUTH_SECRET is required in production.");
-}
-
-function authBaseURL(environment: AuthEnvironment): string {
-  const configured = value(environment, "BETTER_AUTH_URL");
-  if (configured) return new URL(configured).origin;
-
-  const isProductionBuild = environment.NEXT_PHASE === "phase-production-build";
-  if (environment.NODE_ENV !== "production" || isProductionBuild) {
-    return `http://127.0.0.1:${value(environment, "PORT") ?? "3000"}`;
-  }
-  throw new Error("BETTER_AUTH_URL is required in production.");
 }
 
 function oauthProvider(
@@ -141,9 +133,12 @@ export function getAuthRuntimeConfig(
   environment: AuthEnvironment = process.env,
 ): AuthRuntimeConfig {
   const mode = authMode(environment);
+  const origins = resolveAppOrigins(environment);
   return {
-    secret: authSecret(environment),
-    baseURL: authBaseURL(environment),
+    secret: getAppSecrets(environment).authSecret,
+    origins,
+    baseURL: origins.canonical,
+    trustProxyHeaders: trustProxyHeaders(environment),
     mode,
     provider: oauthProvider(environment, mode),
   };

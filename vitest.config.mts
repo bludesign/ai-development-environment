@@ -52,7 +52,15 @@ export default defineConfig({
     // Date tests assert that a zoneless format differs from the UTC one, so the run
     // needs a fixed non-UTC zone. CI machines default to UTC, which makes those
     // assertions vacuously equal.
-    env: { TZ: "America/New_York" },
+    //
+    // APP_SECRET is required in every environment, tests included, so the suite
+    // supplies a fixed one. It is deliberately constant: credential fixtures are
+    // encrypted with a key derived from it, and a per-run value would make their
+    // stored key fingerprints unstable.
+    env: {
+      TZ: "America/New_York",
+      APP_SECRET: "zhDyTms26c9u15SUcFxkhS8S+dCRnouxjPbQMb/haB8=",
+    },
     environment: "jsdom",
     // The GitHub runners are slow enough that tests which finish in well under a
     // second locally were tripping Vitest's 5s default and failing the workflow.

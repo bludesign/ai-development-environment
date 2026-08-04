@@ -1,3 +1,6 @@
+import type { AppOrigins } from "./app-origins";
+import { isTrustedOrigin, resolveAppOrigins } from "./app-origins";
+
 export type PublicOrigin = {
   /** Absolute origin with no trailing slash, for example `https://builds.example.com`. */
   origin: string;
@@ -64,6 +67,11 @@ function build(
  * only the operator knows the true public address when a proxy rewrites them; an
  * unusable value falls through rather than throwing, so a typo degrades to a
  * disabled button instead of a server error.
+ *
+ * Header-derived origins are checked against the APP_ORIGINS allowlist before
+ * they are believed. These values are interpolated into OTA manifests, iOS
+ * enrollment profiles, and the GitHub App webhook URL, so an unvalidated `Host`
+ * would let a caller aim those at a server of their choosing.
  */
 export function resolvePublicOrigin(
   headers: Headers,
@@ -86,22 +94,32 @@ export function resolvePublicOrigin(
     }
   }
 
+  let origins: AppOrigins;
+  try {
+    // An unusable PUBLIC_BASE_URL already fell through above, so drop it here too
+    // rather than letting the stricter allowlist parser turn a typo into a 500.
+    origins = resolveAppOrigins({ ...env, PUBLIC_BASE_URL: undefined });
+  } catch {
+    // A misconfigured allowlist must not be treated as "trust everything".
+    return null;
+  }
+  const trusted = (candidate: PublicOrigin | null): PublicOrigin | null =>
+    candidate && isTrustedOrigin(origins, candidate.origin) ? candidate : null;
+
   const forwardedProtocol = header(headers, "x-forwarded-proto");
   const forwardedHost = header(headers, "x-forwarded-host");
   const host = header(headers, "host");
 
   if (forwardedProtocol && (forwardedHost ?? host)) {
-    const resolved = build(
-      `${forwardedProtocol}:`,
-      (forwardedHost ?? host)!,
-      "forwarded",
+    const resolved = trusted(
+      build(`${forwardedProtocol}:`, (forwardedHost ?? host)!, "forwarded"),
     );
     if (resolved) return resolved;
   }
   if (forwardedHost) {
-    const resolved = build("http:", forwardedHost, "forwarded");
+    const resolved = trusted(build("http:", forwardedHost, "forwarded"));
     if (resolved) return resolved;
   }
-  if (host) return build("http:", host, "host");
+  if (host) return trusted(build("http:", host, "host"));
   return null;
 }

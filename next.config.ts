@@ -2,13 +2,19 @@ import createMDX from "@next/mdx";
 import type { NextConfig } from "next";
 import createNextIntlPlugin from "next-intl/plugin";
 
-const extraDevOrigins = process.env.ALLOWED_DEV_ORIGINS
-  ? process.env.ALLOWED_DEV_ORIGINS.split(",")
-      .map((origin) => origin.trim())
-      .filter(Boolean)
-  : [];
+import { devServerOrigins, resolveAppOrigins } from "./src/lib/app-origins";
 
-const allowedDevOrigins = ["127.0.0.1", ...extraDevOrigins];
+// The dev server's cross-origin allowlist is the same question APP_ORIGINS answers
+// for the auth layer, so both read one list. Relative import: this file loads before
+// the TypeScript path aliases resolve.
+//
+// Resolved with development semantics deliberately. `allowedDevOrigins` has no effect
+// outside `next dev`, and this file is evaluated during `next build` before Next sets
+// NEXT_PHASE — so asking for the production rules here would fail the build over a
+// variable the build never uses.
+const allowedDevOrigins = devServerOrigins(
+  resolveAppOrigins({ ...process.env, NODE_ENV: "development" }),
+);
 
 const configuredAgentWebSocketHost =
   process.env.AGENT_WS_HOSTNAME ?? "127.0.0.1";

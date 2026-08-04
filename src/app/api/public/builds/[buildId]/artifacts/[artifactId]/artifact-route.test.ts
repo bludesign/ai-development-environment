@@ -29,7 +29,7 @@ function request(headers: Record<string, string> = {}, query = ""): Request {
 
 beforeEach(async () => {
   vi.clearAllMocks();
-  process.env.OTA_TOKEN_SECRET = "test-secret";
+  process.env.APP_ORIGINS = "builds.example.com";
   const root = await mkdtemp(join(tmpdir(), "ade-artifact-route-"));
   roots.push(root);
   const path = join(root, "App.ipa");
@@ -44,7 +44,7 @@ beforeEach(async () => {
 });
 
 afterEach(async () => {
-  delete process.env.OTA_TOKEN_SECRET;
+  delete process.env.APP_ORIGINS;
   await Promise.all(
     roots.splice(0).map((root) => rm(root, { recursive: true, force: true })),
   );

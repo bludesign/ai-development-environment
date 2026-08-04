@@ -986,13 +986,6 @@
     "removeDeviceTitle": "Retirer cet appareil enregistré ?",
     "removeDeviceDescription": "Cet appareil ne recevra plus de notifications natives. Il peut s’enregistrer à nouveau depuis l’app."
   },
-  "credentialEncryption": {
-    "title": "Les identifiants de la base de données ne sont pas chiffrés",
-    "description": "Les secrets stockés dans la base de données de l’application sont actuellement en clair. Générez une clé de 32 octets avec cette commande :",
-    "instructionsPrefix": "Définissez la valeur générée comme",
-    "instructionsSuffix": "dans l’environnement du serveur, puis redémarrez-le. Les identifiants existants en clair seront chiffrés ensemble après le redémarrage.",
-    "backup": "Sauvegardez cette clé de manière sécurisée et conservez-la pendant toute la durée de vie des lignes chiffrées. Sa perte ou sa modification rend ces identifiants illisibles."
-  },
   "credentials": {
     "title": "Identifiants",
     "description": "Consultez le backend actif, l’état de protection et un inventaire limité aux métadonnées. Les valeurs secrètes ne sont jamais affichées ici.",
@@ -1085,10 +1078,8 @@
       "readWrite": "Lecture et écriture"
     },
     "warningTitles": {
-      "DATABASE_UNENCRYPTED": "Le chiffrement de la base de données est désactivé",
-      "CREDENTIAL_ENCRYPTION_KEY_INVALID": "La clé de chiffrement est invalide",
-      "CREDENTIAL_ENCRYPTION_KEY_MISSING": "La clé de chiffrement est absente",
-      "CREDENTIAL_ENCRYPTION_KEY_MISMATCH": "La clé de chiffrement ne correspond pas",
+      "APP_SECRET_INVALID": "APP_SECRET est invalide",
+      "CREDENTIAL_KEY_MISMATCH": "APP_SECRET ne correspond pas aux identifiants stockés",
       "CREDENTIAL_DATA_INVALID": "Les données d’identification sont invalides",
       "CREDENTIAL_STORAGE_TYPE_INVALID": "Le type de stockage est invalide",
       "CREDENTIAL_STORE_UNAVAILABLE": "Le stockage des identifiants est indisponible",
@@ -1102,10 +1093,8 @@
       "BACKEND_MISMATCH": "Des identifiants utilisent un autre backend"
     },
     "warnings": {
-      "DATABASE_UNENCRYPTED": "Les identifiants de la base de données sont stockés en clair jusqu’à la configuration d’une clé de chiffrement.",
-      "CREDENTIAL_ENCRYPTION_KEY_INVALID": "CREDENTIAL_ENCRYPTION_KEY doit être un encodage Base64 strict de 32 octets exactement. Corrigez-la et redémarrez le serveur ; aucune solution de repli en clair n’est utilisée avec une clé invalide.",
-      "CREDENTIAL_ENCRYPTION_KEY_MISSING": "Des identifiants chiffrés existent, mais la clé est absente. Restaurez la clé d’origine et redémarrez le serveur.",
-      "CREDENTIAL_ENCRYPTION_KEY_MISMATCH": "La clé configurée ne correspond pas aux identifiants existants. Restaurez la clé d’origine et redémarrez le serveur.",
+      "APP_SECRET_INVALID": "APP_SECRET doit être un encodage Base64 ou hexadécimal de 32 octets aléatoires exactement. Générez-en un avec `openssl rand -base64 32`, puis redémarrez le serveur.",
+      "CREDENTIAL_KEY_MISMATCH": "Les identifiants stockés ont été chiffrés avec un autre APP_SECRET. Restaurez la valeur d’origine, ou définissez-la dans APP_SECRET_PREVIOUS pour qu’ils soient rechiffrés au prochain démarrage.",
       "CREDENTIAL_DATA_INVALID": "Un ou plusieurs enregistrements d’identifiants contiennent des métadonnées invalides et ne peuvent pas être utilisés.",
       "CREDENTIAL_STORAGE_TYPE_INVALID": "CREDENTIAL_STORAGE_TYPE doit être database, vault ou keychain.",
       "CREDENTIAL_STORE_UNAVAILABLE": "Le stockage des identifiants n’a pas pu être initialisé. Vérifiez la configuration et les journaux du serveur.",
