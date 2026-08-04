@@ -770,9 +770,15 @@ input ConfigureWorktreeAutoMergeInput {
 
 extend type Query {
   "Returns a worktree overview."
-  worktreeOverview: WorktreeOverview!
+  worktreeOverview(
+    "Identifier of an app whose assigned repositories should scope the results."
+    appId: ID
+  ): WorktreeOverview!
   "Returns worktrees."
-  hiddenWorktrees: [Worktree!]!
+  hiddenWorktrees(
+    "Identifier of an app whose assigned repositories should scope the results."
+    appId: ID
+  ): [Worktree!]!
   "Returns worktree settings."
   worktreeSettings: WorktreeSettings!
   "Returns a worktree ticket branch preview."

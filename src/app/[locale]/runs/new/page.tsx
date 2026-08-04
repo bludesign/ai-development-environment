@@ -7,6 +7,7 @@ export default async function RunNewRoute({
     kind?: string | string[];
     draft?: string | string[];
     worktree?: string | string[];
+    app?: string | string[];
   }>;
 }) {
   const values = await searchParams;
@@ -17,11 +18,13 @@ export default async function RunNewRoute({
   const worktreeValue = Array.isArray(values.worktree)
     ? values.worktree[0]
     : values.worktree;
+  const appValue = Array.isArray(values.app) ? values.app[0] : values.app;
   return (
     <RunStartPage
       draftId={draftValue ?? null}
       initialKind={kindValue?.toLowerCase() === "session" ? "SESSION" : "PLAN"}
       initialWorktreeId={worktreeValue ?? null}
+      appId={appValue ?? null}
     />
   );
 }

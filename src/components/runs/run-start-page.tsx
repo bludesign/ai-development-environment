@@ -85,11 +85,14 @@ export function RunStartPage({
   initialKind,
   draftId,
   initialWorktreeId,
+  appId,
 }: {
   initialKind: "PLAN" | "SESSION";
   draftId?: string | null;
   /** Preselected worktree, as the worktree cards' New session and New plan links pass. */
   initialWorktreeId?: string | null;
+  /** Limits worktree choices to repositories assigned to this app. */
+  appId?: string | null;
 }) {
   const t = useTranslations("runs");
   const jiraT = useTranslations("jiraTickets");
@@ -143,8 +146,8 @@ export function RunStartPage({
         };
         runDraft?: RunDraftView | null;
       }>(
-        `query RunStartPage${draftId ? "($draftId: ID!)" : ""} {
-        worktreeOverview {
+        `query RunStartPage${draftId ? "($draftId: ID!, $appId: ID)" : "($appId: ID)"} {
+        worktreeOverview(appId: $appId) {
           agents {
             agent { name connectionStatus capabilities }
             codebases {
@@ -155,7 +158,7 @@ export function RunStartPage({
         }
         ${draftId ? `runDraft(id: $draftId) { ${RUN_DRAFT_FIELDS} }` : ""}
       }`,
-        draftId ? { draftId } : undefined,
+        draftId ? { draftId, appId: appId ?? null } : { appId: appId ?? null },
       );
       const options = data.worktreeOverview.agents.flatMap(
         ({ agent, codebases }) =>
@@ -199,7 +202,7 @@ export function RunStartPage({
     } finally {
       setLoading(false);
     }
-  }, [draftId, initialWorktreeId]);
+  }, [appId, draftId, initialWorktreeId]);
 
   useEffect(() => {
     const timer = window.setTimeout(() => void load(), 0);

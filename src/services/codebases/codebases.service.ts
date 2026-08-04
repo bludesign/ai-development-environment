@@ -502,7 +502,10 @@ export class CodebasesService {
       const remaining = await transaction.codebase.count({
         where: { repositoryId: codebase.repositoryId },
       });
-      const repositoryRemoved = remaining === 0;
+      const assignments = await transaction.appRepository.count({
+        where: { repositoryId: codebase.repositoryId },
+      });
+      const repositoryRemoved = remaining === 0 && assignments === 0;
       if (repositoryRemoved) {
         await transaction.codebaseRepository.delete({
           where: { id: codebase.repositoryId },

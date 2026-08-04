@@ -801,7 +801,7 @@ export class WorktreesService {
     return matches.length;
   }
 
-  async overview() {
+  async overview(appId?: string | null) {
     await this.cleanupExpired();
     const prisma = await getPrismaClient();
     const [
@@ -813,7 +813,16 @@ export class WorktreesService {
       activeMoves,
     ] = await Promise.all([
       prisma.worktree.findMany({
-        where: { missingAt: null },
+        where: {
+          missingAt: null,
+          ...(appId
+            ? {
+                codebase: {
+                  repository: { apps: { some: { appId } } },
+                },
+              }
+            : {}),
+        },
         include: worktreeInclude,
         orderBy: [
           { codebase: { agent: { name: "asc" } } },
@@ -826,7 +835,18 @@ export class WorktreesService {
       prisma.worktreeTag.findMany({ orderBy: { name: "asc" } }),
       this.settings(),
       prisma.codebaseSettings.findUnique({ where: { id: "default" } }),
-      prisma.worktree.count({ where: { missingAt: { not: null } } }),
+      prisma.worktree.count({
+        where: {
+          missingAt: { not: null },
+          ...(appId
+            ? {
+                codebase: {
+                  repository: { apps: { some: { appId } } },
+                },
+              }
+            : {}),
+        },
+      }),
       prisma.worktreeMove.findMany({
         where: { status: { in: ACTIVE_MOVE_STATUSES } },
         orderBy: { createdAt: "asc" },
@@ -836,6 +856,14 @@ export class WorktreesService {
     const views = worktrees.map((worktree) =>
       this.view(worktree, defaultRegex),
     );
+    const scopedCodebaseIds = new Set(views.map((item) => item.codebase.id));
+    const scopedActiveMoves = appId
+      ? activeMoves.filter(
+          (move) =>
+            scopedCodebaseIds.has(move.sourceCodebaseId) ||
+            scopedCodebaseIds.has(move.targetCodebaseId),
+        )
+      : activeMoves;
     const repositoryIds = [
       ...new Set(views.map((item) => item.codebase.repository.id)),
     ];
@@ -966,18 +994,27 @@ export class WorktreesService {
       tags,
       settings,
       hiddenCount,
-      activeMoves,
+      activeMoves: scopedActiveMoves,
     };
   }
 
-  async hidden() {
+  async hidden(appId?: string | null) {
     await this.cleanupExpired();
     const prisma = await getPrismaClient();
     const settings = await prisma.codebaseSettings.findUnique({
       where: { id: "default" },
     });
     const worktrees = await prisma.worktree.findMany({
-      where: { missingAt: { not: null } },
+      where: {
+        missingAt: { not: null },
+        ...(appId
+          ? {
+              codebase: {
+                repository: { apps: { some: { appId } } },
+              },
+            }
+          : {}),
+      },
       include: worktreeInclude,
       orderBy: { missingAt: "desc" },
     });

@@ -1,8 +1,4 @@
 // @vitest-environment node
-import { mkdtemp, rm } from "node:fs/promises";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
-
 import { PrismaBetterSqlite3 } from "@prisma/adapter-better-sqlite3";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 
@@ -60,20 +56,17 @@ function adoptable(
 }
 
 describe("adoptExternalCredentials", () => {
-  let directory: string;
   let prisma: InstanceType<typeof PrismaClient>;
 
   beforeEach(async () => {
-    directory = await mkdtemp(join(tmpdir(), "ade-adoption-"));
     prisma = new PrismaClient({
-      adapter: new PrismaBetterSqlite3({ url: join(directory, "test.db") }),
+      adapter: new PrismaBetterSqlite3({ url: ":memory:" }),
     });
     await prisma.$executeRawUnsafe(CREATE_CREDENTIAL_TABLE);
   });
 
   afterEach(async () => {
     await prisma.$disconnect();
-    await rm(directory, { recursive: true, force: true });
   });
 
   test("rebuilds metadata for secrets the database has never seen", async () => {

@@ -1,6 +1,7 @@
 import {
   Bell,
   BellRing,
+  Boxes,
   ChartNoAxesCombined,
   CircleDollarSign,
   ClipboardList,
@@ -76,6 +77,16 @@ export const APP_DESTINATIONS: AppDestination[] = [
     sidebar: true,
     common: true,
     exact: true,
+  },
+  {
+    key: "apps",
+    href: "/apps",
+    labelKey: "apps",
+    aliases: ["products", "projects", "application management"],
+    icon: Boxes,
+    section: "dashboard",
+    sidebar: true,
+    common: true,
   },
   {
     key: "notifications",

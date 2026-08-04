@@ -11,6 +11,7 @@ const labels: Record<BreadcrumbLabelKey, string> = {
   actionsCache: "Actions Cache",
   agents: "Agents",
   analyticsEvents: "Analytics Events",
+  apps: "Apps",
   buildData: "Build Data",
   builds: "Builds",
   cache: "Cache",
@@ -66,6 +67,13 @@ describe("buildAppBreadcrumbs", () => {
       { href: undefined, isCurrent: false, label: "Jira" },
       { href: "/jira/tickets", isCurrent: false, label: "Tickets" },
       { href: undefined, isCurrent: true, label: "APP-123" },
+    ]);
+  });
+
+  test("links the Apps index from an app detail route", () => {
+    expect(buildAppBreadcrumbs("/apps/app-123", translate)).toEqual([
+      { href: "/apps", isCurrent: false, label: "Apps" },
+      { href: undefined, isCurrent: true, label: "app-123" },
     ]);
   });
 

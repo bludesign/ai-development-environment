@@ -1516,6 +1516,7 @@ export class BuildsService {
         agentId: worktree.codebase.agentId,
         codebaseId: worktree.codebaseId,
         worktreeId: worktree.id,
+        repositoryId: worktree.codebase.repository.id,
         configurationId: configuration.id,
         status: "QUEUED",
         action,
@@ -1824,6 +1825,7 @@ export class BuildsService {
         agentId: worktree.codebase.agentId,
         codebaseId: worktree.codebaseId,
         worktreeId: worktree.id,
+        repositoryId: worktree.codebase.repository.id,
         status: "RUNNING",
         action: "TEST",
         destinationType: "HOST",
@@ -2141,6 +2143,7 @@ export class BuildsService {
       status?: string | null;
       codebaseId?: string | null;
       worktreeId?: string | null;
+      appId?: string | null;
     } = {},
   ) {
     const prisma = await getPrismaClient();
@@ -2150,6 +2153,13 @@ export class BuildsService {
         ...(input.status ? { status: input.status } : {}),
         ...(input.codebaseId ? { codebaseId: input.codebaseId } : {}),
         ...(input.worktreeId ? { worktreeId: input.worktreeId } : {}),
+        ...(input.appId
+          ? {
+              repository: {
+                apps: { some: { appId: input.appId } },
+              },
+            }
+          : {}),
       },
       orderBy: [{ createdAt: "desc" }, { id: "desc" }],
       ...(input.after ? { cursor: { id: input.after }, skip: 1 } : {}),

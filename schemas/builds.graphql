@@ -840,6 +840,8 @@ extend type Query {
     codebaseId: ID
     "Identifier of the worktree. Omit it to leave this dimension unfiltered."
     worktreeId: ID
+    "Identifier of an app whose assigned repositories should scope the results."
+    appId: ID
   ): BuildPage!
   "Returns a build, or null when it cannot be found."
   build("Identifier of the resource to return or affect." id: ID!): Build

@@ -1,10 +1,18 @@
-import { execFile } from "node:child_process";
+import { execFile, spawn } from "node:child_process";
 import { copyFile, mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
 
 const execFileAsync = promisify(execFile);
+
+// The control plane rejects a checkpoint whose patch, summary, or manifest is
+// longer than these limits, so the agent stops reading git once it has enough
+// rather than buffering a whole worktree diff it would only discard.
+const PATCH_LIMIT = 2_000_000;
+const SUMMARY_LIMIT = 240_000;
+const MANIFEST_LIMIT = 2_000_000;
+const TRUNCATION_RESERVE = 200;
 
 async function git(
   cwd: string,
@@ -29,6 +37,103 @@ async function optionalGit(
   } catch {
     return null;
   }
+}
+
+// Streams stdout and stops the child as soon as `limit` bytes have arrived. A
+// diff of a large or binary worktree can be hundreds of megabytes, which
+// execFile turns into "stdout maxBuffer length exceeded" and fails the run.
+function cappedGit(
+  cwd: string,
+  args: string[],
+  limit: number,
+): Promise<string> {
+  const budget = limit - TRUNCATION_RESERVE;
+  return new Promise((resolve, reject) => {
+    const child = spawn("git", args, {
+      cwd,
+      env: {
+        ...process.env,
+        GIT_TERMINAL_PROMPT: "0",
+        GIT_OPTIONAL_LOCKS: "0",
+      },
+      shell: false,
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+    const chunks: Buffer[] = [];
+    const errorChunks: Buffer[] = [];
+    let collected = 0;
+    let errorCollected = 0;
+    let truncated = false;
+    let settled = false;
+    child.stdout.on("data", (chunk: Buffer) => {
+      if (truncated) return;
+      const remaining = budget - collected;
+      if (chunk.length >= remaining) {
+        chunks.push(chunk.subarray(0, remaining));
+        collected = budget;
+        truncated = true;
+        child.stdout.destroy();
+        if (child.exitCode === null && !child.killed) child.kill("SIGTERM");
+        return;
+      }
+      chunks.push(chunk);
+      collected += chunk.length;
+    });
+    child.stderr.on("data", (chunk: Buffer) => {
+      if (errorCollected >= 8_192) return;
+      errorChunks.push(chunk);
+      errorCollected += chunk.length;
+    });
+    child.once("error", (error) => {
+      if (settled) return;
+      settled = true;
+      reject(error);
+    });
+    child.once("close", (exitCode) => {
+      if (settled) return;
+      settled = true;
+      if (!truncated && exitCode !== 0) {
+        const message =
+          Buffer.concat(errorChunks).toString("utf8").trim() ||
+          `git ${args[0]} exited with code ${exitCode}`;
+        reject(new Error(message));
+        return;
+      }
+      const output = Buffer.concat(chunks).toString("utf8");
+      resolve(
+        truncated
+          ? `${output.trimEnd()}\n\n[Truncated after ${budget} bytes]`
+          : output.trim(),
+      );
+    });
+  });
+}
+
+async function optionalCappedGit(
+  cwd: string,
+  args: string[],
+  limit: number,
+): Promise<string | null> {
+  try {
+    return (await cappedGit(cwd, args, limit)) || null;
+  } catch {
+    return null;
+  }
+}
+
+// The manifest travels as JSON, so escaping decides how much porcelain output
+// fits inside the control plane's limit.
+function manifestPayload(manifest: string): string {
+  let value = manifest;
+  let json = JSON.stringify({ porcelainV2: value });
+  while (json.length > MANIFEST_LIMIT && value.length > 0) {
+    value = value.slice(
+      0,
+      Math.floor((value.length * MANIFEST_LIMIT) / json.length) - 1,
+    );
+    json = JSON.stringify({ porcelainV2: value });
+  }
+  return json;
 }
 
 export type GitCheckpoint = {
@@ -62,22 +167,30 @@ export async function compareGitCheckpoint(
   if (!target.worktreeTree || !current.worktreeTree) {
     throw new Error("The worktree checkpoint is incomplete");
   }
-  const worktreePatch = await git(cwd, [
-    "diff",
-    "--binary",
-    "--find-renames",
-    target.worktreeTree,
-    current.worktreeTree,
-  ]);
+  const worktreePatch = await cappedGit(
+    cwd,
+    [
+      "diff",
+      "--binary",
+      "--find-renames",
+      target.worktreeTree,
+      current.worktreeTree,
+    ],
+    PATCH_LIMIT,
+  );
   const indexPatch =
     target.indexTree && current.indexTree
-      ? await git(cwd, [
-          "diff",
-          "--binary",
-          "--find-renames",
-          target.indexTree,
-          current.indexTree,
-        ])
+      ? await cappedGit(
+          cwd,
+          [
+            "diff",
+            "--binary",
+            "--find-renames",
+            target.indexTree,
+            current.indexTree,
+          ],
+          PATCH_LIMIT,
+        )
       : "";
   const upstream = await optionalGit(cwd, ["rev-parse", "@{upstream}"]);
   const pushedCount =
@@ -98,7 +211,7 @@ export async function compareGitCheckpoint(
     ]
       .filter(Boolean)
       .join("\n\n")
-      .slice(0, 2_000_000),
+      .slice(0, PATCH_LIMIT),
     pushedCommitWarning:
       pushedCount > 0
         ? `${pushedCount} commit${pushedCount === 1 ? "" : "s"} after this question appear on the upstream branch. Remote refs will not be changed.`
@@ -176,9 +289,21 @@ export async function captureGitCheckpoint(
   ]);
   const upstreamSha = await optionalGit(cwd, ["rev-parse", "@{upstream}"]);
   const indexTree = await optionalGit(cwd, ["write-tree"]);
-  const manifest = await optionalGit(cwd, ["status", "--porcelain=v2", "-z"]);
-  const staged = await optionalGit(cwd, ["diff", "--cached", "--stat", "HEAD"]);
-  const unstaged = await optionalGit(cwd, ["diff", "--stat", "HEAD"]);
+  const manifest = await optionalCappedGit(
+    cwd,
+    ["status", "--porcelain=v2", "-z"],
+    MANIFEST_LIMIT,
+  );
+  const staged = await optionalCappedGit(
+    cwd,
+    ["diff", "--cached", "--stat", "HEAD"],
+    SUMMARY_LIMIT,
+  );
+  const unstaged = await optionalCappedGit(
+    cwd,
+    ["diff", "--stat", "HEAD"],
+    SUMMARY_LIMIT,
+  );
   const directory = await mkdtemp(join(tmpdir(), "aide-run-index-"));
   let worktreeTree: string | null = null;
   let refName: string | null = null;
@@ -226,22 +351,18 @@ export async function captureGitCheckpoint(
     indexTree,
     worktreeTree,
     refName,
-    manifestJson: JSON.stringify({ porcelainV2: manifest ?? "" }),
+    manifestJson: manifestPayload(manifest ?? ""),
     diffSummary:
       [staged && `Staged:\n${staged}`, unstaged && `Working tree:\n${unstaged}`]
         .filter(Boolean)
         .join("\n\n") || null,
     diffPatch:
       headSha && worktreeTree
-        ? (
-            await git(cwd, [
-              "diff",
-              "--binary",
-              "--find-renames",
-              headSha,
-              worktreeTree,
-            ])
-          ).slice(0, 2_000_000) || null
+        ? (await cappedGit(
+            cwd,
+            ["diff", "--binary", "--find-renames", headSha, worktreeTree],
+            PATCH_LIMIT,
+          )) || null
         : null,
   };
 }

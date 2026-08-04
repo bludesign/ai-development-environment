@@ -527,7 +527,7 @@ function reviewClass(value: string) {
   return "border-amber-500/30 bg-amber-500/10 text-amber-700 dark:text-amber-300";
 }
 
-export function WorktreesPage() {
+export function WorktreesPage({ appId }: { appId?: string }) {
   const t = useTranslations("worktrees");
   const [jiraIssueKey, setJiraIssueKey] = useState<string | null>(() => {
     if (typeof window === "undefined") return null;
@@ -551,7 +551,11 @@ export function WorktreesPage() {
   const [inspectionRefreshToken, setInspectionRefreshToken] = useState(0);
   const [tagManagerOpen, setTagManagerOpen] = useState(false);
   const [hiddenOpen, setHiddenOpen] = useState(false);
-  const [storedFilters] = useState(readStoredFilters);
+  const [storedFilters] = useState(() =>
+    appId
+      ? { query: "", agentId: ALL_FILTER_VALUE, repositoryId: ALL_FILTER_VALUE }
+      : readStoredFilters(),
+  );
   const [query, setQuery] = useState(storedFilters.query);
   const [agentFilter, setAgentFilter] = useState(storedFilters.agentId);
   const [repositoryFilter, setRepositoryFilter] = useState(
@@ -565,8 +569,8 @@ export function WorktreesPage() {
       const data = await controlPlaneRequest<{
         worktreeOverview: WorktreeOverview;
       }>(
-        `query WorktreeOverview {
-          worktreeOverview {
+        `query WorktreeOverview($appId: ID) {
+          worktreeOverview(appId: $appId) {
             hiddenCount
             settings { editorVariant updatedAt }
             tags { id name color createdAt updatedAt }
@@ -596,6 +600,7 @@ export function WorktreesPage() {
             }
           }
         }`,
+        { appId: appId ?? null },
       );
       if (request !== latestLoad.current) return;
       setOverview(data.worktreeOverview);
@@ -606,7 +611,7 @@ export function WorktreesPage() {
     } finally {
       if (request === latestLoad.current) setLoading(false);
     }
-  }, []);
+  }, [appId]);
 
   useEffect(() => {
     const initial = window.setTimeout(() => void load(), 0);
@@ -660,15 +665,17 @@ export function WorktreesPage() {
   }, []);
 
   useEffect(() => {
-    window.localStorage.setItem(
-      FILTERS_KEY,
-      JSON.stringify({
-        query,
-        agentId: agentFilter,
-        repositoryId: repositoryFilter,
-      } satisfies StoredFilters),
-    );
-  }, [agentFilter, query, repositoryFilter]);
+    if (!appId) {
+      window.localStorage.setItem(
+        FILTERS_KEY,
+        JSON.stringify({
+          query,
+          agentId: agentFilter,
+          repositoryId: repositoryFilter,
+        } satisfies StoredFilters),
+      );
+    }
+  }, [agentFilter, appId, query, repositoryFilter]);
 
   const selectJiraIssue = (issueKey: string | null) => {
     replaceIssueParam(issueKey);
@@ -1009,6 +1016,7 @@ export function WorktreesPage() {
       ) : groupBy === "repository" ? (
         repositoryGroups.map((repositoryGroup) => (
           <RepositorySection
+            appId={appId}
             allTags={overview.tags}
             editorVariant={overview.settings.editorVariant}
             inspectionRefreshToken={inspectionRefreshToken}
@@ -1026,6 +1034,7 @@ export function WorktreesPage() {
       ) : (
         filteredAgents.map((agentGroup) => (
           <AgentSection
+            appId={appId}
             agentGroup={agentGroup}
             allTags={overview.tags}
             editorVariant={overview.settings.editorVariant}
@@ -1049,6 +1058,7 @@ export function WorktreesPage() {
         tags={overview?.tags ?? []}
       />
       <HiddenWorktreesDialog
+        appId={appId}
         onChanged={load}
         onOpenChange={setHiddenOpen}
         open={hiddenOpen}
@@ -1286,6 +1296,7 @@ function CreateWorktreeCard({
 }
 
 type WorktreeSectionProps = {
+  appId?: string;
   layout: Layout;
   allTags: WorktreeTag[];
   editorVariant: WorktreeOverview["settings"]["editorVariant"];
@@ -1616,6 +1627,7 @@ function WorktreeCard(props: WorktreeItemProps) {
 }
 
 export type WorktreeItemProps = {
+  appId?: string;
   worktree: Worktree;
   group: WorktreeCodebaseGroup;
   allTags: WorktreeTag[];
@@ -3236,6 +3248,7 @@ export function ActionRow(
   props: WorktreeItemProps & { onCompleted: () => Promise<void> },
 ) {
   const { worktree } = props;
+  const { appId } = props;
   const t = useTranslations("worktrees");
   const unavailable =
     worktree.availability !== "AVAILABLE" ||
@@ -3290,7 +3303,9 @@ export function ActionRow(
         </Button>
       ) : (
         <Button asChild size="sm" variant="outline">
-          <Link href={`/runs/new?kind=session&worktree=${worktree.id}`}>
+          <Link
+            href={`/runs/new?kind=session&worktree=${worktree.id}${appId ? `&app=${encodeURIComponent(appId)}` : ""}`}
+          >
             <Terminal /> {t("newSession")}
           </Link>
         </Button>
@@ -3301,7 +3316,9 @@ export function ActionRow(
         </Button>
       ) : (
         <Button asChild size="sm" variant="outline">
-          <Link href={`/runs/new?kind=plan&worktree=${worktree.id}`}>
+          <Link
+            href={`/runs/new?kind=plan&worktree=${worktree.id}${appId ? `&app=${encodeURIComponent(appId)}` : ""}`}
+          >
             <ClipboardList /> {t("newPlan")}
           </Link>
         </Button>
@@ -3895,10 +3912,12 @@ export function TagManagerDialog({
 }
 
 function HiddenWorktreesDialog({
+  appId,
   open,
   onOpenChange,
   onChanged,
 }: {
+  appId?: string;
   open: boolean;
   onOpenChange: (open: boolean) => void;
   onChanged: () => Promise<void>;
@@ -3909,14 +3928,15 @@ function HiddenWorktreesDialog({
   const load = useCallback(async () => {
     try {
       const data = await controlPlaneRequest<{ hiddenWorktrees: Worktree[] }>(
-        `query HiddenWorktrees { hiddenWorktrees { ${WORKTREE_FIELDS} } }`,
+        `query HiddenWorktrees($appId: ID) { hiddenWorktrees(appId: $appId) { ${WORKTREE_FIELDS} } }`,
+        { appId: appId ?? null },
       );
       setItems(data.hiddenWorktrees);
       setError(null);
     } catch (value) {
       setError(value instanceof Error ? value.message : String(value));
     }
-  }, []);
+  }, [appId]);
   useEffect(() => {
     if (!open) return;
     const timer = window.setTimeout(() => void load(), 0);
@@ -3988,7 +4008,7 @@ function HiddenWorktreesDialog({
           )}
         </div>
         <DialogFooter>
-          {items.length > 0 && (
+          {items.length > 0 && !appId && (
             <Button onClick={() => void purge()} variant="destructive">
               <Trash2 /> {t("purgeAll")}
             </Button>

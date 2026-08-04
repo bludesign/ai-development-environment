@@ -58,6 +58,9 @@ const ALLOWED_IDENTICAL_TRANSLATIONS = new Map([
   ["shell.productName", "AI Development Environment"],
   ["shell.jira", "Jira"],
   ["shell.github", "GitHub"],
+  // "Apps" is the product's feature name in every supported locale.
+  ["shell.apps", "Apps"],
+  ["apps.title", "Apps"],
   ["shell.webhooks", "Webhooks"],
   ["notifications.categories.GITHUB", "GitHub"],
   ["pullRequests.jira", "Jira"],
@@ -66,6 +69,8 @@ const ALLOWED_IDENTICAL_TRANSLATIONS = new Map([
   ["builds.exportMethod.APP_STORE_CONNECT", "App Store Connect"],
   // "Worktree" is a git term kept untranslated across locales.
   ["workflows.inputResourceKind.WORKTREE", "Worktree"],
+  ["apps.worktrees", "Worktrees"],
+  ["apps.views.worktrees", "Worktrees"],
 ]);
 
 function isTranslationData(value: unknown): value is TranslationData {

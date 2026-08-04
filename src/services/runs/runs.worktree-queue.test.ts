@@ -33,17 +33,19 @@ import { WorkflowsService } from "@/services/workflows/workflows.service";
 import { RunsService } from "./runs.service";
 
 describe("durable worktree run queues", () => {
-  let templateDirectory: string;
-  let templateDatabasePath: string;
+  // Stays on disk: seeding `:memory:` would mean replaying every migration
+  // through Prisma per test, and the migrations include triggers that cannot be
+  // split into single statements. One directory serves the whole file so each
+  // test costs a copy rather than a mkdtemp plus a recursive remove.
   let directory: string;
+  let templateDatabasePath: string;
+  let databaseCount = 0;
   let prisma: InstanceType<typeof PrismaClient>;
   let service: RunsService;
 
   beforeAll(async () => {
-    templateDirectory = await mkdtemp(
-      join(tmpdir(), "aide-worktree-queue-template-"),
-    );
-    templateDatabasePath = join(templateDirectory, "template.db");
+    directory = await mkdtemp(join(tmpdir(), "aide-worktree-queue-"));
+    templateDatabasePath = join(directory, "template.db");
     const database = new Database(templateDatabasePath);
     const migrationsRoot = resolve(process.cwd(), "prisma/migrations");
     for (const migration of readdirSync(migrationsRoot).toSorted()) {
@@ -54,12 +56,11 @@ describe("durable worktree run queues", () => {
   }, 60_000);
 
   afterAll(async () => {
-    await rm(templateDirectory, { recursive: true, force: true });
+    await rm(directory, { recursive: true, force: true });
   });
 
   beforeEach(async () => {
-    directory = await mkdtemp(join(tmpdir(), "aide-worktree-queue-"));
-    const databasePath = join(directory, "test.db");
+    const databasePath = join(directory, `test-${(databaseCount += 1)}.db`);
     await copyFile(templateDatabasePath, databasePath);
 
     prisma = new PrismaClient({
@@ -114,7 +115,6 @@ describe("durable worktree run queues", () => {
 
   afterEach(async () => {
     await prisma.$disconnect();
-    await rm(directory, { recursive: true, force: true });
     vi.clearAllMocks();
   });
 

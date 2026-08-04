@@ -1,24 +1,10 @@
 // @vitest-environment node
-import { mkdtemp, rm } from "node:fs/promises";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
-
 import { PrismaBetterSqlite3 } from "@prisma/adapter-better-sqlite3";
-import { afterEach, describe, expect, test, vi } from "vitest";
+import { describe, expect, test, vi } from "vitest";
 
 import { PrismaClient } from "@/generated/prisma/client";
 
 import { nextDisplayNumber } from "./runs.service";
-
-const directories: string[] = [];
-
-afterEach(async () => {
-  await Promise.all(
-    directories
-      .splice(0)
-      .map((directory) => rm(directory, { recursive: true, force: true })),
-  );
-});
 
 describe("run display number allocation", () => {
   test("starts each kind at zero and never derives numbers from remaining rows", async () => {
@@ -40,10 +26,8 @@ describe("run display number allocation", () => {
   });
 
   test("allocates zero-based numbers atomically under concurrent transactions", async () => {
-    const directory = await mkdtemp(join(tmpdir(), "aide-run-number-test-"));
-    directories.push(directory);
     const prisma = new PrismaClient({
-      adapter: new PrismaBetterSqlite3({ url: join(directory, "test.db") }),
+      adapter: new PrismaBetterSqlite3({ url: ":memory:" }),
     });
     await prisma.$executeRawUnsafe(`
       CREATE TABLE "RunNumberSequence" (

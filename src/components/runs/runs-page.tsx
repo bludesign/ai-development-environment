@@ -133,9 +133,11 @@ function IconAction({
 export function RunsPage({
   initialFilters = DEFAULT_RUN_FILTERS,
   kind,
+  appId,
 }: {
   initialFilters?: RunFilterState;
   kind: RunKind;
+  appId?: string;
 }) {
   const t = useTranslations("runs");
   const labels = useRunLabels();
@@ -176,8 +178,8 @@ export function RunsPage({
           totalCount: number;
         };
       }>(
-        `query AgentRuns($kind: RunKind!, $search: String, $archive: String!, $provider: String, $origin: RunOrigin) {
-          agentRuns(kind: $kind, search: $search, archive: $archive, provider: $provider, origin: $origin, first: 200) {
+        `query AgentRuns($kind: RunKind!, $search: String, $archive: String!, $provider: String, $origin: RunOrigin, $appId: ID) {
+          agentRuns(kind: $kind, search: $search, archive: $archive, provider: $provider, origin: $origin, appId: $appId, first: 200) {
             items { ${RUN_LIST_FIELDS} } nextCursor totalCount
           }
         }`,
@@ -187,6 +189,7 @@ export function RunsPage({
           archive: archiveFilter,
           provider: provider === "ALL" ? null : provider,
           origin: origin === "ALL" ? null : origin,
+          appId: appId ?? null,
         },
       );
       setItems(data.agentRuns.items);
@@ -198,7 +201,7 @@ export function RunsPage({
     } finally {
       setLoading(false);
     }
-  }, [archiveFilter, kind, origin, provider, search]);
+  }, [appId, archiveFilter, kind, origin, provider, search]);
 
   const loadMore = useCallback(async () => {
     if (!nextCursor) return;
@@ -211,13 +214,14 @@ export function RunsPage({
           totalCount: number;
         };
       }>(
-        `query MoreAgentRuns($kind: RunKind!, $search: String, $archive: String!, $provider: String, $origin: RunOrigin, $after: ID!) { agentRuns(kind: $kind, search: $search, archive: $archive, provider: $provider, origin: $origin, first: 200, after: $after) { items { ${RUN_LIST_FIELDS} } nextCursor totalCount } }`,
+        `query MoreAgentRuns($kind: RunKind!, $search: String, $archive: String!, $provider: String, $origin: RunOrigin, $appId: ID, $after: ID!) { agentRuns(kind: $kind, search: $search, archive: $archive, provider: $provider, origin: $origin, appId: $appId, first: 200, after: $after) { items { ${RUN_LIST_FIELDS} } nextCursor totalCount } }`,
         {
           kind,
           search: search.trim() || null,
           archive: archiveFilter,
           provider: provider === "ALL" ? null : provider,
           origin: origin === "ALL" ? null : origin,
+          appId: appId ?? null,
           after: nextCursor,
         },
       );
@@ -234,7 +238,7 @@ export function RunsPage({
     } finally {
       setLoadingMore(false);
     }
-  }, [archiveFilter, kind, nextCursor, origin, provider, search]);
+  }, [appId, archiveFilter, kind, nextCursor, origin, provider, search]);
 
   useEffect(() => {
     if (!nextCursor || loading || loadingMore || error) return;
@@ -339,7 +343,7 @@ export function RunsPage({
   });
 
   return (
-    <section className="mx-auto flex w-full max-w-[1500px] flex-col gap-6">
+    <section className="flex w-full flex-col gap-6">
       <div className="flex flex-wrap items-start justify-between gap-4">
         <div>
           <h1 className="text-2xl font-semibold tracking-tight">{title}</h1>
@@ -355,7 +359,9 @@ export function RunsPage({
             <FilePenLine /> {editMode ? t("done") : t("edit")}
           </Button>
           <Button asChild>
-            <Link href={`/runs/new?kind=${kind.toLowerCase()}`}>
+            <Link
+              href={`/runs/new?kind=${kind.toLowerCase()}${appId ? `&app=${encodeURIComponent(appId)}` : ""}`}
+            >
               <Plus />{" "}
               {t("newRun", {
                 kind: kind === "PLAN" ? t("plan") : t("session"),

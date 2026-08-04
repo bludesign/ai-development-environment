@@ -127,9 +127,9 @@ describe("RunStartPage", () => {
     const [query, variables] = request.mock.calls.find(([operation]) =>
       String(operation).includes("query RunStartPage"),
     )!;
-    expect(query).toContain("query RunStartPage {");
+    expect(query).toContain("query RunStartPage($appId: ID) {");
     expect(query).not.toContain("$draftId");
-    expect(variables).toBeUndefined();
+    expect(variables).toEqual({ appId: null });
 
     fireEvent.click(screen.getByRole("button", { name: "Choose a model" }));
     fireEvent.click(await screen.findByRole("option", { name: "GPT-5.6" }));
@@ -368,9 +368,9 @@ describe("RunStartPage", () => {
     const [query, variables] = request.mock.calls.find(([operation]) =>
       String(operation).includes("query RunStartPage"),
     )!;
-    expect(query).toContain("query RunStartPage($draftId: ID!) {");
+    expect(query).toContain("query RunStartPage($draftId: ID!, $appId: ID) {");
     expect(query).toContain("runDraft(id: $draftId)");
-    expect(variables).toEqual({ draftId: "draft-1" });
+    expect(variables).toEqual({ draftId: "draft-1", appId: null });
   });
 
   test("searches the palette and pins the chosen model as a preset", async () => {
