@@ -23,12 +23,14 @@ import {
   EmptyTitle,
 } from "@/components/ui/empty";
 import { Spinner } from "@/components/ui/spinner";
-import { Link } from "@/i18n/navigation";
+import { Link, useRouter } from "@/i18n/navigation";
 import {
   controlPlaneRequest,
   controlPlaneSubscriptions,
 } from "@/lib/control-plane-client";
+import { isRowActivation } from "@/lib/row-activation";
 
+import type { AppDetailView } from "./app-detail-page";
 import { AppEditorDialog } from "./app-editor-dialog";
 import {
   APP_FIELDS,
@@ -39,6 +41,7 @@ import {
 
 export function AppsPage() {
   const t = useTranslations("apps");
+  const router = useRouter();
   const [apps, setApps] = useState<ManagedApp[]>([]);
   const [repositories, setRepositories] = useState<AppRepository[]>([]);
   const [loading, setLoading] = useState(true);
@@ -120,7 +123,16 @@ export function AppsPage() {
       ) : (
         <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
           {apps.map((app) => (
-            <Card key={app.id}>
+            <Card
+              className="cursor-pointer transition-colors hover:bg-muted/30"
+              key={app.id}
+              /* The whole card opens the app; the count tiles, badges, and
+                 footer button inside it keep their own behaviour. */
+              onClick={(event) => {
+                if (!isRowActivation(event)) return;
+                router.push(`/apps/${app.id}`);
+              }}
+            >
               <CardHeader>
                 <CardTitle>{app.name}</CardTitle>
                 <CardDescription>
@@ -137,13 +149,22 @@ export function AppsPage() {
                 </div>
                 <div className="grid grid-cols-3 gap-3 text-center">
                   <AppListCount
+                    appId={app.id}
                     label={t("worktrees")}
                     value={app.counts.worktrees}
+                    view="worktrees"
                   />
-                  <AppListCount label={t("plans")} value={app.counts.plans} />
                   <AppListCount
+                    appId={app.id}
+                    label={t("plans")}
+                    value={app.counts.plans}
+                    view="plans"
+                  />
+                  <AppListCount
+                    appId={app.id}
                     label={t("sessions")}
                     value={app.counts.sessions}
+                    view="sessions"
                   />
                 </div>
               </CardContent>
@@ -167,11 +188,28 @@ export function AppsPage() {
   );
 }
 
-function AppListCount({ label, value }: { label: string; value: number }) {
+/**
+ * A count tile that jumps straight to its own tab on the app page, rather than
+ * to the app's overview the way the rest of the card does.
+ */
+function AppListCount({
+  appId,
+  label,
+  value,
+  view,
+}: {
+  appId: string;
+  label: string;
+  value: number;
+  view: AppDetailView;
+}) {
   return (
-    <div className="rounded-lg bg-muted/50 p-2">
+    <Link
+      className="block rounded-lg bg-muted/50 p-2 transition-colors hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
+      href={`/apps/${appId}?view=${view}`}
+    >
       <div className="text-lg font-semibold tabular-nums">{value}</div>
       <div className="text-xs text-muted-foreground">{label}</div>
-    </div>
+    </Link>
   );
 }
