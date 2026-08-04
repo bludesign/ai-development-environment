@@ -9,6 +9,12 @@ const base = {
 };
 
 describe("authentication environment configuration", () => {
+  test("omitting APP_ORIGINS leaves the origin to each request", () => {
+    const runtime = getAuthRuntimeConfig({ ...base, APP_ORIGINS: undefined });
+    expect(runtime.origins.mode).toBe("inferred");
+    expect(runtime.baseURL).toBeNull();
+  });
+
   test("defaults to password authentication", () => {
     expect(getAuthRuntimeConfig(base)).toMatchObject({
       mode: "password",
@@ -142,7 +148,6 @@ describe("authentication environment configuration", () => {
     ],
     [{ ...base, APP_SECRET: "too-short" }],
     [{ ...base, APP_SECRET: undefined }],
-    [{ ...base, APP_ORIGINS: undefined }],
     [{ ...base, APP_ORIGINS: "*.example.com" }],
     [{ ...base, TRUST_PROXY_HEADERS: "maybe" }],
   ])("rejects invalid or partial settings", (environment) => {

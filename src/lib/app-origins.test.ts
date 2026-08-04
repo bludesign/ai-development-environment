@@ -141,10 +141,53 @@ describe("resolveAppOrigins", () => {
     expect(origins.allHttps).toBe(true);
   });
 
-  test("requires APP_ORIGINS in production", () => {
-    expect(() => resolveAppOrigins({ NODE_ENV: "production" })).toThrow(
-      /APP_ORIGINS is required in production/,
+  test("falls back to trusting each request's host when nothing is configured", () => {
+    const origins = resolveAppOrigins({ NODE_ENV: "production" });
+    expect(origins.mode).toBe("inferred");
+    expect(origins.canonical).toBeNull();
+    expect(origins.patterns).toEqual([]);
+    // Better Auth derives its own base URL, and therefore its trusted origin,
+    // from the request.
+    expect(betterAuthBaseURL(origins)).toBeUndefined();
+  });
+
+  test("inferred mode accepts any syntactically valid host", () => {
+    const origins = resolveAppOrigins({ NODE_ENV: "production" });
+    expect(isTrustedOrigin(origins, "anything.example.com")).toBe(true);
+    expect(isTrustedOrigin(origins, "https://anything.example.com")).toBe(true);
+    expect(isTrustedOrigin(origins, "")).toBe(false);
+    expect(isTrustedOrigin(origins, "not a host")).toBe(false);
+  });
+
+  test("configuring either variable leaves inferred mode", () => {
+    expect(
+      resolveAppOrigins({ NODE_ENV: "production", APP_ORIGINS: "app.test" })
+        .mode,
+    ).not.toBe("inferred");
+    expect(
+      resolveAppOrigins({
+        NODE_ENV: "production",
+        PUBLIC_BASE_URL: "https://builds.test",
+      }).mode,
+    ).not.toBe("inferred");
+    // Once anything is configured, an unlisted host is rejected again.
+    const pinned = resolveAppOrigins({
+      NODE_ENV: "production",
+      APP_ORIGINS: "app.test",
+    });
+    expect(isTrustedOrigin(pinned, "attacker.test")).toBe(false);
+  });
+
+  test("development never infers", () => {
+    expect(resolveAppOrigins({ NODE_ENV: "development" }).mode).not.toBe(
+      "inferred",
     );
+    expect(
+      isTrustedOrigin(
+        resolveAppOrigins({ NODE_ENV: "development" }),
+        "attacker.test",
+      ),
+    ).toBe(false);
   });
 
   test("allows a production build to prerender without configuration", () => {

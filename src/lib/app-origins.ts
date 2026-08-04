@@ -29,10 +29,17 @@ export type AppOrigins = {
    * The origin to use when no request is in hand — background jobs, webhook
    * registration, notification links. `PUBLIC_BASE_URL` when set, otherwise the
    * first exact (non-wildcard) origin.
+   *
+   * `null` in `inferred` mode: nothing was configured, so the server has no
+   * address to name except the one on the request in front of it.
    */
-  canonical: string;
-  /** `single` pins a static origin; `multi` resolves per request against the allowlist. */
-  mode: "single" | "multi";
+  canonical: string | null;
+  /**
+   * `single` pins a static origin; `multi` resolves per request against the
+   * allowlist; `inferred` means nothing was configured and each request's own
+   * host is trusted.
+   */
+  mode: "single" | "multi" | "inferred";
   /** Every non-loopback origin is https, so cookies can be pinned to `Secure`. */
   allHttps: boolean;
 };
@@ -167,6 +174,21 @@ function parsePublicBaseURL(env: OriginEnvironment): URL | null {
   return url;
 }
 
+// `resolveAppOrigins` runs per request, so the notice is emitted once per process
+// rather than once per call.
+let warnedAboutInferredOrigins = false;
+
+function warnOnceAboutInferredOrigins(): void {
+  if (warnedAboutInferredOrigins) return;
+  warnedAboutInferredOrigins = true;
+  console.warn(
+    "[origins] Neither APP_ORIGINS nor PUBLIC_BASE_URL is set. Each request's own Host header will be trusted, " +
+      "so absolute URLs this server generates — OAuth callbacks, iOS enrollment and install links, the GitHub " +
+      "webhook URL — follow whatever host the caller asked for. Set APP_ORIGINS to the hostname(s) this server " +
+      "is reached at to pin them.",
+  );
+}
+
 export function resolveAppOrigins(
   env: OriginEnvironment = process.env,
 ): AppOrigins {
@@ -187,10 +209,21 @@ export function resolveAppOrigins(
         .map(parseOriginPattern)
     : [];
 
+  // Configuring nothing is allowed. The server then trusts whatever host each
+  // request arrived on, which is what an unconfigured deployment did before this
+  // allowlist existed. Browsers set `Host` to the real destination, so a
+  // cross-origin CSRF attempt still fails — what is given up is the guarantee
+  // that absolute URLs this server *generates* (OAuth redirect_uri, iOS
+  // enrollment and OTA links, the GitHub webhook URL) name a host the operator
+  // vouched for. Setting APP_ORIGINS or PUBLIC_BASE_URL restores that.
   if (isProduction && listed.length === 0 && !publicBaseURL) {
-    throw new Error(
-      "APP_ORIGINS is required in production. Set it to the origin this server is reached at, for example APP_ORIGINS=app.example.com",
-    );
+    warnOnceAboutInferredOrigins();
+    return {
+      patterns: [],
+      canonical: null,
+      mode: "inferred",
+      allHttps: false,
+    };
   }
 
   // Outside production the loopback origins are always trusted on top of anything
@@ -245,6 +278,13 @@ export function resolveAppOrigins(
   };
 }
 
+/** Whether a value is a bare `host` or `host:port`, with nothing else in it. */
+function isHostShaped(value: string): boolean {
+  const normalized = value.trim().toLowerCase();
+  if (!normalized || /[\s/\\@]/.test(normalized)) return false;
+  return /^(\[[^\]]+\]|[^:]+)(?::\d+)?$/.test(normalized);
+}
+
 /**
  * Matches a `host` header value (`host` or `host:port`) against one pattern.
  *
@@ -270,7 +310,13 @@ export function matchesPattern(
   return hostname.endsWith(suffix) && hostname.length > suffix.length;
 }
 
-/** True when a host header, origin, or absolute URL is on the allowlist. */
+/**
+ * True when a host header, origin, or absolute URL is on the allowlist.
+ *
+ * In `inferred` mode there is no allowlist to check against, so every
+ * syntactically valid candidate is accepted. Callers that need to know whether an
+ * operator actually vouched for the host must test `mode` themselves.
+ */
 export function isTrustedOrigin(
   origins: AppOrigins,
   candidate: string,
@@ -285,6 +331,10 @@ export function isTrustedOrigin(
       return false;
     }
   }
+  // Inferred mode has no allowlist to check against, but a value that is not a
+  // host at all is still rejected — it would be about to be interpolated into a
+  // URL either way.
+  if (origins.mode === "inferred") return isHostShaped(host);
   return origins.patterns.some((pattern) => matchesPattern(host, pattern));
 }
 
@@ -300,13 +350,57 @@ export function betterAuthBaseURL(
   origins: AppOrigins,
 ):
   | string
+  | undefined
   | { allowedHosts: string[]; protocol: "https" | "auto"; fallback: string } {
-  if (origins.mode === "single") return origins.canonical;
+  // `undefined` hands the decision to Better Auth, which derives the base URL —
+  // and therefore its trusted origin — from each request's own host. The CSRF
+  // check still holds: a browser sets `Host` to the real destination, so a
+  // cross-site POST arrives with a foreign `Origin` and is rejected.
+  if (origins.mode === "inferred") return undefined;
+  if (origins.mode === "single") return origins.canonical!;
   return {
     allowedHosts: origins.patterns.map((pattern) => pattern.host),
     protocol: origins.allHttps ? "https" : "auto",
-    fallback: origins.canonical,
+    fallback: origins.canonical!,
   };
+}
+
+/**
+ * The origin a request arrived on, as this server can best determine it.
+ *
+ * Forwarded headers are consulted only when the operator has declared a proxy;
+ * otherwise the `Host` header is used, falling back to the request URL. Used in
+ * `inferred` mode, where the request itself is the only available statement of
+ * what this server is called.
+ */
+export function originFromRequest(
+  request: Request,
+  trustProxyHeaders: boolean,
+): string | null {
+  const header = (name: string): string | null => {
+    const value = request.headers.get(name)?.split(",")[0]?.trim();
+    return value && !/[\s/\\@]/.test(value) ? value : null;
+  };
+
+  const forwardedHost = trustProxyHeaders ? header("x-forwarded-host") : null;
+  const forwardedProtocol = trustProxyHeaders
+    ? header("x-forwarded-proto")
+    : null;
+  const host = forwardedHost ?? header("host");
+
+  if (host && isHostShaped(host)) {
+    const protocol =
+      forwardedProtocol === "https" || forwardedProtocol === "http"
+        ? forwardedProtocol
+        : new URL(request.url).protocol.replace(":", "");
+    return `${protocol}://${host.toLowerCase()}`;
+  }
+
+  try {
+    return new URL(request.url).origin;
+  } catch {
+    return null;
+  }
 }
 
 /** Hostnames for Next's `allowedDevOrigins`, which ignores scheme and port. */

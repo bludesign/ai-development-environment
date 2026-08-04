@@ -31,12 +31,14 @@ export async function GET(request: Request): Promise<Response> {
   );
   // Complete the flow on whichever trusted origin the device actually reached, so
   // a phone on the tailnet is not bounced to the canonical origin mid-sign-in.
+  // With nothing configured there is no canonical origin, and the request's own
+  // is all there is.
   const requestOrigin = new URL(request.url).origin;
   const completion = new URL(
     "/api/auth/mobile/oauth/complete",
     isTrustedOrigin(runtime.origins, requestOrigin)
       ? requestOrigin
-      : runtime.baseURL,
+      : (runtime.baseURL ?? requestOrigin),
   );
   completion.searchParams.set("callback", callback);
 

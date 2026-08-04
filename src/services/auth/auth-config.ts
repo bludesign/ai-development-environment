@@ -24,8 +24,11 @@ export type AuthRuntimeConfig = {
   /**
    * Canonical absolute origin, for links built without a request in hand. Routes
    * that do have a request should prefer its origin when the allowlist trusts it.
+   *
+   * `null` when nothing was configured — there is then no address to use except
+   * the one on the request being handled.
    */
-  baseURL: string;
+  baseURL: string | null;
   /** Whether `x-forwarded-host`/`x-forwarded-proto` may be believed. */
   trustProxyHeaders: boolean;
   mode: AuthMode;
