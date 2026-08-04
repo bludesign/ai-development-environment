@@ -1,9 +1,12 @@
 import { CodebaseLookupError } from "@/services/codebases";
+import { requireUserRequest } from "@/services/auth";
 import { getServerServices } from "@/services/server-services";
 
 export const runtime = "nodejs";
 
 export async function GET(request: Request): Promise<Response> {
+  const authenticationError = await requireUserRequest(request);
+  if (authenticationError) return authenticationError;
   const path = new URL(request.url).searchParams.get("path");
   if (path === null || path.trim().length === 0) {
     return Response.json(

@@ -26,6 +26,27 @@ afterEach(async () => {
 });
 
 describe("AgentGraphQLClient", () => {
+  test("checks public auth configuration for server readiness", async () => {
+    const fetchMock = vi.fn(async () => Response.json({ mode: "password" }));
+    vi.stubGlobal("fetch", fetchMock);
+    const client = new AgentGraphQLClient(
+      "https://control.test",
+      null,
+      10_000,
+      {
+        "CF-Access-Client-Id": "client-id",
+      },
+    );
+
+    await expect(client.ready()).resolves.toEqual({ mode: "password" });
+    expect(fetchMock).toHaveBeenCalledWith(
+      "https://control.test/api/auth/config",
+      expect.objectContaining({
+        headers: { "CF-Access-Client-Id": "client-id" },
+      }),
+    );
+  });
+
   test("builds a run-scoped MCP descriptor with agent authorization taking precedence", () => {
     const client = new AgentGraphQLClient(
       "https://control.test/",

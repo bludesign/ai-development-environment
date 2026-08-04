@@ -7,6 +7,7 @@ import {
   cancelArtifactTransfer,
   expectArtifactTransfer,
 } from "@/services/builds/artifact-transfer";
+import { requireUserRequest } from "@/services/auth";
 import { getServerServices } from "@/services/server-services";
 
 export const runtime = "nodejs";
@@ -18,6 +19,8 @@ export async function GET(
   request: Request,
   context: { params: Promise<{ worktreeId: string }> },
 ): Promise<Response> {
+  const authenticationError = await requireUserRequest(request);
+  if (authenticationError) return authenticationError;
   const uploadId = randomUUID();
   try {
     const { worktreeId } = await context.params;

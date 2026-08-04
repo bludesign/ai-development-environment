@@ -1,12 +1,22 @@
 import { startServerAndCreateNextHandler } from "@as-integrations/next";
+import { AsyncLocalStorage } from "node:async_hooks";
 import { NextRequest } from "next/server";
 
-import { SharedGraphQLServerService } from "@/services/graphql-server/graphql-server.service";
+import {
+  SharedGraphQLServerService,
+  type GraphQLContext,
+} from "@/services/graphql-server/graphql-server.service";
+import { isAnonymousAgentEnrollment } from "@/services/graphql-server/graphql-auth";
+import {
+  PrincipalResolutionError,
+  principalErrorResponse,
+} from "@/services/auth";
 
 export const runtime = "nodejs";
 export const maxDuration = 180;
 
 let handler: ((request: NextRequest) => Promise<Response>) | null = null;
+const requestContext = new AsyncLocalStorage<GraphQLContext>();
 
 async function getHandler(): Promise<
   (request: NextRequest) => Promise<Response>
@@ -14,8 +24,9 @@ async function getHandler(): Promise<
   if (handler === null) {
     const server = await SharedGraphQLServerService.getServer();
     handler = startServerAndCreateNextHandler(server, {
-      context: (request) =>
-        SharedGraphQLServerService.createContext(request.headers),
+      context: async (request) =>
+        requestContext.getStore() ??
+        (await SharedGraphQLServerService.createContext(request.headers)),
     });
   }
 
@@ -24,9 +35,34 @@ async function getHandler(): Promise<
 
 async function handleRequest(request: NextRequest): Promise<Response> {
   try {
+    const context = await SharedGraphQLServerService.createContext(
+      request.headers,
+    );
+    if (context.principal?.kind === "anonymous") {
+      let query: unknown;
+      if (request.method === "POST") {
+        const body = await request
+          .clone()
+          .json()
+          .catch(() => null);
+        if (body && !Array.isArray(body) && typeof body === "object") {
+          query = (body as { query?: unknown }).query;
+        }
+      }
+      if (!isAnonymousAgentEnrollment(query)) {
+        return principalErrorResponse(
+          new PrincipalResolutionError(
+            "Authentication is required for this GraphQL operation.",
+          ),
+        );
+      }
+    }
     const handlerFn = await getHandler();
-    return await handlerFn(request);
+    return await requestContext.run(context, () => handlerFn(request));
   } catch (error) {
+    if (error instanceof PrincipalResolutionError) {
+      return principalErrorResponse(error);
+    }
     console.error("GraphQL request error:", error);
     return new Response(
       JSON.stringify({ errors: [{ message: "Internal server error" }] }),

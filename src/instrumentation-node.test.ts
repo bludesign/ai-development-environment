@@ -8,6 +8,7 @@ import type { WebSocketServer } from "ws";
 import { SharedGraphQLServerService } from "@/services/graphql-server/graphql-server.service";
 
 import {
+  mergeWebSocketCredential,
   parseAgentWebSocketPort,
   startAgentWebSocketServer,
 } from "./instrumentation-node";
@@ -31,6 +32,21 @@ afterEach(() => {
 });
 
 describe("agent WebSocket startup", () => {
+  test("rejects different credentials supplied by the upgrade request and connection parameters", () => {
+    const headers = new Headers({ authorization: "Bearer first" });
+
+    expect(() =>
+      mergeWebSocketCredential(headers, "authorization", "Bearer second"),
+    ).toThrow("Conflicting authorization credentials");
+  });
+
+  test("accepts the same credential in both WebSocket locations", () => {
+    const headers = new Headers({ "x-api-key": "aide_same" });
+
+    mergeWebSocketCredential(headers, "x-api-key", "aide_same");
+    expect(headers.get("x-api-key")).toBe("aide_same");
+  });
+
   test("uses the default port for an empty environment value", () => {
     expect(parseAgentWebSocketPort("")).toBe(3091);
   });

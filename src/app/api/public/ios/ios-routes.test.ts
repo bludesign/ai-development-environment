@@ -6,6 +6,7 @@ const mocks = vi.hoisted(() => ({
   createEnrollment: vi.fn(),
   enrollmentProfile: vi.fn(),
 }));
+const requireUserRequest = vi.hoisted(() => vi.fn());
 
 const deviceId = "8bb37dd2-6e24-4ac8-8c53-c391f6c642c7";
 
@@ -14,6 +15,7 @@ vi.mock("@/services/server-services", () => ({
     iosDevicesService: mocks,
   }),
 }));
+vi.mock("@/services/auth", () => ({ requireUserRequest }));
 
 import { GET as completion } from "./enrollment-complete/route";
 import { GET as profile } from "./enrollment-profile/route";
@@ -30,6 +32,7 @@ function proxyHeaders(extra: Record<string, string> = {}) {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  requireUserRequest.mockResolvedValue(null);
   mocks.completeEnrollment.mockResolvedValue({ id: deviceId });
   mocks.enrollmentProfile.mockResolvedValue(new Uint8Array([1, 2, 3]));
   mocks.createEnrollment.mockResolvedValue({

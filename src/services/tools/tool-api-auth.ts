@@ -1,24 +1,16 @@
 import "server-only";
 
-import { createHash, randomUUID, timingSafeEqual } from "node:crypto";
+import { randomUUID } from "node:crypto";
 
 import type { AgentControlService } from "@/services/agent-control";
+import {
+  PrincipalResolutionError,
+  resolveRequestPrincipal,
+} from "@/services/auth";
 
 import type { ToolInvocationContext } from "./tool-call-audit.service";
 
 type ToolEndpoint = "MCP" | "TOOLS_PAGE";
-
-function bearerCredential(headers: Headers): string | null {
-  const authorization = headers.get("authorization");
-  if (!authorization?.startsWith("Bearer ")) return null;
-  return authorization.slice("Bearer ".length).trim() || null;
-}
-
-function equalSecret(first: string, second: string): boolean {
-  const left = Buffer.from(first);
-  const right = Buffer.from(second);
-  return left.length === right.length && timingSafeEqual(left, right);
-}
 
 function requestCorrelationId(request: Request): string {
   const supplied = request.headers.get("x-request-id")?.trim();
@@ -43,40 +35,46 @@ function unauthorized(message: string): Response {
   );
 }
 
-export function authorizeToolRequest(
+export async function authorizeToolRequest(
   request: Request,
   endpoint: ToolEndpoint,
-): { context: ToolInvocationContext } | { response: Response } {
-  const configured = process.env.TOOLS_API_TOKEN?.trim();
-  if (!configured) {
+): Promise<{ context: ToolInvocationContext } | { response: Response }> {
+  try {
+    const principal = await resolveRequestPrincipal(request.headers);
+    if (
+      principal.kind !== "user" &&
+      !(endpoint === "MCP" && principal.kind === "apiKey")
+    ) {
+      return {
+        response: unauthorized(
+          endpoint === "TOOLS_PAGE"
+            ? "A user session is required"
+            : "A user session or X-API-Key is required",
+        ),
+      };
+    }
+    const caller =
+      principal.kind === "user"
+        ? `user:${principal.userId}`
+        : `api-key:${principal.apiKeyId}`;
     return {
       context: {
-        caller: `anonymous@${requestAddress(request)}`,
+        caller: `${caller}@${requestAddress(request)}`,
         correlationId: requestCorrelationId(request),
         source: endpoint,
       },
     };
+  } catch (error) {
+    if (error instanceof PrincipalResolutionError) {
+      return { response: unauthorized(error.message) };
+    }
+    throw error;
   }
-  const supplied = bearerCredential(request.headers);
-  if (!supplied || !equalSecret(supplied, configured)) {
-    return { response: unauthorized("A valid bearer token is required") };
-  }
-  const fingerprint = createHash("sha256")
-    .update(supplied)
-    .digest("hex")
-    .slice(0, 12);
-  return {
-    context: {
-      caller: `bearer:${fingerprint}@${requestAddress(request)}`,
-      correlationId: requestCorrelationId(request),
-      source: endpoint,
-    },
-  };
 }
 
-export function authorizeMcpPresetRequest(
+export async function authorizeMcpPresetRequest(
   request: Request,
-): { context: ToolInvocationContext } | { response: Response } {
+): Promise<{ context: ToolInvocationContext } | { response: Response }> {
   return authorizeToolRequest(request, "MCP");
 }
 
@@ -86,18 +84,25 @@ export async function authorizeRunMcpRequest(
 ): Promise<
   { agentId: string; context: ToolInvocationContext } | { response: Response }
 > {
-  const agentId = await agents.authenticate(bearerCredential(request.headers));
-  if (!agentId) {
+  try {
+    const principal = await resolveRequestPrincipal(request.headers, agents);
+    if (principal.kind !== "agent") {
+      return {
+        response: unauthorized("A valid enrolled agent credential is required"),
+      };
+    }
     return {
-      response: unauthorized("A valid enrolled agent credential is required"),
+      agentId: principal.agentId,
+      context: {
+        caller: `agent:${principal.agentId}@${requestAddress(request)}`,
+        correlationId: requestCorrelationId(request),
+        source: "MCP",
+      },
     };
+  } catch (error) {
+    if (error instanceof PrincipalResolutionError) {
+      return { response: unauthorized(error.message) };
+    }
+    throw error;
   }
-  return {
-    agentId,
-    context: {
-      caller: `agent:${agentId}@${requestAddress(request)}`,
-      correlationId: requestCorrelationId(request),
-      source: "MCP",
-    },
-  };
 }

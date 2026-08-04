@@ -38,27 +38,65 @@ function run(command, args, options) {
 }
 
 async function waitForStatus(port) {
+  const origin = `http://127.0.0.1:${port}`;
   const deadline = Date.now() + 30_000;
   let lastError;
+
   while (Date.now() < deadline) {
     try {
-      const response = await fetch(`http://127.0.0.1:${port}/api/graphql`, {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({
-          query:
-            "{ health credentialStoreStatus { storageType state warnings { code } } }",
-        }),
-      });
-      const body = await response.json();
-      if (response.ok && body.data) return body.data;
-      lastError = new Error(JSON.stringify(body));
+      const response = await fetch(`${origin}/api/auth/config`);
+      if (response.ok) break;
+      lastError = new Error(`Readiness returned ${response.status}`);
     } catch (error) {
       lastError = error;
     }
     await new Promise((resolve) => setTimeout(resolve, 250));
   }
-  throw lastError ?? new Error("Standalone server did not become ready");
+  if (Date.now() >= deadline) {
+    throw lastError ?? new Error("Standalone server did not become ready");
+  }
+
+  const authBody = {
+    email: "standalone-smoke@example.com",
+    password: "standalone-smoke-password",
+    name: "Standalone smoke test",
+  };
+  let authResponse = await fetch(`${origin}/api/auth/sign-in/email`, {
+    method: "POST",
+    headers: { "content-type": "application/json", origin },
+    body: JSON.stringify({
+      email: authBody.email,
+      password: authBody.password,
+    }),
+  });
+  if (!authResponse.ok) {
+    authResponse = await fetch(`${origin}/api/auth/sign-up/email`, {
+      method: "POST",
+      headers: { "content-type": "application/json", origin },
+      body: JSON.stringify(authBody),
+    });
+  }
+  const sessionToken = authResponse.headers.get("set-auth-token");
+  if (!authResponse.ok || !sessionToken) {
+    throw new Error(
+      `Authentication returned ${authResponse.status}: ${await authResponse.text()}`,
+    );
+  }
+
+  const response = await fetch(`${origin}/api/graphql`, {
+    method: "POST",
+    headers: {
+      authorization: `Bearer ${sessionToken}`,
+      "content-type": "application/json",
+    },
+    body: JSON.stringify({
+      query:
+        "{ health credentialStoreStatus { storageType state warnings { code } } }",
+    }),
+  });
+  const body = await response.json();
+  if (response.ok && body.data) return body.data;
+  throw new Error(JSON.stringify(body));
 }
 
 async function stop(child) {
@@ -88,6 +126,8 @@ async function scenario(databaseUrl, storageType) {
       AGENT_WS_HOSTNAME: "127.0.0.1",
       AGENT_WS_PORT: String(agentPort),
       DATABASE_URL: databaseUrl,
+      BETTER_AUTH_SECRET: "standalone-smoke-better-auth-secret-value",
+      BETTER_AUTH_URL: `http://127.0.0.1:${port}`,
       CREDENTIAL_STORAGE_TYPE: storageType,
       ...(storageType === "database"
         ? { CREDENTIAL_ENCRYPTION_KEY: encryptionKey }

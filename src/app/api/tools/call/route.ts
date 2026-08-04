@@ -14,7 +14,7 @@ const inputSchema = z.object({
 });
 
 export async function POST(request: Request): Promise<Response> {
-  const authorization = authorizeToolRequest(request, "TOOLS_PAGE");
+  const authorization = await authorizeToolRequest(request, "TOOLS_PAGE");
   if ("response" in authorization) return authorization.response;
   const headers = { "x-request-id": authorization.context.correlationId };
   try {

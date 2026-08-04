@@ -306,7 +306,7 @@ describe("CodebaseDetailPage", () => {
       ),
     );
     expect(
-      screen.getByRole("button", { name: "Patch copied stash@{0}" }),
+      await screen.findByRole("button", { name: "Patch copied stash@{0}" }),
     ).toBeDefined();
 
     fireEvent.click(screen.getByRole("button", { name: "Delete stash@{0}" }));

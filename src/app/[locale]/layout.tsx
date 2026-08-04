@@ -1,14 +1,11 @@
 import type { Metadata, Viewport } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
-import { cookies } from "next/headers";
 import { notFound } from "next/navigation";
 import { hasLocale, NextIntlClientProvider } from "next-intl";
 import { getMessages, getTranslations } from "next-intl/server";
 
-import { AppShell } from "@/components/app-shell";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { routing } from "@/i18n/routing";
-import { LEFT_SIDEBAR_COOKIE, RIGHT_SIDEBAR_COOKIE } from "@/lib/sidebar-state";
 
 import "../globals.css";
 
@@ -66,11 +63,7 @@ export default async function RootLayout({
     notFound();
   }
 
-  const [cookieStore, messages] = await Promise.all([cookies(), getMessages()]);
-  const leftDefaultOpen =
-    cookieStore.get(LEFT_SIDEBAR_COOKIE)?.value !== "false";
-  const rightDefaultOpen =
-    cookieStore.get(RIGHT_SIDEBAR_COOKIE)?.value !== "false";
+  const messages = await getMessages();
 
   return (
     <html
@@ -79,14 +72,7 @@ export default async function RootLayout({
     >
       <body className="h-dvh overflow-hidden">
         <NextIntlClientProvider messages={messages}>
-          <TooltipProvider>
-            <AppShell
-              leftDefaultOpen={leftDefaultOpen}
-              rightDefaultOpen={rightDefaultOpen}
-            >
-              {children}
-            </AppShell>
-          </TooltipProvider>
+          <TooltipProvider>{children}</TooltipProvider>
         </NextIntlClientProvider>
       </body>
     </html>

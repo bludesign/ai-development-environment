@@ -24,9 +24,13 @@ export type RouteEntry = {
    * For pages that inspect a checkout live; see playwright/worktree-stub.ts.
    */
   stubWorktree?: boolean;
+  /** Auth pages are intentionally captured without the seeded bearer session. */
+  anonymous?: boolean;
 };
 
 export const routes: RouteEntry[] = [
+  { name: "sign-in", path: "/sign-in", anonymous: true },
+  { name: "register", path: "/register", anonymous: true },
   // Overview / action center
   { name: "dashboard", path: "/" },
 
@@ -212,6 +216,8 @@ export const routes: RouteEntry[] = [
   { name: "push-notifications", path: "/push-notifications" },
 
   // System
+  { name: "users", path: "/users", readyTexts: ["Avery Morgan"] },
+  { name: "api-keys", path: "/api-keys", readyTexts: ["CI automation"] },
   { name: "credentials", path: "/credentials" },
   { name: "settings", path: "/settings" },
 ];

@@ -245,10 +245,10 @@ async function doctor(): Promise<void> {
           null,
           10_000,
           config?.headers,
-        ).health();
+        ).ready();
         return {
-          ok: health.health === "ok",
-          detail: `${endpoint.kind} ${endpoint.server}: ${health.health}`,
+          ok: true,
+          detail: `${endpoint.kind} ${endpoint.server}: ready (${health.mode})`,
         };
       } catch (error) {
         return {
@@ -306,6 +306,9 @@ async function main(): Promise<void> {
               process.env.CONTROL_AGENT_DEV_WEBSOCKET_SERVER ??
               process.env.NEXT_PUBLIC_AGENT_WS_URL,
             name: options.name,
+            enrollmentToken:
+              options["enrollment-token"] ??
+              process.env.CONTROL_AGENT_DEV_ENROLLMENT_TOKEN,
           },
           controller.signal,
         );

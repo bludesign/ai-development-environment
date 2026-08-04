@@ -4,6 +4,7 @@ import {
   resetRateLimitsForTests,
 } from "@/lib/ios-registration-request";
 import { getServerServices } from "@/services/server-services";
+import { requireUserRequest } from "@/services/auth";
 
 export const runtime = "nodejs";
 export const maxDuration = 30;
@@ -16,6 +17,8 @@ const RATE_LIMIT_NAMESPACE = "notification-devices";
  * push-notifications test console with devices belonging to apps built using this server.
  */
 export async function POST(request: Request): Promise<Response> {
+  const authenticationError = await requireUserRequest(request);
+  if (authenticationError) return authenticationError;
   return guardedRegistration(
     request,
     {

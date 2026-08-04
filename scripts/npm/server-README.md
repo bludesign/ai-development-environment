@@ -13,6 +13,8 @@ Requires Node.js 24 (`>=24.16.0 <25`).
 ## Run
 
 ```bash
+BETTER_AUTH_SECRET="replace-with-at-least-32-random-characters" \
+BETTER_AUTH_URL="http://127.0.0.1:3090" \
 ai-development-environment
 ```
 
@@ -29,6 +31,9 @@ Override with environment variables:
 | `AGENT_WS_HOSTNAME`            | `127.0.0.1`                                        |
 | `AGENT_WS_PORT`                | `3091`                                             |
 | `DATABASE_URL`                 | `file:~/.ai-development-environment/production.db` |
+| `BETTER_AUTH_SECRET`           | Required; at least 32 characters                   |
+| `BETTER_AUTH_URL`              | Required; the public server origin                 |
+| `AUTH_MODE`                    | `password`                                         |
 | `CREDENTIAL_STORAGE_TYPE`      | `database`                                         |
 | `CREDENTIAL_ENCRYPTION_KEY`    | unset                                              |
 | `VAULT_ADDR`                   | required for Vault                                 |
@@ -43,6 +48,8 @@ Override with environment variables:
 | `CREDENTIAL_VAULT_READ_ONLY`   | `false`                                            |
 
 Only SQLite `file:` URLs are supported for `DATABASE_URL`.
+
+Generate `BETTER_AUTH_SECRET` once, back it up, and keep it stable across upgrades. Changing it invalidates active sessions. `AUTH_MODE` accepts `password`, `oidc`, or `both`. OIDC modes require a generic provider client ID and secret plus either a discovery URL or a complete authorization, token, and user-info endpoint set. See the [authentication documentation](https://ai-development-environment.mintlify.app/reference/authentication) for the complete `AUTH_OAUTH_*` variable list and redirect URL.
 
 ### Credential backends
 

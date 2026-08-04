@@ -78,7 +78,7 @@ VOLUME ["/data"]
 EXPOSE 3090 3091
 
 HEALTHCHECK --interval=30s --timeout=5s --start-period=30s --retries=3 \
-  CMD ["node", "-e", "fetch('http://127.0.0.1:'+process.env.PORT+'/api/graphql',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({query:'{ health }'})}).then(async response=>{const body=await response.json();if(!response.ok||body.data?.health!=='ok')process.exit(1)}).catch(()=>process.exit(1))"]
+  CMD ["node", "-e", "fetch('http://127.0.0.1:'+process.env.PORT+'/api/auth/config').then(async response=>{const body=await response.json();if(!response.ok||!body.mode)process.exit(1)}).catch(()=>process.exit(1))"]
 
 STOPSIGNAL SIGTERM
 

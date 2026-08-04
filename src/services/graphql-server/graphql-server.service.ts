@@ -13,10 +13,15 @@ import {
   type ServerServices,
 } from "@/services/server-services";
 import { resolvePublicOrigin } from "@/lib/public-origin";
+import {
+  resolveRequestPrincipal,
+  type RequestPrincipal,
+} from "@/services/auth";
 
 export interface GraphQLContext {
   prismaService: PrismaService;
   agentControlService: AgentControlService;
+  principal?: RequestPrincipal;
   agentId: string | null;
   ipAddress: string | null;
   requestOrigin: string | null;
@@ -125,13 +130,15 @@ class GraphQLServerService {
     }
 
     const headers = normalizeHeaders(source);
-    const agentId = await this.services.agentControlService.authenticate(
-      bearerCredential(headers),
+    const principal = await resolveRequestPrincipal(
+      headers,
+      this.services.agentControlService,
     );
     return {
       prismaService: this.services.prismaService,
       agentControlService: this.services.agentControlService,
-      agentId,
+      principal,
+      agentId: principal.kind === "agent" ? principal.agentId : null,
       ipAddress: requestIpAddress(headers),
       requestOrigin: resolvePublicOrigin(headers)?.origin ?? null,
     };

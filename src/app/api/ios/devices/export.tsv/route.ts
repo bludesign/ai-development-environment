@@ -1,8 +1,11 @@
 import { getServerServices } from "@/services/server-services";
+import { requireUserRequest } from "@/services/auth";
 
 export const runtime = "nodejs";
 
-export async function GET(): Promise<Response> {
+export async function GET(request: Request): Promise<Response> {
+  const authenticationError = await requireUserRequest(request);
+  if (authenticationError) return authenticationError;
   const tsv = await getServerServices().iosDevicesService.exportTsv();
   return new Response(`${tsv}\n`, {
     headers: {

@@ -1,7 +1,7 @@
 import { cleanup, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 
-import Home from "@/app/[locale]/page";
+import Home from "@/app/[locale]/(dashboard)/page";
 import { ActionCenterProvider } from "@/components/action-center/action-center-provider";
 import {
   controlPlaneRequest,

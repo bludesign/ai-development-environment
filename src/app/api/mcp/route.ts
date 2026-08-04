@@ -77,7 +77,7 @@ async function handle(request: Request): Promise<Response> {
         { status: 400 },
       );
     }
-    const authorization = authorizeMcpPresetRequest(request);
+    const authorization = await authorizeMcpPresetRequest(request);
     if ("response" in authorization) return authorization.response;
     const toolNames = await tools.mcpPresetToolNames(presetId);
     if (!toolNames) {
@@ -94,7 +94,7 @@ async function handle(request: Request): Promise<Response> {
     context = authorization.context;
     allowedToolNames = new Set(toolNames);
   } else {
-    const authorization = authorizeToolRequest(request, "MCP");
+    const authorization = await authorizeToolRequest(request, "MCP");
     if ("response" in authorization) return authorization.response;
     context = authorization.context;
   }

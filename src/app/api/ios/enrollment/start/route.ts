@@ -1,4 +1,5 @@
 import { resolvePublicOrigin } from "@/lib/public-origin";
+import { requireUserRequest } from "@/services/auth";
 import { getServerServices } from "@/services/server-services";
 
 export const runtime = "nodejs";
@@ -13,6 +14,8 @@ function sameOrigin(request: Request): boolean {
 }
 
 export async function POST(request: Request): Promise<Response> {
+  const authenticationError = await requireUserRequest(request);
+  if (authenticationError) return authenticationError;
   try {
     if (!sameOrigin(request)) {
       return new Response("Enrollment request origin is not allowed", {

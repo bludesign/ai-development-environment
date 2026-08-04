@@ -9,6 +9,7 @@ import {
   SCREENSHOT_TIME_ZONE,
 } from "./playwright/screenshot-time";
 import { MOCK_CREDENTIAL_ENCRYPTION_KEY } from "./scripts/mock-data/encryption-key";
+import { screenshotSessionToken } from "./scripts/mock-data/auth";
 
 const assignedPorts = new Set<number>();
 
@@ -159,6 +160,11 @@ export default defineConfig({
         // makes every database-backed screenshot credential appear unavailable.
         CREDENTIAL_STORAGE_TYPE: "database",
         CREDENTIAL_ENCRYPTION_KEY: MOCK_CREDENTIAL_ENCRYPTION_KEY,
+        BETTER_AUTH_SECRET:
+          "screenshot-better-auth-secret-at-least-thirty-two-characters",
+        BETTER_AUTH_URL: baseURL,
+        AUTH_MODE: "password",
+        SCREENSHOT_SESSION_TOKEN: screenshotSessionToken,
       },
     },
   ],

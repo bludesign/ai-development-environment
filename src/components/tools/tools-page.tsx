@@ -19,9 +19,7 @@ import { useTranslations } from "next-intl";
 import {
   FormEvent,
   Fragment,
-  createContext,
   useCallback,
-  useContext,
   useEffect,
   useMemo,
   useState,
@@ -87,8 +85,6 @@ const SERVER_FIELDS =
 /** Suggested key for the client's own MCP config file; purely a local alias. */
 const BUILT_IN_SERVER_NAME = "ai-development-environment";
 const CUSTOM_SERVER_ORIGIN = "__custom__";
-const ToolApiTokenContext = createContext("");
-
 type JsonSchema = Record<string, unknown>;
 
 const emptyDraft = (): ExternalMcpServerDraft => ({
@@ -149,7 +145,6 @@ export function ToolsPage({
   const [draft, setDraft] = useState<ExternalMcpServerDraft>(emptyDraft);
   const [saving, setSaving] = useState(false);
   const [dialogError, setDialogError] = useState<string | null>(null);
-  const [toolApiToken, setToolApiToken] = useState("");
   const browserOrigin = useSyncExternalStore(
     subscribeToNothing,
     readOrigin,
@@ -312,10 +307,8 @@ export function ToolsPage({
             customServerOrigin={customServerOrigin}
             onCustomServerOriginChange={setCustomServerOrigin}
             onServerOriginChange={setSelectedServerOrigin}
-            onTokenChange={setToolApiToken}
             selectedServerOrigin={selectedServerOrigin}
             serverOrigins={serverOrigins}
-            token={toolApiToken}
           />
 
           <McpPresetManagement baseMcpUrl={mcpBaseUrl} groups={groups} />
@@ -442,21 +435,19 @@ export function ToolsPage({
             </div>
           </div>
 
-          <ToolApiTokenContext.Provider value={toolApiToken}>
-            {catalogLoading && groups.length === 0 ? (
-              <div className="flex items-center gap-2 text-sm text-muted-foreground">
-                <Spinner /> {t("loadingTools")}
-              </div>
-            ) : visibleGroups.length === 0 ? (
-              <p className="text-sm text-muted-foreground">
-                {t("noMatchingTools")}
-              </p>
-            ) : (
-              visibleGroups.map((group) => (
-                <ToolGroup group={group} key={group.id} />
-              ))
-            )}
-          </ToolApiTokenContext.Provider>
+          {catalogLoading && groups.length === 0 ? (
+            <div className="flex items-center gap-2 text-sm text-muted-foreground">
+              <Spinner /> {t("loadingTools")}
+            </div>
+          ) : visibleGroups.length === 0 ? (
+            <p className="text-sm text-muted-foreground">
+              {t("noMatchingTools")}
+            </p>
+          ) : (
+            visibleGroups.map((group) => (
+              <ToolGroup group={group} key={group.id} />
+            ))
+          )}
 
           <ServerDialog
             draft={draft}
@@ -488,19 +479,15 @@ function ConnectClientsCard({
   customServerOrigin,
   onCustomServerOriginChange,
   onServerOriginChange,
-  onTokenChange,
   selectedServerOrigin,
   serverOrigins,
-  token,
 }: {
   baseMcpUrl: string;
   customServerOrigin: string;
   onCustomServerOriginChange: (value: string) => void;
   onServerOriginChange: (value: string) => void;
-  onTokenChange: (value: string) => void;
   selectedServerOrigin: string | null;
   serverOrigins: string[];
-  token: string;
 }) {
   const t = useTranslations("tools");
   const [copied, setCopied] = useState<"URL" | "CONFIG" | null>(null);
@@ -513,9 +500,7 @@ function ConnectClientsCard({
         [BUILT_IN_SERVER_NAME]: {
           type: "http",
           url,
-          ...(token.trim()
-            ? { headers: { Authorization: "Bearer <TOOLS_API_TOKEN>" } }
-            : {}),
+          headers: { "X-API-Key": "<AIDE_API_KEY>" },
         },
       },
     },
@@ -575,20 +560,6 @@ function ConnectClientsCard({
               value={customServerOrigin}
             />
           )}
-        </div>
-        <div className="space-y-1.5">
-          <Label htmlFor="tools-api-token">{t("toolApiToken")}</Label>
-          <Input
-            autoComplete="off"
-            id="tools-api-token"
-            onChange={(event) => onTokenChange(event.target.value)}
-            placeholder={t("toolApiTokenPlaceholder")}
-            type="password"
-            value={token}
-          />
-          <p className="text-xs text-muted-foreground">
-            {t("toolApiTokenHelp")}
-          </p>
         </div>
         <div className="space-y-1.5">
           <h3 className="text-sm font-medium">{t("serverUrl")}</h3>
@@ -1147,7 +1118,6 @@ function ToolRunner({
   toolName: string;
 }) {
   const t = useTranslations("tools");
-  const toolApiToken = useContext(ToolApiTokenContext);
   const [argumentsValue, setArgumentsValue] = useState<Record<string, unknown>>(
     () => (defaultsForSchema(schema) as Record<string, unknown>) ?? {},
   );
@@ -1171,9 +1141,6 @@ function ToolRunner({
       const headers: Record<string, string> = {
         "content-type": "application/json",
       };
-      if (toolApiToken.trim()) {
-        headers.authorization = `Bearer ${toolApiToken.trim()}`;
-      }
       const body = (await responseJson(
         await fetch("/api/tools/call", {
           method: "POST",

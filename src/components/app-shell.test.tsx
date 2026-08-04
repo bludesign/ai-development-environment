@@ -65,6 +65,11 @@ function renderShell({
   return render(
     <TooltipProvider>
       <AppShell
+        currentUser={{
+          name: "Screenshot User",
+          email: "user@example.com",
+          image: null,
+        }}
         leftDefaultOpen={leftDefaultOpen}
         rightDefaultOpen={rightDefaultOpen}
       >

@@ -1,4 +1,5 @@
 import { getServerServices } from "@/services/server-services";
+import { requireUserRequest } from "@/services/auth";
 import {
   TELEMETRY_VIEWS,
   type TelemetryQueryInput,
@@ -73,6 +74,8 @@ async function readLimitedJson(request: Request): Promise<unknown> {
 }
 
 export async function POST(request: Request): Promise<Response> {
+  const authenticationError = await requireUserRequest(request);
+  if (authenticationError) return authenticationError;
   try {
     const body = (await readLimitedJson(request)) as ExportRequest;
     if (!body || typeof body !== "object")

@@ -10,7 +10,7 @@ export function GET(): Response {
         title: "AI Development Environment API",
         version: codebasesOpenApiDocument.info.version,
         description:
-          "Public codebase, observability, and APNs device-registration endpoints.",
+          "Authenticated codebase endpoints and public observability and APNs integration endpoints.",
       },
       tags: [
         ...codebasesOpenApiDocument.tags,
@@ -32,6 +32,7 @@ export function GET(): Response {
           ...codebasesOpenApiDocument.components.responses,
           ...telemetryOpenApiDocument.components.responses,
         },
+        securitySchemes: codebasesOpenApiDocument.components.securitySchemes,
       },
     },
     {
