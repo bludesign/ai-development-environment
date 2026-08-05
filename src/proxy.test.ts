@@ -1,4 +1,5 @@
 import { NextRequest } from "next/server";
+import { unstable_doesMiddlewareMatch } from "next/experimental/testing/server";
 import { beforeEach, describe, expect, test, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
@@ -73,7 +74,23 @@ describe("authentication and locale proxy", () => {
     expect(mocks.intl).toHaveBeenCalledOnce();
   });
 
-  test("excludes APIs, framework assets, and files from optimistic redirects", () => {
-    expect(config.matcher).toEqual(["/((?!api|_next|_vercel|.*\\..*).*)"]);
+  test("excludes APIs, GraphQL WebSockets, framework assets, and files", () => {
+    expect(config.matcher).toEqual([
+      "/((?!api|graphql|_next|_vercel|.*\\..*).*)",
+    ]);
+    expect(
+      unstable_doesMiddlewareMatch({
+        config,
+        nextConfig: {},
+        url: "/graphql",
+      }),
+    ).toBe(false);
+    expect(
+      unstable_doesMiddlewareMatch({
+        config,
+        nextConfig: {},
+        url: "/en/worktrees",
+      }),
+    ).toBe(true);
   });
 });
