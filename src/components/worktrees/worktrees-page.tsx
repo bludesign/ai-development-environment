@@ -61,6 +61,7 @@ import {
   pullRequestDetailHref,
 } from "@/components/github/pull-request-links";
 import { JiraTicketDrawer } from "@/components/jira/ticket-drawer";
+import { useJiraTicketChanges } from "@/components/jira/use-jira-ticket-changes";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -144,6 +145,7 @@ import {
 } from "@/lib/control-plane-client";
 import { cn } from "@/lib/utils";
 import { Link, useRouter } from "@/i18n/navigation";
+import type { JiraTicketDetail } from "@/services/jira/types";
 
 import {
   WorktreeBranchForm,
@@ -208,28 +210,39 @@ const LAYOUT_KEY = "worktrees-layout";
 const GROUP_BY_KEY = "worktrees-group-by";
 const FILTERS_KEY = "worktrees-filters";
 const ALL_FILTER_VALUE = "__all__";
+const DIRTY_FILTER_VALUE = "dirty";
+const CLEAN_FILTER_VALUE = "clean";
 
 export type WorktreeListFilters = {
   query: string;
   agentId: string | null;
   repositoryId: string | null;
+  dirty: boolean | null;
 };
 
 type StoredFilters = {
   query: string;
   agentId: string;
   repositoryId: string;
+  changes: string;
 };
 
-function readStoredFilters(): StoredFilters {
+// The app scoped views keep their own filters so switching between an app and
+// the full list never overwrites the other's selection.
+function filtersStorageKey(appId?: string) {
+  return appId ? `${FILTERS_KEY}:${appId}` : FILTERS_KEY;
+}
+
+function readStoredFilters(appId?: string): StoredFilters {
   const fallback: StoredFilters = {
     query: "",
     agentId: ALL_FILTER_VALUE,
     repositoryId: ALL_FILTER_VALUE,
+    changes: ALL_FILTER_VALUE,
   };
   if (typeof window === "undefined") return fallback;
   try {
-    const raw = window.localStorage.getItem(FILTERS_KEY);
+    const raw = window.localStorage.getItem(filtersStorageKey(appId));
     if (!raw) return fallback;
     const parsed: unknown = JSON.parse(raw);
     if (!parsed || typeof parsed !== "object") return fallback;
@@ -242,10 +255,46 @@ function readStoredFilters(): StoredFilters {
         typeof stored.repositoryId === "string"
           ? stored.repositoryId
           : fallback.repositoryId,
+      changes:
+        stored.changes === DIRTY_FILTER_VALUE ||
+        stored.changes === CLEAN_FILTER_VALUE
+          ? stored.changes
+          : fallback.changes,
     };
   } catch {
     return fallback;
   }
+}
+
+export function worktreeIsDirty(
+  worktree: Pick<Worktree, "hasStagedChanges" | "hasUnstagedChanges">,
+) {
+  return worktree.hasStagedChanges || worktree.hasUnstagedChanges;
+}
+
+export function applyJiraTicketToWorktreeOverview(
+  overview: WorktreeOverview,
+  ticket: Pick<JiraTicketDetail, "key" | "summary" | "status">,
+): WorktreeOverview {
+  const issueKey = ticket.key.trim().toUpperCase();
+  return {
+    ...overview,
+    agents: overview.agents.map((agentGroup) => ({
+      ...agentGroup,
+      codebases: agentGroup.codebases.map((group) => ({
+        ...group,
+        worktrees: group.worktrees.map((worktree) =>
+          worktree.ticketKey?.trim().toUpperCase() === issueKey
+            ? {
+                ...worktree,
+                ticketTitle: ticket.summary,
+                ticketStatus: ticket.status,
+              }
+            : worktree,
+        ),
+      })),
+    })),
+  };
 }
 
 function matchesWorktreeSearch(values: Array<unknown>, query: string) {
@@ -261,7 +310,14 @@ export function filterWorktreeAgentGroups(
   filters: WorktreeListFilters,
 ): WorktreeAgentGroup[] {
   const query = filters.query.trim().toLocaleLowerCase();
-  if (!query && !filters.agentId && !filters.repositoryId) return agents;
+  if (
+    !query &&
+    !filters.agentId &&
+    !filters.repositoryId &&
+    filters.dirty === null
+  ) {
+    return agents;
+  }
   return agents.flatMap((agentGroup) => {
     if (filters.agentId && agentGroup.agent.id !== filters.agentId) return [];
     const agentMatches =
@@ -294,7 +350,7 @@ export function filterWorktreeAgentGroups(
           ],
           query,
         );
-      const worktrees =
+      const searched =
         !query || agentMatches || groupMatches
           ? group.worktrees
           : group.worktrees.filter((worktree) =>
@@ -315,6 +371,12 @@ export function filterWorktreeAgentGroups(
                 ],
                 query,
               ),
+            );
+      const worktrees =
+        filters.dirty === null
+          ? searched
+          : searched.filter(
+              (worktree) => worktreeIsDirty(worktree) === filters.dirty,
             );
       return worktrees.length ? [{ ...group, worktrees }] : [];
     });
@@ -407,7 +469,7 @@ type Operation =
 export function worktreeChangeActionState(
   worktree: Pick<Worktree, "hasStagedChanges" | "hasUnstagedChanges">,
 ) {
-  const hasChanges = worktree.hasStagedChanges || worktree.hasUnstagedChanges;
+  const hasChanges = worktreeIsDirty(worktree);
   const allChangesStaged =
     worktree.hasStagedChanges && !worktree.hasUnstagedChanges;
   return {
@@ -416,6 +478,24 @@ export function worktreeChangeActionState(
       ? ("UNSTAGE_ALL" as const)
       : ("STAGE_ALL" as const),
   };
+}
+
+export function worktreeBranchIsTaken(
+  overview: WorktreeOverview,
+  codebaseId: string,
+  branch: string,
+  excludingWorktreeId: string,
+): boolean {
+  return overview.agents.some((agentGroup) =>
+    agentGroup.codebases.some(
+      (group) =>
+        group.codebase.id === codebaseId &&
+        group.worktrees.some(
+          (candidate) =>
+            candidate.id !== excludingWorktreeId && candidate.branch === branch,
+        ),
+    ),
+  );
 }
 
 const tagColorClasses: Record<string, string> = {
@@ -551,16 +631,13 @@ export function WorktreesPage({ appId }: { appId?: string }) {
   const [inspectionRefreshToken, setInspectionRefreshToken] = useState(0);
   const [tagManagerOpen, setTagManagerOpen] = useState(false);
   const [hiddenOpen, setHiddenOpen] = useState(false);
-  const [storedFilters] = useState(() =>
-    appId
-      ? { query: "", agentId: ALL_FILTER_VALUE, repositoryId: ALL_FILTER_VALUE }
-      : readStoredFilters(),
-  );
+  const [storedFilters] = useState(() => readStoredFilters(appId));
   const [query, setQuery] = useState(storedFilters.query);
   const [agentFilter, setAgentFilter] = useState(storedFilters.agentId);
   const [repositoryFilter, setRepositoryFilter] = useState(
     storedFilters.repositoryId,
   );
+  const [changesFilter, setChangesFilter] = useState(storedFilters.changes);
   const latestLoad = useRef(0);
 
   const load = useCallback(async () => {
@@ -583,6 +660,7 @@ export function WorktreesPage({ appId }: { appId?: string }) {
               agent { ${AGENT_FIELDS} }
               codebases {
                 iosBuildConfigured
+                blockingJob { id agentId kind payload status idempotencyKey result error timeoutSeconds createdAt startedAt finishedAt updatedAt }
                 quickActions {
             id name description quickActionIconKey quickActionButtonVariant
             hasPlainTrigger(resourceKind: "WORKTREE")
@@ -612,6 +690,11 @@ export function WorktreesPage({ appId }: { appId?: string }) {
       if (request === latestLoad.current) setLoading(false);
     }
   }, [appId]);
+
+  useJiraTicketChanges(
+    () => void load(),
+    () => void load(),
+  );
 
   useEffect(() => {
     const initial = window.setTimeout(() => void load(), 0);
@@ -665,17 +748,16 @@ export function WorktreesPage({ appId }: { appId?: string }) {
   }, []);
 
   useEffect(() => {
-    if (!appId) {
-      window.localStorage.setItem(
-        FILTERS_KEY,
-        JSON.stringify({
-          query,
-          agentId: agentFilter,
-          repositoryId: repositoryFilter,
-        } satisfies StoredFilters),
-      );
-    }
-  }, [agentFilter, appId, query, repositoryFilter]);
+    window.localStorage.setItem(
+      filtersStorageKey(appId),
+      JSON.stringify({
+        query,
+        agentId: agentFilter,
+        repositoryId: repositoryFilter,
+        changes: changesFilter,
+      } satisfies StoredFilters),
+    );
+  }, [agentFilter, appId, changesFilter, query, repositoryFilter]);
 
   const selectJiraIssue = (issueKey: string | null) => {
     replaceIssueParam(issueKey);
@@ -766,6 +848,12 @@ export function WorktreesPage({ appId }: { appId?: string }) {
     );
   };
 
+  const updateLocalJiraTicket = (ticket: JiraTicketDetail) => {
+    setOverview((current) =>
+      current ? applyJiraTicketToWorktreeOverview(current, ticket) : current,
+    );
+  };
+
   const repositoryOptions = useMemo(() => {
     const repositories = new Map<string, { id: string; name: string }>();
     overview?.agents.forEach((agentGroup) =>
@@ -804,8 +892,12 @@ export function WorktreesPage({ appId }: { appId?: string }) {
           activeRepositoryFilter === ALL_FILTER_VALUE
             ? null
             : activeRepositoryFilter,
+        dirty:
+          changesFilter === ALL_FILTER_VALUE
+            ? null
+            : changesFilter === DIRTY_FILTER_VALUE,
       }),
-    [activeAgentFilter, activeRepositoryFilter, overview, query],
+    [activeAgentFilter, activeRepositoryFilter, changesFilter, overview, query],
   );
   const repositoryGroups = useMemo(
     () => groupWorktreesByRepository(filteredAgents),
@@ -814,7 +906,8 @@ export function WorktreesPage({ appId }: { appId?: string }) {
   const filtersActive =
     Boolean(query.trim()) ||
     activeAgentFilter !== ALL_FILTER_VALUE ||
-    activeRepositoryFilter !== ALL_FILTER_VALUE;
+    activeRepositoryFilter !== ALL_FILTER_VALUE ||
+    changesFilter !== ALL_FILTER_VALUE;
 
   return (
     <section className="flex w-full flex-col gap-6">
@@ -965,6 +1058,27 @@ export function WorktreesPage({ appId }: { appId?: string }) {
               </SelectContent>
             </Select>
           </div>
+          <div className="min-w-0 flex-[1_1_12rem]">
+            <Select onValueChange={setChangesFilter} value={changesFilter}>
+              <SelectTrigger
+                aria-label={t("filterByChanges")}
+                className="w-full"
+              >
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value={ALL_FILTER_VALUE}>
+                  {t("allWorktrees")}
+                </SelectItem>
+                <SelectItem value={DIRTY_FILTER_VALUE}>
+                  {t("dirtyWorktrees")}
+                </SelectItem>
+                <SelectItem value={CLEAN_FILTER_VALUE}>
+                  {t("cleanWorktrees")}
+                </SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
         </div>
       )}
 
@@ -1066,6 +1180,7 @@ export function WorktreesPage({ appId }: { appId?: string }) {
       <JiraTicketDrawer
         issueKey={jiraIssueKey}
         onClose={() => selectJiraIssue(null)}
+        onTicketChange={updateLocalJiraTicket}
       />
     </section>
   );
@@ -1205,7 +1320,7 @@ function CreateWorktreeCard({
       agentGroup.agent.connectionStatus === "ONLINE" &&
       agentGroup.agent.capabilities.includes("worktree.branch") &&
       group.codebase.availability === "AVAILABLE" &&
-      !group.worktrees.some((worktree) => worktree.activeJob)
+      !group.blockingJob
         ? [{ agentGroup, group }]
         : [],
     ),
@@ -1544,7 +1659,7 @@ function WorktreeCard(props: WorktreeItemProps) {
         </CardTitle>
         <CardAction className="col-start-1 row-span-1 row-start-auto flex max-w-full flex-wrap items-center justify-start gap-1 justify-self-start @md/card-header:col-start-2 @md/card-header:row-span-2 @md/card-header:row-start-1 @md/card-header:justify-end @md/card-header:justify-self-end">
           <OriginStatusBadges worktree={worktree} />
-          {(worktree.hasStagedChanges || worktree.hasUnstagedChanges) && (
+          {worktreeIsDirty(worktree) && (
             <Badge variant="destructive">{t("dirty")}</Badge>
           )}
           <WorktreeMenus {...liveProps} />
@@ -2226,7 +2341,7 @@ function targetAvailable(entry: MoveTargetEntry, overview: WorktreeOverview) {
     entry.agentGroup.agent.connectionStatus === "ONLINE" &&
     entry.agentGroup.agent.capabilities.includes("worktree.move.checkout") &&
     entry.group.codebase.availability === "AVAILABLE" &&
-    !entry.group.worktrees.some((worktree) => worktree.activeJob) &&
+    !entry.group.blockingJob &&
     !busyMove
   );
 }
@@ -2250,7 +2365,7 @@ function moveDisabledReason(
   }
   if (
     props.worktree.availability !== "AVAILABLE" ||
-    props.worktree.activeJob ||
+    props.group.blockingJob ||
     props.worktree.rebaseInProgress ||
     props.overview.activeMoves.some(
       (move) =>
@@ -2326,7 +2441,7 @@ export function WorktreeMenus(
     sourceAgent.agent.connectionStatus !== "ONLINE" ||
     !sourceAgent.agent.capabilities.includes("worktree.delete") ||
     worktree.availability !== "AVAILABLE" ||
-    Boolean(worktree.activeJob) ||
+    Boolean(props.group.blockingJob) ||
     worktree.rebaseInProgress ||
     props.overview.activeMoves.some(
       (move) =>
@@ -2422,6 +2537,36 @@ export function WorktreeMenus(
       setRetryError(value instanceof Error ? value.message : String(value));
     }
   };
+  const defaultBranch = props.group.codebase.defaultBranch;
+  // Git refuses to check a branch out twice, so hide the shortcut whenever a
+  // sibling worktree already holds the default branch. The overview is used
+  // instead of the rendered group because filters can hide that sibling.
+  const defaultBranchTaken = Boolean(
+    defaultBranch &&
+    worktreeBranchIsTaken(
+      props.overview,
+      props.group.codebase.id,
+      defaultBranch,
+      worktree.id,
+    ),
+  );
+  const branchChangeDisabled =
+    !props.branchManagementEnabled ||
+    worktree.availability !== "AVAILABLE" ||
+    Boolean(props.group.blockingJob) ||
+    worktree.rebaseInProgress;
+  const changeToDefaultBranch = async () => {
+    if (!defaultBranch) return;
+    try {
+      await changeBranch({
+        mode: "EXISTING",
+        branchName: defaultBranch,
+        baseBranch: defaultBranch,
+      });
+    } catch (value) {
+      onError(value instanceof Error ? value.message : String(value));
+    }
+  };
   return (
     <>
       <Popover
@@ -2469,22 +2614,30 @@ export function WorktreeMenus(
               </DropdownMenuItem>
             )}
             <DropdownMenuItem
-              disabled={
-                !props.branchManagementEnabled ||
-                worktree.availability !== "AVAILABLE" ||
-                Boolean(worktree.activeJob) ||
-                worktree.rebaseInProgress
-              }
+              disabled={branchChangeDisabled}
               onSelect={() => {
                 openChangeBranchOnMenuClose.current = true;
               }}
             >
               <GitBranch /> {t("changeBranch")}
             </DropdownMenuItem>
+            {defaultBranch && !defaultBranchTaken && (
+              <DropdownMenuItem
+                disabled={
+                  branchChangeDisabled ||
+                  changeBusy ||
+                  worktree.branch === defaultBranch
+                }
+                onSelect={() => void changeToDefaultBranch()}
+              >
+                {changeBusy ? <Spinner /> : <GitBranch />}{" "}
+                {t("changeBranchToDefault", { branch: defaultBranch })}
+              </DropdownMenuItem>
+            )}
             <DropdownMenuItem
               disabled={
                 worktree.availability !== "AVAILABLE" ||
-                Boolean(worktree.activeJob) ||
+                Boolean(props.group.blockingJob) ||
                 worktree.rebaseInProgress ||
                 !sourceAgent?.agent.capabilities.includes("worktree.commit") ||
                 (!worktree.hasStagedChanges && !worktree.hasUnstagedChanges)
@@ -2502,6 +2655,7 @@ export function WorktreeMenus(
                     : t("openCode")
                 }
                 operation="OPEN_EDITOR"
+                disabled={Boolean(props.group.blockingJob)}
                 // The editor opens on the agent, so the menu's own reload is
                 // all there is to wait for.
                 props={{ ...props, onCompleted: props.onReload }}
@@ -3252,7 +3406,7 @@ export function ActionRow(
   const t = useTranslations("worktrees");
   const unavailable =
     worktree.availability !== "AVAILABLE" ||
-    Boolean(worktree.activeJob) ||
+    Boolean(props.group.blockingJob) ||
     worktree.rebaseInProgress;
   const changeActions = worktreeChangeActionState(worktree);
   const agent = props.overview.agents.find((entry) =>
@@ -3698,7 +3852,7 @@ function WorktreeTableRows(props: WorktreeItemProps) {
         <TableCell>
           <div className="flex flex-wrap items-center gap-1">
             <OriginStatusBadges worktree={worktree} />
-            {(worktree.hasStagedChanges || worktree.hasUnstagedChanges) && (
+            {worktreeIsDirty(worktree) && (
               <Badge variant="destructive">{t("dirty")}</Badge>
             )}
           </div>

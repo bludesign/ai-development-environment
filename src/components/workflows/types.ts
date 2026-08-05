@@ -185,6 +185,29 @@ export type WorkflowResourceLink = {
   createdAt: string;
 };
 
+/**
+ * One parked step, as the run detail query returns it.
+ *
+ * `externalKey` is the identifier of whatever the step handed work to — an
+ * agent job id, a plan or session id — and matches the `resourceId` of the
+ * resource link the same step recorded, which is how the UI turns a wait into
+ * a link to the thing being waited on.
+ */
+export type WorkflowWait = {
+  id: string;
+  attemptId: string;
+  kind: string;
+  status: string;
+  predicate: Record<string, unknown> | null;
+  externalKey: string | null;
+  resumeAfter: string | null;
+  timeoutAt: string | null;
+  result: unknown;
+  createdAt: string;
+  resolvedAt: string | null;
+  updatedAt: string;
+};
+
 export type WorkflowRun = {
   id: string;
   displayNumber: number;
@@ -216,6 +239,7 @@ export type WorkflowRun = {
   archivedAt: string | null;
   createdAt: string;
   attempts: WorkflowAttempt[];
+  waits?: WorkflowWait[];
   events: Array<{
     id: string;
     sequence: number;

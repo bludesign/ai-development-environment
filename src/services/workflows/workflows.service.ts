@@ -46,6 +46,8 @@ import { isCodebaseBusyError } from "@/lib/codebase-busy";
 import { requiredConfigSessionPaths } from "@/lib/workflows/config-descriptors";
 import {
   waitCadenceSeconds,
+  waitElapsedText,
+  waitKindText,
   waitResumeAfter,
   waitTimeoutAt,
 } from "@/lib/workflows/wait-timing";
@@ -84,6 +86,7 @@ import {
   WorkflowStepExecutor,
   type WorkflowExecutionContext,
   type WorkflowExecutionResult,
+  type WorkflowWaitInput,
 } from "./step-executor";
 
 const WORKFLOWS_CHANGED_TOPIC = "workflows:changed";
@@ -426,6 +429,33 @@ function nodeProvidedPaths(node: WorkflowNodeDefinition): string[] {
     ...node.providedPaths,
     `steps.${node.id}.*`,
   ];
+}
+
+/**
+ * What freed a parked step: the external actor's own completion callback
+ * (`PUSH`), the runtime's poll sweep (`POLL`), an operator answering a question
+ * (`HUMAN`), or the delay simply elapsing (`TIMER`).
+ */
+type WaitResolutionSource = "PUSH" | "POLL" | "HUMAN" | "TIMER";
+
+/**
+ * What the run timeline says when a step parks on something external.
+ *
+ * The step is named the same way {@link WorkflowsService.completeAttempt} names
+ * it, so a reader scanning the timeline sees one step's story rather than an
+ * anonymous "step is waiting" between two named completions. Time-based waits
+ * also name their target instant: "waiting for delay" on its own leaves a
+ * reader counting against a number the event never showed.
+ */
+function waitingMessage(
+  node: WorkflowNodeDefinition,
+  wait: WorkflowWaitInput,
+): string {
+  const step = node.name ?? node.id;
+  const target = waitKindText(wait.kind);
+  return wait.kind === "DELAY" && wait.resumeAfter
+    ? `Step ${step} is waiting for ${target} until ${wait.resumeAfter.toISOString()}`
+    : `Step ${step} is waiting for ${target}`;
 }
 
 async function nextDisplayNumber(
@@ -3341,7 +3371,7 @@ export class WorkflowsService {
       });
       return attempt;
     });
-    await this.completeWaitingAttempt(result.id, { answers });
+    await this.completeWaitingAttempt(result.id, { answers }, "HUMAN");
     agentEventBus.publish(runQuestionTopic(result.runId), {
       workflowQuestionChanged: { id: batchId, runId: result.runId },
     });
@@ -4206,7 +4236,7 @@ export class WorkflowsService {
       }
       if (signal.aborted) throw new Error("Workflow step was cancelled");
       if (result.wait) {
-        await this.parkAttempt(attempt, result);
+        await this.parkAttempt(attempt, node, result);
       } else {
         await this.completeAttempt(attempt, node, result);
       }
@@ -4768,6 +4798,7 @@ export class WorkflowsService {
 
   private async parkAttempt(
     attempt: WorkflowStepAttempt,
+    node: WorkflowNodeDefinition,
     result: WorkflowExecutionResult,
   ): Promise<void> {
     const wait = result.wait;
@@ -4838,8 +4869,15 @@ export class WorkflowsService {
       attempt.runId,
       attempt.id,
       "STEP_WAITING",
-      `Step is waiting for ${wait.kind.toLowerCase().replaceAll("_", " ")}`,
-      { waitId },
+      waitingMessage(node, wait),
+      {
+        waitId,
+        kind: wait.kind,
+        nodeId: node.id,
+        externalKey: wait.externalKey ?? null,
+        resumeAfter: wait.resumeAfter?.toISOString() ?? null,
+        timeoutAt: wait.timeoutAt?.toISOString() ?? null,
+      },
     );
     publishRunChanged(attempt.runId);
   }
@@ -4848,6 +4886,7 @@ export class WorkflowsService {
     attempt: WorkflowStepAttempt,
     node: WorkflowNodeDefinition,
     result: WorkflowExecutionResult,
+    beforeSuccessEvent?: () => Promise<void>,
   ): Promise<void> {
     const prisma = await getPrismaClient();
     const completed = await prisma.$transaction(async (transaction) => {
@@ -4936,6 +4975,18 @@ export class WorkflowsService {
       return true;
     });
     if (!completed) return;
+    if (beforeSuccessEvent) {
+      try {
+        await beforeSuccessEvent();
+      } catch (error) {
+        // The state transition already succeeded. Timeline diagnostics must not
+        // turn an observability failure into a permanently parked workflow.
+        console.error(
+          `Failed to append completion diagnostics for workflow attempt ${attempt.id}:`,
+          error,
+        );
+      }
+    }
     await this.appendEvent(
       attempt.runId,
       attempt.id,
@@ -5147,7 +5198,11 @@ export class WorkflowsService {
           resolvedAt: now,
         });
         if (!resolved.count) continue;
-        await this.completeWaitingAttempt(wait.attemptId, { delayed: true });
+        await this.completeWaitingAttempt(
+          wait.attemptId,
+          { delayed: true },
+          "TIMER",
+        );
       } else if (wait.kind === "PREDICATE") {
         const predicate = wait.predicateJson
           ? parseObject(json(wait.predicateJson), "Wait predicate")
@@ -5161,7 +5216,11 @@ export class WorkflowsService {
             resolvedAt: now,
           });
           if (!resolved.count) continue;
-          await this.completeWaitingAttempt(wait.attemptId, { matched: true });
+          await this.completeWaitingAttempt(
+            wait.attemptId,
+            { matched: true },
+            "POLL",
+          );
         } else {
           const cadenceSeconds = Math.max(
             1,
@@ -5207,6 +5266,7 @@ export class WorkflowsService {
             await this.completeWaitingAttempt(
               wait.attemptId,
               polled.result ?? {},
+              "POLL",
             );
           }
         }
@@ -5217,6 +5277,7 @@ export class WorkflowsService {
   private async completeWaitingAttempt(
     attemptId: string,
     output: unknown,
+    resolvedBy: WaitResolutionSource = "PUSH",
   ): Promise<void> {
     const prisma = await getPrismaClient();
     const attempt = await prisma.workflowStepAttempt.findUnique({
@@ -5321,11 +5382,16 @@ export class WorkflowsService {
       );
     }
     try {
-      await this.completeAttempt(attempt, node, {
-        output: output ?? pending.value,
-        selectedHandles: pending.selectedHandles,
-        sessionPatch,
-      });
+      await this.completeAttempt(
+        attempt,
+        node,
+        {
+          output: output ?? pending.value,
+          selectedHandles: pending.selectedHandles,
+          sessionPatch,
+        },
+        () => this.appendWaitResolvedEvent(attempt, node, resolvedBy),
+      );
     } catch (error) {
       await this.failAttempt(
         attempt,
@@ -5367,7 +5433,7 @@ export class WorkflowsService {
         ).nodes.find(({ id }) => id === wait.attempt.nodeId);
         await this.failAttempt(wait.attempt, node ?? null, new Error(error));
       } else {
-        await this.completeWaitingAttempt(wait.attemptId, result);
+        await this.completeWaitingAttempt(wait.attemptId, result, "PUSH");
       }
     }
     return waits.length;
@@ -5605,6 +5671,48 @@ export class WorkflowsService {
     if (run.worktreeId) await this.startQueuedRuns();
     publishRunChanged(runId);
     return this.run(runId);
+  }
+
+  /**
+   * Records that a parked step is moving again, and what freed it.
+   *
+   * Until this event existed a wait ended silently — the row flipped to
+   * `RESOLVED` and the next thing in the timeline was the step succeeding, so
+   * the only readable trace of a two-second wait and a fifty-minute one was the
+   * gap between timestamps. `resolvedBy` carries the diagnostic that matters:
+   * an `AGENT_JOB` wait that consistently resolves by `POLL` rather than the
+   * `PUSH` from {@link resolveExternalWait} means the completion callback is
+   * not firing, and the run is only finishing because the poller swept it up.
+   */
+  private async appendWaitResolvedEvent(
+    attempt: WorkflowStepAttempt,
+    node: WorkflowNodeDefinition,
+    resolvedBy: WaitResolutionSource,
+  ): Promise<void> {
+    const prisma = await getPrismaClient();
+    const wait = await prisma.workflowWait.findFirst({
+      where: { attemptId: attempt.id },
+      orderBy: { createdAt: "desc" },
+    });
+    if (!wait) return;
+    const waitedMs = Math.max(
+      0,
+      (wait.resolvedAt ?? new Date()).getTime() - wait.createdAt.getTime(),
+    );
+    await this.appendEvent(
+      attempt.runId,
+      attempt.id,
+      "STEP_WAIT_RESOLVED",
+      `Step ${node.name ?? node.id} resumed after waiting ${waitElapsedText(waitedMs)} for ${waitKindText(wait.kind)}`,
+      {
+        waitId: wait.id,
+        kind: wait.kind,
+        nodeId: node.id,
+        externalKey: wait.externalKey,
+        waitedMs,
+        resolvedBy,
+      },
+    );
   }
 
   private async appendEvent(

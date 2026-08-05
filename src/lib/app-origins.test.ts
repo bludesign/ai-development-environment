@@ -123,8 +123,26 @@ describe("resolveAppOrigins", () => {
     });
     expect(origins.mode).toBe("multi");
     expect(betterAuthBaseURL(origins)).toMatchObject({
-      allowedHosts: ["app.example.com", "admin.example.com"],
+      allowedHosts: [
+        "app.example.com",
+        "app.example.com:*",
+        "admin.example.com",
+        "admin.example.com:*",
+      ],
       protocol: "https",
+    });
+  });
+
+  test("keeps an unpinned wildcard host port-insensitive for Better Auth", () => {
+    const origins = resolveAppOrigins({
+      NODE_ENV: "development",
+      APP_ORIGINS: "*.hare-bull.ts.net",
+    });
+    expect(betterAuthBaseURL(origins)).toMatchObject({
+      allowedHosts: expect.arrayContaining([
+        "*.hare-bull.ts.net",
+        "*.hare-bull.ts.net:*",
+      ]),
     });
   });
 
@@ -389,6 +407,35 @@ describe("isTrustedWebSocketOrigin", () => {
       isTrustedWebSocketOrigin(
         configured,
         "https://app.example.com",
+        "app.example.com:3091",
+      ),
+    ).toBe(true);
+  });
+
+  test.each([
+    ["http://localhost:3000", "localhost:3091"],
+    ["http://127.0.0.1:3000", "127.0.0.1:3091"],
+    ["http://[::1]:3000", "[::1]:3091"],
+  ])(
+    "accepts the development origin %s when its allowlist entry pins a port",
+    (origin, host) => {
+      const development = resolveAppOrigins({
+        NODE_ENV: "development",
+        PORT: "3000",
+      });
+      expect(isTrustedWebSocketOrigin(development, origin, host)).toBe(true);
+    },
+  );
+
+  test("ignores a configured origin port for WebSocket matching", () => {
+    const portPinned = resolveAppOrigins({
+      NODE_ENV: "production",
+      APP_ORIGINS: "https://app.example.com:8443",
+    });
+    expect(
+      isTrustedWebSocketOrigin(
+        portPinned,
+        "https://app.example.com:3000",
         "app.example.com:3091",
       ),
     ).toBe(true);

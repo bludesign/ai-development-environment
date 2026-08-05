@@ -35,6 +35,7 @@ export function captureCommand(options: {
     let cancelled = false;
     let settled = false;
     let killTimer: ReturnType<typeof setTimeout> | null = null;
+    const detached = process.platform !== "win32";
     const child = spawn(options.command, options.args, {
       shell: false,
       stdio: [
@@ -46,6 +47,10 @@ export function captureCommand(options: {
       ],
       env: options.env ?? process.env,
       cwd: options.cwd,
+      // Git can leave credential helpers, SSH processes, hooks, or signing
+      // prompts behind. A separate process group lets timeout and cancellation
+      // stop the entire command tree instead of only the immediate Git process.
+      detached,
     });
     const append = (current: string, chunk: Buffer | string) =>
       `${current}${String(chunk)}`.slice(0, MAX_OUTPUT_BYTES);
@@ -55,11 +60,28 @@ export function captureCommand(options: {
     child.stderr?.on("data", (chunk) => {
       stderr = append(stderr, chunk);
     });
+    const sendSignal = (signal: NodeJS.Signals) => {
+      if (detached && child.pid) {
+        try {
+          process.kill(-child.pid, signal);
+          return;
+        } catch (error) {
+          if (
+            !(error instanceof Error) ||
+            !("code" in error) ||
+            error.code !== "ESRCH"
+          ) {
+            throw error;
+          }
+        }
+      }
+      child.kill(signal);
+    };
     const terminate = () => {
       if (child.exitCode !== null || child.killed) return;
-      child.kill("SIGTERM");
+      sendSignal("SIGTERM");
       killTimer = setTimeout(() => {
-        if (child.exitCode === null) child.kill("SIGKILL");
+        if (child.exitCode === null) sendSignal("SIGKILL");
       }, 5_000);
       killTimer.unref();
     };

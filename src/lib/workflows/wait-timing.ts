@@ -81,3 +81,28 @@ export function waitResumeAfter(config: WaitConfig, fallbackSeconds = 1): Date {
     Date.now() + waitCadenceSeconds(config, fallbackSeconds) * 1_000,
   );
 }
+
+/**
+ * The wait kind as it reads mid-sentence: `AGENT_JOB` becomes `agent job`.
+ *
+ * Run event messages are prose, so they spell the kind out rather than shouting
+ * the database identifier. The UI keeps its own localized labels.
+ */
+export function waitKindText(kind: string): string {
+  return kind.toLowerCase().replaceAll("_", " ");
+}
+
+/**
+ * A short elapsed reading for run event messages: `8s`, `2m 8s`, `1h 3m`.
+ *
+ * Deliberately coarse — the interesting question a resolved wait answers is
+ * whether it took seconds or an hour, not how many milliseconds it took.
+ */
+export function waitElapsedText(milliseconds: number): string {
+  const total = Math.max(0, Math.round(milliseconds / 1_000));
+  const hours = Math.floor(total / 3_600);
+  const minutes = Math.floor((total % 3_600) / 60);
+  if (hours) return `${hours}h ${minutes}m`;
+  if (minutes) return `${minutes}m ${total % 60}s`;
+  return `${total}s`;
+}

@@ -46,5 +46,5 @@ export default async function proxy(request: NextRequest): Promise<Response> {
 }
 
 export const config = {
-  matcher: ["/((?!api|_next|_vercel|.*\\..*).*)"],
+  matcher: ["/((?!api|graphql|_next|_vercel|.*\\..*).*)"],
 };

@@ -274,6 +274,8 @@ type WorktreeCodebaseGroup {
   repository: CodebaseRepository!
   "Worktrees associated with this worktree codebase group."
   worktrees: [Worktree!]!
+  "The active codebase job that prevents starting another worktree operation."
+  blockingJob: AgentJob
   "Whether the iOS build configured condition is true for this worktree codebase group."
   iosBuildConfigured: Boolean!
   "Quick actions associated with this worktree codebase group."

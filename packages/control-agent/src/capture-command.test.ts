@@ -32,4 +32,30 @@ describe("captureCommand", () => {
       cancelled: true,
     });
   });
+
+  test.skipIf(process.platform === "win32")(
+    "terminates descendants that inherit the captured output pipes",
+    async () => {
+      const result = await captureCommand({
+        command: process.execPath,
+        args: [
+          "-e",
+          [
+            'const { spawn } = require("node:child_process");',
+            'spawn(process.execPath, ["-e", "setInterval(() => {}, 1_000)"],',
+            '  { stdio: ["ignore", "inherit", "inherit"] });',
+            "setInterval(() => {}, 1_000);",
+          ].join("\n"),
+        ],
+        timeoutMs: 100,
+        signal: new AbortController().signal,
+      });
+
+      expect(result).toMatchObject({
+        exitCode: null,
+        timedOut: true,
+        cancelled: false,
+      });
+    },
+  );
 });

@@ -155,6 +155,10 @@
     "repositories": "Repositories",
     "repositoryRequirement": "Wählen Sie mindestens ein Repository aus.",
     "noRepositoriesAvailable": "Fügen Sie eine Codebasis hinzu, bevor Sie eine App erstellen.",
+    "agents": "Agents",
+    "agentFilterHelp": "Wähle Agents aus, um die Repository-Liste auf die dort ausgecheckten Repositorys einzugrenzen.",
+    "noRepositoriesForAgents": "Auf den ausgewählten Agents ist kein Repository ausgecheckt.",
+    "hiddenSelectedRepositories": "{count, plural, one {# ausgewähltes Repository ist durch den Agent-Filter ausgeblendet und bleibt zugewiesen.} other {# ausgewählte Repositorys sind durch den Agent-Filter ausgeblendet und bleiben zugewiesen.}}",
     "cancel": "Abbrechen",
     "save": "App speichern",
     "loading": "Apps werden geladen…",
@@ -233,6 +237,27 @@
     "queueWorktree": "Arbeitsbaum",
     "queuedAt": "Eingereiht",
     "exclusive": "Exklusiv",
+    "waitingOn": "Wartet auf",
+    "waitingOnDescription": "Angehaltene Schritte werden von selbst fortgesetzt, sobald die ausgelagerte Arbeit zurückmeldet. Blockierte Schritte warten auf eine Codebasis oder einen Worktree, den ein anderer Lauf belegt.",
+    "waitTarget": "Wartet auf",
+    "waitSince": "Seit",
+    "waitTimeout": "Zeitüberschreitung",
+    "waitNoTimeout": "Keine Zeitüberschreitung",
+    "waitNextCheck": "Nächste Prüfung",
+    "waitHeldDescription": "Die benötigte Codebasis ist belegt. Der Schritt wird bei jedem Durchlauf erneut versucht, bis sie frei wird.",
+    "waitingOnKind": "Wartet auf {kind}",
+    "waitKinds": {
+      "AGENT_JOB": "Agent-Job",
+      "AGENT_JOBS": "Agent-Jobs",
+      "AGENT_RUN": "Agent-Lauf",
+      "COMMAND_RUN": "Befehlslauf",
+      "BUILD": "Build",
+      "GITHUB_CHECKS": "GitHub-Prüfungen",
+      "HUMAN": "Antwort",
+      "DELAY": "Verzögerung",
+      "PREDICATE": "Bedingung",
+      "RETRY": "Wiederholung"
+    },
     "currentRun": "Aktueller Lauf",
     "empty": "Keine passenden Workflows.",
     "noRuns": "Noch keine Workflow-Läufe.",
@@ -420,7 +445,9 @@
     },
     "phases": {
       "REUSED_FROM_PRIOR_GENERATION": "Wiederverwendet",
-      "REPLAY_PENDING": "Für Wiederholung eingeplant"
+      "REPLAY_PENDING": "Für Wiederholung eingeplant",
+      "WAITING_FOR_RESOURCE": "Wartet auf Codebasis",
+      "WAITING_FOR_WORKTREE": "Wartet auf Worktree"
     },
     "eventTypes": {
       "RUN_STARTED": "Lauf gestartet",
@@ -438,7 +465,8 @@
       "STEP_WAITING": "Schritt wartet",
       "STEP_RETRY_SCHEDULED": "Wiederholung geplant",
       "STEP_RECOVERY_BLOCKED": "Wiederherstellung blockiert",
-      "STEP_WAITING_FOR_RESOURCE": "Wartet auf Codebasis"
+      "STEP_WAITING_FOR_RESOURCE": "Wartet auf Codebasis",
+      "STEP_WAIT_RESOLVED": "Warten beendet"
     },
     "diagnosticCodes": {
       "SCHEMA_INVALID": "Ungültiges Schema",
@@ -2712,6 +2740,10 @@
     "allAgents": "Alle Agents",
     "filterByRepository": "Nach Repository filtern",
     "allRepositories": "Alle Repositorys",
+    "filterByChanges": "Nach Änderungen filtern",
+    "allWorktrees": "Alle Worktrees",
+    "dirtyWorktrees": "Geänderte Worktrees",
+    "cleanWorktrees": "Unveränderte Worktrees",
     "groupBy": "Worktrees gruppieren",
     "groupByAgent": "Nach Agent gruppieren",
     "groupByRepository": "Nach Repository gruppieren",
@@ -2742,6 +2774,7 @@
     "localAndOrigin": "Lokal und Origin",
     "remoteDefault": "Remote-Standard",
     "changeBranch": "Branch wechseln",
+    "changeBranchToDefault": "Branch zu {branch} wechseln",
     "commit": "Committen",
     "commitTitle": "Worktree-Änderungen committen",
     "commitDescription": "Änderungen zum Vormerken auswählen und einen Commit in diesem Worktree erstellen.",

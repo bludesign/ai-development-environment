@@ -49,6 +49,12 @@ import {
   type CommandDefinition,
 } from "./types";
 
+// Repository labels carry the origin as well as the name, which the default
+// single-line trigger clips. These let the trigger grow to fit instead.
+const WRAPPING_SELECT_TRIGGER =
+  "h-auto min-h-8 w-full items-start py-1.5 text-left whitespace-normal data-[size=default]:h-auto *:data-[slot=select-value]:line-clamp-none *:data-[slot=select-value]:min-w-0 *:data-[slot=select-value]:[overflow-wrap:anywhere]";
+const WRAPPING_SELECT_ITEM = "whitespace-normal [overflow-wrap:anywhere]";
+
 type Form = {
   name: string;
   description: string;
@@ -325,12 +331,16 @@ export function CommandEditor({ commandId }: { commandId?: string }) {
                     update("targetRepositoryId", value ?? "")
                   }
                 >
-                  <SelectTrigger>
+                  <SelectTrigger className={WRAPPING_SELECT_TRIGGER}>
                     <SelectValue placeholder={t("selectRepository")} />
                   </SelectTrigger>
                   <SelectContent>
                     {repositories.map((repository) => (
-                      <SelectItem key={repository.id} value={repository.id}>
+                      <SelectItem
+                        className={WRAPPING_SELECT_ITEM}
+                        key={repository.id}
+                        value={repository.id}
+                      >
                         {repository.name} · {repository.displayOrigin}
                       </SelectItem>
                     ))}
@@ -410,11 +420,13 @@ export function CommandEditor({ commandId }: { commandId?: string }) {
                   htmlFor={id}
                   key={mode}
                 >
-                  <Item size="sm" variant="outline">
-                    <RadioGroupItem id={id} value={mode} />
-                    <ItemContent>
-                      <ItemTitle>{t(commandConcurrencyKey(mode))}</ItemTitle>
-                      <ItemDescription>
+                  <Item className="items-start" size="sm" variant="outline">
+                    <RadioGroupItem className="mt-0.5" id={id} value={mode} />
+                    <ItemContent className="min-w-0">
+                      <ItemTitle className="line-clamp-none w-full">
+                        {t(commandConcurrencyKey(mode))}
+                      </ItemTitle>
+                      <ItemDescription className="line-clamp-none">
                         {t(`${commandConcurrencyKey(mode)}Help` as never)}
                       </ItemDescription>
                     </ItemContent>

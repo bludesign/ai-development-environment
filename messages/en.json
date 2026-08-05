@@ -155,6 +155,10 @@
     "repositories": "Repositories",
     "repositoryRequirement": "Select at least one repository.",
     "noRepositoriesAvailable": "Add a codebase before creating an app.",
+    "agents": "Agents",
+    "agentFilterHelp": "Select agents to narrow the repository list to the ones checked out on them.",
+    "noRepositoriesForAgents": "No repositories are checked out on the selected agents.",
+    "hiddenSelectedRepositories": "{count, plural, one {# selected repository is hidden by the agent filter and stays assigned.} other {# selected repositories are hidden by the agent filter and stay assigned.}}",
     "cancel": "Cancel",
     "save": "Save app",
     "loading": "Loading apps…",
@@ -233,6 +237,27 @@
     "queueWorktree": "Worktree",
     "queuedAt": "Queued",
     "exclusive": "Exclusive",
+    "waitingOn": "Waiting on",
+    "waitingOnDescription": "Parked steps resume on their own when the work they handed off reports back. Held steps are waiting for a codebase or worktree another run is using.",
+    "waitTarget": "Waiting on",
+    "waitSince": "Since",
+    "waitTimeout": "Times out",
+    "waitNoTimeout": "No timeout",
+    "waitNextCheck": "Next check",
+    "waitHeldDescription": "The codebase this step needs is busy. It retries every tick until the codebase frees up.",
+    "waitingOnKind": "Waiting on {kind}",
+    "waitKinds": {
+      "AGENT_JOB": "Agent job",
+      "AGENT_JOBS": "Agent jobs",
+      "AGENT_RUN": "Agent run",
+      "COMMAND_RUN": "Command run",
+      "BUILD": "Build",
+      "GITHUB_CHECKS": "GitHub checks",
+      "HUMAN": "Answer",
+      "DELAY": "Delay",
+      "PREDICATE": "Condition",
+      "RETRY": "Retry"
+    },
     "currentRun": "Current run",
     "empty": "No workflows match this view.",
     "noRuns": "No workflow runs yet.",
@@ -420,7 +445,9 @@
     },
     "phases": {
       "REUSED_FROM_PRIOR_GENERATION": "Reused",
-      "REPLAY_PENDING": "Queued for replay"
+      "REPLAY_PENDING": "Queued for replay",
+      "WAITING_FOR_RESOURCE": "Waiting for codebase",
+      "WAITING_FOR_WORKTREE": "Waiting for worktree"
     },
     "eventTypes": {
       "RUN_STARTED": "Run started",
@@ -438,7 +465,8 @@
       "STEP_WAITING": "Step waiting",
       "STEP_RETRY_SCHEDULED": "Retry scheduled",
       "STEP_RECOVERY_BLOCKED": "Recovery blocked",
-      "STEP_WAITING_FOR_RESOURCE": "Waiting for codebase"
+      "STEP_WAITING_FOR_RESOURCE": "Waiting for codebase",
+      "STEP_WAIT_RESOLVED": "Wait resolved"
     },
     "diagnosticCodes": {
       "SCHEMA_INVALID": "Invalid schema",
@@ -2712,6 +2740,10 @@
     "allAgents": "All agents",
     "filterByRepository": "Filter by repository",
     "allRepositories": "All repositories",
+    "filterByChanges": "Filter by changes",
+    "allWorktrees": "All worktrees",
+    "dirtyWorktrees": "Dirty worktrees",
+    "cleanWorktrees": "Clean worktrees",
     "groupBy": "Group worktrees",
     "groupByAgent": "Group by agent",
     "groupByRepository": "Group by repository",
@@ -2742,6 +2774,7 @@
     "localAndOrigin": "Local and origin",
     "remoteDefault": "Remote default",
     "changeBranch": "Change branch",
+    "changeBranchToDefault": "Change branch to {branch}",
     "commit": "Commit",
     "commitTitle": "Commit worktree changes",
     "commitDescription": "Choose the changes to stage and create a commit in this worktree.",

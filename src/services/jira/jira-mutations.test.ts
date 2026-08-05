@@ -1,7 +1,16 @@
 import { describe, expect, test, vi } from "vitest";
 
+import {
+  agentEventBus,
+  JIRA_TICKET_CHANGED_TOPIC,
+} from "@/services/agent-control/event-bus";
+
 import { JiraService } from "./jira.service";
-import type { JiraEditField, JiraTicketDetail } from "./types";
+import type {
+  JiraEditField,
+  JiraTicketChange,
+  JiraTicketDetail,
+} from "./types";
 
 const ticket = { key: "APP-1" } as JiraTicketDetail;
 
@@ -146,5 +155,49 @@ describe("Jira write operations", () => {
       "Resolution",
     );
     expect(doTransition).not.toHaveBeenCalled();
+  });
+
+  test("publishes locally initiated ticket changes after refreshing the cache", async () => {
+    type InternalMutationHarness = {
+      requireCredentials(): Promise<{ apiToken: string }>;
+      logCall(input: unknown): Promise<void>;
+      invalidateIssueCaches(issueKey: string): Promise<void>;
+      ticket(issueKey: string, force: boolean): Promise<JiraTicketDetail>;
+      mutateTicket(
+        issueKey: string,
+        operation: string,
+        mutation: () => Promise<void>,
+      ): Promise<JiraTicketDetail>;
+    };
+    const internal = new JiraService() as unknown as InternalMutationHarness;
+    internal.requireCredentials = vi
+      .fn()
+      .mockResolvedValue({ apiToken: "secret" });
+    internal.logCall = vi.fn().mockResolvedValue(undefined);
+    internal.invalidateIssueCaches = vi.fn().mockResolvedValue(undefined);
+    internal.ticket = vi.fn().mockResolvedValue({
+      key: "APP-1",
+      projectKey: "APP",
+    } as JiraTicketDetail);
+    const mutation = vi.fn().mockResolvedValue(undefined);
+    const changes = agentEventBus.iterate<{
+      jiraTicketChanged: JiraTicketChange;
+    }>(JIRA_TICKET_CHANGED_TOPIC);
+    const next = changes.next();
+
+    await internal.mutateTicket("APP-1", "TRANSITION_ISSUE", mutation);
+
+    expect(mutation).toHaveBeenCalledTimes(1);
+    await expect(next).resolves.toEqual({
+      done: false,
+      value: {
+        jiraTicketChanged: {
+          issueKey: "APP-1",
+          projectKey: "APP",
+          event: "aide:transition_issue",
+        },
+      },
+    });
+    await changes.return?.();
   });
 });

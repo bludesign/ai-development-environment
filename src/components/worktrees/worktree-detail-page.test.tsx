@@ -21,6 +21,7 @@ import type { WorktreeDetail, WorktreeOverview } from "./types";
 vi.mock("@/lib/control-plane-client", () => ({
   controlPlaneRequest: vi.fn(),
   controlPlaneSubscriptions: vi.fn(),
+  onControlPlaneConnected: vi.fn(() => vi.fn()),
 }));
 vi.mock("./worktree-jobs", () => ({
   waitForWorktreeJob: vi.fn(async () => ({ status: "SUCCEEDED" })),

@@ -330,6 +330,16 @@ export function matchesPattern(
 
   if (pattern.port && pattern.port !== port) return false;
 
+  return matchesHostname(hostname, pattern);
+}
+
+/** Matches only the hostname portion of a pattern, deliberately ignoring ports. */
+function matchesHostname(
+  candidateHostname: string,
+  pattern: OriginPattern,
+): boolean {
+  const hostname = candidateHostname.trim().toLowerCase();
+  if (!hostname) return false;
   if (!pattern.wildcard) return pattern.hostname === hostname;
   const suffix = pattern.hostname.slice(1); // ".example.com"
   return hostname.endsWith(suffix) && hostname.length > suffix.length;
@@ -384,7 +394,14 @@ export function betterAuthBaseURL(
   if (origins.mode === "inferred") return undefined;
   if (origins.mode === "single") return origins.canonical!;
   return {
-    allowedHosts: origins.patterns.map((pattern) => pattern.host),
+    // Better Auth matches `allowedHosts` against the complete host, including
+    // its port. APP_ORIGINS deliberately treats an entry without a port as
+    // port-insensitive, so add a second Better Auth pattern for that case.
+    // The `:*` suffix keeps a wildcard bounded to the host's port separator;
+    // appending `*` to the hostname itself would also match unrelated names.
+    allowedHosts: origins.patterns.flatMap((pattern) =>
+      pattern.port ? [pattern.host] : [pattern.host, `${pattern.host}:*`],
+    ),
     protocol: origins.allHttps ? "https" : "auto",
     fallback: origins.canonical!,
   };
@@ -492,7 +509,7 @@ export function isTrustedWebSocketOrigin(
 
   if (origins.mode !== "inferred") {
     return origins.patterns.some((pattern) =>
-      matchesPattern(originHostname, pattern),
+      matchesHostname(originHostname, pattern),
     );
   }
 

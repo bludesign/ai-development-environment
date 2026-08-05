@@ -7,6 +7,10 @@ import { AgileClient, Version3Client } from "jira.js";
 import { getPrismaClient } from "@/data/prisma-client";
 import type { Prisma } from "@/generated/prisma/client";
 import {
+  agentEventBus,
+  JIRA_TICKET_CHANGED_TOPIC,
+} from "@/services/agent-control/event-bus";
+import {
   CREDENTIALS,
   CredentialService,
   encodeJsonCredential,
@@ -40,6 +44,7 @@ import type {
   JiraSourceView,
   JiraTicketBoard,
   JiraTicketAssignmentFilter,
+  JiraTicketChange,
   JiraTicketDetail,
   JiraTicketSummary,
   JiraBranchTicket,
@@ -2144,13 +2149,22 @@ export class JiraService {
       throw new Error(message);
     }
     await this.invalidateIssueCaches(issueKey);
+    let ticket: JiraTicketDetail;
     try {
-      return await this.ticket(issueKey, true);
+      ticket = await this.ticket(issueKey, true);
     } catch (error) {
       throw new Error(
         `Jira accepted the update, but refreshed ticket details could not be loaded: ${sanitizeError(error, settings.apiToken)}`,
       );
     }
+    agentEventBus.publish(JIRA_TICKET_CHANGED_TOPIC, {
+      jiraTicketChanged: {
+        issueKey: ticket.key,
+        projectKey: ticket.projectKey,
+        event: `aide:${operation.toLowerCase()}`,
+      } satisfies JiraTicketChange,
+    });
+    return ticket;
   }
 
   private cacheKey(

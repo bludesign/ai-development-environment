@@ -10,7 +10,11 @@ import {
   oneTimeToken,
 } from "better-auth/plugins";
 
-import { betterAuthBaseURL, originFromRequest } from "@/lib/app-origins";
+import {
+  betterAuthBaseURL,
+  isTrustedOrigin,
+  originFromRequest,
+} from "@/lib/app-origins";
 import { getPrismaClient } from "@/data/prisma-client";
 
 import {
@@ -101,21 +105,18 @@ function createAuth(
     // which is also what Better Auth derives its trusted origins from — so the
     // CSRF check and the callbackURL/redirectTo check follow APP_ORIGINS too.
     baseURL: betterAuthBaseURL(runtime.origins),
-    // Adds to whatever the baseURL already implies, rather than replacing it, so
-    // this contributes nothing unless nothing was configured.
+    // Add the request's actual origin when it is on our allowlist. This keeps
+    // APP_ORIGINS' port-insensitive entries working for non-default ports, even
+    // when Better Auth's static trusted-origin list was built at startup.
     //
     // With no allowlist there is no static base URL to derive a trusted origin
-    // from, so it is computed per request from the host the request arrived on. A
-    // function rather than an array because Better Auth resolves the array form
-    // once at startup; only the function form is re-evaluated per request.
-    //
-    // The CSRF property survives: the trusted set is exactly the request's own
-    // origin, so a cross-site POST carrying a victim's cookie still arrives with a
-    // foreign `Origin` and is rejected. Browsers cannot forge `Host`.
+    // from, so this is also computed per request from the host the request
+    // arrived on. The allowlist check still prevents a configured deployment
+    // from trusting an unrelated host.
     trustedOrigins: (request?: Request) => {
-      if (!request || runtime.origins.mode !== "inferred") return [];
+      if (!request) return [];
       const origin = originFromRequest(request, runtime.trustProxyHeaders);
-      return origin ? [origin] : [];
+      return origin && isTrustedOrigin(runtime.origins, origin) ? [origin] : [];
     },
     secret: runtime.secret,
     advanced: {

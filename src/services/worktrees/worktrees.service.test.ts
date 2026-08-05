@@ -12,6 +12,7 @@ import {
   WORKTREE_GIT_INSPECT_JOB_KIND,
   WORKTREE_MOVE_CHECKOUT_JOB_KIND,
   WORKTREE_MOVE_PUSH_JOB_KIND,
+  WORKTREE_OPERATION_JOB_KIND,
 } from "@ai-development-environment/agent-contract/worktrees";
 import {
   agentEventBus,
@@ -159,6 +160,35 @@ function storedWorktreeRecord() {
 
 describe("WorktreesService", () => {
   beforeEach(() => vi.clearAllMocks());
+
+  test("shows an active job only for a Git operation on that worktree", () => {
+    const record = storedWorktreeRecord();
+    const view = (jobs: Array<Record<string, unknown>>) => {
+      record.codebase.jobs = jobs as never[];
+      return (
+        service() as unknown as {
+          view(value: typeof record): { activeJob: { id: string } | null };
+        }
+      ).view(record).activeJob;
+    };
+    const job = (overrides: Record<string, unknown>) => ({
+      id: "job-1",
+      kind: WORKTREE_OPERATION_JOB_KIND,
+      worktreeId: "worktree-1",
+      payloadJson: JSON.stringify({ operation: "PUSH" }),
+      ...overrides,
+    });
+
+    expect(view([job({})])).toMatchObject({ id: "job-1" });
+    expect(view([job({ worktreeId: "worktree-2" })])).toBeNull();
+    expect(view([job({ kind: "command.run" })])).toBeNull();
+    expect(view([job({ kind: WORKTREE_DIFF_ASSET_JOB_KIND })])).toBeNull();
+    expect(
+      view([
+        job({ payloadJson: JSON.stringify({ operation: "OPEN_EDITOR" }) }),
+      ]),
+    ).toBeNull();
+  });
 
   test("requests an immediate reconcile from every codebase agent", async () => {
     getPrismaClient.mockResolvedValue({
@@ -323,6 +353,12 @@ describe("WorktreesService", () => {
       cachedTicket: vi.fn(),
       ticket: vi.fn(),
     } as unknown as JiraService;
+    const blockingJob = {
+      id: "job-blocking",
+      kind: "codebase.refresh",
+      worktreeId: null,
+      payloadJson: "{}",
+    };
     const worktree = {
       id: "worktree-1",
       branch: "feature/AIDE-24",
@@ -361,7 +397,7 @@ describe("WorktreesService", () => {
       codebase: {
         id: "codebase-1",
         defaultBranch: "main",
-        jobs: [],
+        jobs: [blockingJob],
         agent: { id: "agent-1", baseRepoDirectory: "/repo" },
         repository: {
           id: "repository-1",
@@ -439,9 +475,24 @@ describe("WorktreesService", () => {
       ...worktree.builds[0],
       outOfDate: true,
     });
+    expect(initial.agents[0]?.codebases[0]?.blockingJob).toBe(blockingJob);
+    expect(initial.agents[0]?.codebases[0]?.worktrees[0]?.activeJob).toBeNull();
     expect(findMany).toHaveBeenCalledWith(
       expect.objectContaining({
         include: expect.objectContaining({
+          codebase: expect.objectContaining({
+            include: expect.objectContaining({
+              jobs: expect.objectContaining({
+                where: expect.objectContaining({
+                  status: { in: ["QUEUED", "RUNNING"] },
+                  NOT: expect.arrayContaining([
+                    { kind: "command.run" },
+                    { kind: { startsWith: "ios." } },
+                  ]),
+                }),
+              }),
+            }),
+          }),
           builds: expect.objectContaining({
             orderBy: { createdAt: "desc" },
             select: expect.objectContaining({
