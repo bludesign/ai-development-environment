@@ -330,6 +330,16 @@ export function matchesPattern(
 
   if (pattern.port && pattern.port !== port) return false;
 
+  return matchesHostname(hostname, pattern);
+}
+
+/** Matches only the hostname portion of a pattern, deliberately ignoring ports. */
+function matchesHostname(
+  candidateHostname: string,
+  pattern: OriginPattern,
+): boolean {
+  const hostname = candidateHostname.trim().toLowerCase();
+  if (!hostname) return false;
   if (!pattern.wildcard) return pattern.hostname === hostname;
   const suffix = pattern.hostname.slice(1); // ".example.com"
   return hostname.endsWith(suffix) && hostname.length > suffix.length;
@@ -499,7 +509,7 @@ export function isTrustedWebSocketOrigin(
 
   if (origins.mode !== "inferred") {
     return origins.patterns.some((pattern) =>
-      matchesPattern(originHostname, pattern),
+      matchesHostname(originHostname, pattern),
     );
   }
 

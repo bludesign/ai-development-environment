@@ -413,6 +413,35 @@ describe("isTrustedWebSocketOrigin", () => {
   });
 
   test.each([
+    ["http://localhost:3000", "localhost:3091"],
+    ["http://127.0.0.1:3000", "127.0.0.1:3091"],
+    ["http://[::1]:3000", "[::1]:3091"],
+  ])(
+    "accepts the development origin %s when its allowlist entry pins a port",
+    (origin, host) => {
+      const development = resolveAppOrigins({
+        NODE_ENV: "development",
+        PORT: "3000",
+      });
+      expect(isTrustedWebSocketOrigin(development, origin, host)).toBe(true);
+    },
+  );
+
+  test("ignores a configured origin port for WebSocket matching", () => {
+    const portPinned = resolveAppOrigins({
+      NODE_ENV: "production",
+      APP_ORIGINS: "https://app.example.com:8443",
+    });
+    expect(
+      isTrustedWebSocketOrigin(
+        portPinned,
+        "https://app.example.com:3000",
+        "app.example.com:3091",
+      ),
+    ).toBe(true);
+  });
+
+  test.each([
     "https://evil.test",
     "https://app.example.com.evil.test",
     "not a url",
