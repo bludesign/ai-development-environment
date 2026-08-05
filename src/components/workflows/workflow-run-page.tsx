@@ -81,6 +81,7 @@ import { workflowResourceDestination } from "@/lib/workflows/resources";
 import { useOpenWorkflowDestination } from "./use-workflow-destination";
 import { WorkflowGraph, workflowStatusVariant } from "./workflow-graph";
 import { useWorkflowLabels } from "./workflow-labels";
+import { WorkflowWaitCard } from "./workflow-wait-card";
 import { WorktreeRunQueueCard } from "./worktree-run-queue-card";
 import {
   WORKFLOW_REUSED_PHASE,
@@ -193,6 +194,16 @@ export function WorkflowRunPage({ runId }: { runId: string }) {
   const [preview, setPreview] = useState<ReplayPreview | null>(null);
   const nodeDestinations = useMemo(
     () => (run ? workflowRunNodeDestinations(run) : new Map()),
+    [run],
+  );
+  // A step parks at most one wait at a time, so the attempt id identifies it.
+  const pendingWaits = useMemo(
+    () =>
+      new Map(
+        (run?.waits ?? [])
+          .filter(({ status }) => status === "PENDING")
+          .map((wait) => [wait.attemptId, wait]),
+      ),
     [run],
   );
 
@@ -503,6 +514,8 @@ export function WorkflowRunPage({ runId }: { runId: string }) {
           scope="RUN"
         />
       )}
+
+      <WorkflowWaitCard run={run} />
 
       <Card>
         <CardHeader>
@@ -893,6 +906,15 @@ export function WorkflowRunPage({ runId }: { runId: string }) {
                           >
                             {labels.status(attempt.status)}
                           </Badge>
+                          {pendingWaits.has(attempt.id) && (
+                            <p className="mt-1 text-[10px] text-muted-foreground">
+                              {t("waitingOnKind", {
+                                kind: labels.waitKind(
+                                  pendingWaits.get(attempt.id)!.kind,
+                                ),
+                              })}
+                            </p>
+                          )}
                         </TableCell>
                         <TableCell className="text-xs text-muted-foreground">
                           {labels.phase(attempt.phase)}

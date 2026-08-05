@@ -237,6 +237,27 @@
     "queueWorktree": "Arbre de travail",
     "queuedAt": "Mis en file",
     "exclusive": "Exclusif",
+    "waitingOn": "En attente de",
+    "waitingOnDescription": "Les étapes en pause reprennent d'elles-mêmes dès que le travail délégué répond. Les étapes retenues attendent une base de code ou un worktree occupé par une autre exécution.",
+    "waitTarget": "En attente de",
+    "waitSince": "Depuis",
+    "waitTimeout": "Expire",
+    "waitNoTimeout": "Aucun délai",
+    "waitNextCheck": "Prochaine vérification",
+    "waitHeldDescription": "La base de code requise est occupée. L'étape est relancée à chaque cycle jusqu'à ce qu'elle se libère.",
+    "waitingOnKind": "En attente de {kind}",
+    "waitKinds": {
+      "AGENT_JOB": "Tâche d'agent",
+      "AGENT_JOBS": "Tâches d'agent",
+      "AGENT_RUN": "Exécution d'agent",
+      "COMMAND_RUN": "Exécution de commande",
+      "BUILD": "Build",
+      "GITHUB_CHECKS": "Vérifications GitHub",
+      "HUMAN": "Réponse",
+      "DELAY": "Délai",
+      "PREDICATE": "Condition",
+      "RETRY": "Nouvelle tentative"
+    },
     "currentRun": "Exécution actuelle",
     "empty": "Aucun workflow ne correspond à cette vue.",
     "noRuns": "Aucune exécution de workflow.",
@@ -424,7 +445,9 @@
     },
     "phases": {
       "REUSED_FROM_PRIOR_GENERATION": "Réutilisée",
-      "REPLAY_PENDING": "En attente de rejeu"
+      "REPLAY_PENDING": "En attente de rejeu",
+      "WAITING_FOR_RESOURCE": "En attente de la base de code",
+      "WAITING_FOR_WORKTREE": "En attente du worktree"
     },
     "eventTypes": {
       "RUN_STARTED": "Exécution démarrée",
@@ -442,7 +465,8 @@
       "STEP_WAITING": "Étape en attente",
       "STEP_RETRY_SCHEDULED": "Nouvelle tentative planifiée",
       "STEP_RECOVERY_BLOCKED": "Récupération bloquée",
-      "STEP_WAITING_FOR_RESOURCE": "En attente du dépôt"
+      "STEP_WAITING_FOR_RESOURCE": "En attente du dépôt",
+      "STEP_WAIT_RESOLVED": "Attente résolue"
     },
     "diagnosticCodes": {
       "SCHEMA_INVALID": "Schéma invalide",

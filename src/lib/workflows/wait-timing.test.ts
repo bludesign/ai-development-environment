@@ -4,6 +4,8 @@ import {
   MAX_WAIT_SECONDS,
   MIN_WAIT_TIMEOUT_SECONDS,
   waitCadenceSeconds,
+  waitElapsedText,
+  waitKindText,
   waitResumeAfter,
   waitTimeoutAt,
 } from "./wait-timing";
@@ -56,5 +58,20 @@ describe("wait timing", () => {
     expect(waitCadenceSeconds({}, 10)).toBe(10);
     expect(inSeconds(waitResumeAfter({}))).toBe(1);
     expect(inSeconds(waitResumeAfter({ cadenceSeconds: 45 }))).toBe(45);
+  });
+
+  test("spells wait kinds as prose for run event messages", () => {
+    expect(waitKindText("AGENT_JOB")).toBe("agent job");
+    expect(waitKindText("GITHUB_CHECKS")).toBe("github checks");
+  });
+
+  test("reads an elapsed wait at the precision that wait deserves", () => {
+    expect(waitElapsedText(0)).toBe("0s");
+    expect(waitElapsedText(8_400)).toBe("8s");
+    expect(waitElapsedText(128_000)).toBe("2m 8s");
+    expect(waitElapsedText(3_780_000)).toBe("1h 3m");
+    // A clock that ran backwards between parking and resolving must not
+    // produce a negative reading.
+    expect(waitElapsedText(-5_000)).toBe("0s");
   });
 });

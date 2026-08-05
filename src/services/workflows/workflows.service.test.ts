@@ -56,7 +56,12 @@ const prisma = vi.hoisted(() => ({
     count: vi.fn(),
     createMany: vi.fn(),
   },
-  workflowWait: { create: vi.fn(), findMany: vi.fn(), updateMany: vi.fn() },
+  workflowWait: {
+    create: vi.fn(),
+    findFirst: vi.fn(),
+    findMany: vi.fn(),
+    updateMany: vi.fn(),
+  },
   workflowTriggerState: { findUnique: vi.fn(), upsert: vi.fn() },
   workflowTriggerEvent: {
     findMany: vi.fn(),
@@ -1193,12 +1198,69 @@ describe("workflow runtime lifecycle guards", () => {
 
     await internals(service).parkAttempt(
       { id: "attempt-1", runId: "run-1" },
+      { id: "step-1", name: "Step one" },
       { wait: { kind: "DELAY", resumeAfter: new Date() } },
     );
 
     expect(prisma.workflowStepAttempt.updateMany).not.toHaveBeenCalled();
     expect(prisma.workflowWait.create).not.toHaveBeenCalled();
     expect(prisma.workflowRunEvent.create).not.toHaveBeenCalled();
+  });
+
+  test("names the step and what it parked on when a step waits", async () => {
+    prisma.workflowRun.findUnique.mockResolvedValue({ status: "RUNNING" });
+    const service = new WorkflowsService(new WorkflowEventsService());
+    const timeoutAt = new Date("2026-08-05T12:00:00.000Z");
+
+    await internals(service).parkAttempt(
+      { id: "attempt-1", runId: "run-1" },
+      { id: "step-1", name: "Commit changes" },
+      { wait: { kind: "AGENT_JOB", externalKey: "job-1", timeoutAt } },
+    );
+
+    const event = prisma.workflowRunEvent.create.mock.calls.at(-1)?.[0] as {
+      data: { type: string; message: string; detailJson: string };
+    };
+    expect(event.data.type).toBe("STEP_WAITING");
+    expect(event.data.message).toBe(
+      "Step Commit changes is waiting for agent job",
+    );
+    expect(JSON.parse(event.data.detailJson)).toMatchObject({
+      kind: "AGENT_JOB",
+      nodeId: "step-1",
+      externalKey: "job-1",
+      timeoutAt: timeoutAt.toISOString(),
+    });
+  });
+
+  test("reports how long a wait lasted and what freed it", async () => {
+    prisma.workflowWait.findFirst.mockResolvedValue({
+      id: "wait-1",
+      kind: "AGENT_JOB",
+      externalKey: "job-1",
+      createdAt: new Date("2026-08-05T11:00:00.000Z"),
+      resolvedAt: new Date("2026-08-05T11:02:08.000Z"),
+    });
+    const service = new WorkflowsService(new WorkflowEventsService());
+
+    await internals(service).appendWaitResolvedEvent(
+      { id: "attempt-1", runId: "run-1" },
+      { id: "step-1", name: "Commit changes" },
+      "POLL",
+    );
+
+    const event = prisma.workflowRunEvent.create.mock.calls.at(-1)?.[0] as {
+      data: { type: string; message: string; detailJson: string };
+    };
+    expect(event.data.type).toBe("STEP_WAIT_RESOLVED");
+    expect(event.data.message).toBe(
+      "Step Commit changes resumed after waiting 2m 8s for agent job",
+    );
+    expect(JSON.parse(event.data.detailJson)).toMatchObject({
+      waitId: "wait-1",
+      waitedMs: 128_000,
+      resolvedBy: "POLL",
+    });
   });
 
   test("drops a stale completion after cancellation claims the attempt", async () => {

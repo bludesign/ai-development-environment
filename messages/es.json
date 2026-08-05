@@ -237,6 +237,27 @@
     "queueWorktree": "Árbol de trabajo",
     "queuedAt": "En cola",
     "exclusive": "Exclusivo",
+    "waitingOn": "En espera de",
+    "waitingOnDescription": "Los pasos en pausa se reanudan solos cuando el trabajo delegado responde. Los pasos retenidos esperan una base de código o un worktree que usa otra ejecución.",
+    "waitTarget": "En espera de",
+    "waitSince": "Desde",
+    "waitTimeout": "Caduca",
+    "waitNoTimeout": "Sin tiempo límite",
+    "waitNextCheck": "Próxima comprobación",
+    "waitHeldDescription": "La base de código que necesita este paso está ocupada. Se reintenta en cada ciclo hasta que se libere.",
+    "waitingOnKind": "En espera de {kind}",
+    "waitKinds": {
+      "AGENT_JOB": "Trabajo de agente",
+      "AGENT_JOBS": "Trabajos de agente",
+      "AGENT_RUN": "Ejecución de agente",
+      "COMMAND_RUN": "Ejecución de comando",
+      "BUILD": "Compilación",
+      "GITHUB_CHECKS": "Comprobaciones de GitHub",
+      "HUMAN": "Respuesta",
+      "DELAY": "Retraso",
+      "PREDICATE": "Condición",
+      "RETRY": "Reintento"
+    },
     "currentRun": "Ejecución actual",
     "empty": "No hay flujos que coincidan con esta vista.",
     "noRuns": "Todavía no hay ejecuciones de flujos.",
@@ -424,7 +445,9 @@
     },
     "phases": {
       "REUSED_FROM_PRIOR_GENERATION": "Reutilizado",
-      "REPLAY_PENDING": "En cola para repetirse"
+      "REPLAY_PENDING": "En cola para repetirse",
+      "WAITING_FOR_RESOURCE": "Esperando la base de código",
+      "WAITING_FOR_WORKTREE": "Esperando el worktree"
     },
     "eventTypes": {
       "RUN_STARTED": "Ejecución iniciada",
@@ -442,7 +465,8 @@
       "STEP_WAITING": "Paso en espera",
       "STEP_RETRY_SCHEDULED": "Reintento programado",
       "STEP_RECOVERY_BLOCKED": "Recuperación bloqueada",
-      "STEP_WAITING_FOR_RESOURCE": "Esperando el repositorio"
+      "STEP_WAITING_FOR_RESOURCE": "Esperando el repositorio",
+      "STEP_WAIT_RESOLVED": "Espera resuelta"
     },
     "diagnosticCodes": {
       "SCHEMA_INVALID": "Esquema no válido",

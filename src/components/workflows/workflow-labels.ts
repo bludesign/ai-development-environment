@@ -13,7 +13,12 @@ import { formatKindLabel } from "@/lib/enum-label";
  *
  * Step phases are the in-between case: the scheduler coins them freely, so only
  * the few worth wording carefully (the replay phases, which decide whether a
- * step re-ran) carry a message key, and the rest title-case like a kind.
+ * step re-ran, and the two that explain a stalled run) carry a message key, and
+ * the rest title-case like a kind.
+ *
+ * Wait kinds name what a parked step handed work to. They are a closed set the
+ * runtime defines, and they read as nouns in the UI ("Agent job") rather than
+ * as the prose the run event messages use ("waiting for agent job").
  *
  * Step and trigger kinds are the open-ended set — the catalog in
  * `src/lib/workflows/definition.ts` grows with every integration, and its
@@ -32,6 +37,8 @@ export function useWorkflowLabels() {
     phase: (value: string) => lookup("phases", value) ?? formatKindLabel(value),
     eventType: (value: string) =>
       lookup("eventTypes", value) ?? formatKindLabel(value),
+    waitKind: (value: string) =>
+      lookup("waitKinds", value) ?? formatKindLabel(value),
     diagnosticCode: (value: string) =>
       lookup("diagnosticCodes", value) ?? formatKindLabel(value),
     overlapPolicy: (value: string) =>

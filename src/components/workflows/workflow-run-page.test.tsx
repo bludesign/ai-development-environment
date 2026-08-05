@@ -362,6 +362,105 @@ describe("workflow question answers", () => {
     ).toBeTruthy();
   });
 
+  test("explains what a parked step is waiting on and links to it", async () => {
+    request.mockResolvedValue({
+      workflowRun: {
+        ...pendingRun,
+        version: {
+          ...pendingRun.version,
+          definition: {
+            ...pendingRun.version.definition,
+            nodes: [
+              {
+                id: "commit-step",
+                kind: "GIT_COMMIT",
+                name: "Commit changes",
+                config: {},
+                requiredPaths: [],
+                providedPaths: [],
+              },
+            ],
+          },
+        },
+        attempts: [
+          {
+            ...pendingRun.attempts[0],
+            id: "attempt-2",
+            nodeId: "commit-step",
+            questionBatches: [],
+          },
+        ],
+        waits: [
+          {
+            id: "wait-1",
+            attemptId: "attempt-2",
+            kind: "AGENT_JOB",
+            status: "PENDING",
+            predicate: null,
+            externalKey: "job-1",
+            resumeAfter: "2026-07-24T12:00:03.000Z",
+            timeoutAt: "2026-07-24T13:00:00.000Z",
+            result: null,
+            createdAt: "2026-07-24T12:00:01.000Z",
+            resolvedAt: null,
+            updatedAt: "2026-07-24T12:00:01.000Z",
+          },
+        ],
+        resourceLinks: [
+          {
+            id: "link-1",
+            attemptId: "attempt-2",
+            kind: "AGENT_JOB",
+            resourceId: "job-1",
+            label: "Agent job",
+            url: "/jobs/job-1",
+            metadata: null,
+            createdAt: "2026-07-24T12:00:01.000Z",
+          },
+        ],
+      },
+    });
+    render(
+      <TooltipProvider>
+        <WorkflowRunPage runId="run-1" />
+      </TooltipProvider>,
+    );
+
+    const target = await screen.findByRole("link", { name: "Agent job" });
+    const card = target.closest<HTMLElement>('[data-slot="card"]');
+    expect(target.getAttribute("href")).toBe("/jobs/job-1");
+    expect(card?.textContent).toContain("Commit changes");
+    expect(card?.textContent).toContain("Times out");
+  });
+
+  test("keeps a cancelled run's held step out of the waiting card", async () => {
+    request.mockResolvedValue({
+      workflowRun: {
+        ...pendingRun,
+        status: "CANCELLED",
+        attempts: [
+          {
+            ...pendingRun.attempts[0],
+            status: "CANCELLED",
+            phase: "WAITING_FOR_RESOURCE",
+            error: "Codebase is busy",
+            questionBatches: [],
+          },
+        ],
+        waits: [],
+      },
+    });
+    render(
+      <TooltipProvider>
+        <WorkflowRunPage runId="run-1" />
+      </TooltipProvider>,
+    );
+
+    await screen.findByRole("heading", { name: "Release #7" });
+    expect(screen.queryByText("Waiting on")).toBeNull();
+    expect(screen.queryByText("Codebase is busy")).toBeNull();
+  });
+
   test("shows the linked worktree branch instead of its resource ID", async () => {
     request.mockResolvedValue({
       workflowRun: {

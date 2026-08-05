@@ -237,6 +237,27 @@
     "queueWorktree": "Arbeitsbaum",
     "queuedAt": "Eingereiht",
     "exclusive": "Exklusiv",
+    "waitingOn": "Wartet auf",
+    "waitingOnDescription": "Angehaltene Schritte werden von selbst fortgesetzt, sobald die ausgelagerte Arbeit zurückmeldet. Blockierte Schritte warten auf eine Codebasis oder einen Worktree, den ein anderer Lauf belegt.",
+    "waitTarget": "Wartet auf",
+    "waitSince": "Seit",
+    "waitTimeout": "Zeitüberschreitung",
+    "waitNoTimeout": "Keine Zeitüberschreitung",
+    "waitNextCheck": "Nächste Prüfung",
+    "waitHeldDescription": "Die benötigte Codebasis ist belegt. Der Schritt wird bei jedem Durchlauf erneut versucht, bis sie frei wird.",
+    "waitingOnKind": "Wartet auf {kind}",
+    "waitKinds": {
+      "AGENT_JOB": "Agent-Job",
+      "AGENT_JOBS": "Agent-Jobs",
+      "AGENT_RUN": "Agent-Lauf",
+      "COMMAND_RUN": "Befehlslauf",
+      "BUILD": "Build",
+      "GITHUB_CHECKS": "GitHub-Prüfungen",
+      "HUMAN": "Antwort",
+      "DELAY": "Verzögerung",
+      "PREDICATE": "Bedingung",
+      "RETRY": "Wiederholung"
+    },
     "currentRun": "Aktueller Lauf",
     "empty": "Keine passenden Workflows.",
     "noRuns": "Noch keine Workflow-Läufe.",
@@ -424,7 +445,9 @@
     },
     "phases": {
       "REUSED_FROM_PRIOR_GENERATION": "Wiederverwendet",
-      "REPLAY_PENDING": "Für Wiederholung eingeplant"
+      "REPLAY_PENDING": "Für Wiederholung eingeplant",
+      "WAITING_FOR_RESOURCE": "Wartet auf Codebasis",
+      "WAITING_FOR_WORKTREE": "Wartet auf Worktree"
     },
     "eventTypes": {
       "RUN_STARTED": "Lauf gestartet",
@@ -442,7 +465,8 @@
       "STEP_WAITING": "Schritt wartet",
       "STEP_RETRY_SCHEDULED": "Wiederholung geplant",
       "STEP_RECOVERY_BLOCKED": "Wiederherstellung blockiert",
-      "STEP_WAITING_FOR_RESOURCE": "Wartet auf Codebasis"
+      "STEP_WAITING_FOR_RESOURCE": "Wartet auf Codebasis",
+      "STEP_WAIT_RESOLVED": "Warten beendet"
     },
     "diagnosticCodes": {
       "SCHEMA_INVALID": "Ungültiges Schema",

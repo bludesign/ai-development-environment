@@ -237,6 +237,27 @@
     "queueWorktree": "Worktree",
     "queuedAt": "Queued",
     "exclusive": "Exclusive",
+    "waitingOn": "Waiting on",
+    "waitingOnDescription": "Parked steps resume on their own when the work they handed off reports back. Held steps are waiting for a codebase or worktree another run is using.",
+    "waitTarget": "Waiting on",
+    "waitSince": "Since",
+    "waitTimeout": "Times out",
+    "waitNoTimeout": "No timeout",
+    "waitNextCheck": "Next check",
+    "waitHeldDescription": "The codebase this step needs is busy. It retries every tick until the codebase frees up.",
+    "waitingOnKind": "Waiting on {kind}",
+    "waitKinds": {
+      "AGENT_JOB": "Agent job",
+      "AGENT_JOBS": "Agent jobs",
+      "AGENT_RUN": "Agent run",
+      "COMMAND_RUN": "Command run",
+      "BUILD": "Build",
+      "GITHUB_CHECKS": "GitHub checks",
+      "HUMAN": "Answer",
+      "DELAY": "Delay",
+      "PREDICATE": "Condition",
+      "RETRY": "Retry"
+    },
     "currentRun": "Current run",
     "empty": "No workflows match this view.",
     "noRuns": "No workflow runs yet.",
@@ -424,7 +445,9 @@
     },
     "phases": {
       "REUSED_FROM_PRIOR_GENERATION": "Reused",
-      "REPLAY_PENDING": "Queued for replay"
+      "REPLAY_PENDING": "Queued for replay",
+      "WAITING_FOR_RESOURCE": "Waiting for codebase",
+      "WAITING_FOR_WORKTREE": "Waiting for worktree"
     },
     "eventTypes": {
       "RUN_STARTED": "Run started",
@@ -442,7 +465,8 @@
       "STEP_WAITING": "Step waiting",
       "STEP_RETRY_SCHEDULED": "Retry scheduled",
       "STEP_RECOVERY_BLOCKED": "Recovery blocked",
-      "STEP_WAITING_FOR_RESOURCE": "Waiting for codebase"
+      "STEP_WAITING_FOR_RESOURCE": "Waiting for codebase",
+      "STEP_WAIT_RESOLVED": "Wait resolved"
     },
     "diagnosticCodes": {
       "SCHEMA_INVALID": "Invalid schema",
