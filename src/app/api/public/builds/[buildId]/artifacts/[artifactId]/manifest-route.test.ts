@@ -48,14 +48,14 @@ function ipa(metadata: Record<string, unknown> = {}) {
 
 beforeEach(() => {
   vi.clearAllMocks();
-  process.env.OTA_TOKEN_SECRET = "test-secret";
+  process.env.APP_ORIGINS = "builds.example.com";
   getServerServices.mockReturnValue({
     buildsService: { artifactForInstall },
   });
 });
 
 afterEach(() => {
-  delete process.env.OTA_TOKEN_SECRET;
+  delete process.env.APP_ORIGINS;
   vi.restoreAllMocks();
 });
 

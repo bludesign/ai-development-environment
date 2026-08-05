@@ -6,10 +6,12 @@ const mocks = vi.hoisted(() => ({
   ingestAnalytics: vi.fn(),
   exportEntries: vi.fn(),
 }));
+const requireUserRequest = vi.hoisted(() => vi.fn());
 
 vi.mock("@/services/server-services", () => ({
   getServerServices: () => ({ telemetryService: mocks }),
 }));
+vi.mock("@/services/auth", () => ({ requireUserRequest }));
 
 import { POST as consolePost } from "./console-logs/route";
 import { POST as analyticsPost } from "./analytics-events/route";
@@ -39,6 +41,7 @@ function request(
 
 beforeEach(() => {
   vi.clearAllMocks();
+  requireUserRequest.mockResolvedValue(null);
   mocks.ingestConsole.mockResolvedValue({
     collected: true,
     items: [

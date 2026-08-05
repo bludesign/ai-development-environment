@@ -1,5 +1,6 @@
 import { expect, test, type Locator, type Page } from "@playwright/test";
 
+import { screenshotSessionToken } from "../scripts/mock-data/auth";
 import { INTERACTIVE_SELECTOR } from "../src/components/worktrees/worktree-navigation";
 import {
   MOBILE_BREAKPOINT,
@@ -65,6 +66,9 @@ test.describe("app walkthrough", () => {
     };
 
     try {
+      await page.setExtraHTTPHeaders({
+        Authorization: `Bearer ${screenshotSessionToken}`,
+      });
       await setScreenshotTime(page);
       // The worktree stop inspects its checkout on arrival. Answering that from the fixture
       // films the commits and changes rather than a spinner, and leaves no queued job behind

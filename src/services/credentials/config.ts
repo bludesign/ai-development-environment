@@ -1,7 +1,6 @@
-import {
-  credentialKeyFingerprint,
-  parseCredentialEncryptionKey,
-} from "./crypto";
+import { getAppSecrets, getPreviousCredentialKeys } from "@/lib/app-secret";
+
+import { credentialKeyFingerprint } from "./crypto";
 import type {
   CredentialStorageType,
   CredentialStoreDetail,
@@ -24,8 +23,16 @@ const TRANSPORT_MANAGED_HEADERS = new Set([
 
 export type DatabaseCredentialStoreConfig = {
   storageType: "database";
-  encryptionKey: Buffer | null;
-  keyFingerprint: string | null;
+  // Derived from APP_SECRET, which is required in every environment, so database
+  // storage is always encrypted. There is no plaintext mode.
+  encryptionKey: Buffer;
+  keyFingerprint: string;
+  /**
+   * Credential keys derived from APP_SECRET_PREVIOUS. Rows still sealed under one
+   * of these are re-encrypted at startup, which is what makes rotating APP_SECRET
+   * recoverable instead of destructive.
+   */
+  previousKeys: Buffer[];
 };
 
 export type VaultCredentialStoreConfig = {
@@ -186,32 +193,16 @@ export function readCredentialStoreConfig(
   }
 
   if (requestedStorageType === "database") {
-    const keyValue = env.CREDENTIAL_ENCRYPTION_KEY;
-    if (!keyValue) {
-      return {
-        requestedStorageType,
-        storageType: "database",
-        config: {
-          storageType: "database",
-          encryptionKey: null,
-          keyFingerprint: null,
-        },
-        warnings: [
-          issue(
-            "DATABASE_UNENCRYPTED",
-            "Database credentials are stored as plaintext until CREDENTIAL_ENCRYPTION_KEY is configured",
-          ),
-          ...readOnlyIgnoredWarning(env, "database"),
-        ],
-        errors: [],
-        details: [
-          { label: "Location", value: "Application database" },
-          { label: "Encryption key", value: "Not configured" },
-        ],
-      };
-    }
     try {
-      const encryptionKey = parseCredentialEncryptionKey(keyValue);
+      // Derived here, inside the database branch, and nowhere above it: Vault and
+      // Keychain installs must never need APP_SECRET to reach their own store.
+      const secrets = getAppSecrets(env);
+      if (secrets.ephemeral) {
+        throw new Error(
+          "APP_SECRET is required before credentials can be read or written",
+        );
+      }
+      const encryptionKey = secrets.credentialKey;
       return {
         requestedStorageType,
         storageType: "database",
@@ -219,12 +210,13 @@ export function readCredentialStoreConfig(
           storageType: "database",
           encryptionKey,
           keyFingerprint: credentialKeyFingerprint(encryptionKey),
+          previousKeys: getPreviousCredentialKeys(env),
         },
         warnings: readOnlyIgnoredWarning(env, "database"),
         errors: [],
         details: [
           { label: "Location", value: "Application database" },
-          { label: "Encryption key", value: "Configured" },
+          { label: "Encryption key", value: "Derived from APP_SECRET" },
         ],
       };
     } catch (error) {
@@ -235,10 +227,8 @@ export function readCredentialStoreConfig(
         warnings: readOnlyIgnoredWarning(env, "database"),
         errors: [
           issue(
-            "CREDENTIAL_ENCRYPTION_KEY_INVALID",
-            error instanceof Error
-              ? error.message
-              : "The encryption key is invalid",
+            "APP_SECRET_INVALID",
+            error instanceof Error ? error.message : "APP_SECRET is invalid",
           ),
         ],
         details: [

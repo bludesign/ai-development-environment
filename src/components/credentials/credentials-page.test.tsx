@@ -18,20 +18,15 @@ describe("CredentialsPage", () => {
     request.mockResolvedValue({
       credentialStoreStatus: {
         storageType: "DATABASE",
-        state: "WARNING",
-        encryptionState: "PLAINTEXT",
+        state: "READY",
+        encryptionState: "ENCRYPTED",
         details: [
           { label: "Location", value: "Application database" },
-          { label: "Encryption key", value: "Not configured" },
+          { label: "Encryption key", value: "Derived from APP_SECRET" },
         ],
         itemCount: 1,
         mismatchCount: 0,
-        warnings: [
-          {
-            code: "DATABASE_UNENCRYPTED",
-            message: "server fallback message",
-          },
-        ],
+        warnings: [],
       },
       credentials: [
         {
@@ -40,7 +35,7 @@ describe("CredentialsPage", () => {
           ownerId: "default",
           ownerFeature: "Jira",
           storageType: "DATABASE",
-          protection: "PLAINTEXT",
+          protection: "ENCRYPTED",
           createdAt: "2026-07-21T00:00:00.000Z",
           updatedAt: "2026-07-21T00:00:00.000Z",
         },
@@ -49,10 +44,7 @@ describe("CredentialsPage", () => {
     render(<CredentialsPage />);
 
     expect(await screen.findByText("Credential storage")).toBeTruthy();
-    expect(
-      await screen.findByText("Database credentials are not encrypted"),
-    ).toBeTruthy();
-    expect(screen.getByText("openssl rand -base64 32")).toBeTruthy();
+    expect(screen.getByText("Derived from APP_SECRET")).toBeTruthy();
     expect(screen.getByText("API token")).toBeTruthy();
     expect(screen.queryByText("jira-secret-value")).toBeNull();
     expect(

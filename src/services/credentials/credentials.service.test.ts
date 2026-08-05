@@ -20,6 +20,31 @@ import {
   encodeJsonCredential,
 } from "./types";
 
+function appSecret(): Record<string, string> {
+  return { APP_SECRET: randomBytes(32).toString("base64") };
+}
+
+/**
+ * Writes a row the way a database predating unconditional encryption would have.
+ * The service can no longer produce one, but `initialize()` still has to sweep it.
+ */
+async function writePlaintextRow(
+  prisma: InstanceType<typeof PrismaClient>,
+  descriptor: { id: string; kind: string },
+  value: string,
+): Promise<void> {
+  await prisma.credential.create({
+    data: {
+      id: descriptor.id,
+      kind: descriptor.kind,
+      ownerId: "default",
+      storageType: "database",
+      payload: Uint8Array.from(Buffer.from(value)),
+      encrypted: false,
+    },
+  });
+}
+
 const CREATE_CREDENTIAL_TABLE = `
   CREATE TABLE "Credential" (
     "id" TEXT NOT NULL PRIMARY KEY,
@@ -57,27 +82,36 @@ describe("CredentialService database backend", () => {
     await rm(directory, { recursive: true, force: true });
   });
 
-  test("stores plaintext by default and reports the warning", async () => {
-    const service = new CredentialService({ env: {}, prisma });
+  test("encrypts database credentials with no configuration beyond APP_SECRET", async () => {
+    const service = new CredentialService({ env: appSecret(), prisma });
     await service.setText(CREDENTIALS.jiraApiToken, "jira-secret");
 
     const row = await prisma.credential.findUniqueOrThrow({
       where: { id: CREDENTIALS.jiraApiToken.id },
     });
-    expect(row.encrypted).toBe(false);
-    expect(Buffer.from(row.payload!).toString("utf8")).toBe("jira-secret");
+    expect(row.encrypted).toBe(true);
+    expect(Buffer.from(row.payload!).toString("utf8")).not.toBe("jira-secret");
     await expect(service.getText(CREDENTIALS.jiraApiToken)).resolves.toBe(
       "jira-secret",
     );
     await expect(service.status()).resolves.toMatchObject({
-      state: "WARNING",
-      encryptionState: "PLAINTEXT",
-      warnings: [{ code: "DATABASE_UNENCRYPTED" }],
+      state: "READY",
+      encryptionState: "ENCRYPTED",
+      warnings: [],
     });
   });
 
-  test("returns decoded JSON with credential metadata timestamps", async () => {
+  test("refuses database storage when APP_SECRET is absent", async () => {
     const service = new CredentialService({ env: {}, prisma });
+    const status = await service.status();
+    expect(status).toMatchObject({ state: "ERROR", encryptionState: "ERROR" });
+    expect(status.warnings.map(({ code }) => code)).toEqual([
+      "APP_SECRET_INVALID",
+    ]);
+  });
+
+  test("returns decoded JSON with credential metadata timestamps", async () => {
+    const service = new CredentialService({ env: appSecret(), prisma });
     const value = { siteUrl: "https://jira.example.test", email: "dev@test" };
     await service.setJson(CREDENTIALS.jiraConnectionSettings, value);
 
@@ -95,7 +129,7 @@ describe("CredentialService database backend", () => {
   });
 
   test("validates typed JSON credentials when reading them", async () => {
-    const service = new CredentialService({ env: {}, prisma });
+    const service = new CredentialService({ env: appSecret(), prisma });
     await service.setJson(CREDENTIALS.jiraConnectionSettings, {
       siteUrl: 42,
       email: "dev@example.test",
@@ -112,7 +146,7 @@ describe("CredentialService database backend", () => {
   test("encrypts new payloads and round trips without exposing payloads in inventory", async () => {
     const key = randomBytes(32).toString("base64");
     const service = new CredentialService({
-      env: { CREDENTIAL_ENCRYPTION_KEY: key },
+      env: { APP_SECRET: key },
       prisma,
     });
     await service.setText(
@@ -137,7 +171,7 @@ describe("CredentialService database backend", () => {
 
   test("rejects tampered ciphertext", async () => {
     const service = new CredentialService({
-      env: { CREDENTIAL_ENCRYPTION_KEY: randomBytes(32).toString("base64") },
+      env: { APP_SECRET: randomBytes(32).toString("base64") },
       prisma,
     });
     await service.setText(CREDENTIALS.jiraApiToken, "jira-secret");
@@ -155,45 +189,92 @@ describe("CredentialService database backend", () => {
     );
   });
 
-  test("blocks a missing or changed key when encrypted rows exist", async () => {
+  test("blocks a changed APP_SECRET when encrypted rows exist", async () => {
     const originalKey = randomBytes(32).toString("base64");
     await new CredentialService({
-      env: { CREDENTIAL_ENCRYPTION_KEY: originalKey },
+      env: { APP_SECRET: originalKey },
       prisma,
     }).setText(CREDENTIALS.jiraApiToken, "jira-secret");
 
-    const missing = new CredentialService({ env: {}, prisma });
-    await expect(missing.ensureInitialized()).rejects.toMatchObject({
-      code: "CREDENTIAL_ENCRYPTION_KEY_MISSING",
-    });
-    const missingStatus = await missing.status();
-    expect(missingStatus).toMatchObject({
-      state: "ERROR",
-      encryptionState: "ERROR",
-    });
-    expect(missingStatus.warnings.map(({ code }) => code)).toEqual([
-      "CREDENTIAL_ENCRYPTION_KEY_MISSING",
-    ]);
-
     const changed = new CredentialService({
-      env: { CREDENTIAL_ENCRYPTION_KEY: randomBytes(32).toString("base64") },
+      env: { APP_SECRET: randomBytes(32).toString("base64") },
       prisma,
     });
     await expect(changed.ensureInitialized()).rejects.toMatchObject({
-      code: "CREDENTIAL_ENCRYPTION_KEY_MISMATCH",
+      code: "CREDENTIAL_KEY_MISMATCH",
+    });
+    const status = await changed.status();
+    expect(status).toMatchObject({ state: "ERROR", encryptionState: "ERROR" });
+    expect(status.warnings.map(({ code }) => code)).toEqual([
+      "CREDENTIAL_KEY_MISMATCH",
+    ]);
+  });
+
+  test("re-encrypts stored credentials when APP_SECRET_PREVIOUS names the old root", async () => {
+    const originalKey = randomBytes(32).toString("base64");
+    await new CredentialService({
+      env: { APP_SECRET: originalKey },
+      prisma,
+    }).setText(CREDENTIALS.jiraApiToken, "jira-secret");
+    const before = await prisma.credential.findUniqueOrThrow({
+      where: { id: CREDENTIALS.jiraApiToken.id },
+    });
+
+    const rotated = new CredentialService({
+      env: {
+        APP_SECRET: randomBytes(32).toString("base64"),
+        APP_SECRET_PREVIOUS: originalKey,
+      },
+      prisma,
+    });
+    await expect(rotated.ensureInitialized()).resolves.not.toThrow();
+    await expect(rotated.getText(CREDENTIALS.jiraApiToken)).resolves.toBe(
+      "jira-secret",
+    );
+
+    const after = await prisma.credential.findUniqueOrThrow({
+      where: { id: CREDENTIALS.jiraApiToken.id },
+    });
+    expect(after.keyFingerprint).not.toBe(before.keyFingerprint);
+    expect(Buffer.from(after.payload!)).not.toEqual(
+      Buffer.from(before.payload!),
+    );
+
+    // Rotation is idempotent: a second start with the same pair changes nothing.
+    await rotated.ensureInitialized();
+    await expect(rotated.getText(CREDENTIALS.jiraApiToken)).resolves.toBe(
+      "jira-secret",
+    );
+  });
+
+  test("still refuses to start when no previous root explains the mismatch", async () => {
+    await new CredentialService({
+      env: { APP_SECRET: randomBytes(32).toString("base64") },
+      prisma,
+    }).setText(CREDENTIALS.jiraApiToken, "jira-secret");
+
+    const wrong = new CredentialService({
+      env: {
+        APP_SECRET: randomBytes(32).toString("base64"),
+        APP_SECRET_PREVIOUS: randomBytes(32).toString("base64"),
+      },
+      prisma,
+    });
+    await expect(wrong.ensureInitialized()).rejects.toMatchObject({
+      code: "CREDENTIAL_KEY_MISMATCH",
     });
   });
 
-  test("atomically encrypts every plaintext row when a key is added", async () => {
-    const plaintext = new CredentialService({ env: {}, prisma });
-    await plaintext.setText(CREDENTIALS.jiraApiToken, "jira-secret");
-    await plaintext.setText(
+  test("atomically encrypts legacy plaintext rows at startup", async () => {
+    await writePlaintextRow(prisma, CREDENTIALS.jiraApiToken, "jira-secret");
+    await writePlaintextRow(
+      prisma,
       CREDENTIALS.githubPersonalAccessToken,
       "github-secret",
     );
 
     const encrypted = new CredentialService({
-      env: { CREDENTIAL_ENCRYPTION_KEY: randomBytes(32).toString("base64") },
+      env: { APP_SECRET: randomBytes(32).toString("base64") },
       prisma,
     });
     await Promise.all([
@@ -212,8 +293,7 @@ describe("CredentialService database backend", () => {
   test("removes swept plaintext from the SQLite database and WAL", async () => {
     await prisma.$queryRawUnsafe("PRAGMA journal_mode = WAL;");
     const secret = `plaintext-that-must-be-erased-${randomBytes(24).toString("hex")}`;
-    const plaintext = new CredentialService({ env: {}, prisma });
-    await plaintext.setText(CREDENTIALS.jiraApiToken, secret);
+    await writePlaintextRow(prisma, CREDENTIALS.jiraApiToken, secret);
     await prisma.$queryRawUnsafe("PRAGMA wal_checkpoint(TRUNCATE);");
 
     expect((await readFile(databasePath)).includes(Buffer.from(secret))).toBe(
@@ -221,7 +301,7 @@ describe("CredentialService database backend", () => {
     );
 
     const encrypted = new CredentialService({
-      env: { CREDENTIAL_ENCRYPTION_KEY: randomBytes(32).toString("base64") },
+      env: { APP_SECRET: randomBytes(32).toString("base64") },
       prisma,
     });
     await encrypted.ensureInitialized();
@@ -260,7 +340,7 @@ describe("CredentialService database backend", () => {
       ],
     });
     const service = new CredentialService({
-      env: { CREDENTIAL_ENCRYPTION_KEY: randomBytes(32).toString("base64") },
+      env: { APP_SECRET: randomBytes(32).toString("base64") },
       prisma,
     });
     await expect(service.ensureInitialized()).rejects.toMatchObject({
@@ -274,20 +354,20 @@ describe("CredentialService database backend", () => {
   test("deletes unreadable database rows and permits replacement credentials", async () => {
     const originalKey = randomBytes(32).toString("base64");
     await new CredentialService({
-      env: { CREDENTIAL_ENCRYPTION_KEY: originalKey },
+      env: { APP_SECRET: originalKey },
       prisma,
     }).setText(CREDENTIALS.jiraApiToken, "old-secret");
 
     const replacementKey = randomBytes(32).toString("base64");
     const service = new CredentialService({
-      env: { CREDENTIAL_ENCRYPTION_KEY: replacementKey },
+      env: { APP_SECRET: replacementKey },
       prisma,
     });
     await expect(service.status()).resolves.toMatchObject({
       state: "ERROR",
       warnings: [
         expect.objectContaining({
-          code: "CREDENTIAL_ENCRYPTION_KEY_MISMATCH",
+          code: "CREDENTIAL_KEY_MISMATCH",
         }),
       ],
     });
@@ -335,7 +415,7 @@ describe("CredentialService database backend", () => {
         storageType: "vault",
       },
     });
-    const service = new CredentialService({ env: {}, prisma });
+    const service = new CredentialService({ env: appSecret(), prisma });
     await expect(service.status()).resolves.toMatchObject({
       state: "WARNING",
       mismatchCount: 1,

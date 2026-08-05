@@ -19,25 +19,6 @@ export type EncryptedCredential = {
   keyFingerprint: string;
 };
 
-export function parseCredentialEncryptionKey(value: string): Buffer {
-  if (
-    !value ||
-    value.length % 4 !== 0 ||
-    !/^[A-Za-z0-9+/]+={0,2}$/.test(value)
-  ) {
-    throw new Error(
-      "CREDENTIAL_ENCRYPTION_KEY must be strict base64 encoding of exactly 32 bytes",
-    );
-  }
-  const key = Buffer.from(value, "base64");
-  if (key.length !== 32 || key.toString("base64") !== value) {
-    throw new Error(
-      "CREDENTIAL_ENCRYPTION_KEY must be strict base64 encoding of exactly 32 bytes",
-    );
-  }
-  return key;
-}
-
 export function credentialKeyFingerprint(key: Uint8Array): string {
   return createHash("sha256").update(key).digest("hex");
 }

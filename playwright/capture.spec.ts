@@ -6,6 +6,7 @@ import {
   setScreenshotTime,
 } from "./screenshot-time";
 import { stubWorktreeAgent } from "./worktree-stub";
+import { screenshotSessionToken } from "../scripts/mock-data/auth";
 
 /**
  * Captures one screenshot per route for the active Playwright project (viewport + color
@@ -19,6 +20,11 @@ import { stubWorktreeAgent } from "./worktree-stub";
 test.describe("app screenshots", () => {
   for (const route of routes) {
     test(route.name, async ({ page }, testInfo) => {
+      if (!route.anonymous) {
+        await page.setExtraHTTPHeaders({
+          Authorization: `Bearer ${screenshotSessionToken}`,
+        });
+      }
       // Uncaught exceptions and unhandled rejections. Collected rather than thrown from the
       // listener so they surface as an assertion after the screenshot is safely on disk.
       const pageErrors: string[] = [];

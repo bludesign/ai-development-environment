@@ -77,8 +77,13 @@ VOLUME ["/data"]
 
 EXPOSE 3090 3091
 
+# Probes /api/auth/config rather than a GraphQL query because GraphQL now requires
+# a credential, and baking one into an image is worse than the coverage it buys.
+# The route still exercises the server, the auth configuration, and a database read,
+# so the check is narrower than before but not shallow: a broken GraphQL layer alone
+# no longer fails it.
 HEALTHCHECK --interval=30s --timeout=5s --start-period=30s --retries=3 \
-  CMD ["node", "-e", "fetch('http://127.0.0.1:'+process.env.PORT+'/api/graphql',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({query:'{ health }'})}).then(async response=>{const body=await response.json();if(!response.ok||body.data?.health!=='ok')process.exit(1)}).catch(()=>process.exit(1))"]
+  CMD ["node", "-e", "fetch('http://127.0.0.1:'+process.env.PORT+'/api/auth/config').then(async response=>{const body=await response.json();if(!response.ok||!body.mode)process.exit(1)}).catch(()=>process.exit(1))"]
 
 STOPSIGNAL SIGTERM
 

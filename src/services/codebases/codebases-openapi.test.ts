@@ -17,5 +17,11 @@ describe("codebases OpenAPI document", () => {
       type: "object",
       required: expect.arrayContaining(["id", "path", "repository", "agent"]),
     });
+    expect(
+      codebasesOpenApiDocument.paths["/api/codebases"].get.security,
+    ).toEqual([{ BetterAuthCookie: [] }, { BetterAuthBearer: [] }]);
+    expect(
+      codebasesOpenApiDocument.components.securitySchemes.BetterAuthBearer,
+    ).toMatchObject({ type: "http", scheme: "bearer" });
   });
 });

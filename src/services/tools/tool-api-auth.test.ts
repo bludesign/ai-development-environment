@@ -1,5 +1,12 @@
 import { afterEach, describe, expect, test, vi } from "vitest";
 
+const resolveRequestPrincipal = vi.hoisted(() => vi.fn());
+
+vi.mock("@/services/auth", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/services/auth")>()),
+  resolveRequestPrincipal,
+}));
+
 import {
   authorizeMcpPresetRequest,
   authorizeRunMcpRequest,
@@ -7,32 +14,27 @@ import {
 } from "./tool-api-auth";
 
 afterEach(() => {
-  vi.unstubAllEnvs();
+  vi.clearAllMocks();
 });
 
 describe("tool API authorization", () => {
-  test("requires bearer authentication even for same-origin Tools page calls", () => {
-    vi.stubEnv("TOOLS_API_TOKEN", "deployment-secret");
-    const denied = authorizeToolRequest(
-      new Request("https://control.example/api/tools/call", {
-        method: "POST",
-        headers: {
-          origin: "https://control.example",
-          "sec-fetch-site": "same-origin",
-          "x-request-id": "request-1",
-        },
-      }),
+  test("requires a user session for Tools page calls", async () => {
+    resolveRequestPrincipal.mockResolvedValueOnce({ kind: "anonymous" });
+    const denied = await authorizeToolRequest(
+      new Request("https://control.example/api/tools/call"),
       "TOOLS_PAGE",
     );
     expect("response" in denied && denied.response.status).toBe(401);
 
-    const allowed = authorizeToolRequest(
+    resolveRequestPrincipal.mockResolvedValueOnce({
+      kind: "user",
+      userId: "user-1",
+      email: "user@example.com",
+      sessionId: "session-1",
+    });
+    const allowed = await authorizeToolRequest(
       new Request("https://control.example/api/tools/call", {
-        method: "POST",
-        headers: {
-          authorization: "Bearer deployment-secret",
-          "x-request-id": "request-1",
-        },
+        headers: { "x-request-id": "request-1" },
       }),
       "TOOLS_PAGE",
     );
@@ -40,109 +42,88 @@ describe("tool API authorization", () => {
       context: {
         source: "TOOLS_PAGE",
         correlationId: "request-1",
-        caller: expect.stringMatching(/^bearer:/),
+        caller: "user:user-1@unknown",
       },
     });
   });
 
-  test("allows unauthenticated calls when the deployment token is not configured", () => {
-    vi.stubEnv("TOOLS_API_TOKEN", "");
-    const result = authorizeToolRequest(
-      new Request("https://control.example/api/mcp", {
-        headers: { "x-request-id": "request-without-auth" },
-      }),
-      "MCP",
-    );
-    expect(result).toMatchObject({
-      context: {
-        source: "MCP",
-        correlationId: "request-without-auth",
-        caller: "anonymous@unknown",
-      },
-    });
-  });
-
-  test("requires and fingerprints a valid MCP bearer token", () => {
-    vi.stubEnv("TOOLS_API_TOKEN", "deployment-secret");
-    const denied = authorizeToolRequest(
-      new Request("https://control.example/api/mcp", {
-        headers: { authorization: "Bearer wrong" },
-      }),
+  test("rejects anonymous unscoped MCP calls", async () => {
+    resolveRequestPrincipal.mockResolvedValue({ kind: "anonymous" });
+    const denied = await authorizeToolRequest(
+      new Request("https://control.example/api/mcp"),
       "MCP",
     );
     expect("response" in denied && denied.response.status).toBe(401);
+  });
 
-    const allowed = authorizeToolRequest(
-      new Request("https://control.example/api/mcp", {
-        headers: {
-          authorization: "Bearer deployment-secret",
-          "x-request-id": "request-2",
-        },
-      }),
+  test("accepts user sessions and API keys for unscoped MCP", async () => {
+    resolveRequestPrincipal.mockResolvedValueOnce({
+      kind: "user",
+      userId: "user-1",
+      email: "user@example.com",
+      sessionId: "session-1",
+    });
+    const user = await authorizeToolRequest(
+      new Request("https://control.example/api/mcp"),
       "MCP",
     );
-    expect(allowed).toMatchObject({
-      context: {
-        source: "MCP",
-        correlationId: "request-2",
-        caller: expect.stringMatching(/^bearer:[a-f0-9]{12}@/),
-      },
-    });
-    expect(JSON.stringify(allowed)).not.toContain("deployment-secret");
-  });
+    expect(user).toMatchObject({ context: { caller: "user:user-1@unknown" } });
 
-  test("allows unauthenticated preset URLs when no token is configured", () => {
-    vi.stubEnv("TOOLS_API_TOKEN", "");
-    const allowedWithoutToken = authorizeMcpPresetRequest(
-      new Request("https://control.example/api/mcp?preset=preset-1", {
-        headers: { "x-request-id": "preset-without-auth" },
-      }),
+    resolveRequestPrincipal.mockResolvedValueOnce({
+      kind: "apiKey",
+      apiKeyId: "key-1",
+      userId: "user-1",
+      name: "Automation",
+    });
+    const apiKey = await authorizeToolRequest(
+      new Request("https://control.example/api/mcp"),
+      "MCP",
     );
-    expect(allowedWithoutToken).toMatchObject({
-      context: {
-        source: "MCP",
-        correlationId: "preset-without-auth",
-        caller: "anonymous@unknown",
-      },
+    expect(apiKey).toMatchObject({
+      context: { caller: "api-key:key-1@unknown" },
     });
   });
 
-  test("requires a valid deployment token for preset URLs when configured", () => {
-    vi.stubEnv("TOOLS_API_TOKEN", "deployment-secret");
-    const denied = authorizeMcpPresetRequest(
+  test("uses the same user or API-key policy for preset URLs", async () => {
+    resolveRequestPrincipal.mockResolvedValue({
+      kind: "apiKey",
+      apiKeyId: "key-1",
+      userId: "user-1",
+      name: null,
+    });
+    const allowed = await authorizeMcpPresetRequest(
       new Request("https://control.example/api/mcp?preset=preset-1"),
-    );
-    expect("response" in denied && denied.response.status).toBe(401);
-
-    const allowed = authorizeMcpPresetRequest(
-      new Request("https://control.example/api/mcp?preset=preset-1", {
-        headers: { authorization: "Bearer deployment-secret" },
-      }),
     );
     expect(allowed).toMatchObject({ context: { source: "MCP" } });
   });
 
   test("accepts only enrolled agent credentials for run-scoped URLs", async () => {
-    const authenticate = vi.fn(async (credential: string | null) =>
-      credential === "agent-secret" ? "agent-1" : null,
-    );
+    resolveRequestPrincipal.mockResolvedValueOnce({ kind: "user" });
     const denied = await authorizeRunMcpRequest(
       new Request("https://control.example/api/mcp?run=run-1", {
         headers: { authorization: "Bearer deployment-secret" },
       }),
-      { authenticate } as never,
+      {} as never,
     );
     expect("response" in denied && denied.response.status).toBe(401);
 
+    resolveRequestPrincipal.mockResolvedValueOnce({
+      kind: "agent",
+      agentId: "agent-1",
+    });
     const allowed = await authorizeRunMcpRequest(
       new Request("https://control.example/api/mcp?run=run-1", {
         headers: { authorization: "Bearer agent-secret" },
       }),
-      { authenticate } as never,
+      {} as never,
     );
     expect(allowed).toMatchObject({
       agentId: "agent-1",
       context: { caller: "agent:agent-1@unknown", source: "MCP" },
     });
+    expect(resolveRequestPrincipal).toHaveBeenLastCalledWith(
+      expect.any(Headers),
+      expect.anything(),
+    );
   });
 });

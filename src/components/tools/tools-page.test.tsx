@@ -150,10 +150,6 @@ describe("ToolsPage", () => {
 
     render(<ToolsPage />);
     await screen.findByText("get_codebase");
-    fireEvent.change(screen.getByLabelText("Tool API token (optional)"), {
-      target: { value: "deployment-secret" },
-    });
-
     fireEvent.change(screen.getByRole("searchbox", { name: "Search tools" }), {
       target: { value: "missing-tool" },
     });
@@ -198,7 +194,7 @@ describe("ToolsPage", () => {
         expect.objectContaining({
           method: "POST",
           headers: expect.objectContaining({
-            authorization: "Bearer deployment-secret",
+            "content-type": "application/json",
           }),
         }),
       );
@@ -480,6 +476,9 @@ describe("ToolsPage", () => {
               "ai-development-environment": {
                 type: "http",
                 url,
+                headers: {
+                  "X-API-Key": "<AIDE_API_KEY>",
+                },
               },
             },
           },

@@ -1,7 +1,9 @@
 import { beforeEach, describe, expect, test, vi } from "vitest";
 
 const getServerServices = vi.hoisted(() => vi.fn());
+const requireUserRequest = vi.hoisted(() => vi.fn());
 vi.mock("@/services/server-services", () => ({ getServerServices }));
+vi.mock("@/services/auth", () => ({ requireUserRequest }));
 
 import { CodebaseLookupError } from "@/services/codebases";
 
@@ -14,6 +16,7 @@ describe("codebases REST routes", () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
+    requireUserRequest.mockResolvedValue(null);
     getServerServices.mockReturnValue({
       codebaseToolsService: { list, getByPath },
     });
@@ -22,12 +25,27 @@ describe("codebases REST routes", () => {
   test("lists codebases", async () => {
     list.mockResolvedValue([{ id: "codebase-1", path: "/repo" }]);
 
-    const response = await listCodebases();
+    const response = await listCodebases(
+      new Request("http://localhost/api/codebases"),
+    );
 
     expect(response.status).toBe(200);
     await expect(response.json()).resolves.toEqual({
       codebases: [{ id: "codebase-1", path: "/repo" }],
     });
+  });
+
+  test("rejects an anonymous request before reading codebase data", async () => {
+    requireUserRequest.mockResolvedValue(
+      Response.json({ error: "Authentication required" }, { status: 401 }),
+    );
+
+    const response = await listCodebases(
+      new Request("http://localhost/api/codebases"),
+    );
+
+    expect(response.status).toBe(401);
+    expect(list).not.toHaveBeenCalled();
   });
 
   test("validates and resolves path lookups", async () => {

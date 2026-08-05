@@ -28,7 +28,6 @@ import { IosDeviceSettingsCard } from "@/components/devices/settings-card";
 import { PushNotificationSettingsCard } from "@/components/push-notifications/push-notification-settings-card";
 import { SettingsHelpLink } from "@/components/settings-help-link";
 import { JiraSettingsPage } from "@/components/jira/settings-page";
-import { DatabaseEncryptionAlert } from "@/components/credentials/database-encryption-alert";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -90,7 +89,6 @@ export function SettingsPage() {
         <h1 className="text-2xl font-semibold tracking-tight">{t("title")}</h1>
         <p className="mt-1 text-sm text-muted-foreground">{t("description")}</p>
       </div>
-      <DatabaseEncryptionAlert />
       <div className="grid items-start gap-6 xl:grid-cols-2">
         <div className="flex min-w-0 flex-col gap-8">
           <SettingsGroup

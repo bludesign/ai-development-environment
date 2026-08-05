@@ -2,10 +2,8 @@ import { render, screen } from "@testing-library/react";
 import { describe, expect, test, vi } from "vitest";
 
 import RootLayout, { generateMetadata } from "@/app/[locale]/layout";
-import { LEFT_SIDEBAR_COOKIE, RIGHT_SIDEBAR_COOKIE } from "@/lib/sidebar-state";
 
 const mocks = vi.hoisted(() => ({
-  cookies: vi.fn(),
   getMessages: vi.fn(),
   getTranslations: vi.fn(),
   notFound: vi.fn(),
@@ -14,10 +12,6 @@ const mocks = vi.hoisted(() => ({
 vi.mock("next/font/google", () => ({
   Geist: () => ({ variable: "geist-sans" }),
   Geist_Mono: () => ({ variable: "geist-mono" }),
-}));
-
-vi.mock("next/headers", () => ({
-  cookies: mocks.cookies,
 }));
 
 vi.mock("next/navigation", () => ({
@@ -44,35 +38,8 @@ vi.mock("@/components/ui/tooltip", () => ({
   ),
 }));
 
-vi.mock("@/components/app-shell", () => ({
-  AppShell: ({
-    children,
-    leftDefaultOpen,
-    rightDefaultOpen,
-  }: {
-    children: React.ReactNode;
-    leftDefaultOpen: boolean;
-    rightDefaultOpen: boolean;
-  }) => (
-    <div
-      data-testid="app-shell"
-      data-left-open={leftDefaultOpen}
-      data-right-open={rightDefaultOpen}
-    >
-      {children}
-    </div>
-  ),
-}));
-
 describe("localized root layout", () => {
-  test("sets the document language and preserves sidebar cookie defaults", async () => {
-    mocks.cookies.mockResolvedValue({
-      get: (name: string) => {
-        if (name === LEFT_SIDEBAR_COOKIE) return { value: "false" };
-        if (name === RIGHT_SIDEBAR_COOKIE) return { value: "true" };
-        return undefined;
-      },
-    });
+  test("sets the document language without wrapping public routes in the dashboard shell", async () => {
     mocks.getMessages.mockResolvedValue({ shell: {} });
 
     const layout = await RootLayout({
@@ -85,8 +52,7 @@ describe("localized root layout", () => {
 
     expect(screen.getByTestId("intl-provider")).toBeDefined();
     expect(screen.getByTestId("tooltip-provider")).toBeDefined();
-    expect(screen.getByTestId("app-shell").dataset.leftOpen).toBe("false");
-    expect(screen.getByTestId("app-shell").dataset.rightOpen).toBe("true");
+    expect(screen.queryByTestId("app-shell")).toBeNull();
     expect(screen.getByText("Page content")).toBeDefined();
   });
 

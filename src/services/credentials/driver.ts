@@ -31,8 +31,7 @@ export class CredentialStoreOperationError extends Error {
   constructor(
     message: string,
     readonly code:
-      | "CREDENTIAL_ENCRYPTION_KEY_MISSING"
-      | "CREDENTIAL_ENCRYPTION_KEY_MISMATCH"
+      | "CREDENTIAL_KEY_MISMATCH"
       | "CREDENTIAL_DATA_INVALID"
       | "CREDENTIAL_STORE_READ_ONLY"
       | "VAULT_CONFIGURATION_INVALID"

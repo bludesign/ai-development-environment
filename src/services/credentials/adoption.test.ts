@@ -5,9 +5,12 @@ import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { PrismaClient } from "@/generated/prisma/client";
 
 import { adoptExternalCredentials } from "./adoption";
+import { credentialKeyFingerprint } from "./crypto";
 import { DatabaseCredentialDriver } from "./database-driver";
 import type { AdoptableCredential, CredentialDriver } from "./driver";
 import { CREDENTIALS } from "./types";
+
+const TEST_KEY = Buffer.alloc(32, 3);
 
 const CREATE_CREDENTIAL_TABLE = `
   CREATE TABLE "Credential" (
@@ -199,8 +202,9 @@ describe("adoptExternalCredentials", () => {
   test("does nothing for a backend that owns its own metadata", async () => {
     const driver = new DatabaseCredentialDriver(prisma, {
       storageType: "database",
-      encryptionKey: null,
-      keyFingerprint: null,
+      encryptionKey: TEST_KEY,
+      keyFingerprint: credentialKeyFingerprint(TEST_KEY),
+      previousKeys: [],
     });
 
     await expect(adoptExternalCredentials(prisma, driver)).resolves.toEqual({

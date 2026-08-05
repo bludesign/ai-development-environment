@@ -1,0 +1,164 @@
+import { hkdfSync } from "node:crypto";
+
+/**
+ * Every secret this server needs is derived from one root, `APP_SECRET`.
+ *
+ * HKDF-Expand is a PRF, so a leaked derived key reveals nothing about the root
+ * or about its siblings: the blast-radius separation that separate environment
+ * variables used to provide is preserved cryptographically instead. What the
+ * single root gives up is *scoping* — every process needs the root to derive any
+ * of them — which only matters if the credential broker is ever split out of the
+ * control plane.
+ */
+const SALT = "aide/v1";
+
+/**
+ * Changing a label re-keys only that derivation, so treat these as frozen.
+ * `credential-encryption` in particular names data at rest.
+ */
+const INFO = {
+  auth: "better-auth-secret",
+  credential: "credential-encryption",
+  ota: "ota-artifact-token",
+} as const;
+
+const REQUIRED_BYTES = 32;
+
+/**
+ * Used only while Next.js prerenders during `next build`. A production build must
+ * not require production secrets — that keeps real key material out of build
+ * environments and CI images. Anything derived from it is marked `ephemeral` and
+ * is barred from touching stored data.
+ */
+const BUILD_PHASE_MATERIAL = Buffer.alloc(REQUIRED_BYTES, 0x2a);
+
+export type AppSecrets = {
+  /** Better Auth's signing secret, base64. */
+  authSecret: string;
+  /** Raw AES-256-GCM key for credential encryption at rest. */
+  credentialKey: Buffer;
+  /** HMAC key for signed OTA artifact download links, hex. */
+  otaTokenSecret: string;
+  /**
+   * True when derived from the build-phase placeholder rather than a configured
+   * `APP_SECRET`. Callers that read or write persisted secrets must refuse.
+   */
+  ephemeral: boolean;
+};
+
+export type SecretEnvironment = Readonly<Record<string, string | undefined>>;
+
+function decodeHex(value: string): Buffer | null {
+  if (value.length !== REQUIRED_BYTES * 2 || !/^[0-9a-fA-F]+$/.test(value)) {
+    return null;
+  }
+  return Buffer.from(value, "hex");
+}
+
+/**
+ * Strict base64: `Buffer.from` silently ignores trailing garbage and non-base64
+ * characters, so a round-trip comparison is what actually rejects a typo rather
+ * than quietly deriving keys from a truncated value.
+ */
+function decodeBase64(value: string): Buffer | null {
+  if (value.length % 4 !== 0 || !/^[A-Za-z0-9+/]+={0,2}$/.test(value)) {
+    return null;
+  }
+  const decoded = Buffer.from(value, "base64");
+  if (decoded.length !== REQUIRED_BYTES) return null;
+  return decoded.toString("base64") === value ? decoded : null;
+}
+
+/**
+ * Only accepts encodings of exactly 32 random bytes, never a passphrase.
+ *
+ * HKDF has no work factor, and the per-row `keyFingerprint` stored beside every
+ * encrypted credential is a plain SHA-256 of the derived key — together those make
+ * a memorable passphrase cheap to attack offline against a stolen database. The
+ * strict encoding rule is what structurally prevents a weak root.
+ */
+export function parseAppSecretMaterial(value: string, name: string): Buffer {
+  const trimmed = value.trim();
+  const decoded = decodeHex(trimmed) ?? decodeBase64(trimmed);
+  if (!decoded) {
+    throw new Error(
+      `${name} must be base64 or hex encoding of exactly ${REQUIRED_BYTES} random bytes. Generate one with: openssl rand -base64 ${REQUIRED_BYTES}`,
+    );
+  }
+  return decoded;
+}
+
+function derive(material: Buffer, info: string): Buffer {
+  return Buffer.from(hkdfSync("sha256", material, SALT, info, REQUIRED_BYTES));
+}
+
+function expand(material: Buffer, ephemeral: boolean): AppSecrets {
+  return {
+    authSecret: derive(material, INFO.auth).toString("base64"),
+    credentialKey: derive(material, INFO.credential),
+    otaTokenSecret: derive(material, INFO.ota).toString("hex"),
+    ephemeral,
+  };
+}
+
+function readRootMaterial(env: SecretEnvironment): {
+  material: Buffer;
+  ephemeral: boolean;
+} {
+  const configured = env.APP_SECRET?.trim();
+  if (configured) {
+    return {
+      material: parseAppSecretMaterial(configured, "APP_SECRET"),
+      ephemeral: false,
+    };
+  }
+  if (env.NEXT_PHASE === "phase-production-build") {
+    return { material: BUILD_PHASE_MATERIAL, ephemeral: true };
+  }
+  throw new Error(
+    "APP_SECRET is required. Generate one with: openssl rand -base64 32",
+  );
+}
+
+// Keyed on the raw values so a test (or a config reload) that changes the
+// environment gets fresh derivations without an explicit reset hook. The
+// separator is a newline rather than a NUL: a raw NUL byte in the source makes
+// git treat this file as binary, which hides it from every diff and review tool.
+// Neither value can contain a newline after `.trim()`, so the key stays unambiguous.
+let cache: { key: string; secrets: AppSecrets } | null = null;
+
+export function getAppSecrets(
+  env: SecretEnvironment = process.env,
+): AppSecrets {
+  const key = `${env.APP_SECRET ?? ""}\n${env.NEXT_PHASE ?? ""}`;
+  if (cache?.key === key) return cache.secrets;
+  const { material, ephemeral } = readRootMaterial(env);
+  const secrets = expand(material, ephemeral);
+  cache = { key, secrets };
+  return secrets;
+}
+
+/**
+ * Credential keys derived from `APP_SECRET_PREVIOUS`, oldest rotation last.
+ *
+ * Comma-separated so an operator can keep more than one prior root live while a
+ * rotation rolls across replicas. Only the credential key is derived: sessions
+ * signed with a previous auth secret are meant to fall over into a re-login, and
+ * OTA links are short-lived by construction.
+ */
+export function getPreviousCredentialKeys(
+  env: SecretEnvironment = process.env,
+): Buffer[] {
+  const configured = env.APP_SECRET_PREVIOUS?.trim();
+  if (!configured) return [];
+  return configured
+    .split(",")
+    .map((entry) => entry.trim())
+    .filter(Boolean)
+    .map((entry, index) =>
+      derive(
+        parseAppSecretMaterial(entry, `APP_SECRET_PREVIOUS[${index}]`),
+        INFO.credential,
+      ),
+    );
+}

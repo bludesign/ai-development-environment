@@ -16,7 +16,7 @@ const execFileAsync = promisify(execFile);
 const roots: string[] = [];
 
 beforeEach(() => {
-  process.env.OTA_TOKEN_SECRET = "test-secret";
+  process.env.APP_ORIGINS = "builds.example.com";
   getServerServices.mockReturnValue({
     buildsService: {
       artifactForInstall: vi.fn(async () => ({
@@ -39,7 +39,7 @@ beforeEach(() => {
 });
 
 afterEach(async () => {
-  delete process.env.OTA_TOKEN_SECRET;
+  delete process.env.APP_ORIGINS;
   await Promise.all(
     roots.splice(0).map((root) => rm(root, { recursive: true, force: true })),
   );

@@ -31,6 +31,19 @@ function prismaBytes(value: Uint8Array): Uint8Array<ArrayBuffer> {
   return Uint8Array.from(value);
 }
 
+/**
+ * Rows per startup-migration transaction. Small enough that a table of any
+ * realistic size finishes each chunk well inside SQLite's transaction timeout,
+ * large enough that the per-transaction overhead stays negligible.
+ */
+const MIGRATION_BATCH_SIZE = 50;
+
+function* batched<T>(rows: readonly T[]): Generator<readonly T[]> {
+  for (let index = 0; index < rows.length; index += MIGRATION_BATCH_SIZE) {
+    yield rows.slice(index, index + MIGRATION_BATCH_SIZE);
+  }
+}
+
 type SqliteWalCheckpointResult = {
   busy: number | bigint;
 };
@@ -65,6 +78,17 @@ export class DatabaseCredentialDriver implements CredentialDriver {
   ) {}
 
   async initialize(): Promise<void> {
+    const encryptionKey = this.config.encryptionKey;
+
+    // This connection setting makes SQLite overwrite content released by each update.
+    // Leave it enabled so subsequent credential replacements and deletions receive the
+    // same protection.
+    await this.prisma.$queryRawUnsafe("PRAGMA secure_delete = ON;");
+
+    // Rotation runs first, so rows sealed under a previous APP_SECRET are brought
+    // forward before the fingerprint check below would reject them.
+    await this.reencryptRotatedRows();
+
     const encryptedRows = await this.prisma.credential.findMany({
       where: { storageType: this.storageType, encrypted: true },
       select: {
@@ -76,48 +100,39 @@ export class DatabaseCredentialDriver implements CredentialDriver {
         payload: true,
       },
     });
-    if (encryptedRows.length && !this.config.encryptionKey) {
+
+    const mismatched = encryptedRows.some(
+      (row) => row.keyFingerprint !== this.config.keyFingerprint,
+    );
+    if (mismatched) {
       throw new CredentialStoreOperationError(
-        "Encrypted credentials exist, but CREDENTIAL_ENCRYPTION_KEY is not configured. Restore the original key and restart the server.",
-        "CREDENTIAL_ENCRYPTION_KEY_MISSING",
+        "APP_SECRET does not match existing credentials. Restore the original value, or set APP_SECRET_PREVIOUS to it so stored credentials are re-encrypted on the next start.",
+        "CREDENTIAL_KEY_MISMATCH",
       );
     }
-    if (this.config.encryptionKey) {
-      const encryptionKey = this.config.encryptionKey;
-      const mismatched = encryptedRows.some(
-        (row) => row.keyFingerprint !== this.config.keyFingerprint,
+    const malformed = encryptedRows.some(
+      (row) =>
+        !row.payload ||
+        row.encryptionVersion !== 1 ||
+        !row.nonce ||
+        !row.authTag,
+    );
+    if (malformed) {
+      throw invalidCredential(
+        "One or more encrypted credential records have invalid encryption metadata",
       );
-      if (mismatched) {
-        throw new CredentialStoreOperationError(
-          "CREDENTIAL_ENCRYPTION_KEY does not match existing credentials. Restore the original key and restart the server.",
-          "CREDENTIAL_ENCRYPTION_KEY_MISMATCH",
-        );
-      }
-      const malformed = encryptedRows.some(
-        (row) =>
-          !row.payload ||
-          row.encryptionVersion !== 1 ||
-          !row.nonce ||
-          !row.authTag,
-      );
-      if (malformed) {
-        throw invalidCredential(
-          "One or more encrypted credential records have invalid encryption metadata",
-        );
-      }
+    }
 
-      // This connection setting makes SQLite overwrite content released by each update.
-      // Leave it enabled so subsequent credential replacements and deletions receive the
-      // same protection.
-      await this.prisma.$queryRawUnsafe("PRAGMA secure_delete = ON;");
-
-      // Adding a valid key later upgrades every plaintext database credential atomically.
-      const sweptRows = await this.prisma.$transaction(async (transaction) => {
-        const plaintextRows = await transaction.credential.findMany({
-          where: { storageType: this.storageType, encrypted: false },
-          select: { id: true, kind: true, payload: true },
-        });
-        for (const row of plaintextRows) {
+    // Databases written before encryption became unconditional can still hold
+    // plaintext rows; this upgrades every one of them.
+    const plaintextRows = await this.prisma.credential.findMany({
+      where: { storageType: this.storageType, encrypted: false },
+      select: { id: true, kind: true, payload: true },
+    });
+    let sweptRows = 0;
+    for (const batch of batched(plaintextRows)) {
+      sweptRows += await this.prisma.$transaction(async (transaction) => {
+        for (const row of batch) {
           if (!row.payload) {
             throw invalidCredential(
               `Credential metadata for ${row.id} has no database payload`,
@@ -140,10 +155,124 @@ export class DatabaseCredentialDriver implements CredentialDriver {
             },
           });
         }
-        return plaintextRows.length;
+        return batch.length;
       });
-      if (sweptRows > 0) await erasePlaintextRemnants(this.prisma);
     }
+    if (sweptRows > 0) {
+      await erasePlaintextRemnants(this.prisma);
+      console.log(
+        `[credentials] Encrypted ${sweptRows} plaintext credential row(s) under the key derived from APP_SECRET.`,
+      );
+    }
+  }
+
+  /**
+   * Re-seals rows encrypted under a key derived from APP_SECRET_PREVIOUS.
+   *
+   * Idempotent: rows already carrying the current fingerprint are not selected, so
+   * an interrupted run simply resumes. A row that matches no supplied key is left
+   * alone for the caller's mismatch check to report, rather than being dropped.
+   *
+   * Written in batches rather than one transaction spanning every row, because a
+   * large credential table would otherwise have to finish inside SQLite's
+   * transaction timeout or roll the whole rotation back. Resumability is what makes
+   * that safe: a run cut short leaves some rows on the new key and the rest on the
+   * old, and the next start picks up exactly those that are left.
+   */
+  private async reencryptRotatedRows(): Promise<number> {
+    const previousKeys = this.config.previousKeys;
+    if (previousKeys.length === 0) return 0;
+
+    const staleRows = await this.prisma.credential.findMany({
+      where: {
+        storageType: this.storageType,
+        encrypted: true,
+        keyFingerprint: { not: this.config.keyFingerprint },
+      },
+      select: {
+        id: true,
+        kind: true,
+        payload: true,
+        encryptionVersion: true,
+        nonce: true,
+        authTag: true,
+      },
+    });
+    if (staleRows.length === 0) return 0;
+
+    let rotated = 0;
+    for (const batch of batched(staleRows)) {
+      rotated += await this.prisma.$transaction(async (transaction) => {
+        let count = 0;
+        for (const row of batch) {
+          if (
+            !row.payload ||
+            !row.encryptionVersion ||
+            !row.nonce ||
+            !row.authTag
+          ) {
+            throw invalidCredential(
+              `Credential ${row.id} has invalid encryption metadata and cannot be rotated`,
+            );
+          }
+          const descriptor = {
+            id: row.id,
+            kind: row.kind as CredentialDescriptor["kind"],
+          };
+          const encrypted = {
+            payload: row.payload,
+            encryptionVersion: row.encryptionVersion,
+            nonce: row.nonce,
+            authTag: row.authTag,
+          };
+          let plaintext: Buffer | null = null;
+          for (const key of previousKeys) {
+            try {
+              plaintext = decryptCredential(descriptor, encrypted, key);
+              break;
+            } catch {
+              // Try the next previous key; AES-GCM authentication makes a wrong key
+              // a clean failure rather than silent garbage.
+            }
+          }
+          if (!plaintext) continue;
+
+          const resealed = encryptCredential(
+            descriptor,
+            plaintext,
+            this.config.encryptionKey,
+          );
+          await transaction.credential.update({
+            where: { id: row.id },
+            data: {
+              payload: prismaBytes(resealed.payload),
+              encryptionVersion: resealed.encryptionVersion,
+              nonce: prismaBytes(resealed.nonce),
+              authTag: prismaBytes(resealed.authTag),
+              keyFingerprint: resealed.keyFingerprint,
+            },
+          });
+          count += 1;
+        }
+        return count;
+      });
+    }
+    // The superseded ciphertext is released database content, so scrub it the same
+    // way the plaintext upgrade does.
+    if (rotated > 0) {
+      await erasePlaintextRemnants(this.prisma);
+      // `.env.example` tells the operator to remove APP_SECRET_PREVIOUS "once the
+      // server has started cleanly"; without this there is nothing that says when
+      // that happened, or whether anything was left behind.
+      const remaining = staleRows.length - rotated;
+      console.log(
+        `[credentials] Re-encrypted ${rotated} credential row(s) under the current APP_SECRET.` +
+          (remaining > 0
+            ? ` ${remaining} row(s) matched no key in APP_SECRET_PREVIOUS and were left untouched.`
+            : " APP_SECRET_PREVIOUS can now be removed."),
+      );
+    }
+    return rotated;
   }
 
   async get(descriptor: CredentialDescriptor): Promise<Buffer | null> {
@@ -175,16 +304,10 @@ export class DatabaseCredentialDriver implements CredentialDriver {
       );
     }
     if (!record.encrypted) return Buffer.from(record.payload);
-    if (!this.config.encryptionKey) {
-      throw new CredentialStoreOperationError(
-        "CREDENTIAL_ENCRYPTION_KEY is required to read encrypted credentials",
-        "CREDENTIAL_ENCRYPTION_KEY_MISSING",
-      );
-    }
     if (record.keyFingerprint !== this.config.keyFingerprint) {
       throw new CredentialStoreOperationError(
-        "CREDENTIAL_ENCRYPTION_KEY does not match this credential",
-        "CREDENTIAL_ENCRYPTION_KEY_MISMATCH",
+        "APP_SECRET does not match this credential",
+        "CREDENTIAL_KEY_MISMATCH",
       );
     }
     if (!record.encryptionVersion || !record.nonce || !record.authTag) {
@@ -218,19 +341,21 @@ export class DatabaseCredentialDriver implements CredentialDriver {
     descriptor: CredentialDescriptor,
     value: Uint8Array,
   ): Promise<void> {
-    const encryption = this.config.encryptionKey
-      ? encryptCredential(descriptor, value, this.config.encryptionKey)
-      : null;
+    const encryption = encryptCredential(
+      descriptor,
+      value,
+      this.config.encryptionKey,
+    );
     const data = {
       kind: descriptor.kind,
       ownerId: descriptor.ownerId ?? null,
       storageType: this.storageType,
-      payload: prismaBytes(encryption?.payload ?? value),
-      encrypted: Boolean(encryption),
-      encryptionVersion: encryption?.encryptionVersion ?? null,
-      nonce: encryption ? prismaBytes(encryption.nonce) : null,
-      authTag: encryption ? prismaBytes(encryption.authTag) : null,
-      keyFingerprint: encryption?.keyFingerprint ?? null,
+      payload: prismaBytes(encryption.payload),
+      encrypted: true,
+      encryptionVersion: encryption.encryptionVersion,
+      nonce: prismaBytes(encryption.nonce),
+      authTag: prismaBytes(encryption.authTag),
+      keyFingerprint: encryption.keyFingerprint,
     };
     await transaction.credential.upsert({
       where: { id: descriptor.id },

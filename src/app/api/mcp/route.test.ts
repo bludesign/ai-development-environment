@@ -1,9 +1,19 @@
-import { afterEach, describe, expect, test, vi } from "vitest";
+import { beforeEach, describe, expect, test, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
   callBuiltInTool: vi.fn(),
   mcpPresetToolNames: vi.fn().mockResolvedValue(null),
   builtInTools: { definitions: () => [] },
+}));
+const authorization = vi.hoisted(() => ({
+  authorizeMcpPresetRequest: vi.fn(),
+  authorizeRunMcpRequest: vi.fn(),
+  authorizeToolRequest: vi.fn(),
+}));
+
+vi.mock("@/services/tools", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/services/tools")>()),
+  ...authorization,
 }));
 
 vi.mock("@/services/server-services", () => ({
@@ -15,9 +25,17 @@ vi.mock("@/services/server-services", () => ({
 
 import { DELETE, GET, POST } from "./route";
 
-afterEach(() => {
+beforeEach(() => {
   vi.clearAllMocks();
-  vi.unstubAllEnvs();
+  const allowed = {
+    context: {
+      caller: "api-key:key-1@unknown",
+      correlationId: "request-1",
+      source: "MCP",
+    },
+  };
+  authorization.authorizeMcpPresetRequest.mockResolvedValue(allowed);
+  authorization.authorizeToolRequest.mockResolvedValue(allowed);
 });
 
 describe("MCP endpoint authentication", () => {
@@ -39,8 +57,7 @@ describe("MCP endpoint authentication", () => {
     ).resolves.toMatchObject({ status: 400 });
   });
 
-  test("does not require authentication for preset URLs when no token is configured", async () => {
-    vi.stubEnv("TOOLS_API_TOKEN", "");
+  test("allows an authorized API key for preset URLs", async () => {
     const response = await POST(
       new Request("https://control.example/api/mcp?preset=preset-1", {
         method: "POST",
@@ -54,9 +71,8 @@ describe("MCP endpoint authentication", () => {
   });
 
   test.each([GET, POST, DELETE])(
-    "does not require authentication when no token is configured",
+    "allows authorized unscoped requests",
     async (handler) => {
-      vi.stubEnv("TOOLS_API_TOKEN", "");
       const response = await handler(
         new Request("https://control.example/api/mcp", { method: "POST" }),
       );
@@ -64,8 +80,13 @@ describe("MCP endpoint authentication", () => {
     },
   );
 
-  test("rejects an invalid bearer token", async () => {
-    vi.stubEnv("TOOLS_API_TOKEN", "deployment-secret");
+  test("rejects invalid credentials", async () => {
+    authorization.authorizeToolRequest.mockResolvedValueOnce({
+      response: Response.json(
+        { error: { message: "Unauthorized" } },
+        { status: 401 },
+      ),
+    });
     const response = await POST(
       new Request("https://control.example/api/mcp", {
         method: "POST",

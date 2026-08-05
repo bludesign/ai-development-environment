@@ -1,12 +1,10 @@
 import type { PrismaClient } from "../../src/generated/prisma/client";
 
-import {
-  encryptCredential,
-  parseCredentialEncryptionKey,
-} from "../../src/services/credentials/crypto";
+import { getAppSecrets } from "../../src/lib/app-secret";
+import { encryptCredential } from "../../src/services/credentials/crypto";
 import type { CredentialKind } from "../../src/services/credentials/types";
 
-import { MOCK_CREDENTIAL_ENCRYPTION_KEY } from "./encryption-key";
+import { MOCK_APP_SECRET } from "./encryption-key";
 import { ids } from "./ids";
 import { daysAgo } from "./time";
 
@@ -15,7 +13,7 @@ import { daysAgo } from "./time";
  * backend's storage type (lowercase "database"), so these use the real descriptor ids from
  * src/services/credentials/types.ts.
  *
- * Rows are written already encrypted under CREDENTIAL_ENCRYPTION_KEY. Seeding them as
+ * Rows are written already encrypted under the key derived from APP_SECRET. Seeding them as
  * plaintext instead makes the database driver run a migrate-and-`VACUUM` pass on the first
  * request that touches credentials, which under the parallel capture run fails with
  * "database table is locked" and takes every credential-backed page down with it.
@@ -177,7 +175,7 @@ const SEEDS: Seed[] = [
 ];
 
 export async function seedCredentials(prisma: PrismaClient): Promise<void> {
-  const key = parseCredentialEncryptionKey(MOCK_CREDENTIAL_ENCRYPTION_KEY);
+  const key = getAppSecrets({ APP_SECRET: MOCK_APP_SECRET }).credentialKey;
   await prisma.credential.createMany({
     data: SEEDS.map((seed) => {
       const encrypted = encryptCredential(

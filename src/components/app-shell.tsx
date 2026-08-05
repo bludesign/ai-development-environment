@@ -1,8 +1,8 @@
 "use client";
 
 import { Fragment, useEffect, useState, type ReactNode } from "react";
-import { Blocks, PanelLeft, PanelRight, X } from "lucide-react";
-import { useTranslations } from "next-intl";
+import { Blocks, LogOut, PanelLeft, PanelRight, X } from "lucide-react";
+import { useLocale, useTranslations } from "next-intl";
 
 import { ActionCenterProvider } from "@/components/action-center/action-center-provider";
 import { SidebarStatusFooter } from "@/components/disk-space/sidebar-status";
@@ -44,11 +44,19 @@ import {
 import { buildAppBreadcrumbs, type AppBreadcrumb } from "@/lib/breadcrumbs";
 import { controlPlaneRequest } from "@/lib/control-plane-client";
 import { LEFT_SIDEBAR_COOKIE, RIGHT_SIDEBAR_COOKIE } from "@/lib/sidebar-state";
+import { authClient } from "@/services/auth/auth-client";
+
+type CurrentUser = {
+  name: string;
+  email: string;
+  image: string | null;
+};
 
 type AppShellProps = {
   children: ReactNode;
   leftDefaultOpen: boolean;
   rightDefaultOpen: boolean;
+  currentUser: CurrentUser;
 };
 
 type SidebarControls = {
@@ -105,6 +113,7 @@ function useNavigationFeatures(): NavigationFeatures {
 
 export function AppShell({
   children,
+  currentUser,
   leftDefaultOpen,
   rightDefaultOpen,
 }: AppShellProps) {
@@ -112,6 +121,7 @@ export function AppShell({
     <GitHubPipelineStatusProvider>
       <ActionCenterProvider>
         <AppShellFrame
+          currentUser={currentUser}
           leftDefaultOpen={leftDefaultOpen}
           rightDefaultOpen={rightDefaultOpen}
         >
@@ -124,6 +134,7 @@ export function AppShell({
 
 function AppShellFrame({
   children,
+  currentUser,
   leftDefaultOpen,
   rightDefaultOpen,
 }: AppShellProps) {
@@ -134,7 +145,7 @@ function AppShellFrame({
       cookieName={LEFT_SIDEBAR_COOKIE}
       defaultOpen={leftDefaultOpen}
     >
-      <NavigationSidebar features={features} />
+      <NavigationSidebar currentUser={currentUser} features={features} />
       <RightSidebarLayout
         features={features}
         rightDefaultOpen={rightDefaultOpen}
@@ -384,7 +395,59 @@ function MobileSidebarClose({ label }: { label: string }) {
   );
 }
 
-function NavigationSidebar({ features }: { features: NavigationFeatures }) {
+function UserAccountControl({ user }: { user: CurrentUser }) {
+  const t = useTranslations("shell");
+  const locale = useLocale();
+  const [signingOut, setSigningOut] = useState(false);
+  const initials = user.name
+    .split(/\s+/)
+    .map((part) => part[0])
+    .join("")
+    .slice(0, 2)
+    .toUpperCase();
+
+  return (
+    <div className="flex items-center gap-2 border-t border-sidebar-border p-2">
+      <div className="flex size-8 shrink-0 items-center justify-center rounded-full bg-sidebar-accent text-xs font-semibold">
+        {initials || user.email[0]?.toUpperCase()}
+      </div>
+      <div className="min-w-0 flex-1">
+        <p className="truncate text-xs font-medium">{user.name}</p>
+        <p className="truncate text-[11px] text-sidebar-foreground/65">
+          {user.email}
+        </p>
+      </div>
+      <Button
+        aria-label={t("signOut")}
+        disabled={signingOut}
+        onClick={() => {
+          setSigningOut(true);
+          void authClient.signOut({
+            fetchOptions: {
+              onSuccess: () => {
+                window.location.assign(`/${locale}/sign-in`);
+              },
+              onError: () => setSigningOut(false),
+            },
+          });
+        }}
+        size="icon-sm"
+        title={t("signOut")}
+        variant="ghost"
+      >
+        <LogOut />
+      </Button>
+    </div>
+  );
+}
+
+function NavigationSidebar({
+  features,
+  currentUser,
+}: {
+  features: NavigationFeatures;
+  currentUser: CurrentUser;
+}) {
   const t = useTranslations("shell");
   const { isMobile, setOpenMobile } = useSidebar();
   const pathname = usePathname();
@@ -449,6 +512,7 @@ function NavigationSidebar({ features }: { features: NavigationFeatures }) {
         })}
       </SidebarContent>
       <SidebarFooter className="p-0">
+        <UserAccountControl user={currentUser} />
         <SidebarStatusFooter />
       </SidebarFooter>
     </Sidebar>

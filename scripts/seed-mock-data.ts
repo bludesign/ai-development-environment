@@ -27,6 +27,7 @@ import { seedJira, seedJiraWebhooks } from "./mock-data/jira";
 import { seedWorkflows } from "./mock-data/workflows";
 import { seedCosts } from "./mock-data/costs";
 import { seedBuildData } from "./mock-data/build-data";
+import { seedAuth } from "./mock-data/auth";
 
 type Seeder = {
   name: string;
@@ -34,6 +35,7 @@ type Seeder = {
 };
 
 const seeders: Seeder[] = [
+  { name: "auth", run: seedAuth },
   { name: "settings", run: seedSettings },
   { name: "agents", run: seedAgents },
   { name: "codebases", run: seedCodebases },

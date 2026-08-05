@@ -15,11 +15,8 @@ const DEFAULT_SERVER_WAIT_MS = 120_000;
 const SERVER_RETRY_MS = 500;
 
 type DevelopmentAgentApi = {
-  health: () => Promise<{ health: string }>;
+  ready: () => Promise<{ mode: string }>;
   self: () => Promise<{ agentSelf: Record<string, unknown> | null }>;
-  createEnrollmentToken: () => Promise<{
-    createAgentEnrollmentToken: { token: string; expiresAt: string };
-  }>;
   enroll: (
     input: AgentInventory & { enrollmentToken: string; name: string },
   ) => Promise<{
@@ -33,6 +30,7 @@ export type DevelopmentAgentOptions = {
   name?: string;
   configFile?: string;
   waitTimeoutMs?: number;
+  enrollmentToken?: string;
 };
 
 type DevelopmentAgentDependencies = {
@@ -87,7 +85,7 @@ async function waitForServer(
   let lastError: unknown;
   while (!signal.aborted && Date.now() < deadline) {
     try {
-      await client.health();
+      await client.ready();
       return;
     } catch (error) {
       lastError = error;
@@ -142,10 +140,15 @@ export async function prepareDevelopmentAgent(
     // A missing, invalid, or stale development config is replaced below.
   }
 
-  const enrollment = await anonymousClient.createEnrollmentToken();
+  const enrollmentToken = options.enrollmentToken?.trim();
+  if (!enrollmentToken) {
+    throw new Error(
+      "The development agent needs a one-time enrollment token. Create one on the Agents page and set CONTROL_AGENT_DEV_ENROLLMENT_TOKEN.",
+    );
+  }
   const response = await anonymousClient.enroll({
     ...inventory,
-    enrollmentToken: enrollment.createAgentEnrollmentToken.token,
+    enrollmentToken,
     name,
   });
   const config: AgentConfig = {

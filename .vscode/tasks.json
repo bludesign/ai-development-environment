@@ -146,8 +146,8 @@
       "type": "shell",
       "label": "screenshots:copy",
       "group": "test",
-      "command": "npm run screenshots:copy -- '${input:docsDirectory}'",
-      "detail": "Copy the desktop light and dark captures into the docs project"
+      "command": "npm run screenshots:copy -- --include-videos '${input:docsDirectory}'",
+      "detail": "Copy the desktop light and dark captures, including walkthrough videos, into the docs project"
     },
     {
       "type": "shell",

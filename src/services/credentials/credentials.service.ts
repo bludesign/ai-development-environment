@@ -649,8 +649,7 @@ export class CredentialService {
 
   private clearRecoverableDatabaseInitializationIssue(): void {
     if (
-      this.runtimeIssue?.code === "CREDENTIAL_ENCRYPTION_KEY_MISSING" ||
-      this.runtimeIssue?.code === "CREDENTIAL_ENCRYPTION_KEY_MISMATCH" ||
+      this.runtimeIssue?.code === "CREDENTIAL_KEY_MISMATCH" ||
       this.runtimeIssue?.code === "CREDENTIAL_DATA_INVALID"
     ) {
       this.initializationPromise = null;
@@ -802,15 +801,8 @@ export class CredentialService {
           },
         ]
       : [];
-    const hasEncryptedDatabaseRows = rows.some(
-      (row) => row.storageType === "database" && row.encrypted,
-    );
-    const configurationWarnings = this.configResult.warnings.filter(
-      (warning) =>
-        warning.code !== "DATABASE_UNENCRYPTED" || !hasEncryptedDatabaseRows,
-    );
     const warnings = uniqueIssues([
-      ...configurationWarnings,
+      ...this.configResult.warnings,
       ...this.configResult.errors,
       ...(this.runtimeIssue ? [this.runtimeIssue] : []),
       ...(this.adoptionIssue ? [this.adoptionIssue] : []),
@@ -818,13 +810,12 @@ export class CredentialService {
     ]);
     const hasError =
       this.configResult.errors.length > 0 || Boolean(this.runtimeIssue);
+    // Database storage is always encrypted now that the key is derived from the
+    // mandatory APP_SECRET; PLAINTEXT is no longer reachable.
     const encryptionState = hasError
       ? ("ERROR" as const)
       : this.configResult.storageType === "database"
-        ? this.configResult.config?.storageType === "database" &&
-          this.configResult.config.encryptionKey
-          ? ("ENCRYPTED" as const)
-          : ("PLAINTEXT" as const)
+        ? ("ENCRYPTED" as const)
         : ("EXTERNAL" as const);
     return {
       storageType: this.configResult.storageType,

@@ -4,7 +4,6 @@ import { KeyRound, RefreshCw, ShieldAlert } from "lucide-react";
 import { useTranslations } from "next-intl";
 import { useCallback, useEffect, useState } from "react";
 
-import { DatabaseEncryptionAlert } from "./database-encryption-alert";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -138,8 +137,6 @@ export function CredentialsPage() {
     };
   }, []);
 
-  const warningCodes =
-    data?.credentialStoreStatus.warnings.map((warning) => warning.code) ?? [];
   return (
     <section className="mx-auto flex w-full max-w-[1500px] flex-col gap-6">
       <div className="flex items-start justify-between gap-4">
@@ -160,8 +157,6 @@ export function CredentialsPage() {
           {t("refresh")}
         </Button>
       </div>
-
-      <DatabaseEncryptionAlert warningCodes={warningCodes} />
 
       {error && (
         <Alert variant="destructive">

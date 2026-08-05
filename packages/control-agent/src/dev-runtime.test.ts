@@ -30,14 +30,8 @@ const enrolledConfig: AgentConfig = {
 
 function agentApi() {
   return {
-    health: vi.fn().mockResolvedValue({ health: "ok" }),
+    ready: vi.fn().mockResolvedValue({ mode: "password" }),
     self: vi.fn().mockResolvedValue({ agentSelf: null }),
-    createEnrollmentToken: vi.fn().mockResolvedValue({
-      createAgentEnrollmentToken: {
-        token: "enroll-development",
-        expiresAt: new Date().toISOString(),
-      },
-    }),
     enroll: vi.fn().mockResolvedValue({
       enrollAgent: {
         agent: { id: enrolledConfig.agentId },
@@ -64,9 +58,9 @@ describe("development agent preparation", () => {
     vi.restoreAllMocks();
   });
 
-  test("waits for the server and automatically enrolls on first run", async () => {
+  test("waits for the server and enrolls with a supplied one-time token", async () => {
     const anonymous = agentApi();
-    anonymous.health.mockRejectedValueOnce(new Error("connection refused"));
+    anonymous.ready.mockRejectedValueOnce(new Error("connection refused"));
     const save = vi.fn().mockResolvedValue(undefined);
     const wait = vi.fn().mockResolvedValue(undefined);
 
@@ -75,6 +69,7 @@ describe("development agent preparation", () => {
         server: enrolledConfig.server,
         websocketServer: enrolledConfig.websocketServer,
         configFile: "/tmp/control-agent-dev-test.json",
+        enrollmentToken: "enroll-development",
       },
       new AbortController().signal,
       {
@@ -87,7 +82,6 @@ describe("development agent preparation", () => {
     );
 
     expect(wait).toHaveBeenCalledOnce();
-    expect(anonymous.createEnrollmentToken).toHaveBeenCalledOnce();
     expect(anonymous.enroll).toHaveBeenCalledWith({
       ...inventory,
       enrollmentToken: "enroll-development",
@@ -132,7 +126,6 @@ describe("development agent preparation", () => {
 
     expect(config).toEqual(enrolledConfig);
     expect(authenticated.self).toHaveBeenCalledOnce();
-    expect(anonymous.createEnrollmentToken).not.toHaveBeenCalled();
     expect(save).not.toHaveBeenCalled();
     expect(logged).toHaveBeenCalledWith(
       `Reusing development agent ${enrolledConfig.name} (${enrolledConfig.agentId})`,
@@ -149,6 +142,7 @@ describe("development agent preparation", () => {
       {
         server: enrolledConfig.server,
         websocketServer: enrolledConfig.websocketServer,
+        enrollmentToken: "enroll-development",
       },
       new AbortController().signal,
       {
@@ -161,13 +155,30 @@ describe("development agent preparation", () => {
       },
     );
 
-    expect(anonymous.createEnrollmentToken).toHaveBeenCalledOnce();
     expect(anonymous.enroll).toHaveBeenCalledOnce();
     expect(save).toHaveBeenCalledOnce();
     expect(config.agentId).toBe(enrolledConfig.agentId);
     expect(logged).not.toHaveBeenCalledWith(
       expect.stringContaining("Reusing development agent"),
     );
+  });
+
+  test("requires an enrollment token when no reusable identity exists", async () => {
+    const anonymous = agentApi();
+    await expect(
+      prepareDevelopmentAgent(
+        { server: enrolledConfig.server },
+        new AbortController().signal,
+        {
+          createClient: () => anonymous,
+          inventory: () => inventory,
+          load: vi.fn().mockRejectedValue(new Error("missing")),
+          save: vi.fn(),
+          wait: vi.fn(),
+        },
+      ),
+    ).rejects.toThrow("CONTROL_AGENT_DEV_ENROLLMENT_TOKEN");
+    expect(anonymous.enroll).not.toHaveBeenCalled();
   });
 
   test.each([

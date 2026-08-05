@@ -1,11 +1,12 @@
 // @vitest-environment node
-import { beforeEach, describe, expect, test, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
   completeEnrollment: vi.fn(),
   createEnrollment: vi.fn(),
   enrollmentProfile: vi.fn(),
 }));
+const requireUserRequest = vi.hoisted(() => vi.fn());
 
 const deviceId = "8bb37dd2-6e24-4ac8-8c53-c391f6c642c7";
 
@@ -14,6 +15,7 @@ vi.mock("@/services/server-services", () => ({
     iosDevicesService: mocks,
   }),
 }));
+vi.mock("@/services/auth", () => ({ requireUserRequest }));
 
 import { GET as completion } from "./enrollment-complete/route";
 import { GET as profile } from "./enrollment-profile/route";
@@ -28,8 +30,13 @@ function proxyHeaders(extra: Record<string, string> = {}) {
   };
 }
 
+// These routes resolve their public origin from forwarded headers, which are now
+// only believed when APP_ORIGINS lists the host.
 beforeEach(() => {
+  process.env.APP_ORIGINS =
+    "devices.example.com,192.168.1.20,192.168.1.20:3000";
   vi.clearAllMocks();
+  requireUserRequest.mockResolvedValue(null);
   mocks.completeEnrollment.mockResolvedValue({ id: deviceId });
   mocks.enrollmentProfile.mockResolvedValue(new Uint8Array([1, 2, 3]));
   mocks.createEnrollment.mockResolvedValue({
@@ -37,6 +44,10 @@ beforeEach(() => {
     token: "test-token",
     expiresAt: new Date(Date.now() + 60_000),
   });
+});
+
+afterEach(() => {
+  delete process.env.APP_ORIGINS;
 });
 
 describe("iOS enrollment routes", () => {

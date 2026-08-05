@@ -1,12 +1,14 @@
 import { beforeEach, describe, expect, test, vi } from "vitest";
 
 const registerDevice = vi.hoisted(() => vi.fn());
+const requireUserRequest = vi.hoisted(() => vi.fn());
 
 vi.mock("@/services/server-services", () => ({
   getServerServices: () => ({
     notificationsService: { registerDevice },
   }),
 }));
+vi.mock("@/services/auth", () => ({ requireUserRequest }));
 
 import { POST, resetNotificationDeviceRateLimitsForTests } from "./route";
 
@@ -33,6 +35,7 @@ function request(body: unknown = input, headers: Record<string, string> = {}) {
 
 beforeEach(() => {
   registerDevice.mockReset();
+  requireUserRequest.mockResolvedValue(null);
   resetNotificationDeviceRateLimitsForTests();
 });
 

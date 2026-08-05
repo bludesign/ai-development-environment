@@ -18,6 +18,7 @@ export const codebasesOpenApiDocument = {
         tags: ["Codebases"],
         operationId: "getCodebases",
         summary: "List codebases",
+        security: [{ BetterAuthCookie: [] }, { BetterAuthBearer: [] }],
         responses: {
           "200": {
             description: "Registered codebase checkouts",
@@ -38,6 +39,7 @@ export const codebasesOpenApiDocument = {
               },
             },
           },
+          "401": { $ref: "#/components/responses/Unauthorized" },
           "500": { $ref: "#/components/responses/InternalError" },
         },
       },
@@ -47,6 +49,7 @@ export const codebasesOpenApiDocument = {
         tags: ["Codebases"],
         operationId: "getCodebaseByPath",
         summary: "Get a codebase by folder path",
+        security: [{ BetterAuthCookie: [] }, { BetterAuthBearer: [] }],
         parameters: [
           {
             name: "path",
@@ -74,6 +77,7 @@ export const codebasesOpenApiDocument = {
             },
           },
           "400": { $ref: "#/components/responses/BadRequest" },
+          "401": { $ref: "#/components/responses/Unauthorized" },
           "404": { $ref: "#/components/responses/NotFound" },
           "409": { $ref: "#/components/responses/AmbiguousPath" },
           "500": { $ref: "#/components/responses/InternalError" },
@@ -111,11 +115,25 @@ export const codebasesOpenApiDocument = {
         },
       },
     },
+    securitySchemes: {
+      BetterAuthCookie: {
+        type: "apiKey",
+        in: "cookie",
+        name: "better-auth.session_token",
+        description: "Better Auth browser session cookie.",
+      },
+      BetterAuthBearer: {
+        type: "http",
+        scheme: "bearer",
+        description: "Better Auth native-client session token.",
+      },
+    },
     responses: Object.fromEntries(
       [
         ["BadRequest", "The path is missing or invalid"],
         ["NotFound", "No codebase uses the requested path"],
         ["AmbiguousPath", "Multiple agents use the requested path"],
+        ["Unauthorized", "A Better Auth user session is required"],
         ["InternalError", "Unexpected server error"],
       ].map(([name, description]) => [
         name,

@@ -207,6 +207,27 @@ export class AgentGraphQLClient {
     };
   }
 
+  async ready(): Promise<{ mode: string }> {
+    const response = await fetch(`${this.server}/api/auth/config`, {
+      headers: { ...this.headers },
+      signal: AbortSignal.timeout(this.requestTimeoutMs),
+    });
+    const raw = await response.text();
+    let body: { mode?: unknown } | undefined;
+    try {
+      body = raw ? (JSON.parse(raw) as { mode?: unknown }) : undefined;
+    } catch {
+      body = undefined;
+    }
+    if (!response.ok || typeof body?.mode !== "string") {
+      const detail = `HTTP ${response.status} ${response.statusText}`.trim();
+      throw new Error(
+        !body && raw ? `${detail}: ${raw.slice(0, 500)}` : detail,
+      );
+    }
+    return { mode: body.mode };
+  }
+
   async request<T>(
     query: string,
     variables?: Record<string, unknown>,
