@@ -8,6 +8,7 @@ import {
 } from "@/services/graphql-server/graphql-server.service";
 import { isAnonymousAgentEnrollment } from "@/services/graphql-server/graphql-auth";
 import {
+  crossOriginError,
   PrincipalResolutionError,
   principalErrorResponse,
 } from "@/services/auth";
@@ -34,6 +35,12 @@ async function getHandler(): Promise<
 }
 
 async function handleRequest(request: NextRequest): Promise<Response> {
+  // Apollo's own CSRF prevention already demands a preflight-inducing request, so
+  // this is belt and braces — but the dashboard reaches GraphQL on the session
+  // cookie alone, and that deserves the same stated rule as every other route
+  // that does.
+  const crossOrigin = crossOriginError(request);
+  if (crossOrigin) return crossOrigin;
   try {
     const context = await SharedGraphQLServerService.createContext(
       request.headers,

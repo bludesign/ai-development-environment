@@ -31,6 +31,19 @@ function prismaBytes(value: Uint8Array): Uint8Array<ArrayBuffer> {
   return Uint8Array.from(value);
 }
 
+/**
+ * Rows per startup-migration transaction. Small enough that a table of any
+ * realistic size finishes each chunk well inside SQLite's transaction timeout,
+ * large enough that the per-transaction overhead stays negligible.
+ */
+const MIGRATION_BATCH_SIZE = 50;
+
+function* batched<T>(rows: readonly T[]): Generator<readonly T[]> {
+  for (let index = 0; index < rows.length; index += MIGRATION_BATCH_SIZE) {
+    yield rows.slice(index, index + MIGRATION_BATCH_SIZE);
+  }
+}
+
 type SqliteWalCheckpointResult = {
   busy: number | bigint;
 };
@@ -111,38 +124,46 @@ export class DatabaseCredentialDriver implements CredentialDriver {
     }
 
     // Databases written before encryption became unconditional can still hold
-    // plaintext rows; this upgrades all of them atomically.
-    const sweptRows = await this.prisma.$transaction(async (transaction) => {
-      const plaintextRows = await transaction.credential.findMany({
-        where: { storageType: this.storageType, encrypted: false },
-        select: { id: true, kind: true, payload: true },
-      });
-      for (const row of plaintextRows) {
-        if (!row.payload) {
-          throw invalidCredential(
-            `Credential metadata for ${row.id} has no database payload`,
-          );
-        }
-        const encrypted = encryptCredential(
-          { id: row.id, kind: row.kind as CredentialDescriptor["kind"] },
-          row.payload,
-          encryptionKey,
-        );
-        await transaction.credential.update({
-          where: { id: row.id },
-          data: {
-            payload: prismaBytes(encrypted.payload),
-            encrypted: true,
-            encryptionVersion: encrypted.encryptionVersion,
-            nonce: prismaBytes(encrypted.nonce),
-            authTag: prismaBytes(encrypted.authTag),
-            keyFingerprint: encrypted.keyFingerprint,
-          },
-        });
-      }
-      return plaintextRows.length;
+    // plaintext rows; this upgrades every one of them.
+    const plaintextRows = await this.prisma.credential.findMany({
+      where: { storageType: this.storageType, encrypted: false },
+      select: { id: true, kind: true, payload: true },
     });
-    if (sweptRows > 0) await erasePlaintextRemnants(this.prisma);
+    let sweptRows = 0;
+    for (const batch of batched(plaintextRows)) {
+      sweptRows += await this.prisma.$transaction(async (transaction) => {
+        for (const row of batch) {
+          if (!row.payload) {
+            throw invalidCredential(
+              `Credential metadata for ${row.id} has no database payload`,
+            );
+          }
+          const encrypted = encryptCredential(
+            { id: row.id, kind: row.kind as CredentialDescriptor["kind"] },
+            row.payload,
+            encryptionKey,
+          );
+          await transaction.credential.update({
+            where: { id: row.id },
+            data: {
+              payload: prismaBytes(encrypted.payload),
+              encrypted: true,
+              encryptionVersion: encrypted.encryptionVersion,
+              nonce: prismaBytes(encrypted.nonce),
+              authTag: prismaBytes(encrypted.authTag),
+              keyFingerprint: encrypted.keyFingerprint,
+            },
+          });
+        }
+        return batch.length;
+      });
+    }
+    if (sweptRows > 0) {
+      await erasePlaintextRemnants(this.prisma);
+      console.log(
+        `[credentials] Encrypted ${sweptRows} plaintext credential row(s) under the key derived from APP_SECRET.`,
+      );
+    }
   }
 
   /**
@@ -151,6 +172,12 @@ export class DatabaseCredentialDriver implements CredentialDriver {
    * Idempotent: rows already carrying the current fingerprint are not selected, so
    * an interrupted run simply resumes. A row that matches no supplied key is left
    * alone for the caller's mismatch check to report, rather than being dropped.
+   *
+   * Written in batches rather than one transaction spanning every row, because a
+   * large credential table would otherwise have to finish inside SQLite's
+   * transaction timeout or roll the whole rotation back. Resumability is what makes
+   * that safe: a run cut short leaves some rows on the new key and the rest on the
+   * old, and the next start picks up exactly those that are left.
    */
   private async reencryptRotatedRows(): Promise<number> {
     const previousKeys = this.config.previousKeys;
@@ -173,63 +200,78 @@ export class DatabaseCredentialDriver implements CredentialDriver {
     });
     if (staleRows.length === 0) return 0;
 
-    const rotated = await this.prisma.$transaction(async (transaction) => {
-      let count = 0;
-      for (const row of staleRows) {
-        if (
-          !row.payload ||
-          !row.encryptionVersion ||
-          !row.nonce ||
-          !row.authTag
-        ) {
-          throw invalidCredential(
-            `Credential ${row.id} has invalid encryption metadata and cannot be rotated`,
-          );
-        }
-        const descriptor = {
-          id: row.id,
-          kind: row.kind as CredentialDescriptor["kind"],
-        };
-        const encrypted = {
-          payload: row.payload,
-          encryptionVersion: row.encryptionVersion,
-          nonce: row.nonce,
-          authTag: row.authTag,
-        };
-        let plaintext: Buffer | null = null;
-        for (const key of previousKeys) {
-          try {
-            plaintext = decryptCredential(descriptor, encrypted, key);
-            break;
-          } catch {
-            // Try the next previous key; AES-GCM authentication makes a wrong key
-            // a clean failure rather than silent garbage.
+    let rotated = 0;
+    for (const batch of batched(staleRows)) {
+      rotated += await this.prisma.$transaction(async (transaction) => {
+        let count = 0;
+        for (const row of batch) {
+          if (
+            !row.payload ||
+            !row.encryptionVersion ||
+            !row.nonce ||
+            !row.authTag
+          ) {
+            throw invalidCredential(
+              `Credential ${row.id} has invalid encryption metadata and cannot be rotated`,
+            );
           }
-        }
-        if (!plaintext) continue;
+          const descriptor = {
+            id: row.id,
+            kind: row.kind as CredentialDescriptor["kind"],
+          };
+          const encrypted = {
+            payload: row.payload,
+            encryptionVersion: row.encryptionVersion,
+            nonce: row.nonce,
+            authTag: row.authTag,
+          };
+          let plaintext: Buffer | null = null;
+          for (const key of previousKeys) {
+            try {
+              plaintext = decryptCredential(descriptor, encrypted, key);
+              break;
+            } catch {
+              // Try the next previous key; AES-GCM authentication makes a wrong key
+              // a clean failure rather than silent garbage.
+            }
+          }
+          if (!plaintext) continue;
 
-        const resealed = encryptCredential(
-          descriptor,
-          plaintext,
-          this.config.encryptionKey,
-        );
-        await transaction.credential.update({
-          where: { id: row.id },
-          data: {
-            payload: prismaBytes(resealed.payload),
-            encryptionVersion: resealed.encryptionVersion,
-            nonce: prismaBytes(resealed.nonce),
-            authTag: prismaBytes(resealed.authTag),
-            keyFingerprint: resealed.keyFingerprint,
-          },
-        });
-        count += 1;
-      }
-      return count;
-    });
+          const resealed = encryptCredential(
+            descriptor,
+            plaintext,
+            this.config.encryptionKey,
+          );
+          await transaction.credential.update({
+            where: { id: row.id },
+            data: {
+              payload: prismaBytes(resealed.payload),
+              encryptionVersion: resealed.encryptionVersion,
+              nonce: prismaBytes(resealed.nonce),
+              authTag: prismaBytes(resealed.authTag),
+              keyFingerprint: resealed.keyFingerprint,
+            },
+          });
+          count += 1;
+        }
+        return count;
+      });
+    }
     // The superseded ciphertext is released database content, so scrub it the same
     // way the plaintext upgrade does.
-    if (rotated > 0) await erasePlaintextRemnants(this.prisma);
+    if (rotated > 0) {
+      await erasePlaintextRemnants(this.prisma);
+      // `.env.example` tells the operator to remove APP_SECRET_PREVIOUS "once the
+      // server has started cleanly"; without this there is nothing that says when
+      // that happened, or whether anything was left behind.
+      const remaining = staleRows.length - rotated;
+      console.log(
+        `[credentials] Re-encrypted ${rotated} credential row(s) under the current APP_SECRET.` +
+          (remaining > 0
+            ? ` ${remaining} row(s) matched no key in APP_SECRET_PREVIOUS and were left untouched.`
+            : " APP_SECRET_PREVIOUS can now be removed."),
+      );
+    }
     return rotated;
   }
 

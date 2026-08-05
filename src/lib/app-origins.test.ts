@@ -3,7 +3,9 @@ import { describe, expect, test } from "vitest";
 import {
   betterAuthBaseURL,
   devServerOrigins,
+  isSameOriginRequest,
   isTrustedOrigin,
+  isTrustedWebSocketOrigin,
   parseOriginPattern,
   resolveAppOrigins,
 } from "./app-origins";
@@ -139,6 +141,23 @@ describe("resolveAppOrigins", () => {
       APP_ORIGINS: "https://app.example.com,http://localhost:3000",
     });
     expect(origins.allHttps).toBe(true);
+  });
+
+  test("a scheme-less LAN address is plaintext outside production", () => {
+    // `.env.example` invites a bare host, and `next dev` answers such an address
+    // over http. Reading it as https would pin the base URL to a scheme the dev
+    // server never speaks and mark cookies Secure, which the browser then drops.
+    const development = resolveAppOrigins({ APP_ORIGINS: "192.168.1.50:3000" });
+    expect(development.allHttps).toBe(false);
+    expect(betterAuthBaseURL(development)).toMatchObject({ protocol: "auto" });
+
+    // In production the same spelling means https: plaintext is never the
+    // intended default for a deployment.
+    const production = resolveAppOrigins({
+      NODE_ENV: "production",
+      APP_ORIGINS: "app.example.com",
+    });
+    expect(production.allHttps).toBe(true);
   });
 
   test("falls back to trusting each request's host when nothing is configured", () => {
@@ -291,5 +310,122 @@ describe("isTrustedOrigin", () => {
   test("honours a pinned port but ignores an unpinned one", () => {
     expect(isTrustedOrigin(origins, "10.0.0.5:9999")).toBe(false);
     expect(isTrustedOrigin(origins, "app.example.com:8443")).toBe(true);
+  });
+});
+
+describe("isSameOriginRequest", () => {
+  const url = "https://control.example.com/api/tools/call";
+
+  function request(headers: Record<string, string>): Request {
+    return new Request(url, { method: "POST", headers });
+  }
+
+  test.each([
+    ["a same-origin fetch", { "sec-fetch-site": "same-origin" }],
+    ["a user-initiated load", { "sec-fetch-site": "none" }],
+    ["a matching Origin", { origin: "https://control.example.com" }],
+    ["a client that sends neither header", {}],
+  ])("accepts %s", (_label, headers) => {
+    expect(isSameOriginRequest(request(headers), false)).toBe(true);
+  });
+
+  test.each([
+    ["a cross-site request", { "sec-fetch-site": "cross-site" }],
+    ["a sibling subdomain", { "sec-fetch-site": "same-site" }],
+    ["a foreign Origin", { origin: "https://evil.test" }],
+    ["an opaque Origin", { origin: "null" }],
+    [
+      "a foreign Origin even when the scheme matches",
+      { origin: "https://control.example.com.evil.test" },
+    ],
+  ])("refuses %s", (_label, headers) => {
+    expect(isSameOriginRequest(request(headers), false)).toBe(false);
+  });
+
+  test("Sec-Fetch-Site outranks a forged Origin", () => {
+    // The header the browser sets describes the whole redirect chain, so it wins
+    // over an Origin that happens to look right.
+    expect(
+      isSameOriginRequest(
+        request({
+          "sec-fetch-site": "cross-site",
+          origin: "https://control.example.com",
+        }),
+        false,
+      ),
+    ).toBe(false);
+  });
+
+  test("follows the forwarded host only when proxies are trusted", () => {
+    const forwarded = new Request("http://internal:3000/api/tools/call", {
+      method: "POST",
+      headers: {
+        origin: "https://control.example.com",
+        "x-forwarded-host": "control.example.com",
+        "x-forwarded-proto": "https",
+      },
+    });
+    expect(isSameOriginRequest(forwarded, true)).toBe(true);
+    expect(isSameOriginRequest(forwarded, false)).toBe(false);
+  });
+});
+
+describe("isTrustedWebSocketOrigin", () => {
+  const configured = resolveAppOrigins({
+    NODE_ENV: "production",
+    APP_ORIGINS: "app.example.com",
+  });
+  const inferred = resolveAppOrigins({ NODE_ENV: "production" });
+
+  test("accepts a handshake with no Origin", () => {
+    // The control agent and CLI connect this way, and carry no ambient credential.
+    expect(
+      isTrustedWebSocketOrigin(configured, undefined, "app.example.com"),
+    ).toBe(true);
+  });
+
+  test("ignores the port, because the socket is on its own", () => {
+    expect(
+      isTrustedWebSocketOrigin(
+        configured,
+        "https://app.example.com",
+        "app.example.com:3091",
+      ),
+    ).toBe(true);
+  });
+
+  test.each([
+    "https://evil.test",
+    "https://app.example.com.evil.test",
+    "not a url",
+    "null",
+  ])("rejects %s against a configured allowlist", (origin) => {
+    expect(
+      isTrustedWebSocketOrigin(configured, origin, "app.example.com:3091"),
+    ).toBe(false);
+  });
+
+  test("falls back to the handshake's own host when nothing is configured", () => {
+    expect(inferred.mode).toBe("inferred");
+    expect(
+      isTrustedWebSocketOrigin(
+        inferred,
+        "https://box.tailnet.ts.net",
+        "box.tailnet.ts.net:3091",
+      ),
+    ).toBe(true);
+    expect(
+      isTrustedWebSocketOrigin(
+        inferred,
+        "https://evil.test",
+        "box.tailnet.ts.net:3091",
+      ),
+    ).toBe(false);
+  });
+
+  test("rejects a browser origin when the host header is unusable", () => {
+    expect(
+      isTrustedWebSocketOrigin(inferred, "https://evil.test", undefined),
+    ).toBe(false);
   });
 });

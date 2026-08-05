@@ -31,11 +31,12 @@ Override with environment variables:
 | `AGENT_WS_HOSTNAME`            | `127.0.0.1`                                        |
 | `AGENT_WS_PORT`                | `3091`                                             |
 | `DATABASE_URL`                 | `file:~/.ai-development-environment/production.db` |
-| `BETTER_AUTH_SECRET`           | Required; at least 32 characters                   |
-| `BETTER_AUTH_URL`              | Required; the public server origin                 |
+| `APP_SECRET`                   | Required; base64 or hex of exactly 32 bytes        |
+| `APP_SECRET_PREVIOUS`          | unset; set only while rotating `APP_SECRET`        |
+| `APP_ORIGINS`                  | unset; required in production                      |
+| `TRUST_PROXY_HEADERS`          | `false`                                            |
 | `AUTH_MODE`                    | `password`                                         |
 | `CREDENTIAL_STORAGE_TYPE`      | `database`                                         |
-| `CREDENTIAL_ENCRYPTION_KEY`    | unset                                              |
 | `VAULT_ADDR`                   | required for Vault                                 |
 | `VAULT_TOKEN`                  | unset                                              |
 | `VAULT_NAMESPACE`              | unset                                              |
@@ -49,11 +50,17 @@ Override with environment variables:
 
 Only SQLite `file:` URLs are supported for `DATABASE_URL`.
 
-Generate `BETTER_AUTH_SECRET` once, back it up, and keep it stable across upgrades. Changing it invalidates active sessions. `AUTH_MODE` accepts `password`, `oidc`, or `both`. OIDC modes require a generic provider client ID and secret plus either a discovery URL or a complete authorization, token, and user-info endpoint set. See the [authentication documentation](https://ai-development-environment.mintlify.app/reference/authentication) for the complete `AUTH_OAUTH_*` variable list and redirect URL.
+Generate `APP_SECRET` once with `openssl rand -base64 32`, back it up, and keep it stable across upgrades. It must be base64 or hex encoding of exactly 32 random bytes — a passphrase is rejected, because session signing, credential encryption, and install-link signing are all derived from it. Changing it signs everyone out and makes stored credentials unreadable unless the old value is passed as `APP_SECRET_PREVIOUS`, which re-encrypts them on the next start; remove it once the server has started cleanly.
+
+`APP_ORIGINS` is the comma-separated list of origins this server is reached at, and is required in production. Localhost is always trusted outside production. Leaving it unset makes the server trust each request's own `Host`, which means the absolute URLs it generates follow whatever host the caller asked for.
+
+The first account to register claims the instance and closes public registration. Every account then has identical, complete authority: any signed-in user can create and delete accounts, set anyone's password, revoke sessions, and issue API keys. There are no roles.
+
+`AUTH_MODE` accepts `password`, `oidc`, or `both`. OIDC modes require a generic provider client ID and secret plus either a discovery URL or a complete authorization, token, and user-info endpoint set. See the [authentication documentation](https://ai-development-environment.mintlify.app/reference/authentication) for the complete `AUTH_OAUTH_*` variable list and redirect URL.
 
 ### Credential backends
 
-`CREDENTIAL_STORAGE_TYPE` accepts `database`, `vault`, or `keychain`. Database is the default on npm, Linux, and Docker. Database secrets remain plaintext—with warnings on Settings and Credentials—until `CREDENTIAL_ENCRYPTION_KEY` is set. Generate it once with `openssl rand -base64 32`; it must be strict base64 decoding to exactly 32 bytes. Restart after setting it, back it up securely, and retain it for the lifetime of encrypted rows. Losing/changing it blocks credential operations, and key rotation is not supported.
+`CREDENTIAL_STORAGE_TYPE` accepts `database`, `vault`, or `keychain`. Database is the default on npm, Linux, and Docker. Database secrets are always encrypted with a key derived from `APP_SECRET`; there is no plaintext mode and no separate encryption key to configure. Rows written before encryption became unconditional are encrypted at the next start. Rotation is supported: set the old root as `APP_SECRET_PREVIOUS` and stored credentials are re-encrypted on start. Vault and Keychain storage do not use the derived key at all.
 
 Vault supports KV v2 only. Quote custom-header JSON as one shell value, for example `CREDENTIAL_VAULT_HEADERS='{"X-Vault-AWS-IAM-Server-ID":"vault.example.com"}'`. Standard token/namespace variables cannot conflict with equivalent custom headers. `VAULT_CACERT` must be readable by the server process. Plaintext Vault HTTP and `VAULT_SKIP_VERIFY=true` work but display prominent interception warnings. The default-prefix policy is:
 

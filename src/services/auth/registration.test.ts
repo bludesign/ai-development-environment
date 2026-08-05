@@ -25,6 +25,12 @@ function database(userCount = 0, overrides: Partial<Settings> = {}) {
   };
   let users = userCount;
   const authSettings = {
+    // The settings row exists in every fixture, so `findUnique` answers and the
+    // `upsert` fallback stays for the first-miss path only, which a test overrides
+    // with `null` — hence the explicit nullable signature.
+    findUnique: vi.fn<() => Promise<Settings | null>>(async () => ({
+      ...state,
+    })),
     upsert: vi.fn(async () => ({ ...state })),
     update: vi.fn(async ({ data }: { data: Partial<Settings> }) => {
       Object.assign(state, data);
@@ -143,6 +149,60 @@ describe("registration policy", () => {
       ),
     ).resolves.toMatchObject({ data: { role: "user", banned: false } });
     expect(fixture.prisma.authSettings.updateMany).not.toHaveBeenCalled();
+  });
+
+  test("the admin path waives closed registration but never the bootstrap claim", async () => {
+    // The path is the only signal the hook gets, and it is not corroborated by a
+    // session, so it must not be able to skip the race that guards the very first
+    // account. Two concurrent admin-path creations on an empty database still
+    // settle to exactly one winner.
+    const fixture = database();
+    getPrismaClient.mockResolvedValue(fixture.prisma);
+    const managementContext = { path: "/admin/create-user" };
+    const attempts = await Promise.allSettled([
+      authDatabaseHooks.user.create.before(
+        { email: "one@example.com" },
+        managementContext,
+      ),
+      authDatabaseHooks.user.create.before(
+        { email: "two@example.com" },
+        managementContext,
+      ),
+    ]);
+
+    expect(
+      attempts.filter(({ status }) => status === "fulfilled"),
+    ).toHaveLength(1);
+    expect(attempts.filter(({ status }) => status === "rejected")).toHaveLength(
+      1,
+    );
+  });
+
+  test("reading registration status does not write when the row exists", async () => {
+    const fixture = database(1, { bootstrapCompleted: true });
+    getPrismaClient.mockResolvedValue(fixture.prisma);
+
+    await expect(getRegistrationStatus()).resolves.toEqual({
+      enabled: true,
+      setupRequired: false,
+    });
+    // `/api/auth/config` is unauthenticated and polled by the healthcheck, so the
+    // read path must stay a read.
+    expect(fixture.prisma.authSettings.findUnique).toHaveBeenCalled();
+    expect(fixture.prisma.authSettings.upsert).not.toHaveBeenCalled();
+    expect(fixture.prisma.authSettings.update).not.toHaveBeenCalled();
+  });
+
+  test("creates the settings row on the first miss", async () => {
+    const fixture = database();
+    fixture.prisma.authSettings.findUnique.mockResolvedValueOnce(null);
+    getPrismaClient.mockResolvedValue(fixture.prisma);
+
+    await expect(getRegistrationStatus()).resolves.toEqual({
+      enabled: true,
+      setupRequired: true,
+    });
+    expect(fixture.prisma.authSettings.upsert).toHaveBeenCalled();
   });
 
   test("prevents deletion of the current or final user", async () => {

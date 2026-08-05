@@ -2,6 +2,7 @@ import { useServer as createGraphQLWebSocketServer } from "graphql-ws/use/ws";
 import { WebSocketServer } from "ws";
 import { GraphQLError } from "graphql";
 
+import { isTrustedWebSocketOrigin, resolveAppOrigins } from "@/lib/app-origins";
 import {
   type GraphQLContext,
   normalizeHeaders,
@@ -63,6 +64,28 @@ function connectionHeaders(context: {
   return headers;
 }
 
+/**
+ * Errors to answer an operation with, or `null` to let it run.
+ *
+ * The socket carries an anonymous principal until a credential resolves, and the
+ * one thing an unauthenticated caller legitimately needs is enrolling itself —
+ * the agent has no credential yet at that point. Everything else needs one.
+ *
+ * `principal` is optional on the context type, so an absent one is treated as
+ * anonymous rather than waved through: a context that never resolved a principal
+ * has proven nothing about its caller.
+ */
+export function deniedWebSocketOperation(
+  principal: GraphQLContext["principal"],
+  query: string | undefined,
+): GraphQLError[] | null {
+  if (principal && principal.kind !== "anonymous") return null;
+  if (isAnonymousAgentEnrollment(query)) return null;
+  return [
+    new GraphQLError("Authentication is required for this GraphQL operation."),
+  ];
+}
+
 export function parseAgentWebSocketPort(value: string | undefined): number {
   const port = Number(value?.trim() || "3091");
   if (!Number.isInteger(port) || port < 1 || port > 65_535) {
@@ -82,10 +105,24 @@ export async function startAgentWebSocketServer(): Promise<void> {
     process.env.AGENT_WS_HOSTNAME ?? process.env.HOSTNAME ?? "127.0.0.1";
   const startPromise = (async () => {
     const schema = await SharedGraphQLServerService.getSchema();
+    const origins = resolveAppOrigins();
     const webSocketServer = new WebSocketServer({
       host,
       port,
       path: "/graphql",
+      // Rejected at the handshake, before graphql-ws sees the connection, so a
+      // cross-site page never gets far enough to send an operation on a socket
+      // carrying the visitor's cookies.
+      verifyClient: ({ origin, req }, done) => {
+        if (isTrustedWebSocketOrigin(origins, origin, req.headers.host)) {
+          done(true);
+          return;
+        }
+        console.warn(
+          `Agent GraphQL WebSocket rejected a handshake from origin ${origin}.`,
+        );
+        done(false, 403, "Forbidden origin");
+      },
     });
     const disposable = createGraphQLWebSocketServer(
       {
@@ -97,16 +134,11 @@ export async function startAgentWebSocketServer(): Promise<void> {
                 connectionHeaders(context),
               );
             operationContexts.set(context, graphQLContext);
-            if (
-              graphQLContext.principal?.kind === "anonymous" &&
-              !isAnonymousAgentEnrollment(payload.query)
-            ) {
-              return [
-                new GraphQLError(
-                  "Authentication is required for this GraphQL operation.",
-                ),
-              ];
-            }
+            const denied = deniedWebSocketOperation(
+              graphQLContext.principal,
+              payload.query,
+            );
+            if (denied) return denied;
           } catch {
             return [new GraphQLError("The supplied credential is invalid.")];
           }

@@ -55,6 +55,20 @@ function hasBetterAuthCookie(headers: Headers): boolean {
   );
 }
 
+/**
+ * Whether the only credential on this request is one the browser attached by
+ * itself. Those are the requests a cross-site caller can cause to be sent, so
+ * they are the ones that need an origin check; a `Bearer` or `X-API-Key` header
+ * had to be set deliberately by the client.
+ */
+export function usesAmbientCredential(headers: Headers): boolean {
+  return (
+    hasBetterAuthCookie(headers) &&
+    !headers.get("x-api-key")?.trim() &&
+    !headers.get("authorization")?.trim()
+  );
+}
+
 export async function resolveRequestPrincipal(
   headers: Headers,
   agents?: AgentControlService,

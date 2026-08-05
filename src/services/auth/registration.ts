@@ -14,8 +14,41 @@ type AuthHookContext = {
   };
 } | null;
 
+/**
+ * Whether this creation came through the admin endpoint, which an operator uses
+ * to add accounts while public registration is closed.
+ *
+ * The path is the only signal Better Auth offers here: `/admin/create-user`
+ * resolves its own session locally and never publishes it on the hook context
+ * (unlike the endpoints behind `adminMiddleware`), so there is no session to
+ * corroborate against. That is why this only waives the `registrationEnabled`
+ * gate — the endpoint's own `UNAUTHORIZED` check already guards it — and never
+ * the bootstrap claim, which stays unconditional in `claimInitialRegistration`.
+ * A spoofed path therefore cannot be used to create the *first* account.
+ */
 function isAuthenticatedManagementCreation(context: AuthHookContext): boolean {
   return context?.path?.includes("/admin/create-user") ?? false;
+}
+
+/**
+ * Read-first, because this backs `/api/auth/config` — an unauthenticated route
+ * that the Docker healthcheck and the control agent's readiness probe both poll.
+ * Upserting on every call turned a liveness check into a write, and gave any
+ * anonymous caller a cheap way to generate them. The row is created on the first
+ * miss and read thereafter.
+ */
+async function readAuthSettings() {
+  const prisma = await getPrismaClient();
+  return (
+    (await prisma.authSettings.findUnique({
+      where: { id: AUTH_SETTINGS_ID },
+    })) ??
+    (await prisma.authSettings.upsert({
+      where: { id: AUTH_SETTINGS_ID },
+      create: { id: AUTH_SETTINGS_ID },
+      update: {},
+    }))
+  );
 }
 
 export async function getRegistrationStatus(): Promise<{
@@ -24,11 +57,7 @@ export async function getRegistrationStatus(): Promise<{
 }> {
   const prisma = await getPrismaClient();
   const [settings, userCount] = await Promise.all([
-    prisma.authSettings.upsert({
-      where: { id: AUTH_SETTINGS_ID },
-      create: { id: AUTH_SETTINGS_ID },
-      update: {},
-    }),
+    readAuthSettings(),
     prisma.user.count(),
   ]);
 
@@ -74,16 +103,23 @@ export async function setRegistrationEnabled(enabled: boolean): Promise<void> {
   });
 }
 
-async function claimInitialRegistration(): Promise<void> {
+/**
+ * Gate one account creation.
+ *
+ * `allowWhenRegistrationClosed` is set for the admin endpoint, which must keep
+ * working after public registration is turned off. It waives only that gate: the
+ * bootstrap claim below runs for every caller, so the race that protects the
+ * first account on an empty database cannot be skipped by any request, however it
+ * is routed.
+ */
+async function claimInitialRegistration({
+  allowWhenRegistrationClosed = false,
+}: { allowWhenRegistrationClosed?: boolean } = {}): Promise<void> {
   const prisma = await getPrismaClient();
-  const settings = await prisma.authSettings.upsert({
-    where: { id: AUTH_SETTINGS_ID },
-    create: { id: AUTH_SETTINGS_ID },
-    update: {},
-  });
+  const settings = await readAuthSettings();
 
   if (settings.bootstrapCompleted) {
-    if (!settings.registrationEnabled) {
+    if (!settings.registrationEnabled && !allowWhenRegistrationClosed) {
       throw new APIError("FORBIDDEN", {
         message: "Account registration is disabled.",
       });
@@ -91,6 +127,10 @@ async function claimInitialRegistration(): Promise<void> {
     return;
   }
 
+  // Accounts exist but the flag never got set — a database seeded directly, or a
+  // crash between creating the first user and completing the claim. Adopt the
+  // settled state, then apply the ordinary closed-registration rule to this
+  // request.
   const userCount = await prisma.user.count();
   if (userCount > 0) {
     await prisma.authSettings.update({
@@ -102,6 +142,7 @@ async function claimInitialRegistration(): Promise<void> {
         bootstrapClaimedAt: null,
       },
     });
+    if (allowWhenRegistrationClosed) return;
     throw new APIError("FORBIDDEN", {
       message: "Account registration is disabled.",
     });
@@ -149,9 +190,10 @@ export const authDatabaseHooks = {
         user: Record<string, unknown>,
         context: AuthHookContext,
       ) => {
-        if (!isAuthenticatedManagementCreation(context)) {
-          await claimInitialRegistration();
-        }
+        await claimInitialRegistration({
+          allowWhenRegistrationClosed:
+            isAuthenticatedManagementCreation(context),
+        });
         return {
           data: {
             ...user,

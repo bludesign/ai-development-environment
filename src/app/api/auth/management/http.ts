@@ -2,6 +2,7 @@ import { APIError } from "better-auth/api";
 import * as z from "zod/v4";
 
 import {
+  crossOriginError,
   PrincipalResolutionError,
   principalErrorResponse,
   requireUserPrincipal,
@@ -13,6 +14,11 @@ export async function authenticated<T>(
     principal: Awaited<ReturnType<typeof requireUserPrincipal>>,
   ) => Promise<T>,
 ): Promise<Response> {
+  // These routes create accounts, reset passwords, and mint API keys on nothing
+  // but a session cookie, so they are the ones a cross-site caller would most
+  // like to reach.
+  const crossOrigin = crossOriginError(request);
+  if (crossOrigin) return crossOrigin;
   try {
     const principal = await requireUserPrincipal(request.headers);
     return Response.json(await action(principal));

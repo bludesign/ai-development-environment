@@ -35,6 +35,42 @@ const managementStatements = {
 const managementAccess = createAccessControl(managementStatements);
 const userManagerRole = managementAccess.newRole(managementStatements);
 
+/**
+ * Every account is an administrator (see `adminRoles` below), and the user
+ * database hooks pin `role` and the ban columns to fixed values. That makes part
+ * of the admin plugin's surface unusable rather than merely unused, so those
+ * routes are removed instead of left mounted:
+ *
+ * - `setRole`, `banUser`, `unbanUser` would return success and silently do
+ *   nothing, because `authDatabaseHooks.user.update.before` overwrites the very
+ *   columns they set.
+ * - `impersonateUser`/`stopImpersonating` have no privilege boundary to enforce
+ *   when all accounts are equal; they would let any user assume any other user's
+ *   session, and nothing in this deployment reads `Session.impersonatedBy`.
+ *
+ * Dropping the endpoints also drops them from `auth.api`, so a future caller gets
+ * a type error rather than a silent no-op. The return type is inferred rather than
+ * annotated: spelling it out as an `Omit` of the plugin widens `id` off its literal
+ * type, which breaks Better Auth's inference of `auth.api` for every other plugin.
+ */
+function managementAdminPlugin() {
+  const plugin = admin({
+    ac: managementAccess,
+    roles: { user: userManagerRole },
+    defaultRole: "user",
+    adminRoles: ["user"],
+  });
+  const {
+    setRole: _setRole,
+    banUser: _banUser,
+    unbanUser: _unbanUser,
+    impersonateUser: _impersonateUser,
+    stopImpersonating: _stopImpersonating,
+    ...endpoints
+  } = plugin.endpoints;
+  return { ...plugin, endpoints };
+}
+
 function createAuth(
   prisma: Awaited<ReturnType<typeof getPrismaClient>>,
   runtime = getAuthRuntimeConfig(),
@@ -89,10 +125,15 @@ function createAuth(
       // Honour x-forwarded-host only when an operator has declared a proxy in
       // front. The allowlist is still what constrains the value.
       trustedProxyHeaders: runtime.trustProxyHeaders,
-      // With a per-request baseURL the Secure flag would otherwise follow whichever
-      // scheme the request arrived on, so one plaintext origin in the allowlist
-      // could hand out a session cookie without it.
-      useSecureCookies: runtime.origins.allHttps,
+      // `useSecureCookies` is deliberately not set. Better Auth resolves it per
+      // request from the scheme the request actually arrived on, falling back to
+      // the base URL and then to NODE_ENV. Passing a value computed from the
+      // allowlist overrode all three, and in `inferred` mode — nothing configured,
+      // which is a supported production shape — it resolved to `false`, stripping
+      // `Secure` and the `__Secure-` prefix from session cookies on an HTTPS
+      // deployment. Per-request resolution is also simply more accurate: an https
+      // request gets a Secure cookie and a plaintext one does not, rather than the
+      // whole deployment following whichever origin in the list is weakest.
     },
     database: prismaAdapter(prisma, { provider: "sqlite" }),
     emailAndPassword: {
@@ -108,12 +149,7 @@ function createAuth(
     },
     databaseHooks: authDatabaseHooks,
     plugins: [
-      admin({
-        ac: managementAccess,
-        roles: { user: userManagerRole },
-        defaultRole: "user",
-        adminRoles: ["user"],
-      }),
+      managementAdminPlugin(),
       apiKey({
         defaultPrefix: "aide_",
         requireName: true,

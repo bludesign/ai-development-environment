@@ -8,6 +8,7 @@ import type { WebSocketServer } from "ws";
 import { SharedGraphQLServerService } from "@/services/graphql-server/graphql-server.service";
 
 import {
+  deniedWebSocketOperation,
   mergeWebSocketCredential,
   parseAgentWebSocketPort,
   startAgentWebSocketServer,
@@ -81,5 +82,74 @@ describe("agent WebSocket startup", () => {
         error ? reject(error) : resolve(),
       ),
     );
+  });
+});
+
+describe("agent WebSocket operation authorization", () => {
+  const ENROLL = `
+    mutation Enroll($input: EnrollAgentInput!) {
+      enrollAgent(input: $input) { agent { id } }
+    }
+  `;
+
+  test.each([
+    ["an enrolled agent", { kind: "agent", agentId: "agent-1" } as const],
+    [
+      "a user session",
+      {
+        kind: "user",
+        userId: "user-1",
+        email: "user@example.com",
+        sessionId: "session-1",
+      } as const,
+    ],
+    [
+      "an API key",
+      {
+        kind: "apiKey",
+        apiKeyId: "key-1",
+        userId: "user-1",
+        name: null,
+      } as const,
+    ],
+  ])("lets %s run any operation", (_label, principal) => {
+    expect(
+      deniedWebSocketOperation(
+        principal,
+        "subscription { agentEvents { id } }",
+      ),
+    ).toBeNull();
+  });
+
+  test("lets an anonymous caller enroll, because it has no credential yet", () => {
+    expect(deniedWebSocketOperation({ kind: "anonymous" }, ENROLL)).toBeNull();
+  });
+
+  test.each([
+    ["a subscription", "subscription { agentEvents { id } }"],
+    ["introspection", "query { __schema { queryType { name } } }"],
+    [
+      "an aliased enrollment",
+      "mutation { renamed: enrollAgent(input: {}) { agent { id } } }",
+    ],
+    [
+      "enrollment smuggling a second field",
+      "mutation { enrollAgent(input: {}) { agent { id } } health }",
+    ],
+    ["an unparseable document", "not GraphQL"],
+    ["no query at all", undefined],
+  ])("refuses %s from an anonymous caller", (_label, query) => {
+    const denied = deniedWebSocketOperation({ kind: "anonymous" }, query);
+    expect(denied).toHaveLength(1);
+    expect(denied?.[0]?.message).toMatch(/Authentication is required/);
+  });
+
+  test("treats a missing principal as anonymous", () => {
+    // `createContext` always sets one, but the field is optional on the type and
+    // failing open here would be the wrong direction.
+    expect(deniedWebSocketOperation(undefined, ENROLL)).toBeNull();
+    expect(
+      deniedWebSocketOperation(undefined, "query { health }"),
+    ).toHaveLength(1);
   });
 });

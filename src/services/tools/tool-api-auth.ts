@@ -4,6 +4,7 @@ import { randomUUID } from "node:crypto";
 
 import type { AgentControlService } from "@/services/agent-control";
 import {
+  crossOriginError,
   PrincipalResolutionError,
   resolveRequestPrincipal,
 } from "@/services/auth";
@@ -39,6 +40,10 @@ export async function authorizeToolRequest(
   request: Request,
   endpoint: ToolEndpoint,
 ): Promise<{ context: ToolInvocationContext } | { response: Response }> {
+  // Tool calls run arbitrary built-in tools, and the Tools page reaches them with
+  // nothing but the session cookie.
+  const crossOrigin = crossOriginError(request);
+  if (crossOrigin) return { response: crossOrigin };
   try {
     const principal = await resolveRequestPrincipal(request.headers);
     if (

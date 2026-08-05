@@ -138,8 +138,8 @@ function developmentDefaults(env: OriginEnvironment): OriginPattern[] {
 /**
  * Collapses entries naming the same host. Matching only ever considers the host,
  * so a duplicate adds nothing; when two spellings disagree on scheme the plaintext
- * one wins, because `allHttps` gates the `Secure` cookie flag and must never
- * over-claim.
+ * one wins, because `allHttps` decides whether the base URL is pinned to https and
+ * must never over-claim.
  */
 function dedupe(patterns: OriginPattern[]): OriginPattern[] {
   const seen = new Map<string, OriginPattern>();
@@ -154,9 +154,29 @@ function dedupe(patterns: OriginPattern[]): OriginPattern[] {
   return [...seen.values()];
 }
 
-function originOf(pattern: OriginPattern): string {
-  const protocol = pattern.protocol ?? (pattern.loopback ? "http:" : "https:");
-  return `${protocol}//${pattern.host}`;
+/**
+ * The scheme an entry stands for when it was written without one.
+ *
+ * Loopback is plaintext because that is what `next dev` serves. Any other
+ * scheme-less host follows the environment: https in production, where plaintext
+ * is never the intended default, and http outside it, because the common
+ * development spelling — a bare LAN address such as `192.168.1.50`, which
+ * `.env.example` invites — is reached over http. Guessing https there would pin
+ * the base URL to a scheme the dev server does not answer on and mark session
+ * cookies `Secure`, which the browser then drops on a plaintext LAN origin,
+ * breaking sign-in with no diagnostic.
+ */
+function effectiveProtocol(
+  pattern: OriginPattern,
+  isProduction: boolean,
+): "http:" | "https:" {
+  if (pattern.protocol) return pattern.protocol;
+  if (pattern.loopback) return "http:";
+  return isProduction ? "https:" : "http:";
+}
+
+function originOf(pattern: OriginPattern, isProduction: boolean): string {
+  return `${effectiveProtocol(pattern, isProduction)}//${pattern.host}`;
 }
 
 function parsePublicBaseURL(env: OriginEnvironment): URL | null {
@@ -266,14 +286,19 @@ export function resolveAppOrigins(
       "APP_ORIGINS must include at least one exact origin; a wildcard alone gives this server no address to put in the links it generates.",
     );
   }
-  const canonical = publicBaseURL?.origin ?? originOf(exact!);
+  const canonical = publicBaseURL?.origin ?? originOf(exact!, isProduction);
 
   return {
     patterns,
     canonical,
     mode: patterns.length === 1 && !patterns[0]!.wildcard ? "single" : "multi",
+    // Loopback is exempt: browsers treat http://localhost as a secure context, so
+    // a plaintext loopback entry alongside https hosts does not force the whole
+    // deployment down to `auto`.
     allHttps: patterns.every(
-      (pattern) => pattern.loopback || pattern.protocol !== "http:",
+      (pattern) =>
+        pattern.loopback ||
+        effectiveProtocol(pattern, isProduction) === "https:",
     ),
   };
 }
@@ -401,6 +426,81 @@ export function originFromRequest(
   } catch {
     return null;
   }
+}
+
+/**
+ * Whether a request was issued by the site itself rather than by another origin.
+ *
+ * Used to guard endpoints authenticated by the session cookie. `SameSite=Lax`
+ * already withholds that cookie from cross-site POSTs, but it still sends it on
+ * top-level cross-site navigations, and it is a browser default rather than
+ * something this server states — a future `sameSite: "none"` (for a native client,
+ * or a cross-subdomain deployment) would silently remove the only protection these
+ * routes have. This states it.
+ *
+ * `Sec-Fetch-Site` is preferred where the browser sends it, because it describes
+ * the whole redirect chain rather than just the final hop. `none` is a
+ * user-initiated load — typed, bookmarked, or a download the user clicked — and is
+ * as trustworthy as `same-origin`. A request with neither header is not from a
+ * browser (curl, an MCP client, the control agent), so there is no ambient
+ * credential to abuse and nothing to check.
+ */
+export function isSameOriginRequest(
+  request: Request,
+  trustProxyHeaders: boolean,
+): boolean {
+  const site = request.headers.get("sec-fetch-site");
+  if (site) return site === "same-origin" || site === "none";
+
+  const origin = request.headers.get("origin");
+  if (!origin) return true;
+  const self = originFromRequest(request, trustProxyHeaders);
+  return Boolean(self) && origin.trim().toLowerCase() === self;
+}
+
+/**
+ * Whether a browser at `origin` may open a WebSocket to this server.
+ *
+ * WebSocket handshakes are not subject to CORS, so an `Origin` check is the only
+ * thing standing between a hostile page and a connection carrying the visitor's
+ * cookies. `SameSite=Lax` withholds those today, but the agent socket listens on
+ * its own port with nothing else in front of it, so the rule is stated here.
+ *
+ * A handshake with no `Origin` is not from a browser — the control agent and the
+ * CLI both connect this way — and carries no ambient credential, so it passes.
+ *
+ * Matching is port-insensitive by construction: the dashboard runs on the HTTP
+ * port and connects to the socket on another, so the page's origin never equals
+ * the socket's. An allowlist entry without a port already matches any port; in
+ * `inferred` mode, where there is no allowlist, the hostname of the handshake's
+ * own `Host` is the only reference point available.
+ */
+export function isTrustedWebSocketOrigin(
+  origins: AppOrigins,
+  origin: string | undefined,
+  host: string | undefined,
+): boolean {
+  if (!origin) return true;
+
+  let originHostname: string;
+  try {
+    originHostname = new URL(origin).hostname.toLowerCase();
+  } catch {
+    return false;
+  }
+  if (!originHostname) return false;
+
+  if (origins.mode !== "inferred") {
+    return origins.patterns.some((pattern) =>
+      matchesPattern(originHostname, pattern),
+    );
+  }
+
+  if (!host || !isHostShaped(host)) return false;
+  const hostname = /^(\[[^\]]+\]|[^:]+)(?::\d+)?$/
+    .exec(host.trim().toLowerCase())?.[1]
+    ?.toLowerCase();
+  return Boolean(hostname) && hostname === originHostname;
 }
 
 /** Hostnames for Next's `allowedDevOrigins`, which ignores scheme and port. */

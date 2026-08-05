@@ -7,6 +7,8 @@ import {
   oauthAuthenticationEnabled,
 } from "@/services/auth";
 
+import { createMobileOAuthState, mobileOAuthStateCookie } from "../state";
+
 function mobileCallback(value: string | null): string {
   if (!value) return "aide-auth://callback";
   const url = new URL(value);
@@ -41,6 +43,10 @@ export async function GET(request: Request): Promise<Response> {
       : (runtime.baseURL ?? requestOrigin),
   );
   completion.searchParams.set("callback", callback);
+  // Planted here and required by `complete`, so only a flow that started at this
+  // endpoint can trade a session for a one-time token.
+  const state = createMobileOAuthState();
+  completion.searchParams.set("state", state);
 
   const auth = await getAuth();
   const response = await auth.api.signInWithOAuth2({
@@ -54,9 +60,20 @@ export async function GET(request: Request): Promise<Response> {
   });
   const result = (await response.clone().json()) as { url?: string };
   if (!result.url) return response;
-  const redirect = Response.redirect(result.url, 302);
+
+  // Built with `new Response` rather than `Response.redirect`: the latter returns
+  // a response whose headers are immutable, so appending Better Auth's PKCE
+  // cookies to it throws and the flow could never complete.
+  const redirect = new Response(null, {
+    status: 302,
+    headers: { location: result.url },
+  });
   for (const cookie of response.headers.getSetCookie()) {
     redirect.headers.append("set-cookie", cookie);
   }
+  redirect.headers.append(
+    "set-cookie",
+    mobileOAuthStateCookie(state, request, runtime.trustProxyHeaders),
+  );
   return redirect;
 }
