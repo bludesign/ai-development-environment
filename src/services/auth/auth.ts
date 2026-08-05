@@ -90,7 +90,7 @@ function createAuth(
               tokenUrl: runtime.provider.tokenUrl,
               userInfoUrl: runtime.provider.userInfoUrl,
               pkce: true,
-              requireIssuerValidation: true,
+              requireIssuerValidation: runtime.provider.requireIssuerValidation,
               disableImplicitSignUp: false,
             },
           ],

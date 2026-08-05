@@ -10,6 +10,7 @@ export type OAuthProviderConfig = {
   clientId: string;
   clientSecret: string;
   scopes: string[];
+  requireIssuerValidation: boolean;
   discoveryUrl?: string;
   issuer?: string;
   authorizationUrl?: string;
@@ -59,6 +60,18 @@ function trustProxyHeaders(environment: AuthEnvironment): boolean {
   if (!configured || configured === "false" || configured === "0") return false;
   if (configured === "true" || configured === "1") return true;
   throw new Error("TRUST_PROXY_HEADERS must be true, false, 1, or 0.");
+}
+
+function requireIssuerValidation(environment: AuthEnvironment): boolean {
+  const configured = value(
+    environment,
+    "AUTH_OAUTH_REQUIRE_ISSUER_VALIDATION",
+  )?.toLowerCase();
+  if (!configured || configured === "false" || configured === "0") return false;
+  if (configured === "true" || configured === "1") return true;
+  throw new Error(
+    "AUTH_OAUTH_REQUIRE_ISSUER_VALIDATION must be true, false, 1, or 0.",
+  );
 }
 
 function authMode(environment: AuthEnvironment): AuthMode {
@@ -124,6 +137,7 @@ function oauthProvider(
     clientId: required(environment, "AUTH_OAUTH_CLIENT_ID"),
     clientSecret: required(environment, "AUTH_OAUTH_CLIENT_SECRET"),
     scopes,
+    requireIssuerValidation: requireIssuerValidation(environment),
     discoveryUrl,
     issuer,
     authorizationUrl,

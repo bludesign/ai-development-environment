@@ -11,7 +11,7 @@ const repoRoot = path.resolve(
   "..",
 );
 const standaloneDirectory = path.join(repoRoot, ".next", "standalone");
-const encryptionKey = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=";
+const appSecret = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=";
 
 function freePort() {
   return new Promise((resolve, reject) => {
@@ -126,12 +126,12 @@ async function scenario(databaseUrl, storageType) {
       AGENT_WS_HOSTNAME: "127.0.0.1",
       AGENT_WS_PORT: String(agentPort),
       DATABASE_URL: databaseUrl,
-      BETTER_AUTH_SECRET: "standalone-smoke-better-auth-secret-value",
-      BETTER_AUTH_URL: `http://127.0.0.1:${port}`,
+      APP_SECRET: appSecret,
+      APP_SECRET_PREVIOUS: "",
+      APP_ORIGINS: `http://127.0.0.1:${port}`,
+      PUBLIC_BASE_URL: "",
+      AUTH_MODE: "password",
       CREDENTIAL_STORAGE_TYPE: storageType,
-      ...(storageType === "database"
-        ? { CREDENTIAL_ENCRYPTION_KEY: encryptionKey }
-        : { CREDENTIAL_ENCRYPTION_KEY: "" }),
     },
     stdio: ["ignore", "pipe", "pipe"],
   });
