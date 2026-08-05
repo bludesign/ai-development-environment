@@ -15,6 +15,7 @@ import {
 } from "@/lib/control-plane-client";
 
 import {
+  applyJiraTicketToWorktreeOverview,
   displayedWorktreePath,
   filterWorktreeAgentGroups,
   WorktreesPage,
@@ -25,6 +26,7 @@ import type { WorktreeAgentGroup, WorktreeOverview } from "./types";
 vi.mock("@/lib/control-plane-client", () => ({
   controlPlaneRequest: vi.fn(),
   controlPlaneSubscriptions: vi.fn(),
+  onControlPlaneConnected: vi.fn(() => vi.fn()),
 }));
 
 const request = vi.mocked(controlPlaneRequest);
@@ -73,6 +75,54 @@ describe("displayedWorktreePath", () => {
     expect(
       displayedWorktreePath("/Users/test/repos/project", "/Users/test/repos"),
     ).toBe("project");
+  });
+});
+
+describe("applyJiraTicketToWorktreeOverview", () => {
+  test("updates every worktree linked to the changed Jira ticket", () => {
+    const overview = {
+      agents: [
+        {
+          codebases: [
+            {
+              worktrees: [
+                {
+                  id: "worktree-1",
+                  ticketKey: "AIDE-24",
+                  ticketTitle: "Old title",
+                  ticketStatus: "In Progress",
+                },
+                {
+                  id: "worktree-2",
+                  ticketKey: "AIDE-25",
+                  ticketTitle: "Other title",
+                  ticketStatus: "Selected",
+                },
+              ],
+            },
+          ],
+        },
+      ],
+    } as WorktreeOverview;
+
+    const updated = applyJiraTicketToWorktreeOverview(overview, {
+      key: "aide-24",
+      summary: "New title",
+      status: "Done",
+    });
+
+    expect(updated.agents[0]?.codebases[0]?.worktrees).toEqual([
+      expect.objectContaining({
+        id: "worktree-1",
+        ticketTitle: "New title",
+        ticketStatus: "Done",
+      }),
+      expect.objectContaining({
+        id: "worktree-2",
+        ticketTitle: "Other title",
+        ticketStatus: "Selected",
+      }),
+    ]);
   });
 });
 

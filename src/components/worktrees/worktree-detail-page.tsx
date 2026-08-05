@@ -27,6 +27,7 @@ import type { WorktreeRunQueueEntry } from "@/components/workflows/types";
 import { CommandQuickActions } from "@/components/commands/command-quick-actions";
 import { CommandResourcePanel } from "@/components/commands/command-resource-panel";
 import { JiraTicketDrawer } from "@/components/jira/ticket-drawer";
+import { useJiraTicketChanges } from "@/components/jira/use-jira-ticket-changes";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -60,6 +61,7 @@ import {
   worktreeHighlightBackgroundClasses,
 } from "@/lib/worktree-highlight";
 import type { GitHubActionsWorkflowRunView } from "@/services/github/types";
+import type { JiraTicketDetail } from "@/services/jira/types";
 
 import {
   BranchChangesPanel,
@@ -82,6 +84,7 @@ import {
 import type { Worktree, WorktreeDetail, WorktreeOverview } from "./types";
 import {
   ActionRow,
+  applyJiraTicketToWorktreeOverview,
   BaseFreshnessBadge,
   OriginStatusBadges,
   TagManagerDialog,
@@ -229,6 +232,11 @@ export function WorktreeDetailPage({ worktreeId }: { worktreeId: string }) {
       }
     }
   }, [worktreeId]);
+
+  useJiraTicketChanges(
+    () => void loadOverview(),
+    () => void loadOverview(),
+  );
 
   const load = useCallback(async () => {
     await Promise.all([loadOverview(), loadPipelines()]);
@@ -384,6 +392,15 @@ export function WorktreeDetailPage({ worktreeId }: { worktreeId: string }) {
     );
   }, []);
 
+  const updateJiraTicket = useCallback(
+    (ticket: Parameters<typeof applyJiraTicketToWorktreeOverview>[1]) => {
+      setOverview((current) =>
+        current ? applyJiraTicketToWorktreeOverview(current, ticket) : current,
+      );
+    },
+    [],
+  );
+
   if (loading && !overview) {
     return (
       <p className="flex w-full items-center gap-2 text-sm text-muted-foreground">
@@ -431,6 +448,7 @@ export function WorktreeDetailPage({ worktreeId }: { worktreeId: string }) {
       onPipelineCancelled={() => undefined}
       onPipelineRetried={() => undefined}
       onReload={load}
+      onTicketChange={updateJiraTicket}
       onUpdate={updateWorktree}
       overview={overview}
       pipelines={pipelines}
@@ -455,6 +473,7 @@ function LoadedWorktreeDetail({
   onPipelineCancelled,
   onPipelineRetried,
   onReload,
+  onTicketChange,
   onUpdate,
 }: {
   builds: BuildRecord[];
@@ -471,6 +490,7 @@ function LoadedWorktreeDetail({
   onPipelineCancelled: (runId: string) => void;
   onPipelineRetried: (runId: string) => void;
   onReload: () => Promise<void>;
+  onTicketChange: (ticket: JiraTicketDetail) => void;
   onUpdate: (worktree: Worktree) => void;
 }) {
   const t = useTranslations("worktreeDetail");
@@ -861,6 +881,7 @@ function LoadedWorktreeDetail({
       <JiraTicketDrawer
         issueKey={jiraIssueKey}
         onClose={() => openTicket(null)}
+        onTicketChange={onTicketChange}
       />
       <TagManagerDialog
         onChanged={onReload}

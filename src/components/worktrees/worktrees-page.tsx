@@ -61,6 +61,7 @@ import {
   pullRequestDetailHref,
 } from "@/components/github/pull-request-links";
 import { JiraTicketDrawer } from "@/components/jira/ticket-drawer";
+import { useJiraTicketChanges } from "@/components/jira/use-jira-ticket-changes";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -144,6 +145,7 @@ import {
 } from "@/lib/control-plane-client";
 import { cn } from "@/lib/utils";
 import { Link, useRouter } from "@/i18n/navigation";
+import type { JiraTicketDetail } from "@/services/jira/types";
 
 import {
   WorktreeBranchForm,
@@ -268,6 +270,31 @@ export function worktreeIsDirty(
   worktree: Pick<Worktree, "hasStagedChanges" | "hasUnstagedChanges">,
 ) {
   return worktree.hasStagedChanges || worktree.hasUnstagedChanges;
+}
+
+export function applyJiraTicketToWorktreeOverview(
+  overview: WorktreeOverview,
+  ticket: Pick<JiraTicketDetail, "key" | "summary" | "status">,
+): WorktreeOverview {
+  const issueKey = ticket.key.trim().toUpperCase();
+  return {
+    ...overview,
+    agents: overview.agents.map((agentGroup) => ({
+      ...agentGroup,
+      codebases: agentGroup.codebases.map((group) => ({
+        ...group,
+        worktrees: group.worktrees.map((worktree) =>
+          worktree.ticketKey?.trim().toUpperCase() === issueKey
+            ? {
+                ...worktree,
+                ticketTitle: ticket.summary,
+                ticketStatus: ticket.status,
+              }
+            : worktree,
+        ),
+      })),
+    })),
+  };
 }
 
 function matchesWorktreeSearch(values: Array<unknown>, query: string) {
@@ -645,6 +672,11 @@ export function WorktreesPage({ appId }: { appId?: string }) {
     }
   }, [appId]);
 
+  useJiraTicketChanges(
+    () => void load(),
+    () => void load(),
+  );
+
   useEffect(() => {
     const initial = window.setTimeout(() => void load(), 0);
     const poll = window.setInterval(() => void load(), 30_000);
@@ -794,6 +826,12 @@ export function WorktreesPage({ appId }: { appId?: string }) {
             })),
           }
         : current,
+    );
+  };
+
+  const updateLocalJiraTicket = (ticket: JiraTicketDetail) => {
+    setOverview((current) =>
+      current ? applyJiraTicketToWorktreeOverview(current, ticket) : current,
     );
   };
 
@@ -1123,6 +1161,7 @@ export function WorktreesPage({ appId }: { appId?: string }) {
       <JiraTicketDrawer
         issueKey={jiraIssueKey}
         onClose={() => selectJiraIssue(null)}
+        onTicketChange={updateLocalJiraTicket}
       />
     </section>
   );

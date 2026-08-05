@@ -128,6 +128,7 @@ export function ActionCenterProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     const initial = window.setTimeout(() => void refresh(), 0);
+    const poll = window.setInterval(() => void refresh(), 30_000);
     const unsubscribe = controlPlaneSubscriptions().subscribe<{
       actionCenterChanged: boolean;
     }>(
@@ -141,6 +142,7 @@ export function ActionCenterProvider({ children }: { children: ReactNode }) {
     const reconnect = onControlPlaneConnected(() => void refresh());
     return () => {
       window.clearTimeout(initial);
+      window.clearInterval(poll);
       unsubscribe();
       reconnect();
     };

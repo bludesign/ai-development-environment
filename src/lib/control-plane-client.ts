@@ -1,6 +1,12 @@
 "use client";
 
-import { createClient, type Client } from "graphql-ws";
+import {
+  createClient,
+  type Client,
+  type FormattedExecutionResult,
+  type Sink,
+  type SubscribePayload,
+} from "graphql-ws";
 
 type GraphQLResponse<T> = { data?: T; errors?: Array<{ message: string }> };
 
@@ -24,7 +30,13 @@ export async function controlPlaneRequest<T>(
 }
 
 let subscriptionClient: Client | null = null;
+let subscriptionFacade: Pick<Client, "subscribe"> | null = null;
 const connectionListeners = new Set<() => void>();
+let lastAuthenticationTerminationAt = Number.NEGATIVE_INFINITY;
+
+const AUTHENTICATION_RETRY_BASE_MS = 1_000;
+const AUTHENTICATION_RETRY_MAX_MS = 30_000;
+const AUTHENTICATION_TERMINATION_COOLDOWN_MS = 250;
 
 export function onControlPlaneConnected(listener: () => void): () => void {
   connectionListeners.add(listener);
@@ -57,7 +69,28 @@ function websocketUrl(): string {
   );
 }
 
-export function controlPlaneSubscriptions(): Client {
+function subscriptionErrorMessages(error: unknown): string[] {
+  if (error instanceof Error) return [error.message];
+  if (Array.isArray(error)) {
+    return error.flatMap((entry) => subscriptionErrorMessages(entry));
+  }
+  if (error && typeof error === "object" && "message" in error) {
+    const message = (error as { message?: unknown }).message;
+    return typeof message === "string" ? [message] : [];
+  }
+  return typeof error === "string" ? [error] : [];
+}
+
+export function isControlPlaneAuthenticationError(error: unknown): boolean {
+  return subscriptionErrorMessages(error).some(
+    (message) =>
+      message.includes("Authentication is required") ||
+      message.includes("supplied credential is invalid") ||
+      message.includes("session is invalid or expired"),
+  );
+}
+
+function rawSubscriptionClient(): Client {
   subscriptionClient ??= createClient({
     url: websocketUrl,
     lazy: true,
@@ -70,4 +103,79 @@ export function controlPlaneSubscriptions(): Client {
     },
   });
   return subscriptionClient;
+}
+
+function terminateForAuthenticationRecovery(client: Client): void {
+  const now = Date.now();
+  if (
+    now - lastAuthenticationTerminationAt <
+    AUTHENTICATION_TERMINATION_COOLDOWN_MS
+  ) {
+    return;
+  }
+  lastAuthenticationTerminationAt = now;
+  // A WebSocket handshake captures its cookie headers once. Terminating the
+  // shared connection lets graphql-ws reconnect with the current session while
+  // its other active subscriptions retry automatically.
+  client.terminate();
+}
+
+function resilientSubscribe<
+  Data = Record<string, unknown>,
+  Extensions = unknown,
+>(
+  payload: SubscribePayload,
+  sink: Sink<FormattedExecutionResult<Data, Extensions>>,
+): () => void {
+  let disposed = false;
+  let retries = 0;
+  let retryTimer: ReturnType<typeof setTimeout> | null = null;
+  let disposeCurrent: (() => void) | null = null;
+
+  const subscribe = () => {
+    if (disposed) return;
+    const client = rawSubscriptionClient();
+    disposeCurrent = client.subscribe<Data, Extensions>(payload, {
+      next(value) {
+        retries = 0;
+        sink.next(value);
+      },
+      error(error) {
+        if (disposed) return;
+        if (!isControlPlaneAuthenticationError(error)) {
+          disposed = true;
+          sink.error(error);
+          return;
+        }
+
+        terminateForAuthenticationRecovery(client);
+        const delay = Math.min(
+          AUTHENTICATION_RETRY_MAX_MS,
+          AUTHENTICATION_RETRY_BASE_MS * 2 ** Math.min(retries, 5),
+        );
+        retries += 1;
+        retryTimer = setTimeout(() => {
+          retryTimer = null;
+          subscribe();
+        }, delay);
+      },
+      complete() {
+        if (disposed) return;
+        disposed = true;
+        sink.complete();
+      },
+    });
+  };
+
+  subscribe();
+  return () => {
+    disposed = true;
+    if (retryTimer !== null) clearTimeout(retryTimer);
+    disposeCurrent?.();
+  };
+}
+
+export function controlPlaneSubscriptions(): Pick<Client, "subscribe"> {
+  subscriptionFacade ??= { subscribe: resilientSubscribe };
+  return subscriptionFacade;
 }
