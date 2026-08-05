@@ -1263,6 +1263,71 @@ describe("workflow runtime lifecycle guards", () => {
     });
   });
 
+  test("completes a resolved wait even when its diagnostic event fails", async () => {
+    const definition = emptyWorkflowDefinition("Wait completion");
+    definition.nodes = [
+      {
+        id: "step-1",
+        kind: "CUSTOM_COMMAND",
+        position: { x: 0, y: 0 },
+        config: {},
+        requiredPaths: [],
+        providedPaths: [],
+        retry: { maxAttempts: 1, strategy: "EXPONENTIAL", delaySeconds: 5 },
+        failurePolicy: "FAIL",
+      },
+    ];
+    prisma.workflowStepAttempt.findUnique.mockResolvedValue({
+      id: "attempt-1",
+      runId: "run-1",
+      nodeId: "step-1",
+      iterationKey: "",
+      status: "WAITING",
+      outputJson: null,
+      run: { version: { definitionJson: JSON.stringify(definition) } },
+    });
+    prisma.workflowRun.findUnique.mockResolvedValue({
+      id: "run-1",
+      status: "WAITING",
+      sessionDataJson: "{}",
+    });
+    prisma.workflowWait.findFirst.mockResolvedValue({
+      id: "wait-1",
+      kind: "COMMAND_RUN",
+      externalKey: "command-run-1",
+      createdAt: new Date("2026-08-05T11:00:00.000Z"),
+      resolvedAt: new Date("2026-08-05T11:00:05.000Z"),
+    });
+    prisma.workflowRunEvent.create.mockRejectedValueOnce(
+      new Error("database is locked"),
+    );
+    const consoleError = vi
+      .spyOn(console, "error")
+      .mockImplementation(() => {});
+    const service = new WorkflowsService(new WorkflowEventsService());
+
+    await internals(service).completeWaitingAttempt(
+      "attempt-1",
+      { ok: true },
+      "POLL",
+    );
+
+    expect(prisma.workflowStepAttempt.updateMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({ status: "SUCCEEDED" }),
+      }),
+    );
+    expect(prisma.workflowRunEvent.create).toHaveBeenCalledTimes(2);
+    expect(prisma.workflowRunEvent.create.mock.calls[1]?.[0]).toEqual({
+      data: expect.objectContaining({ type: "STEP_SUCCEEDED" }),
+    });
+    expect(consoleError).toHaveBeenCalledWith(
+      expect.stringContaining("attempt-1"),
+      expect.any(Error),
+    );
+    consoleError.mockRestore();
+  });
+
   test("drops a stale completion after cancellation claims the attempt", async () => {
     prisma.workflowRun.findUnique.mockResolvedValue({
       id: "run-1",

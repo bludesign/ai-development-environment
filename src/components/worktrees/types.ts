@@ -117,6 +117,7 @@ export type WorktreeCodebaseGroup = {
   };
   repository: CodebaseRepository;
   worktrees: Worktree[];
+  blockingJob?: AgentJob | null;
   iosBuildConfigured?: boolean;
   quickActions?: WorktreeQuickAction[];
   mergeConflictQuickActions?: WorktreeQuickAction[];

@@ -18,6 +18,7 @@ import {
   applyJiraTicketToWorktreeOverview,
   displayedWorktreePath,
   filterWorktreeAgentGroups,
+  worktreeBranchIsTaken,
   WorktreesPage,
   worktreeChangeActionState,
 } from "./worktrees-page";
@@ -146,6 +147,30 @@ describe("worktreeChangeActionState", () => {
         hasUnstagedChanges: true,
       }),
     ).toEqual({ hasChanges: true, stageOperation: "STAGE_ALL" });
+  });
+});
+
+describe("worktreeBranchIsTaken", () => {
+  test("finds a branch held by a sibling outside the rendered group", () => {
+    const overview = {
+      agents: [
+        {
+          codebases: [
+            {
+              codebase: { id: "codebase-1" },
+              worktrees: [
+                { id: "worktree-1", branch: "feature/AIDE-106" },
+                { id: "worktree-2", branch: "main" },
+              ],
+            },
+          ],
+        },
+      ],
+    } as WorktreeOverview;
+
+    expect(
+      worktreeBranchIsTaken(overview, "codebase-1", "main", "worktree-1"),
+    ).toBe(true);
   });
 });
 
@@ -714,6 +739,38 @@ describe("WorktreesPage", () => {
         { id: "worktree-1" },
       ),
     );
+  });
+
+  test("disables worktree operations while the codebase has a blocking job", async () => {
+    const response = (await request("query Fixture")) as unknown as {
+      worktreeOverview: WorktreeOverview;
+    };
+    response.worktreeOverview.agents[0]!.codebases[0]!.blockingJob = {
+      id: "job-1",
+      kind: "codebase.refresh",
+      status: "RUNNING",
+    } as never;
+    request.mockResolvedValue(response);
+
+    render(<WorktreesPage />);
+    await screen.findByText("feature/AIDE-24");
+    fireEvent.pointerDown(
+      screen.getByRole("button", { name: "Customize worktree" }),
+      { button: 0, ctrlKey: false },
+    );
+
+    for (const name of [
+      "Change branch",
+      "Change branch to main",
+      "Commit",
+      "Open in VS Code",
+    ]) {
+      expect(
+        (await screen.findByRole("menuitem", { name })).hasAttribute(
+          "data-disabled",
+        ),
+      ).toBe(true);
+    }
   });
 
   test("starts a session or plan on the card's own worktree", async () => {

@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import { posix, win32 } from "node:path";
 
 import { parseCodebaseGitState } from "@ai-development-environment/agent-contract/codebases";
+import { COMMAND_RUN_JOB_KIND } from "@ai-development-environment/agent-contract/commands";
 import {
   parseCodebaseWorktreeReport,
   parseWorktreeActivityReport,
@@ -78,6 +79,10 @@ const ACTIVE_WORKTREE_GIT_JOB_KINDS = [
   WORKTREE_DELETE_JOB_KIND,
 ];
 const ACTIVE_WORKTREE_GIT_JOB_KIND_SET = new Set(ACTIVE_WORKTREE_GIT_JOB_KINDS);
+const ACTIVE_CODEBASE_BLOCKING_JOB_WHERE = {
+  status: { in: ACTIVE_STATUSES },
+  NOT: [{ kind: COMMAND_RUN_JOB_KIND }, { kind: { startsWith: "ios." } }],
+} satisfies Prisma.AgentJobWhereInput;
 const ACTIVE_BUILD_STATUSES = ["QUEUED", "PREPARING", "RUNNING"];
 const ACTIVE_MOVE_STATUSES = [
   "PUSHING",
@@ -127,11 +132,7 @@ const worktreeInclude = {
         },
       },
       jobs: {
-        where: {
-          status: { in: ACTIVE_STATUSES },
-          kind: { in: ACTIVE_WORKTREE_GIT_JOB_KINDS },
-          worktreeId: { not: null },
-        },
+        where: ACTIVE_CODEBASE_BLOCKING_JOB_WHERE,
         orderBy: { createdAt: "desc" as const },
         take: 1,
       },
@@ -966,6 +967,7 @@ export class WorktreesService {
       codebase: View["codebase"];
       repository: View["codebase"]["repository"];
       worktrees: View[];
+      blockingJob: View["codebase"]["jobs"][number] | null;
       iosBuildConfigured: boolean;
       quickActions: typeof eligibleQuickActions;
       mergeConflictQuickActions: typeof eligibleQuickActions;
@@ -989,6 +991,7 @@ export class WorktreesService {
           codebase: worktree.codebase,
           repository: worktree.codebase.repository,
           worktrees: [],
+          blockingJob: worktree.codebase.jobs[0] ?? null,
           iosBuildConfigured:
             worktree.codebase.repository.projects?.some(
               (project) => project.configurations.length > 0,
@@ -2550,7 +2553,7 @@ export class WorktreesService {
       const active = await prisma.agentJob.findFirst({
         where: {
           codebaseId: input.codebaseId,
-          status: { in: ACTIVE_STATUSES },
+          ...ACTIVE_CODEBASE_BLOCKING_JOB_WHERE,
         },
         select: { id: true, idempotencyKey: true, kind: true },
       });
@@ -2617,7 +2620,7 @@ export class WorktreesService {
         prisma.agentJob.findFirst({
           where: {
             codebaseId: worktree.codebaseId,
-            status: { in: ACTIVE_STATUSES },
+            ...ACTIVE_CODEBASE_BLOCKING_JOB_WHERE,
           },
         }),
         prisma.worktreeMove.findFirst({
@@ -2653,7 +2656,7 @@ export class WorktreesService {
     }
     const [active, activeMove] = await Promise.all([
       prisma.agentJob.findFirst({
-        where: { codebaseId: id, status: { in: ACTIVE_STATUSES } },
+        where: { codebaseId: id, ...ACTIVE_CODEBASE_BLOCKING_JOB_WHERE },
       }),
       prisma.worktreeMove.findFirst({
         where: {

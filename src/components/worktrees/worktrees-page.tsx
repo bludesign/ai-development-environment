@@ -480,6 +480,24 @@ export function worktreeChangeActionState(
   };
 }
 
+export function worktreeBranchIsTaken(
+  overview: WorktreeOverview,
+  codebaseId: string,
+  branch: string,
+  excludingWorktreeId: string,
+): boolean {
+  return overview.agents.some((agentGroup) =>
+    agentGroup.codebases.some(
+      (group) =>
+        group.codebase.id === codebaseId &&
+        group.worktrees.some(
+          (candidate) =>
+            candidate.id !== excludingWorktreeId && candidate.branch === branch,
+        ),
+    ),
+  );
+}
+
 const tagColorClasses: Record<string, string> = {
   gray: "border-slate-500/40 bg-slate-500/15 text-slate-700 dark:text-slate-300",
   stone:
@@ -642,6 +660,7 @@ export function WorktreesPage({ appId }: { appId?: string }) {
               agent { ${AGENT_FIELDS} }
               codebases {
                 iosBuildConfigured
+                blockingJob { id agentId kind payload status idempotencyKey result error timeoutSeconds createdAt startedAt finishedAt updatedAt }
                 quickActions {
             id name description quickActionIconKey quickActionButtonVariant
             hasPlainTrigger(resourceKind: "WORKTREE")
@@ -1301,7 +1320,7 @@ function CreateWorktreeCard({
       agentGroup.agent.connectionStatus === "ONLINE" &&
       agentGroup.agent.capabilities.includes("worktree.branch") &&
       group.codebase.availability === "AVAILABLE" &&
-      !group.worktrees.some((worktree) => worktree.activeJob)
+      !group.blockingJob
         ? [{ agentGroup, group }]
         : [],
     ),
@@ -2322,7 +2341,7 @@ function targetAvailable(entry: MoveTargetEntry, overview: WorktreeOverview) {
     entry.agentGroup.agent.connectionStatus === "ONLINE" &&
     entry.agentGroup.agent.capabilities.includes("worktree.move.checkout") &&
     entry.group.codebase.availability === "AVAILABLE" &&
-    !entry.group.worktrees.some((worktree) => worktree.activeJob) &&
+    !entry.group.blockingJob &&
     !busyMove
   );
 }
@@ -2346,7 +2365,7 @@ function moveDisabledReason(
   }
   if (
     props.worktree.availability !== "AVAILABLE" ||
-    props.worktree.activeJob ||
+    props.group.blockingJob ||
     props.worktree.rebaseInProgress ||
     props.overview.activeMoves.some(
       (move) =>
@@ -2422,7 +2441,7 @@ export function WorktreeMenus(
     sourceAgent.agent.connectionStatus !== "ONLINE" ||
     !sourceAgent.agent.capabilities.includes("worktree.delete") ||
     worktree.availability !== "AVAILABLE" ||
-    Boolean(worktree.activeJob) ||
+    Boolean(props.group.blockingJob) ||
     worktree.rebaseInProgress ||
     props.overview.activeMoves.some(
       (move) =>
@@ -2520,15 +2539,21 @@ export function WorktreeMenus(
   };
   const defaultBranch = props.group.codebase.defaultBranch;
   // Git refuses to check a branch out twice, so hide the shortcut whenever a
-  // sibling worktree already holds the default branch.
-  const defaultBranchTaken = props.group.worktrees.some(
-    (candidate) =>
-      candidate.id !== worktree.id && candidate.branch === defaultBranch,
+  // sibling worktree already holds the default branch. The overview is used
+  // instead of the rendered group because filters can hide that sibling.
+  const defaultBranchTaken = Boolean(
+    defaultBranch &&
+    worktreeBranchIsTaken(
+      props.overview,
+      props.group.codebase.id,
+      defaultBranch,
+      worktree.id,
+    ),
   );
   const branchChangeDisabled =
     !props.branchManagementEnabled ||
     worktree.availability !== "AVAILABLE" ||
-    Boolean(worktree.activeJob) ||
+    Boolean(props.group.blockingJob) ||
     worktree.rebaseInProgress;
   const changeToDefaultBranch = async () => {
     if (!defaultBranch) return;
@@ -2612,7 +2637,7 @@ export function WorktreeMenus(
             <DropdownMenuItem
               disabled={
                 worktree.availability !== "AVAILABLE" ||
-                Boolean(worktree.activeJob) ||
+                Boolean(props.group.blockingJob) ||
                 worktree.rebaseInProgress ||
                 !sourceAgent?.agent.capabilities.includes("worktree.commit") ||
                 (!worktree.hasStagedChanges && !worktree.hasUnstagedChanges)
@@ -2630,6 +2655,7 @@ export function WorktreeMenus(
                     : t("openCode")
                 }
                 operation="OPEN_EDITOR"
+                disabled={Boolean(props.group.blockingJob)}
                 // The editor opens on the agent, so the menu's own reload is
                 // all there is to wait for.
                 props={{ ...props, onCompleted: props.onReload }}
@@ -3380,7 +3406,7 @@ export function ActionRow(
   const t = useTranslations("worktrees");
   const unavailable =
     worktree.availability !== "AVAILABLE" ||
-    Boolean(worktree.activeJob) ||
+    Boolean(props.group.blockingJob) ||
     worktree.rebaseInProgress;
   const changeActions = worktreeChangeActionState(worktree);
   const agent = props.overview.agents.find((entry) =>

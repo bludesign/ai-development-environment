@@ -4886,6 +4886,7 @@ export class WorkflowsService {
     attempt: WorkflowStepAttempt,
     node: WorkflowNodeDefinition,
     result: WorkflowExecutionResult,
+    beforeSuccessEvent?: () => Promise<void>,
   ): Promise<void> {
     const prisma = await getPrismaClient();
     const completed = await prisma.$transaction(async (transaction) => {
@@ -4974,6 +4975,18 @@ export class WorkflowsService {
       return true;
     });
     if (!completed) return;
+    if (beforeSuccessEvent) {
+      try {
+        await beforeSuccessEvent();
+      } catch (error) {
+        // The state transition already succeeded. Timeline diagnostics must not
+        // turn an observability failure into a permanently parked workflow.
+        console.error(
+          `Failed to append completion diagnostics for workflow attempt ${attempt.id}:`,
+          error,
+        );
+      }
+    }
     await this.appendEvent(
       attempt.runId,
       attempt.id,
@@ -5276,7 +5289,6 @@ export class WorkflowsService {
       json(attempt.run.version.definitionJson),
     ).nodes.find(({ id }) => id === attempt.nodeId);
     if (!node) throw new Error("Workflow step definition is missing");
-    await this.appendWaitResolvedEvent(attempt, node, resolvedBy);
     const pending = this.attemptOutput(attempt) as {
       value?: unknown;
       selectedHandles?: string[];
@@ -5370,11 +5382,16 @@ export class WorkflowsService {
       );
     }
     try {
-      await this.completeAttempt(attempt, node, {
-        output: output ?? pending.value,
-        selectedHandles: pending.selectedHandles,
-        sessionPatch,
-      });
+      await this.completeAttempt(
+        attempt,
+        node,
+        {
+          output: output ?? pending.value,
+          selectedHandles: pending.selectedHandles,
+          sessionPatch,
+        },
+        () => this.appendWaitResolvedEvent(attempt, node, resolvedBy),
+      );
     } catch (error) {
       await this.failAttempt(
         attempt,

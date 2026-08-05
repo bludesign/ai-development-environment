@@ -109,6 +109,7 @@ const OVERVIEW_QUERY = `query WorktreeDetailOverview($worktreeId: ID!) {
       agent { ${AGENT_FIELDS} }
       codebases {
         iosBuildConfigured
+        blockingJob { id agentId kind payload status idempotencyKey result error timeoutSeconds createdAt startedAt finishedAt updatedAt }
         quickActions {
             id name description quickActionIconKey quickActionButtonVariant
             hasPlainTrigger(resourceKind: "WORKTREE")

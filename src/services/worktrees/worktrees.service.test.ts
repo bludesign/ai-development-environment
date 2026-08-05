@@ -353,6 +353,12 @@ describe("WorktreesService", () => {
       cachedTicket: vi.fn(),
       ticket: vi.fn(),
     } as unknown as JiraService;
+    const blockingJob = {
+      id: "job-blocking",
+      kind: "codebase.refresh",
+      worktreeId: null,
+      payloadJson: "{}",
+    };
     const worktree = {
       id: "worktree-1",
       branch: "feature/AIDE-24",
@@ -391,7 +397,7 @@ describe("WorktreesService", () => {
       codebase: {
         id: "codebase-1",
         defaultBranch: "main",
-        jobs: [],
+        jobs: [blockingJob],
         agent: { id: "agent-1", baseRepoDirectory: "/repo" },
         repository: {
           id: "repository-1",
@@ -469,9 +475,24 @@ describe("WorktreesService", () => {
       ...worktree.builds[0],
       outOfDate: true,
     });
+    expect(initial.agents[0]?.codebases[0]?.blockingJob).toBe(blockingJob);
+    expect(initial.agents[0]?.codebases[0]?.worktrees[0]?.activeJob).toBeNull();
     expect(findMany).toHaveBeenCalledWith(
       expect.objectContaining({
         include: expect.objectContaining({
+          codebase: expect.objectContaining({
+            include: expect.objectContaining({
+              jobs: expect.objectContaining({
+                where: expect.objectContaining({
+                  status: { in: ["QUEUED", "RUNNING"] },
+                  NOT: expect.arrayContaining([
+                    { kind: "command.run" },
+                    { kind: { startsWith: "ios." } },
+                  ]),
+                }),
+              }),
+            }),
+          }),
           builds: expect.objectContaining({
             orderBy: { createdAt: "desc" },
             select: expect.objectContaining({
