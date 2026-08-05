@@ -384,7 +384,14 @@ export function betterAuthBaseURL(
   if (origins.mode === "inferred") return undefined;
   if (origins.mode === "single") return origins.canonical!;
   return {
-    allowedHosts: origins.patterns.map((pattern) => pattern.host),
+    // Better Auth matches `allowedHosts` against the complete host, including
+    // its port. APP_ORIGINS deliberately treats an entry without a port as
+    // port-insensitive, so add a second Better Auth pattern for that case.
+    // The `:*` suffix keeps a wildcard bounded to the host's port separator;
+    // appending `*` to the hostname itself would also match unrelated names.
+    allowedHosts: origins.patterns.flatMap((pattern) =>
+      pattern.port ? [pattern.host] : [pattern.host, `${pattern.host}:*`],
+    ),
     protocol: origins.allHttps ? "https" : "auto",
     fallback: origins.canonical!,
   };
