@@ -1,6 +1,6 @@
 "use client";
 
-import { FormEvent, useState } from "react";
+import { FormEvent, useMemo, useState } from "react";
 import { Save } from "lucide-react";
 import { useTranslations } from "next-intl";
 
@@ -42,8 +42,49 @@ export function AppEditorDialog({
   const [repositoryIds, setRepositoryIds] = useState<Set<string>>(
     () => new Set(app?.repositories.map((repository) => repository.id) ?? []),
   );
+  const [agentIds, setAgentIds] = useState<Set<string>>(() => new Set());
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  const agents = useMemo(() => {
+    const known = new Map<string, { id: string; name: string }>();
+    repositories.forEach((repository) =>
+      repository.codebases.forEach((codebase) =>
+        known.set(codebase.agent.id, {
+          id: codebase.agent.id,
+          name: codebase.agent.name,
+        }),
+      ),
+    );
+    return [...known.values()].sort((left, right) =>
+      left.name.localeCompare(right.name),
+    );
+  }, [repositories]);
+  // An agent that disappears between renders must not hide every repository.
+  const activeAgentIds = useMemo(
+    () =>
+      new Set(
+        [...agentIds].filter((agentId) =>
+          agents.some((agent) => agent.id === agentId),
+        ),
+      ),
+    [agentIds, agents],
+  );
+  const visibleRepositories = useMemo(
+    () =>
+      activeAgentIds.size === 0
+        ? repositories
+        : repositories.filter((repository) =>
+            repository.codebases.some((codebase) =>
+              activeAgentIds.has(codebase.agent.id),
+            ),
+          ),
+    [activeAgentIds, repositories],
+  );
+  const hiddenSelectedCount = [...repositoryIds].filter(
+    (repositoryId) =>
+      !visibleRepositories.some((repository) => repository.id === repositoryId),
+  ).length;
 
   const submit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -76,7 +117,7 @@ export function AppEditorDialog({
   return (
     <Dialog onOpenChange={(next) => !busy && onOpenChange(next)} open={open}>
       <DialogContent className="sm:max-w-2xl">
-        <form className="space-y-5" onSubmit={submit}>
+        <form className="min-w-0 space-y-5" onSubmit={submit}>
           <DialogHeader>
             <DialogTitle>{app ? t("editApp") : t("createApp")}</DialogTitle>
             <DialogDescription>{t("editorDescription")}</DialogDescription>
@@ -89,7 +130,10 @@ export function AppEditorDialog({
           <div className="space-y-2">
             <Label htmlFor="app-name">{t("name")}</Label>
             <Input
+              autoComplete="off"
               autoFocus
+              data-1p-ignore
+              data-lpignore="true"
               id="app-name"
               maxLength={120}
               onChange={(event) => setName(event.target.value)}
@@ -107,13 +151,48 @@ export function AppEditorDialog({
               value={description}
             />
           </div>
-          <fieldset className="space-y-2">
+          {agents.length > 0 && (
+            <fieldset className="min-w-0 space-y-2">
+              <legend className="text-sm font-medium">{t("agents")}</legend>
+              <p className="text-xs text-muted-foreground">
+                {t("agentFilterHelp")}
+              </p>
+              <div className="flex flex-wrap gap-x-4 gap-y-2 rounded-lg border p-3">
+                {agents.map((agent) => {
+                  const inputId = `app-agent-${agent.id}`;
+                  return (
+                    <div className="flex items-start gap-2" key={agent.id}>
+                      <Checkbox
+                        checked={activeAgentIds.has(agent.id)}
+                        id={inputId}
+                        onCheckedChange={(value) =>
+                          setAgentIds((current) => {
+                            const next = new Set(current);
+                            if (value === true) next.add(agent.id);
+                            else next.delete(agent.id);
+                            return next;
+                          })
+                        }
+                      />
+                      <Label
+                        className="min-w-0 [overflow-wrap:anywhere]"
+                        htmlFor={inputId}
+                      >
+                        {agent.name}
+                      </Label>
+                    </div>
+                  );
+                })}
+              </div>
+            </fieldset>
+          )}
+          <fieldset className="min-w-0 space-y-2">
             <legend className="text-sm font-medium">{t("repositories")}</legend>
             <p className="text-xs text-muted-foreground">
               {t("repositoryRequirement")}
             </p>
             <div className="max-h-64 space-y-2 overflow-y-auto rounded-lg border p-3">
-              {repositories.map((repository) => {
+              {visibleRepositories.map((repository) => {
                 const checked = repositoryIds.has(repository.id);
                 const inputId = `app-repository-${repository.id}`;
                 return (
@@ -130,21 +209,33 @@ export function AppEditorDialog({
                         })
                       }
                     />
-                    <Label className="min-w-0 flex-1" htmlFor={inputId}>
+                    <Label
+                      className="min-w-0 flex-1 flex-col items-start gap-0 leading-snug [overflow-wrap:anywhere]"
+                      htmlFor={inputId}
+                    >
                       <span className="block">{repository.name}</span>
-                      <span className="block truncate font-normal text-muted-foreground">
+                      <span className="block font-normal text-muted-foreground">
                         {repository.displayOrigin}
                       </span>
                     </Label>
                   </div>
                 );
               })}
-              {!repositories.length && (
+              {!visibleRepositories.length && (
                 <p className="text-sm text-muted-foreground">
-                  {t("noRepositoriesAvailable")}
+                  {repositories.length
+                    ? t("noRepositoriesForAgents")
+                    : t("noRepositoriesAvailable")}
                 </p>
               )}
             </div>
+            {hiddenSelectedCount > 0 && (
+              <p className="text-xs text-muted-foreground">
+                {t("hiddenSelectedRepositories", {
+                  count: hiddenSelectedCount,
+                })}
+              </p>
+            )}
           </fieldset>
           <DialogFooter>
             <Button

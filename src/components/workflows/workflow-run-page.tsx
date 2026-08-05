@@ -819,17 +819,19 @@ export function WorkflowRunPage({ runId }: { runId: string }) {
                       <div className="absolute top-5 bottom-0 left-[11px] w-px bg-border" />
                     )}
                     <div className="z-10 mt-1 size-6 rounded-full border bg-background" />
-                    <div>
+                    <div className="min-w-0">
                       <div className="flex flex-wrap items-center gap-2">
                         <Badge variant="outline">
                           {labels.eventType(event.type)}
                         </Badge>
                         <DateTime kind="relative" value={event.createdAt} />
                       </div>
-                      <p className="mt-1 text-sm">{event.message}</p>
+                      <p className="mt-1 text-sm break-words">
+                        {event.message}
+                      </p>
                       {event.detail ? (
                         <ScrollArea className="mt-2 h-48 rounded-lg bg-muted">
-                          <pre className="min-w-max p-2 text-xs">
+                          <pre className="p-2 text-xs whitespace-pre-wrap [overflow-wrap:anywhere]">
                             {jsonText(event.detail)}
                           </pre>
                         </ScrollArea>

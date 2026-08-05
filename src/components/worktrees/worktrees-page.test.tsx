@@ -128,6 +128,8 @@ describe("filterWorktreeAgentGroups", () => {
               ticketKey: "AIDE-24",
               ticketTitle: "Add worktrees page",
               ticketStatus: "In Progress",
+              hasStagedChanges: false,
+              hasUnstagedChanges: true,
               pullRequest: null,
               tags: [],
             },
@@ -162,6 +164,8 @@ describe("filterWorktreeAgentGroups", () => {
               ticketKey: "PAY-9",
               ticketTitle: "Retry failed payment",
               ticketStatus: "Selected",
+              hasStagedChanges: false,
+              hasUnstagedChanges: false,
               pullRequest: null,
               tags: [],
             },
@@ -182,8 +186,39 @@ describe("filterWorktreeAgentGroups", () => {
       query,
       agentId: null,
       repositoryId: null,
+      dirty: null,
     });
     expect(result.map((group) => group.agent.id)).toEqual([agentId]);
+  });
+
+  test("keeps only dirty or only clean worktrees", () => {
+    expect(
+      filterWorktreeAgentGroups(groups, {
+        query: "",
+        agentId: null,
+        repositoryId: null,
+        dirty: true,
+      }).map((group) => group.agent.id),
+    ).toEqual(["agent-1"]);
+    expect(
+      filterWorktreeAgentGroups(groups, {
+        query: "",
+        agentId: null,
+        repositoryId: null,
+        dirty: false,
+      }).map((group) => group.agent.id),
+    ).toEqual(["agent-2"]);
+  });
+
+  test("applies the changes filter alongside a search query", () => {
+    expect(
+      filterWorktreeAgentGroups(groups, {
+        query: "Studio Mac",
+        agentId: null,
+        repositoryId: null,
+        dirty: false,
+      }),
+    ).toEqual([]);
   });
 
   test("combines agent and repository filters", () => {
@@ -192,6 +227,7 @@ describe("filterWorktreeAgentGroups", () => {
         query: "",
         agentId: "agent-2",
         repositoryId: "repository-2",
+        dirty: null,
       }).map((group) => group.agent.id),
     ).toEqual(["agent-2"]);
     expect(
@@ -199,6 +235,7 @@ describe("filterWorktreeAgentGroups", () => {
         query: "",
         agentId: "agent-1",
         repositoryId: "repository-2",
+        dirty: null,
       }),
     ).toEqual([]);
   });
@@ -604,9 +641,10 @@ describe("WorktreesPage", () => {
 
     const menuItems = screen.getAllByRole("menuitem");
     expect(
-      menuItems.slice(0, 6).map((item) => item.textContent?.trim()),
+      menuItems.slice(0, 7).map((item) => item.textContent?.trim()),
     ).toEqual([
       "Change branch",
+      "Change branch to main",
       "Commit",
       "Open in VS Code",
       "View codebase",
@@ -1338,6 +1376,94 @@ describe("WorktreesPage", () => {
         }) as HTMLInputElement
       ).value,
     ).toBe("nothing-matches");
+  });
+
+  test("remembers app scoped filters separately from the full list", async () => {
+    render(<WorktreesPage appId="app-1" />);
+    await screen.findByText("feature/AIDE-24");
+    fireEvent.change(
+      screen.getByRole("searchbox", { name: "Search worktrees" }),
+      { target: { value: "nothing-matches" } },
+    );
+    await waitFor(() =>
+      expect(
+        JSON.parse(
+          window.localStorage.getItem("worktrees-filters:app-1") ?? "{}",
+        ),
+      ).toMatchObject({ query: "nothing-matches" }),
+    );
+    expect(window.localStorage.getItem("worktrees-filters")).toBeNull();
+
+    cleanup();
+    render(<WorktreesPage appId="app-1" />);
+    expect(await screen.findByText("No matching worktrees")).toBeDefined();
+
+    cleanup();
+    render(<WorktreesPage />);
+    expect(await screen.findByText("feature/AIDE-24")).toBeDefined();
+  });
+
+  test("filters worktrees by uncommitted changes", async () => {
+    render(<WorktreesPage />);
+    await screen.findByText("feature/AIDE-24");
+    const changesFilter = screen.getByRole("combobox", {
+      name: "Filter by changes",
+    });
+
+    fireEvent.pointerDown(changesFilter, {
+      button: 0,
+      ctrlKey: false,
+      pointerType: "mouse",
+    });
+    fireEvent.click(
+      await screen.findByRole("option", { name: "Dirty worktrees" }),
+    );
+    expect(await screen.findByText("No matching worktrees")).toBeDefined();
+
+    fireEvent.pointerDown(changesFilter, {
+      button: 0,
+      ctrlKey: false,
+      pointerType: "mouse",
+    });
+    fireEvent.click(
+      await screen.findByRole("option", { name: "Clean worktrees" }),
+    );
+    expect(await screen.findByText("feature/AIDE-24")).toBeDefined();
+  });
+
+  test("switches a worktree to the default branch from its menu", async () => {
+    render(<WorktreesPage />);
+    await screen.findByText("feature/AIDE-24");
+    fireEvent.pointerDown(
+      screen.getByRole("button", { name: "Customize worktree" }),
+      { button: 0, ctrlKey: false },
+    );
+    request.mockResolvedValueOnce({
+      changeWorktreeBranch: { id: "job-1" },
+    } as never);
+    request.mockResolvedValueOnce({
+      job: { id: "job-1", status: "SUCCEEDED", error: null },
+    } as never);
+    fireEvent.click(
+      await screen.findByRole("menuitem", { name: "Change branch to main" }),
+    );
+    await waitFor(() =>
+      expect(request).toHaveBeenCalledWith(
+        expect.stringContaining("mutation ChangeWorktreeBranch"),
+        {
+          input: {
+            worktreeId: "worktree-1",
+            selection: {
+              mode: "EXISTING",
+              branchName: "main",
+              baseBranch: "main",
+            },
+            requestId: expect.any(String),
+            stashOnFailure: false,
+          },
+        },
+      ),
+    );
   });
 
   test("ignores a remembered filter whose agent is gone", async () => {
