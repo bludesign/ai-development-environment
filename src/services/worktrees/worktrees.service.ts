@@ -67,6 +67,17 @@ import { buildOutOfDate } from "@/services/builds/build-freshness";
 
 const SETTINGS_ID = "default";
 const ACTIVE_STATUSES = ["QUEUED", "RUNNING"];
+const ACTIVE_WORKTREE_GIT_JOB_KINDS = [
+  WORKTREE_OPERATION_JOB_KIND,
+  WORKTREE_COMMIT_JOB_KIND,
+  WORKTREE_AUTO_SYNC_JOB_KIND,
+  WORKTREE_GIT_OPERATION_JOB_KIND,
+  WORKTREE_BRANCH_JOB_KIND,
+  WORKTREE_MOVE_PUSH_JOB_KIND,
+  WORKTREE_MOVE_CHECKOUT_JOB_KIND,
+  WORKTREE_DELETE_JOB_KIND,
+];
+const ACTIVE_WORKTREE_GIT_JOB_KIND_SET = new Set(ACTIVE_WORKTREE_GIT_JOB_KINDS);
 const ACTIVE_BUILD_STATUSES = ["QUEUED", "PREPARING", "RUNNING"];
 const ACTIVE_MOVE_STATUSES = [
   "PUSHING",
@@ -116,7 +127,11 @@ const worktreeInclude = {
         },
       },
       jobs: {
-        where: { status: { in: ACTIVE_STATUSES } },
+        where: {
+          status: { in: ACTIVE_STATUSES },
+          kind: { in: ACTIVE_WORKTREE_GIT_JOB_KINDS },
+          worktreeId: { not: null },
+        },
         orderBy: { createdAt: "desc" as const },
         take: 1,
       },
@@ -153,6 +168,25 @@ type WorktreeRecord = Prisma.WorktreeGetPayload<{
 }>;
 
 type StoredPullRequest = NonNullable<WorktreeRecord["pullRequest"]>;
+
+function isWorktreeGitJob(
+  job: WorktreeRecord["codebase"]["jobs"][number],
+): boolean {
+  if (!ACTIVE_WORKTREE_GIT_JOB_KIND_SET.has(job.kind)) return false;
+  if (job.kind !== WORKTREE_OPERATION_JOB_KIND) return true;
+  try {
+    const payload: unknown = JSON.parse(job.payloadJson);
+    return (
+      Boolean(payload) &&
+      typeof payload === "object" &&
+      !Array.isArray(payload) &&
+      typeof (payload as Record<string, unknown>).operation === "string" &&
+      (payload as Record<string, unknown>).operation !== "OPEN_EDITOR"
+    );
+  } catch {
+    return false;
+  }
+}
 
 type PullRequestTarget = {
   id: string;
@@ -478,11 +512,8 @@ export class WorktreesService {
       tags: worktree.tags.map((assignment) => assignment.tag),
       activeJob:
         worktree.codebase.jobs.find(
-          (job: { worktreeId: string | null }) =>
-            job.worktreeId === worktree.id,
-        ) ??
-        worktree.codebase.jobs[0] ??
-        null,
+          (job) => job.worktreeId === worktree.id && isWorktreeGitJob(job),
+        ) ?? null,
       baseBranch:
         worktree.baseBranchOverride ?? worktree.codebase.defaultBranch ?? null,
       ticketKey: ticketKey(worktree.branch, String(pattern)),
