@@ -63,15 +63,14 @@ describe("authentication and locale proxy", () => {
     expect(mocks.intl).toHaveBeenCalledTimes(2);
   });
 
-  test("optimistically redirects a session cookie away from auth pages", async () => {
+  test("lets auth pages validate an optimistic session cookie", async () => {
     const response = await proxy(
       request("/en/sign-in", {
         cookie: "better-auth.session_token=session-token",
       }),
     );
-    expect(response.headers.get("location")).toBe(
-      "https://control.example.com/en",
-    );
+    expect(response.status).toBe(200);
+    expect(mocks.intl).toHaveBeenCalledOnce();
   });
 
   test("excludes APIs, framework assets, and files from optimistic redirects", () => {

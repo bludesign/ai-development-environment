@@ -1,8 +1,8 @@
 import { APIError } from "better-auth/api";
 import * as z from "zod/v4";
 
-import { getPrismaClient } from "@/data/prisma-client";
 import {
+  deleteManagedUser,
   getAuth,
   getAuthRuntimeConfig,
   passwordAuthenticationEnabled,
@@ -59,21 +59,7 @@ export async function DELETE(
 ): Promise<Response> {
   return authenticated(request, async (principal) => {
     const { userId } = await context.params;
-    if (userId === principal.userId) {
-      throw new APIError("BAD_REQUEST", {
-        message: "You cannot delete the account you are currently using.",
-      });
-    }
-    const prisma = await getPrismaClient();
-    if ((await prisma.user.count()) <= 1) {
-      throw new APIError("BAD_REQUEST", {
-        message: "The final account cannot be deleted.",
-      });
-    }
-    const auth = await getAuth();
-    return auth.api.removeUser({
-      headers: request.headers,
-      body: { userId },
-    });
+    await deleteManagedUser(userId, principal.userId);
+    return { success: true };
   });
 }

@@ -1,6 +1,6 @@
 import { APIError } from "better-auth/api";
 
-import { isTrustedOrigin } from "@/lib/app-origins";
+import { isTrustedOrigin, originFromRequest } from "@/lib/app-origins";
 import {
   getAuth,
   getAuthRuntimeConfig,
@@ -35,7 +35,9 @@ export async function GET(request: Request): Promise<Response> {
   // a phone on the tailnet is not bounced to the canonical origin mid-sign-in.
   // With nothing configured there is no canonical origin, and the request's own
   // is all there is.
-  const requestOrigin = new URL(request.url).origin;
+  const requestOrigin =
+    originFromRequest(request, runtime.trustProxyHeaders) ??
+    new URL(request.url).origin;
   const completion = new URL(
     "/api/auth/mobile/oauth/complete",
     isTrustedOrigin(runtime.origins, requestOrigin)

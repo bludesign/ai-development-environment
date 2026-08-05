@@ -4,7 +4,11 @@ const getPrismaClient = vi.hoisted(() => vi.fn());
 
 vi.mock("@/data/prisma-client", () => ({ getPrismaClient }));
 
-import { authDatabaseHooks, getRegistrationStatus } from "./registration";
+import {
+  authDatabaseHooks,
+  deleteManagedUser,
+  getRegistrationStatus,
+} from "./registration";
 
 type Settings = {
   id: string;
@@ -74,7 +78,13 @@ function database(userCount = 0, overrides: Partial<Settings> = {}) {
   };
   const prisma = {
     authSettings,
-    user: { count: vi.fn(async () => users) },
+    $executeRaw: vi.fn(async () => 0),
+    user: {
+      count: vi.fn(async () => users),
+      findUnique: vi.fn(async ({ where }: { where: { id: string } }) =>
+        users > 0 ? { id: where.id } : null,
+      ),
+    },
   };
   return {
     prisma,
@@ -205,19 +215,35 @@ describe("registration policy", () => {
     expect(fixture.prisma.authSettings.upsert).toHaveBeenCalled();
   });
 
-  test("prevents deletion of the current or final user", async () => {
+  test("deletes a non-final user with one conditional statement", async () => {
     const fixture = database(2, { bootstrapCompleted: true });
+    fixture.prisma.$executeRaw.mockResolvedValueOnce(1);
     getPrismaClient.mockResolvedValue(fixture.prisma);
-    await expect(
-      authDatabaseHooks.user.delete.before(
-        { id: "user-1" },
-        { context: { session: { user: { id: "user-1" } } } },
-      ),
-    ).rejects.toThrow("currently using");
 
-    fixture.setUserCount(1);
     await expect(
-      authDatabaseHooks.user.delete.before({ id: "user-2" }, null),
-    ).rejects.toThrow("final account");
+      deleteManagedUser("user-2", "user-1"),
+    ).resolves.toBeUndefined();
+    expect(fixture.prisma.$executeRaw).toHaveBeenCalledOnce();
+    expect(fixture.prisma.user.findUnique).not.toHaveBeenCalled();
+  });
+
+  test("prevents deletion of the current or final user", async () => {
+    const fixture = database(1, { bootstrapCompleted: true });
+    getPrismaClient.mockResolvedValue(fixture.prisma);
+
+    await expect(deleteManagedUser("user-1", "user-1")).rejects.toThrow(
+      "currently using",
+    );
+    expect(fixture.prisma.$executeRaw).not.toHaveBeenCalled();
+
+    await expect(deleteManagedUser("user-2", "user-1")).rejects.toThrow(
+      "final account",
+    );
+  });
+
+  test("blocks non-atomic Better Auth deletion paths", async () => {
+    await expect(authDatabaseHooks.user.delete.before()).rejects.toThrow(
+      "management API",
+    );
   });
 });

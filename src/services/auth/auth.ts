@@ -21,15 +21,7 @@ import {
 import { authDatabaseHooks } from "./registration";
 
 const managementStatements = {
-  user: [
-    "create",
-    "list",
-    "delete",
-    "set-password",
-    "set-email",
-    "get",
-    "update",
-  ],
+  user: ["create", "list", "set-password", "set-email", "get", "update"],
   session: ["list", "revoke", "delete"],
 } as const;
 const managementAccess = createAccessControl(managementStatements);
@@ -47,6 +39,10 @@ const userManagerRole = managementAccess.newRole(managementStatements);
  * - `impersonateUser`/`stopImpersonating` have no privilege boundary to enforce
  *   when all accounts are equal; they would let any user assume any other user's
  *   session, and nothing in this deployment reads `Session.impersonatedBy`.
+ * - `removeUser` deletes sessions and accounts before the user row, outside one
+ *   transaction. The management route replaces it with an atomic conditional
+ *   delete so two users cannot concurrently delete each other and empty the
+ *   instance.
  *
  * Dropping the endpoints also drops them from `auth.api`, so a future caller gets
  * a type error rather than a silent no-op. The return type is inferred rather than
@@ -66,6 +62,7 @@ function managementAdminPlugin() {
     unbanUser: _unbanUser,
     impersonateUser: _impersonateUser,
     stopImpersonating: _stopImpersonating,
+    removeUser: _removeUser,
     ...endpoints
   } = plugin.endpoints;
   return { ...plugin, endpoints };

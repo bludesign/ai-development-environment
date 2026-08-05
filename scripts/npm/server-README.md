@@ -13,8 +13,8 @@ Requires Node.js 24 (`>=24.16.0 <25`).
 ## Run
 
 ```bash
-BETTER_AUTH_SECRET="replace-with-at-least-32-random-characters" \
-BETTER_AUTH_URL="http://127.0.0.1:3090" \
+export APP_SECRET="$(openssl rand -base64 32)"
+export APP_ORIGINS="http://127.0.0.1:3090"
 ai-development-environment
 ```
 

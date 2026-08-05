@@ -42,9 +42,6 @@ export default async function proxy(request: NextRequest): Promise<Response> {
     }
     return NextResponse.redirect(destination);
   }
-  if (hasOptimisticSession && isAuthPage) {
-    return NextResponse.redirect(new URL(`/${locale}`, request.url));
-  }
   return intlMiddleware(request);
 }
 

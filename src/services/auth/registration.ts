@@ -104,6 +104,47 @@ export async function setRegistrationEnabled(enabled: boolean): Promise<void> {
 }
 
 /**
+ * Deletes one managed account without ever allowing the user table to become
+ * empty. The count predicate and delete are one SQLite statement, so concurrent
+ * requests serialize at the write boundary and exactly one of two cross-deletes
+ * can succeed. Foreign-key cascades remove sessions, accounts, and API keys in
+ * that same statement.
+ *
+ * Better Auth's admin removal endpoint is deliberately not mounted: it deletes
+ * sessions and accounts before deleting the user, which cannot enforce this
+ * invariant atomically.
+ */
+export async function deleteManagedUser(
+  userId: string,
+  currentUserId: string,
+): Promise<void> {
+  if (userId === currentUserId) {
+    throw new APIError("BAD_REQUEST", {
+      message: "You cannot delete the account you are currently using.",
+    });
+  }
+
+  const prisma = await getPrismaClient();
+  const deleted = await prisma.$executeRaw`
+    DELETE FROM "user"
+    WHERE "id" = ${userId}
+      AND (SELECT COUNT(*) FROM "user") > 1
+  `;
+  if (deleted === 1) return;
+
+  const user = await prisma.user.findUnique({
+    where: { id: userId },
+    select: { id: true },
+  });
+  if (!user) {
+    throw new APIError("NOT_FOUND", { message: "User not found." });
+  }
+  throw new APIError("BAD_REQUEST", {
+    message: "The final account cannot be deleted.",
+  });
+}
+
+/**
  * Gate one account creation.
  *
  * `allowWhenRegistrationClosed` is set for the admin endpoint, which must keep
@@ -220,20 +261,10 @@ export const authDatabaseHooks = {
       }),
     },
     delete: {
-      before: async (user: { id: string }, context: AuthHookContext) => {
-        const currentUserId = context?.context?.session?.user?.id;
-        if (currentUserId && currentUserId === user.id) {
-          throw new APIError("BAD_REQUEST", {
-            message: "You cannot delete the account you are currently using.",
-          });
-        }
-        const prisma = await getPrismaClient();
-        if ((await prisma.user.count()) <= 1) {
-          throw new APIError("BAD_REQUEST", {
-            message: "The final account cannot be deleted.",
-          });
-        }
-        return true;
+      before: async () => {
+        throw new APIError("BAD_REQUEST", {
+          message: "Accounts must be deleted through the management API.",
+        });
       },
     },
   },

@@ -55,7 +55,6 @@ export async function POST(request: Request): Promise<Response> {
     }
     const auth = await getAuth();
     const created = await auth.api.createApiKey({
-      headers: request.headers,
       body: {
         userId: input.userId,
         name: input.name,
