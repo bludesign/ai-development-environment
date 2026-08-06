@@ -70,4 +70,27 @@ describe("resource option queries", () => {
       repositoryId: "repository-1",
     });
   });
+
+  test("maps active saved commands to named dropdown options", () => {
+    const plan = resourcePlan("savedCommand", null);
+
+    expect(plan?.query).toContain("commandDefinitions { id name description }");
+    expect(
+      plan?.map({
+        commandDefinitions: [
+          {
+            id: "command-1",
+            name: "Restart development server",
+            description: "Stops and restarts the local server",
+          },
+        ],
+      }),
+    ).toEqual([
+      {
+        value: "command-1",
+        label: "Restart development server",
+        description: "Stops and restarts the local server",
+      },
+    ]);
+  });
 });

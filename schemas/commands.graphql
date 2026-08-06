@@ -86,6 +86,8 @@ type CommandDefinition {
   restartLimit: Int
   "The concurrency mode deciding whether runs of this command may share their target."
   concurrency: CommandConcurrency!
+  "Whether worktree runs of this command block Git and worktree operations on the codebase."
+  blocksGitOperations: Boolean!
   "Whether the quick action enabled condition is true for this command definition."
   quickActionEnabled: Boolean!
   "The quick action icon key associated with this command definition."
@@ -234,6 +236,8 @@ type CommandRun {
   snapshotRestartLimit: Int
   "The snapshot concurrency associated with this command run."
   snapshotConcurrency: CommandConcurrency!
+  "Whether this run blocks Git and worktree operations on its codebase."
+  snapshotBlocksGitOperations: Boolean!
   "Whether the snapshot notifications enabled condition is true for this command run."
   snapshotNotificationsEnabled: Boolean!
   "The snapshot associated with this command run."
@@ -328,6 +332,8 @@ input CommandDefinitionInput {
   restartLimit: Int = 3
   "The concurrency mode to use for the request."
   concurrency: CommandConcurrency = NON_EXCLUSIVE
+  "Whether worktree runs should block Git and worktree operations on the codebase. Exclusive commands always enable this."
+  blocksGitOperations: Boolean = false
   "Whether quick action enabled applies to the request."
   quickActionEnabled: Boolean = false
   "The quick action icon key to use for the request."

@@ -1,6 +1,7 @@
 import { randomBytes, randomUUID } from "node:crypto";
 
 import { getPrismaClient } from "@/data/prisma-client";
+import { compileRe2 } from "@/lib/re2.server";
 import type { Prisma } from "@/generated/prisma/client";
 import {
   CREDENTIALS,
@@ -696,11 +697,7 @@ export function normalizeJiraKeyRegex(
 ): string | null {
   const pattern = value?.trim() ?? "";
   if (!pattern) return null;
-  try {
-    void new RegExp(pattern, "i");
-  } catch {
-    throw new Error("Jira key regex is invalid");
-  }
+  compileRe2(pattern, { flags: "i", label: "Jira key regex" });
   return pattern;
 }
 
@@ -709,7 +706,10 @@ export function parseJiraKey(
   pattern: string | null,
 ): string | null {
   if (!pattern) return null;
-  const match = new RegExp(pattern, "i").exec(title);
+  const match = compileRe2(pattern, {
+    flags: "i",
+    label: "Jira key regex",
+  }).exec(title);
   const value = (match?.[1] ?? match?.[0])?.trim();
   return value ? value.toUpperCase() : null;
 }

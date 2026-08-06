@@ -199,7 +199,9 @@ export class CredentialService {
       adoptionPasses.set(key, pass);
     }
     const result = await pass;
-    this.adoptedCount = result.adopted;
+    // A repointed row is the backend's copy taking over from a stale one, so it is
+    // reported alongside the rows adopted outright.
+    this.adoptedCount = result.adopted + result.repointed;
     this.adoptionIssue = result.issue;
   }
 
@@ -235,10 +237,16 @@ export class CredentialService {
     let record = await prisma.credential.findUnique({
       where: { id: descriptor.id },
     });
-    if (record || !driver.describe) return record;
+    if (!driver.describe) return record;
+    // A row this backend already owns is authoritative. Anything else — no row, or a row
+    // left behind by the backend this install used to be configured for — is decided by
+    // the configured backend, the only one a read can reach.
+    if (record && record.storageType === driver.storageType) return record;
 
     const described = await driver.describe(descriptor.id);
-    if (!described) return null;
+    // Without a secret in the configured backend there is nothing to repoint the row to,
+    // so a stale row stays as it is and reports the mismatch to its caller.
+    if (!described) return record;
     if (
       described.kind !== descriptor.kind ||
       described.ownerId !== (descriptor.ownerId ?? null)
@@ -259,7 +267,19 @@ export class CredentialService {
           payload: null,
           encrypted: false,
         },
-        update: {},
+        // Repointing takes the metadata just verified against the backend and drops the
+        // payload columns with the abandoned copy they described.
+        update: {
+          kind: descriptor.kind,
+          ownerId: descriptor.ownerId ?? null,
+          storageType: driver.storageType,
+          payload: null,
+          encrypted: false,
+          encryptionVersion: null,
+          nonce: null,
+          authTag: null,
+          keyFingerprint: null,
+        },
       });
     });
     record = await prisma.credential.findUnique({
@@ -284,7 +304,7 @@ export class CredentialService {
     }
     if (record.storageType !== driver.storageType) {
       throw new CredentialStoreOperationError(
-        `Credential ${descriptor.id} was stored in ${record.storageType}; re-enter it for ${driver.storageType} storage`,
+        `Credential ${descriptor.id} was stored in ${record.storageType} and ${driver.storageType} does not hold it; re-enter it for ${driver.storageType} storage`,
         "BACKEND_MISMATCH",
       );
     }

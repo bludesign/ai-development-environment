@@ -122,6 +122,53 @@ describe("command restart policy", () => {
   });
 });
 
+describe("command Git blocking policy", () => {
+  const normalize = (input: {
+    concurrency: string;
+    blocksGitOperations?: boolean;
+  }) =>
+    (
+      new CommandsService(agentControl()) as unknown as {
+        normalizeDefinition(value: Record<string, unknown>): {
+          concurrency: string;
+          blocksGitOperations: boolean;
+        };
+      }
+    ).normalizeDefinition({
+      name: "Sleep",
+      script: "sleep 1",
+      targetKind: "ANY_WORKTREE",
+      ...input,
+    });
+
+  test("defaults shared and excluded commands to allowing Git", () => {
+    expect(
+      normalize({ concurrency: "NON_EXCLUSIVE" }).blocksGitOperations,
+    ).toBe(false);
+    expect(normalize({ concurrency: "EXCLUDED" }).blocksGitOperations).toBe(
+      false,
+    );
+  });
+
+  test("allows shared commands to opt into blocking Git", () => {
+    expect(
+      normalize({
+        concurrency: "NON_EXCLUSIVE",
+        blocksGitOperations: true,
+      }).blocksGitOperations,
+    ).toBe(true);
+  });
+
+  test("always blocks Git for exclusive commands", () => {
+    expect(
+      normalize({
+        concurrency: "EXCLUSIVE",
+        blocksGitOperations: false,
+      }).blocksGitOperations,
+    ).toBe(true);
+  });
+});
+
 describe("CommandsService.terminateRun", () => {
   beforeEach(() => vi.clearAllMocks());
 
@@ -437,6 +484,7 @@ describe("command concurrency dispatch", () => {
 
   const dispatchWith = async (input: {
     candidate: string;
+    blocksGitOperations?: boolean;
     peers: Array<{
       id: string;
       snapshotConcurrency: string;
@@ -463,6 +511,7 @@ describe("command concurrency dispatch", () => {
           snapshotTargetKind: "ANY_WORKTREE",
           snapshotScript: "printf safe",
           snapshotConcurrency: input.candidate,
+          snapshotBlocksGitOperations: input.blocksGitOperations ?? false,
           queuedAt: new Date("2026-08-02T10:05:00Z"),
           agentId: "agent-1",
           agent: { capabilitiesJson: '["command.run"]' },
@@ -520,6 +569,17 @@ describe("command concurrency dispatch", () => {
       peers: [holder("run-0", "NON_EXCLUSIVE")],
     });
     expect(createJob).toHaveBeenCalledTimes(1);
+  });
+
+  test("forwards the immutable Git-blocking policy to the agent job", async () => {
+    const { createJob } = await dispatchWith({
+      candidate: "NON_EXCLUSIVE",
+      blocksGitOperations: true,
+      peers: [],
+    });
+    expect(createJob).toHaveBeenCalledWith(
+      expect.objectContaining({ blocksGitOperations: true }),
+    );
   });
 
   test("starts an excluded run without consulting the target at all", async () => {
@@ -615,6 +675,8 @@ describe("command target and output authorization", () => {
       targetRepositoryId: null,
       restartPolicy: "ON_FAILURE",
       restartLimit: 3,
+      concurrency: "NON_EXCLUSIVE",
+      blocksGitOperations: false,
       quickActionEnabled: true,
       quickActionIconKey: "play",
       quickActionButtonVariant: "secondary",
@@ -663,7 +725,13 @@ describe("command target and output authorization", () => {
       }
     ).dispatch = vi.fn().mockResolvedValue(undefined);
 
-    await service.startRun({ commandId: definition.id, agentId: "agent-1" });
+    await service.startRun({
+      commandId: definition.id,
+      agentId: "agent-1",
+      blocksGitOperations: true,
+    });
+
+    expect(create.mock.calls[0][0].data.snapshotBlocksGitOperations).toBe(true);
 
     const snapshot = JSON.parse(
       String(create.mock.calls[0][0].data.snapshotJson),
@@ -718,6 +786,7 @@ describe("command target and output authorization", () => {
     await service.startCustomRun({
       script: "  printf custom  ",
       agentId: "agent-1",
+      blocksGitOperations: true,
     });
 
     expect(create).toHaveBeenCalledWith({
@@ -728,6 +797,7 @@ describe("command target and output authorization", () => {
         snapshotTargetKind: "ANY_AGENT_HOME",
         snapshotRestartPolicy: "NEVER",
         snapshotRestartLimit: null,
+        snapshotBlocksGitOperations: true,
         snapshotNotificationsEnabled: true,
       }),
     });
@@ -736,6 +806,7 @@ describe("command target and output authorization", () => {
         name: "Custom command",
         script: "printf custom",
         targetKind: "ANY_AGENT_HOME",
+        blocksGitOperations: true,
       }),
     );
   });
@@ -914,6 +985,8 @@ describe("command target and output authorization", () => {
       snapshotTargetKind: "REPOSITORY_WORKTREE",
       snapshotRestartPolicy: "ON_FAILURE",
       snapshotRestartLimit: 2,
+      snapshotConcurrency: "NON_EXCLUSIVE",
+      snapshotBlocksGitOperations: true,
       snapshotNotificationsEnabled: false,
       snapshotJson: '{"name":"Original name"}',
       agentId: "agent-1",
@@ -966,6 +1039,7 @@ describe("command target and output authorization", () => {
         snapshotTargetKind: original.snapshotTargetKind,
         snapshotRestartPolicy: original.snapshotRestartPolicy,
         snapshotRestartLimit: original.snapshotRestartLimit,
+        snapshotBlocksGitOperations: original.snapshotBlocksGitOperations,
         snapshotNotificationsEnabled: original.snapshotNotificationsEnabled,
         snapshotJson: original.snapshotJson,
         agentId: original.agentId,
@@ -1644,6 +1718,8 @@ describe("CommandsService command definition portability", () => {
           targetRepository: { id: "repository-1", name: "storefront" },
           restartPolicy: "ON_FAILURE",
           restartLimit: 2,
+          concurrency: "NON_EXCLUSIVE",
+          blocksGitOperations: true,
           quickActionEnabled: true,
           quickActionIconKey: "hammer",
           quickActionButtonVariant: "default",
@@ -1664,6 +1740,7 @@ describe("CommandsService command definition portability", () => {
       targetRepositoryName: "storefront",
       restartPolicy: "ON_FAILURE",
       restartLimit: 2,
+      blocksGitOperations: true,
       quickActionEnabled: true,
       notificationsEnabled: false,
     });
@@ -1687,6 +1764,7 @@ describe("CommandsService command definition portability", () => {
           script: "brew services restart aide",
           targetKind: "SPECIFIC_AGENT_HOME",
           targetAgentName: "studio-mac",
+          blocksGitOperations: true,
         },
       },
     });
@@ -1695,6 +1773,7 @@ describe("CommandsService command definition portability", () => {
       name: "Restart",
       targetKind: "SPECIFIC_AGENT_HOME",
       targetAgentId: "agent-9",
+      blocksGitOperations: true,
     });
   });
 

@@ -4,6 +4,7 @@ import { createHmac, randomUUID, timingSafeEqual } from "node:crypto";
 
 import type { Prisma } from "@/generated/prisma/client";
 import { getPrismaClient } from "@/data/prisma-client";
+import { compileRe2 } from "@/lib/re2.server";
 import {
   CREDENTIALS,
   githubAppConnectionSettings,
@@ -170,7 +171,10 @@ function jiraKeyFromBranch(
 ): string | null {
   if (!branch || !pattern) return null;
   try {
-    const match = new RegExp(pattern, "i").exec(branch);
+    const match = compileRe2(pattern, {
+      flags: "i",
+      label: "Jira branch regex",
+    }).exec(branch);
     const key = (match?.[1] ?? match?.[0])?.trim();
     return key ? key.toUpperCase() : null;
   } catch {

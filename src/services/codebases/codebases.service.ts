@@ -27,6 +27,8 @@ import {
 } from "@ai-development-environment/agent-contract/worktrees";
 
 import { getPrismaClient } from "@/data/prisma-client";
+import { compileRe2 } from "@/lib/re2.server";
+import { ACTIVE_CODEBASE_BLOCKING_JOB_WHERE } from "@/lib/codebase-busy";
 import {
   agentOnlineWindowMs,
   AgentControlService,
@@ -39,7 +41,6 @@ import type { SkillsService } from "@/services/skills";
 const INSPECTION_MAX_AGE_MS = 15 * 60_000;
 const INTERACTIVE_TIMEOUT_MS = 30_000;
 const SETTINGS_ID = "default";
-const ACTIVE_CODEBASE_JOB_STATUSES = ["QUEUED", "RUNNING"];
 
 type CompletedJob = {
   id: string;
@@ -115,7 +116,7 @@ export class CodebasesService {
             agent: true,
             repository: true,
             jobs: {
-              where: { status: { in: ["QUEUED", "RUNNING"] } },
+              where: ACTIVE_CODEBASE_BLOCKING_JOB_WHERE,
               orderBy: { createdAt: "desc" },
               take: 1,
             },
@@ -139,7 +140,7 @@ export class CodebasesService {
             agent: true,
             repository: true,
             jobs: {
-              where: { status: { in: ["QUEUED", "RUNNING"] } },
+              where: ACTIVE_CODEBASE_BLOCKING_JOB_WHERE,
               orderBy: { createdAt: "desc" },
               take: 1,
             },
@@ -158,7 +159,7 @@ export class CodebasesService {
         agent: true,
         repository: { include: { skillGroups: { include: { group: true } } } },
         jobs: {
-          where: { status: { in: ACTIVE_CODEBASE_JOB_STATUSES } },
+          where: ACTIVE_CODEBASE_BLOCKING_JOB_WHERE,
           orderBy: { createdAt: "desc" },
           take: 1,
         },
@@ -275,11 +276,10 @@ export class CodebasesService {
         ? DEFAULT_JIRA_BRANCH_REGEX
         : input.defaultJiraBranchRegex.trim();
     if (defaultJiraBranchRegex) {
-      try {
-        void new RegExp(defaultJiraBranchRegex, "i");
-      } catch {
-        throw new Error("Default Jira branch regex is invalid");
-      }
+      compileRe2(defaultJiraBranchRegex, {
+        flags: "i",
+        label: "Default Jira branch regex",
+      });
     }
     const prisma = await getPrismaClient();
     const data =
@@ -462,11 +462,10 @@ export class CodebasesService {
     }
     const jiraBranchRegex = jiraBranchRegexValue?.trim() || null;
     if (jiraBranchRegex) {
-      try {
-        void new RegExp(jiraBranchRegex, "i");
-      } catch {
-        throw new Error("Jira branch regex is invalid");
-      }
+      compileRe2(jiraBranchRegex, {
+        flags: "i",
+        label: "Jira branch regex",
+      });
     }
     const validatedSkillGroupIds =
       skillGroupIds === undefined || skillGroupIds === null
@@ -555,7 +554,7 @@ export class CodebasesService {
         agent: true,
         repository: true,
         jobs: {
-          where: { status: { in: ACTIVE_CODEBASE_JOB_STATUSES } },
+          where: ACTIVE_CODEBASE_BLOCKING_JOB_WHERE,
           select: { id: true },
           take: 1,
         },
@@ -614,7 +613,7 @@ export class CodebasesService {
         const active = await prisma.agentJob.findFirst({
           where: {
             codebaseId: codebase.id,
-            status: { in: ACTIVE_CODEBASE_JOB_STATUSES },
+            ...ACTIVE_CODEBASE_BLOCKING_JOB_WHERE,
           },
           select: { id: true },
         });
@@ -865,7 +864,7 @@ export class CodebasesService {
         agent: true,
         repository: true,
         jobs: {
-          where: { status: { in: ACTIVE_CODEBASE_JOB_STATUSES } },
+          where: ACTIVE_CODEBASE_BLOCKING_JOB_WHERE,
           select: { id: true },
           take: 1,
         },

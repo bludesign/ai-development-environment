@@ -96,7 +96,7 @@ describe("AppEditorDialog", () => {
     expect(screen.getByLabelText(/Codex/)).toBeDefined();
   });
 
-  test("keeps repositories the agent filter hides assigned", async () => {
+  test("restores and saves agent filters without changing assignments", async () => {
     const onSaved = vi.fn();
     request.mockResolvedValue({ updateApp: { id: "app-1" } } as never);
     render(
@@ -106,6 +106,7 @@ describe("AppEditorDialog", () => {
             id: "app-1",
             name: "Platform",
             description: "",
+            agentIds: ["agent-2"],
             repositories: [repositories[0]!],
             counts: {
               repositories: 1,
@@ -126,7 +127,9 @@ describe("AppEditorDialog", () => {
       />,
     );
 
-    fireEvent.click(screen.getByLabelText("Laptop"));
+    expect(screen.getByLabelText("Laptop").getAttribute("data-state")).toBe(
+      "checked",
+    );
     expect(screen.queryByLabelText(/Codex/)).toBeNull();
     expect(screen.getByText(/hidden by the agent filter/)).toBeDefined();
 
@@ -137,6 +140,7 @@ describe("AppEditorDialog", () => {
           id: "app-1",
           name: "Platform",
           description: "",
+          agentIds: ["agent-2"],
           repositoryIds: ["codex"],
         },
       }),

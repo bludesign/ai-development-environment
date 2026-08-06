@@ -970,6 +970,7 @@ export class AgentControlService {
     codebaseId?: string | null;
     worktreeId?: string | null;
     visibility?: "USER" | "SYSTEM";
+    blocksGitOperations?: boolean;
   }) {
     validateJob(input.kind, input.payload);
     if (!input.idempotencyKey.trim())
@@ -1017,6 +1018,7 @@ export class AgentControlService {
           codebaseId: input.codebaseId ?? null,
           worktreeId: input.worktreeId ?? null,
           visibility: input.visibility ?? "USER",
+          blocksGitOperations: input.blocksGitOperations ?? false,
         },
       });
     } catch (error) {

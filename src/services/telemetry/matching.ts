@@ -71,8 +71,7 @@ function matcher(
   } else {
     const source = mode === "GLOB" ? `^${globSource(pattern)}$` : pattern;
     const flags = caseSensitive ? "su" : "isu";
-    const regex =
-      mode === "REGEX" ? new RE2(source, flags) : new RegExp(source, flags);
+    const regex = new RE2(source, flags);
     match = (value) => regex.test(value);
   }
   matcherCache.set(cacheKey, match);

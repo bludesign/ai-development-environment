@@ -113,6 +113,8 @@ export type WorkflowSummary = {
   maxConcurrentRuns: number;
   completionNotificationsEnabled: boolean;
   exclusiveWorktree: boolean;
+  worktreeConcurrency: "EXCLUSIVE" | "NON_EXCLUSIVE" | "EXCLUDED";
+  blocksGitOperations: boolean;
   quickActionKind: "STANDARD" | "MERGE_CONFLICT" | "GITHUB_ACTIONS" | "NONE";
   quickActionIconKey: string;
   quickActionButtonVariant: "default" | "outline" | "secondary" | "destructive";
@@ -220,6 +222,8 @@ export type WorkflowRun = {
   triggerSubjectKey: string;
   status: string;
   phase: string;
+  worktreeConcurrency: "EXCLUSIVE" | "NON_EXCLUSIVE" | "EXCLUDED";
+  blocksGitOperations: boolean;
   generation: number;
   sessionData: Record<string, unknown>;
   sessionRevision: number;
@@ -271,6 +275,7 @@ export type WorktreeRunQueueEntry = {
   workflowRunId: string | null;
   queuedAt: string;
   exclusiveWorktree: boolean;
+  worktreeConcurrency: "EXCLUSIVE" | "NON_EXCLUSIVE" | "EXCLUDED";
   worktreeConcurrencyLimit: number | null;
 };
 

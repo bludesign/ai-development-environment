@@ -10,7 +10,11 @@ import type { WorkflowsService } from "./workflows.service";
 
 function context(worktreeId: string): WorkflowExecutionContext {
   return {
-    run: { id: "workflow-run", workflowId: "workflow-definition" },
+    run: {
+      id: "workflow-run",
+      workflowId: "workflow-definition",
+      blocksGitOperations: true,
+    },
     attempt: { id: "attempt" },
     node: {
       id: "session",
@@ -967,6 +971,7 @@ describe("saved command workflow adapter", () => {
       worktreeId: "actual-worktree",
       origin: "WORKFLOW",
       idempotencyKey: "workflow-command-attempt",
+      blocksGitOperations: true,
     });
     expect(result.wait).toEqual(
       expect.objectContaining({
@@ -981,6 +986,28 @@ describe("saved command workflow adapter", () => {
         url: "/commands/runs/command-run-1",
       }),
     ]);
+  });
+
+  test("parks a durable once-only output matcher", async () => {
+    const { executor } = commandExecutor();
+    const input = commandContext("WAIT_FOR_EXIT");
+    input.node.config.outputPattern = "ready (?<port>[0-9]+)";
+
+    const result = await executor.execute(input);
+
+    expect(result.wait?.predicate).toEqual({
+      outputMatch: expect.objectContaining({
+        pattern: "ready (?<port>[0-9]+)",
+        mode: "ONCE",
+        matchCount: 0,
+        matched: false,
+      }),
+    });
+    expect(result.sessionPatch).toMatchObject({
+      steps: {
+        "saved-command": { matches: [], latestMatch: null },
+      },
+    });
   });
 
   test("fire and forget succeeds after dispatch without a wait", async () => {
@@ -1036,6 +1063,7 @@ describe("custom command workflow adapter", () => {
       worktreeId: "actual-worktree",
       origin: "WORKFLOW",
       idempotencyKey: "custom-attempt",
+      blocksGitOperations: true,
     });
     expect(result.wait).toEqual(
       expect.objectContaining({
@@ -1075,6 +1103,24 @@ describe("custom command workflow adapter", () => {
       }),
     );
     expect(result.wait).toBeUndefined();
+  });
+
+  test("rejects output matching with fire and forget before dispatch", async () => {
+    const { executor, startCustomRun } = customExecutor();
+    const input = context("actual-worktree");
+    input.node = {
+      ...input.node,
+      id: "custom-command",
+      kind: "CUSTOM_COMMAND",
+      config: {
+        script: "printf fixed",
+        completionMode: "FIRE_AND_FORGET",
+        outputPattern: "fixed",
+      },
+    };
+
+    await expect(executor.execute(input)).rejects.toThrow(/Wait for exit/);
+    expect(startCustomRun).not.toHaveBeenCalled();
   });
 
   test("applies the step's configured wait timing", async () => {

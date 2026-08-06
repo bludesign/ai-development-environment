@@ -51,6 +51,7 @@ const prisma = vi.hoisted(() => ({
   },
   workflowStepAttempt: {
     findUnique: vi.fn(),
+    findMany: vi.fn(),
     update: vi.fn(),
     updateMany: vi.fn(),
     count: vi.fn(),
@@ -885,6 +886,127 @@ describe("workflow sub-workflow validation", () => {
       }),
     );
   });
+
+  test("validates command patterns with the server RE2 implementation", async () => {
+    const draft = emptyWorkflowDefinition("Command matcher");
+    draft.nodes = [
+      {
+        id: "command",
+        kind: "CUSTOM_COMMAND",
+        position: { x: 200, y: 100 },
+        config: {
+          script: "serve",
+          completionMode: "WAIT_FOR_EXIT",
+          outputPattern: "(?=ready)",
+        },
+        requiredPaths: [],
+        providedPaths: [],
+        retry: { maxAttempts: 1, strategy: "EXPONENTIAL", delaySeconds: 5 },
+        failurePolicy: "FAIL",
+      },
+    ];
+    draft.edges = [
+      {
+        id: "start-command",
+        source: "manual",
+        target: "command",
+        sourceHandle: "success",
+        targetHandle: "input",
+      },
+    ];
+    prisma.workflow.findUnique.mockResolvedValue({
+      id: "workflow-a",
+      draftDefinitionJson: JSON.stringify(draft),
+      activeVersion: null,
+      versions: [],
+      _count: { runs: 0 },
+    });
+
+    const service = new WorkflowsService(new WorkflowEventsService());
+    const result = await service.validateDraft("workflow-a");
+
+    expect(result.valid).toBe(false);
+    expect(result.diagnostics).toContainEqual(
+      expect.objectContaining({
+        code: "COMMAND_MATCH_PATTERN_INVALID",
+        nodeId: "command",
+      }),
+    );
+
+    draft.nodes[0]!.config.outputPattern = "\\Aready\\z";
+    prisma.workflow.findUnique.mockResolvedValue({
+      id: "workflow-a",
+      draftDefinitionJson: JSON.stringify(draft),
+      activeVersion: null,
+      versions: [],
+      _count: { runs: 0 },
+    });
+    await expect(service.validateDraft("workflow-a")).resolves.toMatchObject({
+      valid: true,
+    });
+
+    draft.nodes[0]!.config.outputPattern = "\\b";
+    prisma.workflow.findUnique.mockResolvedValue({
+      id: "workflow-a",
+      draftDefinitionJson: JSON.stringify(draft),
+      activeVersion: null,
+      versions: [],
+      _count: { runs: 0 },
+    });
+    const zeroWidth = await service.validateDraft("workflow-a");
+    expect(zeroWidth.valid).toBe(false);
+    expect(zeroWidth.diagnostics).toContainEqual(
+      expect.objectContaining({
+        code: "COMMAND_MATCH_PATTERN_INVALID",
+        nodeId: "command",
+        message: expect.stringMatching(/consume/),
+      }),
+    );
+
+    draft.nodes[0]!.config.outputPattern = "ready";
+    draft.nodes[0]!.config.condition = {
+      op: "MATCHES",
+      left: "ready",
+      right: "(?=ready)",
+    };
+    prisma.workflow.findUnique.mockResolvedValue({
+      id: "workflow-a",
+      draftDefinitionJson: JSON.stringify(draft),
+      activeVersion: null,
+      versions: [],
+      _count: { runs: 0 },
+    });
+    const condition = await service.validateDraft("workflow-a");
+    expect(condition.valid).toBe(false);
+    expect(condition.diagnostics).toContainEqual(
+      expect.objectContaining({
+        code: "WORKFLOW_REGEX_PATTERN_INVALID",
+        nodeId: "command",
+      }),
+    );
+
+    delete draft.nodes[0]!.config.condition;
+    draft.triggers[0]!.kind = "GITHUB_ISSUE_COMMAND";
+    draft.triggers[0]!.config = {
+      allowedLogins: ["octocat"],
+      commandPattern: "^(?=/deploy$).*$",
+    };
+    prisma.workflow.findUnique.mockResolvedValue({
+      id: "workflow-a",
+      draftDefinitionJson: JSON.stringify(draft),
+      activeVersion: null,
+      versions: [],
+      _count: { runs: 0 },
+    });
+    const trigger = await service.validateDraft("workflow-a");
+    expect(trigger.valid).toBe(false);
+    expect(trigger.diagnostics).toContainEqual(
+      expect.objectContaining({
+        code: "WORKFLOW_REGEX_PATTERN_INVALID",
+        triggerId: "manual",
+      }),
+    );
+  });
 });
 
 describe("workflow trigger event processing", () => {
@@ -1231,6 +1353,54 @@ describe("workflow runtime lifecycle guards", () => {
       externalKey: "job-1",
       timeoutAt: timeoutAt.toISOString(),
     });
+  });
+
+  test("publishes command identity and empty match data while the command is running", async () => {
+    prisma.workflowRun.findUnique.mockResolvedValue({
+      id: "run-1",
+      status: "RUNNING",
+      sessionDataJson: "{}",
+      exclusiveWorktree: false,
+      worktreeId: null,
+    });
+    const service = new WorkflowsService(new WorkflowEventsService());
+
+    await internals(service).parkAttempt(
+      {
+        id: "attempt-1",
+        runId: "run-1",
+        iterationKey: "",
+      },
+      { id: "command", name: "Serve", kind: "CUSTOM_COMMAND" },
+      {
+        sessionPatch: {
+          steps: {
+            command: {
+              commandRunId: "command-run-1",
+              matches: [],
+              latestMatch: null,
+            },
+          },
+        },
+        wait: { kind: "COMMAND_RUN", externalKey: "command-run-1" },
+      },
+    );
+
+    const runUpdate = prisma.workflowRun.updateMany.mock.calls[0]?.[0];
+    expect(JSON.parse(runUpdate.data.sessionDataJson)).toMatchObject({
+      steps: {
+        command: {
+          commandRunId: "command-run-1",
+          matches: [],
+          latestMatch: null,
+        },
+      },
+    });
+    const attemptUpdate =
+      prisma.workflowStepAttempt.updateMany.mock.calls[0]?.[0];
+    expect(
+      JSON.parse(attemptUpdate.data.outputJson).sessionPatch,
+    ).toBeUndefined();
   });
 
   test("reports how long a wait lasted and what freed it", async () => {
@@ -1756,6 +1926,493 @@ describe("workflow runtime lifecycle guards", () => {
   });
 });
 
+describe("workflow command output matching", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    prisma.$transaction.mockImplementation(
+      async (
+        operation: unknown[] | ((transaction: typeof prisma) => unknown),
+      ) =>
+        typeof operation === "function"
+          ? operation(prisma)
+          : Promise.all(operation),
+    );
+    prisma.workflowWait.updateMany.mockResolvedValue({ count: 1 });
+    prisma.workflowStepAttempt.createMany.mockResolvedValue({ count: 0 });
+    prisma.workflowRun.update.mockResolvedValue({});
+    prisma.workflowRunEvent.findFirst.mockResolvedValue(null);
+    prisma.workflowRunEvent.create.mockResolvedValue({ id: "event-1" });
+  });
+
+  function commandDefinition() {
+    const definition = emptyWorkflowDefinition("Command matcher");
+    definition.nodes = [
+      {
+        id: "command",
+        kind: "CUSTOM_COMMAND",
+        position: { x: 100, y: 100 },
+        config: {
+          script: "serve",
+          completionMode: "WAIT_FOR_EXIT",
+          outputPattern: "ready",
+        },
+        requiredPaths: [],
+        providedPaths: [],
+        retry: { maxAttempts: 1, strategy: "EXPONENTIAL", delaySeconds: 5 },
+        failurePolicy: "FAIL",
+      },
+      {
+        id: "matched",
+        kind: "NOTIFICATION_SEND",
+        position: { x: 300, y: 0 },
+        config: {},
+        requiredPaths: [],
+        providedPaths: [],
+        retry: { maxAttempts: 1, strategy: "EXPONENTIAL", delaySeconds: 5 },
+        failurePolicy: "FAIL",
+      },
+    ];
+    definition.edges = [
+      {
+        id: "start",
+        source: "manual",
+        target: "command",
+        sourceHandle: "success",
+        targetHandle: "input",
+      },
+      {
+        id: "matched",
+        source: "command",
+        target: "matched",
+        sourceHandle: "match",
+        targetHandle: "input",
+      },
+    ];
+    return definition;
+  }
+
+  function matcherWait(
+    pattern: string,
+    mode: "ONCE" | "EACH_MATCH" = "EACH_MATCH",
+  ) {
+    return {
+      id: "wait-1",
+      runId: "workflow-run-1",
+      attemptId: "workflow-attempt-1",
+      kind: "COMMAND_RUN",
+      status: "PENDING",
+      predicateJson: JSON.stringify({
+        outputMatch: {
+          pattern,
+          mode,
+          matchCount: 0,
+          matched: false,
+          scanAttempt: 1,
+          scanCharacterOffset: 0,
+          observedAttempt: 0,
+          observedSequence: -1,
+        },
+      }),
+      externalKey: "command-run-1",
+      attempt: {
+        id: "workflow-attempt-1",
+        runId: "workflow-run-1",
+        nodeId: "command",
+        kind: "CUSTOM_COMMAND",
+        generation: 0,
+        iterationKey: "",
+        attempt: 0,
+        status: "WAITING",
+        outputJson: null,
+        run: {
+          id: "workflow-run-1",
+          status: "WAITING",
+          version: { definitionJson: JSON.stringify(commandDefinition()) },
+        },
+      },
+    };
+  }
+
+  function outputService(
+    rows: Array<{
+      attempt: number;
+      sequence: number;
+      stream: "STDOUT" | "STDERR" | "SYSTEM";
+      bytes: Buffer;
+    }>,
+  ) {
+    const normalized = rows.map((row) => ({
+      sequence: row.sequence,
+      stream: row.stream,
+      dataBase64: row.bytes.toString("base64"),
+      byteLength: row.bytes.length,
+      attempt: { attempt: row.attempt, runId: "command-run-1" },
+    }));
+    const listOutput = vi.fn(
+      async (
+        _runId: string,
+        afterAttempt: number,
+        afterSequence: number,
+        first: number,
+      ) =>
+        normalized
+          .filter(
+            (row) =>
+              row.attempt.attempt > afterAttempt ||
+              (row.attempt.attempt === afterAttempt &&
+                row.sequence > afterSequence),
+          )
+          .slice(0, first),
+    );
+    const commands = { listOutput, terminateRun: vi.fn() };
+    const service = new WorkflowsService(
+      new WorkflowEventsService(),
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      commands as never,
+    );
+    return { service, commands };
+  }
+
+  function matcherInternals(service: WorkflowsService) {
+    return service as unknown as {
+      processCommandMatchWait(wait: unknown): Promise<void>;
+      persistCommandMatches(
+        wait: unknown,
+        cursor: unknown,
+        matches: unknown[],
+      ): Promise<boolean>;
+      progressRun(runId: string): Promise<void>;
+      dispatchReadyAttempts(): Promise<void>;
+      failCommandMatchWait(wait: unknown, error: Error): Promise<void>;
+      failAttempt(
+        attempt: unknown,
+        node: unknown,
+        error: Error,
+        result?: unknown,
+      ): Promise<void>;
+    };
+  }
+
+  test("matches across split UTF-8 output chunks with captures", async () => {
+    const bytes = Buffer.from("ready π=42", "utf8");
+    const { service } = outputService([
+      {
+        attempt: 1,
+        sequence: 0,
+        stream: "STDOUT",
+        bytes: bytes.subarray(0, 7),
+      },
+      {
+        attempt: 1,
+        sequence: 1,
+        stream: "STDOUT",
+        bytes: bytes.subarray(7),
+      },
+    ]);
+    const internals = matcherInternals(service);
+    const persist = vi.fn().mockResolvedValue(true);
+    internals.persistCommandMatches = persist;
+
+    await internals.processCommandMatchWait(
+      matcherWait("ready π=(?<answer>[0-9]+)"),
+    );
+
+    expect(persist).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ matchCount: 1, scanCharacterOffset: 10 }),
+      [
+        expect.objectContaining({
+          text: "ready π=42",
+          captures: ["42"],
+          namedCaptures: { answer: "42" },
+          commandAttempt: 1,
+          start: { sequence: 0, offset: 0 },
+          end: { sequence: 1, offset: 4 },
+        }),
+      ],
+    );
+  });
+
+  test("emits every combined stdout and stderr occurrence", async () => {
+    const { service } = outputService([
+      {
+        attempt: 1,
+        sequence: 0,
+        stream: "STDOUT",
+        bytes: Buffer.from("ready "),
+      },
+      {
+        attempt: 1,
+        sequence: 1,
+        stream: "STDERR",
+        bytes: Buffer.from("12\nready "),
+      },
+      {
+        attempt: 1,
+        sequence: 2,
+        stream: "STDOUT",
+        bytes: Buffer.from("34"),
+      },
+      {
+        attempt: 1,
+        sequence: 3,
+        stream: "SYSTEM",
+        bytes: Buffer.from("ready 99"),
+      },
+    ]);
+    const internals = matcherInternals(service);
+    const persist = vi.fn().mockResolvedValue(true);
+    internals.persistCommandMatches = persist;
+
+    await internals.processCommandMatchWait(matcherWait("ready ([0-9]+)"));
+
+    const matches = persist.mock.calls[0]?.[2];
+    expect(matches).toEqual([
+      expect.objectContaining({ text: "ready 12", captures: ["12"] }),
+      expect.objectContaining({ text: "ready 34", captures: ["34"] }),
+    ]);
+  });
+
+  test("never carries an unfinished match into a restarted process", async () => {
+    const { service } = outputService([
+      {
+        attempt: 1,
+        sequence: 0,
+        stream: "STDOUT",
+        bytes: Buffer.from("foo"),
+      },
+      {
+        attempt: 2,
+        sequence: 0,
+        stream: "STDOUT",
+        bytes: Buffer.from("bar"),
+      },
+    ]);
+    const internals = matcherInternals(service);
+    const persist = vi.fn().mockResolvedValue(true);
+    internals.persistCommandMatches = persist;
+
+    await internals.processCommandMatchWait(matcherWait("foobar"));
+
+    expect(persist.mock.calls[0]?.[2]).toEqual([]);
+    expect(persist.mock.calls[0]?.[1]).toEqual(
+      expect.objectContaining({ scanAttempt: 2, scanCharacterOffset: 0 }),
+    );
+  });
+
+  test("fails clearly after 16 MiB of unmatched output", async () => {
+    const { service } = outputService([
+      {
+        attempt: 1,
+        sequence: 0,
+        stream: "STDOUT",
+        bytes: Buffer.alloc(16 * 1024 * 1024 + 1, 97),
+      },
+    ]);
+    const internals = matcherInternals(service);
+    const fail = vi.fn().mockResolvedValue(undefined);
+    internals.failCommandMatchWait = fail;
+
+    await internals.processCommandMatchWait(matcherWait("never-matches"));
+
+    expect(fail).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ message: expect.stringContaining("16 MiB") }),
+    );
+  });
+
+  test("atomically appends session matches and creates isolated branch attempts", async () => {
+    const { service } = outputService([]);
+    const internals = matcherInternals(service);
+    internals.progressRun = vi.fn().mockResolvedValue(undefined);
+    internals.dispatchReadyAttempts = vi.fn().mockResolvedValue(undefined);
+    prisma.workflowRun.findUnique.mockResolvedValue({
+      id: "workflow-run-1",
+      status: "WAITING",
+      exclusiveWorktree: false,
+      worktreeId: null,
+      sessionDataJson: JSON.stringify({
+        steps: {
+          command: {
+            commandRunId: "command-run-1",
+            matches: [],
+            latestMatch: null,
+          },
+        },
+      }),
+    });
+    const first = {
+      ordinal: 1,
+      text: "ready 12",
+      captures: ["12"],
+      namedCaptures: {},
+      commandRunId: "command-run-1",
+      commandAttempt: 1,
+      start: { sequence: 0, offset: 0 },
+      end: { sequence: 0, offset: 8 },
+    };
+    const second = { ...first, ordinal: 2, text: "ready 34" };
+    const wait = matcherWait("ready ([0-9]+)");
+    const cursor = JSON.parse(wait.predicateJson).outputMatch;
+    cursor.matchCount = 2;
+
+    await internals.persistCommandMatches(wait, cursor, [first, second]);
+
+    const created = prisma.workflowStepAttempt.createMany.mock.calls[0]?.[0]
+      .data as Array<Record<string, unknown>>;
+    expect(created).toHaveLength(4);
+    expect(
+      created.filter(({ phase }) => phase === "MATCH_EMITTED"),
+    ).toHaveLength(2);
+    expect(
+      created.filter(({ phase }) => phase === "MATCH_PENDING"),
+    ).toHaveLength(2);
+    expect(
+      JSON.parse(
+        String(
+          created.find(({ phase }) => phase === "MATCH_EMITTED")?.outputJson,
+        ),
+      ).selectedHandles,
+    ).toEqual(["match"]);
+    const session = JSON.parse(
+      prisma.workflowRun.update.mock.calls[0]?.[0].data.sessionDataJson,
+    );
+    expect(session.steps.command.matches).toEqual([first, second]);
+    expect(session.steps.command.latestMatch).toEqual(second);
+  });
+
+  test("does not duplicate a match when another reconciler advanced the cursor", async () => {
+    const { service } = outputService([]);
+    const internals = matcherInternals(service);
+    prisma.workflowWait.updateMany.mockResolvedValueOnce({ count: 0 });
+    const wait = matcherWait("ready");
+    const match = {
+      ordinal: 1,
+      text: "ready",
+      captures: [],
+      namedCaptures: {},
+      commandRunId: "command-run-1",
+      commandAttempt: 1,
+      start: { sequence: 0, offset: 0 },
+      end: { sequence: 0, offset: 5 },
+    };
+
+    const persisted = await internals.persistCommandMatches(
+      wait,
+      JSON.parse(wait.predicateJson).outputMatch,
+      [match],
+    );
+
+    expect(persisted).toBe(false);
+    expect(prisma.workflowStepAttempt.createMany).not.toHaveBeenCalled();
+    expect(prisma.workflowRun.update).not.toHaveBeenCalled();
+  });
+
+  test("preserves match data and final command data on failure", async () => {
+    const { service } = outputService([]);
+    const internals = matcherInternals(service);
+    const definition = commandDefinition();
+    const node = definition.nodes[0]!;
+    const existingMatch = { ordinal: 1, text: "ready" };
+    prisma.workflowRun.findUnique.mockResolvedValue({
+      id: "workflow-run-1",
+      status: "WAITING",
+      exclusiveWorktree: false,
+      worktreeId: null,
+      sessionDataJson: JSON.stringify({
+        steps: {
+          command: { matches: [existingMatch], latestMatch: existingMatch },
+        },
+      }),
+    });
+    prisma.workflowStepAttempt.updateMany.mockResolvedValue({ count: 1 });
+    prisma.workflowResourceLease.deleteMany.mockResolvedValue({ count: 0 });
+    const attempt = {
+      id: "workflow-attempt-1",
+      runId: "workflow-run-1",
+      nodeId: "command",
+      iterationKey: "",
+      attempt: 0,
+    };
+
+    await internals.failAttempt(attempt, node, new Error("exit 1"), {
+      output: { status: "FAILED", exitCode: 1 },
+      sessionPatch: { command: { id: "command-run-1", status: "FAILED" } },
+    });
+
+    const session = JSON.parse(
+      prisma.workflowRun.update.mock.calls[0]?.[0].data.sessionDataJson,
+    );
+    expect(session.steps.command).toMatchObject({
+      matches: [existingMatch],
+      latestMatch: existingMatch,
+      status: "FAILED",
+      error: "exit 1",
+      output: { status: "FAILED", exitCode: 1 },
+    });
+    expect(session.command).toEqual({
+      id: "command-run-1",
+      status: "FAILED",
+    });
+  });
+});
+
+describe("workflow attempt dispatch", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    prisma.workflowStepAttempt.count.mockResolvedValue(0);
+    prisma.workflowStepAttempt.findMany.mockResolvedValue([
+      {
+        id: "ready-sibling",
+        startedAt: null,
+      },
+    ]);
+    prisma.workflowStepAttempt.updateMany.mockResolvedValue({ count: 1 });
+  });
+
+  test("dispatches a ready sibling while another step has the run waiting", async () => {
+    const executeAttempt = vi.fn().mockResolvedValue(undefined);
+    const service = new WorkflowsService(
+      new WorkflowEventsService(),
+    ) as unknown as {
+      dispatchReadyAttempts(): Promise<void>;
+      executeAttempt: typeof executeAttempt;
+    };
+    service.executeAttempt = executeAttempt;
+
+    await service.dispatchReadyAttempts();
+
+    const schedulingStatuses = { in: ["RUNNING", "WAITING"] };
+    expect(prisma.workflowStepAttempt.findMany).toHaveBeenCalledWith({
+      where: {
+        status: "READY",
+        run: { status: schedulingStatuses },
+      },
+      orderBy: { createdAt: "asc" },
+      take: 8,
+    });
+    expect(prisma.workflowStepAttempt.updateMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: {
+          id: "ready-sibling",
+          status: "READY",
+          run: { status: schedulingStatuses },
+        },
+      }),
+    );
+    expect(executeAttempt).toHaveBeenCalledWith(
+      "ready-sibling",
+      expect.any(AbortSignal),
+    );
+  });
+});
+
 describe("workflow overlap settings", () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -1782,6 +2439,38 @@ describe("workflow overlap settings", () => {
     ).rejects.toThrow(/overlap scope is not supported/);
   });
 
+  test("normalizes worktree concurrency and forces Git blocking for exclusive workflows", async () => {
+    const service = new WorkflowsService(new WorkflowEventsService());
+
+    await service.create({ name: "Shared" });
+    await service.create({
+      name: "Ignored by admission",
+      worktreeConcurrency: "excluded",
+      blocksGitOperations: true,
+    });
+    await service.create({
+      name: "Exclusive",
+      worktreeConcurrency: "exclusive",
+      blocksGitOperations: false,
+    });
+
+    expect(prisma.workflow.create.mock.calls[0]?.[0].data).toMatchObject({
+      worktreeConcurrency: "NON_EXCLUSIVE",
+      exclusiveWorktree: false,
+      blocksGitOperations: false,
+    });
+    expect(prisma.workflow.create.mock.calls[1]?.[0].data).toMatchObject({
+      worktreeConcurrency: "EXCLUDED",
+      exclusiveWorktree: false,
+      blocksGitOperations: true,
+    });
+    expect(prisma.workflow.create.mock.calls[2]?.[0].data).toMatchObject({
+      worktreeConcurrency: "EXCLUSIVE",
+      exclusiveWorktree: true,
+      blocksGitOperations: true,
+    });
+  });
+
   test("reads the scope of an export written before the setting existed", async () => {
     const service = new WorkflowsService(new WorkflowEventsService());
     const exported = (exclusiveWorktree: boolean) => ({
@@ -1801,10 +2490,14 @@ describe("workflow overlap settings", () => {
     expect(prisma.workflow.create.mock.calls[0]?.[0].data).toMatchObject({
       overlapScope: "WORKTREE",
       exclusiveWorktree: true,
+      worktreeConcurrency: "EXCLUSIVE",
+      blocksGitOperations: true,
     });
     expect(prisma.workflow.create.mock.calls[1]?.[0].data).toMatchObject({
       overlapScope: "GLOBAL",
       exclusiveWorktree: false,
+      worktreeConcurrency: "NON_EXCLUSIVE",
+      blocksGitOperations: false,
     });
   });
 });
@@ -1848,6 +2541,8 @@ describe("workflow queue admission", () => {
       worktreeId: "worktree-2",
       worktreeLeaseOwnerRunId: "run-2",
       exclusiveWorktree: true,
+      worktreeConcurrency: "EXCLUSIVE",
+      blocksGitOperations: true,
       parentRunId: null,
       generation: 0,
       startedAt: null,
@@ -1883,6 +2578,29 @@ describe("workflow queue admission", () => {
     expect(prisma.worktreeWorkflowLease.create).toHaveBeenCalledWith({
       data: { worktreeId: "worktree-2", workflowRunId: "run-2" },
     });
+    expect(prisma.workflowRun.updateMany).toHaveBeenCalledWith({
+      where: { id: "run-2", status: "QUEUED" },
+      data: expect.objectContaining({ status: "RUNNING" }),
+    });
+  });
+
+  test("starts an excluded run without entering the worktree admission lane", async () => {
+    prisma.workflowRun.findMany.mockResolvedValue([
+      queuedRun({
+        worktreeLeaseOwnerRunId: null,
+        exclusiveWorktree: false,
+        worktreeConcurrency: "EXCLUDED",
+        blocksGitOperations: false,
+      }),
+    ]);
+    prisma.workflowRun.count.mockResolvedValue(0);
+    const service = new WorkflowsService(new WorkflowEventsService());
+
+    await internals(service).startQueuedRuns();
+
+    expect(prisma.worktreeAdmissionLane.upsert).not.toHaveBeenCalled();
+    expect(prisma.worktreeWorkflowLease.findUnique).not.toHaveBeenCalled();
+    expect(prisma.worktreeWorkflowLease.create).not.toHaveBeenCalled();
     expect(prisma.workflowRun.updateMany).toHaveBeenCalledWith({
       where: { id: "run-2", status: "QUEUED" },
       data: expect.objectContaining({ status: "RUNNING" }),
@@ -2052,6 +2770,36 @@ describe("workflow trigger interpolation", () => {
     ).resolves.toBe(true);
   });
 
+  test("executes issue and output trigger patterns with RE2", async () => {
+    const issuePayload = {
+      comment: { author: { login: "octocat" }, body: "/deploy" },
+    };
+    await expect(
+      matches(
+        "GITHUB_ISSUE_COMMAND",
+        {
+          allowedLogins: ["octocat"],
+          commandPattern: "^(?P<command>/deploy)$",
+        },
+        issuePayload,
+      ),
+    ).resolves.toBe(true);
+    await expect(
+      matches(
+        "COMMAND_OUTPUT_MATCH",
+        { outputPattern: "\\Aready\\z" },
+        { output: { data: "ready" } },
+      ),
+    ).resolves.toBe(true);
+    await expect(
+      matches(
+        "COMMAND_OUTPUT_MATCH",
+        { outputPattern: "(?=ready)" },
+        { output: { data: "ready" } },
+      ),
+    ).rejects.toThrow(/RE2 syntax/);
+  });
+
   test("fires disk thresholds only on false-to-true crossings", async () => {
     prisma.workflowTriggerState.findUnique
       .mockResolvedValueOnce({ lastMatched: false })
@@ -2174,6 +2922,8 @@ describe("workflow choice triggers", () => {
     enabled: true,
     archivedAt: null,
     overlapPolicy: "CONCURRENT",
+    worktreeConcurrency: "EXCLUDED",
+    blocksGitOperations: true,
     activeVersion: {
       id: "version-1",
       name: definition.name,
@@ -2208,6 +2958,9 @@ describe("workflow choice triggers", () => {
     };
     expect(data.triggerKind).toBe("MANUAL_CHOICE");
     expect(data.triggerId).toBe("db-choose");
+    expect(data.worktreeConcurrency).toBe("EXCLUDED");
+    expect(data.blocksGitOperations).toBe(true);
+    expect(data.exclusiveWorktree).toBe(false);
     expect(JSON.parse(data.triggerPayloadJson!).choice).toBe("ready");
     expect(JSON.parse(data.sessionDataJson!).workflow.trigger.choice).toBe(
       "ready",

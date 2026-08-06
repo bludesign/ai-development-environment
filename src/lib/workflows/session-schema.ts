@@ -389,6 +389,14 @@ export const SESSION_NAMESPACE_FIELDS: Record<string, NamespaceField[]> = {
     { name: "items", description: "Items produced for iteration" },
     { name: "commandRunId", description: "Command run id" },
     { name: "displayNumber", description: "Resource display number" },
+    {
+      name: "matches",
+      description: "Ordered regex matches emitted by a command step",
+    },
+    {
+      name: "latestMatch",
+      description: "Latest regex match emitted by a command step",
+    },
   ],
   comment: [
     { name: "id", description: "Comment id" },

@@ -42,6 +42,7 @@ export type CommandDefinition = {
   restartPolicy: "NEVER" | "ON_FAILURE" | "ALWAYS";
   restartLimit: number | null;
   concurrency: CommandConcurrency;
+  blocksGitOperations: boolean;
   quickActionEnabled: boolean;
   quickActionIconKey: string;
   quickActionButtonVariant: string;
@@ -105,6 +106,7 @@ export type CommandRun = {
   snapshotRestartPolicy: string;
   snapshotRestartLimit: number | null;
   snapshotConcurrency: CommandConcurrency;
+  snapshotBlocksGitOperations: boolean;
   snapshotNotificationsEnabled: boolean;
   snapshot: Record<string, unknown>;
   agentId: string | null;
@@ -137,7 +139,7 @@ export type CommandRun = {
 
 export const COMMAND_DEFINITION_FIELDS = `
   id name description script targetKind targetAgentId targetRepositoryId
-  restartPolicy restartLimit concurrency quickActionEnabled quickActionIconKey quickActionButtonVariant
+  restartPolicy restartLimit concurrency blocksGitOperations quickActionEnabled quickActionIconKey quickActionButtonVariant
   notificationsEnabled
   archivedAt createdAt updatedAt
   targetAgent { id name hostname connectionStatus capabilities }
@@ -147,7 +149,7 @@ export const COMMAND_DEFINITION_FIELDS = `
 export const COMMAND_RUN_FIELDS = `
   id displayNumber commandId origin status snapshotName snapshotDescription
   snapshotScript snapshotTargetKind snapshotRestartPolicy snapshotRestartLimit
-  snapshotConcurrency snapshotNotificationsEnabled snapshot
+  snapshotConcurrency snapshotBlocksGitOperations snapshotNotificationsEnabled snapshot
   agentId worktreeId agentName agentHostname worktreePath worktreeBranch
   restartCount stopRequested nextRestartAt predecessorRunId error exitCode signal
   queuedAt startedAt finishedAt archivedAt createdAt updatedAt

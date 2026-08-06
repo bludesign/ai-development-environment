@@ -4,10 +4,21 @@ import {
   workflowBasicHorizontalWheelDelta,
   workflowConstrainViewportAxis,
   workflowFlowElements,
+  workflowSourceHandles,
 } from "./workflow-graph";
 import { emptyDefinition, type WorkflowAttempt } from "./types";
 
 describe("workflow run graph projection", () => {
+  test("renders the command match connector", () => {
+    for (const kind of ["SAVED_COMMAND", "CUSTOM_COMMAND"]) {
+      expect(workflowSourceHandles(kind).map(({ id }) => id)).toEqual([
+        "success",
+        "failure",
+        "match",
+      ]);
+    }
+  });
+
   test("leaves vertical wheel gestures to the page in horizontal Basic mode", () => {
     expect(
       workflowBasicHorizontalWheelDelta(
@@ -94,6 +105,134 @@ describe("workflow run graph projection", () => {
     expect(build?.data.attemptLabel).toContain("Generation 2");
     expect(build?.data.reused).toBe(false);
     expect(edges[0]?.source).toBe("manual");
+  });
+
+  test("shows match branch executions instead of their pending base template", () => {
+    const definition = emptyDefinition("Graph");
+    definition.nodes.push({
+      id: "matched-step",
+      kind: "SAVED_COMMAND",
+      name: "Matched step",
+      position: { x: 200, y: 100 },
+      config: {},
+      requiredPaths: [],
+      providedPaths: [],
+      retry: { maxAttempts: 1, strategy: "FIXED", delaySeconds: 1 },
+      failurePolicy: "FAIL",
+    });
+    const base = {
+      id: "template",
+      nodeId: "matched-step",
+      kind: "SAVED_COMMAND",
+      generation: 0,
+      iterationKey: "",
+      attempt: 0,
+      status: "PENDING",
+      phase: "PENDING",
+      input: null,
+      output: null,
+      error: null,
+      startedAt: null,
+      finishedAt: null,
+      supersededAt: null,
+      resourceLinks: [],
+    } satisfies WorkflowAttempt;
+    const { nodes } = workflowFlowElements(definition, {
+      attempts: [
+        base,
+        {
+          ...base,
+          id: "first-match",
+          iterationKey: "match.command-attempt.1",
+          status: "SUCCEEDED",
+          phase: "SUCCEEDED",
+        },
+        {
+          ...base,
+          id: "second-match",
+          iterationKey: "match.command-attempt.2",
+          status: "WAITING",
+          phase: "COMMAND",
+        },
+      ],
+      generation: 0,
+    });
+
+    const matchedStep = nodes.find(({ id }) => id === "matched-step");
+    expect(matchedStep?.data.status).toBe("WAITING");
+    expect(matchedStep?.data.phase).toBe("COMMAND");
+    expect(matchedStep?.data.attemptLabel).toContain("2 iterations");
+
+    const afterSourceExit = workflowFlowElements(definition, {
+      attempts: [
+        {
+          ...base,
+          status: "SKIPPED",
+          phase: "INACTIVE_BRANCH",
+        },
+        {
+          ...base,
+          id: "first-match",
+          iterationKey: "match.command-attempt.1",
+          status: "SUCCEEDED",
+          phase: "SUCCEEDED",
+        },
+      ],
+      generation: 0,
+    });
+    expect(
+      afterSourceExit.nodes.find(({ id }) => id === "matched-step")?.data
+        .status,
+    ).toBe("SUCCEEDED");
+  });
+
+  test("keeps a command source status ahead of synthetic match emissions", () => {
+    const definition = emptyDefinition("Graph");
+    definition.nodes.push({
+      id: "command",
+      kind: "SAVED_COMMAND",
+      name: "Command",
+      position: { x: 200, y: 100 },
+      config: {},
+      requiredPaths: [],
+      providedPaths: [],
+      retry: { maxAttempts: 1, strategy: "FIXED", delaySeconds: 1 },
+      failurePolicy: "FAIL",
+    });
+    const base = {
+      id: "command-attempt",
+      nodeId: "command",
+      kind: "SAVED_COMMAND",
+      generation: 0,
+      iterationKey: "",
+      attempt: 0,
+      status: "WAITING",
+      phase: "COMMAND",
+      input: null,
+      output: null,
+      error: null,
+      startedAt: null,
+      finishedAt: null,
+      supersededAt: null,
+      resourceLinks: [],
+    } satisfies WorkflowAttempt;
+    const { nodes } = workflowFlowElements(definition, {
+      attempts: [
+        base,
+        {
+          ...base,
+          id: "emission",
+          iterationKey: "match.command-attempt.1",
+          status: "SUCCEEDED",
+          phase: "MATCH_EMITTED",
+        },
+      ],
+      generation: 0,
+    });
+
+    expect(nodes.find(({ id }) => id === "command")?.data.status).toBe(
+      "WAITING",
+    );
   });
 
   test("marks steps a replay carried forward instead of re-running", () => {

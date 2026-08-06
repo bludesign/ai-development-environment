@@ -39,6 +39,7 @@ export type ResourceKind =
   | "mcpServer"
   | "iosConfiguration"
   | "buildScript"
+  | "savedCommand"
   | "agentRun"
   | "githubWorkflowRun";
 

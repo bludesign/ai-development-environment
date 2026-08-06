@@ -31,6 +31,7 @@ export type ManagedApp = {
   id: string;
   name: string;
   description: string;
+  agentIds: string[];
   repositories: AppRepository[];
   counts: AppCounts;
   createdAt: string;
@@ -46,7 +47,7 @@ export const APP_REPOSITORY_FIELDS = `
 `;
 
 export const APP_FIELDS = `
-  id name description createdAt updatedAt
+  id name description agentIds createdAt updatedAt
   counts { repositories codebases worktrees plans sessions builds }
   repositories { ${APP_REPOSITORY_FIELDS} }
 `;

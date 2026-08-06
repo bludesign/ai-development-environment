@@ -140,7 +140,7 @@ const OVERVIEW_QUERY = `query WorktreeDetailOverview($worktreeId: ID!) {
   }
   worktreeRunQueue(worktreeId: $worktreeId) {
     position id kind displayNumber name status phase worktreeId workflowId workflowRunId
-    queuedAt exclusiveWorktree worktreeConcurrencyLimit
+    queuedAt exclusiveWorktree worktreeConcurrency worktreeConcurrencyLimit
     worktree { id folder branch highlightColor }
   }
 }`;

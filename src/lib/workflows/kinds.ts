@@ -305,5 +305,7 @@ export function workflowStaticSourceHandles(kind: string): string[] {
   if (kind === "CONTROL_IF") return ["true", "false"];
   if (kind === "CONTROL_FOR_EACH") return ["body", "empty"];
   if (kind === "CONTROL_TRY") return ["success", "catch"];
+  if (kind === "SAVED_COMMAND" || kind === "CUSTOM_COMMAND")
+    return ["success", "failure", "match"];
   return ["success", "failure"];
 }

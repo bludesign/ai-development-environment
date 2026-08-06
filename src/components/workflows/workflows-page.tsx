@@ -100,7 +100,7 @@ import { useWorkflowLabels } from "./workflow-labels";
 import type { WorkflowRun, WorkflowSummary } from "./types";
 
 const WORKFLOW_FIELDS = `
-  id name description draftDefinition activeVersionId enabled overlapPolicy overlapScope maxConcurrentRuns completionNotificationsEnabled exclusiveWorktree archivedAt quickActionKind quickActionIconKey quickActionButtonVariant
+  id name description draftDefinition activeVersionId enabled overlapPolicy overlapScope maxConcurrentRuns completionNotificationsEnabled exclusiveWorktree worktreeConcurrency blocksGitOperations archivedAt quickActionKind quickActionIconKey quickActionButtonVariant
   quickActionRepositories { id name displayOrigin }
   hasPlainTrigger
   triggerChoices { key label description }
@@ -108,7 +108,7 @@ const WORKFLOW_FIELDS = `
 `;
 
 const RUN_FIELDS = `
-  id displayNumber workflowId triggerKind triggerSubjectKey status phase
+  id displayNumber workflowId triggerKind triggerSubjectKey status phase worktreeConcurrency blocksGitOperations
   blockedReason error queuedAt startedAt pausedAt finishedAt archivedAt createdAt
   workflow { id name }
   worktree { id folder branch highlightColor }
@@ -666,8 +666,13 @@ export function WorkflowsPage() {
                         workflow.overlapPolicy,
                       )} · ${labels.overlapScope(workflow.overlapScope)}`}
                     </Badge>
-                    {workflow.exclusiveWorktree && (
-                      <Badge variant="outline">{t("reservesWorktree")}</Badge>
+                    <Badge variant="outline">
+                      {labels.worktreeConcurrency(workflow.worktreeConcurrency)}
+                    </Badge>
+                    {workflow.blocksGitOperations && (
+                      <Badge variant="outline">
+                        {t("blocksGitOperationsBadge")}
+                      </Badge>
                     )}
                     {workflow.quickActionKind !== "NONE" && (
                       <Badge variant="outline">

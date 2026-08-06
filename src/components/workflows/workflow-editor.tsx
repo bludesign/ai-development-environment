@@ -167,7 +167,7 @@ const CATALOG_QUERY = `
       triggers { kind category label description details configSchema capabilityFlags seedPaths sourceHandles }
     }
     workflow(id: $id) {
-      id name description draftDefinition activeVersionId enabled overlapPolicy overlapScope maxConcurrentRuns completionNotificationsEnabled exclusiveWorktree archivedAt
+      id name description draftDefinition activeVersionId enabled overlapPolicy overlapScope maxConcurrentRuns completionNotificationsEnabled exclusiveWorktree worktreeConcurrency blocksGitOperations archivedAt
       versionCount runCount createdAt updatedAt
     }
   }
@@ -339,7 +339,10 @@ function WorkflowEditorInner({ workflowId }: { workflowId?: string | null }) {
   const [maxConcurrentRuns, setMaxConcurrentRuns] = useState(1);
   const [completionNotificationsEnabled, setCompletionNotificationsEnabled] =
     useState(true);
-  const [exclusiveWorktree, setExclusiveWorktree] = useState(false);
+  const [worktreeConcurrency, setWorktreeConcurrency] = useState<
+    "EXCLUSIVE" | "NON_EXCLUSIVE" | "EXCLUDED"
+  >("NON_EXCLUSIVE");
+  const [blocksGitOperations, setBlocksGitOperations] = useState(false);
   // Off by default: laying a workflow out means panning and zooming around a
   // canvas bigger than the pane, which a fit lock would fight.
   const [locked, setLocked] = useState(false);
@@ -398,7 +401,10 @@ function WorkflowEditorInner({ workflowId }: { workflowId?: string | null }) {
         setCompletionNotificationsEnabled(
           data.workflow?.completionNotificationsEnabled ?? true,
         );
-        setExclusiveWorktree(data.workflow?.exclusiveWorktree ?? false);
+        setWorktreeConcurrency(
+          data.workflow?.worktreeConcurrency ?? "NON_EXCLUSIVE",
+        );
+        setBlocksGitOperations(data.workflow?.blocksGitOperations ?? false);
         const categoryMap = new Map(
           data.workflowCatalog.steps.map(({ kind, category }) => [
             kind,
@@ -669,7 +675,7 @@ function WorkflowEditorInner({ workflowId }: { workflowId?: string | null }) {
         }>(
           `mutation SaveWorkflow($input: SaveWorkflowDraftInput!) {
             saveWorkflowDraft(input: $input) {
-              id name description draftDefinition activeVersionId enabled overlapPolicy overlapScope maxConcurrentRuns completionNotificationsEnabled exclusiveWorktree archivedAt
+              id name description draftDefinition activeVersionId enabled overlapPolicy overlapScope maxConcurrentRuns completionNotificationsEnabled exclusiveWorktree worktreeConcurrency blocksGitOperations archivedAt
               versionCount runCount createdAt updatedAt
             }
           }`,
@@ -681,7 +687,8 @@ function WorkflowEditorInner({ workflowId }: { workflowId?: string | null }) {
               overlapScope,
               maxConcurrentRuns,
               completionNotificationsEnabled,
-              exclusiveWorktree,
+              worktreeConcurrency,
+              blocksGitOperations,
             },
           },
         );
@@ -694,7 +701,7 @@ function WorkflowEditorInner({ workflowId }: { workflowId?: string | null }) {
         }>(
           `mutation CreateWorkflow($input: CreateWorkflowInput!) {
             createWorkflow(input: $input) {
-              id name description draftDefinition activeVersionId enabled overlapPolicy overlapScope maxConcurrentRuns completionNotificationsEnabled exclusiveWorktree archivedAt
+              id name description draftDefinition activeVersionId enabled overlapPolicy overlapScope maxConcurrentRuns completionNotificationsEnabled exclusiveWorktree worktreeConcurrency blocksGitOperations archivedAt
               versionCount runCount createdAt updatedAt
             }
           }`,
@@ -707,7 +714,8 @@ function WorkflowEditorInner({ workflowId }: { workflowId?: string | null }) {
               overlapScope,
               maxConcurrentRuns,
               completionNotificationsEnabled,
-              exclusiveWorktree,
+              worktreeConcurrency,
+              blocksGitOperations,
             },
           },
         );
@@ -790,7 +798,8 @@ function WorkflowEditorInner({ workflowId }: { workflowId?: string | null }) {
             overlapScope,
             maxConcurrentRuns,
             completionNotificationsEnabled,
-            exclusiveWorktree,
+            worktreeConcurrency,
+            blocksGitOperations,
           },
         },
       );
@@ -819,7 +828,8 @@ function WorkflowEditorInner({ workflowId }: { workflowId?: string | null }) {
               overlapScope,
               maxConcurrentRuns,
               completionNotificationsEnabled,
-              exclusiveWorktree,
+              worktreeConcurrency,
+              blocksGitOperations,
               definition,
             },
           };
@@ -1509,17 +1519,60 @@ function WorkflowEditorInner({ workflowId }: { workflowId?: string | null }) {
                   </FieldDescription>
                 </Field>
                 <Field>
+                  <FieldLabel htmlFor="workflow-worktree-concurrency">
+                    {t("worktreeConcurrency")}
+                  </FieldLabel>
+                  <Select
+                    onValueChange={(value) => {
+                      const concurrency = value as
+                        "EXCLUSIVE" | "NON_EXCLUSIVE" | "EXCLUDED";
+                      setWorktreeConcurrency(concurrency);
+                      setBlocksGitOperations(concurrency === "EXCLUSIVE");
+                    }}
+                    value={worktreeConcurrency}
+                  >
+                    <SelectTrigger
+                      className="w-full"
+                      id="workflow-worktree-concurrency"
+                    >
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="EXCLUSIVE">
+                        {t("worktreeConcurrencyModes.EXCLUSIVE")}
+                      </SelectItem>
+                      <SelectItem value="NON_EXCLUSIVE">
+                        {t("worktreeConcurrencyModes.NON_EXCLUSIVE")}
+                      </SelectItem>
+                      <SelectItem value="EXCLUDED">
+                        {t("worktreeConcurrencyModes.EXCLUDED")}
+                      </SelectItem>
+                    </SelectContent>
+                  </Select>
+                  <FieldDescription>
+                    {t(`worktreeConcurrencyHelp.${worktreeConcurrency}`)}
+                  </FieldDescription>
+                </Field>
+                <Field>
                   <label className="flex items-center gap-2 text-sm">
                     <Checkbox
-                      checked={exclusiveWorktree}
+                      checked={
+                        worktreeConcurrency === "EXCLUSIVE" ||
+                        blocksGitOperations
+                      }
+                      disabled={worktreeConcurrency === "EXCLUSIVE"}
                       onCheckedChange={(checked) =>
-                        setExclusiveWorktree(checked === true)
+                        setBlocksGitOperations(checked === true)
                       }
                     />
-                    {t("exclusiveWorktree")}
+                    {t("blocksGitOperations")}
                   </label>
                   <FieldDescription>
-                    {t("exclusiveWorktreeHelp")}
+                    {t(
+                      worktreeConcurrency === "EXCLUSIVE"
+                        ? "blocksGitOperationsExclusiveHelp"
+                        : "blocksGitOperationsHelp",
+                    )}
                   </FieldDescription>
                 </Field>
                 <Field>

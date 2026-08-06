@@ -2,7 +2,6 @@ import { randomUUID } from "node:crypto";
 import { posix, win32 } from "node:path";
 
 import { parseCodebaseGitState } from "@ai-development-environment/agent-contract/codebases";
-import { COMMAND_RUN_JOB_KIND } from "@ai-development-environment/agent-contract/commands";
 import {
   parseCodebaseWorktreeReport,
   parseWorktreeActivityReport,
@@ -33,8 +32,10 @@ import {
 } from "@ai-development-environment/agent-contract/worktrees";
 
 import { getPrismaClient } from "@/data/prisma-client";
+import { compileRe2 } from "@/lib/re2.server";
 import type { Prisma } from "@/generated/prisma/client";
 import {
+  ACTIVE_CODEBASE_BLOCKING_JOB_WHERE,
   CodebaseBusyError,
   isActiveCodebaseJobConflict,
 } from "@/lib/codebase-busy";
@@ -79,10 +80,6 @@ const ACTIVE_WORKTREE_GIT_JOB_KINDS = [
   WORKTREE_DELETE_JOB_KIND,
 ];
 const ACTIVE_WORKTREE_GIT_JOB_KIND_SET = new Set(ACTIVE_WORKTREE_GIT_JOB_KINDS);
-const ACTIVE_CODEBASE_BLOCKING_JOB_WHERE = {
-  status: { in: ACTIVE_STATUSES },
-  NOT: [{ kind: COMMAND_RUN_JOB_KIND }, { kind: { startsWith: "ios." } }],
-} satisfies Prisma.AgentJobWhereInput;
 const ACTIVE_BUILD_STATUSES = ["QUEUED", "PREPARING", "RUNNING"];
 const ACTIVE_MOVE_STATUSES = [
   "PUSHING",
@@ -274,7 +271,10 @@ function parseBranches(value: string): string[] {
 function ticketKey(branch: string | null, pattern: string): string | null {
   if (!branch || !pattern) return null;
   try {
-    const match = new RegExp(pattern, "i").exec(branch);
+    const match = compileRe2(pattern, {
+      flags: "i",
+      label: "Jira branch regex",
+    }).exec(branch);
     const key = (match?.[1] ?? match?.[0])?.trim();
     return key ? key.toUpperCase() : null;
   } catch {

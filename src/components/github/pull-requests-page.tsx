@@ -145,16 +145,6 @@ function reviewClass(decision: GitHubReviewDecision) {
   return "border-slate-500/30 bg-slate-500/10 text-slate-700 dark:text-slate-300";
 }
 
-function validateRegex(pattern: string): string | null {
-  if (!pattern.trim()) return null;
-  try {
-    void new RegExp(pattern, "i");
-    return null;
-  } catch {
-    return "invalid";
-  }
-}
-
 export function PullRequestsPage() {
   const t = useTranslations("pullRequests");
   const searchParams = useSearchParams();
@@ -1016,10 +1006,6 @@ function GitHubRepositoryManager({
   }, [available.length, loadAvailable, open, tokenConfigured]);
 
   const addRepository = async (repositoryName: string, pattern: string) => {
-    if (validateRegex(pattern)) {
-      setError(t("invalidRegex"));
-      return;
-    }
     setBusy(true);
     try {
       const data = await controlPlaneRequest<{
@@ -1052,7 +1038,7 @@ function GitHubRepositoryManager({
   };
 
   const saveDefaultRegex = async () => {
-    if (!defaultJiraKeyRegex.trim() || validateRegex(defaultJiraKeyRegex)) {
+    if (!defaultJiraKeyRegex.trim()) {
       setError(t("invalidRegex"));
       return;
     }
@@ -1307,10 +1293,6 @@ function ManagedRepositoryEditor({
   const [pattern, setPattern] = useState(repository.jiraKeyRegex ?? "");
 
   const save = async () => {
-    if (validateRegex(pattern)) {
-      onError(t("invalidRegex"));
-      return;
-    }
     onBusyChange(true);
     try {
       const data = await controlPlaneRequest<{

@@ -1,7 +1,28 @@
+import { COMMAND_RUN_JOB_KIND } from "@ai-development-environment/agent-contract/commands";
+import { WORKFLOW_TERMINAL_JOB_KIND } from "@ai-development-environment/agent-contract/workflows";
+
+import type { Prisma } from "@/generated/prisma/client";
+
+export const ACTIVE_CODEBASE_BLOCKING_JOB_WHERE = {
+  status: { in: ["QUEUED", "RUNNING"] },
+  NOT: { kind: { startsWith: "ios." } },
+  OR: [
+    {
+      kind: {
+        notIn: [COMMAND_RUN_JOB_KIND, WORKFLOW_TERMINAL_JOB_KIND],
+      },
+    },
+    {
+      kind: { in: [COMMAND_RUN_JOB_KIND, WORKFLOW_TERMINAL_JOB_KIND] },
+      blocksGitOperations: true,
+    },
+  ],
+} satisfies Prisma.AgentJobWhereInput;
+
 /**
- * Raised when a codebase already has an active agent job and the caller cannot
- * take the single active-job slot enforced by the `AgentJob_codebaseId_active_key`
- * partial unique index.
+ * Raised when a codebase already has a conflicting active agent job and the
+ * caller cannot take the slot enforced by the
+ * `AgentJob_codebaseId_active_key` index or its cross-kind guard.
  *
  * It is thrown before any agent job is created, so callers that can afford to
  * wait — the workflow runtime in particular — may safely hold the work and try

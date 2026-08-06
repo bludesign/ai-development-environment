@@ -42,7 +42,9 @@ export function AppEditorDialog({
   const [repositoryIds, setRepositoryIds] = useState<Set<string>>(
     () => new Set(app?.repositories.map((repository) => repository.id) ?? []),
   );
-  const [agentIds, setAgentIds] = useState<Set<string>>(() => new Set());
+  const [agentIds, setAgentIds] = useState<Set<string>>(
+    () => new Set(app?.agentIds ?? []),
+  );
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -101,6 +103,7 @@ export function AppEditorDialog({
             ...(app ? { id: app.id } : {}),
             name,
             description,
+            agentIds: [...agentIds],
             repositoryIds: [...repositoryIds],
           },
         },

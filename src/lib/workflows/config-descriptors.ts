@@ -279,7 +279,7 @@ const OPERATOR_OPTIONS = listOptions([
   { value: "LT", label: "Less than" },
   { value: "LTE", label: "Less or equal" },
   { value: "CONTAINS", label: "Contains" },
-  { value: "MATCHES", label: "Matches regex" },
+  { value: "MATCHES", label: "Matches RE2" },
   { value: "EXISTS", label: "Exists" },
 ]);
 
@@ -1093,7 +1093,9 @@ const STEP_CONFIG_DESCRIPTORS: StepConfigDescriptors = {
   // -- Extensibility ---------------------------------------------------------
   SAVED_COMMAND: {
     fields: [
-      text("commandId", "Saved command ID", { required: true }),
+      resource("commandId", "Saved command ID", "savedCommand", {
+        required: true,
+      }),
       enumField(
         "completionMode",
         "Completion",
@@ -1110,6 +1112,17 @@ const STEP_CONFIG_DESCRIPTORS: StepConfigDescriptors = {
       text("worktreeId", "Fixed worktree ID", {
         visibleWhen: { key: "targetMode", equals: "FIXED_WORKTREE" },
       }),
+      text("outputPattern", "Output match pattern (RE2)", {
+        placeholder: "ready on port ([0-9]+)",
+        help: "Optional case-sensitive regex. Requires Wait for exit and emits through the match connector while the command runs.",
+        valueModes: ["literal"],
+      }),
+      enumField(
+        "outputMatchMode",
+        "Output match behavior",
+        staticOptions(["ONCE", "EACH_MATCH"]),
+        { default: "ONCE" },
+      ),
     ],
   },
   CUSTOM_COMMAND: {
@@ -1131,6 +1144,17 @@ const STEP_CONFIG_DESCRIPTORS: StepConfigDescriptors = {
       text("worktreeId", "Fixed worktree ID", {
         visibleWhen: { key: "targetMode", equals: "FIXED_WORKTREE" },
       }),
+      text("outputPattern", "Output match pattern (RE2)", {
+        placeholder: "ready on port ([0-9]+)",
+        help: "Optional case-sensitive regex. Requires Wait for exit and emits through the match connector while the command runs.",
+        valueModes: ["literal"],
+      }),
+      enumField(
+        "outputMatchMode",
+        "Output match behavior",
+        staticOptions(["ONCE", "EACH_MATCH"]),
+        { default: "ONCE" },
+      ),
     ],
   },
   TERMINAL_RUN: {
@@ -1412,7 +1436,7 @@ const TRIGGER_CONFIG_DESCRIPTORS: TriggerConfigDescriptors = Object.fromEntries(
             placeholder: "octocat",
             required: true,
           }),
-          text("commandPattern", "Command pattern (regex)", {
+          text("commandPattern", "Command pattern (RE2)", {
             placeholder: "^/deploy\\b$",
             required: true,
             // The matcher compiles this itself, so it has to stay a string: a
@@ -1433,7 +1457,7 @@ const TRIGGER_CONFIG_DESCRIPTORS: TriggerConfigDescriptors = Object.fromEntries(
             placeholder: "5b10a2844c20165700ede21g",
             required: true,
           }),
-          text("commandPattern", "Command pattern (regex)", {
+          text("commandPattern", "Command pattern (RE2)", {
             placeholder: "^/deploy\\b$",
             required: true,
             valueModes: ["literal", "interpolation"],
@@ -1445,7 +1469,7 @@ const TRIGGER_CONFIG_DESCRIPTORS: TriggerConfigDescriptors = Object.fromEntries(
       return [
         kind,
         triggerWithFilters([
-          text("outputPattern", "Output pattern (regex)", {
+          text("outputPattern", "Output pattern (RE2)", {
             placeholder: "error|failed",
             required: true,
             valueModes: ["literal", "interpolation"],

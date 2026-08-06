@@ -79,4 +79,34 @@ describe("CommandEditor", () => {
       input: expect.objectContaining({ notificationsEnabled: false }),
     });
   });
+
+  test("defaults Git blocking off but requires it for exclusive commands", async () => {
+    render(<CommandEditor />);
+
+    const blocksGit = screen.getByRole("checkbox", {
+      name: "Block Git operations while this command runs",
+    });
+    expect(blocksGit.getAttribute("data-state")).toBe("unchecked");
+    expect(blocksGit.hasAttribute("disabled")).toBe(false);
+
+    fireEvent.click(screen.getByRole("radio", { name: /Requires exclusive/ }));
+    expect(blocksGit.getAttribute("data-state")).toBe("checked");
+    expect(blocksGit.hasAttribute("disabled")).toBe(true);
+    expect(
+      screen.getByText(
+        "Exclusive commands always block Git and worktree operations on their codebase.",
+      ),
+    ).toBeDefined();
+
+    fireEvent.click(screen.getByRole("radio", { name: /Non-exclusive/ }));
+    expect(blocksGit.getAttribute("data-state")).toBe("unchecked");
+    expect(blocksGit.hasAttribute("disabled")).toBe(false);
+
+    fireEvent.click(blocksGit);
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+    await waitFor(() => expect(request).toHaveBeenCalledTimes(2));
+    expect(request.mock.calls[1]?.[1]).toEqual({
+      input: expect.objectContaining({ blocksGitOperations: true }),
+    });
+  });
 });

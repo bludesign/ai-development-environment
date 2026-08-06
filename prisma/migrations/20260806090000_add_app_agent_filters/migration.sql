@@ -1,0 +1,1 @@
+ALTER TABLE "App" ADD COLUMN "agentIdsJson" TEXT NOT NULL DEFAULT '[]';

@@ -164,9 +164,11 @@ describe("AppsService", () => {
     const app = await service.create({
       name: "Customer Portal",
       description: "Web and mobile",
+      agentIds: ["agent-1", "agent-1"],
       repositoryIds: ["repository-1", "repository-2", "repository-1"],
     });
 
+    expect(app.agentIds).toEqual(["agent-1"]);
     expect(app.repositories.map((repository) => repository.id)).toEqual([
       "repository-1",
       "repository-2",
@@ -237,8 +239,10 @@ describe("AppsService", () => {
       id: app.id,
       name: "Console",
       description: "Native only",
+      agentIds: ["agent-1"],
       repositoryIds: ["repository-2"],
     });
+    expect(updated.agentIds).toEqual(["agent-1"]);
     expect(updated.repositories.map((repository) => repository.id)).toEqual([
       "repository-2",
     ]);

@@ -1,4 +1,5 @@
 import { render, screen } from "@testing-library/react";
+import { Children, type ReactElement } from "react";
 import { describe, expect, test, vi } from "vitest";
 
 import RootLayout, { generateMetadata } from "@/app/[locale]/layout";
@@ -48,7 +49,19 @@ describe("localized root layout", () => {
     });
 
     expect(layout.props.lang).toBe("es");
-    render(layout.props.children.props.children);
+    const [head, body] = Children.toArray(
+      layout.props.children,
+    ) as ReactElement[];
+    expect(head?.type).toBe("head");
+    expect(
+      (head?.props as { children: ReactElement }).children.props,
+    ).toMatchObject({
+      rel: "manifest",
+      href: "/manifest.webmanifest",
+      crossOrigin: "use-credentials",
+    });
+    expect(body?.type).toBe("body");
+    render((body?.props as { children: React.ReactNode }).children);
 
     expect(screen.getByTestId("intl-provider")).toBeDefined();
     expect(screen.getByTestId("tooltip-provider")).toBeDefined();

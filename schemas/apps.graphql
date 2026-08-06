@@ -6,6 +6,8 @@ type App {
   name: String!
   "Optional longer description for this app."
   description: String!
+  "Agent identifiers selected to filter repositories in the app editor."
+  agentIds: [ID!]!
   "Repositories assigned to this app."
   repositories: [CodebaseRepository!]!
   "Resource totals scoped to this app."
@@ -38,6 +40,8 @@ input CreateAppInput {
   name: String!
   "Optional longer description for the app."
   description: String
+  "Agent identifiers selected to filter repositories in the app editor."
+  agentIds: [ID!]! = []
   "Identifiers of repositories assigned to the app."
   repositoryIds: [ID!]!
 }
@@ -50,6 +54,8 @@ input UpdateAppInput {
   name: String!
   "Optional longer description for the app."
   description: String
+  "Agent identifiers selected to filter repositories in the app editor."
+  agentIds: [ID!]! = []
   "Identifiers of repositories assigned to the app."
   repositoryIds: [ID!]!
 }

@@ -559,7 +559,12 @@ export function CodebaseDetailPage({ codebaseId }: { codebaseId: string }) {
           </dl>
           {activeJob && (
             <p className="flex items-center gap-2 text-sm text-muted-foreground">
-              <Spinner /> {t("activeOperation", { kind: activeJob.kind })}
+              <Spinner />{" "}
+              {activeJob.kind === "command.run"
+                ? t("blockingCommandRunning")
+                : activeJob.kind === "workflow.terminal.run"
+                  ? t("blockingWorkflowTerminalRunning")
+                  : t("activeOperation", { kind: activeJob.kind })}
             </p>
           )}
         </CardContent>

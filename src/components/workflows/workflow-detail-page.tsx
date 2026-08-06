@@ -92,7 +92,7 @@ type WorkflowDetail = WorkflowSummary & {
 };
 
 const DETAIL_FIELDS = `
-  id name description draftDefinition activeVersionId enabled overlapPolicy overlapScope maxConcurrentRuns completionNotificationsEnabled exclusiveWorktree archivedAt quickActionKind quickActionIconKey quickActionButtonVariant
+  id name description draftDefinition activeVersionId enabled overlapPolicy overlapScope maxConcurrentRuns completionNotificationsEnabled exclusiveWorktree worktreeConcurrency blocksGitOperations archivedAt quickActionKind quickActionIconKey quickActionButtonVariant
   hasPlainTrigger
   triggerChoices { key label description }
   quickActionRepositories { id name displayOrigin }
@@ -102,7 +102,7 @@ const DETAIL_FIELDS = `
 `;
 
 const RUN_FIELDS = `
-  id displayNumber workflowId triggerKind triggerSubjectKey status phase generation
+  id displayNumber workflowId triggerKind triggerSubjectKey status phase worktreeConcurrency blocksGitOperations generation
   blockedReason error queuedAt startedAt pausedAt finishedAt
   workflow { id name }
   version { id workflowId version name description schemaVersion definition contentHash publishedAt }
@@ -155,7 +155,7 @@ export function WorkflowDetailPage({ workflowId }: { workflowId: string }) {
         workflowRuns(workflowId: $id, first: 100) { items { ${RUN_FIELDS} } }
         worktreeRunQueue(workflowId: $id) {
           position id kind displayNumber name status phase worktreeId workflowId workflowRunId
-          queuedAt exclusiveWorktree worktreeConcurrencyLimit
+          queuedAt exclusiveWorktree worktreeConcurrency worktreeConcurrencyLimit
           worktree { id folder branch highlightColor }
         }
         workflowCatalog {
@@ -427,12 +427,15 @@ export function WorkflowDetailPage({ workflowId }: { workflowId: string }) {
         </Card>
         <Card>
           <CardHeader>
-            <CardTitle>{t("worktreeReservation")}</CardTitle>
+            <CardTitle>{t("worktreeConcurrency")}</CardTitle>
           </CardHeader>
           <CardContent>
             <Badge variant="outline">
-              {workflow.exclusiveWorktree ? t("enabled") : t("disabled")}
+              {labels.worktreeConcurrency(workflow.worktreeConcurrency)}
             </Badge>
+            {workflow.blocksGitOperations && (
+              <Badge variant="outline">{t("blocksGitOperationsBadge")}</Badge>
+            )}
           </CardContent>
         </Card>
       </div>

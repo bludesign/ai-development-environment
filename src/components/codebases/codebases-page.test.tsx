@@ -181,6 +181,56 @@ describe("CodebasesPage", () => {
     });
   });
 
+  test("explains when a command is the Git blocker", async () => {
+    request.mockImplementation(async (query) => {
+      if (String(query).includes("query CodebaseOverview")) {
+        return {
+          codebaseOverview: {
+            repositories: [
+              {
+                ...repository,
+                codebases: [
+                  {
+                    ...codebase,
+                    activeJob: {
+                      id: "command-job-1",
+                      agentId: agent.id,
+                      kind: "command.run",
+                      payload: { commandRunId: "command-run-1" },
+                      status: "RUNNING",
+                      error: null,
+                      result: null,
+                      timeoutSeconds: 0,
+                      createdAt: new Date(0).toISOString(),
+                      startedAt: new Date(0).toISOString(),
+                      finishedAt: null,
+                      updatedAt: new Date(0).toISOString(),
+                    },
+                  },
+                ],
+              },
+            ],
+          },
+          codebaseSettings: {
+            refreshIntervalSeconds: 30,
+            updatedAt: new Date(0).toISOString(),
+          },
+          agents: [agent],
+        } as never;
+      }
+      throw new Error(`Unexpected operation: ${query}`);
+    });
+
+    render(<CodebasesPage />);
+
+    expect(
+      await screen.findByText(
+        "A command is running; Git operations are temporarily unavailable.",
+      ),
+    ).toBeDefined();
+    expect(screen.queryByText("Git operation in progress…")).toBeNull();
+  });
+
   test("coalesces burst status events into one overview reload", async () => {
     render(<CodebasesPage />);
     await screen.findByText("Studio Mac");

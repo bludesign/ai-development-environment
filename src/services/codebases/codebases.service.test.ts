@@ -362,7 +362,30 @@ describe("CodebasesService", () => {
       new CodebasesService(control()).detail("codebase-1"),
     ).resolves.toBe(record);
     expect(prisma.codebase.findUnique).toHaveBeenCalledWith(
-      expect.objectContaining({ where: { id: "codebase-1" } }),
+      expect.objectContaining({
+        where: { id: "codebase-1" },
+        include: expect.objectContaining({
+          jobs: expect.objectContaining({
+            where: expect.objectContaining({
+              status: { in: ["QUEUED", "RUNNING"] },
+              NOT: { kind: { startsWith: "ios." } },
+              OR: expect.arrayContaining([
+                {
+                  kind: {
+                    notIn: ["command.run", "workflow.terminal.run"],
+                  },
+                },
+                {
+                  kind: {
+                    in: ["command.run", "workflow.terminal.run"],
+                  },
+                  blocksGitOperations: true,
+                },
+              ]),
+            }),
+          }),
+        }),
+      }),
     );
   });
 

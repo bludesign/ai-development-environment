@@ -68,6 +68,7 @@ export type CommandDefinitionInput = {
   restartPolicy?: string | null;
   restartLimit?: number | null;
   concurrency?: string | null;
+  blocksGitOperations?: boolean | null;
   quickActionEnabled?: boolean | null;
   quickActionIconKey?: string | null;
   quickActionButtonVariant?: string | null;
@@ -80,6 +81,7 @@ export type StartCommandRunInput = {
   worktreeId?: string | null;
   origin?: string | null;
   idempotencyKey?: string | null;
+  blocksGitOperations?: boolean | null;
 };
 
 export type StartCustomCommandRunInput = {
@@ -88,6 +90,7 @@ export type StartCustomCommandRunInput = {
   worktreeId?: string | null;
   origin?: string | null;
   idempotencyKey?: string | null;
+  blocksGitOperations?: boolean | null;
 };
 
 type RunResult = {
@@ -451,6 +454,11 @@ export class CommandsService {
           : "This target scope does not accept a repository",
       );
     }
+    const concurrency = enumValue(
+      CONCURRENCY_MODES,
+      input.concurrency ?? "NON_EXCLUSIVE",
+      "Concurrency",
+    );
     return {
       name: text(input.name, "Name", 120),
       description: (input.description ?? "").trim().slice(0, 2_000),
@@ -460,11 +468,11 @@ export class CommandsService {
       targetRepositoryId: input.targetRepositoryId ?? null,
       restartPolicy,
       restartLimit,
-      concurrency: enumValue(
-        CONCURRENCY_MODES,
-        input.concurrency ?? "NON_EXCLUSIVE",
-        "Concurrency",
-      ),
+      concurrency,
+      blocksGitOperations:
+        concurrency === "EXCLUSIVE"
+          ? true
+          : (input.blocksGitOperations ?? false),
       quickActionEnabled: input.quickActionEnabled ?? false,
       quickActionIconKey: text(
         input.quickActionIconKey ?? "terminal",
@@ -536,6 +544,7 @@ export class CommandsService {
         restartPolicy: definition.restartPolicy,
         restartLimit: definition.restartLimit,
         concurrency: definition.concurrency,
+        blocksGitOperations: definition.blocksGitOperations,
         quickActionEnabled: definition.quickActionEnabled,
         quickActionIconKey: definition.quickActionIconKey,
         quickActionButtonVariant: definition.quickActionButtonVariant,
@@ -653,6 +662,7 @@ export class CommandsService {
           ? (command.restartLimit as number | null)
           : 3,
       concurrency: importedText(command.concurrency) ?? "NON_EXCLUSIVE",
+      blocksGitOperations: command.blocksGitOperations === true,
       // A widened target means this script was pinned to a machine or
       // repository that does not exist here. Running it anywhere is a decision
       // for whoever imported it, so the one-click button stays off until they
@@ -980,6 +990,9 @@ export class CommandsService {
             snapshotRestartPolicy: definition.restartPolicy,
             snapshotRestartLimit: definition.restartLimit,
             snapshotConcurrency: definition.concurrency,
+            snapshotBlocksGitOperations:
+              definition.blocksGitOperations ||
+              input.blocksGitOperations === true,
             snapshotNotificationsEnabled: definition.notificationsEnabled,
             snapshotJson: JSON.stringify(definition),
             agentId: agent.id,
@@ -1041,6 +1054,7 @@ export class CommandsService {
       // queue, but it still yields to a command that asked for the target
       // alone.
       concurrency: "NON_EXCLUSIVE",
+      blocksGitOperations: input.blocksGitOperations === true,
       notificationsEnabled: true,
     };
     let run: Awaited<ReturnType<typeof prisma.commandRun.create>>;
@@ -1066,6 +1080,7 @@ export class CommandsService {
             snapshotRestartPolicy: snapshot.restartPolicy,
             snapshotRestartLimit: snapshot.restartLimit,
             snapshotConcurrency: snapshot.concurrency,
+            snapshotBlocksGitOperations: snapshot.blocksGitOperations,
             snapshotNotificationsEnabled: snapshot.notificationsEnabled,
             snapshotJson: JSON.stringify(snapshot),
             agentId: agent.id,
@@ -1309,6 +1324,7 @@ export class CommandsService {
           worktreeId: run.worktreeId,
           codebaseId: run.worktree?.codebaseId ?? null,
           visibility: "SYSTEM",
+          blocksGitOperations: run.snapshotBlocksGitOperations,
         });
       } catch (error) {
         // The codebase can still be held by git or worktree work that the
@@ -1403,6 +1419,7 @@ export class CommandsService {
           snapshotRestartPolicy: original.snapshotRestartPolicy,
           snapshotRestartLimit: original.snapshotRestartLimit,
           snapshotConcurrency: original.snapshotConcurrency,
+          snapshotBlocksGitOperations: original.snapshotBlocksGitOperations,
           snapshotNotificationsEnabled: original.snapshotNotificationsEnabled,
           snapshotJson: original.snapshotJson,
           agentId: original.agentId,

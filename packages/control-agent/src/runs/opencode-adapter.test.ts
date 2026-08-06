@@ -286,3 +286,17 @@ describe("OpenCodeAdapter catalog", () => {
     });
   });
 });
+
+describe("OpenCodeAdapter shared runtime", () => {
+  test("binds an ephemeral port so a server already on 4096 cannot break it", async () => {
+    sdk.createOpencode.mockClear();
+    sdk.createOpencode.mockResolvedValue({
+      client: { config: { providers: vi.fn(async () => ({ data: {} })) } },
+      server: { close: vi.fn() },
+    });
+
+    await new OpenCodeAdapter().catalog();
+
+    expect(sdk.createOpencode).toHaveBeenCalledWith({ port: 0 });
+  });
+});

@@ -10,23 +10,95 @@ import {
 
 type GraphQLResponse<T> = { data?: T; errors?: Array<{ message: string }> };
 
+const MAX_CONCURRENT_REQUESTS = 6;
+const REQUEST_TIMEOUT_MS = 60_000;
+
+let activeRequests = 0;
+const requestQueue: Array<() => void> = [];
+const inFlightQueries = new Map<string, Promise<unknown>>();
+
+function scheduleRequest<T>(request: () => Promise<T>): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const run = () => {
+      activeRequests += 1;
+      void request()
+        .then(resolve, reject)
+        .finally(() => {
+          activeRequests -= 1;
+          requestQueue.shift()?.();
+        });
+    };
+
+    if (activeRequests < MAX_CONCURRENT_REQUESTS) run();
+    else requestQueue.push(run);
+  });
+}
+
+function isQuery(operation: string): boolean {
+  const withoutLeadingComments = operation.replace(
+    /^(?:\s+|#[^\r\n]*(?:\r?\n|$))*/,
+    "",
+  );
+  return !/^mutation\b/i.test(withoutLeadingComments);
+}
+
+async function executeRequest<T>(
+  query: string,
+  variables?: Record<string, unknown>,
+): Promise<T> {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+  try {
+    const response = await fetch("/api/graphql", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      credentials: "same-origin",
+      body: JSON.stringify({ query, variables }),
+      signal: controller.signal,
+    });
+    const raw = await response.text();
+    let body: GraphQLResponse<T> | undefined;
+    try {
+      body = raw ? (JSON.parse(raw) as GraphQLResponse<T>) : undefined;
+    } catch {
+      body = undefined;
+    }
+    if (!response.ok || body?.errors?.length || !body?.data) {
+      const detail =
+        body?.errors?.map((error) => error.message).join("; ") ||
+        `HTTP ${response.status} ${response.statusText}`.trim();
+      throw new Error(
+        !body && raw ? `${detail}: ${raw.slice(0, 500)}` : detail,
+      );
+    }
+    return body.data;
+  } catch (error) {
+    if (controller.signal.aborted) {
+      throw new Error("The GraphQL request timed out.", { cause: error });
+    }
+    throw error;
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
 export async function controlPlaneRequest<T>(
   query: string,
   variables?: Record<string, unknown>,
 ): Promise<T> {
-  const response = await fetch("/api/graphql", {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify({ query, variables }),
-  });
-  const body = (await response.json()) as GraphQLResponse<T>;
-  if (!response.ok || body.errors?.length || !body.data) {
-    throw new Error(
-      body.errors?.map((error) => error.message).join("; ") ||
-        `HTTP ${response.status}`,
-    );
-  }
-  return body.data;
+  if (!isQuery(query))
+    return scheduleRequest(() => executeRequest(query, variables));
+
+  const key = JSON.stringify([query, variables ?? null]);
+  const existing = inFlightQueries.get(key) as Promise<T> | undefined;
+  if (existing) return existing;
+
+  const request = scheduleRequest(() => executeRequest<T>(query, variables));
+  inFlightQueries.set(key, request);
+  void request
+    .finally(() => inFlightQueries.delete(key))
+    .catch(() => undefined);
+  return request;
 }
 
 let subscriptionClient: Client | null = null;
@@ -148,6 +220,8 @@ function resilientSubscribe<
           return;
         }
 
+        disposeCurrent?.();
+        disposeCurrent = null;
         terminateForAuthenticationRecovery(client);
         const delay = Math.min(
           AUTHENTICATION_RETRY_MAX_MS,

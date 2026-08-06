@@ -15,6 +15,10 @@ import {
   type WorkflowTriggerKind,
 } from "./kinds";
 import { invalidWorkflowValueBindings } from "./session";
+import {
+  commandOutputPattern,
+  validateCommandOutputPattern,
+} from "./command-output-match";
 
 export const WORKFLOW_FORMAT = "aide.workflow" as const;
 export const WORKFLOW_SCHEMA_VERSION = 1 as const;
@@ -1502,7 +1506,7 @@ export const WORKFLOW_STEP_CATALOG: readonly WorkflowCatalogEntry[] = [
       description:
         "Starts a saved command on an eligible agent home or worktree target.",
       details:
-        "Uses the saved command snapshot, target rules, output log, and restart policy. Wait for exit fails the workflow when the command ultimately fails or is cancelled; fire and forget succeeds after durable dispatch and remains independent if the workflow is later cancelled. Always-restart commands can only use fire and forget.",
+        "Uses the saved command snapshot, target rules, output log, and restart policy. Wait for exit fails the workflow when the command ultimately fails or is cancelled; fire and forget succeeds after durable dispatch and remains independent if the workflow is later cancelled. An optional RE2 output pattern emits the match connector before exit and records captures in session data; matching requires wait for exit. Always-restart commands can only use fire and forget.",
       mutatesWorktree: true,
     },
   ),
@@ -1517,7 +1521,7 @@ export const WORKFLOW_STEP_CATALOG: readonly WorkflowCatalogEntry[] = [
       description:
         "Runs a one-off shell command on an agent home or worktree and records it in Commands run history.",
       details:
-        "The script is retained only in the immutable command-run snapshot, not as a reusable saved command. Context targeting prefers the current worktree, then the current agent. Wait for exit fails the workflow when the command fails or is cancelled; fire and forget succeeds after durable dispatch.",
+        "The script is retained only in the immutable command-run snapshot, not as a reusable saved command. Context targeting prefers the current worktree, then the current agent. Wait for exit fails the workflow when the command fails or is cancelled; fire and forget succeeds after durable dispatch. An optional RE2 output pattern emits the match connector before exit and records captures in session data; matching requires wait for exit.",
       mutatesWorktree: true,
     },
   ),
@@ -3018,6 +3022,89 @@ export function validateWorkflowDefinition(value: unknown): {
         message: "Sub-workflows must pin a published version",
         nodeId: node.id,
       });
+
+    if (node.kind === "SAVED_COMMAND" || node.kind === "CUSTOM_COMMAND") {
+      const pattern = commandOutputPattern(node.config);
+      const usesMatchHandle = definition.edges.some(
+        (edge) => edge.source === node.id && edge.sourceHandle === "match",
+      );
+      if (usesMatchHandle && !pattern) {
+        diagnostics.push({
+          severity: "ERROR",
+          code: "COMMAND_MATCH_PATTERN_REQUIRED",
+          message: "The match connector requires an output pattern",
+          nodeId: node.id,
+        });
+      }
+      if (pattern) {
+        if (
+          node.config.outputMatchMode !== undefined &&
+          node.config.outputMatchMode !== "ONCE" &&
+          node.config.outputMatchMode !== "EACH_MATCH"
+        ) {
+          diagnostics.push({
+            severity: "ERROR",
+            code: "COMMAND_MATCH_MODE_INVALID",
+            message: "Output match behavior must be Once or Each match",
+            nodeId: node.id,
+          });
+        }
+        if (node.config.completionMode === "FIRE_AND_FORGET") {
+          diagnostics.push({
+            severity: "ERROR",
+            code: "COMMAND_MATCH_REQUIRES_WAIT",
+            message: "Output matching requires Wait for exit completion",
+            nodeId: node.id,
+          });
+        }
+        try {
+          validateCommandOutputPattern(pattern);
+        } catch (error) {
+          diagnostics.push({
+            severity: "ERROR",
+            code: "COMMAND_MATCH_PATTERN_INVALID",
+            message: error instanceof Error ? error.message : String(error),
+            nodeId: node.id,
+          });
+        }
+
+        const starts = (handle: string) =>
+          definition.edges
+            .filter(
+              (edge) => edge.source === node.id && edge.sourceHandle === handle,
+            )
+            .map(({ target }) => target);
+        const descendants = (roots: string[]) => {
+          const visited = new Set<string>();
+          const pending = [...roots];
+          while (pending.length) {
+            const id = pending.shift()!;
+            if (visited.has(id)) continue;
+            visited.add(id);
+            pending.push(
+              ...definition.edges
+                .filter((edge) => edge.source === id)
+                .map(({ target }) => target),
+            );
+          }
+          return visited;
+        };
+        const matchBranch = descendants(starts("match"));
+        const terminalBranch = descendants([
+          ...starts("success"),
+          ...starts("failure"),
+        ]);
+        if ([...matchBranch].some((id) => terminalBranch.has(id))) {
+          diagnostics.push({
+            severity: "ERROR",
+            code: "COMMAND_MATCH_BRANCH_RECONVERGES",
+            message:
+              "A command match branch cannot reconverge with its success or failure branch",
+            nodeId: node.id,
+          });
+        }
+      }
+    }
   }
   for (const triggerDefinition of definition.triggers) {
     if (!(outgoing.get(triggerDefinition.id) ?? []).length)

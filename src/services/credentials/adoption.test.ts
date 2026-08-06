@@ -103,7 +103,85 @@ describe("adoptExternalCredentials", () => {
     });
   });
 
-  test("leaves a credential recorded under another backend untouched", async () => {
+  test("repoints a row left behind by the previous backend", async () => {
+    await prisma.credential.create({
+      data: {
+        id: CREDENTIALS.jiraApiToken.id,
+        kind: CREDENTIALS.jiraApiToken.kind,
+        ownerId: "default",
+        storageType: "database",
+        payload: Buffer.from("database-secret"),
+        encrypted: true,
+        encryptionVersion: 1,
+        nonce: Buffer.alloc(12, 1),
+        authTag: Buffer.alloc(16, 2),
+        keyFingerprint: "old-key",
+        updatedAt: new Date(),
+      },
+    });
+
+    await expect(
+      adoptExternalCredentials(
+        prisma,
+        fakeVault({
+          stored: {
+            [CREDENTIALS.jiraApiToken.id]: adoptable(CREDENTIALS.jiraApiToken),
+          },
+          list: async () => [],
+        }),
+      ),
+    ).resolves.toMatchObject({ adopted: 0, repointed: 1, issue: null });
+    expect(
+      await prisma.credential.findUniqueOrThrow({
+        where: { id: CREDENTIALS.jiraApiToken.id },
+      }),
+    ).toMatchObject({
+      storageType: "vault",
+      payload: null,
+      encrypted: false,
+      encryptionVersion: null,
+      nonce: null,
+      authTag: null,
+      keyFingerprint: null,
+    });
+  });
+
+  test("repoints a dynamic credential the backend cannot enumerate", async () => {
+    const id = "external-mcp-server/server-7/headers";
+    await prisma.credential.create({
+      data: {
+        id,
+        kind: "external-mcp-server-headers",
+        ownerId: "server-7",
+        storageType: "database",
+        payload: Buffer.from("database-secret"),
+        updatedAt: new Date(),
+      },
+    });
+
+    await expect(
+      adoptExternalCredentials(
+        prisma,
+        fakeVault({
+          stored: {
+            [id]: {
+              id,
+              kind: "external-mcp-server-headers",
+              ownerId: "server-7",
+            },
+          },
+          list: async () => {
+            throw new Error("Vault credential list failed (HTTP 403)");
+          },
+        }),
+      ),
+    ).resolves.toMatchObject({ repointed: 1 });
+    await expect(
+      prisma.credential.findUniqueOrThrow({ where: { id } }),
+    ).resolves.toMatchObject({ storageType: "vault", payload: null });
+  });
+
+  test("leaves a row untouched when the backend does not hold the secret", async () => {
     await prisma.credential.create({
       data: {
         id: CREDENTIALS.jiraApiToken.id,
@@ -114,15 +192,13 @@ describe("adoptExternalCredentials", () => {
         updatedAt: new Date(),
       },
     });
-    const describe = vi.fn(async () => adoptable(CREDENTIALS.jiraApiToken));
 
     await expect(
       adoptExternalCredentials(
         prisma,
-        fakeVault({ describe, list: async () => [] }),
+        fakeVault({ stored: {}, list: async () => [] }),
       ),
-    ).resolves.toMatchObject({ adopted: 0 });
-    expect(describe).not.toHaveBeenCalledWith(CREDENTIALS.jiraApiToken.id);
+    ).resolves.toMatchObject({ adopted: 0, repointed: 0 });
     const row = await prisma.credential.findUniqueOrThrow({
       where: { id: CREDENTIALS.jiraApiToken.id },
     });
@@ -209,6 +285,7 @@ describe("adoptExternalCredentials", () => {
 
     await expect(adoptExternalCredentials(prisma, driver)).resolves.toEqual({
       adopted: 0,
+      repointed: 0,
       skipped: 0,
       issue: null,
     });

@@ -195,8 +195,12 @@ describe("workflow editor completion notifications", () => {
       activeVersionId: null,
       enabled: false,
       overlapPolicy: "QUEUE",
+      overlapScope: "WORKTREE",
       maxConcurrentRuns: 1,
       completionNotificationsEnabled: true,
+      exclusiveWorktree: false,
+      worktreeConcurrency: "NON_EXCLUSIVE",
+      blocksGitOperations: false,
       archivedAt: null,
       versionCount: 0,
       runCount: 0,
@@ -233,11 +237,23 @@ describe("workflow editor completion notifications", () => {
     });
     expect(checkbox.getAttribute("data-state")).toBe("checked");
     fireEvent.click(checkbox);
-    const exclusive = screen.getByRole("checkbox", {
-      name: "Reserve the worktree for this workflow",
+    const gitBlocking = screen.getByRole("checkbox", {
+      name: "Block Git operations during command and terminal steps",
     });
-    expect(exclusive.getAttribute("data-state")).toBe("unchecked");
-    fireEvent.click(exclusive);
+    expect(gitBlocking.getAttribute("data-state")).toBe("unchecked");
+    fireEvent.click(
+      screen.getByRole("combobox", { name: "Worktree concurrency" }),
+    );
+    fireEvent.click(await screen.findByRole("option", { name: "Exclusive" }));
+    expect(gitBlocking.getAttribute("data-state")).toBe("checked");
+    expect(gitBlocking.hasAttribute("disabled")).toBe(true);
+    fireEvent.click(
+      screen.getByRole("combobox", { name: "Worktree concurrency" }),
+    );
+    fireEvent.click(await screen.findByRole("option", { name: "Excluded" }));
+    expect(gitBlocking.getAttribute("data-state")).toBe("unchecked");
+    expect(gitBlocking.hasAttribute("disabled")).toBe(false);
+    fireEvent.click(gitBlocking);
     fireEvent.keyDown(document.body, { key: "Escape" });
     fireEvent.click(screen.getByRole("button", { name: "Save draft" }));
 
@@ -247,7 +263,8 @@ describe("workflow editor completion notifications", () => {
         expect.objectContaining({
           input: expect.objectContaining({
             completionNotificationsEnabled: false,
-            exclusiveWorktree: true,
+            worktreeConcurrency: "EXCLUDED",
+            blocksGitOperations: true,
           }),
         }),
       ),
