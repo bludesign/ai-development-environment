@@ -45,6 +45,8 @@ export function useWorkflowLabels() {
       lookup("overlapPolicies", value) ?? formatKindLabel(value),
     overlapScope: (value: string) =>
       lookup("overlapScopes", value) ?? formatKindLabel(value),
+    worktreeConcurrency: (value: string) =>
+      lookup("worktreeConcurrencyModes", value) ?? formatKindLabel(value),
     kind: (value: string) => formatKindLabel(value),
   };
 }

@@ -16,6 +16,16 @@ enum WorkflowOverlapScope {
   GLOBAL
 }
 
+"How a workflow run participates in worktree admission."
+enum WorkflowWorktreeConcurrency {
+  "Runs alone after older participating work has finished."
+  EXCLUSIVE
+  "Shares the worktree with other non-exclusive runs."
+  NON_EXCLUSIVE
+  "Does not wait in or contribute to the worktree admission lane."
+  EXCLUDED
+}
+
 "Lifecycle statuses for workflow run."
 enum WorkflowRunStatus {
   "Represents the queued status for workflow run."
@@ -78,6 +88,10 @@ type Workflow {
   completionNotificationsEnabled: Boolean!
   "Whether each top-level run reserves its worktree for this workflow."
   exclusiveWorktree: Boolean!
+  "How runs participate in worktree admission."
+  worktreeConcurrency: WorkflowWorktreeConcurrency!
+  "Whether command-like jobs launched by this workflow block Git operations."
+  blocksGitOperations: Boolean!
   "The quick action kind associated with this workflow."
   quickActionKind: WorkflowQuickActionKind!
   "The quick action icon key associated with this workflow."
@@ -307,6 +321,10 @@ type WorkflowRun {
   phase: String!
   "Whether this run was configured to reserve its worktree exclusively."
   exclusiveWorktree: Boolean!
+  "The immutable worktree concurrency mode captured when this run was created."
+  worktreeConcurrency: WorkflowWorktreeConcurrency!
+  "The immutable Git-blocking setting captured when this run was created."
+  blocksGitOperations: Boolean!
   "The generation associated with this workflow run."
   generation: Int!
   "The session data associated with this workflow run."
@@ -527,6 +545,8 @@ type WorktreeRunQueueEntry {
   queuedAt: String!
   "Whether this workflow entry will reserve the worktree when admitted."
   exclusiveWorktree: Boolean!
+  "How this workflow entry participates in worktree admission."
+  worktreeConcurrency: WorkflowWorktreeConcurrency!
   "The plan or session's worktree concurrency limit."
   worktreeConcurrencyLimit: Int
 }
@@ -589,6 +609,10 @@ input CreateWorkflowInput {
   completionNotificationsEnabled: Boolean = true
   "Queue other workflows, plans, and sessions while this workflow owns a worktree."
   exclusiveWorktree: Boolean = false
+  "How runs participate in worktree admission."
+  worktreeConcurrency: WorkflowWorktreeConcurrency
+  "Whether command-like jobs launched by this workflow block Git operations."
+  blocksGitOperations: Boolean
 }
 
 "Values used to save a workflow draft."
@@ -607,6 +631,10 @@ input SaveWorkflowDraftInput {
   completionNotificationsEnabled: Boolean
   "Queue other workflows, plans, and sessions while this workflow owns a worktree."
   exclusiveWorktree: Boolean
+  "How runs participate in worktree admission."
+  worktreeConcurrency: WorkflowWorktreeConcurrency
+  "Whether command-like jobs launched by this workflow block Git operations."
+  blocksGitOperations: Boolean
 }
 
 "Values used to trigger a workflow."

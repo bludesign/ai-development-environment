@@ -165,6 +165,8 @@ export type CreateWorkflowInput = {
   maxConcurrentRuns?: number | null;
   completionNotificationsEnabled?: boolean | null;
   exclusiveWorktree?: boolean | null;
+  worktreeConcurrency?: string | null;
+  blocksGitOperations?: boolean | null;
 };
 
 export type SaveWorkflowDraftInput = {
@@ -175,6 +177,8 @@ export type SaveWorkflowDraftInput = {
   maxConcurrentRuns?: number | null;
   completionNotificationsEnabled?: boolean | null;
   exclusiveWorktree?: boolean | null;
+  worktreeConcurrency?: string | null;
+  blocksGitOperations?: boolean | null;
 };
 
 export type TriggerWorkflowInput = {
@@ -227,6 +231,7 @@ export type WorktreeRunQueueEntry = {
   workflowRunId: string | null;
   queuedAt: string;
   exclusiveWorktree: boolean;
+  worktreeConcurrency: string;
   worktreeConcurrencyLimit: number | null;
 };
 
@@ -332,6 +337,32 @@ function overlapScope(value: string | null | undefined): string {
     throw new Error("Workflow overlap scope is not supported");
   }
   return normalized;
+}
+
+const WORKTREE_CONCURRENCY_MODES = [
+  "EXCLUSIVE",
+  "NON_EXCLUSIVE",
+  "EXCLUDED",
+] as const;
+
+function worktreeConcurrency(
+  value: string | null | undefined,
+  legacyExclusive?: boolean | null,
+): (typeof WORKTREE_CONCURRENCY_MODES)[number] {
+  const normalized =
+    value?.trim().toUpperCase() ||
+    (legacyExclusive === true ? "EXCLUSIVE" : "NON_EXCLUSIVE");
+  if (!WORKTREE_CONCURRENCY_MODES.includes(normalized as never)) {
+    throw new Error("Workflow worktree concurrency is not supported");
+  }
+  return normalized as (typeof WORKTREE_CONCURRENCY_MODES)[number];
+}
+
+function workflowGitBlocking(
+  mode: string,
+  requested?: boolean | null,
+): boolean {
+  return mode === "EXCLUSIVE" ? true : (requested ?? false);
 }
 
 /**
@@ -663,6 +694,7 @@ export class WorkflowsService {
           phase: true,
           queuedAt: true,
           exclusiveWorktree: true,
+          worktreeConcurrency: true,
           worktreeLeaseOwnerRunId: true,
           workflowId: true,
           workflow: { select: { name: true } },
@@ -729,6 +761,7 @@ export class WorkflowsService {
         workflowRunId: run.id,
         queuedAt: run.queuedAt,
         exclusiveWorktree: run.exclusiveWorktree,
+        worktreeConcurrency: run.worktreeConcurrency,
         worktreeConcurrencyLimit: null,
         leaseOwnerRunId: run.worktreeLeaseOwnerRunId,
       })),
@@ -745,6 +778,7 @@ export class WorkflowsService {
         workflowRunId: run.workflowRun?.id ?? null,
         queuedAt: run.createdAt,
         exclusiveWorktree: false,
+        worktreeConcurrency: "NON_EXCLUSIVE",
         worktreeConcurrencyLimit: run.worktreeConcurrencyLimit,
         leaseOwnerRunId: run.workflowRun?.worktreeLeaseOwnerRunId ?? null,
       })),
@@ -789,6 +823,7 @@ export class WorkflowsService {
           phase: true,
           queuedAt: true,
           exclusiveWorktree: true,
+          worktreeConcurrency: true,
           workflow: { select: { name: true } },
         },
       }),
@@ -840,6 +875,7 @@ export class WorkflowsService {
         workflowRunId: run.id,
         queuedAt: run.queuedAt.toISOString(),
         exclusiveWorktree: run.exclusiveWorktree,
+        worktreeConcurrency: run.worktreeConcurrency,
         worktreeConcurrencyLimit: null,
       }));
     return [...scoped, ...withoutWorktree].sort(
@@ -1023,6 +1059,10 @@ export class WorkflowsService {
     });
     assertSize(serialized, "Workflow definition", MAX_DEFINITION_BYTES);
     const policy = overlapPolicy(input.overlapPolicy);
+    const concurrency = worktreeConcurrency(
+      input.worktreeConcurrency,
+      input.exclusiveWorktree,
+    );
     const prisma = await getPrismaClient();
     const workflow = await prisma.workflow.create({
       data: {
@@ -1036,7 +1076,12 @@ export class WorkflowsService {
         maxConcurrentRuns: concurrentRuns(input.maxConcurrentRuns, policy),
         completionNotificationsEnabled:
           input.completionNotificationsEnabled ?? true,
-        exclusiveWorktree: input.exclusiveWorktree ?? false,
+        exclusiveWorktree: concurrency === "EXCLUSIVE",
+        worktreeConcurrency: concurrency,
+        blocksGitOperations: workflowGitBlocking(
+          concurrency,
+          input.blocksGitOperations,
+        ),
       },
     });
     publishWorkflowChanged(workflow.id);
@@ -1050,6 +1095,14 @@ export class WorkflowsService {
     const current = await this.get(input.id);
     if (!current) throw new Error("Workflow not found");
     const policy = overlapPolicy(input.overlapPolicy ?? current.overlapPolicy);
+    const concurrency = worktreeConcurrency(
+      input.worktreeConcurrency ??
+        (input.exclusiveWorktree === null ||
+        input.exclusiveWorktree === undefined
+          ? current.worktreeConcurrency
+          : null),
+      input.exclusiveWorktree ?? current.exclusiveWorktree,
+    );
     const prisma = await getPrismaClient();
     await prisma.workflow.update({
       where: { id: input.id },
@@ -1067,7 +1120,12 @@ export class WorkflowsService {
         completionNotificationsEnabled:
           input.completionNotificationsEnabled ??
           current.completionNotificationsEnabled,
-        exclusiveWorktree: input.exclusiveWorktree ?? current.exclusiveWorktree,
+        exclusiveWorktree: concurrency === "EXCLUSIVE",
+        worktreeConcurrency: concurrency,
+        blocksGitOperations: workflowGitBlocking(
+          concurrency,
+          input.blocksGitOperations ?? current.blocksGitOperations,
+        ),
       },
     });
     publishWorkflowChanged(input.id);
@@ -1365,6 +1423,8 @@ export class WorkflowsService {
         maxConcurrentRuns: workflow.maxConcurrentRuns,
         completionNotificationsEnabled: workflow.completionNotificationsEnabled,
         exclusiveWorktree: workflow.exclusiveWorktree,
+        worktreeConcurrency: workflow.worktreeConcurrency,
+        blocksGitOperations: workflow.blocksGitOperations,
         definition: sanitizeWorkflowExportDefinition(definition),
       },
     };
@@ -1415,6 +1475,16 @@ export class WorkflowsService {
         typeof workflow.completionNotificationsEnabled === "boolean"
           ? workflow.completionNotificationsEnabled
           : true,
+      worktreeConcurrency:
+        typeof workflow.worktreeConcurrency === "string"
+          ? workflow.worktreeConcurrency
+          : workflow.exclusiveWorktree === true
+            ? "EXCLUSIVE"
+            : "NON_EXCLUSIVE",
+      blocksGitOperations:
+        typeof workflow.blocksGitOperations === "boolean"
+          ? workflow.blocksGitOperations
+          : workflow.exclusiveWorktree === true,
       exclusiveWorktree:
         typeof workflow.exclusiveWorktree === "boolean"
           ? workflow.exclusiveWorktree
@@ -1733,6 +1803,7 @@ export class WorkflowsService {
       codebaseId: target.codebaseId,
       worktreeId: target.worktreeId,
       visibility: "SYSTEM",
+      blocksGitOperations: context.run.blocksGitOperations,
     });
     return {
       output: { jobId: job.id },
@@ -2800,7 +2871,11 @@ export class WorkflowsService {
           : null;
       const worktreeLeaseOwnerRunId =
         inheritedLeaseOwner ??
-        (!parentRunId && workflow.exclusiveWorktree && worktreeId ? id : null);
+        (!parentRunId &&
+        workflow.worktreeConcurrency === "EXCLUSIVE" &&
+        worktreeId
+          ? id
+          : null);
       const run = await transaction.workflowRun.create({
         data: {
           id,
@@ -2812,7 +2887,9 @@ export class WorkflowsService {
           parentRunId,
           worktreeId,
           worktreeLeaseOwnerRunId,
-          exclusiveWorktree: workflow.exclusiveWorktree,
+          exclusiveWorktree: workflow.worktreeConcurrency === "EXCLUSIVE",
+          worktreeConcurrency: workflow.worktreeConcurrency,
+          blocksGitOperations: workflow.blocksGitOperations,
           idempotencyKey,
           triggerKind,
           triggerSubjectKey: subjectKey,
@@ -3489,7 +3566,7 @@ export class WorkflowsService {
         });
         if (active >= limit) return false;
 
-        if (run.worktreeId) {
+        if (run.worktreeId && run.worktreeConcurrency !== "EXCLUDED") {
           await transaction.worktreeAdmissionLane.upsert({
             where: { worktreeId: run.worktreeId },
             create: { worktreeId: run.worktreeId },
@@ -3526,7 +3603,7 @@ export class WorkflowsService {
                 worktreeId: run.worktreeId,
                 status: "QUEUED",
                 parentRunId: null,
-                exclusiveWorktree: true,
+                worktreeConcurrency: "EXCLUSIVE",
               },
               orderBy: [{ queuedAt: "asc" }, { id: "asc" }],
               select: { id: true, queuedAt: true },
@@ -3562,6 +3639,7 @@ export class WorkflowsService {
                   where: {
                     worktreeId: run.worktreeId,
                     id: { not: run.id },
+                    worktreeConcurrency: { not: "EXCLUDED" },
                     status: {
                       in: ACTIVE_RUN_STATUSES.filter(
                         (status) => status !== "QUEUED",
@@ -3586,6 +3664,7 @@ export class WorkflowsService {
                     worktreeId: run.worktreeId,
                     status: "QUEUED",
                     id: { not: run.id },
+                    worktreeConcurrency: { not: "EXCLUDED" },
                     OR: [
                       { queuedAt: { lt: run.queuedAt } },
                       { queuedAt: run.queuedAt, id: { lt: run.id } },

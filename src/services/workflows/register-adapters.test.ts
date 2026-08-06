@@ -10,7 +10,11 @@ import type { WorkflowsService } from "./workflows.service";
 
 function context(worktreeId: string): WorkflowExecutionContext {
   return {
-    run: { id: "workflow-run", workflowId: "workflow-definition" },
+    run: {
+      id: "workflow-run",
+      workflowId: "workflow-definition",
+      blocksGitOperations: true,
+    },
     attempt: { id: "attempt" },
     node: {
       id: "session",
@@ -967,6 +971,7 @@ describe("saved command workflow adapter", () => {
       worktreeId: "actual-worktree",
       origin: "WORKFLOW",
       idempotencyKey: "workflow-command-attempt",
+      blocksGitOperations: true,
     });
     expect(result.wait).toEqual(
       expect.objectContaining({
@@ -1036,6 +1041,7 @@ describe("custom command workflow adapter", () => {
       worktreeId: "actual-worktree",
       origin: "WORKFLOW",
       idempotencyKey: "custom-attempt",
+      blocksGitOperations: true,
     });
     expect(result.wait).toEqual(
       expect.objectContaining({

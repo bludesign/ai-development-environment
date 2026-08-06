@@ -90,13 +90,13 @@ import {
 } from "./types";
 
 const RUN_DETAIL_FIELDS = `
-  id displayNumber workflowId versionId triggerKind triggerSubjectKey status phase generation
+  id displayNumber workflowId versionId triggerKind triggerSubjectKey status phase worktreeConcurrency blocksGitOperations generation
   sessionData sessionRevision blockedReason error queuedAt startedAt pausedAt finishedAt createdAt updatedAt
   workflow { id name }
   worktree { id folder branch highlightColor }
   queue {
     position id kind displayNumber name status phase worktreeId workflowId workflowRunId
-    queuedAt exclusiveWorktree worktreeConcurrencyLimit
+    queuedAt exclusiveWorktree worktreeConcurrency worktreeConcurrencyLimit
     worktree { id folder branch highlightColor }
   }
   trigger { nodeId }

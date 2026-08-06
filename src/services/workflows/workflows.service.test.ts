@@ -1833,6 +1833,38 @@ describe("workflow overlap settings", () => {
     ).rejects.toThrow(/overlap scope is not supported/);
   });
 
+  test("normalizes worktree concurrency and forces Git blocking for exclusive workflows", async () => {
+    const service = new WorkflowsService(new WorkflowEventsService());
+
+    await service.create({ name: "Shared" });
+    await service.create({
+      name: "Ignored by admission",
+      worktreeConcurrency: "excluded",
+      blocksGitOperations: true,
+    });
+    await service.create({
+      name: "Exclusive",
+      worktreeConcurrency: "exclusive",
+      blocksGitOperations: false,
+    });
+
+    expect(prisma.workflow.create.mock.calls[0]?.[0].data).toMatchObject({
+      worktreeConcurrency: "NON_EXCLUSIVE",
+      exclusiveWorktree: false,
+      blocksGitOperations: false,
+    });
+    expect(prisma.workflow.create.mock.calls[1]?.[0].data).toMatchObject({
+      worktreeConcurrency: "EXCLUDED",
+      exclusiveWorktree: false,
+      blocksGitOperations: true,
+    });
+    expect(prisma.workflow.create.mock.calls[2]?.[0].data).toMatchObject({
+      worktreeConcurrency: "EXCLUSIVE",
+      exclusiveWorktree: true,
+      blocksGitOperations: true,
+    });
+  });
+
   test("reads the scope of an export written before the setting existed", async () => {
     const service = new WorkflowsService(new WorkflowEventsService());
     const exported = (exclusiveWorktree: boolean) => ({
@@ -1852,10 +1884,14 @@ describe("workflow overlap settings", () => {
     expect(prisma.workflow.create.mock.calls[0]?.[0].data).toMatchObject({
       overlapScope: "WORKTREE",
       exclusiveWorktree: true,
+      worktreeConcurrency: "EXCLUSIVE",
+      blocksGitOperations: true,
     });
     expect(prisma.workflow.create.mock.calls[1]?.[0].data).toMatchObject({
       overlapScope: "GLOBAL",
       exclusiveWorktree: false,
+      worktreeConcurrency: "NON_EXCLUSIVE",
+      blocksGitOperations: false,
     });
   });
 });
@@ -1899,6 +1935,8 @@ describe("workflow queue admission", () => {
       worktreeId: "worktree-2",
       worktreeLeaseOwnerRunId: "run-2",
       exclusiveWorktree: true,
+      worktreeConcurrency: "EXCLUSIVE",
+      blocksGitOperations: true,
       parentRunId: null,
       generation: 0,
       startedAt: null,
@@ -1934,6 +1972,29 @@ describe("workflow queue admission", () => {
     expect(prisma.worktreeWorkflowLease.create).toHaveBeenCalledWith({
       data: { worktreeId: "worktree-2", workflowRunId: "run-2" },
     });
+    expect(prisma.workflowRun.updateMany).toHaveBeenCalledWith({
+      where: { id: "run-2", status: "QUEUED" },
+      data: expect.objectContaining({ status: "RUNNING" }),
+    });
+  });
+
+  test("starts an excluded run without entering the worktree admission lane", async () => {
+    prisma.workflowRun.findMany.mockResolvedValue([
+      queuedRun({
+        worktreeLeaseOwnerRunId: null,
+        exclusiveWorktree: false,
+        worktreeConcurrency: "EXCLUDED",
+        blocksGitOperations: false,
+      }),
+    ]);
+    prisma.workflowRun.count.mockResolvedValue(0);
+    const service = new WorkflowsService(new WorkflowEventsService());
+
+    await internals(service).startQueuedRuns();
+
+    expect(prisma.worktreeAdmissionLane.upsert).not.toHaveBeenCalled();
+    expect(prisma.worktreeWorkflowLease.findUnique).not.toHaveBeenCalled();
+    expect(prisma.worktreeWorkflowLease.create).not.toHaveBeenCalled();
     expect(prisma.workflowRun.updateMany).toHaveBeenCalledWith({
       where: { id: "run-2", status: "QUEUED" },
       data: expect.objectContaining({ status: "RUNNING" }),
@@ -2225,6 +2286,8 @@ describe("workflow choice triggers", () => {
     enabled: true,
     archivedAt: null,
     overlapPolicy: "CONCURRENT",
+    worktreeConcurrency: "EXCLUDED",
+    blocksGitOperations: true,
     activeVersion: {
       id: "version-1",
       name: definition.name,
@@ -2259,6 +2322,9 @@ describe("workflow choice triggers", () => {
     };
     expect(data.triggerKind).toBe("MANUAL_CHOICE");
     expect(data.triggerId).toBe("db-choose");
+    expect(data.worktreeConcurrency).toBe("EXCLUDED");
+    expect(data.blocksGitOperations).toBe(true);
+    expect(data.exclusiveWorktree).toBe(false);
     expect(JSON.parse(data.triggerPayloadJson!).choice).toBe("ready");
     expect(JSON.parse(data.sessionDataJson!).workflow.trigger.choice).toBe(
       "ready",

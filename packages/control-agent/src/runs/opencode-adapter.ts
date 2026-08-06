@@ -236,7 +236,11 @@ export class OpenCodeAdapter implements ProviderAdapter {
         );
       }
       prependPathDirectory(dirname(executable));
-      this.runtime = await createOpencode();
+      // Bind an ephemeral port. The SDK otherwise defaults to 4096, where a
+      // user's own `opencode serve` — or one orphaned by a control agent that
+      // was killed before it could close its runtime — makes the spawn exit
+      // with `ServeError` and takes the whole provider offline.
+      this.runtime = await createOpencode({ port: 0 });
     }
     return this.runtime.client;
   }

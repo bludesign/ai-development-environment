@@ -485,9 +485,19 @@ describe("WorktreesService", () => {
               jobs: expect.objectContaining({
                 where: expect.objectContaining({
                   status: { in: ["QUEUED", "RUNNING"] },
-                  NOT: expect.arrayContaining([
-                    { kind: "command.run" },
-                    { kind: { startsWith: "ios." } },
+                  NOT: { kind: { startsWith: "ios." } },
+                  OR: expect.arrayContaining([
+                    {
+                      kind: {
+                        notIn: ["command.run", "workflow.terminal.run"],
+                      },
+                    },
+                    {
+                      kind: {
+                        in: ["command.run", "workflow.terminal.run"],
+                      },
+                      blocksGitOperations: true,
+                    },
                   ]),
                 }),
               }),

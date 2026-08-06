@@ -489,6 +489,8 @@ describe("durable worktree run queues", () => {
         description: definition.description,
         draftDefinitionJson: JSON.stringify(definition),
         exclusiveWorktree: true,
+        worktreeConcurrency: "EXCLUSIVE",
+        blocksGitOperations: true,
       },
     });
     await prisma.workflowVersion.create({
@@ -529,6 +531,8 @@ describe("durable worktree run queues", () => {
         worktreeId: "worktree-1",
         worktreeLeaseOwnerRunId: "workflow-run-exclusive",
         exclusiveWorktree: true,
+        worktreeConcurrency: "EXCLUSIVE",
+        blocksGitOperations: true,
         phase: "WAITING_FOR_WORKTREE",
       },
     });

@@ -66,6 +66,7 @@ type Form = {
   restartLimit: string;
   unlimitedRestarts: boolean;
   concurrency: CommandConcurrency;
+  blocksGitOperations: boolean;
   quickActionEnabled: boolean;
   quickActionIconKey: string;
   quickActionButtonVariant: string;
@@ -83,6 +84,7 @@ const initial: Form = {
   restartLimit: "3",
   unlimitedRestarts: false,
   concurrency: "NON_EXCLUSIVE",
+  blocksGitOperations: false,
   quickActionEnabled: false,
   quickActionIconKey: "terminal",
   quickActionButtonVariant: "default",
@@ -138,6 +140,7 @@ export function CommandEditor({ commandId }: { commandId?: string }) {
             restartLimit: String(value.restartLimit ?? 3),
             unlimitedRestarts: value.restartLimit === null,
             concurrency: value.concurrency,
+            blocksGitOperations: value.blocksGitOperations,
             quickActionEnabled: value.quickActionEnabled,
             quickActionIconKey: value.quickActionIconKey,
             quickActionButtonVariant: value.quickActionButtonVariant,
@@ -169,6 +172,7 @@ export function CommandEditor({ commandId }: { commandId?: string }) {
         restartPolicy: form.restartPolicy,
         restartLimit: form.unlimitedRestarts ? null : Number(form.restartLimit),
         concurrency: form.concurrency,
+        blocksGitOperations: form.blocksGitOperations,
         quickActionEnabled: form.quickActionEnabled,
         quickActionIconKey: form.quickActionIconKey,
         quickActionButtonVariant: form.quickActionButtonVariant,
@@ -407,9 +411,14 @@ export function CommandEditor({ commandId }: { commandId?: string }) {
             {t("concurrencyHelp")}
           </p>
           <RadioGroup
-            onValueChange={(value) =>
-              update("concurrency", value as CommandConcurrency)
-            }
+            onValueChange={(value) => {
+              const concurrency = value as CommandConcurrency;
+              setForm((current) => ({
+                ...current,
+                concurrency,
+                blocksGitOperations: concurrency === "EXCLUSIVE",
+              }));
+            }}
             value={form.concurrency}
           >
             {COMMAND_CONCURRENCY_MODES.map((mode) => {
@@ -435,6 +444,25 @@ export function CommandEditor({ commandId }: { commandId?: string }) {
               );
             })}
           </RadioGroup>
+          <div className="space-y-1">
+            <label className="flex items-center gap-2 text-sm">
+              <Checkbox
+                checked={form.blocksGitOperations}
+                disabled={form.concurrency === "EXCLUSIVE"}
+                onCheckedChange={(checked) =>
+                  update("blocksGitOperations", checked === true)
+                }
+              />
+              {t("blocksGitOperations")}
+            </label>
+            <p className="text-xs text-muted-foreground">
+              {t(
+                form.concurrency === "EXCLUSIVE"
+                  ? "blocksGitOperationsExclusiveHelp"
+                  : "blocksGitOperationsHelp",
+              )}
+            </p>
+          </div>
         </CardContent>
       </Card>
       <Card>

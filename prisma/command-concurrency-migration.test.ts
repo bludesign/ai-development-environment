@@ -16,6 +16,8 @@ const migration = () =>
   [
     "20260802120000_add_command_concurrency",
     "20260802140000_add_command_cross_kind_guards",
+    "20260806100000_add_command_git_blocking",
+    "20260806100500_backfill_command_job_git_blocking",
   ]
     .map((name) =>
       readFileSync(
@@ -49,6 +51,11 @@ function seed(): Database.Database {
       "commandId" TEXT,
       "snapshotName" TEXT NOT NULL
     );
+    CREATE TABLE "CommandRunAttempt" (
+      "id" TEXT NOT NULL PRIMARY KEY,
+      "runId" TEXT NOT NULL,
+      "agentJobId" TEXT
+    );
 
     INSERT INTO "CommandDefinition" ("id", "name")
     VALUES ('command-1', 'Build'), ('command-2', 'Tail logs');
@@ -67,20 +74,44 @@ describe("command concurrency migration", () => {
 
     expect(
       database
-        .prepare(`SELECT "id", "concurrency" FROM "CommandDefinition"`)
+        .prepare(
+          `SELECT "id", "concurrency", "blocksGitOperations" FROM "CommandDefinition"`,
+        )
         .all(),
     ).toEqual([
-      { id: "command-1", concurrency: "NON_EXCLUSIVE" },
-      { id: "command-2", concurrency: "NON_EXCLUSIVE" },
+      {
+        id: "command-1",
+        concurrency: "NON_EXCLUSIVE",
+        blocksGitOperations: 0,
+      },
+      {
+        id: "command-2",
+        concurrency: "NON_EXCLUSIVE",
+        blocksGitOperations: 0,
+      },
     ]);
     expect(
       database
-        .prepare(`SELECT "id", "snapshotConcurrency" FROM "CommandRun"`)
+        .prepare(
+          `SELECT "id", "snapshotConcurrency", "snapshotBlocksGitOperations" FROM "CommandRun"`,
+        )
         .all(),
     ).toEqual([
-      { id: "run-1", snapshotConcurrency: "NON_EXCLUSIVE" },
-      { id: "run-2", snapshotConcurrency: "NON_EXCLUSIVE" },
-      { id: "run-custom", snapshotConcurrency: "NON_EXCLUSIVE" },
+      {
+        id: "run-1",
+        snapshotConcurrency: "NON_EXCLUSIVE",
+        snapshotBlocksGitOperations: 0,
+      },
+      {
+        id: "run-2",
+        snapshotConcurrency: "NON_EXCLUSIVE",
+        snapshotBlocksGitOperations: 0,
+      },
+      {
+        id: "run-custom",
+        snapshotConcurrency: "NON_EXCLUSIVE",
+        snapshotBlocksGitOperations: 0,
+      },
     ]);
   });
 
@@ -123,48 +154,127 @@ describe("command concurrency migration", () => {
     ).toEqual({ snapshotConcurrency: "NON_EXCLUSIVE" });
   });
 
-  test("allows command peers but atomically excludes repository work", () => {
+  test("allows non-blocking command peers to overlap repository work", () => {
     database = seed();
-    const active = database.prepare(
+    const beforeMigration = database.prepare(
       `INSERT INTO "AgentJob" ("id", "kind", "status", "codebaseId") VALUES (?, ?, 'RUNNING', 'codebase-1')`,
     );
-    active.run("command-a", "command.run");
-    expect(() => active.run("command-b", "command.run")).toThrow(
+    beforeMigration.run("command-a", "command.run");
+    expect(() => beforeMigration.run("command-b", "command.run")).toThrow(
       /UNIQUE constraint failed/,
     );
 
     database.exec(migration());
+    const active = database.prepare(
+      `INSERT INTO "AgentJob" ("id", "kind", "status", "codebaseId", "blocksGitOperations") VALUES (?, ?, 'RUNNING', ?, ?)`,
+    );
 
     // Two command runs may hold the same codebase; their concurrency is
     // decided by the command's own mode.
-    expect(() => active.run("command-b", "command.run")).not.toThrow();
-    // Repository work cannot enter after a command already owns the codebase.
-    expect(() => active.run("git-a", "codebase.git.inspect")).toThrow(
-      /AgentJob_codebaseId_active_key/,
-    );
+    expect(() =>
+      active.run("command-b", "command.run", "codebase-1", 0),
+    ).not.toThrow();
+    // Commands using the permissive default may overlap repository work.
+    expect(() =>
+      active.run("git-a", "codebase.git.inspect", "codebase-1", 0),
+    ).not.toThrow();
+    expect(() =>
+      active.run("command-c", "command.run", "codebase-1", 0),
+    ).not.toThrow();
+    // Repository work still serializes with other repository work.
+    expect(() =>
+      active.run("git-b", "codebase.git.mutate", "codebase-1", 0),
+    ).toThrow(/UNIQUE constraint failed/);
 
-    const onSecondCodebase = database.prepare(
-      `INSERT INTO "AgentJob" ("id", "kind", "status", "codebaseId") VALUES (?, ?, 'RUNNING', 'codebase-2')`,
-    );
-    onSecondCodebase.run("git-b", "codebase.git.inspect");
-    // The opposite scheduling order is guarded as well.
-    expect(() => onSecondCodebase.run("command-c", "command.run")).toThrow(
-      /AgentJob_codebaseId_active_key/,
-    );
-    expect(() => onSecondCodebase.run("git-c", "codebase.git.mutate")).toThrow(
-      /UNIQUE constraint failed/,
-    );
+    // A command that opted into Git blocking prevents repository work.
+    active.run("command-blocking", "command.run", "codebase-2", 1);
+    expect(() =>
+      active.run("git-blocked", "codebase.git.inspect", "codebase-2", 0),
+    ).toThrow(/AgentJob_codebaseId_active_key/);
+
+    // The opposite scheduling order is guarded as well, but a non-blocking
+    // command may still enter.
+    active.run("git-first", "codebase.git.inspect", "codebase-3", 0);
+    expect(() =>
+      active.run("command-blocked", "command.run", "codebase-3", 1),
+    ).toThrow(/AgentJob_codebaseId_active_key/);
+    expect(() =>
+      active.run("command-allowed", "command.run", "codebase-3", 0),
+    ).not.toThrow();
+
     // iOS jobs stay exempt as before.
-    active.run("ios-a", "ios.build.run");
-    expect(() => active.run("ios-b", "ios.build.run")).not.toThrow();
+    active.run("ios-a", "ios.build.run", "codebase-1", 0);
+    expect(() =>
+      active.run("ios-b", "ios.build.run", "codebase-1", 0),
+    ).not.toThrow();
   });
 
-  test("applies the cross-kind guard when an existing job becomes active", () => {
+  test("backfills the Git-blocking snapshot onto existing command jobs", () => {
     database = seed();
     database.exec(migration());
     database
       .prepare(
-        `INSERT INTO "AgentJob" ("id", "kind", "status", "codebaseId") VALUES ('command-a', 'command.run', 'RUNNING', 'codebase-1')`,
+        `UPDATE "CommandRun" SET "snapshotBlocksGitOperations" = true WHERE "id" = 'run-1'`,
+      )
+      .run();
+    database
+      .prepare(
+        `INSERT INTO "AgentJob" ("id", "kind", "status", "codebaseId") VALUES ('command-existing', 'command.run', 'RUNNING', 'codebase-1')`,
+      )
+      .run();
+    database
+      .prepare(
+        `INSERT INTO "CommandRunAttempt" ("id", "runId", "agentJobId") VALUES ('attempt-1', 'run-1', 'command-existing')`,
+      )
+      .run();
+
+    const backfill = readFileSync(
+      resolve(
+        process.cwd(),
+        "prisma/migrations/20260806100500_backfill_command_job_git_blocking/migration.sql",
+      ),
+      "utf8",
+    );
+    database.exec(backfill);
+
+    expect(
+      database
+        .prepare(
+          `SELECT "blocksGitOperations" FROM "AgentJob" WHERE "id" = 'command-existing'`,
+        )
+        .get(),
+    ).toEqual({ blocksGitOperations: 1 });
+  });
+
+  test("applies the opt-in guard when a command becomes blocking", () => {
+    database = seed();
+    database.exec(migration());
+    database
+      .prepare(
+        `INSERT INTO "AgentJob" ("id", "kind", "status", "codebaseId", "blocksGitOperations") VALUES ('command-a', 'command.run', 'RUNNING', 'codebase-1', false)`,
+      )
+      .run();
+    database
+      .prepare(
+        `INSERT INTO "AgentJob" ("id", "kind", "status", "codebaseId") VALUES ('git-a', 'codebase.git.inspect', 'RUNNING', 'codebase-1')`,
+      )
+      .run();
+
+    expect(() =>
+      database!
+        .prepare(
+          `UPDATE "AgentJob" SET "blocksGitOperations" = true WHERE "id" = 'command-a'`,
+        )
+        .run(),
+    ).toThrow(/AgentJob_codebaseId_active_key/);
+  });
+
+  test("applies the cross-kind guard when existing repository work becomes active", () => {
+    database = seed();
+    database.exec(migration());
+    database
+      .prepare(
+        `INSERT INTO "AgentJob" ("id", "kind", "status", "codebaseId", "blocksGitOperations") VALUES ('command-a', 'command.run', 'RUNNING', 'codebase-1', true)`,
       )
       .run();
     database

@@ -2,7 +2,6 @@ import { randomUUID } from "node:crypto";
 import { posix, win32 } from "node:path";
 
 import { parseCodebaseGitState } from "@ai-development-environment/agent-contract/codebases";
-import { COMMAND_RUN_JOB_KIND } from "@ai-development-environment/agent-contract/commands";
 import {
   parseCodebaseWorktreeReport,
   parseWorktreeActivityReport,
@@ -35,6 +34,7 @@ import {
 import { getPrismaClient } from "@/data/prisma-client";
 import type { Prisma } from "@/generated/prisma/client";
 import {
+  ACTIVE_CODEBASE_BLOCKING_JOB_WHERE,
   CodebaseBusyError,
   isActiveCodebaseJobConflict,
 } from "@/lib/codebase-busy";
@@ -79,10 +79,6 @@ const ACTIVE_WORKTREE_GIT_JOB_KINDS = [
   WORKTREE_DELETE_JOB_KIND,
 ];
 const ACTIVE_WORKTREE_GIT_JOB_KIND_SET = new Set(ACTIVE_WORKTREE_GIT_JOB_KINDS);
-const ACTIVE_CODEBASE_BLOCKING_JOB_WHERE = {
-  status: { in: ACTIVE_STATUSES },
-  NOT: [{ kind: COMMAND_RUN_JOB_KIND }, { kind: { startsWith: "ios." } }],
-} satisfies Prisma.AgentJobWhereInput;
 const ACTIVE_BUILD_STATUSES = ["QUEUED", "PREPARING", "RUNNING"];
 const ACTIVE_MOVE_STATUSES = [
   "PUSHING",

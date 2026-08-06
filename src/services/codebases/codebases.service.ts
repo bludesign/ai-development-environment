@@ -27,6 +27,7 @@ import {
 } from "@ai-development-environment/agent-contract/worktrees";
 
 import { getPrismaClient } from "@/data/prisma-client";
+import { ACTIVE_CODEBASE_BLOCKING_JOB_WHERE } from "@/lib/codebase-busy";
 import {
   agentOnlineWindowMs,
   AgentControlService,
@@ -39,7 +40,6 @@ import type { SkillsService } from "@/services/skills";
 const INSPECTION_MAX_AGE_MS = 15 * 60_000;
 const INTERACTIVE_TIMEOUT_MS = 30_000;
 const SETTINGS_ID = "default";
-const ACTIVE_CODEBASE_JOB_STATUSES = ["QUEUED", "RUNNING"];
 
 type CompletedJob = {
   id: string;
@@ -115,7 +115,7 @@ export class CodebasesService {
             agent: true,
             repository: true,
             jobs: {
-              where: { status: { in: ["QUEUED", "RUNNING"] } },
+              where: ACTIVE_CODEBASE_BLOCKING_JOB_WHERE,
               orderBy: { createdAt: "desc" },
               take: 1,
             },
@@ -139,7 +139,7 @@ export class CodebasesService {
             agent: true,
             repository: true,
             jobs: {
-              where: { status: { in: ["QUEUED", "RUNNING"] } },
+              where: ACTIVE_CODEBASE_BLOCKING_JOB_WHERE,
               orderBy: { createdAt: "desc" },
               take: 1,
             },
@@ -158,7 +158,7 @@ export class CodebasesService {
         agent: true,
         repository: { include: { skillGroups: { include: { group: true } } } },
         jobs: {
-          where: { status: { in: ACTIVE_CODEBASE_JOB_STATUSES } },
+          where: ACTIVE_CODEBASE_BLOCKING_JOB_WHERE,
           orderBy: { createdAt: "desc" },
           take: 1,
         },
@@ -555,7 +555,7 @@ export class CodebasesService {
         agent: true,
         repository: true,
         jobs: {
-          where: { status: { in: ACTIVE_CODEBASE_JOB_STATUSES } },
+          where: ACTIVE_CODEBASE_BLOCKING_JOB_WHERE,
           select: { id: true },
           take: 1,
         },
@@ -614,7 +614,7 @@ export class CodebasesService {
         const active = await prisma.agentJob.findFirst({
           where: {
             codebaseId: codebase.id,
-            status: { in: ACTIVE_CODEBASE_JOB_STATUSES },
+            ...ACTIVE_CODEBASE_BLOCKING_JOB_WHERE,
           },
           select: { id: true },
         });
@@ -865,7 +865,7 @@ export class CodebasesService {
         agent: true,
         repository: true,
         jobs: {
-          where: { status: { in: ACTIVE_CODEBASE_JOB_STATUSES } },
+          where: ACTIVE_CODEBASE_BLOCKING_JOB_WHERE,
           select: { id: true },
           take: 1,
         },

@@ -722,7 +722,11 @@ function CodebaseCard({
         <div className="flex items-center justify-between gap-3">
           <p className="text-xs text-muted-foreground">
             {active
-              ? t("operationRunning")
+              ? active.kind === "command.run"
+                ? t("blockingCommandRunning")
+                : active.kind === "workflow.terminal.run"
+                  ? t("blockingWorkflowTerminalRunning")
+                  : t("operationRunning")
               : codebase.agent.connectionStatus === "OFFLINE"
                 ? t("offline")
                 : ""}

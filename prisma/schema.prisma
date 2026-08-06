@@ -279,6 +279,7 @@ model AgentJob {
   codebaseId            String?
   worktreeId            String?
   visibility            String                 @default("USER")
+  blocksGitOperations   Boolean                @default(false)
   agent                 Agent                  @relation(fields: [agentId], references: [id], onDelete: Cascade)
   ccusageCollection     CcusageCollection?     @relation(fields: [ccusageCollectionId], references: [id], onDelete: SetNull)
   buildDataCollection   BuildDataCollection?   @relation(fields: [buildDataCollectionId], references: [id], onDelete: SetNull)
@@ -2562,6 +2563,8 @@ model Workflow {
   maxConcurrentRuns              Int                             @default(1)
   completionNotificationsEnabled Boolean                         @default(true)
   exclusiveWorktree              Boolean                         @default(false)
+  worktreeConcurrency            String                          @default("NON_EXCLUSIVE")
+  blocksGitOperations            Boolean                         @default(false)
   quickActionKind                String                          @default("NONE")
   quickActionIconKey             String                          @default("play")
   quickActionButtonVariant       String                          @default("default")
@@ -2600,6 +2603,7 @@ model CommandDefinition {
   restartPolicy            String              @default("NEVER")
   restartLimit             Int?                @default(3)
   concurrency              String              @default("NON_EXCLUSIVE")
+  blocksGitOperations      Boolean             @default(false)
   quickActionEnabled       Boolean             @default(false)
   quickActionIconKey       String              @default("terminal")
   quickActionButtonVariant String              @default("default")
@@ -2630,6 +2634,7 @@ model CommandRun {
   snapshotRestartPolicy        String              @default("NEVER")
   snapshotRestartLimit         Int?
   snapshotConcurrency          String              @default("NON_EXCLUSIVE")
+  snapshotBlocksGitOperations  Boolean             @default(false)
   snapshotNotificationsEnabled Boolean             @default(true)
   snapshotJson                 String              @default("{}")
   agentId                      String?
@@ -2795,6 +2800,8 @@ model WorkflowRun {
   worktreeId              String?
   worktreeLeaseOwnerRunId String?
   exclusiveWorktree       Boolean                   @default(false)
+  worktreeConcurrency     String                    @default("NON_EXCLUSIVE")
+  blocksGitOperations     Boolean                   @default(false)
   idempotencyKey          String                    @unique
   triggerKind             String
   triggerSubjectKey       String

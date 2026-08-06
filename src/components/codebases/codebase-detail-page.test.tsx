@@ -381,4 +381,32 @@ describe("CodebaseDetailPage", () => {
       ),
     ).toBe(false);
   });
+
+  test("names a command as the reason Git operations are blocked", async () => {
+    request.mockImplementation(async (query) => {
+      if (String(query).includes("query CodebaseDetail")) {
+        return {
+          codebase: {
+            ...codebase,
+            activeJob: {
+              ...queuedJob,
+              id: "command-job-1",
+              kind: "command.run",
+              status: "RUNNING",
+            },
+          },
+        } as never;
+      }
+      throw new Error(`Unexpected operation: ${query}`);
+    });
+
+    render(<CodebaseDetailPage codebaseId="codebase-1" />);
+
+    expect(
+      await screen.findByText(
+        "A command configured to block Git operations is running.",
+      ),
+    ).toBeDefined();
+    expect(screen.queryByText("command.run is running…")).toBeNull();
+  });
 });

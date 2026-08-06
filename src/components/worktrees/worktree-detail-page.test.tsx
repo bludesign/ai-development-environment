@@ -328,6 +328,7 @@ describe("WorktreeDetailPage", () => {
               workflowRunId: "workflow-run-4",
               queuedAt: "2026-07-26T00:01:00.000Z",
               exclusiveWorktree: true,
+              worktreeConcurrency: "EXCLUSIVE",
               worktreeConcurrencyLimit: null,
             },
           ],

@@ -152,6 +152,11 @@ export function workflowView(value: Record<string, unknown>) {
     completionNotificationsEnabled:
       value.completionNotificationsEnabled !== false,
     exclusiveWorktree: value.exclusiveWorktree === true,
+    worktreeConcurrency: String(
+      value.worktreeConcurrency ??
+        (value.exclusiveWorktree === true ? "EXCLUSIVE" : "NON_EXCLUSIVE"),
+    ),
+    blocksGitOperations: value.blocksGitOperations === true,
     activeVersionId:
       typeof value.activeVersionId === "string" ? value.activeVersionId : null,
     draftSchemaVersion: Number(value.draftSchemaVersion),

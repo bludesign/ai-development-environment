@@ -2815,6 +2815,7 @@ function registerMiscellaneousAdapters(
       worktreeId,
       origin: "WORKFLOW",
       idempotencyKey: context.attempt.idempotencyKey,
+      blocksGitOperations: context.run.blocksGitOperations,
     });
     if (!run) throw new Error("Command run could not be created");
     return {
@@ -2890,6 +2891,7 @@ function registerMiscellaneousAdapters(
       worktreeId,
       origin: "WORKFLOW",
       idempotencyKey: context.attempt.idempotencyKey,
+      blocksGitOperations: context.run.blocksGitOperations,
     });
     if (!run) throw new Error("Custom command run could not be created");
     return {

@@ -29,6 +29,7 @@ import { formatEnumLabel } from "@/lib/enum-label";
 import { useTranslations } from "next-intl";
 
 import type { WorktreeRunQueueEntry } from "./types";
+import { useWorkflowLabels } from "./workflow-labels";
 
 function entryHref(entry: WorktreeRunQueueEntry): string {
   if (entry.kind === "WORKFLOW") return `/workflows/runs/${entry.id}`;
@@ -47,6 +48,7 @@ export function WorktreeRunQueueCard({
   const t = useTranslations("workflows");
   const kindT = useTranslations("actionCenter.kinds");
   const runLabels = useRunLabels();
+  const workflowLabels = useWorkflowLabels();
   const showWorktree = scope === "WORKFLOW";
 
   return (
@@ -113,8 +115,12 @@ export function WorktreeRunQueueCard({
                             ? formatEnumLabel(entry.phase)
                             : runLabels.phase(entry.phase)}
                         </Badge>
-                        {entry.exclusiveWorktree && (
-                          <Badge variant="secondary">{t("exclusive")}</Badge>
+                        {entry.kind === "WORKFLOW" && (
+                          <Badge variant="secondary">
+                            {workflowLabels.worktreeConcurrency(
+                              entry.worktreeConcurrency,
+                            )}
+                          </Badge>
                         )}
                         {current && (
                           <Badge variant="secondary">{t("currentRun")}</Badge>

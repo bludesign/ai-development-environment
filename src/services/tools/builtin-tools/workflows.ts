@@ -140,6 +140,8 @@ const WorkflowSchema = z.object({
   maxConcurrentRuns: z.number(),
   completionNotificationsEnabled: z.boolean(),
   exclusiveWorktree: z.boolean(),
+  worktreeConcurrency: z.enum(["EXCLUSIVE", "NON_EXCLUSIVE", "EXCLUDED"]),
+  blocksGitOperations: z.boolean(),
   activeVersionId: z.string().nullable(),
   draftSchemaVersion: z.number(),
   quickActionKind: z.enum([
@@ -651,6 +653,18 @@ export function createWorkflowToolGroup(workflows: Service): BuiltInToolGroup {
             .describe(
               "Reserve a run's worktree and queue other workflows, plans, and sessions until it finishes. Defaults to false.",
             ),
+          worktreeConcurrency: z
+            .enum(["EXCLUSIVE", "NON_EXCLUSIVE", "EXCLUDED"])
+            .optional()
+            .describe(
+              "How runs participate in worktree admission. Defaults to NON_EXCLUSIVE.",
+            ),
+          blocksGitOperations: z
+            .boolean()
+            .optional()
+            .describe(
+              "Whether command and terminal steps block concurrent Git operations. Exclusive workflows always enable this.",
+            ),
         }),
         outputSchema: z.object({
           workflow: WorkflowSchema,
@@ -699,6 +713,10 @@ export function createWorkflowToolGroup(workflows: Service): BuiltInToolGroup {
             .describe(
               "Reserve the worktree for each top-level run of this workflow.",
             ),
+          worktreeConcurrency: z
+            .enum(["EXCLUSIVE", "NON_EXCLUSIVE", "EXCLUDED"])
+            .optional(),
+          blocksGitOperations: z.boolean().optional(),
         }),
         outputSchema: DefinitionResultSchema,
         annotations: WRITE_ANNOTATIONS,
@@ -718,6 +736,8 @@ export function createWorkflowToolGroup(workflows: Service): BuiltInToolGroup {
             completionNotificationsEnabled:
               input.completionNotificationsEnabled ?? null,
             exclusiveWorktree: input.exclusiveWorktree ?? null,
+            worktreeConcurrency: input.worktreeConcurrency ?? null,
+            blocksGitOperations: input.blocksGitOperations ?? null,
           });
           return saveDraft(workflows, input.workflowId, next);
         },
