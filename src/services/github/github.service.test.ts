@@ -976,10 +976,12 @@ describe("GitHub service", () => {
       "owner/name",
     );
     expect(normalizeJiraKeyRegex("")).toBeNull();
-    expect(() => normalizeJiraKeyRegex("[")).toThrow("invalid");
+    expect(() => normalizeJiraKeyRegex("[")).toThrow("RE2 syntax");
+    expect(() => normalizeJiraKeyRegex("(?=APP)")).toThrow("RE2 syntax");
     expect(parseJiraKey("ship app-42 now", String.raw`\b([A-Z]+-\d+)\b`)).toBe(
       "APP-42",
     );
+    expect(parseJiraKey("APP-42", String.raw`\A([A-Z]+-\d+)\z`)).toBe("APP-42");
     expect(parseJiraKey("ship APP-42", null)).toBeNull();
   });
 

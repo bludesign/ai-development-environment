@@ -35,6 +35,7 @@
     "db:migrate": "prisma migrate dev",
     "db:deploy": "prisma migrate deploy",
     "db:studio": "prisma studio",
+    "db:audit-re2": "tsx scripts/audit-re2-patterns.ts",
     "db:vacuum": "node scripts/vacuum-database.mjs",
     "supergraph": "rover supergraph compose --elv2-license accept --config ./supergraph.yaml > supergraph.graphql",
     "clean": "rm -rf .next coverage src/generated prisma/dev.db* supergraph.graphql",

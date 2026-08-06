@@ -38,7 +38,7 @@ describe("command output matching", () => {
     expect(() => compileCommandOutputPattern("(?=ready)")).toThrow(
       /RE2 syntax/,
     );
-    expect(() => validateCommandOutputPattern("a*")).toThrow(/consume/);
+    expect(() => compileCommandOutputPattern("a*")).toThrow(/consume/);
     expect(() => compileCommandOutputPattern("\\b")).toThrow(/consume/);
     expect(() => compileCommandOutputPattern("a?\\b")).toThrow(/consume/);
     expect(() => validateCommandOutputPattern("x".repeat(1_025))).toThrow(

@@ -279,7 +279,7 @@ const OPERATOR_OPTIONS = listOptions([
   { value: "LT", label: "Less than" },
   { value: "LTE", label: "Less or equal" },
   { value: "CONTAINS", label: "Contains" },
-  { value: "MATCHES", label: "Matches regex" },
+  { value: "MATCHES", label: "Matches RE2" },
   { value: "EXISTS", label: "Exists" },
 ]);
 
@@ -1436,7 +1436,7 @@ const TRIGGER_CONFIG_DESCRIPTORS: TriggerConfigDescriptors = Object.fromEntries(
             placeholder: "octocat",
             required: true,
           }),
-          text("commandPattern", "Command pattern (regex)", {
+          text("commandPattern", "Command pattern (RE2)", {
             placeholder: "^/deploy\\b$",
             required: true,
             // The matcher compiles this itself, so it has to stay a string: a
@@ -1457,7 +1457,7 @@ const TRIGGER_CONFIG_DESCRIPTORS: TriggerConfigDescriptors = Object.fromEntries(
             placeholder: "5b10a2844c20165700ede21g",
             required: true,
           }),
-          text("commandPattern", "Command pattern (regex)", {
+          text("commandPattern", "Command pattern (RE2)", {
             placeholder: "^/deploy\\b$",
             required: true,
             valueModes: ["literal", "interpolation"],
@@ -1469,7 +1469,7 @@ const TRIGGER_CONFIG_DESCRIPTORS: TriggerConfigDescriptors = Object.fromEntries(
       return [
         kind,
         triggerWithFilters([
-          text("outputPattern", "Output pattern (regex)", {
+          text("outputPattern", "Output pattern (RE2)", {
             placeholder: "error|failed",
             required: true,
             valueModes: ["literal", "interpolation"],

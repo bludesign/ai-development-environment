@@ -739,8 +739,8 @@ describe("PullRequestsPage", () => {
     );
     expect(screen.getByText("acme/platform")).toBeDefined();
 
-    fireEvent.change(screen.getByLabelText("Default ticket key regex"), {
-      target: { value: String.raw`\b([A-Z]+-\d+)\b` },
+    fireEvent.change(screen.getByLabelText("Default ticket key regex (RE2)"), {
+      target: { value: String.raw`\A(?P<key>[A-Z]+-\d+)\z` },
     });
     fireEvent.click(
       screen.getByRole("button", {
@@ -750,7 +750,11 @@ describe("PullRequestsPage", () => {
     await waitFor(() =>
       expect(requestMock).toHaveBeenCalledWith(
         expect.stringContaining("SaveDefaultGitHubJiraKeyRegex"),
-        { input: { defaultJiraKeyRegex: String.raw`\b([A-Z]+-\d+)\b` } },
+        {
+          input: {
+            defaultJiraKeyRegex: String.raw`\A(?P<key>[A-Z]+-\d+)\z`,
+          },
+        },
       ),
     );
 

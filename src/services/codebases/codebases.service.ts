@@ -27,6 +27,7 @@ import {
 } from "@ai-development-environment/agent-contract/worktrees";
 
 import { getPrismaClient } from "@/data/prisma-client";
+import { compileRe2 } from "@/lib/re2.server";
 import { ACTIVE_CODEBASE_BLOCKING_JOB_WHERE } from "@/lib/codebase-busy";
 import {
   agentOnlineWindowMs,
@@ -275,11 +276,10 @@ export class CodebasesService {
         ? DEFAULT_JIRA_BRANCH_REGEX
         : input.defaultJiraBranchRegex.trim();
     if (defaultJiraBranchRegex) {
-      try {
-        void new RegExp(defaultJiraBranchRegex, "i");
-      } catch {
-        throw new Error("Default Jira branch regex is invalid");
-      }
+      compileRe2(defaultJiraBranchRegex, {
+        flags: "i",
+        label: "Default Jira branch regex",
+      });
     }
     const prisma = await getPrismaClient();
     const data =
@@ -462,11 +462,10 @@ export class CodebasesService {
     }
     const jiraBranchRegex = jiraBranchRegexValue?.trim() || null;
     if (jiraBranchRegex) {
-      try {
-        void new RegExp(jiraBranchRegex, "i");
-      } catch {
-        throw new Error("Jira branch regex is invalid");
-      }
+      compileRe2(jiraBranchRegex, {
+        flags: "i",
+        label: "Jira branch regex",
+      });
     }
     const validatedSkillGroupIds =
       skillGroupIds === undefined || skillGroupIds === null

@@ -25,15 +25,6 @@ export function validateCommandOutputPattern(pattern: string): void {
       `Output pattern must not exceed ${COMMAND_OUTPUT_PATTERN_MAX_LENGTH} characters`,
     );
   }
-  // Native RegExp is useful for detecting common empty matches in the editor,
-  // but it is not an RE2 syntax validator. RE2 supports constructs such as
-  // \A, \z, and (?P<name>...) that JavaScript rejects, so a parse failure must
-  // be left to the server-side RE2 compiler.
-  let nativePattern: RegExp | null = null;
-  try {
-    nativePattern = new RegExp(pattern, "u");
-  } catch {}
-  if (nativePattern?.test("")) {
-    throw new Error("Output pattern must consume at least one character");
-  }
+  // Syntax and zero-width checks are authoritative on the server. Keeping this
+  // client-safe helper structural avoids rejecting RE2-only syntax in editors.
 }

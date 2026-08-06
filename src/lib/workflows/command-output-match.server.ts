@@ -1,7 +1,6 @@
 import "server-only";
 
-import { RE2 } from "re2-wasm";
-
+import { compileRe2 } from "@/lib/re2.server";
 import { validateCommandOutputPattern } from "./command-output-match";
 
 // RE2's zero-width assertions depend only on a finite set of surrounding-text
@@ -13,7 +12,10 @@ const ZERO_WIDTH_PROBES = ["", "aa", "  ", "a a", "a\na", " a", "a "];
 
 function assertPatternConsumesText(pattern: string): void {
   for (const input of ZERO_WIDTH_PROBES) {
-    const regex = new RE2(pattern, "uy");
+    const regex = compileRe2(pattern, {
+      flags: "y",
+      label: "Output pattern",
+    });
     for (let index = 0; index <= input.length; index += 1) {
       regex.lastIndex = index;
       const match = regex.exec(input);
@@ -28,7 +30,10 @@ function assertPatternConsumesText(pattern: string): void {
 export function compileCommandOutputPattern(pattern: string, global = false) {
   validateCommandOutputPattern(pattern);
   try {
-    const regex = new RE2(pattern, global ? "gu" : "u");
+    const regex = compileRe2(pattern, {
+      flags: global ? "g" : "",
+      label: "Output pattern",
+    });
     assertPatternConsumesText(pattern);
     return regex;
   } catch (error) {
@@ -38,8 +43,7 @@ export function compileCommandOutputPattern(pattern: string, global = false) {
     ) {
       throw error;
     }
-    throw new Error(
-      `Output pattern is not valid RE2 syntax: ${error instanceof Error ? error.message : String(error)}`,
-    );
+    if (error instanceof Error) throw error;
+    throw new Error(`Output pattern is not valid RE2 syntax: ${String(error)}`);
   }
 }

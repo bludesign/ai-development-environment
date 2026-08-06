@@ -962,6 +962,50 @@ describe("workflow sub-workflow validation", () => {
         message: expect.stringMatching(/consume/),
       }),
     );
+
+    draft.nodes[0]!.config.outputPattern = "ready";
+    draft.nodes[0]!.config.condition = {
+      op: "MATCHES",
+      left: "ready",
+      right: "(?=ready)",
+    };
+    prisma.workflow.findUnique.mockResolvedValue({
+      id: "workflow-a",
+      draftDefinitionJson: JSON.stringify(draft),
+      activeVersion: null,
+      versions: [],
+      _count: { runs: 0 },
+    });
+    const condition = await service.validateDraft("workflow-a");
+    expect(condition.valid).toBe(false);
+    expect(condition.diagnostics).toContainEqual(
+      expect.objectContaining({
+        code: "WORKFLOW_REGEX_PATTERN_INVALID",
+        nodeId: "command",
+      }),
+    );
+
+    delete draft.nodes[0]!.config.condition;
+    draft.triggers[0]!.kind = "GITHUB_ISSUE_COMMAND";
+    draft.triggers[0]!.config = {
+      allowedLogins: ["octocat"],
+      commandPattern: "^(?=/deploy$).*$",
+    };
+    prisma.workflow.findUnique.mockResolvedValue({
+      id: "workflow-a",
+      draftDefinitionJson: JSON.stringify(draft),
+      activeVersion: null,
+      versions: [],
+      _count: { runs: 0 },
+    });
+    const trigger = await service.validateDraft("workflow-a");
+    expect(trigger.valid).toBe(false);
+    expect(trigger.diagnostics).toContainEqual(
+      expect.objectContaining({
+        code: "WORKFLOW_REGEX_PATTERN_INVALID",
+        triggerId: "manual",
+      }),
+    );
   });
 });
 
@@ -2724,6 +2768,36 @@ describe("workflow trigger interpolation", () => {
         payload,
       ),
     ).resolves.toBe(true);
+  });
+
+  test("executes issue and output trigger patterns with RE2", async () => {
+    const issuePayload = {
+      comment: { author: { login: "octocat" }, body: "/deploy" },
+    };
+    await expect(
+      matches(
+        "GITHUB_ISSUE_COMMAND",
+        {
+          allowedLogins: ["octocat"],
+          commandPattern: "^(?P<command>/deploy)$",
+        },
+        issuePayload,
+      ),
+    ).resolves.toBe(true);
+    await expect(
+      matches(
+        "COMMAND_OUTPUT_MATCH",
+        { outputPattern: "\\Aready\\z" },
+        { output: { data: "ready" } },
+      ),
+    ).resolves.toBe(true);
+    await expect(
+      matches(
+        "COMMAND_OUTPUT_MATCH",
+        { outputPattern: "(?=ready)" },
+        { output: { data: "ready" } },
+      ),
+    ).rejects.toThrow(/RE2 syntax/);
   });
 
   test("fires disk thresholds only on false-to-true crossings", async () => {

@@ -1,13 +1,13 @@
 import { describe, expect, test } from "vitest";
 
 import {
-  evaluateWorkflowCondition,
   getSessionValue,
   interpolateWorkflowText,
   mergeSessionData,
   resolveWorkflowValue,
   setSessionValue,
 } from "./session";
+import { evaluateWorkflowCondition } from "./session.server";
 
 describe("workflow session data", () => {
   test("applies immutable nested patches and stable array paths", () => {
@@ -70,5 +70,20 @@ describe("workflow session data", () => {
         data,
       ),
     ).toBe(true);
+  });
+
+  test("uses RE2 for workflow regex conditions", () => {
+    expect(
+      evaluateWorkflowCondition(
+        { op: "MATCHES", left: "ready", right: "\\Aready\\z" },
+        {},
+      ),
+    ).toBe(true);
+    expect(() =>
+      evaluateWorkflowCondition(
+        { op: "MATCHES", left: "ready", right: "(?=ready)" },
+        {},
+      ),
+    ).toThrow(/RE2 syntax/);
   });
 });

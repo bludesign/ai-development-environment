@@ -14,6 +14,7 @@ import type {
   WorkflowWait,
 } from "@/generated/prisma/client";
 import { getPrismaClient } from "@/data/prisma-client";
+import { compileRe2 } from "@/lib/re2.server";
 import {
   emptyWorkflowDefinition,
   hasWorkflowErrors,
@@ -40,7 +41,6 @@ import {
 } from "@/lib/workflows/command-output-match";
 import { compileCommandOutputPattern } from "@/lib/workflows/command-output-match.server";
 import {
-  evaluateWorkflowCondition,
   getSessionValue,
   hasSessionValue,
   mergeSessionData,
@@ -50,6 +50,7 @@ import {
   type SessionData,
   type WorkflowCondition,
 } from "@/lib/workflows/session";
+import { evaluateWorkflowCondition } from "@/lib/workflows/session.server";
 import { isCodebaseBusyError } from "@/lib/codebase-busy";
 import { requiredConfigSessionPaths } from "@/lib/workflows/config-descriptors";
 import {
@@ -166,6 +167,33 @@ function recordValue(value: unknown): Record<string, unknown> {
   return value && typeof value === "object" && !Array.isArray(value)
     ? (value as Record<string, unknown>)
     : {};
+}
+
+function staticRegexPattern(value: unknown): string | null {
+  if (typeof value === "string") return value;
+  const record = recordValue(value);
+  return record.source === "LITERAL" && typeof record.value === "string"
+    ? record.value
+    : null;
+}
+
+function validateConditionPatterns(condition: unknown): void {
+  const value = recordValue(condition);
+  if (value.op === "ALL" || value.op === "ANY") {
+    if (Array.isArray(value.conditions)) {
+      for (const entry of value.conditions) validateConditionPatterns(entry);
+    }
+    return;
+  }
+  if (value.op === "NOT") {
+    validateConditionPatterns(value.condition);
+    return;
+  }
+  if (value.op !== "MATCHES") return;
+  const pattern = staticRegexPattern(value.right);
+  if (pattern !== null) {
+    compileRe2(pattern, { label: "Workflow condition pattern" });
+  }
 }
 
 function commandMatchCursor(
@@ -1237,25 +1265,70 @@ export class WorkflowsService {
     const diagnostics = [...validation.diagnostics];
     if (validation.definition) {
       for (const node of validation.definition.nodes) {
-        if (node.kind !== "SAVED_COMMAND" && node.kind !== "CUSTOM_COMMAND") {
-          continue;
+        if (node.kind === "SAVED_COMMAND" || node.kind === "CUSTOM_COMMAND") {
+          const pattern = commandOutputPattern(node.config);
+          if (pattern) {
+            try {
+              compileCommandOutputPattern(pattern);
+            } catch (error) {
+              if (
+                !diagnostics.some(
+                  ({ code, nodeId }) =>
+                    code === "COMMAND_MATCH_PATTERN_INVALID" &&
+                    nodeId === node.id,
+                )
+              ) {
+                diagnostics.push({
+                  severity: "ERROR",
+                  code: "COMMAND_MATCH_PATTERN_INVALID",
+                  message:
+                    error instanceof Error ? error.message : String(error),
+                  nodeId: node.id,
+                });
+              }
+            }
+          }
         }
-        const pattern = commandOutputPattern(node.config);
-        if (!pattern) continue;
         try {
-          compileCommandOutputPattern(pattern);
+          validateConditionPatterns(node.config.condition);
+        } catch (error) {
+          diagnostics.push({
+            severity: "ERROR",
+            code: "WORKFLOW_REGEX_PATTERN_INVALID",
+            message: error instanceof Error ? error.message : String(error),
+            nodeId: node.id,
+          });
+        }
+      }
+      for (const trigger of validation.definition.triggers) {
+        const pattern =
+          trigger.kind === "GITHUB_ISSUE_COMMAND" ||
+          trigger.kind === "JIRA_ISSUE_COMMAND"
+            ? trigger.config.commandPattern
+            : trigger.kind === "COMMAND_OUTPUT_MATCH"
+              ? trigger.config.outputPattern
+              : null;
+        if (typeof pattern !== "string") continue;
+        try {
+          compileRe2(pattern, {
+            label:
+              trigger.kind === "COMMAND_OUTPUT_MATCH"
+                ? "Command output trigger pattern"
+                : "Issue command pattern",
+          });
         } catch (error) {
           if (
             !diagnostics.some(
-              ({ code, nodeId }) =>
-                code === "COMMAND_MATCH_PATTERN_INVALID" && nodeId === node.id,
+              ({ code, triggerId }) =>
+                code === "WORKFLOW_REGEX_PATTERN_INVALID" &&
+                triggerId === trigger.id,
             )
           ) {
             diagnostics.push({
               severity: "ERROR",
-              code: "COMMAND_MATCH_PATTERN_INVALID",
+              code: "WORKFLOW_REGEX_PATTERN_INVALID",
               message: error instanceof Error ? error.message : String(error),
-              nodeId: node.id,
+              triggerId: trigger.id,
             });
           }
         }
@@ -3199,7 +3272,9 @@ export class WorkflowsService {
       if (
         typeof body !== "string" ||
         typeof config.commandPattern !== "string" ||
-        !new RegExp(config.commandPattern).test(body)
+        !compileRe2(config.commandPattern, {
+          label: "GitHub issue command pattern",
+        }).test(body)
       ) {
         return false;
       }
@@ -3217,7 +3292,9 @@ export class WorkflowsService {
       if (
         typeof body !== "string" ||
         typeof config.commandPattern !== "string" ||
-        !new RegExp(config.commandPattern).test(body)
+        !compileRe2(config.commandPattern, {
+          label: "Jira issue command pattern",
+        }).test(body)
       ) {
         return false;
       }
@@ -3227,7 +3304,9 @@ export class WorkflowsService {
       if (
         typeof output !== "string" ||
         typeof config.outputPattern !== "string" ||
-        !new RegExp(config.outputPattern).test(output)
+        !compileRe2(config.outputPattern, {
+          label: "Command output trigger pattern",
+        }).test(output)
       ) {
         return false;
       }

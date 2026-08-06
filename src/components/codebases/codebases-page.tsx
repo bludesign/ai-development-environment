@@ -395,16 +395,9 @@ function CodebaseSettingsDialog({
     Number.isInteger(fetchIntervalSeconds) &&
     fetchIntervalSeconds >= MIN_WORKTREE_FETCH_INTERVAL_SECONDS &&
     fetchIntervalSeconds <= MAX_WORKTREE_FETCH_INTERVAL_SECONDS;
-  let regexValid = true;
-  try {
-    if (jiraRegex) void new RegExp(jiraRegex, "i");
-  } catch {
-    regexValid = false;
-  }
-
   const save = async (event: FormEvent) => {
     event.preventDefault();
-    if (!valid || !fetchValid || !regexValid) return;
+    if (!valid || !fetchValid) return;
     setBusy(true);
     try {
       const data = await controlPlaneRequest<{
@@ -509,10 +502,7 @@ function CodebaseSettingsDialog({
             >
               {t("cancel")}
             </Button>
-            <Button
-              disabled={busy || !valid || !fetchValid || !regexValid}
-              type="submit"
-            >
+            <Button disabled={busy || !valid || !fetchValid} type="submit">
               {busy && <Spinner />} {t("save")}
             </Button>
           </DialogFooter>
