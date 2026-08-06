@@ -887,7 +887,7 @@ describe("workflow sub-workflow validation", () => {
     );
   });
 
-  test("rejects JavaScript regex features that RE2 cannot execute", async () => {
+  test("validates command patterns with the server RE2 implementation", async () => {
     const draft = emptyWorkflowDefinition("Command matcher");
     draft.nodes = [
       {
@@ -922,15 +922,44 @@ describe("workflow sub-workflow validation", () => {
       _count: { runs: 0 },
     });
 
-    const result = await new WorkflowsService(
-      new WorkflowEventsService(),
-    ).validateDraft("workflow-a");
+    const service = new WorkflowsService(new WorkflowEventsService());
+    const result = await service.validateDraft("workflow-a");
 
     expect(result.valid).toBe(false);
     expect(result.diagnostics).toContainEqual(
       expect.objectContaining({
         code: "COMMAND_MATCH_PATTERN_INVALID",
         nodeId: "command",
+      }),
+    );
+
+    draft.nodes[0]!.config.outputPattern = "\\Aready\\z";
+    prisma.workflow.findUnique.mockResolvedValue({
+      id: "workflow-a",
+      draftDefinitionJson: JSON.stringify(draft),
+      activeVersion: null,
+      versions: [],
+      _count: { runs: 0 },
+    });
+    await expect(service.validateDraft("workflow-a")).resolves.toMatchObject({
+      valid: true,
+    });
+
+    draft.nodes[0]!.config.outputPattern = "\\b";
+    prisma.workflow.findUnique.mockResolvedValue({
+      id: "workflow-a",
+      draftDefinitionJson: JSON.stringify(draft),
+      activeVersion: null,
+      versions: [],
+      _count: { runs: 0 },
+    });
+    const zeroWidth = await service.validateDraft("workflow-a");
+    expect(zeroWidth.valid).toBe(false);
+    expect(zeroWidth.diagnostics).toContainEqual(
+      expect.objectContaining({
+        code: "COMMAND_MATCH_PATTERN_INVALID",
+        nodeId: "command",
+        message: expect.stringMatching(/consume/),
       }),
     );
   });

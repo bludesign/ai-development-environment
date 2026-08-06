@@ -3899,6 +3899,11 @@ export class WorkflowsService {
         let match: ReturnType<typeof regex.exec>;
         while ((match = regex.exec(output))) {
           const matchedText = match[0]!;
+          if (!matchedText.length) {
+            throw new Error(
+              "Command output patterns must consume at least one character",
+            );
+          }
           const startOffset = match.index;
           const endOffset = startOffset + matchedText.length;
           const coordinate = (characterOffset: number, end: boolean) => {

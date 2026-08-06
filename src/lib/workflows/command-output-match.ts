@@ -17,7 +17,7 @@ export function commandOutputMatchMode(
     : "ONCE";
 }
 
-/** Client-safe validation; the server also compiles with RE2 before publish. */
+/** Client-safe validation; the server authoritatively compiles with RE2. */
 export function validateCommandOutputPattern(pattern: string): void {
   if (!pattern.length) throw new Error("Output pattern cannot be empty");
   if (pattern.length > COMMAND_OUTPUT_PATTERN_MAX_LENGTH) {
@@ -25,15 +25,15 @@ export function validateCommandOutputPattern(pattern: string): void {
       `Output pattern must not exceed ${COMMAND_OUTPUT_PATTERN_MAX_LENGTH} characters`,
     );
   }
-  let regex: RegExp;
+  // Native RegExp is useful for detecting common empty matches in the editor,
+  // but it is not an RE2 syntax validator. RE2 supports constructs such as
+  // \A, \z, and (?P<name>...) that JavaScript rejects, so a parse failure must
+  // be left to the server-side RE2 compiler.
+  let nativePattern: RegExp | null = null;
   try {
-    regex = new RegExp(pattern, "u");
-  } catch (error) {
-    throw new Error(
-      `Output pattern is not valid RE2 syntax: ${error instanceof Error ? error.message : String(error)}`,
-    );
-  }
-  if (regex.test("")) {
-    throw new Error("Output pattern must not match an empty string");
+    nativePattern = new RegExp(pattern, "u");
+  } catch {}
+  if (nativePattern?.test("")) {
+    throw new Error("Output pattern must consume at least one character");
   }
 }
