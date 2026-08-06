@@ -70,6 +70,13 @@ export default async function RootLayout({
       lang={locale}
       className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}
     >
+      <head>
+        <link
+          rel="manifest"
+          href="/manifest.webmanifest"
+          crossOrigin="use-credentials"
+        />
+      </head>
       <body className="h-dvh overflow-hidden">
         <NextIntlClientProvider messages={messages}>
           <TooltipProvider>{children}</TooltipProvider>

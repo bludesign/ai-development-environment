@@ -4028,7 +4028,10 @@ export class WorkflowsService {
     let slots = Math.max(0, GLOBAL_CONCURRENCY - runningCount);
     if (!slots) return;
     const candidates = await prisma.workflowStepAttempt.findMany({
-      where: { status: "READY", run: { status: "RUNNING" } },
+      where: {
+        status: "READY",
+        run: { status: { in: [...SCHEDULING_RUN_STATUSES] } },
+      },
       orderBy: { createdAt: "asc" },
       take: slots * 2,
     });
@@ -4038,7 +4041,7 @@ export class WorkflowsService {
         where: {
           id: attempt.id,
           status: "READY",
-          run: { status: "RUNNING" },
+          run: { status: { in: [...SCHEDULING_RUN_STATUSES] } },
         },
         data: {
           status: "RUNNING",

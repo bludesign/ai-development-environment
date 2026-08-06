@@ -51,6 +51,7 @@ const prisma = vi.hoisted(() => ({
   },
   workflowStepAttempt: {
     findUnique: vi.fn(),
+    findMany: vi.fn(),
     update: vi.fn(),
     updateMany: vi.fn(),
     count: vi.fn(),
@@ -1752,6 +1753,56 @@ describe("workflow runtime lifecycle guards", () => {
           }),
         }),
       }),
+    );
+  });
+});
+
+describe("workflow attempt dispatch", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    prisma.workflowStepAttempt.count.mockResolvedValue(0);
+    prisma.workflowStepAttempt.findMany.mockResolvedValue([
+      {
+        id: "ready-sibling",
+        startedAt: null,
+      },
+    ]);
+    prisma.workflowStepAttempt.updateMany.mockResolvedValue({ count: 1 });
+  });
+
+  test("dispatches a ready sibling while another step has the run waiting", async () => {
+    const executeAttempt = vi.fn().mockResolvedValue(undefined);
+    const service = new WorkflowsService(
+      new WorkflowEventsService(),
+    ) as unknown as {
+      dispatchReadyAttempts(): Promise<void>;
+      executeAttempt: typeof executeAttempt;
+    };
+    service.executeAttempt = executeAttempt;
+
+    await service.dispatchReadyAttempts();
+
+    const schedulingStatuses = { in: ["RUNNING", "WAITING"] };
+    expect(prisma.workflowStepAttempt.findMany).toHaveBeenCalledWith({
+      where: {
+        status: "READY",
+        run: { status: schedulingStatuses },
+      },
+      orderBy: { createdAt: "asc" },
+      take: 8,
+    });
+    expect(prisma.workflowStepAttempt.updateMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: {
+          id: "ready-sibling",
+          status: "READY",
+          run: { status: schedulingStatuses },
+        },
+      }),
+    );
+    expect(executeAttempt).toHaveBeenCalledWith(
+      "ready-sibling",
+      expect.any(AbortSignal),
     );
   });
 });

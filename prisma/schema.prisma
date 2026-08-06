@@ -328,6 +328,7 @@ model App {
   name           String
   normalizedName String          @unique
   description    String          @default("")
+  agentIdsJson   String          @default("[]")
   createdAt      DateTime        @default(now())
   updatedAt      DateTime        @updatedAt
   repositories   AppRepository[]

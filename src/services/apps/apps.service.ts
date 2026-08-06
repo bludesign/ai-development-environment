@@ -9,6 +9,7 @@ export const APPS_CHANGED_TOPIC = "apps.changed";
 type AppInput = {
   name: string;
   description?: string | null;
+  agentIds?: string[] | null;
   repositoryIds: string[];
 };
 
@@ -21,6 +22,7 @@ function normalizedName(value: string): string {
 function validateInput(input: AppInput) {
   const name = input.name.trim();
   const description = input.description?.trim() ?? "";
+  const agentIds = [...new Set(input.agentIds ?? [])];
   const repositoryIds = [...new Set(input.repositoryIds)];
 
   if (!name) throw new Error("App name is required");
@@ -38,6 +40,7 @@ function validateInput(input: AppInput) {
     name,
     normalizedName: normalizedName(name),
     description,
+    agentIds,
     repositoryIds,
   };
 }
@@ -101,6 +104,7 @@ export class AppsService {
         name: value.name,
         normalizedName: value.normalizedName,
         description: value.description,
+        agentIdsJson: JSON.stringify(value.agentIds),
         repositories: {
           create: value.repositoryIds.map((repositoryId) => ({
             repositoryId,
@@ -132,6 +136,7 @@ export class AppsService {
           name: value.name,
           normalizedName: value.normalizedName,
           description: value.description,
+          agentIdsJson: JSON.stringify(value.agentIds),
           repositories: {
             create: value.repositoryIds.map((repositoryId) => ({
               repositoryId,
@@ -211,9 +216,10 @@ export class AppsService {
       }),
     ]);
 
-    const { repositories, ...details } = app;
+    const { repositories, agentIdsJson, ...details } = app;
     return {
       ...details,
+      agentIds: this.stringArray(agentIdsJson),
       repositories: repositories.map((item) => item.repository),
       counts: {
         repositories: repositoryIds.length,
@@ -224,5 +230,16 @@ export class AppsService {
         builds,
       },
     };
+  }
+
+  private stringArray(value: string): string[] {
+    try {
+      const parsed: unknown = JSON.parse(value);
+      return Array.isArray(parsed)
+        ? parsed.filter((item): item is string => typeof item === "string")
+        : [];
+    } catch {
+      return [];
+    }
   }
 }

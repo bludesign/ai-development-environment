@@ -77,7 +77,7 @@ path "secret/metadata/ai-development-environment/credentials/*" {
 
 ### Reusing an existing Vault on a new install
 
-A server pointed at a Vault that already holds credentials adopts them when it starts: it reads what is stored under the configured mount and prefix and rebuilds the local metadata rows describing it. Nothing needs to be re-entered, and the Credentials page reports how many items were adopted. Only secrets live in Vault—non-secret settings such as the Jira site URL or GitHub App ID are still entered per install. Point two installs at the same mount and prefix and they share one set of secrets, with no coordination between them; a write from either is immediately visible to the other.
+A server pointed at a Vault that already holds credentials adopts them when it starts: it reads what is stored under the configured mount and prefix and rebuilds the local metadata rows describing it. Nothing needs to be re-entered, and the Credentials page reports how many items were adopted. A credential this install recorded under an earlier backend is adopted the same way, because the configured backend is the only one a read can reach: once Vault is confirmed to hold that secret, the local row is repointed at Vault and the superseded database copy is dropped from it. Only secrets live in Vault—non-secret settings such as the Jira site URL or GitHub App ID are still entered per install. Point two installs at the same mount and prefix and they share one set of secrets, with no coordination between them; a write from either is immediately visible to the other.
 
 Because the Vault token is the only thing gating this, treat it as the credential: anyone who can point a new install at the Vault gets a working install.
 
@@ -94,7 +94,7 @@ path "secret/metadata/ai-development-environment/credentials/*" {
 }
 ```
 
-macOS Keychain is dynamically loaded only on Darwin; selecting it on Linux or in Docker reports an error without crashing the app. Do not run a Keychain-backed service as root. Switching storage backends does not migrate or delete existing values: re-enter mismatched credentials through their owning settings forms. External-backend outages affect only credential-dependent features.
+macOS Keychain is dynamically loaded only on Darwin; selecting it on Linux or in Docker reports an error without crashing the app. Do not run a Keychain-backed service as root. Switching storage backends never copies a value into the new backend. Switching to Vault, whose contents the server can read back, keeps working for every secret Vault already holds; anything the configured backend does not hold is reported as a mismatch on the Credentials page and must be re-entered through its owning settings form. External-backend outages affect only credential-dependent features.
 
 ## See also
 

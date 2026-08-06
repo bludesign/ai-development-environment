@@ -290,6 +290,25 @@ export function resourcePlan(
             label: script.name,
           })) ?? [],
       };
+    case "savedCommand":
+      return {
+        query: `query WorkflowSavedCommandOptions {
+          commandDefinitions { id name description }
+        }`,
+        variables: {},
+        map: (data) =>
+          pick<{
+            commandDefinitions?: {
+              id: string;
+              name: string;
+              description: string;
+            }[];
+          }>(data).commandDefinitions?.map((command) => ({
+            value: command.id,
+            label: command.name,
+            description: command.description || undefined,
+          })) ?? [],
+      };
     case "agentRun":
       if (!scope) return null;
       return {

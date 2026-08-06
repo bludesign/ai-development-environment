@@ -711,6 +711,98 @@ describe("CredentialService vault backend", () => {
     expect(row).toMatchObject({ storageType: "vault", payload: null });
   });
 
+  test("reads from Vault when a row still names the previous backend", async () => {
+    const settings = {
+      siteUrl: "https://jira.example.test",
+      email: "dev@test",
+    };
+    // The row an install that used database storage before Vault leaves behind.
+    await prisma.credential.create({
+      data: {
+        id: CREDENTIALS.jiraConnectionSettings.id,
+        kind: CREDENTIALS.jiraConnectionSettings.kind,
+        ownerId: "default",
+        storageType: "database",
+        payload: Uint8Array.from(Buffer.from("superseded-ciphertext")),
+        encrypted: true,
+        encryptionVersion: 1,
+        keyFingerprint: "old-key",
+        updatedAt: new Date(),
+      },
+    });
+    const request = vaultBackend(
+      new Map([
+        [
+          CREDENTIALS.jiraConnectionSettings.id,
+          {
+            kind: CREDENTIALS.jiraConnectionSettings.kind,
+            ownerId: "default",
+            value: encodeJsonCredential(settings).toString("utf8"),
+          },
+        ],
+      ]),
+    );
+    const service = new CredentialService({
+      env: env(),
+      prisma,
+      vaultRequest: request as never,
+      vaultDispatcherFactory: () => ({}) as never,
+    });
+
+    await expect(
+      service.getJson(CREDENTIALS.jiraConnectionSettings),
+    ).resolves.toEqual(settings);
+    await expect(
+      service.isConfigured(CREDENTIALS.jiraConnectionSettings),
+    ).resolves.toBe(true);
+    await expect(service.status()).resolves.toMatchObject({
+      state: "READY",
+      mismatchCount: 0,
+      adoptedCount: 1,
+      warnings: [],
+    });
+    expect(
+      await prisma.credential.findUniqueOrThrow({
+        where: { id: CREDENTIALS.jiraConnectionSettings.id },
+      }),
+    ).toMatchObject({
+      storageType: "vault",
+      payload: null,
+      encrypted: false,
+      encryptionVersion: null,
+      keyFingerprint: null,
+    });
+  });
+
+  test("still requires re-entry when Vault does not hold the credential", async () => {
+    await prisma.credential.create({
+      data: {
+        id: CREDENTIALS.jiraConnectionSettings.id,
+        kind: CREDENTIALS.jiraConnectionSettings.kind,
+        ownerId: "default",
+        storageType: "database",
+        payload: Uint8Array.from(Buffer.from("superseded-ciphertext")),
+        encrypted: true,
+        updatedAt: new Date(),
+      },
+    });
+    const service = new CredentialService({
+      env: env(),
+      prisma,
+      vaultRequest: vaultBackend(new Map()) as never,
+      vaultDispatcherFactory: () => ({}) as never,
+    });
+
+    await expect(
+      service.getJson(CREDENTIALS.jiraConnectionSettings),
+    ).rejects.toMatchObject({ code: "BACKEND_MISMATCH" });
+    await expect(service.status()).resolves.toMatchObject({
+      state: "WARNING",
+      mismatchCount: 1,
+      adoptedCount: 0,
+    });
+  });
+
   test("lazily adopts an explicitly requested dynamic credential", async () => {
     const descriptor = apnsCertificateCredential("certificate-7");
     const value = { p12Base64: "bundle", passphrase: "passphrase" };

@@ -1093,7 +1093,9 @@ const STEP_CONFIG_DESCRIPTORS: StepConfigDescriptors = {
   // -- Extensibility ---------------------------------------------------------
   SAVED_COMMAND: {
     fields: [
-      text("commandId", "Saved command ID", { required: true }),
+      resource("commandId", "Saved command ID", "savedCommand", {
+        required: true,
+      }),
       enumField(
         "completionMode",
         "Completion",

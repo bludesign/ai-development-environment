@@ -6,12 +6,13 @@ const mocks = vi.hoisted(() => {
     error(error: unknown): void;
     complete(): void;
   };
-  const subscribe = vi.fn((_payload: unknown, _sink: SubscriptionSink) =>
-    vi.fn(),
+  const dispose = vi.fn();
+  const subscribe = vi.fn(
+    (_payload: unknown, _sink: SubscriptionSink) => dispose,
   );
   const terminate = vi.fn();
   const createClient = vi.fn(() => ({ subscribe, terminate }));
-  return { createClient, subscribe, terminate };
+  return { createClient, dispose, subscribe, terminate };
 });
 
 vi.mock("graphql-ws", () => ({ createClient: mocks.createClient }));
@@ -45,6 +46,7 @@ describe("control-plane subscription recovery", () => {
       { message: "Authentication is required for this GraphQL operation." },
     ]);
 
+    expect(mocks.dispose).toHaveBeenCalledTimes(1);
     expect(mocks.terminate).toHaveBeenCalledTimes(1);
     expect(sink.error).not.toHaveBeenCalled();
     await vi.advanceTimersByTimeAsync(999);

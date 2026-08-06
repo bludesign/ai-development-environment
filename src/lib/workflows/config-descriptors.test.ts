@@ -68,6 +68,19 @@ describe("workflow config descriptors", () => {
     }
   });
 
+  test("uses the saved-command picker for run saved command", () => {
+    expect(
+      getConfigDescriptor("SAVED_COMMAND", "step")?.fields.find(
+        ({ key }) => key === "commandId",
+      ),
+    ).toMatchObject({
+      control: "resource",
+      required: true,
+      options: { kind: "resource", resource: "savedCommand" },
+      valueModes: ["literal", "session", "interpolation"],
+    });
+  });
+
   test("uses kind-specific worktree concurrency defaults for AI runs", () => {
     const concurrency = (kind: string) =>
       getConfigDescriptor(kind, "step")?.fields.find(
