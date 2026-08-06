@@ -489,6 +489,53 @@ function latestAttempts(attempts: WorkflowAttempt[], generation?: number) {
   return latest;
 }
 
+const iterationStatusPriority = [
+  "BLOCKED",
+  "FAILED",
+  "RUNNING",
+  "WAITING",
+  "READY",
+  "PENDING",
+  "CANCELLED",
+  "SUCCEEDED",
+  "SKIPPED",
+  "SUPERSEDED",
+];
+const dormantIterationTemplatePhases = new Set([
+  "INACTIVE_BRANCH",
+  "ITERATION_TEMPLATE",
+]);
+
+/**
+ * Iterated branches retain a base attempt as a scheduling template. In
+ * particular, a command's streaming match branch can finish while that base
+ * row is still pending because the source command has not exited yet. Show the
+ * real branch executions in that case instead of the dormant template.
+ *
+ * MATCH_EMITTED rows represent the command source for an occurrence, not an
+ * execution of the node's own step, so they do not participate in the card's
+ * aggregate status.
+ */
+function displayedAttempt(
+  values: WorkflowAttempt[],
+): WorkflowAttempt | undefined {
+  const base = values.find(({ iterationKey }) => !iterationKey);
+  const executions = values.filter(
+    ({ iterationKey, phase }) => iterationKey && phase !== "MATCH_EMITTED",
+  );
+  const dormantBase =
+    !base ||
+    base.status === "PENDING" ||
+    (base.status === "SKIPPED" &&
+      dormantIterationTemplatePhases.has(base.phase));
+  if (!dormantBase || !executions.length) return base ?? values.at(-1);
+  for (const status of iterationStatusPriority) {
+    const matching = executions.filter((attempt) => attempt.status === status);
+    if (matching.length) return matching.at(-1);
+  }
+  return executions.at(-1);
+}
+
 export function workflowFlowElements(
   definition: WorkflowDefinition,
   options: {
@@ -542,8 +589,7 @@ export function workflowFlowElements(
     })),
     ...definition.nodes.map((node) => {
       const values = iterations.get(node.id) ?? [];
-      const base =
-        values.find(({ iterationKey }) => !iterationKey) ?? values.at(-1);
+      const base = displayedAttempt(values);
       const retryCount = base ? Math.max(0, base.attempt) : 0;
       const iterationCount = values.filter(
         ({ iterationKey }) => iterationKey,
