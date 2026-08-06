@@ -711,6 +711,69 @@ describe("workflow catalog", () => {
     expect(handles("CONTROL_FOR_EACH")).toEqual(["body", "empty"]);
     expect(handles("CONTROL_TRY")).toEqual(["success", "catch"]);
     expect(handles("JIRA_LOAD_TICKET")).toEqual(["success", "failure"]);
+    expect(handles("SAVED_COMMAND")).toEqual(["success", "failure", "match"]);
+    expect(handles("CUSTOM_COMMAND")).toEqual(["success", "failure", "match"]);
+  });
+
+  test("validates command match configuration and isolated routing", () => {
+    const definition = emptyWorkflowDefinition("Command matching");
+    const command = node("command", "CUSTOM_COMMAND");
+    command.config = {
+      script: "serve",
+      completionMode: "FIRE_AND_FORGET",
+      outputPattern: "ready ([0-9]+)",
+    };
+    definition.nodes = [
+      command,
+      node("matched", "NOTIFICATION_SEND"),
+      node("finished", "CONTROL_JOIN"),
+    ];
+    definition.edges = [
+      {
+        id: "start",
+        source: "manual",
+        target: "command",
+        sourceHandle: "success",
+        targetHandle: "input",
+      },
+      {
+        id: "match",
+        source: "command",
+        target: "matched",
+        sourceHandle: "match",
+        targetHandle: "input",
+      },
+      {
+        id: "matched-finished",
+        source: "matched",
+        target: "finished",
+        sourceHandle: "success",
+        targetHandle: "input",
+      },
+      {
+        id: "success-finished",
+        source: "command",
+        target: "finished",
+        sourceHandle: "success",
+        targetHandle: "input",
+      },
+    ];
+
+    const diagnostics = validateWorkflowDefinition(definition).diagnostics;
+    expect(diagnostics).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ code: "COMMAND_MATCH_REQUIRES_WAIT" }),
+        expect.objectContaining({ code: "COMMAND_MATCH_BRANCH_RECONVERGES" }),
+      ]),
+    );
+
+    definition.nodes[0]!.config = {
+      script: "serve",
+      completionMode: "WAIT_FOR_EXIT",
+    };
+    expect(validateWorkflowDefinition(definition).diagnostics).toContainEqual(
+      expect.objectContaining({ code: "COMMAND_MATCH_PATTERN_REQUIRED" }),
+    );
   });
 
   test("choice triggers leave their handles to config", () => {

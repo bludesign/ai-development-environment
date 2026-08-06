@@ -4,10 +4,21 @@ import {
   workflowBasicHorizontalWheelDelta,
   workflowConstrainViewportAxis,
   workflowFlowElements,
+  workflowSourceHandles,
 } from "./workflow-graph";
 import { emptyDefinition, type WorkflowAttempt } from "./types";
 
 describe("workflow run graph projection", () => {
+  test("renders the command match connector", () => {
+    for (const kind of ["SAVED_COMMAND", "CUSTOM_COMMAND"]) {
+      expect(workflowSourceHandles(kind).map(({ id }) => id)).toEqual([
+        "success",
+        "failure",
+        "match",
+      ]);
+    }
+  });
+
   test("leaves vertical wheel gestures to the page in horizontal Basic mode", () => {
     expect(
       workflowBasicHorizontalWheelDelta(

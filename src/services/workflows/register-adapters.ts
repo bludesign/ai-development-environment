@@ -42,6 +42,11 @@ import type {
 import type { RunConfigurationInput } from "@/services/runs";
 import { pullRequestResourceId } from "@/lib/workflows/resources";
 import { getSessionValue, mergeSessionData } from "@/lib/workflows/session";
+import {
+  commandOutputMatchMode,
+  commandOutputPattern,
+} from "@/lib/workflows/command-output-match";
+import { compileCommandOutputPattern } from "@/lib/workflows/command-output-match.server";
 import { waitResumeAfter, waitTimeoutAt } from "@/lib/workflows/wait-timing";
 import type {
   WorkflowExecutionContext,
@@ -2770,6 +2775,22 @@ function registerMiscellaneousAdapters(
       context.node.config.completionMode === "FIRE_AND_FORGET"
         ? "FIRE_AND_FORGET"
         : "WAIT_FOR_EXIT";
+    const outputPattern = commandOutputPattern(context.node.config);
+    const outputMode = commandOutputMatchMode(context.node.config);
+    const previousMatches = Array.isArray(
+      getSessionValue(context.sessionData, `steps.${context.node.id}.matches`),
+    )
+      ? (getSessionValue(
+          context.sessionData,
+          `steps.${context.node.id}.matches`,
+        ) as unknown[])
+      : [];
+    if (outputPattern) {
+      compileCommandOutputPattern(outputPattern);
+      if (completionMode !== "WAIT_FOR_EXIT") {
+        throw new Error("Output matching requires Wait for exit completion");
+      }
+    }
     if (
       completionMode === "WAIT_FOR_EXIT" &&
       definition.restartPolicy === "ALWAYS"
@@ -2829,6 +2850,8 @@ function registerMiscellaneousAdapters(
           [context.node.id]: {
             commandRunId: run.id,
             displayNumber: run.displayNumber,
+            matches: previousMatches,
+            latestMatch: previousMatches.at(-1) ?? null,
           },
         },
       },
@@ -2845,6 +2868,21 @@ function registerMiscellaneousAdapters(
           ? {
               kind: "COMMAND_RUN",
               externalKey: run.id,
+              predicate: outputPattern
+                ? {
+                    outputMatch: {
+                      pattern: outputPattern,
+                      mode: outputMode,
+                      matchCount: previousMatches.length,
+                      matched:
+                        outputMode === "ONCE" && previousMatches.length > 0,
+                      scanAttempt: 1,
+                      scanCharacterOffset: 0,
+                      observedAttempt: 0,
+                      observedSequence: -1,
+                    },
+                  }
+                : undefined,
               resumeAfter: waitResumeAfter(context.node.config),
               timeoutAt: waitTimeoutAt(context.node.config),
             }
@@ -2861,6 +2899,22 @@ function registerMiscellaneousAdapters(
       context.node.config.completionMode === "FIRE_AND_FORGET"
         ? "FIRE_AND_FORGET"
         : "WAIT_FOR_EXIT";
+    const outputPattern = commandOutputPattern(context.node.config);
+    const outputMode = commandOutputMatchMode(context.node.config);
+    const previousMatches = Array.isArray(
+      getSessionValue(context.sessionData, `steps.${context.node.id}.matches`),
+    )
+      ? (getSessionValue(
+          context.sessionData,
+          `steps.${context.node.id}.matches`,
+        ) as unknown[])
+      : [];
+    if (outputPattern) {
+      compileCommandOutputPattern(outputPattern);
+      if (completionMode !== "WAIT_FOR_EXIT") {
+        throw new Error("Output matching requires Wait for exit completion");
+      }
+    }
     const targetMode = String(context.node.config.targetMode ?? "CONTEXT");
     let agentId: string | null = null;
     let worktreeId: string | null = null;
@@ -2905,6 +2959,8 @@ function registerMiscellaneousAdapters(
           [context.node.id]: {
             commandRunId: run.id,
             displayNumber: run.displayNumber,
+            matches: previousMatches,
+            latestMatch: previousMatches.at(-1) ?? null,
           },
         },
       },
@@ -2921,6 +2977,21 @@ function registerMiscellaneousAdapters(
           ? {
               kind: "COMMAND_RUN",
               externalKey: run.id,
+              predicate: outputPattern
+                ? {
+                    outputMatch: {
+                      pattern: outputPattern,
+                      mode: outputMode,
+                      matchCount: previousMatches.length,
+                      matched:
+                        outputMode === "ONCE" && previousMatches.length > 0,
+                      scanAttempt: 1,
+                      scanCharacterOffset: 0,
+                      observedAttempt: 0,
+                      observedSequence: -1,
+                    },
+                  }
+                : undefined,
               resumeAfter: waitResumeAfter(context.node.config),
               timeoutAt: waitTimeoutAt(context.node.config),
             }

@@ -1112,6 +1112,17 @@ const STEP_CONFIG_DESCRIPTORS: StepConfigDescriptors = {
       text("worktreeId", "Fixed worktree ID", {
         visibleWhen: { key: "targetMode", equals: "FIXED_WORKTREE" },
       }),
+      text("outputPattern", "Output match pattern (RE2)", {
+        placeholder: "ready on port ([0-9]+)",
+        help: "Optional case-sensitive regex. Requires Wait for exit and emits through the match connector while the command runs.",
+        valueModes: ["literal"],
+      }),
+      enumField(
+        "outputMatchMode",
+        "Output match behavior",
+        staticOptions(["ONCE", "EACH_MATCH"]),
+        { default: "ONCE" },
+      ),
     ],
   },
   CUSTOM_COMMAND: {
@@ -1133,6 +1144,17 @@ const STEP_CONFIG_DESCRIPTORS: StepConfigDescriptors = {
       text("worktreeId", "Fixed worktree ID", {
         visibleWhen: { key: "targetMode", equals: "FIXED_WORKTREE" },
       }),
+      text("outputPattern", "Output match pattern (RE2)", {
+        placeholder: "ready on port ([0-9]+)",
+        help: "Optional case-sensitive regex. Requires Wait for exit and emits through the match connector while the command runs.",
+        valueModes: ["literal"],
+      }),
+      enumField(
+        "outputMatchMode",
+        "Output match behavior",
+        staticOptions(["ONCE", "EACH_MATCH"]),
+        { default: "ONCE" },
+      ),
     ],
   },
   TERMINAL_RUN: {

@@ -11,6 +11,7 @@ import type {
   WorkflowStepAttempt,
   WorkflowTrigger,
   WorkflowVersion,
+  WorkflowWait,
 } from "@/generated/prisma/client";
 import { getPrismaClient } from "@/data/prisma-client";
 import {
@@ -31,6 +32,13 @@ import {
   type WorkflowDiagnostic,
   type WorkflowNodeDefinition,
 } from "@/lib/workflows/definition";
+import {
+  COMMAND_OUTPUT_MATCH_BUFFER_BYTES,
+  commandOutputMatchMode,
+  commandOutputPattern,
+  type CommandOutputMatchMode,
+} from "@/lib/workflows/command-output-match";
+import { compileCommandOutputPattern } from "@/lib/workflows/command-output-match.server";
 import {
   evaluateWorkflowCondition,
   getSessionValue,
@@ -59,6 +67,7 @@ import {
 import {
   agentOnlineWindowMs,
   agentEventBus,
+  COMMAND_RUN_OUTPUT_CHANGED_TOPIC,
   SIDEBAR_STATUS_CHANGED_TOPIC,
   type AgentControlService,
 } from "@/services/agent-control";
@@ -122,6 +131,86 @@ const EXCLUSIVE_WORKTREE_IDENTITY_MUTATION_STEPS = new Set([
   "WORKTREE_MOVE",
   "WORKTREE_MOVE_CONTROL",
 ]);
+
+type CommandMatchCursor = {
+  pattern: string;
+  mode: CommandOutputMatchMode;
+  matchCount: number;
+  matched: boolean;
+  scanAttempt: number;
+  scanCharacterOffset: number;
+  observedAttempt: number;
+  observedSequence: number;
+};
+
+type CommandMatchResult = {
+  ordinal: number;
+  text: string;
+  captures: Array<string | null>;
+  namedCaptures: Record<string, string | null>;
+  commandRunId: string;
+  commandAttempt: number;
+  start: { sequence: number; offset: number };
+  end: { sequence: number; offset: number };
+};
+
+type CommandOutputRow = {
+  sequence: number;
+  stream: string;
+  dataBase64: string;
+  byteLength: number;
+  attempt: { attempt: number; runId: string };
+};
+
+function recordValue(value: unknown): Record<string, unknown> {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : {};
+}
+
+function commandMatchCursor(
+  predicateJson: string | null,
+): CommandMatchCursor | null {
+  if (!predicateJson) return null;
+  const predicate = recordValue(json<unknown>(predicateJson));
+  const raw = recordValue(predicate.outputMatch);
+  if (typeof raw.pattern !== "string" || !raw.pattern) return null;
+  return {
+    pattern: raw.pattern,
+    mode: commandOutputMatchMode({ outputMatchMode: raw.mode }),
+    matchCount: Number.isInteger(raw.matchCount) ? Number(raw.matchCount) : 0,
+    matched: raw.matched === true,
+    scanAttempt:
+      Number.isInteger(raw.scanAttempt) && Number(raw.scanAttempt) > 0
+        ? Number(raw.scanAttempt)
+        : 1,
+    scanCharacterOffset:
+      Number.isInteger(raw.scanCharacterOffset) &&
+      Number(raw.scanCharacterOffset) >= 0
+        ? Number(raw.scanCharacterOffset)
+        : 0,
+    observedAttempt:
+      Number.isInteger(raw.observedAttempt) && Number(raw.observedAttempt) >= 0
+        ? Number(raw.observedAttempt)
+        : 0,
+    observedSequence: Number.isInteger(raw.observedSequence)
+      ? Number(raw.observedSequence)
+      : -1,
+  };
+}
+
+function commandMatchPredicate(
+  predicateJson: string | null,
+  cursor: CommandMatchCursor,
+): string {
+  const predicate = predicateJson
+    ? recordValue(json<unknown>(predicateJson))
+    : {};
+  return JSON.stringify({
+    ...predicate,
+    outputMatch: cursor,
+  });
+}
 
 function sessionWorktreeId(sessionData: SessionData): string | null {
   const value = getSessionValue(sessionData, "worktree.id");
@@ -512,6 +601,7 @@ function workflowTriggerDeliveryId(
 
 export class WorkflowsService {
   private runtimeTimer?: ReturnType<typeof setInterval>;
+  private commandOutputStream?: AsyncIterableIterator<unknown>;
   private ticking = false;
   private readonly workerId = randomUUID();
   private readonly activeExecutions = new Map<string, AbortController>();
@@ -944,6 +1034,7 @@ export class WorkflowsService {
 
   startRuntime(): void {
     if (this.runtimeTimer) return;
+    void this.consumeCommandOutputMatches();
     this.runtimeTimer = setInterval(() => {
       void this.tick().catch((error) => {
         console.error("Workflow runtime tick failed:", error);
@@ -958,6 +1049,8 @@ export class WorkflowsService {
   stopRuntime(): void {
     if (this.runtimeTimer) clearInterval(this.runtimeTimer);
     this.runtimeTimer = undefined;
+    void this.commandOutputStream?.return?.();
+    this.commandOutputStream = undefined;
     for (const controller of this.activeExecutions.values()) controller.abort();
     this.activeExecutions.clear();
   }
@@ -1143,6 +1236,30 @@ export class WorkflowsService {
     );
     const diagnostics = [...validation.diagnostics];
     if (validation.definition) {
+      for (const node of validation.definition.nodes) {
+        if (node.kind !== "SAVED_COMMAND" && node.kind !== "CUSTOM_COMMAND") {
+          continue;
+        }
+        const pattern = commandOutputPattern(node.config);
+        if (!pattern) continue;
+        try {
+          compileCommandOutputPattern(pattern);
+        } catch (error) {
+          if (
+            !diagnostics.some(
+              ({ code, nodeId }) =>
+                code === "COMMAND_MATCH_PATTERN_INVALID" && nodeId === node.id,
+            )
+          ) {
+            diagnostics.push({
+              severity: "ERROR",
+              code: "COMMAND_MATCH_PATTERN_INVALID",
+              message: error instanceof Error ? error.message : String(error),
+              nodeId: node.id,
+            });
+          }
+        }
+      }
       diagnostics.push(
         ...(await this.validateSubworkflows(
           workflow.id,
@@ -3455,6 +3572,412 @@ export class WorkflowsService {
     return this.run(result.runId);
   }
 
+  private async consumeCommandOutputMatches(): Promise<void> {
+    if (this.commandOutputStream || !this.commandsService) return;
+    const stream = agentEventBus.iterate<{
+      commandRunOutputAdded: { runId: string };
+    }>(COMMAND_RUN_OUTPUT_CHANGED_TOPIC);
+    this.commandOutputStream = stream;
+    try {
+      for await (const payload of stream) {
+        if (this.commandOutputStream !== stream) break;
+        await this.reconcileCommandOutputMatches(
+          payload.commandRunOutputAdded.runId,
+        ).catch((error) =>
+          console.error("Could not process workflow command output:", error),
+        );
+      }
+    } finally {
+      if (this.commandOutputStream === stream) {
+        this.commandOutputStream = undefined;
+      }
+      await stream.return?.();
+    }
+  }
+
+  private async commandOutputRows(
+    runId: string,
+    afterAttempt: number,
+    afterSequence: number,
+  ): Promise<CommandOutputRow[]> {
+    if (!this.commandsService) return [];
+    const result: CommandOutputRow[] = [];
+    let attempt = afterAttempt;
+    let sequence = afterSequence;
+    while (true) {
+      const page = (await this.commandsService.listOutput(
+        runId,
+        attempt,
+        sequence,
+        5_000,
+      )) as CommandOutputRow[];
+      result.push(...page);
+      if (page.length < 5_000) return result;
+      const last = page.at(-1)!;
+      attempt = last.attempt.attempt;
+      sequence = last.sequence;
+    }
+  }
+
+  private commandMatchBranchNodes(
+    definition: WorkflowDefinition,
+    sourceNodeId: string,
+  ): WorkflowNodeDefinition[] {
+    const outgoing = new Map<string, WorkflowDefinition["edges"]>();
+    for (const edge of definition.edges) {
+      outgoing.set(edge.source, [...(outgoing.get(edge.source) ?? []), edge]);
+    }
+    const pending = (outgoing.get(sourceNodeId) ?? [])
+      .filter(({ sourceHandle }) => sourceHandle === "match")
+      .map(({ target }) => target);
+    const ids = new Set<string>();
+    while (pending.length) {
+      const id = pending.shift()!;
+      if (ids.has(id)) continue;
+      ids.add(id);
+      pending.push(...(outgoing.get(id) ?? []).map(({ target }) => target));
+    }
+    return definition.nodes.filter(({ id }) => ids.has(id));
+  }
+
+  private async persistCommandMatches(
+    wait: WorkflowWait & {
+      attempt: WorkflowStepAttempt & {
+        run: WorkflowRun & { version: WorkflowVersion };
+      };
+    },
+    cursor: CommandMatchCursor,
+    matches: CommandMatchResult[],
+  ): Promise<boolean> {
+    const prisma = await getPrismaClient();
+    const nextPredicateJson = commandMatchPredicate(wait.predicateJson, cursor);
+    if (!matches.length) {
+      const updated = await prisma.workflowWait.updateMany({
+        where: {
+          id: wait.id,
+          status: "PENDING",
+          predicateJson: wait.predicateJson,
+        },
+        data: { predicateJson: nextPredicateJson },
+      });
+      return Boolean(updated.count);
+    }
+    const definition = parseWorkflowDefinition(
+      json(wait.attempt.run.version.definitionJson),
+    );
+    const sourceNode = definition.nodes.find(
+      ({ id }) => id === wait.attempt.nodeId,
+    );
+    if (!sourceNode) throw new Error("Workflow command step is missing");
+    const branchNodes = this.commandMatchBranchNodes(definition, sourceNode.id);
+    const persisted = await prisma.$transaction(async (transaction) => {
+      const claimed = await transaction.workflowWait.updateMany({
+        where: {
+          id: wait.id,
+          status: "PENDING",
+          predicateJson: wait.predicateJson,
+        },
+        data: { predicateJson: nextPredicateJson },
+      });
+      if (!claimed.count) return false;
+      const run = await transaction.workflowRun.findUnique({
+        where: { id: wait.runId },
+      });
+      if (!run || !SCHEDULING_RUN_STATUSES.has(run.status)) return false;
+      let sessionData = workflowSessionData(run.sessionDataJson ?? "{}");
+      const stepPath = `steps.${sourceNode.id}`;
+      const existingStep = recordValue(getSessionValue(sessionData, stepPath));
+      const previousMatches = Array.isArray(existingStep.matches)
+        ? existingStep.matches
+        : [];
+      const aggregate = [...previousMatches, ...matches];
+      sessionData = setSessionValue(sessionData, stepPath, {
+        ...existingStep,
+        matches: aggregate,
+        latestMatch: matches.at(-1)!,
+      });
+      assertExclusiveWorktreeUnchanged(run, sessionData);
+      const serialized = JSON.stringify(sessionData);
+      assertSize(serialized, "Workflow session data", MAX_SESSION_BYTES);
+
+      const attempts = branchNodes.length
+        ? matches.flatMap((match, matchIndex) => {
+            const iterationKey = `match.${wait.attempt.id}.${match.ordinal}`;
+            const iterationPatch = setSessionValue({}, stepPath, {
+              ...existingStep,
+              matches: [
+                ...previousMatches,
+                ...matches.slice(0, matchIndex + 1),
+              ],
+              latestMatch: match,
+            });
+            const common = {
+              runId: wait.runId,
+              generation: wait.attempt.generation,
+              iterationKey,
+              attempt: 0,
+            };
+            return [
+              {
+                id: randomUUID(),
+                ...common,
+                nodeId: sourceNode.id,
+                kind: sourceNode.kind,
+                status: "SUCCEEDED",
+                phase: "MATCH_EMITTED",
+                inputJson: JSON.stringify(iterationPatch),
+                outputJson: JSON.stringify({
+                  value: match,
+                  selectedHandles: ["match"],
+                  sessionPatch: iterationPatch,
+                }),
+                requiredPathsJson: JSON.stringify(
+                  nodeRequiredPaths(sourceNode),
+                ),
+                providedPathsJson: JSON.stringify(
+                  nodeProvidedPaths(sourceNode),
+                ),
+                idempotencyKey: `${wait.runId}:${sourceNode.id}:${wait.attempt.generation}:${iterationKey}:0`,
+                startedAt: new Date(),
+                finishedAt: new Date(),
+              },
+              ...branchNodes.map((node) => ({
+                id: randomUUID(),
+                ...common,
+                nodeId: node.id,
+                kind: node.kind,
+                status: "PENDING",
+                phase: "MATCH_PENDING",
+                inputJson: JSON.stringify(iterationPatch),
+                requiredPathsJson: JSON.stringify(nodeRequiredPaths(node)),
+                providedPathsJson: JSON.stringify(nodeProvidedPaths(node)),
+                idempotencyKey: `${wait.runId}:${node.id}:${wait.attempt.generation}:${iterationKey}:0`,
+              })),
+            ];
+          })
+        : [];
+      if (attempts.length) {
+        await transaction.workflowStepAttempt.createMany({ data: attempts });
+      }
+      await transaction.workflowRun.update({
+        where: { id: wait.runId },
+        data: {
+          sessionDataJson: serialized,
+          sessionRevision: { increment: 1 },
+        },
+      });
+      return true;
+    });
+    if (!persisted) return false;
+    for (const match of matches) {
+      await this.appendEvent(
+        wait.runId,
+        wait.attemptId,
+        "STEP_OUTPUT_MATCHED",
+        `Step ${sourceNode.name ?? sourceNode.id} matched command output`,
+        { nodeId: sourceNode.id, match },
+      );
+    }
+    publishRunChanged(wait.runId);
+    await this.progressRun(wait.runId);
+    await this.dispatchReadyAttempts();
+    return true;
+  }
+
+  private async failCommandMatchWait(
+    wait: WorkflowWait & {
+      attempt: WorkflowStepAttempt & {
+        run: WorkflowRun & { version: WorkflowVersion };
+      };
+    },
+    error: Error,
+  ): Promise<void> {
+    const prisma = await getPrismaClient();
+    const failed = await prisma.workflowWait.updateMany({
+      where: {
+        id: wait.id,
+        status: "PENDING",
+        predicateJson: wait.predicateJson,
+      },
+      data: { status: "FAILED", resolvedAt: new Date() },
+    });
+    if (!failed.count) return;
+    await this.commandsService?.terminateRun(wait.externalKey!);
+    const node = parseWorkflowDefinition(
+      json(wait.attempt.run.version.definitionJson),
+    ).nodes.find(({ id }) => id === wait.attempt.nodeId);
+    await this.failAttempt(wait.attempt, node ?? null, error);
+  }
+
+  private async processCommandMatchWait(
+    wait: WorkflowWait & {
+      attempt: WorkflowStepAttempt & {
+        run: WorkflowRun & { version: WorkflowVersion };
+      };
+    },
+  ): Promise<void> {
+    if (!wait.externalKey || !this.commandsService) return;
+    const cursor = commandMatchCursor(wait.predicateJson);
+    if (!cursor) return;
+    try {
+      const newRows = await this.commandOutputRows(
+        wait.externalKey,
+        cursor.observedAttempt,
+        cursor.observedSequence,
+      );
+      if (!newRows.length) return;
+      const observed = newRows.at(-1)!;
+      cursor.observedAttempt = observed.attempt.attempt;
+      cursor.observedSequence = observed.sequence;
+      if (cursor.mode === "ONCE" && cursor.matched) {
+        await this.persistCommandMatches(wait, cursor, []);
+        return;
+      }
+
+      const rows = await this.commandOutputRows(
+        wait.externalKey,
+        cursor.scanAttempt - 1,
+        -1,
+      );
+      const grouped = new Map<number, CommandOutputRow[]>();
+      for (const row of rows) {
+        const attempt = row.attempt.attempt;
+        if (attempt < cursor.scanAttempt) continue;
+        grouped.set(attempt, [...(grouped.get(attempt) ?? []), row]);
+      }
+      const attemptNumbers = [...grouped.keys()].sort(
+        (left, right) => left - right,
+      );
+      const matches: CommandMatchResult[] = [];
+      const regex = compileCommandOutputPattern(cursor.pattern, true);
+      for (
+        let groupIndex = 0;
+        groupIndex < attemptNumbers.length;
+        groupIndex += 1
+      ) {
+        const attemptNumber = attemptNumbers[groupIndex]!;
+        const chunks = grouped.get(attemptNumber)!;
+        let output = "";
+        const decoders = new Map<string, TextDecoder>();
+        const segments: Array<{
+          sequence: number;
+          start: number;
+          end: number;
+        }> = [];
+        for (const chunk of chunks) {
+          if (chunk.stream !== "STDOUT" && chunk.stream !== "STDERR") continue;
+          const decoder =
+            decoders.get(chunk.stream) ??
+            new TextDecoder("utf-8", { fatal: false });
+          decoders.set(chunk.stream, decoder);
+          const decoded = decoder.decode(
+            Buffer.from(chunk.dataBase64, "base64"),
+            { stream: true },
+          );
+          const start = output.length;
+          output += decoded;
+          segments.push({
+            sequence: chunk.sequence,
+            start,
+            end: output.length,
+          });
+        }
+        const offset =
+          attemptNumber === cursor.scanAttempt
+            ? Math.min(cursor.scanCharacterOffset, output.length)
+            : 0;
+        const unmatched = output.slice(offset);
+        if (
+          Buffer.byteLength(unmatched, "utf8") >
+          COMMAND_OUTPUT_MATCH_BUFFER_BYTES
+        ) {
+          throw new Error(
+            "Command output matcher exceeded its 16 MiB unmatched-output limit",
+          );
+        }
+        regex.lastIndex = offset;
+        let match: ReturnType<typeof regex.exec>;
+        while ((match = regex.exec(output))) {
+          const matchedText = match[0]!;
+          const startOffset = match.index;
+          const endOffset = startOffset + matchedText.length;
+          const coordinate = (characterOffset: number, end: boolean) => {
+            const segment =
+              segments.find(({ start, end: segmentEnd }) =>
+                end
+                  ? characterOffset > start && characterOffset <= segmentEnd
+                  : characterOffset >= start && characterOffset < segmentEnd,
+              ) ?? segments.at(-1)!;
+            return {
+              sequence: segment.sequence,
+              offset: Math.max(0, characterOffset - segment.start),
+            };
+          };
+          cursor.matchCount += 1;
+          const result: CommandMatchResult = {
+            ordinal: cursor.matchCount,
+            text: matchedText,
+            captures: match.slice(1).map((value) => value ?? null),
+            namedCaptures: Object.fromEntries(
+              Object.entries(match.groups ?? {}).map(([name, value]) => [
+                name,
+                value ?? null,
+              ]),
+            ),
+            commandRunId: wait.externalKey,
+            commandAttempt: attemptNumber,
+            start: coordinate(startOffset, false),
+            end: coordinate(endOffset, true),
+          };
+          matches.push(result);
+          cursor.scanAttempt = attemptNumber;
+          cursor.scanCharacterOffset = endOffset;
+          if (cursor.mode === "ONCE") {
+            cursor.matched = true;
+            break;
+          }
+        }
+        if (cursor.matched) break;
+        const nextAttempt = attemptNumbers[groupIndex + 1];
+        if (nextAttempt !== undefined) {
+          cursor.scanAttempt = nextAttempt;
+          cursor.scanCharacterOffset = 0;
+        } else if (attemptNumber > cursor.scanAttempt) {
+          cursor.scanAttempt = attemptNumber;
+          cursor.scanCharacterOffset = 0;
+        }
+      }
+      await this.persistCommandMatches(wait, cursor, matches);
+    } catch (error) {
+      await this.failCommandMatchWait(
+        wait,
+        error instanceof Error ? error : new Error(String(error)),
+      );
+    }
+  }
+
+  private async reconcileCommandOutputMatches(
+    commandRunId?: string,
+  ): Promise<void> {
+    if (!this.commandsService) return;
+    const prisma = await getPrismaClient();
+    const waits = await prisma.workflowWait.findMany({
+      where: {
+        kind: "COMMAND_RUN",
+        status: "PENDING",
+        predicateJson: { not: null },
+        ...(commandRunId ? { externalKey: commandRunId } : {}),
+        run: { status: { in: [...SCHEDULING_RUN_STATUSES] } },
+      },
+      include: {
+        attempt: { include: { run: { include: { version: true } } } },
+      },
+      orderBy: { createdAt: "asc" },
+      take: 100,
+    });
+    for (const wait of waits) await this.processCommandMatchWait(wait);
+  }
+
   private async tick(): Promise<void> {
     if (this.ticking) return;
     this.ticking = true;
@@ -3463,6 +3986,7 @@ export class WorkflowsService {
       await this.processSchedules();
       await this.processTriggerEvents();
       await this.events.maintain();
+      await this.reconcileCommandOutputMatches();
       await this.resolveDueWaits();
       await this.startQueuedRuns();
       const prisma = await getPrismaClient();
@@ -4890,9 +5414,18 @@ export class WorkflowsService {
     const parked = await prisma.$transaction(async (transaction) => {
       const run = await transaction.workflowRun.findUnique({
         where: { id: attempt.runId },
-        select: { status: true },
       });
       if (!run || TERMINAL_RUN_STATUSES.has(run.status)) return false;
+      let sessionData = workflowSessionData(run.sessionDataJson ?? "{}");
+      const applySessionPatchEarly =
+        !attempt.iterationKey &&
+        (node.kind === "SAVED_COMMAND" || node.kind === "CUSTOM_COMMAND");
+      if (applySessionPatchEarly && result.sessionPatch) {
+        sessionData = mergeSessionData(sessionData, result.sessionPatch);
+      }
+      assertExclusiveWorktreeUnchanged(run, sessionData);
+      const serializedSession = JSON.stringify(sessionData);
+      assertSize(serializedSession, "Workflow session data", MAX_SESSION_BYTES);
       const claimed = await transaction.workflowStepAttempt.updateMany({
         where: { id: attempt.id, status: "RUNNING" },
         data: {
@@ -4901,7 +5434,9 @@ export class WorkflowsService {
           outputJson: JSON.stringify({
             value: result.output,
             selectedHandles: result.selectedHandles,
-            sessionPatch: result.sessionPatch,
+            sessionPatch: applySessionPatchEarly
+              ? undefined
+              : result.sessionPatch,
           }),
           claimOwner: null,
           claimExpiresAt: null,
@@ -4939,7 +5474,12 @@ export class WorkflowsService {
           id: attempt.runId,
           status: { in: [...SCHEDULING_RUN_STATUSES] },
         },
-        data: { status: "WAITING", phase: wait.kind },
+        data: {
+          status: "WAITING",
+          phase: wait.kind,
+          sessionDataJson: serializedSession,
+          sessionRevision: { increment: 1 },
+        },
       });
       await transaction.workflowResourceLease.deleteMany({
         where: { attemptId: attempt.id },
@@ -4992,7 +5532,12 @@ export class WorkflowsService {
         if (result.sessionPatch) {
           sessionData = mergeSessionData(sessionData, result.sessionPatch);
         }
-        sessionData = setSessionValue(sessionData, `steps.${node.id}`, {
+        const stepPath = `steps.${node.id}`;
+        const existingStep = recordValue(
+          getSessionValue(sessionData, stepPath),
+        );
+        sessionData = setSessionValue(sessionData, stepPath, {
+          ...existingStep,
           status: "SUCCEEDED",
           output: result.output ?? null,
           snapshotId:
@@ -5082,6 +5627,7 @@ export class WorkflowsService {
     attempt: WorkflowStepAttempt,
     node: WorkflowNodeDefinition | null,
     error: Error,
+    result: WorkflowExecutionResult = {},
   ): Promise<void> {
     const prisma = await getPrismaClient();
     const definitionNode =
@@ -5117,11 +5663,23 @@ export class WorkflowsService {
       if (!run || TERMINAL_RUN_STATUSES.has(run.status)) return false;
       let sessionData = workflowSessionData(run.sessionDataJson);
       if (!attempt.iterationKey) {
-        sessionData = setSessionValue(sessionData, `steps.${attempt.nodeId}`, {
+        if (result.sessionPatch) {
+          sessionData = mergeSessionData(sessionData, result.sessionPatch);
+        }
+        const stepPath = `steps.${attempt.nodeId}`;
+        const existingStep = recordValue(
+          getSessionValue(sessionData, stepPath),
+        );
+        sessionData = setSessionValue(sessionData, stepPath, {
+          ...existingStep,
           status: "FAILED",
           error: error.message,
+          ...(result.output !== undefined ? { output: result.output } : {}),
         });
       }
+      assertExclusiveWorktreeUnchanged(run, sessionData);
+      const serializedSession = JSON.stringify(sessionData);
+      assertSize(serializedSession, "Workflow session data", MAX_SESSION_BYTES);
       const claimed = await transaction.workflowStepAttempt.updateMany({
         where: {
           id: attempt.id,
@@ -5151,7 +5709,7 @@ export class WorkflowsService {
       await transaction.workflowRun.update({
         where: { id: attempt.runId },
         data: {
-          sessionDataJson: JSON.stringify(sessionData),
+          sessionDataJson: serializedSession,
           sessionRevision: { increment: 1 },
         },
       });
@@ -5314,6 +5872,13 @@ export class WorkflowsService {
         }
       } else if (wait.externalKey && this.waitPollers.has(wait.kind)) {
         const polled = await this.waitPollers.get(wait.kind)!(wait.externalKey);
+        if (wait.kind === "COMMAND_RUN" && !polled.pending) {
+          // Command completion is reported only after output upload, but that
+          // upload and this poll can still interleave. Scan once more before
+          // resolving the wait so the terminal edge never outruns its final
+          // match emission.
+          await this.reconcileCommandOutputMatches(wait.externalKey);
+        }
         if (polled.pending) {
           // The poller proposes a cadence for its resource; an author who set
           // one on the step overrides it.
@@ -5339,10 +5904,28 @@ export class WorkflowsService {
             const node = parseWorkflowDefinition(
               json(wait.attempt.run.version.definitionJson),
             ).nodes.find(({ id }) => id === wait.attempt.nodeId);
+            const pending = this.attemptOutput(wait.attempt) as {
+              value?: unknown;
+              sessionPatch?: SessionData;
+            };
+            const output = recordValue(polled.result);
+            const finalPatch =
+              output.sessionPatch &&
+              typeof output.sessionPatch === "object" &&
+              !Array.isArray(output.sessionPatch)
+                ? mergeSessionData(
+                    pending.sessionPatch ?? {},
+                    output.sessionPatch as SessionData,
+                  )
+                : pending.sessionPatch;
             await this.failAttempt(
               wait.attempt,
               node ?? null,
               new Error(polled.error),
+              {
+                output: polled.result ?? pending.value,
+                sessionPatch: finalPatch,
+              },
             );
           } else {
             await this.completeWaitingAttempt(

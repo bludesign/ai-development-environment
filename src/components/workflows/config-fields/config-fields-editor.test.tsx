@@ -186,4 +186,18 @@ describe("interactive step configuration", () => {
       screen.getByRole("textbox", { name: "Fixed worktree ID" }),
     ).toBeTruthy();
   });
+
+  test("edits custom-command output matching settings", () => {
+    render(<Harness config={{}} kind="CUSTOM_COMMAND" />);
+
+    fireEvent.change(
+      screen.getByRole("textbox", { name: "Output match pattern (RE2)" }),
+      { target: { value: "ready ([0-9]+)" } },
+    );
+
+    expect(config().outputPattern).toBe("ready ([0-9]+)");
+    expect(
+      screen.getByRole("combobox", { name: "Output match behavior" }),
+    ).toBeTruthy();
+  });
 });

@@ -886,6 +886,54 @@ describe("workflow sub-workflow validation", () => {
       }),
     );
   });
+
+  test("rejects JavaScript regex features that RE2 cannot execute", async () => {
+    const draft = emptyWorkflowDefinition("Command matcher");
+    draft.nodes = [
+      {
+        id: "command",
+        kind: "CUSTOM_COMMAND",
+        position: { x: 200, y: 100 },
+        config: {
+          script: "serve",
+          completionMode: "WAIT_FOR_EXIT",
+          outputPattern: "(?=ready)",
+        },
+        requiredPaths: [],
+        providedPaths: [],
+        retry: { maxAttempts: 1, strategy: "EXPONENTIAL", delaySeconds: 5 },
+        failurePolicy: "FAIL",
+      },
+    ];
+    draft.edges = [
+      {
+        id: "start-command",
+        source: "manual",
+        target: "command",
+        sourceHandle: "success",
+        targetHandle: "input",
+      },
+    ];
+    prisma.workflow.findUnique.mockResolvedValue({
+      id: "workflow-a",
+      draftDefinitionJson: JSON.stringify(draft),
+      activeVersion: null,
+      versions: [],
+      _count: { runs: 0 },
+    });
+
+    const result = await new WorkflowsService(
+      new WorkflowEventsService(),
+    ).validateDraft("workflow-a");
+
+    expect(result.valid).toBe(false);
+    expect(result.diagnostics).toContainEqual(
+      expect.objectContaining({
+        code: "COMMAND_MATCH_PATTERN_INVALID",
+        nodeId: "command",
+      }),
+    );
+  });
 });
 
 describe("workflow trigger event processing", () => {
@@ -1232,6 +1280,54 @@ describe("workflow runtime lifecycle guards", () => {
       externalKey: "job-1",
       timeoutAt: timeoutAt.toISOString(),
     });
+  });
+
+  test("publishes command identity and empty match data while the command is running", async () => {
+    prisma.workflowRun.findUnique.mockResolvedValue({
+      id: "run-1",
+      status: "RUNNING",
+      sessionDataJson: "{}",
+      exclusiveWorktree: false,
+      worktreeId: null,
+    });
+    const service = new WorkflowsService(new WorkflowEventsService());
+
+    await internals(service).parkAttempt(
+      {
+        id: "attempt-1",
+        runId: "run-1",
+        iterationKey: "",
+      },
+      { id: "command", name: "Serve", kind: "CUSTOM_COMMAND" },
+      {
+        sessionPatch: {
+          steps: {
+            command: {
+              commandRunId: "command-run-1",
+              matches: [],
+              latestMatch: null,
+            },
+          },
+        },
+        wait: { kind: "COMMAND_RUN", externalKey: "command-run-1" },
+      },
+    );
+
+    const runUpdate = prisma.workflowRun.updateMany.mock.calls[0]?.[0];
+    expect(JSON.parse(runUpdate.data.sessionDataJson)).toMatchObject({
+      steps: {
+        command: {
+          commandRunId: "command-run-1",
+          matches: [],
+          latestMatch: null,
+        },
+      },
+    });
+    const attemptUpdate =
+      prisma.workflowStepAttempt.updateMany.mock.calls[0]?.[0];
+    expect(
+      JSON.parse(attemptUpdate.data.outputJson).sessionPatch,
+    ).toBeUndefined();
   });
 
   test("reports how long a wait lasted and what freed it", async () => {
@@ -1754,6 +1850,443 @@ describe("workflow runtime lifecycle guards", () => {
         }),
       }),
     );
+  });
+});
+
+describe("workflow command output matching", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    prisma.$transaction.mockImplementation(
+      async (
+        operation: unknown[] | ((transaction: typeof prisma) => unknown),
+      ) =>
+        typeof operation === "function"
+          ? operation(prisma)
+          : Promise.all(operation),
+    );
+    prisma.workflowWait.updateMany.mockResolvedValue({ count: 1 });
+    prisma.workflowStepAttempt.createMany.mockResolvedValue({ count: 0 });
+    prisma.workflowRun.update.mockResolvedValue({});
+    prisma.workflowRunEvent.findFirst.mockResolvedValue(null);
+    prisma.workflowRunEvent.create.mockResolvedValue({ id: "event-1" });
+  });
+
+  function commandDefinition() {
+    const definition = emptyWorkflowDefinition("Command matcher");
+    definition.nodes = [
+      {
+        id: "command",
+        kind: "CUSTOM_COMMAND",
+        position: { x: 100, y: 100 },
+        config: {
+          script: "serve",
+          completionMode: "WAIT_FOR_EXIT",
+          outputPattern: "ready",
+        },
+        requiredPaths: [],
+        providedPaths: [],
+        retry: { maxAttempts: 1, strategy: "EXPONENTIAL", delaySeconds: 5 },
+        failurePolicy: "FAIL",
+      },
+      {
+        id: "matched",
+        kind: "NOTIFICATION_SEND",
+        position: { x: 300, y: 0 },
+        config: {},
+        requiredPaths: [],
+        providedPaths: [],
+        retry: { maxAttempts: 1, strategy: "EXPONENTIAL", delaySeconds: 5 },
+        failurePolicy: "FAIL",
+      },
+    ];
+    definition.edges = [
+      {
+        id: "start",
+        source: "manual",
+        target: "command",
+        sourceHandle: "success",
+        targetHandle: "input",
+      },
+      {
+        id: "matched",
+        source: "command",
+        target: "matched",
+        sourceHandle: "match",
+        targetHandle: "input",
+      },
+    ];
+    return definition;
+  }
+
+  function matcherWait(
+    pattern: string,
+    mode: "ONCE" | "EACH_MATCH" = "EACH_MATCH",
+  ) {
+    return {
+      id: "wait-1",
+      runId: "workflow-run-1",
+      attemptId: "workflow-attempt-1",
+      kind: "COMMAND_RUN",
+      status: "PENDING",
+      predicateJson: JSON.stringify({
+        outputMatch: {
+          pattern,
+          mode,
+          matchCount: 0,
+          matched: false,
+          scanAttempt: 1,
+          scanCharacterOffset: 0,
+          observedAttempt: 0,
+          observedSequence: -1,
+        },
+      }),
+      externalKey: "command-run-1",
+      attempt: {
+        id: "workflow-attempt-1",
+        runId: "workflow-run-1",
+        nodeId: "command",
+        kind: "CUSTOM_COMMAND",
+        generation: 0,
+        iterationKey: "",
+        attempt: 0,
+        status: "WAITING",
+        outputJson: null,
+        run: {
+          id: "workflow-run-1",
+          status: "WAITING",
+          version: { definitionJson: JSON.stringify(commandDefinition()) },
+        },
+      },
+    };
+  }
+
+  function outputService(
+    rows: Array<{
+      attempt: number;
+      sequence: number;
+      stream: "STDOUT" | "STDERR" | "SYSTEM";
+      bytes: Buffer;
+    }>,
+  ) {
+    const normalized = rows.map((row) => ({
+      sequence: row.sequence,
+      stream: row.stream,
+      dataBase64: row.bytes.toString("base64"),
+      byteLength: row.bytes.length,
+      attempt: { attempt: row.attempt, runId: "command-run-1" },
+    }));
+    const listOutput = vi.fn(
+      async (
+        _runId: string,
+        afterAttempt: number,
+        afterSequence: number,
+        first: number,
+      ) =>
+        normalized
+          .filter(
+            (row) =>
+              row.attempt.attempt > afterAttempt ||
+              (row.attempt.attempt === afterAttempt &&
+                row.sequence > afterSequence),
+          )
+          .slice(0, first),
+    );
+    const commands = { listOutput, terminateRun: vi.fn() };
+    const service = new WorkflowsService(
+      new WorkflowEventsService(),
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      commands as never,
+    );
+    return { service, commands };
+  }
+
+  function matcherInternals(service: WorkflowsService) {
+    return service as unknown as {
+      processCommandMatchWait(wait: unknown): Promise<void>;
+      persistCommandMatches(
+        wait: unknown,
+        cursor: unknown,
+        matches: unknown[],
+      ): Promise<boolean>;
+      progressRun(runId: string): Promise<void>;
+      dispatchReadyAttempts(): Promise<void>;
+      failCommandMatchWait(wait: unknown, error: Error): Promise<void>;
+      failAttempt(
+        attempt: unknown,
+        node: unknown,
+        error: Error,
+        result?: unknown,
+      ): Promise<void>;
+    };
+  }
+
+  test("matches across split UTF-8 output chunks with captures", async () => {
+    const bytes = Buffer.from("ready π=42", "utf8");
+    const { service } = outputService([
+      {
+        attempt: 1,
+        sequence: 0,
+        stream: "STDOUT",
+        bytes: bytes.subarray(0, 7),
+      },
+      {
+        attempt: 1,
+        sequence: 1,
+        stream: "STDOUT",
+        bytes: bytes.subarray(7),
+      },
+    ]);
+    const internals = matcherInternals(service);
+    const persist = vi.fn().mockResolvedValue(true);
+    internals.persistCommandMatches = persist;
+
+    await internals.processCommandMatchWait(
+      matcherWait("ready π=(?<answer>[0-9]+)"),
+    );
+
+    expect(persist).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ matchCount: 1, scanCharacterOffset: 10 }),
+      [
+        expect.objectContaining({
+          text: "ready π=42",
+          captures: ["42"],
+          namedCaptures: { answer: "42" },
+          commandAttempt: 1,
+          start: { sequence: 0, offset: 0 },
+          end: { sequence: 1, offset: 4 },
+        }),
+      ],
+    );
+  });
+
+  test("emits every combined stdout and stderr occurrence", async () => {
+    const { service } = outputService([
+      {
+        attempt: 1,
+        sequence: 0,
+        stream: "STDOUT",
+        bytes: Buffer.from("ready "),
+      },
+      {
+        attempt: 1,
+        sequence: 1,
+        stream: "STDERR",
+        bytes: Buffer.from("12\nready "),
+      },
+      {
+        attempt: 1,
+        sequence: 2,
+        stream: "STDOUT",
+        bytes: Buffer.from("34"),
+      },
+      {
+        attempt: 1,
+        sequence: 3,
+        stream: "SYSTEM",
+        bytes: Buffer.from("ready 99"),
+      },
+    ]);
+    const internals = matcherInternals(service);
+    const persist = vi.fn().mockResolvedValue(true);
+    internals.persistCommandMatches = persist;
+
+    await internals.processCommandMatchWait(matcherWait("ready ([0-9]+)"));
+
+    const matches = persist.mock.calls[0]?.[2];
+    expect(matches).toEqual([
+      expect.objectContaining({ text: "ready 12", captures: ["12"] }),
+      expect.objectContaining({ text: "ready 34", captures: ["34"] }),
+    ]);
+  });
+
+  test("never carries an unfinished match into a restarted process", async () => {
+    const { service } = outputService([
+      {
+        attempt: 1,
+        sequence: 0,
+        stream: "STDOUT",
+        bytes: Buffer.from("foo"),
+      },
+      {
+        attempt: 2,
+        sequence: 0,
+        stream: "STDOUT",
+        bytes: Buffer.from("bar"),
+      },
+    ]);
+    const internals = matcherInternals(service);
+    const persist = vi.fn().mockResolvedValue(true);
+    internals.persistCommandMatches = persist;
+
+    await internals.processCommandMatchWait(matcherWait("foobar"));
+
+    expect(persist.mock.calls[0]?.[2]).toEqual([]);
+    expect(persist.mock.calls[0]?.[1]).toEqual(
+      expect.objectContaining({ scanAttempt: 2, scanCharacterOffset: 0 }),
+    );
+  });
+
+  test("fails clearly after 16 MiB of unmatched output", async () => {
+    const { service } = outputService([
+      {
+        attempt: 1,
+        sequence: 0,
+        stream: "STDOUT",
+        bytes: Buffer.alloc(16 * 1024 * 1024 + 1, 97),
+      },
+    ]);
+    const internals = matcherInternals(service);
+    const fail = vi.fn().mockResolvedValue(undefined);
+    internals.failCommandMatchWait = fail;
+
+    await internals.processCommandMatchWait(matcherWait("never-matches"));
+
+    expect(fail).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ message: expect.stringContaining("16 MiB") }),
+    );
+  });
+
+  test("atomically appends session matches and creates isolated branch attempts", async () => {
+    const { service } = outputService([]);
+    const internals = matcherInternals(service);
+    internals.progressRun = vi.fn().mockResolvedValue(undefined);
+    internals.dispatchReadyAttempts = vi.fn().mockResolvedValue(undefined);
+    prisma.workflowRun.findUnique.mockResolvedValue({
+      id: "workflow-run-1",
+      status: "WAITING",
+      exclusiveWorktree: false,
+      worktreeId: null,
+      sessionDataJson: JSON.stringify({
+        steps: {
+          command: {
+            commandRunId: "command-run-1",
+            matches: [],
+            latestMatch: null,
+          },
+        },
+      }),
+    });
+    const first = {
+      ordinal: 1,
+      text: "ready 12",
+      captures: ["12"],
+      namedCaptures: {},
+      commandRunId: "command-run-1",
+      commandAttempt: 1,
+      start: { sequence: 0, offset: 0 },
+      end: { sequence: 0, offset: 8 },
+    };
+    const second = { ...first, ordinal: 2, text: "ready 34" };
+    const wait = matcherWait("ready ([0-9]+)");
+    const cursor = JSON.parse(wait.predicateJson).outputMatch;
+    cursor.matchCount = 2;
+
+    await internals.persistCommandMatches(wait, cursor, [first, second]);
+
+    const created = prisma.workflowStepAttempt.createMany.mock.calls[0]?.[0]
+      .data as Array<Record<string, unknown>>;
+    expect(created).toHaveLength(4);
+    expect(
+      created.filter(({ phase }) => phase === "MATCH_EMITTED"),
+    ).toHaveLength(2);
+    expect(
+      created.filter(({ phase }) => phase === "MATCH_PENDING"),
+    ).toHaveLength(2);
+    expect(
+      JSON.parse(
+        String(
+          created.find(({ phase }) => phase === "MATCH_EMITTED")?.outputJson,
+        ),
+      ).selectedHandles,
+    ).toEqual(["match"]);
+    const session = JSON.parse(
+      prisma.workflowRun.update.mock.calls[0]?.[0].data.sessionDataJson,
+    );
+    expect(session.steps.command.matches).toEqual([first, second]);
+    expect(session.steps.command.latestMatch).toEqual(second);
+  });
+
+  test("does not duplicate a match when another reconciler advanced the cursor", async () => {
+    const { service } = outputService([]);
+    const internals = matcherInternals(service);
+    prisma.workflowWait.updateMany.mockResolvedValueOnce({ count: 0 });
+    const wait = matcherWait("ready");
+    const match = {
+      ordinal: 1,
+      text: "ready",
+      captures: [],
+      namedCaptures: {},
+      commandRunId: "command-run-1",
+      commandAttempt: 1,
+      start: { sequence: 0, offset: 0 },
+      end: { sequence: 0, offset: 5 },
+    };
+
+    const persisted = await internals.persistCommandMatches(
+      wait,
+      JSON.parse(wait.predicateJson).outputMatch,
+      [match],
+    );
+
+    expect(persisted).toBe(false);
+    expect(prisma.workflowStepAttempt.createMany).not.toHaveBeenCalled();
+    expect(prisma.workflowRun.update).not.toHaveBeenCalled();
+  });
+
+  test("preserves match data and final command data on failure", async () => {
+    const { service } = outputService([]);
+    const internals = matcherInternals(service);
+    const definition = commandDefinition();
+    const node = definition.nodes[0]!;
+    const existingMatch = { ordinal: 1, text: "ready" };
+    prisma.workflowRun.findUnique.mockResolvedValue({
+      id: "workflow-run-1",
+      status: "WAITING",
+      exclusiveWorktree: false,
+      worktreeId: null,
+      sessionDataJson: JSON.stringify({
+        steps: {
+          command: { matches: [existingMatch], latestMatch: existingMatch },
+        },
+      }),
+    });
+    prisma.workflowStepAttempt.updateMany.mockResolvedValue({ count: 1 });
+    prisma.workflowResourceLease.deleteMany.mockResolvedValue({ count: 0 });
+    const attempt = {
+      id: "workflow-attempt-1",
+      runId: "workflow-run-1",
+      nodeId: "command",
+      iterationKey: "",
+      attempt: 0,
+    };
+
+    await internals.failAttempt(attempt, node, new Error("exit 1"), {
+      output: { status: "FAILED", exitCode: 1 },
+      sessionPatch: { command: { id: "command-run-1", status: "FAILED" } },
+    });
+
+    const session = JSON.parse(
+      prisma.workflowRun.update.mock.calls[0]?.[0].data.sessionDataJson,
+    );
+    expect(session.steps.command).toMatchObject({
+      matches: [existingMatch],
+      latestMatch: existingMatch,
+      status: "FAILED",
+      error: "exit 1",
+      output: { status: "FAILED", exitCode: 1 },
+    });
+    expect(session.command).toEqual({
+      id: "command-run-1",
+      status: "FAILED",
+    });
   });
 });
 

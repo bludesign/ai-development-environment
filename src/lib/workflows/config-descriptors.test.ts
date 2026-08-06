@@ -81,6 +81,22 @@ describe("workflow config descriptors", () => {
     });
   });
 
+  test("offers literal RE2 output matching on both command steps", () => {
+    for (const kind of ["SAVED_COMMAND", "CUSTOM_COMMAND"]) {
+      const fields = getConfigDescriptor(kind, "step")?.fields;
+      expect(fields?.find(({ key }) => key === "outputPattern")).toMatchObject({
+        control: "text",
+        valueModes: ["literal"],
+      });
+      expect(
+        fields?.find(({ key }) => key === "outputMatchMode"),
+      ).toMatchObject({
+        control: "enum",
+        default: "ONCE",
+      });
+    }
+  });
+
   test("uses kind-specific worktree concurrency defaults for AI runs", () => {
     const concurrency = (kind: string) =>
       getConfigDescriptor(kind, "step")?.fields.find(
