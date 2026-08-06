@@ -49,6 +49,15 @@ export async function authenticated<T>(
         { status: 400 },
       );
     }
-    throw error;
+    console.error("Auth management request failed:", error);
+    return Response.json(
+      {
+        error: {
+          code: "INTERNAL_SERVER_ERROR",
+          message: "The request could not be completed.",
+        },
+      },
+      { status: 500 },
+    );
   }
 }

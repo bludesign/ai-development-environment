@@ -149,6 +149,9 @@ function createAuth(
     plugins: [
       managementAdminPlugin(),
       apiKey({
+        // Better Auth's logical table name is `apikey`; Prisma exposes this
+        // schema model as `apiKey`, regardless of its database-level @@map.
+        schema: { apikey: { modelName: "ApiKey" } },
         defaultPrefix: "aide_",
         requireName: true,
         startingCharactersConfig: {
