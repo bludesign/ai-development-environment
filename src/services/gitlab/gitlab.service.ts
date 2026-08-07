@@ -7,6 +7,7 @@ import {
   randomUUID,
   timingSafeEqual,
 } from "node:crypto";
+import { normalizeGitOrigin } from "@ai-development-environment/agent-contract/codebases";
 
 import { getPrismaClient } from "@/data/prisma-client";
 import {
@@ -35,6 +36,7 @@ import type {
   GitLabMergeRequestScope,
   GitLabMergeRequestState,
   GitLabMergeRequestView,
+  GitLabPipelineMergeRequestView,
   GitLabPipelineStatus,
   GitLabPipelineView,
   GitLabProjectCandidateView,
@@ -110,6 +112,7 @@ type RawGitLabPipeline = {
   source: string;
   status: string;
   web_url: string;
+  started_at?: string | null;
   created_at?: string | null;
   updated_at?: string | null;
   finished_at?: string | null;
@@ -171,7 +174,7 @@ type RawGitLabDiscussion = {
     updated_at: string;
     system: boolean;
     resolvable: boolean;
-    resolved: boolean;
+    resolved?: boolean | null;
     resolved_by?: RawGitLabUser | null;
   }>;
 };
@@ -274,16 +277,42 @@ function mapPipeline(pipeline: RawGitLabPipeline): GitLabPipelineView {
     projectId: String(pipeline.project_id),
     iid: pipeline.iid == null ? null : String(pipeline.iid),
     ref: pipeline.ref,
+    branch: pipeline.ref,
     sha: pipeline.sha,
     source: pipeline.source,
     status: mapGitLabPipelineStatus(pipeline.status),
     webUrl: pipeline.web_url,
+    mergeRequests: [],
+    worktreeId: null,
+    worktreeHighlightColor: null,
+    startedAt: pipeline.started_at ?? pipeline.created_at ?? null,
     createdAt: pipeline.created_at ?? null,
     updatedAt: pipeline.updated_at ?? null,
     finishedAt: pipeline.finished_at ?? null,
     duration: pipeline.duration ?? null,
     queuedDuration: pipeline.queued_duration ?? null,
   };
+}
+
+export function resolveGitLabPipelineBranch(
+  pipeline: Pick<GitLabPipelineView, "ref" | "source">,
+  mergeRequests: GitLabPipelineMergeRequestView[],
+): string {
+  const syntheticRef = pipeline.ref.match(
+    /^refs\/merge-requests\/(\d+)\/(?:head|merge)$/,
+  );
+  const matchingMergeRequest = syntheticRef
+    ? mergeRequests.find(
+        (mergeRequest) => mergeRequest.iid === Number(syntheticRef[1]),
+      )
+    : mergeRequests.find(
+        (mergeRequest) => mergeRequest.sourceBranch === pipeline.ref,
+      );
+  if (matchingMergeRequest) return matchingMergeRequest.sourceBranch;
+  if (pipeline.source === "merge_request_event" && mergeRequests[0]) {
+    return mergeRequests[0].sourceBranch;
+  }
+  return pipeline.ref;
 }
 
 function mapJob(job: RawGitLabJob): GitLabJobView {
@@ -332,7 +361,9 @@ function mapMergeRequest(mr: RawGitLabMergeRequest): GitLabMergeRequestView {
   };
 }
 
-function mapDiscussion(discussion: RawGitLabDiscussion): GitLabDiscussionView {
+export function mapGitLabDiscussion(
+  discussion: RawGitLabDiscussion,
+): GitLabDiscussionView {
   return {
     id: discussion.id,
     individualNote: discussion.individual_note,
@@ -344,7 +375,7 @@ function mapDiscussion(discussion: RawGitLabDiscussion): GitLabDiscussionView {
       updatedAt: note.updated_at,
       system: note.system,
       resolvable: note.resolvable,
-      resolved: note.resolved,
+      resolved: note.resolved ?? false,
       resolvedBy: note.resolved_by ? mapUser(note.resolved_by) : null,
     })),
   };
@@ -1541,7 +1572,7 @@ export class GitLabService {
       ...mapMergeRequest(mr.data),
       changesCount: mr.data.changes_count ?? null,
       commitsCount: commits.data.length,
-      discussions: discussions.data.map(mapDiscussion),
+      discussions: discussions.data.map(mapGitLabDiscussion),
       pipelines: pipelines.data.map(mapPipeline),
     };
   }
@@ -1650,7 +1681,7 @@ export class GitLabService {
       source: "COMMENTS_PAGE",
       force: true,
     });
-    return mapDiscussion(discussion.data);
+    return mapGitLabDiscussion(discussion.data);
   }
 
   async setDiscussionResolved(input: {
@@ -1667,7 +1698,7 @@ export class GitLabService {
       body: { resolved: input.resolved },
       invalidateProjectId: input.projectId,
     });
-    return mapDiscussion(data);
+    return mapGitLabDiscussion(data);
   }
 
   async mergeMergeRequest(input: {
@@ -1692,6 +1723,105 @@ export class GitLabService {
       invalidateProjectId: input.projectId,
     });
     return mapMergeRequest(data);
+  }
+
+  private async pipelineMergeRequests(
+    projectId: string,
+    sha: string,
+  ): Promise<GitLabPipelineMergeRequestView[]> {
+    try {
+      const response = await this.get<RawGitLabMergeRequest[]>({
+        path: `/projects/${encodeURIComponent(projectId)}/repository/commits/${encodeURIComponent(sha)}/merge_requests`,
+        operation: "GitLabPipelineMergeRequests",
+        source: "PIPELINES_PAGE",
+        query: { per_page: 100 },
+      });
+      return response.data.map((mergeRequest) => ({
+        projectId: String(mergeRequest.project_id),
+        iid: mergeRequest.iid,
+        title: mergeRequest.title,
+        webUrl: mergeRequest.web_url,
+        sourceBranch: mergeRequest.source_branch,
+      }));
+    } catch {
+      // Commit association is supplementary; keep the pipeline visible when
+      // the endpoint is unavailable or the token cannot read the repository.
+      return [];
+    }
+  }
+
+  private async pipelineWorktrees(
+    projectId: string,
+    branches: string[],
+  ): Promise<Map<string, { id: string; highlightColor: string | null }>> {
+    const links = new Map<
+      string,
+      { id: string; highlightColor: string | null }
+    >();
+    const names = [...new Set(branches.filter(Boolean))];
+    if (!names.length) return links;
+    const prisma = await getPrismaClient();
+    const project = await prisma.gitLabProject.findUnique({
+      where: { id: projectId },
+      select: { webUrl: true },
+    });
+    if (!project) return links;
+    const canonicalOrigin = normalizeGitOrigin(project.webUrl).canonicalOrigin;
+    const repository = await prisma.codebaseRepository.findUnique({
+      where: { canonicalOrigin },
+      select: { id: true },
+    });
+    if (!repository) return links;
+    const worktrees = await prisma.worktree.findMany({
+      where: {
+        missingAt: null,
+        branch: { in: names },
+        codebase: { repositoryId: repository.id },
+      },
+      orderBy: { updatedAt: "desc" },
+      select: { id: true, branch: true, highlightColor: true },
+    });
+    for (const worktree of worktrees) {
+      if (!worktree.branch || links.has(worktree.branch)) continue;
+      links.set(worktree.branch, {
+        id: worktree.id,
+        highlightColor: worktree.highlightColor,
+      });
+    }
+    return links;
+  }
+
+  private async enrichPipelines(
+    projectId: string,
+    pipelines: GitLabPipelineView[],
+  ): Promise<GitLabPipelineView[]> {
+    if (!pipelines.length) return pipelines;
+    const mergeRequestsBySha = new Map(
+      await Promise.all(
+        [...new Set(pipelines.map((pipeline) => pipeline.sha))].map(
+          async (sha) =>
+            [sha, await this.pipelineMergeRequests(projectId, sha)] as const,
+        ),
+      ),
+    );
+    const branches = pipelines.map((pipeline) =>
+      resolveGitLabPipelineBranch(
+        pipeline,
+        mergeRequestsBySha.get(pipeline.sha) ?? [],
+      ),
+    );
+    const worktrees = await this.pipelineWorktrees(projectId, branches);
+    return pipelines.map((pipeline, index) => {
+      const branch = branches[index] ?? pipeline.ref;
+      const worktree = worktrees.get(branch);
+      return {
+        ...pipeline,
+        branch,
+        mergeRequests: mergeRequestsBySha.get(pipeline.sha) ?? [],
+        worktreeId: worktree?.id ?? null,
+        worktreeHighlightColor: worktree?.highlightColor ?? null,
+      };
+    });
   }
 
   private async observePipelines(
@@ -1764,7 +1894,10 @@ export class GitLabService {
       source: "PIPELINES_PAGE",
       query: { page, per_page: size, order_by: "id", sort: "desc" },
     });
-    const items = response.data.map(mapPipeline);
+    const items = await this.enrichPipelines(
+      projectId,
+      response.data.map(mapPipeline),
+    );
     await this.observePipelines(items);
     return {
       items,
@@ -1790,7 +1923,7 @@ export class GitLabService {
       ).data,
     );
     await this.observePipelines([pipeline]);
-    return pipeline;
+    return (await this.enrichPipelines(projectId, [pipeline]))[0] ?? pipeline;
   }
 
   async pipelineJobs(

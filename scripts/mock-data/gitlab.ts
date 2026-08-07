@@ -2,11 +2,15 @@ import { createHash } from "node:crypto";
 
 import type { PrismaClient } from "../../src/generated/prisma/client";
 
+import { ids } from "./ids";
 import { daysFromNow, minutesAgo } from "./time";
 
 const BASE_URL = "https://gitlab.acme.example.com/gitlab";
 const PROJECT_ID = "1001";
 const PROJECT_PATH = "acme/platform";
+const REPOSITORY_ID = "repo-acme-gitlab-platform";
+const CODEBASE_ID = "codebase-acme-gitlab-platform";
+const WORKTREE_ID = "worktree-gitlab-retry-diagnostics";
 
 function canonicalize(value: unknown): unknown {
   if (Array.isArray(value)) return value.map(canonicalize);
@@ -128,6 +132,7 @@ const pipelines = [
     status: "failed",
     web_url: `${BASE_URL}/${PROJECT_PATH}/-/pipelines/9401`,
     created_at: minutesAgo(18).toISOString(),
+    started_at: minutesAgo(17).toISOString(),
     updated_at: minutesAgo(8).toISOString(),
     finished_at: minutesAgo(8).toISOString(),
     duration: 301,
@@ -143,6 +148,7 @@ const pipelines = [
     status: "success",
     web_url: `${BASE_URL}/${PROJECT_PATH}/-/pipelines/9399`,
     created_at: minutesAgo(52).toISOString(),
+    started_at: minutesAgo(51).toISOString(),
     updated_at: minutesAgo(45).toISOString(),
     finished_at: minutesAgo(45).toISOString(),
     duration: 416,
@@ -198,6 +204,101 @@ export async function seedGitLab(prisma: PrismaClient): Promise<void> {
       webhookState: "CONFIGURED",
       webhookConfiguredAt: minutesAgo(28),
       webhookLastReceivedAt: minutesAgo(8),
+    },
+  });
+
+  await prisma.codebaseRepository.create({
+    data: {
+      id: REPOSITORY_ID,
+      canonicalOrigin: "gitlab.acme.example.com/gitlab/acme/platform",
+      displayOrigin: "gitlab.acme.example.com/gitlab/acme/platform",
+      name: "platform",
+      description: "Acme platform services hosted in GitLab.",
+    },
+  });
+  await prisma.codebase.create({
+    data: {
+      id: CODEBASE_ID,
+      repositoryId: REPOSITORY_ID,
+      agentId: ids.agents.studio,
+      folder: "/Users/acme/Repositories/platform",
+      observedOrigin: "gitlab.acme.example.com/gitlab/acme/platform",
+      branch: "main",
+      headSha: pipelines[1]!.sha,
+      upstream: "origin/main",
+      ahead: 0,
+      behind: 0,
+      syncState: "IN_SYNC",
+      availability: "AVAILABLE",
+      defaultBranch: "main",
+      localBranchesJson: JSON.stringify(["main", "feature/retry-diagnostics"]),
+      remoteBranchesJson: JSON.stringify(["main", "feature/retry-diagnostics"]),
+      lastCheckedAt: minutesAgo(3),
+      lastFetchedAt: minutesAgo(3),
+    },
+  });
+  await prisma.worktree.create({
+    data: {
+      id: WORKTREE_ID,
+      codebaseId: CODEBASE_ID,
+      gitDirectory: "/Users/acme/Repositories/platform-retry/.git",
+      folder: "/Users/acme/Repositories/platform-retry",
+      relativePath: "platform-retry",
+      branch: mergeRequests[0]!.source_branch,
+      headSha: mergeRequests[0]!.sha,
+      upstream: `origin/${mergeRequests[0]!.source_branch}`,
+      ahead: 2,
+      behind: 0,
+      syncState: "AHEAD",
+      pushStatus: "READY",
+      highlightColor: "violet",
+      availability: "AVAILABLE",
+      lastCheckedAt: minutesAgo(3),
+      pullRequestLookupOrigin: "gitlab.acme.example.com/gitlab/acme/platform",
+      pullRequestLookupBranch: mergeRequests[0]!.source_branch,
+      pullRequestLookupAt: minutesAgo(3),
+    },
+  });
+  await prisma.worktreeGitLabMergeRequest.create({
+    data: {
+      worktreeId: WORKTREE_ID,
+      gitlabId: String(mergeRequests[0]!.id),
+      iid: mergeRequests[0]!.iid,
+      projectId: PROJECT_ID,
+      title: mergeRequests[0]!.title,
+      description: mergeRequests[0]!.description,
+      webUrl: mergeRequests[0]!.web_url,
+      state: mergeRequests[0]!.state.toUpperCase(),
+      draft: mergeRequests[0]!.draft,
+      sourceBranch: mergeRequests[0]!.source_branch,
+      targetBranch: mergeRequests[0]!.target_branch,
+      sha: mergeRequests[0]!.sha,
+      authorJson: JSON.stringify({
+        id: String(user.id),
+        username: user.username,
+        name: user.name,
+        avatarUrl: user.avatar_url,
+        webUrl: user.web_url,
+      }),
+      reviewersJson: JSON.stringify(
+        mergeRequests[0]!.reviewers.map((reviewer) => ({
+          id: String(reviewer.id),
+          username: reviewer.username,
+          name: reviewer.name,
+          avatarUrl: reviewer.avatar_url,
+          webUrl: reviewer.web_url,
+        })),
+      ),
+      labelsJson: JSON.stringify(mergeRequests[0]!.labels),
+      detailedMergeStatus: mergeRequests[0]!.detailed_merge_status,
+      mergeWhenPipelineSucceeds: mergeRequests[0]!.merge_when_pipeline_succeeds,
+      squashOnMerge: mergeRequests[0]!.squash_on_merge,
+      hasConflicts: mergeRequests[0]!.has_conflicts,
+      blockingDiscussionsResolved:
+        mergeRequests[0]!.blocking_discussions_resolved,
+      gitlabCreatedAt: new Date(mergeRequests[0]!.created_at),
+      gitlabUpdatedAt: new Date(mergeRequests[0]!.updated_at),
+      mergedAt: null,
     },
   });
 
@@ -257,6 +358,15 @@ export async function seedGitLab(prisma: PrismaClient): Promise<void> {
         },
         response: pipelines,
       }),
+      ...pipelines.map((pipeline, index) =>
+        cacheEntry({
+          id: `gitlab-cache-pipeline-merge-requests-${pipeline.id}`,
+          operation: "GitLabPipelineMergeRequests",
+          path: `/projects/${PROJECT_ID}/repository/commits/${pipeline.sha}/merge_requests`,
+          query: { per_page: 100 },
+          response: index === 0 ? [mergeRequests[0]] : [],
+        }),
+      ),
     ],
   });
 

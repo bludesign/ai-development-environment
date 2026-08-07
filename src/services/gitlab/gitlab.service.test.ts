@@ -6,9 +6,11 @@ import {
   gitLabRestCacheKey,
   gitLabVersionSupported,
   gitLabWebhookProjectId,
+  mapGitLabDiscussion,
   mapGitLabPipelineStatus,
   normalizeGitLabBaseUrl,
   parseGitLabRateLimitHeaders,
+  resolveGitLabPipelineBranch,
   verifyGitLabWebhookSignature,
 } from "./gitlab.service";
 
@@ -57,6 +59,61 @@ describe("GitLab service primitives", () => {
       expect(mapGitLabPipelineStatus(status)).toBe(status.toUpperCase());
     }
     expect(mapGitLabPipelineStatus("future_status")).toBe("UNKNOWN");
+  });
+
+  test("defaults omitted discussion resolution state to unresolved", () => {
+    const author = {
+      id: 42,
+      username: "reviewer",
+      name: "Reviewer",
+      avatar_url: "https://gitlab.com/uploads/reviewer.png",
+      web_url: "https://gitlab.com/reviewer",
+    };
+
+    expect(
+      mapGitLabDiscussion({
+        id: "discussion-1",
+        individual_note: true,
+        notes: [
+          {
+            id: 101,
+            body: "assigned to @reviewer",
+            author,
+            created_at: "2026-08-07T15:00:58.732Z",
+            updated_at: "2026-08-07T15:00:58.734Z",
+            system: true,
+            resolvable: false,
+          },
+        ],
+      }).notes[0]?.resolved,
+    ).toBe(false);
+  });
+
+  test("resolves synthetic merge request refs to their source branch", () => {
+    const mergeRequests = [
+      {
+        projectId: "project-1",
+        iid: 17,
+        title: "Improve retry diagnostics",
+        webUrl: "https://gitlab.com/acme/widgets/-/merge_requests/17",
+        sourceBranch: "feature/retry-diagnostics",
+      },
+    ];
+    expect(
+      resolveGitLabPipelineBranch(
+        { ref: "refs/merge-requests/17/head", source: "merge_request_event" },
+        mergeRequests,
+      ),
+    ).toBe("feature/retry-diagnostics");
+    expect(
+      resolveGitLabPipelineBranch(
+        { ref: "feature/retry-diagnostics", source: "push" },
+        mergeRequests,
+      ),
+    ).toBe("feature/retry-diagnostics");
+    expect(
+      resolveGitLabPipelineBranch({ ref: "main", source: "push" }, []),
+    ).toBe("main");
   });
 
   test("parses rate limits and request IDs", () => {

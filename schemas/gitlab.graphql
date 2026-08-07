@@ -378,6 +378,20 @@ type GitLabMergeRequestDetail {
   mergedAt: String
 }
 
+"A merge request associated with a GitLab pipeline commit."
+type GitLabPipelineMergeRequest {
+  "Project containing the merge request."
+  projectId: ID!
+  "Project-scoped merge request number."
+  iid: Int!
+  "Merge request title."
+  title: String!
+  "GitLab URL for the merge request."
+  webUrl: String!
+  "Source branch for the merge request."
+  sourceBranch: String!
+}
+
 "GitLabPipeline values exposed by the GitLab integration."
 type GitLabPipeline {
   "Id for GitLabPipeline."
@@ -388,6 +402,8 @@ type GitLabPipeline {
   iid: ID
   "Ref for GitLabPipeline."
   ref: String!
+  "Effective source branch for GitLabPipeline."
+  branch: String!
   "Sha for GitLabPipeline."
   sha: String!
   "Source for GitLabPipeline."
@@ -396,6 +412,14 @@ type GitLabPipeline {
   status: GitLabPipelineStatus!
   "Web url for GitLabPipeline."
   webUrl: String!
+  "Merge requests associated with the pipeline commit."
+  mergeRequests: [GitLabPipelineMergeRequest!]!
+  "Matching worktree identifier, when the branch is checked out."
+  worktreeId: ID
+  "Matching worktree highlight color."
+  worktreeHighlightColor: String
+  "Started at for GitLabPipeline."
+  startedAt: String
   "Created at for GitLabPipeline."
   createdAt: String
   "Updated at for GitLabPipeline."

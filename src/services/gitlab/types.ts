@@ -88,15 +88,28 @@ export type GitLabPipelineStatus =
   | "SCHEDULED"
   | "UNKNOWN";
 
+export type GitLabPipelineMergeRequestView = {
+  projectId: string;
+  iid: number;
+  title: string;
+  webUrl: string;
+  sourceBranch: string;
+};
+
 export type GitLabPipelineView = {
   id: string;
   projectId: string;
   iid: string | null;
   ref: string;
+  branch: string;
   sha: string;
   source: string;
   status: GitLabPipelineStatus;
   webUrl: string;
+  mergeRequests: GitLabPipelineMergeRequestView[];
+  worktreeId: string | null;
+  worktreeHighlightColor: string | null;
+  startedAt: string | null;
   createdAt: string | null;
   updatedAt: string | null;
   finishedAt: string | null;

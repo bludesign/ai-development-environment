@@ -2,6 +2,8 @@
 
 import {
   CheckCircle2,
+  ChevronDown,
+  ChevronRight,
   ExternalLink,
   GitMerge,
   GitFork,
@@ -13,17 +15,33 @@ import {
   Webhook,
 } from "lucide-react";
 import { useTranslations } from "next-intl";
-import { useCallback, useEffect, useState } from "react";
+import { Fragment, useCallback, useEffect, useState } from "react";
 
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { DateTime } from "@/components/common/date-time";
 import { Input } from "@/components/ui/input";
 import { Spinner } from "@/components/ui/spinner";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
 import { Textarea } from "@/components/ui/textarea";
+import { worktreeDetailHref } from "@/components/worktrees/worktree-navigation";
 import { Link } from "@/i18n/navigation";
 import { controlPlaneRequest } from "@/lib/control-plane-client";
+import { isRowActivation } from "@/lib/row-activation";
+import { cn } from "@/lib/utils";
+import {
+  worktreeHighlightBackgroundClasses,
+  worktreeHighlightInsetAccentClasses,
+} from "@/lib/worktree-highlight";
 import type {
   GitLabApiCallView,
   GitLabAutoRetryRuleView,
@@ -33,6 +51,7 @@ import type {
   GitLabMergeRequestDetailView,
   GitLabMergeRequestScope,
   GitLabMergeRequestView,
+  GitLabPipelineStatus,
   GitLabPipelineView,
   GitLabProjectView,
   GitLabSettingsView,
@@ -44,13 +63,68 @@ const PROJECT =
   "id name pathWithNamespace webUrl defaultBranch visibility enabled webhookId webhookState webhookError webhookConfiguredAt webhookLastReceivedAt";
 const USER = "id username name avatarUrl webUrl";
 const PIPELINE =
-  "id projectId iid ref sha source status webUrl createdAt updatedAt finishedAt duration queuedDuration";
+  "id projectId iid ref branch sha source status webUrl mergeRequests { projectId iid title webUrl sourceBranch } worktreeId worktreeHighlightColor startedAt createdAt updatedAt finishedAt duration queuedDuration";
 const MR = `id iid projectId title description state draft webUrl sourceBranch targetBranch sha
   author { ${USER} } reviewers { ${USER} } labels detailedMergeStatus mergeWhenPipelineSucceeds
   squashOnMerge hasConflicts blockingDiscussionsResolved createdAt updatedAt mergedAt`;
 const DISCUSSION = `id individualNote notes {
   id body author { ${USER} } createdAt updatedAt system resolvable resolved resolvedBy { ${USER} }
 }`;
+
+type GitLabJobState = {
+  loading: boolean;
+  error: string | null;
+  jobs: GitLabJobView[] | null;
+};
+
+function gitLabPipelineStatusClass(status: GitLabPipelineStatus) {
+  if (status === "SUCCESS") {
+    return "border-emerald-500/30 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300";
+  }
+  if (status === "FAILED" || status === "CANCELED") {
+    return "border-red-500/30 bg-red-500/10 text-red-700 dark:text-red-300";
+  }
+  if (
+    status === "CREATED" ||
+    status === "WAITING_FOR_RESOURCE" ||
+    status === "PREPARING" ||
+    status === "PENDING" ||
+    status === "RUNNING" ||
+    status === "MANUAL" ||
+    status === "SCHEDULED"
+  ) {
+    return "border-amber-500/30 bg-amber-500/10 text-amber-700 dark:text-amber-300";
+  }
+  return "border-slate-500/30 bg-slate-500/10 text-slate-700 dark:text-slate-300";
+}
+
+function gitLabPipelineDuration(pipeline: GitLabPipelineView) {
+  let totalSeconds = pipeline.duration;
+  if (
+    totalSeconds === null &&
+    [
+      "CREATED",
+      "WAITING_FOR_RESOURCE",
+      "PREPARING",
+      "PENDING",
+      "RUNNING",
+    ].includes(pipeline.status) &&
+    pipeline.startedAt
+  ) {
+    const startedAt = Date.parse(pipeline.startedAt);
+    if (Number.isFinite(startedAt)) {
+      totalSeconds = Math.max(0, Math.floor((Date.now() - startedAt) / 1000));
+    }
+  }
+  if (totalSeconds === null) return "—";
+  const seconds = Math.max(0, Math.floor(totalSeconds));
+  const hours = Math.floor(seconds / 3600);
+  const minutes = Math.floor((seconds % 3600) / 60);
+  const remainder = seconds % 60;
+  if (hours > 0) return `${hours}h${minutes > 0 ? ` ${minutes}m` : ""}`;
+  if (minutes > 0) return `${minutes}m${remainder > 0 ? ` ${remainder}s` : ""}`;
+  return `${remainder}s`;
+}
 
 type Configuration = {
   settings: GitLabSettingsView;
@@ -650,7 +724,12 @@ export function GitLabPipelinesPage() {
   } = useConfiguration();
   const [projectId, setProjectId] = useState("");
   const [pipelines, setPipelines] = useState<GitLabPipelineView[]>([]);
-  const [jobs, setJobs] = useState<Record<string, GitLabJobView[]>>({});
+  const [expandedPipelines, setExpandedPipelines] = useState<Set<string>>(
+    new Set(),
+  );
+  const [jobStates, setJobStates] = useState<Record<string, GitLabJobState>>(
+    {},
+  );
   const [ref, setRef] = useState("");
   const [autoRetryRules, setAutoRetryRules] = useState<
     GitLabAutoRetryRuleView[]
@@ -698,6 +777,14 @@ export function GitLabPipelinesPage() {
   }, [load, projectId]);
 
   const loadJobs = async (pipelineId: string) => {
+    setJobStates((items) => ({
+      ...items,
+      [pipelineId]: {
+        loading: true,
+        error: null,
+        jobs: items[pipelineId]?.jobs ?? null,
+      },
+    }));
     try {
       const data = await controlPlaneRequest<{
         gitlabPipelineJobs: GitLabJobView[];
@@ -705,10 +792,35 @@ export function GitLabPipelinesPage() {
         `query GitLabPipelineJobs($projectId: ID!, $pipelineId: ID!) { gitlabPipelineJobs(projectId: $projectId, pipelineId: $pipelineId) { id pipelineId name stage status ref webUrl allowFailure createdAt startedAt finishedAt duration queuedDuration retried } }`,
         { projectId, pipelineId },
       );
-      setJobs((items) => ({ ...items, [pipelineId]: data.gitlabPipelineJobs }));
+      setJobStates((items) => ({
+        ...items,
+        [pipelineId]: {
+          loading: false,
+          error: null,
+          jobs: data.gitlabPipelineJobs,
+        },
+      }));
     } catch (value) {
-      setError(value instanceof Error ? value.message : String(value));
+      setJobStates((items) => ({
+        ...items,
+        [pipelineId]: {
+          loading: false,
+          error: value instanceof Error ? value.message : String(value),
+          jobs: items[pipelineId]?.jobs ?? null,
+        },
+      }));
     }
+  };
+
+  const togglePipeline = (pipelineId: string) => {
+    const expanding = !expandedPipelines.has(pipelineId);
+    setExpandedPipelines((items) => {
+      const next = new Set(items);
+      if (next.has(pipelineId)) next.delete(pipelineId);
+      else next.add(pipelineId);
+      return next;
+    });
+    if (expanding && !jobStates[pipelineId]) void loadJobs(pipelineId);
   };
 
   const pipelineMutation = async (
@@ -804,6 +916,8 @@ export function GitLabPipelinesPage() {
           <ProjectSelect
             onChange={(value) => {
               setProjectId(value);
+              setExpandedPipelines(new Set());
+              setJobStates({});
               const project = configuration.projects.find(
                 (item) => item.id === value,
               );
@@ -899,107 +1013,257 @@ export function GitLabPipelinesPage() {
           )}
         </CardContent>
       </Card>
-      <div className="space-y-3">
-        {pipelines.map((pipeline) => (
-          <Card key={pipeline.id}>
-            <CardContent className="space-y-3 py-4">
-              <div className="flex flex-wrap items-center justify-between gap-3">
-                <div>
-                  <a
-                    className="font-medium text-primary hover:underline"
-                    href={pipeline.webUrl}
-                    rel="noreferrer"
-                    target="_blank"
+      <Card className="gap-0 py-0">
+        <Table>
+          <TableHeader>
+            <TableRow className="hover:bg-transparent">
+              <TableHead className="w-10">
+                <span className="sr-only">{t("expand")}</span>
+              </TableHead>
+              <TableHead>{t("pipeline")}</TableHead>
+              <TableHead>{t("branch")}</TableHead>
+              <TableHead>{t("source")}</TableHead>
+              <TableHead>{t("status")}</TableHead>
+              <TableHead>{t("mergeRequest")}</TableHead>
+              <TableHead>{t("started")}</TableHead>
+              <TableHead className="text-right">{t("actions")}</TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {pipelines.map((pipeline) => {
+              const expanded = expandedPipelines.has(pipeline.id);
+              const highlight = pipeline.worktreeHighlightColor;
+              return (
+                <Fragment key={pipeline.id}>
+                  <TableRow
+                    className={cn(
+                      "cursor-pointer",
+                      highlight &&
+                        worktreeHighlightBackgroundClasses[highlight],
+                    )}
+                    onClick={(event) => {
+                      if (isRowActivation(event)) togglePipeline(pipeline.id);
+                    }}
                   >
-                    #{pipeline.id} · {pipeline.ref}
-                  </a>
-                  <p className="text-xs text-muted-foreground">
-                    {pipeline.source} · {pipeline.sha.slice(0, 8)}
-                  </p>
-                </div>
-                <div className="flex items-center gap-2">
-                  <Badge variant="outline">{pipeline.status}</Badge>
-                  <Button
-                    disabled={busy}
-                    onClick={() => void loadJobs(pipeline.id)}
-                    size="sm"
-                    type="button"
-                    variant="outline"
-                  >
-                    {t("jobs")}
-                  </Button>
-                  <Button
-                    disabled={
-                      busy || !["FAILED", "CANCELED"].includes(pipeline.status)
-                    }
-                    onClick={() => void pipelineMutation("retry", pipeline.id)}
-                    size="sm"
-                    type="button"
-                    variant="outline"
-                  >
-                    <RotateCcw />
-                    {t("retry")}
-                  </Button>
-                  <Button
-                    disabled={
-                      busy ||
-                      ![
-                        "CREATED",
-                        "PENDING",
-                        "RUNNING",
-                        "PREPARING",
-                        "WAITING_FOR_RESOURCE",
-                      ].includes(pipeline.status)
-                    }
-                    onClick={() => void pipelineMutation("cancel", pipeline.id)}
-                    size="sm"
-                    type="button"
-                    variant="outline"
-                  >
-                    <Square />
-                    {t("cancel")}
-                  </Button>
-                </div>
-              </div>
-              {jobs[pipeline.id] && (
-                <div className="space-y-2 border-t pt-3">
-                  {jobs[pipeline.id].map((job) => (
-                    <div
-                      className="flex items-center justify-between gap-3 text-sm"
-                      key={job.id}
+                    <TableCell
+                      className={cn(
+                        "pr-0",
+                        highlight &&
+                          worktreeHighlightInsetAccentClasses[highlight],
+                      )}
                     >
+                      <Button
+                        aria-expanded={expanded}
+                        aria-label={t(expanded ? "hideJobs" : "showJobs", {
+                          pipeline: `#${pipeline.id} · ${pipeline.ref}`,
+                        })}
+                        onClick={() => togglePipeline(pipeline.id)}
+                        size="icon-sm"
+                        type="button"
+                        variant="ghost"
+                      >
+                        {expanded ? <ChevronDown /> : <ChevronRight />}
+                      </Button>
+                    </TableCell>
+                    <TableCell className="min-w-64 whitespace-normal">
                       <a
-                        className="text-primary hover:underline"
-                        href={job.webUrl}
+                        className="inline-flex items-center gap-1 font-medium text-primary hover:underline"
+                        href={pipeline.webUrl}
                         rel="noreferrer"
                         target="_blank"
                       >
-                        {job.stage} / {job.name}
+                        #{pipeline.id} · {pipeline.ref}
+                        <ExternalLink className="size-3.5 shrink-0" />
                       </a>
-                      <div className="flex items-center gap-2">
-                        <Badge variant="outline">{job.status}</Badge>
+                      <p className="mt-1 font-mono text-xs text-muted-foreground">
+                        {pipeline.sha.slice(0, 8)}
+                      </p>
+                    </TableCell>
+                    <TableCell className="min-w-48 whitespace-normal">
+                      {pipeline.worktreeId ? (
+                        <Link
+                          className="inline-flex rounded-md px-1.5 py-1 font-mono text-xs text-primary transition-colors hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                          href={worktreeDetailHref(pipeline.worktreeId)}
+                        >
+                          {pipeline.branch}
+                        </Link>
+                      ) : (
+                        <span className="font-mono text-xs">
+                          {pipeline.branch}
+                        </span>
+                      )}
+                    </TableCell>
+                    <TableCell>{pipeline.source}</TableCell>
+                    <TableCell>
+                      <Badge
+                        className={gitLabPipelineStatusClass(pipeline.status)}
+                      >
+                        {pipeline.status}
+                      </Badge>
+                    </TableCell>
+                    <TableCell className="min-w-64 whitespace-normal">
+                      {pipeline.mergeRequests.length === 0 ? (
+                        "—"
+                      ) : (
+                        <div className="flex flex-col gap-1">
+                          {pipeline.mergeRequests.map((mergeRequest) => (
+                            <Link
+                              className="rounded-md px-1.5 py-1 transition-colors hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                              href={`/gitlab/merge-requests/${encodeURIComponent(mergeRequest.projectId)}/${mergeRequest.iid}`}
+                              key={`${mergeRequest.projectId}:${mergeRequest.iid}`}
+                            >
+                              <span className="block text-sm font-medium text-primary">
+                                !{mergeRequest.iid} · {mergeRequest.title}
+                              </span>
+                            </Link>
+                          ))}
+                        </div>
+                      )}
+                    </TableCell>
+                    <TableCell className="text-muted-foreground">
+                      <div className="flex flex-col gap-0.5">
+                        <DateTime
+                          kind="time"
+                          relativeToday
+                          value={pipeline.startedAt}
+                        />
+                        <span className="text-xs">
+                          {t("duration", {
+                            duration: gitLabPipelineDuration(pipeline),
+                          })}
+                        </span>
+                      </div>
+                    </TableCell>
+                    <TableCell>
+                      <div className="flex items-center justify-end gap-2">
                         <Button
                           disabled={
-                            !["FAILED", "CANCELED"].includes(job.status)
+                            busy ||
+                            !["FAILED", "CANCELED"].includes(pipeline.status)
                           }
-                          onClick={() => void retryJob(job.id, pipeline.id)}
+                          onClick={() =>
+                            void pipelineMutation("retry", pipeline.id)
+                          }
                           size="sm"
                           type="button"
-                          variant="ghost"
+                          variant="outline"
                         >
                           <RotateCcw />
-                          <span className="sr-only">{t("retry")}</span>
+                          {t("retry")}
+                        </Button>
+                        <Button
+                          disabled={
+                            busy ||
+                            ![
+                              "CREATED",
+                              "PENDING",
+                              "RUNNING",
+                              "PREPARING",
+                              "WAITING_FOR_RESOURCE",
+                            ].includes(pipeline.status)
+                          }
+                          onClick={() =>
+                            void pipelineMutation("cancel", pipeline.id)
+                          }
+                          size="sm"
+                          type="button"
+                          variant="outline"
+                        >
+                          <Square />
+                          {t("cancel")}
                         </Button>
                       </div>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </CardContent>
-          </Card>
-        ))}
-      </div>
+                    </TableCell>
+                  </TableRow>
+                  {expanded && (
+                    <TableRow className="bg-muted/20 hover:bg-muted/20">
+                      <TableCell className="p-0" colSpan={8}>
+                        <GitLabJobsPanel
+                          onReload={() => void loadJobs(pipeline.id)}
+                          onRetry={(jobId) => void retryJob(jobId, pipeline.id)}
+                          state={jobStates[pipeline.id]}
+                        />
+                      </TableCell>
+                    </TableRow>
+                  )}
+                </Fragment>
+              );
+            })}
+          </TableBody>
+        </Table>
+      </Card>
     </section>
+  );
+}
+
+function GitLabJobsPanel({
+  state,
+  onReload,
+  onRetry,
+}: {
+  state: GitLabJobState | undefined;
+  onReload: () => void;
+  onRetry: (jobId: string) => void;
+}) {
+  const t = useTranslations("gitlabPages");
+
+  return (
+    <div className="border-l-2 border-muted-foreground/20 px-4 py-3">
+      <p className="mb-2 text-xs font-medium uppercase tracking-wide text-muted-foreground">
+        {state?.jobs ? t("jobCount", { count: state.jobs.length }) : t("jobs")}
+      </p>
+      {state?.loading && !state.jobs ? (
+        <div className="flex items-center gap-2 px-2 py-3 text-sm text-muted-foreground">
+          <Spinner /> {t("loadingJobs")}
+        </div>
+      ) : state?.error ? (
+        <Alert variant="destructive">
+          <AlertDescription className="flex items-center justify-between gap-3">
+            <span>{state.error}</span>
+            <Button
+              onClick={onReload}
+              size="sm"
+              type="button"
+              variant="outline"
+            >
+              <RefreshCw /> {t("retryLoad")}
+            </Button>
+          </AlertDescription>
+        </Alert>
+      ) : state?.jobs?.length === 0 ? (
+        <p className="px-2 py-3 text-sm text-muted-foreground">{t("noJobs")}</p>
+      ) : state?.jobs ? (
+        <div className="divide-y">
+          {state.jobs.map((job) => (
+            <div className="flex items-center gap-2 px-2 py-1.5" key={job.id}>
+              <a
+                className="flex min-w-0 flex-1 items-center gap-2 rounded-md px-2 py-2 text-left hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                href={job.webUrl}
+                rel="noreferrer"
+                target="_blank"
+              >
+                <span className="min-w-0 flex-1 truncate text-sm font-medium">
+                  {job.stage} / {job.name}
+                </span>
+                <Badge className={gitLabPipelineStatusClass(job.status)}>
+                  {job.status}
+                </Badge>
+              </a>
+              <Button
+                aria-label={t("retryJob", { job: job.name })}
+                disabled={!["FAILED", "CANCELED"].includes(job.status)}
+                onClick={() => onRetry(job.id)}
+                size="icon-sm"
+                type="button"
+                variant="ghost"
+              >
+                <RotateCcw />
+              </Button>
+            </div>
+          ))}
+        </div>
+      ) : null}
+    </div>
   );
 }
 
