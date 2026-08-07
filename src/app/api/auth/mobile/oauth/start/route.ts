@@ -7,6 +7,7 @@ import {
   oauthAuthenticationEnabled,
 } from "@/services/auth";
 
+import { isMobileOAuthState, isPKCECodeChallenge } from "../../pkce";
 import { createMobileOAuthState, mobileOAuthStateCookie } from "../state";
 
 function mobileCallback(value: string | null): string {
@@ -28,9 +29,42 @@ export async function GET(request: Request): Promise<Response> {
       { status: 404 },
     );
   }
-  const callback = mobileCallback(
-    new URL(request.url).searchParams.get("callback"),
+  const requestURL = new URL(request.url);
+  let callback: string;
+  try {
+    callback = mobileCallback(requestURL.searchParams.get("callback"));
+  } catch {
+    return Response.json(
+      {
+        error: {
+          code: "INVALID_CALLBACK",
+          message: "The mobile callback must use aide-auth://callback.",
+        },
+      },
+      { status: 400 },
+    );
+  }
+  const clientState = requestURL.searchParams.get("state");
+  const codeChallenge = requestURL.searchParams.get("code_challenge");
+  const codeChallengeMethod = requestURL.searchParams.get(
+    "code_challenge_method",
   );
+  if (
+    !isMobileOAuthState(clientState) ||
+    !isPKCECodeChallenge(codeChallenge) ||
+    codeChallengeMethod !== "S256"
+  ) {
+    return Response.json(
+      {
+        error: {
+          code: "INVALID_PKCE_REQUEST",
+          message:
+            "Mobile OAuth requires state, a valid code challenge, and code_challenge_method=S256.",
+        },
+      },
+      { status: 400 },
+    );
+  }
   // Complete the flow on whichever trusted origin the device actually reached, so
   // a phone on the tailnet is not bounced to the canonical origin mid-sign-in.
   // With nothing configured there is no canonical origin, and the request's own
@@ -46,9 +80,11 @@ export async function GET(request: Request): Promise<Response> {
   );
   completion.searchParams.set("callback", callback);
   // Planted here and required by `complete`, so only a flow that started at this
-  // endpoint can trade a session for a one-time token.
+  // endpoint can trade a browser session for a native authorization code.
   const state = createMobileOAuthState();
-  completion.searchParams.set("state", state);
+  completion.searchParams.set("browser_state", state);
+  completion.searchParams.set("state", clientState);
+  completion.searchParams.set("code_challenge", codeChallenge);
 
   const auth = await getAuth();
   const response = await auth.api.signInWithOAuth2({
