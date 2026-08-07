@@ -618,11 +618,29 @@ export class ToolsService {
       this.credentials.isConfigured(CREDENTIALS.githubPersonalAccessToken),
       this.credentials.isConfigured(CREDENTIALS.gitlabAccessToken),
     ]);
-    const builtInGroups = this.builtInTools.catalog().filter((group) => {
-      if (group.id === "builtin:github") return githubConfigured;
-      if (group.id === "builtin:gitlab") return gitlabConfigured;
-      return true;
-    });
+    const builtInGroups = this.builtInTools
+      .catalog()
+      .filter((group) => {
+        if (group.id === "builtin:github") return githubConfigured;
+        if (group.id === "builtin:gitlab") return gitlabConfigured;
+        return true;
+      })
+      .map((group) =>
+        group.id === "builtin:cache-administration"
+          ? {
+              ...group,
+              children: group.children.filter((child) => {
+                if (child.id === "builtin:cache-administration:github") {
+                  return githubConfigured;
+                }
+                if (child.id === "builtin:cache-administration:gitlab") {
+                  return gitlabConfigured;
+                }
+                return true;
+              }),
+            }
+          : group,
+      );
     return { groups: [...builtInGroups, ...externalGroups] };
   }
 
@@ -695,15 +713,17 @@ export class ToolsService {
 
   private async assertProviderToolConfigured(groupId: string): Promise<void> {
     const descriptor =
-      groupId === "builtin:github"
+      groupId === "builtin:github" ||
+      groupId === "builtin:cache-administration:github"
         ? CREDENTIALS.githubPersonalAccessToken
-        : groupId === "builtin:gitlab"
+        : groupId === "builtin:gitlab" ||
+            groupId === "builtin:cache-administration:gitlab"
           ? CREDENTIALS.gitlabAccessToken
           : null;
     if (!descriptor) return;
     if (!(await this.credentials.isConfigured(descriptor))) {
       throw new Error(
-        `${groupId === "builtin:github" ? "GitHub" : "GitLab"} tools are unavailable until the provider's primary access token is configured`,
+        `${groupId.includes("github") ? "GitHub" : "GitLab"} tools are unavailable until the provider's primary access token is configured`,
       );
     }
   }

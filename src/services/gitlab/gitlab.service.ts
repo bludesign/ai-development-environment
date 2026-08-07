@@ -1919,6 +1919,34 @@ export class GitLabService {
     return { items, total, limit, offset };
   }
 
+  async cacheMetrics(): Promise<{
+    entries: number;
+    calls: number;
+    liveCalls: number;
+    cacheHits: number;
+    errors: number;
+    staleFallbacks: number;
+    averageDurationMs: number;
+  }> {
+    const prisma = await getPrismaClient();
+    const [entries, calls] = await Promise.all([
+      prisma.gitLabRestCacheEntry.count(),
+      prisma.gitLabApiCallLog.findMany({
+        select: { source: true, servedStale: true, durationMs: true },
+      }),
+    ]);
+    const duration = calls.reduce((sum, call) => sum + call.durationMs, 0);
+    return {
+      entries,
+      calls: calls.length,
+      liveCalls: calls.filter(({ source }) => source === "LIVE").length,
+      cacheHits: calls.filter(({ source }) => source === "CACHE").length,
+      errors: calls.filter(({ source }) => source === "ERROR").length,
+      staleFallbacks: calls.filter(({ servedStale }) => servedStale).length,
+      averageDurationMs: calls.length ? duration / calls.length : 0,
+    };
+  }
+
   async cachedEntry(id: string): Promise<GitLabCacheEntryDetailView | null> {
     const prisma = await getPrismaClient();
     const row = await prisma.gitLabRestCacheEntry.findUnique({ where: { id } });

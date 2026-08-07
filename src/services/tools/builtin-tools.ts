@@ -331,6 +331,7 @@ export function createBuiltInToolRegistry(
         services.cacheServer,
         services.jira,
         services.github,
+        services.gitlab,
       ),
     );
   if (services.toolAudit && services.testExternalMcpServer) {

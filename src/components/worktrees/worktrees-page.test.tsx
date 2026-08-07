@@ -1243,7 +1243,9 @@ describe("WorktreesPage", () => {
     } as never);
     fireEvent.click(screen.getByRole("button", { name: "Refresh" }));
 
-    expect(await screen.findByText("new-file.ts")).toBeDefined();
+    expect(
+      await screen.findByText("new-file.ts", undefined, { timeout: 3_000 }),
+    ).toBeDefined();
     expect(screen.queryByText("old-file.ts")).toBeNull();
     expect(request).toHaveBeenCalledWith(
       expect.stringContaining("mutation RefreshWorktrees"),

@@ -26,6 +26,7 @@ import type { CodebasesService } from "@/services/codebases";
 import type { CommandsService } from "@/services/commands";
 import type { DiskSpaceService } from "@/services/disk-space";
 import type { GitHubService } from "@/services/github";
+import type { GitLabService } from "@/services/gitlab";
 import type { JiraService } from "@/services/jira";
 import type { NotificationsService } from "@/services/notifications";
 import type { IosDevicesService } from "@/services/ios-devices";
@@ -60,6 +61,7 @@ export type WorkflowAdapterServices = {
   agentControl: AgentControlService;
   jira: JiraService;
   github: GitHubService;
+  gitlab: GitLabService;
   worktrees: WorktreesService;
   worktreeAutomations: WorktreeAutomationService;
   codebases: CodebasesService;
@@ -1131,6 +1133,36 @@ function registerExpansionAdapters(
       ),
     );
   }
+  executor.register("GITLAB_SAVE_AUTO_RETRY", (context) =>
+    call(
+      context,
+      "builtin:gitlab",
+      "gitlab_save_auto_retry_rule",
+      object(context.node.config.input, "GitLab auto-retry rule"),
+    ),
+  );
+  executor.register("GITLAB_WAIT_PIPELINE", (context) => {
+    const projectId = contextual(
+      context,
+      "projectId",
+      "repo.gitlabProjectId",
+      "GitLab project ID",
+    );
+    const pipelineId = contextual(
+      context,
+      "pipelineId",
+      "pipeline.id",
+      "GitLab pipeline ID",
+    );
+    return Promise.resolve({
+      wait: {
+        kind: "GITLAB_PIPELINE",
+        externalKey: JSON.stringify({ projectId, pipelineId }),
+        resumeAfter: waitResumeAfter(context.node.config),
+        timeoutAt: waitTimeoutAt(context.node.config),
+      },
+    });
+  });
   const githubPullRequestAction = async (
     context: WorkflowExecutionContext,
     name: string,
@@ -1637,6 +1669,41 @@ function registerWaitPollers(
         run.status === "SUCCESS"
           ? null
           : `GitHub checks concluded ${run.status.toLowerCase()}`,
+    };
+  });
+  workflows.registerWaitPoller("GITLAB_PIPELINE", async (externalKey) => {
+    const input = object(JSON.parse(externalKey), "GitLab pipeline wait");
+    const pipeline = await services.gitlab.pipeline(
+      text(input.projectId, "GitLab project ID", 500),
+      text(input.pipelineId, "GitLab pipeline ID", 500),
+    );
+    if (
+      !new Set(["SUCCESS", "FAILED", "CANCELED", "SKIPPED", "MANUAL"]).has(
+        pipeline.status,
+      )
+    ) {
+      return { pending: true, pollAfterSeconds: 10 };
+    }
+    return {
+      pending: false,
+      result: {
+        id: pipeline.id,
+        projectId: pipeline.projectId,
+        status: pipeline.status,
+        webUrl: pipeline.webUrl,
+        sessionPatch: {
+          pipeline: {
+            id: pipeline.id,
+            projectId: pipeline.projectId,
+            status: pipeline.status,
+            webUrl: pipeline.webUrl,
+          },
+        },
+      },
+      error:
+        pipeline.status === "SUCCESS"
+          ? null
+          : `GitLab pipeline concluded ${pipeline.status.toLowerCase()}`,
     };
   });
   workflows.registerWaitPoller("DISK_SPACE_REPORT", async (externalKey) => {

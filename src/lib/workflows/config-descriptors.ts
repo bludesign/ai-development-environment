@@ -597,6 +597,15 @@ const STEP_CONFIG_DESCRIPTORS: StepConfigDescriptors = {
       text("pipelineId", "Pipeline ID"),
     ],
   },
+  GITLAB_SAVE_AUTO_RETRY: {
+    fields: [json("input", "Auto-retry rule", { required: true })],
+  },
+  GITLAB_WAIT_PIPELINE: {
+    fields: [
+      text("projectId", "Project ID"),
+      text("pipelineId", "Pipeline ID"),
+    ],
+  },
   // -- Worktrees -------------------------------------------------------------
   WORKTREE_CREATE: {
     fields: [
@@ -1321,6 +1330,7 @@ const POLLED_WAIT_STEP_KINDS: readonly WorkflowStepKind[] = [
   "SIGNING_DELETE_EXPIRED",
   "SKILL_APPLY",
   "GITHUB_WAIT_CHECKS",
+  "GITLAB_WAIT_PIPELINE",
   // Control flow
   "CONTROL_SUBWORKFLOW",
   "CONTROL_WAIT_UNTIL",

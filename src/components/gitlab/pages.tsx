@@ -178,7 +178,7 @@ export function GitLabMergeRequestsPage() {
     error: configurationError,
   } = useConfiguration();
   const [items, setItems] = useState<GitLabMergeRequestView[]>([]);
-  const [scope, setScope] = useState<GitLabMergeRequestScope>("ALL");
+  const [scope, setScope] = useState<GitLabMergeRequestScope>("MINE");
   const [projectId, setProjectId] = useState("");
   const [state, setState] = useState("OPENED");
   const [busy, setBusy] = useState(false);
@@ -203,6 +203,7 @@ export function GitLabMergeRequestsPage() {
       setItems(data.gitlabMergeRequests.items);
       setError(null);
     } catch (value) {
+      setItems([]);
       setError(value instanceof Error ? value.message : String(value));
     } finally {
       setBusy(false);
@@ -268,7 +269,7 @@ export function GitLabMergeRequestsPage() {
         </CardContent>
       </Card>
       <div className="space-y-3">
-        {items.length === 0 && !busy ? (
+        {items.length === 0 && !busy && !error ? (
           <Card>
             <CardContent className="py-8 text-sm text-muted-foreground">
               {t("noMergeRequests")}

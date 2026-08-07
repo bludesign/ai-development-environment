@@ -218,6 +218,20 @@ export async function seedGitLab(prisma: PrismaClient): Promise<void> {
         response: mergeRequests,
       }),
       cacheEntry({
+        id: "gitlab-cache-merge-requests-mine",
+        operation: "GitLabMergeRequests",
+        path: "/merge_requests",
+        query: {
+          scope: "created_by_me",
+          state: "opened",
+          order_by: "updated_at",
+          sort: "desc",
+          page: 1,
+          per_page: 25,
+        },
+        response: mergeRequests,
+      }),
+      cacheEntry({
         id: "gitlab-cache-merge-requests-review",
         operation: "GitLabMergeRequests",
         path: "/merge_requests",

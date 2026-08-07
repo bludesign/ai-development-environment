@@ -2,6 +2,7 @@ import * as z from "zod/v4";
 
 import type { CacheServerService } from "@/services/cache-server";
 import type { GitHubService } from "@/services/github";
+import type { GitLabService } from "@/services/gitlab";
 import type { JiraService } from "@/services/jira";
 
 import {
@@ -16,6 +17,7 @@ export function createCacheAdministrationGroup(
   cache: CacheServerService,
   jira: JiraService,
   github: GitHubService,
+  gitlab?: GitLabService,
 ): BuiltInToolGroup {
   return {
     id: "builtin:cache-administration",
@@ -214,6 +216,64 @@ export function createCacheAdministrationGroup(
           }),
         ],
       },
+      ...(gitlab
+        ? [
+            {
+              id: "builtin:cache-administration:gitlab",
+              name: "GitLab Cache",
+              children: [],
+              tools: [
+                serviceTool({
+                  name: "get_gitlab_cache_metrics",
+                  title: "Get GitLab cache metrics",
+                  description: "Get GitLab cache and API-call metrics.",
+                  inputSchema: z.object({}),
+                  service: gitlab,
+                  method: "cacheMetrics",
+                  arguments: () => [],
+                  resultKey: "metrics",
+                }),
+                serviceTool({
+                  name: "get_gitlab_api_calls",
+                  title: "Get GitLab API calls",
+                  description: "List redacted GitLab API-call history.",
+                  inputSchema: z.object({
+                    limit: z.number().int().min(1).max(500).default(100),
+                    offset: z.number().int().min(0).default(0),
+                  }),
+                  service: gitlab,
+                  method: "apiCalls",
+                  arguments: ({ limit, offset }) => [limit, offset],
+                  resultKey: "page",
+                }),
+                serviceTool({
+                  name: "get_gitlab_cached_entries",
+                  title: "Get GitLab cached entries",
+                  description: "List cached GitLab REST API entries.",
+                  inputSchema: z.object({
+                    limit: z.number().int().min(1).max(500).default(100),
+                    offset: z.number().int().min(0).default(0),
+                  }),
+                  service: gitlab,
+                  method: "cachedEntries",
+                  arguments: ({ limit, offset }) => [limit, offset],
+                  resultKey: "page",
+                }),
+                serviceTool({
+                  name: "clear_gitlab_cache",
+                  title: "Clear GitLab cache",
+                  description: "Permanently clear cached GitLab REST entries.",
+                  inputSchema: z.object({}),
+                  service: gitlab,
+                  method: "clearCache",
+                  arguments: () => [],
+                  resultKey: "cleared",
+                  annotations: DESTRUCTIVE_ANNOTATIONS,
+                }),
+              ],
+            },
+          ]
+        : []),
     ],
   };
 }

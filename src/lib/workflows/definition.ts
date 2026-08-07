@@ -496,6 +496,21 @@ const EXPANSION_STEP_CATALOG: WorkflowCatalogEntry[] = [
     ),
   ),
   expansionStep(
+    "GITLAB_SAVE_AUTO_RETRY",
+    "GitLab Pipelines",
+    "Install auto-retry rule",
+    ["pipeline.id"],
+    [],
+    { mutatesExternal: true },
+  ),
+  expansionStep(
+    "GITLAB_WAIT_PIPELINE",
+    "GitLab Pipelines",
+    "Wait for pipeline",
+    ["pipeline.id"],
+    ["pipeline.*"],
+  ),
+  expansionStep(
     "JIRA_CREATE_TICKET",
     "Jira",
     "Create Jira ticket",

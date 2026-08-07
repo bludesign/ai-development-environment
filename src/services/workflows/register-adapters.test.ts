@@ -454,6 +454,52 @@ describe("workflow expansion adapters", () => {
       externalKey: "command-run-2",
     });
   });
+
+  test("saves a GitLab auto-retry rule through the provider tool", async () => {
+    const callTool = vi.fn().mockResolvedValue({
+      structuredContent: { rule: { id: "rule-1", maxAttempts: 3 } },
+    });
+    const input = context("actual-worktree");
+    input.node = {
+      ...input.node,
+      id: "save-gitlab-retry",
+      kind: "GITLAB_SAVE_AUTO_RETRY",
+      config: {
+        input: { projectId: "42", pipelineId: "11", maxAttempts: 3 },
+      },
+    };
+
+    const result = await expansionExecutor(callTool).execute(input);
+
+    expect(result.output).toEqual({
+      rule: { id: "rule-1", maxAttempts: 3 },
+    });
+    expect(callTool).toHaveBeenCalledWith(
+      expect.objectContaining({
+        groupId: "builtin:gitlab",
+        name: "gitlab_save_auto_retry_rule",
+        arguments: expect.objectContaining({ projectId: "42" }),
+      }),
+      expect.any(Object),
+    );
+  });
+
+  test("parks a workflow until a GitLab pipeline is terminal", async () => {
+    const input = context("actual-worktree");
+    input.node = {
+      ...input.node,
+      id: "wait-gitlab-pipeline",
+      kind: "GITLAB_WAIT_PIPELINE",
+      config: { projectId: "42", pipelineId: "11", cadenceSeconds: 7 },
+    };
+
+    const result = await expansionExecutor(vi.fn()).execute(input);
+
+    expect(result.wait).toMatchObject({
+      kind: "GITLAB_PIPELINE",
+      externalKey: JSON.stringify({ projectId: "42", pipelineId: "11" }),
+    });
+  });
 });
 
 describe("workflow wait pollers", () => {
@@ -492,6 +538,35 @@ describe("workflow wait pollers", () => {
     await expect(
       registered.get("AGENT_RUN")?.("session-queued"),
     ).resolves.toEqual({ pending: true, pollAfterSeconds: 3 });
+  });
+
+  test("waits for GitLab pipelines and fails non-success terminals", async () => {
+    const pipeline = vi
+      .fn()
+      .mockResolvedValueOnce({ status: "RUNNING" })
+      .mockResolvedValueOnce({
+        id: "11",
+        projectId: "42",
+        status: "FAILED",
+        webUrl: "https://gitlab.example/acme/app/-/pipelines/11",
+      });
+    const registered = pollers({ gitlab: { pipeline } as never });
+    const externalKey = JSON.stringify({ projectId: "42", pipelineId: "11" });
+
+    await expect(
+      registered.get("GITLAB_PIPELINE")?.(externalKey),
+    ).resolves.toEqual({ pending: true, pollAfterSeconds: 10 });
+    await expect(
+      registered.get("GITLAB_PIPELINE")?.(externalKey),
+    ).resolves.toMatchObject({
+      pending: false,
+      error: "GitLab pipeline concluded failed",
+      result: {
+        id: "11",
+        status: "FAILED",
+        sessionPatch: { pipeline: { id: "11", status: "FAILED" } },
+      },
+    });
   });
 
   test("hydrates the destination context after moving a worktree", async () => {

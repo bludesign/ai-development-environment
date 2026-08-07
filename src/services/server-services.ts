@@ -238,6 +238,7 @@ function createServerServices(): ServerServices {
     agentControl: agentControlService,
     jira: jiraService,
     github: gitHubService,
+    gitlab: gitLabService,
     worktrees: worktreesService,
     worktreeAutomations: worktreeAutomationService,
     codebases: codebasesService,

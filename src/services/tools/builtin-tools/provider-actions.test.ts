@@ -66,17 +66,35 @@ describe("provider action tools", () => {
   });
 
   test("parses and invokes GitLab merge-request and pipeline operations", async () => {
+    const updateMergeRequest = vi.fn().mockResolvedValue({ id: "mr-1" });
     const submitReview = vi.fn().mockResolvedValue(true);
     const mergeMergeRequest = vi.fn().mockResolvedValue({ id: "mr-1" });
+    const pipeline = vi.fn().mockResolvedValue({ id: "pipeline-1" });
     const createPipeline = vi.fn().mockResolvedValue({ id: "pipeline-1" });
     const retryJob = vi.fn().mockResolvedValue({ id: "job-1" });
+    const saveAutoRetryRule = vi.fn().mockResolvedValue({ id: "rule-1" });
+    const rateLimitSnapshots = vi.fn().mockResolvedValue([]);
     const group = createGitLabToolGroup({
+      updateMergeRequest,
       submitReview,
       mergeMergeRequest,
+      pipeline,
       createPipeline,
       retryJob,
+      saveAutoRetryRule,
+      rateLimitSnapshots,
     } as never);
 
+    await tool(group, "gitlab_set_merge_request_labels").invoke({
+      projectId: "42",
+      iid: 1,
+      labels: ["ready"],
+    });
+    await tool(group, "gitlab_request_merge_request_reviewers").invoke({
+      projectId: "42",
+      iid: 1,
+      reviewerIds: ["7"],
+    });
     await tool(group, "gitlab_submit_review").invoke({
       projectId: "42",
       iid: 1,
@@ -96,7 +114,25 @@ describe("provider action tools", () => {
       projectId: "42",
       jobId: "9",
     });
+    await tool(group, "gitlab_get_pipeline").invoke({
+      projectId: "42",
+      pipelineId: "11",
+    });
+    await tool(group, "gitlab_save_auto_retry_rule").invoke({
+      projectId: "42",
+      pipelineId: "11",
+      maxAttempts: 3,
+    });
+    await tool(group, "gitlab_get_rate_limits").invoke({});
 
+    expect(updateMergeRequest).toHaveBeenNthCalledWith(
+      1,
+      expect.objectContaining({ labels: ["ready"] }),
+    );
+    expect(updateMergeRequest).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({ reviewerIds: ["7"] }),
+    );
     expect(submitReview).toHaveBeenCalledWith(
       expect.objectContaining({ outcome: "APPROVE" }),
     );
@@ -107,6 +143,11 @@ describe("provider action tools", () => {
       { key: "DEPLOY", value: "true" },
     ]);
     expect(retryJob).toHaveBeenCalledWith("42", "9");
+    expect(pipeline).toHaveBeenCalledWith("42", "11");
+    expect(saveAutoRetryRule).toHaveBeenCalledWith(
+      expect.objectContaining({ projectId: "42", maxAttempts: 3 }),
+    );
+    expect(rateLimitSnapshots).toHaveBeenCalledWith();
   });
 
   test("parses and invokes Jira issue creation, worklog, and linking operations", async () => {

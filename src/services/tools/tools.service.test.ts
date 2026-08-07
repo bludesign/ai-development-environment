@@ -9,6 +9,7 @@ import {
   ToolsService,
 } from "./tools.service";
 import type { BuildsService } from "@/services/builds";
+import { CREDENTIALS } from "@/services/credentials";
 
 afterEach(() => vi.unstubAllGlobals());
 
@@ -78,6 +79,66 @@ describe("external MCP configuration", () => {
     expect(startBuild).toHaveBeenCalledWith(
       expect.objectContaining({ requestId: "request-1", scriptIds: [] }),
     );
+  });
+
+  test("filters and guards provider cache tools with the primary token", async () => {
+    getPrismaClient.mockResolvedValue({
+      externalMcpServer: { findMany: vi.fn().mockResolvedValue([]) },
+    });
+    const cachedEntries = vi.fn().mockResolvedValue({
+      items: [],
+      total: 0,
+      limit: 100,
+      offset: 0,
+    });
+    const credentials = {
+      isConfigured: vi.fn(
+        async (descriptor: { id: string }) =>
+          descriptor.id === CREDENTIALS.gitlabAccessToken.id,
+      ),
+    };
+    const service = new ToolsService(
+      {} as never,
+      undefined,
+      {
+        cacheServer: {} as never,
+        jira: {} as never,
+        github: {} as never,
+        gitlab: { cachedEntries } as never,
+      },
+      credentials as never,
+    );
+
+    const catalog = await service.catalog();
+    expect(catalog.groups.map(({ id }) => id)).toContain("builtin:gitlab");
+    expect(catalog.groups.map(({ id }) => id)).not.toContain("builtin:github");
+    const cache = catalog.groups.find(
+      ({ id }) => id === "builtin:cache-administration",
+    );
+    expect(cache?.children.map(({ id }) => id)).toContain(
+      "builtin:cache-administration:gitlab",
+    );
+    expect(cache?.children.map(({ id }) => id)).not.toContain(
+      "builtin:cache-administration:github",
+    );
+
+    await expect(
+      service.callTool({
+        groupId: "builtin:cache-administration:github",
+        name: "get_github_cached_entries",
+        arguments: {},
+      }),
+    ).rejects.toThrow(/GitHub tools are unavailable/);
+    await expect(
+      service.callTool({
+        groupId: "builtin:cache-administration:gitlab",
+        name: "get_gitlab_cached_entries",
+        arguments: {},
+      }),
+    ).resolves.toMatchObject({
+      structuredContent: { page: { total: 0 } },
+    });
+    expect(cachedEntries).toHaveBeenCalledWith(100, 0);
   });
 
   test("preserves existing write-only header values and deletes omitted rows", async () => {
