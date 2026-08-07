@@ -2092,6 +2092,8 @@
     "autoMerge": "Auto-merge",
     "pipelines": "Pipelines",
     "pipelinesTitle": "GitLab pipelines",
+    "pipelineCount": "{count} pipeline",
+    "pipelineCountPlural": "{count} pipelines",
     "pipelinesDescription": "Run, inspect, cancel, and retry GitLab CI/CD pipelines and jobs.",
     "ref": "Branch or tag",
     "runPipeline": "Run pipeline",

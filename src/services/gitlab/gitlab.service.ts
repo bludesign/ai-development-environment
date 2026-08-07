@@ -1909,6 +1909,30 @@ export class GitLabService {
     };
   }
 
+  async pipelinesForCommit(
+    projectId: string,
+    headSha: string,
+  ): Promise<GitLabPipelineView[]> {
+    const response = await this.get<RawGitLabPipeline[]>({
+      path: `/projects/${encodeURIComponent(projectId)}/pipelines`,
+      operation: "GitLabWorktreePipelines",
+      source: "WORKTREES",
+      query: {
+        sha: headSha,
+        per_page: MAX_PAGE_SIZE,
+        order_by: "id",
+        sort: "desc",
+      },
+      allowStaleOnError: true,
+    });
+    const pipelines = await this.enrichPipelines(
+      projectId,
+      response.data.map(mapPipeline),
+    );
+    await this.observePipelines(pipelines);
+    return pipelines;
+  }
+
   async pipeline(
     projectId: string,
     pipelineId: string,

@@ -2092,6 +2092,8 @@
     "autoMerge": "Automatisch zusammenführen",
     "pipelines": "Pipelines",
     "pipelinesTitle": "GitLab-Pipelines",
+    "pipelineCount": "{count} Pipeline",
+    "pipelineCountPlural": "{count} Pipelines",
     "pipelinesDescription": "Starte, prüfe, brich GitLab-CI/CD-Pipelines und Jobs ab oder wiederhole sie.",
     "ref": "Branch oder Tag",
     "runPipeline": "Pipeline starten",

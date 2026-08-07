@@ -63,7 +63,11 @@ import type {
 } from "@/services/github/types";
 import type { JiraService } from "@/services/jira";
 import { jiraBranchCandidates } from "@/services/jira";
-import type { GitLabService, GitLabMergeRequestView } from "@/services/gitlab";
+import type {
+  GitLabService,
+  GitLabMergeRequestView,
+  GitLabPipelineView,
+} from "@/services/gitlab";
 import type { SkillsService } from "@/services/skills";
 import type { WorkflowEventsService } from "@/services/workflows/workflow-events.service";
 import { buildOutOfDate } from "@/services/builds/build-freshness";
@@ -194,11 +198,14 @@ function isWorktreeGitJob(
 type PullRequestTarget = {
   id: string;
   branch: string | null;
+  headSha: string | null;
+  highlightColor: string | null;
   pullRequestLookupOrigin: string | null;
   pullRequestLookupBranch: string | null;
   pullRequestLookupAt: Date | null;
   pullRequest: GitHubPullRequestView | null;
   gitLabMergeRequest: GitLabMergeRequestView | null;
+  gitLabPipelines: GitLabPipelineView[];
   codebase: { repository: { canonicalOrigin: string } };
 };
 type WorktreePayloadSource = {
@@ -599,6 +606,7 @@ export class WorktreesService {
         : worktree.pullRequest
           ? storedPullRequestView(worktree.pullRequest)
           : null,
+      gitLabPipelines: [] as GitLabPipelineView[],
       latestBuild: worktree.builds?.[0]
         ? {
             ...worktree.builds[0],
@@ -925,9 +933,40 @@ export class WorktreesService {
     }
   }
 
+  private async hydrateGitLabPipelines(
+    worktrees: PullRequestTarget[],
+  ): Promise<void> {
+    if (!this.gitLabService) return;
+    await Promise.all(
+      worktrees.map(async (worktree) => {
+        if (!worktree.headSha) return;
+        try {
+          const project = await this.gitLabService!.projectForCanonicalOrigin(
+            worktree.codebase.repository.canonicalOrigin,
+          );
+          if (!project) return;
+          const pipelines = await this.gitLabService!.pipelinesForCommit(
+            project.id,
+            worktree.headSha,
+          );
+          worktree.gitLabPipelines = pipelines.map((pipeline) => ({
+            ...pipeline,
+            worktreeId: worktree.id,
+            worktreeHighlightColor: worktree.highlightColor,
+          }));
+        } catch {
+          // GitLab pipeline metadata is optional in worktree responses.
+        }
+      }),
+    );
+  }
+
   private async hydratedView(worktree: WorktreeRecord, defaultRegex = "") {
     const view = this.view(worktree, defaultRegex);
-    await this.hydratePullRequestPipelines([view]);
+    await Promise.all([
+      this.hydratePullRequestPipelines([view]),
+      this.hydrateGitLabPipelines([view]),
+    ]);
     view.sourceControlRequest = view.gitLabMergeRequest ?? view.pullRequest;
     return view;
   }
@@ -1128,7 +1167,10 @@ export class WorktreesService {
 
     await this.synchronizePullRequests(views);
     await this.synchronizeGitLabMergeRequests(views);
-    await this.hydratePullRequestPipelines(views);
+    await Promise.all([
+      this.hydratePullRequestPipelines(views),
+      this.hydrateGitLabPipelines(views),
+    ]);
     for (const item of views) {
       item.sourceControlRequest = item.gitLabMergeRequest ?? item.pullRequest;
     }

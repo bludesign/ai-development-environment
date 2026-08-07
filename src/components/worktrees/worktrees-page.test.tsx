@@ -1427,6 +1427,64 @@ describe("WorktreesPage", () => {
     expect(screen.queryByRole("button", { name: "Commits: 0" })).toBeNull();
   });
 
+  test("shows GitLab merge requests and pipelines for the worktree", async () => {
+    const response = (await request("query Fixture")) as unknown as {
+      worktreeOverview: WorktreeOverview;
+    };
+    const worktree =
+      response.worktreeOverview.agents[0]!.codebases[0]!.worktrees[0]!;
+    worktree.pullRequest = null;
+    worktree.sourceControlRequest = {
+      provider: "GITLAB",
+      id: "merge-request-24",
+      number: 24,
+      title: "Add GitLab pipelines",
+      url: "https://gitlab.com/acme/widgets/-/merge_requests/24",
+      isDraft: false,
+      headRefName: "feature/AIDE-24",
+      headRefOid: "abc",
+      createdAt: new Date(0).toISOString(),
+      projectId: "project-1",
+      detailedMergeStatus: "mergeable",
+    };
+    worktree.gitLabPipelines = [
+      {
+        id: "pipeline-42",
+        projectId: "project-1",
+        iid: "42",
+        ref: "feature/AIDE-24",
+        branch: "feature/AIDE-24",
+        sha: "abc",
+        source: "push",
+        status: "SUCCESS",
+        webUrl: "https://gitlab.com/acme/widgets/-/pipelines/42",
+        mergeRequests: [],
+        worktreeId: "worktree-1",
+        worktreeHighlightColor: "blue",
+        startedAt: null,
+        createdAt: null,
+        updatedAt: null,
+        finishedAt: null,
+        duration: null,
+        queuedDuration: null,
+      },
+    ];
+    request.mockClear();
+
+    render(<WorktreesPage />);
+    await screen.findByText("feature/AIDE-24");
+    expect(screen.getByRole("button", { name: "MR !24" })).toBeDefined();
+    fireEvent.pointerDown(
+      screen.getByRole("button", { name: "Pipelines: SUCCESS" }),
+      { button: 0, ctrlKey: false },
+    );
+    expect(
+      (await screen.findByText("#42 · feature/AIDE-24"))
+        .closest("a")
+        ?.getAttribute("href"),
+    ).toBe("https://gitlab.com/acme/widgets/-/pipelines/42");
+  });
+
   test("names the agent on the card instead of its hostname", async () => {
     render(<WorktreesPage />);
     await screen.findByText("feature/AIDE-24");

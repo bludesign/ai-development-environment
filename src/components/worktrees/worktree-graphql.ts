@@ -11,6 +11,15 @@ export const WORKTREE_FIELDS = `
   autoSync { worktreeId state conflictWorkflowId conflictWorkflowChoice lastError lastSyncedAt updatedAt }
   autoMerge { worktreeId state repositoryNameWithOwner pullRequestNumber mergeMethod commitHeadline commitBody authorEmail deleteWorktree moveTicketToDone ticketKey lastError updatedAt }
   pullRequest { ${PULL_REQUEST_FIELDS} }
+  sourceControlRequest {
+    provider id number title url isDraft headRefName headRefOid createdAt
+    ... on GitLabMergeRequest { projectId detailedMergeStatus }
+  }
+  gitLabPipelines {
+    id projectId iid ref branch sha source status webUrl
+    mergeRequests { projectId iid title webUrl sourceBranch }
+    worktreeId worktreeHighlightColor startedAt createdAt updatedAt finishedAt duration queuedDuration
+  }
   latestBuild {
     id status action destinationType destination outOfDate createdAt
     artifacts { id kind }

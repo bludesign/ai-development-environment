@@ -19,6 +19,7 @@ import {
   WORKTREE_CHANGED_TOPIC,
 } from "@/services/agent-control";
 import type { GitHubService } from "@/services/github";
+import type { GitLabService } from "@/services/gitlab";
 import type { JiraService } from "@/services/jira";
 
 import { WorktreesService, worktreeDisplayPath } from "./worktrees.service";
@@ -798,6 +799,75 @@ describe("WorktreesService", () => {
           pipelineStatus: "SUCCESS",
           pipelineRevision: 9,
         }),
+      }),
+    ]);
+  });
+
+  test("attaches current-commit GitLab pipelines to their worktree", async () => {
+    const pipelinesForCommit = vi.fn().mockResolvedValue([
+      {
+        id: "pipeline-42",
+        projectId: "project-1",
+        iid: "42",
+        ref: "feature/AIDE-24",
+        branch: "feature/AIDE-24",
+        sha: "head-2",
+        source: "push",
+        status: "SUCCESS",
+        webUrl: "https://gitlab.com/acme/widgets/-/pipelines/42",
+        mergeRequests: [],
+        worktreeId: null,
+        worktreeHighlightColor: null,
+        startedAt: null,
+        createdAt: null,
+        updatedAt: null,
+        finishedAt: null,
+        duration: null,
+        queuedDuration: null,
+      },
+    ]);
+    const worktrees = new WorktreesService(
+      { registerCompletionHandler: vi.fn() } as unknown as AgentControlService,
+      {} as JiraService,
+      {} as GitHubService,
+      undefined,
+      undefined,
+      pipelineStatus,
+      {
+        projectForCanonicalOrigin: vi
+          .fn()
+          .mockResolvedValue({ id: "project-1" }),
+        pipelinesForCommit,
+      } as unknown as GitLabService,
+    );
+    const target = {
+      id: "worktree-1",
+      branch: "feature/AIDE-24",
+      headSha: "head-2",
+      highlightColor: "blue",
+      pullRequestLookupOrigin: null,
+      pullRequestLookupBranch: null,
+      pullRequestLookupAt: null,
+      pullRequest: null,
+      gitLabMergeRequest: null,
+      gitLabPipelines: [],
+      codebase: {
+        repository: { canonicalOrigin: "gitlab.com/acme/widgets" },
+      },
+    };
+
+    await (
+      worktrees as unknown as {
+        hydrateGitLabPipelines(values: unknown[]): Promise<void>;
+      }
+    ).hydrateGitLabPipelines([target]);
+
+    expect(pipelinesForCommit).toHaveBeenCalledWith("project-1", "head-2");
+    expect(target.gitLabPipelines).toEqual([
+      expect.objectContaining({
+        id: "pipeline-42",
+        worktreeId: "worktree-1",
+        worktreeHighlightColor: "blue",
       }),
     ]);
   });

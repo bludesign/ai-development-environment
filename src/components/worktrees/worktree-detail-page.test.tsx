@@ -169,6 +169,8 @@ function overview(
                 ticketTitle: "Worktree Details Page",
                 ticketStatus: "In Progress",
                 pullRequest: null,
+                sourceControlRequest: null,
+                gitLabPipelines: [],
                 latestBuild: {
                   id: "build-1",
                   status: "SUCCEEDED",
@@ -476,6 +478,151 @@ describe("WorktreeDetailPage", () => {
         .getByRole("menuitem", { name: "View repository" })
         .getAttribute("href"),
     ).toBe("/codebases/repositories/repository-1");
+  });
+
+  test("shows GitLab pipelines as a dedicated detail card", async () => {
+    const state = overview();
+    const codebase = state.agents[0]!.codebases[0]!;
+    codebase.repository.canonicalOrigin =
+      "gitlab.com/chandlerhuff/gitlab-actions-test";
+    codebase.repository.displayOrigin =
+      "gitlab.com/chandlerhuff/gitlab-actions-test";
+    codebase.worktrees[0] = {
+      ...codebase.worktrees[0]!,
+      gitLabPipelines: [
+        {
+          id: "2741253240",
+          projectId: "project-1",
+          iid: "2741253240",
+          ref: "test-merge-request-pipeline",
+          branch: "test-merge-request-pipeline",
+          sha: "541b913b503fdf5df1a054a563b1846d49a09063",
+          source: "MERGE_REQUEST_EVENT",
+          status: "FAILED",
+          webUrl:
+            "https://gitlab.com/chandlerhuff/gitlab-actions-test/-/pipelines/2741253240",
+          mergeRequests: [],
+          worktreeId: "worktree-1",
+          worktreeHighlightColor: "blue",
+          startedAt: "2026-08-07T15:00:00.000Z",
+          createdAt: "2026-08-07T15:00:00.000Z",
+          updatedAt: "2026-08-07T15:01:00.000Z",
+          finishedAt: "2026-08-07T15:01:00.000Z",
+          duration: 60,
+          queuedDuration: 2,
+        },
+      ],
+    };
+    request.mockImplementation(async (query) => {
+      if (query.includes("WorktreeDetailOverview")) {
+        return { worktreeOverview: state } as never;
+      }
+      if (query.includes("GitHubWorktreeWorkflowRuns")) {
+        return { githubWorktreeWorkflowRuns: [] } as never;
+      }
+      if (query.includes("WorktreeGitLabPipelineJobs")) {
+        return {
+          gitlabPipelineJobs: [
+            {
+              id: "job-1",
+              pipelineId: "2741253240",
+              name: "test",
+              stage: "build",
+              status: "FAILED",
+              ref: "test-merge-request-pipeline",
+              webUrl:
+                "https://gitlab.com/chandlerhuff/gitlab-actions-test/-/jobs/1",
+              allowFailure: false,
+              createdAt: "2026-08-07T15:00:00.000Z",
+              startedAt: "2026-08-07T15:00:00.000Z",
+              finishedAt: "2026-08-07T15:01:00.000Z",
+              duration: 60,
+              queuedDuration: 2,
+              retried: false,
+            },
+          ],
+        } as never;
+      }
+      if (query.includes("InspectWorktree")) {
+        return { inspectWorktree: initialDetail } as never;
+      }
+      if (query.includes("WorktreeGitLabPipelineAction")) {
+        return { retryGitLabPipeline: { id: "2741253240" } } as never;
+      }
+      if (query.includes("WorktreeRetryGitLabJob")) {
+        return { retryGitLabJob: { id: "job-1" } } as never;
+      }
+      throw new Error(`Unexpected request: ${query}`);
+    });
+
+    render(<WorktreeDetailPage worktreeId="worktree-1" />);
+
+    const title = await screen.findByText("GitLab pipelines");
+    const card = title.closest<HTMLElement>('[data-slot="card"]');
+    expect(card).not.toBeNull();
+    const queueCard = screen
+      .getByText("Worktree queue")
+      .closest<HTMLElement>('[data-slot="card"]');
+    expect(queueCard).not.toBeNull();
+    expect(
+      queueCard!.compareDocumentPosition(card!) &
+        Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+    expect(within(card!).getByText("1 pipeline")).toBeDefined();
+    expect(within(card!).getByText("FAILED")).toBeDefined();
+    expect(within(card!).getByText("MERGE_REQUEST_EVENT")).toBeDefined();
+    expect(
+      within(card!)
+        .getByRole("link", {
+          name: /#2741253240 · test-merge-request-pipeline/,
+        })
+        .getAttribute("href"),
+    ).toBe(
+      "https://gitlab.com/chandlerhuff/gitlab-actions-test/-/pipelines/2741253240",
+    );
+    expect(
+      within(card!)
+        .getByRole("link", { name: "All pipelines" })
+        .getAttribute("href"),
+    ).toBe("/gitlab/pipelines");
+    const retryPipeline = within(card!).getByRole("button", { name: "Retry" });
+    expect((retryPipeline as HTMLButtonElement).disabled).toBe(false);
+    expect(
+      (
+        within(card!).getByRole("button", {
+          name: "Cancel",
+        }) as HTMLButtonElement
+      ).disabled,
+    ).toBe(true);
+    fireEvent.click(retryPipeline);
+    await waitFor(() =>
+      expect(request).toHaveBeenCalledWith(
+        expect.stringContaining("retryGitLabPipeline"),
+        { projectId: "project-1", pipelineId: "2741253240" },
+      ),
+    );
+
+    fireEvent.click(
+      within(card!).getByRole("button", {
+        name: "Show jobs for #2741253240 · test-merge-request-pipeline",
+      }),
+    );
+    expect(
+      (
+        await within(card!).findByRole("link", { name: /build \/ test/ })
+      ).getAttribute("href"),
+    ).toBe("https://gitlab.com/chandlerhuff/gitlab-actions-test/-/jobs/1");
+    expect(request).toHaveBeenCalledWith(
+      expect.stringContaining("query WorktreeGitLabPipelineJobs"),
+      { projectId: "project-1", pipelineId: "2741253240" },
+    );
+    fireEvent.click(within(card!).getByRole("button", { name: "Retry test" }));
+    await waitFor(() =>
+      expect(request).toHaveBeenCalledWith(
+        expect.stringContaining("mutation WorktreeRetryGitLabJob"),
+        { projectId: "project-1", jobId: "job-1" },
+      ),
+    );
   });
 
   test("keeps saved metadata read-only when the agent is offline", async () => {

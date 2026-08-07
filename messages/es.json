@@ -2092,6 +2092,8 @@
     "autoMerge": "Fusión automática",
     "pipelines": "Canalizaciones",
     "pipelinesTitle": "Canalizaciones de GitLab",
+    "pipelineCount": "{count} canalización",
+    "pipelineCountPlural": "{count} canalizaciones",
     "pipelinesDescription": "Ejecuta, inspecciona, cancela y reintenta canalizaciones y trabajos de CI/CD de GitLab.",
     "ref": "Rama o etiqueta",
     "runPipeline": "Ejecutar canalización",

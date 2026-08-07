@@ -2092,6 +2092,8 @@
     "autoMerge": "Fusion automatique",
     "pipelines": "Pipelines",
     "pipelinesTitle": "Pipelines GitLab",
+    "pipelineCount": "{count} pipeline",
+    "pipelineCountPlural": "{count} pipelines",
     "pipelinesDescription": "Lancez, inspectez, annulez et relancez les pipelines et tâches CI/CD GitLab.",
     "ref": "Branche ou étiquette",
     "runPipeline": "Lancer la pipeline",
