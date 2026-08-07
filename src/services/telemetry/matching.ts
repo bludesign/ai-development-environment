@@ -1,4 +1,4 @@
-import { RE2 } from "re2-wasm";
+import RE2 from "re2";
 
 import {
   telemetryDisplay,

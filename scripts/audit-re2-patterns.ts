@@ -4,7 +4,7 @@ import { homedir } from "node:os";
 import { resolve } from "node:path";
 
 import Database from "better-sqlite3";
-import { RE2 } from "re2-wasm";
+import RE2 from "re2";
 
 const MAX_PATTERN_LENGTH = 1_024;
 

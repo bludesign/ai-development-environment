@@ -24,4 +24,14 @@ describe("shared RE2 compiler", () => {
     const regex = compileRe2("^(a+)+$");
     expect(regex.test(`${"a".repeat(100_000)}!`)).toBe(false);
   });
+
+  test("supports repeated compilation without exhausting a fixed WASM heap", () => {
+    for (let index = 0; index < 10_000; index += 1) {
+      expect(
+        compileRe2(String.raw`\b([A-Z]+-\d+)\b`, { flags: "i" }).test(
+          "AIDE-105",
+        ),
+      ).toBe(true);
+    }
+  });
 });

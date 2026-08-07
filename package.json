@@ -117,7 +117,7 @@
     "pkijs": "3.4.0",
     "quickjs-emscripten": "0.32.0",
     "radix-ui": "1.6.4",
-    "re2-wasm": "1.0.2",
+    "re2": "1.26.1",
     "react": "19.2.7",
     "react-day-picker": "10.0.1",
     "react-dom": "19.2.7",
@@ -179,6 +179,7 @@
     "@apollo/protobufjs@1.2.8": true,
     "@parcel/watcher@2.6.0": true,
     "@prisma/engines@7.8.0": true,
-    "@swc/core@1.15.46": true
+    "@swc/core@1.15.46": true,
+    "re2@1.26.1": true
   }
 }
