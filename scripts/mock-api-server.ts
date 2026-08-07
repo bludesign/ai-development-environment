@@ -362,9 +362,15 @@ const pipelineContexts = (seed: PullRequestSeed) => {
       // `CHECK_SUITE:<id>`, so a shared id makes two records collide on one unique row.
       checkSuite: {
         id: `CS_${seed.number}_build`,
+        status: seed.rollup === "PENDING" ? "IN_PROGRESS" : "COMPLETED",
+        conclusion: seed.rollup === "PENDING" ? null : "SUCCESS",
+        url: `${base}/98765432${seed.number}`,
+        app: { name: "GitHub Actions", slug: "github-actions" },
         workflowRun: {
           databaseId: Number(`98765432${seed.number}`),
           runNumber: 412,
+          runAttempt: 1,
+          updatedAt: ago(seed.updatedMinutesAgo + 6),
           url: `${base}/98765432${seed.number}`,
           workflow: { name: "Build", databaseId: 1001 },
         },
@@ -382,9 +388,15 @@ const pipelineContexts = (seed: PullRequestSeed) => {
         seed.rollup === "PENDING" ? null : ago(seed.updatedMinutesAgo + 4),
       checkSuite: {
         id: `CS_${seed.number}_test`,
+        status: seed.rollup === "PENDING" ? "QUEUED" : "COMPLETED",
+        conclusion: conclusion("SUCCESS"),
+        url: `${base}/98765433${seed.number}`,
+        app: { name: "GitHub Actions", slug: "github-actions" },
         workflowRun: {
           databaseId: Number(`98765433${seed.number}`),
           runNumber: 412,
+          runAttempt: 1,
+          updatedAt: ago(seed.updatedMinutesAgo + 4),
           url: `${base}/98765433${seed.number}`,
           workflow: { name: "Test", databaseId: 1002 },
         },
