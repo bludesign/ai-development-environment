@@ -72,39 +72,60 @@ function useNavigationFeatures(): NavigationFeatures {
     actionsCache: false,
     webhooks: false,
     jiraWebhooks: false,
+    github: false,
+    gitlab: false,
+    gitlabWebhooks: false,
   });
 
   useEffect(() => {
     let cancelled = false;
-    void controlPlaneRequest<{
-      cacheServerSettings: { configured: boolean };
-      githubWebhooksEnabled: boolean;
-      jiraWebhooksEnabled: boolean;
-    }>(`query NavigationFeatures {
+    const load = () =>
+      void controlPlaneRequest<{
+        cacheServerSettings: { configured: boolean };
+        sourceControlIntegrationState: {
+          github: { configured: boolean; webhooksEnabled: boolean };
+          gitlab: { configured: boolean; webhooksEnabled: boolean };
+        };
+        jiraWebhooksEnabled: boolean;
+      }>(`query NavigationFeatures {
       cacheServerSettings { configured }
-      githubWebhooksEnabled
+      sourceControlIntegrationState {
+        github { configured webhooksEnabled }
+        gitlab { configured webhooksEnabled }
+      }
       jiraWebhooksEnabled
     }`)
-      .then((data) => {
-        if (!cancelled) {
-          setFeatures({
-            actionsCache: data.cacheServerSettings.configured,
-            webhooks: data.githubWebhooksEnabled,
-            jiraWebhooks: data.jiraWebhooksEnabled,
-          });
-        }
-      })
-      .catch(() => {
-        if (!cancelled) {
-          setFeatures({
-            actionsCache: false,
-            webhooks: false,
-            jiraWebhooks: false,
-          });
-        }
-      });
+        .then((data) => {
+          if (!cancelled) {
+            setFeatures({
+              actionsCache: data.cacheServerSettings.configured,
+              webhooks:
+                data.sourceControlIntegrationState.github.webhooksEnabled,
+              jiraWebhooks: data.jiraWebhooksEnabled,
+              github: data.sourceControlIntegrationState.github.configured,
+              gitlab: data.sourceControlIntegrationState.gitlab.configured,
+              gitlabWebhooks:
+                data.sourceControlIntegrationState.gitlab.webhooksEnabled,
+            });
+          }
+        })
+        .catch(() => {
+          if (!cancelled) {
+            setFeatures({
+              actionsCache: false,
+              webhooks: false,
+              jiraWebhooks: false,
+              github: false,
+              gitlab: false,
+              gitlabWebhooks: false,
+            });
+          }
+        });
+    load();
+    window.addEventListener("source-control-settings-changed", load);
     return () => {
       cancelled = true;
+      window.removeEventListener("source-control-settings-changed", load);
     };
   }, [pathname]);
 

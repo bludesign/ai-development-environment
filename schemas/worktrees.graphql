@@ -246,6 +246,8 @@ type Worktree {
   ticketStatus: String
   "The pull request associated with this worktree. May be null when unavailable or not applicable."
   pullRequest: GitHubPullRequest
+  "The provider-neutral pull or merge request associated with this worktree."
+  sourceControlRequest: SourceControlRequest
   "The latest build associated with this worktree. May be null when unavailable or not applicable."
   latestBuild: WorktreeLatestBuild
   "Tags associated with this worktree."

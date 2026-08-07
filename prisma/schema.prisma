@@ -446,6 +446,7 @@ model Worktree {
   pullRequestLookupBranch  String?
   pullRequestLookupAt      DateTime?
   pullRequest              WorktreePullRequest?
+  gitLabMergeRequest       WorktreeGitLabMergeRequest?
 
   @@unique([codebaseId, gitDirectory])
   @@index([codebaseId, missingAt])
@@ -454,6 +455,7 @@ model Worktree {
 
 model WorktreePullRequest {
   worktreeId                  String   @id
+  sourceControlProvider       String   @default("GITHUB")
   githubId                    String
   number                      Int
   title                       String
@@ -482,8 +484,42 @@ model WorktreePullRequest {
   @@index([githubId])
 }
 
+model WorktreeGitLabMergeRequest {
+  worktreeId                  String    @id
+  sourceControlProvider       String    @default("GITLAB")
+  gitlabId                    String
+  iid                         Int
+  projectId                   String
+  title                       String
+  description                 String
+  webUrl                      String
+  state                       String
+  draft                       Boolean
+  sourceBranch                String
+  targetBranch                String
+  sha                         String
+  authorJson                  String
+  reviewersJson               String
+  labelsJson                  String
+  detailedMergeStatus         String
+  mergeWhenPipelineSucceeds   Boolean
+  squashOnMerge               Boolean
+  hasConflicts                Boolean
+  blockingDiscussionsResolved Boolean
+  gitlabCreatedAt             DateTime
+  gitlabUpdatedAt             DateTime
+  mergedAt                    DateTime?
+  createdAt                   DateTime  @default(now())
+  updatedAt                   DateTime  @updatedAt
+  worktree                    Worktree  @relation(fields: [worktreeId], references: [id], onDelete: Cascade)
+
+  @@index([gitlabId])
+  @@index([projectId, iid])
+}
+
 model GitHubPipelineSnapshot {
   id                      String                 @id
+  sourceControlProvider   String                 @default("GITHUB")
   repositoryGithubId      String
   repositoryNameWithOwner String
   repositoryUrl           String
@@ -503,6 +539,7 @@ model GitHubPipelineSnapshot {
 
 model GitHubPipelineRecord {
   id                     String                 @id
+  sourceControlProvider  String                 @default("GITHUB")
   snapshotId             String
   identityKey            String
   githubPipelineId       String
@@ -2290,6 +2327,182 @@ model GitHubSettings {
   cacheTtlSeconds                        Int      @default(300)
   createdAt                              DateTime @default(now())
   updatedAt                              DateTime @updatedAt
+}
+
+model GitLabSettings {
+  id                          String    @id
+  currentUserId               String?
+  currentUsername             String?
+  currentUserName             String?   @map("currentUserDisplayName")
+  currentUserAvatarUrl        String?
+  currentUserWebUrl           String?
+  version                     String?
+  revision                    String?
+  verifiedAt                  DateTime?
+  pipelinePollIntervalSeconds Int       @default(60)
+  cacheTtlSeconds             Int       @default(300)
+  createdAt                   DateTime  @default(now())
+  updatedAt                   DateTime  @updatedAt
+}
+
+model GitLabProject {
+  id                    String    @id
+  name                  String
+  pathWithNamespace     String
+  webUrl                String
+  defaultBranch         String?
+  visibility            String
+  enabled               Boolean   @default(true)
+  webhookId             String?
+  webhookState          String    @default("NOT_CONFIGURED")
+  webhookError          String?
+  webhookConfiguredAt   DateTime?
+  webhookLastReceivedAt DateTime?
+  createdAt             DateTime  @default(now())
+  updatedAt             DateTime  @updatedAt
+
+  @@unique([pathWithNamespace])
+  @@index([enabled, pathWithNamespace])
+}
+
+model GitLabRestCacheEntry {
+  id           String   @id
+  cacheKey     String   @unique
+  endpoint     String
+  operation    String
+  requestJson  String
+  responseJson String
+  fetchedAt    DateTime
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  @@index([operation, fetchedAt])
+  @@index([fetchedAt])
+}
+
+model GitLabRestCacheTtlOverride {
+  operation  String   @id
+  ttlSeconds Int
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+}
+
+model GitLabApiCallLog {
+  id                 String    @id
+  method             String
+  endpoint           String
+  operation          String
+  requestSource      String
+  requestSummary     String
+  source             String
+  durationMs         Int
+  statusCode         Int?
+  error              String?
+  servedStale        Boolean   @default(false)
+  rateLimitLimit     Int?
+  rateLimitRemaining Int?
+  rateLimitResetAt   DateTime?
+  requestId          String?
+  createdAt          DateTime  @default(now())
+
+  @@index([createdAt])
+  @@index([operation, source, createdAt])
+}
+
+model GitLabRateLimitSnapshot {
+  id         String    @id
+  resource   String
+  limit      Int
+  remaining  Int
+  resetAt    DateTime?
+  observedAt DateTime
+  createdAt  DateTime  @default(now())
+  updatedAt  DateTime  @updatedAt
+
+  @@unique([resource])
+}
+
+model GitLabWebhookDelivery {
+  id          String    @id
+  webhookId   String    @unique
+  eventType   String
+  projectId   String?
+  objectKind  String?
+  action      String?
+  outcome     String
+  error       String?
+  payloadJson String
+  receivedAt  DateTime
+  processedAt DateTime?
+  createdAt   DateTime  @default(now())
+
+  @@index([receivedAt])
+  @@index([projectId, receivedAt])
+}
+
+model GitLabPipelineSnapshot {
+  id             String                 @id
+  projectId      String
+  headSha        String
+  status         String
+  lastObservedAt DateTime
+  createdAt      DateTime               @default(now())
+  updatedAt      DateTime               @updatedAt
+  records        GitLabPipelineRecord[]
+
+  @@unique([projectId, headSha])
+  @@index([lastObservedAt])
+}
+
+model GitLabPipelineRecord {
+  id              String                 @id
+  snapshotId      String
+  pipelineId      String
+  ref             String
+  status          String
+  webUrl          String
+  source          String
+  jobsJson        String                 @default("[]")
+  gitlabUpdatedAt DateTime?
+  lastObservedAt  DateTime
+  createdAt       DateTime               @default(now())
+  updatedAt       DateTime               @updatedAt
+  snapshot        GitLabPipelineSnapshot @relation(fields: [snapshotId], references: [id], onDelete: Cascade)
+
+  @@unique([snapshotId, pipelineId])
+  @@index([pipelineId])
+  @@index([lastObservedAt])
+}
+
+model GitLabAutoRetryRule {
+  id            String                     @id
+  projectId     String
+  pipelineId    String?
+  enabled       Boolean                    @default(true)
+  maxAttempts   Int                        @default(1)
+  attempts      Int                        @default(0)
+  lastError     String?
+  lastAttemptAt DateTime?
+  createdAt     DateTime                   @default(now())
+  updatedAt     DateTime                   @updatedAt
+  executions    GitLabAutoRetryExecution[]
+
+  @@index([projectId, enabled])
+}
+
+model GitLabAutoRetryExecution {
+  id         String              @id
+  ruleId     String
+  pipelineId String
+  attempt    Int
+  status     String
+  lastError  String?
+  createdAt  DateTime            @default(now())
+  updatedAt  DateTime            @updatedAt
+  rule       GitLabAutoRetryRule @relation(fields: [ruleId], references: [id], onDelete: Cascade)
+
+  @@unique([ruleId, pipelineId, attempt])
+  @@index([pipelineId, createdAt])
 }
 
 model GitHubGraphqlCacheEntry {

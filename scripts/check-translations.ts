@@ -58,11 +58,14 @@ const ALLOWED_IDENTICAL_TRANSLATIONS = new Map([
   ["shell.productName", "AI Development Environment"],
   ["shell.jira", "Jira"],
   ["shell.github", "GitHub"],
+  ["shell.gitlab", "GitLab"],
   // "Apps" is the product's feature name in every supported locale.
   ["shell.apps", "Apps"],
   ["apps.title", "Apps"],
   ["shell.webhooks", "Webhooks"],
   ["notifications.categories.GITHUB", "GitHub"],
+  ["notifications.categories.GITLAB", "GitLab"],
+  ["gitlabSettings.version", "GitLab {version}"],
   ["pullRequests.jira", "Jira"],
   ["polling.duration", "{milliseconds} ms"],
   // Apple ships this product name untranslated in every locale.

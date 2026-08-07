@@ -14,8 +14,10 @@ import { createCcusageResolvers } from "./resolvers/ccusage";
 import { createBuildDataResolvers } from "./resolvers/build-data";
 import { createJiraResolvers } from "./resolvers/jira";
 import { createGitHubResolvers } from "./resolvers/github";
+import { createGitLabResolvers } from "./resolvers/gitlab";
 import { createCacheServerResolvers } from "./resolvers/cache-server";
 import { GitHubService } from "@/services/github";
+import type { GitLabService } from "@/services/gitlab";
 import type { CacheServerService } from "@/services/cache-server";
 import { JiraService, JiraWebhookService } from "@/services/jira";
 import { CcusageService } from "@/services/ccusage";
@@ -76,6 +78,7 @@ export const createSchema = (
   jiraService: JiraService,
   jiraWebhookService: JiraWebhookService,
   gitHubService: GitHubService,
+  gitLabService: GitLabService,
   ccusageService: CcusageService,
   codebasesService: CodebasesService,
   toolsService: ToolsService,
@@ -107,6 +110,7 @@ export const createSchema = (
     createAgentResolvers(agentControlService),
     createJiraResolvers(jiraService, jiraWebhookService),
     createGitHubResolvers(gitHubService, worktreesService),
+    createGitLabResolvers(gitLabService, gitHubService),
     createCcusageResolvers(ccusageService),
     createBuildDataResolvers(buildDataService),
     createCodebaseResolvers(codebasesService),

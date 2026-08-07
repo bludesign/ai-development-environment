@@ -13,6 +13,7 @@ import {
   FolderGit2,
   GitBranch,
   GitCompare,
+  GitFork,
   GitPullRequest,
   Hammer,
   HardDrive,
@@ -38,9 +39,15 @@ import {
   type LucideIcon,
 } from "lucide-react";
 
-export type NavigationFeature = "actionsCache" | "webhooks" | "jiraWebhooks";
+export type NavigationFeature =
+  | "actionsCache"
+  | "webhooks"
+  | "jiraWebhooks"
+  | "github"
+  | "gitlab"
+  | "gitlabWebhooks";
 export type NavigationSection =
-  "dashboard" | "ai" | "debugging" | "github" | "jira" | "system";
+  "dashboard" | "ai" | "debugging" | "github" | "gitlab" | "jira" | "system";
 
 export type AppDestination = {
   key: string;
@@ -52,17 +59,23 @@ export type AppDestination = {
   sidebar: boolean;
   common?: boolean;
   feature?: NavigationFeature;
+  features?: NavigationFeature[];
   activePrefixes?: string[];
   exact?: boolean;
 };
 
-export type NavigationFeatures = Record<NavigationFeature, boolean>;
+export type NavigationFeatures = Record<
+  "actionsCache" | "webhooks" | "jiraWebhooks",
+  boolean
+> &
+  Partial<Record<"github" | "gitlab" | "gitlabWebhooks", boolean>>;
 
 export const NAVIGATION_SECTIONS: NavigationSection[] = [
   "dashboard",
   "ai",
   "debugging",
   "github",
+  "gitlab",
   "jira",
   "system",
 ];
@@ -271,6 +284,7 @@ export const APP_DESTINATIONS: AppDestination[] = [
     icon: GitPullRequest,
     section: "github",
     sidebar: true,
+    feature: "github",
   },
   {
     key: "actions",
@@ -280,6 +294,7 @@ export const APP_DESTINATIONS: AppDestination[] = [
     icon: PlayCircle,
     section: "github",
     sidebar: true,
+    feature: "github",
   },
   {
     key: "webhooks",
@@ -289,7 +304,7 @@ export const APP_DESTINATIONS: AppDestination[] = [
     icon: Webhook,
     section: "github",
     sidebar: true,
-    feature: "webhooks",
+    features: ["github", "webhooks"],
   },
   {
     key: "comments",
@@ -299,6 +314,7 @@ export const APP_DESTINATIONS: AppDestination[] = [
     icon: MessageSquareText,
     section: "github",
     sidebar: true,
+    feature: "github",
   },
   {
     key: "github-cache",
@@ -308,6 +324,7 @@ export const APP_DESTINATIONS: AppDestination[] = [
     icon: Database,
     section: "github",
     sidebar: true,
+    feature: "github",
   },
   {
     key: "actions-cache",
@@ -317,7 +334,58 @@ export const APP_DESTINATIONS: AppDestination[] = [
     icon: DatabaseZap,
     section: "github",
     sidebar: true,
-    feature: "actionsCache",
+    features: ["github", "actionsCache"],
+  },
+
+  {
+    key: "gitlab-merge-requests",
+    href: "/gitlab/merge-requests",
+    labelKey: "mergeRequests",
+    aliases: ["gitlab merge requests", "mrs"],
+    icon: GitFork,
+    section: "gitlab",
+    sidebar: true,
+    feature: "gitlab",
+  },
+  {
+    key: "gitlab-pipelines",
+    href: "/gitlab/pipelines",
+    labelKey: "pipelines",
+    aliases: ["gitlab ci", "gitlab pipelines"],
+    icon: PlayCircle,
+    section: "gitlab",
+    sidebar: true,
+    feature: "gitlab",
+  },
+  {
+    key: "gitlab-webhooks",
+    href: "/gitlab/webhooks",
+    labelKey: "webhooks",
+    aliases: ["gitlab webhooks"],
+    icon: Webhook,
+    section: "gitlab",
+    sidebar: true,
+    features: ["gitlab", "gitlabWebhooks"],
+  },
+  {
+    key: "gitlab-comments",
+    href: "/gitlab/comments",
+    labelKey: "comments",
+    aliases: ["gitlab discussions", "gitlab comments"],
+    icon: MessageSquareText,
+    section: "gitlab",
+    sidebar: true,
+    feature: "gitlab",
+  },
+  {
+    key: "gitlab-cache",
+    href: "/gitlab/cache",
+    labelKey: "apiCache",
+    aliases: ["gitlab api cache"],
+    icon: Database,
+    section: "gitlab",
+    sidebar: true,
+    feature: "gitlab",
   },
 
   {
@@ -483,7 +551,11 @@ export function destinationVisible(
   destination: AppDestination,
   features: NavigationFeatures,
 ): boolean {
-  return !destination.feature || features[destination.feature];
+  const required = [
+    ...(destination.feature ? [destination.feature] : []),
+    ...(destination.features ?? []),
+  ];
+  return required.every((feature) => features[feature]);
 }
 
 export function destinationActive(

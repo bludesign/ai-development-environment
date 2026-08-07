@@ -10,6 +10,7 @@ import {
   GitHubPipelineStatusService,
   GitHubService,
 } from "@/services/github";
+import { GitLabService } from "@/services/gitlab";
 import { CacheServerService } from "@/services/cache-server";
 import { JiraService, JiraWebhookService } from "@/services/jira";
 import { IosDevicesService } from "@/services/ios-devices";
@@ -55,6 +56,7 @@ export type ServerServices = {
   jiraWebhookService: JiraWebhookService;
   iosDevicesService: IosDevicesService;
   gitHubService: GitHubService;
+  gitLabService: GitLabService;
   gitHubPipelineStatusService: GitHubPipelineStatusService;
   gitHubActionsNotificationsService: GitHubActionsNotificationsService;
   cacheServerService: CacheServerService;
@@ -150,6 +152,12 @@ function createServerServices(): ServerServices {
     () => gitHubActionsNotificationsService.configurationChanged(),
     gitHubPipelineStatusService,
   );
+  const gitLabService = new GitLabService(
+    credentialService,
+    workflowEventsService,
+    pollingService,
+    notificationsService,
+  );
   const cacheServerService = new CacheServerService(credentialService);
   const worktreesService = new WorktreesService(
     agentControlService,
@@ -158,6 +166,7 @@ function createServerServices(): ServerServices {
     skillsService,
     workflowEventsService,
     gitHubPipelineStatusService,
+    gitLabService,
   );
   const systemStatusService = new SystemStatusService(
     ccusageService,
@@ -182,6 +191,7 @@ function createServerServices(): ServerServices {
       jira: jiraService,
       jiraWebhooks: jiraWebhookService,
       github: gitHubService,
+      gitlab: gitLabService,
       buildData: buildDataService,
       cacheServer: cacheServerService,
       ccusage: ccusageService,
@@ -278,6 +288,7 @@ function createServerServices(): ServerServices {
     jiraWebhookService,
     iosDevicesService,
     gitHubService,
+    gitLabService,
     gitHubPipelineStatusService,
     gitHubActionsNotificationsService,
     cacheServerService,

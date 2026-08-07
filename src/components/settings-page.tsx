@@ -28,6 +28,7 @@ import { IosDeviceSettingsCard } from "@/components/devices/settings-card";
 import { PushNotificationSettingsCard } from "@/components/push-notifications/push-notification-settings-card";
 import { SettingsHelpLink } from "@/components/settings-help-link";
 import { JiraSettingsPage } from "@/components/jira/settings-page";
+import { GitLabSettingsCard } from "@/components/gitlab/settings-card";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -116,6 +117,7 @@ export function SettingsPage() {
             <JiraSettingsPage embedded />
             <GitHubSettingsCard />
             <GitHubAppSettingsCard />
+            <GitLabSettingsCard />
             <CacheServerSettingsCard />
           </SettingsGroup>
         </div>

@@ -63,6 +63,7 @@ import type {
 } from "@/services/github/types";
 import type { JiraService } from "@/services/jira";
 import { jiraBranchCandidates } from "@/services/jira";
+import type { GitLabService, GitLabMergeRequestView } from "@/services/gitlab";
 import type { SkillsService } from "@/services/skills";
 import type { WorkflowEventsService } from "@/services/workflows/workflow-events.service";
 import { buildOutOfDate } from "@/services/builds/build-freshness";
@@ -154,6 +155,7 @@ const worktreeInclude = {
   autoSync: true,
   autoMerge: true,
   pullRequest: true,
+  gitLabMergeRequest: true,
   _count: {
     select: {
       builds: { where: { status: { in: ACTIVE_BUILD_STATUSES } } },
@@ -166,6 +168,9 @@ type WorktreeRecord = Prisma.WorktreeGetPayload<{
 }>;
 
 type StoredPullRequest = NonNullable<WorktreeRecord["pullRequest"]>;
+type StoredGitLabMergeRequest = NonNullable<
+  WorktreeRecord["gitLabMergeRequest"]
+>;
 
 function isWorktreeGitJob(
   job: WorktreeRecord["codebase"]["jobs"][number],
@@ -193,6 +198,7 @@ type PullRequestTarget = {
   pullRequestLookupBranch: string | null;
   pullRequestLookupAt: Date | null;
   pullRequest: GitHubPullRequestView | null;
+  gitLabMergeRequest: GitLabMergeRequestView | null;
   codebase: { repository: { canonicalOrigin: string } };
 };
 type WorktreePayloadSource = {
@@ -289,6 +295,67 @@ function jsonArray<T>(value: string): T[] {
   } catch {
     return [];
   }
+}
+
+function jsonObject<T>(value: string): T {
+  return JSON.parse(value) as T;
+}
+
+function storedGitLabMergeRequestView(
+  value: StoredGitLabMergeRequest,
+): GitLabMergeRequestView {
+  return {
+    id: value.gitlabId,
+    iid: value.iid,
+    projectId: value.projectId,
+    title: value.title,
+    description: value.description,
+    state: value.state,
+    draft: value.draft,
+    webUrl: value.webUrl,
+    sourceBranch: value.sourceBranch,
+    targetBranch: value.targetBranch,
+    sha: value.sha,
+    author: jsonObject(value.authorJson),
+    reviewers: jsonArray(value.reviewersJson),
+    labels: jsonArray(value.labelsJson),
+    detailedMergeStatus: value.detailedMergeStatus,
+    mergeWhenPipelineSucceeds: value.mergeWhenPipelineSucceeds,
+    squashOnMerge: value.squashOnMerge,
+    hasConflicts: value.hasConflicts,
+    blockingDiscussionsResolved: value.blockingDiscussionsResolved,
+    createdAt: value.gitlabCreatedAt.toISOString(),
+    updatedAt: value.gitlabUpdatedAt.toISOString(),
+    mergedAt: value.mergedAt?.toISOString() ?? null,
+  };
+}
+
+function gitLabMergeRequestData(value: GitLabMergeRequestView) {
+  return {
+    sourceControlProvider: "GITLAB",
+    gitlabId: value.id,
+    iid: value.iid,
+    projectId: value.projectId,
+    title: value.title,
+    description: value.description,
+    webUrl: value.webUrl,
+    state: value.state,
+    draft: value.draft,
+    sourceBranch: value.sourceBranch,
+    targetBranch: value.targetBranch,
+    sha: value.sha,
+    authorJson: JSON.stringify(value.author),
+    reviewersJson: JSON.stringify(value.reviewers),
+    labelsJson: JSON.stringify(value.labels),
+    detailedMergeStatus: value.detailedMergeStatus,
+    mergeWhenPipelineSucceeds: value.mergeWhenPipelineSucceeds,
+    squashOnMerge: value.squashOnMerge,
+    hasConflicts: value.hasConflicts,
+    blockingDiscussionsResolved: value.blockingDiscussionsResolved,
+    gitlabCreatedAt: new Date(value.createdAt),
+    gitlabUpdatedAt: new Date(value.updatedAt),
+    mergedAt: value.mergedAt ? new Date(value.mergedAt) : null,
+  };
 }
 
 function storedPullRequestView(
@@ -424,6 +491,7 @@ export class WorktreesService {
     private readonly skillsService?: SkillsService,
     private readonly workflowEvents?: WorkflowEventsService,
     private readonly pipelineStatus = new GitHubPipelineStatusService(),
+    private readonly gitLabService?: GitLabService,
   ) {
     this.agentControl.registerCompletionHandler(
       WORKTREE_OPERATION_JOB_KIND,
@@ -523,6 +591,14 @@ export class WorktreesService {
       pullRequest: worktree.pullRequest
         ? storedPullRequestView(worktree.pullRequest)
         : null,
+      gitLabMergeRequest: worktree.gitLabMergeRequest
+        ? storedGitLabMergeRequestView(worktree.gitLabMergeRequest)
+        : null,
+      sourceControlRequest: worktree.gitLabMergeRequest
+        ? storedGitLabMergeRequestView(worktree.gitLabMergeRequest)
+        : worktree.pullRequest
+          ? storedPullRequestView(worktree.pullRequest)
+          : null,
       latestBuild: worktree.builds?.[0]
         ? {
             ...worktree.builds[0],
@@ -554,6 +630,9 @@ export class WorktreesService {
       });
       if (pullRequest) {
         const data = pullRequestData(pullRequest);
+        await transaction.worktreeGitLabMergeRequest?.deleteMany({
+          where: { worktreeId },
+        });
         await transaction.worktreePullRequest.upsert({
           where: { worktreeId },
           create: { worktreeId, ...data },
@@ -567,13 +646,51 @@ export class WorktreesService {
     });
   }
 
+  private async storeGitLabMergeRequest(
+    worktreeId: string,
+    canonicalOrigin: string,
+    branch: string,
+    mergeRequest: GitLabMergeRequestView | null,
+  ): Promise<void> {
+    const prisma = await getPrismaClient();
+    await prisma.$transaction(async (transaction) => {
+      await transaction.worktree.update({
+        where: { id: worktreeId },
+        data: {
+          pullRequestLookupOrigin: canonicalOrigin,
+          pullRequestLookupBranch: branch,
+          pullRequestLookupAt: new Date(),
+        },
+      });
+      await transaction.worktreePullRequest.deleteMany({
+        where: { worktreeId },
+      });
+      if (mergeRequest) {
+        const data = gitLabMergeRequestData(mergeRequest);
+        await transaction.worktreeGitLabMergeRequest?.upsert({
+          where: { worktreeId },
+          create: { worktreeId, ...data },
+          update: data,
+        });
+      } else {
+        await transaction.worktreeGitLabMergeRequest?.deleteMany({
+          where: { worktreeId },
+        });
+      }
+    });
+  }
+
   private async clearPullRequest(
     worktreeId: string,
     clearLookup = true,
   ): Promise<void> {
     const prisma = await getPrismaClient();
+    const gitLabDelete = prisma.worktreeGitLabMergeRequest?.deleteMany({
+      where: { worktreeId },
+    });
     await prisma.$transaction([
       prisma.worktreePullRequest.deleteMany({ where: { worktreeId } }),
+      ...(gitLabDelete ? [gitLabDelete] : []),
       ...(clearLookup
         ? [
             prisma.worktree.update({
@@ -616,6 +733,7 @@ export class WorktreesService {
       ) {
         await this.clearPullRequest(worktree.id);
         worktree.pullRequest = null;
+        worktree.gitLabMergeRequest = null;
         worktree.pullRequestLookupOrigin = null;
         worktree.pullRequestLookupBranch = null;
         worktree.pullRequestLookupAt = null;
@@ -719,6 +837,57 @@ export class WorktreesService {
     );
   }
 
+  private async synchronizeGitLabMergeRequests(
+    worktrees: PullRequestTarget[],
+  ): Promise<void> {
+    if (!this.gitLabService) return;
+    const now = Date.now();
+    const retryAfterMs = 5 * 60 * 1_000;
+    await Promise.all(
+      worktrees.map(async (worktree) => {
+        if (!worktree.branch) return;
+        const origin = worktree.codebase.repository.canonicalOrigin;
+        let project;
+        try {
+          project = await this.gitLabService!.projectForCanonicalOrigin(origin);
+        } catch {
+          return;
+        }
+        if (!project) return;
+        const lookupMatches =
+          worktree.pullRequestLookupOrigin?.toLowerCase() ===
+            origin.toLowerCase() &&
+          worktree.pullRequestLookupBranch === worktree.branch;
+        if (
+          lookupMatches &&
+          worktree.pullRequestLookupAt &&
+          now - worktree.pullRequestLookupAt.getTime() < retryAfterMs
+        ) {
+          return;
+        }
+        try {
+          const mergeRequest = await this.gitLabService!.mergeRequestForBranch(
+            project.id,
+            worktree.branch,
+          );
+          await this.storeGitLabMergeRequest(
+            worktree.id,
+            origin,
+            worktree.branch,
+            mergeRequest,
+          );
+          worktree.gitLabMergeRequest = mergeRequest;
+          worktree.pullRequest = null;
+          worktree.pullRequestLookupOrigin = origin;
+          worktree.pullRequestLookupBranch = worktree.branch;
+          worktree.pullRequestLookupAt = new Date();
+        } catch {
+          // Provider discovery is optional in overview responses.
+        }
+      }),
+    );
+  }
+
   private async hydratePullRequestPipelines(
     worktrees: PullRequestTarget[],
   ): Promise<void> {
@@ -759,6 +928,7 @@ export class WorktreesService {
   private async hydratedView(worktree: WorktreeRecord, defaultRegex = "") {
     const view = this.view(worktree, defaultRegex);
     await this.hydratePullRequestPipelines([view]);
+    view.sourceControlRequest = view.gitLabMergeRequest ?? view.pullRequest;
     return view;
   }
 
@@ -772,8 +942,31 @@ export class WorktreesService {
     const origin = worktree.codebase.repository.canonicalOrigin;
     if (!worktree.branch)
       throw new Error("A named worktree branch is required");
+    const gitLabProject =
+      await this.gitLabService?.projectForCanonicalOrigin(origin);
+    if (gitLabProject) {
+      const mergeRequest = await this.gitLabService!.mergeRequestForBranch(
+        gitLabProject.id,
+        worktree.branch,
+        true,
+      );
+      await this.storeGitLabMergeRequest(
+        id,
+        origin,
+        worktree.branch,
+        mergeRequest,
+      );
+      const updated = await prisma.worktree.findUniqueOrThrow({
+        where: { id },
+        include: worktreeInclude,
+      });
+      this.publish(id, worktree.codebaseId);
+      return this.hydratedView(updated);
+    }
     if (!/^github\.com\/[^/]+\/[^/]+$/i.test(origin)) {
-      throw new Error("The worktree repository is not hosted on GitHub");
+      throw new Error(
+        "The worktree repository does not match configured GitHub or GitLab projects",
+      );
     }
     const found = await this.gitHubService.pullRequestsForBranches(
       origin,
@@ -934,7 +1127,11 @@ export class WorktreesService {
     );
 
     await this.synchronizePullRequests(views);
+    await this.synchronizeGitLabMergeRequests(views);
     await this.hydratePullRequestPipelines(views);
+    for (const item of views) {
+      item.sourceControlRequest = item.gitLabMergeRequest ?? item.pullRequest;
+    }
     const keys = [
       ...new Set(views.map((item) => item.ticketKey).filter(Boolean)),
     ] as string[];

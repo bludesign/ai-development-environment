@@ -99,7 +99,11 @@ describe("AppShell", () => {
       if (query.includes("query NavigationFeatures")) {
         return {
           cacheServerSettings: { configured: false },
-          githubWebhooksEnabled: false,
+          sourceControlIntegrationState: {
+            github: { configured: true, webhooksEnabled: false },
+            gitlab: { configured: false, webhooksEnabled: false },
+          },
+          jiraWebhooksEnabled: false,
         } as never;
       }
       return { sidebarNotifications: [] } as never;
@@ -111,8 +115,10 @@ describe("AppShell", () => {
     clearCookies();
   });
 
-  test("opens both sidebars on desktop by default and toggles them independently", () => {
+  test("opens both sidebars on desktop by default and toggles them independently", async () => {
     renderShell();
+
+    await screen.findByRole("link", { name: "Actions" });
 
     expect(
       screen.getByRole("link", { name: "Usage" }).getAttribute("href"),
@@ -165,7 +171,7 @@ describe("AppShell", () => {
     const disabled = renderShell();
     await waitFor(() => {
       expect(requestMock).toHaveBeenCalledWith(
-        expect.stringContaining("githubWebhooksEnabled"),
+        expect.stringContaining("sourceControlIntegrationState"),
       );
     });
     expect(screen.queryByRole("link", { name: "Webhooks" })).toBeNull();
@@ -175,7 +181,11 @@ describe("AppShell", () => {
       if (query.includes("query NavigationFeatures")) {
         return {
           cacheServerSettings: { configured: false },
-          githubWebhooksEnabled: true,
+          sourceControlIntegrationState: {
+            github: { configured: true, webhooksEnabled: true },
+            gitlab: { configured: false, webhooksEnabled: false },
+          },
+          jiraWebhooksEnabled: false,
         } as never;
       }
       return { sidebarNotifications: [] } as never;
@@ -187,6 +197,41 @@ describe("AppShell", () => {
         "href",
       ),
     ).toBe("/webhooks");
+  });
+
+  test.each([
+    { name: "GitHub only", github: true, gitlab: false },
+    { name: "GitLab only", github: false, gitlab: true },
+    { name: "both providers", github: true, gitlab: true },
+    { name: "neither provider", github: false, gitlab: false },
+  ])("shows provider navigation for $name", async ({ github, gitlab }) => {
+    requestMock.mockImplementation(async (query) => {
+      if (query.includes("query NavigationFeatures")) {
+        return {
+          cacheServerSettings: { configured: false },
+          sourceControlIntegrationState: {
+            github: { configured: github, webhooksEnabled: false },
+            gitlab: { configured: gitlab, webhooksEnabled: false },
+          },
+          jiraWebhooksEnabled: false,
+        } as never;
+      }
+      return { sidebarNotifications: [] } as never;
+    });
+
+    renderShell();
+
+    await waitFor(() => {
+      expect(requestMock).toHaveBeenCalledWith(
+        expect.stringContaining("sourceControlIntegrationState"),
+      );
+      expect(
+        screen.queryByRole("link", { name: "Pull Requests" }) !== null,
+      ).toBe(github);
+      expect(
+        screen.queryByRole("link", { name: "Merge Requests" }) !== null,
+      ).toBe(gitlab);
+    });
   });
 
   test("uses independently restored desktop defaults", () => {

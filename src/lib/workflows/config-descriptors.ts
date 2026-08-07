@@ -495,6 +495,108 @@ const STEP_CONFIG_DESCRIPTORS: StepConfigDescriptors = {
       text("workflowRunId", "Workflow run ID"),
     ],
   },
+  // -- GitLab ----------------------------------------------------------------
+  GITLAB_LOAD_MR: {
+    fields: [text("projectId", "Project ID"), num("iid", "Merge request IID")],
+  },
+  GITLAB_CREATE_MR: {
+    fields: [
+      text("projectId", "Project ID"),
+      text("sourceBranch", "Source branch"),
+      text("targetBranch", "Target branch"),
+      text("title", "Title"),
+      multiline("description", "Description"),
+      bool("removeSourceBranch", "Remove source branch"),
+      bool("squash", "Squash commits"),
+      stringList("reviewerIds", "Reviewer IDs"),
+      stringList("labels", "Labels"),
+    ],
+  },
+  GITLAB_UPDATE_MR: {
+    fields: [
+      text("projectId", "Project ID"),
+      num("iid", "Merge request IID"),
+      text("title", "Title"),
+      multiline("description", "Description"),
+      enumField("stateEvent", "State", staticOptions(["CLOSE", "REOPEN"])),
+      stringList("reviewerIds", "Reviewer IDs"),
+      stringList("labels", "Labels"),
+    ],
+  },
+  GITLAB_SUBMIT_REVIEW: {
+    fields: [
+      text("projectId", "Project ID"),
+      num("iid", "Merge request IID"),
+      enumField(
+        "outcome",
+        "Review outcome",
+        staticOptions(["APPROVE", "COMMENT", "REQUEST_CHANGES"]),
+      ),
+      multiline("body", "Review body"),
+    ],
+  },
+  GITLAB_REPLY_DISCUSSION: {
+    fields: [
+      text("projectId", "Project ID"),
+      num("iid", "Merge request IID"),
+      text("discussionId", "Discussion ID", { required: true }),
+      multiline("body", "Reply", { required: true }),
+    ],
+  },
+  GITLAB_SET_DISCUSSION_RESOLVED: {
+    fields: [
+      text("projectId", "Project ID"),
+      num("iid", "Merge request IID"),
+      text("discussionId", "Discussion ID", { required: true }),
+      bool("resolved", "Mark resolved"),
+    ],
+  },
+  GITLAB_MERGE_MR: {
+    fields: [
+      text("projectId", "Project ID"),
+      num("iid", "Merge request IID"),
+      bool("squash", "Squash commits"),
+      bool("removeSourceBranch", "Remove source branch"),
+      bool("autoMerge", "Enable auto-merge"),
+      text("sha", "Expected source SHA"),
+    ],
+  },
+  GITLAB_SET_MR_LABELS: {
+    fields: [
+      text("projectId", "Project ID"),
+      num("iid", "Merge request IID"),
+      stringList("labels", "Labels"),
+    ],
+  },
+  GITLAB_REQUEST_REVIEWERS: {
+    fields: [
+      text("projectId", "Project ID"),
+      num("iid", "Merge request IID"),
+      stringList("reviewerIds", "Reviewer IDs"),
+    ],
+  },
+  GITLAB_CREATE_PIPELINE: {
+    fields: [
+      text("projectId", "Project ID"),
+      text("ref", "Git ref"),
+      json("variables", "Pipeline variables"),
+    ],
+  },
+  GITLAB_RETRY_PIPELINE: {
+    fields: [
+      text("projectId", "Project ID"),
+      text("pipelineId", "Pipeline ID"),
+    ],
+  },
+  GITLAB_RETRY_JOB: {
+    fields: [text("projectId", "Project ID"), text("jobId", "Job ID")],
+  },
+  GITLAB_CANCEL_PIPELINE: {
+    fields: [
+      text("projectId", "Project ID"),
+      text("pipelineId", "Pipeline ID"),
+    ],
+  },
   // -- Worktrees -------------------------------------------------------------
   WORKTREE_CREATE: {
     fields: [
@@ -1320,6 +1422,16 @@ const ALL_TRIGGER_KINDS: WorkflowTriggerKind[] = [
   "GITHUB_ISSUE_COMMAND",
   "GITHUB_ACTIONS_RESULT",
   "GITHUB_PR_LABEL",
+  "GITLAB_MR_STATE",
+  "GITLAB_REVIEW_CHANGES_REQUESTED",
+  "GITLAB_REVIEW_COMMENT",
+  "GITLAB_MR_CLOSED",
+  "GITLAB_PIPELINE_FAILED",
+  "GITLAB_PUSH_DEFAULT",
+  "GITLAB_PIPELINE_SUCCEEDED",
+  "GITLAB_NOTE_COMMAND",
+  "GITLAB_PIPELINE_RESULT",
+  "GITLAB_MR_LABEL",
   "BUILD_RESULT",
   "BUILD_TEST_THRESHOLD",
   "BUILD_COVERAGE_THRESHOLD",
@@ -1370,6 +1482,10 @@ const ALL_TRIGGER_KINDS: WorkflowTriggerKind[] = [
   "GITHUB_PIPELINE_STATUS_CHANGED",
   "GITHUB_PR_SYNCHRONIZED",
   "GITHUB_REVIEW_APPROVED",
+  "GITLAB_PIPELINE_STATUS_CHANGED",
+  "GITLAB_MR_SYNCHRONIZED",
+  "GITLAB_REVIEW_APPROVED",
+  "GITLAB_JOB_STATUS_CHANGED",
   "JIRA_TICKET_UPDATED",
   "JIRA_COMMENT_ADDED",
   "JIRA_WORKLOG_ADDED",
@@ -1428,14 +1544,19 @@ const TRIGGER_CONFIG_DESCRIPTORS: TriggerConfigDescriptors = Object.fromEntries(
         ]),
       ];
     }
-    if (kind === "GITHUB_ISSUE_COMMAND") {
+    if (kind === "GITHUB_ISSUE_COMMAND" || kind === "GITLAB_NOTE_COMMAND") {
+      const gitlab = kind === "GITLAB_NOTE_COMMAND";
       return [
         kind,
         triggerWithFilters([
-          stringList("allowedLogins", "Allowed logins", {
-            placeholder: "octocat",
-            required: true,
-          }),
+          stringList(
+            gitlab ? "allowedUsernames" : "allowedLogins",
+            gitlab ? "Allowed usernames" : "Allowed logins",
+            {
+              placeholder: "octocat",
+              required: true,
+            },
+          ),
           text("commandPattern", "Command pattern (RE2)", {
             placeholder: "^/deploy\\b$",
             required: true,

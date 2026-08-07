@@ -11,6 +11,7 @@ import type { Prisma } from "@/generated/prisma/client";
 import type { BuildsService } from "@/services/builds";
 import type { CodebaseToolsService } from "@/services/codebases";
 import {
+  CREDENTIALS,
   CredentialService,
   externalMcpHeadersCredential,
 } from "@/services/credentials";
@@ -613,9 +614,16 @@ export class ToolsService {
         }
       }),
     );
-    return {
-      groups: [...this.builtInTools.catalog(), ...externalGroups],
-    };
+    const [githubConfigured, gitlabConfigured] = await Promise.all([
+      this.credentials.isConfigured(CREDENTIALS.githubPersonalAccessToken),
+      this.credentials.isConfigured(CREDENTIALS.gitlabAccessToken),
+    ]);
+    const builtInGroups = this.builtInTools.catalog().filter((group) => {
+      if (group.id === "builtin:github") return githubConfigured;
+      if (group.id === "builtin:gitlab") return gitlabConfigured;
+      return true;
+    });
+    return { groups: [...builtInGroups, ...externalGroups] };
   }
 
   async callTool(
@@ -647,6 +655,7 @@ export class ToolsService {
   ): ReturnType<BuiltInToolRegistry["callByName"]> {
     const groupId = this.builtInTools.groupIdForName(name);
     if (!groupId) throw new Error(`Unknown built-in tool: ${name}`);
+    await this.assertProviderToolConfigured(groupId);
     const operation = () => this.builtInTools.callByName(name, args);
     return context
       ? this.audit.execute(
@@ -662,6 +671,7 @@ export class ToolsService {
     arguments: Record<string, unknown>;
   }): Promise<unknown> {
     if (this.builtInTools.hasGroup(input.groupId)) {
+      await this.assertProviderToolConfigured(input.groupId);
       return this.builtInTools.call(input.groupId, input.name, input.arguments);
     }
     if (!input.groupId.startsWith(EXTERNAL_GROUP_PREFIX)) {
@@ -681,6 +691,21 @@ export class ToolsService {
         { timeout: CALL_TIMEOUT_MS, resetTimeoutOnProgress: true },
       ),
     );
+  }
+
+  private async assertProviderToolConfigured(groupId: string): Promise<void> {
+    const descriptor =
+      groupId === "builtin:github"
+        ? CREDENTIALS.githubPersonalAccessToken
+        : groupId === "builtin:gitlab"
+          ? CREDENTIALS.gitlabAccessToken
+          : null;
+    if (!descriptor) return;
+    if (!(await this.credentials.isConfigured(descriptor))) {
+      throw new Error(
+        `${groupId === "builtin:github" ? "GitHub" : "GitLab"} tools are unavailable until the provider's primary access token is configured`,
+      );
+    }
   }
 
   private async externalServerWithSecrets(

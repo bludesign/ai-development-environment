@@ -75,6 +75,28 @@ const SEEDS: Seed[] = [
     createdAt: daysAgo(60),
   },
   {
+    id: "gitlab/default/connection-settings",
+    kind: "gitlab-connection-settings",
+    value: jsonCredential({
+      baseUrl: "https://gitlab.acme.example.com/gitlab",
+    }),
+    createdAt: daysAgo(30),
+  },
+  {
+    id: "gitlab/default/access-token",
+    kind: "gitlab-access-token",
+    value: "glpat-acmeMockScreenshotToken0000000000",
+    createdAt: daysAgo(30),
+  },
+  {
+    id: "gitlab/default/webhook-signing-secrets",
+    kind: "gitlab-webhook-signing-secrets",
+    value: jsonCredential({
+      "1001": "acme-mock-gitlab-project-signing-token",
+    }),
+    createdAt: daysAgo(30),
+  },
+  {
     id: "cache-server/default/settings",
     kind: "cache-server-settings",
     value: jsonCredential({

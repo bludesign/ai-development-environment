@@ -10,6 +10,7 @@ export type GlobalSearchGroup =
   | "CODEBASES"
   | "WORKFLOWS"
   | "GITHUB_ACTIONS"
+  | "GITLAB_PIPELINES"
   | "BUILDS"
   | "AGENTS_JOBS"
   | "PLANS_SESSIONS"
@@ -21,11 +22,13 @@ export type GlobalSearchKind =
   | "WORKTREE"
   | "JIRA_TICKET"
   | "GITHUB_PULL_REQUEST"
+  | "GITLAB_MERGE_REQUEST"
   | "REPOSITORY"
   | "CODEBASE"
   | "WORKFLOW"
   | "WORKFLOW_RUN"
   | "GITHUB_ACTIONS_RUN"
+  | "GITLAB_PIPELINE"
   | "BUILD"
   | "AGENT"
   | "AGENT_JOB"
@@ -255,6 +258,8 @@ export class GlobalSearchService {
       tickets,
       pullRequests,
       pipelineRecords,
+      gitLabMergeRequests,
+      gitLabPipelineRecords,
       agentRuns,
       commands,
       commandRuns,
@@ -332,12 +337,17 @@ export class GlobalSearchService {
             },
             { codebase: { agent: { name: { contains: candidateQuery } } } },
             { pullRequest: { title: { contains: candidateQuery } } },
+            { gitLabMergeRequest: { title: { contains: candidateQuery } } },
             ...(numberMatch ? [{ pullRequest: { number: numericQuery } }] : []),
+            ...(numberMatch
+              ? [{ gitLabMergeRequest: { iid: numericQuery } }]
+              : []),
           ],
         },
         include: {
           codebase: { include: { repository: true, agent: true } },
           pullRequest: true,
+          gitLabMergeRequest: true,
         },
         orderBy: { updatedAt: "desc" },
         take: CANDIDATE_LIMIT,
@@ -443,6 +453,34 @@ export class GlobalSearchService {
         orderBy: { updatedAt: "desc" },
         take: CANDIDATE_LIMIT,
       }),
+      prisma.worktreeGitLabMergeRequest?.findMany({
+        where: {
+          worktree: { missingAt: null },
+          OR: [
+            { gitlabId: { contains: candidateQuery } },
+            ...(numberMatch ? [{ iid: numericQuery }] : []),
+            { title: { contains: candidateQuery } },
+            { sourceBranch: { contains: candidateQuery } },
+            { projectId: { contains: candidateQuery } },
+          ],
+        },
+        include: { worktree: true },
+        orderBy: { updatedAt: "desc" },
+        take: CANDIDATE_LIMIT,
+      }) ?? Promise.resolve([]),
+      prisma.gitLabPipelineRecord?.findMany({
+        where: {
+          OR: [
+            { pipelineId: { contains: candidateQuery } },
+            { ref: { contains: candidateQuery } },
+            { status: { contains: candidateQuery } },
+            { snapshot: { projectId: { contains: candidateQuery } } },
+          ],
+        },
+        include: { snapshot: true },
+        orderBy: { updatedAt: "desc" },
+        take: CANDIDATE_LIMIT,
+      }) ?? Promise.resolve([]),
       prisma.agentRun.findMany({
         where: {
           kind: { in: ["PLAN", "SESSION"] },
@@ -586,6 +624,7 @@ export class GlobalSearchService {
             worktree.codebase.repository.name,
             worktree.codebase.agent.name,
             worktree.pullRequest?.title,
+            worktree.gitLabMergeRequest?.title,
           ],
         ),
       ),
@@ -685,6 +724,29 @@ export class GlobalSearchService {
           [pullRequest.repositoryNameWithOwner, pullRequest.headRefName],
         );
       }),
+      firstPerGroup,
+      (item) => item.key.toLocaleLowerCase(),
+    );
+
+    const gitLabMergeRequestItems = sortAndLimitUnique(
+      gitLabMergeRequests.map((mergeRequest) =>
+        ranked(
+          {
+            key: `gitlab-merge-request:${mergeRequest.projectId}:${mergeRequest.iid}`,
+            kind: "GITLAB_MERGE_REQUEST",
+            group: "PULL_REQUESTS",
+            title: `!${mergeRequest.iid} · ${mergeRequest.title}`,
+            subtitle: mergeRequest.sourceBranch,
+            href: `/gitlab/merge-requests/${segment(mergeRequest.projectId)}/${mergeRequest.iid}`,
+            status: mergeRequest.state,
+            updatedAt: iso(mergeRequest.updatedAt),
+          },
+          query,
+          mergeRequest.title,
+          [mergeRequest.iid, `!${mergeRequest.iid}`, mergeRequest.gitlabId],
+          [mergeRequest.projectId, mergeRequest.sourceBranch],
+        ),
+      ),
       firstPerGroup,
       (item) => item.key.toLocaleLowerCase(),
     );
@@ -799,6 +861,28 @@ export class GlobalSearchService {
           [record.snapshot.repositoryNameWithOwner, record.status],
         );
       }),
+      firstPerGroup,
+    );
+
+    const gitLabPipelineItems = sortAndLimit(
+      gitLabPipelineRecords.map((record) =>
+        ranked(
+          {
+            key: `gitlab-pipeline:${record.snapshot.projectId}:${record.pipelineId}`,
+            kind: "GITLAB_PIPELINE",
+            group: "GITLAB_PIPELINES",
+            title: `Pipeline #${record.pipelineId}`,
+            subtitle: record.ref,
+            href: `/gitlab/pipelines?project=${segment(record.snapshot.projectId)}&pipeline=${segment(record.pipelineId)}`,
+            status: record.status,
+            updatedAt: iso(record.updatedAt),
+          },
+          query,
+          `Pipeline #${record.pipelineId}`,
+          [record.pipelineId],
+          [record.snapshot.projectId, record.ref, record.status],
+        ),
+      ),
       firstPerGroup,
     );
 
@@ -1082,10 +1166,12 @@ export class GlobalSearchService {
         ...worktreeItems,
         ...ticketItems,
         ...pullRequestItems,
+        ...gitLabMergeRequestItems,
         ...repositoryItems,
         ...codebaseItems,
         ...workflowGroupItems,
         ...githubActionItems,
+        ...gitLabPipelineItems,
         ...buildItems,
         ...agentJobGroupItems,
         ...runItems,

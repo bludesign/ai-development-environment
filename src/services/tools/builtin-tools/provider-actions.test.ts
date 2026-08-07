@@ -1,11 +1,13 @@
 import { describe, expect, test, vi } from "vitest";
 
 import { createGitHubToolGroup } from "./github";
+import { createGitLabToolGroup } from "./gitlab";
 import { createJiraToolGroup } from "./jira";
 
 const tool = (
   group:
     | ReturnType<typeof createGitHubToolGroup>
+    | ReturnType<typeof createGitLabToolGroup>
     | ReturnType<typeof createJiraToolGroup>,
   name: string,
 ) => group.tools.find((candidate) => candidate.name === name)!;
@@ -61,6 +63,50 @@ describe("provider action tools", () => {
     expect(dispatchWorkflow).toHaveBeenCalledWith(
       expect.objectContaining({ repositoryId: "repo-1", ref: "main" }),
     );
+  });
+
+  test("parses and invokes GitLab merge-request and pipeline operations", async () => {
+    const submitReview = vi.fn().mockResolvedValue(true);
+    const mergeMergeRequest = vi.fn().mockResolvedValue({ id: "mr-1" });
+    const createPipeline = vi.fn().mockResolvedValue({ id: "pipeline-1" });
+    const retryJob = vi.fn().mockResolvedValue({ id: "job-1" });
+    const group = createGitLabToolGroup({
+      submitReview,
+      mergeMergeRequest,
+      createPipeline,
+      retryJob,
+    } as never);
+
+    await tool(group, "gitlab_submit_review").invoke({
+      projectId: "42",
+      iid: 1,
+      outcome: "APPROVE",
+    });
+    await tool(group, "gitlab_merge_merge_request").invoke({
+      projectId: "42",
+      iid: 1,
+      squash: true,
+    });
+    await tool(group, "gitlab_create_pipeline").invoke({
+      projectId: "42",
+      ref: "main",
+      variables: [{ key: "DEPLOY", value: "true" }],
+    });
+    await tool(group, "gitlab_retry_job").invoke({
+      projectId: "42",
+      jobId: "9",
+    });
+
+    expect(submitReview).toHaveBeenCalledWith(
+      expect.objectContaining({ outcome: "APPROVE" }),
+    );
+    expect(mergeMergeRequest).toHaveBeenCalledWith(
+      expect.objectContaining({ squash: true }),
+    );
+    expect(createPipeline).toHaveBeenCalledWith("42", "main", [
+      { key: "DEPLOY", value: "true" },
+    ]);
+    expect(retryJob).toHaveBeenCalledWith("42", "9");
   });
 
   test("parses and invokes Jira issue creation, worklog, and linking operations", async () => {

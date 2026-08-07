@@ -535,7 +535,9 @@ type GitHubRepositoryCandidatePage {
 }
 
 "Represents a GitHub pull request in the GraphQL API."
-type GitHubPullRequest {
+type GitHubPullRequest implements SourceControlRequest {
+  "Source-control provider for this pull request."
+  provider: SourceControlProvider!
   "Stable identifier for this GitHub pull request."
   id: ID!
   "The number associated with this GitHub pull request."

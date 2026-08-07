@@ -3279,6 +3279,24 @@ export class WorkflowsService {
         return false;
       }
     }
+    if (trigger.kind === "GITLAB_NOTE_COMMAND") {
+      const username = getSessionValue(payload, "comment.author.username");
+      const body = getSessionValue(payload, "comment.body");
+      const allow = Array.isArray(config.allowedUsernames)
+        ? config.allowedUsernames
+        : [];
+      if (typeof username !== "string" || !allow.includes(username))
+        return false;
+      if (
+        typeof body !== "string" ||
+        typeof config.commandPattern !== "string" ||
+        !compileRe2(config.commandPattern, {
+          label: "GitLab note command pattern",
+        }).test(body)
+      ) {
+        return false;
+      }
+    }
     if (trigger.kind === "JIRA_ISSUE_COMMAND") {
       // Jira has no stable handle, so the allow-list is keyed on account ID.
       const accountId = getSessionValue(payload, "comment.author.accountId");

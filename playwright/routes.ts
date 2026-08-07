@@ -152,6 +152,31 @@ export const routes: RouteEntry[] = [
     path: `/github-cache/entries/${ids.githubCacheEntries.pullRequests}`,
   },
 
+  // GitLab
+  {
+    name: "gitlab-merge-requests",
+    path: "/gitlab/merge-requests",
+    readyGraphqlOperation: "GitLabMergeRequests",
+    readyTexts: ["Improve pipeline retry diagnostics", "No merge requests"],
+  },
+  {
+    name: "gitlab-pipelines",
+    path: "/gitlab/pipelines",
+    readyGraphqlOperation: "GitLabPipelines",
+    readyTexts: ["#9401 · feature/retry-diagnostics", "No pipelines"],
+  },
+  {
+    name: "gitlab-comments",
+    path: "/gitlab/comments",
+    readyGraphqlOperation: "GitLabCommentMergeRequests",
+    readyTexts: [
+      "Improve pipeline retry diagnostics",
+      "No open merge requests",
+    ],
+  },
+  { name: "gitlab-webhooks", path: "/gitlab/webhooks" },
+  { name: "gitlab-cache", path: "/gitlab/cache" },
+
   // Jira
   { name: "jira-tickets", path: "/jira/tickets" },
   { name: "jira-ticket-detail", path: `/jira/tickets/${ids.jira.issueKey}` },
