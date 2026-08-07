@@ -217,7 +217,7 @@ jobs:
               content: Buffer.from(formula).toString("base64"),
             });
 
-  publish-npm:
+  publish-server:
     needs:
       - tag
     if: >-
@@ -228,6 +228,8 @@ jobs:
     permissions:
       contents: read
       id-token: write
+    env:
+      NPM_CONFIG_REGISTRY: https://registry.npmjs.org
     steps:
       - name: Checkout code
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
@@ -268,29 +270,117 @@ jobs:
         uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: 24
-          registry-url: https://registry.npmjs.org
+
+      - name: Check whether server is already published
+        id: published
+        env:
+          PACKAGE: "@ai-development-environment/server"
+          VERSION: ${{ steps.release.outputs.version }}
+        run: |
+          if npm view "${PACKAGE}@${VERSION}" version >/dev/null 2>&1; then
+            echo "${PACKAGE}@${VERSION} is already published; skipping."
+            echo "exists=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "${PACKAGE}@${VERSION} is not published; continuing."
+            echo "exists=false" >> "$GITHUB_OUTPUT"
+          fi
 
       - name: Install dependencies
+        if: steps.published.outputs.exists != 'true'
         run: npm ci
 
       - name: Build server
+        if: steps.published.outputs.exists != 'true'
         run: npm run build
 
-      - name: Build control agent
-        run: npm run agent:build
-
       - name: Stage server package
+        if: steps.published.outputs.exists != 'true'
         run: node scripts/prepare-npm-server-package.mjs --version "${{ steps.release.outputs.version }}"
 
-      - name: Set control-agent version from tag
-        working-directory: packages/control-agent
-        run: npm version "${{ steps.release.outputs.version }}" --no-git-tag-version
-
       - name: Publish server
+        if: steps.published.outputs.exists != 'true'
         working-directory: .npm-staging/server
         run: npm publish --provenance --access public
 
+  publish-control-agent:
+    needs:
+      - tag
+    if: >-
+      always() &&
+      ((github.event_name == 'push' && needs.tag.result == 'success') ||
+       github.event_name == 'workflow_dispatch')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    env:
+      NPM_CONFIG_REGISTRY: https://registry.npmjs.org
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          fetch-depth: 0
+
+      - name: Resolve release tag
+        id: release
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          PUSH_TAG: ${{ needs.tag.outputs.tag }}
+          MANUAL_TAG: ${{ inputs.tag }}
+        run: |
+          if [[ "$EVENT_NAME" == "push" ]]; then
+            tag="$PUSH_TAG"
+          else
+            tag="$MANUAL_TAG"
+          fi
+
+          if [[ ! "$tag" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "Release tag must match vMAJOR.MINOR.PATCH: $tag" >&2
+            exit 1
+          fi
+
+          git fetch --force --tags origin
+          if ! git rev-parse --verify --quiet "refs/tags/$tag" >/dev/null; then
+            echo "Release tag does not exist: $tag" >&2
+            exit 1
+          fi
+
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          echo "version=${tag#v}" >> "$GITHUB_OUTPUT"
+
+      - name: Checkout release tag
+        run: git checkout "refs/tags/${{ steps.release.outputs.tag }}"
+
+      - name: Set up Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 24
+
+      - name: Check whether control-agent is already published
+        id: published
+        env:
+          PACKAGE: "@ai-development-environment/control-agent"
+          VERSION: ${{ steps.release.outputs.version }}
+        run: |
+          if npm view "${PACKAGE}@${VERSION}" version >/dev/null 2>&1; then
+            echo "${PACKAGE}@${VERSION} is already published; skipping."
+            echo "exists=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "${PACKAGE}@${VERSION} is not published; continuing."
+            echo "exists=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Install dependencies
+        if: steps.published.outputs.exists != 'true'
+        run: npm ci
+
+      - name: Set control-agent version from tag
+        if: steps.published.outputs.exists != 'true'
+        working-directory: packages/control-agent
+        run: npm version "${{ steps.release.outputs.version }}" --no-git-tag-version
+
       - name: Publish control-agent
+        if: steps.published.outputs.exists != 'true'
         working-directory: packages/control-agent
         run: npm publish --provenance --access public
 
