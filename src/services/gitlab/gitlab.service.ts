@@ -215,6 +215,36 @@ function stableStringify(value: unknown): string {
   return JSON.stringify(canonicalize(value));
 }
 
+const SENSITIVE_REQUEST_KEY =
+  /(?:authorization|password|private.?key|secret|signature|token)$/i;
+
+function sanitizeRequestValue(
+  value: unknown,
+  key = "",
+  insideVariables = false,
+): unknown {
+  if (SENSITIVE_REQUEST_KEY.test(key) || (insideVariables && key === "value")) {
+    return "[REDACTED]";
+  }
+  const childInsideVariables = insideVariables || key === "variables";
+  if (Array.isArray(value)) {
+    return value.map((item) =>
+      sanitizeRequestValue(item, "", childInsideVariables),
+    );
+  }
+  if (!value || typeof value !== "object") return value;
+  return Object.fromEntries(
+    Object.entries(value as Record<string, unknown>).map(([itemKey, item]) => [
+      itemKey,
+      sanitizeRequestValue(item, itemKey, childInsideVariables),
+    ]),
+  );
+}
+
+export function gitLabMutationRequestSummary(body: unknown): string {
+  return stableStringify(sanitizeRequestValue(body ?? {})).slice(0, 1000);
+}
+
 function sanitizedError(error: unknown, token?: string | null): string {
   const raw = error instanceof Error ? error.message : String(error);
   return (token ? raw.replaceAll(token, "[REDACTED]") : raw).slice(0, 1000);
@@ -1086,7 +1116,7 @@ export class GitLabService {
           endpoint,
           operation: input.operation,
           requestSource: input.source,
-          requestSummary: stableStringify(input.body ?? {}),
+          requestSummary: gitLabMutationRequestSummary(input.body),
           source: "LIVE",
           durationMs: Date.now() - startedAt,
           statusCode: response.status,
@@ -1101,7 +1131,7 @@ export class GitLabService {
         endpoint,
         operation: input.operation,
         requestSource: input.source,
-        requestSummary: stableStringify(input.body ?? {}),
+        requestSummary: gitLabMutationRequestSummary(input.body),
         source: "ERROR",
         durationMs: Date.now() - startedAt,
         statusCode:
@@ -2491,7 +2521,16 @@ export class GitLabService {
     if (!project?.enabled)
       throw new Error("A managed GitLab project is required");
     const prisma = await getPrismaClient();
-    const id = input.id ?? randomUUID();
+    const existingRule = input.id
+      ? null
+      : await prisma.gitLabAutoRetryRule.findFirst({
+          where: {
+            projectId: input.projectId,
+            pipelineId: input.pipelineId ?? null,
+          },
+          select: { id: true },
+        });
+    const id = input.id ?? existingRule?.id ?? randomUUID();
     await prisma.gitLabAutoRetryRule.upsert({
       where: { id },
       create: {

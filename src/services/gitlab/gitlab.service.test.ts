@@ -4,6 +4,7 @@ import { describe, expect, test } from "vitest";
 
 import {
   gitLabRestCacheKey,
+  gitLabMutationRequestSummary,
   gitLabVersionSupported,
   gitLabWebhookRequestsReview,
   gitLabWebhookProjectId,
@@ -167,6 +168,28 @@ describe("GitLab service primitives", () => {
         query: { page: 1, labels: ["api", "backend"] },
       }),
     ).not.toBe(first);
+  });
+
+  test("redacts secrets and CI variable values from mutation audit summaries", () => {
+    const summary = gitLabMutationRequestSummary({
+      ref: "main",
+      signing_token: "whsec-sensitive",
+      variables: [
+        { key: "DEPLOY_TOKEN", value: "pipeline-secret" },
+        { key: "ENVIRONMENT", value: "production" },
+      ],
+    });
+
+    expect(JSON.parse(summary)).toEqual({
+      ref: "main",
+      signing_token: "[REDACTED]",
+      variables: [
+        { key: "DEPLOY_TOKEN", value: "[REDACTED]" },
+        { key: "ENVIRONMENT", value: "[REDACTED]" },
+      ],
+    });
+    expect(summary).not.toContain("whsec-sensitive");
+    expect(summary).not.toContain("pipeline-secret");
   });
 
   test("round-trips cached response headers used for pagination", () => {
