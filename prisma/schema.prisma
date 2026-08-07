@@ -2366,15 +2366,16 @@ model GitLabProject {
 }
 
 model GitLabRestCacheEntry {
-  id           String   @id
-  cacheKey     String   @unique
-  endpoint     String
-  operation    String
-  requestJson  String
-  responseJson String
-  fetchedAt    DateTime
-  createdAt    DateTime @default(now())
-  updatedAt    DateTime @updatedAt
+  id                  String   @id
+  cacheKey            String   @unique
+  endpoint            String
+  operation           String
+  requestJson         String
+  responseJson        String
+  responseHeadersJson String?
+  fetchedAt           DateTime
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
 
   @@index([operation, fetchedAt])
   @@index([fetchedAt])

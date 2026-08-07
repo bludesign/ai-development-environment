@@ -92,8 +92,17 @@ describe("GitLabMergeRequestsPage", () => {
           scope: "MINE",
           projectId: null,
           state: "OPENED",
+          page: 1,
         });
-        return { gitlabMergeRequests: { items: [mergeRequest] } } as never;
+        return {
+          gitlabMergeRequests: {
+            items: [mergeRequest],
+            total: 1,
+            page: 1,
+            perPage: 25,
+            nextPage: null,
+          },
+        } as never;
       }
       throw new Error(`Unexpected operation: ${query}`);
     });
@@ -127,6 +136,46 @@ describe("GitLabMergeRequestsPage", () => {
         screen.queryByText("No merge requests match these filters."),
       ).toBeNull();
     });
+  });
+
+  test("loads the next page of merge requests", async () => {
+    requestMock.mockImplementation(async (query, variables) => {
+      if (query.includes("GitLabPageConfiguration")) {
+        return configuration as never;
+      }
+      if (query.includes("query GitLabMergeRequests")) {
+        const page = Number((variables as { page: number }).page);
+        return {
+          gitlabMergeRequests: {
+            items: [
+              {
+                ...mergeRequest,
+                id: `merge-request-${page}`,
+                title: `Merge request page ${page}`,
+              },
+            ],
+            total: 26,
+            page,
+            perPage: 25,
+            nextPage: page === 1 ? 2 : null,
+          },
+        } as never;
+      }
+      throw new Error(`Unexpected operation: ${query}`);
+    });
+
+    render(<GitLabMergeRequestsPage />);
+
+    expect(await screen.findByText("Merge request page 1")).toBeDefined();
+    fireEvent.click(screen.getByRole("button", { name: "Next" }));
+    expect(await screen.findByText("Merge request page 2")).toBeDefined();
+    expect(
+      requestMock.mock.calls.some(
+        ([query, variables]) =>
+          query.includes("query GitLabMergeRequests") &&
+          (variables as { page?: number })?.page === 2,
+      ),
+    ).toBe(true);
   });
 });
 
@@ -170,6 +219,10 @@ describe("GitLabPipelinesPage", () => {
                 queuedDuration: 2,
               },
             ],
+            total: 1,
+            page: 1,
+            perPage: 25,
+            nextPage: null,
           },
           gitlabAutoRetryRules: [],
         } as never;

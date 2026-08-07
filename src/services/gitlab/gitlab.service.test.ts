@@ -5,12 +5,16 @@ import { describe, expect, test } from "vitest";
 import {
   gitLabRestCacheKey,
   gitLabVersionSupported,
+  gitLabWebhookRequestsReview,
   gitLabWebhookProjectId,
+  gitLabWebhookTriggerKinds,
   mapGitLabDiscussion,
   mapGitLabPipelineStatus,
   normalizeGitLabBaseUrl,
+  parseGitLabResponseHeaders,
   parseGitLabRateLimitHeaders,
   resolveGitLabPipelineBranch,
+  serializeGitLabResponseHeaders,
   verifyGitLabWebhookSignature,
 } from "./gitlab.service";
 
@@ -163,6 +167,141 @@ describe("GitLab service primitives", () => {
         query: { page: 1, labels: ["api", "backend"] },
       }),
     ).not.toBe(first);
+  });
+
+  test("round-trips cached response headers used for pagination", () => {
+    const serialized = serializeGitLabResponseHeaders(
+      new Headers({
+        "x-next-page": "2",
+        "x-total": "51",
+        "x-request-id": "request-1",
+      }),
+    );
+    const restored = parseGitLabResponseHeaders(serialized);
+    expect(restored.get("x-next-page")).toBe("2");
+    expect(restored.get("x-total")).toBe("51");
+    expect(restored.get("x-request-id")).toBe("request-1");
+    expect([...parseGitLabResponseHeaders("not-json")]).toEqual([]);
+  });
+
+  test("classifies merge request updates by their changed fields", () => {
+    const payload = (extra: Record<string, unknown>) => ({
+      object_kind: "merge_request",
+      object_attributes: { action: "update" },
+      ...extra,
+    });
+    expect(
+      gitLabWebhookTriggerKinds(
+        payload({ changes: { title: { previous: "A", current: "B" } } }),
+      ),
+    ).toEqual([]);
+    expect(
+      gitLabWebhookTriggerKinds(
+        payload({
+          object_attributes: { action: "update", oldrev: "previous-sha" },
+        }),
+      ),
+    ).toEqual(["GITLAB_MR_SYNCHRONIZED"]);
+    expect(
+      gitLabWebhookTriggerKinds(
+        payload({ changes: { labels: { previous: [], current: ["bug"] } } }),
+      ),
+    ).toEqual(["GITLAB_MR_LABEL"]);
+    expect(
+      gitLabWebhookTriggerKinds(
+        payload({ changes: { draft: { previous: true, current: false } } }),
+      ),
+    ).toEqual(["GITLAB_MR_STATE"]);
+  });
+
+  test("ignores non-merge-request notes when classifying workflow events", () => {
+    const note = {
+      object_kind: "note",
+      object_attributes: {
+        note: "/submit_review approve",
+        noteable_type: "Issue",
+      },
+      issue: { id: 42 },
+    };
+    expect(gitLabWebhookTriggerKinds(note)).toEqual([]);
+    expect(
+      gitLabWebhookTriggerKinds({
+        ...note,
+        object_attributes: {
+          ...note.object_attributes,
+          noteable_type: "MergeRequest",
+        },
+        merge_request: { id: 7, iid: 3 },
+      }),
+    ).toEqual([
+      "GITLAB_REVIEW_COMMENT",
+      "GITLAB_NOTE_COMMAND",
+      "GITLAB_REVIEW_APPROVED",
+    ]);
+  });
+
+  test("detects only review requests targeting the configured viewer", () => {
+    const viewer = { id: "7", username: "reviewer" };
+    expect(
+      gitLabWebhookRequestsReview(
+        {
+          object_kind: "merge_request",
+          object_attributes: { action: "open" },
+          reviewers: [{ id: 8, username: "someone-else" }],
+        },
+        viewer,
+      ),
+    ).toBe(false);
+    expect(
+      gitLabWebhookRequestsReview(
+        {
+          object_kind: "merge_request",
+          object_attributes: { action: "open" },
+          reviewers: [{ id: 7, username: "reviewer" }],
+        },
+        viewer,
+      ),
+    ).toBe(true);
+    expect(
+      gitLabWebhookRequestsReview(
+        {
+          object_kind: "merge_request",
+          object_attributes: { action: "approved" },
+          reviewers: [{ id: 7, username: "reviewer" }],
+        },
+        viewer,
+      ),
+    ).toBe(false);
+    expect(
+      gitLabWebhookRequestsReview(
+        {
+          object_kind: "merge_request",
+          object_attributes: { action: "update" },
+          changes: {
+            reviewers: [
+              [{ id: 8, username: "someone-else" }],
+              [{ id: 7, username: "reviewer", state: "unreviewed" }],
+            ],
+          },
+        },
+        viewer,
+      ),
+    ).toBe(true);
+    expect(
+      gitLabWebhookRequestsReview(
+        {
+          object_kind: "merge_request",
+          object_attributes: { action: "update" },
+          changes: {
+            reviewers: {
+              previous: [{ id: 7, username: "reviewer" }],
+              current: [{ id: 7, username: "reviewer", re_requested: true }],
+            },
+          },
+        },
+        viewer,
+      ),
+    ).toBe(true);
   });
 
   test("selects the project secret from both supported payload shapes", () => {

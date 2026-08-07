@@ -304,7 +304,7 @@ export const APP_DESTINATIONS: AppDestination[] = [
     icon: Webhook,
     section: "github",
     sidebar: true,
-    features: ["github", "webhooks"],
+    feature: "webhooks",
   },
   {
     key: "comments",

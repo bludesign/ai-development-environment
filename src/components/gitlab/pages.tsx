@@ -62,6 +62,7 @@ import type {
   GitLabProjectView,
   GitLabSettingsView,
   GitLabWebhookDeliveryView,
+  Paginated,
 } from "@/services/gitlab";
 
 import {
@@ -93,6 +94,11 @@ type Configuration = {
   settings: GitLabSettingsView;
   projects: GitLabProjectView[];
 };
+
+type GitLabPagination = Pick<
+  Paginated<unknown>,
+  "total" | "page" | "perPage" | "nextPage"
+>;
 
 const ALL_PROJECTS_VALUE = "__all_projects__";
 
@@ -137,6 +143,55 @@ function PageHeader({
     <div>
       <h1 className="text-2xl font-semibold tracking-tight">{title}</h1>
       <p className="mt-1 text-sm text-muted-foreground">{description}</p>
+    </div>
+  );
+}
+
+function PaginationControls({
+  busy,
+  onPageChange,
+  pagination,
+}: {
+  busy: boolean;
+  onPageChange: (page: number) => void;
+  pagination: GitLabPagination | null;
+}) {
+  const t = useTranslations("gitlabPages");
+  if (!pagination || (pagination.page === 1 && pagination.nextPage === null)) {
+    return null;
+  }
+  return (
+    <div className="flex flex-wrap items-center justify-between gap-3 text-sm">
+      <span className="text-muted-foreground">
+        {t("pageSummary", {
+          page: pagination.page,
+          total: pagination.total,
+        })}
+      </span>
+      <div className="flex gap-2">
+        <Button
+          disabled={busy || pagination.page <= 1}
+          onClick={() => onPageChange(pagination.page - 1)}
+          size="sm"
+          type="button"
+          variant="outline"
+        >
+          {t("previous")}
+        </Button>
+        <Button
+          disabled={busy || pagination.nextPage === null}
+          onClick={() => {
+            if (pagination.nextPage !== null) {
+              onPageChange(pagination.nextPage);
+            }
+          }}
+          size="sm"
+          type="button"
+          variant="outline"
+        >
+          {t("next")}
+        </Button>
+      </div>
     </div>
   );
 }
@@ -226,6 +281,8 @@ export function GitLabMergeRequestsPage() {
   const [scope, setScope] = useState<GitLabMergeRequestScope>("MINE");
   const [projectId, setProjectId] = useState("");
   const [state, setState] = useState("OPENED");
+  const [page, setPage] = useState(1);
+  const [pagination, setPagination] = useState<GitLabPagination | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -234,26 +291,31 @@ export function GitLabMergeRequestsPage() {
     setBusy(true);
     try {
       const data = await controlPlaneRequest<{
-        gitlabMergeRequests: { items: GitLabMergeRequestView[] };
+        gitlabMergeRequests: Paginated<GitLabMergeRequestView>;
       }>(
-        `query GitLabMergeRequests($scope: GitLabMergeRequestScope!, $projectId: ID, $state: GitLabMergeRequestState!) {
-        gitlabMergeRequests(scope: $scope, projectId: $projectId, state: $state) { items { ${MR} } }
+        `query GitLabMergeRequests($scope: GitLabMergeRequestScope!, $projectId: ID, $state: GitLabMergeRequestState!, $page: Int!) {
+        gitlabMergeRequests(scope: $scope, projectId: $projectId, state: $state, page: $page) {
+          total page perPage nextPage items { ${MR} }
+        }
       }`,
         {
           scope: projectId ? "PROJECT" : scope,
           projectId: projectId || null,
           state,
+          page,
         },
       );
       setItems(data.gitlabMergeRequests.items);
+      setPagination(data.gitlabMergeRequests);
       setError(null);
     } catch (value) {
       setItems([]);
+      setPagination(null);
       setError(value instanceof Error ? value.message : String(value));
     } finally {
       setBusy(false);
     }
-  }, [configuration?.settings.configured, projectId, scope, state]);
+  }, [configuration?.settings.configured, page, projectId, scope, state]);
 
   useEffect(() => {
     if (!configuration?.settings.configured) return;
@@ -274,15 +336,19 @@ export function GitLabMergeRequestsPage() {
         <CardContent className="flex flex-wrap items-center gap-3 py-4">
           <ProjectSelect
             allowAll
-            onChange={setProjectId}
+            onChange={(value) => {
+              setPage(1);
+              setProjectId(value);
+            }}
             projects={configuration.projects}
             value={projectId}
           />
           <Select
             disabled={Boolean(projectId)}
-            onValueChange={(value) =>
-              setScope(value as GitLabMergeRequestScope)
-            }
+            onValueChange={(value) => {
+              setPage(1);
+              setScope(value as GitLabMergeRequestScope);
+            }}
             value={scope}
           >
             <SelectTrigger aria-label={t("scope")} className="h-9">
@@ -296,7 +362,13 @@ export function GitLabMergeRequestsPage() {
               </SelectItem>
             </SelectContent>
           </Select>
-          <Select onValueChange={setState} value={state}>
+          <Select
+            onValueChange={(value) => {
+              setPage(1);
+              setState(value);
+            }}
+            value={state}
+          >
             <SelectTrigger aria-label={t("state")} className="h-9">
               <SelectValue />
             </SelectTrigger>
@@ -357,6 +429,11 @@ export function GitLabMergeRequestsPage() {
           ))
         )}
       </div>
+      <PaginationControls
+        busy={busy}
+        onPageChange={setPage}
+        pagination={pagination}
+      />
     </section>
   );
 }
@@ -700,6 +777,8 @@ export function GitLabPipelinesPage() {
   } = useConfiguration();
   const [projectId, setProjectId] = useState("");
   const [pipelines, setPipelines] = useState<GitLabPipelineView[]>([]);
+  const [page, setPage] = useState(1);
+  const [pagination, setPagination] = useState<GitLabPagination | null>(null);
   const [expandedPipelines, setExpandedPipelines] = useState<Set<string>>(
     new Set(),
   );
@@ -730,13 +809,14 @@ export function GitLabPipelinesPage() {
     setBusy(true);
     try {
       const data = await controlPlaneRequest<{
-        gitlabPipelines: { items: GitLabPipelineView[] };
+        gitlabPipelines: Paginated<GitLabPipelineView>;
         gitlabAutoRetryRules: GitLabAutoRetryRuleView[];
       }>(
-        `query GitLabPipelines($projectId: ID!) { gitlabPipelines(projectId: $projectId) { items { ${PIPELINE} } } gitlabAutoRetryRules(projectId: $projectId) { id projectId pipelineId enabled maxAttempts attempts lastError lastAttemptAt createdAt updatedAt executions { id pipelineId attempt status lastError createdAt updatedAt } } }`,
-        { projectId },
+        `query GitLabPipelines($projectId: ID!, $page: Int!) { gitlabPipelines(projectId: $projectId, page: $page) { total page perPage nextPage items { ${PIPELINE} } } gitlabAutoRetryRules(projectId: $projectId) { id projectId pipelineId enabled maxAttempts attempts lastError lastAttemptAt createdAt updatedAt executions { id pipelineId attempt status lastError createdAt updatedAt } } }`,
+        { projectId, page },
       );
       setPipelines(data.gitlabPipelines.items);
+      setPagination(data.gitlabPipelines);
       setAutoRetryRules(data.gitlabAutoRetryRules);
       setError(null);
     } catch (value) {
@@ -744,7 +824,7 @@ export function GitLabPipelinesPage() {
     } finally {
       setBusy(false);
     }
-  }, [projectId]);
+  }, [page, projectId]);
 
   useEffect(() => {
     if (!projectId) return;
@@ -891,6 +971,7 @@ export function GitLabPipelinesPage() {
         <CardContent className="flex flex-wrap gap-3 py-4">
           <ProjectSelect
             onChange={(value) => {
+              setPage(1);
               setProjectId(value);
               setExpandedPipelines(new Set());
               setJobStates({});
@@ -1168,6 +1249,15 @@ export function GitLabPipelinesPage() {
           </TableBody>
         </Table>
       </Card>
+      <PaginationControls
+        busy={busy}
+        onPageChange={(nextPage) => {
+          setExpandedPipelines(new Set());
+          setJobStates({});
+          setPage(nextPage);
+        }}
+        pagination={pagination}
+      />
     </section>
   );
 }
@@ -1254,22 +1344,40 @@ export function GitLabCommentsPage() {
   const t = useTranslations("gitlabPages");
   const { configuration, loading } = useConfiguration();
   const [items, setItems] = useState<GitLabMergeRequestView[]>([]);
+  const [page, setPage] = useState(1);
+  const [pagination, setPagination] = useState<GitLabPagination | null>(null);
+  const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const load = useCallback(async () => {
+    if (!configuration?.settings.configured) return;
+    setBusy(true);
+    try {
+      const data = await controlPlaneRequest<{
+        gitlabMergeRequests: Paginated<GitLabMergeRequestView>;
+      }>(
+        `query GitLabCommentMergeRequests($page: Int!) {
+          gitlabMergeRequests(scope: REVIEW_REQUESTED, state: OPENED, page: $page) {
+            total page perPage nextPage items { ${MR} }
+          }
+        }`,
+        { page },
+      );
+      setItems(data.gitlabMergeRequests.items);
+      setPagination(data.gitlabMergeRequests);
+      setError(null);
+    } catch (value) {
+      setItems([]);
+      setPagination(null);
+      setError(value instanceof Error ? value.message : String(value));
+    } finally {
+      setBusy(false);
+    }
+  }, [configuration?.settings.configured, page]);
   useEffect(() => {
     if (!configuration?.settings.configured) return;
-    const timeout = window.setTimeout(() => {
-      void controlPlaneRequest<{
-        gitlabMergeRequests: { items: GitLabMergeRequestView[] };
-      }>(
-        `query GitLabCommentMergeRequests { gitlabMergeRequests(scope: REVIEW_REQUESTED, state: OPENED) { items { ${MR} } } }`,
-      )
-        .then((data) => setItems(data.gitlabMergeRequests.items))
-        .catch((value) =>
-          setError(value instanceof Error ? value.message : String(value)),
-        );
-    }, 0);
+    const timeout = window.setTimeout(() => void load(), 0);
     return () => window.clearTimeout(timeout);
-  }, [configuration?.settings.configured]);
+  }, [configuration?.settings.configured, load]);
   if (loading) return <Spinner />;
   if (!configuration?.settings.configured) return <ProviderNotConfigured />;
   return (
@@ -1295,7 +1403,7 @@ export function GitLabCommentsPage() {
             </CardContent>
           </Card>
         ))}
-        {items.length === 0 && (
+        {items.length === 0 && !busy && !error && (
           <Card>
             <CardContent className="py-8 text-sm text-muted-foreground">
               {t("noReviewRequests")}
@@ -1303,6 +1411,11 @@ export function GitLabCommentsPage() {
           </Card>
         )}
       </div>
+      <PaginationControls
+        busy={busy}
+        onPageChange={setPage}
+        pagination={pagination}
+      />
     </section>
   );
 }

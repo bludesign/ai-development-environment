@@ -472,6 +472,172 @@ export function gitLabRestCacheKey(input: {
     .digest("hex");
 }
 
+export function serializeGitLabResponseHeaders(headers: Headers): string {
+  return JSON.stringify(Object.fromEntries(headers.entries()));
+}
+
+export function parseGitLabResponseHeaders(
+  value: string | null | undefined,
+): Headers {
+  if (!value) return new Headers();
+  try {
+    const parsed = JSON.parse(value) as unknown;
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+      return new Headers();
+    }
+    return new Headers(
+      Object.fromEntries(
+        Object.entries(parsed).filter(
+          (entry): entry is [string, string] => typeof entry[1] === "string",
+        ),
+      ),
+    );
+  } catch {
+    return new Headers();
+  }
+}
+
+function recordValue(value: unknown): Record<string, unknown> {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : {};
+}
+
+function owns(value: Record<string, unknown>, key: string): boolean {
+  return Object.prototype.hasOwnProperty.call(value, key);
+}
+
+function changeCurrent(value: unknown): unknown {
+  if (Array.isArray(value)) return value[1];
+  const change = recordValue(value);
+  return change.current;
+}
+
+function reviewerChange(value: unknown): {
+  previous: Array<Record<string, unknown>>;
+  current: Array<Record<string, unknown>>;
+} {
+  const change = recordValue(value);
+  const values = Array.isArray(value)
+    ? value
+    : [change.previous, change.current];
+  const reviewers = (candidate: unknown) =>
+    Array.isArray(candidate)
+      ? candidate.map(recordValue).filter((item) => Object.keys(item).length)
+      : [];
+  return {
+    previous: reviewers(values[0]),
+    current: reviewers(values[1]),
+  };
+}
+
+export function gitLabWebhookTriggerKinds(
+  payload: Record<string, unknown>,
+): string[] {
+  const kind = String(payload.object_kind ?? "").toLowerCase();
+  const attributes = recordValue(payload.object_attributes);
+  const changes = recordValue(payload.changes);
+  const action = String(attributes.action ?? "").toLowerCase();
+  const status = String(attributes.status ?? "").toLowerCase();
+  const triggerKinds: string[] = [];
+
+  if (kind === "merge_request") {
+    const becameReady =
+      action === "update" &&
+      owns(changes, "draft") &&
+      changeCurrent(changes.draft) === false;
+    if (["open", "reopen"].includes(action) || becameReady) {
+      triggerKinds.push("GITLAB_MR_STATE");
+    }
+    if (["close", "merge"].includes(action)) {
+      triggerKinds.push("GITLAB_MR_CLOSED");
+    }
+    if (
+      action === "update" &&
+      typeof attributes.oldrev === "string" &&
+      attributes.oldrev.trim()
+    ) {
+      triggerKinds.push("GITLAB_MR_SYNCHRONIZED");
+    }
+    if (action === "approved" || action === "approval") {
+      triggerKinds.push("GITLAB_REVIEW_APPROVED");
+    }
+    if (action === "update" && owns(changes, "labels")) {
+      triggerKinds.push("GITLAB_MR_LABEL");
+    }
+  } else if (kind === "note") {
+    const mergeRequest = recordValue(payload.merge_request);
+    if (!Object.keys(mergeRequest).length) return [];
+    triggerKinds.push("GITLAB_REVIEW_COMMENT", "GITLAB_NOTE_COMMAND");
+    const body = String(attributes.note ?? "");
+    if (body.includes("/submit_review requested_changes")) {
+      triggerKinds.push("GITLAB_REVIEW_CHANGES_REQUESTED");
+    }
+    if (body.includes("/submit_review approve")) {
+      triggerKinds.push("GITLAB_REVIEW_APPROVED");
+    }
+  } else if (kind === "pipeline") {
+    triggerKinds.push("GITLAB_PIPELINE_STATUS_CHANGED");
+    if (["success", "failed", "canceled", "skipped"].includes(status)) {
+      triggerKinds.push("GITLAB_PIPELINE_RESULT");
+    }
+    if (status === "failed") triggerKinds.push("GITLAB_PIPELINE_FAILED");
+    if (status === "success") triggerKinds.push("GITLAB_PIPELINE_SUCCEEDED");
+  } else if (kind === "build") {
+    triggerKinds.push("GITLAB_JOB_STATUS_CHANGED");
+  } else if (kind === "push") {
+    const project = recordValue(payload.project);
+    const defaultBranch = String(project.default_branch ?? "");
+    const ref = String(payload.ref ?? "");
+    if (defaultBranch && ref === `refs/heads/${defaultBranch}`) {
+      triggerKinds.push("GITLAB_PUSH_DEFAULT");
+    }
+  }
+
+  return [...new Set(triggerKinds)];
+}
+
+export function gitLabWebhookRequestsReview(
+  payload: Record<string, unknown>,
+  viewer: { id: string | null; username: string | null },
+): boolean {
+  if (String(payload.object_kind ?? "").toLowerCase() !== "merge_request") {
+    return false;
+  }
+  if (!viewer.id && !viewer.username) return false;
+  const attributes = recordValue(payload.object_attributes);
+  const action = String(attributes.action ?? "").toLowerCase();
+  const matchesViewer = (reviewer: Record<string, unknown>) =>
+    (viewer.id != null && String(reviewer.id ?? "") === viewer.id) ||
+    (viewer.username != null &&
+      String(reviewer.username ?? "").toLowerCase() ===
+        viewer.username.toLowerCase());
+
+  if (["open", "reopen"].includes(action)) {
+    return Array.isArray(payload.reviewers)
+      ? payload.reviewers.map(recordValue).some(matchesViewer)
+      : false;
+  }
+  if (action !== "update") return false;
+  const changes = recordValue(payload.changes);
+  if (!owns(changes, "reviewers")) return false;
+  const reviewers = reviewerChange(changes.reviewers);
+  const current = reviewers.current.find(matchesViewer);
+  if (!current) return false;
+  return (
+    current.re_requested === true || !reviewers.previous.some(matchesViewer)
+  );
+}
+
+function isUniqueConstraintError(error: unknown): boolean {
+  return (
+    typeof error === "object" &&
+    error !== null &&
+    "code" in error &&
+    error.code === "P2002"
+  );
+}
+
 export function gitLabWebhookProjectId(
   payload: Record<string, unknown>,
 ): string | null {
@@ -794,7 +960,7 @@ export class GitLabService {
       return {
         data: json(cached.responseJson) as T,
         status: 200,
-        headers: new Headers(),
+        headers: parseGitLabResponseHeaders(cached.responseHeadersJson),
         endpoint,
         rateLimit: {
           limit: null,
@@ -821,6 +987,9 @@ export class GitLabService {
             operation: input.operation,
             requestJson: stableStringify(request),
             responseJson: JSON.stringify(response.data),
+            responseHeadersJson: serializeGitLabResponseHeaders(
+              response.headers,
+            ),
             fetchedAt: new Date(),
           },
           update: {
@@ -828,6 +997,9 @@ export class GitLabService {
             operation: input.operation,
             requestJson: stableStringify(request),
             responseJson: JSON.stringify(response.data),
+            responseHeadersJson: serializeGitLabResponseHeaders(
+              response.headers,
+            ),
             fetchedAt: new Date(),
           },
         }),
@@ -864,7 +1036,7 @@ export class GitLabService {
         return {
           data: json(cached.responseJson) as T,
           status: 200,
-          headers: new Headers(),
+          headers: parseGitLabResponseHeaders(cached.responseHeadersJson),
           endpoint,
           rateLimit: {
             limit: null,
@@ -2448,8 +2620,6 @@ export class GitLabService {
     const attributes = value("object_attributes");
     const user = value("user");
     const kind = String(input.payload.object_kind ?? "").toLowerCase();
-    const status = String(attributes.status ?? "").toLowerCase();
-    const action = String(attributes.action ?? "").toLowerCase();
     const sessionData: Record<string, unknown> = {
       repo: {
         provider: "GITLAB",
@@ -2482,7 +2652,7 @@ export class GitLabService {
             : null,
         targetBranch: attributes.target_branch ?? null,
         url: attributes.url ?? null,
-        labels: attributes.labels ?? [],
+        labels: input.payload.labels ?? attributes.labels ?? [],
       };
     } else if (kind === "pipeline") {
       sessionData.pipeline = {
@@ -2532,41 +2702,7 @@ export class GitLabService {
       };
     }
 
-    const triggerKinds: string[] = [];
-    if (kind === "merge_request") {
-      if (["open", "reopen", "update"].includes(action))
-        triggerKinds.push("GITLAB_MR_STATE");
-      if (["close", "merge"].includes(action))
-        triggerKinds.push("GITLAB_MR_CLOSED");
-      if (action === "update") triggerKinds.push("GITLAB_MR_SYNCHRONIZED");
-      if (action === "approved" || action === "approval")
-        triggerKinds.push("GITLAB_REVIEW_APPROVED");
-      if (action.includes("label")) triggerKinds.push("GITLAB_MR_LABEL");
-    } else if (kind === "note") {
-      triggerKinds.push("GITLAB_REVIEW_COMMENT", "GITLAB_NOTE_COMMAND");
-      const body = String(attributes.note ?? "");
-      if (body.includes("/submit_review requested_changes")) {
-        triggerKinds.push("GITLAB_REVIEW_CHANGES_REQUESTED");
-      }
-      if (body.includes("/submit_review approve")) {
-        triggerKinds.push("GITLAB_REVIEW_APPROVED");
-      }
-    } else if (kind === "pipeline") {
-      triggerKinds.push("GITLAB_PIPELINE_STATUS_CHANGED");
-      if (["success", "failed", "canceled", "skipped"].includes(status)) {
-        triggerKinds.push("GITLAB_PIPELINE_RESULT");
-      }
-      if (status === "failed") triggerKinds.push("GITLAB_PIPELINE_FAILED");
-      if (status === "success") triggerKinds.push("GITLAB_PIPELINE_SUCCEEDED");
-    } else if (kind === "build") {
-      triggerKinds.push("GITLAB_JOB_STATUS_CHANGED");
-    } else if (kind === "push") {
-      const defaultBranch = String(project.default_branch ?? "");
-      const ref = String(input.payload.ref ?? "");
-      if (defaultBranch && ref === `refs/heads/${defaultBranch}`) {
-        triggerKinds.push("GITLAB_PUSH_DEFAULT");
-      }
-    }
+    const triggerKinds = gitLabWebhookTriggerKinds(input.payload);
     await Promise.all(
       [...new Set(triggerKinds)].map((triggerKind) =>
         this.workflowEvents!.record({
@@ -2615,12 +2751,21 @@ export class GitLabService {
       body = `${String(attributes.ref ?? "Pipeline")} · #${pipelineId}`;
       resourceKind = "GITLAB_PIPELINE";
       resourceId = `${input.projectId}:${pipelineId}`;
-    } else if (
-      kind === "merge_request" &&
-      ["open", "reopen", "approved"].includes(
-        String(attributes.action ?? "").toLowerCase(),
-      )
-    ) {
+    } else if (kind === "merge_request") {
+      const settings = await (
+        await getPrismaClient()
+      ).gitLabSettings.findUnique({
+        where: { id: SETTINGS_ID },
+        select: { currentUserId: true, currentUsername: true },
+      });
+      if (
+        !gitLabWebhookRequestsReview(input.payload, {
+          id: settings?.currentUserId ?? null,
+          username: settings?.currentUsername ?? null,
+        })
+      ) {
+        return;
+      }
       typeKey = "GITLAB_REVIEW_REQUESTED";
       const iid = String(attributes.iid ?? "");
       href = `/gitlab/merge-requests/${encodeURIComponent(input.projectId)}/${encodeURIComponent(iid)}`;
@@ -2680,10 +2825,6 @@ export class GitLabService {
       signingToken: token,
     });
     const prisma = await getPrismaClient();
-    const existing = await prisma.gitLabWebhookDelivery.findUnique({
-      where: { webhookId: messageId },
-    });
-    if (existing) return { duplicate: true };
     const objectAttributes = source.object_attributes;
     const action =
       objectAttributes &&
@@ -2691,72 +2832,102 @@ export class GitLabService {
       "action" in objectAttributes
         ? String((objectAttributes as { action: unknown }).action)
         : null;
-    await prisma.$transaction([
-      prisma.gitLabWebhookDelivery.create({
+    const deliveryData = {
+      eventType,
+      projectId,
+      objectKind:
+        typeof source.object_kind === "string" ? source.object_kind : null,
+      action,
+      outcome: "RECEIVED",
+      error: null,
+      payloadJson: input.rawBody.slice(0, 1_000_000),
+      receivedAt: new Date(seconds * 1000),
+      processedAt: null,
+    };
+    try {
+      await prisma.gitLabWebhookDelivery.create({
         data: {
           id: randomUUID(),
           webhookId: messageId,
-          eventType,
-          projectId,
-          objectKind:
-            typeof source.object_kind === "string" ? source.object_kind : null,
-          action,
-          outcome: "PROCESSED",
-          payloadJson: input.rawBody.slice(0, 1_000_000),
-          receivedAt: new Date(seconds * 1000),
-          processedAt: new Date(),
+          ...deliveryData,
         },
-      }),
-      prisma.gitLabProject.updateMany({
-        where: { id: projectId },
-        data: { webhookLastReceivedAt: new Date(), webhookError: null },
-      }),
-      prisma.gitLabRestCacheEntry.deleteMany({
+      });
+    } catch (error) {
+      if (!isUniqueConstraintError(error)) throw error;
+      const retried = await prisma.gitLabWebhookDelivery.updateMany({
         where: {
-          endpoint: { contains: `/projects/${encodeURIComponent(projectId)}/` },
+          webhookId: messageId,
+          outcome: { notIn: ["PROCESSED", "IGNORED"] },
         },
-      }),
-    ]);
-    await this.recordWebhookWorkflowEvents({
-      messageId,
-      eventType,
-      projectId,
-      payload: source,
-    });
-    await this.recordWebhookNotification({
-      messageId,
-      projectId,
-      payload: source,
-    });
-    if (
-      String(source.object_kind ?? "").toLowerCase() === "pipeline" &&
-      ["failed", "canceled"].includes(
-        String(
-          source.object_attributes &&
-            typeof source.object_attributes === "object" &&
-            "status" in source.object_attributes
-            ? (source.object_attributes as { status: unknown }).status
-            : "",
-        ).toLowerCase(),
-      )
-    ) {
-      const attributes = source.object_attributes as Record<string, unknown>;
-      if (attributes.id != null) {
-        await this.autoRetryFailedPipeline(projectId, String(attributes.id));
-      }
+        data: deliveryData,
+      });
+      if (retried.count === 0) return { duplicate: true };
     }
-    if (String(source.object_kind ?? "").toLowerCase() === "pipeline") {
-      const attributes = source.object_attributes as Record<string, unknown>;
-      if (attributes.id != null) {
-        try {
-          this.publishPipeline(
-            await this.pipeline(projectId, String(attributes.id)),
-          );
-        } catch {
-          // The durable webhook record remains authoritative if refresh fails.
+    const finish = async (outcome: string, error: string | null = null) => {
+      await prisma.gitLabWebhookDelivery.update({
+        where: { webhookId: messageId },
+        data: { outcome, error, processedAt: new Date() },
+      });
+    };
+    try {
+      await prisma.$transaction([
+        prisma.gitLabProject.updateMany({
+          where: { id: projectId },
+          data: { webhookLastReceivedAt: new Date(), webhookError: null },
+        }),
+        prisma.gitLabRestCacheEntry.deleteMany({
+          where: {
+            endpoint: {
+              contains: `/projects/${encodeURIComponent(projectId)}/`,
+            },
+          },
+        }),
+      ]);
+      await this.recordWebhookWorkflowEvents({
+        messageId,
+        eventType,
+        projectId,
+        payload: source,
+      });
+      await this.recordWebhookNotification({
+        messageId,
+        projectId,
+        payload: source,
+      });
+      if (
+        String(source.object_kind ?? "").toLowerCase() === "pipeline" &&
+        ["failed", "canceled"].includes(
+          String(
+            source.object_attributes &&
+              typeof source.object_attributes === "object" &&
+              "status" in source.object_attributes
+              ? (source.object_attributes as { status: unknown }).status
+              : "",
+          ).toLowerCase(),
+        )
+      ) {
+        const attributes = source.object_attributes as Record<string, unknown>;
+        if (attributes.id != null) {
+          await this.autoRetryFailedPipeline(projectId, String(attributes.id));
         }
       }
+      if (String(source.object_kind ?? "").toLowerCase() === "pipeline") {
+        const attributes = source.object_attributes as Record<string, unknown>;
+        if (attributes.id != null) {
+          try {
+            this.publishPipeline(
+              await this.pipeline(projectId, String(attributes.id)),
+            );
+          } catch {
+            // The durable webhook record remains authoritative if refresh fails.
+          }
+        }
+      }
+      await finish("PROCESSED");
+      return { duplicate: false };
+    } catch (error) {
+      await finish("ERROR", sanitizedError(error, token));
+      throw error;
     }
-    return { duplicate: false };
   }
 }
