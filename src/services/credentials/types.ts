@@ -17,6 +17,9 @@ export const CREDENTIAL_KINDS = {
   githubAppSettings: "github-app-settings",
   githubAppPrivateKey: "github-app-private-key",
   githubAppWebhookSecret: "github-app-webhook-secret",
+  gitlabConnectionSettings: "gitlab-connection-settings",
+  gitlabAccessToken: "gitlab-access-token",
+  gitlabWebhookSigningSecrets: "gitlab-webhook-signing-secrets",
   cacheServerSettings: "cache-server-settings",
   cacheServerApiKey: "cache-server-api-key",
   externalMcpServerHeaders: "external-mcp-server-headers",
@@ -78,6 +81,21 @@ export const CREDENTIALS = {
   githubAppWebhookSecret: {
     id: "github-app/default/webhook-secret",
     kind: CREDENTIAL_KINDS.githubAppWebhookSecret,
+    ownerId: "default",
+  },
+  gitlabConnectionSettings: {
+    id: "gitlab/default/connection-settings",
+    kind: CREDENTIAL_KINDS.gitlabConnectionSettings,
+    ownerId: "default",
+  },
+  gitlabAccessToken: {
+    id: "gitlab/default/access-token",
+    kind: CREDENTIAL_KINDS.gitlabAccessToken,
+    ownerId: "default",
+  },
+  gitlabWebhookSigningSecrets: {
+    id: "gitlab/default/webhook-signing-secrets",
+    kind: CREDENTIAL_KINDS.gitlabWebhookSigningSecrets,
     ownerId: "default",
   },
   cacheServerSettings: {
@@ -250,6 +268,10 @@ export function credentialOwnerFeature(kind: string): string {
     case CREDENTIAL_KINDS.githubAppPrivateKey:
     case CREDENTIAL_KINDS.githubAppWebhookSecret:
       return "GitHub";
+    case CREDENTIAL_KINDS.gitlabConnectionSettings:
+    case CREDENTIAL_KINDS.gitlabAccessToken:
+    case CREDENTIAL_KINDS.gitlabWebhookSigningSecrets:
+      return "GitLab";
     case CREDENTIAL_KINDS.cacheServerSettings:
     case CREDENTIAL_KINDS.cacheServerApiKey:
       return "Actions cache";

@@ -13,6 +13,7 @@ import type { DiskSpaceService } from "@/services/disk-space";
 import type { CredentialService } from "@/services/credentials";
 import type { CommandsService } from "@/services/commands";
 import type { GitHubService } from "@/services/github";
+import type { GitLabService } from "@/services/gitlab";
 import type { JiraService, JiraWebhookService } from "@/services/jira";
 import type { IosDevicesService } from "@/services/ios-devices";
 import type { ModelCostsService } from "@/services/model-costs";
@@ -39,6 +40,7 @@ import { createDebuggingToolGroup } from "./builtin-tools/debugging";
 import { createDiskSpaceToolGroup } from "./builtin-tools/disk-space";
 import { createCommandToolGroup } from "./builtin-tools/commands";
 import { createGitHubToolGroup } from "./builtin-tools/github";
+import { createGitLabToolGroup } from "./builtin-tools/gitlab";
 import { createJiraToolGroup } from "./builtin-tools/jira";
 import { createIosDeviceToolGroup } from "./builtin-tools/ios-devices";
 import { createNotificationToolGroup } from "./builtin-tools/notifications";
@@ -123,6 +125,7 @@ export type BuiltInToolServices = {
   jira?: JiraService;
   jiraWebhooks?: JiraWebhookService;
   github?: GitHubService;
+  gitlab?: GitLabService;
   buildData?: BuildDataService;
   cacheServer?: CacheServerService;
   ccusage?: CcusageService;
@@ -300,6 +303,7 @@ export function createBuiltInToolRegistry(
   if (services.jira && services.jiraWebhooks)
     groups.push(createJiraToolGroup(services.jira, services.jiraWebhooks));
   if (services.github) groups.push(createGitHubToolGroup(services.github));
+  if (services.gitlab) groups.push(createGitLabToolGroup(services.gitlab));
   if (services.skills) groups.push(createSkillToolGroup(services.skills));
   if (services.buildData)
     groups.push(createBuildDataToolGroup(services.buildData));
@@ -327,6 +331,7 @@ export function createBuiltInToolRegistry(
         services.cacheServer,
         services.jira,
         services.github,
+        services.gitlab,
       ),
     );
   if (services.toolAudit && services.testExternalMcpServer) {

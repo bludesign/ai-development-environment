@@ -23,6 +23,7 @@ import { seedNotifications } from "./mock-data/notifications";
 import { seedSigning } from "./mock-data/signing";
 import { seedCredentials } from "./mock-data/credentials";
 import { seedGitHub } from "./mock-data/github";
+import { seedGitLab } from "./mock-data/gitlab";
 import { seedJira, seedJiraWebhooks } from "./mock-data/jira";
 import { seedWorkflows } from "./mock-data/workflows";
 import { seedCosts } from "./mock-data/costs";
@@ -51,6 +52,7 @@ const seeders: Seeder[] = [
   { name: "signing", run: seedSigning },
   { name: "credentials", run: seedCredentials },
   { name: "github", run: seedGitHub },
+  { name: "gitlab", run: seedGitLab },
   { name: "jira", run: seedJira },
   { name: "jira-webhooks", run: seedJiraWebhooks },
   { name: "workflows", run: seedWorkflows },

@@ -1,0 +1,1041 @@
+"SourceControlProvider values exposed by the GitLab integration."
+enum SourceControlProvider {
+  "Represents the github value."
+  GITHUB
+  "Represents the gitlab value."
+  GITLAB
+}
+
+"SourceControlRequest values exposed by the GitLab integration."
+interface SourceControlRequest {
+  "Provider for SourceControlRequest."
+  provider: SourceControlProvider!
+  "Id for SourceControlRequest."
+  id: ID!
+  "Number for SourceControlRequest."
+  number: Int!
+  "Title for SourceControlRequest."
+  title: String!
+  "Url for SourceControlRequest."
+  url: String!
+  "Is draft for SourceControlRequest."
+  isDraft: Boolean!
+  "Head ref name for SourceControlRequest."
+  headRefName: String!
+  "Head ref oid for SourceControlRequest."
+  headRefOid: String!
+  "Created at for SourceControlRequest."
+  createdAt: String!
+}
+
+"SourceControlProviderState values exposed by the GitLab integration."
+type SourceControlProviderState {
+  "Provider for SourceControlProviderState."
+  provider: SourceControlProvider!
+  "Configured for SourceControlProviderState."
+  configured: Boolean!
+  "Webhooks enabled for SourceControlProviderState."
+  webhooksEnabled: Boolean!
+  "Base url for SourceControlProviderState."
+  baseUrl: String
+}
+
+"SourceControlIntegrationState values exposed by the GitLab integration."
+type SourceControlIntegrationState {
+  "Github for SourceControlIntegrationState."
+  github: SourceControlProviderState!
+  "Gitlab for SourceControlIntegrationState."
+  gitlab: SourceControlProviderState!
+}
+
+"GitLabMergeRequestScope values exposed by the GitLab integration."
+enum GitLabMergeRequestScope {
+  "Represents the mine value."
+  MINE
+  "Represents the review requested value."
+  REVIEW_REQUESTED
+  "Represents the project value."
+  PROJECT
+  "Represents the all value."
+  ALL
+}
+
+"GitLabMergeRequestState values exposed by the GitLab integration."
+enum GitLabMergeRequestState {
+  "Represents the opened value."
+  OPENED
+  "Represents the closed value."
+  CLOSED
+  "Represents the merged value."
+  MERGED
+  "Represents the all value."
+  ALL
+}
+
+"GitLabReviewOutcome values exposed by the GitLab integration."
+enum GitLabReviewOutcome {
+  "Represents the approve value."
+  APPROVE
+  "Represents the comment value."
+  COMMENT
+  "Represents the request changes value."
+  REQUEST_CHANGES
+}
+
+"GitLabMergeRequestStateEvent values exposed by the GitLab integration."
+enum GitLabMergeRequestStateEvent {
+  "Represents the close value."
+  CLOSE
+  "Represents the reopen value."
+  REOPEN
+}
+
+"GitLabPipelineStatus values exposed by the GitLab integration."
+enum GitLabPipelineStatus {
+  "Represents the created value."
+  CREATED
+  "Represents the waiting for resource value."
+  WAITING_FOR_RESOURCE
+  "Represents the preparing value."
+  PREPARING
+  "Represents the pending value."
+  PENDING
+  "Represents the running value."
+  RUNNING
+  "Represents the success value."
+  SUCCESS
+  "Represents the failed value."
+  FAILED
+  "Represents the canceled value."
+  CANCELED
+  "Represents the skipped value."
+  SKIPPED
+  "Represents the manual value."
+  MANUAL
+  "Represents the scheduled value."
+  SCHEDULED
+  "Represents the unknown value."
+  UNKNOWN
+}
+
+"GitLabUser values exposed by the GitLab integration."
+type GitLabUser {
+  "Id for GitLabUser."
+  id: ID!
+  "Username for GitLabUser."
+  username: String!
+  "Name for GitLabUser."
+  name: String!
+  "Avatar url for GitLabUser."
+  avatarUrl: String
+  "Web url for GitLabUser."
+  webUrl: String!
+}
+
+"GitLabSettings values exposed by the GitLab integration."
+type GitLabSettings {
+  "Configured for GitLabSettings."
+  configured: Boolean!
+  "Token configured for GitLabSettings."
+  tokenConfigured: Boolean!
+  "Base url for GitLabSettings."
+  baseUrl: String
+  "Version for GitLabSettings."
+  version: String
+  "Revision for GitLabSettings."
+  revision: String
+  "Viewer for GitLabSettings."
+  viewer: GitLabUser
+  "Pipeline poll interval seconds for GitLabSettings."
+  pipelinePollIntervalSeconds: Int!
+  "Cache ttl seconds for GitLabSettings."
+  cacheTtlSeconds: Int!
+  "Verified at for GitLabSettings."
+  verifiedAt: String
+  "Updated at for GitLabSettings."
+  updatedAt: String!
+}
+
+"GitLabProject values exposed by the GitLab integration."
+type GitLabProject {
+  "Id for GitLabProject."
+  id: ID!
+  "Name for GitLabProject."
+  name: String!
+  "Path with namespace for GitLabProject."
+  pathWithNamespace: String!
+  "Web url for GitLabProject."
+  webUrl: String!
+  "Default branch for GitLabProject."
+  defaultBranch: String
+  "Visibility for GitLabProject."
+  visibility: String!
+  "Enabled for GitLabProject."
+  enabled: Boolean!
+  "Webhook id for GitLabProject."
+  webhookId: ID
+  "Webhook state for GitLabProject."
+  webhookState: String!
+  "Webhook error for GitLabProject."
+  webhookError: String
+  "Webhook configured at for GitLabProject."
+  webhookConfiguredAt: String
+  "Webhook last received at for GitLabProject."
+  webhookLastReceivedAt: String
+}
+
+"GitLabProjectCandidate values exposed by the GitLab integration."
+type GitLabProjectCandidate {
+  "Id for GitLabProjectCandidate."
+  id: ID!
+  "Name for GitLabProjectCandidate."
+  name: String!
+  "Path with namespace for GitLabProjectCandidate."
+  pathWithNamespace: String!
+  "Web url for GitLabProjectCandidate."
+  webUrl: String!
+  "Default branch for GitLabProjectCandidate."
+  defaultBranch: String
+  "Visibility for GitLabProjectCandidate."
+  visibility: String!
+  "Already managed for GitLabProjectCandidate."
+  alreadyManaged: Boolean!
+}
+
+"GitLabProjectCandidatePage values exposed by the GitLab integration."
+type GitLabProjectCandidatePage {
+  "Items for GitLabProjectCandidatePage."
+  items: [GitLabProjectCandidate!]!
+  "Total for GitLabProjectCandidatePage."
+  total: Int!
+  "Page for GitLabProjectCandidatePage."
+  page: Int!
+  "Per page for GitLabProjectCandidatePage."
+  perPage: Int!
+  "Next page for GitLabProjectCandidatePage."
+  nextPage: Int
+}
+
+"GitLabMergeRequest values exposed by the GitLab integration."
+type GitLabMergeRequest implements SourceControlRequest {
+  "Provider for GitLabMergeRequest."
+  provider: SourceControlProvider!
+  "Id for GitLabMergeRequest."
+  id: ID!
+  "Number for GitLabMergeRequest."
+  number: Int!
+  "Iid for GitLabMergeRequest."
+  iid: Int!
+  "Project id for GitLabMergeRequest."
+  projectId: ID!
+  "Title for GitLabMergeRequest."
+  title: String!
+  "Description for GitLabMergeRequest."
+  description: String!
+  "State for GitLabMergeRequest."
+  state: String!
+  "Draft for GitLabMergeRequest."
+  draft: Boolean!
+  "Web url for GitLabMergeRequest."
+  webUrl: String!
+  "Url for GitLabMergeRequest."
+  url: String!
+  "Source branch for GitLabMergeRequest."
+  sourceBranch: String!
+  "Head ref name for GitLabMergeRequest."
+  headRefName: String!
+  "Target branch for GitLabMergeRequest."
+  targetBranch: String!
+  "Sha for GitLabMergeRequest."
+  sha: String!
+  "Head ref oid for GitLabMergeRequest."
+  headRefOid: String!
+  "Is draft for GitLabMergeRequest."
+  isDraft: Boolean!
+  "Author for GitLabMergeRequest."
+  author: GitLabUser!
+  "Reviewers for GitLabMergeRequest."
+  reviewers: [GitLabUser!]!
+  "Labels for GitLabMergeRequest."
+  labels: [String!]!
+  "Detailed merge status for GitLabMergeRequest."
+  detailedMergeStatus: String!
+  "Merge when pipeline succeeds for GitLabMergeRequest."
+  mergeWhenPipelineSucceeds: Boolean!
+  "Squash on merge for GitLabMergeRequest."
+  squashOnMerge: Boolean!
+  "Has conflicts for GitLabMergeRequest."
+  hasConflicts: Boolean!
+  "Blocking discussions resolved for GitLabMergeRequest."
+  blockingDiscussionsResolved: Boolean!
+  "Created at for GitLabMergeRequest."
+  createdAt: String!
+  "Updated at for GitLabMergeRequest."
+  updatedAt: String!
+  "Merged at for GitLabMergeRequest."
+  mergedAt: String
+}
+
+"GitLabMergeRequestPage values exposed by the GitLab integration."
+type GitLabMergeRequestPage {
+  "Items for GitLabMergeRequestPage."
+  items: [GitLabMergeRequest!]!
+  "Total for GitLabMergeRequestPage."
+  total: Int!
+  "Page for GitLabMergeRequestPage."
+  page: Int!
+  "Per page for GitLabMergeRequestPage."
+  perPage: Int!
+  "Next page for GitLabMergeRequestPage."
+  nextPage: Int
+}
+
+"GitLabDiscussionNote values exposed by the GitLab integration."
+type GitLabDiscussionNote {
+  "Id for GitLabDiscussionNote."
+  id: ID!
+  "Body for GitLabDiscussionNote."
+  body: String!
+  "Author for GitLabDiscussionNote."
+  author: GitLabUser!
+  "Created at for GitLabDiscussionNote."
+  createdAt: String!
+  "Updated at for GitLabDiscussionNote."
+  updatedAt: String!
+  "System for GitLabDiscussionNote."
+  system: Boolean!
+  "Resolvable for GitLabDiscussionNote."
+  resolvable: Boolean!
+  "Resolved for GitLabDiscussionNote."
+  resolved: Boolean!
+  "Resolved by for GitLabDiscussionNote."
+  resolvedBy: GitLabUser
+}
+
+"GitLabDiscussion values exposed by the GitLab integration."
+type GitLabDiscussion {
+  "Id for GitLabDiscussion."
+  id: ID!
+  "Individual note for GitLabDiscussion."
+  individualNote: Boolean!
+  "Notes for GitLabDiscussion."
+  notes: [GitLabDiscussionNote!]!
+}
+
+"GitLabMergeRequestDetail values exposed by the GitLab integration."
+type GitLabMergeRequestDetail {
+  "Id for GitLabMergeRequestDetail."
+  id: ID!
+  "Iid for GitLabMergeRequestDetail."
+  iid: Int!
+  "Project id for GitLabMergeRequestDetail."
+  projectId: ID!
+  "Title for GitLabMergeRequestDetail."
+  title: String!
+  "Description for GitLabMergeRequestDetail."
+  description: String!
+  "State for GitLabMergeRequestDetail."
+  state: String!
+  "Draft for GitLabMergeRequestDetail."
+  draft: Boolean!
+  "Web url for GitLabMergeRequestDetail."
+  webUrl: String!
+  "Source branch for GitLabMergeRequestDetail."
+  sourceBranch: String!
+  "Target branch for GitLabMergeRequestDetail."
+  targetBranch: String!
+  "Sha for GitLabMergeRequestDetail."
+  sha: String!
+  "Author for GitLabMergeRequestDetail."
+  author: GitLabUser!
+  "Reviewers for GitLabMergeRequestDetail."
+  reviewers: [GitLabUser!]!
+  "Labels for GitLabMergeRequestDetail."
+  labels: [String!]!
+  "Detailed merge status for GitLabMergeRequestDetail."
+  detailedMergeStatus: String!
+  "Merge when pipeline succeeds for GitLabMergeRequestDetail."
+  mergeWhenPipelineSucceeds: Boolean!
+  "Squash on merge for GitLabMergeRequestDetail."
+  squashOnMerge: Boolean!
+  "Has conflicts for GitLabMergeRequestDetail."
+  hasConflicts: Boolean!
+  "Blocking discussions resolved for GitLabMergeRequestDetail."
+  blockingDiscussionsResolved: Boolean!
+  "Changes count for GitLabMergeRequestDetail."
+  changesCount: String
+  "Commits count for GitLabMergeRequestDetail."
+  commitsCount: Int!
+  "Discussions for GitLabMergeRequestDetail."
+  discussions: [GitLabDiscussion!]!
+  "Pipelines for GitLabMergeRequestDetail."
+  pipelines: [GitLabPipeline!]!
+  "Created at for GitLabMergeRequestDetail."
+  createdAt: String!
+  "Updated at for GitLabMergeRequestDetail."
+  updatedAt: String!
+  "Merged at for GitLabMergeRequestDetail."
+  mergedAt: String
+}
+
+"A merge request associated with a GitLab pipeline commit."
+type GitLabPipelineMergeRequest {
+  "Project containing the merge request."
+  projectId: ID!
+  "Project-scoped merge request number."
+  iid: Int!
+  "Merge request title."
+  title: String!
+  "GitLab URL for the merge request."
+  webUrl: String!
+  "Source branch for the merge request."
+  sourceBranch: String!
+}
+
+"GitLabPipeline values exposed by the GitLab integration."
+type GitLabPipeline {
+  "Id for GitLabPipeline."
+  id: ID!
+  "Project id for GitLabPipeline."
+  projectId: ID!
+  "Iid for GitLabPipeline."
+  iid: ID
+  "Ref for GitLabPipeline."
+  ref: String!
+  "Effective source branch for GitLabPipeline."
+  branch: String!
+  "Sha for GitLabPipeline."
+  sha: String!
+  "Source for GitLabPipeline."
+  source: String!
+  "Status for GitLabPipeline."
+  status: GitLabPipelineStatus!
+  "Web url for GitLabPipeline."
+  webUrl: String!
+  "Merge requests associated with the pipeline commit."
+  mergeRequests: [GitLabPipelineMergeRequest!]!
+  "Matching worktree identifier, when the branch is checked out."
+  worktreeId: ID
+  "Matching worktree highlight color."
+  worktreeHighlightColor: String
+  "Started at for GitLabPipeline."
+  startedAt: String
+  "Created at for GitLabPipeline."
+  createdAt: String
+  "Updated at for GitLabPipeline."
+  updatedAt: String
+  "Finished at for GitLabPipeline."
+  finishedAt: String
+  "Duration for GitLabPipeline."
+  duration: Float
+  "Queued duration for GitLabPipeline."
+  queuedDuration: Float
+}
+
+"GitLabPipelinePage values exposed by the GitLab integration."
+type GitLabPipelinePage {
+  "Items for GitLabPipelinePage."
+  items: [GitLabPipeline!]!
+  "Total for GitLabPipelinePage."
+  total: Int!
+  "Page for GitLabPipelinePage."
+  page: Int!
+  "Per page for GitLabPipelinePage."
+  perPage: Int!
+  "Next page for GitLabPipelinePage."
+  nextPage: Int
+}
+
+"GitLabJob values exposed by the GitLab integration."
+type GitLabJob {
+  "Id for GitLabJob."
+  id: ID!
+  "Pipeline id for GitLabJob."
+  pipelineId: ID!
+  "Name for GitLabJob."
+  name: String!
+  "Stage for GitLabJob."
+  stage: String!
+  "Status for GitLabJob."
+  status: GitLabPipelineStatus!
+  "Ref for GitLabJob."
+  ref: String!
+  "Web url for GitLabJob."
+  webUrl: String!
+  "Allow failure for GitLabJob."
+  allowFailure: Boolean!
+  "Created at for GitLabJob."
+  createdAt: String
+  "Started at for GitLabJob."
+  startedAt: String
+  "Finished at for GitLabJob."
+  finishedAt: String
+  "Duration for GitLabJob."
+  duration: Float
+  "Queued duration for GitLabJob."
+  queuedDuration: Float
+  "Retried for GitLabJob."
+  retried: Boolean!
+}
+
+"GitLabCacheEntry values exposed by the GitLab integration."
+type GitLabCacheEntry {
+  "Id for GitLabCacheEntry."
+  id: ID!
+  "Operation for GitLabCacheEntry."
+  operation: String!
+  "Endpoint for GitLabCacheEntry."
+  endpoint: String!
+  "Fetched at for GitLabCacheEntry."
+  fetchedAt: String!
+  "Stale for GitLabCacheEntry."
+  stale: Boolean!
+}
+
+"GitLabCacheEntryDetail values exposed by the GitLab integration."
+type GitLabCacheEntryDetail {
+  "Id for GitLabCacheEntryDetail."
+  id: ID!
+  "Operation for GitLabCacheEntryDetail."
+  operation: String!
+  "Endpoint for GitLabCacheEntryDetail."
+  endpoint: String!
+  "Fetched at for GitLabCacheEntryDetail."
+  fetchedAt: String!
+  "Stale for GitLabCacheEntryDetail."
+  stale: Boolean!
+  "Request for GitLabCacheEntryDetail."
+  request: JSON
+  "Response for GitLabCacheEntryDetail."
+  response: JSON
+}
+
+"GitLabCacheEntryPage values exposed by the GitLab integration."
+type GitLabCacheEntryPage {
+  "Items for GitLabCacheEntryPage."
+  items: [GitLabCacheEntry!]!
+  "Total for GitLabCacheEntryPage."
+  total: Int!
+  "Limit for GitLabCacheEntryPage."
+  limit: Int!
+  "Offset for GitLabCacheEntryPage."
+  offset: Int!
+}
+
+"GitLabApiCall values exposed by the GitLab integration."
+type GitLabApiCall {
+  "Id for GitLabApiCall."
+  id: ID!
+  "Method for GitLabApiCall."
+  method: String!
+  "Endpoint for GitLabApiCall."
+  endpoint: String!
+  "Operation for GitLabApiCall."
+  operation: String!
+  "Request source for GitLabApiCall."
+  requestSource: String!
+  "Request summary for GitLabApiCall."
+  requestSummary: String!
+  "Source for GitLabApiCall."
+  source: String!
+  "Duration ms for GitLabApiCall."
+  durationMs: Int!
+  "Status code for GitLabApiCall."
+  statusCode: Int
+  "Error for GitLabApiCall."
+  error: String
+  "Served stale for GitLabApiCall."
+  servedStale: Boolean!
+  "Rate limit limit for GitLabApiCall."
+  rateLimitLimit: Int
+  "Rate limit remaining for GitLabApiCall."
+  rateLimitRemaining: Int
+  "Rate limit reset at for GitLabApiCall."
+  rateLimitResetAt: String
+  "Request id for GitLabApiCall."
+  requestId: String
+  "Created at for GitLabApiCall."
+  createdAt: String!
+}
+
+"GitLabApiCallPage values exposed by the GitLab integration."
+type GitLabApiCallPage {
+  "Items for GitLabApiCallPage."
+  items: [GitLabApiCall!]!
+  "Total for GitLabApiCallPage."
+  total: Int!
+  "Limit for GitLabApiCallPage."
+  limit: Int!
+  "Offset for GitLabApiCallPage."
+  offset: Int!
+}
+
+"GitLabWebhookDelivery values exposed by the GitLab integration."
+type GitLabWebhookDelivery {
+  "Id for GitLabWebhookDelivery."
+  id: ID!
+  "Webhook id for GitLabWebhookDelivery."
+  webhookId: ID!
+  "Event type for GitLabWebhookDelivery."
+  eventType: String!
+  "Project id for GitLabWebhookDelivery."
+  projectId: ID
+  "Object kind for GitLabWebhookDelivery."
+  objectKind: String
+  "Action for GitLabWebhookDelivery."
+  action: String
+  "Outcome for GitLabWebhookDelivery."
+  outcome: String!
+  "Error for GitLabWebhookDelivery."
+  error: String
+  "Received at for GitLabWebhookDelivery."
+  receivedAt: String!
+  "Processed at for GitLabWebhookDelivery."
+  processedAt: String
+}
+
+"GitLabWebhookDeliveryPage values exposed by the GitLab integration."
+type GitLabWebhookDeliveryPage {
+  "Items for GitLabWebhookDeliveryPage."
+  items: [GitLabWebhookDelivery!]!
+  "Total for GitLabWebhookDeliveryPage."
+  total: Int!
+  "Limit for GitLabWebhookDeliveryPage."
+  limit: Int!
+  "Offset for GitLabWebhookDeliveryPage."
+  offset: Int!
+}
+
+"GitLabWebhookSetup values exposed by the GitLab integration."
+type GitLabWebhookSetup {
+  "Project for GitLabWebhookSetup."
+  project: GitLabProject!
+  "Callback url for GitLabWebhookSetup."
+  callbackUrl: String!
+  "Signing token for GitLabWebhookSetup."
+  signingToken: String
+  "Manual configuration required for GitLabWebhookSetup."
+  manualConfigurationRequired: Boolean!
+}
+
+"GitLabCacheTtlOverride values exposed by the GitLab integration."
+type GitLabCacheTtlOverride {
+  "Operation for GitLabCacheTtlOverride."
+  operation: String!
+  "Ttl seconds for GitLabCacheTtlOverride."
+  ttlSeconds: Int!
+  "Created at for GitLabCacheTtlOverride."
+  createdAt: String!
+  "Updated at for GitLabCacheTtlOverride."
+  updatedAt: String!
+}
+
+"GitLabRateLimitSnapshot values exposed by the GitLab integration."
+type GitLabRateLimitSnapshot {
+  "Id for GitLabRateLimitSnapshot."
+  id: ID!
+  "Resource for GitLabRateLimitSnapshot."
+  resource: String!
+  "Limit for GitLabRateLimitSnapshot."
+  limit: Int!
+  "Remaining for GitLabRateLimitSnapshot."
+  remaining: Int!
+  "Reset at for GitLabRateLimitSnapshot."
+  resetAt: String
+  "Observed at for GitLabRateLimitSnapshot."
+  observedAt: String!
+}
+
+"GitLabAutoRetryExecution values exposed by the GitLab integration."
+type GitLabAutoRetryExecution {
+  "Id for GitLabAutoRetryExecution."
+  id: ID!
+  "Pipeline id for GitLabAutoRetryExecution."
+  pipelineId: ID!
+  "Attempt for GitLabAutoRetryExecution."
+  attempt: Int!
+  "Status for GitLabAutoRetryExecution."
+  status: String!
+  "Last error for GitLabAutoRetryExecution."
+  lastError: String
+  "Created at for GitLabAutoRetryExecution."
+  createdAt: String!
+  "Updated at for GitLabAutoRetryExecution."
+  updatedAt: String!
+}
+
+"GitLabAutoRetryRule values exposed by the GitLab integration."
+type GitLabAutoRetryRule {
+  "Id for GitLabAutoRetryRule."
+  id: ID!
+  "Project id for GitLabAutoRetryRule."
+  projectId: ID!
+  "Pipeline id for GitLabAutoRetryRule."
+  pipelineId: ID
+  "Enabled for GitLabAutoRetryRule."
+  enabled: Boolean!
+  "Max attempts for GitLabAutoRetryRule."
+  maxAttempts: Int!
+  "Attempts for GitLabAutoRetryRule."
+  attempts: Int!
+  "Last error for GitLabAutoRetryRule."
+  lastError: String
+  "Last attempt at for GitLabAutoRetryRule."
+  lastAttemptAt: String
+  "Created at for GitLabAutoRetryRule."
+  createdAt: String!
+  "Updated at for GitLabAutoRetryRule."
+  updatedAt: String!
+  "Executions for GitLabAutoRetryRule."
+  executions: [GitLabAutoRetryExecution!]!
+}
+
+"SaveGitLabAutoRetryRuleInput values exposed by the GitLab integration."
+input SaveGitLabAutoRetryRuleInput {
+  "Id for SaveGitLabAutoRetryRuleInput."
+  id: ID
+  "Project id for SaveGitLabAutoRetryRuleInput."
+  projectId: ID!
+  "Pipeline id for SaveGitLabAutoRetryRuleInput."
+  pipelineId: ID
+  "Enabled for SaveGitLabAutoRetryRuleInput."
+  enabled: Boolean
+  "Max attempts for SaveGitLabAutoRetryRuleInput."
+  maxAttempts: Int!
+}
+
+"SaveGitLabSettingsInput values exposed by the GitLab integration."
+input SaveGitLabSettingsInput {
+  "Base url for SaveGitLabSettingsInput."
+  baseUrl: String!
+  "Access token for SaveGitLabSettingsInput."
+  accessToken: String
+  "Pipeline poll interval seconds for SaveGitLabSettingsInput."
+  pipelinePollIntervalSeconds: Int
+}
+
+"CreateGitLabMergeRequestInput values exposed by the GitLab integration."
+input CreateGitLabMergeRequestInput {
+  "Project id for CreateGitLabMergeRequestInput."
+  projectId: ID!
+  "Source branch for CreateGitLabMergeRequestInput."
+  sourceBranch: String!
+  "Target branch for CreateGitLabMergeRequestInput."
+  targetBranch: String!
+  "Title for CreateGitLabMergeRequestInput."
+  title: String!
+  "Description for CreateGitLabMergeRequestInput."
+  description: String
+  "Reviewer ids for CreateGitLabMergeRequestInput."
+  reviewerIds: [ID!]
+  "Labels for CreateGitLabMergeRequestInput."
+  labels: [String!]
+  "Remove source branch for CreateGitLabMergeRequestInput."
+  removeSourceBranch: Boolean
+  "Squash for CreateGitLabMergeRequestInput."
+  squash: Boolean
+}
+
+"UpdateGitLabMergeRequestInput values exposed by the GitLab integration."
+input UpdateGitLabMergeRequestInput {
+  "Project id for UpdateGitLabMergeRequestInput."
+  projectId: ID!
+  "Iid for UpdateGitLabMergeRequestInput."
+  iid: Int!
+  "Title for UpdateGitLabMergeRequestInput."
+  title: String
+  "Description for UpdateGitLabMergeRequestInput."
+  description: String
+  "State event for UpdateGitLabMergeRequestInput."
+  stateEvent: GitLabMergeRequestStateEvent
+  "Reviewer ids for UpdateGitLabMergeRequestInput."
+  reviewerIds: [ID!]
+  "Labels for UpdateGitLabMergeRequestInput."
+  labels: [String!]
+}
+
+"SubmitGitLabReviewInput values exposed by the GitLab integration."
+input SubmitGitLabReviewInput {
+  "Project id for SubmitGitLabReviewInput."
+  projectId: ID!
+  "Iid for SubmitGitLabReviewInput."
+  iid: Int!
+  "Outcome for SubmitGitLabReviewInput."
+  outcome: GitLabReviewOutcome!
+  "Body for SubmitGitLabReviewInput."
+  body: String
+}
+
+"GitLabDiscussionInput values exposed by the GitLab integration."
+input GitLabDiscussionInput {
+  "Project id for GitLabDiscussionInput."
+  projectId: ID!
+  "Iid for GitLabDiscussionInput."
+  iid: Int!
+  "Discussion id for GitLabDiscussionInput."
+  discussionId: ID!
+}
+
+"MergeGitLabMergeRequestInput values exposed by the GitLab integration."
+input MergeGitLabMergeRequestInput {
+  "Project id for MergeGitLabMergeRequestInput."
+  projectId: ID!
+  "Iid for MergeGitLabMergeRequestInput."
+  iid: Int!
+  "Squash for MergeGitLabMergeRequestInput."
+  squash: Boolean
+  "Remove source branch for MergeGitLabMergeRequestInput."
+  removeSourceBranch: Boolean
+  "Auto merge for MergeGitLabMergeRequestInput."
+  autoMerge: Boolean
+  "Sha for MergeGitLabMergeRequestInput."
+  sha: String
+}
+
+"GitLabPipelineVariableInput values exposed by the GitLab integration."
+input GitLabPipelineVariableInput {
+  "Key for GitLabPipelineVariableInput."
+  key: String!
+  "Value for GitLabPipelineVariableInput."
+  value: String!
+}
+
+extend type Query {
+  "Source control integration state for Query."
+  sourceControlIntegrationState: SourceControlIntegrationState!
+  "Gitlab settings for Query."
+  gitlabSettings: GitLabSettings!
+  "Gitlab webhooks enabled for Query."
+  gitlabWebhooksEnabled: Boolean!
+  "Gitlab projects for Query."
+  gitlabProjects: [GitLabProject!]!
+  "Gitlab available projects for Query."
+  gitlabAvailableProjects(
+    "Search used by gitlabAvailableProjects."
+    search: String
+    "Page used by gitlabAvailableProjects."
+    page: Int = 1
+    "Per page used by gitlabAvailableProjects."
+    perPage: Int = 50
+  ): GitLabProjectCandidatePage!
+  "Gitlab merge requests for Query."
+  gitlabMergeRequests(
+    "Scope used by gitlabMergeRequests."
+    scope: GitLabMergeRequestScope!
+    "Project id used by gitlabMergeRequests."
+    projectId: ID
+    "State used by gitlabMergeRequests."
+    state: GitLabMergeRequestState = OPENED
+    "Page used by gitlabMergeRequests."
+    page: Int = 1
+    "Per page used by gitlabMergeRequests."
+    perPage: Int = 25
+  ): GitLabMergeRequestPage!
+  "Gitlab merge request for Query."
+  gitlabMergeRequest(
+    "Project id used by gitlabMergeRequest."
+    projectId: ID!
+    "Iid used by gitlabMergeRequest."
+    iid: Int!
+  ): GitLabMergeRequestDetail!
+  "Gitlab pipelines for Query."
+  gitlabPipelines(
+    "Project id used by gitlabPipelines."
+    projectId: ID!
+    "Page used by gitlabPipelines."
+    page: Int = 1
+    "Per page used by gitlabPipelines."
+    perPage: Int = 25
+  ): GitLabPipelinePage!
+  "Gitlab pipeline for Query."
+  gitlabPipeline(
+    "Project id used by gitlabPipeline."
+    projectId: ID!
+    "Pipeline id used by gitlabPipeline."
+    pipelineId: ID!
+  ): GitLabPipeline!
+  "Gitlab pipeline jobs for Query."
+  gitlabPipelineJobs(
+    "Project id used by gitlabPipelineJobs."
+    projectId: ID!
+    "Pipeline id used by gitlabPipelineJobs."
+    pipelineId: ID!
+  ): [GitLabJob!]!
+  "Gitlab cached entries for Query."
+  gitlabCachedEntries(
+    "Limit used by gitlabCachedEntries."
+    limit: Int = 50
+    "Offset used by gitlabCachedEntries."
+    offset: Int = 0
+  ): GitLabCacheEntryPage!
+  "Gitlab cached entry for Query."
+  gitlabCachedEntry(
+    "Id used by gitlabCachedEntry."
+    id: ID!
+  ): GitLabCacheEntryDetail
+  "Gitlab api calls for Query."
+  gitlabApiCalls(
+    "Limit used by gitlabApiCalls."
+    limit: Int = 50
+    "Offset used by gitlabApiCalls."
+    offset: Int = 0
+  ): GitLabApiCallPage!
+  "Gitlab webhook deliveries for Query."
+  gitlabWebhookDeliveries(
+    "Limit used by gitlabWebhookDeliveries."
+    limit: Int = 50
+    "Offset used by gitlabWebhookDeliveries."
+    offset: Int = 0
+  ): GitLabWebhookDeliveryPage!
+  "Gitlab cache ttl overrides for Query."
+  gitlabCacheTtlOverrides: [GitLabCacheTtlOverride!]!
+  "Gitlab rate limit snapshots for Query."
+  gitlabRateLimitSnapshots: [GitLabRateLimitSnapshot!]!
+  "Gitlab auto retry rules for Query."
+  gitlabAutoRetryRules(
+    "Project id used by gitlabAutoRetryRules."
+    projectId: ID
+  ): [GitLabAutoRetryRule!]!
+}
+
+extend type Mutation {
+  "Save git lab settings for Mutation."
+  saveGitLabSettings(
+    "Input used by saveGitLabSettings."
+    input: SaveGitLabSettingsInput!
+  ): GitLabSettings!
+  "Test git lab connection for Mutation."
+  testGitLabConnection: GitLabSettings!
+  "Clear git lab credentials for Mutation."
+  clearGitLabCredentials(
+    "Force used by clearGitLabCredentials."
+    force: Boolean! = false
+  ): GitLabSettings!
+  "Add git lab project for Mutation."
+  addGitLabProject(
+    "Project id used by addGitLabProject."
+    projectId: ID!
+  ): [GitLabProject!]!
+  "Remove git lab project for Mutation."
+  removeGitLabProject(
+    "Project id used by removeGitLabProject."
+    projectId: ID!
+    "Force used by removeGitLabProject."
+    force: Boolean! = false
+  ): [GitLabProject!]!
+  "Configure git lab project webhook for Mutation."
+  configureGitLabProjectWebhook(
+    "Project id used by configureGitLabProjectWebhook."
+    projectId: ID!
+    "Callback url used by configureGitLabProjectWebhook."
+    callbackUrl: String
+  ): GitLabWebhookSetup!
+  "Remove git lab project webhook for Mutation."
+  removeGitLabProjectWebhook(
+    "Project id used by removeGitLabProjectWebhook."
+    projectId: ID!
+  ): GitLabProject!
+  "Create git lab merge request for Mutation."
+  createGitLabMergeRequest(
+    "Input used by createGitLabMergeRequest."
+    input: CreateGitLabMergeRequestInput!
+  ): GitLabMergeRequest!
+  "Update git lab merge request for Mutation."
+  updateGitLabMergeRequest(
+    "Input used by updateGitLabMergeRequest."
+    input: UpdateGitLabMergeRequestInput!
+  ): GitLabMergeRequest!
+  "Submit git lab review for Mutation."
+  submitGitLabReview(
+    "Input used by submitGitLabReview."
+    input: SubmitGitLabReviewInput!
+  ): Boolean!
+  "Reply to git lab discussion for Mutation."
+  replyToGitLabDiscussion(
+    "Input used by replyToGitLabDiscussion."
+    input: GitLabDiscussionInput!
+    "Body used by replyToGitLabDiscussion."
+    body: String!
+  ): GitLabDiscussion!
+  "Set git lab discussion resolved for Mutation."
+  setGitLabDiscussionResolved(
+    "Input used by setGitLabDiscussionResolved."
+    input: GitLabDiscussionInput!
+    "Resolved used by setGitLabDiscussionResolved."
+    resolved: Boolean!
+  ): GitLabDiscussion!
+  "Merge git lab merge request for Mutation."
+  mergeGitLabMergeRequest(
+    "Input used by mergeGitLabMergeRequest."
+    input: MergeGitLabMergeRequestInput!
+  ): GitLabMergeRequest!
+  "Create git lab pipeline for Mutation."
+  createGitLabPipeline(
+    "Project id used by createGitLabPipeline."
+    projectId: ID!
+    "Ref used by createGitLabPipeline."
+    ref: String!
+    "Variables used by createGitLabPipeline."
+    variables: [GitLabPipelineVariableInput!]
+  ): GitLabPipeline!
+  "Retry git lab pipeline for Mutation."
+  retryGitLabPipeline(
+    "Project id used by retryGitLabPipeline."
+    projectId: ID!
+    "Pipeline id used by retryGitLabPipeline."
+    pipelineId: ID!
+  ): GitLabPipeline!
+  "Cancel git lab pipeline for Mutation."
+  cancelGitLabPipeline(
+    "Project id used by cancelGitLabPipeline."
+    projectId: ID!
+    "Pipeline id used by cancelGitLabPipeline."
+    pipelineId: ID!
+  ): GitLabPipeline!
+  "Retry git lab job for Mutation."
+  retryGitLabJob(
+    "Project id used by retryGitLabJob."
+    projectId: ID!
+    "Job id used by retryGitLabJob."
+    jobId: ID!
+  ): GitLabJob!
+  "Update git lab cache ttl for Mutation."
+  updateGitLabCacheTtl(
+    "Ttl minutes used by updateGitLabCacheTtl."
+    ttlMinutes: Int!
+  ): GitLabSettings!
+  "Clear git lab cache for Mutation."
+  clearGitLabCache: Boolean!
+  "Delete git lab cached entry for Mutation."
+  deleteGitLabCachedEntry(
+    "Id used by deleteGitLabCachedEntry."
+    id: ID!
+  ): Boolean!
+  "Save git lab cache ttl override for Mutation."
+  saveGitLabCacheTtlOverride(
+    "Operation used by saveGitLabCacheTtlOverride."
+    operation: String!
+    "Ttl seconds used by saveGitLabCacheTtlOverride."
+    ttlSeconds: Int!
+  ): [GitLabCacheTtlOverride!]!
+  "Delete git lab cache ttl override for Mutation."
+  deleteGitLabCacheTtlOverride(
+    "Operation used by deleteGitLabCacheTtlOverride."
+    operation: String!
+  ): [GitLabCacheTtlOverride!]!
+  "Save git lab auto retry rule for Mutation."
+  saveGitLabAutoRetryRule(
+    "Input used by saveGitLabAutoRetryRule."
+    input: SaveGitLabAutoRetryRuleInput!
+  ): GitLabAutoRetryRule!
+  "Delete git lab auto retry rule for Mutation."
+  deleteGitLabAutoRetryRule(
+    "Id used by deleteGitLabAutoRetryRule."
+    id: ID!
+  ): Boolean!
+}
+
+extend type Subscription {
+  "Gitlab pipeline status changed for Subscription."
+  gitlabPipelineStatusChanged: GitLabPipeline!
+}

@@ -177,6 +177,7 @@ describe("built-in tool registry", () => {
       jira: placeholder,
       jiraWebhooks: placeholder,
       github: placeholder,
+      gitlab: placeholder,
       skills: placeholder,
       buildData: placeholder,
       signingAssets: placeholder,
@@ -200,6 +201,7 @@ describe("built-in tool registry", () => {
         "builtin:commands",
         "builtin:jira",
         "builtin:github",
+        "builtin:gitlab",
         "builtin:skills",
         "builtin:build-data",
         "builtin:signing-assets",
@@ -212,7 +214,7 @@ describe("built-in tool registry", () => {
       ]),
     );
     const tools = expanded.definitions();
-    expect(tools).toHaveLength(297);
+    expect(tools).toHaveLength(324);
     expect(new Set(tools.map(({ name }) => name)).size).toBe(tools.length);
     expect(tools.every(({ annotations }) => Boolean(annotations))).toBe(true);
   });

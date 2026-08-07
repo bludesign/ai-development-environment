@@ -56,6 +56,7 @@ import {
 import { WorkflowQuickActions } from "@/components/workflows/workflow-quick-actions";
 import { CommandQuickActions } from "@/components/commands/command-quick-actions";
 import { PipelineMenu } from "@/components/github/pipeline-menu";
+import { GitLabWorktreePipelinesMenu } from "@/components/gitlab/worktree-pipelines-menu";
 import {
   pullRequestCommentsHref,
   pullRequestDetailHref,
@@ -2055,7 +2056,12 @@ export function PullRequestBadges({
   onToggleDetails?: () => void;
 }) {
   const t = useTranslations("worktrees");
+  const gitLabT = useTranslations("gitlabPages");
   const commits = worktree.baseAhead ?? 0;
+  const gitLabMergeRequest =
+    worktree.sourceControlRequest?.provider === "GITLAB"
+      ? worktree.sourceControlRequest
+      : null;
   return (
     <>
       {worktree.pullRequest ? (
@@ -2091,7 +2097,38 @@ export function PullRequestBadges({
             </Link>
           </Badge>
         </>
-      ) : commits === 0 ? (
+      ) : gitLabMergeRequest ? (
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <Badge asChild>
+              <button type="button">MR !{gitLabMergeRequest.number}</button>
+            </Badge>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="start" className="w-44">
+            <DropdownMenuItem asChild>
+              <a href={gitLabMergeRequest.url} rel="noreferrer" target="_blank">
+                <ExternalLink />
+                {gitLabT("openInGitLab")}
+              </a>
+            </DropdownMenuItem>
+            {gitLabMergeRequest.projectId ? (
+              <DropdownMenuItem asChild>
+                <Link
+                  href={`/gitlab/merge-requests/${encodeURIComponent(gitLabMergeRequest.projectId)}/${gitLabMergeRequest.number}`}
+                >
+                  <GitMerge />
+                  {t("openDetails")}
+                </Link>
+              </DropdownMenuItem>
+            ) : null}
+          </DropdownMenuContent>
+        </DropdownMenu>
+      ) : null}
+      <GitLabWorktreePipelinesMenu pipelines={worktree.gitLabPipelines ?? []} />
+      {!worktree.pullRequest &&
+      !gitLabMergeRequest &&
+      !(worktree.gitLabPipelines ?? []).length &&
+      commits === 0 ? (
         <span className="text-muted-foreground">—</span>
       ) : null}
       {commits > 0 &&

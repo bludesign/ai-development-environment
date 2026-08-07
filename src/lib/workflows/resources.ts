@@ -155,12 +155,25 @@ const pullRequestTriggerKinds = new Set([
   "GITHUB_PR_LABEL",
   "GITHUB_PR_SYNCHRONIZED",
   "GITHUB_REVIEW_APPROVED",
+  "GITLAB_MR_STATE",
+  "GITLAB_REVIEW_CHANGES_REQUESTED",
+  "GITLAB_REVIEW_COMMENT",
+  "GITLAB_MR_CLOSED",
+  "GITLAB_NOTE_COMMAND",
+  "GITLAB_MR_LABEL",
+  "GITLAB_MR_SYNCHRONIZED",
+  "GITLAB_REVIEW_APPROVED",
 ]);
 const workflowRunTriggerKinds = new Set([
   "GITHUB_CHECK_FAILED",
   "GITHUB_WORKFLOW_SUCCEEDED",
   "GITHUB_ACTIONS_RESULT",
   "GITHUB_PIPELINE_STATUS_CHANGED",
+  "GITLAB_PIPELINE_FAILED",
+  "GITLAB_PIPELINE_SUCCEEDED",
+  "GITLAB_PIPELINE_RESULT",
+  "GITLAB_PIPELINE_STATUS_CHANGED",
+  "GITLAB_JOB_STATUS_CHANGED",
 ]);
 
 /** Returns the primary resource that caused a workflow trigger event. */
@@ -177,9 +190,15 @@ export function workflowTriggerResourceLink(
     const providerUrl =
       normalizedResourceKind === "GITHUB_JOB"
         ? nested(session, "job", "url")
-        : normalizedResourceKind === "GITHUB_PIPELINE"
-          ? nested(session, "pipeline", "url")
-          : null;
+        : normalizedResourceKind === "GITLAB_JOB"
+          ? nested(session, "job", "webUrl")
+          : normalizedResourceKind === "GITHUB_PIPELINE"
+            ? nested(session, "pipeline", "url")
+            : normalizedResourceKind === "GITLAB_PIPELINE"
+              ? nested(session, "pipeline", "webUrl")
+              : normalizedResourceKind === "GITLAB_MERGE_REQUEST"
+                ? nested(session, "pr", "webUrl")
+                : null;
     return typeof resourceKind === "string"
       ? resourceLink(resourceKind.toUpperCase(), payload.resourceId, {
           url: typeof providerUrl === "string" ? providerUrl : null,

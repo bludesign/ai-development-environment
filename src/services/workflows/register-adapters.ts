@@ -26,6 +26,7 @@ import type { CodebasesService } from "@/services/codebases";
 import type { CommandsService } from "@/services/commands";
 import type { DiskSpaceService } from "@/services/disk-space";
 import type { GitHubService } from "@/services/github";
+import type { GitLabService } from "@/services/gitlab";
 import type { JiraService } from "@/services/jira";
 import type { NotificationsService } from "@/services/notifications";
 import type { IosDevicesService } from "@/services/ios-devices";
@@ -60,6 +61,7 @@ export type WorkflowAdapterServices = {
   agentControl: AgentControlService;
   jira: JiraService;
   github: GitHubService;
+  gitlab: GitLabService;
   worktrees: WorktreesService;
   worktreeAutomations: WorktreeAutomationService;
   codebases: CodebasesService;
@@ -415,6 +417,24 @@ function registerExpansionAdapters(
     sessionPath: string,
     label: string,
   ) => configuredId(context, configKey, sessionPath, label);
+  const gitLabMergeRequestCoordinates = (
+    context: WorkflowExecutionContext,
+  ) => ({
+    projectId: contextual(
+      context,
+      "projectId",
+      "pr.projectId",
+      "GitLab project ID",
+    ),
+    iid: Number(
+      context.node.config.iid ??
+        getSessionValue(context.sessionData, "pr.iid") ??
+        getSessionValue(context.sessionData, "pr.number"),
+    ),
+  });
+  const gitLabMergeRequestPatch = (output: Record<string, unknown>) => ({
+    pr: object(output.mergeRequest, "GitLab merge request output"),
+  });
 
   executor.register("COMMAND_RERUN", async (context) => {
     const id = contextual(
@@ -919,6 +939,229 @@ function registerExpansionAdapters(
   executor.register("MODEL_COST_REFRESH", async () => {
     const output = await services.modelCosts.refresh();
     return { output, sessionPatch: { modelCosts: output } };
+  });
+  executor.register("GITLAB_LOAD_MR", (context) =>
+    call(
+      context,
+      "builtin:gitlab",
+      "gitlab_get_merge_request",
+      gitLabMergeRequestCoordinates(context),
+      { sessionPatch: gitLabMergeRequestPatch },
+    ),
+  );
+  executor.register("GITLAB_CREATE_MR", (context) =>
+    call(
+      context,
+      "builtin:gitlab",
+      "gitlab_create_merge_request",
+      {
+        projectId: contextual(
+          context,
+          "projectId",
+          "repo.gitlabProjectId",
+          "GitLab project ID",
+        ),
+        sourceBranch: contextual(
+          context,
+          "sourceBranch",
+          "worktree.branch",
+          "Source branch",
+        ),
+        targetBranch: contextual(
+          context,
+          "targetBranch",
+          "worktree.baseBranch",
+          "Target branch",
+        ),
+        title: text(
+          context.node.config.title ??
+            getSessionValue(context.sessionData, "ticket.title"),
+          "Merge request title",
+          500,
+        ),
+        description: optionalText(context.node.config.description),
+        removeSourceBranch: context.node.config.removeSourceBranch === true,
+        squash: context.node.config.squash === true,
+        reviewerIds: Array.isArray(context.node.config.reviewerIds)
+          ? context.node.config.reviewerIds.map(String)
+          : [],
+        labels: Array.isArray(context.node.config.labels)
+          ? context.node.config.labels.map(String)
+          : [],
+      },
+      { sessionPatch: gitLabMergeRequestPatch },
+    ),
+  );
+  executor.register("GITLAB_UPDATE_MR", (context) =>
+    call(
+      context,
+      "builtin:gitlab",
+      "gitlab_update_merge_request",
+      {
+        ...gitLabMergeRequestCoordinates(context),
+        title: optionalText(context.node.config.title),
+        description: optionalText(context.node.config.description),
+        stateEvent: optionalText(context.node.config.stateEvent),
+        reviewerIds: Array.isArray(context.node.config.reviewerIds)
+          ? context.node.config.reviewerIds.map(String)
+          : undefined,
+        labels: Array.isArray(context.node.config.labels)
+          ? context.node.config.labels.map(String)
+          : undefined,
+      },
+      { sessionPatch: gitLabMergeRequestPatch },
+    ),
+  );
+  executor.register("GITLAB_SUBMIT_REVIEW", (context) =>
+    call(context, "builtin:gitlab", "gitlab_submit_review", {
+      ...gitLabMergeRequestCoordinates(context),
+      outcome: String(context.node.config.outcome ?? "COMMENT"),
+      body: optionalText(context.node.config.body),
+    }),
+  );
+  executor.register("GITLAB_REPLY_DISCUSSION", (context) =>
+    call(context, "builtin:gitlab", "gitlab_reply_discussion", {
+      ...gitLabMergeRequestCoordinates(context),
+      discussionId: text(
+        context.node.config.discussionId,
+        "Discussion ID",
+        500,
+      ),
+      body: text(context.node.config.body, "Discussion reply", 100_000),
+    }),
+  );
+  executor.register("GITLAB_SET_DISCUSSION_RESOLVED", (context) =>
+    call(context, "builtin:gitlab", "gitlab_set_discussion_resolved", {
+      ...gitLabMergeRequestCoordinates(context),
+      discussionId: text(
+        context.node.config.discussionId,
+        "Discussion ID",
+        500,
+      ),
+      resolved: context.node.config.resolved !== false,
+    }),
+  );
+  executor.register("GITLAB_MERGE_MR", (context) =>
+    call(
+      context,
+      "builtin:gitlab",
+      "gitlab_merge_merge_request",
+      {
+        ...gitLabMergeRequestCoordinates(context),
+        squash: context.node.config.squash === true,
+        removeSourceBranch: context.node.config.removeSourceBranch === true,
+        autoMerge: context.node.config.autoMerge === true,
+        sha: optionalText(context.node.config.sha),
+      },
+      { sessionPatch: gitLabMergeRequestPatch },
+    ),
+  );
+  for (const [kind, field] of [
+    ["GITLAB_SET_MR_LABELS", "labels"],
+    ["GITLAB_REQUEST_REVIEWERS", "reviewerIds"],
+  ] as const) {
+    executor.register(kind, (context) =>
+      call(
+        context,
+        "builtin:gitlab",
+        "gitlab_update_merge_request",
+        {
+          ...gitLabMergeRequestCoordinates(context),
+          [field]: Array.isArray(context.node.config[field])
+            ? context.node.config[field].map(String)
+            : [],
+        },
+        { sessionPatch: gitLabMergeRequestPatch },
+      ),
+    );
+  }
+  executor.register("GITLAB_CREATE_PIPELINE", (context) =>
+    call(
+      context,
+      "builtin:gitlab",
+      "gitlab_create_pipeline",
+      {
+        projectId: contextual(
+          context,
+          "projectId",
+          "repo.gitlabProjectId",
+          "GitLab project ID",
+        ),
+        ref: contextual(context, "ref", "worktree.branch", "Git ref"),
+        variables: Array.isArray(context.node.config.variables)
+          ? context.node.config.variables
+          : [],
+      },
+      { sessionPatch: (output) => ({ pipeline: output.pipeline }) },
+    ),
+  );
+  for (const [kind, toolName, idKey, sessionPath] of [
+    [
+      "GITLAB_RETRY_PIPELINE",
+      "gitlab_retry_pipeline",
+      "pipelineId",
+      "pipeline.id",
+    ],
+    [
+      "GITLAB_CANCEL_PIPELINE",
+      "gitlab_cancel_pipeline",
+      "pipelineId",
+      "pipeline.id",
+    ],
+    ["GITLAB_RETRY_JOB", "gitlab_retry_job", "jobId", "job.id"],
+  ] as const) {
+    executor.register(kind, (context) =>
+      call(
+        context,
+        "builtin:gitlab",
+        toolName,
+        {
+          projectId: contextual(
+            context,
+            "projectId",
+            "repo.gitlabProjectId",
+            "GitLab project ID",
+          ),
+          [idKey]: contextual(context, idKey, sessionPath, idKey),
+        },
+        {
+          sessionPatch: (output) =>
+            idKey === "jobId"
+              ? { job: output.job }
+              : { pipeline: output.pipeline },
+        },
+      ),
+    );
+  }
+  executor.register("GITLAB_SAVE_AUTO_RETRY", (context) =>
+    call(
+      context,
+      "builtin:gitlab",
+      "gitlab_save_auto_retry_rule",
+      object(context.node.config.input, "GitLab auto-retry rule"),
+    ),
+  );
+  executor.register("GITLAB_WAIT_PIPELINE", (context) => {
+    const projectId = contextual(
+      context,
+      "projectId",
+      "repo.gitlabProjectId",
+      "GitLab project ID",
+    );
+    const pipelineId = contextual(
+      context,
+      "pipelineId",
+      "pipeline.id",
+      "GitLab pipeline ID",
+    );
+    return Promise.resolve({
+      wait: {
+        kind: "GITLAB_PIPELINE",
+        externalKey: JSON.stringify({ projectId, pipelineId }),
+        resumeAfter: waitResumeAfter(context.node.config),
+        timeoutAt: waitTimeoutAt(context.node.config),
+      },
+    });
   });
   const githubPullRequestAction = async (
     context: WorkflowExecutionContext,
@@ -1426,6 +1669,41 @@ function registerWaitPollers(
         run.status === "SUCCESS"
           ? null
           : `GitHub checks concluded ${run.status.toLowerCase()}`,
+    };
+  });
+  workflows.registerWaitPoller("GITLAB_PIPELINE", async (externalKey) => {
+    const input = object(JSON.parse(externalKey), "GitLab pipeline wait");
+    const pipeline = await services.gitlab.pipeline(
+      text(input.projectId, "GitLab project ID", 500),
+      text(input.pipelineId, "GitLab pipeline ID", 500),
+    );
+    if (
+      !new Set(["SUCCESS", "FAILED", "CANCELED", "SKIPPED", "MANUAL"]).has(
+        pipeline.status,
+      )
+    ) {
+      return { pending: true, pollAfterSeconds: 10 };
+    }
+    return {
+      pending: false,
+      result: {
+        id: pipeline.id,
+        projectId: pipeline.projectId,
+        status: pipeline.status,
+        webUrl: pipeline.webUrl,
+        sessionPatch: {
+          pipeline: {
+            id: pipeline.id,
+            projectId: pipeline.projectId,
+            status: pipeline.status,
+            webUrl: pipeline.webUrl,
+          },
+        },
+      },
+      error:
+        pipeline.status === "SUCCESS"
+          ? null
+          : `GitLab pipeline concluded ${pipeline.status.toLowerCase()}`,
     };
   });
   workflows.registerWaitPoller("DISK_SPACE_REPORT", async (externalKey) => {

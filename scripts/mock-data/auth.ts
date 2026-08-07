@@ -1,5 +1,7 @@
 import type { PrismaClient } from "../../src/generated/prisma/client";
 
+import { daysAgo, hoursAgo, minutesAgo } from "./time";
+
 export const screenshotSessionToken = "screenshot-session-token";
 
 export async function seedAuth(prisma: PrismaClient): Promise<void> {
@@ -11,6 +13,8 @@ export async function seedAuth(prisma: PrismaClient): Promise<void> {
         email: "avery@acme.example",
         emailVerified: false,
         role: "user",
+        createdAt: daysAgo(180),
+        updatedAt: daysAgo(5),
       },
       {
         id: "user-screenshot-developer",
@@ -18,6 +22,8 @@ export async function seedAuth(prisma: PrismaClient): Promise<void> {
         email: "jordan@acme.example",
         emailVerified: false,
         role: "user",
+        createdAt: daysAgo(120),
+        updatedAt: daysAgo(8),
       },
     ],
   });
@@ -30,12 +36,16 @@ export async function seedAuth(prisma: PrismaClient): Promise<void> {
         userId: "user-screenshot-admin",
         // Deliberately unusable: screenshot users authenticate through the seeded session.
         password: "mock-password-hash-not-a-credential",
+        createdAt: daysAgo(180),
+        updatedAt: daysAgo(5),
       },
       {
         id: "account-screenshot-developer",
         accountId: "jordan-oidc-subject",
         providerId: "company-oidc",
         userId: "user-screenshot-developer",
+        createdAt: daysAgo(120),
+        updatedAt: daysAgo(8),
       },
     ],
   });
@@ -47,6 +57,8 @@ export async function seedAuth(prisma: PrismaClient): Promise<void> {
       expiresAt: new Date("2035-01-01T00:00:00.000Z"),
       ipAddress: "192.0.2.42",
       userAgent: "Screenshot Browser",
+      createdAt: minutesAgo(12),
+      updatedAt: minutesAgo(2),
     },
   });
   await prisma.apiKey.create({
@@ -62,7 +74,9 @@ export async function seedAuth(prisma: PrismaClient): Promise<void> {
       enabled: true,
       rateLimitEnabled: false,
       requestCount: 18,
-      lastRequest: new Date("2026-07-31T14:30:00.000Z"),
+      lastRequest: hoursAgo(23),
+      createdAt: daysAgo(30),
+      updatedAt: hoursAgo(2),
     },
   });
   await prisma.authSettings.create({
@@ -70,6 +84,8 @@ export async function seedAuth(prisma: PrismaClient): Promise<void> {
       id: "default",
       bootstrapCompleted: true,
       registrationEnabled: true,
+      createdAt: daysAgo(180),
+      updatedAt: daysAgo(10),
     },
   });
 }

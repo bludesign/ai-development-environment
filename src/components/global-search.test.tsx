@@ -230,7 +230,12 @@ describe("GlobalSearch", () => {
   test("includes gated page destinations only when their features are enabled", async () => {
     render(
       <GlobalSearch
-        features={{ actionsCache: true, webhooks: true, jiraWebhooks: true }}
+        features={{
+          actionsCache: true,
+          webhooks: true,
+          jiraWebhooks: true,
+          github: true,
+        }}
       />,
     );
     fireEvent.click(screen.getByRole("button", { name: "Open global search" }));

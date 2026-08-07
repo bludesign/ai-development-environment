@@ -14,6 +14,8 @@ enum GlobalSearchGroup {
   WORKFLOWS
   "Represents the GitHub actions option."
   GITHUB_ACTIONS
+  "Represents GitLab pipelines."
+  GITLAB_PIPELINES
   "Represents the builds option."
   BUILDS
   "Represents the agents jobs option."
@@ -36,6 +38,8 @@ enum GlobalSearchKind {
   JIRA_TICKET
   "Represents the GitHub pull request option."
   GITHUB_PULL_REQUEST
+  "Represents a GitLab merge request."
+  GITLAB_MERGE_REQUEST
   "Represents the repository option."
   REPOSITORY
   "Represents the codebase option."
@@ -46,6 +50,8 @@ enum GlobalSearchKind {
   WORKFLOW_RUN
   "Represents the GitHub actions run option."
   GITHUB_ACTIONS_RUN
+  "Represents a GitLab pipeline."
+  GITLAB_PIPELINE
   "Represents the build option."
   BUILD
   "Represents the agent option."

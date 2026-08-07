@@ -129,6 +129,16 @@ const RESOURCE_KIND_SEED_PATHS: Record<WorkflowResourceKind, string[]> = {
     "agent.*",
     "ticket.*",
   ],
+  GITLAB_MERGE_REQUEST: ["pr.*", "repo.*", "worktree.*", "ticket.*"],
+  GITLAB_PIPELINE: ["pipeline.*", "repo.*", "pr.*", "worktree.*", "ticket.*"],
+  GITLAB_JOB: [
+    "job.*",
+    "pipeline.*",
+    "repo.*",
+    "pr.*",
+    "worktree.*",
+    "ticket.*",
+  ],
   PULL_REQUEST: ["pr.number", "repo.displayOrigin"],
   WORKTREE: [
     "worktree.*",
@@ -458,6 +468,47 @@ const EXPANSION_STEP_CATALOG: WorkflowCatalogEntry[] = [
     ["repo.*"],
     ["pipeline.*"],
     { mutatesExternal: true },
+  ),
+  ...[
+    ["GITLAB_LOAD_MR", "Load merge request", false],
+    ["GITLAB_CREATE_MR", "Create merge request", true],
+    ["GITLAB_UPDATE_MR", "Update merge request", true],
+    ["GITLAB_SUBMIT_REVIEW", "Submit merge request review", true],
+    ["GITLAB_REPLY_DISCUSSION", "Reply to discussion", true],
+    ["GITLAB_SET_DISCUSSION_RESOLVED", "Resolve discussion", true],
+    ["GITLAB_MERGE_MR", "Merge merge request", true],
+    ["GITLAB_SET_MR_LABELS", "Set merge request labels", true],
+    ["GITLAB_REQUEST_REVIEWERS", "Request merge request reviewers", true],
+    ["GITLAB_CREATE_PIPELINE", "Create pipeline", true],
+    ["GITLAB_RETRY_PIPELINE", "Retry pipeline", true],
+    ["GITLAB_RETRY_JOB", "Retry job", true],
+    ["GITLAB_CANCEL_PIPELINE", "Cancel pipeline", true],
+  ].map(([kind, label, mutatesExternal]) =>
+    expansionStep(
+      kind as WorkflowStepKind,
+      "GitLab",
+      String(label),
+      [],
+      String(kind).includes("PIPELINE") || String(kind).includes("JOB")
+        ? ["pipeline.*", "job.*"]
+        : ["pr.*"],
+      { mutatesExternal: Boolean(mutatesExternal) },
+    ),
+  ),
+  expansionStep(
+    "GITLAB_SAVE_AUTO_RETRY",
+    "GitLab Pipelines",
+    "Install auto-retry rule",
+    ["pipeline.id"],
+    [],
+    { mutatesExternal: true },
+  ),
+  expansionStep(
+    "GITLAB_WAIT_PIPELINE",
+    "GitLab Pipelines",
+    "Wait for pipeline",
+    ["pipeline.id"],
+    ["pipeline.*"],
   ),
   expansionStep(
     "JIRA_CREATE_TICKET",
@@ -1641,6 +1692,15 @@ const GITHUB_ISSUE_COMMENT_SEED_PATHS = [
   "comment.*",
 ];
 
+const GITLAB_MERGE_REQUEST_SEED_PATHS = [
+  "repo.*",
+  "pr.*",
+  "ticket.*",
+  "worktree.*",
+  "codebase.*",
+  "agent.*",
+];
+
 /** Shared closing note for every trigger that supports the `filters` map. */
 const FILTERS_NOTE =
   "Filters narrow it further: each session path must equal the given value, or be one of a list of values.";
@@ -1723,6 +1783,81 @@ const EXPANSION_TRIGGER_CATALOG: WorkflowTriggerCatalogEntry[] = [
     "GitHub",
     "Pull request review approved",
     GITHUB_PULL_REQUEST_SEED_PATHS,
+  ),
+  ...[
+    [
+      "GITLAB_MR_STATE",
+      "Merge request opened or ready",
+      GITLAB_MERGE_REQUEST_SEED_PATHS,
+    ],
+    [
+      "GITLAB_REVIEW_CHANGES_REQUESTED",
+      "Changes requested",
+      GITLAB_MERGE_REQUEST_SEED_PATHS,
+    ],
+    [
+      "GITLAB_REVIEW_COMMENT",
+      "Review comment created",
+      [...GITLAB_MERGE_REQUEST_SEED_PATHS, "comment.*"],
+    ],
+    [
+      "GITLAB_MR_CLOSED",
+      "Merge request merged or closed",
+      GITLAB_MERGE_REQUEST_SEED_PATHS,
+    ],
+    [
+      "GITLAB_PIPELINE_FAILED",
+      "Pipeline failed",
+      ["pipeline.*", "repo.*", "pr.*"],
+    ],
+    ["GITLAB_PUSH_DEFAULT", "Push to default branch", ["repo.*", "push.*"]],
+    [
+      "GITLAB_PIPELINE_SUCCEEDED",
+      "Pipeline succeeded",
+      ["pipeline.*", "repo.*", "pr.*"],
+    ],
+    [
+      "GITLAB_NOTE_COMMAND",
+      "Note command",
+      [...GITLAB_MERGE_REQUEST_SEED_PATHS, "comment.*"],
+    ],
+    [
+      "GITLAB_PIPELINE_RESULT",
+      "Pipeline result",
+      ["pipeline.*", "repo.*", "pr.*"],
+    ],
+    [
+      "GITLAB_MR_LABEL",
+      "Merge request label set",
+      GITLAB_MERGE_REQUEST_SEED_PATHS,
+    ],
+    [
+      "GITLAB_PIPELINE_STATUS_CHANGED",
+      "Pipeline status changed",
+      ["pipeline.*", "repo.*", "pr.*"],
+    ],
+    [
+      "GITLAB_MR_SYNCHRONIZED",
+      "Merge request synchronized",
+      GITLAB_MERGE_REQUEST_SEED_PATHS,
+    ],
+    [
+      "GITLAB_REVIEW_APPROVED",
+      "Merge request approved",
+      GITLAB_MERGE_REQUEST_SEED_PATHS,
+    ],
+    [
+      "GITLAB_JOB_STATUS_CHANGED",
+      "Job status changed",
+      ["job.*", "pipeline.*", "repo.*"],
+    ],
+  ].map(([kind, label, seedPaths]) =>
+    expansionTrigger(
+      String(kind) as WorkflowTriggerKind,
+      "GitLab",
+      String(label),
+      seedPaths as string[],
+    ),
   ),
   expansionTrigger(
     "JIRA_TICKET_UPDATED",
@@ -3178,12 +3313,16 @@ export function validateWorkflowDefinition(value: unknown): {
     }
     if (
       triggerDefinition.kind === "GITHUB_ISSUE_COMMAND" ||
-      triggerDefinition.kind === "JIRA_ISSUE_COMMAND"
+      triggerDefinition.kind === "JIRA_ISSUE_COMMAND" ||
+      triggerDefinition.kind === "GITLAB_NOTE_COMMAND"
     ) {
       const jira = triggerDefinition.kind === "JIRA_ISSUE_COMMAND";
+      const gitlab = triggerDefinition.kind === "GITLAB_NOTE_COMMAND";
       const allowed = jira
         ? triggerDefinition.config.allowedAccountIds
-        : triggerDefinition.config.allowedLogins;
+        : gitlab
+          ? triggerDefinition.config.allowedUsernames
+          : triggerDefinition.config.allowedLogins;
       const pattern = triggerDefinition.config.commandPattern;
       if (
         !Array.isArray(allowed) ||
@@ -3195,7 +3334,9 @@ export function validateWorkflowDefinition(value: unknown): {
           code: "ISSUE_COMMAND_ALLOWLIST_REQUIRED",
           message: jira
             ? "Issue command triggers require an explicit Jira account ID allow-list"
-            : "Issue command triggers require an explicit GitHub login allow-list",
+            : gitlab
+              ? "Note command triggers require an explicit GitLab username allow-list"
+              : "Issue command triggers require an explicit GitHub login allow-list",
           triggerId: triggerDefinition.id,
         });
       if (

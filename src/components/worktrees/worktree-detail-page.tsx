@@ -21,6 +21,7 @@ import type { BuildRecord, BuildReport } from "@/components/builds/types";
 import { useBuildTimeTicker } from "@/components/builds/use-build-time-ticker";
 import { CoverageValue } from "@/components/common/coverage-value";
 import { WorktreePipelinesCard } from "@/components/github/worktree-pipelines-card";
+import { GitLabWorktreePipelinesCard } from "@/components/gitlab/worktree-pipelines-card";
 import { WorkflowQuickActions } from "@/components/workflows/workflow-quick-actions";
 import { WorktreeRunQueueCard } from "@/components/workflows/worktree-run-queue-card";
 import type { WorktreeRunQueueEntry } from "@/components/workflows/types";
@@ -765,6 +766,11 @@ function LoadedWorktreeDetail({
         onRetried={onPipelineRetried}
         runs={pipelines}
         worktreeId={worktree.id}
+      />
+
+      <GitLabWorktreePipelinesCard
+        onChanged={onReload}
+        pipelines={worktree.gitLabPipelines ?? []}
       />
 
       <div className="grid gap-5 lg:grid-cols-2">

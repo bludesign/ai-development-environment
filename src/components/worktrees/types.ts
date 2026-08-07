@@ -9,6 +9,21 @@ import type {
   CodebaseRepository,
 } from "@/components/codebases/types";
 import type { GitHubPullRequestView } from "@/services/github/types";
+import type { GitLabPipelineView } from "@/services/gitlab/types";
+
+export type WorktreeSourceControlRequest = {
+  provider: "GITHUB" | "GITLAB";
+  id: string;
+  number: number;
+  title: string;
+  url: string;
+  isDraft: boolean;
+  headRefName: string;
+  headRefOid: string;
+  createdAt: string;
+  projectId?: string;
+  detailedMergeStatus?: string;
+};
 
 export type WorktreeTag = {
   id: string;
@@ -82,6 +97,8 @@ export type Worktree = {
   ticketTitle: string | null;
   ticketStatus: string | null;
   pullRequest: GitHubPullRequestView | null;
+  sourceControlRequest: WorktreeSourceControlRequest | null;
+  gitLabPipelines: GitLabPipelineView[];
   latestBuild?: WorktreeLatestBuild | null;
   tags: WorktreeTag[];
   activeJob: AgentJob | null;

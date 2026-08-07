@@ -17,6 +17,10 @@ export type GitHubAppConnectionSettings = {
   webhookUrl: string | null;
 };
 
+export type GitLabConnectionSettings = {
+  baseUrl: string;
+};
+
 export type CacheServerConnectionSettings = {
   baseUrl: string;
   headers: Array<{ name: string; value: string }>;
@@ -124,6 +128,15 @@ export function githubAppConnectionSettings(
     appId: string(source.appId, "GitHub App settings"),
     installationId: string(source.installationId, "GitHub App settings"),
     webhookUrl: nullableString(source.webhookUrl, "GitHub App settings"),
+  };
+}
+
+export function gitlabConnectionSettings(
+  value: unknown,
+): GitLabConnectionSettings {
+  const source = record(value, "GitLab connection settings");
+  return {
+    baseUrl: string(source.baseUrl, "GitLab connection settings"),
   };
 }
 

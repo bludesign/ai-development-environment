@@ -49,6 +49,7 @@ beforeAll(async () => {
   database.exec(`
     CREATE TABLE "GitHubPipelineSnapshot" (
       "id" TEXT NOT NULL PRIMARY KEY,
+      "sourceControlProvider" TEXT NOT NULL DEFAULT 'GITHUB',
       "repositoryGithubId" TEXT NOT NULL,
       "repositoryNameWithOwner" TEXT NOT NULL,
       "repositoryUrl" TEXT NOT NULL,
@@ -65,6 +66,7 @@ beforeAll(async () => {
       ON "GitHubPipelineSnapshot"("repositoryGithubId", "headSha");
     CREATE TABLE "GitHubPipelineRecord" (
       "id" TEXT NOT NULL PRIMARY KEY,
+      "sourceControlProvider" TEXT NOT NULL DEFAULT 'GITHUB',
       "snapshotId" TEXT NOT NULL,
       "identityKey" TEXT NOT NULL,
       "githubPipelineId" TEXT NOT NULL,

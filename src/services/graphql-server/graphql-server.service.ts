@@ -78,6 +78,7 @@ class GraphQLServerService {
       this.services.jiraService,
       this.services.jiraWebhookService,
       this.services.gitHubService,
+      this.services.gitLabService,
       this.services.ccusageService,
       this.services.codebasesService,
       this.services.toolsService,
