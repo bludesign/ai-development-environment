@@ -3975,7 +3975,7 @@ export class WorkflowsService {
           );
         }
         regex.lastIndex = offset;
-        let match: ReturnType<typeof regex.exec>;
+        let match: RegExpExecArray | null;
         while ((match = regex.exec(output))) {
           const matchedText = match[0]!;
           if (!matchedText.length) {

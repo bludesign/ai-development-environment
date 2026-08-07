@@ -7,11 +7,12 @@ import { originFromRequest } from "@/lib/app-origins";
 /**
  * One-flow state binding the mobile OAuth `start` and `complete` legs together.
  *
- * `complete` exchanges an existing browser session for a one-time token and hands
- * it to a native app over a custom scheme. Without a state check that is reachable
- * by top-level navigation from any site — `SameSite=Lax` sends the session cookie
- * on exactly that kind of request — so a hostile page could make a signed-in
- * user's browser mint a token and fire it at whatever holds the `aide-auth://`
+ * `complete` exchanges an existing browser session for a PKCE-bound authorization
+ * code and hands it to a native app over a custom scheme. Without a state check,
+ * the completion route is reachable by top-level navigation from any site —
+ * `SameSite=Lax` sends the session cookie on exactly that kind of request — so
+ * a hostile page could make a signed-in user's browser mint a code and fire it
+ * at whatever holds the `aide-auth://`
  * scheme on that device. Requiring a value this server planted moments earlier
  * means only a flow that actually began at `start` can finish.
  *

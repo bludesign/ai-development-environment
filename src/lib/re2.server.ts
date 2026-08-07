@@ -1,6 +1,6 @@
 import "server-only";
 
-import { RE2 } from "re2-wasm";
+import RE2 from "re2";
 
 export const RE2_PATTERN_MAX_LENGTH = 1_024;
 
@@ -29,8 +29,14 @@ export function compileRe2(
   try {
     return new RE2(pattern, unicodeFlags(flags));
   } catch (error) {
-    throw new Error(
-      `${label} is not valid RE2 syntax: ${error instanceof Error ? error.message : String(error)}`,
-    );
+    const message = error instanceof Error ? error.message : String(error);
+    if (!(error instanceof SyntaxError)) {
+      throw new Error(`${label} could not be compiled: ${message}`, {
+        cause: error,
+      });
+    }
+    throw new Error(`${label} is not valid RE2 syntax: ${message}`, {
+      cause: error,
+    });
   }
 }
