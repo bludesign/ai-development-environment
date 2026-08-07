@@ -55,7 +55,13 @@ cpSync(standaloneSource, path.join(stagingDir, "standalone"), {
 
 // Native modules are platform-specific; drop the traced copies and install them as real
 // dependencies instead so npm builds the correct platform binary at install time.
-const nativeModules = ["better-sqlite3", "sharp", "@img", "@napi-rs/keyring"];
+const nativeModules = [
+  "better-sqlite3",
+  "sharp",
+  "re2",
+  "@img",
+  "@napi-rs/keyring",
+];
 for (const name of nativeModules) {
   rmSync(path.join(stagingDir, "standalone", "node_modules", name), {
     recursive: true,
@@ -205,16 +211,18 @@ const nextPackage = JSON.parse(
 const betterSqlite3Version = rootPackage.dependencies?.["better-sqlite3"];
 const keyringVersion = rootPackage.dependencies?.["@napi-rs/keyring"];
 const prismaVersion = rootPackage.devDependencies?.prisma;
+const re2Version = rootPackage.dependencies?.re2;
 const sharpVersion =
   nextPackage.optionalDependencies?.sharp ?? nextPackage.dependencies?.sharp;
 if (
   !betterSqlite3Version ||
   !keyringVersion ||
   !prismaVersion ||
+  !re2Version ||
   !sharpVersion
 ) {
   fail(
-    "unable to resolve @napi-rs/keyring, better-sqlite3, prisma, or sharp versions to pin",
+    "unable to resolve @napi-rs/keyring, better-sqlite3, prisma, re2, or sharp versions to pin",
   );
 }
 
@@ -235,6 +243,7 @@ const manifest = {
     "@napi-rs/keyring": keyringVersion,
     "better-sqlite3": betterSqlite3Version,
     prisma: prismaVersion,
+    re2: re2Version,
     sharp: sharpVersion,
   },
   allowScripts: rootPackage.allowScripts,
