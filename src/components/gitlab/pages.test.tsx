@@ -101,10 +101,9 @@ describe("GitLabMergeRequestsPage", () => {
     render(<GitLabMergeRequestsPage />);
 
     expect(await screen.findByText("Add the API")).toBeDefined();
-    expect(screen.getByRole("combobox", { name: "Scope" })).toHaveProperty(
-      "value",
-      "MINE",
-    );
+    expect(
+      screen.getByRole("combobox", { name: "Scope" }).textContent,
+    ).toContain("Authored by me");
   });
 
   test("does not describe a failed request as an empty result", async () => {
@@ -253,6 +252,23 @@ describe("GitLabPipelinesPage", () => {
     expect(await screen.findByText("test / unit")).toBeDefined();
     expect(screen.getByText("SUCCESS").className).toContain("emerald-500");
     expect(screen.getByText("FAILED").className).toContain("red-500");
+    expect(screen.getByText("Duration 59s")).toBeDefined();
+    expect(screen.getByText("Duration 29s")).toBeDefined();
+    expect(screen.getAllByText("Started")).toHaveLength(3);
+    expect(
+      (
+        screen.getByRole("button", {
+          name: "Retry unit",
+        }) as HTMLButtonElement
+      ).disabled,
+    ).toBe(false);
+    expect(
+      (
+        screen.getByRole("button", {
+          name: "Retry lint",
+        }) as HTMLButtonElement
+      ).disabled,
+    ).toBe(false);
 
     fireEvent.click(
       screen.getByRole("button", {

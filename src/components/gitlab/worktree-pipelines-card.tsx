@@ -30,7 +30,11 @@ import { controlPlaneRequest } from "@/lib/control-plane-client";
 import { isRowActivation } from "@/lib/row-activation";
 import type { GitLabJobView, GitLabPipelineView } from "@/services/gitlab";
 
-import { gitLabPipelineStatusClass } from "./pipeline-format";
+import {
+  canRetryGitLabJob,
+  gitLabDuration,
+  gitLabPipelineStatusClass,
+} from "./pipeline-format";
 
 type GitLabJobState = {
   loading: boolean;
@@ -356,9 +360,16 @@ function GitLabPipelineJobs({
                   {job.status}
                 </Badge>
               </a>
+              <div className="min-w-32 text-right text-xs text-muted-foreground">
+                <div>
+                  {t("started")}{" "}
+                  <DateTime kind="time" relativeToday value={job.startedAt} />
+                </div>
+                <div>{t("duration", { duration: gitLabDuration(job) })}</div>
+              </div>
               <Button
                 aria-label={t("retryJob", { job: job.name })}
-                disabled={busy || !["FAILED", "CANCELED"].includes(job.status)}
+                disabled={busy || !canRetryGitLabJob(job.status)}
                 onClick={() => onRetry(job.id)}
                 size="icon-sm"
                 type="button"

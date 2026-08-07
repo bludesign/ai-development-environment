@@ -23,6 +23,13 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { DateTime } from "@/components/common/date-time";
 import { Input } from "@/components/ui/input";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { Spinner } from "@/components/ui/spinner";
 import {
   Table,
@@ -57,7 +64,11 @@ import type {
   GitLabWebhookDeliveryView,
 } from "@/services/gitlab";
 
-import { gitLabPipelineStatusClass } from "./pipeline-format";
+import {
+  canRetryGitLabJob,
+  gitLabDuration,
+  gitLabPipelineStatusClass,
+} from "./pipeline-format";
 
 const SETTINGS = "configured baseUrl version tokenConfigured";
 const PROJECT =
@@ -78,38 +89,12 @@ type GitLabJobState = {
   jobs: GitLabJobView[] | null;
 };
 
-function gitLabPipelineDuration(pipeline: GitLabPipelineView) {
-  let totalSeconds = pipeline.duration;
-  if (
-    totalSeconds === null &&
-    [
-      "CREATED",
-      "WAITING_FOR_RESOURCE",
-      "PREPARING",
-      "PENDING",
-      "RUNNING",
-    ].includes(pipeline.status) &&
-    pipeline.startedAt
-  ) {
-    const startedAt = Date.parse(pipeline.startedAt);
-    if (Number.isFinite(startedAt)) {
-      totalSeconds = Math.max(0, Math.floor((Date.now() - startedAt) / 1000));
-    }
-  }
-  if (totalSeconds === null) return "—";
-  const seconds = Math.max(0, Math.floor(totalSeconds));
-  const hours = Math.floor(seconds / 3600);
-  const minutes = Math.floor((seconds % 3600) / 60);
-  const remainder = seconds % 60;
-  if (hours > 0) return `${hours}h${minutes > 0 ? ` ${minutes}m` : ""}`;
-  if (minutes > 0) return `${minutes}m${remainder > 0 ? ` ${remainder}s` : ""}`;
-  return `${remainder}s`;
-}
-
 type Configuration = {
   settings: GitLabSettingsView;
   projects: GitLabProjectView[];
 };
+
+const ALL_PROJECTS_VALUE = "__all_projects__";
 
 function ProviderNotConfigured() {
   const t = useTranslations("gitlabPages");
@@ -169,20 +154,26 @@ function ProjectSelect({
 }) {
   const t = useTranslations("gitlabPages");
   return (
-    <select
-      aria-label={t("project")}
-      className="h-9 min-w-56 rounded-md border bg-background px-3 text-sm"
-      onChange={(event) => onChange(event.target.value)}
-      value={value}
+    <Select
+      onValueChange={(nextValue) =>
+        onChange(nextValue === ALL_PROJECTS_VALUE ? "" : nextValue)
+      }
+      value={allowAll && !value ? ALL_PROJECTS_VALUE : value}
     >
-      {allowAll && <option value="">{t("allProjects")}</option>}
-      {!allowAll && !value && <option value="">{t("chooseProject")}</option>}
-      {projects.map((project) => (
-        <option key={project.id} value={project.id}>
-          {project.pathWithNamespace}
-        </option>
-      ))}
-    </select>
+      <SelectTrigger aria-label={t("project")} className="h-9 min-w-56">
+        <SelectValue placeholder={t("chooseProject")} />
+      </SelectTrigger>
+      <SelectContent>
+        {allowAll && (
+          <SelectItem value={ALL_PROJECTS_VALUE}>{t("allProjects")}</SelectItem>
+        )}
+        {projects.map((project) => (
+          <SelectItem key={project.id} value={project.id}>
+            {project.pathWithNamespace}
+          </SelectItem>
+        ))}
+      </SelectContent>
+    </Select>
   );
 }
 
@@ -287,30 +278,35 @@ export function GitLabMergeRequestsPage() {
             projects={configuration.projects}
             value={projectId}
           />
-          <select
-            aria-label={t("scope")}
-            className="h-9 rounded-md border bg-background px-3 text-sm"
+          <Select
             disabled={Boolean(projectId)}
-            onChange={(event) =>
-              setScope(event.target.value as GitLabMergeRequestScope)
+            onValueChange={(value) =>
+              setScope(value as GitLabMergeRequestScope)
             }
             value={scope}
           >
-            <option value="ALL">{t("allAccessible")}</option>
-            <option value="MINE">{t("authoredByMe")}</option>
-            <option value="REVIEW_REQUESTED">{t("reviewRequested")}</option>
-          </select>
-          <select
-            aria-label={t("state")}
-            className="h-9 rounded-md border bg-background px-3 text-sm"
-            onChange={(event) => setState(event.target.value)}
-            value={state}
-          >
-            <option value="OPENED">{t("open")}</option>
-            <option value="MERGED">{t("merged")}</option>
-            <option value="CLOSED">{t("closed")}</option>
-            <option value="ALL">{t("all")}</option>
-          </select>
+            <SelectTrigger aria-label={t("scope")} className="h-9">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="ALL">{t("allAccessible")}</SelectItem>
+              <SelectItem value="MINE">{t("authoredByMe")}</SelectItem>
+              <SelectItem value="REVIEW_REQUESTED">
+                {t("reviewRequested")}
+              </SelectItem>
+            </SelectContent>
+          </Select>
+          <Select onValueChange={setState} value={state}>
+            <SelectTrigger aria-label={t("state")} className="h-9">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="OPENED">{t("open")}</SelectItem>
+              <SelectItem value="MERGED">{t("merged")}</SelectItem>
+              <SelectItem value="CLOSED">{t("closed")}</SelectItem>
+              <SelectItem value="ALL">{t("all")}</SelectItem>
+            </SelectContent>
+          </Select>
           <Button
             disabled={busy}
             onClick={() => void load()}
@@ -1109,7 +1105,7 @@ export function GitLabPipelinesPage() {
                         />
                         <span className="text-xs">
                           {t("duration", {
-                            duration: gitLabPipelineDuration(pipeline),
+                            duration: gitLabDuration(pipeline),
                           })}
                         </span>
                       </div>
@@ -1229,9 +1225,16 @@ function GitLabJobsPanel({
                   {job.status}
                 </Badge>
               </a>
+              <div className="min-w-32 text-right text-xs text-muted-foreground">
+                <div>
+                  {t("started")}{" "}
+                  <DateTime kind="time" relativeToday value={job.startedAt} />
+                </div>
+                <div>{t("duration", { duration: gitLabDuration(job) })}</div>
+              </div>
               <Button
                 aria-label={t("retryJob", { job: job.name })}
-                disabled={!["FAILED", "CANCELED"].includes(job.status)}
+                disabled={!canRetryGitLabJob(job.status)}
                 onClick={() => onRetry(job.id)}
                 size="icon-sm"
                 type="button"
