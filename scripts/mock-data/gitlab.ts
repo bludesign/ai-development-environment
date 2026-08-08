@@ -6,11 +6,11 @@ import { ids } from "./ids";
 import { daysFromNow, minutesAgo } from "./time";
 
 const BASE_URL = "https://gitlab.acme.example.com/gitlab";
-const PROJECT_ID = "1001";
+const PROJECT_ID = ids.gitlab.projectId;
 const PROJECT_PATH = "acme/platform";
 const REPOSITORY_ID = "repo-acme-gitlab-platform";
 const CODEBASE_ID = "codebase-acme-gitlab-platform";
-const WORKTREE_ID = "worktree-gitlab-retry-diagnostics";
+const WORKTREE_ID = ids.worktrees.gitlabRetry;
 
 function canonicalize(value: unknown): unknown {
   if (Array.isArray(value)) return value.map(canonicalize);
@@ -28,7 +28,7 @@ function canonicalize(value: unknown): unknown {
 function cacheKey(
   operation: string,
   path: string,
-  query: Record<string, string | number>,
+  query: Record<string, string | number | boolean>,
 ): string {
   const entries = Object.entries(query)
     .map(([key, value]) => [key, String(value)] as const)
@@ -62,7 +62,7 @@ const user = {
 const mergeRequests = [
   {
     id: 8101,
-    iid: 42,
+    iid: ids.gitlab.mergeRequestIid,
     project_id: Number(PROJECT_ID),
     title: "Improve pipeline retry diagnostics",
     description:
@@ -156,11 +156,113 @@ const pipelines = [
   },
 ];
 
+/** Mirrors the prefix GitLabService.mergeRequest() builds, so the cache keys line up. */
+const mergeRequestPath = `/projects/${encodeURIComponent(PROJECT_ID)}/merge_requests/${mergeRequests[0]!.iid}`;
+
+const reviewer = mergeRequests[0]!.reviewers[0]!;
+
+/** Only the length is read (`commitsCount`), but the shape mirrors GitLab's commit payload. */
+const mergeRequestCommits = [
+  {
+    id: mergeRequests[0]!.sha,
+    short_id: mergeRequests[0]!.sha.slice(0, 8),
+    title: "Record retry attempts on the pipeline snapshot",
+    author_name: user.name,
+    created_at: minutesAgo(230).toISOString(),
+  },
+  {
+    id: "4d5e6f708192a3b4c5d6e7f8091a2b3c4d5e6f70",
+    short_id: "4d5e6f70",
+    title: "Surface failed job logs in the retry summary",
+    author_name: user.name,
+    created_at: minutesAgo(200).toISOString(),
+  },
+  {
+    id: "3c4d5e6f708192a3b4c5d6e7f8091a2b3c4d5e6f",
+    short_id: "3c4d5e6f",
+    title: "Add retry history to the pipeline API response",
+    author_name: user.name,
+    created_at: minutesAgo(180).toISOString(),
+  },
+  {
+    id: "2b3c4d5e6f708192a3b4c5d6e7f8091a2b3c4d5e",
+    short_id: "2b3c4d5e",
+    title: "Extract the retry policy into its own module",
+    author_name: user.name,
+    created_at: minutesAgo(165).toISOString(),
+  },
+];
+
+const mergeRequestDiscussions = [
+  {
+    id: "d1f0a9b8c7d6e5f40312a9b8c7d6e5f403122a9b",
+    individual_note: false,
+    notes: [
+      {
+        id: 71001,
+        body: "Retrying here can race with the webhook that marks the pipeline failed. Can we guard on the attempt counter before dispatching?",
+        author: reviewer,
+        created_at: minutesAgo(96).toISOString(),
+        updated_at: minutesAgo(96).toISOString(),
+        system: false,
+        resolvable: true,
+        resolved: false,
+        resolved_by: null,
+      },
+      {
+        id: 71002,
+        body: "Good catch — the retry now checks `attempts < maxAttempts` inside the same transaction that records the attempt.",
+        author: user,
+        created_at: minutesAgo(74).toISOString(),
+        updated_at: minutesAgo(74).toISOString(),
+        system: false,
+        resolvable: true,
+        resolved: false,
+        resolved_by: null,
+      },
+    ],
+  },
+  {
+    id: "b8c7d6e5f40312a9b8c7d6e5f403122a9b8c7d6e",
+    individual_note: false,
+    notes: [
+      {
+        id: 71003,
+        body: "The diagnostics payload should include the queued duration so slow runners are distinguishable from failing ones.",
+        author: reviewer,
+        created_at: minutesAgo(88).toISOString(),
+        updated_at: minutesAgo(88).toISOString(),
+        system: false,
+        resolvable: true,
+        resolved: true,
+        resolved_by: user,
+      },
+    ],
+  },
+  {
+    id: "c7d6e5f40312a9b8c7d6e5f403122a9b8c7d6e5f",
+    individual_note: true,
+    notes: [
+      {
+        id: 71004,
+        body: "Ready for another look — the pipeline failure is the flaky integration job, not this change.",
+        author: user,
+        created_at: minutesAgo(20).toISOString(),
+        updated_at: minutesAgo(20).toISOString(),
+        system: false,
+        resolvable: false,
+        resolved: false,
+        resolved_by: null,
+      },
+    ],
+  },
+];
+
 function cacheEntry(input: {
   id: string;
   operation: string;
   path: string;
-  query: Record<string, string | number>;
+  query: Record<string, string | number | boolean>;
   response: unknown;
 }) {
   const request = { path: input.path, query: input.query };
@@ -357,6 +459,36 @@ export async function seedGitLab(prisma: PrismaClient): Promise<void> {
           sort: "desc",
         },
         response: pipelines,
+      }),
+      // The merge request detail page issues these four requests in parallel; all of them must
+      // hit the cache or the page renders its error alert, since no GitLab host is reachable.
+      cacheEntry({
+        id: "gitlab-cache-merge-request-detail",
+        operation: "GitLabMergeRequest",
+        path: mergeRequestPath,
+        query: { include_rebase_in_progress: true },
+        response: mergeRequests[0],
+      }),
+      cacheEntry({
+        id: "gitlab-cache-merge-request-commits",
+        operation: "GitLabMergeRequestCommits",
+        path: `${mergeRequestPath}/commits`,
+        query: { per_page: 100 },
+        response: mergeRequestCommits,
+      }),
+      cacheEntry({
+        id: "gitlab-cache-merge-request-discussions",
+        operation: "GitLabMergeRequestDiscussions",
+        path: `${mergeRequestPath}/discussions`,
+        query: { per_page: 100 },
+        response: mergeRequestDiscussions,
+      }),
+      cacheEntry({
+        id: "gitlab-cache-merge-request-pipelines",
+        operation: "GitLabMergeRequestPipelines",
+        path: `${mergeRequestPath}/pipelines`,
+        query: { per_page: 100 },
+        response: [pipelines[0]],
       }),
       ...pipelines.map((pipeline, index) =>
         cacheEntry({

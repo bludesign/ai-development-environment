@@ -28,6 +28,8 @@ export const ids = {
     webFeature: "worktree-web-feature-search",
     iosMain: "worktree-ios-main",
     apiFeature: "worktree-api-feature-auth",
+    /** The GitLab-backed checkout; seeded by scripts/mock-data/gitlab.ts. */
+    gitlabRetry: "worktree-gitlab-retry-diagnostics",
   },
   worktreeTags: {
     review: "tag-in-review",
@@ -129,6 +131,10 @@ export const ids = {
     owner: "acme",
     repository: "web-app",
     number: 42,
+  },
+  gitlab: {
+    projectId: "1001",
+    mergeRequestIid: 42,
   },
   mcpPresets: {
     core: "mcp-preset-core",
