@@ -69,6 +69,14 @@ test.describe("app screenshots", () => {
         });
       }
       await page.waitForTimeout(800);
+      if (route.scrollTo) {
+        await page
+          .locator(route.scrollTo)
+          .evaluate((element) =>
+            element.scrollIntoView({ behavior: "instant", block: "center" }),
+          );
+        await page.waitForTimeout(300);
+      }
       await normalizeScreenshotValues(page);
 
       await page.screenshot({

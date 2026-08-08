@@ -24,6 +24,12 @@ export type RouteEntry = {
    * For pages that inspect a checkout live; see playwright/worktree-stub.ts.
    */
   stubWorktree?: boolean;
+  /**
+   * CSS selector centered in the viewport before the capture. The dashboard shell scrolls
+   * inside itself, so `fullPage` never grows past the viewport height and a card below the
+   * fold can only be photographed by scrolling to it first.
+   */
+  scrollTo?: string;
   /** Auth pages are intentionally captured without the seeded bearer session. */
   anonymous?: boolean;
 };
@@ -160,6 +166,15 @@ export const routes: RouteEntry[] = [
     readyTexts: ["Improve pipeline retry diagnostics", "No merge requests"],
   },
   {
+    // The detail page fans out to four cached GitLab REST reads; `GitLabMergeRequest` is the
+    // GraphQL operation that wraps all of them. Its name is a prefix of `GitLabMergeRequests`,
+    // but that list query never runs here, so the match stays unambiguous.
+    name: "gitlab-merge-request-detail",
+    path: `/gitlab/merge-requests/${ids.gitlab.projectId}/${ids.gitlab.mergeRequestIid}`,
+    readyGraphqlOperation: "GitLabMergeRequest",
+    readyTexts: ["Improve pipeline retry diagnostics"],
+  },
+  {
     name: "gitlab-pipelines",
     path: "/gitlab/pipelines",
     readyGraphqlOperation: "GitLabPipelines",
@@ -173,6 +188,21 @@ export const routes: RouteEntry[] = [
       "Improve pipeline retry diagnostics",
       "No open merge requests",
     ],
+  },
+  {
+    // The same worktree detail page as `worktree-detail`, but on the GitLab-backed checkout, so
+    // it photographs the merge-request and pipeline cards instead of their GitHub equivalents.
+    // Stubbed for the same reason: the page inspects the checkout on load.
+    name: "gitlab-worktree-detail",
+    path: `/worktrees/${ids.worktrees.gitlabRetry}`,
+    stubWorktree: true,
+  },
+  {
+    // Settings → Integrations → GitLab, the card the setup and managed-project pages describe.
+    // It sits below the fold behind the Jira and GitHub cards, hence the scroll.
+    name: "gitlab-settings",
+    path: "/settings",
+    scrollTo: "#gitlab-token",
   },
   { name: "gitlab-webhooks", path: "/gitlab/webhooks" },
   { name: "gitlab-cache", path: "/gitlab/cache" },
