@@ -174,6 +174,37 @@ describe("CliHealthService", () => {
     ).toBe(true);
   });
 
+  test("does not reuse a cached result after its command changes", async () => {
+    const completed = {
+      finishedAt: new Date("2026-08-09T12:00:00.000Z"),
+      resultJson: JSON.stringify({
+        checks: [
+          {
+            id: "builtin-acli-jira",
+            command: "acli jira auth status --old",
+            exitCode: 0,
+          },
+        ],
+      }),
+    };
+    getPrismaClient.mockResolvedValue(prismaWithJobs(null, completed));
+    const current = agent("current");
+    const { control, github, gitlab } = dependencies([current]);
+
+    const status = await new CliHealthService(
+      control,
+      github,
+      gitlab,
+    ).statusForAgent(current.id);
+
+    expect(status.overall).toBe("NOT_CHECKED");
+    expect(status.results[0]).toMatchObject({
+      command: "acli jira auth status",
+      state: "NOT_RUN",
+      exitCode: null,
+    });
+  });
+
   test("run all dispatches only online capable agents and skips an active sweep", async () => {
     const eligible = agent("eligible");
     const offline = agent("offline", { online: false });

@@ -33,6 +33,24 @@ describe("captureCommand", () => {
     });
   });
 
+  test("caps combined output before retaining unterminated streams", async () => {
+    const result = await captureCommand({
+      command: process.execPath,
+      args: [
+        "-e",
+        'process.stdout.write("x".repeat(4096)); process.stderr.write("y".repeat(4096));',
+      ],
+      timeoutMs: 10_000,
+      signal: new AbortController().signal,
+      maxOutputBytes: 1024,
+    });
+
+    expect(Buffer.byteLength(`${result.stdout}${result.stderr}`, "utf8")).toBe(
+      1024,
+    );
+    expect(result.outputTruncated).toBe(true);
+  });
+
   test.skipIf(process.platform === "win32")(
     "terminates descendants that inherit the captured output pipes",
     async () => {

@@ -42,6 +42,7 @@ describe("runCliHealth", () => {
   });
 
   test("strips terminal controls and truncates oversized output", async () => {
+    const logs: Array<{ sequence: number; message: string }> = [];
     const result = await runCliHealth(
       {
         checks: [
@@ -55,7 +56,9 @@ describe("runCliHealth", () => {
       },
       600_000,
       new AbortController().signal,
-      async () => undefined,
+      async (log) => {
+        logs.push(log);
+      },
     );
     expect(result.checks[0]?.stdout).not.toContain("\u001b");
     expect(result.checks[0]?.outputTruncated).toBe(true);
@@ -65,6 +68,64 @@ describe("runCliHealth", () => {
         "utf8",
       ),
     ).toBeLessThanOrEqual(32 * 1024);
+    expect(logs).toHaveLength(1);
+    expect(Buffer.byteLength(logs[0]?.message ?? "", "utf8")).toBeLessThan(
+      33 * 1024,
+    );
+  });
+
+  test("does not mark output truncated when it exactly fills the limit", async () => {
+    const result = await runCliHealth(
+      {
+        checks: [
+          {
+            id: "exact",
+            name: "Exact",
+            command: "head -c 32768 /dev/zero | tr '\\0' x",
+            builtIn: false,
+          },
+        ],
+      },
+      600_000,
+      new AbortController().signal,
+      async () => undefined,
+    );
+
+    expect(Buffer.byteLength(result.checks[0]?.stdout ?? "", "utf8")).toBe(
+      32 * 1024,
+    );
+    expect(result.checks[0]?.outputTruncated).toBe(false);
+  });
+
+  test("allocates log sequences across concurrent checks", async () => {
+    const logs: Array<{ sequence: number; message: string }> = [];
+    await runCliHealth(
+      {
+        checks: [
+          {
+            id: "first",
+            name: "First",
+            command: "printf 'one\\ntwo\\n'",
+            builtIn: false,
+          },
+          {
+            id: "second",
+            name: "Second",
+            command: "printf 'three\\nfour\\n'",
+            builtIn: false,
+          },
+        ],
+      },
+      600_000,
+      new AbortController().signal,
+      async (log) => {
+        logs.push(log);
+      },
+    );
+
+    expect(logs).toHaveLength(2);
+    expect(logs.map((log) => log.sequence)).toEqual([0, 1]);
+    expect(logs.every((log) => log.message.includes("\n"))).toBe(true);
   });
 
   test("runs through a shell from the agent home directory and maps a missing executable", async () => {
@@ -119,6 +180,7 @@ describe("runCliHealth", () => {
 
     expect(timedOut.timedOut).toBe(true);
     expect(timedOut.exitCode).toBeNull();
+    expect(timedOut.stderr).toContain("Process exceeded");
     expect(launchFailure.launchError).toContain("missing-shell");
     expect(launchFailure.exitCode).toBeNull();
   });

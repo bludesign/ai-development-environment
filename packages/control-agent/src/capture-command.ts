@@ -7,6 +7,7 @@ const MAX_OUTPUT_BYTES = 2 * 1024 * 1024;
 export type CaptureResult = ProcessResult & {
   stdout: string;
   stderr: string;
+  outputTruncated: boolean;
 };
 
 export function captureCommand(options: {
@@ -17,6 +18,8 @@ export function captureCommand(options: {
   env?: NodeJS.ProcessEnv;
   cwd?: string;
   stdoutFileDescriptor?: number;
+  /** Optional combined stdout/stderr retention limit. */
+  maxOutputBytes?: number;
 }): Promise<CaptureResult> {
   if (options.signal.aborted || options.timeoutMs <= 0) {
     return Promise.resolve({
@@ -26,11 +29,16 @@ export function captureCommand(options: {
       cancelled: options.signal.aborted,
       stdout: "",
       stderr: "",
+      outputTruncated: false,
     });
   }
   return new Promise((resolve, reject) => {
-    let stdout = "";
-    let stderr = "";
+    const stdoutChunks: Buffer[] = [];
+    const stderrChunks: Buffer[] = [];
+    let stdoutBytes = 0;
+    let stderrBytes = 0;
+    let retainedBytes = 0;
+    let outputTruncated = false;
     let timedOut = false;
     let cancelled = false;
     let settled = false;
@@ -52,13 +60,29 @@ export function captureCommand(options: {
       // stop the entire command tree instead of only the immediate Git process.
       detached,
     });
-    const append = (current: string, chunk: Buffer | string) =>
-      `${current}${String(chunk)}`.slice(0, MAX_OUTPUT_BYTES);
+    const append = (
+      chunks: Buffer[],
+      chunk: Buffer | string,
+      streamBytes: number,
+    ) => {
+      const bytes = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+      const remaining = Math.max(
+        0,
+        options.maxOutputBytes === undefined
+          ? MAX_OUTPUT_BYTES - streamBytes
+          : options.maxOutputBytes - retainedBytes,
+      );
+      const retained = bytes.subarray(0, remaining);
+      if (retained.length) chunks.push(Buffer.from(retained));
+      retainedBytes += retained.length;
+      outputTruncated ||= retained.length < bytes.length;
+      return streamBytes + retained.length;
+    };
     child.stdout?.on("data", (chunk) => {
-      stdout = append(stdout, chunk);
+      stdoutBytes = append(stdoutChunks, chunk, stdoutBytes);
     });
     child.stderr?.on("data", (chunk) => {
-      stderr = append(stderr, chunk);
+      stderrBytes = append(stderrChunks, chunk, stderrBytes);
     });
     const sendSignal = (signal: NodeJS.Signals) => {
       if (detached && child.pid) {
@@ -127,8 +151,9 @@ export function captureCommand(options: {
         signal,
         timedOut,
         cancelled,
-        stdout,
-        stderr,
+        stdout: Buffer.concat(stdoutChunks, stdoutBytes).toString("utf8"),
+        stderr: Buffer.concat(stderrChunks, stderrBytes).toString("utf8"),
+        outputTruncated,
       });
     });
   });

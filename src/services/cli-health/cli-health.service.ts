@@ -253,7 +253,7 @@ export class CliHealthService {
     );
     return definitions.map((definition) => {
       const value = byId.get(definition.id);
-      if (!value) {
+      if (!value || value.command !== definition.command) {
         return {
           ...definition,
           state: "NOT_RUN",

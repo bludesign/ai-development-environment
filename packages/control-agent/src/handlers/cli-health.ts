@@ -10,7 +10,8 @@ import {
   type CliHealthJobResult,
 } from "@ai-development-environment/agent-contract/cli-health";
 
-import { runProcess, type ProcessLog } from "../process-runner.js";
+import { captureCommand } from "../capture-command.js";
+import type { ProcessLog } from "../process-runner.js";
 
 const CONCURRENCY = 4;
 const ANSI_PATTERN = /\u001B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])/g;
@@ -21,12 +22,17 @@ function clean(value: string): string {
   return value.replace(ANSI_PATTERN, "").replace(CONTROL_PATTERN, "");
 }
 
+function lineBufferedOutput(value: string): string {
+  return value.replace(/\r?\n$/, "");
+}
+
 function appendWithinLimit(
   current: string,
   line: string,
   retainedBytes: number,
 ): { value: string; retainedBytes: number; truncated: boolean } {
   const addition = current ? `\n${line}` : line;
+  if (!addition) return { value: current, retainedBytes, truncated: false };
   const remaining = CLI_HEALTH_MAX_OUTPUT_BYTES - retainedBytes;
   if (remaining <= 0) return { value: current, retainedBytes, truncated: true };
   const bytes = Buffer.from(addition, "utf8");
@@ -55,6 +61,34 @@ function appendWithinLimit(
   };
 }
 
+async function reportOutput(
+  check: CliHealthCheckDefinition,
+  stdout: string,
+  stderr: string,
+  createdAt: string,
+  onLog: (log: ProcessLog) => Promise<void>,
+): Promise<void> {
+  for (const [stream, message] of [
+    ["STDOUT", stdout],
+    ["STDERR", stderr],
+  ] as const) {
+    if (!message) continue;
+    try {
+      await onLog({
+        sequence: 0,
+        stream,
+        message: `[${check.name}] ${message}`,
+        createdAt,
+      });
+    } catch (error) {
+      console.error(
+        `Could not append CLI health log for ${check.id}:`,
+        error instanceof Error ? error.message : error,
+      );
+    }
+  }
+}
+
 export async function runCliHealthCheck(
   check: CliHealthCheckDefinition,
   signal: AbortSignal,
@@ -63,34 +97,41 @@ export async function runCliHealthCheck(
 ): Promise<CliHealthCheckResult> {
   const started = Date.now();
   const checkedAt = new Date().toISOString();
-  let stdout = "";
-  let stderr = "";
-  let retainedBytes = 0;
-  let outputTruncated = false;
   try {
     const shell = options.shell || process.env.SHELL || "/bin/sh";
-    const result = await runProcess({
+    const timeoutMs = options.timeoutMs ?? CLI_HEALTH_CHECK_TIMEOUT_MS;
+    const result = await captureCommand({
       command: shell,
       args: ["-lc", check.command],
       cwd: options.cwd || homedir(),
-      timeoutMs: options.timeoutMs ?? CLI_HEALTH_CHECK_TIMEOUT_MS,
+      timeoutMs,
       signal,
-      onLog: async (log) => {
-        const message = clean(log.message);
-        if (log.stream === "STDOUT") {
-          const appended = appendWithinLimit(stdout, message, retainedBytes);
-          stdout = appended.value;
-          retainedBytes = appended.retainedBytes;
-          outputTruncated ||= appended.truncated;
-        } else {
-          const appended = appendWithinLimit(stderr, message, retainedBytes);
-          stderr = appended.value;
-          retainedBytes = appended.retainedBytes;
-          outputTruncated ||= appended.truncated;
-        }
-        await onLog({ ...log, message: `[${check.name}] ${message}` });
-      },
+      maxOutputBytes: CLI_HEALTH_MAX_OUTPUT_BYTES,
     });
+    const capturedStdout = appendWithinLimit(
+      "",
+      clean(lineBufferedOutput(result.stdout)),
+      0,
+    );
+    const systemError = result.timedOut
+      ? `Process exceeded its ${Math.round(timeoutMs / 1000)} second timeout`
+      : result.cancelled
+        ? "Cancellation requested"
+        : "";
+    const capturedStderr = appendWithinLimit(
+      "",
+      [clean(lineBufferedOutput(result.stderr)), systemError]
+        .filter(Boolean)
+        .join("\n"),
+      capturedStdout.retainedBytes,
+    );
+    const stdout = capturedStdout.value;
+    const stderr = capturedStderr.value;
+    const outputTruncated =
+      result.outputTruncated ||
+      capturedStdout.truncated ||
+      capturedStderr.truncated;
+    await reportOutput(check, stdout, stderr, checkedAt, onLog);
     return {
       ...check,
       exitCode: result.exitCode,
@@ -106,16 +147,17 @@ export async function runCliHealthCheck(
     const launchError = clean(
       error instanceof Error ? error.message : String(error),
     );
+    await reportOutput(check, "", launchError, checkedAt, onLog);
     return {
       ...check,
       exitCode: null,
-      stdout,
-      stderr: stderr || launchError,
+      stdout: "",
+      stderr: launchError,
       durationMs: Date.now() - started,
       checkedAt,
       timedOut: false,
       launchError,
-      outputTruncated,
+      outputTruncated: false,
     };
   }
 }
@@ -129,16 +171,29 @@ export async function runCliHealth(
   const { checks } = parseCliHealthJobPayload(payload);
   const results = new Array<CliHealthCheckResult>(checks.length);
   let next = 0;
+  let logSequence = 0;
+  let logChain = Promise.resolve();
+  const appendSweepLog = (log: ProcessLog) => {
+    const sequenced = { ...log, sequence: logSequence++ };
+    const task = logChain.then(() => onLog(sequenced));
+    logChain = task.catch(() => undefined);
+    return task;
+  };
   const worker = async () => {
     while (!signal.aborted) {
       const index = next++;
       if (index >= checks.length) return;
-      results[index] = await runCliHealthCheck(checks[index], signal, onLog);
+      results[index] = await runCliHealthCheck(
+        checks[index],
+        signal,
+        appendSweepLog,
+      );
     }
   };
   await Promise.all(
     Array.from({ length: Math.min(CONCURRENCY, checks.length) }, worker),
   );
+  await logChain;
   return {
     exitCode: signal.aborted ? null : 0,
     signal: null,

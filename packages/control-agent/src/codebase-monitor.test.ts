@@ -163,6 +163,7 @@ describe("CodebaseMonitor", () => {
       signal: null,
       timedOut: false,
       cancelled: false,
+      outputTruncated: false,
     });
     updateBaseBranch.mockResolvedValue(true);
 
@@ -205,6 +206,7 @@ describe("CodebaseMonitor", () => {
       signal: null,
       timedOut: false,
       cancelled: false,
+      outputTruncated: false,
     });
 
     await new CodebaseMonitor(client).reconcile(new AbortController().signal);
