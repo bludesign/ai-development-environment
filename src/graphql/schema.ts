@@ -66,6 +66,8 @@ import { createGlobalSearchResolvers } from "./resolvers/global-search";
 import type { GlobalSearchService } from "@/services/global-search";
 import type { AppsService } from "@/services/apps";
 import { createAppResolvers } from "./resolvers/apps";
+import { createCliHealthResolvers } from "./resolvers/cli-health";
+import type { CliHealthService } from "@/services/cli-health";
 
 // Pre-generated SDL strings (see scripts/prebuild-schema.ts) → DocumentNodes for the subgraph.
 const typeDefs = schemaDefinitions.map((schema) => gql(schema));
@@ -104,6 +106,7 @@ export const createSchema = (
   actionCenterService: ActionCenterService,
   globalSearchService: GlobalSearchService,
   appsService: AppsService,
+  cliHealthService: CliHealthService,
 ): GraphQLSchema => {
   const resolvers = mergeResolvers([
     createHealthResolvers(prismaService),
@@ -134,6 +137,7 @@ export const createSchema = (
     createActionCenterResolvers(actionCenterService),
     createGlobalSearchResolvers(globalSearchService),
     createAppResolvers(appsService),
+    createCliHealthResolvers(cliHealthService),
   ]);
 
   return buildSubgraphSchema({

@@ -15,6 +15,10 @@ import {
   parseCommandRunPayload,
 } from "@ai-development-environment/agent-contract/commands";
 import {
+  CLI_HEALTH_JOB_KIND,
+  parseCliHealthJobPayload,
+} from "@ai-development-environment/agent-contract/cli-health";
+import {
   COVERAGE_IMPORT_JOB_KIND,
   COVERAGE_JOB_KINDS,
   parseCoverageImportPayload,
@@ -180,6 +184,7 @@ export function agentOnlineWindowMs(agent: {
   );
 }
 export const SUPPORTED_AGENT_JOBS = [
+  CLI_HEALTH_JOB_KIND,
   COMMAND_RUN_JOB_KIND,
   CCUSAGE_REPORT_JOB_KIND,
   ...COVERAGE_JOB_KINDS,
@@ -250,6 +255,10 @@ function cadence(
 
 export function validateJob(kind: string, payload: unknown): void {
   const value = parsePayload(payload);
+  if (kind === CLI_HEALTH_JOB_KIND) {
+    parseCliHealthJobPayload(value);
+    return;
+  }
   if (kind === COMMAND_RUN_JOB_KIND) {
     parseCommandRunPayload(value);
     return;

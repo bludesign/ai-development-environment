@@ -35,6 +35,7 @@ import { SystemStatusService } from "@/services/system-status";
 import { ActionCenterService } from "@/services/action-center";
 import { AppsService } from "@/services/apps";
 import { GlobalSearchService } from "@/services/global-search";
+import { CliHealthService } from "@/services/cli-health";
 import {
   WorkflowEventsService,
   WorkflowsService,
@@ -77,6 +78,7 @@ export type ServerServices = {
   actionCenterService: ActionCenterService;
   appsService: AppsService;
   globalSearchService: GlobalSearchService;
+  cliHealthService: CliHealthService;
   workflowEventsService: WorkflowEventsService;
   workflowsService: WorkflowsService;
   workflowEventBridge: WorkflowEventBridge;
@@ -157,6 +159,11 @@ function createServerServices(): ServerServices {
     workflowEventsService,
     pollingService,
     notificationsService,
+  );
+  const cliHealthService = new CliHealthService(
+    agentControlService,
+    gitHubService,
+    gitLabService,
   );
   const cacheServerService = new CacheServerService(credentialService);
   const worktreesService = new WorktreesService(
@@ -309,6 +316,7 @@ function createServerServices(): ServerServices {
     actionCenterService,
     appsService,
     globalSearchService,
+    cliHealthService,
     toolsService,
     workflowEventsService,
     workflowsService,

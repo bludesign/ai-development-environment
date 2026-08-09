@@ -1,0 +1,158 @@
+"Overall CLI health state for an agent."
+enum CliHealthOverallStatus {
+  "All current checks completed successfully."
+  HEALTHY
+  "One or more current checks failed or have not run."
+  ISSUES
+  "No current check has a completed result."
+  NOT_CHECKED
+  "A CLI health sweep is active."
+  RUNNING
+  "The agent does not advertise CLI health support."
+  UNSUPPORTED
+}
+
+"State of one CLI health check."
+enum CliHealthCheckStatus {
+  "The check completed with exit code zero."
+  HEALTHY
+  "The check failed, timed out, or could not launch."
+  UNHEALTHY
+  "The current check definition has no cached result."
+  NOT_RUN
+}
+
+"A bundled server dependency and its installed version."
+type InstallationDependencyVersion {
+  "Display name of the bundled dependency."
+  name: String!
+  "Version declared by the installed package manifest."
+  version: String!
+}
+
+"One editable global CLI health check."
+type CustomCliHealthCheck {
+  "Stable identifier for this custom check."
+  id: ID!
+  "Human-readable custom check name."
+  name: String!
+  "Shell command executed by compatible agents."
+  command: String!
+  "Whether this custom check participates in future sweeps."
+  enabled: Boolean!
+}
+
+"The latest output for one CLI health check."
+type CliHealthCheckResult {
+  "Stable identifier shared by the check definition and its result."
+  id: ID!
+  "Human-readable check name."
+  name: String!
+  "Exact shell command executed by the agent."
+  command: String!
+  "Whether this check is supplied by the control plane."
+  builtIn: Boolean!
+  "Current health state after merging definitions with cached results."
+  state: CliHealthCheckStatus!
+  "Process exit code. May be null when the check has not run, timed out, or could not launch."
+  exitCode: Int
+  "Retained standard output with terminal controls removed."
+  stdout: String!
+  "Retained standard error with terminal controls removed."
+  stderr: String!
+  "Elapsed execution time in milliseconds. May be null when the check has not run."
+  durationMs: Int
+  "ISO 8601 timestamp when the check started. May be null when the check has not run."
+  checkedAt: String
+  "Whether the command exceeded its per-check timeout."
+  timedOut: Boolean!
+  "Launch failure message. May be null when the process launched normally or has not run."
+  launchError: String
+  "Whether retained output was limited to the configured maximum."
+  outputTruncated: Boolean!
+}
+
+"Cached CLI health for one registered agent."
+type AgentCliHealthStatus {
+  "Identifier of the related agent."
+  agentId: ID!
+  "Control-plane display name for the agent."
+  name: String!
+  "Host name reported by the agent."
+  hostname: String!
+  "Software version reported by the agent."
+  version: String!
+  "Current connection state derived from the agent heartbeat."
+  connectionStatus: AgentConnectionStatus!
+  "Whether the agent advertises the CLI health capability."
+  supported: Boolean!
+  "Identifier of the active CLI health job. May be null when no sweep is active."
+  activeJobId: ID
+  "ISO 8601 timestamp when the latest completed sweep finished. May be null when no sweep completed."
+  lastCheckedAt: String
+  "Aggregate health state for the agent."
+  overall: CliHealthOverallStatus!
+  "Current check definitions merged with the latest completed results."
+  results: [CliHealthCheckResult!]!
+}
+
+"Installed versions, settings, and CLI health for this control plane."
+type InstallationStatus {
+  "Version of the running server package."
+  version: String!
+  "Versions of dependencies bundled with the control agent and web application."
+  dependencies: [InstallationDependencyVersion!]!
+  "Global custom CLI health check settings, including disabled checks."
+  customChecks: [CustomCliHealthCheck!]!
+  "CLI health and version information for every registered agent."
+  agents: [AgentCliHealthStatus!]!
+}
+
+"Editable values for one global custom CLI health check."
+input CustomCliHealthCheckInput {
+  "Existing stable identifier, or null when creating a check."
+  id: ID
+  "Human-readable name unique among custom checks without regard to case."
+  name: String!
+  "Shell command to execute on every eligible agent."
+  command: String!
+  "Whether the check participates in future sweeps."
+  enabled: Boolean!
+}
+
+"A signal that cached health or global check settings changed."
+type CliHealthStatusChangedEvent {
+  "Agent whose health changed, or null when global settings changed."
+  agentId: ID
+}
+
+extend type Query {
+  "Returns installed versions, global custom checks, and CLI health for all agents."
+  installationStatus: InstallationStatus!
+  "Returns cached CLI health for one agent."
+  agentCliHealthStatus(
+    "Identifier of the agent to inspect."
+    agentId: ID!
+  ): AgentCliHealthStatus!
+}
+
+extend type Mutation {
+  "Starts manual CLI health sweeps for one agent or every eligible agent."
+  runCliHealthChecks(
+    "Agent to check, or null to dispatch to all online compatible agents."
+    agentId: ID
+  ): InstallationStatus!
+  "Replaces the global custom CLI health check settings."
+  saveCliHealthSettings(
+    "Complete ordered list of custom check settings."
+    checks: [CustomCliHealthCheckInput!]!
+  ): InstallationStatus!
+}
+
+extend type Subscription {
+  "Emits when a CLI health run or global check settings change."
+  cliHealthStatusChanged(
+    "Optional agent filter. Global settings changes are still emitted."
+    agentId: ID
+  ): CliHealthStatusChangedEvent!
+}

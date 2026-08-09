@@ -1,4 +1,5 @@
 import {
+  Activity,
   Bell,
   BellRing,
   Boxes,
@@ -418,6 +419,15 @@ export const APP_DESTINATIONS: AppDestination[] = [
     sidebar: true,
   },
 
+  {
+    key: "status",
+    href: "/status",
+    labelKey: "status",
+    aliases: ["health", "versions", "cli health"],
+    icon: Activity,
+    section: "system",
+    sidebar: true,
+  },
   {
     key: "polling",
     href: "/polling",

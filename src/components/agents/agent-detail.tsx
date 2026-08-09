@@ -93,6 +93,11 @@ import {
   controlPlaneSubscriptions,
 } from "@/lib/control-plane-client";
 import { cn } from "@/lib/utils";
+import { CliHealthResults } from "@/components/status/cli-health-results";
+import {
+  AGENT_CLI_HEALTH_FIELDS,
+  type AgentCliHealthStatus,
+} from "@/components/status/types";
 
 import { AGENT_FIELDS, JOB_FIELDS } from "./graphql-fields";
 import { samplePayloadForCapability } from "./capability-payloads";
@@ -146,6 +151,8 @@ export function AgentDetail({ agentId }: { agentId: string }) {
   const router = useRouter();
   const [agent, setAgent] = useState<Agent | null>(null);
   const [diskSpace, setDiskSpace] = useState<AgentDiskSpace | null>(null);
+  const [cliHealth, setCliHealth] = useState<AgentCliHealthStatus | null>(null);
+  const [cliHealthRunning, setCliHealthRunning] = useState(false);
   const [jobs, setJobs] = useState<AgentJob[]>([]);
   const [cadenceSettings, setCadenceSettings] =
     useState<AgentCadenceSettings | null>(null);
@@ -170,10 +177,12 @@ export function AgentDetail({ agentId }: { agentId: string }) {
         agentJobs: AgentJob[];
         codebaseOverview: { repositories: CodebaseOverviewRepository[] };
         agentDiskSpace: AgentDiskSpace;
+        agentCliHealthStatus: AgentCliHealthStatus;
       }>(
         `query AgentDetail($id: ID!) {
           agent(id: $id) { ${AGENT_FIELDS} }
           agentDiskSpace(agentId: $id) { ${AGENT_DISK_SPACE_FIELDS} }
+          agentCliHealthStatus(agentId: $id) { ${AGENT_CLI_HEALTH_FIELDS} }
           agentCadenceSettings(agentId: $id) {
             agentId codebaseScanIntervalSeconds jobReconciliationIntervalSeconds
             gitFetchIntervalSeconds heartbeatIntervalSeconds
@@ -194,6 +203,7 @@ export function AgentDetail({ agentId }: { agentId: string }) {
       if (loadId !== latestLoad.current) return;
       setAgent(data.agent);
       setDiskSpace(data.agentDiskSpace);
+      setCliHealth(data.agentCliHealthStatus);
       setCadenceSettings(data.agentCadenceSettings);
       setJobs(data.agentJobs);
       setCodebases(
@@ -260,6 +270,21 @@ export function AgentDetail({ agentId }: { agentId: string }) {
         complete: () => undefined,
       },
     );
+    const unsubscribeCliHealth = client.subscribe<{
+      cliHealthStatusChanged: { agentId: string | null };
+    }>(
+      {
+        query: `subscription AgentCliHealthChanged($agentId: ID!) {
+          cliHealthStatusChanged(agentId: $agentId) { agentId }
+        }`,
+        variables: { agentId },
+      },
+      {
+        next: () => void load(),
+        error: () => undefined,
+        complete: () => undefined,
+      },
+    );
     const unsubscribeDiskSpace = client.subscribe<{ diskSpaceChanged: string }>(
       {
         query: `subscription AgentDiskSpaceChanged { diskSpaceChanged }`,
@@ -282,9 +307,36 @@ export function AgentDetail({ agentId }: { agentId: string }) {
       latestLoad.current += 1;
       unsubscribeAgent();
       unsubscribeCodebases();
+      unsubscribeCliHealth();
       unsubscribeDiskSpace();
     };
   }, [agentId, load]);
+
+  const runCliHealth = async () => {
+    setCliHealthRunning(true);
+    try {
+      const data = await controlPlaneRequest<{
+        runCliHealthChecks: { agents: AgentCliHealthStatus[] };
+      }>(
+        `mutation RunAgentCliHealth($agentId: ID!) {
+          runCliHealthChecks(agentId: $agentId) {
+            agents { ${AGENT_CLI_HEALTH_FIELDS} }
+          }
+        }`,
+        { agentId },
+      );
+      setCliHealth(
+        data.runCliHealthChecks.agents.find(
+          (status) => status.agentId === agentId,
+        ) ?? null,
+      );
+      setLoadError(null);
+    } catch (value) {
+      setLoadError(value instanceof Error ? value.message : String(value));
+    } finally {
+      setCliHealthRunning(false);
+    }
+  };
 
   const activeJobIds = useMemo(
     () => jobs.filter(isActiveJob).map((job) => job.id),
@@ -527,6 +579,16 @@ export function AgentDetail({ agentId }: { agentId: string }) {
               mono
             />
           </dl>
+          {cliHealth && (
+            <div className="space-y-2 rounded-lg border p-3">
+              <h3 className="text-sm font-medium">{t("cliHealth")}</h3>
+              <CliHealthResults
+                onRun={() => void runCliHealth()}
+                running={cliHealthRunning}
+                status={cliHealth}
+              />
+            </div>
+          )}
           <div className="grid gap-3 md:grid-cols-2">
             <ResourceUsage
               free={agent.memoryFreeBytes}

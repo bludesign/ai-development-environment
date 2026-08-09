@@ -18,9 +18,11 @@ import {
 } from "@ai-development-environment/agent-contract/commands";
 
 import { COVERAGE_IMPORT_JOB_KIND } from "@ai-development-environment/agent-contract/coverage";
+import { CLI_HEALTH_JOB_KIND } from "@ai-development-environment/agent-contract/cli-health";
 
 import { runCommand } from "./commands.js";
 import { importCoverageReport } from "./coverage.js";
+import { runCliHealth } from "./cli-health.js";
 import { inspectIosSigning } from "./signing.js";
 import { runCcusage } from "./ccusage.js";
 import { deleteBuildData, scanBuildData, sizeBuildData } from "./build-data.js";
@@ -164,6 +166,7 @@ export type AgentJobHandler = (
 ) => Promise<ProcessResult>;
 
 export const handlers: Readonly<Record<string, AgentJobHandler>> = {
+  [CLI_HEALTH_JOB_KIND]: runCliHealth,
   [COMMAND_RUN_JOB_KIND]: runCommand,
   [CCUSAGE_REPORT_JOB_KIND]: runCcusage,
   [BUILD_DATA_SCAN_JOB_KIND]: scanBuildData,

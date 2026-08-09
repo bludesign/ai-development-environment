@@ -77,6 +77,10 @@ test.describe("app screenshots", () => {
           );
         await page.waitForTimeout(300);
       }
+      if (route.clickButton) {
+        await page.getByRole("button", { name: route.clickButton }).click();
+        await page.waitForTimeout(300);
+      }
       await normalizeScreenshotValues(page);
 
       await page.screenshot({

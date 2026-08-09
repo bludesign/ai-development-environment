@@ -27,6 +27,7 @@ const reportedAt = (secondsApart: number): Date =>
  * and status data seeded below, which is what the screenshots should show.
  */
 const AGENT_CAPABILITIES = [
+  "cli.health",
   "command.run",
   "ccusage.report",
   "buildData.scan",
@@ -55,6 +56,79 @@ const AGENT_CAPABILITIES = [
   "workflow.terminal.run",
   "workflow.git.checkpoint",
 ];
+
+const healthResult = (failClaude = false) => ({
+  exitCode: 0,
+  signal: null,
+  timedOut: false,
+  cancelled: false,
+  checks: [
+    [
+      "builtin-acli-jira",
+      "Atlassian Jira",
+      "acli jira auth status",
+      0,
+      "Authenticated to acme.atlassian.net",
+    ],
+    [
+      "builtin-acli",
+      "Atlassian CLI",
+      "acli auth status",
+      0,
+      "Authentication is valid",
+    ],
+    [
+      "builtin-claude",
+      "Claude",
+      "claude auth status",
+      failClaude ? 1 : 0,
+      failClaude ? "Authentication expired" : "Authenticated with Claude",
+    ],
+    [
+      "builtin-codex",
+      "Codex",
+      "codex login status",
+      0,
+      "Logged in using ChatGPT",
+    ],
+    ["builtin-opencode", "OpenCode", "opencode auth list", 0, "OpenAI oauth"],
+    [
+      "builtin-xcode",
+      "Xcode",
+      "xcodebuild -version",
+      0,
+      "Xcode 26.0\nBuild version 17A100",
+    ],
+    [
+      "builtin-github",
+      "GitHub",
+      "gh auth status",
+      0,
+      "Logged in to github.com",
+    ],
+    [
+      "builtin-gitlab",
+      "GitLab",
+      "glab auth status",
+      0,
+      "Logged in to gitlab.com",
+    ],
+    ["mock-node-version", "Node.js", "node --version", 0, "v24.18.0"],
+  ].map(([id, name, command, exitCode, output]) => ({
+    id,
+    name,
+    command,
+    builtIn: String(id).startsWith("builtin-"),
+    exitCode,
+    stdout: exitCode === 0 ? output : "",
+    stderr: exitCode === 0 ? "" : output,
+    durationMs: 180,
+    checkedAt: hoursAgo(1).toISOString(),
+    timedOut: false,
+    launchError: null,
+    outputTruncated: false,
+  })),
+});
 
 function diskSpaceState(rootFolder: string, volumeId: string) {
   const derivedRoot = `${rootFolder}/Library/Developer/Xcode/DerivedData`;
@@ -290,6 +364,34 @@ export async function seedAgents(prisma: PrismaClient): Promise<void> {
         createdAt: hoursAgo(8),
         startedAt: hoursAgo(8),
         finishedAt: hoursAgo(8),
+      },
+      {
+        id: "job-cli-health-studio",
+        agentId: ids.agents.studio,
+        kind: "cli.health",
+        payloadJson: JSON.stringify({ checks: [] }),
+        status: "SUCCEEDED",
+        idempotencyKey: "mock-cli-health-studio",
+        resultJson: JSON.stringify(healthResult(false)),
+        timeoutSeconds: 600,
+        visibility: "SYSTEM",
+        createdAt: hoursAgo(1),
+        startedAt: hoursAgo(1),
+        finishedAt: hoursAgo(1),
+      },
+      {
+        id: "job-cli-health-build",
+        agentId: ids.agents.build,
+        kind: "cli.health",
+        payloadJson: JSON.stringify({ checks: [] }),
+        status: "SUCCEEDED",
+        idempotencyKey: "mock-cli-health-build",
+        resultJson: JSON.stringify(healthResult(true)),
+        timeoutSeconds: 600,
+        visibility: "SYSTEM",
+        createdAt: hoursAgo(2),
+        startedAt: hoursAgo(2),
+        finishedAt: hoursAgo(2),
       },
     ],
   });
