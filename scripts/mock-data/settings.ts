@@ -167,6 +167,19 @@ const MODEL_COST_ENTRIES = [
  * instead of their empty setup states.
  */
 export async function seedSettings(prisma: PrismaClient): Promise<void> {
+  await prisma.cliHealthSettings.create({
+    data: {
+      id: "default",
+      checksJson: JSON.stringify([
+        {
+          id: "mock-node-version",
+          name: "Node.js",
+          command: "node --version",
+          enabled: true,
+        },
+      ]),
+    },
+  });
   await prisma.gitHubSettings.deleteMany({});
   await prisma.gitHubSettings.create({
     data: {

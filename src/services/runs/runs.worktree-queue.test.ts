@@ -53,7 +53,7 @@ describe("durable worktree run queues", () => {
       if (existsSync(path)) database.exec(readFileSync(path, "utf8"));
     }
     database.close();
-  }, 60_000);
+  }, 120_000);
 
   afterAll(async () => {
     await rm(directory, { recursive: true, force: true });

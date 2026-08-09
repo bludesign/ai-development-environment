@@ -1,0 +1,6 @@
+CREATE TABLE "CliHealthSettings" (
+    "id" TEXT NOT NULL PRIMARY KEY,
+    "checksJson" TEXT NOT NULL DEFAULT '[]',
+    "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "updatedAt" DATETIME NOT NULL
+);

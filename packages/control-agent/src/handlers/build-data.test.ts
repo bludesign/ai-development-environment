@@ -55,6 +55,7 @@ beforeEach(() => {
     cancelled: false,
     stdout: "",
     stderr: "Missing WorkspacePath",
+    outputTruncated: false,
   });
 });
 
@@ -102,6 +103,7 @@ describe("Build Data agent handlers", () => {
         cancelled: false,
         stdout: isProject ? "/Repos/App/App.xcodeproj\n" : "",
         stderr: isProject ? "" : "Missing WorkspacePath",
+        outputTruncated: false,
       };
     });
 
@@ -265,6 +267,7 @@ describe("Build Data agent handlers", () => {
           ? '<?xml version="1.0"?><plist version="1.0"><dict><key>APFSContainerReference</key><string>disk3</string></dict></plist>'
           : "",
       stderr: "",
+      outputTruncated: false,
     }));
 
     const report = await collectAgentDiskSpace(

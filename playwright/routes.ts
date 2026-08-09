@@ -30,6 +30,8 @@ export type RouteEntry = {
    * fold can only be photographed by scrolling to it first.
    */
   scrollTo?: string;
+  /** Accessible button name clicked after the page reaches its ready state. */
+  clickButton?: string;
   /** Auth pages are intentionally captured without the seeded bearer session. */
   anonymous?: boolean;
 };
@@ -271,6 +273,19 @@ export const routes: RouteEntry[] = [
   { name: "push-notifications", path: "/push-notifications" },
 
   // System
+  {
+    name: "status",
+    path: "/status",
+    readyGraphqlOperation: "InstallationStatus",
+    readyTexts: ["Studio Mac"],
+  },
+  {
+    name: "cli-health-checks",
+    path: "/status",
+    readyGraphqlOperation: "InstallationStatus",
+    readyTexts: ["Studio Mac"],
+    clickButton: "CLI health check settings",
+  },
   { name: "users", path: "/users", readyTexts: ["Avery Morgan"] },
   { name: "api-keys", path: "/api-keys", readyTexts: ["CI automation"] },
   { name: "credentials", path: "/credentials" },

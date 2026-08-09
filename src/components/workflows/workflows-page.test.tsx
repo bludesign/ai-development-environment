@@ -320,4 +320,34 @@ describe("WorkflowsPage", () => {
       "Actions",
     ]);
   });
+
+  test("tints a workflow run row with its worktree highlight color", async () => {
+    request.mockImplementationOnce(
+      async () =>
+        ({
+          workflows: { items: [] },
+          workflowRuns: {
+            items: [
+              {
+                ...workflowRun("highlighted", 606, null),
+                worktree: {
+                  id: "worktree-1",
+                  folder: "/tmp/repository/feature",
+                  branch: "feature/AIDE-606",
+                  highlightColor: "violet",
+                },
+              },
+            ],
+          },
+        }) as never,
+    );
+
+    renderPage();
+
+    const row = (await screen.findByRole("link", { name: "#606" })).closest(
+      "tr",
+    );
+    expect(row?.className).toContain("bg-violet-500/10");
+    expect(row?.className).toContain("hover:bg-violet-500/20");
+  });
 });

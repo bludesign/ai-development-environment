@@ -124,6 +124,13 @@ model AuthSettings {
   updatedAt           DateTime  @updatedAt
 }
 
+model CliHealthSettings {
+  id         String   @id
+  checksJson String   @default("[]")
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+}
+
 model Agent {
   id                               String                     @id
   name                             String

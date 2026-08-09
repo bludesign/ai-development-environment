@@ -23,10 +23,12 @@ import { SIGNING_ASSET_JOB_KINDS } from "@ai-development-environment/agent-contr
 import { WORKFLOW_JOB_KINDS } from "@ai-development-environment/agent-contract/workflows";
 import { COMMAND_RUN_JOB_KIND } from "@ai-development-environment/agent-contract/commands";
 import { COVERAGE_JOB_KINDS } from "@ai-development-environment/agent-contract/coverage";
+import { CLI_HEALTH_JOB_KIND } from "@ai-development-environment/agent-contract/cli-health";
 
 export const AGENT_VERSION = process.env.CONTROL_AGENT_VERSION ?? "0.1.0";
 
 const PORTABLE_AGENT_CAPABILITIES = [
+  CLI_HEALTH_JOB_KIND,
   COMMAND_RUN_JOB_KIND,
   CCUSAGE_REPORT_JOB_KIND,
   ...CODEBASE_JOB_KINDS,

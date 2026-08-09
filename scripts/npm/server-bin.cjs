@@ -4,6 +4,9 @@ const os = require("node:os");
 const path = require("node:path");
 
 const packageRoot = path.join(__dirname, "..");
+const packageManifest = require(path.join(packageRoot, "package.json"));
+
+process.env.AIDE_VERSION ||= packageManifest.version;
 
 process.env.HOSTNAME ||= "127.0.0.1";
 process.env.PORT ||= "3090";
