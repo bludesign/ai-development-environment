@@ -2289,8 +2289,6 @@
     "duration": "Dauer: {milliseconds} ms",
     "timedOut": "Zeitüberschreitung",
     "truncated": "Ausgabe gekürzt",
-    "stdout": "Standardausgabe",
-    "stderr": "Standardfehlerausgabe",
     "noOutput": "Der Befehl hat keine Ausgabe erzeugt.",
     "settingsTitle": "Einstellungen für CLI-Statusprüfungen",
     "settingsDescription": "Fügen Sie globale Shell-Prüfungen hinzu, die auf jedem online und kompatiblen Agenten ausgeführt werden.",

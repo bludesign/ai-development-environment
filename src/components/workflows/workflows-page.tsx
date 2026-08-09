@@ -93,6 +93,7 @@ import {
 } from "@/lib/active-table-order";
 import { isRowActivation, rowLinkClass } from "@/lib/row-activation";
 import { cn } from "@/lib/utils";
+import { worktreeHighlightBackgroundClasses } from "@/lib/worktree-highlight";
 
 import { WorkflowChoiceMenu } from "./workflow-choice-menu";
 import { workflowStatusVariant } from "./workflow-graph";
@@ -785,156 +786,166 @@ export function WorkflowsPage() {
                           })}
                     </TableCell>
                   </TableRow>
-                  {group.items.map((run) => (
-                    <TableRow
-                      className="cursor-pointer"
-                      key={run.id}
-                      /* Anything interactive inside the row — the workflow link,
+                  {group.items.map((run) => {
+                    const highlighted = run.worktree?.highlightColor
+                      ? worktreeHighlightBackgroundClasses[
+                          run.worktree.highlightColor
+                        ]
+                      : undefined;
+                    return (
+                      <TableRow
+                        className={cn("cursor-pointer", highlighted)}
+                        key={run.id}
+                        /* Anything interactive inside the row — the workflow link,
                          a text selection drag — opts the row out, so only a click
                          on the row itself opens the run. In edit mode the row is
                          a selection target instead, so it toggles rather than
                          navigating away mid-selection. */
-                      onClick={(event) => {
-                        if (!isRowActivation(event)) return;
-                        if (editMode) toggleSelected(run.id);
-                        else router.push(`/workflows/runs/${run.id}`);
-                      }}
-                    >
-                      {editMode && (
-                        <TableCell>
-                          <Checkbox
-                            aria-label={t("selectRun", {
-                              id: run.displayNumber,
-                            })}
-                            checked={selected.has(run.id)}
-                            onCheckedChange={(checked) =>
-                              setSelected((current) => {
-                                const next = new Set(current);
-                                if (checked) next.add(run.id);
-                                else next.delete(run.id);
-                                return next;
-                              })
-                            }
-                          />
-                        </TableCell>
-                      )}
-                      <TableCell>
-                        <Link
-                          className={cn(
-                            rowLinkClass,
-                            "inline-block font-mono font-medium",
-                          )}
-                          href={`/workflows/runs/${run.id}`}
-                        >
-                          #{run.displayNumber}
-                        </Link>
-                      </TableCell>
-                      <TableCell>
-                        <Link
-                          className={cn(rowLinkClass, "block min-w-0 truncate")}
-                          href={`/workflows/${run.workflow.id}`}
-                          title={run.workflow.name}
-                        >
-                          {run.workflow.name}
-                        </Link>
-                      </TableCell>
-                      <TableCell>
-                        <div className="flex flex-wrap gap-1">
-                          <Badge variant={workflowStatusVariant(run.status)}>
-                            {labels.status(run.status)}
-                          </Badge>
-                          {run.archivedAt && (
-                            <Badge variant="outline">{t("archived")}</Badge>
-                          )}
-                        </div>
-                      </TableCell>
-                      <TableCell
-                        className="truncate"
-                        title={labels.kind(run.triggerKind)}
+                        onClick={(event) => {
+                          if (!isRowActivation(event)) return;
+                          if (editMode) toggleSelected(run.id);
+                          else router.push(`/workflows/runs/${run.id}`);
+                        }}
                       >
-                        {labels.kind(run.triggerKind)}
-                      </TableCell>
-                      <TableCell>
-                        {run.agent ? (
+                        {editMode && (
+                          <TableCell>
+                            <Checkbox
+                              aria-label={t("selectRun", {
+                                id: run.displayNumber,
+                              })}
+                              checked={selected.has(run.id)}
+                              onCheckedChange={(checked) =>
+                                setSelected((current) => {
+                                  const next = new Set(current);
+                                  if (checked) next.add(run.id);
+                                  else next.delete(run.id);
+                                  return next;
+                                })
+                              }
+                            />
+                          </TableCell>
+                        )}
+                        <TableCell>
+                          <Link
+                            className={cn(
+                              rowLinkClass,
+                              "inline-block font-mono font-medium",
+                            )}
+                            href={`/workflows/runs/${run.id}`}
+                          >
+                            #{run.displayNumber}
+                          </Link>
+                        </TableCell>
+                        <TableCell>
                           <Link
                             className={cn(
                               rowLinkClass,
                               "block min-w-0 truncate",
                             )}
-                            href={`/agents/${run.agent.id}`}
-                            title={run.agent.name}
+                            href={`/workflows/${run.workflow.id}`}
+                            title={run.workflow.name}
                           >
-                            {run.agent.name}
+                            {run.workflow.name}
                           </Link>
-                        ) : (
-                          <span className="text-muted-foreground">—</span>
-                        )}
-                      </TableCell>
-                      <TableCell>
-                        {run.worktree ? (
-                          <Link
-                            className={cn(
-                              rowLinkClass,
-                              "block min-w-0 truncate",
+                        </TableCell>
+                        <TableCell>
+                          <div className="flex flex-wrap gap-1">
+                            <Badge variant={workflowStatusVariant(run.status)}>
+                              {labels.status(run.status)}
+                            </Badge>
+                            {run.archivedAt && (
+                              <Badge variant="outline">{t("archived")}</Badge>
                             )}
-                            href={`/worktrees/${run.worktree.id}`}
-                            title={run.worktree.folder}
-                          >
-                            {run.worktree.branch ?? run.worktree.folder}
-                          </Link>
-                        ) : (
-                          <span className="text-muted-foreground">—</span>
-                        )}
-                      </TableCell>
-                      <TableCell>
-                        {run.startedAt ? (
-                          <DateTime
-                            kind="time"
-                            relativeToday
-                            value={run.startedAt}
-                          />
-                        ) : (
-                          t("queued")
-                        )}
-                      </TableCell>
-                      <TableCell>
-                        <div className="flex justify-end gap-1">
-                          <Tooltip>
-                            <TooltipTrigger asChild>
-                              <Button
-                                aria-label={
-                                  run.archivedAt ? t("restore") : t("archive")
-                                }
-                                onClick={() =>
-                                  void archiveRuns([run.id], !run.archivedAt)
-                                }
-                                size="icon-sm"
-                                variant="ghost"
-                              >
-                                {run.archivedAt ? <Undo2 /> : <Archive />}
-                              </Button>
-                            </TooltipTrigger>
-                            <TooltipContent>
-                              {run.archivedAt ? t("restore") : t("archive")}
-                            </TooltipContent>
-                          </Tooltip>
-                          <Tooltip>
-                            <TooltipTrigger asChild>
-                              <Button
-                                aria-label={t("delete")}
-                                onClick={() => setDeleteIds([run.id])}
-                                size="icon-sm"
-                                variant="destructive"
-                              >
-                                <Trash2 />
-                              </Button>
-                            </TooltipTrigger>
-                            <TooltipContent>{t("delete")}</TooltipContent>
-                          </Tooltip>
-                        </div>
-                      </TableCell>
-                    </TableRow>
-                  ))}
+                          </div>
+                        </TableCell>
+                        <TableCell
+                          className="truncate"
+                          title={labels.kind(run.triggerKind)}
+                        >
+                          {labels.kind(run.triggerKind)}
+                        </TableCell>
+                        <TableCell>
+                          {run.agent ? (
+                            <Link
+                              className={cn(
+                                rowLinkClass,
+                                "block min-w-0 truncate",
+                              )}
+                              href={`/agents/${run.agent.id}`}
+                              title={run.agent.name}
+                            >
+                              {run.agent.name}
+                            </Link>
+                          ) : (
+                            <span className="text-muted-foreground">—</span>
+                          )}
+                        </TableCell>
+                        <TableCell>
+                          {run.worktree ? (
+                            <Link
+                              className={cn(
+                                rowLinkClass,
+                                "block min-w-0 truncate",
+                              )}
+                              href={`/worktrees/${run.worktree.id}`}
+                              title={run.worktree.folder}
+                            >
+                              {run.worktree.branch ?? run.worktree.folder}
+                            </Link>
+                          ) : (
+                            <span className="text-muted-foreground">—</span>
+                          )}
+                        </TableCell>
+                        <TableCell>
+                          {run.startedAt ? (
+                            <DateTime
+                              kind="time"
+                              relativeToday
+                              value={run.startedAt}
+                            />
+                          ) : (
+                            t("queued")
+                          )}
+                        </TableCell>
+                        <TableCell>
+                          <div className="flex justify-end gap-1">
+                            <Tooltip>
+                              <TooltipTrigger asChild>
+                                <Button
+                                  aria-label={
+                                    run.archivedAt ? t("restore") : t("archive")
+                                  }
+                                  onClick={() =>
+                                    void archiveRuns([run.id], !run.archivedAt)
+                                  }
+                                  size="icon-sm"
+                                  variant="ghost"
+                                >
+                                  {run.archivedAt ? <Undo2 /> : <Archive />}
+                                </Button>
+                              </TooltipTrigger>
+                              <TooltipContent>
+                                {run.archivedAt ? t("restore") : t("archive")}
+                              </TooltipContent>
+                            </Tooltip>
+                            <Tooltip>
+                              <TooltipTrigger asChild>
+                                <Button
+                                  aria-label={t("delete")}
+                                  onClick={() => setDeleteIds([run.id])}
+                                  size="icon-sm"
+                                  variant="destructive"
+                                >
+                                  <Trash2 />
+                                </Button>
+                              </TooltipTrigger>
+                              <TooltipContent>{t("delete")}</TooltipContent>
+                            </Tooltip>
+                          </div>
+                        </TableCell>
+                      </TableRow>
+                    );
+                  })}
                 </Fragment>
               ))}
             </TableBody>

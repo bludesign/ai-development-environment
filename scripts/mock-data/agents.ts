@@ -93,13 +93,6 @@ const healthResult = (failClaude = false) => ({
     ],
     ["builtin-opencode", "OpenCode", "opencode auth list", 0, "OpenAI oauth"],
     [
-      "builtin-xcode",
-      "Xcode",
-      "xcodebuild -version",
-      0,
-      "Xcode 26.0\nBuild version 17A100",
-    ],
-    [
       "builtin-github",
       "GitHub",
       "gh auth status",

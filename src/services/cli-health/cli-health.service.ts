@@ -56,12 +56,6 @@ const BUILT_IN_CHECKS: CliHealthCheckDefinition[] = [
     command: "opencode auth list",
     builtIn: true,
   },
-  {
-    id: "builtin-xcode",
-    name: "Xcode",
-    command: "xcodebuild -version",
-    builtIn: true,
-  },
 ];
 
 const GITHUB_CHECK: CliHealthCheckDefinition = {

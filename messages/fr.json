@@ -2289,8 +2289,6 @@
     "duration": "Durée : {milliseconds} ms",
     "timedOut": "Délai dépassé",
     "truncated": "Sortie tronquée",
-    "stdout": "Sortie standard",
-    "stderr": "Erreur standard",
     "noOutput": "La commande n’a produit aucune sortie.",
     "settingsTitle": "Paramètres des vérifications d’état CLI",
     "settingsDescription": "Ajoutez des vérifications shell globales exécutées sur chaque agent en ligne compatible.",

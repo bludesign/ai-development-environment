@@ -2289,8 +2289,6 @@
     "duration": "{milliseconds} ms",
     "timedOut": "Timed out",
     "truncated": "Output truncated",
-    "stdout": "Standard output",
-    "stderr": "Standard error",
     "noOutput": "The command produced no output.",
     "settingsTitle": "CLI health check settings",
     "settingsDescription": "Add global shell checks that run on every online, compatible agent.",

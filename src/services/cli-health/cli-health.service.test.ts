@@ -95,7 +95,6 @@ describe("CliHealthService", () => {
       "claude auth status",
       "codex login status",
       "opencode auth list",
-      "xcodebuild -version",
       "gh auth status",
       "node --version",
     ]);

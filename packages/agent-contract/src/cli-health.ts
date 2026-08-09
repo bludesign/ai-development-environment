@@ -1,5 +1,5 @@
 export const CLI_HEALTH_JOB_KIND = "cli.health";
-export const CLI_HEALTH_MAX_CHECKS = 28;
+export const CLI_HEALTH_MAX_CHECKS = 27;
 export const CLI_HEALTH_MAX_OUTPUT_BYTES = 32 * 1024;
 export const CLI_HEALTH_CHECK_TIMEOUT_MS = 15_000;
 

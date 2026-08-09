@@ -2289,8 +2289,6 @@
     "duration": "Duración: {milliseconds} ms",
     "timedOut": "Tiempo de espera agotado",
     "truncated": "Salida truncada",
-    "stdout": "Salida estándar",
-    "stderr": "Error estándar",
     "noOutput": "El comando no produjo ninguna salida.",
     "settingsTitle": "Configuración de comprobaciones de estado de CLI",
     "settingsDescription": "Añade comprobaciones globales del shell que se ejecutan en cada agente en línea compatible.",

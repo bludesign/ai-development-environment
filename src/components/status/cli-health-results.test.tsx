@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { cleanup, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, test, vi } from "vitest";
 
 import { CliHealthResults } from "./cli-health-results";
@@ -47,17 +47,17 @@ const status = (
 describe("CliHealthResults", () => {
   afterEach(cleanup);
 
-  test("renders every badge state and expands separated command output", () => {
+  test("renders every badge state with command output expanded", () => {
     render(<CliHealthResults status={status()} />);
 
     expect(screen.getByText("Issues")).toBeDefined();
     expect(screen.getByText("Passed")).toBeDefined();
     expect(screen.getByText("Failed")).toBeDefined();
     expect(screen.getByText("Not run")).toBeDefined();
-    expect(screen.queryByText("Login expired")).toBeNull();
-
-    fireEvent.click(screen.getByRole("button", { name: /Failing/ }));
     expect(screen.getByText("Login expired")).toBeDefined();
+    expect(screen.getByText("Authenticated")).toBeDefined();
+    expect(screen.queryByText("Standard output")).toBeNull();
+    expect(screen.queryByText("Standard error")).toBeNull();
     expect(screen.getByText("Output truncated")).toBeDefined();
     expect(screen.getByText("Exit code: 1")).toBeDefined();
   });

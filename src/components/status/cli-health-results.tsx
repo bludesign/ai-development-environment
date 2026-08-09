@@ -4,12 +4,6 @@ import { Play } from "lucide-react";
 import { useTranslations } from "next-intl";
 
 import { DateTime } from "@/components/common/date-time";
-import {
-  Accordion,
-  AccordionContent,
-  AccordionItem,
-  AccordionTrigger,
-} from "@/components/ui/accordion";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Spinner } from "@/components/ui/spinner";
@@ -82,78 +76,64 @@ export function CliHealthResults({
       {!status.supported ? (
         <p className="text-sm text-muted-foreground">{t("updateRequired")}</p>
       ) : (
-        <Accordion className="rounded-lg border px-3" type="multiple">
+        <div className="divide-y rounded-lg border px-3">
           {status.results.map((check) => (
-            <AccordionItem key={check.id} value={check.id}>
-              <AccordionTrigger>
-                <span className="flex min-w-0 flex-1 flex-wrap items-center gap-2 pr-3">
-                  <span>{check.name}</span>
-                  <Badge
-                    className={healthyClassName(check.state)}
-                    variant={checkVariant(check.state)}
-                  >
-                    {t(`checks.${check.state}`)}
-                  </Badge>
-                  <code className="min-w-0 truncate text-xs font-normal text-muted-foreground">
-                    {check.command}
-                  </code>
+            <div className="space-y-3 py-3" key={check.id}>
+              <div className="flex min-w-0 flex-wrap items-center gap-2">
+                <span>{check.name}</span>
+                <Badge
+                  className={healthyClassName(check.state)}
+                  variant={checkVariant(check.state)}
+                >
+                  {t(`checks.${check.state}`)}
+                </Badge>
+                <code className="min-w-0 truncate text-xs font-normal text-muted-foreground">
+                  {check.command}
+                </code>
+              </div>
+              <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-muted-foreground">
+                <span>
+                  {t("exitCode")}: {check.exitCode ?? "—"}
                 </span>
-              </AccordionTrigger>
-              <AccordionContent className="space-y-3">
-                <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-muted-foreground">
+                {check.durationMs !== null && (
                   <span>
-                    {t("exitCode")}: {check.exitCode ?? "—"}
+                    {t("duration", { milliseconds: check.durationMs })}
                   </span>
-                  {check.durationMs !== null && (
-                    <span>
-                      {t("duration", { milliseconds: check.durationMs })}
-                    </span>
-                  )}
-                  {check.checkedAt && <DateTime value={check.checkedAt} />}
-                  {check.timedOut && <span>{t("timedOut")}</span>}
-                  {check.outputTruncated && <span>{t("truncated")}</span>}
-                </div>
-                {check.stdout && (
-                  <Output label={t("stdout")} value={check.stdout} />
                 )}
-                {check.stderr && (
-                  <Output
-                    label={t("stderr")}
-                    value={check.stderr}
-                    destructive={check.state === "UNHEALTHY"}
-                  />
-                )}
-                {!check.stdout && !check.stderr && (
-                  <p className="text-xs text-muted-foreground">
-                    {t("noOutput")}
-                  </p>
-                )}
-              </AccordionContent>
-            </AccordionItem>
+                {check.checkedAt && <DateTime value={check.checkedAt} />}
+                {check.timedOut && <span>{t("timedOut")}</span>}
+                {check.outputTruncated && <span>{t("truncated")}</span>}
+              </div>
+              {check.stdout && <Output value={check.stdout} />}
+              {check.stderr && (
+                <Output
+                  value={check.stderr}
+                  destructive={check.state === "UNHEALTHY"}
+                />
+              )}
+              {!check.stdout && !check.stderr && (
+                <p className="text-xs text-muted-foreground">{t("noOutput")}</p>
+              )}
+            </div>
           ))}
-        </Accordion>
+        </div>
       )}
     </div>
   );
 }
 
 function Output({
-  label,
   value,
   destructive = false,
 }: {
-  label: string;
   value: string;
   destructive?: boolean;
 }) {
   return (
-    <div>
-      <p className="mb-1 text-xs font-medium">{label}</p>
-      <pre
-        className={`max-h-64 overflow-auto whitespace-pre-wrap break-words rounded-md bg-muted p-3 text-xs ${destructive ? "text-destructive" : ""}`}
-      >
-        {value}
-      </pre>
-    </div>
+    <pre
+      className={`max-h-64 overflow-auto whitespace-pre-wrap break-words rounded-md bg-muted p-3 text-xs ${destructive ? "text-destructive" : ""}`}
+    >
+      {value}
+    </pre>
   );
 }

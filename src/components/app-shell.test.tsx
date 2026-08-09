@@ -139,6 +139,11 @@ describe("AppShell", () => {
     ).toBe("/devices");
     expect(
       screen
+        .getByText("Screenshot User")
+        .closest('[data-slot="sidebar-footer"]')?.className,
+    ).toContain("gap-0");
+    expect(
+      screen
         .getAllByRole("link", { name: "Cache" })
         .map((link) => link.getAttribute("href")),
     ).toEqual(["/github-cache", "/jira-cache"]);
