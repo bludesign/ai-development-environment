@@ -1,4 +1,4 @@
-import { describe, expect, test } from "vitest";
+import { describe, expect, test, vi } from "vitest";
 
 import { captureCommand } from "./capture-command.js";
 
@@ -56,6 +56,36 @@ describe("captureCommand", () => {
         timedOut: true,
         cancelled: false,
       });
+    },
+  );
+
+  test.skipIf(process.platform === "win32")(
+    "falls back to terminating the child when its process group cannot be signalled",
+    async () => {
+      const kill = vi.spyOn(process, "kill").mockImplementation(() => {
+        throw Object.assign(new Error("Operation not permitted"), {
+          code: "EPERM",
+        });
+      });
+      try {
+        const result = await captureCommand({
+          command: process.execPath,
+          args: ["-e", "setInterval(() => {}, 1_000)"],
+          timeoutMs: 100,
+          signal: new AbortController().signal,
+        });
+
+        expect(result).toMatchObject({
+          exitCode: null,
+          signal: "SIGTERM",
+          timedOut: true,
+          cancelled: false,
+        });
+        expect(kill).toHaveBeenCalledWith(expect.any(Number), "SIGTERM");
+        expect(kill.mock.calls[0]?.[0]).toBeLessThan(0);
+      } finally {
+        kill.mockRestore();
+      }
     },
   );
 });

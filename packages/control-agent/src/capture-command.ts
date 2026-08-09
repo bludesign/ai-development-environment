@@ -66,16 +66,28 @@ export function captureCommand(options: {
           process.kill(-child.pid, signal);
           return;
         } catch (error) {
+          // The group can disappear or become inaccessible before Node reports
+          // the child as closed. Fall back to the child handle in either case.
           if (
             !(error instanceof Error) ||
             !("code" in error) ||
-            error.code !== "ESRCH"
+            (error.code !== "ESRCH" && error.code !== "EPERM")
           ) {
             throw error;
           }
         }
       }
-      child.kill(signal);
+      try {
+        child.kill(signal);
+      } catch (error) {
+        if (
+          !(error instanceof Error) ||
+          !("code" in error) ||
+          (error.code !== "ESRCH" && error.code !== "EPERM")
+        ) {
+          throw error;
+        }
+      }
     };
     const terminate = () => {
       if (child.exitCode !== null || child.killed) return;
