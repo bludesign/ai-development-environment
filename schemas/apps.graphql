@@ -26,6 +26,8 @@ type AppCounts {
   codebases: Int!
   "Number of visible worktrees."
   worktrees: Int!
+  "Number of visible worktrees with staged or unstaged changes."
+  dirtyWorktrees: Int!
   "Number of active plans."
   plans: Int!
   "Number of active sessions."

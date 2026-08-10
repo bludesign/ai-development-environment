@@ -629,6 +629,7 @@ export class WorktreesService {
             });
             return {
               worktree: this.view(worktree),
+              agent: worktree.codebase.agent,
               supported,
               unsupportedReason: supported
                 ? null

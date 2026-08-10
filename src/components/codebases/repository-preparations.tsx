@@ -18,14 +18,16 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Spinner } from "@/components/ui/spinner";
+import { Textarea } from "@/components/ui/textarea";
 import { controlPlaneRequest } from "@/lib/control-plane-client";
 
 import type { CodebaseRepository, RepositoryPreparation } from "./types";
 
 type DraftPreparation = RepositoryPreparation & {
   localId: string;
-  contentBase64?: string;
   fileName?: string;
+  textContent: string | null;
+  contentChanged: boolean;
 };
 
 const MAX_FILE_BYTES = 10 * 1024 * 1024;
@@ -42,16 +44,32 @@ function bytesToBase64(bytes: Uint8Array): string {
   return btoa(binary);
 }
 
-async function uploaded(file: File): Promise<{
+function base64ToBytes(value: string): Uint8Array {
+  const binary = atob(value);
+  return Uint8Array.from(binary, (character) => character.charCodeAt(0));
+}
+
+function textFromBase64(value: string | null): string | null {
+  if (value === null) return null;
+  try {
+    const text = new TextDecoder("utf-8", { fatal: true }).decode(
+      base64ToBytes(value),
+    );
+    return text.includes("\0") ? null : text;
+  } catch {
+    return null;
+  }
+}
+
+async function contentDetails(bytes: Uint8Array): Promise<{
   contentBase64: string;
   contentSha256: string;
   byteCount: number;
 }> {
-  if (file.size > MAX_FILE_BYTES) {
-    throw new Error("Each uploaded file must be 10 MiB or smaller.");
-  }
-  const bytes = new Uint8Array(await file.arrayBuffer());
-  const digest = new Uint8Array(await crypto.subtle.digest("SHA-256", bytes));
+  const digestBytes = Uint8Array.from(bytes);
+  const digest = new Uint8Array(
+    await crypto.subtle.digest("SHA-256", digestBytes.buffer),
+  );
   return {
     contentBase64: bytesToBase64(bytes),
     contentSha256: [...digest]
@@ -61,8 +79,32 @@ async function uploaded(file: File): Promise<{
   };
 }
 
+async function uploaded(file: File): Promise<{
+  contentBase64: string;
+  contentSha256: string;
+  byteCount: number;
+  textContent: string | null;
+  contentChanged: boolean;
+}> {
+  if (file.size > MAX_FILE_BYTES) {
+    throw new Error("Each uploaded file must be 10 MiB or smaller.");
+  }
+  const bytes = new Uint8Array(await file.arrayBuffer());
+  return {
+    ...(await contentDetails(bytes)),
+    textContent: textFromBase64(bytesToBase64(bytes)),
+    contentChanged: true,
+  };
+}
+
 function draftFrom(value: RepositoryPreparation): DraftPreparation {
-  return { ...value, localId: value.id };
+  return {
+    ...value,
+    localId: value.id,
+    textContent:
+      value.kind === "WRITE" ? textFromBase64(value.contentBase64) : null,
+    contentChanged: false,
+  };
 }
 
 function empty(kind: RepositoryPreparation["kind"]): DraftPreparation {
@@ -71,9 +113,15 @@ function empty(kind: RepositoryPreparation["kind"]): DraftPreparation {
     localId: crypto.randomUUID(),
     kind,
     path: "",
-    contentSha256: null,
-    byteCount: null,
+    contentSha256:
+      kind === "WRITE"
+        ? "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        : null,
+    byteCount: kind === "WRITE" ? 0 : null,
+    contentBase64: kind === "WRITE" ? "" : null,
     definitionHash: "",
+    textContent: kind === "WRITE" ? "" : null,
+    contentChanged: kind === "WRITE",
   };
 }
 
@@ -123,13 +171,18 @@ export function RepositoryPreparations({
   const invalid =
     drafts.length > 500 ||
     totalBytes > MAX_TOTAL_BYTES ||
+    drafts.some((preparation) =>
+      preparation.byteCount === null
+        ? false
+        : preparation.byteCount > MAX_FILE_BYTES,
+    ) ||
     paths.some((path) => !validPath(path)) ||
     new Set(paths).size !== paths.length ||
     drafts.some(
       (preparation) =>
         preparation.kind === "WRITE" &&
         !preparation.id &&
-        !preparation.contentBase64,
+        preparation.contentBase64 === null,
     );
 
   const update = (localId: string, value: Partial<DraftPreparation>) =>
@@ -156,6 +209,30 @@ export function RepositoryPreparations({
     } catch (value) {
       setError(value instanceof Error ? value.message : String(value));
     }
+  };
+
+  const addTextFile = () =>
+    setDrafts((current) => [...current, empty("WRITE")]);
+
+  const updateText = (localId: string, textContent: string) => {
+    const bytes = new TextEncoder().encode(textContent);
+    const contentBase64 = bytesToBase64(bytes);
+    update(localId, {
+      textContent,
+      contentBase64,
+      contentSha256: null,
+      byteCount: bytes.byteLength,
+      contentChanged: true,
+    });
+    void contentDetails(bytes).then(({ contentSha256 }) => {
+      setDrafts((current) =>
+        current.map((item) =>
+          item.localId === localId && item.contentBase64 === contentBase64
+            ? { ...item, contentSha256 }
+            : item,
+        ),
+      );
+    });
   };
 
   const replaceFile = async (
@@ -187,7 +264,7 @@ export function RepositoryPreparations({
       }>(
         `mutation SaveRepositoryPreparations($input: SaveCodebaseRepositoryPreparationsInput!) {
           saveCodebaseRepositoryPreparations(input: $input) {
-            preparations { id kind path contentSha256 byteCount definitionHash }
+            preparations { id kind path contentSha256 byteCount contentBase64 definitionHash }
           }
         }`,
         {
@@ -197,7 +274,8 @@ export function RepositoryPreparations({
               id: preparation.id || null,
               kind: preparation.kind,
               path: preparation.path.trim(),
-              ...(preparation.contentBase64
+              ...((!preparation.id || preparation.contentChanged) &&
+              preparation.contentBase64 !== null
                 ? { contentBase64: preparation.contentBase64 }
                 : {}),
             })),
@@ -230,15 +308,20 @@ export function RepositoryPreparations({
         </CardHeader>
         <CardContent className="space-y-3">
           {kind === "WRITE" ? (
-            <Label className="inline-flex cursor-pointer items-center gap-2 rounded-md border px-3 py-2 text-sm font-medium hover:bg-muted">
-              <Upload className="size-4" /> {t("uploadPreparationFiles")}
-              <Input
-                className="sr-only"
-                multiple
-                onChange={(event) => void addFiles(event.target.files)}
-                type="file"
-              />
-            </Label>
+            <div className="flex flex-wrap gap-2">
+              <Label className="inline-flex cursor-pointer items-center gap-2 rounded-md border px-3 py-2 text-sm font-medium hover:bg-muted">
+                <Upload className="size-4" /> {t("uploadPreparationFiles")}
+                <Input
+                  className="sr-only"
+                  multiple
+                  onChange={(event) => void addFiles(event.target.files)}
+                  type="file"
+                />
+              </Label>
+              <Button onClick={addTextFile} type="button" variant="outline">
+                <FilePlus2 /> {t("newTextPreparation")}
+              </Button>
+            </div>
           ) : (
             <Button
               onClick={() => setDrafts((current) => [...current, empty(kind)])}
@@ -250,7 +333,7 @@ export function RepositoryPreparations({
           )}
           {items.map((preparation) => (
             <div
-              className="grid gap-3 rounded-lg border p-3 md:grid-cols-[minmax(16rem,1fr)_auto]"
+              className="grid min-w-0 gap-3 rounded-lg border p-3 md:grid-cols-[minmax(16rem,1fr)_auto]"
               key={preparation.localId}
             >
               <div className="space-y-2">
@@ -267,23 +350,48 @@ export function RepositoryPreparations({
                   value={preparation.path}
                 />
                 {kind === "WRITE" ? (
-                  <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
-                    <Badge variant="outline">
-                      {size(preparation.byteCount)}
-                    </Badge>
-                    <span className="max-w-full truncate font-mono">
-                      {preparation.contentSha256 ?? t("uploadRequired")}
-                    </span>
-                    <Label className="inline-flex cursor-pointer items-center gap-1 rounded px-2 py-1 hover:bg-muted">
-                      <FilePlus2 className="size-3.5" /> {t("replaceFile")}
-                      <Input
-                        className="sr-only"
-                        onChange={(event) =>
-                          void replaceFile(preparation.localId, event)
-                        }
-                        type="file"
-                      />
-                    </Label>
+                  <div className="space-y-3">
+                    <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+                      <Badge variant="outline">
+                        {size(preparation.byteCount)}
+                      </Badge>
+                      <span className="max-w-full truncate font-mono">
+                        {preparation.contentSha256 ?? t("calculatingHash")}
+                      </span>
+                      <Label className="inline-flex cursor-pointer items-center gap-1 rounded px-2 py-1 hover:bg-muted">
+                        <FilePlus2 className="size-3.5" /> {t("replaceFile")}
+                        <Input
+                          className="sr-only"
+                          onChange={(event) =>
+                            void replaceFile(preparation.localId, event)
+                          }
+                          type="file"
+                        />
+                      </Label>
+                    </div>
+                    <div className="space-y-2">
+                      <Label
+                        htmlFor={`preparation-content-${preparation.localId}`}
+                      >
+                        {t("fileContents")}
+                      </Label>
+                      {preparation.textContent !== null ? (
+                        <Textarea
+                          className="min-h-64 resize-y font-mono text-xs"
+                          id={`preparation-content-${preparation.localId}`}
+                          onChange={(event) =>
+                            updateText(preparation.localId, event.target.value)
+                          }
+                          spellCheck={false}
+                          value={preparation.textContent}
+                        />
+                      ) : (
+                        <div className="rounded-lg border border-dashed p-8 text-center text-sm text-muted-foreground">
+                          <FilePlus2 className="mx-auto mb-2" />
+                          {t("binaryPreparation")}
+                        </div>
+                      )}
+                    </div>
                   </div>
                 ) : null}
               </div>

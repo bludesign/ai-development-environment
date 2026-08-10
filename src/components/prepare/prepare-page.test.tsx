@@ -57,9 +57,16 @@ function overview(supported: boolean) {
             worktree: {
               id: "worktree-1",
               folder: "/Users/acme/app-feature",
+              relativePath: "app-feature",
               branch: "feature/search",
+              headSha: "1234567890abcdef",
               primary: false,
               availability: "AVAILABLE",
+            },
+            agent: {
+              id: "agent-1",
+              name: "Studio Mac",
+              hostname: "studio.local",
             },
             supported,
             unsupportedReason: supported ? null : "Agent must be updated",
@@ -111,16 +118,34 @@ describe("PreparePage", () => {
     expect(screen.getAllByText("Drifted")[0]?.className).toContain(
       "destructive",
     );
+    expect(screen.getAllByText("Studio Mac · studio.local").length).toBe(2);
+    expect(screen.getByText("Agent must be updated")).toBeDefined();
     expect(screen.queryByRole("button", { name: "Apply" })).toBeNull();
   });
 
   test("confirms a destructive per-worktree action before dispatching it", async () => {
-    request.mockImplementation(async (query) => {
+    request.mockImplementation(async (query, variables) => {
       if (String(query).includes("query WorktreePreparationOverview")) {
         return { worktreePreparationOverview: overview(true) } as never;
       }
       if (String(query).includes("mutation RunWorktreePreparations")) {
-        return { runWorktreePreparations: { jobs: [], skipped: [] } } as never;
+        const action = (variables as { input?: { action?: string } }).input
+          ?.action;
+        return {
+          runWorktreePreparations: {
+            jobs: action === "APPLY" ? [{ id: "job-1" }] : [],
+            skipped: [],
+          },
+        } as never;
+      }
+      if (String(query).includes("query WorktreeJob")) {
+        return {
+          agentJob: {
+            status: "SUCCEEDED",
+            error: null,
+            worktreeOperationResult: null,
+          },
+        } as never;
       }
       throw new Error(`Unexpected operation: ${query}`);
     });
@@ -129,6 +154,12 @@ describe("PreparePage", () => {
 
     const apply = await screen.findByRole("button", { name: "Apply" });
     await waitFor(() => expect(apply.hasAttribute("disabled")).toBe(false));
+    expect(screen.getAllByRole("button", { name: "Apply all" })).toHaveLength(
+      2,
+    );
+    expect(
+      screen.getByRole("button", { name: "Undo" }).getAttribute("data-variant"),
+    ).toBe("outline");
     fireEvent.click(apply);
 
     const dialog = await screen.findByRole("alertdialog");
@@ -146,6 +177,15 @@ describe("PreparePage", () => {
               "APPLY",
         ),
       ).toBe(true),
+    );
+    await waitFor(
+      () =>
+        expect(
+          request.mock.calls.some(([query]) =>
+            String(query).includes("query WorktreeJob"),
+          ),
+        ).toBe(true),
+      { timeout: 2500 },
     );
   });
 });

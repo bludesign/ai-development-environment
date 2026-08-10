@@ -187,34 +187,42 @@ export class AppsService {
     const prisma = await getPrismaClient();
     const repositoryIds = app.repositories.map((item) => item.repositoryId);
     const repositoryScope = { in: repositoryIds };
-    const [codebases, worktrees, plans, sessions, builds] = await Promise.all([
-      prisma.codebase.count({
-        where: { repositoryId: repositoryScope },
-      }),
-      prisma.worktree.count({
-        where: {
-          missingAt: null,
-          codebase: { repositoryId: repositoryScope },
-        },
-      }),
-      prisma.agentRun.count({
-        where: {
-          kind: "PLAN",
-          archivedAt: null,
-          repositoryId: repositoryScope,
-        },
-      }),
-      prisma.agentRun.count({
-        where: {
-          kind: "SESSION",
-          archivedAt: null,
-          repositoryId: repositoryScope,
-        },
-      }),
-      prisma.build.count({
-        where: { repositoryId: repositoryScope },
-      }),
-    ]);
+    const [codebases, worktrees, dirtyWorktrees, plans, sessions, builds] =
+      await Promise.all([
+        prisma.codebase.count({
+          where: { repositoryId: repositoryScope },
+        }),
+        prisma.worktree.count({
+          where: {
+            missingAt: null,
+            codebase: { repositoryId: repositoryScope },
+          },
+        }),
+        prisma.worktree.count({
+          where: {
+            missingAt: null,
+            codebase: { repositoryId: repositoryScope },
+            OR: [{ hasStagedChanges: true }, { hasUnstagedChanges: true }],
+          },
+        }),
+        prisma.agentRun.count({
+          where: {
+            kind: "PLAN",
+            archivedAt: null,
+            repositoryId: repositoryScope,
+          },
+        }),
+        prisma.agentRun.count({
+          where: {
+            kind: "SESSION",
+            archivedAt: null,
+            repositoryId: repositoryScope,
+          },
+        }),
+        prisma.build.count({
+          where: { repositoryId: repositoryScope },
+        }),
+      ]);
 
     const { repositories, agentIdsJson, ...details } = app;
     return {
@@ -225,6 +233,7 @@ export class AppsService {
         repositories: repositoryIds.length,
         codebases,
         worktrees,
+        dirtyWorktrees,
         plans,
         sessions,
         builds,

@@ -40,7 +40,7 @@ import { RepositoryPreparations } from "./repository-preparations";
 
 const REPOSITORY_FIELDS = `
   id canonicalOrigin displayOrigin name description jiraBranchRegex keepBaseBranchUpToDate createdAt updatedAt
-  preparations { id kind path contentSha256 byteCount definitionHash }
+  preparations { id kind path contentSha256 byteCount contentBase64 definitionHash }
   skillGroups { id name }
   quickActionWorkflows { id name description enabled quickActionKind quickActionRepositories { id name } }
   codebases {

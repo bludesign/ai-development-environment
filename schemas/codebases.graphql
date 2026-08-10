@@ -70,6 +70,8 @@ type RepositoryPreparation {
   contentSha256: String
   "Uploaded content size for write preparations."
   byteCount: Int
+  "Base64-encoded uploaded contents for write preparations."
+  contentBase64: String
   "Hash of all behavior-affecting fields."
   definitionHash: String!
   "ISO 8601 timestamp when this preparation was created."

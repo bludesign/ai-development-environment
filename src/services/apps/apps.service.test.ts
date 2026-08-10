@@ -108,6 +108,8 @@ describe("AppsService", () => {
         folder: "/tmp/web",
         relativePath: ".",
         primary: true,
+        hasStagedChanges: true,
+        hasUnstagedChanges: true,
       },
     });
     await prisma.agentRun.createMany({
@@ -181,6 +183,7 @@ describe("AppsService", () => {
       repositories: 2,
       codebases: 1,
       worktrees: 1,
+      dirtyWorktrees: 1,
       plans: 1,
       sessions: 1,
       builds: 1,
@@ -215,6 +218,7 @@ describe("AppsService", () => {
         repositories: 1,
         codebases: 0,
         worktrees: 0,
+        dirtyWorktrees: 0,
         plans: 1,
         sessions: 1,
         builds: 1,

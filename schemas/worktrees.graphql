@@ -248,6 +248,8 @@ type WorktreePreparationFileStatus {
 type WorktreePreparationWorktree {
   "The worktree represented by this preparation state."
   worktree: Worktree!
+  "The agent that owns this worktree."
+  agent: Agent!
   "Whether the owning agent supports preparation jobs."
   supported: Boolean!
   "Why preparation actions cannot run on this worktree."

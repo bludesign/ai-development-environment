@@ -1,3 +1,5 @@
+import { Buffer } from "node:buffer";
+
 import {
   CODEBASE_FETCH_JOB_KIND,
   CODEBASE_REFRESH_JOB_KIND,
@@ -63,6 +65,8 @@ export const createCodebaseResolvers = (service: CodebasesService) => ({
     updatedAt: (value: { updatedAt: Date }) => value.updatedAt.toISOString(),
   },
   RepositoryPreparation: {
+    contentBase64: (value: { contents: Uint8Array | null }) =>
+      value.contents ? Buffer.from(value.contents).toString("base64") : null,
     createdAt: (value: { createdAt: Date }) => value.createdAt.toISOString(),
     updatedAt: (value: { updatedAt: Date }) => value.updatedAt.toISOString(),
   },

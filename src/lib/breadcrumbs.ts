@@ -4,6 +4,8 @@ export type BreadcrumbLabelKey =
   | "actionsCache"
   | "agents"
   | "analyticsEvents"
+  | "apiCache"
+  | "apiKeys"
   | "apps"
   | "buildData"
   | "builds"
@@ -23,12 +25,16 @@ export type BreadcrumbLabelKey =
   | "entries"
   | "groups"
   | "github"
+  | "gitlab"
   | "jira"
+  | "mergeRequests"
   | "new"
   | "notifications"
   | "plans"
+  | "pipelines"
   | "polling"
   | "provisioningProfiles"
+  | "prepare"
   | "pullRequests"
   | "pushNotifications"
   | "repositories"
@@ -36,11 +42,13 @@ export type BreadcrumbLabelKey =
   | "sessions"
   | "settings"
   | "skills"
+  | "status"
   | "sync"
   | "tickets"
   | "tools"
   | "unifiedEvents"
   | "usage"
+  | "users"
   | "webhooks"
   | "workflows"
   | "worktrees";
@@ -58,6 +66,7 @@ const STATIC_SEGMENTS: Record<string, BreadcrumbLabelKey> = {
   "actions-cache": "actionsCache",
   agents: "agents",
   "analytics-events": "analyticsEvents",
+  "api-keys": "apiKeys",
   apps: "apps",
   "build-data": "buildData",
   builds: "builds",
@@ -77,15 +86,19 @@ const STATIC_SEGMENTS: Record<string, BreadcrumbLabelKey> = {
   entries: "entries",
   groups: "groups",
   github: "github",
+  gitlab: "gitlab",
   "github-cache": "cache",
   jira: "jira",
+  "merge-requests": "mergeRequests",
   "jira-cache": "cache",
   "jira-webhooks": "webhooks",
   new: "new",
   notifications: "notifications",
   plans: "plans",
+  pipelines: "pipelines",
   polling: "polling",
   "provisioning-profiles": "provisioningProfiles",
+  prepare: "prepare",
   "pull-requests": "pullRequests",
   "push-notifications": "pushNotifications",
   repositories: "repositories",
@@ -93,11 +106,13 @@ const STATIC_SEGMENTS: Record<string, BreadcrumbLabelKey> = {
   sessions: "sessions",
   settings: "settings",
   skills: "skills",
+  status: "status",
   sync: "sync",
   tickets: "tickets",
   tools: "tools",
   "unified-events": "unifiedEvents",
   usage: "usage",
+  users: "users",
   webhooks: "webhooks",
   workflows: "workflows",
   worktrees: "worktrees",
@@ -116,6 +131,11 @@ const STATIC_NESTED_PATHS = new Set([
   "/commands/new",
   "/commands/runs",
   "/devices/enroll",
+  "/gitlab/cache",
+  "/gitlab/comments",
+  "/gitlab/merge-requests",
+  "/gitlab/pipelines",
+  "/gitlab/webhooks",
   "/github-cache/entries",
   "/jira-cache/tickets",
   "/jira/tickets",
@@ -125,6 +145,10 @@ const STATIC_NESTED_PATHS = new Set([
   "/workflows/new",
   "/workflows/runs",
 ]);
+
+const STATIC_PATH_LABELS: Record<string, BreadcrumbLabelKey> = {
+  "/gitlab/cache": "apiCache",
+};
 
 const STATIC_NESTED_PATH_PATTERNS = [
   /^\/builds\/[^/]+\/coverage$/,
@@ -137,6 +161,7 @@ const ROUTABLE_STATIC_PATHS = new Set([
   "/actions-cache",
   "/agents",
   "/analytics-events",
+  "/api-keys",
   "/apps",
   "/build-data",
   "/builds",
@@ -151,22 +176,30 @@ const ROUTABLE_STATIC_PATHS = new Set([
   "/devices",
   "/devices/enroll",
   "/drafts",
+  "/gitlab/cache",
+  "/gitlab/comments",
+  "/gitlab/merge-requests",
+  "/gitlab/pipelines",
+  "/gitlab/webhooks",
   "/github-cache",
   "/jira-cache",
   "/jira/tickets",
   "/notifications",
   "/plans",
   "/polling",
+  "/prepare",
   "/provisioning-profiles",
   "/pull-requests",
   "/push-notifications",
   "/sessions",
   "/settings",
+  "/status",
   "/skills",
   "/skills/groups",
   "/tools",
   "/unified-events",
   "/usage",
+  "/users",
   "/jira-webhooks",
   "/webhooks",
   "/workflows",
@@ -235,7 +268,10 @@ export function buildAppBreadcrumbs(
     const isCurrent = index === segments.length - 1;
     const alias = index === 0 ? TOP_LEVEL_ALIASES[segment] : undefined;
     const prefix = `/${segments.slice(0, index + 1).join("/")}`;
-    const labelKey = alias?.labelKey ?? staticLabelKey(segment, index, prefix);
+    const labelKey =
+      alias?.labelKey ??
+      STATIC_PATH_LABELS[prefix] ??
+      staticLabelKey(segment, index, prefix);
 
     return {
       href: isCurrent

@@ -66,6 +66,7 @@ export type RepositoryPreparation = {
   path: string;
   contentSha256: string | null;
   byteCount: number | null;
+  contentBase64: string | null;
   definitionHash: string;
 };
 
