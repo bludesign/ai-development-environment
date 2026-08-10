@@ -39,6 +39,7 @@ import type {
   WorktreeAutoSync,
   WorktreeQuickAction,
 } from "./types";
+import { waitForWorktreeJob } from "./worktree-jobs";
 
 const NONE = "__none__";
 const DEFAULT_EMAIL = "__github_account_default__";
@@ -66,6 +67,7 @@ export function AutoSyncButton({
   const rule = worktree.autoSync;
   const [open, setOpen] = useState(false);
   const [busy, setBusy] = useState(false);
+  const [forceArmed, setForceArmed] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [useWorkflow, setUseWorkflow] = useState(false);
   const [workflowId, setWorkflowId] = useState(NONE);
@@ -77,6 +79,7 @@ export function AutoSyncButton({
 
   const openDialog = () => {
     setError(null);
+    setForceArmed(false);
     setUseWorkflow(Boolean(rule?.conflictWorkflowId));
     setWorkflowId(rule?.conflictWorkflowId ?? NONE);
     setChoice(rule?.conflictWorkflowChoice ?? NONE);
@@ -95,7 +98,7 @@ export function AutoSyncButton({
         ) {
           configureWorktreeAutoSync(input: $input) {
             worktreeId state conflictWorkflowId conflictWorkflowChoice
-            lastError lastSyncedAt updatedAt
+            lastError pauseReason lastSyncedAt updatedAt
           }
         }`,
         {
@@ -139,6 +142,31 @@ export function AutoSyncButton({
     }
   };
 
+  const forceSync = async () => {
+    setBusy(true);
+    setError(null);
+    try {
+      const data = await controlPlaneRequest<{
+        forceWorktreeAutoSync: { id: string };
+      }>(
+        `mutation ForceWorktreeAutoSync($worktreeId: ID!, $requestId: ID!) {
+          forceWorktreeAutoSync(worktreeId: $worktreeId, requestId: $requestId) { id }
+        }`,
+        { worktreeId: worktree.id, requestId: crypto.randomUUID() },
+      );
+      await waitForWorktreeJob(data.forceWorktreeAutoSync.id);
+      onError(null);
+      setOpen(false);
+      await onCompleted();
+    } catch (value) {
+      setError(errorMessage(value));
+      await onCompleted().catch(() => undefined);
+    } finally {
+      setForceArmed(false);
+      setBusy(false);
+    }
+  };
+
   const paused = rule?.state === "PAUSED";
   return (
     <>
@@ -160,7 +188,13 @@ export function AutoSyncButton({
         <RefreshCw />
         {paused ? t("autoSyncPaused") : rule ? t("autoSyncing") : t("autoSync")}
       </Button>
-      <Dialog onOpenChange={(next) => !busy && setOpen(next)} open={open}>
+      <Dialog
+        onOpenChange={(next) => {
+          if (!busy) setOpen(next);
+          if (!next) setForceArmed(false);
+        }}
+        open={open}
+      >
         <DialogContent className="sm:max-w-xl">
           <DialogHeader>
             <DialogTitle>{t("autoSyncTitle")}</DialogTitle>
@@ -243,6 +277,25 @@ export function AutoSyncButton({
             )}
           </div>
           <DialogFooter>
+            {rule?.state === "PAUSED" &&
+              rule.pauseReason === "PREPARATION_CONFLICT" && (
+                <Button
+                  disabled={busy}
+                  onClick={() => {
+                    if (forceArmed) void forceSync();
+                    else setForceArmed(true);
+                  }}
+                  type="button"
+                  variant="destructive"
+                >
+                  {busy && <Spinner />}{" "}
+                  {t(
+                    forceArmed
+                      ? "confirmForceSyncPreparations"
+                      : "forceSyncPreparations",
+                  )}
+                </Button>
+              )}
             {rule && (
               <Button
                 disabled={busy}

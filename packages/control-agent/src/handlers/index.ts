@@ -48,6 +48,7 @@ import {
   WORKTREE_MOVE_CHECKOUT_JOB_KIND,
   WORKTREE_MOVE_PUSH_JOB_KIND,
   WORKTREE_OPERATION_JOB_KIND,
+  WORKTREE_PREPARATION_JOB_KIND,
   WORKTREE_WATCH_JOB_KIND,
   type WorktreeActivityReport,
 } from "@ai-development-environment/agent-contract/worktrees";
@@ -76,6 +77,7 @@ import {
   operateWorktreeGit,
   pushMovedWorktree,
   operateWorktree,
+  prepareWorktree,
   autoSyncWorktree,
   watchWorktree,
 } from "./worktrees.js";
@@ -186,6 +188,7 @@ export const handlers: Readonly<Record<string, AgentJobHandler>> = {
   [WORKTREE_MOVE_CHECKOUT_JOB_KIND]: checkoutMovedWorktree,
   [WORKTREE_DELETE_JOB_KIND]: deleteWorktree,
   [WORKTREE_OPERATION_JOB_KIND]: operateWorktree,
+  [WORKTREE_PREPARATION_JOB_KIND]: prepareWorktree,
   [WORKTREE_GIT_INSPECT_JOB_KIND]: inspectWorktreeGit,
   [WORKTREE_GIT_OPERATION_JOB_KIND]: operateWorktreeGit,
   [WORKTREE_WATCH_JOB_KIND]: watchWorktree,

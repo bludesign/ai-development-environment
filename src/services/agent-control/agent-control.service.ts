@@ -99,6 +99,7 @@ import {
   WORKTREE_MOVE_CHECKOUT_JOB_KIND,
   WORKTREE_MOVE_PUSH_JOB_KIND,
   WORKTREE_OPERATION_JOB_KIND,
+  WORKTREE_PREPARATION_JOB_KIND,
   WORKTREE_COMMIT_JOB_KIND,
   WORKTREE_WATCH_JOB_KIND,
   worktreeJobPayload,
@@ -111,6 +112,7 @@ import {
   worktreeGitOperationPayload,
   worktreeMoveCheckoutJobPayload,
   worktreeMovePushJobPayload,
+  worktreePreparationJobPayload,
   worktreeWatchJobPayload,
 } from "@ai-development-environment/agent-contract/worktrees";
 import {
@@ -339,6 +341,10 @@ export function validateJob(kind: string, payload: unknown): void {
     kind === WORKTREE_OPERATION_JOB_KIND
   ) {
     worktreeJobPayload(value);
+    return;
+  }
+  if (kind === WORKTREE_PREPARATION_JOB_KIND) {
+    worktreePreparationJobPayload(value);
     return;
   }
   if (kind === WORKTREE_AUTO_SYNC_JOB_KIND) {

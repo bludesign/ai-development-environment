@@ -34,6 +34,80 @@ enum WorktreeOperation {
   UNSTAGE_ALL
 }
 
+"Actions supported by the worktree preparation agent job."
+enum WorktreePreparationAction {
+  "Inspects managed paths without changing them."
+  INSPECT
+  "Applies the repository preparation definitions."
+  APPLY
+  "Restores managed paths and clears their Git flags."
+  UNDO
+}
+
+"Per-file preparation states."
+enum WorktreePreparationState {
+  "The current definition has not been applied yet."
+  PENDING
+  "The path matches its preparation definition."
+  APPLIED
+  "The preparation has been explicitly undone."
+  UNDONE
+  "The managed path no longer matches its definition."
+  DRIFTED
+  "The preparation is suspended while Git conflict work is active."
+  SUSPENDED
+  "The rule is neutral for this worktree, such as an untracked assume-only path."
+  NOT_APPLICABLE
+  "The latest preparation action failed for this path."
+  ERROR
+  "The path has not been inspected or has no persisted result."
+  UNKNOWN
+}
+
+"Derived overall state for a worktree."
+enum WorktreePreparationOverallState {
+  "The repository has no preparation definitions."
+  NOT_CONFIGURED
+  "At least one current definition has not been applied."
+  PENDING
+  "Every applicable definition is applied."
+  APPLIED
+  "At least one definition has been explicitly undone."
+  UNDONE
+  "At least one managed path has drifted."
+  DRIFTED
+  "Preparation state is suspended while Git conflict work is active."
+  SUSPENDED
+  "No configured definition currently applies to this worktree."
+  NOT_APPLICABLE
+  "At least one preparation result is an error."
+  ERROR
+  "The aggregate preparation state is not known."
+  UNKNOWN
+}
+
+"Typed outcome returned by worktree Sync and Rebase jobs."
+enum WorktreeOperationOutcome {
+  "The requested Git operation completed successfully."
+  COMPLETED
+  "Preparation-managed paths block the operation and require an explicit force retry."
+  PREPARATION_CONFLICT
+  "The rebase has genuine Git conflicts requiring resolution."
+  REBASE_CONFLICT
+}
+
+"Why Auto Sync is paused."
+enum WorktreeAutoSyncPauseReason {
+  "Preparation-managed paths require an explicit force sync."
+  PREPARATION_CONFLICT
+  "A rebase conflict requires the configured conflict workflow."
+  REBASE_CONFLICT
+  "The worktree branch changed from the branch Auto Sync was configured for."
+  BRANCH_CHANGED
+  "Auto Sync encountered another error."
+  ERROR
+}
+
 "Values supported for worktree branch."
 enum WorktreeBranchMode {
   "Uses the new mode."
@@ -150,10 +224,83 @@ type WorktreeAutoSync {
   conflictWorkflowChoice: String
   "The last error associated with this worktree auto sync. May be null when unavailable or not applicable."
   lastError: String
+  "Structured reason Auto Sync is paused."
+  pauseReason: WorktreeAutoSyncPauseReason
   "ISO 8601 timestamp when this worktree auto sync was last synchronized. May be null when unavailable or not applicable."
   lastSyncedAt: String
   "ISO 8601 timestamp when this worktree auto sync was last updated."
   updatedAt: String!
+}
+
+"Observed status of one preparation in one worktree."
+type WorktreePreparationFileStatus {
+  "The repository preparation definition represented by this status."
+  preparation: RepositoryPreparation!
+  "Current observed state of the managed path."
+  state: WorktreePreparationState!
+  "Agent-provided status or error detail."
+  message: String
+  "ISO 8601 timestamp of the latest persisted observation."
+  checkedAt: String
+}
+
+"Preparation state for one worktree."
+type WorktreePreparationWorktree {
+  "The worktree represented by this preparation state."
+  worktree: Worktree!
+  "Whether the owning agent supports preparation jobs."
+  supported: Boolean!
+  "Why preparation actions cannot run on this worktree."
+  unsupportedReason: String
+  "Aggregate state derived from all configured preparation paths."
+  overallState: WorktreePreparationOverallState!
+  "Persisted status for each configured preparation path."
+  statuses: [WorktreePreparationFileStatus!]!
+  "The active preparation job for this worktree, when one exists."
+  activeJob: AgentJob
+}
+
+"Preparation state grouped by repository."
+type WorktreePreparationRepository {
+  "The repository whose preparation state is grouped here."
+  repository: CodebaseRepository!
+  "Primary and linked worktrees belonging to the repository."
+  worktrees: [WorktreePreparationWorktree!]!
+}
+
+"All repository preparation states."
+type WorktreePreparationOverview {
+  "Preparation state grouped across all known repositories."
+  repositories: [WorktreePreparationRepository!]!
+}
+
+"A worktree skipped by a preparation batch."
+type WorktreePreparationSkip {
+  "Identifier of the worktree for which no job was created."
+  worktreeId: ID!
+  "Why the worktree was skipped."
+  reason: String!
+}
+
+"Jobs created for a preparation batch."
+type WorktreePreparationBatch {
+  "Preparation jobs created by this request."
+  jobs: [AgentJob!]!
+  "Worktrees that were ineligible for the requested preparation action."
+  skipped: [WorktreePreparationSkip!]!
+}
+
+"Typed result stored on a worktree operation job."
+type WorktreeOperationResult {
+  "Typed terminal outcome of the worktree operation."
+  outcome: WorktreeOperationOutcome!
+  "Repository-relative paths involved in a preparation conflict."
+  preparationConflictPaths: [String!]!
+}
+
+extend type AgentJob {
+  "Typed worktree-operation result when this is a worktree operation job."
+  worktreeOperationResult: WorktreeOperationResult
 }
 
 "Represents a worktree auto merge in the GraphQL API."
@@ -656,6 +803,18 @@ input RunWorktreeOperationInput {
   operation: WorktreeOperation!
   "Identifier of the request to use."
   requestId: ID!
+  "Whether preparation-managed paths may be reset before Sync or Rebase."
+  forcePreparations: Boolean! = false
+}
+
+"Values used to run preparation actions for worktrees."
+input RunWorktreePreparationsInput {
+  "Identifiers of the worktrees on which to run the action."
+  worktreeIds: [ID!]!
+  "Preparation action to run."
+  action: WorktreePreparationAction!
+  "Client-generated identifier used to deduplicate jobs."
+  requestId: ID!
 }
 
 "Values used to commit worktree changes."
@@ -775,6 +934,8 @@ input ConfigureWorktreeAutoMergeInput {
 }
 
 extend type Query {
+  "Returns the preparation state of every known worktree."
+  worktreePreparationOverview: WorktreePreparationOverview!
   "Returns a worktree overview."
   worktreeOverview(
     "Identifier of an app whose assigned repositories should scope the results."
@@ -810,6 +971,11 @@ extend type Query {
 }
 
 extend type Mutation {
+  "Runs a preparation action for one or more worktrees."
+  runWorktreePreparations(
+    "Values for the requested preparation action."
+    input: RunWorktreePreparationsInput!
+  ): WorktreePreparationBatch!
   "Refreshes worktrees and returns the number of affected records."
   refreshWorktrees: Int!
   "Refreshes a worktree pull request and returns a worktree."
@@ -843,6 +1009,13 @@ extend type Mutation {
   runWorktreeOperation(
     "Values for the requested operation."
     input: RunWorktreeOperationInput!
+  ): AgentJob!
+  "Forces a paused Auto Sync through preparation-managed paths."
+  forceWorktreeAutoSync(
+    "Identifier of the paused worktree."
+    worktreeId: ID!
+    "Client-generated identifier used to deduplicate the force job."
+    requestId: ID!
   ): AgentJob!
   "Stages and commits selected worktree changes and returns an agent job."
   commitWorktree(

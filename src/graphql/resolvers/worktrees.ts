@@ -80,7 +80,53 @@ export const createWorktreeResolvers = (
     updatedAt: (value: { updatedAt: Date }) => value.updatedAt.toISOString(),
     finishedAt: (value: { finishedAt: Date | null }) => iso(value.finishedAt),
   },
+  WorktreePreparationFileStatus: {
+    checkedAt: (value: { checkedAt: Date | null }) => iso(value.checkedAt),
+  },
+  AgentJob: {
+    worktreeOperationResult: (value: {
+      kind: string;
+      resultJson: string | null;
+    }) => {
+      if (value.kind !== "worktree.operation" || !value.resultJson) return null;
+      try {
+        const parsed: unknown = JSON.parse(value.resultJson);
+        if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+          return null;
+        }
+        const result = parsed as Record<string, unknown>;
+        const outcome = result.outcome;
+        if (
+          outcome !== "COMPLETED" &&
+          outcome !== "PREPARATION_CONFLICT" &&
+          outcome !== "REBASE_CONFLICT"
+        ) {
+          return null;
+        }
+        return {
+          outcome,
+          preparationConflictPaths: Array.isArray(
+            result.preparationConflictPaths,
+          )
+            ? result.preparationConflictPaths.filter(
+                (path): path is string => typeof path === "string",
+              )
+            : [],
+        };
+      } catch {
+        return null;
+      }
+    },
+  },
   Query: {
+    worktreePreparationOverview: (
+      _root: unknown,
+      _args: unknown,
+      context: GraphQLContext,
+    ) => {
+      requireControlPlane(context);
+      return service.preparationOverview();
+    },
     worktreeOverview: (
       _root: unknown,
       { appId }: { appId?: string | null },
@@ -147,6 +193,26 @@ export const createWorktreeResolvers = (
     },
   },
   Mutation: {
+    runWorktreePreparations: (
+      _root: unknown,
+      {
+        input,
+      }: {
+        input: {
+          worktreeIds: string[];
+          action: "INSPECT" | "APPLY" | "UNDO";
+          requestId: string;
+        };
+      },
+      context: GraphQLContext,
+    ) => {
+      requireControlPlane(context);
+      return service.runPreparations(
+        input.worktreeIds,
+        input.action,
+        input.requestId,
+      );
+    },
     refreshWorktreePullRequest: (
       _root: unknown,
       { id }: { id: string },
@@ -218,6 +284,7 @@ export const createWorktreeResolvers = (
           worktreeId: string;
           operation: WorktreeOperation;
           requestId: string;
+          forcePreparations: boolean;
         };
       },
       context: GraphQLContext,
@@ -227,7 +294,16 @@ export const createWorktreeResolvers = (
         input.worktreeId,
         input.operation,
         input.requestId,
+        input.forcePreparations,
       );
+    },
+    forceWorktreeAutoSync: (
+      _root: unknown,
+      { worktreeId, requestId }: { worktreeId: string; requestId: string },
+      context: GraphQLContext,
+    ) => {
+      requireControlPlane(context);
+      return automation.forceAutoSync(worktreeId, requestId);
     },
     commitWorktree: (
       _root: unknown,

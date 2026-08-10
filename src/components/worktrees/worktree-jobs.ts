@@ -4,15 +4,32 @@ import { controlPlaneRequest } from "@/lib/control-plane-client";
 
 import type { WorktreeMove } from "./types";
 
-export async function waitForWorktreeJob(jobId: string): Promise<void> {
+export type WorktreeOperationJobResult = {
+  outcome: "COMPLETED" | "PREPARATION_CONFLICT" | "REBASE_CONFLICT";
+  preparationConflictPaths: string[];
+};
+
+export async function waitForWorktreeOperationJob(
+  jobId: string,
+): Promise<WorktreeOperationJobResult | null> {
   const deadline = Date.now() + 10 * 60_000;
   while (Date.now() < deadline) {
     await new Promise((resolve) => window.setTimeout(resolve, 750));
     const data = await controlPlaneRequest<{
-      agentJob: { status: string; error: string | null } | null;
-    }>("query WorktreeJob($id: ID!) { agentJob(id: $id) { status error } }", {
-      id: jobId,
-    });
+      agentJob: {
+        status: string;
+        error: string | null;
+        worktreeOperationResult: WorktreeOperationJobResult | null;
+      } | null;
+    }>(
+      `query WorktreeJob($id: ID!) {
+        agentJob(id: $id) {
+          status error
+          worktreeOperationResult { outcome preparationConflictPaths }
+        }
+      }`,
+      { id: jobId },
+    );
     const job = data.agentJob;
     if (!job || ["QUEUED", "RUNNING"].includes(job.status)) continue;
     if (job.status !== "SUCCEEDED") {
@@ -20,11 +37,15 @@ export async function waitForWorktreeJob(jobId: string): Promise<void> {
         job.error || `Worktree operation ${job.status.toLowerCase()}`,
       );
     }
-    return;
+    return job.worktreeOperationResult;
   }
   throw new Error(
     "Worktree operation is still running; check the agent job history",
   );
+}
+
+export async function waitForWorktreeJob(jobId: string): Promise<void> {
+  await waitForWorktreeOperationJob(jobId);
 }
 
 export async function waitForWorktreeMove(

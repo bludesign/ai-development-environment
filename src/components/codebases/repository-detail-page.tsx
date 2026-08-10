@@ -36,9 +36,11 @@ import {
 } from "@/lib/control-plane-client";
 
 import type { CodebaseRepository } from "./types";
+import { RepositoryPreparations } from "./repository-preparations";
 
 const REPOSITORY_FIELDS = `
   id canonicalOrigin displayOrigin name description jiraBranchRegex keepBaseBranchUpToDate createdAt updatedAt
+  preparations { id kind path contentSha256 byteCount definitionHash }
   skillGroups { id name }
   quickActionWorkflows { id name description enabled quickActionKind quickActionRepositories { id name } }
   codebases {
@@ -232,6 +234,7 @@ export function RepositoryDetailPage({
       <Tabs defaultValue="details">
         <TabsList>
           <TabsTrigger value="details">{t("repositoryDetails")}</TabsTrigger>
+          <TabsTrigger value="preparations">{t("preparations")}</TabsTrigger>
           <TabsTrigger value="ios-app">{buildsT("iosApp")}</TabsTrigger>
           <TabsTrigger value="auto-retry">{t("autoRetry")}</TabsTrigger>
           <TabsTrigger value="quick-actions">{t("quickActions")}</TabsTrigger>
@@ -338,6 +341,9 @@ export function RepositoryDetailPage({
               </CardContent>
             </Card>
           </form>
+        </TabsContent>
+        <TabsContent value="preparations">
+          <RepositoryPreparations repository={repository} onSaved={load} />
         </TabsContent>
         <TabsContent value="ios-app">
           <IosProjectSection

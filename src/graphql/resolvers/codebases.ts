@@ -30,6 +30,13 @@ export const createCodebaseResolvers = (service: CodebasesService) => ({
       Array.isArray(value) ? value : (value.repositories ?? []),
   },
   CodebaseRepository: {
+    preparations: async (value: { id: string }) => {
+      const prisma = await getPrismaClient();
+      return prisma.codebaseRepositoryPreparation.findMany({
+        where: { repositoryId: value.id },
+        orderBy: [{ kind: "asc" }, { path: "asc" }],
+      });
+    },
     quickActionWorkflows: async (value: { id: string }) => {
       const prisma = await getPrismaClient();
       return prisma.workflow.findMany({
@@ -52,6 +59,10 @@ export const createCodebaseResolvers = (service: CodebasesService) => ({
         orderBy: [{ name: "asc" }, { id: "asc" }],
       });
     },
+    createdAt: (value: { createdAt: Date }) => value.createdAt.toISOString(),
+    updatedAt: (value: { updatedAt: Date }) => value.updatedAt.toISOString(),
+  },
+  RepositoryPreparation: {
     createdAt: (value: { createdAt: Date }) => value.createdAt.toISOString(),
     updatedAt: (value: { updatedAt: Date }) => value.updatedAt.toISOString(),
   },
@@ -205,6 +216,29 @@ export const createCodebaseResolvers = (service: CodebasesService) => ({
         input.jiraBranchRegex,
         input.keepBaseBranchUpToDate,
         input.skillGroupIds,
+      );
+    },
+    saveCodebaseRepositoryPreparations: (
+      _root: unknown,
+      {
+        input,
+      }: {
+        input: {
+          repositoryId: string;
+          preparations: Array<{
+            id?: string | null;
+            kind: "WRITE" | "DELETE" | "ASSUME_UNCHANGED";
+            path: string;
+            contentBase64?: string | null;
+          }>;
+        };
+      },
+      context: GraphQLContext,
+    ) => {
+      requireControlPlane(context);
+      return service.saveRepositoryPreparations(
+        input.repositoryId,
+        input.preparations,
       );
     },
     updateCodebaseSettings: (

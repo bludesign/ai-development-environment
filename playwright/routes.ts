@@ -32,6 +32,8 @@ export type RouteEntry = {
   scrollTo?: string;
   /** Accessible button name clicked after the page reaches its ready state. */
   clickButton?: string;
+  /** Accessible tab name selected after the page reaches its ready state. */
+  clickTab?: string;
   /** Auth pages are intentionally captured without the seeded bearer session. */
   anonymous?: boolean;
 };
@@ -75,7 +77,18 @@ export const routes: RouteEntry[] = [
     name: "repository-detail",
     path: `/codebases/repositories/${ids.repositories.web}`,
   },
+  {
+    name: "repository-preparations",
+    path: `/codebases/repositories/${ids.repositories.web}`,
+    clickTab: "Preparations",
+  },
   { name: "worktrees", path: "/worktrees" },
+  {
+    name: "prepare",
+    path: "/prepare",
+    readyGraphqlOperation: "WorktreePreparationOverview",
+    readyTexts: ["web-app"],
+  },
   {
     // The page inspects the checkout on load, which queues a job for the Mac that owns it and
     // leaves it QUEUED for the rest of the capture: the page then photographs its "operation in

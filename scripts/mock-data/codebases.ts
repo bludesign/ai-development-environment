@@ -200,6 +200,123 @@ export async function seedCodebases(prisma: PrismaClient): Promise<void> {
     ],
   });
 
+  await prisma.codebaseRepositoryPreparation.createMany({
+    data: [
+      {
+        id: "preparation-web-env",
+        repositoryId: ids.repositories.web,
+        kind: "WRITE",
+        path: ".env.local",
+        contents: Buffer.from("NEXT_PUBLIC_API_URL=http://localhost:4000\n"),
+        contentSha256:
+          "5c770441f20e58314232019270944ed947cf22cd28ee1a2e0c14183d775e1b78",
+        byteCount: 42,
+        definitionHash:
+          "write-5c770441f20e58314232019270944ed947cf22cd28ee1a2e0c14183d775e1b78",
+      },
+      {
+        id: "preparation-web-delete-debug",
+        repositoryId: ids.repositories.web,
+        kind: "DELETE",
+        path: "tmp/debug.flag",
+        definitionHash: "delete-tmp-debug-flag-v1",
+      },
+      {
+        id: "preparation-web-assume-settings",
+        repositoryId: ids.repositories.web,
+        kind: "ASSUME_UNCHANGED",
+        path: ".vscode/settings.json",
+        definitionHash: "assume-vscode-settings-v1",
+      },
+      {
+        id: "preparation-ios-xcconfig",
+        repositoryId: ids.repositories.ios,
+        kind: "WRITE",
+        path: "AcmeApp/Config/Local.xcconfig",
+        contents: Buffer.from("API_HOST = localhost\n"),
+        contentSha256:
+          "10cef5ae0574ec71bf4e9ed100535d6d6ad36d08cde2b5063a924cefa597ddfd",
+        byteCount: 21,
+        definitionHash:
+          "write-10cef5ae0574ec71bf4e9ed100535d6d6ad36d08cde2b5063a924cefa597ddfd",
+      },
+      {
+        id: "preparation-ios-assume-secrets",
+        repositoryId: ids.repositories.ios,
+        kind: "ASSUME_UNCHANGED",
+        path: "AcmeApp/Config/Secrets.xcconfig",
+        definitionHash: "assume-ios-secrets-v1",
+      },
+    ],
+  });
+
+  await prisma.worktreePreparationStatus.createMany({
+    data: [
+      {
+        worktreeId: ids.worktrees.webMain,
+        preparationId: "preparation-web-env",
+        definitionHash:
+          "write-5c770441f20e58314232019270944ed947cf22cd28ee1a2e0c14183d775e1b78",
+        state: "APPLIED",
+        checkedAt: minutesAgo(4),
+      },
+      {
+        worktreeId: ids.worktrees.webMain,
+        preparationId: "preparation-web-delete-debug",
+        definitionHash: "delete-tmp-debug-flag-v1",
+        state: "APPLIED",
+        checkedAt: minutesAgo(4),
+      },
+      {
+        worktreeId: ids.worktrees.webMain,
+        preparationId: "preparation-web-assume-settings",
+        definitionHash: "assume-vscode-settings-v1",
+        state: "APPLIED",
+        checkedAt: minutesAgo(4),
+      },
+      {
+        worktreeId: ids.worktrees.webFeature,
+        preparationId: "preparation-web-env",
+        definitionHash:
+          "write-5c770441f20e58314232019270944ed947cf22cd28ee1a2e0c14183d775e1b78",
+        state: "DRIFTED",
+        message: "File contents differ from the configured upload",
+        checkedAt: minutesAgo(2),
+      },
+      {
+        worktreeId: ids.worktrees.webFeature,
+        preparationId: "preparation-web-delete-debug",
+        definitionHash: "delete-tmp-debug-flag-v1",
+        state: "PENDING",
+        checkedAt: minutesAgo(2),
+      },
+      {
+        worktreeId: ids.worktrees.webFeature,
+        preparationId: "preparation-web-assume-settings",
+        definitionHash: "assume-vscode-settings-v1",
+        state: "SUSPENDED",
+        message: "Suspended while a rebase is in progress",
+        checkedAt: minutesAgo(2),
+      },
+      {
+        worktreeId: ids.worktrees.iosMain,
+        preparationId: "preparation-ios-xcconfig",
+        definitionHash:
+          "write-10cef5ae0574ec71bf4e9ed100535d6d6ad36d08cde2b5063a924cefa597ddfd",
+        state: "APPLIED",
+        checkedAt: minutesAgo(5),
+      },
+      {
+        worktreeId: ids.worktrees.iosMain,
+        preparationId: "preparation-ios-assume-secrets",
+        definitionHash: "assume-ios-secrets-v1",
+        state: "NOT_APPLICABLE",
+        message: "Path is missing or untracked",
+        checkedAt: minutesAgo(5),
+      },
+    ],
+  });
+
   // Tag colors go through the same palette-name lookup as highlights, so they are names too.
   await prisma.worktreeTag.createMany({
     data: [

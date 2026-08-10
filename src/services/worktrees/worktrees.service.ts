@@ -20,6 +20,9 @@ import {
   WORKTREE_MOVE_CHECKOUT_JOB_KIND,
   WORKTREE_MOVE_PUSH_JOB_KIND,
   WORKTREE_OPERATION_JOB_KIND,
+  WORKTREE_PREPARATION_JOB_KIND,
+  WORKTREE_PREPARATION_ACTIONS,
+  WORKTREE_PREPARATION_STATES,
   WORKTREE_OPERATIONS,
   WORKTREE_WATCH_JOB_KIND,
   type CodebaseWorktreeReport,
@@ -28,6 +31,8 @@ import {
   type WorktreeEditorVariant,
   type WorktreeGitOperation,
   type WorktreeOperation,
+  type WorktreePreparationAction,
+  type WorktreePreparationState,
   type WorktreeDiffScope,
 } from "@ai-development-environment/agent-contract/worktrees";
 
@@ -71,6 +76,7 @@ import type {
 import type { SkillsService } from "@/services/skills";
 import type { WorkflowEventsService } from "@/services/workflows/workflow-events.service";
 import { buildOutOfDate } from "@/services/builds/build-freshness";
+import { overallPreparationState, preparationPayload } from "./preparations";
 
 const SETTINGS_ID = "default";
 const ACTIVE_STATUSES = ["QUEUED", "RUNNING"];
@@ -83,6 +89,7 @@ const ACTIVE_WORKTREE_GIT_JOB_KINDS = [
   WORKTREE_MOVE_PUSH_JOB_KIND,
   WORKTREE_MOVE_CHECKOUT_JOB_KIND,
   WORKTREE_DELETE_JOB_KIND,
+  WORKTREE_PREPARATION_JOB_KIND,
 ];
 const ACTIVE_WORKTREE_GIT_JOB_KIND_SET = new Set(ACTIVE_WORKTREE_GIT_JOB_KINDS);
 const ACTIVE_BUILD_STATUSES = ["QUEUED", "PREPARING", "RUNNING"];
@@ -244,7 +251,10 @@ export type WorktreeBranchSelection = {
 };
 
 type RunnableCodebase = Prisma.CodebaseGetPayload<{
-  include: { agent: true; repository: true };
+  include: {
+    agent: true;
+    repository: { include: { preparations: true } };
+  };
 }>;
 
 function online(agent: {
@@ -532,6 +542,194 @@ export class WorktreesService {
       WORKTREE_DELETE_JOB_KIND,
       (job) => this.projectDeleteOperation(job),
     );
+    this.agentControl.registerCompletionHandler(
+      WORKTREE_PREPARATION_JOB_KIND,
+      (job) => this.projectPreparationOperation(job),
+    );
+  }
+
+  async preparationOverview() {
+    const prisma = await getPrismaClient();
+    const [repositories, worktrees, statuses, activeJobs] = await Promise.all([
+      prisma.codebaseRepository.findMany({
+        where: { codebases: { some: {} } },
+        include: {
+          preparations: { orderBy: [{ kind: "asc" }, { path: "asc" }] },
+        },
+        orderBy: [{ name: "asc" }, { canonicalOrigin: "asc" }],
+      }),
+      prisma.worktree.findMany({
+        include: worktreeInclude,
+        orderBy: [
+          { codebase: { repository: { name: "asc" } } },
+          { codebase: { agent: { name: "asc" } } },
+          { primary: "desc" },
+          { branch: "asc" },
+          { folder: "asc" },
+        ],
+      }),
+      prisma.worktreePreparationStatus.findMany(),
+      prisma.agentJob.findMany({
+        where: {
+          kind: WORKTREE_PREPARATION_JOB_KIND,
+          status: { in: ACTIVE_STATUSES },
+          worktreeId: { not: null },
+        },
+        orderBy: { createdAt: "desc" },
+      }),
+    ]);
+    const statusMap = new Map(
+      statuses.map((status) => [
+        `${status.worktreeId}\0${status.preparationId}`,
+        status,
+      ]),
+    );
+    const activeMap = new Map(
+      activeJobs.flatMap((job) =>
+        job.worktreeId ? [[job.worktreeId, job] as const] : [],
+      ),
+    );
+    const worktreesByRepository = new Map<string, WorktreeRecord[]>();
+    for (const worktree of worktrees) {
+      const repositoryId = worktree.codebase.repositoryId;
+      worktreesByRepository.set(repositoryId, [
+        ...(worktreesByRepository.get(repositoryId) ?? []),
+        worktree,
+      ]);
+    }
+    return {
+      repositories: repositories.map((repository) => ({
+        repository,
+        worktrees: (worktreesByRepository.get(repository.id) ?? []).map(
+          (worktree) => {
+            const supported =
+              !worktree.missingAt &&
+              worktree.availability === "AVAILABLE" &&
+              online(worktree.codebase.agent) &&
+              capabilities(worktree.codebase.agent).includes(
+                WORKTREE_PREPARATION_JOB_KIND,
+              );
+            const fileStatuses = repository.preparations.map((preparation) => {
+              const current = statusMap.get(
+                `${worktree.id}\0${preparation.id}`,
+              );
+              const currentState =
+                current?.definitionHash === preparation.definitionHash
+                  ? (current.state as WorktreePreparationState)
+                  : "PENDING";
+              return {
+                preparation,
+                state: currentState,
+                message: current?.message ?? null,
+                checkedAt:
+                  current?.definitionHash === preparation.definitionHash
+                    ? current.checkedAt
+                    : null,
+              };
+            });
+            return {
+              worktree: this.view(worktree),
+              supported,
+              unsupportedReason: supported
+                ? null
+                : worktree.missingAt || worktree.availability !== "AVAILABLE"
+                  ? "Worktree is unavailable"
+                  : !online(worktree.codebase.agent)
+                    ? "Agent is offline"
+                    : "Agent must be updated to use preparations",
+              overallState: overallPreparationState(
+                fileStatuses.map((status) => status.state),
+              ),
+              statuses: fileStatuses,
+              activeJob: activeMap.get(worktree.id) ?? null,
+            };
+          },
+        ),
+      })),
+    };
+  }
+
+  async runPreparations(
+    worktreeIds: string[],
+    action: WorktreePreparationAction,
+    requestId: string,
+  ) {
+    if (!requestId.trim()) throw new Error("requestId is required");
+    if (!WORKTREE_PREPARATION_ACTIONS.includes(action)) {
+      throw new Error("Unknown preparation action");
+    }
+    const ids = [...new Set(worktreeIds)];
+    if (ids.length !== worktreeIds.length || ids.length > 500) {
+      throw new Error(
+        "worktreeIds must be unique and contain at most 500 values",
+      );
+    }
+    const prisma = await getPrismaClient();
+    const worktrees = await prisma.worktree.findMany({
+      where: { id: { in: ids } },
+      include: {
+        codebase: {
+          include: {
+            agent: true,
+            repository: { include: { preparations: true } },
+          },
+        },
+      },
+    });
+    const byId = new Map(worktrees.map((worktree) => [worktree.id, worktree]));
+    const jobs = [];
+    const skipped: Array<{ worktreeId: string; reason: string }> = [];
+    for (const id of ids) {
+      const worktree = byId.get(id);
+      let reason: string | null = null;
+      if (
+        !worktree ||
+        worktree.missingAt ||
+        worktree.availability !== "AVAILABLE"
+      ) {
+        reason = "Worktree is unavailable";
+      } else if (!online(worktree.codebase.agent)) {
+        reason = "Agent is offline";
+      } else if (
+        !capabilities(worktree.codebase.agent).includes(
+          WORKTREE_PREPARATION_JOB_KIND,
+        )
+      ) {
+        reason = "Agent must be updated to use preparations";
+      }
+      if (reason || !worktree) {
+        skipped.push({
+          worktreeId: id,
+          reason: reason ?? "Worktree not found",
+        });
+        continue;
+      }
+      try {
+        jobs.push(
+          await this.agentControl.createJob({
+            agentId: worktree.codebase.agentId,
+            worktreeId: worktree.id,
+            kind: WORKTREE_PREPARATION_JOB_KIND,
+            payload: {
+              ...this.payload(worktree),
+              action,
+              preparations:
+                worktree.codebase.repository.preparations.map(
+                  preparationPayload,
+                ),
+            },
+            idempotencyKey: `worktree:prepare:${action.toLowerCase()}:${requestId}:${id}`,
+            timeoutSeconds: 600,
+          }),
+        );
+      } catch (error) {
+        skipped.push({
+          worktreeId: id,
+          reason: error instanceof Error ? error.message : String(error),
+        });
+      }
+    }
+    return { jobs, skipped };
   }
 
   async settings() {
@@ -1731,7 +1929,7 @@ export class WorktreesService {
   }
 
   private async ticketBranch(
-    codebase: RunnableCodebase,
+    codebase: { repositoryId: string },
     ticketKeyValue: string | null | undefined,
     currentBranch: string | null,
   ) {
@@ -2065,6 +2263,9 @@ export class WorktreesService {
         mode: resolved.mode,
         candidates: resolved.candidates,
         stashOnFailure: false,
+        preparations: (codebase.repository.preparations ?? []).map(
+          preparationPayload,
+        ),
       },
       idempotencyKey: `worktree:branch:create:${input.requestId}:${codebase.id}`,
       timeoutSeconds: 600,
@@ -2102,6 +2303,7 @@ export class WorktreesService {
         mode: resolved.mode,
         candidates: resolved.candidates,
         stashOnFailure: Boolean(input.stashOnFailure),
+        preparations: [],
       },
       idempotencyKey: `worktree:branch:change:${input.requestId}:${worktree.id}`,
       timeoutSeconds: 600,
@@ -2586,6 +2788,7 @@ export class WorktreesService {
     id: string,
     operation: WorktreeOperation,
     requestId: string,
+    forcePreparations = false,
   ) {
     if (!WORKTREE_OPERATIONS.includes(operation))
       throw new Error("Unknown worktree operation");
@@ -2594,6 +2797,15 @@ export class WorktreesService {
       WORKTREE_OPERATION_JOB_KIND,
     );
     const settings = await this.settings();
+    const preparations = worktree.codebase.repository.preparations ?? [];
+    if (
+      preparations.length > 0 &&
+      !capabilities(worktree.codebase.agent).includes(
+        WORKTREE_PREPARATION_JOB_KIND,
+      )
+    ) {
+      throw new Error("Agent must be updated to use repository preparations");
+    }
     return this.agentControl.createJob({
       agentId: worktree.codebase.agentId,
       codebaseId: worktree.codebaseId,
@@ -2602,6 +2814,8 @@ export class WorktreesService {
       payload: {
         ...this.payload(worktree),
         operation,
+        forcePreparations,
+        preparations: preparations.map(preparationPayload),
         ...(operation === "OPEN_EDITOR"
           ? { editorVariant: settings.editorVariant }
           : {}),
@@ -2652,6 +2866,7 @@ export class WorktreesService {
     phase: WorktreeAutoSyncPhase,
     expectedBranch: string,
     requestId: string,
+    forcePreparations = false,
   ) {
     const worktree = await this.requireRunnable(
       id,
@@ -2660,6 +2875,14 @@ export class WorktreesService {
     const payload = this.payload(worktree);
     if (!payload.baseBranch)
       throw new Error("Auto Sync requires a base branch");
+    if (
+      (worktree.codebase.repository.preparations?.length ?? 0) > 0 &&
+      !capabilities(worktree.codebase.agent).includes(
+        WORKTREE_PREPARATION_JOB_KIND,
+      )
+    ) {
+      throw new Error("Agent must be updated to use repository preparations");
+    }
     return this.agentControl.createJob({
       agentId: worktree.codebase.agentId,
       codebaseId: worktree.codebaseId,
@@ -2670,6 +2893,10 @@ export class WorktreesService {
         expectedBranch,
         baseBranch: payload.baseBranch,
         phase,
+        forcePreparations,
+        preparations: (worktree.codebase.repository.preparations ?? []).map(
+          preparationPayload,
+        ),
       },
       idempotencyKey: `worktree:auto-sync:${phase.toLowerCase()}:${requestId}:${id}`,
       timeoutSeconds: 600,
@@ -2840,7 +3067,12 @@ export class WorktreesService {
     const worktree = await prisma.worktree.findUnique({
       where: { id },
       include: {
-        codebase: { include: { agent: true, repository: true } },
+        codebase: {
+          include: {
+            agent: true,
+            repository: { include: { preparations: true } },
+          },
+        },
       },
     });
     if (
@@ -2884,7 +3116,10 @@ export class WorktreesService {
     const prisma = await getPrismaClient();
     const codebase = await prisma.codebase.findUnique({
       where: { id },
-      include: { agent: true, repository: true },
+      include: {
+        agent: true,
+        repository: { include: { preparations: true } },
+      },
     });
     if (!codebase || codebase.availability !== "AVAILABLE") {
       throw new Error("Codebase is unavailable");
@@ -2892,6 +3127,12 @@ export class WorktreesService {
     if (!online(codebase.agent)) throw new Error("Agent is offline");
     if (!capabilities(codebase.agent).includes(capability)) {
       throw new Error("Agent must be updated to create or change worktrees");
+    }
+    if (
+      (codebase.repository.preparations?.length ?? 0) > 0 &&
+      !capabilities(codebase.agent).includes(WORKTREE_PREPARATION_JOB_KIND)
+    ) {
+      throw new Error("Agent must be updated to apply repository preparations");
     }
     const [active, activeMove] = await Promise.all([
       prisma.agentJob.findFirst({
@@ -3101,12 +3342,23 @@ export class WorktreesService {
     const prisma = await getPrismaClient();
     const target = await prisma.codebase.findUnique({
       where: { id: move.targetCodebaseId },
-      include: { agent: true, repository: true },
+      include: {
+        agent: true,
+        repository: { include: { preparations: true } },
+      },
     });
     if (!target) throw new Error("Destination codebase no longer exists");
     if (!online(target.agent)) throw new Error("Destination agent is offline");
     if (!capabilities(target.agent).includes(WORKTREE_MOVE_CHECKOUT_JOB_KIND)) {
       throw new Error("Destination agent must be updated to move worktrees");
+    }
+    if (
+      (target.repository.preparations?.length ?? 0) > 0 &&
+      !capabilities(target.agent).includes(WORKTREE_PREPARATION_JOB_KIND)
+    ) {
+      throw new Error(
+        "Destination agent must be updated to apply preparations",
+      );
     }
     const targetWorktree = move.targetWorktreeId
       ? await prisma.worktree.findFirst({
@@ -3138,6 +3390,9 @@ export class WorktreesService {
         baseBranch: move.baseBranch,
         mode: move.destinationMode,
         stashOnFailure,
+        preparations: (target.repository.preparations ?? []).map(
+          preparationPayload,
+        ),
       },
       idempotencyKey: `worktree:move:checkout:${move.id}:${
         stashOnFailure ? "stash" : "initial"
@@ -3397,7 +3652,11 @@ export class WorktreesService {
       );
       return;
     }
-    await this.projectMoveDestination(move, result.worktree);
+    const targetWorktreeId = await this.projectMoveDestination(
+      move,
+      result.worktree,
+    );
+    await this.projectPreparationResults(targetWorktreeId, job.resultJson!);
     if (move.deleteSource) {
       await this.scheduleMoveCleanup(move.id);
     } else {
@@ -3476,8 +3735,9 @@ export class WorktreesService {
     resultJson: string | null;
     status: string;
   }) {
-    if (!job.worktreeId || job.status !== "SUCCEEDED" || !job.resultJson)
-      return;
+    if (!job.worktreeId || !job.resultJson) return;
+    await this.projectPreparationResults(job.worktreeId, job.resultJson);
+    if (job.status !== "SUCCEEDED") return;
     const result = resultObject({ ...job, error: null });
     if (!result.worktree) return;
     const item = parseWorktreeInventoryItem(result.worktree);
@@ -3582,11 +3842,90 @@ export class WorktreesService {
       worktreeId = projected.id;
     });
     this.publish(worktreeId ?? null, job.codebaseId);
+    if (worktreeId) {
+      await this.projectPreparationResults(worktreeId, job.resultJson);
+    }
     if (!job.worktreeId && worktreeId) {
       await this.recordWorktreeCreated(worktreeId);
     }
     await this.skillsService?.requestAutoReconcile();
     if (job.worktreeId) await this.restartWatch(job.worktreeId);
+  }
+
+  private async projectPreparationOperation(job: {
+    worktreeId: string | null;
+    resultJson: string | null;
+  }) {
+    if (!job.worktreeId || !job.resultJson) return;
+    await this.projectPreparationResults(job.worktreeId, job.resultJson);
+    const prisma = await getPrismaClient();
+    const worktree = await prisma.worktree.findUnique({
+      where: { id: job.worktreeId },
+      select: { codebaseId: true },
+    });
+    this.publish(job.worktreeId, worktree?.codebaseId ?? null);
+  }
+
+  private async projectPreparationResults(
+    worktreeId: string,
+    resultJson: string,
+  ): Promise<void> {
+    let value: unknown;
+    try {
+      value = JSON.parse(resultJson);
+    } catch {
+      return;
+    }
+    if (!value || typeof value !== "object" || Array.isArray(value)) return;
+    const result = value as Record<string, unknown>;
+    if (!Array.isArray(result.preparations)) return;
+    const checkedAt =
+      typeof result.checkedAt === "string" &&
+      !Number.isNaN(Date.parse(result.checkedAt))
+        ? new Date(result.checkedAt)
+        : new Date();
+    const prisma = await getPrismaClient();
+    for (const raw of result.preparations.slice(0, 500)) {
+      if (!raw || typeof raw !== "object" || Array.isArray(raw)) continue;
+      const item = raw as Record<string, unknown>;
+      if (
+        typeof item.id !== "string" ||
+        typeof item.definitionHash !== "string" ||
+        typeof item.state !== "string" ||
+        !WORKTREE_PREPARATION_STATES.includes(
+          item.state as WorktreePreparationState,
+        )
+      ) {
+        continue;
+      }
+      const exists = await prisma.codebaseRepositoryPreparation.findUnique({
+        where: { id: item.id },
+        select: { id: true },
+      });
+      if (!exists) continue;
+      await prisma.worktreePreparationStatus.upsert({
+        where: {
+          worktreeId_preparationId: {
+            worktreeId,
+            preparationId: item.id,
+          },
+        },
+        create: {
+          worktreeId,
+          preparationId: item.id,
+          definitionHash: item.definitionHash,
+          state: item.state,
+          message: typeof item.message === "string" ? item.message : null,
+          checkedAt,
+        },
+        update: {
+          definitionHash: item.definitionHash,
+          state: item.state,
+          message: typeof item.message === "string" ? item.message : null,
+          checkedAt,
+        },
+      });
+    }
   }
 
   private async recordWorktreeCreated(worktreeId: string): Promise<void> {

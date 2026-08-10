@@ -18,6 +18,7 @@ import {
   operateWorktree,
   watchWorktree,
 } from "./worktrees.js";
+import { executeWorktreePreparations } from "./worktree-preparations.js";
 
 registerWorktreeFixtures();
 
@@ -181,6 +182,95 @@ describe("worktree pull, sync, and rebase", () => {
       (await git(remote, "branch", "--list", "feature/rebase")).stdout.trim(),
     ).toBe("");
   }, 15_000);
+
+  test("reports preparation conflicts without changes, then force rebases and reapplies", async () => {
+    const folder = await repository();
+    const remote = await localRemote();
+    const remoteUrl = `ssh://git@example.test${remote}`;
+    await useHostedRemote(folder, remote, remoteUrl);
+    await git(folder, "config", "commit.gpgsign", "false");
+    await git(folder, "push", "-u", "origin", "main");
+    const linked = `${folder}-prepared-rebase`;
+    temporaryDirectories.push(linked);
+    await git(folder, "worktree", "add", "-b", "feature/prepared", linked);
+    await writeFile(join(linked, "feature.txt"), "feature\n");
+    await git(linked, "add", "feature.txt");
+    await git(linked, "commit", "-m", "Add feature");
+    const featureHead = (await git(linked, "rev-parse", "HEAD")).stdout.trim();
+    await writeFile(join(folder, "README.md"), "base change\n");
+    await git(folder, "add", "README.md");
+    await git(folder, "commit", "-m", "Change base readme");
+    await git(folder, "push", "origin", "main");
+    const baseHead = (await git(folder, "rev-parse", "HEAD")).stdout.trim();
+    const gitDirectory = await realpath(
+      (
+        await git(linked, "rev-parse", "--path-format=absolute", "--git-dir")
+      ).stdout.trim(),
+    );
+    const preparations = [
+      {
+        id: "prepared-readme",
+        kind: "WRITE" as const,
+        path: "README.md",
+        contentBase64: Buffer.from("local configuration\n").toString("base64"),
+        definitionHash: "prepared-readme-v1",
+      },
+    ];
+    await executeWorktreePreparations(
+      linked,
+      preparations,
+      "APPLY",
+      10_000,
+      new AbortController().signal,
+    );
+    const operation = {
+      codebaseId: "codebase-1",
+      folder: linked,
+      gitDirectory,
+      expectedOrigin: normalizeGitOrigin(remoteUrl).canonicalOrigin,
+      baseBranch: "main",
+      operation: "REBASE" as const,
+      preparations,
+    };
+
+    await expect(
+      operateWorktree(
+        operation,
+        10_000,
+        new AbortController().signal,
+        async () => undefined,
+      ),
+    ).resolves.toMatchObject({
+      outcome: "PREPARATION_CONFLICT",
+      preparationConflictPaths: ["README.md"],
+    });
+    expect((await git(linked, "rev-parse", "HEAD")).stdout.trim()).toBe(
+      featureHead,
+    );
+    expect(await readFile(join(linked, "README.md"), "utf8")).toBe(
+      "local configuration\n",
+    );
+
+    await expect(
+      operateWorktree(
+        { ...operation, forcePreparations: true },
+        10_000,
+        new AbortController().signal,
+        async () => undefined,
+      ),
+    ).resolves.toMatchObject({
+      outcome: "COMPLETED",
+      preparations: [{ id: "prepared-readme", state: "APPLIED" }],
+    });
+    expect((await git(linked, "rev-parse", "HEAD~1")).stdout.trim()).toBe(
+      baseHead,
+    );
+    expect(await readFile(join(linked, "README.md"), "utf8")).toBe(
+      "local configuration\n",
+    );
+    expect((await git(linked, "status", "--porcelain")).stdout).toBe("");
+  }, 20_000);
+
   test("retains a conflicted rebase until it is cancelled", async () => {
     const folder = await repository();
     const remote = await localRemote();
@@ -231,7 +321,10 @@ describe("worktree pull, sync, and rebase", () => {
         new AbortController().signal,
         async () => undefined,
       ),
-    ).rejects.toThrow();
+    ).resolves.toMatchObject({
+      outcome: "REBASE_CONFLICT",
+      preparationConflictPaths: ["README.md"],
+    });
     await vi.waitFor(
       () =>
         expect(reportWorktreeActivity).toHaveBeenCalledWith(

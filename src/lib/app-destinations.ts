@@ -429,6 +429,15 @@ export const APP_DESTINATIONS: AppDestination[] = [
     sidebar: true,
   },
   {
+    key: "prepare",
+    href: "/prepare",
+    labelKey: "prepare",
+    aliases: ["preparations", "worktree preparations"],
+    icon: Sparkles,
+    section: "system",
+    sidebar: true,
+  },
+  {
     key: "polling",
     href: "/polling",
     labelKey: "polling",
