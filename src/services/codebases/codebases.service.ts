@@ -24,6 +24,8 @@ import {
   DEFAULT_WORKTREE_FETCH_INTERVAL_SECONDS,
   MAX_WORKTREE_FETCH_INTERVAL_SECONDS,
   MIN_WORKTREE_FETCH_INTERVAL_SECONDS,
+  WORKTREE_PREPARATION_KINDS,
+  type WorktreePreparationKind,
 } from "@ai-development-environment/agent-contract/worktrees";
 
 import { getPrismaClient } from "@/data/prisma-client";
@@ -37,6 +39,15 @@ import {
   agentJobChangedTopic,
 } from "@/services/agent-control";
 import type { SkillsService } from "@/services/skills";
+import {
+  decodePreparationContents,
+  MAX_PREPARATION_TOTAL_BYTES,
+  MAX_REPOSITORY_PREPARATIONS,
+  normalizePreparationPath,
+  preparationContentSha256,
+  preparationDefinitionHash,
+  type SavePreparationInput,
+} from "@/services/worktrees/preparations";
 
 const INSPECTION_MAX_AGE_MS = 15 * 60_000;
 const INTERACTIVE_TIMEOUT_MS = 30_000;
@@ -147,6 +158,19 @@ export class CodebasesService {
           },
         },
       },
+    });
+  }
+
+  async repositoryPreparations(repositoryId: string) {
+    const prisma = await getPrismaClient();
+    const repository = await prisma.codebaseRepository.findUnique({
+      where: { id: repositoryId },
+      select: { id: true },
+    });
+    if (!repository) throw new Error("Repository not found");
+    return prisma.codebaseRepositoryPreparation.findMany({
+      where: { repositoryId },
+      orderBy: [{ kind: "asc" }, { path: "asc" }],
     });
   }
 
@@ -486,6 +510,153 @@ export class CodebasesService {
     }
     this.publish(null, id);
     return repository;
+  }
+
+  async saveRepositoryPreparations(
+    repositoryId: string,
+    inputs: SavePreparationInput[],
+  ) {
+    if (inputs.length > MAX_REPOSITORY_PREPARATIONS) {
+      throw new Error("A repository can have at most 500 preparations");
+    }
+    const prisma = await getPrismaClient();
+    const repository = await prisma.codebaseRepository.findUnique({
+      where: { id: repositoryId },
+      include: { preparations: { include: { statuses: true } } },
+    });
+    if (!repository) throw new Error("Repository not found");
+    const existing = new Map(
+      repository.preparations.map((preparation) => [
+        preparation.id,
+        preparation,
+      ]),
+    );
+    const seenIds = new Set<string>();
+    const seenPaths = new Set<string>();
+    let totalBytes = 0;
+    const normalized = inputs.map((input, index) => {
+      if (!WORKTREE_PREPARATION_KINDS.includes(input.kind)) {
+        throw new Error(`Preparation ${index + 1} has an invalid kind`);
+      }
+      const path = normalizePreparationPath(input.path);
+      if (seenPaths.has(path)) {
+        throw new Error(`Preparation path ${path} is duplicated`);
+      }
+      seenPaths.add(path);
+      const id = input.id?.trim() || null;
+      const current = id ? existing.get(id) : null;
+      if (id && !current) {
+        throw new Error(`Preparation ${id} does not belong to this repository`);
+      }
+      if (id && seenIds.has(id)) {
+        throw new Error(`Preparation ${id} is duplicated`);
+      }
+      if (id) seenIds.add(id);
+      let contents: Buffer | null = null;
+      if (input.kind === "WRITE") {
+        contents =
+          input.contentBase64 !== null && input.contentBase64 !== undefined
+            ? decodePreparationContents(input.contentBase64)
+            : current?.kind === "WRITE" && current.contents
+              ? Buffer.from(current.contents)
+              : null;
+        if (contents === null) {
+          throw new Error(`Uploaded contents are required for ${path}`);
+        }
+        totalBytes += contents.byteLength;
+      } else if (
+        input.contentBase64 !== null &&
+        input.contentBase64 !== undefined
+      ) {
+        throw new Error(
+          `Uploaded contents are only supported for write preparations`,
+        );
+      }
+      return {
+        id,
+        kind: input.kind as WorktreePreparationKind,
+        path,
+        contents,
+        definitionHash: preparationDefinitionHash({
+          kind: input.kind,
+          path,
+          contents,
+        }),
+      };
+    });
+    if (totalBytes > MAX_PREPARATION_TOTAL_BYTES) {
+      throw new Error(
+        "Repository preparation uploads must total 20 MiB or less",
+      );
+    }
+
+    const needsCleanup = repository.preparations.filter((preparation) => {
+      const retained = normalized.find((input) => input.id === preparation.id);
+      if (
+        retained &&
+        retained.kind === preparation.kind &&
+        retained.path === preparation.path
+      ) {
+        return false;
+      }
+      return (
+        preparation.statuses?.some(
+          (status) =>
+            status.state !== "UNDONE" && status.state !== "NOT_APPLICABLE",
+        ) ?? false
+      );
+    });
+    if (needsCleanup.length > 0) {
+      throw new Error(
+        `Undo preparation ${needsCleanup[0]!.path} on all worktrees before removing or moving it`,
+      );
+    }
+
+    await prisma.$transaction(async (transaction) => {
+      const retainedIds = normalized.flatMap((input) =>
+        input.id ? [input.id] : [],
+      );
+      await transaction.codebaseRepositoryPreparation.deleteMany({
+        where: {
+          repositoryId,
+          ...(retainedIds.length ? { id: { notIn: retainedIds } } : {}),
+        },
+      });
+      for (const input of normalized) {
+        const current = input.id ? existing.get(input.id) : null;
+        if (current && current.path !== input.path) {
+          await transaction.codebaseRepositoryPreparation.update({
+            where: { id: current.id },
+            data: { path: `.aide-preparation-replacement/${randomUUID()}` },
+          });
+        }
+      }
+      for (const input of normalized) {
+        const id = input.id ?? randomUUID();
+        const data = {
+          kind: input.kind,
+          path: input.path,
+          contents: input.contents ? Uint8Array.from(input.contents) : null,
+          contentSha256: input.contents
+            ? preparationContentSha256(input.contents)
+            : null,
+          byteCount: input.contents?.byteLength ?? null,
+          definitionHash: input.definitionHash,
+        };
+        if (input.id) {
+          await transaction.codebaseRepositoryPreparation.update({
+            where: { id },
+            data,
+          });
+        } else {
+          await transaction.codebaseRepositoryPreparation.create({
+            data: { id, repositoryId, ...data },
+          });
+        }
+      }
+    });
+    this.publish(null, repositoryId);
+    return this.repositoryDetail(repositoryId);
   }
 
   async removeCodebase(id: string) {

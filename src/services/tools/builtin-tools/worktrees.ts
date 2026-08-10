@@ -3,6 +3,7 @@ import * as z from "zod/v4";
 import {
   WORKTREE_GIT_OPERATIONS,
   WORKTREE_OPERATIONS,
+  WORKTREE_PREPARATION_ACTIONS,
 } from "@ai-development-environment/agent-contract/worktrees";
 
 import type { WorktreesService } from "@/services/worktrees";
@@ -27,6 +28,71 @@ const selection = z.object({
   baseBranch: z.string().min(1),
 });
 
+const preparationActionInput = z.object({
+  worktreeIds: z.array(z.string().min(1)).max(500),
+  action: z.enum(WORKTREE_PREPARATION_ACTIONS),
+  requestId: z.string().min(1),
+});
+const preparationMetadataSchema = z.object({
+  id: z.string(),
+  kind: z.enum(["WRITE", "DELETE", "ASSUME_UNCHANGED"]),
+  path: z.string(),
+  contentSha256: z.string().nullable(),
+  byteCount: z.number().int().nonnegative().nullable(),
+  definitionHash: z.string(),
+});
+const preparationOverviewSchema = z.object({
+  repositories: z.array(
+    z.object({
+      repository: z.object({
+        id: z.string(),
+        name: z.string(),
+        canonicalOrigin: z.string(),
+        displayOrigin: z.string(),
+      }),
+      preparations: z.array(preparationMetadataSchema),
+      worktrees: z.array(
+        z.object({
+          worktree: z.object({
+            id: z.string(),
+            codebaseId: z.string(),
+            folder: z.string(),
+            relativePath: z.string(),
+            branch: z.string().nullable(),
+            baseBranch: z.string().nullable(),
+            primary: z.boolean(),
+            availability: z.string(),
+            missingAt: z.string().nullable(),
+          }),
+          agent: z.object({
+            id: z.string(),
+            name: z.string(),
+            hostname: z.string(),
+            version: z.string(),
+          }),
+          supported: z.boolean(),
+          unsupportedReason: z.string().nullable(),
+          overallState: z.string(),
+          statuses: z.array(
+            z.object({
+              preparationId: z.string(),
+              kind: z.enum(["WRITE", "DELETE", "ASSUME_UNCHANGED"]),
+              path: z.string(),
+              definitionHash: z.string(),
+              state: z.string(),
+              message: z.string().nullable(),
+              checkedAt: z.string().nullable(),
+            }),
+          ),
+          activeJob: z
+            .object({ id: z.string(), status: z.string() })
+            .nullable(),
+        }),
+      ),
+    }),
+  ),
+});
+
 export function createWorktreeToolGroup(
   service: WorktreesService,
 ): BuiltInToolGroup {
@@ -45,6 +111,98 @@ export function createWorktreeToolGroup(
         method: "overview",
         arguments: () => [],
         resultKey: "overview",
+      }),
+      defineTool({
+        name: "get_worktree_preparation_overview",
+        title: "Get worktree preparation overview",
+        description:
+          "Get persisted per-file preparation status for every repository worktree, including unsupported and offline worktrees.",
+        inputSchema: emptyInput,
+        outputSchema: z.object({ overview: preparationOverviewSchema }),
+        handler: async () => {
+          const overview = await service.preparationOverview();
+          return {
+            overview: {
+              repositories: overview.repositories.map(
+                ({ repository, worktrees }) => ({
+                  repository: {
+                    id: repository.id,
+                    name: repository.name,
+                    canonicalOrigin: repository.canonicalOrigin,
+                    displayOrigin: repository.displayOrigin,
+                  },
+                  preparations: repository.preparations.map((preparation) => ({
+                    id: preparation.id,
+                    kind: preparation.kind as
+                      "WRITE" | "DELETE" | "ASSUME_UNCHANGED",
+                    path: preparation.path,
+                    contentSha256: preparation.contentSha256,
+                    byteCount: preparation.byteCount,
+                    definitionHash: preparation.definitionHash,
+                  })),
+                  worktrees: worktrees.map((item) => ({
+                    worktree: {
+                      id: item.worktree.id,
+                      codebaseId: item.worktree.codebaseId,
+                      folder: item.worktree.folder,
+                      relativePath: item.worktree.relativePath,
+                      branch: item.worktree.branch,
+                      baseBranch: item.worktree.baseBranch,
+                      primary: item.worktree.primary,
+                      availability: item.worktree.availability,
+                      missingAt: item.worktree.missingAt?.toISOString() ?? null,
+                    },
+                    agent: {
+                      id: item.agent.id,
+                      name: item.agent.name,
+                      hostname: item.agent.hostname,
+                      version: item.agent.version,
+                    },
+                    supported: item.supported,
+                    unsupportedReason: item.unsupportedReason,
+                    overallState: item.overallState,
+                    statuses: item.statuses.map((status) => ({
+                      preparationId: status.preparation.id,
+                      kind: status.preparation.kind as
+                        "WRITE" | "DELETE" | "ASSUME_UNCHANGED",
+                      path: status.preparation.path,
+                      definitionHash: status.preparation.definitionHash,
+                      state: status.state,
+                      message: status.message,
+                      checkedAt: status.checkedAt?.toISOString() ?? null,
+                    })),
+                    activeJob: item.activeJob
+                      ? {
+                          id: item.activeJob.id,
+                          status: item.activeJob.status,
+                        }
+                      : null,
+                  })),
+                }),
+              ),
+            },
+          };
+        },
+      }),
+      defineTool({
+        name: "run_worktree_preparations",
+        title: "Run worktree preparations",
+        description:
+          "Inspect, apply, or undo repository preparations for up to 500 worktrees. Returns dispatched jobs and explicit skip reasons.",
+        inputSchema: preparationActionInput,
+        outputSchema: z.object({
+          jobs: z.array(z.unknown()),
+          skipped: z.array(
+            z.object({ worktreeId: z.string(), reason: z.string() }),
+          ),
+        }),
+        handler: (value) =>
+          service.runPreparations(
+            value.worktreeIds,
+            value.action,
+            value.requestId,
+          ),
+        annotations: DESTRUCTIVE_ANNOTATIONS,
       }),
       defineTool({
         name: "get_worktree",
@@ -237,6 +395,7 @@ export function createWorktreeToolGroup(
         // exist instead of guessing and being turned away by the service.
         inputSchema: requestInput.extend({
           operation: z.enum(WORKTREE_OPERATIONS),
+          forcePreparations: z.boolean().default(false),
         }),
         service,
         method: "runOperation",
@@ -244,6 +403,7 @@ export function createWorktreeToolGroup(
           value.worktreeId,
           value.operation,
           value.requestId,
+          value.forcePreparations,
         ],
         resultKey: "job",
         annotations: WRITE_ANNOTATIONS,

@@ -10,6 +10,19 @@ function context(agentId: string | null): GraphQLContext {
 }
 
 describe("codebase Git management resolvers", () => {
+  test("exposes write preparation contents as base64 for repository editing", () => {
+    const resolvers = createCodebaseResolvers({} as CodebasesService);
+
+    expect(
+      resolvers.RepositoryPreparation.contentBase64({
+        contents: Uint8Array.from([0, 1, 2, 255]),
+      }),
+    ).toBe("AAEC/w==");
+    expect(
+      resolvers.RepositoryPreparation.contentBase64({ contents: null }),
+    ).toBeNull();
+  });
+
   test("exposes detail, live inspection, and operation scheduling to the control plane", async () => {
     const service = {
       detail: vi.fn().mockResolvedValue({ id: "codebase-1" }),

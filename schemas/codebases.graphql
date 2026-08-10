@@ -46,6 +46,40 @@ enum CodebaseGitOperation {
   DELETE_STASH
 }
 
+"Kinds of repository preparation applied to worktrees."
+enum RepositoryPreparationKind {
+  "Writes uploaded bytes to the configured path."
+  WRITE
+  "Removes the configured path."
+  DELETE
+  "Marks a tracked path assumed unchanged without changing its contents."
+  ASSUME_UNCHANGED
+}
+
+"A repository preparation definition."
+type RepositoryPreparation {
+  "Stable identifier for this preparation."
+  id: ID!
+  "Identifier of the repository that owns this preparation."
+  repositoryId: ID!
+  "The operation performed for this preparation."
+  kind: RepositoryPreparationKind!
+  "Exact repository-relative POSIX file path."
+  path: String!
+  "SHA-256 of uploaded contents for write preparations."
+  contentSha256: String
+  "Uploaded content size for write preparations."
+  byteCount: Int
+  "Base64-encoded uploaded contents for write preparations."
+  contentBase64: String
+  "Hash of all behavior-affecting fields."
+  definitionHash: String!
+  "ISO 8601 timestamp when this preparation was created."
+  createdAt: String!
+  "ISO 8601 timestamp when this preparation was updated."
+  updatedAt: String!
+}
+
 "Represents a codebase repository in the GraphQL API."
 type CodebaseRepository {
   "Stable identifier for this codebase repository."
@@ -68,6 +102,8 @@ type CodebaseRepository {
   quickActionWorkflows: [Workflow!]!
   "Codebases associated with this codebase repository."
   codebases: [Codebase!]!
+  "Preparations applied to worktrees for this repository."
+  preparations: [RepositoryPreparation!]!
   "ISO 8601 timestamp when this codebase repository was created."
   createdAt: String!
   "ISO 8601 timestamp when this codebase repository was last updated."
@@ -388,6 +424,26 @@ input UpdateCodebaseRepositoryInput {
   skillGroupIds: [ID!]
 }
 
+"One preparation saved for a repository."
+input SaveRepositoryPreparationInput {
+  "Existing preparation identifier. Omit when adding a preparation."
+  id: ID
+  "The operation performed for this preparation."
+  kind: RepositoryPreparationKind!
+  "Exact repository-relative POSIX file path."
+  path: String!
+  "Base64-encoded bytes for a new or replaced write preparation."
+  contentBase64: String
+}
+
+"Values used to replace a repository's preparation definitions."
+input SaveCodebaseRepositoryPreparationsInput {
+  "Identifier of the repository to update."
+  repositoryId: ID!
+  "Complete desired preparation list."
+  preparations: [SaveRepositoryPreparationInput!]!
+}
+
 "Values used to update codebase settings."
 input UpdateCodebaseSettingsInput {
   "Refresh interval in seconds."
@@ -520,6 +576,11 @@ extend type Mutation {
   updateCodebaseRepository(
     "Values for the requested operation."
     input: UpdateCodebaseRepositoryInput!
+  ): CodebaseRepository!
+  "Replaces a repository's preparation definitions."
+  saveCodebaseRepositoryPreparations(
+    "Values for the requested operation."
+    input: SaveCodebaseRepositoryPreparationsInput!
   ): CodebaseRepository!
   "Updates codebase settings and returns the updated codebase settings."
   updateCodebaseSettings(

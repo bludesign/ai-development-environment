@@ -26,6 +26,7 @@ import { Spinner } from "@/components/ui/spinner";
 import { Link, useRouter } from "@/i18n/navigation";
 import { controlPlaneRequest } from "@/lib/control-plane-client";
 import { isRowActivation } from "@/lib/row-activation";
+import { cn } from "@/lib/utils";
 
 import type { AppDetailView } from "./app-detail-page";
 import { AppEditorDialog } from "./app-editor-dialog";
@@ -138,7 +139,23 @@ export function AppsPage() {
                     </Badge>
                   ))}
                 </div>
-                <div className="grid grid-cols-3 gap-3 text-center">
+                <div
+                  className={cn(
+                    "grid gap-3 text-center",
+                    app.counts.dirtyWorktrees > 0
+                      ? "grid-cols-4"
+                      : "grid-cols-3",
+                  )}
+                >
+                  {app.counts.dirtyWorktrees > 0 && (
+                    <AppListCount
+                      appId={app.id}
+                      destructive
+                      label={t("dirtyWorktrees")}
+                      value={app.counts.dirtyWorktrees}
+                      view="worktrees"
+                    />
+                  )}
                   <AppListCount
                     appId={app.id}
                     label={t("worktrees")}
@@ -188,19 +205,33 @@ function AppListCount({
   label,
   value,
   view,
+  destructive = false,
 }: {
   appId: string;
+  destructive?: boolean;
   label: string;
   value: number;
   view: AppDetailView;
 }) {
   return (
     <Link
-      className="block rounded-lg bg-muted/50 p-2 transition-colors hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
+      className={cn(
+        "block rounded-lg p-2 transition-colors focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none",
+        destructive
+          ? "bg-destructive/10 text-destructive hover:bg-destructive/15"
+          : "bg-muted/50 hover:bg-muted",
+      )}
       href={`/apps/${appId}?view=${view}`}
     >
       <div className="text-lg font-semibold tabular-nums">{value}</div>
-      <div className="text-xs text-muted-foreground">{label}</div>
+      <div
+        className={cn(
+          "text-xs",
+          destructive ? "text-destructive" : "text-muted-foreground",
+        )}
+      >
+        {label}
+      </div>
     </Link>
   );
 }

@@ -47,6 +47,12 @@ export type WorktreeAutoSync = {
   conflictWorkflowId: string | null;
   conflictWorkflowChoice: string | null;
   lastError: string | null;
+  pauseReason?:
+    | "PREPARATION_CONFLICT"
+    | "REBASE_CONFLICT"
+    | "BRANCH_CHANGED"
+    | "ERROR"
+    | null;
   lastSyncedAt: string | null;
   updatedAt: string;
 };

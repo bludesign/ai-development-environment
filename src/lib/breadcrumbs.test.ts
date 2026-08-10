@@ -11,6 +11,8 @@ const labels: Record<BreadcrumbLabelKey, string> = {
   actionsCache: "Actions Cache",
   agents: "Agents",
   analyticsEvents: "Analytics Events",
+  apiCache: "API Cache",
+  apiKeys: "API Keys",
   apps: "Apps",
   buildData: "Build Data",
   builds: "Builds",
@@ -30,12 +32,16 @@ const labels: Record<BreadcrumbLabelKey, string> = {
   entries: "Entries",
   groups: "Groups",
   github: "GitHub",
+  gitlab: "GitLab",
   jira: "Jira",
+  mergeRequests: "Merge Requests",
   new: "New",
   notifications: "Notifications",
   plans: "Plans",
+  pipelines: "Pipelines",
   polling: "Polling",
   provisioningProfiles: "Provisioning Profiles",
+  prepare: "Prepare",
   pullRequests: "Pull Requests",
   pushNotifications: "Push Notifications",
   repositories: "Repositories",
@@ -43,11 +49,13 @@ const labels: Record<BreadcrumbLabelKey, string> = {
   sessions: "Sessions",
   settings: "Settings",
   skills: "Skills",
+  status: "Status",
   sync: "Sync",
   tickets: "Tickets",
   tools: "Tools",
   unifiedEvents: "Unified View",
   usage: "Usage",
+  users: "Users",
   webhooks: "Webhooks",
   workflows: "Workflows",
   worktrees: "Worktrees",
@@ -93,6 +101,32 @@ describe("buildAppBreadcrumbs", () => {
     ]);
     expect(buildAppBreadcrumbs("/jira-cache", translate)).toEqual([
       { isCurrent: true, label: "Cache" },
+    ]);
+  });
+
+  test("localizes newer System destinations", () => {
+    expect(buildAppBreadcrumbs("/prepare", translate)).toEqual([
+      { isCurrent: true, label: "Prepare" },
+    ]);
+    expect(buildAppBreadcrumbs("/status", translate)).toEqual([
+      { isCurrent: true, label: "Status" },
+    ]);
+    expect(buildAppBreadcrumbs("/users", translate)).toEqual([
+      { isCurrent: true, label: "Users" },
+    ]);
+    expect(buildAppBreadcrumbs("/api-keys", translate)).toEqual([
+      { isCurrent: true, label: "API Keys" },
+    ]);
+  });
+
+  test("localizes nested GitLab destinations", () => {
+    expect(buildAppBreadcrumbs("/gitlab/merge-requests", translate)).toEqual([
+      { href: undefined, isCurrent: false, label: "GitLab" },
+      { isCurrent: true, label: "Merge Requests" },
+    ]);
+    expect(buildAppBreadcrumbs("/gitlab/cache", translate)).toEqual([
+      { href: undefined, isCurrent: false, label: "GitLab" },
+      { isCurrent: true, label: "API Cache" },
     ]);
   });
 

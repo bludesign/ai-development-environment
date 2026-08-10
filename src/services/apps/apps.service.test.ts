@@ -47,10 +47,12 @@ describe("AppsService", () => {
     const database = new Database(templateDatabasePath);
     database.pragma("foreign_keys = ON");
     const migrationsRoot = resolve(process.cwd(), "prisma/migrations");
-    for (const migration of readdirSync(migrationsRoot).toSorted()) {
-      const path = join(migrationsRoot, migration, "migration.sql");
-      if (existsSync(path)) database.exec(readFileSync(path, "utf8"));
-    }
+    database.transaction(() => {
+      for (const migration of readdirSync(migrationsRoot).toSorted()) {
+        const path = join(migrationsRoot, migration, "migration.sql");
+        if (existsSync(path)) database.exec(readFileSync(path, "utf8"));
+      }
+    })();
     database.close();
   }, 120_000);
 
@@ -108,6 +110,8 @@ describe("AppsService", () => {
         folder: "/tmp/web",
         relativePath: ".",
         primary: true,
+        hasStagedChanges: true,
+        hasUnstagedChanges: true,
       },
     });
     await prisma.agentRun.createMany({
@@ -181,6 +185,7 @@ describe("AppsService", () => {
       repositories: 2,
       codebases: 1,
       worktrees: 1,
+      dirtyWorktrees: 1,
       plans: 1,
       sessions: 1,
       builds: 1,
@@ -215,6 +220,7 @@ describe("AppsService", () => {
         repositories: 1,
         codebases: 0,
         worktrees: 0,
+        dirtyWorktrees: 0,
         plans: 1,
         sessions: 1,
         builds: 1,

@@ -54,12 +54,30 @@ function resultOutcome(resultJson: string | null): string | null {
   }
 }
 
+function resultPreparationConflictPaths(resultJson: string | null): string[] {
+  if (!resultJson) return [];
+  try {
+    const parsed: unknown = JSON.parse(resultJson);
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+      return [];
+    }
+    const paths = (parsed as { preparationConflictPaths?: unknown })
+      .preparationConflictPaths;
+    return Array.isArray(paths)
+      ? paths.filter((path): path is string => typeof path === "string")
+      : [];
+  } catch {
+    return [];
+  }
+}
+
 function syncView(rule: {
   worktreeId: string;
   state: string;
   conflictWorkflowId: string | null;
   conflictWorkflowChoice: string | null;
   lastError: string | null;
+  pauseReason: string | null;
   lastSyncedAt: Date | null;
   updatedAt: Date;
 }) {
@@ -69,6 +87,7 @@ function syncView(rule: {
     conflictWorkflowId: rule.conflictWorkflowId,
     conflictWorkflowChoice: rule.conflictWorkflowChoice,
     lastError: rule.lastError,
+    pauseReason: rule.pauseReason,
     lastSyncedAt: rule.lastSyncedAt?.toISOString() ?? null,
     updatedAt: rule.updatedAt.toISOString(),
   };
@@ -243,6 +262,7 @@ export class WorktreeAutomationService {
         activeJobId: null,
         workflowRunId: null,
         lastError: null,
+        pauseReason: null,
       },
     });
     this.worktrees.publishAutomationChange(worktree.id, worktree.codebaseId);
@@ -273,6 +293,7 @@ export class WorktreeAutomationService {
         activeJobId: null,
         workflowRunId: null,
         lastError: null,
+        pauseReason: null,
       },
     });
     this.worktrees.publishAutomationChange(worktreeId);
@@ -468,6 +489,41 @@ export class WorktreeAutomationService {
     }
   }
 
+  async forceAutoSync(worktreeId: string, requestId: string) {
+    if (!requestId.trim()) throw new Error("requestId is required");
+    const prisma = await getPrismaClient();
+    const rule = await prisma.worktreeAutoSync.findUnique({
+      where: { worktreeId },
+    });
+    if (
+      !rule ||
+      rule.state !== "PAUSED" ||
+      rule.pauseReason !== "PREPARATION_CONFLICT"
+    ) {
+      throw new Error("Auto Sync is not paused for a preparation conflict");
+    }
+    const job = await this.worktrees.createAutoSyncJob(
+      worktreeId,
+      "SYNC",
+      rule.branch,
+      requestId,
+      true,
+    );
+    await prisma.worktreeAutoSync.update({
+      where: { worktreeId },
+      data: {
+        state: "SYNCING",
+        activeJobId: job.id,
+        workflowRunId: null,
+        lastError: null,
+        pauseReason: null,
+      },
+    });
+    this.worktrees.publishAutomationChange(worktreeId);
+    this.changed();
+    return job;
+  }
+
   async cancelAutoMerge(worktreeId: string): Promise<boolean> {
     const prisma = await getPrismaClient();
     const rule = await prisma.worktreeAutoMerge.findUnique({
@@ -569,7 +625,12 @@ export class WorktreeAutomationService {
           );
           await prisma.worktreeAutoSync.update({
             where: { worktreeId: rule.worktreeId },
-            data: { state: "SYNCING", activeJobId: job.id, lastError: null },
+            data: {
+              state: "SYNCING",
+              activeJobId: job.id,
+              lastError: null,
+              pauseReason: null,
+            },
           });
           continue;
         }
@@ -596,6 +657,7 @@ export class WorktreeAutomationService {
               state: "SYNCING",
               activeJobId: job.id,
               workflowRunId: null,
+              pauseReason: null,
             },
           });
           continue;
@@ -607,11 +669,36 @@ export class WorktreeAutomationService {
           throw new Error(job.error || `Auto Sync ${job.status.toLowerCase()}`);
         }
         const outcome = resultOutcome(job.resultJson);
+        if (outcome === "PREPARATION_CONFLICT") {
+          const paths = resultPreparationConflictPaths(job.resultJson);
+          await prisma.worktreeAutoSync.update({
+            where: { worktreeId: rule.worktreeId },
+            data: {
+              state: "PAUSED",
+              activeJobId: null,
+              workflowRunId: null,
+              lastError:
+                "Auto Sync paused because repository preparations block the rebase" +
+                (paths.length ? `: ${paths.join(", ")}` : ""),
+              pauseReason: "PREPARATION_CONFLICT",
+            },
+          });
+          continue;
+        }
         if (outcome === "CONFLICT") {
           if (!rule.conflictWorkflowId) {
-            throw new Error(
-              "Auto Sync paused because the rebase has merge conflicts",
-            );
+            await prisma.worktreeAutoSync.update({
+              where: { worktreeId: rule.worktreeId },
+              data: {
+                state: "PAUSED",
+                activeJobId: null,
+                workflowRunId: null,
+                lastError:
+                  "Auto Sync paused because the rebase has merge conflicts",
+                pauseReason: "REBASE_CONFLICT",
+              },
+            });
+            continue;
           }
           const run = await this.workflows.trigger({
             workflowId: rule.conflictWorkflowId,
@@ -628,6 +715,7 @@ export class WorktreeAutomationService {
               activeJobId: null,
               workflowRunId: run.id,
               lastError: null,
+              pauseReason: null,
             },
           });
           continue;
@@ -647,6 +735,7 @@ export class WorktreeAutomationService {
             activeJobId: null,
             workflowRunId: null,
             lastError: null,
+            pauseReason: null,
             ...(outcome === "SYNCED" ? { lastSyncedAt: new Date() } : {}),
           },
         });
@@ -654,6 +743,9 @@ export class WorktreeAutomationService {
         const message = error instanceof Error ? error.message : String(error);
         const transient =
           /offline|busy|already has an active job|temporarily/i.test(message);
+        const pauseReason = /branch changed/i.test(message)
+          ? "BRANCH_CHANGED"
+          : "ERROR";
         await prisma.worktreeAutoSync.updateMany({
           where: { worktreeId: rule.worktreeId },
           data: {
@@ -661,6 +753,7 @@ export class WorktreeAutomationService {
             activeJobId: null,
             workflowRunId: null,
             lastError: message,
+            pauseReason: transient ? null : pauseReason,
           },
         });
       } finally {

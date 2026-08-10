@@ -7,6 +7,36 @@ import remarkGfm from "remark-gfm";
 import { configDefaults, defineConfig } from "vitest/config";
 
 const rootDirectory = path.dirname(fileURLToPath(import.meta.url));
+const sharedTestExcludes = [
+  ...configDefaults.exclude,
+  "packages/control-agent/**",
+  // Playwright owns everything under playwright/ (see testDir in playwright.config.ts).
+  // Its specs match Vitest's default `*.spec.ts` include, and loading them here makes
+  // test.describe() throw because Playwright's runner isn't the one executing them.
+  "playwright/**",
+  ".next/**",
+  // Screenshot builds copy source tests into this generated tree. Running them again
+  // makes local results depend on stale build output and duplicates those test files.
+  ".next-mock/**",
+  ".npm-staging/**",
+];
+const componentNodeTestIncludes = [
+  "src/components/agents/capability-payloads.test.ts",
+  "src/components/apps/app-summary-subscriptions.test.ts",
+  "src/components/auth/auth-form.test.ts",
+  "src/components/common/diff-view/parse-patch.test.ts",
+  "src/components/disk-space/types.test.ts",
+  "src/components/github/workflow-resource-context.test.ts",
+  "src/components/jira/description-history.test.ts",
+  "src/components/push-notifications/push-notifications-page.test.ts",
+  "src/components/signing-assets/apple-portal.test.ts",
+  "src/components/tools/mcp-preset-management.test.ts",
+  "src/components/usage/aggregate-usage.test.ts",
+  "src/components/usage/usage-cost-chart.test.ts",
+  "src/components/workflows/basic-layout.test.ts",
+  "src/components/workflows/config-fields/condition.test.ts",
+  "src/components/workflows/workflow-graph.test.ts",
+];
 
 // `server-only` throws when loaded outside Next's server export condition. Vitest does not
 // emulate that condition, so alias the bare specifier to an empty shim for tests only. The
@@ -61,20 +91,48 @@ export default defineConfig({
       TZ: "America/New_York",
       APP_SECRET: "zhDyTms26c9u15SUcFxkhS8S+dCRnouxjPbQMb/haB8=",
     },
-    environment: "jsdom",
     // The GitHub runners are slow enough that tests which finish in well under a
     // second locally were tripping Vitest's 5s default and failing the workflow.
     testTimeout: 20_000,
     hookTimeout: 20_000,
-    exclude: [
-      ...configDefaults.exclude,
-      "packages/control-agent/**",
-      // Playwright owns everything under playwright/ (see testDir in playwright.config.ts).
-      // Its specs match Vitest's default `*.spec.ts` include, and loading them here makes
-      // test.describe() throw because Playwright's runner isn't the one executing them.
-      "playwright/**",
-      ".next/**",
-      ".npm-staging/**",
+    exclude: sharedTestExcludes,
+    projects: [
+      {
+        extends: true,
+        test: {
+          name: "node",
+          environment: "node",
+          include: configDefaults.include,
+          exclude: [
+            ...sharedTestExcludes,
+            "src/components/**",
+            "src/app/**/*.test.tsx",
+          ],
+        },
+      },
+      {
+        extends: true,
+        test: {
+          name: "component-node",
+          environment: "node",
+          pool: "threads",
+          include: componentNodeTestIncludes,
+          exclude: sharedTestExcludes,
+        },
+      },
+      {
+        extends: true,
+        test: {
+          name: "jsdom",
+          environment: "jsdom",
+          pool: "threads",
+          include: [
+            "src/components/**/*.test.{ts,tsx}",
+            "src/app/**/*.test.tsx",
+          ],
+          exclude: [...sharedTestExcludes, ...componentNodeTestIncludes],
+        },
+      },
     ],
     coverage: {
       provider: "v8",

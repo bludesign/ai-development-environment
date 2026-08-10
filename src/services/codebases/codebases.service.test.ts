@@ -18,6 +18,7 @@ import {
 } from "@/services/agent-control";
 
 import { CodebasesService } from "./codebases.service";
+import { preparationDefinitionHash } from "../worktrees/preparations";
 
 function control() {
   return {
@@ -93,6 +94,221 @@ describe("CodebasesService", () => {
           }),
         }),
       }),
+    );
+  });
+
+  test("atomically retains uploaded bytes and stable IDs while replacing preparations", async () => {
+    const contents = Buffer.from([0, 255, 4]);
+    const existing = {
+      id: "preparation-1",
+      repositoryId: "repository-1",
+      kind: "WRITE",
+      path: ".env.local",
+      contents: Uint8Array.from(contents),
+      contentSha256: "old",
+      byteCount: contents.byteLength,
+      definitionHash: preparationDefinitionHash({
+        kind: "WRITE",
+        path: ".env.local",
+        contents,
+      }),
+    };
+    const transaction = {
+      codebaseRepositoryPreparation: {
+        update: vi.fn().mockResolvedValue(existing),
+        create: vi.fn().mockResolvedValue({}),
+        deleteMany: vi.fn().mockResolvedValue({ count: 0 }),
+      },
+    };
+    const prisma = {
+      codebaseRepository: {
+        findUnique: vi.fn().mockResolvedValue({
+          id: "repository-1",
+          preparations: [existing],
+        }),
+      },
+      $transaction: vi.fn((callback) => callback(transaction)),
+    };
+    getPrismaClient.mockResolvedValue(prisma);
+    const service = new CodebasesService(control());
+    vi.spyOn(service, "repositoryDetail").mockResolvedValue({
+      id: "repository-1",
+    } as never);
+
+    await service.saveRepositoryPreparations("repository-1", [
+      {
+        id: "preparation-1",
+        kind: "WRITE",
+        path: ".env.local",
+      },
+      { kind: "DELETE", path: "tmp/debug.flag" },
+    ]);
+
+    expect(
+      transaction.codebaseRepositoryPreparation.update,
+    ).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { id: "preparation-1" },
+        data: expect.objectContaining({
+          contents: Uint8Array.from(contents),
+          byteCount: contents.byteLength,
+          definitionHash: existing.definitionHash,
+        }),
+      }),
+    );
+    expect(
+      transaction.codebaseRepositoryPreparation.create,
+    ).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          repositoryId: "repository-1",
+          kind: "DELETE",
+          path: "tmp/debug.flag",
+        }),
+      }),
+    );
+    expect(
+      transaction.codebaseRepositoryPreparation.deleteMany,
+    ).toHaveBeenCalledWith({
+      where: {
+        repositoryId: "repository-1",
+        id: { notIn: expect.arrayContaining(["preparation-1"]) },
+      },
+    });
+  });
+
+  test("rejects duplicate and unsafe preparation paths before writing", async () => {
+    getPrismaClient.mockResolvedValue({
+      codebaseRepository: {
+        findUnique: vi.fn().mockResolvedValue({
+          id: "repository-1",
+          preparations: [],
+        }),
+      },
+      $transaction: vi.fn(),
+    });
+    const service = new CodebasesService(control());
+
+    await expect(
+      service.saveRepositoryPreparations("repository-1", [
+        { kind: "DELETE", path: "config/local.json" },
+        { kind: "ASSUME_UNCHANGED", path: "config/local.json" },
+      ]),
+    ).rejects.toThrow("duplicated");
+    await expect(
+      service.saveRepositoryPreparations("repository-1", [
+        { kind: "DELETE", path: ".git/config" },
+      ]),
+    ).rejects.toThrow("exact repository-relative file path");
+  });
+
+  test("accepts an empty uploaded write and persists its hashes", async () => {
+    const create = vi.fn().mockResolvedValue({});
+    const transaction = {
+      codebaseRepositoryPreparation: {
+        update: vi.fn(),
+        create,
+        deleteMany: vi.fn().mockResolvedValue({ count: 0 }),
+      },
+    };
+    getPrismaClient.mockResolvedValue({
+      codebaseRepository: {
+        findUnique: vi.fn().mockResolvedValue({
+          id: "repository-1",
+          preparations: [],
+        }),
+      },
+      $transaction: vi.fn((callback) => callback(transaction)),
+    });
+    const service = new CodebasesService(control());
+    vi.spyOn(service, "repositoryDetail").mockResolvedValue({
+      id: "repository-1",
+    } as never);
+
+    await service.saveRepositoryPreparations("repository-1", [
+      { kind: "WRITE", path: "empty.txt", contentBase64: "" },
+    ]);
+
+    expect(create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          contents: Uint8Array.from([]),
+          byteCount: 0,
+          contentSha256: expect.any(String),
+        }),
+      }),
+    );
+  });
+
+  test("retains applied preparations until every worktree has undone them", async () => {
+    const transaction = vi.fn();
+    getPrismaClient.mockResolvedValue({
+      codebaseRepository: {
+        findUnique: vi.fn().mockResolvedValue({
+          id: "repository-1",
+          preparations: [
+            {
+              id: "preparation-1",
+              repositoryId: "repository-1",
+              kind: "DELETE",
+              path: "local.txt",
+              contents: null,
+              statuses: [{ state: "APPLIED" }],
+            },
+          ],
+        }),
+      },
+      $transaction: transaction,
+    });
+
+    await expect(
+      new CodebasesService(control()).saveRepositoryPreparations(
+        "repository-1",
+        [],
+      ),
+    ).rejects.toThrow("Undo preparation local.txt");
+    expect(transaction).not.toHaveBeenCalled();
+  });
+
+  test("deletes omitted path conflicts before creating replacements", async () => {
+    const remove = vi.fn().mockResolvedValue({ count: 1 });
+    const create = vi.fn().mockResolvedValue({});
+    const transaction = {
+      codebaseRepositoryPreparation: {
+        update: vi.fn(),
+        create,
+        deleteMany: remove,
+      },
+    };
+    getPrismaClient.mockResolvedValue({
+      codebaseRepository: {
+        findUnique: vi.fn().mockResolvedValue({
+          id: "repository-1",
+          preparations: [
+            {
+              id: "old-preparation",
+              repositoryId: "repository-1",
+              kind: "DELETE",
+              path: "local.txt",
+              contents: null,
+              statuses: [{ state: "UNDONE" }],
+            },
+          ],
+        }),
+      },
+      $transaction: vi.fn((callback) => callback(transaction)),
+    });
+    const service = new CodebasesService(control());
+    vi.spyOn(service, "repositoryDetail").mockResolvedValue({
+      id: "repository-1",
+    } as never);
+
+    await service.saveRepositoryPreparations("repository-1", [
+      { kind: "WRITE", path: "local.txt", contentBase64: "" },
+    ]);
+
+    expect(remove.mock.invocationCallOrder[0]).toBeLessThan(
+      create.mock.invocationCallOrder[0]!,
     );
   });
 

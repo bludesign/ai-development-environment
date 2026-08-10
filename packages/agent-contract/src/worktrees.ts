@@ -8,6 +8,7 @@ export const WORKTREE_INSPECT_JOB_KIND = "worktree.inspect";
 export const WORKTREE_OPERATION_JOB_KIND = "worktree.operation";
 export const WORKTREE_COMMIT_JOB_KIND = "worktree.commit";
 export const WORKTREE_AUTO_SYNC_JOB_KIND = "worktree.auto-sync";
+export const WORKTREE_PREPARATION_JOB_KIND = "worktree.prepare";
 export const WORKTREE_GIT_INSPECT_JOB_KIND = "worktree.git.inspect";
 export const WORKTREE_GIT_OPERATION_JOB_KIND = "worktree.git.operation";
 export const WORKTREE_WATCH_JOB_KIND = "worktree.watch";
@@ -22,6 +23,7 @@ export const WORKTREE_JOB_KINDS = [
   WORKTREE_OPERATION_JOB_KIND,
   WORKTREE_COMMIT_JOB_KIND,
   WORKTREE_AUTO_SYNC_JOB_KIND,
+  WORKTREE_PREPARATION_JOB_KIND,
   WORKTREE_GIT_INSPECT_JOB_KIND,
   WORKTREE_GIT_OPERATION_JOB_KIND,
   WORKTREE_WATCH_JOB_KIND,
@@ -75,7 +77,40 @@ export const WORKTREE_OPERATIONS = [
 export type WorktreeOperation = (typeof WORKTREE_OPERATIONS)[number];
 export type WorktreeAutoSyncPhase = "SYNC" | "FINALIZE";
 export type WorktreeAutoSyncOutcome =
-  "NO_CHANGE" | "SYNCED" | "CONFLICT" | "UNRESOLVED";
+  "NO_CHANGE" | "SYNCED" | "CONFLICT" | "UNRESOLVED" | "PREPARATION_CONFLICT";
+export const WORKTREE_PREPARATION_KINDS = [
+  "WRITE",
+  "DELETE",
+  "ASSUME_UNCHANGED",
+] as const;
+export type WorktreePreparationKind =
+  (typeof WORKTREE_PREPARATION_KINDS)[number];
+export const WORKTREE_PREPARATION_ACTIONS = [
+  "INSPECT",
+  "APPLY",
+  "UNDO",
+] as const;
+export type WorktreePreparationAction =
+  (typeof WORKTREE_PREPARATION_ACTIONS)[number];
+export const WORKTREE_PREPARATION_STATES = [
+  "PENDING",
+  "APPLIED",
+  "UNDONE",
+  "DRIFTED",
+  "SUSPENDED",
+  "NOT_APPLICABLE",
+  "ERROR",
+  "UNKNOWN",
+] as const;
+export type WorktreePreparationState =
+  (typeof WORKTREE_PREPARATION_STATES)[number];
+export type WorktreePreparationDefinition = {
+  id: string;
+  kind: WorktreePreparationKind;
+  path: string;
+  contentBase64: string | null;
+  definitionHash: string;
+};
 export type WorktreeEditorVariant = "CODE" | "CODE_INSIDERS" | "NONE";
 export type WorktreeWatchAction = "START" | "STOP";
 export type WorktreeBranchAction = "CREATE" | "CHANGE";
@@ -275,15 +310,95 @@ function stashOid(value: unknown, name: string): string {
 
 function safeRelativePath(value: unknown, name: string): string {
   const path = stringValue(value, name).replaceAll("\\", "/");
+  const parts = path.split("/");
   if (
+    !path ||
+    path === "." ||
     path.startsWith("/") ||
     /^[A-Za-z]:\//.test(path) ||
-    path.split("/").includes("..") ||
-    path.includes("\0")
+    /[\0\r\n]/.test(path) ||
+    parts.some((part) => !part || part === "." || part === "..") ||
+    parts.some((part) => part.toLowerCase() === ".git")
   ) {
-    throw new Error(`${name} must stay within the worktree`);
+    throw new Error(`${name} must be an exact file inside the worktree`);
   }
   return path;
+}
+
+function safePreparationPath(value: unknown, name: string): string {
+  const path = safeRelativePath(value, name);
+  if (/[*?[\]]/.test(path)) {
+    throw new Error(`${name} must be an exact file inside the worktree`);
+  }
+  return path;
+}
+
+function safeDiffPath(value: unknown, name: string): string {
+  try {
+    return safeRelativePath(value, name);
+  } catch {
+    throw new Error(`${name} must stay within the worktree`);
+  }
+}
+
+function preparationDefinitions(
+  value: unknown,
+  name: string,
+): WorktreePreparationDefinition[] {
+  if (!Array.isArray(value) || value.length > 500) {
+    throw new Error(`${name} must be an array with at most 500 items`);
+  }
+  const definitions = value.map((entry, index) => {
+    const item = objectValue(entry, `${name}[${index}]`);
+    const allowed = new Set([
+      "id",
+      "kind",
+      "path",
+      "contentBase64",
+      "definitionHash",
+    ]);
+    const unexpected = Object.keys(item).find((key) => !allowed.has(key));
+    if (unexpected) {
+      throw new Error(`Unexpected ${name}[${index}] field: ${unexpected}`);
+    }
+    if (
+      typeof item.kind !== "string" ||
+      !WORKTREE_PREPARATION_KINDS.includes(item.kind as WorktreePreparationKind)
+    ) {
+      throw new Error(`${name}[${index}].kind is invalid`);
+    }
+    const contentBase64 =
+      item.contentBase64 === null || item.contentBase64 === undefined
+        ? null
+        : typeof item.contentBase64 === "string"
+          ? item.contentBase64
+          : (() => {
+              throw new Error(
+                `${name}[${index}].contentBase64 must be a string`,
+              );
+            })();
+    if (item.kind === "WRITE" && contentBase64 === null) {
+      throw new Error(`${name}[${index}].contentBase64 is required`);
+    }
+    if (item.kind !== "WRITE" && contentBase64 !== null) {
+      throw new Error(`${name}[${index}].contentBase64 is not allowed`);
+    }
+    return {
+      id: stringValue(item.id, `${name}[${index}].id`),
+      kind: item.kind as WorktreePreparationKind,
+      path: safePreparationPath(item.path, `${name}[${index}].path`),
+      contentBase64,
+      definitionHash: stringValue(
+        item.definitionHash,
+        `${name}[${index}].definitionHash`,
+      ),
+    };
+  });
+  const paths = definitions.map((item) => item.path);
+  if (new Set(paths).size !== paths.length) {
+    throw new Error(`${name} paths must be unique`);
+  }
+  return definitions;
 }
 
 function nullableCount(value: unknown, name: string): number | null {
@@ -482,6 +597,7 @@ export function worktreeBranchJobPayload(value: unknown): {
   mode: WorktreeBranchJobMode;
   candidates: string[];
   stashOnFailure: boolean;
+  preparations: WorktreePreparationDefinition[];
 } {
   const payload = objectValue(value, "worktree branch payload");
   const allowed = new Set([
@@ -495,6 +611,7 @@ export function worktreeBranchJobPayload(value: unknown): {
     "mode",
     "candidates",
     "stashOnFailure",
+    "preparations",
   ]);
   const unexpected = Object.keys(payload).find((key) => !allowed.has(key));
   if (unexpected) {
@@ -565,6 +682,10 @@ export function worktreeBranchJobPayload(value: unknown): {
     mode: payload.mode,
     candidates,
     stashOnFailure: payload.stashOnFailure,
+    preparations: preparationDefinitions(
+      payload.preparations ?? [],
+      "worktree branch payload.preparations",
+    ),
   };
 }
 
@@ -633,6 +754,7 @@ export function worktreeMoveCheckoutJobPayload(value: unknown): {
   baseBranch: string;
   mode: WorktreeMoveDestinationMode;
   stashOnFailure: boolean;
+  preparations: WorktreePreparationDefinition[];
 } {
   const payload = objectValue(value, "worktree move checkout payload");
   const allowed = new Set([
@@ -647,6 +769,7 @@ export function worktreeMoveCheckoutJobPayload(value: unknown): {
     "baseBranch",
     "mode",
     "stashOnFailure",
+    "preparations",
   ]);
   const unexpected = Object.keys(payload).find((key) => !allowed.has(key));
   if (unexpected) {
@@ -708,6 +831,10 @@ export function worktreeMoveCheckoutJobPayload(value: unknown): {
     ),
     mode: payload.mode,
     stashOnFailure: payload.stashOnFailure,
+    preparations: preparationDefinitions(
+      payload.preparations ?? [],
+      "worktree move checkout payload.preparations",
+    ),
   };
 }
 
@@ -868,6 +995,8 @@ export function worktreeJobPayload(value: unknown): {
   baseBranch: string | null;
   operation?: WorktreeOperation;
   editorVariant?: WorktreeEditorVariant;
+  forcePreparations: boolean;
+  preparations: WorktreePreparationDefinition[];
 } {
   const payload = objectValue(value, "worktree payload");
   const allowed = new Set([
@@ -878,6 +1007,8 @@ export function worktreeJobPayload(value: unknown): {
     "baseBranch",
     "operation",
     "editorVariant",
+    "forcePreparations",
+    "preparations",
   ]);
   const unexpected = Object.keys(payload).find((key) => !allowed.has(key));
   if (unexpected)
@@ -896,6 +1027,12 @@ export function worktreeJobPayload(value: unknown): {
     !["CODE", "CODE_INSIDERS", "NONE"].includes(String(editorVariant))
   ) {
     throw new Error("worktree payload.editorVariant is invalid");
+  }
+  if (
+    payload.forcePreparations !== undefined &&
+    typeof payload.forcePreparations !== "boolean"
+  ) {
+    throw new Error("worktree payload.forcePreparations must be a boolean");
   }
   return {
     codebaseId: stringValue(payload.codebaseId, "worktree payload.codebaseId"),
@@ -918,6 +1055,11 @@ export function worktreeJobPayload(value: unknown): {
     ...(editorVariant === undefined
       ? {}
       : { editorVariant: editorVariant as WorktreeEditorVariant }),
+    forcePreparations: payload.forcePreparations === true,
+    preparations: preparationDefinitions(
+      payload.preparations ?? [],
+      "worktree payload.preparations",
+    ),
   };
 }
 
@@ -929,6 +1071,8 @@ export function worktreeAutoSyncJobPayload(value: unknown): {
   expectedBranch: string;
   baseBranch: string;
   phase: WorktreeAutoSyncPhase;
+  forcePreparations: boolean;
+  preparations: WorktreePreparationDefinition[];
 } {
   const payload = objectValue(value, "worktree auto sync payload");
   const allowed = new Set([
@@ -939,6 +1083,8 @@ export function worktreeAutoSyncJobPayload(value: unknown): {
     "expectedBranch",
     "baseBranch",
     "phase",
+    "forcePreparations",
+    "preparations",
   ]);
   const unexpected = Object.keys(payload).find((key) => !allowed.has(key));
   if (unexpected) {
@@ -948,6 +1094,14 @@ export function worktreeAutoSyncJobPayload(value: unknown): {
   }
   if (payload.phase !== "SYNC" && payload.phase !== "FINALIZE") {
     throw new Error("worktree auto sync payload.phase is invalid");
+  }
+  if (
+    payload.forcePreparations !== undefined &&
+    typeof payload.forcePreparations !== "boolean"
+  ) {
+    throw new Error(
+      "worktree auto sync payload.forcePreparations must be a boolean",
+    );
   }
   return {
     codebaseId: stringValue(
@@ -972,7 +1126,125 @@ export function worktreeAutoSyncJobPayload(value: unknown): {
       "worktree auto sync payload.baseBranch",
     ),
     phase: payload.phase,
+    forcePreparations: payload.forcePreparations === true,
+    preparations: preparationDefinitions(
+      payload.preparations ?? [],
+      "worktree auto sync payload.preparations",
+    ),
   };
+}
+
+export function worktreePreparationJobPayload(value: unknown): {
+  codebaseId: string;
+  expectedOrigin: string;
+  action: WorktreePreparationAction;
+  preparations: WorktreePreparationDefinition[];
+} & (
+  | { folder: string; gitDirectory: string }
+  | {
+      worktrees: Array<{
+        worktreeId: string;
+        folder: string;
+        gitDirectory: string;
+      }>;
+    }
+) {
+  const payload = objectValue(value, "worktree preparation payload");
+  const batched = payload.worktrees !== undefined;
+  const allowed = new Set(
+    batched
+      ? ["codebaseId", "expectedOrigin", "action", "preparations", "worktrees"]
+      : [
+          "codebaseId",
+          "folder",
+          "gitDirectory",
+          "expectedOrigin",
+          "action",
+          "preparations",
+        ],
+  );
+  const unexpected = Object.keys(payload).find((key) => !allowed.has(key));
+  if (unexpected) {
+    throw new Error(
+      `Unexpected worktree preparation payload field: ${unexpected}`,
+    );
+  }
+  if (
+    typeof payload.action !== "string" ||
+    !WORKTREE_PREPARATION_ACTIONS.includes(
+      payload.action as WorktreePreparationAction,
+    )
+  ) {
+    throw new Error("worktree preparation payload.action is invalid");
+  }
+  const common = {
+    codebaseId: stringValue(
+      payload.codebaseId,
+      "worktree preparation payload.codebaseId",
+    ),
+    expectedOrigin: stringValue(
+      payload.expectedOrigin,
+      "worktree preparation payload.expectedOrigin",
+    ),
+    action: payload.action as WorktreePreparationAction,
+    preparations: preparationDefinitions(
+      payload.preparations,
+      "worktree preparation payload.preparations",
+    ),
+  };
+  if (!batched) {
+    return {
+      ...common,
+      folder: stringValue(
+        payload.folder,
+        "worktree preparation payload.folder",
+      ),
+      gitDirectory: stringValue(
+        payload.gitDirectory,
+        "worktree preparation payload.gitDirectory",
+      ),
+    };
+  }
+  if (!Array.isArray(payload.worktrees) || payload.worktrees.length > 500) {
+    throw new Error(
+      "worktree preparation payload.worktrees must be an array with at most 500 items",
+    );
+  }
+  const worktrees = payload.worktrees.map((value, index) => {
+    const target = objectValue(
+      value,
+      `worktree preparation payload.worktrees[${index}]`,
+    );
+    const unexpectedTarget = Object.keys(target).find(
+      (key) => !["worktreeId", "folder", "gitDirectory"].includes(key),
+    );
+    if (unexpectedTarget) {
+      throw new Error(
+        `Unexpected worktree preparation payload.worktrees[${index}] field: ${unexpectedTarget}`,
+      );
+    }
+    return {
+      worktreeId: stringValue(
+        target.worktreeId,
+        `worktree preparation payload.worktrees[${index}].worktreeId`,
+      ),
+      folder: stringValue(
+        target.folder,
+        `worktree preparation payload.worktrees[${index}].folder`,
+      ),
+      gitDirectory: stringValue(
+        target.gitDirectory,
+        `worktree preparation payload.worktrees[${index}].gitDirectory`,
+      ),
+    };
+  });
+  if (
+    new Set(worktrees.map(({ worktreeId }) => worktreeId)).size !==
+    worktrees.length
+  ) {
+    throw new Error("worktree preparation payload.worktreeIds must be unique");
+  }
+  return { ...common, worktrees };
 }
 
 export function worktreeGitInspectPayload(value: unknown):
@@ -1184,11 +1456,11 @@ export function worktreeDiffPayload(value: unknown): WorktreeDiffPayload {
   const path =
     payload.path === null || payload.path === undefined
       ? null
-      : safeRelativePath(payload.path, "worktree diff payload.path");
+      : safeDiffPath(payload.path, "worktree diff payload.path");
   const previousPath =
     payload.previousPath === null || payload.previousPath === undefined
       ? null
-      : safeRelativePath(
+      : safeDiffPath(
           payload.previousPath,
           "worktree diff payload.previousPath",
         );

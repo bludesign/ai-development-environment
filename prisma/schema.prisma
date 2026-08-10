@@ -327,8 +327,27 @@ model CodebaseRepository {
   apps                   AppRepository[]
   runs                   AgentRun[]
   builds                 Build[]
+  preparations           CodebaseRepositoryPreparation[]
 
   @@index([name])
+}
+
+model CodebaseRepositoryPreparation {
+  id             String                      @id
+  repositoryId   String
+  kind           String
+  path           String
+  contents       Bytes?
+  contentSha256  String?
+  byteCount      Int?
+  definitionHash String
+  createdAt      DateTime                    @default(now())
+  updatedAt      DateTime                    @updatedAt
+  repository     CodebaseRepository          @relation(fields: [repositoryId], references: [id], onDelete: Cascade)
+  statuses       WorktreePreparationStatus[]
+
+  @@unique([repositoryId, path])
+  @@index([repositoryId, kind, path])
 }
 
 model App {
@@ -454,10 +473,28 @@ model Worktree {
   pullRequestLookupAt      DateTime?
   pullRequest              WorktreePullRequest?
   gitLabMergeRequest       WorktreeGitLabMergeRequest?
+  preparationStatuses      WorktreePreparationStatus[]
 
   @@unique([codebaseId, gitDirectory])
   @@index([codebaseId, missingAt])
   @@index([missingAt])
+}
+
+model WorktreePreparationStatus {
+  worktreeId     String
+  preparationId  String
+  definitionHash String
+  state          String
+  message        String?
+  checkedAt      DateTime
+  createdAt      DateTime                      @default(now())
+  updatedAt      DateTime                      @updatedAt
+  worktree       Worktree                      @relation(fields: [worktreeId], references: [id], onDelete: Cascade)
+  preparation    CodebaseRepositoryPreparation @relation(fields: [preparationId], references: [id], onDelete: Cascade)
+
+  @@id([worktreeId, preparationId])
+  @@index([preparationId, state])
+  @@index([worktreeId, state])
 }
 
 model WorktreePullRequest {
@@ -587,6 +624,7 @@ model WorktreeAutoSync {
   activeJobId            String?
   workflowRunId          String?
   lastError              String?
+  pauseReason            String?
   lastSyncedAt           DateTime?
   createdAt              DateTime  @default(now())
   updatedAt              DateTime  @updatedAt

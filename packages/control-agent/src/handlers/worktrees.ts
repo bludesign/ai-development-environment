@@ -16,6 +16,7 @@ import {
   worktreeJobPayload,
   worktreeMoveCheckoutJobPayload,
   worktreeMovePushJobPayload,
+  worktreePreparationJobPayload,
   worktreeWatchJobPayload,
   type WorktreeActivityReport,
   type WorktreeChange,
@@ -33,6 +34,12 @@ import {
   inspectCodebaseStashDiff,
   runCodebaseGitOperation,
 } from "./codebases.js";
+import {
+  executeWorktreePreparations,
+  preparationConflictPaths,
+  suspendWorktreePreparations,
+  type WorktreePreparationResult,
+} from "./worktree-preparations.js";
 import type { AgentJobHandler, AgentJobHandlerContext } from "./index.js";
 
 const successfulProcess = {
@@ -167,6 +174,14 @@ export function closeAllWorktreeWatches(): void {
     closeWorktreeWatch(entry);
   }
   activeWorktreeWatches.clear();
+}
+
+/** Exposes watch ownership so callers can observe that STOP has completed. */
+export function worktreeWatchIsActive(
+  gitDirectory: string,
+  watchId: string,
+): boolean {
+  return activeWorktreeWatches.get(gitDirectory)?.watchId === watchId;
 }
 
 async function flushWorktreeActivity(entry: ActiveWorktreeWatch) {
@@ -1988,46 +2003,101 @@ export const branchWorktree: AgentJobHandler = async (
   }
 
   let stashed = false;
-  if (args.length > 0) {
-    let switched = await git(
-      input.action === "CREATE" ? rootFolder : targetFolder,
-      args,
+  let preparationsSuspended = false;
+  const reapplyPreparations = () =>
+    executeWorktreePreparations(
+      targetFolder,
+      input.preparations,
+      "APPLY",
       timeoutMs,
       signal,
     );
-    if (
-      switched.exitCode !== 0 &&
-      input.action === "CHANGE" &&
-      input.stashOnFailure
-    ) {
-      const stash = requireSuccess(
-        await git(
-          targetFolder,
-          [
-            "stash",
-            "push",
-            "--include-untracked",
-            "-m",
-            `Automatic stash before switching to ${branch}`,
-          ],
-          timeoutMs,
-          signal,
-        ),
-        "Could not stash worktree changes",
+  if (
+    args.length > 0 &&
+    input.action === "CHANGE" &&
+    input.preparations.length > 0
+  ) {
+    const suspended = await suspendWorktreePreparations(
+      targetFolder,
+      input.preparations,
+      timeoutMs,
+      signal,
+      true,
+    );
+    preparationsSuspended = true;
+    const failed = suspended.filter((item) => item.state === "ERROR");
+    if (failed.length > 0) {
+      await reapplyPreparations();
+      throw new Error(
+        failed.map((item) => item.message ?? "Preparation failed").join("; "),
       );
-      stashed = !stash.stdout.toLowerCase().includes("no local changes");
-      switched = await git(targetFolder, args, timeoutMs, signal);
-      if (switched.exitCode !== 0) {
-        throw new Error(
-          `${cleanError(switched.stderr || "Branch switch failed after stashing")}. The stash was preserved.`,
+    }
+  }
+  if (args.length > 0) {
+    try {
+      let switched = await git(
+        input.action === "CREATE" ? rootFolder : targetFolder,
+        args,
+        timeoutMs,
+        signal,
+      );
+      if (
+        switched.exitCode !== 0 &&
+        input.action === "CHANGE" &&
+        input.stashOnFailure
+      ) {
+        const stash = requireSuccess(
+          await git(
+            targetFolder,
+            [
+              "stash",
+              "push",
+              "--include-untracked",
+              "-m",
+              `Automatic stash before switching to ${branch}`,
+            ],
+            timeoutMs,
+            signal,
+          ),
+          "Could not stash worktree changes",
+        );
+        stashed = !stash.stdout.toLowerCase().includes("no local changes");
+        switched = await git(targetFolder, args, timeoutMs, signal);
+        if (switched.exitCode !== 0) {
+          throw new Error(
+            `${cleanError(switched.stderr || "Branch switch failed after stashing")}. The stash was preserved.`,
+          );
+        }
+      } else {
+        requireSuccess(
+          switched,
+          input.action === "CREATE"
+            ? "Could not create the worktree"
+            : "Could not change the worktree branch",
         );
       }
-    } else {
-      requireSuccess(
-        switched,
-        input.action === "CREATE"
-          ? "Could not create the worktree"
-          : "Could not change the worktree branch",
+    } catch (error) {
+      if (preparationsSuspended) await reapplyPreparations();
+      throw error;
+    }
+  }
+
+  let preparations: WorktreePreparationResult[] = [];
+  if (input.preparations.length > 0) {
+    preparations = await reapplyPreparations();
+    const failed = preparations.filter((item) => item.state === "ERROR");
+    if (failed.length > 0 && input.action === "CREATE") {
+      await git(
+        rootFolder,
+        ["worktree", "remove", "--force", targetFolder],
+        timeoutMs,
+        signal,
+      );
+      if (input.mode === "NEW") {
+        await git(rootFolder, ["branch", "-D", branch], timeoutMs, signal);
+      }
+      throw new Error(
+        failed.map((item) => item.message ?? "Preparation failed").join("; "),
       );
     }
   }
@@ -2049,6 +2119,8 @@ export const branchWorktree: AgentJobHandler = async (
     branch,
     baseBranch: input.baseBranch,
     stashed,
+    checkedAt: new Date().toISOString(),
+    preparations,
   };
 };
 
@@ -2205,6 +2277,7 @@ export const checkoutMovedWorktree: AgentJobHandler = async (
   }
 
   let targetFolder: string;
+  let createdLocalBranch = false;
   let stashed = false;
   const occupiedFolder = await checkedOutBranchFolder(
     rootFolder,
@@ -2241,6 +2314,7 @@ export const checkoutMovedWorktree: AgentJobHandler = async (
       timeoutMs,
       signal,
     );
+    createdLocalBranch = !local;
     requireSuccess(
       await git(
         rootFolder,
@@ -2374,6 +2448,32 @@ export const checkoutMovedWorktree: AgentJobHandler = async (
   if (checkedOutHead !== input.expectedHeadSha) {
     throw new Error("The destination did not check out the pushed commit");
   }
+  const preparations = await executeWorktreePreparations(
+    targetFolder,
+    input.preparations,
+    "APPLY",
+    timeoutMs,
+    signal,
+  );
+  const preparationErrors = preparations.filter(
+    (item) => item.state === "ERROR",
+  );
+  if (preparationErrors.length > 0 && input.mode === "NEW") {
+    await git(
+      rootFolder,
+      ["worktree", "remove", "--force", targetFolder],
+      timeoutMs,
+      signal,
+    );
+    if (createdLocalBranch) {
+      await git(rootFolder, ["branch", "-D", input.branch], timeoutMs, signal);
+    }
+    throw new Error(
+      preparationErrors
+        .map((item) => item.message ?? "Preparation failed")
+        .join("; "),
+    );
+  }
   const worktree = await inspectWorktreeItem(
     targetFolder,
     rootFolder,
@@ -2394,6 +2494,71 @@ export const checkoutMovedWorktree: AgentJobHandler = async (
     worktree,
     baseBranch: input.baseBranch,
     stashed,
+    checkedAt: new Date().toISOString(),
+    preparations,
+  };
+};
+
+export const prepareWorktree: AgentJobHandler = async (
+  payload,
+  timeoutMs,
+  signal,
+) => {
+  const input = worktreePreparationJobPayload(payload);
+  if ("worktrees" in input) {
+    const worktrees = [];
+    for (const target of input.worktrees) {
+      try {
+        const folder = await validateWorktree(
+          {
+            codebaseId: input.codebaseId,
+            folder: target.folder,
+            gitDirectory: target.gitDirectory,
+            expectedOrigin: input.expectedOrigin,
+            baseBranch: null,
+          },
+          timeoutMs,
+          signal,
+        );
+        const preparations = await executeWorktreePreparations(
+          folder,
+          input.preparations,
+          input.action,
+          timeoutMs,
+          signal,
+        );
+        worktrees.push({
+          worktreeId: target.worktreeId,
+          checkedAt: new Date().toISOString(),
+          preparations,
+        });
+      } catch (error) {
+        worktrees.push({
+          worktreeId: target.worktreeId,
+          checkedAt: new Date().toISOString(),
+          preparations: input.preparations.map((definition) => ({
+            id: definition.id,
+            definitionHash: definition.definitionHash,
+            state: "ERROR" as const,
+            message: cleanError(error),
+          })),
+        });
+      }
+    }
+    return { ...successfulProcess, worktrees };
+  }
+  const folder = await validateWorktree(input, timeoutMs, signal);
+  const preparations = await executeWorktreePreparations(
+    folder,
+    input.preparations,
+    input.action,
+    timeoutMs,
+    signal,
+  );
+  return {
+    ...successfulProcess,
+    checkedAt: new Date().toISOString(),
+    preparations,
   };
 };
 
@@ -2533,6 +2698,36 @@ export const operateWorktree: AgentJobHandler = async (
     upstreamResult?.exitCode === 0 ? upstreamResult.stdout.trim() : null;
   const runGit = async (args: string[], fallback: string) =>
     requireSuccess(await git(folder, args, timeoutMs, signal), fallback);
+  let operationOutcome:
+    "COMPLETED" | "PREPARATION_CONFLICT" | "REBASE_CONFLICT" = "COMPLETED";
+  let preparationConflictPathList: string[] = [];
+  let preparationResults: WorktreePreparationResult[] = [];
+
+  const inspectPreparations = () =>
+    executeWorktreePreparations(
+      folder,
+      input.preparations,
+      "INSPECT",
+      timeoutMs,
+      signal,
+    );
+  const reapplyPreparations = () =>
+    executeWorktreePreparations(
+      folder,
+      input.preparations,
+      "APPLY",
+      timeoutMs,
+      signal,
+    );
+  const worktreeResult = async () =>
+    inspectWorktreeItem(
+      folder,
+      folder,
+      input.baseBranch,
+      false,
+      Math.min(timeoutMs, 30_000),
+      signal,
+    );
 
   switch (input.operation) {
     case "OPEN_EDITOR": {
@@ -2565,13 +2760,61 @@ export const operateWorktree: AgentJobHandler = async (
       if (statusResult.stdout.trim())
         throw new Error("Stash or commit changes before syncing");
       await runGit(["fetch", "origin"], "Could not fetch origin");
-      const rebase = await git(
+      const remoteBase = `refs/remotes/origin/${input.baseBranch}`;
+      const isCurrent = await git(
         folder,
-        ["rebase", `refs/remotes/origin/${input.baseBranch}`],
+        ["merge-base", "--is-ancestor", remoteBase, "HEAD"],
         timeoutMs,
         signal,
       );
-      if (rebase.exitCode !== 0) {
+      if (isCurrent.exitCode !== 0 && isCurrent.exitCode !== 1) {
+        requireSuccess(isCurrent, "Could not compare the base branch");
+      }
+      if (isCurrent.exitCode === 1) {
+        preparationConflictPathList = await preparationConflictPaths(
+          folder,
+          input.preparations,
+          remoteBase,
+          timeoutMs,
+          signal,
+        );
+        if (
+          preparationConflictPathList.length > 0 &&
+          !input.forcePreparations
+        ) {
+          operationOutcome = "PREPARATION_CONFLICT";
+          preparationResults = await inspectPreparations();
+          return {
+            ...successfulProcess,
+            outcome: operationOutcome,
+            preparationConflictPaths: preparationConflictPathList,
+            checkedAt: new Date().toISOString(),
+            preparations: preparationResults,
+            worktree: await worktreeResult(),
+          };
+        }
+        if (input.forcePreparations) {
+          preparationResults = await suspendWorktreePreparations(
+            folder,
+            input.preparations,
+            timeoutMs,
+            signal,
+          );
+          if (preparationResults.some((item) => item.state === "ERROR")) {
+            return {
+              ...successfulProcess,
+              exitCode: 1,
+              checkedAt: new Date().toISOString(),
+              preparations: preparationResults,
+            };
+          }
+        }
+      }
+      const rebase =
+        isCurrent.exitCode === 0
+          ? null
+          : await git(folder, ["rebase", remoteBase], timeoutMs, signal);
+      if (rebase && rebase.exitCode !== 0) {
         const status = await git(
           folder,
           ["status", "--porcelain=v1", "-z"],
@@ -2581,14 +2824,54 @@ export const operateWorktree: AgentJobHandler = async (
         const conflicts =
           status.exitCode === 0 &&
           statusChangeState(status.stdout).hasConflicts;
-        if (!(
-          conflicts && (await rebaseInProgress(folder, timeoutMs, signal))
-        )) {
+        if (conflicts && (await rebaseInProgress(folder, timeoutMs, signal))) {
+          operationOutcome = "REBASE_CONFLICT";
+          const conflictsResult = await git(
+            folder,
+            ["diff", "--name-only", "--diff-filter=U"],
+            timeoutMs,
+            signal,
+          );
+          preparationConflictPathList =
+            conflictsResult.exitCode === 0
+              ? conflictsResult.stdout.split("\n").filter(Boolean)
+              : [];
+          preparationResults = input.preparations.map((definition) => ({
+            id: definition.id,
+            definitionHash: definition.definitionHash,
+            state: "SUSPENDED" as const,
+          }));
+          return {
+            ...successfulProcess,
+            outcome: operationOutcome,
+            preparationConflictPaths: preparationConflictPathList,
+            checkedAt: new Date().toISOString(),
+            preparations: preparationResults,
+            worktree: await worktreeResult(),
+          };
+        } else {
           await git(folder, ["rebase", "--abort"], timeoutMs, signal);
+        }
+        if (input.forcePreparations) {
+          preparationResults = await reapplyPreparations();
         }
         throw new Error(cleanError(rebase.stderr || "Rebase failed"));
       }
-      await runGit(["push", "--force-with-lease"], "Sync push failed");
+      const push = await git(
+        folder,
+        ["push", "--force-with-lease"],
+        timeoutMs,
+        signal,
+      );
+      if (push.exitCode !== 0) {
+        if (input.forcePreparations) {
+          preparationResults = await reapplyPreparations();
+        }
+        requireSuccess(push, "Sync push failed");
+      }
+      preparationResults = input.forcePreparations
+        ? await reapplyPreparations()
+        : await inspectPreparations();
       break;
     }
     case "REBASE": {
@@ -2601,13 +2884,61 @@ export const operateWorktree: AgentJobHandler = async (
       if (statusResult.stdout.trim())
         throw new Error("Stash or commit changes before rebasing");
       await runGit(["fetch", "origin"], "Could not fetch origin");
-      const rebase = await git(
+      const remoteBase = `refs/remotes/origin/${input.baseBranch}`;
+      const isCurrent = await git(
         folder,
-        ["rebase", `refs/remotes/origin/${input.baseBranch}`],
+        ["merge-base", "--is-ancestor", remoteBase, "HEAD"],
         timeoutMs,
         signal,
       );
-      if (rebase.exitCode !== 0) {
+      if (isCurrent.exitCode !== 0 && isCurrent.exitCode !== 1) {
+        requireSuccess(isCurrent, "Could not compare the base branch");
+      }
+      if (isCurrent.exitCode === 1) {
+        preparationConflictPathList = await preparationConflictPaths(
+          folder,
+          input.preparations,
+          remoteBase,
+          timeoutMs,
+          signal,
+        );
+        if (
+          preparationConflictPathList.length > 0 &&
+          !input.forcePreparations
+        ) {
+          operationOutcome = "PREPARATION_CONFLICT";
+          preparationResults = await inspectPreparations();
+          return {
+            ...successfulProcess,
+            outcome: operationOutcome,
+            preparationConflictPaths: preparationConflictPathList,
+            checkedAt: new Date().toISOString(),
+            preparations: preparationResults,
+            worktree: await worktreeResult(),
+          };
+        }
+        if (input.forcePreparations) {
+          preparationResults = await suspendWorktreePreparations(
+            folder,
+            input.preparations,
+            timeoutMs,
+            signal,
+          );
+          if (preparationResults.some((item) => item.state === "ERROR")) {
+            return {
+              ...successfulProcess,
+              exitCode: 1,
+              checkedAt: new Date().toISOString(),
+              preparations: preparationResults,
+            };
+          }
+        }
+      }
+      const rebase =
+        isCurrent.exitCode === 0
+          ? null
+          : await git(folder, ["rebase", remoteBase], timeoutMs, signal);
+      if (rebase && rebase.exitCode !== 0) {
         const status = await git(
           folder,
           ["status", "--porcelain=v1", "-z"],
@@ -2617,13 +2948,42 @@ export const operateWorktree: AgentJobHandler = async (
         const conflicts =
           status.exitCode === 0 &&
           statusChangeState(status.stdout).hasConflicts;
-        if (!(
-          conflicts && (await rebaseInProgress(folder, timeoutMs, signal))
-        )) {
+        if (conflicts && (await rebaseInProgress(folder, timeoutMs, signal))) {
+          operationOutcome = "REBASE_CONFLICT";
+          const conflictsResult = await git(
+            folder,
+            ["diff", "--name-only", "--diff-filter=U"],
+            timeoutMs,
+            signal,
+          );
+          preparationConflictPathList =
+            conflictsResult.exitCode === 0
+              ? conflictsResult.stdout.split("\n").filter(Boolean)
+              : [];
+          preparationResults = input.preparations.map((definition) => ({
+            id: definition.id,
+            definitionHash: definition.definitionHash,
+            state: "SUSPENDED" as const,
+          }));
+          return {
+            ...successfulProcess,
+            outcome: operationOutcome,
+            preparationConflictPaths: preparationConflictPathList,
+            checkedAt: new Date().toISOString(),
+            preparations: preparationResults,
+            worktree: await worktreeResult(),
+          };
+        } else {
           await git(folder, ["rebase", "--abort"], timeoutMs, signal);
+        }
+        if (input.forcePreparations) {
+          preparationResults = await reapplyPreparations();
         }
         throw new Error(cleanError(rebase.stderr || "Rebase failed"));
       }
+      preparationResults = input.forcePreparations
+        ? await reapplyPreparations()
+        : await inspectPreparations();
       break;
     }
     case "CANCEL_REBASE": {
@@ -2631,6 +2991,7 @@ export const operateWorktree: AgentJobHandler = async (
         throw new Error("No rebase is in progress");
       }
       await runGit(["rebase", "--abort"], "Could not cancel rebase");
+      preparationResults = await reapplyPreparations();
       break;
     }
     case "PULL": {
@@ -2673,14 +3034,11 @@ export const operateWorktree: AgentJobHandler = async (
 
   return {
     ...successfulProcess,
-    worktree: await inspectWorktreeItem(
-      folder,
-      folder,
-      input.baseBranch,
-      false,
-      Math.min(timeoutMs, 30_000),
-      signal,
-    ),
+    outcome: operationOutcome,
+    preparationConflictPaths: preparationConflictPathList,
+    checkedAt: new Date().toISOString(),
+    preparations: preparationResults,
+    worktree: await worktreeResult(),
   };
 };
 
@@ -2693,6 +3051,28 @@ export const autoSyncWorktree: AgentJobHandler = async (
   const folder = await validateWorktree(input, timeoutMs, signal);
   const runGit = async (args: string[], fallback: string) =>
     requireSuccess(await git(folder, args, timeoutMs, signal), fallback);
+  const inspectPreparations = () =>
+    executeWorktreePreparations(
+      folder,
+      input.preparations,
+      "INSPECT",
+      timeoutMs,
+      signal,
+    );
+  const reapplyPreparations = () =>
+    executeWorktreePreparations(
+      folder,
+      input.preparations,
+      "APPLY",
+      timeoutMs,
+      signal,
+    );
+  const suspendedPreparations = () =>
+    input.preparations.map((definition) => ({
+      id: definition.id,
+      definitionHash: definition.definitionHash,
+      state: "SUSPENDED" as const,
+    }));
   const branchResult = await git(
     folder,
     ["symbolic-ref", "--short", "-q", "HEAD"],
@@ -2736,6 +3116,8 @@ export const autoSyncWorktree: AgentJobHandler = async (
       return {
         ...successfulProcess,
         outcome: "UNRESOLVED",
+        checkedAt: new Date().toISOString(),
+        preparations: suspendedPreparations(),
         worktree: await inspectWorktreeItem(
           folder,
           folder,
@@ -2764,6 +3146,8 @@ export const autoSyncWorktree: AgentJobHandler = async (
         return {
           ...successfulProcess,
           outcome: "UNRESOLVED",
+          checkedAt: new Date().toISOString(),
+          preparations: suspendedPreparations(),
           worktree: await inspectWorktreeItem(
             folder,
             folder,
@@ -2789,6 +3173,8 @@ export const autoSyncWorktree: AgentJobHandler = async (
       return {
         ...successfulProcess,
         outcome: "UNRESOLVED",
+        checkedAt: new Date().toISOString(),
+        preparations: suspendedPreparations(),
         worktree: await inspectWorktreeItem(
           folder,
           folder,
@@ -2824,10 +3210,22 @@ export const autoSyncWorktree: AgentJobHandler = async (
         `Auto Sync expected branch ${input.expectedBranch} with an upstream`,
       );
     }
-    await runGit(["push", "--force-with-lease"], "Auto Sync push failed");
+    const push = await git(
+      folder,
+      ["push", "--force-with-lease"],
+      timeoutMs,
+      signal,
+    );
+    if (push.exitCode !== 0) {
+      await reapplyPreparations();
+      requireSuccess(push, "Auto Sync push failed");
+    }
+    const preparations = await reapplyPreparations();
     return {
       ...successfulProcess,
       outcome: "SYNCED",
+      checkedAt: new Date().toISOString(),
+      preparations,
       worktree: await inspectWorktreeItem(
         folder,
         folder,
@@ -2877,6 +3275,8 @@ export const autoSyncWorktree: AgentJobHandler = async (
       return {
         ...successfulProcess,
         outcome: "SYNCED",
+        checkedAt: new Date().toISOString(),
+        preparations: await inspectPreparations(),
         worktree: await inspectWorktreeItem(
           folder,
           folder,
@@ -2890,6 +3290,8 @@ export const autoSyncWorktree: AgentJobHandler = async (
     return {
       ...successfulProcess,
       outcome: "NO_CHANGE",
+      checkedAt: new Date().toISOString(),
+      preparations: await inspectPreparations(),
       worktree: await inspectWorktreeItem(
         folder,
         folder,
@@ -2899,6 +3301,48 @@ export const autoSyncWorktree: AgentJobHandler = async (
         signal,
       ),
     };
+  }
+
+  const preparationConflictPathList = await preparationConflictPaths(
+    folder,
+    input.preparations,
+    remoteBase,
+    timeoutMs,
+    signal,
+  );
+  if (preparationConflictPathList.length > 0 && !input.forcePreparations) {
+    return {
+      ...successfulProcess,
+      outcome: "PREPARATION_CONFLICT",
+      preparationConflictPaths: preparationConflictPathList,
+      checkedAt: new Date().toISOString(),
+      preparations: await inspectPreparations(),
+      worktree: await inspectWorktreeItem(
+        folder,
+        folder,
+        input.baseBranch,
+        false,
+        Math.min(timeoutMs, 30_000),
+        signal,
+      ),
+    };
+  }
+  let preparationResults: WorktreePreparationResult[] = [];
+  if (input.forcePreparations) {
+    preparationResults = await suspendWorktreePreparations(
+      folder,
+      input.preparations,
+      timeoutMs,
+      signal,
+    );
+    if (preparationResults.some((item) => item.state === "ERROR")) {
+      return {
+        ...successfulProcess,
+        exitCode: 1,
+        checkedAt: new Date().toISOString(),
+        preparations: preparationResults,
+      };
+    }
   }
 
   const rebase = await git(folder, ["rebase", remoteBase], timeoutMs, signal);
@@ -2916,6 +3360,8 @@ export const autoSyncWorktree: AgentJobHandler = async (
       return {
         ...successfulProcess,
         outcome: "CONFLICT",
+        checkedAt: new Date().toISOString(),
+        preparations: suspendedPreparations(),
         worktree: await inspectWorktreeItem(
           folder,
           folder,
@@ -2927,12 +3373,27 @@ export const autoSyncWorktree: AgentJobHandler = async (
       };
     }
     await git(folder, ["rebase", "--abort"], timeoutMs, signal);
+    if (input.forcePreparations) await reapplyPreparations();
     throw new Error(cleanError(rebase.stderr || "Auto Sync rebase failed"));
   }
-  await runGit(["push", "--force-with-lease"], "Auto Sync push failed");
+  const push = await git(
+    folder,
+    ["push", "--force-with-lease"],
+    timeoutMs,
+    signal,
+  );
+  if (push.exitCode !== 0) {
+    if (input.forcePreparations) await reapplyPreparations();
+    requireSuccess(push, "Auto Sync push failed");
+  }
+  preparationResults = input.forcePreparations
+    ? await reapplyPreparations()
+    : await inspectPreparations();
   return {
     ...successfulProcess,
     outcome: "SYNCED",
+    checkedAt: new Date().toISOString(),
+    preparations: preparationResults,
     worktree: await inspectWorktreeItem(
       folder,
       folder,

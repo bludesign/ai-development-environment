@@ -13,6 +13,7 @@ import {
   WORKTREE_MOVE_CHECKOUT_JOB_KIND,
   WORKTREE_MOVE_PUSH_JOB_KIND,
   WORKTREE_OPERATION_JOB_KIND,
+  WORKTREE_PREPARATION_JOB_KIND,
 } from "@ai-development-environment/agent-contract/worktrees";
 import {
   agentEventBus,
@@ -260,6 +261,153 @@ describe("WorktreesService", () => {
         kind: WORKTREE_AUTO_SYNC_JOB_KIND,
         payload: expect.objectContaining({
           expectedBranch: "feature/configured",
+        }),
+      }),
+    );
+  });
+
+  test("batches preparation worktrees under one codebase-serialized job", async () => {
+    const preparation = {
+      id: "preparation-1",
+      kind: "WRITE",
+      path: "empty.txt",
+      contents: Uint8Array.from([]),
+      definitionHash: "hash-1",
+    };
+    const codebase = {
+      id: "codebase-1",
+      agentId: "agent-1",
+      agent: {
+        lastSeenAt: new Date(),
+        disconnectedAt: null,
+        capabilitiesJson: JSON.stringify([WORKTREE_PREPARATION_JOB_KIND]),
+      },
+      repository: {
+        canonicalOrigin: "github.com/openai/codex",
+        preparations: [preparation],
+      },
+    };
+    getPrismaClient.mockResolvedValue({
+      worktree: {
+        findMany: vi.fn().mockResolvedValue([
+          {
+            id: "worktree-1",
+            codebaseId: "codebase-1",
+            folder: "/repo",
+            gitDirectory: "/repo/.git",
+            missingAt: null,
+            availability: "AVAILABLE",
+            codebase,
+          },
+          {
+            id: "worktree-2",
+            codebaseId: "codebase-1",
+            folder: "/repo-feature",
+            gitDirectory: "/repo/.git/worktrees/repo-feature",
+            missingAt: null,
+            availability: "AVAILABLE",
+            codebase,
+          },
+        ]),
+      },
+    });
+    const createJob = vi.fn().mockResolvedValue({ id: "job-1" });
+    const control = {
+      registerCompletionHandler: vi.fn(),
+      createJob,
+    } as unknown as AgentControlService;
+
+    await expect(
+      service(control).runPreparations(
+        ["worktree-1", "worktree-2"],
+        "APPLY",
+        "request-1",
+      ),
+    ).resolves.toMatchObject({ jobs: [{ id: "job-1" }], skipped: [] });
+    expect(createJob).toHaveBeenCalledOnce();
+    expect(createJob).toHaveBeenCalledWith(
+      expect.objectContaining({
+        codebaseId: "codebase-1",
+        worktreeId: null,
+        kind: WORKTREE_PREPARATION_JOB_KIND,
+        payload: expect.objectContaining({
+          codebaseId: "codebase-1",
+          worktrees: [
+            expect.objectContaining({ worktreeId: "worktree-1" }),
+            expect.objectContaining({ worktreeId: "worktree-2" }),
+          ],
+        }),
+      }),
+    );
+  });
+
+  test("includes repository preparations when changing a worktree branch", async () => {
+    const preparation = {
+      id: "preparation-1",
+      kind: "DELETE",
+      path: "local.txt",
+      contents: null,
+      definitionHash: "hash-1",
+    };
+    const runnable = {
+      id: "worktree-1",
+      codebaseId: "codebase-1",
+      folder: "/repo",
+      gitDirectory: "/repo/.git",
+      branch: "main",
+      baseBranchOverride: null,
+      missingAt: null,
+      availability: "AVAILABLE",
+      codebase: {
+        id: "codebase-1",
+        repositoryId: "repository-1",
+        agentId: "agent-1",
+        folder: "/repo",
+        defaultBranch: "main",
+        localBranchesJson: JSON.stringify(["main", "release"]),
+        remoteBranchesJson: JSON.stringify(["main"]),
+        agent: {
+          lastSeenAt: new Date(),
+          disconnectedAt: null,
+          capabilitiesJson: JSON.stringify([
+            WORKTREE_BRANCH_JOB_KIND,
+            WORKTREE_PREPARATION_JOB_KIND,
+          ]),
+        },
+        repository: {
+          canonicalOrigin: "github.com/openai/codex",
+          preparations: [preparation],
+        },
+      },
+    };
+    getPrismaClient.mockResolvedValue({
+      worktree: {
+        findUnique: vi.fn().mockResolvedValue(runnable),
+        findFirst: vi.fn().mockResolvedValue(null),
+      },
+      agentJob: { findFirst: vi.fn().mockResolvedValue(null) },
+      worktreeMove: { findFirst: vi.fn().mockResolvedValue(null) },
+    });
+    const createJob = vi.fn().mockResolvedValue({ id: "job-1" });
+    const control = {
+      registerCompletionHandler: vi.fn(),
+      createJob,
+    } as unknown as AgentControlService;
+
+    await service(control).changeWorktreeBranch({
+      worktreeId: "worktree-1",
+      selection: {
+        mode: "EXISTING",
+        branchName: "release",
+        baseBranch: "main",
+      },
+      requestId: "request-1",
+    });
+
+    expect(createJob).toHaveBeenCalledWith(
+      expect.objectContaining({
+        payload: expect.objectContaining({
+          preparations: [expect.objectContaining({ id: "preparation-1" })],
         }),
       }),
     );

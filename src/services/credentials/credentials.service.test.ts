@@ -1,11 +1,21 @@
 // @vitest-environment node
 import { randomBytes } from "node:crypto";
-import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { copyFile, mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import { PrismaBetterSqlite3 } from "@prisma/adapter-better-sqlite3";
-import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
+import Database from "better-sqlite3";
+import {
+  afterAll,
+  afterEach,
+  beforeAll,
+  beforeEach,
+  describe,
+  expect,
+  test,
+  vi,
+} from "vitest";
 
 import { PrismaClient } from "@/generated/prisma/client";
 
@@ -63,22 +73,34 @@ const CREATE_CREDENTIAL_TABLE = `
 
 describe("CredentialService database backend", () => {
   let directory: string;
+  let templateDatabasePath: string;
+  let databaseCount = 0;
   let databasePath: string;
   let prisma: InstanceType<typeof PrismaClient>;
 
-  beforeEach(async () => {
+  beforeAll(async () => {
     // On disk, not `:memory:`: the plaintext sweep test reads the raw database
     // and WAL bytes back to prove the secret is gone from the files themselves.
     directory = await mkdtemp(join(tmpdir(), "ade-credentials-"));
-    databasePath = join(directory, "test.db");
+    templateDatabasePath = join(directory, "template.db");
+    const database = new Database(templateDatabasePath);
+    database.exec(CREATE_CREDENTIAL_TABLE);
+    database.close();
+  });
+
+  beforeEach(async () => {
+    databasePath = join(directory, `test-${(databaseCount += 1)}.db`);
+    await copyFile(templateDatabasePath, databasePath);
     prisma = new PrismaClient({
       adapter: new PrismaBetterSqlite3({ url: databasePath }),
     });
-    await prisma.$executeRawUnsafe(CREATE_CREDENTIAL_TABLE);
   });
 
   afterEach(async () => {
     await prisma.$disconnect();
+  });
+
+  afterAll(async () => {
     await rm(directory, { recursive: true, force: true });
   });
 

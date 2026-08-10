@@ -4,6 +4,7 @@ import {
   render,
   screen,
   waitFor,
+  within,
 } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 
@@ -52,6 +53,17 @@ const repository = {
   description: "iOS app",
   jiraBranchRegex: null,
   keepBaseBranchUpToDate: true,
+  preparations: [
+    {
+      id: "preparation-1",
+      kind: "WRITE",
+      path: ".env.local",
+      contentSha256: "abc123",
+      byteCount: 24,
+      contentBase64: "aGVsbG8=",
+      definitionHash: "definition-1",
+    },
+  ],
   skillGroups: [{ id: "group-1", name: "Mobile" }],
   codebases: [
     {
@@ -94,6 +106,13 @@ describe("RepositoryDetailPage", () => {
       if (String(query).includes("mutation UpdateCodebaseRepository")) {
         return { updateCodebaseRepository: { id: "repository-1" } } as never;
       }
+      if (String(query).includes("mutation SaveRepositoryPreparations")) {
+        return {
+          saveCodebaseRepositoryPreparations: {
+            preparations: repository.preparations,
+          },
+        } as never;
+      }
       throw new Error(`Unexpected operation: ${query}`);
     });
   });
@@ -135,5 +154,52 @@ describe("RepositoryDetailPage", () => {
         "Studio Mac · /Users/test/Repositories/App | Laptop · /Users/test/Other/App",
       ),
     ).toBeDefined();
+  });
+
+  test("edits repository preparations and confirms atomic replacement", async () => {
+    render(<RepositoryDetailPage repositoryId="repository-1" />);
+
+    fireEvent.click(await screen.findByRole("tab", { name: "Preparations" }));
+    expect(await screen.findByDisplayValue(".env.local")).toBeDefined();
+    expect(screen.getByText("abc123")).toBeDefined();
+    const contents = screen.getByLabelText("File contents");
+    expect((contents as HTMLTextAreaElement).value).toBe("hello");
+    fireEvent.change(contents, { target: { value: "updated contents" } });
+
+    fireEvent.click(screen.getByRole("button", { name: "Save preparations" }));
+    const dialog = await screen.findByRole("alertdialog");
+    expect(
+      within(dialog).getByText("Replace repository preparations?"),
+    ).toBeDefined();
+    fireEvent.click(
+      within(dialog).getByRole("button", { name: "Save preparations" }),
+    );
+
+    await waitFor(() =>
+      expect(
+        request.mock.calls.some(
+          ([query, variables]) =>
+            String(query).includes("mutation SaveRepositoryPreparations") &&
+            (
+              variables as {
+                input?: {
+                  preparations?: Array<{
+                    id?: string;
+                    contentBase64?: string;
+                  }>;
+                };
+              }
+            ).input?.preparations?.[0]?.id === "preparation-1" &&
+            (
+              variables as {
+                input?: {
+                  preparations?: Array<{ contentBase64?: string }>;
+                };
+              }
+            ).input?.preparations?.[0]?.contentBase64 ===
+              "dXBkYXRlZCBjb250ZW50cw==",
+        ),
+      ).toBe(true),
+    );
   });
 });

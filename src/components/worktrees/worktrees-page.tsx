@@ -163,7 +163,11 @@ import {
   useWorktreeActivitySubscription,
   type WorktreeActivity,
 } from "./worktree-inspection";
-import { waitForWorktreeJob, waitForWorktreeMove } from "./worktree-jobs";
+import {
+  waitForWorktreeJob,
+  waitForWorktreeMove,
+  waitForWorktreeOperationJob,
+} from "./worktree-jobs";
 import { WorktreeRebaseConflictItem } from "./worktree-rebase-conflict-item";
 import {
   shouldNavigateWorktreeSurface,
@@ -3637,8 +3641,10 @@ function useWorktreeOperation({
   operation,
   confirm = false,
 }: Pick<OperationProps, "props" | "operation" | "confirm">) {
+  const t = useTranslations("worktrees");
   const [armed, setArmed] = useState(false);
   const [busy, setBusy] = useState(false);
+  const [forcePreparations, setForcePreparations] = useState(false);
   const timer = useRef<number | null>(null);
   useEffect(
     () => () => {
@@ -3664,13 +3670,27 @@ function useWorktreeOperation({
             worktreeId: props.worktree.id,
             operation,
             requestId: createClientId(),
+            ...(forcePreparations ? { forcePreparations: true } : {}),
           },
         },
       );
       props.onError(null);
       await props.onCompleted();
-      await waitForWorktreeJob(data.runWorktreeOperation.id);
+      const result = await waitForWorktreeOperationJob(
+        data.runWorktreeOperation.id,
+      );
       await props.onCompleted();
+      if (result?.outcome === "PREPARATION_CONFLICT") {
+        setForcePreparations(true);
+        setArmed(true);
+        props.onError(
+          t("preparationConflict", {
+            paths: result.preparationConflictPaths.join(", "),
+          }),
+        );
+        return;
+      }
+      setForcePreparations(false);
     } catch (value) {
       try {
         await props.onCompleted();
@@ -3683,7 +3703,7 @@ function useWorktreeOperation({
     }
   };
 
-  return { armed, busy, run };
+  return { armed, busy, forcePreparations, run };
 }
 
 function OperationButton({
@@ -3695,7 +3715,7 @@ function OperationButton({
   disabled = false,
 }: OperationProps) {
   const t = useTranslations("worktrees");
-  const { armed, busy, run } = useWorktreeOperation({
+  const { armed, busy, forcePreparations, run } = useWorktreeOperation({
     props,
     operation,
     confirm,
@@ -3709,7 +3729,11 @@ function OperationButton({
       variant={armed ? "destructive" : "outline"}
     >
       {busy ? <Spinner /> : armed ? <Check /> : icon}{" "}
-      {armed ? t("confirmAction") : label}
+      {armed
+        ? forcePreparations
+          ? t("forcePreparationOperation")
+          : t("confirmAction")
+        : label}
     </Button>
   );
 }

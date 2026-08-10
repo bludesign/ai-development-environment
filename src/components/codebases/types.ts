@@ -45,6 +45,7 @@ export type CodebaseRepository = {
   description: string;
   jiraBranchRegex: string | null;
   keepBaseBranchUpToDate: boolean;
+  preparations?: RepositoryPreparation[];
   skillGroups?: Array<{ id: string; name: string }>;
   quickActionWorkflows?: Array<{
     id: string;
@@ -57,6 +58,16 @@ export type CodebaseRepository = {
   codebases: Codebase[];
   createdAt: string;
   updatedAt: string;
+};
+
+export type RepositoryPreparation = {
+  id: string;
+  kind: "WRITE" | "DELETE" | "ASSUME_UNCHANGED";
+  path: string;
+  contentSha256: string | null;
+  byteCount: number | null;
+  contentBase64: string | null;
+  definitionHash: string;
 };
 
 export type CodebaseSettings = {

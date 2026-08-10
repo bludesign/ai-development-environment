@@ -23,7 +23,6 @@ describe("worktree Auto Sync", () => {
     const remote = await localRemote();
     const remoteUrl = `ssh://git@example.test${remote}`;
     await useHostedRemote(folder, remote, remoteUrl);
-    await git(folder, "config", "commit.gpgsign", "false");
     await git(folder, "push", "-u", "origin", "main");
     const linked = `${folder}-auto-sync`;
     temporaryDirectories.push(linked);
@@ -108,7 +107,6 @@ describe("worktree Auto Sync", () => {
     const remote = await localRemote();
     const remoteUrl = `ssh://git@example.test${remote}`;
     await useHostedRemote(folder, remote, remoteUrl);
-    await git(folder, "config", "commit.gpgsign", "false");
     await git(folder, "push", "-u", "origin", "main");
     const linked = `${folder}-auto-sync-push-retry`;
     temporaryDirectories.push(linked);

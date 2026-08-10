@@ -3,6 +3,7 @@ import { CODEBASE_GIT_OPERATIONS } from "@ai-development-environment/agent-contr
 import {
   WORKTREE_GIT_OPERATIONS,
   WORKTREE_OPERATIONS,
+  WORKTREE_PREPARATION_ACTIONS,
 } from "@ai-development-environment/agent-contract/worktrees";
 
 import type {
@@ -650,6 +651,19 @@ const STEP_CONFIG_DESCRIPTORS: StepConfigDescriptors = {
     fields: [
       resource("worktreeId", "Worktree", "worktree"),
       enumField("operation", "Operation", WORKTREE_OPERATION_OPTIONS),
+      bool("forcePreparations", "Force preparation conflicts", {
+        help: "Destructively resets preparation-managed paths before Sync or Rebase, then reapplies the current rules.",
+      }),
+    ],
+  },
+  WORKTREE_PREPARATION: {
+    fields: [
+      resource("worktreeId", "Worktree", "worktree"),
+      enumField(
+        "action",
+        "Action",
+        staticOptions(WORKTREE_PREPARATION_ACTIONS),
+      ),
     ],
   },
   WORKTREE_SET_AUTO_SYNC: {
@@ -658,7 +672,7 @@ const STEP_CONFIG_DESCRIPTORS: StepConfigDescriptors = {
       enumField(
         "action",
         "Action",
-        staticOptions(["ENABLE", "RETRY", "CANCEL"]),
+        staticOptions(["ENABLE", "RETRY", "FORCE", "CANCEL"]),
       ),
       text("conflictWorkflowId", "Conflict workflow ID"),
       text("conflictWorkflowChoice", "Conflict workflow choice"),
@@ -1300,6 +1314,8 @@ const POLLED_WAIT_STEP_KINDS: readonly WorkflowStepKind[] = [
   "WORKTREE_CREATE",
   "WORKTREE_CHANGE_BRANCH",
   "WORKTREE_OPERATION",
+  "WORKTREE_PREPARATION",
+  "WORKTREE_SET_AUTO_SYNC",
   "WORKTREE_DELETE",
   "WORKTREE_GIT_OPERATION",
   "WORKTREE_MOVE",

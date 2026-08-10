@@ -873,6 +873,21 @@ export const WORKFLOW_STEP_CATALOG: readonly WorkflowCatalogEntry[] = [
     },
   ),
   step(
+    "WORKTREE_PREPARATION",
+    "Worktrees",
+    "Run worktree preparations",
+    "SERVER",
+    ["worktree.id"],
+    [],
+    {
+      description:
+        "Inspects, applies, or undoes the repository preparation rules for one worktree.",
+      details:
+        "Dispatches a preparation job to the owning agent and waits for its per-file result. Apply and Undo can overwrite managed paths, while Inspect only refreshes persisted status. Unsupported, offline, and unavailable worktrees fail with the service's explicit skip reason.",
+      mutatesWorktree: true,
+    },
+  ),
+  step(
     "WORKTREE_SET_AUTO_SYNC",
     "Worktrees",
     "Set worktree Auto Sync",
@@ -883,7 +898,7 @@ export const WORKFLOW_STEP_CATALOG: readonly WorkflowCatalogEntry[] = [
       description:
         "Enables, updates, retries, or cancels persistent Auto Sync for a worktree.",
       details:
-        "An enabled rule rebases on the target branch whenever it changes and force-pushes with lease. A merge-conflict quick-action workflow can be selected as the automatic recovery path; unresolved conflicts pause the rule.",
+        "An enabled rule rebases on the target branch whenever it changes and force-pushes with lease. A merge-conflict quick-action workflow can be selected as the automatic recovery path; unresolved conflicts pause the rule. Force is accepted only when preparations paused Auto Sync, destructively resets managed paths, and resumes the rule after a successful sync.",
       mutatesWorktree: true,
       mutatesExternal: true,
     },
