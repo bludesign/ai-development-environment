@@ -48,10 +48,12 @@ describe("durable worktree run queues", () => {
     templateDatabasePath = join(directory, "template.db");
     const database = new Database(templateDatabasePath);
     const migrationsRoot = resolve(process.cwd(), "prisma/migrations");
-    for (const migration of readdirSync(migrationsRoot).toSorted()) {
-      const path = join(migrationsRoot, migration, "migration.sql");
-      if (existsSync(path)) database.exec(readFileSync(path, "utf8"));
-    }
+    database.transaction(() => {
+      for (const migration of readdirSync(migrationsRoot).toSorted()) {
+        const path = join(migrationsRoot, migration, "migration.sql");
+        if (existsSync(path)) database.exec(readFileSync(path, "utf8"));
+      }
+    })();
     database.close();
   }, 120_000);
 

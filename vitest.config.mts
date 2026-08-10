@@ -74,6 +74,9 @@ export default defineConfig({
       // test.describe() throw because Playwright's runner isn't the one executing them.
       "playwright/**",
       ".next/**",
+      // Screenshot builds copy source tests into this generated tree. Running them again
+      // makes local results depend on stale build output and duplicates those test files.
+      ".next-mock/**",
       ".npm-staging/**",
     ],
     coverage: {

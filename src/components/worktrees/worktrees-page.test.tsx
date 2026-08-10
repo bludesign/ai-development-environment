@@ -1219,9 +1219,7 @@ describe("WorktreesPage", () => {
     fireEvent.click(screen.getByRole("button", { name: "feature/AIDE-24" }));
     expect(await screen.findByText("old-file.ts")).toBeDefined();
 
-    request.mockResolvedValueOnce({ refreshWorktrees: 1 } as never);
-    request.mockResolvedValueOnce(overviewResponse as never);
-    request.mockResolvedValueOnce({
+    const refreshedInspection = {
       inspectWorktree: {
         commits: [],
         changes: [
@@ -1240,11 +1238,20 @@ describe("WorktreesPage", () => {
         commitsTruncated: false,
         changesTruncated: false,
       },
-    } as never);
+    };
+    // Quick actions also load on a timer. Match requests by operation so that
+    // background work cannot consume the refresh or inspection response.
+    request.mockImplementation(async (query) => {
+      if (query.includes("mutation RefreshWorktrees"))
+        return { refreshWorktrees: 1 } as never;
+      if (query.includes("mutation InspectWorktree"))
+        return refreshedInspection as never;
+      return overviewResponse as never;
+    });
     fireEvent.click(screen.getByRole("button", { name: "Refresh" }));
 
     expect(
-      await screen.findByText("new-file.ts", undefined, { timeout: 3_000 }),
+      await screen.findByText("new-file.ts", undefined, { timeout: 10_000 }),
     ).toBeDefined();
     expect(screen.queryByText("old-file.ts")).toBeNull();
     expect(request).toHaveBeenCalledWith(
@@ -1343,6 +1350,7 @@ describe("WorktreesPage", () => {
 
   test("retries the live subscription after a transient error", async () => {
     let liveAttempts = 0;
+    const liveSubscription = { fail: null as (() => void) | null };
     subscriptions.mockReturnValue({
       subscribe: vi.fn(
         (
@@ -1352,7 +1360,7 @@ describe("WorktreesPage", () => {
           if (operation.query.includes("WorktreeInspectionChanged")) {
             liveAttempts += 1;
             if (liveAttempts === 1) {
-              window.setTimeout(() => sink.error(new Error("temporary")), 0);
+              liveSubscription.fail = () => sink.error(new Error("temporary"));
             }
           }
           return vi.fn();
@@ -1372,7 +1380,14 @@ describe("WorktreesPage", () => {
     fireEvent.click(screen.getByRole("button", { name: "feature/AIDE-24" }));
     expect(await screen.findByText("The worktree is clean.")).toBeDefined();
 
-    await waitFor(() => expect(liveAttempts).toBe(2), { timeout: 2_500 });
+    vi.useFakeTimers();
+    try {
+      liveSubscription.fail?.();
+      await vi.advanceTimersByTimeAsync(1_000);
+    } finally {
+      vi.useRealTimers();
+    }
+    expect(liveAttempts).toBe(2);
   });
 
   test("switches to the compact table and remembers the choice", async () => {
