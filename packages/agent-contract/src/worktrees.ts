@@ -316,10 +316,18 @@ function safeRelativePath(value: unknown, name: string): string {
     path === "." ||
     path.startsWith("/") ||
     /^[A-Za-z]:\//.test(path) ||
-    /[\0\r\n*?[\]]/.test(path) ||
+    /[\0\r\n]/.test(path) ||
     parts.some((part) => !part || part === "." || part === "..") ||
     parts.some((part) => part.toLowerCase() === ".git")
   ) {
+    throw new Error(`${name} must be an exact file inside the worktree`);
+  }
+  return path;
+}
+
+function safePreparationPath(value: unknown, name: string): string {
+  const path = safeRelativePath(value, name);
+  if (/[*?[\]]/.test(path)) {
     throw new Error(`${name} must be an exact file inside the worktree`);
   }
   return path;
@@ -359,10 +367,16 @@ function preparationDefinitions(
     ) {
       throw new Error(`${name}[${index}].kind is invalid`);
     }
-    const contentBase64 = nullableString(
-      item.contentBase64,
-      `${name}[${index}].contentBase64`,
-    );
+    const contentBase64 =
+      item.contentBase64 === null || item.contentBase64 === undefined
+        ? null
+        : typeof item.contentBase64 === "string"
+          ? item.contentBase64
+          : (() => {
+              throw new Error(
+                `${name}[${index}].contentBase64 must be a string`,
+              );
+            })();
     if (item.kind === "WRITE" && contentBase64 === null) {
       throw new Error(`${name}[${index}].contentBase64 is required`);
     }
@@ -372,7 +386,7 @@ function preparationDefinitions(
     return {
       id: stringValue(item.id, `${name}[${index}].id`),
       kind: item.kind as WorktreePreparationKind,
-      path: safeRelativePath(item.path, `${name}[${index}].path`),
+      path: safePreparationPath(item.path, `${name}[${index}].path`),
       contentBase64,
       definitionHash: stringValue(
         item.definitionHash,
@@ -1122,21 +1136,33 @@ export function worktreeAutoSyncJobPayload(value: unknown): {
 
 export function worktreePreparationJobPayload(value: unknown): {
   codebaseId: string;
-  folder: string;
-  gitDirectory: string;
   expectedOrigin: string;
   action: WorktreePreparationAction;
   preparations: WorktreePreparationDefinition[];
-} {
+} & (
+  | { folder: string; gitDirectory: string }
+  | {
+      worktrees: Array<{
+        worktreeId: string;
+        folder: string;
+        gitDirectory: string;
+      }>;
+    }
+) {
   const payload = objectValue(value, "worktree preparation payload");
-  const allowed = new Set([
-    "codebaseId",
-    "folder",
-    "gitDirectory",
-    "expectedOrigin",
-    "action",
-    "preparations",
-  ]);
+  const batched = payload.worktrees !== undefined;
+  const allowed = new Set(
+    batched
+      ? ["codebaseId", "expectedOrigin", "action", "preparations", "worktrees"]
+      : [
+          "codebaseId",
+          "folder",
+          "gitDirectory",
+          "expectedOrigin",
+          "action",
+          "preparations",
+        ],
+  );
   const unexpected = Object.keys(payload).find((key) => !allowed.has(key));
   if (unexpected) {
     throw new Error(
@@ -1151,15 +1177,10 @@ export function worktreePreparationJobPayload(value: unknown): {
   ) {
     throw new Error("worktree preparation payload.action is invalid");
   }
-  return {
+  const common = {
     codebaseId: stringValue(
       payload.codebaseId,
       "worktree preparation payload.codebaseId",
-    ),
-    folder: stringValue(payload.folder, "worktree preparation payload.folder"),
-    gitDirectory: stringValue(
-      payload.gitDirectory,
-      "worktree preparation payload.gitDirectory",
     ),
     expectedOrigin: stringValue(
       payload.expectedOrigin,
@@ -1171,6 +1192,59 @@ export function worktreePreparationJobPayload(value: unknown): {
       "worktree preparation payload.preparations",
     ),
   };
+  if (!batched) {
+    return {
+      ...common,
+      folder: stringValue(
+        payload.folder,
+        "worktree preparation payload.folder",
+      ),
+      gitDirectory: stringValue(
+        payload.gitDirectory,
+        "worktree preparation payload.gitDirectory",
+      ),
+    };
+  }
+  if (!Array.isArray(payload.worktrees) || payload.worktrees.length > 500) {
+    throw new Error(
+      "worktree preparation payload.worktrees must be an array with at most 500 items",
+    );
+  }
+  const worktrees = payload.worktrees.map((value, index) => {
+    const target = objectValue(
+      value,
+      `worktree preparation payload.worktrees[${index}]`,
+    );
+    const unexpectedTarget = Object.keys(target).find(
+      (key) => !["worktreeId", "folder", "gitDirectory"].includes(key),
+    );
+    if (unexpectedTarget) {
+      throw new Error(
+        `Unexpected worktree preparation payload.worktrees[${index}] field: ${unexpectedTarget}`,
+      );
+    }
+    return {
+      worktreeId: stringValue(
+        target.worktreeId,
+        `worktree preparation payload.worktrees[${index}].worktreeId`,
+      ),
+      folder: stringValue(
+        target.folder,
+        `worktree preparation payload.worktrees[${index}].folder`,
+      ),
+      gitDirectory: stringValue(
+        target.gitDirectory,
+        `worktree preparation payload.worktrees[${index}].gitDirectory`,
+      ),
+    };
+  });
+  if (
+    new Set(worktrees.map(({ worktreeId }) => worktreeId)).size !==
+    worktrees.length
+  ) {
+    throw new Error("worktree preparation payload.worktreeIds must be unique");
+  }
+  return { ...common, worktrees };
 }
 
 export function worktreeGitInspectPayload(value: unknown):

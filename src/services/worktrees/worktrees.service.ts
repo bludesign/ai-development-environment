@@ -573,7 +573,6 @@ export class WorktreesService {
         where: {
           kind: WORKTREE_PREPARATION_JOB_KIND,
           status: { in: ACTIVE_STATUSES },
-          worktreeId: { not: null },
         },
         orderBy: { createdAt: "desc" },
       }),
@@ -584,11 +583,33 @@ export class WorktreesService {
         status,
       ]),
     );
-    const activeMap = new Map(
-      activeJobs.flatMap((job) =>
-        job.worktreeId ? [[job.worktreeId, job] as const] : [],
-      ),
-    );
+    const activeMap = new Map<string, (typeof activeJobs)[number]>();
+    for (const job of activeJobs) {
+      if (job.worktreeId) activeMap.set(job.worktreeId, job);
+      try {
+        const payload: unknown = JSON.parse(job.payloadJson);
+        if (!payload || typeof payload !== "object" || Array.isArray(payload)) {
+          continue;
+        }
+        const targets = (payload as Record<string, unknown>).worktrees;
+        if (!Array.isArray(targets)) continue;
+        for (const target of targets) {
+          if (
+            target &&
+            typeof target === "object" &&
+            !Array.isArray(target) &&
+            typeof (target as Record<string, unknown>).worktreeId === "string"
+          ) {
+            activeMap.set(
+              String((target as Record<string, unknown>).worktreeId),
+              job,
+            );
+          }
+        }
+      } catch {
+        // A malformed payload will fail on the agent; it should not break the overview.
+      }
+    }
     const worktreesByRepository = new Map<string, WorktreeRecord[]>();
     for (const worktree of worktrees) {
       const repositoryId = worktree.codebase.repositoryId;
@@ -680,6 +701,7 @@ export class WorktreesService {
     const byId = new Map(worktrees.map((worktree) => [worktree.id, worktree]));
     const jobs = [];
     const skipped: Array<{ worktreeId: string; reason: string }> = [];
+    const runnableByCodebase = new Map<string, (typeof worktrees)[number][]>();
     for (const id of ids) {
       const worktree = byId.get(id);
       let reason: string | null = null;
@@ -705,29 +727,43 @@ export class WorktreesService {
         });
         continue;
       }
+      runnableByCodebase.set(worktree.codebaseId, [
+        ...(runnableByCodebase.get(worktree.codebaseId) ?? []),
+        worktree,
+      ]);
+    }
+    for (const [codebaseId, targets] of runnableByCodebase) {
+      const first = targets[0]!;
       try {
         jobs.push(
           await this.agentControl.createJob({
-            agentId: worktree.codebase.agentId,
-            worktreeId: worktree.id,
+            agentId: first.codebase.agentId,
+            codebaseId,
+            worktreeId: targets.length === 1 ? first.id : null,
             kind: WORKTREE_PREPARATION_JOB_KIND,
             payload: {
-              ...this.payload(worktree),
+              codebaseId,
+              expectedOrigin: first.codebase.repository.canonicalOrigin,
               action,
               preparations:
-                worktree.codebase.repository.preparations.map(
-                  preparationPayload,
-                ),
+                first.codebase.repository.preparations.map(preparationPayload),
+              worktrees: targets.map((worktree) => ({
+                worktreeId: worktree.id,
+                folder: worktree.folder,
+                gitDirectory: worktree.gitDirectory,
+              })),
             },
-            idempotencyKey: `worktree:prepare:${action.toLowerCase()}:${requestId}:${id}`,
+            idempotencyKey: `worktree:prepare:${action.toLowerCase()}:${requestId}:${codebaseId}`,
             timeoutSeconds: 600,
           }),
         );
       } catch (error) {
-        skipped.push({
-          worktreeId: id,
-          reason: error instanceof Error ? error.message : String(error),
-        });
+        for (const target of targets) {
+          skipped.push({
+            worktreeId: target.id,
+            reason: error instanceof Error ? error.message : String(error),
+          });
+        }
       }
     }
     return { jobs, skipped };
@@ -2283,6 +2319,14 @@ export class WorktreesService {
       input.worktreeId,
       WORKTREE_BRANCH_JOB_KIND,
     );
+    if (
+      (worktree.codebase.repository.preparations?.length ?? 0) > 0 &&
+      !capabilities(worktree.codebase.agent).includes(
+        WORKTREE_PREPARATION_JOB_KIND,
+      )
+    ) {
+      throw new Error("Agent must be updated to apply repository preparations");
+    }
     const resolved = await this.resolveBranchSelection(
       worktree.codebase,
       input.selection,
@@ -2304,7 +2348,9 @@ export class WorktreesService {
         mode: resolved.mode,
         candidates: resolved.candidates,
         stashOnFailure: Boolean(input.stashOnFailure),
-        preparations: [],
+        preparations: (worktree.codebase.repository.preparations ?? []).map(
+          preparationPayload,
+        ),
       },
       idempotencyKey: `worktree:branch:change:${input.requestId}:${worktree.id}`,
       timeoutSeconds: 600,
@@ -3857,14 +3903,49 @@ export class WorktreesService {
     worktreeId: string | null;
     resultJson: string | null;
   }) {
-    if (!job.worktreeId || !job.resultJson) return;
-    await this.projectPreparationResults(job.worktreeId, job.resultJson);
+    if (!job.resultJson) return;
+    let result: unknown;
+    try {
+      result = JSON.parse(job.resultJson);
+    } catch {
+      return;
+    }
+    const projectedWorktrees: string[] = [];
+    if (result && typeof result === "object" && !Array.isArray(result)) {
+      const batch = (result as Record<string, unknown>).worktrees;
+      if (Array.isArray(batch)) {
+        for (const raw of batch.slice(0, 500)) {
+          if (!raw || typeof raw !== "object" || Array.isArray(raw)) continue;
+          const target = raw as Record<string, unknown>;
+          if (
+            typeof target.worktreeId !== "string" ||
+            !Array.isArray(target.preparations)
+          ) {
+            continue;
+          }
+          await this.projectPreparationResults(
+            target.worktreeId,
+            JSON.stringify({
+              checkedAt: target.checkedAt,
+              preparations: target.preparations,
+            }),
+          );
+          projectedWorktrees.push(target.worktreeId);
+        }
+      }
+    }
+    if (projectedWorktrees.length === 0 && job.worktreeId) {
+      await this.projectPreparationResults(job.worktreeId, job.resultJson);
+      projectedWorktrees.push(job.worktreeId);
+    }
     const prisma = await getPrismaClient();
-    const worktree = await prisma.worktree.findUnique({
-      where: { id: job.worktreeId },
-      select: { codebaseId: true },
-    });
-    this.publish(job.worktreeId, worktree?.codebaseId ?? null);
+    for (const worktreeId of projectedWorktrees) {
+      const worktree = await prisma.worktree.findUnique({
+        where: { id: worktreeId },
+        select: { codebaseId: true },
+      });
+      this.publish(worktreeId, worktree?.codebaseId ?? null);
+    }
   }
 
   private async projectPreparationResults(

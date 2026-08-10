@@ -522,7 +522,7 @@ export class CodebasesService {
     const prisma = await getPrismaClient();
     const repository = await prisma.codebaseRepository.findUnique({
       where: { id: repositoryId },
-      include: { preparations: true },
+      include: { preparations: { include: { statuses: true } } },
     });
     if (!repository) throw new Error("Repository not found");
     const existing = new Map(
@@ -554,16 +554,20 @@ export class CodebasesService {
       if (id) seenIds.add(id);
       let contents: Buffer | null = null;
       if (input.kind === "WRITE") {
-        contents = input.contentBase64
-          ? decodePreparationContents(input.contentBase64)
-          : current?.kind === "WRITE" && current.contents
-            ? Buffer.from(current.contents)
-            : null;
-        if (!contents) {
+        contents =
+          input.contentBase64 !== null && input.contentBase64 !== undefined
+            ? decodePreparationContents(input.contentBase64)
+            : current?.kind === "WRITE" && current.contents
+              ? Buffer.from(current.contents)
+              : null;
+        if (contents === null) {
           throw new Error(`Uploaded contents are required for ${path}`);
         }
         totalBytes += contents.byteLength;
-      } else if (input.contentBase64) {
+      } else if (
+        input.contentBase64 !== null &&
+        input.contentBase64 !== undefined
+      ) {
         throw new Error(
           `Uploaded contents are only supported for write preparations`,
         );
@@ -586,11 +590,49 @@ export class CodebasesService {
       );
     }
 
+    const needsCleanup = repository.preparations.filter((preparation) => {
+      const retained = normalized.find((input) => input.id === preparation.id);
+      if (
+        retained &&
+        retained.kind === preparation.kind &&
+        retained.path === preparation.path
+      ) {
+        return false;
+      }
+      return (
+        preparation.statuses?.some(
+          (status) =>
+            status.state !== "UNDONE" && status.state !== "NOT_APPLICABLE",
+        ) ?? false
+      );
+    });
+    if (needsCleanup.length > 0) {
+      throw new Error(
+        `Undo preparation ${needsCleanup[0]!.path} on all worktrees before removing or moving it`,
+      );
+    }
+
     await prisma.$transaction(async (transaction) => {
-      const retainedIds: string[] = [];
+      const retainedIds = normalized.flatMap((input) =>
+        input.id ? [input.id] : [],
+      );
+      await transaction.codebaseRepositoryPreparation.deleteMany({
+        where: {
+          repositoryId,
+          ...(retainedIds.length ? { id: { notIn: retainedIds } } : {}),
+        },
+      });
+      for (const input of normalized) {
+        const current = input.id ? existing.get(input.id) : null;
+        if (current && current.path !== input.path) {
+          await transaction.codebaseRepositoryPreparation.update({
+            where: { id: current.id },
+            data: { path: `.aide-preparation-replacement/${randomUUID()}` },
+          });
+        }
+      }
       for (const input of normalized) {
         const id = input.id ?? randomUUID();
-        retainedIds.push(id);
         const data = {
           kind: input.kind,
           path: input.path,
@@ -612,12 +654,6 @@ export class CodebasesService {
           });
         }
       }
-      await transaction.codebaseRepositoryPreparation.deleteMany({
-        where: {
-          repositoryId,
-          ...(retainedIds.length ? { id: { notIn: retainedIds } } : {}),
-        },
-      });
     });
     this.publish(null, repositoryId);
     return this.repositoryDetail(repositoryId);

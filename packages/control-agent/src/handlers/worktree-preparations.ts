@@ -509,6 +509,7 @@ export async function suspendWorktreePreparations(
   definitions: WorktreePreparationDefinition[],
   timeoutMs: number,
   signal: AbortSignal,
+  preserveAssumeUnchangedContents = false,
 ): Promise<WorktreePreparationResult[]> {
   let excludeError: string | null = null;
   try {
@@ -530,7 +531,17 @@ export async function suspendWorktreePreparations(
     try {
       if (definition.kind === "ASSUME_UNCHANGED") {
         if (await isTracked(folder, definition.path, timeoutMs, signal)) {
-          await restoreFromHead(folder, definition, timeoutMs, signal);
+          if (preserveAssumeUnchangedContents) {
+            await setAssumeUnchanged(
+              folder,
+              definition.path,
+              false,
+              timeoutMs,
+              signal,
+            );
+          } else {
+            await restoreFromHead(folder, definition, timeoutMs, signal);
+          }
           results.push({
             id: definition.id,
             definitionHash: definition.definitionHash,
@@ -605,6 +616,24 @@ export async function preparationConflictPaths(
           head.stdout.trim() !== working.stdout.trim();
       } else if (definition.kind === "WRITE") {
         managedChange = await exists(await safeTarget(folder, definition.path));
+      } else {
+        const presentOnBase = await git(
+          folder,
+          ["cat-file", "-e", `${remoteBase}:${definition.path}`],
+          timeoutMs,
+          signal,
+        );
+        if (presentOnBase.exitCode === 0) {
+          managedChange = true;
+        } else if (
+          presentOnBase.exitCode !== 1 &&
+          presentOnBase.exitCode !== 128
+        ) {
+          requireSuccess(
+            presentOnBase,
+            `Could not inspect ${definition.path} on the base branch`,
+          );
+        }
       }
       if (managedChange) paths.push(definition.path);
       continue;

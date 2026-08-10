@@ -271,6 +271,90 @@ describe("worktree pull, sync, and rebase", () => {
     expect((await git(linked, "status", "--porcelain")).stdout).toBe("");
   }, 20_000);
 
+  test("reconciles delete and assume rules for paths newly added by the base", async () => {
+    const folder = await repository();
+    const remote = await localRemote();
+    const remoteUrl = `ssh://git@example.test${remote}`;
+    await useHostedRemote(folder, remote, remoteUrl);
+    await git(folder, "config", "commit.gpgsign", "false");
+    await git(folder, "push", "-u", "origin", "main");
+    const linked = `${folder}-base-added-preparations`;
+    temporaryDirectories.push(linked);
+    await git(folder, "worktree", "add", "-b", "feature/prepared", linked);
+    await writeFile(join(linked, "feature.txt"), "feature\n");
+    await git(linked, "add", "feature.txt");
+    await git(linked, "commit", "-m", "Add feature");
+    await writeFile(join(folder, "delete-on-base.txt"), "delete me\n");
+    await writeFile(join(folder, "assume-on-base.txt"), "keep me\n");
+    await git(folder, "add", "delete-on-base.txt", "assume-on-base.txt");
+    await git(folder, "commit", "-m", "Add prepared paths on base");
+    await git(folder, "push", "origin", "main");
+    const gitDirectory = await realpath(
+      (
+        await git(linked, "rev-parse", "--path-format=absolute", "--git-dir")
+      ).stdout.trim(),
+    );
+    const preparations = [
+      {
+        id: "delete-base-path",
+        kind: "DELETE" as const,
+        path: "delete-on-base.txt",
+        contentBase64: null,
+        definitionHash: "delete-base-path-v1",
+      },
+      {
+        id: "assume-base-path",
+        kind: "ASSUME_UNCHANGED" as const,
+        path: "assume-on-base.txt",
+        contentBase64: null,
+        definitionHash: "assume-base-path-v1",
+      },
+    ];
+    const operation = {
+      codebaseId: "codebase-1",
+      folder: linked,
+      gitDirectory,
+      expectedOrigin: normalizeGitOrigin(remoteUrl).canonicalOrigin,
+      baseBranch: "main",
+      operation: "REBASE" as const,
+      preparations,
+    };
+
+    await expect(
+      operateWorktree(
+        operation,
+        10_000,
+        new AbortController().signal,
+        async () => undefined,
+      ),
+    ).resolves.toMatchObject({
+      outcome: "PREPARATION_CONFLICT",
+      preparationConflictPaths: ["delete-on-base.txt", "assume-on-base.txt"],
+    });
+
+    await expect(
+      operateWorktree(
+        { ...operation, forcePreparations: true },
+        10_000,
+        new AbortController().signal,
+        async () => undefined,
+      ),
+    ).resolves.toMatchObject({
+      outcome: "COMPLETED",
+      preparations: [
+        { id: "delete-base-path", state: "APPLIED" },
+        { id: "assume-base-path", state: "APPLIED" },
+      ],
+    });
+    await expect(
+      readFile(join(linked, "delete-on-base.txt"), "utf8"),
+    ).rejects.toMatchObject({ code: "ENOENT" });
+    expect(
+      (await git(linked, "ls-files", "-v", "assume-on-base.txt")).stdout[0],
+    ).toBe("h");
+    expect((await git(linked, "status", "--porcelain")).stdout).toBe("");
+  }, 20_000);
+
   test("retains a conflicted rebase until it is cancelled", async () => {
     const folder = await repository();
     const remote = await localRemote();

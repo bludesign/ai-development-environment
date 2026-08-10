@@ -1,4 +1,4 @@
-import { realpath, writeFile } from "node:fs/promises";
+import { readFile, realpath, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 
 import { describe, expect, test } from "vitest";
@@ -18,6 +18,7 @@ import {
   inspectWorktreeDiff,
   operateWorktree,
 } from "./worktrees.js";
+import { executeWorktreePreparations } from "./worktree-preparations.js";
 
 registerWorktreeFixtures();
 
@@ -170,6 +171,145 @@ describe("worktree inventory and inspection", () => {
     );
     expect((await git(folder, "stash", "list")).stdout).toContain(
       "Automatic stash before switching to release",
+    );
+  });
+
+  test("suspends and reapplies tracked preparations around a branch change", async () => {
+    const folder = await repository();
+    await git(folder, "switch", "-c", "release");
+    await writeFile(join(folder, "README.md"), "release contents\n");
+    await git(folder, "add", "README.md");
+    await git(folder, "commit", "-m", "Change release readme");
+    await git(folder, "switch", "main");
+    const gitDirectory = await realpath(
+      (
+        await git(folder, "rev-parse", "--path-format=absolute", "--git-dir")
+      ).stdout.trim(),
+    );
+    const preparations = [
+      {
+        id: "prepared-readme",
+        kind: "WRITE" as const,
+        path: "README.md",
+        contentBase64: Buffer.from("local configuration\n").toString("base64"),
+        definitionHash: "prepared-readme-v1",
+      },
+    ];
+    await executeWorktreePreparations(
+      folder,
+      preparations,
+      "APPLY",
+      10_000,
+      new AbortController().signal,
+    );
+
+    await expect(
+      branchWorktree(
+        {
+          codebaseId: "codebase-1",
+          rootFolder: folder,
+          folder,
+          gitDirectory,
+          expectedOrigin: "github.com/openai/codex",
+          baseBranch: "main",
+          action: "CHANGE",
+          mode: "EXISTING",
+          candidates: ["release"],
+          stashOnFailure: false,
+          preparations,
+        },
+        10_000,
+        new AbortController().signal,
+        async () => undefined,
+      ),
+    ).resolves.toMatchObject({
+      branch: "release",
+      preparations: [{ id: "prepared-readme", state: "APPLIED" }],
+    });
+    expect(await readFile(join(folder, "README.md"), "utf8")).toBe(
+      "local configuration\n",
+    );
+    expect((await git(folder, "ls-files", "-v", "README.md")).stdout[0]).toBe(
+      "h",
+    );
+    expect((await git(folder, "status", "--porcelain")).stdout).toBe("");
+  });
+
+  test("makes assume-unchanged edits visible to branch-change stashing", async () => {
+    const folder = await repository();
+    await git(folder, "switch", "-c", "release");
+    await writeFile(join(folder, "README.md"), "release contents\n");
+    await git(folder, "add", "README.md");
+    await git(folder, "commit", "-m", "Change release readme");
+    await git(folder, "switch", "main");
+    await writeFile(join(folder, "README.md"), "private main contents\n");
+    const gitDirectory = await realpath(
+      (
+        await git(folder, "rev-parse", "--path-format=absolute", "--git-dir")
+      ).stdout.trim(),
+    );
+    const preparations = [
+      {
+        id: "assume-readme",
+        kind: "ASSUME_UNCHANGED" as const,
+        path: "README.md",
+        contentBase64: null,
+        definitionHash: "assume-readme-v1",
+      },
+    ];
+    await executeWorktreePreparations(
+      folder,
+      preparations,
+      "APPLY",
+      10_000,
+      new AbortController().signal,
+    );
+    const payload = {
+      codebaseId: "codebase-1",
+      rootFolder: folder,
+      folder,
+      gitDirectory,
+      expectedOrigin: "github.com/openai/codex",
+      baseBranch: "main",
+      action: "CHANGE" as const,
+      mode: "EXISTING" as const,
+      candidates: ["release"],
+      preparations,
+    };
+
+    await expect(
+      branchWorktree(
+        { ...payload, stashOnFailure: false },
+        10_000,
+        new AbortController().signal,
+        async () => undefined,
+      ),
+    ).rejects.toThrow();
+    expect(await readFile(join(folder, "README.md"), "utf8")).toBe(
+      "private main contents\n",
+    );
+    expect((await git(folder, "ls-files", "-v", "README.md")).stdout[0]).toBe(
+      "h",
+    );
+
+    await branchWorktree(
+      { ...payload, stashOnFailure: true },
+      10_000,
+      new AbortController().signal,
+      async () => undefined,
+    );
+
+    expect((await git(folder, "branch", "--show-current")).stdout.trim()).toBe(
+      "release",
+    );
+    expect(await readFile(join(folder, "README.md"), "utf8")).toBe(
+      "release contents\n",
+    );
+    expect((await git(folder, "stash", "list")).stdout).toContain(
+      "Automatic stash before switching to release",
+    );
+    expect((await git(folder, "ls-files", "-v", "README.md")).stdout[0]).toBe(
+      "h",
     );
   });
 

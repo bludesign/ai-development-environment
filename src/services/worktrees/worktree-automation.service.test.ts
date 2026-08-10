@@ -197,6 +197,11 @@ describe("WorktreeAutomationService", () => {
     ).toBeLessThan(
       upsert.mock.invocationCallOrder[0] ?? Number.POSITIVE_INFINITY,
     );
+    expect(upsert).toHaveBeenCalledWith(
+      expect.objectContaining({
+        update: expect.not.objectContaining({ pauseReason: expect.anything() }),
+      }),
+    );
   });
 
   test.each([

@@ -2,6 +2,7 @@ import {
   chmod,
   mkdtemp,
   readFile,
+  realpath,
   stat,
   symlink,
   writeFile,
@@ -20,6 +21,7 @@ import {
   temporaryDirectories,
 } from "./worktree-fixtures.js";
 import { executeWorktreePreparations } from "./worktree-preparations.js";
+import { prepareWorktree } from "./worktrees.js";
 
 registerWorktreeFixtures();
 
@@ -38,6 +40,63 @@ const definition = (
 });
 
 describe("worktree preparations", () => {
+  test("runs a codebase batch sequentially across linked worktrees", async () => {
+    const folder = await repository();
+    const linked = `${folder}-batch`;
+    temporaryDirectories.push(linked);
+    await git(folder, "worktree", "add", "-b", "feature/batch", linked);
+    const gitDirectory = async (worktree: string) =>
+      realpath(
+        (
+          await git(
+            worktree,
+            "rev-parse",
+            "--path-format=absolute",
+            "--git-dir",
+          )
+        ).stdout.trim(),
+      );
+    const definitions = [
+      definition("local", "WRITE", ".env.local", Buffer.from("local\n")),
+    ];
+
+    const result = (await prepareWorktree(
+      {
+        codebaseId: "codebase-1",
+        expectedOrigin: "github.com/openai/codex",
+        action: "APPLY",
+        preparations: definitions,
+        worktrees: [
+          {
+            worktreeId: "worktree-1",
+            folder,
+            gitDirectory: await gitDirectory(folder),
+          },
+          {
+            worktreeId: "worktree-2",
+            folder: linked,
+            gitDirectory: await gitDirectory(linked),
+          },
+        ],
+      },
+      10_000,
+      signal,
+      async () => undefined,
+    )) as unknown as {
+      worktrees: Array<{
+        worktreeId: string;
+        preparations: Array<{ state: string }>;
+      }>;
+    };
+
+    expect(result.worktrees).toMatchObject([
+      { worktreeId: "worktree-1", preparations: [{ state: "APPLIED" }] },
+      { worktreeId: "worktree-2", preparations: [{ state: "APPLIED" }] },
+    ]);
+    expect(await readFile(join(folder, ".env.local"), "utf8")).toBe("local\n");
+    expect(await readFile(join(linked, ".env.local"), "utf8")).toBe("local\n");
+  });
+
   test("applies binary writes, deletes, assume flags, and exact exclusions", async () => {
     const folder = await repository();
     await writeFile(join(folder, "delete.txt"), "remove me\n");

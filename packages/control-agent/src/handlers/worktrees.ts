@@ -1995,59 +1995,88 @@ export const branchWorktree: AgentJobHandler = async (
   }
 
   let stashed = false;
-  if (args.length > 0) {
-    let switched = await git(
-      input.action === "CREATE" ? rootFolder : targetFolder,
-      args,
-      timeoutMs,
-      signal,
-    );
-    if (
-      switched.exitCode !== 0 &&
-      input.action === "CHANGE" &&
-      input.stashOnFailure
-    ) {
-      const stash = requireSuccess(
-        await git(
-          targetFolder,
-          [
-            "stash",
-            "push",
-            "--include-untracked",
-            "-m",
-            `Automatic stash before switching to ${branch}`,
-          ],
-          timeoutMs,
-          signal,
-        ),
-        "Could not stash worktree changes",
-      );
-      stashed = !stash.stdout.toLowerCase().includes("no local changes");
-      switched = await git(targetFolder, args, timeoutMs, signal);
-      if (switched.exitCode !== 0) {
-        throw new Error(
-          `${cleanError(switched.stderr || "Branch switch failed after stashing")}. The stash was preserved.`,
-        );
-      }
-    } else {
-      requireSuccess(
-        switched,
-        input.action === "CREATE"
-          ? "Could not create the worktree"
-          : "Could not change the worktree branch",
-      );
-    }
-  }
-
-  let preparations: WorktreePreparationResult[] = [];
-  if (input.preparations.length > 0) {
-    preparations = await executeWorktreePreparations(
+  let preparationsSuspended = false;
+  const reapplyPreparations = () =>
+    executeWorktreePreparations(
       targetFolder,
       input.preparations,
       "APPLY",
       timeoutMs,
       signal,
     );
+  if (
+    args.length > 0 &&
+    input.action === "CHANGE" &&
+    input.preparations.length > 0
+  ) {
+    const suspended = await suspendWorktreePreparations(
+      targetFolder,
+      input.preparations,
+      timeoutMs,
+      signal,
+      true,
+    );
+    preparationsSuspended = true;
+    const failed = suspended.filter((item) => item.state === "ERROR");
+    if (failed.length > 0) {
+      await reapplyPreparations();
+      throw new Error(
+        failed.map((item) => item.message ?? "Preparation failed").join("; "),
+      );
+    }
+  }
+  if (args.length > 0) {
+    try {
+      let switched = await git(
+        input.action === "CREATE" ? rootFolder : targetFolder,
+        args,
+        timeoutMs,
+        signal,
+      );
+      if (
+        switched.exitCode !== 0 &&
+        input.action === "CHANGE" &&
+        input.stashOnFailure
+      ) {
+        const stash = requireSuccess(
+          await git(
+            targetFolder,
+            [
+              "stash",
+              "push",
+              "--include-untracked",
+              "-m",
+              `Automatic stash before switching to ${branch}`,
+            ],
+            timeoutMs,
+            signal,
+          ),
+          "Could not stash worktree changes",
+        );
+        stashed = !stash.stdout.toLowerCase().includes("no local changes");
+        switched = await git(targetFolder, args, timeoutMs, signal);
+        if (switched.exitCode !== 0) {
+          throw new Error(
+            `${cleanError(switched.stderr || "Branch switch failed after stashing")}. The stash was preserved.`,
+          );
+        }
+      } else {
+        requireSuccess(
+          switched,
+          input.action === "CREATE"
+            ? "Could not create the worktree"
+            : "Could not change the worktree branch",
+        );
+      }
+    } catch (error) {
+      if (preparationsSuspended) await reapplyPreparations();
+      throw error;
+    }
+  }
+
+  let preparations: WorktreePreparationResult[] = [];
+  if (input.preparations.length > 0) {
+    preparations = await reapplyPreparations();
     const failed = preparations.filter((item) => item.state === "ERROR");
     if (failed.length > 0 && input.action === "CREATE") {
       await git(
@@ -2468,6 +2497,48 @@ export const prepareWorktree: AgentJobHandler = async (
   signal,
 ) => {
   const input = worktreePreparationJobPayload(payload);
+  if ("worktrees" in input) {
+    const worktrees = [];
+    for (const target of input.worktrees) {
+      try {
+        const folder = await validateWorktree(
+          {
+            codebaseId: input.codebaseId,
+            folder: target.folder,
+            gitDirectory: target.gitDirectory,
+            expectedOrigin: input.expectedOrigin,
+            baseBranch: null,
+          },
+          timeoutMs,
+          signal,
+        );
+        const preparations = await executeWorktreePreparations(
+          folder,
+          input.preparations,
+          input.action,
+          timeoutMs,
+          signal,
+        );
+        worktrees.push({
+          worktreeId: target.worktreeId,
+          checkedAt: new Date().toISOString(),
+          preparations,
+        });
+      } catch (error) {
+        worktrees.push({
+          worktreeId: target.worktreeId,
+          checkedAt: new Date().toISOString(),
+          preparations: input.preparations.map((definition) => ({
+            id: definition.id,
+            definitionHash: definition.definitionHash,
+            state: "ERROR" as const,
+            message: cleanError(error),
+          })),
+        });
+      }
+    }
+    return { ...successfulProcess, worktrees };
+  }
   const folder = await validateWorktree(input, timeoutMs, signal);
   const preparations = await executeWorktreePreparations(
     folder,

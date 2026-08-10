@@ -450,7 +450,6 @@ export class WorktreeAutomationService {
           ticketMovedAt: null,
           deleteJobId: null,
           lastError: null,
-          pauseReason: null,
         },
       });
       this.worktrees.publishAutomationChange(worktree.id, worktree.codebaseId);
