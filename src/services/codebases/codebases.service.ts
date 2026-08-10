@@ -161,6 +161,19 @@ export class CodebasesService {
     });
   }
 
+  async repositoryPreparations(repositoryId: string) {
+    const prisma = await getPrismaClient();
+    const repository = await prisma.codebaseRepository.findUnique({
+      where: { id: repositoryId },
+      select: { id: true },
+    });
+    if (!repository) throw new Error("Repository not found");
+    return prisma.codebaseRepositoryPreparation.findMany({
+      where: { repositoryId },
+      orderBy: [{ kind: "asc" }, { path: "asc" }],
+    });
+  }
+
   async detail(id: string) {
     await this.cleanupInternalJobs();
     const prisma = await getPrismaClient();

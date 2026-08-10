@@ -72,6 +72,44 @@ const InspectStashInputSchema = z.object({
   requestId: z.string().min(1),
 });
 const InspectStashOutputSchema = z.object({ diff: z.unknown() });
+const RepositoryPreparationSchema = z.object({
+  id: z.string(),
+  kind: z.enum(["WRITE", "DELETE", "ASSUME_UNCHANGED"]),
+  path: z.string(),
+  contentBase64: z.string().nullable(),
+  contentSha256: z.string().nullable(),
+  byteCount: z.number().int().nonnegative().nullable(),
+  definitionHash: z.string(),
+  createdAt: z.string(),
+  updatedAt: z.string(),
+});
+const RepositoryPreparationsInputSchema = z.object({
+  repositoryId: z.string().min(1),
+});
+
+const preparationView = (preparation: {
+  id: string;
+  kind: string;
+  path: string;
+  contents: Uint8Array | null;
+  contentSha256: string | null;
+  byteCount: number | null;
+  definitionHash: string;
+  createdAt: Date;
+  updatedAt: Date;
+}) => ({
+  id: preparation.id,
+  kind: preparation.kind as "WRITE" | "DELETE" | "ASSUME_UNCHANGED",
+  path: preparation.path,
+  contentBase64: preparation.contents
+    ? Buffer.from(preparation.contents).toString("base64")
+    : null,
+  contentSha256: preparation.contentSha256,
+  byteCount: preparation.byteCount,
+  definitionHash: preparation.definitionHash,
+  createdAt: preparation.createdAt.toISOString(),
+  updatedAt: preparation.updatedAt.toISOString(),
+});
 
 export function createCodebaseToolGroup(
   codebaseTools: CodebaseToolsService,
@@ -228,6 +266,55 @@ export function createCodebaseToolGroup(
         handler: async ({ id }) => ({
           repository: await codebaseTools.repository(id),
         }),
+      }),
+      defineTool({
+        name: "get_codebase_repository_preparations",
+        title: "Get repository preparations",
+        description:
+          "Get every write, delete, and assume-unchanged rule configured for a repository, including uploaded write contents.",
+        inputSchema: RepositoryPreparationsInputSchema,
+        outputSchema: z.object({
+          preparations: z.array(RepositoryPreparationSchema),
+        }),
+        annotations: READ_ONLY_ANNOTATIONS,
+        handler: async ({ repositoryId }) => ({
+          preparations: (
+            await codebases.repositoryPreparations(repositoryId)
+          ).map(preparationView),
+        }),
+      }),
+      defineTool({
+        name: "save_codebase_repository_preparations",
+        title: "Save repository preparations",
+        description:
+          "Atomically replace a repository's preparation rules. Existing write contents are retained when their rule ID is supplied without contentBase64; omitted rules are deleted.",
+        inputSchema: RepositoryPreparationsInputSchema.extend({
+          preparations: z
+            .array(
+              z.object({
+                id: z.string().min(1).nullable().optional(),
+                kind: z.enum(["WRITE", "DELETE", "ASSUME_UNCHANGED"]),
+                path: z.string().min(1),
+                contentBase64: z.string().nullable().optional(),
+              }),
+            )
+            .max(500),
+        }),
+        outputSchema: z.object({
+          preparations: z.array(RepositoryPreparationSchema),
+        }),
+        annotations: DESTRUCTIVE_ANNOTATIONS,
+        handler: async ({ repositoryId, preparations }) => {
+          await codebases.saveRepositoryPreparations(
+            repositoryId,
+            preparations,
+          );
+          return {
+            preparations: (
+              await codebases.repositoryPreparations(repositoryId)
+            ).map(preparationView),
+          };
+        },
       }),
       defineTool({
         name: "get_codebase_settings",

@@ -16,6 +16,7 @@ const AutoSyncSchema = z.object({
   conflictWorkflowId: z.string().nullable(),
   conflictWorkflowChoice: z.string().nullable(),
   lastError: z.string().nullable(),
+  pauseReason: z.string().nullable(),
   lastSyncedAt: z.string().nullable(),
   updatedAt: z.string(),
 });
@@ -87,6 +88,21 @@ export function createWorktreeAutomationToolGroup(
         annotations: WRITE_ANNOTATIONS,
         handler: async ({ worktreeId }) => ({
           autoSync: await service().retryAutoSync(worktreeId),
+        }),
+      }),
+      defineTool({
+        name: "force_worktree_auto_sync",
+        title: "Force worktree Auto Sync",
+        description:
+          "Force an Auto Sync paused specifically by a preparation conflict. Managed paths are reset, the sync runs, and current preparations are reapplied.",
+        inputSchema: z.object({
+          worktreeId: z.string().min(1),
+          requestId: z.string().min(1),
+        }),
+        outputSchema: z.object({ job: z.unknown() }),
+        annotations: DESTRUCTIVE_ANNOTATIONS,
+        handler: async ({ worktreeId, requestId }) => ({
+          job: await service().forceAutoSync(worktreeId, requestId),
         }),
       }),
       defineTool({

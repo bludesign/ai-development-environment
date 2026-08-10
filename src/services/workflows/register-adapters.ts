@@ -13,6 +13,8 @@ import {
 import {
   WORKTREE_GIT_OPERATIONS,
   WORKTREE_OPERATIONS,
+  WORKTREE_PREPARATION_ACTIONS,
+  type WorktreePreparationAction,
   type WorktreeGitOperation,
   type WorktreeOperation,
 } from "@ai-development-environment/agent-contract/worktrees";
@@ -2316,12 +2318,45 @@ function registerWorktreeAdapters(
       id,
       operation as WorktreeOperation,
       requestId(context, operation.toLowerCase()),
+      context.node.config.forcePreparations === true,
     );
+    return jobResult(context, job, undefined, [worktreeLink(id)]);
+  });
+  executor.register("WORKTREE_PREPARATION", async (context) => {
+    const id = worktreeId(context);
+    const action = String(
+      context.node.config.action ?? "INSPECT",
+    ).toUpperCase();
+    if (
+      !WORKTREE_PREPARATION_ACTIONS.includes(
+        action as WorktreePreparationAction,
+      )
+    ) {
+      throw new Error("Worktree preparation action is invalid");
+    }
+    const result = await services.worktrees.runPreparations(
+      [id],
+      action as WorktreePreparationAction,
+      requestId(context, `preparation-${action.toLowerCase()}`),
+    );
+    const job = result.jobs[0];
+    if (!job) {
+      throw new Error(
+        result.skipped[0]?.reason ?? "Worktree preparation was not dispatched",
+      );
+    }
     return jobResult(context, job, undefined, [worktreeLink(id)]);
   });
   executor.register("WORKTREE_SET_AUTO_SYNC", async (context) => {
     const id = worktreeId(context);
     const action = String(context.node.config.action ?? "ENABLE").toUpperCase();
+    if (action === "FORCE") {
+      const job = await services.worktreeAutomations.forceAutoSync(
+        id,
+        requestId(context, "force-auto-sync"),
+      );
+      return jobResult(context, job, undefined, [worktreeLink(id)]);
+    }
     const autoSync =
       action === "CANCEL"
         ? {

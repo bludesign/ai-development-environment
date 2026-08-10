@@ -87,6 +87,108 @@ const diskSnapshot = {
 };
 
 describe("workflow run adapters", () => {
+  test("dispatches and waits for a worktree preparation action", async () => {
+    const runPreparations = vi.fn().mockResolvedValue({
+      jobs: [{ id: "prepare-job", timeoutSeconds: 600 }],
+      skipped: [],
+    });
+    const executor = new WorkflowStepExecutor();
+    registerWorkflowAdapters(
+      { registerWaitPoller: vi.fn() } as unknown as WorkflowsService,
+      executor,
+      { worktrees: { runPreparations } } as unknown as WorkflowAdapterServices,
+    );
+    const input = context("actual-worktree");
+    input.node = {
+      ...input.node,
+      id: "prepare",
+      kind: "WORKTREE_PREPARATION",
+      config: { worktreeId: "actual-worktree", action: "APPLY" },
+    };
+
+    const result = await executor.execute(input);
+
+    expect(runPreparations).toHaveBeenCalledWith(
+      ["actual-worktree"],
+      "APPLY",
+      "workflow-run:attempt:preparation-apply",
+    );
+    expect(result.wait).toMatchObject({
+      kind: "AGENT_JOB",
+      externalKey: "prepare-job",
+    });
+    expect(result.links).toContainEqual(
+      expect.objectContaining({
+        kind: "WORKTREE",
+        resourceId: "actual-worktree",
+      }),
+    );
+  });
+
+  test("forwards explicit preparation force to worktree operations", async () => {
+    const runOperation = vi
+      .fn()
+      .mockResolvedValue({ id: "sync-job", timeoutSeconds: 600 });
+    const executor = new WorkflowStepExecutor();
+    registerWorkflowAdapters(
+      { registerWaitPoller: vi.fn() } as unknown as WorkflowsService,
+      executor,
+      { worktrees: { runOperation } } as unknown as WorkflowAdapterServices,
+    );
+    const input = context("actual-worktree");
+    input.node = {
+      ...input.node,
+      id: "sync",
+      kind: "WORKTREE_OPERATION",
+      config: {
+        worktreeId: "actual-worktree",
+        operation: "SYNC",
+        forcePreparations: true,
+      },
+    };
+
+    await executor.execute(input);
+
+    expect(runOperation).toHaveBeenCalledWith(
+      "actual-worktree",
+      "SYNC",
+      "workflow-run:attempt:sync",
+      true,
+    );
+  });
+
+  test("forces preparation-paused Auto Sync and waits for the job", async () => {
+    const forceAutoSync = vi
+      .fn()
+      .mockResolvedValue({ id: "auto-sync-job", timeoutSeconds: 600 });
+    const executor = new WorkflowStepExecutor();
+    registerWorkflowAdapters(
+      { registerWaitPoller: vi.fn() } as unknown as WorkflowsService,
+      executor,
+      {
+        worktreeAutomations: { forceAutoSync },
+      } as unknown as WorkflowAdapterServices,
+    );
+    const input = context("actual-worktree");
+    input.node = {
+      ...input.node,
+      id: "force-sync",
+      kind: "WORKTREE_SET_AUTO_SYNC",
+      config: { worktreeId: "actual-worktree", action: "FORCE" },
+    };
+
+    const result = await executor.execute(input);
+
+    expect(forceAutoSync).toHaveBeenCalledWith(
+      "actual-worktree",
+      "workflow-run:attempt:force-auto-sync",
+    );
+    expect(result.wait).toMatchObject({
+      kind: "AGENT_JOB",
+      externalKey: "auto-sync-job",
+    });
+  });
+
   test("recovers a worktree id accidentally bound to workflow.id", async () => {
     const create = vi
       .fn()
