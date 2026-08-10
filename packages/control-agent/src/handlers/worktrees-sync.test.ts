@@ -28,7 +28,6 @@ describe("worktree pull, sync, and rebase", () => {
     const remote = await localRemote();
     const remoteUrl = `ssh://git@example.test${remote}`;
     await useHostedRemote(folder, remote, remoteUrl);
-    await git(folder, "config", "commit.gpgsign", "false");
     await git(folder, "push", "-u", "origin", "main");
     await writeFile(join(folder, "base.txt"), "base\n");
     await git(folder, "add", "base.txt");
@@ -68,7 +67,6 @@ describe("worktree pull, sync, and rebase", () => {
     const remote = await localRemote();
     const remoteUrl = `ssh://git@example.test${remote}`;
     await useHostedRemote(folder, remote, remoteUrl);
-    await git(folder, "config", "commit.gpgsign", "false");
     await git(folder, "push", "-u", "origin", "main");
     await writeFile(join(folder, "remote.txt"), "remote\n");
     await git(folder, "add", "remote.txt");
@@ -140,9 +138,6 @@ describe("worktree pull, sync, and rebase", () => {
     const remote = await localRemote();
     const remoteUrl = `ssh://git@example.test${remote}`;
     await useHostedRemote(folder, remote, remoteUrl);
-    // The handler runs Git with the developer's own global config, so the
-    // rebase it performs would otherwise block on commit signing.
-    await git(folder, "config", "commit.gpgsign", "false");
     await git(folder, "push", "-u", "origin", "main");
     const linked = `${folder}-rebase`;
     temporaryDirectories.push(linked);
@@ -188,7 +183,6 @@ describe("worktree pull, sync, and rebase", () => {
     const remote = await localRemote();
     const remoteUrl = `ssh://git@example.test${remote}`;
     await useHostedRemote(folder, remote, remoteUrl);
-    await git(folder, "config", "commit.gpgsign", "false");
     await git(folder, "push", "-u", "origin", "main");
     const linked = `${folder}-prepared-rebase`;
     temporaryDirectories.push(linked);
@@ -276,7 +270,6 @@ describe("worktree pull, sync, and rebase", () => {
     const remote = await localRemote();
     const remoteUrl = `ssh://git@example.test${remote}`;
     await useHostedRemote(folder, remote, remoteUrl);
-    await git(folder, "config", "commit.gpgsign", "false");
     await git(folder, "push", "-u", "origin", "main");
     const linked = `${folder}-base-added-preparations`;
     temporaryDirectories.push(linked);
@@ -360,7 +353,6 @@ describe("worktree pull, sync, and rebase", () => {
     const remote = await localRemote();
     const remoteUrl = `ssh://git@example.test${remote}`;
     await useHostedRemote(folder, remote, remoteUrl);
-    await git(folder, "config", "commit.gpgsign", "false");
     await git(folder, "push", "-u", "origin", "main");
     const linked = `${folder}-conflicted-rebase`;
     temporaryDirectories.push(linked);

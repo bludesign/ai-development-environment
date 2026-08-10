@@ -176,6 +176,14 @@ export function closeAllWorktreeWatches(): void {
   activeWorktreeWatches.clear();
 }
 
+/** Exposes watch ownership so callers can observe that STOP has completed. */
+export function worktreeWatchIsActive(
+  gitDirectory: string,
+  watchId: string,
+): boolean {
+  return activeWorktreeWatches.get(gitDirectory)?.watchId === watchId;
+}
+
 async function flushWorktreeActivity(entry: ActiveWorktreeWatch) {
   if (activeWorktreeWatches.get(entry.gitDirectory) !== entry) return;
   if (entry.reporting) {

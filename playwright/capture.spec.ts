@@ -1,4 +1,4 @@
-import { expect, test } from "@playwright/test";
+import { expect, test, type Page } from "@playwright/test";
 
 import { routes } from "./routes";
 import {
@@ -7,6 +7,15 @@ import {
 } from "./screenshot-time";
 import { stubWorktreeAgent } from "./worktree-stub";
 import { screenshotSessionToken } from "../scripts/mock-data/auth";
+
+async function waitForVisualSettle(page: Page): Promise<void> {
+  await page.evaluate(async () => {
+    await document.fonts.ready;
+    await new Promise<void>((resolve) => {
+      requestAnimationFrame(() => requestAnimationFrame(() => resolve()));
+    });
+  });
+}
 
 /**
  * Captures one screenshot per route for the active Playwright project (viewport + color
@@ -68,23 +77,23 @@ test.describe("app screenshots", () => {
           timeout: 30_000,
         });
       }
-      await page.waitForTimeout(800);
       if (route.scrollTo) {
         await page
           .locator(route.scrollTo)
           .evaluate((element) =>
             element.scrollIntoView({ behavior: "instant", block: "center" }),
           );
-        await page.waitForTimeout(300);
       }
       if (route.clickButton) {
         await page.getByRole("button", { name: route.clickButton }).click();
-        await page.waitForTimeout(300);
+        await page.getByRole("dialog").waitFor({ state: "visible" });
       }
       if (route.clickTab) {
-        await page.getByRole("tab", { name: route.clickTab }).click();
-        await page.waitForTimeout(300);
+        const tab = page.getByRole("tab", { name: route.clickTab });
+        await tab.click();
+        await expect(tab).toHaveAttribute("aria-selected", "true");
       }
+      await waitForVisualSettle(page);
       await normalizeScreenshotValues(page);
 
       await page.screenshot({

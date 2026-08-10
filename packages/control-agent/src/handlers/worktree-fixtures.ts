@@ -34,6 +34,7 @@ async function buildTemplate() {
   await git(folder, "init", "-b", "main");
   await git(folder, "config", "user.email", "test@example.com");
   await git(folder, "config", "user.name", "Test User");
+  await git(folder, "config", "commit.gpgsign", "false");
   await writeFile(join(folder, "README.md"), "base\n");
   await git(folder, "add", "README.md");
   await git(folder, "commit", "-m", "Initial commit");

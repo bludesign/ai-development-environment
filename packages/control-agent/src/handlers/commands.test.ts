@@ -167,14 +167,15 @@ describe("saved command handler", () => {
   test("terminates the detached process group on cancellation", async () => {
     const controller = new AbortController();
     const started = Date.now();
+    const append = vi.fn(async () => undefined);
     const running = runCommand(
       payload("printf ready; sleep 30"),
       0,
       controller.signal,
       vi.fn(),
-      context(async () => undefined),
+      context(append),
     );
-    await new Promise((resolve) => setTimeout(resolve, 100));
+    await vi.waitFor(() => expect(append).toHaveBeenCalled());
     controller.abort();
     const result = await running;
     expect(result.cancelled).toBe(true);

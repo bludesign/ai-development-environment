@@ -1,10 +1,10 @@
 import { execFile } from "node:child_process";
-import { mkdir, mkdtemp, realpath, rm, writeFile } from "node:fs/promises";
+import { cp, mkdir, mkdtemp, realpath, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
 
-import { afterEach, describe, expect, test } from "vitest";
+import { afterAll, afterEach, describe, expect, test } from "vitest";
 
 import {
   deleteCodebaseRemoteBranch,
@@ -26,9 +26,8 @@ async function git(folder: string, ...args: string[]) {
   });
 }
 
-async function repository() {
-  const folder = await mkdtemp(join(tmpdir(), "codebase-agent-"));
-  temporaryDirectories.push(folder);
+async function buildRepositoryTemplate() {
+  const folder = await mkdtemp(join(tmpdir(), "codebase-agent-template-"));
   await git(folder, "init", "-b", "main");
   await git(folder, "config", "user.email", "test@example.com");
   await git(folder, "config", "user.name", "Test User");
@@ -40,6 +39,20 @@ async function repository() {
     "origin",
     "git@github.com:OpenAI/Codex.git",
   );
+  return folder;
+}
+
+// The suite needs a clean repository for each test, but replaying Git setup in
+// every case adds five subprocesses before the behavior under test begins.
+// Git stores no absolute paths in this fixture, so a recursive copy is isolated
+// while retaining the exact repository shape each test expects.
+let repositoryTemplate: Promise<string> | null = null;
+
+async function repository() {
+  repositoryTemplate ??= buildRepositoryTemplate();
+  const folder = await mkdtemp(join(tmpdir(), "codebase-agent-"));
+  temporaryDirectories.push(folder);
+  await cp(await repositoryTemplate, folder, { recursive: true });
   return folder;
 }
 
@@ -73,6 +86,12 @@ afterEach(async () => {
       .splice(0)
       .map((folder) => rm(folder, { recursive: true, force: true })),
   );
+});
+
+afterAll(async () => {
+  const built = repositoryTemplate;
+  repositoryTemplate = null;
+  if (built) await rm(await built, { recursive: true, force: true });
 });
 
 describe("codebase Git inspection", () => {

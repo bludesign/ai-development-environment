@@ -8,7 +8,7 @@ import {
   repository,
   registerWorktreeFixtures,
 } from "./worktree-fixtures.js";
-import { watchWorktree } from "./worktrees.js";
+import { watchWorktree, worktreeWatchIsActive } from "./worktrees.js";
 
 registerWorktreeFixtures();
 
@@ -89,8 +89,7 @@ describe("worktree activity watching", () => {
       async () => undefined,
     );
     reportWorktreeActivity.mockClear();
-    await writeFile(join(folder, "watched.txt"), "stopped\n");
-    await new Promise((resolve) => setTimeout(resolve, 750));
+    expect(worktreeWatchIsActive(gitDirectory, payload.watchId)).toBe(false);
     expect(reportWorktreeActivity).not.toHaveBeenCalled();
   }, 10_000);
 
