@@ -3021,6 +3021,9 @@ export const operateWorktree: AgentJobHandler = async (
       await runGit(["clean", "-fd"], "Could not remove untracked files");
       break;
     }
+    case "CLEAR_LOCK":
+      await rm(join(input.gitDirectory, "index.lock"), { force: true });
+      break;
     case "STASH_ALL":
       await runGit(["stash", "push", "--include-untracked"], "Stash failed");
       break;

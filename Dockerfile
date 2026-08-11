@@ -46,7 +46,7 @@ FROM node:24.18.0-bookworm-slim AS runner
 ENV NODE_ENV=production \
     NEXT_TELEMETRY_DISABLED=1 \
     HOME=/home/node \
-    AIDE_SERVER_HOSTNAME=0.0.0.0 \
+    HOSTNAME=0.0.0.0 \
     PORT=3090 \
     AGENT_WS_HOSTNAME=0.0.0.0 \
     AGENT_WS_PORT=3091 \

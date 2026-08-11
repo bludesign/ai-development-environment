@@ -19,6 +19,7 @@ import {
   GitPullRequest,
   Grid2X2,
   List,
+  LockOpen,
   MoreHorizontal,
   MoveRight,
   Paintbrush,
@@ -467,6 +468,7 @@ type Operation =
   | "PULL"
   | "PUSH"
   | "RESET"
+  | "CLEAR_LOCK"
   | "STASH_ALL"
   | "STAGE_ALL"
   | "UNSTAGE_ALL";
@@ -3592,6 +3594,14 @@ export function ActionRow(
             operation="RESET"
             props={props}
             disabled={unavailable || !worktree.upstream}
+          />
+          <OperationMenuItem
+            confirm
+            icon={<LockOpen />}
+            label={t("clearLock")}
+            operation="CLEAR_LOCK"
+            props={props}
+            disabled={unavailable}
           />
           <OperationMenuItem
             icon={<Archive />}

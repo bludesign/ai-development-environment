@@ -69,6 +69,7 @@ export const WORKTREE_OPERATIONS = [
   "PULL",
   "PUSH",
   "RESET",
+  "CLEAR_LOCK",
   "STASH_ALL",
   "STAGE_ALL",
   "UNSTAGE_ALL",
