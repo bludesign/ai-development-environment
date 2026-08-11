@@ -3173,8 +3173,12 @@ export class WorkflowsService {
             publishRunChanged(run.id);
           }
         }
-        await prisma.workflowTriggerEvent.delete({
+        // Keep the producer's unique dedupe key as the durable replay receipt.
+        // Per-trigger delivery rows optimize fan-out, but they are tied to runs
+        // and may disappear when operators delete run history.
+        await prisma.workflowTriggerEvent.update({
           where: { id: event.id },
+          data: { status: "PROCESSED", processedAt: new Date(), error: null },
         });
       } catch (error) {
         await prisma.workflowTriggerEvent.update({

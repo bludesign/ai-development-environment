@@ -60,8 +60,8 @@ export class WorkflowEventsService {
     if (now < this.nextMaintenanceAt) return;
 
     const prisma = await getPrismaClient();
-    // Legacy PROCESSED rows are durable producer-key receipts. Deleting them
-    // without equivalent delivery rows would let a provider retry create a run.
+    // PROCESSED rows are durable producer-key receipts. Deleting them would let
+    // a provider retry create another run after per-run delivery history is gone.
     const expired = await prisma.workflowTriggerEvent.findMany({
       where: {
         status: "FAILED",

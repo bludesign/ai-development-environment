@@ -146,4 +146,27 @@ describe("telemetry REST routes", () => {
     });
     expect(mocks.exportEntries).not.toHaveBeenCalled();
   });
+
+  test("rejects untrusted export locale and time-zone variants", async () => {
+    const invalidLocale = await exportPost(
+      request("/api/telemetry/export", {
+        format: "CSV",
+        query: { view: "CONSOLE" },
+        locale: "en-x-attacker-controlled",
+        timeZone: "UTC",
+      }),
+    );
+    expect(invalidLocale.status).toBe(400);
+
+    const invalidTimeZone = await exportPost(
+      request("/api/telemetry/export", {
+        format: "CSV",
+        query: { view: "CONSOLE" },
+        locale: "en",
+        timeZone: "Not/AZone",
+      }),
+    );
+    expect(invalidTimeZone.status).toBe(400);
+    expect(mocks.exportEntries).not.toHaveBeenCalled();
+  });
 });

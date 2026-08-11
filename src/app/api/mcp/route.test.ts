@@ -2,6 +2,8 @@ import { beforeEach, describe, expect, test, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
   callBuiltInTool: vi.fn(),
+  callRunBuiltInTool: vi.fn(),
+  mcpRunToolNames: vi.fn(),
   mcpPresetToolNames: vi.fn().mockResolvedValue(null),
   builtInTools: { definitions: () => [] },
 }));

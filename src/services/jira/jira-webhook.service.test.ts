@@ -828,7 +828,10 @@ describe("Jira webhook registration", () => {
   test("refuses an address Jira could never deliver to", async () => {
     await expect(
       service().registerWebhook({ url: "http://localhost:3000" }),
-    ).rejects.toThrow("cannot reach");
+    ).rejects.toThrow("must use HTTPS");
+    await expect(
+      service().registerWebhook({ url: "http://aide.example.com" }),
+    ).rejects.toThrow("must use HTTPS");
     await expect(
       service().registerWebhook({ url: "https://aide.example.com/elsewhere" }),
     ).rejects.toThrow(JIRA_WEBHOOK_PATH);

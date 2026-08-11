@@ -26,7 +26,7 @@ Override with environment variables:
 
 | Variable                       | Default                                            |
 | ------------------------------ | -------------------------------------------------- |
-| `HOSTNAME`                     | `127.0.0.1`                                        |
+| `AIDE_SERVER_HOSTNAME`         | `127.0.0.1`                                        |
 | `PORT`                         | `3090`                                             |
 | `AGENT_WS_HOSTNAME`            | `127.0.0.1`                                        |
 | `AGENT_WS_PORT`                | `3091`                                             |
@@ -49,6 +49,10 @@ Override with environment variables:
 | `CREDENTIAL_VAULT_READ_ONLY`   | `false`                                            |
 
 Only SQLite `file:` URLs are supported for `DATABASE_URL`.
+
+`AIDE_SERVER_HOSTNAME` is the explicit HTTP bind-address override. The launcher
+intentionally ignores the ambient `HOSTNAME` variable because shells and
+container runtimes commonly set it to a network-reachable machine name.
 
 Generate `APP_SECRET` once with `openssl rand -base64 32`, back it up, and keep it stable across upgrades. It must be base64 or hex encoding of exactly 32 random bytes — a passphrase is rejected, because session signing, credential encryption, and install-link signing are all derived from it. Changing it signs everyone out and makes stored credentials unreadable unless the old value is passed as `APP_SECRET_PREVIOUS`, which re-encrypts them on the next start; remove it once the server has started cleanly.
 

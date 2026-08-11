@@ -1032,7 +1032,7 @@ describe("workflow trigger event processing", () => {
     };
   }
 
-  test("loads active workflows once for a batch and deletes every success", async () => {
+  test("loads active workflows once and retains durable success receipts", async () => {
     prisma.workflowTriggerEvent.findMany.mockResolvedValue([
       {
         id: "event-1",
@@ -1058,13 +1058,15 @@ describe("workflow trigger event processing", () => {
     ).processTriggerEvents();
 
     expect(prisma.workflow.findMany).toHaveBeenCalledTimes(1);
-    expect(prisma.workflowTriggerEvent.delete).toHaveBeenNthCalledWith(1, {
+    expect(prisma.workflowTriggerEvent.update).toHaveBeenNthCalledWith(1, {
       where: { id: "event-1" },
+      data: { status: "PROCESSED", processedAt: expect.any(Date), error: null },
     });
-    expect(prisma.workflowTriggerEvent.delete).toHaveBeenNthCalledWith(2, {
+    expect(prisma.workflowTriggerEvent.update).toHaveBeenNthCalledWith(2, {
       where: { id: "event-2" },
+      data: { status: "PROCESSED", processedAt: expect.any(Date), error: null },
     });
-    expect(prisma.workflowTriggerEvent.update).not.toHaveBeenCalled();
+    expect(prisma.workflowTriggerEvent.delete).not.toHaveBeenCalled();
   });
 
   test("uses the producer dedupe key for run idempotency", async () => {
@@ -1152,8 +1154,9 @@ describe("workflow trigger event processing", () => {
 
     expect(prisma.workflowTriggerState.findUnique).not.toHaveBeenCalled();
     expect(prisma.workflowRun.findUnique).not.toHaveBeenCalled();
-    expect(prisma.workflowTriggerEvent.delete).toHaveBeenCalledWith({
+    expect(prisma.workflowTriggerEvent.update).toHaveBeenCalledWith({
       where: { id: "event-1" },
+      data: { status: "PROCESSED", processedAt: expect.any(Date), error: null },
     });
   });
 
@@ -1199,8 +1202,9 @@ describe("workflow trigger event processing", () => {
     expect(prisma.workflowTriggerDelivery.create).toHaveBeenCalledWith({
       data: { id: deliveryId, runId: "queued-run" },
     });
-    expect(prisma.workflowTriggerEvent.delete).toHaveBeenCalledWith({
+    expect(prisma.workflowTriggerEvent.update).toHaveBeenCalledWith({
       where: { id: "event-1" },
+      data: { status: "PROCESSED", processedAt: expect.any(Date), error: null },
     });
   });
 

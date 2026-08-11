@@ -8,7 +8,9 @@ const packageManifest = require(path.join(packageRoot, "package.json"));
 
 process.env.AIDE_VERSION ||= packageManifest.version;
 
-process.env.HOSTNAME ||= "127.0.0.1";
+// HOSTNAME is populated implicitly by many shells and container runtimes. Do
+// not treat that ambient machine name as consent to expose the control plane.
+process.env.HOSTNAME = process.env.AIDE_SERVER_HOSTNAME?.trim() || "127.0.0.1";
 process.env.PORT ||= "3090";
 process.env.AGENT_WS_HOSTNAME ||= "127.0.0.1";
 process.env.AGENT_WS_PORT ||= "3091";

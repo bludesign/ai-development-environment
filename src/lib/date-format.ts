@@ -43,25 +43,63 @@ export function toDate(value: DateInput): Date | null {
 // these run per row on long tables. Cache by every option that affects output.
 const dateTimeFormatters = new Map<string, Intl.DateTimeFormat>();
 const relativeFormatters = new Map<string, Intl.RelativeTimeFormat>();
+const MAX_DATE_TIME_FORMATTERS = 64;
+const MAX_RELATIVE_FORMATTERS = 16;
+
+function cacheFormatter<T>(
+  cache: Map<string, T>,
+  key: string,
+  create: () => T,
+  limit: number,
+): T {
+  const cached = cache.get(key);
+  if (cached) {
+    // Refresh recency so frequently used UI locales survive export traffic.
+    cache.delete(key);
+    cache.set(key, cached);
+    return cached;
+  }
+  const formatter = create();
+  cache.set(key, formatter);
+  while (cache.size > limit) {
+    const oldest = cache.keys().next().value;
+    if (oldest === undefined) break;
+    cache.delete(oldest);
+  }
+  return formatter;
+}
+
+/** @internal Exposed only so the cache bound has direct regression coverage. */
+export function dateFormatterCacheSizes(): {
+  dateTime: number;
+  relative: number;
+} {
+  return {
+    dateTime: dateTimeFormatters.size,
+    relative: relativeFormatters.size,
+  };
+}
 
 function dateTimeFormatter(
   key: string,
   locale: string,
   options: Intl.DateTimeFormatOptions,
 ): Intl.DateTimeFormat {
-  const cached = dateTimeFormatters.get(key);
-  if (cached) return cached;
-  const formatter = new Intl.DateTimeFormat(locale, options);
-  dateTimeFormatters.set(key, formatter);
-  return formatter;
+  return cacheFormatter(
+    dateTimeFormatters,
+    key,
+    () => new Intl.DateTimeFormat(locale, options),
+    MAX_DATE_TIME_FORMATTERS,
+  );
 }
 
 function relativeFormatter(locale: string): Intl.RelativeTimeFormat {
-  const cached = relativeFormatters.get(locale);
-  if (cached) return cached;
-  const formatter = new Intl.RelativeTimeFormat(locale, { numeric: "auto" });
-  relativeFormatters.set(locale, formatter);
-  return formatter;
+  return cacheFormatter(
+    relativeFormatters,
+    locale,
+    () => new Intl.RelativeTimeFormat(locale, { numeric: "auto" }),
+    MAX_RELATIVE_FORMATTERS,
+  );
 }
 
 /**

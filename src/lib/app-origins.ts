@@ -486,11 +486,10 @@ export function isSameOriginRequest(
  * A handshake with no `Origin` is not from a browser — the control agent and the
  * CLI both connect this way — and carries no ambient credential, so it passes.
  *
- * Matching is port-insensitive by construction: the dashboard runs on the HTTP
- * port and connects to the socket on another, so the page's origin never equals
- * the socket's. An allowlist entry without a port already matches any port; in
- * `inferred` mode, where there is no allowlist, the hostname of the handshake's
- * own `Host` is the only reference point available.
+ * The browser page origin is checked against APP_ORIGINS exactly as configured.
+ * An allowlist entry without a port matches any port, while an entry that pins a
+ * port keeps that restriction. The socket listener's own port is irrelevant; it
+ * appears in `host`, not in the browser's `Origin`.
  */
 export function isTrustedWebSocketOrigin(
   origins: AppOrigins,
@@ -499,17 +498,18 @@ export function isTrustedWebSocketOrigin(
 ): boolean {
   if (!origin) return true;
 
-  let originHostname: string;
+  let originUrl: URL;
   try {
-    originHostname = new URL(origin).hostname.toLowerCase();
+    originUrl = new URL(origin);
   } catch {
     return false;
   }
+  const originHostname = originUrl.hostname.toLowerCase();
   if (!originHostname) return false;
 
   if (origins.mode !== "inferred") {
     return origins.patterns.some((pattern) =>
-      matchesHostname(originHostname, pattern),
+      matchesPattern(originUrl.host, pattern),
     );
   }
 

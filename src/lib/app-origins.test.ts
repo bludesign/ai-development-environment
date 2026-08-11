@@ -427,7 +427,7 @@ describe("isTrustedWebSocketOrigin", () => {
     },
   );
 
-  test("ignores a configured origin port for WebSocket matching", () => {
+  test("enforces a configured origin port for WebSocket matching", () => {
     const portPinned = resolveAppOrigins({
       NODE_ENV: "production",
       APP_ORIGINS: "https://app.example.com:8443",
@@ -435,10 +435,17 @@ describe("isTrustedWebSocketOrigin", () => {
     expect(
       isTrustedWebSocketOrigin(
         portPinned,
-        "https://app.example.com:3000",
+        "https://app.example.com:8443",
         "app.example.com:3091",
       ),
     ).toBe(true);
+    expect(
+      isTrustedWebSocketOrigin(
+        portPinned,
+        "https://app.example.com:3000",
+        "app.example.com:3091",
+      ),
+    ).toBe(false);
   });
 
   test.each([
