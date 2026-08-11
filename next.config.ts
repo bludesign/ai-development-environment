@@ -99,6 +99,8 @@ const nextConfig: NextConfig = {
 const withMDX = createMDX({
   extension: /\.mdx?$/,
   options: {
+    // Next 16's Turbopack bridge requires plugin package names to be
+    // serializable strings; imported plugin functions are for webpack builds.
     remarkPlugins: ["remark-gfm"],
   },
 });

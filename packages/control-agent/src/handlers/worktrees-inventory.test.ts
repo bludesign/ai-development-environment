@@ -533,6 +533,61 @@ describe("worktree inventory and inspection", () => {
     );
   });
 
+  test("clears only the selected worktree's Git index lock", async () => {
+    const folder = await repository();
+    const linked = `${folder}-linked-lock`;
+    temporaryDirectories.push(linked);
+    await git(folder, "worktree", "add", "-b", "feature/clear-lock", linked);
+    const primaryGitDirectory = await realpath(
+      (
+        await git(folder, "rev-parse", "--path-format=absolute", "--git-dir")
+      ).stdout.trim(),
+    );
+    const linkedGitDirectory = await realpath(
+      (
+        await git(linked, "rev-parse", "--path-format=absolute", "--git-dir")
+      ).stdout.trim(),
+    );
+    const primaryLock = join(primaryGitDirectory, "index.lock");
+    const linkedLock = join(linkedGitDirectory, "index.lock");
+    await writeFile(primaryLock, "primary\n");
+    await writeFile(linkedLock, "linked\n");
+
+    const result = await operateWorktree(
+      {
+        codebaseId: "codebase-1",
+        folder: linked,
+        gitDirectory: linkedGitDirectory,
+        expectedOrigin: "github.com/openai/codex",
+        baseBranch: "main",
+        operation: "CLEAR_LOCK",
+      },
+      10_000,
+      new AbortController().signal,
+      async () => undefined,
+    );
+
+    expect(result.exitCode).toBe(0);
+    await expect(readFile(linkedLock, "utf8")).rejects.toThrow();
+    await expect(readFile(primaryLock, "utf8")).resolves.toBe("primary\n");
+
+    await expect(
+      operateWorktree(
+        {
+          codebaseId: "codebase-1",
+          folder: linked,
+          gitDirectory: linkedGitDirectory,
+          expectedOrigin: "github.com/openai/codex",
+          baseBranch: "main",
+          operation: "CLEAR_LOCK",
+        },
+        10_000,
+        new AbortController().signal,
+        async () => undefined,
+      ),
+    ).resolves.toMatchObject({ exitCode: 0 });
+  });
+
   test("commits exactly the selected paths while preserving other changes", async () => {
     const folder = await repository();
     await writeFile(join(folder, "README.md"), "selected\n");

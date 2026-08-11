@@ -1438,6 +1438,7 @@ const mockTranslations = {
     push: "Push",
     publish: "Publish",
     reset: "Reset",
+    clearLock: "Clear lock",
     stashAll: "Stash all",
     stageAll: "Stage all",
     unstageAll: "Unstage all",

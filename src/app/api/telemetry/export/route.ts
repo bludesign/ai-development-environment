@@ -1,4 +1,5 @@
 import { getServerServices } from "@/services/server-services";
+import { locales } from "@/i18n/routing";
 import { requireUserRequest } from "@/services/auth";
 import {
   TELEMETRY_VIEWS,
@@ -15,6 +16,7 @@ import {
 export const runtime = "nodejs";
 export const maxDuration = 60;
 const MAX_EXPORT_BODY_BYTES = 256 * 1024;
+const EXPORT_LOCALES = new Set<string>(locales);
 
 class ExportPayloadTooLargeError extends Error {}
 
@@ -73,6 +75,17 @@ async function readLimitedJson(request: Request): Promise<unknown> {
   return JSON.parse(new TextDecoder().decode(bytes));
 }
 
+function exportTimeZone(value: unknown): string | null | undefined {
+  if (value === null || value === undefined || value === "") return null;
+  if (typeof value !== "string") return undefined;
+  try {
+    return new Intl.DateTimeFormat("en", { timeZone: value }).resolvedOptions()
+      .timeZone;
+  } catch {
+    return undefined;
+  }
+}
+
 export async function POST(request: Request): Promise<Response> {
   const authenticationError = await requireUserRequest(request);
   if (authenticationError) return authenticationError;
@@ -91,6 +104,15 @@ export async function POST(request: Request): Promise<Response> {
     const query = body.query as TelemetryQueryInput;
     if (!TELEMETRY_VIEWS.includes(query.view as TelemetryView))
       return bad("Unknown telemetry view");
+    const locale =
+      body.locale === null || body.locale === undefined || body.locale === ""
+        ? null
+        : typeof body.locale === "string" && EXPORT_LOCALES.has(body.locale)
+          ? body.locale
+          : undefined;
+    if (locale === undefined) return bad("Unknown export locale");
+    const timeZone = exportTimeZone(body.timeZone);
+    if (timeZone === undefined) return bad("Unknown export time zone");
     const ids = Array.isArray(body.ids)
       ? body.ids
           .filter((id): id is string => typeof id === "string")
@@ -119,8 +141,8 @@ export async function POST(request: Request): Promise<Response> {
       format: body.format as TelemetryExportFormat,
       view: query.view,
       fields,
-      locale: typeof body.locale === "string" ? body.locale : null,
-      timeZone: typeof body.timeZone === "string" ? body.timeZone : null,
+      locale,
+      timeZone,
       timeFormat: body.timeFormat === "24" ? ("24" as const) : ("12" as const),
       filterSummary: JSON.stringify({
         search: query.search ?? null,

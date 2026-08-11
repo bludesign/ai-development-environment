@@ -565,11 +565,16 @@ export function registerWorktreesPageTests(
           (screen.getByRole("button", { name: "Sync" }) as HTMLButtonElement)
             .disabled,
         ).toBe(true);
-        // Stash and stage moved behind the row's overflow menu.
+        // Lock clearing, stash, and stage live behind the row's overflow menu.
         fireEvent.pointerDown(screen.getByRole("button", { name: "More" }), {
           button: 0,
           ctrlKey: false,
         });
+        expect(
+          (
+            await screen.findByRole("menuitem", { name: "Clear lock" })
+          ).hasAttribute("data-disabled"),
+        ).toBe(false);
         for (const name of ["Stash all", "Stage all"]) {
           expect(
             (await screen.findByRole("menuitem", { name })).hasAttribute(
@@ -876,6 +881,38 @@ export function registerWorktreesPageTests(
               input: {
                 worktreeId: "worktree-1",
                 operation: "PULL",
+                requestId: expect.any(String),
+              },
+            },
+          ),
+        );
+      });
+
+      test("clears a worktree index lock after confirmation", async () => {
+        render(<WorktreesPage />);
+        await screen.findByText("feature/AIDE-24");
+
+        fireEvent.pointerDown(screen.getByRole("button", { name: "More" }), {
+          button: 0,
+          ctrlKey: false,
+        });
+        fireEvent.click(
+          await screen.findByRole("menuitem", { name: "Clear lock" }),
+        );
+        request.mockResolvedValueOnce({
+          runWorktreeOperation: { id: "job-clear-lock" },
+        } as never);
+        fireEvent.click(
+          await screen.findByRole("menuitem", { name: "Confirm" }),
+        );
+
+        await waitFor(() =>
+          expect(request).toHaveBeenCalledWith(
+            expect.stringContaining("mutation RunWorktreeOperation"),
+            {
+              input: {
+                worktreeId: "worktree-1",
+                operation: "CLEAR_LOCK",
                 requestId: expect.any(String),
               },
             },

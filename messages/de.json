@@ -3179,6 +3179,7 @@
     "push": "Pushen",
     "publish": "Veröffentlichen",
     "reset": "Zurücksetzen",
+    "clearLock": "Sperrdatei löschen",
     "stashAll": "Alles stashen",
     "stageAll": "Alles vormerken",
     "unstageAll": "Alle Vormerkungen aufheben",

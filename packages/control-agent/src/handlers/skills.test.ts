@@ -1,17 +1,32 @@
 import { execFile } from "node:child_process";
-import { mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
+import {
+  mkdir,
+  mkdtemp,
+  readFile,
+  rm,
+  stat,
+  symlink,
+  writeFile,
+} from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
 
-import { afterEach, describe, expect, test } from "vitest";
+import { afterEach, describe, expect, test, vi } from "vitest";
+
+const osMock = vi.hoisted(() => ({ home: "" }));
+
+vi.mock("node:os", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("node:os")>()),
+  homedir: () => osMock.home,
+}));
 
 import {
   hashSkillFiles,
   type SkillPackageFile,
 } from "@ai-development-environment/agent-contract/skills";
 
-import { applySkills } from "./skills.js";
+import { applySkills, readSkills } from "./skills.js";
 
 const executeFile = promisify(execFile);
 const folders: string[] = [];
@@ -48,6 +63,7 @@ afterEach(async () => {
       .splice(0)
       .map((folder) => rm(folder, { recursive: true, force: true })),
   );
+  osMock.home = "";
 });
 
 describe("skill apply handler", () => {
@@ -202,5 +218,42 @@ describe("skill apply handler", () => {
     expect(exclude).toContain("/.agents/skills/existing/");
     expect(exclude).toContain("/.agents/skills/swift-review/");
     expect(exclude).toContain("generated/\n!generated/keep.txt");
+  });
+});
+
+describe("skill read handler containment", () => {
+  test("rejects a project package symlink that resolves outside its skill root", async () => {
+    const folder = await repository();
+    osMock.home = folder;
+    await mkdir(join(folder, ".codex"), { recursive: true });
+    const root = join(folder, ".agents", "skills");
+    const outside = join(folder, "outside-skill");
+    await mkdir(root, { recursive: true });
+    await mkdir(outside, { recursive: true });
+    await writeFile(
+      join(outside, "SKILL.md"),
+      "---\nname: escaped-skill\ndescription: Must remain private.\n---\n",
+    );
+    await symlink(outside, join(root, "escaped-skill"), "dir");
+
+    await expect(
+      readSkills(
+        {
+          tools: ["CODEX"],
+          targets: [{ codebaseId: "codebase-1", worktreeId: null, folder }],
+          requests: [
+            {
+              scope: "PROJECT",
+              rootKind: "AGENTS",
+              folder,
+              skillName: "escaped-skill",
+            },
+          ],
+        },
+        30_000,
+        signal,
+        log,
+      ),
+    ).rejects.toThrow("outside its configured root");
   });
 });

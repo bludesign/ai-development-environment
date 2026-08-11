@@ -3179,6 +3179,7 @@
     "push": "Pousser",
     "publish": "Publier",
     "reset": "Réinitialiser",
+    "clearLock": "Supprimer le verrou",
     "stashAll": "Remiser tout",
     "stageAll": "Indexer tout",
     "unstageAll": "Désindexer tout",

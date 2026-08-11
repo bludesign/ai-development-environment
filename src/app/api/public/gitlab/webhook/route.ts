@@ -5,17 +5,42 @@ export const maxDuration = 30;
 
 const MAX_BODY_BYTES = 1024 * 1024;
 
+async function readLimitedBody(request: Request): Promise<Uint8Array> {
+  const contentLength = Number(request.headers.get("content-length") ?? "0");
+  if (Number.isFinite(contentLength) && contentLength > MAX_BODY_BYTES) {
+    throw new RangeError("GitLab webhook payload is too large");
+  }
+  if (!request.body) throw new Error("GitLab webhook payload is required");
+  const reader = request.body.getReader();
+  const chunks: Uint8Array[] = [];
+  let length = 0;
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      length += value.byteLength;
+      if (length > MAX_BODY_BYTES) {
+        await reader.cancel().catch(() => undefined);
+        throw new RangeError("GitLab webhook payload is too large");
+      }
+      chunks.push(value);
+    }
+  } finally {
+    reader.releaseLock();
+  }
+  const body = new Uint8Array(length);
+  let offset = 0;
+  for (const chunk of chunks) {
+    body.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+  return body;
+}
+
 export async function POST(request: Request): Promise<Response> {
   try {
-    const contentLength = Number(request.headers.get("content-length") ?? "0");
-    if (Number.isFinite(contentLength) && contentLength > MAX_BODY_BYTES) {
-      throw new RangeError("GitLab webhook payload is too large");
-    }
-    const bytes = new Uint8Array(await request.arrayBuffer());
+    const bytes = await readLimitedBody(request);
     if (!bytes.length) throw new Error("GitLab webhook payload is required");
-    if (bytes.length > MAX_BODY_BYTES) {
-      throw new RangeError("GitLab webhook payload is too large");
-    }
     const result = await getServerServices().gitLabService.handleWebhook({
       rawBody: new TextDecoder().decode(bytes),
       headers: request.headers,

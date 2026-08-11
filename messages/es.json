@@ -3179,6 +3179,7 @@
     "push": "Push",
     "publish": "Publicar",
     "reset": "Restablecer",
+    "clearLock": "Eliminar bloqueo",
     "stashAll": "Guardar todo en stash",
     "stageAll": "Preparar todo",
     "unstageAll": "Quitar todo del área de preparación",

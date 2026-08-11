@@ -131,6 +131,25 @@ function rootPath(location: SkillLocation): string {
   return path;
 }
 
+function isContainedPath(base: string, candidate: string): boolean {
+  return candidate === base || candidate.startsWith(`${base}${sep}`);
+}
+
+async function resolvedSkillRoot(location: SkillLocation): Promise<{
+  root: string;
+  resolvedRoot: string;
+}> {
+  const root = rootPath(location);
+  const resolvedRoot = await realpath(root);
+  if (location.scope === "PROJECT") {
+    const resolvedProject = await realpath(location.folder!);
+    if (!isContainedPath(resolvedProject, resolvedRoot)) {
+      throw new Error("Project skill root resolves outside the project folder");
+    }
+  }
+  return { root, resolvedRoot };
+}
+
 function targetForFolder(targets: SkillScanTarget[], folder: string | null) {
   return folder
     ? targets.find((target) => resolve(target.folder) === resolve(folder))
@@ -177,13 +196,17 @@ async function listPackageFiles(
   return files;
 }
 
-async function readPackage(directory: string): Promise<SkillPackage> {
+async function readPackage(
+  directory: string,
+  resolvedRoot: string,
+): Promise<SkillPackage> {
   const metadata = await lstat(directory);
-  let resolvedDirectory = directory;
-  if (metadata.isSymbolicLink()) {
-    resolvedDirectory = await realpath(directory);
-  } else if (!metadata.isDirectory()) {
+  if (!metadata.isSymbolicLink() && !metadata.isDirectory()) {
     throw new Error("Skill path is not a directory");
+  }
+  const resolvedDirectory = await realpath(directory);
+  if (!isContainedPath(resolvedRoot, resolvedDirectory)) {
+    throw new Error("Skill package resolves outside its configured root");
   }
   const files = await listPackageFiles(resolvedDirectory);
   const definition = files.find((file) => file.path === "SKILL.md");
@@ -239,6 +262,15 @@ async function scanRoot(
 ): Promise<SkillScanInstallation[]> {
   const root = rootPath(location);
   if (!(await directoryExists(root))) return [];
+  let resolvedRoot: string;
+  try {
+    resolvedRoot = (await resolvedSkillRoot(location)).resolvedRoot;
+  } catch (error) {
+    warnings.push(
+      `${root}: ${error instanceof Error ? error.message : String(error)}`,
+    );
+    return [];
+  }
   const consumers = consumersForRoot(
     configured,
     location.rootKind,
@@ -251,7 +283,7 @@ async function scanRoot(
     if (!entry.isDirectory() && !entry.isSymbolicLink()) continue;
     const directory = join(root, entry.name);
     try {
-      const skillPackage = await readPackage(directory);
+      const skillPackage = await readPackage(directory, resolvedRoot);
       const relativeDirectory = location.folder
         ? relative(location.folder, directory).split(sep).join("/")
         : "";
@@ -344,9 +376,10 @@ export const readSkills: AgentJobHandler = async (payload) => {
     if (!allowed.has(`${request.scope}:${root}`)) {
       throw new Error("Requested skill root is not enabled or configured");
     }
+    const { resolvedRoot } = await resolvedSkillRoot(request);
     packages.push({
       ...request,
-      package: await readPackage(join(root, request.skillName)),
+      package: await readPackage(join(root, request.skillName), resolvedRoot),
     });
   }
   return { ...successfulProcess, packages };

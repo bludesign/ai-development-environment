@@ -539,6 +539,7 @@ describe("MCP tool presets", () => {
       agentRun: {
         findUnique: vi.fn().mockResolvedValue({
           agentId: "agent-1",
+          repositoryId: "repository-1",
           mcpToolNamesJson: JSON.stringify([toolName, "removed_tool"]),
         }),
       },
@@ -552,7 +553,31 @@ describe("MCP tool presets", () => {
     });
     await expect(service.mcpRunToolNames("run-1", "agent-1")).resolves.toEqual({
       status: "OK",
+      repositoryId: "repository-1",
       toolNames: [toolName],
     });
+  });
+
+  test("scopes preparation tools to the run repository", async () => {
+    const repositoryPreparations = vi.fn().mockResolvedValue([]);
+    const service = new ToolsService({} as never, undefined, {
+      codebases: { repositoryPreparations } as never,
+    });
+
+    await expect(
+      service.callRunBuiltInTool(
+        "get_codebase_repository_preparations",
+        { repositoryId: "repository-1" },
+        "repository-1",
+      ),
+    ).resolves.toMatchObject({ structuredContent: { preparations: [] } });
+    await expect(
+      service.callRunBuiltInTool(
+        "get_codebase_repository_preparations",
+        { repositoryId: "repository-2" },
+        "repository-1",
+      ),
+    ).rejects.toThrow("run repository");
+    expect(repositoryPreparations).toHaveBeenCalledTimes(1);
   });
 });

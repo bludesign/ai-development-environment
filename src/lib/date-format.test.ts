@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   DATE_FALLBACK,
+  dateFormatterCacheSizes,
   dayKey,
   formatDateValue,
   formatRelativeTime,
@@ -97,6 +98,20 @@ describe("formatDateValue", () => {
     expect(formatDateValue(null)).toBe(DATE_FALLBACK);
     expect(formatDateValue("nonsense")).toBe(DATE_FALLBACK);
     expect(formatDateValue(null, "short", { fallback: "Never" })).toBe("Never");
+  });
+
+  it("bounds formatter caches when callers supply many valid variants", () => {
+    for (let index = 0; index < 100; index += 1) {
+      formatDateValue(SAMPLE, "short", {
+        locale: `en-x-export-${index}`,
+        utc: true,
+      });
+      formatDateValue(SAMPLE, "relative", {
+        locale: `en-x-relative-${index}`,
+        now: Date.parse(SAMPLE),
+      });
+    }
+    expect(dateFormatterCacheSizes()).toEqual({ dateTime: 64, relative: 16 });
   });
 });
 

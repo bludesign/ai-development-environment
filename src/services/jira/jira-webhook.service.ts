@@ -239,8 +239,8 @@ export function normalizeJiraDeliveryUrl(value: string): string {
   } catch {
     throw new Error("Enter the public URL of this server");
   }
-  if (url.protocol !== "https:" && url.protocol !== "http:") {
-    throw new Error("The webhook URL must use HTTP or HTTPS");
+  if (url.protocol !== "https:") {
+    throw new Error("The webhook URL must use HTTPS");
   }
   if (url.username || url.password || url.search || url.hash) {
     throw new Error(

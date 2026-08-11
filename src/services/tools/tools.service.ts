@@ -53,6 +53,10 @@ const RESERVED_HEADERS = new Set([
   "transfer-encoding",
 ]);
 const MCP_PRESET_ICON_KEYS = new Set<string>(BUILD_CONFIGURATION_ICON_KEYS);
+const RUN_REPOSITORY_SCOPED_TOOLS = new Set([
+  "get_codebase_repository_preparations",
+  "save_codebase_repository_preparations",
+]);
 
 export type ServerWithSecrets = {
   id: string;
@@ -390,14 +394,14 @@ export class ToolsService {
     runId: string,
     agentId: string,
   ): Promise<
-    | { status: "OK"; toolNames: string[] }
+    | { status: "OK"; toolNames: string[]; repositoryId: string | null }
     | { status: "NOT_FOUND" }
     | { status: "FORBIDDEN" }
   > {
     const prisma = await getPrismaClient();
     const run = await prisma.agentRun.findUnique({
       where: { id: runId },
-      select: { agentId: true, mcpToolNamesJson: true },
+      select: { agentId: true, mcpToolNamesJson: true, repositoryId: true },
     });
     if (!run) return { status: "NOT_FOUND" };
     if (run.agentId !== agentId) return { status: "FORBIDDEN" };
@@ -409,6 +413,7 @@ export class ToolsService {
     );
     return {
       status: "OK",
+      repositoryId: run.repositoryId,
       toolNames: this.builtInTools
         .definitions()
         .map(({ name }) => name)
@@ -681,6 +686,26 @@ export class ToolsService {
           operation,
         )
       : operation();
+  }
+
+  async callRunBuiltInTool(
+    name: string,
+    args: unknown,
+    repositoryId: string | null,
+    context?: ToolInvocationContext,
+  ): ReturnType<BuiltInToolRegistry["callByName"]> {
+    if (RUN_REPOSITORY_SCOPED_TOOLS.has(name)) {
+      const input =
+        typeof args === "object" && args !== null && !Array.isArray(args)
+          ? (args as Record<string, unknown>)
+          : null;
+      if (!repositoryId || input?.repositoryId !== repositoryId) {
+        throw new Error(
+          "Run-scoped MCP may only access preparations for the run repository",
+        );
+      }
+    }
+    return this.callBuiltInTool(name, args, context);
   }
 
   private async invokeTool(input: {

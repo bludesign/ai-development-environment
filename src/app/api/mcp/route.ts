@@ -31,6 +31,7 @@ async function handle(request: Request): Promise<Response> {
   const tools = services.toolsService;
   let context: ToolInvocationContext;
   let allowedToolNames: ReadonlySet<string> | undefined;
+  let runRepositoryId: string | null | undefined;
   if (runValues.length) {
     const runId = runValues[0]!.trim();
     if (!runId) {
@@ -64,6 +65,7 @@ async function handle(request: Request): Promise<Response> {
     }
     context = authorization.context;
     allowedToolNames = new Set(snapshot.toolNames);
+    runRepositoryId = snapshot.repositoryId;
   } else if (presetValues.length) {
     const presetId = presetValues[0]!.trim();
     if (!presetId) {
@@ -102,7 +104,10 @@ async function handle(request: Request): Promise<Response> {
     const transport = new WebStandardStreamableHTTPServerTransport();
     const server = createBuiltInMcpServer(
       tools.builtInTools,
-      (name, input) => tools.callBuiltInTool(name, input, context),
+      (name, input) =>
+        runRepositoryId === undefined
+          ? tools.callBuiltInTool(name, input, context)
+          : tools.callRunBuiltInTool(name, input, runRepositoryId, context),
       allowedToolNames,
     );
     await server.connect(transport);

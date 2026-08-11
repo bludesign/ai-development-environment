@@ -55,6 +55,7 @@ COPY --from=runtime-dependencies /app/node_modules ./node_modules
 COPY --from=builder --chown=node:node /app/packages/control-agent/package.json ./package.json
 COPY --from=builder --chown=node:node /app/packages/control-agent/dist ./dist
 COPY --chmod=755 scripts/docker/entrypoint.sh /usr/local/bin/entrypoint.sh
+COPY --chmod=755 scripts/docker/agent-healthcheck.sh /usr/local/bin/agent-healthcheck.sh
 
 RUN mkdir -p /data /workspace \
     && chown node:node /data /workspace /home/node
@@ -69,7 +70,7 @@ VOLUME ["/data", "/home/node"]
 WORKDIR /workspace
 
 HEALTHCHECK --interval=30s --timeout=15s --start-period=15s --retries=3 \
-  CMD ["node", "/app/dist/control-agent.js", "status"]
+  CMD ["/usr/local/bin/agent-healthcheck.sh"]
 
 STOPSIGNAL SIGTERM
 

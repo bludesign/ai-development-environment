@@ -26,6 +26,8 @@ enum WorktreeOperation {
   PUSH
   "Represents the reset option."
   RESET
+  "Removes the selected worktree's Git index lock."
+  CLEAR_LOCK
   "Represents the stash all option."
   STASH_ALL
   "Represents the stage all option."
