@@ -34,6 +34,17 @@ type OpenCodeQuestionRequest = {
   questions: ProviderQuestion[];
 };
 
+type OpenCodePermissionRequest = {
+  id: string;
+  sessionId?: string;
+  surface: OpenCodeQuestionSurface;
+  permission: string;
+  patterns: string[];
+  always: string[];
+};
+
+type OpenCodePermissionReply = "once" | "always" | "reject";
+
 function resultData(value: unknown): unknown {
   const record = asRecord(value);
   return "data" in record ? record.data : value;
@@ -186,6 +197,118 @@ function opencodeQuestionResolution(value: unknown): string | undefined {
   const data = asRecord(payload.data ?? event.data ?? properties.data);
   const requestId = data.requestID ?? properties.requestID;
   return typeof requestId === "string" ? requestId : undefined;
+}
+
+function stringArray(value: unknown): string[] {
+  return Array.isArray(value) ? value.map(String) : [];
+}
+
+function opencodePermissionRequest(
+  value: unknown,
+  fallbackSurface?: OpenCodeQuestionSurface,
+): OpenCodePermissionRequest | null {
+  const event = asRecord(value);
+  const payload = asRecord(event.payload);
+  const type = String(payload.type ?? event.type ?? "");
+  if (type && type !== "permission.asked" && type !== "permission.v2.asked")
+    return null;
+  const properties = asRecord(payload.properties ?? event.properties);
+  const request = type
+    ? asRecord(
+        properties.request ??
+          properties.data ??
+          payload.data ??
+          event.data ??
+          properties,
+      )
+    : event;
+  const permission = request.permission ?? request.action;
+  if (typeof permission !== "string") return null;
+  return {
+    id: String(request.id ?? properties.id ?? "permission"),
+    sessionId:
+      typeof request.sessionID === "string"
+        ? request.sessionID
+        : typeof properties.sessionID === "string"
+          ? properties.sessionID
+          : undefined,
+    surface:
+      type === "permission.v2.asked" ? "V2" : (fallbackSurface ?? "LEGACY"),
+    permission,
+    patterns: stringArray(request.patterns ?? request.resources),
+    always: stringArray(request.always ?? request.save),
+  };
+}
+
+function opencodePermissionResolution(value: unknown): string | undefined {
+  const event = asRecord(value);
+  const payload = asRecord(event.payload);
+  const type = String(payload.type ?? event.type ?? "");
+  if (type !== "permission.replied" && type !== "permission.v2.replied")
+    return undefined;
+  const properties = asRecord(payload.properties ?? event.properties);
+  const data = asRecord(payload.data ?? event.data ?? properties.data);
+  const requestId = data.requestID ?? properties.requestID;
+  return typeof requestId === "string" ? requestId : undefined;
+}
+
+function permissionQuestions(
+  request: OpenCodePermissionRequest,
+): ProviderQuestion[] {
+  const permission = request.permission.replaceAll("_", " ");
+  const targets = request.patterns.length
+    ? ` for ${request.patterns.join(", ")}`
+    : "";
+  return [
+    {
+      id: "permission",
+      header: "Permission required",
+      prompt: `OpenCode requests ${permission} permission${targets}.`,
+      multiSelect: false,
+      allowCustom: false,
+      options: [
+        {
+          label: "Allow once",
+          description: "Approve only this request.",
+        },
+        ...(request.always.length
+          ? [
+              {
+                label: "Always allow",
+                description: `Approve this request and remember ${request.always.join(", ")}.`,
+              },
+            ]
+          : []),
+        {
+          label: "Reject",
+          description: "Deny this request and let OpenCode continue safely.",
+        },
+      ],
+    },
+  ];
+}
+
+function permissionReply(value: unknown): OpenCodePermissionReply {
+  const selected = answerArrays(value)
+    .flat()
+    .map((answer) => answer.trim().toLowerCase())
+    .filter(Boolean);
+  if (selected.length !== 1)
+    throw new Error("Select one response for the OpenCode permission request");
+  switch (selected[0]) {
+    case "allow once":
+    case "once":
+      return "once";
+    case "always allow":
+    case "allow always":
+    case "always":
+      return "always";
+    case "reject":
+    case "deny":
+      return "reject";
+    default:
+      throw new Error(`Unknown OpenCode permission response: ${selected[0]}`);
+  }
 }
 
 function responseItems(value: unknown): unknown[] {
@@ -347,6 +470,7 @@ export class OpenCodeAdapter implements ProviderAdapter {
     let stopReason: "PAUSED" | "CANCELLED" | null = null;
     const streamController = new AbortController();
     const questionSurfaces = new Map<string, OpenCodeQuestionSurface>();
+    const permissionSurfaces = new Map<string, OpenCodeQuestionSurface>();
     const pendingQuestions = new Set<string>();
     let sawQuestion = false;
 
@@ -359,6 +483,20 @@ export class OpenCodeAdapter implements ProviderAdapter {
         await callbacks.onQuestion(request.id, request.questions);
       } catch (error) {
         questionSurfaces.delete(request.id);
+        pendingQuestions.delete(request.id);
+        throw error;
+      }
+    };
+
+    const reportPermission = async (request: OpenCodePermissionRequest) => {
+      if (permissionSurfaces.has(request.id)) return;
+      permissionSurfaces.set(request.id, request.surface);
+      pendingQuestions.add(request.id);
+      sawQuestion = true;
+      try {
+        await callbacks.onQuestion(request.id, permissionQuestions(request));
+      } catch (error) {
+        permissionSurfaces.delete(request.id);
         pendingQuestions.delete(request.id);
         throw error;
       }
@@ -388,6 +526,29 @@ export class OpenCodeAdapter implements ProviderAdapter {
       }
     };
 
+    const reconcileLegacyPermissions = async () => {
+      const response = await client.permission.list(
+        { directory: cwd },
+        { signal: AbortSignal.timeout(QUESTION_RECONCILIATION_TIMEOUT_MS) },
+      );
+      for (const value of responseItems(response)) {
+        const request = opencodePermissionRequest(value, "LEGACY");
+        if (request?.sessionId === nativeId) await reportPermission(request);
+      }
+    };
+
+    const reconcileV2Permissions = async () => {
+      const response = await client.v2.session.permission.list(
+        { sessionID: nativeId },
+        { signal: AbortSignal.timeout(QUESTION_RECONCILIATION_TIMEOUT_MS) },
+      );
+      for (const value of responseItems(response)) {
+        const request = opencodePermissionRequest(value, "V2");
+        if (request && (!request.sessionId || request.sessionId === nativeId))
+          await reportPermission(request);
+      }
+    };
+
     const eventTask = (async () => {
       try {
         const subscription = await client.event.subscribe(
@@ -398,8 +559,13 @@ export class OpenCodeAdapter implements ProviderAdapter {
           if (eventSessionId(event) !== nativeId) continue;
           const question = opencodeQuestionRequest(event);
           if (question) await reportQuestion(question);
+          const permission = opencodePermissionRequest(event);
+          if (permission) await reportPermission(permission);
           const resolvedRequestId = opencodeQuestionResolution(event);
           if (resolvedRequestId) pendingQuestions.delete(resolvedRequestId);
+          const resolvedPermissionId = opencodePermissionResolution(event);
+          if (resolvedPermissionId)
+            pendingQuestions.delete(resolvedPermissionId);
           const record = asRecord(event);
           const payload = asRecord(record.payload);
           const type = String(payload.type ?? record.type ?? "event");
@@ -429,7 +595,7 @@ export class OpenCodeAdapter implements ProviderAdapter {
     })();
 
     const questionReconciliationTask = (
-      surface: OpenCodeQuestionSurface,
+      surface: string,
       reconcile: () => Promise<void>,
     ) =>
       (async () => {
@@ -462,6 +628,14 @@ export class OpenCodeAdapter implements ProviderAdapter {
       "V2",
       reconcileV2Questions,
     );
+    const legacyPermissionReconciliationTask = questionReconciliationTask(
+      "LEGACY permission",
+      reconcileLegacyPermissions,
+    );
+    const v2PermissionReconciliationTask = questionReconciliationTask(
+      "V2 permission",
+      reconcileV2Permissions,
+    );
 
     const send = async (prompt: string, attachments: StagedAttachment[]) => {
       const response = await client.session.prompt({
@@ -493,6 +667,8 @@ export class OpenCodeAdapter implements ProviderAdapter {
         await Promise.allSettled([
           reconcileLegacyQuestions(),
           reconcileV2Questions(),
+          reconcileLegacyPermissions(),
+          reconcileV2Permissions(),
         ]);
         while (!stopReason && pendingQuestions.size) {
           await waitForPoll(streamController.signal);
@@ -544,6 +720,8 @@ export class OpenCodeAdapter implements ProviderAdapter {
           eventTask,
           legacyQuestionReconciliationTask,
           v2QuestionReconciliationTask,
+          legacyPermissionReconciliationTask,
+          v2PermissionReconciliationTask,
         ]);
         isolatedRuntime?.server.close();
       }
@@ -560,7 +738,20 @@ export class OpenCodeAdapter implements ProviderAdapter {
         await send(prompt, attachments);
       },
       async answer(requestId, answers) {
-        if (questionSurfaces.get(requestId) === "V2") {
+        const permissionSurface = permissionSurfaces.get(requestId);
+        if (permissionSurface === "V2") {
+          await client.v2.session.permission.reply({
+            sessionID: nativeId,
+            requestID: requestId,
+            reply: permissionReply(answers),
+          });
+        } else if (permissionSurface === "LEGACY") {
+          await client.permission.reply({
+            requestID: requestId,
+            directory: cwd,
+            reply: permissionReply(answers),
+          });
+        } else if (questionSurfaces.get(requestId) === "V2") {
           await client.v2.session.question.reply({
             sessionID: nativeId,
             requestID: requestId,
@@ -574,6 +765,7 @@ export class OpenCodeAdapter implements ProviderAdapter {
           });
         }
         pendingQuestions.delete(requestId);
+        permissionSurfaces.delete(requestId);
       },
     };
   }
