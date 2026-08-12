@@ -366,6 +366,51 @@ describe("UsagePage", () => {
     ).toHaveLength(1);
   });
 
+  test("ignores a collect response captured before the history filter changed", async () => {
+    let resolveCollect:
+      | ((value: { collectCcusage: ReturnType<typeof collection> }) => void)
+      | undefined;
+    const pendingCollect = new Promise<{
+      collectCcusage: ReturnType<typeof collection>;
+    }>((resolve) => {
+      resolveCollect = resolve;
+    });
+    const liveCollection = structuredClone(collection());
+    liveCollection.aggregate.totals.totalCost = 0.5;
+    liveCollection.aggregate.days[0]!.totalCost = 0.5;
+    liveCollection.aggregate.days[0]!.models[0]!.totalCost = 0.5;
+    liveCollection.aggregate.days[0]!.models[0]!.agents[0]!.totalCost = 0.5;
+    requestMock.mockImplementation(async (query, variables) => {
+      if (query.includes("query CcusageCollection")) {
+        return {
+          ccusageCollection:
+            variables?.includeHistory === false ? liveCollection : collection(),
+        } as never;
+      }
+      if (query.includes("mutation CollectCcusage")) {
+        return pendingCollect as never;
+      }
+      throw new Error(`Unexpected query: ${query}`);
+    });
+
+    render(<UsagePage />);
+    const toggle = await screen.findByRole("button", {
+      name: "Include stored usage history",
+    });
+    fireEvent.click(toggle);
+    await waitFor(() =>
+      expect(screen.getAllByText("$0.50").length).toBeGreaterThan(0),
+    );
+
+    await act(async () => {
+      resolveCollect?.({ collectCcusage: collection() });
+      await pendingCollect;
+    });
+
+    expect(screen.getAllByText("$0.50").length).toBeGreaterThan(0);
+    expect(screen.queryByText("$1.26")).toBeNull();
+  });
+
   test("confirms before clearing all stored history", async () => {
     render(<UsagePage />);
 

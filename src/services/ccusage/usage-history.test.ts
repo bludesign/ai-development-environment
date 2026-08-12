@@ -118,6 +118,12 @@ describe("usage history merging", () => {
         observedAt: new Date("2026-08-12T12:00:01Z"),
       }),
     ).toBe(true);
+    expect(
+      shouldApplyUsageObservation(current, {
+        jobId: "job-same-time",
+        observedAt: new Date("2026-08-12T12:00:00Z"),
+      }),
+    ).toBe(false);
   });
 
   test("uses the first live report as the baseline", () => {
@@ -143,16 +149,32 @@ describe("usage history merging", () => {
     expect(merged.combined.totals.inputTokens).toBe(150);
   });
 
-  test("adds a reset report as a new usage epoch", () => {
+  test("retains the high-water mark when a cumulative report shrinks", () => {
     const merged = mergeCcusageHistory(
       emptyCcusageReport(),
       report(100),
       report(20),
     );
 
-    expect(merged.archived.totals.inputTokens).toBe(100);
-    expect(merged.combined.totals.inputTokens).toBe(120);
-    expect(merged.combined.totals.totalCost).toBeCloseTo(1.2);
+    expect(merged.archived.totals.inputTokens).toBe(80);
+    expect(merged.combined.totals.inputTokens).toBe(100);
+    expect(merged.combined.totals.totalCost).toBeCloseTo(1);
+  });
+
+  test("adds only usage beyond a retained partial report", () => {
+    const shrunk = mergeCcusageHistory(
+      emptyCcusageReport(),
+      report(100),
+      report(60),
+    );
+    const increased = mergeCcusageHistory(
+      shrunk.archived,
+      shrunk.live,
+      report(70),
+    );
+
+    expect(shrunk.combined.totals.inputTokens).toBe(100);
+    expect(increased.combined.totals.inputTokens).toBe(110);
   });
 
   test("archives missing days and adds them again if they reappear", () => {
@@ -199,14 +221,14 @@ describe("usage history merging", () => {
 
     const merged = mergeCcusageHistory(emptyCcusageReport(), previous, next);
 
-    expect(merged.archived.totals.inputTokens).toBe(100);
-    expect(merged.combined.totals.inputTokens).toBe(320);
+    expect(merged.archived.totals.inputTokens).toBe(80);
+    expect(merged.combined.totals.inputTokens).toBe(300);
     expect(
       merged.combined.daily[0]?.modelBreakdowns.reduce(
         (total, model) => total + model.inputTokens,
         0,
       ),
-    ).toBe(320);
+    ).toBe(300);
   });
 
   test("tracks resets in unattributed usage", () => {
@@ -221,8 +243,8 @@ describe("usage history merging", () => {
 
     const merged = mergeCcusageHistory(emptyCcusageReport(), previous, next);
 
-    expect(merged.archived.totals.inputTokens).toBe(100);
-    expect(merged.combined.totals.inputTokens).toBe(195);
+    expect(merged.archived.totals.inputTokens).toBe(80);
+    expect(merged.combined.totals.inputTokens).toBe(175);
     expect(merged.combined.daily[0]?.modelBreakdowns[0]?.inputTokens).toBe(75);
   });
 });

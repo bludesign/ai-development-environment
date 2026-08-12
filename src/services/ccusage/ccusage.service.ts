@@ -74,6 +74,7 @@ type PersistedJob = {
   resultJson: string | null;
   error: string | null;
   createdAt?: Date;
+  startedAt?: Date | null;
   finishedAt?: Date | null;
   updatedAt?: Date;
 };
@@ -521,10 +522,9 @@ export class CcusageService {
                 report,
                 jobId: progress.jobId,
                 observedAt:
-                  jobs.get(progress.agent.id)?.finishedAt ??
-                  jobs.get(progress.agent.id)?.updatedAt ??
+                  jobs.get(progress.agent.id)?.startedAt ??
                   jobs.get(progress.agent.id)?.createdAt ??
-                  collection.updatedAt,
+                  collection.createdAt,
               },
             ]
           : [],

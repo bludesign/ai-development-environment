@@ -159,6 +159,7 @@ export function UsagePage() {
   const [selectedModel, setSelectedModel] = useState<string | null>(null);
   const rangeRef = useRef(range);
   const includeHistoryRef = useRef(includeHistory);
+  const viewVersionRef = useRef(0);
 
   useEffect(() => {
     rangeRef.current = range;
@@ -232,6 +233,7 @@ export function UsagePage() {
 
   useEffect(() => {
     let disposed = false;
+    const viewVersion = viewVersionRef.current;
     void controlPlaneRequest<{ collectCcusage: CcusageCollection }>(
       `mutation CollectCcusage($requestId: ID!, $range: CcusageRange!, $includeHistory: Boolean!) {
         collectCcusage(requestId: $requestId) { ${COLLECTION_FIELDS} }
@@ -243,7 +245,7 @@ export function UsagePage() {
       },
     )
       .then(({ collectCcusage }) => {
-        if (disposed) return;
+        if (disposed || viewVersion !== viewVersionRef.current) return;
         setCollection(collectCcusage);
         setLoading(false);
         setLoadError(null);
@@ -327,7 +329,13 @@ export function UsagePage() {
             </div>
           )}
           <Tabs
-            onValueChange={(value) => setRange(value as UsageRange)}
+            onValueChange={(value) => {
+              const next = value as UsageRange;
+              if (next === range) return;
+              rangeRef.current = next;
+              viewVersionRef.current += 1;
+              setRange(next);
+            }}
             value={range}
           >
             <TabsList aria-label={t("rangeLabel")}>
@@ -347,7 +355,12 @@ export function UsagePage() {
           <Button
             aria-label={t("historyToggleLabel")}
             aria-pressed={includeHistory}
-            onClick={() => setIncludeHistory((current) => !current)}
+            onClick={() => {
+              const next = !includeHistory;
+              includeHistoryRef.current = next;
+              viewVersionRef.current += 1;
+              setIncludeHistory(next);
+            }}
             variant="outline"
           >
             <History />
@@ -364,6 +377,7 @@ export function UsagePage() {
                 await controlPlaneRequest<{ clearCcusageHistory: number }>(
                   `mutation ClearCcusageHistory { clearCcusageHistory }`,
                 );
+                viewVersionRef.current += 1;
                 setReconcileVersion((current) => current + 1);
               } catch (error) {
                 setLoadError(

@@ -43,7 +43,7 @@ export function shouldApplyUsageObservation(
   return (
     current === null ||
     (current.lastJobId !== next.jobId &&
-      current.lastObservedAt <= next.observedAt)
+      current.lastObservedAt < next.observedAt)
   );
 }
 
@@ -113,7 +113,7 @@ function archivedMetric(
   next?: number,
 ): number {
   if (next === undefined) return archived + previous;
-  return next < previous ? archived + previous : archived;
+  return next < previous ? archived + previous - next : archived;
 }
 
 function mergeArchivedModel(

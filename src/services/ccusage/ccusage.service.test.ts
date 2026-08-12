@@ -223,6 +223,58 @@ describe("CcusageService", () => {
     );
   });
 
+  test("orders persisted reports by job start instead of completion", async () => {
+    const alpha = agent("alpha");
+    const startedAt = new Date("2026-07-16T12:00:00Z");
+    const persisted = {
+      id: "collection-ordered",
+      deadlineAt: new Date("2026-07-16T12:03:00Z"),
+      finishedAt: null,
+      createdAt: new Date("2026-07-16T11:59:30Z"),
+      updatedAt: new Date("2026-07-16T12:02:00Z"),
+      agents: [
+        {
+          agentId: alpha.id,
+          initialStatus: "QUEUING",
+          error: null,
+          agent: alpha,
+        },
+      ],
+      jobs: [
+        {
+          id: "job-alpha",
+          agentId: alpha.id,
+          status: "SUCCEEDED",
+          resultJson: resultJson(),
+          error: null,
+          createdAt: new Date("2026-07-16T11:59:45Z"),
+          startedAt,
+          finishedAt: new Date("2026-07-16T12:02:00Z"),
+          updatedAt: new Date("2026-07-16T12:02:00Z"),
+        },
+      ],
+    };
+    const prisma = withHistory({
+      ccusageCollection: {
+        findUnique: vi.fn().mockResolvedValue(persisted),
+        updateMany: vi.fn().mockResolvedValue({ count: 1 }),
+      },
+    });
+    getPrismaClient.mockResolvedValue(prisma);
+    const service = new CcusageService(
+      {} as AgentControlService,
+      () => new Date("2026-07-16T12:02:01Z"),
+    );
+
+    await service.getCollection(persisted.id);
+
+    expect(prisma.ccusageHistory.upsert).toHaveBeenCalledWith(
+      expect.objectContaining({
+        create: expect.objectContaining({ lastObservedAt: startedAt }),
+      }),
+    );
+  });
+
   test("combines stored agents with live results while a collection is partial", async () => {
     const alpha = agent("alpha");
     const beta = agent("beta");
