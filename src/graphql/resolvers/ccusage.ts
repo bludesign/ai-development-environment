@@ -28,8 +28,15 @@ export const createCcusageResolvers = (ccusageService: CcusageService) => ({
   CcusageCollection: {
     aggregate: (
       collection: CcusageCollectionSnapshot,
-      { range = "ALL" }: { range?: CcusageRange },
-    ) => filterUsageByDays(collection.aggregate, RANGE_DAYS[range]),
+      {
+        range = "ALL",
+        includeHistory = true,
+      }: { range?: CcusageRange; includeHistory?: boolean },
+    ) =>
+      filterUsageByDays(
+        includeHistory ? collection.aggregate : collection.liveAggregate,
+        RANGE_DAYS[range],
+      ),
   },
   CcusageModelUsage: {
     unattributed: (model: { unattributed?: boolean }) =>
@@ -54,7 +61,16 @@ export const createCcusageResolvers = (ccusageService: CcusageService) => ({
     ) => {
       requireControlPlane(context);
       await ccusageService.initialize();
-      return ccusageService.collect(requestId);
+      return ccusageService.start(requestId);
+    },
+    clearCcusageHistory: async (
+      _root: unknown,
+      _args: Record<string, never>,
+      context: GraphQLContext,
+    ) => {
+      requireControlPlane(context);
+      await ccusageService.initialize();
+      return ccusageService.clearHistory();
     },
   },
   Subscription: {

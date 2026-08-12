@@ -141,6 +141,7 @@ function collection(status: "COLLECTING" | "COMPLETED" = "COMPLETED") {
         },
       ],
     },
+    hasStoredHistory: true,
     aggregate,
     allAggregate: { days: [{ period: "2026-07-16" }] },
   };
@@ -198,7 +199,10 @@ describe("UsagePage", () => {
         return { ccusageCollection: collection() } as never;
       }
       if (query.includes("mutation CollectCcusage")) {
-        return { collectCcusage: { id: "collection-1" } } as never;
+        return { collectCcusage: collection() } as never;
+      }
+      if (query.includes("mutation ClearCcusageHistory")) {
+        return { clearCcusageHistory: 1 } as never;
       }
       throw new Error(`Unexpected query: ${query}`);
     });
@@ -269,7 +273,7 @@ describe("UsagePage", () => {
         return { ccusageCollection: result } as never;
       }
       if (query.includes("mutation CollectCcusage")) {
-        return { collectCcusage: { id: "collection-1" } } as never;
+        return { collectCcusage: result } as never;
       }
       throw new Error(`Unexpected query: ${query}`);
     });
@@ -334,5 +338,70 @@ describe("UsagePage", () => {
     });
     expect(screen.getByText("Daily cost by model")).toBeDefined();
     expect(screen.getByText("1 of 2 compatible agents reported")).toBeDefined();
+  });
+
+  test("switches between history and live data without recollecting", async () => {
+    render(<UsagePage />);
+
+    const toggle = await screen.findByRole("button", {
+      name: "Include stored usage history",
+    });
+    expect(toggle.getAttribute("aria-pressed")).toBe("true");
+    fireEvent.click(toggle);
+
+    await waitFor(() =>
+      expect(
+        requestMock.mock.calls.some(
+          ([query, variables]) =>
+            String(query).includes("query CcusageCollection") &&
+            variables?.includeHistory === false,
+        ),
+      ).toBe(true),
+    );
+    expect(toggle.getAttribute("aria-pressed")).toBe("false");
+    expect(
+      requestMock.mock.calls.filter(([query]) =>
+        String(query).includes("mutation CollectCcusage"),
+      ),
+    ).toHaveLength(1);
+  });
+
+  test("confirms before clearing all stored history", async () => {
+    render(<UsagePage />);
+
+    fireEvent.click(
+      await screen.findByRole("button", { name: "Clear history" }),
+    );
+    expect(screen.getByText("Clear all usage history?")).toBeDefined();
+    const actions = screen.getAllByRole("button", { name: "Clear history" });
+    fireEvent.click(actions.at(-1)!);
+
+    await waitFor(() =>
+      expect(
+        requestMock.mock.calls.some(([query]) =>
+          String(query).includes("mutation ClearCcusageHistory"),
+        ),
+      ).toBe(true),
+    );
+  });
+
+  test("renders stored aggregate while current agents are still collecting", async () => {
+    const collecting = collection("COLLECTING");
+    collecting.progress.successfulCount = 0;
+    collecting.progress.agents[0]!.status = "RUNNING";
+    requestMock.mockImplementation(async (query) => {
+      if (query.includes("query CcusageCollection")) {
+        return { ccusageCollection: collecting } as never;
+      }
+      if (query.includes("mutation CollectCcusage")) {
+        return { collectCcusage: collecting } as never;
+      }
+      throw new Error(`Unexpected query: ${query}`);
+    });
+
+    render(<UsagePage />);
+
+    expect(await screen.findByText("Daily cost by model")).toBeDefined();
+    expect(screen.getByText("0 of 2 compatible agents reported")).toBeDefined();
   });
 });

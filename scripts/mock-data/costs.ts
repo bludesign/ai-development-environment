@@ -273,12 +273,10 @@ export async function seedCosts(prisma: PrismaClient): Promise<void> {
 
   /**
    * A *finished* collection under a fixed id. The Usage page always asks the control plane to
-   * collect afresh under a client-generated request id and then blocks until every online
-   * agent answers — with no agent connected that only resolves at the 150s deadline, which is
-   * why the capture used to photograph the spinner. The `usage` route in playwright/routes.ts
-   * pins `crypto.randomUUID` to this id, so `collectCcusage` finds this row already complete
-   * and the first reconcile query returns real numbers. `finishedAt` also keeps the service's
-   * startup restore pass from re-dispatching jobs for it.
+   * collect afresh under a client-generated request id. The `usage` route in
+   * playwright/routes.ts pins `crypto.randomUUID` to this id, so `collectCcusage` finds this
+   * row already complete and immediately returns real numbers. `finishedAt` also keeps the
+   * service's startup restore pass from re-dispatching jobs for it.
    */
   await prisma.ccusageCollection.create({
     data: {
@@ -318,6 +316,28 @@ export async function seedCosts(prisma: PrismaClient): Promise<void> {
       createdAt: hoursAgo(6),
       startedAt: hoursAgo(6),
       finishedAt: hoursAgo(6),
+    })),
+  });
+
+  await prisma.ccusageHistory.createMany({
+    data: AGENT_USAGE.map((usage, index) => ({
+      agentId: usage.agentId,
+      agentName: usage.agentName,
+      hostname: usage.hostname,
+      archivedReportJson: JSON.stringify({
+        daily: [],
+        totals: {
+          inputTokens: 0,
+          outputTokens: 0,
+          cacheCreationTokens: 0,
+          cacheReadTokens: 0,
+          totalTokens: 0,
+          totalCost: 0,
+        },
+      }),
+      lastLiveReportJson: JSON.stringify(reportFor(usage)),
+      lastObservedAt: hoursAgo(6),
+      lastJobId: `job-ccusage-collection-${index + 1}`,
     })),
   });
 }

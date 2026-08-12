@@ -19,6 +19,14 @@ import {
   ccusageCollectionChangedTopic,
 } from "@/services/agent-control";
 
+import {
+  addCcusageReports,
+  emptyCcusageReport,
+  mergeCcusageHistory,
+  parseStoredCcusageReport,
+  shouldApplyUsageObservation,
+} from "./usage-history";
+
 export const CCUSAGE_JOB_TIMEOUT_SECONDS = 120;
 export const CCUSAGE_COLLECTION_DEADLINE_MS = 150_000;
 
@@ -65,6 +73,9 @@ type PersistedJob = {
   status: string;
   resultJson: string | null;
   error: string | null;
+  createdAt?: Date;
+  finishedAt?: Date | null;
+  updatedAt?: Date;
 };
 
 type PersistedCollectionAgent = {
@@ -104,6 +115,13 @@ export type CcusageCollectionSnapshot = {
     agents: CcusageAgentProgress[];
   };
   aggregate: AggregatedUsage;
+  liveAggregate: AggregatedUsage;
+  hasStoredHistory: boolean;
+};
+
+type ObservedUsageReport = UsageReportSource & {
+  jobId: string;
+  observedAt: Date;
 };
 
 export type CcusageCompletionObserver = (
@@ -238,19 +256,16 @@ export class CcusageService {
   }
 
   async collect(requestId?: string | null): Promise<CcusageCollectionSnapshot> {
+    const snapshot = await this.start(requestId);
+    if (snapshot.status === "COMPLETED") return snapshot;
+    return this.waitForCompletion(snapshot.id);
+  }
+
+  async start(requestId?: string | null): Promise<CcusageCollectionSnapshot> {
     const id = requestId?.trim() || randomUUID();
     await this.ensureCollection(id);
-    const snapshot = await this.waitForCompletion(id);
-    for (const observer of this.completionObservers) {
-      try {
-        await observer(snapshot);
-      } catch (error) {
-        console.error(
-          "ccusage completion observer failed:",
-          error instanceof Error ? error.message : error,
-        );
-      }
-    }
+    const snapshot = await this.getCollection(id);
+    if (!snapshot) throw new Error("ccusage collection disappeared");
     return snapshot;
   }
 
@@ -272,20 +287,36 @@ export class CcusageService {
       collection = (await this.loadCollection(id)) ?? collection;
     }
 
-    const snapshot = this.snapshot(collection);
+    const snapshot = await this.snapshot(collection);
     if (snapshot.status === "COMPLETED" && collection.finishedAt === null) {
       const finishedAt = this.now();
       const prisma = await getPrismaClient();
-      await prisma.ccusageCollection.updateMany({
+      const updated = await prisma.ccusageCollection.updateMany({
         where: { id, finishedAt: null },
         data: { finishedAt },
       });
       snapshot.finishedAt = finishedAt.toISOString();
       this.clearDeadline(id);
+      if (updated.count > 0) await this.notifyCompletion(snapshot);
     } else if (snapshot.status === "COLLECTING") {
       this.scheduleDeadline(collection);
     }
     return snapshot;
+  }
+
+  async clearHistory(): Promise<number> {
+    const prisma = await getPrismaClient();
+    return prisma.$transaction(async (transaction) => {
+      const clearedAt = this.now();
+      const deleted = await transaction.ccusageHistory.deleteMany();
+      await transaction.sidebarUsageSummary.deleteMany();
+      await transaction.ccusageHistoryState.upsert({
+        where: { id: "default" },
+        create: { id: "default", clearedAt },
+        update: { clearedAt },
+      });
+      return deleted.count;
+    });
   }
 
   async *subscribe(
@@ -463,7 +494,9 @@ export class CcusageService {
     if (updated.count > 0) this.publish(collection.id);
   }
 
-  private snapshot(collection: PersistedCollection): CcusageCollectionSnapshot {
+  private async snapshot(
+    collection: PersistedCollection,
+  ): Promise<CcusageCollectionSnapshot> {
     const jobs = new Map(collection.jobs.map((job) => [job.agentId, job]));
     const progressAndReports = collection.agents.map((member) =>
       progressFor(member, jobs.get(member.agentId)),
@@ -475,9 +508,9 @@ export class CcusageService {
     const finished = eligible.filter(({ status }) =>
       status === "INVALID" ? true : JOB_TERMINAL_STATUSES.has(status),
     );
-    const reports: UsageReportSource[] = progressAndReports.flatMap(
+    const reports: ObservedUsageReport[] = progressAndReports.flatMap(
       ({ progress, report }) =>
-        report
+        report && progress.jobId
           ? [
               {
                 agent: {
@@ -486,10 +519,26 @@ export class CcusageService {
                   hostname: progress.agent.hostname,
                 },
                 report,
+                jobId: progress.jobId,
+                observedAt:
+                  jobs.get(progress.agent.id)?.finishedAt ??
+                  jobs.get(progress.agent.id)?.updatedAt ??
+                  jobs.get(progress.agent.id)?.createdAt ??
+                  collection.updatedAt,
               },
             ]
           : [],
     );
+    await this.persistReports(reports);
+    const history = await this.loadHistoryReports();
+    const historicalAgentIds = new Set(
+      history.reports.map(({ agent }) => agent.id),
+    );
+    const combinedReports = [
+      ...history.reports,
+      ...reports.filter(({ agent }) => !historicalAgentIds.has(agent.id)),
+    ];
+    const liveReports: UsageReportSource[] = reports;
     return {
       id: collection.id,
       status: finished.length === eligible.length ? "COMPLETED" : "COLLECTING",
@@ -503,8 +552,105 @@ export class CcusageService {
           .length,
         agents,
       },
-      aggregate: aggregateUsage(reports),
+      aggregate: aggregateUsage(combinedReports),
+      liveAggregate: aggregateUsage(liveReports),
+      hasStoredHistory: history.hasStoredHistory,
     };
+  }
+
+  private async persistReports(reports: ObservedUsageReport[]): Promise<void> {
+    if (reports.length === 0) return;
+    const prisma = await getPrismaClient();
+    for (const source of reports) {
+      await prisma.$transaction(async (transaction) => {
+        const state = await transaction.ccusageHistoryState.findUnique({
+          where: { id: "default" },
+          select: { clearedAt: true },
+        });
+        if (state?.clearedAt && source.observedAt <= state.clearedAt) return;
+
+        const current = await transaction.ccusageHistory.findUnique({
+          where: { agentId: source.agent.id },
+        });
+        if (!shouldApplyUsageObservation(current, source)) {
+          return;
+        }
+
+        const merged = current
+          ? mergeCcusageHistory(
+              parseStoredCcusageReport(current.archivedReportJson),
+              parseStoredCcusageReport(current.lastLiveReportJson),
+              source.report,
+            )
+          : mergeCcusageHistory(
+              emptyCcusageReport(),
+              emptyCcusageReport(),
+              source.report,
+            );
+        const data = {
+          agentName: source.agent.name,
+          hostname: source.agent.hostname,
+          archivedReportJson: JSON.stringify(merged.archived),
+          lastLiveReportJson: JSON.stringify(merged.live),
+          lastObservedAt: source.observedAt,
+          lastJobId: source.jobId,
+        };
+        await transaction.ccusageHistory.upsert({
+          where: { agentId: source.agent.id },
+          create: { agentId: source.agent.id, ...data },
+          update: data,
+        });
+      });
+    }
+  }
+
+  private async loadHistoryReports(): Promise<{
+    reports: UsageReportSource[];
+    hasStoredHistory: boolean;
+  }> {
+    const prisma = await getPrismaClient();
+    const histories = await prisma.ccusageHistory.findMany();
+    return {
+      hasStoredHistory: histories.length > 0,
+      reports: histories.flatMap((history) => {
+        try {
+          return [
+            {
+              agent: {
+                id: history.agentId,
+                name: history.agentName,
+                hostname: history.hostname,
+              },
+              report: addCcusageReports(
+                parseStoredCcusageReport(history.archivedReportJson),
+                parseStoredCcusageReport(history.lastLiveReportJson),
+              ),
+            },
+          ];
+        } catch (error) {
+          console.error(
+            `Could not read ccusage history for agent ${history.agentId}:`,
+            error instanceof Error ? error.message : error,
+          );
+          return [];
+        }
+      }),
+    };
+  }
+
+  private async notifyCompletion(
+    snapshot: CcusageCollectionSnapshot,
+  ): Promise<void> {
+    for (const observer of this.completionObservers) {
+      try {
+        await observer(snapshot);
+      } catch (error) {
+        console.error(
+          "ccusage completion observer failed:",
+          error instanceof Error ? error.message : error,
+        );
+      }
+    }
   }
 
   private scheduleDeadline(collection: {

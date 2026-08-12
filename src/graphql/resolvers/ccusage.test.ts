@@ -23,13 +23,16 @@ const snapshot = {
     agents: [],
   },
   aggregate: { days: [], totals: emptyUsageMetrics() },
+  liveAggregate: { days: [], totals: emptyUsageMetrics() },
+  hasStoredHistory: false,
 };
 
 describe("ccusage resolvers", () => {
   test("keeps collection creation in the mutation and the query read-only", async () => {
     const service = {
       initialize: vi.fn().mockResolvedValue(undefined),
-      collect: vi.fn().mockResolvedValue(snapshot),
+      start: vi.fn().mockResolvedValue(snapshot),
+      clearHistory: vi.fn().mockResolvedValue(0),
       getCollection: vi.fn().mockResolvedValue(snapshot),
       subscribe: vi.fn(),
     } as unknown as CcusageService;
@@ -42,7 +45,7 @@ describe("ccusage resolvers", () => {
         context(null),
       ),
     ).resolves.toBe(snapshot);
-    expect(service.collect).not.toHaveBeenCalled();
+    expect(service.start).not.toHaveBeenCalled();
 
     await expect(
       resolvers.Mutation.collectCcusage(
@@ -51,7 +54,7 @@ describe("ccusage resolvers", () => {
         context(null),
       ),
     ).resolves.toBe(snapshot);
-    expect(service.collect).toHaveBeenCalledWith("collection-1");
+    expect(service.start).toHaveBeenCalledWith("collection-1");
   });
 
   test("resolves bare collection snapshots from the progress subscription", () => {
@@ -60,6 +63,43 @@ describe("ccusage resolvers", () => {
     expect(
       resolvers.Subscription.ccusageCollectionChanged.resolve(snapshot),
     ).toBe(snapshot);
+  });
+
+  test("selects historical or live aggregate and clears history", async () => {
+    const historical = {
+      days: [],
+      totals: { ...emptyUsageMetrics(), totalCost: 4 },
+    };
+    const live = {
+      days: [],
+      totals: { ...emptyUsageMetrics(), totalCost: 1 },
+    };
+    const collection = {
+      ...snapshot,
+      aggregate: historical,
+      liveAggregate: live,
+    };
+    const service = {
+      initialize: vi.fn().mockResolvedValue(undefined),
+      clearHistory: vi.fn().mockResolvedValue(2),
+    } as unknown as CcusageService;
+    const resolvers = createCcusageResolvers(service);
+
+    expect(
+      resolvers.CcusageCollection.aggregate(collection, {
+        range: "ALL",
+        includeHistory: true,
+      }).totals.totalCost,
+    ).toBe(4);
+    expect(
+      resolvers.CcusageCollection.aggregate(collection, {
+        range: "ALL",
+        includeHistory: false,
+      }).totals.totalCost,
+    ).toBe(1);
+    await expect(
+      resolvers.Mutation.clearCcusageHistory({}, {}, context(null)),
+    ).resolves.toBe(2);
   });
 
   test("rejects agent credentials for query, mutation, and subscription", async () => {
@@ -78,6 +118,11 @@ describe("ccusage resolvers", () => {
     );
     await expect(
       resolvers.Mutation.collectCcusage({}, { requestId: null }, agentContext),
+    ).rejects.toThrow(
+      "Agent credentials cannot perform control-plane operations",
+    );
+    await expect(
+      resolvers.Mutation.clearCcusageHistory({}, {}, agentContext),
     ).rejects.toThrow(
       "Agent credentials cannot perform control-plane operations",
     );

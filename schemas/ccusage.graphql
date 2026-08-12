@@ -170,10 +170,14 @@ type CcusageCollection {
   finishedAt: String
   "The progress associated with this Claude Code usage collection."
   progress: CcusageProgress!
+  "Whether durable Claude Code usage history is stored."
+  hasStoredHistory: Boolean!
   "The aggregate associated with this Claude Code usage collection."
   aggregate(
     "The range used to filter or perform the operation. Defaults to `ALL`."
     range: CcusageRange = ALL
+    "Whether stored usage history is included. Defaults to `true`."
+    includeHistory: Boolean = true
   ): CcusageAggregate!
 }
 
@@ -188,6 +192,8 @@ extend type Query {
 extend type Mutation {
   "Collects Claude Code usage and returns a Claude Code usage collection."
   collectCcusage("Identifier of the request." requestId: ID): CcusageCollection!
+  "Clears all durable Claude Code usage history and returns the number of agent histories removed."
+  clearCcusageHistory: Int!
 }
 
 extend type Subscription {

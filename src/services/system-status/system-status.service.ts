@@ -44,7 +44,6 @@ export class SystemStatusService {
   private async recordCompletedUsage(
     snapshot: CcusageCollectionSnapshot,
   ): Promise<void> {
-    if (snapshot.progress.successfulCount === 0) return;
     const period = localDay();
     const today = snapshot.aggregate.days.find((day) => day.period === period);
     await this.persistUsage(period, today?.totalCost ?? 0, new Date());
@@ -151,11 +150,27 @@ export class SystemStatusService {
     collectedAt: Date;
   } | null> {
     const prisma = await getPrismaClient();
+    const historyState = await prisma.ccusageHistoryState.findUnique({
+      where: { id: "default" },
+      select: { clearedAt: true },
+    });
+    const afterClear = historyState?.clearedAt
+      ? {
+          OR: [
+            { finishedAt: { gt: historyState.clearedAt } },
+            {
+              finishedAt: null,
+              createdAt: { gt: historyState.clearedAt },
+            },
+          ],
+        }
+      : {};
     const jobs = await prisma.agentJob.findMany({
       where: {
         kind: CCUSAGE_REPORT_JOB_KIND,
         status: "SUCCEEDED",
         resultJson: { not: null },
+        ...afterClear,
       },
       orderBy: [{ finishedAt: "desc" }, { createdAt: "desc" }],
       distinct: ["agentId"],

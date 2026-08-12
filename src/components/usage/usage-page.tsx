@@ -1,13 +1,20 @@
 "use client";
 
 import { CCUSAGE_REPORT_JOB_KIND } from "@ai-development-environment/agent-contract";
-import { ChevronDown, ChevronRight, RefreshCw } from "lucide-react";
+import {
+  ChevronDown,
+  ChevronRight,
+  History,
+  RefreshCw,
+  Trash2,
+} from "lucide-react";
 import { useLocale, useTranslations } from "next-intl";
-import { Fragment, useEffect, useState } from "react";
+import { Fragment, useEffect, useRef, useState } from "react";
 
 import { AGENT_FIELDS } from "@/components/agents/graphql-fields";
 import type { Agent } from "@/components/agents/types";
 import { SearchableSelect } from "@/components/common/searchable-select";
+import { ConfirmationDialog } from "@/components/confirmation-dialog";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
@@ -81,6 +88,7 @@ type CcusageCollection = {
     successfulCount: number;
     agents: AgentCollection[];
   };
+  hasStoredHistory: boolean;
   aggregate: AggregatedUsage;
   allAggregate: { days: Array<{ period: string }> };
 };
@@ -92,7 +100,8 @@ const COLLECTION_FIELDS = `
     eligibleCount finishedCount successfulCount
     agents { agent { ${AGENT_FIELDS} } status jobId error }
   }
-  aggregate(range: $range) {
+  hasStoredHistory
+  aggregate(range: $range, includeHistory: $includeHistory) {
     totals { ${METRICS_FIELDS} }
     days {
       period sources ${METRICS_FIELDS}
@@ -102,8 +111,34 @@ const COLLECTION_FIELDS = `
       }
     }
   }
-  allAggregate: aggregate(range: ALL) { days { period } }
+  allAggregate: aggregate(range: ALL, includeHistory: $includeHistory) { days { period } }
 `;
+
+type UsageAgentOption = {
+  value: string;
+  label: string;
+  description: string;
+};
+
+function usageAgentOptions(
+  usage: AggregatedUsage | undefined,
+): UsageAgentOption[] {
+  const agents = new Map<string, UsageAgentOption>();
+  usage?.days.forEach((day) =>
+    day.models.forEach((model) =>
+      model.agents.forEach((agent) => {
+        agents.set(agent.agentId, {
+          value: agent.agentId,
+          label: agent.agentName,
+          description: agent.hostname,
+        });
+      }),
+    ),
+  );
+  return [...agents.values()].toSorted((first, second) =>
+    first.label.localeCompare(second.label),
+  );
+}
 
 function terminal(status: CollectionStatus): boolean {
   return status === "INVALID" || TERMINAL_STATUSES.has(status);
@@ -117,8 +152,18 @@ export function UsagePage() {
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [range, setRange] = useState<UsageRange>("ALL");
+  const [includeHistory, setIncludeHistory] = useState(true);
+  const [clearingHistory, setClearingHistory] = useState(false);
+  const [reconcileVersion, setReconcileVersion] = useState(0);
   const [selectedAgentId, setSelectedAgentId] = useState(ALL_AGENTS);
   const [selectedModel, setSelectedModel] = useState<string | null>(null);
+  const rangeRef = useRef(range);
+  const includeHistoryRef = useRef(includeHistory);
+
+  useEffect(() => {
+    rangeRef.current = range;
+    includeHistoryRef.current = includeHistory;
+  }, [includeHistory, range]);
 
   useEffect(() => {
     let disposed = false;
@@ -142,10 +187,10 @@ export function UsagePage() {
         const data = await controlPlaneRequest<{
           ccusageCollection: CcusageCollection | null;
         }>(
-          `query CcusageCollection($id: ID!, $range: CcusageRange!) {
+          `query CcusageCollection($id: ID!, $range: CcusageRange!, $includeHistory: Boolean!) {
             ccusageCollection(id: $id) { ${COLLECTION_FIELDS} }
           }`,
-          { id: requestId, range },
+          { id: requestId, range, includeHistory },
         );
         if (data.ccusageCollection) applyCollection(data.ccusageCollection);
       } catch {
@@ -156,10 +201,10 @@ export function UsagePage() {
       ccusageCollectionChanged: CcusageCollection;
     }>(
       {
-        query: `subscription CcusageCollectionChanged($id: ID!, $range: CcusageRange!) {
+        query: `subscription CcusageCollectionChanged($id: ID!, $range: CcusageRange!, $includeHistory: Boolean!) {
           ccusageCollectionChanged(id: $id) { ${COLLECTION_FIELDS} }
         }`,
-        variables: { id: requestId, range },
+        variables: { id: requestId, range, includeHistory },
       },
       {
         next: (value) => {
@@ -183,20 +228,31 @@ export function UsagePage() {
       unsubscribe();
       if (reconcileTimer !== undefined) window.clearInterval(reconcileTimer);
     };
-  }, [range, requestId]);
+  }, [includeHistory, range, reconcileVersion, requestId]);
 
   useEffect(() => {
     let disposed = false;
-    void controlPlaneRequest<{ collectCcusage: { id: string } }>(
-      `mutation CollectCcusage($requestId: ID!) {
-        collectCcusage(requestId: $requestId) { id }
+    void controlPlaneRequest<{ collectCcusage: CcusageCollection }>(
+      `mutation CollectCcusage($requestId: ID!, $range: CcusageRange!, $includeHistory: Boolean!) {
+        collectCcusage(requestId: $requestId) { ${COLLECTION_FIELDS} }
       }`,
-      { requestId },
-    ).catch((error) => {
-      if (disposed) return;
-      setLoadError(error instanceof Error ? error.message : String(error));
-      setLoading(false);
-    });
+      {
+        requestId,
+        range: rangeRef.current,
+        includeHistory: includeHistoryRef.current,
+      },
+    )
+      .then(({ collectCcusage }) => {
+        if (disposed) return;
+        setCollection(collectCcusage);
+        setLoading(false);
+        setLoadError(null);
+      })
+      .catch((error) => {
+        if (disposed) return;
+        setLoadError(error instanceof Error ? error.message : String(error));
+        setLoading(false);
+      });
     return () => {
       disposed = true;
     };
@@ -216,20 +272,13 @@ export function UsagePage() {
   const failures = records.filter(
     (record) => terminal(record.status) && record.status !== "SUCCEEDED",
   );
+  const aggregateAgents = usageAgentOptions(usage);
   const agentOptions = [
     { value: ALL_AGENTS, label: t("allAgents") },
-    ...successful
-      .toSorted((first, second) =>
-        first.agent.name.localeCompare(second.agent.name),
-      )
-      .map(({ agent }) => ({
-        value: agent.id,
-        label: agent.name,
-        description: agent.hostname,
-      })),
+    ...aggregateAgents,
   ];
-  const activeAgentId = successful.some(
-    ({ agent }) => agent.id === selectedAgentId,
+  const activeAgentId = aggregateAgents.some(
+    ({ value }) => value === selectedAgentId,
   )
     ? selectedAgentId
     : null;
@@ -264,7 +313,7 @@ export function UsagePage() {
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
-          {successful.length > 1 && (
+          {aggregateAgents.length > 1 && (
             <div className="w-full sm:w-64">
               <SearchableSelect
                 ariaLabel={t("agentFilterLabel")}
@@ -296,9 +345,50 @@ export function UsagePage() {
             </TabsList>
           </Tabs>
           <Button
+            aria-label={t("historyToggleLabel")}
+            aria-pressed={includeHistory}
+            onClick={() => setIncludeHistory((current) => !current)}
+            variant="outline"
+          >
+            <History />
+            {t(includeHistory ? "historyOn" : "liveOnly")}
+          </Button>
+          <ConfirmationDialog
+            actionLabel={t("clearHistoryAction")}
+            cancelLabel={t("cancel")}
+            description={t("clearHistoryDescription")}
+            onConfirm={async () => {
+              setClearingHistory(true);
+              setLoadError(null);
+              try {
+                await controlPlaneRequest<{ clearCcusageHistory: number }>(
+                  `mutation ClearCcusageHistory { clearCcusageHistory }`,
+                );
+                setReconcileVersion((current) => current + 1);
+              } catch (error) {
+                setLoadError(
+                  error instanceof Error ? error.message : String(error),
+                );
+              } finally {
+                setClearingHistory(false);
+              }
+            }}
+            title={t("clearHistoryTitle")}
+            trigger={
+              <Button
+                disabled={
+                  clearingHistory || collecting || !collection?.hasStoredHistory
+                }
+                variant="outline"
+              >
+                <Trash2 />
+                {t(clearingHistory ? "clearingHistory" : "clearHistory")}
+              </Button>
+            }
+          />
+          <Button
             disabled={loading || collecting}
             onClick={() => {
-              setCollection(null);
               setLoading(true);
               setLoadError(null);
               setRequestId(createClientId());
@@ -330,11 +420,32 @@ export function UsagePage() {
         />
       )}
 
-      {loading ? (
+      {loading && !usage ? (
         <p className="flex items-center gap-2 text-sm text-muted-foreground">
           <Spinner />
           {t("loading")}
         </p>
+      ) : usage && collection?.allAggregate.days.length > 0 ? (
+        filteredUsage && filteredUsage.days.length === 0 ? (
+          <UsageEmpty
+            title={t("noUsageInRange")}
+            description={t("noUsageInRangeDescription")}
+          />
+        ) : filteredUsage && summaryMetrics ? (
+          <>
+            <UsageCostChart
+              days={filteredUsage.days}
+              onSelectModel={setSelectedModel}
+              selectedModel={activeModel}
+            />
+            <SummaryTiles metrics={summaryMetrics} model={activeModel} />
+            <UsageTable
+              days={filteredUsage.days}
+              locale={locale}
+              totals={filteredUsage.totals}
+            />
+          </>
+        ) : null
       ) : records.length === 0 && !loadError ? (
         <UsageEmpty
           title={t("noAgents")}
@@ -368,27 +479,6 @@ export function UsagePage() {
           title={t("zeroUsage")}
           description={t("zeroUsageDescription")}
         />
-      ) : successful.length > 0 &&
-        filteredUsage &&
-        filteredUsage.days.length === 0 ? (
-        <UsageEmpty
-          title={t("noUsageInRange")}
-          description={t("noUsageInRangeDescription")}
-        />
-      ) : successful.length > 0 && filteredUsage && summaryMetrics ? (
-        <>
-          <UsageCostChart
-            days={filteredUsage.days}
-            onSelectModel={setSelectedModel}
-            selectedModel={activeModel}
-          />
-          <SummaryTiles metrics={summaryMetrics} model={activeModel} />
-          <UsageTable
-            days={filteredUsage.days}
-            locale={locale}
-            totals={filteredUsage.totals}
-          />
-        </>
       ) : null}
     </section>
   );

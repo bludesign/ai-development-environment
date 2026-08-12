@@ -218,12 +218,14 @@ const FILTERS_KEY = "worktrees-filters";
 const ALL_FILTER_VALUE = "__all__";
 const DIRTY_FILTER_VALUE = "dirty";
 const CLEAN_FILTER_VALUE = "clean";
+const NON_DEFAULT_BRANCH_FILTER_VALUE = "non-default";
 
 export type WorktreeListFilters = {
   query: string;
   agentId: string | null;
   repositoryId: string | null;
   dirty: boolean | null;
+  nonDefaultBranch: boolean;
 };
 
 type StoredFilters = {
@@ -231,6 +233,7 @@ type StoredFilters = {
   agentId: string;
   repositoryId: string;
   changes: string;
+  branches: string;
 };
 
 // The app scoped views keep their own filters so switching between an app and
@@ -245,6 +248,7 @@ function readStoredFilters(appId?: string): StoredFilters {
     agentId: ALL_FILTER_VALUE,
     repositoryId: ALL_FILTER_VALUE,
     changes: ALL_FILTER_VALUE,
+    branches: ALL_FILTER_VALUE,
   };
   if (typeof window === "undefined") return fallback;
   try {
@@ -266,6 +270,10 @@ function readStoredFilters(appId?: string): StoredFilters {
         stored.changes === CLEAN_FILTER_VALUE
           ? stored.changes
           : fallback.changes,
+      branches:
+        stored.branches === NON_DEFAULT_BRANCH_FILTER_VALUE
+          ? stored.branches
+          : fallback.branches,
     };
   } catch {
     return fallback;
@@ -320,7 +328,8 @@ export function filterWorktreeAgentGroups(
     !query &&
     !filters.agentId &&
     !filters.repositoryId &&
-    filters.dirty === null
+    filters.dirty === null &&
+    !filters.nonDefaultBranch
   ) {
     return agents;
   }
@@ -378,12 +387,19 @@ export function filterWorktreeAgentGroups(
                 query,
               ),
             );
-      const worktrees =
+      const changedWorktrees =
         filters.dirty === null
           ? searched
           : searched.filter(
               (worktree) => worktreeIsDirty(worktree) === filters.dirty,
             );
+      const worktrees = filters.nonDefaultBranch
+        ? group.codebase.defaultBranch
+          ? changedWorktrees.filter(
+              (worktree) => worktree.branch !== group.codebase.defaultBranch,
+            )
+          : []
+        : changedWorktrees;
       return worktrees.length ? [{ ...group, worktrees }] : [];
     });
     return codebases.length ? [{ ...agentGroup, codebases }] : [];
@@ -645,6 +661,7 @@ export function WorktreesPage({ appId }: { appId?: string }) {
     storedFilters.repositoryId,
   );
   const [changesFilter, setChangesFilter] = useState(storedFilters.changes);
+  const [branchFilter, setBranchFilter] = useState(storedFilters.branches);
   const latestLoad = useRef(0);
 
   const load = useCallback(async () => {
@@ -762,9 +779,17 @@ export function WorktreesPage({ appId }: { appId?: string }) {
         agentId: agentFilter,
         repositoryId: repositoryFilter,
         changes: changesFilter,
+        branches: branchFilter,
       } satisfies StoredFilters),
     );
-  }, [agentFilter, appId, changesFilter, query, repositoryFilter]);
+  }, [
+    agentFilter,
+    appId,
+    branchFilter,
+    changesFilter,
+    query,
+    repositoryFilter,
+  ]);
 
   const selectJiraIssue = (issueKey: string | null) => {
     replaceIssueParam(issueKey);
@@ -903,8 +928,16 @@ export function WorktreesPage({ appId }: { appId?: string }) {
           changesFilter === ALL_FILTER_VALUE
             ? null
             : changesFilter === DIRTY_FILTER_VALUE,
+        nonDefaultBranch: branchFilter === NON_DEFAULT_BRANCH_FILTER_VALUE,
       }),
-    [activeAgentFilter, activeRepositoryFilter, changesFilter, overview, query],
+    [
+      activeAgentFilter,
+      activeRepositoryFilter,
+      branchFilter,
+      changesFilter,
+      overview,
+      query,
+    ],
   );
   const repositoryGroups = useMemo(
     () => groupWorktreesByRepository(filteredAgents),
@@ -914,7 +947,8 @@ export function WorktreesPage({ appId }: { appId?: string }) {
     Boolean(query.trim()) ||
     activeAgentFilter !== ALL_FILTER_VALUE ||
     activeRepositoryFilter !== ALL_FILTER_VALUE ||
-    changesFilter !== ALL_FILTER_VALUE;
+    changesFilter !== ALL_FILTER_VALUE ||
+    branchFilter !== ALL_FILTER_VALUE;
 
   return (
     <section className="flex w-full flex-col gap-6">
@@ -1082,6 +1116,24 @@ export function WorktreesPage({ appId }: { appId?: string }) {
                 </SelectItem>
                 <SelectItem value={CLEAN_FILTER_VALUE}>
                   {t("cleanWorktrees")}
+                </SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+          <div className="min-w-0 flex-[1_1_12rem]">
+            <Select onValueChange={setBranchFilter} value={branchFilter}>
+              <SelectTrigger
+                aria-label={t("filterByBranch")}
+                className="w-full"
+              >
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value={ALL_FILTER_VALUE}>
+                  {t("allBranches")}
+                </SelectItem>
+                <SelectItem value={NON_DEFAULT_BRANCH_FILTER_VALUE}>
+                  {t("nonDefaultBranches")}
                 </SelectItem>
               </SelectContent>
             </Select>
