@@ -32,6 +32,10 @@ describe("OpenCodeAdapter questions", () => {
         list: vi.fn(async () => ({ data: [] })),
         reply: vi.fn(),
       },
+      permission: {
+        list: vi.fn(async () => ({ data: [] })),
+        reply: vi.fn(),
+      },
       session: {
         create: vi.fn(async () => ({ data: { id: "session-1" } })),
         prompt: vi.fn(async () => ({
@@ -46,6 +50,10 @@ describe("OpenCodeAdapter questions", () => {
       v2: {
         session: {
           interrupt: vi.fn(),
+          permission: {
+            list: vi.fn(async () => ({ data: [] })),
+            reply: vi.fn(),
+          },
           question: { list: vi.fn(async () => ({ data: [] })), reply: vi.fn() },
         },
       },
@@ -137,6 +145,10 @@ describe("OpenCodeAdapter questions", () => {
         list: questionList,
         reply: questionReply,
       },
+      permission: {
+        list: vi.fn(async () => ({ data: [] })),
+        reply: vi.fn(),
+      },
       session: {
         create: vi.fn(async () => ({ data: { id: "session-1" } })),
         prompt: sessionPrompt,
@@ -153,6 +165,10 @@ describe("OpenCodeAdapter questions", () => {
       v2: {
         session: {
           interrupt: vi.fn(async () => ({ data: true })),
+          permission: {
+            list: vi.fn(async () => ({ data: [] })),
+            reply: vi.fn(async () => ({ data: true })),
+          },
           question: {
             list: vi.fn(async () => {
               throw new Error("v2 question surface unavailable");
@@ -224,6 +240,142 @@ describe("OpenCodeAdapter questions", () => {
     await expect(handle.completion).resolves.toMatchObject({
       status: "COMPLETED",
       finalOutput: "REST API selected.",
+    });
+    await adapter.close();
+    expect(close).toHaveBeenCalledOnce();
+  });
+
+  test("surfaces and answers a legacy permission request", async () => {
+    let resolvePrompt!: (value: unknown) => void;
+    const prompt = new Promise<unknown>((resolve) => {
+      resolvePrompt = resolve;
+    });
+    const permissionReply = vi.fn(async () => {
+      resolvePrompt({
+        data: {
+          info: { tokens: {} },
+          parts: [{ type: "text", text: "Permission accepted." }],
+        },
+      });
+      return { data: true };
+    });
+    const close = vi.fn();
+    const client = {
+      event: {
+        subscribe: vi.fn(async () => ({
+          stream: (async function* () {
+            yield {
+              type: "permission.asked",
+              properties: {
+                id: "permission-1",
+                sessionID: "session-1",
+                permission: "external_directory",
+                patterns: ["/tmp/*"],
+                metadata: {
+                  filepath: "/tmp/aide119.diff",
+                  parentDir: "/tmp",
+                },
+                always: ["/tmp/*"],
+                tool: {
+                  messageID: "message-1",
+                  callID: "call-1",
+                },
+              },
+            };
+          })(),
+        })),
+      },
+      question: {
+        list: vi.fn(async () => ({ data: [] })),
+        reply: vi.fn(),
+      },
+      permission: {
+        list: vi.fn(async () => ({ data: [] })),
+        reply: permissionReply,
+      },
+      session: {
+        create: vi.fn(async () => ({ data: { id: "session-1" } })),
+        prompt: vi.fn(async () => prompt),
+        status: vi.fn(async () => ({ data: {} })),
+        messages: vi.fn(async () => ({ data: [] })),
+      },
+      v2: {
+        session: {
+          interrupt: vi.fn(async () => ({ data: true })),
+          permission: {
+            list: vi.fn(async () => ({ data: [] })),
+            reply: vi.fn(async () => ({ data: true })),
+          },
+          question: {
+            list: vi.fn(async () => ({ data: [] })),
+            reply: vi.fn(async () => ({ data: true })),
+          },
+        },
+      },
+    };
+    sdk.createOpencode.mockResolvedValue({ client, server: { close } });
+    const callbacks = {
+      onNativeId: vi.fn(async () => undefined),
+      onEvent: vi.fn(async () => undefined),
+      onQuestion: vi.fn(async () => undefined),
+      onUsage: vi.fn(async () => undefined),
+    } satisfies ProviderCallbacks;
+    const adapter = new OpenCodeAdapter();
+
+    const handle = await adapter.start(
+      {
+        run: {
+          kind: "PLAN",
+          model: "opencode-go/deepseek-v4-flash",
+          effort: "max",
+          webSearchEnabled: false,
+          worktree: { folder: "/workspace" },
+        },
+        prompt: "Read the generated diff.",
+        attachments: [],
+      } as unknown as ProviderStartInput,
+      callbacks,
+    );
+
+    await vi.waitFor(() => {
+      expect(callbacks.onQuestion).toHaveBeenCalledWith("permission-1", [
+        {
+          id: "permission",
+          header: "Permission required",
+          prompt: "OpenCode requests external directory permission for /tmp/*.",
+          multiSelect: false,
+          allowCustom: false,
+          options: [
+            {
+              label: "Allow once",
+              description: "Approve only this request.",
+            },
+            {
+              label: "Always allow",
+              description: "Approve this request and remember /tmp/*.",
+            },
+            {
+              label: "Reject",
+              description:
+                "Deny this request and let OpenCode continue safely.",
+            },
+          ],
+        },
+      ]);
+    });
+
+    await handle.answer("permission-1", {
+      permission: { answers: ["Allow once"] },
+    });
+
+    expect(permissionReply).toHaveBeenCalledWith({
+      requestID: "permission-1",
+      directory: "/workspace",
+      reply: "once",
+    });
+    await expect(handle.completion).resolves.toMatchObject({
+      status: "COMPLETED",
+      finalOutput: "Permission accepted.",
     });
     await adapter.close();
     expect(close).toHaveBeenCalledOnce();
