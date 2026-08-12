@@ -112,7 +112,7 @@ describe("SystemStatusService", () => {
     });
   });
 
-  test("stores a completed Usage-page collection for the sidebar", async () => {
+  test("stores historical usage after a collection completes without a fresh agent result", async () => {
     const upsert = vi.fn().mockResolvedValue({});
     getPrismaClient.mockResolvedValue({
       sidebarUsageSummary: { upsert },
@@ -120,7 +120,7 @@ describe("SystemStatusService", () => {
     const { ccusage, diskSpace, polling, observer } = dependencies();
     new SystemStatusService(ccusage, diskSpace, polling);
     const completed = {
-      progress: { successfulCount: 1 },
+      progress: { successfulCount: 0 },
       aggregate: {
         days: [{ period: "2026-07-25", totalCost: 7.25 }],
       },
@@ -142,6 +142,47 @@ describe("SystemStatusService", () => {
         collectedAt: new Date("2026-07-25T12:00:00"),
       },
     });
+  });
+
+  test("removes a completed background collection after it populates usage", async () => {
+    const collectionDelete = vi.fn().mockResolvedValue({ count: 1 });
+    const jobDelete = vi.fn().mockResolvedValue({ count: 1 });
+    getPrismaClient.mockResolvedValue({
+      ccusageCollection: {
+        findMany: vi.fn().mockResolvedValue([]),
+        deleteMany: collectionDelete,
+      },
+      agentJob: { deleteMany: jobDelete },
+    });
+    const collect = vi.fn().mockResolvedValue({
+      progress: { successfulCount: 1 },
+    });
+    const polling = {
+      register: vi.fn(),
+      schedule: vi.fn(),
+      run: vi.fn(async (_id: string, work: () => Promise<unknown>) => {
+        await work();
+      }),
+    } as unknown as PollingService;
+    const { ccusage, diskSpace } = dependencies();
+    (ccusage as unknown as { collect: unknown }).collect = collect;
+    const service = new SystemStatusService(ccusage, diskSpace, polling);
+
+    service.startRuntime();
+
+    await vi.waitFor(() => expect(collectionDelete).toHaveBeenCalledOnce());
+    const collectionId = collect.mock.calls[0]?.[0];
+    expect(collectionId).toMatch(/^sidebar-usage:/);
+    expect(jobDelete).toHaveBeenCalledWith({
+      where: { ccusageCollectionId: collectionId },
+    });
+    expect(collectionDelete).toHaveBeenCalledWith({
+      where: { id: collectionId },
+    });
+    expect(collect.mock.invocationCallOrder[0]).toBeLessThan(
+      jobDelete.mock.invocationCallOrder[0] ?? Infinity,
+    );
+    service.stopRuntime();
   });
 
   test("polls without collecting when collection is disabled", async () => {

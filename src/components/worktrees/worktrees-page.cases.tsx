@@ -279,6 +279,7 @@ export function registerWorktreesPageTests(
           agentId: null,
           repositoryId: null,
           dirty: null,
+          nonDefaultBranch: false,
         });
         expect(result.map((group) => group.agent.id)).toEqual([agentId]);
       });
@@ -290,6 +291,7 @@ export function registerWorktreesPageTests(
             agentId: null,
             repositoryId: null,
             dirty: true,
+            nonDefaultBranch: false,
           }).map((group) => group.agent.id),
         ).toEqual(["agent-1"]);
         expect(
@@ -298,6 +300,7 @@ export function registerWorktreesPageTests(
             agentId: null,
             repositoryId: null,
             dirty: false,
+            nonDefaultBranch: false,
           }).map((group) => group.agent.id),
         ).toEqual(["agent-2"]);
       });
@@ -309,6 +312,7 @@ export function registerWorktreesPageTests(
             agentId: null,
             repositoryId: null,
             dirty: false,
+            nonDefaultBranch: false,
           }),
         ).toEqual([]);
       });
@@ -320,6 +324,7 @@ export function registerWorktreesPageTests(
             agentId: "agent-2",
             repositoryId: "repository-2",
             dirty: null,
+            nonDefaultBranch: false,
           }).map((group) => group.agent.id),
         ).toEqual(["agent-2"]);
         expect(
@@ -328,8 +333,37 @@ export function registerWorktreesPageTests(
             agentId: "agent-1",
             repositoryId: "repository-2",
             dirty: null,
+            nonDefaultBranch: false,
           }),
         ).toEqual([]);
+      });
+
+      test("filters non-default branches and combines with dirty state", () => {
+        const result = filterWorktreeAgentGroups(groups, {
+          query: "",
+          agentId: null,
+          repositoryId: null,
+          dirty: true,
+          nonDefaultBranch: true,
+        });
+
+        expect(result.map((group) => group.agent.id)).toEqual(["agent-1"]);
+      });
+
+      test("includes detached worktrees but excludes unknown default branches", () => {
+        const candidates = structuredClone(groups);
+        candidates[0]!.codebases[0]!.worktrees[0]!.branch = null;
+        candidates[1]!.codebases[0]!.codebase.defaultBranch = null;
+
+        const result = filterWorktreeAgentGroups(candidates, {
+          query: "",
+          agentId: null,
+          repositoryId: null,
+          dirty: null,
+          nonDefaultBranch: true,
+        });
+
+        expect(result.map((group) => group.agent.id)).toEqual(["agent-1"]);
       });
     });
   }
@@ -1730,6 +1764,32 @@ export function registerWorktreesPageTests(
           await screen.findByRole("option", { name: "Clean worktrees" }),
         );
         expect(await screen.findByText("feature/AIDE-24")).toBeDefined();
+      });
+
+      test("filters and remembers worktrees not on the default branch", async () => {
+        render(<WorktreesPage />);
+        await screen.findByText("feature/AIDE-24");
+        const branchFilter = screen.getByRole("combobox", {
+          name: "Filter by branch",
+        });
+
+        fireEvent.pointerDown(branchFilter, {
+          button: 0,
+          ctrlKey: false,
+          pointerType: "mouse",
+        });
+        fireEvent.click(
+          await screen.findByRole("option", { name: "Not on default branch" }),
+        );
+
+        expect(await screen.findByText("feature/AIDE-24")).toBeDefined();
+        await waitFor(() =>
+          expect(
+            JSON.parse(
+              window.localStorage.getItem("worktrees-filters") ?? "{}",
+            ),
+          ).toMatchObject({ branches: "non-default" }),
+        );
       });
 
       test("switches a worktree to the default branch from its menu", async () => {

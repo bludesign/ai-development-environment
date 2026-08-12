@@ -71,12 +71,36 @@ function resultJson() {
   });
 }
 
+function withHistory<T extends Record<string, unknown>>(prisma: T) {
+  const enriched = Object.assign(prisma, {
+    ccusageHistory: {
+      findMany: vi.fn().mockResolvedValue([]),
+      findUnique: vi.fn().mockResolvedValue(null),
+      upsert: vi.fn().mockResolvedValue({}),
+      deleteMany: vi.fn().mockResolvedValue({ count: 0 }),
+    },
+    ccusageHistoryState: {
+      findUnique: vi.fn().mockResolvedValue(null),
+      upsert: vi.fn().mockResolvedValue({}),
+    },
+    sidebarUsageSummary: {
+      deleteMany: vi.fn().mockResolvedValue({ count: 0 }),
+    },
+    $transaction: vi.fn(),
+  });
+  enriched.$transaction.mockImplementation(
+    (operation: (transaction: typeof enriched) => unknown) =>
+      operation(enriched),
+  );
+  return enriched;
+}
+
 describe("CcusageService", () => {
   beforeEach(() => vi.clearAllMocks());
 
   test("creates an empty collection once and rejoins it by request ID", async () => {
     let collection: Record<string, unknown> | null = null;
-    const prisma = {
+    const prisma = withHistory({
       ccusageCollection: {
         findUnique: vi.fn(async ({ include }: { include?: unknown }) => {
           if (!collection) return null;
@@ -105,7 +129,7 @@ describe("CcusageService", () => {
       },
       ccusageCollectionAgent: { findMany: vi.fn().mockResolvedValue([]) },
       agentJob: { findMany: vi.fn().mockResolvedValue([]) },
-    };
+    });
     getPrismaClient.mockResolvedValue(prisma);
     const agentControl = {
       listAgents: vi.fn().mockResolvedValue([]),
@@ -125,7 +149,7 @@ describe("CcusageService", () => {
     expect(second.id).toBe(first.id);
     expect(prisma.ccusageCollection.create).toHaveBeenCalledTimes(1);
     expect(agentControl.createJob).not.toHaveBeenCalled();
-    expect(observer).toHaveBeenCalledTimes(2);
+    expect(observer).toHaveBeenCalledTimes(1);
     expect(observer).toHaveBeenLastCalledWith(second);
   });
 
@@ -169,12 +193,12 @@ describe("CcusageService", () => {
         },
       ],
     };
-    const prisma = {
+    const prisma = withHistory({
       ccusageCollection: {
         findUnique: vi.fn().mockResolvedValue(persisted),
         updateMany: vi.fn().mockResolvedValue({ count: 1 }),
       },
-    };
+    });
     getPrismaClient.mockResolvedValue(prisma);
     const service = new CcusageService(
       {} as AgentControlService,
@@ -197,6 +221,142 @@ describe("CcusageService", () => {
     expect(snapshot?.aggregate.days[0]?.models[0]?.agents[0]?.agentId).toBe(
       "alpha",
     );
+  });
+
+  test("orders persisted reports by job start instead of completion", async () => {
+    const alpha = agent("alpha");
+    const startedAt = new Date("2026-07-16T12:00:00Z");
+    const persisted = {
+      id: "collection-ordered",
+      deadlineAt: new Date("2026-07-16T12:03:00Z"),
+      finishedAt: null,
+      createdAt: new Date("2026-07-16T11:59:30Z"),
+      updatedAt: new Date("2026-07-16T12:02:00Z"),
+      agents: [
+        {
+          agentId: alpha.id,
+          initialStatus: "QUEUING",
+          error: null,
+          agent: alpha,
+        },
+      ],
+      jobs: [
+        {
+          id: "job-alpha",
+          agentId: alpha.id,
+          status: "SUCCEEDED",
+          resultJson: resultJson(),
+          error: null,
+          createdAt: new Date("2026-07-16T11:59:45Z"),
+          startedAt,
+          finishedAt: new Date("2026-07-16T12:02:00Z"),
+          updatedAt: new Date("2026-07-16T12:02:00Z"),
+        },
+      ],
+    };
+    const prisma = withHistory({
+      ccusageCollection: {
+        findUnique: vi.fn().mockResolvedValue(persisted),
+        updateMany: vi.fn().mockResolvedValue({ count: 1 }),
+      },
+    });
+    getPrismaClient.mockResolvedValue(prisma);
+    const service = new CcusageService(
+      {} as AgentControlService,
+      () => new Date("2026-07-16T12:02:01Z"),
+    );
+
+    await service.getCollection(persisted.id);
+
+    expect(prisma.ccusageHistory.upsert).toHaveBeenCalledWith(
+      expect.objectContaining({
+        create: expect.objectContaining({ lastObservedAt: startedAt }),
+      }),
+    );
+  });
+
+  test("combines stored agents with live results while a collection is partial", async () => {
+    const alpha = agent("alpha");
+    const beta = agent("beta");
+    const persisted = {
+      id: "collection-partial",
+      deadlineAt: new Date("2026-07-16T12:02:30Z"),
+      finishedAt: null,
+      createdAt: new Date("2026-07-16T12:00:00Z"),
+      updatedAt: new Date("2026-07-16T12:00:00Z"),
+      agents: [
+        {
+          agentId: alpha.id,
+          initialStatus: "QUEUING",
+          error: null,
+          agent: alpha,
+        },
+        {
+          agentId: beta.id,
+          initialStatus: "QUEUING",
+          error: null,
+          agent: beta,
+        },
+      ],
+      jobs: [
+        {
+          id: "job-alpha",
+          agentId: alpha.id,
+          status: "SUCCEEDED",
+          resultJson: resultJson(),
+          error: null,
+          finishedAt: new Date("2026-07-16T12:00:30Z"),
+        },
+        {
+          id: "job-beta",
+          agentId: beta.id,
+          status: "RUNNING",
+          resultJson: null,
+          error: null,
+        },
+      ],
+    };
+    const prisma = withHistory({
+      ccusageCollection: {
+        findUnique: vi.fn().mockResolvedValue(persisted),
+      },
+    });
+    prisma.ccusageHistory.findMany.mockResolvedValue([
+      {
+        agentId: beta.id,
+        agentName: beta.name,
+        hostname: beta.hostname,
+        archivedReportJson: JSON.stringify({
+          daily: [],
+          totals: {
+            inputTokens: 0,
+            outputTokens: 0,
+            cacheCreationTokens: 0,
+            cacheReadTokens: 0,
+            totalTokens: 0,
+            totalCost: 0,
+          },
+        }),
+        lastLiveReportJson: JSON.stringify(report),
+      },
+    ]);
+    getPrismaClient.mockResolvedValue(prisma);
+    const service = new CcusageService(
+      {} as AgentControlService,
+      () => new Date("2026-07-16T12:01:00Z"),
+    );
+
+    const snapshot = await service.getCollection(persisted.id);
+
+    expect(snapshot?.status).toBe("COLLECTING");
+    expect(snapshot?.hasStoredHistory).toBe(true);
+    expect(snapshot?.liveAggregate.totals.inputTokens).toBe(3_000_000_000);
+    expect(snapshot?.aggregate.totals.inputTokens).toBe(6_000_000_000);
+    expect(
+      snapshot?.aggregate.days[0]?.models[0]?.agents.map(
+        ({ agentId }) => agentId,
+      ),
+    ).toEqual(expect.arrayContaining(["alpha", "beta"]));
   });
 
   test("times out active jobs when a persisted deadline has elapsed", async () => {
@@ -228,7 +388,7 @@ describe("CcusageService", () => {
       ...running,
       jobs: [{ ...running.jobs[0], status: "TIMED_OUT" }],
     };
-    const prisma = {
+    const prisma = withHistory({
       ccusageCollection: {
         findUnique: vi
           .fn()
@@ -236,7 +396,7 @@ describe("CcusageService", () => {
           .mockResolvedValueOnce(timedOut),
         updateMany: vi.fn().mockResolvedValue({ count: 1 }),
       },
-    };
+    });
     getPrismaClient.mockResolvedValue(prisma);
     const agentControl = {
       timeoutCollectionJobs: vi.fn().mockResolvedValue([]),
@@ -260,7 +420,7 @@ describe("CcusageService", () => {
     let finishedAt: Date | null = null;
     const deadlineAt = new Date("2026-07-16T12:00:00Z");
     const createdAt = new Date("2026-07-16T11:57:30Z");
-    const prisma = {
+    const prisma = withHistory({
       ccusageCollection: {
         findMany: vi.fn().mockResolvedValue([{ id: "collection-1" }]),
         findUnique: vi.fn(async ({ include }: { include?: unknown }) =>
@@ -296,7 +456,7 @@ describe("CcusageService", () => {
           },
         ),
       },
-    };
+    });
     getPrismaClient.mockResolvedValue(prisma);
     const agentControl = {
       timeoutCollectionJobs: vi.fn().mockResolvedValue([]),
@@ -322,5 +482,73 @@ describe("CcusageService", () => {
       jobId: null,
       status: "TIMED_OUT",
     });
+  });
+
+  test("clears every stored agent history and advances the watermark", async () => {
+    const prisma = withHistory({});
+    prisma.ccusageHistory.deleteMany.mockResolvedValue({ count: 3 });
+    getPrismaClient.mockResolvedValue(prisma);
+    const service = new CcusageService(
+      {} as AgentControlService,
+      () => new Date("2026-07-16T12:00:00Z"),
+    );
+
+    await expect(service.clearHistory()).resolves.toBe(3);
+    expect(prisma.sidebarUsageSummary.deleteMany).toHaveBeenCalledOnce();
+    expect(prisma.ccusageHistoryState.upsert).toHaveBeenCalledWith({
+      where: { id: "default" },
+      create: {
+        id: "default",
+        clearedAt: new Date("2026-07-16T12:00:00Z"),
+      },
+      update: { clearedAt: new Date("2026-07-16T12:00:00Z") },
+    });
+  });
+
+  test("does not repersist a successful report observed before the clear", async () => {
+    const alpha = agent("alpha");
+    const persisted = {
+      id: "collection-before-clear",
+      deadlineAt: new Date("2026-07-16T12:02:30Z"),
+      finishedAt: new Date("2026-07-16T11:59:00Z"),
+      createdAt: new Date("2026-07-16T11:58:00Z"),
+      updatedAt: new Date("2026-07-16T11:59:00Z"),
+      agents: [
+        {
+          agentId: alpha.id,
+          initialStatus: "QUEUING",
+          error: null,
+          agent: alpha,
+        },
+      ],
+      jobs: [
+        {
+          id: "job-alpha",
+          agentId: alpha.id,
+          status: "SUCCEEDED",
+          resultJson: resultJson(),
+          error: null,
+          createdAt: new Date("2026-07-16T11:58:00Z"),
+          finishedAt: new Date("2026-07-16T11:59:00Z"),
+          updatedAt: new Date("2026-07-16T11:59:00Z"),
+        },
+      ],
+    };
+    const prisma = withHistory({
+      ccusageCollection: {
+        findUnique: vi.fn().mockResolvedValue(persisted),
+      },
+    });
+    prisma.ccusageHistoryState.findUnique.mockResolvedValue({
+      clearedAt: new Date("2026-07-16T12:00:00Z"),
+    });
+    getPrismaClient.mockResolvedValue(prisma);
+    const service = new CcusageService({} as AgentControlService);
+
+    const snapshot = await service.getCollection(persisted.id);
+
+    expect(prisma.ccusageHistory.upsert).not.toHaveBeenCalled();
+    expect(snapshot?.hasStoredHistory).toBe(false);
+    expect(snapshot?.aggregate.totals.inputTokens).toBe(3_000_000_000);
   });
 });

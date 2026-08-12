@@ -161,6 +161,7 @@ model Agent {
   updatedAt                        DateTime                   @updatedAt
   jobs                             AgentJob[]
   ccusageCollections               CcusageCollectionAgent[]
+  ccusageHistory                   CcusageHistory?
   auditEvents                      AgentAuditEvent[]
   codebases                        Codebase[]
   buildDataCollections             BuildDataCollectionAgent[]
@@ -2213,6 +2214,28 @@ model CcusageCollectionAgent {
 
   @@id([collectionId, agentId])
   @@index([agentId])
+}
+
+model CcusageHistory {
+  agentId            String   @id
+  agentName          String
+  hostname           String
+  archivedReportJson String
+  lastLiveReportJson String
+  lastObservedAt     DateTime
+  lastJobId          String
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+  agent              Agent    @relation(fields: [agentId], references: [id], onDelete: Cascade)
+
+  @@index([lastObservedAt])
+}
+
+model CcusageHistoryState {
+  id        String    @id
+  clearedAt DateTime?
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
 }
 
 model AgentJobLog {
