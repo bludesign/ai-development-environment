@@ -76,8 +76,8 @@
     "@apollo/subgraph": "2.14.3",
     "@as-integrations/next": "4.1.0",
     "@base-ui/react": "1.7.0",
-    "@better-auth/api-key": "^1.6.29",
-    "@better-auth/prisma-adapter": "^1.6.29",
+    "@better-auth/api-key": "^1.7.0",
+    "@better-auth/prisma-adapter": "^1.7.0",
     "@expo-google-fonts/noto-emoji": "0.4.6",
     "@fontpkg/unifont": "15.0.1",
     "@graphql-tools/merge": "9.2.3",
@@ -95,7 +95,7 @@
     "@xterm/xterm": "^6.0.0",
     "@xyflow/react": "^12.11.3",
     "asn1js": "3.0.10",
-    "better-auth": "^1.6.29",
+    "better-auth": "^1.7.0",
     "better-sqlite3": "12.11.1",
     "class-variance-authority": "0.7.1",
     "clsx": "2.1.1",
@@ -106,7 +106,7 @@
     "graphql": "^16",
     "graphql-tag": "2.12.7",
     "graphql-ws": "6.2.1",
-    "jira.js": "5.4.0",
+    "jira.js": "6.1.0",
     "jira2md": "3.0.1",
     "jose": "6.2.9",
     "lucide-react": "1.31.0",
@@ -135,6 +135,7 @@
     "zod": "4.4.3"
   },
   "devDependencies": {
+    "@babel/plugin-transform-runtime": "7.29.0",
     "@graphql-codegen/cli": "7.2.0",
     "@graphql-codegen/typescript": "6.1.0",
     "@graphql-codegen/typescript-resolvers": "6.1.0",
@@ -151,7 +152,7 @@
     "@types/react-dom": "19.2",
     "@types/web-push": "3.6.4",
     "@types/ws": "8.18.1",
-    "@vitejs/plugin-react": "6.0.3",
+    "@vitejs/plugin-react": "6.0.5",
     "@vitest/coverage-v8": "^4.1.10",
     "concurrently": "10.0.5",
     "dotenv": "17.4.2",
@@ -168,7 +169,7 @@
     "vitest": "4.1.10"
   },
   "overrides": {
-    "@better-auth/core": "1.6.29"
+    "@better-auth/core": "1.7.0"
   },
   "optionalDependencies": {
     "@apollo/rover": "0.41.0"
@@ -182,7 +183,7 @@
     "@apollo/protobufjs@1.2.8": true,
     "@parcel/watcher@2.6.0": true,
     "@prisma/engines@7.9.1": true,
-    "@swc/core@1.15.46": true,
+    "@swc/core@1.16.0": true,
     "re2@1.26.1": true
   }
 }

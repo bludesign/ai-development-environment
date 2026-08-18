@@ -1,3 +1,10 @@
 {
-  "reject": ["@types/node", "eslint", "typescript", "graphql"]
+  "reject": [
+    "@babel/plugin-transform-runtime",
+    "@types/node",
+    "better-sqlite3",
+    "eslint",
+    "typescript",
+    "graphql"
+  ]
 }

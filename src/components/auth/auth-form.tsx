@@ -79,8 +79,8 @@ export function AuthForm({
     if (!configuration.provider) return;
     setSubmitting(true);
     setError(null);
-    const result = await authClient.signIn.oauth2({
-      providerId: configuration.provider.id,
+    const result = await authClient.signIn.social({
+      provider: configuration.provider.id,
       callbackURL: destination,
       requestSignUp: intent === "register",
     });
