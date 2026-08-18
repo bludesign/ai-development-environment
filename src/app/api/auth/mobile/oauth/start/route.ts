@@ -87,10 +87,10 @@ export async function GET(request: Request): Promise<Response> {
   completion.searchParams.set("code_challenge", codeChallenge);
 
   const auth = await getAuth();
-  const response = await auth.api.signInWithOAuth2({
+  const response = await auth.api.signInSocial({
     headers: request.headers,
     body: {
-      providerId: runtime.provider.providerId,
+      provider: runtime.provider.providerId,
       callbackURL: completion.toString(),
       errorCallbackURL: completion.toString(),
     },

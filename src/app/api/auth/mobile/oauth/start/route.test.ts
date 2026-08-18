@@ -2,12 +2,12 @@ import { beforeEach, describe, expect, test, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
   getAuthRuntimeConfig: vi.fn(),
-  signInWithOAuth2: vi.fn(),
+  signInSocial: vi.fn(),
 }));
 
 vi.mock("@/services/auth", () => ({
   getAuth: async () => ({
-    api: { signInWithOAuth2: mocks.signInWithOAuth2 },
+    api: { signInSocial: mocks.signInSocial },
   }),
   getAuthRuntimeConfig: mocks.getAuthRuntimeConfig,
   oauthAuthenticationEnabled: () => true,
@@ -62,15 +62,19 @@ describe("mobile OAuth start", () => {
       "set-cookie",
       "better-auth.oauth_state=encrypted; Path=/; HttpOnly",
     );
-    mocks.signInWithOAuth2.mockResolvedValue(response);
+    mocks.signInSocial.mockResolvedValue(response);
   });
 
   test("uses the trusted forwarded origin for the completion callback", async () => {
     const response = await GET(startRequest());
 
     expect(response.status).toBe(302);
-    const invocation = mocks.signInWithOAuth2.mock.calls[0]?.[0] as {
-      body: { callbackURL: string; errorCallbackURL: string };
+    const invocation = mocks.signInSocial.mock.calls[0]?.[0] as {
+      body: {
+        callbackURL: string;
+        errorCallbackURL: string;
+        provider: string;
+      };
     };
     const callback = new URL(invocation.body.callbackURL);
     expect(callback.origin).toBe("https://control.example.com");
@@ -81,6 +85,7 @@ describe("mobile OAuth start", () => {
       /^[A-Za-z0-9_-]{43}$/,
     );
     expect(invocation.body.errorCallbackURL).toBe(invocation.body.callbackURL);
+    expect(invocation.body.provider).toBe("company-oidc");
     expect(response.headers.getSetCookie()).toEqual(
       expect.arrayContaining([
         expect.stringContaining("better-auth.oauth_state=encrypted"),
@@ -102,7 +107,7 @@ describe("mobile OAuth start", () => {
     await expect(response.json()).resolves.toMatchObject({
       error: { code: "INVALID_PKCE_REQUEST" },
     });
-    expect(mocks.signInWithOAuth2).not.toHaveBeenCalled();
+    expect(mocks.signInSocial).not.toHaveBeenCalled();
   });
 
   test("rejects any callback other than the registered custom scheme", async () => {
@@ -114,6 +119,6 @@ describe("mobile OAuth start", () => {
     await expect(response.json()).resolves.toMatchObject({
       error: { code: "INVALID_CALLBACK" },
     });
-    expect(mocks.signInWithOAuth2).not.toHaveBeenCalled();
+    expect(mocks.signInSocial).not.toHaveBeenCalled();
   });
 });
