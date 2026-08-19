@@ -111,7 +111,7 @@
     "jose": "6.2.9",
     "lucide-react": "1.31.0",
     "next": "16.3.1",
-    "next-intl": "4.13.6",
+    "next-intl": "4.13.7",
     "pdfkit": "0.19.1",
     "pixelmatch": "^7.2.0",
     "pkijs": "3.4.0",
@@ -183,7 +183,7 @@
     "@apollo/protobufjs@1.2.8": true,
     "@parcel/watcher@2.6.0": true,
     "@prisma/engines@7.9.1": true,
-    "@swc/core@1.16.0": true,
+    "@swc/core@1.15.47": true,
     "re2@1.26.1": true
   }
 }
