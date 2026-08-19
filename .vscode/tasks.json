@@ -227,7 +227,7 @@
       "label": "upgrade",
       "group": "build",
       "command": "npm run upgrade",
-      "detail": "Upgrade all dependencies in package.json with npm-check-updates and install"
+      "detail": "Upgrade direct and transitive dependencies after the 48-hour release-age gate"
     },
     {
       "type": "shell",

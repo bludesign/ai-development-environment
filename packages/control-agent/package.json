@@ -42,7 +42,7 @@
     "full-check": "npm run format && npm run lint:fix && npm run type-check && npm run test:run && npm run build && npm run smoke",
     "full-check:ci": "npm run format:check && npm run lint && npm run type-check && npm run test:run && npm run build && npm run smoke",
     "full-check:dev": "npm run full-check && npm run dev",
-    "upgrade": "ncu -u --cooldown 48h && npm install",
+    "upgrade": "ncu -u --cooldown 48h && npm install --min-release-age=2 && npm upgrade --min-release-age=2",
     "upgrade:check": "ncu --cooldown 48h"
   },
   "devDependencies": {
