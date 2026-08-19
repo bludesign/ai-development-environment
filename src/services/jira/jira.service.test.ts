@@ -7,7 +7,37 @@ import {
   stableStringify,
   JiraService,
 } from "./jira.service";
-import type { JiraTicketBoard } from "./types";
+import type { JiraSourceView, JiraTicketBoard } from "./types";
+
+type SourceLoaderHarness = {
+  getClients: ReturnType<typeof vi.fn>;
+  cachedCall: ReturnType<typeof vi.fn>;
+  storeSummaries: ReturnType<typeof vi.fn>;
+  loadJqlSource(
+    source: JiraSourceView,
+    force: boolean,
+  ): Promise<JiraTicketBoard>;
+  loadBoardSource(
+    source: JiraSourceView,
+    force: boolean,
+  ): Promise<JiraTicketBoard>;
+};
+
+function sourceLoaderHarness(service: JiraService): SourceLoaderHarness {
+  const runtime = service as unknown as SourceLoaderHarness;
+  let entry = 0;
+  runtime.cachedCall = vi.fn(
+    async (input: { fetcher: () => Promise<unknown> }) => ({
+      value: await input.fetcher(),
+      source: "LIVE",
+      stale: false,
+      fetchedAt: new Date("2026-08-18T12:00:00.000Z"),
+      entryId: `entry-${++entry}`,
+    }),
+  );
+  runtime.storeSummaries = vi.fn().mockResolvedValue(undefined);
+  return runtime;
+}
 
 describe("Jira service input helpers", () => {
   test("normalizes one Jira Cloud origin", () => {
@@ -241,7 +271,7 @@ describe("Jira webhook event resolution", () => {
     const service = new JiraService();
     const runtime = service as unknown as Record<string, unknown>;
     runtime.getClients = vi.fn().mockResolvedValue({
-      version3: { issues: { getIssue } },
+      cloud: { issues: { getIssue } },
     });
 
     await expect(
@@ -255,11 +285,12 @@ describe("Jira webhook event resolution", () => {
       .fn()
       .mockResolvedValueOnce({
         issues: [{ key: "APP-1" }, { key: "APP-2" }],
-        total: 3,
+        isLast: false,
+        nextPageToken: "page-2",
       })
       .mockResolvedValueOnce({
         issues: [{ key: "APP-3" }],
-        total: 3,
+        isLast: true,
       });
     const service = new JiraService();
     const runtime = service as unknown as Record<string, unknown>;
@@ -276,12 +307,127 @@ describe("Jira webhook event resolution", () => {
     ]);
     expect(getIssuesForSprint).toHaveBeenNthCalledWith(
       2,
-      expect.objectContaining({ sprintId: 27, startAt: 2 }),
+      expect.objectContaining({ sprintId: 27, nextPageToken: "page-2" }),
     );
     expect(refreshCachedTicket.mock.calls.map(([key]) => key)).toEqual([
       "APP-1",
       "APP-2",
       "APP-3",
     ]);
+  });
+});
+
+describe("Jira v6 source pagination", () => {
+  const issue = (key: string, updated: Date) => ({
+    id: key,
+    key,
+    fields: {
+      summary: key,
+      status: {
+        id: "doing",
+        name: "In Progress",
+        statusCategory: { key: "indeterminate" },
+      },
+      project: { key: "APP" },
+      updated,
+    },
+  });
+
+  test("uses JQL continuation tokens and surfaces structured warnings", async () => {
+    const searchAndReconsileIssuesUsingJql = vi
+      .fn()
+      .mockResolvedValueOnce({
+        issues: [issue("APP-1", new Date("2026-08-17T10:00:00.000Z"))],
+        isLast: false,
+        nextPageToken: "jql-page-2",
+        warnings: [
+          {
+            type: "CLAUSE_LIMIT_EXCEEDED",
+            message: "The first clause was limited.",
+          },
+        ],
+      })
+      .mockResolvedValueOnce({
+        issues: [issue("APP-2", new Date("2026-08-17T11:00:00.000Z"))],
+        isLast: true,
+        warnings: [{ type: "RESULTS_TRUNCATED" }],
+      });
+    const runtime = sourceLoaderHarness(new JiraService());
+    runtime.getClients = vi.fn().mockResolvedValue({
+      cloud: { issueSearch: { searchAndReconsileIssuesUsingJql } },
+    });
+
+    const board = await runtime.loadJqlSource(
+      {
+        id: "source-1",
+        projectId: "project-1",
+        name: "Current work",
+        kind: "JQL",
+        value: "project = APP",
+        boardId: null,
+        position: 0,
+      },
+      false,
+    );
+
+    expect(searchAndReconsileIssuesUsingJql).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({ nextPageToken: "jql-page-2" }),
+    );
+    expect(board.tickets.map(({ key }) => key)).toEqual(["APP-1", "APP-2"]);
+    expect(board.tickets[0]?.updatedAt).toBe("2026-08-17T10:00:00.000Z");
+    expect(board.warnings).toEqual([
+      "The first clause was limited.",
+      "RESULTS_TRUNCATED",
+    ]);
+  });
+
+  test("uses Agile continuation tokens for board issues", async () => {
+    const getIssuesForBoard = vi
+      .fn()
+      .mockResolvedValueOnce({
+        issues: [issue("APP-1", new Date("2026-08-17T10:00:00.000Z"))],
+        isLast: false,
+        nextPageToken: "board-page-2",
+        warningMessages: ["First-page warning"],
+      })
+      .mockResolvedValueOnce({
+        issues: [issue("APP-2", new Date("2026-08-17T11:00:00.000Z"))],
+        isLast: true,
+      });
+    const runtime = sourceLoaderHarness(new JiraService());
+    runtime.getClients = vi.fn().mockResolvedValue({
+      agile: {
+        board: {
+          getBoard: vi.fn().mockResolvedValue({ id: 42, type: "kanban" }),
+          getConfiguration: vi
+            .fn()
+            .mockResolvedValue({ columnConfig: { columns: [] } }),
+          getIssuesForBoard,
+        },
+      },
+    });
+
+    const board = await runtime.loadBoardSource(
+      {
+        id: "source-2",
+        projectId: "project-1",
+        name: "Kanban",
+        kind: "BOARD",
+        value:
+          "https://example.atlassian.net/jira/software/c/projects/APP/boards/42",
+        boardId: 42,
+        position: 0,
+      },
+      false,
+    );
+
+    expect(getIssuesForBoard).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({ nextPageToken: "board-page-2" }),
+    );
+    expect(board.tickets.map(({ key }) => key)).toEqual(["APP-1", "APP-2"]);
+    expect(board.warnings).toEqual(["First-page warning"]);
+    expect(board.truncated).toBe(false);
   });
 });
