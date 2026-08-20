@@ -132,6 +132,24 @@ type CcusageAggregate {
   totals: CcusageMetrics!
 }
 
+"Represents a fixed calendar spend window with the highest retained cost."
+type CcusageSpendWindow {
+  "The inclusive first calendar date in this spend window."
+  startDate: String!
+  "The inclusive last calendar date in this spend window."
+  endDate: String!
+  "The total cost across this spend window."
+  totalCost: Float!
+}
+
+"Represents the highest retained seven-day and thirty-day spend windows."
+type CcusageSpendPeaks {
+  "The highest seven-day spend window, or null when no matching usage exists."
+  last7Days: CcusageSpendWindow
+  "The highest thirty-day spend window, or null when no matching usage exists."
+  last30Days: CcusageSpendWindow
+}
+
 "Represents Claude Code usage agent progress in the GraphQL API."
 type CcusageAgentProgress {
   "The agent associated with this Claude Code usage agent progress."
@@ -178,7 +196,18 @@ type CcusageCollection {
     range: CcusageRange = ALL
     "Whether stored usage history is included. Defaults to `true`."
     includeHistory: Boolean = true
+    "The inclusive final calendar date in strict `YYYY-MM-DD` form. Ignored for `ALL`."
+    endDate: String
   ): CcusageAggregate!
+  "The highest rolling spend windows across all retained usage matching the non-date filters."
+  spendPeaks(
+    "Whether stored usage history is included. Defaults to `true`."
+    includeHistory: Boolean = true
+    "Identifier of the agent whose usage is included. All agents are included when omitted."
+    agentId: ID
+    "Name of the model whose usage is included. All models are included when omitted."
+    modelName: String
+  ): CcusageSpendPeaks!
 }
 
 extend type Query {
