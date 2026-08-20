@@ -9,7 +9,11 @@ import {
   emptyUsageMetrics,
   filterUsageByAgent,
   filterUsageByDays,
+  filterUsageByModel,
+  highestUsageSpendWindow,
   totalsForModel,
+  usagePeriodToDate,
+  usageSpendPeaks,
   type UsageDayRow,
   type UsageReportSource,
 } from "./aggregate-usage";
@@ -209,7 +213,7 @@ describe("aggregateUsage", () => {
     );
   });
 
-  test("filters inclusive rolling ranges and recalculates visible totals", () => {
+  test("filters inclusive rolling ranges with upper bounds and recalculates visible totals", () => {
     const usage = aggregateUsage([
       {
         agent: { id: "agent-a", name: "Alpha", hostname: "alpha.local" },
@@ -220,6 +224,13 @@ describe("aggregateUsage", () => {
             creation: 3,
             read: 4,
             cost: 0.1,
+          }),
+          daily("2026-07-17", "gpt-5", {
+            input: 1_000,
+            output: 2_000,
+            creation: 3_000,
+            read: 4_000,
+            cost: 100,
           }),
           daily("2026-07-09", "gpt-5", {
             input: 10,
@@ -253,6 +264,55 @@ describe("aggregateUsage", () => {
       totalCost: 1.1,
     });
     expect(filterUsageByDays(usage, null)).toBe(usage);
+  });
+
+  test("handles exact month and year transitions", () => {
+    const usage = aggregateUsage([
+      {
+        agent: { id: "agent-a", name: "Alpha", hostname: "alpha.local" },
+        report: report([
+          daily("2026-01-02", "gpt-5", {
+            input: 1,
+            output: 0,
+            creation: 0,
+            read: 0,
+            cost: 1,
+          }),
+          daily("2025-12-27", "gpt-5", {
+            input: 1,
+            output: 0,
+            creation: 0,
+            read: 0,
+            cost: 2,
+          }),
+          daily("2025-12-26", "gpt-5", {
+            input: 1,
+            output: 0,
+            creation: 0,
+            read: 0,
+            cost: 4,
+          }),
+        ]),
+      },
+    ]);
+
+    expect(
+      filterUsageByDays(usage, 7, "2026-01-02").days.map((day) => day.period),
+    ).toEqual(["2026-01-02", "2025-12-27"]);
+  });
+
+  test("rejects malformed and impossible dates but ALL ignores the end date", () => {
+    expect(() => usagePeriodToDate("2026-02-29")).toThrow(
+      "valid date in YYYY-MM-DD format",
+    );
+    expect(() => usagePeriodToDate("2026-2-09")).toThrow(
+      "valid date in YYYY-MM-DD format",
+    );
+    const empty = aggregateUsage([]);
+    expect(() => filterUsageByDays(empty, 7, "not-a-date")).toThrow(
+      "valid date in YYYY-MM-DD format",
+    );
+    expect(filterUsageByDays(empty, null, "not-a-date")).toBe(empty);
   });
 });
 
@@ -370,5 +430,112 @@ describe("filterUsageByAgent", () => {
       days: [],
       totals: emptyUsageMetrics(),
     });
+  });
+});
+
+describe("spend records", () => {
+  const spendUsage = () =>
+    aggregateUsage([
+      {
+        agent: { id: "agent-a", name: "Alpha", hostname: "alpha.local" },
+        report: report([
+          daily("2026-01-01", "gpt-5", {
+            input: 1,
+            output: 0,
+            creation: 0,
+            read: 0,
+            cost: 5,
+          }),
+          daily("2026-01-07", "gpt-5", {
+            input: 1,
+            output: 0,
+            creation: 0,
+            read: 0,
+            cost: 5,
+          }),
+          daily("2026-02-01", "claude", {
+            input: 1,
+            output: 0,
+            creation: 0,
+            read: 0,
+            cost: 10,
+          }),
+        ]),
+      },
+      {
+        agent: { id: "agent-b", name: "Beta", hostname: "beta.local" },
+        report: report([
+          daily("2026-03-01", "gpt-5", {
+            input: 1,
+            output: 0,
+            creation: 0,
+            read: 0,
+            cost: 10,
+          }),
+        ]),
+      },
+    ]);
+
+  test("treats missing days as zero and chooses the latest window on a tie", () => {
+    expect(highestUsageSpendWindow(spendUsage(), 7)).toEqual({
+      startDate: "2026-02-23",
+      endDate: "2026-03-01",
+      totalCost: 10,
+    });
+    expect(highestUsageSpendWindow(spendUsage(), 30)).toEqual({
+      startDate: "2026-01-31",
+      endDate: "2026-03-01",
+      totalCost: 20,
+    });
+  });
+
+  test("considers missing calendar dates as possible latest peak endings", () => {
+    const usage = aggregateUsage([
+      {
+        agent: { id: "agent-a", name: "Alpha", hostname: "alpha.local" },
+        report: report([
+          daily("2026-01-01", "gpt-5", {
+            input: 1,
+            output: 0,
+            creation: 0,
+            read: 0,
+            cost: 10,
+          }),
+          daily("2026-01-20", "gpt-5", {
+            input: 1,
+            output: 0,
+            creation: 0,
+            read: 0,
+            cost: 1,
+          }),
+        ]),
+      },
+    ]);
+
+    expect(highestUsageSpendWindow(usage, 7)).toEqual({
+      startDate: "2026-01-01",
+      endDate: "2026-01-07",
+      totalCost: 10,
+    });
+  });
+
+  test("returns null for empty filtered data and honors combined agent/model filters", () => {
+    expect(usageSpendPeaks(spendUsage(), "missing", "gpt-5")).toEqual({
+      last7Days: null,
+      last30Days: null,
+    });
+    expect(usageSpendPeaks(spendUsage(), "agent-a", "gpt-5")).toEqual({
+      last7Days: {
+        startDate: "2026-01-01",
+        endDate: "2026-01-07",
+        totalCost: 10,
+      },
+      last30Days: {
+        startDate: "2025-12-09",
+        endDate: "2026-01-07",
+        totalCost: 10,
+      },
+    });
+    expect(filterUsageByModel(spendUsage(), "missing").days).toEqual([]);
   });
 });

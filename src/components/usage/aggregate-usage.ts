@@ -39,6 +39,17 @@ export type AggregatedUsage = {
   totals: UsageMetrics;
 };
 
+export type UsageSpendWindow = {
+  startDate: string;
+  endDate: string;
+  totalCost: number;
+};
+
+export type UsageSpendPeaks = {
+  last7Days: UsageSpendWindow | null;
+  last30Days: UsageSpendWindow | null;
+};
+
 export type UsageRangeDays = 7 | 30 | null;
 
 type MutableAgentRow = UsageAgentRow & { sourceSet: Set<string> };
@@ -236,9 +247,32 @@ export function aggregateUsage(reports: UsageReportSource[]): AggregatedUsage {
   };
 }
 
-function localPeriod(date: Date): string {
+export function usagePeriodForDate(date: Date): string {
   const pad = (value: number) => String(value).padStart(2, "0");
   return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`;
+}
+
+export function usagePeriodToDate(period: string): Date {
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(period);
+  if (!match) {
+    throw new Error("Usage date must be a valid date in YYYY-MM-DD format");
+  }
+
+  const [, yearString, monthString, dayString] = match;
+  const year = Number(yearString);
+  const month = Number(monthString);
+  const day = Number(dayString);
+  const date = new Date(0);
+  date.setHours(0, 0, 0, 0);
+  date.setFullYear(year, month - 1, day);
+  if (
+    date.getFullYear() !== year ||
+    date.getMonth() !== month - 1 ||
+    date.getDate() !== day
+  ) {
+    throw new Error("Usage date must be a valid date in YYYY-MM-DD format");
+  }
+  return date;
 }
 
 /**
@@ -303,18 +337,133 @@ export function filterUsageByAgent(
   return { days, totals };
 }
 
+export function filterUsageByModel(
+  usage: AggregatedUsage,
+  modelName: string,
+): AggregatedUsage {
+  const totals = emptyUsageMetrics();
+  const days = usage.days.flatMap((day) => {
+    const models = day.models.filter(
+      (model) => !model.unattributed && model.modelName === modelName,
+    );
+    if (models.length === 0) return [];
+
+    const metrics = emptyUsageMetrics();
+    const sourceSet = new Set<string>();
+    models.forEach((model) => {
+      addMetrics(metrics, model);
+      model.agents.forEach((agent) =>
+        agent.sources.forEach((source) => sourceSet.add(source)),
+      );
+    });
+    addMetrics(totals, metrics);
+    return [
+      {
+        ...metrics,
+        period: day.period,
+        sources: [...sourceSet].sort(),
+        models,
+      },
+    ];
+  });
+
+  return { days, totals };
+}
+
 export function filterUsageByDays(
   usage: AggregatedUsage,
   days: UsageRangeDays,
-  today = new Date(),
+  endDate: Date | string = new Date(),
 ): AggregatedUsage {
   if (days === null) return usage;
-  const cutoffDate = new Date(today);
-  cutoffDate.setHours(0, 0, 0, 0);
+  const finalDate =
+    typeof endDate === "string"
+      ? usagePeriodToDate(endDate)
+      : new Date(endDate);
+  finalDate.setHours(0, 0, 0, 0);
+  const cutoffDate = new Date(finalDate);
   cutoffDate.setDate(cutoffDate.getDate() - (days - 1));
-  const cutoff = localPeriod(cutoffDate);
-  const filteredDays = usage.days.filter((day) => day.period >= cutoff);
+  const cutoff = usagePeriodForDate(cutoffDate);
+  const upperBound = usagePeriodForDate(finalDate);
+  const filteredDays = usage.days.filter(
+    (day) => day.period >= cutoff && day.period <= upperBound,
+  );
   const totals = emptyUsageMetrics();
   filteredDays.forEach((day) => addMetrics(totals, day));
   return { days: filteredDays, totals };
+}
+
+const DAY_IN_MILLISECONDS = 24 * 60 * 60 * 1000;
+
+function periodOrdinal(period: string): number {
+  const date = usagePeriodToDate(period);
+  const utcDate = new Date(0);
+  utcDate.setUTCHours(0, 0, 0, 0);
+  utcDate.setUTCFullYear(date.getFullYear(), date.getMonth(), date.getDate());
+  return Math.floor(utcDate.getTime() / DAY_IN_MILLISECONDS);
+}
+
+function periodForOrdinal(ordinal: number): string {
+  const date = new Date(ordinal * DAY_IN_MILLISECONDS);
+  const pad = (value: number) => String(value).padStart(2, "0");
+  return `${date.getUTCFullYear()}-${pad(date.getUTCMonth() + 1)}-${pad(date.getUTCDate())}`;
+}
+
+export function highestUsageSpendWindow(
+  usage: AggregatedUsage,
+  days: 7 | 30,
+): UsageSpendWindow | null {
+  if (usage.days.length === 0) return null;
+
+  const entries = usage.days
+    .map((day) => ({
+      ordinal: periodOrdinal(day.period),
+      totalCost: day.totalCost,
+    }))
+    .sort((first, second) => first.ordinal - second.ordinal);
+  const costByOrdinal = new Map(
+    entries.map((entry) => [entry.ordinal, entry.totalCost]),
+  );
+  const firstOrdinal = entries[0]!.ordinal;
+  const lastOrdinal = entries.at(-1)!.ordinal;
+  let rollingCost = 0;
+  let bestEndOrdinal = firstOrdinal;
+  let bestCost = Number.NEGATIVE_INFINITY;
+
+  for (
+    let endOrdinal = firstOrdinal;
+    endOrdinal <= lastOrdinal;
+    endOrdinal += 1
+  ) {
+    rollingCost += costByOrdinal.get(endOrdinal) ?? 0;
+    rollingCost -= costByOrdinal.get(endOrdinal - days) ?? 0;
+    if (
+      rollingCost > bestCost ||
+      (rollingCost === bestCost && endOrdinal > bestEndOrdinal)
+    ) {
+      bestCost = rollingCost;
+      bestEndOrdinal = endOrdinal;
+    }
+  }
+
+  return {
+    startDate: periodForOrdinal(bestEndOrdinal - (days - 1)),
+    endDate: periodForOrdinal(bestEndOrdinal),
+    totalCost: bestCost,
+  };
+}
+
+export function usageSpendPeaks(
+  usage: AggregatedUsage,
+  agentId?: string | null,
+  modelName?: string | null,
+): UsageSpendPeaks {
+  const agentUsage = agentId ? filterUsageByAgent(usage, agentId) : usage;
+  const filteredUsage = modelName
+    ? filterUsageByModel(agentUsage, modelName)
+    : agentUsage;
+  return {
+    last7Days: highestUsageSpendWindow(filteredUsage, 7),
+    last30Days: highestUsageSpendWindow(filteredUsage, 30),
+  };
 }
