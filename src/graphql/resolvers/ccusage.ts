@@ -5,6 +5,7 @@ import {
 } from "@/services/ccusage";
 import {
   filterUsageByDays,
+  usageSpendPeaks,
   type UsageRangeDays,
 } from "@/components/usage/aggregate-usage";
 
@@ -31,11 +32,34 @@ export const createCcusageResolvers = (ccusageService: CcusageService) => ({
       {
         range = "ALL",
         includeHistory = true,
-      }: { range?: CcusageRange; includeHistory?: boolean },
+        endDate,
+      }: {
+        range?: CcusageRange;
+        includeHistory?: boolean;
+        endDate?: string | null;
+      },
     ) =>
       filterUsageByDays(
         includeHistory ? collection.aggregate : collection.liveAggregate,
         RANGE_DAYS[range],
+        endDate ?? new Date(),
+      ),
+    spendPeaks: (
+      collection: CcusageCollectionSnapshot,
+      {
+        includeHistory = true,
+        agentId,
+        modelName,
+      }: {
+        includeHistory?: boolean;
+        agentId?: string | null;
+        modelName?: string | null;
+      },
+    ) =>
+      usageSpendPeaks(
+        includeHistory ? collection.aggregate : collection.liveAggregate,
+        agentId,
+        modelName,
       ),
   },
   CcusageModelUsage: {

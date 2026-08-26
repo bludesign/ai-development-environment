@@ -4,6 +4,7 @@ import { CCUSAGE_REPORT_JOB_KIND } from "@ai-development-environment/agent-contr
 import {
   ChevronDown,
   ChevronRight,
+  CalendarDays,
   History,
   RefreshCw,
   Trash2,
@@ -17,6 +18,7 @@ import { SearchableSelect } from "@/components/common/searchable-select";
 import { ConfirmationDialog } from "@/components/confirmation-dialog";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
+import { Calendar } from "@/components/ui/calendar";
 import { Card, CardContent } from "@/components/ui/card";
 import {
   Empty,
@@ -25,6 +27,11 @@ import {
   EmptyTitle,
 } from "@/components/ui/empty";
 import { Spinner } from "@/components/ui/spinner";
+import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from "@/components/ui/popover";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
   Table,
@@ -42,8 +49,17 @@ import {
 } from "@/lib/control-plane-client";
 import { formatDateValue } from "@/lib/date-format";
 
-import type { AggregatedUsage, UsageMetrics } from "./aggregate-usage";
-import { filterUsageByAgent, totalsForModel } from "./aggregate-usage";
+import type {
+  AggregatedUsage,
+  UsageMetrics,
+  UsageSpendPeaks,
+} from "./aggregate-usage";
+import {
+  filterUsageByAgent,
+  totalsForModel,
+  usagePeriodForDate,
+  usagePeriodToDate,
+} from "./aggregate-usage";
 import { UsageCostChart } from "./usage-cost-chart";
 
 const RECONCILE_INTERVAL_MS = 2_000;
@@ -91,6 +107,7 @@ type CcusageCollection = {
   hasStoredHistory: boolean;
   aggregate: AggregatedUsage;
   allAggregate: { days: Array<{ period: string }> };
+  spendPeaks: UsageSpendPeaks;
 };
 
 const METRICS_FIELDS = `inputTokens outputTokens cacheCreationTokens cacheReadTokens totalTokens totalCost`;
@@ -101,7 +118,7 @@ const COLLECTION_FIELDS = `
     agents { agent { ${AGENT_FIELDS} } status jobId error }
   }
   hasStoredHistory
-  aggregate(range: $range, includeHistory: $includeHistory) {
+  aggregate(range: $range, includeHistory: $includeHistory, endDate: $endDate) {
     totals { ${METRICS_FIELDS} }
     days {
       period sources ${METRICS_FIELDS}
@@ -112,6 +129,14 @@ const COLLECTION_FIELDS = `
     }
   }
   allAggregate: aggregate(range: ALL, includeHistory: $includeHistory) { days { period } }
+  spendPeaks(
+    includeHistory: $includeHistory
+    agentId: $peakAgentId
+    modelName: $peakModelName
+  ) {
+    last7Days { startDate endDate totalCost }
+    last30Days { startDate endDate totalCost }
+  }
 `;
 
 type UsageAgentOption = {
@@ -151,114 +176,23 @@ export function UsagePage() {
   const [collection, setCollection] = useState<CcusageCollection | null>(null);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
-  const [range, setRange] = useState<UsageRange>("ALL");
+  const [range, setRange] = useState<UsageRange>("LAST_30_DAYS");
+  const [today] = useState(() => {
+    const date = new Date();
+    date.setHours(0, 0, 0, 0);
+    return date;
+  });
+  const [endDate, setEndDate] = useState(() => usagePeriodForDate(today));
+  const [endDateOpen, setEndDateOpen] = useState(false);
   const [includeHistory, setIncludeHistory] = useState(true);
   const [clearingHistory, setClearingHistory] = useState(false);
   const [reconcileVersion, setReconcileVersion] = useState(0);
   const [selectedAgentId, setSelectedAgentId] = useState(ALL_AGENTS);
   const [selectedModel, setSelectedModel] = useState<string | null>(null);
   const rangeRef = useRef(range);
+  const endDateRef = useRef(endDate);
   const includeHistoryRef = useRef(includeHistory);
   const viewVersionRef = useRef(0);
-
-  useEffect(() => {
-    rangeRef.current = range;
-    includeHistoryRef.current = includeHistory;
-  }, [includeHistory, range]);
-
-  useEffect(() => {
-    let disposed = false;
-    let completed = false;
-    let reconcileTimer: number | undefined;
-    const applyCollection = (next: CcusageCollection) => {
-      if (disposed) return;
-      setCollection(next);
-      setLoading(false);
-      setLoadError(null);
-      if (next.status === "COMPLETED") {
-        completed = true;
-        if (reconcileTimer !== undefined) {
-          window.clearInterval(reconcileTimer);
-          reconcileTimer = undefined;
-        }
-      }
-    };
-    const reconcile = async () => {
-      try {
-        const data = await controlPlaneRequest<{
-          ccusageCollection: CcusageCollection | null;
-        }>(
-          `query CcusageCollection($id: ID!, $range: CcusageRange!, $includeHistory: Boolean!) {
-            ccusageCollection(id: $id) { ${COLLECTION_FIELDS} }
-          }`,
-          { id: requestId, range, includeHistory },
-        );
-        if (data.ccusageCollection) applyCollection(data.ccusageCollection);
-      } catch {
-        // The blocking mutation, subscription, or next pass can still deliver it.
-      }
-    };
-    const unsubscribe = controlPlaneSubscriptions().subscribe<{
-      ccusageCollectionChanged: CcusageCollection;
-    }>(
-      {
-        query: `subscription CcusageCollectionChanged($id: ID!, $range: CcusageRange!, $includeHistory: Boolean!) {
-          ccusageCollectionChanged(id: $id) { ${COLLECTION_FIELDS} }
-        }`,
-        variables: { id: requestId, range, includeHistory },
-      },
-      {
-        next: (value) => {
-          if (value.data?.ccusageCollectionChanged) {
-            applyCollection(value.data.ccusageCollectionChanged);
-          }
-        },
-        error: () => undefined,
-        complete: () => undefined,
-      },
-    );
-    void reconcile();
-    if (!completed) {
-      reconcileTimer = window.setInterval(
-        () => void reconcile(),
-        RECONCILE_INTERVAL_MS,
-      );
-    }
-    return () => {
-      disposed = true;
-      unsubscribe();
-      if (reconcileTimer !== undefined) window.clearInterval(reconcileTimer);
-    };
-  }, [includeHistory, range, reconcileVersion, requestId]);
-
-  useEffect(() => {
-    let disposed = false;
-    const viewVersion = viewVersionRef.current;
-    void controlPlaneRequest<{ collectCcusage: CcusageCollection }>(
-      `mutation CollectCcusage($requestId: ID!, $range: CcusageRange!, $includeHistory: Boolean!) {
-        collectCcusage(requestId: $requestId) { ${COLLECTION_FIELDS} }
-      }`,
-      {
-        requestId,
-        range: rangeRef.current,
-        includeHistory: includeHistoryRef.current,
-      },
-    )
-      .then(({ collectCcusage }) => {
-        if (disposed || viewVersion !== viewVersionRef.current) return;
-        setCollection(collectCcusage);
-        setLoading(false);
-        setLoadError(null);
-      })
-      .catch((error) => {
-        if (disposed) return;
-        setLoadError(error instanceof Error ? error.message : String(error));
-        setLoading(false);
-      });
-    return () => {
-      disposed = true;
-    };
-  }, [requestId]);
 
   const records = collection?.progress.agents ?? [];
   const usage = collection?.aggregate;
@@ -302,6 +236,135 @@ export function UsagePage() {
     filteredUsage && activeModel
       ? totalsForModel(filteredUsage.days, activeModel)
       : filteredUsage?.totals;
+  const peakAgentIdRef = useRef(activeAgentId);
+  const peakModelNameRef = useRef(activeModel);
+
+  useEffect(() => {
+    rangeRef.current = range;
+    endDateRef.current = endDate;
+    includeHistoryRef.current = includeHistory;
+    peakAgentIdRef.current = activeAgentId;
+    peakModelNameRef.current = activeModel;
+  }, [activeAgentId, activeModel, endDate, includeHistory, range]);
+
+  useEffect(() => {
+    let disposed = false;
+    let completed = false;
+    let reconcileTimer: number | undefined;
+    const applyCollection = (next: CcusageCollection) => {
+      if (disposed) return;
+      setCollection(next);
+      setLoading(false);
+      setLoadError(null);
+      if (next.status === "COMPLETED") {
+        completed = true;
+        if (reconcileTimer !== undefined) {
+          window.clearInterval(reconcileTimer);
+          reconcileTimer = undefined;
+        }
+      }
+    };
+    const reconcile = async () => {
+      try {
+        const data = await controlPlaneRequest<{
+          ccusageCollection: CcusageCollection | null;
+        }>(
+          `query CcusageCollection($id: ID!, $range: CcusageRange!, $includeHistory: Boolean!, $endDate: String, $peakAgentId: ID, $peakModelName: String) {
+            ccusageCollection(id: $id) { ${COLLECTION_FIELDS} }
+          }`,
+          {
+            id: requestId,
+            range,
+            includeHistory,
+            endDate,
+            peakAgentId: activeAgentId,
+            peakModelName: activeModel,
+          },
+        );
+        if (data.ccusageCollection) applyCollection(data.ccusageCollection);
+      } catch {
+        // The blocking mutation, subscription, or next pass can still deliver it.
+      }
+    };
+    const unsubscribe = controlPlaneSubscriptions().subscribe<{
+      ccusageCollectionChanged: CcusageCollection;
+    }>(
+      {
+        query: `subscription CcusageCollectionChanged($id: ID!, $range: CcusageRange!, $includeHistory: Boolean!, $endDate: String, $peakAgentId: ID, $peakModelName: String) {
+          ccusageCollectionChanged(id: $id) { ${COLLECTION_FIELDS} }
+        }`,
+        variables: {
+          id: requestId,
+          range,
+          includeHistory,
+          endDate,
+          peakAgentId: activeAgentId,
+          peakModelName: activeModel,
+        },
+      },
+      {
+        next: (value) => {
+          if (value.data?.ccusageCollectionChanged) {
+            applyCollection(value.data.ccusageCollectionChanged);
+          }
+        },
+        error: () => undefined,
+        complete: () => undefined,
+      },
+    );
+    void reconcile();
+    if (!completed) {
+      reconcileTimer = window.setInterval(
+        () => void reconcile(),
+        RECONCILE_INTERVAL_MS,
+      );
+    }
+    return () => {
+      disposed = true;
+      unsubscribe();
+      if (reconcileTimer !== undefined) window.clearInterval(reconcileTimer);
+    };
+  }, [
+    activeAgentId,
+    activeModel,
+    endDate,
+    includeHistory,
+    range,
+    reconcileVersion,
+    requestId,
+  ]);
+
+  useEffect(() => {
+    let disposed = false;
+    const viewVersion = viewVersionRef.current;
+    void controlPlaneRequest<{ collectCcusage: CcusageCollection }>(
+      `mutation CollectCcusage($requestId: ID!, $range: CcusageRange!, $includeHistory: Boolean!, $endDate: String, $peakAgentId: ID, $peakModelName: String) {
+        collectCcusage(requestId: $requestId) { ${COLLECTION_FIELDS} }
+      }`,
+      {
+        requestId,
+        range: rangeRef.current,
+        includeHistory: includeHistoryRef.current,
+        endDate: endDateRef.current,
+        peakAgentId: peakAgentIdRef.current,
+        peakModelName: peakModelNameRef.current,
+      },
+    )
+      .then(({ collectCcusage }) => {
+        if (disposed || viewVersion !== viewVersionRef.current) return;
+        setCollection(collectCcusage);
+        setLoading(false);
+        setLoadError(null);
+      })
+      .catch((error) => {
+        if (disposed) return;
+        setLoadError(error instanceof Error ? error.message : String(error));
+        setLoading(false);
+      });
+    return () => {
+      disposed = true;
+    };
+  }, [requestId]);
 
   return (
     <section className="mx-auto flex w-full max-w-[1500px] flex-col gap-6">
@@ -320,7 +383,11 @@ export function UsagePage() {
               <SearchableSelect
                 ariaLabel={t("agentFilterLabel")}
                 emptyMessage={t("noAgentsFound")}
-                onValueChange={setSelectedAgentId}
+                onValueChange={(nextAgentId) => {
+                  if (nextAgentId === selectedAgentId) return;
+                  viewVersionRef.current += 1;
+                  setSelectedAgentId(nextAgentId);
+                }}
                 options={agentOptions}
                 placeholder={t("allAgents")}
                 searchPlaceholder={t("searchAgents")}
@@ -352,6 +419,54 @@ export function UsagePage() {
               ))}
             </TabsList>
           </Tabs>
+          {range !== "ALL" && (
+            <Popover onOpenChange={setEndDateOpen} open={endDateOpen}>
+              <PopoverTrigger asChild>
+                <Button
+                  aria-label={t("endDatePickerLabel", {
+                    date: formatDateValue(`${endDate}T00:00:00Z`, "short", {
+                      locale,
+                      showTime: false,
+                      utc: true,
+                    }),
+                  })}
+                  type="button"
+                  variant="outline"
+                >
+                  <CalendarDays />
+                  {t("endingDate", {
+                    date: formatDateValue(`${endDate}T00:00:00Z`, "short", {
+                      locale,
+                      showTime: false,
+                      utc: true,
+                    }),
+                  })}
+                </Button>
+              </PopoverTrigger>
+              <PopoverContent align="start" className="w-auto p-0">
+                <Calendar
+                  autoFocus
+                  captionLayout="dropdown"
+                  disabled={{ after: today }}
+                  endMonth={today}
+                  mode="single"
+                  onSelect={(nextDate) => {
+                    if (!nextDate || nextDate > today) return;
+                    const nextEndDate = usagePeriodForDate(nextDate);
+                    if (nextEndDate === endDate) {
+                      setEndDateOpen(false);
+                      return;
+                    }
+                    endDateRef.current = nextEndDate;
+                    viewVersionRef.current += 1;
+                    setEndDate(nextEndDate);
+                    setEndDateOpen(false);
+                  }}
+                  selected={usagePeriodToDate(endDate)}
+                />
+              </PopoverContent>
+            </Popover>
+          )}
           <Button
             aria-label={t("historyToggleLabel")}
             aria-pressed={includeHistory}
@@ -449,10 +564,15 @@ export function UsagePage() {
           <>
             <UsageCostChart
               days={filteredUsage.days}
-              onSelectModel={setSelectedModel}
+              onSelectModel={(nextModel) => {
+                if (nextModel === selectedModel) return;
+                viewVersionRef.current += 1;
+                setSelectedModel(nextModel);
+              }}
               selectedModel={activeModel}
             />
             <SummaryTiles metrics={summaryMetrics} model={activeModel} />
+            <SpendRecordTiles locale={locale} peaks={collection.spendPeaks} />
             <UsageTable
               days={filteredUsage.days}
               locale={locale}
@@ -595,6 +715,75 @@ function SummaryTiles({
         ))}
       </div>
     </div>
+  );
+}
+
+function SpendRecordTiles({
+  locale,
+  peaks,
+}: {
+  locale: string;
+  peaks: UsageSpendPeaks;
+}) {
+  const t = useTranslations("usage");
+  const currency = new Intl.NumberFormat(locale, {
+    style: "currency",
+    currency: "USD",
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  });
+  const date = (value: string) =>
+    formatDateValue(`${value}T00:00:00Z`, "short", {
+      locale,
+      showTime: false,
+      utc: true,
+    });
+  const records = [
+    [t("highest7DaySpend"), peaks.last7Days],
+    [t("highest30DaySpend"), peaks.last30Days],
+  ] as const;
+
+  return (
+    <section aria-labelledby="usage-spend-records" className="space-y-3">
+      <h2 className="text-lg font-semibold" id="usage-spend-records">
+        {t("spendRecords")}
+      </h2>
+      <div className="grid gap-3 sm:grid-cols-2">
+        {records.map(([label, record]) => {
+          const amount = record ? currency.format(record.totalCost) : "—";
+          const start = record ? date(record.startDate) : "";
+          const end = record ? date(record.endDate) : "";
+          return (
+            <Card
+              aria-label={
+                record
+                  ? t("spendRecordAccessibilityLabel", {
+                      label,
+                      amount,
+                      start,
+                      end,
+                    })
+                  : t("spendRecordEmptyAccessibilityLabel", { label })
+              }
+              key={label}
+              role="group"
+            >
+              <CardContent>
+                <p className="text-sm text-muted-foreground">{label}</p>
+                <p className="mt-2 text-2xl font-semibold tabular-nums">
+                  {amount}
+                </p>
+                {record && (
+                  <p className="mt-1 text-sm text-muted-foreground">
+                    {t("spendRecordDateSpan", { start, end })}
+                  </p>
+                )}
+              </CardContent>
+            </Card>
+          );
+        })}
+      </div>
+    </section>
   );
 }
 

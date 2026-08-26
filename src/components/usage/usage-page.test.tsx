@@ -15,6 +15,7 @@ import {
 } from "@/lib/control-plane-client";
 
 import { UsagePage } from "./usage-page";
+import { usagePeriodForDate } from "./aggregate-usage";
 
 vi.mock("@/lib/control-plane-client", () => ({
   controlPlaneRequest: vi.fn(),
@@ -144,6 +145,18 @@ function collection(status: "COLLECTING" | "COMPLETED" = "COMPLETED") {
     hasStoredHistory: true,
     aggregate,
     allAggregate: { days: [{ period: "2026-07-16" }] },
+    spendPeaks: {
+      last7Days: {
+        startDate: "2026-07-10",
+        endDate: "2026-07-16",
+        totalCost: 1.256,
+      },
+      last30Days: {
+        startDate: "2026-06-17",
+        endDate: "2026-07-16",
+        totalCost: 4.5,
+      },
+    },
   };
 }
 
@@ -225,7 +238,23 @@ describe("UsagePage", () => {
     expect(screen.getByText(/Update required: Agent OLD/)).toBeDefined();
     expect(screen.getByText(/Failed: Agent B/)).toBeDefined();
     expect(screen.getByText("Daily cost by model")).toBeDefined();
+    expect(
+      screen.getByRole("tab", { name: "30 days" }).getAttribute("data-active"),
+    ).not.toBeNull();
+    expect(
+      screen.getByRole("button", {
+        name: /Select usage end date, currently/,
+      }),
+    ).toBeDefined();
     expect(screen.getAllByText("$1.26").length).toBeGreaterThan(0);
+    expect(screen.getByText("Spend records")).toBeDefined();
+    expect(screen.getByText("Highest 7-day spend")).toBeDefined();
+    expect(screen.getByText("Highest 30-day spend")).toBeDefined();
+    expect(
+      screen.getByRole("group", {
+        name: /Highest 7-day spend: \$1\.26, from/,
+      }),
+    ).toBeDefined();
     expect(
       screen.queryByRole("combobox", { name: "Filter usage by agent" }),
     ).toBeNull();
@@ -246,7 +275,8 @@ describe("UsagePage", () => {
         requestMock.mock.calls.some(
           ([query, variables]) =>
             String(query).includes("query CcusageCollection") &&
-            variables?.range === "LAST_7_DAYS",
+            variables?.range === "LAST_7_DAYS" &&
+            variables?.endDate === usagePeriodForDate(new Date()),
         ),
       ).toBe(true);
     });
@@ -266,10 +296,72 @@ describe("UsagePage", () => {
     });
   });
 
+  test("shows the bounded date selector, disables future dates, and preserves its value", async () => {
+    render(<UsagePage />);
+
+    const picker = await screen.findByRole("button", {
+      name: /Select usage end date, currently/,
+    });
+    fireEvent.click(picker);
+    const tomorrow = new Date();
+    tomorrow.setHours(0, 0, 0, 0);
+    tomorrow.setDate(tomorrow.getDate() + 1);
+    const futureDay = document.querySelector(
+      `[data-day="${tomorrow.toLocaleDateString()}"]`,
+    );
+    expect(futureDay?.hasAttribute("disabled")).toBe(true);
+
+    const yesterday = new Date();
+    yesterday.setHours(0, 0, 0, 0);
+    yesterday.setDate(yesterday.getDate() - 1);
+    const yesterdayButton = document.querySelector(
+      `[data-day="${yesterday.toLocaleDateString()}"]`,
+    );
+    expect(yesterdayButton).not.toBeNull();
+    fireEvent.click(yesterdayButton!);
+    await waitFor(() =>
+      expect(
+        requestMock.mock.calls.some(
+          ([query, variables]) =>
+            String(query).includes("query CcusageCollection") &&
+            variables?.endDate === usagePeriodForDate(yesterday),
+        ),
+      ).toBe(true),
+    );
+    expect(
+      requestMock.mock.calls.filter(([query]) =>
+        String(query).includes("mutation CollectCcusage"),
+      ),
+    ).toHaveLength(1);
+
+    fireEvent.click(screen.getByRole("tab", { name: "All data" }));
+    expect(
+      screen.queryByRole("button", { name: /Select usage end date/ }),
+    ).toBeNull();
+    fireEvent.click(screen.getByRole("tab", { name: "7 days" }));
+    expect(
+      screen.getByRole("button", { name: /Select usage end date, currently/ }),
+    ).toBeDefined();
+    await waitFor(() =>
+      expect(
+        requestMock.mock.calls.some(
+          ([query, variables]) =>
+            String(query).includes("query CcusageCollection") &&
+            variables?.range === "LAST_7_DAYS" &&
+            variables?.endDate === usagePeriodForDate(yesterday),
+        ),
+      ).toBe(true),
+    );
+  });
+
   test("searches and filters usage when multiple agents report", async () => {
     const result = collectionWithTwoSuccessfulAgents();
-    requestMock.mockImplementation(async (query) => {
+    requestMock.mockImplementation(async (query, variables) => {
       if (query.includes("query CcusageCollection")) {
+        if (variables?.peakAgentId === "b") {
+          result.spendPeaks.last7Days!.totalCost = 0.5;
+          result.spendPeaks.last30Days!.totalCost = 0.5;
+        }
         return { ccusageCollection: result } as never;
       }
       if (query.includes("mutation CollectCcusage")) {
@@ -296,6 +388,15 @@ describe("UsagePage", () => {
     fireEvent.click(screen.getByRole("option", { name: "Agent B, b.local" }));
 
     await waitFor(() => expect(filter.textContent).toContain("Agent B"));
+    await waitFor(() =>
+      expect(
+        requestMock.mock.calls.some(
+          ([query, variables]) =>
+            String(query).includes("query CcusageCollection") &&
+            variables?.peakAgentId === "b",
+        ),
+      ).toBe(true),
+    );
     expect(
       screen.getByText("Grand total").closest("tr")?.textContent,
     ).toContain("$0.50");
@@ -309,6 +410,33 @@ describe("UsagePage", () => {
     expect(screen.queryByText("Agent A")).toBeNull();
     expect(screen.getAllByText("Agent B").length).toBeGreaterThan(0);
     expect(screen.getByText("b.local · claude")).toBeDefined();
+    expect(
+      requestMock.mock.calls.filter(([query]) =>
+        String(query).includes("mutation CollectCcusage"),
+      ),
+    ).toHaveLength(1);
+  });
+
+  test("refreshes spend records for the active model without recollecting", async () => {
+    render(<UsagePage />);
+
+    fireEvent.click(
+      await screen.findByRole("button", { name: "Show only gpt-5" }),
+    );
+    await waitFor(() =>
+      expect(
+        requestMock.mock.calls.some(
+          ([query, variables]) =>
+            String(query).includes("query CcusageCollection") &&
+            variables?.peakModelName === "gpt-5",
+        ),
+      ).toBe(true),
+    );
+    expect(
+      requestMock.mock.calls.filter(([query]) =>
+        String(query).includes("mutation CollectCcusage"),
+      ),
+    ).toHaveLength(1);
   });
 
   test("uses query reconciliation when the progress subscription is silent", async () => {
@@ -380,6 +508,8 @@ describe("UsagePage", () => {
     liveCollection.aggregate.days[0]!.totalCost = 0.5;
     liveCollection.aggregate.days[0]!.models[0]!.totalCost = 0.5;
     liveCollection.aggregate.days[0]!.models[0]!.agents[0]!.totalCost = 0.5;
+    liveCollection.spendPeaks.last7Days!.totalCost = 0.5;
+    liveCollection.spendPeaks.last30Days!.totalCost = 0.5;
     requestMock.mockImplementation(async (query, variables) => {
       if (query.includes("query CcusageCollection")) {
         return {
