@@ -176,7 +176,7 @@ export function AppsPage() {
                   />
                 </div>
               </CardContent>
-              <CardFooter className="justify-end">
+              <CardFooter className="mt-auto justify-end">
                 <Button asChild>
                   <Link href={`/apps/${app.id}`}>{t("openApp")}</Link>
                 </Button>

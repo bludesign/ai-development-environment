@@ -79,4 +79,31 @@ describe("AppsPage", () => {
     expect(worktreeLinks[0]?.textContent).toContain("Dirty worktrees");
     expect(worktreeLinks[1]?.textContent).toContain("Worktrees");
   });
+
+  test("anchors each footer to the bottom of its stretched grid card", async () => {
+    request.mockResolvedValue({
+      apps: [
+        app("first-app", "First app", {
+          worktrees: 1,
+          dirtyWorktrees: 0,
+        }),
+        app("second-app", "Second app", {
+          worktrees: 2,
+          dirtyWorktrees: 1,
+        }),
+      ],
+      codebaseOverview: { repositories: [] },
+    } as never);
+
+    render(<AppsPage />);
+
+    const firstCard = (
+      await screen.findByText("First app")
+    ).closest<HTMLElement>('[data-slot="card"]');
+    const footer = firstCard?.querySelector<HTMLElement>(
+      '[data-slot="card-footer"]',
+    );
+
+    expect(footer?.className.split(/\s+/)).toContain("mt-auto");
+  });
 });
