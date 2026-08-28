@@ -55,8 +55,46 @@ const cancellableJob = (job: { status: string } | null | undefined) =>
 const RESTART_DELAY_MS = 1_000;
 const STABLE_ATTEMPT_MS = 60_000;
 const EXPORT_FORMAT = "aide.command.export";
-const EXPORT_SCHEMA_VERSION = 1;
+const EXPORT_SCHEMA_VERSION = 2;
 const MAX_IMPORT_BYTES = 2 * 1024 * 1024;
+
+const definitionInclude = () => ({
+  targetAgent: true,
+  repositories: {
+    include: { repository: true },
+    orderBy: [{ createdAt: "asc" as const }, { repositoryId: "asc" as const }],
+  },
+});
+
+type DefinitionWithRepositories = {
+  repositories?: Array<{
+    repositoryId: string;
+    repository: {
+      id: string;
+      canonicalOrigin: string;
+      name: string;
+      [key: string]: unknown;
+    };
+  }>;
+  [key: string]: unknown;
+};
+
+const commandDefinitionResult = <T extends DefinitionWithRepositories>(
+  definition: T,
+) => {
+  const { repositories = [], ...value } = definition;
+  const assignments = Array.isArray(repositories) ? repositories : [];
+  const targetRepositories = assignments.map((entry) => entry.repository);
+  return {
+    ...value,
+    targetRepositoryIds: assignments.map((entry) => entry.repositoryId),
+    targetRepositories,
+    targetRepositoryId:
+      assignments.length === 1 ? assignments[0]?.repositoryId : null,
+    targetRepository:
+      targetRepositories.length === 1 ? targetRepositories[0] : null,
+  };
+};
 
 export type CommandDefinitionInput = {
   name: string;
@@ -64,6 +102,8 @@ export type CommandDefinitionInput = {
   script: string;
   targetKind: string;
   targetAgentId?: string | null;
+  targetRepositoryIds?: string[] | null;
+  /** @deprecated Use targetRepositoryIds. */
   targetRepositoryId?: string | null;
   restartPolicy?: string | null;
   restartLimit?: number | null;
@@ -406,19 +446,21 @@ export class CommandsService {
 
   async listDefinitions(includeArchived = false) {
     const prisma = await getPrismaClient();
-    return prisma.commandDefinition.findMany({
+    const definitions = await prisma.commandDefinition.findMany({
       where: includeArchived ? {} : { archivedAt: null },
-      include: { targetAgent: true, targetRepository: true },
+      include: definitionInclude(),
       orderBy: [{ archivedAt: "asc" }, { name: "asc" }],
     });
+    return definitions.map(commandDefinitionResult);
   }
 
   async getDefinition(id: string) {
     const prisma = await getPrismaClient();
-    return prisma.commandDefinition.findUnique({
+    const definition = await prisma.commandDefinition.findUnique({
       where: { id },
-      include: { targetAgent: true, targetRepository: true },
+      include: definitionInclude(),
     });
+    return definition ? commandDefinitionResult(definition) : null;
   }
 
   private normalizeDefinition(input: CommandDefinitionInput) {
@@ -440,6 +482,21 @@ export class CommandsService {
     }
     const needsAgent = targetKind === "SPECIFIC_AGENT_HOME";
     const needsRepository = targetKind === "REPOSITORY_WORKTREE";
+    if (
+      input.targetRepositoryIds !== undefined &&
+      input.targetRepositoryIds !== null &&
+      input.targetRepositoryId
+    ) {
+      throw new Error(
+        "Use targetRepositoryIds or the deprecated targetRepositoryId, not both",
+      );
+    }
+    const rawRepositoryIds =
+      input.targetRepositoryIds ??
+      (input.targetRepositoryId ? [input.targetRepositoryId] : []);
+    const targetRepositoryIds = [
+      ...new Set(rawRepositoryIds.map((id) => id.trim()).filter(Boolean)),
+    ];
     if (needsAgent !== Boolean(input.targetAgentId)) {
       throw new Error(
         needsAgent
@@ -447,11 +504,11 @@ export class CommandsService {
           : "This target scope does not accept a specific agent",
       );
     }
-    if (needsRepository !== Boolean(input.targetRepositoryId)) {
+    if (needsRepository !== Boolean(targetRepositoryIds.length)) {
       throw new Error(
         needsRepository
-          ? "A repository-worktree command requires a repository"
-          : "This target scope does not accept a repository",
+          ? "A repository-worktree command requires at least one repository"
+          : "This target scope does not accept repositories",
       );
     }
     const concurrency = enumValue(
@@ -465,7 +522,7 @@ export class CommandsService {
       script: text(input.script, "Script", 1_000_000),
       targetKind,
       targetAgentId: input.targetAgentId ?? null,
-      targetRepositoryId: input.targetRepositoryId ?? null,
+      targetRepositoryIds,
       restartPolicy,
       restartLimit,
       concurrency,
@@ -488,25 +545,54 @@ export class CommandsService {
     };
   }
 
+  private async assertRepositoriesExist(repositoryIds: string[]) {
+    if (!repositoryIds.length) return;
+    const prisma = await getPrismaClient();
+    const count = await prisma.codebaseRepository.count({
+      where: { id: { in: repositoryIds } },
+    });
+    if (count !== repositoryIds.length) {
+      throw new Error("One or more selected repositories do not exist");
+    }
+  }
+
   async createDefinition(input: CommandDefinitionInput) {
     const prisma = await getPrismaClient();
+    const { targetRepositoryIds, ...data } = this.normalizeDefinition(input);
+    await this.assertRepositoriesExist(targetRepositoryIds);
     const definition = await prisma.commandDefinition.create({
-      data: { id: randomUUID(), ...this.normalizeDefinition(input) },
-      include: { targetAgent: true, targetRepository: true },
+      data: {
+        id: randomUUID(),
+        ...data,
+        repositories: {
+          create: targetRepositoryIds.map((repositoryId) => ({ repositoryId })),
+        },
+      },
+      include: definitionInclude(),
     });
-    publishDefinition(definition);
-    return definition;
+    const result = commandDefinitionResult(definition);
+    publishDefinition(result);
+    return result;
   }
 
   async updateDefinition(id: string, input: CommandDefinitionInput) {
     const prisma = await getPrismaClient();
+    const { targetRepositoryIds, ...data } = this.normalizeDefinition(input);
+    await this.assertRepositoriesExist(targetRepositoryIds);
     const definition = await prisma.commandDefinition.update({
       where: { id },
-      data: this.normalizeDefinition(input),
-      include: { targetAgent: true, targetRepository: true },
+      data: {
+        ...data,
+        repositories: {
+          deleteMany: {},
+          create: targetRepositoryIds.map((repositoryId) => ({ repositoryId })),
+        },
+      },
+      include: definitionInclude(),
     });
-    publishDefinition(definition);
-    return definition;
+    const result = commandDefinitionResult(definition);
+    publishDefinition(result);
+    return result;
   }
 
   async deleteDefinition(id: string) {
@@ -540,7 +626,10 @@ export class CommandsService {
         // Identifiers are per-install, so a scoped target travels by name and
         // is resolved again on import.
         targetAgentName: definition.targetAgent?.name ?? null,
-        targetRepositoryName: definition.targetRepository?.name ?? null,
+        targetRepositories: definition.targetRepositories.map((repository) => ({
+          canonicalOrigin: repository.canonicalOrigin,
+          name: repository.name,
+        })),
         restartPolicy: definition.restartPolicy,
         restartLimit: definition.restartLimit,
         concurrency: definition.concurrency,
@@ -554,7 +643,7 @@ export class CommandsService {
   }
 
   /**
-   * Matches an exported agent or repository target to a local record. A target
+   * Matches exported agent or repository targets to local records. A target
    * that no longer exists widens to the unscoped equivalent rather than
    * failing the import, which is the usual outcome across two installs.
    *
@@ -584,17 +673,74 @@ export class CommandsService {
         ? {
             targetKind,
             targetAgentId: agent.id,
-            targetRepositoryId: null,
+            targetRepositoryIds: [],
             widened: false,
           }
         : {
             targetKind: "ANY_AGENT_HOME" as const,
             targetAgentId: null,
-            targetRepositoryId: null,
+            targetRepositoryIds: [],
             widened: true,
           };
     }
     if (targetKind === "REPOSITORY_WORKTREE") {
+      const exportedTargets = Array.isArray(command.targetRepositories)
+        ? command.targetRepositories.map((value) =>
+            importObject(value, "Exported target repository"),
+          )
+        : [];
+      if (exportedTargets.length) {
+        const repositories = await prisma.codebaseRepository.findMany({
+          where: {
+            OR: exportedTargets.flatMap((value) => {
+              const canonicalOrigin = importedText(value.canonicalOrigin);
+              const name = importedText(value.name);
+              return [
+                ...(canonicalOrigin ? [{ canonicalOrigin }] : []),
+                ...(name ? [{ name }] : []),
+              ];
+            }),
+          },
+          orderBy: { id: "asc" },
+        });
+        const matched = exportedTargets
+          .map((value) => {
+            const canonicalOrigin = importedText(value.canonicalOrigin);
+            const name = importedText(value.name);
+            return (
+              repositories.find(
+                (repository) =>
+                  canonicalOrigin &&
+                  repository.canonicalOrigin === canonicalOrigin,
+              ) ??
+              repositories.find(
+                (repository) => name && repository.name === name,
+              )
+            );
+          })
+          .filter((repository): repository is (typeof repositories)[number] =>
+            Boolean(repository),
+          );
+        const targetRepositoryIds = [
+          ...new Set(matched.map((repository) => repository.id)),
+        ];
+        return targetRepositoryIds.length
+          ? {
+              targetKind,
+              targetAgentId: null,
+              targetRepositoryIds,
+              widened: matched.length !== exportedTargets.length,
+            }
+          : {
+              targetKind: "ANY_WORKTREE" as const,
+              targetAgentId: null,
+              targetRepositoryIds: [],
+              widened: true,
+            };
+      }
+      // Schema version 1 exported one repository by name. Bare legacy command
+      // objects are accepted too, so the field rather than the envelope is the
+      // compatibility signal.
       const name = importedText(command.targetRepositoryName);
       const repository = name
         ? await prisma.codebaseRepository.findFirst({
@@ -606,20 +752,20 @@ export class CommandsService {
         ? {
             targetKind,
             targetAgentId: null,
-            targetRepositoryId: repository.id,
+            targetRepositoryIds: [repository.id],
             widened: false,
           }
         : {
             targetKind: "ANY_WORKTREE" as const,
             targetAgentId: null,
-            targetRepositoryId: null,
+            targetRepositoryIds: [],
             widened: true,
           };
     }
     return {
       targetKind,
       targetAgentId: null,
-      targetRepositoryId: null,
+      targetRepositoryIds: [],
       widened: false,
     };
   }
@@ -681,15 +827,16 @@ export class CommandsService {
     const definition = await prisma.commandDefinition.update({
       where: { id },
       data: { archivedAt: archived ? new Date() : null },
-      include: { targetAgent: true, targetRepository: true },
+      include: definitionInclude(),
     });
-    publishDefinition(definition);
-    return definition;
+    const result = commandDefinitionResult(definition);
+    publishDefinition(result);
+    return result;
   }
 
   async eligibleForAgent(agentId: string) {
     const prisma = await getPrismaClient();
-    return prisma.commandDefinition.findMany({
+    const definitions = await prisma.commandDefinition.findMany({
       where: {
         archivedAt: null,
         OR: [
@@ -697,9 +844,10 @@ export class CommandsService {
           { targetKind: "SPECIFIC_AGENT_HOME", targetAgentId: agentId },
         ],
       },
-      include: { targetAgent: true, targetRepository: true },
+      include: definitionInclude(),
       orderBy: { name: "asc" },
     });
+    return definitions.map(commandDefinitionResult);
   }
 
   async eligibleForWorktree(worktreeId: string) {
@@ -709,20 +857,23 @@ export class CommandsService {
       select: { codebase: { select: { repositoryId: true } } },
     });
     if (!worktree) throw new Error("Worktree not found");
-    return prisma.commandDefinition.findMany({
+    const definitions = await prisma.commandDefinition.findMany({
       where: {
         archivedAt: null,
         OR: [
           { targetKind: "ANY_WORKTREE" },
           {
             targetKind: "REPOSITORY_WORKTREE",
-            targetRepositoryId: worktree.codebase.repositoryId,
+            repositories: {
+              some: { repositoryId: worktree.codebase.repositoryId },
+            },
           },
         ],
       },
-      include: { targetAgent: true, targetRepository: true },
+      include: definitionInclude(),
       orderBy: { name: "asc" },
     });
+    return definitions.map(commandDefinitionResult);
   }
 
   async listRuns(input: {
@@ -899,7 +1050,7 @@ export class CommandsService {
     definition: {
       targetKind: string;
       targetAgentId: string | null;
-      targetRepositoryId: string | null;
+      repositories: Array<{ repositoryId: string }>;
     },
     input: Pick<StartCommandRunInput, "agentId" | "worktreeId">,
   ) {
@@ -937,7 +1088,10 @@ export class CommandsService {
       throw new Error("Worktree is unavailable");
     if (
       definition.targetKind === "REPOSITORY_WORKTREE" &&
-      definition.targetRepositoryId !== worktree.codebase.repositoryId
+      !definition.repositories.some(
+        (repository) =>
+          repository.repositoryId === worktree.codebase.repositoryId,
+      )
     ) {
       throw new Error(
         "This command is not eligible for the selected repository",
@@ -964,6 +1118,7 @@ export class CommandsService {
     if (existing) return this.getRun(existing.id);
     const definition = await prisma.commandDefinition.findUnique({
       where: { id: input.commandId },
+      include: definitionInclude(),
     });
     if (!definition || definition.archivedAt)
       throw new Error("Command not found");
@@ -994,7 +1149,7 @@ export class CommandsService {
               definition.blocksGitOperations ||
               input.blocksGitOperations === true,
             snapshotNotificationsEnabled: definition.notificationsEnabled,
-            snapshotJson: JSON.stringify(definition),
+            snapshotJson: JSON.stringify(commandDefinitionResult(definition)),
             agentId: agent.id,
             worktreeId: worktree?.id ?? null,
             agentName: agent.name,
@@ -1039,7 +1194,7 @@ export class CommandsService {
       {
         targetKind,
         targetAgentId: null,
-        targetRepositoryId: null,
+        repositories: [],
       },
       input,
     );

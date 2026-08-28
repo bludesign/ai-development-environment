@@ -13,6 +13,89 @@ afterEach(() => {
 });
 
 describe("commands migration", () => {
+  test("migrates singular repository targets into assignments", () => {
+    database = new Database(":memory:");
+    database.pragma("foreign_keys = ON");
+    database.exec(`
+      CREATE TABLE "Agent" ("id" TEXT NOT NULL PRIMARY KEY);
+      CREATE TABLE "CodebaseRepository" (
+        "id" TEXT NOT NULL PRIMARY KEY,
+        "canonicalOrigin" TEXT NOT NULL,
+        "name" TEXT NOT NULL
+      );
+      CREATE TABLE "CommandDefinition" (
+        "id" TEXT NOT NULL PRIMARY KEY,
+        "name" TEXT NOT NULL,
+        "description" TEXT NOT NULL DEFAULT '',
+        "script" TEXT NOT NULL,
+        "targetKind" TEXT NOT NULL,
+        "targetAgentId" TEXT,
+        "targetRepositoryId" TEXT,
+        "restartPolicy" TEXT NOT NULL DEFAULT 'NEVER',
+        "restartLimit" INTEGER DEFAULT 3,
+        "concurrency" TEXT NOT NULL DEFAULT 'NON_EXCLUSIVE',
+        "blocksGitOperations" BOOLEAN NOT NULL DEFAULT false,
+        "quickActionEnabled" BOOLEAN NOT NULL DEFAULT false,
+        "quickActionIconKey" TEXT NOT NULL DEFAULT 'terminal',
+        "quickActionButtonVariant" TEXT NOT NULL DEFAULT 'default',
+        "notificationsEnabled" BOOLEAN NOT NULL DEFAULT true,
+        "archivedAt" DATETIME,
+        "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        "updatedAt" DATETIME NOT NULL,
+        FOREIGN KEY ("targetAgentId") REFERENCES "Agent" ("id") ON DELETE SET NULL,
+        FOREIGN KEY ("targetRepositoryId") REFERENCES "CodebaseRepository" ("id") ON DELETE SET NULL
+      );
+      INSERT INTO "CodebaseRepository" ("id", "canonicalOrigin", "name")
+      VALUES ('repository-1', 'github.com/acme/web', 'web');
+      INSERT INTO "CommandDefinition" (
+        "id", "name", "script", "targetKind", "targetRepositoryId", "updatedAt"
+      ) VALUES (
+        'command-1', 'Test', 'npm test', 'REPOSITORY_WORKTREE',
+        'repository-1', CURRENT_TIMESTAMP
+      );
+    `);
+
+    database.exec(
+      readFileSync(
+        resolve(
+          process.cwd(),
+          "prisma/migrations/20260827120000_add_command_repository_targets/migration.sql",
+        ),
+        "utf8",
+      ),
+    );
+
+    expect(
+      database.prepare(`SELECT * FROM "CommandDefinitionRepository"`).all(),
+    ).toEqual([
+      {
+        commandId: "command-1",
+        repositoryId: "repository-1",
+        createdAt: expect.any(String),
+      },
+    ]);
+    expect(
+      database.prepare(`PRAGMA table_info("CommandDefinition")`).all(),
+    ).not.toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ name: "targetRepositoryId" }),
+      ]),
+    );
+    database
+      .prepare(`DELETE FROM "CodebaseRepository" WHERE "id" = ?`)
+      .run("repository-1");
+    expect(
+      database
+        .prepare(`SELECT COUNT(*) AS count FROM "CommandDefinitionRepository"`)
+        .get(),
+    ).toEqual({ count: 0 });
+    expect(
+      database
+        .prepare(`SELECT COUNT(*) AS count FROM "CommandDefinition"`)
+        .get(),
+    ).toEqual({ count: 1 });
+  });
+
   test("adds command storage and only cancels active legacy tunnel jobs", () => {
     database = new Database(":memory:");
     database.exec(`

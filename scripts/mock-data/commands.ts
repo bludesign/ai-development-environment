@@ -274,7 +274,12 @@ export async function seedCommands(prisma: PrismaClient): Promise<void> {
       description: "Runs the full test suite in the selected worktree.",
       script: "npm test",
       targetKind: "REPOSITORY_WORKTREE",
-      targetRepositoryId: ids.repositories.web,
+      repositories: {
+        create: [
+          { repositoryId: ids.repositories.api },
+          { repositoryId: ids.repositories.ios },
+        ],
+      },
       restartPolicy: "ON_FAILURE",
       restartLimit: 2,
       quickActionEnabled: true,

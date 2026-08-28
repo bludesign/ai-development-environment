@@ -672,7 +672,7 @@ describe("command target and output authorization", () => {
       script: "npm run dev",
       targetKind: "ANY_AGENT_HOME",
       targetAgentId: null,
-      targetRepositoryId: null,
+      repositories: [],
       restartPolicy: "ON_FAILURE",
       restartLimit: 3,
       concurrency: "NON_EXCLUSIVE",
@@ -736,8 +736,13 @@ describe("command target and output authorization", () => {
     const snapshot = JSON.parse(
       String(create.mock.calls[0][0].data.snapshotJson),
     );
+    const { repositories: _repositories, ...persistedDefinition } = definition;
     expect(snapshot).toEqual({
-      ...definition,
+      ...persistedDefinition,
+      targetRepositoryIds: [],
+      targetRepositories: [],
+      targetRepositoryId: null,
+      targetRepository: null,
       createdAt: definition.createdAt.toISOString(),
       updatedAt: definition.updatedAt.toISOString(),
     });
@@ -1068,7 +1073,9 @@ describe("command target and output authorization", () => {
           OR: expect.arrayContaining([
             expect.objectContaining({
               targetKind: "REPOSITORY_WORKTREE",
-              targetRepositoryId: "repository-1",
+              repositories: {
+                some: { repositoryId: "repository-1" },
+              },
             }),
           ]),
         }),
@@ -1713,9 +1720,25 @@ describe("CommandsService command definition portability", () => {
           script: "make build",
           targetKind: "REPOSITORY_WORKTREE",
           targetAgentId: null,
-          targetRepositoryId: "repository-1",
           targetAgent: null,
-          targetRepository: { id: "repository-1", name: "storefront" },
+          repositories: [
+            {
+              repositoryId: "repository-1",
+              repository: {
+                id: "repository-1",
+                canonicalOrigin: "github.com/acme/storefront",
+                name: "storefront",
+              },
+            },
+            {
+              repositoryId: "repository-2",
+              repository: {
+                id: "repository-2",
+                canonicalOrigin: "github.com/acme/api",
+                name: "api",
+              },
+            },
+          ],
           restartPolicy: "ON_FAILURE",
           restartLimit: 2,
           concurrency: "NON_EXCLUSIVE",
@@ -1733,11 +1756,18 @@ describe("CommandsService command definition portability", () => {
     );
 
     expect(exported.format).toBe("aide.command.export");
+    expect(exported.schemaVersion).toBe(2);
     expect(exported.command).toMatchObject({
       name: "Build",
       script: "make build",
       targetKind: "REPOSITORY_WORKTREE",
-      targetRepositoryName: "storefront",
+      targetRepositories: [
+        {
+          canonicalOrigin: "github.com/acme/storefront",
+          name: "storefront",
+        },
+        { canonicalOrigin: "github.com/acme/api", name: "api" },
+      ],
       restartPolicy: "ON_FAILURE",
       restartLimit: 2,
       blocksGitOperations: true,
@@ -1797,7 +1827,7 @@ describe("CommandsService command definition portability", () => {
 
     expect(create.mock.calls[0][0].data).toMatchObject({
       targetKind: "ANY_WORKTREE",
-      targetRepositoryId: null,
+      repositories: { create: [] },
     });
   });
 
@@ -1897,6 +1927,163 @@ describe("CommandsService command definition portability", () => {
     await expect(
       service.importDefinition({ payload: "x".repeat(2 * 1024 * 1024 + 1) }),
     ).rejects.toThrow("too large");
+  });
+
+  test("stores unique repository assignments and validates every repository", async () => {
+    const count = vi.fn().mockResolvedValue(2);
+    const create = vi.fn().mockImplementation(({ data }) => ({
+      id: data.id,
+      ...data,
+      repositories: [
+        {
+          repositoryId: "repository-1",
+          repository: {
+            id: "repository-1",
+            canonicalOrigin: "github.com/acme/web",
+            name: "web",
+          },
+        },
+        {
+          repositoryId: "repository-2",
+          repository: {
+            id: "repository-2",
+            canonicalOrigin: "github.com/acme/api",
+            name: "api",
+          },
+        },
+      ],
+    }));
+    getPrismaClient.mockResolvedValue({
+      codebaseRepository: { count },
+      commandDefinition: { create },
+    });
+
+    const result = await new CommandsService(agentControl()).createDefinition({
+      name: "Test",
+      script: "npm test",
+      targetKind: "REPOSITORY_WORKTREE",
+      targetRepositoryIds: ["repository-1", "repository-2", "repository-1"],
+    });
+
+    expect(count).toHaveBeenCalledWith({
+      where: { id: { in: ["repository-1", "repository-2"] } },
+    });
+    expect(create.mock.calls[0][0].data.repositories).toEqual({
+      create: [
+        { repositoryId: "repository-1" },
+        { repositoryId: "repository-2" },
+      ],
+    });
+    expect(result.targetRepositoryIds).toEqual([
+      "repository-1",
+      "repository-2",
+    ]);
+    expect(result.targetRepositoryId).toBeNull();
+  });
+
+  test("rejects missing repositories and assignments on other scopes", async () => {
+    getPrismaClient.mockResolvedValue({
+      codebaseRepository: { count: vi.fn().mockResolvedValue(1) },
+      commandDefinition: { create: vi.fn() },
+    });
+    const service = new CommandsService(agentControl());
+
+    await expect(
+      service.createDefinition({
+        name: "Test",
+        script: "npm test",
+        targetKind: "REPOSITORY_WORKTREE",
+        targetRepositoryIds: ["repository-1", "missing"],
+      }),
+    ).rejects.toThrow("do not exist");
+    await expect(
+      service.createDefinition({
+        name: "Test",
+        script: "npm test",
+        targetKind: "ANY_WORKTREE",
+        targetRepositoryIds: ["repository-1"],
+      }),
+    ).rejects.toThrow("does not accept repositories");
+  });
+
+  test("retains partial version 2 repository matches and disables quick action", async () => {
+    const create = vi
+      .fn()
+      .mockImplementation(({ data }) => ({ id: "command-8", ...data }));
+    getPrismaClient.mockResolvedValue({
+      codebaseRepository: {
+        findMany: vi.fn().mockResolvedValue([
+          {
+            id: "repository-1",
+            canonicalOrigin: "github.com/acme/web",
+            name: "web-renamed",
+          },
+        ]),
+        count: vi.fn().mockResolvedValue(1),
+      },
+      commandDefinition: { create },
+    });
+
+    await new CommandsService(agentControl()).importDefinition({
+      payload: {
+        format: "aide.command.export",
+        schemaVersion: 2,
+        command: {
+          name: "Test",
+          script: "npm test",
+          targetKind: "REPOSITORY_WORKTREE",
+          targetRepositories: [
+            { canonicalOrigin: "github.com/acme/web", name: "web" },
+            { canonicalOrigin: "github.com/acme/missing", name: "missing" },
+          ],
+          quickActionEnabled: true,
+        },
+      },
+    });
+
+    expect(create.mock.calls[0][0].data).toMatchObject({
+      targetKind: "REPOSITORY_WORKTREE",
+      quickActionEnabled: false,
+      repositories: { create: [{ repositoryId: "repository-1" }] },
+    });
+  });
+
+  test("accepts any repository in the launch allow-list", async () => {
+    getPrismaClient.mockResolvedValue({
+      worktree: {
+        findUnique: vi.fn().mockResolvedValue({
+          id: "worktree-2",
+          missingAt: null,
+          codebase: {
+            repositoryId: "repository-2",
+            agent: { capabilitiesJson: '["command.run"]' },
+            repository: { id: "repository-2" },
+          },
+        }),
+      },
+    });
+    const resolveTarget = (
+      new CommandsService(agentControl()) as unknown as {
+        resolveTarget: (
+          definition: Record<string, unknown>,
+          target: Record<string, unknown>,
+        ) => Promise<unknown>;
+      }
+    ).resolveTarget.bind(new CommandsService(agentControl()));
+
+    await expect(
+      resolveTarget(
+        {
+          targetKind: "REPOSITORY_WORKTREE",
+          targetAgentId: null,
+          repositories: [
+            { repositoryId: "repository-1" },
+            { repositoryId: "repository-2" },
+          ],
+        },
+        { worktreeId: "worktree-2" },
+      ),
+    ).resolves.toBeTruthy();
   });
 
   test("keeps commands that have run history out of delete", async () => {

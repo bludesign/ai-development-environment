@@ -25,9 +25,15 @@ const definitionInput = z.object({
     "REPOSITORY_WORKTREE",
   ]),
   targetAgentId: z.string().nullable().optional(),
+  targetRepositoryIds: z.array(z.string().min(1)).nullable().optional(),
+  /** @deprecated Use targetRepositoryIds. */
   targetRepositoryId: z.string().nullable().optional(),
   restartPolicy: z.enum(["NEVER", "ON_FAILURE", "ALWAYS"]).default("NEVER"),
   restartLimit: z.number().int().min(0).max(100).default(3),
+  concurrency: z
+    .enum(["EXCLUSIVE", "NON_EXCLUSIVE", "EXCLUDED"])
+    .default("NON_EXCLUSIVE"),
+  blocksGitOperations: z.boolean().default(false),
   quickActionEnabled: z.boolean().default(false),
   quickActionIconKey: z.string().default("terminal"),
   quickActionButtonVariant: z.string().default("default"),

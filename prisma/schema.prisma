@@ -324,7 +324,7 @@ model CodebaseRepository {
   githubWorkflowRuns     GitHubWorkflowRunObservation[]
   githubPollingState     GitHubActionsPollingState?
   quickActionWorkflows   WorkflowQuickActionRepository[]
-  commandDefinitions     CommandDefinition[]
+  commandDefinitions     CommandDefinitionRepository[]
   apps                   AppRepository[]
   runs                   AgentRun[]
   builds                 Build[]
@@ -2881,7 +2881,6 @@ model CommandDefinition {
   script                   String
   targetKind               String
   targetAgentId            String?
-  targetRepositoryId       String?
   restartPolicy            String              @default("NEVER")
   restartLimit             Int?                @default(3)
   concurrency              String              @default("NON_EXCLUSIVE")
@@ -2894,12 +2893,22 @@ model CommandDefinition {
   createdAt                DateTime            @default(now())
   updatedAt                DateTime            @updatedAt
   targetAgent              Agent?              @relation("CommandDefinitionTargetAgent", fields: [targetAgentId], references: [id], onDelete: SetNull)
-  targetRepository         CodebaseRepository? @relation(fields: [targetRepositoryId], references: [id], onDelete: SetNull)
+  repositories             CommandDefinitionRepository[]
   runs                     CommandRun[]
 
   @@index([archivedAt, updatedAt])
   @@index([targetKind, targetAgentId])
-  @@index([targetKind, targetRepositoryId])
+}
+
+model CommandDefinitionRepository {
+  commandId    String
+  repositoryId String
+  createdAt    DateTime           @default(now())
+  command      CommandDefinition  @relation(fields: [commandId], references: [id], onDelete: Cascade)
+  repository   CodebaseRepository @relation(fields: [repositoryId], references: [id], onDelete: Cascade)
+
+  @@id([commandId, repositoryId])
+  @@index([repositoryId, commandId])
 }
 
 model CommandRun {

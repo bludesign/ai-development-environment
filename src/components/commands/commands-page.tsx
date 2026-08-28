@@ -861,6 +861,13 @@ export function CommandsPage() {
                   <Badge variant="outline">
                     {t(commandTargetKey(definition.targetKind))}
                   </Badge>
+                  {definition.targetKind === "REPOSITORY_WORKTREE" && (
+                    <Badge variant="secondary">
+                      {t("selectedRepositories", {
+                        count: definition.targetRepositoryIds.length,
+                      })}
+                    </Badge>
+                  )}
                   <Badge variant="outline">
                     {t(commandRestartKey(definition.restartPolicy))}
                   </Badge>

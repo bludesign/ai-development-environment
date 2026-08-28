@@ -37,6 +37,19 @@ afterEach(() => {
 });
 
 describe("CommandEditor", () => {
+  const chooseRepositoryScope = async () => {
+    fireEvent.pointerDown(screen.getAllByRole("combobox")[0]!, {
+      button: 0,
+      ctrlKey: false,
+      pointerType: "mouse",
+    });
+    fireEvent.click(
+      await screen.findByRole("option", {
+        name: "Worktree in selected repositories",
+      }),
+    );
+  };
+
   test("shows an icon-free command card and a quick-action icon picker", async () => {
     render(<CommandEditor />);
 
@@ -107,6 +120,93 @@ describe("CommandEditor", () => {
     await waitFor(() => expect(request).toHaveBeenCalledTimes(2));
     expect(request.mock.calls[1]?.[1]).toEqual({
       input: expect.objectContaining({ blocksGitOperations: true }),
+    });
+  });
+
+  test("requires and saves multiple selected repositories", async () => {
+    request.mockResolvedValueOnce({
+      agents: [],
+      codebaseOverview: {
+        repositories: [
+          { id: "repo-web", name: "web", displayOrigin: "github.com/acme/web" },
+          { id: "repo-ios", name: "ios", displayOrigin: "github.com/acme/ios" },
+        ],
+      },
+    } as never);
+    render(<CommandEditor />);
+    await chooseRepositoryScope();
+    await screen.findByText("github.com/acme/web");
+
+    expect(screen.getByText("Select at least one repository.")).toBeDefined();
+    expect(
+      screen.getByRole("button", { name: "Save" }).hasAttribute("disabled"),
+    ).toBe(true);
+
+    fireEvent.click(
+      screen.getByRole("checkbox", { name: "web · github.com/acme/web" }),
+    );
+    fireEvent.click(
+      screen.getByRole("checkbox", { name: "ios · github.com/acme/ios" }),
+    );
+    expect(screen.getByText("2 selected")).toBeDefined();
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+
+    await waitFor(() => expect(request).toHaveBeenCalledTimes(2));
+    expect(request.mock.calls[1]?.[1]).toEqual({
+      input: expect.objectContaining({
+        targetKind: "REPOSITORY_WORKTREE",
+        targetRepositoryIds: ["repo-web", "repo-ios"],
+      }),
+    });
+  });
+
+  test("loads and edits an existing multi-repository definition", async () => {
+    request.mockResolvedValueOnce({
+      agents: [],
+      codebaseOverview: {
+        repositories: [
+          { id: "repo-web", name: "web", displayOrigin: "github.com/acme/web" },
+          { id: "repo-ios", name: "ios", displayOrigin: "github.com/acme/ios" },
+        ],
+      },
+      commandDefinition: {
+        id: "command-1",
+        name: "Test",
+        description: "",
+        script: "npm test",
+        targetKind: "REPOSITORY_WORKTREE",
+        targetAgentId: null,
+        targetAgent: null,
+        targetRepositoryIds: ["repo-web", "repo-ios"],
+        targetRepositories: [],
+        restartPolicy: "NEVER",
+        restartLimit: 3,
+        concurrency: "NON_EXCLUSIVE",
+        blocksGitOperations: false,
+        quickActionEnabled: false,
+        quickActionIconKey: "terminal",
+        quickActionButtonVariant: "default",
+        notificationsEnabled: true,
+        archivedAt: null,
+        createdAt: "2026-08-27T00:00:00Z",
+        updatedAt: "2026-08-27T00:00:00Z",
+      },
+    } as never);
+
+    render(<CommandEditor commandId="command-1" />);
+    await screen.findByDisplayValue("Test");
+    expect(await screen.findByText("2 selected")).toBeDefined();
+    const ios = screen.getByRole("checkbox", {
+      name: "ios · github.com/acme/ios",
+    });
+    expect(ios.getAttribute("data-state")).toBe("checked");
+    fireEvent.click(ios);
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+
+    await waitFor(() => expect(request).toHaveBeenCalledTimes(2));
+    expect(request.mock.calls[1]?.[1]).toEqual({
+      id: "command-1",
+      input: expect.objectContaining({ targetRepositoryIds: ["repo-web"] }),
     });
   });
 });
