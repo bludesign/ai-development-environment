@@ -13,6 +13,15 @@ const repoRoot = path.resolve(
 const standaloneDirectory = path.join(repoRoot, ".next", "standalone");
 const appSecret = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=";
 
+const sensitiveLogValue = new RegExp(
+  String.raw`((?:"?(?:authorization|password|accessToken|refreshToken|idToken|sessionToken|clientSecret|secret|privateKey)"?)\s*:\s*)(?:"(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'|[^,\n}\]]+)`,
+  "gi",
+);
+
+function redactSensitiveLogOutput(output) {
+  return output.replace(sensitiveLogValue, '$1"[REDACTED]"');
+}
+
 function freePort() {
   return new Promise((resolve, reject) => {
     const server = net.createServer();
@@ -148,7 +157,9 @@ async function scenario(databaseUrl, storageType) {
     return result.credentialStoreStatus;
   } catch (error) {
     throw new Error(
-      `${error instanceof Error ? error.message : error}\n${logs}`,
+      redactSensitiveLogOutput(
+        `${error instanceof Error ? error.message : error}\n${logs}`,
+      ),
     );
   } finally {
     await stop(child);

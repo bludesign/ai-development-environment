@@ -22,6 +22,7 @@ import {
   oauthAuthenticationEnabled,
   passwordAuthenticationEnabled,
 } from "./auth-config";
+import { logBetterAuth } from "./auth-logger";
 import { authDatabaseHooks } from "./registration";
 
 const managementStatements = {
@@ -86,7 +87,10 @@ function createAuth(
               clientSecret: runtime.provider.clientSecret,
               scopes: runtime.provider.scopes,
               discoveryUrl: runtime.provider.discoveryUrl,
-              accountIssuer: runtime.provider.issuer,
+              // Better Auth 1.7 keys accounts by issuer and provider subject.
+              // Existing releases keyed them by providerId and subject, so keep
+              // that stable namespace across the required issuer backfill.
+              accountIssuer: `local:oauth:${runtime.provider.providerId}`,
               authorizationUrl: runtime.provider.authorizationUrl,
               tokenUrl: runtime.provider.tokenUrl,
               userInfoUrl: runtime.provider.userInfoUrl,
@@ -120,6 +124,7 @@ function createAuth(
       return origin && isTrustedOrigin(runtime.origins, origin) ? [origin] : [];
     },
     secret: runtime.secret,
+    logger: { log: logBetterAuth },
     advanced: {
       // Honour x-forwarded-host only when an operator has declared a proxy in
       // front. The allowlist is still what constrains the value.

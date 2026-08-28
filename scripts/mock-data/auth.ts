@@ -31,6 +31,7 @@ export async function seedAuth(prisma: PrismaClient): Promise<void> {
     data: [
       {
         id: "account-screenshot-admin",
+        issuer: "local:credential",
         accountId: "user-screenshot-admin",
         providerId: "credential",
         userId: "user-screenshot-admin",
@@ -41,6 +42,7 @@ export async function seedAuth(prisma: PrismaClient): Promise<void> {
       },
       {
         id: "account-screenshot-developer",
+        issuer: "local:oauth:company-oidc",
         accountId: "jordan-oidc-subject",
         providerId: "company-oidc",
         userId: "user-screenshot-developer",
