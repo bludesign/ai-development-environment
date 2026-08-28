@@ -49,19 +49,13 @@ import {
   type CommandDefinition,
 } from "./types";
 
-// Repository labels carry the origin as well as the name, which the default
-// single-line trigger clips. These let the trigger grow to fit instead.
-const WRAPPING_SELECT_TRIGGER =
-  "h-auto min-h-8 w-full items-start py-1.5 text-left whitespace-normal data-[size=default]:h-auto *:data-[slot=select-value]:line-clamp-none *:data-[slot=select-value]:min-w-0 *:data-[slot=select-value]:[overflow-wrap:anywhere]";
-const WRAPPING_SELECT_ITEM = "whitespace-normal [overflow-wrap:anywhere]";
-
 type Form = {
   name: string;
   description: string;
   script: string;
   targetKind: CommandDefinition["targetKind"];
   targetAgentId: string;
-  targetRepositoryId: string;
+  targetRepositoryIds: string[];
   restartPolicy: CommandDefinition["restartPolicy"];
   restartLimit: string;
   unlimitedRestarts: boolean;
@@ -79,7 +73,7 @@ const initial: Form = {
   script: "#!/bin/zsh\nset -e\n\n",
   targetKind: "ANY_WORKTREE",
   targetAgentId: "",
-  targetRepositoryId: "",
+  targetRepositoryIds: [],
   restartPolicy: "NEVER",
   restartLimit: "3",
   unlimitedRestarts: false,
@@ -135,7 +129,9 @@ export function CommandEditor({ commandId }: { commandId?: string }) {
             script: value.script,
             targetKind: value.targetKind,
             targetAgentId: value.targetAgentId ?? "",
-            targetRepositoryId: value.targetRepositoryId ?? "",
+            targetRepositoryIds:
+              value.targetRepositoryIds ??
+              (value.targetRepositoryId ? [value.targetRepositoryId] : []),
             restartPolicy: value.restartPolicy,
             restartLimit: String(value.restartLimit ?? 3),
             unlimitedRestarts: value.restartLimit === null,
@@ -155,7 +151,13 @@ export function CommandEditor({ commandId }: { commandId?: string }) {
 
   const update = <K extends keyof Form>(key: K, value: Form[K]) =>
     setForm((current) => ({ ...current, [key]: value }));
+  const validTarget =
+    (form.targetKind !== "SPECIFIC_AGENT_HOME" ||
+      Boolean(form.targetAgentId)) &&
+    (form.targetKind !== "REPOSITORY_WORKTREE" ||
+      form.targetRepositoryIds.length > 0);
   const save = async () => {
+    if (!validTarget) return;
     setSaving(true);
     try {
       const input = {
@@ -165,10 +167,10 @@ export function CommandEditor({ commandId }: { commandId?: string }) {
         targetKind: form.targetKind,
         targetAgentId:
           form.targetKind === "SPECIFIC_AGENT_HOME" ? form.targetAgentId : null,
-        targetRepositoryId:
+        targetRepositoryIds:
           form.targetKind === "REPOSITORY_WORKTREE"
-            ? form.targetRepositoryId
-            : null,
+            ? form.targetRepositoryIds
+            : [],
         restartPolicy: form.restartPolicy,
         restartLimit: form.unlimitedRestarts ? null : Number(form.restartLimit),
         concurrency: form.concurrency,
@@ -225,7 +227,7 @@ export function CommandEditor({ commandId }: { commandId?: string }) {
             {archived ? t("restore") : t("archive")}
           </Button>
         )}
-        <Button disabled={saving} onClick={() => void save()}>
+        <Button disabled={saving || !validTarget} onClick={() => void save()}>
           <Save />
           {saving ? t("saving") : t("save")}
         </Button>
@@ -328,28 +330,61 @@ export function CommandEditor({ commandId }: { commandId?: string }) {
             )}
             {form.targetKind === "REPOSITORY_WORKTREE" && (
               <div className="grid gap-2">
-                <Label>{t("repository")}</Label>
-                <Select
-                  value={form.targetRepositoryId}
-                  onValueChange={(value) =>
-                    update("targetRepositoryId", value ?? "")
-                  }
+                <div className="flex items-center justify-between gap-3">
+                  <Label id="command-repositories-label">
+                    {t("repositories")}
+                  </Label>
+                  <span className="text-xs text-muted-foreground">
+                    {t("selectedRepositories", {
+                      count: form.targetRepositoryIds.length,
+                    })}
+                  </span>
+                </div>
+                <div
+                  aria-labelledby="command-repositories-label"
+                  className="max-h-56 space-y-1 overflow-y-auto rounded-md border p-2"
+                  role="group"
                 >
-                  <SelectTrigger className={WRAPPING_SELECT_TRIGGER}>
-                    <SelectValue placeholder={t("selectRepository")} />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {repositories.map((repository) => (
-                      <SelectItem
-                        className={WRAPPING_SELECT_ITEM}
+                  {repositories.map((repository) => {
+                    const checked = form.targetRepositoryIds.includes(
+                      repository.id,
+                    );
+                    return (
+                      <label
+                        className="flex cursor-pointer items-start gap-3 rounded-sm px-2 py-2 hover:bg-muted"
                         key={repository.id}
-                        value={repository.id}
                       >
-                        {repository.name} · {repository.displayOrigin}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
+                        <Checkbox
+                          aria-label={`${repository.name} · ${repository.displayOrigin}`}
+                          checked={checked}
+                          onCheckedChange={(selected) =>
+                            update(
+                              "targetRepositoryIds",
+                              selected === true
+                                ? [...form.targetRepositoryIds, repository.id]
+                                : form.targetRepositoryIds.filter(
+                                    (id) => id !== repository.id,
+                                  ),
+                            )
+                          }
+                        />
+                        <span className="min-w-0 text-sm">
+                          <span className="block font-medium">
+                            {repository.name}
+                          </span>
+                          <span className="block text-xs text-muted-foreground [overflow-wrap:anywhere]">
+                            {repository.displayOrigin}
+                          </span>
+                        </span>
+                      </label>
+                    );
+                  })}
+                </div>
+                {form.targetRepositoryIds.length === 0 && (
+                  <p className="text-xs text-destructive">
+                    {t("repositorySelectionRequired")}
+                  </p>
+                )}
               </div>
             )}
           </CardContent>

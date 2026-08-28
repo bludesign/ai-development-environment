@@ -37,8 +37,16 @@ export type CommandDefinition = {
     | "REPOSITORY_WORKTREE";
   targetAgentId: string | null;
   targetAgent: CommandAgent | null;
-  targetRepositoryId: string | null;
-  targetRepository: { id: string; name: string; displayOrigin: string } | null;
+  targetRepositoryIds: string[];
+  targetRepositories: Array<{
+    id: string;
+    name: string;
+    displayOrigin: string;
+  }>;
+  /** @deprecated Use targetRepositoryIds. */
+  targetRepositoryId?: string | null;
+  /** @deprecated Use targetRepositories. */
+  targetRepository?: { id: string; name: string; displayOrigin: string } | null;
   restartPolicy: "NEVER" | "ON_FAILURE" | "ALWAYS";
   restartLimit: number | null;
   concurrency: CommandConcurrency;
@@ -138,12 +146,12 @@ export type CommandRun = {
 };
 
 export const COMMAND_DEFINITION_FIELDS = `
-  id name description script targetKind targetAgentId targetRepositoryId
+  id name description script targetKind targetAgentId targetRepositoryIds
   restartPolicy restartLimit concurrency blocksGitOperations quickActionEnabled quickActionIconKey quickActionButtonVariant
   notificationsEnabled
   archivedAt createdAt updatedAt
   targetAgent { id name hostname connectionStatus capabilities }
-  targetRepository { id name displayOrigin }
+  targetRepositories { id name displayOrigin }
 `;
 
 export const COMMAND_RUN_FIELDS = `

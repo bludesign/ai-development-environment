@@ -39,7 +39,10 @@ export function CommandTargetDialog({
       )
     : worktrees.filter((worktree) =>
         command?.targetKind === "REPOSITORY_WORKTREE"
-          ? worktree.repositoryId === command.targetRepositoryId
+          ? Boolean(
+              worktree.repositoryId &&
+              command.targetRepositoryIds.includes(worktree.repositoryId),
+            )
           : true,
       );
   return (
