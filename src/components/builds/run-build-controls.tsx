@@ -440,17 +440,15 @@ export function RunBuildControls({
             {t("clearDevices")}
           </Button>
         </div>
-        {compact && (
-          <Button
-            disabled={running || selectedDestinations.size === 0}
-            onClick={() => void run()}
-            size="sm"
-            type="button"
-          >
-            {running && runningDestinationId === null ? <Spinner /> : <Play />}
-            {t("runSelected")}
-          </Button>
-        )}
+        <Button
+          disabled={running || selectedDestinations.size === 0}
+          onClick={() => void run()}
+          size="sm"
+          type="button"
+        >
+          {running && runningDestinationId === null ? <Spinner /> : <Play />}
+          {t("runSelected")}
+        </Button>
       </div>
     </DropdownMenuContent>
   );

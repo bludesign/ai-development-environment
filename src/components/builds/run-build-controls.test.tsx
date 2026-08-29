@@ -229,6 +229,13 @@ describe("RunBuildControls", () => {
     ).toBe(true);
 
     fireEvent.click(ipad);
+    expect(
+      (
+        screen.getByRole("button", {
+          name: "Run Selected",
+        }) as HTMLButtonElement
+      ).disabled,
+    ).toBe(false);
     fireEvent.click(screen.getByRole("button", { name: "Run on iPad Pro" }));
     await waitFor(() =>
       expect(request).toHaveBeenCalledWith(
