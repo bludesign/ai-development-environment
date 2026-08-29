@@ -125,6 +125,12 @@ export const routes: RouteEntry[] = [
       value: () => "${ids.buildDataCollections.captured}",
     });`,
   },
+  {
+    name: "tailscale",
+    path: "/tailscale",
+    readyGraphqlOperation: "TailscaleServeOverview",
+    readyTexts: ["Developer dashboard", "studio.acme-tailnet.ts.net"],
+  },
 
   // Commands
   { name: "commands", path: "/commands" },

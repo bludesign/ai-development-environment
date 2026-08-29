@@ -6,6 +6,37 @@ import {
 } from "./config-descriptors";
 
 describe("workflow config descriptors", () => {
+  test("exposes typed Tailscale fields and fleet agent selectors", () => {
+    const inspect = getConfigDescriptor(
+      "TAILSCALE_SERVE_INSPECT",
+      "step",
+    )?.fields;
+    expect(inspect?.find(({ key }) => key === "agentIds")).toMatchObject({
+      control: "resourceMulti",
+      options: { kind: "resource", resource: "agent" },
+    });
+
+    const upsert = getConfigDescriptor(
+      "TAILSCALE_SERVE_UPSERT_TEMPLATE",
+      "step",
+    )?.fields;
+    expect(upsert?.find(({ key }) => key === "protocol")).toMatchObject({
+      control: "enum",
+      default: "HTTPS",
+    });
+    expect(upsert?.find(({ key }) => key === "listenPort")).toMatchObject({
+      control: "number",
+      minimum: 1,
+      maximum: 65_535,
+      integer: true,
+    });
+    expect(upsert?.find(({ key }) => key === "agentIds")).toMatchObject({
+      control: "resourceMulti",
+      required: true,
+      options: { kind: "resource", resource: "agent" },
+    });
+  });
+
   test("uses resource selectors for worktrees and Jira issue keys", () => {
     const runFields = getConfigDescriptor("RUN_CREATE_SESSION", "step")?.fields;
 

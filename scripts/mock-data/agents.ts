@@ -55,6 +55,9 @@ const AGENT_CAPABILITIES = [
   "runs.session.read",
   "workflow.terminal.run",
   "workflow.git.checkpoint",
+  "tailscale.serve.inspect.v1",
+  "tailscale.serve.upsert.v1",
+  "tailscale.serve.remove.v1",
 ];
 
 const healthResult = (failClaude = false) => ({
@@ -241,7 +244,11 @@ export async function seedAgents(prisma: PrismaClient): Promise<void> {
       memoryFreeBytes: 4 * GIB,
       diskTotalBytes: 1024 * GIB,
       diskFreeBytes: 61 * GIB,
-      capabilitiesJson: JSON.stringify(AGENT_CAPABILITIES),
+      capabilitiesJson: JSON.stringify(
+        AGENT_CAPABILITIES.filter(
+          (capability) => !capability.startsWith("tailscale."),
+        ),
+      ),
       secretHash: "mock-secret-hash-ci-runner",
       derivedDataLocationMode: "DEFAULT",
       heartbeatIntervalSeconds: HEARTBEAT_INTERVAL_SECONDS,

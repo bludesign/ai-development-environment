@@ -168,6 +168,10 @@ export const ids = {
      */
     captured: "1a2b3c4d-5e6f-4a7b-8c9d-0e1f2a3b4c5d",
   },
+  tailscaleTemplates: {
+    dashboard: "tailscale-template-dashboard",
+    postgres: "tailscale-template-postgres",
+  },
 } as const;
 
 /** Display numbers must be unique per their scope; kept here so the seed stays consistent. */

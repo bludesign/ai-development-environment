@@ -36,6 +36,7 @@ import { ActionCenterService } from "@/services/action-center";
 import { AppsService } from "@/services/apps";
 import { GlobalSearchService } from "@/services/global-search";
 import { CliHealthService } from "@/services/cli-health";
+import { TailscaleServeService } from "@/services/tailscale";
 import {
   WorkflowEventsService,
   WorkflowsService,
@@ -79,6 +80,7 @@ export type ServerServices = {
   appsService: AppsService;
   globalSearchService: GlobalSearchService;
   cliHealthService: CliHealthService;
+  tailscaleServeService: TailscaleServeService;
   workflowEventsService: WorkflowEventsService;
   workflowsService: WorkflowsService;
   workflowEventBridge: WorkflowEventBridge;
@@ -99,6 +101,7 @@ function createServerServices(): ServerServices {
   commandsService.startRuntime();
   const ccusageService = new CcusageService(agentControlService);
   const buildDataService = new BuildDataService(agentControlService);
+  const tailscaleServeService = new TailscaleServeService(agentControlService);
   const telemetryService = new TelemetryService();
   const signingAssetsService = new SigningAssetsService(
     agentControlService,
@@ -200,6 +203,7 @@ function createServerServices(): ServerServices {
       github: gitHubService,
       gitlab: gitLabService,
       buildData: buildDataService,
+      tailscale: tailscaleServeService,
       cacheServer: cacheServerService,
       ccusage: ccusageService,
       credentials: credentialService,
@@ -262,6 +266,7 @@ function createServerServices(): ServerServices {
     iosDevices: iosDevicesService,
     modelCosts: modelCostsService,
     signingAssets: signingAssetsService,
+    tailscale: tailscaleServeService,
   });
   const workflowEventBridge = new WorkflowEventBridge(
     workflowEventsService,
@@ -317,6 +322,7 @@ function createServerServices(): ServerServices {
     appsService,
     globalSearchService,
     cliHealthService,
+    tailscaleServeService,
     toolsService,
     workflowEventsService,
     workflowsService,

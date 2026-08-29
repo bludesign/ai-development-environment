@@ -16,6 +16,7 @@
     "./runs": "./src/runs.ts",
     "./skills": "./src/skills.ts",
     "./signing-assets": "./src/signing-assets.ts",
+    "./tailscale": "./src/tailscale.ts",
     "./worktrees": "./src/worktrees.ts",
     "./workflows": "./src/workflows.ts"
   },

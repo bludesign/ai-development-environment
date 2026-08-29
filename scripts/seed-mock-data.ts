@@ -29,6 +29,7 @@ import { seedWorkflows } from "./mock-data/workflows";
 import { seedCosts } from "./mock-data/costs";
 import { seedBuildData } from "./mock-data/build-data";
 import { seedAuth } from "./mock-data/auth";
+import { seedTailscale } from "./mock-data/tailscale";
 
 type Seeder = {
   name: string;
@@ -39,6 +40,7 @@ const seeders: Seeder[] = [
   { name: "auth", run: seedAuth },
   { name: "settings", run: seedSettings },
   { name: "agents", run: seedAgents },
+  { name: "tailscale", run: seedTailscale },
   { name: "codebases", run: seedCodebases },
   { name: "apps", run: seedApps },
   { name: "runs", run: seedRuns },

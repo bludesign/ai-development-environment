@@ -24,6 +24,7 @@ import type { SkillsService } from "@/services/skills";
 import type { SystemStatusService } from "@/services/system-status";
 import type { PushNotificationsService } from "@/services/push-notifications";
 import type { TelemetryService } from "@/services/telemetry";
+import type { TailscaleServeService } from "@/services/tailscale";
 import type { RunsService } from "@/services/runs";
 import type { WorkflowsService } from "@/services/workflows";
 import type {
@@ -52,6 +53,7 @@ import { createUsageCostToolGroup } from "./builtin-tools/usage-costs";
 import { createWorkflowToolGroup } from "./builtin-tools/workflows";
 import { createWorktreeToolGroup } from "./builtin-tools/worktrees";
 import { createToolAdministrationGroup } from "./builtin-tools/tool-administration";
+import { createTailscaleToolGroup } from "./builtin-tools/tailscale";
 import type { ToolCallAuditService } from "./tool-call-audit.service";
 import { createWorktreeAutomationToolGroup } from "./builtin-tools/worktree-automations";
 import type { ToolAnnotations, ToolCatalogGroup } from "./types";
@@ -127,6 +129,7 @@ export type BuiltInToolServices = {
   github?: GitHubService;
   gitlab?: GitLabService;
   buildData?: BuildDataService;
+  tailscale?: TailscaleServeService;
   cacheServer?: CacheServerService;
   ccusage?: CcusageService;
   credentials?: CredentialService;
@@ -307,6 +310,8 @@ export function createBuiltInToolRegistry(
   if (services.skills) groups.push(createSkillToolGroup(services.skills));
   if (services.buildData)
     groups.push(createBuildDataToolGroup(services.buildData));
+  if (services.tailscale)
+    groups.push(createTailscaleToolGroup(services.tailscale));
   if (services.signingAssets)
     groups.push(createSigningAssetToolGroup(services.signingAssets));
   if (services.iosDevices)

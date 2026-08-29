@@ -20,4 +20,15 @@ describe("app destinations", () => {
     };
     expect(destinationVisible(destination!, features)).toBe(true);
   });
+
+  test("includes Tailscale under System", () => {
+    expect(APP_DESTINATIONS).toContainEqual(
+      expect.objectContaining({
+        key: "tailscale",
+        href: "/tailscale",
+        section: "system",
+        sidebar: true,
+      }),
+    );
+  });
 });

@@ -180,6 +180,7 @@ describe("built-in tool registry", () => {
       gitlab: placeholder,
       skills: placeholder,
       buildData: placeholder,
+      tailscale: placeholder,
       signingAssets: placeholder,
       iosDevices: placeholder,
       notifications: placeholder,
@@ -204,6 +205,7 @@ describe("built-in tool registry", () => {
         "builtin:gitlab",
         "builtin:skills",
         "builtin:build-data",
+        "builtin:tailscale",
         "builtin:signing-assets",
         "builtin:ios-devices",
         "builtin:notifications",
@@ -214,7 +216,7 @@ describe("built-in tool registry", () => {
       ]),
     );
     const tools = expanded.definitions();
-    expect(tools).toHaveLength(328);
+    expect(tools).toHaveLength(333);
     expect(new Set(tools.map(({ name }) => name)).size).toBe(tools.length);
     expect(tools.every(({ annotations }) => Boolean(annotations))).toBe(true);
   });

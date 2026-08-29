@@ -134,7 +134,7 @@ model CliHealthSettings {
 }
 
 model Agent {
-  id                               String                     @id
+  id                               String                         @id
   name                             String
   hostname                         String
   version                          String
@@ -146,9 +146,9 @@ model Agent {
   diskTotalBytes                   Float?
   diskFreeBytes                    Float?
   capabilitiesJson                 String
-  secretHash                       String                     @unique
+  secretHash                       String                         @unique
   baseRepoDirectory                String?
-  derivedDataLocationMode          String                     @default("DEFAULT")
+  derivedDataLocationMode          String                         @default("DEFAULT")
   derivedDataPath                  String?
   buildsDirectory                  String?
   defaultBuildsDirectory           String?
@@ -159,8 +159,8 @@ model Agent {
   ipAddress                        String?
   lastSeenAt                       DateTime?
   disconnectedAt                   DateTime?
-  createdAt                        DateTime                   @default(now())
-  updatedAt                        DateTime                   @updatedAt
+  createdAt                        DateTime                       @default(now())
+  updatedAt                        DateTime                       @updatedAt
   jobs                             AgentJob[]
   ccusageCollections               CcusageCollectionAgent[]
   ccusageHistory                   CcusageHistory?
@@ -180,11 +180,14 @@ model Agent {
   runDrafts                        RunDraft[]
   runCommands                      RunCommand[]
   runProviderSyncs                 RunProviderSync[]
-  targetedCommandDefinitions       CommandDefinition[]        @relation("CommandDefinitionTargetAgent")
+  targetedCommandDefinitions       CommandDefinition[]            @relation("CommandDefinitionTargetAgent")
   commandRuns                      CommandRun[]
   diskSpaceState                   AgentDiskSpaceState?
   derivedDataLocks                 DerivedDataLock[]
   derivedDataCleanupLeases         DerivedDataCleanupLease[]
+  tailscaleServeAssignments        TailscaleServeAssignment[]
+  tailscaleState                   TailscaleAgentState?
+  tailscaleOperationItems          TailscaleServeOperationAgent[]
 }
 
 model AgentEnrollmentToken {
@@ -271,35 +274,36 @@ model IosDeviceSettings {
 }
 
 model AgentJob {
-  id                    String                 @id
-  agentId               String
-  kind                  String
-  payloadJson           String
-  status                String
-  idempotencyKey        String
-  resultJson            String?
-  error                 String?
-  timeoutSeconds        Int
-  createdAt             DateTime               @default(now())
-  startedAt             DateTime?
-  finishedAt            DateTime?
-  updatedAt             DateTime               @updatedAt
-  ccusageCollectionId   String?
-  buildDataCollectionId String?
-  codebaseId            String?
-  worktreeId            String?
-  visibility            String                 @default("USER")
-  blocksGitOperations   Boolean                @default(false)
-  agent                 Agent                  @relation(fields: [agentId], references: [id], onDelete: Cascade)
-  ccusageCollection     CcusageCollection?     @relation(fields: [ccusageCollectionId], references: [id], onDelete: SetNull)
-  buildDataCollection   BuildDataCollection?   @relation(fields: [buildDataCollectionId], references: [id], onDelete: SetNull)
-  codebase              Codebase?              @relation(fields: [codebaseId], references: [id], onDelete: SetNull)
-  logs                  AgentJobLog[]
-  builds                Build[]
-  deployments           BuildDeployment[]
-  exports               BuildExport[]
-  signingOperationItems SigningOperationItem[]
-  commandRunAttempt     CommandRunAttempt?
+  id                     String                        @id
+  agentId                String
+  kind                   String
+  payloadJson            String
+  status                 String
+  idempotencyKey         String
+  resultJson             String?
+  error                  String?
+  timeoutSeconds         Int
+  createdAt              DateTime                      @default(now())
+  startedAt              DateTime?
+  finishedAt             DateTime?
+  updatedAt              DateTime                      @updatedAt
+  ccusageCollectionId    String?
+  buildDataCollectionId  String?
+  codebaseId             String?
+  worktreeId             String?
+  visibility             String                        @default("USER")
+  blocksGitOperations    Boolean                       @default(false)
+  agent                  Agent                         @relation(fields: [agentId], references: [id], onDelete: Cascade)
+  ccusageCollection      CcusageCollection?            @relation(fields: [ccusageCollectionId], references: [id], onDelete: SetNull)
+  buildDataCollection    BuildDataCollection?          @relation(fields: [buildDataCollectionId], references: [id], onDelete: SetNull)
+  codebase               Codebase?                     @relation(fields: [codebaseId], references: [id], onDelete: SetNull)
+  logs                   AgentJobLog[]
+  builds                 Build[]
+  deployments            BuildDeployment[]
+  exports                BuildExport[]
+  signingOperationItems  SigningOperationItem[]
+  commandRunAttempt      CommandRunAttempt?
+  tailscaleOperationItem TailscaleServeOperationAgent?
 
   @@unique([agentId, idempotencyKey])
   @@index([agentId, status, createdAt])
@@ -307,6 +311,97 @@ model AgentJob {
   @@index([buildDataCollectionId, status])
   @@index([codebaseId, status, createdAt])
   @@index([worktreeId, status, createdAt])
+}
+
+model TailscaleServeTemplate {
+  id                  String                     @id
+  name                String
+  protocol            String
+  listenPort          Int
+  mountPath           String                     @default("/")
+  destinationProtocol String
+  destinationPort     Int
+  destinationPath     String                     @default("")
+  funnel              Boolean                    @default(false)
+  appCapabilitiesJson String                     @default("[]")
+  proxyProtocol       String                     @default("NONE")
+  fingerprint         String                     @unique
+  revision            Int                        @default(1)
+  lifecycle           String                     @default("ACTIVE")
+  origin              String                     @default("USER")
+  createdAt           DateTime                   @default(now())
+  updatedAt           DateTime                   @updatedAt
+  assignments         TailscaleServeAssignment[]
+  operations          TailscaleServeOperation[]
+
+  @@index([lifecycle, createdAt])
+  @@index([protocol, listenPort, mountPath])
+}
+
+model TailscaleServeAssignment {
+  templateId          String
+  agentId             String
+  desiredEnabled      Boolean                @default(true)
+  observedEnabled     Boolean                @default(false)
+  observedFingerprint String?
+  revision            Int                    @default(1)
+  status              String                 @default("PENDING")
+  lastJobId           String?
+  lastError           String?
+  lastObservedAt      DateTime?
+  createdAt           DateTime               @default(now())
+  updatedAt           DateTime               @updatedAt
+  template            TailscaleServeTemplate @relation(fields: [templateId], references: [id], onDelete: Cascade)
+  agent               Agent                  @relation(fields: [agentId], references: [id], onDelete: Cascade)
+
+  @@id([templateId, agentId])
+  @@index([agentId, status])
+  @@index([lastJobId])
+}
+
+model TailscaleAgentState {
+  agentId         String    @id
+  dnsHostname     String?
+  ipv4Json        String    @default("[]")
+  ipv6Json        String    @default("[]")
+  backendState    String    @default("Unknown")
+  routesJson      String    @default("[]")
+  lastInspectedAt DateTime?
+  lastError       String?
+  updatedAt       DateTime  @updatedAt
+  agent           Agent     @relation(fields: [agentId], references: [id], onDelete: Cascade)
+}
+
+model TailscaleServeOperation {
+  id         String                         @id
+  kind       String
+  status     String                         @default("QUEUING")
+  requestId  String                         @unique
+  templateId String?
+  createdAt  DateTime                       @default(now())
+  finishedAt DateTime?
+  updatedAt  DateTime                       @updatedAt
+  template   TailscaleServeTemplate?        @relation(fields: [templateId], references: [id], onDelete: SetNull)
+  agents     TailscaleServeOperationAgent[]
+
+  @@index([templateId, createdAt])
+  @@index([status, createdAt])
+}
+
+model TailscaleServeOperationAgent {
+  operationId String
+  agentId     String
+  status      String                  @default("QUEUING")
+  jobId       String?                 @unique
+  error       String?
+  createdAt   DateTime                @default(now())
+  updatedAt   DateTime                @updatedAt
+  operation   TailscaleServeOperation @relation(fields: [operationId], references: [id], onDelete: Cascade)
+  agent       Agent                   @relation(fields: [agentId], references: [id], onDelete: Cascade)
+  job         AgentJob?               @relation(fields: [jobId], references: [id], onDelete: SetNull)
+
+  @@id([operationId, agentId])
+  @@index([agentId, status])
 }
 
 model CodebaseRepository {
@@ -2877,24 +2972,24 @@ model WorkflowQuickActionRepository {
 }
 
 model CommandDefinition {
-  id                       String              @id
+  id                       String                        @id
   name                     String
-  description              String              @default("")
+  description              String                        @default("")
   script                   String
   targetKind               String
   targetAgentId            String?
-  restartPolicy            String              @default("NEVER")
-  restartLimit             Int?                @default(3)
-  concurrency              String              @default("NON_EXCLUSIVE")
-  blocksGitOperations      Boolean             @default(false)
-  quickActionEnabled       Boolean             @default(false)
-  quickActionIconKey       String              @default("terminal")
-  quickActionButtonVariant String              @default("default")
-  notificationsEnabled     Boolean             @default(true)
+  restartPolicy            String                        @default("NEVER")
+  restartLimit             Int?                          @default(3)
+  concurrency              String                        @default("NON_EXCLUSIVE")
+  blocksGitOperations      Boolean                       @default(false)
+  quickActionEnabled       Boolean                       @default(false)
+  quickActionIconKey       String                        @default("terminal")
+  quickActionButtonVariant String                        @default("default")
+  notificationsEnabled     Boolean                       @default(true)
   archivedAt               DateTime?
-  createdAt                DateTime            @default(now())
-  updatedAt                DateTime            @updatedAt
-  targetAgent              Agent?              @relation("CommandDefinitionTargetAgent", fields: [targetAgentId], references: [id], onDelete: SetNull)
+  createdAt                DateTime                      @default(now())
+  updatedAt                DateTime                      @updatedAt
+  targetAgent              Agent?                        @relation("CommandDefinitionTargetAgent", fields: [targetAgentId], references: [id], onDelete: SetNull)
   repositories             CommandDefinitionRepository[]
   runs                     CommandRun[]
 

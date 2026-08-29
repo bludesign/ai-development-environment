@@ -117,6 +117,9 @@ export const POLLING_CHANGED_TOPIC = "polling.changed";
 export const DISK_SPACE_CHANGED_TOPIC = "disk-space.changed";
 export const SIDEBAR_STATUS_CHANGED_TOPIC = "sidebar-status.changed";
 export const CLI_HEALTH_CHANGED_TOPIC = "cli-health.changed";
+export const TAILSCALE_SERVE_CHANGED_TOPIC = "tailscale-serve.changed";
+export const tailscaleServeOperationChangedTopic = (operationId: string) =>
+  `tailscale-serve.operation.${operationId}.changed`;
 export const TELEMETRY_CHANGED_TOPIC = "telemetry.changed";
 export const TELEMETRY_SETTINGS_CHANGED_TOPIC = "telemetry.settings.changed";
 export const buildTopic = (buildId: string) => `build.${buildId}.changed`;
