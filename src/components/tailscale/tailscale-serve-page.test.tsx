@@ -134,31 +134,94 @@ describe("TailscaleServePage", () => {
     render(<TailscaleServePage />);
 
     expect(await screen.findAllByText("Studio Mac")).toHaveLength(2);
+    await waitFor(() => expect(request).toHaveBeenCalledTimes(3));
     expect(screen.getByText("studio.example.ts.net")).toBeDefined();
     expect(screen.getByText("100.64.0.10")).toBeDefined();
     expect(screen.getByText("fd7a:115c:a1e0::10")).toBeDefined();
     expect(screen.getByText("Old Linux")).toBeDefined();
-    expect(screen.getByText("Online")).toBeDefined();
+    expect(
+      screen
+        .getByText("Online")
+        .closest('[data-slot="badge"]')
+        ?.getAttribute("data-variant"),
+    ).toBe("success");
     expect(screen.getByText("Offline")).toBeDefined();
     expect(screen.getByText("Unsupported")).toBeDefined();
     expect(screen.getByText("Dashboard")).toBeDefined();
     expect(screen.getByText("Observed on")).toBeDefined();
     expect(
       screen
-        .getByRole("checkbox", { name: "Toggle Dashboard on Studio Mac" })
+        .getByText("Succeeded")
+        .closest('[data-slot="badge"]')
+        ?.getAttribute("data-variant"),
+    ).toBe("success");
+    expect(
+      screen
+        .getByRole("switch", { name: "Toggle Dashboard on Studio Mac" })
         .getAttribute("data-state"),
     ).toBe("checked");
+    expect(screen.getByText("Inspected")).toBeDefined();
+    expect(
+      document.querySelector('time[datetime="2026-08-29T12:00:00.000Z"]'),
+    ).toBeDefined();
+
+    fireEvent.pointerDown(
+      screen.getByRole("button", {
+        name: "Open Dashboard links for Studio Mac",
+      }),
+      { button: 0, ctrlKey: false },
+    );
+    expect(
+      (
+        await screen.findByRole("menuitem", {
+          name: "DNS hostname: studio.example.ts.net",
+        })
+      ).getAttribute("href"),
+    ).toBe("https://studio.example.ts.net/dashboard");
+    expect(
+      screen
+        .getByRole("menuitem", { name: "IPv4: 100.64.0.10" })
+        .getAttribute("href"),
+    ).toBe("https://100.64.0.10/dashboard");
+    expect(
+      screen
+        .getByRole("menuitem", { name: "IPv6: fd7a:115c:a1e0::10" })
+        .getAttribute("href"),
+    ).toBe("https://[fd7a:115c:a1e0::10]/dashboard");
   });
 
-  test("queues a manual fleet inspection and refreshes the overview", async () => {
+  test("inspects on appearance and supports a manual refresh", async () => {
     render(<TailscaleServePage />);
-    fireEvent.click(
-      await screen.findByRole("button", { name: "Inspect agents" }),
-    );
 
+    const inspectButton = await screen.findByRole("button", {
+      name: "Inspect agents",
+    });
     await waitFor(() => expect(request).toHaveBeenCalledTimes(3));
     expect(String(request.mock.calls[1]?.[0])).toContain(
       "mutation InspectTailscaleServe",
     );
+
+    request.mockClear();
+    fireEvent.click(inspectButton);
+
+    await waitFor(() => expect(request).toHaveBeenCalledTimes(2));
+    expect(String(request.mock.calls[0]?.[0])).toContain(
+      "mutation InspectTailscaleServe",
+    );
+  });
+
+  test("uses shadcn controls in the fleet template editor", async () => {
+    render(<TailscaleServePage />);
+    fireEvent.click(
+      await screen.findByRole("button", { name: "Create template" }),
+    );
+
+    expect(screen.getAllByRole("combobox")).toHaveLength(3);
+    expect(document.querySelector("select")).toBeNull();
+    expect(screen.getByRole("switch", { name: "Public Funnel" })).toBeDefined();
+    expect(screen.queryByText("System / Tailscale")).toBeNull();
+    expect(
+      screen.getByRole("heading", { name: "Tailscale Serve", level: 1 }),
+    ).toBeDefined();
   });
 });

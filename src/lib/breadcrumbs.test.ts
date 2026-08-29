@@ -51,6 +51,7 @@ const labels: Record<BreadcrumbLabelKey, string> = {
   skills: "Skills",
   status: "Status",
   sync: "Sync",
+  tailscale: "Tailscale",
   tickets: "Tickets",
   tools: "Tools",
   unifiedEvents: "Unified View",
@@ -116,6 +117,9 @@ describe("buildAppBreadcrumbs", () => {
     ]);
     expect(buildAppBreadcrumbs("/api-keys", translate)).toEqual([
       { isCurrent: true, label: "API Keys" },
+    ]);
+    expect(buildAppBreadcrumbs("/tailscale", translate)).toEqual([
+      { isCurrent: true, label: "Tailscale" },
     ]);
   });
 

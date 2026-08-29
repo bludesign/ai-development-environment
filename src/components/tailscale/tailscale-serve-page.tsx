@@ -3,8 +3,9 @@
 import {
   AlertTriangle,
   CheckCircle2,
+  ExternalLink,
   Globe2,
-  Network,
+  MoreHorizontal,
   Pencil,
   Plus,
   RefreshCw,
@@ -12,9 +13,10 @@ import {
   Trash2,
 } from "lucide-react";
 import { useTranslations } from "next-intl";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { ConfirmationDialog } from "@/components/confirmation-dialog";
+import { DateTime } from "@/components/common/date-time";
 import { WorkflowResourcePanel } from "@/components/workflows/workflow-resource-panel";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
@@ -28,9 +30,24 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { Checkbox } from "@/components/ui/checkbox";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { Spinner } from "@/components/ui/spinner";
+import { Switch } from "@/components/ui/switch";
 import { createClientId } from "@/lib/browser-utils";
 import {
   controlPlaneRequest,
@@ -217,13 +234,49 @@ function destinationLabel(route: Route): string {
 
 function statusVariant(
   status: string,
-): "default" | "secondary" | "destructive" | "outline" {
-  if (status === "SUCCEEDED" || status === "Running") return "default";
+): "default" | "secondary" | "destructive" | "outline" | "success" {
+  if (status === "SUCCEEDED" || status === "Running") return "success";
   if (["FAILED", "PARTIAL_FAILED", "TIMED_OUT"].includes(status))
     return "destructive";
   if (["QUEUING", "QUEUED", "RUNNING", "PENDING"].includes(status))
     return "secondary";
+  if (["DISABLED", "CANCELLED"].includes(status)) return "secondary";
   return "outline";
+}
+
+function statusClassName(status: string): string | undefined {
+  if (["QUEUING", "QUEUED", "RUNNING", "PENDING"].includes(status)) {
+    return "border-blue-500/30 bg-blue-500/10 text-blue-700 dark:text-blue-300";
+  }
+  if (["UNSUPPORTED", "SKIPPED", "CANCELLED"].includes(status)) {
+    return "border-amber-500/30 bg-amber-500/10 text-amber-700 dark:text-amber-300";
+  }
+  return undefined;
+}
+
+function capitalCase(value: string): string {
+  return value
+    .toLowerCase()
+    .split("_")
+    .map((part) => `${part.charAt(0).toUpperCase()}${part.slice(1)}`)
+    .join(" ");
+}
+
+function listenerUrl(route: Route, address: string): string {
+  const host = address.includes(":") ? `[${address}]` : address;
+  const scheme =
+    route.protocol === "HTTP"
+      ? "http"
+      : route.protocol === "TCP"
+        ? "tcp"
+        : "https";
+  const defaultPort =
+    (scheme === "http" && route.listenPort === 80) ||
+    (scheme === "https" && route.listenPort === 443);
+  const path = ["HTTP", "HTTPS"].includes(route.protocol)
+    ? route.mountPath
+    : "";
+  return `${scheme}://${host}${defaultPort ? "" : `:${route.listenPort}`}${path}`;
 }
 
 export function TailscaleServePage() {
@@ -237,6 +290,7 @@ export function TailscaleServePage() {
   const [editor, setEditor] = useState<EditorState | null>(null);
   const [confirmFunnel, setConfirmFunnel] = useState(false);
   const [deleteTemplate, setDeleteTemplate] = useState<Template | null>(null);
+  const inspectedOnAppearance = useRef(false);
 
   const load = useCallback(async () => {
     try {
@@ -253,34 +307,6 @@ export function TailscaleServePage() {
       setLoading(false);
     }
   }, []);
-
-  useEffect(() => {
-    const initialLoad = window.setTimeout(() => {
-      void load();
-    }, 0);
-    const unsubscribe = controlPlaneSubscriptions().subscribe<{
-      tailscaleServeOverviewChanged: Overview;
-    }>(
-      {
-        query: `subscription TailscaleServeOverviewChanged {
-          tailscaleServeOverviewChanged { ${OVERVIEW_FIELDS} }
-        }`,
-      },
-      {
-        next: (value) => {
-          if (value.data?.tailscaleServeOverviewChanged) {
-            setOverview(value.data.tailscaleServeOverviewChanged);
-          }
-        },
-        error: () => undefined,
-        complete: () => undefined,
-      },
-    );
-    return () => {
-      window.clearTimeout(initialLoad);
-      unsubscribe();
-    };
-  }, [load]);
 
   const run = useCallback(
     async (work: () => Promise<Operation>) => {
@@ -313,18 +339,49 @@ export function TailscaleServePage() {
     [load, t],
   );
 
-  const inspect = () =>
-    void run(async () => {
-      const data = await controlPlaneRequest<{
-        inspectTailscaleServe: Operation;
-      }>(
-        `mutation InspectTailscaleServe($requestId: ID!) {
+  const inspect = useCallback(
+    () =>
+      run(async () => {
+        const data = await controlPlaneRequest<{
+          inspectTailscaleServe: Operation;
+        }>(
+          `mutation InspectTailscaleServe($requestId: ID!) {
           inspectTailscaleServe(agentIds: [], requestId: $requestId) { ${OPERATION_FIELDS} }
         }`,
-        { requestId: createClientId() },
-      );
-      return data.inspectTailscaleServe;
-    });
+          { requestId: createClientId() },
+        );
+        return data.inspectTailscaleServe;
+      }),
+    [run],
+  );
+
+  useEffect(() => {
+    if (!inspectedOnAppearance.current) {
+      inspectedOnAppearance.current = true;
+      void load().then(() => inspect());
+    }
+    const unsubscribe = controlPlaneSubscriptions().subscribe<{
+      tailscaleServeOverviewChanged: Overview;
+    }>(
+      {
+        query: `subscription TailscaleServeOverviewChanged {
+          tailscaleServeOverviewChanged { ${OVERVIEW_FIELDS} }
+        }`,
+      },
+      {
+        next: (value) => {
+          if (value.data?.tailscaleServeOverviewChanged) {
+            setOverview(value.data.tailscaleServeOverviewChanged);
+          }
+        },
+        error: () => undefined,
+        complete: () => undefined,
+      },
+    );
+    return () => {
+      unsubscribe();
+    };
+  }, [inspect, load]);
 
   const save = async () => {
     if (!editor) return;
@@ -418,6 +475,13 @@ export function TailscaleServePage() {
     () => overview?.agents.filter(({ supported }) => supported).length ?? 0,
     [overview],
   );
+  const agentStatesById = useMemo(
+    () =>
+      new Map(
+        overview?.agents.map((state) => [state.agent.id, state] as const) ?? [],
+      ),
+    [overview],
+  );
 
   if (loading) {
     return (
@@ -432,14 +496,10 @@ export function TailscaleServePage() {
     <main className="mx-auto flex w-full max-w-7xl flex-col gap-6 p-4 sm:p-6">
       <header className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
         <div>
-          <div className="mb-2 flex items-center gap-2 text-sm font-medium text-primary">
-            <Network className="size-4" aria-hidden="true" />
-            {t("eyebrow")}
-          </div>
-          <h1 className="font-heading text-3xl font-semibold tracking-tight">
+          <h1 className="text-2xl font-semibold tracking-tight">
             {t("title")}
           </h1>
-          <p className="mt-2 max-w-3xl text-muted-foreground">
+          <p className="mt-1 max-w-3xl text-sm text-muted-foreground">
             {t("description")}
           </p>
         </div>
@@ -491,7 +551,7 @@ export function TailscaleServePage() {
                 <CardAction className="flex flex-wrap justify-end gap-1">
                   <Badge
                     variant={
-                      state.agent.disconnectedAt ? "destructive" : "outline"
+                      state.agent.disconnectedAt ? "destructive" : "success"
                     }
                   >
                     {state.agent.disconnectedAt ? ts("offline") : ts("online")}
@@ -535,11 +595,14 @@ export function TailscaleServePage() {
                   </div>
                 </div>
                 <p className="text-xs text-muted-foreground">
-                  {state.lastInspectedAt
-                    ? t("inspectedAt", {
-                        date: new Date(state.lastInspectedAt).toLocaleString(),
-                      })
-                    : t("neverInspected")}
+                  {state.lastInspectedAt ? (
+                    <>
+                      {t("inspected")}{" "}
+                      <DateTime kind="relative" value={state.lastInspectedAt} />
+                    </>
+                  ) : (
+                    t("neverInspected")
+                  )}
                 </p>
                 {state.error && (
                   <p className="text-sm text-destructive">{state.error}</p>
@@ -635,8 +698,11 @@ export function TailscaleServePage() {
                       <div className="min-w-0 flex-1">
                         <p className="font-medium">{assignment.agent.name}</p>
                         <div className="mt-1 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
-                          <Badge variant={statusVariant(assignment.status)}>
-                            {assignment.status.replaceAll("_", " ")}
+                          <Badge
+                            className={statusClassName(assignment.status)}
+                            variant={statusVariant(assignment.status)}
+                          >
+                            {capitalCase(assignment.status)}
                           </Badge>
                           <span>
                             {assignment.observedEnabled
@@ -666,11 +732,18 @@ export function TailscaleServePage() {
                           <RotateCcw /> {t("retry")}
                         </Button>
                       )}
-                      <label className="flex cursor-pointer items-center gap-2 text-sm font-medium">
-                        <Checkbox
+                      <div className="flex items-center gap-2">
+                        <Label
+                          className="cursor-pointer text-sm font-medium"
+                          htmlFor={`tailscale-${template.id}-${assignment.agent.id}`}
+                        >
+                          {assignment.desiredEnabled ? t("on") : t("off")}
+                        </Label>
+                        <Switch
+                          id={`tailscale-${template.id}-${assignment.agent.id}`}
                           checked={assignment.desiredEnabled}
                           onCheckedChange={(value) =>
-                            toggle(template, assignment, value === true)
+                            toggle(template, assignment, value)
                           }
                           disabled={busy || template.lifecycle === "DELETING"}
                           aria-label={t("toggleNamed", {
@@ -678,8 +751,13 @@ export function TailscaleServePage() {
                             template: template.name,
                           })}
                         />
-                        {assignment.desiredEnabled ? t("on") : t("off")}
-                      </label>
+                        <AssignmentLinksMenu
+                          agent={assignment.agent}
+                          state={agentStatesById.get(assignment.agent.id)}
+                          template={template}
+                          t={t}
+                        />
+                      </div>
                     </div>
                   ))}
                 </div>
@@ -733,6 +811,72 @@ export function TailscaleServePage() {
   );
 }
 
+function AssignmentLinksMenu({
+  agent,
+  state,
+  template,
+  t,
+}: {
+  agent: Agent;
+  state: AgentState | undefined;
+  template: Template;
+  t: ReturnType<typeof useTranslations<"tailscale">>;
+}) {
+  const links = state
+    ? [
+        ...(state.dnsHostname
+          ? [
+              {
+                address: state.dnsHostname,
+                label: t("dnsHostnameShort"),
+              },
+            ]
+          : []),
+        ...state.ipv4.map((address) => ({ address, label: "IPv4" })),
+        ...state.ipv6.map((address) => ({ address, label: "IPv6" })),
+      ]
+    : [];
+
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <Button
+          aria-label={t("openLinksNamed", {
+            agent: agent.name,
+            template: template.name,
+          })}
+          disabled={!links.length}
+          size="icon-sm"
+          variant="ghost"
+        >
+          <MoreHorizontal />
+        </Button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="end" className="min-w-72">
+        <DropdownMenuLabel>{t("openRouteUsing")}</DropdownMenuLabel>
+        {links.map(({ address, label }) => (
+          <DropdownMenuItem asChild key={`${label}:${address}`}>
+            <a
+              aria-label={`${label}: ${address}`}
+              href={listenerUrl(template.route, address)}
+              rel="noreferrer"
+              target="_blank"
+            >
+              <ExternalLink />
+              <span className="w-full min-w-0">
+                <span>{label}</span>
+                <span className="ml-2 break-all font-mono text-xs text-muted-foreground">
+                  {address}
+                </span>
+              </span>
+            </a>
+          </DropdownMenuItem>
+        ))}
+      </DropdownMenuContent>
+    </DropdownMenu>
+  );
+}
+
 function TemplateEditor({
   editor,
   agents,
@@ -773,12 +917,10 @@ function TemplateEditor({
             />
           </Field>
           <Field label={t("protocol")}>
-            <select
-              className="h-8 rounded-lg border bg-background px-2 text-sm"
+            <Select
               value={editor.protocol}
-              onChange={(event) => {
-                const protocol = event.target.value as Route["protocol"];
-                update("protocol", protocol);
+              onValueChange={(value) => {
+                const protocol = value as Route["protocol"];
                 if (["TCP", "TLS_TERMINATED_TCP"].includes(protocol)) {
                   onChange({
                     ...editor,
@@ -787,16 +929,36 @@ function TemplateEditor({
                     destinationProtocol: "TCP",
                     destinationPath: "",
                     appCapabilities: "",
+                    proxyProtocol:
+                      protocol === "TCP" ? editor.proxyProtocol : "NONE",
                   });
+                  return;
                 }
+                onChange({
+                  ...editor,
+                  protocol,
+                  destinationProtocol:
+                    editor.destinationProtocol === "TCP"
+                      ? "HTTP"
+                      : editor.destinationProtocol,
+                  funnel: protocol === "HTTP" ? false : editor.funnel,
+                  proxyProtocol: "NONE",
+                });
               }}
             >
-              {(["HTTP", "HTTPS", "TCP", "TLS_TERMINATED_TCP"] as const).map(
-                (value) => (
-                  <option key={value}>{value}</option>
-                ),
-              )}
-            </select>
+              <SelectTrigger className="w-full" aria-label={t("protocol")}>
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {(["HTTP", "HTTPS", "TCP", "TLS_TERMINATED_TCP"] as const).map(
+                  (value) => (
+                    <SelectItem key={value} value={value}>
+                      {capitalCase(value)}
+                    </SelectItem>
+                  ),
+                )}
+              </SelectContent>
+            </Select>
           </Field>
           <Field label={t("listenPort")}>
             <Input
@@ -816,23 +978,32 @@ function TemplateEditor({
             />
           </Field>
           <Field label={t("destinationProtocol")}>
-            <select
-              className="h-8 rounded-lg border bg-background px-2 text-sm"
+            <Select
               value={editor.destinationProtocol}
-              onChange={(event) =>
+              onValueChange={(value) =>
                 update(
                   "destinationProtocol",
-                  event.target.value as Route["destination"]["protocol"],
+                  value as Route["destination"]["protocol"],
                 )
               }
               disabled={!web}
             >
-              {(web ? ["HTTP", "HTTPS", "HTTPS_INSECURE"] : ["TCP"]).map(
-                (value) => (
-                  <option key={value}>{value}</option>
-                ),
-              )}
-            </select>
+              <SelectTrigger
+                className="w-full"
+                aria-label={t("destinationProtocol")}
+              >
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {(web ? ["HTTP", "HTTPS", "HTTPS_INSECURE"] : ["TCP"]).map(
+                  (value) => (
+                    <SelectItem key={value} value={value}>
+                      {value === "HTTPS_INSECURE" ? "HTTPS + Insecure" : value}
+                    </SelectItem>
+                  ),
+                )}
+              </SelectContent>
+            </Select>
           </Field>
           <Field label={t("destinationPort")}>
             <Input
@@ -856,23 +1027,26 @@ function TemplateEditor({
             />
           </Field>
           <Field label={t("proxyProtocol")}>
-            <select
-              className="h-8 rounded-lg border bg-background px-2 text-sm"
+            <Select
               value={editor.proxyProtocol}
-              onChange={(event) =>
-                update(
-                  "proxyProtocol",
-                  event.target.value as Route["proxyProtocol"],
-                )
+              onValueChange={(value) =>
+                update("proxyProtocol", value as Route["proxyProtocol"])
               }
               disabled={editor.protocol !== "TCP"}
             >
-              {(["NONE", "V1", "V2"] as const).map((value) => (
-                <option key={value}>{value}</option>
-              ))}
-            </select>
+              <SelectTrigger className="w-full" aria-label={t("proxyProtocol")}>
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {(["NONE", "V1", "V2"] as const).map((value) => (
+                  <SelectItem key={value} value={value}>
+                    {capitalCase(value)}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
           </Field>
-          <Field label={t("appCapabilities")} className="md:col-span-2">
+          <Field label={t("appCapabilities")} className="lg:col-span-3">
             <Input
               value={editor.appCapabilities}
               onChange={(event) =>
@@ -882,14 +1056,18 @@ function TemplateEditor({
               disabled={!web || editor.funnel}
             />
           </Field>
-          <label className="flex items-center gap-2 self-end rounded-lg border p-2 text-sm font-medium">
-            <Checkbox
-              checked={editor.funnel}
-              onCheckedChange={(value) => update("funnel", value === true)}
-              disabled={editor.protocol === "HTTP"}
-            />
-            <Globe2 className="size-4" /> {t("funnel")}
-          </label>
+          <Field label={t("funnel")}>
+            <div className="flex h-8 items-center justify-center gap-2 rounded-lg border px-2.5">
+              <Globe2 className="size-4 text-muted-foreground" />
+              <Switch
+                id="tailscale-public-funnel"
+                checked={editor.funnel}
+                onCheckedChange={(value) => update("funnel", value)}
+                disabled={editor.protocol === "HTTP"}
+                aria-label={t("funnel")}
+              />
+            </div>
+          </Field>
         </div>
         <fieldset className="mt-5">
           <legend className="mb-2 text-sm font-medium">
