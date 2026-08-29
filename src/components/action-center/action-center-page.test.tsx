@@ -158,6 +158,18 @@ const unrun = {
   status: "SUCCEEDED",
   phase: null,
   questionBatches: [],
+  buildRun: {
+    buildId: "build-unrun",
+    destinationType: "SIMULATOR",
+    preferredDestination: {
+      type: "SIMULATOR",
+      id: "SIM-1",
+      name: "iPhone 17 Pro",
+      platform: "iOS",
+      osVersion: "27.0",
+      state: "Booted",
+    },
+  },
   dismissalFingerprint: "BUILD:build-unrun:UNRUN_BUILD",
 };
 
@@ -405,6 +417,9 @@ describe("MiniActionCenter", () => {
         .getByRole("button", { name: "Dismiss Debug runnable build" })
         .getAttribute("data-size"),
     ).toBe("icon-xs");
+    expect(
+      screen.getByRole("button", { name: "Run" }).getAttribute("data-size"),
+    ).toBe("xs");
   });
 
   test("shows initial query errors instead of the empty state", async () => {

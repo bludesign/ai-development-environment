@@ -143,7 +143,7 @@ export function ActionCenterItem({
           onCompleted={refresh}
           onError={reportError}
           preferredDestination={item.buildRun.preferredDestination}
-          size="sm"
+          size={compact ? "xs" : "sm"}
         />
       )}
       {item.failureFingerprint && (

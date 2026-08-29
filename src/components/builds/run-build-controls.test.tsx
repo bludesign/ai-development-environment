@@ -226,4 +226,59 @@ describe("RunBuildControls", () => {
     fireEvent.click(screen.getByRole("button", { name: "Clear" }));
     expect(ipad.getAttribute("aria-checked")).toBe("false");
   });
+
+  test("searches devices by name, platform, OS version, and state", async () => {
+    request.mockResolvedValue({
+      inspectBuildRunDestinations: [
+        {
+          type: "SIMULATOR",
+          id: "SIM-1",
+          name: "iPhone 17 Pro",
+          platform: "iOS",
+          osVersion: "27.0",
+          state: "Booted",
+          available: true,
+        },
+        {
+          type: "SIMULATOR",
+          id: "SIM-2",
+          name: "Offline iPad",
+          platform: "iPadOS",
+          osVersion: "26.4",
+          state: "Offline",
+          available: false,
+        },
+      ],
+    } as never);
+    render(
+      <RunBuildControls
+        buildId="build-1"
+        destinationType="SIMULATOR"
+        onError={vi.fn()}
+      />,
+    );
+
+    fireEvent.pointerDown(screen.getByRole("button", { name: "Run devices" }), {
+      button: 0,
+      ctrlKey: false,
+    });
+    await screen.findByRole("menuitemcheckbox", { name: /iPhone 17 Pro/ });
+    const search = screen.getByRole("searchbox", { name: "Search devices…" });
+
+    fireEvent.change(search, { target: { value: "26.4" } });
+    expect(
+      screen.getByRole("menuitemcheckbox", { name: /Offline iPad/ }),
+    ).toBeDefined();
+    expect(
+      screen.queryByRole("menuitemcheckbox", { name: /iPhone 17 Pro/ }),
+    ).toBeNull();
+
+    fireEvent.change(search, { target: { value: "connected" } });
+    expect(screen.getByText("No devices match your search.")).toBeDefined();
+
+    fireEvent.change(search, { target: { value: "booted" } });
+    expect(
+      screen.getByRole("menuitemcheckbox", { name: /iPhone 17 Pro/ }),
+    ).toBeDefined();
+  });
 });
