@@ -11,6 +11,7 @@ import {
   agentWebSocketHeaders,
   subscribeToAgentEvents,
   type AgentJob,
+  writeArtifactTransferBytes,
 } from "./graphql-client.js";
 
 const temporaryDirectories: string[] = [];
@@ -27,6 +28,40 @@ afterEach(async () => {
 });
 
 describe("AgentGraphQLClient", () => {
+  test("retries positioned writes until a downloaded chunk is complete", async () => {
+    const positions: number[] = [];
+    const stored: number[] = [];
+    const writer = {
+      write: vi.fn(
+        async (
+          bytes: Uint8Array,
+          offset: number,
+          length: number,
+          position: number,
+        ) => {
+          positions.push(position);
+          stored.push(bytes[offset]!);
+          return { bytesWritten: Math.min(1, length) };
+        },
+      ),
+    };
+
+    await writeArtifactTransferBytes(writer, Buffer.from("abc"), 11);
+
+    expect(positions).toEqual([11, 12, 13]);
+    expect(Buffer.from(stored).toString()).toBe("abc");
+  });
+
+  test("rejects a downloaded chunk write that makes no progress", async () => {
+    await expect(
+      writeArtifactTransferBytes(
+        { write: vi.fn().mockResolvedValue({ bytesWritten: 0 }) },
+        Buffer.from("abc"),
+        0,
+      ),
+    ).rejects.toThrow("made no progress");
+  });
+
   test("checks public auth configuration for server readiness", async () => {
     const fetchMock = vi.fn(async () => Response.json({ mode: "password" }));
     vi.stubGlobal("fetch", fetchMock);

@@ -96,7 +96,7 @@ import {
   type WorktreeItemProps,
 } from "./worktrees-page";
 
-export const WORKTREE_DETAIL_OVERVIEW_QUERY = `query WorktreeDetailOverview($worktreeId: ID!) {
+export const WORKTREE_DETAIL_OVERVIEW_QUERY = `query WorktreeDetailOverview($worktreeId: ID!, $buildFirst: Int = 50) {
   worktreeOverview {
     hiddenCount
     settings { editorVariant updatedAt }
@@ -127,7 +127,7 @@ export const WORKTREE_DETAIL_OVERVIEW_QUERY = `query WorktreeDetailOverview($wor
       }
     }
   }
-  builds(first: 50, worktreeId: $worktreeId) {
+  builds(first: $buildFirst, worktreeId: $worktreeId) {
     items { ${BUILD_LIST_FIELDS} }
     nextCursor
   }

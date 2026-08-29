@@ -119,6 +119,40 @@ export type AgentCadenceSettings = {
   heartbeatIntervalSeconds: number;
 };
 
+type PositionedWriter = {
+  write: (
+    buffer: Uint8Array,
+    offset: number,
+    length: number,
+    position: number,
+  ) => Promise<{ bytesWritten: number }>;
+};
+
+export async function writeArtifactTransferBytes(
+  writer: PositionedWriter,
+  bytes: Uint8Array,
+  position: number,
+): Promise<void> {
+  let written = 0;
+  while (written < bytes.byteLength) {
+    const remaining = bytes.byteLength - written;
+    const { bytesWritten } = await writer.write(
+      bytes,
+      written,
+      remaining,
+      position + written,
+    );
+    if (
+      !Number.isSafeInteger(bytesWritten) ||
+      bytesWritten <= 0 ||
+      bytesWritten > remaining
+    ) {
+      throw new Error("Artifact transfer file write made no progress");
+    }
+    written += bytesWritten;
+  }
+}
+
 async function artifactTransferRetryDelay(
   attempt: number,
   signal: AbortSignal,
@@ -739,7 +773,7 @@ export class AgentGraphQLClient {
           if (++attempt >= 5) throw failure;
           await artifactTransferRetryDelay(attempt, input.signal);
         }
-        await handle.write(bytes, 0, bytes.length, offset);
+        await writeArtifactTransferBytes(handle, bytes, offset);
         offset += bytes.length;
       }
       await handle.sync();

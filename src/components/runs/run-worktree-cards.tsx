@@ -2,7 +2,7 @@
 
 import { ExternalLink } from "lucide-react";
 import { useTranslations } from "next-intl";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { BUILD_LIST_FIELDS } from "@/components/builds/graphql-fields";
 import type { BuildRecord } from "@/components/builds/types";
@@ -35,6 +35,8 @@ import {
   controlPlaneSubscriptions,
 } from "@/lib/control-plane-client";
 
+const INITIAL_BUILD_PAGE_SIZE = 50;
+
 export function RunWorktreeCards({ worktreeId }: { worktreeId: string }) {
   const t = useTranslations("runs");
   const wt = useTranslations("worktrees");
@@ -45,13 +47,17 @@ export function RunWorktreeCards({ worktreeId }: { worktreeId: string }) {
   const [loading, setLoading] = useState(true);
   const [loadingMore, setLoadingMore] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const loadedBuildCount = useRef(INITIAL_BUILD_PAGE_SIZE);
 
   const load = useCallback(async () => {
     try {
       const data = await controlPlaneRequest<{
         worktreeOverview: WorktreeOverview;
         builds: { items: BuildRecord[]; nextCursor: string | null };
-      }>(WORKTREE_DETAIL_OVERVIEW_QUERY, { worktreeId });
+      }>(WORKTREE_DETAIL_OVERVIEW_QUERY, {
+        worktreeId,
+        buildFirst: loadedBuildCount.current,
+      });
       setOverview(data.worktreeOverview);
       setBuilds(data.builds?.items ?? []);
       setNextCursor(data.builds?.nextCursor ?? null);
@@ -80,10 +86,15 @@ export function RunWorktreeCards({ worktreeId }: { worktreeId: string }) {
       );
       setBuilds((current) => {
         const ids = new Set(current.map((build) => build.id));
-        return [
+        const merged = [
           ...current,
           ...data.builds.items.filter((build) => !ids.has(build.id)),
         ];
+        loadedBuildCount.current = Math.max(
+          INITIAL_BUILD_PAGE_SIZE,
+          merged.length,
+        );
+        return merged;
       });
       setNextCursor(data.builds.nextCursor);
       setError(null);

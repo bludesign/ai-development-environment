@@ -29,6 +29,40 @@ const locks =
   globalRelay.buildArtifactTransferLocks ??
   (globalRelay.buildArtifactTransferLocks = new Map());
 
+type PositionedWriter = {
+  write: (
+    buffer: Uint8Array,
+    offset: number,
+    length: number,
+    position: number,
+  ) => Promise<{ bytesWritten: number }>;
+};
+
+export async function writeArtifactTransferBytes(
+  writer: PositionedWriter,
+  bytes: Uint8Array,
+  position: number,
+): Promise<void> {
+  let written = 0;
+  while (written < bytes.byteLength) {
+    const remaining = bytes.byteLength - written;
+    const { bytesWritten } = await writer.write(
+      bytes,
+      written,
+      remaining,
+      position + written,
+    );
+    if (
+      !Number.isSafeInteger(bytesWritten) ||
+      bytesWritten <= 0 ||
+      bytesWritten > remaining
+    ) {
+      throw new Error("Artifact transfer file write made no progress");
+    }
+    written += bytesWritten;
+  }
+}
+
 async function withTransferLock<T>(id: string, action: () => Promise<T>) {
   while (locks.has(id)) await locks.get(id);
   let release!: () => void;
@@ -213,7 +247,7 @@ export async function appendBuildArtifactTransferChunk(
     }
     const handle = await open(transfer.stagingPath, offset === 0 ? "w" : "r+");
     try {
-      await handle.write(bytes, 0, bytes.byteLength, offset);
+      await writeArtifactTransferBytes(handle, bytes, offset);
       await handle.sync();
     } finally {
       await handle.close();

@@ -97,6 +97,43 @@ afterEach(async () => {
 });
 
 describe("build artifact relay", () => {
+  test("retries positioned writes until the complete chunk is stored", async () => {
+    const { writeArtifactTransferBytes } = await relay();
+    const positions: number[] = [];
+    const stored: number[] = [];
+    const writer = {
+      write: vi.fn(
+        async (
+          bytes: Uint8Array,
+          offset: number,
+          length: number,
+          position: number,
+        ) => {
+          positions.push(position);
+          stored.push(bytes[offset]!);
+          return { bytesWritten: Math.min(1, length) };
+        },
+      ),
+    };
+
+    await writeArtifactTransferBytes(writer, Buffer.from("abc"), 7);
+
+    expect(positions).toEqual([7, 8, 9]);
+    expect(Buffer.from(stored).toString()).toBe("abc");
+  });
+
+  test("rejects a positioned write that makes no progress", async () => {
+    const { writeArtifactTransferBytes } = await relay();
+
+    await expect(
+      writeArtifactTransferBytes(
+        { write: vi.fn().mockResolvedValue({ bytesWritten: 0 }) },
+        Buffer.from("abc"),
+        0,
+      ),
+    ).rejects.toThrow("made no progress");
+  });
+
   test("enforces agent identity and expires unfinished transfers", async () => {
     const { buildArtifactTransferStatus } = await relay();
 
