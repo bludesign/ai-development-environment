@@ -15,6 +15,7 @@ import {
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
+import { getPrismaClient } from "@/data/prisma-client";
 import {
   cancelArtifactTransfer,
   expectArtifactTransfer,
@@ -121,6 +122,49 @@ async function readCached(key: string): Promise<MaterializedArtifact | null> {
   }
 }
 
+async function artifactCacheIdentity(buildId: string, artifactId: string) {
+  const services = getServerServices();
+  const artifact = await services.buildsService.artifactForInstall(
+    buildId,
+    artifactId,
+  );
+  if (!artifact) throw new Error("Build artifact not found");
+  return {
+    artifact,
+    key: cacheKey(artifactId, artifact.checksum ?? artifact.createdAt),
+  };
+}
+
+export async function cachedArtifact(
+  buildId: string,
+  artifactId: string,
+): Promise<MaterializedArtifact | null> {
+  const { key } = await artifactCacheIdentity(buildId, artifactId);
+  return readCached(key);
+}
+
+export async function cacheTransferredArtifact(input: {
+  buildId: string;
+  artifactId: string;
+  path: string;
+  filename: string;
+  contentType: string;
+}): Promise<MaterializedArtifact> {
+  const { key } = await artifactCacheIdentity(input.buildId, input.artifactId);
+  await mkdir(CACHE_DIRECTORY, { recursive: true, mode: 0o700 });
+  const path = join(CACHE_DIRECTORY, key);
+  await moveIntoCache(input.path, path);
+  const size = (await stat(path)).size;
+  const sidecar: Sidecar = {
+    filename: input.filename,
+    contentType: input.contentType,
+    size,
+  };
+  await writeFile(`${path}.json`, JSON.stringify(sidecar), { mode: 0o600 });
+  await prune(key).catch(() => {});
+  return { path, etag: `"${key}"`, ...sidecar };
+}
+
 /**
  * Drops the least recently used entries once the cache exceeds its budget, and
  * anything past the maximum age. Entries are several hundred megabytes each, so
@@ -131,9 +175,27 @@ async function readCached(key: string): Promise<MaterializedArtifact | null> {
  * out from under the response that just fetched it.
  */
 async function prune(keep: string): Promise<void> {
+  const protectedPaths = new Set<string>();
+  try {
+    const prisma = await getPrismaClient();
+    const activeTransfers = await prisma.buildArtifactTransfer.findMany({
+      where: {
+        status: { in: ["READY", "DOWNLOADING"] },
+        expiresAt: { gt: new Date() },
+        stagingPath: { not: null },
+      },
+      select: { stagingPath: true },
+    });
+    for (const transfer of activeTransfers) {
+      if (transfer.stagingPath) protectedPaths.add(transfer.stagingPath);
+    }
+  } catch {
+    // Cache pruning is best effort. A temporarily unavailable database must not
+    // turn an otherwise successful artifact upload into a failed transfer.
+  }
   let entries;
   try {
-    entries = await readdir(CACHE_DIRECTORY);
+    entries = await readdir(/* turbopackIgnore: true */ CACHE_DIRECTORY);
   } catch {
     return;
   }
@@ -162,7 +224,7 @@ async function prune(keep: string): Promise<void> {
         path,
         size: information.size,
         mtimeMs: information.mtimeMs,
-        keep: entry === keep,
+        keep: entry === keep || protectedPaths.has(path),
       });
     } catch {
       continue;
@@ -245,14 +307,7 @@ export async function materializeArtifact(
   buildId: string,
   artifactId: string,
 ): Promise<MaterializedArtifact> {
-  const services = getServerServices();
-  const artifact = await services.buildsService.artifactForInstall(
-    buildId,
-    artifactId,
-  );
-  if (!artifact) throw new Error("Build artifact not found");
-
-  const key = cacheKey(artifactId, artifact.checksum ?? artifact.createdAt);
+  const { artifact, key } = await artifactCacheIdentity(buildId, artifactId);
   const cached = await readCached(key);
   if (cached) return cached;
 

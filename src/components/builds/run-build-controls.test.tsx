@@ -16,6 +16,21 @@ vi.mock("@/lib/control-plane-client", () => ({
 }));
 
 const request = vi.mocked(controlPlaneRequest);
+const buildRunAgents = [
+  {
+    agent: {
+      id: "agent-build",
+      name: "Build Mac",
+      hostname: "build.local",
+      osVersion: "macOS 26.0",
+      architecture: "arm64",
+      connectionStatus: "ONLINE",
+    },
+    isBuildAgent: true,
+    available: true,
+    unavailableReason: null,
+  },
+];
 
 beforeEach(() => vi.clearAllMocks());
 
@@ -74,6 +89,9 @@ describe("RunBuildControls", () => {
   test("runs from one compact device-picker button", async () => {
     request.mockImplementation(async (query) => {
       const operation = String(query);
+      if (operation.includes("BuildRunAgents")) {
+        return { buildRunAgents } as never;
+      }
       if (operation.includes("BuildRunDestinations")) {
         return {
           inspectBuildRunDestinations: [
@@ -142,6 +160,9 @@ describe("RunBuildControls", () => {
   test("supports row selection, quick run, select all, clear, and unavailable devices", async () => {
     request.mockImplementation(async (query) => {
       const operation = String(query);
+      if (operation.includes("BuildRunAgents")) {
+        return { buildRunAgents } as never;
+      }
       if (operation.includes("BuildRunDestinations")) {
         return {
           inspectBuildRunDestinations: [
@@ -228,28 +249,33 @@ describe("RunBuildControls", () => {
   });
 
   test("searches devices by name, platform, OS version, and state", async () => {
-    request.mockResolvedValue({
-      inspectBuildRunDestinations: [
-        {
-          type: "SIMULATOR",
-          id: "SIM-1",
-          name: "iPhone 17 Pro",
-          platform: "iOS",
-          osVersion: "27.0",
-          state: "Booted",
-          available: true,
-        },
-        {
-          type: "SIMULATOR",
-          id: "SIM-2",
-          name: "Offline iPad",
-          platform: "iPadOS",
-          osVersion: "26.4",
-          state: "Offline",
-          available: false,
-        },
-      ],
-    } as never);
+    request.mockImplementation(async (query) => {
+      if (String(query).includes("BuildRunAgents")) {
+        return { buildRunAgents } as never;
+      }
+      return {
+        inspectBuildRunDestinations: [
+          {
+            type: "SIMULATOR",
+            id: "SIM-1",
+            name: "iPhone 17 Pro",
+            platform: "iOS",
+            osVersion: "27.0",
+            state: "Booted",
+            available: true,
+          },
+          {
+            type: "SIMULATOR",
+            id: "SIM-2",
+            name: "Offline iPad",
+            platform: "iPadOS",
+            osVersion: "26.4",
+            state: "Offline",
+            available: false,
+          },
+        ],
+      } as never;
+    });
     render(
       <RunBuildControls
         buildId="build-1"
@@ -280,5 +306,103 @@ describe("RunBuildControls", () => {
     expect(
       screen.getByRole("menuitemcheckbox", { name: /iPhone 17 Pro/ }),
     ).toBeDefined();
+  });
+
+  test("switches agents lazily and submits only the active agent", async () => {
+    const targetAgent = {
+      agent: {
+        id: "agent-target",
+        name: "Lab Mac",
+        hostname: "lab.local",
+        osVersion: "macOS 26.0",
+        architecture: "arm64",
+        connectionStatus: "ONLINE",
+      },
+      isBuildAgent: false,
+      available: true,
+      unavailableReason: null,
+    };
+    request.mockImplementation(async (query, variables) => {
+      const operation = String(query);
+      if (operation.includes("BuildRunAgents")) {
+        return {
+          buildRunAgents: [
+            ...buildRunAgents,
+            targetAgent,
+            {
+              ...targetAgent,
+              agent: {
+                ...targetAgent.agent,
+                id: "offline",
+                name: "Offline Mac",
+              },
+              available: false,
+              unavailableReason: "OFFLINE",
+            },
+          ],
+        } as never;
+      }
+      if (operation.includes("BuildRunDestinations")) {
+        const agentId = (variables as { agentId: string }).agentId;
+        return {
+          inspectBuildRunDestinations: [
+            {
+              type: "SIMULATOR",
+              id: agentId === "agent-target" ? "TARGET-SIM" : "BUILD-SIM",
+              name: agentId === "agent-target" ? "Lab iPhone" : "Build iPhone",
+              platform: "iOS Simulator",
+              osVersion: "27.0",
+              state: "Booted",
+            },
+          ],
+        } as never;
+      }
+      return {
+        runBuild: [{ id: "deployment", status: "TRANSFERRING" }],
+      } as never;
+    });
+    render(
+      <RunBuildControls
+        buildId="build-1"
+        compact
+        destinationType="SIMULATOR"
+        onError={vi.fn()}
+      />,
+    );
+
+    fireEvent.pointerDown(screen.getByRole("button", { name: "Run" }), {
+      button: 0,
+      ctrlKey: false,
+    });
+    await screen.findByRole("menuitemcheckbox", { name: /Build iPhone/ });
+    fireEvent.keyDown(screen.getByRole("tab", { name: /Build Mac/ }), {
+      key: "ArrowRight",
+    });
+    expect(
+      screen
+        .getByRole("tab", { name: /Lab Mac/ })
+        .getAttribute("aria-selected"),
+    ).toBe("true");
+    const target = await screen.findByRole("menuitemcheckbox", {
+      name: /Lab iPhone/,
+    });
+    expect(
+      (screen.getByRole("tab", { name: /Offline Mac/ }) as HTMLButtonElement)
+        .disabled,
+    ).toBe(true);
+    fireEvent.click(target);
+    fireEvent.click(screen.getByRole("button", { name: "Run Selected" }));
+
+    await waitFor(() =>
+      expect(request).toHaveBeenCalledWith(
+        expect.stringContaining("RunCompletedBuild"),
+        expect.objectContaining({
+          input: expect.objectContaining({
+            targetAgentId: "agent-target",
+            destinations: [expect.objectContaining({ id: "TARGET-SIM" })],
+          }),
+        }),
+      ),
+    );
   });
 });

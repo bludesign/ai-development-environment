@@ -12,6 +12,7 @@ export const ids = {
     studio: "agent-studio-mac",
     build: "agent-build-mac",
     ci: "agent-ci-runner",
+    legacy: "agent-legacy-mac",
   },
   repositories: {
     web: "repo-acme-web-app",

@@ -135,6 +135,25 @@ beforeEach(() => {
         ],
       } as never;
     }
+    if (operation.includes("query BuildRunAgents")) {
+      return {
+        buildRunAgents: [
+          {
+            agent: {
+              id: "agent-1",
+              name: "Build Mac",
+              hostname: "build.local",
+              osVersion: "macOS 26.0",
+              architecture: "arm64",
+              connectionStatus: "ONLINE",
+            },
+            isBuildAgent: true,
+            available: true,
+            unavailableReason: null,
+          },
+        ],
+      } as never;
+    }
     if (operation.includes("mutation RunCompletedBuild")) {
       return { runBuild: [] } as never;
     }
@@ -297,6 +316,7 @@ describe("BuildsPage", () => {
               expect.objectContaining({ id: "SIM-2" }),
             ],
             requestId: expect.any(String),
+            targetAgentId: "agent-1",
           },
         },
       ),

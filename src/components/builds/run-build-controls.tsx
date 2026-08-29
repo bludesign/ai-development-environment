@@ -2,7 +2,7 @@
 
 import { CheckSquare2, ChevronDown, Play, Search, Square } from "lucide-react";
 import { useTranslations } from "next-intl";
-import { useMemo, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 
 import { Button } from "@/components/ui/button";
 import {
@@ -17,7 +17,7 @@ import { createClientId } from "@/lib/browser-utils";
 import { controlPlaneRequest } from "@/lib/control-plane-client";
 import { formatEnumLabel } from "@/lib/enum-label";
 
-import type { BuildDestination, BuildRecord } from "./types";
+import type { BuildDestination, BuildRecord, BuildRunAgent } from "./types";
 
 export function RunBuildControls({
   buildId,
@@ -48,6 +48,13 @@ export function RunBuildControls({
   );
   const [destinationsLoaded, setDestinationsLoaded] = useState(false);
   const [loadingDestinations, setLoadingDestinations] = useState(false);
+  const [runAgents, setRunAgents] = useState<BuildRunAgent[]>([]);
+  const [runAgentsLoaded, setRunAgentsLoaded] = useState(false);
+  const [selectedAgentId, setSelectedAgentId] = useState<string | null>(null);
+  const activeAgentId = useRef<string | null>(null);
+  const loadingAgentId = useRef<string | null>(null);
+  const agentTabRefs = useRef(new Map<string, HTMLButtonElement>());
+  const destinationCache = useRef(new Map<string, BuildDestination[]>());
   const [destinationSearch, setDestinationSearch] = useState("");
   const [running, setRunning] = useState(false);
   const [runningDestinationId, setRunningDestinationId] = useState<
@@ -80,38 +87,124 @@ export function RunBuildControls({
       ].some((value) => value?.toLocaleLowerCase().includes(query));
     });
   }, [destinationSearch, destinations, t]);
+  const tabStopAgentId =
+    runAgents.find(
+      (option) => option.agent.id === selectedAgentId && option.available,
+    )?.agent.id ?? runAgents.find((option) => option.available)?.agent.id;
 
-  const loadDestinations = async () => {
+  const applyDestinations = (compatible: BuildDestination[]) => {
+    setDestinations(compatible);
+    setSelectedDestinations((current) => {
+      const availableIds = new Set(
+        compatible
+          .filter((destination) => destination.available !== false)
+          .map((destination) => destination.id),
+      );
+      return new Set([...current].filter((id) => availableIds.has(id)));
+    });
+    setDestinationsLoaded(true);
+  };
+
+  const loadDestinations = async (agentId: string) => {
+    const cached = destinationCache.current.get(agentId);
+    if (cached) {
+      if (activeAgentId.current === agentId) applyDestinations(cached);
+      return;
+    }
+    loadingAgentId.current = agentId;
     setLoadingDestinations(true);
     onError(null);
     try {
       const data = await controlPlaneRequest<{
         inspectBuildRunDestinations: BuildDestination[];
       }>(
-        `mutation BuildRunDestinations($buildId: ID!, $requestId: ID!) {
-          inspectBuildRunDestinations(buildId: $buildId, requestId: $requestId)
+        `mutation BuildRunDestinations($buildId: ID!, $agentId: ID, $requestId: ID!) {
+          inspectBuildRunDestinations(buildId: $buildId, agentId: $agentId, requestId: $requestId)
         }`,
-        { buildId, requestId: createClientId() },
+        { buildId, agentId, requestId: createClientId() },
       );
       const compatible = data.inspectBuildRunDestinations.filter(
         (destination) =>
           destination.type === destinationType && !destination.generic,
       );
-      setDestinations(compatible);
-      setSelectedDestinations((current) => {
-        const availableIds = new Set(
-          compatible
-            .filter((destination) => destination.available !== false)
-            .map((destination) => destination.id),
-        );
-        return new Set([...current].filter((id) => availableIds.has(id)));
-      });
-      setDestinationsLoaded(true);
+      destinationCache.current.set(agentId, compatible);
+      if (activeAgentId.current === agentId) applyDestinations(compatible);
+    } catch (value) {
+      if (activeAgentId.current === agentId) {
+        onError(value instanceof Error ? value.message : String(value));
+      }
+    } finally {
+      if (loadingAgentId.current === agentId) {
+        loadingAgentId.current = null;
+        setLoadingDestinations(false);
+      }
+    }
+  };
+
+  const loadRunAgents = async () => {
+    onError(null);
+    setLoadingDestinations(true);
+    try {
+      const data = await controlPlaneRequest<{
+        buildRunAgents: BuildRunAgent[];
+      }>(
+        `query BuildRunAgents($buildId: ID!) {
+          buildRunAgents(buildId: $buildId) {
+            isBuildAgent available unavailableReason
+            agent { id name hostname osVersion architecture connectionStatus }
+          }
+        }`,
+        { buildId },
+      );
+      setRunAgents(data.buildRunAgents);
+      setRunAgentsLoaded(true);
+      const selected =
+        data.buildRunAgents.find((option) => option.isBuildAgent) ??
+        data.buildRunAgents.find((option) => option.available);
+      if (!selected) {
+        activeAgentId.current = null;
+        setDestinations([]);
+        setDestinationsLoaded(true);
+        return;
+      }
+      activeAgentId.current = selected.agent.id;
+      setSelectedAgentId(selected.agent.id);
+      if (selected.available) await loadDestinations(selected.agent.id);
+      else {
+        setDestinations([]);
+        setDestinationsLoaded(true);
+      }
     } catch (value) {
       onError(value instanceof Error ? value.message : String(value));
     } finally {
-      setLoadingDestinations(false);
+      if (!loadingAgentId.current) setLoadingDestinations(false);
     }
+  };
+
+  const selectAgent = (option: BuildRunAgent) => {
+    if (!option.available || option.agent.id === selectedAgentId) return;
+    activeAgentId.current = option.agent.id;
+    setSelectedAgentId(option.agent.id);
+    setSelectedDestinations(new Set());
+    setDestinations([]);
+    setDestinationsLoaded(false);
+    setDestinationSearch("");
+    void loadDestinations(option.agent.id);
+  };
+
+  const selectAdjacentAgent = (currentAgentId: string, direction: -1 | 1) => {
+    const available = runAgents.filter((option) => option.available);
+    const currentIndex = available.findIndex(
+      (option) => option.agent.id === currentAgentId,
+    );
+    if (currentIndex < 0 || available.length < 2) return;
+    const next =
+      available[
+        (currentIndex + direction + available.length) % available.length
+      ];
+    if (!next) return;
+    selectAgent(next);
+    agentTabRefs.current.get(next.agent.id)?.focus();
   };
 
   const run = async (onlyDestination?: BuildDestination) => {
@@ -126,6 +219,7 @@ export function RunBuildControls({
         {
           input: {
             buildId,
+            targetAgentId: selectedAgentId,
             destinations: onlyDestination
               ? [onlyDestination]
               : destinations.filter(
@@ -158,12 +252,70 @@ export function RunBuildControls({
   };
 
   const handleMenuOpenChange = (open: boolean) => {
-    if (open && !destinationsLoaded) void loadDestinations();
+    if (open && !runAgentsLoaded) void loadRunAgents();
+    else if (open && selectedAgentId && !destinationsLoaded) {
+      void loadDestinations(selectedAgentId);
+    }
     if (!open) setDestinationSearch("");
   };
 
   const destinationMenu = (
     <DropdownMenuContent align="end" className="w-80">
+      <div
+        aria-label={t("runAgents")}
+        className="flex gap-1 overflow-x-auto p-1.5"
+        role="tablist"
+      >
+        {runAgents.map((option) => {
+          const reason = option.unavailableReason
+            ? t(`runAgentUnavailable.${option.unavailableReason}`)
+            : null;
+          return (
+            <Button
+              aria-label={
+                reason ? `${option.agent.name}: ${reason}` : option.agent.name
+              }
+              aria-selected={option.agent.id === selectedAgentId}
+              className="h-auto shrink-0 flex-col items-start gap-0 px-2 py-1"
+              disabled={!option.available || running}
+              key={option.agent.id}
+              onClick={() => selectAgent(option)}
+              onKeyDown={(event) => {
+                if (event.key !== "ArrowLeft" && event.key !== "ArrowRight")
+                  return;
+                event.preventDefault();
+                selectAdjacentAgent(
+                  option.agent.id,
+                  event.key === "ArrowLeft" ? -1 : 1,
+                );
+              }}
+              ref={(element) => {
+                if (element) agentTabRefs.current.set(option.agent.id, element);
+                else agentTabRefs.current.delete(option.agent.id);
+              }}
+              role="tab"
+              size="sm"
+              tabIndex={option.agent.id === tabStopAgentId ? 0 : -1}
+              title={
+                reason ??
+                `${option.agent.osVersion} · ${option.agent.architecture}`
+              }
+              type="button"
+              variant={
+                option.agent.id === selectedAgentId ? "secondary" : "ghost"
+              }
+            >
+              <span>{option.agent.name}</span>
+              <span className="text-[10px] font-normal text-muted-foreground">
+                {option.isBuildAgent
+                  ? t("buildAgent")
+                  : (reason ?? option.agent.hostname)}
+              </span>
+            </Button>
+          );
+        })}
+      </div>
+      <DropdownMenuSeparator />
       <div className="relative p-1.5">
         <Search
           aria-hidden="true"

@@ -185,6 +185,9 @@ model Agent {
   diskSpaceState                   AgentDiskSpaceState?
   derivedDataLocks                 DerivedDataLock[]
   derivedDataCleanupLeases         DerivedDataCleanupLease[]
+  sourceBuildArtifactTransfers     BuildArtifactTransfer[]        @relation("BuildArtifactTransferSourceAgent")
+  targetBuildArtifactTransfers     BuildArtifactTransfer[]        @relation("BuildArtifactTransferTargetAgent")
+  targetBuildDeployments           BuildDeployment[]              @relation("BuildDeploymentTargetAgent")
   tailscaleServeAssignments        TailscaleServeAssignment[]
   tailscaleState                   TailscaleAgentState?
   tailscaleOperationItems          TailscaleServeOperationAgent[]
@@ -274,36 +277,38 @@ model IosDeviceSettings {
 }
 
 model AgentJob {
-  id                     String                        @id
-  agentId                String
-  kind                   String
-  payloadJson            String
-  status                 String
-  idempotencyKey         String
-  resultJson             String?
-  error                  String?
-  timeoutSeconds         Int
-  createdAt              DateTime                      @default(now())
-  startedAt              DateTime?
-  finishedAt             DateTime?
-  updatedAt              DateTime                      @updatedAt
-  ccusageCollectionId    String?
-  buildDataCollectionId  String?
-  codebaseId             String?
-  worktreeId             String?
-  visibility             String                        @default("USER")
-  blocksGitOperations    Boolean                       @default(false)
-  agent                  Agent                         @relation(fields: [agentId], references: [id], onDelete: Cascade)
-  ccusageCollection      CcusageCollection?            @relation(fields: [ccusageCollectionId], references: [id], onDelete: SetNull)
-  buildDataCollection    BuildDataCollection?          @relation(fields: [buildDataCollectionId], references: [id], onDelete: SetNull)
-  codebase               Codebase?                     @relation(fields: [codebaseId], references: [id], onDelete: SetNull)
-  logs                   AgentJobLog[]
-  builds                 Build[]
-  deployments            BuildDeployment[]
-  exports                BuildExport[]
-  signingOperationItems  SigningOperationItem[]
-  commandRunAttempt      CommandRunAttempt?
-  tailscaleOperationItem TailscaleServeOperationAgent?
+  id                      String                        @id
+  agentId                 String
+  kind                    String
+  payloadJson             String
+  status                  String
+  idempotencyKey          String
+  resultJson              String?
+  error                   String?
+  timeoutSeconds          Int
+  createdAt               DateTime                      @default(now())
+  startedAt               DateTime?
+  finishedAt              DateTime?
+  updatedAt               DateTime                      @updatedAt
+  ccusageCollectionId     String?
+  buildDataCollectionId   String?
+  codebaseId              String?
+  worktreeId              String?
+  visibility              String                        @default("USER")
+  blocksGitOperations     Boolean                       @default(false)
+  agent                   Agent                         @relation(fields: [agentId], references: [id], onDelete: Cascade)
+  ccusageCollection       CcusageCollection?            @relation(fields: [ccusageCollectionId], references: [id], onDelete: SetNull)
+  buildDataCollection     BuildDataCollection?          @relation(fields: [buildDataCollectionId], references: [id], onDelete: SetNull)
+  codebase                Codebase?                     @relation(fields: [codebaseId], references: [id], onDelete: SetNull)
+  logs                    AgentJobLog[]
+  builds                  Build[]
+  deployments             BuildDeployment[]
+  sourceArtifactTransfers BuildArtifactTransfer[]       @relation("BuildArtifactTransferSourceJob")
+  targetArtifactTransfers BuildArtifactTransfer[]       @relation("BuildArtifactTransferTargetJob")
+  exports                 BuildExport[]
+  signingOperationItems   SigningOperationItem[]
+  commandRunAttempt       CommandRunAttempt?
+  tailscaleOperationItem  TailscaleServeOperationAgent?
 
   @@unique([agentId, idempotencyKey])
   @@index([agentId, status, createdAt])
@@ -1621,16 +1626,17 @@ model Build {
 }
 
 model BuildArtifact {
-  id           String       @id
+  id           String                  @id
   buildId      String
   kind         String
   relativePath String
   sizeBytes    Float?
   checksum     String?
-  metadataJson String       @default("{}")
-  createdAt    DateTime     @default(now())
-  build        Build        @relation(fields: [buildId], references: [id], onDelete: Cascade)
+  metadataJson String                  @default("{}")
+  createdAt    DateTime                @default(now())
+  build        Build                   @relation(fields: [buildId], references: [id], onDelete: Cascade)
   report       BuildReport?
+  transfers    BuildArtifactTransfer[]
 
   @@unique([buildId, relativePath])
   @@index([buildId, kind])
@@ -1784,27 +1790,68 @@ model TelemetrySavedFilter {
 }
 
 model BuildDeployment {
-  id                 String    @id
+  id                 String                 @id
   buildId            String
   batchId            String
   requestId          String
   jobId              String?
+  targetAgentId      String?
+  transferId         String?
   destinationJson    String
   destinationKey     String
-  status             String    @default("QUEUED")
+  status             String                 @default("QUEUED")
   commandSummary     String
   outputRelativePath String?
   error              String?
-  createdAt          DateTime  @default(now())
+  createdAt          DateTime               @default(now())
   startedAt          DateTime?
   finishedAt         DateTime?
-  updatedAt          DateTime  @updatedAt
-  build              Build     @relation(fields: [buildId], references: [id], onDelete: Cascade)
-  job                AgentJob? @relation(fields: [jobId], references: [id], onDelete: SetNull)
+  updatedAt          DateTime               @updatedAt
+  build              Build                  @relation(fields: [buildId], references: [id], onDelete: Cascade)
+  job                AgentJob?              @relation(fields: [jobId], references: [id], onDelete: SetNull)
+  targetAgent        Agent?                 @relation("BuildDeploymentTargetAgent", fields: [targetAgentId], references: [id], onDelete: SetNull)
+  transfer           BuildArtifactTransfer? @relation(fields: [transferId], references: [id], onDelete: SetNull)
 
-  @@unique([buildId, requestId, destinationKey])
+  @@unique([buildId, requestId, targetAgentId, destinationKey])
   @@index([buildId, createdAt])
   @@index([jobId])
+  @@index([targetAgentId, createdAt])
+  @@index([transferId])
+}
+
+model BuildArtifactTransfer {
+  id             String            @id
+  artifactId     String
+  targetAgentId  String
+  sourceAgentId  String?
+  sourceJobId    String?
+  targetJobId    String?
+  status         String            @default("QUEUED")
+  uploadOffset   Float             @default(0)
+  uploadLength   Float?
+  downloadOffset Float             @default(0)
+  checksum       String?
+  filename       String?
+  contentType    String?
+  stagingPath    String?
+  error          String?
+  expiresAt      DateTime
+  createdAt      DateTime          @default(now())
+  updatedAt      DateTime          @updatedAt
+  finishedAt     DateTime?
+  artifact       BuildArtifact     @relation(fields: [artifactId], references: [id], onDelete: Cascade)
+  sourceAgent    Agent?            @relation("BuildArtifactTransferSourceAgent", fields: [sourceAgentId], references: [id], onDelete: SetNull)
+  targetAgent    Agent             @relation("BuildArtifactTransferTargetAgent", fields: [targetAgentId], references: [id], onDelete: Cascade)
+  sourceJob      AgentJob?         @relation("BuildArtifactTransferSourceJob", fields: [sourceJobId], references: [id], onDelete: SetNull)
+  targetJob      AgentJob?         @relation("BuildArtifactTransferTargetJob", fields: [targetJobId], references: [id], onDelete: SetNull)
+  deployments    BuildDeployment[]
+
+  @@index([artifactId, targetAgentId, createdAt])
+  @@index([sourceAgentId, status])
+  @@index([targetAgentId, status])
+  @@index([sourceJobId])
+  @@index([targetJobId])
+  @@index([status, expiresAt])
 }
 
 model BuildExport {

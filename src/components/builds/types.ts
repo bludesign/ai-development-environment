@@ -17,6 +17,26 @@ export type BuildDestination = {
   available?: boolean;
 };
 
+export type BuildRunAgent = {
+  agent: {
+    id: string;
+    name: string;
+    hostname: string;
+    osVersion: string;
+    architecture: string;
+    connectionStatus: "ONLINE" | "OFFLINE";
+  };
+  isBuildAgent: boolean;
+  available: boolean;
+  unavailableReason:
+    | "OFFLINE"
+    | "AGENT_UPDATE_REQUIRED"
+    | "BUILD_AGENT_UNAVAILABLE"
+    | "INCOMPATIBLE_ARCHITECTURE"
+    | "NOT_MACOS"
+    | null;
+};
+
 export type BuildSourceObservation = {
   id: string;
   scopeKey: string;
@@ -129,6 +149,15 @@ export type BuildRecord = {
     id: string;
     batchId: string;
     destination: BuildDestination;
+    targetAgent?: BuildRunAgent["agent"] | null;
+    transfer?: {
+      id: string;
+      status: string;
+      uploadOffset: number;
+      uploadLength: number | null;
+      downloadOffset: number;
+      error: string | null;
+    } | null;
     status: string;
     commandSummary: string;
     outputRelativePath: string | null;

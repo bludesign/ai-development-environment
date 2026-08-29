@@ -47,6 +47,11 @@ const AGENT_CAPABILITIES = [
   "skills.apply",
   "ios.build",
   "ios.build.delete",
+  "ios.runDestinations.inspect",
+  "ios.build.deploy",
+  "ios.agentRunDestinations.inspect",
+  "ios.artifact.transfer.upload",
+  "ios.build.remoteDeploy",
   "signing.assets.scan",
   "runs.protocol.v1",
   "runs.provider.codex",
@@ -253,11 +258,43 @@ export async function seedAgents(prisma: PrismaClient): Promise<void> {
       derivedDataLocationMode: "DEFAULT",
       heartbeatIntervalSeconds: HEARTBEAT_INTERVAL_SECONDS,
       ipAddress: "192.168.1.44",
-      // Every seeded agent is connected: pages gated on an ONLINE agent (usage collection,
-      // command targets, capability invocation) show their populated state in the captures
-      // instead of an offline fallback.
-      lastSeenAt: minutesAgo(3),
+      // Deliberately offline so run-agent selectors can explain why a known Mac is unavailable.
+      lastSeenAt: daysAgo(3),
       createdAt: daysAgo(20),
+    },
+  });
+
+  await prisma.agent.create({
+    data: {
+      id: ids.agents.legacy,
+      name: "Legacy Mac",
+      hostname: "legacy-mac.local",
+      version: "0.0.8",
+      osVersion: "macOS 14.7",
+      architecture: "arm64",
+      cpuModel: "M1",
+      memoryTotalBytes: 16 * GIB,
+      memoryFreeBytes: 6 * GIB,
+      diskTotalBytes: 512 * GIB,
+      diskFreeBytes: 92 * GIB,
+      capabilitiesJson: JSON.stringify(
+        AGENT_CAPABILITIES.filter(
+          (capability) =>
+            ![
+              "ios.agentRunDestinations.inspect",
+              "ios.artifact.transfer.upload",
+              "ios.build.remoteDeploy",
+            ].includes(capability),
+        ),
+      ),
+      secretHash: "mock-secret-hash-legacy-mac",
+      baseRepoDirectory: "/Users/legacy/Repositories",
+      derivedDataLocationMode: "DEFAULT",
+      defaultBuildsDirectory: "/Users/legacy/Repositories/Builds",
+      heartbeatIntervalSeconds: HEARTBEAT_INTERVAL_SECONDS,
+      ipAddress: "192.168.1.62",
+      lastSeenAt: minutesAgo(4),
+      createdAt: daysAgo(70),
     },
   });
 

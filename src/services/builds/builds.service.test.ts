@@ -2,12 +2,17 @@ import { beforeEach, describe, expect, test, vi } from "vitest";
 
 const getPrismaClient = vi.hoisted(() => vi.fn());
 vi.mock("@/data/prisma-client", () => ({ getPrismaClient }));
+const cachedArtifact = vi.hoisted(() => vi.fn());
+vi.mock("./artifact-cache", () => ({ cachedArtifact }));
 
 import {
+  IOS_AGENT_RUN_DESTINATIONS_JOB_KIND,
+  IOS_ARTIFACT_TRANSFER_UPLOAD_JOB_KIND,
   IOS_BUILD_JOB_KIND,
   IOS_BUILD_DELETE_JOB_KIND,
   IOS_DESTINATIONS_JOB_KIND,
   IOS_DEPLOY_JOB_KIND,
+  IOS_REMOTE_DEPLOY_JOB_KIND,
   IOS_RUN_DESTINATIONS_JOB_KIND,
   type BuildDestination,
 } from "@ai-development-environment/agent-contract/builds";
@@ -120,7 +125,105 @@ function control(
 }
 
 describe("BuildsService", () => {
-  beforeEach(() => vi.clearAllMocks());
+  beforeEach(() => {
+    vi.clearAllMocks();
+    cachedArtifact.mockResolvedValue(null);
+  });
+
+  test("orders run agents and explains cross-agent eligibility", async () => {
+    const agent = (
+      id: string,
+      capabilities: string[],
+      overrides: Record<string, unknown> = {},
+    ) => ({
+      id,
+      name: id,
+      hostname: `${id}.local`,
+      osVersion: "macOS 26.0",
+      architecture: "arm64",
+      capabilitiesJson: JSON.stringify(capabilities),
+      lastSeenAt: new Date(),
+      disconnectedAt: null,
+      ...overrides,
+    });
+    const source = agent("source", [
+      IOS_RUN_DESTINATIONS_JOB_KIND,
+      IOS_DEPLOY_JOB_KIND,
+      IOS_ARTIFACT_TRANSFER_UPLOAD_JOB_KIND,
+    ]);
+    const targetCapabilities = [
+      IOS_AGENT_RUN_DESTINATIONS_JOB_KIND,
+      IOS_REMOTE_DEPLOY_JOB_KIND,
+    ];
+    const agents = [
+      agent("eligible", targetCapabilities),
+      agent("offline", targetCapabilities, {
+        lastSeenAt: new Date(Date.now() - 60 * 60_000),
+      }),
+      agent("outdated", []),
+      source,
+    ];
+    getPrismaClient.mockResolvedValue({
+      build: {
+        findUnique: vi.fn().mockResolvedValue({
+          id: "build-1",
+          status: "SUCCEEDED",
+          agentId: source.id,
+          agent: source,
+          destinationType: "SIMULATOR",
+          artifacts: [
+            {
+              id: "artifact-1",
+              kind: "RUNNABLE_APP",
+              metadataJson: JSON.stringify({ architectures: ["arm64"] }),
+            },
+          ],
+          worktree: null,
+        }),
+      },
+      agent: { findMany: vi.fn().mockResolvedValue(agents) },
+    });
+
+    const options = await new BuildsService(control()).runAgentsForBuild(
+      "build-1",
+    );
+
+    expect(options[0]).toMatchObject({
+      agent: { id: "source" },
+      isBuildAgent: true,
+      available: true,
+    });
+    expect(
+      options.find((option) => option.agent.id === "eligible"),
+    ).toMatchObject({ available: true, unavailableReason: null });
+    expect(
+      options.find((option) => option.agent.id === "offline"),
+    ).toMatchObject({ available: false, unavailableReason: "OFFLINE" });
+    expect(
+      options.find((option) => option.agent.id === "outdated"),
+    ).toMatchObject({
+      available: false,
+      unavailableReason: "AGENT_UPDATE_REQUIRED",
+    });
+
+    source.lastSeenAt = new Date(Date.now() - 60 * 60_000);
+    const coldOptions = await new BuildsService(control()).runAgentsForBuild(
+      "build-1",
+    );
+    expect(
+      coldOptions.find((option) => option.agent.id === "eligible"),
+    ).toMatchObject({
+      available: false,
+      unavailableReason: "BUILD_AGENT_UNAVAILABLE",
+    });
+    cachedArtifact.mockResolvedValue({ path: "/cache/artifact" });
+    const cachedOptions = await new BuildsService(control()).runAgentsForBuild(
+      "build-1",
+    );
+    expect(
+      cachedOptions.find((option) => option.agent.id === "eligible"),
+    ).toMatchObject({ available: true, unavailableReason: null });
+  });
 
   test("queues completed build folder deletion and removes its record", async () => {
     const artifactDirectory = "/agent/builds/build-1";
@@ -1109,9 +1212,10 @@ describe("BuildsService", () => {
 
     expect(findDeployment).toHaveBeenCalledWith({
       where: {
-        buildId_requestId_destinationKey: {
+        buildId_requestId_targetAgentId_destinationKey: {
           buildId: "build-1",
           requestId: "run-1",
+          targetAgentId: "agent-1",
           destinationKey: "SIMULATOR:SIM-1",
         },
       },
@@ -1141,6 +1245,95 @@ describe("BuildsService", () => {
         requestId: "run-offline",
       }),
     ).rejects.toThrow("no longer available");
+  });
+
+  test("fails cross-agent deployments when job queuing stops midway", async () => {
+    const deployment = {
+      id: "deployment-1",
+      buildId: "build-1",
+      requestId: "run-cross-agent",
+      destinationJson: JSON.stringify(destination),
+      destinationKey: "SIMULATOR:SIM-1",
+      targetAgentId: "target-agent",
+      transferId: null,
+      status: "TRANSFERRING",
+    };
+    const transferUpdate = vi.fn().mockResolvedValue({});
+    const deploymentUpdate = vi.fn().mockResolvedValue({ count: 1 });
+    getPrismaClient.mockResolvedValue({
+      build: {
+        findUnique: vi.fn().mockResolvedValue({
+          id: "build-1",
+          status: "SUCCEEDED",
+          agentId: "source-agent",
+          destinationType: "SIMULATOR",
+          artifactDirectory: "/agent/builds/build-1",
+          artifacts: [
+            {
+              id: "artifact-1",
+              kind: "RUNNABLE_APP",
+              relativePath: "products/Acme.app",
+              metadataJson: JSON.stringify({
+                bundleIdentifier: "com.example.acme",
+              }),
+            },
+          ],
+          worktree: null,
+        }),
+      },
+      buildDeployment: {
+        findUnique: vi.fn().mockResolvedValue(null),
+        create: vi.fn().mockResolvedValue(deployment),
+        updateMany: deploymentUpdate,
+      },
+      buildArtifactTransfer: {
+        create: vi.fn().mockResolvedValue({}),
+        update: transferUpdate,
+      },
+      $transaction: vi.fn(async (operations: Promise<unknown>[]) =>
+        Promise.all(operations),
+      ),
+    });
+    const createJob = vi
+      .fn()
+      .mockResolvedValueOnce({ id: "source-job" })
+      .mockRejectedValueOnce(new Error("Target agent queue is unavailable"));
+    const service = new BuildsService(control(createJob));
+    vi.spyOn(service, "runAgentsForBuild").mockResolvedValue([
+      {
+        agent: { id: "target-agent" },
+        isBuildAgent: false,
+        available: true,
+        unavailableReason: null,
+      },
+    ] as never);
+    vi.spyOn(service, "destinationsForBuild").mockResolvedValue([destination]);
+
+    await expect(
+      service.runBuild({
+        buildId: "build-1",
+        targetAgentId: "target-agent",
+        destinations: [destination],
+        requestId: "run-cross-agent",
+      }),
+    ).rejects.toThrow("Target agent queue is unavailable");
+
+    expect(transferUpdate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          status: "FAILED",
+          error: "Target agent queue is unavailable",
+        }),
+      }),
+    );
+    expect(deploymentUpdate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          status: "FAILED",
+          error: "Target agent queue is unavailable",
+        }),
+      }),
+    );
   });
 
   test("redacts common credentials again before central log persistence", async () => {

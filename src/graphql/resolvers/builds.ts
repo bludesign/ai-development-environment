@@ -159,6 +159,11 @@ export const createBuildResolvers = (service: BuildsService) => ({
     startedAt: (value: { startedAt: Date | null }) => iso(value.startedAt),
     finishedAt: (value: { finishedAt: Date | null }) => iso(value.finishedAt),
   },
+  BuildArtifactTransfer: {
+    createdAt: (value: { createdAt: Date }) => value.createdAt.toISOString(),
+    updatedAt: (value: { updatedAt: Date }) => value.updatedAt.toISOString(),
+    finishedAt: (value: { finishedAt: Date | null }) => iso(value.finishedAt),
+  },
   BuildExport: {
     settings: (value: { settingsSnapshotJson: string }) =>
       json(value.settingsSnapshotJson, {}),
@@ -220,6 +225,14 @@ export const createBuildResolvers = (service: BuildsService) => ({
     ) => {
       requireControlPlane(context);
       return service.getBuild(id);
+    },
+    buildRunAgents: (
+      _root: unknown,
+      { buildId }: { buildId: string },
+      context: GraphQLContext,
+    ) => {
+      requireControlPlane(context);
+      return service.runAgentsForBuild(buildId);
     },
     buildLogChunks: (
       _root: unknown,
@@ -301,11 +314,15 @@ export const createBuildResolvers = (service: BuildsService) => ({
     },
     inspectBuildRunDestinations: (
       _root: unknown,
-      args: { buildId: string; requestId: string },
+      args: { buildId: string; agentId?: string | null; requestId: string },
       context: GraphQLContext,
     ) => {
       requireControlPlane(context);
-      return service.destinationsForBuild(args.buildId, args.requestId);
+      return service.destinationsForBuild(
+        args.buildId,
+        args.requestId,
+        args.agentId,
+      );
     },
     saveBuildScript: (
       _root: unknown,

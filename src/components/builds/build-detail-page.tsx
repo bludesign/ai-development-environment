@@ -83,7 +83,11 @@ const BUILD_DETAIL_FIELDS = `
     artifact { id kind relativePath sizeBytes checksum metadata createdAt }
   }
   scriptExecutions { id phase position nameSnapshot status exitCode durationMs causedBuildFailure outputRelativePath error }
-  deployments { id batchId destination status commandSummary outputRelativePath error createdAt startedAt finishedAt }
+  deployments {
+    id batchId destination status commandSummary outputRelativePath error createdAt startedAt finishedAt
+    targetAgent { id name hostname osVersion architecture connectionStatus }
+    transfer { id status uploadOffset uploadLength downloadOffset checksum error createdAt updatedAt finishedAt }
+  }
   exports { id status settings commandSummary outputRelativePath error createdAt startedAt finishedAt }
 `;
 
@@ -109,6 +113,17 @@ function humanizeIdentifier(value: string): string {
   return humanizeConstant(
     value.replace(/([a-z0-9])([A-Z])/g, "$1_$2").replaceAll("-", "_"),
   );
+}
+
+function transferProgressPercent(
+  transfer: NonNullable<BuildRecord["deployments"][number]["transfer"]>,
+): number {
+  if (!transfer.uploadLength) return 0;
+  const offset =
+    transfer.status === "DOWNLOADING"
+      ? transfer.downloadOffset
+      : transfer.uploadOffset;
+  return Math.min(100, (offset / transfer.uploadLength) * 100);
 }
 
 const ADVANCED_SETTING_ORDER = [
@@ -363,7 +378,7 @@ export function BuildDetailPage({
     build !== null &&
     (["QUEUED", "PREPARING", "RUNNING"].includes(build.status) ||
       build.deployments.some((deployment) =>
-        ["QUEUED", "RUNNING"].includes(deployment.status),
+        ["QUEUED", "TRANSFERRING", "RUNNING"].includes(deployment.status),
       ) ||
       build.exports.some((entry) =>
         ["QUEUED", "RUNNING"].includes(entry.status),
@@ -914,6 +929,44 @@ export function BuildDetailPage({
                   {deployment.error && (
                     <p className="mt-1 text-xs text-destructive">
                       {deployment.error}
+                    </p>
+                  )}
+                  {deployment.targetAgent && (
+                    <p className="mt-1 text-xs text-muted-foreground">
+                      {t("runningOnAgent", {
+                        name: deployment.targetAgent.name,
+                      })}
+                    </p>
+                  )}
+                  {deployment.transfer?.uploadLength &&
+                    ["UPLOADING", "READY", "DOWNLOADING"].includes(
+                      deployment.transfer.status,
+                    ) && (
+                      <div className="mt-2 space-y-1">
+                        <div className="flex justify-between text-xs text-muted-foreground">
+                          <span>
+                            {humanizeConstant(deployment.transfer.status)}
+                          </span>
+                          <span>
+                            {Math.round(
+                              transferProgressPercent(deployment.transfer),
+                            )}
+                            %
+                          </span>
+                        </div>
+                        <div className="h-1.5 overflow-hidden rounded-full bg-muted">
+                          <div
+                            className="h-full bg-primary transition-[width]"
+                            style={{
+                              width: `${transferProgressPercent(deployment.transfer)}%`,
+                            }}
+                          />
+                        </div>
+                      </div>
+                    )}
+                  {deployment.transfer?.error && !deployment.error && (
+                    <p className="mt-1 text-xs text-destructive">
+                      {deployment.transfer.error}
                     </p>
                   )}
                 </div>

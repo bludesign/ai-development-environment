@@ -11,7 +11,10 @@ import {
   IOS_BUILD_JOB_KIND,
   IOS_BUILD_DELETE_JOB_KIND,
   IOS_ARTIFACT_DOWNLOAD_JOB_KIND,
+  IOS_ARTIFACT_TRANSFER_UPLOAD_JOB_KIND,
+  IOS_AGENT_RUN_DESTINATIONS_JOB_KIND,
   IOS_DEPLOY_JOB_KIND,
+  IOS_REMOTE_DEPLOY_JOB_KIND,
   IOS_DESTINATIONS_JOB_KIND,
   IOS_EXPORT_JOB_KIND,
   IOS_TEST_RESULTS_JOB_KIND,
@@ -57,6 +60,11 @@ import type {
 } from "@/services/notifications";
 
 import { effectiveBuildsDirectory } from "./build-directory";
+import { cachedArtifact } from "./artifact-cache";
+import {
+  buildArtifactFileChecksum,
+  failBuildArtifactTransferForJob,
+} from "./artifact-relay";
 
 const ICON_KEYS = new Set<string>(BUILD_CONFIGURATION_ICON_KEYS);
 const FINAL_JOB_STATUSES = new Set([
@@ -148,6 +156,33 @@ function cleanName(value: string, field: string, max = 80): string {
 
 function destinationKey(destination: BuildDestination): string {
   return `${destination.type}:${destination.id}`;
+}
+
+function versionParts(value: string): number[] {
+  return value.split(".").map((part) => Number.parseInt(part, 10) || 0);
+}
+
+function runnableDestinationCompatibility(
+  destination: BuildDestination,
+  metadata: JsonObject,
+): BuildDestination {
+  const minimum =
+    typeof metadata.minimumOSVersion === "string"
+      ? metadata.minimumOSVersion
+      : null;
+  if (destination.type !== "SIMULATOR" || !minimum || !destination.osVersion) {
+    return destination;
+  }
+  const current = versionParts(destination.osVersion);
+  const required = versionParts(minimum);
+  const length = Math.max(current.length, required.length);
+  for (let index = 0; index < length; index += 1) {
+    if ((current[index] ?? 0) > (required[index] ?? 0)) return destination;
+    if ((current[index] ?? 0) < (required[index] ?? 0)) {
+      return { ...destination, available: false };
+    }
+  }
+  return destination;
 }
 
 function coordinationCodebaseId(build: {
@@ -378,7 +413,13 @@ const buildInclude = {
   scriptExecutions: {
     orderBy: [{ phase: "asc" as const }, { position: "asc" as const }],
   },
-  deployments: { orderBy: { createdAt: "desc" as const } },
+  deployments: {
+    orderBy: { createdAt: "desc" as const },
+    include: {
+      targetAgent: true,
+      transfer: { include: { sourceAgent: true, targetAgent: true } },
+    },
+  },
   exports: { orderBy: { createdAt: "desc" as const } },
 } satisfies Prisma.BuildInclude;
 
@@ -419,6 +460,21 @@ export class BuildsService {
     );
     this.agentControl.registerCompletionHandler(IOS_DEPLOY_JOB_KIND, (job) =>
       this.projectDeploymentCompletion(job),
+    );
+    this.agentControl.registerCompletionHandler(
+      IOS_REMOTE_DEPLOY_JOB_KIND,
+      (job) => this.projectDeploymentCompletion(job),
+    );
+    this.agentControl.registerCompletionHandler(
+      IOS_ARTIFACT_TRANSFER_UPLOAD_JOB_KIND,
+      async (job) => {
+        if (job.status !== "SUCCEEDED") {
+          await failBuildArtifactTransferForJob(
+            job.id,
+            job.error || "The build agent could not upload the runnable app",
+          );
+        }
+      },
     );
     this.agentControl.registerCompletionHandler(IOS_EXPORT_JOB_KIND, (job) =>
       this.projectExportCompletion(job),
@@ -1098,7 +1154,85 @@ export class BuildsService {
     }
   }
 
-  async destinationsForBuild(buildId: string, requestId: string) {
+  async runAgentsForBuild(buildId: string) {
+    const prisma = await getPrismaClient();
+    const build = await prisma.build.findUnique({
+      where: { id: buildId },
+      include: { artifacts: true, agent: true, worktree: true },
+    });
+    const artifact = build?.artifacts.find(
+      (entry) => entry.kind === "RUNNABLE_APP",
+    );
+    if (!build || build.status !== "SUCCEEDED" || !artifact || !build.agentId) {
+      throw new Error("A successful runnable build is required");
+    }
+    const metadata = objectValue(
+      parseJson(artifact.metadataJson, {}),
+      "runnable metadata",
+    );
+    const artifactArchitectures = new Set(
+      stringArray(metadata.architectures).map((value) =>
+        value === "x64" ? "x86_64" : value,
+      ),
+    );
+    const cached = await cachedArtifact(build.id, artifact.id);
+    const sourceCapabilities = build.agent ? capabilities(build.agent) : [];
+    const agents = await prisma.agent.findMany({ orderBy: { name: "asc" } });
+    return agents
+      .map((agent) => {
+        const isBuildAgent = agent.id === build.agentId;
+        let unavailableReason: string | null = null;
+        if (!agent.osVersion.toLocaleLowerCase().startsWith("macos")) {
+          unavailableReason = "NOT_MACOS";
+        } else if (!online(agent)) {
+          unavailableReason = "OFFLINE";
+        } else if (isBuildAgent) {
+          if (
+            !capabilities(agent).includes(IOS_RUN_DESTINATIONS_JOB_KIND) ||
+            !capabilities(agent).includes(IOS_DEPLOY_JOB_KIND)
+          ) {
+            unavailableReason = "AGENT_UPDATE_REQUIRED";
+          }
+        } else if (
+          !capabilities(agent).includes(IOS_AGENT_RUN_DESTINATIONS_JOB_KIND) ||
+          !capabilities(agent).includes(IOS_REMOTE_DEPLOY_JOB_KIND)
+        ) {
+          unavailableReason = "AGENT_UPDATE_REQUIRED";
+        } else if (
+          !cached &&
+          (!build.agent ||
+            !online(build.agent) ||
+            !sourceCapabilities.includes(IOS_ARTIFACT_TRANSFER_UPLOAD_JOB_KIND))
+        ) {
+          unavailableReason = "BUILD_AGENT_UNAVAILABLE";
+        } else if (
+          build.destinationType === "SIMULATOR" &&
+          artifactArchitectures.size > 0 &&
+          !artifactArchitectures.has(
+            agent.architecture === "x64" ? "x86_64" : agent.architecture,
+          )
+        ) {
+          unavailableReason = "INCOMPATIBLE_ARCHITECTURE";
+        }
+        return {
+          agent,
+          isBuildAgent,
+          available: unavailableReason === null,
+          unavailableReason,
+        };
+      })
+      .sort(
+        (left, right) =>
+          Number(right.isBuildAgent) - Number(left.isBuildAgent) ||
+          left.agent.name.localeCompare(right.agent.name),
+      );
+  }
+
+  async destinationsForBuild(
+    buildId: string,
+    requestId: string,
+    targetAgentId?: string | null,
+  ) {
     const prisma = await getPrismaClient();
     const build = await prisma.build.findUnique({
       where: { id: buildId },
@@ -1107,11 +1241,53 @@ export class BuildsService {
     if (
       !build ||
       build.status !== "SUCCEEDED" ||
-      !build.worktreeId ||
       !build.artifacts.some((artifact) => artifact.kind === "RUNNABLE_APP")
     ) {
       throw new Error("A successful runnable build is required");
     }
+    const runnableArtifact = build.artifacts.find(
+      (artifact) => artifact.kind === "RUNNABLE_APP",
+    )!;
+    const runnableMetadata = objectValue(
+      parseJson(runnableArtifact.metadataJson, {}),
+      "runnable metadata",
+    );
+    const selectedAgentId = targetAgentId ?? build.agentId;
+    if (!selectedAgentId) throw new Error("Build agent is unavailable");
+    if (selectedAgentId !== build.agentId) {
+      const option = (await this.runAgentsForBuild(build.id)).find(
+        (entry) => entry.agent.id === selectedAgentId,
+      );
+      if (!option?.available) {
+        throw new Error("The selected run agent is unavailable");
+      }
+      const job = await this.agentControl.createJob({
+        agentId: selectedAgentId,
+        kind: IOS_AGENT_RUN_DESTINATIONS_JOB_KIND,
+        payload: { destinationType: build.destinationType },
+        idempotencyKey: `ios:agent-build-destinations:${cleanName(requestId, "Request ID", 200)}:${build.id}:${selectedAgentId}`,
+        timeoutSeconds: 120,
+        visibility: "SYSTEM",
+      });
+      try {
+        const result = this.result(await this.waitForJob(job.id));
+        return (Array.isArray(result.destinations) ? result.destinations : [])
+          .map((destination) => parseBuildDestination(destination))
+          .map((destination) =>
+            runnableDestinationCompatibility(destination, runnableMetadata),
+          )
+          .filter(
+            (destination) =>
+              destination.type === build.destinationType &&
+              !destination.generic,
+          );
+      } finally {
+        await prisma.agentJob.deleteMany({
+          where: { id: job.id, visibility: "SYSTEM" },
+        });
+      }
+    }
+    if (!build.worktreeId) throw new Error("The build worktree is unavailable");
     const worktree = await this.requireWorktree(
       build.worktreeId,
       IOS_RUN_DESTINATIONS_JOB_KIND,
@@ -1139,6 +1315,9 @@ export class BuildsService {
       const result = this.result(await this.waitForJob(job.id));
       return (Array.isArray(result.destinations) ? result.destinations : [])
         .map((destination) => parseBuildDestination(destination))
+        .map((destination) =>
+          runnableDestinationCompatibility(destination, runnableMetadata),
+        )
         .filter(
           (destination) =>
             destination.type === build.destinationType && !destination.generic,
@@ -2493,6 +2672,7 @@ export class BuildsService {
 
   async runBuild(input: {
     buildId: string;
+    targetAgentId?: string | null;
     destinations: unknown[];
     requestId: string;
   }) {
@@ -2506,7 +2686,7 @@ export class BuildsService {
         },
       },
     });
-    if (!build || build.status !== "SUCCEEDED" || !build.worktree) {
+    if (!build || build.status !== "SUCCEEDED") {
       throw new Error("A successful build is required");
     }
     const artifact = build.artifacts.find(
@@ -2541,9 +2721,22 @@ export class BuildsService {
     ) {
       throw new Error("Run destinations must match the build destination type");
     }
+    const buildAgentId = build.agentId ?? build.worktree?.codebase.agentId;
+    const targetAgentId = input.targetAgentId ?? buildAgentId;
+    if (!targetAgentId) throw new Error("Build agent is unavailable");
+    const sameAgent = targetAgentId === buildAgentId;
+    if (!sameAgent) {
+      const runAgent = (await this.runAgentsForBuild(build.id)).find(
+        (entry) => entry.agent.id === targetAgentId,
+      );
+      if (!runAgent?.available) {
+        throw new Error("The selected run agent is unavailable");
+      }
+    }
     const availableDestinations = await this.destinationsForBuild(
       build.id,
       `${cleanName(input.requestId, "Request ID", 200)}:preflight`,
+      targetAgentId,
     );
     const resolvedDestinations = destinations.map((destination) =>
       availableDestinations.find(
@@ -2559,19 +2752,23 @@ export class BuildsService {
     if (destinations.some((destination) => destination.available === false)) {
       throw new Error("A selected run destination is no longer available");
     }
-    const worktree = await this.requireWorktree(
-      build.worktree.id,
-      IOS_DEPLOY_JOB_KIND,
-    );
+    if (sameAgent && !build.worktree) {
+      throw new Error("The build worktree is unavailable");
+    }
+    const worktree = sameAgent
+      ? await this.requireWorktree(build.worktree!.id, IOS_DEPLOY_JOB_KIND)
+      : null;
     const batchId = randomUUID();
     const rows = [];
     for (const destination of destinations) {
+      const key = destinationKey(destination);
       const existing = await prisma.buildDeployment.findUnique({
         where: {
-          buildId_requestId_destinationKey: {
+          buildId_requestId_targetAgentId_destinationKey: {
             buildId: build.id,
             requestId: input.requestId,
-            destinationKey: destinationKey(destination),
+            targetAgentId,
+            destinationKey: key,
           },
         },
       });
@@ -2584,7 +2781,9 @@ export class BuildsService {
               batchId,
               requestId: input.requestId,
               destinationJson: JSON.stringify(destination),
-              destinationKey: destinationKey(destination),
+              destinationKey: key,
+              targetAgentId,
+              status: sameAgent ? "QUEUED" : "TRANSFERRING",
               commandSummary:
                 destination.type === "SIMULATOR"
                   ? `open -a Simulator --args -CurrentDeviceUDID ${destination.id}; xcrun simctl install/launch ${destination.id}`
@@ -2593,29 +2792,124 @@ export class BuildsService {
           })),
       );
     }
-    const job = await this.agentControl.createJob({
-      agentId: worktree.codebase.agentId,
-      codebaseId: worktree.codebaseId,
-      worktreeId: worktree.id,
-      kind: IOS_DEPLOY_JOB_KIND,
-      payload: {
-        ...this.identity(worktree),
-        buildId: build.id,
-        artifactDirectory: build.artifactDirectory,
-        artifactRelativePath: artifact.relativePath,
-        bundleIdentifier,
-        deployments: rows.map((row, index) => ({
-          id: row.id,
-          destination: destinations[index],
-        })),
-      },
-      idempotencyKey: `ios:deploy:${build.id}:${input.requestId}`,
-      timeoutSeconds: 3_600,
-    });
-    await prisma.buildDeployment.updateMany({
-      where: { id: { in: rows.map((row) => row.id) } },
-      data: { jobId: job.id },
-    });
+    const deployments = rows.map((row, index) => ({
+      id: row.id,
+      destination: destinations[index]!,
+    }));
+    if (sameAgent && worktree) {
+      const job = await this.agentControl.createJob({
+        agentId: worktree.codebase.agentId,
+        codebaseId: worktree.codebaseId,
+        worktreeId: worktree.id,
+        kind: IOS_DEPLOY_JOB_KIND,
+        payload: {
+          ...this.identity(worktree),
+          buildId: build.id,
+          artifactDirectory: build.artifactDirectory,
+          artifactRelativePath: artifact.relativePath,
+          bundleIdentifier,
+          deployments,
+        },
+        idempotencyKey: `ios:deploy:${build.id}:${input.requestId}`,
+        timeoutSeconds: 3_600,
+      });
+      await prisma.buildDeployment.updateMany({
+        where: { id: { in: rows.map((row) => row.id) } },
+        data: { jobId: job.id },
+      });
+    } else {
+      const existingTransferId = rows.find((row) => row.transferId)?.transferId;
+      if (!existingTransferId) {
+        const transferId = randomUUID();
+        const cached = await cachedArtifact(build.id, artifact.id);
+        const checksum = cached
+          ? await buildArtifactFileChecksum(cached.path)
+          : null;
+        await prisma.buildArtifactTransfer.create({
+          data: {
+            id: transferId,
+            artifactId: artifact.id,
+            sourceAgentId: build.agentId,
+            targetAgentId,
+            status: cached ? "READY" : "QUEUED",
+            uploadOffset: cached?.size ?? 0,
+            uploadLength: cached?.size ?? null,
+            checksum,
+            filename: cached?.filename ?? null,
+            contentType: cached?.contentType ?? null,
+            stagingPath: cached?.path ?? null,
+            expiresAt: new Date(Date.now() + 6 * 60 * 60_000),
+          },
+        });
+        try {
+          let sourceJobId: string | null = null;
+          if (!cached) {
+            const sourceJob = await this.agentControl.createJob({
+              agentId: build.agentId!,
+              kind: IOS_ARTIFACT_TRANSFER_UPLOAD_JOB_KIND,
+              payload: {
+                transferId,
+                buildId: build.id,
+                artifactDirectory: build.artifactDirectory,
+                artifactRelativePath: artifact.relativePath,
+              },
+              idempotencyKey: `ios:artifact-transfer:${transferId}`,
+              timeoutSeconds: 3_600,
+              visibility: "SYSTEM",
+            });
+            sourceJobId = sourceJob.id;
+            await prisma.buildArtifactTransfer.update({
+              where: { id: transferId },
+              data: { sourceJobId },
+            });
+          }
+          const targetJob = await this.agentControl.createJob({
+            agentId: targetAgentId,
+            kind: IOS_REMOTE_DEPLOY_JOB_KIND,
+            payload: {
+              transferId,
+              buildId: build.id,
+              bundleIdentifier,
+              deployments,
+            },
+            idempotencyKey: `ios:remote-deploy:${build.id}:${input.requestId}:${targetAgentId}`,
+            timeoutSeconds: 7_200,
+          });
+          await prisma.$transaction([
+            prisma.buildArtifactTransfer.update({
+              where: { id: transferId },
+              data: { sourceJobId, targetJobId: targetJob.id },
+            }),
+            prisma.buildDeployment.updateMany({
+              where: { id: { in: rows.map((row) => row.id) } },
+              data: {
+                jobId: targetJob.id,
+                transferId,
+                targetAgentId,
+              },
+            }),
+          ]);
+        } catch (error) {
+          const message =
+            error instanceof Error ? error.message : String(error);
+          const finishedAt = new Date();
+          await prisma
+            .$transaction([
+              prisma.buildArtifactTransfer.update({
+                where: { id: transferId },
+                data: { status: "FAILED", error: message, finishedAt },
+              }),
+              prisma.buildDeployment.updateMany({
+                where: { id: { in: rows.map((row) => row.id) } },
+                data: { status: "FAILED", error: message, finishedAt },
+              }),
+            ])
+            .catch(() => {});
+          this.publish(build.id);
+          throw error;
+        }
+      }
+    }
     this.publish(build.id);
     return prisma.buildDeployment.findMany({
       where: { id: { in: rows.map((row) => row.id) } },
@@ -3159,6 +3453,32 @@ export class BuildsService {
               ? outcome.outputRelativePath
               : null,
           startedAt: row.startedAt ?? new Date(),
+          finishedAt: new Date(),
+        },
+      });
+    }
+    const transferIds = [
+      ...new Set(
+        rows
+          .map((row) => row.transferId)
+          .filter((id): id is string => Boolean(id)),
+      ),
+    ];
+    for (const transferId of transferIds) {
+      const failed = rows.some((row) => {
+        const outcome = outcomes
+          .map((value) => objectValue(value, "deployment outcome"))
+          .find((value) => value.id === row.id);
+        return outcome?.status !== "SUCCEEDED";
+      });
+      await prisma.buildArtifactTransfer.update({
+        where: { id: transferId },
+        data: {
+          status: failed || job.status !== "SUCCEEDED" ? "FAILED" : "SUCCEEDED",
+          error:
+            failed || job.status !== "SUCCEEDED"
+              ? job.error || "One or more remote deployments failed"
+              : null,
           finishedAt: new Date(),
         },
       });

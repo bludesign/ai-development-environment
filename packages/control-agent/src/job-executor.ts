@@ -74,6 +74,10 @@ export class JobExecutor {
               this.client.appendBuildLogChunks(buildId, chunks),
             uploadBuildArtifact: (input) =>
               this.client.uploadBuildArtifact(input),
+            uploadBuildArtifactTransfer: (input) =>
+              this.client.uploadBuildArtifactTransfer(input),
+            downloadBuildArtifactTransfer: (input) =>
+              this.client.downloadBuildArtifactTransfer(input),
             claimSigningSecretTransfer: (transferId) =>
               this.client.claimSigningSecretTransfer(transferId),
             claimWorkflowJobSecrets: () =>
