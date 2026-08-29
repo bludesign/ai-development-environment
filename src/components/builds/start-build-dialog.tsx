@@ -34,7 +34,7 @@ import {
 } from "@/components/ui/select";
 import { Spinner } from "@/components/ui/spinner";
 import { Textarea } from "@/components/ui/textarea";
-import { Link, useRouter } from "@/i18n/navigation";
+import { Link } from "@/i18n/navigation";
 import { createClientId } from "@/lib/browser-utils";
 import { controlPlaneRequest } from "@/lib/control-plane-client";
 import { formatDateValue } from "@/lib/date-format";
@@ -100,6 +100,7 @@ export function StartBuildButton({
   disabled,
   disabledReason,
   buildSettingsHref,
+  onStarted,
   size = "sm",
 }: {
   codebaseId: string;
@@ -107,10 +108,10 @@ export function StartBuildButton({
   disabled?: boolean;
   disabledReason?: string | null;
   buildSettingsHref?: string;
+  onStarted?: (buildId: string) => void;
   size?: "sm" | "default";
 }) {
   const t = useTranslations("builds");
-  const router = useRouter();
   const [open, setOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const settingsCloseTimer = useRef<number | null>(null);
@@ -196,7 +197,7 @@ export function StartBuildButton({
         <StartBuildDialog
           codebaseId={codebaseId}
           onOpenChange={setOpen}
-          onStarted={(id) => router.push(`/builds/${id}`)}
+          onStarted={(id) => onStarted?.(id)}
           open={open}
           worktreeId={worktreeId}
         />
@@ -217,7 +218,6 @@ export function WorktreeCoverageButton({
   onStarted?: (buildId: string) => void;
 }) {
   const t = useTranslations("builds");
-  const router = useRouter();
   const [open, setOpen] = useState(false);
   return (
     <>
@@ -229,10 +229,7 @@ export function WorktreeCoverageButton({
           codebaseId={codebaseId}
           coverageMode
           onOpenChange={setOpen}
-          onStarted={(id) => {
-            onStarted?.(id);
-            router.push(`/builds/${id}`);
-          }}
+          onStarted={(id) => onStarted?.(id)}
           open={open}
           worktreeId={worktreeId}
         />

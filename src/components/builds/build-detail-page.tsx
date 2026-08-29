@@ -211,6 +211,7 @@ export function BuildDetailPage({
   const logsHydratedRef = useRef(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [rebuiltBuildId, setRebuiltBuildId] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [reportBusy, setReportBusy] = useState<
     "TEST_RESULTS" | "CODE_COVERAGE" | null
@@ -536,6 +537,19 @@ export function BuildDetailPage({
           <AlertDescription>{error}</AlertDescription>
         </Alert>
       )}
+      {rebuiltBuildId && (
+        <Alert>
+          <AlertDescription className="flex flex-wrap items-center gap-2">
+            {t("rebuildStarted")}
+            <Link
+              className="font-medium underline underline-offset-4"
+              href={`/builds/${rebuiltBuildId}`}
+            >
+              {t("viewBuild")}
+            </Link>
+          </AlertDescription>
+        </Alert>
+      )}
       {build.error && (
         <Alert variant="destructive">
           <AlertDescription>
@@ -585,7 +599,10 @@ export function BuildDetailPage({
         <div className="flex flex-wrap gap-2">
           <RebuildButton
             buildId={build.id}
-            onCompleted={(rebuilt) => router.push(`/builds/${rebuilt.id}`)}
+            onCompleted={async (rebuilt) => {
+              setRebuiltBuildId(rebuilt.id);
+              await load();
+            }}
             onError={setError}
           />
           {["QUEUED", "PREPARING", "RUNNING"].includes(build.status) && (

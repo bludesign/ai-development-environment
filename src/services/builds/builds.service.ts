@@ -1037,7 +1037,9 @@ export class BuildsService {
     });
     try {
       const result = this.result(await this.waitForJob(job.id));
-      return Array.isArray(result.destinations) ? result.destinations : [];
+      return (Array.isArray(result.destinations) ? result.destinations : [])
+        .map((destination) => parseBuildDestination(destination))
+        .filter((destination) => destination.available !== false);
     } finally {
       await prisma.agentJob.deleteMany({
         where: { id: job.id, visibility: "SYSTEM" },
@@ -2554,6 +2556,9 @@ export class BuildsService {
       throw new Error("A selected run destination is no longer available");
     }
     destinations = resolvedDestinations as BuildDestination[];
+    if (destinations.some((destination) => destination.available === false)) {
+      throw new Error("A selected run destination is no longer available");
+    }
     const worktree = await this.requireWorktree(
       build.worktree.id,
       IOS_DEPLOY_JOB_KIND,

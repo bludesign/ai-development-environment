@@ -280,10 +280,10 @@ describe("BuildsPage", () => {
       name: /iPad Pro/,
     });
     fireEvent.click(destination);
-    expect(screen.getByRole("button", { name: /2 devices/ })).toBeDefined();
     fireEvent.keyDown(document.activeElement ?? document.body, {
       key: "Escape",
     });
+    expect(screen.getByRole("button", { name: /2 devices/ })).toBeDefined();
     fireEvent.click(screen.getByRole("button", { name: "Run" }));
 
     await waitFor(() =>

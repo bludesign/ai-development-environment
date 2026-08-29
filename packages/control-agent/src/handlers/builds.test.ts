@@ -404,6 +404,32 @@ describe("iOS destination and error parsing", () => {
         type: "SIMULATOR",
         id: "SIM-1",
         osVersion: "26.0",
+        available: true,
+      }),
+    ]);
+    expect(
+      simulatorDestinations(
+        {
+          devices: {
+            "com.apple.CoreSimulator.SimRuntime.iOS-26-0": [
+              {
+                udid: "SIM-1",
+                name: "iPhone 17 Pro",
+                state: "Shutdown",
+                isAvailable: true,
+              },
+              { udid: "OLD", name: "Unavailable", isAvailable: false },
+            ],
+          },
+        },
+        true,
+      ),
+    ).toEqual([
+      expect.objectContaining({ id: "SIM-1", available: true }),
+      expect.objectContaining({
+        id: "OLD",
+        available: false,
+        state: "Unavailable",
       }),
     ]);
     expect(
@@ -431,8 +457,29 @@ describe("iOS destination and error parsing", () => {
         type: "PHYSICAL_DEVICE",
         id: "DEVICE-1",
         name: "Test iPhone",
+        available: true,
       }),
     ]);
+    expect(
+      physicalDestinations(
+        {
+          result: {
+            devices: [
+              {
+                identifier: "OFFLINE-1",
+                hardwareProperties: { platform: "iOS" },
+                deviceProperties: {
+                  name: "Offline iPhone",
+                  osVersionNumber: "26.0",
+                },
+                connectionProperties: { tunnelState: "disconnected" },
+              },
+            ],
+          },
+        },
+        true,
+      ),
+    ).toEqual([expect.objectContaining({ id: "OFFLINE-1", available: false })]);
   });
 
   test("opens the selected simulator UI without using a shell command", () => {

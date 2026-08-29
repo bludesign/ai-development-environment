@@ -448,6 +448,12 @@ describe("BuildDetailPage", () => {
         { id: "build-1", requestId: expect.any(String) },
       ),
     );
+    expect(await screen.findByText("The rebuild was queued.")).toBeDefined();
+    expect(
+      screen
+        .getAllByRole("link", { name: "View build" })
+        .find((link) => link.getAttribute("href") === "/builds/build-rebuilt"),
+    ).toBeDefined();
 
     fireEvent.click(screen.getByRole("button", { name: "Delete build" }));
     const confirmation = await screen.findByRole("alertdialog");

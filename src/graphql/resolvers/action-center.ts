@@ -29,6 +29,14 @@ export const createActionCenterResolvers = (service: ActionCenterService) => ({
       requireControlPlane(context);
       return service.acknowledge(input);
     },
+    dismissActionCenterItem: (
+      _root: unknown,
+      { input }: { input: Parameters<ActionCenterService["dismiss"]>[0] },
+      context: GraphQLContext,
+    ) => {
+      requireControlPlane(context);
+      return service.dismiss(input);
+    },
   },
   Subscription: {
     actionCenterChanged: {

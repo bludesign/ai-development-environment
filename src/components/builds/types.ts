@@ -14,6 +14,7 @@ export type BuildDestination = {
   osVersion: string | null;
   state: string | null;
   generic?: boolean;
+  available?: boolean;
 };
 
 export type BuildSourceObservation = {

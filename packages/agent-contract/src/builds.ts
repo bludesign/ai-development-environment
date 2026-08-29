@@ -122,6 +122,7 @@ export type BuildDestination = {
   osVersion: string | null;
   state: string | null;
   generic?: boolean;
+  available?: boolean;
 };
 
 export type BuildAdvancedSettings = {
@@ -411,6 +412,14 @@ export function parseBuildDestination(value: unknown): BuildDestination {
           generic: booleanValue(
             destination.generic,
             "build destination.generic",
+          ),
+        }),
+    ...(destination.available === undefined
+      ? {}
+      : {
+          available: booleanValue(
+            destination.available,
+            "build destination.available",
           ),
         }),
   };

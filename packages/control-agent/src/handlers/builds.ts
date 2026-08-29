@@ -827,7 +827,10 @@ export const parseBuildSourceMetadata: AgentJobHandler = async (
   };
 };
 
-export function simulatorDestinations(value: unknown): BuildDestination[] {
+export function simulatorDestinations(
+  value: unknown,
+  includeUnavailable = false,
+): BuildDestination[] {
   if (!value || typeof value !== "object" || Array.isArray(value)) return [];
   const devices = (value as Record<string, unknown>).devices;
   if (!devices || typeof devices !== "object" || Array.isArray(devices))
@@ -841,7 +844,11 @@ export function simulatorDestinations(value: unknown): BuildDestination[] {
     for (const raw of entries) {
       if (!raw || typeof raw !== "object" || Array.isArray(raw)) continue;
       const device = raw as Record<string, unknown>;
-      if (device.isAvailable !== true || typeof device.udid !== "string")
+      const available = device.isAvailable === true;
+      if (
+        (!available && !includeUnavailable) ||
+        typeof device.udid !== "string"
+      )
         continue;
       result.push({
         type: "SIMULATOR",
@@ -849,7 +856,13 @@ export function simulatorDestinations(value: unknown): BuildDestination[] {
         name: typeof device.name === "string" ? device.name : device.udid,
         platform: "iOS Simulator",
         osVersion,
-        state: typeof device.state === "string" ? device.state : null,
+        state:
+          typeof device.state === "string"
+            ? device.state
+            : available
+              ? null
+              : "Unavailable",
+        available,
       });
     }
   }
@@ -871,7 +884,10 @@ function nestedString(value: unknown, paths: string[][]): string | null {
   return null;
 }
 
-export function physicalDestinations(value: unknown): BuildDestination[] {
+export function physicalDestinations(
+  value: unknown,
+  includeUnavailable = false,
+): BuildDestination[] {
   if (!value || typeof value !== "object" || Array.isArray(value)) return [];
   const result = (value as Record<string, unknown>).result;
   const devices =
@@ -895,7 +911,10 @@ export function physicalDestinations(value: unknown): BuildDestination[] {
       ["connectionProperties", "tunnelState"],
       ["deviceProperties", "connectionState"],
     ]);
-    if (state && /(disconnected|unavailable|not.?connected)/i.test(state)) {
+    const available = !(
+      state && /(disconnected|unavailable|not.?connected|offline)/i.test(state)
+    );
+    if (!available && !includeUnavailable) {
       return [];
     }
     return [
@@ -909,6 +928,7 @@ export function physicalDestinations(value: unknown): BuildDestination[] {
           ["deviceProperties", "osVersion"],
         ]),
         state,
+        available,
       },
     ];
   });
@@ -945,6 +965,7 @@ export function genericBuildDestinations(
 async function listPhysicalDevices(
   timeoutMs: number,
   signal: AbortSignal,
+  includeUnavailable = false,
 ): Promise<BuildDestination[]> {
   const directory = await mkdtemp(join(tmpdir(), "ade-devices-"));
   const output = join(directory, "devices.json");
@@ -965,7 +986,10 @@ async function listPhysicalDevices(
       signal,
     );
     if (result.exitCode !== 0) return [];
-    return physicalDestinations(JSON.parse(await readFile(output, "utf8")));
+    return physicalDestinations(
+      JSON.parse(await readFile(output, "utf8")),
+      includeUnavailable,
+    );
   } finally {
     await rm(directory, { recursive: true, force: true });
   }
@@ -1028,7 +1052,7 @@ export const inspectBuildRunDestinations: AgentJobHandler = async (
   if (input.destinationType === "SIMULATOR") {
     const simulators = await command(
       "xcrun",
-      ["simctl", "list", "devices", "available", "-j"],
+      ["simctl", "list", "devices", "-j"],
       Math.min(timeoutMs, 30_000),
       signal,
       folder,
@@ -1036,12 +1060,12 @@ export const inspectBuildRunDestinations: AgentJobHandler = async (
     requireSuccess(simulators, "Could not inspect available simulators");
     return {
       ...successfulProcess,
-      destinations: simulatorDestinations(JSON.parse(simulators.stdout)),
+      destinations: simulatorDestinations(JSON.parse(simulators.stdout), true),
     };
   }
   return {
     ...successfulProcess,
-    destinations: await listPhysicalDevices(timeoutMs, signal),
+    destinations: await listPhysicalDevices(timeoutMs, signal, true),
   };
 };
 

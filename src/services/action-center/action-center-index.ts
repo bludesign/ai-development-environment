@@ -133,7 +133,7 @@ const CANDIDATES_SQL = `
       'BUILD:' || build.id AS key,
       'UNRUN_BUILD' AS reason,
       strftime('%Y-%m-%dT%H:%M:%fZ', build.updatedAt) AS updatedAt,
-      NULL AS failureFingerprint
+      'BUILD:' || build.id || ':UNRUN_BUILD' AS failureFingerprint
     FROM ranked_builds AS build
     INNER JOIN Worktree AS worktree ON worktree.id = build.worktreeId
     WHERE build.targetRank = 1

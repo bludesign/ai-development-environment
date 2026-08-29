@@ -1,21 +1,20 @@
 "use client";
 
-import { ChevronDown, Play } from "lucide-react";
+import { CheckSquare2, ChevronDown, Play, Square } from "lucide-react";
 import { useTranslations } from "next-intl";
 import { useMemo, useState } from "react";
 
 import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
-  DropdownMenuCheckboxItem,
   DropdownMenuContent,
-  DropdownMenuItem,
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Spinner } from "@/components/ui/spinner";
 import { createClientId } from "@/lib/browser-utils";
 import { controlPlaneRequest } from "@/lib/control-plane-client";
+import { formatEnumLabel } from "@/lib/enum-label";
 
 import type { BuildDestination, BuildRecord } from "./types";
 
@@ -49,6 +48,9 @@ export function RunBuildControls({
   const [destinationsLoaded, setDestinationsLoaded] = useState(false);
   const [loadingDestinations, setLoadingDestinations] = useState(false);
   const [running, setRunning] = useState(false);
+  const [runningDestinationId, setRunningDestinationId] = useState<
+    string | null
+  >(null);
 
   const selectedNames = useMemo(
     () =>
@@ -77,7 +79,9 @@ export function RunBuildControls({
       setDestinations(compatible);
       setSelectedDestinations((current) => {
         const availableIds = new Set(
-          compatible.map((destination) => destination.id),
+          compatible
+            .filter((destination) => destination.available !== false)
+            .map((destination) => destination.id),
         );
         return new Set([...current].filter((id) => availableIds.has(id)));
       });
@@ -89,8 +93,9 @@ export function RunBuildControls({
     }
   };
 
-  const run = async () => {
+  const run = async (onlyDestination?: BuildDestination) => {
     setRunning(true);
+    setRunningDestinationId(onlyDestination?.id ?? null);
     onError(null);
     try {
       await controlPlaneRequest(
@@ -100,21 +105,152 @@ export function RunBuildControls({
         {
           input: {
             buildId,
-            destinations: destinations.filter((destination) =>
-              selectedDestinations.has(destination.id),
-            ),
+            destinations: onlyDestination
+              ? [onlyDestination]
+              : destinations.filter(
+                  (destination) =>
+                    destination.available !== false &&
+                    selectedDestinations.has(destination.id),
+                ),
             requestId: createClientId(),
           },
         },
       );
-      setSelectedDestinations(new Set());
+      if (!onlyDestination) setSelectedDestinations(new Set());
       await onCompleted?.();
     } catch (value) {
       onError(value instanceof Error ? value.message : String(value));
     } finally {
       setRunning(false);
+      setRunningDestinationId(null);
     }
   };
+
+  const toggleDestination = (destination: BuildDestination) => {
+    if (destination.available === false) return;
+    setSelectedDestinations((current) => {
+      const next = new Set(current);
+      if (next.has(destination.id)) next.delete(destination.id);
+      else next.add(destination.id);
+      return next;
+    });
+  };
+
+  const destinationMenu = (
+    <DropdownMenuContent align="end" className="w-80">
+      {loadingDestinations && (
+        <div className="flex justify-center p-3 text-muted-foreground">
+          <Spinner />
+        </div>
+      )}
+      {!loadingDestinations &&
+        destinations.map((destination) => {
+          const available = destination.available !== false;
+          const selected = selectedDestinations.has(destination.id);
+          const detail = [destination.platform, destination.osVersion]
+            .filter(Boolean)
+            .join(" ");
+          const state = destination.state
+            ? formatEnumLabel(destination.state)
+            : available
+              ? t("available")
+              : t("unavailable");
+          return (
+            <div
+              className="flex items-stretch gap-1 rounded-md p-0.5 hover:bg-accent"
+              key={`${destination.type}:${destination.id}`}
+            >
+              <button
+                aria-checked={selected}
+                className="flex min-w-0 flex-1 items-center gap-2 rounded-sm px-2 py-1.5 text-left outline-hidden focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50"
+                disabled={!available || running}
+                onClick={() => toggleDestination(destination)}
+                role="menuitemcheckbox"
+                type="button"
+              >
+                {selected ? (
+                  <CheckSquare2 className="size-4 shrink-0" />
+                ) : (
+                  <Square className="size-4 shrink-0" />
+                )}
+                <span className="min-w-0 flex-1">
+                  <span className="block truncate text-sm font-medium">
+                    {destination.name}
+                  </span>
+                  <span className="block truncate text-xs text-muted-foreground">
+                    {detail ? `${detail} · ${state}` : state}
+                  </span>
+                </span>
+              </button>
+              <Button
+                aria-label={t("runOnDevice", { name: destination.name })}
+                disabled={!available || running}
+                onClick={() => void run(destination)}
+                size="icon-sm"
+                title={t("runOnDevice", { name: destination.name })}
+                type="button"
+                variant="ghost"
+              >
+                {runningDestinationId === destination.id ? (
+                  <Spinner />
+                ) : (
+                  <Play />
+                )}
+              </Button>
+            </div>
+          );
+        })}
+      {destinationsLoaded && !destinations.length && (
+        <p className="p-2 text-xs text-muted-foreground">
+          {t("noCompatibleDevices")}
+        </p>
+      )}
+      <DropdownMenuSeparator />
+      <div className="flex items-center justify-between gap-2 px-1 py-0.5">
+        <div className="flex gap-1">
+          <Button
+            disabled={
+              running || !destinations.some((item) => item.available !== false)
+            }
+            onClick={() =>
+              setSelectedDestinations(
+                new Set(
+                  destinations
+                    .filter((destination) => destination.available !== false)
+                    .map((destination) => destination.id),
+                ),
+              )
+            }
+            size="sm"
+            type="button"
+            variant="ghost"
+          >
+            {t("selectAllDevices")}
+          </Button>
+          <Button
+            disabled={running || selectedDestinations.size === 0}
+            onClick={() => setSelectedDestinations(new Set())}
+            size="sm"
+            type="button"
+            variant="ghost"
+          >
+            {t("clearDevices")}
+          </Button>
+        </div>
+        {compact && (
+          <Button
+            disabled={running || selectedDestinations.size === 0}
+            onClick={() => void run()}
+            size="sm"
+            type="button"
+          >
+            {running && runningDestinationId === null ? <Spinner /> : <Play />}
+            {t("runSelected")}
+          </Button>
+        )}
+      </div>
+    </DropdownMenuContent>
+  );
 
   if (compact) {
     return (
@@ -133,45 +269,7 @@ export function RunBuildControls({
               {t("run")}
             </Button>
           </DropdownMenuTrigger>
-          <DropdownMenuContent align="end" className="w-72">
-            {loadingDestinations && (
-              <div className="flex justify-center p-2 text-muted-foreground">
-                <Spinner />
-              </div>
-            )}
-            {destinations.map((destination) => (
-              <DropdownMenuCheckboxItem
-                checked={selectedDestinations.has(destination.id)}
-                key={destination.id}
-                onCheckedChange={(checked) =>
-                  setSelectedDestinations((current) => {
-                    const next = new Set(current);
-                    if (checked) next.add(destination.id);
-                    else next.delete(destination.id);
-                    return next;
-                  })
-                }
-              >
-                {destination.name}
-                {destination.osVersion ? ` · ${destination.osVersion}` : ""}
-              </DropdownMenuCheckboxItem>
-            ))}
-            {destinationsLoaded && !destinations.length && (
-              <p className="p-2 text-xs text-muted-foreground">
-                {t("noCompatibleDevices")}
-              </p>
-            )}
-            <DropdownMenuSeparator />
-            <DropdownMenuItem
-              disabled={running || selectedDestinations.size === 0}
-              onSelect={(event) => {
-                event.preventDefault();
-                void run();
-              }}
-            >
-              {running ? <Spinner /> : <Play />} {t("run")}
-            </DropdownMenuItem>
-          </DropdownMenuContent>
+          {destinationMenu}
         </DropdownMenu>
       </div>
     );
@@ -202,30 +300,7 @@ export function RunBuildControls({
             <ChevronDown />
           </Button>
         </DropdownMenuTrigger>
-        <DropdownMenuContent align="end" className="w-72">
-          {destinations.map((destination) => (
-            <DropdownMenuCheckboxItem
-              checked={selectedDestinations.has(destination.id)}
-              key={destination.id}
-              onCheckedChange={(checked) =>
-                setSelectedDestinations((current) => {
-                  const next = new Set(current);
-                  if (checked) next.add(destination.id);
-                  else next.delete(destination.id);
-                  return next;
-                })
-              }
-            >
-              {destination.name}
-              {destination.osVersion ? ` · ${destination.osVersion}` : ""}
-            </DropdownMenuCheckboxItem>
-          ))}
-          {destinationsLoaded && !destinations.length && (
-            <p className="p-2 text-xs text-muted-foreground">
-              {t("noCompatibleDevices")}
-            </p>
-          )}
-        </DropdownMenuContent>
+        {destinationMenu}
       </DropdownMenu>
       <Button
         disabled={running || selectedDestinations.size === 0}

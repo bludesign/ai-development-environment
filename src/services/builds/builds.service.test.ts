@@ -931,6 +931,7 @@ describe("BuildsService", () => {
         resultJson: JSON.stringify({
           destinations: [
             destination,
+            { ...destination, id: "SIM-OFFLINE", available: false },
             {
               type: "PHYSICAL_DEVICE",
               id: "DEVICE-1",
@@ -947,7 +948,10 @@ describe("BuildsService", () => {
 
     await expect(
       service.destinationsForBuild("build-1", "request-4"),
-    ).resolves.toEqual([destination]);
+    ).resolves.toEqual([
+      destination,
+      { ...destination, id: "SIM-OFFLINE", available: false },
+    ]);
     expect(createJob).toHaveBeenCalledWith(
       expect.objectContaining({
         kind: IOS_RUN_DESTINATIONS_JOB_KIND,
@@ -1091,9 +1095,9 @@ describe("BuildsService", () => {
     });
     const createJob = vi.fn().mockResolvedValue({ id: "deployment-job" });
     const service = new BuildsService(control(createJob));
-    vi.spyOn(service, "destinationsForBuild").mockResolvedValue([
-      refreshedDestination,
-    ]);
+    const refreshDestinations = vi
+      .spyOn(service, "destinationsForBuild")
+      .mockResolvedValue([refreshedDestination]);
 
     await expect(
       service.runBuild({
@@ -1126,6 +1130,17 @@ describe("BuildsService", () => {
       where: { id: { in: ["deployment-1"] } },
       data: { jobId: "deployment-job" },
     });
+
+    refreshDestinations.mockResolvedValueOnce([
+      { ...refreshedDestination, available: false },
+    ]);
+    await expect(
+      service.runBuild({
+        buildId: "build-1",
+        destinations: [selectedDestination],
+        requestId: "run-offline",
+      }),
+    ).rejects.toThrow("no longer available");
   });
 
   test("redacts common credentials again before central log persistence", async () => {

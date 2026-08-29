@@ -1997,9 +1997,17 @@ function LatestBuildRow({
           </DropdownMenuItem>
         </DropdownMenuContent>
       </DropdownMenu>
-      <Badge variant={buildStatusVariant(build.status)}>
-        {buildsT(`statuses.${build.status}`)}
-      </Badge>
+      {build.status === "SUCCEEDED" ? (
+        <Badge asChild variant={buildStatusVariant(build.status)}>
+          <Link href={`/builds/${build.id}`}>
+            {buildsT(`statuses.${build.status}`)}
+          </Link>
+        </Badge>
+      ) : (
+        <Badge variant={buildStatusVariant(build.status)}>
+          {buildsT(`statuses.${build.status}`)}
+        </Badge>
+      )}
       {build.outOfDate && (
         <Badge
           className="border-amber-500/40 text-amber-700 dark:text-amber-300"
@@ -3493,17 +3501,15 @@ function DeleteWorktreeDialog({
   );
 }
 
-export function ActionRow(
-  props: WorktreeItemProps & { onCompleted: () => Promise<void> },
+export function PrimaryWorktreeActions(
+  props: Pick<
+    WorktreeItemProps,
+    "appId" | "group" | "overview" | "worktree"
+  > & { onCompleted: () => Promise<void> },
 ) {
   const { worktree } = props;
   const { appId } = props;
   const t = useTranslations("worktrees");
-  const unavailable =
-    worktree.availability !== "AVAILABLE" ||
-    Boolean(props.group.blockingJob) ||
-    worktree.rebaseInProgress;
-  const changeActions = worktreeChangeActionState(worktree);
   const agent = props.overview.agents.find((entry) =>
     entry.codebases.some(
       (codebase) => codebase.codebase.id === props.group.codebase.id,
@@ -3544,6 +3550,7 @@ export function ActionRow(
                   ? t("worktreeUnavailable")
                   : null
         }
+        onStarted={() => void props.onCompleted()}
         worktreeId={worktree.id}
       />
       {runUnavailable ? (
@@ -3572,6 +3579,23 @@ export function ActionRow(
           </Link>
         </Button>
       )}
+    </div>
+  );
+}
+
+export function ActionRow(
+  props: WorktreeItemProps & { onCompleted: () => Promise<void> },
+) {
+  const { worktree } = props;
+  const t = useTranslations("worktrees");
+  const unavailable =
+    worktree.availability !== "AVAILABLE" ||
+    Boolean(props.group.blockingJob) ||
+    worktree.rebaseInProgress;
+  const changeActions = worktreeChangeActionState(worktree);
+  return (
+    <div className="flex flex-wrap gap-2">
+      <PrimaryWorktreeActions {...props} />
       <OperationButton
         icon={<Download />}
         label={t("pull")}

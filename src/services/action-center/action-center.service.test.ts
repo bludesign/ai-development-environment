@@ -287,6 +287,10 @@ describe("ActionCenterService", () => {
     expect(result.items.map(({ key }) => key)).not.toContain(
       "BUILD:build-unrun-old",
     );
+    expect(
+      result.items.find(({ key }) => key === "BUILD:build-unrun-new")
+        ?.dismissalFingerprint,
+    ).toBe("BUILD:build-unrun-new:UNRUN_BUILD");
     expect(result.items[0]?.questionBatches[0]?.questions[0]?.prompt).toBe(
       "Which approach should be used?",
     );
@@ -384,5 +388,73 @@ describe("ActionCenterService", () => {
         failureFingerprint: `${fingerprint}:stale`,
       }),
     ).rejects.toThrow("no longer current");
+  });
+
+  test("dismisses only the current newest runnable build fingerprint", async () => {
+    const upsert = vi.fn().mockResolvedValue({});
+    const findFirst = vi.fn().mockResolvedValue({ id: "build-unrun-new" });
+    getPrismaClient.mockResolvedValue({
+      build: {
+        findUnique: vi.fn().mockResolvedValue({
+          id: "build-unrun-new",
+          status: "SUCCEEDED",
+          worktreeId: "worktree-1",
+          configurationId: "configuration-1",
+          destinationType: "SIMULATOR",
+          artifacts: [{ kind: "RUNNABLE_APP" }],
+          deployments: [],
+          worktree: {
+            id: "worktree-1",
+            availability: "AVAILABLE",
+            missingAt: null,
+          },
+        }),
+        findFirst,
+      },
+      actionCenterAcknowledgement: { upsert },
+    });
+    const publish = vi.spyOn(agentEventBus, "publish");
+    const service = new ActionCenterService();
+    const fingerprint = "BUILD:build-unrun-new:UNRUN_BUILD";
+
+    await expect(
+      service.dismiss({
+        resourceKind: "BUILD",
+        resourceId: "build-unrun-new",
+        dismissalFingerprint: fingerprint,
+      }),
+    ).resolves.toBe(true);
+
+    expect(upsert).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: {
+          resourceKind_resourceId_failureFingerprint: {
+            resourceKind: "BUILD",
+            resourceId: "build-unrun-new",
+            failureFingerprint: fingerprint,
+          },
+        },
+      }),
+    );
+    expect(publish).toHaveBeenCalledWith("sidebar-status.changed", {
+      sidebarStatusChanged: true,
+    });
+
+    await expect(
+      service.dismiss({
+        resourceKind: "BUILD",
+        resourceId: "build-unrun-new",
+        dismissalFingerprint: `${fingerprint}:stale`,
+      }),
+    ).rejects.toThrow("no longer current");
+
+    findFirst.mockResolvedValueOnce({ id: "newer-build" });
+    await expect(
+      service.dismiss({
+        resourceKind: "BUILD",
+        resourceId: "build-unrun-new",
+        dismissalFingerprint: fingerprint,
+      }),
+    ).rejects.toThrow("no longer dismissible");
   });
 });

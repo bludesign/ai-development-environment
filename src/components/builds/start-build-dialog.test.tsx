@@ -455,8 +455,13 @@ describe("StartBuildDialog", () => {
   });
 
   test("preflights a configuration, previews a safe command, validates overrides, and snapshots default scripts", async () => {
+    const started = vi.fn();
     render(
-      <StartBuildButton codebaseId="codebase-1" worktreeId="worktree-1" />,
+      <StartBuildButton
+        codebaseId="codebase-1"
+        onStarted={started}
+        worktreeId="worktree-1"
+      />,
     );
     fireEvent.click(screen.getByRole("button", { name: "Build" }));
 
@@ -576,6 +581,7 @@ describe("StartBuildDialog", () => {
         },
       ),
     );
-    expect(navigation.push).toHaveBeenCalledWith("/builds/build-1");
+    expect(started).toHaveBeenCalledWith("build-1");
+    expect(navigation.push).not.toHaveBeenCalled();
   });
 });

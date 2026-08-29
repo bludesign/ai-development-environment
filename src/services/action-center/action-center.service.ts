@@ -67,12 +67,19 @@ export type ActionCenterItemView = {
     preferredDestination: unknown;
   } | null;
   failureFingerprint: string | null;
+  dismissalFingerprint: string | null;
 };
 
 type AcknowledgeInput = {
   resourceKind: string;
   resourceId: string;
   failureFingerprint: string;
+};
+
+type DismissInput = {
+  resourceKind: string;
+  resourceId: string;
+  dismissalFingerprint: string;
 };
 
 const questionInclude = {
@@ -113,6 +120,10 @@ function failureFingerprint(
   generation?: number,
 ): string {
   return [kind, id, generation ?? 0, timestamp.toISOString()].join(":");
+}
+
+function unrunBuildFingerprint(id: string): string {
+  return `BUILD:${id}:UNRUN_BUILD`;
 }
 
 function priority(reason: ActionCenterReason): number {
@@ -331,6 +342,7 @@ export class ActionCenterService {
         questionBatches: reason === "QUESTION" ? questions : [],
         buildRun: null,
         failureFingerprint: fingerprint,
+        dismissalFingerprint: null,
       });
     }
 
@@ -373,6 +385,7 @@ export class ActionCenterService {
         questionBatches: reason === "QUESTION" ? questions : [],
         buildRun: null,
         failureFingerprint: fingerprint,
+        dismissalFingerprint: null,
       });
     }
 
@@ -417,6 +430,8 @@ export class ActionCenterService {
               }
             : null,
         failureFingerprint: fingerprint,
+        dismissalFingerprint:
+          reason === "UNRUN_BUILD" ? unrunBuildFingerprint(build.id) : null,
       });
     }
 
@@ -512,6 +527,71 @@ export class ActionCenterService {
         id: randomUUID(),
         resourceKind,
         resourceId: input.resourceId,
+        failureFingerprint: current,
+      },
+      update: { acknowledgedAt: new Date() },
+    });
+    agentEventBus.publish(SIDEBAR_STATUS_CHANGED_TOPIC, {
+      sidebarStatusChanged: true,
+    });
+    return true;
+  }
+
+  async dismiss(input: DismissInput): Promise<boolean> {
+    const resourceKind = input.resourceKind.trim().toUpperCase();
+    if (resourceKind !== "BUILD") {
+      throw new Error("Only unrun builds can be dismissed");
+    }
+    const prisma = await getPrismaClient();
+    const build = await prisma.build.findUnique({
+      where: { id: input.resourceId },
+      include: {
+        artifacts: { select: { kind: true } },
+        deployments: { select: { id: true } },
+        worktree: { select: { id: true, availability: true, missingAt: true } },
+      },
+    });
+    if (
+      !build ||
+      build.status !== "SUCCEEDED" ||
+      !build.worktree ||
+      build.worktree.missingAt ||
+      build.worktree.availability !== "AVAILABLE" ||
+      !build.artifacts.some((artifact) => artifact.kind === "RUNNABLE_APP") ||
+      build.deployments.length > 0
+    ) {
+      throw new Error("Action Center item is no longer dismissible");
+    }
+    if (build.worktreeId && build.configurationId) {
+      const latest = await prisma.build.findFirst({
+        where: {
+          worktreeId: build.worktreeId,
+          configurationId: build.configurationId,
+          destinationType: build.destinationType,
+        },
+        orderBy: [{ createdAt: "desc" }, { id: "desc" }],
+        select: { id: true },
+      });
+      if (latest?.id !== build.id) {
+        throw new Error("Action Center item is no longer dismissible");
+      }
+    }
+    const current = unrunBuildFingerprint(build.id);
+    if (current !== input.dismissalFingerprint) {
+      throw new Error("Action Center dismissal is no longer current");
+    }
+    await prisma.actionCenterAcknowledgement.upsert({
+      where: {
+        resourceKind_resourceId_failureFingerprint: {
+          resourceKind,
+          resourceId: build.id,
+          failureFingerprint: current,
+        },
+      },
+      create: {
+        id: randomUUID(),
+        resourceKind,
+        resourceId: build.id,
         failureFingerprint: current,
       },
       update: { acknowledgedAt: new Date() },

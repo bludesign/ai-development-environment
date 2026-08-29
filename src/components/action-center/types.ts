@@ -55,6 +55,7 @@ export type ActionCenterItem = {
     preferredDestination: BuildDestination;
   } | null;
   failureFingerprint: string | null;
+  dismissalFingerprint: string | null;
 };
 
 export type ActionCenterPageView = {
@@ -67,7 +68,7 @@ export type ActionCenterPageView = {
 
 export const ACTION_CENTER_ITEM_FIELDS = `
   key resourceKind reason resourceId href displayNumber label summary status phase error
-  createdAt updatedAt failureFingerprint
+  createdAt updatedAt failureFingerprint dismissalFingerprint
   worktree { id folder branch highlightColor }
   questionBatches {
     id sourceKind createdAt
