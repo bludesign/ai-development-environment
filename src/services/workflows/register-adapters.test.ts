@@ -438,6 +438,110 @@ describe("workflow expansion adapters", () => {
     return executor;
   }
 
+  test("sends typed Tailscale templates and waits on durable fleet operations", async () => {
+    const callTool = vi.fn().mockResolvedValue({
+      structuredContent: {
+        operation: {
+          id: "tailscale-operation-1",
+          templateId: "template-1",
+          status: "QUEUED",
+        },
+      },
+    });
+    const input = context("actual-worktree");
+    input.node = {
+      ...input.node,
+      id: "tailscale-upsert",
+      kind: "TAILSCALE_SERVE_UPSERT_TEMPLATE",
+      config: {
+        name: "Developer API",
+        protocol: "HTTPS",
+        listenPort: 443,
+        mountPath: "/api",
+        destinationProtocol: "HTTP",
+        destinationPort: 3000,
+        destinationPath: "",
+        funnel: false,
+        appCapabilities: ["example.com/editor"],
+        proxyProtocol: "NONE",
+        agentIds: ["agent-1", "agent-2"],
+      },
+    };
+
+    const result = await expansionExecutor(callTool).execute(input);
+
+    expect(callTool).toHaveBeenCalledWith(
+      expect.objectContaining({
+        groupId: "builtin:tailscale",
+        name: "upsert_tailscale_serve_template",
+        arguments: expect.objectContaining({
+          input: expect.objectContaining({
+            listenPort: 443,
+            assignments: [
+              { agentId: "agent-1", enabled: true },
+              { agentId: "agent-2", enabled: true },
+            ],
+          }),
+        }),
+      }),
+      expect.any(Object),
+    );
+    expect(result.wait).toMatchObject({
+      kind: "TAILSCALE_SERVE_OPERATION",
+      externalKey: "tailscale-operation-1",
+    });
+    expect(result.links).toContainEqual({
+      kind: "TAILSCALE_SERVE_OPERATION",
+      resourceId: "tailscale-operation-1",
+      label: "Tailscale Serve",
+      url: "/tailscale",
+    });
+    expect(result.sessionPatch).toMatchObject({
+      tailscale: {
+        operationId: "tailscale-operation-1",
+        status: "QUEUED",
+        templateId: "template-1",
+      },
+    });
+  });
+
+  test("fails a durable Tailscale wait on partial fleet results", async () => {
+    const registerWaitPoller = vi.fn();
+    const executor = new WorkflowStepExecutor();
+    registerWorkflowAdapters(
+      { registerWaitPoller } as unknown as WorkflowsService,
+      executor,
+      {
+        tools: { callTool: vi.fn() },
+        tailscale: {
+          operation: vi.fn().mockResolvedValue({
+            id: "tailscale-operation-1",
+            templateId: "template-1",
+            status: "PARTIAL_FAILED",
+          }),
+        },
+      } as unknown as WorkflowAdapterServices,
+    );
+    const poller = registerWaitPoller.mock.calls.find(
+      ([kind]) => kind === "TAILSCALE_SERVE_OPERATION",
+    )?.[1];
+
+    const result = await poller("tailscale-operation-1");
+
+    expect(result).toMatchObject({
+      pending: false,
+      error: "Tailscale Serve operation partial failed",
+      result: {
+        sessionPatch: {
+          tailscale: {
+            operationId: "tailscale-operation-1",
+            status: "PARTIAL_FAILED",
+          },
+        },
+      },
+    });
+  });
+
   test("unwraps GitHub action payloads and refreshes pull request context", async () => {
     const callTool = vi.fn().mockResolvedValue({
       content: [{ type: "text", text: "provider result" }],

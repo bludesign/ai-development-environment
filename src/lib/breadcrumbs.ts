@@ -44,6 +44,7 @@ export type BreadcrumbLabelKey =
   | "skills"
   | "status"
   | "sync"
+  | "tailscale"
   | "tickets"
   | "tools"
   | "unifiedEvents"
@@ -108,6 +109,7 @@ const STATIC_SEGMENTS: Record<string, BreadcrumbLabelKey> = {
   skills: "skills",
   status: "status",
   sync: "sync",
+  tailscale: "tailscale",
   tickets: "tickets",
   tools: "tools",
   "unified-events": "unifiedEvents",
@@ -194,6 +196,7 @@ const ROUTABLE_STATIC_PATHS = new Set([
   "/sessions",
   "/settings",
   "/status",
+  "/tailscale",
   "/skills",
   "/skills/groups",
   "/tools",

@@ -125,6 +125,16 @@ import {
   scanSigningAssets,
 } from "./signing.js";
 import type { BuildLogChunk } from "@ai-development-environment/agent-contract/builds";
+import {
+  TAILSCALE_SERVE_INSPECT_JOB_KIND,
+  TAILSCALE_SERVE_REMOVE_JOB_KIND,
+  TAILSCALE_SERVE_UPSERT_JOB_KIND,
+} from "@ai-development-environment/agent-contract/tailscale";
+import {
+  inspectTailscaleServe,
+  removeTailscaleServe,
+  upsertTailscaleServe,
+} from "./tailscale.js";
 
 export type AgentJobHandlerContext = {
   agentId: string;
@@ -219,6 +229,9 @@ export const handlers: Readonly<Record<string, AgentJobHandler>> = {
   [SIGNING_PROFILE_DELETE_JOB_KIND]: deleteSigningProfile,
   [SIGNING_IDENTITY_IMPORT_JOB_KIND]: importSigningIdentity,
   [SIGNING_IDENTITY_DELETE_JOB_KIND]: deleteSigningIdentity,
+  [TAILSCALE_SERVE_INSPECT_JOB_KIND]: inspectTailscaleServe,
+  [TAILSCALE_SERVE_UPSERT_JOB_KIND]: upsertTailscaleServe,
+  [TAILSCALE_SERVE_REMOVE_JOB_KIND]: removeTailscaleServe,
 };
 
 export { SIGNING_ASSET_JOB_KINDS };

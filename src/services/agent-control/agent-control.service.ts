@@ -149,6 +149,15 @@ import {
   parseWorkflowGitCheckpointPayload,
   parseWorkflowTerminalPayload,
 } from "@ai-development-environment/agent-contract/workflows";
+import {
+  TAILSCALE_SERVE_INSPECT_JOB_KIND,
+  TAILSCALE_SERVE_JOB_KINDS,
+  TAILSCALE_SERVE_REMOVE_JOB_KIND,
+  TAILSCALE_SERVE_UPSERT_JOB_KIND,
+  tailscaleServeInspectPayload,
+  tailscaleServeRemovePayload,
+  tailscaleServeUpsertPayload,
+} from "@ai-development-environment/agent-contract/tailscale";
 
 import { getPrismaClient } from "@/data/prisma-client";
 import {
@@ -197,6 +206,7 @@ export const SUPPORTED_AGENT_JOBS = [
   ...IOS_BUILD_JOB_KINDS,
   ...SIGNING_ASSET_JOB_KINDS,
   ...WORKFLOW_JOB_KINDS,
+  ...TAILSCALE_SERVE_JOB_KINDS,
 ] as const;
 
 type CompletionHandler = (job: {
@@ -456,6 +466,18 @@ export function validateJob(kind: string, payload: unknown): void {
         `Unexpected ccusage.report payload field: ${unexpected[0]}`,
       );
     }
+    return;
+  }
+  if (kind === TAILSCALE_SERVE_INSPECT_JOB_KIND) {
+    tailscaleServeInspectPayload(value);
+    return;
+  }
+  if (kind === TAILSCALE_SERVE_UPSERT_JOB_KIND) {
+    tailscaleServeUpsertPayload(value);
+    return;
+  }
+  if (kind === TAILSCALE_SERVE_REMOVE_JOB_KIND) {
+    tailscaleServeRemovePayload(value);
     return;
   }
   throw new Error(`Unsupported agent job kind: ${kind}`);

@@ -168,6 +168,18 @@ export const ids = {
      */
     captured: "1a2b3c4d-5e6f-4a7b-8c9d-0e1f2a3b4c5d",
   },
+  tailscaleTemplates: {
+    dashboard: "tailscale-template-dashboard",
+    postgres: "tailscale-template-postgres",
+  },
+  tailscaleOperations: {
+    /**
+     * Doubles as the Tailscale page's inspection request id. Playwright pins the
+     * client-generated id to this finished operation so opening the page does not
+     * enqueue fresh agent jobs in the shared screenshot database.
+     */
+    capturedInspection: "2b3c4d5e-6f70-4a8b-9c0d-1e2f3a4b5c6d",
+  },
 } as const;
 
 /** Display numbers must be unique per their scope; kept here so the seed stays consistent. */

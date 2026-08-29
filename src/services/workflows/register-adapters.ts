@@ -37,6 +37,7 @@ import type { PushNotificationsService } from "@/services/push-notifications";
 import type { RunsService } from "@/services/runs";
 import type { SkillsService } from "@/services/skills";
 import type { SigningAssetsService } from "@/services/signing-assets";
+import type { TailscaleServeService } from "@/services/tailscale";
 import type { ToolsService } from "@/services/tools";
 import type {
   WorktreeAutomationService,
@@ -80,6 +81,7 @@ export type WorkflowAdapterServices = {
   iosDevices: IosDevicesService;
   modelCosts: ModelCostsService;
   signingAssets: SigningAssetsService;
+  tailscale: TailscaleServeService;
 };
 
 const object = (value: unknown, label: string): Record<string, unknown> => {
@@ -782,6 +784,135 @@ function registerExpansionAdapters(
       },
     );
   });
+  const tailscaleResult = async (
+    context: WorkflowExecutionContext,
+    toolName: string,
+    args: Record<string, unknown>,
+  ) => {
+    const result = await call(context, "builtin:tailscale", toolName, args, {
+      sessionPatch: (output) => {
+        const operation = object(
+          output.operation,
+          "Tailscale operation output",
+        );
+        return {
+          tailscale: {
+            operation,
+            operationId: operation.id,
+            status: operation.status,
+            templateId: operation.templateId,
+          },
+        };
+      },
+      wait: (output) => {
+        const operation = object(
+          output.operation,
+          "Tailscale operation output",
+        );
+        return ["SUCCEEDED", "FAILED", "PARTIAL_FAILED"].includes(
+          String(operation.status),
+        )
+          ? undefined
+          : waitFor(
+              context,
+              "TAILSCALE_SERVE_OPERATION",
+              text(operation.id, "Tailscale operation ID", 500),
+              7 * 24 * 60 * 60,
+            );
+      },
+    });
+    const operation = object(
+      object(result.output, "Tailscale tool output").operation,
+      "Tailscale operation output",
+    );
+    return {
+      ...result,
+      links: [
+        {
+          kind: "TAILSCALE_SERVE_OPERATION",
+          resourceId: text(operation.id, "Tailscale operation ID", 500),
+          label: "Tailscale Serve",
+          url: "/tailscale",
+        },
+      ],
+    };
+  };
+  executor.register("TAILSCALE_SERVE_INSPECT", (context) =>
+    tailscaleResult(context, "inspect_tailscale_serve", {
+      agentIds: Array.isArray(context.node.config.agentIds)
+        ? context.node.config.agentIds.map(String)
+        : [],
+      requestId: requestId(context, "tailscale-inspect"),
+    }),
+  );
+  executor.register("TAILSCALE_SERVE_UPSERT_TEMPLATE", (context) => {
+    const templateId = optionalText(context.node.config.templateId, 500);
+    const expectedRevision = Number(context.node.config.expectedRevision);
+    const agentIds = Array.isArray(context.node.config.agentIds)
+      ? context.node.config.agentIds.map((value) =>
+          text(value, "Agent ID", 500),
+        )
+      : [];
+    return tailscaleResult(context, "upsert_tailscale_serve_template", {
+      input: {
+        ...(templateId ? { id: templateId, expectedRevision } : {}),
+        name: text(context.node.config.name, "Template name", 200),
+        protocol: text(
+          context.node.config.protocol ?? "HTTPS",
+          "Listener protocol",
+          50,
+        ),
+        listenPort: Number(context.node.config.listenPort),
+        mountPath: String(context.node.config.mountPath ?? "/"),
+        destinationProtocol: text(
+          context.node.config.destinationProtocol ?? "HTTP",
+          "Destination protocol",
+          50,
+        ),
+        destinationPort: Number(context.node.config.destinationPort),
+        destinationPath: String(context.node.config.destinationPath ?? ""),
+        funnel: context.node.config.funnel === true,
+        appCapabilities: Array.isArray(context.node.config.appCapabilities)
+          ? context.node.config.appCapabilities.map((value) =>
+              text(value, "App capability", 500),
+            )
+          : [],
+        proxyProtocol: text(
+          context.node.config.proxyProtocol ?? "NONE",
+          "PROXY protocol",
+          20,
+        ),
+        assignments: agentIds.map((agentId) => ({ agentId, enabled: true })),
+      },
+      requestId: requestId(context, "tailscale-upsert"),
+    });
+  });
+  executor.register("TAILSCALE_SERVE_SET_AGENT_ENABLED", (context) =>
+    tailscaleResult(context, "set_tailscale_serve_agent_enabled", {
+      templateId: contextual(
+        context,
+        "templateId",
+        "tailscale.templateId",
+        "Tailscale template ID",
+      ),
+      agentId: text(context.node.config.agentId, "Agent ID", 500),
+      enabled: context.node.config.enabled === true,
+      expectedRevision: Number(context.node.config.expectedRevision),
+      requestId: requestId(context, "tailscale-assignment"),
+    }),
+  );
+  executor.register("TAILSCALE_SERVE_DELETE_TEMPLATE", (context) =>
+    tailscaleResult(context, "delete_tailscale_serve_template", {
+      id: contextual(
+        context,
+        "templateId",
+        "tailscale.templateId",
+        "Tailscale template ID",
+      ),
+      expectedRevision: Number(context.node.config.expectedRevision),
+      requestId: requestId(context, "tailscale-delete"),
+    }),
+  );
   executor.register("SIGNING_REFRESH", (context) =>
     call(
       context,
@@ -1482,6 +1613,42 @@ function registerWaitPollers(
           ...collection,
           sessionPatch: { buildData: collection },
         },
+      };
+    },
+  );
+  workflows.registerWaitPoller(
+    "TAILSCALE_SERVE_OPERATION",
+    async (operationId) => {
+      const operation = await services.tailscale.operation(operationId);
+      if (!operation) {
+        return {
+          pending: false,
+          error: "Tailscale Serve operation disappeared",
+        };
+      }
+      if (
+        !["SUCCEEDED", "FAILED", "PARTIAL_FAILED"].includes(operation.status)
+      ) {
+        return { pending: true, pollAfterSeconds: 2 };
+      }
+      const result = {
+        ...operation,
+        sessionPatch: {
+          tailscale: {
+            operation,
+            operationId: operation.id,
+            status: operation.status,
+            templateId: operation.templateId,
+          },
+        },
+      };
+      return {
+        pending: false,
+        result,
+        error:
+          operation.status === "SUCCEEDED"
+            ? null
+            : `Tailscale Serve operation ${operation.status.toLowerCase().replaceAll("_", " ")}`,
       };
     },
   );

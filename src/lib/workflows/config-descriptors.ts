@@ -972,6 +972,72 @@ const STEP_CONFIG_DESCRIPTORS: StepConfigDescriptors = {
       bool("locked", "Locked"),
     ],
   },
+  TAILSCALE_SERVE_INSPECT: {
+    fields: [resourceMulti("agentIds", "Agents", "agent")],
+  },
+  TAILSCALE_SERVE_UPSERT_TEMPLATE: {
+    fields: [
+      text("templateId", "Template ID"),
+      num("expectedRevision", "Expected revision", {
+        minimum: 1,
+        integer: true,
+      }),
+      text("name", "Template name", { required: true }),
+      enumField(
+        "protocol",
+        "Listener protocol",
+        staticOptions(["HTTP", "HTTPS", "TCP", "TLS_TERMINATED_TCP"]),
+        { required: true, default: "HTTPS" },
+      ),
+      num("listenPort", "Incoming port", {
+        required: true,
+        default: 443,
+        minimum: 1,
+        maximum: 65_535,
+        integer: true,
+      }),
+      text("mountPath", "Mount path", { default: "/" }),
+      enumField(
+        "destinationProtocol",
+        "Destination protocol",
+        staticOptions(["HTTP", "HTTPS", "HTTPS_INSECURE", "TCP"]),
+        { required: true, default: "HTTP" },
+      ),
+      num("destinationPort", "Destination port", {
+        required: true,
+        default: 3000,
+        minimum: 1,
+        maximum: 65_535,
+        integer: true,
+      }),
+      text("destinationPath", "Destination path", { default: "" }),
+      bool("funnel", "Public Funnel"),
+      stringList("appCapabilities", "App capabilities"),
+      enumField(
+        "proxyProtocol",
+        "PROXY protocol",
+        staticOptions(["NONE", "V1", "V2"]),
+        { required: true, default: "NONE" },
+      ),
+      resourceMulti("agentIds", "Enabled agents", "agent", {
+        required: true,
+      }),
+    ],
+  },
+  TAILSCALE_SERVE_SET_AGENT_ENABLED: {
+    fields: [
+      text("templateId", "Template ID", { required: true }),
+      resource("agentId", "Agent", "agent", { required: true }),
+      bool("enabled", "Enabled"),
+      num("expectedRevision", "Expected revision", { required: true }),
+    ],
+  },
+  TAILSCALE_SERVE_DELETE_TEMPLATE: {
+    fields: [
+      text("templateId", "Template ID", { required: true }),
+      num("expectedRevision", "Expected revision", { required: true }),
+    ],
+  },
   SIGNING_REFRESH: { fields: [stringList("agentIds", "Agent IDs")] },
   SIGNING_SYNC_PROFILE: {
     fields: [
@@ -1341,6 +1407,10 @@ const POLLED_WAIT_STEP_KINDS: readonly WorkflowStepKind[] = [
   "COMMAND_RERUN",
   "BUILD_REBUILD",
   "BUILD_DATA_REFRESH",
+  "TAILSCALE_SERVE_INSPECT",
+  "TAILSCALE_SERVE_UPSERT_TEMPLATE",
+  "TAILSCALE_SERVE_SET_AGENT_ENABLED",
+  "TAILSCALE_SERVE_DELETE_TEMPLATE",
   "SIGNING_REFRESH",
   "SIGNING_SYNC_PROFILE",
   "SIGNING_DELETE_EXPIRED",

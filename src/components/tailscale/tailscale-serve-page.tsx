@@ -1,0 +1,1138 @@
+"use client";
+
+import {
+  AlertTriangle,
+  CheckCircle2,
+  ExternalLink,
+  Globe2,
+  MoreHorizontal,
+  Pencil,
+  Plus,
+  RefreshCw,
+  RotateCcw,
+  Trash2,
+} from "lucide-react";
+import { useTranslations } from "next-intl";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+
+import { ConfirmationDialog } from "@/components/confirmation-dialog";
+import { DateTime } from "@/components/common/date-time";
+import { WorkflowResourcePanel } from "@/components/workflows/workflow-resource-panel";
+import { Alert, AlertDescription } from "@/components/ui/alert";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import {
+  Card,
+  CardAction,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from "@/components/ui/card";
+import { Checkbox } from "@/components/ui/checkbox";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import { Spinner } from "@/components/ui/spinner";
+import { Switch } from "@/components/ui/switch";
+import { createClientId } from "@/lib/browser-utils";
+import {
+  controlPlaneRequest,
+  controlPlaneSubscriptions,
+} from "@/lib/control-plane-client";
+import { cn } from "@/lib/utils";
+
+type Route = {
+  protocol: "HTTP" | "HTTPS" | "TCP" | "TLS_TERMINATED_TCP";
+  listenPort: number;
+  mountPath: string;
+  destination: {
+    protocol: "HTTP" | "HTTPS" | "HTTPS_INSECURE" | "TCP";
+    port: number;
+    path: string;
+  };
+  funnel: boolean;
+  appCapabilities: string[];
+  proxyProtocol: "NONE" | "V1" | "V2";
+};
+
+type Agent = {
+  id: string;
+  name: string;
+  hostname: string;
+  lastSeenAt: string | null;
+  disconnectedAt: string | null;
+};
+
+type AgentState = {
+  agent: Agent;
+  supported: boolean;
+  dnsHostname: string | null;
+  ipv4: string[];
+  ipv6: string[];
+  backendState: string;
+  observedRoutes: Route[];
+  lastInspectedAt: string | null;
+  error: string | null;
+};
+
+type Assignment = {
+  agent: Agent;
+  desiredEnabled: boolean;
+  observedEnabled: boolean;
+  observedFingerprint: string | null;
+  revision: number;
+  status: string;
+  lastJobId: string | null;
+  lastError: string | null;
+  lastObservedAt: string | null;
+};
+
+type Template = {
+  id: string;
+  name: string;
+  route: Route;
+  fingerprint: string;
+  revision: number;
+  lifecycle: "ACTIVE" | "DELETING";
+  origin: "USER" | "IMPORTED";
+  assignments: Assignment[];
+  createdAt: string;
+  updatedAt: string;
+};
+
+type Overview = {
+  agents: AgentState[];
+  templates: Template[];
+  updatedAt: string;
+};
+
+type Operation = {
+  id: string;
+  kind: string;
+  status: string;
+  templateId: string | null;
+  agents: Array<{
+    agent: Agent;
+    status: string;
+    error: string | null;
+    job: { id: string; status: string; error: string | null } | null;
+  }>;
+};
+
+const ROUTE_FIELDS = `
+  protocol listenPort mountPath funnel appCapabilities proxyProtocol
+  destination { protocol port path }
+`;
+const AGENT_FIELDS = `id name hostname lastSeenAt disconnectedAt`;
+const OPERATION_FIELDS = `
+  id kind status templateId createdAt finishedAt updatedAt
+  agents { agent { ${AGENT_FIELDS} } status error job { id status error } }
+`;
+const OVERVIEW_FIELDS = `
+  updatedAt
+  agents {
+    agent { ${AGENT_FIELDS} }
+    supported dnsHostname ipv4 ipv6 backendState lastInspectedAt error
+    observedRoutes { ${ROUTE_FIELDS} }
+  }
+  templates {
+    id name fingerprint revision lifecycle origin createdAt updatedAt
+    route { ${ROUTE_FIELDS} }
+    assignments {
+      agent { ${AGENT_FIELDS} }
+      desiredEnabled observedEnabled observedFingerprint revision status
+      lastJobId lastError lastObservedAt
+    }
+  }
+`;
+
+type EditorState = {
+  id: string | null;
+  expectedRevision: number | null;
+  name: string;
+  protocol: Route["protocol"];
+  listenPort: string;
+  mountPath: string;
+  destinationProtocol: Route["destination"]["protocol"];
+  destinationPort: string;
+  destinationPath: string;
+  funnel: boolean;
+  appCapabilities: string;
+  proxyProtocol: Route["proxyProtocol"];
+  assignments: Record<string, boolean>;
+};
+
+function emptyEditor(agents: AgentState[]): EditorState {
+  return {
+    id: null,
+    expectedRevision: null,
+    name: "",
+    protocol: "HTTPS",
+    listenPort: "443",
+    mountPath: "/",
+    destinationProtocol: "HTTP",
+    destinationPort: "3000",
+    destinationPath: "",
+    funnel: false,
+    appCapabilities: "",
+    proxyProtocol: "NONE",
+    assignments: Object.fromEntries(
+      agents
+        .filter(({ supported }) => supported)
+        .map(({ agent }) => [agent.id, true]),
+    ),
+  };
+}
+
+function editorFor(template: Template): EditorState {
+  return {
+    id: template.id,
+    expectedRevision: template.revision,
+    name: template.name,
+    protocol: template.route.protocol,
+    listenPort: String(template.route.listenPort),
+    mountPath: template.route.mountPath,
+    destinationProtocol: template.route.destination.protocol,
+    destinationPort: String(template.route.destination.port),
+    destinationPath: template.route.destination.path,
+    funnel: template.route.funnel,
+    appCapabilities: template.route.appCapabilities.join(", "),
+    proxyProtocol: template.route.proxyProtocol,
+    assignments: Object.fromEntries(
+      template.assignments.map(({ agent, desiredEnabled }) => [
+        agent.id,
+        desiredEnabled,
+      ]),
+    ),
+  };
+}
+
+function routeLabel(route: Route): string {
+  const path = ["HTTP", "HTTPS"].includes(route.protocol)
+    ? route.mountPath
+    : "";
+  return `${route.protocol.replaceAll("_", " ")} :${route.listenPort}${path}`;
+}
+
+function destinationLabel(route: Route): string {
+  return `${route.destination.protocol.toLowerCase().replace("_", "+")}://127.0.0.1:${route.destination.port}${route.destination.path}`;
+}
+
+function statusVariant(
+  status: string,
+): "default" | "secondary" | "destructive" | "outline" | "success" {
+  if (status === "SUCCEEDED" || status === "Running") return "success";
+  if (["FAILED", "PARTIAL_FAILED", "TIMED_OUT"].includes(status))
+    return "destructive";
+  if (["QUEUING", "QUEUED", "RUNNING", "PENDING"].includes(status))
+    return "secondary";
+  if (["DISABLED", "CANCELLED"].includes(status)) return "secondary";
+  return "outline";
+}
+
+function statusClassName(status: string): string | undefined {
+  if (["QUEUING", "QUEUED", "RUNNING", "PENDING"].includes(status)) {
+    return "border-blue-500/30 bg-blue-500/10 text-blue-700 dark:text-blue-300";
+  }
+  if (["UNSUPPORTED", "SKIPPED", "CANCELLED"].includes(status)) {
+    return "border-amber-500/30 bg-amber-500/10 text-amber-700 dark:text-amber-300";
+  }
+  return undefined;
+}
+
+function capitalCase(value: string): string {
+  return value
+    .toLowerCase()
+    .split("_")
+    .map((part) => `${part.charAt(0).toUpperCase()}${part.slice(1)}`)
+    .join(" ");
+}
+
+function listenerUrl(route: Route, address: string): string {
+  const host = address.includes(":") ? `[${address}]` : address;
+  const scheme =
+    route.protocol === "HTTP"
+      ? "http"
+      : route.protocol === "TCP"
+        ? "tcp"
+        : "https";
+  const defaultPort =
+    (scheme === "http" && route.listenPort === 80) ||
+    (scheme === "https" && route.listenPort === 443);
+  const path = ["HTTP", "HTTPS"].includes(route.protocol)
+    ? route.mountPath
+    : "";
+  return `${scheme}://${host}${defaultPort ? "" : `:${route.listenPort}`}${path}`;
+}
+
+export function TailscaleServePage() {
+  const t = useTranslations("tailscale");
+  const tc = useTranslations("common");
+  const ts = useTranslations("status");
+  const [overview, setOverview] = useState<Overview | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [editor, setEditor] = useState<EditorState | null>(null);
+  const [confirmFunnel, setConfirmFunnel] = useState(false);
+  const [deleteTemplate, setDeleteTemplate] = useState<Template | null>(null);
+  const inspectedOnAppearance = useRef(false);
+
+  const load = useCallback(async () => {
+    try {
+      const data = await controlPlaneRequest<{
+        tailscaleServeOverview: Overview;
+      }>(
+        `query TailscaleServeOverview { tailscaleServeOverview { ${OVERVIEW_FIELDS} } }`,
+      );
+      setOverview(data.tailscaleServeOverview);
+      setError(null);
+    } catch (value) {
+      setError(value instanceof Error ? value.message : String(value));
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  const run = useCallback(
+    async (work: () => Promise<Operation>) => {
+      setBusy(true);
+      setError(null);
+      try {
+        const operation = await work();
+        const failures = operation.agents.filter(
+          ({ status }) => !["SUCCEEDED", "QUEUED", "RUNNING"].includes(status),
+        );
+        if (failures.length) {
+          setError(
+            failures
+              .map(
+                ({ agent, error: itemError }) =>
+                  `${agent.name}: ${itemError ?? t("operationFailed")}`,
+              )
+              .join("\n"),
+          );
+        }
+        await load();
+        return operation;
+      } catch (value) {
+        setError(value instanceof Error ? value.message : String(value));
+        return null;
+      } finally {
+        setBusy(false);
+      }
+    },
+    [load, t],
+  );
+
+  const inspect = useCallback(
+    () =>
+      run(async () => {
+        const data = await controlPlaneRequest<{
+          inspectTailscaleServe: Operation;
+        }>(
+          `mutation InspectTailscaleServe($requestId: ID!) {
+          inspectTailscaleServe(agentIds: [], requestId: $requestId) { ${OPERATION_FIELDS} }
+        }`,
+          { requestId: createClientId() },
+        );
+        return data.inspectTailscaleServe;
+      }),
+    [run],
+  );
+
+  useEffect(() => {
+    if (!inspectedOnAppearance.current) {
+      inspectedOnAppearance.current = true;
+      void load().then(() => inspect());
+    }
+    const unsubscribe = controlPlaneSubscriptions().subscribe<{
+      tailscaleServeOverviewChanged: Overview;
+    }>(
+      {
+        query: `subscription TailscaleServeOverviewChanged {
+          tailscaleServeOverviewChanged { ${OVERVIEW_FIELDS} }
+        }`,
+      },
+      {
+        next: (value) => {
+          if (value.data?.tailscaleServeOverviewChanged) {
+            setOverview(value.data.tailscaleServeOverviewChanged);
+          }
+        },
+        error: () => undefined,
+        complete: () => undefined,
+      },
+    );
+    return () => {
+      unsubscribe();
+    };
+  }, [inspect, load]);
+
+  const save = async () => {
+    if (!editor) return;
+    if (editor.funnel && !confirmFunnel) {
+      setConfirmFunnel(true);
+      return;
+    }
+    const assignments = Object.entries(editor.assignments).map(
+      ([agentId, enabled]) => ({ agentId, enabled }),
+    );
+    await run(async () => {
+      const data = await controlPlaneRequest<{
+        upsertTailscaleServeTemplate: Operation;
+      }>(
+        `mutation UpsertTailscaleServeTemplate($input: TailscaleServeTemplateInput!, $requestId: ID!) {
+          upsertTailscaleServeTemplate(input: $input, requestId: $requestId) { ${OPERATION_FIELDS} }
+        }`,
+        {
+          requestId: createClientId(),
+          input: {
+            id: editor.id,
+            expectedRevision: editor.expectedRevision,
+            name: editor.name,
+            protocol: editor.protocol,
+            listenPort: Number(editor.listenPort),
+            mountPath: editor.mountPath,
+            destinationProtocol: editor.destinationProtocol,
+            destinationPort: Number(editor.destinationPort),
+            destinationPath: editor.destinationPath,
+            funnel: editor.funnel,
+            appCapabilities: editor.appCapabilities
+              .split(",")
+              .map((value) => value.trim())
+              .filter(Boolean),
+            proxyProtocol: editor.proxyProtocol,
+            assignments,
+          },
+        },
+      );
+      return data.upsertTailscaleServeTemplate;
+    });
+    setEditor(null);
+    setConfirmFunnel(false);
+  };
+
+  const toggle = (
+    template: Template,
+    assignment: Assignment,
+    enabled: boolean,
+  ) =>
+    void run(async () => {
+      const data = await controlPlaneRequest<{
+        setTailscaleServeAgentEnabled: Operation;
+      }>(
+        `mutation SetTailscaleServeAgentEnabled($templateId: ID!, $agentId: ID!, $enabled: Boolean!, $expectedRevision: Int!, $requestId: ID!) {
+          setTailscaleServeAgentEnabled(templateId: $templateId, agentId: $agentId, enabled: $enabled, expectedRevision: $expectedRevision, requestId: $requestId) { ${OPERATION_FIELDS} }
+        }`,
+        {
+          templateId: template.id,
+          agentId: assignment.agent.id,
+          enabled,
+          expectedRevision: template.revision,
+          requestId: createClientId(),
+        },
+      );
+      return data.setTailscaleServeAgentEnabled;
+    });
+
+  const remove = async () => {
+    if (!deleteTemplate) return;
+    const target = deleteTemplate;
+    setDeleteTemplate(null);
+    await run(async () => {
+      const data = await controlPlaneRequest<{
+        deleteTailscaleServeTemplate: Operation;
+      }>(
+        `mutation DeleteTailscaleServeTemplate($id: ID!, $expectedRevision: Int!, $requestId: ID!) {
+          deleteTailscaleServeTemplate(id: $id, expectedRevision: $expectedRevision, requestId: $requestId) { ${OPERATION_FIELDS} }
+        }`,
+        {
+          id: target.id,
+          expectedRevision: target.revision,
+          requestId: createClientId(),
+        },
+      );
+      return data.deleteTailscaleServeTemplate;
+    });
+  };
+
+  const supportedAgents = useMemo(
+    () => overview?.agents.filter(({ supported }) => supported).length ?? 0,
+    [overview],
+  );
+  const agentStatesById = useMemo(
+    () =>
+      new Map(
+        overview?.agents.map((state) => [state.agent.id, state] as const) ?? [],
+      ),
+    [overview],
+  );
+
+  if (loading) {
+    return (
+      <div className="flex min-h-72 items-center justify-center" role="status">
+        <Spinner className="size-6" />
+        <span className="sr-only">{t("loading")}</span>
+      </div>
+    );
+  }
+
+  return (
+    <main className="mx-auto flex w-full max-w-7xl flex-col gap-6 p-4 sm:p-6">
+      <header className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+        <div>
+          <h1 className="text-2xl font-semibold tracking-tight">
+            {t("title")}
+          </h1>
+          <p className="mt-1 max-w-3xl text-sm text-muted-foreground">
+            {t("description")}
+          </p>
+        </div>
+        <div className="flex flex-wrap gap-2">
+          <Button variant="outline" onClick={inspect} disabled={busy}>
+            <RefreshCw className={cn("size-4", busy && "animate-spin")} />
+            {t("inspect")}
+          </Button>
+          <Button
+            onClick={() => setEditor(emptyEditor(overview?.agents ?? []))}
+            disabled={!supportedAgents || busy}
+          >
+            <Plus className="size-4" />
+            {t("create")}
+          </Button>
+        </div>
+      </header>
+
+      {error && (
+        <Alert variant="destructive">
+          <AlertTriangle className="size-4" />
+          <AlertDescription className="whitespace-pre-line">
+            {error}
+          </AlertDescription>
+        </Alert>
+      )}
+
+      <section aria-labelledby="tailscale-agents-title">
+        <div className="mb-3 flex items-center justify-between">
+          <h2
+            id="tailscale-agents-title"
+            className="font-heading text-xl font-semibold"
+          >
+            {t("agents")}
+          </h2>
+          <span className="text-sm text-muted-foreground">
+            {t("supportedCount", {
+              supported: supportedAgents,
+              total: overview?.agents.length ?? 0,
+            })}
+          </span>
+        </div>
+        <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+          {overview?.agents.map((state) => (
+            <Card key={state.agent.id} size="sm">
+              <CardHeader>
+                <CardTitle>{state.agent.name}</CardTitle>
+                <CardDescription>{state.agent.hostname}</CardDescription>
+                <CardAction className="flex flex-wrap justify-end gap-1">
+                  <Badge
+                    variant={
+                      state.agent.disconnectedAt ? "destructive" : "success"
+                    }
+                  >
+                    {state.agent.disconnectedAt ? ts("offline") : ts("online")}
+                  </Badge>
+                  <Badge
+                    variant={
+                      state.supported
+                        ? statusVariant(state.backendState)
+                        : "outline"
+                    }
+                  >
+                    {state.supported ? state.backendState : t("unsupported")}
+                  </Badge>
+                </CardAction>
+              </CardHeader>
+              <CardContent className="grid gap-3">
+                <div>
+                  <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                    {t("dnsHostname")}
+                  </p>
+                  <p className="mt-1 break-all font-mono text-xs">
+                    {state.dnsHostname ?? t("notObserved")}
+                  </p>
+                </div>
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <p className="text-xs font-medium text-muted-foreground">
+                      IPv4
+                    </p>
+                    <p className="mt-1 break-all font-mono text-xs">
+                      {state.ipv4.join(", ") || "—"}
+                    </p>
+                  </div>
+                  <div>
+                    <p className="text-xs font-medium text-muted-foreground">
+                      IPv6
+                    </p>
+                    <p className="mt-1 break-all font-mono text-xs">
+                      {state.ipv6.join(", ") || "—"}
+                    </p>
+                  </div>
+                </div>
+                <p className="text-xs text-muted-foreground">
+                  {state.lastInspectedAt ? (
+                    <>
+                      {t("inspected")}{" "}
+                      <DateTime kind="relative" value={state.lastInspectedAt} />
+                    </>
+                  ) : (
+                    t("neverInspected")
+                  )}
+                </p>
+                {state.error && (
+                  <p className="text-sm text-destructive">{state.error}</p>
+                )}
+              </CardContent>
+            </Card>
+          ))}
+        </div>
+      </section>
+
+      {editor && overview && (
+        <TemplateEditor
+          editor={editor}
+          agents={overview.agents}
+          busy={busy}
+          onChange={setEditor}
+          onCancel={() => setEditor(null)}
+          onSave={() => void save()}
+          t={t}
+          tc={tc}
+        />
+      )}
+
+      <section aria-labelledby="tailscale-templates-title">
+        <h2
+          id="tailscale-templates-title"
+          className="mb-3 font-heading text-xl font-semibold"
+        >
+          {t("templates")}
+        </h2>
+        <div className="grid gap-4 xl:grid-cols-2">
+          {overview?.templates.map((template) => (
+            <Card key={template.id}>
+              <CardHeader>
+                <CardTitle className="flex flex-wrap items-center gap-2">
+                  {template.name}
+                  {template.route.funnel && (
+                    <Badge variant="destructive">
+                      <Globe2 className="size-3" /> Funnel
+                    </Badge>
+                  )}
+                  {template.origin === "IMPORTED" && (
+                    <Badge variant="outline">{t("imported")}</Badge>
+                  )}
+                </CardTitle>
+                <CardDescription>
+                  {routeLabel(template.route)} →{" "}
+                  {destinationLabel(template.route)}
+                </CardDescription>
+                <CardAction className="flex gap-1">
+                  <Button
+                    size="icon-sm"
+                    variant="ghost"
+                    aria-label={t("editNamed", { name: template.name })}
+                    onClick={() => setEditor(editorFor(template))}
+                    disabled={busy || template.lifecycle === "DELETING"}
+                  >
+                    <Pencil />
+                  </Button>
+                  <Button
+                    size="icon-sm"
+                    variant="ghost"
+                    aria-label={t("deleteNamed", { name: template.name })}
+                    onClick={() => setDeleteTemplate(template)}
+                    disabled={busy}
+                  >
+                    <Trash2 />
+                  </Button>
+                </CardAction>
+              </CardHeader>
+              <CardContent className="grid gap-4">
+                {(template.route.appCapabilities.length > 0 ||
+                  template.route.proxyProtocol !== "NONE") && (
+                  <div className="flex flex-wrap gap-2 text-xs">
+                    {template.route.appCapabilities.map((capability) => (
+                      <Badge key={capability} variant="secondary">
+                        {capability}
+                      </Badge>
+                    ))}
+                    {template.route.proxyProtocol !== "NONE" && (
+                      <Badge variant="secondary">
+                        PROXY {template.route.proxyProtocol}
+                      </Badge>
+                    )}
+                  </div>
+                )}
+                <div className="divide-y rounded-lg border">
+                  {template.assignments.map((assignment) => (
+                    <div
+                      key={assignment.agent.id}
+                      className="flex flex-wrap items-center gap-3 p-3"
+                    >
+                      <div className="min-w-0 flex-1">
+                        <p className="font-medium">{assignment.agent.name}</p>
+                        <div className="mt-1 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+                          <Badge
+                            className={statusClassName(assignment.status)}
+                            variant={statusVariant(assignment.status)}
+                          >
+                            {capitalCase(assignment.status)}
+                          </Badge>
+                          <span>
+                            {assignment.observedEnabled
+                              ? t("observedOn")
+                              : t("observedOff")}
+                          </span>
+                        </div>
+                        {assignment.lastError && (
+                          <p className="mt-2 text-sm text-destructive">
+                            {assignment.lastError}
+                          </p>
+                        )}
+                      </div>
+                      {assignment.lastError && (
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          onClick={() =>
+                            toggle(
+                              template,
+                              assignment,
+                              assignment.desiredEnabled,
+                            )
+                          }
+                          disabled={busy}
+                        >
+                          <RotateCcw /> {t("retry")}
+                        </Button>
+                      )}
+                      <div className="flex items-center gap-2">
+                        <Label
+                          className="cursor-pointer text-sm font-medium"
+                          htmlFor={`tailscale-${template.id}-${assignment.agent.id}`}
+                        >
+                          {assignment.desiredEnabled ? t("on") : t("off")}
+                        </Label>
+                        <Switch
+                          id={`tailscale-${template.id}-${assignment.agent.id}`}
+                          checked={assignment.desiredEnabled}
+                          onCheckedChange={(value) =>
+                            toggle(template, assignment, value)
+                          }
+                          disabled={busy || template.lifecycle === "DELETING"}
+                          aria-label={t("toggleNamed", {
+                            agent: assignment.agent.name,
+                            template: template.name,
+                          })}
+                        />
+                        <AssignmentLinksMenu
+                          agent={assignment.agent}
+                          state={agentStatesById.get(assignment.agent.id)}
+                          template={template}
+                          t={t}
+                        />
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </CardContent>
+            </Card>
+          ))}
+          {!overview?.templates.length && (
+            <Card className="xl:col-span-2">
+              <CardContent className="py-10 text-center">
+                <CheckCircle2 className="mx-auto size-8 text-muted-foreground" />
+                <h3 className="mt-3 font-heading text-lg font-medium">
+                  {t("emptyTitle")}
+                </h3>
+                <p className="mt-1 text-muted-foreground">
+                  {t("emptyDescription")}
+                </p>
+              </CardContent>
+            </Card>
+          )}
+        </div>
+      </section>
+
+      <WorkflowResourcePanel
+        resourceKind="TAILSCALE_SERVE_OPERATION"
+        resourceId="overview"
+        sessionData={{ tailscale: { overview } }}
+      />
+
+      <ConfirmationDialog
+        open={confirmFunnel}
+        onOpenChange={setConfirmFunnel}
+        title={t("funnelConfirmTitle")}
+        description={t("funnelConfirmDescription")}
+        actionLabel={t("exposePublicly")}
+        cancelLabel={tc("cancel")}
+        onConfirm={() => {
+          setConfirmFunnel(false);
+          void save();
+        }}
+      />
+      <ConfirmationDialog
+        open={Boolean(deleteTemplate)}
+        onOpenChange={(open) => !open && setDeleteTemplate(null)}
+        title={t("deleteConfirmTitle")}
+        description={t("deleteConfirmDescription")}
+        actionLabel={t("delete")}
+        cancelLabel={tc("cancel")}
+        onConfirm={remove}
+      />
+    </main>
+  );
+}
+
+function AssignmentLinksMenu({
+  agent,
+  state,
+  template,
+  t,
+}: {
+  agent: Agent;
+  state: AgentState | undefined;
+  template: Template;
+  t: ReturnType<typeof useTranslations<"tailscale">>;
+}) {
+  const links = state
+    ? [
+        ...(state.dnsHostname
+          ? [
+              {
+                address: state.dnsHostname,
+                label: t("dnsHostnameShort"),
+              },
+            ]
+          : []),
+        ...state.ipv4.map((address) => ({ address, label: "IPv4" })),
+        ...state.ipv6.map((address) => ({ address, label: "IPv6" })),
+      ]
+    : [];
+
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <Button
+          aria-label={t("openLinksNamed", {
+            agent: agent.name,
+            template: template.name,
+          })}
+          disabled={!links.length}
+          size="icon-sm"
+          variant="ghost"
+        >
+          <MoreHorizontal />
+        </Button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="end" className="min-w-72">
+        <DropdownMenuLabel>{t("openRouteUsing")}</DropdownMenuLabel>
+        {links.map(({ address, label }) => (
+          <DropdownMenuItem asChild key={`${label}:${address}`}>
+            <a
+              aria-label={`${label}: ${address}`}
+              href={listenerUrl(template.route, address)}
+              rel="noreferrer"
+              target="_blank"
+            >
+              <ExternalLink />
+              <span className="w-full min-w-0">
+                <span>{label}</span>
+                <span className="ml-2 break-all font-mono text-xs text-muted-foreground">
+                  {address}
+                </span>
+              </span>
+            </a>
+          </DropdownMenuItem>
+        ))}
+      </DropdownMenuContent>
+    </DropdownMenu>
+  );
+}
+
+function TemplateEditor({
+  editor,
+  agents,
+  busy,
+  onChange,
+  onCancel,
+  onSave,
+  t,
+  tc,
+}: {
+  editor: EditorState;
+  agents: AgentState[];
+  busy: boolean;
+  onChange: (value: EditorState) => void;
+  onCancel: () => void;
+  onSave: () => void;
+  t: ReturnType<typeof useTranslations<"tailscale">>;
+  tc: ReturnType<typeof useTranslations<"common">>;
+}) {
+  const update = <K extends keyof EditorState>(key: K, value: EditorState[K]) =>
+    onChange({ ...editor, [key]: value });
+  const web = editor.protocol === "HTTP" || editor.protocol === "HTTPS";
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle>
+          {editor.id ? t("editTemplate") : t("createTemplate")}
+        </CardTitle>
+        <CardDescription>{t("editorDescription")}</CardDescription>
+      </CardHeader>
+      <CardContent>
+        <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
+          <Field label={t("name")}>
+            <Input
+              value={editor.name}
+              onChange={(event) => update("name", event.target.value)}
+              required
+            />
+          </Field>
+          <Field label={t("protocol")}>
+            <Select
+              value={editor.protocol}
+              onValueChange={(value) => {
+                const protocol = value as Route["protocol"];
+                if (["TCP", "TLS_TERMINATED_TCP"].includes(protocol)) {
+                  onChange({
+                    ...editor,
+                    protocol,
+                    mountPath: "/",
+                    destinationProtocol: "TCP",
+                    destinationPath: "",
+                    appCapabilities: "",
+                    proxyProtocol:
+                      protocol === "TCP" ? editor.proxyProtocol : "NONE",
+                  });
+                  return;
+                }
+                onChange({
+                  ...editor,
+                  protocol,
+                  destinationProtocol:
+                    editor.destinationProtocol === "TCP"
+                      ? "HTTP"
+                      : editor.destinationProtocol,
+                  funnel: protocol === "HTTP" ? false : editor.funnel,
+                  proxyProtocol: "NONE",
+                });
+              }}
+            >
+              <SelectTrigger className="w-full" aria-label={t("protocol")}>
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {(["HTTP", "HTTPS", "TCP", "TLS_TERMINATED_TCP"] as const).map(
+                  (value) => (
+                    <SelectItem key={value} value={value}>
+                      {capitalCase(value)}
+                    </SelectItem>
+                  ),
+                )}
+              </SelectContent>
+            </Select>
+          </Field>
+          <Field label={t("listenPort")}>
+            <Input
+              type="number"
+              min={1}
+              max={65535}
+              value={editor.listenPort}
+              onChange={(event) => update("listenPort", event.target.value)}
+              required
+            />
+          </Field>
+          <Field label={t("mountPath")}>
+            <Input
+              value={editor.mountPath}
+              onChange={(event) => update("mountPath", event.target.value)}
+              disabled={!web}
+            />
+          </Field>
+          <Field label={t("destinationProtocol")}>
+            <Select
+              value={editor.destinationProtocol}
+              onValueChange={(value) =>
+                update(
+                  "destinationProtocol",
+                  value as Route["destination"]["protocol"],
+                )
+              }
+              disabled={!web}
+            >
+              <SelectTrigger
+                className="w-full"
+                aria-label={t("destinationProtocol")}
+              >
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {(web ? ["HTTP", "HTTPS", "HTTPS_INSECURE"] : ["TCP"]).map(
+                  (value) => (
+                    <SelectItem key={value} value={value}>
+                      {value === "HTTPS_INSECURE" ? "HTTPS + Insecure" : value}
+                    </SelectItem>
+                  ),
+                )}
+              </SelectContent>
+            </Select>
+          </Field>
+          <Field label={t("destinationPort")}>
+            <Input
+              type="number"
+              min={1}
+              max={65535}
+              value={editor.destinationPort}
+              onChange={(event) =>
+                update("destinationPort", event.target.value)
+              }
+              required
+            />
+          </Field>
+          <Field label={t("destinationPath")}>
+            <Input
+              value={editor.destinationPath}
+              onChange={(event) =>
+                update("destinationPath", event.target.value)
+              }
+              disabled={!web}
+            />
+          </Field>
+          <Field label={t("proxyProtocol")}>
+            <Select
+              value={editor.proxyProtocol}
+              onValueChange={(value) =>
+                update("proxyProtocol", value as Route["proxyProtocol"])
+              }
+              disabled={editor.protocol !== "TCP"}
+            >
+              <SelectTrigger className="w-full" aria-label={t("proxyProtocol")}>
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {(["NONE", "V1", "V2"] as const).map((value) => (
+                  <SelectItem key={value} value={value}>
+                    {capitalCase(value)}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </Field>
+          <Field label={t("appCapabilities")} className="lg:col-span-3">
+            <Input
+              value={editor.appCapabilities}
+              onChange={(event) =>
+                update("appCapabilities", event.target.value)
+              }
+              placeholder="example.com/editor, example.com/viewer"
+              disabled={!web || editor.funnel}
+            />
+          </Field>
+          <Field label={t("funnel")}>
+            <div className="flex h-8 items-center justify-center gap-2 rounded-lg border px-2.5">
+              <Globe2 className="size-4 text-muted-foreground" />
+              <Switch
+                id="tailscale-public-funnel"
+                checked={editor.funnel}
+                onCheckedChange={(value) => update("funnel", value)}
+                disabled={editor.protocol === "HTTP"}
+                aria-label={t("funnel")}
+              />
+            </div>
+          </Field>
+        </div>
+        <fieldset className="mt-5">
+          <legend className="mb-2 text-sm font-medium">
+            {t("assignAgents")}
+          </legend>
+          <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
+            {agents.map((state) => (
+              <label
+                key={state.agent.id}
+                className={cn(
+                  "flex items-center gap-2 rounded-lg border p-3 text-sm",
+                  !state.supported && "opacity-60",
+                )}
+              >
+                <Checkbox
+                  checked={editor.assignments[state.agent.id] ?? false}
+                  onCheckedChange={(value) =>
+                    update("assignments", {
+                      ...editor.assignments,
+                      [state.agent.id]: value === true,
+                    })
+                  }
+                  disabled={!state.supported}
+                />
+                <span className="flex-1">{state.agent.name}</span>
+                {!state.supported && (
+                  <Badge variant="outline">{t("unsupported")}</Badge>
+                )}
+              </label>
+            ))}
+          </div>
+        </fieldset>
+        <div className="mt-5 flex justify-end gap-2">
+          <Button variant="outline" onClick={onCancel}>
+            {tc("cancel")}
+          </Button>
+          <Button
+            onClick={onSave}
+            disabled={
+              busy ||
+              !editor.name.trim() ||
+              !Object.keys(editor.assignments).length
+            }
+          >
+            {t("save")}
+          </Button>
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
+
+function Field({
+  label,
+  className,
+  children,
+}: {
+  label: string;
+  className?: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <div className={cn("grid gap-1.5", className)}>
+      <Label>{label}</Label>
+      {children}
+    </div>
+  );
+}

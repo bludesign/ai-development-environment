@@ -1,0 +1,326 @@
+"Protocols supported by node-level Tailscale Serve templates."
+enum TailscaleServeProtocol {
+  "Plain HTTP listener within the tailnet."
+  HTTP
+  "HTTPS listener with Tailscale-managed TLS."
+  HTTPS
+  "Raw TCP forwarding listener."
+  TCP
+  "TCP listener that terminates TLS before forwarding."
+  TLS_TERMINATED_TCP
+}
+
+"Typed loopback destination protocols."
+enum TailscaleServeDestinationProtocol {
+  "Loopback HTTP destination."
+  HTTP
+  "Loopback HTTPS destination with normal certificate validation."
+  HTTPS
+  "Loopback HTTPS destination that permits an invalid or self-signed certificate."
+  HTTPS_INSECURE
+  "Loopback TCP destination."
+  TCP
+}
+
+"PROXY protocol versions supported by TCP forwarding."
+enum TailscaleServeProxyProtocol {
+  "Do not prepend a PROXY protocol header."
+  NONE
+  "Prepend a PROXY protocol version 1 header."
+  V1
+  "Prepend a PROXY protocol version 2 header."
+  V2
+}
+
+"Lifecycle state of a fleet template."
+enum TailscaleServeTemplateLifecycle {
+  "The template can be edited and assigned."
+  ACTIVE
+  "The template is retained while fleet removals finish or await retry."
+  DELETING
+}
+
+"Origin of a fleet template."
+enum TailscaleServeTemplateOrigin {
+  "A user or automation created the template."
+  USER
+  "Fleet inspection imported the template from an existing route."
+  IMPORTED
+}
+
+"Progress state for an assignment or operation item."
+enum TailscaleServeProgressStatus {
+  "The control plane is creating operation work items."
+  QUEUING
+  "The durable work is waiting for an agent."
+  QUEUED
+  "At least one agent is applying the operation."
+  RUNNING
+  "An assignment has not yet been observed."
+  PENDING
+  "The assignment is intentionally disabled."
+  DISABLED
+  "All applicable work succeeded."
+  SUCCEEDED
+  "The work failed."
+  FAILED
+  "Some fleet work succeeded and some failed."
+  PARTIAL_FAILED
+  "The work was cancelled."
+  CANCELLED
+  "The work exceeded its timeout."
+  TIMED_OUT
+  "The agent does not advertise the required typed job."
+  UNSUPPORTED
+}
+
+"Kind of durable fleet operation."
+enum TailscaleServeOperationKind {
+  "Inspect agent identity and observed Serve routes."
+  INSPECT
+  "Create and apply a new fleet template."
+  CREATE_TEMPLATE
+  "Update and reapply an existing fleet template."
+  UPDATE_TEMPLATE
+  "Enable one agent assignment."
+  ENABLE_AGENT
+  "Disable one agent assignment."
+  DISABLE_AGENT
+  "Remove and then purge a fleet template."
+  DELETE_TEMPLATE
+}
+
+"A validated loopback destination."
+type TailscaleServeDestination {
+  "Destination protocol."
+  protocol: TailscaleServeDestinationProtocol!
+  "Loopback port."
+  port: Int!
+  "Optional HTTP path appended to the destination."
+  path: String!
+}
+
+"A normalized route observed from or sent to an agent."
+type TailscaleServeRoute {
+  "Incoming listener protocol."
+  protocol: TailscaleServeProtocol!
+  "Incoming listener port."
+  listenPort: Int!
+  "Web mount path, or `/` for TCP listeners."
+  mountPath: String!
+  "Typed loopback destination."
+  destination: TailscaleServeDestination!
+  "Whether this route is publicly exposed with Funnel."
+  funnel: Boolean!
+  "Private HTTP application capabilities accepted by this route."
+  appCapabilities: [String!]!
+  "PROXY protocol version for plain TCP routes."
+  proxyProtocol: TailscaleServeProxyProtocol!
+}
+
+"A persisted desired and observed state for one template on one agent."
+type TailscaleServeAssignment {
+  "Assigned agent."
+  agent: Agent!
+  "Whether the route should be enabled."
+  desiredEnabled: Boolean!
+  "Whether the route was present at the last inspection."
+  observedEnabled: Boolean!
+  "Observed settings fingerprint, when present."
+  observedFingerprint: String
+  "Template revision applied to this assignment."
+  revision: Int!
+  "Current assignment progress."
+  status: TailscaleServeProgressStatus!
+  "Related agent job identifier."
+  lastJobId: ID
+  "Last actionable per-agent error."
+  lastError: String
+  "Last observation time in ISO 8601 format."
+  lastObservedAt: String
+}
+
+"A fleet-wide Tailscale Serve template."
+type TailscaleServeTemplate {
+  "Stable template identifier."
+  id: ID!
+  "Human-readable template name."
+  name: String!
+  "Canonical normalized settings."
+  route: TailscaleServeRoute!
+  "Canonical settings fingerprint."
+  fingerprint: String!
+  "Optimistic-concurrency revision."
+  revision: Int!
+  "Template lifecycle."
+  lifecycle: TailscaleServeTemplateLifecycle!
+  "Whether a user created the template or inspection imported it."
+  origin: TailscaleServeTemplateOrigin!
+  "Per-agent desired and observed state."
+  assignments: [TailscaleServeAssignment!]!
+  "Creation time in ISO 8601 format."
+  createdAt: String!
+  "Last update time in ISO 8601 format."
+  updatedAt: String!
+}
+
+"Tailscale identity and observed routes for one control agent."
+type TailscaleServeAgentState {
+  "Control agent."
+  agent: Agent!
+  "Whether the installed agent supports typed Tailscale jobs."
+  supported: Boolean!
+  "Tailscale MagicDNS hostname."
+  dnsHostname: String
+  "Tailscale IPv4 addresses."
+  ipv4: [String!]!
+  "Tailscale IPv6 addresses."
+  ipv6: [String!]!
+  "Tailscale backend state reported by the CLI."
+  backendState: String!
+  "Normalized routes observed on the node."
+  observedRoutes: [TailscaleServeRoute!]!
+  "Last inspection time in ISO 8601 format."
+  lastInspectedAt: String
+  "Last actionable inspection or mutation error."
+  error: String
+}
+
+"Progress for one agent in a durable fleet operation."
+type TailscaleServeOperationAgent {
+  "Control agent."
+  agent: Agent!
+  "Current per-agent progress."
+  status: TailscaleServeProgressStatus!
+  "Related typed agent job."
+  job: AgentJob
+  "Actionable error for this agent."
+  error: String
+}
+
+"A durable fleet operation."
+type TailscaleServeOperation {
+  "Stable operation identifier."
+  id: ID!
+  "Operation kind."
+  kind: TailscaleServeOperationKind!
+  "Aggregate operation progress."
+  status: TailscaleServeProgressStatus!
+  "Related template identifier."
+  templateId: ID
+  "Per-agent progress and jobs."
+  agents: [TailscaleServeOperationAgent!]!
+  "Creation time in ISO 8601 format."
+  createdAt: String!
+  "Completion time in ISO 8601 format."
+  finishedAt: String
+  "Last update time in ISO 8601 format."
+  updatedAt: String!
+}
+
+"Fleet templates, agent identities, and observed configuration."
+type TailscaleServeOverview {
+  "Control agents and their Tailscale state."
+  agents: [TailscaleServeAgentState!]!
+  "Shared fleet templates."
+  templates: [TailscaleServeTemplate!]!
+  "Snapshot time in ISO 8601 format."
+  updatedAt: String!
+}
+
+"Explicit desired state for one agent assignment."
+input TailscaleServeAgentAssignmentInput {
+  "Control agent identifier."
+  agentId: ID!
+  "Whether the template should be enabled on this agent."
+  enabled: Boolean!
+}
+
+"Validated fleet template settings."
+input TailscaleServeTemplateInput {
+  "Existing template identifier when editing."
+  id: ID
+  "Required current revision when editing."
+  expectedRevision: Int
+  "Human-readable template name."
+  name: String!
+  "Incoming listener protocol."
+  protocol: TailscaleServeProtocol!
+  "Incoming listener port from 1 through 65535."
+  listenPort: Int!
+  "Web mount path."
+  mountPath: String = "/"
+  "Typed loopback destination protocol."
+  destinationProtocol: TailscaleServeDestinationProtocol!
+  "Loopback destination port from 1 through 65535."
+  destinationPort: Int!
+  "Optional HTTP destination path."
+  destinationPath: String = ""
+  "Whether to expose the listener publicly with Funnel."
+  funnel: Boolean!
+  "Private HTTP application capabilities in domain/name form."
+  appCapabilities: [String!]! = []
+  "PROXY protocol version for plain TCP forwarding."
+  proxyProtocol: TailscaleServeProxyProtocol!
+  "Explicit desired state for every selected agent."
+  assignments: [TailscaleServeAgentAssignmentInput!]!
+}
+
+extend type Query {
+  "Returns fleet templates, agent identities, and observed configuration."
+  tailscaleServeOverview: TailscaleServeOverview!
+  "Returns one durable Tailscale Serve operation."
+  tailscaleServeOperation(
+    "Stable operation identifier."
+    id: ID!
+  ): TailscaleServeOperation
+}
+
+extend type Mutation {
+  "Inspects Tailscale identity and Serve configuration on selected agents; an empty list selects all agents."
+  inspectTailscaleServe(
+    "Agents to inspect, or an empty list for every agent."
+    agentIds: [ID!]! = []
+    "Client-generated idempotency identifier."
+    requestId: ID!
+  ): TailscaleServeOperation!
+  "Creates or updates a shared Tailscale Serve template and queues enabled assignments."
+  upsertTailscaleServeTemplate(
+    "Validated template settings and explicit assignments."
+    input: TailscaleServeTemplateInput!
+    "Client-generated idempotency identifier."
+    requestId: ID!
+  ): TailscaleServeOperation!
+  "Turns one template assignment on or off while retaining its desired state."
+  setTailscaleServeAgentEnabled(
+    "Fleet template identifier."
+    templateId: ID!
+    "Control agent identifier."
+    agentId: ID!
+    "New explicit desired state."
+    enabled: Boolean!
+    "Current template revision used for optimistic concurrency."
+    expectedRevision: Int!
+    "Client-generated idempotency identifier."
+    requestId: ID!
+  ): TailscaleServeOperation!
+  "Deletes a template after removing it from every observed or enabled agent."
+  deleteTailscaleServeTemplate(
+    "Fleet template identifier."
+    id: ID!
+    "Current template revision used for optimistic concurrency."
+    expectedRevision: Int!
+    "Client-generated idempotency identifier."
+    requestId: ID!
+  ): TailscaleServeOperation!
+}
+
+extend type Subscription {
+  "Emits a fresh overview whenever Tailscale Serve state changes."
+  tailscaleServeOverviewChanged: TailscaleServeOverview!
+  "Emits one operation whenever its per-agent progress changes."
+  tailscaleServeOperationChanged(
+    "Stable operation identifier to observe."
+    id: ID!
+  ): TailscaleServeOperation!
+}

@@ -185,6 +185,19 @@ export const SESSION_NAMESPACE_FIELDS: Record<string, NamespaceField[]> = {
       description: "Agents that completed collection successfully",
     },
   ],
+  tailscale: [
+    { name: "operationId", description: "Tailscale Serve operation id" },
+    { name: "status", description: "Fleet operation status" },
+    { name: "templateId", description: "Tailscale Serve template id" },
+    {
+      name: "operation",
+      description: "Durable operation and per-agent progress",
+    },
+    {
+      name: "overview",
+      description: "Fleet templates and agent Tailscale identity",
+    },
+  ],
   signingProfile: [
     { name: "id", description: "Signing profile id" },
     { name: "uuid", description: "Provisioning profile UUID" },

@@ -24,6 +24,7 @@ import { WORKFLOW_JOB_KINDS } from "@ai-development-environment/agent-contract/w
 import { COMMAND_RUN_JOB_KIND } from "@ai-development-environment/agent-contract/commands";
 import { COVERAGE_JOB_KINDS } from "@ai-development-environment/agent-contract/coverage";
 import { CLI_HEALTH_JOB_KIND } from "@ai-development-environment/agent-contract/cli-health";
+import { TAILSCALE_SERVE_JOB_KINDS } from "@ai-development-environment/agent-contract/tailscale";
 
 export const AGENT_VERSION = process.env.CONTROL_AGENT_VERSION ?? "0.1.0";
 
@@ -50,11 +51,16 @@ const MACOS_AGENT_CAPABILITIES = [
   ...SIGNING_ASSET_JOB_KINDS,
 ] as const;
 
+const UNIX_AGENT_CAPABILITIES = [...TAILSCALE_SERVE_JOB_KINDS] as const;
+
 export function capabilitiesForPlatform(
   targetPlatform: NodeJS.Platform,
 ): string[] {
   return [
     ...PORTABLE_AGENT_CAPABILITIES,
+    ...(targetPlatform === "darwin" || targetPlatform === "linux"
+      ? UNIX_AGENT_CAPABILITIES
+      : []),
     ...(targetPlatform === "darwin" ? MACOS_AGENT_CAPABILITIES : []),
   ];
 }
