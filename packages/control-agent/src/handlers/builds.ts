@@ -3337,6 +3337,17 @@ export const deployIosBuild: AgentJobHandler = async (
   );
 };
 
+export async function createRemoteBuildStagingDirectory(
+  buildId: string,
+): Promise<string> {
+  // macOS commonly exposes the temporary directory as /var/folders while
+  // realpath() returns /private/var/folders. Canonicalize the root before any
+  // containment comparison so the same directory is not treated as external.
+  return realpath(
+    await mkdtemp(join(tmpdir(), `ade-remote-build-${buildId}-`)),
+  );
+}
+
 export const deployTransferredIosBuild: AgentJobHandler = async (
   payload,
   timeoutMs,
@@ -3348,9 +3359,7 @@ export const deployTransferredIosBuild: AgentJobHandler = async (
   if (!context?.downloadBuildArtifactTransfer) {
     throw new Error("This agent cannot download transferred build artifacts");
   }
-  const staging = await mkdtemp(
-    join(tmpdir(), `ade-remote-build-${input.buildId}-`),
-  );
+  const staging = await createRemoteBuildStagingDirectory(input.buildId);
   const archive = join(staging, "artifact.tar.gz");
   try {
     await onLog({

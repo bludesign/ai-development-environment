@@ -28,6 +28,7 @@ import type { ProcessResult } from "../process-runner.js";
 
 import {
   classifyFailure,
+  createRemoteBuildStagingDirectory,
   createRedactor,
   dependentSigningTargetNamesFromPbxProject,
   deleteIosBuild,
@@ -88,6 +89,28 @@ afterEach(async () => {
 });
 
 describe("iOS build command construction", () => {
+  test("canonicalizes remote build staging beneath a symlinked temporary directory", async () => {
+    const realTemporaryRoot = await mkdtemp(
+      join(tmpdir(), "remote-build-staging-real-"),
+    );
+    temporaryDirectories.push(realTemporaryRoot);
+    const temporaryAlias = `${realTemporaryRoot}-alias`;
+    await symlink(realTemporaryRoot, temporaryAlias, "dir");
+    temporaryDirectories.push(temporaryAlias);
+    const originalTemporaryDirectory = process.env.TMPDIR;
+    try {
+      process.env.TMPDIR = temporaryAlias;
+      const staging = await createRemoteBuildStagingDirectory("build-1");
+      expect(staging.startsWith(`${await realpath(realTemporaryRoot)}/`)).toBe(
+        true,
+      );
+      expect(staging).toBe(await realpath(staging));
+    } finally {
+      if (originalTemporaryDirectory === undefined) delete process.env.TMPDIR;
+      else process.env.TMPDIR = originalTemporaryDirectory;
+    }
+  });
+
   test("maps every supported action without overriding Derived Data", () => {
     const actions = {
       BUILD: "build",
