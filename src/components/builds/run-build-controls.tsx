@@ -19,6 +19,13 @@ import { formatEnumLabel } from "@/lib/enum-label";
 
 import type { BuildDestination, BuildRecord, BuildRunAgent } from "./types";
 
+function availableDestinationsFirst(destinations: BuildDestination[]) {
+  return [
+    ...destinations.filter((destination) => destination.available !== false),
+    ...destinations.filter((destination) => destination.available === false),
+  ];
+}
+
 export function RunBuildControls({
   buildId,
   destinationType,
@@ -93,7 +100,7 @@ export function RunBuildControls({
     )?.agent.id ?? runAgents.find((option) => option.available)?.agent.id;
 
   const applyDestinations = (compatible: BuildDestination[]) => {
-    setDestinations(compatible);
+    setDestinations(availableDestinationsFirst(compatible));
     setSelectedDestinations((current) => {
       const availableIds = new Set(
         compatible

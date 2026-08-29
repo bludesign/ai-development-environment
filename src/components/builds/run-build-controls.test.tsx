@@ -168,6 +168,15 @@ describe("RunBuildControls", () => {
           inspectBuildRunDestinations: [
             {
               type: "SIMULATOR",
+              id: "SIM-OFFLINE",
+              name: "Offline iPhone",
+              platform: "iOS",
+              osVersion: "26.4",
+              state: "Offline",
+              available: false,
+            },
+            {
+              type: "SIMULATOR",
               id: "SIM-1",
               name: "iPhone 17 Pro",
               platform: "iOS",
@@ -183,15 +192,6 @@ describe("RunBuildControls", () => {
               osVersion: "27.0",
               state: "Shutdown",
               available: true,
-            },
-            {
-              type: "SIMULATOR",
-              id: "SIM-OFFLINE",
-              name: "Offline iPhone",
-              platform: "iOS",
-              osVersion: "26.4",
-              state: "Offline",
-              available: false,
             },
           ],
         } as never;
@@ -219,6 +219,15 @@ describe("RunBuildControls", () => {
     const offline = screen.getByRole("menuitemcheckbox", {
       name: /Offline iPhone.*iOS 26.4.*Offline/,
     });
+    expect(
+      screen
+        .getAllByRole("menuitemcheckbox")
+        .map((destination) => destination.textContent),
+    ).toEqual([
+      expect.stringContaining("iPhone 17 Pro"),
+      expect.stringContaining("iPad Pro"),
+      expect.stringContaining("Offline iPhone"),
+    ]);
     expect((offline as HTMLButtonElement).disabled).toBe(true);
     expect(
       (
