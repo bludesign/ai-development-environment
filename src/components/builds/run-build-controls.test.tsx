@@ -55,10 +55,7 @@ describe("RunBuildControls", () => {
     );
 
     expect(screen.getByRole("button", { name: /1 devices/ })).toBeDefined();
-    expect(
-      (screen.getByRole("button", { name: "Run" }) as HTMLButtonElement)
-        .disabled,
-    ).toBe(false);
+    expect(screen.queryByRole("button", { name: "Run" })).toBeNull();
   });
 
   test("does not preselect a generic destination", () => {
@@ -80,10 +77,7 @@ describe("RunBuildControls", () => {
     );
 
     expect(screen.getByRole("button", { name: "Run devices" })).toBeDefined();
-    expect(
-      (screen.getByRole("button", { name: "Run" }) as HTMLButtonElement)
-        .disabled,
-    ).toBe(true);
+    expect(screen.queryByRole("button", { name: "Run" })).toBeNull();
   });
 
   test("runs from one compact device-picker button", async () => {
@@ -177,20 +171,20 @@ describe("RunBuildControls", () => {
             },
             {
               type: "SIMULATOR",
-              id: "SIM-1",
-              name: "iPhone 17 Pro",
-              platform: "iOS",
-              osVersion: "27.0",
-              state: "Booted",
-              available: true,
-            },
-            {
-              type: "SIMULATOR",
               id: "SIM-2",
               name: "iPad Pro",
               platform: "iOS",
               osVersion: "27.0",
               state: "Shutdown",
+              available: true,
+            },
+            {
+              type: "SIMULATOR",
+              id: "SIM-1",
+              name: "iPhone 17 Pro",
+              platform: "iOS",
+              osVersion: "27.0",
+              state: "Booted",
               available: true,
             },
           ],

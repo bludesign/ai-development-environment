@@ -19,9 +19,17 @@ import { formatEnumLabel } from "@/lib/enum-label";
 
 import type { BuildDestination, BuildRecord, BuildRunAgent } from "./types";
 
-function availableDestinationsFirst(destinations: BuildDestination[]) {
+function orderedDestinations(destinations: BuildDestination[]) {
+  const isBooted = (destination: BuildDestination) =>
+    destination.state?.trim().toLocaleLowerCase() === "booted";
   return [
-    ...destinations.filter((destination) => destination.available !== false),
+    ...destinations.filter(
+      (destination) => destination.available !== false && isBooted(destination),
+    ),
+    ...destinations.filter(
+      (destination) =>
+        destination.available !== false && !isBooted(destination),
+    ),
     ...destinations.filter((destination) => destination.available === false),
   ];
 }
@@ -100,7 +108,7 @@ export function RunBuildControls({
     )?.agent.id ?? runAgents.find((option) => option.available)?.agent.id;
 
   const applyDestinations = (compatible: BuildDestination[]) => {
-    setDestinations(availableDestinationsFirst(compatible));
+    setDestinations(orderedDestinations(compatible));
     setSelectedDestinations((current) => {
       const availableIds = new Set(
         compatible
@@ -502,14 +510,6 @@ export function RunBuildControls({
         </DropdownMenuTrigger>
         {destinationMenu}
       </DropdownMenu>
-      <Button
-        disabled={running || selectedDestinations.size === 0}
-        onClick={() => void run()}
-        size={size}
-        type="button"
-      >
-        {running ? <Spinner /> : <Play />} {t("run")}
-      </Button>
     </div>
   );
 }
