@@ -170,8 +170,8 @@ export function normalizeTailscaleServeSnapshot(
     for (const [mountPath, rawHandler] of Object.entries(handlers)) {
       const handler = objectValue(rawHandler);
       if (!handler || typeof handler.Proxy !== "string") continue;
-      const capabilities = Array.isArray(handler.AppCapabilities)
-        ? handler.AppCapabilities.filter(
+      const capabilities = Array.isArray(handler.AcceptAppCaps)
+        ? handler.AcceptAppCaps.filter(
             (value): value is string => typeof value === "string",
           )
         : [];

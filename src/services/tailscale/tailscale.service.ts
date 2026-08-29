@@ -175,6 +175,12 @@ function operationStatusFromJob(status: string): string {
         : "FAILED";
 }
 
+function mutationRevision(value: unknown): number | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  const revision = (value as Record<string, unknown>).revision;
+  return Number.isInteger(revision) ? (revision as number) : null;
+}
+
 export function parseTailscaleServeJobResult(
   value: string | null,
 ): TailscaleServeJobResult {
@@ -310,6 +316,14 @@ export class TailscaleServeService {
     return agentEventBus.iterate(tailscaleServeOperationChangedTopic(id));
   }
 
+  private async operationForRequest(requestId: string) {
+    const prisma = await getPrismaClient();
+    return prisma.tailscaleServeOperation.findUnique({
+      where: { requestId },
+      include: operationInclude,
+    });
+  }
+
   private async createOperation(
     kind: string,
     requestId: string,
@@ -323,17 +337,59 @@ export class TailscaleServeService {
     });
     if (existing) return existing;
     const id = randomUUID();
-    return prisma.tailscaleServeOperation.create({
-      data: {
-        id,
-        kind,
-        requestId,
-        templateId: templateId ?? null,
-        agents: {
-          create: [...new Set(agentIds)].map((agentId) => ({ agentId })),
+    try {
+      return await prisma.tailscaleServeOperation.create({
+        data: {
+          id,
+          kind,
+          requestId,
+          templateId: templateId ?? null,
+          agents: {
+            create: [...new Set(agentIds)].map((agentId) => ({ agentId })),
+          },
         },
-      },
-      include: operationInclude,
+        include: operationInclude,
+      });
+    } catch (error) {
+      const concurrent = await this.operationForRequest(requestId);
+      if (concurrent) return concurrent;
+      throw error;
+    }
+  }
+
+  private async persistDispatchState(
+    operation: { id: string; templateId: string | null },
+    agentId: string,
+    payload: unknown,
+    state: { status: string; error: string | null; jobId?: string },
+  ) {
+    const prisma = await getPrismaClient();
+    const revision = mutationRevision(payload);
+    await prisma.$transaction(async (transaction) => {
+      await transaction.tailscaleServeOperationAgent.update({
+        where: {
+          operationId_agentId: { operationId: operation.id, agentId },
+        },
+        data: {
+          status: state.status,
+          error: state.error,
+          ...(state.jobId ? { jobId: state.jobId } : {}),
+        },
+      });
+      if (operation.templateId) {
+        await transaction.tailscaleServeAssignment.updateMany({
+          where: {
+            templateId: operation.templateId,
+            agentId,
+            ...(revision ? { revision } : {}),
+          },
+          data: {
+            status: state.status,
+            lastError: state.error,
+            ...(state.jobId ? { lastJobId: state.jobId } : {}),
+          },
+        });
+      }
     });
   }
 
@@ -342,24 +398,27 @@ export class TailscaleServeService {
     kind: string | ((agentId: string) => string),
     payloadForAgent: (agentId: string, kind: string) => unknown,
   ) {
-    const prisma = await getPrismaClient();
     for (const item of operation.agents) {
       const agentKind = typeof kind === "string" ? kind : kind(item.agentId);
+      let payload: unknown;
+      try {
+        payload = payloadForAgent(item.agentId, agentKind);
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        await this.persistDispatchState(operation, item.agentId, null, {
+          status: "FAILED",
+          error: message,
+        });
+        continue;
+      }
       const supported = capabilities(item.agent.capabilitiesJson).includes(
         agentKind,
       );
       if (!supported) {
-        await prisma.tailscaleServeOperationAgent.update({
-          where: {
-            operationId_agentId: {
-              operationId: operation.id,
-              agentId: item.agentId,
-            },
-          },
-          data: {
-            status: "UNSUPPORTED",
-            error: "This agent does not advertise Tailscale Serve support",
-          },
+        const message = "This agent does not advertise Tailscale Serve support";
+        await this.persistDispatchState(operation, item.agentId, payload, {
+          status: "UNSUPPORTED",
+          error: message,
         });
         continue;
       }
@@ -367,31 +426,20 @@ export class TailscaleServeService {
         const job = await this.agentControl.createJob({
           agentId: item.agentId,
           kind: agentKind,
-          payload: payloadForAgent(item.agentId, agentKind),
+          payload,
           idempotencyKey: `${operation.id}:${item.agentId}`,
           timeoutSeconds: 90,
         });
-        await prisma.tailscaleServeOperationAgent.update({
-          where: {
-            operationId_agentId: {
-              operationId: operation.id,
-              agentId: item.agentId,
-            },
-          },
-          data: { status: job.status, jobId: job.id },
+        await this.persistDispatchState(operation, item.agentId, payload, {
+          status: job.status,
+          error: job.error,
+          jobId: job.id,
         });
       } catch (error) {
-        await prisma.tailscaleServeOperationAgent.update({
-          where: {
-            operationId_agentId: {
-              operationId: operation.id,
-              agentId: item.agentId,
-            },
-          },
-          data: {
-            status: "FAILED",
-            error: error instanceof Error ? error.message : String(error),
-          },
+        const message = error instanceof Error ? error.message : String(error);
+        await this.persistDispatchState(operation, item.agentId, payload, {
+          status: "FAILED",
+          error: message,
         });
       }
     }
@@ -401,6 +449,8 @@ export class TailscaleServeService {
   }
 
   async inspect(agentIds: string[], requestId: string) {
+    const retried = await this.operationForRequest(requestId);
+    if (retried) return retried;
     const prisma = await getPrismaClient();
     const ids = agentIds.length
       ? [...new Set(agentIds)]
@@ -444,6 +494,8 @@ export class TailscaleServeService {
   }
 
   async upsert(input: TailscaleTemplateInput, requestId: string) {
+    const retried = await this.operationForRequest(requestId);
+    if (retried) return retried;
     if (!input.assignments.length) {
       throw new Error("At least one explicit agent assignment is required");
     }
@@ -488,29 +540,47 @@ export class TailscaleServeService {
     for (const assignment of input.assignments) {
       prospectiveAssignments.set(assignment.agentId, assignment.enabled);
     }
-    await this.assertNoConflicts(
-      id,
-      route,
-      [...prospectiveAssignments].map(([agentId, enabled]) => ({
-        agentId,
-        enabled,
-      })),
+    const allAssignments = [...prospectiveAssignments].map(
+      ([agentId, enabled]) => ({ agentId, enabled }),
     );
+    await this.assertNoConflicts(id, route, allAssignments);
     const revision = existing ? existing.revision + 1 : 1;
     const previousRoute = existing ? routeFromTemplate(existing) : null;
+    const removeAgentIds = new Set(
+      allAssignments
+        .filter(
+          ({ agentId, enabled }) => !enabled && previouslyEnabled.has(agentId),
+        )
+        .map(({ agentId }) => agentId),
+    );
+    const targetAgentIds = [
+      ...allAssignments
+        .filter(({ enabled }) => enabled)
+        .map(({ agentId }) => agentId),
+      ...removeAgentIds,
+    ];
     const data = {
       ...routeData(route),
       name: validName(input.name),
       revision,
       lifecycle: "ACTIVE",
     };
+    const operationId = randomUUID();
+    let operation: Awaited<
+      ReturnType<TailscaleServeService["createOperation"]>
+    >;
     try {
-      await prisma.$transaction(async (transaction) => {
+      operation = await prisma.$transaction(async (transaction) => {
         if (existing) {
-          await transaction.tailscaleServeTemplate.update({
-            where: { id },
+          const updated = await transaction.tailscaleServeTemplate.updateMany({
+            where: { id, revision: input.expectedRevision! },
             data,
           });
+          if (updated.count !== 1) {
+            throw new Error(
+              "Tailscale Serve template changed; refresh before editing it",
+            );
+          }
         } else {
           await transaction.tailscaleServeTemplate.create({
             data: { id, ...data, origin: "USER" },
@@ -545,34 +615,29 @@ export class TailscaleServeService {
           where: { templateId: id, desiredEnabled: true },
           data: { revision, status: "QUEUING", lastError: null },
         });
+        return transaction.tailscaleServeOperation.create({
+          data: {
+            id: operationId,
+            kind: existing ? "UPDATE_TEMPLATE" : "CREATE_TEMPLATE",
+            requestId,
+            templateId: id,
+            agents: {
+              create: [...new Set(targetAgentIds)].map((agentId) => ({
+                agentId,
+              })),
+            },
+          },
+          include: operationInclude,
+        });
       });
     } catch (error) {
+      const concurrent = await this.operationForRequest(requestId);
+      if (concurrent) return concurrent;
       if (String(error).includes("fingerprint")) {
         throw new Error("An identical Tailscale Serve template already exists");
       }
       throw error;
     }
-    const assignments = await prisma.tailscaleServeAssignment.findMany({
-      where: { templateId: id },
-    });
-    const enabled = assignments.filter(({ desiredEnabled }) => desiredEnabled);
-    const disabledTransitions = assignments.filter(
-      ({ agentId, desiredEnabled }) =>
-        !desiredEnabled && previouslyEnabled.has(agentId),
-    );
-    const removeAgentIds = new Set(
-      disabledTransitions.map(({ agentId }) => agentId),
-    );
-    const targetAgentIds = [
-      ...enabled.map(({ agentId }) => agentId),
-      ...removeAgentIds,
-    ];
-    const operation = await this.createOperation(
-      existing ? "UPDATE_TEMPLATE" : "CREATE_TEMPLATE",
-      requestId,
-      targetAgentIds,
-      id,
-    );
     if (!targetAgentIds.length) {
       await this.finishOperation(operation.id);
       this.publish(operation.id);
@@ -604,6 +669,8 @@ export class TailscaleServeService {
     expectedRevision: number,
     requestId: string,
   ) {
+    const retried = await this.operationForRequest(requestId);
+    if (retried) return retried;
     const prisma = await getPrismaClient();
     const template = await prisma.tailscaleServeTemplate.findUnique({
       where: { id: templateId },
@@ -661,6 +728,8 @@ export class TailscaleServeService {
     expectedRevision: number,
     requestId: string,
   ) {
+    const retried = await this.operationForRequest(requestId);
+    if (retried) return retried;
     const prisma = await getPrismaClient();
     const template = await prisma.tailscaleServeTemplate.findUnique({
       where: { id: templateId },
@@ -710,6 +779,16 @@ export class TailscaleServeService {
     snapshot: TailscaleServeSnapshot,
   ) {
     const inspectedAt = new Date(snapshot.inspectedAt);
+    const current = await transaction.tailscaleAgentState.findUnique({
+      where: { agentId },
+      select: { lastInspectedAt: true },
+    });
+    if (
+      current?.lastInspectedAt &&
+      current.lastInspectedAt.getTime() > inspectedAt.getTime()
+    ) {
+      return;
+    }
     await transaction.tailscaleAgentState.upsert({
       where: { agentId },
       create: {

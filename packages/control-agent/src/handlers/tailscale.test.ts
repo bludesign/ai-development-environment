@@ -52,7 +52,12 @@ describe("Tailscale Serve agent handler", () => {
         TCP: { "443": { HTTPS: true } },
         Web: {
           "agent.tailnet.ts.net:443": {
-            Handlers: { "/": { Proxy: "http://127.0.0.1:3000" } },
+            Handlers: {
+              "/": {
+                Proxy: "http://127.0.0.1:3000",
+                AcceptAppCaps: ["example.com/editor"],
+              },
+            },
           },
         },
         AllowFunnel: {},
@@ -62,6 +67,7 @@ describe("Tailscale Serve agent handler", () => {
     expect(snapshot.identity.dnsHostname).toBe("agent.tailnet.ts.net");
     expect(snapshot.routes).toHaveLength(1);
     expect(snapshot.routes[0]?.destination.port).toBe(3000);
+    expect(snapshot.routes[0]?.appCapabilities).toEqual(["example.com/editor"]);
   });
 
   it("leaves non-loopback and file handlers unmanaged", () => {

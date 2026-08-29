@@ -32,6 +32,7 @@ vi.mock("@/data/prisma-client", () => ({
 }));
 
 import { PrismaClient } from "@/generated/prisma/client";
+import type { AgentControlService } from "@/services/agent-control";
 
 import {
   parseTailscaleServeJobResult,
@@ -159,6 +160,7 @@ describe("TailscaleServeService persistence", () => {
   let service: TailscaleServeService;
   let jobs: QueuedJob[];
   let completions: Map<string, (job: never) => Promise<void>>;
+  let createJob: ReturnType<typeof vi.fn>;
 
   beforeAll(async () => {
     directory = await mkdtemp(join(tmpdir(), "aide-tailscale-"));
@@ -200,11 +202,8 @@ describe("TailscaleServeService persistence", () => {
     });
     jobs = [];
     completions = new Map();
-    service = new TailscaleServeService({
-      registerCompletionHandler: vi.fn((kind, handler) => {
-        completions.set(kind, handler as (job: never) => Promise<void>);
-      }),
-      createJob: vi.fn(async (input) => {
+    createJob = vi.fn(
+      async (input: Parameters<AgentControlService["createJob"]>[0]) => {
         const job = {
           id: `job-${jobs.length + 1}`,
           agentId: input.agentId,
@@ -220,14 +219,21 @@ describe("TailscaleServeService persistence", () => {
             payloadJson: JSON.stringify(job.payload),
             status: "QUEUED",
             idempotencyKey: input.idempotencyKey,
-            timeoutSeconds: input.timeoutSeconds,
+            timeoutSeconds: input.timeoutSeconds ?? 90,
           },
         });
+      },
+    );
+    service = new TailscaleServeService({
+      registerCompletionHandler: vi.fn((kind, handler) => {
+        completions.set(kind, handler as (job: never) => Promise<void>);
       }),
+      createJob,
     } as never);
   });
 
   afterEach(async () => {
+    vi.restoreAllMocks();
     await prisma.$disconnect();
   });
 
@@ -285,6 +291,103 @@ describe("TailscaleServeService persistence", () => {
     });
   }
 
+  it("returns the original operation when an upsert request is retried", async () => {
+    const input = templateInput([{ agentId: "agent-1", enabled: true }]);
+    const created = await service.upsert(input, "idempotent-create");
+    const createRetry = await service.upsert(input, "idempotent-create");
+
+    expect(createRetry.id).toBe(created.id);
+    expect(await prisma.tailscaleServeTemplate.count()).toBe(1);
+    expect(jobs).toHaveLength(1);
+
+    const update = templateInput([{ agentId: "agent-1", enabled: true }], {
+      id: created.templateId,
+      expectedRevision: 1,
+      destinationPort: 4000,
+    });
+    const updated = await service.upsert(update, "idempotent-update");
+    const updateRetry = await service.upsert(update, "idempotent-update");
+
+    expect(updateRetry.id).toBe(updated.id);
+    expect(jobs).toHaveLength(2);
+    expect(
+      await prisma.tailscaleServeTemplate.findUniqueOrThrow({
+        where: { id: created.templateId! },
+      }),
+    ).toMatchObject({ revision: 2, destinationPort: 4000 });
+  });
+
+  it("allows only one concurrent update for an expected revision", async () => {
+    await seedTemplate();
+    const results = await Promise.allSettled([
+      service.upsert(
+        templateInput([{ agentId: "agent-1", enabled: true }], {
+          id: "template-1",
+          expectedRevision: 1,
+          destinationPort: 4000,
+        }),
+        "concurrent-update-1",
+      ),
+      service.upsert(
+        templateInput([{ agentId: "agent-1", enabled: true }], {
+          id: "template-1",
+          expectedRevision: 1,
+          destinationPort: 5000,
+        }),
+        "concurrent-update-2",
+      ),
+    ]);
+
+    expect(results.filter(({ status }) => status === "fulfilled")).toHaveLength(
+      1,
+    );
+    expect(results.filter(({ status }) => status === "rejected")).toHaveLength(
+      1,
+    );
+    expect(
+      await prisma.tailscaleServeTemplate.findUniqueOrThrow({
+        where: { id: "template-1" },
+      }),
+    ).toMatchObject({ revision: 2 });
+    expect(jobs).toHaveLength(1);
+  });
+
+  it("persists terminal assignment state when dispatch cannot start", async () => {
+    await prisma.agent.update({
+      where: { id: "agent-1" },
+      data: { capabilitiesJson: "[]" },
+    });
+    createJob.mockRejectedValueOnce(new Error("queue unavailable"));
+
+    const operation = await service.upsert(
+      templateInput([
+        { agentId: "agent-1", enabled: true },
+        { agentId: "agent-2", enabled: true },
+      ]),
+      "dispatch-failures",
+    );
+
+    expect(operation.status).toBe("FAILED");
+    expect(
+      await prisma.tailscaleServeAssignment.findMany({
+        where: { templateId: operation.templateId! },
+        orderBy: { agentId: "asc" },
+        select: { agentId: true, status: true, lastError: true },
+      }),
+    ).toEqual([
+      {
+        agentId: "agent-1",
+        status: "UNSUPPORTED",
+        lastError: "This agent does not advertise Tailscale Serve support",
+      },
+      {
+        agentId: "agent-2",
+        status: "FAILED",
+        lastError: "queue unavailable",
+      },
+    ]);
+  });
+
   it("groups exact imported routes and attaches listener drift without duplicates", async () => {
     await service.inspect(["agent-1", "agent-2"], "inspect-group");
     await complete(jobs[0]!, "SUCCEEDED", snapshot([webRoute]));
@@ -312,6 +415,47 @@ describe("TailscaleServeService persistence", () => {
       tailscaleServeFingerprint(driftedRoute),
     );
     expect(templates[0]!.fingerprint).toBe(tailscaleServeFingerprint(webRoute));
+  });
+
+  it("does not project an inspection older than the persisted snapshot", async () => {
+    await seedTemplate();
+    const replacement = {
+      ...webRoute,
+      destination: { ...webRoute.destination, port: 4000 },
+    };
+    await service.inspect(["agent-1"], "newer-inspection");
+    await service.inspect(["agent-1"], "older-inspection");
+
+    await complete(
+      jobs[0]!,
+      "SUCCEEDED",
+      snapshot([replacement], "2026-08-29T13:00:00.000Z"),
+    );
+    await complete(
+      jobs[1]!,
+      "SUCCEEDED",
+      snapshot([webRoute], "2026-08-29T12:00:00.000Z"),
+    );
+
+    const state = await prisma.tailscaleAgentState.findUniqueOrThrow({
+      where: { agentId: "agent-1" },
+    });
+    expect(state.lastInspectedAt?.toISOString()).toBe(
+      "2026-08-29T13:00:00.000Z",
+    );
+    expect(JSON.parse(state.routesJson)).toEqual([replacement]);
+    expect(
+      await prisma.tailscaleServeAssignment.findUniqueOrThrow({
+        where: {
+          templateId_agentId: {
+            templateId: "template-1",
+            agentId: "agent-1",
+          },
+        },
+      }),
+    ).toMatchObject({
+      observedFingerprint: tailscaleServeFingerprint(replacement),
+    });
   });
 
   it("ignores stale revisions while replacements move to the latest route", async () => {
@@ -344,8 +488,8 @@ describe("TailscaleServeService persistence", () => {
     });
     expect(assignment).toMatchObject({
       revision: 2,
-      status: "QUEUING",
-      lastJobId: null,
+      status: "QUEUED",
+      lastJobId: jobs[1]!.id,
       observedFingerprint: tailscaleServeFingerprint(webRoute),
     });
 
