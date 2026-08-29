@@ -15,14 +15,17 @@ const state = vi.hoisted(() => ({
   linkEvents: [] as string[],
   issueLinks: [] as Array<{ cacheEntryId: string; issueKey: string }>,
   ticketUpserts: [] as Array<Record<string, unknown>>,
+  createClient: vi.fn(),
+  createCloudClient: vi.fn(),
+  createAgileClient: vi.fn(),
 }));
 
 vi.mock("jira.js", () => ({
-  AgileClient: class {},
-  Version3Client: class {
-    myself = { getCurrentUser: state.currentUser };
-  },
+  createAgileClient: state.createAgileClient,
+  createCloudClient: state.createCloudClient,
 }));
+
+vi.mock("jira.js/core", () => ({ createClient: state.createClient }));
 
 vi.mock("@/services/credentials", async (importOriginal) => {
   const original =
@@ -177,6 +180,15 @@ beforeEach(() => {
   state.linkEvents = [];
   state.issueLinks = [];
   state.ticketUpserts = [];
+  state.createClient.mockReset();
+  state.createCloudClient.mockReset();
+  state.createAgileClient.mockReset();
+  const client = { sendRequest: vi.fn() };
+  state.createClient.mockReturnValue(client);
+  state.createCloudClient.mockReturnValue({
+    myself: { getCurrentUser: state.currentUser },
+  });
+  state.createAgileClient.mockReturnValue({});
 });
 
 describe("Jira SDK cache wrapper", () => {
@@ -275,6 +287,28 @@ describe("Jira SDK cache wrapper", () => {
       source: "ERROR",
       servedStale: false,
     });
+  });
+
+  test("builds Cloud and Agile factories from one v6 client", async () => {
+    const service = new JiraService();
+    state.currentUser.mockResolvedValue({
+      accountId: "account-1",
+      displayName: "Example User",
+    });
+
+    await service.testConnection();
+
+    expect(state.createClient).toHaveBeenCalledWith({
+      host: "https://example.atlassian.net",
+      auth: {
+        type: "basic",
+        email: "user@example.com",
+        apiToken: "secret-token",
+      },
+    });
+    const sharedClient = state.createClient.mock.results[0]?.value;
+    expect(state.createCloudClient).toHaveBeenCalledWith(sharedClient);
+    expect(state.createAgileClient).toHaveBeenCalledWith(sharedClient);
   });
 
   test("rejects a stale connection result from a coalesced request", async () => {

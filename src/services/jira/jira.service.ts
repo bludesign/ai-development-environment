@@ -2,7 +2,13 @@ import "server-only";
 
 import { createHash, randomUUID } from "node:crypto";
 
-import { AgileClient, Version3Client } from "jira.js";
+import {
+  createAgileClient,
+  createCloudClient,
+  type AgileClient,
+  type CloudClient,
+} from "jira.js";
+import { createClient } from "jira.js/core";
 
 import { getPrismaClient } from "@/data/prisma-client";
 import type { Prisma } from "@/generated/prisma/client";
@@ -90,11 +96,10 @@ type RawIssue = JsonRecord & {
 
 type RawSearchPage = {
   issues?: RawIssue[];
-  startAt?: number;
-  maxResults?: number;
-  total?: number;
-  nextPageToken?: string;
+  isLast?: boolean;
+  nextPageToken?: string | null;
   warningMessages?: string[];
+  warnings?: unknown[];
 };
 
 const SETTINGS_ID = "default";
@@ -133,7 +138,21 @@ function asArray(value: unknown): unknown[] {
 }
 
 function asString(value: unknown): string | null {
+  if (value instanceof Date && !Number.isNaN(value.getTime())) {
+    return value.toISOString();
+  }
   return typeof value === "string" && value.length > 0 ? value : null;
+}
+
+function searchWarnings(page: RawSearchPage): string[] {
+  const structuredWarnings = (page.warnings ?? []).flatMap((value) => {
+    const warning = asRecord(value);
+    const message = asString(warning.message);
+    if (message) return [message];
+    const type = asString(warning.type);
+    return type ? [type] : [];
+  });
+  return [...(page.warningMessages ?? []), ...structuredWarnings];
 }
 
 function asNumber(value: unknown): number | null {
@@ -434,7 +453,7 @@ export function filterJiraTicketBoard(
 export class JiraService {
   private readonly inFlight = new Map<string, Promise<CacheResult<unknown>>>();
   private clients:
-    { key: string; version3: Version3Client; agile: AgileClient } | undefined;
+    { key: string; cloud: CloudClient; agile: AgileClient } | undefined;
   private lastPrunedAt = 0;
 
   constructor(
@@ -725,8 +744,8 @@ export class JiraService {
       force: true,
       allowStaleOnError: false,
       fetcher: async () => {
-        const { version3 } = await this.getClients();
-        return version3.myself.getCurrentUser();
+        const { cloud } = await this.getClients();
+        return cloud.myself.getCurrentUser();
       },
     });
     if (result.stale) {
@@ -782,8 +801,10 @@ export class JiraService {
       params: { jiraId: project.jiraId },
       requestSummary: `Statuses for project ${project.key}`,
       fetcher: async () => {
-        const { version3 } = await this.getClients();
-        return version3.projects.getAllStatuses(project.jiraId);
+        const { cloud } = await this.getClients();
+        return cloud.projects.getAllStatuses({
+          projectIdOrKey: project.jiraId,
+        });
       },
     });
     const statuses = new Map<string, JiraProjectStatus>();
@@ -878,8 +899,8 @@ export class JiraService {
         params: { startAt, maxResults: PAGE_SIZE },
         requestSummary: `Visible projects from ${startAt}`,
         fetcher: async () => {
-          const { version3 } = await this.getClients();
-          return version3.projects.searchProjects({
+          const { cloud } = await this.getClients();
+          return cloud.projects.searchProjects({
             startAt,
             maxResults: PAGE_SIZE,
             orderBy: "name",
@@ -922,8 +943,8 @@ export class JiraService {
       params: { jiraId: id },
       requestSummary: `Project ${id}`,
       fetcher: async () => {
-        const { version3 } = await this.getClients();
-        return version3.projects.getProject(id);
+        const { cloud } = await this.getClients();
+        return cloud.projects.getProject({ projectIdOrKey: id });
       },
     });
     const project = asRecord(result.value);
@@ -1121,13 +1142,11 @@ export class JiraService {
       requestSummary: `Issue ${key} with all fields`,
       force,
       fetcher: async () => {
-        const { version3 } = await this.getClients();
-        return version3.issues.getIssue<RawIssue>({
+        const { cloud } = await this.getClients();
+        return cloud.issues.getIssue({
           issueIdOrKey: key,
           fields: ["*all"],
-          // Jira Cloud expects `names`; jira.js 5.4's generated union currently
-          // exposes the singular `name`, so keep the runtime-correct value.
-          expand: ["names", "schema"] as never,
+          expand: ["names", "schema"],
           updateHistory: false,
         });
       },
@@ -1145,8 +1164,8 @@ export class JiraService {
         requestSummary: `Comments for ${key} from ${startAt}`,
         force,
         fetcher: async () => {
-          const { version3 } = await this.getClients();
-          return version3.issueComments.getComments({
+          const { cloud } = await this.getClients();
+          return cloud.issueComments.getComments({
             issueIdOrKey: key,
             startAt,
             maxResults: PAGE_SIZE,
@@ -1192,8 +1211,8 @@ export class JiraService {
       params: { issueKey: key, query: normalizedQuery, maxResults: 50 },
       requestSummary: `Assignable users for ${key}`,
       fetcher: async () => {
-        const { version3 } = await this.getClients();
-        return version3.userSearch.findAssignableUsers({
+        const { cloud } = await this.getClients();
+        return cloud.userSearch.findAssignableUsers({
           issueKey: key,
           query: normalizedQuery,
           maxResults: 50,
@@ -1215,8 +1234,8 @@ export class JiraService {
       params: { issueKey: key, expand: "transitions.fields" },
       requestSummary: `Available transitions for ${key}`,
       fetcher: async () => {
-        const { version3 } = await this.getClients();
-        return version3.issues.getTransitions({
+        const { cloud } = await this.getClients();
+        return cloud.issues.getTransitions({
           issueIdOrKey: key,
           expand: "transitions.fields",
         });
@@ -1260,8 +1279,8 @@ export class JiraService {
       params: { issueKey: key },
       requestSummary: `Editable fields for ${key}`,
       fetcher: async () => {
-        const { version3 } = await this.getClients();
-        return version3.issues.getEditIssueMeta({ issueIdOrKey: key });
+        const { cloud } = await this.getClients();
+        return cloud.issues.getEditIssueMeta({ issueIdOrKey: key });
       },
       itemCount: (value) =>
         Object.keys(asRecord(asRecord(value).fields)).length,
@@ -1293,8 +1312,8 @@ export class JiraService {
       params: { issueKey: key, startAt: 0, maxResults: 1 },
       requestSummary: `Changelog count for ${key}`,
       fetcher: async () => {
-        const { version3 } = await this.getClients();
-        return version3.issues.getChangeLogs({
+        const { cloud } = await this.getClients();
+        return cloud.issues.getChangeLogs({
           issueIdOrKey: key,
           startAt: 0,
           maxResults: 1,
@@ -1317,8 +1336,8 @@ export class JiraService {
       params: { issueKey: key, startAt, maxResults: count },
       requestSummary: `Changelog for ${key} from ${startAt}`,
       fetcher: async () => {
-        const { version3 } = await this.getClients();
-        return version3.issues.getChangeLogs({
+        const { cloud } = await this.getClients();
+        return cloud.issues.getChangeLogs({
           issueIdOrKey: key,
           startAt,
           maxResults: count,
@@ -1363,8 +1382,8 @@ export class JiraService {
       params: { issueKey: key, startAt: 0, maxResults: 1 },
       requestSummary: `Worklog count for ${key}`,
       fetcher: async () => {
-        const { version3 } = await this.getClients();
-        return version3.issueWorklogs.getIssueWorklog({
+        const { cloud } = await this.getClients();
+        return cloud.issueWorklogs.getIssueWorklog({
           issueIdOrKey: key,
           startAt: 0,
           maxResults: 1,
@@ -1387,8 +1406,8 @@ export class JiraService {
       params: { issueKey: key, startAt, maxResults: count },
       requestSummary: `Worklogs for ${key} from ${startAt}`,
       fetcher: async () => {
-        const { version3 } = await this.getClients();
-        return version3.issueWorklogs.getIssueWorklog({
+        const { cloud } = await this.getClients();
+        return cloud.issueWorklogs.getIssueWorklog({
           issueIdOrKey: key,
           startAt,
           maxResults: count,
@@ -1454,10 +1473,10 @@ export class JiraService {
     if (!content.value.trim()) throw new Error("Comment text is required");
     const document = jiraTextInputToAdf(content);
     return this.mutateTicket(key, "ADD_COMMENT", async () => {
-      const { version3 } = await this.getClients();
-      await version3.issueComments.addComment({
+      const { cloud } = await this.getClients();
+      await cloud.issueComments.addComment({
         issueIdOrKey: key,
-        comment: document,
+        body: document as never,
       });
     });
   }
@@ -1469,10 +1488,12 @@ export class JiraService {
     const key = normalizeIssueKey(issueKey);
     const normalizedAccountId = accountId?.trim() || null;
     return this.mutateTicket(key, "ASSIGN_ISSUE", async () => {
-      const { version3 } = await this.getClients();
-      await version3.issues.assignIssue({
+      const { cloud } = await this.getClients();
+      await cloud.issues.assignIssue({
         issueIdOrKey: key,
-        accountId: normalizedAccountId,
+        // Jira documents null as the value for unassigning an issue, but the
+        // jira.js 6.1 generated input type currently only permits strings.
+        accountId: normalizedAccountId as never,
       });
     });
   }
@@ -1492,8 +1513,8 @@ export class JiraService {
       );
     }
     return this.mutateTicket(key, "TRANSITION_ISSUE", async () => {
-      const { version3 } = await this.getClients();
-      await version3.issues.doTransition({
+      const { cloud } = await this.getClients();
+      await cloud.issues.doTransition({
         issueIdOrKey: key,
         transition: { id: transition.id },
       });
@@ -1613,8 +1634,8 @@ export class JiraService {
       throw new Error("At least one editable Jira field is required");
     }
     return this.mutateTicket(key, "EDIT_ISSUE", async () => {
-      const { version3 } = await this.getClients();
-      await version3.issues.editIssue({
+      const { cloud } = await this.getClients();
+      await cloud.issues.editIssue({
         issueIdOrKey: key,
         fields,
       });
@@ -1634,8 +1655,8 @@ export class JiraService {
     if (!projectKey || !issueTypeId || !summary) {
       throw new Error("Project, issue type, and summary are required");
     }
-    const { version3 } = await this.getClients();
-    const created = await version3.issues.createIssue({
+    const { cloud } = await this.getClients();
+    const created = await cloud.issues.createIssue({
       fields: {
         ...(input.fields ?? {}),
         project: { key: projectKey },
@@ -1664,12 +1685,14 @@ export class JiraService {
     ) {
       throw new Error("Time spent must be a positive number of seconds");
     }
-    const { version3 } = await this.getClients();
-    await version3.issueWorklogs.addWorklog({
+    const { cloud } = await this.getClients();
+    await cloud.issueWorklogs.addWorklog({
       issueIdOrKey: key,
       timeSpentSeconds: input.timeSpentSeconds,
       started: input.startedAt ?? new Date().toISOString(),
-      ...(input.comment ? { comment: jiraTextInputToAdf(input.comment) } : {}),
+      ...(input.comment
+        ? { comment: jiraTextInputToAdf(input.comment) as never }
+        : {}),
     });
     return this.ticket(key, true);
   }
@@ -1683,8 +1706,8 @@ export class JiraService {
     const outwardIssueKey = normalizeIssueKey(input.outwardIssueKey);
     const linkType = input.linkType.trim();
     if (!linkType) throw new Error("Jira issue link type is required");
-    const { version3 } = await this.getClients();
-    await version3.issueLinks.linkIssues({
+    const { cloud } = await this.getClients();
+    await cloud.issueLinks.linkIssues({
       type: { name: linkType },
       inwardIssue: { key: inwardIssueKey },
       outwardIssue: { key: outwardIssueKey },
@@ -1710,8 +1733,8 @@ export class JiraService {
       params: { issueKey: key, fields: ["summary", "issuetype", "project"] },
       requestSummary: `Branch details for ${key}`,
       fetcher: async () => {
-        const { version3 } = await this.getClients();
-        return version3.issues.getIssue<RawIssue>({
+        const { cloud } = await this.getClients();
+        return cloud.issues.getIssue({
           issueIdOrKey: key,
           fields: ["summary", "issuetype", "project"],
           updateHistory: false,
@@ -1796,10 +1819,10 @@ export class JiraService {
       ...new Set(issueIds.map((issueId) => issueId.trim()).filter(Boolean)),
     ];
     if (ids.length === 0) return [];
-    const { version3 } = await this.getClients();
+    const { cloud } = await this.getClients();
     const issues = await Promise.all(
       ids.map((issueId) =>
-        version3.issues.getIssue<RawIssue>({
+        cloud.issues.getIssue({
           issueIdOrKey: issueId,
           fields: ["key"],
         }),
@@ -1822,14 +1845,16 @@ export class JiraService {
     }
     const { agile } = await this.getClients();
     const issueKeys: string[] = [];
-    let startAt = 0;
+    let nextPageToken: string | undefined;
     while (issueKeys.length < MAX_ISSUES) {
       const maxResults = Math.min(PAGE_SIZE, MAX_ISSUES - issueKeys.length);
-      const page = await agile.sprint.getIssuesForSprint<RawSearchPage>({
+      const page = await agile.sprint.getIssuesForSprint({
         sprintId,
-        startAt,
+        nextPageToken,
         maxResults,
-        fields: ["key"],
+        // Jira's REST API accepts field names here, while jira.js 6.1's
+        // generated Agile input type incorrectly describes them as objects.
+        fields: ["key"] as never,
       });
       const issues = page.issues ?? [];
       issueKeys.push(
@@ -1838,12 +1863,12 @@ export class JiraService {
           return key ? [normalizeIssueKey(key)] : [];
         }),
       );
-      const complete =
-        page.total === undefined
-          ? issues.length < maxResults
-          : startAt + issues.length >= page.total;
-      if (issues.length === 0 || complete) break;
-      startAt += issues.length;
+      const pageToken = asString(page.nextPageToken) ?? undefined;
+      if (issues.length === 0 || page.isLast || !pageToken) break;
+      if (pageToken === nextPageToken) {
+        throw new Error("Jira returned a repeated sprint pagination token");
+      }
+      nextPageToken = pageToken;
     }
 
     const tickets: JiraTicketDetail[] = [];
@@ -2014,17 +2039,18 @@ export class JiraService {
       .update(`${settings.siteUrl}\0${settings.email}\0${settings.apiToken}`)
       .digest("hex");
     if (this.clients?.key === key) return this.clients;
-    const config = {
+    const client = createClient({
       host: settings.siteUrl,
-      authentication: {
-        basic: { email: settings.email, apiToken: settings.apiToken },
+      auth: {
+        type: "basic",
+        email: settings.email,
+        apiToken: settings.apiToken,
       },
-      baseRequestConfig: { timeout: 15_000 },
-    } as const;
+    });
     this.clients = {
       key,
-      version3: new Version3Client(config),
-      agile: new AgileClient(config),
+      cloud: createCloudClient(client),
+      agile: createAgileClient(client),
     };
     return this.clients;
   }
@@ -2093,8 +2119,8 @@ export class JiraService {
       params: {},
       requestSummary: "Current Jira user",
       fetcher: async () => {
-        const { version3 } = await this.getClients();
-        return version3.myself.getCurrentUser();
+        const { cloud } = await this.getClients();
+        return cloud.myself.getCurrentUser();
       },
     });
     const accountId = asString(asRecord(result.value).accountId);
@@ -2341,8 +2367,8 @@ export class JiraService {
         params: { jql: value },
         requestSummary: `Validate JQL: ${value}`,
         fetcher: async () => {
-          const { version3 } = await this.getClients();
-          return version3.issueSearch.searchForIssuesUsingJqlEnhancedSearch({
+          const { cloud } = await this.getClients();
+          return cloud.issueSearch.searchAndReconsileIssuesUsingJql({
             jql: value,
             maxResults: 1,
             fields: ["key"],
@@ -2387,26 +2413,31 @@ export class JiraService {
         sourceId: source.id,
         force,
         fetcher: async () => {
-          const { version3 } = await this.getClients();
-          return version3.issueSearch.searchForIssuesUsingJqlEnhancedSearch<RawSearchPage>(
-            {
-              jql: source.value,
-              nextPageToken,
-              maxResults,
-              fields: LIST_FIELDS,
-            },
-          );
+          const { cloud } = await this.getClients();
+          return cloud.issueSearch.searchAndReconsileIssuesUsingJql({
+            jql: source.value,
+            nextPageToken,
+            maxResults,
+            fields: LIST_FIELDS,
+          });
         },
         itemCount: (value) => value.issues?.length ?? 0,
       });
       results.push(result);
       const pageIssues = result.value.issues ?? [];
       issues.push(...pageIssues);
-      warnings.push(...(result.value.warningMessages ?? []));
+      warnings.push(...searchWarnings(result.value));
       if (result.source === "LIVE") {
         await this.storeSummaries(result.entryId, pageIssues, result.fetchedAt);
       }
-      nextPageToken = result.value.nextPageToken;
+      const pageToken = asString(result.value.nextPageToken) ?? undefined;
+      const hasMore = result.value.isLast !== true && Boolean(pageToken);
+      if (hasMore && pageToken === nextPageToken) {
+        warnings.push("Jira returned a repeated JQL pagination token.");
+        nextPageToken = undefined;
+      } else {
+        nextPageToken = hasMore ? pageToken : undefined;
+      }
       if (issues.length >= MAX_ISSUES && nextPageToken) truncated = true;
     } while (nextPageToken && issues.length < MAX_ISSUES);
     return this.buildBoardResult(issues, results, warnings, truncated);
@@ -2422,7 +2453,7 @@ export class JiraService {
       force,
       fetcher: async () => {
         const { agile } = await this.getClients();
-        return agile.board.getBoard<JsonRecord>({ boardId: source.boardId! });
+        return agile.board.getBoard({ boardId: source.boardId! });
       },
     });
     const configuration = await this.cachedCall<JsonRecord>({
@@ -2433,7 +2464,7 @@ export class JiraService {
       force,
       fetcher: async () => {
         const { agile } = await this.getClients();
-        return agile.board.getConfiguration<JsonRecord>({
+        return agile.board.getConfiguration({
           boardId: source.boardId!,
         });
       },
@@ -2451,7 +2482,7 @@ export class JiraService {
         force,
         fetcher: async () => {
           const { agile } = await this.getClients();
-          return agile.board.getAllSprints<JsonRecord>({
+          return agile.board.getAllSprints({
             boardId: source.boardId!,
             state: "active",
             startAt: 0,
@@ -2471,15 +2502,15 @@ export class JiraService {
           "SPRINT_ISSUES",
           source,
           force,
-          (startAt, maxResults) => ({
+          (nextPageToken, maxResults) => ({
             sprintId,
-            startAt,
+            nextPageToken,
             maxResults,
             fields: LIST_FIELDS,
           }),
           async (parameters) => {
             const { agile } = await this.getClients();
-            return agile.sprint.getIssuesForSprint<RawSearchPage>(parameters);
+            return agile.sprint.getIssuesForSprint(parameters);
           },
           issues.length,
         );
@@ -2493,15 +2524,15 @@ export class JiraService {
         "BOARD_ISSUES",
         source,
         force,
-        (startAt, maxResults) => ({
+        (nextPageToken, maxResults) => ({
           boardId: source.boardId!,
-          startAt,
+          nextPageToken,
           maxResults,
           fields: LIST_FIELDS,
         }),
         async (parameters) => {
           const { agile } = await this.getClients();
-          return agile.board.getIssuesForBoard<RawSearchPage>(parameters);
+          return agile.board.getIssuesForBoard(parameters);
         },
         0,
       );
@@ -2539,26 +2570,28 @@ export class JiraService {
     operation: string,
     source: JiraSourceView,
     force: boolean,
-    params: (startAt: number, maxResults: number) => JsonRecord,
+    params: (
+      nextPageToken: string | undefined,
+      maxResults: number,
+    ) => JsonRecord,
     fetcher: (parameters: never) => Promise<RawSearchPage>,
     alreadyLoaded: number,
   ) {
     const issues: RawIssue[] = [];
     const results: CacheResult<unknown>[] = [];
     const warnings: string[] = [];
-    let startAt = 0;
-    let total = Number.POSITIVE_INFINITY;
+    let nextPageToken: string | undefined;
     let truncated = false;
-    while (startAt < total && issues.length + alreadyLoaded < MAX_ISSUES) {
+    while (issues.length + alreadyLoaded < MAX_ISSUES) {
       const maxResults = Math.min(
         PAGE_SIZE,
         MAX_ISSUES - alreadyLoaded - issues.length,
       );
-      const parameters = params(startAt, maxResults);
+      const parameters = params(nextPageToken, maxResults);
       const result = await this.cachedCall<RawSearchPage>({
         operation,
         params: parameters,
-        requestSummary: `${operation.replaceAll("_", " ")} from ${startAt}`,
+        requestSummary: `${operation.replaceAll("_", " ")}${nextPageToken ? " next page" : ""}`,
         sourceId: source.id,
         force,
         fetcher: () => fetcher(parameters as never),
@@ -2567,15 +2600,25 @@ export class JiraService {
       results.push(result);
       const pageIssues = result.value.issues ?? [];
       issues.push(...pageIssues);
-      warnings.push(...(result.value.warningMessages ?? []));
+      warnings.push(...searchWarnings(result.value));
       if (result.source === "LIVE")
         await this.storeSummaries(result.entryId, pageIssues, result.fetchedAt);
-      total = result.value.total ?? issues.length;
-      if (pageIssues.length === 0) break;
-      startAt += pageIssues.length;
+      const pageToken = asString(result.value.nextPageToken) ?? undefined;
+      const hasMore = result.value.isLast !== true && Boolean(pageToken);
+      if (pageIssues.length === 0 || !hasMore) {
+        nextPageToken = undefined;
+        break;
+      }
+      if (pageToken === nextPageToken) {
+        warnings.push("Jira returned a repeated Agile pagination token.");
+        nextPageToken = undefined;
+        break;
+      }
+      nextPageToken = pageToken;
     }
-    if (issues.length + alreadyLoaded >= MAX_ISSUES && startAt < total)
+    if (issues.length + alreadyLoaded >= MAX_ISSUES && nextPageToken) {
       truncated = true;
+    }
     return { issues, results, warnings, truncated };
   }
 

@@ -36,7 +36,6 @@ type JsonRpcMessage = {
   error?: { message?: string };
 };
 
-export const SUPPORTED_CODEX_APP_SERVER_MINORS = ["0.144", "0.145"] as const;
 const execFileAsync = promisify(execFile);
 
 export function codexAppServerArgs(modelCatalogPath: string): string[] {
@@ -47,19 +46,6 @@ export function codexAppServerArgs(modelCatalogPath: string): string[] {
     "--listen",
     "stdio://",
   ];
-}
-
-export function codexVersionFromUserAgent(userAgent: string): string | null {
-  return userAgent.match(/\/(\d+\.\d+\.\d+)(?:\s|$)/)?.[1] ?? null;
-}
-
-export function supportedCodexVersion(version: string | null): boolean {
-  return Boolean(
-    version &&
-    SUPPORTED_CODEX_APP_SERVER_MINORS.some((minor) =>
-      version.startsWith(`${minor}.`),
-    ),
-  );
 }
 
 export function codexRunConfig(
@@ -176,24 +162,14 @@ class CodexAppServer {
       child.once("spawn", resolve);
       child.once("error", reject);
     });
-    const initialized = asRecord(
-      await this.requestDirect("initialize", {
-        clientInfo: {
-          name: "ai-development-environment-control-agent",
-          title: "AI Development Environment",
-          version: "0.1.0",
-        },
-        capabilities: { experimentalApi: true },
-      }),
-    );
-    const userAgent = String(initialized.userAgent ?? "");
-    const version = codexVersionFromUserAgent(userAgent);
-    if (!supportedCodexVersion(version)) {
-      child.kill("SIGTERM");
-      throw new Error(
-        `Unsupported Codex app-server ${version ?? "version"}; expected ${SUPPORTED_CODEX_APP_SERVER_MINORS.map((minor) => `${minor}.x`).join(" or ")}`,
-      );
-    }
+    await this.requestDirect("initialize", {
+      clientInfo: {
+        name: "ai-development-environment-control-agent",
+        title: "AI Development Environment",
+        version: "0.1.0",
+      },
+      capabilities: { experimentalApi: true },
+    });
     this.notify("initialized", {});
     await this.requestDirect("model/list", {
       cursor: null,

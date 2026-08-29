@@ -2,17 +2,8 @@
 
 import { apiKeyClient } from "@better-auth/api-key/client";
 import { createAuthClient } from "better-auth/react";
-import {
-  adminClient,
-  genericOAuthClient,
-  oneTimeTokenClient,
-} from "better-auth/client/plugins";
+import { adminClient, oneTimeTokenClient } from "better-auth/client/plugins";
 
 export const authClient = createAuthClient({
-  plugins: [
-    adminClient(),
-    apiKeyClient(),
-    genericOAuthClient(),
-    oneTimeTokenClient(),
-  ],
+  plugins: [adminClient(), apiKeyClient(), oneTimeTokenClient()],
 });

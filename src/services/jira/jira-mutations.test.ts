@@ -16,7 +16,7 @@ const ticket = { key: "APP-1" } as JiraTicketDetail;
 
 type MutationHarness = {
   getClients(): Promise<{
-    version3: {
+    cloud: {
       issueComments: { addComment: ReturnType<typeof vi.fn> };
       issues: {
         assignIssue: ReturnType<typeof vi.fn>;
@@ -51,7 +51,7 @@ function harness() {
   const editIssue = vi.fn().mockResolvedValue(undefined);
   const service = new JiraService() as unknown as MutationHarness;
   service.getClients = vi.fn().mockResolvedValue({
-    version3: {
+    cloud: {
       issueComments: { addComment },
       issues: { assignIssue, doTransition, editIssue },
     },
@@ -80,7 +80,7 @@ describe("Jira write operations", () => {
     await service.assignTicket("APP-1", "account-1");
     expect(addComment).toHaveBeenCalledWith({
       issueIdOrKey: "APP-1",
-      comment: expect.objectContaining({ type: "doc", version: 1 }),
+      body: expect.objectContaining({ type: "doc", version: 1 }),
     });
     expect(assignIssue).toHaveBeenCalledWith({
       issueIdOrKey: "APP-1",
