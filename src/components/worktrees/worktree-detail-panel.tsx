@@ -33,11 +33,12 @@ export function WorktreeDetailPanel({
   inline = false,
 }: {
   detail: WorktreeDetail;
-  worktreeId?: string;
+  worktreeId: string;
   inline?: boolean;
 }) {
   const t = useTranslations("worktrees");
-  if (inline) return <InlineWorktreeDetail detail={detail} />;
+  if (inline)
+    return <InlineWorktreeDetail detail={detail} worktreeId={worktreeId} />;
   return (
     <div
       className={cn("w-full space-y-4", inline && "border-t pt-4")}
@@ -51,68 +52,11 @@ export function WorktreeDetailPanel({
         <div className="divide-y rounded-md border">
           {detail.changes.length ? (
             detail.changes.map((change) => (
-              <ExpandableRow
+              <WorktreeChangeRow
+                change={change}
                 key={change.path}
-                label={change.path}
-                summary={
-                  <div className="flex flex-wrap items-center gap-2">
-                    {change.conflicted && (
-                      <Badge variant="destructive">{t("conflicted")}</Badge>
-                    )}
-                    {change.staged && (
-                      <ChangeState
-                        additions={change.stagedAdditions}
-                        deletions={change.stagedDeletions}
-                        label={t("staged")}
-                      />
-                    )}
-                    {change.unstaged && (
-                      <ChangeState
-                        additions={change.unstagedAdditions}
-                        deletions={change.unstagedDeletions}
-                        label={t("unstaged")}
-                      />
-                    )}
-                    {change.untracked && (
-                      <ChangeState
-                        additions={change.unstagedAdditions}
-                        deletions={change.unstagedDeletions}
-                        label={t("untracked")}
-                      />
-                    )}
-                  </div>
-                }
-              >
-                {worktreeId ? (
-                  <div className="space-y-3">
-                    {change.staged && (
-                      <DiffBlock
-                        label={t("staged")}
-                        path={change.path}
-                        previousPath={change.previousPath}
-                        scope="STAGED"
-                        worktreeId={worktreeId}
-                      />
-                    )}
-                    {change.unstaged && (
-                      <DiffBlock
-                        label={t("unstaged")}
-                        path={change.path}
-                        scope="UNSTAGED"
-                        worktreeId={worktreeId}
-                      />
-                    )}
-                    {change.untracked && (
-                      <DiffBlock
-                        label={t("untracked")}
-                        path={change.path}
-                        scope="UNTRACKED"
-                        worktreeId={worktreeId}
-                      />
-                    )}
-                  </div>
-                ) : null}
-              </ExpandableRow>
+                worktreeId={worktreeId}
+              />
             ))
           ) : (
             <p className="p-3 text-sm text-muted-foreground">
@@ -163,7 +107,13 @@ export function WorktreeDetailPanel({
   );
 }
 
-function InlineWorktreeDetail({ detail }: { detail: WorktreeDetail }) {
+function InlineWorktreeDetail({
+  detail,
+  worktreeId,
+}: {
+  detail: WorktreeDetail;
+  worktreeId: string;
+}) {
   const t = useTranslations("worktrees");
   return (
     <div
@@ -175,54 +125,19 @@ function InlineWorktreeDetail({ detail }: { detail: WorktreeDetail }) {
         <h2 className="mb-2 font-medium">
           {t("changes", { count: detail.changes.length })}
         </h2>
-        <div className="max-h-80 overflow-auto rounded-md border">
+        <div
+          aria-label={t("changes", { count: detail.changes.length })}
+          className="max-h-80 divide-y overflow-auto rounded-md border"
+          role="group"
+        >
           {detail.changes.length ? (
-            <Table
-              aria-label={t("changes", { count: detail.changes.length })}
-              className="min-w-[36rem] table-fixed text-xs"
-            >
-              <TableBody>
-                {detail.changes.map((change) => (
-                  <TableRow key={change.path}>
-                    <TableCell className="max-w-0 px-2 py-1.5 font-mono">
-                      <span className="block truncate" title={change.path}>
-                        {change.path}
-                      </span>
-                    </TableCell>
-                    <TableCell className="w-px px-2 py-1.5">
-                      <div className="flex items-center justify-end gap-2">
-                        {change.conflicted && (
-                          <Badge className="px-1.5" variant="destructive">
-                            {t("conflicted")}
-                          </Badge>
-                        )}
-                        {change.staged && (
-                          <ChangeState
-                            additions={change.stagedAdditions}
-                            deletions={change.stagedDeletions}
-                            label={t("staged")}
-                          />
-                        )}
-                        {change.unstaged && (
-                          <ChangeState
-                            additions={change.unstagedAdditions}
-                            deletions={change.unstagedDeletions}
-                            label={t("unstaged")}
-                          />
-                        )}
-                        {change.untracked && (
-                          <ChangeState
-                            additions={change.unstagedAdditions}
-                            deletions={change.unstagedDeletions}
-                            label={t("untracked")}
-                          />
-                        )}
-                      </div>
-                    </TableCell>
-                  </TableRow>
-                ))}
-              </TableBody>
-            </Table>
+            detail.changes.map((change) => (
+              <WorktreeChangeRow
+                change={change}
+                key={change.path}
+                worktreeId={worktreeId}
+              />
+            ))
           ) : (
             <p className="p-3 text-sm text-muted-foreground">
               {t("noChanges")}
@@ -275,6 +190,77 @@ function InlineWorktreeDetail({ detail }: { detail: WorktreeDetail }) {
         </div>
       </section>
     </div>
+  );
+}
+
+function WorktreeChangeRow({
+  change,
+  worktreeId,
+}: {
+  change: WorktreeDetail["changes"][number];
+  worktreeId: string;
+}) {
+  const t = useTranslations("worktrees");
+  return (
+    <ExpandableRow
+      label={change.path}
+      summary={
+        <div className="flex flex-wrap items-center gap-2">
+          {change.conflicted && (
+            <Badge variant="destructive">{t("conflicted")}</Badge>
+          )}
+          {change.staged && (
+            <ChangeState
+              additions={change.stagedAdditions}
+              deletions={change.stagedDeletions}
+              label={t("staged")}
+            />
+          )}
+          {change.unstaged && (
+            <ChangeState
+              additions={change.unstagedAdditions}
+              deletions={change.unstagedDeletions}
+              label={t("unstaged")}
+            />
+          )}
+          {change.untracked && (
+            <ChangeState
+              additions={change.unstagedAdditions}
+              deletions={change.unstagedDeletions}
+              label={t("untracked")}
+            />
+          )}
+        </div>
+      }
+    >
+      <div className="space-y-3">
+        {change.staged && (
+          <DiffBlock
+            label={t("staged")}
+            path={change.path}
+            previousPath={change.previousPath}
+            scope="STAGED"
+            worktreeId={worktreeId}
+          />
+        )}
+        {change.unstaged && (
+          <DiffBlock
+            label={t("unstaged")}
+            path={change.path}
+            scope="UNSTAGED"
+            worktreeId={worktreeId}
+          />
+        )}
+        {change.untracked && (
+          <DiffBlock
+            label={t("untracked")}
+            path={change.path}
+            scope="UNTRACKED"
+            worktreeId={worktreeId}
+          />
+        )}
+      </div>
+    </ExpandableRow>
   );
 }
 

@@ -1741,7 +1741,13 @@ function WorktreeCard(props: WorktreeItemProps) {
             <Spinner /> {t("loadingDetails")}
           </p>
         )}
-        {expanded && detail && <WorktreeDetailPanel detail={detail} inline />}
+        {expanded && detail && (
+          <WorktreeDetailPanel
+            detail={detail}
+            inline
+            worktreeId={worktree.id}
+          />
+        )}
       </CardContent>
       <CardFooter
         className="flex-col items-stretch gap-2"
@@ -4040,7 +4046,11 @@ function WorktreeTableRows(props: WorktreeItemProps) {
             {detailLoading && !detail ? (
               <Spinner />
             ) : detail ? (
-              <WorktreeDetailPanel detail={detail} inline />
+              <WorktreeDetailPanel
+                detail={detail}
+                inline
+                worktreeId={worktree.id}
+              />
             ) : null}
           </TableCell>
         </TableRow>
