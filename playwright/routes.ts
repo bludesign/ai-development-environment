@@ -130,6 +130,13 @@ export const routes: RouteEntry[] = [
     path: "/tailscale",
     readyGraphqlOperation: "TailscaleServeOverview",
     readyTexts: ["Developer dashboard", "studio.acme-tailnet.ts.net"],
+    // The page automatically inspects every agent. Reuse the finished inspection seeded in
+    // scripts/mock-data/tailscale.ts so each viewport does not add live QUEUED jobs that make
+    // the Polling screenshot's pendingJobs detail depend on capture timing.
+    initScript: `Object.defineProperty(crypto, "randomUUID", {
+      configurable: true,
+      value: () => "${ids.tailscaleOperations.capturedInspection}",
+    });`,
   },
 
   // Commands

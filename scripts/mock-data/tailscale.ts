@@ -142,4 +142,30 @@ export async function seedTailscale(prisma: PrismaClient): Promise<void> {
       },
     },
   });
+
+  // TailscaleServePage inspects the fleet when it appears. Every Playwright project shares
+  // one mock database, so four independent page loads would otherwise enqueue jobs while the
+  // Polling screenshots are being captured. The route pins randomUUID to this request id and
+  // reuses the completed operation instead.
+  await prisma.tailscaleServeOperation.create({
+    data: {
+      id: ids.tailscaleOperations.capturedInspection,
+      kind: "INSPECT",
+      status: "PARTIAL_FAILED",
+      requestId: ids.tailscaleOperations.capturedInspection,
+      createdAt: minutesAgo(2),
+      finishedAt: minutesAgo(2),
+      agents: {
+        create: [
+          { agentId: ids.agents.studio, status: "SUCCEEDED" },
+          { agentId: ids.agents.build, status: "SUCCEEDED" },
+          {
+            agentId: ids.agents.ci,
+            status: "UNSUPPORTED",
+            error: "This agent does not advertise Tailscale Serve support",
+          },
+        ],
+      },
+    },
+  });
 }
