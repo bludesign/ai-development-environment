@@ -22,9 +22,9 @@
     "access": "public"
   },
   "dependencies": {
-    "@anthropic-ai/claude-agent-sdk": "0.3.233",
-    "@openai/codex-sdk": "0.147.0",
-    "@opencode-ai/sdk": "1.18.18",
+    "@anthropic-ai/claude-agent-sdk": "0.3.247",
+    "@openai/codex-sdk": "0.150.1",
+    "@opencode-ai/sdk": "1.18.23",
     "ws": "8.21.3"
   },
   "scripts": {
@@ -51,13 +51,13 @@
     "@types/ws": "8.18.1",
     "esbuild": "0.28.2",
     "eslint": "^9",
-    "eslint-config-next": "16.3.1",
+    "eslint-config-next": "16.3.3",
     "graphql": "16.0.0",
     "graphql-ws": "6.2.1",
-    "npm-check-updates": "23.0.2",
+    "npm-check-updates": "23.1.0",
     "prettier": "3.9.6",
     "tsx": "4.23.12",
     "typescript": "^6",
-    "vitest": "4.1.10"
+    "vitest": "4.1.11"
   }
 }
