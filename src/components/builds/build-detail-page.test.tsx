@@ -949,10 +949,7 @@ describe("BuildDetailPage", () => {
     fireEvent.click(
       await screen.findByRole("menuitemcheckbox", { name: /iPad Pro/ }),
     );
-    fireEvent.keyDown(document.activeElement ?? document.body, {
-      key: "Escape",
-    });
-    fireEvent.click(screen.getByRole("button", { name: "Run" }));
+    fireEvent.click(screen.getByRole("button", { name: "Run Selected" }));
     await waitFor(() =>
       expect(request).toHaveBeenCalledWith(
         expect.stringContaining("mutation RunCompletedBuild"),
@@ -969,6 +966,9 @@ describe("BuildDetailPage", () => {
         },
       ),
     );
+    fireEvent.keyDown(document.activeElement ?? document.body, {
+      key: "Escape",
+    });
 
     fireEvent.click(screen.getByRole("button", { name: "Export archive" }));
     const dialog = await screen.findByRole("dialog");

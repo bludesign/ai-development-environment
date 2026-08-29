@@ -569,10 +569,7 @@ export function registerWorktreesPageTests(
         expect(screen.getByText("Succeeded")).toBeDefined();
         expect(screen.getByText("Out of date")).toBeDefined();
         expect(screen.getByRole("button", { name: /1 devices/ })).toBeDefined();
-        expect(
-          (screen.getByRole("button", { name: "Run" }) as HTMLButtonElement)
-            .disabled,
-        ).toBe(false);
+        expect(screen.queryByRole("button", { name: "Run" })).toBeNull();
         expect(
           within(latestBuildRow).queryByRole("button", { name: "Rebuild" }),
         ).toBeNull();

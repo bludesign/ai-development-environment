@@ -299,11 +299,8 @@ describe("BuildsPage", () => {
       name: /iPad Pro/,
     });
     fireEvent.click(destination);
-    fireEvent.keyDown(document.activeElement ?? document.body, {
-      key: "Escape",
-    });
-    expect(screen.getByRole("button", { name: /2 devices/ })).toBeDefined();
-    fireEvent.click(screen.getByRole("button", { name: "Run" }));
+    expect(destination.getAttribute("aria-checked")).toBe("true");
+    fireEvent.click(screen.getByRole("button", { name: "Run Selected" }));
 
     await waitFor(() =>
       expect(request).toHaveBeenCalledWith(
