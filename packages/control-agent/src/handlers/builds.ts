@@ -41,7 +41,7 @@ import {
   parseBuildRemoteDeploymentPayload,
   parseBuildSourceDiscoverPayload,
   parseBuildSourceParsePayload,
-  GENERIC_BUILD_DESTINATION_ACTIONS,
+  genericBuildDestinations,
   type BuildAction,
   type BuildAdvancedSettings,
   type BuildDestination,
@@ -53,6 +53,8 @@ import {
   type BuildSigningRequirement,
   type BuildSourceSnapshot,
 } from "@ai-development-environment/agent-contract/builds";
+
+export { genericBuildDestinations };
 import { normalizeGitOrigin } from "@ai-development-environment/agent-contract/codebases";
 import { plistDocument } from "@ai-development-environment/agent-contract/plist";
 
@@ -937,34 +939,6 @@ export function physicalDestinations(
   });
 }
 
-export function genericBuildDestinations(
-  action: BuildAction,
-): BuildDestination[] {
-  if (!GENERIC_BUILD_DESTINATION_ACTIONS.includes(action)) return [];
-  const physical: BuildDestination = {
-    type: "PHYSICAL_DEVICE",
-    id: "generic-ios",
-    name: "Any Physical iOS Device",
-    platform: "iOS",
-    osVersion: null,
-    state: null,
-    generic: true,
-  };
-  if (action === "ARCHIVE") return [physical];
-  return [
-    {
-      type: "SIMULATOR",
-      id: "generic-ios-simulator",
-      name: "Any iOS Simulator",
-      platform: "iOS Simulator",
-      osVersion: null,
-      state: null,
-      generic: true,
-    },
-    physical,
-  ];
-}
-
 async function listPhysicalDevices(
   timeoutMs: number,
   signal: AbortSignal,
@@ -1005,24 +979,7 @@ export const inspectBuildDestinations: AgentJobHandler = async (
 ) => {
   const input = parseBuildDestinationsPayload(payload);
   const folder = await validateWorktree(input, timeoutMs, signal);
-  const absolutePath = await validateSource(folder, input.source);
-  const preflight = await command(
-    "xcrun",
-    [
-      "xcodebuild",
-      ...sourceArguments(input.source, absolutePath),
-      "-scheme",
-      input.scheme,
-      "-configuration",
-      input.configuration,
-      "-showBuildSettings",
-      "-json",
-    ],
-    Math.min(timeoutMs, 60_000),
-    signal,
-    folder,
-  );
-  requireSuccess(preflight, "The saved scheme or configuration is unavailable");
+  await validateSource(folder, input.source);
   const [simulators, physical] = await Promise.all([
     command(
       "xcrun",
@@ -2643,6 +2600,7 @@ export const runIosBuild: AgentJobHandler = async (
       telemetry: input.telemetry ?? null,
     };
     let buildResult: CommandResult | null = null;
+    let preflightResult: CommandResult | null = null;
     let coverageChanges: CoverageChange[] = [];
     let errorCode: string | null = null;
     let error: string | null = null;
@@ -2668,29 +2626,53 @@ export const runIosBuild: AgentJobHandler = async (
       } catch (progressError) {
         logger.emit("PREPARING", "SYSTEM", cleanError(progressError));
       }
-      for (const script of [...input.scripts].sort(
-        (a, b) => a.position - b.position,
-      )) {
-        if (!script.preBuildScript) continue;
-        const execution = await runHook({
-          input,
-          folder,
-          script,
-          phase: "PRE_BUILD",
-          source: script.preBuildScript,
-          contextPath,
-          hookContext: baseHookContext,
-          logger,
+      if (!signal.aborted) {
+        preflightResult = await runLoggedCommand({
+          command: "xcrun",
+          args: xcodeBuildSettingsArguments(input, folder),
+          cwd: folder,
+          env: xcodeEnvironment(),
+          timeoutMs: Math.min(timeoutMs, 60_000),
           signal,
+          logger,
+          phase: "PREFLIGHT",
         });
-        scriptExecutions.push(execution);
-        if (execution.causedBuildFailure) {
+        if (preflightResult.exitCode !== 0 && !preflightResult.cancelled) {
           failBuild = true;
-          errorCode = "SCRIPT_FAILED";
-          error = execution.error;
-          break;
+          errorCode = preflightResult.timedOut
+            ? "TIMEOUT"
+            : classifyFailure(preflightResult.output);
+          error = cleanError(
+            preflightResult.output ||
+              "The saved scheme, configuration, or destination is unavailable",
+          );
         }
-        if (signal.aborted) break;
+      }
+      if (!failBuild && !signal.aborted) {
+        for (const script of [...input.scripts].sort(
+          (a, b) => a.position - b.position,
+        )) {
+          if (!script.preBuildScript) continue;
+          const execution = await runHook({
+            input,
+            folder,
+            script,
+            phase: "PRE_BUILD",
+            source: script.preBuildScript,
+            contextPath,
+            hookContext: baseHookContext,
+            logger,
+            signal,
+          });
+          scriptExecutions.push(execution);
+          if (execution.causedBuildFailure) {
+            failBuild = true;
+            errorCode = "SCRIPT_FAILED";
+            error = execution.error;
+            break;
+          }
+          if (signal.aborted) break;
+        }
       }
       if (!failBuild && !signal.aborted) {
         try {
@@ -2754,7 +2736,10 @@ export const runIosBuild: AgentJobHandler = async (
                 (!signal.aborted &&
                   buildResult !== null &&
                   buildResult.exitCode !== 0),
-              cancelled: signal.aborted || buildResult?.cancelled === true,
+              cancelled:
+                signal.aborted ||
+                preflightResult?.cancelled === true ||
+                buildResult?.cancelled === true,
               errorCode,
               error,
             },
@@ -2792,8 +2777,9 @@ export const runIosBuild: AgentJobHandler = async (
     const testAction = ["TEST", "TEST_WITHOUT_BUILDING"].includes(input.action);
     const canGenerateReports = () =>
       !signal.aborted &&
-      buildResult?.cancelled !== true &&
-      buildResult?.timedOut !== true;
+      buildResult !== null &&
+      !buildResult.cancelled &&
+      !buildResult.timedOut;
     if (
       canGenerateReports() &&
       testAction &&
@@ -2841,8 +2827,12 @@ export const runIosBuild: AgentJobHandler = async (
         await artifact(input.artifactDirectory, "RAW_LOG", rawLog),
       );
     }
-    const cancelled = signal.aborted || buildResult?.cancelled === true;
-    const timedOut = buildResult?.timedOut === true;
+    const cancelled =
+      signal.aborted ||
+      preflightResult?.cancelled === true ||
+      buildResult?.cancelled === true;
+    const timedOut =
+      preflightResult?.timedOut === true || buildResult?.timedOut === true;
     const exitCode = cancelled
       ? null
       : failBuild || !buildResult
@@ -2857,7 +2847,7 @@ export const runIosBuild: AgentJobHandler = async (
     const codeStateObservedAt = new Date().toISOString();
     return {
       exitCode,
-      signal: buildResult?.signal ?? null,
+      signal: buildResult?.signal ?? preflightResult?.signal ?? null,
       timedOut,
       cancelled,
       errorCode,

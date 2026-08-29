@@ -770,6 +770,78 @@ esac
     expect(uploaded).toBe("build output");
   });
 
+  test("fails queue-time preflight before running pre-build hooks", async () => {
+    const root = await mkdtemp(join(tmpdir(), "ios-build-preflight-"));
+    temporaryDirectories.push(root);
+    const repository = join(root, "repository");
+    const bin = join(root, "bin");
+    const artifactDirectory = join(root, "build-preflight");
+    await mkdir(join(repository, "App.xcworkspace"), { recursive: true });
+    await mkdir(bin);
+    await execute("git", ["init", "-b", "main", repository]);
+    await execute("git", [
+      "-C",
+      repository,
+      "remote",
+      "add",
+      "origin",
+      "https://github.com/example/app.git",
+    ]);
+    const gitDirectory = await realpath(join(repository, ".git"));
+    const xcrun = join(bin, "xcrun");
+    await writeFile(
+      xcrun,
+      '#!/bin/sh\nprintf "scheme App is not currently configured" >&2\nexit 1\n',
+    );
+    await chmod(xcrun, 0o755);
+    const originalPath = process.env.PATH;
+    process.env.PATH = `${bin}:${originalPath ?? ""}`;
+    const hookMarker = join(repository, "pre-build-ran");
+    try {
+      const result = (await runIosBuild(
+        payload({
+          folder: repository,
+          gitDirectory,
+          expectedOrigin: normalizeGitOrigin(
+            "https://github.com/example/app.git",
+          ).canonicalOrigin,
+          buildId: "build-preflight",
+          artifactDirectory,
+          scripts: [
+            {
+              id: "pre-build",
+              name: "Pre-build",
+              preBuildScript: `import { writeFile } from "node:fs/promises";
+export default async function hook() { await writeFile(${JSON.stringify(hookMarker)}, "ran"); }`,
+              postBuildScript: null,
+              timeoutSeconds: 10,
+              failureBehavior: "FAIL_BUILD",
+              position: 0,
+            },
+          ],
+        }),
+        30_000,
+        new AbortController().signal,
+        async () => undefined,
+      )) as unknown as {
+        exitCode: number | null;
+        errorCode: string | null;
+        reports: unknown[];
+        scriptExecutions: unknown[];
+      };
+
+      expect(result).toMatchObject({
+        exitCode: 1,
+        errorCode: "MISSING_SCHEME",
+        reports: [],
+        scriptExecutions: [],
+      });
+      expect(existsSync(hookMarker)).toBe(false);
+    } finally {
+      process.env.PATH = originalPath;
+    }
+  });
+
   test("runs hooks in deterministic order, redacts output, and finalizes the raw log artifact", async () => {
     const root = await mkdtemp(join(tmpdir(), "ios-build-agent-"));
     temporaryDirectories.push(root);

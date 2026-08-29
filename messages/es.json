@@ -3658,6 +3658,7 @@
     "physicalDevice": "Dispositivo físico",
     "device": "Dispositivo",
     "selectDevice": "Selecciona un dispositivo",
+    "destinationRefreshWarning": "No se pudo actualizar la lista de dispositivos en vivo. Aún puedes iniciar la compilación con el destino genérico seleccionado. {error}",
     "anySimulator": "Cualquier simulador iOS",
     "anyPhysicalDevice": "Cualquier dispositivo iOS físico",
     "scripts": "Scripts de compilación",

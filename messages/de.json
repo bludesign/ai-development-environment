@@ -3658,6 +3658,7 @@
     "physicalDevice": "Physisches Gerät",
     "device": "Gerät",
     "selectDevice": "Gerät auswählen",
+    "destinationRefreshWarning": "Die Live-Geräteliste konnte nicht aktualisiert werden. Du kannst den Build weiterhin mit dem ausgewählten allgemeinen Ziel starten. {error}",
     "anySimulator": "Beliebiger iOS-Simulator",
     "anyPhysicalDevice": "Beliebiges physisches iOS-Gerät",
     "scripts": "Build-Skripte",

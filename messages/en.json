@@ -3658,6 +3658,7 @@
     "physicalDevice": "Physical Device",
     "device": "Device",
     "selectDevice": "Select a device",
+    "destinationRefreshWarning": "The live device list could not be refreshed. You can still start with the selected generic destination. {error}",
     "anySimulator": "Any iOS Simulator",
     "anyPhysicalDevice": "Any Physical iOS Device",
     "scripts": "Build scripts",

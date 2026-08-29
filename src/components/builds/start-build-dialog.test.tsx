@@ -104,6 +104,9 @@ beforeEach(() => {
         },
       } as never;
     }
+    if (operation.includes("query StartBuildPriorBuilds")) {
+      return { builds: { items: [] } } as never;
+    }
     if (operation.includes("mutation ReparseStartBuild")) {
       return { reparseBuildConfiguration: observation } as never;
     }
@@ -243,6 +246,79 @@ afterEach(() => {
 });
 
 describe("StartBuildDialog", () => {
+  test("allows a generic build to start while live destinations refresh", async () => {
+    const defaultImplementation = request.getMockImplementation()!;
+    let finishDestinationRefresh: (() => void) | undefined;
+    request.mockImplementation(async (query, variables) => {
+      if (String(query).includes("mutation InspectStartBuildDestinations")) {
+        await new Promise<void>((resolve) => {
+          finishDestinationRefresh = resolve;
+        });
+        return {
+          inspectBuildDestinations: [],
+        } as never;
+      }
+      return defaultImplementation(query, variables);
+    });
+
+    render(
+      <StartBuildButton codebaseId="codebase-1" worktreeId="worktree-1" />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Build" }));
+
+    const start = await screen.findByRole("button", { name: "Start Build" });
+    await waitFor(() =>
+      expect((start as HTMLButtonElement).disabled).toBe(false),
+    );
+    expect(screen.getAllByText(/Any iOS Simulator/).length).toBeGreaterThan(0);
+    fireEvent.click(start);
+
+    await waitFor(() =>
+      expect(request).toHaveBeenCalledWith(
+        expect.stringContaining("mutation StartIosBuild"),
+        expect.objectContaining({
+          input: expect.objectContaining({
+            destination: expect.objectContaining({
+              id: "generic-ios-simulator",
+              generic: true,
+            }),
+          }),
+        }),
+      ),
+    );
+    finishDestinationRefresh?.();
+  });
+
+  test("loads prior builds only when Test Without Building is selected", async () => {
+    render(
+      <StartBuildButton codebaseId="codebase-1" worktreeId="worktree-1" />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Build" }));
+    const dialog = await screen.findByRole("dialog");
+    expect(
+      request.mock.calls.some(([query]) =>
+        String(query).includes("query StartBuildPriorBuilds"),
+      ),
+    ).toBe(false);
+
+    const action = within(dialog).getAllByRole("combobox")[0]!;
+    fireEvent.pointerDown(action, {
+      button: 0,
+      ctrlKey: false,
+      pointerType: "mouse",
+    });
+    fireEvent.click(
+      await screen.findByRole("option", { name: "Test without building" }),
+    );
+
+    await waitFor(() =>
+      expect(request).toHaveBeenCalledWith(
+        expect.stringContaining("query StartBuildPriorBuilds"),
+        { worktreeId: "worktree-1" },
+      ),
+    );
+  });
+
   test("parses signing requirements while keeping manual signing overrides available", async () => {
     render(
       <StartBuildButton codebaseId="codebase-1" worktreeId="worktree-1" />,

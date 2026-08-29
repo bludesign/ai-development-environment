@@ -133,6 +133,34 @@ export type BuildDestination = {
   available?: boolean;
 };
 
+export function genericBuildDestinations(
+  action: BuildAction,
+): BuildDestination[] {
+  if (!GENERIC_BUILD_DESTINATION_ACTIONS.includes(action)) return [];
+  const physical: BuildDestination = {
+    type: "PHYSICAL_DEVICE",
+    id: "generic-ios",
+    name: "Any Physical iOS Device",
+    platform: "iOS",
+    osVersion: null,
+    state: null,
+    generic: true,
+  };
+  if (action === "ARCHIVE") return [physical];
+  return [
+    {
+      type: "SIMULATOR",
+      id: "generic-ios-simulator",
+      name: "Any iOS Simulator",
+      platform: "iOS Simulator",
+      osVersion: null,
+      state: null,
+      generic: true,
+    },
+    physical,
+  ];
+}
+
 export type BuildAdvancedSettings = {
   packageResolution:
     "DEFAULT" | "RESOLVED_ONLY" | "SKIP_UPDATES" | "DISABLE_AUTOMATIC";

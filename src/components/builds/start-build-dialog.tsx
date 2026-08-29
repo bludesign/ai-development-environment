@@ -1,6 +1,9 @@
 "use client";
 
-import type { BuildSigningRequirement } from "@ai-development-environment/agent-contract/builds";
+import {
+  genericBuildDestinations,
+  type BuildSigningRequirement,
+} from "@ai-development-environment/agent-contract/builds";
 import { Hammer, RefreshCw, TestTube2 } from "lucide-react";
 import { useLocale, useTranslations } from "next-intl";
 import { useEffect, useMemo, useRef, useState } from "react";
@@ -68,6 +71,13 @@ type BuildAgent = {
   hostname: string;
 };
 
+type DestinationCacheEntry = {
+  destinations: BuildDestination[];
+  expiresAt: number;
+};
+
+const DESTINATION_CACHE_TTL_MS = 15_000;
+
 const PROJECT_FIELDS = `
   id type
   configurations {
@@ -115,6 +125,9 @@ export function StartBuildButton({
   const [open, setOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const settingsCloseTimer = useRef<number | null>(null);
+  const [destinationCache] = useState(
+    () => new Map<string, DestinationCacheEntry>(),
+  );
 
   const cancelSettingsClose = () => {
     if (settingsCloseTimer.current !== null) {
@@ -196,6 +209,7 @@ export function StartBuildButton({
       {open && (
         <StartBuildDialog
           codebaseId={codebaseId}
+          destinationCache={destinationCache}
           onOpenChange={setOpen}
           onStarted={(id) => onStarted?.(id)}
           open={open}
@@ -219,6 +233,9 @@ export function WorktreeCoverageButton({
 }) {
   const t = useTranslations("builds");
   const [open, setOpen] = useState(false);
+  const [destinationCache] = useState(
+    () => new Map<string, DestinationCacheEntry>(),
+  );
   return (
     <>
       <Button disabled={disabled} onClick={() => setOpen(true)} type="button">
@@ -228,6 +245,7 @@ export function WorktreeCoverageButton({
         <StartBuildDialog
           codebaseId={codebaseId}
           coverageMode
+          destinationCache={destinationCache}
           onOpenChange={setOpen}
           onStarted={(id) => onStarted?.(id)}
           open={open}
@@ -244,6 +262,7 @@ function StartBuildDialog({
   open,
   onOpenChange,
   onStarted,
+  destinationCache,
   coverageMode = false,
 }: {
   codebaseId: string;
@@ -251,6 +270,7 @@ function StartBuildDialog({
   open: boolean;
   onOpenChange: (open: boolean) => void;
   onStarted: (buildId: string) => void;
+  destinationCache: Map<string, DestinationCacheEntry>;
   coverageMode?: boolean;
 }) {
   const t = useTranslations("builds");
@@ -258,6 +278,7 @@ function StartBuildDialog({
   const [project, setProject] = useState<IosAppProject | null>(null);
   const [agent, setAgent] = useState<BuildAgent | null>(null);
   const [priorBuilds, setPriorBuilds] = useState<PriorBuildForTesting[]>([]);
+  const [priorBuildsLoading, setPriorBuildsLoading] = useState(false);
   const [configurationId, setConfigurationId] = useState("");
   const [action, setAction] = useState<BuildAction>("BUILD");
   const [observations, setObservations] = useState<
@@ -275,9 +296,16 @@ function StartBuildDialog({
   );
   const [overrides, setOverrides] = useState("{}");
   const [loading, setLoading] = useState(true);
-  const [preparing, setPreparing] = useState(false);
+  const [reparsing, setReparsing] = useState(false);
   const [starting, setStarting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [destinationWarning, setDestinationWarning] = useState<string | null>(
+    null,
+  );
+  const destinationRequest = useRef(0);
+  const destinationTypeRef = useRef<BuildDestination["type"]>("SIMULATOR");
+  const destinationIdRef = useRef("");
+  const priorBuildsLoaded = useRef(false);
 
   const configuration = project?.configurations.find(
     (entry) => entry.id === configurationId,
@@ -291,22 +319,17 @@ function StartBuildDialog({
     void controlPlaneRequest<{
       iosAppProject: IosAppProject | null;
       codebase: { agent: BuildAgent } | null;
-      builds: { items: PriorBuildForTesting[] };
     }>(
-      `query StartBuildProject($codebaseId: ID!, $worktreeId: ID!) {
+      `query StartBuildProject($codebaseId: ID!) {
         iosAppProject(codebaseId: $codebaseId) { ${PROJECT_FIELDS} }
         codebase(id: $codebaseId) { agent { id name hostname } }
-        builds(first: 50, status: SUCCEEDED, worktreeId: $worktreeId) {
-          items { id action destinationType snapshot createdAt }
-        }
       }`,
-      { codebaseId, worktreeId },
+      { codebaseId },
     )
       .then((data) => {
         if (disposed) return;
         setProject(data.iosAppProject);
         setAgent(data.codebase?.agent ?? null);
-        setPriorBuilds(data.builds.items);
         const first = data.iosAppProject?.configurations[0];
         if (first) {
           setConfigurationId(first.id);
@@ -345,6 +368,28 @@ function StartBuildDialog({
     };
   }, [codebaseId, coverageMode, worktreeId]);
 
+  useEffect(() => {
+    if (action !== "TEST_WITHOUT_BUILDING" || priorBuildsLoaded.current) {
+      return;
+    }
+    priorBuildsLoaded.current = true;
+    setPriorBuildsLoading(true);
+    void controlPlaneRequest<{ builds: { items: PriorBuildForTesting[] } }>(
+      `query StartBuildPriorBuilds($worktreeId: ID!) {
+        builds(first: 50, status: SUCCEEDED, worktreeId: $worktreeId) {
+          items { id action destinationType snapshot createdAt }
+        }
+      }`,
+      { worktreeId },
+    )
+      .then((data) => setPriorBuilds(data.builds.items))
+      .catch((value) => {
+        priorBuildsLoaded.current = false;
+        setError(value instanceof Error ? value.message : String(value));
+      })
+      .finally(() => setPriorBuildsLoading(false));
+  }, [action, worktreeId]);
+
   const compatiblePriorBuilds = useMemo(
     () =>
       priorBuilds.filter((build) => {
@@ -372,14 +417,57 @@ function StartBuildDialog({
     compatiblePriorBuilds[0]?.id ??
     null;
 
+  const applyDestinations = (
+    next: BuildDestination[],
+    selectedAction: BuildAction,
+    preserveSelection: boolean,
+  ) => {
+    const defaultType: BuildDestination["type"] =
+      selectedAction === "ARCHIVE"
+        ? "PHYSICAL_DEVICE"
+        : next.some((destination) => destination.type === "SIMULATOR")
+          ? "SIMULATOR"
+          : "PHYSICAL_DEVICE";
+    const nextType =
+      preserveSelection &&
+      next.some(
+        (destination) => destination.type === destinationTypeRef.current,
+      )
+        ? destinationTypeRef.current
+        : defaultType;
+    const nextId =
+      preserveSelection &&
+      next.some(
+        (destination) =>
+          destination.id === destinationIdRef.current &&
+          destination.type === nextType,
+      )
+        ? destinationIdRef.current
+        : (next.find((destination) => destination.type === nextType)?.id ?? "");
+    destinationTypeRef.current = nextType;
+    destinationIdRef.current = nextId;
+    setDestinations(next);
+    setDestinationType(nextType);
+    setDestinationId(nextId);
+  };
+
   const prepare = async (
     selected: BuildConfiguration,
     selectedAction: BuildAction,
   ) => {
-    setPreparing(true);
+    const request = ++destinationRequest.current;
+    const cacheKey = `${worktreeId}:${selected.id}:${selectedAction}`;
+    const cached = destinationCache.get(cacheKey);
+    if (cached && cached.expiresAt <= Date.now()) {
+      destinationCache.delete(cacheKey);
+    }
+    const initialDestinations =
+      cached && cached.expiresAt > Date.now()
+        ? cached.destinations
+        : (genericBuildDestinations(selectedAction) as BuildDestination[]);
     setError(null);
-    setDestinations([]);
-    setDestinationId("");
+    setDestinationWarning(null);
+    applyDestinations(initialDestinations, selectedAction, false);
     try {
       const data = await controlPlaneRequest<{
         inspectBuildDestinations: BuildDestination[];
@@ -396,30 +484,27 @@ function StartBuildDialog({
           },
         },
       );
-      setDestinations(data.inspectBuildDestinations);
-      const preferredType =
-        selectedAction === "ARCHIVE"
-          ? "PHYSICAL_DEVICE"
-          : data.inspectBuildDestinations.some(
-                (destination) => destination.type === "SIMULATOR",
-              )
-            ? "SIMULATOR"
-            : "PHYSICAL_DEVICE";
-      setDestinationType(preferredType);
-      setDestinationId(
-        data.inspectBuildDestinations.find(
-          (destination) => destination.type === preferredType,
-        )?.id ?? "",
-      );
+      if (request !== destinationRequest.current) return;
+      destinationCache.set(cacheKey, {
+        destinations: data.inspectBuildDestinations,
+        expiresAt: Date.now() + DESTINATION_CACHE_TTL_MS,
+      });
+      applyDestinations(data.inspectBuildDestinations, selectedAction, true);
     } catch (value) {
-      setError(value instanceof Error ? value.message : String(value));
-    } finally {
-      setPreparing(false);
+      if (request !== destinationRequest.current) return;
+      const message = value instanceof Error ? value.message : String(value);
+      if (initialDestinations.length) {
+        setDestinationWarning(
+          t("destinationRefreshWarning", { error: message }),
+        );
+      } else {
+        setError(message);
+      }
     }
   };
 
   const reparse = async (selected: BuildConfiguration) => {
-    setPreparing(true);
+    setReparsing(true);
     setError(null);
     try {
       const parsed = await controlPlaneRequest<{
@@ -444,11 +529,11 @@ function StartBuildDialog({
       if (nextObservation.status !== "VALID") {
         throw new Error(nextObservation.error || t("configurationInvalid"));
       }
-      await prepare(selected, action);
+      void prepare(selected, action);
     } catch (value) {
       setError(value instanceof Error ? value.message : String(value));
     } finally {
-      setPreparing(false);
+      setReparsing(false);
     }
   };
 
@@ -486,7 +571,10 @@ function StartBuildDialog({
       () => void prepare(configuration, action),
       0,
     );
-    return () => window.clearTimeout(timer);
+    return () => {
+      window.clearTimeout(timer);
+      destinationRequest.current += 1;
+    };
     // Prepare only when the selected configuration/action changes.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [configurationId, action, loading]);
@@ -584,6 +672,11 @@ function StartBuildDialog({
             <AlertDescription>{error}</AlertDescription>
           </Alert>
         )}
+        {destinationWarning && (
+          <Alert>
+            <AlertDescription>{destinationWarning}</AlertDescription>
+          </Alert>
+        )}
         {loading ? (
           <p className="flex items-center gap-2 text-muted-foreground">
             <Spinner /> {t("loading")}
@@ -602,6 +695,9 @@ function StartBuildDialog({
                     className={`rounded-xl border p-3 text-left transition-colors ${entry.id === configurationId ? "border-primary bg-primary/5" : "hover:bg-muted/50"}`}
                     key={entry.id}
                     onClick={() => {
+                      if (entry.id !== configurationId) {
+                        destinationRequest.current += 1;
+                      }
                       setConfigurationId(entry.id);
                       setAction(coverageMode ? "TEST" : entry.defaultAction);
                       setAdvanced(entry.advancedSettings ?? {});
@@ -663,13 +759,13 @@ function StartBuildDialog({
                       )}
                     </div>
                     <Button
-                      disabled={preparing}
+                      disabled={reparsing}
                       onClick={() => void reparse(configuration)}
                       size="sm"
                       type="button"
                       variant="outline"
                     >
-                      {preparing ? <Spinner /> : <RefreshCw />} {t("reparse")}
+                      {reparsing ? <Spinner /> : <RefreshCw />} {t("reparse")}
                     </Button>
                   </div>
                   {observation?.error && (
@@ -686,6 +782,7 @@ function StartBuildDialog({
                 <Label>{t("action")}</Label>
                 <Select
                   onValueChange={(value) => {
+                    if (value !== action) destinationRequest.current += 1;
                     setAction(value as BuildAction);
                     if (value !== "ARCHIVE") setExportWhenComplete(false);
                   }}
@@ -709,11 +806,13 @@ function StartBuildDialog({
                   disabled={action === "ARCHIVE"}
                   onValueChange={(value) => {
                     const type = value as BuildDestination["type"];
+                    destinationTypeRef.current = type;
                     setDestinationType(type);
-                    setDestinationId(
+                    const id =
                       destinations.find((entry) => entry.type === type)?.id ??
-                        "",
-                    );
+                      "";
+                    destinationIdRef.current = id;
+                    setDestinationId(id);
                   }}
                   value={destinationType}
                 >
@@ -731,8 +830,11 @@ function StartBuildDialog({
               <div className="space-y-2">
                 <Label>{t("device")}</Label>
                 <Select
-                  disabled={preparing || !filteredDestinations.length}
-                  onValueChange={setDestinationId}
+                  disabled={!filteredDestinations.length}
+                  onValueChange={(value) => {
+                    destinationIdRef.current = value;
+                    setDestinationId(value);
+                  }}
                   value={destinationId}
                 >
                   <SelectTrigger>
@@ -780,7 +882,7 @@ function StartBuildDialog({
               <div className="space-y-2">
                 <Label>{t("priorBuildForTesting")}</Label>
                 <Select
-                  disabled={!compatiblePriorBuilds.length}
+                  disabled={priorBuildsLoading || !compatiblePriorBuilds.length}
                   onValueChange={(value) =>
                     setAdvanced((current) => ({
                       ...current,
@@ -807,7 +909,12 @@ function StartBuildDialog({
                     ))}
                   </SelectContent>
                 </Select>
-                {!compatiblePriorBuilds.length && (
+                {priorBuildsLoading && (
+                  <p className="flex items-center gap-2 text-xs text-muted-foreground">
+                    <Spinner /> {t("loading")}
+                  </p>
+                )}
+                {!priorBuildsLoading && !compatiblePriorBuilds.length && (
                   <p className="text-xs text-destructive">
                     {t("noPriorBuildForTesting")}
                   </p>
@@ -1015,7 +1122,6 @@ function StartBuildDialog({
           <Button
             disabled={
               loading ||
-              preparing ||
               starting ||
               !configuration ||
               !destination ||

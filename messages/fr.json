@@ -3658,6 +3658,7 @@
     "physicalDevice": "Appareil physique",
     "device": "Appareil",
     "selectDevice": "Sélectionner un appareil",
+    "destinationRefreshWarning": "La liste des appareils actifs n’a pas pu être actualisée. Vous pouvez tout de même lancer le build avec la destination générique sélectionnée. {error}",
     "anySimulator": "N’importe quel simulateur iOS",
     "anyPhysicalDevice": "N’importe quel appareil iOS physique",
     "scripts": "Scripts de build",

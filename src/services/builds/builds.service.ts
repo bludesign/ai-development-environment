@@ -23,6 +23,7 @@ import {
   IOS_SIGNING_INSPECT_JOB_KIND,
   IOS_SOURCE_DISCOVER_JOB_KIND,
   IOS_SOURCE_PARSE_JOB_KIND,
+  genericBuildDestinations,
   parseBuildAdvancedSettings,
   parseBuildArtifactSnapshots,
   parseBuildDestination,
@@ -230,32 +231,6 @@ function destinationSpecifier(destination: BuildDestination): string {
   return destination.type === "SIMULATOR"
     ? `platform=iOS Simulator,id=${destination.id}`
     : `platform=iOS,id=${destination.id}`;
-}
-
-function genericBuildDestinations(action: BuildAction): BuildDestination[] {
-  if (!GENERIC_BUILD_DESTINATION_ACTIONS.includes(action)) return [];
-  const physical: BuildDestination = {
-    type: "PHYSICAL_DEVICE",
-    id: "generic-ios",
-    name: "Any Physical iOS Device",
-    platform: "iOS",
-    osVersion: null,
-    state: null,
-    generic: true,
-  };
-  if (action === "ARCHIVE") return [physical];
-  return [
-    {
-      type: "SIMULATOR",
-      id: "generic-ios-simulator",
-      name: "Any iOS Simulator",
-      platform: "iOS Simulator",
-      osVersion: null,
-      state: null,
-      generic: true,
-    },
-    physical,
-  ];
 }
 
 function actionArgument(action: BuildAction): string {
