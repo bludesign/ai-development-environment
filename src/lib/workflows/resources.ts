@@ -265,6 +265,17 @@ export function workflowTriggerResourceLink(
       nested(session, "buildData", "id"),
     );
   }
+  if (kind.startsWith("SSE_")) {
+    const sse = record(session.sse);
+    const requestId = nested(sse, "request", "id");
+    return resourceLink(
+      kind === "SSE_EVENT_EMITTED" ? "SSE_EVENT" : "SSE_REQUEST",
+      kind === "SSE_EVENT_EMITTED" ? nested(sse, "event", "id") : requestId,
+      {
+        url: `/sse/history?requestId=${encodeURIComponent(String(requestId ?? ""))}`,
+      },
+    );
+  }
   if (kind === "AGENT_JOB_FAILED") {
     return resourceLink(
       "AGENT_JOB",

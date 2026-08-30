@@ -26,6 +26,7 @@ import type { PushNotificationsService } from "@/services/push-notifications";
 import type { TelemetryService } from "@/services/telemetry";
 import type { TailscaleServeService } from "@/services/tailscale";
 import type { RunsService } from "@/services/runs";
+import type { SseService } from "@/services/sse";
 import type { WorkflowsService } from "@/services/workflows";
 import type {
   WorktreeAutomationService,
@@ -56,6 +57,7 @@ import { createToolAdministrationGroup } from "./builtin-tools/tool-administrati
 import { createTailscaleToolGroup } from "./builtin-tools/tailscale";
 import type { ToolCallAuditService } from "./tool-call-audit.service";
 import { createWorktreeAutomationToolGroup } from "./builtin-tools/worktree-automations";
+import { createSseToolGroup } from "./builtin-tools/sse";
 import type { ToolAnnotations, ToolCatalogGroup } from "./types";
 
 export type { ToolAnnotations } from "./types";
@@ -140,6 +142,7 @@ export type BuiltInToolServices = {
   signingAssets?: SigningAssetsService;
   skills?: SkillsService;
   systemStatus?: SystemStatusService;
+  sse?: SseService;
   toolAudit?: ToolCallAuditService;
   testExternalMcpServer?: (id: string) => Promise<unknown>;
   /**
@@ -354,5 +357,6 @@ export function createBuiltInToolRegistry(
       createWorktreeAutomationToolGroup(services.worktreeAutomations),
     );
   }
+  if (services.sse) groups.push(createSseToolGroup(services.sse));
   return new BuiltInToolRegistry(groups);
 }

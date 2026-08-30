@@ -26,6 +26,7 @@ import {
   Network,
   PlayCircle,
   Plus,
+  RadioTower,
   Settings,
   ShieldCheck,
   Smartphone,
@@ -241,6 +242,21 @@ export const APP_DESTINATIONS: AppDestination[] = [
     sidebar: true,
   },
 
+  {
+    key: "sse",
+    href: "/sse",
+    labelKey: "sseEndpoints",
+    aliases: [
+      "server sent events",
+      "event streams",
+      "sse history",
+      "sse mocks",
+    ],
+    icon: RadioTower,
+    section: "debugging",
+    sidebar: true,
+    activePrefixes: ["/sse"],
+  },
   {
     key: "push-notifications",
     href: "/push-notifications",

@@ -1133,6 +1133,86 @@ const STEP_CONFIG_DESCRIPTORS: StepConfigDescriptors = {
       json("arguments", "Arguments"),
     ],
   },
+  SSE_ENDPOINT_ACTION: {
+    fields: [
+      enumField(
+        "operation",
+        "Operation",
+        staticOptions([
+          "CREATE",
+          "UPDATE",
+          "SET_MODE",
+          "ROTATE_TOKEN",
+          "DELETE",
+        ]),
+        { required: true },
+      ),
+      text("endpointId", "Endpoint ID"),
+      json("input", "Endpoint input"),
+    ],
+  },
+  SSE_MOCK_ACTION: {
+    fields: [
+      enumField(
+        "operation",
+        "Operation",
+        staticOptions([
+          "SAVE_TEMPLATE",
+          "DELETE_TEMPLATE",
+          "SAVE_COMPOSITION",
+          "ACTIVATE_COMPOSITION",
+          "DELETE_COMPOSITION",
+        ]),
+        { required: true },
+      ),
+      text("endpointId", "Endpoint ID"),
+      text("resourceId", "Template or composition ID"),
+      json("input", "Mock input"),
+    ],
+  },
+  SSE_STORAGE_ACTION: {
+    fields: [
+      enumField(
+        "operation",
+        "Operation",
+        staticOptions(["SET", "COMPARE_AND_SET", "INCREMENT", "DELETE"]),
+        { required: true },
+      ),
+      text("key", "Storage key", { required: true }),
+      json("value", "JSON value"),
+      num("expectedVersion", "Expected version"),
+      num("delta", "Increment amount"),
+    ],
+  },
+  SSE_BREAKPOINT_RESOLVE: {
+    fields: [
+      text("breakpointId", "Breakpoint ID", { required: true }),
+      num("version", "Version", { required: true, integer: true }),
+      enumField(
+        "resolution",
+        "Resolution",
+        staticOptions(["FORWARD", "SAVED_MOCK", "AD_HOC"]),
+        { required: true },
+      ),
+      text("mockCompositionId", "Mock composition ID"),
+      json("adHocComposition", "Ad hoc composition"),
+    ],
+  },
+  SSE_HISTORY_CLEAR: {
+    fields: [
+      text("endpointId", "Endpoint ID"),
+      stringList("ids", "Request IDs"),
+    ],
+  },
+  SSE_SCRIPT_TEST: {
+    fields: [
+      multiline("source", "JavaScript", { required: true }),
+      json("context", "Script context"),
+      num("timeoutMs", "Timeout (ms)", { integer: true }),
+      num("memoryLimitMb", "Memory limit (MiB)", { integer: true }),
+      num("fetchTimeoutMs", "Fetch timeout (ms)", { integer: true }),
+    ],
+  },
   // -- Plans and sessions ----------------------------------------------------
   RUN_CREATE_PLAN: { fields: runInputFields("PLAN") },
   RUN_CREATE_SESSION: { fields: runInputFields("SESSION") },
@@ -1604,6 +1684,12 @@ const ALL_TRIGGER_KINDS: WorkflowTriggerKind[] = [
   "AGENT_RESOURCE_THRESHOLD",
   "AGENT_VERSION_CHANGED",
   "TOOL_CALL_RESULT",
+  "SSE_REQUEST_OPENED",
+  "SSE_EVENT_EMITTED",
+  "SSE_BREAKPOINT_WAITING",
+  "SSE_BREAKPOINT_RESOLVED",
+  "SSE_STREAM_COMPLETED",
+  "SSE_STREAM_FAILED",
 ];
 
 const TRIGGER_CONFIG_DESCRIPTORS: TriggerConfigDescriptors = Object.fromEntries(

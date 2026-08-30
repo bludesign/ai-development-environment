@@ -152,6 +152,15 @@ export const ids = {
   notifications: {
     buildFailed: "notification-build-failed",
   },
+  sse: {
+    productFeed: "sse-endpoint-product-feed",
+    assistant: "sse-endpoint-assistant",
+    mockComposition: "sse-composition-product-feed",
+    displayCardTemplate: "sse-template-display-card",
+    history: "sse-history-product-feed",
+    breakpointHistory: "sse-history-assistant-breakpoint",
+    breakpoint: "sse-breakpoint-assistant",
+  },
   ccusageCollections: {
     /**
      * Doubles as the Usage page's collection request id — playwright/routes.ts pins the

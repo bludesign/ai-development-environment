@@ -278,6 +278,44 @@ export const routes: RouteEntry[] = [
   { name: "analytics-events", path: "/analytics-events" },
   { name: "unified-events", path: "/unified-events" },
 
+  // Hosted SSE endpoints
+  {
+    name: "sse-endpoints",
+    path: "/sse",
+    readyGraphqlOperation: "SseEndpointsPage",
+    readyTexts: ["Product recommendation stream"],
+  },
+  {
+    name: "sse-endpoint-detail",
+    path: `/sse/${ids.sse.productFeed}`,
+    readyGraphqlOperation: "SseEndpointDetail",
+    readyTexts: ["Product recommendation stream"],
+  },
+  {
+    name: "sse-mocks",
+    path: `/sse/${ids.sse.productFeed}/mocks`,
+    readyGraphqlOperation: "SseEndpointDetail",
+    readyTexts: ["Mock composition builder"],
+  },
+  {
+    name: "sse-breakpoints",
+    path: "/sse/breakpoints",
+    readyGraphqlOperation: "SseBreakpointsPage",
+    readyTexts: ["Assistant response stream"],
+  },
+  {
+    name: "sse-storage",
+    path: "/sse/storage",
+    readyGraphqlOperation: "SseStoragePage",
+    readyTexts: ["tenant-config"],
+  },
+  {
+    name: "sse-history",
+    path: "/sse/history",
+    readyGraphqlOperation: "SseHistoryPage",
+    readyTexts: ["Product recommendation stream"],
+  },
+
   // Usage & costs
   {
     name: "usage",
