@@ -1,12 +1,21 @@
 "use client";
 
-import { ChevronDown, ChevronRight } from "lucide-react";
+import { Check, ChevronDown, ChevronRight, Plus } from "lucide-react";
 import { Fragment, useState } from "react";
 
 import { DateTime } from "@/components/common/date-time";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import { Input } from "@/components/ui/input";
 import {
   Table,
   TableBody,
@@ -15,7 +24,9 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import { Textarea } from "@/components/ui/textarea";
 import { Link } from "@/i18n/navigation";
+import { controlPlaneRequest } from "@/lib/control-plane-client";
 import { formatEnumLabel } from "@/lib/enum-label";
 
 import { ModeBadge } from "./sse-shell";
@@ -85,13 +96,7 @@ function eventCell(event: SseHistoryEvent, column: string, hour12: boolean) {
     case "endpoint":
       return event.request?.endpointName ?? "Deleted endpoint";
     case "createdAt":
-      return (
-        <DateTime
-          hour12={hour12}
-          kind="time"
-          value={event.createdAt}
-        />
-      );
+      return <DateTime hour12={hour12} kind="time" value={event.createdAt} />;
     case "eventName":
       return <code>{event.eventName}</code>;
     case "stage":
@@ -159,6 +164,48 @@ export function SseHistoryEventDetails({
   hour12?: boolean;
 }) {
   const request = event.request ?? stream;
+  const [templateOpen, setTemplateOpen] = useState(false);
+  const [templateName, setTemplateName] = useState(
+    `${event.eventName || "Text"} from history`,
+  );
+  const [eventName, setEventName] = useState(event.eventName);
+  const [eventId, setEventId] = useState(event.eventId ?? "");
+  const [eventData, setEventData] = useState(event.data);
+  const [retryMs, setRetryMs] = useState(event.retryMs?.toString() ?? "");
+  const [savingTemplate, setSavingTemplate] = useState(false);
+  const [templateCreated, setTemplateCreated] = useState(false);
+  const [templateError, setTemplateError] = useState<string | null>(null);
+
+  async function createTemplate() {
+    if (!request?.endpointId || !templateName.trim()) return;
+    setSavingTemplate(true);
+    setTemplateError(null);
+    try {
+      await controlPlaneRequest(
+        `mutation CreateSseTemplateFromHistory($endpointId: ID!, $input: SseMockEventTemplateInput!) {
+          saveSseMockEventTemplate(endpointId: $endpointId, input: $input) { id }
+        }`,
+        {
+          endpointId: request.endpointId,
+          input: {
+            name: templateName,
+            eventName: eventName || null,
+            data: eventData,
+            eventId: eventId || null,
+            retryMs: retryMs ? Number(retryMs) : null,
+          },
+        },
+      );
+      setTemplateCreated(true);
+      setTemplateOpen(false);
+    } catch (failure) {
+      setTemplateError(
+        failure instanceof Error ? failure.message : String(failure),
+      );
+    } finally {
+      setSavingTemplate(false);
+    }
+  }
   return (
     <div className="space-y-5 border-l-2 border-primary/30 bg-muted/15 p-4 sm:p-5">
       <dl className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
@@ -207,11 +254,91 @@ export function SseHistoryEventDetails({
               <code>{request.method}</code> {request.requestUrl}
             </p>
           </div>
-          <Button asChild className="shrink-0" size="sm" variant="outline">
-            <Link href={`/sse/history/${request.id}`}>View Stream</Link>
-          </Button>
+          <div className="flex shrink-0 flex-wrap gap-2">
+            {request.endpointId ? (
+              <Button
+                onClick={() => setTemplateOpen(true)}
+                size="sm"
+                variant="outline"
+              >
+                {templateCreated ? <Check /> : <Plus />}
+                {templateCreated ? "Template Created" : "Create Template"}
+              </Button>
+            ) : null}
+            <Button asChild size="sm" variant="outline">
+              <Link href={`/sse/history/${request.id}`}>View Stream</Link>
+            </Button>
+          </div>
         </div>
       ) : null}
+      <Dialog onOpenChange={setTemplateOpen} open={templateOpen}>
+        <DialogContent className="sm:max-w-xl">
+          <DialogHeader>
+            <DialogTitle>Create Event Template</DialogTitle>
+            <DialogDescription>
+              Save this retained event to{" "}
+              {request?.endpointName ?? "the endpoint"} so it can be reused in
+              mock compositions.
+            </DialogDescription>
+          </DialogHeader>
+          {templateError ? (
+            <p className="text-sm text-destructive">{templateError}</p>
+          ) : null}
+          <div className="space-y-4">
+            <label className="grid gap-2 text-sm font-medium">
+              Template Name
+              <Input
+                onChange={(value) => setTemplateName(value.target.value)}
+                value={templateName}
+              />
+            </label>
+            <div className="grid gap-3 sm:grid-cols-2">
+              <label className="grid gap-2 text-sm font-medium">
+                Event Name
+                <Input
+                  onChange={(value) => setEventName(value.target.value)}
+                  value={eventName}
+                />
+              </label>
+              <label className="grid gap-2 text-sm font-medium">
+                Event ID
+                <Input
+                  onChange={(value) => setEventId(value.target.value)}
+                  value={eventId}
+                />
+              </label>
+            </div>
+            <label className="grid gap-2 text-sm font-medium">
+              Data
+              <Textarea
+                className="min-h-32 font-mono text-xs"
+                onChange={(value) => setEventData(value.target.value)}
+                value={eventData}
+              />
+            </label>
+            <label className="grid gap-2 text-sm font-medium">
+              Retry (ms)
+              <Input
+                min={0}
+                onChange={(value) => setRetryMs(value.target.value)}
+                type="number"
+                value={retryMs}
+              />
+            </label>
+          </div>
+          <DialogFooter>
+            <Button
+              disabled={!templateName.trim() || savingTemplate}
+              onClick={() => void createTemplate()}
+            >
+              <Plus /> Create Template
+            </Button>
+            <Button onClick={() => setTemplateOpen(false)} variant="outline">
+              Cancel
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

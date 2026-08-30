@@ -166,6 +166,24 @@ function normalizeHeaders(values?: SseHeader[] | null): SseHeader[] {
   return result;
 }
 
+function normalizeCustomEvent(
+  value: SseMockCompositionInput["blocks"][number]["customEvent"],
+) {
+  if (!value) return null;
+  if (Buffer.byteLength(value.data) > 10 * 1024 * 1024) {
+    throw new Error("Custom event data is too large");
+  }
+  return {
+    eventName: value.eventName?.trim() || null,
+    data: value.data,
+    eventId: value.eventId ?? null,
+    retryMs:
+      value.retryMs == null
+        ? null
+        : numberInRange(value.retryMs, 0, 0, 86_400_000, "Retry"),
+  };
+}
+
 function endpointData(input: SseEndpointInput, current?: SseEndpointSnapshot) {
   const mode = oneOf(
     input.mode,
@@ -320,6 +338,15 @@ function resolvedComposition(
         ),
         delayMs: block.delayMs,
         script: block.script,
+        customEvent:
+          block.eventData === null
+            ? null
+            : {
+                eventName: block.eventName,
+                data: block.eventData,
+                eventId: block.eventId,
+                retryMs: block.retryMs,
+              },
         template: block.template
           ? {
               id: block.template.id,
@@ -751,9 +778,16 @@ export class SseService {
         const template = block.templateId
           ? byId.get(block.templateId)
           : undefined;
-        if (kind === "EVENT" && !template) {
+        const customEvent =
+          kind === "EVENT" ? normalizeCustomEvent(block.customEvent) : null;
+        if (kind === "EVENT" && block.templateId && !template) {
           throw new Error(
-            "Every ad hoc event block must reference a template from this endpoint",
+            "Mock event template does not belong to this endpoint",
+          );
+        }
+        if (kind === "EVENT" && Boolean(template) === Boolean(customEvent)) {
+          throw new Error(
+            "Event blocks require exactly one template or custom event",
           );
         }
         return {
@@ -764,6 +798,7 @@ export class SseService {
               ? numberInRange(block.delayMs, 0, 0, 86_400_000, "Mock delay")
               : null,
           script: kind === "SCRIPT" ? (block.script ?? "") : null,
+          customEvent,
           template: template
             ? {
                 id: template.id,
@@ -815,7 +850,7 @@ export class SseService {
       });
       if (count !== new Set(templateIds).size)
         throw new Error(
-          "Every event block must reference a template from this endpoint",
+          "Every referenced template must belong to this endpoint",
         );
     }
     const compositionId = id ?? randomUUID();
@@ -845,8 +880,16 @@ export class SseService {
               "DELAY",
               "Mock block kind",
             );
-            if (kind === "EVENT" && !block.templateId)
-              throw new Error("Event blocks require a template");
+            const customEvent =
+              kind === "EVENT" ? normalizeCustomEvent(block.customEvent) : null;
+            if (
+              kind === "EVENT" &&
+              Boolean(block.templateId) === Boolean(customEvent)
+            ) {
+              throw new Error(
+                "Event blocks require exactly one template or custom event",
+              );
+            }
             if (kind === "SCRIPT" && !block.script?.trim())
               throw new Error("Script blocks require JavaScript");
             return {
@@ -855,6 +898,10 @@ export class SseService {
               position,
               kind,
               templateId: kind === "EVENT" ? block.templateId : null,
+              eventName: customEvent?.eventName ?? null,
+              eventData: customEvent?.data ?? null,
+              eventId: customEvent?.eventId ?? null,
+              retryMs: customEvent?.retryMs ?? null,
               delayMs:
                 kind === "DELAY"
                   ? numberInRange(block.delayMs, 0, 0, 86_400_000, "Mock delay")

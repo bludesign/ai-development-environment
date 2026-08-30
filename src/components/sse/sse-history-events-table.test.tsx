@@ -110,6 +110,11 @@ describe("SseHistoryEventsTable", () => {
     expect(
       screen.getByRole("link", { name: "View Stream" }).getAttribute("href"),
     ).toBe("/sse/history/stream-1");
+    fireEvent.click(screen.getByRole("button", { name: "Create Template" }));
+    expect(
+      screen.getByRole("heading", { name: "Create Event Template" }),
+    ).toBeDefined();
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
 
     fireEvent.keyDown(row, { key: " " });
     expect(row.getAttribute("aria-expanded")).toBe("false");

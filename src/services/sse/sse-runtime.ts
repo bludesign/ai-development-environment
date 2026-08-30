@@ -706,13 +706,13 @@ async function mockResponse(
               );
             });
           } else if (block.kind === "EVENT") {
-            if (!block.template)
-              throw new Error("Mock event template was deleted");
+            const event = block.template ?? block.customEvent;
+            if (!event) throw new Error("Mock event payload is unavailable");
             await pipeline.push({
-              event: block.template.eventName,
-              data: block.template.data,
-              id: block.template.eventId,
-              retry: block.template.retryMs,
+              event: event.eventName,
+              data: event.data,
+              id: event.eventId,
+              retry: event.retryMs,
             });
           } else {
             const result = await runSseScript({

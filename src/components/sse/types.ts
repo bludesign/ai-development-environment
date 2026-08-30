@@ -20,6 +20,12 @@ export type SseMockBlock = {
   kind: "EVENT" | "DELAY" | "SCRIPT";
   delayMs: number | null;
   script: string | null;
+  customEvent: {
+    eventName: string | null;
+    data: string;
+    eventId: string | null;
+    retryMs: number | null;
+  } | null;
   template: SseMockTemplate | null;
 };
 

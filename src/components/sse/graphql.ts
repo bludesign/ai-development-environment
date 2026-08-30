@@ -1,7 +1,7 @@
 export const SSE_COMPOSITION_FIELDS = `
   id name statusCode headers { name value } createdAt updatedAt
   blocks {
-    id kind delayMs script
+    id kind delayMs script customEvent { eventName data eventId retryMs }
     template { id endpointId name eventName data eventId retryMs }
   }
 `;

@@ -149,6 +149,48 @@ describe("handlePublicSseRequest", () => {
     );
   });
 
+  test("streams custom event blocks without creating a template", async () => {
+    const composition: SseResolvedComposition = {
+      id: "mock-custom",
+      name: "Custom event",
+      statusCode: 200,
+      headers: [],
+      blocks: [
+        {
+          id: "custom-event",
+          kind: "EVENT",
+          delayMs: null,
+          script: null,
+          template: null,
+          customEvent: {
+            eventName: "display_card",
+            data: '{"title":"Custom"}',
+            eventId: "event-42",
+            retryMs: 2_000,
+          },
+        },
+      ],
+    };
+    const testService = service();
+    const response = await handlePublicSseRequest(
+      testService.fake,
+      endpoint(composition),
+      new Request("https://control.example/api/public/sse/token"),
+    );
+
+    await expect(response.text()).resolves.toContain(
+      'event:display_card\nid:event-42\nretry:2000\ndata:{"title":"Custom"}',
+    );
+    expect(testService.history).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          data: '{"title":"Custom"}',
+          eventId: "event-42",
+        }),
+      ]),
+    );
+  });
+
   test("backfills records flushed by the event that introduces an ID", async () => {
     const composition: SseResolvedComposition = {
       id: "mock-2",
@@ -161,6 +203,7 @@ describe("handlePublicSseRequest", () => {
           kind: "EVENT",
           delayMs: null,
           script: null,
+          customEvent: null,
           template: {
             id: "template-1",
             endpointId: "endpoint-1",
@@ -176,6 +219,7 @@ describe("handlePublicSseRequest", () => {
           kind: "EVENT",
           delayMs: null,
           script: null,
+          customEvent: null,
           template: {
             id: "template-2",
             endpointId: "endpoint-1",

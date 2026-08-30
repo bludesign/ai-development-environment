@@ -3477,6 +3477,10 @@ model SseMockBlock {
   templateId    String?
   delayMs       Int?
   script        String?
+  eventName     String?
+  eventData     String?
+  eventId       String?
+  retryMs       Int?
   createdAt     DateTime              @default(now())
   updatedAt     DateTime              @updatedAt
   composition   SseMockComposition    @relation(fields: [compositionId], references: [id], onDelete: Cascade)

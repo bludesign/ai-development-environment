@@ -14,6 +14,7 @@ import {
   ListFilter,
   Paintbrush,
   Plus,
+  Save,
   Search,
   Trash2,
   X,
@@ -74,7 +75,7 @@ import { useRouter } from "@/i18n/navigation";
 import { controlPlaneRequest } from "@/lib/control-plane-client";
 import { formatEnumLabel } from "@/lib/enum-label";
 
-import { SSE_HISTORY_QUERY } from "./graphql";
+import { SSE_COMPOSITION_FIELDS, SSE_HISTORY_QUERY } from "./graphql";
 import {
   SseHistoryEventsTable,
   STREAM_EVENT_COLUMNS,
@@ -1482,7 +1483,28 @@ export function SseStreamHistoryDetails({
     ...STREAM_EVENT_COLUMNS,
   ]);
   const [eventHour12, setEventHour12] = useState(true);
+  const [compositionOpen, setCompositionOpen] = useState(false);
+  const [compositionName, setCompositionName] = useState(
+    `${request.endpointName} stream`,
+  );
+  const [preserveTiming, setPreserveTiming] = useState(true);
+  const [savingComposition, setSavingComposition] = useState(false);
+  const [compositionSaved, setCompositionSaved] = useState(false);
+  const [compositionError, setCompositionError] = useState<string | null>(null);
   const events = request.events ?? [];
+  const emittedEvents = events.filter(
+    (event) => event.stage === "EMITTED" && !event.dropped,
+  );
+  const replayEvents = (
+    emittedEvents.length
+      ? emittedEvents
+      : events.filter((event) => event.stage === "SOURCE" && !event.dropped)
+  ).toSorted(
+    (first, second) =>
+      first.sequence - second.sequence ||
+      first.logicalIndex - second.logicalIndex ||
+      first.createdAt.localeCompare(second.createdAt),
+  );
   const eventNames = [
     ...new Set(events.map((event) => event.eventName)),
   ].sort();
@@ -1500,17 +1522,85 @@ export function SseStreamHistoryDetails({
     );
   });
 
+  async function saveStreamComposition() {
+    if (
+      !request.endpointId ||
+      !compositionName.trim() ||
+      !replayEvents.length
+    ) {
+      return;
+    }
+    setSavingComposition(true);
+    setCompositionError(null);
+    try {
+      const blocks: Array<Record<string, unknown>> = [];
+      replayEvents.forEach((event, index) => {
+        const previous = replayEvents[index - 1];
+        if (preserveTiming && previous) {
+          const delayMs = Math.min(
+            86_400_000,
+            Math.max(
+              0,
+              new Date(event.createdAt).getTime() -
+                new Date(previous.createdAt).getTime(),
+            ),
+          );
+          if (delayMs > 0) blocks.push({ kind: "DELAY", delayMs });
+        }
+        blocks.push({
+          kind: "EVENT",
+          customEvent: {
+            eventName: event.eventName || null,
+            data: event.data,
+            eventId: event.eventId,
+            retryMs: event.retryMs,
+          },
+        });
+      });
+      await controlPlaneRequest(
+        `mutation SaveSseStreamAsComposition($endpointId: ID!, $input: SseMockCompositionInput!) {
+          saveSseMockComposition(endpointId: $endpointId, input: $input) { ${SSE_COMPOSITION_FIELDS} }
+        }`,
+        {
+          endpointId: request.endpointId,
+          input: {
+            name: compositionName,
+            statusCode: request.responseStatus ?? request.upstreamStatus ?? 200,
+            headers: request.responseHeaders,
+            blocks,
+          },
+        },
+      );
+      setCompositionSaved(true);
+      setCompositionOpen(false);
+    } catch (failure) {
+      setCompositionError(
+        failure instanceof Error ? failure.message : String(failure),
+      );
+    } finally {
+      setSavingComposition(false);
+    }
+  }
+
   return (
     <div className="min-w-0 space-y-6 p-4 sm:p-6">
-      <div className="flex flex-wrap gap-2">
-        <ModeBadge mode={request.mode} />
-        <Badge variant={request.error ? "destructive" : "success"}>
-          {formatEnumLabel(request.outcome ?? request.status)}
-        </Badge>
-        {request.truncated ? (
-          <Badge variant="destructive">History truncated</Badge>
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div className="flex flex-wrap gap-2">
+          <ModeBadge mode={request.mode} />
+          <Badge variant={request.error ? "destructive" : "success"}>
+            {formatEnumLabel(request.outcome ?? request.status)}
+          </Badge>
+          {request.truncated ? (
+            <Badge variant="destructive">History truncated</Badge>
+          ) : null}
+          <Badge variant="outline">{request.eventCount} events</Badge>
+        </div>
+        {request.endpointId && replayEvents.length ? (
+          <Button onClick={() => setCompositionOpen(true)} variant="outline">
+            {compositionSaved ? <Check /> : <Save />}
+            {compositionSaved ? "Composition Saved" : "Save as Composition"}
+          </Button>
         ) : null}
-        <Badge variant="outline">{request.eventCount} events</Badge>
       </div>
       {request.error ? (
         <Alert variant="destructive">
@@ -1738,6 +1828,63 @@ export function SseStreamHistoryDetails({
           {JSON.stringify(request.configSnapshot, null, 2)}
         </pre>
       </details>
+      <Dialog onOpenChange={setCompositionOpen} open={compositionOpen}>
+        <DialogContent className="sm:max-w-xl">
+          <DialogHeader>
+            <DialogTitle>Save Stream as Composition</DialogTitle>
+            <DialogDescription>
+              Store {replayEvents.length}{" "}
+              {emittedEvents.length ? "emitted" : "source"} events as one-off
+              event blocks for {request.endpointName}.
+            </DialogDescription>
+          </DialogHeader>
+          {compositionError ? (
+            <Alert variant="destructive">
+              <AlertDescription>{compositionError}</AlertDescription>
+            </Alert>
+          ) : null}
+          <div className="space-y-4">
+            <label className="grid gap-2 text-sm font-medium">
+              Composition Name
+              <Input
+                onChange={(event) => setCompositionName(event.target.value)}
+                value={compositionName}
+              />
+            </label>
+            <label className="flex items-start gap-2 rounded-lg border p-3 text-sm">
+              <Checkbox
+                checked={preserveTiming}
+                onCheckedChange={(checked) =>
+                  setPreserveTiming(checked === true)
+                }
+              />
+              <span>
+                <span className="block font-medium">Preserve event timing</span>
+                <span className="text-muted-foreground">
+                  Insert delay blocks between events using their recorded
+                  timestamps.
+                </span>
+              </span>
+            </label>
+            <p className="text-xs text-muted-foreground">
+              The saved composition uses response status{" "}
+              {request.responseStatus ?? request.upstreamStatus ?? 200} and the
+              retained emitted response headers.
+            </p>
+          </div>
+          <DialogFooter>
+            <Button
+              disabled={!compositionName.trim() || savingComposition}
+              onClick={() => void saveStreamComposition()}
+            >
+              {savingComposition ? <Spinner /> : <Save />} Save Composition
+            </Button>
+            <Button onClick={() => setCompositionOpen(false)} variant="outline">
+              Cancel
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

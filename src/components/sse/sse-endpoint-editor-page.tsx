@@ -33,6 +33,14 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import {
   Field as FormField,
   FieldDescription,
   FieldLabel,
@@ -87,6 +95,12 @@ type DraftBlock = {
   key: string;
   kind: "EVENT" | "DELAY" | "SCRIPT";
   templateId?: string;
+  customEvent?: {
+    eventName: string;
+    data: string;
+    eventId: string;
+    retryMs: number | null;
+  };
   delayMs?: number;
   script?: string;
 };
@@ -1018,8 +1032,7 @@ function MockBuilder({
   const [templateId, setTemplateId] = useState<string | null>(
     templates[0]?.id ?? null,
   );
-  const activeTemplate =
-    templates.find((item) => item.id === templateId) ?? null;
+  const [templateOpen, setTemplateOpen] = useState(false);
   const [templateDraft, setTemplateDraft] = useState({
     name: "",
     eventName: "",
@@ -1036,28 +1049,6 @@ function MockBuilder({
   const [statusCode, setStatusCode] = useState(200);
   const [headers, setHeaders] = useState("Content-Type: text/event-stream");
   const [blocks, setBlocks] = useState<DraftBlock[]>([]);
-
-  useEffect(() => {
-    const timer = window.setTimeout(() => {
-      if (activeTemplate)
-        setTemplateDraft({
-          name: activeTemplate.name,
-          eventName: activeTemplate.eventName ?? "",
-          data: activeTemplate.data,
-          eventId: activeTemplate.eventId ?? "",
-          retryMs: activeTemplate.retryMs?.toString() ?? "",
-        });
-      else
-        setTemplateDraft({
-          name: "",
-          eventName: "",
-          data: "",
-          eventId: "",
-          retryMs: "",
-        });
-    }, 0);
-    return () => window.clearTimeout(timer);
-  }, [activeTemplate]);
 
   useEffect(() => {
     const timer = window.setTimeout(() => {
@@ -1080,6 +1071,14 @@ function MockBuilder({
           key: block.id,
           kind: block.kind,
           templateId: block.template?.id ?? undefined,
+          customEvent: block.customEvent
+            ? {
+                eventName: block.customEvent.eventName ?? "",
+                data: block.customEvent.data,
+                eventId: block.customEvent.eventId ?? "",
+                retryMs: block.customEvent.retryMs,
+              }
+            : undefined,
           delayMs: block.delayMs ?? undefined,
           script: block.script ?? undefined,
         })),
@@ -1103,6 +1102,18 @@ function MockBuilder({
     [headers],
   );
 
+  function openTemplateDialog(template: SseMockTemplate | null) {
+    setTemplateId(template?.id ?? null);
+    setTemplateDraft({
+      name: template?.name ?? "",
+      eventName: template?.eventName ?? "",
+      data: template?.data ?? "",
+      eventId: template?.eventId ?? "",
+      retryMs: template?.retryMs?.toString() ?? "",
+    });
+    setTemplateOpen(true);
+  }
+
   async function saveTemplate() {
     try {
       const data = await controlPlaneRequest<{
@@ -1124,20 +1135,22 @@ function MockBuilder({
         },
       );
       setTemplateId(data.saveSseMockEventTemplate.id);
+      setTemplateOpen(false);
       await onChanged();
     } catch (value) {
       setError(value instanceof Error ? value.message : String(value));
     }
   }
 
-  async function deleteTemplate() {
-    if (!templateId) return;
+  async function deleteTemplate(id = templateId) {
+    if (!id) return;
     try {
       await controlPlaneRequest(
         `mutation DeleteSseTemplate($id: ID!) { deleteSseMockEventTemplate(id: $id) }`,
-        { id: templateId },
+        { id },
       );
-      setTemplateId(null);
+      if (templateId === id) setTemplateId(null);
+      setTemplateOpen(false);
       await onChanged();
     } catch (value) {
       setError(value instanceof Error ? value.message : String(value));
@@ -1157,12 +1170,22 @@ function MockBuilder({
             name: duplicate ? `${compositionName} copy` : compositionName,
             statusCode,
             headers: parsedHeaders,
-            blocks: blocks.map(({ kind, templateId: id, delayMs, script }) => ({
-              kind,
-              templateId: id,
-              delayMs,
-              script,
-            })),
+            blocks: blocks.map(
+              ({ kind, templateId: id, customEvent, delayMs, script }) => ({
+                kind,
+                templateId: id,
+                customEvent: customEvent
+                  ? {
+                      eventName: customEvent.eventName || null,
+                      data: customEvent.data,
+                      eventId: customEvent.eventId || null,
+                      retryMs: customEvent.retryMs,
+                    }
+                  : null,
+                delayMs,
+                script,
+              }),
+            ),
           },
         },
       );
@@ -1206,12 +1229,25 @@ function MockBuilder({
       {
         key: crypto.randomUUID(),
         kind,
-        templateId: kind === "EVENT" ? templates[0]?.id : undefined,
+        customEvent:
+          kind === "EVENT"
+            ? { eventName: "message", data: "", eventId: "", retryMs: null }
+            : undefined,
         delayMs: kind === "DELAY" ? 1_000 : undefined,
         script:
           kind === "SCRIPT"
             ? "return { data: 'Hello from a mock script' };"
             : undefined,
+      },
+    ]);
+  }
+  function addTemplateBlock(templateIdValue: string) {
+    setBlocks((current) => [
+      ...current,
+      {
+        key: crypto.randomUUID(),
+        kind: "EVENT",
+        templateId: templateIdValue,
       },
     ]);
   }
@@ -1239,8 +1275,8 @@ function MockBuilder({
           <AlertDescription>{error}</AlertDescription>
         </Alert>
       ) : null}
-      <div className="grid gap-4 xl:grid-cols-[minmax(300px,0.7fr)_minmax(0,1.3fr)]">
-        <Card>
+      <div className="grid gap-6">
+        <Card className="order-2 border-0 bg-transparent shadow-none">
           <CardHeader>
             <CardTitle>Event template library</CardTitle>
             <CardDescription>
@@ -1248,106 +1284,80 @@ function MockBuilder({
             </CardDescription>
             <CardAction>
               <Button
-                onClick={() => setTemplateId(null)}
+                onClick={() => openTemplateDialog(null)}
                 size="sm"
                 variant="outline"
               >
-                <Plus /> New
+                <Plus /> New Template
               </Button>
             </CardAction>
           </CardHeader>
-          <CardContent className="space-y-4">
-            <Select
-              onValueChange={(value) =>
-                setTemplateId(value === "new" ? null : value)
-              }
-              value={templateId ?? "new"}
-            >
-              <SelectTrigger>
-                <SelectValue placeholder="New template" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="new">New template</SelectItem>
-                {templates.map((item) => (
-                  <SelectItem key={item.id} value={item.id}>
-                    {item.name}
-                  </SelectItem>
+          <CardContent>
+            {templates.length ? (
+              <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+                {templates.map((template) => (
+                  <Card key={template.id} size="sm">
+                    <CardHeader>
+                      <CardTitle>{template.name}</CardTitle>
+                      <CardDescription className="flex flex-wrap gap-1">
+                        <Badge variant="outline">
+                          {template.eventName || "Unnamed event"}
+                        </Badge>
+                        {template.eventId ? (
+                          <Badge variant="outline">ID {template.eventId}</Badge>
+                        ) : null}
+                        {template.retryMs !== null ? (
+                          <Badge variant="outline">
+                            Retry {template.retryMs} ms
+                          </Badge>
+                        ) : null}
+                      </CardDescription>
+                    </CardHeader>
+                    <CardContent className="space-y-3">
+                      <pre className="max-h-40 overflow-auto whitespace-pre-wrap break-words rounded-lg border bg-muted/30 p-3 text-xs">
+                        {template.data || "Empty data"}
+                      </pre>
+                      <div className="flex flex-wrap gap-2">
+                        <Button
+                          onClick={() => addTemplateBlock(template.id)}
+                          size="sm"
+                        >
+                          <Plus /> Add to Mock
+                        </Button>
+                        <Button
+                          onClick={() => openTemplateDialog(template)}
+                          size="sm"
+                          variant="outline"
+                        >
+                          Edit
+                        </Button>
+                        <Button
+                          aria-label={`Delete ${template.name}`}
+                          onClick={() => void deleteTemplate(template.id)}
+                          size="icon-sm"
+                          variant="ghost"
+                        >
+                          <Trash2 />
+                        </Button>
+                      </div>
+                    </CardContent>
+                  </Card>
                 ))}
-              </SelectContent>
-            </Select>
-            <Field label="Template name">
-              <Input
-                onChange={(e) =>
-                  setTemplateDraft((d) => ({ ...d, name: e.target.value }))
-                }
-                value={templateDraft.name}
-              />
-            </Field>
-            <div className="grid grid-cols-2 gap-3">
-              <Field label="Event name">
-                <Input
-                  onChange={(e) =>
-                    setTemplateDraft((d) => ({
-                      ...d,
-                      eventName: e.target.value,
-                    }))
-                  }
-                  placeholder="message"
-                  value={templateDraft.eventName}
-                />
-              </Field>
-              <Field label="Event ID">
-                <Input
-                  onChange={(e) =>
-                    setTemplateDraft((d) => ({ ...d, eventId: e.target.value }))
-                  }
-                  value={templateDraft.eventId}
-                />
-              </Field>
-            </div>
-            <Field label="Data">
-              <Textarea
-                className="min-h-36 font-mono text-xs"
-                onChange={(e) =>
-                  setTemplateDraft((d) => ({ ...d, data: e.target.value }))
-                }
-                value={templateDraft.data}
-              />
-            </Field>
-            <Field label="Retry (ms)">
-              <Input
-                min={0}
-                onChange={(e) =>
-                  setTemplateDraft((d) => ({ ...d, retryMs: e.target.value }))
-                }
-                type="number"
-                value={templateDraft.retryMs}
-              />
-            </Field>
-            <div className="flex gap-2">
-              <Button
-                disabled={!templateDraft.name.trim()}
-                onClick={() => void saveTemplate()}
-              >
-                <Save /> Save template
-              </Button>
-              {templateId ? (
-                <Button
-                  onClick={() => void deleteTemplate()}
-                  variant="destructive"
-                >
-                  <Trash2 /> Delete
-                </Button>
-              ) : null}
-            </div>
+              </div>
+            ) : (
+              <div className="rounded-lg border border-dashed p-8 text-center text-sm text-muted-foreground">
+                No reusable event templates yet. Create one or add a custom
+                event directly in the builder.
+              </div>
+            )}
           </CardContent>
         </Card>
-        <Card>
+        <Card className="order-1">
           <CardHeader>
             <CardTitle>Mock composition builder</CardTitle>
             <CardDescription>
-              Compose response headers with ordered Event Template, Delay, and
-              Script blocks.
+              Compose response headers with ordered reusable or custom Event,
+              Delay, and Script blocks.
             </CardDescription>
             <CardAction>
               {compositionId === activeCompositionId ? (
@@ -1419,12 +1429,11 @@ function MockBuilder({
               <Label>Ordered blocks</Label>
               <div className="flex flex-wrap gap-2">
                 <Button
-                  disabled={!templates.length}
                   onClick={() => addBlock("EVENT")}
                   size="sm"
                   variant="outline"
                 >
-                  <Plus /> Event
+                  <Plus /> Custom Event
                 </Button>
                 <Button
                   onClick={() => addBlock("DELAY")}
@@ -1457,11 +1466,27 @@ function MockBuilder({
                       {index + 1}
                     </Badge>
                     <Select
-                      onValueChange={(value) =>
+                      onValueChange={(value) => {
+                        const kind = value as DraftBlock["kind"];
                         changeBlock(index, {
-                          kind: value as DraftBlock["kind"],
-                        })
-                      }
+                          kind,
+                          templateId: undefined,
+                          customEvent:
+                            kind === "EVENT"
+                              ? {
+                                  eventName: "message",
+                                  data: "",
+                                  eventId: "",
+                                  retryMs: null,
+                                }
+                              : undefined,
+                          delayMs: kind === "DELAY" ? 1_000 : block.delayMs,
+                          script:
+                            kind === "SCRIPT"
+                              ? "return { data: 'Hello from a mock script' };"
+                              : block.script,
+                        });
+                      }}
                       value={block.kind}
                     >
                       <SelectTrigger>
@@ -1474,23 +1499,11 @@ function MockBuilder({
                       </SelectContent>
                     </Select>
                     {block.kind === "EVENT" ? (
-                      <Select
-                        onValueChange={(templateIdValue) =>
-                          changeBlock(index, { templateId: templateIdValue })
-                        }
-                        value={block.templateId}
-                      >
-                        <SelectTrigger>
-                          <SelectValue placeholder="Choose template" />
-                        </SelectTrigger>
-                        <SelectContent>
-                          {templates.map((item) => (
-                            <SelectItem key={item.id} value={item.id}>
-                              {item.name}
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
+                      <MockEventBlockEditor
+                        block={block}
+                        onChange={(patch) => changeBlock(index, patch)}
+                        templates={templates}
+                      />
                     ) : block.kind === "DELAY" ? (
                       <Input
                         aria-label="Delay milliseconds"
@@ -1577,6 +1590,222 @@ function MockBuilder({
           </CardContent>
         </Card>
       </div>
+      <Dialog onOpenChange={setTemplateOpen} open={templateOpen}>
+        <DialogContent className="sm:max-w-xl">
+          <DialogHeader>
+            <DialogTitle>
+              {templateId ? "Edit Event Template" : "New Event Template"}
+            </DialogTitle>
+            <DialogDescription>
+              Save an event payload that can be added to any composition for
+              this endpoint.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4">
+            <Field label="Template name">
+              <Input
+                onChange={(event) =>
+                  setTemplateDraft((current) => ({
+                    ...current,
+                    name: event.target.value,
+                  }))
+                }
+                value={templateDraft.name}
+              />
+            </Field>
+            <div className="grid grid-cols-2 gap-3">
+              <Field label="Event name">
+                <Input
+                  onChange={(event) =>
+                    setTemplateDraft((current) => ({
+                      ...current,
+                      eventName: event.target.value,
+                    }))
+                  }
+                  placeholder="message"
+                  value={templateDraft.eventName}
+                />
+              </Field>
+              <Field label="Event ID">
+                <Input
+                  onChange={(event) =>
+                    setTemplateDraft((current) => ({
+                      ...current,
+                      eventId: event.target.value,
+                    }))
+                  }
+                  value={templateDraft.eventId}
+                />
+              </Field>
+            </div>
+            <Field label="Data">
+              <Textarea
+                className="min-h-36 font-mono text-xs"
+                onChange={(event) =>
+                  setTemplateDraft((current) => ({
+                    ...current,
+                    data: event.target.value,
+                  }))
+                }
+                value={templateDraft.data}
+              />
+            </Field>
+            <Field label="Retry (ms)">
+              <Input
+                min={0}
+                onChange={(event) =>
+                  setTemplateDraft((current) => ({
+                    ...current,
+                    retryMs: event.target.value,
+                  }))
+                }
+                type="number"
+                value={templateDraft.retryMs}
+              />
+            </Field>
+          </div>
+          <DialogFooter>
+            <Button
+              disabled={!templateDraft.name.trim()}
+              onClick={() => void saveTemplate()}
+            >
+              <Save /> Save Template
+            </Button>
+            {templateId ? (
+              <Button
+                onClick={() => void deleteTemplate()}
+                variant="destructive"
+              >
+                <Trash2 /> Delete
+              </Button>
+            ) : null}
+            <Button onClick={() => setTemplateOpen(false)} variant="outline">
+              Cancel
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </div>
+  );
+}
+
+function MockEventBlockEditor({
+  block,
+  templates,
+  onChange,
+}: {
+  block: DraftBlock;
+  templates: SseMockTemplate[];
+  onChange: (patch: Partial<DraftBlock>) => void;
+}) {
+  const template = templates.find((item) => item.id === block.templateId);
+  const customEvent = block.customEvent ?? {
+    eventName: "message",
+    data: "",
+    eventId: "",
+    retryMs: null,
+  };
+  return (
+    <div className="space-y-3">
+      <Select
+        onValueChange={(value) =>
+          value === "custom"
+            ? onChange({
+                templateId: undefined,
+                customEvent,
+              })
+            : onChange({ templateId: value, customEvent: undefined })
+        }
+        value={block.templateId ?? "custom"}
+      >
+        <SelectTrigger aria-label="Event block source">
+          <SelectValue />
+        </SelectTrigger>
+        <SelectContent>
+          <SelectItem value="custom">Custom event</SelectItem>
+          {templates.map((item) => (
+            <SelectItem key={item.id} value={item.id}>
+              {item.name}
+            </SelectItem>
+          ))}
+        </SelectContent>
+      </Select>
+      {template ? (
+        <div className="space-y-2 rounded-lg border bg-muted/20 p-3">
+          <div className="flex flex-wrap gap-1">
+            <Badge variant="outline">
+              {template.eventName || "Unnamed event"}
+            </Badge>
+            {template.eventId ? (
+              <Badge variant="outline">ID {template.eventId}</Badge>
+            ) : null}
+            {template.retryMs !== null ? (
+              <Badge variant="outline">Retry {template.retryMs} ms</Badge>
+            ) : null}
+          </div>
+          <pre className="max-h-40 overflow-auto whitespace-pre-wrap break-words font-mono text-xs">
+            {template.data || "Empty data"}
+          </pre>
+        </div>
+      ) : (
+        <div className="grid gap-3 rounded-lg border bg-muted/20 p-3 sm:grid-cols-2">
+          <Field label="Event name">
+            <Input
+              onChange={(event) =>
+                onChange({
+                  customEvent: {
+                    ...customEvent,
+                    eventName: event.target.value,
+                  },
+                })
+              }
+              placeholder="message"
+              value={customEvent.eventName}
+            />
+          </Field>
+          <Field label="Event ID">
+            <Input
+              onChange={(event) =>
+                onChange({
+                  customEvent: {
+                    ...customEvent,
+                    eventId: event.target.value,
+                  },
+                })
+              }
+              value={customEvent.eventId}
+            />
+          </Field>
+          <Field label="Data">
+            <Textarea
+              className="min-h-28 font-mono text-xs"
+              onChange={(event) =>
+                onChange({
+                  customEvent: { ...customEvent, data: event.target.value },
+                })
+              }
+              value={customEvent.data}
+            />
+          </Field>
+          <Field label="Retry (ms)">
+            <Input
+              min={0}
+              onChange={(event) =>
+                onChange({
+                  customEvent: {
+                    ...customEvent,
+                    retryMs: event.target.value
+                      ? numberValue(event.target.value, 0)
+                      : null,
+                  },
+                })
+              }
+              type="number"
+              value={customEvent.retryMs ?? ""}
+            />
+          </Field>
+        </div>
+      )}
     </div>
   );
 }

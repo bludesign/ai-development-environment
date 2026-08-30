@@ -96,8 +96,22 @@ type SseMockBlock {
   delayMs: Int
   "script field."
   script: String
+  "One-off event payload stored directly on this block."
+  customEvent: SseMockEvent
   "template field."
   template: SseMockEventTemplate
+}
+
+"An SSE event payload embedded directly in a mock block."
+type SseMockEvent {
+  "event name field."
+  eventName: String
+  "data field."
+  data: String!
+  "event id field."
+  eventId: String
+  "retry ms field."
+  retryMs: Int
 }
 
 "A saved response assembled from event, delay, and script blocks."
@@ -590,10 +604,24 @@ input SseMockBlockInput {
   kind: SseMockBlockKind!
   "template id input value."
   templateId: ID
+  "One-off event payload that does not create a reusable template."
+  customEvent: SseMockEventInput
   "delay ms input value."
   delayMs: Int
   "script input value."
   script: String
+}
+
+"Editable event fields embedded directly in a mock block."
+input SseMockEventInput {
+  "event name input value."
+  eventName: String
+  "data input value."
+  data: String!
+  "event id input value."
+  eventId: String
+  "retry ms input value."
+  retryMs: Int
 }
 
 "Editable saved or ad hoc SSE mock composition fields."

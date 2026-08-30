@@ -47,6 +47,12 @@ export type SseMockBlockInput = {
   id?: string | null;
   kind: SseMockBlockKind;
   templateId?: string | null;
+  customEvent?: {
+    eventName?: string | null;
+    data: string;
+    eventId?: string | null;
+    retryMs?: number | null;
+  } | null;
   delayMs?: number | null;
   script?: string | null;
 };
@@ -145,6 +151,12 @@ export type SseResolvedComposition = {
     kind: SseMockBlockKind;
     delayMs: number | null;
     script: string | null;
+    customEvent: null | {
+      eventName: string | null;
+      data: string;
+      eventId: string | null;
+      retryMs: number | null;
+    };
     template: null | {
       id: string;
       endpointId: string;

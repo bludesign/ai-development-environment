@@ -17,6 +17,12 @@ import {
 } from "../builtin-tools";
 
 const HeaderSchema = z.object({ name: z.string().min(1), value: z.string() });
+const EventSchema = z.object({
+  eventName: z.string().nullable().optional(),
+  data: z.string(),
+  eventId: z.string().nullable().optional(),
+  retryMs: z.number().int().nullable().optional(),
+});
 const EndpointInputSchema = z.object({
   name: z.string().min(1),
   description: z.string().nullable().optional(),
@@ -50,6 +56,7 @@ const BlockSchema = z.object({
   id: z.string().nullable().optional(),
   kind: z.enum(["EVENT", "DELAY", "SCRIPT"]),
   templateId: z.string().nullable().optional(),
+  customEvent: EventSchema.nullable().optional(),
   delayMs: z.number().int().nullable().optional(),
   script: z.string().nullable().optional(),
 });
