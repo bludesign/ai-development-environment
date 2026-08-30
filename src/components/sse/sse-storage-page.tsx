@@ -141,7 +141,7 @@ export function SseStoragePage() {
         </Button>
       }
       description="Inspect and atomically manage the versioned JSON store shared by request, response-event, and mock scripts across every SSE endpoint."
-      title="SSE script storage"
+      title="SSE Script Storage"
     >
       <Alert>
         <Braces />

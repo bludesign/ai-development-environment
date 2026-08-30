@@ -123,7 +123,7 @@ export function SseEndpointsPage() {
         </Button>
       }
       description="Create hosted Server-Sent Events URLs and route each new connection through a live forwarder, reusable mock, or interactive breakpoint."
-      title="SSE endpoints"
+      title="SSE Endpoints"
     >
       <Alert>
         <ShieldAlert />

@@ -32,8 +32,16 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
+import {
+  Field as FormField,
+  FieldDescription,
+  FieldLabel,
+  FieldLegend,
+  FieldSet,
+} from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import {
   Select,
   SelectContent,
@@ -47,6 +55,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Textarea } from "@/components/ui/textarea";
 import { Link, useRouter } from "@/i18n/navigation";
 import { controlPlaneRequest } from "@/lib/control-plane-client";
+import { formatEnumLabel } from "@/lib/enum-label";
 
 import {
   SSE_COMPOSITION_FIELDS,
@@ -107,6 +116,70 @@ const DEFAULT_DRAFT: EndpointDraft = {
   retentionDays: 30,
   retentionEventLimit: 100_000,
 };
+
+const BUFFER_MODE_OPTIONS: Array<{
+  value: SseBufferMode;
+  label: string;
+  description: string;
+}> = [
+  {
+    value: "STANDARD",
+    label: "Standard",
+    description:
+      "Handle each complete SSE frame as it arrives. Multiple data lines inside one frame are joined with a newline.",
+  },
+  {
+    value: "CONCATENATE",
+    label: "Concatenate",
+    description:
+      "Combine consecutive unnamed data frames, treating an empty data line as a newline, until a named event or stream end.",
+  },
+  {
+    value: "PRESERVE_FRAMES",
+    label: "Preserve Frames",
+    description:
+      "Keep every unnamed SSE frame separate at its original frame boundary, including multiline data within that frame.",
+  },
+];
+
+const REQUEST_SCRIPT_PLACEHOLDER = `// request is read-only; forward is mutable.
+const token = request.headers.get("authorization");
+await storage.set("last-auth-token", token);
+
+forward.method = "POST";
+forward.headers.set("authorization", token ?? "");
+forward.headers.delete("x-remove-before-forwarding");
+forward.body = JSON.stringify(request.body.json ?? request.body.text);
+
+// You can mutate forward, return overrides, or do both.
+return {
+  url: "https://api.example.com/events",
+  method: forward.method,
+  headers: forward.headers,
+  body: forward.body,
+};`;
+
+const RESPONSE_SCRIPT_PLACEHOLDER = `// phase is "headers" once, then "event" for every source event.
+if (phase === "headers") {
+  response.headers.set("x-stream-source", "aide");
+  return { status: 200, headers: response.headers };
+}
+
+const count = await storage.increment("events-seen", 1);
+console.log("event", event.event, count.value);
+
+if (buffers.delivery.includes("\\n\\n")) {
+  return {
+    split: {
+      target: "BOTH",
+      offset: buffers.delivery.indexOf("\\n\\n"),
+      separatorLength: 2,
+    },
+  };
+}
+
+// undefined passes through; null drops; an array fans out.
+return { ...event, data: event.data.trim() };`;
 
 function endpointDraft(endpoint: SseEndpoint): EndpointDraft {
   const {
@@ -289,7 +362,7 @@ export function SseEndpointEditorPage({
     return (
       <SsePageShell
         description="Loading endpoint configuration and mock library."
-        title="SSE endpoint"
+        title="SSE Endpoint"
       >
         <p className="flex items-center gap-2 text-muted-foreground">
           <Spinner /> Loading endpoint…
@@ -321,7 +394,7 @@ export function SseEndpointEditorPage({
           ? "Create a stable public SSE URL. It starts in Forward mode and can be switched at any time."
           : "Configure request routing, event transformation, mocks, buffering, limits, and endpoint-scoped history."
       }
-      title={isNew ? "Create SSE endpoint" : (endpoint?.name ?? "SSE endpoint")}
+      title={isNew ? "Create SSE Endpoint" : (endpoint?.name ?? "SSE Endpoint")}
     >
       {error ? (
         <Alert variant="destructive">
@@ -510,12 +583,14 @@ function ConfigurationEditor({
           <Field label="Name">
             <Input
               onChange={(e) => update("name", e.target.value)}
+              placeholder="Customer activity stream"
               value={draft.name}
             />
           </Field>
           <Field label="Description">
             <Textarea
               onChange={(e) => update("description", e.target.value)}
+              placeholder="Describe what this endpoint receives and where its events should go."
               rows={3}
               value={draft.description}
             />
@@ -523,29 +598,30 @@ function ConfigurationEditor({
           <Field label="Forward URL">
             <Input
               onChange={(e) => update("forwardUrl", e.target.value)}
+              placeholder="https://api.example.com/events"
               type="url"
               value={draft.forwardUrl}
             />
           </Field>
+          <BufferModeField
+            defaultValue="STANDARD"
+            description="Controls how unnamed source frames are grouped before events are delivered to the connected client."
+            idPrefix="delivery-buffering"
+            label="Delivery Buffering"
+            onValueChange={(value) => update("deliveryBufferMode", value)}
+            value={draft.deliveryBufferMode}
+          />
+          <BufferModeField
+            defaultValue="CONCATENATE"
+            description="Controls how unnamed source frames are grouped into logical history records. This does not change what the client receives."
+            idPrefix="history-buffering"
+            label="History Buffering"
+            onValueChange={(value) => update("historyBufferMode", value)}
+            value={draft.historyBufferMode}
+          />
           <div className="grid gap-4 sm:grid-cols-2">
             <SelectField
-              label="Delivery buffering"
-              onValueChange={(value) =>
-                update("deliveryBufferMode", value as SseBufferMode)
-              }
-              value={draft.deliveryBufferMode}
-              values={["STANDARD", "CONCATENATE", "PRESERVE_FRAMES"]}
-            />
-            <SelectField
-              label="History buffering"
-              onValueChange={(value) =>
-                update("historyBufferMode", value as SseBufferMode)
-              }
-              value={draft.historyBufferMode}
-              values={["STANDARD", "CONCATENATE", "PRESERVE_FRAMES"]}
-            />
-            <SelectField
-              label="Mock completion"
+              label="Mock Completion"
               onValueChange={(value) =>
                 update(
                   "mockCompletion",
@@ -556,7 +632,7 @@ function ConfigurationEditor({
               values={["CLOSE", "HOLD", "LOOP"]}
             />
             <NumberField
-              label="Breakpoint timeout (ms)"
+              label="Breakpoint Timeout (ms)"
               value={draft.breakpointTimeoutMs}
               onChange={(value) => update("breakpointTimeoutMs", value)}
             />
@@ -576,7 +652,7 @@ function ConfigurationEditor({
           </div>
           {draft.heartbeatEnabled ? (
             <NumberField
-              label="Heartbeat interval (ms)"
+              label="Heartbeat Interval (ms)"
               value={draft.heartbeatIntervalMs}
               onChange={(value) => update("heartbeatIntervalMs", value)}
             />
@@ -661,27 +737,24 @@ function ScriptsEditor({
   return (
     <div className="grid gap-4 xl:grid-cols-2">
       <ScriptCard
-        description="Runs once before Forward, Mock, or Breakpoint dispatch. Mutate forwarding URL, method, body, and headers. Mock mode ignores URL overrides."
+        description="Runs once before the endpoint chooses Forward, Mock, or Breakpoint behavior. Read the immutable request method, URL, headers, and body from request; change the mutable forward URL, method, body, or headers. Return a partial forwarding object, mutate forward directly, or do both. Mock mode keeps header, method, and body changes but ignores URL overrides."
+        kind="request"
         label="Request script"
         onChange={(value) => update("requestScript", value)}
+        placeholder={REQUEST_SCRIPT_PLACEHOLDER}
         source={draft.requestScript}
         timeoutMs={draft.requestScriptTimeoutMs}
       />
       <ScriptCard
-        description="Runs in headers phase, then for every forwarded or generated source event. Return undefined, null, one event, many events, or split directives."
+        description="Runs once with phase set to headers before the response starts, then again with phase set to event for every forwarded or generated source event. Read request, endpoint, event, response, and the current delivery/history buffers. During the headers phase, mutate or return response status and headers. During the event phase, pass through, drop, replace, fan out, or split buffered data."
+        kind="response"
         label="Response event script"
         onChange={(value) => update("responseScript", value)}
+        placeholder={RESPONSE_SCRIPT_PLACEHOLDER}
         source={draft.responseScript}
         timeoutMs={draft.responseScriptTimeoutMs}
       />
-      <Alert className="xl:col-span-2">
-        <Braces />
-        <AlertDescription>
-          Scripts are async JavaScript in QuickJS with no imports, Node, DOM, or
-          filesystem. They can use HTTP(S) fetch and shared global storage with
-          get, set, delete, compareAndSet, increment, and transactional update.
-        </AlertDescription>
-      </Alert>
+      <ScriptRuntimeOverview />
     </div>
   );
 }
@@ -689,12 +762,16 @@ function ScriptsEditor({
 function ScriptCard({
   label,
   description,
+  kind,
+  placeholder,
   source,
   timeoutMs,
   onChange,
 }: {
   label: string;
   description: string;
+  kind: "request" | "response";
+  placeholder: string;
   source: string;
   timeoutMs: number;
   onChange: (source: string) => void;
@@ -711,22 +788,7 @@ function ScriptCard({
           input: {
             source,
             timeoutMs,
-            context: {
-              phase: "event",
-              originalRequest: {
-                method: "POST",
-                headers: [{ name: "authorization", value: "Bearer example" }],
-                body: "test",
-              },
-              forwarding: {
-                url: "https://example.com/events",
-                method: "POST",
-                headers: [],
-                body: "test",
-              },
-              event: { event: "message", data: "Hello\n\nworld" },
-              buffers: { delivery: "", history: "" },
-            },
+            context: scriptTestContext(kind),
           },
         },
       );
@@ -759,9 +821,7 @@ function ScriptCard({
           aria-label={label}
           className="min-h-96 font-mono text-xs"
           onChange={(e) => onChange(e.target.value)}
-          placeholder={
-            '// Example\nconsole.log("event", event);\nreturn undefined;'
-          }
+          placeholder={placeholder}
           spellCheck={false}
           value={source}
         />
@@ -777,6 +837,167 @@ function ScriptCard({
         ) : null}
       </CardContent>
     </Card>
+  );
+}
+
+function scriptTestContext(kind: "request" | "response") {
+  const request = {
+    id: "script-test",
+    method: "POST",
+    url: "https://example.test/api/public/sse/test-token",
+    headers: [
+      { name: "authorization", value: "Bearer example" },
+      { name: "content-type", value: "application/json" },
+    ],
+    body: {
+      text: '{"message":"Hello world"}',
+      base64: "eyJtZXNzYWdlIjoiSGVsbG8gd29ybGQifQ==",
+      json: { message: "Hello world" },
+      byteLength: 25,
+    },
+  };
+  const endpoint = {
+    id: "endpoint-test",
+    name: "Script test endpoint",
+    mode: "FORWARD",
+  };
+  if (kind === "request") {
+    return {
+      phase: "request",
+      endpoint,
+      request,
+      forward: {
+        url: "https://api.example.com/events",
+        method: "POST",
+        headers: [
+          { name: "authorization", value: "Bearer example" },
+          { name: "x-remove-before-forwarding", value: "true" },
+        ],
+        body: request.body.text,
+      },
+      response: null,
+      event: null,
+      buffers: { delivery: "", history: "" },
+    };
+  }
+  return {
+    phase: "event",
+    endpoint,
+    request: {
+      ...request,
+      effective: {
+        url: "https://api.example.com/events",
+        method: "POST",
+        headers: request.headers,
+        body: request.body.text,
+      },
+    },
+    response: {
+      status: 200,
+      headers: [{ name: "content-type", value: "text/event-stream" }],
+    },
+    event: {
+      event: null,
+      data: "Hello\n\nworld",
+      id: "event-123",
+      retry: null,
+    },
+    buffers: {
+      delivery: "Hello\n\nworld",
+      history: "Hello\n\nworld",
+    },
+  };
+}
+
+function ScriptRuntimeOverview() {
+  return (
+    <Card className="xl:col-span-2">
+      <CardHeader>
+        <CardTitle>Script runtime and shared variables</CardTitle>
+        <CardDescription>
+          Every script is wrapped as asynchronous JavaScript, so you can use
+          await directly. Test runs use copy-on-write storage and show proposed
+          writes without changing live values.
+        </CardDescription>
+      </CardHeader>
+      <CardContent className="grid gap-6 lg:grid-cols-2">
+        <ScriptGuideSection title="Inputs and header controls">
+          <p>
+            <code>request</code> and its headers are read-only. Request scripts
+            receive mutable <code>forward</code> and <code>forwarding</code>
+            aliases. Response scripts receive <code>phase</code>, mutable{" "}
+            <code>response</code>, the current <code>event</code>, and the{" "}
+            <code>buffers.delivery</code> and <code>buffers.history</code> text.
+          </p>
+          <p>
+            Header bags support <code>get</code>, <code>getAll</code>,{" "}
+            <code>has</code>, <code>set</code>, <code>append</code>,{" "}
+            <code>delete</code>, and <code>replace</code>. Response status and
+            headers can only change during the headers phase.
+          </p>
+        </ScriptGuideSection>
+        <ScriptGuideSection title="Return values">
+          <p>
+            A request script can return any combination of <code>url</code>,{" "}
+            <code>method</code>, <code>headers</code>, and <code>body</code>. A
+            response event script returns <code>undefined</code> to pass
+            through,
+            <code>null</code> or an empty list to drop, one event to replace, or
+            an array of events to fan out.
+          </p>
+          <p>
+            Return{" "}
+            <code>{`{ split: { target, offset, separatorLength } }`}</code>
+            to flush part of the Delivery, History, or Both buffer while keeping
+            the remainder for later data.
+          </p>
+        </ScriptGuideSection>
+        <ScriptGuideSection title="Global storage">
+          <p>
+            Local variables live for one invocation. To keep JSON values between
+            requests and events, use the global <code>storage</code> object. Its
+            keys are shared by every SSE endpoint, and <code>get</code> returns
+            the stored value together with its monotonically increasing version.
+          </p>
+          <pre className="overflow-x-auto rounded-lg border bg-muted/40 p-3 text-xs">
+            {`const current = await storage.get("session");
+await storage.set("session", { token });
+await storage.increment("event-count", 1);
+await storage.compareAndSet("session", current?.version ?? null, nextValue);
+await storage.update("session", (value) => ({ ...value, refreshed: true }));
+await storage.delete("session");`}
+          </pre>
+        </ScriptGuideSection>
+        <ScriptGuideSection title="Network and sandbox">
+          <p>
+            Use <code>fetch</code> for HTTP or HTTPS calls and await{" "}
+            <code>text()</code> or <code>json()</code> on the response. Fetches
+            use the endpoint timeout and can be used to turn an authorization
+            header or stored token into generated event data.
+          </p>
+          <p>
+            Scripts run in QuickJS with no imports, Node APIs, DOM, or
+            filesystem access. Console output, duration, return values, errors,
+            and proposed storage changes are included in test results.
+          </p>
+        </ScriptGuideSection>
+      </CardContent>
+    </Card>
+  );
+}
+
+function ScriptGuideSection({
+  title,
+  children,
+}: {
+  title: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <section className="space-y-2 text-sm text-muted-foreground">
+      <h3 className="font-medium text-foreground">{title}</h3>
+      {children}
+    </section>
   );
 }
 
@@ -1451,12 +1672,80 @@ function Field({
   children: React.ReactNode;
 }) {
   return (
-    <div className="grid gap-1.5">
-      <Label>{label}</Label>
+    <FormField>
+      <FieldLabel>{label}</FieldLabel>
       {children}
-    </div>
+    </FormField>
   );
 }
+
+function BufferModeField({
+  idPrefix,
+  label,
+  description,
+  value,
+  defaultValue,
+  onValueChange,
+}: {
+  idPrefix: string;
+  label: string;
+  description: string;
+  value: SseBufferMode;
+  defaultValue: SseBufferMode;
+  onValueChange: (value: SseBufferMode) => void;
+}) {
+  return (
+    <FieldSet>
+      <FieldLegend>{label}</FieldLegend>
+      <FieldDescription>{description}</FieldDescription>
+      <RadioGroup
+        className="grid gap-3 lg:grid-cols-3"
+        onValueChange={(nextValue) => onValueChange(nextValue as SseBufferMode)}
+        value={value}
+      >
+        {BUFFER_MODE_OPTIONS.map((option) => {
+          const id = `${idPrefix}-${option.value.toLowerCase()}`;
+          const selected = value === option.value;
+          return (
+            <FormField className="h-full" key={option.value}>
+              <FieldLabel className="h-full w-full cursor-pointer" htmlFor={id}>
+                <Card
+                  className={
+                    selected
+                      ? "h-full border-primary bg-primary/5 py-0 ring-1 ring-primary/20"
+                      : "h-full py-0 transition-colors hover:bg-muted/40"
+                  }
+                >
+                  <CardContent className="flex items-start gap-3 p-4">
+                    <RadioGroupItem
+                      className="mt-0.5"
+                      id={id}
+                      value={option.value}
+                    />
+                    <div className="min-w-0 space-y-1">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <span className="font-medium text-foreground">
+                          {option.label}
+                        </span>
+                        {option.value === defaultValue ? (
+                          <Badge variant="secondary">Default</Badge>
+                        ) : null}
+                      </div>
+                      <p className="text-sm leading-relaxed text-muted-foreground">
+                        {option.description}
+                      </p>
+                    </div>
+                  </CardContent>
+                </Card>
+              </FieldLabel>
+            </FormField>
+          );
+        })}
+      </RadioGroup>
+    </FieldSet>
+  );
+}
+
 function NumberField({
   label,
   value,
@@ -1496,7 +1785,7 @@ function SelectField({
         <SelectContent>
           {values.map((item) => (
             <SelectItem key={item} value={item}>
-              {item.replaceAll("_", " ")}
+              {formatEnumLabel(item)}
             </SelectItem>
           ))}
         </SelectContent>

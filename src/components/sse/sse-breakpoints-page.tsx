@@ -114,7 +114,7 @@ export function SseBreakpointsPage() {
     <SsePageShell
       badge={`${breakpoints.length} waiting`}
       description="Inspect paused requests and resolve each version exactly once by forwarding it, selecting a saved mock, or composing an ad hoc response."
-      title="SSE breakpoints"
+      title="SSE Breakpoints"
     >
       {error ? (
         <Alert variant="destructive">

@@ -624,6 +624,8 @@ input SseHistoryQueryInput {
   statuses: [String!]
   "event names input value."
   eventNames: [String!]
+  "event stages input value."
+  stages: [SseHistoryEventStage!]
   "search input value."
   search: String
   "search mode input value."

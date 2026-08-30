@@ -11,7 +11,6 @@ import {
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Link, usePathname } from "@/i18n/navigation";
-import { cn } from "@/lib/utils";
 
 const NAVIGATION: Array<{
   href: string;
@@ -79,9 +78,7 @@ export function SsePageShell({
           );
         })}
       </nav>
-      <div className={cn("min-w-0", pathname === "/sse" && "space-y-4")}>
-        {children}
-      </div>
+      <div className="min-w-0 space-y-4">{children}</div>
     </section>
   );
 }

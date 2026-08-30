@@ -7,12 +7,18 @@ export const SSE_BUFFER_MODES = [
 export const SSE_MOCK_COMPLETIONS = ["CLOSE", "HOLD", "LOOP"] as const;
 export const SSE_MOCK_BLOCK_KINDS = ["EVENT", "DELAY", "SCRIPT"] as const;
 export const SSE_HISTORY_VIEWS = ["STREAMS", "EVENTS"] as const;
+export const SSE_HISTORY_EVENT_STAGES = [
+  "SOURCE",
+  "EMITTED",
+  "DROPPED",
+] as const;
 
 export type SseEndpointMode = (typeof SSE_ENDPOINT_MODES)[number];
 export type SseBufferMode = (typeof SSE_BUFFER_MODES)[number];
 export type SseMockCompletion = (typeof SSE_MOCK_COMPLETIONS)[number];
 export type SseMockBlockKind = (typeof SSE_MOCK_BLOCK_KINDS)[number];
 export type SseHistoryView = (typeof SSE_HISTORY_VIEWS)[number];
+export type SseHistoryEventStage = (typeof SSE_HISTORY_EVENT_STAGES)[number];
 
 export type SseHeader = { name: string; value: string };
 
@@ -86,6 +92,7 @@ export type SseHistoryQueryInput = {
   modes?: SseEndpointMode[] | null;
   statuses?: string[] | null;
   eventNames?: string[] | null;
+  stages?: SseHistoryEventStage[] | null;
   search?: string | null;
   searchMode?: "TEXT" | "GLOB" | "REGEX" | null;
   caseSensitive?: boolean | null;

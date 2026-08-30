@@ -1649,6 +1649,7 @@ export class SseService {
       eventName: input.eventNames?.length
         ? { in: input.eventNames }
         : undefined,
+      stage: input.stages?.length ? { in: input.stages } : undefined,
     };
     if (input.search) {
       const [totalCount, allValues] = await Promise.all([
@@ -1909,22 +1910,25 @@ export class SseService {
   private defaultColumns(view: string): string[] {
     return view === "EVENTS"
       ? [
+          "endpoint",
           "createdAt",
-          "endpointName",
           "eventName",
           "stage",
-          "data",
           "eventId",
+          "data",
+          "sequence",
           "mode",
         ]
       : [
+          "endpoint",
           "startedAt",
-          "endpointName",
-          "mode",
           "method",
+          "mode",
           "status",
-          "durationMs",
+          "responseStatus",
           "eventCount",
+          "duration",
+          "storedBytes",
         ];
   }
 

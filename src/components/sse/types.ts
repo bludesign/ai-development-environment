@@ -1,6 +1,7 @@
 export type SseMode = "FORWARD" | "MOCK" | "BREAKPOINT";
 export type SseBufferMode = "STANDARD" | "CONCATENATE" | "PRESERVE_FRAMES";
 export type SseHistoryView = "STREAMS" | "EVENTS";
+export type SseHistoryStage = "SOURCE" | "EMITTED" | "DROPPED";
 
 export type SseHeader = { name: string; value: string };
 
@@ -78,7 +79,7 @@ export type SseHistoryEvent = {
   requestId: string;
   sequence: number;
   logicalIndex: number;
-  stage: "SOURCE" | "EMITTED" | "DROPPED";
+  stage: SseHistoryStage;
   correlationId: string;
   eventName: string;
   data: string;

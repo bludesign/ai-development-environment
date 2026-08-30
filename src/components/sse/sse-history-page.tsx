@@ -11,6 +11,7 @@ import {
   Printer,
   Search,
   Trash2,
+  X,
 } from "lucide-react";
 import { useSearchParams } from "next/navigation";
 import { useCallback, useEffect, useMemo, useState } from "react";
@@ -18,8 +19,10 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { DateTime } from "@/components/common/date-time";
 import {
   Card,
+  CardAction,
   CardContent,
   CardDescription,
   CardHeader,
@@ -28,6 +31,7 @@ import {
 import { Checkbox } from "@/components/ui/checkbox";
 import {
   Dialog,
+  DialogClose,
   DialogContent,
   DialogDescription,
   DialogHeader,
@@ -65,6 +69,7 @@ import {
 } from "@/components/ui/table";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { controlPlaneRequest } from "@/lib/control-plane-client";
+import { formatEnumLabel } from "@/lib/enum-label";
 
 import {
   SSE_HISTORY_DETAIL_QUERY,
@@ -76,6 +81,7 @@ import type {
   SseEndpoint,
   SseHistoryEvent,
   SseHistoryRequest,
+  SseHistoryStage,
   SseHistoryView,
   SseMode,
 } from "./types";
@@ -148,6 +154,44 @@ const EVENT_COLUMNS = [
   "mode",
 ];
 
+const COLUMN_LABELS: Record<string, string> = {
+  endpoint: "Endpoint",
+  startedAt: "Started At",
+  createdAt: "Create At",
+  method: "Method",
+  mode: "Mode",
+  status: "Status",
+  responseStatus: "Response Status",
+  eventCount: "Event Count",
+  duration: "Duration",
+  storedBytes: "Stored Bytes",
+  eventName: "Event Name",
+  stage: "Stage",
+  eventId: "Event ID",
+  data: "Data",
+  sequence: "Sequence",
+};
+
+const COLUMN_ALIASES: Record<string, string> = {
+  endpointName: "endpoint",
+  durationMs: "duration",
+};
+
+function columnLabel(column: string) {
+  return COLUMN_LABELS[column] ?? column;
+}
+
+function normalizeColumns(columns: string[], view: SseHistoryView) {
+  const allowed = new Set(view === "STREAMS" ? STREAM_COLUMNS : EVENT_COLUMNS);
+  return [
+    ...new Set(
+      columns
+        .map((column) => COLUMN_ALIASES[column] ?? column)
+        .filter((column) => allowed.has(column)),
+    ),
+  ];
+}
+
 function download(name: string, content: string, type: string) {
   const url = URL.createObjectURL(new Blob([content], { type }));
   const anchor = document.createElement("a");
@@ -163,20 +207,21 @@ function csvCell(value: unknown) {
 
 export function SseHistoryPage() {
   const params = useSearchParams();
-  const [view, setView] = useState<SseHistoryView>("STREAMS");
+  const [view, setView] = useState<SseHistoryView>("EVENTS");
   const [endpointId, setEndpointId] = useState(
     params.get("endpointId") ?? "all",
   );
   const [mode, setMode] = useState<SseMode | "all">("all");
   const [status, setStatus] = useState("all");
   const [eventName, setEventName] = useState("all");
+  const [stage, setStage] = useState<SseHistoryStage | "all">("SOURCE");
   const [search, setSearch] = useState("");
   const [searchMode, setSearchMode] = useState("TEXT");
   const [caseSensitive, setCaseSensitive] = useState(false);
   const [data, setData] = useState<HistoryPageData | null>(null);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [detail, setDetail] = useState<SseHistoryRequest | null>(null);
-  const [columns, setColumns] = useState<string[]>(STREAM_COLUMNS);
+  const [columns, setColumns] = useState<string[]>(EVENT_COLUMNS);
   const [presetName, setPresetName] = useState("");
   const [filterName, setFilterName] = useState("");
   const [loading, setLoading] = useState(true);
@@ -190,6 +235,7 @@ export function SseHistoryPage() {
       modes: mode === "all" ? null : [mode],
       statuses: status === "all" ? null : [status],
       eventNames: eventName === "all" ? null : [eventName],
+      stages: view === "EVENTS" && stage !== "all" ? [stage] : null,
       search: search || null,
       searchMode,
       caseSensitive,
@@ -201,6 +247,7 @@ export function SseHistoryPage() {
       mode,
       search,
       searchMode,
+      stage,
       status,
       view,
     ],
@@ -215,7 +262,7 @@ export function SseHistoryPage() {
       setData(response);
       setColumns((current) =>
         response.sseHistoryViewSettings.columns.length
-          ? response.sseHistoryViewSettings.columns
+          ? normalizeColumns(response.sseHistoryViewSettings.columns, view)
           : current,
       );
       setError(null);
@@ -306,11 +353,22 @@ export function SseHistoryPage() {
       mode: mode === "all" ? null : mode,
       status: status === "all" ? null : status,
       eventName: eventName === "all" ? null : eventName,
+      stage: view === "EVENTS" && stage !== "all" ? stage : null,
       search,
       searchMode,
       caseSensitive,
     }),
-    [caseSensitive, endpointId, eventName, mode, search, searchMode, status],
+    [
+      caseSensitive,
+      endpointId,
+      eventName,
+      mode,
+      search,
+      searchMode,
+      stage,
+      status,
+      view,
+    ],
   );
   async function saveFilter() {
     if (!filterName.trim()) return;
@@ -339,6 +397,13 @@ export function SseHistoryPage() {
     );
     setEventName(
       typeof definition.eventName === "string" ? definition.eventName : "all",
+    );
+    setStage(
+      definition.stage === "SOURCE" ||
+        definition.stage === "EMITTED" ||
+        definition.stage === "DROPPED"
+        ? definition.stage
+        : "all",
     );
     setSearch(typeof definition.search === "string" ? definition.search : "");
     setSearchMode(
@@ -439,7 +504,7 @@ export function SseHistoryPage() {
     <SsePageShell
       badge={data ? `${data.sseHistory.matchingCount} matching` : undefined}
       description="Inspect every hosted SSE stream and logical event with live updates, endpoint facets, saved filters, configurable columns, and export."
-      title="SSE history"
+      title="SSE History"
     >
       {error ? (
         <Alert variant="destructive">
@@ -494,7 +559,7 @@ export function SseHistoryPage() {
                 <SelectItem value="all">All modes</SelectItem>
                 {["FORWARD", "MOCK", "BREAKPOINT"].map((value) => (
                   <SelectItem key={value} value={value}>
-                    {value}
+                    {formatEnumLabel(value)}
                   </SelectItem>
                 ))}
               </SelectContent>
@@ -507,25 +572,43 @@ export function SseHistoryPage() {
                 <SelectItem value="all">All outcomes</SelectItem>
                 {data?.sseHistoryFacets.statuses?.map((value) => (
                   <SelectItem key={value} value={value}>
-                    {value}
+                    {formatEnumLabel(value)}
                   </SelectItem>
                 ))}
               </SelectContent>
             </Select>
             {view === "EVENTS" ? (
-              <Select onValueChange={setEventName} value={eventName}>
-                <SelectTrigger className="w-48">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="all">All event names</SelectItem>
-                  {data?.sseHistoryFacets.eventNames?.map((value) => (
-                    <SelectItem key={value} value={value}>
-                      {value}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+              <>
+                <Select
+                  onValueChange={(value) =>
+                    setStage(value as SseHistoryStage | "all")
+                  }
+                  value={stage}
+                >
+                  <SelectTrigger aria-label="Stage" className="w-40">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">All stages</SelectItem>
+                    <SelectItem value="SOURCE">Source</SelectItem>
+                    <SelectItem value="EMITTED">Emitted</SelectItem>
+                    <SelectItem value="DROPPED">Dropped</SelectItem>
+                  </SelectContent>
+                </Select>
+                <Select onValueChange={setEventName} value={eventName}>
+                  <SelectTrigger className="w-48">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">All event names</SelectItem>
+                    {data?.sseHistoryFacets.eventNames?.map((value) => (
+                      <SelectItem key={value} value={value}>
+                        {value}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </>
             ) : null}
           </div>
           <div className="flex flex-wrap items-center gap-2">
@@ -615,7 +698,7 @@ export function SseHistoryPage() {
                           )
                         }
                       />
-                      {column}
+                      {columnLabel(column)}
                     </label>
                   ))}
                 </div>
@@ -649,7 +732,8 @@ export function SseHistoryPage() {
                   const preset = data.sseHistoryColumnPresets.find(
                     (item) => item.id === id,
                   );
-                  if (preset) setColumns(preset.columns);
+                  if (preset)
+                    setColumns(normalizeColumns(preset.columns, view));
                 }}
               >
                 <SelectTrigger className="w-44">
@@ -731,12 +815,29 @@ export function SseHistoryPage() {
         onOpenChange={(open) => !open && setDetail(null)}
         open={Boolean(detail)}
       >
-        <DialogContent className="max-w-[min(1100px,calc(100%-2rem))]">
-          <DialogHeader>
-            <DialogTitle>{detail?.endpointName} stream</DialogTitle>
-            <DialogDescription>
-              {detail?.method} {detail?.requestUrl}
-            </DialogDescription>
+        <DialogContent
+          className="top-2 h-[calc(100dvh-1rem)] max-h-[calc(100dvh-1rem)] w-[calc(100vw-1rem)] max-w-[1440px] -translate-y-0 gap-0 overflow-y-auto p-0 sm:top-1/2 sm:h-auto sm:max-h-[90dvh] sm:w-[calc(100vw-2rem)] sm:max-w-[1440px] sm:-translate-y-1/2"
+          showCloseButton={false}
+        >
+          <DialogHeader className="sticky top-0 z-10 min-w-0 border-b bg-popover p-4 pr-3">
+            <div className="flex w-full min-w-0 items-start justify-between gap-3">
+              <div className="min-w-0 flex-1 space-y-2">
+                <DialogTitle>{detail?.endpointName} stream</DialogTitle>
+                <DialogDescription className="max-w-full [overflow-wrap:anywhere]">
+                  {detail?.method} {detail?.requestUrl}
+                </DialogDescription>
+              </div>
+              <DialogClose asChild>
+                <Button
+                  aria-label="Close stream details"
+                  className="shrink-0"
+                  size="icon-sm"
+                  variant="ghost"
+                >
+                  <X />
+                </Button>
+              </DialogClose>
+            </div>
           </DialogHeader>
           {detail ? <HistoryDetail request={detail} /> : null}
         </DialogContent>
@@ -806,7 +907,7 @@ function StreamsTable({
             />
           </TableHead>
           {columns.map((column) => (
-            <TableHead key={column}>{column}</TableHead>
+            <TableHead key={column}>{columnLabel(column)}</TableHead>
           ))}
         </TableRow>
       </TableHeader>
@@ -840,7 +941,7 @@ function streamCell(row: SseHistoryRequest, column: string) {
     case "endpoint":
       return <span className="font-medium">{row.endpointName}</span>;
     case "startedAt":
-      return new Date(row.startedAt).toLocaleString();
+      return <DateTime value={row.startedAt} />;
     case "method":
       return <code>{row.method}</code>;
     case "mode":
@@ -856,7 +957,7 @@ function streamCell(row: SseHistoryRequest, column: string) {
                 : "outline"
           }
         >
-          {row.outcome ?? row.status}
+          {formatEnumLabel(row.outcome ?? row.status)}
         </Badge>
       );
     case "responseStatus":
@@ -903,7 +1004,7 @@ function EventsTable({
             />
           </TableHead>
           {columns.map((column) => (
-            <TableHead key={column}>{column}</TableHead>
+            <TableHead key={column}>{columnLabel(column)}</TableHead>
           ))}
         </TableRow>
       </TableHeader>
@@ -937,7 +1038,7 @@ function eventCell(row: SseHistoryEvent, column: string) {
     case "endpoint":
       return row.request?.endpointName ?? "Deleted endpoint";
     case "createdAt":
-      return new Date(row.createdAt).toLocaleString();
+      return <DateTime value={row.createdAt} />;
     case "eventName":
       return <code>{row.eventName}</code>;
     case "stage":
@@ -951,7 +1052,7 @@ function eventCell(row: SseHistoryEvent, column: string) {
                 : "outline"
           }
         >
-          {row.stage}
+          {formatEnumLabel(row.stage)}
           {row.split ? " · split" : ""}
         </Badge>
       );
@@ -980,25 +1081,109 @@ function HeaderList({
   headers: Array<{ name: string; value: string }>;
 }) {
   return (
-    <div>
-      <h3 className="mb-2 text-sm font-medium">{title}</h3>
-      <pre className="max-h-48 overflow-auto rounded-lg border bg-muted/30 p-3 text-xs">
-        {headers.length
-          ? headers
-              .map((header) => `${header.name}: ${header.value}`)
-              .join("\n")
-          : "No headers"}
-      </pre>
+    <Card size="sm">
+      <CardHeader>
+        <CardTitle>{title}</CardTitle>
+      </CardHeader>
+      <CardContent>
+        <pre className="overflow-x-auto whitespace-pre-wrap break-all rounded-lg border bg-muted/30 p-3 text-xs">
+          {headers.length
+            ? headers
+                .map((header) => `${header.name}: ${header.value}`)
+                .join("\n")
+            : "No headers"}
+        </pre>
+      </CardContent>
+    </Card>
+  );
+}
+
+function DetailValue({
+  label,
+  children,
+  className,
+}: {
+  label: string;
+  children: React.ReactNode;
+  className?: string;
+}) {
+  return (
+    <div className={className}>
+      <dt className="text-xs font-medium text-muted-foreground">{label}</dt>
+      <dd className="mt-1 min-w-0 text-sm">{children}</dd>
     </div>
   );
 }
+
+function EventRecord({ event }: { event: SseHistoryEvent }) {
+  return (
+    <Card size="sm">
+      <CardHeader>
+        <CardTitle>
+          <code className="break-all">{event.eventName}</code>
+        </CardTitle>
+        <CardDescription className="flex flex-wrap items-center gap-x-2 gap-y-1">
+          <span>
+            Sequence {event.sequence}.{event.logicalIndex}
+          </span>
+          <span aria-hidden="true">·</span>
+          <DateTime value={event.createdAt} />
+        </CardDescription>
+        <CardAction>
+          <Badge
+            variant={
+              event.stage === "DROPPED"
+                ? "destructive"
+                : event.stage === "EMITTED"
+                  ? "success"
+                  : "outline"
+            }
+          >
+            {formatEnumLabel(event.stage)}
+          </Badge>
+        </CardAction>
+      </CardHeader>
+      <CardContent className="space-y-3">
+        <dl className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+          <DetailValue label="Event ID">
+            <code className="break-all">{event.eventId ?? "—"}</code>
+          </DetailValue>
+          <DetailValue label="Retry">
+            {event.retryMs === null ? "—" : `${event.retryMs} ms`}
+          </DetailValue>
+          <DetailValue label="Correlation ID">
+            <code className="break-all">{event.correlationId}</code>
+          </DetailValue>
+          <DetailValue label="Transformation">
+            <span className="flex flex-wrap gap-1">
+              {event.split ? <Badge variant="outline">Split</Badge> : null}
+              {event.fanOutIndex !== null ? (
+                <Badge variant="outline">Fan-out {event.fanOutIndex + 1}</Badge>
+              ) : null}
+              {event.truncated ? (
+                <Badge variant="destructive">Truncated</Badge>
+              ) : null}
+              {!event.split && event.fanOutIndex === null && !event.truncated
+                ? "None"
+                : null}
+            </span>
+          </DetailValue>
+        </dl>
+        <pre className="overflow-x-auto whitespace-pre-wrap break-words rounded-lg border bg-muted/30 p-3 text-xs">
+          {event.data}
+        </pre>
+      </CardContent>
+    </Card>
+  );
+}
+
 function HistoryDetail({ request }: { request: SseHistoryRequest }) {
   return (
-    <div className="space-y-4">
+    <div className="min-w-0 space-y-6 p-4 sm:p-6">
       <div className="flex flex-wrap gap-2">
         <ModeBadge mode={request.mode} />
         <Badge variant={request.error ? "destructive" : "success"}>
-          {request.outcome ?? request.status}
+          {formatEnumLabel(request.outcome ?? request.status)}
         </Badge>
         {request.truncated ? (
           <Badge variant="destructive">History truncated</Badge>
@@ -1010,70 +1195,122 @@ function HistoryDetail({ request }: { request: SseHistoryRequest }) {
           <AlertDescription>{request.error}</AlertDescription>
         </Alert>
       ) : null}
-      <div className="grid gap-4 lg:grid-cols-2">
-        <HeaderList
-          headers={request.requestHeaders}
-          title="Original request headers"
-        />
-        <HeaderList
-          headers={request.effectiveHeaders}
-          title="Effective forwarded headers"
-        />
-        <HeaderList
-          headers={request.upstreamHeaders}
-          title="Upstream response headers"
-        />
-        <HeaderList
-          headers={request.responseHeaders}
-          title="Emitted response headers"
-        />
-      </div>
-      <div className="grid gap-4 lg:grid-cols-2">
+      <Card size="sm">
+        <CardHeader>
+          <CardTitle>Stream overview</CardTitle>
+          <CardDescription>
+            Original and effective request information captured for this
+            connection.
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          <dl className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+            <DetailValue label="Started">
+              <DateTime value={request.startedAt} />
+            </DetailValue>
+            <DetailValue label="First Event">
+              <DateTime value={request.firstEventAt} />
+            </DetailValue>
+            <DetailValue label="Finished">
+              <DateTime value={request.finishedAt} />
+            </DetailValue>
+            <DetailValue label="Duration">
+              {request.durationMs === null ? "—" : `${request.durationMs} ms`}
+            </DetailValue>
+            <DetailValue label="Effective Request" className="sm:col-span-2">
+              <p className="break-all">
+                <code>{request.effectiveMethod ?? request.method}</code>{" "}
+                {request.effectiveUrl ?? "Not forwarded"}
+              </p>
+            </DetailValue>
+            <DetailValue label="Response Status">
+              {request.responseStatus ?? "—"}
+            </DetailValue>
+            <DetailValue label="Persisted Data">
+              {request.storedBytes.toLocaleString()} bytes
+            </DetailValue>
+          </dl>
+        </CardContent>
+      </Card>
+      <section className="space-y-3">
+        <h3 className="text-sm font-medium">Headers</h3>
+        <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+          <HeaderList
+            headers={request.requestHeaders}
+            title="Original request"
+          />
+          <HeaderList
+            headers={request.effectiveHeaders}
+            title="Effective forwarded"
+          />
+          <HeaderList
+            headers={request.upstreamHeaders}
+            title="Upstream response"
+          />
+          <HeaderList
+            headers={request.responseHeaders}
+            title="Emitted response"
+          />
+        </div>
+      </section>
+      <section className="space-y-3">
+        <h3 className="text-sm font-medium">Request bodies</h3>
+        <div className="grid gap-4 lg:grid-cols-2">
+          <Card size="sm">
+            <CardHeader>
+              <CardTitle>Original body</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <pre className="overflow-x-auto whitespace-pre-wrap break-words rounded-lg border bg-muted/30 p-3 text-xs">
+                {request.requestBody ?? "No body"}
+              </pre>
+            </CardContent>
+          </Card>
+          <Card size="sm">
+            <CardHeader>
+              <CardTitle>Effective body</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <pre className="overflow-x-auto whitespace-pre-wrap break-words rounded-lg border bg-muted/30 p-3 text-xs">
+                {request.effectiveBody ?? "No body"}
+              </pre>
+            </CardContent>
+          </Card>
+        </div>
+      </section>
+      <section className="space-y-3">
         <div>
-          <h3 className="mb-2 text-sm font-medium">Original body</h3>
-          <pre className="max-h-48 overflow-auto rounded-lg border bg-muted/30 p-3 text-xs whitespace-pre-wrap">
-            {request.requestBody ?? "No body"}
-          </pre>
+          <h3 className="text-sm font-medium">
+            Source and emitted event records
+          </h3>
+          <p className="mt-1 text-sm text-muted-foreground">
+            All retained records are listed below. Scroll the stream details to
+            review the complete sequence.
+          </p>
         </div>
-        <div>
-          <h3 className="mb-2 text-sm font-medium">Effective body</h3>
-          <pre className="max-h-48 overflow-auto rounded-lg border bg-muted/30 p-3 text-xs whitespace-pre-wrap">
-            {request.effectiveBody ?? "No body"}
-          </pre>
+        <div className="space-y-3">
+          {request.events ? (
+            request.events.length ? (
+              request.events.map((event) => (
+                <EventRecord event={event} key={event.id} />
+              ))
+            ) : (
+              <p className="rounded-lg border border-dashed p-6 text-center text-sm text-muted-foreground">
+                No retained event records.
+              </p>
+            )
+          ) : (
+            <p className="flex items-center gap-2 text-muted-foreground">
+              <Spinner /> Loading event records…
+            </p>
+          )}
         </div>
-      </div>
-      <div>
-        <h3 className="mb-2 text-sm font-medium">
-          Source and emitted event records
-        </h3>
-        <div className="max-h-96 space-y-2 overflow-auto">
-          {request.events?.map((event) => (
-            <div
-              className="grid gap-2 rounded-lg border p-3 text-xs sm:grid-cols-[7rem_8rem_1fr]"
-              key={event.id}
-            >
-              <Badge
-                variant={
-                  event.stage === "DROPPED"
-                    ? "destructive"
-                    : event.stage === "EMITTED"
-                      ? "success"
-                      : "outline"
-                }
-              >
-                {event.stage}
-              </Badge>
-              <code>{event.eventName}</code>
-              <pre className="whitespace-pre-wrap">{event.data}</pre>
-            </div>
-          )) ?? <Spinner />}
-        </div>
-      </div>
-      <details>
+      </section>
+      <details className="rounded-lg border p-4">
         <summary className="cursor-pointer text-sm font-medium">
           Configuration snapshot
         </summary>
-        <pre className="mt-2 max-h-64 overflow-auto rounded-lg border bg-muted/30 p-3 text-xs">
+        <pre className="mt-3 overflow-x-auto whitespace-pre-wrap break-words rounded-lg border bg-muted/30 p-3 text-xs">
           {JSON.stringify(request.configSnapshot, null, 2)}
         </pre>
       </details>
