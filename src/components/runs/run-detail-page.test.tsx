@@ -102,6 +102,13 @@ const failedRun: AgentRunView = {
   updatedAt: "2026-07-23T12:43:00.000Z",
 };
 let runData = failedRun;
+let worktreeOverviewData: unknown = {
+  agents: [],
+  tags: [],
+  settings: {},
+  hiddenCount: 0,
+  activeMoves: [],
+};
 let eventData: Array<{
   id: string;
   runId: string;
@@ -118,6 +125,13 @@ let eventData: Array<{
 describe("RunDetailPage", () => {
   beforeEach(() => {
     runData = failedRun;
+    worktreeOverviewData = {
+      agents: [],
+      tags: [],
+      settings: {},
+      hiddenCount: 0,
+      activeMoves: [],
+    };
     eventData = [];
     push.mockReset();
     request.mockReset();
@@ -156,6 +170,14 @@ describe("RunDetailPage", () => {
             .slice(0, 500),
         } as never;
       }
+      if (operation.includes("query WorktreeDetailOverview")) {
+        return {
+          worktreeOverview: worktreeOverviewData,
+          builds: { items: [], nextCursor: null },
+          worktreeCoverageReports: [],
+          worktreeRunQueue: [],
+        } as never;
+      }
       throw new Error(`Unexpected operation: ${operation}`);
     });
   });
@@ -172,6 +194,125 @@ describe("RunDetailPage", () => {
         "Control agent restarted while this run was active",
       ),
     ).toBeDefined();
+  });
+
+  test("places worktree Actions, Status, and Builds after Follow Up", async () => {
+    worktreeOverviewData = {
+      hiddenCount: 0,
+      tags: [],
+      activeMoves: [],
+      settings: {
+        editorVariant: "CODE",
+        updatedAt: "2026-07-23T12:00:00.000Z",
+      },
+      agents: [
+        {
+          agent: {
+            id: "agent-1",
+            name: "Mac Studio",
+            hostname: "studio.local",
+            connectionStatus: "ONLINE",
+            capabilities: ["ios.build.run", "command.run"],
+            baseRepoDirectory: "/workspace",
+          },
+          codebases: [
+            {
+              iosBuildConfigured: true,
+              blockingJob: null,
+              quickActions: [],
+              mergeConflictQuickActions: [],
+              repository: {
+                id: "repo-1",
+                name: "aide",
+                displayOrigin: "github.com/example/aide",
+              },
+              codebase: {
+                id: "codebase-1",
+                folder: "/workspace/aide",
+                defaultBranch: "main",
+              },
+              worktrees: [
+                {
+                  id: "worktree-1",
+                  codebaseId: "codebase-1",
+                  folder: "/workspace/ai-development-environment",
+                  branch: "feature/AIDE-66-plans-and-sessions-support",
+                  headSha: "abcdef1234567890",
+                  upstream: "origin/feature/AIDE-66-plans-and-sessions-support",
+                  ahead: 0,
+                  behind: 0,
+                  syncState: "IN_SYNC",
+                  baseBranch: "main",
+                  baseBranchOverride: null,
+                  baseAhead: 1,
+                  baseBehind: 0,
+                  hasStagedChanges: false,
+                  hasUnstagedChanges: false,
+                  rebaseInProgress: false,
+                  availability: "AVAILABLE",
+                  pullRequest: null,
+                  sourceControlRequest: null,
+                  gitLabPipelines: [],
+                  latestBuild: null,
+                },
+              ],
+            },
+          ],
+        },
+      ],
+    };
+    runData = {
+      ...failedRun,
+      checkpoints: [
+        {
+          id: "checkpoint-1",
+          kind: "FINAL",
+          headSha: "abcdef1234567890",
+          branch: failedRun.branch,
+          upstreamSha: null,
+          indexTree: null,
+          worktreeTree: null,
+          refName: null,
+          diffSummary: null,
+          diffPatch: null,
+          stashRef: null,
+          createdAt: "2026-07-23T12:43:00.000Z",
+        },
+      ],
+    };
+
+    render(<RunDetailPage runId="run-353" />);
+
+    expect(await screen.findByText("Worktree Status")).toBeDefined();
+    const titles = Array.from(
+      document.querySelectorAll('[data-slot="card-title"]'),
+      (node) => node.textContent,
+    );
+    const ordered = [
+      "Follow Up",
+      "Actions",
+      "Worktree Status",
+      "Builds",
+      "Changes",
+    ];
+    expect(ordered.map((title) => titles.indexOf(title))).toEqual(
+      [...ordered.map((title) => titles.indexOf(title))].sort((a, b) => a - b),
+    );
+    expect(
+      screen.getByRole("link", { name: "Open Worktree" }).getAttribute("href"),
+    ).toBe("/worktrees/worktree-1");
+    expect(screen.getByRole("button", { name: "Build" })).toBeDefined();
+    expect(screen.getByRole("link", { name: "New plan" })).toBeDefined();
+    expect(screen.getByRole("link", { name: "New session" })).toBeDefined();
+  });
+
+  test("omits worktree cards when the run has no worktree", async () => {
+    runData = { ...failedRun, worktreeId: null, worktree: null };
+
+    render(<RunDetailPage runId="run-353" />);
+
+    expect(await screen.findByText("Follow Up")).toBeDefined();
+    expect(screen.queryByText("Worktree Status")).toBeNull();
   });
 
   test("formats answers and keeps prompt, result, activity, and changes controls compact", async () => {

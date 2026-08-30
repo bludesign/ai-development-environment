@@ -31,14 +31,17 @@ import {
   parseBuildDeploymentPayload,
   parseBuildDeletePayload,
   parseBuildArtifactDownloadPayload,
+  parseBuildArtifactTransferUploadPayload,
+  parseBuildAgentRunDestinationsPayload,
   parseBuildDestinationsPayload,
   parseBuildExportPayload,
   parseBuildJobPayload,
   parseBuildReportPayload,
   parseBuildRunDestinationsPayload,
+  parseBuildRemoteDeploymentPayload,
   parseBuildSourceDiscoverPayload,
   parseBuildSourceParsePayload,
-  GENERIC_BUILD_DESTINATION_ACTIONS,
+  genericBuildDestinations,
   type BuildAction,
   type BuildAdvancedSettings,
   type BuildDestination,
@@ -50,6 +53,8 @@ import {
   type BuildSigningRequirement,
   type BuildSourceSnapshot,
 } from "@ai-development-environment/agent-contract/builds";
+
+export { genericBuildDestinations };
 import { normalizeGitOrigin } from "@ai-development-environment/agent-contract/codebases";
 import { plistDocument } from "@ai-development-environment/agent-contract/plist";
 
@@ -827,7 +832,10 @@ export const parseBuildSourceMetadata: AgentJobHandler = async (
   };
 };
 
-export function simulatorDestinations(value: unknown): BuildDestination[] {
+export function simulatorDestinations(
+  value: unknown,
+  includeUnavailable = false,
+): BuildDestination[] {
   if (!value || typeof value !== "object" || Array.isArray(value)) return [];
   const devices = (value as Record<string, unknown>).devices;
   if (!devices || typeof devices !== "object" || Array.isArray(devices))
@@ -841,7 +849,11 @@ export function simulatorDestinations(value: unknown): BuildDestination[] {
     for (const raw of entries) {
       if (!raw || typeof raw !== "object" || Array.isArray(raw)) continue;
       const device = raw as Record<string, unknown>;
-      if (device.isAvailable !== true || typeof device.udid !== "string")
+      const available = device.isAvailable === true;
+      if (
+        (!available && !includeUnavailable) ||
+        typeof device.udid !== "string"
+      )
         continue;
       result.push({
         type: "SIMULATOR",
@@ -849,7 +861,13 @@ export function simulatorDestinations(value: unknown): BuildDestination[] {
         name: typeof device.name === "string" ? device.name : device.udid,
         platform: "iOS Simulator",
         osVersion,
-        state: typeof device.state === "string" ? device.state : null,
+        state:
+          typeof device.state === "string"
+            ? device.state
+            : available
+              ? null
+              : "Unavailable",
+        available,
       });
     }
   }
@@ -871,7 +889,10 @@ function nestedString(value: unknown, paths: string[][]): string | null {
   return null;
 }
 
-export function physicalDestinations(value: unknown): BuildDestination[] {
+export function physicalDestinations(
+  value: unknown,
+  includeUnavailable = false,
+): BuildDestination[] {
   if (!value || typeof value !== "object" || Array.isArray(value)) return [];
   const result = (value as Record<string, unknown>).result;
   const devices =
@@ -895,7 +916,10 @@ export function physicalDestinations(value: unknown): BuildDestination[] {
       ["connectionProperties", "tunnelState"],
       ["deviceProperties", "connectionState"],
     ]);
-    if (state && /(disconnected|unavailable|not.?connected)/i.test(state)) {
+    const available = !(
+      state && /(disconnected|unavailable|not.?connected|offline)/i.test(state)
+    );
+    if (!available && !includeUnavailable) {
       return [];
     }
     return [
@@ -909,42 +933,16 @@ export function physicalDestinations(value: unknown): BuildDestination[] {
           ["deviceProperties", "osVersion"],
         ]),
         state,
+        available,
       },
     ];
   });
 }
 
-export function genericBuildDestinations(
-  action: BuildAction,
-): BuildDestination[] {
-  if (!GENERIC_BUILD_DESTINATION_ACTIONS.includes(action)) return [];
-  const physical: BuildDestination = {
-    type: "PHYSICAL_DEVICE",
-    id: "generic-ios",
-    name: "Any Physical iOS Device",
-    platform: "iOS",
-    osVersion: null,
-    state: null,
-    generic: true,
-  };
-  if (action === "ARCHIVE") return [physical];
-  return [
-    {
-      type: "SIMULATOR",
-      id: "generic-ios-simulator",
-      name: "Any iOS Simulator",
-      platform: "iOS Simulator",
-      osVersion: null,
-      state: null,
-      generic: true,
-    },
-    physical,
-  ];
-}
-
 async function listPhysicalDevices(
   timeoutMs: number,
   signal: AbortSignal,
+  includeUnavailable = false,
 ): Promise<BuildDestination[]> {
   const directory = await mkdtemp(join(tmpdir(), "ade-devices-"));
   const output = join(directory, "devices.json");
@@ -965,7 +963,10 @@ async function listPhysicalDevices(
       signal,
     );
     if (result.exitCode !== 0) return [];
-    return physicalDestinations(JSON.parse(await readFile(output, "utf8")));
+    return physicalDestinations(
+      JSON.parse(await readFile(output, "utf8")),
+      includeUnavailable,
+    );
   } finally {
     await rm(directory, { recursive: true, force: true });
   }
@@ -978,24 +979,7 @@ export const inspectBuildDestinations: AgentJobHandler = async (
 ) => {
   const input = parseBuildDestinationsPayload(payload);
   const folder = await validateWorktree(input, timeoutMs, signal);
-  const absolutePath = await validateSource(folder, input.source);
-  const preflight = await command(
-    "xcrun",
-    [
-      "xcodebuild",
-      ...sourceArguments(input.source, absolutePath),
-      "-scheme",
-      input.scheme,
-      "-configuration",
-      input.configuration,
-      "-showBuildSettings",
-      "-json",
-    ],
-    Math.min(timeoutMs, 60_000),
-    signal,
-    folder,
-  );
-  requireSuccess(preflight, "The saved scheme or configuration is unavailable");
+  await validateSource(folder, input.source);
   const [simulators, physical] = await Promise.all([
     command(
       "xcrun",
@@ -1028,7 +1012,7 @@ export const inspectBuildRunDestinations: AgentJobHandler = async (
   if (input.destinationType === "SIMULATOR") {
     const simulators = await command(
       "xcrun",
-      ["simctl", "list", "devices", "available", "-j"],
+      ["simctl", "list", "devices", "-j"],
       Math.min(timeoutMs, 30_000),
       signal,
       folder,
@@ -1036,12 +1020,38 @@ export const inspectBuildRunDestinations: AgentJobHandler = async (
     requireSuccess(simulators, "Could not inspect available simulators");
     return {
       ...successfulProcess,
-      destinations: simulatorDestinations(JSON.parse(simulators.stdout)),
+      destinations: simulatorDestinations(JSON.parse(simulators.stdout), true),
     };
   }
   return {
     ...successfulProcess,
-    destinations: await listPhysicalDevices(timeoutMs, signal),
+    destinations: await listPhysicalDevices(timeoutMs, signal, true),
+  };
+};
+
+export const inspectAgentBuildRunDestinations: AgentJobHandler = async (
+  payload,
+  timeoutMs,
+  signal,
+) => {
+  const input = parseBuildAgentRunDestinationsPayload(payload);
+  if (input.destinationType === "SIMULATOR") {
+    const simulators = await command(
+      "xcrun",
+      ["simctl", "list", "devices", "-j"],
+      Math.min(timeoutMs, 30_000),
+      signal,
+      process.cwd(),
+    );
+    requireSuccess(simulators, "Could not inspect available simulators");
+    return {
+      ...successfulProcess,
+      destinations: simulatorDestinations(JSON.parse(simulators.stdout), true),
+    };
+  }
+  return {
+    ...successfulProcess,
+    destinations: await listPhysicalDevices(timeoutMs, signal, true),
   };
 };
 
@@ -2489,6 +2499,11 @@ async function captureArtifacts(
           bundleIdentifier: settings.PRODUCT_BUNDLE_IDENTIFIER ?? null,
           target: apps[0]!.target,
           destinationType: input.destination.type,
+          architectures: (settings.ARCHS ?? settings.VALID_ARCHS ?? "")
+            .split(/\s+/)
+            .filter(Boolean),
+          minimumOSVersion: settings.IPHONEOS_DEPLOYMENT_TARGET ?? null,
+          sdkName: settings.SDK_NAME ?? null,
         }),
       );
     }
@@ -2585,6 +2600,7 @@ export const runIosBuild: AgentJobHandler = async (
       telemetry: input.telemetry ?? null,
     };
     let buildResult: CommandResult | null = null;
+    let preflightResult: CommandResult | null = null;
     let coverageChanges: CoverageChange[] = [];
     let errorCode: string | null = null;
     let error: string | null = null;
@@ -2610,29 +2626,53 @@ export const runIosBuild: AgentJobHandler = async (
       } catch (progressError) {
         logger.emit("PREPARING", "SYSTEM", cleanError(progressError));
       }
-      for (const script of [...input.scripts].sort(
-        (a, b) => a.position - b.position,
-      )) {
-        if (!script.preBuildScript) continue;
-        const execution = await runHook({
-          input,
-          folder,
-          script,
-          phase: "PRE_BUILD",
-          source: script.preBuildScript,
-          contextPath,
-          hookContext: baseHookContext,
-          logger,
+      if (!signal.aborted) {
+        preflightResult = await runLoggedCommand({
+          command: "xcrun",
+          args: xcodeBuildSettingsArguments(input, folder),
+          cwd: folder,
+          env: xcodeEnvironment(),
+          timeoutMs: Math.min(timeoutMs, 60_000),
           signal,
+          logger,
+          phase: "PREFLIGHT",
         });
-        scriptExecutions.push(execution);
-        if (execution.causedBuildFailure) {
+        if (preflightResult.exitCode !== 0 && !preflightResult.cancelled) {
           failBuild = true;
-          errorCode = "SCRIPT_FAILED";
-          error = execution.error;
-          break;
+          errorCode = preflightResult.timedOut
+            ? "TIMEOUT"
+            : classifyFailure(preflightResult.output);
+          error = cleanError(
+            preflightResult.output ||
+              "The saved scheme, configuration, or destination is unavailable",
+          );
         }
-        if (signal.aborted) break;
+      }
+      if (!failBuild && !signal.aborted) {
+        for (const script of [...input.scripts].sort(
+          (a, b) => a.position - b.position,
+        )) {
+          if (!script.preBuildScript) continue;
+          const execution = await runHook({
+            input,
+            folder,
+            script,
+            phase: "PRE_BUILD",
+            source: script.preBuildScript,
+            contextPath,
+            hookContext: baseHookContext,
+            logger,
+            signal,
+          });
+          scriptExecutions.push(execution);
+          if (execution.causedBuildFailure) {
+            failBuild = true;
+            errorCode = "SCRIPT_FAILED";
+            error = execution.error;
+            break;
+          }
+          if (signal.aborted) break;
+        }
       }
       if (!failBuild && !signal.aborted) {
         try {
@@ -2696,7 +2736,10 @@ export const runIosBuild: AgentJobHandler = async (
                 (!signal.aborted &&
                   buildResult !== null &&
                   buildResult.exitCode !== 0),
-              cancelled: signal.aborted || buildResult?.cancelled === true,
+              cancelled:
+                signal.aborted ||
+                preflightResult?.cancelled === true ||
+                buildResult?.cancelled === true,
               errorCode,
               error,
             },
@@ -2734,8 +2777,9 @@ export const runIosBuild: AgentJobHandler = async (
     const testAction = ["TEST", "TEST_WITHOUT_BUILDING"].includes(input.action);
     const canGenerateReports = () =>
       !signal.aborted &&
-      buildResult?.cancelled !== true &&
-      buildResult?.timedOut !== true;
+      buildResult !== null &&
+      !buildResult.cancelled &&
+      !buildResult.timedOut;
     if (
       canGenerateReports() &&
       testAction &&
@@ -2783,8 +2827,12 @@ export const runIosBuild: AgentJobHandler = async (
         await artifact(input.artifactDirectory, "RAW_LOG", rawLog),
       );
     }
-    const cancelled = signal.aborted || buildResult?.cancelled === true;
-    const timedOut = buildResult?.timedOut === true;
+    const cancelled =
+      signal.aborted ||
+      preflightResult?.cancelled === true ||
+      buildResult?.cancelled === true;
+    const timedOut =
+      preflightResult?.timedOut === true || buildResult?.timedOut === true;
     const exitCode = cancelled
       ? null
       : failBuild || !buildResult
@@ -2799,7 +2847,7 @@ export const runIosBuild: AgentJobHandler = async (
     const codeStateObservedAt = new Date().toISOString();
     return {
       exitCode,
-      signal: buildResult?.signal ?? null,
+      signal: buildResult?.signal ?? preflightResult?.signal ?? null,
       timedOut,
       cancelled,
       errorCode,
@@ -2941,6 +2989,79 @@ export const downloadIosBuildArtifact: AgentJobHandler = async (
   }
 };
 
+export const uploadTransferredIosBuildArtifact: AgentJobHandler = async (
+  payload,
+  timeoutMs,
+  signal,
+  onLog,
+  context,
+) => {
+  const input = parseBuildArtifactTransferUploadPayload(payload);
+  if (!context?.uploadBuildArtifactTransfer) {
+    throw new Error("This agent cannot upload transferred build artifacts");
+  }
+  const root = await realpath(input.artifactDirectory);
+  const target = await realpath(
+    containedPath(root, input.artifactRelativePath),
+  );
+  const difference = relative(root, target);
+  if (
+    !difference ||
+    difference === ".." ||
+    difference.startsWith(`..${sep}`) ||
+    isAbsolute(difference)
+  ) {
+    throw new Error("Build artifact resolves outside the build folder");
+  }
+  const information = await stat(target);
+  let uploadPath = target;
+  let filename = basename(target);
+  let contentType = "application/octet-stream";
+  let temporaryArchive: string | null = null;
+  try {
+    if (information.isDirectory()) {
+      temporaryArchive = join(
+        tmpdir(),
+        `ade-build-transfer-${input.transferId}-${randomUUID()}.tar.gz`,
+      );
+      requireSuccess(
+        await command(
+          "tar",
+          ["-czf", temporaryArchive, "-C", dirname(target), basename(target)],
+          timeoutMs,
+          signal,
+        ),
+        "Could not package the runnable app",
+      );
+      uploadPath = temporaryArchive;
+      filename = `${filename}.tar.gz`;
+      contentType = "application/gzip";
+    } else if (!information.isFile()) {
+      throw new Error("Build artifact is not transferable");
+    }
+    const checksum = await fileChecksum(uploadPath);
+    if (!checksum)
+      throw new Error("Could not checksum the runnable app archive");
+    await onLog({
+      sequence: 0,
+      stream: "SYSTEM",
+      message: `Uploading ${filename} in resumable 16 MiB chunks`,
+      createdAt: new Date().toISOString(),
+    });
+    await context.uploadBuildArtifactTransfer({
+      transferId: input.transferId,
+      path: uploadPath,
+      filename,
+      contentType,
+      checksum,
+      signal,
+    });
+    return successfulProcess;
+  } finally {
+    if (temporaryArchive) await rm(temporaryArchive, { force: true });
+  }
+};
+
 async function runSimpleLogged(
   logger: BuildLogger,
   options: {
@@ -2972,23 +3093,19 @@ export function simulatorAppArguments(destinationId: string): string[] {
   return ["-a", "Simulator", "--args", "-CurrentDeviceUDID", destinationId];
 }
 
-export const deployIosBuild: AgentJobHandler = async (
-  payload,
-  timeoutMs,
-  signal,
-  _onLog,
-  context,
-) => {
-  const input = parseBuildDeploymentPayload(payload);
-  const folder = await validateWorktree(
-    input,
-    Math.min(timeoutMs, 60_000),
-    signal,
-  );
-  const appPath = containedPath(
-    input.artifactDirectory,
-    input.artifactRelativePath,
-  );
+async function deployPreparedIosBuild(
+  input: {
+    buildId: string;
+    artifactDirectory: string;
+    bundleIdentifier: string;
+    deployments: Array<{ id: string; destination: BuildDestination }>;
+  },
+  folder: string,
+  appPath: string,
+  timeoutMs: number,
+  signal: AbortSignal,
+  context: AgentJobHandlerContext | undefined,
+) {
   if (!(await pathExists(appPath)) || !appPath.endsWith(".app")) {
     throw new Error("Runnable app artifact is missing");
   }
@@ -3180,6 +3297,131 @@ export const deployIosBuild: AgentJobHandler = async (
     };
   } finally {
     await logger.close();
+  }
+}
+
+export const deployIosBuild: AgentJobHandler = async (
+  payload,
+  timeoutMs,
+  signal,
+  _onLog,
+  context,
+) => {
+  const input = parseBuildDeploymentPayload(payload);
+  const folder = await validateWorktree(
+    input,
+    Math.min(timeoutMs, 60_000),
+    signal,
+  );
+  const appPath = containedPath(
+    input.artifactDirectory,
+    input.artifactRelativePath,
+  );
+  return deployPreparedIosBuild(
+    input,
+    folder,
+    appPath,
+    timeoutMs,
+    signal,
+    context,
+  );
+};
+
+export async function createRemoteBuildStagingDirectory(
+  buildId: string,
+): Promise<string> {
+  // macOS commonly exposes the temporary directory as /var/folders while
+  // realpath() returns /private/var/folders. Canonicalize the root before any
+  // containment comparison so the same directory is not treated as external.
+  return realpath(
+    await mkdtemp(join(tmpdir(), `ade-remote-build-${buildId}-`)),
+  );
+}
+
+export const deployTransferredIosBuild: AgentJobHandler = async (
+  payload,
+  timeoutMs,
+  signal,
+  onLog,
+  context,
+) => {
+  const input = parseBuildRemoteDeploymentPayload(payload);
+  if (!context?.downloadBuildArtifactTransfer) {
+    throw new Error("This agent cannot download transferred build artifacts");
+  }
+  const staging = await createRemoteBuildStagingDirectory(input.buildId);
+  const archive = join(staging, "artifact.tar.gz");
+  try {
+    await onLog({
+      sequence: 0,
+      stream: "SYSTEM",
+      message: "Waiting for the relayed build artifact",
+      createdAt: new Date().toISOString(),
+    });
+    await context.downloadBuildArtifactTransfer({
+      transferId: input.transferId,
+      path: archive,
+      signal,
+    });
+    const listing = await command(
+      "tar",
+      ["-tzf", archive],
+      Math.min(timeoutMs, 120_000),
+      signal,
+      staging,
+    );
+    requireSuccess(listing, "Transferred build archive is malformed");
+    const entries = listing.stdout
+      .split("\n")
+      .map((entry) => entry.trim().replace(/^\.\//, ""))
+      .filter(Boolean);
+    if (
+      !entries.length ||
+      entries.some(
+        (entry) =>
+          entry.startsWith("/") ||
+          entry.split("/").some((component) => component === ".."),
+      )
+    ) {
+      throw new Error("Transferred build archive contains an unsafe path");
+    }
+    const roots = new Set(entries.map((entry) => entry.split("/")[0]!));
+    const root = [...roots][0];
+    if (roots.size !== 1 || !root?.endsWith(".app")) {
+      throw new Error("Transferred build archive must contain one app bundle");
+    }
+    requireSuccess(
+      await command(
+        "tar",
+        ["-xzf", archive, "-C", staging],
+        Math.min(timeoutMs, 120_000),
+        signal,
+        staging,
+      ),
+      "Could not extract the transferred app",
+    );
+    const appPath = await realpath(join(staging, root));
+    const pathDifference = relative(staging, appPath);
+    if (
+      pathDifference === ".." ||
+      pathDifference.startsWith(`..${sep}`) ||
+      isAbsolute(pathDifference)
+    ) {
+      throw new Error("Transferred app resolves outside its staging directory");
+    }
+    return await deployPreparedIosBuild(
+      {
+        ...input,
+        artifactDirectory: staging,
+      },
+      staging,
+      appPath,
+      timeoutMs,
+      signal,
+      context,
+    );
+  } finally {
+    await rm(staging, { recursive: true, force: true });
   }
 };
 

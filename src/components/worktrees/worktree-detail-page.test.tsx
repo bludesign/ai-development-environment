@@ -390,12 +390,8 @@ describe("WorktreeDetailPage", () => {
       within(buildsCard!).getByRole("button", { name: /1 devices/ }),
     ).toBeDefined();
     expect(
-      (
-        within(buildsCard!).getByRole("button", {
-          name: "Run",
-        }) as HTMLButtonElement
-      ).disabled,
-    ).toBe(false);
+      within(buildsCard!).queryByRole("button", { name: "Run" }),
+    ).toBeNull();
     fireEvent.click(
       within(buildsCard!).getByRole("button", { name: "Rebuild" }),
     );

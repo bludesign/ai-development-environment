@@ -44,6 +44,7 @@ type ActionCenterContextValue = {
     answers: AnswerPayload,
   ) => Promise<void>;
   acknowledge: (item: ActionCenterItem) => Promise<void>;
+  dismiss: (item: ActionCenterItem) => Promise<void>;
   reportError: (value: string | null) => void;
 };
 
@@ -209,6 +210,35 @@ export function ActionCenterProvider({ children }: { children: ReactNode }) {
     [items, refresh],
   );
 
+  const dismiss = useCallback(
+    async (item: ActionCenterItem) => {
+      if (!item.dismissalFingerprint) return;
+      const previous = items;
+      setItems((current) => current.filter(({ key }) => key !== item.key));
+      try {
+        await controlPlaneRequest(
+          `mutation DismissActionCenterItem($input: DismissActionCenterItemInput!) {
+            dismissActionCenterItem(input: $input)
+          }`,
+          {
+            input: {
+              resourceKind: item.resourceKind,
+              resourceId: item.resourceId,
+              dismissalFingerprint: item.dismissalFingerprint,
+            },
+          },
+        );
+        await refresh();
+      } catch (value) {
+        setItems(previous);
+        const message = value instanceof Error ? value.message : String(value);
+        setError(message);
+        throw value;
+      }
+    },
+    [items, refresh],
+  );
+
   return (
     <ActionCenterContext.Provider
       value={{
@@ -224,6 +254,7 @@ export function ActionCenterProvider({ children }: { children: ReactNode }) {
         loadMore,
         answerQuestion,
         acknowledge,
+        dismiss,
         reportError: setError,
       }}
     >

@@ -83,6 +83,7 @@ import {
 } from "./worktrees.js";
 import {
   deployIosBuild,
+  deployTransferredIosBuild,
   deleteIosBuild,
   downloadIosBuildArtifact,
   discoverBuildSources,
@@ -90,14 +91,19 @@ import {
   generateIosBuildReport,
   inspectBuildDestinations,
   inspectBuildRunDestinations,
+  inspectAgentBuildRunDestinations,
   parseBuildSourceMetadata,
   runIosBuild,
+  uploadTransferredIosBuildArtifact,
 } from "./builds.js";
 import {
   IOS_BUILD_JOB_KIND,
   IOS_BUILD_DELETE_JOB_KIND,
   IOS_ARTIFACT_DOWNLOAD_JOB_KIND,
+  IOS_ARTIFACT_TRANSFER_UPLOAD_JOB_KIND,
+  IOS_AGENT_RUN_DESTINATIONS_JOB_KIND,
   IOS_DEPLOY_JOB_KIND,
+  IOS_REMOTE_DEPLOY_JOB_KIND,
   IOS_DESTINATIONS_JOB_KIND,
   IOS_RUN_DESTINATIONS_JOB_KIND,
   IOS_EXPORT_JOB_KIND,
@@ -156,6 +162,19 @@ export type AgentJobHandlerContext = {
     filename: string;
     contentType: string;
   }) => Promise<unknown>;
+  uploadBuildArtifactTransfer?: (input: {
+    transferId: string;
+    path: string;
+    filename: string;
+    contentType: string;
+    checksum: string;
+    signal: AbortSignal;
+  }) => Promise<void>;
+  downloadBuildArtifactTransfer?: (input: {
+    transferId: string;
+    path: string;
+    signal: AbortSignal;
+  }) => Promise<{ filename: string; contentType: string; checksum: string }>;
   claimSigningSecretTransfer?: (transferId: string) => Promise<{
     p12Base64: string;
     passphrase: string;
@@ -214,10 +233,13 @@ export const handlers: Readonly<Record<string, AgentJobHandler>> = {
   [IOS_SOURCE_PARSE_JOB_KIND]: parseBuildSourceMetadata,
   [IOS_DESTINATIONS_JOB_KIND]: inspectBuildDestinations,
   [IOS_RUN_DESTINATIONS_JOB_KIND]: inspectBuildRunDestinations,
+  [IOS_AGENT_RUN_DESTINATIONS_JOB_KIND]: inspectAgentBuildRunDestinations,
   [IOS_BUILD_JOB_KIND]: runIosBuild,
   [IOS_BUILD_DELETE_JOB_KIND]: deleteIosBuild,
   [IOS_ARTIFACT_DOWNLOAD_JOB_KIND]: downloadIosBuildArtifact,
+  [IOS_ARTIFACT_TRANSFER_UPLOAD_JOB_KIND]: uploadTransferredIosBuildArtifact,
   [IOS_DEPLOY_JOB_KIND]: deployIosBuild,
+  [IOS_REMOTE_DEPLOY_JOB_KIND]: deployTransferredIosBuild,
   [IOS_EXPORT_JOB_KIND]: exportIosArchive,
   [IOS_TEST_RESULTS_JOB_KIND]: generateIosBuildReport,
   [IOS_COVERAGE_REPORT_JOB_KIND]: generateIosBuildReport,

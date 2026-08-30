@@ -1,4 +1,5 @@
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { createHash } from "node:crypto";
+import { mkdtemp, rm, truncate, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -10,6 +11,7 @@ import {
   agentWebSocketHeaders,
   subscribeToAgentEvents,
   type AgentJob,
+  writeArtifactTransferBytes,
 } from "./graphql-client.js";
 
 const temporaryDirectories: string[] = [];
@@ -26,6 +28,40 @@ afterEach(async () => {
 });
 
 describe("AgentGraphQLClient", () => {
+  test("retries positioned writes until a downloaded chunk is complete", async () => {
+    const positions: number[] = [];
+    const stored: number[] = [];
+    const writer = {
+      write: vi.fn(
+        async (
+          bytes: Uint8Array,
+          offset: number,
+          length: number,
+          position: number,
+        ) => {
+          positions.push(position);
+          stored.push(bytes[offset]!);
+          return { bytesWritten: Math.min(1, length) };
+        },
+      ),
+    };
+
+    await writeArtifactTransferBytes(writer, Buffer.from("abc"), 11);
+
+    expect(positions).toEqual([11, 12, 13]);
+    expect(Buffer.from(stored).toString()).toBe("abc");
+  });
+
+  test("rejects a downloaded chunk write that makes no progress", async () => {
+    await expect(
+      writeArtifactTransferBytes(
+        { write: vi.fn().mockResolvedValue({ bytesWritten: 0 }) },
+        Buffer.from("abc"),
+        0,
+      ),
+    ).rejects.toThrow("made no progress");
+  });
+
   test("checks public auth configuration for server readiness", async () => {
     const fetchMock = vi.fn(async () => Response.json({ mode: "password" }));
     vi.stubGlobal("fetch", fetchMock);
@@ -161,6 +197,141 @@ describe("AgentGraphQLClient", () => {
         }),
       }),
     );
+  });
+
+  test("uploads artifacts larger than 100 MB without exceeding 16 MiB per request", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "control-agent-transfer-"));
+    temporaryDirectories.push(directory);
+    const path = join(directory, "AcmeApp.tar.gz");
+    const uploadLength = 101 * 1024 * 1024 + 7;
+    await writeFile(path, "");
+    await truncate(path, uploadLength);
+    let confirmedOffset = 0;
+    const chunkSizes: number[] = [];
+    const fetchMock = vi.fn(async (url: string, init: RequestInit = {}) => {
+      if (url.endsWith("/complete")) {
+        return new Response(null, { status: 204 });
+      }
+      if (url.endsWith("/upload") && init.method === "HEAD") {
+        return new Response(null, {
+          status: 204,
+          headers: { "upload-offset": String(confirmedOffset) },
+        });
+      }
+      if (url.endsWith("/upload") && init.method === "PATCH") {
+        const headers = new Headers(init.headers);
+        const size = Number(headers.get("content-length"));
+        expect(Number(headers.get("upload-offset"))).toBe(confirmedOffset);
+        chunkSizes.push(size);
+        confirmedOffset += size;
+        return new Response(null, {
+          status: 204,
+          headers: { "upload-offset": String(confirmedOffset) },
+        });
+      }
+      expect(init.method).toBe("POST");
+      return Response.json({ status: "UPLOADING" });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const client = new AgentGraphQLClient(
+      "https://control.test",
+      "agent-credential",
+    );
+
+    await client.uploadBuildArtifactTransfer({
+      transferId: "transfer-1",
+      path,
+      filename: "AcmeApp.tar.gz",
+      contentType: "application/gzip",
+      checksum: "a".repeat(64),
+      signal: new AbortController().signal,
+    });
+
+    expect(confirmedOffset).toBe(uploadLength);
+    expect(chunkSizes).toHaveLength(7);
+    expect(Math.max(...chunkSizes)).toBe(16 * 1024 * 1024);
+    expect(chunkSizes.every((size) => size <= 16 * 1024 * 1024)).toBe(true);
+  });
+
+  test("resumes from the server offset after an upload response is lost", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "control-agent-transfer-"));
+    temporaryDirectories.push(directory);
+    const path = join(directory, "AcmeApp.tar.gz");
+    await writeFile(path, "data");
+    let confirmedOffset = 0;
+    let patchRequests = 0;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string, init: RequestInit = {}) => {
+        if (url.endsWith("/complete"))
+          return new Response(null, { status: 204 });
+        if (url.endsWith("/upload") && init.method === "HEAD") {
+          return new Response(null, {
+            status: 204,
+            headers: { "upload-offset": String(confirmedOffset) },
+          });
+        }
+        if (url.endsWith("/upload") && init.method === "PATCH") {
+          patchRequests += 1;
+          confirmedOffset = 4;
+          throw new Error("connection reset after upload");
+        }
+        return Response.json({ status: "UPLOADING" });
+      }),
+    );
+
+    await new AgentGraphQLClient(
+      "https://control.test",
+      "agent-credential",
+    ).uploadBuildArtifactTransfer({
+      transferId: "transfer-1",
+      path,
+      filename: "AcmeApp.tar.gz",
+      contentType: "application/gzip",
+      checksum: createHash("sha256").update("data").digest("hex"),
+      signal: new AbortController().signal,
+    });
+
+    expect(patchRequests).toBe(1);
+    expect(confirmedOffset).toBe(4);
+  });
+
+  test("retries failed artifact download ranges", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "control-agent-transfer-"));
+    temporaryDirectories.push(directory);
+    const path = join(directory, "AcmeApp.tar.gz");
+    let rangeRequests = 0;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string) => {
+        if (url.endsWith("/download")) {
+          rangeRequests += 1;
+          if (rangeRequests === 1)
+            return new Response("retry", { status: 503 });
+          return new Response("abc", { status: 206 });
+        }
+        return Response.json({
+          status: "READY",
+          uploadLength: 3,
+          checksum: createHash("sha256").update("abc").digest("hex"),
+          filename: "AcmeApp.tar.gz",
+          contentType: "application/gzip",
+          error: null,
+        });
+      }),
+    );
+
+    await expect(
+      new AgentGraphQLClient(
+        "https://control.test",
+        "agent-credential",
+      ).downloadBuildArtifactTransfer({
+        transferId: "transfer-1",
+        path,
+        signal: new AbortController().signal,
+      }),
+    ).resolves.toMatchObject({ filename: "AcmeApp.tar.gz" });
+    expect(rangeRequests).toBe(2);
   });
 
   test("applies headers to WebSocket upgrades with agent authorization taking precedence", () => {

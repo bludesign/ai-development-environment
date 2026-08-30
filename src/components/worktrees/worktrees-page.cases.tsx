@@ -569,10 +569,7 @@ export function registerWorktreesPageTests(
         expect(screen.getByText("Succeeded")).toBeDefined();
         expect(screen.getByText("Out of date")).toBeDefined();
         expect(screen.getByRole("button", { name: /1 devices/ })).toBeDefined();
-        expect(
-          (screen.getByRole("button", { name: "Run" }) as HTMLButtonElement)
-            .disabled,
-        ).toBe(false);
+        expect(screen.queryByRole("button", { name: "Run" })).toBeNull();
         expect(
           within(latestBuildRow).queryByRole("button", { name: "Rebuild" }),
         ).toBeNull();
@@ -1249,7 +1246,7 @@ export function registerWorktreesPageTests(
         expect(await screen.findAllByRole("option")).toHaveLength(2);
       });
 
-      test("toggles stacked commit and change tables from the commits badge", async () => {
+      test("toggles commits and expandable file changes from the commits badge", async () => {
         render(<WorktreesPage />);
         await screen.findByText("feature/AIDE-24");
         request.mockResolvedValueOnce({
@@ -1290,7 +1287,7 @@ export function registerWorktreesPageTests(
           await screen.findByRole("table", { name: "Commits (1)" }),
         ).toBeDefined();
         expect(
-          screen.getByRole("table", { name: "Changes (1)" }),
+          screen.getByRole("group", { name: "Changes (1)" }),
         ).toBeDefined();
         const detail = screen.getByTestId("worktree-detail");
         expect(detail.className).toContain("space-y-4");
@@ -1305,7 +1302,7 @@ export function registerWorktreesPageTests(
         expect(
           screen
             .getByTitle("src/components/worktrees/worktrees-page.tsx")
-            .closest("td")?.className,
+            .closest("button")?.className,
         ).toContain("py-1.5");
         expect(
           screen.getByText("Staged").closest('[data-slot="badge"]'),
@@ -1313,12 +1310,43 @@ export function registerWorktreesPageTests(
         expect(
           screen.getByText("Unstaged").closest('[data-slot="badge"]'),
         ).toBeNull();
-        const tables = screen.getAllByRole("table");
-        expect(
-          tables.indexOf(screen.getByRole("table", { name: "Changes (1)" })),
-        ).toBeLessThan(
-          tables.indexOf(screen.getByRole("table", { name: "Commits (1)" })),
-        );
+        const changeButton = screen.getByRole("button", {
+          name: /src\/components\/worktrees\/worktrees-page\.tsx/,
+        });
+        expect(changeButton.getAttribute("aria-expanded")).toBe("false");
+        request.mockImplementation(async (query) => {
+          if (query.includes("mutation InspectWorktreeDiff")) {
+            return {
+              inspectWorktreeDiff: {
+                files: [],
+                patch: "@@ -1 +1 @@\n-before\n+after",
+                image: false,
+                binary: false,
+                truncated: false,
+                beforeAvailable: true,
+                afterAvailable: true,
+              },
+            } as never;
+          }
+          return {} as never;
+        });
+        request.mockClear();
+        fireEvent.click(changeButton);
+        expect(changeButton.getAttribute("aria-expanded")).toBe("true");
+        await waitFor(() => {
+          for (const scope of ["STAGED", "UNSTAGED"]) {
+            expect(request).toHaveBeenCalledWith(
+              expect.stringContaining("mutation InspectWorktreeDiff"),
+              {
+                input: expect.objectContaining({
+                  worktreeId: "worktree-1",
+                  scope,
+                  path: "src/components/worktrees/worktrees-page.tsx",
+                }),
+              },
+            );
+          }
+        });
         expect(commitsBadge.getAttribute("aria-expanded")).toBe("true");
         fireEvent.click(commitsBadge);
         expect(screen.queryByRole("table", { name: "Commits (1)" })).toBeNull();

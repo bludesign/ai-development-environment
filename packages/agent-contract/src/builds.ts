@@ -6,6 +6,11 @@ export const IOS_BUILD_JOB_KIND = "ios.build.run";
 export const IOS_BUILD_DELETE_JOB_KIND = "ios.build.delete";
 export const IOS_ARTIFACT_DOWNLOAD_JOB_KIND = "ios.artifact.download";
 export const IOS_DEPLOY_JOB_KIND = "ios.build.deploy";
+export const IOS_AGENT_RUN_DESTINATIONS_JOB_KIND =
+  "ios.agentRunDestinations.inspect";
+export const IOS_ARTIFACT_TRANSFER_UPLOAD_JOB_KIND =
+  "ios.artifact.transfer.upload";
+export const IOS_REMOTE_DEPLOY_JOB_KIND = "ios.build.remoteDeploy";
 export const IOS_EXPORT_JOB_KIND = "ios.archive.export";
 export const IOS_TEST_RESULTS_JOB_KIND = "ios.test-results.parse";
 export const IOS_COVERAGE_REPORT_JOB_KIND = "ios.coverage.generate";
@@ -31,6 +36,9 @@ export const IOS_BUILD_JOB_KINDS = [
   IOS_BUILD_DELETE_JOB_KIND,
   IOS_ARTIFACT_DOWNLOAD_JOB_KIND,
   IOS_DEPLOY_JOB_KIND,
+  IOS_AGENT_RUN_DESTINATIONS_JOB_KIND,
+  IOS_ARTIFACT_TRANSFER_UPLOAD_JOB_KIND,
+  IOS_REMOTE_DEPLOY_JOB_KIND,
   IOS_EXPORT_JOB_KIND,
   IOS_TEST_RESULTS_JOB_KIND,
   IOS_COVERAGE_REPORT_JOB_KIND,
@@ -122,7 +130,36 @@ export type BuildDestination = {
   osVersion: string | null;
   state: string | null;
   generic?: boolean;
+  available?: boolean;
 };
+
+export function genericBuildDestinations(
+  action: BuildAction,
+): BuildDestination[] {
+  if (!GENERIC_BUILD_DESTINATION_ACTIONS.includes(action)) return [];
+  const physical: BuildDestination = {
+    type: "PHYSICAL_DEVICE",
+    id: "generic-ios",
+    name: "Any Physical iOS Device",
+    platform: "iOS",
+    osVersion: null,
+    state: null,
+    generic: true,
+  };
+  if (action === "ARCHIVE") return [physical];
+  return [
+    {
+      type: "SIMULATOR",
+      id: "generic-ios-simulator",
+      name: "Any iOS Simulator",
+      platform: "iOS Simulator",
+      osVersion: null,
+      state: null,
+      generic: true,
+    },
+    physical,
+  ];
+}
 
 export type BuildAdvancedSettings = {
   packageResolution:
@@ -218,6 +255,10 @@ export type BuildRunDestinationsPayload = BuildWorktreeIdentity & {
   destinationType: BuildDestinationType;
 };
 
+export type BuildAgentRunDestinationsPayload = {
+  destinationType: BuildDestinationType;
+};
+
 export type BuildJobPayload = BuildWorktreeIdentity & {
   buildId: string;
   artifactDirectory: string;
@@ -258,6 +299,20 @@ export type BuildDeletePayload = {
 export type BuildArtifactDownloadPayload = BuildDeletePayload & {
   artifactRelativePath: string;
   uploadId: string;
+};
+
+export type BuildArtifactTransferUploadPayload = {
+  transferId: string;
+  buildId: string;
+  artifactDirectory: string;
+  artifactRelativePath: string;
+};
+
+export type BuildRemoteDeploymentPayload = {
+  transferId: string;
+  buildId: string;
+  bundleIdentifier: string;
+  deployments: Array<{ id: string; destination: BuildDestination }>;
 };
 
 export type BuildExportSettings = {
@@ -411,6 +466,14 @@ export function parseBuildDestination(value: unknown): BuildDestination {
           generic: booleanValue(
             destination.generic,
             "build destination.generic",
+          ),
+        }),
+    ...(destination.available === undefined
+      ? {}
+      : {
+          available: booleanValue(
+            destination.available,
+            "build destination.available",
           ),
         }),
   };
@@ -815,10 +878,53 @@ export function parseBuildArtifactDownloadPayload(
   };
 }
 
-export function parseBuildDeploymentPayload(
+export function parseBuildArtifactTransferUploadPayload(
   value: unknown,
-): BuildDeploymentPayload {
-  const input = objectValue(value, "build deployment payload");
+): BuildArtifactTransferUploadPayload {
+  const input = objectValue(value, "build artifact transfer upload payload");
+  const buildId = stringValue(
+    input.buildId,
+    "build artifact transfer upload payload.buildId",
+  );
+  const artifactDirectory = safeAbsolutePath(
+    input.artifactDirectory,
+    "build artifact transfer upload payload.artifactDirectory",
+  );
+  if (artifactDirectory.split("/").at(-1) !== buildId) {
+    throw new Error(
+      "Build artifact transfer folder must end with the build ID",
+    );
+  }
+  return {
+    transferId: stringValue(
+      input.transferId,
+      "build artifact transfer upload payload.transferId",
+    ),
+    buildId,
+    artifactDirectory,
+    artifactRelativePath: safeRelativePath(
+      input.artifactRelativePath,
+      "build artifact transfer upload payload.artifactRelativePath",
+    ),
+  };
+}
+
+export function parseBuildAgentRunDestinationsPayload(
+  value: unknown,
+): BuildAgentRunDestinationsPayload {
+  const input = objectValue(value, "agent run destinations payload");
+  return {
+    destinationType: enumValue(
+      input.destinationType,
+      BUILD_DESTINATION_TYPES,
+      "agent run destinations payload.destinationType",
+    ),
+  };
+}
+
+function parseDeployments(
+  input: JsonObject,
+): Array<{ id: string; destination: BuildDestination }> {
   if (!Array.isArray(input.deployments) || !input.deployments.length) {
     throw new Error("build deployment payload.deployments must not be empty");
   }
@@ -846,6 +952,14 @@ export function parseBuildDeploymentPayload(
   ) {
     throw new Error("deployment destinations must use one destination type");
   }
+  return deployments;
+}
+
+export function parseBuildDeploymentPayload(
+  value: unknown,
+): BuildDeploymentPayload {
+  const input = objectValue(value, "build deployment payload");
+  const deployments = parseDeployments(input);
   return {
     ...worktreeIdentity(input),
     buildId: stringValue(input.buildId, "build deployment payload.buildId"),
@@ -862,6 +976,27 @@ export function parseBuildDeploymentPayload(
       "build deployment payload.bundleIdentifier",
     ),
     deployments,
+  };
+}
+
+export function parseBuildRemoteDeploymentPayload(
+  value: unknown,
+): BuildRemoteDeploymentPayload {
+  const input = objectValue(value, "remote build deployment payload");
+  return {
+    transferId: stringValue(
+      input.transferId,
+      "remote build deployment payload.transferId",
+    ),
+    buildId: stringValue(
+      input.buildId,
+      "remote build deployment payload.buildId",
+    ),
+    bundleIdentifier: stringValue(
+      input.bundleIdentifier,
+      "remote build deployment payload.bundleIdentifier",
+    ),
+    deployments: parseDeployments(input),
   };
 }
 

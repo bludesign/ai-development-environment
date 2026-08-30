@@ -96,7 +96,7 @@ import {
   type WorktreeItemProps,
 } from "./worktrees-page";
 
-const OVERVIEW_QUERY = `query WorktreeDetailOverview($worktreeId: ID!) {
+export const WORKTREE_DETAIL_OVERVIEW_QUERY = `query WorktreeDetailOverview($worktreeId: ID!, $buildFirst: Int = 50) {
   worktreeOverview {
     hiddenCount
     settings { editorVariant updatedAt }
@@ -127,7 +127,7 @@ const OVERVIEW_QUERY = `query WorktreeDetailOverview($worktreeId: ID!) {
       }
     }
   }
-  builds(first: 50, worktreeId: $worktreeId) {
+  builds(first: $buildFirst, worktreeId: $worktreeId) {
     items { ${BUILD_LIST_FIELDS} }
     nextCursor
   }
@@ -188,7 +188,7 @@ export function WorktreeDetailPage({ worktreeId }: { worktreeId: string }) {
         builds?: { items: BuildRecord[]; nextCursor: string | null };
         worktreeCoverageReports?: CoverageHistoryReport[];
         worktreeRunQueue?: WorktreeRunQueueEntry[];
-      }>(OVERVIEW_QUERY, { worktreeId });
+      }>(WORKTREE_DETAIL_OVERVIEW_QUERY, { worktreeId });
       if (requestId !== latestOverviewLoad.current) return;
       displayedCodebaseId.current =
         findWorktreeOverviewEntry(data.worktreeOverview, worktreeId)?.group
@@ -1010,7 +1010,7 @@ function WorktreeCoverageCard({
   );
 }
 
-function WorktreeBuildTable({
+export function WorktreeBuildTable({
   builds,
   loadingMore,
   nextCursor,

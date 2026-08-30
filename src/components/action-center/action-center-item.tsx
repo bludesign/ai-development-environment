@@ -7,6 +7,7 @@ import {
   GitBranch,
   Hammer,
   MessagesSquare,
+  X,
   Waypoints,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
@@ -85,8 +86,9 @@ export function ActionCenterItem({
 }) {
   const t = useTranslations("actionCenter");
   const runLabels = useRunLabels();
-  const { acknowledge, refresh, reportError } = useActionCenter();
+  const { acknowledge, dismiss, refresh, reportError } = useActionCenter();
   const [acknowledging, setAcknowledging] = useState(false);
+  const [dismissing, setDismissing] = useState(false);
   const Icon = KIND_ICONS[item.resourceKind];
   const kind = t(`kinds.${item.resourceKind}`);
   const title = itemTitle(item, kind);
@@ -120,6 +122,17 @@ export function ActionCenterItem({
     }
   };
 
+  const dismissItem = async () => {
+    setDismissing(true);
+    try {
+      await dismiss(item);
+    } catch {
+      // The provider exposes the error in both Action Center surfaces.
+    } finally {
+      setDismissing(false);
+    }
+  };
+
   const actions = (
     <div className="flex shrink-0 flex-wrap items-center gap-2">
       {item.buildRun && (
@@ -130,7 +143,7 @@ export function ActionCenterItem({
           onCompleted={refresh}
           onError={reportError}
           preferredDestination={item.buildRun.preferredDestination}
-          size="sm"
+          size={compact ? "xs" : "sm"}
         />
       )}
       {item.failureFingerprint && (
@@ -147,6 +160,20 @@ export function ActionCenterItem({
         >
           {acknowledging ? <Spinner /> : <CheckCheck />}
           {!compact && t("acknowledge")}
+        </Button>
+      )}
+      {item.dismissalFingerprint && (
+        <Button
+          aria-label={compact ? t("dismissNamed", { name: title }) : undefined}
+          disabled={dismissing}
+          onClick={() => void dismissItem()}
+          size={compact ? "icon-xs" : "sm"}
+          title={compact ? t("dismiss") : undefined}
+          type="button"
+          variant="outline"
+        >
+          {dismissing ? <Spinner /> : <X />}
+          {!compact && t("dismiss")}
         </Button>
       )}
     </div>

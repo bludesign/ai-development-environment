@@ -5,6 +5,7 @@ import {
   render,
   screen,
   waitFor,
+  within,
 } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 
@@ -547,9 +548,11 @@ describe("UsagePage", () => {
     fireEvent.click(
       await screen.findByRole("button", { name: "Clear history" }),
     );
-    expect(screen.getByText("Clear all usage history?")).toBeDefined();
-    const actions = screen.getAllByRole("button", { name: "Clear history" });
-    fireEvent.click(actions.at(-1)!);
+    const dialog = await screen.findByRole("alertdialog");
+    expect(within(dialog).getByText("Clear all usage history?")).toBeDefined();
+    fireEvent.click(
+      within(dialog).getByRole("button", { name: "Clear history" }),
+    );
 
     await waitFor(() =>
       expect(

@@ -405,6 +405,21 @@ export async function seedBuilds(prisma: PrismaClient): Promise<void> {
             sizeBytes: 512_000,
             createdAt: hoursAgo(3),
           },
+          {
+            id: "artifact-archive-runnable-app",
+            kind: "RUNNABLE_APP",
+            relativePath: "products/AcmeApp.app",
+            sizeBytes: 126_400_000,
+            metadataJson: JSON.stringify({
+              bundleIdentifier: "com.acme.mobile",
+              target: "AcmeApp",
+              destinationType: "PHYSICAL_DEVICE",
+              architectures: ["arm64"],
+              minimumOSVersion: "17.0",
+              sdkName: "iphoneos26.0",
+            }),
+            createdAt: hoursAgo(3),
+          },
         ],
       },
       reports: {

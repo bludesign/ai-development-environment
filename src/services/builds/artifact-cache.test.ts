@@ -15,6 +15,14 @@ const getServerServices = vi.fn();
 vi.mock("@/services/server-services", () => ({
   getServerServices: () => getServerServices(),
 }));
+const activeTransfers = vi.fn(
+  async () => [] as { stagingPath: string | null }[],
+);
+vi.mock("@/data/prisma-client", () => ({
+  getPrismaClient: async () => ({
+    buildArtifactTransfer: { findMany: activeTransfers },
+  }),
+}));
 
 const fsMocks = vi.hoisted(() => ({ rename: vi.fn() }));
 vi.mock("node:fs/promises", async (importOriginal) => {
@@ -100,6 +108,7 @@ beforeEach(async () => {
     metadata: {},
   };
   getServerServices.mockImplementation(services);
+  activeTransfers.mockClear();
   fsMocks.rename.mockClear();
   await rm(CACHE_DIRECTORY, { recursive: true, force: true });
 });
@@ -221,6 +230,25 @@ describe("materializeArtifact", () => {
       await materializeArtifact("build-1", "artifact-1");
 
       await expect(stat(first.path)).rejects.toThrow();
+    } finally {
+      delete process.env.ARTIFACT_CACHE_MAX_BYTES;
+    }
+  });
+
+  test("does not evict an artifact used by an active cross-agent transfer", async () => {
+    process.env.ARTIFACT_CACHE_MAX_BYTES = "12";
+    try {
+      vi.resetModules();
+      const { materializeArtifact } = await importCache();
+      const first = await materializeArtifact("build-1", "artifact-1");
+      activeTransfers.mockResolvedValue([{ stagingPath: first.path }]);
+
+      const old = new Date(Date.now() - 60_000);
+      await utimes(first.path, old, old);
+      artifactRow = { ...artifactRow, checksum: "checksum-2" };
+      await materializeArtifact("build-1", "artifact-1");
+
+      await expect(stat(first.path)).resolves.toMatchObject({ size: 9 });
     } finally {
       delete process.env.ARTIFACT_CACHE_MAX_BYTES;
     }

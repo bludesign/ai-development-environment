@@ -96,6 +96,7 @@ import { RUN_DETAIL_FIELDS, RUN_EVENT_FIELDS } from "./graphql-fields";
 import { ActivityRows } from "./activity-rows";
 import { AttachmentPicker } from "./attachment-picker";
 import { MarkdownActions, MarkdownView } from "./markdown-view";
+import { RunWorktreeCards } from "./run-worktree-cards";
 import {
   ModelEffortPicker,
   type ProviderCatalogEntry,
@@ -1636,6 +1637,8 @@ export function RunDetailPage({
           </div>
         </CardContent>
       </Card>
+
+      {run.worktreeId && <RunWorktreeCards worktreeId={run.worktreeId} />}
 
       {run.checkpoints.length > 0 && (
         <Card>

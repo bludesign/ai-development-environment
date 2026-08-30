@@ -1,10 +1,7 @@
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 
 import type { AgentConfig } from "./config.js";
-import {
-  assertLoopbackServer,
-  prepareDevelopmentAgent,
-} from "./dev-runtime.js";
+import { prepareDevelopmentAgent } from "./dev-runtime.js";
 import type { AgentInventory } from "./inventory.js";
 
 const inventory: AgentInventory = {
@@ -93,7 +90,7 @@ describe("development agent preparation", () => {
     );
     expect(config).toEqual(enrolledConfig);
     expect(logged).toHaveBeenCalledWith(
-      `Waiting for local control plane at ${enrolledConfig.server} ...`,
+      `Waiting for development control plane at ${enrolledConfig.server} ...`,
     );
     expect(logged).toHaveBeenCalledWith(
       `Enrolled development agent ${enrolledConfig.name} (${enrolledConfig.agentId})`,
@@ -181,22 +178,31 @@ describe("development agent preparation", () => {
     expect(anonymous.enroll).not.toHaveBeenCalled();
   });
 
-  test.each([
-    "http://localhost:3000",
-    "http://127.0.0.1:3000",
-    "http://127.42.1.9:3000",
-    "http://[::1]:3000",
-  ])("allows loopback server %s", (server) => {
-    expect(() => assertLoopbackServer(server)).not.toThrow();
-  });
+  test("allows enrollment from a non-loopback development server", async () => {
+    const anonymous = agentApi();
+    const save = vi.fn().mockResolvedValue(undefined);
+    const server = "https://control-plane.example.com";
 
-  test.each([
-    "https://control-plane.example.com",
-    "http://10.0.0.5:3000",
-    "http://192.168.1.20:3000",
-  ])("rejects non-loopback server %s", (server) => {
-    expect(() => assertLoopbackServer(server)).toThrow(
-      "Development auto-enrollment is restricted to loopback servers",
+    const config = await prepareDevelopmentAgent(
+      { server, enrollmentToken: "enroll-development" },
+      new AbortController().signal,
+      {
+        createClient: () => anonymous,
+        inventory: () => inventory,
+        load: vi.fn().mockRejectedValue(new Error("missing")),
+        save,
+        wait: vi.fn(),
+      },
+    );
+
+    expect(anonymous.enroll).toHaveBeenCalledOnce();
+    expect(config).toMatchObject({
+      server,
+      websocketServer: "wss://control-plane.example.com/graphql",
+    });
+    expect(save).toHaveBeenCalledWith(
+      expect.objectContaining({ server }),
+      expect.any(String),
     );
   });
 });

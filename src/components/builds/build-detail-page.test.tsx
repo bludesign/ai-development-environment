@@ -278,6 +278,25 @@ beforeEach(() => {
         ],
       } as never;
     }
+    if (operation.includes("query BuildRunAgents")) {
+      return {
+        buildRunAgents: [
+          {
+            agent: {
+              id: "agent-1",
+              name: "Build Mac",
+              hostname: "build.local",
+              osVersion: "macOS 26.0",
+              architecture: "arm64",
+              connectionStatus: "ONLINE",
+            },
+            isBuildAgent: true,
+            available: true,
+            unavailableReason: null,
+          },
+        ],
+      } as never;
+    }
     if (operation.includes("query BuildSigningOptions")) {
       return {
         buildSigningOptions: {
@@ -448,6 +467,12 @@ describe("BuildDetailPage", () => {
         { id: "build-1", requestId: expect.any(String) },
       ),
     );
+    expect(await screen.findByText("The rebuild was queued.")).toBeDefined();
+    expect(
+      screen
+        .getAllByRole("link", { name: "View build" })
+        .find((link) => link.getAttribute("href") === "/builds/build-rebuilt"),
+    ).toBeDefined();
 
     fireEvent.click(screen.getByRole("button", { name: "Delete build" }));
     const confirmation = await screen.findByRole("alertdialog");
@@ -460,6 +485,57 @@ describe("BuildDetailPage", () => {
         { ids: ["build-1"] },
       ),
     );
+  });
+
+  test("shows target-agent download progress independently from upload progress", async () => {
+    request.mockImplementation(async (query) => {
+      if (String(query).includes("query BuildDetail")) {
+        return {
+          build: {
+            ...build,
+            deployments: [
+              {
+                ...build.deployments[0],
+                status: "TRANSFERRING",
+                targetAgent: {
+                  id: "agent-target",
+                  name: "Studio Mac",
+                  hostname: "studio.local",
+                  osVersion: "macOS 26.0",
+                  architecture: "arm64",
+                  connectionStatus: "ONLINE",
+                },
+                transfer: {
+                  id: "transfer-1",
+                  status: "DOWNLOADING",
+                  uploadOffset: 100,
+                  uploadLength: 100,
+                  downloadOffset: 25,
+                  checksum: "a".repeat(64),
+                  error: null,
+                  createdAt: now,
+                  updatedAt: now,
+                  finishedAt: null,
+                },
+              },
+            ],
+          },
+        } as never;
+      }
+      if (String(query).includes("query BuildLogChunks")) {
+        return { buildLogChunks: [] } as never;
+      }
+      throw new Error(`Unexpected operation: ${String(query)}`);
+    });
+
+    render(<BuildDetailPage buildId="build-1" publicOrigin={null} />);
+
+    const card = (await screen.findByText("Runs and exports")).closest(
+      '[data-slot="card"]',
+    );
+    expect(card?.textContent).toContain("Running on Studio Mac");
+    expect(card?.textContent).toContain("Downloading");
+    expect(card?.textContent).toContain("25%");
   });
 
   test("loads build output beyond the former 5000-event limit", async () => {
@@ -857,7 +933,11 @@ describe("BuildDetailPage", () => {
     await waitFor(() =>
       expect(request).toHaveBeenCalledWith(
         expect.stringContaining("mutation BuildRunDestinations"),
-        { buildId: "build-1", requestId: expect.any(String) },
+        {
+          agentId: "agent-1",
+          buildId: "build-1",
+          requestId: expect.any(String),
+        },
       ),
     );
     if (destinationTrigger.getAttribute("aria-expanded") !== "true") {
@@ -869,10 +949,7 @@ describe("BuildDetailPage", () => {
     fireEvent.click(
       await screen.findByRole("menuitemcheckbox", { name: /iPad Pro/ }),
     );
-    fireEvent.keyDown(document.activeElement ?? document.body, {
-      key: "Escape",
-    });
-    fireEvent.click(screen.getByRole("button", { name: "Run" }));
+    fireEvent.click(screen.getByRole("button", { name: "Run Selected" }));
     await waitFor(() =>
       expect(request).toHaveBeenCalledWith(
         expect.stringContaining("mutation RunCompletedBuild"),
@@ -884,10 +961,14 @@ describe("BuildDetailPage", () => {
               expect.objectContaining({ id: "SIM-2" }),
             ],
             requestId: expect.any(String),
+            targetAgentId: "agent-1",
           },
         },
       ),
     );
+    fireEvent.keyDown(document.activeElement ?? document.body, {
+      key: "Escape",
+    });
 
     fireEvent.click(screen.getByRole("button", { name: "Export archive" }));
     const dialog = await screen.findByRole("dialog");
@@ -918,7 +999,11 @@ describe("BuildDetailPage", () => {
     );
     expect(request).toHaveBeenCalledWith(
       expect.stringContaining("mutation BuildRunDestinations"),
-      { buildId: "build-1", requestId: expect.any(String) },
+      {
+        agentId: "agent-1",
+        buildId: "build-1",
+        requestId: expect.any(String),
+      },
     );
   });
 });

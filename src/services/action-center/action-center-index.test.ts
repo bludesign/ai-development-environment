@@ -142,6 +142,15 @@ describe("Action Center index", () => {
     expect(result.rows.map(({ resourceId }) => resourceId)).toEqual([
       "newest-unrun",
     ]);
+
+    await prisma.$executeRawUnsafe(
+      `INSERT INTO ActionCenterAcknowledgement (
+        id, resourceKind, resourceId, failureFingerprint
+      ) VALUES ('dismiss-newest', 'BUILD', 'newest-unrun', 'BUILD:newest-unrun:UNRUN_BUILD')`,
+    );
+    await expect(
+      queryActionCenterIndex(prisma, { first: 10, cursor: null }),
+    ).resolves.toMatchObject({ rows: [], totalCount: 0 });
   });
 
   test("excludes builds whose worktree cannot run them", async () => {

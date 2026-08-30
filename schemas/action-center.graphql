@@ -124,6 +124,8 @@ type ActionCenterItem {
   buildRun: ActionCenterBuildRun
   "The failure fingerprint associated with this action center item. May be null when unavailable or not applicable."
   failureFingerprint: String
+  "The dismissal fingerprint associated with this action center item. May be null when the item cannot be dismissed."
+  dismissalFingerprint: String
 }
 
 "A paginated collection of action centers."
@@ -150,6 +152,16 @@ input AcknowledgeActionCenterItemInput {
   failureFingerprint: String!
 }
 
+"Values used to dismiss an action center item."
+input DismissActionCenterItemInput {
+  "The resource kind to use for the request."
+  resourceKind: ActionCenterResourceKind!
+  "Identifier of the resource to use."
+  resourceId: ID!
+  "The dismissal fingerprint to use for the request."
+  dismissalFingerprint: String!
+}
+
 extend type Query {
   "Returns an action center page."
   actionCenter(
@@ -165,6 +177,11 @@ extend type Mutation {
   acknowledgeActionCenterItem(
     "Values for the requested operation."
     input: AcknowledgeActionCenterItemInput!
+  ): Boolean!
+  "Dismisses an action center item and reports whether the operation succeeded."
+  dismissActionCenterItem(
+    "Values for the requested operation."
+    input: DismissActionCenterItemInput!
   ): Boolean!
 }
 

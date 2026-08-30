@@ -65,16 +65,6 @@ const defaultDependencies: DevelopmentAgentDependencies = {
     }),
 };
 
-export function assertLoopbackServer(server: string): void {
-  const hostname = new URL(server).hostname.toLowerCase();
-  const isIpv4Loopback = /^127(?:\.\d{1,3}){3}$/.test(hostname);
-  if (hostname !== "localhost" && hostname !== "[::1]" && !isIpv4Loopback) {
-    throw new Error(
-      `Development auto-enrollment is restricted to loopback servers; received ${hostname}`,
-    );
-  }
-}
-
 async function waitForServer(
   client: DevelopmentAgentApi,
   timeoutMs: number,
@@ -93,7 +83,9 @@ async function waitForServer(
     }
   }
   const detail = lastError instanceof Error ? `: ${lastError.message}` : "";
-  throw new Error(`Timed out waiting for the local control plane${detail}`);
+  throw new Error(
+    `Timed out waiting for the development control plane${detail}`,
+  );
 }
 
 export async function prepareDevelopmentAgent(
@@ -102,7 +94,6 @@ export async function prepareDevelopmentAgent(
   dependencies: DevelopmentAgentDependencies = defaultDependencies,
 ): Promise<AgentConfig> {
   const server = normalizeServer(options.server);
-  assertLoopbackServer(server);
   const websocketServer =
     options.websocketServer ?? defaultWebSocketServer(server);
   const configFile = options.configFile ?? developmentConfigPath();
@@ -110,7 +101,7 @@ export async function prepareDevelopmentAgent(
   const name = options.name ?? `${inventory.hostname}-dev`;
   const anonymousClient = dependencies.createClient(server);
 
-  console.log(`Waiting for local control plane at ${server} ...`);
+  console.log(`Waiting for development control plane at ${server} ...`);
   await waitForServer(
     anonymousClient,
     options.waitTimeoutMs ?? DEFAULT_SERVER_WAIT_MS,

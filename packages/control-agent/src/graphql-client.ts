@@ -1,5 +1,5 @@
 import { createReadStream } from "node:fs";
-import { rm, stat } from "node:fs/promises";
+import { open, rm, stat } from "node:fs/promises";
 import { createHash } from "node:crypto";
 import { Readable } from "node:stream";
 
@@ -118,6 +118,61 @@ export type AgentCadenceSettings = {
   gitFetchIntervalSeconds: number;
   heartbeatIntervalSeconds: number;
 };
+
+type PositionedWriter = {
+  write: (
+    buffer: Uint8Array,
+    offset: number,
+    length: number,
+    position: number,
+  ) => Promise<{ bytesWritten: number }>;
+};
+
+export async function writeArtifactTransferBytes(
+  writer: PositionedWriter,
+  bytes: Uint8Array,
+  position: number,
+): Promise<void> {
+  let written = 0;
+  while (written < bytes.byteLength) {
+    const remaining = bytes.byteLength - written;
+    const { bytesWritten } = await writer.write(
+      bytes,
+      written,
+      remaining,
+      position + written,
+    );
+    if (
+      !Number.isSafeInteger(bytesWritten) ||
+      bytesWritten <= 0 ||
+      bytesWritten > remaining
+    ) {
+      throw new Error("Artifact transfer file write made no progress");
+    }
+    written += bytesWritten;
+  }
+}
+
+async function artifactTransferRetryDelay(
+  attempt: number,
+  signal: AbortSignal,
+): Promise<void> {
+  await new Promise<void>((resolve, reject) => {
+    const timeout = setTimeout(
+      () => {
+        signal.removeEventListener("abort", abort);
+        resolve();
+      },
+      Math.min(4_000, 250 * 2 ** attempt),
+    );
+    const abort = () => {
+      clearTimeout(timeout);
+      reject(signal.reason ?? new Error("Artifact transfer was cancelled"));
+    };
+    if (signal.aborted) abort();
+    else signal.addEventListener("abort", abort, { once: true });
+  });
+}
 
 export type AgentCodebaseRegistration = {
   id: string;
@@ -496,6 +551,247 @@ export class AgentGraphQLClient {
         `Artifact upload failed: HTTP ${response.status} ${await response.text()}`,
       );
     }
+  }
+
+  private artifactTransferHeaders(
+    values: Record<string, string> = {},
+  ): Record<string, string> {
+    return mergeHeaders(this.headers, {
+      ...(this.credential
+        ? { authorization: `Bearer ${this.credential}` }
+        : {}),
+      ...values,
+    });
+  }
+
+  async uploadBuildArtifactTransfer(input: {
+    transferId: string;
+    path: string;
+    filename: string;
+    contentType: string;
+    checksum: string;
+    signal: AbortSignal;
+  }): Promise<void> {
+    const information = await stat(input.path);
+    const base = `${this.server}/api/agent/build-artifact-transfers/${encodeURIComponent(input.transferId)}`;
+    const metadata = await fetch(base, {
+      method: "POST",
+      headers: this.artifactTransferHeaders({
+        "content-type": "application/json",
+      }),
+      body: JSON.stringify({
+        uploadLength: information.size,
+        checksum: input.checksum,
+        filename: input.filename,
+        contentType: input.contentType,
+      }),
+      signal: input.signal,
+    });
+    if (!metadata.ok) {
+      throw new Error(
+        `Artifact transfer initialization failed: HTTP ${metadata.status} ${await metadata.text()}`,
+      );
+    }
+
+    const confirmedOffset = async (): Promise<number> => {
+      const response = await fetch(`${base}/upload`, {
+        method: "HEAD",
+        headers: this.artifactTransferHeaders(),
+        signal: input.signal,
+      });
+      if (!response.ok) {
+        throw new Error(
+          `Could not inspect artifact upload offset: HTTP ${response.status}`,
+        );
+      }
+      const offset = Number(response.headers.get("upload-offset"));
+      if (
+        !Number.isSafeInteger(offset) ||
+        offset < 0 ||
+        offset > information.size
+      ) {
+        throw new Error("Artifact relay returned an invalid upload offset");
+      }
+      return offset;
+    };
+
+    const handle = await open(input.path, "r");
+    try {
+      let offset = await confirmedOffset();
+      const buffer = Buffer.allocUnsafe(16 * 1024 * 1024);
+      while (offset < information.size) {
+        if (input.signal.aborted) throw input.signal.reason;
+        const length = Math.min(buffer.length, information.size - offset);
+        const { bytesRead } = await handle.read(buffer, 0, length, offset);
+        if (bytesRead !== length)
+          throw new Error("Artifact changed while uploading");
+        let attempt = 0;
+        while (true) {
+          let failure: Error;
+          try {
+            const response = await fetch(`${base}/upload`, {
+              method: "PATCH",
+              headers: this.artifactTransferHeaders({
+                "content-length": String(bytesRead),
+                "content-type": "application/offset+octet-stream",
+                "upload-offset": String(offset),
+              }),
+              body: buffer.subarray(0, bytesRead),
+              signal: input.signal,
+            });
+            if (response.ok) {
+              const nextOffset = Number(response.headers.get("upload-offset"));
+              if (
+                Number.isSafeInteger(nextOffset) &&
+                nextOffset > offset &&
+                nextOffset <= information.size
+              ) {
+                offset = nextOffset;
+                break;
+              }
+              failure = new Error(
+                "Artifact relay returned an invalid upload offset",
+              );
+            } else {
+              failure = new Error(
+                `Artifact chunk upload failed: HTTP ${response.status} ${await response.text()}`,
+              );
+            }
+          } catch (error) {
+            if (input.signal.aborted) throw error;
+            failure = error instanceof Error ? error : new Error(String(error));
+          }
+          if (++attempt >= 5) throw failure;
+          await artifactTransferRetryDelay(attempt, input.signal);
+          const resumedOffset = await confirmedOffset();
+          if (resumedOffset !== offset) {
+            offset = resumedOffset;
+            break;
+          }
+        }
+      }
+    } finally {
+      await handle.close();
+    }
+    const completion = await fetch(`${base}/complete`, {
+      method: "POST",
+      headers: this.artifactTransferHeaders(),
+      signal: input.signal,
+    });
+    if (!completion.ok) {
+      throw new Error(
+        `Artifact transfer completion failed: HTTP ${completion.status} ${await completion.text()}`,
+      );
+    }
+  }
+
+  async downloadBuildArtifactTransfer(input: {
+    transferId: string;
+    path: string;
+    signal: AbortSignal;
+  }): Promise<{ filename: string; contentType: string; checksum: string }> {
+    const base = `${this.server}/api/agent/build-artifact-transfers/${encodeURIComponent(input.transferId)}`;
+    let metadata: {
+      status: string;
+      uploadLength: number | null;
+      checksum: string | null;
+      filename: string | null;
+      contentType: string | null;
+      error: string | null;
+    };
+    while (true) {
+      const response = await fetch(base, {
+        headers: this.artifactTransferHeaders(),
+        signal: input.signal,
+      });
+      if (!response.ok) {
+        throw new Error(
+          `Could not inspect artifact transfer: HTTP ${response.status} ${await response.text()}`,
+        );
+      }
+      metadata = (await response.json()) as typeof metadata;
+      if (["READY", "DOWNLOADING", "SUCCEEDED"].includes(metadata.status))
+        break;
+      if (["FAILED", "CANCELLED", "EXPIRED"].includes(metadata.status)) {
+        throw new Error(
+          metadata.error ||
+            `Artifact transfer ${metadata.status.toLowerCase()}`,
+        );
+      }
+      await new Promise((resolve) => setTimeout(resolve, 1_000));
+    }
+    if (
+      !Number.isSafeInteger(metadata.uploadLength) ||
+      !metadata.uploadLength ||
+      !metadata.checksum ||
+      !metadata.filename
+    ) {
+      throw new Error("Artifact transfer metadata is incomplete");
+    }
+    let offset = 0;
+    try {
+      offset = (await stat(input.path)).size;
+    } catch {
+      // A new download starts at byte zero.
+    }
+    if (offset > metadata.uploadLength) {
+      await rm(input.path, { force: true });
+      offset = 0;
+    }
+    const handle = await open(input.path, offset === 0 ? "w" : "r+");
+    try {
+      while (offset < metadata.uploadLength) {
+        const end = Math.min(
+          metadata.uploadLength - 1,
+          offset + 16 * 1024 * 1024 - 1,
+        );
+        let bytes: Buffer | null = null;
+        let attempt = 0;
+        while (!bytes) {
+          let failure = new Error("Artifact range download failed");
+          try {
+            const response = await fetch(`${base}/download`, {
+              headers: this.artifactTransferHeaders({
+                range: `bytes=${offset}-${end}`,
+              }),
+              signal: input.signal,
+            });
+            if (response.status !== 206) {
+              failure = new Error(
+                `Artifact range download failed: HTTP ${response.status} ${await response.text()}`,
+              );
+            } else {
+              const received = Buffer.from(await response.arrayBuffer());
+              if (received.length === end - offset + 1) bytes = received;
+              else failure = new Error("Artifact range length did not match");
+            }
+          } catch (error) {
+            if (input.signal.aborted) throw error;
+            failure = error instanceof Error ? error : new Error(String(error));
+          }
+          if (bytes) break;
+          if (++attempt >= 5) throw failure;
+          await artifactTransferRetryDelay(attempt, input.signal);
+        }
+        await writeArtifactTransferBytes(handle, bytes, offset);
+        offset += bytes.length;
+      }
+      await handle.sync();
+    } finally {
+      await handle.close();
+    }
+    const digest = createHash("sha256");
+    for await (const chunk of createReadStream(input.path))
+      digest.update(chunk);
+    if (digest.digest("hex") !== metadata.checksum) {
+      await rm(input.path, { force: true });
+      throw new Error("Downloaded artifact checksum did not match");
+    }
+    return {
+      filename: metadata.filename,
+      contentType: metadata.contentType ?? "application/octet-stream",
+      checksum: metadata.checksum,
+    };
   }
 
   completeJob(

@@ -28,7 +28,10 @@ import {
   IOS_BUILD_DELETE_JOB_KIND,
   IOS_BUILD_JOB_KINDS,
   IOS_ARTIFACT_DOWNLOAD_JOB_KIND,
+  IOS_ARTIFACT_TRANSFER_UPLOAD_JOB_KIND,
+  IOS_AGENT_RUN_DESTINATIONS_JOB_KIND,
   IOS_DEPLOY_JOB_KIND,
+  IOS_REMOTE_DEPLOY_JOB_KIND,
   IOS_DESTINATIONS_JOB_KIND,
   IOS_EXPORT_JOB_KIND,
   IOS_SIGNING_INSPECT_JOB_KIND,
@@ -40,12 +43,15 @@ import {
   parseBuildDeploymentPayload,
   parseBuildDestinationsPayload,
   parseBuildArtifactDownloadPayload,
+  parseBuildArtifactTransferUploadPayload,
+  parseBuildAgentRunDestinationsPayload,
   parseBuildExportPayload,
   parseBuildSigningInspectPayload,
   parseBuildJobPayload,
   parseBuildReportPayload,
   parseBuildDeletePayload,
   parseBuildRunDestinationsPayload,
+  parseBuildRemoteDeploymentPayload,
   parseBuildSourceDiscoverPayload,
   parseBuildSourceParsePayload,
 } from "@ai-development-environment/agent-contract/builds";
@@ -428,6 +434,10 @@ export function validateJob(kind: string, payload: unknown): void {
     parseBuildRunDestinationsPayload(payload);
     return;
   }
+  if (kind === IOS_AGENT_RUN_DESTINATIONS_JOB_KIND) {
+    parseBuildAgentRunDestinationsPayload(payload);
+    return;
+  }
   if (kind === IOS_BUILD_JOB_KIND) {
     parseBuildJobPayload(payload);
     return;
@@ -440,8 +450,16 @@ export function validateJob(kind: string, payload: unknown): void {
     parseBuildArtifactDownloadPayload(payload);
     return;
   }
+  if (kind === IOS_ARTIFACT_TRANSFER_UPLOAD_JOB_KIND) {
+    parseBuildArtifactTransferUploadPayload(payload);
+    return;
+  }
   if (kind === IOS_DEPLOY_JOB_KIND) {
     parseBuildDeploymentPayload(payload);
+    return;
+  }
+  if (kind === IOS_REMOTE_DEPLOY_JOB_KIND) {
+    parseBuildRemoteDeploymentPayload(payload);
     return;
   }
   if (kind === IOS_EXPORT_JOB_KIND) {

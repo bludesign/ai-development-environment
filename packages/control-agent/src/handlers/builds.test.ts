@@ -28,6 +28,7 @@ import type { ProcessResult } from "../process-runner.js";
 
 import {
   classifyFailure,
+  createRemoteBuildStagingDirectory,
   createRedactor,
   dependentSigningTargetNamesFromPbxProject,
   deleteIosBuild,
@@ -88,6 +89,28 @@ afterEach(async () => {
 });
 
 describe("iOS build command construction", () => {
+  test("canonicalizes remote build staging beneath a symlinked temporary directory", async () => {
+    const realTemporaryRoot = await mkdtemp(
+      join(tmpdir(), "remote-build-staging-real-"),
+    );
+    temporaryDirectories.push(realTemporaryRoot);
+    const temporaryAlias = `${realTemporaryRoot}-alias`;
+    await symlink(realTemporaryRoot, temporaryAlias, "dir");
+    temporaryDirectories.push(temporaryAlias);
+    const originalTemporaryDirectory = process.env.TMPDIR;
+    try {
+      process.env.TMPDIR = temporaryAlias;
+      const staging = await createRemoteBuildStagingDirectory("build-1");
+      expect(staging.startsWith(`${await realpath(realTemporaryRoot)}/`)).toBe(
+        true,
+      );
+      expect(staging).toBe(await realpath(staging));
+    } finally {
+      if (originalTemporaryDirectory === undefined) delete process.env.TMPDIR;
+      else process.env.TMPDIR = originalTemporaryDirectory;
+    }
+  });
+
   test("maps every supported action without overriding Derived Data", () => {
     const actions = {
       BUILD: "build",
@@ -404,6 +427,32 @@ describe("iOS destination and error parsing", () => {
         type: "SIMULATOR",
         id: "SIM-1",
         osVersion: "26.0",
+        available: true,
+      }),
+    ]);
+    expect(
+      simulatorDestinations(
+        {
+          devices: {
+            "com.apple.CoreSimulator.SimRuntime.iOS-26-0": [
+              {
+                udid: "SIM-1",
+                name: "iPhone 17 Pro",
+                state: "Shutdown",
+                isAvailable: true,
+              },
+              { udid: "OLD", name: "Unavailable", isAvailable: false },
+            ],
+          },
+        },
+        true,
+      ),
+    ).toEqual([
+      expect.objectContaining({ id: "SIM-1", available: true }),
+      expect.objectContaining({
+        id: "OLD",
+        available: false,
+        state: "Unavailable",
       }),
     ]);
     expect(
@@ -431,8 +480,29 @@ describe("iOS destination and error parsing", () => {
         type: "PHYSICAL_DEVICE",
         id: "DEVICE-1",
         name: "Test iPhone",
+        available: true,
       }),
     ]);
+    expect(
+      physicalDestinations(
+        {
+          result: {
+            devices: [
+              {
+                identifier: "OFFLINE-1",
+                hardwareProperties: { platform: "iOS" },
+                deviceProperties: {
+                  name: "Offline iPhone",
+                  osVersionNumber: "26.0",
+                },
+                connectionProperties: { tunnelState: "disconnected" },
+              },
+            ],
+          },
+        },
+        true,
+      ),
+    ).toEqual([expect.objectContaining({ id: "OFFLINE-1", available: false })]);
   });
 
   test("opens the selected simulator UI without using a shell command", () => {
@@ -698,6 +768,78 @@ esac
       ),
     ).resolves.toMatchObject({ exitCode: 0 });
     expect(uploaded).toBe("build output");
+  });
+
+  test("fails queue-time preflight before running pre-build hooks", async () => {
+    const root = await mkdtemp(join(tmpdir(), "ios-build-preflight-"));
+    temporaryDirectories.push(root);
+    const repository = join(root, "repository");
+    const bin = join(root, "bin");
+    const artifactDirectory = join(root, "build-preflight");
+    await mkdir(join(repository, "App.xcworkspace"), { recursive: true });
+    await mkdir(bin);
+    await execute("git", ["init", "-b", "main", repository]);
+    await execute("git", [
+      "-C",
+      repository,
+      "remote",
+      "add",
+      "origin",
+      "https://github.com/example/app.git",
+    ]);
+    const gitDirectory = await realpath(join(repository, ".git"));
+    const xcrun = join(bin, "xcrun");
+    await writeFile(
+      xcrun,
+      '#!/bin/sh\nprintf "scheme App is not currently configured" >&2\nexit 1\n',
+    );
+    await chmod(xcrun, 0o755);
+    const originalPath = process.env.PATH;
+    process.env.PATH = `${bin}:${originalPath ?? ""}`;
+    const hookMarker = join(repository, "pre-build-ran");
+    try {
+      const result = (await runIosBuild(
+        payload({
+          folder: repository,
+          gitDirectory,
+          expectedOrigin: normalizeGitOrigin(
+            "https://github.com/example/app.git",
+          ).canonicalOrigin,
+          buildId: "build-preflight",
+          artifactDirectory,
+          scripts: [
+            {
+              id: "pre-build",
+              name: "Pre-build",
+              preBuildScript: `import { writeFile } from "node:fs/promises";
+export default async function hook() { await writeFile(${JSON.stringify(hookMarker)}, "ran"); }`,
+              postBuildScript: null,
+              timeoutSeconds: 10,
+              failureBehavior: "FAIL_BUILD",
+              position: 0,
+            },
+          ],
+        }),
+        30_000,
+        new AbortController().signal,
+        async () => undefined,
+      )) as unknown as {
+        exitCode: number | null;
+        errorCode: string | null;
+        reports: unknown[];
+        scriptExecutions: unknown[];
+      };
+
+      expect(result).toMatchObject({
+        exitCode: 1,
+        errorCode: "MISSING_SCHEME",
+        reports: [],
+        scriptExecutions: [],
+      });
+      expect(existsSync(hookMarker)).toBe(false);
+    } finally {
+      process.env.PATH = originalPath;
+    }
   });
 
   test("runs hooks in deterministic order, redacts output, and finalizes the raw log artifact", async () => {

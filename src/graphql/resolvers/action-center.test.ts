@@ -16,10 +16,15 @@ function context(agentId: string | null): GraphQLContext {
 }
 
 describe("Action Center resolvers", () => {
-  test("delegates control-plane queries and acknowledgements", async () => {
+  test("delegates control-plane queries, acknowledgements, and dismissals", async () => {
     const list = vi.fn().mockResolvedValue({ items: [], totalCount: 0 });
     const acknowledge = vi.fn().mockResolvedValue(true);
-    const service = { list, acknowledge } as unknown as ActionCenterService;
+    const dismiss = vi.fn().mockResolvedValue(true);
+    const service = {
+      list,
+      acknowledge,
+      dismiss,
+    } as unknown as ActionCenterService;
     const resolvers = createActionCenterResolvers(service);
 
     await expect(
@@ -44,12 +49,31 @@ describe("Action Center resolvers", () => {
       resourceId: "build-1",
       failureFingerprint: "fingerprint",
     });
+    await expect(
+      resolvers.Mutation.dismissActionCenterItem(
+        {},
+        {
+          input: {
+            resourceKind: "BUILD",
+            resourceId: "build-2",
+            dismissalFingerprint: "dismissal",
+          },
+        },
+        context(null),
+      ),
+    ).resolves.toBe(true);
+    expect(dismiss).toHaveBeenCalledWith({
+      resourceKind: "BUILD",
+      resourceId: "build-2",
+      dismissalFingerprint: "dismissal",
+    });
   });
 
   test("rejects agent credentials", async () => {
     const service = {
       list: vi.fn(),
       acknowledge: vi.fn(),
+      dismiss: vi.fn(),
     } as unknown as ActionCenterService;
     const resolvers = createActionCenterResolvers(service);
 

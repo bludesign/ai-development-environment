@@ -25,6 +25,7 @@ vi.mock("@/lib/control-plane-client", () => ({
 
 const request = vi.mocked(controlPlaneRequest);
 const subscriptions = vi.mocked(controlPlaneSubscriptions);
+let dismissedUnrun = false;
 
 const question = {
   key: "PLAN:plan-1",
@@ -79,6 +80,7 @@ const question = {
   ],
   buildRun: null,
   failureFingerprint: null,
+  dismissalFingerprint: null,
 };
 
 const workflowQuestion = {
@@ -144,23 +146,63 @@ const active = {
   questionBatches: [],
 };
 
+const unrun = {
+  ...question,
+  key: "BUILD:build-unrun",
+  resourceKind: "BUILD",
+  reason: "UNRUN_BUILD",
+  resourceId: "build-unrun",
+  href: "/builds/build-unrun",
+  displayNumber: null,
+  label: "Debug runnable build",
+  status: "SUCCEEDED",
+  phase: null,
+  questionBatches: [],
+  buildRun: {
+    buildId: "build-unrun",
+    destinationType: "SIMULATOR",
+    preferredDestination: {
+      type: "SIMULATOR",
+      id: "SIM-1",
+      name: "iPhone 17 Pro",
+      platform: "iOS",
+      osVersion: "27.0",
+      state: "Booted",
+    },
+  },
+  dismissalFingerprint: "BUILD:build-unrun:UNRUN_BUILD",
+};
+
 const page = {
-  items: [question, workflowQuestion, failed, active],
+  items: [question, workflowQuestion, failed, unrun, active],
   nextCursor: null,
-  totalCount: 4,
-  needsAttentionCount: 3,
+  totalCount: 5,
+  needsAttentionCount: 4,
   activeCount: 1,
 };
 
 beforeEach(() => {
   vi.clearAllMocks();
+  dismissedUnrun = false;
   subscriptions.mockReturnValue({
     subscribe: vi.fn(() => vi.fn()),
   } as never);
   request.mockImplementation(async (query) => {
     const operation = String(query);
-    if (operation.includes("query ActionCenter"))
-      return { actionCenter: page } as never;
+    if (operation.includes("query ActionCenter")) {
+      return {
+        actionCenter: dismissedUnrun
+          ? {
+              ...page,
+              items: page.items.filter(
+                ({ resourceId }) => resourceId !== "build-unrun",
+              ),
+              totalCount: page.totalCount - 1,
+              needsAttentionCount: page.needsAttentionCount - 1,
+            }
+          : page,
+      } as never;
+    }
     if (operation.includes("AnswerActionCenterRunQuestion")) {
       return {
         answerRunQuestion: { id: "plan-1", status: "IN_PROGRESS" },
@@ -173,6 +215,10 @@ beforeEach(() => {
     }
     if (operation.includes("AcknowledgeActionCenterItem")) {
       return { acknowledgeActionCenterItem: true } as never;
+    }
+    if (operation.includes("DismissActionCenterItem")) {
+      dismissedUnrun = true;
+      return { dismissActionCenterItem: true } as never;
     }
     throw new Error(`Unexpected operation: ${operation}`);
   });
@@ -311,6 +357,27 @@ describe("ActionCenterPage", () => {
       ),
     );
   });
+
+  test("optimistically dismisses an unrun build", async () => {
+    renderPage();
+    fireEvent.click(await screen.findByRole("button", { name: "Dismiss" }));
+
+    await waitFor(() =>
+      expect(request).toHaveBeenCalledWith(
+        expect.stringContaining("DismissActionCenterItem"),
+        {
+          input: {
+            resourceKind: "BUILD",
+            resourceId: "build-unrun",
+            dismissalFingerprint: "BUILD:build-unrun:UNRUN_BUILD",
+          },
+        },
+      ),
+    );
+    expect(
+      screen.queryByRole("link", { name: "Debug runnable build" }),
+    ).toBeNull();
+  });
 });
 
 describe("MiniActionCenter", () => {
@@ -345,6 +412,14 @@ describe("MiniActionCenter", () => {
         .getByRole("button", { name: "Acknowledge Debug" })
         .getAttribute("data-size"),
     ).toBe("icon-xs");
+    expect(
+      screen
+        .getByRole("button", { name: "Dismiss Debug runnable build" })
+        .getAttribute("data-size"),
+    ).toBe("icon-xs");
+    expect(
+      screen.getByRole("button", { name: "Run" }).getAttribute("data-size"),
+    ).toBe("xs");
   });
 
   test("shows initial query errors instead of the empty state", async () => {
