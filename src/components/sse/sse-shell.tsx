@@ -40,13 +40,19 @@ export function SsePageShell({
   const pathname = usePathname();
   return (
     <section className="mx-auto flex w-full max-w-[1600px] flex-col gap-6">
-      <div className="flex flex-wrap items-start justify-between gap-4">
-        <div>
-          <div className="flex items-center gap-2">
-            <h1 className="text-2xl font-semibold tracking-tight">{title}</h1>
-            {badge ? <Badge variant="secondary">{badge}</Badge> : null}
+      <div className="flex min-w-0 flex-col items-start gap-4 sm:flex-row sm:justify-between">
+        <div className="min-w-0 flex-1">
+          <div className="flex min-w-0 flex-wrap items-center gap-2">
+            <h1 className="min-w-0 text-2xl font-semibold tracking-tight [overflow-wrap:anywhere]">
+              {title}
+            </h1>
+            {badge ? (
+              <Badge className="shrink-0" variant="secondary">
+                {badge}
+              </Badge>
+            ) : null}
           </div>
-          <p className="mt-1 max-w-4xl text-sm text-muted-foreground">
+          <p className="mt-1 max-w-4xl text-sm text-muted-foreground [overflow-wrap:anywhere]">
             {description}
           </p>
         </div>

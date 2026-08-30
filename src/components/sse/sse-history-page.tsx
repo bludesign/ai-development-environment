@@ -11,32 +11,22 @@ import {
   Printer,
   Search,
   Trash2,
-  X,
 } from "lucide-react";
 import { useSearchParams } from "next/navigation";
 import { useCallback, useEffect, useMemo, useState } from "react";
 
+import { DateTime } from "@/components/common/date-time";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { DateTime } from "@/components/common/date-time";
 import {
   Card,
-  CardAction,
   CardContent,
   CardDescription,
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
 import { Checkbox } from "@/components/ui/checkbox";
-import {
-  Dialog,
-  DialogClose,
-  DialogContent,
-  DialogDescription,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -68,14 +58,12 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
+import { useRouter } from "@/i18n/navigation";
 import { controlPlaneRequest } from "@/lib/control-plane-client";
 import { formatEnumLabel } from "@/lib/enum-label";
 
-import {
-  SSE_HISTORY_DETAIL_QUERY,
-  SSE_HISTORY_EXPORT_QUERY,
-  SSE_HISTORY_QUERY,
-} from "./graphql";
+import { SSE_HISTORY_EXPORT_QUERY, SSE_HISTORY_QUERY } from "./graphql";
+import { SseHistoryEventsTable } from "./sse-history-events-table";
 import { ModeBadge, SsePageShell } from "./sse-shell";
 import type {
   SseEndpoint,
@@ -207,6 +195,7 @@ function csvCell(value: unknown) {
 
 export function SseHistoryPage() {
   const params = useSearchParams();
+  const router = useRouter();
   const [view, setView] = useState<SseHistoryView>("EVENTS");
   const [endpointId, setEndpointId] = useState(
     params.get("endpointId") ?? "all",
@@ -220,7 +209,6 @@ export function SseHistoryPage() {
   const [caseSensitive, setCaseSensitive] = useState(false);
   const [data, setData] = useState<HistoryPageData | null>(null);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
-  const [detail, setDetail] = useState<SseHistoryRequest | null>(null);
   const [columns, setColumns] = useState<string[]>(EVENT_COLUMNS);
   const [presetName, setPresetName] = useState("");
   const [filterName, setFilterName] = useState("");
@@ -284,17 +272,6 @@ export function SseHistoryPage() {
     setView(next);
     setColumns(next === "STREAMS" ? STREAM_COLUMNS : EVENT_COLUMNS);
     setSelectedIds(new Set());
-  }
-
-  async function openDetail(requestId: string) {
-    try {
-      const response = await controlPlaneRequest<{
-        sseHistoryRequest: SseHistoryRequest | null;
-      }>(SSE_HISTORY_DETAIL_QUERY, { id: requestId });
-      setDetail(response.sseHistoryRequest);
-    } catch (failure) {
-      setError(failure instanceof Error ? failure.message : String(failure));
-    }
   }
 
   async function clearSelected() {
@@ -798,50 +775,18 @@ export function SseHistoryPage() {
               rows={data?.sseHistory.streams ?? []}
               selected={selectedIds}
               setSelected={setSelectedIds}
-              openDetail={openDetail}
+              openStream={(id) => router.push(`/sse/history/${id}`)}
             />
           ) : (
-            <EventsTable
+            <SseHistoryEventsTable
               columns={columns}
               rows={data?.sseHistory.events ?? []}
               selected={selectedIds}
               setSelected={setSelectedIds}
-              openDetail={openDetail}
             />
           )}
         </CardContent>
       </Card>
-      <Dialog
-        onOpenChange={(open) => !open && setDetail(null)}
-        open={Boolean(detail)}
-      >
-        <DialogContent
-          className="top-2 h-[calc(100dvh-1rem)] max-h-[calc(100dvh-1rem)] w-[calc(100vw-1rem)] max-w-[1440px] -translate-y-0 gap-0 overflow-y-auto p-0 sm:top-1/2 sm:h-auto sm:max-h-[90dvh] sm:w-[calc(100vw-2rem)] sm:max-w-[1440px] sm:-translate-y-1/2"
-          showCloseButton={false}
-        >
-          <DialogHeader className="sticky top-0 z-10 min-w-0 border-b bg-popover p-4 pr-3">
-            <div className="flex w-full min-w-0 items-start justify-between gap-3">
-              <div className="min-w-0 flex-1 space-y-2">
-                <DialogTitle>{detail?.endpointName} stream</DialogTitle>
-                <DialogDescription className="max-w-full [overflow-wrap:anywhere]">
-                  {detail?.method} {detail?.requestUrl}
-                </DialogDescription>
-              </div>
-              <DialogClose asChild>
-                <Button
-                  aria-label="Close stream details"
-                  className="shrink-0"
-                  size="icon-sm"
-                  variant="ghost"
-                >
-                  <X />
-                </Button>
-              </DialogClose>
-            </div>
-          </DialogHeader>
-          {detail ? <HistoryDetail request={detail} /> : null}
-        </DialogContent>
-      </Dialog>
     </SsePageShell>
   );
 }
@@ -881,13 +826,13 @@ function StreamsTable({
   columns,
   selected,
   setSelected,
-  openDetail,
+  openStream,
 }: {
   rows: SseHistoryRequest[];
   columns: string[];
   selected: Set<string>;
   setSelected: React.Dispatch<React.SetStateAction<Set<string>>>;
-  openDetail: (id: string) => Promise<void>;
+  openStream: (id: string) => void;
 }) {
   return (
     <Table>
@@ -914,9 +859,18 @@ function StreamsTable({
       <TableBody>
         {rows.map((row) => (
           <TableRow
-            className="cursor-pointer"
+            aria-label={`View ${row.endpointName} stream`}
+            className="cursor-pointer focus-visible:bg-muted/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset"
             key={row.id}
-            onClick={() => void openDetail(row.id)}
+            onClick={() => openStream(row.id)}
+            onKeyDown={(event) => {
+              if (event.key === "Enter" || event.key === " ") {
+                event.preventDefault();
+                openStream(row.id);
+              }
+            }}
+            role="link"
+            tabIndex={0}
           >
             <TableCell onClick={(event) => event.stopPropagation()}>
               <Selection
@@ -973,106 +927,6 @@ function streamCell(row: SseHistoryRequest, column: string) {
   }
 }
 
-function EventsTable({
-  rows,
-  columns,
-  selected,
-  setSelected,
-  openDetail,
-}: {
-  rows: SseHistoryEvent[];
-  columns: string[];
-  selected: Set<string>;
-  setSelected: React.Dispatch<React.SetStateAction<Set<string>>>;
-  openDetail: (id: string) => Promise<void>;
-}) {
-  return (
-    <Table>
-      <TableHeader>
-        <TableRow>
-          <TableHead>
-            <Selection
-              checked={
-                rows.length > 0 && rows.every((row) => selected.has(row.id))
-              }
-              label="Select all events"
-              onCheckedChange={(checked) =>
-                setSelected(
-                  checked ? new Set(rows.map((row) => row.id)) : new Set(),
-                )
-              }
-            />
-          </TableHead>
-          {columns.map((column) => (
-            <TableHead key={column}>{columnLabel(column)}</TableHead>
-          ))}
-        </TableRow>
-      </TableHeader>
-      <TableBody>
-        {rows.map((row) => (
-          <TableRow
-            className="cursor-pointer"
-            key={row.id}
-            onClick={() => void openDetail(row.requestId)}
-          >
-            <TableCell onClick={(event) => event.stopPropagation()}>
-              <Selection
-                checked={selected.has(row.id)}
-                label={`Select ${row.eventName}`}
-                onCheckedChange={(checked) =>
-                  setRow(setSelected, row.id, checked)
-                }
-              />
-            </TableCell>
-            {columns.map((column) => (
-              <TableCell key={column}>{eventCell(row, column)}</TableCell>
-            ))}
-          </TableRow>
-        ))}
-      </TableBody>
-    </Table>
-  );
-}
-function eventCell(row: SseHistoryEvent, column: string) {
-  switch (column) {
-    case "endpoint":
-      return row.request?.endpointName ?? "Deleted endpoint";
-    case "createdAt":
-      return <DateTime value={row.createdAt} />;
-    case "eventName":
-      return <code>{row.eventName}</code>;
-    case "stage":
-      return (
-        <Badge
-          variant={
-            row.stage === "DROPPED"
-              ? "destructive"
-              : row.stage === "EMITTED"
-                ? "success"
-                : "outline"
-          }
-        >
-          {formatEnumLabel(row.stage)}
-          {row.split ? " · split" : ""}
-        </Badge>
-      );
-    case "eventId":
-      return row.eventId ?? "—";
-    case "data":
-      return (
-        <code className="line-clamp-2 max-w-2xl whitespace-pre-wrap text-xs">
-          {row.data}
-        </code>
-      );
-    case "sequence":
-      return `${row.sequence}.${row.logicalIndex}`;
-    case "mode":
-      return row.request ? <ModeBadge mode={row.request.mode} /> : "—";
-    default:
-      return "—";
-  }
-}
-
 function HeaderList({
   title,
   headers,
@@ -1115,69 +969,32 @@ function DetailValue({
   );
 }
 
-function EventRecord({ event }: { event: SseHistoryEvent }) {
-  return (
-    <Card size="sm">
-      <CardHeader>
-        <CardTitle>
-          <code className="break-all">{event.eventName}</code>
-        </CardTitle>
-        <CardDescription className="flex flex-wrap items-center gap-x-2 gap-y-1">
-          <span>
-            Sequence {event.sequence}.{event.logicalIndex}
-          </span>
-          <span aria-hidden="true">·</span>
-          <DateTime value={event.createdAt} />
-        </CardDescription>
-        <CardAction>
-          <Badge
-            variant={
-              event.stage === "DROPPED"
-                ? "destructive"
-                : event.stage === "EMITTED"
-                  ? "success"
-                  : "outline"
-            }
-          >
-            {formatEnumLabel(event.stage)}
-          </Badge>
-        </CardAction>
-      </CardHeader>
-      <CardContent className="space-y-3">
-        <dl className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-          <DetailValue label="Event ID">
-            <code className="break-all">{event.eventId ?? "—"}</code>
-          </DetailValue>
-          <DetailValue label="Retry">
-            {event.retryMs === null ? "—" : `${event.retryMs} ms`}
-          </DetailValue>
-          <DetailValue label="Correlation ID">
-            <code className="break-all">{event.correlationId}</code>
-          </DetailValue>
-          <DetailValue label="Transformation">
-            <span className="flex flex-wrap gap-1">
-              {event.split ? <Badge variant="outline">Split</Badge> : null}
-              {event.fanOutIndex !== null ? (
-                <Badge variant="outline">Fan-out {event.fanOutIndex + 1}</Badge>
-              ) : null}
-              {event.truncated ? (
-                <Badge variant="destructive">Truncated</Badge>
-              ) : null}
-              {!event.split && event.fanOutIndex === null && !event.truncated
-                ? "None"
-                : null}
-            </span>
-          </DetailValue>
-        </dl>
-        <pre className="overflow-x-auto whitespace-pre-wrap break-words rounded-lg border bg-muted/30 p-3 text-xs">
-          {event.data}
-        </pre>
-      </CardContent>
-    </Card>
-  );
-}
+export function SseStreamHistoryDetails({
+  request,
+}: {
+  request: SseHistoryRequest;
+}) {
+  const [eventSearch, setEventSearch] = useState("");
+  const [eventStage, setEventStage] = useState<SseHistoryStage | "all">("all");
+  const [eventNameFilter, setEventNameFilter] = useState("all");
+  const events = request.events ?? [];
+  const eventNames = [
+    ...new Set(events.map((event) => event.eventName)),
+  ].sort();
+  const filteredEvents = events.filter((event) => {
+    if (eventStage !== "all" && event.stage !== eventStage) return false;
+    if (eventNameFilter !== "all" && event.eventName !== eventNameFilter) {
+      return false;
+    }
+    if (!eventSearch.trim()) return true;
+    const term = eventSearch.toLocaleLowerCase();
+    return (
+      event.eventName.toLocaleLowerCase().includes(term) ||
+      event.data.toLocaleLowerCase().includes(term) ||
+      (event.eventId ?? "").toLocaleLowerCase().includes(term)
+    );
+  });
 
-function HistoryDetail({ request }: { request: SseHistoryRequest }) {
   return (
     <div className="min-w-0 space-y-6 p-4 sm:p-6">
       <div className="flex flex-wrap gap-2">
@@ -1280,31 +1097,90 @@ function HistoryDetail({ request }: { request: SseHistoryRequest }) {
       </section>
       <section className="space-y-3">
         <div>
-          <h3 className="text-sm font-medium">
-            Source and emitted event records
-          </h3>
+          <h3 className="text-sm font-medium">Event Stream</h3>
           <p className="mt-1 text-sm text-muted-foreground">
-            All retained records are listed below. Scroll the stream details to
-            review the complete sequence.
+            Filter the retained source, emitted, and dropped records, then
+            expand any row to inspect the complete event.
           </p>
         </div>
-        <div className="space-y-3">
-          {request.events ? (
-            request.events.length ? (
-              request.events.map((event) => (
-                <EventRecord event={event} key={event.id} />
-              ))
+        <Card size="sm">
+          <CardContent className="grid gap-3 pt-4 sm:grid-cols-2 xl:grid-cols-[minmax(16rem,1fr)_12rem_14rem]">
+            <div className="relative sm:col-span-2 xl:col-span-1">
+              <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
+              <Input
+                aria-label="Search stream events"
+                className="pl-9"
+                onChange={(event) => setEventSearch(event.target.value)}
+                placeholder="Search event name, data, or ID"
+                type="search"
+                value={eventSearch}
+              />
+            </div>
+            <Select
+              onValueChange={(value) =>
+                setEventStage(value as SseHistoryStage | "all")
+              }
+              value={eventStage}
+            >
+              <SelectTrigger aria-label="Filter stream events by stage">
+                <SelectValue placeholder="All Stages" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All Stages</SelectItem>
+                <SelectItem value="SOURCE">Source</SelectItem>
+                <SelectItem value="EMITTED">Emitted</SelectItem>
+                <SelectItem value="DROPPED">Dropped</SelectItem>
+              </SelectContent>
+            </Select>
+            <Select onValueChange={setEventNameFilter} value={eventNameFilter}>
+              <SelectTrigger aria-label="Filter stream events by name">
+                <SelectValue placeholder="All Event Names" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All Event Names</SelectItem>
+                {eventNames.map((name) => (
+                  <SelectItem key={name} value={name}>
+                    {name}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </CardContent>
+        </Card>
+        <Card size="sm">
+          <CardHeader>
+            <CardTitle>Events</CardTitle>
+            <CardDescription>
+              {filteredEvents.length} of {events.length} retained records
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="overflow-x-auto p-0">
+            {request.events ? (
+              filteredEvents.length ? (
+                <SseHistoryEventsTable
+                  columns={[
+                    "createdAt",
+                    "eventName",
+                    "stage",
+                    "eventId",
+                    "data",
+                    "sequence",
+                  ]}
+                  rows={filteredEvents}
+                  stream={request}
+                />
+              ) : (
+                <p className="p-10 text-center text-sm text-muted-foreground">
+                  No retained event records match these filters.
+                </p>
+              )
             ) : (
-              <p className="rounded-lg border border-dashed p-6 text-center text-sm text-muted-foreground">
-                No retained event records.
+              <p className="flex items-center gap-2 p-4 text-muted-foreground">
+                <Spinner /> Loading event records…
               </p>
-            )
-          ) : (
-            <p className="flex items-center gap-2 text-muted-foreground">
-              <Spinner /> Loading event records…
-            </p>
-          )}
-        </div>
+            )}
+          </CardContent>
+        </Card>
       </section>
       <details className="rounded-lg border p-4">
         <summary className="cursor-pointer text-sm font-medium">

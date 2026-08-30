@@ -315,6 +315,12 @@ export const routes: RouteEntry[] = [
     readyGraphqlOperation: "SseHistoryPage",
     readyTexts: ["Product recommendation stream"],
   },
+  {
+    name: "sse-stream-history",
+    path: `/sse/history/${ids.sse.history}`,
+    readyGraphqlOperation: "SseHistoryDetail",
+    readyTexts: ["Product recommendation Stream", "display_card"],
+  },
 
   // Usage & costs
   {
