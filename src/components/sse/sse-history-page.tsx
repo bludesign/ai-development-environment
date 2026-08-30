@@ -14,11 +14,11 @@ import {
   ListFilter,
   Paintbrush,
   Plus,
-  Printer,
   Search,
   Trash2,
   X,
 } from "lucide-react";
+import { useLocale } from "next-intl";
 import { useSearchParams } from "next/navigation";
 import { Fragment, useCallback, useEffect, useMemo, useState } from "react";
 
@@ -74,7 +74,7 @@ import { useRouter } from "@/i18n/navigation";
 import { controlPlaneRequest } from "@/lib/control-plane-client";
 import { formatEnumLabel } from "@/lib/enum-label";
 
-import { SSE_HISTORY_EXPORT_QUERY, SSE_HISTORY_QUERY } from "./graphql";
+import { SSE_HISTORY_QUERY } from "./graphql";
 import {
   SseHistoryEventsTable,
   STREAM_EVENT_COLUMNS,
@@ -131,13 +131,6 @@ type HistoryPageData = {
     name: string;
     definition: Record<string, unknown>;
   }>;
-};
-
-type HistoryExportData = {
-  sseHistory: Pick<
-    HistoryPageData["sseHistory"],
-    "view" | "nextCursor" | "streams" | "events"
-  >;
 };
 
 type HistoryColumnPreset = HistoryPageData["sseHistoryColumnPresets"][number];
@@ -202,22 +195,10 @@ function normalizeColumns(columns: string[], view: SseHistoryView) {
   ];
 }
 
-function download(name: string, content: string, type: string) {
-  const url = URL.createObjectURL(new Blob([content], { type }));
-  const anchor = document.createElement("a");
-  anchor.href = url;
-  anchor.download = name;
-  anchor.click();
-  URL.revokeObjectURL(url);
-}
-
-function csvCell(value: unknown) {
-  return `"${String(value ?? "").replaceAll('"', '""')}"`;
-}
-
 export function SseHistoryPage() {
   const params = useSearchParams();
   const router = useRouter();
+  const locale = useLocale();
   const [view, setView] = useState<SseHistoryView>("EVENTS");
   const [endpointId, setEndpointId] = useState(
     params.get("endpointId") ?? "all",
@@ -237,6 +218,7 @@ export function SseHistoryPage() {
   const [loadingMore, setLoadingMore] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [columnsOpen, setColumnsOpen] = useState(false);
+  const [exportOpen, setExportOpen] = useState(false);
   const [editMode, setEditMode] = useState(false);
   const [timeFormat, setTimeFormat] = useState("TWELVE_HOUR");
 
@@ -471,87 +453,6 @@ export function SseHistoryPage() {
     }
   }
 
-  async function exportRows(format: "csv" | "markdown") {
-    try {
-      const matchingRows: Array<SseHistoryRequest | SseHistoryEvent> = [];
-      let after: string | null = null;
-      do {
-        const response: HistoryExportData =
-          await controlPlaneRequest<HistoryExportData>(
-            SSE_HISTORY_EXPORT_QUERY,
-            {
-              input: { ...variables, first: 500, after },
-            },
-          );
-        matchingRows.push(
-          ...(response.sseHistory.view === "STREAMS"
-            ? response.sseHistory.streams
-            : response.sseHistory.events),
-        );
-        after = response.sseHistory.nextCursor;
-      } while (after);
-
-      const exported = matchingRows.map((row) =>
-        view === "STREAMS"
-          ? {
-              endpoint: (row as SseHistoryRequest).endpointName,
-              startedAt: (row as SseHistoryRequest).startedAt,
-              method: (row as SseHistoryRequest).method,
-              mode: (row as SseHistoryRequest).mode,
-              status:
-                (row as SseHistoryRequest).outcome ??
-                (row as SseHistoryRequest).status,
-              responseStatus: (row as SseHistoryRequest).responseStatus,
-              events: (row as SseHistoryRequest).eventCount,
-              durationMs: (row as SseHistoryRequest).durationMs,
-            }
-          : {
-              endpoint: (row as SseHistoryEvent).request?.endpointName,
-              createdAt: (row as SseHistoryEvent).createdAt,
-              eventName: (row as SseHistoryEvent).eventName,
-              stage: (row as SseHistoryEvent).stage,
-              eventId: (row as SseHistoryEvent).eventId,
-              data: (row as SseHistoryEvent).data,
-            },
-      );
-      const keys = Object.keys(exported[0] ?? {});
-      if (format === "csv")
-        download(
-          "sse-history.csv",
-          [
-            keys.map(csvCell).join(","),
-            ...exported.map((item) =>
-              keys
-                .map((key) => csvCell((item as Record<string, unknown>)[key]))
-                .join(","),
-            ),
-          ].join("\n"),
-          "text/csv",
-        );
-      else
-        download(
-          "sse-history.md",
-          [
-            `| ${keys.join(" | ")} |`,
-            `| ${keys.map(() => "---").join(" | ")} |`,
-            ...exported.map(
-              (item) =>
-                `| ${keys
-                  .map((key) =>
-                    String((item as Record<string, unknown>)[key] ?? "")
-                      .replaceAll("|", "\\|")
-                      .replaceAll("\n", "<br>"),
-                  )
-                  .join(" | ")} |`,
-            ),
-          ].join("\n"),
-          "text/markdown",
-        );
-    } catch (failure) {
-      setError(failure instanceof Error ? failure.message : String(failure));
-    }
-  }
-
   const allColumns = view === "STREAMS" ? STREAM_COLUMNS : EVENT_COLUMNS;
   const hour12 = !["24", "TWENTY_FOUR_HOUR"].includes(timeFormat);
   return (
@@ -771,24 +672,9 @@ export function SseHistoryPage() {
               <Trash2 /> Delete {selectedIds.size}
             </Button>
           ) : null}
-          <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <Button variant="outline">
-                <Download /> Export <ChevronDown />
-              </Button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="end">
-              <DropdownMenuItem onClick={() => void exportRows("csv")}>
-                CSV
-              </DropdownMenuItem>
-              <DropdownMenuItem onClick={() => void exportRows("markdown")}>
-                Markdown
-              </DropdownMenuItem>
-              <DropdownMenuItem onClick={() => window.print()}>
-                <Printer /> Print / Save PDF
-              </DropdownMenuItem>
-            </DropdownMenuContent>
-          </DropdownMenu>
+          <Button onClick={() => setExportOpen(true)} variant="outline">
+            <Download /> Export
+          </Button>
         </div>
       </div>
       <Card className="gap-0 overflow-hidden py-0">
@@ -835,24 +721,45 @@ export function SseHistoryPage() {
         </Button>
       ) : null}
       {data ? (
-        <SseHistoryColumnsDialog
-          activePresetId={data.sseHistoryViewSettings.activeColumnPresetId}
-          allColumns={allColumns}
-          columns={columns}
-          key={`columns:${columnsOpen}:${view}:${columns.join("|")}`}
-          onChanged={() => void load()}
-          onError={setError}
-          onOpenChange={setColumnsOpen}
-          onSave={(nextColumns, activeColumnPresetId) =>
-            saveViewSettings({
-              columns: nextColumns,
-              activeColumnPresetId,
-            })
-          }
-          open={columnsOpen}
-          presets={data.sseHistoryColumnPresets}
-          view={view}
-        />
+        <>
+          <SseHistoryColumnsDialog
+            activePresetId={data.sseHistoryViewSettings.activeColumnPresetId}
+            allColumns={allColumns}
+            columns={columns}
+            key={`columns:${columnsOpen}:${view}:${columns.join("|")}`}
+            onChanged={() => void load()}
+            onError={setError}
+            onOpenChange={setColumnsOpen}
+            onSave={(nextColumns, activeColumnPresetId) =>
+              saveViewSettings({
+                columns: nextColumns,
+                activeColumnPresetId,
+              })
+            }
+            open={columnsOpen}
+            presets={data.sseHistoryColumnPresets}
+            view={view}
+          />
+          <SseHistoryExportDialog
+            allColumns={allColumns}
+            columns={columns}
+            endpointName={
+              endpointId === "all"
+                ? null
+                : (data.sseEndpoints.find((item) => item.id === endpointId)
+                    ?.name ?? null)
+            }
+            key={`export:${exportOpen}:${view}:${columns.join("|")}:${[...selectedIds].join("|")}`}
+            locale={locale}
+            hour12={hour12}
+            onOpenChange={setExportOpen}
+            open={exportOpen}
+            query={variables}
+            selectedIds={[...selectedIds]}
+            totalCount={data.sseHistory.matchingCount}
+            view={view}
+          />
+        </>
       ) : null}
     </SsePageShell>
   );
@@ -1347,6 +1254,170 @@ function SseHistoryColumnsDialog({
             }}
           >
             Apply Columns
+          </Button>
+          <Button onClick={() => onOpenChange(false)} variant="outline">
+            Cancel
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+function SseHistoryExportDialog({
+  open,
+  onOpenChange,
+  view,
+  query,
+  columns,
+  allColumns,
+  selectedIds,
+  totalCount,
+  endpointName,
+  locale,
+  hour12,
+}: {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  view: SseHistoryView;
+  query: Record<string, unknown>;
+  columns: string[];
+  allColumns: string[];
+  selectedIds: string[];
+  totalCount: number;
+  endpointName: string | null;
+  locale: string;
+  hour12: boolean;
+}) {
+  const [format, setFormat] = useState("CSV");
+  const [fields, setFields] = useState(columns);
+  const [busy, setBusy] = useState(false);
+  const [exportError, setExportError] = useState<string | null>(null);
+  const available = [...new Set([...columns, ...allColumns])];
+
+  async function run() {
+    setBusy(true);
+    setExportError(null);
+    try {
+      const response = await fetch("/api/sse/history/export", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          format,
+          query,
+          ids: selectedIds.length ? selectedIds : null,
+          fields,
+          locale,
+          timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+          timeFormat: hour12 ? "12" : "24",
+          filterSummary: JSON.stringify({
+            endpoint: endpointName,
+            modes: query.modes ?? [],
+            statuses: query.statuses ?? [],
+            eventNames: query.eventNames ?? [],
+            stages: query.stages ?? [],
+            search: query.search ?? null,
+            searchMode: query.searchMode ?? "TEXT",
+            caseSensitive: query.caseSensitive === true,
+          }),
+        }),
+      });
+      if (!response.ok) {
+        const body = (await response.json()) as {
+          error?: { message?: string };
+        };
+        throw new Error(body.error?.message || `HTTP ${response.status}`);
+      }
+      const blob = await response.blob();
+      const disposition = response.headers.get("content-disposition") ?? "";
+      const filename =
+        disposition.match(/filename="([^"]+)"/)?.[1] ??
+        `sse-${view.toLocaleLowerCase()}.${format === "MARKDOWN" ? "md" : format.toLocaleLowerCase()}`;
+      const url = URL.createObjectURL(blob);
+      const anchor = document.createElement("a");
+      anchor.href = url;
+      anchor.download = filename;
+      anchor.click();
+      URL.revokeObjectURL(url);
+      onOpenChange(false);
+    } catch {
+      setExportError("The SSE history export could not be generated.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <Dialog
+      onOpenChange={(nextOpen) => {
+        if (!nextOpen) setExportError(null);
+        onOpenChange(nextOpen);
+      }}
+      open={open}
+    >
+      <DialogContent className="sm:max-w-xl">
+        <DialogHeader>
+          <DialogTitle>
+            Export SSE {view === "EVENTS" ? "Events" : "Streams"}
+          </DialogTitle>
+          <DialogDescription>
+            {selectedIds.length
+              ? `Export the ${selectedIds.length} selected ${view === "EVENTS" ? "events" : "streams"}.`
+              : `Export all ${totalCount} matching ${view === "EVENTS" ? "events" : "streams"}.`}{" "}
+            Choose a format and the fields to include.
+          </DialogDescription>
+        </DialogHeader>
+        <div className="space-y-4">
+          {exportError ? (
+            <Alert variant="destructive">
+              <AlertDescription>{exportError}</AlertDescription>
+            </Alert>
+          ) : null}
+          <div className="space-y-2">
+            <label className="text-sm font-medium" htmlFor="sse-export-format">
+              Format
+            </label>
+            <Select onValueChange={setFormat} value={format}>
+              <SelectTrigger id="sse-export-format">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="CSV">CSV</SelectItem>
+                <SelectItem value="MARKDOWN">Markdown</SelectItem>
+                <SelectItem value="PDF">PDF</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+          <div className="space-y-2">
+            <p className="text-sm font-medium">Export Fields</p>
+            <div className="grid max-h-64 gap-2 overflow-y-auto rounded-lg border p-3 sm:grid-cols-2">
+              {available.map((field) => (
+                <label
+                  className="flex min-w-0 items-center gap-2 text-xs"
+                  key={field}
+                >
+                  <Checkbox
+                    checked={fields.includes(field)}
+                    onCheckedChange={(checked) =>
+                      setFields((current) =>
+                        checked
+                          ? [...current, field]
+                          : current.filter((item) => item !== field),
+                      )
+                    }
+                  />
+                  <span className="truncate">{columnLabel(field)}</span>
+                </label>
+              ))}
+            </div>
+          </div>
+        </div>
+        <DialogFooter>
+          <Button
+            disabled={busy || fields.length === 0}
+            onClick={() => void run()}
+          >
+            {busy ? <Spinner /> : <Download />} Export
           </Button>
           <Button onClick={() => onOpenChange(false)} variant="outline">
             Cancel

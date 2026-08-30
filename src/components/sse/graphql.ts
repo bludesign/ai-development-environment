@@ -77,14 +77,3 @@ export const SSE_HISTORY_DETAIL_QUERY = `query SseHistoryDetail($id: ID!) {
     events { ${SSE_HISTORY_EVENT_FIELDS} }
   }
 }`;
-
-export const SSE_HISTORY_EXPORT_QUERY = `query SseHistoryExport($input: SseHistoryQueryInput!) {
-  sseHistory(input: $input) {
-    view nextCursor
-    streams { ${SSE_HISTORY_REQUEST_FIELDS} }
-    events {
-      ${SSE_HISTORY_EVENT_FIELDS}
-      request { ${SSE_HISTORY_REQUEST_FIELDS} }
-    }
-  }
-}`;
