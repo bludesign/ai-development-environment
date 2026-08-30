@@ -19,6 +19,11 @@ import { Link } from "@/i18n/navigation";
 import { formatEnumLabel } from "@/lib/enum-label";
 
 import { ModeBadge } from "./sse-shell";
+import {
+  SseHistoryColumnHead,
+  SseHistoryDayRow,
+  sseHistoryDayKey,
+} from "./sse-history-table-parts";
 import type { SseHistoryEvent, SseHistoryRequest } from "./types";
 
 export const STREAM_EVENT_COLUMNS = [
@@ -75,12 +80,18 @@ function stageBadge(event: SseHistoryEvent) {
   );
 }
 
-function eventCell(event: SseHistoryEvent, column: string) {
+function eventCell(event: SseHistoryEvent, column: string, hour12: boolean) {
   switch (column) {
     case "endpoint":
       return event.request?.endpointName ?? "Deleted endpoint";
     case "createdAt":
-      return <DateTime value={event.createdAt} />;
+      return (
+        <DateTime
+          hour12={hour12}
+          kind="time"
+          value={event.createdAt}
+        />
+      );
     case "eventName":
       return <code>{event.eventName}</code>;
     case "stage":
@@ -141,9 +152,11 @@ function transformationBadges(event: SseHistoryEvent) {
 export function SseHistoryEventDetails({
   event,
   stream,
+  hour12 = true,
 }: {
   event: SseHistoryEvent;
   stream?: SseHistoryRequest;
+  hour12?: boolean;
 }) {
   const request = event.request ?? stream;
   return (
@@ -154,7 +167,7 @@ export function SseHistoryEventDetails({
         </DetailValue>
         <DetailValue label="Stage">{stageBadge(event)}</DetailValue>
         <DetailValue label="Create At">
-          <DateTime value={event.createdAt} />
+          <DateTime hour12={hour12} value={event.createdAt} />
         </DetailValue>
         <DetailValue label="Sequence">
           {event.sequence}.{event.logicalIndex}
@@ -209,16 +222,28 @@ export function SseHistoryEventsTable({
   selected,
   setSelected,
   stream,
+  editMode = false,
+  hour12 = true,
+  onRemoveColumn,
 }: {
   rows: SseHistoryEvent[];
   columns: readonly string[];
   selected?: Set<string>;
   setSelected?: React.Dispatch<React.SetStateAction<Set<string>>>;
   stream?: SseHistoryRequest;
+  editMode?: boolean;
+  hour12?: boolean;
+  onRemoveColumn?: (column: string) => void;
 }) {
   const [expandedIds, setExpandedIds] = useState<Set<string>>(new Set());
   const selectable = selected !== undefined && setSelected !== undefined;
   const selectedRows = selected ?? new Set<string>();
+  const showSelection = selectable && editMode;
+  const idsByDay = new Map<string, string[]>();
+  for (const row of rows) {
+    const day = sseHistoryDayKey(row.createdAt);
+    idsByDay.set(day, [...(idsByDay.get(day) ?? []), row.id]);
+  }
 
   function toggleExpanded(id: string) {
     setExpandedIds((current) => {
@@ -232,9 +257,9 @@ export function SseHistoryEventsTable({
   return (
     <Table>
       <TableHeader>
-        <TableRow>
-          <TableHead className="w-20">
-            {selectable ? (
+        <TableRow className="hover:bg-transparent">
+          <TableHead className="h-8 w-20 px-2">
+            {showSelection ? (
               <Checkbox
                 aria-label="Select all events"
                 checked={
@@ -254,16 +279,58 @@ export function SseHistoryEventsTable({
             )}
           </TableHead>
           {columns.map((column) => (
-            <TableHead key={column}>{sseEventColumnLabel(column)}</TableHead>
+            <SseHistoryColumnHead
+              key={column}
+              label={sseEventColumnLabel(column)}
+              onRemove={
+                onRemoveColumn ? () => onRemoveColumn(column) : undefined
+              }
+              removable={columns.length > 1}
+            />
           ))}
         </TableRow>
       </TableHeader>
       <TableBody>
-        {rows.map((row) => {
+        {rows.map((row, index) => {
           const expanded = expandedIds.has(row.id);
           const stage = formatEnumLabel(row.stage);
+          const day = sseHistoryDayKey(row.createdAt);
+          const dayIds = idsByDay.get(day) ?? [];
+          const selectedDayCount = dayIds.filter((id) =>
+            selectedRows.has(id),
+          ).length;
+          const showDay =
+            index === 0 || sseHistoryDayKey(rows[index - 1]!.createdAt) !== day;
           return (
             <Fragment key={row.id}>
+              {showDay ? (
+                <SseHistoryDayRow
+                  checked={
+                    showSelection
+                      ? selectedDayCount === dayIds.length
+                        ? true
+                        : selectedDayCount
+                          ? "indeterminate"
+                          : false
+                      : undefined
+                  }
+                  colSpan={columns.length + 1}
+                  onCheckedChange={
+                    showSelection
+                      ? (checked) =>
+                          setSelected?.((current) => {
+                            const next = new Set(current);
+                            for (const id of dayIds) {
+                              if (checked) next.add(id);
+                              else next.delete(id);
+                            }
+                            return next;
+                          })
+                      : undefined
+                  }
+                  value={row.createdAt}
+                />
+              ) : null}
               <TableRow
                 aria-expanded={expanded}
                 aria-label={`${row.eventName} ${stage} event`}
@@ -278,9 +345,13 @@ export function SseHistoryEventsTable({
                 role="button"
                 tabIndex={0}
               >
-                <TableCell onClick={(event) => event.stopPropagation()}>
+                <TableCell
+                  className="px-2 py-1.5"
+                  onClick={(event) => event.stopPropagation()}
+                  onKeyDown={(event) => event.stopPropagation()}
+                >
                   <div className="flex items-center gap-1">
-                    {selectable ? (
+                    {showSelection ? (
                       <Checkbox
                         aria-label={`Select ${row.eventName}`}
                         checked={selectedRows.has(row.id)}
@@ -314,13 +385,19 @@ export function SseHistoryEventsTable({
                   </div>
                 </TableCell>
                 {columns.map((column) => (
-                  <TableCell key={column}>{eventCell(row, column)}</TableCell>
+                  <TableCell className="px-2 py-1.5" key={column}>
+                    {eventCell(row, column, hour12)}
+                  </TableCell>
                 ))}
               </TableRow>
               {expanded ? (
                 <TableRow className="hover:bg-transparent">
                   <TableCell className="p-0" colSpan={columns.length + 1}>
-                    <SseHistoryEventDetails event={row} stream={stream} />
+                    <SseHistoryEventDetails
+                      event={row}
+                      hour12={hour12}
+                      stream={stream}
+                    />
                   </TableCell>
                 </TableRow>
               ) : null}

@@ -71,16 +71,31 @@ const eventRecord: SseHistoryEvent = {
   request: stream,
 };
 
+const previousEvent: SseHistoryEvent = {
+  ...eventRecord,
+  id: "event-previous",
+  correlationId: "correlation-event-previous",
+  eventName: "loading",
+  createdAt: "2026-08-29T12:00:00.100Z",
+};
+
 afterEach(cleanup);
 
 describe("SseHistoryEventsTable", () => {
   test("expands an event row inline without opening its stream", () => {
+    const removeColumn = vi.fn();
     render(
       <SseHistoryEventsTable
         columns={["createdAt", "eventName", "stage", "data"]}
-        rows={[eventRecord]}
+        onRemoveColumn={removeColumn}
+        rows={[eventRecord, previousEvent]}
       />,
     );
+
+    expect(screen.getByText("Sunday, August 30, 2026")).toBeDefined();
+    expect(screen.getByText("Saturday, August 29, 2026")).toBeDefined();
+    fireEvent.click(screen.getByRole("button", { name: "Remove Data column" }));
+    expect(removeColumn).toHaveBeenCalledWith("data");
 
     const row = screen.getByRole("button", {
       name: "display_card Source event",
