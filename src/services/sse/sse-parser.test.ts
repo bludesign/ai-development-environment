@@ -91,4 +91,31 @@ describe("SseParser", () => {
       ),
     ).toBe("event:message\nid:42\nretry:500\ndata:a\ndata:b\n\n");
   });
+
+  test("preserves control-only frames without dispatching empty messages", () => {
+    const parser = new SseParser();
+    const events = parser.push("retry:5000\n\nid:42\n\n");
+
+    expect(events).toEqual([
+      {
+        event: null,
+        data: "",
+        dataLines: [],
+        id: undefined,
+        retry: 5000,
+        dispatch: false,
+      },
+      {
+        event: null,
+        data: "",
+        dataLines: [],
+        id: "42",
+        retry: null,
+        dispatch: false,
+      },
+    ]);
+    expect(
+      events.map((event) => new TextDecoder().decode(encodeSseEvent(event))),
+    ).toEqual(["retry:5000\n\n", "id:42\n\n"]);
+  });
 });

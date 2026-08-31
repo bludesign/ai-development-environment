@@ -28,7 +28,28 @@ export type SseEvent = {
   id?: string | null;
   retry?: number | null;
   dataLines?: string[];
+  /** False for SSE control frames that must not dispatch a client message. */
+  dispatch?: boolean;
 };
+
+const SSE_NULL_BODY_STATUSES = new Set([204, 205, 304]);
+
+export function validateSseStreamingStatus(
+  value: number,
+  label = "SSE response status",
+): number {
+  if (
+    !Number.isInteger(value) ||
+    value < 200 ||
+    value > 599 ||
+    SSE_NULL_BODY_STATUSES.has(value)
+  ) {
+    throw new Error(
+      `${label} must be an HTTP status between 200 and 599 that permits a response body`,
+    );
+  }
+  return value;
+}
 
 export type SseSplitDirective = {
   target: "DELIVERY" | "HISTORY" | "BOTH" | "delivery" | "history" | "both";

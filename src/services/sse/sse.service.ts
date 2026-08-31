@@ -4,6 +4,7 @@ import { randomBytes, randomUUID } from "node:crypto";
 
 import type { Prisma } from "@/generated/prisma/client";
 import { getPrismaClient } from "@/data/prisma-client";
+import { compileRe2, RE2_PATTERN_MAX_LENGTH } from "@/lib/re2.server";
 import {
   SSE_BREAKPOINTS_CHANGED_TOPIC,
   SSE_ENDPOINTS_CHANGED_TOPIC,
@@ -35,6 +36,7 @@ import {
   type SseHistoryQueryInput,
   type SseMockCompositionInput,
   type SseResolvedComposition,
+  validateSseStreamingStatus,
 } from "./types";
 
 const MAX_NAME_LENGTH = 120;
@@ -42,6 +44,10 @@ const MAX_DESCRIPTION_LENGTH = 2_000;
 const MAX_STORAGE_KEY_LENGTH = 256;
 const MAX_STORAGE_VALUE_BYTES = 2 * 1024 * 1024;
 const MAINTENANCE_INTERVAL_MS = 60 * 60 * 1_000;
+const MAX_HISTORY_SEARCH_ROWS = 10_000;
+const MAX_HISTORY_SEARCH_BYTES = 64 * 1024 * 1024;
+const HISTORY_SEARCH_BATCH_SIZE = 100;
+const MAX_HISTORY_TEXT_SEARCH_LENGTH = 10_000;
 
 function cleanName(value: string, label = "Name"): string {
   const name = value.trim();
@@ -121,6 +127,49 @@ function oneOf<T extends string>(
   const resolved = (value ?? fallback) as T;
   if (!values.includes(resolved)) throw new Error(`${label} is not supported`);
   return resolved;
+}
+
+function historySearchMatcher(
+  input: SseHistoryQueryInput,
+): (value: string) => boolean {
+  const search = input.search ?? "";
+  if (search.length > MAX_HISTORY_TEXT_SEARCH_LENGTH) {
+    throw new Error(
+      `SSE history search must not exceed ${MAX_HISTORY_TEXT_SEARCH_LENGTH.toLocaleString()} characters`,
+    );
+  }
+  const mode = oneOf(
+    input.searchMode,
+    ["TEXT", "GLOB", "REGEX"] as const,
+    "TEXT",
+    "SSE history search mode",
+  );
+  const flags = input.caseSensitive ? "" : "i";
+  if (mode === "TEXT") {
+    const needle = input.caseSensitive ? search : search.toLocaleLowerCase();
+    return (value) =>
+      (input.caseSensitive ? value : value.toLocaleLowerCase()).includes(
+        needle,
+      );
+  }
+  if (search.length > RE2_PATTERN_MAX_LENGTH) {
+    throw new Error(
+      `SSE history pattern must not exceed ${RE2_PATTERN_MAX_LENGTH.toLocaleString()} characters`,
+    );
+  }
+  const source =
+    mode === "GLOB"
+      ? `^${search
+          .replace(/[.+^${}()|[\]\\]/g, "\\$&")
+          .replaceAll("*", ".*")
+          .replaceAll("?", ".")}$`
+      : search;
+  const pattern = compileRe2(source, {
+    flags,
+    label: "SSE history pattern",
+    maxLength: RE2_PATTERN_MAX_LENGTH * 2 + 2,
+  });
+  return (value) => pattern.test(value);
 }
 
 type CursorPageInput = {
@@ -760,11 +809,8 @@ export class SseService {
     return {
       id: `ad-hoc:${randomUUID()}`,
       name: cleanName(input.name || "Ad hoc response", "Composition name"),
-      statusCode: numberInRange(
-        input.statusCode,
-        200,
-        100,
-        599,
+      statusCode: validateSseStreamingStatus(
+        input.statusCode ?? 200,
         "Mock status code",
       ),
       headers: normalizeHeaders(input.headers),
@@ -822,11 +868,8 @@ export class SseService {
   ) {
     await this.endpointRecord(endpointId);
     const headers = normalizeHeaders(input.headers);
-    const statusCode = numberInRange(
-      input.statusCode,
-      200,
-      100,
-      599,
+    const statusCode = validateSseStreamingStatus(
+      input.statusCode ?? 200,
       "Mock status code",
     );
     if (input.blocks.length > 1_000)
@@ -1265,16 +1308,29 @@ export class SseService {
     split?: boolean;
     fanOutIndex?: number | null;
     limitBytes: number;
+    limitRecords: number;
     endpointId: string;
     mode: string;
   }) {
     const bytes = Buffer.byteLength(input.data);
     const prisma = await getPrismaClient();
-    const event = await prisma.$transaction(async (transaction) => {
+    const result = await prisma.$transaction(async (transaction) => {
       const request = await transaction.sseRequestHistory.findUniqueOrThrow({
         where: { id: input.requestId },
       });
-      const truncated = request.storedBytes + bytes > input.limitBytes;
+      const truncated =
+        request.truncated ||
+        request.storedBytes + bytes > input.limitBytes ||
+        input.sequence >= input.limitRecords;
+      if (truncated) {
+        if (!request.truncated) {
+          await transaction.sseRequestHistory.update({
+            where: { id: input.requestId },
+            data: { truncated: true },
+          });
+        }
+        return { event: null, truncatedNow: !request.truncated };
+      }
       const created = await transaction.sseHistoryEvent.create({
         data: {
           id: randomUUID(),
@@ -1284,25 +1340,31 @@ export class SseService {
           stage: input.stage,
           correlationId: input.correlationId,
           eventName: input.eventName || "text",
-          data: truncated ? "" : input.data,
+          data: input.data,
           eventId: input.eventId ?? null,
           retryMs: input.retryMs ?? null,
           dropped: input.dropped ?? false,
           split: input.split ?? false,
           fanOutIndex: input.fanOutIndex ?? null,
-          truncated,
+          truncated: false,
         },
       });
       await transaction.sseRequestHistory.update({
         where: { id: input.requestId },
         data: {
-          storedBytes: truncated ? undefined : { increment: bytes },
-          truncated: truncated || request.truncated,
+          storedBytes: { increment: bytes },
           firstEventAt: request.firstEventAt ?? new Date(),
         },
       });
-      return created;
+      return { event: created, truncatedNow: false };
     });
+    if (result.truncatedNow) {
+      this.changed(SSE_HISTORY_CHANGED_TOPIC, "TRUNCATED", [input.requestId]);
+      this.changed(SSE_REQUEST_HISTORY_CHANGED_TOPIC, "TRUNCATED", [
+        input.requestId,
+      ]);
+    }
+    const event = result.event;
     if (event) {
       this.changed(SSE_HISTORY_CHANGED_TOPIC, "EVENT", [
         input.requestId,
@@ -1339,25 +1401,6 @@ export class SseService {
       }
     }
     return event;
-  }
-
-  async backfillEventId(requestId: string, eventId: string): Promise<number> {
-    const prisma = await getPrismaClient();
-    const count = (
-      await prisma.sseHistoryEvent.updateMany({
-        where: { requestId, eventId: null },
-        data: { eventId },
-      })
-    ).count;
-    if (count) {
-      this.changed(SSE_HISTORY_CHANGED_TOPIC, "EVENT_IDS_BACKFILLED", [
-        requestId,
-      ]);
-      this.changed(SSE_EVENT_HISTORY_CHANGED_TOPIC, "IDS_BACKFILLED", [
-        requestId,
-      ]);
-    }
-    return count;
   }
 
   async completeRequest(
@@ -1624,6 +1667,53 @@ export class SseService {
     };
   }
 
+  private async searchedHistoryPage<T>(
+    input: SseHistoryQueryInput,
+    totalCount: number,
+    offset: number,
+    first: number,
+    fetchPage: (skip: number, take: number) => Promise<T[]>,
+  ) {
+    const matches = historySearchMatcher(input);
+    if (totalCount > MAX_HISTORY_SEARCH_ROWS) {
+      throw new Error(
+        `SSE history search scans at most ${MAX_HISTORY_SEARCH_ROWS.toLocaleString()} records; narrow the filters and try again`,
+      );
+    }
+    const nodes: T[] = [];
+    let matchingCount = 0;
+    let scannedCount = 0;
+    let scannedBytes = 0;
+    while (scannedCount < totalCount) {
+      const values = await fetchPage(
+        scannedCount,
+        Math.min(HISTORY_SEARCH_BATCH_SIZE, totalCount - scannedCount),
+      );
+      if (!values.length) break;
+      for (const value of values) {
+        const text = jsonString(value);
+        scannedBytes += Buffer.byteLength(text);
+        if (scannedBytes > MAX_HISTORY_SEARCH_BYTES) {
+          throw new Error(
+            "SSE history search exceeded the 64 MiB scan limit; narrow the filters and try again",
+          );
+        }
+        if (!matches(text)) continue;
+        if (matchingCount >= offset && nodes.length < first) nodes.push(value);
+        matchingCount += 1;
+      }
+      scannedCount += values.length;
+    }
+    return {
+      nodes,
+      matchingCount,
+      nextCursor:
+        offset + first < matchingCount
+          ? Buffer.from(String(offset + first)).toString("base64url")
+          : null,
+    };
+  }
+
   async history(input: SseHistoryQueryInput = {}) {
     const view = oneOf(
       input.view,
@@ -1641,27 +1731,31 @@ export class SseService {
     };
     if (view === "STREAMS") {
       if (input.search) {
-        const [totalCount, allValues] = await Promise.all([
-          prisma.sseRequestHistory.count({ where: requestWhere }),
-          prisma.sseRequestHistory.findMany({
-            where: requestWhere,
-            orderBy: [{ startedAt: "desc" }, { id: "desc" }],
-            include: { _count: { select: { events: true } } },
-          }),
-        ]);
-        const filtered = this.search(
-          allValues.map((value) => this.requestView(value)),
+        const totalCount = await prisma.sseRequestHistory.count({
+          where: requestWhere,
+        });
+        const searched = await this.searchedHistoryPage(
           input,
+          totalCount,
+          offset,
+          first,
+          async (skip, take) =>
+            (
+              await prisma.sseRequestHistory.findMany({
+                where: requestWhere,
+                orderBy: [{ startedAt: "desc" }, { id: "desc" }],
+                skip,
+                take,
+                include: { _count: { select: { events: true } } },
+              })
+            ).map((value) => this.requestView(value)),
         );
         return {
           view,
-          streams: filtered.slice(offset, offset + first),
+          streams: searched.nodes,
           events: [],
-          nextCursor:
-            offset + first < filtered.length
-              ? Buffer.from(String(offset + first)).toString("base64url")
-              : null,
-          matchingCount: filtered.length,
+          nextCursor: searched.nextCursor,
+          matchingCount: searched.matchingCount,
           totalCount,
         };
       }
@@ -1675,14 +1769,11 @@ export class SseService {
           include: { _count: { select: { events: true } } },
         }),
       ]);
-      const filtered = this.search(
-        values.map((value) => this.requestView(value)),
-        input,
-      );
+      const streams = values.map((value) => this.requestView(value));
       const hasNext = values.length > first;
       return {
         view,
-        streams: filtered.slice(0, first),
+        streams: streams.slice(0, first),
         events: [],
         nextCursor: hasNext
           ? Buffer.from(String(offset + first)).toString("base64url")
@@ -1699,27 +1790,31 @@ export class SseService {
       stage: input.stages?.length ? { in: input.stages } : undefined,
     };
     if (input.search) {
-      const [totalCount, allValues] = await Promise.all([
-        prisma.sseHistoryEvent.count({ where: eventWhere }),
-        prisma.sseHistoryEvent.findMany({
-          where: eventWhere,
-          orderBy: [{ createdAt: "desc" }, { id: "desc" }],
-          include: { request: true },
-        }),
-      ]);
-      const filtered = this.search(
-        allValues.map((value) => this.eventView(value)),
+      const totalCount = await prisma.sseHistoryEvent.count({
+        where: eventWhere,
+      });
+      const searched = await this.searchedHistoryPage(
         input,
+        totalCount,
+        offset,
+        first,
+        async (skip, take) =>
+          (
+            await prisma.sseHistoryEvent.findMany({
+              where: eventWhere,
+              orderBy: [{ createdAt: "desc" }, { id: "desc" }],
+              skip,
+              take,
+              include: { request: true },
+            })
+          ).map((value) => this.eventView(value)),
       );
       return {
         view,
         streams: [],
-        events: filtered.slice(offset, offset + first),
-        nextCursor:
-          offset + first < filtered.length
-            ? Buffer.from(String(offset + first)).toString("base64url")
-            : null,
-        matchingCount: filtered.length,
+        events: searched.nodes,
+        nextCursor: searched.nextCursor,
+        matchingCount: searched.matchingCount,
         totalCount,
       };
     }
@@ -1733,15 +1828,12 @@ export class SseService {
         include: { request: true },
       }),
     ]);
-    const filtered = this.search(
-      values.map((value) => this.eventView(value)),
-      input,
-    );
+    const events = values.map((value) => this.eventView(value));
     const hasNext = values.length > first;
     return {
       view,
       streams: [],
-      events: filtered.slice(0, first),
+      events: events.slice(0, first),
       nextCursor: hasNext
         ? Buffer.from(String(offset + first)).toString("base64url")
         : null,
@@ -1796,35 +1888,6 @@ export class SseService {
       content = JSON.stringify(rows, null, 2);
     }
     return { format, content, rowCount: rows.length };
-  }
-
-  private search<T>(values: T[], input: SseHistoryQueryInput): T[] {
-    if (!input.search) return values;
-    const source = input.caseSensitive
-      ? input.search
-      : input.search.toLocaleLowerCase();
-    const pattern =
-      input.searchMode === "REGEX"
-        ? new RegExp(input.search, input.caseSensitive ? "" : "i")
-        : null;
-    const glob =
-      input.searchMode === "GLOB"
-        ? new RegExp(
-            `^${input.search
-              .replace(/[.+^${}()|[\]\\]/g, "\\$&")
-              .replaceAll("*", ".*")
-              .replaceAll("?", ".")}$`,
-            input.caseSensitive ? "" : "i",
-          )
-        : null;
-    return values.filter((value) => {
-      const text = jsonString(value);
-      if (pattern) return pattern.test(text);
-      if (glob) return glob.test(text);
-      return (input.caseSensitive ? text : text.toLocaleLowerCase()).includes(
-        source,
-      );
-    });
   }
 
   async historyRequest(id: string) {

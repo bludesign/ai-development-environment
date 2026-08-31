@@ -5,14 +5,15 @@ import { randomUUID } from "node:crypto";
 import { runSseScript } from "./script-runner";
 import { encodeSseEvent, SseEventNormalizer, SseParser } from "./sse-parser";
 import type { SseService } from "./sse.service";
-import type {
-  SseEndpointSnapshot,
-  SseEvent,
-  SseHeader,
-  SseMockCompositionInput,
-  SseResolvedComposition,
-  SseScriptEventResult,
-  SseSplitDirective,
+import {
+  validateSseStreamingStatus,
+  type SseEndpointSnapshot,
+  type SseEvent,
+  type SseHeader,
+  type SseMockCompositionInput,
+  type SseResolvedComposition,
+  type SseScriptEventResult,
+  type SseSplitDirective,
 } from "./types";
 
 const HOP_BY_HOP_HEADERS = new Set([
@@ -28,6 +29,13 @@ const HOP_BY_HOP_HEADERS = new Set([
   "content-length",
 ]);
 const MAX_ERROR_BODY_BYTES = 2 * 1024 * 1024;
+const TRANSFORMED_BODY_HEADERS = [
+  "content-encoding",
+  "content-md5",
+  "content-range",
+  "digest",
+  "etag",
+] as const;
 
 function message(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
@@ -58,6 +66,7 @@ function safeHeaders(values: SseHeader[], includeContentType = true): Headers {
 
 function sseHeaders(values: SseHeader[]): Headers {
   const headers = safeHeaders(values, false);
+  for (const name of TRANSFORMED_BODY_HEADERS) headers.delete(name);
   headers.set("content-type", "text/event-stream; charset=utf-8");
   headers.set("cache-control", "no-cache, no-transform");
   headers.set("x-accel-buffering", "no");
@@ -157,11 +166,15 @@ function normalizeEvent(value: unknown): SseEvent {
   ) {
     throw new Error("SSE event retry must be a non-negative integer");
   }
+  if (event.dispatch != null && typeof event.dispatch !== "boolean") {
+    throw new Error("SSE event dispatch must be a boolean");
+  }
   return {
     event: (event.event as string | null | undefined) ?? null,
     data: event.data,
     id: event.id as string | null | undefined,
     retry: event.retry as number | null | undefined,
+    dispatch: event.dispatch as boolean | undefined,
   };
 }
 
@@ -283,7 +296,7 @@ class EventPipeline {
     private readonly requestId: string,
     private readonly scriptRequest: Record<string, unknown>,
     response: { status: number; headers: SseHeader[] },
-    private readonly enqueue: (chunk: Uint8Array) => void,
+    private readonly enqueue: (chunk: Uint8Array) => Promise<void>,
   ) {
     this.sourceHistory = new SseEventNormalizer(endpoint.historyBufferMode);
     this.emittedHistory = new SseEventNormalizer(endpoint.historyBufferMode);
@@ -329,6 +342,7 @@ class EventPipeline {
       split: extra.split,
       fanOutIndex: extra.fanOutIndex,
       limitBytes: this.endpoint.streamHistoryLimitBytes,
+      limitRecords: this.endpoint.retentionEventLimit,
       endpointId: this.endpoint.id,
       mode: this.endpoint.mode,
     });
@@ -343,6 +357,7 @@ class EventPipeline {
   async push(sourceValue: SseEvent): Promise<void> {
     this.checkSize(sourceValue);
     const backfillId =
+      sourceValue.dispatch !== false &&
       sourceValue.id !== undefined &&
       sourceValue.id !== null &&
       sourceValue.id !== ""
@@ -418,15 +433,12 @@ class EventPipeline {
           fanOutIndex: transformed.events.length > 1 ? index : null,
         });
       }
-      for (const event of deliverable) this.enqueue(encodeSseEvent(event));
+      for (const event of deliverable) {
+        await this.enqueue(encodeSseEvent(event));
+      }
     }
     for (const split of transformed.splits)
       await this.applySplit(split, correlationId);
-    // Concatenating normalizers can flush earlier ID-less records only when
-    // this event arrives, so backfill after all source and emitted writes.
-    if (backfillId) {
-      await this.service.backfillEventId(this.requestId, backfillId);
-    }
   }
 
   private async applySplit(
@@ -460,7 +472,7 @@ class EventPipeline {
         split.offset,
         separatorLength,
       )) {
-        this.enqueue(encodeSseEvent(event));
+        await this.enqueue(encodeSseEvent(event));
       }
     }
   }
@@ -471,8 +483,9 @@ class EventPipeline {
       await this.record("SOURCE", event, correlationId);
     for (const event of this.emittedHistory.flush())
       await this.record("EMITTED", event, correlationId);
-    for (const event of this.delivery.flush())
-      this.enqueue(encodeSseEvent(event));
+    for (const event of this.delivery.flush()) {
+      await this.enqueue(encodeSseEvent(event));
+    }
   }
 }
 
@@ -483,7 +496,10 @@ async function responseConfiguration(
   status: number,
   headers: SseHeader[],
 ): Promise<{ status: number; headers: SseHeader[] }> {
-  if (!endpoint.responseScript.trim()) return { status, headers };
+  const initialStatus = validateSseStreamingStatus(status);
+  if (!endpoint.responseScript.trim()) {
+    return { status: initialStatus, headers };
+  }
   const result = await runSseScript({
     source: endpoint.responseScript,
     timeoutMs: endpoint.responseScriptTimeoutMs,
@@ -507,12 +523,9 @@ async function responseConfiguration(
     result.result && typeof result.result === "object"
       ? (result.result as Record<string, unknown>)
       : {};
-  const nextStatus = Number(
-    returned.status ?? contextResponse.status ?? status,
+  const nextStatus = validateSseStreamingStatus(
+    Number(returned.status ?? contextResponse.status ?? initialStatus),
   );
-  if (!Number.isInteger(nextStatus) || nextStatus < 100 || nextStatus > 599) {
-    throw new Error("Response script returned an invalid HTTP status");
-  }
   return {
     status: nextStatus,
     headers: normalizeScriptHeaders(
@@ -531,17 +544,28 @@ function streamingResponse(
 ): Response {
   const abort = new AbortController();
   let closed = false;
+  let releaseCapacity: (() => void) | null = null;
   const stream = new ReadableStream<Uint8Array>({
     start(controller) {
-      const enqueue = (chunk: Uint8Array) => {
+      const waitForCapacity = async () => {
+        while (!closed && (controller.desiredSize ?? 1) <= 0) {
+          await new Promise<void>((resolve) => {
+            releaseCapacity = resolve;
+          });
+        }
+      };
+      const enqueue = async (chunk: Uint8Array) => {
+        await waitForCapacity();
         if (!closed) controller.enqueue(chunk);
       };
       const heartbeat = endpoint.heartbeatEnabled
-        ? setInterval(
-            () =>
-              enqueue(new TextEncoder().encode(`:heartbeat ${Date.now()}\n\n`)),
-            endpoint.heartbeatIntervalMs,
-          )
+        ? setInterval(() => {
+            if (!closed && (controller.desiredSize ?? 0) > 0) {
+              controller.enqueue(
+                new TextEncoder().encode(`:heartbeat ${Date.now()}\n\n`),
+              );
+            }
+          }, endpoint.heartbeatIntervalMs)
         : null;
       heartbeat?.unref?.();
       const pipeline = new EventPipeline(
@@ -578,9 +602,17 @@ function streamingResponse(
           if (heartbeat) clearInterval(heartbeat);
         });
     },
+    pull() {
+      const release = releaseCapacity;
+      releaseCapacity = null;
+      release?.();
+    },
     cancel() {
       closed = true;
       abort.abort();
+      const release = releaseCapacity;
+      releaseCapacity = null;
+      release?.();
     },
   });
   return new Response(stream, {
@@ -625,6 +657,7 @@ async function forwardResponse(
       `Upstream returned ${response.status}`,
     );
     const headers = safeHeaders(config.headers);
+    for (const name of TRANSFORMED_BODY_HEADERS) headers.delete(name);
     headers.set("access-control-allow-origin", "*");
     headers.set("cache-control", "no-store");
     return new Response(new Uint8Array(body).buffer, {

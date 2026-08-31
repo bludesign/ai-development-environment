@@ -104,6 +104,7 @@ export class SseParser {
       dataLines: [...this.dataLines],
       id: this.eventId,
       retry: this.retry,
+      ...(this.dataLines.length === 0 ? { dispatch: false } : {}),
     };
     this.dataLines = [];
     this.eventName = null;
@@ -122,6 +123,11 @@ export class SseEventNormalizer {
   push(event: SseEvent): SseEvent[] {
     if (this.mode === "STANDARD") return [event];
     if (this.mode === "PRESERVE_FRAMES") return [event];
+    if (event.dispatch === false) {
+      const values = this.flush();
+      values.push(event);
+      return values;
+    }
     if (event.event) {
       const values = this.flush();
       values.push(event);
@@ -191,7 +197,9 @@ export function encodeSseEvent(event: SseEvent): Uint8Array {
   if (event.retry !== undefined && event.retry !== null) {
     lines.push(`retry:${event.retry}`);
   }
-  for (const line of event.data.split("\n")) lines.push(`data:${line}`);
+  if (event.dispatch !== false) {
+    for (const line of event.data.split("\n")) lines.push(`data:${line}`);
+  }
   lines.push("", "");
   return new TextEncoder().encode(lines.join("\n"));
 }
