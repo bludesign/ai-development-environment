@@ -78,8 +78,16 @@ import type {
   SseHistoryRequest,
   SseMockComposition,
   SseMockTemplate,
+  SseMockTemplateField,
   SseMode,
 } from "./types";
+import {
+  sseTemplateBlockError,
+  sseTemplateDraftError,
+  sseTemplateValueError,
+  sseTemplateValuesInput,
+  sseTemplateValuesRecord,
+} from "./template-parameters";
 import { useSseLiveReload } from "./use-sse-live-reload";
 
 type EndpointDraft = Omit<
@@ -95,6 +103,7 @@ type DraftBlock = {
   key: string;
   kind: "EVENT" | "DELAY" | "SCRIPT";
   templateId?: string;
+  templateValues?: Record<string, string>;
   customEvent?: {
     eventName: string;
     data: string;
@@ -1015,7 +1024,7 @@ function ScriptGuideSection({
   );
 }
 
-function MockBuilder({
+export function MockBuilder({
   endpointId,
   templates,
   compositions,
@@ -1039,6 +1048,8 @@ function MockBuilder({
     data: "",
     eventId: "",
     retryMs: "",
+    retryMsTemplate: "",
+    fields: [] as SseMockTemplateField[],
   });
   const [compositionId, setCompositionId] = useState<string | null>(
     compositions[0]?.id ?? null,
@@ -1071,6 +1082,7 @@ function MockBuilder({
           key: block.id,
           kind: block.kind,
           templateId: block.template?.id ?? undefined,
+          templateValues: sseTemplateValuesRecord(block.templateValues),
           customEvent: block.customEvent
             ? {
                 eventName: block.customEvent.eventName ?? "",
@@ -1101,6 +1113,20 @@ function MockBuilder({
         }),
     [headers],
   );
+  const templateValidationError = useMemo(
+    () => sseTemplateDraftError(templateDraft),
+    [templateDraft],
+  );
+  const compositionValidationError = useMemo(() => {
+    for (const block of blocks) {
+      if (!block.templateId) continue;
+      const template = templates.find((item) => item.id === block.templateId);
+      if (!template) return "A selected event template is unavailable.";
+      const error = sseTemplateBlockError(template, block.templateValues);
+      if (error) return `${template.name}: ${error}`;
+    }
+    return null;
+  }, [blocks, templates]);
 
   function openTemplateDialog(template: SseMockTemplate | null) {
     setTemplateId(template?.id ?? null);
@@ -1110,6 +1136,8 @@ function MockBuilder({
       data: template?.data ?? "",
       eventId: template?.eventId ?? "",
       retryMs: template?.retryMs?.toString() ?? "",
+      retryMsTemplate: template?.retryMsTemplate ?? "",
+      fields: template?.fields ?? [],
     });
     setTemplateOpen(true);
   }
@@ -1119,7 +1147,7 @@ function MockBuilder({
       const data = await controlPlaneRequest<{
         saveSseMockEventTemplate: SseMockTemplate;
       }>(
-        `mutation SaveSseTemplate($endpointId: ID!, $input: SseMockEventTemplateInput!) { saveSseMockEventTemplate(endpointId: $endpointId, input: $input) { id endpointId name eventName data eventId retryMs } }`,
+        `mutation SaveSseTemplate($endpointId: ID!, $input: SseMockEventTemplateInput!) { saveSseMockEventTemplate(endpointId: $endpointId, input: $input) { id endpointId name eventName data eventId retryMs retryMsTemplate fields { id key label helpText type required defaultValue } } }`,
         {
           endpointId,
           input: {
@@ -1131,6 +1159,8 @@ function MockBuilder({
             retryMs: templateDraft.retryMs
               ? Number(templateDraft.retryMs)
               : null,
+            retryMsTemplate: templateDraft.retryMsTemplate || null,
+            fields: templateDraft.fields,
           },
         },
       );
@@ -1171,9 +1201,17 @@ function MockBuilder({
             statusCode,
             headers: parsedHeaders,
             blocks: blocks.map(
-              ({ kind, templateId: id, customEvent, delayMs, script }) => ({
+              ({
                 kind,
                 templateId: id,
+                templateValues,
+                customEvent,
+                delayMs,
+                script,
+              }) => ({
+                kind,
+                templateId: id,
+                templateValues: sseTemplateValuesInput(templateValues),
                 customEvent: customEvent
                   ? {
                       eventName: customEvent.eventName || null,
@@ -1248,6 +1286,7 @@ function MockBuilder({
         key: crypto.randomUUID(),
         kind: "EVENT",
         templateId: templateIdValue,
+        templateValues: {},
       },
     ]);
   }
@@ -1265,6 +1304,58 @@ function MockBuilder({
       if (target < 0 || target >= next.length) return current;
       [next[index], next[target]] = [next[target], next[index]];
       return next;
+    });
+  }
+  function moveBlockTo(index: number, target: number) {
+    setBlocks((current) => {
+      if (
+        index === target ||
+        index < 0 ||
+        target < 0 ||
+        index >= current.length ||
+        target >= current.length
+      ) {
+        return current;
+      }
+      const next = [...current];
+      const [block] = next.splice(index, 1);
+      if (!block) return current;
+      next.splice(target, 0, block);
+      return next;
+    });
+  }
+  function addTemplateField() {
+    setTemplateDraft((current) => ({
+      ...current,
+      fields: [
+        ...current.fields,
+        {
+          id: crypto.randomUUID(),
+          key: `field${current.fields.length + 1}`,
+          label: `Field ${current.fields.length + 1}`,
+          helpText: "",
+          type: "TEXT",
+          required: false,
+          defaultValue: null,
+        },
+      ],
+    }));
+  }
+  function updateTemplateField(field: SseMockTemplateField) {
+    setTemplateDraft((current) => ({
+      ...current,
+      fields: current.fields.map((item) =>
+        item.id === field.id ? field : item,
+      ),
+    }));
+  }
+  function moveTemplateField(index: number, offset: -1 | 1) {
+    setTemplateDraft((current) => {
+      const fields = [...current.fields];
+      const target = index + offset;
+      if (target < 0 || target >= fields.length) return current;
+      [fields[index], fields[target]] = [fields[target], fields[index]];
+      return { ...current, fields };
     });
   }
 
@@ -1309,6 +1400,17 @@ function MockBuilder({
                         {template.retryMs !== null ? (
                           <Badge variant="outline">
                             Retry {template.retryMs} ms
+                          </Badge>
+                        ) : null}
+                        {template.retryMsTemplate ? (
+                          <Badge variant="outline">
+                            Retry {template.retryMsTemplate}
+                          </Badge>
+                        ) : null}
+                        {template.fields.length ? (
+                          <Badge variant="secondary">
+                            {template.fields.length} parameter
+                            {template.fields.length === 1 ? "" : "s"}
                           </Badge>
                         ) : null}
                       </CardDescription>
@@ -1459,18 +1561,22 @@ function MockBuilder({
               ) : (
                 blocks.map((block, index) => (
                   <div
-                    className="grid gap-2 rounded-lg border p-3 sm:grid-cols-[auto_8rem_minmax(0,1fr)_auto]"
+                    className="grid min-w-0 max-w-full grid-cols-[minmax(0,1fr)] gap-2 rounded-lg border p-3 sm:grid-cols-[auto_8rem_minmax(0,1fr)_auto]"
+                    data-slot="sse-mock-block"
                     key={block.key}
                   >
-                    <Badge className="self-start" variant="outline">
-                      {index + 1}
-                    </Badge>
+                    <EditableBlockPosition
+                      count={blocks.length}
+                      onMove={(target) => moveBlockTo(index, target)}
+                      position={index + 1}
+                    />
                     <Select
                       onValueChange={(value) => {
                         const kind = value as DraftBlock["kind"];
                         changeBlock(index, {
                           kind,
                           templateId: undefined,
+                          templateValues: undefined,
                           customEvent:
                             kind === "EVENT"
                               ? {
@@ -1519,10 +1625,11 @@ function MockBuilder({
                     ) : (
                       <Textarea
                         aria-label="Mock block script"
-                        className="min-h-28 font-mono text-xs"
+                        className="min-h-28 min-w-0 max-w-full overflow-x-hidden whitespace-pre-wrap font-mono text-xs [overflow-wrap:anywhere]"
                         onChange={(e) =>
                           changeBlock(index, { script: e.target.value })
                         }
+                        wrap="soft"
                         value={block.script ?? ""}
                       />
                     )}
@@ -1564,7 +1671,11 @@ function MockBuilder({
             </div>
             <div className="flex flex-wrap gap-2">
               <Button
-                disabled={!compositionName.trim() || !blocks.length}
+                disabled={
+                  !compositionName.trim() ||
+                  !blocks.length ||
+                  Boolean(compositionValidationError)
+                }
                 onClick={() => void saveComposition()}
               >
                 <Save /> Save composition
@@ -1587,11 +1698,16 @@ function MockBuilder({
                 </Button>
               ) : null}
             </div>
+            {compositionValidationError ? (
+              <p className="text-sm text-destructive">
+                {compositionValidationError}
+              </p>
+            ) : null}
           </CardContent>
         </Card>
       </div>
       <Dialog onOpenChange={setTemplateOpen} open={templateOpen}>
-        <DialogContent className="sm:max-w-xl">
+        <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-3xl">
           <DialogHeader>
             <DialogTitle>
               {templateId ? "Edit Event Template" : "New Event Template"}
@@ -1652,6 +1768,8 @@ function MockBuilder({
             </Field>
             <Field label="Retry (ms)">
               <Input
+                disabled={Boolean(templateDraft.retryMsTemplate)}
+                max={86_400_000}
                 min={0}
                 onChange={(event) =>
                   setTemplateDraft((current) => ({
@@ -1663,10 +1781,66 @@ function MockBuilder({
                 value={templateDraft.retryMs}
               />
             </Field>
+            <Field label="Retry template">
+              <Input
+                className="font-mono"
+                disabled={Boolean(templateDraft.retryMs)}
+                onChange={(event) =>
+                  setTemplateDraft((current) => ({
+                    ...current,
+                    retryMsTemplate: event.target.value,
+                  }))
+                }
+                placeholder="{{retryDelay}}"
+                value={templateDraft.retryMsTemplate}
+              />
+            </Field>
+            <div className="rounded-lg border bg-muted/20 p-3 text-sm text-muted-foreground">
+              Use <code>{"{{fieldKey}}"}</code> for raw substitution or{" "}
+              <code>{"{{json:fieldKey}}"}</code> for JSON-safe insertion. Use{" "}
+              <code>{String.raw`\{{`}</code> for a literal opening token.
+            </div>
+            <div className="space-y-3">
+              <div className="flex items-center justify-between gap-2">
+                <div>
+                  <Label>Template fields</Label>
+                  <p className="text-xs text-muted-foreground">
+                    Fields appear in this order in every template block.
+                  </p>
+                </div>
+                <Button onClick={addTemplateField} size="sm" variant="outline">
+                  <Plus /> Add field
+                </Button>
+              </div>
+              {templateDraft.fields.map((field, index) => (
+                <TemplateFieldDefinitionEditor
+                  field={field}
+                  index={index}
+                  isFirst={index === 0}
+                  isLast={index === templateDraft.fields.length - 1}
+                  key={field.id}
+                  onChange={updateTemplateField}
+                  onMove={(offset) => moveTemplateField(index, offset)}
+                  onRemove={() =>
+                    setTemplateDraft((current) => ({
+                      ...current,
+                      fields: current.fields.filter(
+                        (item) => item.id !== field.id,
+                      ),
+                    }))
+                  }
+                />
+              ))}
+            </div>
+            {templateValidationError ? (
+              <p className="text-sm text-destructive">
+                {templateValidationError}
+              </p>
+            ) : null}
           </div>
           <DialogFooter>
             <Button
-              disabled={!templateDraft.name.trim()}
+              disabled={Boolean(templateValidationError)}
               onClick={() => void saveTemplate()}
             >
               <Save /> Save Template
@@ -1689,6 +1863,262 @@ function MockBuilder({
   );
 }
 
+function EditableBlockPosition({
+  position,
+  count,
+  onMove,
+}: {
+  position: number;
+  count: number;
+  onMove: (target: number) => void;
+}) {
+  function commit(input: HTMLInputElement) {
+    const nextPosition = Number(input.value);
+    if (
+      !Number.isInteger(nextPosition) ||
+      nextPosition < 1 ||
+      nextPosition > count
+    ) {
+      input.value = String(position);
+      return;
+    }
+    onMove(nextPosition - 1);
+  }
+
+  return (
+    <Input
+      aria-label={`Block ${position} position`}
+      className="h-7 w-14 self-start rounded-full px-2 text-center text-xs tabular-nums"
+      defaultValue={position}
+      key={position}
+      max={count}
+      min={1}
+      onBlur={(event) => commit(event.currentTarget)}
+      onFocus={(event) => event.currentTarget.select()}
+      onKeyDown={(event) => {
+        if (event.key === "Enter") event.currentTarget.blur();
+      }}
+      step={1}
+      title={`Move block to a position from 1 to ${count}`}
+      type="number"
+    />
+  );
+}
+
+function TemplateFieldDefinitionEditor({
+  field,
+  index,
+  isFirst,
+  isLast,
+  onChange,
+  onMove,
+  onRemove,
+}: {
+  field: SseMockTemplateField;
+  index: number;
+  isFirst: boolean;
+  isLast: boolean;
+  onChange: (field: SseMockTemplateField) => void;
+  onMove: (offset: -1 | 1) => void;
+  onRemove: () => void;
+}) {
+  const defaultError =
+    field.defaultValue === null
+      ? null
+      : sseTemplateValueError(field, field.defaultValue);
+  return (
+    <div className="space-y-3 rounded-lg border p-3">
+      <div className="flex items-center justify-between gap-2">
+        <Badge variant="outline">Field {index + 1}</Badge>
+        <div className="flex gap-1">
+          <Button
+            aria-label={`Move ${field.label} up`}
+            disabled={isFirst}
+            onClick={() => onMove(-1)}
+            size="icon-sm"
+            variant="ghost"
+          >
+            <ArrowUp />
+          </Button>
+          <Button
+            aria-label={`Move ${field.label} down`}
+            disabled={isLast}
+            onClick={() => onMove(1)}
+            size="icon-sm"
+            variant="ghost"
+          >
+            <ArrowDown />
+          </Button>
+          <Button
+            aria-label={`Remove ${field.label}`}
+            onClick={onRemove}
+            size="icon-sm"
+            variant="ghost"
+          >
+            <Trash2 />
+          </Button>
+        </div>
+      </div>
+      <div className="grid gap-3 sm:grid-cols-2">
+        <Field label="Placeholder key">
+          <Input
+            className="font-mono"
+            onChange={(event) =>
+              onChange({ ...field, key: event.target.value })
+            }
+            value={field.key}
+          />
+        </Field>
+        <Field label="Label">
+          <Input
+            onChange={(event) =>
+              onChange({ ...field, label: event.target.value })
+            }
+            value={field.label}
+          />
+        </Field>
+        <Field label="Type">
+          <Select
+            onValueChange={(value) =>
+              onChange({
+                ...field,
+                type: value as SseMockTemplateField["type"],
+                defaultValue: null,
+              })
+            }
+            value={field.type}
+          >
+            <SelectTrigger aria-label={`${field.label} type`}>
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="TEXT">Text</SelectItem>
+              <SelectItem value="NUMBER">Number</SelectItem>
+              <SelectItem value="BOOLEAN">Boolean</SelectItem>
+              <SelectItem value="JSON">JSON</SelectItem>
+            </SelectContent>
+          </Select>
+        </Field>
+        <FormField className="flex items-center justify-between rounded-lg border p-3">
+          <div>
+            <FieldLabel htmlFor={`required-${field.id}`}>Required</FieldLabel>
+            <FieldDescription>
+              Require an override when no default exists.
+            </FieldDescription>
+          </div>
+          <Switch
+            checked={field.required}
+            id={`required-${field.id}`}
+            onCheckedChange={(required) => onChange({ ...field, required })}
+          />
+        </FormField>
+      </div>
+      <Field label="Help text">
+        <Input
+          onChange={(event) =>
+            onChange({ ...field, helpText: event.target.value })
+          }
+          value={field.helpText}
+        />
+      </Field>
+      {field.defaultValue === null ? (
+        <Button
+          onClick={() =>
+            onChange({
+              ...field,
+              defaultValue:
+                field.type === "BOOLEAN"
+                  ? "false"
+                  : field.type === "NUMBER"
+                    ? "0"
+                    : field.type === "JSON"
+                      ? "{}"
+                      : "",
+            })
+          }
+          size="sm"
+          variant="outline"
+        >
+          <Plus /> Add default value
+        </Button>
+      ) : (
+        <div className="space-y-2">
+          <div className="flex items-end gap-2">
+            <div className="min-w-0 flex-1">
+              <TemplateValueControl
+                field={field}
+                label="Default value"
+                onChange={(value) =>
+                  onChange({ ...field, defaultValue: value })
+                }
+                value={field.defaultValue}
+              />
+            </div>
+            <Button
+              onClick={() => onChange({ ...field, defaultValue: null })}
+              size="sm"
+              variant="outline"
+            >
+              Remove default
+            </Button>
+          </div>
+          {defaultError ? (
+            <p className="text-sm text-destructive">{defaultError}</p>
+          ) : null}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function TemplateValueControl({
+  field,
+  label,
+  value,
+  onChange,
+}: {
+  field: SseMockTemplateField;
+  label: string;
+  value: string;
+  onChange: (value: string) => void;
+}) {
+  if (field.type === "BOOLEAN") {
+    return (
+      <Field label={label}>
+        <Select onValueChange={onChange} value={value}>
+          <SelectTrigger aria-label={field.label}>
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="true">True</SelectItem>
+            <SelectItem value="false">False</SelectItem>
+          </SelectContent>
+        </Select>
+      </Field>
+    );
+  }
+  return (
+    <Field label={label}>
+      {field.type === "JSON" ? (
+        <Textarea
+          aria-label={field.label}
+          className="min-h-24 min-w-0 max-w-full overflow-x-hidden whitespace-pre-wrap font-mono text-xs [overflow-wrap:anywhere]"
+          onChange={(event) => onChange(event.target.value)}
+          value={value}
+          wrap="soft"
+        />
+      ) : (
+        <Input
+          aria-label={field.label}
+          onChange={(event) => onChange(event.target.value)}
+          type={field.type === "NUMBER" ? "number" : "text"}
+          value={value}
+        />
+      )}
+    </Field>
+  );
+}
+
 function MockEventBlockEditor({
   block,
   templates,
@@ -1706,15 +2136,20 @@ function MockEventBlockEditor({
     retryMs: null,
   };
   return (
-    <div className="space-y-3">
+    <div className="min-w-0 max-w-full space-y-3">
       <Select
         onValueChange={(value) =>
           value === "custom"
             ? onChange({
                 templateId: undefined,
+                templateValues: undefined,
                 customEvent,
               })
-            : onChange({ templateId: value, customEvent: undefined })
+            : onChange({
+                templateId: value,
+                templateValues: {},
+                customEvent: undefined,
+              })
         }
         value={block.templateId ?? "custom"}
       >
@@ -1731,26 +2166,101 @@ function MockEventBlockEditor({
         </SelectContent>
       </Select>
       {template ? (
-        <div className="space-y-2 rounded-lg border bg-muted/20 p-3">
+        <div className="min-w-0 max-w-full space-y-2 rounded-lg border bg-muted/20 p-3">
           <div className="flex flex-wrap gap-1">
-            <Badge variant="outline">
+            <Badge
+              className="h-auto max-w-full min-w-0 break-all whitespace-normal py-1"
+              variant="outline"
+            >
               {template.eventName || "Unnamed event"}
             </Badge>
             {template.eventId ? (
-              <Badge variant="outline">ID {template.eventId}</Badge>
+              <Badge
+                className="h-auto max-w-full min-w-0 break-all whitespace-normal py-1"
+                variant="outline"
+              >
+                ID {template.eventId}
+              </Badge>
             ) : null}
             {template.retryMs !== null ? (
               <Badge variant="outline">Retry {template.retryMs} ms</Badge>
             ) : null}
+            {template.fields.length ? (
+              <Badge variant="secondary">
+                {template.fields.length} parameter
+                {template.fields.length === 1 ? "" : "s"}
+              </Badge>
+            ) : null}
           </div>
-          <pre className="max-h-40 overflow-auto whitespace-pre-wrap break-words font-mono text-xs">
+          <pre className="max-h-40 min-w-0 max-w-full overflow-y-auto whitespace-pre-wrap font-mono text-xs [overflow-wrap:anywhere]">
             {template.data || "Empty data"}
           </pre>
+          {template.fields.length ? (
+            <div className="space-y-3 border-t pt-3">
+              {template.fields.map((field) => {
+                const override = block.templateValues?.[field.id];
+                const effective = override ?? field.defaultValue ?? "";
+                const valueError =
+                  override === undefined
+                    ? field.required && field.defaultValue === null
+                      ? "A value is required."
+                      : null
+                    : sseTemplateValueError(field, override);
+                return (
+                  <div className="space-y-1" key={field.id}>
+                    <div className="flex items-end gap-2">
+                      <div className="min-w-0 flex-1">
+                        <TemplateValueControl
+                          field={field}
+                          label={field.label}
+                          onChange={(value) =>
+                            onChange({
+                              templateValues: {
+                                ...(block.templateValues ?? {}),
+                                [field.id]: value,
+                              },
+                            })
+                          }
+                          value={effective}
+                        />
+                      </div>
+                      <Button
+                        disabled={override === undefined}
+                        onClick={() => {
+                          const next = { ...(block.templateValues ?? {}) };
+                          delete next[field.id];
+                          onChange({ templateValues: next });
+                        }}
+                        size="sm"
+                        variant="outline"
+                      >
+                        Reset
+                      </Button>
+                    </div>
+                    {field.helpText ? (
+                      <p className="text-xs text-muted-foreground [overflow-wrap:anywhere]">
+                        {field.helpText}
+                      </p>
+                    ) : null}
+                    {override === undefined && field.defaultValue !== null ? (
+                      <p className="text-xs text-muted-foreground [overflow-wrap:anywhere]">
+                        Using default: {field.defaultValue}
+                      </p>
+                    ) : null}
+                    {valueError ? (
+                      <p className="text-sm text-destructive">{valueError}</p>
+                    ) : null}
+                  </div>
+                );
+              })}
+            </div>
+          ) : null}
         </div>
       ) : (
-        <div className="grid gap-3 rounded-lg border bg-muted/20 p-3 sm:grid-cols-2">
+        <div className="grid min-w-0 max-w-full grid-cols-[minmax(0,1fr)] gap-3 rounded-lg border bg-muted/20 p-3 sm:grid-cols-2">
           <Field label="Event name">
             <Input
+              aria-label="Event name"
               onChange={(event) =>
                 onChange({
                   customEvent: {
@@ -1765,6 +2275,7 @@ function MockEventBlockEditor({
           </Field>
           <Field label="Event ID">
             <Input
+              aria-label="Event ID"
               onChange={(event) =>
                 onChange({
                   customEvent: {
@@ -1778,12 +2289,14 @@ function MockEventBlockEditor({
           </Field>
           <Field label="Data">
             <Textarea
-              className="min-h-28 font-mono text-xs"
+              aria-label="Event data"
+              className="min-h-28 min-w-0 max-w-full overflow-x-hidden whitespace-pre-wrap font-mono text-xs [overflow-wrap:anywhere]"
               onChange={(event) =>
                 onChange({
                   customEvent: { ...customEvent, data: event.target.value },
                 })
               }
+              wrap="soft"
               value={customEvent.data}
             />
           </Field>
@@ -1901,7 +2414,7 @@ function Field({
   children: React.ReactNode;
 }) {
   return (
-    <FormField>
+    <FormField className="min-w-0">
       <FieldLabel>{label}</FieldLabel>
       {children}
     </FormField>

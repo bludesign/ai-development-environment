@@ -3,6 +3,7 @@ import "server-only";
 import { randomUUID } from "node:crypto";
 
 import { runSseScript } from "./script-runner";
+import { renderSseParameterizedTemplate } from "./mock-template";
 import { encodeSseEvent, SseEventNormalizer, SseParser } from "./sse-parser";
 import type { SseService } from "./sse.service";
 import {
@@ -739,14 +740,23 @@ async function mockResponse(
               );
             });
           } else if (block.kind === "EVENT") {
-            const event = block.template ?? block.customEvent;
-            if (!event) throw new Error("Mock event payload is unavailable");
-            await pipeline.push({
-              event: event.eventName,
-              data: event.data,
-              id: event.eventId,
-              retry: event.retryMs,
-            });
+            if (block.template) {
+              await pipeline.push(
+                renderSseParameterizedTemplate(
+                  block.template,
+                  block.templateValues,
+                ),
+              );
+            } else {
+              const event = block.customEvent;
+              if (!event) throw new Error("Mock event payload is unavailable");
+              await pipeline.push({
+                event: event.eventName,
+                data: event.data,
+                id: event.eventId,
+                retry: event.retryMs,
+              });
+            }
           } else {
             const result = await runSseScript({
               source: block.script ?? "",

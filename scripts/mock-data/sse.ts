@@ -47,12 +47,37 @@ export async function seedSse(prisma: PrismaClient): Promise<void> {
         endpointId: ids.sse.productFeed,
         name: "Display product card",
         eventName: "display_card",
-        data: JSON.stringify({
-          title: "Trail Running Shoes",
-          price: "$129",
-          image: "https://cdn.acme.example/trail-shoes.png",
-        }),
-        eventId: "evt_1349872",
+        data: `{"title":{{json:title}},"price":{{json:price}},"image":"https://cdn.acme.example/trail-shoes.png"}`,
+        eventId: "product_{{productId}}",
+        fieldsJson: JSON.stringify([
+          {
+            id: "sse-field-product-title",
+            key: "title",
+            label: "Product title",
+            helpText: "The title shown on the recommendation card.",
+            type: "TEXT",
+            required: true,
+            defaultValue: "Trail Running Shoes",
+          },
+          {
+            id: "sse-field-product-price",
+            key: "price",
+            label: "Display price",
+            helpText: "Include the currency symbol used by the storefront.",
+            type: "TEXT",
+            required: true,
+            defaultValue: "$129",
+          },
+          {
+            id: "sse-field-product-id",
+            key: "productId",
+            label: "Product ID",
+            helpText: "Stable catalog identifier used in the SSE event ID.",
+            type: "NUMBER",
+            required: true,
+            defaultValue: "1349872",
+          },
+        ]),
       },
       {
         id: "sse-template-loading",
@@ -84,16 +109,23 @@ export async function seedSse(prisma: PrismaClient): Promise<void> {
         create: [
           {
             id: "sse-block-loading",
-            position: 0,
+            position: 1,
             kind: "EVENT",
             templateId: "sse-template-loading",
           },
-          { id: "sse-block-delay", position: 1, kind: "DELAY", delayMs: 750 },
+          { id: "sse-block-delay", position: 2, kind: "DELAY", delayMs: 750 },
           {
             id: "sse-block-display-card",
-            position: 2,
+            position: 0,
             kind: "EVENT",
             templateId: ids.sse.displayCardTemplate,
+            templateValuesJson: JSON.stringify([
+              {
+                fieldId: "sse-field-product-title",
+                value: "Tempo Trail Shoes",
+              },
+              { fieldId: "sse-field-product-price", value: "$119" },
+            ]),
           },
           {
             id: "sse-block-script",

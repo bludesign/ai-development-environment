@@ -5,6 +5,18 @@ export type SseHistoryStage = "SOURCE" | "EMITTED" | "DROPPED";
 
 export type SseHeader = { name: string; value: string };
 
+export type SseMockTemplateField = {
+  id: string;
+  key: string;
+  label: string;
+  helpText: string;
+  type: "TEXT" | "NUMBER" | "BOOLEAN" | "JSON";
+  required: boolean;
+  defaultValue: string | null;
+};
+
+export type SseMockTemplateValue = { fieldId: string; value: string };
+
 export type SseMockTemplate = {
   id: string;
   endpointId: string;
@@ -13,6 +25,8 @@ export type SseMockTemplate = {
   data: string;
   eventId: string | null;
   retryMs: number | null;
+  retryMsTemplate: string | null;
+  fields: SseMockTemplateField[];
 };
 
 export type SseMockBlock = {
@@ -27,6 +41,7 @@ export type SseMockBlock = {
     retryMs: number | null;
   } | null;
   template: SseMockTemplate | null;
+  templateValues: SseMockTemplateValue[];
 };
 
 export type SseMockComposition = {

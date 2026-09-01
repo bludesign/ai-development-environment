@@ -17,6 +17,11 @@ import {
 import type { WorkflowEventsService } from "@/services/workflows";
 
 import {
+  normalizeSseTemplateFields,
+  normalizeSseTemplateValues,
+  validateSseParameterizedTemplate,
+} from "./mock-template";
+import {
   runSseScript,
   type SseScriptStorage,
   type SseStoredValue,
@@ -35,6 +40,9 @@ import {
   type SseHeader,
   type SseHistoryQueryInput,
   type SseMockCompositionInput,
+  type SseMockTemplateField,
+  type SseMockTemplateFieldInput,
+  type SseMockTemplateValue,
   type SseResolvedComposition,
   validateSseStreamingStatus,
 } from "./types";
@@ -387,6 +395,10 @@ function resolvedComposition(
         ),
         delayMs: block.delayMs,
         script: block.script,
+        templateValues: json<SseMockTemplateValue[]>(
+          block.templateValuesJson,
+          [],
+        ),
         customEvent:
           block.eventData === null
             ? null
@@ -405,6 +417,11 @@ function resolvedComposition(
               data: block.template.data,
               eventId: block.template.eventId,
               retryMs: block.template.retryMs,
+              retryMsTemplate: block.template.retryMsTemplate,
+              fields: json<SseMockTemplateField[]>(
+                block.template.fieldsJson,
+                [],
+              ),
             }
           : null,
       })),
@@ -698,6 +715,7 @@ export class SseService {
     });
     return values.map((value) => ({
       ...value,
+      fields: json<SseMockTemplateField[]>(value.fieldsJson, []),
       createdAt: value.createdAt.toISOString(),
       updatedAt: value.updatedAt.toISOString(),
     }));
@@ -712,6 +730,8 @@ export class SseService {
       data: string;
       eventId?: string | null;
       retryMs?: number | null;
+      retryMsTemplate?: string | null;
+      fields?: SseMockTemplateFieldInput[] | null;
     },
   ) {
     await this.endpointRecord(endpointId);
@@ -719,45 +739,80 @@ export class SseService {
       throw new Error("Template data is too large");
     const prisma = await getPrismaClient();
     const id = input.id ?? randomUUID();
-    if (input.id) {
-      const existing = await prisma.sseMockEventTemplate.findUnique({
-        where: { id },
-        select: { endpointId: true },
-      });
-      if (existing && existing.endpointId !== endpointId) {
-        throw new Error("Mock template does not belong to this endpoint");
-      }
+    const existing = input.id
+      ? await prisma.sseMockEventTemplate.findUnique({ where: { id } })
+      : null;
+    if (existing && existing.endpointId !== endpointId) {
+      throw new Error("Mock template does not belong to this endpoint");
     }
-    const value = await prisma.sseMockEventTemplate.upsert({
-      where: { id },
-      create: {
-        id,
-        endpointId,
-        name: cleanName(input.name, "Template name"),
-        eventName: input.eventName?.trim() || null,
-        data: input.data,
-        eventId: input.eventId ?? null,
-        retryMs:
-          input.retryMs == null
-            ? null
-            : numberInRange(input.retryMs, 0, 0, 86_400_000, "Retry"),
-      },
-      update: {
-        name: cleanName(input.name, "Template name"),
-        eventName: input.eventName?.trim() || null,
-        data: input.data,
-        eventId: input.eventId ?? null,
-        retryMs:
-          input.retryMs == null
-            ? null
-            : numberInRange(input.retryMs, 0, 0, 86_400_000, "Retry"),
-      },
+    const fields =
+      input.fields === undefined || input.fields === null
+        ? json<SseMockTemplateField[]>(existing?.fieldsJson, [])
+        : normalizeSseTemplateFields(input.fields);
+    const eventName = input.eventName?.trim() || null;
+    const eventId = input.eventId ?? null;
+    const retryMs =
+      input.retryMs == null
+        ? null
+        : numberInRange(input.retryMs, 0, 0, 86_400_000, "Retry");
+    const retryMsTemplate = input.retryMsTemplate?.trim() || null;
+    validateSseParameterizedTemplate({
+      eventName,
+      data: input.data,
+      eventId,
+      retryMs,
+      retryMsTemplate,
+      fields,
+    });
+    const value = await prisma.$transaction(async (transaction) => {
+      if (existing) {
+        const fieldIds = new Set(fields.map((field) => field.id));
+        const blocks = await transaction.sseMockBlock.findMany({
+          where: { templateId: id },
+          select: { id: true, templateValuesJson: true },
+        });
+        for (const block of blocks) {
+          const retained = json<SseMockTemplateValue[]>(
+            block.templateValuesJson,
+            [],
+          ).filter((entry) => fieldIds.has(entry.fieldId));
+          const normalized = normalizeSseTemplateValues(fields, retained, true);
+          await transaction.sseMockBlock.update({
+            where: { id: block.id },
+            data: { templateValuesJson: jsonString(normalized) },
+          });
+        }
+      }
+      return transaction.sseMockEventTemplate.upsert({
+        where: { id },
+        create: {
+          id,
+          endpointId,
+          name: cleanName(input.name, "Template name"),
+          eventName,
+          data: input.data,
+          eventId,
+          retryMs,
+          retryMsTemplate,
+          fieldsJson: jsonString(fields),
+        },
+        update: {
+          name: cleanName(input.name, "Template name"),
+          eventName,
+          data: input.data,
+          eventId,
+          retryMs,
+          retryMsTemplate,
+          fieldsJson: jsonString(fields),
+        },
+      });
     });
     this.changed(SSE_ENDPOINTS_CHANGED_TOPIC, "MOCK_TEMPLATE_SAVED", [
       endpointId,
     ]);
     return {
       ...value,
+      fields,
       createdAt: value.createdAt.toISOString(),
       updatedAt: value.updatedAt.toISOString(),
     };
@@ -765,17 +820,32 @@ export class SseService {
 
   async deleteEventTemplate(id: string): Promise<boolean> {
     const prisma = await getPrismaClient();
-    const current = await prisma.sseMockEventTemplate.findUnique({
-      where: { id },
-    });
-    const result = await prisma.sseMockEventTemplate.deleteMany({
-      where: { id },
-    });
-    if (current && result.count)
+    const { current, deleted } = await prisma.$transaction(
+      async (transaction) => {
+        const current = await transaction.sseMockEventTemplate.findUnique({
+          where: { id },
+        });
+        if (
+          current &&
+          (await transaction.sseMockBlock.count({
+            where: { templateId: id },
+          })) > 0
+        ) {
+          throw new Error(
+            "Mock templates cannot be deleted while composition blocks reference them",
+          );
+        }
+        const result = await transaction.sseMockEventTemplate.deleteMany({
+          where: { id },
+        });
+        return { current, deleted: result.count > 0 };
+      },
+    );
+    if (current && deleted)
       this.changed(SSE_ENDPOINTS_CHANGED_TOPIC, "MOCK_TEMPLATE_DELETED", [
         current.endpointId,
       ]);
-    return result.count > 0;
+    return deleted;
   }
 
   async compositions(endpointId: string) {
@@ -845,6 +915,13 @@ export class SseService {
               : null,
           script: kind === "SCRIPT" ? (block.script ?? "") : null,
           customEvent,
+          templateValues: template
+            ? normalizeSseTemplateValues(
+                json<SseMockTemplateField[]>(template.fieldsJson, []),
+                block.templateValues,
+                true,
+              )
+            : [],
           template: template
             ? {
                 id: template.id,
@@ -854,6 +931,8 @@ export class SseService {
                 data: template.data,
                 eventId: template.eventId,
                 retryMs: template.retryMs,
+                retryMsTemplate: template.retryMsTemplate,
+                fields: json<SseMockTemplateField[]>(template.fieldsJson, []),
               }
             : null,
         };
@@ -887,15 +966,20 @@ export class SseService {
     const templateIds = input.blocks.flatMap((block) =>
       block.templateId ? [block.templateId] : [],
     );
+    const templates = templateIds.length
+      ? await prisma.sseMockEventTemplate.findMany({
+          where: { endpointId, id: { in: templateIds } },
+        })
+      : [];
     if (templateIds.length) {
-      const count = await prisma.sseMockEventTemplate.count({
-        where: { endpointId, id: { in: templateIds } },
-      });
-      if (count !== new Set(templateIds).size)
+      if (templates.length !== new Set(templateIds).size)
         throw new Error(
           "Every referenced template must belong to this endpoint",
         );
     }
+    const templatesById = new Map(
+      templates.map((template) => [template.id, template]),
+    );
     const compositionId = id ?? randomUUID();
     await prisma.$transaction(async (transaction) => {
       await transaction.sseMockComposition.upsert({
@@ -925,6 +1009,9 @@ export class SseService {
             );
             const customEvent =
               kind === "EVENT" ? normalizeCustomEvent(block.customEvent) : null;
+            const template = block.templateId
+              ? templatesById.get(block.templateId)
+              : undefined;
             if (
               kind === "EVENT" &&
               Boolean(block.templateId) === Boolean(customEvent)
@@ -935,6 +1022,18 @@ export class SseService {
             }
             if (kind === "SCRIPT" && !block.script?.trim())
               throw new Error("Script blocks require JavaScript");
+            if (!template && (block.templateValues?.length ?? 0) > 0) {
+              throw new Error(
+                "Only template event blocks accept template values",
+              );
+            }
+            const templateValues = template
+              ? normalizeSseTemplateValues(
+                  json<SseMockTemplateField[]>(template.fieldsJson, []),
+                  block.templateValues,
+                  true,
+                )
+              : [];
             return {
               id: block.id ?? randomUUID(),
               compositionId,
@@ -945,6 +1044,7 @@ export class SseService {
               eventData: customEvent?.data ?? null,
               eventId: customEvent?.eventId ?? null,
               retryMs: customEvent?.retryMs ?? null,
+              templateValuesJson: jsonString(templateValues),
               delayMs:
                 kind === "DELAY"
                   ? numberInRange(block.delayMs, 0, 0, 86_400_000, "Mock delay")

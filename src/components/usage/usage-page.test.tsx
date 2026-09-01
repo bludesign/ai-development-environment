@@ -298,6 +298,9 @@ describe("UsagePage", () => {
   });
 
   test("shows the bounded date selector, disables future dates, and preserves its value", async () => {
+    // Keep tomorrow in the displayed month so this assertion does not depend on
+    // the runner's wall clock (for example, when CI runs on the last day of a month).
+    vi.setSystemTime(new Date("2026-07-16T12:00:00-04:00"));
     render(<UsagePage />);
 
     const picker = await screen.findByRole("button", {
@@ -307,10 +310,13 @@ describe("UsagePage", () => {
     const tomorrow = new Date();
     tomorrow.setHours(0, 0, 0, 0);
     tomorrow.setDate(tomorrow.getDate() + 1);
-    const futureDay = document.querySelector(
-      `[data-day="${tomorrow.toLocaleDateString()}"]`,
+    await waitFor(() =>
+      expect(
+        document
+          .querySelector(`[data-day="${tomorrow.toLocaleDateString()}"]`)
+          ?.hasAttribute("disabled"),
+      ).toBe(true),
     );
-    expect(futureDay?.hasAttribute("disabled")).toBe(true);
 
     const yesterday = new Date();
     yesterday.setHours(0, 0, 0, 0);

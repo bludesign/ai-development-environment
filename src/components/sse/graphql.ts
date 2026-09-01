@@ -2,7 +2,11 @@ export const SSE_COMPOSITION_FIELDS = `
   id name statusCode headers { name value } createdAt updatedAt
   blocks {
     id kind delayMs script customEvent { eventName data eventId retryMs }
-    template { id endpointId name eventName data eventId retryMs }
+    template {
+      id endpointId name eventName data eventId retryMs retryMsTemplate
+      fields { id key label helpText type required defaultValue }
+    }
+    templateValues { fieldId value }
   }
 `;
 
@@ -38,7 +42,9 @@ export const SSE_ENDPOINTS_QUERY = `query SseEndpointsPage {
 export const SSE_ENDPOINT_DETAIL_QUERY = `query SseEndpointDetail($id: ID!) {
   sseEndpoint(id: $id) { ${SSE_ENDPOINT_FIELDS} }
   sseMockEventTemplates(endpointId: $id) {
-    id endpointId name eventName data eventId retryMs createdAt updatedAt
+    id endpointId name eventName data eventId retryMs retryMsTemplate
+    fields { id key label helpText type required defaultValue }
+    createdAt updatedAt
   }
   sseMockCompositions(endpointId: $id) { ${SSE_COMPOSITION_FIELDS} }
 }`;

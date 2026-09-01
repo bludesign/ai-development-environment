@@ -6,6 +6,12 @@ export const SSE_BUFFER_MODES = [
 ] as const;
 export const SSE_MOCK_COMPLETIONS = ["CLOSE", "HOLD", "LOOP"] as const;
 export const SSE_MOCK_BLOCK_KINDS = ["EVENT", "DELAY", "SCRIPT"] as const;
+export const SSE_MOCK_TEMPLATE_FIELD_TYPES = [
+  "TEXT",
+  "NUMBER",
+  "BOOLEAN",
+  "JSON",
+] as const;
 export const SSE_HISTORY_VIEWS = ["STREAMS", "EVENTS"] as const;
 export const SSE_HISTORY_EVENT_STAGES = [
   "SOURCE",
@@ -17,10 +23,37 @@ export type SseEndpointMode = (typeof SSE_ENDPOINT_MODES)[number];
 export type SseBufferMode = (typeof SSE_BUFFER_MODES)[number];
 export type SseMockCompletion = (typeof SSE_MOCK_COMPLETIONS)[number];
 export type SseMockBlockKind = (typeof SSE_MOCK_BLOCK_KINDS)[number];
+export type SseMockTemplateFieldType =
+  (typeof SSE_MOCK_TEMPLATE_FIELD_TYPES)[number];
 export type SseHistoryView = (typeof SSE_HISTORY_VIEWS)[number];
 export type SseHistoryEventStage = (typeof SSE_HISTORY_EVENT_STAGES)[number];
 
 export type SseHeader = { name: string; value: string };
+
+export type SseMockTemplateField = {
+  id: string;
+  key: string;
+  label: string;
+  helpText: string;
+  type: SseMockTemplateFieldType;
+  required: boolean;
+  defaultValue: string | null;
+};
+
+export type SseMockTemplateFieldInput = {
+  id?: string | null;
+  key: string;
+  label: string;
+  helpText?: string | null;
+  type: SseMockTemplateFieldType;
+  required: boolean;
+  defaultValue?: string | null;
+};
+
+export type SseMockTemplateValue = {
+  fieldId: string;
+  value: string;
+};
 
 export type SseEvent = {
   event?: string | null;
@@ -68,6 +101,7 @@ export type SseMockBlockInput = {
   id?: string | null;
   kind: SseMockBlockKind;
   templateId?: string | null;
+  templateValues?: SseMockTemplateValue[] | null;
   customEvent?: {
     eventName?: string | null;
     data: string;
@@ -186,7 +220,10 @@ export type SseResolvedComposition = {
       data: string;
       eventId: string | null;
       retryMs: number | null;
+      retryMsTemplate: string | null;
+      fields: SseMockTemplateField[];
     };
+    templateValues: SseMockTemplateValue[];
   }>;
 };
 

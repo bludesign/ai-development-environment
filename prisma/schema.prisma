@@ -3436,17 +3436,19 @@ model SseEndpoint {
 }
 
 model SseMockEventTemplate {
-  id         String         @id
-  endpointId String
-  name       String
-  eventName  String?
-  data       String
-  eventId    String?
-  retryMs    Int?
-  createdAt  DateTime       @default(now())
-  updatedAt  DateTime       @updatedAt
-  endpoint   SseEndpoint    @relation(fields: [endpointId], references: [id], onDelete: Cascade)
-  blocks     SseMockBlock[]
+  id              String         @id
+  endpointId      String
+  name            String
+  eventName       String?
+  data            String
+  eventId         String?
+  retryMs         Int?
+  retryMsTemplate String?
+  fieldsJson      String         @default("[]")
+  createdAt       DateTime       @default(now())
+  updatedAt       DateTime       @updatedAt
+  endpoint        SseEndpoint    @relation(fields: [endpointId], references: [id], onDelete: Cascade)
+  blocks          SseMockBlock[]
 
   @@unique([endpointId, name])
   @@index([endpointId, updatedAt])
@@ -3470,21 +3472,22 @@ model SseMockComposition {
 }
 
 model SseMockBlock {
-  id            String                @id
-  compositionId String
-  position      Int
-  kind          String
-  templateId    String?
-  delayMs       Int?
-  script        String?
-  eventName     String?
-  eventData     String?
-  eventId       String?
-  retryMs       Int?
-  createdAt     DateTime              @default(now())
-  updatedAt     DateTime              @updatedAt
-  composition   SseMockComposition    @relation(fields: [compositionId], references: [id], onDelete: Cascade)
-  template      SseMockEventTemplate? @relation(fields: [templateId], references: [id], onDelete: SetNull)
+  id                 String                @id
+  compositionId      String
+  position           Int
+  kind               String
+  templateId         String?
+  delayMs            Int?
+  script             String?
+  eventName          String?
+  eventData          String?
+  eventId            String?
+  retryMs            Int?
+  templateValuesJson String                @default("[]")
+  createdAt          DateTime              @default(now())
+  updatedAt          DateTime              @updatedAt
+  composition        SseMockComposition    @relation(fields: [compositionId], references: [id], onDelete: Cascade)
+  template           SseMockEventTemplate? @relation(fields: [templateId], references: [id], onDelete: SetNull)
 
   @@unique([compositionId, position])
   @@index([templateId])

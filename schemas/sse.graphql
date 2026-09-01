@@ -38,6 +38,18 @@ enum SseMockBlockKind {
   SCRIPT
 }
 
+"Supported value types for reusable SSE template fields."
+enum SseMockTemplateFieldType {
+  "text enum value."
+  TEXT
+  "number enum value."
+  NUMBER
+  "boolean enum value."
+  BOOLEAN
+  "json enum value."
+  JSON
+}
+
 "Available SSE history table granularities."
 enum SseHistoryView {
   "streams enum value."
@@ -80,10 +92,40 @@ type SseMockEventTemplate {
   eventId: String
   "retry ms field."
   retryMs: Int
+  "Placeholder-based retry value, mutually exclusive with retryMs."
+  retryMsTemplate: String
+  "Ordered parameter definitions used by this template."
+  fields: [SseMockTemplateField!]!
   "created at field."
   createdAt: String!
   "updated at field."
   updatedAt: String!
+}
+
+"One typed parameter declared by a reusable SSE mock template."
+type SseMockTemplateField {
+  "Stable field identifier."
+  id: ID!
+  "Placeholder key."
+  key: String!
+  "Builder label."
+  label: String!
+  "Optional builder guidance."
+  helpText: String!
+  "Value type."
+  type: SseMockTemplateFieldType!
+  "Whether a value or default is required."
+  required: Boolean!
+  "Validated default value."
+  defaultValue: String
+}
+
+"One saved override for a template field."
+type SseMockTemplateValue {
+  "Stable template field identifier."
+  fieldId: ID!
+  "Validated serialized value."
+  value: String!
 }
 
 "An ordered block in an SSE mock composition."
@@ -100,6 +142,8 @@ type SseMockBlock {
   customEvent: SseMockEvent
   "template field."
   template: SseMockEventTemplate
+  "Per-block template field overrides."
+  templateValues: [SseMockTemplateValue!]!
 }
 
 "An SSE event payload embedded directly in a mock block."
@@ -594,6 +638,36 @@ input SseMockEventTemplateInput {
   eventId: String
   "retry ms input value."
   retryMs: Int
+  "Placeholder-based retry input, mutually exclusive with retryMs."
+  retryMsTemplate: String
+  "Ordered template field definitions. Omit to preserve existing fields."
+  fields: [SseMockTemplateFieldInput!]
+}
+
+"Editable reusable SSE mock template field."
+input SseMockTemplateFieldInput {
+  "Stable field identifier; generated when omitted."
+  id: ID
+  "Placeholder key."
+  key: String!
+  "Builder label."
+  label: String!
+  "Optional builder guidance."
+  helpText: String
+  "Value type."
+  type: SseMockTemplateFieldType!
+  "Whether a value or default is required."
+  required: Boolean!
+  "Validated default value."
+  defaultValue: String
+}
+
+"Editable per-block template field override."
+input SseMockTemplateValueInput {
+  "Stable template field identifier."
+  fieldId: ID!
+  "Serialized value."
+  value: String!
 }
 
 "Editable mock composition block fields."
@@ -604,6 +678,8 @@ input SseMockBlockInput {
   kind: SseMockBlockKind!
   "template id input value."
   templateId: ID
+  "Per-block template field overrides."
+  templateValues: [SseMockTemplateValueInput!]
   "One-off event payload that does not create a reusable template."
   customEvent: SseMockEventInput
   "delay ms input value."

@@ -154,6 +154,7 @@ describe("handlePublicSseRequest", () => {
           kind: "EVENT",
           delayMs: null,
           script: null,
+          templateValues: [],
           template: null,
           customEvent: {
             eventName: "display_card",
@@ -184,6 +185,68 @@ describe("handlePublicSseRequest", () => {
     );
   });
 
+  test("emits independent values for two blocks using one template", async () => {
+    const sharedTemplate = {
+      id: "template-parameterized",
+      endpointId: "endpoint-1",
+      name: "Greeting",
+      eventName: "hello_{{name}}",
+      data: '{"name":{{json:name}}}',
+      eventId: "id-{{name}}",
+      retryMs: null,
+      retryMsTemplate: "{{delay}}",
+      fields: [
+        {
+          id: "name-id",
+          key: "name",
+          label: "Name",
+          helpText: "",
+          type: "TEXT" as const,
+          required: true,
+          defaultValue: null,
+        },
+        {
+          id: "delay-id",
+          key: "delay",
+          label: "Delay",
+          helpText: "",
+          type: "NUMBER" as const,
+          required: false,
+          defaultValue: "1000",
+        },
+      ],
+    };
+    const composition: SseResolvedComposition = {
+      id: "mock-parameterized",
+      name: "Parameterized",
+      statusCode: 200,
+      headers: [],
+      blocks: ["Ada", "Grace"].map((name, index) => ({
+        id: `event-${index}`,
+        kind: "EVENT" as const,
+        delayMs: null,
+        script: null,
+        customEvent: null,
+        template: sharedTemplate,
+        templateValues: [{ fieldId: "name-id", value: name }],
+      })),
+    };
+    const testService = service();
+    const response = await handlePublicSseRequest(
+      testService.fake,
+      endpoint(composition),
+      new Request("https://control.example/api/public/sse/token"),
+    );
+
+    const body = await response.text();
+    expect(body).toContain(
+      'event:hello_Ada\nid:id-Ada\nretry:1000\ndata:{"name":"Ada"}',
+    );
+    expect(body).toContain(
+      'event:hello_Grace\nid:id-Grace\nretry:1000\ndata:{"name":"Grace"}',
+    );
+  });
+
   test("assigns an ID to buffered records flushed by that event", async () => {
     const composition: SseResolvedComposition = {
       id: "mock-2",
@@ -196,6 +259,7 @@ describe("handlePublicSseRequest", () => {
           kind: "EVENT",
           delayMs: null,
           script: null,
+          templateValues: [],
           customEvent: null,
           template: {
             id: "template-1",
@@ -205,6 +269,8 @@ describe("handlePublicSseRequest", () => {
             data: "before",
             eventId: null,
             retryMs: null,
+            retryMsTemplate: null,
+            fields: [],
           },
         },
         {
@@ -212,6 +278,7 @@ describe("handlePublicSseRequest", () => {
           kind: "EVENT",
           delayMs: null,
           script: null,
+          templateValues: [],
           customEvent: null,
           template: {
             id: "template-2",
@@ -221,6 +288,8 @@ describe("handlePublicSseRequest", () => {
             data: "after",
             eventId: "1349872",
             retryMs: null,
+            retryMsTemplate: null,
+            fields: [],
           },
         },
       ],
@@ -255,6 +324,7 @@ describe("handlePublicSseRequest", () => {
           kind: "EVENT",
           delayMs: null,
           script: null,
+          templateValues: [],
           template: null,
           customEvent: {
             eventName: "first",
@@ -268,6 +338,7 @@ describe("handlePublicSseRequest", () => {
           kind: "EVENT",
           delayMs: null,
           script: null,
+          templateValues: [],
           template: null,
           customEvent: {
             eventName: "second",

@@ -23,6 +23,26 @@ const EventSchema = z.object({
   eventId: z.string().nullable().optional(),
   retryMs: z.number().int().nullable().optional(),
 });
+const TemplateFieldSchema = z.object({
+  id: z
+    .string()
+    .nullable()
+    .optional()
+    .describe("Stable field ID; preserve it when renaming an existing field."),
+  key: z
+    .string()
+    .min(1)
+    .describe("Placeholder key used by {{key}} and {{json:key}}."),
+  label: z.string().min(1).describe("Label shown in mock builders."),
+  helpText: z.string().optional().describe("Optional builder guidance."),
+  type: z.enum(["TEXT", "NUMBER", "BOOLEAN", "JSON"]),
+  required: z.boolean(),
+  defaultValue: z.string().nullable().optional(),
+});
+const TemplateValueSchema = z.object({
+  fieldId: z.string().min(1),
+  value: z.string(),
+});
 const EndpointInputSchema = z.object({
   name: z.string().min(1),
   description: z.string().nullable().optional(),
@@ -56,6 +76,7 @@ const BlockSchema = z.object({
   id: z.string().nullable().optional(),
   kind: z.enum(["EVENT", "DELAY", "SCRIPT"]),
   templateId: z.string().nullable().optional(),
+  templateValues: z.array(TemplateValueSchema).optional(),
   customEvent: EventSchema.nullable().optional(),
   delayMs: z.number().int().nullable().optional(),
   script: z.string().nullable().optional(),
@@ -181,7 +202,8 @@ export function createSseToolGroup(service: SseService): BuiltInToolGroup {
       defineTool({
         name: "sse_mock_template_save",
         title: "Save SSE mock template",
-        description: "Create or update a reusable SSE mock event.",
+        description:
+          "Create or update a reusable SSE mock event with ordered typed fields. Use {{key}} for raw values and {{json:key}} for JSON-safe values.",
         inputSchema: z.object({
           endpointId: z.string(),
           id: z.string().nullable().optional(),
@@ -190,6 +212,19 @@ export function createSseToolGroup(service: SseService): BuiltInToolGroup {
           data: z.string(),
           eventId: z.string().nullable().optional(),
           retryMs: z.number().int().nullable().optional(),
+          retryMsTemplate: z
+            .string()
+            .nullable()
+            .optional()
+            .describe(
+              "Placeholder-based retry value; mutually exclusive with retryMs.",
+            ),
+          fields: z
+            .array(TemplateFieldSchema)
+            .optional()
+            .describe(
+              "Ordered template fields. Omit when updating to preserve existing fields; send [] to clear them.",
+            ),
         }),
         outputSchema: ObjectOutput,
         annotations: WRITE_ANNOTATIONS,
