@@ -46,6 +46,7 @@ export function SearchableSelect({
   className,
   showSelectedDetails = false,
   allowCustomValue = false,
+  clearLabel,
 }: {
   value: string;
   onValueChange: (value: string) => void;
@@ -58,6 +59,8 @@ export function SearchableSelect({
   className?: string;
   showSelectedDetails?: boolean;
   allowCustomValue?: boolean;
+  /** When set, shows an option that clears the current non-empty value. */
+  clearLabel?: string;
 }) {
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
@@ -139,6 +142,19 @@ export function SearchableSelect({
           <CommandList className="min-h-0 flex-1 max-h-64 overscroll-contain [scrollbar-width:thin] [&::-webkit-scrollbar]:block [&::-webkit-scrollbar]:w-2 [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-border">
             <CommandEmpty>{emptyMessage}</CommandEmpty>
             <CommandGroup>
+              {clearLabel && value && (
+                <CommandItem
+                  aria-label={clearLabel}
+                  onSelect={() => {
+                    onValueChange("");
+                    setQuery("");
+                    setOpen(false);
+                  }}
+                  value="__clear_selection__"
+                >
+                  {clearLabel}
+                </CommandItem>
+              )}
               {showCustomValue && (
                 <CommandItem
                   aria-label={customValue}

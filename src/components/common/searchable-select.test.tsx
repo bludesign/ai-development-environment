@@ -157,4 +157,16 @@ describe("SearchableSelect", () => {
 
     expect(onValueChange).toHaveBeenCalledWith("APP-404");
   });
+
+  test("clears a selected value when a clear label is provided", () => {
+    const onValueChange = renderSelect(vi.fn(), {
+      clearLabel: "Not set",
+      value: "codex",
+    });
+    openSelect();
+
+    fireEvent.click(screen.getByRole("option", { name: "Not set" }));
+
+    expect(onValueChange).toHaveBeenCalledWith("");
+  });
 });
