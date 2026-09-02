@@ -2780,8 +2780,34 @@ export function emptyWorkflowDefinition(
   });
 }
 
+/**
+ * Removes config written by older workflow editors that current adapters no
+ * longer consume. Keeping these bindings would make validation wait for
+ * session data that cannot affect the step, such as the former Jira summary
+ * companion field on AI run actions.
+ */
+function migrateWorkflowDefinition(
+  definition: WorkflowDefinition,
+): WorkflowDefinition {
+  return {
+    ...definition,
+    nodes: definition.nodes.map((node) => {
+      if (
+        (node.kind === "RUN_CREATE_PLAN" ||
+          node.kind === "RUN_CREATE_SESSION") &&
+        Object.hasOwn(node.config, "jiraSummary")
+      ) {
+        const config = { ...node.config };
+        delete config.jiraSummary;
+        return { ...node, config };
+      }
+      return node;
+    }),
+  };
+}
+
 export function parseWorkflowDefinition(value: unknown): WorkflowDefinition {
-  return workflowDefinitionSchema.parse(value);
+  return migrateWorkflowDefinition(workflowDefinitionSchema.parse(value));
 }
 
 export function sanitizeWorkflowExportDefinition(
@@ -3089,7 +3115,7 @@ export function validateWorkflowDefinition(value: unknown): {
       })),
     };
   }
-  const definition = parsed.data;
+  const definition = migrateWorkflowDefinition(parsed.data);
   const diagnostics: WorkflowDiagnostic[] = [];
   const allIds = new Set<string>();
   for (const item of [...definition.triggers, ...definition.nodes]) {

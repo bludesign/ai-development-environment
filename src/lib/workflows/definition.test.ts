@@ -4,6 +4,7 @@ import { hasConfigDescriptor } from "./config-descriptors";
 import {
   computeWorkflowPathAvailability,
   emptyWorkflowDefinition,
+  parseWorkflowDefinition,
   resourceManualSeedPaths,
   sanitizeWorkflowExportDefinition,
   validateWorkflowDefinition,
@@ -362,6 +363,26 @@ describe("workflow definition validation", () => {
       runId: { source: "SESSION", path: "run.id" },
     };
 
+    expect(validateWorkflowDefinition(value).diagnostics).toEqual([]);
+  });
+
+  test("removes the retired Jira summary binding from AI run actions", () => {
+    const run = node("commit", "RUN_CREATE_SESSION");
+    run.config = {
+      model: "gpt-5",
+      prompt: "Commit the staged changes",
+      jiraSummary: { source: "SESSION", path: "ticket.status" },
+    };
+    const value = definition([run]);
+    value.triggers[0] = {
+      ...value.triggers[0]!,
+      kind: "RESOURCE_MANUAL",
+      config: { resourceKind: "WORKTREE" },
+    };
+
+    expect(parseWorkflowDefinition(value).nodes[0]?.config).not.toHaveProperty(
+      "jiraSummary",
+    );
     expect(validateWorkflowDefinition(value).diagnostics).toEqual([]);
   });
 
