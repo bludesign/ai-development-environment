@@ -276,6 +276,7 @@ function ResourceField({
     scope,
   );
   const resourceSessionPath = source?.sessionPath;
+  const clearLabel = !field.required ? t("notSet") : undefined;
   const resourceSessionPaths = resourceSessionPath
     ? sessionPaths.filter(({ path }) => {
         const [namespace, sessionField] = resourceSessionPath.split(".");
@@ -289,6 +290,7 @@ function ResourceField({
   return (
     <ValueModeField
       allowCustomSessionPath={!resourceSessionPath}
+      clearLabel={clearLabel}
       defaultSessionPath={resourceSessionPath}
       help={field.help}
       interpolationEnabled={interpolationModes(field)}
@@ -302,9 +304,10 @@ function ResourceField({
         <SearchableSelect
           allowCustomValue
           ariaLabel={field.label}
+          clearLabel={clearLabel}
           disabled={loading}
           emptyMessage={t("noOptions")}
-          onValueChange={onLiteral}
+          onValueChange={(next) => onLiteral(next || undefined)}
           options={options}
           placeholder={field.placeholder ?? t("selectPlaceholder")}
           searchPlaceholder={t("searchPlaceholder")}

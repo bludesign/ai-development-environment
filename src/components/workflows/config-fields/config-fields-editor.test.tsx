@@ -1,10 +1,24 @@
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { useState } from "react";
-import { afterEach, describe, expect, test } from "vitest";
+import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 
 import { TooltipProvider } from "@/components/ui/tooltip";
 
 import { ConfigFieldsEditor } from "./config-fields-editor";
+
+vi.mock("./use-resource-options", () => ({
+  useResourceOptions: () => ({
+    options: [{ value: "APP-123", label: "APP-123" }],
+    loading: false,
+    fallback: false,
+  }),
+}));
+
+class ResizeObserverMock {
+  observe() {}
+  unobserve() {}
+  disconnect() {}
+}
 
 function Harness({
   config: initial,
@@ -31,6 +45,11 @@ function Harness({
 }
 
 const config = () => JSON.parse(screen.getByTestId("config").textContent!);
+
+beforeEach(() => {
+  global.ResizeObserver = ResizeObserverMock;
+  Element.prototype.scrollIntoView = vi.fn();
+});
 
 afterEach(() => cleanup());
 
@@ -116,6 +135,20 @@ describe("interactive step configuration", () => {
 
     fireEvent.change(input, { target: { value: "2" } });
     expect(config().worktreeConcurrencyLimit).toBe(2);
+  });
+
+  test("clears an optional Jira issue from a session action", () => {
+    render(
+      <Harness
+        config={{ jiraIssueKey: "APP-123" }}
+        kind="RUN_CREATE_SESSION"
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("combobox", { name: "Jira issue key" }));
+    fireEvent.click(screen.getByRole("option", { name: "Not set" }));
+
+    expect(config().jiraIssueKey).toBeUndefined();
   });
 
   test("preserves structured terminal credential entries while editing", () => {

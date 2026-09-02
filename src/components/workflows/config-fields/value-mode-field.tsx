@@ -127,6 +127,7 @@ export function ValueModeField({
   label,
   help,
   allowCustomSessionPath = true,
+  clearLabel,
   defaultSessionPath,
   sessionEnabled,
   interpolationEnabled = false,
@@ -138,6 +139,7 @@ export function ValueModeField({
   label: string;
   help?: string;
   allowCustomSessionPath?: boolean;
+  clearLabel?: string;
   defaultSessionPath?: string;
   sessionEnabled: boolean;
   interpolationEnabled?: boolean;
@@ -191,8 +193,11 @@ export function ValueModeField({
           <SearchableSelect
             allowCustomValue={allowCustomSessionPath}
             ariaLabel={t("sessionBindingLabel")}
+            clearLabel={clearLabel}
             emptyMessage={t("noOptions")}
-            onValueChange={(path) => onChange({ source: "SESSION", path })}
+            onValueChange={(path) =>
+              onChange(path ? { source: "SESSION", path } : undefined)
+            }
             options={sessionOptions}
             placeholder={t("sessionPathPlaceholder")}
             searchPlaceholder={t("searchPlaceholder")}
