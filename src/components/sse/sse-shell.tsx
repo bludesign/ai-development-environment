@@ -1,0 +1,113 @@
+"use client";
+
+import {
+  Braces,
+  History,
+  Library,
+  RadioTower,
+  ShieldAlert,
+} from "lucide-react";
+
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { Link, usePathname } from "@/i18n/navigation";
+
+const NAVIGATION: Array<{
+  href: string;
+  label: string;
+  icon: typeof RadioTower;
+  exact?: boolean;
+}> = [
+  { href: "/sse", label: "Endpoints", icon: RadioTower, exact: true },
+  { href: "/sse/breakpoints", label: "Breakpoints", icon: ShieldAlert },
+  { href: "/sse/storage", label: "Script storage", icon: Braces },
+  { href: "/sse/history", label: "History", icon: History },
+] as const;
+
+export function SsePageShell({
+  title,
+  description,
+  children,
+  action,
+  badge,
+}: {
+  title: string;
+  description: string;
+  children: React.ReactNode;
+  action?: React.ReactNode;
+  badge?: string;
+}) {
+  const pathname = usePathname();
+  return (
+    <section className="mx-auto flex w-full max-w-[1600px] flex-col gap-6">
+      <div className="flex min-w-0 flex-col items-start gap-4 sm:flex-row sm:justify-between">
+        <div className="min-w-0 flex-1">
+          <div className="flex min-w-0 flex-wrap items-center gap-2">
+            <h1 className="min-w-0 text-2xl font-semibold tracking-tight [overflow-wrap:anywhere]">
+              {title}
+            </h1>
+            {badge ? (
+              <Badge className="shrink-0" variant="secondary">
+                {badge}
+              </Badge>
+            ) : null}
+          </div>
+          <p className="mt-1 max-w-4xl text-sm text-muted-foreground [overflow-wrap:anywhere]">
+            {description}
+          </p>
+        </div>
+        {action}
+      </div>
+      <nav
+        aria-label="SSE sections"
+        className="flex flex-wrap gap-2 border-b pb-3"
+      >
+        {NAVIGATION.map((item) => {
+          const active = item.exact
+            ? pathname === item.href ||
+              /^\/sse\/(?:new|(?!(?:breakpoints|storage|history)$)[^/]+)$/.test(
+                pathname,
+              )
+            : pathname.startsWith(item.href);
+          const Icon = item.icon;
+          return (
+            <Button
+              asChild
+              key={item.href}
+              size="sm"
+              variant={active ? "secondary" : "ghost"}
+            >
+              <Link aria-current={active ? "page" : undefined} href={item.href}>
+                <Icon /> {item.label}
+              </Link>
+            </Button>
+          );
+        })}
+      </nav>
+      <div className="min-w-0 space-y-4">{children}</div>
+    </section>
+  );
+}
+
+export function ModeBadge({ mode }: { mode: string }) {
+  return (
+    <Badge
+      variant={
+        mode === "FORWARD"
+          ? "success"
+          : mode === "MOCK"
+            ? "secondary"
+            : "outline"
+      }
+    >
+      {mode === "BREAKPOINT" ? (
+        <ShieldAlert />
+      ) : mode === "MOCK" ? (
+        <Library />
+      ) : (
+        <RadioTower />
+      )}
+      {mode.toLocaleLowerCase().replace(/^./, (value) => value.toUpperCase())}
+    </Badge>
+  );
+}

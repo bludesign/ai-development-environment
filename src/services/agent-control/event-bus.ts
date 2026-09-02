@@ -122,6 +122,12 @@ export const tailscaleServeOperationChangedTopic = (operationId: string) =>
   `tailscale-serve.operation.${operationId}.changed`;
 export const TELEMETRY_CHANGED_TOPIC = "telemetry.changed";
 export const TELEMETRY_SETTINGS_CHANGED_TOPIC = "telemetry.settings.changed";
+export const SSE_ENDPOINTS_CHANGED_TOPIC = "sse.endpoints.changed";
+export const SSE_STORAGE_CHANGED_TOPIC = "sse.storage.changed";
+export const SSE_BREAKPOINTS_CHANGED_TOPIC = "sse.breakpoints.changed";
+export const SSE_HISTORY_CHANGED_TOPIC = "sse.history.changed";
+export const SSE_REQUEST_HISTORY_CHANGED_TOPIC = "sse.history.requests.changed";
+export const SSE_EVENT_HISTORY_CHANGED_TOPIC = "sse.history.events.changed";
 export const buildTopic = (buildId: string) => `build.${buildId}.changed`;
 export const buildLogChunkTopic = (buildId: string) =>
   `build.${buildId}.log-chunk`;

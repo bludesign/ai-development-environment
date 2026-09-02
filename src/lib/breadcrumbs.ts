@@ -9,6 +9,7 @@ export type BreadcrumbLabelKey =
   | "apps"
   | "buildData"
   | "builds"
+  | "breakpoints"
   | "cache"
   | "changes"
   | "codebases"
@@ -24,10 +25,12 @@ export type BreadcrumbLabelKey =
   | "enroll"
   | "entries"
   | "groups"
+  | "history"
   | "github"
   | "gitlab"
   | "jira"
   | "mergeRequests"
+  | "mocks"
   | "new"
   | "notifications"
   | "plans"
@@ -43,7 +46,9 @@ export type BreadcrumbLabelKey =
   | "settings"
   | "skills"
   | "status"
+  | "scriptStorage"
   | "sync"
+  | "sseEndpoints"
   | "tailscale"
   | "tickets"
   | "tools"
@@ -71,6 +76,7 @@ const STATIC_SEGMENTS: Record<string, BreadcrumbLabelKey> = {
   apps: "apps",
   "build-data": "buildData",
   builds: "builds",
+  breakpoints: "breakpoints",
   cache: "cache",
   changes: "changes",
   codebases: "codebases",
@@ -86,11 +92,13 @@ const STATIC_SEGMENTS: Record<string, BreadcrumbLabelKey> = {
   enroll: "enroll",
   entries: "entries",
   groups: "groups",
+  history: "history",
   github: "github",
   gitlab: "gitlab",
   "github-cache": "cache",
   jira: "jira",
   "merge-requests": "mergeRequests",
+  mocks: "mocks",
   "jira-cache": "cache",
   "jira-webhooks": "webhooks",
   new: "new",
@@ -106,9 +114,11 @@ const STATIC_SEGMENTS: Record<string, BreadcrumbLabelKey> = {
   runs: "runs",
   sessions: "sessions",
   settings: "settings",
+  storage: "scriptStorage",
   skills: "skills",
   status: "status",
   sync: "sync",
+  sse: "sseEndpoints",
   tailscale: "tailscale",
   tickets: "tickets",
   tools: "tools",
@@ -144,6 +154,11 @@ const STATIC_NESTED_PATHS = new Set([
   "/runs/new",
   "/skills/groups",
   "/skills/sync",
+  "/sse/breakpoints",
+  "/sse/history",
+  "/sse/mocks",
+  "/sse/new",
+  "/sse/storage",
   "/workflows/new",
   "/workflows/runs",
 ]);
@@ -156,6 +171,7 @@ const STATIC_NESTED_PATH_PATTERNS = [
   /^\/builds\/[^/]+\/coverage$/,
   /^\/commands\/(?!new(?:\/|$)|runs(?:\/|$))[^/]+\/edit$/,
   /^\/workflows\/(?!new(?:\/|$)|runs(?:\/|$))[^/]+\/edit$/,
+  /^\/sse\/(?!new(?:\/|$)|breakpoints(?:\/|$)|history(?:\/|$)|storage(?:\/|$))[^/]+\/mocks$/,
 ];
 
 const ROUTABLE_STATIC_PATHS = new Set([
@@ -194,6 +210,11 @@ const ROUTABLE_STATIC_PATHS = new Set([
   "/pull-requests",
   "/push-notifications",
   "/sessions",
+  "/sse",
+  "/sse/breakpoints",
+  "/sse/history",
+  "/sse/new",
+  "/sse/storage",
   "/settings",
   "/status",
   "/tailscale",
@@ -222,6 +243,8 @@ const ROUTABLE_DYNAMIC_PATHS = [
   /^\/plans\/[^/]+$/,
   /^\/provisioning-profiles\/[^/]+$/,
   /^\/sessions\/[^/]+$/,
+  /^\/sse\/(?!new$|breakpoints$|history$|storage$)[^/]+$/,
+  /^\/sse\/(?!new$|breakpoints$|history$|storage$)[^/]+\/mocks$/,
   /^\/skills\/(?!groups(?:\/|$)|sync(?:\/|$))[^/]+$/,
   /^\/skills\/groups\/[^/]+$/,
   /^\/workflows\/(?!new$|runs(?:\/|$))[^/]+$/,

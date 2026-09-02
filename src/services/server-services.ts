@@ -37,6 +37,7 @@ import { AppsService } from "@/services/apps";
 import { GlobalSearchService } from "@/services/global-search";
 import { CliHealthService } from "@/services/cli-health";
 import { TailscaleServeService } from "@/services/tailscale";
+import { SseService } from "@/services/sse";
 import {
   WorkflowEventsService,
   WorkflowsService,
@@ -81,6 +82,7 @@ export type ServerServices = {
   globalSearchService: GlobalSearchService;
   cliHealthService: CliHealthService;
   tailscaleServeService: TailscaleServeService;
+  sseService: SseService;
   workflowEventsService: WorkflowEventsService;
   workflowsService: WorkflowsService;
   workflowEventBridge: WorkflowEventBridge;
@@ -90,6 +92,8 @@ function createServerServices(): ServerServices {
   const prismaService = new PrismaService();
   const credentialService = new CredentialService();
   const workflowEventsService = new WorkflowEventsService();
+  const sseService = new SseService(workflowEventsService);
+  sseService.startRuntime();
   const agentControlService = new AgentControlService();
   const notificationsService = new NotificationsService(credentialService);
   const pollingService = new PollingService();
@@ -214,6 +218,7 @@ function createServerServices(): ServerServices {
       signingAssets: signingAssetsService,
       skills: skillsService,
       systemStatus: systemStatusService,
+      sse: sseService,
       // A thunk, not the instance: `workflowsService` is constructed below and
       // takes `toolsService` itself. Resolved when a workflow tool is called.
       workflows: () => workflowsService,
@@ -323,6 +328,7 @@ function createServerServices(): ServerServices {
     globalSearchService,
     cliHealthService,
     tailscaleServeService,
+    sseService,
     toolsService,
     workflowEventsService,
     workflowsService,

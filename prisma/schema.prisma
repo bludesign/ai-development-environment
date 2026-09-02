@@ -3397,3 +3397,226 @@ model WorkflowResourceLease {
   @@index([expiresAt])
   @@index([runId])
 }
+
+model SseEndpoint {
+  id                      String                 @id
+  token                   String                 @unique
+  name                    String
+  description             String                 @default("")
+  mode                    String                 @default("FORWARD")
+  forwardUrl              String
+  requestScript           String                 @default("")
+  responseScript          String                 @default("")
+  activeMockCompositionId String?
+  deliveryBufferMode      String                 @default("STANDARD")
+  historyBufferMode       String                 @default("CONCATENATE")
+  breakpointTimeoutMs     Int                    @default(300000)
+  heartbeatEnabled        Boolean                @default(true)
+  heartbeatIntervalMs     Int                    @default(15000)
+  mockCompletion          String                 @default("CLOSE")
+  requestScriptTimeoutMs  Int                    @default(30000)
+  mockScriptTimeoutMs     Int                    @default(30000)
+  responseScriptTimeoutMs Int                    @default(5000)
+  scriptMemoryLimitMb     Int                    @default(32)
+  fetchTimeoutMs          Int                    @default(15000)
+  requestBodyLimitBytes   Int                    @default(2097152)
+  eventDataLimitBytes     Int                    @default(524288)
+  streamHistoryLimitBytes Int                    @default(52428800)
+  retentionDays           Int                    @default(30)
+  retentionEventLimit     Int                    @default(100000)
+  createdAt               DateTime               @default(now())
+  updatedAt               DateTime               @updatedAt
+  activeMockComposition   SseMockComposition?    @relation("ActiveSseMockComposition", fields: [activeMockCompositionId], references: [id], onDelete: SetNull)
+  eventTemplates          SseMockEventTemplate[]
+  mockCompositions        SseMockComposition[]   @relation("SseEndpointMockCompositions")
+  requests                SseRequestHistory[]
+  breakpoints             SseBreakpoint[]
+
+  @@index([mode, updatedAt])
+}
+
+model SseMockEventTemplate {
+  id              String         @id
+  endpointId      String
+  name            String
+  eventName       String?
+  data            String
+  eventId         String?
+  retryMs         Int?
+  retryMsTemplate String?
+  fieldsJson      String         @default("[]")
+  createdAt       DateTime       @default(now())
+  updatedAt       DateTime       @updatedAt
+  endpoint        SseEndpoint    @relation(fields: [endpointId], references: [id], onDelete: Cascade)
+  blocks          SseMockBlock[]
+
+  @@unique([endpointId, name])
+  @@index([endpointId, updatedAt])
+}
+
+model SseMockComposition {
+  id                   String          @id
+  endpointId           String
+  name                 String
+  statusCode           Int             @default(200)
+  headersJson          String          @default("[]")
+  createdAt            DateTime        @default(now())
+  updatedAt            DateTime        @updatedAt
+  endpoint             SseEndpoint     @relation("SseEndpointMockCompositions", fields: [endpointId], references: [id], onDelete: Cascade)
+  activeForEndpoints   SseEndpoint[]   @relation("ActiveSseMockComposition")
+  blocks               SseMockBlock[]
+  breakpointSelections SseBreakpoint[]
+
+  @@unique([endpointId, name])
+  @@index([endpointId, updatedAt])
+}
+
+model SseMockBlock {
+  id                 String                @id
+  compositionId      String
+  position           Int
+  kind               String
+  templateId         String?
+  delayMs            Int?
+  script             String?
+  eventName          String?
+  eventData          String?
+  eventId            String?
+  retryMs            Int?
+  templateValuesJson String                @default("[]")
+  createdAt          DateTime              @default(now())
+  updatedAt          DateTime              @updatedAt
+  composition        SseMockComposition    @relation(fields: [compositionId], references: [id], onDelete: Cascade)
+  template           SseMockEventTemplate? @relation(fields: [templateId], references: [id], onDelete: SetNull)
+
+  @@unique([compositionId, position])
+  @@index([templateId])
+}
+
+model SseScriptStorageEntry {
+  key       String   @id
+  valueJson String
+  version   Int      @default(1)
+  updatedBy String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([updatedAt])
+}
+
+model SseRequestHistory {
+  id                   String            @id
+  endpointId           String?
+  endpointName         String
+  endpointToken        String
+  mode                 String
+  status               String            @default("OPEN")
+  method               String
+  requestUrl           String
+  requestHeadersJson   String
+  requestBody          String?
+  effectiveUrl         String?
+  effectiveMethod      String?
+  effectiveHeadersJson String?
+  effectiveBody        String?
+  upstreamStatus       Int?
+  upstreamHeadersJson  String?
+  responseStatus       Int?
+  responseHeadersJson  String?
+  breakpointResolution String?
+  outcome              String?
+  error                String?
+  configSnapshotJson   String
+  storedBytes          Int               @default(0)
+  truncated            Boolean           @default(false)
+  startedAt            DateTime          @default(now())
+  firstEventAt         DateTime?
+  finishedAt           DateTime?
+  durationMs           Int?
+  endpoint             SseEndpoint?      @relation(fields: [endpointId], references: [id], onDelete: SetNull)
+  events               SseHistoryEvent[]
+  breakpoint           SseBreakpoint?
+
+  @@index([endpointId, startedAt])
+  @@index([status, startedAt])
+  @@index([mode, startedAt])
+}
+
+model SseHistoryEvent {
+  id            String            @id
+  requestId     String
+  sequence      Int
+  logicalIndex  Int
+  stage         String
+  correlationId String
+  eventName     String
+  data          String
+  eventId       String?
+  retryMs       Int?
+  dropped       Boolean           @default(false)
+  split         Boolean           @default(false)
+  fanOutIndex   Int?
+  truncated     Boolean           @default(false)
+  createdAt     DateTime          @default(now())
+  request       SseRequestHistory @relation(fields: [requestId], references: [id], onDelete: Cascade)
+
+  @@unique([requestId, sequence])
+  @@index([requestId, logicalIndex, stage])
+  @@index([eventName, createdAt])
+  @@index([eventId])
+}
+
+model SseBreakpoint {
+  id                   String              @id
+  requestId            String              @unique
+  endpointId           String?
+  status               String              @default("WAITING")
+  version              Int                 @default(1)
+  resolution           String?
+  mockCompositionId    String?
+  adHocCompositionJson String?
+  expiresAt            DateTime
+  resolvedAt           DateTime?
+  createdAt            DateTime            @default(now())
+  updatedAt            DateTime            @updatedAt
+  request              SseRequestHistory   @relation(fields: [requestId], references: [id], onDelete: Cascade)
+  endpoint             SseEndpoint?        @relation(fields: [endpointId], references: [id], onDelete: SetNull)
+  mockComposition      SseMockComposition? @relation(fields: [mockCompositionId], references: [id], onDelete: SetNull)
+
+  @@index([status, expiresAt])
+  @@index([endpointId, createdAt])
+}
+
+model SseHistoryViewSettings {
+  view                 String   @id
+  columnsJson          String
+  timeFormat           String   @default("TWELVE_HOUR")
+  activeColumnPresetId String?
+  activeSavedFilterId  String?
+  updatedAt            DateTime @updatedAt
+}
+
+model SseHistoryColumnPreset {
+  id          String   @id
+  view        String
+  name        String
+  columnsJson String
+  isDefault   Boolean  @default(false)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@unique([view, name])
+  @@index([view, isDefault])
+}
+
+model SseHistorySavedFilter {
+  id             String   @id
+  view           String
+  name           String
+  definitionJson String
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  @@unique([view, name])
+  @@index([view, updatedAt])
+}

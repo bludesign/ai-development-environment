@@ -1654,6 +1654,23 @@ export const WORKFLOW_STEP_CATALOG: readonly WorkflowCatalogEntry[] = [
       mutatesExternal: true,
     },
   ),
+  ...[
+    ["SSE_ENDPOINT_ACTION", "Manage SSE endpoint"],
+    ["SSE_MOCK_ACTION", "Manage SSE mock"],
+    ["SSE_STORAGE_ACTION", "Manage SSE storage"],
+    ["SSE_BREAKPOINT_RESOLVE", "Resolve SSE breakpoint"],
+    ["SSE_HISTORY_CLEAR", "Clear SSE history"],
+    ["SSE_SCRIPT_TEST", "Test SSE script"],
+  ].map(([kind, label]) =>
+    expansionStep(
+      kind as WorkflowStepKind,
+      "SSE",
+      label,
+      [],
+      ["sse.*", "steps.<stepId>.output"],
+      { mutatesExternal: false },
+    ),
+  ),
 ];
 
 export const WORKFLOW_STEP_BY_KIND = new Map(
@@ -2028,6 +2045,39 @@ const EXPANSION_TRIGGER_CATALOG: WorkflowTriggerCatalogEntry[] = [
   ]),
   expansionTrigger("TOOL_CALL_RESULT", "Tools", "Tool call result", [
     "toolCall.*",
+  ]),
+  expansionTrigger("SSE_REQUEST_OPENED", "SSE", "SSE request opened", [
+    "sse.*",
+    "endpoint.*",
+    "request.*",
+  ]),
+  expansionTrigger("SSE_EVENT_EMITTED", "SSE", "SSE event emitted", [
+    "sse.*",
+    "endpoint.*",
+    "request.*",
+    "event.*",
+  ]),
+  expansionTrigger("SSE_BREAKPOINT_WAITING", "SSE", "SSE breakpoint waiting", [
+    "sse.*",
+    "endpoint.*",
+    "request.*",
+    "breakpoint.*",
+  ]),
+  expansionTrigger(
+    "SSE_BREAKPOINT_RESOLVED",
+    "SSE",
+    "SSE breakpoint resolved",
+    ["sse.*", "endpoint.*", "request.*", "breakpoint.*"],
+  ),
+  expansionTrigger("SSE_STREAM_COMPLETED", "SSE", "SSE stream completed", [
+    "sse.*",
+    "endpoint.*",
+    "request.*",
+  ]),
+  expansionTrigger("SSE_STREAM_FAILED", "SSE", "SSE stream failed", [
+    "sse.*",
+    "endpoint.*",
+    "request.*",
   ]),
 ];
 

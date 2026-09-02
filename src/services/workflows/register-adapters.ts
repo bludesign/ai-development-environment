@@ -3549,6 +3549,161 @@ function registerMiscellaneousAdapters(
           : "SANDBOX",
     }),
   }));
+  const callSseTool = async (
+    context: WorkflowExecutionContext,
+    name: string,
+    argumentsValue: Record<string, unknown>,
+  ): Promise<WorkflowExecutionResult> => {
+    const result = await services.tools.callTool(
+      {
+        groupId: "builtin:sse",
+        name,
+        arguments: argumentsValue,
+      },
+      {
+        caller: `workflow:${context.run.id}`,
+        correlationId: context.attempt.id,
+        source: "WORKFLOW",
+      },
+    );
+    return {
+      output: result,
+      sessionPatch: {
+        sse: { action: result },
+        steps: { [context.node.id]: { output: result } },
+      },
+    };
+  };
+  executor.register("SSE_ENDPOINT_ACTION", async (context) => {
+    const operation = text(
+      context.node.config.operation,
+      "SSE endpoint operation",
+      50,
+    );
+    const endpointId = optionalText(context.node.config.endpointId, 500);
+    const input = object(context.node.config.input ?? {}, "SSE endpoint input");
+    const mapping: Record<
+      string,
+      { name: string; arguments: Record<string, unknown> }
+    > = {
+      CREATE: { name: "sse_endpoint_create", arguments: input },
+      UPDATE: {
+        name: "sse_endpoint_update",
+        arguments: { id: endpointId, endpoint: input },
+      },
+      SET_MODE: {
+        name: "sse_endpoint_set_mode",
+        arguments: { id: endpointId, mode: input.mode },
+      },
+      ROTATE_TOKEN: {
+        name: "sse_endpoint_rotate_token",
+        arguments: { id: endpointId },
+      },
+      DELETE: { name: "sse_endpoint_delete", arguments: { id: endpointId } },
+    };
+    const selected = mapping[operation];
+    if (!selected)
+      throw new Error("Unsupported SSE endpoint workflow operation");
+    if (operation !== "CREATE" && !endpointId)
+      throw new Error("SSE endpoint ID is required");
+    return callSseTool(context, selected.name, selected.arguments);
+  });
+  executor.register("SSE_MOCK_ACTION", async (context) => {
+    const operation = text(
+      context.node.config.operation,
+      "SSE mock operation",
+      50,
+    );
+    const endpointId = optionalText(context.node.config.endpointId, 500);
+    const resourceId = optionalText(context.node.config.resourceId, 500);
+    const input = object(context.node.config.input ?? {}, "SSE mock input");
+    const mapping: Record<
+      string,
+      { name: string; arguments: Record<string, unknown> }
+    > = {
+      SAVE_TEMPLATE: {
+        name: "sse_mock_template_save",
+        arguments: { endpointId, id: resourceId, ...input },
+      },
+      DELETE_TEMPLATE: {
+        name: "sse_mock_template_delete",
+        arguments: { id: resourceId },
+      },
+      SAVE_COMPOSITION: {
+        name: "sse_mock_composition_save",
+        arguments: { endpointId, id: resourceId, composition: input },
+      },
+      ACTIVATE_COMPOSITION: {
+        name: "sse_mock_composition_activate",
+        arguments: { endpointId, compositionId: resourceId },
+      },
+      DELETE_COMPOSITION: {
+        name: "sse_mock_composition_delete",
+        arguments: { id: resourceId },
+      },
+    };
+    const selected = mapping[operation];
+    if (!selected) throw new Error("Unsupported SSE mock workflow operation");
+    return callSseTool(context, selected.name, selected.arguments);
+  });
+  executor.register("SSE_STORAGE_ACTION", async (context) => {
+    const operation = text(
+      context.node.config.operation,
+      "SSE storage operation",
+      50,
+    );
+    const key = text(context.node.config.key, "SSE storage key", 256);
+    const mapping: Record<
+      string,
+      { name: string; arguments: Record<string, unknown> }
+    > = {
+      SET: {
+        name: "sse_storage_set",
+        arguments: { key, value: context.node.config.value },
+      },
+      COMPARE_AND_SET: {
+        name: "sse_storage_compare_and_set",
+        arguments: {
+          key,
+          expectedVersion: context.node.config.expectedVersion ?? null,
+          value: context.node.config.value,
+        },
+      },
+      INCREMENT: {
+        name: "sse_storage_increment",
+        arguments: { key, delta: context.node.config.delta ?? 1 },
+      },
+      DELETE: { name: "sse_storage_delete", arguments: { key } },
+    };
+    const selected = mapping[operation];
+    if (!selected)
+      throw new Error("Unsupported SSE storage workflow operation");
+    return callSseTool(context, selected.name, selected.arguments);
+  });
+  executor.register("SSE_BREAKPOINT_RESOLVE", async (context) =>
+    callSseTool(context, "sse_breakpoint_resolve", {
+      id: text(context.node.config.breakpointId, "SSE breakpoint ID", 500),
+      version: context.node.config.version,
+      resolution: context.node.config.resolution,
+      mockCompositionId: context.node.config.mockCompositionId ?? null,
+      adHocComposition: context.node.config.adHocComposition ?? null,
+    }),
+  );
+  executor.register("SSE_HISTORY_CLEAR", async (context) =>
+    callSseTool(context, "sse_history_clear", {
+      endpointId: context.node.config.endpointId ?? null,
+      ids: context.node.config.ids ?? null,
+    }),
+  );
+  executor.register("SSE_SCRIPT_TEST", async (context) =>
+    callSseTool(context, "sse_script_test", {
+      source: text(context.node.config.source, "SSE script", 100_000),
+      context: context.node.config.context ?? {},
+      timeoutMs: context.node.config.timeoutMs,
+      memoryLimitMb: context.node.config.memoryLimitMb,
+      fetchTimeoutMs: context.node.config.fetchTimeoutMs,
+    }),
+  );
   executor.register("MCP_CALL", async (context) => {
     const result = await services.tools.callTool(
       {

@@ -1,0 +1,1067 @@
+"Operating mode for a hosted SSE endpoint."
+enum SseEndpointMode {
+  "forward enum value."
+  FORWARD
+  "mock enum value."
+  MOCK
+  "breakpoint enum value."
+  BREAKPOINT
+}
+
+"How unnamed SSE data is grouped."
+enum SseBufferMode {
+  "standard enum value."
+  STANDARD
+  "concatenate enum value."
+  CONCATENATE
+  "preserve frames enum value."
+  PRESERVE_FRAMES
+}
+
+"Behavior after a mock composition reaches its final block."
+enum SseMockCompletion {
+  "close enum value."
+  CLOSE
+  "hold enum value."
+  HOLD
+  "loop enum value."
+  LOOP
+}
+
+"Kind of block in a saved SSE mock composition."
+enum SseMockBlockKind {
+  "event enum value."
+  EVENT
+  "delay enum value."
+  DELAY
+  "script enum value."
+  SCRIPT
+}
+
+"Supported value types for reusable SSE template fields."
+enum SseMockTemplateFieldType {
+  "text enum value."
+  TEXT
+  "number enum value."
+  NUMBER
+  "boolean enum value."
+  BOOLEAN
+  "json enum value."
+  JSON
+}
+
+"Available SSE history table granularities."
+enum SseHistoryView {
+  "streams enum value."
+  STREAMS
+  "events enum value."
+  EVENTS
+}
+
+"Stage of an SSE event retained in history."
+enum SseHistoryEventStage {
+  "source enum value."
+  SOURCE
+  "emitted enum value."
+  EMITTED
+  "dropped enum value."
+  DROPPED
+}
+
+"An ordered HTTP header that preserves duplicate values."
+type SseHeader {
+  "name field."
+  name: String!
+  "value field."
+  value: String!
+}
+
+"A reusable event in an endpoint's mock library."
+type SseMockEventTemplate {
+  "id field."
+  id: ID!
+  "endpoint id field."
+  endpointId: ID!
+  "name field."
+  name: String!
+  "event name field."
+  eventName: String
+  "data field."
+  data: String!
+  "event id field."
+  eventId: String
+  "retry ms field."
+  retryMs: Int
+  "Placeholder-based retry value, mutually exclusive with retryMs."
+  retryMsTemplate: String
+  "Ordered parameter definitions used by this template."
+  fields: [SseMockTemplateField!]!
+  "created at field."
+  createdAt: String!
+  "updated at field."
+  updatedAt: String!
+}
+
+"One typed parameter declared by a reusable SSE mock template."
+type SseMockTemplateField {
+  "Stable field identifier."
+  id: ID!
+  "Placeholder key."
+  key: String!
+  "Builder label."
+  label: String!
+  "Optional builder guidance."
+  helpText: String!
+  "Value type."
+  type: SseMockTemplateFieldType!
+  "Whether a value or default is required."
+  required: Boolean!
+  "Validated default value."
+  defaultValue: String
+}
+
+"One saved override for a template field."
+type SseMockTemplateValue {
+  "Stable template field identifier."
+  fieldId: ID!
+  "Validated serialized value."
+  value: String!
+}
+
+"An ordered block in an SSE mock composition."
+type SseMockBlock {
+  "id field."
+  id: ID!
+  "kind field."
+  kind: SseMockBlockKind!
+  "delay ms field."
+  delayMs: Int
+  "script field."
+  script: String
+  "One-off event payload stored directly on this block."
+  customEvent: SseMockEvent
+  "template field."
+  template: SseMockEventTemplate
+  "Per-block template field overrides."
+  templateValues: [SseMockTemplateValue!]!
+}
+
+"An SSE event payload embedded directly in a mock block."
+type SseMockEvent {
+  "event name field."
+  eventName: String
+  "data field."
+  data: String!
+  "event id field."
+  eventId: String
+  "retry ms field."
+  retryMs: Int
+}
+
+"A saved response assembled from event, delay, and script blocks."
+type SseMockComposition {
+  "id field."
+  id: ID!
+  "name field."
+  name: String!
+  "status code field."
+  statusCode: Int!
+  "headers field."
+  headers: [SseHeader!]!
+  "blocks field."
+  blocks: [SseMockBlock!]!
+  "created at field."
+  createdAt: String
+  "updated at field."
+  updatedAt: String
+}
+
+"A hosted SSE proxy, mock, or breakpoint endpoint."
+type SseEndpoint {
+  "id field."
+  id: ID!
+  "token field."
+  token: String!
+  "public url field."
+  publicUrl: String!
+  "name field."
+  name: String!
+  "description field."
+  description: String!
+  "mode field."
+  mode: SseEndpointMode!
+  "forward url field."
+  forwardUrl: String!
+  "request script field."
+  requestScript: String!
+  "response script field."
+  responseScript: String!
+  "active mock composition id field."
+  activeMockCompositionId: ID
+  "active mock composition field."
+  activeMockComposition: SseMockComposition
+  "delivery buffer mode field."
+  deliveryBufferMode: SseBufferMode!
+  "history buffer mode field."
+  historyBufferMode: SseBufferMode!
+  "breakpoint timeout ms field."
+  breakpointTimeoutMs: Int!
+  "heartbeat enabled field."
+  heartbeatEnabled: Boolean!
+  "heartbeat interval ms field."
+  heartbeatIntervalMs: Int!
+  "mock completion field."
+  mockCompletion: SseMockCompletion!
+  "request script timeout ms field."
+  requestScriptTimeoutMs: Int!
+  "mock script timeout ms field."
+  mockScriptTimeoutMs: Int!
+  "response script timeout ms field."
+  responseScriptTimeoutMs: Int!
+  "script memory limit mb field."
+  scriptMemoryLimitMb: Int!
+  "fetch timeout ms field."
+  fetchTimeoutMs: Int!
+  "request body limit bytes field."
+  requestBodyLimitBytes: Int!
+  "event data limit bytes field."
+  eventDataLimitBytes: Int!
+  "stream history limit bytes field."
+  streamHistoryLimitBytes: Int!
+  "retention days field."
+  retentionDays: Int!
+  "retention event limit field."
+  retentionEventLimit: Int!
+  "created at field."
+  createdAt: String!
+  "updated at field."
+  updatedAt: String!
+}
+
+"A versioned JSON value shared by every SSE script."
+type SseStorageEntry {
+  "key field."
+  key: String!
+  "value field."
+  value: JSON!
+  "version field."
+  version: Int!
+  "updated by field."
+  updatedBy: String
+  "created at field."
+  createdAt: String!
+  "updated at field."
+  updatedAt: String!
+}
+
+"One hosted SSE request and stream lifecycle."
+type SseRequestHistory {
+  "id field."
+  id: ID!
+  "endpoint id field."
+  endpointId: ID
+  "endpoint name field."
+  endpointName: String!
+  "endpoint token field."
+  endpointToken: String!
+  "mode field."
+  mode: SseEndpointMode!
+  "status field."
+  status: String!
+  "method field."
+  method: String!
+  "request url field."
+  requestUrl: String!
+  "request headers field."
+  requestHeaders: [SseHeader!]!
+  "request body field."
+  requestBody: String
+  "effective url field."
+  effectiveUrl: String
+  "effective method field."
+  effectiveMethod: String
+  "effective headers field."
+  effectiveHeaders: [SseHeader!]!
+  "effective body field."
+  effectiveBody: String
+  "upstream status field."
+  upstreamStatus: Int
+  "upstream headers field."
+  upstreamHeaders: [SseHeader!]!
+  "response status field."
+  responseStatus: Int
+  "response headers field."
+  responseHeaders: [SseHeader!]!
+  "breakpoint resolution field."
+  breakpointResolution: String
+  "outcome field."
+  outcome: String
+  "error field."
+  error: String
+  "config snapshot field."
+  configSnapshot: JSON!
+  "stored bytes field."
+  storedBytes: Int!
+  "truncated field."
+  truncated: Boolean!
+  "event count field."
+  eventCount: Int!
+  "started at field."
+  startedAt: String!
+  "first event at field."
+  firstEventAt: String
+  "finished at field."
+  finishedAt: String
+  "duration ms field."
+  durationMs: Int
+  "events field."
+  events: [SseHistoryEvent!]
+}
+
+"A source, emitted, or dropped SSE history event."
+type SseHistoryEvent {
+  "id field."
+  id: ID!
+  "request id field."
+  requestId: ID!
+  "request field."
+  request: SseRequestHistory!
+  "sequence field."
+  sequence: Int!
+  "logical index field."
+  logicalIndex: Int!
+  "stage field."
+  stage: SseHistoryEventStage!
+  "correlation id field."
+  correlationId: String!
+  "event name field."
+  eventName: String!
+  "data field."
+  data: String!
+  "event id field."
+  eventId: String
+  "retry ms field."
+  retryMs: Int
+  "dropped field."
+  dropped: Boolean!
+  "split field."
+  split: Boolean!
+  "fan out index field."
+  fanOutIndex: Int
+  "truncated field."
+  truncated: Boolean!
+  "created at field."
+  createdAt: String!
+}
+
+"A page of SSE streams or event records."
+type SseHistoryPage {
+  "view field."
+  view: SseHistoryView!
+  "streams field."
+  streams: [SseRequestHistory!]!
+  "events field."
+  events: [SseHistoryEvent!]!
+  "next cursor field."
+  nextCursor: String
+  "matching count field."
+  matchingCount: Int!
+  "total count field."
+  totalCount: Int!
+}
+
+"A request currently paused for interactive resolution."
+type SseBreakpoint {
+  "id field."
+  id: ID!
+  "request id field."
+  requestId: ID!
+  "endpoint id field."
+  endpointId: ID
+  "status field."
+  status: String!
+  "version field."
+  version: Int!
+  "resolution field."
+  resolution: String
+  "mock composition id field."
+  mockCompositionId: ID
+  "ad hoc composition field."
+  adHocComposition: JSON
+  "expires at field."
+  expiresAt: String!
+  "resolved at field."
+  resolvedAt: String
+  "created at field."
+  createdAt: String!
+  "updated at field."
+  updatedAt: String!
+  "request field."
+  request: SseRequestHistory!
+}
+
+"Captured result from a non-persistent SSE script test."
+type SseScriptTestResult {
+  "result field."
+  result: JSON
+  "result defined field."
+  resultDefined: Boolean!
+  "context field."
+  context: JSON!
+  "console field."
+  console: JSON!
+  "storage writes field."
+  storageWrites: JSON!
+  "duration ms field."
+  durationMs: Int!
+}
+
+"Saved SSE history table preferences."
+type SseHistoryViewSettings {
+  "view field."
+  view: SseHistoryView!
+  "columns field."
+  columns: [String!]!
+  "time format field."
+  timeFormat: String!
+  "active column preset id field."
+  activeColumnPresetId: ID
+  "active saved filter id field."
+  activeSavedFilterId: ID
+}
+
+"A reusable SSE history column configuration."
+type SseHistoryColumnPreset {
+  "id field."
+  id: ID!
+  "view field."
+  view: SseHistoryView!
+  "name field."
+  name: String!
+  "columns field."
+  columns: [String!]!
+  "is default field."
+  isDefault: Boolean!
+  "created at field."
+  createdAt: String!
+  "updated at field."
+  updatedAt: String!
+}
+
+"A saved SSE history filter definition."
+type SseHistorySavedFilter {
+  "id field."
+  id: ID!
+  "view field."
+  view: SseHistoryView!
+  "name field."
+  name: String!
+  "definition field."
+  definition: JSON!
+  "created at field."
+  createdAt: String!
+  "updated at field."
+  updatedAt: String!
+}
+
+"A live invalidation for SSE control-plane data."
+type SseChange {
+  "reason field."
+  reason: String!
+  "ids field."
+  ids: [ID!]!
+}
+
+"A cursor-paginated page of hosted SSE endpoints."
+type SseEndpointPage {
+  "Endpoints in the current page."
+  nodes: [SseEndpoint!]!
+  "Cursor for the next page, or null at the end."
+  nextCursor: String
+  "Total endpoint count before pagination."
+  totalCount: Int!
+}
+
+"A cursor-paginated page of reusable mock event templates."
+type SseMockEventTemplatePage {
+  "Templates in the current page."
+  nodes: [SseMockEventTemplate!]!
+  "Cursor for the next page, or null at the end."
+  nextCursor: String
+  "Total template count before pagination."
+  totalCount: Int!
+}
+
+"A cursor-paginated page of saved mock compositions."
+type SseMockCompositionPage {
+  "Compositions in the current page."
+  nodes: [SseMockComposition!]!
+  "Cursor for the next page, or null at the end."
+  nextCursor: String
+  "Total composition count before pagination."
+  totalCount: Int!
+}
+
+"A cursor-paginated page of global script storage entries."
+type SseStorageEntryPage {
+  "Storage entries in the current page."
+  nodes: [SseStorageEntry!]!
+  "Cursor for the next page, or null at the end."
+  nextCursor: String
+  "Total storage entry count before pagination."
+  totalCount: Int!
+}
+
+"A cursor-paginated page of breakpoint requests."
+type SseBreakpointPage {
+  "Breakpoints in the current page."
+  nodes: [SseBreakpoint!]!
+  "Cursor for the next page, or null at the end."
+  nextCursor: String
+  "Total breakpoint count before pagination."
+  totalCount: Int!
+}
+
+"One filterable value exposed by SSE history."
+type SseHistoryFacet {
+  "Facet category such as endpoint, mode, status, or event name."
+  kind: String!
+  "Stable value used in a history filter."
+  value: String!
+  "Human-readable value shown by clients."
+  label: String!
+  "Endpoint ID for endpoint facets."
+  endpointId: ID
+  "Number of matching stream or event records."
+  count: Int!
+}
+
+"A cursor-paginated page of SSE history facet values."
+type SseHistoryFacetPage {
+  "Facet values in the current page."
+  nodes: [SseHistoryFacet!]!
+  "Cursor for the next page, or null at the end."
+  nextCursor: String
+  "Total facet count before pagination."
+  totalCount: Int!
+}
+
+"A cursor-paginated page of history column presets."
+type SseHistoryColumnPresetPage {
+  "Column presets in the current page."
+  nodes: [SseHistoryColumnPreset!]!
+  "Cursor for the next page, or null at the end."
+  nextCursor: String
+  "Total preset count before pagination."
+  totalCount: Int!
+}
+
+"A cursor-paginated page of saved history filters."
+type SseHistorySavedFilterPage {
+  "Saved filters in the current page."
+  nodes: [SseHistorySavedFilter!]!
+  "Cursor for the next page, or null at the end."
+  nextCursor: String
+  "Total saved filter count before pagination."
+  totalCount: Int!
+}
+
+"An ordered HTTP header input."
+input SseHeaderInput {
+  "name input value."
+  name: String!
+  "value input value."
+  value: String!
+}
+
+"Editable fields for an SSE endpoint."
+input SseEndpointInput {
+  "name input value."
+  name: String!
+  "description input value."
+  description: String
+  "forward url input value."
+  forwardUrl: String!
+  "mode input value."
+  mode: SseEndpointMode
+  "request script input value."
+  requestScript: String
+  "response script input value."
+  responseScript: String
+  "active mock composition id input value."
+  activeMockCompositionId: ID
+  "delivery buffer mode input value."
+  deliveryBufferMode: SseBufferMode
+  "history buffer mode input value."
+  historyBufferMode: SseBufferMode
+  "breakpoint timeout ms input value."
+  breakpointTimeoutMs: Int
+  "heartbeat enabled input value."
+  heartbeatEnabled: Boolean
+  "heartbeat interval ms input value."
+  heartbeatIntervalMs: Int
+  "mock completion input value."
+  mockCompletion: SseMockCompletion
+  "request script timeout ms input value."
+  requestScriptTimeoutMs: Int
+  "mock script timeout ms input value."
+  mockScriptTimeoutMs: Int
+  "response script timeout ms input value."
+  responseScriptTimeoutMs: Int
+  "script memory limit mb input value."
+  scriptMemoryLimitMb: Int
+  "fetch timeout ms input value."
+  fetchTimeoutMs: Int
+  "request body limit bytes input value."
+  requestBodyLimitBytes: Int
+  "event data limit bytes input value."
+  eventDataLimitBytes: Int
+  "stream history limit bytes input value."
+  streamHistoryLimitBytes: Int
+  "retention days input value."
+  retentionDays: Int
+  "retention event limit input value."
+  retentionEventLimit: Int
+}
+
+"Editable reusable SSE mock event fields."
+input SseMockEventTemplateInput {
+  "id input value."
+  id: ID
+  "name input value."
+  name: String!
+  "event name input value."
+  eventName: String
+  "data input value."
+  data: String!
+  "event id input value."
+  eventId: String
+  "retry ms input value."
+  retryMs: Int
+  "Placeholder-based retry input, mutually exclusive with retryMs."
+  retryMsTemplate: String
+  "Ordered template field definitions. Omit to preserve existing fields."
+  fields: [SseMockTemplateFieldInput!]
+}
+
+"Editable reusable SSE mock template field."
+input SseMockTemplateFieldInput {
+  "Stable field identifier; generated when omitted."
+  id: ID
+  "Placeholder key."
+  key: String!
+  "Builder label."
+  label: String!
+  "Optional builder guidance."
+  helpText: String
+  "Value type."
+  type: SseMockTemplateFieldType!
+  "Whether a value or default is required."
+  required: Boolean!
+  "Validated default value."
+  defaultValue: String
+}
+
+"Editable per-block template field override."
+input SseMockTemplateValueInput {
+  "Stable template field identifier."
+  fieldId: ID!
+  "Serialized value."
+  value: String!
+}
+
+"Editable mock composition block fields."
+input SseMockBlockInput {
+  "id input value."
+  id: ID
+  "kind input value."
+  kind: SseMockBlockKind!
+  "template id input value."
+  templateId: ID
+  "Per-block template field overrides."
+  templateValues: [SseMockTemplateValueInput!]
+  "One-off event payload that does not create a reusable template."
+  customEvent: SseMockEventInput
+  "delay ms input value."
+  delayMs: Int
+  "script input value."
+  script: String
+}
+
+"Editable event fields embedded directly in a mock block."
+input SseMockEventInput {
+  "event name input value."
+  eventName: String
+  "data input value."
+  data: String!
+  "event id input value."
+  eventId: String
+  "retry ms input value."
+  retryMs: Int
+}
+
+"Editable saved or ad hoc SSE mock composition fields."
+input SseMockCompositionInput {
+  "name input value."
+  name: String!
+  "status code input value."
+  statusCode: Int
+  "headers input value."
+  headers: [SseHeaderInput!]
+  "blocks input value."
+  blocks: [SseMockBlockInput!]!
+}
+
+"Filters and pagination for SSE history."
+input SseHistoryQueryInput {
+  "view input value."
+  view: SseHistoryView = STREAMS
+  "first input value."
+  first: Int = 100
+  "after input value."
+  after: String
+  "endpoint id input value."
+  endpointId: ID
+  "modes input value."
+  modes: [SseEndpointMode!]
+  "statuses input value."
+  statuses: [String!]
+  "event names input value."
+  eventNames: [String!]
+  "event stages input value."
+  stages: [SseHistoryEventStage!]
+  "search input value."
+  search: String
+  "search mode input value."
+  searchMode: String = "TEXT"
+  "case sensitive input value."
+  caseSensitive: Boolean = false
+}
+
+"Versioned resolution for a waiting SSE breakpoint."
+input SseBreakpointResolutionInput {
+  "id input value."
+  id: ID!
+  "version input value."
+  version: Int!
+  "resolution input value."
+  resolution: String!
+  "mock composition id input value."
+  mockCompositionId: ID
+  "ad hoc composition input value."
+  adHocComposition: SseMockCompositionInput
+}
+
+"Input for testing an SSE script without committing storage writes."
+input SseScriptTestInput {
+  "source input value."
+  source: String!
+  "context input value."
+  context: JSON
+  "timeout ms input value."
+  timeoutMs: Int
+  "memory limit mb input value."
+  memoryLimitMb: Int
+  "fetch timeout ms input value."
+  fetchTimeoutMs: Int
+}
+
+"Editable SSE history view preferences."
+input SseHistoryViewSettingsInput {
+  "view input value."
+  view: SseHistoryView!
+  "columns input value."
+  columns: [String!]
+  "time format input value."
+  timeFormat: String
+  "active column preset id input value."
+  activeColumnPresetId: ID
+  "active saved filter id input value."
+  activeSavedFilterId: ID
+}
+
+"Editable SSE history column preset."
+input SseHistoryColumnPresetInput {
+  "id input value."
+  id: ID
+  "view input value."
+  view: SseHistoryView!
+  "name input value."
+  name: String!
+  "columns input value."
+  columns: [String!]!
+  "is default input value."
+  isDefault: Boolean
+}
+
+"Editable SSE history saved filter."
+input SseHistorySavedFilterInput {
+  "id input value."
+  id: ID
+  "view input value."
+  view: SseHistoryView!
+  "name input value."
+  name: String!
+  "definition input value."
+  definition: JSON!
+}
+
+extend type Query {
+  "sse endpoints field."
+  sseEndpoints(
+    "request origin input value."
+    requestOrigin: String
+  ): [SseEndpoint!]!
+  "Return a cursor-paginated page of hosted SSE endpoints."
+  sseEndpointPage(
+    "Maximum nodes to return."
+    first: Int = 100
+    "Cursor returned by the previous page."
+    after: String
+    "Origin used to build absolute public endpoint URLs."
+    requestOrigin: String
+  ): SseEndpointPage!
+  "sse endpoint field."
+  sseEndpoint(
+    "id input value."
+    id: ID!
+    "request origin input value."
+    requestOrigin: String
+  ): SseEndpoint
+  "sse mock event templates field."
+  sseMockEventTemplates(
+    "endpoint id input value."
+    endpointId: ID!
+  ): [SseMockEventTemplate!]!
+  "Return a cursor-paginated endpoint-scoped template library."
+  sseMockEventTemplatePage(
+    "Endpoint that owns the templates."
+    endpointId: ID!
+    "Maximum nodes to return."
+    first: Int = 100
+    "Cursor returned by the previous page."
+    after: String
+  ): SseMockEventTemplatePage!
+  "sse mock compositions field."
+  sseMockCompositions(
+    "endpoint id input value."
+    endpointId: ID!
+  ): [SseMockComposition!]!
+  "Return a cursor-paginated endpoint-scoped mock library."
+  sseMockCompositionPage(
+    "Endpoint that owns the compositions."
+    endpointId: ID!
+    "Maximum nodes to return."
+    first: Int = 100
+    "Cursor returned by the previous page."
+    after: String
+  ): SseMockCompositionPage!
+  "sse storage entries field."
+  sseStorageEntries: [SseStorageEntry!]!
+  "Return a cursor-paginated page of shared global storage."
+  sseStorageEntryPage(
+    "Maximum nodes to return."
+    first: Int = 100
+    "Cursor returned by the previous page."
+    after: String
+  ): SseStorageEntryPage!
+  "sse breakpoints field."
+  sseBreakpoints("status input value." status: String): [SseBreakpoint!]!
+  "Return a cursor-paginated page of pending or resolved breakpoints."
+  sseBreakpointPage(
+    "Optional breakpoint status filter."
+    status: String
+    "Maximum nodes to return."
+    first: Int = 100
+    "Cursor returned by the previous page."
+    after: String
+  ): SseBreakpointPage!
+  "sse history field."
+  sseHistory("input input value." input: SseHistoryQueryInput!): SseHistoryPage!
+  "sse history request field."
+  sseHistoryRequest("id input value." id: ID!): SseRequestHistory
+  "sse history facets field."
+  sseHistoryFacets: JSON!
+  "Return cursor-paginated endpoint, mode, status, and event-name facets."
+  sseHistoryFacetPage(
+    "Maximum nodes to return."
+    first: Int = 100
+    "Cursor returned by the previous page."
+    after: String
+  ): SseHistoryFacetPage!
+  "sse history view settings field."
+  sseHistoryViewSettings(
+    "view input value."
+    view: SseHistoryView!
+  ): SseHistoryViewSettings!
+  "sse history column presets field."
+  sseHistoryColumnPresets(
+    "view input value."
+    view: SseHistoryView!
+  ): [SseHistoryColumnPreset!]!
+  "Return cursor-paginated history column presets for a view."
+  sseHistoryColumnPresetPage(
+    "History view that owns the presets."
+    view: SseHistoryView!
+    "Maximum nodes to return."
+    first: Int = 100
+    "Cursor returned by the previous page."
+    after: String
+  ): SseHistoryColumnPresetPage!
+  "sse history saved filters field."
+  sseHistorySavedFilters(
+    "view input value."
+    view: SseHistoryView!
+  ): [SseHistorySavedFilter!]!
+  "Return cursor-paginated saved history filters for a view."
+  sseHistorySavedFilterPage(
+    "History view that owns the filters."
+    view: SseHistoryView!
+    "Maximum nodes to return."
+    first: Int = 100
+    "Cursor returned by the previous page."
+    after: String
+  ): SseHistorySavedFilterPage!
+}
+
+extend type Mutation {
+  "create sse endpoint field."
+  createSseEndpoint(
+    "input input value."
+    input: SseEndpointInput!
+    "request origin input value."
+    requestOrigin: String
+  ): SseEndpoint!
+  "update sse endpoint field."
+  updateSseEndpoint(
+    "id input value."
+    id: ID!
+    "input input value."
+    input: SseEndpointInput!
+    "request origin input value."
+    requestOrigin: String
+  ): SseEndpoint!
+  "delete sse endpoint field."
+  deleteSseEndpoint("id input value." id: ID!): Boolean!
+  "rotate sse endpoint token field."
+  rotateSseEndpointToken(
+    "id input value."
+    id: ID!
+    "request origin input value."
+    requestOrigin: String
+  ): SseEndpoint!
+  "set sse endpoint mode field."
+  setSseEndpointMode(
+    "id input value."
+    id: ID!
+    "mode input value."
+    mode: SseEndpointMode!
+    "request origin input value."
+    requestOrigin: String
+  ): SseEndpoint!
+  "save sse mock event template field."
+  saveSseMockEventTemplate(
+    "endpoint id input value."
+    endpointId: ID!
+    "input input value."
+    input: SseMockEventTemplateInput!
+  ): SseMockEventTemplate!
+  "delete sse mock event template field."
+  deleteSseMockEventTemplate("id input value." id: ID!): Boolean!
+  "save sse mock composition field."
+  saveSseMockComposition(
+    "endpoint id input value."
+    endpointId: ID!
+    "id input value."
+    id: ID
+    "input input value."
+    input: SseMockCompositionInput!
+  ): SseMockComposition!
+  "delete sse mock composition field."
+  deleteSseMockComposition("id input value." id: ID!): Boolean!
+  "activate sse mock composition field."
+  activateSseMockComposition(
+    "endpoint id input value."
+    endpointId: ID!
+    "composition id input value."
+    compositionId: ID
+    "request origin input value."
+    requestOrigin: String
+  ): SseEndpoint!
+  "set sse storage value field."
+  setSseStorageValue(
+    "key input value."
+    key: String!
+    "value input value."
+    value: JSON!
+  ): SseStorageEntry!
+  "compare and set sse storage value field."
+  compareAndSetSseStorageValue(
+    "key input value."
+    key: String!
+    "expected version input value."
+    expectedVersion: Int
+    "value input value."
+    value: JSON!
+  ): SseStorageEntry!
+  "increment sse storage value field."
+  incrementSseStorageValue(
+    "key input value."
+    key: String!
+    "delta input value."
+    delta: Float!
+  ): SseStorageEntry!
+  "delete sse storage value field."
+  deleteSseStorageValue("key input value." key: String!): Boolean!
+  "resolve sse breakpoint field."
+  resolveSseBreakpoint(
+    "input input value."
+    input: SseBreakpointResolutionInput!
+  ): SseBreakpoint!
+  "clear sse history field."
+  clearSseHistory(
+    "ids input value."
+    ids: [ID!]
+    "endpoint id input value."
+    endpointId: ID
+  ): Int!
+  "test sse script field."
+  testSseScript(
+    "input input value."
+    input: SseScriptTestInput!
+  ): SseScriptTestResult!
+  "save sse history view settings field."
+  saveSseHistoryViewSettings(
+    "input input value."
+    input: SseHistoryViewSettingsInput!
+  ): SseHistoryViewSettings!
+  "save sse history column preset field."
+  saveSseHistoryColumnPreset(
+    "input input value."
+    input: SseHistoryColumnPresetInput!
+  ): SseHistoryColumnPreset!
+  "delete sse history column preset field."
+  deleteSseHistoryColumnPreset("id input value." id: ID!): Boolean!
+  "save sse history saved filter field."
+  saveSseHistorySavedFilter(
+    "input input value."
+    input: SseHistorySavedFilterInput!
+  ): SseHistorySavedFilter!
+  "delete sse history saved filter field."
+  deleteSseHistorySavedFilter("id input value." id: ID!): Boolean!
+}
+
+extend type Subscription {
+  "sse endpoints changed field."
+  sseEndpointsChanged: SseChange!
+  "sse storage changed field."
+  sseStorageChanged: SseChange!
+  "sse breakpoints changed field."
+  sseBreakpointsChanged: SseChange!
+  "sse history changed field."
+  sseHistoryChanged: SseChange!
+  "A request stream was opened, completed, failed, cancelled, or cleared."
+  sseRequestHistoryChanged: SseChange!
+  "A source, emitted, dropped, split, or ID-backfilled event record changed."
+  sseEventHistoryChanged: SseChange!
+}
