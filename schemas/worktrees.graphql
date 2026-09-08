@@ -942,6 +942,8 @@ extend type Query {
   worktreePreparationOverview: WorktreePreparationOverview!
   "Returns a worktree overview."
   worktreeOverview(
+    "Scope to the repository containing this worktree, including sibling checkouts needed for move destinations."
+    worktreeId: ID
     "Identifier of an app whose assigned repositories should scope the results."
     appId: ID
   ): WorktreeOverview!

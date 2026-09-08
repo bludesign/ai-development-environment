@@ -18,8 +18,9 @@ vi.mock("next/navigation", () => ({
 }));
 
 vi.mock("@/lib/control-plane-client", () => ({
+  onControlPlaneRecovery: vi.fn(() => vi.fn()),
   controlPlaneRequest: vi.fn(),
-  controlPlaneSubscriptions: () => ({ subscribe: vi.fn() }),
+  controlPlaneSubscriptions: () => ({ subscribe: vi.fn(() => vi.fn()) }),
 }));
 
 const requestMock = vi.mocked(controlPlaneRequest);
@@ -137,7 +138,7 @@ beforeEach(() => {
   intersectionObserver = null;
   window.history.replaceState(null, "", "/actions");
   requestMock.mockImplementation(async (query, variables) => {
-    if (query.includes("GitHubActionsConfiguration")) {
+    if (query.includes("GitHubPageConfiguration")) {
       return {
         githubSettings: {
           tokenConfigured: true,
@@ -223,7 +224,7 @@ afterEach(() => {
 describe("ActionsPage", () => {
   test("tints the row of a run whose worktree has a highlight", async () => {
     requestMock.mockImplementation(async (query) => {
-      if (query.includes("GitHubActionsConfiguration")) {
+      if (query.includes("GitHubPageConfiguration")) {
         return {
           githubSettings: {
             tokenConfigured: true,
@@ -277,7 +278,7 @@ describe("ActionsPage", () => {
 
   test("keeps paginated runs in creation order when an older run starts later", async () => {
     requestMock.mockImplementation(async (query, variables) => {
-      if (query.includes("GitHubActionsConfiguration")) {
+      if (query.includes("GitHubPageConfiguration")) {
         return {
           githubSettings: {
             tokenConfigured: true,
@@ -367,7 +368,7 @@ describe("ActionsPage", () => {
     credentialView.unmount();
 
     requestMock.mockImplementation(async (query) => {
-      if (query.includes("GitHubActionsConfiguration")) {
+      if (query.includes("GitHubPageConfiguration")) {
         return {
           githubSettings: {
             tokenConfigured: true,

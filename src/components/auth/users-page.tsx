@@ -1,6 +1,12 @@
 "use client";
 
-import { useCallback, useEffect, useState, type FormEvent } from "react";
+import {
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+  type FormEvent,
+} from "react";
 import {
   Laptop,
   Pencil,
@@ -67,21 +73,6 @@ type UserDraft = {
 
 const emptyDraft = (): UserDraft => ({ name: "", email: "", password: "" });
 
-async function usersData(search = ""): Promise<{
-  users: UsersResponse;
-  config: AuthConfig;
-}> {
-  const [users, config] = await Promise.all([
-    authManagementRequest<UsersResponse>(
-      `users${search ? `?search=${encodeURIComponent(search)}` : ""}`,
-    ),
-    fetch("/api/auth/config").then(
-      (response) => response.json() as Promise<AuthConfig>,
-    ),
-  ]);
-  return { users, config };
-}
-
 export function UsersPage() {
   const t = useTranslations("userManagement");
   const common = useTranslations("common");
@@ -95,41 +86,60 @@ export function UsersPage() {
   const [saving, setSaving] = useState(false);
   const [deleting, setDeleting] = useState<User | null>(null);
 
+  const activeLoad = useRef<AbortController | null>(null);
+  const configLoad = useRef<AbortController | null>(null);
+  const loadConfiguration = useCallback(async () => {
+    configLoad.current?.abort();
+    const controller = new AbortController();
+    configLoad.current = controller;
+    try {
+      const response = await fetch("/api/auth/config", {
+        signal: controller.signal,
+      });
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      const config = (await response.json()) as AuthConfig;
+      if (!controller.signal.aborted) setConfiguration(config);
+    } catch (value) {
+      if (!controller.signal.aborted)
+        setError(value instanceof Error ? value.message : String(value));
+    }
+  }, []);
   const load = useCallback(async (search = "") => {
+    activeLoad.current?.abort();
+    const controller = new AbortController();
+    activeLoad.current = controller;
     setLoading(true);
     setError(null);
     try {
-      const { users, config } = await usersData(search);
-      setData(users);
-      setConfiguration(config);
+      const users = await authManagementRequest<UsersResponse>(
+        `users${search ? `?search=${encodeURIComponent(search)}` : ""}`,
+        { signal: controller.signal },
+      );
+      if (!controller.signal.aborted) setData(users);
     } catch (value) {
-      setError(value instanceof Error ? value.message : String(value));
+      if (!controller.signal.aborted)
+        setError(value instanceof Error ? value.message : String(value));
     } finally {
-      setLoading(false);
+      if (!controller.signal.aborted) setLoading(false);
     }
   }, []);
 
   useEffect(() => {
-    let cancelled = false;
-    void usersData()
-      .then(({ users, config }) => {
-        if (!cancelled) {
-          setData(users);
-          setConfiguration(config);
-        }
-      })
-      .catch((value: unknown) => {
-        if (!cancelled) {
-          setError(value instanceof Error ? value.message : String(value));
-        }
-      })
-      .finally(() => {
-        if (!cancelled) setLoading(false);
-      });
+    const timer = window.setTimeout(() => void loadConfiguration(), 0);
     return () => {
-      cancelled = true;
+      window.clearTimeout(timer);
+      configLoad.current?.abort();
     };
-  }, []);
+  }, [loadConfiguration]);
+  useEffect(() => {
+    // Abort as soon as the filter changes, including during the debounce.
+    activeLoad.current?.abort();
+    const timer = window.setTimeout(() => void load(query), query ? 200 : 0);
+    return () => {
+      window.clearTimeout(timer);
+      activeLoad.current?.abort();
+    };
+  }, [load, query]);
 
   function openEditor(user: User | "new") {
     setEditor(user);
@@ -213,7 +223,10 @@ export function UsersPage() {
         <div className="flex flex-wrap gap-2">
           <Button
             disabled={loading}
-            onClick={() => void load(query)}
+            onClick={() => {
+              void load(query);
+              void loadConfiguration();
+            }}
             variant="outline"
           >
             {loading ? <Spinner /> : <RefreshCw />}
@@ -266,7 +279,6 @@ export function UsersPage() {
           className="pl-9"
           onChange={(event) => {
             setQuery(event.target.value);
-            void load(event.target.value);
           }}
           placeholder={t("searchPlaceholder")}
           value={query}

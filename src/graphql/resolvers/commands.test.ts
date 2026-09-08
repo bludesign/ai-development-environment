@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, test } from "vitest";
+import { afterEach, describe, expect, test, vi } from "vitest";
 
 import {
   COMMAND_RUNS_CHANGED_TOPIC,
@@ -6,6 +6,28 @@ import {
 } from "@/services/agent-control";
 
 import { createCommandResolvers } from "./commands";
+
+test("batched command summaries require control-plane credentials and preserve input", async () => {
+  const targetSummaries = vi.fn().mockResolvedValue([]);
+  const resolvers = createCommandResolvers({ targetSummaries } as never);
+  const targets = [
+    {
+      resourceKind: "AGENT" as const,
+      resourceId: "agent",
+      includeRecentRuns: true,
+    },
+  ];
+  expect(() =>
+    resolvers.Query.commandTargetSummaries(null, { targets }, {
+      agentId: "agent",
+    } as never),
+  ).toThrow("Agent credentials");
+  expect(targetSummaries).not.toHaveBeenCalled();
+  await expect(
+    resolvers.Query.commandTargetSummaries(null, { targets }, {} as never),
+  ).resolves.toEqual([]);
+  expect(targetSummaries).toHaveBeenCalledWith(targets);
+});
 
 describe("command run subscriptions", () => {
   const iterators: AsyncIterableIterator<unknown>[] = [];

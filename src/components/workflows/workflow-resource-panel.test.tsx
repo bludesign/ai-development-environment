@@ -18,6 +18,7 @@ import { WorkflowResourcePanel } from "./workflow-resource-panel";
 const routerPush = vi.hoisted(() => vi.fn());
 
 vi.mock("@/lib/control-plane-client", () => ({
+  onControlPlaneRecovery: vi.fn(() => vi.fn()),
   controlPlaneRequest: vi.fn(),
   controlPlaneSubscriptions: vi.fn(),
 }));

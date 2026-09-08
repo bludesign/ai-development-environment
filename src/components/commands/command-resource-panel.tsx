@@ -2,7 +2,7 @@
 
 import { Play } from "lucide-react";
 import { useTranslations } from "next-intl";
-import { useEffect, useState } from "react";
+import { useState } from "react";
 
 import { DateTime } from "@/components/common/date-time";
 import { Alert, AlertDescription } from "@/components/ui/alert";
@@ -18,14 +18,11 @@ import {
 import { Link, useRouter } from "@/i18n/navigation";
 import { controlPlaneRequest } from "@/lib/control-plane-client";
 
+import { commandStatusKey, commandTargetKey } from "./types";
 import {
-  COMMAND_DEFINITION_FIELDS,
-  COMMAND_RUN_FIELDS,
-  commandStatusKey,
-  commandTargetKey,
-  type CommandDefinition,
-  type CommandRun,
-} from "./types";
+  useCommandTargetSummary,
+  type CommandActionDefinition,
+} from "./command-target-summaries";
 
 export function CommandResourcePanel({
   agentId,
@@ -38,39 +35,19 @@ export function CommandResourcePanel({
 }) {
   const t = useTranslations("commands");
   const router = useRouter();
-  const [commands, setCommands] = useState<CommandDefinition[]>([]);
-  const [runs, setRuns] = useState<CommandRun[]>([]);
+  const summary = useCommandTargetSummary(
+    {
+      resourceKind: agentId ? "AGENT" : "WORKTREE",
+      resourceId: agentId ?? worktreeId ?? "",
+    },
+    { includeAllCommands: true, includeRecentRuns: true },
+  );
+  const commands = summary.commands;
+  const runs = summary.recentRuns;
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const upgraded = agentCapabilities.includes("command.run");
-  useEffect(() => {
-    const eligible = agentId
-      ? `eligibleCommandsForAgent(agentId: $id) { ${COMMAND_DEFINITION_FIELDS} }`
-      : `eligibleCommandsForWorktree(worktreeId: $id) { ${COMMAND_DEFINITION_FIELDS} }`;
-    void Promise.resolve(
-      controlPlaneRequest<{
-        eligibleCommandsForAgent?: CommandDefinition[];
-        eligibleCommandsForWorktree?: CommandDefinition[];
-        commandRuns: { nodes: CommandRun[] };
-      }>(
-        `query CommandResource($id: ID!) { ${eligible} commandRuns(${agentId ? "agentId" : "worktreeId"}: $id, first: 8) { nodes { ${COMMAND_RUN_FIELDS} } } }`,
-        { id: agentId ?? worktreeId },
-      ),
-    )
-      .then((data) => {
-        if (!data) return;
-        setCommands(
-          data.eligibleCommandsForAgent ??
-            data.eligibleCommandsForWorktree ??
-            [],
-        );
-        setRuns(data.commandRuns.nodes);
-      })
-      .catch((value) =>
-        setError(value instanceof Error ? value.message : String(value)),
-      );
-  }, [agentId, worktreeId]);
-  const run = async (command: CommandDefinition) => {
+  const run = async (command: CommandActionDefinition) => {
     setBusy(command.id);
     try {
       const data = await controlPlaneRequest<{
@@ -92,6 +69,7 @@ export function CommandResourcePanel({
       setBusy(null);
     }
   };
+  const displayedError = error ?? summary.error;
   return (
     <Card>
       <CardHeader>
@@ -112,9 +90,9 @@ export function CommandResourcePanel({
         </div>
       </CardHeader>
       <CardContent className="space-y-5">
-        {error && (
+        {displayedError && (
           <Alert variant="destructive">
-            <AlertDescription>{error}</AlertDescription>
+            <AlertDescription>{displayedError}</AlertDescription>
           </Alert>
         )}
         {!upgraded && (

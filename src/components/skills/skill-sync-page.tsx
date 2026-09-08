@@ -10,7 +10,7 @@ import {
   Trash2,
 } from "lucide-react";
 import { useTranslations } from "next-intl";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
@@ -53,6 +53,7 @@ import { Textarea } from "@/components/ui/textarea";
 import {
   controlPlaneRequest,
   controlPlaneSubscriptions,
+  onControlPlaneConnected,
 } from "@/lib/control-plane-client";
 
 import type { SkillGroupSummary, SkillSyncItem, SkillSyncRun } from "./types";
@@ -160,32 +161,68 @@ export function SkillSyncPage({ runId }: { runId: string }) {
   const [compareLoading, setCompareLoading] = useState(false);
   const [groupChoices, setGroupChoices] = useState<Record<string, string>>({});
 
-  const load = useCallback(async () => {
-    try {
-      const data = await controlPlaneRequest<{
-        skillSyncRun: SkillSyncRun | null;
-        skillsOverview: { groups: SkillGroupSummary[] };
-      }>(
-        `query SkillSyncRun($id: ID!) {
+  const latestRun = useRef<SkillSyncRun | null>(null);
+  const applyRun = useCallback(
+    (next: SkillSyncRun) => {
+      if (
+        next.id !== runId ||
+        (latestRun.current?.id === next.id &&
+          latestRun.current.updatedAt > next.updatedAt)
+      )
+        return;
+      latestRun.current = next;
+      setRun(next);
+    },
+    [runId],
+  );
+
+  const notFoundMessage = t("syncRunNotFound");
+  const load = useCallback(
+    async (signal?: AbortSignal) => {
+      try {
+        const data = await controlPlaneRequest<{
+          skillSyncRun: SkillSyncRun | null;
+        }>(
+          `query SkillSyncRun($id: ID!) {
           skillSyncRun(id: $id) { ${SKILL_SYNC_RUN_FIELDS} }
-          skillsOverview { groups { id name } }
         }`,
-        { id: runId },
-      );
-      if (!data.skillSyncRun) throw new Error(t("syncRunNotFound"));
-      setRun(data.skillSyncRun);
-      setGroups(data.skillsOverview.groups);
-      setError(null);
-    } catch (value) {
-      setError(value instanceof Error ? value.message : String(value));
-    } finally {
-      setLoading(false);
-    }
-  }, [runId, t]);
+          { id: runId },
+          { signal },
+        );
+        if (!data.skillSyncRun) throw new Error(notFoundMessage);
+        if (signal?.aborted) return;
+        applyRun(data.skillSyncRun);
+        setError(null);
+      } catch (value) {
+        if (signal?.aborted) return;
+        setError(value instanceof Error ? value.message : String(value));
+      } finally {
+        setLoading(false);
+      }
+    },
+    [applyRun, notFoundMessage, runId],
+  );
 
   useEffect(() => {
-    const initial = window.setTimeout(() => void load(), 0);
-    const refresh = window.setInterval(() => void load(), 10_000);
+    const controller = new AbortController();
+    latestRun.current = null;
+    const reload = () => void load(controller.signal);
+    const initial = window.setTimeout(reload, 0);
+    const refresh = window.setInterval(() => {
+      const current = latestRun.current;
+      if (
+        !current ||
+        ["SCANNING", "APPLYING", "PREPARING"].includes(current.status) ||
+        current.items.some((item) => item.status === "PENDING")
+      )
+        reload();
+    }, 10_000);
+    const offConnected = onControlPlaneConnected(reload);
+    const onVisible = () => {
+      if (document.visibilityState === "visible") reload();
+    };
+    window.addEventListener("focus", reload);
+    document.addEventListener("visibilitychange", onVisible);
     const unsubscribe = controlPlaneSubscriptions().subscribe<{
       skillSyncRunChanged: SkillSyncRun;
     }>(
@@ -197,18 +234,57 @@ export function SkillSyncPage({ runId }: { runId: string }) {
       },
       {
         next: (value) =>
+          !controller.signal.aborted &&
           value.data?.skillSyncRunChanged &&
-          setRun(value.data.skillSyncRunChanged),
+          applyRun(value.data.skillSyncRunChanged),
         error: () => undefined,
         complete: () => undefined,
       },
     );
     return () => {
+      controller.abort();
       window.clearTimeout(initial);
       window.clearInterval(refresh);
       unsubscribe();
+      offConnected();
+      window.removeEventListener("focus", reload);
+      document.removeEventListener("visibilitychange", onVisible);
     };
-  }, [load, runId]);
+  }, [applyRun, load, runId]);
+
+  useEffect(() => {
+    const controller = new AbortController();
+    void controlPlaneRequest<{
+      skillsOverview: { groups: SkillGroupSummary[] };
+    }>(
+      `query SkillSyncGroups { skillsOverview { groups { id name } } }`,
+      undefined,
+      { signal: controller.signal },
+    )
+      .then((data) => {
+        if (!controller.signal.aborted) setGroups(data.skillsOverview.groups);
+      })
+      .catch(() => undefined);
+    const off = controlPlaneSubscriptions().subscribe<{
+      skillsChanged: { groups: SkillGroupSummary[] };
+    }>(
+      {
+        query: `subscription SkillSyncGroupsChanged { skillsChanged { groups { id name } } }`,
+      },
+      {
+        next: (value) => {
+          if (value.data?.skillsChanged)
+            setGroups(value.data.skillsChanged.groups);
+        },
+        error: () => undefined,
+        complete: () => undefined,
+      },
+    );
+    return () => {
+      controller.abort();
+      off();
+    };
+  }, []);
 
   const visibleItems = useMemo(
     () =>
@@ -289,7 +365,7 @@ export function SkillSyncPage({ runId }: { runId: string }) {
           },
         },
       );
-      setRun(data.resolveSkillSyncItem);
+      applyRun(data.resolveSkillSyncItem);
       setManualItem(null);
       setError(null);
     } catch (value) {
@@ -308,7 +384,7 @@ export function SkillSyncPage({ runId }: { runId: string }) {
         }`,
         { runId },
       );
-      setRun(data.applySkillSync);
+      applyRun(data.applySkillSync);
     } catch (value) {
       setError(value instanceof Error ? value.message : String(value));
     } finally {
@@ -327,7 +403,7 @@ export function SkillSyncPage({ runId }: { runId: string }) {
         }`,
         { runId },
       );
-      setRun(data.skipPendingSkillSync);
+      applyRun(data.skipPendingSkillSync);
       setError(null);
     } catch (value) {
       setError(value instanceof Error ? value.message : String(value));

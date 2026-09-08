@@ -34,7 +34,8 @@ import {
   useState,
 } from "react";
 
-import { AGENT_FIELDS } from "@/components/agents/graphql-fields";
+const AGENT_FIELDS =
+  "id name hostname connectionStatus capabilities baseRepoDirectory";
 import { AgentDirectoryBrowser } from "@/components/agents/agent-directory-browser";
 import type { Agent } from "@/components/agents/types";
 import { ConfirmationDialog } from "@/components/confirmation-dialog";
@@ -75,6 +76,7 @@ import { Link } from "@/i18n/navigation";
 import {
   controlPlaneRequest,
   controlPlaneSubscriptions,
+  onControlPlaneRecovery,
 } from "@/lib/control-plane-client";
 import { cn } from "@/lib/utils";
 
@@ -113,26 +115,41 @@ export function CodebasesPage() {
   const [addOpen, setAddOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const latestLoad = useRef(0);
+  const settingsRevision = useRef(0);
+  const settingsLoadedRevision = useRef(-1);
+  const loadController = useRef<AbortController | null>(null);
 
   const load = useCallback(async () => {
     const loadId = ++latestLoad.current;
+    loadController.current?.abort();
+    const controller = new AbortController();
+    loadController.current = controller;
+    const settingsVersion = settingsRevision.current;
+    const includeSettings = settingsLoadedRevision.current !== settingsVersion;
     try {
       const data = await controlPlaneRequest<{
         codebaseOverview: { repositories: CodebaseRepository[] };
         codebaseSettings: CodebaseSettings;
         agents: Agent[];
-      }>(`query CodebaseOverview {
+      }>(
+        `query CodebaseOverview($includeSettings: Boolean!) {
         codebaseOverview { repositories { ${REPOSITORY_FIELDS} } }
-        codebaseSettings { refreshIntervalSeconds fetchIntervalSeconds defaultJiraBranchRegex updatedAt }
+        codebaseSettings @include(if: $includeSettings) { refreshIntervalSeconds fetchIntervalSeconds defaultJiraBranchRegex updatedAt }
         agents { ${AGENT_FIELDS} }
-      }`);
+      }`,
+        { includeSettings },
+        { signal: controller.signal },
+      );
       if (loadId !== latestLoad.current) return;
       setRepositories(data.codebaseOverview.repositories);
-      setSettings(data.codebaseSettings);
+      if (includeSettings) {
+        setSettings(data.codebaseSettings);
+        settingsLoadedRevision.current = settingsVersion;
+      }
       setAgents(data.agents);
       setError(null);
     } catch (value) {
-      if (loadId !== latestLoad.current) return;
+      if (loadId !== latestLoad.current || controller.signal.aborted) return;
       setError(value instanceof Error ? value.message : String(value));
     } finally {
       if (loadId === latestLoad.current) setLoading(false);
@@ -141,13 +158,20 @@ export function CodebasesPage() {
 
   useEffect(() => {
     let eventReload: number | null = null;
+    const recovery = onControlPlaneRecovery(() => {
+      ++settingsRevision.current;
+      void load();
+    });
     const initial = window.setTimeout(() => void load(), 0);
     const reconcile = window.setInterval(
       () => void load(),
       RECONCILE_INTERVAL_MS,
     );
     const unsubscribe = controlPlaneSubscriptions().subscribe<{
-      codebaseOverviewChanged: { repositoryId: string | null };
+      codebaseOverviewChanged: {
+        repositoryId: string | null;
+        codebaseId: string | null;
+      };
     }>(
       {
         query: `subscription CodebaseOverviewChanged {
@@ -155,7 +179,10 @@ export function CodebasesPage() {
         }`,
       },
       {
-        next: () => {
+        next: (value) => {
+          const changed = value.data?.codebaseOverviewChanged;
+          if (!changed || (!changed.codebaseId && !changed.repositoryId))
+            ++settingsRevision.current;
           if (eventReload !== null) window.clearTimeout(eventReload);
           eventReload = window.setTimeout(() => {
             eventReload = null;
@@ -172,6 +199,8 @@ export function CodebasesPage() {
       if (eventReload !== null) window.clearTimeout(eventReload);
       latestLoad.current += 1;
       unsubscribe();
+      recovery();
+      loadController.current?.abort();
     };
   }, [load]);
 

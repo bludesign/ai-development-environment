@@ -13,6 +13,7 @@ import {
   COMMAND_RUNS_CHANGED_TOPIC,
   COMMAND_RUN_OUTPUT_CHANGED_TOPIC,
   COMMANDS_CHANGED_TOPIC,
+  ACTION_CENTER_CHANGED_TOPIC,
   SIDEBAR_STATUS_CHANGED_TOPIC,
   agentEventBus,
   agentOnlineWindowMs,
@@ -21,6 +22,10 @@ import {
   type AgentControlService,
 } from "@/services/agent-control";
 import type { NotificationsService } from "@/services/notifications";
+import {
+  loadCommandTargetSummaries,
+  type CommandTargetSummaryInput,
+} from "./command-target-summaries";
 
 const TARGETS = [
   "ANY_AGENT_HOME",
@@ -402,6 +407,9 @@ function publishRun(run: { id: string }): void {
   });
   agentEventBus.publish(SIDEBAR_STATUS_CHANGED_TOPIC, {
     sidebarStatusChanged: true,
+  });
+  agentEventBus.publish(ACTION_CENTER_CHANGED_TOPIC, {
+    actionCenterChanged: true,
   });
 }
 
@@ -848,6 +856,10 @@ export class CommandsService {
       orderBy: { name: "asc" },
     });
     return definitions.map(commandDefinitionResult);
+  }
+
+  targetSummaries(targets: CommandTargetSummaryInput[]) {
+    return loadCommandTargetSummaries(targets);
   }
 
   async eligibleForWorktree(worktreeId: string) {

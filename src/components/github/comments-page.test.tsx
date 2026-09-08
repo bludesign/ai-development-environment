@@ -15,6 +15,8 @@ import type { GitHubReviewThread } from "@/services/github/types";
 import { CommentsPage } from "./comments-page";
 
 vi.mock("@/lib/control-plane-client", () => ({
+  controlPlaneSubscriptions: vi.fn(() => ({ subscribe: vi.fn(() => vi.fn()) })),
+  onControlPlaneRecovery: vi.fn(() => vi.fn()),
   controlPlaneRequest: vi.fn(),
 }));
 
@@ -104,7 +106,7 @@ const resolved = thread("resolved", {
 
 function configureRequests() {
   request.mockImplementation(async (query) => {
-    if (query.includes("GitHubCommentsConfiguration")) {
+    if (query.includes("GitHubPageConfiguration")) {
       return {
         githubSettings: {
           tokenConfigured: true,
@@ -167,7 +169,7 @@ afterEach(() => {
 describe("CommentsPage", () => {
   test("does not retry review-thread loading after an error", async () => {
     request.mockImplementation(async (query) => {
-      if (query.includes("GitHubCommentsConfiguration")) {
+      if (query.includes("GitHubPageConfiguration")) {
         return {
           githubSettings: {
             tokenConfigured: true,
@@ -200,7 +202,7 @@ describe("CommentsPage", () => {
       highlightColor: "violet",
     });
     request.mockImplementation(async (query) => {
-      if (query.includes("GitHubCommentsConfiguration")) {
+      if (query.includes("GitHubPageConfiguration")) {
         return {
           githubSettings: {
             tokenConfigured: true,

@@ -567,7 +567,10 @@ type Build {
   "Artifacts associated with this build."
   artifacts: [BuildArtifact!]!
   "Reports associated with this build."
-  reports: [BuildReport!]!
+  reports(
+    "Filter by report kind; omitted returns every kind."
+    kind: BuildReportKind
+  ): [BuildReport!]!
   "Script executions associated with this build."
   scriptExecutions: [BuildScriptExecution!]!
   "Deployments associated with this build."
@@ -646,6 +649,8 @@ type BuildSourceInspection {
 type BuildChange {
   "Stable identifier for this build change."
   id: ID!
+  "Repository containing the build, or null after deletion."
+  repositoryId: ID
 }
 
 "Values used to save a build configuration."
@@ -781,6 +786,18 @@ input BuildProgressInput {
 }
 
 "Input values for build log chunk."
+input BuildLogRangeInput {
+  "Log stream scope, such as the build, an export, or a deployment."
+  scope: String!
+  "Identifier of the operation within this log scope."
+  scopeId: ID!
+  "First received sequence in this inclusive range."
+  fromSequence: Int!
+  "Last received sequence in this inclusive range."
+  throughSequence: Int!
+}
+
+"A chunk of encoded output from a build operation."
 input BuildLogChunkInput {
   "The scope to use for the request."
   scope: String!
@@ -929,10 +946,18 @@ extend type Query {
   buildRunAgents("Identifier of the build." buildId: ID!): [BuildRunAgent!]!
   "Returns build log chunks."
   buildLogChunks(
+    "Return the newest page, in ascending chronological order."
+    latest: Boolean = false
+    "Return chunks strictly before this chronological cursor."
+    before: ID
+    "Limit reconciliation to the visible window starting at this cursor, inclusive."
+    from: ID
     "Identifier of the build."
     buildId: ID!
     "Cursor or identifier after which to return records. Omit it to leave this dimension unfiltered."
     after: ID
+    "Already received sequence ranges to exclude. Unlike the chronological cursor this remains safe for late log ingestion."
+    knownRanges: [BuildLogRangeInput!]
     "Maximum number of records to return. Defaults to `1000`."
     first: Int = 1000
   ): [BuildLogChunk!]!
@@ -1074,8 +1099,18 @@ extend type Mutation {
 }
 
 extend type Subscription {
+  "Emits when a build script is saved or removed."
+  buildScriptsChanged: Boolean!
+
   "Emits a build change whenever builds change."
-  buildsChanged: BuildChange!
+  buildsChanged(
+    "Restrict results to repositories assigned to this app; omitted means all apps."
+    appId: ID
+    "Only builds for this worktree; deletions trigger conservative reconciliation."
+    worktreeId: ID
+  ): BuildChange!
+  "A complete current build projection after a change. Null when the build was deleted; no event replay is guaranteed."
+  buildSnapshotChanged("Identifier of the build to observe." id: ID!): Build
   "Emits a build change whenever build changes."
   buildChanged(
     "Identifier of the resource to return or affect."

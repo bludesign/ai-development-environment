@@ -129,11 +129,14 @@ export const createWorktreeResolvers = (
     },
     worktreeOverview: (
       _root: unknown,
-      { appId }: { appId?: string | null },
+      {
+        appId,
+        worktreeId,
+      }: { appId?: string | null; worktreeId?: string | null },
       context: GraphQLContext,
     ) => {
       requireControlPlane(context);
-      return service.overview(appId);
+      return service.overview(appId, worktreeId);
     },
     hiddenWorktrees: (
       _root: unknown,

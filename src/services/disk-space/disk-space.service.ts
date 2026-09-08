@@ -20,7 +20,7 @@ import {
 } from "@ai-development-environment/agent-contract/disk-space";
 
 import { getPrismaClient } from "@/data/prisma-client";
-import type { Agent } from "@/generated/prisma/client";
+import type { Agent, AgentDiskSpaceState } from "@/generated/prisma/client";
 import {
   AgentControlService,
   agentOnlineWindowMs,
@@ -138,6 +138,102 @@ function entryKey(agentId: string, path: string): string {
     .update("\0")
     .update(path)
     .digest("base64url");
+}
+
+type DiskStatusState = Pick<
+  AgentDiskSpaceState,
+  | "enabled"
+  | "manualPressureMode"
+  | "automaticPressureMode"
+  | "lastReportedAt"
+  | "lastError"
+  | "volumesJson"
+  | "warningsJson"
+>;
+
+function projectDiskStatus(
+  agentId: string,
+  state: DiskStatusState | null,
+  settings: DiskSpaceSettingsView,
+  deleting: Set<string>,
+): Omit<AgentDiskSpaceView, "agent"> {
+  const enabled = state?.enabled ?? true;
+  const manualPressureMode = state?.manualPressureMode ?? false;
+  const automaticPressureMode = state?.automaticPressureMode ?? false;
+  const pressureMode = manualPressureMode
+    ? ("MANUAL" as const)
+    : automaticPressureMode
+      ? ("AUTOMATIC" as const)
+      : ("NORMAL" as const);
+  const lastReportedAt = state?.lastReportedAt ?? null;
+  const stale =
+    !lastReportedAt ||
+    Date.now() - lastReportedAt.getTime() > settings.staleAfterSeconds * 1_000;
+  const effectiveThresholdBytes =
+    (manualPressureMode || automaticPressureMode
+      ? settings.pressureThresholdGiB
+      : settings.normalThresholdGiB) * GIB;
+  const volumes = parseArray<AgentDiskSpaceVolumeReport>(state?.volumesJson);
+  const monitored = monitoredDiskSpaceVolumes(volumes);
+  const critical = monitored.some(
+    (volume) => volume.freeBytes <= settings.pressureThresholdGiB * GIB,
+  );
+  const cleanupRequired = monitored.some(
+    (volume) => volume.freeBytes < effectiveThresholdBytes,
+  );
+  let status: DiskSpaceAgentStatus = "IDLE";
+  if (!enabled) status = "DISABLED";
+  else if (stale) status = "STALE";
+  else if (
+    state?.lastError ||
+    (volumes.length === 0 && parseArray<string>(state?.warningsJson).length > 0)
+  )
+    status = "ERROR";
+  else if (critical) status = "CRITICAL";
+  else if (deleting.has(agentId)) status = "DELETING";
+  else if (manualPressureMode || automaticPressureMode) status = "PRESSURE";
+  else if (cleanupRequired) status = "CLEANUP_REQUIRED";
+  const volumeViews: DiskSpaceVolumeView[] = volumes.map((volume) => {
+    const monitoredVolume = isMonitoredDiskSpaceVolume(volume);
+    return {
+      ...volume,
+      effectiveThresholdBytes,
+      monitored: monitoredVolume,
+      status: !enabled
+        ? "DISABLED"
+        : stale
+          ? "STALE"
+          : // Unmonitored volumes are shown for context only; their free
+            // space never escalates status.
+            !monitoredVolume
+            ? "IDLE"
+            : volume.freeBytes <= settings.pressureThresholdGiB * GIB
+              ? "CRITICAL"
+              : deleting.has(agentId) &&
+                  volume.freeBytes < effectiveThresholdBytes
+                ? "DELETING"
+                : manualPressureMode || automaticPressureMode
+                  ? "PRESSURE"
+                  : volume.freeBytes < effectiveThresholdBytes
+                    ? "CLEANUP_REQUIRED"
+                    : "IDLE",
+    };
+  });
+  const warnings = parseArray<string>(state?.warningsJson);
+  if (enabled && !stale && volumes.length > 0 && monitored.length === 0) {
+    warnings.push(NO_MONITORED_VOLUME_WARNING);
+  }
+  return {
+    enabled,
+    status,
+    pressureMode,
+    manualPressureMode,
+    automaticPressureMode,
+    lastReportedAt: lastReportedAt?.toISOString() ?? null,
+    lastError: state?.lastError ?? null,
+    warnings,
+    volumes: volumeViews,
+  };
 }
 
 export class DiskSpaceService {
@@ -280,9 +376,6 @@ export class DiskSpaceService {
     agents: AgentDiskSpaceView[];
   }> {
     const prisma = await getPrismaClient();
-    await prisma.derivedDataCleanupLease.deleteMany({
-      where: { jobId: null, expiresAt: { lte: new Date() } },
-    });
     const [settings, agents, leases] = await Promise.all([
       this.settings(),
       prisma.agent.findMany({
@@ -290,96 +383,70 @@ export class DiskSpaceService {
         include: { diskSpaceState: true },
       }),
       prisma.derivedDataCleanupLease.findMany({
+        where: {
+          OR: [{ jobId: { not: null } }, { expiresAt: { gt: new Date() } }],
+        },
         select: { agentId: true },
       }),
     ]);
     const deleting = new Set(leases.map((lease) => lease.agentId));
     return {
       settings,
-      agents: agents.map((agent) => {
-        const state = agent.diskSpaceState;
-        const enabled = state?.enabled ?? true;
-        const manualPressureMode = state?.manualPressureMode ?? false;
-        const automaticPressureMode = state?.automaticPressureMode ?? false;
-        const pressureMode = manualPressureMode
-          ? ("MANUAL" as const)
-          : automaticPressureMode
-            ? ("AUTOMATIC" as const)
-            : ("NORMAL" as const);
-        const lastReportedAt = state?.lastReportedAt ?? null;
-        const stale =
-          !lastReportedAt ||
-          Date.now() - lastReportedAt.getTime() >
-            settings.staleAfterSeconds * 1_000;
-        const effectiveThresholdBytes =
-          (manualPressureMode || automaticPressureMode
-            ? settings.pressureThresholdGiB
-            : settings.normalThresholdGiB) * GIB;
-        const volumes = parseArray<AgentDiskSpaceVolumeReport>(
-          state?.volumesJson,
+      agents: agents.map((agent) => ({
+        agent,
+        ...projectDiskStatus(
+          agent.id,
+          agent.diskSpaceState,
+          settings,
+          deleting,
+        ),
+      })),
+    };
+  }
+
+  async summary() {
+    const prisma = await getPrismaClient();
+    const [settings, agents, leases] = await Promise.all([
+      this.settings(),
+      prisma.agent.findMany({
+        orderBy: { name: "asc" },
+        select: {
+          id: true,
+          name: true,
+          diskSpaceState: {
+            select: {
+              enabled: true,
+              manualPressureMode: true,
+              automaticPressureMode: true,
+              lastReportedAt: true,
+              lastError: true,
+              volumesJson: true,
+              warningsJson: true,
+            },
+          },
+        },
+      }),
+      prisma.derivedDataCleanupLease.findMany({
+        where: {
+          OR: [{ jobId: { not: null } }, { expiresAt: { gt: new Date() } }],
+        },
+        select: { agentId: true },
+      }),
+    ]);
+    const deleting = new Set(leases.map((lease) => lease.agentId));
+    return {
+      agents: agents.map(({ diskSpaceState, ...agent }) => {
+        const view = projectDiskStatus(
+          agent.id,
+          diskSpaceState,
+          settings,
+          deleting,
         );
-        const monitored = monitoredDiskSpaceVolumes(volumes);
-        const critical = monitored.some(
-          (volume) => volume.freeBytes <= settings.pressureThresholdGiB * GIB,
-        );
-        const cleanupRequired = monitored.some(
-          (volume) => volume.freeBytes < effectiveThresholdBytes,
-        );
-        let status: DiskSpaceAgentStatus = "IDLE";
-        if (!enabled) status = "DISABLED";
-        else if (stale) status = "STALE";
-        else if (
-          state?.lastError ||
-          (volumes.length === 0 &&
-            parseArray<string>(state?.warningsJson).length > 0)
-        )
-          status = "ERROR";
-        else if (critical) status = "CRITICAL";
-        else if (deleting.has(agent.id)) status = "DELETING";
-        else if (manualPressureMode || automaticPressureMode)
-          status = "PRESSURE";
-        else if (cleanupRequired) status = "CLEANUP_REQUIRED";
-        const volumeViews: DiskSpaceVolumeView[] = volumes.map((volume) => {
-          const monitoredVolume = isMonitoredDiskSpaceVolume(volume);
-          return {
-            ...volume,
-            effectiveThresholdBytes,
-            monitored: monitoredVolume,
-            status: !enabled
-              ? "DISABLED"
-              : stale
-                ? "STALE"
-                : // Unmonitored volumes are shown for context only; their free
-                  // space never escalates status.
-                  !monitoredVolume
-                  ? "IDLE"
-                  : volume.freeBytes <= settings.pressureThresholdGiB * GIB
-                    ? "CRITICAL"
-                    : deleting.has(agent.id) &&
-                        volume.freeBytes < effectiveThresholdBytes
-                      ? "DELETING"
-                      : manualPressureMode || automaticPressureMode
-                        ? "PRESSURE"
-                        : volume.freeBytes < effectiveThresholdBytes
-                          ? "CLEANUP_REQUIRED"
-                          : "IDLE",
-          };
-        });
-        const warnings = parseArray<string>(state?.warningsJson);
-        if (enabled && !stale && volumes.length > 0 && monitored.length === 0) {
-          warnings.push(NO_MONITORED_VOLUME_WARNING);
-        }
         return {
           agent,
-          enabled,
-          status,
-          pressureMode,
-          manualPressureMode,
-          automaticPressureMode,
-          lastReportedAt: lastReportedAt?.toISOString() ?? null,
-          lastError: state?.lastError ?? null,
-          warnings,
-          volumes: volumeViews,
+          enabled: view.enabled,
+          status: view.status,
+          volumes: view.volumes.filter((volume) => volume.monitored),
         };
       }),
     };

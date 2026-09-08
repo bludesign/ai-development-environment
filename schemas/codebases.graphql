@@ -540,7 +540,10 @@ input CodebaseStatusReportInput {
 
 extend type Query {
   "Returns a codebase overview."
-  codebaseOverview: CodebaseOverview!
+  codebaseOverview(
+    "Restrict the overview to this agent; omitted means all agents."
+    agentId: ID
+  ): CodebaseOverview!
   "Returns a codebase repository, or null when it cannot be found."
   codebaseRepository(
     "Identifier of the resource to return or affect."
@@ -626,5 +629,8 @@ extend type Mutation {
 
 extend type Subscription {
   "Emits a codebase overview change whenever codebase overview changes."
-  codebaseOverviewChanged: CodebaseOverviewChange!
+  codebaseOverviewChanged(
+    "Restrict the overview to this agent; omitted means all agents."
+    agentId: ID
+  ): CodebaseOverviewChange!
 }

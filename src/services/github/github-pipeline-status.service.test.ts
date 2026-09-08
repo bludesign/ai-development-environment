@@ -6,6 +6,10 @@ import Database from "better-sqlite3";
 import { afterAll, beforeAll, describe, expect, test } from "vitest";
 
 import type { GitHubActionsWorkflowRunView } from "./types";
+import {
+  agentEventBus,
+  GITHUB_PIPELINE_STATUS_CHANGED_TOPIC,
+} from "@/services/agent-control/event-bus";
 
 const directory = mkdtempSync(join(tmpdir(), "github-pipeline-status-"));
 const databasePath = join(directory, "pipeline.db");
@@ -118,6 +122,102 @@ afterAll(async () => {
 });
 
 describe("GitHubPipelineStatusService", () => {
+  test("scoped subscriptions replay current rows and retain events arriving before the initial read", async () => {
+    const key = {
+      repositoryGithubId: "replay-repository",
+      headSha: "replay-sha",
+    };
+    const initial = await service.observeSnapshot({
+      ...key,
+      repositoryNameWithOwner: "acme/replay",
+      repositoryUrl: "https://github.com/acme/replay",
+      graphqlRollupStatus: "PENDING",
+      completeGraphqlRollup: true,
+      pipelines: [],
+    });
+    const iterator = service.subscribe({
+      snapshotKeys: [key],
+      recordKeys: [],
+      replayCurrent: true,
+    });
+    const latest = {
+      snapshot: {
+        ...initial.snapshot,
+        revision: initial.snapshot.revision + 1,
+        pipelineStatus: "SUCCESS" as const,
+      },
+      changedPipeline: null,
+    };
+    agentEventBus.publish(GITHUB_PIPELINE_STATUS_CHANGED_TOPIC, {
+      githubPipelineStatusChanged: latest,
+    });
+    agentEventBus.publish(GITHUB_PIPELINE_STATUS_CHANGED_TOPIC, {
+      githubPipelineStatusChanged: {
+        ...latest,
+        snapshot: { ...latest.snapshot, headSha: "unrelated" },
+      },
+    });
+    expect(
+      (await iterator.next()).value.githubPipelineStatusChanged.snapshot,
+    ).toMatchObject(initial.snapshot);
+    expect((await iterator.next()).value.githubPipelineStatusChanged).toEqual(
+      latest,
+    );
+    const pending = iterator.next();
+    await iterator.return?.();
+    expect(await pending).toMatchObject({ done: true });
+  });
+
+  test("record-only scopes replay historical workflow records and close pending reads immediately", async () => {
+    const recordRun = run({
+      id: "replay-run",
+      repositoryGithubId: "replay-record-repository",
+      headSha: "replay-record-sha",
+    });
+    await service.observeWorkflowRuns([recordRun], "REST", false);
+    const iterator = service.subscribe({
+      snapshotKeys: [],
+      recordKeys: [
+        {
+          repositoryGithubId: recordRun.repositoryGithubId,
+          workflowRunId: recordRun.id,
+        },
+      ],
+      replayCurrent: true,
+    });
+    expect(
+      (await iterator.next()).value.githubPipelineStatusChanged.changedPipeline,
+    ).toMatchObject({ workflowRunId: recordRun.id, isCurrent: false });
+    const pending = iterator.next();
+    await iterator.return?.();
+    expect(await pending).toMatchObject({ done: true });
+  });
+
+  test("omitted filters retain global delivery and empty filters deliver nothing", async () => {
+    const legacy = service.subscribe();
+    const empty = service.subscribe({
+      snapshotKeys: [],
+      recordKeys: [],
+      replayCurrent: true,
+    });
+    const emptyPending = empty.next();
+    const change = await service.observeSnapshot({
+      repositoryGithubId: "legacy-repository",
+      headSha: "legacy-sha",
+      repositoryNameWithOwner: "acme/legacy",
+      repositoryUrl: "https://github.com/acme/legacy",
+      pipelines: [],
+    });
+    agentEventBus.publish(GITHUB_PIPELINE_STATUS_CHANGED_TOPIC, {
+      githubPipelineStatusChanged: change,
+    });
+    expect((await legacy.next()).value.githubPipelineStatusChanged).toEqual(
+      change,
+    );
+    await Promise.all([legacy.return?.(), empty.return?.()]);
+    expect(await emptyPending).toMatchObject({ done: true });
+  });
+
   test("reconciles aliases and preserves jobs across GraphQL observations", async () => {
     await service.observeSnapshot({
       repositoryGithubId: "repository-1",

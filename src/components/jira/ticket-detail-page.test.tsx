@@ -1,4 +1,5 @@
 import {
+  act,
   cleanup,
   fireEvent,
   render,
@@ -8,7 +9,11 @@ import {
 } from "@testing-library/react";
 import { afterEach, describe, expect, test, vi } from "vitest";
 
-import { controlPlaneRequest } from "@/lib/control-plane-client";
+import {
+  controlPlaneRequest,
+  onControlPlaneConnected,
+  onControlPlaneRecovery,
+} from "@/lib/control-plane-client";
 import type { JiraTicketDetail } from "@/services/jira/types";
 
 import { JiraTicketDetailPage } from "./ticket-detail-page";
@@ -17,6 +22,7 @@ vi.mock("@/lib/control-plane-client", () => ({
   controlPlaneRequest: vi.fn(),
   controlPlaneSubscriptions: vi.fn(() => ({ subscribe: vi.fn(() => vi.fn()) })),
   onControlPlaneConnected: vi.fn(() => vi.fn()),
+  onControlPlaneRecovery: vi.fn(() => vi.fn()),
 }));
 
 vi.mock("./ticket-worktree-dialog", () => ({
@@ -111,6 +117,41 @@ afterEach(() => {
 });
 
 describe("JiraTicketDetailPage", () => {
+  test("shares the pending initial read and reconciles once on reconnect", async () => {
+    let resolveInitial!: (value: unknown) => void;
+    const initial = new Promise((resolve) => {
+      resolveInitial = resolve;
+    });
+    let reads = 0;
+    request.mockImplementation(async (query) => {
+      if (query.includes("query JiraTicketDetail")) {
+        reads += 1;
+        return reads === 1
+          ? ((await initial) as never)
+          : ({ jiraTicket: ticket } as never);
+      }
+      return {} as never;
+    });
+    render(<JiraTicketDetailPage issueKey="APP-42" />);
+    await waitFor(() => expect(reads).toBe(1));
+    const recovery = vi.mocked(onControlPlaneRecovery).mock.calls.at(-1)!;
+    expect(recovery[1]).toEqual({ includeInitial: true });
+    const connected = vi.mocked(onControlPlaneConnected).mock.calls.at(-1)![0];
+    await act(async () => {
+      connected();
+      recovery[0]({ initialConnection: true });
+      resolveInitial({ jiraTicket: ticket });
+      await initial;
+    });
+    await screen.findByText(ticket.summary);
+    expect(reads).toBe(1);
+    await act(async () => {
+      connected();
+      recovery[0]({ initialConnection: false });
+    });
+    await waitFor(() => expect(reads).toBe(2));
+  });
+
   test("shows full fields and loads history independently", async () => {
     request.mockImplementation(async (query) => {
       if (query.includes("query JiraTicketDetail"))
@@ -356,7 +397,7 @@ describe("JiraTicketDetailPage", () => {
       within(descriptionCard).getByRole("button", { name: "Edit" }),
     );
     fireEvent.change(
-      within(descriptionCard).getByRole("textbox", { name: "Comment" }),
+      await within(descriptionCard).findByRole("textbox", { name: "Comment" }),
       { target: { value: "" } },
     );
     const save = within(descriptionCard).getByRole("button", {

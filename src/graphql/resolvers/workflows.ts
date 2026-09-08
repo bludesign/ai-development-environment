@@ -91,6 +91,8 @@ export const createWorkflowResolvers = (service: WorkflowsService) => ({
     createdAt: (value: { createdAt: Date }) => value.createdAt.toISOString(),
   },
   WorkflowRun: {
+    events: (value: { id: string; events?: unknown[] }) =>
+      value.events ?? service.runEvents(value.id, -1, null),
     triggerPayload: (value: { triggerPayloadJson: string }) =>
       JSON.parse(value.triggerPayloadJson),
     sessionData: (value: { sessionDataJson: string }) =>
@@ -211,23 +213,46 @@ export const createWorkflowResolvers = (service: WorkflowsService) => ({
       context: GraphQLContext,
     ) => {
       requireControlPlane(context);
-      return service.run(id);
+      return service.run(id, false);
     },
     workflowRunEvents: (
       _root: unknown,
-      args: { runId: string; afterSequence?: number; first?: number },
+      args: {
+        runId: string;
+        afterSequence?: number;
+        first?: number;
+        beforeSequence?: number | null;
+        latest?: boolean;
+      },
       context: GraphQLContext,
     ) => {
       requireControlPlane(context);
-      return service.runEvents(args.runId, args.afterSequence, args.first);
+      return service.runEvents(
+        args.runId,
+        args.afterSequence,
+        args.first,
+        args,
+      );
+    },
+    workflowRunSummariesForResource: (
+      _root: unknown,
+      args: { kind: string; resourceId: string; first?: number },
+      context: GraphQLContext,
+    ) => {
+      requireControlPlane(context);
+      return service.runSummariesForResource(
+        args.kind,
+        args.resourceId,
+        args.first,
+      );
     },
     workflowRunsForResource: (
       _root: unknown,
-      args: { kind: string; resourceId: string },
+      args: { kind: string; resourceId: string; first?: number | null },
       context: GraphQLContext,
     ) => {
       requireControlPlane(context);
-      return service.runsForResource(args.kind, args.resourceId);
+      return service.runsForResource(args.kind, args.resourceId, args.first);
     },
     workflowsAcceptingResource: (
       _root: unknown,
@@ -425,6 +450,32 @@ export const createWorkflowResolvers = (service: WorkflowsService) => ({
     },
   },
   Subscription: {
+    workflowChanges: {
+      subscribe: (
+        _root: unknown,
+        args: {
+          includeQueuePeers?: boolean;
+          workflowId?: string | null;
+          resourceKind?: string | null;
+          resourceId?: string | null;
+        },
+        context: GraphQLContext,
+      ) => {
+        requireControlPlane(context);
+        if (Boolean(args.resourceKind) !== Boolean(args.resourceId))
+          throw new Error("Resource kind and ID must be provided together");
+        return service.subscribeChanges(args);
+      },
+      resolve: ({
+        workflowChanged: change,
+      }: {
+        workflowChanged: { id: string; runId?: string };
+      }) => ({
+        workflowId: change.id === "runs" ? null : change.id,
+        runId: change.runId ?? null,
+        definitionsChanged: change.id !== "runs",
+      }),
+    },
     workflowsChanged: {
       subscribe: (_root: unknown, _args: unknown, context: GraphQLContext) => {
         requireControlPlane(context);
@@ -445,7 +496,7 @@ export const createWorkflowResolvers = (service: WorkflowsService) => ({
         return service.subscribeRun(runId);
       },
       resolve: (payload: { workflowRunChanged: { id: string } }) =>
-        service.run(payload.workflowRunChanged.id),
+        service.run(payload.workflowRunChanged.id, false),
     },
     workflowRunEventAdded: {
       subscribe: (

@@ -4,6 +4,7 @@
     "description": "An AI-focused development environment."
   },
   "common": {
+    "loadMore": "Load more",
     "cancel": "Cancel",
     "continue": "Continue",
     "cannotBeUndone": "This action cannot be undone."

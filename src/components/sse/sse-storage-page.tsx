@@ -26,6 +26,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { Textarea } from "@/components/ui/textarea";
+import { useOwnedRead } from "@/hooks/use-owned-read";
 import { controlPlaneRequest } from "@/lib/control-plane-client";
 
 import { SSE_STORAGE_QUERY } from "./graphql";
@@ -44,25 +45,24 @@ export function SseStoragePage() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const load = useCallback(async () => {
+  const fetchData = useCallback(async (signal: AbortSignal) => {
     try {
       const data = await controlPlaneRequest<{
         sseStorageEntries: SseStorageEntry[];
-      }>(SSE_STORAGE_QUERY);
+      }>(SSE_STORAGE_QUERY, undefined, { signal });
+      if (signal.aborted) return;
       setEntries(data.sseStorageEntries);
       setError(null);
     } catch (failure) {
-      setError(failure instanceof Error ? failure.message : String(failure));
+      if (!signal.aborted)
+        setError(failure instanceof Error ? failure.message : String(failure));
     } finally {
-      setLoading(false);
+      if (!signal.aborted) setLoading(false);
     }
   }, []);
 
-  useEffect(() => {
-    const timer = window.setTimeout(() => void load(), 0);
-    return () => window.clearTimeout(timer);
-  }, [load]);
-  useSseLiveReload("storage", () => void load());
+  const load = useOwnedRead(fetchData);
+  useSseLiveReload("storage", load);
   useEffect(() => {
     if (!selected) return;
     const timer = window.setTimeout(() => {

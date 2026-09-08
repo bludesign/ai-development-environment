@@ -62,6 +62,7 @@ import { Switch } from "@/components/ui/switch";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Textarea } from "@/components/ui/textarea";
 import { Link, useRouter } from "@/i18n/navigation";
+import { useOwnedRead } from "@/hooks/use-owned-read";
 import { controlPlaneRequest } from "@/lib/control-plane-client";
 import { formatEnumLabel } from "@/lib/enum-label";
 
@@ -259,41 +260,87 @@ export function SseEndpointEditorPage({
 }) {
   const router = useRouter();
   const isNew = !endpointId;
+  const [tab, setTab] = useState(initialTab);
   const [endpoint, setEndpoint] = useState<SseEndpoint | null>(null);
   const [draft, setDraft] = useState<EndpointDraft>(DEFAULT_DRAFT);
   const [templates, setTemplates] = useState<SseMockTemplate[]>([]);
   const [compositions, setCompositions] = useState<SseMockComposition[]>([]);
   const [loading, setLoading] = useState(!isNew);
+  const [mocksReadyId, setMocksReadyId] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
 
-  const load = useCallback(async () => {
-    if (!endpointId) return;
-    try {
-      const data = await controlPlaneRequest<{
-        sseEndpoint: SseEndpoint | null;
-        sseMockEventTemplates: SseMockTemplate[];
-        sseMockCompositions: SseMockComposition[];
-      }>(SSE_ENDPOINT_DETAIL_QUERY, { id: endpointId });
-      if (!data.sseEndpoint) throw new Error("SSE endpoint not found");
-      setEndpoint(data.sseEndpoint);
-      setDraft(endpointDraft(data.sseEndpoint));
-      setTemplates(data.sseMockEventTemplates);
-      setCompositions(data.sseMockCompositions);
-      setError(null);
-    } catch (value) {
-      setError(value instanceof Error ? value.message : String(value));
-    } finally {
-      setLoading(false);
-    }
-  }, [endpointId]);
+  const fetchEndpoint = useCallback(
+    async (signal: AbortSignal) => {
+      if (!endpointId) return;
+      try {
+        const data = await controlPlaneRequest<{
+          sseEndpoint: SseEndpoint | null;
+          sseMockEventTemplates: SseMockTemplate[];
+          sseMockCompositions: SseMockComposition[];
+        }>(
+          SSE_ENDPOINT_DETAIL_QUERY,
+          { id: endpointId, includeMocks: false },
+          { signal },
+        );
+        if (signal.aborted) return;
+        if (!data.sseEndpoint) throw new Error("SSE endpoint not found");
+        setEndpoint(data.sseEndpoint);
+        setDraft(endpointDraft(data.sseEndpoint));
+        if (data.sseMockEventTemplates)
+          setTemplates(data.sseMockEventTemplates);
+        if (data.sseMockCompositions) setCompositions(data.sseMockCompositions);
+        setError(null);
+      } catch (value) {
+        if (!signal.aborted)
+          setError(value instanceof Error ? value.message : String(value));
+      } finally {
+        if (!signal.aborted) setLoading(false);
+      }
+    },
+    [endpointId],
+  );
 
-  useEffect(() => {
-    const timer = window.setTimeout(() => void load(), 0);
-    return () => window.clearTimeout(timer);
-  }, [load]);
-  useSseLiveReload("endpoints", () => void load());
+  const load = useOwnedRead(fetchEndpoint, { enabled: Boolean(endpointId) });
+  useSseLiveReload("endpoints", load, {
+    enabled: Boolean(endpointId),
+    id: endpointId,
+  });
+
+  const fetchMocks = useCallback(
+    async (signal: AbortSignal) => {
+      if (!endpointId || tab !== "mocks") return;
+      try {
+        const data = await controlPlaneRequest<{
+          sseMockEventTemplates: SseMockTemplate[];
+          sseMockCompositions: SseMockComposition[];
+        }>(
+          `query SseEndpointMockCatalog($id: ID!) {
+          sseMockEventTemplates(endpointId: $id) { id endpointId name eventName data eventId retryMs retryMsTemplate fields { id key label helpText type required defaultValue } createdAt updatedAt }
+          sseMockCompositions(endpointId: $id) { ${SSE_COMPOSITION_FIELDS} }
+        }`,
+          { id: endpointId },
+          { signal },
+        );
+        if (signal?.aborted) return;
+        setTemplates(data.sseMockEventTemplates);
+        setCompositions(data.sseMockCompositions);
+        setMocksReadyId(endpointId);
+      } catch (value) {
+        if (!signal?.aborted)
+          setError(value instanceof Error ? value.message : String(value));
+      }
+    },
+    [endpointId, tab],
+  );
+  const loadMocks = useOwnedRead(fetchMocks, {
+    enabled: Boolean(endpointId) && tab === "mocks",
+  });
+  useSseLiveReload("endpoints", () => loadMocks(), {
+    enabled: Boolean(endpointId) && tab === "mocks",
+    id: endpointId,
+  });
 
   const update = <K extends keyof EndpointDraft>(
     key: K,
@@ -439,7 +486,7 @@ export function SseEndpointEditorPage({
         mode={draft.mode}
         onChange={switchMode}
       />
-      <Tabs defaultValue={initialTab}>
+      <Tabs value={tab} onValueChange={(value) => setTab(value as typeof tab)}>
         <TabsList className="flex h-auto w-full justify-start overflow-x-auto">
           <TabsTrigger value="configuration">Configuration</TabsTrigger>
           <TabsTrigger value="scripts">
@@ -464,13 +511,19 @@ export function SseEndpointEditorPage({
         </TabsContent>
         {!isNew && endpointId ? (
           <TabsContent className="mt-4" value="mocks">
-            <MockBuilder
-              activeCompositionId={draft.activeMockCompositionId}
-              compositions={compositions}
-              endpointId={endpointId}
-              onChanged={load}
-              templates={templates}
-            />
+            {mocksReadyId === endpointId ? (
+              <MockBuilder
+                activeCompositionId={draft.activeMockCompositionId}
+                compositions={compositions}
+                endpointId={endpointId}
+                onChanged={async () => {
+                  await Promise.all([load(), loadMocks()]);
+                }}
+                templates={templates}
+              />
+            ) : (
+              <Spinner />
+            )}
           </TabsContent>
         ) : null}
         {!isNew && endpointId ? (
@@ -2326,25 +2379,28 @@ function MockEventBlockEditor({
 function EndpointHistory({ endpointId }: { endpointId: string }) {
   const [history, setHistory] = useState<SseHistoryRequest[]>([]);
   const [error, setError] = useState<string | null>(null);
-  const load = useCallback(async () => {
-    try {
-      const data = await controlPlaneRequest<{
-        sseHistory: { streams: SseHistoryRequest[] };
-      }>(
-        `query SseEndpointHistory($input: SseHistoryQueryInput!) { sseHistory(input: $input) { streams { ${SSE_HISTORY_REQUEST_FIELDS} } } }`,
-        { input: { view: "STREAMS", endpointId, first: 20 } },
-      );
-      setHistory(data.sseHistory.streams);
-      setError(null);
-    } catch (value) {
-      setError(value instanceof Error ? value.message : String(value));
-    }
-  }, [endpointId]);
-  useEffect(() => {
-    const timer = window.setTimeout(() => void load(), 0);
-    return () => window.clearTimeout(timer);
-  }, [load]);
-  useSseLiveReload("history", () => void load());
+  const fetchHistory = useCallback(
+    async (signal: AbortSignal) => {
+      try {
+        const data = await controlPlaneRequest<{
+          sseHistory: { streams: SseHistoryRequest[] };
+        }>(
+          `query SseEndpointHistory($input: SseHistoryQueryInput!) { sseHistory(input: $input) { streams { ${SSE_HISTORY_REQUEST_FIELDS} } } }`,
+          { input: { view: "STREAMS", endpointId, first: 20 } },
+          { signal },
+        );
+        if (signal.aborted) return;
+        setHistory(data.sseHistory.streams);
+        setError(null);
+      } catch (value) {
+        if (!signal.aborted)
+          setError(value instanceof Error ? value.message : String(value));
+      }
+    },
+    [endpointId],
+  );
+  const load = useOwnedRead(fetchHistory);
+  useSseLiveReload("history", load);
   return (
     <Card>
       <CardHeader>

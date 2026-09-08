@@ -37,45 +37,55 @@ export function SkillGroupDetailPage({ groupId }: { groupId: string }) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const load = useCallback(async () => {
-    try {
-      const data = await controlPlaneRequest<{
-        skillsOverview: {
-          groups: SkillGroupSummary[];
-          skills: SkillSummary[];
-          repositories: RepositorySummary[];
-        };
-      }>(`query SkillGroupDetail { skillsOverview {
-        groups {
-          id name
+  const notFoundMessage = t("groupNotFound");
+  const load = useCallback(
+    async (signal?: AbortSignal) => {
+      try {
+        const data = await controlPlaneRequest<{
+          skillGroup: SkillGroupSummary | null;
+          skillsOverview: {
+            skills: SkillSummary[];
+            repositories: RepositorySummary[];
+          };
+        }>(
+          `query SkillGroupDetail($id: ID!) {
+        skillGroup(id: $id) { id name skills { id name description } repositories { id name displayOrigin } }
+        skillsOverview {
           skills { id name description }
           repositories { id name displayOrigin }
         }
-        skills { id name description syncGlobally packageHash updatedAt files { id path } groups { id name } }
-        repositories { id name displayOrigin }
-      } }`);
-      const selected = data.skillsOverview.groups.find(
-        (value) => value.id === groupId,
-      );
-      if (!selected) throw new Error(t("groupNotFound"));
-      setGroup(selected);
-      setName(selected.name);
-      setSkillIds(selected.skills?.map((skill) => skill.id) ?? []);
-      setRepositoryIds(
-        selected.repositories?.map((repository) => repository.id) ?? [],
-      );
-      setSkills(data.skillsOverview.skills);
-      setRepositories(data.skillsOverview.repositories);
-    } catch (value) {
-      setError(value instanceof Error ? value.message : String(value));
-    } finally {
-      setLoading(false);
-    }
-  }, [groupId, t]);
+      }`,
+          { id: groupId },
+          { signal },
+        );
+        if (signal?.aborted) return;
+        const selected = data.skillGroup;
+        if (!selected) throw new Error(notFoundMessage);
+        setGroup(selected);
+        setName(selected.name);
+        setSkillIds(selected.skills?.map((skill) => skill.id) ?? []);
+        setRepositoryIds(
+          selected.repositories?.map((repository) => repository.id) ?? [],
+        );
+        setSkills(data.skillsOverview.skills);
+        setRepositories(data.skillsOverview.repositories);
+      } catch (value) {
+        if (!signal?.aborted)
+          setError(value instanceof Error ? value.message : String(value));
+      } finally {
+        if (!signal?.aborted) setLoading(false);
+      }
+    },
+    [groupId, notFoundMessage],
+  );
 
   useEffect(() => {
-    const timeout = window.setTimeout(() => void load(), 0);
-    return () => window.clearTimeout(timeout);
+    const controller = new AbortController();
+    const timeout = window.setTimeout(() => void load(controller.signal), 0);
+    return () => {
+      window.clearTimeout(timeout);
+      controller.abort();
+    };
   }, [load]);
 
   const filteredSkills = useMemo(

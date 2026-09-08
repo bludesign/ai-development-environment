@@ -332,12 +332,25 @@ extend type Query {
   ): [AgentJob!]!
   "Returns an agent job, or null when it cannot be found."
   agentJob("Identifier of the resource to return or affect." id: ID!): AgentJob
+  "Returns jobs in one bounded lookup, preserving agent ownership restrictions."
+  agentJobsByIds(
+    "Identifiers of the jobs to retrieve; at most 200 unique IDs."
+    ids: [ID!]!
+  ): [AgentJob!]!
   "Returns agent job logs."
   agentJobLogs(
     "Identifier of the job."
     jobId: ID!
     "The after sequence used to filter or perform the operation. Defaults to `-1`."
     afterSequence: Int = -1
+    "Maximum records to return; the resolver enforces its page limit."
+    first: Int = 5000
+    "Return records strictly before this sequence."
+    beforeSequence: Int
+    "Select the newest page and return it in ascending sequence order."
+    latest: Boolean = false
+    "Inclusive ranges already received by the consumer; omitted ranges remain eligible for gap recovery."
+    knownRanges: [AgentJobLogRangeInput!]
   ): [AgentJobLog!]!
 }
 
@@ -436,6 +449,8 @@ type Mutation {
 
 "Live events emitted as control-plane resources change."
 type Subscription {
+  "Integration settings and project configuration invalidations, including an initial recovery signal."
+  integrationConfigurationChanged: String!
   "Emits an agent event for this event stream."
   agentEvents("Identifier of the agent." agentId: ID!): AgentEvent!
   "Emits an agent whenever agent changes."
@@ -444,4 +459,12 @@ type Subscription {
   agentJobChanged("Identifier of the job." jobId: ID!): AgentJob!
   "Emits an agent job log whenever agent job log is added."
   agentJobLogAdded("Identifier of the job." jobId: ID!): AgentJobLog!
+}
+
+"Inclusive sequences already held by a log consumer."
+input AgentJobLogRangeInput {
+  "First received sequence in this inclusive range."
+  fromSequence: Int!
+  "Last received sequence in this inclusive range."
+  throughSequence: Int!
 }

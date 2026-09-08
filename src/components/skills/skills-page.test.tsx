@@ -7,6 +7,10 @@ import { SkillsPage } from "./skills-page";
 
 vi.mock("@/lib/control-plane-client", () => ({
   controlPlaneRequest: vi.fn(),
+  controlPlaneSubscriptions: () => ({
+    subscribe: vi.fn(() => () => undefined),
+  }),
+  onControlPlaneRecovery: vi.fn(() => () => undefined),
 }));
 
 const request = vi.mocked(controlPlaneRequest);

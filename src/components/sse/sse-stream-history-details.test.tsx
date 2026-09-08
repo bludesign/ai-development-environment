@@ -79,7 +79,9 @@ describe("SseStreamHistoryDetails", () => {
       screen.getByRole("heading", { name: "Save Stream as Composition" }),
     ).toBeDefined();
     expect(
-      screen.getByText(/Store 1 emitted events as one-off event blocks/),
+      screen.getByText(
+        /Store the retained emitted events as one-off event blocks/,
+      ),
     ).toBeDefined();
     expect(
       screen.getByRole("checkbox", { name: /Preserve event timing/ }),

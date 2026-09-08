@@ -19,6 +19,7 @@ import type { AgentJob } from "@/components/agents/types";
 import { CodebaseDetailPage } from "./codebase-detail-page";
 
 vi.mock("@/lib/control-plane-client", () => ({
+  onControlPlaneRecovery: vi.fn(() => () => {}),
   controlPlaneRequest: vi.fn(),
   controlPlaneSubscriptions: vi.fn(),
 }));

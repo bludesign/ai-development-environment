@@ -66,7 +66,9 @@ export const AGENT_DISK_SPACE_FIELDS = `
  * which is the only one monitoring acts on. Agents reporting Derived Data
  * across several volumes fall back to the one with the least free space.
  */
-export function monitoredVolume(agent: AgentDiskSpace): DiskSpaceVolume | null {
+export function monitoredVolume(
+  agent: Pick<AgentDiskSpace, "volumes">,
+): DiskSpaceVolume | null {
   return (
     agent.volumes
       .filter((volume) => volume.monitored)

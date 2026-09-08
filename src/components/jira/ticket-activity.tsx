@@ -1,7 +1,7 @@
 "use client";
 
 import { useLocale, useTranslations } from "next-intl";
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
@@ -47,16 +47,20 @@ export function JiraTicketActivity({
   const [worklogLoading, setWorklogLoading] = useState(false);
   const [worklogError, setWorklogError] = useState<string | null>(null);
 
+  const controllerRef = useRef<AbortController | null>(null);
+  useEffect(() => () => controllerRef.current?.abort(), [ticket.key]);
   const loadWorklogs = async () => {
     if (worklogLoading) return;
+    const controller = new AbortController();
+    controllerRef.current = controller;
     setWorklogLoading(true);
     setWorklogError(null);
     try {
       const data = await controlPlaneRequest<{
         jiraTicketWorklogs: JiraActivityPage<JiraWorklog>;
       }>(
-        `query JiraTicketWorklogs($issueKey: ID!, $limit: Int!, $offset: Int!) {
-          jiraTicketWorklogs(issueKey: $issueKey, limit: $limit, offset: $offset) {
+        `query JiraTicketWorklogs($issueKey: ID!, $limit: Int!, $offset: Int!, $snapshotTotal: Int) {
+          jiraTicketWorklogs(issueKey: $issueKey, limit: $limit, offset: $offset, snapshotTotal: $snapshotTotal) {
             items {
               id author { ${JIRA_PERSON_FIELDS} }
               comment { ${JIRA_RICH_TEXT_FIELDS} }
@@ -65,14 +69,22 @@ export function JiraTicketActivity({
             total limit offset cache { ${JIRA_CACHE_FIELDS} }
           }
         }`,
-        { issueKey: ticket.key, limit: PAGE_SIZE, offset: worklogs.length },
+        {
+          issueKey: ticket.key,
+          limit: PAGE_SIZE,
+          offset: worklogs.length,
+          snapshotTotal: worklogTotal,
+        },
+        { signal: controller.signal },
       );
+      if (controller.signal.aborted) return;
       setWorklogs((current) => [...current, ...data.jiraTicketWorklogs.items]);
       setWorklogTotal(data.jiraTicketWorklogs.total);
     } catch (value) {
+      if (controller.signal.aborted) return;
       setWorklogError(value instanceof Error ? value.message : String(value));
     } finally {
-      setWorklogLoading(false);
+      if (!controller.signal.aborted) setWorklogLoading(false);
     }
   };
 

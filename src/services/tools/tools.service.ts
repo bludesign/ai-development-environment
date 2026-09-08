@@ -1,4 +1,4 @@
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 
 import { BUILD_CONFIGURATION_ICON_KEYS } from "@ai-development-environment/agent-contract/builds";
 
@@ -193,6 +193,51 @@ function presetView(preset: {
 }
 
 export class ToolsService {
+  private readonly remoteCatalogs = new Map<
+    string,
+    {
+      signature: string;
+      expiresAt: number;
+      promise: Promise<ToolCatalogItem[]>;
+    }
+  >();
+
+  private remoteCatalog(server: ServerWithSecrets, reuse: boolean) {
+    const signature = createHash("sha256")
+      .update(JSON.stringify(server))
+      .digest("hex");
+    const previous = this.remoteCatalogs.get(server.id);
+    if (
+      previous?.signature === signature &&
+      previous.expiresAt > Date.now() &&
+      reuse
+    )
+      return previous.promise;
+    // Share concurrent fresh loads, but a later explicit refresh always discovers
+    // tool changes. Schema expansion can reuse the just-fetched catalog snapshot.
+    if (previous?.signature === signature && previous.expiresAt === Infinity)
+      return previous.promise;
+    const entry = {
+      signature,
+      expiresAt: Infinity,
+      promise: this.listRemoteTools(server),
+    };
+    this.remoteCatalogs.delete(server.id);
+    this.remoteCatalogs.set(server.id, entry);
+    if (this.remoteCatalogs.size > 32)
+      this.remoteCatalogs.delete(this.remoteCatalogs.keys().next().value!);
+    void entry.promise.then(
+      () => {
+        entry.expiresAt = Date.now() + 60_000;
+      },
+      () => {
+        if (this.remoteCatalogs.get(server.id) === entry)
+          this.remoteCatalogs.delete(server.id);
+      },
+    );
+    return entry.promise;
+  }
+
   readonly builtInTools: BuiltInToolRegistry;
 
   constructor(
@@ -580,17 +625,38 @@ export class ToolsService {
     return { id: server.id, name: server.name, toolCount: tools.length };
   }
 
-  async catalog(): Promise<{ groups: ToolCatalogGroup[] }> {
+  async catalog(
+    options: {
+      source?: "BUILTIN" | "EXTERNAL";
+      groupId?: string;
+      reuse?: boolean;
+    } = {},
+  ): Promise<{ groups: ToolCatalogGroup[] }> {
+    const [builtInGroups, externalGroups] = await Promise.all([
+      options.source === "EXTERNAL" ? [] : this.builtInCatalog(),
+      options.source === "BUILTIN" ? [] : this.externalCatalog(options),
+    ]);
+    return { groups: [...builtInGroups, ...externalGroups] };
+  }
+
+  private async externalCatalog(options: {
+    groupId?: string;
+    reuse?: boolean;
+  }) {
     const prisma = await getPrismaClient();
     const servers = await prisma.externalMcpServer.findMany({
+      ...(options.groupId
+        ? { where: { id: options.groupId.replace(EXTERNAL_GROUP_PREFIX, "") } }
+        : {}),
       orderBy: { name: "asc" },
       include: { headers: true },
     });
     const externalGroups = await Promise.all(
       servers.map(async (server): Promise<ToolCatalogGroup> => {
         try {
-          const tools = await this.listRemoteTools(
+          const tools = await this.remoteCatalog(
             await this.externalServerWithSecrets(server.id),
+            options.reuse ?? false,
           );
           return {
             id: `${EXTERNAL_GROUP_PREFIX}${server.id}`,
@@ -619,6 +685,10 @@ export class ToolsService {
         }
       }),
     );
+    return externalGroups;
+  }
+
+  private async builtInCatalog() {
     const [githubConfigured, gitlabConfigured] = await Promise.all([
       this.credentials.isConfigured(CREDENTIALS.githubPersonalAccessToken),
       this.credentials.isConfigured(CREDENTIALS.gitlabAccessToken),
@@ -646,7 +716,7 @@ export class ToolsService {
             }
           : group,
       );
-    return { groups: [...builtInGroups, ...externalGroups] };
+    return builtInGroups;
   }
 
   async callTool(

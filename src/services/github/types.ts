@@ -274,6 +274,12 @@ export type GitHubPipelineStatusKeyInput = {
   headSha: string;
 };
 
+export type GitHubPipelineStatusSubscriptionInput = {
+  snapshotKeys?: GitHubPipelineStatusKeyInput[] | null;
+  recordKeys?: GitHubPipelineRecordKeyInput[] | null;
+  replayCurrent?: boolean | null;
+};
+
 export type GitHubPipelineRecordKeyInput = {
   repositoryGithubId: string;
   workflowRunId: string;

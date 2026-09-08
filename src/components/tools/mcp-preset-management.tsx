@@ -41,7 +41,7 @@ import { Spinner } from "@/components/ui/spinner";
 import { Textarea } from "@/components/ui/textarea";
 import { copyText } from "@/lib/browser-utils";
 import { controlPlaneRequest } from "@/lib/control-plane-client";
-import type { ToolCatalogGroup } from "@/services/tools/types";
+import type { ToolCatalogSummaryGroup as ToolCatalogGroup } from "@/services/tools/types";
 
 import {
   MCP_PRESET_FIELDS,

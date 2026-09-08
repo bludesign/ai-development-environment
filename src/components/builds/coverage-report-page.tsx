@@ -97,49 +97,59 @@ export function CoverageReportPage({ buildId }: { buildId: string }) {
     key: "filename",
     direction: "asc",
   });
-  const load = useCallback(async () => {
-    try {
-      const data = await controlPlaneRequest<{
-        build: {
-          id: string;
-          snapshot: Record<string, unknown>;
-          reports: BuildReport[];
-          worktree: { id: string } | null;
-        } | null;
-      }>(
-        `query CoverageReport($id: ID!) {
+  const load = useCallback(
+    async (signal?: AbortSignal) => {
+      try {
+        const data = await controlPlaneRequest<{
+          build: {
+            id: string;
+            snapshot: Record<string, unknown>;
+            reports: BuildReport[];
+            worktree: { id: string } | null;
+          } | null;
+        }>(
+          `query CoverageReport($id: ID!) {
           build(id: $id) {
             id snapshot
             worktree { id }
-            reports {
+            reports(kind: CODE_COVERAGE) {
               id kind source status summary data error createdAt updatedAt finishedAt
               artifact { id kind relativePath sizeBytes checksum metadata createdAt }
             }
           }
         }`,
-        { id: buildId },
-      );
-      const coverage = data.build?.reports.find(
-        (candidate) => candidate.kind === "CODE_COVERAGE",
-      );
-      setReport(coverage ?? null);
-      const configuration = data.build?.snapshot.configuration as
-        { name?: string } | undefined;
-      const worktree = data.build?.snapshot.worktree as
-        { folder?: string } | undefined;
-      setBuildName(configuration?.name ?? buildId);
-      setWorktreeFolder(worktree?.folder ?? null);
-      setWorktreeId(data.build?.worktree?.id ?? null);
-      setError(null);
-    } catch (value) {
-      setError(value instanceof Error ? value.message : String(value));
-    } finally {
-      setLoading(false);
-    }
-  }, [buildId]);
+          { id: buildId },
+          { signal },
+        );
+        if (signal?.aborted) return;
+        const coverage = data.build?.reports.find(
+          (candidate) => candidate.kind === "CODE_COVERAGE",
+        );
+        setReport(coverage ?? null);
+        const configuration = data.build?.snapshot.configuration as
+          { name?: string } | undefined;
+        const worktree = data.build?.snapshot.worktree as
+          { folder?: string } | undefined;
+        setBuildName(configuration?.name ?? buildId);
+        setWorktreeFolder(worktree?.folder ?? null);
+        setWorktreeId(data.build?.worktree?.id ?? null);
+        setError(null);
+      } catch (value) {
+        if (signal?.aborted) return;
+        setError(value instanceof Error ? value.message : String(value));
+      } finally {
+        if (!signal?.aborted) setLoading(false);
+      }
+    },
+    [buildId],
+  );
   useEffect(() => {
-    const timer = window.setTimeout(() => void load(), 0);
-    return () => window.clearTimeout(timer);
+    const controller = new AbortController();
+    const timer = window.setTimeout(() => void load(controller.signal), 0);
+    return () => {
+      controller.abort();
+      window.clearTimeout(timer);
+    };
   }, [load]);
 
   const rawFiles = useMemo(

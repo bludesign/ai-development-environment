@@ -1,4 +1,5 @@
 import {
+  act,
   cleanup,
   fireEvent,
   render,
@@ -21,6 +22,7 @@ const { push } = vi.hoisted(() => ({ push: vi.fn() }));
 vi.mock("@/lib/control-plane-client", () => ({
   controlPlaneRequest: vi.fn(),
   controlPlaneSubscriptions: vi.fn(),
+  onControlPlaneRecovery: vi.fn(() => vi.fn()),
 }));
 
 vi.mock("@/i18n/navigation", () => ({
@@ -160,14 +162,25 @@ describe("RunDetailPage", () => {
         } as never;
       }
       if (operation.includes("query RunActivity")) {
-        const afterSequence = Number(
-          (variables as { afterSequence?: number } | undefined)
-            ?.afterSequence ?? -1,
+        const args = variables as
+          | {
+              afterSequence?: number;
+              before?: number;
+              first?: number;
+              latest?: boolean;
+            }
+          | undefined;
+        const filtered = eventData.filter(
+          ({ sequence }) =>
+            sequence > (args?.afterSequence ?? -1) &&
+            (args?.before == null || sequence < args.before),
         );
+        const first = args?.first ?? (operation.includes("Older") ? 200 : 500);
         return {
-          runEvents: eventData
-            .filter(({ sequence }) => sequence > afterSequence)
-            .slice(0, 500),
+          runEvents:
+            args?.latest || args?.before != null
+              ? filtered.slice(-first)
+              : filtered.slice(0, first),
         } as never;
       }
       if (operation.includes("query WorktreeDetailOverview")) {
@@ -184,6 +197,22 @@ describe("RunDetailPage", () => {
 
   afterEach(() => {
     cleanup();
+  });
+
+  test("initializing the follow-up provider does not refetch run detail", async () => {
+    vi.useFakeTimers();
+    const view = render(<RunDetailPage runId="run-353" />);
+    try {
+      await act(() => vi.advanceTimersByTimeAsync(1000));
+      expect(
+        request.mock.calls.filter(([query]) =>
+          String(query).includes("query AgentRunDetail"),
+        ),
+      ).toHaveLength(1);
+    } finally {
+      view.unmount();
+      vi.useRealTimers();
+    }
   });
 
   test("shows the persisted error for a failed session", async () => {
@@ -452,7 +481,7 @@ describe("RunDetailPage", () => {
     expect(screen.getByText("old")).toBeDefined();
   });
 
-  test("loads activity beyond the first 500 events", async () => {
+  test("loads the newest activity first and older pages only on demand", async () => {
     eventData = Array.from({ length: 501 }, (_, sequence) => ({
       id: `event-${sequence}`,
       runId: runData.id,
@@ -469,13 +498,17 @@ describe("RunDetailPage", () => {
     render(<RunDetailPage runId="run-353" />);
 
     expect(await screen.findByText("Event 500")).toBeDefined();
+    expect(screen.queryByText("Event 0")).toBeNull();
     expect(
-      request.mock.calls.some(
-        ([query, variables]) =>
-          String(query).includes("query RunActivity") &&
-          (variables as { afterSequence?: number } | undefined)
-            ?.afterSequence === 499,
+      request.mock.calls.filter(([query]) =>
+        String(query).includes("query RunActivity"),
       ),
-    ).toBe(true);
+    ).toHaveLength(1);
+    fireEvent.click(screen.getByRole("button", { name: "Load more" }));
+    expect(await screen.findByText("Event 101")).toBeDefined();
+    expect(screen.queryByText("Event 0")).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Load more" }));
+    expect(await screen.findByText("Event 0")).toBeDefined();
+    expect(screen.queryByRole("button", { name: "Load more" })).toBeNull();
   });
 });

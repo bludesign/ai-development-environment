@@ -1,5 +1,6 @@
 "use client";
 
+import { createRefreshCoalescer } from "@/lib/refresh-coalescer";
 import {
   Download,
   KeyRound,
@@ -9,7 +10,7 @@ import {
   Upload,
 } from "lucide-react";
 import { useTranslations } from "next-intl";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 import { ConfirmationDialog } from "@/components/confirmation-dialog";
 import { Alert, AlertDescription } from "@/components/ui/alert";
@@ -48,6 +49,7 @@ import { Link, useRouter } from "@/i18n/navigation";
 import {
   controlPlaneRequest,
   controlPlaneSubscriptions,
+  onControlPlaneRecovery,
 } from "@/lib/control-plane-client";
 
 import {
@@ -184,7 +186,14 @@ export function ProvisioningProfilesPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
+  const mounted = useRef(false);
+  const inventoryRequest = useRef<AbortController | null>(null);
+  const portalRequest = useRef<AbortController | null>(null);
   const load = useCallback(async () => {
+    if (!mounted.current) return;
+    inventoryRequest.current?.abort();
+    const controller = new AbortController();
+    inventoryRequest.current = controller;
     setLoading(true);
     try {
       const data = await controlPlaneRequest<{
@@ -192,7 +201,8 @@ export function ProvisioningProfilesPage() {
         signingProfiles: Profile[];
         signingCertificates: Certificate[];
         signingOperations: Operation[];
-      }>(LOCAL_QUERY);
+      }>(LOCAL_QUERY, undefined, { signal: controller.signal });
+      if (controller.signal.aborted) return;
       setAgents(data.signingAgents);
       setProfiles(data.signingProfiles);
       setCertificates(data.signingCertificates);
@@ -208,13 +218,18 @@ export function ProvisioningProfilesPage() {
       );
       setError(null);
     } catch (value) {
+      if (controller.signal.aborted) return;
       setError(value instanceof Error ? value.message : String(value));
     } finally {
-      setLoading(false);
+      if (!controller.signal.aborted) setLoading(false);
     }
   }, []);
 
   const loadPortal = useCallback(async () => {
+    if (!mounted.current) return;
+    portalRequest.current?.abort();
+    const controller = new AbortController();
+    portalRequest.current = controller;
     try {
       const data = await controlPlaneRequest<{
         appleDeveloperInventory: {
@@ -223,28 +238,46 @@ export function ProvisioningProfilesPage() {
           bundleIds: AppleResource[];
           devices: AppleResource[];
         };
-      }>(`query AppleDeveloperSigningInventory {
+      }>(
+        `query AppleDeveloperSigningInventory {
         appleDeveloperInventory {
           profiles { id type attributes }
           certificates { id type attributes }
           bundleIds { id type attributes }
           devices { id type attributes }
         }
-      }`);
+      }`,
+        undefined,
+        { signal: controller.signal },
+      );
+      if (controller.signal.aborted) return;
       setPortal(data.appleDeveloperInventory);
       setPortalError(null);
     } catch (value) {
+      if (controller.signal.aborted) return;
       setPortalError(value instanceof Error ? value.message : String(value));
     }
   }, []);
 
   useEffect(() => {
-    const timer = window.setTimeout(() => {
-      void load();
-      void loadPortal();
-    }, 0);
-    return () => window.clearTimeout(timer);
-  }, [load, loadPortal]);
+    mounted.current = true;
+    const timer = window.setTimeout(() => void load(), 0);
+    return () => {
+      mounted.current = false;
+      window.clearTimeout(timer);
+      inventoryRequest.current?.abort();
+      portalRequest.current?.abort();
+    };
+  }, [load]);
+
+  useEffect(() => {
+    if (assetTab !== "portal") return;
+    const timer = window.setTimeout(() => void loadPortal(), 0);
+    return () => {
+      window.clearTimeout(timer);
+      portalRequest.current?.abort();
+    };
+  }, [assetTab, loadPortal]);
 
   const mutate = async (query: string, variables?: Record<string, unknown>) => {
     setBusy(true);
@@ -265,6 +298,11 @@ export function ProvisioningProfilesPage() {
       if (index < 0) return [...current, job];
       const previous = current[index]!;
       if (
+        TERMINAL_JOB_STATUSES.has(previous.status) &&
+        !TERMINAL_JOB_STATUSES.has(job.status)
+      )
+        return current;
+      if (
         previous.status === job.status &&
         previous.error === job.error &&
         previous.agentId === job.agentId
@@ -278,6 +316,7 @@ export function ProvisioningProfilesPage() {
   }, []);
 
   const refreshJobIds = refreshJobs
+    .filter((job) => !TERMINAL_JOB_STATUSES.has(job.status))
     .map((job) => job.id)
     .sort()
     .join(",");
@@ -306,30 +345,31 @@ export function ProvisioningProfilesPage() {
         },
       ),
     );
-    const reconcile = async () => {
-      await Promise.all(
-        ids.map(async (id) => {
-          try {
-            const data = await controlPlaneRequest<{
-              agentJob: RefreshJob | null;
-            }>(
-              `query SigningInventoryJob($id: ID!) {
-                agentJob(id: $id) { id agentId status error }
-              }`,
-              { id },
-            );
-            if (data.agentJob) applyRefreshJob(data.agentJob);
-          } catch {
-            // The subscription remains the primary progress channel.
-          }
-        }),
-      );
-    };
-    void reconcile();
-    const timer = window.setInterval(() => void reconcile(), 2_000);
+    const owner = createRefreshCoalescer(async (signal) => {
+      try {
+        for (let offset = 0; offset < ids.length; offset += 200) {
+          const data = await controlPlaneRequest<{
+            agentJobsByIds: RefreshJob[];
+          }>(
+            `query SigningInventoryJobs($ids: [ID!]!) { agentJobsByIds(ids: $ids) { id agentId status error } }`,
+            { ids: ids.slice(offset, offset + 200) },
+            { signal },
+          );
+          if (signal.aborted) return;
+          data.agentJobsByIds.forEach(applyRefreshJob);
+        }
+      } catch {
+        /* The subscription and next reconciliation can recover progress. */
+      }
+    });
+    void owner.refresh();
+    const timer = window.setInterval(() => void owner.refresh(), 2_000);
+    const recovery = onControlPlaneRecovery(() => void owner.refresh());
     return () => {
       unsubscribers.forEach((unsubscribe) => unsubscribe());
       window.clearInterval(timer);
+      owner.dispose();
+      recovery();
     };
   }, [applyRefreshJob, refreshJobIds]);
 

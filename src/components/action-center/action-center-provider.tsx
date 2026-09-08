@@ -13,8 +13,11 @@ import {
 import {
   controlPlaneRequest,
   controlPlaneSubscriptions,
-  onControlPlaneConnected,
+  onControlPlaneRecovery,
 } from "@/lib/control-plane-client";
+
+import { readCursorWindow } from "@/lib/read-cursor-window";
+import { createRefreshCoalescer } from "@/lib/refresh-coalescer";
 
 import {
   ACTION_CENTER_ITEM_FIELDS,
@@ -55,6 +58,7 @@ const ActionCenterContext = createContext<ActionCenterContextValue | null>(
 async function fetchActionCenter(
   after: string | null = null,
   first = PAGE_SIZE,
+  signal?: AbortSignal,
 ): Promise<ActionCenterPageView> {
   const data = await controlPlaneRequest<{
     actionCenter: ActionCenterPageView;
@@ -66,6 +70,7 @@ async function fetchActionCenter(
       }
     }`,
     { first, after },
+    { signal },
   );
   if (!data.actionCenter) {
     throw new Error("Action Center data is unavailable");
@@ -104,50 +109,93 @@ export function ActionCenterProvider({ children }: { children: ReactNode }) {
     setError(null);
   }, []);
 
+  const refreshOwner = useRef<ReturnType<typeof createRefreshCoalescer> | null>(
+    null,
+  );
+  const lifetime = useRef<AbortController | null>(null);
+  const pageGeneration = useRef(0);
+  const pageRequest = useRef<AbortController | null>(null);
   const refresh = useCallback(async () => {
-    try {
-      const first = Math.max(PAGE_SIZE, Math.min(loadedCount.current, 200));
-      apply(await fetchActionCenter(null, first));
-    } catch (value) {
-      setError(value instanceof Error ? value.message : String(value));
-    } finally {
-      setLoading(false);
-    }
-  }, [apply]);
+    await refreshOwner.current?.refresh();
+  }, []);
 
   const loadMore = useCallback(async () => {
-    if (!nextCursor || loadingMore) return;
+    if (!nextCursor || loadingMore || pageRequest.current) return;
+    const controller = new AbortController();
+    pageRequest.current = controller;
+    const generation = pageGeneration.current;
+    const signal = controller.signal;
     setLoadingMore(true);
     try {
-      apply(await fetchActionCenter(nextCursor), true);
+      const page = await fetchActionCenter(nextCursor, PAGE_SIZE, signal);
+      if (!signal?.aborted && generation === pageGeneration.current)
+        apply(page, true);
     } catch (value) {
-      setError(value instanceof Error ? value.message : String(value));
+      if (!signal.aborted)
+        setError(value instanceof Error ? value.message : String(value));
     } finally {
-      setLoadingMore(false);
+      if (pageRequest.current === controller) pageRequest.current = null;
+      if (!signal.aborted && generation === pageGeneration.current)
+        setLoadingMore(false);
     }
   }, [apply, loadingMore, nextCursor]);
 
   useEffect(() => {
-    const initial = window.setTimeout(() => void refresh(), 0);
-    const poll = window.setInterval(() => void refresh(), 30_000);
-    const unsubscribe = controlPlaneSubscriptions().subscribe<{
-      actionCenterChanged: boolean;
-    }>(
+    const controller = new AbortController();
+    lifetime.current = controller;
+    const updates = createRefreshCoalescer(async (signal) => {
+      const generation = ++pageGeneration.current;
+      pageRequest.current?.abort();
+      pageRequest.current = null;
+      setLoadingMore(false);
+      try {
+        const first = Math.max(PAGE_SIZE, loadedCount.current);
+        const result = await readCursorWindow(
+          (after, count) => fetchActionCenter(after, count, signal),
+          first,
+          200,
+          (item: ActionCenterItem) => item.key,
+        );
+        if (!signal.aborted && generation === pageGeneration.current)
+          apply(result);
+      } catch (value) {
+        if (!signal.aborted)
+          setError(value instanceof Error ? value.message : String(value));
+      } finally {
+        if (!signal.aborted) setLoading(false);
+      }
+    });
+    refreshOwner.current = updates;
+    const initial = window.setTimeout(() => void updates.refresh(), 0);
+    const poll = window.setInterval(() => void updates.refresh(), 30_000);
+    const unsubscribe = controlPlaneSubscriptions().subscribe(
       { query: "subscription ActionCenterChanged { actionCenterChanged }" },
       {
-        next: () => void refresh(),
+        next: () => void updates.refresh(),
         error: () => undefined,
         complete: () => undefined,
       },
     );
-    const reconnect = onControlPlaneConnected(() => void refresh());
+    const reconnect = onControlPlaneRecovery(
+      (event) => {
+        void (event?.initialConnection
+          ? updates.refreshIfIdle()
+          : updates.refresh());
+      },
+      { includeInitial: true },
+    );
     return () => {
       window.clearTimeout(initial);
       window.clearInterval(poll);
       unsubscribe();
       reconnect();
+      updates.dispose();
+      controller.abort();
+      pageRequest.current?.abort();
+      pageRequest.current = null;
+      refreshOwner.current = null;
     };
-  }, [refresh]);
+  }, [apply]);
 
   const answerQuestion = useCallback(
     async (

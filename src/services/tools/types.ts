@@ -90,3 +90,12 @@ export type ToolCatalogGroup = {
   tools: ToolCatalogItem[];
   children: ToolCatalogGroup[];
 };
+
+/** Listing projection: tool schemas are fetched only when a runner opens. */
+export type ToolCatalogSummaryGroup = Omit<
+  ToolCatalogGroup,
+  "tools" | "children"
+> & {
+  tools: Array<Omit<ToolCatalogItem, "inputSchema" | "outputSchema">>;
+  children: ToolCatalogSummaryGroup[];
+};

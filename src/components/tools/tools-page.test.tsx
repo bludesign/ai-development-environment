@@ -19,6 +19,40 @@ vi.mock("@/lib/browser-utils", () => ({
   copyText: vi.fn(),
 }));
 
+type CatalogFixtureGroup = {
+  id: string;
+  source: string;
+  tools: Array<{ name: string; [key: string]: unknown }>;
+  children?: CatalogFixtureGroup[];
+  [key: string]: unknown;
+};
+function catalogResponse(
+  input: RequestInfo | URL,
+  body: { groups: CatalogFixtureGroup[] },
+) {
+  const params = new URL(String(input), "http://localhost").searchParams;
+  const flatten = (groups: CatalogFixtureGroup[]): CatalogFixtureGroup[] =>
+    groups.flatMap((group) => [group, ...flatten(group.children ?? [])]);
+  if (params.has("name"))
+    return Response.json({
+      tool: flatten(body.groups)
+        .find((group) => group.id === params.get("groupId"))
+        ?.tools.find((tool) => tool.name === params.get("name")),
+    });
+  const summary = (group: CatalogFixtureGroup): unknown => ({
+    ...group,
+    tools: group.tools.map(
+      ({ inputSchema: _input, outputSchema: _output, ...tool }) => tool,
+    ),
+    children: (group.children ?? []).map(summary),
+  });
+  return Response.json({
+    groups: body.groups
+      .filter((group) => group.source === params.get("source"))
+      .map(summary),
+  });
+}
+
 const requestMock = vi.mocked(controlPlaneRequest);
 const copyTextMock = vi.mocked(copyText);
 
@@ -109,7 +143,7 @@ describe("ToolsPage", () => {
     requestMock.mockResolvedValue({ externalMcpServers: [] } as never);
     const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
       if (String(input).includes("/api/tools/catalog")) {
-        return Response.json({
+        return catalogResponse(input, {
           groups: [
             {
               id: "builtin:codebases",
@@ -167,10 +201,10 @@ describe("ToolsPage", () => {
     expect(toolRow.getAttribute("aria-expanded")).toBe("false");
     fireEvent.keyDown(toolRow, { key: "Enter" });
     expect(toolRow.getAttribute("aria-expanded")).toBe("true");
-    fireEvent.change(screen.getByLabelText(/path/), {
+    fireEvent.change(await screen.findByLabelText(/path/), {
       target: { value: "/work/repo" },
     });
-    fireEvent.click(screen.getByRole("button", { name: "Run tool" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Run tool" }));
 
     expect(await screen.findByText(/\/work\/repo/)).toBeDefined();
     fireEvent.click(screen.getByRole("button", { name: "Copy response" }));
@@ -206,7 +240,7 @@ describe("ToolsPage", () => {
     const fetchMock = vi.fn(
       async (input: RequestInfo | URL, init?: RequestInit) => {
         if (String(input).includes("/api/tools/catalog")) {
-          return Response.json({
+          return catalogResponse(input, {
             groups: [
               {
                 id: "external:dynamic",
@@ -248,12 +282,12 @@ describe("ToolsPage", () => {
     fireEvent.click(
       await screen.findByRole("button", { name: "Expand dynamic_lookup" }),
     );
-    const editor = screen.getByLabelText("Arguments (JSON object)");
+    const editor = await screen.findByLabelText("Arguments (JSON object)");
     expect((editor as HTMLTextAreaElement).value).toBe("{}");
     fireEvent.change(editor, {
       target: { value: '{"region":"us-east"}' },
     });
-    fireEvent.click(screen.getByRole("button", { name: "Run tool" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Run tool" }));
 
     expect(await screen.findByText(/"found": true/)).toBeDefined();
     expect(fetchMock).toHaveBeenCalledWith(
@@ -266,7 +300,7 @@ describe("ToolsPage", () => {
     requestMock.mockResolvedValue({ externalMcpServers: [] } as never);
     const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
       if (String(input).includes("/api/tools/catalog")) {
-        return Response.json({
+        return catalogResponse(input, {
           groups: [
             {
               id: "builtin:danger",
@@ -304,13 +338,21 @@ describe("ToolsPage", () => {
       await screen.findByRole("button", { name: "Expand delete_everything" }),
     );
     expect(screen.getByText("Destructive")).toBeDefined();
-    fireEvent.click(screen.getByRole("button", { name: "Run tool" }));
-    expect(fetchMock).toHaveBeenCalledTimes(1);
+    fireEvent.click(await screen.findByRole("button", { name: "Run tool" }));
+    expect(
+      fetchMock.mock.calls.filter(([url]) => String(url) === "/api/tools/call"),
+    ).toHaveLength(0);
     expect(await screen.findByText("Run a destructive tool?")).toBeDefined();
     fireEvent.click(
       screen.getByRole("button", { name: "Run destructive tool" }),
     );
-    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
+    await waitFor(() =>
+      expect(
+        fetchMock.mock.calls.filter(
+          ([url]) => String(url) === "/api/tools/call",
+        ),
+      ).toHaveLength(1),
+    );
   });
 
   test("renders, searches, counts, and invokes nested built-in groups", async () => {
@@ -318,7 +360,7 @@ describe("ToolsPage", () => {
     const fetchMock = vi.fn(
       async (input: RequestInfo | URL, init?: RequestInit) => {
         if (String(input).includes("/api/tools/catalog")) {
-          return Response.json({
+          return catalogResponse(input, {
             groups: [
               {
                 id: "builtin:debugging",
@@ -386,7 +428,7 @@ describe("ToolsPage", () => {
     fireEvent.click(
       screen.getByRole("button", { name: "Expand get_console_logs" }),
     );
-    fireEvent.click(screen.getByRole("button", { name: "Run tool" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Run tool" }));
     await waitFor(() =>
       expect(fetchMock).toHaveBeenCalledWith(
         "/api/tools/call",

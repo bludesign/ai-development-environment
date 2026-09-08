@@ -22,7 +22,14 @@ import {
   Trash2,
 } from "lucide-react";
 import { useTranslations } from "next-intl";
-import { Fragment, useCallback, useEffect, useMemo, useState } from "react";
+import {
+  Fragment,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 
 import { AGENT_FIELDS, JOB_FIELDS } from "@/components/agents/graphql-fields";
 import type { AgentJob } from "@/components/agents/types";
@@ -66,7 +73,12 @@ import { copyText, createClientId } from "@/lib/browser-utils";
 import {
   controlPlaneRequest,
   controlPlaneSubscriptions,
+  onControlPlaneRecovery,
 } from "@/lib/control-plane-client";
+import {
+  createRefreshCoalescer,
+  type RefreshCoalescer,
+} from "@/lib/refresh-coalescer";
 import { cn } from "@/lib/utils";
 
 import type {
@@ -146,35 +158,53 @@ export function CodebaseDetailPage({ codebaseId }: { codebaseId: string }) {
   const [notice, setNotice] = useState<string | null>(null);
   const [diffs, setDiffs] = useState<Record<string, DiffEntry>>({});
 
-  const inspectState = useCallback(async () => {
-    setInspecting(true);
-    try {
-      const data = await controlPlaneRequest<{
-        inspectCodebaseGitState: CodebaseGitState;
-      }>(
-        `mutation InspectCodebaseGitState($input: InspectCodebaseGitStateInput!) {
+  const ownerRef = useRef<RefreshCoalescer | null>(null);
+  const inspectionMode = useRef<boolean | "changed">(false);
+  const inspectedRevision = useRef<string | null>(null);
+  const load = useCallback((mode: boolean | "changed" = true) => {
+    if (
+      mode === true ||
+      (inspectionMode.current !== true && mode === "changed")
+    )
+      inspectionMode.current = mode;
+    return ownerRef.current?.refresh() ?? Promise.resolve();
+  }, []);
+  const inspectState = useCallback(
+    async (signal: AbortSignal) => {
+      setInspecting(true);
+      try {
+        const data = await controlPlaneRequest<{
+          inspectCodebaseGitState: CodebaseGitState;
+        }>(
+          `mutation InspectCodebaseGitState($input: InspectCodebaseGitStateInput!) {
           inspectCodebaseGitState(input: $input) {
             dirty branchesTruncated stashesTruncated
             branches { name local remote current checkedOutPath lastCommitMessage lastCommitAt }
             stashes { oid selector message createdAt }
           }
         }`,
-        { input: { codebaseId, requestId: createClientId() } },
-      );
-      setGitState(data.inspectCodebaseGitState);
-      setDiffs({});
-      setLoadError(null);
-      return true;
-    } catch (value) {
-      setLoadError(value instanceof Error ? value.message : String(value));
-      return false;
-    } finally {
-      setInspecting(false);
-    }
-  }, [codebaseId]);
+          { input: { codebaseId, requestId: createClientId() } },
+        );
+        if (signal.aborted) return false;
+        setGitState(data.inspectCodebaseGitState);
+        setDiffs({});
+        setLoadError(null);
+        return true;
+      } catch (value) {
+        if (signal.aborted) return false;
+        setLoadError(value instanceof Error ? value.message : String(value));
+        return false;
+      } finally {
+        if (!signal.aborted) setInspecting(false);
+      }
+    },
+    [codebaseId],
+  );
 
-  const load = useCallback(
-    async (includeLiveState = true) => {
+  const fetchDetail = useCallback(
+    async (signal: AbortSignal) => {
+      const mode = inspectionMode.current;
+      inspectionMode.current = false;
       try {
         const data = await controlPlaneRequest<{
           codebase: CodebaseDetail | null;
@@ -183,8 +213,21 @@ export function CodebaseDetailPage({ codebaseId }: { codebaseId: string }) {
             codebase(id: $id) { ${CODEBASE_DETAIL_FIELDS} }
           }`,
           { id: codebaseId },
+          { signal },
         );
+        if (signal.aborted) return;
         const next = data.codebase;
+        const revision = JSON.stringify([
+          next?.id,
+          next?.lastCheckedAt,
+          next?.lastFetchedAt,
+          next?.headSha,
+          next?.branch,
+          next?.availability,
+        ]);
+        const includeLiveState =
+          mode === true ||
+          (mode === "changed" && inspectedRevision.current !== revision);
         setCodebase(next);
         setLoadError(null);
         if (!next) {
@@ -194,8 +237,11 @@ export function CodebaseDetailPage({ codebaseId }: { codebaseId: string }) {
           !next.activeJob &&
           liveInspectionAvailable(next)
         ) {
-          if (!(await inspectState())) {
+          if (!(await inspectState(signal))) {
+            if (signal.aborted) return;
             setGitState(persistedState(next));
+          } else {
+            inspectedRevision.current = revision;
           }
         } else if (!liveInspectionAvailable(next)) {
           setGitState(persistedState(next));
@@ -203,15 +249,19 @@ export function CodebaseDetailPage({ codebaseId }: { codebaseId: string }) {
           setGitState((current) => current ?? persistedState(next));
         }
       } catch (value) {
+        if (signal.aborted) return;
         setLoadError(value instanceof Error ? value.message : String(value));
       } finally {
-        setLoading(false);
+        if (!signal.aborted) setLoading(false);
       }
     },
     [codebaseId, inspectState],
   );
 
   useEffect(() => {
+    const owner = createRefreshCoalescer(fetchDetail);
+    ownerRef.current = owner;
+    const recovery = onControlPlaneRecovery(() => void load());
     const initial = window.setTimeout(() => void load(), 0);
     const refresh = window.setInterval(() => void load(false), 30_000);
     const unsubscribe = controlPlaneSubscriptions().subscribe<{
@@ -233,7 +283,7 @@ export function CodebaseDetailPage({ codebaseId }: { codebaseId: string }) {
             changed.codebaseId === null ||
             changed.codebaseId === codebaseId
           ) {
-            void load();
+            void load("changed");
           }
         },
         error: () => undefined,
@@ -244,8 +294,11 @@ export function CodebaseDetailPage({ codebaseId }: { codebaseId: string }) {
       window.clearTimeout(initial);
       window.clearInterval(refresh);
       unsubscribe();
+      recovery();
+      owner.dispose();
+      if (ownerRef.current === owner) ownerRef.current = null;
     };
-  }, [codebaseId, load]);
+  }, [codebaseId, fetchDetail, load]);
 
   const activeJob = codebase?.activeJob ?? null;
   useEffect(() => {

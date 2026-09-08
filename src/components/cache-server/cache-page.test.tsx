@@ -14,6 +14,8 @@ import { controlPlaneRequest } from "@/lib/control-plane-client";
 import { CacheServerPage } from "./cache-page";
 
 vi.mock("@/lib/control-plane-client", () => ({
+  controlPlaneSubscriptions: vi.fn(() => ({ subscribe: vi.fn(() => vi.fn()) })),
+  onControlPlaneRecovery: vi.fn(() => vi.fn()),
   controlPlaneRequest: vi.fn(),
 }));
 

@@ -4,6 +4,7 @@
     "description": "Un environnement de développement axé sur l’intelligence artificielle."
   },
   "common": {
+    "loadMore": "Charger plus",
     "cancel": "Annuler",
     "continue": "Continuer",
     "cannotBeUndone": "Cette action est irréversible."

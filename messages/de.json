@@ -4,6 +4,7 @@
     "description": "Eine auf künstliche Intelligenz ausgerichtete Entwicklungsumgebung."
   },
   "common": {
+    "loadMore": "Mehr laden",
     "cancel": "Abbrechen",
     "continue": "Fortfahren",
     "cannotBeUndone": "Diese Aktion kann nicht rückgängig gemacht werden."

@@ -203,45 +203,18 @@ export class SkillsService {
     });
   }
 
-  async overview(searchValue = "") {
+  async listSkills(searchValue = "") {
     const prisma = await getPrismaClient();
     const search = searchValue.trim().toLocaleLowerCase();
-    const [
-      skills,
-      groups,
-      observations,
-      installations,
-      settings,
-      repositories,
-    ] = await Promise.all([
-      prisma.skill.findMany({
-        where: { deletedAt: null },
-        include: skillInclude,
-        orderBy: { name: "asc" },
-      }),
-      prisma.skillGroup.findMany({
-        include: groupInclude,
-        orderBy: { name: "asc" },
-      }),
-      prisma.skillToolObservation.findMany({
-        include: { agent: true },
-        orderBy: [{ tool: "asc" }, { agent: { name: "asc" } }],
-      }),
-      prisma.skillInstallation.findMany({
-        where: { present: true },
-        include: {
-          agent: true,
-          codebase: { include: { repository: true } },
-          worktree: true,
-          baseline: true,
-          skill: true,
-        },
-        orderBy: [{ skillName: "asc" }, { rootPath: "asc" }],
-      }),
-      this.settings(),
-      prisma.codebaseRepository.findMany({ orderBy: { name: "asc" } }),
-    ]);
-    const filteredSkills = search
+    const skills = await prisma.skill.findMany({
+      where: { deletedAt: null },
+      include: {
+        groups: skillInclude.groups,
+        files: { orderBy: { path: "asc" }, omit: { contents: true } },
+      },
+      orderBy: { name: "asc" },
+    });
+    return search
       ? skills.filter((skill) =>
           [
             skill.name,
@@ -250,7 +223,47 @@ export class SkillsService {
           ].some((value) => value.toLocaleLowerCase().includes(search)),
         )
       : skills;
-    const filteredInstallations = search
+  }
+
+  async listGroups() {
+    const prisma = await getPrismaClient();
+    return prisma.skillGroup.findMany({
+      include: groupInclude,
+      orderBy: { name: "asc" },
+    });
+  }
+
+  async getGroup(id: string) {
+    const prisma = await getPrismaClient();
+    return prisma.skillGroup.findUnique({
+      where: { id },
+      include: groupInclude,
+    });
+  }
+
+  async observations() {
+    const prisma = await getPrismaClient();
+    return prisma.skillToolObservation.findMany({
+      include: { agent: true },
+      orderBy: [{ tool: "asc" }, { agent: { name: "asc" } }],
+    });
+  }
+
+  async installations(searchValue = "") {
+    const prisma = await getPrismaClient();
+    const search = searchValue.trim().toLocaleLowerCase();
+    const installations = await prisma.skillInstallation.findMany({
+      where: { present: true },
+      include: {
+        agent: true,
+        codebase: { include: { repository: true } },
+        worktree: true,
+        baseline: true,
+        skill: true,
+      },
+      orderBy: [{ skillName: "asc" }, { rootPath: "asc" }],
+    });
+    return search
       ? installations.filter((installation) =>
           [
             installation.skillName,
@@ -261,11 +274,43 @@ export class SkillsService {
           ].some((value) => value.toLocaleLowerCase().includes(search)),
         )
       : installations;
-    return {
-      skills: filteredSkills,
+  }
+
+  async repositories() {
+    const prisma = await getPrismaClient();
+    return prisma.codebaseRepository.findMany({ orderBy: { name: "asc" } });
+  }
+
+  async fileContents(id: string) {
+    const prisma = await getPrismaClient();
+    const file = await prisma.skillFile.findUniqueOrThrow({
+      where: { id },
+      select: { contents: true },
+    });
+    return file.contents;
+  }
+
+  async overview(searchValue = "") {
+    const [
+      skills,
       groups,
       observations,
-      installations: filteredInstallations,
+      installations,
+      settings,
+      repositories,
+    ] = await Promise.all([
+      this.listSkills(searchValue),
+      this.listGroups(),
+      this.observations(),
+      this.installations(searchValue),
+      this.settings(),
+      this.repositories(),
+    ]);
+    return {
+      skills,
+      groups,
+      observations,
+      installations,
       settings,
       repositories,
     };

@@ -1,6 +1,11 @@
 "use client";
 
 import {
+  createRefreshCoalescer,
+  type RefreshCoalescer,
+} from "@/lib/refresh-coalescer";
+
+import {
   CalendarDays,
   ChevronDown,
   ChevronRight,
@@ -16,6 +21,7 @@ import {
   useCallback,
   useEffect,
   useMemo,
+  useRef,
   useState,
 } from "react";
 
@@ -73,7 +79,10 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { Link } from "@/i18n/navigation";
-import { controlPlaneRequest } from "@/lib/control-plane-client";
+import {
+  controlPlaneRequest,
+  onControlPlaneRecovery,
+} from "@/lib/control-plane-client";
 import { formatDateValue } from "@/lib/date-format";
 import type {
   JiraEditField,
@@ -105,8 +114,15 @@ export function JiraTicketDetailPage({ issueKey }: { issueKey: string }) {
   const t = useTranslations("jiraTicketDetail");
   const tt = useTranslations("jiraTickets");
   const ticketHistory = useJiraTicketHistory(issueKey);
+  const resetHistory = ticketHistory.reset;
   const [ticket, setTicket] = useState<JiraTicketDetail | null>(null);
   const [editFields, setEditFields] = useState<JiraEditField[]>([]);
+  const [editFieldsIssueKey, setEditFieldsIssueKey] = useState<string | null>(
+    null,
+  );
+  const editFieldsLoaded = editFieldsIssueKey === issueKey;
+  const [editFieldsLoading, setEditFieldsLoading] = useState(false);
+  const editRequest = useRef<AbortController | null>(null);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -119,6 +135,11 @@ export function JiraTicketDetailPage({ issueKey }: { issueKey: string }) {
   const [fieldsOpen, setFieldsOpen] = useState(false);
 
   const loadEditFields = useCallback(async () => {
+    if (editFieldsLoaded) return editFields;
+    editRequest.current?.abort();
+    const controller = new AbortController();
+    editRequest.current = controller;
+    setEditFieldsLoading(true);
     try {
       const data = await controlPlaneRequest<{
         jiraTicketEditFields: JiraEditField[];
@@ -129,39 +150,91 @@ export function JiraTicketDetailPage({ issueKey }: { issueKey: string }) {
           }
         }`,
         { issueKey },
+        { signal: controller.signal },
       );
+      if (controller.signal.aborted) return [];
       setEditFields(data.jiraTicketEditFields);
-    } catch {
-      setEditFields([]);
-    }
-  }, [issueKey]);
-
-  const load = useCallback(async () => {
-    setLoading(true);
-    try {
-      const data = await controlPlaneRequest<{ jiraTicket: JiraTicketDetail }>(
-        `query JiraTicketDetail($issueKey: ID!) {
-          jiraTicket(issueKey: $issueKey) { ${JIRA_TICKET_DETAIL_FIELDS} }
-        }`,
-        { issueKey },
-      );
-      setTicket(data.jiraTicket);
-      setSummary(data.jiraTicket.summary);
-      setError(null);
-      await loadEditFields();
+      setEditFieldsIssueKey(issueKey);
+      return data.jiraTicketEditFields;
     } catch (value) {
-      setError(value instanceof Error ? value.message : String(value));
+      if (!controller.signal.aborted)
+        setError(value instanceof Error ? value.message : String(value));
+      return [];
     } finally {
-      setLoading(false);
+      if (!controller.signal.aborted) setEditFieldsLoading(false);
     }
-  }, [issueKey, loadEditFields]);
+  }, [editFields, editFieldsLoaded, issueKey]);
+
+  useEffect(() => () => editRequest.current?.abort(), [issueKey]);
+  const beginEdit = async (field: "summary" | "description" | "details") => {
+    const fields = await loadEditFields();
+    if (field === "details") {
+      if (fields.length) setDetailsOpen(true);
+    } else if (fields.some((item) => item.id === field)) {
+      if (field === "summary") setSummaryEditing(true);
+      else setDescriptionEditing(true);
+    }
+  };
+
+  const readOwner = useRef<RefreshCoalescer | null>(null);
+  const snapshotRevision = useRef(0);
+  const latestIssueKey = useRef(issueKey);
+  useEffect(() => {
+    latestIssueKey.current = issueKey;
+  }, [issueKey]);
+  const load = useCallback(
+    async (signal: AbortSignal) => {
+      const version = snapshotRevision.current;
+      setLoading(true);
+      try {
+        const data = await controlPlaneRequest<{
+          jiraTicket: JiraTicketDetail;
+        }>(
+          `query JiraTicketDetail($issueKey: ID!) {
+          jiraTicket(issueKey: $issueKey, commentsFirst: 50) { ${JIRA_TICKET_DETAIL_FIELDS} }
+        }`,
+          { issueKey },
+          { signal },
+        );
+        if (signal.aborted || version !== snapshotRevision.current) return;
+        setTicket(data.jiraTicket);
+        setSummary(data.jiraTicket.summary);
+        setError(null);
+      } catch (value) {
+        if (signal.aborted) return;
+        setError(value instanceof Error ? value.message : String(value));
+      } finally {
+        if (!signal.aborted) setLoading(false);
+      }
+    },
+    [issueKey],
+  );
 
   useEffect(() => {
-    const timeout = window.setTimeout(() => void load(), 0);
-    return () => window.clearTimeout(timeout);
-  }, [load]);
+    const owner = createRefreshCoalescer(load);
+    readOwner.current = owner;
+    const timeout = window.setTimeout(() => void owner.refresh(), 0);
+    const recovery = onControlPlaneRecovery(
+      (event) => {
+        if (event?.initialConnection) void owner.refreshIfIdle();
+        else {
+          resetHistory();
+          void owner.refresh();
+        }
+      },
+      { includeInitial: true },
+    );
+    return () => {
+      window.clearTimeout(timeout);
+      recovery();
+      owner.dispose();
+      if (readOwner.current === owner) readOwner.current = null;
+    };
+  }, [load, resetHistory]);
 
   const ticketChanged = (next: JiraTicketDetail) => {
+    if (next.key !== latestIssueKey.current) return;
+    ++snapshotRevision.current;
     setTicket(next);
     setSummary(next.summary);
     setError(null);
@@ -171,26 +244,14 @@ export function JiraTicketDetailPage({ issueKey }: { issueKey: string }) {
   // The webhook delivery already refreshed the server-side cache, so this
   // refetch is quiet: no busy state, or the page would blink every time
   // someone posts a comment in Jira.
-  const reloadTicket = async () => {
-    try {
-      const data = await controlPlaneRequest<{ jiraTicket: JiraTicketDetail }>(
-        `query JiraTicketDetail($issueKey: ID!) {
-          jiraTicket(issueKey: $issueKey) { ${JIRA_TICKET_DETAIL_FIELDS} }
-        }`,
-        { issueKey },
-      );
-      ticketChanged(data.jiraTicket);
-    } catch {
-      // Leave the last good render in place; manual refresh still works.
-    }
+  const reloadTicket = () => {
+    ticketHistory.reset();
+    return readOwner.current?.refresh() ?? Promise.resolve();
   };
 
-  useJiraTicketChanges(
-    (change) => {
-      if (change.issueKey === issueKey) void reloadTicket();
-    },
-    () => void reloadTicket(),
-  );
+  useJiraTicketChanges((change) => {
+    if (change.issueKey === issueKey) void reloadTicket();
+  });
 
   const refresh = async () => {
     setBusy(true);
@@ -206,7 +267,7 @@ export function JiraTicketDetailPage({ issueKey }: { issueKey: string }) {
         { issueKey },
       );
       ticketChanged(data.refreshJiraCachedTicket);
-      await loadEditFields();
+      setEditFieldsIssueKey(null);
     } catch (value) {
       setError(value instanceof Error ? value.message : String(value));
     } finally {
@@ -321,10 +382,11 @@ export function JiraTicketDetailPage({ issueKey }: { issueKey: string }) {
               <h1 className="text-2xl font-semibold tracking-tight">
                 {ticket.summary}
               </h1>
-              {editable.has("summary") && (
+              {(!editFieldsLoaded || editable.has("summary")) && (
                 <Button
                   aria-label={t("editSummary")}
-                  onClick={() => setSummaryEditing(true)}
+                  disabled={editFieldsLoading}
+                  onClick={() => void beginEdit("summary")}
                   size="icon-xs"
                   variant="outline"
                 >
@@ -372,9 +434,10 @@ export function JiraTicketDetailPage({ issueKey }: { issueKey: string }) {
         <Card>
           <CardHeader className="flex grid-cols-none flex-row items-center justify-between gap-3">
             <CardTitle>{t("details")}</CardTitle>
-            {editFields.length > 0 && (
+            {(!editFieldsLoaded || editFields.length > 0) && (
               <Button
-                onClick={() => setDetailsOpen(true)}
+                disabled={editFieldsLoading}
+                onClick={() => void beginEdit("details")}
                 size="xs"
                 variant="outline"
               >
@@ -449,9 +512,10 @@ export function JiraTicketDetailPage({ issueKey }: { issueKey: string }) {
                     history={ticketHistory}
                     ticket={ticket}
                   />
-                  {editable.has("description") && (
+                  {(!editFieldsLoaded || editable.has("description")) && (
                     <Button
-                      onClick={() => setDescriptionEditing(true)}
+                      disabled={editFieldsLoading}
+                      onClick={() => void beginEdit("description")}
                       size="xs"
                       variant="outline"
                     >

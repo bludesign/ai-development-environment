@@ -1,5 +1,12 @@
 "use client";
 
+import { readWorktreeBuildWindow } from "@/components/builds/build-history-window";
+
+import {
+  createRefreshCoalescer,
+  type RefreshCoalescer,
+} from "@/lib/refresh-coalescer";
+
 import { ExternalLink } from "lucide-react";
 import { useTranslations } from "next-intl";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -33,6 +40,7 @@ import { Link } from "@/i18n/navigation";
 import {
   controlPlaneRequest,
   controlPlaneSubscriptions,
+  onControlPlaneRecovery,
 } from "@/lib/control-plane-client";
 
 const INITIAL_BUILD_PAGE_SIZE = 50;
@@ -48,29 +56,58 @@ export function RunWorktreeCards({ worktreeId }: { worktreeId: string }) {
   const [loadingMore, setLoadingMore] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const loadedBuildCount = useRef(INITIAL_BUILD_PAGE_SIZE);
+  const buildPagination = useRef<AbortController | null>(null);
 
-  const load = useCallback(async () => {
-    try {
-      const data = await controlPlaneRequest<{
-        worktreeOverview: WorktreeOverview;
-        builds: { items: BuildRecord[]; nextCursor: string | null };
-      }>(WORKTREE_DETAIL_OVERVIEW_QUERY, {
-        worktreeId,
-        buildFirst: loadedBuildCount.current,
-      });
-      setOverview(data.worktreeOverview);
-      setBuilds(data.builds?.items ?? []);
-      setNextCursor(data.builds?.nextCursor ?? null);
-      setError(null);
-    } catch (value) {
-      setError(value instanceof Error ? value.message : String(value));
-    } finally {
-      setLoading(false);
-    }
-  }, [worktreeId]);
+  const overviewOwner = useRef<RefreshCoalescer | null>(null);
+  const load = useCallback(
+    () => overviewOwner.current?.refresh() ?? Promise.resolve(),
+    [],
+  );
+  const fetchOverview = useCallback(
+    async (signal: AbortSignal) => {
+      buildPagination.current?.abort();
+      buildPagination.current = null;
+      setLoadingMore(false);
+      try {
+        const data = await controlPlaneRequest<{
+          worktreeOverview: WorktreeOverview;
+          builds: { items: BuildRecord[]; nextCursor: string | null };
+        }>(
+          WORKTREE_DETAIL_OVERVIEW_QUERY,
+          {
+            worktreeId,
+            buildFirst: Math.min(200, loadedBuildCount.current),
+            includeCoverage: false,
+            includeQueue: false,
+          },
+          { signal },
+        );
+        if (signal.aborted) return;
+        const history = await readWorktreeBuildWindow(
+          worktreeId,
+          data.builds ?? { items: [], nextCursor: null },
+          loadedBuildCount.current,
+          signal,
+        );
+        if (signal.aborted) return;
+        setOverview(data.worktreeOverview);
+        setBuilds(history.items);
+        setNextCursor(history.nextCursor);
+        setError(null);
+      } catch (value) {
+        if (signal.aborted) return;
+        setError(value instanceof Error ? value.message : String(value));
+      } finally {
+        if (!signal.aborted) setLoading(false);
+      }
+    },
+    [worktreeId],
+  );
 
   const loadMore = useCallback(async () => {
-    if (!nextCursor) return;
+    if (!nextCursor || buildPagination.current) return;
+    const controller = new AbortController();
+    buildPagination.current = controller;
     setLoadingMore(true);
     try {
       const data = await controlPlaneRequest<{
@@ -83,7 +120,9 @@ export function RunWorktreeCards({ worktreeId }: { worktreeId: string }) {
           }
         }`,
         { worktreeId, after: nextCursor },
+        { signal: controller.signal },
       );
+      if (controller.signal.aborted) return;
       setBuilds((current) => {
         const ids = new Set(current.map((build) => build.id));
         const merged = [
@@ -99,11 +138,28 @@ export function RunWorktreeCards({ worktreeId }: { worktreeId: string }) {
       setNextCursor(data.builds.nextCursor);
       setError(null);
     } catch (value) {
+      if (controller.signal.aborted) return;
       setError(value instanceof Error ? value.message : String(value));
     } finally {
-      setLoadingMore(false);
+      if (buildPagination.current === controller)
+        buildPagination.current = null;
+      if (!controller.signal.aborted) setLoadingMore(false);
     }
   }, [nextCursor, worktreeId]);
+
+  useEffect(() => {
+    loadedBuildCount.current = 50;
+    const owner = createRefreshCoalescer(fetchOverview);
+    overviewOwner.current = owner;
+    const recovery = onControlPlaneRecovery(() => void owner.refresh());
+    return () => {
+      owner.dispose();
+      recovery();
+      buildPagination.current?.abort();
+      buildPagination.current = null;
+      if (overviewOwner.current === owner) overviewOwner.current = null;
+    };
+  }, [fetchOverview]);
 
   useEffect(() => {
     const initial = window.setTimeout(() => void load(), 0);
@@ -133,7 +189,9 @@ export function RunWorktreeCards({ worktreeId }: { worktreeId: string }) {
     );
     const unsubscribeBuilds = subscriptions.subscribe(
       {
-        query: "subscription RunWorktreeBuildsChanged { buildsChanged { id } }",
+        query:
+          "subscription RunWorktreeBuildsChanged($worktreeId: ID!) { buildsChanged(worktreeId: $worktreeId) { id } }",
+        variables: { worktreeId },
       },
       {
         next: () => void load(),

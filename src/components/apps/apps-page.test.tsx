@@ -8,6 +8,7 @@ import type { ManagedApp } from "./types";
 
 vi.mock("@/lib/control-plane-client", () => ({
   controlPlaneRequest: vi.fn(),
+  onControlPlaneRecovery: vi.fn(() => () => undefined),
   controlPlaneSubscriptions: () => ({ subscribe: () => vi.fn() }),
 }));
 

@@ -203,6 +203,30 @@ type SidebarUsageToday {
 }
 
 "Represents sidebar status in the GraphQL API."
+type SidebarDiskAgentIdentity {
+  "Stable identifier of this resource."
+  id: ID!
+  "Display name of this resource."
+  name: String!
+}
+"Compact disk status for the visible navigation footer."
+type SidebarDiskAgent {
+  "Identity of the agent reporting disk status."
+  agent: SidebarDiskAgentIdentity!
+  "Whether disk management is enabled for this agent."
+  enabled: Boolean!
+  "Current execution or health status."
+  status: DiskSpaceAgentStatus!
+  "Compact volume usage and threshold summaries."
+  volumes: [DiskSpaceVolume!]!
+}
+"Compact disk information displayed without opening disk details."
+type SidebarDiskSummary {
+  "Disk status summaries for agents in the sidebar."
+  agents: [SidebarDiskAgent!]!
+}
+
+"Disk and usage summaries for the shared sidebar."
 type SidebarStatus {
   "The usage today associated with this sidebar status."
   usageToday: SidebarUsageToday!
@@ -210,6 +234,8 @@ type SidebarStatus {
   activity: SidebarActivityCounts!
   "The disk space associated with this sidebar status."
   diskSpace: DiskSpaceOverview!
+  "Current monitored volumes and status without full agent reports or cleanup history."
+  diskSummary: SidebarDiskSummary!
 }
 
 extend type Query {

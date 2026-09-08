@@ -1520,8 +1520,19 @@ extend type Query {
 }
 
 extend type Subscription {
-  "Emits a GitHub pipeline status change whenever GitHub pipeline status change."
-  githubPipelineStatusChanged: GitHubPipelineStatusChanged!
+  """
+  Omitted key lists retain the global event stream. Supplying either list scopes
+  delivery to their union; empty lists watch nothing. replayCurrent attaches the
+  listener before reading current revisions to recover registration/reconnect gaps.
+  """
+  githubPipelineStatusChanged(
+    "Only emit statuses for these worktree pipeline snapshots; omitted retains global delivery."
+    snapshotKeys: [GitHubPipelineStatusKeyInput!]
+    "Only emit statuses for these individual pipeline records; omitted retains global delivery."
+    recordKeys: [GitHubPipelineRecordKeyInput!]
+    "Replay current watched statuses after registering for live changes."
+    replayCurrent: Boolean = false
+  ): GitHubPipelineStatusChanged!
 }
 
 extend type Mutation {

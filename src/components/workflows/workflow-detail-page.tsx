@@ -11,7 +11,7 @@ import {
   Save,
 } from "lucide-react";
 import { useTranslations } from "next-intl";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 import { DateTime } from "@/components/common/date-time";
 import { Alert, AlertDescription } from "@/components/ui/alert";
@@ -66,8 +66,14 @@ import { downloadJson, exportFileStem } from "@/lib/browser-utils";
 import {
   controlPlaneRequest,
   controlPlaneSubscriptions,
+  onControlPlaneRecovery,
 } from "@/lib/control-plane-client";
 
+import {
+  createRefreshCoalescer,
+  type RefreshCoalescer,
+} from "@/lib/refresh-coalescer";
+import { loadWorkflowCatalog } from "./workflow-catalog";
 import { WorkflowChoiceMenu } from "./workflow-choice-menu";
 import { WorkflowGraph, workflowStatusVariant } from "./workflow-graph";
 import { WorkflowReadonlyInspector } from "./workflow-readonly-inspector";
@@ -98,14 +104,13 @@ const DETAIL_FIELDS = `
   quickActionRepositories { id name displayOrigin }
   versionCount runCount createdAt updatedAt
   activeVersion { id workflowId version name description schemaVersion definition contentHash publishedAt }
-  versions { id workflowId version name description schemaVersion definition contentHash publishedAt }
+  versions { id version contentHash publishedAt }
 `;
 
 const RUN_FIELDS = `
   id displayNumber workflowId triggerKind triggerSubjectKey status phase worktreeConcurrency blocksGitOperations generation
   blockedReason error queuedAt startedAt pausedAt finishedAt
   workflow { id name }
-  version { id workflowId version name description schemaVersion definition contentHash publishedAt }
 `;
 
 export function WorkflowDetailPage({ workflowId }: { workflowId: string }) {
@@ -135,96 +140,178 @@ export function WorkflowDetailPage({ workflowId }: { workflowId: string }) {
   >([]);
   const [savingQuickAction, setSavingQuickAction] = useState(false);
 
-  const load = useCallback(async () => {
-    try {
-      const data = await controlPlaneRequest<{
-        workflow: WorkflowDetail | null;
-        workflowRuns: { items: WorkflowRun[] };
-        worktreeRunQueue: WorktreeRunQueueEntry[];
-        workflowCatalog: WorkflowCatalog;
-        codebaseOverview?: {
-          repositories: Array<{
-            id: string;
-            name: string;
-            displayOrigin: string;
-          }>;
-        };
-      }>(
-        `query WorkflowOverview($id: ID!) {
-        workflow(id: $id) { ${DETAIL_FIELDS} }
-        workflowRuns(workflowId: $id, first: 100) { items { ${RUN_FIELDS} } }
+  useEffect(() => {
+    if (!selectedNodeId) return;
+    const controller = new AbortController();
+    void loadWorkflowCatalog(controller.signal)
+      .then((value) => {
+        if (!controller.signal.aborted) setCatalog(value);
+      })
+      .catch((value: unknown) => {
+        if (!controller.signal.aborted)
+          setError(value instanceof Error ? value.message : String(value));
+      });
+    return () => controller.abort();
+  }, [selectedNodeId]);
+
+  const notFoundMessage = t("notFound");
+  const ownerRef = useRef<RefreshCoalescer | null>(null);
+  const definitionRevision = useRef(0);
+  const definitionsLoaded = useRef(-1);
+  const repositoriesRevision = useRef(0);
+  const repositoriesLoaded = useRef(-1);
+  const appliedDraft = useRef("");
+  const load = useCallback(() => {
+    ++definitionRevision.current;
+    ++repositoriesRevision.current;
+    return ownerRef.current?.refresh() ?? Promise.resolve();
+  }, []);
+  const fetchOverview = useCallback(
+    async (signal: AbortSignal) => {
+      const definitionsVersion = definitionRevision.current;
+      const repositoriesVersion = repositoriesRevision.current;
+      const includeDefinition =
+        definitionsVersion !== definitionsLoaded.current;
+      const includeRepositories =
+        repositoriesVersion !== repositoriesLoaded.current;
+      try {
+        const data = await controlPlaneRequest<{
+          workflow?: WorkflowDetail | null;
+          workflowRuns: { items: WorkflowRun[]; totalCount: number };
+          worktreeRunQueue: WorktreeRunQueueEntry[];
+          codebaseOverview?: {
+            repositories: Array<{
+              id: string;
+              name: string;
+              displayOrigin: string;
+            }>;
+          };
+        }>(
+          `query WorkflowOverview($id: ID!, $includeDefinition: Boolean!, $includeRepositories: Boolean!) {
+        workflow(id: $id) @include(if: $includeDefinition) { ${DETAIL_FIELDS} }
+        workflowRuns(workflowId: $id, first: 100) { totalCount items { ${RUN_FIELDS} } }
         worktreeRunQueue(workflowId: $id) {
           position id kind displayNumber name status phase worktreeId workflowId workflowRunId
           queuedAt exclusiveWorktree worktreeConcurrency worktreeConcurrencyLimit
           worktree { id folder branch highlightColor }
         }
-        workflowCatalog {
-          schemaVersion globalConcurrency
-          steps { kind category label description details execution configSchema capabilityFlags requiredPaths providedPaths sourceHandles mutatesExternal mutatesWorktree }
-          triggers { kind category label description details configSchema capabilityFlags seedPaths sourceHandles }
-        }
-        codebaseOverview { repositories { id name displayOrigin } }
+        codebaseOverview @include(if: $includeRepositories) { repositories { id name displayOrigin } }
       }`,
-        { id: workflowId },
-      );
-      setWorkflow(data.workflow);
-      setRuns(data.workflowRuns.items);
-      setQueue(data.worktreeRunQueue ?? []);
-      setCatalog(data.workflowCatalog);
-      setRepositories(data.codebaseOverview?.repositories ?? []);
-      if (data.workflow) {
-        setQuickActionKind(data.workflow.quickActionKind ?? "NONE");
-        setQuickActionIconKey(data.workflow.quickActionIconKey ?? "play");
-        setQuickActionButtonVariant(
-          data.workflow.quickActionButtonVariant ?? "default",
+          { id: workflowId, includeDefinition, includeRepositories },
+          { signal },
         );
-        setQuickActionRepositoryIds(
-          data.workflow.quickActionRepositories?.map(({ id }) => id) ?? [],
-        );
+        if (signal.aborted) return;
+        if (includeDefinition) {
+          setWorkflow(data.workflow ?? null);
+          definitionsLoaded.current = definitionsVersion;
+        } else if (data.workflowRuns.totalCount !== undefined) {
+          setWorkflow((current) =>
+            current
+              ? { ...current, runCount: data.workflowRuns.totalCount }
+              : current,
+          );
+        }
+        setRuns(data.workflowRuns.items);
+        setQueue(data.worktreeRunQueue ?? []);
+        if (includeRepositories) {
+          setRepositories(data.codebaseOverview?.repositories ?? []);
+          repositoriesLoaded.current = repositoriesVersion;
+        }
+        const version = JSON.stringify([
+          data.workflow?.id,
+          data.workflow?.updatedAt,
+        ]);
+        if (
+          includeDefinition &&
+          data.workflow &&
+          appliedDraft.current !== version
+        ) {
+          appliedDraft.current = version;
+          setQuickActionKind(data.workflow.quickActionKind ?? "NONE");
+          setQuickActionIconKey(data.workflow.quickActionIconKey ?? "play");
+          setQuickActionButtonVariant(
+            data.workflow.quickActionButtonVariant ?? "default",
+          );
+          setQuickActionRepositoryIds(
+            data.workflow.quickActionRepositories?.map(({ id }) => id) ?? [],
+          );
+        }
+        if (includeDefinition) setError(data.workflow ? null : notFoundMessage);
+      } catch (value) {
+        if (signal.aborted) return;
+        setError(value instanceof Error ? value.message : String(value));
+      } finally {
+        if (!signal.aborted) setLoading(false);
       }
-      setError(data.workflow ? null : t("notFound"));
-    } catch (value) {
-      setError(value instanceof Error ? value.message : String(value));
-    } finally {
-      setLoading(false);
-    }
-  }, [t, workflowId]);
+    },
+    [notFoundMessage, workflowId],
+  );
 
   useEffect(() => {
-    const timer = window.setTimeout(() => void load(), 0);
+    definitionsLoaded.current = -1;
+    repositoriesLoaded.current = -1;
+    const owner = createRefreshCoalescer(fetchOverview);
+    ownerRef.current = owner;
+    const refresh = () => {
+      void owner.refresh().catch(() => undefined);
+    };
+    const timer = window.setTimeout(refresh, 0);
     const client = controlPlaneSubscriptions();
     const workflowSubscription = client.subscribe<{
-      workflowsChanged: { id: string } | null;
+      workflowChanges: { definitionsChanged: boolean };
     }>(
       {
         query:
-          "subscription WorkflowOverviewChanged { workflowsChanged { id } }",
+          "subscription WorkflowOverviewChanged($workflowId: ID!) { workflowChanges(workflowId: $workflowId, includeQueuePeers: true) { definitionsChanged } }",
+        variables: { workflowId },
       },
       {
-        next: () => void load(),
+        next: ({ data }) => {
+          if (data?.workflowChanges.definitionsChanged)
+            ++definitionRevision.current;
+          refresh();
+        },
         error: () => undefined,
         complete: () => undefined,
       },
     );
-    const agentRunSubscription = client.subscribe<{
-      agentRunsChanged: { id: string } | null;
-    }>(
+    const agentRunSubscription = client.subscribe(
       {
         query:
-          "subscription WorkflowQueueAgentRuns { agentRunsChanged { id } }",
+          "subscription WorkflowQueueAgentRuns($workflowId: ID!) { agentRunListChanged(workflowId: $workflowId) }",
+        variables: { workflowId },
+      },
+      { next: refresh, error: () => undefined, complete: () => undefined },
+    );
+    const repositoriesSubscription = client.subscribe(
+      {
+        query:
+          "subscription WorkflowRepositoryChoices { codebaseOverviewChanged { repositoryId } }",
       },
       {
-        next: () => void load(),
+        next: () => {
+          ++repositoriesRevision.current;
+          refresh();
+        },
         error: () => undefined,
         complete: () => undefined,
       },
     );
+    const recovery = onControlPlaneRecovery(() => {
+      ++definitionRevision.current;
+      ++repositoriesRevision.current;
+      refresh();
+    });
     return () => {
       window.clearTimeout(timer);
       workflowSubscription();
       agentRunSubscription();
+      repositoriesSubscription();
+      recovery();
+      owner.dispose();
+      if (ownerRef.current === owner) ownerRef.current = null;
     };
-  }, [load]);
+  }, [fetchOverview, workflowId]);
 
   const toggleEnabled = async () => {
     if (!workflow) return;

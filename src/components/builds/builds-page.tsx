@@ -2,7 +2,14 @@
 
 import { Hammer, Plus, ScrollText, Trash2 } from "lucide-react";
 import { useLocale, useTranslations } from "next-intl";
-import { Fragment, useCallback, useEffect, useMemo, useState } from "react";
+import {
+  Fragment,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 
 import { ConfirmationDialog } from "@/components/confirmation-dialog";
 import { Alert, AlertDescription } from "@/components/ui/alert";
@@ -50,7 +57,10 @@ import { Link, useRouter } from "@/i18n/navigation";
 import {
   controlPlaneRequest,
   controlPlaneSubscriptions,
+  onControlPlaneRecovery,
 } from "@/lib/control-plane-client";
+import { createRefreshCoalescer } from "@/lib/refresh-coalescer";
+import { readCursorWindow } from "@/lib/read-cursor-window";
 import { dayKey, formatDateValue } from "@/lib/date-format";
 import { cn } from "@/lib/utils";
 import {
@@ -123,67 +133,164 @@ export function BuildsPage({ appId }: { appId?: string }) {
   const [loading, setLoading] = useState(true);
   const [loadingMore, setLoadingMore] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [tab, setTab] = useState("history");
   const [scriptOpen, setScriptOpen] = useState(false);
   const [editingScript, setEditingScript] = useState<BuildScript | null>(null);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [deleting, setDeleting] = useState(false);
 
-  const load = useCallback(
-    async (after?: string | null) => {
-      if (after) setLoadingMore(true);
-      else setLoading(true);
-      try {
-        const data = await controlPlaneRequest<{
-          builds: { items: BuildRecord[]; nextCursor: string | null };
-          buildScripts: BuildScript[];
-        }>(
-          `query BuildsPage($after: ID, $status: BuildStatus, $appId: ID) {
-            builds(first: 50, after: $after, status: $status, appId: $appId) {
-              items { ${BUILD_LIST_FIELDS} }
-              nextCursor
-            }
-            buildScripts { ${SCRIPT_FIELDS} }
-          }`,
-          {
-            after: after ?? null,
-            status: status === "ALL" ? null : status,
-            appId: appId ?? null,
-          },
-        );
-        setBuilds((current) =>
-          after ? [...current, ...data.builds.items] : data.builds.items,
-        );
-        setNextCursor(data.builds.nextCursor);
-        setScripts(data.buildScripts);
-        setError(null);
-      } catch (value) {
-        setError(value instanceof Error ? value.message : String(value));
-      } finally {
-        setLoading(false);
-        setLoadingMore(false);
-      }
+  const loadedCount = useRef(0);
+  const pageRequest = useRef<AbortController | null>(null);
+  const generation = useRef(0);
+  const refreshing = useRef(false);
+  const historyOwner = useRef<ReturnType<typeof createRefreshCoalescer> | null>(
+    null,
+  );
+  const scriptsOwner = useRef<ReturnType<typeof createRefreshCoalescer> | null>(
+    null,
+  );
+  useEffect(() => {
+    loadedCount.current = builds.length;
+  }, [builds.length]);
+  const readPage = useCallback(
+    async (after: string | null, first: number, signal: AbortSignal) => {
+      const data = await controlPlaneRequest<{
+        builds: { items: BuildRecord[]; nextCursor: string | null };
+      }>(
+        `query BuildsPage($after: ID, $first: Int!, $status: BuildStatus, $appId: ID) {
+        builds(first: $first, after: $after, status: $status, appId: $appId) { items { ${BUILD_LIST_FIELDS} } nextCursor }
+      }`,
+        {
+          after,
+          first,
+          status: status === "ALL" ? null : status,
+          appId: appId ?? null,
+        },
+        { signal },
+      );
+      return data.builds;
     },
     [appId, status],
   );
+  const load = useCallback(
+    async (after?: string | null) => {
+      if (!after) {
+        await historyOwner.current?.refresh();
+        return;
+      }
+      if (pageRequest.current || refreshing.current) return;
+      const controller = new AbortController();
+      pageRequest.current = controller;
+      const version = generation.current;
+      setLoadingMore(true);
+      try {
+        const page = await readPage(after, 50, controller.signal);
+        if (controller.signal.aborted || version !== generation.current) return;
+        setBuilds((current) => {
+          const known = new Set(current.map(({ id }) => id));
+          return [...current, ...page.items.filter(({ id }) => !known.has(id))];
+        });
+        setNextCursor(page.nextCursor);
+        setError(null);
+      } catch (value) {
+        if (!controller.signal.aborted)
+          setError(value instanceof Error ? value.message : String(value));
+      } finally {
+        if (pageRequest.current === controller) pageRequest.current = null;
+        if (!controller.signal.aborted) setLoadingMore(false);
+      }
+    },
+    [readPage],
+  );
 
   useEffect(() => {
-    const timer = window.setTimeout(() => void load(), 0);
-    return () => window.clearTimeout(timer);
-  }, [load]);
+    loadedCount.current = 0;
+    const owner = createRefreshCoalescer(async (signal) => {
+      const version = ++generation.current;
+      refreshing.current = true;
+      pageRequest.current?.abort();
+      pageRequest.current = null;
+      setLoadingMore(false);
+      try {
+        const page = await readCursorWindow(
+          (after, first) => readPage(after, first, signal),
+          Math.max(50, loadedCount.current),
+          50,
+          (item: BuildRecord) => item.id,
+        );
+        if (signal.aborted || version !== generation.current) return;
+        setBuilds(page.items);
+        setNextCursor(page.nextCursor);
+        setError(null);
+      } catch (value) {
+        if (!signal.aborted)
+          setError(value instanceof Error ? value.message : String(value));
+      } finally {
+        if (version === generation.current) refreshing.current = false;
+        if (!signal.aborted) setLoading(false);
+      }
+    });
+    historyOwner.current = owner;
+    const timer = window.setTimeout(() => void owner.refresh(), 0);
+    const dispose = controlPlaneSubscriptions().subscribe(
+      {
+        query: `subscription BuildsChanged($appId: ID) { buildsChanged(appId: $appId) { id } }`,
+        variables: { appId: appId ?? null },
+      },
+      {
+        next: () => void owner.refresh(),
+        error: () => undefined,
+        complete: () => undefined,
+      },
+    );
+    const recover = onControlPlaneRecovery(() => void owner.refresh());
+    return () => {
+      window.clearTimeout(timer);
+      dispose();
+      recover();
+      owner.dispose();
+      pageRequest.current?.abort();
+      pageRequest.current = null;
+      if (historyOwner.current === owner) historyOwner.current = null;
+    };
+  }, [appId, readPage]);
 
-  useEffect(
-    () =>
-      controlPlaneSubscriptions().subscribe<{ buildsChanged: { id: string } }>(
-        { query: `subscription BuildsChanged { buildsChanged { id } }` },
-        {
-          next: () => void load(),
-          error: () => undefined,
-          complete: () => undefined,
-        },
-      ),
-    [load],
-  );
+  useEffect(() => {
+    if (appId || tab !== "scripts") return;
+    const owner = createRefreshCoalescer(async (signal) => {
+      try {
+        const data = await controlPlaneRequest<{ buildScripts: BuildScript[] }>(
+          `query BuildScriptCatalog { buildScripts { ${SCRIPT_FIELDS} } }`,
+          undefined,
+          { signal },
+        );
+        if (!signal.aborted) setScripts(data.buildScripts);
+      } catch (value) {
+        if (!signal.aborted)
+          setError(value instanceof Error ? value.message : String(value));
+      }
+    });
+    scriptsOwner.current = owner;
+    void owner.refresh();
+    const dispose = controlPlaneSubscriptions().subscribe(
+      {
+        query: "subscription BuildScriptCatalogChanged { buildScriptsChanged }",
+      },
+      {
+        next: () => void owner.refresh(),
+        error: () => undefined,
+        complete: () => undefined,
+      },
+    );
+    const recover = onControlPlaneRecovery(() => void owner.refresh());
+    return () => {
+      dispose();
+      recover();
+      owner.dispose();
+      if (scriptsOwner.current === owner) scriptsOwner.current = null;
+    };
+  }, [appId, tab]);
 
   const deleteScript = async (id: string) => {
     try {
@@ -191,7 +298,7 @@ export function BuildsPage({ appId }: { appId?: string }) {
         `mutation DeleteBuildScript($id: ID!) { deleteBuildScript(id: $id) }`,
         { id },
       );
-      await load();
+      await scriptsOwner.current?.refresh();
     } catch (value) {
       setError(value instanceof Error ? value.message : String(value));
     }
@@ -261,7 +368,7 @@ export function BuildsPage({ appId }: { appId?: string }) {
           <AlertDescription>{error}</AlertDescription>
         </Alert>
       )}
-      <Tabs defaultValue="history">
+      <Tabs value={tab} onValueChange={setTab}>
         <TabsList>
           <TabsTrigger value="history">
             <Hammer /> {t("history")}
@@ -622,7 +729,9 @@ export function BuildsPage({ appId }: { appId?: string }) {
       {scriptOpen && (
         <BuildScriptDialog
           onOpenChange={setScriptOpen}
-          onSaved={load}
+          onSaved={async () => {
+            await scriptsOwner.current?.refresh();
+          }}
           open={scriptOpen}
           script={editingScript}
         />

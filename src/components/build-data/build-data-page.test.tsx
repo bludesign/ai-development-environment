@@ -1,4 +1,5 @@
 import {
+  act,
   cleanup,
   fireEvent,
   render,
@@ -16,8 +17,10 @@ import {
 import { BuildDataPage } from "./build-data-page";
 
 vi.mock("@/lib/control-plane-client", () => ({
+  onControlPlaneRecovery: vi.fn(() => vi.fn()),
   controlPlaneRequest: vi.fn(),
   controlPlaneSubscriptions: vi.fn(),
+  onControlPlaneConnected: vi.fn(() => vi.fn()),
 }));
 
 vi.mock("@/i18n/navigation", () => ({
@@ -158,8 +161,92 @@ describe("BuildDataPage", () => {
 
   afterEach(() => {
     cleanup();
+    vi.useRealTimers();
     request.mockReset();
     subscriptions.mockReset();
+  });
+
+  test.each(["IDLE", "SIZING", "DELETING"] as const)(
+    "polls only outstanding collection work (%s) and stops after the final snapshot",
+    async (operation) => {
+      vi.useFakeTimers();
+      const original = request.getMockImplementation()!;
+      request.mockImplementation(async (query, ...args) => {
+        if (String(query).includes("refreshDerivedData"))
+          return { refreshDerivedData: collection(operation) } as never;
+        if (String(query).includes("query DerivedDataCollection"))
+          return { derivedDataCollection: collection(operation) } as never;
+        return original(query, ...args);
+      });
+      let publish: ((value: unknown) => void) | undefined;
+      subscriptions.mockReturnValue({
+        subscribe: (
+          payload: { query: string },
+          sink: { next: (value: unknown) => void },
+        ) => {
+          if (
+            payload.query.includes("subscription DerivedDataCollectionChanged")
+          )
+            publish = sink.next;
+          return vi.fn();
+        },
+      } as never);
+      render(<BuildDataPage />);
+      await act(() => vi.advanceTimersByTimeAsync(10));
+      request.mockClear();
+      await act(() => vi.advanceTimersByTimeAsync(6500));
+      const polls = () =>
+        request.mock.calls.filter(([query]) =>
+          String(query).includes("query DerivedDataCollection"),
+        );
+      expect(polls()).toHaveLength(operation === "IDLE" ? 0 : 3);
+      await act(async () =>
+        publish?.({ data: { derivedDataCollectionChanged: collection() } }),
+      );
+      request.mockClear();
+      await act(() => vi.advanceTimersByTimeAsync(4500));
+      expect(polls()).toHaveLength(0);
+    },
+  );
+
+  test("a late start response cannot restart polling after a completed subscription snapshot", async () => {
+    vi.useFakeTimers();
+    const original = request.getMockImplementation()!;
+    let finishStart: ((value: unknown) => void) | undefined;
+    request.mockImplementation((query, ...args) =>
+      String(query).includes("refreshDerivedData")
+        ? (new Promise((resolve) => {
+            finishStart = resolve;
+          }) as never)
+        : original(query, ...args),
+    );
+    let publish: ((value: unknown) => void) | undefined;
+    subscriptions.mockReturnValue({
+      subscribe: (
+        payload: { query: string },
+        sink: { next: (value: unknown) => void },
+      ) => {
+        if (payload.query.includes("subscription DerivedDataCollectionChanged"))
+          publish = sink.next;
+        return vi.fn();
+      },
+    } as never);
+    render(<BuildDataPage />);
+    await act(async () =>
+      publish?.({ data: { derivedDataCollectionChanged: collection() } }),
+    );
+    await act(async () =>
+      finishStart?.({
+        refreshDerivedData: { ...collection(), status: "COLLECTING" },
+      }),
+    );
+    await act(() => vi.advanceTimersByTimeAsync(6500));
+    expect(
+      request.mock.calls.filter(([query]) =>
+        String(query).includes("query DerivedDataCollection"),
+      ),
+    ).toHaveLength(0);
+    expect(screen.getByText("App-hash")).toBeTruthy();
   });
 
   test("scans on load, links matched worktrees, and calculates sizes on demand", async () => {

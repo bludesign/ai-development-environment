@@ -17,6 +17,7 @@ import {
 import { CodebasesPage } from "./codebases-page";
 
 vi.mock("@/lib/control-plane-client", () => ({
+  onControlPlaneRecovery: vi.fn(() => () => {}),
   controlPlaneRequest: vi.fn(),
   controlPlaneSubscriptions: vi.fn(),
 }));

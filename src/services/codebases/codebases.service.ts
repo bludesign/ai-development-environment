@@ -1,3 +1,4 @@
+import { filterAsyncIterator } from "@/lib/filter-async-iterator";
 import { randomUUID } from "node:crypto";
 
 import {
@@ -98,6 +99,12 @@ function online(agent: {
 }
 
 export class CodebasesService {
+  private readonly stateInspections = new Map<
+    string,
+    Promise<ReturnType<typeof parseCodebaseGitState>>
+  >();
+  private cleanupInFlight: Promise<void> | null = null;
+  private lastCleanupAt = 0;
   constructor(
     private readonly agentControl: AgentControlService,
     private readonly skillsService?: SkillsService,
@@ -113,15 +120,17 @@ export class CodebasesService {
     );
   }
 
-  async overview() {
+  async overview(agentId?: string | null) {
     await this.cleanupInternalJobs();
     const prisma = await getPrismaClient();
     return prisma.codebaseRepository.findMany({
+      ...(agentId ? { where: { codebases: { some: { agentId } } } } : {}),
       orderBy: [{ name: "asc" }, { canonicalOrigin: "asc" }],
       include: {
         skillGroups: { include: { group: true } },
         quickActionWorkflows: { include: { workflow: true } },
         codebases: {
+          ...(agentId ? { where: { agentId } } : {}),
           orderBy: { folder: "asc" },
           include: {
             agent: true,
@@ -664,7 +673,7 @@ export class CodebasesService {
     const removal = await prisma.$transaction(async (transaction) => {
       const codebase = await transaction.codebase.findUnique({
         where: { id },
-        select: { id: true, repositoryId: true },
+        select: { id: true, repositoryId: true, agentId: true },
       });
       if (!codebase) throw new Error("Codebase not found");
 
@@ -684,11 +693,12 @@ export class CodebasesService {
 
       return {
         id: codebase.id,
+        agentId: codebase.agentId,
         repositoryId: codebase.repositoryId,
         repositoryRemoved,
       };
     });
-    this.publish(removal.id, removal.repositoryId);
+    this.publish(removal.id, removal.repositoryId, removal.agentId);
     return removal;
   }
 
@@ -795,7 +805,22 @@ export class CodebasesService {
     return { jobs, skipped };
   }
 
-  async inspectGitState(codebaseId: string, requestId: string) {
+  inspectGitState(codebaseId: string, requestId: string) {
+    if (!requestId.trim())
+      return Promise.reject(new Error("requestId is required"));
+    const existing = this.stateInspections.get(codebaseId);
+    if (existing) return existing;
+    const pending = this.inspectGitStateOnce(codebaseId, requestId).finally(
+      () => {
+        if (this.stateInspections.get(codebaseId) === pending)
+          this.stateInspections.delete(codebaseId);
+      },
+    );
+    this.stateInspections.set(codebaseId, pending);
+    return pending;
+  }
+
+  private async inspectGitStateOnce(codebaseId: string, requestId: string) {
     if (!requestId.trim()) throw new Error("requestId is required");
     const codebase = await this.requireRunnableCodebase(
       codebaseId,
@@ -892,8 +917,39 @@ export class CodebasesService {
     });
   }
 
-  subscribe() {
-    return agentEventBus.iterate(CODEBASE_CHANGED_TOPIC);
+  subscribe(agentId?: string | null) {
+    const events = agentEventBus.iterate<{
+      codebaseOverviewChanged: {
+        codebaseId?: string | null;
+        repositoryId?: string | null;
+        agentId?: string | null;
+      };
+    }>(CODEBASE_CHANGED_TOPIC);
+    if (!agentId) return events;
+    return filterAsyncIterator(events, async (event) => {
+      const change = event.codebaseOverviewChanged as {
+        codebaseId?: string | null;
+        repositoryId?: string | null;
+        agentId?: string | null;
+      };
+      if (change.agentId) return change.agentId === agentId;
+      const prisma = await getPrismaClient();
+      if (change.codebaseId) {
+        const codebase = await prisma.codebase.findUnique({
+          where: { id: change.codebaseId },
+          select: { agentId: true },
+        });
+        return !codebase || codebase.agentId === agentId;
+      }
+      if (change.repositoryId)
+        return Boolean(
+          await prisma.codebase.findFirst({
+            where: { repositoryId: change.repositoryId, agentId },
+            select: { id: true },
+          }),
+        );
+      return true;
+    });
   }
 
   private async projectJob(job: CompletedJob) {
@@ -1083,13 +1139,30 @@ export class CodebasesService {
     }
   }
 
-  private publish(codebaseId: string | null, repositoryId: string | null) {
+  private publish(
+    codebaseId: string | null,
+    repositoryId: string | null,
+    agentId?: string,
+  ) {
     agentEventBus.publish(CODEBASE_CHANGED_TOPIC, {
-      codebaseOverviewChanged: { codebaseId, repositoryId },
+      codebaseOverviewChanged: { codebaseId, repositoryId, agentId },
     });
   }
 
   private async cleanupInternalJobs() {
+    if (this.cleanupInFlight) return this.cleanupInFlight;
+    if (Date.now() - this.lastCleanupAt < 60_000) return;
+    this.cleanupInFlight = this.deleteExpiredInternalJobs()
+      .then(() => {
+        this.lastCleanupAt = Date.now();
+      })
+      .finally(() => {
+        this.cleanupInFlight = null;
+      });
+    return this.cleanupInFlight;
+  }
+
+  private async deleteExpiredInternalJobs() {
     const prisma = await getPrismaClient();
     await prisma.agentJob.deleteMany({
       where: {

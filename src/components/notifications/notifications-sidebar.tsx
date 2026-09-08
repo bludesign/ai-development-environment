@@ -23,7 +23,13 @@ import { Link } from "@/i18n/navigation";
 import {
   controlPlaneRequest,
   controlPlaneSubscriptions,
+  onControlPlaneRecovery,
 } from "@/lib/control-plane-client";
+
+import {
+  createRefreshCoalescer,
+  type RefreshCoalescer,
+} from "@/lib/refresh-coalescer";
 
 import { NotificationCard } from "./notification-card";
 import { MiniActionCenter } from "@/components/action-center/mini-action-center";
@@ -118,22 +124,55 @@ export function NotificationsSidebar() {
   const soundEnabledRef = useRef(false);
   const timers = useRef<Map<string, number>>(new Map());
 
-  const load = useCallback(async () => {
-    try {
-      const data = await controlPlaneRequest<{
-        sidebarNotifications: AppNotificationView[];
-      }>(`query SidebarNotifications {
-        sidebarNotifications(limit: 50) { ${APP_NOTIFICATION_FIELDS} }
-      }`);
-      setNotifications(data.sidebarNotifications);
-    } catch {
-      // The shell stays usable while the control-plane connection recovers.
-    } finally {
-      setLoaded(true);
-    }
+  const snapshotRevision = useRef(0);
+  const itemsRef = useRef<AppNotificationView[]>([]);
+  const deliveredIds = useRef(new Set<string>());
+  const ownerRef = useRef<RefreshCoalescer | null>(null);
+  const load = useCallback(
+    () => ownerRef.current?.refresh() ?? Promise.resolve(),
+    [],
+  );
+  const replaceNotifications = useCallback((items: AppNotificationView[]) => {
+    itemsRef.current = items;
+    setNotifications(items);
   }, []);
+  const fetchNotifications = useCallback(
+    async (signal: AbortSignal) => {
+      const revision = snapshotRevision.current;
+      try {
+        const data = await controlPlaneRequest<{
+          sidebarNotifications: AppNotificationView[];
+        }>(
+          `query SidebarNotifications {
+        sidebarNotifications(limit: 50) { ${APP_NOTIFICATION_FIELDS} }
+      }`,
+          undefined,
+          { signal },
+        );
+        if (signal.aborted) return;
+        if (revision !== snapshotRevision.current) {
+          void load();
+          return;
+        }
+        replaceNotifications(data.sidebarNotifications);
+        for (const item of data.sidebarNotifications)
+          deliveredIds.current.add(item.id);
+      } catch {
+        // The shell stays usable while the control-plane connection recovers.
+      } finally {
+        if (!signal.aborted) setLoaded(true);
+      }
+    },
+    [load, replaceNotifications],
+  );
 
   useEffect(() => {
+    const owner = createRefreshCoalescer(fetchNotifications);
+    ownerRef.current = owner;
+    const recover = onControlPlaneRecovery((event) => {
+      // Preserve the initial snapshot and reconcile when an existing stream recovers.
+      if (!event?.initialConnection) void load();
+    });
     const arrivalTimers = timers.current;
     const initializeSound = window.setTimeout(() => {
       const enabled =
@@ -157,21 +196,36 @@ export function NotificationsSidebar() {
             result.data as { notificationsChanged?: NotificationChangeView }
           )?.notificationsChanged;
           if (!change) return;
+          if (
+            change.kind === "PREFERENCES_UPDATED" ||
+            change.kind === "DEVICES_CHANGED"
+          )
+            return;
+          ++snapshotRevision.current;
           const notification = change.notification;
           if (change.kind === "CREATED" && notification) {
-            if (notification.browserRequested) {
+            const firstDelivery = !deliveredIds.current.has(notification.id);
+            deliveredIds.current.add(notification.id);
+            if (deliveredIds.current.size > 1000)
+              deliveredIds.current.delete(
+                deliveredIds.current.values().next().value!,
+              );
+            if (firstDelivery && notification.browserRequested) {
               showBrowserNotification(notification);
             }
             if (notification.sidebarRequested) {
-              setNotifications((current) =>
+              replaceNotifications(
                 [
                   notification,
-                  ...current.filter((entry) => entry.id !== notification.id),
+                  ...itemsRef.current.filter(
+                    (entry) => entry.id !== notification.id,
+                  ),
                 ].slice(0, 50),
               );
               setArrivingIds((current) =>
                 new Set(current).add(notification.id),
               );
+              window.clearTimeout(timers.current.get(notification.id));
               const timer = window.setTimeout(() => {
                 timers.current.delete(notification.id);
                 setArrivingIds((current) => {
@@ -181,8 +235,28 @@ export function NotificationsSidebar() {
                 });
               }, ARRIVAL_HIGHLIGHT_MS);
               timers.current.set(notification.id, timer);
-              if (soundEnabledRef.current) playChime();
+              if (firstDelivery && soundEnabledRef.current) playChime();
             }
+            return;
+          }
+          if (
+            change.kind === "SIDEBAR_CLEARED" ||
+            change.kind === "HISTORY_CLEARED"
+          ) {
+            replaceNotifications([]);
+            return;
+          }
+          if (
+            (change.kind === "DISMISSED" || change.kind === "DELETED") &&
+            change.notificationId
+          ) {
+            const current = itemsRef.current;
+            if (!current.some((item) => item.id === change.notificationId))
+              return;
+            replaceNotifications(
+              current.filter((item) => item.id !== change.notificationId),
+            );
+            if (current.length === 50) void load();
             return;
           }
           void load();
@@ -195,10 +269,13 @@ export function NotificationsSidebar() {
       window.clearTimeout(initial);
       window.clearTimeout(initializeSound);
       unsubscribe();
+      recover();
+      owner.dispose();
+      if (ownerRef.current === owner) ownerRef.current = null;
       arrivalTimers.forEach((timer) => window.clearTimeout(timer));
       arrivalTimers.clear();
     };
-  }, [load]);
+  }, [fetchNotifications, load, replaceNotifications]);
 
   const toggleSound = () => {
     const next = !soundEnabled;
@@ -209,19 +286,24 @@ export function NotificationsSidebar() {
   };
 
   const dismiss = async (id: string) => {
-    setNotifications((current) => current.filter((entry) => entry.id !== id));
+    ++snapshotRevision.current;
+    const backfill = itemsRef.current.length === 50;
+    replaceNotifications(itemsRef.current.filter((entry) => entry.id !== id));
     try {
       await controlPlaneRequest(
         `mutation DismissNotification($id: ID!) { dismissNotification(id: $id) }`,
         { id },
       );
+      if (backfill) await load();
     } catch {
       await load();
     }
   };
 
   const deleteNotification = async (id: string) => {
-    setNotifications((current) => current.filter((entry) => entry.id !== id));
+    ++snapshotRevision.current;
+    const backfill = itemsRef.current.length === 50;
+    replaceNotifications(itemsRef.current.filter((entry) => entry.id !== id));
     try {
       await controlPlaneRequest(
         `mutation DeleteSidebarNotification($selection: NotificationSelectionInput!) {
@@ -229,19 +311,24 @@ export function NotificationsSidebar() {
         }`,
         { selection: { ids: [id] } },
       );
+      if (backfill) await load();
     } catch {
       await load();
     }
   };
 
   const dismissAll = async () => {
+    const version = snapshotRevision.current;
     try {
       await controlPlaneRequest(
         `mutation DismissAllSidebarNotifications {
           dismissAllSidebarNotifications
         }`,
       );
-      setNotifications([]);
+      if (version === snapshotRevision.current) {
+        ++snapshotRevision.current;
+        replaceNotifications([]);
+      } else await load();
     } catch {
       await load();
     }

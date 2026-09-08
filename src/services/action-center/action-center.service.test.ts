@@ -4,7 +4,11 @@ const getPrismaClient = vi.hoisted(() => vi.fn());
 
 vi.mock("@/data/prisma-client", () => ({ getPrismaClient }));
 
-import { agentEventBus } from "@/services/agent-control";
+import {
+  agentEventBus,
+  ACTION_CENTER_CHANGED_TOPIC,
+  SIDEBAR_STATUS_CHANGED_TOPIC,
+} from "@/services/agent-control";
 
 import { ActionCenterService } from "./action-center.service";
 
@@ -457,4 +461,23 @@ describe("ActionCenterService", () => {
       }),
     ).rejects.toThrow("no longer dismissible");
   });
+});
+
+test("disk and usage status bursts do not invalidate Action Center", async () => {
+  const changes = new ActionCenterService().subscribe();
+  try {
+    for (let index = 0; index < 8; index++)
+      agentEventBus.publish(SIDEBAR_STATUS_CHANGED_TOPIC, {
+        sidebarStatusChanged: true,
+      });
+    agentEventBus.publish(ACTION_CENTER_CHANGED_TOPIC, {
+      actionCenterChanged: true,
+    });
+    expect((await changes.next()).value).toEqual({ actionCenterChanged: true });
+    const pending = changes.next();
+    await changes.return?.();
+    expect((await pending).done).toBe(true);
+  } finally {
+    await changes.return?.();
+  }
 });

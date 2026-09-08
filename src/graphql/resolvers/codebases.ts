@@ -119,11 +119,11 @@ export const createCodebaseResolvers = (service: CodebasesService) => ({
   Query: {
     codebaseOverview: async (
       _root: unknown,
-      _args: unknown,
+      args: { agentId?: string | null },
       context: GraphQLContext,
     ) => {
       requireControlPlane(context);
-      return service.overview();
+      return service.overview(args.agentId);
     },
     codebaseRepository: (
       _root: unknown,
@@ -344,9 +344,13 @@ export const createCodebaseResolvers = (service: CodebasesService) => ({
   },
   Subscription: {
     codebaseOverviewChanged: {
-      subscribe: (_root: unknown, _args: unknown, context: GraphQLContext) => {
+      subscribe: (
+        _root: unknown,
+        args: { agentId?: string | null },
+        context: GraphQLContext,
+      ) => {
         requireControlPlane(context);
-        return service.subscribe();
+        return service.subscribe(args.agentId);
       },
     },
   },

@@ -15,6 +15,7 @@ import {
 import { TailscaleServePage } from "./tailscale-serve-page";
 
 vi.mock("@/lib/control-plane-client", () => ({
+  onControlPlaneRecovery: vi.fn(() => vi.fn()),
   controlPlaneRequest: vi.fn(),
   controlPlaneSubscriptions: vi.fn(),
 }));

@@ -1460,6 +1460,110 @@ describe("GitHub service", () => {
     });
   });
 
+  test("coalesces concurrent REST reads without retaining settled results", async () => {
+    const pending = Promise.withResolvers<Response>();
+    const fetchMock = vi
+      .fn()
+      .mockReturnValueOnce(pending.promise)
+      .mockImplementation(async () => response({ total_count: 0, jobs: [] }));
+    vi.stubGlobal("fetch", fetchMock);
+    const service = new GitHubService();
+    const first = service.actionsWorkflowJobs("codebase-repository-1", "44");
+    const second = service.actionsWorkflowJobs("codebase-repository-1", "44");
+    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledOnce());
+    pending.resolve(response({ total_count: 0, jobs: [] }));
+    expect(await Promise.all([first, second])).toEqual([[], []]);
+    expect(cacheClient.recordRestCall).toHaveBeenCalledOnce();
+    await service.actionsWorkflowJobs("codebase-repository-1", "44");
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  test("keeps REST flights isolated across credentials and invalidation", async () => {
+    const flights = Array.from({ length: 3 }, () =>
+      Promise.withResolvers<Response>(),
+    );
+    const fetchMock = vi
+      .fn()
+      .mockImplementationOnce(() => flights[0].promise)
+      .mockImplementationOnce(() => flights[1].promise)
+      .mockImplementationOnce(() => flights[2].promise);
+    vi.stubGlobal("fetch", fetchMock);
+    const service = new GitHubService();
+    const first = service.actionsWorkflowJobs("codebase-repository-1", "44");
+    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledOnce());
+    state.apiToken = "replacement-test-token";
+    const second = service.actionsWorkflowJobs("codebase-repository-1", "44");
+    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
+    await service.clearCache();
+    const third = service.actionsWorkflowJobs("codebase-repository-1", "44");
+    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(3));
+    flights[0].resolve(response({ total_count: 0, jobs: [] }));
+    flights[1].resolve(response({ total_count: 0, jobs: [] }));
+    await Promise.all([first, second]);
+    const fourth = service.actionsWorkflowJobs("codebase-repository-1", "44");
+    // Let the public method read its fixture credentials before settling the
+    // remaining response; an older flight must not remove the current one.
+    await new Promise((resolve) => setTimeout(resolve, 5));
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+    flights[2].resolve(response({ total_count: 0, jobs: [] }));
+    await Promise.all([third, fourth]);
+  });
+
+  test("clears failed REST flights so the next reader can recover", async () => {
+    const pending = Promise.withResolvers<Response>();
+    const fetchMock = vi
+      .fn()
+      .mockReturnValueOnce(pending.promise)
+      .mockImplementation(async () => response({ total_count: 0, jobs: [] }));
+    vi.stubGlobal("fetch", fetchMock);
+    const service = new GitHubService();
+    const readers = Promise.allSettled([
+      service.actionsWorkflowJobs("codebase-repository-1", "44"),
+      service.actionsWorkflowJobs("codebase-repository-1", "44"),
+    ]);
+    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledOnce());
+    pending.reject(new Error("secret-token failed"));
+    const outcomes = await readers;
+    expect(outcomes.every((outcome) => outcome.status === "rejected")).toBe(
+      true,
+    );
+    expect(outcomes[0]).toMatchObject({
+      reason: new Error("[REDACTED] failed"),
+    });
+    await service.actionsWorkflowJobs("codebase-repository-1", "44");
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  test("looks up fallback pull request associations once per repository/SHA across worker batches", async () => {
+    const runs = Array.from({ length: 7 }, (_, index) => ({
+      ...rawActionsWorkflowRun(
+        index + 1,
+        "acme/widgets",
+        "2026-07-21T12:00:00.000Z",
+      ),
+      head_sha: "shared-sha",
+    }));
+    const fetchMock = vi.fn(async (url: string) => {
+      if (url.includes("/actions/runs?"))
+        return response({ total_count: runs.length, workflow_runs: runs });
+      if (url.includes("/commits/shared-sha/pulls?"))
+        return response([{ number: 17 }]);
+      throw new Error(`Unexpected association request: ${url}`);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const result = await new GitHubService().actionsWorkflowRuns(
+      "codebase-repository-1",
+      10,
+    );
+    expect(result.items).toHaveLength(7);
+    expect(
+      result.items.every((item) => item.pullRequests[0]?.number === 17),
+    ).toBe(true);
+    expect(
+      fetchMock.mock.calls.filter(([url]) => url.includes("/commits/")),
+    ).toHaveLength(1);
+  });
+
   test("deduplicates Mine results, normalizes badges, parses Jira, and paginates unresolved threads", async () => {
     const fetchMock = vi.fn(async (_url: string, init?: RequestInit) => {
       const body = JSON.parse(String(init?.body)) as {

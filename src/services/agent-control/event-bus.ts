@@ -94,6 +94,7 @@ export const GITHUB_PIPELINE_STATUS_CHANGED_TOPIC =
 export const JIRA_WEBHOOK_DELIVERY_TOPIC = "jira.webhook.delivery";
 export const JIRA_TICKET_CHANGED_TOPIC = "jira.ticket.changed";
 export const SKILLS_CHANGED_TOPIC = "skills.changed";
+export const BUILD_SCRIPTS_CHANGED_TOPIC = "build-scripts.changed";
 export const BUILDS_CHANGED_TOPIC = "builds.changed";
 export const IOS_DEVICES_CHANGED_TOPIC = "ios-devices.changed";
 export const SIGNING_ASSETS_CHANGED_TOPIC = "signing-assets.changed";
@@ -115,6 +116,7 @@ export const runEventTopic = (runId: string) => `run.${runId}.event`;
 export const runQuestionTopic = (runId: string) => `run.${runId}.question`;
 export const POLLING_CHANGED_TOPIC = "polling.changed";
 export const DISK_SPACE_CHANGED_TOPIC = "disk-space.changed";
+export const ACTION_CENTER_CHANGED_TOPIC = "action-center.changed";
 export const SIDEBAR_STATUS_CHANGED_TOPIC = "sidebar-status.changed";
 export const CLI_HEALTH_CHANGED_TOPIC = "cli-health.changed";
 export const TAILSCALE_SERVE_CHANGED_TOPIC = "tailscale-serve.changed";
@@ -135,3 +137,6 @@ export const skillSyncRunTopic = (runId: string) =>
   `skills.sync.${runId}.changed`;
 export const worktreeInspectionTopic = (worktreeId: string) =>
   `worktree.${worktreeId}.inspection`;
+
+export const INTEGRATION_CONFIGURATION_CHANGED_TOPIC =
+  "integration-configuration:changed";

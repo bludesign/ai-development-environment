@@ -62,6 +62,16 @@ export const createCommandResolvers = (service: CommandsService) => ({
         : value.createdAt.toISOString(),
   },
   Query: {
+    commandTargetSummaries: (
+      _root: unknown,
+      {
+        targets,
+      }: { targets: Parameters<CommandsService["targetSummaries"]>[0] },
+      context: GraphQLContext,
+    ) => {
+      requireControlPlane(context);
+      return service.targetSummaries(targets);
+    },
     commandDefinitions: (
       _root: unknown,
       { includeArchived }: { includeArchived?: boolean },

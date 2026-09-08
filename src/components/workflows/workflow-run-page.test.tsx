@@ -24,6 +24,7 @@ import type { WorkflowRun } from "./types";
 const routerPush = vi.hoisted(() => vi.fn());
 
 vi.mock("@/lib/control-plane-client", () => ({
+  onControlPlaneRecovery: vi.fn(() => () => {}),
   controlPlaneRequest: vi.fn(),
   controlPlaneSubscriptions: vi.fn(),
 }));
@@ -208,7 +209,10 @@ beforeEach(() => {
   subscriptions.mockReturnValue({
     subscribe: vi.fn(() => vi.fn()),
   } as unknown as ReturnType<typeof controlPlaneSubscriptions>);
-  request.mockResolvedValue({ workflowRun: pendingRun });
+  request.mockResolvedValue({
+    workflowRun: pendingRun,
+    workflowRunEvents: pendingRun.events,
+  });
 });
 
 afterEach(() => cleanup());
@@ -260,6 +264,7 @@ describe("workflow question answers", () => {
 
   test("tints the header with the linked worktree colour", async () => {
     request.mockResolvedValue({
+      workflowRunEvents: pendingRun.events,
       workflowRun: {
         ...pendingRun,
         worktree: {
@@ -284,6 +289,7 @@ describe("workflow question answers", () => {
 
   test("shows the worktree queue at the top while the run is queued", async () => {
     request.mockResolvedValue({
+      workflowRunEvents: pendingRun.events,
       workflowRun: {
         ...pendingRun,
         status: "QUEUED",
@@ -364,6 +370,7 @@ describe("workflow question answers", () => {
 
   test("explains what a parked step is waiting on and links to it", async () => {
     request.mockResolvedValue({
+      workflowRunEvents: pendingRun.events,
       workflowRun: {
         ...pendingRun,
         version: {
@@ -435,6 +442,7 @@ describe("workflow question answers", () => {
 
   test("keeps a cancelled run's held step out of the waiting card", async () => {
     request.mockResolvedValue({
+      workflowRunEvents: pendingRun.events,
       workflowRun: {
         ...pendingRun,
         status: "CANCELLED",
@@ -463,6 +471,7 @@ describe("workflow question answers", () => {
 
   test("shows the linked worktree branch instead of its resource ID", async () => {
     request.mockResolvedValue({
+      workflowRunEvents: pendingRun.events,
       workflowRun: {
         ...pendingRun,
         triggerKind: "RESOURCE_MANUAL_CHOICE",
@@ -498,6 +507,7 @@ describe("workflow question answers", () => {
 
   test("navigates locked links and only selects unlocked action nodes for replay", async () => {
     request.mockResolvedValue({
+      workflowRunEvents: pendingRun.events,
       workflowRun: { ...pendingRun, status: "SUCCEEDED" },
     });
     render(

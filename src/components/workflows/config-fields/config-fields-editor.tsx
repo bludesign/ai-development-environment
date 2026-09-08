@@ -271,9 +271,13 @@ function ResourceField({
   const t = useTranslations("workflows");
   const source = field.options?.kind === "resource" ? field.options : null;
   const scope = literalScope(config, source?.scopeFrom);
+  const [openedScope, setOpenedScope] = useState<string | null>(null);
+  const scopeKey = JSON.stringify([source?.resource, scope]);
   const { options, loading } = useResourceOptions(
     source?.resource ?? "codebase",
     scope,
+    !isSessionBinding(value) &&
+      (openedScope === scopeKey || Boolean(literalValue(value))),
   );
   const resourceSessionPath = source?.sessionPath;
   const clearLabel = !field.required ? t("notSet") : undefined;
@@ -305,7 +309,10 @@ function ResourceField({
           allowCustomValue
           ariaLabel={field.label}
           clearLabel={clearLabel}
-          disabled={loading}
+          loading={loading}
+          onOpenChange={(open) => {
+            if (open) setOpenedScope(scopeKey);
+          }}
           emptyMessage={t("noOptions")}
           onValueChange={(next) => onLiteral(next || undefined)}
           options={options}
@@ -322,9 +329,12 @@ function ResourceMultiField({ field, config, value, onChange }: FieldProps) {
   const t = useTranslations("workflows");
   const source = field.options?.kind === "resource" ? field.options : null;
   const scope = literalScope(config, source?.scopeFrom);
+  const [openedScope, setOpenedScope] = useState<string | null>(null);
+  const scopeKey = JSON.stringify([source?.resource, scope]);
   const { options, loading } = useResourceOptions(
     source?.resource ?? "codebase",
     scope,
+    openedScope === scopeKey || (Array.isArray(value) && value.length > 0),
   );
   const selected = Array.isArray(value) ? value.map(String) : [];
   const remaining = options.filter(
@@ -374,7 +384,10 @@ function ResourceMultiField({ field, config, value, onChange }: FieldProps) {
       <SearchableSelect
         allowCustomValue
         ariaLabel={field.label}
-        disabled={loading}
+        loading={loading}
+        onOpenChange={(open) => {
+          if (open) setOpenedScope(scopeKey);
+        }}
         emptyMessage={t("noOptions")}
         onValueChange={add}
         options={remaining}

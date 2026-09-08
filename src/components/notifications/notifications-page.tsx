@@ -57,7 +57,10 @@ import { Link, useRouter } from "@/i18n/navigation";
 import {
   controlPlaneRequest,
   controlPlaneSubscriptions,
+  onControlPlaneRecovery,
 } from "@/lib/control-plane-client";
+import { createRefreshCoalescer } from "@/lib/refresh-coalescer";
+import { readCursorWindow } from "@/lib/read-cursor-window";
 import { dayKey, formatDateValue } from "@/lib/date-format";
 import { isRowActivation, rowLinkClass } from "@/lib/row-activation";
 import { cn } from "@/lib/utils";
@@ -230,54 +233,71 @@ export function NotificationsPage() {
   const [isStandalone, setIsStandalone] = useState(false);
   const sentinel = useRef<HTMLDivElement>(null);
 
+  const loadedCount = useRef(0);
+  const revision = useRef(0);
+  const pageRequest = useRef<AbortController | null>(null);
+  const historyOwner = useRef<ReturnType<typeof createRefreshCoalescer> | null>(
+    null,
+  );
+  const settingsOwner = useRef<ReturnType<
+    typeof createRefreshCoalescer
+  > | null>(null);
+  const historyPending = useRef(false);
+  const knownIds = useRef(new Set<string>());
+  useEffect(() => {
+    loadedCount.current = notifications.length;
+    knownIds.current = new Set(notifications.map(({ id }) => id));
+  }, [notifications]);
+
   const refresh = useCallback(async () => {
-    try {
-      const data = await controlPlaneRequest<{
-        notifications: {
-          items: AppNotificationView[];
-          nextCursor: string | null;
-          totalCount: number;
-        };
-        notificationPreferences: NotificationPreferenceView[];
-        webPushState: WebPushStateView;
-        webPushSubscriptions: WebPushSubscriptionView[];
-        notificationApnsState?: NotificationApnsStateView;
-        notificationDevices?: NotificationDeviceView[];
-      }>(`query NotificationsPage {
-        notifications(first: ${PAGE_SIZE}) {
-          items { ${APP_NOTIFICATION_FIELDS} }
-          nextCursor totalCount
-        }
-        notificationPreferences { ${PREFERENCE_FIELDS} }
-        webPushState { configured publicKey subscriptionCount }
-        webPushSubscriptions {
-          id endpoint expirationTime locale userAgent lastSeenAt createdAt updatedAt
-        }
-        notificationApnsState { configured deviceCount }
-        notificationDevices { ${NOTIFICATION_DEVICE_FIELDS} }
-      }`);
-      setNotifications(data.notifications.items);
-      setNextCursor(data.notifications.nextCursor);
-      setTotalCount(data.notifications.totalCount);
-      setPreferences(data.notificationPreferences);
-      setWebPushState(data.webPushState);
-      setWebPushSubscriptions(data.webPushSubscriptions);
-      // Tolerated as absent so the page still renders against a control plane that predates the
-      // native channel rather than blanking out on a missing field.
-      setApnsState(data.notificationApnsState ?? null);
-      setDevices(data.notificationDevices ?? []);
-      setError(null);
-    } catch (value) {
-      setError(value instanceof Error ? value.message : String(value));
-    } finally {
-      setLoading(false);
-    }
+    await Promise.all([
+      historyOwner.current?.refresh(),
+      settingsOwner.current?.refresh(),
+    ]);
   }, []);
 
-  const loadMore = useCallback(async () => {
-    if (!nextCursor || loadingMore) return;
-    setLoadingMore(true);
-    try {
+  useEffect(() => {
+    if (tab !== "settings") return;
+    const owner = createRefreshCoalescer(async (signal) => {
+      try {
+        const data = await controlPlaneRequest<{
+          notificationPreferences: NotificationPreferenceView[];
+          webPushState: WebPushStateView;
+          webPushSubscriptions: WebPushSubscriptionView[];
+          notificationApnsState?: NotificationApnsStateView;
+          notificationDevices?: NotificationDeviceView[];
+        }>(
+          `query NotificationSettings {
+          notificationPreferences { ${PREFERENCE_FIELDS} }
+          webPushState { configured publicKey subscriptionCount }
+          webPushSubscriptions { id endpoint expirationTime locale userAgent lastSeenAt createdAt updatedAt }
+          notificationApnsState { configured deviceCount }
+          notificationDevices { ${NOTIFICATION_DEVICE_FIELDS} }
+        }`,
+          undefined,
+          { signal },
+        );
+        if (signal.aborted) return;
+        setPreferences(data.notificationPreferences);
+        setWebPushState(data.webPushState);
+        setWebPushSubscriptions(data.webPushSubscriptions);
+        setApnsState(data.notificationApnsState ?? null);
+        setDevices(data.notificationDevices ?? []);
+      } catch (value) {
+        if (!signal.aborted)
+          setError(value instanceof Error ? value.message : String(value));
+      }
+    });
+    settingsOwner.current = owner;
+    void owner.refresh();
+    return () => {
+      owner.dispose();
+      if (settingsOwner.current === owner) settingsOwner.current = null;
+    };
+  }, [tab]);
+
+  const readPage = useCallback(
+    async (after: string | null, first: number, signal: AbortSignal) => {
       const data = await controlPlaneRequest<{
         notifications: {
           items: AppNotificationView[];
@@ -285,32 +305,71 @@ export function NotificationsPage() {
           totalCount: number;
         };
       }>(
-        `query MoreNotifications($after: ID!) {
-          notifications(first: ${PAGE_SIZE}, after: $after) {
-            items { ${APP_NOTIFICATION_FIELDS} }
-            nextCursor totalCount
-          }
-        }`,
-        { after: nextCursor },
+        `query NotificationsPage($after: ID, $first: Int!) {
+      notifications(first: $first, after: $after) { items { ${APP_NOTIFICATION_FIELDS} } nextCursor totalCount }
+    }`,
+        { after, first },
+        { signal },
       );
+      return data.notifications;
+    },
+    [],
+  );
+
+  const loadMore = useCallback(async () => {
+    if (!nextCursor || pageRequest.current || historyPending.current) return;
+    const controller = new AbortController();
+    pageRequest.current = controller;
+    const version = revision.current;
+    setLoadingMore(true);
+    try {
+      const page = await readPage(nextCursor, PAGE_SIZE, controller.signal);
+      if (controller.signal.aborted || version !== revision.current) return;
       setNotifications((current) => {
         const known = new Set(current.map(({ id }) => id));
-        return [
-          ...current,
-          ...data.notifications.items.filter(({ id }) => !known.has(id)),
-        ];
+        return [...current, ...page.items.filter(({ id }) => !known.has(id))];
       });
-      setNextCursor(data.notifications.nextCursor);
-      setTotalCount(data.notifications.totalCount);
+      setNextCursor(page.nextCursor);
+      setTotalCount(page.totalCount);
     } catch (value) {
-      setError(value instanceof Error ? value.message : String(value));
+      if (!controller.signal.aborted)
+        setError(value instanceof Error ? value.message : String(value));
     } finally {
-      setLoadingMore(false);
+      if (pageRequest.current === controller) pageRequest.current = null;
+      if (!controller.signal.aborted) setLoadingMore(false);
     }
-  }, [loadingMore, nextCursor]);
+  }, [nextCursor, readPage]);
 
   useEffect(() => {
-    const initial = window.setTimeout(() => void refresh(), 0);
+    const owner = createRefreshCoalescer(async (signal) => {
+      const version = ++revision.current;
+      historyPending.current = true;
+      pageRequest.current?.abort();
+      pageRequest.current = null;
+      setLoadingMore(false);
+      try {
+        const page = await readCursorWindow(
+          (after, first) => readPage(after, first, signal),
+          Math.max(PAGE_SIZE, loadedCount.current),
+          200,
+          (item: AppNotificationView) => item.id,
+        );
+        if (signal.aborted || version !== revision.current) return;
+        setNotifications(page.items);
+        knownIds.current = new Set(page.items.map(({ id }) => id));
+        setNextCursor(page.nextCursor);
+        setTotalCount(page.totalCount);
+        setError(null);
+      } catch (value) {
+        if (!signal.aborted)
+          setError(value instanceof Error ? value.message : String(value));
+      } finally {
+        historyPending.current = false;
+        if (!signal.aborted) setLoading(false);
+      }
+    });
+    historyOwner.current = owner;
+    const initial = window.setTimeout(() => void owner.refresh(), 0);
     const initializeBrowserState = window.setTimeout(() => {
       if ("Notification" in window) {
         setPermission(window.Notification.permission);
@@ -342,30 +401,54 @@ export function NotificationsPage() {
           )?.notificationsChanged;
           if (!change) return;
           if (change.kind === "CREATED" && change.notification) {
+            if (historyPending.current) {
+              ++revision.current;
+              void owner.refresh();
+              return;
+            }
+            ++revision.current;
+            pageRequest.current?.abort();
+            pageRequest.current = null;
+            setLoadingMore(false);
+            const isNew = !knownIds.current.has(change.notification.id);
+            knownIds.current.add(change.notification.id);
             setNotifications((current) => [
               change.notification!,
               ...current.filter(({ id }) => id !== change.notification!.id),
             ]);
-            setTotalCount((current) => current + 1);
+            if (isNew) setTotalCount((current) => current + 1);
           } else if (
             change.kind === "DELETED" ||
-            change.kind === "HISTORY_CLEARED" ||
+            change.kind === "HISTORY_CLEARED"
+          ) {
+            ++revision.current;
+            void owner.refresh();
+          } else if (
             change.kind === "PREFERENCES_UPDATED" ||
             change.kind === "DEVICES_CHANGED"
           ) {
-            void refresh();
+            void settingsOwner.current?.refresh();
           }
         },
         error: () => undefined,
         complete: () => undefined,
       },
     );
+    const recover = onControlPlaneRecovery(() => {
+      void owner.refresh();
+      void settingsOwner.current?.refresh();
+    });
     return () => {
       window.clearTimeout(initial);
       window.clearTimeout(initializeBrowserState);
       unsubscribe();
+      recover();
+      owner.dispose();
+      pageRequest.current?.abort();
+      pageRequest.current = null;
+      if (historyOwner.current === owner) historyOwner.current = null;
     };
-  }, [refresh]);
+  }, [readPage]);
 
   useEffect(() => {
     const element = sentinel.current;

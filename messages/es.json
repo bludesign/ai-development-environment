@@ -4,6 +4,7 @@
     "description": "Un entorno de desarrollo centrado en la inteligencia artificial."
   },
   "common": {
+    "loadMore": "Cargar más",
     "cancel": "Cancelar",
     "continue": "Continuar",
     "cannotBeUndone": "Esta acción no se puede deshacer."

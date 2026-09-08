@@ -8,6 +8,7 @@ import type { AppRepository } from "./types";
 
 vi.mock("@/lib/control-plane-client", () => ({
   controlPlaneRequest: vi.fn(),
+  onControlPlaneRecovery: vi.fn(() => () => undefined),
 }));
 
 const request = vi.mocked(controlPlaneRequest);

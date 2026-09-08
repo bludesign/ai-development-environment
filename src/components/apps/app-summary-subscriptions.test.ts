@@ -7,6 +7,7 @@ const mocks = vi.hoisted(() => ({
 
 vi.mock("@/lib/control-plane-client", () => ({
   controlPlaneSubscriptions: mocks.controlPlaneSubscriptions,
+  onControlPlaneRecovery: vi.fn(() => () => undefined),
 }));
 
 import { subscribeToAppSummaryChanges } from "./app-summary-subscriptions";
@@ -20,7 +21,7 @@ describe("subscribeToAppSummaryChanges", () => {
     });
   });
 
-  test("refreshes summaries for app, checkout, worktree, run, and build changes", () => {
+  test("refreshes summaries for app, checkout, worktree, run, and build changes", async () => {
     const onChange = vi.fn();
     subscribeToAppSummaryChanges(onChange);
 
@@ -31,12 +32,13 @@ describe("subscribeToAppSummaryChanges", () => {
       expect.stringContaining("appsChanged"),
       expect.stringContaining("codebaseOverviewChanged"),
       expect.stringContaining("worktreeOverviewChanged"),
-      expect.stringContaining("agentRunsChanged"),
+      expect.stringContaining("agentRunListChanged"),
       expect.stringContaining("buildsChanged"),
     ]);
 
     for (const [, sink] of mocks.subscribe.mock.calls) sink.next();
-    expect(onChange).toHaveBeenCalledTimes(5);
+    await Promise.resolve();
+    expect(onChange).toHaveBeenCalledTimes(2);
   });
 
   test("unsubscribes from every summary source", () => {
@@ -45,7 +47,7 @@ describe("subscribeToAppSummaryChanges", () => {
     const remaining = [...unsubscribers];
 
     const unsubscribe = subscribeToAppSummaryChanges(vi.fn());
-    unsubscribe();
+    unsubscribe.dispose();
 
     for (const cleanup of remaining) expect(cleanup).toHaveBeenCalledOnce();
   });

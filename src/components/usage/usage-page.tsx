@@ -12,8 +12,6 @@ import {
 import { useLocale, useTranslations } from "next-intl";
 import { Fragment, useEffect, useRef, useState } from "react";
 
-import { AGENT_FIELDS } from "@/components/agents/graphql-fields";
-import type { Agent } from "@/components/agents/types";
 import { SearchableSelect } from "@/components/common/searchable-select";
 import { ConfirmationDialog } from "@/components/confirmation-dialog";
 import { Alert, AlertDescription } from "@/components/ui/alert";
@@ -46,7 +44,9 @@ import { createClientId } from "@/lib/browser-utils";
 import {
   controlPlaneRequest,
   controlPlaneSubscriptions,
+  onControlPlaneRecovery,
 } from "@/lib/control-plane-client";
+import { createRefreshCoalescer } from "@/lib/refresh-coalescer";
 import { formatDateValue } from "@/lib/date-format";
 
 import type {
@@ -84,7 +84,7 @@ type CollectionStatus =
   | "INVALID";
 
 type AgentCollection = {
-  agent: Agent;
+  agent: { id: string; name: string; capabilities: string[] };
   status: CollectionStatus;
   jobId: string | null;
   error: string | null;
@@ -115,7 +115,7 @@ const COLLECTION_FIELDS = `
   id status createdAt deadlineAt finishedAt
   progress {
     eligibleCount finishedCount successfulCount
-    agents { agent { ${AGENT_FIELDS} } status jobId error }
+    agents { agent { id name capabilities } status jobId error }
   }
   hasStoredHistory
   aggregate(range: $range, includeHistory: $includeHistory, endDate: $endDate) {
@@ -193,6 +193,16 @@ export function UsagePage() {
   const endDateRef = useRef(endDate);
   const includeHistoryRef = useRef(includeHistory);
   const viewVersionRef = useRef(0);
+  const startedRequest = useRef<string | null>(null);
+  const latestProgress = useRef<{
+    requestId: string;
+    status: CcusageCollection["status"];
+    finished: number;
+  } | null>(null);
+  const deliveryRevision = useRef(0);
+  const applyCollectionRef = useRef<((next: CcusageCollection) => void) | null>(
+    null,
+  );
 
   const records = collection?.progress.agents ?? [];
   const usage = collection?.aggregate;
@@ -249,10 +259,24 @@ export function UsagePage() {
 
   useEffect(() => {
     let disposed = false;
-    let completed = false;
+    let completed =
+      latestProgress.current?.requestId === requestId &&
+      latestProgress.current.status === "COMPLETED";
     let reconcileTimer: number | undefined;
     const applyCollection = (next: CcusageCollection) => {
       if (disposed) return;
+      const previous = latestProgress.current;
+      if (
+        previous?.requestId === requestId &&
+        ((previous.status === "COMPLETED" && next.status !== "COMPLETED") ||
+          next.progress.finishedCount < previous.finished)
+      )
+        return;
+      latestProgress.current = {
+        requestId,
+        status: next.status,
+        finished: next.progress.finishedCount,
+      };
       setCollection(next);
       setLoading(false);
       setLoadError(null);
@@ -264,7 +288,9 @@ export function UsagePage() {
         }
       }
     };
-    const reconcile = async () => {
+    applyCollectionRef.current = applyCollection;
+    const owner = createRefreshCoalescer(async (signal) => {
+      const revision = deliveryRevision.current;
       try {
         const data = await controlPlaneRequest<{
           ccusageCollection: CcusageCollection | null;
@@ -280,12 +306,18 @@ export function UsagePage() {
             peakAgentId: activeAgentId,
             peakModelName: activeModel,
           },
+          { signal },
         );
-        if (data.ccusageCollection) applyCollection(data.ccusageCollection);
+        if (
+          !signal.aborted &&
+          revision === deliveryRevision.current &&
+          data.ccusageCollection
+        )
+          applyCollection(data.ccusageCollection);
       } catch {
-        // The blocking mutation, subscription, or next pass can still deliver it.
+        // The start mutation, subscription, or next pass can still deliver it.
       }
-    };
+    });
     const unsubscribe = controlPlaneSubscriptions().subscribe<{
       ccusageCollectionChanged: CcusageCollection;
     }>(
@@ -305,6 +337,7 @@ export function UsagePage() {
       {
         next: (value) => {
           if (value.data?.ccusageCollectionChanged) {
+            ++deliveryRevision.current;
             applyCollection(value.data.ccusageCollectionChanged);
           }
         },
@@ -312,16 +345,30 @@ export function UsagePage() {
         complete: () => undefined,
       },
     );
-    void reconcile();
+    // A new collection returns its initial snapshot from the start mutation.
+    // Existing collections need a read when view filters change.
+    if (startedRequest.current === requestId) void owner.refresh();
+    const recover = () => {
+      if (document.visibilityState !== "hidden") void owner.refresh();
+    };
+    const recovery = onControlPlaneRecovery(recover);
+    window.addEventListener("focus", recover);
+    document.addEventListener("visibilitychange", recover);
     if (!completed) {
       reconcileTimer = window.setInterval(
-        () => void reconcile(),
+        () => void owner.refresh(),
         RECONCILE_INTERVAL_MS,
       );
     }
     return () => {
       disposed = true;
       unsubscribe();
+      recovery();
+      owner.dispose();
+      if (applyCollectionRef.current === applyCollection)
+        applyCollectionRef.current = null;
+      window.removeEventListener("focus", recover);
+      document.removeEventListener("visibilitychange", recover);
       if (reconcileTimer !== undefined) window.clearInterval(reconcileTimer);
     };
   }, [
@@ -337,6 +384,8 @@ export function UsagePage() {
   useEffect(() => {
     let disposed = false;
     const viewVersion = viewVersionRef.current;
+    const revision = deliveryRevision.current;
+    startedRequest.current = requestId;
     void controlPlaneRequest<{ collectCcusage: CcusageCollection }>(
       `mutation CollectCcusage($requestId: ID!, $range: CcusageRange!, $includeHistory: Boolean!, $endDate: String, $peakAgentId: ID, $peakModelName: String) {
         collectCcusage(requestId: $requestId) { ${COLLECTION_FIELDS} }
@@ -351,13 +400,21 @@ export function UsagePage() {
       },
     )
       .then(({ collectCcusage }) => {
-        if (disposed || viewVersion !== viewVersionRef.current) return;
-        setCollection(collectCcusage);
-        setLoading(false);
-        setLoadError(null);
+        if (
+          disposed ||
+          viewVersion !== viewVersionRef.current ||
+          revision !== deliveryRevision.current
+        )
+          return;
+        applyCollectionRef.current?.(collectCcusage);
       })
       .catch((error) => {
-        if (disposed) return;
+        if (
+          disposed ||
+          viewVersion !== viewVersionRef.current ||
+          revision !== deliveryRevision.current
+        )
+          return;
         setLoadError(error instanceof Error ? error.message : String(error));
         setLoading(false);
       });

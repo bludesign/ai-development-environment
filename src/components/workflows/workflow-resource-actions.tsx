@@ -24,6 +24,7 @@ import { Spinner } from "@/components/ui/spinner";
 import {
   controlPlaneRequest,
   controlPlaneSubscriptions,
+  onControlPlaneRecovery,
 } from "@/lib/control-plane-client";
 
 import { WorkflowResourcePanel } from "./workflow-resource-panel";
@@ -47,7 +48,7 @@ export type WorkflowMenuResource = {
 
 const quickActionCache = new Map<string, Promise<GitHubQuickAction[]>>();
 const cacheListeners = new Set<() => void>();
-let cacheSubscriptionStarted = false;
+let disposeCacheSubscription: (() => void) | null = null;
 
 function cacheKey(
   kind: WorkflowMenuResource["kind"],
@@ -93,23 +94,31 @@ function loadQuickActions(
 }
 
 function ensureCacheInvalidation() {
-  if (cacheSubscriptionStarted || typeof window === "undefined") return;
-  cacheSubscriptionStarted = true;
-  controlPlaneSubscriptions().subscribe(
-    { query: "subscription QuickActionChanges { workflowsChanged { id } }" },
+  if (disposeCacheSubscription || typeof window === "undefined") return;
+  const invalidate = () => {
+    quickActionCache.clear();
+    for (const listener of cacheListeners) listener();
+  };
+  const dispose = controlPlaneSubscriptions().subscribe<{
+    workflowChanges: { definitionsChanged: boolean };
+  }>(
     {
-      next: () => {
-        quickActionCache.clear();
-        for (const listener of cacheListeners) listener();
+      query:
+        "subscription QuickActionChanges { workflowChanges { definitionsChanged } }",
+    },
+    {
+      next: (result) => {
+        if (result.data?.workflowChanges.definitionsChanged) invalidate();
       },
-      error: () => {
-        cacheSubscriptionStarted = false;
-      },
-      complete: () => {
-        cacheSubscriptionStarted = false;
-      },
+      error: () => undefined,
+      complete: () => undefined,
     },
   );
+  const recover = onControlPlaneRecovery(invalidate);
+  disposeCacheSubscription = () => {
+    dispose();
+    recover();
+  };
 }
 
 function useGitHubQuickActions(resource: WorkflowMenuResource) {
@@ -121,6 +130,11 @@ function useGitHubQuickActions(resource: WorkflowMenuResource) {
     cacheListeners.add(invalidate);
     return () => {
       cacheListeners.delete(invalidate);
+      if (!cacheListeners.size) {
+        disposeCacheSubscription?.();
+        disposeCacheSubscription = null;
+        quickActionCache.clear();
+      }
     };
   }, []);
   useEffect(() => {

@@ -60,6 +60,12 @@ export const createPushNotificationsResolvers = (
     editor: (value: { editorJson: string }) => JSON.parse(value.editorJson),
   },
   PushNotificationBatch: {
+    pushType: (value: { editorJson: string }) =>
+      String(JSON.parse(value.editorJson).pushType ?? ""),
+    deliveries: async (value: { id: string; deliveries?: unknown[] }) =>
+      value.deliveries ??
+      (await service.historyItem(value.id))?.deliveries ??
+      [],
     ...dateFields,
     editor: (value: { editorJson: string }) => JSON.parse(value.editorJson),
     payload: (value: { payloadJson: string }) => JSON.parse(value.payloadJson),
@@ -107,13 +113,21 @@ export const createPushNotificationsResolvers = (
       requireControlPlane(context);
       return service.presets();
     },
+    pushNotificationHistoryItem: (
+      _root: unknown,
+      { id }: { id: string },
+      context: GraphQLContext,
+    ) => {
+      requireControlPlane(context);
+      return service.historyItem(id);
+    },
     pushNotificationHistory: (
       _root: unknown,
       { limit }: { limit?: number },
       context: GraphQLContext,
     ) => {
       requireControlPlane(context);
-      return service.history(limit);
+      return service.history(limit, false);
     },
     validatePushNotification: (
       _root: unknown,
@@ -275,6 +289,15 @@ export const createPushNotificationsResolvers = (
     },
   },
   Subscription: {
+    pushNotificationChanges: {
+      subscribe: (_root: unknown, _args: unknown, context: GraphQLContext) => {
+        requireControlPlane(context);
+        return service.subscribe();
+      },
+      resolve: (payload: { kind?: string }) => ({
+        kind: payload.kind ?? "ALL",
+      }),
+    },
     pushNotificationsChanged: {
       subscribe: (_root: unknown, _args: unknown, context: GraphQLContext) => {
         requireControlPlane(context);

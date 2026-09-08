@@ -223,7 +223,7 @@ export class SystemStatusService {
     await prisma.ccusageCollection.deleteMany({ where: { id: { in: ids } } });
   }
 
-  async status() {
+  async status(includeDiskSpace = true) {
     const prisma = await getPrismaClient();
     const period = localDay();
     const [
@@ -271,7 +271,7 @@ export class SystemStatusService {
       prisma.commandRun.count({
         where: { archivedAt: null, status: "RUNNING" },
       }),
-      this.diskSpace.overview(),
+      includeDiskSpace ? this.diskSpace.overview() : Promise.resolve(undefined),
     ]);
     let usageToday =
       storedUsage?.period === period

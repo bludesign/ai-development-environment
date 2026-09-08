@@ -18,7 +18,7 @@ import {
   type LucideIcon,
 } from "lucide-react";
 import { useTranslations } from "next-intl";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
@@ -60,7 +60,13 @@ import {
 } from "@/components/ui/table";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Link, useRouter } from "@/i18n/navigation";
-import { controlPlaneRequest } from "@/lib/control-plane-client";
+import {
+  controlPlaneRequest,
+  onControlPlaneRecovery,
+  controlPlaneSubscriptions,
+} from "@/lib/control-plane-client";
+
+import { createRefreshCoalescer } from "@/lib/refresh-coalescer";
 
 import type {
   SkillInstallation,
@@ -87,15 +93,15 @@ const TOOL_ICONS: Record<SkillTool, LucideIcon> = {
 };
 
 const OVERVIEW_QUERY = `
-  query SkillsOverview($search: String) {
+  query SkillsOverview($search: String, $includeMetadata: Boolean!) {
     skillsOverview(search: $search) {
       skills {
         id name description syncGlobally packageHash updatedAt
         files { id path }
         groups { id name }
       }
-      groups { id name }
-      observations {
+      groups @include(if: $includeMetadata) { id name }
+      observations @include(if: $includeMetadata) {
         tool configured homePath checkedAt
         agent { id name hostname connectionStatus }
       }
@@ -106,10 +112,10 @@ const OVERVIEW_QUERY = `
         worktree { id folder }
         skill { id name packageHash }
       }
-      settings {
+      settings @include(if: $includeMetadata) {
         autoSyncProjectGroups cursorEnabled githubCopilotEnabled codexEnabled claudeEnabled openCodeEnabled updatedAt
       }
-      repositories { id name displayOrigin }
+      repositories @include(if: $includeMetadata) { id name displayOrigin }
     }
   }
 `;
@@ -140,24 +146,72 @@ export function SkillsPage() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const load = useCallback(async () => {
-    try {
-      const data = await controlPlaneRequest<{
-        skillsOverview: SkillsOverview;
-      }>(OVERVIEW_QUERY, { search });
-      setOverview(data.skillsOverview);
-      setError(null);
-    } catch (value) {
-      setError(value instanceof Error ? value.message : String(value));
-    } finally {
-      setLoading(false);
-    }
-  }, [search]);
+  const metadataLoaded = useRef(false);
+  const activeLoad = useRef<AbortController | null>(null);
+  const load = useCallback(
+    async (refreshMetadata = true) => {
+      activeLoad.current?.abort();
+      const controller = new AbortController();
+      activeLoad.current = controller;
+      const includeMetadata = refreshMetadata || !metadataLoaded.current;
+      try {
+        const data = await controlPlaneRequest<{
+          skillsOverview: SkillsOverview;
+        }>(
+          OVERVIEW_QUERY,
+          { search, includeMetadata },
+          { signal: controller.signal },
+        );
+        if (controller.signal.aborted) return;
+        if (includeMetadata) metadataLoaded.current = true;
+        setOverview((current) => ({ ...current, ...data.skillsOverview }));
+        setError(null);
+      } catch (value) {
+        if (!controller.signal.aborted)
+          setError(value instanceof Error ? value.message : String(value));
+      } finally {
+        if (!controller.signal.aborted) setLoading(false);
+      }
+    },
+    [search],
+  );
+  const latestLoad = useRef(load);
+  useEffect(() => {
+    latestLoad.current = load;
+  }, [load]);
 
   useEffect(() => {
-    const timeout = window.setTimeout(() => void load(), 200);
-    return () => window.clearTimeout(timeout);
+    const timeout = window.setTimeout(() => void load(false), 200);
+    return () => {
+      window.clearTimeout(timeout);
+      activeLoad.current?.abort();
+    };
   }, [load]);
+
+  useEffect(() => {
+    const refresh = createRefreshCoalescer(() => latestLoad.current());
+    const unsubscribe = controlPlaneSubscriptions().subscribe(
+      {
+        query: `subscription SkillsPageChanged { skillsChanged { __typename } }`,
+      },
+      {
+        next: () => {
+          void refresh.refresh();
+        },
+        error: () => undefined,
+        complete: () => undefined,
+      },
+    );
+    const recover = onControlPlaneRecovery(() => {
+      void refresh.refresh();
+    });
+    return () => {
+      unsubscribe();
+      recover();
+      refresh.dispose();
+      activeLoad.current?.abort();
+    };
+  }, []);
 
   const configuredTools = useMemo(() => {
     if (!overview) return [];

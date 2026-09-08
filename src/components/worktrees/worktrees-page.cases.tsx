@@ -25,6 +25,7 @@ import {
 import type { WorktreeAgentGroup, WorktreeOverview } from "./types";
 
 vi.mock("@/lib/control-plane-client", () => ({
+  onControlPlaneRecovery: vi.fn(() => vi.fn()),
   controlPlaneRequest: vi.fn(),
   controlPlaneSubscriptions: vi.fn(),
   onControlPlaneConnected: vi.fn(() => vi.fn()),
@@ -1207,6 +1208,7 @@ export function registerWorktreesPageTests(
           expect(request).toHaveBeenCalledWith(
             expect.stringContaining("query JiraTicket"),
             { issueKey: "AIDE-24" },
+            { signal: expect.any(AbortSignal) },
           ),
         );
       });
@@ -1225,6 +1227,7 @@ export function registerWorktreesPageTests(
           expect(request).toHaveBeenCalledWith(
             expect.stringContaining("query JiraTicket"),
             { issueKey: "AIDE-24" },
+            { signal: expect.any(AbortSignal) },
           ),
         );
       });

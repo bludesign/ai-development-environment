@@ -1,7 +1,7 @@
 "use client";
 
 import { Clock3, Forward, Library, Send, ShieldAlert } from "lucide-react";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useState } from "react";
 
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
@@ -24,6 +24,7 @@ import {
 } from "@/components/ui/select";
 import { Spinner } from "@/components/ui/spinner";
 import { Textarea } from "@/components/ui/textarea";
+import { useOwnedRead } from "@/hooks/use-owned-read";
 import { controlPlaneRequest } from "@/lib/control-plane-client";
 
 import { SSE_BREAKPOINTS_QUERY, SSE_COMPOSITION_FIELDS } from "./graphql";
@@ -43,11 +44,12 @@ export function SseBreakpointsPage() {
   );
   const [busy, setBusy] = useState(false);
 
-  const load = useCallback(async () => {
+  const fetchData = useCallback(async (signal: AbortSignal) => {
     try {
       const data = await controlPlaneRequest<{
         sseBreakpoints: SseBreakpoint[];
-      }>(SSE_BREAKPOINTS_QUERY);
+      }>(SSE_BREAKPOINTS_QUERY, undefined, { signal });
+      if (signal.aborted) return;
       setBreakpoints(data.sseBreakpoints);
       setSelected((current) =>
         current
@@ -56,33 +58,49 @@ export function SseBreakpointsPage() {
       );
       setError(null);
     } catch (failure) {
-      setError(failure instanceof Error ? failure.message : String(failure));
+      if (!signal.aborted)
+        setError(failure instanceof Error ? failure.message : String(failure));
     } finally {
-      setLoading(false);
+      if (!signal.aborted) setLoading(false);
     }
   }, []);
 
-  useEffect(() => {
-    const timer = window.setTimeout(() => void load(), 0);
-    return () => window.clearTimeout(timer);
-  }, [load]);
-  useSseLiveReload("breakpoints", () => void load());
+  const load = useOwnedRead(fetchData);
+  useSseLiveReload("breakpoints", load);
 
-  async function selectBreakpoint(value: SseBreakpoint) {
+  const selectedEndpointId = selected?.endpointId;
+  const fetchCompositions = useCallback(
+    async (signal: AbortSignal) => {
+      if (!selectedEndpointId) return;
+      try {
+        const data = await controlPlaneRequest<{
+          sseMockCompositions: SseMockComposition[];
+        }>(
+          `query SseBreakpointMocks($endpointId: ID!) { sseMockCompositions(endpointId: $endpointId) { ${SSE_COMPOSITION_FIELDS} } }`,
+          { endpointId: selectedEndpointId },
+          { signal },
+        );
+        if (signal.aborted) return;
+        setCompositions(data.sseMockCompositions);
+        setCompositionId(data.sseMockCompositions[0]?.id ?? "");
+      } catch (failure) {
+        if (!signal.aborted)
+          setError(
+            failure instanceof Error ? failure.message : String(failure),
+          );
+      }
+    },
+    [selectedEndpointId],
+  );
+  const loadCompositions = useOwnedRead(fetchCompositions, {
+    enabled: Boolean(selectedEndpointId),
+  });
+  function selectBreakpoint(value: SseBreakpoint) {
+    const sameEndpoint = selectedEndpointId === value.endpointId;
     setSelected(value);
     setCompositionId("");
-    try {
-      const data = await controlPlaneRequest<{
-        sseMockCompositions: SseMockComposition[];
-      }>(
-        `query SseBreakpointMocks($endpointId: ID!) { sseMockCompositions(endpointId: $endpointId) { ${SSE_COMPOSITION_FIELDS} } }`,
-        { endpointId: value.endpointId },
-      );
-      setCompositions(data.sseMockCompositions);
-      setCompositionId(data.sseMockCompositions[0]?.id ?? "");
-    } catch (failure) {
-      setError(failure instanceof Error ? failure.message : String(failure));
-    }
+    if (sameEndpoint) void loadCompositions();
+    else setCompositions([]);
   }
 
   async function resolve(resolution: "FORWARD" | "SAVED_MOCK" | "AD_HOC") {

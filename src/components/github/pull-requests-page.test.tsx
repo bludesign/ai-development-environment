@@ -18,6 +18,8 @@ vi.mock("next/navigation", () => ({
 }));
 
 vi.mock("@/lib/control-plane-client", () => ({
+  controlPlaneSubscriptions: vi.fn(() => ({ subscribe: vi.fn(() => vi.fn()) })),
+  onControlPlaneRecovery: vi.fn(() => vi.fn()),
   controlPlaneRequest: vi.fn(),
 }));
 
@@ -144,7 +146,10 @@ afterEach(() => {
 
 function configureRequests() {
   requestMock.mockImplementation(async (query, variables) => {
-    if (query.includes("GitHubPullRequestConfiguration")) {
+    if (
+      query.includes("GitHubPageConfiguration") ||
+      query.includes("GitHubPageRepositories")
+    ) {
       return {
         githubSettings: {
           tokenConfigured: true,
@@ -257,7 +262,10 @@ function configureRequests() {
 describe("PullRequestsPage", () => {
   test("does not retry pull-request loading after an error", async () => {
     requestMock.mockImplementation(async (query) => {
-      if (query.includes("GitHubPullRequestConfiguration")) {
+      if (
+        query.includes("GitHubPageConfiguration") ||
+        query.includes("GitHubPageRepositories")
+      ) {
         return {
           githubSettings: {
             tokenConfigured: true,
@@ -286,7 +294,10 @@ describe("PullRequestsPage", () => {
 
   test("loads another tab after a pull-request page error", async () => {
     requestMock.mockImplementation(async (query, variables) => {
-      if (query.includes("GitHubPullRequestConfiguration")) {
+      if (
+        query.includes("GitHubPageConfiguration") ||
+        query.includes("GitHubPageRepositories")
+      ) {
         return {
           githubSettings: {
             tokenConfigured: true,
@@ -332,7 +343,10 @@ describe("PullRequestsPage", () => {
 
   test("tints the row of a pull request whose worktree has a highlight", async () => {
     requestMock.mockImplementation(async (query) => {
-      if (query.includes("GitHubPullRequestConfiguration")) {
+      if (
+        query.includes("GitHubPageConfiguration") ||
+        query.includes("GitHubPageRepositories")
+      ) {
         return {
           githubSettings: {
             tokenConfigured: true,
@@ -388,7 +402,10 @@ describe("PullRequestsPage", () => {
 
   test("preserves updated ordering when creation dates interleave", async () => {
     requestMock.mockImplementation(async (query) => {
-      if (query.includes("GitHubPullRequestConfiguration")) {
+      if (
+        query.includes("GitHubPageConfiguration") ||
+        query.includes("GitHubPageRepositories")
+      ) {
         return {
           githubSettings: {
             tokenConfigured: true,

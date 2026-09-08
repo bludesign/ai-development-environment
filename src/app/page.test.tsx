@@ -9,6 +9,7 @@ import {
 } from "@/lib/control-plane-client";
 
 vi.mock("@/lib/control-plane-client", () => ({
+  onControlPlaneRecovery: vi.fn(() => vi.fn()),
   controlPlaneRequest: vi.fn(),
   controlPlaneSubscriptions: vi.fn(),
   onControlPlaneConnected: vi.fn(() => vi.fn()),

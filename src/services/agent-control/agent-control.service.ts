@@ -1009,6 +1009,15 @@ export class AgentControlService {
     });
   }
 
+  async getJobs(ids: string[]) {
+    const unique = [...new Set(ids)];
+    if (unique.length > 200)
+      throw new Error("At most 200 jobs may be requested at once");
+    if (!unique.length) return [];
+    const prisma = await getPrismaClient();
+    return prisma.agentJob.findMany({ where: { id: { in: unique } } });
+  }
+
   async getJob(id: string) {
     const prisma = await getPrismaClient();
     return prisma.agentJob.findUnique({ where: { id } });
@@ -1360,12 +1369,55 @@ export class AgentControlService {
     return timedOut;
   }
 
-  async listLogs(jobId: string, afterSequence = -1) {
+  async listLogs(
+    jobId: string,
+    afterSequence = -1,
+    options: {
+      first?: number | null;
+      beforeSequence?: number | null;
+      latest?: boolean | null;
+      knownRanges?: Array<{
+        fromSequence: number;
+        throughSequence: number;
+      }> | null;
+    } = {},
+  ) {
     const prisma = await getPrismaClient();
-    return prisma.agentJobLog.findMany({
-      where: { jobId, sequence: { gt: afterSequence } },
-      orderBy: { sequence: "asc" },
-      take: 5_000,
+    const descending = Boolean(
+      options.latest || options.beforeSequence != null,
+    );
+    const ranges = options.knownRanges ?? [];
+    if (
+      ranges.length > 100 ||
+      ranges.some(
+        (range) =>
+          range.fromSequence < 0 || range.throughSequence < range.fromSequence,
+      )
+    )
+      throw new Error("Invalid known log ranges");
+    const rows = await prisma.agentJobLog.findMany({
+      where: {
+        jobId,
+        sequence: {
+          gt: afterSequence,
+          ...(options.beforeSequence == null
+            ? {}
+            : { lt: options.beforeSequence }),
+        },
+        ...(ranges.length
+          ? {
+              NOT: ranges.map((range) => ({
+                sequence: {
+                  gte: range.fromSequence,
+                  lte: range.throughSequence,
+                },
+              })),
+            }
+          : {}),
+      },
+      orderBy: { sequence: descending ? "desc" : "asc" },
+      take: Math.min(5000, Math.max(1, options.first ?? 5000)),
     });
+    return descending ? rows.reverse() : rows;
   }
 }

@@ -315,7 +315,18 @@ type SseRequestHistory {
   "duration ms field."
   durationMs: Int
   "events field."
-  events: [SseHistoryEvent!]
+  events(
+    "Maximum events to return; omitted retains the legacy complete history."
+    first: Int
+    "Return events before this sequence, exclusive."
+    beforeSequence: Int
+    "Return events after this sequence, exclusive."
+    afterSequence: Int
+    "Read the newest page, returned in ascending sequence order."
+    latest: Boolean = false
+    "Already received sequences to omit while recovering gaps."
+    knownRanges: [SseHistorySequenceRangeInput!]
+  ): [SseHistoryEvent!]
 }
 
 "A source, emitted, or dropped SSE history event."
@@ -1064,4 +1075,12 @@ extend type Subscription {
   sseRequestHistoryChanged: SseChange!
   "A source, emitted, dropped, split, or ID-backfilled event record changed."
   sseEventHistoryChanged: SseChange!
+}
+
+"An inclusive range of SSE event sequences already held by a consumer."
+input SseHistorySequenceRangeInput {
+  "First received sequence in the range."
+  fromSequence: Int!
+  "Last received sequence in the range."
+  throughSequence: Int!
 }

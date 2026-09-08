@@ -1,4 +1,5 @@
 import {
+  act,
   cleanup,
   fireEvent,
   render,
@@ -17,6 +18,7 @@ import { SkillSyncPage } from "./skill-sync-page";
 vi.mock("@/lib/control-plane-client", () => ({
   controlPlaneRequest: vi.fn(),
   controlPlaneSubscriptions: vi.fn(),
+  onControlPlaneConnected: vi.fn(() => vi.fn()),
 }));
 
 const request = vi.mocked(controlPlaneRequest);
@@ -110,11 +112,91 @@ beforeEach(() => {
 
 afterEach(() => {
   cleanup();
+  vi.useRealTimers();
   request.mockReset();
   subscriptions.mockReset();
 });
 
 describe("SkillSyncPage", () => {
+  test("settled runs stop polling while pending agent work retains fallback reads", async () => {
+    vi.useFakeTimers();
+    const original = request.getMockImplementation()!;
+    const snapshot = (await original("query SkillSyncRun")) as {
+      skillSyncRun: Record<string, unknown>;
+    };
+    const run = {
+      ...snapshot.skillSyncRun,
+      status: "SUCCEEDED",
+      finishedAt: new Date(0).toISOString(),
+      items: [],
+    };
+    request.mockImplementation(async (query, ...args) =>
+      String(query).includes("query SkillSyncRun")
+        ? ({ skillSyncRun: run } as never)
+        : original(query, ...args),
+    );
+    let publish: ((value: unknown) => void) | undefined;
+    subscriptions.mockReturnValue({
+      subscribe: (
+        payload: { query: string },
+        sink: { next: (value: unknown) => void },
+      ) => {
+        if (payload.query.includes("subscription SkillSyncRunChanged"))
+          publish = sink.next;
+        return vi.fn();
+      },
+    } as never);
+    render(<SkillSyncPage runId="run-1" />);
+    await act(() => vi.advanceTimersByTimeAsync(10));
+    request.mockClear();
+    await act(() => vi.advanceTimersByTimeAsync(21000));
+    expect(
+      request.mock.calls.filter(([q]) =>
+        String(q).includes("query SkillSyncRun"),
+      ),
+    ).toHaveLength(0);
+    await act(async () =>
+      publish?.({
+        data: {
+          skillSyncRunChanged: {
+            ...run,
+            status: "APPLYING",
+            finishedAt: null,
+            updatedAt: new Date(1000).toISOString(),
+          },
+        },
+      }),
+    );
+    await act(() => vi.advanceTimersByTimeAsync(21000));
+    expect(
+      request.mock.calls.filter(([q]) =>
+        String(q).includes("query SkillSyncRun"),
+      ),
+    ).toHaveLength(2);
+    expect(
+      request.mock.calls.some(([q]) =>
+        String(q).includes("query SkillSyncGroups"),
+      ),
+    ).toBe(false);
+    await act(async () =>
+      publish?.({
+        data: {
+          skillSyncRunChanged: {
+            ...run,
+            updatedAt: new Date(2000).toISOString(),
+          },
+        },
+      }),
+    );
+    request.mockClear();
+    await act(() => vi.advanceTimersByTimeAsync(21000));
+    expect(
+      request.mock.calls.filter(([q]) =>
+        String(q).includes("query SkillSyncRun"),
+      ),
+    ).toHaveLength(0);
+  });
+
   test("compares full packages and prepares a complete manual result", async () => {
     render(<SkillSyncPage runId="run-1" />);
 

@@ -74,24 +74,31 @@ export function JiraTicketDrawer({
       const timeout = window.setTimeout(() => setTicket(null), 0);
       return () => window.clearTimeout(timeout);
     }
+    const controller = new AbortController();
     const timeout = window.setTimeout(async () => {
       setLoading(true);
       try {
         const data = await controlPlaneRequest<{
           jiraTicket: JiraTicketDetail;
         }>(
-          `query JiraTicket($issueKey: ID!) { jiraTicket(issueKey: $issueKey) { ${JIRA_TICKET_DETAIL_FIELDS} } }`,
+          `query JiraTicket($issueKey: ID!) { jiraTicket(issueKey: $issueKey, commentsFirst: 50) { ${JIRA_TICKET_DETAIL_FIELDS} } }`,
           { issueKey },
+          { signal: controller.signal },
         );
+        if (controller.signal.aborted) return;
         setTicket(data.jiraTicket);
         setError(null);
       } catch (value) {
+        if (controller.signal.aborted) return;
         setError(value instanceof Error ? value.message : String(value));
       } finally {
-        setLoading(false);
+        if (!controller.signal.aborted) setLoading(false);
       }
     }, 0);
-    return () => window.clearTimeout(timeout);
+    return () => {
+      window.clearTimeout(timeout);
+      controller.abort();
+    };
   }, [issueKey]);
 
   const ticketChanged = (next: JiraTicketDetail) => {

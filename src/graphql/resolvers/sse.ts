@@ -12,7 +12,15 @@ function origin(value: string | null | undefined, context: GraphQLContext) {
 }
 
 export const createSseResolvers = (service: SseService) => ({
+  SseHistoryEvent: {
+    request: (value: { requestId: string; request?: unknown }) =>
+      value.request ?? service.historyRequest(value.requestId, false),
+  },
   SseRequestHistory: {
+    events: (
+      value: { id: string },
+      args: NonNullable<Parameters<SseService["historyEvents"]>[1]>,
+    ) => service.historyEvents(value.id, args),
     eventCount: (value: {
       eventCount?: number;
       _count?: { events?: number };
@@ -151,7 +159,7 @@ export const createSseResolvers = (service: SseService) => ({
       context: GraphQLContext,
     ) => {
       requireControlPlane(context);
-      return service.historyRequest(id);
+      return service.historyRequest(id, false);
     },
     sseHistoryFacets: (
       _root: unknown,

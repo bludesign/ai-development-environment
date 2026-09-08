@@ -27,6 +27,7 @@ import type {
   GitHubPipelineStatusChangeView,
   GitHubPipelineStatusKeyInput,
   GitHubPipelineStatusSnapshotView,
+  GitHubPipelineStatusSubscriptionInput,
   GitHubPipelineView,
   GitHubWorkflowJobView,
 } from "./types";
@@ -912,10 +913,130 @@ export class GitHubPipelineStatusService {
     return result.change;
   }
 
-  subscribe() {
-    return agentEventBus.iterate<{
+  subscribe(input: GitHubPipelineStatusSubscriptionInput = {}) {
+    type Payload = {
       githubPipelineStatusChanged: GitHubPipelineStatusChangeView;
-    }>(GITHUB_PIPELINE_STATUS_CHANGED_TOPIC);
+    };
+    const scoped = input.snapshotKeys != null || input.recordKeys != null;
+    const snapshotKeys = (input.snapshotKeys ?? [])
+      .map((key) => ({
+        repositoryGithubId: key.repositoryGithubId.trim(),
+        headSha: key.headSha.trim(),
+      }))
+      .filter((key) => key.repositoryGithubId && key.headSha);
+    const recordKeys = (input.recordKeys ?? [])
+      .map((key) => ({
+        repositoryGithubId: key.repositoryGithubId.trim(),
+        workflowRunId: key.workflowRunId.trim(),
+      }))
+      .filter((key) => key.repositoryGithubId && key.workflowRunId);
+    const snapshotIds = new Set(
+      snapshotKeys.map((key) => `${key.repositoryGithubId}\0${key.headSha}`),
+    );
+    const recordIds = new Set(
+      recordKeys.map(
+        (key) => `${key.repositoryGithubId}\0${key.workflowRunId}`,
+      ),
+    );
+    const matchesSnapshot = (snapshot: GitHubPipelineStatusSnapshotView) =>
+      snapshotIds.has(`${snapshot.repositoryGithubId}\0${snapshot.headSha}`);
+    const matchesRecord = (
+      repositoryGithubId: string,
+      workflowRunId?: string | null,
+    ) =>
+      Boolean(
+        workflowRunId &&
+        recordIds.has(`${repositoryGithubId}\0${workflowRunId}`),
+      );
+    // iterate registers synchronously. Changes concurrent with the initial DB
+    // read remain queued and revision-aware consumers can safely merge both.
+    const events = agentEventBus.iterate<Payload>(
+      GITHUB_PIPELINE_STATUS_CHANGED_TOPIC,
+      scoped
+        ? ({ githubPipelineStatusChanged: change }) =>
+            matchesSnapshot(change.snapshot) ||
+            matchesRecord(
+              change.snapshot.repositoryGithubId,
+              change.changedPipeline?.workflowRunId,
+            ) ||
+            change.snapshot.pipelines.some((pipeline) =>
+              matchesRecord(
+                change.snapshot.repositoryGithubId,
+                pipeline.workflowRunId,
+              ),
+            )
+        : undefined,
+    );
+    if (!scoped || !input.replayCurrent) return events;
+    let closed = false;
+    let initial: Promise<Payload[]> | null = null;
+    const replay = async (): Promise<Payload[]> => {
+      if (!snapshotKeys.length && !recordKeys.length) return [];
+      const prisma = await getPrismaClient();
+      const rows = await prisma.gitHubPipelineSnapshot.findMany({
+        where: {
+          OR: [
+            ...snapshotKeys,
+            ...recordKeys.map((key) => ({
+              repositoryGithubId: key.repositoryGithubId,
+              records: { some: { workflowRunId: key.workflowRunId } },
+            })),
+          ],
+        },
+        include: { records: true },
+      });
+      return (rows as PipelineSnapshotRow[]).flatMap<Payload>((row) => {
+        const snapshot = snapshotView(row);
+        const records = row.records.filter((record) =>
+          matchesRecord(row.repositoryGithubId, record.workflowRunId),
+        );
+        return records.length
+          ? records.map((record) => ({
+              githubPipelineStatusChanged: {
+                snapshot,
+                changedPipeline: recordView(row, record),
+              },
+            }))
+          : [
+              {
+                githubPipelineStatusChanged: {
+                  snapshot,
+                  changedPipeline: null,
+                },
+              },
+            ];
+      });
+    };
+    // A wrapper rather than an async generator lets return() close the event
+    // listener immediately even while a next() is blocked on DB work/events.
+    return {
+      [Symbol.asyncIterator]() {
+        return this;
+      },
+      async next(): Promise<IteratorResult<Payload>> {
+        if (closed) return { value: undefined, done: true };
+        try {
+          const values = await (initial ??= replay());
+          if (closed) return { value: undefined, done: true };
+          const value = values.shift();
+          return value ? { value, done: false } : events.next();
+        } catch (error) {
+          closed = true;
+          await events.return?.();
+          throw error;
+        }
+      },
+      async return(): Promise<IteratorResult<Payload>> {
+        closed = true;
+        await events.return?.();
+        return { value: undefined, done: true };
+      },
+      async throw(error: unknown): Promise<IteratorResult<Payload>> {
+        closed = true;
+        await events.return?.();
+        throw error;
+      },
+    } satisfies AsyncIterableIterator<Payload>;
   }
 
   private async pruneIfNeeded(): Promise<void> {

@@ -5,6 +5,7 @@ import { randomUUID } from "node:crypto";
 import { getPrismaClient } from "@/data/prisma-client";
 import {
   agentEventBus,
+  ACTION_CENTER_CHANGED_TOPIC,
   SIDEBAR_STATUS_CHANGED_TOPIC,
 } from "@/services/agent-control";
 import { getSessionValue } from "@/lib/workflows/session";
@@ -534,6 +535,9 @@ export class ActionCenterService {
     agentEventBus.publish(SIDEBAR_STATUS_CHANGED_TOPIC, {
       sidebarStatusChanged: true,
     });
+    agentEventBus.publish(ACTION_CENTER_CHANGED_TOPIC, {
+      actionCenterChanged: true,
+    });
     return true;
   }
 
@@ -599,10 +603,13 @@ export class ActionCenterService {
     agentEventBus.publish(SIDEBAR_STATUS_CHANGED_TOPIC, {
       sidebarStatusChanged: true,
     });
+    agentEventBus.publish(ACTION_CENTER_CHANGED_TOPIC, {
+      actionCenterChanged: true,
+    });
     return true;
   }
 
   subscribe() {
-    return agentEventBus.iterate(SIDEBAR_STATUS_CHANGED_TOPIC);
+    return agentEventBus.iterate(ACTION_CENTER_CHANGED_TOPIC);
   }
 }

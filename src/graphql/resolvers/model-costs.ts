@@ -1,3 +1,7 @@
+import {
+  agentEventBus,
+  MODEL_COST_CATALOG_CHANGED_TOPIC,
+} from "@/services/agent-control";
 import type { GraphQLContext } from "@/services/graphql-server/graphql-server.service";
 import type {
   ModelCostSortDirection,
@@ -74,6 +78,15 @@ export const createModelCostResolvers = (service: ModelCostsService) => ({
     ) => {
       requireControlPlane(context);
       return service.listEntries(args);
+    },
+  },
+  Subscription: {
+    modelCostCatalogChanged: {
+      subscribe: (_root: unknown, _args: unknown, context: GraphQLContext) => {
+        requireControlPlane(context);
+        return agentEventBus.iterate(MODEL_COST_CATALOG_CHANGED_TOPIC);
+      },
+      resolve: (value: { catalog: unknown }) => value.catalog,
     },
   },
   Mutation: {

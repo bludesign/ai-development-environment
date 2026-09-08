@@ -1,5 +1,9 @@
 "use client";
 
+import {
+  clearIntegrationConfigurationCache,
+  subscribeIntegrationConfiguration,
+} from "@/lib/integration-configuration";
 import { Fragment, useEffect, useState, type ReactNode } from "react";
 import { Blocks, LogOut, PanelLeft, PanelRight, X } from "lucide-react";
 import { useLocale, useTranslations } from "next-intl";
@@ -43,6 +47,7 @@ import {
 } from "@/lib/app-destinations";
 import { buildAppBreadcrumbs, type AppBreadcrumb } from "@/lib/breadcrumbs";
 import { controlPlaneRequest } from "@/lib/control-plane-client";
+import { createRefreshCoalescer } from "@/lib/refresh-coalescer";
 import { LEFT_SIDEBAR_COOKIE, RIGHT_SIDEBAR_COOKIE } from "@/lib/sidebar-state";
 import { authClient } from "@/services/auth/auth-client";
 
@@ -66,8 +71,7 @@ type SidebarControls = {
   toggleSidebar: () => void;
 };
 
-function useNavigationFeatures(): NavigationFeatures {
-  const pathname = usePathname();
+export function useNavigationFeatures(sessionKey: string): NavigationFeatures {
   const [features, setFeatures] = useState<NavigationFeatures>({
     actionsCache: false,
     webhooks: false,
@@ -78,56 +82,48 @@ function useNavigationFeatures(): NavigationFeatures {
   });
 
   useEffect(() => {
-    let cancelled = false;
-    const load = () =>
-      void controlPlaneRequest<{
+    const updates = createRefreshCoalescer(async (signal) => {
+      const data = await controlPlaneRequest<{
         cacheServerSettings: { configured: boolean };
         sourceControlIntegrationState: {
           github: { configured: boolean; webhooksEnabled: boolean };
           gitlab: { configured: boolean; webhooksEnabled: boolean };
         };
         jiraWebhooksEnabled: boolean;
-      }>(`query NavigationFeatures {
-      cacheServerSettings { configured }
-      sourceControlIntegrationState {
-        github { configured webhooksEnabled }
-        gitlab { configured webhooksEnabled }
-      }
-      jiraWebhooksEnabled
-    }`)
-        .then((data) => {
-          if (!cancelled) {
-            setFeatures({
-              actionsCache: data.cacheServerSettings.configured,
-              webhooks:
-                data.sourceControlIntegrationState.github.webhooksEnabled,
-              jiraWebhooks: data.jiraWebhooksEnabled,
-              github: data.sourceControlIntegrationState.github.configured,
-              gitlab: data.sourceControlIntegrationState.gitlab.configured,
-              gitlabWebhooks:
-                data.sourceControlIntegrationState.gitlab.webhooksEnabled,
-            });
-          }
-        })
-        .catch(() => {
-          if (!cancelled) {
-            setFeatures({
-              actionsCache: false,
-              webhooks: false,
-              jiraWebhooks: false,
-              github: false,
-              gitlab: false,
-              gitlabWebhooks: false,
-            });
-          }
-        });
-    load();
-    window.addEventListener("source-control-settings-changed", load);
-    return () => {
-      cancelled = true;
-      window.removeEventListener("source-control-settings-changed", load);
+      }>(
+        `query NavigationFeatures {
+        cacheServerSettings { configured }
+        sourceControlIntegrationState {
+          github { configured webhooksEnabled }
+          gitlab { configured webhooksEnabled }
+        }
+        jiraWebhooksEnabled
+      }`,
+        undefined,
+        { signal },
+      );
+      if (signal.aborted) return;
+      setFeatures({
+        actionsCache: data.cacheServerSettings.configured,
+        webhooks: data.sourceControlIntegrationState.github.webhooksEnabled,
+        jiraWebhooks: data.jiraWebhooksEnabled,
+        github: data.sourceControlIntegrationState.github.configured,
+        gitlab: data.sourceControlIntegrationState.gitlab.configured,
+        gitlabWebhooks:
+          data.sourceControlIntegrationState.gitlab.webhooksEnabled,
+      });
+    });
+    const load = () => {
+      void updates.refresh().catch(() => undefined);
     };
-  }, [pathname]);
+    load();
+    const offConfiguration = subscribeIntegrationConfiguration(null, load);
+    return () => {
+      updates.dispose();
+      offConfiguration();
+      clearIntegrationConfigurationCache();
+    };
+  }, [sessionKey]);
 
   return features;
 }
@@ -159,7 +155,7 @@ function AppShellFrame({
   leftDefaultOpen,
   rightDefaultOpen,
 }: AppShellProps) {
-  const features = useNavigationFeatures();
+  const features = useNavigationFeatures(currentUser.email);
   return (
     <SidebarProvider
       className="h-dvh min-h-0 overflow-hidden"
@@ -446,6 +442,8 @@ function UserAccountControl({ user }: { user: CurrentUser }) {
           void authClient.signOut({
             fetchOptions: {
               onSuccess: () => {
+                // A document reload clears session-scoped caches after sign-out.
+                // eslint-disable-next-line @next/next/no-location-assign-relative-destination
                 window.location.assign(`/${locale}/sign-in`);
               },
               onError: () => setSigningOut(false),

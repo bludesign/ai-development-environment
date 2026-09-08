@@ -592,6 +592,18 @@ describe("GitHub resolvers", () => {
         context(null),
       ),
     ).toBe(iterator);
+    expect(
+      resolvers.Subscription.githubPipelineStatusChanged.subscribe(
+        {},
+        { snapshotKeys, recordKeys, replayCurrent: true },
+        context(null),
+      ),
+    ).toBe(iterator);
+    expect(pipelineStatus.subscribe).toHaveBeenLastCalledWith({
+      snapshotKeys,
+      recordKeys,
+      replayCurrent: true,
+    });
     expect(() =>
       resolvers.Subscription.githubPipelineStatusChanged.subscribe(
         {},

@@ -1130,29 +1130,175 @@ export class JiraService {
     return board;
   }
 
-  async ticket(
+  async summary(
     issueKey: string,
-    force = false,
-    changelog?: JiraWebhookChangelog | null,
-  ): Promise<JiraTicketDetail> {
+    preferStored = false,
+  ): Promise<JiraTicketSummary> {
     const key = normalizeIssueKey(issueKey);
-    const detail = await this.cachedCall<RawIssue>({
-      operation: "ISSUE",
-      params: { issueKey: key, fields: "*all", expand: "names,schema" },
-      requestSummary: `Issue ${key} with all fields`,
-      force,
+    if (preferStored) {
+      const prisma = await getPrismaClient();
+      const stored = await prisma.jiraCachedTicket.findUnique({
+        where: { issueKey: key },
+        select: {
+          summaryJson: true,
+          detailJson: true,
+          summaryFetchedAt: true,
+          detailFetchedAt: true,
+        },
+      });
+      if (stored) {
+        const latest =
+          stored.detailFetchedAt &&
+          (!stored.summaryFetchedAt ||
+            stored.detailFetchedAt > stored.summaryFetchedAt)
+            ? stored.detailJson
+            : (stored.summaryJson ?? stored.detailJson);
+        if (latest) return ticketSummary(JSON.parse(latest));
+      }
+    }
+    const fields = [
+      "summary",
+      "status",
+      "issuetype",
+      "priority",
+      "assignee",
+      "project",
+      "updated",
+    ];
+    const result = await this.cachedCall<RawIssue>({
+      operation: "ISSUE_SUMMARY",
+      params: { issueKey: key, fields },
+      requestSummary: `Summary for ${key}`,
       fetcher: async () => {
         const { cloud } = await this.getClients();
         return cloud.issues.getIssue({
           issueIdOrKey: key,
-          fields: ["*all"],
-          expand: ["names", "schema"],
+          fields,
           updateHistory: false,
         });
       },
     });
+    if (result.source === "LIVE")
+      await this.storeSummaries(
+        result.entryId,
+        [result.value],
+        result.fetchedAt,
+      );
+    return ticketSummary(result.value);
+  }
+
+  async ticketComments(
+    issueKey: string,
+    limit = 50,
+    offset = 0,
+    snapshotTotal?: number | null,
+    force = false,
+  ): Promise<JiraActivityPage<JiraCommentView>> {
+    const key = normalizeIssueKey(issueKey);
+    const pagination = this.validatePagination(limit, offset);
+    const anchored =
+      pagination.offset > 0 &&
+      Number.isInteger(snapshotTotal) &&
+      snapshotTotal! >= pagination.offset &&
+      snapshotTotal! <= 2_147_483_647
+        ? snapshotTotal!
+        : null;
+    const count =
+      anchored === null
+        ? pagination.limit
+        : Math.min(pagination.limit, anchored - pagination.offset);
+    const startAt =
+      anchored === null
+        ? pagination.offset
+        : Math.max(0, anchored - pagination.offset - count);
+    const orderBy = anchored === null ? "-created" : "created";
+    const result = await this.cachedCall({
+      operation: "COMMENTS",
+      params: {
+        issueKey: key,
+        startAt,
+        maxResults: Math.max(1, count),
+        orderBy,
+      },
+      requestSummary: `Comments for ${key} from ${startAt}`,
+      force,
+      fetcher: async () => {
+        const { cloud } = await this.getClients();
+        return cloud.issueComments.getComments({
+          issueIdOrKey: key,
+          startAt,
+          maxResults: Math.max(1, count),
+          orderBy,
+        });
+      },
+      itemCount: (value) => asArray(asRecord(value).comments).length,
+    });
+    await this.linkCacheEntryToIssue(key, result.entryId);
+    const page = asRecord(result.value);
+    const raw = asArray(page.comments).slice(0, count);
+    if (orderBy === "-created") raw.reverse();
+    const settings = await this.requireCredentials();
+    return {
+      ...pagination,
+      total: anchored ?? asNumber(page.total) ?? raw.length,
+      cache: cacheMeta(result),
+      items: raw.map(asRecord).map((comment) => ({
+        id: asString(comment.id) ?? randomUUID(),
+        author: person(comment.author),
+        body: comment.body ?? null,
+        content: normalizeJiraRichText(comment.body ?? null, settings.siteUrl),
+        createdAt: asString(comment.created),
+        updatedAt: asString(comment.updated),
+      })),
+    };
+  }
+
+  async ticket(
+    issueKey: string,
+    force = false,
+    changelog?: JiraWebhookChangelog | null,
+    commentsFirst?: number | null,
+  ): Promise<JiraTicketDetail> {
+    const key = normalizeIssueKey(issueKey);
+    const [detail, initialComments] = await Promise.all([
+      this.cachedCall<RawIssue>({
+        operation: "ISSUE",
+        params: { issueKey: key, fields: "*all", expand: "names,schema" },
+        requestSummary: `Issue ${key} with all fields`,
+        force,
+        fetcher: async () => {
+          const { cloud } = await this.getClients();
+          return cloud.issues.getIssue({
+            issueIdOrKey: key,
+            fields: ["*all"],
+            expand: ["names", "schema"],
+            updateHistory: false,
+          });
+        },
+      }),
+      commentsFirst != null
+        ? this.ticketComments(key, commentsFirst, 0, undefined, force)
+        : Promise.resolve(null),
+    ]);
     if (detail.source === "LIVE")
       await this.storeDetail(detail.entryId, detail.value, detail.fetchedAt);
+
+    if (initialComments) {
+      const page = initialComments;
+      const settings = await this.requireCredentials();
+      const ticket = this.normalizeTicketDetail(
+        detail.value,
+        [],
+        settings.siteUrl,
+        cacheMeta(detail),
+        page.cache,
+      );
+      ticket.comments = page.items;
+      ticket.commentsTotal = page.total;
+      // The bounded page contains the latest comment, which is all observation needs.
+      await this.recordTicketWorkflowEvents(ticket, changelog);
+      return ticket;
+    }
 
     const commentResults: CacheResult<unknown>[] = [];
     const comments: unknown[] = [];
@@ -1185,12 +1331,13 @@ export class JiraService {
     const commentsFetchedAt = new Date(
       Math.min(...commentResults.map((result) => result.fetchedAt.getTime())),
     );
-    await this.storeComments(
-      key,
-      comments,
-      commentsFetchedAt,
-      commentResults.map((result) => result.entryId),
-    );
+    if (commentResults.some((result) => result.source === "LIVE"))
+      await this.storeComments(
+        key,
+        comments,
+        commentsFetchedAt,
+        commentResults.map((result) => result.entryId),
+      );
     const settings = await this.requireCredentials();
     const ticket = this.normalizeTicketDetail(
       detail.value,
@@ -1304,49 +1451,66 @@ export class JiraService {
     issueKey: string,
     limit = 50,
     offset = 0,
+    snapshotTotal?: number | null,
   ): Promise<JiraActivityPage<JiraChange>> {
     const key = normalizeIssueKey(issueKey);
     const pagination = this.validatePagination(limit, offset);
-    const probe = await this.cachedCall({
-      operation: "ISSUE_CHANGELOG",
-      params: { issueKey: key, startAt: 0, maxResults: 1 },
-      requestSummary: `Changelog count for ${key}`,
-      fetcher: async () => {
-        const { cloud } = await this.getClients();
-        return cloud.issues.getChangeLogs({
-          issueIdOrKey: key,
-          startAt: 0,
-          maxResults: 1,
-        });
-      },
-      itemCount: (value) => asArray(asRecord(value).values).length,
-    });
-    await this.linkCacheEntryToIssue(key, probe.entryId);
-    const total = asNumber(asRecord(probe.value).total) ?? 0;
+    const anchoredTotal =
+      pagination.offset > 0 &&
+      Number.isInteger(snapshotTotal) &&
+      snapshotTotal! > pagination.offset &&
+      snapshotTotal! <= 2_147_483_647
+        ? snapshotTotal!
+        : null;
+    const probe =
+      anchoredTotal !== null
+        ? null
+        : await this.cachedCall({
+            operation: "ISSUE_CHANGELOG",
+            params: { issueKey: key, startAt: 0, maxResults: pagination.limit },
+            requestSummary: `Changelog count for ${key}`,
+            fetcher: async () => {
+              const { cloud } = await this.getClients();
+              return cloud.issues.getChangeLogs({
+                issueIdOrKey: key,
+                startAt: 0,
+                maxResults: pagination.limit,
+              });
+            },
+            itemCount: (value) => asArray(asRecord(value).values).length,
+          });
+    if (probe) await this.linkCacheEntryToIssue(key, probe.entryId);
+    const total = anchoredTotal ?? asNumber(asRecord(probe?.value).total) ?? 0;
     const count = Math.min(
       pagination.limit,
       Math.max(0, total - pagination.offset),
     );
     const startAt = Math.max(0, total - pagination.offset - count);
     if (count === 0) {
-      return { ...pagination, total, items: [], cache: cacheMeta(probe) };
+      return { ...pagination, total, items: [], cache: cacheMeta(probe!) };
     }
-    const page = await this.cachedCall({
-      operation: "ISSUE_CHANGELOG",
-      params: { issueKey: key, startAt, maxResults: count },
-      requestSummary: `Changelog for ${key} from ${startAt}`,
-      fetcher: async () => {
-        const { cloud } = await this.getClients();
-        return cloud.issues.getChangeLogs({
-          issueIdOrKey: key,
-          startAt,
-          maxResults: count,
-        });
-      },
-      itemCount: (value) => asArray(asRecord(value).values).length,
-    });
+    const page =
+      probe &&
+      startAt === 0 &&
+      asArray(asRecord(probe.value).values).length >= count
+        ? probe
+        : await this.cachedCall({
+            operation: "ISSUE_CHANGELOG",
+            params: { issueKey: key, startAt, maxResults: count },
+            requestSummary: `Changelog for ${key} from ${startAt}`,
+            fetcher: async () => {
+              const { cloud } = await this.getClients();
+              return cloud.issues.getChangeLogs({
+                issueIdOrKey: key,
+                startAt,
+                maxResults: count,
+              });
+            },
+            itemCount: (value) => asArray(asRecord(value).values).length,
+          });
     await this.linkCacheEntryToIssue(key, page.entryId);
     const items = asArray(asRecord(page.value).values)
+      .slice(0, count)
       .map(asRecord)
       .reverse()
       .map((change) => ({
@@ -1366,7 +1530,7 @@ export class JiraService {
       ...pagination,
       total,
       items,
-      cache: combineCacheMeta([probe, page]),
+      cache: combineCacheMeta(probe ? [probe, page] : [page]),
     };
   }
 
@@ -1374,50 +1538,67 @@ export class JiraService {
     issueKey: string,
     limit = 50,
     offset = 0,
+    snapshotTotal?: number | null,
   ): Promise<JiraActivityPage<JiraWorklog>> {
     const key = normalizeIssueKey(issueKey);
     const pagination = this.validatePagination(limit, offset);
-    const probe = await this.cachedCall({
-      operation: "ISSUE_WORKLOGS",
-      params: { issueKey: key, startAt: 0, maxResults: 1 },
-      requestSummary: `Worklog count for ${key}`,
-      fetcher: async () => {
-        const { cloud } = await this.getClients();
-        return cloud.issueWorklogs.getIssueWorklog({
-          issueIdOrKey: key,
-          startAt: 0,
-          maxResults: 1,
-        });
-      },
-      itemCount: (value) => asArray(asRecord(value).worklogs).length,
-    });
-    await this.linkCacheEntryToIssue(key, probe.entryId);
-    const total = asNumber(asRecord(probe.value).total) ?? 0;
+    const anchoredTotal =
+      pagination.offset > 0 &&
+      Number.isInteger(snapshotTotal) &&
+      snapshotTotal! > pagination.offset &&
+      snapshotTotal! <= 2_147_483_647
+        ? snapshotTotal!
+        : null;
+    const probe =
+      anchoredTotal !== null
+        ? null
+        : await this.cachedCall({
+            operation: "ISSUE_WORKLOGS",
+            params: { issueKey: key, startAt: 0, maxResults: pagination.limit },
+            requestSummary: `Worklog count for ${key}`,
+            fetcher: async () => {
+              const { cloud } = await this.getClients();
+              return cloud.issueWorklogs.getIssueWorklog({
+                issueIdOrKey: key,
+                startAt: 0,
+                maxResults: pagination.limit,
+              });
+            },
+            itemCount: (value) => asArray(asRecord(value).worklogs).length,
+          });
+    if (probe) await this.linkCacheEntryToIssue(key, probe.entryId);
+    const total = anchoredTotal ?? asNumber(asRecord(probe?.value).total) ?? 0;
     const count = Math.min(
       pagination.limit,
       Math.max(0, total - pagination.offset),
     );
     const startAt = Math.max(0, total - pagination.offset - count);
     if (count === 0) {
-      return { ...pagination, total, items: [], cache: cacheMeta(probe) };
+      return { ...pagination, total, items: [], cache: cacheMeta(probe!) };
     }
-    const page = await this.cachedCall({
-      operation: "ISSUE_WORKLOGS",
-      params: { issueKey: key, startAt, maxResults: count },
-      requestSummary: `Worklogs for ${key} from ${startAt}`,
-      fetcher: async () => {
-        const { cloud } = await this.getClients();
-        return cloud.issueWorklogs.getIssueWorklog({
-          issueIdOrKey: key,
-          startAt,
-          maxResults: count,
-        });
-      },
-      itemCount: (value) => asArray(asRecord(value).worklogs).length,
-    });
+    const page =
+      probe &&
+      startAt === 0 &&
+      asArray(asRecord(probe.value).worklogs).length >= count
+        ? probe
+        : await this.cachedCall({
+            operation: "ISSUE_WORKLOGS",
+            params: { issueKey: key, startAt, maxResults: count },
+            requestSummary: `Worklogs for ${key} from ${startAt}`,
+            fetcher: async () => {
+              const { cloud } = await this.getClients();
+              return cloud.issueWorklogs.getIssueWorklog({
+                issueIdOrKey: key,
+                startAt,
+                maxResults: count,
+              });
+            },
+            itemCount: (value) => asArray(asRecord(value).worklogs).length,
+          });
     await this.linkCacheEntryToIssue(key, page.entryId);
     const settings = await this.requireCredentials();
     const items = asArray(asRecord(page.value).worklogs)
+      .slice(0, count)
       .map(asRecord)
       .reverse()
       .map((worklog) => ({
@@ -1461,7 +1642,7 @@ export class JiraService {
       ...pagination,
       total,
       items,
-      cache: combineCacheMeta([probe, page]),
+      cache: combineCacheMeta(probe ? [probe, page] : [page]),
     };
   }
 
@@ -2852,6 +3033,7 @@ export class JiraService {
           createdAt: asString(attachment.created),
         })),
       comments,
+      commentsTotal: comments.length,
       createdAt: asString(fields.created),
       dueAt: asString(fields.duedate),
       resolvedAt: asString(fields.resolutiondate),

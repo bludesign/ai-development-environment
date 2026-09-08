@@ -17,8 +17,9 @@ vi.mock("next/navigation", () => ({
 }));
 
 vi.mock("@/lib/control-plane-client", () => ({
+  onControlPlaneRecovery: vi.fn(() => vi.fn()),
   controlPlaneRequest: vi.fn(),
-  controlPlaneSubscriptions: () => ({ subscribe: vi.fn() }),
+  controlPlaneSubscriptions: () => ({ subscribe: vi.fn(() => vi.fn()) }),
 }));
 
 const requestMock = vi.mocked(controlPlaneRequest);

@@ -1,6 +1,12 @@
 "use client";
 
 import {
+  GITHUB_CONFIGURATION_QUERY,
+  readIntegrationConfiguration,
+  subscribeIntegrationConfiguration,
+} from "@/lib/integration-configuration";
+
+import {
   ChevronDown,
   ChevronRight,
   ExternalLink,
@@ -333,35 +339,63 @@ export function ActionsPage() {
     [],
   );
 
+  const currentFiltersRef = useRef({
+    repositoryId: selectedRepositoryId,
+    branch: selectedBranch,
+    pipeline: selectedPipeline,
+  });
   useEffect(() => {
-    const timeout = window.setTimeout(async () => {
+    currentFiltersRef.current = {
+      repositoryId: selectedRepositoryId,
+      branch: selectedBranch,
+      pipeline: selectedPipeline,
+    };
+  }, [selectedRepositoryId, selectedBranch, selectedPipeline]);
+  useEffect(() => {
+    let controller: AbortController | null = null;
+    let initialLoaded = false;
+    let wasConfigured = false;
+    const loadConfiguration = async () => {
+      controller?.abort();
+      const owner = new AbortController();
+      controller = owner;
       try {
-        const data = await controlPlaneRequest<{
+        const data = await readIntegrationConfiguration<{
           githubSettings: GitHubSettingsView;
-        }>(
-          "query GitHubActionsConfiguration { githubSettings { tokenConfigured defaultJiraKeyRegex updatedAt } }",
-        );
+        }>("github", GITHUB_CONFIGURATION_QUERY, { signal: owner.signal });
+        if (owner.signal.aborted) return;
         setSettings(data.githubSettings);
         setError(null);
-        if (data.githubSettings.tokenConfigured) {
-          const initialFilters = initialFiltersRef.current;
+        const shouldLoad =
+          data.githubSettings.tokenConfigured &&
+          (!initialLoaded || !wasConfigured);
+        initialLoaded = true;
+        wasConfigured = data.githubSettings.tokenConfigured;
+        if (shouldLoad) {
+          const filters = currentFiltersRef.current;
           await loadRuns(
-            initialFilters.repositoryId,
-            initialFilters.repositoryId === ALL_REPOSITORIES
-              ? ""
-              : initialFilters.branch,
-            initialFilters.repositoryId === ALL_REPOSITORIES
-              ? ALL_PIPELINES
-              : initialFilters.pipeline,
+            filters.repositoryId,
+            filters.branch,
+            filters.pipeline,
           );
         }
       } catch (value) {
-        setError(value instanceof Error ? value.message : String(value));
+        if (!owner.signal.aborted)
+          setError(value instanceof Error ? value.message : String(value));
       } finally {
-        setConfigurationLoading(false);
+        if (!owner.signal.aborted) setConfigurationLoading(false);
       }
-    }, 0);
-    return () => window.clearTimeout(timeout);
+    };
+    const timeout = window.setTimeout(() => void loadConfiguration(), 0);
+    const dispose = subscribeIntegrationConfiguration(
+      "github",
+      () => void loadConfiguration(),
+    );
+    return () => {
+      window.clearTimeout(timeout);
+      dispose();
+      controller?.abort();
+    };
   }, [loadRuns]);
 
   useEffect(() => {

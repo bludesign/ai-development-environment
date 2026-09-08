@@ -26,7 +26,11 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { controlPlaneRequest } from "@/lib/control-plane-client";
+import {
+  controlPlaneRequest,
+  controlPlaneSubscriptions,
+  onControlPlaneRecovery,
+} from "@/lib/control-plane-client";
 
 import {
   MODEL_COST_CATALOG_FIELDS,
@@ -37,6 +41,9 @@ import {
   type ModelCostSortDirection,
   type ModelCostSortKey,
 } from "./types";
+
+import { readCursorWindow } from "@/lib/read-cursor-window";
+import { createRefreshCoalescer } from "@/lib/refresh-coalescer";
 
 const PAGE_SIZE = 100;
 const SEARCH_DEBOUNCE_MS = 250;
@@ -70,49 +77,85 @@ export function CostsPage() {
   const [loadingMore, setLoadingMore] = useState(false);
   const [busy, setBusy] = useState<"save" | "refresh" | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const activeLoad = useRef<AbortController | null>(null);
+  const pageLoad = useRef<AbortController | null>(null);
+  const generation = useRef(0);
+  const loadedWindow = useRef({ scope: "", count: PAGE_SIZE });
   const loadMoreTriggerRef = useRef<HTMLDivElement>(null);
 
+  const catalogUrl = useRef<string | undefined>(undefined);
   const applyCatalog = useCallback((value: ModelCostCatalogView) => {
     setCatalog(value);
-    setUrlDraft(value.customUrl ?? "");
+    if (catalogUrl.current !== (value.customUrl ?? ""))
+      setUrlDraft(value.customUrl ?? "");
+    catalogUrl.current = value.customUrl ?? "";
   }, []);
 
-  const load = useCallback(
-    async (term: string, order: Sort) => {
-      try {
-        const data = await controlPlaneRequest<{
-          modelCostCatalog: ModelCostCatalogView;
-          modelCostEntries: {
-            items: ModelCostEntryView[];
-            totalCount: number;
-          };
-        }>(
-          `query CostsPage($search: String, $first: Int!, $sortKey: ModelCostSortKey!, $direction: ModelCostSortDirection!) {
-            modelCostCatalog { ${MODEL_COST_CATALOG_FIELDS} }
-            modelCostEntries(search: $search, first: $first, sortKey: $sortKey, direction: $direction) {
+  const load = useCallback(async (term: string, order: Sort) => {
+    activeLoad.current?.abort();
+    pageLoad.current?.abort();
+    const controller = new AbortController();
+    activeLoad.current = controller;
+    const requestGeneration = ++generation.current;
+    setLoadingMore(false);
+    try {
+      const scope = JSON.stringify([term, order]);
+      const page = await readCursorWindow(
+        async (after, first) => {
+          const offset = Number(after ?? 0);
+          const data = await controlPlaneRequest<{
+            modelCostEntries: {
+              items: ModelCostEntryView[];
+              totalCount: number;
+            };
+          }>(
+            `query CostsPage($search: String, $first: Int!, $offset: Int!, $sortKey: ModelCostSortKey!, $direction: ModelCostSortDirection!) {
+            modelCostEntries(search: $search, first: $first, offset: $offset, sortKey: $sortKey, direction: $direction) {
               items { ${MODEL_COST_ENTRY_FIELDS} }
               totalCount
             }
           }`,
-          {
-            search: term || null,
-            first: PAGE_SIZE,
-            sortKey: order.key,
-            direction: order.direction,
-          },
-        );
-        applyCatalog(data.modelCostCatalog);
-        setEntries(data.modelCostEntries.items);
-        setTotalCount(data.modelCostEntries.totalCount);
-        setError(null);
-      } catch (value) {
+            {
+              search: term || null,
+              first,
+              offset,
+              sortKey: order.key,
+              direction: order.direction,
+            },
+            { signal: controller.signal },
+          );
+          const value = data.modelCostEntries;
+          return {
+            ...value,
+            nextCursor:
+              value.items.length &&
+              offset + value.items.length < value.totalCount
+                ? String(offset + value.items.length)
+                : null,
+          };
+        },
+        loadedWindow.current.scope === scope
+          ? loadedWindow.current.count
+          : PAGE_SIZE,
+        500,
+        (item: ModelCostEntryView) => item.model,
+      );
+      if (controller.signal.aborted || requestGeneration !== generation.current)
+        return;
+      loadedWindow.current = {
+        scope,
+        count: Math.max(PAGE_SIZE, page.items.length),
+      };
+      setEntries(page.items);
+      setTotalCount(page.totalCount);
+      setError(null);
+    } catch (value) {
+      if (!controller.signal.aborted)
         setError(value instanceof Error ? value.message : String(value));
-      } finally {
-        setLoading(false);
-      }
-    },
-    [applyCatalog],
-  );
+    } finally {
+      if (!controller.signal.aborted) setLoading(false);
+    }
+  }, []);
 
   /**
    * The query itself is what waits out the typing, so there is no second copy
@@ -121,6 +164,67 @@ export function CostsPage() {
    * is a finished intent rather than a half-typed one, so only a changed search
    * term is worth coalescing. The first load is immediate for the same reason.
    */
+  const latestFilters = useRef({ search, sort });
+  useEffect(() => {
+    latestFilters.current = { search, sort };
+  }, [search, sort]);
+  useEffect(() => {
+    let controller = new AbortController();
+    let revision = 0;
+    const fetchCatalog = () => {
+      controller.abort();
+      controller = new AbortController();
+      const signal = controller.signal;
+      const version = revision;
+      void controlPlaneRequest<{ modelCostCatalog: ModelCostCatalogView }>(
+        `query ModelCostConfiguration { modelCostCatalog { ${MODEL_COST_CATALOG_FIELDS} } }`,
+        undefined,
+        { signal },
+      )
+        .then((data) => {
+          if (!signal.aborted && version === revision)
+            applyCatalog(data.modelCostCatalog);
+        })
+        .catch((value: unknown) => {
+          if (!signal.aborted)
+            setError(value instanceof Error ? value.message : String(value));
+        });
+    };
+    fetchCatalog();
+    const entriesOwner = createRefreshCoalescer(() =>
+      load(latestFilters.current.search, latestFilters.current.sort),
+    );
+    const refreshEntries = () => void entriesOwner.refresh();
+    const off = controlPlaneSubscriptions().subscribe<{
+      modelCostCatalogChanged: ModelCostCatalogView;
+    }>(
+      {
+        query: `subscription ModelCostCatalogChanged { modelCostCatalogChanged { ${MODEL_COST_CATALOG_FIELDS} } }`,
+      },
+      {
+        next: ({ data }) => {
+          if (data?.modelCostCatalogChanged) {
+            ++revision;
+            applyCatalog(data.modelCostCatalogChanged);
+            refreshEntries();
+          }
+        },
+        error: () => undefined,
+        complete: () => undefined,
+      },
+    );
+    const recover = onControlPlaneRecovery(() => {
+      fetchCatalog();
+      refreshEntries();
+    });
+    return () => {
+      controller.abort();
+      entriesOwner.dispose();
+      off();
+      recover();
+    };
+  }, [applyCatalog, load]);
+
   const loadedSearch = useRef(search);
   useEffect(() => {
     const typing = loadedSearch.current !== search;
@@ -129,10 +233,18 @@ export function CostsPage() {
       () => void load(search, sort),
       typing ? SEARCH_DEBOUNCE_MS : 0,
     );
-    return () => window.clearTimeout(timer);
+    return () => {
+      window.clearTimeout(timer);
+      activeLoad.current?.abort();
+      pageLoad.current?.abort();
+    };
   }, [load, search, sort]);
 
   const loadMore = useCallback(async () => {
+    if (pageLoad.current && !pageLoad.current.signal.aborted) return;
+    const controller = new AbortController();
+    pageLoad.current = controller;
+    const requestGeneration = generation.current;
     setLoadingMore(true);
     try {
       const data = await controlPlaneRequest<{
@@ -151,27 +263,35 @@ export function CostsPage() {
           sortKey: sort.key,
           direction: sort.direction,
         },
+        { signal: controller.signal },
       );
-      /*
-       * The offset is taken from what is already on screen, so a page that
-       * arrives after a re-sort can overlap the one before it. Keying by model
-       * — which the catalog makes unique — drops the duplicates rather than
-       * rendering a row twice.
-       */
+      if (controller.signal.aborted || requestGeneration !== generation.current)
+        return;
       setEntries((current) => {
         const seen = new Set(current.map(({ model }) => model));
-        return [
+        const items = [
           ...current,
           ...data.modelCostEntries.items.filter(
             ({ model }) => !seen.has(model),
           ),
         ];
+        loadedWindow.current = {
+          scope: JSON.stringify([search, sort]),
+          count: Math.max(PAGE_SIZE, items.length),
+        };
+        return items;
       });
       setTotalCount(data.modelCostEntries.totalCount);
     } catch (value) {
-      setError(value instanceof Error ? value.message : String(value));
+      if (!controller.signal.aborted)
+        setError(value instanceof Error ? value.message : String(value));
     } finally {
-      setLoadingMore(false);
+      if (pageLoad.current === controller) pageLoad.current = null;
+      if (
+        !controller.signal.aborted &&
+        requestGeneration === generation.current
+      )
+        setLoadingMore(false);
     }
   }, [entries.length, search, sort]);
 
@@ -237,11 +357,14 @@ export function CostsPage() {
   const refresh = async () => {
     setBusy("refresh");
     try {
-      await controlPlaneRequest(
+      const result = await controlPlaneRequest<{
+        refreshModelCosts: ModelCostCatalogView;
+      }>(
         `mutation RefreshModelCosts {
           refreshModelCosts { ${MODEL_COST_CATALOG_FIELDS} }
         }`,
       );
+      applyCatalog(result.refreshModelCosts);
       await load(search, sort);
     } catch (value) {
       setError(value instanceof Error ? value.message : String(value));

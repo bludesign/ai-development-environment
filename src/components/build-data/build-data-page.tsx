@@ -62,6 +62,7 @@ import { createClientId } from "@/lib/browser-utils";
 import {
   controlPlaneRequest,
   controlPlaneSubscriptions,
+  onControlPlaneConnected,
 } from "@/lib/control-plane-client";
 import { dayKey, formatDateValue } from "@/lib/date-format";
 import { cn } from "@/lib/utils";
@@ -177,8 +178,19 @@ export function BuildDataPage() {
   const [historyCursor, setHistoryCursor] = useState<string | null>(null);
   const [historyLoading, setHistoryLoading] = useState(true);
   const [historyVersion, setHistoryVersion] = useState(0);
+  const collectionRef = useRef<DerivedDataCollection | null>(null);
+  const collectionVersion = useRef(0);
+  const operationBusyRef = useRef(false);
 
   const applyCollection = useCallback((next: DerivedDataCollection) => {
+    if (
+      collectionRef.current?.id === next.id &&
+      collectionRef.current.status === "COMPLETED" &&
+      next.status === "COLLECTING"
+    )
+      return;
+    collectionRef.current = next;
+    collectionVersion.current += 1;
     setCollection(next);
     setLoading(false);
     setError(null);
@@ -186,6 +198,12 @@ export function BuildDataPage() {
 
   useEffect(() => {
     let disposed = false;
+    let reconciling = false;
+    let starting = true;
+    collectionRef.current = null;
+    collectionVersion.current += 1;
+    const startVersion = collectionVersion.current;
+    const controller = new AbortController();
     const subscription = controlPlaneSubscriptions().subscribe<{
       derivedDataCollectionChanged: DerivedDataCollection;
     }>(
@@ -197,7 +215,7 @@ export function BuildDataPage() {
       },
       {
         next: (value) => {
-          if (value.data?.derivedDataCollectionChanged) {
+          if (!disposed && value.data?.derivedDataCollectionChanged) {
             applyCollection(value.data.derivedDataCollectionChanged);
           }
         },
@@ -206,6 +224,9 @@ export function BuildDataPage() {
       },
     );
     const reconcile = async () => {
+      if (disposed || reconciling || operationBusyRef.current) return;
+      reconciling = true;
+      const version = collectionVersion.current;
       try {
         const data = await controlPlaneRequest<{
           derivedDataCollection: DerivedDataCollection | null;
@@ -214,12 +235,19 @@ export function BuildDataPage() {
             derivedDataCollection(id: $id) { ${COLLECTION_FIELDS} }
           }`,
           { id: collectionId },
+          { signal: controller.signal },
         );
-        if (!disposed && data.derivedDataCollection) {
+        if (
+          !disposed &&
+          version === collectionVersion.current &&
+          data.derivedDataCollection
+        ) {
           applyCollection(data.derivedDataCollection);
         }
       } catch {
         // The start mutation or subscription can still deliver the collection.
+      } finally {
+        reconciling = false;
       }
     };
     void controlPlaneRequest<{ refreshDerivedData: DerivedDataCollection }>(
@@ -228,16 +256,45 @@ export function BuildDataPage() {
       }`,
       { requestId: collectionId },
     )
-      .then((data) => !disposed && applyCollection(data.refreshDerivedData))
+      .then(
+        (data) =>
+          !disposed &&
+          startVersion === collectionVersion.current &&
+          applyCollection(data.refreshDerivedData),
+      )
       .catch((value) => {
         if (disposed) return;
         setError(value instanceof Error ? value.message : String(value));
         setLoading(false);
+      })
+      .finally(() => {
+        starting = false;
       });
-    void reconcile();
-    const timer = window.setInterval(() => void reconcile(), 2_000);
+    const timer = window.setInterval(() => {
+      const current = collectionRef.current;
+      if (
+        !current ||
+        current.status !== "COMPLETED" ||
+        operationBusyRef.current ||
+        current.entries.some((entry) => entry.operation !== "IDLE")
+      )
+        void reconcile();
+    }, 2_000);
+    const recover = () => {
+      if (!starting) void reconcile();
+    };
+    const offConnected = onControlPlaneConnected(recover);
+    const onVisible = () => {
+      if (document.visibilityState === "visible") recover();
+    };
+    window.addEventListener("focus", recover);
+    document.addEventListener("visibilitychange", onVisible);
     return () => {
       disposed = true;
+      controller.abort();
+      offConnected();
+      window.removeEventListener("focus", recover);
+      document.removeEventListener("visibilitychange", onVisible);
       subscription();
       window.clearInterval(timer);
     };
@@ -306,6 +363,8 @@ export function BuildDataPage() {
     overrideProtection = false,
   ) => {
     if (!collection) return;
+    operationBusyRef.current = true;
+    const version = ++collectionVersion.current;
     setOperationBusy(true);
     setError(null);
     try {
@@ -332,7 +391,8 @@ export function BuildDataPage() {
           overrideProtection,
         },
       );
-      applyCollection(data[operation]);
+      if (version === collectionVersion.current)
+        applyCollection(data[operation]);
       if (operation === "deleteDerivedDataEntries") {
         setSelected(new Set());
         setArmedDeleteKey(null);
@@ -340,22 +400,38 @@ export function BuildDataPage() {
     } catch (value) {
       setError(value instanceof Error ? value.message : String(value));
     } finally {
+      operationBusyRef.current = false;
       setOperationBusy(false);
     }
   };
 
-  const previousEntryCount = useMemo(
-    () => allEntries.length,
-    [allEntries.length],
-  );
+  const previousHistoryState = useRef<{
+    id: string;
+    count: number;
+    deleting: boolean;
+  } | null>(null);
+  const deleting = allEntries.some((entry) => entry.operation === "DELETING");
   useEffect(() => {
-    const timer = window.setTimeout(() => {
-      if (!activeOperation && !loading) {
-        setHistoryVersion((value) => value + 1);
-      }
-    }, 0);
+    if (!collection || loading) return;
+    const previous = previousHistoryState.current;
+    previousHistoryState.current = {
+      id: collection.id,
+      count: collection.entries.length,
+      deleting,
+    };
+    if (
+      !previous ||
+      previous.id !== collection.id ||
+      deleting ||
+      !(previous.deleting || previous.count > collection.entries.length)
+    )
+      return;
+    const timer = window.setTimeout(
+      () => setHistoryVersion((value) => value + 1),
+      0,
+    );
     return () => window.clearTimeout(timer);
-  }, [activeOperation, loading, previousEntryCount]);
+  }, [collection, deleting, loading]);
 
   const refresh = () => {
     setLoading(true);

@@ -196,9 +196,13 @@ export const createTelemetryResolvers = (service: TelemetryService) => ({
   },
   Subscription: {
     telemetryEntriesChanged: {
-      subscribe: (_root: unknown, _args: unknown, context: GraphQLContext) => {
+      subscribe: (
+        _root: unknown,
+        args: { view?: "CONSOLE" | "ANALYTICS" | "UNIFIED" | null },
+        context: GraphQLContext,
+      ) => {
         requireControlPlane(context);
-        return service.subscribe();
+        return service.subscribe(args.view);
       },
       resolve: (payload: { ids: string[]; reason: string }) => payload,
     },

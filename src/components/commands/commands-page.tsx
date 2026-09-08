@@ -63,7 +63,9 @@ import { downloadJsonFiles, exportFileStem } from "@/lib/browser-utils";
 import {
   controlPlaneRequest,
   controlPlaneSubscriptions,
+  onControlPlaneRecovery,
 } from "@/lib/control-plane-client";
+import { createRefreshCoalescer } from "@/lib/refresh-coalescer";
 import { dayKey, formatDateValue } from "@/lib/date-format";
 import {
   hasPrioritizedTableStatus,
@@ -118,74 +120,71 @@ export function CommandsPage() {
   const [customLaunching, setCustomLaunching] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const load = useCallback(async () => {
-    try {
-      const data = await controlPlaneRequest<{
-        commandDefinitions: CommandDefinition[];
-        commandRuns: { nodes: CommandRun[] };
-        agents: CommandAgent[];
-        worktreeOverview: {
-          agents: Array<{
-            agent: CommandAgent;
-            codebases: Array<{
-              repository: { id: string; name: string };
-              worktrees: CommandWorktree[];
-            }>;
-          }>;
-        };
-      }>(
-        `query CommandManagement($includeArchived: Boolean!) {
-        commandDefinitions(includeArchived: true) { ${COMMAND_DEFINITION_FIELDS} }
-        commandRuns(includeArchived: $includeArchived, first: 200) { nodes { ${COMMAND_RUN_FIELDS} } }
-        agents { id name hostname connectionStatus capabilities }
-        worktreeOverview {
-          agents { agent { id name hostname connectionStatus capabilities }
-            codebases { repository { id name } worktrees { id folder branch highlightColor } }
-          }
+  const definitionsLoaded = useRef(false);
+  const needsDefinitions = useRef(true);
+  const load = useCallback(
+    async (signal?: AbortSignal) => {
+      const includeDefinitions =
+        needsDefinitions.current || !definitionsLoaded.current;
+      needsDefinitions.current = false;
+      try {
+        const data = await controlPlaneRequest<{
+          commandDefinitions?: CommandDefinition[];
+          commandRuns: { nodes: CommandRun[] };
+        }>(
+          `query CommandManagement($includeArchived: Boolean!, $includeDefinitions: Boolean!) {
+          commandDefinitions(includeArchived: true) @include(if: $includeDefinitions) { ${COMMAND_DEFINITION_FIELDS} }
+          commandRuns(includeArchived: $includeArchived, first: 200) { nodes { ${COMMAND_RUN_FIELDS} } }
+        }`,
+          { includeArchived: archive !== "ACTIVE", includeDefinitions },
+          { signal },
+        );
+        if (signal?.aborted) return;
+        if (data.commandDefinitions) {
+          definitionsLoaded.current = true;
+          setDefinitions(data.commandDefinitions);
         }
-      }`,
-        { includeArchived: archive !== "ACTIVE" },
-      );
-      setDefinitions(data.commandDefinitions);
-      setRuns(
-        data.commandRuns.nodes.filter((run) =>
-          archive === "ARCHIVED"
-            ? Boolean(run.archivedAt)
-            : archive === "ACTIVE"
-              ? !run.archivedAt
-              : true,
-        ),
-      );
-      setAgents(data.agents);
-      setWorktrees(
-        data.worktreeOverview.agents.flatMap((group) =>
-          group.codebases.flatMap((codebase) =>
-            codebase.worktrees.map((worktree) => ({
-              ...worktree,
-              repositoryId: codebase.repository.id,
-              repositoryName: codebase.repository.name,
-              agentId: group.agent.id,
-              agentName: group.agent.name,
-            })),
+        setRuns(
+          data.commandRuns.nodes.filter((run) =>
+            archive === "ARCHIVED"
+              ? Boolean(run.archivedAt)
+              : archive === "ACTIVE"
+                ? !run.archivedAt
+                : true,
           ),
-        ),
-      );
-      setError(null);
-    } catch (value) {
-      setError(value instanceof Error ? value.message : String(value));
-    } finally {
-      setLoading(false);
-    }
-  }, [archive]);
+        );
+        setError(null);
+      } catch (value) {
+        if (includeDefinitions) needsDefinitions.current = true;
+        if (!signal?.aborted)
+          setError(value instanceof Error ? value.message : String(value));
+      } finally {
+        if (!signal?.aborted) setLoading(false);
+      }
+    },
+    [archive],
+  );
+  const refreshOwner = useRef<ReturnType<typeof createRefreshCoalescer> | null>(
+    null,
+  );
+  const refresh = useCallback(async () => {
+    needsDefinitions.current = true;
+    await refreshOwner.current?.refresh();
+  }, []);
 
   useEffect(() => {
-    const initialLoad = window.setTimeout(() => void load(), 0);
+    const owner = createRefreshCoalescer(load);
+    refreshOwner.current = owner;
+    const initialLoad = window.setTimeout(() => void owner.refresh(), 0);
     const client = controlPlaneSubscriptions();
     const disposers = [
       client.subscribe(
         { query: "subscription CommandsChanged { commandsChanged { id } }" },
         {
-          next: () => void load(),
+          next: () => {
+            needsDefinitions.current = true;
+            void owner.refresh();
+          },
           error: () => undefined,
           complete: () => undefined,
         },
@@ -196,17 +195,99 @@ export function CommandsPage() {
             "subscription CommandRunsChanged { commandRunsChanged { id } }",
         },
         {
-          next: () => void load(),
+          next: () => void owner.refresh(),
           error: () => undefined,
           complete: () => undefined,
         },
       ),
+      onControlPlaneRecovery(() => {
+        needsDefinitions.current = true;
+        void owner.refresh();
+      }),
     ];
     return () => {
       window.clearTimeout(initialLoad);
       disposers.forEach((dispose) => dispose());
+      owner.dispose();
+      if (refreshOwner.current === owner) refreshOwner.current = null;
     };
   }, [load]);
+
+  const choosingTarget = customOpen || targetCommand !== null;
+  useEffect(() => {
+    if (!choosingTarget) return;
+    const owner = createRefreshCoalescer(async (signal) => {
+      try {
+        const data = await controlPlaneRequest<{
+          agents: CommandAgent[];
+          worktreeOverview: {
+            agents: Array<{
+              agent: CommandAgent;
+              codebases: Array<{
+                repository: { id: string; name: string };
+                worktrees: CommandWorktree[];
+              }>;
+            }>;
+          };
+        }>(
+          `query CommandLaunchTargets {
+          agents { id name hostname connectionStatus capabilities }
+          worktreeOverview { agents { agent { id name } codebases {
+            repository { id name } worktrees { id folder branch highlightColor }
+          } } }
+        }`,
+          undefined,
+          { signal },
+        );
+        if (signal.aborted) return;
+        setAgents(data.agents);
+        setWorktrees(
+          data.worktreeOverview.agents.flatMap((group) =>
+            group.codebases.flatMap((codebase) =>
+              codebase.worktrees.map((worktree) => ({
+                ...worktree,
+                repositoryId: codebase.repository.id,
+                repositoryName: codebase.repository.name,
+                agentId: group.agent.id,
+                agentName: group.agent.name,
+              })),
+            ),
+          ),
+        );
+      } catch (value) {
+        if (!signal.aborted)
+          setError(value instanceof Error ? value.message : String(value));
+      }
+    });
+    void owner.refresh();
+    const client = controlPlaneSubscriptions();
+    const disposers = [
+      client.subscribe(
+        {
+          query:
+            "subscription CommandTargetWorktrees { worktreeOverviewChanged { worktreeId } }",
+        },
+        {
+          next: () => void owner.refresh(),
+          error: () => undefined,
+          complete: () => undefined,
+        },
+      ),
+      client.subscribe(
+        { query: "subscription CommandTargetAgents { agentChanged { id } }" },
+        {
+          next: () => void owner.refresh(),
+          error: () => undefined,
+          complete: () => undefined,
+        },
+      ),
+      onControlPlaneRecovery(() => void owner.refresh()),
+    ];
+    return () => {
+      disposers.forEach((dispose) => dispose());
+      owner.dispose();
+    };
+  }, [choosingTarget]);
 
   const filteredRuns = useMemo(
     () =>
@@ -252,7 +333,7 @@ export function CommandsPage() {
     try {
       await controlPlaneRequest(query, variables);
       setSelected(new Set());
-      await load();
+      await refresh();
     } catch (value) {
       setError(value instanceof Error ? value.message : String(value));
     }
@@ -295,7 +376,7 @@ export function CommandsPage() {
     }
     if (imported.length) {
       setTab("definitions");
-      await load();
+      await refresh();
     }
   };
 
@@ -340,7 +421,7 @@ export function CommandsPage() {
     }
     setSelected(new Set());
     setError(failure);
-    await load();
+    await refresh();
   };
 
   const launch = async (
@@ -480,7 +561,7 @@ export function CommandsPage() {
             aria-label={t("refresh")}
             size="icon"
             variant="outline"
-            onClick={() => void load()}
+            onClick={() => void refresh()}
           >
             <RefreshCw />
           </Button>

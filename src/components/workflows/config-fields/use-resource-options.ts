@@ -168,13 +168,13 @@ export function resourcePlan(
     case "jiraTicket":
       return {
         query: `query WorkflowTicketOptions {
-          jiraCachedTickets(limit: 100) { key summary }
+          jiraCachedTickets(limit: 100) { items { key: issueKey summary } }
         }`,
         variables: {},
         map: (data) =>
           pick<{
-            jiraCachedTickets?: { key: string; summary: string }[];
-          }>(data).jiraCachedTickets?.map((ticket) => ({
+            jiraCachedTickets?: { items: { key: string; summary: string }[] };
+          }>(data).jiraCachedTickets?.items.map((ticket) => ({
             value: ticket.key,
             label: ticket.key,
             description: ticket.summary,
@@ -183,7 +183,7 @@ export function resourcePlan(
     case "jiraUser":
       if (!scope) return null;
       return {
-        query: `query WorkflowAssignableUsers($issueKey: String!) {
+        query: `query WorkflowAssignableUsers($issueKey: ID!) {
           jiraAssignableUsers(issueKey: $issueKey) { accountId displayName }
         }`,
         variables: { issueKey: scope },
@@ -369,6 +369,7 @@ export function resourcePlan(
 export function useResourceOptions(
   resource: ResourceKind,
   scope: string | null,
+  enabled = true,
 ): ResourceOptionsState {
   const plan = useMemo(
     () =>
@@ -386,26 +387,28 @@ export function useResourceOptions(
   }>({ key: "", options: [], error: false });
 
   useEffect(() => {
-    if (!plan || !planKey) return;
-    let cancelled = false;
+    if (!enabled || !plan || !planKey) return;
+    const controller = new AbortController();
     void controlPlaneRequest<Record<string, unknown>>(
       plan.query,
       plan.variables,
+      { signal: controller.signal },
     )
       .then((data) => {
-        if (!cancelled) {
+        if (!controller.signal.aborted) {
           setResult({ key: planKey, options: plan.map(data), error: false });
         }
       })
       .catch(() => {
-        if (!cancelled) setResult({ key: planKey, options: [], error: true });
+        if (!controller.signal.aborted)
+          setResult({ key: planKey, options: [], error: true });
       });
     return () => {
-      cancelled = true;
+      controller.abort();
     };
-  }, [plan, planKey]);
+  }, [enabled, plan, planKey]);
 
-  if (!plan || !planKey) {
+  if (!enabled || !plan || !planKey) {
     return { options: [], loading: false, fallback: true };
   }
   if (result.key !== planKey) {

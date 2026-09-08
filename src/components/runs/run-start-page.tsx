@@ -118,35 +118,42 @@ export function RunStartPage({
   const [attachments, setAttachments] = useState<RunAttachmentView[]>([]);
   const [worktreeOpen, setWorktreeOpen] = useState(false);
   const [loading, setLoading] = useState(true);
+  const configurationScope = JSON.stringify([
+    appId,
+    draftId,
+    initialWorktreeId,
+  ]);
+  const [resolvedScope, setResolvedScope] = useState<string | null>(null);
   const [busy, setBusy] = useState<"save" | "start" | "upload" | null>(null);
   const [error, setError] = useState<string | null>(null);
 
-  const load = useCallback(async () => {
-    try {
-      const data = await controlPlaneRequest<{
-        worktreeOverview: {
-          agents: Array<{
-            agent: {
-              name: string;
-              connectionStatus: string;
-              capabilities: string[];
-            };
-            codebases: Array<{
-              repository: { name: string };
-              worktrees: Array<{
-                id: string;
-                folder: string;
-                branch: string | null;
-                availability: string;
-                ticketKey: string | null;
-                ticketTitle: string | null;
+  const load = useCallback(
+    async (signal?: AbortSignal) => {
+      try {
+        const data = await controlPlaneRequest<{
+          worktreeOverview: {
+            agents: Array<{
+              agent: {
+                name: string;
+                connectionStatus: string;
+                capabilities: string[];
+              };
+              codebases: Array<{
+                repository: { name: string };
+                worktrees: Array<{
+                  id: string;
+                  folder: string;
+                  branch: string | null;
+                  availability: string;
+                  ticketKey: string | null;
+                  ticketTitle: string | null;
+                }>;
               }>;
             }>;
-          }>;
-        };
-        runDraft?: RunDraftView | null;
-      }>(
-        `query RunStartPage${draftId ? "($draftId: ID!, $appId: ID)" : "($appId: ID)"} {
+          };
+          runDraft?: RunDraftView | null;
+        }>(
+          `query RunStartPage${draftId ? "($draftId: ID!, $appId: ID)" : "($appId: ID)"} {
         worktreeOverview(appId: $appId) {
           agents {
             agent { name connectionStatus capabilities }
@@ -158,79 +165,93 @@ export function RunStartPage({
         }
         ${draftId ? `runDraft(id: $draftId) { ${RUN_DRAFT_FIELDS} }` : ""}
       }`,
-        draftId ? { draftId, appId: appId ?? null } : { appId: appId ?? null },
-      );
-      const options = data.worktreeOverview.agents.flatMap(
-        ({ agent, codebases }) =>
-          codebases.flatMap(({ repository, worktrees }) =>
-            worktrees.map((worktree) => ({
-              ...worktree,
-              repository: repository.name,
-              agentName: agent.name,
-              agentOnline: agent.connectionStatus === "ONLINE",
-              capabilities: agent.capabilities,
-            })),
-          ),
-      );
-      setWorktrees(options);
-      // Arriving from a worktree carries its ticket over, the same way picking
-      // one here does. A draft's own key wins below.
-      const preselected = options.find(
-        (option) =>
-          option.id === initialWorktreeId && worktreeSelectable(option),
-      );
-      if (!data.runDraft) {
-        setWorktreeId(preselected?.id ?? "");
-        setJiraIssueKey(preselected?.ticketKey ?? "");
+          draftId
+            ? { draftId, appId: appId ?? null }
+            : { appId: appId ?? null },
+          { signal },
+        );
+        if (signal?.aborted) return;
+        const options = data.worktreeOverview.agents.flatMap(
+          ({ agent, codebases }) =>
+            codebases.flatMap(({ repository, worktrees }) =>
+              worktrees.map((worktree) => ({
+                ...worktree,
+                repository: repository.name,
+                agentName: agent.name,
+                agentOnline: agent.connectionStatus === "ONLINE",
+                capabilities: agent.capabilities,
+              })),
+            ),
+        );
+        setWorktrees(options);
+        setResolvedScope(JSON.stringify([appId, draftId, initialWorktreeId]));
+        // Arriving from a worktree carries its ticket over, the same way picking
+        // one here does. A draft's own key wins below.
+        const preselected = options.find(
+          (option) =>
+            option.id === initialWorktreeId && worktreeSelectable(option),
+        );
+        if (!data.runDraft) {
+          setWorktreeId(preselected?.id ?? "");
+          setJiraIssueKey(preselected?.ticketKey ?? "");
+        }
+        if (data.runDraft) {
+          const draft = data.runDraft;
+          setKind(draft.kind);
+          setWorktreeId(draft.worktreeId ?? "");
+          setJiraIssueKey(draft.jiraIssueKey ?? "");
+          setPrompt(draft.prompt);
+          setProvider(draft.provider);
+          setModel(draft.model);
+          setEffort(draft.effort ?? "auto");
+          setWebSearch(draft.webSearchEnabled);
+          setMcpPresetIds(draft.mcpPresetIds ?? []);
+          setAttachments(draft.attachments);
+        }
+        setError(null);
+      } catch (value) {
+        if (!signal?.aborted)
+          setError(value instanceof Error ? value.message : String(value));
+      } finally {
+        if (!signal?.aborted) setLoading(false);
       }
-      if (data.runDraft) {
-        const draft = data.runDraft;
-        setKind(draft.kind);
-        setWorktreeId(draft.worktreeId ?? "");
-        setJiraIssueKey(draft.jiraIssueKey ?? "");
-        setPrompt(draft.prompt);
-        setProvider(draft.provider);
-        setModel(draft.model);
-        setEffort(draft.effort ?? "auto");
-        setWebSearch(draft.webSearchEnabled);
-        setMcpPresetIds(draft.mcpPresetIds ?? []);
-        setAttachments(draft.attachments);
-      }
-      setError(null);
-    } catch (value) {
-      setError(value instanceof Error ? value.message : String(value));
-    } finally {
-      setLoading(false);
-    }
-  }, [appId, draftId, initialWorktreeId]);
+    },
+    [appId, draftId, initialWorktreeId],
+  );
 
   useEffect(() => {
-    const timer = window.setTimeout(() => void load(), 0);
-    return () => window.clearTimeout(timer);
+    const controller = new AbortController();
+    const timer = window.setTimeout(() => void load(controller.signal), 0);
+    return () => {
+      window.clearTimeout(timer);
+      controller.abort();
+    };
   }, [load]);
 
   useEffect(() => {
-    let cancelled = false;
+    if (loading || resolvedScope !== configurationScope) return;
+    const controller = new AbortController();
     const timer = window.setTimeout(() => {
       void controlPlaneRequest<{
         runProviderCatalog: ProviderCatalogEntry[];
       }>(
         `query RunProviderCatalog($worktreeId: ID) { runProviderCatalog(worktreeId: $worktreeId) { key label available supportsWebSearch models { id label efforts group } } }`,
         { worktreeId: worktreeId || null },
+        { signal: controller.signal },
       )
         .then((data) => {
-          if (!cancelled) setCatalog(data.runProviderCatalog);
+          if (!controller.signal.aborted) setCatalog(data.runProviderCatalog);
         })
         .catch((value) => {
-          if (!cancelled)
+          if (!controller.signal.aborted)
             setError(value instanceof Error ? value.message : String(value));
         });
     }, 0);
     return () => {
-      cancelled = true;
+      controller.abort();
       window.clearTimeout(timer);
     };
-  }, [worktreeId]);
+  }, [loading, resolvedScope, configurationScope, worktreeId]);
 
   const normalizedJiraIssueKey = jiraIssueKey.trim().toUpperCase();
   const canLoadTicket = JIRA_ISSUE_KEY_PATTERN.test(normalizedJiraIssueKey);
@@ -238,12 +259,14 @@ export function RunStartPage({
   useEffect(() => {
     if (!canLoadTicket) return;
     let cancelled = false;
+    const controller = new AbortController();
     const key = normalizedJiraIssueKey;
     const timer = window.setTimeout(() => {
       setTicketPreview({ key, ticket: null, loading: true, error: null });
       void controlPlaneRequest<{ jiraTicket: JiraTicketSummary }>(
-        `query RunJiraTicket($issueKey: ID!) { jiraTicket(issueKey: $issueKey) { ${JIRA_SUMMARY_FIELDS} } }`,
+        `query RunJiraTicket($issueKey: ID!) { jiraTicket: jiraTicketSummary(issueKey: $issueKey) { ${JIRA_SUMMARY_FIELDS} } }`,
         { issueKey: key },
+        { signal: controller.signal },
       )
         .then(({ jiraTicket }) => {
           if (!cancelled)
@@ -266,6 +289,7 @@ export function RunStartPage({
     }, 300);
     return () => {
       cancelled = true;
+      controller.abort();
       window.clearTimeout(timer);
     };
   }, [canLoadTicket, normalizedJiraIssueKey]);
