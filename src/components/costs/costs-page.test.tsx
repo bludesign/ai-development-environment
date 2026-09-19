@@ -82,6 +82,7 @@ test("reconciles all loaded prices in one bounded read without repeating catalog
   });
   render(<CostsPage />);
   await screen.findByText("model-099");
+  await waitFor(() => expect(more).toBeTypeOf("function"));
   act(() =>
     more(
       [{ isIntersecting: true } as IntersectionObserverEntry],
