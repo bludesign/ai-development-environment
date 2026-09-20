@@ -303,11 +303,13 @@ type ActionsRepositoryTarget = GitHubActionsRepositoryView & {
 };
 
 type ActionsCursor = {
-  version: 1;
+  version: 2;
   codebaseRepositoryId: string | null;
   branch: string | null;
   workflowId: string | null;
+  latestOnly: boolean;
   consumed: Record<string, number>;
+  seenGroups: Record<string, string[]>;
 };
 
 type PullRequestCursorStream = {
@@ -742,29 +744,68 @@ function decodeActionsCursor(
   codebaseRepositoryId: string | null,
   branch: string | null,
   workflowId: string | null,
+  latestOnly: boolean,
 ): ActionsCursor {
   if (!value) {
     return {
-      version: 1,
+      version: 2,
       codebaseRepositoryId,
       branch,
       workflowId,
+      latestOnly,
       consumed: {},
+      seenGroups: {},
     };
   }
   try {
     const parsed = JSON.parse(
       Buffer.from(value, "base64url").toString("utf8"),
-    ) as Partial<ActionsCursor>;
+    ) as {
+      version?: number;
+      codebaseRepositoryId?: string | null;
+      branch?: string | null;
+      workflowId?: string | null;
+      latestOnly?: boolean;
+      consumed?: Record<string, unknown>;
+      seenGroups?: Record<string, unknown>;
+    };
+    const validConsumed =
+      parsed.consumed &&
+      typeof parsed.consumed === "object" &&
+      Object.values(parsed.consumed).every(
+        (item) => Number.isInteger(item) && Number(item) >= 0,
+      );
     if (
-      parsed.version !== 1 ||
+      parsed.version === 1 &&
+      !latestOnly &&
+      parsed.codebaseRepositoryId === codebaseRepositoryId &&
+      parsed.branch === branch &&
+      parsed.workflowId === workflowId &&
+      validConsumed
+    ) {
+      return {
+        version: 2,
+        codebaseRepositoryId,
+        branch,
+        workflowId,
+        latestOnly: false,
+        consumed: parsed.consumed as Record<string, number>,
+        seenGroups: {},
+      };
+    }
+    if (
+      parsed.version !== 2 ||
       parsed.codebaseRepositoryId !== codebaseRepositoryId ||
       parsed.branch !== branch ||
       parsed.workflowId !== workflowId ||
-      !parsed.consumed ||
-      typeof parsed.consumed !== "object" ||
-      Object.values(parsed.consumed).some(
-        (item) => !Number.isInteger(item) || Number(item) < 0,
+      parsed.latestOnly !== latestOnly ||
+      !validConsumed ||
+      !parsed.seenGroups ||
+      typeof parsed.seenGroups !== "object" ||
+      Object.values(parsed.seenGroups).some(
+        (groups) =>
+          !Array.isArray(groups) ||
+          groups.some((group) => typeof group !== "string"),
       )
     ) {
       throw new Error("invalid");
@@ -777,6 +818,13 @@ function decodeActionsCursor(
 
 function encodeActionsCursor(cursor: ActionsCursor): string {
   return Buffer.from(JSON.stringify(cursor), "utf8").toString("base64url");
+}
+
+function actionsLatestGroupKey(run: RawActionsWorkflowRun): string {
+  const workflowId = String(run.workflow_id ?? run.name ?? run.id);
+  return createHash("sha256")
+    .update(JSON.stringify([workflowId, run.event, run.head_branch]))
+    .digest("base64url");
 }
 
 function pullRequestCursorStreamKeys(scope: GitHubPullRequestScope): string[] {
@@ -2606,6 +2654,7 @@ export class GitHubService {
     branch?: string | null,
     workflowId?: string | null,
     requestSource: GitHubRequestSource = "ACTIONS_PAGE",
+    latestOnly = false,
   ): Promise<GitHubActionsWorkflowRunPage> {
     if (!Number.isInteger(first) || first < 1 || first > ACTIONS_PAGE_SIZE) {
       throw new Error(
@@ -2625,6 +2674,7 @@ export class GitHubService {
       selectedRepositoryId,
       selectedBranch,
       selectedWorkflowId,
+      latestOnly,
     );
     const token = await this.requireToken();
     const prisma = await getPrismaClient();
@@ -2657,6 +2707,7 @@ export class GitHubService {
       totalCount: number;
       current: RawActionsWorkflowRun | null;
       failed: boolean;
+      seenGroups: Set<string>;
     };
     const streams: WorkflowRunStream[] = targets.map((target) => ({
       target,
@@ -2666,54 +2717,66 @@ export class GitHubService {
       totalCount: Number.POSITIVE_INFINITY,
       current: null,
       failed: false,
+      seenGroups: new Set(cursor.seenGroups[target.id] ?? []),
     }));
     const repositoryErrors: GitHubActionsRepositoryErrorView[] = [];
 
     const ensureCurrent = async (stream: WorkflowRunStream) => {
-      if (stream.failed || stream.consumed >= stream.totalCount) {
-        stream.current = null;
-        return;
-      }
-      const page = Math.floor(stream.consumed / ACTIONS_PAGE_SIZE) + 1;
-      const offset = stream.consumed % ACTIONS_PAGE_SIZE;
       try {
-        if (stream.loadedPage !== page) {
-          const workflowPath = selectedWorkflowId
-            ? `/actions/workflows/${encodeURIComponent(selectedWorkflowId)}/runs`
-            : "/actions/runs";
-          const operation = selectedWorkflowId
-            ? GITHUB_REST_OPERATIONS.actions.listWorkflowRuns
-            : GITHUB_REST_OPERATIONS.actions.listWorkflowRunsForRepo;
-          const result = await this.restRequest<{
-            total_count: number;
-            workflow_runs: RawActionsWorkflowRun[];
-          }>(
-            `${GITHUB_API_BASE_URL}/repos/${encodeURIComponent(
-              stream.target.owner,
-            )}/${encodeURIComponent(
-              stream.target.name,
-            )}${workflowPath}?per_page=${ACTIONS_PAGE_SIZE}&page=${page}${
-              selectedBranch
-                ? `&branch=${encodeURIComponent(selectedBranch)}`
-                : ""
-            }`,
-            operation,
-            token,
-            requestSource,
-          );
-          if (
-            !Number.isInteger(result.total_count) ||
-            !Array.isArray(result.workflow_runs)
-          ) {
-            throw new Error(
-              "GitHub returned an invalid workflow runs response",
+        while (!stream.failed && stream.consumed < stream.totalCount) {
+          const page = Math.floor(stream.consumed / ACTIONS_PAGE_SIZE) + 1;
+          const offset = stream.consumed % ACTIONS_PAGE_SIZE;
+          if (stream.loadedPage !== page) {
+            const workflowPath = selectedWorkflowId
+              ? `/actions/workflows/${encodeURIComponent(selectedWorkflowId)}/runs`
+              : "/actions/runs";
+            const operation = selectedWorkflowId
+              ? GITHUB_REST_OPERATIONS.actions.listWorkflowRuns
+              : GITHUB_REST_OPERATIONS.actions.listWorkflowRunsForRepo;
+            const result = await this.restRequest<{
+              total_count: number;
+              workflow_runs: RawActionsWorkflowRun[];
+            }>(
+              `${GITHUB_API_BASE_URL}/repos/${encodeURIComponent(
+                stream.target.owner,
+              )}/${encodeURIComponent(
+                stream.target.name,
+              )}${workflowPath}?per_page=${ACTIONS_PAGE_SIZE}&page=${page}${
+                selectedBranch
+                  ? `&branch=${encodeURIComponent(selectedBranch)}`
+                  : ""
+              }`,
+              operation,
+              token,
+              requestSource,
             );
+            if (
+              !Number.isInteger(result.total_count) ||
+              !Array.isArray(result.workflow_runs)
+            ) {
+              throw new Error(
+                "GitHub returned an invalid workflow runs response",
+              );
+            }
+            stream.loadedPage = page;
+            stream.runs = result.workflow_runs;
+            stream.totalCount = result.total_count;
           }
-          stream.loadedPage = page;
-          stream.runs = result.workflow_runs;
-          stream.totalCount = result.total_count;
+          const current = stream.runs[offset] ?? null;
+          if (!current) {
+            stream.current = null;
+            return;
+          }
+          if (
+            !latestOnly ||
+            !stream.seenGroups.has(actionsLatestGroupKey(current))
+          ) {
+            stream.current = current;
+            return;
+          }
+          stream.consumed += 1;
         }
-        stream.current = stream.runs[offset] ?? null;
+        stream.current = null;
       } catch (error) {
         stream.failed = true;
         stream.current = null;
@@ -2747,6 +2810,9 @@ export class GitHubService {
         .sort(compareWorkflowRuns)[0];
       if (!next) break;
       selectedRuns.push({ run: next.run, target: next.target });
+      if (latestOnly) {
+        next.stream.seenGroups.add(actionsLatestGroupKey(next.run));
+      }
       next.stream.consumed += 1;
       await ensureCurrent(next.stream);
     }
@@ -2910,12 +2976,16 @@ export class GitHubService {
     );
     const endCursor = hasNextPage
       ? encodeActionsCursor({
-          version: 1,
+          version: 2,
           codebaseRepositoryId: selectedRepositoryId,
           branch: selectedBranch,
           workflowId: selectedWorkflowId,
+          latestOnly,
           consumed: Object.fromEntries(
             streams.map((stream) => [stream.target.id, stream.consumed]),
+          ),
+          seenGroups: Object.fromEntries(
+            streams.map((stream) => [stream.target.id, [...stream.seenGroups]]),
           ),
         })
       : null;

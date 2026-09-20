@@ -2723,6 +2723,7 @@
     "clearBranchFilter": "Borrar el filtro de rama",
     "pipelineFilter": "Flujo de trabajo",
     "allPipelines": "Todos los pipelines",
+    "latestOnly": "Solo ejecuciones más recientes",
     "searchPipelines": "Buscar pipelines",
     "noPipelineMatches": "Ningún pipeline coincide con la búsqueda.",
     "loadingRuns": "Cargando ejecuciones…",

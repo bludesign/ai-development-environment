@@ -646,22 +646,27 @@ function rawActionsWorkflowRun(
     branch?: string | null;
     conclusion?: string | null;
     displayTitle?: string;
+    event?: string;
+    name?: string;
     pullRequests?: number[];
     status?: string;
+    workflowId?: number;
   } = {},
 ) {
   const [, name] = repository.split("/");
   return {
     id,
-    name: "CI",
+    workflow_id: options.workflowId,
+    name: options.name ?? "CI",
     display_title: options.displayTitle ?? `Run ${id}`,
     run_number: id,
     run_attempt: 1,
-    event: "pull_request",
+    event: options.event ?? "pull_request",
     status: options.status ?? "completed",
     conclusion: options.conclusion ?? "success",
     html_url: `https://github.com/${repository}/actions/runs/${id}`,
-    head_branch: options.branch ?? "feature/APP-42",
+    head_branch:
+      options.branch === undefined ? "feature/APP-42" : options.branch,
     head_sha: `sha-${id}`,
     check_suite_node_id: `check-suite-${id}`,
     repository: {
@@ -1399,6 +1404,188 @@ describe("GitHub service", () => {
     await expect(
       service.actionsWorkflowRuns(null, 1, null, "feature/APP-42"),
     ).rejects.toThrow("repository");
+  });
+
+  test("keeps the latest run for each repository, workflow, event, and branch", async () => {
+    state.codebaseRepositories = [
+      ...state.codebaseRepositories,
+      {
+        id: "codebase-repository-2",
+        canonicalOrigin: "github.com/acme/platform",
+        name: "platform",
+        jiraBranchRegex: null,
+      },
+    ];
+    const runsByRepository = {
+      widgets: [
+        rawActionsWorkflowRun(10, "acme/widgets", "2026-07-20T12:00:00.000Z", {
+          pullRequests: [17],
+          workflowId: 100,
+        }),
+        rawActionsWorkflowRun(9, "acme/widgets", "2026-07-20T11:00:00.000Z", {
+          pullRequests: [17],
+          workflowId: 100,
+        }),
+        rawActionsWorkflowRun(8, "acme/widgets", "2026-07-20T10:00:00.000Z", {
+          event: "push",
+          pullRequests: [17],
+          workflowId: 100,
+        }),
+        rawActionsWorkflowRun(7, "acme/widgets", "2026-07-20T09:00:00.000Z", {
+          name: "Lint",
+          pullRequests: [17],
+          workflowId: 101,
+        }),
+        rawActionsWorkflowRun(6, "acme/widgets", "2026-07-20T08:00:00.000Z", {
+          branch: "main",
+          pullRequests: [17],
+          workflowId: 100,
+        }),
+        rawActionsWorkflowRun(5, "acme/widgets", "2026-07-20T07:00:00.000Z", {
+          branch: null,
+          pullRequests: [17],
+          workflowId: 100,
+        }),
+        rawActionsWorkflowRun(4, "acme/widgets", "2026-07-20T06:00:00.000Z", {
+          branch: null,
+          pullRequests: [17],
+          workflowId: 100,
+        }),
+      ],
+      platform: [
+        rawActionsWorkflowRun(20, "acme/platform", "2026-07-20T13:00:00.000Z", {
+          pullRequests: [18],
+          workflowId: 100,
+        }),
+        rawActionsWorkflowRun(19, "acme/platform", "2026-07-20T05:00:00.000Z", {
+          pullRequests: [18],
+          workflowId: 100,
+        }),
+      ],
+    };
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string) => {
+        const repository = url.includes("/acme/platform/")
+          ? "platform"
+          : "widgets";
+        const runs = runsByRepository[repository];
+        return response({ total_count: runs.length, workflow_runs: runs });
+      }),
+    );
+
+    const page = await new GitHubService().actionsWorkflowRuns(
+      null,
+      25,
+      null,
+      null,
+      null,
+      "ACTIONS_PAGE",
+      true,
+    );
+
+    expect(page.items.map((item) => item.id)).toEqual([
+      "20",
+      "10",
+      "8",
+      "7",
+      "6",
+      "5",
+    ]);
+    expect(page.hasNextPage).toBe(false);
+  });
+
+  test("carries latest-only groups across GitHub pages and rejects cursor mode changes", async () => {
+    const duplicateRuns = Array.from({ length: 25 }, (_, index) =>
+      rawActionsWorkflowRun(
+        100 - index,
+        "acme/widgets",
+        new Date(Date.UTC(2026, 6, 20, 12, 0, -index)).toISOString(),
+        { pullRequests: [17], workflowId: 100 },
+      ),
+    );
+    const runs = [
+      ...duplicateRuns,
+      rawActionsWorkflowRun(75, "acme/widgets", "2026-07-20T11:00:00.000Z", {
+        event: "push",
+        pullRequests: [17],
+        workflowId: 100,
+      }),
+      rawActionsWorkflowRun(74, "acme/widgets", "2026-07-20T10:00:00.000Z", {
+        name: "Lint",
+        pullRequests: [17],
+        workflowId: 101,
+      }),
+      rawActionsWorkflowRun(73, "acme/widgets", "2026-07-20T09:00:00.000Z", {
+        branch: "main",
+        pullRequests: [17],
+        workflowId: 100,
+      }),
+      rawActionsWorkflowRun(72, "acme/widgets", "2026-07-20T08:00:00.000Z", {
+        branch: null,
+        pullRequests: [17],
+        workflowId: 100,
+      }),
+      rawActionsWorkflowRun(71, "acme/widgets", "2026-07-20T07:00:00.000Z", {
+        branch: null,
+        pullRequests: [17],
+        workflowId: 100,
+      }),
+    ];
+    const fetchMock = vi.fn(async (url: string) => {
+      const page = Number(new URL(url).searchParams.get("page") ?? 1);
+      const start = (page - 1) * 25;
+      return response({
+        total_count: runs.length,
+        workflow_runs: runs.slice(start, start + 25),
+      });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const service = new GitHubService();
+
+    const firstPage = await service.actionsWorkflowRuns(
+      "codebase-repository-1",
+      2,
+      null,
+      null,
+      null,
+      "ACTIONS_PAGE",
+      true,
+    );
+    expect(firstPage.items.map((item) => item.id)).toEqual(["100", "75"]);
+    expect(fetchMock.mock.calls.some(([url]) => url.includes("page=2"))).toBe(
+      true,
+    );
+
+    const secondPage = await service.actionsWorkflowRuns(
+      "codebase-repository-1",
+      2,
+      firstPage.endCursor,
+      null,
+      null,
+      "ACTIONS_PAGE",
+      true,
+    );
+    expect(secondPage.items.map((item) => item.id)).toEqual(["74", "73"]);
+
+    const thirdPage = await service.actionsWorkflowRuns(
+      "codebase-repository-1",
+      2,
+      secondPage.endCursor,
+      null,
+      null,
+      "ACTIONS_PAGE",
+      true,
+    );
+    expect(thirdPage.items.map((item) => item.id)).toEqual(["72"]);
+    expect(thirdPage.hasNextPage).toBe(false);
+    await expect(
+      service.actionsWorkflowRuns(
+        "codebase-repository-1",
+        2,
+        firstPage.endCursor,
+      ),
+    ).rejects.toThrow("cursor");
   });
 
   test("loads workflow jobs through the PAT and reserves retries for the App", async () => {

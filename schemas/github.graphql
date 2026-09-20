@@ -1426,6 +1426,8 @@ extend type Query {
     branch: String
     "Identifier of the workflow. Omit it to leave this dimension unfiltered."
     workflowId: ID
+    "Whether to return only the newest run for each repository, workflow, event, and branch. Defaults to `false`."
+    latestOnly: Boolean = false
     "Maximum number of records to return. Defaults to `25`."
     first: Int = 25
     "Cursor or identifier after which to return records. Omit it to leave this dimension unfiltered."

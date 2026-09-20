@@ -17,6 +17,31 @@ async function waitForVisualSettle(page: Page): Promise<void> {
   });
 }
 
+async function scrollToLazyTarget(page: Page, selector: string) {
+  const target = page.locator(selector);
+  const scroller = page.locator("main");
+  for (
+    let attempt = 0;
+    attempt < 20 && (await target.count()) === 0;
+    attempt += 1
+  ) {
+    const moved = await scroller.evaluate((element) => {
+      const before = element.scrollTop;
+      element.scrollBy({
+        behavior: "instant",
+        top: Math.max(320, element.clientHeight * 0.8),
+      });
+      return element.scrollTop !== before;
+    });
+    await waitForVisualSettle(page);
+    if (!moved) break;
+  }
+  await target.waitFor({ state: "attached", timeout: 5_000 });
+  await target.evaluate((element) =>
+    element.scrollIntoView({ behavior: "instant", block: "center" }),
+  );
+}
+
 /**
  * Captures one screenshot per route for the active Playwright project (viewport + color
  * scheme), and fails the route if the page did not actually render.
@@ -78,11 +103,7 @@ test.describe("app screenshots", () => {
         });
       }
       if (route.scrollTo) {
-        await page
-          .locator(route.scrollTo)
-          .evaluate((element) =>
-            element.scrollIntoView({ behavior: "instant", block: "center" }),
-          );
+        await scrollToLazyTarget(page, route.scrollTo);
       }
       if (route.clickButton) {
         await page.getByRole("button", { name: route.clickButton }).click();

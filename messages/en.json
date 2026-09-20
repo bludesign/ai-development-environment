@@ -2723,6 +2723,7 @@
     "clearBranchFilter": "Clear branch filter",
     "pipelineFilter": "Pipeline",
     "allPipelines": "All pipelines",
+    "latestOnly": "Latest only",
     "searchPipelines": "Search pipelines",
     "noPipelineMatches": "No pipelines match your search.",
     "loadingRuns": "Loading workflow runs…",

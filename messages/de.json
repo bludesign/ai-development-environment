@@ -2723,6 +2723,7 @@
     "clearBranchFilter": "Branch-Filter löschen",
     "pipelineFilter": "Workflow",
     "allPipelines": "Alle Pipelines",
+    "latestOnly": "Nur neueste Läufe",
     "searchPipelines": "Pipelines durchsuchen",
     "noPipelineMatches": "Keine Pipelines entsprechen der Suche.",
     "loadingRuns": "Workflow-Läufe werden geladen…",

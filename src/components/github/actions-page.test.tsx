@@ -391,6 +391,49 @@ describe("ActionsPage", () => {
     expect(await screen.findByText("No GitHub codebases")).toBeDefined();
   });
 
+  test("enables latest-only by default and reloads when it is disabled", async () => {
+    render(<ActionsPage />);
+
+    const latestOnly = await screen.findByRole("checkbox", {
+      name: "Latest only",
+    });
+    expect(latestOnly.getAttribute("aria-checked")).toBe("true");
+    await waitFor(() =>
+      expect(requestMock).toHaveBeenCalledWith(
+        expect.stringContaining("latestOnly: $latestOnly"),
+        expect.objectContaining({ latestOnly: true }),
+      ),
+    );
+    expect(window.location.search).toBe("");
+
+    fireEvent.click(latestOnly);
+
+    await waitFor(() =>
+      expect(requestMock).toHaveBeenCalledWith(
+        expect.stringContaining("query GitHubActionsWorkflowRuns"),
+        expect.objectContaining({ latestOnly: false }),
+      ),
+    );
+    expect(window.location.search).toBe("?latest=false");
+  });
+
+  test("loads an explicitly disabled latest-only filter from the URL", async () => {
+    window.history.replaceState(null, "", "/actions?latest=false");
+
+    render(<ActionsPage />);
+
+    const latestOnly = await screen.findByRole("checkbox", {
+      name: "Latest only",
+    });
+    expect(latestOnly.getAttribute("aria-checked")).toBe("false");
+    await waitFor(() =>
+      expect(requestMock).toHaveBeenCalledWith(
+        expect.stringContaining("query GitHubActionsWorkflowRuns"),
+        expect.objectContaining({ latestOnly: false }),
+      ),
+    );
+  });
+
   test("renders related links, filters and infinitely paginates runs", async () => {
     render(<ActionsPage />);
 
@@ -507,6 +550,17 @@ describe("ActionsPage", () => {
     );
     expect(window.location.search).toBe(
       "?repository=codebase-repository-1&branch=feature%2FAPP-42&pipeline=workflow-1&issue=APP-42",
+    );
+
+    fireEvent.click(screen.getByRole("checkbox", { name: "Latest only" }));
+    await waitFor(() =>
+      expect(requestMock).toHaveBeenCalledWith(
+        expect.stringContaining("query GitHubActionsWorkflowRuns"),
+        expect.objectContaining({ latestOnly: false }),
+      ),
+    );
+    expect(window.location.search).toBe(
+      "?repository=codebase-repository-1&branch=feature%2FAPP-42&pipeline=workflow-1&issue=APP-42&latest=false",
     );
   });
 

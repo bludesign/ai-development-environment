@@ -224,6 +224,7 @@ export const createGitHubResolvers = (
             codebaseRepositoryId,
             branch,
             workflowId,
+            latestOnly,
             first,
             after,
           }: {
@@ -231,6 +232,7 @@ export const createGitHubResolvers = (
             codebaseRepositoryId?: string | null;
             branch?: string | null;
             workflowId?: string | null;
+            latestOnly?: boolean | null;
             first?: number | null;
             after?: string | null;
           },
@@ -244,6 +246,7 @@ export const createGitHubResolvers = (
             branch,
             workflowId,
             source,
+            latestOnly ?? false,
           );
         },
         githubActionsWorkflowJobs: (

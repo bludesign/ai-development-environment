@@ -46,6 +46,7 @@ import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
+import { Checkbox } from "@/components/ui/checkbox";
 import { DateTime } from "@/components/common/date-time";
 import { Input } from "@/components/ui/input";
 import {
@@ -55,6 +56,7 @@ import {
   EmptyMedia,
   EmptyTitle,
 } from "@/components/ui/empty";
+import { Label } from "@/components/ui/label";
 import {
   SearchableSelect,
   type SearchableSelectOption,
@@ -122,6 +124,7 @@ function replaceFilterParams(
   repositoryId: string,
   branch: string,
   pipeline: string,
+  latestOnly: boolean,
 ) {
   const params = new URLSearchParams(window.location.search);
   if (repositoryId === ALL_REPOSITORIES) {
@@ -138,6 +141,8 @@ function replaceFilterParams(
       params.delete("pipeline");
     }
   }
+  if (latestOnly) params.delete("latest");
+  else params.set("latest", "false");
   const query = params.toString();
   window.history.replaceState(
     null,
@@ -173,6 +178,7 @@ export function ActionsPage() {
     repositoryId: searchParams.get("repository")?.trim() || ALL_REPOSITORIES,
     branch: searchParams.get("branch")?.trim() || "",
     pipeline: searchParams.get("pipeline")?.trim() || ALL_PIPELINES,
+    latestOnly: searchParams.get("latest") !== "false",
   });
   const [settings, setSettings] = useState<GitHubSettingsView | null>(null);
   const [configurationLoading, setConfigurationLoading] = useState(true);
@@ -201,6 +207,9 @@ export function ActionsPage() {
       ? ALL_PIPELINES
       : initialFiltersRef.current.pipeline,
   );
+  const [latestOnly, setLatestOnly] = useState(
+    initialFiltersRef.current.latestOnly,
+  );
   const [knownPipelines, setKnownPipelines] = useState<Record<string, string>>(
     {},
   );
@@ -221,6 +230,7 @@ export function ActionsPage() {
       repositoryId: string,
       branch: string,
       pipeline: string,
+      latestOnlyFilter: boolean,
       options: { append: boolean; cursor?: string | null } = {
         append: false,
       },
@@ -258,6 +268,7 @@ export function ActionsPage() {
             $codebaseRepositoryId: ID
             $branch: String
             $workflowId: ID
+            $latestOnly: Boolean!
             $first: Int!
             $after: String
           ) {
@@ -266,6 +277,7 @@ export function ActionsPage() {
               codebaseRepositoryId: $codebaseRepositoryId
               branch: $branch
               workflowId: $workflowId
+              latestOnly: $latestOnly
               first: $first
               after: $after
             ) {
@@ -285,6 +297,7 @@ export function ActionsPage() {
               repositoryId === ALL_REPOSITORIES || pipeline === ALL_PIPELINES
                 ? null
                 : pipeline,
+            latestOnly: latestOnlyFilter,
             first: 25,
             after: options.cursor ?? null,
           },
@@ -343,14 +356,16 @@ export function ActionsPage() {
     repositoryId: selectedRepositoryId,
     branch: selectedBranch,
     pipeline: selectedPipeline,
+    latestOnly,
   });
   useEffect(() => {
     currentFiltersRef.current = {
       repositoryId: selectedRepositoryId,
       branch: selectedBranch,
       pipeline: selectedPipeline,
+      latestOnly,
     };
-  }, [selectedRepositoryId, selectedBranch, selectedPipeline]);
+  }, [latestOnly, selectedRepositoryId, selectedBranch, selectedPipeline]);
   useEffect(() => {
     let controller: AbortController | null = null;
     let initialLoaded = false;
@@ -377,6 +392,7 @@ export function ActionsPage() {
             filters.repositoryId,
             filters.branch,
             filters.pipeline,
+            filters.latestOnly,
           );
         }
       } catch (value) {
@@ -414,10 +430,16 @@ export function ActionsPage() {
     const observer = new IntersectionObserver(
       (entries) => {
         if (!entries.some((entry) => entry.isIntersecting)) return;
-        void loadRuns(selectedRepositoryId, selectedBranch, selectedPipeline, {
-          append: true,
-          cursor: endCursor,
-        });
+        void loadRuns(
+          selectedRepositoryId,
+          selectedBranch,
+          selectedPipeline,
+          latestOnly,
+          {
+            append: true,
+            cursor: endCursor,
+          },
+        );
       },
       { rootMargin: "400px 0px" },
     );
@@ -429,6 +451,7 @@ export function ActionsPage() {
     loadRuns,
     loading,
     loadingMore,
+    latestOnly,
     paginationError,
     selectedRepositoryId,
     selectedBranch,
@@ -442,8 +465,8 @@ export function ActionsPage() {
     setBranchInput("");
     setSelectedPipeline(ALL_PIPELINES);
     setKnownPipelines({});
-    replaceFilterParams(repositoryId, "", ALL_PIPELINES);
-    void loadRuns(repositoryId, "", ALL_PIPELINES);
+    replaceFilterParams(repositoryId, "", ALL_PIPELINES, latestOnly);
+    void loadRuns(repositoryId, "", ALL_PIPELINES, latestOnly);
   };
 
   const applyBranchFilter = (event: FormEvent<HTMLFormElement>) => {
@@ -451,22 +474,48 @@ export function ActionsPage() {
     const branch = branchInput.trim();
     setBranchInput(branch);
     setSelectedBranch(branch);
-    replaceFilterParams(selectedRepositoryId, branch, selectedPipeline);
-    void loadRuns(selectedRepositoryId, branch, selectedPipeline);
+    replaceFilterParams(
+      selectedRepositoryId,
+      branch,
+      selectedPipeline,
+      latestOnly,
+    );
+    void loadRuns(selectedRepositoryId, branch, selectedPipeline, latestOnly);
   };
 
   const clearBranchFilter = () => {
     setBranchInput("");
     if (!selectedBranch) return;
     setSelectedBranch("");
-    replaceFilterParams(selectedRepositoryId, "", selectedPipeline);
-    void loadRuns(selectedRepositoryId, "", selectedPipeline);
+    replaceFilterParams(selectedRepositoryId, "", selectedPipeline, latestOnly);
+    void loadRuns(selectedRepositoryId, "", selectedPipeline, latestOnly);
   };
 
   const selectPipeline = (pipeline: string) => {
     setSelectedPipeline(pipeline);
-    replaceFilterParams(selectedRepositoryId, selectedBranch, pipeline);
-    void loadRuns(selectedRepositoryId, selectedBranch, pipeline);
+    replaceFilterParams(
+      selectedRepositoryId,
+      selectedBranch,
+      pipeline,
+      latestOnly,
+    );
+    void loadRuns(selectedRepositoryId, selectedBranch, pipeline, latestOnly);
+  };
+
+  const selectLatestOnly = (checked: boolean) => {
+    setLatestOnly(checked);
+    replaceFilterParams(
+      selectedRepositoryId,
+      selectedBranch,
+      selectedPipeline,
+      checked,
+    );
+    void loadRuns(
+      selectedRepositoryId,
+      selectedBranch,
+      selectedPipeline,
+      checked,
+    );
   };
 
   const loadJobs = useCallback(async (run: GitHubActionsWorkflowRunView) => {
@@ -603,6 +652,7 @@ export function ActionsPage() {
               selectedRepositoryId,
               selectedBranch,
               selectedPipeline,
+              latestOnly,
             )
           }
           variant="outline"
@@ -641,7 +691,7 @@ export function ActionsPage() {
       ) : (
         <>
           {repositories.length > 0 && (
-            <div className="grid max-w-6xl gap-3 sm:grid-cols-3">
+            <div className="grid max-w-7xl gap-3 sm:grid-cols-2 xl:grid-cols-4">
               <SearchableSelect
                 ariaLabel={t("repositoryFilter")}
                 emptyMessage={t("noRepositoryMatches")}
@@ -690,6 +740,16 @@ export function ActionsPage() {
                   />
                 </>
               )}
+              <div className="flex min-h-9 items-center gap-2 rounded-md border px-3">
+                <Checkbox
+                  checked={latestOnly}
+                  id="latest-actions-only"
+                  onCheckedChange={(checked) =>
+                    selectLatestOnly(Boolean(checked))
+                  }
+                />
+                <Label htmlFor="latest-actions-only">{t("latestOnly")}</Label>
+              </div>
             </div>
           )}
 
@@ -750,6 +810,7 @@ export function ActionsPage() {
                       selectedRepositoryId,
                       selectedBranch,
                       selectedPipeline,
+                      latestOnly,
                       {
                         append: true,
                         cursor: endCursor,
