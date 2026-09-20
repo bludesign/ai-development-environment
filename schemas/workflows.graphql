@@ -740,13 +740,28 @@ extend type Query {
     afterSequence: Int = -1
     "Maximum number of records to return. Defaults to `500`."
     first: Int = 500
+    "Return events before this sequence, in chronological order."
+    beforeSequence: Int
+    "Select the newest page rather than starting with the oldest events."
+    latest: Boolean = false
   ): [WorkflowRunEvent!]!
+  "Returns bounded summaries of the newest runs linked to a resource."
+  workflowRunSummariesForResource(
+    "The kind value for this request."
+    kind: String!
+    "Identifier of the target resource."
+    resourceId: ID!
+    "Maximum records to return; the resolver enforces its page limit."
+    first: Int = 6
+  ): [WorkflowResourceRunSummary!]!
   "Returns workflow runs."
   workflowRunsForResource(
     "The kind used to filter or perform the operation."
     kind: String!
     "Identifier of the resource."
     resourceId: ID!
+    "Limit the newest linked runs; omit to retain the full legacy result."
+    first: Int
   ): [WorkflowRun!]!
   "Returns workflows."
   workflowsAcceptingResource(
@@ -884,7 +899,29 @@ extend type Mutation {
   ): WorkflowRun!
 }
 
+"A lightweight workflow definition or run invalidation."
+type WorkflowChange {
+  "Identifier of the workflow affected by this change, or a workflow scope for a subscription."
+  workflowId: ID
+  "Identifier of the affected workflow run, when the change concerns execution."
+  runId: ID
+  "Whether definitions or resource eligibility may have changed."
+  definitionsChanged: Boolean!
+}
+
 extend type Subscription {
+  "Changes matching an optional workflow or linked resource. Existing unscoped subscriptions remain available."
+  workflowChanges(
+    "Include other workflow runs sharing a worktree with queued work in the selected workflow."
+    includeQueuePeers: Boolean = false
+    "Identifier of the workflow affected by this change, or a workflow scope for a subscription."
+    workflowId: ID
+    "Kind of resource whose commands or workflows are being observed."
+    resourceKind: String
+    "Identifier of the target resource."
+    resourceId: ID
+  ): WorkflowChange!
+
   "Emits a workflow whenever workflows change."
   workflowsChanged: Workflow
   "Emits a workflow run whenever workflow run changes."
@@ -896,4 +933,24 @@ extend type Subscription {
     "Identifier of the run."
     runId: ID!
   ): RunQuestionBatch!
+}
+
+"Compact linked-run history without graph or activity payloads."
+type WorkflowResourceRunSummary {
+  "Stable identifier of this resource."
+  id: ID!
+  "Human-readable sequential run number."
+  displayNumber: Int!
+  "Current execution or health status."
+  status: WorkflowRunStatus!
+  "Compact identity of the workflow that owns this run."
+  workflow: WorkflowResourceRunDefinition!
+}
+
+"Workflow identity shown in a linked-run history entry."
+type WorkflowResourceRunDefinition {
+  "Stable identifier of this resource."
+  id: ID!
+  "Display name of this resource."
+  name: String!
 }

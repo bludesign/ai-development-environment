@@ -1,3 +1,4 @@
+import { publishIntegrationConfiguration } from "@/services/integration-configuration-events";
 import "server-only";
 
 import {
@@ -10,6 +11,7 @@ import {
 import { normalizeGitOrigin } from "@ai-development-environment/agent-contract/codebases";
 
 import { getPrismaClient } from "@/data/prisma-client";
+import { mapIntegrationRequests } from "@/services/integration-request";
 import {
   CREDENTIALS,
   CredentialService,
@@ -725,6 +727,16 @@ export function verifyGitLabWebhookSignature(input: {
 
 export class GitLabService {
   private autoRetryTimer: ReturnType<typeof setTimeout> | null = null;
+  private cacheGeneration = 0;
+  private readonly getRequests = new Map<
+    string,
+    Promise<RawResponse<unknown>>
+  >();
+
+  private invalidatePendingGets(): void {
+    this.cacheGeneration += 1;
+    this.getRequests.clear();
+  }
 
   constructor(
     private readonly credentials = new CredentialService(),
@@ -954,6 +966,7 @@ export class GitLabService {
     force?: boolean;
     allowStaleOnError?: boolean;
   }): Promise<RawResponse<T>> {
+    const generation = this.cacheGeneration;
     const connection = await this.connection();
     const endpoint = this.endpoint(
       connection.baseUrl,
@@ -1002,51 +1015,68 @@ export class GitLabService {
     }
     const startedAt = Date.now();
     try {
-      const response = await this.fetchRaw<T>({
-        ...connection,
-        path: input.path,
-        query: input.query,
-      });
-      await Promise.all([
-        prisma.gitLabRestCacheEntry.upsert({
-          where: { cacheKey },
-          create: {
-            id: randomUUID(),
-            cacheKey,
-            endpoint,
-            operation: input.operation,
-            requestJson: stableStringify(request),
-            responseJson: JSON.stringify(response.data),
-            responseHeadersJson: serializeGitLabResponseHeaders(
-              response.headers,
-            ),
-            fetchedAt: new Date(),
-          },
-          update: {
-            endpoint,
-            operation: input.operation,
-            requestJson: stableStringify(request),
-            responseJson: JSON.stringify(response.data),
-            responseHeadersJson: serializeGitLabResponseHeaders(
-              response.headers,
-            ),
-            fetchedAt: new Date(),
-          },
-        }),
-        this.recordRateLimit(response.rateLimit),
-        this.logCall({
-          method: "GET",
-          endpoint,
-          operation: input.operation,
-          requestSource: input.source,
-          requestSummary: stableStringify(request),
-          source: "LIVE",
-          durationMs: Date.now() - startedAt,
-          statusCode: response.status,
-          rateLimit: response.rateLimit,
-        }),
-      ]);
-      return response;
+      const flightKey = `${generation}\0${createHash("sha256").update(connection.token).digest("hex")}\0${cacheKey}`;
+      let pending = this.getRequests.get(flightKey);
+      if (!pending) {
+        pending = (async () => {
+          const response = await this.fetchRaw<T>({
+            ...connection,
+            path: input.path,
+            query: input.query,
+          });
+          await Promise.all([
+            // A mutation, webhook, or credential change may have invalidated this
+            // read while GitLab was answering. Do not resurrect its cache entry.
+            generation === this.cacheGeneration
+              ? prisma.gitLabRestCacheEntry.upsert({
+                  where: { cacheKey },
+                  create: {
+                    id: randomUUID(),
+                    cacheKey,
+                    endpoint,
+                    operation: input.operation,
+                    requestJson: stableStringify(request),
+                    responseJson: JSON.stringify(response.data),
+                    responseHeadersJson: serializeGitLabResponseHeaders(
+                      response.headers,
+                    ),
+                    fetchedAt: new Date(),
+                  },
+                  update: {
+                    endpoint,
+                    operation: input.operation,
+                    requestJson: stableStringify(request),
+                    responseJson: JSON.stringify(response.data),
+                    responseHeadersJson: serializeGitLabResponseHeaders(
+                      response.headers,
+                    ),
+                    fetchedAt: new Date(),
+                  },
+                })
+              : Promise.resolve(),
+            this.recordRateLimit(response.rateLimit),
+            this.logCall({
+              method: "GET",
+              endpoint,
+              operation: input.operation,
+              requestSource: input.source,
+              requestSummary: stableStringify(request),
+              source: "LIVE",
+              durationMs: Date.now() - startedAt,
+              statusCode: response.status,
+              rateLimit: response.rateLimit,
+            }),
+          ]);
+          return response;
+        })();
+        this.getRequests.set(flightKey, pending);
+        const settled = () => {
+          if (this.getRequests.get(flightKey) === pending)
+            this.getRequests.delete(flightKey);
+        };
+        void pending.then(settled, settled);
+      }
+      return (await pending) as RawResponse<T>;
     } catch (error) {
       const statusCode =
         error instanceof GitLabRequestError ? error.statusCode : null;
@@ -1099,6 +1129,7 @@ export class GitLabService {
     body?: unknown;
     invalidateProjectId?: string;
   }): Promise<T> {
+    this.invalidatePendingGets();
     const connection = await this.connection();
     const endpoint = this.endpoint(connection.baseUrl, input.path).toString();
     const startedAt = Date.now();
@@ -1143,6 +1174,7 @@ export class GitLabService {
   }
 
   private async invalidateCache(projectId?: string): Promise<void> {
+    this.invalidatePendingGets();
     const prisma = await getPrismaClient();
     await prisma.gitLabRestCacheEntry.deleteMany(
       projectId
@@ -1343,6 +1375,7 @@ export class GitLabService {
       CREDENTIALS.gitlabAccessToken,
       CREDENTIALS.gitlabWebhookSigningSecrets,
     ]);
+    this.invalidatePendingGets();
     const prisma = await getPrismaClient();
     await prisma.$transaction([
       prisma.gitLabProject.deleteMany(),
@@ -1999,11 +2032,10 @@ export class GitLabService {
   ): Promise<GitLabPipelineView[]> {
     if (!pipelines.length) return pipelines;
     const mergeRequestsBySha = new Map(
-      await Promise.all(
-        [...new Set(pipelines.map((pipeline) => pipeline.sha))].map(
-          async (sha) =>
-            [sha, await this.pipelineMergeRequests(projectId, sha)] as const,
-        ),
+      await mapIntegrationRequests(
+        [...new Set(pipelines.map((pipeline) => pipeline.sha))],
+        async (sha) =>
+          [sha, await this.pipelineMergeRequests(projectId, sha)] as const,
       ),
     );
     const branches = pipelines.map((pipeline) =>
@@ -2329,6 +2361,7 @@ export class GitLabService {
   }
 
   async deleteCachedEntry(id: string): Promise<boolean> {
+    this.invalidatePendingGets();
     const prisma = await getPrismaClient();
     return (
       (await prisma.gitLabRestCacheEntry.deleteMany({ where: { id } })).count >
@@ -2909,6 +2942,7 @@ export class GitLabService {
       });
     };
     try {
+      this.invalidatePendingGets();
       await prisma.$transaction([
         prisma.gitLabProject.updateMany({
           where: { id: projectId },
@@ -2922,6 +2956,7 @@ export class GitLabService {
           },
         }),
       ]);
+      publishIntegrationConfiguration("gitlab");
       await this.recordWebhookWorkflowEvents({
         messageId,
         eventType,

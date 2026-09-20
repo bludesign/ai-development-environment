@@ -114,3 +114,8 @@ extend type Mutation {
   "Refreshes model costs and returns a model cost catalog."
   refreshModelCosts: ModelCostCatalog!
 }
+
+extend type Subscription {
+  "Updated model catalog metadata after settings or prices change."
+  modelCostCatalogChanged: ModelCostCatalog!
+}

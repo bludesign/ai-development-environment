@@ -2,7 +2,7 @@
 
 import { CirclePlay, ExternalLink } from "lucide-react";
 import { useTranslations } from "next-intl";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
@@ -27,7 +27,9 @@ import { Link } from "@/i18n/navigation";
 import {
   controlPlaneRequest,
   controlPlaneSubscriptions,
+  onControlPlaneRecovery,
 } from "@/lib/control-plane-client";
+import { createRefreshCoalescer } from "@/lib/refresh-coalescer";
 import {
   currentPageWorkflowNodeIds,
   workflowRunNodeDestinations,
@@ -82,55 +84,95 @@ export function WorkflowResourcePanel({
   const labels = useWorkflowLabels();
   const openDestination = useOpenWorkflowDestination();
   const [runs, setRuns] = useState<WorkflowRun[]>([]);
+  const [recentRuns, setRecentRuns] = useState<
+    Array<Pick<WorkflowRun, "id" | "displayNumber" | "status" | "workflow">>
+  >([]);
   const [workflows, setWorkflows] = useState<AcceptedWorkflow[]>([]);
   const [triggering, setTriggering] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
-  const load = useCallback(async () => {
-    try {
-      const data = await controlPlaneRequest<{
-        workflowRunsForResource: WorkflowRun[];
-        workflowsAcceptingResource: AcceptedWorkflow[];
-      }>(
-        `query ResourceWorkflows($kind: String!, $resourceId: ID!) {
-        workflowRunsForResource(kind: $kind, resourceId: $resourceId) { ${LINKED_RUN_FIELDS} }
-        workflowsAcceptingResource(kind: $kind) {
+  const catalogDirty = useRef(true);
+  const load = useCallback(
+    async (signal?: AbortSignal) => {
+      const includeCatalog = catalogDirty.current;
+      catalogDirty.current = false;
+      try {
+        const data = await controlPlaneRequest<{
+          workflowRunsForResource: WorkflowRun[];
+          workflowRunSummariesForResource: Array<
+            Pick<WorkflowRun, "id" | "displayNumber" | "status" | "workflow">
+          >;
+          workflowsAcceptingResource?: AcceptedWorkflow[];
+        }>(
+          `query ResourceWorkflows($kind: String!, $resourceId: ID!, $includeCatalog: Boolean!) {
+        workflowRunsForResource(kind: $kind, resourceId: $resourceId, first: 1) { ${LINKED_RUN_FIELDS} }
+        workflowRunSummariesForResource(kind: $kind, resourceId: $resourceId, first: 6) { id displayNumber status workflow { id name } }
+        workflowsAcceptingResource(kind: $kind) @include(if: $includeCatalog) {
           id name description enabled
           hasPlainTrigger(resourceKind: $kind)
           triggerChoices(resourceKind: $kind) { key label description }
         }
       }`,
-        { kind: resourceKind, resourceId },
-      );
-      setRuns(data.workflowRunsForResource);
-      setWorkflows(data.workflowsAcceptingResource);
-      setError(null);
-    } catch (value) {
-      setError(value instanceof Error ? value.message : String(value));
-    }
-  }, [resourceId, resourceKind]);
+          { kind: resourceKind, resourceId, includeCatalog },
+          { signal },
+        );
+        if (signal?.aborted) return;
+        setRuns(data.workflowRunsForResource);
+        setRecentRuns(data.workflowRunSummariesForResource ?? []);
+        if (data.workflowsAcceptingResource)
+          setWorkflows(data.workflowsAcceptingResource);
+        setError(null);
+      } catch (value) {
+        if (includeCatalog) catalogDirty.current = true;
+        if (!signal?.aborted)
+          setError(value instanceof Error ? value.message : String(value));
+      }
+    },
+    [resourceId, resourceKind],
+  );
 
+  const ownerRef = useRef<ReturnType<typeof createRefreshCoalescer> | null>(
+    null,
+  );
+  const refresh = useCallback(async () => {
+    await ownerRef.current?.refresh();
+  }, []);
   useEffect(() => {
-    const timer = window.setTimeout(() => void load(), 0);
-    const client = controlPlaneSubscriptions();
-    const dispose = client.subscribe<{
-      workflowsChanged: { id: string } | null;
+    catalogDirty.current = true;
+    const owner = createRefreshCoalescer(load);
+    ownerRef.current = owner;
+    const timer = window.setTimeout(() => void owner.refresh(), 0);
+    const dispose = controlPlaneSubscriptions().subscribe<{
+      workflowChanges: { definitionsChanged: boolean };
     }>(
       {
-        query:
-          "subscription ResourceWorkflowChanges { workflowsChanged { id } }",
+        query: `subscription ResourceWorkflowChanges($kind: String!, $resourceId: ID!) {
+        workflowChanges(resourceKind: $kind, resourceId: $resourceId) { definitionsChanged }
+      }`,
+        variables: { kind: resourceKind, resourceId },
       },
       {
-        next: () => void load(),
+        next: (result) => {
+          if (result.data?.workflowChanges.definitionsChanged)
+            catalogDirty.current = true;
+          void owner.refresh();
+        },
         error: () => undefined,
         complete: () => undefined,
       },
     );
+    const recover = onControlPlaneRecovery(() => {
+      catalogDirty.current = true;
+      void owner.refresh();
+    });
     return () => {
       window.clearTimeout(timer);
       dispose();
+      recover();
+      owner.dispose();
+      if (ownerRef.current === owner) ownerRef.current = null;
     };
-  }, [load]);
+  }, [load, resourceKind, resourceId]);
 
   const trigger = async (workflowId: string, choice: string | null) => {
     setTriggering(workflowId);
@@ -149,7 +191,7 @@ export function WorkflowResourcePanel({
         },
       );
       // Stay on the resource page: the run shows up in this card's graph below.
-      await load();
+      await refresh();
     } catch (value) {
       setError(value instanceof Error ? value.message : String(value));
     } finally {
@@ -237,7 +279,7 @@ export function WorkflowResourcePanel({
                 </Link>
               </Button>
             </div>
-            <WorkflowQuestionActions onAnswered={load} run={current} />
+            <WorkflowQuestionActions onAnswered={refresh} run={current} />
             <WorkflowGraph
               attempts={current.attempts}
               compact
@@ -249,20 +291,26 @@ export function WorkflowResourcePanel({
                 if (locked) openDestination(destination);
               }}
             />
-            {runs.length > 1 && (
+            {recentRuns.some((run) => run.id !== current.id) && (
               <div className="flex flex-wrap gap-2">
-                {runs.slice(1, 6).map((run) => (
-                  <Button asChild key={run.id} size="sm" variant="ghost">
-                    <Link className="gap-2" href={`/workflows/runs/${run.id}`}>
-                      <span>
-                        #{run.displayNumber} · {run.workflow.name}
-                      </span>
-                      <Badge variant={workflowStatusVariant(run.status)}>
-                        {labels.status(run.status)}
-                      </Badge>
-                    </Link>
-                  </Button>
-                ))}
+                {recentRuns
+                  .filter((run) => run.id !== current.id)
+                  .slice(0, 5)
+                  .map((run) => (
+                    <Button asChild key={run.id} size="sm" variant="ghost">
+                      <Link
+                        className="gap-2"
+                        href={`/workflows/runs/${run.id}`}
+                      >
+                        <span>
+                          #{run.displayNumber} · {run.workflow.name}
+                        </span>
+                        <Badge variant={workflowStatusVariant(run.status)}>
+                          {labels.status(run.status)}
+                        </Badge>
+                      </Link>
+                    </Button>
+                  ))}
               </div>
             )}
           </div>

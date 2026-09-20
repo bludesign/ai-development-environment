@@ -208,7 +208,10 @@ describe("workflow editor completion notifications", () => {
       updatedAt: "2026-07-24T00:00:00.000Z",
     };
     request.mockImplementation(async (query, variables) => {
-      if (query.includes("workflowCatalog"))
+      if (
+        query.includes("workflowCatalog") ||
+        query.includes("query WorkflowEditorDefinition")
+      )
         return {
           workflowCatalog: {
             schemaVersion: 1,
@@ -298,7 +301,10 @@ describe("workflow editor overlap settings", () => {
       updatedAt: "2026-08-03T00:00:00.000Z",
     };
     request.mockImplementation(async (query, variables) => {
-      if (query.includes("workflowCatalog"))
+      if (
+        query.includes("workflowCatalog") ||
+        query.includes("query WorkflowEditorDefinition")
+      )
         return {
           workflowCatalog: {
             schemaVersion: 1,
@@ -387,7 +393,10 @@ describe("workflow editor edge deletion", () => {
     };
 
     request.mockImplementation(async (query, variables) => {
-      if (query.includes("workflowCatalog")) {
+      if (
+        query.includes("workflowCatalog") ||
+        query.includes("query WorkflowEditorDefinition")
+      ) {
         return {
           workflowCatalog: {
             schemaVersion: 1,
@@ -614,7 +623,10 @@ describe("workflow editor basic layout preview", () => {
       updatedAt: "2026-07-24T00:00:00.000Z",
     };
     request.mockImplementation(async (query, variables) => {
-      if (query.includes("workflowCatalog"))
+      if (
+        query.includes("workflowCatalog") ||
+        query.includes("query WorkflowEditorDefinition")
+      )
         return {
           workflowCatalog: {
             schemaVersion: 1,

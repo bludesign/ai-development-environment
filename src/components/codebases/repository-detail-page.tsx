@@ -2,7 +2,7 @@
 
 import { ArrowLeft, FolderGit2, Save } from "lucide-react";
 import { useTranslations } from "next-intl";
-import { FormEvent, useCallback, useEffect, useState } from "react";
+import { FormEvent, useCallback, useEffect, useRef, useState } from "react";
 
 import { AGENT_FIELDS, JOB_FIELDS } from "@/components/agents/graphql-fields";
 import { IosProjectSection } from "@/components/builds/ios-project-section";
@@ -33,14 +33,20 @@ import { Link } from "@/i18n/navigation";
 import {
   controlPlaneRequest,
   controlPlaneSubscriptions,
+  onControlPlaneRecovery,
 } from "@/lib/control-plane-client";
+
+import {
+  createRefreshCoalescer,
+  type RefreshCoalescer,
+} from "@/lib/refresh-coalescer";
 
 import type { CodebaseRepository } from "./types";
 import { RepositoryPreparations } from "./repository-preparations";
 
 const REPOSITORY_FIELDS = `
   id canonicalOrigin displayOrigin name description jiraBranchRegex keepBaseBranchUpToDate createdAt updatedAt
-  preparations { id kind path contentSha256 byteCount contentBase64 definitionHash }
+  preparations @include(if: $includePreparations) { id kind path contentSha256 byteCount contentBase64 definitionHash }
   skillGroups { id name }
   quickActionWorkflows { id name description enabled quickActionKind quickActionRepositories { id name } }
   codebases {
@@ -63,6 +69,10 @@ export function RepositoryDetailPage({
     Array<{ id: string; name: string }>
   >([]);
   const [loading, setLoading] = useState(true);
+  const [tab, setTab] = useState("details");
+  const groupsRevision = useRef(0);
+  const groupsLoadedRevision = useRef(-1);
+  const loadOwner = useRef<RefreshCoalescer | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
@@ -82,8 +92,17 @@ export function RepositoryDetailPage({
     }>
   >([]);
 
+  const appliedRepositoryVersion = useRef("");
   const applyRepository = useCallback((value: CodebaseRepository) => {
-    setRepository(value);
+    setRepository((previous) => ({
+      ...value,
+      preparations:
+        value.preparations ??
+        (previous?.id === value.id ? previous.preparations : undefined),
+    }));
+    const version = JSON.stringify([value.id, value.updatedAt]);
+    if (appliedRepositoryVersion.current === version) return;
+    appliedRepositoryVersion.current = version;
     setName(value.name);
     setDescription(value.description);
     setJiraBranchRegex(value.jiraBranchRegex ?? "");
@@ -92,30 +111,67 @@ export function RepositoryDetailPage({
     setQuickActionWorkflows(value.quickActionWorkflows ?? []);
   }, []);
 
-  const load = useCallback(async () => {
-    try {
-      const data = await controlPlaneRequest<{
-        codebaseRepository: CodebaseRepository | null;
-        skillsOverview?: { groups: Array<{ id: string; name: string }> };
-      }>(
-        `query RepositoryDetail($id: ID!) {
+  const load = useCallback(
+    () => loadOwner.current?.refresh() ?? Promise.resolve(),
+    [],
+  );
+  const fetchDetail = useCallback(
+    async (signal: AbortSignal) => {
+      const groupsVersion = groupsRevision.current;
+      const includeGroups = groupsLoadedRevision.current !== groupsVersion;
+      try {
+        const data = await controlPlaneRequest<{
+          codebaseRepository: CodebaseRepository | null;
+          skillsOverview?: { groups: Array<{ id: string; name: string }> };
+        }>(
+          `query RepositoryDetail($id: ID!, $includeGroups: Boolean!, $includePreparations: Boolean!) {
           codebaseRepository(id: $id) { ${REPOSITORY_FIELDS} }
-          skillsOverview { groups { id name } }
+          skillsOverview @include(if: $includeGroups) { groups { id name } }
         }`,
-        { id: repositoryId },
-      );
-      if (data.codebaseRepository) applyRepository(data.codebaseRepository);
-      else setRepository(null);
-      setSkillGroups(data.skillsOverview?.groups ?? []);
-      setError(null);
-    } catch (value) {
-      setError(value instanceof Error ? value.message : String(value));
-    } finally {
-      setLoading(false);
-    }
-  }, [applyRepository, repositoryId]);
+          {
+            id: repositoryId,
+            includeGroups,
+            includePreparations: tab === "preparations",
+          },
+          { signal },
+        );
+        if (signal.aborted) return;
+        if (data.codebaseRepository) applyRepository(data.codebaseRepository);
+        else setRepository(null);
+        if (includeGroups) {
+          setSkillGroups(data.skillsOverview?.groups ?? []);
+          groupsLoadedRevision.current = groupsVersion;
+        }
+        setError(null);
+      } catch (value) {
+        if (signal.aborted) return;
+        setError(value instanceof Error ? value.message : String(value));
+      } finally {
+        if (!signal.aborted) setLoading(false);
+      }
+    },
+    [applyRepository, repositoryId, tab],
+  );
 
   useEffect(() => {
+    const owner = createRefreshCoalescer(fetchDetail);
+    loadOwner.current = owner;
+    const invalidateGroups = () => {
+      ++groupsRevision.current;
+      void load();
+    };
+    const recovery = onControlPlaneRecovery(invalidateGroups);
+    const groups = controlPlaneSubscriptions().subscribe(
+      {
+        query:
+          "subscription RepositorySkillGroups { skillsChanged { groups { id } } }",
+      },
+      {
+        next: invalidateGroups,
+        error: () => undefined,
+        complete: () => undefined,
+      },
+    );
     const timer = window.setTimeout(() => void load(), 0);
     const unsubscribe = controlPlaneSubscriptions().subscribe<{
       codebaseOverviewChanged: { repositoryId: string | null };
@@ -137,8 +193,12 @@ export function RepositoryDetailPage({
     return () => {
       window.clearTimeout(timer);
       unsubscribe();
+      recovery();
+      groups();
+      owner.dispose();
+      if (loadOwner.current === owner) loadOwner.current = null;
     };
-  }, [load, repositoryId]);
+  }, [fetchDetail, load, repositoryId]);
 
   const save = async (event: FormEvent) => {
     event.preventDefault();
@@ -231,7 +291,7 @@ export function RepositoryDetailPage({
         </Alert>
       )}
 
-      <Tabs defaultValue="details">
+      <Tabs value={tab} onValueChange={(value) => setTab(String(value))}>
         <TabsList>
           <TabsTrigger value="details">{t("repositoryDetails")}</TabsTrigger>
           <TabsTrigger value="preparations">{t("preparations")}</TabsTrigger>
@@ -343,7 +403,15 @@ export function RepositoryDetailPage({
           </form>
         </TabsContent>
         <TabsContent value="preparations">
-          <RepositoryPreparations repository={repository} onSaved={load} />
+          {repository.preparations ? (
+            <RepositoryPreparations
+              key={repository.updatedAt}
+              repository={repository}
+              onSaved={load}
+            />
+          ) : (
+            <Spinner />
+          )}
         </TabsContent>
         <TabsContent value="ios-app">
           <IosProjectSection

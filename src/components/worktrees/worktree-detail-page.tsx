@@ -1,5 +1,12 @@
 "use client";
 
+import { readWorktreeBuildWindow } from "@/components/builds/build-history-window";
+
+import {
+  createRefreshCoalescer,
+  type RefreshCoalescer,
+} from "@/lib/refresh-coalescer";
+
 import {
   WORKTREE_INSPECT_JOB_KIND,
   WORKTREE_WATCH_JOB_KIND,
@@ -8,7 +15,6 @@ import { ArrowLeft, GitBranch, RefreshCw } from "lucide-react";
 import { useLocale, useTranslations } from "next-intl";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
-import { AGENT_FIELDS } from "@/components/agents/graphql-fields";
 import {
   buildDuration,
   buildStatusVariant,
@@ -55,6 +61,7 @@ import { Link, useRouter } from "@/i18n/navigation";
 import {
   controlPlaneRequest,
   controlPlaneSubscriptions,
+  onControlPlaneRecovery,
 } from "@/lib/control-plane-client";
 import { cn } from "@/lib/utils";
 import {
@@ -96,8 +103,8 @@ import {
   type WorktreeItemProps,
 } from "./worktrees-page";
 
-export const WORKTREE_DETAIL_OVERVIEW_QUERY = `query WorktreeDetailOverview($worktreeId: ID!, $buildFirst: Int = 50) {
-  worktreeOverview {
+export const WORKTREE_DETAIL_OVERVIEW_QUERY = `query WorktreeDetailOverview($worktreeId: ID!, $buildFirst: Int = 50, $includeCoverage: Boolean = true, $includeQueue: Boolean = true) {
+  worktreeOverview(worktreeId: $worktreeId) {
     hiddenCount
     settings { editorVariant updatedAt }
     tags { id name color createdAt updatedAt }
@@ -107,10 +114,10 @@ export const WORKTREE_DETAIL_OVERVIEW_QUERY = `query WorktreeDetailOverview($wor
       createdAt updatedAt finishedAt
     }
     agents {
-      agent { ${AGENT_FIELDS} }
+      agent { id name hostname capabilities baseRepoDirectory connectionStatus }
       codebases {
         iosBuildConfigured
-        blockingJob { id agentId kind payload status idempotencyKey result error timeoutSeconds createdAt startedAt finishedAt updatedAt }
+        blockingJob { id agentId kind status error createdAt startedAt finishedAt updatedAt }
         quickActions {
             id name description quickActionIconKey quickActionButtonVariant
             hasPlainTrigger(resourceKind: "WORKTREE")
@@ -131,7 +138,7 @@ export const WORKTREE_DETAIL_OVERVIEW_QUERY = `query WorktreeDetailOverview($wor
     items { ${BUILD_LIST_FIELDS} }
     nextCursor
   }
-  worktreeCoverageReports(worktreeId: $worktreeId) {
+  worktreeCoverageReports(worktreeId: $worktreeId) @include(if: $includeCoverage) {
     id kind source status summary error createdAt updatedAt finishedAt
     artifact { id kind relativePath sizeBytes checksum metadata createdAt }
     build {
@@ -139,7 +146,7 @@ export const WORKTREE_DETAIL_OVERVIEW_QUERY = `query WorktreeDetailOverview($wor
       artifacts { id kind relativePath sizeBytes checksum metadata createdAt }
     }
   }
-  worktreeRunQueue(worktreeId: $worktreeId) {
+  worktreeRunQueue(worktreeId: $worktreeId) @include(if: $includeQueue) {
     position id kind displayNumber name status phase worktreeId workflowId workflowRunId
     queuedAt exclusiveWorktree worktreeConcurrency worktreeConcurrencyLimit
     worktree { id folder branch highlightColor }
@@ -177,36 +184,62 @@ export function WorktreeDetailPage({ worktreeId }: { worktreeId: string }) {
   );
   const [pipelinesError, setPipelinesError] = useState<string | null>(null);
   const latestOverviewLoad = useRef(0);
+  const buildPagination = useRef<AbortController | null>(null);
+  const loadedBuildCount = useRef(50);
   const latestPipelinesLoad = useRef(0);
   const displayedCodebaseId = useRef<string | null>(null);
 
-  const loadOverview = useCallback(async () => {
-    const requestId = ++latestOverviewLoad.current;
-    try {
-      const data = await controlPlaneRequest<{
-        worktreeOverview: WorktreeOverview;
-        builds?: { items: BuildRecord[]; nextCursor: string | null };
-        worktreeCoverageReports?: CoverageHistoryReport[];
-        worktreeRunQueue?: WorktreeRunQueueEntry[];
-      }>(WORKTREE_DETAIL_OVERVIEW_QUERY, { worktreeId });
-      if (requestId !== latestOverviewLoad.current) return;
-      displayedCodebaseId.current =
-        findWorktreeOverviewEntry(data.worktreeOverview, worktreeId)?.group
-          .codebase.id ?? null;
-      setOverview(data.worktreeOverview);
-      setBuilds(data.builds?.items ?? []);
-      setBuildsNextCursor(data.builds?.nextCursor ?? null);
-      setCoverageReports(data.worktreeCoverageReports ?? []);
-      setQueue(data.worktreeRunQueue ?? []);
-      setError(null);
-    } catch (value) {
-      if (requestId === latestOverviewLoad.current) {
-        setError(value instanceof Error ? value.message : String(value));
+  const overviewOwner = useRef<RefreshCoalescer | null>(null);
+  const loadOverview = useCallback(
+    () => overviewOwner.current?.refresh() ?? Promise.resolve(),
+    [],
+  );
+  const fetchOverview = useCallback(
+    async (signal: AbortSignal) => {
+      buildPagination.current?.abort();
+      buildPagination.current = null;
+      setBuildsLoadingMore(false);
+      const requestId = ++latestOverviewLoad.current;
+      try {
+        const data = await controlPlaneRequest<{
+          worktreeOverview: WorktreeOverview;
+          builds?: { items: BuildRecord[]; nextCursor: string | null };
+          worktreeCoverageReports?: CoverageHistoryReport[];
+          worktreeRunQueue?: WorktreeRunQueueEntry[];
+        }>(
+          WORKTREE_DETAIL_OVERVIEW_QUERY,
+          { worktreeId, buildFirst: Math.min(200, loadedBuildCount.current) },
+          { signal },
+        );
+        if (requestId !== latestOverviewLoad.current || signal.aborted) return;
+        displayedCodebaseId.current =
+          findWorktreeOverviewEntry(data.worktreeOverview, worktreeId)?.group
+            .codebase.id ?? null;
+        const history = await readWorktreeBuildWindow(
+          worktreeId,
+          data.builds ?? { items: [], nextCursor: null },
+          loadedBuildCount.current,
+          signal,
+        );
+        if (signal.aborted) return;
+        setOverview(data.worktreeOverview);
+        setBuilds(history.items);
+        setBuildsNextCursor(history.nextCursor);
+        setCoverageReports(data.worktreeCoverageReports ?? []);
+        setQueue(data.worktreeRunQueue ?? []);
+        setError(null);
+      } catch (value) {
+        if (signal.aborted) return;
+        if (requestId === latestOverviewLoad.current && !signal.aborted) {
+          setError(value instanceof Error ? value.message : String(value));
+        }
+      } finally {
+        if (requestId === latestOverviewLoad.current && !signal.aborted)
+          setLoading(false);
       }
-    } finally {
-      if (requestId === latestOverviewLoad.current) setLoading(false);
-    }
-  }, [worktreeId]);
+    },
+    [worktreeId],
+  );
 
   const loadPipelines = useCallback(async () => {
     const requestId = ++latestPipelinesLoad.current;
@@ -235,17 +268,16 @@ export function WorktreeDetailPage({ worktreeId }: { worktreeId: string }) {
     }
   }, [worktreeId]);
 
-  useJiraTicketChanges(
-    () => void loadOverview(),
-    () => void loadOverview(),
-  );
+  useJiraTicketChanges(() => void loadOverview());
 
   const load = useCallback(async () => {
     await Promise.all([loadOverview(), loadPipelines()]);
   }, [loadOverview, loadPipelines]);
 
   const loadMoreBuilds = useCallback(async () => {
-    if (!buildsNextCursor) return;
+    if (!buildsNextCursor || buildPagination.current) return;
+    const controller = new AbortController();
+    buildPagination.current = controller;
     setBuildsLoadingMore(true);
     try {
       const data = await controlPlaneRequest<{
@@ -258,22 +290,49 @@ export function WorktreeDetailPage({ worktreeId }: { worktreeId: string }) {
           }
         }`,
         { worktreeId, after: buildsNextCursor },
+        { signal: controller.signal },
       );
+      if (controller.signal.aborted) return;
       setBuilds((current) => {
         const currentIds = new Set(current.map((build) => build.id));
-        return [
+        const merged = [
           ...current,
           ...data.builds.items.filter((build) => !currentIds.has(build.id)),
         ];
+        loadedBuildCount.current = Math.max(50, merged.length);
+        return merged;
       });
       setBuildsNextCursor(data.builds.nextCursor);
       setError(null);
     } catch (value) {
+      if (controller.signal.aborted) return;
       setError(value instanceof Error ? value.message : String(value));
     } finally {
-      setBuildsLoadingMore(false);
+      if (buildPagination.current === controller)
+        buildPagination.current = null;
+      if (!controller.signal.aborted) setBuildsLoadingMore(false);
     }
   }, [buildsNextCursor, worktreeId]);
+
+  useEffect(() => {
+    loadedBuildCount.current = 50;
+    const owner = createRefreshCoalescer(fetchOverview);
+    overviewOwner.current = owner;
+    const recovery = onControlPlaneRecovery(
+      (event) => {
+        if (event?.initialConnection) void owner.refreshIfIdle();
+        else void owner.refresh();
+      },
+      { includeInitial: true },
+    );
+    return () => {
+      owner.dispose();
+      recovery();
+      buildPagination.current?.abort();
+      buildPagination.current = null;
+      if (overviewOwner.current === owner) overviewOwner.current = null;
+    };
+  }, [fetchOverview]);
 
   useEffect(() => {
     displayedCodebaseId.current = null;
@@ -312,7 +371,8 @@ export function WorktreeDetailPage({ worktreeId }: { worktreeId: string }) {
     }>(
       {
         query:
-          "subscription WorktreeDetailBuildsChanged { buildsChanged { id } }",
+          "subscription WorktreeDetailBuildsChanged($worktreeId: ID!) { buildsChanged(worktreeId: $worktreeId) { id } }",
+        variables: { worktreeId },
       },
       {
         next: () => void loadOverview(),
@@ -321,15 +381,15 @@ export function WorktreeDetailPage({ worktreeId }: { worktreeId: string }) {
       },
     );
     const unsubscribeWorkflows = subscriptions.subscribe<{
-      workflowsChanged: { id: string } | null;
+      workflowChanges: { definitionsChanged: boolean } | null;
     }>(
       {
-        query:
-          "subscription WorktreeDetailQuickActionsChanged { workflowsChanged { id } }",
+        query: `subscription WorktreeDetailQuickActionsChanged($worktreeId: ID!) { workflowChanges(resourceKind: "WORKTREE", resourceId: $worktreeId) { definitionsChanged } }`,
+        variables: { worktreeId },
       },
       {
         next: (value) => {
-          if (value.data?.workflowsChanged) void loadOverview();
+          if (value.data?.workflowChanges) void loadOverview();
         },
         error: () => undefined,
         complete: () => undefined,
@@ -340,7 +400,8 @@ export function WorktreeDetailPage({ worktreeId }: { worktreeId: string }) {
     }>(
       {
         query:
-          "subscription WorktreeQueueAgentRuns { agentRunsChanged { id } }",
+          "subscription WorktreeQueueAgentRuns($worktreeId: ID!) { agentRunListChanged(worktreeId: $worktreeId) }",
+        variables: { worktreeId },
       },
       {
         next: () => void loadOverview(),

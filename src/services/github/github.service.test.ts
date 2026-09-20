@@ -646,22 +646,27 @@ function rawActionsWorkflowRun(
     branch?: string | null;
     conclusion?: string | null;
     displayTitle?: string;
+    event?: string;
+    name?: string;
     pullRequests?: number[];
     status?: string;
+    workflowId?: number;
   } = {},
 ) {
   const [, name] = repository.split("/");
   return {
     id,
-    name: "CI",
+    workflow_id: options.workflowId,
+    name: options.name ?? "CI",
     display_title: options.displayTitle ?? `Run ${id}`,
     run_number: id,
     run_attempt: 1,
-    event: "pull_request",
+    event: options.event ?? "pull_request",
     status: options.status ?? "completed",
     conclusion: options.conclusion ?? "success",
     html_url: `https://github.com/${repository}/actions/runs/${id}`,
-    head_branch: options.branch ?? "feature/APP-42",
+    head_branch:
+      options.branch === undefined ? "feature/APP-42" : options.branch,
     head_sha: `sha-${id}`,
     check_suite_node_id: `check-suite-${id}`,
     repository: {
@@ -1401,6 +1406,188 @@ describe("GitHub service", () => {
     ).rejects.toThrow("repository");
   });
 
+  test("keeps the latest run for each repository, workflow, event, and branch", async () => {
+    state.codebaseRepositories = [
+      ...state.codebaseRepositories,
+      {
+        id: "codebase-repository-2",
+        canonicalOrigin: "github.com/acme/platform",
+        name: "platform",
+        jiraBranchRegex: null,
+      },
+    ];
+    const runsByRepository = {
+      widgets: [
+        rawActionsWorkflowRun(10, "acme/widgets", "2026-07-20T12:00:00.000Z", {
+          pullRequests: [17],
+          workflowId: 100,
+        }),
+        rawActionsWorkflowRun(9, "acme/widgets", "2026-07-20T11:00:00.000Z", {
+          pullRequests: [17],
+          workflowId: 100,
+        }),
+        rawActionsWorkflowRun(8, "acme/widgets", "2026-07-20T10:00:00.000Z", {
+          event: "push",
+          pullRequests: [17],
+          workflowId: 100,
+        }),
+        rawActionsWorkflowRun(7, "acme/widgets", "2026-07-20T09:00:00.000Z", {
+          name: "Lint",
+          pullRequests: [17],
+          workflowId: 101,
+        }),
+        rawActionsWorkflowRun(6, "acme/widgets", "2026-07-20T08:00:00.000Z", {
+          branch: "main",
+          pullRequests: [17],
+          workflowId: 100,
+        }),
+        rawActionsWorkflowRun(5, "acme/widgets", "2026-07-20T07:00:00.000Z", {
+          branch: null,
+          pullRequests: [17],
+          workflowId: 100,
+        }),
+        rawActionsWorkflowRun(4, "acme/widgets", "2026-07-20T06:00:00.000Z", {
+          branch: null,
+          pullRequests: [17],
+          workflowId: 100,
+        }),
+      ],
+      platform: [
+        rawActionsWorkflowRun(20, "acme/platform", "2026-07-20T13:00:00.000Z", {
+          pullRequests: [18],
+          workflowId: 100,
+        }),
+        rawActionsWorkflowRun(19, "acme/platform", "2026-07-20T05:00:00.000Z", {
+          pullRequests: [18],
+          workflowId: 100,
+        }),
+      ],
+    };
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string) => {
+        const repository = url.includes("/acme/platform/")
+          ? "platform"
+          : "widgets";
+        const runs = runsByRepository[repository];
+        return response({ total_count: runs.length, workflow_runs: runs });
+      }),
+    );
+
+    const page = await new GitHubService().actionsWorkflowRuns(
+      null,
+      25,
+      null,
+      null,
+      null,
+      "ACTIONS_PAGE",
+      true,
+    );
+
+    expect(page.items.map((item) => item.id)).toEqual([
+      "20",
+      "10",
+      "8",
+      "7",
+      "6",
+      "5",
+    ]);
+    expect(page.hasNextPage).toBe(false);
+  });
+
+  test("carries latest-only groups across GitHub pages and rejects cursor mode changes", async () => {
+    const duplicateRuns = Array.from({ length: 25 }, (_, index) =>
+      rawActionsWorkflowRun(
+        100 - index,
+        "acme/widgets",
+        new Date(Date.UTC(2026, 6, 20, 12, 0, -index)).toISOString(),
+        { pullRequests: [17], workflowId: 100 },
+      ),
+    );
+    const runs = [
+      ...duplicateRuns,
+      rawActionsWorkflowRun(75, "acme/widgets", "2026-07-20T11:00:00.000Z", {
+        event: "push",
+        pullRequests: [17],
+        workflowId: 100,
+      }),
+      rawActionsWorkflowRun(74, "acme/widgets", "2026-07-20T10:00:00.000Z", {
+        name: "Lint",
+        pullRequests: [17],
+        workflowId: 101,
+      }),
+      rawActionsWorkflowRun(73, "acme/widgets", "2026-07-20T09:00:00.000Z", {
+        branch: "main",
+        pullRequests: [17],
+        workflowId: 100,
+      }),
+      rawActionsWorkflowRun(72, "acme/widgets", "2026-07-20T08:00:00.000Z", {
+        branch: null,
+        pullRequests: [17],
+        workflowId: 100,
+      }),
+      rawActionsWorkflowRun(71, "acme/widgets", "2026-07-20T07:00:00.000Z", {
+        branch: null,
+        pullRequests: [17],
+        workflowId: 100,
+      }),
+    ];
+    const fetchMock = vi.fn(async (url: string) => {
+      const page = Number(new URL(url).searchParams.get("page") ?? 1);
+      const start = (page - 1) * 25;
+      return response({
+        total_count: runs.length,
+        workflow_runs: runs.slice(start, start + 25),
+      });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const service = new GitHubService();
+
+    const firstPage = await service.actionsWorkflowRuns(
+      "codebase-repository-1",
+      2,
+      null,
+      null,
+      null,
+      "ACTIONS_PAGE",
+      true,
+    );
+    expect(firstPage.items.map((item) => item.id)).toEqual(["100", "75"]);
+    expect(fetchMock.mock.calls.some(([url]) => url.includes("page=2"))).toBe(
+      true,
+    );
+
+    const secondPage = await service.actionsWorkflowRuns(
+      "codebase-repository-1",
+      2,
+      firstPage.endCursor,
+      null,
+      null,
+      "ACTIONS_PAGE",
+      true,
+    );
+    expect(secondPage.items.map((item) => item.id)).toEqual(["74", "73"]);
+
+    const thirdPage = await service.actionsWorkflowRuns(
+      "codebase-repository-1",
+      2,
+      secondPage.endCursor,
+      null,
+      null,
+      "ACTIONS_PAGE",
+      true,
+    );
+    expect(thirdPage.items.map((item) => item.id)).toEqual(["72"]);
+    expect(thirdPage.hasNextPage).toBe(false);
+    await expect(
+      service.actionsWorkflowRuns(
+        "codebase-repository-1",
+        2,
+        firstPage.endCursor,
+      ),
+    ).rejects.toThrow("cursor");
+  });
+
   test("loads workflow jobs through the PAT and reserves retries for the App", async () => {
     const fetchMock = vi.fn(async (url: string) => {
       expect(url).toContain("/actions/runs/44/jobs");
@@ -1458,6 +1645,110 @@ describe("GitHub service", () => {
       canRetry: false,
       retryUnavailableReason: "GITHUB_APP_NOT_CONFIGURED",
     });
+  });
+
+  test("coalesces concurrent REST reads without retaining settled results", async () => {
+    const pending = Promise.withResolvers<Response>();
+    const fetchMock = vi
+      .fn()
+      .mockReturnValueOnce(pending.promise)
+      .mockImplementation(async () => response({ total_count: 0, jobs: [] }));
+    vi.stubGlobal("fetch", fetchMock);
+    const service = new GitHubService();
+    const first = service.actionsWorkflowJobs("codebase-repository-1", "44");
+    const second = service.actionsWorkflowJobs("codebase-repository-1", "44");
+    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledOnce());
+    pending.resolve(response({ total_count: 0, jobs: [] }));
+    expect(await Promise.all([first, second])).toEqual([[], []]);
+    expect(cacheClient.recordRestCall).toHaveBeenCalledOnce();
+    await service.actionsWorkflowJobs("codebase-repository-1", "44");
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  test("keeps REST flights isolated across credentials and invalidation", async () => {
+    const flights = Array.from({ length: 3 }, () =>
+      Promise.withResolvers<Response>(),
+    );
+    const fetchMock = vi
+      .fn()
+      .mockImplementationOnce(() => flights[0].promise)
+      .mockImplementationOnce(() => flights[1].promise)
+      .mockImplementationOnce(() => flights[2].promise);
+    vi.stubGlobal("fetch", fetchMock);
+    const service = new GitHubService();
+    const first = service.actionsWorkflowJobs("codebase-repository-1", "44");
+    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledOnce());
+    state.apiToken = "replacement-test-token";
+    const second = service.actionsWorkflowJobs("codebase-repository-1", "44");
+    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
+    await service.clearCache();
+    const third = service.actionsWorkflowJobs("codebase-repository-1", "44");
+    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(3));
+    flights[0].resolve(response({ total_count: 0, jobs: [] }));
+    flights[1].resolve(response({ total_count: 0, jobs: [] }));
+    await Promise.all([first, second]);
+    const fourth = service.actionsWorkflowJobs("codebase-repository-1", "44");
+    // Let the public method read its fixture credentials before settling the
+    // remaining response; an older flight must not remove the current one.
+    await new Promise((resolve) => setTimeout(resolve, 5));
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+    flights[2].resolve(response({ total_count: 0, jobs: [] }));
+    await Promise.all([third, fourth]);
+  });
+
+  test("clears failed REST flights so the next reader can recover", async () => {
+    const pending = Promise.withResolvers<Response>();
+    const fetchMock = vi
+      .fn()
+      .mockReturnValueOnce(pending.promise)
+      .mockImplementation(async () => response({ total_count: 0, jobs: [] }));
+    vi.stubGlobal("fetch", fetchMock);
+    const service = new GitHubService();
+    const readers = Promise.allSettled([
+      service.actionsWorkflowJobs("codebase-repository-1", "44"),
+      service.actionsWorkflowJobs("codebase-repository-1", "44"),
+    ]);
+    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledOnce());
+    pending.reject(new Error("secret-token failed"));
+    const outcomes = await readers;
+    expect(outcomes.every((outcome) => outcome.status === "rejected")).toBe(
+      true,
+    );
+    expect(outcomes[0]).toMatchObject({
+      reason: new Error("[REDACTED] failed"),
+    });
+    await service.actionsWorkflowJobs("codebase-repository-1", "44");
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  test("looks up fallback pull request associations once per repository/SHA across worker batches", async () => {
+    const runs = Array.from({ length: 7 }, (_, index) => ({
+      ...rawActionsWorkflowRun(
+        index + 1,
+        "acme/widgets",
+        "2026-07-21T12:00:00.000Z",
+      ),
+      head_sha: "shared-sha",
+    }));
+    const fetchMock = vi.fn(async (url: string) => {
+      if (url.includes("/actions/runs?"))
+        return response({ total_count: runs.length, workflow_runs: runs });
+      if (url.includes("/commits/shared-sha/pulls?"))
+        return response([{ number: 17 }]);
+      throw new Error(`Unexpected association request: ${url}`);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const result = await new GitHubService().actionsWorkflowRuns(
+      "codebase-repository-1",
+      10,
+    );
+    expect(result.items).toHaveLength(7);
+    expect(
+      result.items.every((item) => item.pullRequests[0]?.number === 17),
+    ).toBe(true);
+    expect(
+      fetchMock.mock.calls.filter(([url]) => url.includes("/commits/")),
+    ).toHaveLength(1);
   });
 
   test("deduplicates Mine results, normalizes badges, parses Jira, and paginates unresolved threads", async () => {

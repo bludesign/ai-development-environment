@@ -10,7 +10,7 @@ import {
   Waypoints,
 } from "lucide-react";
 import { useLocale, useTranslations } from "next-intl";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { useOptionalActionCenter } from "@/components/action-center/action-center-provider";
 import { Badge } from "@/components/ui/badge";
@@ -28,6 +28,7 @@ import { Link } from "@/i18n/navigation";
 import {
   controlPlaneRequest,
   controlPlaneSubscriptions,
+  onControlPlaneRecovery,
 } from "@/lib/control-plane-client";
 
 import {
@@ -36,6 +37,8 @@ import {
   type DiskSpaceOverview,
   type DiskSpaceStatus,
 } from "./types";
+import { createRefreshCoalescer } from "@/lib/refresh-coalescer";
+
 import { diskStatusColor, formatDiskBytes, VolumeBar } from "./volume-bar";
 
 type SidebarStatusData = {
@@ -47,7 +50,14 @@ type SidebarStatusData = {
     workflows: number;
     commands: number;
   };
-  diskSpace: DiskSpaceOverview;
+  diskSummary: {
+    agents: Array<
+      Pick<
+        DiskSpaceOverview["agents"][number],
+        "enabled" | "status" | "volumes"
+      > & { agent: { id: string; name: string } }
+    >;
+  };
 };
 
 type HistoryItem = {
@@ -90,56 +100,103 @@ export function SidebarStatusFooter() {
   const [status, setStatus] = useState<SidebarStatusData | null>(null);
   const [history, setHistory] = useState<HistoryItem[]>([]);
   const [busy, setBusy] = useState<string | null>(null);
+  const [popoverOpen, setPopoverOpen] = useState(false);
+  const [detail, setDetail] = useState<DiskSpaceOverview | null>(null);
+  const detailUpdates = useRef<ReturnType<
+    typeof createRefreshCoalescer
+  > | null>(null);
+  const statusUpdates = useRef<ReturnType<
+    typeof createRefreshCoalescer
+  > | null>(null);
 
   const load = useCallback(async () => {
-    try {
-      const data = await controlPlaneRequest<{
-        sidebarStatus: SidebarStatusData;
-        derivedDataDeletionHistory: { items: HistoryItem[] };
-      }>(`query SidebarStatus {
-        sidebarStatus {
-          usageToday { totalCost collectedAt }
-          activity { plans sessions builds workflows commands }
-          diskSpace { ${DISK_SPACE_FIELDS} }
-        }
-        derivedDataDeletionHistory(first: 5) {
-          items { id agentName folderName source deletedAt }
-        }
-      }`);
-      setStatus(data.sidebarStatus);
-      setHistory(data.derivedDataDeletionHistory.items);
-    } catch {
-      // The footer stays unobtrusive when the control plane is unavailable.
-    }
+    await statusUpdates.current?.refresh();
   }, []);
 
   useEffect(() => {
-    const initialLoad = window.setTimeout(() => void load(), 0);
-    const unsubscribe = controlPlaneSubscriptions().subscribe<{
-      sidebarStatusChanged: boolean;
-    }>(
+    const updates = createRefreshCoalescer(async (signal) => {
+      try {
+        const data = await controlPlaneRequest<{
+          sidebarStatus: SidebarStatusData;
+        }>(
+          `query SidebarStatus {
+          sidebarStatus {
+            usageToday { totalCost collectedAt }
+            activity { plans sessions builds workflows commands }
+            diskSummary { agents { agent { id name } enabled status volumes { id totalBytes freeBytes roles paths status effectiveThresholdBytes monitored } } }
+          }
+        }`,
+          undefined,
+          { signal },
+        );
+        if (!signal.aborted) setStatus(data.sidebarStatus);
+      } catch {
+        /* Keep the last visible status during temporary failures. */
+      }
+    });
+    statusUpdates.current = updates;
+    const refresh = () => {
+      void updates.refresh();
+      void detailUpdates.current?.refresh();
+    };
+    const initialLoad = window.setTimeout(() => void updates.refresh(), 0);
+    const unsubscribe = controlPlaneSubscriptions().subscribe(
       { query: "subscription SidebarStatusChanged { sidebarStatusChanged }" },
-      {
-        next: () => void load(),
-        error: () => undefined,
-        complete: () => undefined,
-      },
+      { next: refresh, error: () => undefined, complete: () => undefined },
     );
-    const timer = window.setInterval(() => void load(), 60_000);
+    const offRecovery = onControlPlaneRecovery((event) => {
+      // The initial mount already reads status; recovery is for a lost stream.
+      if (!event?.initialConnection) refresh();
+    });
+    const timer = window.setInterval(refresh, 60_000);
     return () => {
       window.clearTimeout(initialLoad);
       unsubscribe();
+      offRecovery();
       window.clearInterval(timer);
+      updates.dispose();
+      statusUpdates.current = null;
     };
-  }, [load]);
+  }, []);
+
+  useEffect(() => {
+    if (!popoverOpen) return;
+    const updates = createRefreshCoalescer(async (signal) => {
+      try {
+        const data = await controlPlaneRequest<{
+          diskSpaceOverview: DiskSpaceOverview;
+          derivedDataDeletionHistory: { items: HistoryItem[] };
+        }>(
+          `query SidebarDiskDetails {
+          diskSpaceOverview { ${DISK_SPACE_FIELDS} }
+          derivedDataDeletionHistory(first: 5) { items { id agentName folderName source deletedAt } }
+        }`,
+          undefined,
+          { signal },
+        );
+        if (!signal.aborted) {
+          setDetail(data.diskSpaceOverview);
+          setHistory(data.derivedDataDeletionHistory.items);
+        }
+      } catch {
+        /* Keep the current popover contents available while recovering. */
+      }
+    });
+    detailUpdates.current = updates;
+    void updates.refresh();
+    return () => {
+      detailUpdates.current = null;
+      updates.dispose();
+    };
+  }, [popoverOpen]);
 
   const enabledAgents = useMemo(
-    () => status?.diskSpace.agents.filter((agent) => agent.enabled) ?? [],
+    () => status?.diskSummary.agents.filter((agent) => agent.enabled) ?? [],
     [status],
   );
   const overall = useMemo(
     () =>
-      [...(status?.diskSpace.agents ?? [])].sort(
+      [...(status?.diskSummary.agents ?? [])].sort(
         (first, second) =>
           STATUS_PRIORITY[second.status] - STATUS_PRIORITY[first.status],
       )[0]?.status ?? "STALE",
@@ -155,7 +212,7 @@ export function SidebarStatusFooter() {
         }`,
         { agentId, enabled },
       );
-      await load();
+      await Promise.all([load(), detailUpdates.current?.refresh()]);
     } finally {
       setBusy(null);
     }
@@ -247,7 +304,7 @@ export function SidebarStatusFooter() {
           </Link>
         ))}
       </div>
-      <Popover>
+      <Popover open={popoverOpen} onOpenChange={setPopoverOpen}>
         <PopoverTrigger asChild>
           <Button
             className="h-auto w-full justify-start px-2 py-2"
@@ -332,19 +389,19 @@ export function SidebarStatusFooter() {
                 {t(`status.${overall}`)}
               </Badge>
             </div>
-            {status && (
+            {detail && (
               <p className="text-xs text-muted-foreground">
                 {t("thresholdSummary", {
-                  normal: status.diskSpace.settings.normalThresholdGiB,
-                  pressure: status.diskSpace.settings.pressureThresholdGiB,
+                  normal: detail.settings.normalThresholdGiB,
+                  pressure: detail.settings.pressureThresholdGiB,
                 })}
               </p>
             )}
           </PopoverHeader>
-          {!status ? (
+          {!detail ? (
             <Spinner />
           ) : (
-            status.diskSpace.agents.map((agent) => (
+            detail.agents.map((agent) => (
               <div
                 className="space-y-2 rounded-md border p-2.5"
                 key={agent.agent.id}

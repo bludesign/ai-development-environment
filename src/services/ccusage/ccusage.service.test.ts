@@ -552,3 +552,91 @@ describe("CcusageService", () => {
     expect(snapshot?.aggregate.totals.inputTokens).toBe(3_000_000_000);
   });
 });
+
+describe("revision-aware usage history reuse", () => {
+  const row = (id: string, revision = 0) => ({
+    agentId: id,
+    agentName: `Agent ${id}`,
+    hostname: `${id}.local`,
+    updatedAt: new Date(revision),
+    lastJobId: `job-${revision}`,
+    lastObservedAt: new Date(revision),
+    archivedReportJson: JSON.stringify(report),
+    lastLiveReportJson: JSON.stringify(report),
+  });
+  function historyHarness(initial: ReturnType<typeof row>[]) {
+    let rows = initial;
+    const findMany = vi.fn(
+      async (input: {
+        select?: unknown;
+        where?: { agentId: { in: string[] } };
+      }) => {
+        const selected = input.where
+          ? rows.filter((row) => input.where!.agentId.in.includes(row.agentId))
+          : rows;
+        return selected.map(
+          ({ archivedReportJson, lastLiveReportJson, ...metadata }) =>
+            input.select
+              ? metadata
+              : { ...metadata, archivedReportJson, lastLiveReportJson },
+        );
+      },
+    );
+    getPrismaClient.mockResolvedValue({ ccusageHistory: { findMany } });
+    const service = new CcusageService(
+      {} as AgentControlService,
+    ) as unknown as {
+      loadHistoryReports(): Promise<{
+        reports: Array<{ agent: { id: string; name: string } }>;
+        hasStoredHistory: boolean;
+      }>;
+      historyReports: Map<string, unknown>;
+    };
+    return {
+      service,
+      findMany,
+      setRows: (next: typeof rows) => {
+        rows = next;
+      },
+    };
+  }
+  test("avoids unchanged JSON reads and observes another process updating or clearing history", async () => {
+    const h = historyHarness([row("a"), row("b")]);
+    await h.service.loadHistoryReports();
+    await h.service.loadHistoryReports();
+    expect(
+      h.findMany.mock.calls.filter(([input]) => !input.select),
+    ).toHaveLength(1);
+    h.setRows([row("a"), { ...row("b", 1), agentName: "Renamed" }]);
+    const changed = await h.service.loadHistoryReports();
+    expect(h.findMany.mock.calls.at(-1)?.[0].where?.agentId.in).toEqual(["b"]);
+    expect(
+      changed.reports.find((value) => value.agent.id === "b")?.agent.name,
+    ).toBe("Renamed");
+    h.setRows([]);
+    await expect(h.service.loadHistoryReports()).resolves.toEqual({
+      reports: [],
+      hasStoredHistory: false,
+    });
+    expect(h.service.historyReports.size).toBe(0);
+    h.setRows([row("c", 2)]);
+    expect(
+      (await h.service.loadHistoryReports()).reports.map(
+        (value) => value.agent.id,
+      ),
+    ).toEqual(["c"]);
+  });
+  test("cache eviction never drops agents from a snapshot larger than the cache capacity", async () => {
+    const h = historyHarness(
+      Array.from({ length: 257 }, (_, index) => row(String(index))),
+    );
+    expect((await h.service.loadHistoryReports()).reports).toHaveLength(257);
+    expect(h.service.historyReports.size).toBe(256);
+    const again = await h.service.loadHistoryReports();
+    expect(new Set(again.reports.map((value) => value.agent.id)).size).toBe(
+      257,
+    );
+    expect(h.findMany.mock.calls.at(-1)?.[0].where?.agentId.in).toEqual(["0"]);
+    expect(h.service.historyReports.size).toBe(256);
+  });
+});

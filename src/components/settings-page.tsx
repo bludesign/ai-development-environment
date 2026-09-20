@@ -22,6 +22,7 @@ import {
   useState,
 } from "react";
 
+import { DeferredPanel } from "@/components/common/deferred-panel";
 import { ConfirmationDialog } from "@/components/confirmation-dialog";
 import { CacheServerSettingsCard } from "@/components/cache-server/settings-card";
 import { IosDeviceSettingsCard } from "@/components/devices/settings-card";
@@ -104,8 +105,12 @@ export function SettingsPage() {
             id="settings-apple"
             title={t("appleGroup")}
           >
-            <IosDeviceSettingsCard />
-            <PushNotificationSettingsCard />
+            <DeferredPanel>
+              <IosDeviceSettingsCard />
+            </DeferredPanel>
+            <DeferredPanel>
+              <PushNotificationSettingsCard />
+            </DeferredPanel>
           </SettingsGroup>
         </div>
         <div className="min-w-0">
@@ -115,10 +120,18 @@ export function SettingsPage() {
             title={t("integrationsGroup")}
           >
             <JiraSettingsPage embedded />
-            <GitHubSettingsCard />
-            <GitHubAppSettingsCard />
-            <GitLabSettingsCard />
-            <CacheServerSettingsCard />
+            <DeferredPanel>
+              <GitHubSettingsCard />
+            </DeferredPanel>
+            <DeferredPanel>
+              <GitHubAppSettingsCard />
+            </DeferredPanel>
+            <DeferredPanel>
+              <GitLabSettingsCard />
+            </DeferredPanel>
+            <DeferredPanel>
+              <CacheServerSettingsCard />
+            </DeferredPanel>
           </SettingsGroup>
         </div>
       </div>

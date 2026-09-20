@@ -186,12 +186,15 @@ export class PushNotificationsService {
     }
   }
 
-  private changed(): void {
-    agentEventBus.publish(PUSH_NOTIFICATIONS_CHANGED_TOPIC, { changed: true });
+  private changed(kind: "CATALOG" | "HISTORY" | "ALL" = "CATALOG"): void {
+    agentEventBus.publish(PUSH_NOTIFICATIONS_CHANGED_TOPIC, {
+      changed: true,
+      kind,
+    });
   }
 
   subscribe() {
-    return agentEventBus.iterate<{ changed: boolean }>(
+    return agentEventBus.iterate<{ changed: boolean; kind?: string }>(
       PUSH_NOTIFICATIONS_CHANGED_TOPIC,
     );
   }
@@ -712,10 +715,14 @@ export class PushNotificationsService {
     return true;
   }
 
-  async history(limit = 100) {
+  async history(limit = 100, includeDeliveries = true) {
     const prisma = await getPrismaClient();
     return prisma.pushNotificationBatch.findMany({
-      include: { deliveries: { orderBy: { createdAt: "asc" } } },
+      include: {
+        deliveries: includeDeliveries
+          ? { orderBy: { createdAt: "asc" } }
+          : false,
+      },
       orderBy: { createdAt: "desc" },
       take: Math.max(1, Math.min(limit, 200)),
     });
@@ -744,7 +751,7 @@ export class PushNotificationsService {
       },
       include: { deliveries: true },
     });
-    this.changed();
+    this.changed("HISTORY");
     return batch;
   }
 
@@ -761,7 +768,7 @@ export class PushNotificationsService {
       if (!batch) throw new Error("Push history item not found");
       throw new Error("Queued or sending push notifications cannot be deleted");
     }
-    this.changed();
+    this.changed("HISTORY");
     return true;
   }
 
@@ -770,7 +777,7 @@ export class PushNotificationsService {
     const result = await prisma.pushNotificationBatch.deleteMany({
       where: { status: { notIn: ["QUEUED", "SENDING"] } },
     });
-    this.changed();
+    this.changed("HISTORY");
     return result.count;
   }
 
@@ -907,7 +914,7 @@ export class PushNotificationsService {
       },
       include: { deliveries: true },
     });
-    this.changed();
+    this.changed("HISTORY");
     void this.processBatch(batch.id).catch(() => undefined);
     return batch;
   }
@@ -994,7 +1001,7 @@ export class PushNotificationsService {
         finishedAt: new Date(),
       },
     });
-    this.changed();
+    this.changed("HISTORY");
   }
 
   private async executeDelivery(
@@ -1014,7 +1021,7 @@ export class PushNotificationsService {
       where: { id: delivery.id },
       data: { status: "SENDING", startedAt: new Date() },
     });
-    this.changed();
+    this.changed("HISTORY");
     try {
       const registration = delivery.registrationId
         ? await prisma.apnsRegistration.findUnique({
@@ -1139,7 +1146,7 @@ export class PushNotificationsService {
         finishedAt: new Date(),
       },
     });
-    this.changed();
+    this.changed("HISTORY");
     if (tokenAuthentication) {
       await prisma.pushNotificationSettings.updateMany({
         where: { id: SETTINGS_ID },
@@ -1181,6 +1188,7 @@ export class PushNotificationsService {
           lastFailureAt: new Date(),
         },
       });
+      this.changed("CATALOG");
     } else {
       await prisma.apnsRegistration.update({
         where: { id: registration.id },
@@ -1253,7 +1261,7 @@ export class PushNotificationsService {
           finishedAt: new Date(),
         },
       });
-      this.changed();
+      this.changed("HISTORY");
     } finally {
       this.activeBatchIds.delete(id);
     }

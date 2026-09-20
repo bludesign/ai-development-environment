@@ -811,6 +811,10 @@ extend type Query {
     first: Int = 200
     "Whether include superseded applies to the operation. Defaults to `false`."
     includeSuperseded: Boolean = false
+    "Return records strictly before this sequence."
+    beforeSequence: Int
+    "Select the newest page and return it in ascending sequence order."
+    latest: Boolean = false
   ): [RunEvent!]!
   "Returns a run question batch page."
   runQuestionBatches(
@@ -1067,6 +1071,22 @@ extend type Mutation {
 }
 
 extend type Subscription {
+  "Lightweight invalidations for a run list. Deletes reconcile all formerly matching lists."
+  agentRunListChanged(
+    "Runs created by this workflow or sharing a worktree with its queued work; deleted runs invalidate conservatively."
+    workflowId: ID
+    "Only runs in this worktree; deleted runs invalidate conservatively."
+    worktreeId: ID
+    "Only emit changes for this run kind."
+    kind: RunKind
+    "Restrict results to repositories assigned to this app; omitted means all apps."
+    appId: ID
+    "Only emit changes for runs using this provider."
+    provider: String
+    "Only emit changes for runs with this origin."
+    origin: RunOrigin
+  ): Boolean!
+
   "Emits an agent run whenever agent runs change."
   agentRunsChanged: AgentRun
   "Emits an agent run whenever agent run changes."

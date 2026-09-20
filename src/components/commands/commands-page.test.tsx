@@ -19,6 +19,7 @@ import { CommandsPage } from "./commands-page";
 
 vi.mock("@/lib/control-plane-client", () => ({
   controlPlaneRequest: vi.fn(),
+  onControlPlaneRecovery: vi.fn(() => () => undefined),
   controlPlaneSubscriptions: vi.fn(),
 }));
 vi.mock("@/lib/browser-utils", async (importOriginal) => ({
@@ -395,7 +396,7 @@ describe("CommandsPage", () => {
       target: { value: "printf custom" },
     });
     fireEvent.click(
-      screen.getByRole("button", { name: /Studio · studio\.local/ }),
+      await screen.findByRole("button", { name: /Studio · studio\.local/ }),
     );
     fireEvent.click(screen.getByRole("button", { name: "Run" }));
 

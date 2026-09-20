@@ -3,6 +3,7 @@
 import { ChevronsUpDown } from "lucide-react";
 import { useCallback, useState } from "react";
 
+import { Spinner } from "@/components/ui/spinner";
 import { Button } from "@/components/ui/button";
 import {
   Command,
@@ -47,6 +48,8 @@ export function SearchableSelect({
   showSelectedDetails = false,
   allowCustomValue = false,
   clearLabel,
+  onOpenChange,
+  loading = false,
 }: {
   value: string;
   onValueChange: (value: string) => void;
@@ -61,6 +64,8 @@ export function SearchableSelect({
   allowCustomValue?: boolean;
   /** When set, shows an option that clears the current non-empty value. */
   clearLabel?: string;
+  onOpenChange?: (open: boolean) => void;
+  loading?: boolean;
 }) {
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
@@ -88,6 +93,7 @@ export function SearchableSelect({
     <Popover
       onOpenChange={(nextOpen) => {
         setOpen(nextOpen);
+        onOpenChange?.(nextOpen);
         if (!nextOpen) setQuery("");
       }}
       open={open}
@@ -140,7 +146,9 @@ export function SearchableSelect({
             value={query}
           />
           <CommandList className="min-h-0 flex-1 max-h-64 overscroll-contain [scrollbar-width:thin] [&::-webkit-scrollbar]:block [&::-webkit-scrollbar]:w-2 [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-border">
-            <CommandEmpty>{emptyMessage}</CommandEmpty>
+            <CommandEmpty>
+              {loading ? <Spinner className="mx-auto" /> : emptyMessage}
+            </CommandEmpty>
             <CommandGroup>
               {clearLabel && value && (
                 <CommandItem

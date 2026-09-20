@@ -30,14 +30,14 @@ export type DiffRequest = {
  * take effect.
  */
 function cacheKey(request: DiffRequest, resetToken: string): string {
-  return [
+  return JSON.stringify([
     resetToken,
     request.worktreeId,
     request.scope,
     request.commitSha ?? "",
     request.previousPath ?? "",
     request.path ?? "",
-  ].join(" ");
+  ]);
 }
 
 /**
@@ -57,9 +57,10 @@ export function useDiffRequest(
   // The cache lives in state rather than a ref so it can be read during render
   // and so a landed request re-renders without a separate signal.
   const [store, setStore] = useState<{
+    resetToken: string;
     diffs: Map<string, WorktreeFileDiff>;
     errors: Map<string, string>;
-  }>(() => ({ diffs: new Map(), errors: new Map() }));
+  }>(() => ({ resetToken, diffs: new Map(), errors: new Map() }));
 
   const key = request ? cacheKey(request, resetToken) : null;
   const value = key ? (store.diffs.get(key) ?? null) : null;
@@ -70,6 +71,7 @@ export function useDiffRequest(
   useEffect(() => {
     if (!request || !key || value || error) return;
     let disposed = false;
+    const controller = new AbortController();
     const timer = window.setTimeout(() => {
       void controlPlaneRequest<{ inspectWorktreeDiff: WorktreeFileDiff }>(
         INSPECT_WORKTREE_DIFF_MUTATION,
@@ -83,27 +85,43 @@ export function useDiffRequest(
             requestId: createClientId(),
           },
         },
+        { signal: controller.signal, cancelBeforeDispatch: true },
       )
         .then((data) => {
           if (disposed) return;
-          setStore((current) => ({
-            ...current,
-            diffs: new Map(current.diffs).set(key, data.inspectWorktreeDiff),
-          }));
+          setStore((current) => {
+            const sameRevision = current.resetToken === resetToken;
+            const diffs = new Map(sameRevision ? current.diffs : []);
+            diffs.set(key, data.inspectWorktreeDiff);
+            if (diffs.size > 50) diffs.delete(diffs.keys().next().value!);
+            return {
+              resetToken,
+              diffs,
+              errors: sameRevision ? current.errors : new Map(),
+            };
+          });
         })
         .catch((reason) => {
           if (disposed) return;
-          setStore((current) => ({
-            ...current,
-            errors: new Map(current.errors).set(
+          setStore((current) => {
+            const sameRevision = current.resetToken === resetToken;
+            const errors = new Map(sameRevision ? current.errors : []);
+            errors.set(
               key,
               reason instanceof Error ? reason.message : String(reason),
-            ),
-          }));
+            );
+            if (errors.size > 50) errors.delete(errors.keys().next().value!);
+            return {
+              resetToken,
+              errors,
+              diffs: sameRevision ? current.diffs : new Map(),
+            };
+          });
         });
     }, DEBOUNCE_MS);
     return () => {
       disposed = true;
+      controller.abort();
       window.clearTimeout(timer);
     };
     // `key` fully describes the request; the object identity changes every render.

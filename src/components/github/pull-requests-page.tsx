@@ -1,6 +1,12 @@
 "use client";
 
 import {
+  GITHUB_CONFIGURATION_QUERY,
+  readIntegrationConfiguration,
+  subscribeIntegrationConfiguration,
+} from "@/lib/integration-configuration";
+
+import {
   ExternalLink,
   FileText,
   GitMerge,
@@ -176,15 +182,28 @@ export function PullRequestsPage() {
   const requestGenerationsRef = useRef<Record<string, number>>({});
   const appendInFlightGenerationsRef = useRef<Record<string, number>>({});
 
+  const configurationController = useRef<AbortController | null>(null);
   const loadConfiguration = useCallback(async () => {
+    configurationController.current?.abort();
+    const controller = new AbortController();
+    configurationController.current = controller;
     try {
-      const data = await controlPlaneRequest<{
-        githubSettings: GitHubSettingsView;
-        githubRepositories: GitHubRepositoryView[];
-      }>(`query GitHubPullRequestConfiguration {
-        githubSettings { tokenConfigured defaultJiraKeyRegex updatedAt }
-        githubRepositories { ${REPOSITORY_FIELDS} }
-      }`);
+      const [settingsData, repositoryData] = await Promise.all([
+        readIntegrationConfiguration<{ githubSettings: GitHubSettingsView }>(
+          "github",
+          GITHUB_CONFIGURATION_QUERY,
+          { signal: controller.signal },
+        ),
+        readIntegrationConfiguration<{
+          githubRepositories: GitHubRepositoryView[];
+        }>(
+          "github",
+          `query GitHubPageRepositories { githubRepositories { ${REPOSITORY_FIELDS} } }`,
+          { signal: controller.signal },
+        ),
+      ]);
+      if (controller.signal.aborted) return;
+      const data = { ...settingsData, ...repositoryData };
       setSettings(data.githubSettings);
       setRepositories(data.githubRepositories);
       setSelectedRepositoryId((current) =>
@@ -194,17 +213,26 @@ export function PullRequestsPage() {
       );
       setConfigurationError(null);
     } catch (value) {
+      if (controller.signal.aborted) return;
       setConfigurationError(
         value instanceof Error ? value.message : String(value),
       );
     } finally {
-      setConfigurationLoading(false);
+      if (!controller.signal.aborted) setConfigurationLoading(false);
     }
   }, []);
 
   useEffect(() => {
     const timeout = window.setTimeout(() => void loadConfiguration(), 0);
-    return () => window.clearTimeout(timeout);
+    const dispose = subscribeIntegrationConfiguration(
+      "github",
+      () => void loadConfiguration(),
+    );
+    return () => {
+      window.clearTimeout(timeout);
+      dispose();
+      configurationController.current?.abort();
+    };
   }, [loadConfiguration]);
 
   const loadTab = useCallback(

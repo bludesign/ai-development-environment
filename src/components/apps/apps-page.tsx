@@ -47,33 +47,57 @@ export function AppsPage() {
   const [error, setError] = useState<string | null>(null);
   const [editorOpen, setEditorOpen] = useState(false);
 
-  const load = useCallback(async () => {
+  const load = useCallback(async (signal?: AbortSignal) => {
     try {
       const data = await controlPlaneRequest<{
         apps: ManagedApp[];
-        codebaseOverview: { repositories: AppRepository[] };
-      }>(`query AppsPage {
+      }>(
+        `query AppsPage {
         apps { ${APP_FIELDS} }
-        codebaseOverview { repositories { ${APP_REPOSITORY_FIELDS} } }
-      }`);
+      }`,
+        undefined,
+        { signal },
+      );
+      if (signal?.aborted) return;
       setApps(data.apps);
-      setRepositories(data.codebaseOverview.repositories);
       setError(null);
     } catch (value) {
-      setError(value instanceof Error ? value.message : String(value));
+      if (!signal?.aborted)
+        setError(value instanceof Error ? value.message : String(value));
     } finally {
-      setLoading(false);
+      if (!signal?.aborted) setLoading(false);
     }
   }, []);
 
   useEffect(() => {
-    const timer = window.setTimeout(() => void load(), 0);
-    const unsubscribe = subscribeToAppSummaryChanges(() => void load());
+    const subscription = subscribeToAppSummaryChanges(load);
+    const timer = window.setTimeout(() => void subscription.refresh(), 0);
     return () => {
       window.clearTimeout(timer);
-      unsubscribe();
+      subscription.dispose();
     };
   }, [load]);
+
+  useEffect(() => {
+    if (!editorOpen) return;
+    const controller = new AbortController();
+    void controlPlaneRequest<{
+      codebaseOverview: { repositories: AppRepository[] };
+    }>(
+      `query AppEditorRepositories { codebaseOverview { repositories { ${APP_REPOSITORY_FIELDS} } } }`,
+      undefined,
+      { signal: controller.signal },
+    )
+      .then((data) => {
+        if (!controller.signal.aborted)
+          setRepositories(data.codebaseOverview.repositories);
+      })
+      .catch((value: unknown) => {
+        if (!controller.signal.aborted)
+          setError(value instanceof Error ? value.message : String(value));
+      });
+    return () => controller.abort();
+  }, [editorOpen]);
 
   return (
     <section className="mx-auto flex w-full max-w-[1500px] flex-col gap-6">
@@ -86,10 +110,7 @@ export function AppsPage() {
             {t("description")}
           </p>
         </div>
-        <Button
-          disabled={!repositories.length}
-          onClick={() => setEditorOpen(true)}
-        >
+        <Button onClick={() => setEditorOpen(true)}>
           <Plus /> {t("createApp")}
         </Button>
       </div>

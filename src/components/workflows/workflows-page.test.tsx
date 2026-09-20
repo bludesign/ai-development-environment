@@ -19,6 +19,7 @@ import { WorkflowsPage } from "./workflows-page";
 
 vi.mock("@/lib/control-plane-client", () => ({
   controlPlaneRequest: vi.fn(),
+  onControlPlaneRecovery: vi.fn(() => () => undefined),
   controlPlaneSubscriptions: vi.fn(),
 }));
 
@@ -233,7 +234,8 @@ describe("WorkflowsPage", () => {
     await waitFor(() =>
       expect(request).toHaveBeenCalledWith(
         expect.stringContaining("query WorkflowManagement"),
-        { archive: "ARCHIVED" },
+        expect.objectContaining({ archive: "ARCHIVED" }),
+        expect.objectContaining({ signal: expect.any(AbortSignal) }),
       ),
     );
   });

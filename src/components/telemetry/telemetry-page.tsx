@@ -1,5 +1,7 @@
 "use client";
 
+import { createRefreshCoalescer } from "@/lib/refresh-coalescer";
+import { readCursorWindow } from "@/lib/read-cursor-window";
 import {
   ArrowDown,
   ArrowUp,
@@ -90,6 +92,7 @@ import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import {
   controlPlaneRequest,
   controlPlaneSubscriptions,
+  onControlPlaneRecovery,
 } from "@/lib/control-plane-client";
 import { copyText } from "@/lib/browser-utils";
 import { formatDateValue } from "@/lib/date-format";
@@ -364,6 +367,11 @@ export function TelemetryPage({ view }: { view: TelemetryView }) {
   const initializedConfiguration = useRef(false);
   const arrivalTimers = useRef<Map<string, number>>(new Map());
   const timelineRequestGeneration = useRef(0);
+  const timelineController = useRef<AbortController | null>(null);
+  const entriesRef = useRef(entries);
+  useEffect(() => {
+    entriesRef.current = entries;
+  }, [entries]);
 
   const columns =
     configuration?.viewSettings.columns ?? DEFAULT_TELEMETRY_COLUMNS[view];
@@ -458,54 +466,67 @@ export function TelemetryPage({ view }: { view: TelemetryView }) {
       generation = ++timelineRequestGeneration.current,
     ) => {
       if (generation !== timelineRequestGeneration.current) return;
+      timelineController.current?.abort();
+      const controller = new AbortController();
+      timelineController.current = controller;
+      if (!append) setLoadingMore(false);
       if (append) setLoadingMore(true);
       else setLoading(true);
       try {
-        const input = { ...queryInput, after: append ? nextCursor : null };
-        const data = await controlPlaneRequest<{
-          telemetryTimeline: TelemetryTimelinePage;
-        }>(
-          `query TelemetryTimeline($input: TelemetryTimelineInput!) {
-            telemetryTimeline(input: $input) {
-              items { ${ENTRY_FIELDS} }
-              nextCursor matchingCount totalCount
-            }
-          }`,
-          { input },
+        const readPage = async (after: string | null, first: number) => {
+          const data = await controlPlaneRequest<{
+            telemetryTimeline: TelemetryTimelinePage;
+          }>(
+            `query TelemetryTimeline($input: TelemetryTimelineInput!) {
+              telemetryTimeline(input: $input) { items { ${ENTRY_FIELDS} } nextCursor matchingCount totalCount }
+            }`,
+            { input: { ...queryInput, first, after } },
+            { signal: controller.signal },
+          );
+          if (controller.signal.aborted)
+            throw new DOMException("Aborted", "AbortError");
+          return data.telemetryTimeline;
+        };
+        const page = append
+          ? await readPage(nextCursor, 200)
+          : await readCursorWindow(
+              readPage,
+              reconcile ? Math.max(200, entriesRef.current.length) : 200,
+              200,
+              (entry: TelemetryEntryView) => entry.id,
+            );
+        if (
+          controller.signal.aborted ||
+          generation !== timelineRequestGeneration.current
+        )
+          return;
+        setEntries((current) =>
+          append
+            ? [
+                ...current,
+                ...page.items.filter(
+                  (item) =>
+                    !current.some((existing) => existing.id === item.id),
+                ),
+              ]
+            : page.items,
         );
-        if (generation !== timelineRequestGeneration.current) return;
-        const page = data.telemetryTimeline;
-        setEntries((current) => {
-          if (append) {
-            return [
-              ...current,
-              ...page.items.filter(
-                (item) => !current.some((existing) => existing.id === item.id),
-              ),
-            ];
-          }
-          if (!reconcile || current.length === 0) return page.items;
-          const newestIds = new Set(page.items.map(({ id }) => id));
-          return [
-            ...page.items,
-            ...current.filter((item) => !newestIds.has(item.id)),
-          ].sort((left, right) => {
-            const time = right.clientTime.localeCompare(left.clientTime);
-            if (time) return time;
-            const received = right.receivedAt.localeCompare(left.receivedAt);
-            return received || right.id.localeCompare(left.id);
-          });
-        });
-        if (!reconcile) setNextCursor(page.nextCursor);
+        setNextCursor(page.nextCursor);
         setMatchingCount(page.matchingCount);
         setTotalCount(page.totalCount);
         setError(null);
       } catch (value) {
-        if (generation === timelineRequestGeneration.current) {
+        if (
+          !controller.signal.aborted &&
+          generation === timelineRequestGeneration.current
+        ) {
           setError(value instanceof Error ? value.message : String(value));
         }
       } finally {
-        if (generation === timelineRequestGeneration.current) {
+        if (
+          !controller.signal.aborted &&
+          generation === timelineRequestGeneration.current
+        ) {
           if (append) setLoadingMore(false);
           else setLoading(false);
         }
@@ -524,20 +545,36 @@ export function TelemetryPage({ view }: { view: TelemetryView }) {
   }, [loadConfiguration]);
 
   useEffect(() => {
+    timelineController.current?.abort();
     const generation = ++timelineRequestGeneration.current;
     const timer = window.setTimeout(
       () => void loadTimeline(false, false, generation),
       180,
     );
-    return () => window.clearTimeout(timer);
+    return () => {
+      window.clearTimeout(timer);
+      timelineController.current?.abort();
+    };
   }, [queryInput]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  const latestTimelineLoad = useRef(loadTimeline);
   useEffect(() => {
+    latestTimelineLoad.current = loadTimeline;
+  }, [loadTimeline]);
+  useEffect(() => {
+    const owner = createRefreshCoalescer(() =>
+      latestTimelineLoad.current(false, true),
+    );
+    const recovery = onControlPlaneRecovery(() => void owner.refresh());
     const subscriptions = controlPlaneSubscriptions();
     const unsubscribeEntries = subscriptions.subscribe<{
       telemetryEntriesChanged: { ids: string[]; reason: string };
     }>(
-      { query: "subscription { telemetryEntriesChanged { ids reason } }" },
+      {
+        query:
+          "subscription TelemetryEntryChanges($view: TelemetryView!) { telemetryEntriesChanged(view: $view) { ids reason } }",
+        variables: { view },
+      },
       {
         next: (payload) => {
           const change = payload.data?.telemetryEntriesChanged;
@@ -547,7 +584,7 @@ export function TelemetryPage({ view }: { view: TelemetryView }) {
           ) {
             markArriving(change.ids);
           }
-          void loadTimeline(false, !change?.reason.startsWith("CLEARED"));
+          void owner.refresh();
         },
         error: () => undefined,
         complete: () => undefined,
@@ -564,16 +601,18 @@ export function TelemetryPage({ view }: { view: TelemetryView }) {
       },
     );
     const visible = () => {
-      if (document.visibilityState === "visible")
-        void loadTimeline(false, true);
+      if (document.visibilityState === "visible") void owner.refresh();
     };
     document.addEventListener("visibilitychange", visible);
     return () => {
+      owner.dispose();
+      recovery();
+      timelineController.current?.abort();
       unsubscribeEntries();
       unsubscribeSettings();
       document.removeEventListener("visibilitychange", visible);
     };
-  }, [loadConfiguration, loadTimeline, markArriving]);
+  }, [loadConfiguration, markArriving, view]);
 
   useEffect(() => {
     const timers = arrivalTimers.current;

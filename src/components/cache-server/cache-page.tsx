@@ -1,6 +1,11 @@
 "use client";
 
 import {
+  readIntegrationConfiguration,
+  subscribeIntegrationConfiguration,
+} from "@/lib/integration-configuration";
+
+import {
   Check,
   DatabaseZap,
   Eye,
@@ -129,18 +134,25 @@ export function CacheServerPage() {
   const [editing, setEditing] = useState(false);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const loadGeneration = useRef(0);
+  const loadController = useRef<AbortController | null>(null);
 
   const load = useCallback(
     async (requestedPage = page) => {
+      loadController.current?.abort();
+      const controller = new AbortController();
+      loadController.current = controller;
       const generation = ++loadGeneration.current;
       setLoading(true);
       try {
-        const config = await controlPlaneRequest<{
+        const config = await readIntegrationConfiguration<{
           cacheServerSettings: { configured: boolean };
         }>(
+          "cacheServer",
           "query CacheServerConfigured { cacheServerSettings { configured } }",
+          { signal: controller.signal },
         );
-        if (generation !== loadGeneration.current) return;
+        if (generation !== loadGeneration.current || controller.signal.aborted)
+          return;
         if (!config.cacheServerSettings.configured) {
           setConfigured(false);
           setData(null);
@@ -176,8 +188,10 @@ export function CacheServerPage() {
             itemsPerPage,
             page: requestedPage,
           },
+          { signal: controller.signal },
         );
-        if (generation !== loadGeneration.current) return;
+        if (generation !== loadGeneration.current || controller.signal.aborted)
+          return;
         const lastPage = Math.max(
           1,
           Math.ceil(result.cacheEntries.total / itemsPerPage),
@@ -191,11 +205,15 @@ export function CacheServerPage() {
         setData(result.cacheEntries);
         setError(null);
       } catch (value) {
-        if (generation === loadGeneration.current) {
+        if (
+          generation === loadGeneration.current &&
+          !controller.signal.aborted
+        ) {
           setError(value instanceof Error ? value.message : String(value));
         }
       } finally {
-        if (generation === loadGeneration.current) setLoading(false);
+        if (generation === loadGeneration.current && !controller.signal.aborted)
+          setLoading(false);
       }
     },
     [appliedFilters, itemsPerPage, page],
@@ -203,8 +221,23 @@ export function CacheServerPage() {
 
   useEffect(() => {
     const timeout = window.setTimeout(() => void load(), 0);
-    return () => window.clearTimeout(timeout);
+    return () => {
+      window.clearTimeout(timeout);
+      loadController.current?.abort();
+    };
   }, [load]);
+  const latestLoad = useRef(load);
+  useEffect(() => {
+    latestLoad.current = load;
+  }, [load]);
+  useEffect(
+    () =>
+      subscribeIntegrationConfiguration(
+        "cacheServer",
+        () => void latestLoad.current(),
+      ),
+    [],
+  );
 
   // Selection only ever refers to the rows currently on screen, so anything that
   // swaps out those rows also clears it.

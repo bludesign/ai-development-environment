@@ -50,13 +50,18 @@ export const createDiskSpaceResolvers = (
       context: GraphQLContext,
     ) => {
       requireControlPlane(context);
-      return systemStatus.status();
+      return systemStatus.status(false);
     },
     agentDiskSpaceConfiguration: (
       _root: unknown,
       _args: unknown,
       context: GraphQLContext,
     ) => diskSpace.configuration(requireAgent(context)),
+  },
+  SidebarStatus: {
+    diskSpace: (parent: { diskSpace?: unknown }) =>
+      parent.diskSpace ?? diskSpace.overview(),
+    diskSummary: () => diskSpace.summary(),
   },
   Mutation: {
     updateDiskSpaceSettings: (

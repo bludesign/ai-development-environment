@@ -1,3 +1,5 @@
+import { workflowQueueUsesWorktree } from "@/services/workflows/workflow-queue-scope";
+import { filterAsyncIterator } from "@/lib/filter-async-iterator";
 import "server-only";
 
 import { randomUUID } from "node:crypto";
@@ -6,6 +8,7 @@ import type { Prisma } from "@/generated/prisma/client";
 import { getPrismaClient } from "@/data/prisma-client";
 import {
   RUNS_CHANGED_TOPIC,
+  ACTION_CENTER_CHANGED_TOPIC,
   SIDEBAR_STATUS_CHANGED_TOPIC,
   agentOnlineWindowMs,
   agentEventBus,
@@ -187,6 +190,9 @@ function publishRun(runId: string): void {
   agentEventBus.publish(RUNS_CHANGED_TOPIC, payload);
   agentEventBus.publish(SIDEBAR_STATUS_CHANGED_TOPIC, {
     sidebarStatusChanged: true,
+  });
+  agentEventBus.publish(ACTION_CENTER_CHANGED_TOPIC, {
+    actionCenterChanged: true,
   });
 }
 
@@ -821,21 +827,28 @@ export class RunsService {
     afterSequence?: number | null;
     first?: number | null;
     includeSuperseded?: boolean | null;
+    beforeSequence?: number | null;
+    latest?: boolean | null;
   }) {
     const prisma = await getPrismaClient();
     const first = Math.max(1, Math.min(input.first ?? 200, 500));
-    return prisma.runEvent.findMany({
+    const descending = Boolean(input.latest || input.beforeSequence != null);
+    const rows = await prisma.runEvent.findMany({
       where: {
         runId: input.runId,
-        sequence: { gt: input.afterSequence ?? -1 },
+        sequence: {
+          gt: input.afterSequence ?? -1,
+          ...(input.beforeSequence == null ? {} : { lt: input.beforeSequence }),
+        },
         ...(input.includeSuperseded ? {} : { supersededAt: null }),
         ...(input.search?.trim()
           ? { searchText: { contains: input.search.trim() } }
           : {}),
       },
-      orderBy: { sequence: "asc" },
+      orderBy: { sequence: descending ? "desc" : "asc" },
       take: first,
     });
+    return descending ? rows.reverse() : rows;
   }
 
   async questions(input: {
@@ -3040,6 +3053,66 @@ export class RunsService {
         catalogJson:
           catalog === undefined ? undefined : JSON.stringify(catalog),
       },
+    });
+  }
+
+  subscribeRunList(input: {
+    workflowId?: string | null;
+    worktreeId?: string | null;
+    kind?: string | null;
+    appId?: string | null;
+    provider?: string | null;
+    origin?: string | null;
+  }) {
+    const source = agentEventBus.iterate<{ runChanged: { id: string } }>(
+      RUNS_CHANGED_TOPIC,
+    );
+    return filterAsyncIterator(source, async (payload) => {
+      if (payload.runChanged.id === "drafts") return false;
+      if (
+        !input.kind &&
+        !input.appId &&
+        !input.provider &&
+        !input.origin &&
+        !input.worktreeId &&
+        !input.workflowId
+      )
+        return true;
+      const prisma = await getPrismaClient();
+      const run = await prisma.agentRun.findUnique({
+        where: { id: payload.runChanged.id },
+        select: {
+          worktreeId: true,
+          workflowRun: { select: { workflowId: true } },
+          kind: true,
+          provider: true,
+          origin: true,
+          repositoryId: true,
+        },
+      });
+      if (!run) return true;
+      if (
+        input.workflowId &&
+        run.workflowRun?.workflowId !== input.workflowId &&
+        !(await workflowQueueUsesWorktree(input.workflowId, run.worktreeId))
+      )
+        return false;
+      if (input.worktreeId && run.worktreeId !== input.worktreeId) return false;
+      if (input.kind && run.kind !== input.kind) return false;
+      if (
+        input.provider &&
+        run.provider !== input.provider.trim().toUpperCase()
+      )
+        return false;
+      if (input.origin && run.origin !== input.origin) return false;
+      if (!input.appId) return true;
+      if (!run.repositoryId) return false;
+      return Boolean(
+        await prisma.appRepository.findFirst({
+          where: { appId: input.appId, repositoryId: run.repositoryId },
+          select: { appId: true },
+        }),
+      );
     });
   }
 

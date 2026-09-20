@@ -2,7 +2,7 @@
 
 import { CircleStop, ExternalLink, RotateCcw } from "lucide-react";
 import { useTranslations } from "next-intl";
-import { useCallback, useEffect, useState } from "react";
+import { useState } from "react";
 
 import { ConfigurationIcon } from "@/components/builds/configuration-icon";
 import { Alert, AlertDescription } from "@/components/ui/alert";
@@ -24,21 +24,16 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { Spinner } from "@/components/ui/spinner";
 import { Link } from "@/i18n/navigation";
-import {
-  controlPlaneRequest,
-  controlPlaneSubscriptions,
-} from "@/lib/control-plane-client";
+import { controlPlaneRequest } from "@/lib/control-plane-client";
 import { cn } from "@/lib/utils";
 
+import { activeCommandRun } from "./types";
 import {
-  COMMAND_DEFINITION_FIELDS,
-  activeCommandRun,
-  type CommandDefinition,
-} from "./types";
+  useCommandTargetSummary,
+  type CommandActionDefinition,
+} from "./command-target-summaries";
 
 type ActiveRun = { id: string; displayNumber: number; status: string };
-
-const RUN_STATUS_FIELDS = "id displayNumber status";
 
 export function CommandQuickActions({
   agentId,
@@ -56,88 +51,20 @@ export function CommandQuickActions({
   className?: string;
 }) {
   const t = useTranslations("commands");
-  const [commands, setCommands] = useState<CommandDefinition[]>([]);
+  const summary = useCommandTargetSummary({
+    resourceKind: agentId ? "AGENT" : "WORKTREE",
+    resourceId: agentId ?? worktreeId ?? "",
+  });
+  const commands = summary.commands.filter(
+    (command) => command.quickActionEnabled,
+  );
   const [starting, setStarting] = useState<string | null>(null);
-  const [active, setActive] = useState<Record<string, ActiveRun[]>>({});
+  const active: Record<string, ActiveRun[]> = {};
+  for (const run of summary.activeRuns) {
+    if (activeCommandRun(run.status)) (active[run.commandId] ??= []).push(run);
+  }
   const [error, setError] = useState<string | null>(null);
   const upgraded = agentCapabilities.includes("command.run");
-
-  useEffect(() => {
-    const query = agentId
-      ? `query AgentCommandQuickActions($id: ID!) { eligibleCommandsForAgent(agentId: $id) { ${COMMAND_DEFINITION_FIELDS} } }`
-      : `query WorktreeCommandQuickActions($id: ID!) { eligibleCommandsForWorktree(worktreeId: $id) { ${COMMAND_DEFINITION_FIELDS} } }`;
-    void Promise.resolve(
-      controlPlaneRequest<{
-        eligibleCommandsForAgent?: CommandDefinition[];
-        eligibleCommandsForWorktree?: CommandDefinition[];
-      }>(query, { id: agentId ?? worktreeId }),
-    )
-      .then((data) => {
-        if (!data) return;
-        setCommands(
-          (
-            data.eligibleCommandsForAgent ??
-            data.eligibleCommandsForWorktree ??
-            []
-          ).filter((command) => command.quickActionEnabled),
-        );
-      })
-      .catch((value) =>
-        setError(value instanceof Error ? value.message : String(value)),
-      );
-  }, [agentId, worktreeId]);
-
-  // A run started here can finish, be terminated from the run page, or sit
-  // queued behind an exclusive run for a long time. Reloading the runs this
-  // target owns keeps the spinner honest instead of leaving it turning forever.
-  const loadRuns = useCallback(async () => {
-    try {
-      const data = await controlPlaneRequest<{
-        commandRuns: {
-          nodes: Array<ActiveRun & { commandId: string | null }>;
-        };
-      }>(
-        `query QuickActionRuns($id: ID!) { commandRuns(${agentId ? "agentId" : "worktreeId"}: $id, statuses: [QUEUED, RUNNING, RESTARTING, CANCELLING], first: 50) { nodes { ${RUN_STATUS_FIELDS} commandId } } }`,
-        { id: agentId ?? worktreeId },
-      );
-      const grouped: Record<string, ActiveRun[]> = {};
-      for (const run of data.commandRuns.nodes) {
-        if (!run.commandId || !activeCommandRun(run.status)) continue;
-        (grouped[run.commandId] ??= []).push({
-          id: run.id,
-          displayNumber: run.displayNumber,
-          status: run.status,
-        });
-      }
-      for (const runs of Object.values(grouped)) {
-        runs.sort((left, right) => left.displayNumber - right.displayNumber);
-      }
-      setActive(grouped);
-    } catch {
-      // A failed refresh leaves the previous snapshot in place; the next
-      // command-run event or user action tries again.
-    }
-  }, [agentId, worktreeId]);
-
-  useEffect(() => {
-    const initial = window.setTimeout(() => void loadRuns(), 0);
-    const client = controlPlaneSubscriptions();
-    const dispose = client.subscribe(
-      {
-        query: `subscription QuickActionRuns($id: ID!) { commandRunsChanged(${agentId ? "agentId" : "worktreeId"}: $id) { id } }`,
-        variables: { id: agentId ?? worktreeId },
-      },
-      {
-        next: () => void loadRuns(),
-        error: () => undefined,
-        complete: () => undefined,
-      },
-    );
-    return () => {
-      window.clearTimeout(initial);
-      dispose();
-    };
-  }, [agentId, loadRuns, worktreeId]);
 
   const mutate = async (query: string, variables: Record<string, unknown>) => {
     try {
@@ -146,13 +73,13 @@ export function CommandQuickActions({
     } catch (value) {
       setError(value instanceof Error ? value.message : String(value));
     } finally {
-      await loadRuns();
+      summary.refresh();
     }
   };
 
   // Every click starts its own run. Whether it begins immediately or waits for
   // the target is decided by the command's concurrency mode on the server.
-  const start = async (command: CommandDefinition) => {
+  const start = async (command: CommandActionDefinition) => {
     setStarting(command.id);
     try {
       await mutate(
@@ -184,7 +111,8 @@ export function CommandQuickActions({
       { id: runId },
     );
 
-  if (!commands.length && !error) return null;
+  const displayedError = error ?? summary.error;
+  if (!commands.length && !displayedError) return null;
   const actions = (
     <div
       className={cn("w-full space-y-2", className)}
@@ -286,9 +214,9 @@ export function CommandQuickActions({
           </span>
         )}
       </div>
-      {error && (
+      {displayedError && (
         <Alert variant="destructive">
-          <AlertDescription>{error}</AlertDescription>
+          <AlertDescription>{displayedError}</AlertDescription>
         </Alert>
       )}
     </div>

@@ -1,6 +1,12 @@
 "use client";
 
 import {
+  GITHUB_CONFIGURATION_QUERY,
+  readIntegrationConfiguration,
+  subscribeIntegrationConfiguration,
+} from "@/lib/integration-configuration";
+
+import {
   ExternalLink,
   Grid2X2,
   List,
@@ -8,7 +14,7 @@ import {
   RefreshCw,
 } from "lucide-react";
 import { useTranslations } from "next-intl";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import {
   pullRequestDetailHref,
@@ -106,19 +112,23 @@ export function CommentsPage({
   const [unresolved, setUnresolved] = useState(true);
   const [layout, setLayout] = useState<"cards" | "table">("cards");
 
+  const configurationController = useRef<AbortController | null>(null);
   const loadConfiguration = useCallback(async () => {
+    configurationController.current?.abort();
+    const controller = new AbortController();
+    configurationController.current = controller;
     try {
-      const data = await controlPlaneRequest<{
+      const data = await readIntegrationConfiguration<{
         githubSettings: GitHubSettingsView;
-      }>(
-        "query GitHubCommentsConfiguration { githubSettings { tokenConfigured updatedAt } }",
-      );
+      }>("github", GITHUB_CONFIGURATION_QUERY, { signal: controller.signal });
+      if (controller.signal.aborted) return;
       setSettings(data.githubSettings);
       setError(null);
     } catch (value) {
+      if (controller.signal.aborted) return;
       setError(value instanceof Error ? value.message : String(value));
     } finally {
-      setConfigurationLoading(false);
+      if (!controller.signal.aborted) setConfigurationLoading(false);
     }
   }, []);
 
@@ -146,7 +156,15 @@ export function CommentsPage({
 
   useEffect(() => {
     const timeout = window.setTimeout(() => void loadConfiguration(), 0);
-    return () => window.clearTimeout(timeout);
+    const dispose = subscribeIntegrationConfiguration(
+      "github",
+      () => void loadConfiguration(),
+    );
+    return () => {
+      window.clearTimeout(timeout);
+      dispose();
+      configurationController.current?.abort();
+    };
   }, [loadConfiguration]);
 
   useEffect(() => {

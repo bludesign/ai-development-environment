@@ -22,6 +22,7 @@ const terminalReset = vi.hoisted(() => vi.fn());
 
 vi.mock("@/lib/control-plane-client", () => ({
   controlPlaneRequest: vi.fn(),
+  onControlPlaneRecovery: vi.fn(() => vi.fn()),
   controlPlaneSubscriptions: vi.fn(),
 }));
 vi.mock("@xterm/xterm", () => ({
@@ -538,14 +539,18 @@ describe("BuildDetailPage", () => {
     expect(card?.textContent).toContain("25%");
   });
 
-  test("loads build output beyond the former 5000-event limit", async () => {
+  test("starts at the newest output and loads older pages beyond 5000 events on demand", async () => {
     request.mockImplementation(async (query, variables) => {
       const operation = String(query);
       if (operation.includes("query BuildDetail")) return { build } as never;
-      if (operation.includes("query BuildLogChunks")) {
-        const after = (variables as { after?: string | null }).after;
-        const start = after ? Number(after.slice(4)) + 1 : 0;
-        const count = Math.min(1_000, 5_001 - start);
+      if (
+        operation.includes("query BuildLogChunks") ||
+        operation.includes("query BuildOlderLogs")
+      ) {
+        const before = (variables as { before?: string | null }).before;
+        const end = before ? Number(before.slice(4)) : 5001;
+        const start = Math.max(0, end - 1000);
+        const count = end - start;
         return {
           buildLogChunks: Array.from({ length: count }, (_, offset) =>
             buildLogChunk(start + offset),
@@ -572,7 +577,41 @@ describe("BuildDetailPage", () => {
       request.mock.calls.filter(([query]) =>
         String(query).includes("query BuildLogChunks"),
       ),
-    ).toHaveLength(6);
+    ).toHaveLength(1);
+    expect(
+      terminalWrite.mock.calls.some(
+        ([value]) =>
+          value instanceof Uint8Array &&
+          Buffer.from(value).toString("utf8") === "output-0\r\n",
+      ),
+    ).toBe(false);
+    for (let page = 0; page < 5; page++) {
+      fireEvent.click(screen.getByRole("button", { name: "Load more" }));
+      await waitFor(() =>
+        expect(
+          request.mock.calls.filter(([query]) =>
+            String(query).includes("query BuildOlderLogs"),
+          ),
+        ).toHaveLength(page + 1),
+      );
+      await waitFor(() =>
+        expect(
+          screen
+            .queryByRole("button", { name: "Load more" })
+            ?.hasAttribute("disabled") ?? false,
+        ).toBe(false),
+      );
+    }
+    await waitFor(() =>
+      expect(
+        terminalWrite.mock.calls.some(
+          ([value]) =>
+            value instanceof Uint8Array &&
+            Buffer.from(value).toString("utf8") === "output-0\r\n",
+        ),
+      ).toBe(true),
+    );
+    expect(screen.queryByRole("button", { name: "Load more" })).toBeNull();
   });
 
   test("buffers and deduplicates subscription output during history loading", async () => {

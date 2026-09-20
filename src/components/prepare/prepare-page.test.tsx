@@ -16,6 +16,7 @@ import {
 import { PreparePage } from "./prepare-page";
 
 vi.mock("@/lib/control-plane-client", () => ({
+  onControlPlaneRecovery: vi.fn(() => vi.fn()),
   controlPlaneRequest: vi.fn(),
   controlPlaneSubscriptions: vi.fn(),
 }));
@@ -138,13 +139,9 @@ describe("PreparePage", () => {
           },
         } as never;
       }
-      if (String(query).includes("query WorktreeJob")) {
+      if (String(query).includes("query WorktreePreparationJobs")) {
         return {
-          agentJob: {
-            status: "SUCCEEDED",
-            error: null,
-            worktreeOperationResult: null,
-          },
+          agentJobsByIds: [{ id: "job-1", status: "SUCCEEDED", error: null }],
         } as never;
       }
       throw new Error(`Unexpected operation: ${query}`);
@@ -182,7 +179,7 @@ describe("PreparePage", () => {
       () =>
         expect(
           request.mock.calls.some(([query]) =>
-            String(query).includes("query WorktreeJob"),
+            String(query).includes("query WorktreePreparationJobs"),
           ),
         ).toBe(true),
       { timeout: 2500 },

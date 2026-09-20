@@ -12,62 +12,156 @@ import { Link } from "@/i18n/navigation";
 import {
   controlPlaneRequest,
   controlPlaneSubscriptions,
+  onControlPlaneRecovery,
 } from "@/lib/control-plane-client";
+import { createRefreshCoalescer } from "@/lib/refresh-coalescer";
+import { sequenceRanges } from "@/lib/sequence-ranges";
 import { cn } from "@/lib/utils";
 
-import { JOB_FIELDS, JOB_LOG_FIELDS } from "./graphql-fields";
+import { JOB_LOG_FIELDS } from "./graphql-fields";
 import { StatusBadge } from "./status-badge";
 import type { AgentJob, AgentJobLog } from "./types";
+
+const JOB_FIELDS =
+  "id agentId kind status error createdAt startedAt finishedAt updatedAt";
 
 export function JobMonitor({
   jobId,
   compact = false,
+  seed,
+  onJobChanged,
 }: {
   jobId: string;
   compact?: boolean;
+  seed?: AgentJob;
+  onJobChanged?: (job: AgentJob) => void;
 }) {
   const t = useTranslations("jobs");
-  const [job, setJob] = useState<AgentJob | null>(null);
+  const common = useTranslations("common");
+  const [loadedJob, setJob] = useState<AgentJob | null>(null);
+  const job = seed ?? loadedJob;
+  const seeded = Boolean(seed);
   const [logs, setLogs] = useState<AgentJobLog[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const output = useRef<HTMLDivElement>(null);
   const stickToBottom = useRef(true);
 
-  const load = useCallback(async () => {
+  const logsRef = useRef<AgentJobLog[]>([]);
+  const jobRevision = useRef(0);
+  const [hasOlder, setHasOlder] = useState(false);
+  const [loadingOlder, setLoadingOlder] = useState(false);
+  const olderRequest = useRef<AbortController | null>(null);
+  const mergeLogs = useCallback((incoming: AgentJobLog[]) => {
+    const merged = new Map(logsRef.current.map((log) => [log.sequence, log]));
+    for (const log of incoming) merged.set(log.sequence, log);
+    logsRef.current = [...merged.values()].sort(
+      (a, b) => a.sequence - b.sequence,
+    );
+    setLogs(logsRef.current);
+  }, []);
+  const loadOlder = async () => {
+    if (olderRequest.current || !logsRef.current.length) return;
+    const controller = new AbortController();
+    olderRequest.current = controller;
+    setLoadingOlder(true);
     try {
-      const data = await controlPlaneRequest<{
-        agentJob: AgentJob | null;
-        agentJobLogs: AgentJobLog[];
-      }>(
-        `query Job($id: ID!) { agentJob(id: $id) { ${JOB_FIELDS} } agentJobLogs(jobId: $id) { ${JOB_LOG_FIELDS} } }`,
-        { id: jobId },
+      const data = await controlPlaneRequest<{ agentJobLogs: AgentJobLog[] }>(
+        `query OlderJobLogs($id: ID!, $before: Int!) { agentJobLogs(jobId: $id, beforeSequence: $before, first: 200) { ${JOB_LOG_FIELDS} } }`,
+        { id: jobId, before: logsRef.current[0]!.sequence },
+        { signal: controller.signal },
       );
-      setJob(data.agentJob);
-      setLogs(data.agentJobLogs);
-      setError(null);
+      if (controller.signal.aborted) return;
+      stickToBottom.current = false;
+      mergeLogs(data.agentJobLogs);
+      setHasOlder(
+        data.agentJobLogs.length === 200 && data.agentJobLogs[0]!.sequence > 0,
+      );
     } catch (value) {
-      setError(value instanceof Error ? value.message : String(value));
+      if (!controller.signal.aborted)
+        setError(value instanceof Error ? value.message : String(value));
     } finally {
-      setLoading(false);
+      if (olderRequest.current === controller) olderRequest.current = null;
+      if (!controller.signal.aborted) setLoadingOlder(false);
     }
-  }, [jobId]);
+  };
 
   useEffect(() => {
-    const initialLoad = window.setTimeout(() => void load(), 0);
+    logsRef.current = [];
+    let initialized = false;
+    const owner = createRefreshCoalescer(async (signal) => {
+      const revision = jobRevision.current;
+      const initial = !initialized;
+      let after = initial ? -1 : (logsRef.current[0]?.sequence ?? 0) - 1;
+      try {
+        for (;;) {
+          const data = await controlPlaneRequest<{
+            agentJob?: AgentJob | null;
+            agentJobLogs: AgentJobLog[];
+          }>(
+            `query Job($id: ID!, $metadata: Boolean!, $first: Int!, $latest: Boolean!, $after: Int!, $knownRanges: [AgentJobLogRangeInput!]!) {
+              agentJob(id: $id) @include(if: $metadata) { ${JOB_FIELDS} }
+              agentJobLogs(jobId: $id, afterSequence: $after, first: $first, latest: $latest, knownRanges: $knownRanges) { ${JOB_LOG_FIELDS} }
+            }`,
+            {
+              id: jobId,
+              metadata: !seeded,
+              first: initial ? 200 : 5000,
+              latest: initial,
+              after,
+              knownRanges: initial
+                ? []
+                : sequenceRanges(
+                    logsRef.current.map((log) => log.sequence),
+                  ).slice(0, 100),
+            },
+            { signal },
+          );
+          if (signal.aborted) return;
+          if (!seeded && revision === jobRevision.current)
+            setJob(data.agentJob ?? null);
+          mergeLogs(data.agentJobLogs);
+          if (initial)
+            setHasOlder(
+              Boolean(
+                data.agentJobLogs.length && data.agentJobLogs[0]!.sequence > 0,
+              ),
+            );
+          initialized = true;
+          if (initial || data.agentJobLogs.length < 5000) break;
+          // Continue this reconciliation in sequence order. The next recovery
+          // starts from the visible window again to catch late lower sequences.
+          const next = data.agentJobLogs.at(-1)!.sequence;
+          if (next <= after) break;
+          after = next;
+        }
+        setError(null);
+      } catch (value) {
+        if (!signal.aborted)
+          setError(value instanceof Error ? value.message : String(value));
+      } finally {
+        if (!signal.aborted) setLoading(false);
+      }
+    });
     const client = controlPlaneSubscriptions();
-    const unsubscribeJob = client.subscribe<{ agentJobChanged: AgentJob }>(
-      {
-        query: `subscription JobChanged($jobId: ID!) { agentJobChanged(jobId: $jobId) { ${JOB_FIELDS} } }`,
-        variables: { jobId },
-      },
-      {
-        next: (value) =>
-          value.data?.agentJobChanged && setJob(value.data.agentJobChanged),
-        error: () => undefined,
-        complete: () => undefined,
-      },
-    );
+    const unsubscribeJob = seeded
+      ? () => undefined
+      : client.subscribe<{ agentJobChanged: AgentJob }>(
+          {
+            query: `subscription JobChanged($jobId: ID!) { agentJobChanged(jobId: $jobId) { ${JOB_FIELDS} } }`,
+            variables: { jobId },
+          },
+          {
+            next: (value) => {
+              if (value.data?.agentJobChanged) {
+                ++jobRevision.current;
+                setJob(value.data.agentJobChanged);
+              }
+            },
+            error: () => undefined,
+            complete: () => undefined,
+          },
+        );
     const unsubscribeLogs = client.subscribe<{ agentJobLogAdded: AgentJobLog }>(
       {
         query: `subscription JobLog($jobId: ID!) { agentJobLogAdded(jobId: $jobId) { ${JOB_LOG_FIELDS} } }`,
@@ -75,24 +169,32 @@ export function JobMonitor({
       },
       {
         next: (value) => {
-          const log = value.data?.agentJobLogAdded;
-          if (!log) return;
-          setLogs((current) =>
-            current.some((item) => item.sequence === log.sequence)
-              ? current
-              : [...current, log].sort((a, b) => a.sequence - b.sequence),
-          );
+          if (value.data?.agentJobLogAdded)
+            mergeLogs([value.data.agentJobLogAdded]);
         },
         error: () => undefined,
         complete: () => undefined,
       },
     );
+    const recover = () => {
+      if (document.visibilityState !== "hidden") void owner.refresh();
+    };
+    const recovery = onControlPlaneRecovery(recover);
+    window.addEventListener("focus", recover);
+    document.addEventListener("visibilitychange", recover);
+    const initialLoad = window.setTimeout(() => void owner.refresh(), 0);
     return () => {
+      owner.dispose();
+      recovery();
       unsubscribeJob();
       unsubscribeLogs();
+      olderRequest.current?.abort();
+      olderRequest.current = null;
       window.clearTimeout(initialLoad);
+      window.removeEventListener("focus", recover);
+      document.removeEventListener("visibilitychange", recover);
     };
-  }, [jobId, load]);
+  }, [jobId, mergeLogs, seeded]);
 
   useEffect(() => {
     if (stickToBottom.current) {
@@ -107,6 +209,7 @@ export function JobMonitor({
         { jobId },
       );
       setJob(data.cancelAgentJob);
+      onJobChanged?.(data.cancelAgentJob);
       setError(null);
     } catch (value) {
       setError(value instanceof Error ? value.message : String(value));
@@ -166,6 +269,17 @@ export function JobMonitor({
 
   const body = (
     <>
+      {hasOlder && (
+        <Button
+          disabled={loadingOlder}
+          onClick={() => void loadOlder()}
+          size="sm"
+          variant="outline"
+        >
+          {loadingOlder && <Spinner />}
+          {common("loadMore")}
+        </Button>
+      )}
       {job.error && (
         <Alert variant="destructive">
           <AlertDescription>{job.error}</AlertDescription>

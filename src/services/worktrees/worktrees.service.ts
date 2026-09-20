@@ -499,6 +499,10 @@ function resultObject(job: {
 }
 
 export class WorktreesService {
+  private readonly preparationInspections = new Map<
+    string,
+    ReturnType<AgentControlService["createJob"]>
+  >();
   private readonly watchDemand = new Map<string, WorktreeWatchDemand>();
 
   constructor(
@@ -736,26 +740,31 @@ export class WorktreesService {
       const first = targets[0]!;
       try {
         jobs.push(
-          await this.agentControl.createJob({
-            agentId: first.codebase.agentId,
-            codebaseId,
-            worktreeId: targets.length === 1 ? first.id : null,
-            kind: WORKTREE_PREPARATION_JOB_KIND,
-            payload: {
+          await this.createPreparationJob(
+            {
+              agentId: first.codebase.agentId,
               codebaseId,
-              expectedOrigin: first.codebase.repository.canonicalOrigin,
-              action,
-              preparations:
-                first.codebase.repository.preparations.map(preparationPayload),
-              worktrees: targets.map((worktree) => ({
-                worktreeId: worktree.id,
-                folder: worktree.folder,
-                gitDirectory: worktree.gitDirectory,
-              })),
+              worktreeId: targets.length === 1 ? first.id : null,
+              kind: WORKTREE_PREPARATION_JOB_KIND,
+              payload: {
+                codebaseId,
+                expectedOrigin: first.codebase.repository.canonicalOrigin,
+                action,
+                preparations:
+                  first.codebase.repository.preparations.map(
+                    preparationPayload,
+                  ),
+                worktrees: targets.map((worktree) => ({
+                  worktreeId: worktree.id,
+                  folder: worktree.folder,
+                  gitDirectory: worktree.gitDirectory,
+                })),
+              },
+              idempotencyKey: `worktree:prepare:${action.toLowerCase()}:${requestId}:${codebaseId}`,
+              timeoutSeconds: 600,
             },
-            idempotencyKey: `worktree:prepare:${action.toLowerCase()}:${requestId}:${codebaseId}`,
-            timeoutSeconds: 600,
-          }),
+            action === "INSPECT",
+          ),
         );
       } catch (error) {
         for (const target of targets) {
@@ -767,6 +776,32 @@ export class WorktreesService {
       }
     }
     return { jobs, skipped };
+  }
+
+  private createPreparationJob(
+    input: Parameters<AgentControlService["createJob"]>[0],
+    reuse: boolean,
+  ) {
+    if (!reuse) return this.agentControl.createJob(input);
+    const payloadJson = JSON.stringify(input.payload);
+    const key = JSON.stringify([input.agentId, input.codebaseId, payloadJson]);
+    const pending = this.preparationInspections.get(key);
+    if (pending) return pending;
+    const request = (async () => {
+      const prisma = await getPrismaClient();
+      const existing = await prisma.agentJob.findFirst({
+        where: {
+          agentId: input.agentId,
+          codebaseId: input.codebaseId,
+          kind: input.kind,
+          status: { in: ["QUEUED", "RUNNING"] },
+          payloadJson,
+        },
+      });
+      return existing ?? this.agentControl.createJob(input);
+    })().finally(() => this.preparationInspections.delete(key));
+    this.preparationInspections.set(key, request);
+    return request;
   }
 
   async settings() {
@@ -1300,9 +1335,15 @@ export class WorktreesService {
     return matches.length;
   }
 
-  async overview(appId?: string | null) {
+  async overview(appId?: string | null, worktreeId?: string | null) {
     await this.cleanupExpired();
     const prisma = await getPrismaClient();
+    const repositoryScope = {
+      ...(appId ? { apps: { some: { appId } } } : {}),
+      ...(worktreeId
+        ? { codebases: { some: { worktrees: { some: { id: worktreeId } } } } }
+        : {}),
+    };
     const [
       worktrees,
       tags,
@@ -1314,10 +1355,10 @@ export class WorktreesService {
       prisma.worktree.findMany({
         where: {
           missingAt: null,
-          ...(appId
+          ...(appId || worktreeId
             ? {
                 codebase: {
-                  repository: { apps: { some: { appId } } },
+                  repository: repositoryScope,
                 },
               }
             : {}),
@@ -1337,10 +1378,10 @@ export class WorktreesService {
       prisma.worktree.count({
         where: {
           missingAt: { not: null },
-          ...(appId
+          ...(appId || worktreeId
             ? {
                 codebase: {
-                  repository: { apps: { some: { appId } } },
+                  repository: repositoryScope,
                 },
               }
             : {}),
@@ -1356,13 +1397,14 @@ export class WorktreesService {
       this.view(worktree, defaultRegex),
     );
     const scopedCodebaseIds = new Set(views.map((item) => item.codebase.id));
-    const scopedActiveMoves = appId
-      ? activeMoves.filter(
-          (move) =>
-            scopedCodebaseIds.has(move.sourceCodebaseId) ||
-            scopedCodebaseIds.has(move.targetCodebaseId),
-        )
-      : activeMoves;
+    const scopedActiveMoves =
+      appId || worktreeId
+        ? activeMoves.filter(
+            (move) =>
+              scopedCodebaseIds.has(move.sourceCodebaseId) ||
+              scopedCodebaseIds.has(move.targetCodebaseId),
+          )
+        : activeMoves;
     const repositoryIds = [
       ...new Set(views.map((item) => item.codebase.repository.id)),
     ];
@@ -1416,8 +1458,7 @@ export class WorktreesService {
     await Promise.all(
       keys.map(async (key) => {
         try {
-          const cached = await this.jiraService.cachedTicket(key);
-          const ticket = cached ?? (await this.jiraService.ticket(key));
+          const ticket = await this.jiraService.summary(key, true);
           tickets.set(key, {
             title: ticket.summary,
             status: ticket.status,

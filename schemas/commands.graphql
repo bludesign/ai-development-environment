@@ -1,3 +1,81 @@
+"Resource identity used by batched command action summaries."
+enum CommandResourceKind {
+  "An enrolled control agent."
+  AGENT
+  "A Git worktree belonging to a codebase."
+  WORKTREE
+}
+
+"A resource to summarize; duplicate targets are merged and at most 200 inputs are accepted."
+input CommandTargetSummaryInput {
+  "Kind of resource whose commands or workflows are being observed."
+  resourceKind: CommandResourceKind!
+  "Identifier of the target resource."
+  resourceId: ID!
+  "Include eligible commands beyond those enabled as quick actions."
+  includeAllCommands: Boolean = false
+  "Include the bounded recent run list for this target."
+  includeRecentRuns: Boolean = false
+}
+
+"Command metadata needed for an action button; scripts remain on the definition API."
+type CommandActionDefinition {
+  "Stable identifier of this resource."
+  id: ID!
+  "Display name of this resource."
+  name: String!
+  "Human-readable description of the command."
+  description: String!
+  "Kind of agent or worktree accepted by the command."
+  targetKind: CommandTargetKind!
+  "Whether the command is offered as a quick action."
+  quickActionEnabled: Boolean!
+  "Icon used for the quick action button."
+  quickActionIconKey: String!
+  "Visual variant of the quick action button."
+  quickActionButtonVariant: String!
+}
+
+"An active run of a displayed quick action, without attempts or payload history."
+type CommandActiveRunSummary {
+  "Stable identifier of this resource."
+  id: ID!
+  "Identifier of the command that created this run."
+  commandId: ID!
+  "Human-readable sequential run number."
+  displayNumber: Int!
+  "Current execution or health status."
+  status: CommandRunStatus!
+}
+
+"A compact recent run row."
+type CommandRecentRunSummary {
+  "Stable identifier of this resource."
+  id: ID!
+  "Human-readable sequential run number."
+  displayNumber: Int!
+  "Current execution or health status."
+  status: CommandRunStatus!
+  "Command name captured when the run started."
+  snapshotName: String!
+  "ISO 8601 creation timestamp."
+  createdAt: String!
+}
+
+"One keyed result per target, including empty eligible-command lists."
+type CommandTargetSummary {
+  "Kind of resource whose commands or workflows are being observed."
+  resourceKind: CommandResourceKind!
+  "Identifier of the target resource."
+  resourceId: ID!
+  "Eligible command definitions for this resource."
+  commands: [CommandActionDefinition!]!
+  "All active runs of eligible quick actions; never limited across different targets."
+  activeRuns: [CommandActiveRunSummary!]!
+  "At most eight recent unarchived runs for this target, newest first."
+  recentRuns: [CommandRecentRunSummary!]!
+}
+
 "Values supported for command target."
 enum CommandTargetKind {
   "Represents the any agent home option."
@@ -402,6 +480,11 @@ input CommandRunOutputInput {
 }
 
 extend type Query {
+  "Batch eligible action metadata and compact run summaries for rendered resources."
+  commandTargetSummaries(
+    "Resource targets to retrieve in one batch; duplicate targets are combined."
+    targets: [CommandTargetSummaryInput!]!
+  ): [CommandTargetSummary!]!
   "Returns command definitions."
   commandDefinitions(
     "Whether archived records should be included. Defaults to `false`."

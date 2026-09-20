@@ -1,6 +1,10 @@
 "use client";
 
 import {
+  createRefreshCoalescer,
+  type RefreshCoalescer,
+} from "@/lib/refresh-coalescer";
+import {
   useCallback,
   useEffect,
   useMemo,
@@ -83,6 +87,7 @@ import { Link, useRouter } from "@/i18n/navigation";
 import {
   controlPlaneRequest,
   controlPlaneSubscriptions,
+  onControlPlaneRecovery,
 } from "@/lib/control-plane-client";
 import { formatProviderLabel } from "@/lib/enum-label";
 import { McpPresetPicker } from "@/components/tools/mcp-preset-picker";
@@ -515,6 +520,7 @@ export function RunDetailPage({
   runId: string;
 }) {
   const t = useTranslations("runs");
+  const common = useTranslations("common");
   const labels = useRunLabels();
   const diffLabels = useDiffViewLabels();
   const locale = useLocale();
@@ -522,6 +528,21 @@ export function RunDetailPage({
   const [run, setRun] = useState<AgentRunView | null>(null);
   const [events, setEvents] = useState<RunEventView[]>([]);
   const [search, setSearch] = useState("");
+  const latestSearch = useRef(search);
+  useEffect(() => {
+    latestSearch.current = search;
+  }, [search]);
+  const eventsRef = useRef<RunEventView[]>([]);
+  const streamBuffer = useRef(new Map<string, RunEventView>());
+  const eventOwner = useRef<RefreshCoalescer | null>(null);
+  const detailOwner = useRef<RefreshCoalescer | null>(null);
+  const eventScope = useRef<string | null>(null);
+  const olderRequest = useRef<AbortController | null>(null);
+  const [hasOlderEvents, setHasOlderEvents] = useState(false);
+  const [loadingOlderEvents, setLoadingOlderEvents] = useState(false);
+  const catalogRevision = useRef(0);
+  const catalogLoadedRevision = useRef(-1);
+  const detailRevision = useRef(0);
   const [promptRaw, setPromptRaw] = useState(false);
   const [outputRaw, setOutputRaw] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -534,6 +555,7 @@ export function RunDetailPage({
   const [followMode, setFollowMode] = useState("RESUME");
   const [followPrompt, setFollowPrompt] = useState("");
   const [followProvider, setFollowProvider] = useState("");
+  const followInitializedFor = useRef<string | null>(null);
   const [followModel, setFollowModel] = useState("");
   const [followEffort, setFollowEffort] = useState("auto");
   const [followWebSearch, setFollowWebSearch] = useState(false);
@@ -656,59 +678,178 @@ export function RunDetailPage({
     downloadBlob(new Blob([bytes], { type: "application/x-ndjson" }), filename);
   }, [runId]);
 
-  const refresh = useCallback(async () => {
-    try {
-      const data = await controlPlaneRequest<{
-        agentRun: AgentRunView | null;
-        runProviderCatalog: ProviderCatalog[];
-      }>(
-        `query AgentRunDetail($id: ID!) { agentRun(id: $id) { ${RUN_DETAIL_FIELDS} } runProviderCatalog(runId: $id) { key label available supportsWebSearch supportsPause supportsSteering supportsResume supportsNativeDelete models { id label efforts group } } }`,
-        { id: runId },
-      );
-      setRun(data.agentRun);
-      setCatalog(data.runProviderCatalog);
-      if (data.agentRun && !followProvider) {
-        setFollowProvider(data.agentRun.provider);
-        setFollowModel(data.agentRun.model);
-        setFollowEffort(data.agentRun.effort ?? "auto");
-        setFollowWebSearch(data.agentRun.webSearchEnabled);
-      }
-      setError(null);
-    } catch (value) {
-      setError(value instanceof Error ? value.message : String(value));
-    } finally {
-      setLoading(false);
-    }
-  }, [followProvider, runId]);
-  const refreshEvents = useCallback(async () => {
-    try {
-      const all: RunEventView[] = [];
-      let afterSequence = -1;
-      for (;;) {
-        const data = await controlPlaneRequest<{ runEvents: RunEventView[] }>(
-          `query RunActivity($runId: ID!, $search: String, $afterSequence: Int!) { runEvents(runId: $runId, search: $search, afterSequence: $afterSequence, first: 500) { ${RUN_EVENT_FIELDS} } }`,
-          { runId, search: search.trim() || null, afterSequence },
+  const refresh = useCallback(
+    () => detailOwner.current?.refresh() ?? Promise.resolve(),
+    [],
+  );
+  const refreshEvents = useCallback(
+    () => eventOwner.current?.refresh() ?? Promise.resolve(),
+    [],
+  );
+  const fetchDetail = useCallback(
+    async (signal: AbortSignal) => {
+      const revision = detailRevision.current;
+      const catalogVersion = catalogRevision.current;
+      const includeCatalog = catalogLoadedRevision.current !== catalogVersion;
+      try {
+        const data = await controlPlaneRequest<{
+          agentRun: AgentRunView | null;
+          runProviderCatalog: ProviderCatalog[];
+        }>(
+          `query AgentRunDetail($id: ID!, $includeCatalog: Boolean!) { agentRun(id: $id) { ${RUN_DETAIL_FIELDS} } runProviderCatalog(runId: $id) @include(if: $includeCatalog) { key label available supportsWebSearch supportsPause supportsSteering supportsResume supportsNativeDelete models { id label efforts group } } }`,
+          { id: runId, includeCatalog },
+          { signal },
         );
-        const page = data.runEvents;
-        all.push(...page);
-        if (page.length < 500) break;
-        const nextSequence = page[page.length - 1]!.sequence;
-        if (nextSequence <= afterSequence) break;
-        afterSequence = nextSequence;
+        if (signal.aborted) return;
+        if (revision === detailRevision.current) setRun(data.agentRun);
+        if (includeCatalog) {
+          setCatalog(data.runProviderCatalog);
+          catalogLoadedRevision.current = catalogVersion;
+        }
+        if (data.agentRun && followInitializedFor.current !== runId) {
+          followInitializedFor.current = runId;
+          setFollowProvider(data.agentRun.provider);
+          setFollowModel(data.agentRun.model);
+          setFollowEffort(data.agentRun.effort ?? "auto");
+          setFollowWebSearch(data.agentRun.webSearchEnabled);
+        }
+        setError(null);
+      } catch (value) {
+        if (!signal.aborted)
+          setError(value instanceof Error ? value.message : String(value));
+      } finally {
+        if (!signal.aborted) setLoading(false);
       }
-      setEvents(all);
+    },
+    [runId],
+  );
+  const commitEvents = useCallback((incoming: RunEventView[]) => {
+    const byId = new Map(incoming.map((event) => [event.id, event]));
+    eventsRef.current = [...byId.values()].sort(
+      (a, b) => a.sequence - b.sequence,
+    );
+    setEvents(eventsRef.current);
+  }, []);
+  const fetchEvents = useCallback(
+    async (signal: AbortSignal) => {
+      const scope = JSON.stringify([runId, search.trim()]);
+      const initial = eventScope.current !== scope;
+      if (initial) {
+        eventsRef.current = [];
+        streamBuffer.current.clear();
+      }
+      const all: RunEventView[] = [];
+      let afterSequence = initial
+        ? -1
+        : (eventsRef.current[0]?.sequence ?? 0) - 1;
+      const originalFloor = eventsRef.current[0]?.sequence;
+      streamBuffer.current.clear();
+      try {
+        for (;;) {
+          const data = await controlPlaneRequest<{ runEvents: RunEventView[] }>(
+            `query RunActivity($runId: ID!, $search: String, $afterSequence: Int!, $first: Int!, $latest: Boolean!) { runEvents(runId: $runId, search: $search, afterSequence: $afterSequence, first: $first, latest: $latest) { ${RUN_EVENT_FIELDS} } }`,
+            {
+              runId,
+              search: search.trim() || null,
+              afterSequence,
+              first: initial ? 200 : 500,
+              latest: initial,
+            },
+            { signal },
+          );
+          if (signal.aborted) return;
+          const page = data.runEvents;
+          all.push(...page);
+          if (initial || page.length < 500) break;
+          const nextSequence = page.at(-1)!.sequence;
+          if (nextSequence <= afterSequence) break;
+          afterSequence = nextSequence;
+        }
+        if (
+          !initial &&
+          originalFloor !== undefined &&
+          (eventsRef.current[0]?.sequence ?? originalFloor) < originalFloor
+        ) {
+          void refreshEvents();
+          return;
+        }
+        if (initial)
+          setHasOlderEvents(all.length === 200 && all[0]!.sequence > 0);
+        eventScope.current = scope;
+        commitEvents([...all, ...streamBuffer.current.values()]);
+      } catch (value) {
+        if (!signal.aborted)
+          setError(value instanceof Error ? value.message : String(value));
+      }
+    },
+    [commitEvents, refreshEvents, runId, search],
+  );
+  const loadOlderEvents = async () => {
+    if (olderRequest.current || !eventsRef.current.length) return;
+    const controller = new AbortController();
+    olderRequest.current = controller;
+    setLoadingOlderEvents(true);
+    try {
+      const data = await controlPlaneRequest<{ runEvents: RunEventView[] }>(
+        `query RunActivityOlder($runId: ID!, $search: String, $before: Int!) { runEvents(runId: $runId, search: $search, beforeSequence: $before, first: 200) { ${RUN_EVENT_FIELDS} } }`,
+        {
+          runId,
+          search: search.trim() || null,
+          before: eventsRef.current[0]!.sequence,
+        },
+        { signal: controller.signal },
+      );
+      if (controller.signal.aborted) return;
+      activityPinnedRef.current = false;
+      commitEvents([...eventsRef.current, ...data.runEvents]);
+      setHasOlderEvents(
+        data.runEvents.length === 200 && data.runEvents[0]!.sequence > 0,
+      );
     } catch (value) {
-      setError(value instanceof Error ? value.message : String(value));
+      if (!controller.signal.aborted)
+        setError(value instanceof Error ? value.message : String(value));
+    } finally {
+      if (olderRequest.current === controller) olderRequest.current = null;
+      if (!controller.signal.aborted) setLoadingOlderEvents(false);
     }
-  }, [runId, search]);
+  };
   useEffect(() => {
-    const timer = window.setTimeout(() => void refresh(), 0);
-    return () => window.clearTimeout(timer);
-  }, [refresh]);
+    catalogLoadedRevision.current = -1;
+    const owner = createRefreshCoalescer(fetchDetail);
+    detailOwner.current = owner;
+    const timer = window.setTimeout(() => void owner.refresh(), 0);
+    const recovery = onControlPlaneRecovery(() => {
+      ++catalogRevision.current;
+      void owner.refresh();
+    });
+    return () => {
+      window.clearTimeout(timer);
+      owner.dispose();
+      recovery();
+      if (detailOwner.current === owner) detailOwner.current = null;
+    };
+  }, [fetchDetail]);
   useEffect(() => {
-    const timer = window.setTimeout(() => void refreshEvents(), 150);
-    return () => window.clearTimeout(timer);
-  }, [refreshEvents]);
+    const owner = createRefreshCoalescer(fetchEvents);
+    eventOwner.current = owner;
+    const timer = window.setTimeout(() => void owner.refresh(), 150);
+    const recover = () => {
+      if (document.visibilityState !== "hidden") void owner.refresh();
+    };
+    const recovery = onControlPlaneRecovery(recover);
+    window.addEventListener("focus", recover);
+    document.addEventListener("visibilitychange", recover);
+    return () => {
+      window.clearTimeout(timer);
+      owner.dispose();
+      recovery();
+      olderRequest.current?.abort();
+      olderRequest.current = null;
+      window.removeEventListener("focus", recover);
+      document.removeEventListener("visibilitychange", recover);
+      if (eventOwner.current === owner) eventOwner.current = null;
+    };
+  }, [fetchEvents]);
   useEffect(() => {
     const subscriptions = controlPlaneSubscriptions();
     const offRun = subscriptions.subscribe(
@@ -721,7 +862,10 @@ export function RunDetailPage({
           const next = (
             value.data as { agentRunChanged?: AgentRunView } | undefined
           )?.agentRunChanged;
-          if (next) setRun(next);
+          if (next) {
+            ++detailRevision.current;
+            setRun(next);
+          }
         },
         error: () => undefined,
         complete: () => undefined,
@@ -737,12 +881,20 @@ export function RunDetailPage({
           const next = (
             value.data as { runEventAdded?: RunEventView } | undefined
           )?.runEventAdded;
-          if (next)
-            setEvents((current) =>
-              current.some(({ id }) => id === next.id)
-                ? current
-                : [...current, next],
-            );
+          if (!next) return;
+          if (latestSearch.current.trim()) {
+            void refreshEvents();
+            return;
+          }
+          streamBuffer.current.set(next.id, next);
+          const visibleEvents =
+            eventScope.current === JSON.stringify([runId, ""])
+              ? eventsRef.current
+              : [];
+          commitEvents([
+            ...visibleEvents.filter((event) => event.id !== next.id),
+            next,
+          ]);
         },
         error: () => undefined,
         complete: () => undefined,
@@ -765,7 +917,7 @@ export function RunDetailPage({
       offEvent();
       offQuestion();
     };
-  }, [refresh, runId]);
+  }, [commitEvents, refresh, refreshEvents, runId]);
 
   const lifecycle = async (
     action: "pause" | "continue" | "cancel" | "play",
@@ -1414,6 +1566,17 @@ export function RunDetailPage({
             </div>
           </div>
         </CardHeader>
+        {hasOlderEvents && (
+          <Button
+            disabled={loadingOlderEvents}
+            onClick={() => void loadOlderEvents()}
+            size="sm"
+            variant="ghost"
+          >
+            {loadingOlderEvents && <Spinner />}
+            {common("loadMore")}
+          </Button>
+        )}
         <div
           className="h-[24rem] overflow-y-auto"
           onScroll={handleActivityScroll}

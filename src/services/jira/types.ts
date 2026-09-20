@@ -184,6 +184,7 @@ export type JiraTicketDetail = JiraTicketSummary & {
   issueLinks: JiraIssueLinkView[];
   attachments: JiraAttachmentView[];
   comments: JiraCommentView[];
+  commentsTotal?: number;
   createdAt: string | null;
   dueAt: string | null;
   resolvedAt: string | null;

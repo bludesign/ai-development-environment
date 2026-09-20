@@ -1,8 +1,19 @@
 "use client";
 
+import {
+  createRefreshCoalescer,
+  type RefreshCoalescer,
+} from "@/lib/refresh-coalescer";
 import { Check, ChevronDown, History, Save, Send, Trash2 } from "lucide-react";
 import { useLocale, useTranslations } from "next-intl";
-import { Fragment, useCallback, useEffect, useMemo, useState } from "react";
+import {
+  Fragment,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 
 import { ConfirmationDialog } from "@/components/confirmation-dialog";
 import { WorkflowResourcePanel } from "@/components/workflows/workflow-resource-panel";
@@ -56,6 +67,7 @@ import { createClientId } from "@/lib/browser-utils";
 import {
   controlPlaneRequest,
   controlPlaneSubscriptions,
+  onControlPlaneRecovery,
 } from "@/lib/control-plane-client";
 import { formatDateValue } from "@/lib/date-format";
 import { cn } from "@/lib/utils";
@@ -134,6 +146,11 @@ type Batch = {
   finishedAt: string | null;
   deliveries: Delivery[];
 };
+
+type BatchSummary = Omit<
+  Batch,
+  "editor" | "payload" | "headers" | "deliveries"
+> & { pushType: string };
 
 type EditorState = {
   pushType: PushType;
@@ -219,14 +236,13 @@ const DEFAULT_EDITOR: EditorState = {
   credentialId: "",
 };
 
-const PAGE_QUERY = `query PushNotificationsPage {
-  apnsRegistrations { id displayName topic environment supportedPushTypes tokenMasked status }
-  pushNotificationSettings { certificates { id name topic environment expiresAt } }
-  apnsBroadcastChannels { id channelId bundleId environment storagePolicy createdAt }
-  pushNotificationPresets { id name editor createdAt updatedAt }
+const PAGE_QUERY = `query PushNotificationsPage($includeCatalog: Boolean!) {
+  apnsRegistrations @include(if: $includeCatalog) { id displayName topic environment supportedPushTypes tokenMasked status }
+  pushNotificationSettings @include(if: $includeCatalog) { certificates { id name topic environment expiresAt } }
+  apnsBroadcastChannels @include(if: $includeCatalog) { id channelId bundleId environment storagePolicy createdAt }
+  pushNotificationPresets @include(if: $includeCatalog) { id name editor createdAt updatedAt }
   pushNotificationHistory(limit: 100) {
-    id requestId status editor payload headers targetMode channelId recipientCount successCount failureCount error createdAt finishedAt
-    deliveries { id registrationId topic environment status apnsId responseCode reason attempts durationMs }
+    id requestId status pushType targetMode channelId recipientCount successCount failureCount error createdAt finishedAt
   }
 }`;
 
@@ -345,7 +361,11 @@ export function PushNotificationsPage() {
   const [credentials, setCredentials] = useState<Credential[]>([]);
   const [channels, setChannels] = useState<Channel[]>([]);
   const [presets, setPresets] = useState<Preset[]>([]);
-  const [history, setHistory] = useState<Batch[]>([]);
+  const [history, setHistory] = useState<BatchSummary[]>([]);
+  const [historyRevision, setHistoryRevision] = useState(0);
+  const catalogRevision = useRef(0);
+  const catalogLoadedRevision = useRef(-1);
+  const loadOwner = useRef<RefreshCoalescer | null>(null);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [allEligible, setAllEligible] = useState(false);
   const [broadcastChannelId, setBroadcastChannelId] = useState("");
@@ -367,33 +387,54 @@ export function PushNotificationsPage() {
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
 
-  const load = useCallback(async () => {
+  const load = useCallback((includeCatalog = true) => {
+    if (includeCatalog) ++catalogRevision.current;
+    return loadOwner.current?.refresh() ?? Promise.resolve();
+  }, []);
+  const fetchPage = useCallback(async (signal: AbortSignal) => {
+    const version = catalogRevision.current;
+    const includeCatalog = catalogLoadedRevision.current !== version;
     try {
       const data = await controlPlaneRequest<{
         apnsRegistrations: Registration[];
         pushNotificationSettings: { certificates: Credential[] };
         apnsBroadcastChannels: Channel[];
         pushNotificationPresets: Preset[];
-        pushNotificationHistory: Batch[];
-      }>(PAGE_QUERY);
-      setRegistrations(data.apnsRegistrations);
-      setCredentials(data.pushNotificationSettings.certificates);
-      setChannels(data.apnsBroadcastChannels);
-      setPresets(data.pushNotificationPresets);
+        pushNotificationHistory: BatchSummary[];
+      }>(PAGE_QUERY, { includeCatalog }, { signal });
+      if (signal.aborted) return;
+      if (includeCatalog) {
+        setRegistrations(data.apnsRegistrations);
+        setCredentials(data.pushNotificationSettings.certificates);
+        setChannels(data.apnsBroadcastChannels);
+        setPresets(data.pushNotificationPresets);
+        catalogLoadedRevision.current = version;
+      }
       setHistory(data.pushNotificationHistory);
+      setHistoryRevision((current) => current + 1);
       setError(null);
     } catch (value) {
+      if (signal.aborted) return;
       setError(value instanceof Error ? value.message : String(value));
     } finally {
-      setLoading(false);
+      if (!signal.aborted) setLoading(false);
     }
   }, []);
   useEffect(() => {
+    const owner = createRefreshCoalescer(fetchPage);
+    loadOwner.current = owner;
+    const recovery = onControlPlaneRecovery(() => void load());
     const timer = window.setTimeout(() => void load(), 0);
     const unsubscribe = controlPlaneSubscriptions().subscribe(
-      { query: `subscription { pushNotificationsChanged }` },
       {
-        next: () => void load(),
+        query: `subscription PushNotificationChanges { pushNotificationChanges { kind } }`,
+      },
+      {
+        next: (result) => {
+          const change = result.data?.pushNotificationChanges as
+            { kind?: string } | undefined;
+          void load(change?.kind !== "HISTORY");
+        },
         error: () => undefined,
         complete: () => undefined,
       },
@@ -401,8 +442,11 @@ export function PushNotificationsPage() {
     return () => {
       window.clearTimeout(timer);
       unsubscribe();
+      recovery();
+      owner.dispose();
+      if (loadOwner.current === owner) loadOwner.current = null;
     };
-  }, [load]);
+  }, [fetchPage, load]);
 
   const update = <K extends keyof EditorState>(key: K, value: EditorState[K]) =>
     setState((current) => ({ ...current, [key]: value }));
@@ -1212,6 +1256,7 @@ export function PushNotificationsPage() {
           <TabsContent value="history">
             <ExpandableHistory
               batches={history}
+              revision={historyRevision}
               expanded={expandedHistory}
               onDelete={(id) =>
                 run(
@@ -1502,6 +1547,7 @@ function ChannelsCard({
 
 function ExpandableHistory({
   batches,
+  revision,
   expanded,
   setExpanded,
   onLoad,
@@ -1509,7 +1555,8 @@ function ExpandableHistory({
   onPreset,
   onDelete,
 }: {
-  batches: Batch[];
+  batches: BatchSummary[];
+  revision: number;
   expanded: Set<string>;
   setExpanded: React.Dispatch<React.SetStateAction<Set<string>>>;
   onLoad: (editor: Record<string, unknown>) => void;
@@ -1518,7 +1565,6 @@ function ExpandableHistory({
   onDelete: (id: string) => Promise<void>;
 }) {
   const t = useTranslations("pushNotifications");
-  const tc = useTranslations("common");
   const toggle = (id: string) =>
     setExpanded((current) => {
       const next = new Set(current);
@@ -1566,7 +1612,7 @@ function ExpandableHistory({
               </TableCell>
               <TableCell>
                 <Badge variant="secondary">
-                  {String(batch.editor.pushType ?? "—")}
+                  {String(batch.pushType || "—")}
                 </Badge>
               </TableCell>
               <TableCell>{batch.targetMode}</TableCell>
@@ -1587,95 +1633,14 @@ function ExpandableHistory({
             {expanded.has(batch.id) && (
               <TableRow className="hover:bg-transparent">
                 <TableCell colSpan={7} className="bg-muted/20 p-5">
-                  <div className="grid gap-4 lg:grid-cols-2">
-                    <div>
-                      <Label>{t("payload")}</Label>
-                      <pre className="mt-2 max-h-72 overflow-auto rounded-xl bg-background p-3 text-xs">
-                        {JSON.stringify(batch.payload, null, 2)}
-                      </pre>
-                    </div>
-                    <div>
-                      <Label>{t("headers")}</Label>
-                      <pre className="mt-2 max-h-72 overflow-auto rounded-xl bg-background p-3 text-xs">
-                        {JSON.stringify(batch.headers, null, 2)}
-                      </pre>
-                    </div>
-                  </div>
-                  {batch.deliveries.length > 0 && (
-                    <div className="mt-4 grid gap-2 md:grid-cols-2">
-                      {batch.deliveries.map((delivery) => (
-                        <div
-                          className="rounded-lg border bg-background p-3"
-                          key={delivery.id}
-                        >
-                          <div className="flex justify-between">
-                            <span className="font-mono text-xs">
-                              {delivery.topic}
-                            </span>
-                            <Badge
-                              variant={
-                                delivery.status === "SUCCEEDED"
-                                  ? "default"
-                                  : "destructive"
-                              }
-                            >
-                              {delivery.status}
-                            </Badge>
-                          </div>
-                          <p className="text-xs text-muted-foreground">
-                            HTTP {delivery.responseCode ?? "—"} ·{" "}
-                            {delivery.reason ?? "—"} · {delivery.attempts}{" "}
-                            {t("attempts")} · {delivery.durationMs ?? "—"} ms
-                          </p>
-                          {delivery.apnsId && (
-                            <p className="font-mono text-xs">
-                              {delivery.apnsId}
-                            </p>
-                          )}
-                        </div>
-                      ))}
-                    </div>
-                  )}
-                  <div className="mt-4">
-                    <WorkflowResourcePanel
-                      resourceId={batch.id}
-                      resourceKind="PUSH_NOTIFICATION_BATCH"
-                      sessionData={{ pushBatch: { id: batch.id } }}
-                    />
-                  </div>
-                  <div className="mt-4 flex flex-wrap justify-end gap-2">
-                    <Button
-                      onClick={() => onLoad(batch.editor)}
-                      variant="outline"
-                    >
-                      {t("load")}
-                    </Button>
-                    <Button onClick={() => onPreset(batch)} variant="outline">
-                      <Save /> {t("saveAsPreset")}
-                    </Button>
-                    {batch.targetMode !== "DRAFT" && (
-                      <Button onClick={() => void onResend(batch.id)}>
-                        <Send /> {t("resend")}
-                      </Button>
-                    )}
-                    <ConfirmationDialog
-                      actionLabel={t("delete")}
-                      cancelLabel={tc("cancel")}
-                      description={t("deleteHistoryDescription")}
-                      onConfirm={() => onDelete(batch.id)}
-                      title={t("deleteHistory")}
-                      trigger={
-                        <Button
-                          disabled={["QUEUED", "SENDING"].includes(
-                            batch.status,
-                          )}
-                          variant="ghost"
-                        >
-                          <Trash2 /> {t("delete")}
-                        </Button>
-                      }
-                    />
-                  </div>
+                  <ExpandedPushBatch
+                    batchId={batch.id}
+                    revision={revision}
+                    onLoad={onLoad}
+                    onResend={onResend}
+                    onPreset={onPreset}
+                    onDelete={onDelete}
+                  />
                 </TableCell>
               </TableRow>
             )}
@@ -1683,6 +1648,139 @@ function ExpandableHistory({
         ))}
       </TableBody>
     </Table>
+  );
+}
+
+function ExpandedPushBatch({
+  batchId,
+  revision,
+  onLoad,
+  onResend,
+  onPreset,
+  onDelete,
+}: {
+  batchId: string;
+  revision: number;
+  onLoad: (editor: Record<string, unknown>) => void;
+  onResend: (id: string) => Promise<void>;
+  onPreset: (batch: Batch) => void;
+  onDelete: (id: string) => Promise<void>;
+}) {
+  const t = useTranslations("pushNotifications");
+  const tc = useTranslations("common");
+  const [batch, setBatch] = useState<Batch | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  useEffect(() => {
+    const controller = new AbortController();
+    void controlPlaneRequest<{ pushNotificationHistoryItem: Batch | null }>(
+      `query PushNotificationHistoryItem($id: ID!) {
+        pushNotificationHistoryItem(id: $id) { id requestId status editor payload headers targetMode channelId recipientCount successCount failureCount error createdAt finishedAt
+          deliveries { id registrationId topic environment status apnsId responseCode reason attempts durationMs }
+        }
+      }`,
+      { id: batchId },
+      { signal: controller.signal },
+    )
+      .then((data) => {
+        if (!controller.signal.aborted) {
+          setBatch(data.pushNotificationHistoryItem);
+          setError(null);
+        }
+      })
+      .catch((value) => {
+        if (!controller.signal.aborted)
+          setError(value instanceof Error ? value.message : String(value));
+      });
+    return () => controller.abort();
+  }, [batchId, revision]);
+  if (error)
+    return (
+      <Alert variant="destructive">
+        <AlertDescription>{error}</AlertDescription>
+      </Alert>
+    );
+  if (!batch) return <Spinner />;
+  return (
+    <>
+      <div className="grid gap-4 lg:grid-cols-2">
+        <div>
+          <Label>{t("payload")}</Label>
+          <pre className="mt-2 max-h-72 overflow-auto rounded-xl bg-background p-3 text-xs">
+            {JSON.stringify(batch.payload, null, 2)}
+          </pre>
+        </div>
+        <div>
+          <Label>{t("headers")}</Label>
+          <pre className="mt-2 max-h-72 overflow-auto rounded-xl bg-background p-3 text-xs">
+            {JSON.stringify(batch.headers, null, 2)}
+          </pre>
+        </div>
+      </div>
+      {batch.deliveries.length > 0 && (
+        <div className="mt-4 grid gap-2 md:grid-cols-2">
+          {batch.deliveries.map((delivery) => (
+            <div
+              className="rounded-lg border bg-background p-3"
+              key={delivery.id}
+            >
+              <div className="flex justify-between">
+                <span className="font-mono text-xs">{delivery.topic}</span>
+                <Badge
+                  variant={
+                    delivery.status === "SUCCEEDED" ? "default" : "destructive"
+                  }
+                >
+                  {delivery.status}
+                </Badge>
+              </div>
+              <p className="text-xs text-muted-foreground">
+                HTTP {delivery.responseCode ?? "—"} · {delivery.reason ?? "—"} ·{" "}
+                {delivery.attempts} {t("attempts")} ·{" "}
+                {delivery.durationMs ?? "—"} ms
+              </p>
+              {delivery.apnsId && (
+                <p className="font-mono text-xs">{delivery.apnsId}</p>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
+      <div className="mt-4">
+        <WorkflowResourcePanel
+          resourceId={batch.id}
+          resourceKind="PUSH_NOTIFICATION_BATCH"
+          sessionData={{ pushBatch: { id: batch.id } }}
+        />
+      </div>
+      <div className="mt-4 flex flex-wrap justify-end gap-2">
+        <Button onClick={() => onLoad(batch.editor)} variant="outline">
+          {t("load")}
+        </Button>
+        <Button onClick={() => onPreset(batch)} variant="outline">
+          <Save /> {t("saveAsPreset")}
+        </Button>
+        {batch.targetMode !== "DRAFT" && (
+          <Button onClick={() => void onResend(batch.id)}>
+            <Send /> {t("resend")}
+          </Button>
+        )}
+        <ConfirmationDialog
+          actionLabel={t("delete")}
+          cancelLabel={tc("cancel")}
+          description={t("deleteHistoryDescription")}
+          onConfirm={() => onDelete(batch.id)}
+          title={t("deleteHistory")}
+          trigger={
+            <Button
+              disabled={["QUEUED", "SENDING"].includes(batch.status)}
+              variant="ghost"
+            >
+              <Trash2 /> {t("delete")}
+            </Button>
+          }
+        />
+      </div>
+    </>
   );
 }
 

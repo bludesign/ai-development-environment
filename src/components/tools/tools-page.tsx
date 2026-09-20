@@ -22,6 +22,7 @@ import {
   useCallback,
   useEffect,
   useMemo,
+  useRef,
   useState,
   useSyncExternalStore,
 } from "react";
@@ -164,37 +165,72 @@ export function ToolsPage({
       : (selectedServerOrigin ?? browserOrigin);
   const mcpBaseUrl = `${selectedOrigin.replace(/\/$/, "")}/api/mcp`;
 
-  const loadServers = useCallback(async () => {
+  const catalogRequest = useRef<AbortController | null>(null);
+  const loadServers = useCallback(async (signal?: AbortSignal) => {
     const data = await controlPlaneRequest<{
       externalMcpServers: ExternalMcpServerView[];
-    }>(`query ExternalMcpServers { externalMcpServers { ${SERVER_FIELDS} } }`);
-    setServers(data.externalMcpServers);
+    }>(
+      `query ExternalMcpServers { externalMcpServers { ${SERVER_FIELDS} } }`,
+      undefined,
+      { signal },
+    );
+    if (!signal?.aborted) setServers(data.externalMcpServers);
   }, []);
 
   const loadCatalog = useCallback(async () => {
+    catalogRequest.current?.abort();
+    const controller = new AbortController();
+    catalogRequest.current = controller;
     setCatalogLoading(true);
-    try {
-      const body = (await responseJson(
-        await fetch("/api/tools/catalog", { cache: "no-store" }),
-      )) as { groups: ToolCatalogGroup[] };
-      setGroups(body.groups);
-      setError(null);
-    } catch (value) {
-      setError(value instanceof Error ? value.message : String(value));
-    } finally {
-      setCatalogLoading(false);
-    }
+    setError(null);
+    // Render each source as it arrives; a slow external server cannot hold up
+    // built-in tools, their search results, or the preset picker.
+    await Promise.all(
+      (["BUILTIN", "EXTERNAL"] as const).map(async (source) => {
+        try {
+          const body = (await responseJson(
+            await fetch(`/api/tools/catalog?summary=1&source=${source}`, {
+              cache: "no-store",
+              signal: controller.signal,
+            }),
+          )) as { groups: ToolCatalogGroup[] };
+          if (controller.signal.aborted) return;
+          setGroups((current) => {
+            const values = [
+              ...current.filter((group) => group.source !== source),
+              ...body.groups.filter((group) => group.source === source),
+            ];
+            return values.sort((a, b) =>
+              a.source === b.source ? 0 : a.source === "BUILTIN" ? -1 : 1,
+            );
+          });
+        } catch (value) {
+          if (!controller.signal.aborted)
+            setError(value instanceof Error ? value.message : String(value));
+        }
+      }),
+    );
+    if (!controller.signal.aborted) setCatalogLoading(false);
   }, []);
 
   useEffect(() => {
+    const controller = new AbortController();
     const timeout = window.setTimeout(() => {
-      void Promise.all([loadServers(), loadCatalog()])
-        .catch((value) =>
-          setError(value instanceof Error ? value.message : String(value)),
-        )
-        .finally(() => setLoading(false));
+      void loadServers(controller.signal)
+        .catch((value: unknown) => {
+          if (!controller.signal.aborted)
+            setError(value instanceof Error ? value.message : String(value));
+        })
+        .finally(() => {
+          if (!controller.signal.aborted) setLoading(false);
+        });
+      void loadCatalog();
     }, 0);
-    return () => window.clearTimeout(timeout);
+    return () => {
+      window.clearTimeout(timeout);
+      controller.abort();
+      catalogRequest.current?.abort();
+    };
   }, [loadCatalog, loadServers]);
 
   const visibleGroups = useMemo(() => {
@@ -947,6 +983,41 @@ function ToolRow({
 }) {
   const t = useTranslations("tools");
   const [expanded, setExpanded] = useState(false);
+  const [schemaState, setSchemaState] = useState<{
+    tool: typeof tool;
+    schema: Record<string, unknown> | null;
+    error: string | null;
+  } | null>(null);
+  const schema = schemaState?.tool === tool ? schemaState.schema : null;
+  const schemaError = schemaState?.tool === tool ? schemaState.error : null;
+  useEffect(() => {
+    if (!expanded || schema) return;
+    const controller = new AbortController();
+    const params = new URLSearchParams({ groupId, name: tool.name });
+    void fetch(`/api/tools/catalog?${params}`, {
+      cache: "no-store",
+      signal: controller.signal,
+    })
+      .then(responseJson)
+      .then((body) => {
+        if (!controller.signal.aborted)
+          setSchemaState({
+            tool,
+            error: null,
+            schema: (body as { tool: { inputSchema: Record<string, unknown> } })
+              .tool.inputSchema,
+          });
+      })
+      .catch((value: unknown) => {
+        if (!controller.signal.aborted)
+          setSchemaState({
+            tool,
+            schema: null,
+            error: value instanceof Error ? value.message : String(value),
+          });
+      });
+    return () => controller.abort();
+  }, [expanded, groupId, tool, schema]);
   const toggleExpanded = () => setExpanded((value) => !value);
   return (
     <Fragment>
@@ -992,12 +1063,22 @@ function ToolRow({
         className={expanded ? "bg-muted/20 hover:bg-muted/20" : "hidden"}
       >
         <TableCell colSpan={3} className="whitespace-normal p-4">
-          <ToolRunner
-            groupId={groupId}
-            annotations={tool.annotations}
-            schema={tool.inputSchema}
-            toolName={tool.name}
-          />
+          {schema ? (
+            <ToolRunner
+              groupId={groupId}
+              annotations={tool.annotations}
+              schema={schema}
+              toolName={tool.name}
+            />
+          ) : expanded ? (
+            schemaError ? (
+              <Alert variant="destructive">
+                <AlertDescription>{schemaError}</AlertDescription>
+              </Alert>
+            ) : (
+              <Spinner />
+            )
+          ) : null}
         </TableCell>
       </TableRow>
     </Fragment>

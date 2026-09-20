@@ -513,6 +513,24 @@ export const createRunResolvers = (service: RunsService) => ({
       ),
   },
   Subscription: {
+    agentRunListChanged: {
+      subscribe: (
+        _root: unknown,
+        args: {
+          workflowId?: string | null;
+          worktreeId?: string | null;
+          kind?: string | null;
+          appId?: string | null;
+          provider?: string | null;
+          origin?: string | null;
+        },
+        context: GraphQLContext,
+      ) => {
+        requireControlPlane(context);
+        return service.subscribeRunList(args);
+      },
+      resolve: () => true,
+    },
     agentRunsChanged: {
       subscribe: (_root: unknown, _args: unknown, context: GraphQLContext) => {
         requireControlPlane(context);

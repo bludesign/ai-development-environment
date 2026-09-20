@@ -329,6 +329,9 @@ input ResolveSkillSyncItemInput {
 }
 
 extend type Query {
+  "Returns one skill group with its assignments."
+  skillGroup("Stable identifier of this resource." id: ID!): SkillGroup
+
   "Returns a skills overview."
   skillsOverview(
     "Text used to filter matching records. Defaults to `\"\"`."

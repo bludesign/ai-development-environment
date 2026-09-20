@@ -1,6 +1,6 @@
 import type {
   ExternalMcpServerView,
-  ToolCatalogGroup,
+  ToolCatalogSummaryGroup as ToolCatalogGroup,
   ToolCallAuditView,
 } from "@/services/tools/types";
 

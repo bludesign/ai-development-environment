@@ -1,6 +1,11 @@
 "use client";
 
 import {
+  createRefreshCoalescer,
+  type RefreshCoalescer,
+} from "@/lib/refresh-coalescer";
+
+import {
   CODEBASE_BROWSE_JOB_KIND,
   CODEBASE_RECONCILE_EVENT_CAPABILITY,
   MAX_CODEBASE_RECONCILE_INTERVAL_SECONDS,
@@ -33,7 +38,6 @@ import {
   Fragment,
   useCallback,
   useEffect,
-  useMemo,
   useRef,
   useState,
 } from "react";
@@ -91,6 +95,7 @@ import { copyText, createClientId } from "@/lib/browser-utils";
 import {
   controlPlaneRequest,
   controlPlaneSubscriptions,
+  onControlPlaneRecovery,
 } from "@/lib/control-plane-client";
 import { cn } from "@/lib/utils";
 import { CliHealthResults } from "@/components/status/cli-health-results";
@@ -150,6 +155,11 @@ export function AgentDetail({ agentId }: { agentId: string }) {
   const locale = useLocale();
   const router = useRouter();
   const [agent, setAgent] = useState<Agent | null>(null);
+  const agentRevision = useRef(0);
+  const applyAgent = useCallback((value: Agent) => {
+    ++agentRevision.current;
+    setAgent(value);
+  }, []);
   const [diskSpace, setDiskSpace] = useState<AgentDiskSpace | null>(null);
   const [cliHealth, setCliHealth] = useState<AgentCliHealthStatus | null>(null);
   const [cliHealthRunning, setCliHealthRunning] = useState(false);
@@ -168,27 +178,41 @@ export function AgentDetail({ agentId }: { agentId: string }) {
   const [renameBusy, setRenameBusy] = useState(false);
   const [renameError, setRenameError] = useState<string | null>(null);
   const latestLoad = useRef(0);
-  const load = useCallback(async () => {
-    const loadId = ++latestLoad.current;
-    try {
-      const data = await controlPlaneRequest<{
-        agent: Agent | null;
-        agentCadenceSettings: AgentCadenceSettings;
-        agentJobs: AgentJob[];
-        codebaseOverview: { repositories: CodebaseOverviewRepository[] };
-        agentDiskSpace: AgentDiskSpace;
-        agentCliHealthStatus: AgentCliHealthStatus;
-      }>(
-        `query AgentDetail($id: ID!) {
-          agent(id: $id) { ${AGENT_FIELDS} }
-          agentDiskSpace(agentId: $id) { ${AGENT_DISK_SPACE_FIELDS} }
-          agentCliHealthStatus(agentId: $id) { ${AGENT_CLI_HEALTH_FIELDS} }
-          agentCadenceSettings(agentId: $id) {
+  type Section = "core" | "codebases" | "disk" | "health";
+  const pendingSections = useRef(new Set<Section>());
+  const loadOwner = useRef<RefreshCoalescer | null>(null);
+  const load = useCallback((section?: Section) => {
+    for (const key of section
+      ? [section]
+      : (["core", "codebases", "disk", "health"] as const))
+      pendingSections.current.add(key);
+    return loadOwner.current?.refresh() ?? Promise.resolve();
+  }, []);
+  const fetchSections = useCallback(
+    async (signal: AbortSignal) => {
+      const version = agentRevision.current;
+      const sections = new Set(pendingSections.current);
+      pendingSections.current.clear();
+      const loadId = ++latestLoad.current;
+      try {
+        const data = await controlPlaneRequest<{
+          agent: Agent | null;
+          agentCadenceSettings: AgentCadenceSettings;
+          agentJobs: AgentJob[];
+          codebaseOverview: { repositories: CodebaseOverviewRepository[] };
+          agentDiskSpace: AgentDiskSpace;
+          agentCliHealthStatus: AgentCliHealthStatus;
+        }>(
+          `query AgentDetail($id: ID!, $core: Boolean!, $codebases: Boolean!, $disk: Boolean!, $health: Boolean!) {
+          agent(id: $id) @include(if: $core) { ${AGENT_FIELDS} }
+          agentDiskSpace(agentId: $id) @include(if: $disk) { ${AGENT_DISK_SPACE_FIELDS} }
+          agentCliHealthStatus(agentId: $id) @include(if: $health) { ${AGENT_CLI_HEALTH_FIELDS} }
+          agentCadenceSettings(agentId: $id) @include(if: $core) {
             agentId codebaseScanIntervalSeconds jobReconciliationIntervalSeconds
             gitFetchIntervalSeconds heartbeatIntervalSeconds
           }
-          agentJobs(agentId: $id) { ${JOB_FIELDS} }
-          codebaseOverview {
+          agentJobs(agentId: $id) @include(if: $core) { ${JOB_FIELDS} }
+          codebaseOverview(agentId: $id) @include(if: $codebases) {
             repositories {
               id name description displayOrigin
               codebases {
@@ -198,50 +222,65 @@ export function AgentDetail({ agentId }: { agentId: string }) {
             }
           }
         }`,
-        { id: agentId },
-      );
-      if (loadId !== latestLoad.current) return;
-      setAgent(data.agent);
-      setDiskSpace(data.agentDiskSpace);
-      setCliHealth(data.agentCliHealthStatus);
-      setCadenceSettings(data.agentCadenceSettings);
-      setJobs(data.agentJobs);
-      setCodebases(
-        (data.codebaseOverview?.repositories ?? []).flatMap((repository) =>
-          repository.codebases
-            .filter((codebase) => codebase.agent.id === agentId)
-            .map((codebase) => ({
-              id: codebase.id,
-              folder: codebase.folder,
-              branch: codebase.branch,
-              headSha: codebase.headSha,
-              syncState: codebase.syncState,
-              availability: codebase.availability,
-              lastCheckedAt: codebase.lastCheckedAt,
-              repository: {
-                id: repository.id,
-                name: repository.name,
-                description: repository.description,
-                displayOrigin: repository.displayOrigin,
-              },
-            })),
-        ),
-      );
-      setSelectedJobId((current) =>
-        current && data.agentJobs.some((job) => job.id === current)
-          ? current
-          : (data.agentJobs[0]?.id ?? null),
-      );
-      setLoadError(null);
-    } catch (value) {
-      if (loadId !== latestLoad.current) return;
-      setLoadError(value instanceof Error ? value.message : String(value));
-    } finally {
-      if (loadId === latestLoad.current) setLoading(false);
-    }
-  }, [agentId]);
+          {
+            id: agentId,
+            core: sections.has("core"),
+            codebases: sections.has("codebases"),
+            disk: sections.has("disk"),
+            health: sections.has("health"),
+          },
+          { signal },
+        );
+        if (signal.aborted || loadId !== latestLoad.current) return;
+        if (sections.has("core") && version === agentRevision.current)
+          setAgent(data.agent);
+        if (sections.has("disk")) setDiskSpace(data.agentDiskSpace);
+        if (sections.has("health")) setCliHealth(data.agentCliHealthStatus);
+        if (sections.has("core")) setCadenceSettings(data.agentCadenceSettings);
+        if (sections.has("core")) setJobs(data.agentJobs);
+        if (sections.has("codebases"))
+          setCodebases(
+            (data.codebaseOverview?.repositories ?? []).flatMap((repository) =>
+              repository.codebases
+                .filter((codebase) => codebase.agent.id === agentId)
+                .map((codebase) => ({
+                  id: codebase.id,
+                  folder: codebase.folder,
+                  branch: codebase.branch,
+                  headSha: codebase.headSha,
+                  syncState: codebase.syncState,
+                  availability: codebase.availability,
+                  lastCheckedAt: codebase.lastCheckedAt,
+                  repository: {
+                    id: repository.id,
+                    name: repository.name,
+                    description: repository.description,
+                    displayOrigin: repository.displayOrigin,
+                  },
+                })),
+            ),
+          );
+        if (sections.has("core"))
+          setSelectedJobId((current) =>
+            current && data.agentJobs.some((job) => job.id === current)
+              ? current
+              : (data.agentJobs[0]?.id ?? null),
+          );
+        setLoadError(null);
+      } catch (value) {
+        if (signal.aborted || loadId !== latestLoad.current) return;
+        setLoadError(value instanceof Error ? value.message : String(value));
+      } finally {
+        if (!signal.aborted && loadId === latestLoad.current) setLoading(false);
+      }
+    },
+    [agentId],
+  );
 
   useEffect(() => {
+    const owner = createRefreshCoalescer(fetchSections);
+    loadOwner.current = owner;
+    const recovery = onControlPlaneRecovery(() => void load());
     const initialLoad = window.setTimeout(() => void load(), 0);
     const client = controlPlaneSubscriptions();
     const unsubscribeAgent = client.subscribe<{ agentChanged: Agent }>(
@@ -251,7 +290,7 @@ export function AgentDetail({ agentId }: { agentId: string }) {
       },
       {
         next: (value) =>
-          value.data?.agentChanged && setAgent(value.data.agentChanged),
+          value.data?.agentChanged && applyAgent(value.data.agentChanged),
         error: () => undefined,
         complete: () => undefined,
       },
@@ -260,12 +299,13 @@ export function AgentDetail({ agentId }: { agentId: string }) {
       codebaseOverviewChanged: { codebaseId: string | null };
     }>(
       {
-        query: `subscription CodebaseOverviewChanged {
-          codebaseOverviewChanged { codebaseId repositoryId }
+        query: `subscription CodebaseOverviewChanged($agentId: ID!) {
+          codebaseOverviewChanged(agentId: $agentId) { codebaseId repositoryId }
         }`,
+        variables: { agentId },
       },
       {
-        next: () => void load(),
+        next: () => void load("codebases"),
         error: () => undefined,
         complete: () => undefined,
       },
@@ -280,7 +320,7 @@ export function AgentDetail({ agentId }: { agentId: string }) {
         variables: { agentId },
       },
       {
-        next: () => void load(),
+        next: () => void load("health"),
         error: () => undefined,
         complete: () => undefined,
       },
@@ -295,7 +335,7 @@ export function AgentDetail({ agentId }: { agentId: string }) {
             value.data?.diskSpaceChanged === agentId ||
             value.data?.diskSpaceChanged === "settings"
           ) {
-            void load();
+            void load("disk");
           }
         },
         error: () => undefined,
@@ -305,12 +345,15 @@ export function AgentDetail({ agentId }: { agentId: string }) {
     return () => {
       window.clearTimeout(initialLoad);
       latestLoad.current += 1;
+      owner.dispose();
+      recovery();
+      if (loadOwner.current === owner) loadOwner.current = null;
       unsubscribeAgent();
       unsubscribeCodebases();
       unsubscribeCliHealth();
       unsubscribeDiskSpace();
     };
-  }, [agentId, load]);
+  }, [agentId, applyAgent, fetchSections, load]);
 
   const runCliHealth = async () => {
     setCliHealthRunning(true);
@@ -338,15 +381,19 @@ export function AgentDetail({ agentId }: { agentId: string }) {
     }
   };
 
-  const activeJobIds = useMemo(
-    () => jobs.filter(isActiveJob).map((job) => job.id),
-    [jobs],
-  );
-
+  const jobSubscriptions = useRef(new Map<string, () => void>());
   useEffect(() => {
+    const activeIds = new Set(jobs.filter(isActiveJob).map((job) => job.id));
+    for (const [id, dispose] of jobSubscriptions.current) {
+      if (!activeIds.has(id)) {
+        dispose();
+        jobSubscriptions.current.delete(id);
+      }
+    }
     const client = controlPlaneSubscriptions();
-    const unsubscribers = activeJobIds.map((jobId) =>
-      client.subscribe<{ agentJobChanged: AgentJob }>(
+    for (const jobId of activeIds) {
+      if (jobSubscriptions.current.has(jobId)) continue;
+      const dispose = client.subscribe<{ agentJobChanged: AgentJob }>(
         {
           query: `subscription JobChanged($jobId: ID!) { agentJobChanged(jobId: $jobId) { ${JOB_FIELDS} } }`,
           variables: { jobId },
@@ -359,10 +406,17 @@ export function AgentDetail({ agentId }: { agentId: string }) {
           error: () => undefined,
           complete: () => undefined,
         },
-      ),
-    );
-    return () => unsubscribers.forEach((unsubscribe) => unsubscribe());
-  }, [activeJobIds]);
+      );
+      jobSubscriptions.current.set(jobId, dispose);
+    }
+  }, [jobs]);
+  useEffect(() => {
+    const subscriptions = jobSubscriptions.current;
+    return () => {
+      for (const dispose of subscriptions.values()) dispose();
+      subscriptions.clear();
+    };
+  }, [agentId]);
 
   const saveBaseRepoDirectory = async (baseRepoDirectory: string | null) => {
     setDirectoryBusy(true);
@@ -378,7 +432,7 @@ export function AgentDetail({ agentId }: { agentId: string }) {
         }`,
         { agentId, baseRepoDirectory },
       );
-      setAgent(data.updateAgentBaseRepoDirectory);
+      applyAgent(data.updateAgentBaseRepoDirectory);
     } catch (value) {
       setDirectoryError(value instanceof Error ? value.message : String(value));
     } finally {
@@ -399,7 +453,7 @@ export function AgentDetail({ agentId }: { agentId: string }) {
         }`,
         { agentId, name },
       );
-      setAgent(data.renameAgent);
+      applyAgent(data.renameAgent);
       setRenameValue(null);
     } catch (value) {
       setRenameError(value instanceof Error ? value.message : String(value));
@@ -715,14 +769,14 @@ export function AgentDetail({ agentId }: { agentId: string }) {
         agent={agent}
         canBrowseDirectories={canBrowseDirectories}
         key={`${agent.id}:${agent.derivedDataLocationMode ?? "DEFAULT"}:${agent.derivedDataPath ?? ""}`}
-        onSaved={setAgent}
+        onSaved={applyAgent}
       />
 
       <BuildsDirectorySettingsCard
         agent={agent}
         canBrowseDirectories={canBrowseDirectories}
         key={`${agent.id}:${agent.buildsDirectory ?? "default"}:${agent.defaultBuildsDirectory ?? ""}`}
-        onSaved={setAgent}
+        onSaved={applyAgent}
       />
 
       <Card className="gap-0 py-0">
@@ -772,7 +826,13 @@ export function AgentDetail({ agentId }: { agentId: string }) {
       </Card>
 
       {selectedJobId && (
-        <JobMonitor key={selectedJobId} compact jobId={selectedJobId} />
+        <JobMonitor
+          key={selectedJobId}
+          compact
+          jobId={selectedJobId}
+          seed={jobs.find((job) => job.id === selectedJobId)}
+          onJobChanged={handleJobChanged}
+        />
       )}
 
       <section>
@@ -1335,14 +1395,13 @@ function CapabilityRunner({
   const [busy, setBusy] = useState(false);
   const [copied, setCopied] = useState(false);
 
+  const activeJobId = job && isActiveJob(job) ? job.id : null;
   useEffect(() => {
-    if (!job || !isActiveJob(job)) return;
+    if (!activeJobId) return;
     return controlPlaneSubscriptions().subscribe<{ agentJobChanged: AgentJob }>(
       {
-        query: `subscription CapabilityJobChanged($jobId: ID!) {
-          agentJobChanged(jobId: $jobId) { ${JOB_FIELDS} }
-        }`,
-        variables: { jobId: job.id },
+        query: `subscription JobChanged($jobId: ID!) { agentJobChanged(jobId: $jobId) { ${JOB_FIELDS} } }`,
+        variables: { jobId: activeJobId },
       },
       {
         next: (value) => {
@@ -1355,7 +1414,7 @@ function CapabilityRunner({
         complete: () => undefined,
       },
     );
-  }, [job, onJobChanged]);
+  }, [activeJobId, onJobChanged]);
 
   const run = async (event: FormEvent) => {
     event.preventDefault();

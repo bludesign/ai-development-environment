@@ -159,13 +159,10 @@ import {
 } from "./workflow-inspector-data";
 import { WorkflowReadonlyInspector } from "./workflow-readonly-inspector";
 
-const CATALOG_QUERY = `
-  query WorkflowEditorCatalog($id: ID!) {
-    workflowCatalog {
-      schemaVersion globalConcurrency
-      steps { kind category label description details execution configSchema capabilityFlags requiredPaths providedPaths sourceHandles mutatesExternal mutatesWorktree }
-      triggers { kind category label description details configSchema capabilityFlags seedPaths sourceHandles }
-    }
+import { loadWorkflowCatalog } from "./workflow-catalog";
+
+const DEFINITION_QUERY = `
+  query WorkflowEditorDefinition($id: ID!) {
     workflow(id: $id) {
       id name description draftDefinition activeVersionId enabled overlapPolicy overlapScope maxConcurrentRuns completionNotificationsEnabled exclusiveWorktree worktreeConcurrency blocksGitOperations archivedAt
       versionCount runCount createdAt updatedAt
@@ -384,13 +381,18 @@ function WorkflowEditorInner({ workflowId }: { workflowId?: string | null }) {
   );
 
   useEffect(() => {
-    let cancelled = false;
-    void controlPlaneRequest<{
-      workflowCatalog: WorkflowCatalog;
-      workflow: WorkflowSummary | null;
-    }>(CATALOG_QUERY, { id: workflowId ?? "__new__" })
-      .then((data) => {
-        if (cancelled) return;
+    const controller = new AbortController();
+    void Promise.all([
+      loadWorkflowCatalog(controller.signal),
+      controlPlaneRequest<{ workflow: WorkflowSummary | null }>(
+        DEFINITION_QUERY,
+        { id: workflowId ?? "__new__" },
+        { signal: controller.signal },
+      ),
+    ])
+      .then(([workflowCatalog, result]) => {
+        if (controller.signal.aborted) return;
+        const data = { ...result, workflowCatalog };
         const next = data.workflow?.draftDefinition ?? emptyDefinition();
         setCatalog(data.workflowCatalog);
         setWorkflow(data.workflow);
@@ -423,13 +425,14 @@ function WorkflowEditorInner({ workflowId }: { workflowId?: string | null }) {
         setNodes(elements.nodes);
         setEdges(elements.edges);
       })
-      .catch((value) =>
-        setError(value instanceof Error ? value.message : String(value)),
-      )
-      .finally(() => setLoading(false));
-    return () => {
-      cancelled = true;
-    };
+      .catch((value) => {
+        if (!controller.signal.aborted)
+          setError(value instanceof Error ? value.message : String(value));
+      })
+      .finally(() => {
+        if (!controller.signal.aborted) setLoading(false);
+      });
+    return () => controller.abort();
   }, [setEdges, setNodes, workflowId]);
 
   const selectedNode =

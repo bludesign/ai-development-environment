@@ -1,6 +1,11 @@
 "use client";
 
 import {
+  createRefreshCoalescer,
+  type RefreshCoalescer,
+} from "@/lib/refresh-coalescer";
+
+import {
   Archive,
   ArrowDown,
   ArrowRight,
@@ -45,7 +50,6 @@ import {
   useState,
 } from "react";
 
-import { AGENT_FIELDS } from "@/components/agents/graphql-fields";
 import { buildStatusVariant } from "@/components/builds/build-format";
 import { useRebuildBuild } from "@/components/builds/rebuild-button";
 import { RunBuildControls } from "@/components/builds/run-build-controls";
@@ -144,6 +148,7 @@ import { worktreeHighlightSurfaceClasses } from "@/lib/worktree-highlight";
 import {
   controlPlaneRequest,
   controlPlaneSubscriptions,
+  onControlPlaneRecovery,
 } from "@/lib/control-plane-client";
 import { cn } from "@/lib/utils";
 import { Link, useRouter } from "@/i18n/navigation";
@@ -664,13 +669,19 @@ export function WorktreesPage({ appId }: { appId?: string }) {
   const [branchFilter, setBranchFilter] = useState(storedFilters.branches);
   const latestLoad = useRef(0);
 
-  const load = useCallback(async () => {
-    const request = ++latestLoad.current;
-    try {
-      const data = await controlPlaneRequest<{
-        worktreeOverview: WorktreeOverview;
-      }>(
-        `query WorktreeOverview($appId: ID) {
+  const overviewOwner = useRef<RefreshCoalescer | null>(null);
+  const load = useCallback(
+    () => overviewOwner.current?.refresh() ?? Promise.resolve(),
+    [],
+  );
+  const fetchOverview = useCallback(
+    async (signal: AbortSignal) => {
+      const request = ++latestLoad.current;
+      try {
+        const data = await controlPlaneRequest<{
+          worktreeOverview: WorktreeOverview;
+        }>(
+          `query WorktreeOverview($appId: ID) {
           worktreeOverview(appId: $appId) {
             hiddenCount
             settings { editorVariant updatedAt }
@@ -681,10 +692,10 @@ export function WorktreesPage({ appId }: { appId?: string }) {
               createdAt updatedAt finishedAt
             }
             agents {
-              agent { ${AGENT_FIELDS} }
+              agent { id name hostname capabilities baseRepoDirectory connectionStatus }
               codebases {
                 iosBuildConfigured
-                blockingJob { id agentId kind payload status idempotencyKey result error timeoutSeconds createdAt startedAt finishedAt updatedAt }
+                blockingJob { id agentId kind status error createdAt startedAt finishedAt updatedAt }
                 quickActions {
             id name description quickActionIconKey quickActionButtonVariant
             hasPlainTrigger(resourceKind: "WORKTREE")
@@ -702,23 +713,42 @@ export function WorktreesPage({ appId }: { appId?: string }) {
             }
           }
         }`,
-        { appId: appId ?? null },
-      );
-      if (request !== latestLoad.current) return;
-      setOverview(data.worktreeOverview);
-      setError(null);
-    } catch (value) {
-      if (request === latestLoad.current)
-        setError(value instanceof Error ? value.message : String(value));
-    } finally {
-      if (request === latestLoad.current) setLoading(false);
-    }
-  }, [appId]);
-
-  useJiraTicketChanges(
-    () => void load(),
-    () => void load(),
+          { appId: appId ?? null },
+          { signal },
+        );
+        if (request !== latestLoad.current || signal.aborted) return;
+        setOverview(data.worktreeOverview);
+        setError(null);
+      } catch (value) {
+        if (signal.aborted) return;
+        if (request === latestLoad.current && !signal.aborted)
+          setError(value instanceof Error ? value.message : String(value));
+      } finally {
+        if (request === latestLoad.current && !signal.aborted)
+          setLoading(false);
+      }
+    },
+    [appId],
   );
+
+  useJiraTicketChanges(() => void load());
+
+  useEffect(() => {
+    const owner = createRefreshCoalescer(fetchOverview);
+    overviewOwner.current = owner;
+    const recovery = onControlPlaneRecovery(
+      (event) => {
+        if (event?.initialConnection) void owner.refreshIfIdle();
+        else void owner.refresh();
+      },
+      { includeInitial: true },
+    );
+    return () => {
+      owner.dispose();
+      recovery();
+      if (overviewOwner.current === owner) overviewOwner.current = null;
+    };
+  }, [fetchOverview]);
 
   useEffect(() => {
     const initial = window.setTimeout(() => void load(), 0);
@@ -746,10 +776,18 @@ export function WorktreesPage({ appId }: { appId?: string }) {
     const unsubscribeWorkflows = subscriptions.subscribe(
       {
         query:
-          "subscription WorktreeQuickActionsChanged { workflowsChanged { id } }",
+          "subscription WorktreeQuickActionsChanged { workflowChanges { definitionsChanged } }",
       },
       {
-        next: () => void load(),
+        next: (value) => {
+          if (
+            (
+              value.data?.workflowChanges as
+                { definitionsChanged?: boolean } | undefined
+            )?.definitionsChanged
+          )
+            void load();
+        },
         error: () => undefined,
         complete: () => undefined,
       },
@@ -762,7 +800,7 @@ export function WorktreesPage({ appId }: { appId?: string }) {
       unsubscribeBuilds();
       unsubscribeWorkflows();
     };
-  }, [load]);
+  }, [load, appId]);
 
   useEffect(() => {
     const syncIssueFromUrl = () =>

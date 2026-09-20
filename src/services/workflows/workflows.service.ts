@@ -1,3 +1,5 @@
+import { workflowQueueUsesWorktree } from "./workflow-queue-scope";
+import { filterAsyncIterator } from "@/lib/filter-async-iterator";
 import "server-only";
 
 import { createHash, randomUUID } from "node:crypto";
@@ -69,6 +71,7 @@ import {
   agentOnlineWindowMs,
   agentEventBus,
   COMMAND_RUN_OUTPUT_CHANGED_TOPIC,
+  ACTION_CENTER_CHANGED_TOPIC,
   SIDEBAR_STATUS_CHANGED_TOPIC,
   type AgentControlService,
 } from "@/services/agent-control";
@@ -548,6 +551,9 @@ function publishRunChanged(runId: string): void {
   });
   agentEventBus.publish(SIDEBAR_STATUS_CHANGED_TOPIC, {
     sidebarStatusChanged: true,
+  });
+  agentEventBus.publish(ACTION_CENTER_CHANGED_TOPIC, {
+    actionCenterChanged: true,
   });
 }
 
@@ -1773,7 +1779,7 @@ export class WorkflowsService {
     return result.count;
   }
 
-  async run(id: string) {
+  async run(id: string, includeEvents = true) {
     const prisma = await getPrismaClient();
     return prisma.workflowRun.findUnique({
       where: { id },
@@ -1808,19 +1814,35 @@ export class WorkflowsService {
           },
         },
         waits: { orderBy: { createdAt: "asc" } },
-        events: { orderBy: { sequence: "asc" } },
+        events: includeEvents ? { orderBy: { sequence: "asc" } } : false,
+        _count: { select: { events: true } },
         resourceLinks: { orderBy: { createdAt: "asc" } },
       },
     });
   }
 
-  async runEvents(runId: string, afterSequence = -1, first = 500) {
+  async runEvents(
+    runId: string,
+    afterSequence = -1,
+    first: number | null = 500,
+    options: { beforeSequence?: number | null; latest?: boolean } = {},
+  ) {
     const prisma = await getPrismaClient();
-    return prisma.workflowRunEvent.findMany({
-      where: { runId, sequence: { gt: afterSequence } },
-      orderBy: { sequence: "asc" },
-      take: Math.min(Math.max(first, 1), 1_000),
+    const descending = options.latest || options.beforeSequence != null;
+    const events = await prisma.workflowRunEvent.findMany({
+      where: {
+        runId,
+        sequence: {
+          gt: afterSequence,
+          ...(options.beforeSequence == null
+            ? {}
+            : { lt: options.beforeSequence }),
+        },
+      },
+      orderBy: { sequence: descending ? "desc" : "asc" },
+      ...(first == null ? {} : { take: Math.min(Math.max(first, 1), 1_000) }),
     });
+    return descending ? events.reverse() : events;
   }
 
   async questionBatch(id: string) {
@@ -2438,16 +2460,44 @@ export class WorkflowsService {
     throw new Error("Workflow comparison job timed out");
   }
 
-  async runsForResource(kind: string, resourceId: string) {
+  async runSummariesForResource(kind: string, resourceId: string, first = 6) {
     const prisma = await getPrismaClient();
-    const links = await prisma.workflowRunResourceLink.findMany({
-      where: { kind: kind.trim().toUpperCase(), resourceId: resourceId.trim() },
-      select: { runId: true },
-      distinct: ["runId"],
-      orderBy: { createdAt: "desc" },
-    });
     return prisma.workflowRun.findMany({
-      where: { id: { in: links.map(({ runId }) => runId) } },
+      where: {
+        resourceLinks: {
+          some: {
+            kind: kind.trim().toUpperCase(),
+            resourceId: resourceId.trim(),
+          },
+        },
+      },
+      take: Math.min(Math.max(first, 1), 100),
+      select: {
+        id: true,
+        displayNumber: true,
+        status: true,
+        workflow: { select: { id: true, name: true } },
+      },
+      orderBy: [{ createdAt: "desc" }, { id: "desc" }],
+    });
+  }
+
+  async runsForResource(
+    kind: string,
+    resourceId: string,
+    first?: number | null,
+  ) {
+    const prisma = await getPrismaClient();
+    return prisma.workflowRun.findMany({
+      where: {
+        resourceLinks: {
+          some: {
+            kind: kind.trim().toUpperCase(),
+            resourceId: resourceId.trim(),
+          },
+        },
+      },
+      ...(first == null ? {} : { take: Math.min(Math.max(first, 1), 100) }),
       include: {
         workflow: true,
         version: true,
@@ -2469,7 +2519,7 @@ export class WorkflowsService {
         },
         resourceLinks: { orderBy: { createdAt: "asc" } },
       },
-      orderBy: { createdAt: "desc" },
+      orderBy: [{ createdAt: "desc" }, { id: "desc" }],
     });
   }
 
@@ -6516,6 +6566,58 @@ export class WorkflowsService {
       workflowRunEventAdded: event,
     });
     return event;
+  }
+
+  subscribeChanges(
+    input: {
+      includeQueuePeers?: boolean;
+      workflowId?: string | null;
+      resourceKind?: string | null;
+      resourceId?: string | null;
+    } = {},
+  ) {
+    const source = agentEventBus.iterate<{
+      workflowChanged: { id: string; runId?: string };
+    }>(WORKFLOWS_CHANGED_TOPIC);
+    return filterAsyncIterator(source, async ({ workflowChanged: change }) => {
+      if (change.id !== "runs")
+        return !input.workflowId || change.id === input.workflowId;
+      if (!change.runId || (!input.workflowId && !input.resourceId))
+        return true;
+      const prisma = await getPrismaClient();
+      const run = await prisma.workflowRun.findUnique({
+        where: { id: change.runId },
+        select: {
+          worktreeId: true,
+          workflowId: true,
+          ...(input.resourceId
+            ? {
+                resourceLinks: {
+                  where: {
+                    kind: input.resourceKind?.trim().toUpperCase(),
+                    resourceId: input.resourceId.trim(),
+                  },
+                  select: { id: true },
+                  take: 1,
+                },
+              }
+            : {}),
+        },
+      });
+      // A removed run has no remaining links; reconcile once to remove it from
+      // previously linked views. Existing unrelated runs are filtered cheaply.
+      if (!run) return true;
+      if (
+        input.workflowId &&
+        run.workflowId !== input.workflowId &&
+        !(
+          input.includeQueuePeers &&
+          (await workflowQueueUsesWorktree(input.workflowId, run.worktreeId))
+        )
+      )
+        return false;
+      return !input.resourceId || Boolean(run.resourceLinks?.length);
+    });
   }
 
   subscribeWorkflows() {

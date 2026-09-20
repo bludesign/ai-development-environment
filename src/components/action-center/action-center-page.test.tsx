@@ -19,6 +19,7 @@ import { MiniActionCenter } from "./mini-action-center";
 
 vi.mock("@/lib/control-plane-client", () => ({
   controlPlaneRequest: vi.fn(),
+  onControlPlaneRecovery: vi.fn(() => () => undefined),
   controlPlaneSubscriptions: vi.fn(),
   onControlPlaneConnected: vi.fn(() => vi.fn()),
 }));

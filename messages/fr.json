@@ -4,6 +4,7 @@
     "description": "Un environnement de développement axé sur l’intelligence artificielle."
   },
   "common": {
+    "loadMore": "Charger plus",
     "cancel": "Annuler",
     "continue": "Continuer",
     "cannotBeUndone": "Cette action est irréversible."
@@ -2722,6 +2723,7 @@
     "clearBranchFilter": "Effacer le filtre de branche",
     "pipelineFilter": "Flux de travail",
     "allPipelines": "Tous les pipelines",
+    "latestOnly": "Dernières exécutions uniquement",
     "searchPipelines": "Rechercher des pipelines",
     "noPipelineMatches": "Aucun pipeline ne correspond à la recherche.",
     "loadingRuns": "Chargement des exécutions…",

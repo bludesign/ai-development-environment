@@ -1,6 +1,10 @@
 "use client";
 
 import {
+  readIntegrationConfiguration,
+  subscribeIntegrationConfiguration,
+} from "@/lib/integration-configuration";
+import {
   CheckCircle2,
   ChevronDown,
   ChevronRight,
@@ -15,7 +19,7 @@ import {
   Webhook,
 } from "lucide-react";
 import { useTranslations } from "next-intl";
-import { Fragment, useCallback, useEffect, useState } from "react";
+import { Fragment, useCallback, useEffect, useRef, useState } from "react";
 
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
@@ -42,7 +46,12 @@ import {
 import { Textarea } from "@/components/ui/textarea";
 import { worktreeDetailHref } from "@/components/worktrees/worktree-navigation";
 import { Link } from "@/i18n/navigation";
-import { controlPlaneRequest } from "@/lib/control-plane-client";
+import {
+  controlPlaneRequest,
+  controlPlaneSubscriptions,
+  onControlPlaneRecovery,
+} from "@/lib/control-plane-client";
+import { createRefreshCoalescer } from "@/lib/refresh-coalescer";
 import { isRowActivation } from "@/lib/row-activation";
 import { cn } from "@/lib/utils";
 import {
@@ -243,29 +252,47 @@ function useConfiguration(): {
   );
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const controllerRef = useRef<AbortController | null>(null);
   const reload = useCallback(async () => {
+    controllerRef.current?.abort();
+    const controller = new AbortController();
+    controllerRef.current = controller;
     try {
-      const data = await controlPlaneRequest<{
+      const data = await readIntegrationConfiguration<{
         gitlabSettings: GitLabSettingsView;
         gitlabProjects: GitLabProjectView[];
-      }>(`query GitLabPageConfiguration {
+      }>(
+        "gitlab",
+        `query GitLabPageConfiguration {
         gitlabSettings { ${SETTINGS} }
         gitlabProjects { ${PROJECT} }
-      }`);
+      }`,
+        { signal: controller.signal },
+      );
+      if (controller.signal.aborted) return;
       setConfiguration({
         settings: data.gitlabSettings,
         projects: data.gitlabProjects,
       });
       setError(null);
     } catch (value) {
+      if (controller.signal.aborted) return;
       setError(value instanceof Error ? value.message : String(value));
     } finally {
-      setLoading(false);
+      if (!controller.signal.aborted) setLoading(false);
     }
   }, []);
   useEffect(() => {
     const timeout = window.setTimeout(() => void reload(), 0);
-    return () => window.clearTimeout(timeout);
+    const dispose = subscribeIntegrationConfiguration(
+      "gitlab",
+      () => void reload(),
+    );
+    return () => {
+      window.clearTimeout(timeout);
+      dispose();
+      controllerRef.current?.abort();
+    };
   }, [reload]);
   return { configuration, loading, error, reload };
 }
@@ -804,33 +831,87 @@ export function GitLabPipelinesPage() {
     }
   }, [configuration?.projects, projectId]);
 
-  const load = useCallback(async () => {
-    if (!projectId) return;
-    setBusy(true);
-    try {
-      const data = await controlPlaneRequest<{
-        gitlabPipelines: Paginated<GitLabPipelineView>;
-        gitlabAutoRetryRules: GitLabAutoRetryRuleView[];
-      }>(
-        `query GitLabPipelines($projectId: ID!, $page: Int!) { gitlabPipelines(projectId: $projectId, page: $page) { total page perPage nextPage items { ${PIPELINE} } } gitlabAutoRetryRules(projectId: $projectId) { id projectId pipelineId enabled maxAttempts attempts lastError lastAttemptAt createdAt updatedAt executions { id pipelineId attempt status lastError createdAt updatedAt } } }`,
-        { projectId, page },
-      );
-      setPipelines(data.gitlabPipelines.items);
-      setPagination(data.gitlabPipelines);
-      setAutoRetryRules(data.gitlabAutoRetryRules);
-      setError(null);
-    } catch (value) {
-      setError(value instanceof Error ? value.message : String(value));
-    } finally {
-      setBusy(false);
-    }
-  }, [page, projectId]);
+  const rulesLoadedFor = useRef<string | null>(null);
+  const loadController = useRef<AbortController | null>(null);
+  const load = useCallback(
+    async (includeRules = true) => {
+      if (!projectId) return;
+      loadController.current?.abort();
+      const controller = new AbortController();
+      loadController.current = controller;
+      setBusy(true);
+      try {
+        const data = await controlPlaneRequest<{
+          gitlabPipelines: Paginated<GitLabPipelineView>;
+          gitlabAutoRetryRules: GitLabAutoRetryRuleView[];
+        }>(
+          `query GitLabPipelines($projectId: ID!, $page: Int!, $includeRules: Boolean!) { gitlabPipelines(projectId: $projectId, page: $page) { total page perPage nextPage items { ${PIPELINE} } } gitlabAutoRetryRules(projectId: $projectId) @include(if: $includeRules) { id projectId pipelineId enabled maxAttempts attempts lastError lastAttemptAt createdAt updatedAt executions { id pipelineId attempt status lastError createdAt updatedAt } } }`,
+          {
+            projectId,
+            page,
+            includeRules: includeRules || rulesLoadedFor.current !== projectId,
+          },
+          { signal: controller.signal },
+        );
+        if (controller.signal.aborted) return;
+        setPipelines(data.gitlabPipelines.items);
+        setPagination(data.gitlabPipelines);
+        if (data.gitlabAutoRetryRules) {
+          setAutoRetryRules(data.gitlabAutoRetryRules);
+          rulesLoadedFor.current = projectId;
+        }
+        setError(null);
+      } catch (value) {
+        if (controller.signal.aborted) return;
+        setError(value instanceof Error ? value.message : String(value));
+      } finally {
+        if (!controller.signal.aborted) setBusy(false);
+      }
+    },
+    [page, projectId],
+  );
 
   useEffect(() => {
     if (!projectId) return;
-    const timeout = window.setTimeout(() => void load(), 0);
-    return () => window.clearTimeout(timeout);
+    const timeout = window.setTimeout(() => void load(false), 0);
+    return () => {
+      window.clearTimeout(timeout);
+      loadController.current?.abort();
+    };
   }, [load, projectId]);
+
+  const latestLoad = useRef(load);
+  useEffect(() => {
+    latestLoad.current = load;
+  }, [load]);
+  useEffect(() => {
+    const refresh = createRefreshCoalescer(() => latestLoad.current());
+    const requestRefresh = () => {
+      void refresh.refresh().catch(() => undefined);
+    };
+    const off = controlPlaneSubscriptions().subscribe<{
+      gitlabPipelineStatusChanged: { projectId: string };
+    }>(
+      {
+        query:
+          "subscription GitLabPipelineRulesChanged { gitlabPipelineStatusChanged { projectId } }",
+      },
+      {
+        next: ({ data }) => {
+          if (data?.gitlabPipelineStatusChanged.projectId === projectId)
+            requestRefresh();
+        },
+        error: () => undefined,
+        complete: () => undefined,
+      },
+    );
+    const recover = onControlPlaneRecovery(requestRefresh);
+    return () => {
+      off();
+      recover();
+      refresh.dispose();
+    };
+  }, [projectId]);
 
   const loadJobs = async (pipelineId: string) => {
     setJobStates((items) => ({

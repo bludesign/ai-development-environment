@@ -13,6 +13,12 @@ const requestHeaders = JSON.stringify([
 ]);
 
 export async function seedSse(prisma: PrismaClient): Promise<void> {
+  const productHistoryStartedAt = minutesAgo(18);
+  const productHistoryFirstEventAt = minutesAgo(17);
+  const productHistoryFinishedAt = minutesAgo(16);
+  const productHistoryEventAt = (sequence: number) =>
+    new Date(productHistoryFirstEventAt.getTime() + sequence * 8_000);
+
   await prisma.sseEndpoint.createMany({
     data: [
       {
@@ -226,9 +232,9 @@ export async function seedSse(prisma: PrismaClient): Promise<void> {
         heartbeatIntervalMs: 15000,
       }),
       storedBytes: 284,
-      startedAt: minutesAgo(18),
-      firstEventAt: minutesAgo(17),
-      finishedAt: minutesAgo(16),
+      startedAt: productHistoryStartedAt,
+      firstEventAt: productHistoryFirstEventAt,
+      finishedAt: productHistoryFinishedAt,
       durationMs: 122_400,
       events: {
         create: [
@@ -244,6 +250,7 @@ export async function seedSse(prisma: PrismaClient): Promise<void> {
               price: "$129",
             }),
             eventId: "1349872",
+            createdAt: productHistoryEventAt(0),
           },
           {
             id: "sse-event-emitted-card",
@@ -258,6 +265,7 @@ export async function seedSse(prisma: PrismaClient): Promise<void> {
             }),
             eventId: "1349872",
             fanOutIndex: 0,
+            createdAt: productHistoryEventAt(1),
           },
           {
             id: "sse-event-source-text",
@@ -268,6 +276,7 @@ export async function seedSse(prisma: PrismaClient): Promise<void> {
             eventName: "text",
             data: "Good morning\nHow are you?",
             eventId: "1349872",
+            createdAt: productHistoryEventAt(2),
           },
           {
             id: "sse-event-emitted-text",
@@ -279,6 +288,7 @@ export async function seedSse(prisma: PrismaClient): Promise<void> {
             data: "Good morning\nHow are you?",
             eventId: "1349872",
             fanOutIndex: 0,
+            createdAt: productHistoryEventAt(3),
           },
           {
             id: "sse-event-source-loading",
@@ -289,6 +299,7 @@ export async function seedSse(prisma: PrismaClient): Promise<void> {
             eventName: "loading",
             data: JSON.stringify({ text: "Loading" }),
             eventId: "1349872",
+            createdAt: productHistoryEventAt(4),
           },
           {
             id: "sse-event-emitted-loading",
@@ -300,6 +311,7 @@ export async function seedSse(prisma: PrismaClient): Promise<void> {
             data: JSON.stringify({ text: "Loading" }),
             eventId: "1349872",
             fanOutIndex: 0,
+            createdAt: productHistoryEventAt(5),
           },
           {
             id: "sse-event-source-followup",
@@ -310,6 +322,7 @@ export async function seedSse(prisma: PrismaClient): Promise<void> {
             eventName: "text",
             data: "What would you like to work on?",
             eventId: "1349872",
+            createdAt: productHistoryEventAt(6),
           },
           {
             id: "sse-event-emitted-followup",
@@ -321,6 +334,7 @@ export async function seedSse(prisma: PrismaClient): Promise<void> {
             data: "What would you like to work on?",
             eventId: "1349872",
             fanOutIndex: 0,
+            createdAt: productHistoryEventAt(7),
           },
         ],
       },

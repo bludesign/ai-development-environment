@@ -399,7 +399,10 @@ extend type Mutation {
 
 extend type Subscription {
   "Emits a telemetry change whenever telemetry entries change."
-  telemetryEntriesChanged: TelemetryChange!
+  telemetryEntriesChanged(
+    "Only emit changes affecting this telemetry view; omitted observes all views."
+    view: TelemetryView
+  ): TelemetryChange!
   "Emits a telemetry settings change whenever telemetry settings change."
   telemetrySettingsChanged: TelemetrySettingsChange!
 }

@@ -6,7 +6,7 @@ import { join } from "node:path";
 // schema instances are never split across two module realms (notably under Vitest).
 const require = createRequire(import.meta.url);
 const { buildSubgraphSchema } = require("@apollo/subgraph");
-const { Kind, parse, printSchema } = require("graphql");
+const { Kind, concatAST, parse, printSchema } = require("graphql");
 
 const DESCRIBABLE_DEFINITION_KINDS = new Set([
   Kind.SCHEMA_DEFINITION,
@@ -47,8 +47,8 @@ export async function collectGraphQLFiles(rootDirectory) {
 
 export async function generateRuntimeSchema(rootDirectory) {
   const files = await collectGraphQLFiles(rootDirectory);
-  const typeDefs = files.map(({ source }) => parse(source));
-  const schema = buildSubgraphSchema({ typeDefs });
+  const typeDefs = concatAST(files.map(({ source }) => parse(source)));
+  const schema = buildSubgraphSchema(typeDefs);
   return `${printSchema(schema).trimEnd()}\n`;
 }
 

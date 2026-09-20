@@ -30,6 +30,8 @@ vi.mock("@/i18n/navigation", async () => {
 
 vi.mock("@/lib/control-plane-client", () => ({
   controlPlaneRequest: vi.fn(),
+  onControlPlaneRecovery: vi.fn(() => vi.fn()),
+  onControlPlaneMutation: vi.fn(() => vi.fn()),
   controlPlaneSubscriptions: vi.fn(() => ({
     subscribe: vi.fn(() => vi.fn()),
   })),
@@ -177,6 +179,8 @@ describe("AppShell", () => {
     await waitFor(() => {
       expect(requestMock).toHaveBeenCalledWith(
         expect.stringContaining("sourceControlIntegrationState"),
+        undefined,
+        expect.objectContaining({ signal: expect.any(AbortSignal) }),
       );
     });
     expect(screen.queryByRole("link", { name: "Webhooks" })).toBeNull();
@@ -229,6 +233,8 @@ describe("AppShell", () => {
     await waitFor(() => {
       expect(requestMock).toHaveBeenCalledWith(
         expect.stringContaining("sourceControlIntegrationState"),
+        undefined,
+        expect.objectContaining({ signal: expect.any(AbortSignal) }),
       );
       expect(
         screen.queryByRole("link", { name: "Pull Requests" }) !== null,

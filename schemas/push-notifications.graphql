@@ -156,6 +156,8 @@ type PushNotificationDelivery {
 
 "A batch of push notifications processed together."
 type PushNotificationBatch {
+  "Push type displayed in history without downloading the editor payload."
+  pushType: String!
   "Stable identifier for this push notification batch."
   id: ID!
   "Identifier of the related request."
@@ -270,6 +272,11 @@ extend type Query {
   "Returns push notification presets."
   pushNotificationPresets: [PushNotificationPreset!]!
   "Returns push notification batches."
+  pushNotificationHistoryItem(
+    "Stable identifier of this resource."
+    id: ID!
+  ): PushNotificationBatch
+  "Recent push notification batches; delivery details resolve only when selected."
   pushNotificationHistory(
     "Maximum number of records to return. Defaults to `100`."
     limit: Int = 100
@@ -376,4 +383,12 @@ extend type Mutation {
 extend type Subscription {
   "Emits a change signal whenever push notifications changes."
   pushNotificationsChanged: Boolean!
+  "Scoped push notification catalog or history invalidations."
+  pushNotificationChanges: PushNotificationChange!
+}
+
+"Sections invalidated by push notification changes."
+type PushNotificationChange {
+  "CATALOG, HISTORY, or ALL, identifying which views need reconciliation."
+  kind: String!
 }

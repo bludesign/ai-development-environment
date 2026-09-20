@@ -17,6 +17,7 @@ import {
 import { RunWorktreeCards } from "./run-worktree-cards";
 
 vi.mock("@/lib/control-plane-client", () => ({
+  onControlPlaneRecovery: vi.fn(() => vi.fn()),
   controlPlaneRequest: vi.fn(),
   controlPlaneSubscriptions: vi.fn(),
 }));
@@ -183,6 +184,8 @@ describe("RunWorktreeCards", () => {
     expect(overviewVariables.at(-1)).toEqual({
       worktreeId: "worktree-1",
       buildFirst: 60,
+      includeCoverage: false,
+      includeQueue: false,
     });
     expect(screen.getByText("build-count:60")).toBeDefined();
   });

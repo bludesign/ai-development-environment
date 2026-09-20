@@ -242,6 +242,10 @@ export function tailscaleRoutesConflict(
 }
 
 export class TailscaleServeService {
+  private readonly pendingInspections = new Map<
+    string,
+    ReturnType<TailscaleServeService["inspectAgents"]>
+  >();
   constructor(private readonly agentControl: AgentControlService) {
     for (const kind of [
       TAILSCALE_SERVE_INSPECT_JOB_KIND,
@@ -448,7 +452,18 @@ export class TailscaleServeService {
     return (await this.operation(operation.id))!;
   }
 
-  async inspect(agentIds: string[], requestId: string) {
+  inspect(agentIds: string[], requestId: string) {
+    const key = JSON.stringify([...new Set(agentIds)].sort());
+    const existing = this.pendingInspections.get(key);
+    if (existing) return existing;
+    const request = this.inspectAgents(agentIds, requestId).finally(() =>
+      this.pendingInspections.delete(key),
+    );
+    this.pendingInspections.set(key, request);
+    return request;
+  }
+
+  private async inspectAgents(agentIds: string[], requestId: string) {
     const retried = await this.operationForRequest(requestId);
     if (retried) return retried;
     const prisma = await getPrismaClient();

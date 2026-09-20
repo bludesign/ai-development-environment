@@ -19,6 +19,7 @@ import { UsagePage } from "./usage-page";
 import { usagePeriodForDate } from "./aggregate-usage";
 
 vi.mock("@/lib/control-plane-client", () => ({
+  onControlPlaneRecovery: vi.fn(() => () => {}),
   controlPlaneRequest: vi.fn(),
   controlPlaneSubscriptions: vi.fn(),
 }));
@@ -469,7 +470,7 @@ describe("UsagePage", () => {
     expect(screen.queryByText("Daily cost by model")).toBeNull();
 
     await act(async () => {
-      await vi.advanceTimersByTimeAsync(2_000);
+      await vi.advanceTimersByTimeAsync(4_000);
     });
     expect(screen.getByText("Daily cost by model")).toBeDefined();
     expect(screen.getByText("1 of 2 compatible agents reported")).toBeDefined();

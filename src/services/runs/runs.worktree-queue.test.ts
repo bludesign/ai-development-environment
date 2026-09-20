@@ -31,6 +31,8 @@ import { WorkflowEventsService } from "@/services/workflows/workflow-events.serv
 import { WorkflowsService } from "@/services/workflows/workflows.service";
 
 import { RunsService } from "./runs.service";
+import { agentEventBus } from "@/services/agent-control/event-bus";
+import { workflowQueueUsesWorktree } from "@/services/workflows/workflow-queue-scope";
 
 describe("durable worktree run queues", () => {
   // Stays on disk: seeding `:memory:` would mean replaying every migration
@@ -480,6 +482,118 @@ describe("durable worktree run queues", () => {
       ).rejects.toThrow("Worktree concurrency limit must be between 0 and 32");
     }
     await expect(prisma.agentRun.count()).resolves.toBe(0);
+  });
+
+  test("queue invalidation follows both queued workflows and managed child runs, then stops at completion", async () => {
+    const definition = emptyWorkflowDefinition("Queue observer");
+    await prisma.workflow.create({
+      data: {
+        id: "observed-workflow",
+        name: definition.name,
+        draftDefinitionJson: JSON.stringify(definition),
+      },
+    });
+    await prisma.workflowVersion.create({
+      data: {
+        id: "observed-version",
+        workflowId: "observed-workflow",
+        version: 1,
+        name: definition.name,
+        schemaVersion: definition.schemaVersion,
+        definitionJson: JSON.stringify(definition),
+        contentHash: "observer",
+      },
+    });
+    await prisma.workflowRun.create({
+      data: {
+        id: "observed-run",
+        displayNumber: 0,
+        workflowId: "observed-workflow",
+        versionId: "observed-version",
+        idempotencyKey: "observed",
+        triggerKind: "MANUAL",
+        triggerSubjectKey: "manual",
+        triggerPayloadJson: "{}",
+        sessionDataJson: "{}",
+        status: "QUEUED",
+        worktreeId: "worktree-1",
+      },
+    });
+    const linked = await prisma.workflowRun.findUniqueOrThrow({
+      where: { id: "observed-run" },
+    });
+    await prisma.workflowRun.create({
+      data: {
+        ...linked,
+        id: "linked-run",
+        displayNumber: 1,
+        idempotencyKey: "linked-run",
+      },
+    });
+    await prisma.workflowRunResourceLink.create({
+      data: {
+        id: "link",
+        runId: "linked-run",
+        kind: "WORKTREE",
+        resourceId: "target-resource",
+      },
+    });
+    const workflows = new WorkflowsService(new WorkflowEventsService());
+    const changes = workflows.subscribeChanges({
+      resourceKind: "WORKTREE",
+      resourceId: "target-resource",
+    });
+    try {
+      const next = changes.next();
+      agentEventBus.publish("workflows:changed", {
+        workflowChanged: { id: "runs", runId: "observed-run" },
+      });
+      agentEventBus.publish("workflows:changed", {
+        workflowChanged: { id: "runs", runId: "linked-run" },
+      });
+      expect((await next).value).toEqual({
+        workflowChanged: { id: "runs", runId: "linked-run" },
+      });
+    } finally {
+      await changes.return?.();
+    }
+    await prisma.workflowRun.delete({ where: { id: "linked-run" } });
+    await expect(
+      workflowQueueUsesWorktree("observed-workflow", "worktree-1"),
+    ).resolves.toBe(true);
+    await expect(
+      workflowQueueUsesWorktree("observed-workflow", "other-worktree"),
+    ).resolves.toBe(false);
+    await prisma.workflowRun.update({
+      where: { id: "observed-run" },
+      data: { status: "RUNNING", worktreeId: null },
+    });
+    await expect(
+      workflowQueueUsesWorktree("observed-workflow", "worktree-1"),
+    ).resolves.toBe(false);
+    const child = await service.create(input("SESSION", "Child queue"));
+    if (!child) throw new Error("Expected a queued child run");
+    await prisma.agentRun.update({
+      where: { id: child.id },
+      data: {
+        workflowRunId: "observed-run",
+        status: "QUEUED",
+        origin: "MANAGED",
+      },
+    });
+    await expect(
+      workflowQueueUsesWorktree("observed-workflow", "worktree-1"),
+    ).resolves.toBe(true);
+    await prisma.agentRun.update({
+      where: { id: child.id },
+      data: { status: "COMPLETED" },
+    });
+    await expect(
+      workflowQueueUsesWorktree("observed-workflow", "worktree-1"),
+    ).resolves.toBe(false);
+    await expect(
+      workflowQueueUsesWorktree("observed-workflow", null),
+    ).resolves.toBe(false);
   });
 
   test("gives an exclusive workflow the whole worktree while admitting its own runs", async () => {

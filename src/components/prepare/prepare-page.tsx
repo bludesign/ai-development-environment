@@ -1,6 +1,11 @@
 "use client";
 
 import {
+  createRefreshCoalescer,
+  type RefreshCoalescer,
+} from "@/lib/refresh-coalescer";
+
+import {
   FolderOpen,
   GitBranch,
   Monitor,
@@ -26,8 +31,9 @@ import { Spinner } from "@/components/ui/spinner";
 import {
   controlPlaneRequest,
   controlPlaneSubscriptions,
+  onControlPlaneRecovery,
 } from "@/lib/control-plane-client";
-import { waitForWorktreeJob } from "@/components/worktrees/worktree-jobs";
+import { waitForWorktreeJobs } from "@/components/worktrees/worktree-jobs";
 
 type PreparationState =
   | "PENDING"
@@ -141,7 +147,14 @@ export function PreparePage() {
   } | null>(null);
   const inspectionRequested = useRef(new Set<string>());
 
+  const ownerRef = useRef<RefreshCoalescer | null>(null);
+  const currentOverview = useRef<PreparationOverview | null>(null);
+  const lifecycle = useRef<AbortController | null>(null);
   const load = useCallback(async () => {
+    await ownerRef.current?.refresh();
+    return currentOverview.current;
+  }, []);
+  const fetchOverview = useCallback(async (signal: AbortSignal) => {
     try {
       const data = await controlPlaneRequest<{
         worktreePreparationOverview: PreparationOverview;
@@ -149,21 +162,27 @@ export function PreparePage() {
         `query WorktreePreparationOverview {
           worktreePreparationOverview { ${OVERVIEW_FIELDS} }
         }`,
+        undefined,
+        { signal },
       );
+      if (signal.aborted) return;
+      currentOverview.current = data.worktreePreparationOverview;
       setOverview(data.worktreePreparationOverview);
       setError(null);
       return data.worktreePreparationOverview;
     } catch (value) {
+      if (signal.aborted) return;
       setError(value instanceof Error ? value.message : String(value));
       return null;
     } finally {
-      setLoading(false);
+      if (!signal.aborted) setLoading(false);
     }
   }, []);
 
   const run = useCallback(
     async (action: "INSPECT" | "APPLY" | "UNDO", worktreeIds: string[]) => {
-      if (!worktreeIds.length) return;
+      const signal = lifecycle.current?.signal;
+      if (!worktreeIds.length || signal?.aborted) return;
       setRunning(true);
       setRunningIds((current) => new Set([...current, ...worktreeIds]));
       setError(null);
@@ -187,22 +206,25 @@ export function PreparePage() {
               requestId: crypto.randomUUID(),
             },
           },
+          { signal, cancelBeforeDispatch: action === "INSPECT" },
         );
+        if (signal?.aborted) return;
         const skippedMessage = data.runWorktreePreparations.skipped
           .map((item) => item.reason)
           .join("; ");
-        await load();
-        await Promise.all(
-          data.runWorktreePreparations.jobs.map((job) =>
-            waitForWorktreeJob(job.id),
-          ),
+        await waitForWorktreeJobs(
+          data.runWorktreePreparations.jobs.map((job) => job.id),
+          signal,
         );
+        if (signal?.aborted) return;
         await load();
         if (skippedMessage) setError(skippedMessage);
       } catch (value) {
+        if (signal?.aborted) return;
         await load();
         setError(value instanceof Error ? value.message : String(value));
       } finally {
+        if (signal?.aborted) return;
         setRunning(false);
         setRunningIds((current) => {
           const next = new Set(current);
@@ -216,6 +238,11 @@ export function PreparePage() {
 
   useEffect(() => {
     let active = true;
+    const controller = new AbortController();
+    lifecycle.current = controller;
+    const owner = createRefreshCoalescer(fetchOverview);
+    ownerRef.current = owner;
+    const recover = onControlPlaneRecovery(() => void load());
     const initial = window.setTimeout(async () => {
       const value = await load();
       if (!active || !value) return;
@@ -248,10 +275,14 @@ export function PreparePage() {
     );
     return () => {
       active = false;
+      controller.abort();
+      owner.dispose();
+      recover();
+      if (ownerRef.current === owner) ownerRef.current = null;
       window.clearTimeout(initial);
       unsubscribe();
     };
-  }, [load, run]);
+  }, [fetchOverview, load, run]);
 
   const eligibleIds = useMemo(
     () =>

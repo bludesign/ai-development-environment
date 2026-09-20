@@ -1,6 +1,11 @@
 "use client";
 
 import {
+  createRefreshCoalescer,
+  type RefreshCoalescer,
+} from "@/lib/refresh-coalescer";
+
+import {
   AlertTriangle,
   CheckCircle2,
   ExternalLink,
@@ -52,6 +57,7 @@ import { createClientId } from "@/lib/browser-utils";
 import {
   controlPlaneRequest,
   controlPlaneSubscriptions,
+  onControlPlaneRecovery,
 } from "@/lib/control-plane-client";
 import { cn } from "@/lib/utils";
 
@@ -292,28 +298,43 @@ export function TailscaleServePage() {
   const [deleteTemplate, setDeleteTemplate] = useState<Template | null>(null);
   const inspectedOnAppearance = useRef(false);
 
-  const load = useCallback(async () => {
+  const ownerRef = useRef<RefreshCoalescer | null>(null);
+  const lifecycle = useRef<AbortController | null>(null);
+  const snapshotVersion = useRef(0);
+  const load = useCallback(
+    () => ownerRef.current?.refresh() ?? Promise.resolve(),
+    [],
+  );
+  const fetchOverview = useCallback(async (signal: AbortSignal) => {
+    const version = snapshotVersion.current;
     try {
       const data = await controlPlaneRequest<{
         tailscaleServeOverview: Overview;
       }>(
         `query TailscaleServeOverview { tailscaleServeOverview { ${OVERVIEW_FIELDS} } }`,
+        undefined,
+        { signal },
       );
+      if (signal.aborted || version !== snapshotVersion.current) return;
       setOverview(data.tailscaleServeOverview);
       setError(null);
     } catch (value) {
+      if (signal.aborted) return;
       setError(value instanceof Error ? value.message : String(value));
     } finally {
-      setLoading(false);
+      if (!signal.aborted) setLoading(false);
     }
   }, []);
 
   const run = useCallback(
     async (work: () => Promise<Operation>) => {
+      const signal = lifecycle.current?.signal;
+      if (signal?.aborted) return null;
       setBusy(true);
       setError(null);
       try {
         const operation = await work();
+        if (signal?.aborted) return null;
         const failures = operation.agents.filter(
           ({ status }) => !["SUCCEEDED", "QUEUED", "RUNNING"].includes(status),
         );
@@ -330,10 +351,11 @@ export function TailscaleServePage() {
         await load();
         return operation;
       } catch (value) {
+        if (signal?.aborted) return null;
         setError(value instanceof Error ? value.message : String(value));
         return null;
       } finally {
-        setBusy(false);
+        if (!signal?.aborted) setBusy(false);
       }
     },
     [load, t],
@@ -349,17 +371,30 @@ export function TailscaleServePage() {
           inspectTailscaleServe(agentIds: [], requestId: $requestId) { ${OPERATION_FIELDS} }
         }`,
           { requestId: createClientId() },
+          { signal: lifecycle.current?.signal, cancelBeforeDispatch: true },
         );
         return data.inspectTailscaleServe;
       }),
     [run],
   );
 
+  const latestInspect = useRef(inspect);
   useEffect(() => {
-    if (!inspectedOnAppearance.current) {
-      inspectedOnAppearance.current = true;
-      void load().then(() => inspect());
-    }
+    latestInspect.current = inspect;
+  }, [inspect]);
+  useEffect(() => {
+    const controller = new AbortController();
+    lifecycle.current = controller;
+    const owner = createRefreshCoalescer(fetchOverview);
+    ownerRef.current = owner;
+    const recovery = onControlPlaneRecovery(() => void load());
+    const initial = window.setTimeout(() => {
+      void load();
+      if (!inspectedOnAppearance.current) {
+        inspectedOnAppearance.current = true;
+        void latestInspect.current();
+      }
+    }, 0);
     const unsubscribe = controlPlaneSubscriptions().subscribe<{
       tailscaleServeOverviewChanged: Overview;
     }>(
@@ -371,6 +406,7 @@ export function TailscaleServePage() {
       {
         next: (value) => {
           if (value.data?.tailscaleServeOverviewChanged) {
+            ++snapshotVersion.current;
             setOverview(value.data.tailscaleServeOverviewChanged);
           }
         },
@@ -379,9 +415,14 @@ export function TailscaleServePage() {
       },
     );
     return () => {
+      window.clearTimeout(initial);
       unsubscribe();
+      controller.abort();
+      owner.dispose();
+      recovery();
+      if (ownerRef.current === owner) ownerRef.current = null;
     };
-  }, [inspect, load]);
+  }, [fetchOverview, load]);
 
   const save = async () => {
     if (!editor) return;

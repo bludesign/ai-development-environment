@@ -20,6 +20,7 @@ export const JIRA_TICKET_DETAIL_FIELDS = `${JIRA_SUMMARY_FIELDS}
     author { ${JIRA_PERSON_FIELDS} }
     createdAt
   }
+  commentsTotal
   comments {
     id author { ${JIRA_PERSON_FIELDS} } body
     content { ${JIRA_RICH_TEXT_FIELDS} }

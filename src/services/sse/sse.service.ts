@@ -1990,20 +1990,82 @@ export class SseService {
     return { format, content, rowCount: rows.length };
   }
 
-  async historyRequest(id: string) {
+  async historyRequest(id: string, includeEvents = true) {
     const prisma = await getPrismaClient();
     const value = await prisma.sseRequestHistory.findUnique({
       where: { id },
-      include: { events: { orderBy: { sequence: "asc" } } },
+      include: {
+        _count: { select: { events: true } },
+        ...(includeEvents
+          ? { events: { orderBy: { sequence: "asc" as const } } }
+          : {}),
+      },
     });
     if (!value) return null;
     return {
       ...this.requestView(value),
-      events: value.events.map((event) => ({
+      events: value.events?.map((event) => ({
         ...event,
         createdAt: event.createdAt.toISOString(),
       })),
     };
+  }
+
+  async historyEvents(
+    requestId: string,
+    options: {
+      first?: number | null;
+      beforeSequence?: number | null;
+      afterSequence?: number | null;
+      latest?: boolean | null;
+      knownRanges?: Array<{
+        fromSequence: number;
+        throughSequence: number;
+      }> | null;
+    } = {},
+  ) {
+    const prisma = await getPrismaClient();
+    const ranges = options.knownRanges ?? [];
+    if (
+      ranges.length > 100 ||
+      ranges.some(
+        (range) =>
+          !Number.isInteger(range.fromSequence) ||
+          !Number.isInteger(range.throughSequence) ||
+          range.fromSequence < 0 ||
+          range.throughSequence < range.fromSequence,
+      )
+    )
+      throw new Error("Invalid known sequence ranges");
+    const descending = options.latest || options.beforeSequence != null;
+    const events = await prisma.sseHistoryEvent.findMany({
+      where: {
+        requestId,
+        sequence: {
+          gt: options.afterSequence ?? undefined,
+          lt: options.beforeSequence ?? undefined,
+        },
+        ...(ranges.length
+          ? {
+              NOT: ranges.map((range) => ({
+                sequence: {
+                  gte: range.fromSequence,
+                  lte: range.throughSequence,
+                },
+              })),
+            }
+          : {}),
+      },
+      orderBy: { sequence: descending ? "desc" : "asc" },
+      ...(options.first == null
+        ? {}
+        : { take: Math.max(1, Math.min(5000, options.first)) }),
+    });
+    if (descending) events.reverse();
+    return events.map((event) => ({
+      ...event,
+      createdAt: event.createdAt.toISOString(),
+    }));
   }
 
   async clearHistory(input: {

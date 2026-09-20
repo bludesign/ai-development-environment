@@ -4,6 +4,7 @@
     "description": "An AI-focused development environment."
   },
   "common": {
+    "loadMore": "Load more",
     "cancel": "Cancel",
     "continue": "Continue",
     "cannotBeUndone": "This action cannot be undone."
@@ -2722,6 +2723,7 @@
     "clearBranchFilter": "Clear branch filter",
     "pipelineFilter": "Pipeline",
     "allPipelines": "All pipelines",
+    "latestOnly": "Latest only",
     "searchPipelines": "Search pipelines",
     "noPipelineMatches": "No pipelines match your search.",
     "loadingRuns": "Loading workflow runs…",

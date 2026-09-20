@@ -30,6 +30,7 @@ function renderPage() {
 
 vi.mock("@/lib/control-plane-client", () => ({
   controlPlaneRequest: vi.fn(),
+  onControlPlaneRecovery: vi.fn(() => () => undefined),
   controlPlaneSubscriptions: vi.fn(),
 }));
 
@@ -150,7 +151,10 @@ beforeEach(() => {
   } as never);
   request.mockImplementation(async (query, variables) => {
     const operation = String(query);
-    if (operation.includes("query NotificationsPage")) {
+    if (
+      operation.includes("query NotificationsPage") ||
+      operation.includes("query NotificationSettings")
+    ) {
       return {
         notifications: {
           items: [notification],
@@ -235,7 +239,7 @@ describe("NotificationsPage", () => {
 
     expect(await screen.findByText("Example · Debug · main")).toBeDefined();
     fireEvent.click(screen.getByRole("tab", { name: "Settings" }));
-    const pushToggle = screen.getByRole("checkbox", {
+    const pushToggle = await screen.findByRole("checkbox", {
       name: "Toggle Web Push for iOS build succeeded",
     });
     expect(pushToggle.getAttribute("data-state")).toBe("unchecked");
@@ -422,7 +426,10 @@ describe("NotificationsPage", () => {
   test("tells the user to configure APNs before devices can be reached", async () => {
     request.mockImplementation(async (query) => {
       const operation = String(query);
-      if (operation.includes("query NotificationsPage")) {
+      if (
+        operation.includes("query NotificationsPage") ||
+        operation.includes("query NotificationSettings")
+      ) {
         return {
           notifications: { items: [], nextCursor: null, totalCount: 0 },
           notificationPreferences: preferences,

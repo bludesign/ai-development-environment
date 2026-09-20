@@ -1,5 +1,7 @@
 "use client";
 
+import { createRefreshCoalescer } from "@/lib/refresh-coalescer";
+
 import {
   Archive,
   CirclePause,
@@ -85,6 +87,7 @@ import { downloadJsonFiles, exportFileStem } from "@/lib/browser-utils";
 import {
   controlPlaneRequest,
   controlPlaneSubscriptions,
+  onControlPlaneRecovery,
 } from "@/lib/control-plane-client";
 import { dayKey, formatDateValue } from "@/lib/date-format";
 import {
@@ -101,7 +104,7 @@ import { useWorkflowLabels } from "./workflow-labels";
 import type { WorkflowRun, WorkflowSummary } from "./types";
 
 const WORKFLOW_FIELDS = `
-  id name description draftDefinition activeVersionId enabled overlapPolicy overlapScope maxConcurrentRuns completionNotificationsEnabled exclusiveWorktree worktreeConcurrency blocksGitOperations archivedAt quickActionKind quickActionIconKey quickActionButtonVariant
+  id name description activeVersionId enabled overlapPolicy overlapScope maxConcurrentRuns completionNotificationsEnabled exclusiveWorktree worktreeConcurrency blocksGitOperations archivedAt quickActionKind quickActionIconKey quickActionButtonVariant
   quickActionRepositories { id name displayOrigin }
   hasPlainTrigger
   triggerChoices { key label description }
@@ -114,7 +117,6 @@ const RUN_FIELDS = `
   workflow { id name }
   worktree { id folder branch highlightColor }
   agent { id name }
-  version { id workflowId version name description schemaVersion definition contentHash publishedAt }
 `;
 
 export function WorkflowsPage() {
@@ -137,44 +139,76 @@ export function WorkflowsPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  const load = useCallback(async () => {
-    try {
-      const data = await controlPlaneRequest<{
-        workflows: { items: WorkflowSummary[] };
-        workflowRuns: { items: WorkflowRun[] };
-      }>(
-        `query WorkflowManagement($archive: String!) {
-        workflows(first: 200) { items { ${WORKFLOW_FIELDS} } }
+  const catalogDirty = useRef(true);
+  const load = useCallback(
+    async (signal?: AbortSignal) => {
+      const includeDefinitions = catalogDirty.current || tab === "workflows";
+      catalogDirty.current = false;
+      try {
+        const data = await controlPlaneRequest<{
+          workflows?: { items: WorkflowSummary[] };
+          workflowRuns: { items: WorkflowRun[] };
+        }>(
+          `query WorkflowManagement($archive: String!, $includeDefinitions: Boolean!) {
+        workflows(first: 200) @include(if: $includeDefinitions) { items { ${WORKFLOW_FIELDS} } }
         workflowRuns(archive: $archive, first: 200) { items { ${RUN_FIELDS} } }
       }`,
-        { archive: runArchiveFilter },
-      );
-      setWorkflows(data.workflows.items);
-      setRuns(data.workflowRuns.items);
-      setError(null);
-    } catch (value) {
-      setError(value instanceof Error ? value.message : String(value));
-    } finally {
-      setLoading(false);
-    }
-  }, [runArchiveFilter]);
+          { archive: runArchiveFilter, includeDefinitions },
+          { signal },
+        );
+        if (signal?.aborted) return;
+        if (data.workflows) setWorkflows(data.workflows.items);
+        setRuns(data.workflowRuns.items);
+        setError(null);
+      } catch (value) {
+        if (includeDefinitions) catalogDirty.current = true;
+        if (!signal?.aborted)
+          setError(value instanceof Error ? value.message : String(value));
+      } finally {
+        if (!signal?.aborted) setLoading(false);
+      }
+    },
+    [runArchiveFilter, tab],
+  );
 
+  const ownerRef = useRef<ReturnType<typeof createRefreshCoalescer> | null>(
+    null,
+  );
+  const refresh = useCallback(async () => {
+    catalogDirty.current = true;
+    await ownerRef.current?.refresh();
+  }, []);
   useEffect(() => {
-    const timer = window.setTimeout(() => void load(), 0);
-    const subscriptions = controlPlaneSubscriptions();
-    const dispose = subscriptions.subscribe<{
-      workflowsChanged: { id: string } | null;
+    const owner = createRefreshCoalescer(load);
+    ownerRef.current = owner;
+    const timer = window.setTimeout(() => void owner.refresh(), 0);
+    const dispose = controlPlaneSubscriptions().subscribe<{
+      workflowChanges: { definitionsChanged: boolean };
     }>(
-      { query: "subscription WorkflowListChanges { workflowsChanged { id } }" },
       {
-        next: () => void load(),
+        query:
+          "subscription WorkflowListChanges { workflowChanges { definitionsChanged } }",
+      },
+      {
+        next: (result) => {
+          if (result.data?.workflowChanges.definitionsChanged)
+            catalogDirty.current = true;
+          void owner.refresh();
+        },
         error: () => undefined,
         complete: () => undefined,
       },
     );
+    const recover = onControlPlaneRecovery(() => {
+      catalogDirty.current = true;
+      void owner.refresh();
+    });
     return () => {
       window.clearTimeout(timer);
       dispose();
+      recover();
+      owner.dispose();
+      if (ownerRef.current === owner) ownerRef.current = null;
     };
   }, [load]);
 
@@ -230,7 +264,7 @@ export function WorkflowsPage() {
       await controlPlaneRequest(query, variables);
       setSelected(new Set());
       setError(null);
-      await load();
+      await refresh();
     } catch (value) {
       setError(value instanceof Error ? value.message : String(value));
     }
@@ -278,7 +312,7 @@ export function WorkflowsPage() {
         );
         router.push(`/workflows/runs/${data.triggerWorkflow.id}`);
       }
-      await load();
+      await refresh();
     } catch (value) {
       setError(value instanceof Error ? value.message : String(value));
     }
@@ -314,7 +348,7 @@ export function WorkflowsPage() {
     }
     if (imported.length) {
       setTab("workflows");
-      await load();
+      await refresh();
     }
   };
 
@@ -357,7 +391,7 @@ export function WorkflowsPage() {
     }
     setSelected(new Set());
     setError(failure);
-    await load();
+    await refresh();
   };
 
   return (
@@ -461,7 +495,7 @@ export function WorkflowsPage() {
             <TooltipTrigger asChild>
               <Button
                 aria-label={t("refresh")}
-                onClick={() => void load()}
+                onClick={() => void refresh()}
                 size="icon"
                 variant="outline"
               >

@@ -188,6 +188,8 @@ function pathContains(folder: string, candidate: string): boolean {
 
 export class BuildDataService {
   private initialized = false;
+  private nextHistoryPruneAt = 0;
+  private historyPrune: Promise<void> | null = null;
 
   constructor(private readonly agentControlService: AgentControlService) {
     this.agentControlService.registerCompletionHandler(
@@ -298,14 +300,17 @@ export class BuildDataService {
         })
       : null;
     const items = await prisma.buildDataDeletionHistory.findMany({
-      where: cursor
-        ? {
-            OR: [
-              { deletedAt: { lt: cursor.deletedAt } },
-              { deletedAt: cursor.deletedAt, id: { lt: cursor.id } },
-            ],
-          }
-        : undefined,
+      where: {
+        deletedAt: { gte: new Date(Date.now() - HISTORY_RETENTION_MS) },
+        ...(cursor
+          ? {
+              OR: [
+                { deletedAt: { lt: cursor.deletedAt } },
+                { deletedAt: cursor.deletedAt, id: { lt: cursor.id } },
+              ],
+            }
+          : {}),
+      },
       orderBy: [{ deletedAt: "desc" }, { id: "desc" }],
       take: take + 1,
     });
@@ -990,10 +995,22 @@ export class BuildDataService {
   }
 
   private async pruneHistory(): Promise<void> {
-    const prisma = await getPrismaClient();
-    await prisma.buildDataDeletionHistory.deleteMany({
-      where: { deletedAt: { lt: new Date(Date.now() - HISTORY_RETENTION_MS) } },
-    });
+    if (this.historyPrune) return this.historyPrune;
+    if (Date.now() < this.nextHistoryPruneAt) return;
+    this.historyPrune = (async () => {
+      const prisma = await getPrismaClient();
+      await prisma.buildDataDeletionHistory.deleteMany({
+        where: {
+          deletedAt: { lt: new Date(Date.now() - HISTORY_RETENTION_MS) },
+        },
+      });
+      this.nextHistoryPruneAt = Date.now() + 60_000;
+    })();
+    try {
+      await this.historyPrune;
+    } finally {
+      this.historyPrune = null;
+    }
   }
 
   private publish(id: string): void {

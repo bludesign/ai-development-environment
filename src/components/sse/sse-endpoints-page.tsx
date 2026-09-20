@@ -11,7 +11,7 @@ import {
   ShieldAlert,
   Trash2,
 } from "lucide-react";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useState } from "react";
 
 import { ConfirmationDialog } from "@/components/confirmation-dialog";
 import { Alert, AlertDescription } from "@/components/ui/alert";
@@ -41,6 +41,7 @@ import {
 } from "@/components/ui/empty";
 import { Spinner } from "@/components/ui/spinner";
 import { Link } from "@/i18n/navigation";
+import { useOwnedRead } from "@/hooks/use-owned-read";
 import { controlPlaneRequest } from "@/lib/control-plane-client";
 
 import { SSE_ENDPOINT_FIELDS, SSE_ENDPOINTS_QUERY } from "./graphql";
@@ -57,25 +58,26 @@ export function SseEndpointsPage() {
   );
   const [error, setError] = useState<string | null>(null);
 
-  const load = useCallback(async () => {
+  const fetchData = useCallback(async (signal: AbortSignal) => {
     try {
       const data = await controlPlaneRequest<{ sseEndpoints: SseEndpoint[] }>(
         SSE_ENDPOINTS_QUERY,
+        undefined,
+        { signal },
       );
+      if (signal.aborted) return;
       setEndpoints(data.sseEndpoints);
       setError(null);
     } catch (value) {
-      setError(value instanceof Error ? value.message : String(value));
+      if (!signal.aborted)
+        setError(value instanceof Error ? value.message : String(value));
     } finally {
-      setLoading(false);
+      if (!signal.aborted) setLoading(false);
     }
   }, []);
 
-  useEffect(() => {
-    const timer = window.setTimeout(() => void load(), 0);
-    return () => window.clearTimeout(timer);
-  }, [load]);
-  useSseLiveReload("endpoints", () => void load());
+  const load = useOwnedRead(fetchData);
+  useSseLiveReload("endpoints", load);
 
   async function setMode(endpoint: SseEndpoint, mode: SseMode) {
     setBusyId(endpoint.id);

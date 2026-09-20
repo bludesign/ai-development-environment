@@ -1356,7 +1356,16 @@ function jiraRest(pathname: string, search: URLSearchParams): unknown {
     const issue =
       JIRA_ISSUE_PAYLOADS.find((item) => item.key === key) ??
       JIRA_ISSUE_PAYLOADS[0]!;
-    return { ...issue.fields.comment, startAt: 0, maxResults: 50 };
+    const startAt = Math.max(0, Number(search.get("startAt") ?? 0));
+    const maxResults = Math.max(1, Number(search.get("maxResults") ?? 50));
+    const comments = [...issue.fields.comment.comments];
+    if (search.get("orderBy") === "-created") comments.reverse();
+    return {
+      ...issue.fields.comment,
+      comments: comments.slice(startAt, startAt + maxResults),
+      startAt,
+      maxResults,
+    };
   }
 
   if (/^\/issue\/[^/]+\/transitions$/.test(path)) {

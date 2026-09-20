@@ -19,6 +19,7 @@ import type { AgentJob } from "./types";
 vi.mock("@/lib/control-plane-client", () => ({
   controlPlaneRequest: vi.fn(),
   controlPlaneSubscriptions: vi.fn(),
+  onControlPlaneRecovery: () => () => undefined,
 }));
 
 const requestMock = vi.mocked(controlPlaneRequest);
@@ -36,7 +37,7 @@ afterEach(() => {
 });
 
 describe("AgentDetail", () => {
-  test("ignores stale overlapping detail loads", async () => {
+  test("coalesces codebase bursts and refreshes only codebases", async () => {
     const createdAt = new Date(0).toISOString();
     const response = (agentName: string, repositoryName: string) => ({
       agent: {
@@ -116,23 +117,30 @@ describe("AgentDetail", () => {
 
     render(<AgentDetail agentId="agent-1" />);
     await waitFor(() => expect(requestMock).toHaveBeenCalledTimes(1));
-    act(() => triggerCodebaseReload());
-    await waitFor(() => expect(requestMock).toHaveBeenCalledTimes(2));
-
-    await act(async () => {
-      resolveLatest(latestResponse);
-      await latestRequest;
+    act(() => {
+      triggerCodebaseReload();
+      triggerCodebaseReload();
     });
-    expect(await screen.findByText("Latest agent")).toBeDefined();
-    expect(screen.getByText("Latest repository")).toBeDefined();
-
+    expect(requestMock).toHaveBeenCalledTimes(1);
     await act(async () => {
       resolveStale(staleResponse);
       await staleRequest;
     });
-    await waitFor(() => expect(screen.queryByText("Stale agent")).toBeNull());
-    expect(screen.getByText("Latest agent")).toBeDefined();
-    expect(screen.getByText("Latest repository")).toBeDefined();
+    await waitFor(() => expect(requestMock).toHaveBeenCalledTimes(2));
+    expect(requestMock.mock.calls[1]?.[1]).toMatchObject({
+      id: "agent-1",
+      core: false,
+      codebases: true,
+      disk: false,
+      health: false,
+    });
+    await act(async () => {
+      resolveLatest(latestResponse);
+      await latestRequest;
+    });
+    expect(await screen.findByText("Latest repository")).toBeDefined();
+    expect(screen.getByText("Stale agent")).toBeDefined();
+    expect(screen.queryByText("Stale repository")).toBeNull();
   });
 
   test("shows live system information and codebases for the agent", async () => {
@@ -450,7 +458,8 @@ describe("AgentDetail", () => {
     await waitFor(() =>
       expect(requestMock).toHaveBeenCalledWith(
         expect.stringContaining("query Job"),
-        { id: "job-2" },
+        expect.objectContaining({ id: "job-2", metadata: false, first: 200 }),
+        expect.objectContaining({ signal: expect.any(AbortSignal) }),
       ),
     );
   });

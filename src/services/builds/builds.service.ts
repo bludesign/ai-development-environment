@@ -1,3 +1,4 @@
+import { filterAsyncIterator } from "@/lib/filter-async-iterator";
 import { randomUUID } from "node:crypto";
 import { basename, isAbsolute, join, relative, resolve } from "node:path";
 
@@ -47,6 +48,8 @@ import {
   agentOnlineWindowMs,
   AgentControlService,
   BUILDS_CHANGED_TOPIC,
+  BUILD_SCRIPTS_CHANGED_TOPIC,
+  ACTION_CENTER_CHANGED_TOPIC,
   SIDEBAR_STATUS_CHANGED_TOPIC,
   agentEventBus,
   agentJobChangedTopic,
@@ -468,6 +471,48 @@ export class BuildsService {
     );
   }
 
+  subscribeBuildChanges(appId?: string | null, worktreeId?: string | null) {
+    const source = agentEventBus.iterate<{ buildsChanged: { id: string } }>(
+      BUILDS_CHANGED_TOPIC,
+    );
+    if (!appId && !worktreeId) return source;
+    return filterAsyncIterator(source, async ({ buildsChanged: { id } }) => {
+      const prisma = await getPrismaClient();
+      const build = await prisma.build.findUnique({
+        where: { id },
+        select: {
+          worktreeId: true,
+          repository: {
+            select: {
+              apps: {
+                where: { appId: appId ?? undefined },
+                select: { appId: true },
+                take: 1,
+              },
+            },
+          },
+        },
+      });
+      return (
+        !build ||
+        ((!worktreeId || build.worktreeId === worktreeId) &&
+          (!appId || Boolean(build.repository?.apps.length)))
+      );
+    });
+  }
+
+  async repositoryIdForBuild(id: string) {
+    const prisma = await getPrismaClient();
+    return (
+      (
+        await prisma.build.findUnique({
+          where: { id },
+          select: { repositoryId: true },
+        })
+      )?.repositoryId ?? null
+    );
+  }
+
   private publish(buildId: string): void {
     agentEventBus.publish(buildTopic(buildId), {
       buildChanged: { id: buildId },
@@ -477,6 +522,9 @@ export class BuildsService {
     });
     agentEventBus.publish(SIDEBAR_STATUS_CHANGED_TOPIC, {
       sidebarStatusChanged: true,
+    });
+    agentEventBus.publish(ACTION_CENTER_CHANGED_TOPIC, {
+      actionCenterChanged: true,
     });
   }
 
@@ -733,7 +781,7 @@ export class BuildsService {
     }
     const prisma = await getPrismaClient();
     const id = input.id ?? randomUUID();
-    return prisma.buildScript.upsert({
+    const script = await prisma.buildScript.upsert({
       where: { id },
       create: {
         id,
@@ -754,6 +802,10 @@ export class BuildsService {
         deletedAt: null,
       },
     });
+    agentEventBus.publish(BUILD_SCRIPTS_CHANGED_TOPIC, {
+      buildScriptsChanged: true,
+    });
+    return script;
   }
 
   async deleteScript(id: string): Promise<boolean> {
@@ -765,6 +817,10 @@ export class BuildsService {
     await prisma.codebaseRepositoryBuildScript.deleteMany({
       where: { scriptId: id },
     });
+    if (removed.count)
+      agentEventBus.publish(BUILD_SCRIPTS_CHANGED_TOPIC, {
+        buildScriptsChanged: true,
+      });
     return removed.count === 1;
   }
 
@@ -2274,11 +2330,34 @@ export class BuildsService {
     });
   }
 
-  async reportsForBuild(buildId: string) {
+  reportsForBuild(
+    buildId: string,
+    kind?: BuildReportKind,
+  ): Promise<
+    Array<Prisma.BuildReportGetPayload<{ include: { artifact: true } }>>
+  >;
+  reportsForBuild(
+    buildId: string,
+    kind: BuildReportKind | undefined,
+    includeData: false,
+  ): Promise<
+    Array<
+      Omit<
+        Prisma.BuildReportGetPayload<{ include: { artifact: true } }>,
+        "dataJson"
+      >
+    >
+  >;
+  async reportsForBuild(
+    buildId: string,
+    kind?: BuildReportKind,
+    includeData = true,
+  ) {
     const prisma = await getPrismaClient();
     return prisma.buildReport.findMany({
-      where: { buildId },
+      where: { buildId, ...(kind ? { kind } : {}) },
       orderBy: { createdAt: "asc" },
+      ...(includeData ? {} : { omit: { dataJson: true } }),
       include: { artifact: true },
     });
   }
@@ -2485,7 +2564,35 @@ export class BuildsService {
     }
   }
 
-  async logChunks(buildId: string, after: string | null = null, first = 1_000) {
+  async logChunks(
+    buildId: string,
+    after: string | null = null,
+    first = 1_000,
+    knownRanges: Array<{
+      scope: string;
+      scopeId: string;
+      fromSequence: number;
+      throughSequence: number;
+    }> = [],
+    options: {
+      latest?: boolean | null;
+      before?: string | null;
+      from?: string | null;
+    } = {},
+  ) {
+    if (
+      knownRanges.some(
+        (range) =>
+          !Number.isInteger(range.fromSequence) ||
+          range.fromSequence < 0 ||
+          !Number.isInteger(range.throughSequence) ||
+          range.throughSequence < range.fromSequence,
+      )
+    ) {
+      throw new Error(
+        "Build log ranges must contain ordered non-negative sequence numbers",
+      );
+    }
     const prisma = await getPrismaClient();
     const cursor = after
       ? await prisma.buildLogChunk.findFirst({
@@ -2494,9 +2601,77 @@ export class BuildsService {
         })
       : null;
     if (after && !cursor) throw new Error("Build log cursor not found");
-    return prisma.buildLogChunk.findMany({
+    const loadCursor = async (id: string | null | undefined) => {
+      if (!id) return null;
+      const value = await prisma.buildLogChunk.findFirst({
+        where: { id, buildId },
+        select: { id: true, createdAt: true, sequence: true },
+      });
+      if (!value) throw new Error("Build log cursor not found");
+      return value;
+    };
+    const [before, from] = await Promise.all([
+      loadCursor(options.before),
+      loadCursor(options.from),
+    ]);
+    const descending = Boolean(options.latest || before);
+    const chunks = await prisma.buildLogChunk.findMany({
       where: {
         buildId,
+        ...(before || from
+          ? {
+              AND: [
+                ...(before
+                  ? [
+                      {
+                        OR: [
+                          { createdAt: { lt: before.createdAt } },
+                          {
+                            createdAt: before.createdAt,
+                            sequence: { lt: before.sequence },
+                          },
+                          {
+                            createdAt: before.createdAt,
+                            sequence: before.sequence,
+                            id: { lt: before.id },
+                          },
+                        ],
+                      },
+                    ]
+                  : []),
+                ...(from
+                  ? [
+                      {
+                        OR: [
+                          { createdAt: { gt: from.createdAt } },
+                          {
+                            createdAt: from.createdAt,
+                            sequence: { gt: from.sequence },
+                          },
+                          {
+                            createdAt: from.createdAt,
+                            sequence: from.sequence,
+                            id: { gte: from.id },
+                          },
+                        ],
+                      },
+                    ]
+                  : []),
+              ],
+            }
+          : {}),
+        ...(knownRanges.length
+          ? {
+              NOT: knownRanges.map((range) => ({
+                scope: range.scope,
+                scopeId: range.scopeId,
+                sequence: {
+                  gte: range.fromSequence,
+                  lte: range.throughSequence,
+                },
+              })),
+            }
+          : {}),
         ...(cursor
           ? {
               OR: [
@@ -2514,9 +2689,14 @@ export class BuildsService {
             }
           : {}),
       },
-      orderBy: [{ createdAt: "asc" }, { sequence: "asc" }, { id: "asc" }],
+      orderBy: [
+        { createdAt: descending ? "desc" : "asc" },
+        { sequence: descending ? "desc" : "asc" },
+        { id: descending ? "desc" : "asc" },
+      ],
       take: Math.max(1, Math.min(first, 5_000)),
     });
+    return descending ? chunks.reverse() : chunks;
   }
 
   async cancelBuild(id: string) {

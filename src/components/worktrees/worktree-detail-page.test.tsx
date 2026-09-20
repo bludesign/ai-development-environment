@@ -19,6 +19,7 @@ import { WorktreeDetailPage } from "./worktree-detail-page";
 import type { WorktreeDetail, WorktreeOverview } from "./types";
 
 vi.mock("@/lib/control-plane-client", () => ({
+  onControlPlaneRecovery: vi.fn(() => vi.fn()),
   controlPlaneRequest: vi.fn(),
   controlPlaneSubscriptions: vi.fn(),
   onControlPlaneConnected: vi.fn(() => vi.fn()),
@@ -827,7 +828,9 @@ describe("WorktreeDetailPage", () => {
     expect(requestCount("WorktreeDetailOverview")).toBe(
       initialOverviewCount + 2,
     );
-    workflowsSink!.next({ data: { workflowsChanged: { id: "workflow-1" } } });
+    workflowsSink!.next({
+      data: { workflowChanges: { definitionsChanged: true } },
+    });
     await waitFor(() =>
       expect(requestCount("WorktreeDetailOverview")).toBe(
         initialOverviewCount + 3,

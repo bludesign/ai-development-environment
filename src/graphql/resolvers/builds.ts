@@ -1,7 +1,8 @@
 import type { GraphQLContext } from "@/services/graphql-server/graphql-server.service";
+import type { BuildLogRange } from "@/lib/build-log-ranges";
 import { buildOutOfDate } from "@/services/builds/build-freshness";
 import {
-  BUILDS_CHANGED_TOPIC,
+  BUILD_SCRIPTS_CHANGED_TOPIC,
   agentEventBus,
   buildLogChunkTopic,
   buildTopic,
@@ -42,6 +43,10 @@ const lineNumbers = (value: unknown): number[] =>
   Array.isArray(value) ? value.filter((line) => typeof line === "number") : [];
 
 export const createBuildResolvers = (service: BuildsService) => ({
+  BuildChange: {
+    repositoryId: (value: { id: string }) =>
+      service.repositoryIdForBuild(value.id),
+  },
   CodebaseProject: {
     createdAt: (value: { createdAt: Date }) => value.createdAt.toISOString(),
     updatedAt: (value: { updatedAt: Date }) => value.updatedAt.toISOString(),
@@ -172,8 +177,15 @@ export const createBuildResolvers = (service: BuildsService) => ({
     finishedAt: (value: { finishedAt: Date | null }) => iso(value.finishedAt),
   },
   Build: {
-    reports: (value: { id: string; reports?: unknown[] }) =>
-      value.reports ?? service.reportsForBuild(value.id),
+    reports: (
+      value: { id: string; reports?: Array<{ kind?: string }> },
+      args: { kind?: "TEST_RESULTS" | "CODE_COVERAGE" | null } = {},
+    ) =>
+      value.reports
+        ? value.reports.filter(
+            (report) => !args.kind || report.kind === args.kind,
+          )
+        : service.reportsForBuild(value.id, args.kind ?? undefined, false),
     destination: (value: { destinationJson: string }) =>
       json(value.destinationJson, {}),
     snapshot: (value: { snapshotJson: string }) => json(value.snapshotJson, {}),
@@ -236,11 +248,25 @@ export const createBuildResolvers = (service: BuildsService) => ({
     },
     buildLogChunks: (
       _root: unknown,
-      args: { buildId: string; after?: string | null; first?: number },
+      args: {
+        buildId: string;
+        latest?: boolean | null;
+        before?: string | null;
+        from?: string | null;
+        after?: string | null;
+        first?: number;
+        knownRanges?: BuildLogRange[] | null;
+      },
       context: GraphQLContext,
     ) => {
       requireControlPlane(context);
-      return service.logChunks(args.buildId, args.after, args.first);
+      return service.logChunks(
+        args.buildId,
+        args.after,
+        args.first,
+        args.knownRanges ?? undefined,
+        { latest: args.latest, before: args.before, from: args.from },
+      );
     },
     worktreeCoverageReports: (
       _root: unknown,
@@ -448,11 +474,36 @@ export const createBuildResolvers = (service: BuildsService) => ({
     ) => service.appendLogChunks(requireAgent(context), buildId, chunks),
   },
   Subscription: {
-    buildsChanged: {
+    buildScriptsChanged: {
       subscribe: (_root: unknown, _args: unknown, context: GraphQLContext) => {
         requireControlPlane(context);
-        return agentEventBus.iterate(BUILDS_CHANGED_TOPIC);
+        return agentEventBus.iterate(BUILD_SCRIPTS_CHANGED_TOPIC);
       },
+    },
+    buildsChanged: {
+      subscribe: (
+        _root: unknown,
+        {
+          appId,
+          worktreeId,
+        }: { appId?: string | null; worktreeId?: string | null },
+        context: GraphQLContext,
+      ) => {
+        requireControlPlane(context);
+        return service.subscribeBuildChanges(appId, worktreeId);
+      },
+    },
+    buildSnapshotChanged: {
+      subscribe: (
+        _root: unknown,
+        { id }: { id: string },
+        context: GraphQLContext,
+      ) => {
+        requireControlPlane(context);
+        return agentEventBus.iterate(buildTopic(id));
+      },
+      resolve: (payload: { buildChanged: { id: string } }) =>
+        service.getBuild(payload.buildChanged.id),
     },
     buildChanged: {
       subscribe: (

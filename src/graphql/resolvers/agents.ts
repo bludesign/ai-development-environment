@@ -1,3 +1,4 @@
+import { prependAsyncIterator } from "@/lib/filter-async-iterator";
 import { GraphQLScalarType, Kind, type ValueNode } from "graphql";
 import { COMMAND_RUN_JOB_KIND } from "@ai-development-environment/agent-contract/commands";
 
@@ -5,6 +6,7 @@ import type { AgentControlService } from "@/services/agent-control";
 import { effectiveBuildsDirectory } from "@/services/builds/build-directory";
 import {
   AGENT_CHANGED_TOPIC,
+  INTEGRATION_CONFIGURATION_CHANGED_TOPIC,
   agentOnlineWindowMs,
   agentEventBus,
   agentEventsTopic,
@@ -34,12 +36,29 @@ function requireOwnedAgent(context: GraphQLContext, agentId: string): void {
   }
 }
 
+const pendingJobReads = new WeakMap<
+  GraphQLContext,
+  Map<string, ReturnType<AgentControlService["getJob"]>>
+>();
+
 async function requireOwnedJob(
   context: GraphQLContext,
   agentControlService: AgentControlService,
   jobId: string,
 ) {
-  const job = await agentControlService.getJob(jobId);
+  let reads = pendingJobReads.get(context);
+  if (!reads) {
+    reads = new Map();
+    pendingJobReads.set(context, reads);
+  }
+  let pending = reads.get(jobId);
+  if (!pending) {
+    pending = agentControlService
+      .getJob(jobId)
+      .finally(() => reads!.delete(jobId));
+    reads.set(jobId, pending);
+  }
+  const job = await pending;
   if (job) requireOwnedAgent(context, job.agentId);
   return job;
 }
@@ -168,13 +187,28 @@ export const createAgentResolvers = (
       { id }: { id: string },
       context: GraphQLContext,
     ) => requireOwnedJob(context, agentControlService, id),
+    agentJobsByIds: async (
+      _root: unknown,
+      { ids }: { ids: string[] },
+      context: GraphQLContext,
+    ) => {
+      const jobs = await agentControlService.getJobs(ids);
+      for (const job of jobs) requireOwnedAgent(context, job.agentId);
+      return jobs;
+    },
     agentJobLogs: async (
       _root: unknown,
-      { jobId, afterSequence }: { jobId: string; afterSequence?: number },
+      {
+        jobId,
+        afterSequence,
+        ...options
+      }: { jobId: string; afterSequence?: number } & NonNullable<
+        Parameters<AgentControlService["listLogs"]>[2]
+      >,
       context: GraphQLContext,
     ) => {
       await requireOwnedJob(context, agentControlService, jobId);
-      return agentControlService.listLogs(jobId, afterSequence);
+      return agentControlService.listLogs(jobId, afterSequence, options);
     },
   },
   Mutation: {
@@ -379,6 +413,17 @@ export const createAgentResolvers = (
     },
   },
   Subscription: {
+    integrationConfigurationChanged: {
+      subscribe: (_root: unknown, _args: unknown, context: GraphQLContext) => {
+        requireControlPlane(context);
+        const events = agentEventBus.iterate<{
+          integrationConfigurationChanged: string;
+        }>(INTEGRATION_CONFIGURATION_CHANGED_TOPIC);
+        return prependAsyncIterator(events, {
+          integrationConfigurationChanged: "ALL",
+        });
+      },
+    },
     agentEvents: {
       subscribe: (
         _root: unknown,

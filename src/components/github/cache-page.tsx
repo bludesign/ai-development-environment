@@ -15,6 +15,7 @@ import {
   useCallback,
   useEffect,
   useMemo,
+  useRef,
   useState,
 } from "react";
 
@@ -184,69 +185,102 @@ export function GitHubCachePage() {
   const [busyKey, setBusyKey] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
-  const load = useCallback(async () => {
-    setLoading(true);
-    try {
-      const result = await controlPlaneRequest<CachePageData>(
-        `query GitHubCachePage($limit: Int!, $callOffset: Int!, $entryOffset: Int!, $apiType: GitHubApiType, $requestSource: GitHubRequestSource, $callSource: GitHubCallSource) {
-          githubSettings { tokenConfigured defaultJiraKeyRegex actionsNotificationPollIntervalSeconds cacheTtlSeconds updatedAt }
-          githubCacheTtlOverrides { operation ttlSeconds builtIn createdAt updatedAt }
-          githubCacheableGraphqlOperations
-          githubRateLimitSnapshots { authentication resource limit remaining used resetAt observedAt }
-          githubCacheMetrics {
+  const loadedSections = useRef<{ calls: string; entries: number } | null>(
+    null,
+  );
+  const activeRequest = useRef<AbortController | null>(null);
+  const load = useCallback(
+    async (force = true) => {
+      activeRequest.current?.abort();
+      const controller = new AbortController();
+      activeRequest.current = controller;
+      const callsKey = JSON.stringify([
+        callOffset,
+        apiTypeFilter,
+        requestSourceFilter,
+        callSourceFilter,
+      ]);
+      const metadata = force || loadedSections.current === null;
+      const calls = metadata || loadedSections.current?.calls !== callsKey;
+      const entries =
+        metadata || loadedSections.current?.entries !== entryOffset;
+      setLoading(true);
+      try {
+        const result = await controlPlaneRequest<CachePageData>(
+          `query GitHubCachePage($metadata: Boolean!, $calls: Boolean!, $entries: Boolean!, $limit: Int!, $callOffset: Int!, $entryOffset: Int!, $apiType: GitHubApiType, $requestSource: GitHubRequestSource, $callSource: GitHubCallSource) {
+          githubSettings @include(if: $metadata) { tokenConfigured defaultJiraKeyRegex actionsNotificationPollIntervalSeconds cacheTtlSeconds updatedAt }
+          githubCacheTtlOverrides @include(if: $metadata) { operation ttlSeconds builtIn createdAt updatedAt }
+          githubCacheableGraphqlOperations @include(if: $metadata)
+          githubRateLimitSnapshots @include(if: $metadata) { authentication resource limit remaining used resetAt observedAt }
+          githubCacheMetrics @include(if: $metadata) {
             windows { ${WINDOW_FIELDS} }
             apiTypes { apiType windows { ${WINDOW_FIELDS} } }
             operations { operation windows { ${WINDOW_FIELDS} } }
             requestSources { requestSource windows { ${WINDOW_FIELDS} } }
           }
-          githubApiCalls(limit: $limit, offset: $callOffset, apiType: $apiType, requestSource: $requestSource, source: $callSource) {
+          githubApiCalls(limit: $limit, offset: $callOffset, apiType: $apiType, requestSource: $requestSource, source: $callSource) @include(if: $calls) {
             items { id authentication apiType method endpoint operation requestSource requestSummary variables source durationMs statusCode error servedStale pointCost pointsAvoided rateLimitLimit rateLimitRemaining rateLimitUsed rateLimitResetAt rateLimitResource createdAt }
             total limit offset
           }
-          githubCachedEntries(limit: $limit, offset: $entryOffset) {
+          githubCachedEntries(limit: $limit, offset: $entryOffset) @include(if: $entries) {
             items { id authentication operation endpoint fetchedAt pointCost stale }
             total limit offset
           }
         }`,
-        {
-          limit: PAGE_SIZE,
-          callOffset,
-          entryOffset,
-          apiType: apiTypeFilter === "ALL" ? undefined : apiTypeFilter,
-          requestSource:
-            requestSourceFilter === "ALL" ? undefined : requestSourceFilter,
-          callSource: callSourceFilter === "ALL" ? undefined : callSourceFilter,
-        },
-      );
-      setData(result);
-      setTtlMinutes(
-        String(Math.round(result.githubSettings.cacheTtlSeconds / 60)),
-      );
-      setOverrideDrafts(
-        Object.fromEntries(
-          result.githubCacheTtlOverrides.map((override) => [
-            override.operation,
-            String(override.ttlSeconds),
-          ]),
-        ),
-      );
-      setError(null);
-    } catch (value) {
-      setError(value instanceof Error ? value.message : String(value));
-    } finally {
-      setLoading(false);
-    }
-  }, [
-    apiTypeFilter,
-    callOffset,
-    callSourceFilter,
-    entryOffset,
-    requestSourceFilter,
-  ]);
+          {
+            metadata,
+            calls,
+            entries,
+            limit: PAGE_SIZE,
+            callOffset,
+            entryOffset,
+            apiType: apiTypeFilter === "ALL" ? undefined : apiTypeFilter,
+            requestSource:
+              requestSourceFilter === "ALL" ? undefined : requestSourceFilter,
+            callSource:
+              callSourceFilter === "ALL" ? undefined : callSourceFilter,
+          },
+          { signal: controller.signal },
+        );
+        if (controller.signal.aborted) return;
+        loadedSections.current = { calls: callsKey, entries: entryOffset };
+        setData((current) => ({ ...current, ...result }));
+        if (metadata) {
+          setTtlMinutes(
+            String(Math.round(result.githubSettings.cacheTtlSeconds / 60)),
+          );
+          setOverrideDrafts(
+            Object.fromEntries(
+              result.githubCacheTtlOverrides.map((override) => [
+                override.operation,
+                String(override.ttlSeconds),
+              ]),
+            ),
+          );
+        }
+        setError(null);
+      } catch (value) {
+        if (controller.signal.aborted) return;
+        setError(value instanceof Error ? value.message : String(value));
+      } finally {
+        if (!controller.signal.aborted) setLoading(false);
+      }
+    },
+    [
+      apiTypeFilter,
+      callOffset,
+      callSourceFilter,
+      entryOffset,
+      requestSourceFilter,
+    ],
+  );
 
   useEffect(() => {
-    const timeout = window.setTimeout(() => void load(), 0);
-    return () => window.clearTimeout(timeout);
+    const timeout = window.setTimeout(() => void load(false), 0);
+    return () => {
+      window.clearTimeout(timeout);
+      activeRequest.current?.abort();
+    };
   }, [load]);
 
   const callGroups = useMemo(() => {

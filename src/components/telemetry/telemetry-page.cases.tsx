@@ -16,6 +16,7 @@ const subscribe = vi.hoisted(() => vi.fn(() => vi.fn()));
 const copyText = vi.hoisted(() => vi.fn());
 
 vi.mock("@/lib/control-plane-client", () => ({
+  onControlPlaneRecovery: vi.fn(() => () => {}),
   controlPlaneRequest: request,
   controlPlaneSubscriptions: () => ({ subscribe }),
 }));
@@ -346,6 +347,7 @@ export function registerTelemetryPageTests(
                 searchMode: "TEXT",
               }),
             }),
+            expect.objectContaining({ signal: expect.any(AbortSignal) }),
           ),
         );
       });
@@ -406,6 +408,7 @@ export function registerTelemetryPageTests(
             expect.objectContaining({
               input: expect.objectContaining({ search: "stale" }),
             }),
+            expect.objectContaining({ signal: expect.any(AbortSignal) }),
           ),
         );
         fireEvent.change(search, { target: { value: "current" } });

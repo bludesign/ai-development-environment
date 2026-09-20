@@ -71,7 +71,10 @@ import { Link, useRouter } from "@/i18n/navigation";
 import {
   controlPlaneRequest,
   controlPlaneSubscriptions,
+  onControlPlaneRecovery,
 } from "@/lib/control-plane-client";
+import { createRefreshCoalescer } from "@/lib/refresh-coalescer";
+import { readCursorWindow } from "@/lib/read-cursor-window";
 import { dayKey, formatDateValue } from "@/lib/date-format";
 import { formatModelLabel } from "@/lib/enum-label";
 import {
@@ -169,8 +172,18 @@ export function RunsPage({
     });
   }, [archiveFilter, kind, origin, provider]);
 
-  const refresh = useCallback(async () => {
-    try {
+  const loadedCount = useRef(0);
+  const generation = useRef(0);
+  const pageRequest = useRef<AbortController | null>(null);
+  const refreshOwner = useRef<ReturnType<typeof createRefreshCoalescer> | null>(
+    null,
+  );
+  const refreshing = useRef(false);
+  useEffect(() => {
+    loadedCount.current = items.length;
+  }, [items.length]);
+  const readPage = useCallback(
+    async (after: string | null, first: number, signal: AbortSignal) => {
       const data = await controlPlaneRequest<{
         agentRuns: {
           items: AgentRunView[];
@@ -178,11 +191,11 @@ export function RunsPage({
           totalCount: number;
         };
       }>(
-        `query AgentRuns($kind: RunKind!, $search: String, $archive: String!, $provider: String, $origin: RunOrigin, $appId: ID) {
-          agentRuns(kind: $kind, search: $search, archive: $archive, provider: $provider, origin: $origin, appId: $appId, first: 200) {
-            items { ${RUN_LIST_FIELDS} } nextCursor totalCount
-          }
-        }`,
+        `query AgentRuns($kind: RunKind!, $search: String, $archive: String!, $provider: String, $origin: RunOrigin, $appId: ID, $after: ID, $first: Int!) {
+      agentRuns(kind: $kind, search: $search, archive: $archive, provider: $provider, origin: $origin, appId: $appId, after: $after, first: $first) {
+        items { ${RUN_LIST_FIELDS} } nextCursor totalCount
+      }
+    }`,
         {
           kind,
           search: search.trim() || null,
@@ -190,55 +203,42 @@ export function RunsPage({
           provider: provider === "ALL" ? null : provider,
           origin: origin === "ALL" ? null : origin,
           appId: appId ?? null,
+          after,
+          first,
         },
+        { signal },
       );
-      setItems(data.agentRuns.items);
-      setNextCursor(data.agentRuns.nextCursor);
-      setTotalCount(data.agentRuns.totalCount);
-      setError(null);
-    } catch (value) {
-      setError(value instanceof Error ? value.message : String(value));
-    } finally {
-      setLoading(false);
-    }
-  }, [appId, archiveFilter, kind, origin, provider, search]);
+      return data.agentRuns;
+    },
+    [appId, archiveFilter, kind, origin, provider, search],
+  );
+  const refresh = useCallback(async () => {
+    await refreshOwner.current?.refresh();
+  }, []);
 
   const loadMore = useCallback(async () => {
-    if (!nextCursor) return;
+    if (!nextCursor || pageRequest.current || refreshing.current) return;
+    const controller = new AbortController();
+    pageRequest.current = controller;
+    const version = generation.current;
     setLoadingMore(true);
     try {
-      const data = await controlPlaneRequest<{
-        agentRuns: {
-          items: AgentRunView[];
-          nextCursor: string | null;
-          totalCount: number;
-        };
-      }>(
-        `query MoreAgentRuns($kind: RunKind!, $search: String, $archive: String!, $provider: String, $origin: RunOrigin, $appId: ID, $after: ID!) { agentRuns(kind: $kind, search: $search, archive: $archive, provider: $provider, origin: $origin, appId: $appId, first: 200, after: $after) { items { ${RUN_LIST_FIELDS} } nextCursor totalCount } }`,
-        {
-          kind,
-          search: search.trim() || null,
-          archive: archiveFilter,
-          provider: provider === "ALL" ? null : provider,
-          origin: origin === "ALL" ? null : origin,
-          appId: appId ?? null,
-          after: nextCursor,
-        },
-      );
-      setItems((current) => [
-        ...current,
-        ...data.agentRuns.items.filter(
-          (item) => !current.some(({ id }) => id === item.id),
-        ),
-      ]);
-      setNextCursor(data.agentRuns.nextCursor);
-      setTotalCount(data.agentRuns.totalCount);
+      const page = await readPage(nextCursor, 200, controller.signal);
+      if (controller.signal.aborted || version !== generation.current) return;
+      setItems((current) => {
+        const known = new Set(current.map(({ id }) => id));
+        return [...current, ...page.items.filter(({ id }) => !known.has(id))];
+      });
+      setNextCursor(page.nextCursor);
+      setTotalCount(page.totalCount);
     } catch (value) {
-      setError(value instanceof Error ? value.message : String(value));
+      if (!controller.signal.aborted)
+        setError(value instanceof Error ? value.message : String(value));
     } finally {
-      setLoadingMore(false);
+      if (pageRequest.current === controller) pageRequest.current = null;
+      if (!controller.signal.aborted) setLoadingMore(false);
     }
-  }, [appId, archiveFilter, kind, nextCursor, origin, provider, search]);
+  }, [nextCursor, readPage]);
 
   useEffect(() => {
     if (!nextCursor || loading || loadingMore || error) return;
@@ -256,20 +256,64 @@ export function RunsPage({
   }, [error, loadMore, loading, loadingMore, nextCursor]);
 
   useEffect(() => {
-    const timer = window.setTimeout(() => void refresh(), 150);
-    return () => window.clearTimeout(timer);
-  }, [refresh]);
-  useEffect(() => {
+    loadedCount.current = 0;
+    const owner = createRefreshCoalescer(async (signal) => {
+      const version = ++generation.current;
+      refreshing.current = true;
+      pageRequest.current?.abort();
+      pageRequest.current = null;
+      setLoadingMore(false);
+      try {
+        const page = await readCursorWindow(
+          (after, first) => readPage(after, first, signal),
+          Math.max(200, loadedCount.current),
+          200,
+          (item: AgentRunView) => item.id,
+        );
+        if (signal.aborted || version !== generation.current) return;
+        setItems(page.items);
+        setNextCursor(page.nextCursor);
+        setTotalCount(page.totalCount);
+        setError(null);
+      } catch (value) {
+        if (!signal.aborted)
+          setError(value instanceof Error ? value.message : String(value));
+      } finally {
+        if (version === generation.current) refreshing.current = false;
+        if (!signal.aborted) setLoading(false);
+      }
+    });
+    refreshOwner.current = owner;
+    const timer = window.setTimeout(() => void owner.refresh(), 150);
     const unsubscribe = controlPlaneSubscriptions().subscribe(
-      { query: "subscription RunsChanged { agentRunsChanged { id } }" },
       {
-        next: () => void refresh(),
+        query: `subscription RunsChanged($kind: RunKind!, $appId: ID, $provider: String, $origin: RunOrigin) {
+        agentRunListChanged(kind: $kind, appId: $appId, provider: $provider, origin: $origin)
+      }`,
+        variables: {
+          kind,
+          appId: appId ?? null,
+          provider: provider === "ALL" ? null : provider,
+          origin: origin === "ALL" ? null : origin,
+        },
+      },
+      {
+        next: () => void owner.refresh(),
         error: () => undefined,
         complete: () => undefined,
       },
     );
-    return unsubscribe;
-  }, [refresh]);
+    const recover = onControlPlaneRecovery(() => void owner.refresh());
+    return () => {
+      window.clearTimeout(timer);
+      unsubscribe();
+      recover();
+      owner.dispose();
+      pageRequest.current?.abort();
+      pageRequest.current = null;
+      if (refreshOwner.current === owner) refreshOwner.current = null;
+    };
+  }, [appId, kind, origin, provider, readPage]);
 
   const groups = useMemo(() => {
     const result: Array<{

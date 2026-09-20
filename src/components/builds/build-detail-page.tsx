@@ -54,7 +54,10 @@ import { copyText, createClientId } from "@/lib/browser-utils";
 import {
   controlPlaneRequest,
   controlPlaneSubscriptions,
+  onControlPlaneRecovery,
 } from "@/lib/control-plane-client";
+import { createRefreshCoalescer } from "@/lib/refresh-coalescer";
+import { buildLogRanges } from "@/lib/build-log-ranges";
 import type { PublicOrigin } from "@/lib/public-origin";
 import { cn } from "@/lib/utils";
 import {
@@ -79,7 +82,7 @@ const BUILD_DETAIL_FIELDS = `
   }
   artifacts { id kind relativePath sizeBytes checksum metadata createdAt }
   reports {
-    id kind source status summary data error createdAt updatedAt finishedAt
+    id kind source status summary error createdAt updatedAt finishedAt
     artifact { id kind relativePath sizeBytes checksum metadata createdAt }
   }
   scriptExecutions { id phase position nameSnapshot status exitCode durationMs causedBuildFailure outputRelativePath error }
@@ -224,6 +227,15 @@ export function BuildDetailPage({
     logState.buildId === buildId ? logState.chunks : EMPTY_LOG_CHUNKS;
   const logChunksRef = useRef<BuildLogChunk[]>([]);
   const logsHydratedRef = useRef(false);
+  const olderLogsRemain = useRef(false);
+  const olderLogRequest = useRef<AbortController | null>(null);
+  const [hasOlderLogs, setHasOlderLogs] = useState(false);
+  const [loadingOlderLogs, setLoadingOlderLogs] = useState(false);
+  const tc = useTranslations("common");
+  const buildEventVersion = useRef(0);
+  const reconcileOwner = useRef<ReturnType<
+    typeof createRefreshCoalescer
+  > | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [rebuiltBuildId, setRebuiltBuildId] = useState<string | null>(null);
@@ -236,85 +248,187 @@ export function BuildDetailPage({
   const [commandCopied, setCommandCopied] = useState(false);
   const [logsOpen, setLogsOpen] = useState(true);
 
-  const load = useCallback(async () => {
-    try {
-      const data = await controlPlaneRequest<{ build: BuildRecord | null }>(
-        `query BuildDetail($id: ID!) { build(id: $id) { ${BUILD_DETAIL_FIELDS} } }`,
-        { id: buildId },
-      );
-      setBuild(data.build);
-      setError(null);
-    } catch (value) {
-      setError(value instanceof Error ? value.message : String(value));
-    } finally {
-      setLoading(false);
-    }
-  }, [buildId]);
-
-  const mergeLogChunks = useCallback(
-    (incoming: BuildLogChunk[]) => {
-      setLogState((current) => {
-        const merged = mergeBuildLogChunks(
-          current.buildId === buildId ? current.chunks : [],
-          incoming,
+  const load = useCallback(
+    async (signal?: AbortSignal) => {
+      const version = buildEventVersion.current;
+      try {
+        const data = await controlPlaneRequest<{ build: BuildRecord | null }>(
+          `query BuildDetail($id: ID!) { build(id: $id) { ${BUILD_DETAIL_FIELDS} } }`,
+          { id: buildId },
+          { signal },
         );
-        logChunksRef.current = merged;
-        return { buildId, chunks: merged };
-      });
+        if (signal?.aborted || version !== buildEventVersion.current) return;
+        setBuild(data.build);
+        setError(null);
+      } catch (value) {
+        if (!signal?.aborted)
+          setError(value instanceof Error ? value.message : String(value));
+      } finally {
+        if (!signal?.aborted) setLoading(false);
+      }
     },
     [buildId],
   );
 
-  const catchUpLogChunks = useCallback(async () => {
-    if (!logsHydratedRef.current) return;
-    let after = logChunksRef.current.at(-1)?.id ?? null;
-    const incoming: BuildLogChunk[] = [];
-    while (true) {
+  const mergeLogChunks = useCallback(
+    (incoming: BuildLogChunk[]) => {
+      const merged = mergeBuildLogChunks(logChunksRef.current, incoming);
+      logChunksRef.current = merged;
+      setLogState({ buildId, chunks: merged });
+    },
+    [buildId],
+  );
+
+  const loadOlderLogs = useCallback(async () => {
+    const before = logChunksRef.current[0]?.id;
+    if (!before || olderLogRequest.current) return;
+    const controller = new AbortController();
+    olderLogRequest.current = controller;
+    setLoadingOlderLogs(true);
+    try {
       const data = await controlPlaneRequest<{
         buildLogChunks: BuildLogChunk[];
       }>(
-        `query BuildLogChunks($buildId: ID!, $after: ID) {
-          buildLogChunks(buildId: $buildId, after: $after, first: 1000) { ${LOG_FIELDS} }
-        }`,
-        { buildId, after },
+        `query BuildOlderLogs($buildId: ID!, $before: ID!) { buildLogChunks(buildId: $buildId, before: $before, first: 1000) { ${LOG_FIELDS} } }`,
+        { buildId, before },
+        { signal: controller.signal },
       );
-      incoming.push(...data.buildLogChunks);
-      if (data.buildLogChunks.length < 1_000) break;
-      const last = data.buildLogChunks.at(-1);
-      if (!last) break;
-      after = last.id;
+      if (controller.signal.aborted) return;
+      mergeLogChunks(data.buildLogChunks);
+      olderLogsRemain.current = data.buildLogChunks.length === 1000;
+      setHasOlderLogs(olderLogsRemain.current);
+    } catch (value) {
+      if (!controller.signal.aborted)
+        setError(value instanceof Error ? value.message : String(value));
+    } finally {
+      if (olderLogRequest.current === controller)
+        olderLogRequest.current = null;
+      if (!controller.signal.aborted) setLoadingOlderLogs(false);
     }
-    if (incoming.length) mergeLogChunks(incoming);
   }, [buildId, mergeLogChunks]);
 
+  const catchUpLogChunks = useCallback(
+    async (signal?: AbortSignal) => {
+      if (!logsHydratedRef.current) return;
+      while (!signal?.aborted) {
+        const before = logChunksRef.current.length;
+        const data = await controlPlaneRequest<{
+          buildLogChunks: BuildLogChunk[];
+        }>(
+          `query BuildLogChunks($buildId: ID!, $knownRanges: [BuildLogRangeInput!], $from: ID) {
+          buildLogChunks(buildId: $buildId, knownRanges: $knownRanges, from: $from, first: 1000) { ${LOG_FIELDS} }
+        }`,
+          {
+            buildId,
+            knownRanges: buildLogRanges(logChunksRef.current),
+            from: olderLogsRemain.current ? logChunksRef.current[0]?.id : null,
+          },
+          { signal },
+        );
+        if (signal?.aborted) return;
+        mergeLogChunks(data.buildLogChunks);
+        if (
+          data.buildLogChunks.length < 1000 ||
+          logChunksRef.current.length === before
+        )
+          return;
+      }
+    },
+    [buildId, mergeLogChunks],
+  );
+
+  const reconcile = useCallback(
+    async (signal: AbortSignal) => {
+      const version = buildEventVersion.current;
+      const data = await controlPlaneRequest<{
+        build: BuildRecord | null;
+        buildLogChunks?: BuildLogChunk[];
+      }>(
+        `query BuildReconcile($id: ID!, $includeLogs: Boolean!, $knownRanges: [BuildLogRangeInput!], $from: ID) {
+        build(id: $id) { ${BUILD_DETAIL_FIELDS} }
+        buildLogChunks(buildId: $id, knownRanges: $knownRanges, from: $from, first: 1000) @include(if: $includeLogs) { ${LOG_FIELDS} }
+      }`,
+        {
+          id: buildId,
+          includeLogs: logsHydratedRef.current,
+          knownRanges: buildLogRanges(logChunksRef.current),
+          from: olderLogsRemain.current ? logChunksRef.current[0]?.id : null,
+        },
+        { signal },
+      );
+      if (signal.aborted) return;
+      if (version === buildEventVersion.current) setBuild(data.build);
+      if (data.buildLogChunks?.length) mergeLogChunks(data.buildLogChunks);
+      if (data.buildLogChunks?.length === 1000) await catchUpLogChunks(signal);
+    },
+    [buildId, catchUpLogChunks, mergeLogChunks],
+  );
+
   useEffect(() => {
-    const timer = window.setTimeout(() => void load(), 0);
-    return () => window.clearTimeout(timer);
+    const updates = createRefreshCoalescer(reconcile);
+    reconcileOwner.current = updates;
+    const recover = () => {
+      void updates
+        .refresh()
+        .catch((value) =>
+          setError(value instanceof Error ? value.message : String(value)),
+        );
+    };
+    const offRecovery = onControlPlaneRecovery(recover);
+    const onVisible = () => {
+      if (document.visibilityState === "visible") recover();
+    };
+    window.addEventListener("focus", recover);
+    document.addEventListener("visibilitychange", onVisible);
+    return () => {
+      offRecovery();
+      updates.dispose();
+      reconcileOwner.current = null;
+      window.removeEventListener("focus", recover);
+      document.removeEventListener("visibilitychange", onVisible);
+    };
+  }, [reconcile]);
+
+  useEffect(() => {
+    const controller = new AbortController();
+    const timer = window.setTimeout(() => void load(controller.signal), 0);
+    return () => {
+      controller.abort();
+      window.clearTimeout(timer);
+    };
   }, [load]);
 
   useEffect(() => {
     const unsubscribeBuild = controlPlaneSubscriptions().subscribe<{
-      buildChanged: { id: string };
+      buildSnapshotChanged: BuildRecord | null;
     }>(
       {
-        query: `subscription BuildChanged($id: ID!) { buildChanged(id: $id) { id } }`,
+        query: `subscription BuildChanged($id: ID!) { buildSnapshotChanged(id: $id) { ${BUILD_DETAIL_FIELDS} } }`,
         variables: { id: buildId },
       },
       {
-        next: () => void load(),
+        next: (value) => {
+          const next = value.data?.buildSnapshotChanged;
+          if (value.data && "buildSnapshotChanged" in value.data) {
+            buildEventVersion.current += 1;
+            setBuild(next ?? null);
+          }
+        },
         error: () => undefined,
         complete: () => undefined,
       },
     );
     return unsubscribeBuild;
-  }, [buildId, load]);
+  }, [buildId]);
 
   useEffect(() => {
     let cancelled = false;
+    const controller = new AbortController();
     let hydrating = true;
     let buffered: BuildLogChunk[] = [];
     logChunksRef.current = [];
     logsHydratedRef.current = false;
+    olderLogsRemain.current = false;
     const unsubscribe = controlPlaneSubscriptions().subscribe<{
       buildLogChunkAdded: BuildLogChunk;
     }>(
@@ -336,24 +450,17 @@ export function BuildDetailPage({
       },
     );
     void (async () => {
-      const historical: BuildLogChunk[] = [];
-      let after: string | null = null;
-      while (!cancelled) {
-        const data: { buildLogChunks: BuildLogChunk[] } =
-          await controlPlaneRequest<{
-            buildLogChunks: BuildLogChunk[];
-          }>(
-            `query BuildLogChunks($buildId: ID!, $after: ID) {
-              buildLogChunks(buildId: $buildId, after: $after, first: 1000) { ${LOG_FIELDS} }
-            }`,
-            { buildId, after },
-          );
-        historical.push(...data.buildLogChunks);
-        if (data.buildLogChunks.length < 1_000) break;
-        const last: BuildLogChunk | undefined = data.buildLogChunks.at(-1);
-        if (!last) break;
-        after = last.id;
-      }
+      const data = await controlPlaneRequest<{
+        buildLogChunks: BuildLogChunk[];
+      }>(
+        `query BuildLogChunks($buildId: ID!) { buildLogChunks(buildId: $buildId, latest: true, first: 1000) { ${LOG_FIELDS} } }`,
+        { buildId },
+        { signal: controller.signal },
+      );
+      const historical = data.buildLogChunks;
+      if (cancelled) return;
+      olderLogsRemain.current = historical.length === 1000;
+      setHasOlderLogs(olderLogsRemain.current);
       if (cancelled) return;
       hydrating = false;
       logsHydratedRef.current = true;
@@ -370,6 +477,9 @@ export function BuildDetailPage({
     });
     return () => {
       cancelled = true;
+      controller.abort();
+      olderLogRequest.current?.abort();
+      olderLogRequest.current = null;
       unsubscribe();
     };
   }, [buildId, mergeLogChunks]);
@@ -386,13 +496,14 @@ export function BuildDetailPage({
   useEffect(() => {
     if (!activeOperation) return;
     const timer = window.setInterval(() => {
-      void load();
-      void catchUpLogChunks().catch((value) =>
-        setError(value instanceof Error ? value.message : String(value)),
-      );
+      void reconcileOwner.current
+        ?.refresh()
+        .catch((value) =>
+          setError(value instanceof Error ? value.message : String(value)),
+        );
     }, 2_000);
     return () => window.clearInterval(timer);
-  }, [activeOperation, catchUpLogChunks, load]);
+  }, [activeOperation]);
 
   useEffect(() => {
     if (!commandCopied) return;
@@ -696,10 +807,20 @@ export function BuildDetailPage({
         </div>
       </div>
 
-      {testReport && <TestResultsCard report={testReport} />}
+      {testReport && <TestResultsCard buildId={buildId} report={testReport} />}
 
       <div className="grid min-w-0 gap-5 lg:grid-cols-[minmax(0,2fr)_minmax(18rem,1fr)]">
         <div className="min-w-0 space-y-5">
+          {hasOlderLogs ? (
+            <Button
+              disabled={loadingOlderLogs}
+              onClick={() => void loadOlderLogs()}
+              variant="outline"
+            >
+              {loadingOlderLogs ? <Spinner /> : null}
+              {tc("loadMore")}
+            </Button>
+          ) : null}
           <TerminalOutputCard
             ariaLabel={t("logs")}
             collapseLabel={t("collapseLogs")}
@@ -1201,14 +1322,72 @@ function testFileName(test: TestCaseResult): string | null {
   return optionalTestString(test.identifier)?.split("/")[0] ?? null;
 }
 
-function TestResultsCard({ report }: { report: BuildReport }) {
+function TestResultsCard({
+  buildId,
+  report,
+}: {
+  buildId: string;
+  report: BuildReport;
+}) {
+  const revision = JSON.stringify([report.id, report.updatedAt]);
+  const [loaded, setLoaded] = useState<{
+    revision: string;
+    data: Record<string, unknown>;
+  } | null>(null);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const reportData =
+    report.data ?? (loaded?.revision === revision ? loaded.data : {});
+  useEffect(() => {
+    if (report.data || report.status !== "READY") return;
+    let controller = new AbortController();
+    let complete = false;
+    const load = () => {
+      if (complete) return;
+      controller.abort();
+      controller = new AbortController();
+      const signal = controller.signal;
+      void controlPlaneRequest<{
+        build: {
+          reports: Array<{ id: string; data: Record<string, unknown> }>;
+        } | null;
+      }>(
+        `query BuildTestResults($id: ID!) { build(id: $id) { reports(kind: TEST_RESULTS) { id data } } }`,
+        { id: buildId },
+        { signal },
+      )
+        .then((data) => {
+          if (!signal.aborted) {
+            complete = true;
+            setLoaded({
+              revision,
+              data:
+                data.build?.reports.find((item) => item.id === report.id)
+                  ?.data ?? {},
+            });
+            setLoadError(null);
+          }
+        })
+        .catch((error: unknown) => {
+          if (!signal.aborted)
+            setLoadError(
+              error instanceof Error ? error.message : String(error),
+            );
+        });
+    };
+    load();
+    const recover = onControlPlaneRecovery(load);
+    return () => {
+      controller.abort();
+      recover();
+    };
+  }, [buildId, report.data, report.id, report.status, revision]);
   const t = useTranslations("builds");
   const [filter, setFilter] = useState<TestResultFilter>("ALL");
-  const tests = Array.isArray(report.data.tests)
-    ? (report.data.tests as TestCaseResult[])
+  const tests = Array.isArray(reportData.tests)
+    ? (reportData.tests as TestCaseResult[])
     : [];
-  const devices = Array.isArray(report.data.devices)
-    ? (report.data.devices as Array<Record<string, unknown>>)
+  const devices = Array.isArray(reportData.devices)
+    ? (reportData.devices as Array<Record<string, unknown>>)
     : [];
   const number = (key: string) =>
     typeof report.summary[key] === "number" ? Number(report.summary[key]) : 0;
@@ -1221,6 +1400,17 @@ function TestResultsCard({ report }: { report: BuildReport }) {
         <CardTitle>{t("testResults")}</CardTitle>
       </CardHeader>
       <CardContent className="space-y-4">
+        {loadError ? (
+          <Alert variant="destructive">
+            <AlertDescription>{loadError}</AlertDescription>
+          </Alert>
+        ) : null}
+        {report.status === "READY" &&
+        !report.data &&
+        loaded?.revision !== revision &&
+        !loadError ? (
+          <Spinner />
+        ) : null}
         {report.status === "FAILED" ? (
           <Alert variant="destructive">
             <AlertDescription>

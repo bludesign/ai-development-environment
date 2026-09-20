@@ -20,6 +20,13 @@ export async function GET(request: Request): Promise<Response> {
   return authenticated(request, async (principal) => {
     const prisma = await getPrismaClient();
     const search = new URL(request.url).searchParams.get("search")?.trim();
+    if (new URL(request.url).searchParams.get("summary") === "1") {
+      const users = await prisma.user.findMany({
+        orderBy: [{ name: "asc" }, { email: "asc" }],
+        select: { id: true, name: true, email: true },
+      });
+      return { currentUserId: principal.userId, users };
+    }
     const users = await prisma.user.findMany({
       where: search
         ? {

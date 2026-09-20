@@ -14,7 +14,7 @@ import {
 import {
   controlPlaneRequest,
   controlPlaneSubscriptions,
-  onControlPlaneConnected,
+  onControlPlaneRecovery,
 } from "@/lib/control-plane-client";
 import type {
   GitHubPipelineRecordKeyInput,
@@ -202,9 +202,14 @@ export function GitHubPipelineStatusProvider({
         workflowRunId: incoming.workflowRunId!,
       });
       const existing = current.get(key);
-      if (existing && existing.revision >= incoming.revision) return current;
+      if (existing && existing.revision > incoming.revision) return current;
+      const merged =
+        existing && existing.revision === incoming.revision
+          ? { ...incoming, ...mergePipelineProjection(existing, incoming) }
+          : incoming;
+      if (existing && sameProjection(existing, merged)) return current;
       const next = new Map(current);
-      next.set(key, incoming);
+      next.set(key, merged);
       return next;
     });
   }, []);
@@ -222,7 +227,8 @@ export function GitHubPipelineStatusProvider({
           { keys },
         );
         for (const snapshot of data.githubPipelineStatuses) {
-          seedSnapshot(snapshot);
+          if (snapshotWatches.current.has(snapshotKey(snapshot)))
+            seedSnapshot(snapshot);
         }
       } catch {
         // Existing page data remains usable when local reconciliation fails.
@@ -243,7 +249,15 @@ export function GitHubPipelineStatusProvider({
           }`,
           { keys },
         );
-        for (const record of data.githubPipelineRecords) seedRecord(record);
+        for (const record of data.githubPipelineRecords) {
+          if (
+            record.workflowRunId &&
+            recordWatches.current.has(
+              recordKey({ ...record, workflowRunId: record.workflowRunId }),
+            )
+          )
+            seedRecord(record);
+        }
       } catch {
         // Existing page data remains usable when local reconciliation fails.
       }
@@ -251,43 +265,124 @@ export function GitHubPipelineStatusProvider({
     [seedRecord],
   );
 
-  const reconcile = useCallback(() => {
-    void loadSnapshots(
-      [...snapshotWatches.current.values()].map(({ key }) => key),
-    );
-    void loadRecords([...recordWatches.current.values()].map(({ key }) => key));
-  }, [loadRecords, loadSnapshots]);
+  const pendingSnapshots = useRef(new Set<string>());
+  const pendingRecords = useRef(new Set<string>());
+  const flushTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const subscription = useRef<{ scope: string; dispose: () => void } | null>(
+    null,
+  );
 
-  useEffect(() => {
-    const unsubscribeConnection = onControlPlaneConnected(reconcile);
-    const unsubscribeSubscription = controlPlaneSubscriptions().subscribe<{
-      githubPipelineStatusChanged: GitHubPipelineStatusChangeView;
-    }>(
-      {
-        query: `subscription GitHubPipelineStatusChanged {
-          githubPipelineStatusChanged {
-            snapshot { ${SNAPSHOT_FIELDS} }
+  const flush = useCallback(() => {
+    flushTimer.current = null;
+    const snapshotKeys = [...snapshotWatches.current.entries()]
+      .sort(([a], [b]) => a.localeCompare(b))
+      .map(([, { key }]) => key);
+    const recordKeys = [...recordWatches.current.entries()]
+      .sort(([a], [b]) => a.localeCompare(b))
+      .map(([, { key }]) => key);
+    const scope = JSON.stringify([snapshotKeys, recordKeys]);
+    if (!snapshotKeys.length && !recordKeys.length) {
+      subscription.current?.dispose();
+      subscription.current = null;
+    } else if (subscription.current?.scope !== scope) {
+      const previous = subscription.current;
+      const dispose = controlPlaneSubscriptions().subscribe<{
+        githubPipelineStatusChanged: GitHubPipelineStatusChangeView;
+      }>(
+        {
+          query: `subscription GitHubPipelineStatusChanged(
+          $snapshotKeys: [GitHubPipelineStatusKeyInput!],
+          $recordKeys: [GitHubPipelineRecordKeyInput!],
+          $includeSnapshots: Boolean!
+        ) {
+          githubPipelineStatusChanged(snapshotKeys: $snapshotKeys, recordKeys: $recordKeys, replayCurrent: true) {
+            snapshot @include(if: $includeSnapshots) { ${SNAPSHOT_FIELDS} }
             changedPipeline { ${RECORD_FIELDS} }
           }
         }`,
-      },
-      {
-        next: ({ data }) => {
-          const change = data?.githubPipelineStatusChanged;
-          if (!change) return;
-          seedSnapshot(change.snapshot);
-          if (change.changedPipeline) seedRecord(change.changedPipeline);
+          variables: {
+            snapshotKeys,
+            recordKeys,
+            includeSnapshots: snapshotKeys.length > 0,
+          },
         },
-        error: () => undefined,
-        complete: () => undefined,
-      },
+        {
+          next: ({ data }) => {
+            const change = data?.githubPipelineStatusChanged;
+            if (!change) return;
+            if (
+              change.snapshot &&
+              snapshotWatches.current.has(snapshotKey(change.snapshot))
+            )
+              seedSnapshot(change.snapshot);
+            const record = change.changedPipeline;
+            if (
+              record?.workflowRunId &&
+              recordWatches.current.has(
+                recordKey({ ...record, workflowRunId: record.workflowRunId }),
+              )
+            )
+              seedRecord(record);
+          },
+          error: () => undefined,
+          complete: () => undefined,
+        },
+      );
+      subscription.current = { scope, dispose };
+      // The server attaches its listener before replaying current revisions,
+      // so replacing a scope cannot lose changes during registration.
+      previous?.dispose();
+    }
+    const snapshotsToLoad = snapshotKeys.filter((key) =>
+      pendingSnapshots.current.has(snapshotKey(key)),
     );
-    reconcile();
+    const recordsToLoad = recordKeys.filter((key) =>
+      pendingRecords.current.has(recordKey(key)),
+    );
+    pendingSnapshots.current.clear();
+    pendingRecords.current.clear();
+    void loadSnapshots(snapshotsToLoad);
+    void loadRecords(recordsToLoad);
+    setSnapshots((current) => {
+      const next = new Map(
+        [...current].filter(([id]) => snapshotWatches.current.has(id)),
+      );
+      return next.size === current.size ? current : next;
+    });
+    setRecords((current) => {
+      const next = new Map(
+        [...current].filter(([id]) => recordWatches.current.has(id)),
+      );
+      return next.size === current.size ? current : next;
+    });
+  }, [loadRecords, loadSnapshots, seedRecord, seedSnapshot]);
+
+  const scheduleFlush = useCallback(() => {
+    // Coalesce all row effects (including cleanup/re-registration) in a commit.
+    if (flushTimer.current === null) flushTimer.current = setTimeout(flush, 0);
+  }, [flush]);
+
+  const reconcile = useCallback(() => {
+    for (const id of snapshotWatches.current.keys())
+      pendingSnapshots.current.add(id);
+    for (const id of recordWatches.current.keys())
+      pendingRecords.current.add(id);
+    scheduleFlush();
+  }, [scheduleFlush]);
+
+  useEffect(() => {
+    const unsubscribeConnection = onControlPlaneRecovery(reconcile, {
+      includeInitial: true,
+    });
+    scheduleFlush();
     return () => {
       unsubscribeConnection();
-      unsubscribeSubscription();
+      subscription.current?.dispose();
+      subscription.current = null;
+      if (flushTimer.current !== null) clearTimeout(flushTimer.current);
+      flushTimer.current = null;
     };
-  }, [reconcile, seedRecord, seedSnapshot]);
+  }, [reconcile, scheduleFlush]);
 
   const watchSnapshot = useCallback(
     (key: GitHubPipelineStatusKeyInput) => {
@@ -297,8 +392,12 @@ export function GitHubPipelineStatusProvider({
         key,
         count: (existing?.count ?? 0) + 1,
       });
-      if (!existing) void loadSnapshots([key]);
+      if (!existing) pendingSnapshots.current.add(id);
+      scheduleFlush();
+      let active = true;
       return () => {
+        if (!active) return;
+        active = false;
         const current = snapshotWatches.current.get(id);
         if (!current || current.count <= 1) snapshotWatches.current.delete(id);
         else
@@ -306,9 +405,10 @@ export function GitHubPipelineStatusProvider({
             ...current,
             count: current.count - 1,
           });
+        scheduleFlush();
       };
     },
-    [loadSnapshots],
+    [scheduleFlush],
   );
 
   const watchRecord = useCallback(
@@ -319,8 +419,12 @@ export function GitHubPipelineStatusProvider({
         key,
         count: (existing?.count ?? 0) + 1,
       });
-      if (!existing) void loadRecords([key]);
+      if (!existing) pendingRecords.current.add(id);
+      scheduleFlush();
+      let active = true;
       return () => {
+        if (!active) return;
+        active = false;
         const current = recordWatches.current.get(id);
         if (!current || current.count <= 1) recordWatches.current.delete(id);
         else
@@ -328,9 +432,10 @@ export function GitHubPipelineStatusProvider({
             ...current,
             count: current.count - 1,
           });
+        scheduleFlush();
       };
     },
-    [loadRecords],
+    [scheduleFlush],
   );
 
   const value = useMemo(
@@ -398,17 +503,22 @@ export function useGitHubPipelineRecords(
   seeds: GitHubPipelineRecordView[] = [],
 ): Map<string, GitHubPipelineRecordView> {
   const context = usePipelineStatusContext();
-  const ids = keys.map(recordKey).join("\u0001");
+  const ids = [...new Set(keys.map(recordKey))].sort().join("\u0001");
   const seedRecord = context?.seedRecord;
   const watchRecord = context?.watchRecord;
   useEffect(() => {
-    if (!seedRecord || !watchRecord) return;
-    for (const seed of seeds) seedRecord(seed);
-    const unwatch = keys.map((key) => watchRecord(key));
+    for (const seed of seeds) seedRecord?.(seed);
+  }, [seedRecord, seeds]);
+  useEffect(() => {
+    if (!watchRecord || !ids) return;
+    const unwatch = ids.split("\u0001").map((id) => {
+      const [repositoryGithubId, workflowRunId] = id.split("\u0000");
+      return watchRecord({ repositoryGithubId, workflowRunId });
+    });
     return () => {
       for (const dispose of unwatch) dispose();
     };
-  }, [ids, keys, seedRecord, seeds, watchRecord]);
+  }, [ids, watchRecord]);
   const result = new Map<string, GitHubPipelineRecordView>();
   for (const key of keys) {
     const id = recordKey(key);

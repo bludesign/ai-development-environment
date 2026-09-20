@@ -271,6 +271,7 @@ describe("GitHub resolvers", () => {
         codebaseRepositoryId: "codebase-repository-1",
         branch: "feature/APP-42",
         workflowId: "workflow-1",
+        latestOnly: true,
         first: 10,
         after: "cursor-1",
       },
@@ -400,6 +401,21 @@ describe("GitHub resolvers", () => {
       "feature/APP-42",
       "workflow-1",
       "ACTIONS_PAGE",
+      true,
+    );
+    await resolvers.Query.githubActionsWorkflowRuns(
+      {},
+      { source: "ACTIONS_PAGE" },
+      context(null),
+    );
+    expect(service.actionsWorkflowRuns).toHaveBeenLastCalledWith(
+      undefined,
+      25,
+      undefined,
+      undefined,
+      undefined,
+      "ACTIONS_PAGE",
+      false,
     );
     expect(service.actionsWorkflowJobs).toHaveBeenCalledWith(
       "codebase-repository-1",
@@ -592,6 +608,18 @@ describe("GitHub resolvers", () => {
         context(null),
       ),
     ).toBe(iterator);
+    expect(
+      resolvers.Subscription.githubPipelineStatusChanged.subscribe(
+        {},
+        { snapshotKeys, recordKeys, replayCurrent: true },
+        context(null),
+      ),
+    ).toBe(iterator);
+    expect(pipelineStatus.subscribe).toHaveBeenLastCalledWith({
+      snapshotKeys,
+      recordKeys,
+      replayCurrent: true,
+    });
     expect(() =>
       resolvers.Subscription.githubPipelineStatusChanged.subscribe(
         {},

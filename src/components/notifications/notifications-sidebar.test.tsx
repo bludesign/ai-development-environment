@@ -11,6 +11,7 @@ import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { SidebarProvider } from "@/components/ui/sidebar";
 import {
   controlPlaneRequest,
+  onControlPlaneRecovery,
   controlPlaneSubscriptions,
 } from "@/lib/control-plane-client";
 
@@ -18,6 +19,7 @@ import { formatDateValue } from "@/lib/date-format";
 import { NotificationsSidebar } from "./notifications-sidebar";
 
 vi.mock("@/lib/control-plane-client", () => ({
+  onControlPlaneRecovery: vi.fn(() => () => {}),
   controlPlaneRequest: vi.fn(),
   controlPlaneSubscriptions: vi.fn(),
 }));
@@ -314,4 +316,22 @@ describe("NotificationsSidebar", () => {
       ),
     );
   });
+});
+
+test("does not repeat initial reads on first connection and still reconciles reconnects", async () => {
+  render(
+    <SidebarProvider>
+      <NotificationsSidebar />
+    </SidebarProvider>,
+  );
+  const calls = () =>
+    request.mock.calls.filter(([query]) =>
+      query.includes("query SidebarNotifications"),
+    );
+  await waitFor(() => expect(calls()).toHaveLength(1));
+  const recover = vi.mocked(onControlPlaneRecovery).mock.calls.at(-1)![0];
+  await act(async () => recover({ initialConnection: true }));
+  expect(calls()).toHaveLength(1);
+  await act(async () => recover({ initialConnection: false }));
+  await waitFor(() => expect(calls()).toHaveLength(2));
 });

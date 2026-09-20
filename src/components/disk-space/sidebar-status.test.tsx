@@ -1,4 +1,5 @@
 import {
+  act,
   cleanup,
   fireEvent,
   render,
@@ -10,6 +11,7 @@ import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 
 import {
   controlPlaneRequest,
+  onControlPlaneRecovery,
   controlPlaneSubscriptions,
 } from "@/lib/control-plane-client";
 
@@ -19,6 +21,8 @@ import { SidebarStatusFooter } from "./sidebar-status";
 
 vi.mock("@/lib/control-plane-client", () => ({
   controlPlaneRequest: vi.fn(),
+  onControlPlaneRecovery: vi.fn(() => vi.fn()),
+  onControlPlaneMutation: vi.fn(() => vi.fn()),
   controlPlaneSubscriptions: vi.fn(),
 }));
 
@@ -132,10 +136,18 @@ describe("SidebarStatusFooter", () => {
       const operation = String(query);
       if (operation.includes("query SidebarStatus")) {
         return {
-          sidebarStatus,
+          sidebarStatus: {
+            ...sidebarStatus,
+            diskSummary: sidebarStatus.diskSpace,
+          },
           derivedDataDeletionHistory: { items: [] },
         } as never;
       }
+      if (operation.includes("query SidebarDiskDetails"))
+        return {
+          diskSpaceOverview: sidebarStatus.diskSpace,
+          derivedDataDeletionHistory: { items: [] },
+        } as never;
       if (operation.includes("SidebarPressureMode")) {
         return {
           setAgentDiskSpacePressureMode: { manualPressureMode: false },
@@ -166,7 +178,7 @@ describe("SidebarStatusFooter", () => {
       expect(badge.className).toContain("bg-amber-500/10");
     }
 
-    const pressureMode = screen.getByRole("button", {
+    const pressureMode = await screen.findByRole("button", {
       name: "Pressure mode",
     });
     expect(pressureMode.getAttribute("aria-pressed")).toBe("true");
@@ -243,7 +255,7 @@ describe("SidebarStatusFooter", () => {
       return {
         sidebarStatus: {
           ...sidebarStatus,
-          diskSpace: {
+          diskSummary: {
             ...sidebarStatus.diskSpace,
             agents: [
               sidebarStatus.diskSpace.agents[0],
@@ -269,5 +281,19 @@ describe("SidebarStatusFooter", () => {
     );
     expect(circle.style.background).toContain("var(--muted) 0% 20%");
     expect(circle.style.background).toContain("#f59e0b 20% 100%");
+  });
+
+  test("does not repeat initial reads on first connection and still reconciles reconnects", async () => {
+    renderFooter();
+    const calls = () =>
+      request.mock.calls.filter(([query]) =>
+        query.includes("query SidebarStatus"),
+      );
+    await waitFor(() => expect(calls()).toHaveLength(1));
+    const recover = vi.mocked(onControlPlaneRecovery).mock.calls.at(-1)![0];
+    await act(async () => recover({ initialConnection: true }));
+    expect(calls()).toHaveLength(1);
+    await act(async () => recover({ initialConnection: false }));
+    await waitFor(() => expect(calls()).toHaveLength(2));
   });
 });

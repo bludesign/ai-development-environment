@@ -4,6 +4,7 @@
     "description": "Eine auf künstliche Intelligenz ausgerichtete Entwicklungsumgebung."
   },
   "common": {
+    "loadMore": "Mehr laden",
     "cancel": "Abbrechen",
     "continue": "Fortfahren",
     "cannotBeUndone": "Diese Aktion kann nicht rückgängig gemacht werden."
@@ -2722,6 +2723,7 @@
     "clearBranchFilter": "Branch-Filter löschen",
     "pipelineFilter": "Workflow",
     "allPipelines": "Alle Pipelines",
+    "latestOnly": "Nur neueste Läufe",
     "searchPipelines": "Pipelines durchsuchen",
     "noPipelineMatches": "Keine Pipelines entsprechen der Suche.",
     "loadingRuns": "Workflow-Läufe werden geladen…",

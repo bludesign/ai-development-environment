@@ -1043,6 +1043,7 @@ const mockTranslations = {
     allRepositories: "All repositories",
     searchRepositories: "Search repositories",
     noRepositoryMatches: "No repositories match your search.",
+    latestOnly: "Latest only",
     loadingRuns: "Loading workflow runs…",
     noCodebases: "No GitHub codebases",
     noCodebasesDescription:

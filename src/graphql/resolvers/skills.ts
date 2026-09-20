@@ -41,8 +41,10 @@ export const createSkillResolvers = (service: SkillsService) => ({
     updatedAt: (value: { updatedAt: Date }) => value.updatedAt.toISOString(),
   },
   SkillFile: {
-    contentsBase64: (value: { contents: Uint8Array }) =>
-      Buffer.from(value.contents).toString("base64"),
+    contentsBase64: async (value: { id: string; contents?: Uint8Array }) =>
+      Buffer.from(
+        value.contents ?? (await service.fileContents(value.id)),
+      ).toString("base64"),
     createdAt: (value: { createdAt: Date }) => value.createdAt.toISOString(),
     updatedAt: (value: { updatedAt: Date }) => value.updatedAt.toISOString(),
   },
@@ -88,14 +90,31 @@ export const createSkillResolvers = (service: SkillsService) => ({
     updatedAt: (value: { updatedAt: Date }) => value.updatedAt.toISOString(),
     finishedAt: (value: { finishedAt: Date | null }) => iso(value.finishedAt),
   },
+  SkillsOverview: {
+    skills: (value: { search?: string }) => service.listSkills(value.search),
+    groups: () => service.listGroups(),
+    observations: () => service.observations(),
+    installations: (value: { search?: string }) =>
+      service.installations(value.search),
+    settings: () => service.settings(),
+    repositories: () => service.repositories(),
+  },
   Query: {
+    skillGroup: (
+      _root: unknown,
+      { id }: { id: string },
+      context: GraphQLContext,
+    ) => {
+      requireControlPlane(context);
+      return service.getGroup(id);
+    },
     skillsOverview: (
       _root: unknown,
       { search }: { search?: string | null },
       context: GraphQLContext,
     ) => {
       requireControlPlane(context);
-      return service.overview(search ?? "");
+      return { search: search ?? "" };
     },
     skill: (
       _root: unknown,
@@ -206,7 +225,7 @@ export const createSkillResolvers = (service: SkillsService) => ({
         requireControlPlane(context);
         return service.subscribe();
       },
-      resolve: () => service.overview(),
+      resolve: () => ({ search: "" }),
     },
     skillSyncRunChanged: {
       subscribe: (

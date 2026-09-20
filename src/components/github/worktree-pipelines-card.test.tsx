@@ -14,8 +14,9 @@ import type { GitHubActionsWorkflowRunView } from "@/services/github/types";
 import { WorktreePipelinesCard } from "./worktree-pipelines-card";
 
 vi.mock("@/lib/control-plane-client", () => ({
+  onControlPlaneRecovery: vi.fn(() => vi.fn()),
   controlPlaneRequest: vi.fn(),
-  controlPlaneSubscriptions: () => ({ subscribe: vi.fn() }),
+  controlPlaneSubscriptions: () => ({ subscribe: vi.fn(() => vi.fn()) }),
 }));
 
 Object.defineProperties(HTMLElement.prototype, {

@@ -18,6 +18,7 @@ import { BuildsPage } from "./builds-page";
 
 vi.mock("@/lib/control-plane-client", () => ({
   controlPlaneRequest: vi.fn(),
+  onControlPlaneRecovery: vi.fn(() => () => undefined),
   controlPlaneSubscriptions: vi.fn(),
 }));
 
@@ -43,7 +44,10 @@ beforeEach(() => {
   } as never);
   request.mockImplementation(async (query) => {
     const operation = String(query);
-    if (operation.includes("query BuildsPage")) {
+    if (
+      operation.includes("query BuildsPage") ||
+      operation.includes("query BuildScriptCatalog")
+    ) {
       return {
         builds: {
           items: [

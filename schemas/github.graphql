@@ -1426,6 +1426,8 @@ extend type Query {
     branch: String
     "Identifier of the workflow. Omit it to leave this dimension unfiltered."
     workflowId: ID
+    "Whether to return only the newest run for each repository, workflow, event, and branch. Defaults to `false`."
+    latestOnly: Boolean = false
     "Maximum number of records to return. Defaults to `25`."
     first: Int = 25
     "Cursor or identifier after which to return records. Omit it to leave this dimension unfiltered."
@@ -1520,8 +1522,19 @@ extend type Query {
 }
 
 extend type Subscription {
-  "Emits a GitHub pipeline status change whenever GitHub pipeline status change."
-  githubPipelineStatusChanged: GitHubPipelineStatusChanged!
+  """
+  Omitted key lists retain the global event stream. Supplying either list scopes
+  delivery to their union; empty lists watch nothing. replayCurrent attaches the
+  listener before reading current revisions to recover registration/reconnect gaps.
+  """
+  githubPipelineStatusChanged(
+    "Only emit statuses for these worktree pipeline snapshots; omitted retains global delivery."
+    snapshotKeys: [GitHubPipelineStatusKeyInput!]
+    "Only emit statuses for these individual pipeline records; omitted retains global delivery."
+    recordKeys: [GitHubPipelineRecordKeyInput!]
+    "Replay current watched statuses after registering for live changes."
+    replayCurrent: Boolean = false
+  ): GitHubPipelineStatusChanged!
 }
 
 extend type Mutation {

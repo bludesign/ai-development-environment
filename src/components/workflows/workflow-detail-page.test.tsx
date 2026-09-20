@@ -4,10 +4,12 @@ import { afterEach, describe, expect, test, vi } from "vitest";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { controlPlaneRequest } from "@/lib/control-plane-client";
 
+import { invalidateWorkflowCatalog } from "./workflow-catalog";
 import { WorkflowDetailPage } from "./workflow-detail-page";
 import { emptyDefinition, type WorkflowDisplayLayout } from "./types";
 
 vi.mock("@/lib/control-plane-client", () => ({
+  onControlPlaneRecovery: vi.fn(() => vi.fn()),
   controlPlaneRequest: vi.fn(),
   controlPlaneSubscriptions: () => ({
     subscribe: () => () => undefined,
@@ -49,6 +51,7 @@ vi.mock("./workflow-graph", async () => {
 const request = vi.mocked(controlPlaneRequest);
 
 afterEach(() => {
+  invalidateWorkflowCatalog();
   cleanup();
   vi.clearAllMocks();
 });

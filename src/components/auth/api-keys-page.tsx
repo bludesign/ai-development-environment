@@ -1,6 +1,12 @@
 "use client";
 
-import { useCallback, useEffect, useState, type FormEvent } from "react";
+import {
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+  type FormEvent,
+} from "react";
 import {
   Check,
   Copy,
@@ -53,17 +59,6 @@ type ApiKeyMetadata = {
   user: UserSummary;
 };
 
-async function apiKeyData(): Promise<{
-  apiKeys: ApiKeyMetadata[];
-  users: UserSummary[];
-}> {
-  const [keyData, userData] = await Promise.all([
-    authManagementRequest<{ apiKeys: ApiKeyMetadata[] }>("api-keys"),
-    authManagementRequest<{ users: UserSummary[] }>("users"),
-  ]);
-  return { apiKeys: keyData.apiKeys, users: userData.users };
-}
-
 export function ApiKeysPage() {
   const t = useTranslations("apiKeyManagement");
   const common = useTranslations("common");
@@ -85,43 +80,56 @@ export function ApiKeysPage() {
     new Date(Date.now() + 86_400_000).toISOString().slice(0, 16),
   );
 
+  const activeLoad = useRef<AbortController | null>(null);
   const load = useCallback(async () => {
+    activeLoad.current?.abort();
+    const controller = new AbortController();
+    activeLoad.current = controller;
     setLoading(true);
     setError(null);
     try {
-      const data = await apiKeyData();
-      setKeys(data.apiKeys);
-      setUsers(data.users);
-      setOwnerId((current) => current || data.users[0]?.id || "");
+      const data = await authManagementRequest<{ apiKeys: ApiKeyMetadata[] }>(
+        "api-keys",
+        { signal: controller.signal },
+      );
+      if (!controller.signal.aborted) setKeys(data.apiKeys);
     } catch (value) {
-      setError(value instanceof Error ? value.message : String(value));
+      if (!controller.signal.aborted)
+        setError(value instanceof Error ? value.message : String(value));
     } finally {
-      setLoading(false);
+      if (!controller.signal.aborted) setLoading(false);
     }
   }, []);
 
   useEffect(() => {
-    let cancelled = false;
-    void apiKeyData()
+    const timer = window.setTimeout(() => void load(), 0);
+    return () => {
+      window.clearTimeout(timer);
+      activeLoad.current?.abort();
+    };
+  }, [load]);
+
+  useEffect(() => {
+    if (!createOpen) return;
+    const controller = new AbortController();
+    void authManagementRequest<{ users: UserSummary[] }>("users?summary=1", {
+      signal: controller.signal,
+    })
       .then((data) => {
-        if (!cancelled) {
-          setKeys(data.apiKeys);
-          setUsers(data.users);
-          setOwnerId(data.users[0]?.id || "");
-        }
+        if (controller.signal.aborted) return;
+        setUsers(data.users);
+        setOwnerId((current) =>
+          data.users.some((user) => user.id === current)
+            ? current
+            : data.users[0]?.id || "",
+        );
       })
       .catch((value: unknown) => {
-        if (!cancelled) {
+        if (!controller.signal.aborted)
           setError(value instanceof Error ? value.message : String(value));
-        }
-      })
-      .finally(() => {
-        if (!cancelled) setLoading(false);
       });
-    return () => {
-      cancelled = true;
-    };
-  }, []);
+    return () => controller.abort();
+  }, [createOpen]);
 
   async function createKey(event: FormEvent) {
     event.preventDefault();

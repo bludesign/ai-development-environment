@@ -11,7 +11,7 @@ import {
   Trash2,
 } from "lucide-react";
 import { useTranslations } from "next-intl";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 import { BuildsPage } from "@/components/builds/builds-page";
 import { ConfirmationDialog } from "@/components/confirmation-dialog";
@@ -80,36 +80,69 @@ export function AppDetailPage({
   const [editorOpen, setEditorOpen] = useState(false);
   const [deleteOpen, setDeleteOpen] = useState(false);
 
-  const load = useCallback(async () => {
-    try {
-      const data = await controlPlaneRequest<{
-        app: ManagedApp | null;
-        codebaseOverview: { repositories: AppRepository[] };
-      }>(
-        `query AppDetail($id: ID!) {
+  const load = useCallback(
+    async (signal?: AbortSignal) => {
+      try {
+        const data = await controlPlaneRequest<{
+          app: ManagedApp | null;
+        }>(
+          `query AppDetail($id: ID!) {
           app(id: $id) { ${APP_FIELDS} }
-          codebaseOverview { repositories { ${APP_REPOSITORY_FIELDS} } }
-        }`,
-        { id: appId },
-      );
-      setApp(data.app);
-      setRepositories(data.codebaseOverview.repositories);
-      setError(null);
-    } catch (value) {
-      setError(value instanceof Error ? value.message : String(value));
-    } finally {
-      setLoading(false);
-    }
-  }, [appId]);
+          }`,
+          { id: appId },
+          { signal },
+        );
+        if (signal?.aborted) return;
+        setApp(data.app);
+        setError(null);
+      } catch (value) {
+        if (!signal?.aborted)
+          setError(value instanceof Error ? value.message : String(value));
+      } finally {
+        if (!signal?.aborted) setLoading(false);
+      }
+    },
+    [appId],
+  );
+
+  const appRef = useRef(app);
+  useEffect(() => {
+    appRef.current = app;
+  }, [app]);
 
   useEffect(() => {
-    const timer = window.setTimeout(() => void load(), 0);
-    const unsubscribe = subscribeToAppSummaryChanges(() => void load());
+    const subscription = subscribeToAppSummaryChanges(
+      load,
+      () => appRef.current,
+      appId,
+    );
+    const timer = window.setTimeout(() => void subscription.refresh(), 0);
     return () => {
       window.clearTimeout(timer);
-      unsubscribe();
+      subscription.dispose();
     };
-  }, [load]);
+  }, [appId, load]);
+
+  useEffect(() => {
+    if (!editorOpen) return;
+    const controller = new AbortController();
+    void controlPlaneRequest<{
+      codebaseOverview: { repositories: AppRepository[] };
+    }>(
+      `query AppEditorRepositories { codebaseOverview { repositories { ${APP_REPOSITORY_FIELDS} } } }`,
+      undefined,
+      { signal: controller.signal },
+    )
+      .then((data) => {
+        if (!controller.signal.aborted)
+          setRepositories(data.codebaseOverview.repositories);
+      })
+      .catch((value: unknown) => {
+        if (!controller.signal.aborted)
+          setError(value instanceof Error ? value.message : String(value));
+      });
+    return () => controller.abort();
+  }, [editorOpen]);
 
   const remove = async () => {
     try {

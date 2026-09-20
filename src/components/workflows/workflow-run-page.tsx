@@ -10,7 +10,7 @@ import {
   Wrench,
 } from "lucide-react";
 import { useTranslations } from "next-intl";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { DateTime } from "@/components/common/date-time";
 import { Alert, AlertDescription } from "@/components/ui/alert";
@@ -49,6 +49,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { Spinner } from "@/components/ui/spinner";
 import { Skeleton } from "@/components/ui/skeleton";
 import {
   Table,
@@ -69,6 +70,7 @@ import { Link } from "@/i18n/navigation";
 import {
   controlPlaneRequest,
   controlPlaneSubscriptions,
+  onControlPlaneRecovery,
 } from "@/lib/control-plane-client";
 import { cn } from "@/lib/utils";
 import {
@@ -89,6 +91,9 @@ import {
   type WorktreeRunQueueEntry,
 } from "./types";
 
+import { createRefreshCoalescer } from "@/lib/refresh-coalescer";
+
+const EVENT_FIELDS = `id attemptId sequence type message detail createdAt`;
 const RUN_DETAIL_FIELDS = `
   id displayNumber workflowId versionId triggerKind triggerSubjectKey status phase worktreeConcurrency blocksGitOperations generation
   sessionData sessionRevision blockedReason error queuedAt startedAt pausedAt finishedAt createdAt updatedAt
@@ -114,7 +119,6 @@ const RUN_DETAIL_FIELDS = `
     checkpoints { id kind headSha branch upstreamSha refName diffSummary stashRef createdAt }
   }
   waits { id attemptId kind status predicate externalKey resumeAfter timeoutAt result createdAt resolvedAt updatedAt }
-  events { id attemptId sequence type message detail createdAt }
   resourceLinks { id attemptId kind resourceId label url metadata createdAt }
 `;
 
@@ -180,6 +184,7 @@ function triggerSubjectLabel(run: WorkflowRun): string {
 export function WorkflowRunPage({ runId }: { runId: string }) {
   const t = useTranslations("workflows");
   const labels = useWorkflowLabels();
+  const common = useTranslations("common");
   const openDestination = useOpenWorkflowDestination();
   const [run, setRun] = useState<WorkflowRunDetail | null>(null);
   const [loading, setLoading] = useState(true);
@@ -192,6 +197,24 @@ export function WorkflowRunPage({ runId }: { runId: string }) {
   );
   const [replayNodeId, setReplayNodeId] = useState<string>("");
   const [preview, setPreview] = useState<ReplayPreview | null>(null);
+  const [events, setEvents] = useState<WorkflowRun["events"]>([]);
+  const [hasOlderEvents, setHasOlderEvents] = useState(false);
+  const [loadingOlder, setLoadingOlder] = useState(false);
+  const eventsRef = useRef<WorkflowRun["events"]>([]);
+  const ownerRef = useRef<ReturnType<typeof createRefreshCoalescer> | null>(
+    null,
+  );
+  const olderRequest = useRef<AbortController | null>(null);
+  const eventCursor = useRef<number | null>(null);
+  const stateRevision = useRef(0);
+  const mergeEvents = useCallback((incoming: WorkflowRun["events"]) => {
+    const merged = new Map(eventsRef.current.map((event) => [event.id, event]));
+    for (const event of incoming) merged.set(event.id, event);
+    eventsRef.current = [...merged.values()].sort(
+      (a, b) => a.sequence - b.sequence,
+    );
+    setEvents(eventsRef.current);
+  }, []);
   const nodeDestinations = useMemo(
     () => (run ? workflowRunNodeDestinations(run) : new Map()),
     [run],
@@ -207,64 +230,166 @@ export function WorkflowRunPage({ runId }: { runId: string }) {
     [run],
   );
 
+  const notFoundMessage = t("runNotFound");
   const load = useCallback(async () => {
+    await ownerRef.current?.refresh();
+  }, []);
+  const loadOlderEvents = useCallback(async () => {
+    if (olderRequest.current || !eventsRef.current.length) return;
+    const controller = new AbortController();
+    olderRequest.current = controller;
+    setLoadingOlder(true);
     try {
       const data = await controlPlaneRequest<{
-        workflowRun: WorkflowRunDetail | null;
+        workflowRunEvents: WorkflowRun["events"];
       }>(
-        `query WorkflowRunDetail($id: ID!) { workflowRun(id: $id) { ${RUN_DETAIL_FIELDS} } }`,
-        { id: runId },
+        `query OlderWorkflowRunEvents($id: ID!, $before: Int!) {
+          workflowRunEvents(runId: $id, beforeSequence: $before, first: 100) { ${EVENT_FIELDS} }
+        }`,
+        { id: runId, before: eventsRef.current[0]!.sequence },
+        { signal: controller.signal },
       );
-      setRun(data.workflowRun);
-      setError(data.workflowRun ? null : t("runNotFound"));
+      if (controller.signal.aborted) return;
+      mergeEvents(data.workflowRunEvents);
+      setHasOlderEvents(
+        Boolean(
+          data.workflowRunEvents.length &&
+          data.workflowRunEvents[0]!.sequence > 0,
+        ),
+      );
     } catch (value) {
-      setError(value instanceof Error ? value.message : String(value));
+      if (!controller.signal.aborted)
+        setError(value instanceof Error ? value.message : String(value));
     } finally {
-      setLoading(false);
+      if (olderRequest.current === controller) olderRequest.current = null;
+      if (!controller.signal.aborted) setLoadingOlder(false);
     }
-  }, [runId, t]);
+  }, [mergeEvents, runId]);
 
   useEffect(() => {
-    const timer = window.setTimeout(() => void load(), 0);
+    eventsRef.current = [];
+    eventCursor.current = null;
+    const owner = createRefreshCoalescer(async (signal) => {
+      const revision = stateRevision.current;
+      const initial = eventCursor.current === null;
+      try {
+        const data = await controlPlaneRequest<{
+          workflowRun: WorkflowRunDetail | null;
+          workflowRunEvents: WorkflowRun["events"];
+        }>(
+          `query WorkflowRunDetail($id: ID!, $after: Int!, $latest: Boolean!, $first: Int!) {
+          workflowRun(id: $id) { ${RUN_DETAIL_FIELDS} }
+          workflowRunEvents(runId: $id, afterSequence: $after, latest: $latest, first: $first) { ${EVENT_FIELDS} }
+        }`,
+          {
+            id: runId,
+            after: eventCursor.current ?? -1,
+            latest: initial,
+            first: initial ? 100 : 1000,
+          },
+          { signal },
+        );
+        if (signal.aborted) return;
+        if (revision === stateRevision.current) setRun(data.workflowRun);
+        let page = data.workflowRunEvents;
+        mergeEvents(page);
+        if (initial)
+          setHasOlderEvents(Boolean(page.length && page[0]!.sequence > 0));
+        eventCursor.current =
+          page.at(-1)?.sequence ?? eventCursor.current ?? -1;
+        // Events allocate their sequence in a DB transaction. Advance recovery
+        // only through HTTP snapshots, never through a possibly gapped live stream.
+        while (!initial && page.length === 1000) {
+          const before: number = eventCursor.current ?? -1;
+          const next = await controlPlaneRequest<{
+            workflowRunEvents: WorkflowRun["events"];
+          }>(
+            `query WorkflowRunEventRecovery($id: ID!, $after: Int!) {
+              workflowRunEvents(runId: $id, afterSequence: $after, first: 1000) { ${EVENT_FIELDS} }
+            }`,
+            { id: runId, after: before },
+            { signal },
+          );
+          if (signal.aborted) return;
+          page = next.workflowRunEvents;
+          mergeEvents(page);
+          eventCursor.current = page.at(-1)?.sequence ?? before;
+          if (eventCursor.current === before) break;
+        }
+        setError(data.workflowRun ? null : notFoundMessage);
+      } catch (value) {
+        if (!signal.aborted)
+          setError(value instanceof Error ? value.message : String(value));
+      } finally {
+        if (!signal.aborted) setLoading(false);
+      }
+    });
+    ownerRef.current = owner;
     const client = controlPlaneSubscriptions();
     const subscriptions = [
-      client.subscribe<{ workflowRunChanged: { id: string } }>(
+      client.subscribe<{ workflowRunChanged: WorkflowRunDetail }>(
         {
-          query: `subscription WorkflowRunState($id: ID!) { workflowRunChanged(runId: $id) { id } }`,
+          query: `subscription WorkflowRunState($id: ID!) { workflowRunChanged(runId: $id) { ${RUN_DETAIL_FIELDS} } }`,
           variables: { id: runId },
         },
         {
-          next: () => void load(),
+          next: (result) => {
+            const value = result.data?.workflowRunChanged;
+            if (value) {
+              ++stateRevision.current;
+              setRun(value);
+              setLoading(false);
+            }
+          },
           error: () => undefined,
           complete: () => undefined,
         },
       ),
-      client.subscribe<{ workflowRunEventAdded: { id: string } }>(
+      client.subscribe<{
+        workflowRunEventAdded: WorkflowRun["events"][number];
+      }>(
         {
-          query: `subscription WorkflowRunEvents($id: ID!) { workflowRunEventAdded(runId: $id) { id } }`,
+          query: `subscription WorkflowRunEvents($id: ID!) { workflowRunEventAdded(runId: $id) { ${EVENT_FIELDS} } }`,
           variables: { id: runId },
         },
         {
-          next: () => void load(),
+          next: (result) => {
+            if (result.data?.workflowRunEventAdded)
+              mergeEvents([result.data.workflowRunEventAdded]);
+          },
           error: () => undefined,
           complete: () => undefined,
         },
       ),
+      onControlPlaneRecovery(() => void owner.refresh()),
     ];
+    const recover = () => {
+      if (document.visibilityState !== "hidden") void owner.refresh();
+    };
+    window.addEventListener("focus", recover);
+    document.addEventListener("visibilitychange", recover);
+    const timer = window.setTimeout(() => void owner.refresh(), 0);
     return () => {
       window.clearTimeout(timer);
-      subscriptions.forEach((subscription) => subscription());
+      subscriptions.forEach((dispose) => dispose());
+      owner.dispose();
+      olderRequest.current?.abort();
+      olderRequest.current = null;
+      window.removeEventListener("focus", recover);
+      document.removeEventListener("visibilitychange", recover);
+      if (ownerRef.current === owner) ownerRef.current = null;
     };
-  }, [load, runId]);
+  }, [mergeEvents, notFoundMessage, runId]);
 
   useEffect(() => {
     if (run?.status !== "QUEUED") return;
     const client = controlPlaneSubscriptions();
     const subscriptions = [
-      client.subscribe<{ workflowsChanged: { id: string } | null }>(
+      client.subscribe<{ workflowChanges: { runId: string | null } }>(
         {
           query:
-            "subscription QueuedWorkflowRunQueueChanges { workflowsChanged { id } }",
+            "subscription QueuedWorkflowRunQueueChanges($workflowId: ID!) { workflowChanges(workflowId: $workflowId, includeQueuePeers: true) { runId } }",
+          variables: { workflowId: run.workflowId },
         },
         {
           next: () => void load(),
@@ -272,10 +397,11 @@ export function WorkflowRunPage({ runId }: { runId: string }) {
           complete: () => undefined,
         },
       ),
-      client.subscribe<{ agentRunsChanged: { id: string } | null }>(
+      client.subscribe<{ agentRunListChanged: boolean }>(
         {
           query:
-            "subscription QueuedWorkflowAgentRunChanges { agentRunsChanged { id } }",
+            "subscription QueuedWorkflowAgentRunChanges($workflowId: ID!) { agentRunListChanged(workflowId: $workflowId) }",
+          variables: { workflowId: run.workflowId },
         },
         {
           next: () => void load(),
@@ -285,7 +411,7 @@ export function WorkflowRunPage({ runId }: { runId: string }) {
       ),
     ];
     return () => subscriptions.forEach((subscription) => subscription());
-  }, [load, run?.status]);
+  }, [load, run?.status, run?.workflowId]);
 
   const lifecycle = async (action: "pause" | "resume" | "cancel") => {
     setBusy(true);
@@ -823,12 +949,23 @@ export function WorkflowRunPage({ runId }: { runId: string }) {
           <Card>
             <CardContent className="pt-6">
               <div className="space-y-0">
-                {run.events.map((event, index) => (
+                {hasOlderEvents && (
+                  <Button
+                    disabled={loadingOlder}
+                    onClick={() => void loadOlderEvents()}
+                    variant="outline"
+                    className="mb-4"
+                  >
+                    {loadingOlder && <Spinner />}
+                    {common("loadMore")}
+                  </Button>
+                )}
+                {events.map((event, index) => (
                   <div
                     className="relative grid grid-cols-[24px_1fr] gap-3 pb-5"
                     key={event.id}
                   >
-                    {index < run.events.length - 1 && (
+                    {index < events.length - 1 && (
                       <div className="absolute top-5 bottom-0 left-[11px] w-px bg-border" />
                     )}
                     <div className="z-10 mt-1 size-6 rounded-full border bg-background" />
@@ -852,7 +989,7 @@ export function WorkflowRunPage({ runId }: { runId: string }) {
                     </div>
                   </div>
                 ))}
-                {!run.events.length && (
+                {!events.length && (
                   <Empty className="py-12">
                     <EmptyHeader>
                       <EmptyTitle>{t("noEvents")}</EmptyTitle>

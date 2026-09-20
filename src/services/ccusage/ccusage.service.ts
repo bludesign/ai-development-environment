@@ -215,6 +215,10 @@ function progressFor(
 }
 
 export class CcusageService {
+  private readonly historyReports = new Map<
+    string,
+    { revision: string; source: UsageReportSource }
+  >();
   private readonly deadlineTimers = new Map<
     string,
     ReturnType<typeof setTimeout>
@@ -561,7 +565,22 @@ export class CcusageService {
   private async persistReports(reports: ObservedUsageReport[]): Promise<void> {
     if (reports.length === 0) return;
     const prisma = await getPrismaClient();
+    // A compact cursor preflight avoids opening a write transaction for an immutable
+    // job report already incorporated by this or another server process. The
+    // transaction below still rechecks both the cursor and clear-history barrier.
+    const cursors = await prisma.ccusageHistory.findMany({
+      where: { agentId: { in: reports.map(({ agent }) => agent.id) } },
+      select: { agentId: true, lastJobId: true, lastObservedAt: true },
+    });
+    const byAgent = new Map(cursors.map((cursor) => [cursor.agentId, cursor]));
     for (const source of reports) {
+      if (
+        !shouldApplyUsageObservation(
+          byAgent.get(source.agent.id) ?? null,
+          source,
+        )
+      )
+        continue;
       await prisma.$transaction(async (transaction) => {
         const state = await transaction.ccusageHistoryState.findUnique({
           where: { id: "default" },
@@ -609,31 +628,83 @@ export class CcusageService {
     hasStoredHistory: boolean;
   }> {
     const prisma = await getPrismaClient();
-    const histories = await prisma.ccusageHistory.findMany();
+    // Read revisions on every snapshot: this cache never substitutes a timer for
+    // cross-process updates or a history clear. Large report JSON is read only
+    // for agents whose stored observation changed.
+    const revisions = await prisma.ccusageHistory.findMany({
+      select: {
+        agentId: true,
+        agentName: true,
+        hostname: true,
+        updatedAt: true,
+        lastJobId: true,
+        lastObservedAt: true,
+      },
+    });
+    const revisionKey = (row: (typeof revisions)[number]) =>
+      JSON.stringify([
+        row.updatedAt,
+        row.lastJobId,
+        row.lastObservedAt,
+        row.agentName,
+        row.hostname,
+      ]);
+    const present = new Set(revisions.map(({ agentId }) => agentId));
+    for (const id of this.historyReports.keys())
+      if (!present.has(id)) this.historyReports.delete(id);
+    const stableReports = new Map(
+      revisions.flatMap((row) => {
+        const cached = this.historyReports.get(row.agentId);
+        return cached?.revision === revisionKey(row)
+          ? [[row.agentId, cached.source] as const]
+          : [];
+      }),
+    );
+    const changed = revisions.filter(
+      (row) =>
+        this.historyReports.get(row.agentId)?.revision !== revisionKey(row),
+    );
+    const histories = changed.length
+      ? await prisma.ccusageHistory.findMany({
+          where: { agentId: { in: changed.map(({ agentId }) => agentId) } },
+        })
+      : [];
+    const refreshed = new Map<string, UsageReportSource>();
+    for (const history of histories) {
+      try {
+        const source: UsageReportSource = {
+          agent: {
+            id: history.agentId,
+            name: history.agentName,
+            hostname: history.hostname,
+          },
+          report: addCcusageReports(
+            parseStoredCcusageReport(history.archivedReportJson),
+            parseStoredCcusageReport(history.lastLiveReportJson),
+          ),
+        };
+        refreshed.set(history.agentId, source);
+        this.historyReports.delete(history.agentId);
+        this.historyReports.set(history.agentId, {
+          revision: revisionKey(history),
+          source,
+        });
+        if (this.historyReports.size > 256)
+          this.historyReports.delete(this.historyReports.keys().next().value!);
+      } catch (error) {
+        this.historyReports.delete(history.agentId);
+        console.error(
+          `Could not read ccusage history for agent ${history.agentId}:`,
+          error instanceof Error ? error.message : error,
+        );
+      }
+    }
     return {
-      hasStoredHistory: histories.length > 0,
-      reports: histories.flatMap((history) => {
-        try {
-          return [
-            {
-              agent: {
-                id: history.agentId,
-                name: history.agentName,
-                hostname: history.hostname,
-              },
-              report: addCcusageReports(
-                parseStoredCcusageReport(history.archivedReportJson),
-                parseStoredCcusageReport(history.lastLiveReportJson),
-              ),
-            },
-          ];
-        } catch (error) {
-          console.error(
-            `Could not read ccusage history for agent ${history.agentId}:`,
-            error instanceof Error ? error.message : error,
-          );
-          return [];
-        }
+      hasStoredHistory: revisions.length > 0,
+      reports: revisions.flatMap((row) => {
+        const source =
+          refreshed.get(row.agentId) ?? stableReports.get(row.agentId);
+        return source ? [source] : [];
       }),
     };
   }

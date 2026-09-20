@@ -1,6 +1,7 @@
-import { randomBytes, randomUUID } from "node:crypto";
+import { createHash, randomBytes, randomUUID } from "node:crypto";
 
 import { getPrismaClient } from "@/data/prisma-client";
+import { mapIntegrationRequests } from "@/services/integration-request";
 import { compileRe2 } from "@/lib/re2.server";
 import type { Prisma } from "@/generated/prisma/client";
 import {
@@ -302,11 +303,13 @@ type ActionsRepositoryTarget = GitHubActionsRepositoryView & {
 };
 
 type ActionsCursor = {
-  version: 1;
+  version: 2;
   codebaseRepositoryId: string | null;
   branch: string | null;
   workflowId: string | null;
+  latestOnly: boolean;
   consumed: Record<string, number>;
+  seenGroups: Record<string, string[]>;
 };
 
 type PullRequestCursorStream = {
@@ -741,29 +744,68 @@ function decodeActionsCursor(
   codebaseRepositoryId: string | null,
   branch: string | null,
   workflowId: string | null,
+  latestOnly: boolean,
 ): ActionsCursor {
   if (!value) {
     return {
-      version: 1,
+      version: 2,
       codebaseRepositoryId,
       branch,
       workflowId,
+      latestOnly,
       consumed: {},
+      seenGroups: {},
     };
   }
   try {
     const parsed = JSON.parse(
       Buffer.from(value, "base64url").toString("utf8"),
-    ) as Partial<ActionsCursor>;
+    ) as {
+      version?: number;
+      codebaseRepositoryId?: string | null;
+      branch?: string | null;
+      workflowId?: string | null;
+      latestOnly?: boolean;
+      consumed?: Record<string, unknown>;
+      seenGroups?: Record<string, unknown>;
+    };
+    const validConsumed =
+      parsed.consumed &&
+      typeof parsed.consumed === "object" &&
+      Object.values(parsed.consumed).every(
+        (item) => Number.isInteger(item) && Number(item) >= 0,
+      );
     if (
-      parsed.version !== 1 ||
+      parsed.version === 1 &&
+      !latestOnly &&
+      parsed.codebaseRepositoryId === codebaseRepositoryId &&
+      parsed.branch === branch &&
+      parsed.workflowId === workflowId &&
+      validConsumed
+    ) {
+      return {
+        version: 2,
+        codebaseRepositoryId,
+        branch,
+        workflowId,
+        latestOnly: false,
+        consumed: parsed.consumed as Record<string, number>,
+        seenGroups: {},
+      };
+    }
+    if (
+      parsed.version !== 2 ||
       parsed.codebaseRepositoryId !== codebaseRepositoryId ||
       parsed.branch !== branch ||
       parsed.workflowId !== workflowId ||
-      !parsed.consumed ||
-      typeof parsed.consumed !== "object" ||
-      Object.values(parsed.consumed).some(
-        (item) => !Number.isInteger(item) || Number(item) < 0,
+      parsed.latestOnly !== latestOnly ||
+      !validConsumed ||
+      !parsed.seenGroups ||
+      typeof parsed.seenGroups !== "object" ||
+      Object.values(parsed.seenGroups).some(
+        (groups) =>
+          !Array.isArray(groups) ||
+          groups.some((group) => typeof group !== "string"),
       )
     ) {
       throw new Error("invalid");
@@ -776,6 +818,13 @@ function decodeActionsCursor(
 
 function encodeActionsCursor(cursor: ActionsCursor): string {
   return Buffer.from(JSON.stringify(cursor), "utf8").toString("base64url");
+}
+
+function actionsLatestGroupKey(run: RawActionsWorkflowRun): string {
+  const workflowId = String(run.workflow_id ?? run.name ?? run.id);
+  return createHash("sha256")
+    .update(JSON.stringify([workflowId, run.event, run.head_branch]))
+    .digest("base64url");
 }
 
 function pullRequestCursorStreamKeys(scope: GitHubPullRequestScope): string[] {
@@ -1105,6 +1154,9 @@ export class GitHubService {
   private autoRetryService: GitHubAutoRetryService | null = null;
   private readonly cache = new GitHubCache();
   private readonly graphqlFetchedAt = new WeakMap<object, Date>();
+  // Only concurrent GETs share work. Settled results retain their existing
+  // freshness policy, and credential material never appears in the map key.
+  private readonly restRequests = new Map<string, Promise<unknown>>();
 
   constructor(
     startAutoRetry = false,
@@ -1198,7 +1250,12 @@ export class GitHubService {
         this.livePatGraphql<T>(prepared.liveQuery, variables, token),
     };
     if (prepared.kind === "mutation") {
-      return this.cache.mutation(requestInput);
+      this.restRequests.clear();
+      try {
+        return await this.cache.mutation(requestInput);
+      } finally {
+        this.restRequests.clear();
+      }
     }
     const result = await this.cache.query({ ...requestInput, ...options });
     this.rememberGraphqlFetchedAt(result.data, result.fetchedAt);
@@ -1280,6 +1337,29 @@ export class GitHubService {
     token: string,
     requestSource: GitHubRequestSource,
   ): Promise<T> {
+    const key = `${createHash("sha256").update(token).digest("hex")}\0${url}`;
+    const existing = this.restRequests.get(key);
+    if (existing) return existing as Promise<T>;
+    const request = this.liveRestRequest<T>(
+      url,
+      operation,
+      token,
+      requestSource,
+    );
+    this.restRequests.set(key, request);
+    try {
+      return await request;
+    } finally {
+      if (this.restRequests.get(key) === request) this.restRequests.delete(key);
+    }
+  }
+
+  private async liveRestRequest<T>(
+    url: string,
+    operation: GitHubRestOperation,
+    token: string,
+    requestSource: GitHubRequestSource,
+  ): Promise<T> {
     const startedAt = Date.now();
     const record = (input: {
       statusCode?: number | null;
@@ -1347,6 +1427,27 @@ export class GitHubService {
   }
 
   private async restMutation(
+    url: string,
+    operation: GitHubRestOperation,
+    token: string,
+    requestSource: GitHubRequestSource,
+    body: Record<string, unknown>,
+  ): Promise<void> {
+    this.restRequests.clear();
+    try {
+      return await this.liveRestMutation(
+        url,
+        operation,
+        token,
+        requestSource,
+        body,
+      );
+    } finally {
+      this.restRequests.clear();
+    }
+  }
+
+  private async liveRestMutation(
     url: string,
     operation: GitHubRestOperation,
     token: string,
@@ -1453,7 +1554,12 @@ export class GitHubService {
     };
     let data: T;
     if (prepared.kind === "mutation") {
-      data = await this.cache.mutation(requestInput);
+      this.restRequests.clear();
+      try {
+        data = await this.cache.mutation(requestInput);
+      } finally {
+        this.restRequests.clear();
+      }
     } else {
       const result = await this.cache.query({ ...requestInput, ...options });
       data = result.data;
@@ -1666,6 +1772,7 @@ export class GitHubService {
         },
       );
       await this.cache.clearForCredentialChange("PAT");
+      this.restRequests.clear();
     } else {
       await prisma.gitHubSettings.upsert({
         where: { id: SETTINGS_ID },
@@ -1689,6 +1796,7 @@ export class GitHubService {
       },
     );
     await this.cache.clearForCredentialChange("PAT");
+    this.restRequests.clear();
     this.pollingConfigurationChanged();
     return this.getSettings();
   }
@@ -1748,7 +1856,12 @@ export class GitHubService {
   }
 
   async clearCache(): Promise<boolean> {
-    return this.cache.clear();
+    this.restRequests.clear();
+    try {
+      return await this.cache.clear();
+    } finally {
+      this.restRequests.clear();
+    }
   }
 
   async clearApiCalls(): Promise<boolean> {
@@ -2310,6 +2423,7 @@ export class GitHubService {
         githubRequestId: verification.githubRequestId,
       });
       await this.cache.clearForCredentialChange("APP");
+      this.restRequests.clear();
       this.notificationsConfigurationChanged?.();
       return this.getAppSettings();
     } catch (error) {
@@ -2445,6 +2559,7 @@ export class GitHubService {
     );
     clearGitHubAppTokenCache();
     await this.cache.clearForCredentialChange("APP");
+    this.restRequests.clear();
     await this.audit(auditContext, {
       operation: "GITHUB_APP_SETTINGS_CLEAR",
       outcome: "SUCCESS",
@@ -2539,6 +2654,7 @@ export class GitHubService {
     branch?: string | null,
     workflowId?: string | null,
     requestSource: GitHubRequestSource = "ACTIONS_PAGE",
+    latestOnly = false,
   ): Promise<GitHubActionsWorkflowRunPage> {
     if (!Number.isInteger(first) || first < 1 || first > ACTIONS_PAGE_SIZE) {
       throw new Error(
@@ -2558,6 +2674,7 @@ export class GitHubService {
       selectedRepositoryId,
       selectedBranch,
       selectedWorkflowId,
+      latestOnly,
     );
     const token = await this.requireToken();
     const prisma = await getPrismaClient();
@@ -2590,6 +2707,7 @@ export class GitHubService {
       totalCount: number;
       current: RawActionsWorkflowRun | null;
       failed: boolean;
+      seenGroups: Set<string>;
     };
     const streams: WorkflowRunStream[] = targets.map((target) => ({
       target,
@@ -2599,54 +2717,66 @@ export class GitHubService {
       totalCount: Number.POSITIVE_INFINITY,
       current: null,
       failed: false,
+      seenGroups: new Set(cursor.seenGroups[target.id] ?? []),
     }));
     const repositoryErrors: GitHubActionsRepositoryErrorView[] = [];
 
     const ensureCurrent = async (stream: WorkflowRunStream) => {
-      if (stream.failed || stream.consumed >= stream.totalCount) {
-        stream.current = null;
-        return;
-      }
-      const page = Math.floor(stream.consumed / ACTIONS_PAGE_SIZE) + 1;
-      const offset = stream.consumed % ACTIONS_PAGE_SIZE;
       try {
-        if (stream.loadedPage !== page) {
-          const workflowPath = selectedWorkflowId
-            ? `/actions/workflows/${encodeURIComponent(selectedWorkflowId)}/runs`
-            : "/actions/runs";
-          const operation = selectedWorkflowId
-            ? GITHUB_REST_OPERATIONS.actions.listWorkflowRuns
-            : GITHUB_REST_OPERATIONS.actions.listWorkflowRunsForRepo;
-          const result = await this.restRequest<{
-            total_count: number;
-            workflow_runs: RawActionsWorkflowRun[];
-          }>(
-            `${GITHUB_API_BASE_URL}/repos/${encodeURIComponent(
-              stream.target.owner,
-            )}/${encodeURIComponent(
-              stream.target.name,
-            )}${workflowPath}?per_page=${ACTIONS_PAGE_SIZE}&page=${page}${
-              selectedBranch
-                ? `&branch=${encodeURIComponent(selectedBranch)}`
-                : ""
-            }`,
-            operation,
-            token,
-            requestSource,
-          );
-          if (
-            !Number.isInteger(result.total_count) ||
-            !Array.isArray(result.workflow_runs)
-          ) {
-            throw new Error(
-              "GitHub returned an invalid workflow runs response",
+        while (!stream.failed && stream.consumed < stream.totalCount) {
+          const page = Math.floor(stream.consumed / ACTIONS_PAGE_SIZE) + 1;
+          const offset = stream.consumed % ACTIONS_PAGE_SIZE;
+          if (stream.loadedPage !== page) {
+            const workflowPath = selectedWorkflowId
+              ? `/actions/workflows/${encodeURIComponent(selectedWorkflowId)}/runs`
+              : "/actions/runs";
+            const operation = selectedWorkflowId
+              ? GITHUB_REST_OPERATIONS.actions.listWorkflowRuns
+              : GITHUB_REST_OPERATIONS.actions.listWorkflowRunsForRepo;
+            const result = await this.restRequest<{
+              total_count: number;
+              workflow_runs: RawActionsWorkflowRun[];
+            }>(
+              `${GITHUB_API_BASE_URL}/repos/${encodeURIComponent(
+                stream.target.owner,
+              )}/${encodeURIComponent(
+                stream.target.name,
+              )}${workflowPath}?per_page=${ACTIONS_PAGE_SIZE}&page=${page}${
+                selectedBranch
+                  ? `&branch=${encodeURIComponent(selectedBranch)}`
+                  : ""
+              }`,
+              operation,
+              token,
+              requestSource,
             );
+            if (
+              !Number.isInteger(result.total_count) ||
+              !Array.isArray(result.workflow_runs)
+            ) {
+              throw new Error(
+                "GitHub returned an invalid workflow runs response",
+              );
+            }
+            stream.loadedPage = page;
+            stream.runs = result.workflow_runs;
+            stream.totalCount = result.total_count;
           }
-          stream.loadedPage = page;
-          stream.runs = result.workflow_runs;
-          stream.totalCount = result.total_count;
+          const current = stream.runs[offset] ?? null;
+          if (!current) {
+            stream.current = null;
+            return;
+          }
+          if (
+            !latestOnly ||
+            !stream.seenGroups.has(actionsLatestGroupKey(current))
+          ) {
+            stream.current = current;
+            return;
+          }
+          stream.consumed += 1;
         }
-        stream.current = stream.runs[offset] ?? null;
+        stream.current = null;
       } catch (error) {
         stream.failed = true;
         stream.current = null;
@@ -2658,7 +2788,7 @@ export class GitHubService {
       }
     };
 
-    await Promise.all(streams.map(ensureCurrent));
+    await mapIntegrationRequests(streams, ensureCurrent);
     const selectedRuns: Array<{
       run: RawActionsWorkflowRun;
       target: ActionsRepositoryTarget;
@@ -2680,6 +2810,9 @@ export class GitHubService {
         .sort(compareWorkflowRuns)[0];
       if (!next) break;
       selectedRuns.push({ run: next.run, target: next.target });
+      if (latestOnly) {
+        next.stream.seenGroups.add(actionsLatestGroupKey(next.run));
+      }
       next.stream.consumed += 1;
       await ensureCurrent(next.stream);
     }
@@ -2731,10 +2864,37 @@ export class GitHubService {
     const defaultBranchRegex =
       codebaseSettings?.defaultJiraBranchRegex ?? DEFAULT_JIRA_KEY_REGEX;
     const appConfigured = appSettings !== null;
-    const pullRequestNumbersByRun = await Promise.all(
-      selectedRuns.map(({ run, target }) =>
-        this.actionsPullRequestNumbers(run, target, token, requestSource),
-      ),
+    const associations = new Map<string, Promise<number[]>>();
+    const pullRequestNumbersByRun = await mapIntegrationRequests(
+      selectedRuns,
+      ({ run, target }) => {
+        // Keep reported run associations authoritative. Only the fallback lookup
+        // is shared by repository/SHA, including across separate worker batches.
+        if (
+          run.pull_requests?.some(
+            ({ number }) => Number.isInteger(number) && number > 0,
+          ) ||
+          !run.head_sha
+        )
+          return this.actionsPullRequestNumbers(
+            run,
+            target,
+            token,
+            requestSource,
+          );
+        const key = `${target.nameWithOwner.toLowerCase()}\0${run.head_sha}`;
+        let request = associations.get(key);
+        if (!request) {
+          request = this.actionsPullRequestNumbers(
+            run,
+            target,
+            token,
+            requestSource,
+          );
+          associations.set(key, request);
+        }
+        return request;
+      },
     );
     const items: GitHubActionsWorkflowRunView[] = selectedRuns.map(
       ({ run, target }, index) => {
@@ -2816,12 +2976,16 @@ export class GitHubService {
     );
     const endCursor = hasNextPage
       ? encodeActionsCursor({
-          version: 1,
+          version: 2,
           codebaseRepositoryId: selectedRepositoryId,
           branch: selectedBranch,
           workflowId: selectedWorkflowId,
+          latestOnly,
           consumed: Object.fromEntries(
             streams.map((stream) => [stream.target.id, stream.consumed]),
+          ),
+          seenGroups: Object.fromEntries(
+            streams.map((stream) => [stream.target.id, [...stream.seenGroups]]),
           ),
         })
       : null;
@@ -3208,39 +3372,37 @@ export class GitHubService {
       page += 1;
     } while (workflows.length < totalCount);
 
-    return Promise.all(
-      workflows.map(async (workflow) => {
-        const latest = await this.restRequest<{
-          workflow_runs: RawActionsWorkflowRun[];
-        }>(
-          `${GITHUB_API_BASE_URL}/repos/${encodeURIComponent(target.owner)}/${encodeURIComponent(
+    return mapIntegrationRequests(workflows, async (workflow) => {
+      const latest = await this.restRequest<{
+        workflow_runs: RawActionsWorkflowRun[];
+      }>(
+        `${GITHUB_API_BASE_URL}/repos/${encodeURIComponent(target.owner)}/${encodeURIComponent(
+          target.name,
+        )}/actions/workflows/${encodeURIComponent(String(workflow.id))}/runs?per_page=1`,
+        GITHUB_REST_OPERATIONS.actions.listWorkflowRuns,
+        token,
+        requestSource,
+      );
+      const run = latest.workflow_runs[0];
+      const jobs = run
+        ? await this.patWorkflowJobs(
+            target.owner,
             target.name,
-          )}/actions/workflows/${encodeURIComponent(String(workflow.id))}/runs?per_page=1`,
-          GITHUB_REST_OPERATIONS.actions.listWorkflowRuns,
-          token,
-          requestSource,
-        );
-        const run = latest.workflow_runs[0];
-        const jobs = run
-          ? await this.patWorkflowJobs(
-              target.owner,
-              target.name,
-              String(run.id),
-              token,
-              "latest",
-              requestSource,
-            )
-          : [];
-        return {
-          id: String(workflow.id),
-          name: workflow.name,
-          path: workflow.path,
-          state: workflow.state,
-          url: workflow.html_url,
-          jobNames: [...new Set(jobs.map((job) => job.name))].sort(),
-        };
-      }),
-    );
+            String(run.id),
+            token,
+            "latest",
+            requestSource,
+          )
+        : [];
+      return {
+        id: String(workflow.id),
+        name: workflow.name,
+        path: workflow.path,
+        state: workflow.state,
+        url: workflow.html_url,
+        jobNames: [...new Set(jobs.map((job) => job.name))].sort(),
+      };
+    });
   }
 
   async autoRetryRuns(
@@ -3488,7 +3650,7 @@ export class GitHubService {
           })
         ).githubRequestId;
       }
-      await this.cache.clear();
+      await this.clearCache();
       if (action === "JOB" && jobId) {
         await this.pipelineStatus.optimisticJobByWorkflowRun(
           null,
@@ -3564,7 +3726,7 @@ export class GitHubService {
         force,
         requestSource,
       });
-      await this.cache.clear();
+      await this.clearCache();
       await this.pipelineStatus.optimisticByWorkflowRun(null, workflowRunId, {
         status: "CANCELLED",
       });
@@ -5782,7 +5944,7 @@ export class GitHubService {
         );
       }
     }
-    await this.cache.clear();
+    await this.clearCache();
     const detail = await this.pullRequest(
       owner,
       name,
@@ -5832,7 +5994,7 @@ export class GitHubService {
       token,
       { requestSource: "WORKFLOW_AUTOMATION" },
     );
-    await this.cache.clear();
+    await this.clearCache();
     const detail = await this.pullRequest(
       owner,
       name,
@@ -5920,7 +6082,7 @@ export class GitHubService {
       token,
       { requestSource: "WORKFLOW_AUTOMATION" },
     );
-    await this.cache.clear();
+    await this.clearCache();
     const detail = await this.pullRequest(
       owner,
       name,
@@ -5955,7 +6117,7 @@ export class GitHubService {
       "WORKFLOW_AUTOMATION",
       { ref, inputs: input.inputs ?? {} },
     );
-    await this.cache.clear();
+    await this.clearCache();
     return true;
   }
 
@@ -6237,7 +6399,7 @@ export class GitHubService {
         workflowRunId: String(checkSuite.workflowRun.databaseId),
         requestSource,
       });
-      await this.cache.clear();
+      await this.clearCache();
       await this.audit(auditContext, {
         operation: "GITHUB_ACTIONS_WORKFLOW_RERUN",
         repositoryId,
@@ -6369,7 +6531,7 @@ export class GitHubService {
         jobId,
         requestSource,
       });
-      await this.cache.clear();
+      await this.clearCache();
       await this.audit(auditContext, {
         operation: "GITHUB_ACTIONS_JOB_RERUN",
         repositoryId,

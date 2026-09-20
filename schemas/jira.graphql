@@ -366,6 +366,8 @@ type JiraTicketDetail {
   attachments: [JiraAttachment!]!
   "Comments associated with this Jira ticket detail."
   comments: [JiraComment!]!
+  "Total number of comments in the observed ticket snapshot, including older unloaded comments."
+  commentsTotal: Int
   "ISO 8601 timestamp when this Jira ticket detail was created. May be null when unavailable or not applicable."
   createdAt: String
   "ISO 8601 timestamp when this Jira ticket detail due. May be null when unavailable or not applicable."
@@ -832,10 +834,28 @@ extend type Query {
   "Returns a Jira ticket board."
   jiraTicketBoard("Identifier of the source." sourceId: ID!): JiraTicketBoard!
   "Returns a Jira ticket detail."
+  jiraTicketSummary(
+    "Issue key to summarize without loading comments or custom fields."
+    issueKey: ID!
+  ): JiraTicketSummary!
+  "Returns Jira ticket detail; omitted commentsFirst preserves complete comment history."
   jiraTicket(
+    "Maximum newest comments to include. Older comments remain available through jiraTicketComments."
+    commentsFirst: Int
     "The issue key used to filter or perform the operation."
     issueKey: ID!
   ): JiraTicketDetail!
+  "Returns one chronological page of comments, paging backward from the newest comments."
+  jiraTicketComments(
+    "Issue key whose comments to read."
+    issueKey: ID!
+    "Maximum comments in this page."
+    limit: Int = 50
+    "Number of newer comments already read."
+    offset: Int = 0
+    "Total from the first page, anchoring older offsets while new comments arrive."
+    snapshotTotal: Int
+  ): JiraCommentPage!
   "Returns Jira people."
   jiraAssignableUsers(
     "The issue key used to filter or perform the operation."
@@ -855,6 +875,8 @@ extend type Query {
   ): [JiraEditField!]!
   "Returns a Jira change page."
   jiraTicketChanges(
+    "Total from the first page. Pins subsequent offsets to that snapshot until the client refreshes."
+    snapshotTotal: Int
     "The issue key used to filter or perform the operation."
     issueKey: ID!
     "Maximum number of records to return. Defaults to `50`."
@@ -864,6 +886,8 @@ extend type Query {
   ): JiraChangePage!
   "Returns a Jira worklog page."
   jiraTicketWorklogs(
+    "Total from the first page. Pins subsequent offsets to that snapshot until the client refreshes."
+    snapshotTotal: Int
     "The issue key used to filter or perform the operation."
     issueKey: ID!
     "Maximum number of records to return. Defaults to `50`."
@@ -1005,4 +1029,18 @@ extend type Subscription {
   jiraWebhookDeliveryChanged: JiraWebhookDelivery!
   "Emits a Jira ticket change whenever a webhook delivery updates a ticket."
   jiraTicketChanged: JiraTicketChange!
+}
+
+"A bounded page of ticket comments with an anchored total."
+type JiraCommentPage {
+  "Comments in chronological order within this page."
+  items: [JiraComment!]!
+  "Total comments in the observed snapshot."
+  total: Int!
+  "Maximum requested comments per page."
+  limit: Int!
+  "Number of newer comments skipped."
+  offset: Int!
+  "Cache provenance for this page."
+  cache: JiraCacheMeta!
 }

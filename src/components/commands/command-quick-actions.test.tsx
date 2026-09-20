@@ -5,12 +5,15 @@ import { afterEach, describe, expect, test, vi } from "vitest";
 import { controlPlaneRequest } from "@/lib/control-plane-client";
 
 import { CommandQuickActions } from "./command-quick-actions";
+import { CommandResourcePanel } from "./command-resource-panel";
 
 vi.mock("@/lib/control-plane-client", () => ({
   controlPlaneRequest: vi.fn(),
   controlPlaneSubscriptions: () => ({ subscribe: () => () => undefined }),
+  onControlPlaneRecovery: () => () => undefined,
 }));
 vi.mock("@/i18n/navigation", () => ({
+  useRouter: () => ({ push: vi.fn() }),
   Link: ({
     href,
     children,
@@ -46,11 +49,18 @@ const serve = {
  */
 function respondWith(runs: Array<Record<string, unknown>>) {
   request.mockImplementation((query: string) => {
-    if (query.includes("commandRuns(")) {
-      return Promise.resolve({ commandRuns: { nodes: runs } } as never);
-    }
-    if (query.includes("eligibleCommandsFor")) {
-      return Promise.resolve({ eligibleCommandsForAgent: [serve] } as never);
+    if (query.includes("commandTargetSummaries(")) {
+      return Promise.resolve({
+        commandTargetSummaries: [
+          {
+            resourceKind: "AGENT",
+            resourceId: "agent-1",
+            commands: [serve],
+            activeRuns: runs,
+            recentRuns: [],
+          },
+        ],
+      } as never);
     }
     return Promise.resolve({} as never);
   });
@@ -74,15 +84,23 @@ const openRunMenu = async () => {
 describe("CommandQuickActions", () => {
   test("shows only quick actions and gates an old agent", async () => {
     request.mockResolvedValue({
-      eligibleCommandsForAgent: [
-        serve,
+      commandTargetSummaries: [
         {
-          id: "regular",
-          name: "Migrate",
-          description: "Run migration",
-          quickActionEnabled: false,
-          quickActionIconKey: "terminal",
-          quickActionButtonVariant: "default",
+          resourceKind: "AGENT",
+          resourceId: "agent-1",
+          activeRuns: [],
+          recentRuns: [],
+          commands: [
+            serve,
+            {
+              id: "regular",
+              name: "Migrate",
+              description: "Run migration",
+              quickActionEnabled: false,
+              quickActionIconKey: "terminal",
+              quickActionButtonVariant: "default",
+            },
+          ],
         },
       ],
     } as never);
@@ -141,7 +159,7 @@ describe("CommandQuickActions", () => {
     ).toBeNull();
   });
 
-  test("asks the server for active runs before applying the page limit", async () => {
+  test("requests a compact target summary without scripts or a global run limit", async () => {
     respondWith([]);
     render(
       <CommandQuickActions
@@ -152,11 +170,10 @@ describe("CommandQuickActions", () => {
 
     await screen.findByRole("button", { name: /Serve/ });
     const query = request.mock.calls.find(([operation]) =>
-      operation.includes("commandRuns("),
+      operation.includes("commandTargetSummaries("),
     )?.[0];
-    expect(query).toContain(
-      "statuses: [QUEUED, RUNNING, RESTARTING, CANCELLING]",
-    );
+    expect(query).toContain("activeRuns { id commandId displayNumber status }");
+    expect(query).not.toMatch(/\bscript\b|\bsnapshot\b|first: 50/);
   });
 
   test("terminates the run the menu was opened for", async () => {
@@ -192,7 +209,7 @@ describe("CommandQuickActions", () => {
         agentId="agent-1"
       />,
     );
-    fireEvent.click(await screen.findByRole("button", { name: /Serve/ }));
+    fireEvent.click(await screen.findByRole("button", { name: "Serve" }));
     await vi.waitFor(() =>
       expect(
         request.mock.calls.some(
@@ -209,5 +226,48 @@ describe("CommandQuickActions", () => {
         query.includes("terminateCommandRun"),
       ),
     ).toBe(false);
+  });
+
+  test("rendered cards and an overlapping detail panel share one target batch", async () => {
+    request.mockImplementation(
+      async (_query, variables) =>
+        ({
+          commandTargetSummaries: (
+            variables?.targets as Array<{
+              resourceKind: string;
+              resourceId: string;
+            }>
+          ).map((target) => ({
+            ...target,
+            commands: [serve],
+            activeRuns: [],
+            recentRuns: [],
+          })),
+        }) as never,
+    );
+    const view = (
+      <>
+        {["a", "b", "c", "d"].map((agentId) => (
+          <CommandQuickActions
+            key={agentId}
+            agentId={agentId}
+            agentCapabilities={["command.run"]}
+          />
+        ))}
+        <CommandResourcePanel agentId="a" agentCapabilities={["command.run"]} />
+      </>
+    );
+    const mounted = render(view);
+    await screen.findAllByText("Serve");
+    expect(request).toHaveBeenCalledTimes(1);
+    expect(request.mock.calls[0][1]?.targets).toHaveLength(4);
+    expect(request.mock.calls[0][1]?.targets).toContainEqual({
+      resourceKind: "AGENT",
+      resourceId: "a",
+      includeAllCommands: true,
+      includeRecentRuns: true,
+    });
+    mounted.rerender(view);
+    expect(request).toHaveBeenCalledTimes(1);
   });
 });

@@ -1,7 +1,9 @@
-import { buildSubgraphSchema } from "@apollo/subgraph";
-import type { GraphQLResolverMap } from "@apollo/subgraph/dist/schema-helper";
+import {
+  buildSubgraphSchema,
+  type BuildSubgraphSchemaInput,
+} from "@apollo/subgraph";
 import { mergeResolvers } from "@graphql-tools/merge";
-import type { GraphQLSchema } from "graphql";
+import { concatAST, type DocumentNode, type GraphQLSchema } from "graphql";
 import { gql } from "graphql-tag";
 
 import { schemaDefinitions } from "@/generated/schema-definitions";
@@ -74,7 +76,12 @@ import type { SseService } from "@/services/sse";
 import { createSseResolvers } from "./resolvers/sse";
 
 // Pre-generated SDL strings (see scripts/prebuild-schema.ts) → DocumentNodes for the subgraph.
-const typeDefs = schemaDefinitions.map((schema) => gql(schema));
+const typeDefs = concatAST(schemaDefinitions.map((schema) => gql(schema)));
+type SubgraphSchemaModule = Exclude<
+  Extract<BuildSubgraphSchemaInput, unknown[]>[number],
+  DocumentNode
+>;
+type SubgraphResolvers = NonNullable<SubgraphSchemaModule["resolvers"]>;
 
 // Builds the Apollo Federation subgraph schema. Resolver factories receive their services
 // here and are merged into one resolver map.
@@ -148,8 +155,7 @@ export const createSchema = (
     createSseResolvers(sseService),
   ]);
 
-  return buildSubgraphSchema({
-    typeDefs,
-    resolvers: resolvers as GraphQLResolverMap<unknown>,
-  });
+  return buildSubgraphSchema([
+    { typeDefs, resolvers: resolvers as SubgraphResolvers },
+  ]);
 };

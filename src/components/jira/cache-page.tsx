@@ -2,7 +2,7 @@
 
 import { Database, ExternalLink, RefreshCw, Save, Trash2 } from "lucide-react";
 import { useTranslations } from "next-intl";
-import { FormEvent, useCallback, useEffect, useState } from "react";
+import { FormEvent, useCallback, useEffect, useRef, useState } from "react";
 
 import { ConfirmationDialog } from "@/components/confirmation-dialog";
 import { Alert, AlertDescription } from "@/components/ui/alert";
@@ -79,33 +79,63 @@ export function JiraCachePage() {
   const [busyKey, setBusyKey] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
-  const load = useCallback(async () => {
-    setLoading(true);
-    try {
-      const result = await controlPlaneRequest<CachePageData>(
-        `query JiraCachePage($limit: Int!, $callOffset: Int!, $ticketOffset: Int!) {
-          jiraSettings { ${SETTINGS_FIELDS} }
-          jiraCacheMetrics { windows { ${WINDOW_FIELDS} } operations { operation windows { ${WINDOW_FIELDS} } } }
-          jiraApiCalls(limit: $limit, offset: $callOffset) { items { ${CALL_FIELDS} } total limit offset }
-          jiraCachedTickets(limit: $limit, offset: $ticketOffset) { items { ${CACHED_TICKET_FIELDS} } total limit offset }
+  const loadedSections = useRef<{ calls: string; entries: number } | null>(
+    null,
+  );
+  const activeRequest = useRef<AbortController | null>(null);
+  const load = useCallback(
+    async (force = true) => {
+      activeRequest.current?.abort();
+      const controller = new AbortController();
+      activeRequest.current = controller;
+      const callsKey = String(callOffset);
+      const metadata = force || loadedSections.current === null;
+      const calls = metadata || loadedSections.current?.calls !== callsKey;
+      const entries =
+        metadata || loadedSections.current?.entries !== ticketOffset;
+      setLoading(true);
+      try {
+        const result = await controlPlaneRequest<CachePageData>(
+          `query JiraCachePage($metadata: Boolean!, $calls: Boolean!, $entries: Boolean!, $limit: Int!, $callOffset: Int!, $ticketOffset: Int!) {
+          jiraSettings @include(if: $metadata) { ${SETTINGS_FIELDS} }
+          jiraCacheMetrics @include(if: $metadata) { windows { ${WINDOW_FIELDS} } operations { operation windows { ${WINDOW_FIELDS} } } }
+          jiraApiCalls(limit: $limit, offset: $callOffset) @include(if: $calls) { items { ${CALL_FIELDS} } total limit offset }
+          jiraCachedTickets(limit: $limit, offset: $ticketOffset) @include(if: $entries) { items { ${CACHED_TICKET_FIELDS} } total limit offset }
         }`,
-        { limit: PAGE_SIZE, callOffset, ticketOffset },
-      );
-      setData(result);
-      setTtlMinutes(
-        String(Math.round(result.jiraSettings.cacheTtlSeconds / 60)),
-      );
-      setError(null);
-    } catch (value) {
-      setError(value instanceof Error ? value.message : String(value));
-    } finally {
-      setLoading(false);
-    }
-  }, [callOffset, ticketOffset]);
+          {
+            metadata,
+            calls,
+            entries,
+            limit: PAGE_SIZE,
+            callOffset,
+            ticketOffset,
+          },
+          { signal: controller.signal },
+        );
+        if (controller.signal.aborted) return;
+        loadedSections.current = { calls: callsKey, entries: ticketOffset };
+        setData((current) => ({ ...current, ...result }));
+        if (metadata)
+          setTtlMinutes(
+            String(Math.round(result.jiraSettings.cacheTtlSeconds / 60)),
+          );
+        setError(null);
+      } catch (value) {
+        if (controller.signal.aborted) return;
+        setError(value instanceof Error ? value.message : String(value));
+      } finally {
+        if (!controller.signal.aborted) setLoading(false);
+      }
+    },
+    [callOffset, ticketOffset],
+  );
 
   useEffect(() => {
-    const timeout = window.setTimeout(() => void load(), 0);
-    return () => window.clearTimeout(timeout);
+    const timeout = window.setTimeout(() => void load(false), 0);
+    return () => {
+      window.clearTimeout(timeout);
+      activeRequest.current?.abort();
+    };
   }, [load]);
 
   const updateTtl = async (event: FormEvent) => {

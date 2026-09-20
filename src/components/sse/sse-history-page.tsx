@@ -1,5 +1,7 @@
 "use client";
 
+import { readCursorWindow } from "@/lib/read-cursor-window";
+
 import {
   ArrowDown,
   ArrowUp,
@@ -21,7 +23,14 @@ import {
 } from "lucide-react";
 import { useLocale } from "next-intl";
 import { useSearchParams } from "next/navigation";
-import { Fragment, useCallback, useEffect, useMemo, useState } from "react";
+import {
+  Fragment,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 
 import { DateTime } from "@/components/common/date-time";
 import { Alert, AlertDescription } from "@/components/ui/alert";
@@ -75,7 +84,11 @@ import { useRouter } from "@/i18n/navigation";
 import { controlPlaneRequest } from "@/lib/control-plane-client";
 import { formatEnumLabel } from "@/lib/enum-label";
 
-import { SSE_COMPOSITION_FIELDS, SSE_HISTORY_QUERY } from "./graphql";
+import {
+  SSE_COMPOSITION_FIELDS,
+  SSE_HISTORY_DETAIL_QUERY,
+  SSE_HISTORY_QUERY,
+} from "./graphql";
 import {
   SseHistoryEventsTable,
   STREAM_EVENT_COLUMNS,
@@ -249,32 +262,115 @@ export function SseHistoryPage() {
     ],
   );
 
+  const metadataScope = useRef<string | null>(null);
+  const facetsReady = useRef(false);
+  const loadController = useRef<AbortController | null>(null);
+  const requestGeneration = useRef(0);
+  const loadedWindow = useRef({ scope: "", count: 100 });
   const load = useCallback(async () => {
+    const generation = ++requestGeneration.current;
+    setLoadingMore(false);
+    loadController.current?.abort();
+    const controller = new AbortController();
+    loadController.current = controller;
+    const includeMetadata = metadataScope.current !== view;
+    const includeFacets = !facetsReady.current;
     try {
-      const response = await controlPlaneRequest<HistoryPageData>(
-        SSE_HISTORY_QUERY,
-        { input: variables, view },
+      const scope = JSON.stringify(variables);
+      const wanted =
+        loadedWindow.current.scope === scope ? loadedWindow.current.count : 100;
+      let initial: HistoryPageData | undefined;
+      const page = await readCursorWindow<
+        SseHistoryEvent | SseHistoryRequest,
+        {
+          items: Array<SseHistoryEvent | SseHistoryRequest>;
+          nextCursor: string | null;
+          response: HistoryPageData;
+        }
+      >(
+        async (after, first) => {
+          const response = await controlPlaneRequest<HistoryPageData>(
+            SSE_HISTORY_QUERY,
+            {
+              input: { ...variables, first, after },
+              view,
+              includeMetadata: !after && includeMetadata,
+              includeFacets: !after && includeFacets,
+            },
+            { signal: controller.signal },
+          );
+          if (!after) initial = response;
+          return {
+            items:
+              view === "EVENTS"
+                ? response.sseHistory.events
+                : response.sseHistory.streams,
+            nextCursor: response.sseHistory.nextCursor,
+            response,
+          };
+        },
+        wanted,
+        100,
+        (item) => item.id,
       );
-      setData(response);
-      setColumns((current) =>
-        response.sseHistoryViewSettings.columns.length
-          ? normalizeColumns(response.sseHistoryViewSettings.columns, view)
-          : current,
-      );
-      setTimeFormat(response.sseHistoryViewSettings.timeFormat);
+      const response = {
+        ...initial!,
+        sseHistory: {
+          ...page.response.sseHistory,
+          ...(view === "EVENTS"
+            ? { events: page.items as SseHistoryEvent[] }
+            : { streams: page.items as SseHistoryRequest[] }),
+          nextCursor: page.nextCursor,
+        },
+      };
+      if (controller.signal.aborted || generation !== requestGeneration.current)
+        return;
+      loadedWindow.current = { scope, count: Math.max(100, page.items.length) };
+      setData((current) => ({ ...current, ...response }));
+      if (includeFacets) facetsReady.current = true;
+      if (includeMetadata) {
+        metadataScope.current = view;
+        setColumns((current) =>
+          response.sseHistoryViewSettings.columns.length
+            ? normalizeColumns(response.sseHistoryViewSettings.columns, view)
+            : current,
+        );
+        setTimeFormat(response.sseHistoryViewSettings.timeFormat);
+      }
       setError(null);
     } catch (failure) {
+      if (controller.signal.aborted || generation !== requestGeneration.current)
+        return;
       setError(failure instanceof Error ? failure.message : String(failure));
     } finally {
-      setLoading(false);
+      if (
+        !controller.signal.aborted &&
+        generation === requestGeneration.current
+      )
+        setLoading(false);
     }
   }, [variables, view]);
 
   useEffect(() => {
     const timer = window.setTimeout(() => void load(), 180);
-    return () => window.clearTimeout(timer);
+    return () => {
+      window.clearTimeout(timer);
+      loadController.current?.abort();
+    };
   }, [load]);
-  useSseLiveReload("history", () => void load());
+  useSseLiveReload("history", (change) => {
+    facetsReady.current = false;
+    if (
+      !change?.reason ||
+      /VIEW_SETTINGS|COLUMN_PRESET|SAVED_FILTER/.test(change.reason)
+    )
+      metadataScope.current = null;
+    return load();
+  });
+  useSseLiveReload("endpoints", () => {
+    facetsReady.current = false;
+    return load();
+  });
 
   function changeView(next: string) {
     if (next !== "STREAMS" && next !== "EVENTS") return;
@@ -423,34 +519,72 @@ export function SseHistoryPage() {
 
   async function loadMore() {
     const after = data?.sseHistory.nextCursor;
-    if (!after) return;
+    if (!after || loadingMore) return;
     setLoadingMore(true);
+    const generation = requestGeneration.current;
+    const controller = new AbortController();
+    loadController.current?.abort();
+    loadController.current = controller;
     try {
       const response = await controlPlaneRequest<HistoryPageData>(
         SSE_HISTORY_QUERY,
-        { input: { ...variables, after }, view },
+        {
+          input: { ...variables, after },
+          view,
+          includeMetadata: false,
+          includeFacets: false,
+        },
+        { signal: controller.signal },
       );
+      if (controller.signal.aborted || generation !== requestGeneration.current)
+        return;
+      loadedWindow.current = {
+        scope: JSON.stringify(variables),
+        count: Math.max(
+          100,
+          view === "EVENTS"
+            ? (data?.sseHistory.events.length ?? 0) +
+                response.sseHistory.events.length
+            : (data?.sseHistory.streams.length ?? 0) +
+                response.sseHistory.streams.length,
+        ),
+      };
       setData((current) => {
         if (!current) return response;
         return {
+          ...current,
           ...response,
           sseHistory: {
             ...response.sseHistory,
             streams: [
-              ...current.sseHistory.streams,
-              ...response.sseHistory.streams,
+              ...new Map(
+                [
+                  ...current.sseHistory.streams,
+                  ...response.sseHistory.streams,
+                ].map((item) => [item.id, item]),
+              ).values(),
             ],
             events: [
-              ...current.sseHistory.events,
-              ...response.sseHistory.events,
+              ...new Map(
+                [
+                  ...current.sseHistory.events,
+                  ...response.sseHistory.events,
+                ].map((item) => [item.id, item]),
+              ).values(),
             ],
           },
         };
       });
     } catch (failure) {
+      if (controller.signal.aborted || generation !== requestGeneration.current)
+        return;
       setError(failure instanceof Error ? failure.message : String(failure));
     } finally {
-      setLoadingMore(false);
+      if (
+        !controller.signal.aborted &&
+        generation === requestGeneration.current
+      )
+        setLoadingMore(false);
     }
   }
 
@@ -1533,9 +1667,35 @@ export function SseStreamHistoryDetails({
     setSavingComposition(true);
     setCompositionError(null);
     try {
+      // Saving a replay needs the complete stream even when the viewer has loaded
+      // only its newest page. Preserve the existing source/emitted selection.
+      const full =
+        events.length < request.eventCount
+          ? await controlPlaneRequest<{
+              sseHistoryRequest: SseHistoryRequest | null;
+            }>(SSE_HISTORY_DETAIL_QUERY, { id: request.id })
+          : null;
+      const completeEvents = full?.sseHistoryRequest?.events ?? events;
+      if (full && !full.sseHistoryRequest)
+        throw new Error("This SSE stream was not found.");
+      const emitted = completeEvents.filter(
+        (event) => event.stage === "EMITTED" && !event.dropped,
+      );
+      const completeReplay = (
+        emitted.length
+          ? emitted
+          : completeEvents.filter(
+              (event) => event.stage === "SOURCE" && !event.dropped,
+            )
+      ).toSorted(
+        (a, b) =>
+          a.sequence - b.sequence ||
+          a.logicalIndex - b.logicalIndex ||
+          a.createdAt.localeCompare(b.createdAt),
+      );
       const blocks: Array<Record<string, unknown>> = [];
-      replayEvents.forEach((event, index) => {
-        const previous = replayEvents[index - 1];
+      completeReplay.forEach((event, index) => {
+        const previous = completeReplay[index - 1];
         if (preserveTiming && previous) {
           const delayMs = Math.min(
             86_400_000,
@@ -1788,7 +1948,8 @@ export function SseStreamHistoryDetails({
           <CardHeader>
             <CardTitle>Events</CardTitle>
             <CardDescription>
-              {filteredEvents.length} of {events.length} retained records
+              {filteredEvents.length} shown · {events.length} loaded ·{" "}
+              {request.eventCount} retained records
             </CardDescription>
           </CardHeader>
           <CardContent className="overflow-x-auto p-0">
@@ -1833,9 +1994,9 @@ export function SseStreamHistoryDetails({
           <DialogHeader>
             <DialogTitle>Save Stream as Composition</DialogTitle>
             <DialogDescription>
-              Store {replayEvents.length}{" "}
-              {emittedEvents.length ? "emitted" : "source"} events as one-off
-              event blocks for {request.endpointName}.
+              Store the retained {emittedEvents.length ? "emitted" : "source"}{" "}
+              events as one-off event blocks for {request.endpointName}. Older
+              retained events are included.
             </DialogDescription>
           </DialogHeader>
           {compositionError ? (

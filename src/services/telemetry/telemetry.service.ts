@@ -1,3 +1,4 @@
+import { filterAsyncIterator } from "@/lib/filter-async-iterator";
 import "server-only";
 
 import { randomUUID } from "node:crypto";
@@ -382,10 +383,18 @@ function parseColumns(value: string, view: TelemetryView): string[] {
 }
 
 export class TelemetryService {
-  subscribe() {
-    return agentEventBus.iterate<{ ids: string[]; reason: string }>(
-      TELEMETRY_CHANGED_TOPIC,
-    );
+  subscribe(view?: TelemetryView | null) {
+    const events = agentEventBus.iterate<{
+      ids: string[];
+      reason: string;
+      views?: TelemetryView[];
+    }>(TELEMETRY_CHANGED_TOPIC);
+    return view
+      ? filterAsyncIterator(
+          events,
+          (event) => !event.views || event.views.includes(view),
+        )
+      : events;
   }
 
   subscribeSettings() {
@@ -394,8 +403,12 @@ export class TelemetryService {
     );
   }
 
-  private publish(ids: string[], reason: string) {
-    agentEventBus.publish(TELEMETRY_CHANGED_TOPIC, { ids, reason });
+  private publish(ids: string[], reason: string, views?: TelemetryView[]) {
+    agentEventBus.publish(TELEMETRY_CHANGED_TOPIC, {
+      ids,
+      reason,
+      ...(views ? { views } : {}),
+    });
   }
 
   notifyChange(ids: string[], reason: string) {
@@ -531,6 +544,7 @@ export class TelemetryService {
     this.publish(
       records.map(({ id }) => id),
       "INGESTED",
+      ["CONSOLE", "UNIFIED"],
     );
     return {
       collected: true,
@@ -587,6 +601,7 @@ export class TelemetryService {
     this.publish(
       records.map(({ id }) => id),
       "INGESTED",
+      ["ANALYTICS", "UNIFIED"],
     );
     return {
       collected: true,
@@ -1136,7 +1151,11 @@ export class TelemetryService {
         ? { entryType: { in: [...sourcesForView(view), "SEPARATOR"] } }
         : sourceWhere(view),
     });
-    this.publish([], includeSeparators ? "CLEARED_WITH_SEPARATORS" : "CLEARED");
+    this.publish(
+      [],
+      includeSeparators ? "CLEARED_WITH_SEPARATORS" : "CLEARED",
+      includeSeparators || view === "UNIFIED" ? undefined : [view, "UNIFIED"],
+    );
     return result.count;
   }
 

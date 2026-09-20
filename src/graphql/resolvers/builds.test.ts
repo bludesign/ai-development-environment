@@ -1,3 +1,6 @@
+import { buildASTSchema, parse, subscribe, validate } from "graphql";
+import { schemaDefinitions } from "@/generated/schema-definitions";
+import { agentEventBus, buildTopic } from "@/services/agent-control";
 import { describe, expect, test, vi } from "vitest";
 
 import type { BuildsService } from "@/services/builds";
@@ -146,4 +149,66 @@ describe("build resolver authorization", () => {
       { sequence: 0, dataBase64: "eA==" },
     ]);
   });
+});
+
+test("executes the additive full build snapshot subscription while retaining the legacy invalidation", async () => {
+  const service = {
+    getBuild: vi.fn().mockResolvedValue({ id: "build-1", status: "SUCCEEDED" }),
+  } as unknown as BuildsService;
+  const resolvers = createBuildResolvers(service);
+  const schema = buildASTSchema(parse(schemaDefinitions.join("\n")), {
+    assumeValidSDL: true,
+  });
+  for (const name of ["buildSnapshotChanged", "buildChanged"] as const)
+    Object.assign(
+      schema.getSubscriptionType()!.getFields()[name],
+      resolvers.Subscription[name],
+    );
+  expect(
+    validate(
+      schema,
+      parse(
+        'subscription { buildSnapshotChanged(id: "build-1") { id status } }',
+      ),
+    ),
+  ).toEqual([]);
+  const stream = await subscribe({
+    schema,
+    document: parse(
+      'subscription { buildSnapshotChanged(id: "build-1") { id status } }',
+    ),
+    contextValue: context(null),
+  });
+  if (!(Symbol.asyncIterator in stream))
+    throw new Error(JSON.stringify(stream));
+  const next = stream.next();
+  agentEventBus.publish(buildTopic("build-1"), {
+    buildChanged: { id: "build-1" },
+  });
+  const value = await next;
+  if (value.done) throw new Error("Snapshot subscription ended");
+  expect(value.value.errors).toBeUndefined();
+  expect(value.value.data).toEqual({
+    buildSnapshotChanged: { id: "build-1", status: "SUCCEEDED" },
+  });
+  expect(service.getBuild).toHaveBeenCalledTimes(1);
+  await stream.return?.();
+  const legacy = await subscribe({
+    schema,
+    document: parse('subscription { buildChanged(id: "build-1") { id } }'),
+    contextValue: context(null),
+  });
+  if (!(Symbol.asyncIterator in legacy))
+    throw new Error(JSON.stringify(legacy));
+  const legacyNext = legacy.next();
+  agentEventBus.publish(buildTopic("build-1"), {
+    buildChanged: { id: "build-1" },
+  });
+  const legacyValue = await legacyNext;
+  if (legacyValue.done) throw new Error("Legacy subscription ended");
+  expect(legacyValue.value.data).toEqual({
+    buildChanged: { id: "build-1" },
+  });
+  expect(service.getBuild).toHaveBeenCalledTimes(1);
+  await legacy.return?.();
 });
