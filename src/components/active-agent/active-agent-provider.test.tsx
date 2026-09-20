@@ -45,6 +45,7 @@ function Page({ page = "usage" }: { page?: string }) {
         {focus.ready ? (focus.activeAgentId ?? baseline) : "loading"}
       </output>
       <output aria-label="baseline">{baseline}</output>
+      <output aria-label="catalog-size">{focus.agents.length}</output>
       <button onClick={() => setBaseline("a")}>Local A</button>
       <button onClick={() => focus.selectAgent("a")}>Focus A</button>
       <button onClick={() => focus.selectAgent("b")}>Focus B</button>
@@ -94,6 +95,15 @@ describe("active agent", () => {
     fireEvent.click(screen.getByText("Focus A"));
     fireEvent.click(screen.getByText("Clear focus"));
     expect(screen.getByLabelText("effective").textContent).toBe("a");
+  });
+
+  test("shows the selector only when multiple agents are available", async () => {
+    vi.mocked(controlPlaneRequest).mockResolvedValue({ agents: [agents[0]] });
+    render(surface());
+    await waitFor(() =>
+      expect(screen.getByLabelText("catalog-size").textContent).toBe("1"),
+    );
+    expect(screen.queryByRole("combobox", { name: /Active agent/ })).toBeNull();
   });
 
   test("isolates accounts and synchronizes storage events only for the current user", async () => {

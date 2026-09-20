@@ -38,6 +38,8 @@ export function ActiveAgentSelector() {
     selectAgent(id);
     setOpen(false);
   };
+  if (agents.length <= 1) return null;
+
   return (
     <Popover
       open={open}
