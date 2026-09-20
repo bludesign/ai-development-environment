@@ -36,6 +36,8 @@ export type RouteEntry = {
   clickTab?: string;
   /** Auth pages are intentionally captured without the seeded bearer session. */
   anonymous?: boolean;
+  /** Capture the global focus menu after its catalog has loaded. */
+  activeAgentMenu?: boolean;
 };
 
 export const routes: RouteEntry[] = [
@@ -83,6 +85,13 @@ export const routes: RouteEntry[] = [
     clickTab: "Preparations",
   },
   { name: "worktrees", path: "/worktrees" },
+  { name: "active-agent-selector", path: "/worktrees", activeAgentMenu: true },
+  {
+    name: "active-agent-worktrees",
+    path: "/worktrees",
+    initScript: `localStorage.setItem("ade.active-agent.user-screenshot-admin", JSON.stringify({activeAgentId: "${ids.agents.studio}", pageAgents: {}}));`,
+    readyTexts: ["Controlled by Active Agent"],
+  },
   {
     name: "prepare",
     path: "/prepare",

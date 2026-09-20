@@ -11,6 +11,8 @@ import { useLocale, useTranslations } from "next-intl";
 import { ActionCenterProvider } from "@/components/action-center/action-center-provider";
 import { SidebarStatusFooter } from "@/components/disk-space/sidebar-status";
 import { GitHubPipelineStatusProvider } from "@/components/github/pipeline-status-provider";
+import { ActiveAgentProvider } from "@/components/active-agent/active-agent-provider";
+import { ActiveAgentSelector } from "@/components/active-agent/active-agent-selector";
 import { GlobalSearch } from "@/components/global-search";
 import { NotificationsSidebar } from "@/components/notifications/notifications-sidebar";
 import {
@@ -52,6 +54,7 @@ import { LEFT_SIDEBAR_COOKIE, RIGHT_SIDEBAR_COOKIE } from "@/lib/sidebar-state";
 import { authClient } from "@/services/auth/auth-client";
 
 type CurrentUser = {
+  id: string;
   name: string;
   email: string;
   image: string | null;
@@ -135,17 +138,19 @@ export function AppShell({
   rightDefaultOpen,
 }: AppShellProps) {
   return (
-    <GitHubPipelineStatusProvider>
-      <ActionCenterProvider>
-        <AppShellFrame
-          currentUser={currentUser}
-          leftDefaultOpen={leftDefaultOpen}
-          rightDefaultOpen={rightDefaultOpen}
-        >
-          {children}
-        </AppShellFrame>
-      </ActionCenterProvider>
-    </GitHubPipelineStatusProvider>
+    <ActiveAgentProvider userId={currentUser.id}>
+      <GitHubPipelineStatusProvider>
+        <ActionCenterProvider>
+          <AppShellFrame
+            currentUser={currentUser}
+            leftDefaultOpen={leftDefaultOpen}
+            rightDefaultOpen={rightDefaultOpen}
+          >
+            {children}
+          </AppShellFrame>
+        </ActionCenterProvider>
+      </GitHubPipelineStatusProvider>
+    </ActiveAgentProvider>
   );
 }
 
@@ -265,6 +270,7 @@ function AppHeader({
           side="left"
         />
         <AppBreadcrumbs />
+        <ActiveAgentSelector />
         <GlobalSearch features={features} />
         <SidebarToggle
           expanded={rightOpen}
