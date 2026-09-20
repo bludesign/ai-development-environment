@@ -109,6 +109,16 @@ test.describe("app screenshots", () => {
         await page.getByRole("button", { name: route.clickButton }).click();
         await page.getByRole("dialog").waitFor({ state: "visible" });
       }
+      if (route.activeAgentMenu) {
+        await page
+          .getByRole("combobox", { name: "Active agent: None", exact: true })
+          .click();
+        await page
+          .getByRole("option")
+          .filter({ hasText: "studio" })
+          .first()
+          .waitFor();
+      }
       if (route.clickTab) {
         const tab = page.getByRole("tab", { name: route.clickTab });
         await tab.click();

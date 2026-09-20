@@ -68,6 +68,7 @@ function renderShell({
     <TooltipProvider>
       <AppShell
         currentUser={{
+          id: "test-user",
           name: "Screenshot User",
           email: "user@example.com",
           image: null,
@@ -98,6 +99,8 @@ describe("AppShell", () => {
     clearCookies();
     requestMock.mockReset();
     requestMock.mockImplementation(async (query) => {
+      if (query.includes("query ActiveAgentOptions"))
+        return { agents: [] } as never;
       if (query.includes("query NavigationFeatures")) {
         return {
           cacheServerSettings: { configured: false },

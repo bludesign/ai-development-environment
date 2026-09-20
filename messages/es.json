@@ -4972,5 +4972,19 @@
     "save": "Guardar",
     "revokeTitle": "¿Revocar clave API?",
     "revokeDescription": "¿Revocar {name}? Los clientes que la usen perderán el acceso de inmediato."
+  },
+  "activeAgent": {
+    "title": "Agente activo",
+    "none": "Ninguno",
+    "label": "Agente activo: {name}",
+    "search": "Buscar agentes…",
+    "empty": "No se encontraron agentes",
+    "online": "En línea",
+    "offline": "Sin conexión",
+    "loading": "Cargando agentes…",
+    "loadError": "No se pudieron cargar los agentes.",
+    "retry": "Reintentar",
+    "unavailable": "Agente no disponible",
+    "controlled": "Controlado por el agente activo"
   }
 }

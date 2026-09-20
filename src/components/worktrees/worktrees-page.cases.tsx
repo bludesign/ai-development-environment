@@ -1,4 +1,8 @@
 import {
+  ActiveAgentProvider,
+  useActiveAgent,
+} from "@/components/active-agent/active-agent-provider";
+import {
   cleanup,
   fireEvent,
   render,
@@ -65,6 +69,18 @@ Object.defineProperties(HTMLElement.prototype, {
 
 export type WorktreesPageTestSection =
   "helpers" | "cards" | "details" | "filters";
+
+function WorktreeFocusControls() {
+  const { selectAgent } = useActiveAgent();
+  return (
+    <>
+      <button onClick={() => selectAgent("agent-without-worktrees")}>
+        Focus empty agent
+      </button>
+      <button onClick={() => selectAgent(null)}>Clear focus</button>
+    </>
+  );
+}
 
 export function registerWorktreesPageTests(
   section: WorktreesPageTestSection,
@@ -626,6 +642,57 @@ export function registerWorktreesPageTests(
         expect(
           card?.querySelector('[data-slot="card-action"]')?.className,
         ).toContain("@md/card-header:col-start-2");
+      });
+
+      test("global focus locks the agent filter and restores saved app-specific choices", async () => {
+        const original = request.getMockImplementation()!;
+        request.mockImplementation(async (...args) => {
+          if (args[0].includes("query ActiveAgentOptions"))
+            return {
+              agents: [
+                {
+                  id: "agent-without-worktrees",
+                  name: "Empty agent",
+                  hostname: "empty.local",
+                  connectionStatus: "OFFLINE",
+                },
+              ],
+            } as never;
+          return original(...args);
+        });
+        window.localStorage.setItem(
+          "worktrees-filters:app-1",
+          JSON.stringify({ agentId: "agent-1" }),
+        );
+        window.localStorage.setItem(
+          "worktrees-filters",
+          JSON.stringify({ agentId: "__all__" }),
+        );
+        render(
+          <ActiveAgentProvider userId="worktree-test">
+            <WorktreeFocusControls />
+            <WorktreesPage appId="app-1" />
+          </ActiveAgentProvider>,
+        );
+        await screen.findByText("feature/AIDE-24");
+        const selector = screen.getByRole("combobox", {
+          name: "Filter by agent",
+        });
+        fireEvent.click(screen.getByText("Focus empty agent"));
+        expect(selector.hasAttribute("disabled")).toBe(true);
+        expect(selector.textContent).toContain("Empty agent");
+        expect(await screen.findByText("No matching worktrees")).toBeDefined();
+        expect(
+          JSON.parse(window.localStorage.getItem("worktrees-filters:app-1")!)
+            .agentId,
+        ).toBe("agent-1");
+        expect(
+          JSON.parse(window.localStorage.getItem("worktrees-filters")!).agentId,
+        ).toBe("__all__");
+        fireEvent.click(screen.getByText("Clear focus"));
+        expect(selector.hasAttribute("disabled")).toBe(false);
+        expect(selector.textContent).toContain("Studio Mac");
+        expect(await screen.findByText("feature/AIDE-24")).toBeDefined();
       });
 
       test("searches worktrees and provides shadcn agent and repository filters", async () => {

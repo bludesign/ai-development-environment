@@ -12,6 +12,10 @@ import {
 import { useLocale, useTranslations } from "next-intl";
 import { Fragment, useEffect, useRef, useState } from "react";
 
+import {
+  useActiveAgent,
+  usePageAgentFilter,
+} from "@/components/active-agent/active-agent-provider";
 import { SearchableSelect } from "@/components/common/searchable-select";
 import { ConfirmationDialog } from "@/components/confirmation-dialog";
 import { Alert, AlertDescription } from "@/components/ui/alert";
@@ -187,7 +191,13 @@ export function UsagePage() {
   const [includeHistory, setIncludeHistory] = useState(true);
   const [clearingHistory, setClearingHistory] = useState(false);
   const [reconcileVersion, setReconcileVersion] = useState(0);
-  const [selectedAgentId, setSelectedAgentId] = useState(ALL_AGENTS);
+  const globalAgent = useActiveAgent();
+  const activeAgentTranslations = useTranslations("activeAgent");
+  const [selectedAgentId, setSelectedAgentId] = usePageAgentFilter(
+    "usage",
+    ALL_AGENTS,
+  );
+  const [spendPeaksKey, setSpendPeaksKey] = useState<string | null>(null);
   const [selectedModel, setSelectedModel] = useState<string | null>(null);
   const rangeRef = useRef(range);
   const endDateRef = useRef(endDate);
@@ -220,14 +230,26 @@ export function UsagePage() {
   );
   const aggregateAgents = usageAgentOptions(usage);
   const agentOptions = [
+    ...(globalAgent.activeAgentId &&
+    !aggregateAgents.some(({ value }) => value === globalAgent.activeAgentId)
+      ? [
+          {
+            value: globalAgent.activeAgentId,
+            label:
+              globalAgent.activeAgent?.name ??
+              activeAgentTranslations("unavailable"),
+          },
+        ]
+      : []),
     { value: ALL_AGENTS, label: t("allAgents") },
     ...aggregateAgents,
   ];
-  const activeAgentId = aggregateAgents.some(
+  const localAgentId = aggregateAgents.some(
     ({ value }) => value === selectedAgentId,
   )
     ? selectedAgentId
     : null;
+  const activeAgentId = globalAgent.activeAgentId ?? localAgentId;
   const filteredUsage =
     usage && activeAgentId ? filterUsageByAgent(usage, activeAgentId) : usage;
   // A model the current range no longer covers is treated as no filter at all,
@@ -246,10 +268,16 @@ export function UsagePage() {
     filteredUsage && activeModel
       ? totalsForModel(filteredUsage.days, activeModel)
       : filteredUsage?.totals;
+  const currentPeaksKey = JSON.stringify([
+    activeAgentId,
+    activeModel,
+    includeHistory,
+  ]);
   const peakAgentIdRef = useRef(activeAgentId);
   const peakModelNameRef = useRef(activeModel);
 
   useEffect(() => {
+    viewVersionRef.current += 1;
     rangeRef.current = range;
     endDateRef.current = endDate;
     includeHistoryRef.current = includeHistory;
@@ -278,6 +306,9 @@ export function UsagePage() {
         finished: next.progress.finishedCount,
       };
       setCollection(next);
+      setSpendPeaksKey(
+        JSON.stringify([activeAgentId, activeModel, includeHistory]),
+      );
       setLoading(false);
       setLoadError(null);
       if (next.status === "COMPLETED") {
@@ -435,9 +466,10 @@ export function UsagePage() {
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
-          {aggregateAgents.length > 1 && (
+          {(aggregateAgents.length > 1 || globalAgent.activeAgentId) && (
             <div className="w-full sm:w-64">
               <SearchableSelect
+                disabled={Boolean(globalAgent.activeAgentId)}
                 ariaLabel={t("agentFilterLabel")}
                 emptyMessage={t("noAgentsFound")}
                 onValueChange={(nextAgentId) => {
@@ -450,6 +482,11 @@ export function UsagePage() {
                 searchPlaceholder={t("searchAgents")}
                 value={activeAgentId ?? ALL_AGENTS}
               />
+              {globalAgent.activeAgentId && (
+                <p className="mt-1 text-xs text-muted-foreground">
+                  {activeAgentTranslations("controlled")}
+                </p>
+              )}
             </div>
           )}
           <Tabs
@@ -606,7 +643,7 @@ export function UsagePage() {
         />
       )}
 
-      {loading && !usage ? (
+      {!globalAgent.ready || (loading && !usage) ? (
         <p className="flex items-center gap-2 text-sm text-muted-foreground">
           <Spinner />
           {t("loading")}
@@ -629,7 +666,14 @@ export function UsagePage() {
               selectedModel={activeModel}
             />
             <SummaryTiles metrics={summaryMetrics} model={activeModel} />
-            <SpendRecordTiles locale={locale} peaks={collection.spendPeaks} />
+            <SpendRecordTiles
+              locale={locale}
+              peaks={
+                spendPeaksKey === currentPeaksKey
+                  ? collection.spendPeaks
+                  : { last7Days: null, last30Days: null }
+              }
+            />
             <UsageTable
               days={filteredUsage.days}
               locale={locale}

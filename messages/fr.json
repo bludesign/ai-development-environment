@@ -4972,5 +4972,19 @@
     "save": "Enregistrer",
     "revokeTitle": "Révoquer la clé API ?",
     "revokeDescription": "Révoquer {name} ? Les clients qui l’utilisent perdront immédiatement l’accès."
+  },
+  "activeAgent": {
+    "title": "Agent actif",
+    "none": "Aucun",
+    "label": "Agent actif : {name}",
+    "search": "Rechercher des agents…",
+    "empty": "Aucun agent trouvé",
+    "online": "En ligne",
+    "offline": "Hors ligne",
+    "loading": "Chargement des agents…",
+    "loadError": "Impossible de charger les agents.",
+    "retry": "Réessayer",
+    "unavailable": "Agent indisponible",
+    "controlled": "Contrôlé par l’agent actif"
   }
 }

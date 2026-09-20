@@ -1,5 +1,7 @@
 "use client";
 
+import { useActiveAgent } from "@/components/active-agent/active-agent-provider";
+
 import {
   createRefreshCoalescer,
   type RefreshCoalescer,
@@ -659,6 +661,8 @@ export function WorktreesPage({ appId }: { appId?: string }) {
   const [inspectionRefreshToken, setInspectionRefreshToken] = useState(0);
   const [tagManagerOpen, setTagManagerOpen] = useState(false);
   const [hiddenOpen, setHiddenOpen] = useState(false);
+  const globalAgent = useActiveAgent();
+  const activeAgentTranslations = useTranslations("activeAgent");
   const [storedFilters] = useState(() => readStoredFilters(appId));
   const [query, setQuery] = useState(storedFilters.query);
   const [agentFilter, setAgentFilter] = useState(storedFilters.agentId);
@@ -940,12 +944,13 @@ export function WorktreesPage({ appId }: { appId?: string }) {
   }, [overview]);
   // A remembered filter can point at an agent or repository that no longer
   // exists, so ignore it until the saved selection is available again.
-  const activeAgentFilter =
+  const localAgentFilter =
     !overview ||
     agentFilter === ALL_FILTER_VALUE ||
     overview.agents.some((agentGroup) => agentGroup.agent.id === agentFilter)
       ? agentFilter
       : ALL_FILTER_VALUE;
+  const activeAgentFilter = globalAgent.activeAgentId ?? localAgentFilter;
   const activeRepositoryFilter =
     !overview ||
     repositoryFilter === ALL_FILTER_VALUE ||
@@ -1095,7 +1100,11 @@ export function WorktreesPage({ appId }: { appId?: string }) {
             />
           </div>
           <div className="min-w-0 flex-[1_1_12rem]">
-            <Select onValueChange={setAgentFilter} value={activeAgentFilter}>
+            <Select
+              disabled={Boolean(globalAgent.activeAgentId)}
+              onValueChange={setAgentFilter}
+              value={activeAgentFilter}
+            >
               <SelectTrigger aria-label={t("filterByAgent")} className="w-full">
                 <SelectValue />
               </SelectTrigger>
@@ -1103,6 +1112,15 @@ export function WorktreesPage({ appId }: { appId?: string }) {
                 <SelectItem value={ALL_FILTER_VALUE}>
                   {t("allAgents")}
                 </SelectItem>
+                {globalAgent.activeAgentId &&
+                  !overview.agents.some(
+                    ({ agent }) => agent.id === globalAgent.activeAgentId,
+                  ) && (
+                    <SelectItem value={globalAgent.activeAgentId}>
+                      {globalAgent.activeAgent?.name ??
+                        activeAgentTranslations("unavailable")}
+                    </SelectItem>
+                  )}
                 {overview.agents.map((agentGroup) => (
                   <SelectItem
                     key={agentGroup.agent.id}
@@ -1113,6 +1131,11 @@ export function WorktreesPage({ appId }: { appId?: string }) {
                 ))}
               </SelectContent>
             </Select>
+            {globalAgent.activeAgentId && (
+              <p className="mt-1 text-xs text-muted-foreground">
+                {activeAgentTranslations("controlled")}
+              </p>
+            )}
           </div>
           <div className="min-w-0 flex-[1_1_12rem]">
             <Select
@@ -1198,7 +1221,7 @@ export function WorktreesPage({ appId }: { appId?: string }) {
         />
       )}
 
-      {loading && !overview ? (
+      {!globalAgent.ready || (loading && !overview) ? (
         <p className="flex items-center gap-2 text-sm text-muted-foreground">
           <Spinner /> {t("loading")}
         </p>

@@ -4,6 +4,20 @@
 const React = require("react");
 
 const mockTranslations = {
+  activeAgent: {
+    title: "Active Agent",
+    none: "None",
+    label: "Active agent: {name}",
+    search: "Search agents…",
+    empty: "No agents found",
+    online: "Online",
+    offline: "Offline",
+    loading: "Loading agents…",
+    loadError: "Unable to load agents.",
+    retry: "Retry",
+    unavailable: "Unavailable agent",
+    controlled: "Controlled by Active Agent",
+  },
   metadata: {
     title: "AI Development Environment",
     description: "An AI-focused development environment.",

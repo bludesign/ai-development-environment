@@ -4972,5 +4972,19 @@
     "save": "Speichern",
     "revokeTitle": "API-Schlüssel widerrufen?",
     "revokeDescription": "{name} widerrufen? Verwendende Clients verlieren sofort den Zugriff."
+  },
+  "activeAgent": {
+    "title": "Aktiver Agent",
+    "none": "Keiner",
+    "label": "Aktiver Agent: {name}",
+    "search": "Agenten suchen…",
+    "empty": "Keine Agenten gefunden",
+    "online": "Online",
+    "offline": "Offline",
+    "loading": "Agenten werden geladen…",
+    "loadError": "Agenten konnten nicht geladen werden.",
+    "retry": "Erneut versuchen",
+    "unavailable": "Agent nicht verfügbar",
+    "controlled": "Vom aktiven Agenten gesteuert"
   }
 }

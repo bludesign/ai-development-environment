@@ -15,6 +15,11 @@ import {
   controlPlaneSubscriptions,
 } from "@/lib/control-plane-client";
 
+import {
+  ActiveAgentProvider,
+  useActiveAgent,
+  activeAgentStorageKey,
+} from "@/components/active-agent/active-agent-provider";
 import { UsagePage } from "./usage-page";
 import { usagePeriodForDate } from "./aggregate-usage";
 
@@ -202,6 +207,17 @@ function collectionWithTwoSuccessfulAgents() {
   return result;
 }
 
+function GlobalAgentControls() {
+  const { selectAgent } = useActiveAgent();
+  return (
+    <>
+      <button onClick={() => selectAgent("b")}>Focus B</button>
+      <button onClick={() => selectAgent("empty")}>Focus empty</button>
+      <button onClick={() => selectAgent(null)}>Clear focus</button>
+    </>
+  );
+}
+
 describe("UsagePage", () => {
   beforeEach(() => {
     global.ResizeObserver = ResizeObserverMock;
@@ -360,6 +376,74 @@ describe("UsagePage", () => {
         ),
       ).toBe(true),
     );
+  });
+
+  test("global focus locks the selector, keeps the baseline, and never falls back to all data", async () => {
+    window.localStorage.setItem(
+      activeAgentStorageKey("usage-test"),
+      JSON.stringify({ activeAgentId: null, pageAgents: { usage: "a" } }),
+    );
+    requestMock.mockImplementation(async (query, variables) => {
+      if (query.includes("query ActiveAgentOptions"))
+        return {
+          agents: ["a", "b", "empty"].map((id) => ({
+            id,
+            name: `Agent ${id.toUpperCase()}`,
+            hostname: `${id}.local`,
+            connectionStatus: "ONLINE",
+          })),
+        } as never;
+      const result = collectionWithTwoSuccessfulAgents();
+      if (variables?.peakAgentId === "b") {
+        result.spendPeaks.last7Days!.totalCost = 0.5;
+        result.spendPeaks.last30Days!.totalCost = 0.5;
+      }
+      if (query.includes("query CcusageCollection"))
+        return { ccusageCollection: result } as never;
+      if (query.includes("mutation CollectCcusage"))
+        return { collectCcusage: result } as never;
+      throw new Error(`Unexpected query: ${query}`);
+    });
+    render(
+      <ActiveAgentProvider userId="usage-test">
+        <GlobalAgentControls />
+        <UsagePage />
+      </ActiveAgentProvider>,
+    );
+    const filter = await screen.findByRole("combobox", {
+      name: "Filter usage by agent",
+    });
+    await waitFor(() => expect(filter.textContent).toContain("Agent A"));
+    fireEvent.click(screen.getByText("Focus B"));
+    expect(filter.hasAttribute("disabled")).toBe(true);
+    await waitFor(() =>
+      expect(
+        screen.getByText("Grand total").closest("tr")?.textContent,
+      ).toContain("$0.50"),
+    );
+    expect(screen.getByText("Controlled by Active Agent")).toBeDefined();
+    expect(
+      JSON.parse(
+        window.localStorage.getItem(activeAgentStorageKey("usage-test"))!,
+      ).pageAgents.usage,
+    ).toBe("a");
+    fireEvent.click(screen.getByText("Focus empty"));
+    expect(filter.textContent).toContain("Agent EMPTY");
+    expect(screen.queryByText("Grand total")).toBeNull();
+    fireEvent.click(screen.getByText("Clear focus"));
+    expect(filter.hasAttribute("disabled")).toBe(false);
+    expect(filter.textContent).toContain("Agent A");
+    await waitFor(() =>
+      expect(
+        screen.getByText("Grand total").closest("tr")?.textContent,
+      ).toContain("$1.26"),
+    );
+    expect(
+      requestMock.mock.calls.filter(([query]) =>
+        query.includes("mutation CollectCcusage"),
+      ),
+    ).toHaveLength(1);
+    window.localStorage.removeItem(activeAgentStorageKey("usage-test"));
   });
 
   test("searches and filters usage when multiple agents report", async () => {

@@ -24,6 +24,7 @@ export default async function DashboardLayout({
   return (
     <AppShell
       currentUser={{
+        id: session.user.id,
         name: session.user.name,
         email: session.user.email,
         image: session.user.image ?? null,
