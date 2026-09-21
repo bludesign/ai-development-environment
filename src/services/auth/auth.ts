@@ -23,6 +23,7 @@ import {
   passwordAuthenticationEnabled,
 } from "./auth-config";
 import { logBetterAuth } from "./auth-logger";
+import { fetchGitHubProfile } from "./github-profile";
 import { authDatabaseHooks } from "./registration";
 
 const managementStatements = {
@@ -77,26 +78,39 @@ function createAuth(
   prisma: Awaited<ReturnType<typeof getPrismaClient>>,
   runtime = getAuthRuntimeConfig(),
 ) {
+  const provider = runtime.provider;
+  const githubUserInfoUrl =
+    provider?.providerId.toLowerCase() === "github"
+      ? provider.userInfoUrl
+      : undefined;
   const oauthPlugin =
-    oauthAuthenticationEnabled(runtime.mode) && runtime.provider
+    oauthAuthenticationEnabled(runtime.mode) && provider
       ? genericOAuth({
           config: [
             {
-              providerId: runtime.provider.providerId,
-              clientId: runtime.provider.clientId,
-              clientSecret: runtime.provider.clientSecret,
-              scopes: runtime.provider.scopes,
-              discoveryUrl: runtime.provider.discoveryUrl,
+              providerId: provider.providerId,
+              clientId: provider.clientId,
+              clientSecret: provider.clientSecret,
+              scopes: provider.scopes,
+              discoveryUrl: provider.discoveryUrl,
               // Better Auth 1.7 keys accounts by issuer and provider subject.
               // Existing releases keyed them by providerId and subject, so keep
               // that stable namespace across the required issuer backfill.
-              accountIssuer: `local:oauth:${runtime.provider.providerId}`,
-              authorizationUrl: runtime.provider.authorizationUrl,
-              tokenUrl: runtime.provider.tokenUrl,
-              userInfoUrl: runtime.provider.userInfoUrl,
+              accountIssuer: `local:oauth:${provider.providerId}`,
+              authorizationUrl: provider.authorizationUrl,
+              tokenUrl: provider.tokenUrl,
+              userInfoUrl: provider.userInfoUrl,
+              getUserInfo: githubUserInfoUrl
+                ? async (tokens) => {
+                    if (!tokens.accessToken) return null;
+                    return fetchGitHubProfile(
+                      githubUserInfoUrl,
+                      tokens.accessToken,
+                    );
+                  }
+                : undefined,
               pkce: true,
-              requireIdTokenVerification:
-                runtime.provider.requireIssuerValidation,
+              requireIdTokenVerification: provider.requireIssuerValidation,
               disableImplicitSignUp: false,
             },
           ],
