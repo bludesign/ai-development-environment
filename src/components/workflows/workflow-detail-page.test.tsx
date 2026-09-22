@@ -50,9 +50,12 @@ vi.mock("./workflow-graph", async () => {
 
 const request = vi.mocked(controlPlaneRequest);
 
-afterEach(() => {
+afterEach(async () => {
   invalidateWorkflowCatalog();
   cleanup();
+  // Radix FocusScope dispatches its unmount event on a zero-delay timer.
+  // Let it fire before Vitest tears down this test's jsdom globals.
+  await new Promise((resolve) => setTimeout(resolve, 0));
   vi.clearAllMocks();
 });
 
