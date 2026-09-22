@@ -5,6 +5,7 @@
     "better-sqlite3",
     "eslint",
     "typescript",
-    "graphql"
+    "graphql",
+    "jsdom"
   ]
 }
