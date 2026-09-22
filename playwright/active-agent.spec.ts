@@ -38,6 +38,25 @@ test("global focus survives navigation and reload, then restores each page filte
   await page.getByRole("option").filter({ hasText: "Build Mac" }).click();
   await expect(localAgent).toBeDisabled();
   await expect(localAgent).toHaveText("Build Mac");
+  const searchInput = page.getByRole("searchbox", {
+    name: "Search worktrees",
+    exact: true,
+  });
+  const searchIcon = page
+    .getByRole("search", { name: "Worktree filters", exact: true })
+    .locator(".lucide-search");
+  await expect
+    .poll(async () => {
+      const [inputBox, iconBox] = await Promise.all([
+        searchInput.boundingBox(),
+        searchIcon.boundingBox(),
+      ]);
+      if (!inputBox || !iconBox) return Number.POSITIVE_INFINITY;
+      const inputCenter = inputBox.y + inputBox.height / 2;
+      const iconCenter = iconBox.y + iconBox.height / 2;
+      return Math.abs(inputCenter - iconCenter);
+    })
+    .toBeLessThanOrEqual(1);
   await page.reload();
   await expect(localAgent).toBeDisabled();
   await expect(localAgent).toHaveText("Build Mac");

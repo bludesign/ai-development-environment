@@ -2,7 +2,6 @@ import {
   DEFAULT_CODEBASE_RECONCILE_INTERVAL_SECONDS,
   MAX_CODEBASE_RECONCILE_INTERVAL_SECONDS,
   MIN_CODEBASE_RECONCILE_INTERVAL_SECONDS,
-  type CodebaseStatusReport,
 } from "@ai-development-environment/agent-contract/codebases";
 import type { CodebaseWorktreeReport } from "@ai-development-environment/agent-contract/worktrees";
 
@@ -46,11 +45,9 @@ export class CodebaseMonitor {
         this.intervalMs = configuration.refreshIntervalSeconds * 1_000;
       }
       const codebases = configuration.codebases;
-      const reports: CodebaseStatusReport[] = [];
-      const worktreeReports: CodebaseWorktreeReport[] = [];
       for (let index = 0; index < codebases.length; index += CONCURRENCY) {
         const batch = codebases.slice(index, index + CONCURRENCY);
-        const results = await Promise.all(
+        await Promise.all(
           batch.map((codebase) =>
             this.repositoryCoordinator.run(codebase.id, async () => {
               let snapshot = await inspectCodebase(
@@ -138,30 +135,22 @@ export class CodebaseMonitor {
                     ? error.message.slice(0, 2_000)
                     : String(error);
               }
-              return {
-                codebaseReport: { codebaseId: codebase.id, snapshot },
-                worktreeReport: {
+              // Keep persistence under the repository lock too: a delayed
+              // inventory report must not overwrite a newer manual fetch.
+              await this.client.reportCodebaseStatuses([
+                { codebaseId: codebase.id, snapshot },
+              ]);
+              await this.client.reportWorktrees([
+                {
                   codebaseId: codebase.id,
                   ...inventory,
                   fetchedAt: snapshot.fetchedAt,
                   fetchAttemptedAt,
                   fetchError,
                 },
-              };
+              ]);
             }),
           ),
-        );
-        reports.push(...results.map((result) => result.codebaseReport));
-        worktreeReports.push(...results.map((result) => result.worktreeReport));
-      }
-      for (let index = 0; index < reports.length; index += 500) {
-        await this.client.reportCodebaseStatuses(
-          reports.slice(index, index + 500),
-        );
-      }
-      for (let index = 0; index < worktreeReports.length; index += 100) {
-        await this.client.reportWorktrees(
-          worktreeReports.slice(index, index + 100),
         );
       }
     } catch (error) {

@@ -15,6 +15,7 @@ import {
   updateBaseBranchAfterFetch,
 } from "./handlers/codebases.js";
 import { discoverWorktrees } from "./handlers/worktrees.js";
+import { RepositoryCoordinator } from "./repository-coordinator.js";
 
 const inspect = vi.mocked(inspectCodebase);
 const updateBaseBranch = vi.mocked(updateBaseBranchAfterFetch);
@@ -91,8 +92,80 @@ describe("CodebaseMonitor", () => {
     expect(monitor.reconcileIntervalMs).toBe(120_000);
     expect(client.reportCodebaseStatuses).toHaveBeenCalledWith([
       { codebaseId: "a", snapshot: { ...snapshot, folder: "/a" } },
+    ]);
+    expect(client.reportCodebaseStatuses).toHaveBeenCalledWith([
       { codebaseId: "b", snapshot: { ...snapshot, folder: "/b" } },
     ]);
+  });
+
+  test("persists inventory before a following fetch even when another checkout is slow", async () => {
+    const firstDiscovered = Promise.withResolvers<void>();
+    const slowScan = Promise.withResolvers<void>();
+    const reportStarted = Promise.withResolvers<"report">();
+    const reportCompleted = Promise.withResolvers<void>();
+    const fetchStarted = Promise.withResolvers<"fetch">();
+    let branches: string[] = [];
+    const client = {
+      agentCodebaseConfiguration: vi.fn().mockResolvedValue({
+        refreshIntervalSeconds: 30,
+        fetchIntervalSeconds: 300,
+        codebases: ["a", "b"].map((id) => ({
+          id,
+          folder: `/${id}`,
+          canonicalOrigin: `example.com/${id}`,
+          defaultBranch: "main",
+          keepBaseBranchUpToDate: false,
+          lastFetchedAt: null,
+          lastFetchAttemptAt: new Date().toISOString(),
+          worktrees: [],
+        })),
+      }),
+      reportCodebaseStatuses: vi.fn().mockResolvedValue({}),
+      reportWorktrees: vi.fn<AgentGraphQLClient["reportWorktrees"]>(
+        async (reports) => {
+          if (reports.some((report) => report.codebaseId === "a")) {
+            reportStarted.resolve("report");
+            await reportCompleted.promise;
+            branches = reports.find(
+              (report) => report.codebaseId === "a",
+            )!.remoteBranches;
+          }
+          return { reportWorktrees: [] };
+        },
+      ),
+    } as unknown as AgentGraphQLClient;
+    inspect.mockImplementation(async (folder) => ({ ...snapshot, folder }));
+    discover.mockImplementation(async (folder) => {
+      if (folder === "/b") await slowScan.promise;
+      else firstDiscovered.resolve();
+      return {
+        complete: true,
+        defaultBranch: "main",
+        localBranches: ["main"],
+        remoteBranches: ["main"],
+        worktrees: [],
+      };
+    });
+    const coordinator = new RepositoryCoordinator();
+    const monitor = new CodebaseMonitor(client, coordinator);
+    const reconciliation = monitor.reconcile(new AbortController().signal);
+    await firstDiscovered.promise;
+    const fetch = coordinator.run("a", async () => {
+      fetchStarted.resolve("fetch");
+      branches = ["main", "new-remote-branch"];
+    });
+
+    const first = await Promise.race([
+      reportStarted.promise,
+      fetchStarted.promise,
+    ]);
+    reportCompleted.resolve();
+    await fetch;
+    slowScan.resolve();
+    await reconciliation;
+
+    expect(first).toBe("report");
+    expect(branches).toEqual(["main", "new-remote-branch"]);
   });
 
   test("does not overlap reconciliation passes", async () => {
