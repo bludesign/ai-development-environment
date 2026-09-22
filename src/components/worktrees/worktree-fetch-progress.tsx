@@ -2,7 +2,7 @@
 
 import { Check, ChevronRight, ExternalLink, X } from "lucide-react";
 import { useTranslations } from "next-intl";
-import { useId } from "react";
+import { useEffect, useId } from "react";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -78,6 +78,12 @@ export function WorktreeFetchProgress({
       !row.worktreeRefreshError,
   );
   const progressLabel = t("progress", { completed, total: batch.rows.length });
+
+  useEffect(() => {
+    if (batch.phase !== "finished") return;
+    const timer = window.setTimeout(onDismiss, 3_000);
+    return () => window.clearTimeout(timer);
+  }, [batch.id, batch.phase, onDismiss]);
 
   return (
     <section

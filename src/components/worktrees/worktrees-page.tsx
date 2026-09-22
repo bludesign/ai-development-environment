@@ -1106,7 +1106,7 @@ export function WorktreesPage({ appId }: { appId?: string }) {
       {overview && overview.agents.length > 0 && (
         <div
           aria-label={t("filters")}
-          className="flex flex-wrap gap-2"
+          className="flex flex-wrap items-start gap-2"
           role="search"
         >
           <div className="relative min-w-0 flex-[2_1_18rem]">
