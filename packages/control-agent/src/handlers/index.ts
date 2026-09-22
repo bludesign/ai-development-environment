@@ -27,6 +27,7 @@ import { inspectIosSigning } from "./signing.js";
 import { runCcusage } from "./ccusage.js";
 import { deleteBuildData, scanBuildData, sizeBuildData } from "./build-data.js";
 import type { ProcessLog, ProcessResult } from "../process-runner.js";
+import type { FetchedCodebaseRefresh } from "../refresh-fetched-codebase.js";
 import {
   browseCodebaseDirectories,
   fetchCodebase,
@@ -145,6 +146,7 @@ import {
 export type AgentJobHandlerContext = {
   agentId: string;
   reportWorktreeActivity: (input: WorktreeActivityReport) => Promise<unknown>;
+  refreshFetchedCodebase?: (input: FetchedCodebaseRefresh) => Promise<string>;
   reportBuildProgress?: (input: {
     buildId: string;
     status: "PREPARING" | "RUNNING";

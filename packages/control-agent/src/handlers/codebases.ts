@@ -471,8 +471,24 @@ export const fetchCodebase: AgentJobHandler = async (
   payload,
   timeoutMs,
   signal,
+  onLog,
+  context,
 ) => {
   const input = codebaseJobPayload(payload);
+  let sequence = 0;
+  const log = async (message: string) => {
+    try {
+      await onLog({
+        sequence: sequence++,
+        stream: "SYSTEM",
+        message,
+        createdAt: new Date().toISOString(),
+      });
+    } catch (error) {
+      console.error("Could not report fetch progress:", cleanError(error));
+    }
+  };
+  await log("Checking repository before fetching");
   const beforeResult = await inspectCodebaseProcess(
     input.folder,
     Math.min(timeoutMs, 30_000),
@@ -485,6 +501,8 @@ export const fetchCodebase: AgentJobHandler = async (
     return { ...successfulProcess, exitCode: 1, snapshot: before };
   }
   let result: CaptureResult;
+  const fetchAttemptedAt = new Date().toISOString();
+  await log("Fetching remote branches from origin");
   try {
     result = await git(input.folder, ["fetch", "origin"], timeoutMs, signal);
   } catch (error) {
@@ -496,11 +514,17 @@ export const fetchCodebase: AgentJobHandler = async (
     input.keepBaseBranchUpToDate &&
     input.baseBranch
   ) {
-    await updateBaseBranchAfterFetch(
+    await log("Updating the base branch where it can be fast-forwarded");
+    const updated = await updateBaseBranchAfterFetch(
       input.folder,
       input.baseBranch,
       timeoutMs,
       signal,
+    );
+    await log(
+      updated
+        ? "Base branch updated"
+        : "Base branch left unchanged because it could not be safely fast-forwarded",
     );
   }
   const afterResult = await inspectCodebaseProcess(
@@ -516,12 +540,34 @@ export const fetchCodebase: AgentJobHandler = async (
   } else if (!snapshot.fetchedAt) {
     snapshot.fetchedAt = new Date().toISOString();
   }
+  if (result.exitCode !== 0) {
+    await log(snapshot.error || "Git fetch failed");
+  }
+  let worktreesRefreshedAt: string | undefined;
+  let worktreeRefreshError: string | undefined;
+  if (input.codebaseId && context?.refreshFetchedCodebase) {
+    await log("Refreshing worktree branches and status");
+    try {
+      worktreesRefreshedAt = await context.refreshFetchedCodebase({
+        codebaseId: input.codebaseId,
+        snapshot,
+        fetchAttemptedAt,
+        fetchError: result.exitCode === 0 ? null : snapshot.error,
+      });
+      await log("Worktree branches and status refreshed");
+    } catch (error) {
+      worktreeRefreshError = cleanError(error);
+      await log(`Could not refresh worktrees: ${worktreeRefreshError}`);
+    }
+  }
   return {
     exitCode: result.exitCode,
     signal: result.signal,
     timedOut: result.timedOut,
-    cancelled: result.cancelled,
+    cancelled: result.cancelled || signal.aborted,
     snapshot,
+    ...(worktreesRefreshedAt ? { worktreesRefreshedAt } : {}),
+    ...(worktreeRefreshError ? { worktreeRefreshError } : {}),
   };
 };
 

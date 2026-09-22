@@ -4,10 +4,12 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
 
-import { afterAll, afterEach, describe, expect, test } from "vitest";
+import { afterAll, afterEach, describe, expect, test, vi } from "vitest";
 
+import * as capture from "../capture-command.js";
 import {
   deleteCodebaseRemoteBranch,
+  fetchCodebase,
   inspectCodebaseGit,
   inspectCodebaseGitState,
   inspectCodebase,
@@ -16,6 +18,7 @@ import {
   pullCodebaseBranch,
   updateBaseBranchAfterFetch,
 } from "./codebases.js";
+import type { AgentJobHandlerContext } from "./index.js";
 
 const execute = promisify(execFile);
 const temporaryDirectories: string[] = [];
@@ -81,6 +84,7 @@ async function advanceRemoteMain(folder: string) {
 }
 
 afterEach(async () => {
+  vi.restoreAllMocks();
   await Promise.all(
     temporaryDirectories
       .splice(0)
@@ -92,6 +96,132 @@ afterAll(async () => {
   const built = repositoryTemplate;
   repositoryTemplate = null;
   if (built) await rm(await built, { recursive: true, force: true });
+});
+
+describe("manual codebase fetch", () => {
+  function mockFetch(exitCode = 0, stderr = "") {
+    const captureCommand = capture.captureCommand;
+    // Keep real repository inspection while avoiding a network fetch in tests.
+    vi.spyOn(capture, "captureCommand").mockImplementation((options) =>
+      options.args.slice(-2).join(" ") === "fetch origin"
+        ? Promise.resolve({
+            exitCode,
+            stdout: "",
+            stderr,
+            signal: null,
+            timedOut: false,
+            cancelled: false,
+            outputTruncated: false,
+          })
+        : captureCommand(options),
+    );
+  }
+
+  test("waits for worktree persistence and reports concise fetch stages", async () => {
+    const folder = await repository();
+    mockFetch();
+    const refreshStarted = Promise.withResolvers<void>();
+    const refreshComplete = Promise.withResolvers<string>();
+    const refresh = vi.fn<
+      NonNullable<AgentJobHandlerContext["refreshFetchedCodebase"]>
+    >(async () => {
+      refreshStarted.resolve();
+      return refreshComplete.promise;
+    });
+    const onLog = vi.fn().mockResolvedValue(undefined);
+    let settled = false;
+    const pending = fetchCodebase(
+      { codebaseId: "codebase-1", folder },
+      10_000,
+      new AbortController().signal,
+      onLog,
+      {
+        agentId: "agent-1",
+        reportWorktreeActivity: async () => undefined,
+        refreshFetchedCodebase: refresh,
+      },
+    ).then((result) => {
+      settled = true;
+      return result;
+    });
+
+    await refreshStarted.promise;
+    expect(settled).toBe(false);
+    expect(refresh).toHaveBeenCalledWith({
+      codebaseId: "codebase-1",
+      snapshot: expect.objectContaining({ availability: "AVAILABLE" }),
+      fetchAttemptedAt: expect.any(String),
+      fetchError: null,
+    });
+    const refreshedAt = new Date().toISOString();
+    refreshComplete.resolve(refreshedAt);
+    expect(await pending).toMatchObject({
+      exitCode: 0,
+      worktreesRefreshedAt: refreshedAt,
+    });
+    expect(onLog.mock.calls.map(([log]) => log.message)).toEqual([
+      "Checking repository before fetching",
+      "Fetching remote branches from origin",
+      "Refreshing worktree branches and status",
+      "Worktree branches and status refreshed",
+    ]);
+    expect(onLog.mock.calls.map(([log]) => log.sequence)).toEqual([0, 1, 2, 3]);
+  });
+
+  test("preserves successful fetch results when refreshing worktrees fails", async () => {
+    const folder = await repository();
+    mockFetch();
+    const result = await fetchCodebase(
+      { codebaseId: "codebase-1", folder },
+      10_000,
+      new AbortController().signal,
+      async () => undefined,
+      {
+        agentId: "agent-1",
+        reportWorktreeActivity: async () => undefined,
+        refreshFetchedCodebase: async () => {
+          throw new Error("HTTP 503");
+        },
+      },
+    );
+    expect(result).toMatchObject({
+      exitCode: 0,
+      snapshot: { error: null, fetchedAt: expect.any(String) },
+      worktreeRefreshError: "HTTP 503",
+    });
+    expect(result).not.toHaveProperty("worktreesRefreshedAt");
+  });
+
+  test("reports failed fetch attempts without replacing their Git error", async () => {
+    const folder = await repository();
+    mockFetch(128, "fatal: could not read from remote repository");
+    const refresh = vi.fn().mockResolvedValue(new Date().toISOString());
+    const result = await fetchCodebase(
+      { codebaseId: "codebase-1", folder },
+      10_000,
+      new AbortController().signal,
+      async () => undefined,
+      {
+        agentId: "agent-1",
+        reportWorktreeActivity: async () => undefined,
+        refreshFetchedCodebase: refresh,
+      },
+    );
+    expect(result.exitCode).not.toBe(0);
+    expect(result).toMatchObject({
+      snapshot: {
+        error: expect.stringContaining("could not read from remote repository"),
+      },
+    });
+    expect(refresh).toHaveBeenCalledWith(
+      expect.objectContaining({
+        fetchAttemptedAt: expect.any(String),
+        fetchError: expect.stringContaining(
+          "could not read from remote repository",
+        ),
+      }),
+    );
+  });
 });
 
 describe("codebase Git inspection", () => {

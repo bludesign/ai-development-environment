@@ -3,6 +3,7 @@ import {
   useActiveAgent,
 } from "@/components/active-agent/active-agent-provider";
 import {
+  act,
   cleanup,
   fireEvent,
   render,
@@ -68,7 +69,7 @@ Object.defineProperties(HTMLElement.prototype, {
 });
 
 export type WorktreesPageTestSection =
-  "helpers" | "cards" | "details" | "filters";
+  "helpers" | "cards" | "details" | "filters" | "fetch";
 
 function WorktreeFocusControls() {
   const { selectAgent } = useActiveAgent();
@@ -560,6 +561,176 @@ export function registerWorktreesPageTests(
       request.mockReset();
       subscriptions.mockReset();
     });
+
+    if (section === "fetch") {
+      test.each([undefined, "app-1"])(
+        "waits for a fresh trailing overview read on the %s page",
+        async (appId) => {
+          let invalidateOverview!: () => void;
+          subscriptions.mockReturnValue({
+            subscribe: vi.fn(
+              (
+                operation: { query: string },
+                sink: { next: (value: unknown) => void },
+              ) => {
+                if (operation.query.includes("subscription WorktreesChanged"))
+                  invalidateOverview = () =>
+                    sink.next({
+                      data: {
+                        worktreeOverviewChanged: { codebaseId: "codebase-1" },
+                      },
+                    });
+                return vi.fn();
+              },
+            ),
+          } as never);
+          render(<WorktreesPage appId={appId} />);
+          await screen.findByText("feature/AIDE-24");
+          const original = await request.mock.results[0]!.value;
+          const updated = structuredClone(original) as {
+            worktreeOverview: WorktreeOverview;
+          };
+          updated.worktreeOverview.agents[0]!.codebases[0]!.worktrees[0]!.branch =
+            "feature/fetched";
+          let resolveJobs!: (value: unknown) => void;
+          const jobs = new Promise((resolve) => {
+            resolveJobs = resolve;
+          });
+          let resolveOverview!: (value: unknown) => void;
+          const finalOverview = new Promise((resolve) => {
+            resolveOverview = resolve;
+          });
+          const staleOverview = Promise.withResolvers<unknown>();
+          let completionReads = 0;
+          const job = {
+            id: "fetch-job-1",
+            agentId: "agent-1",
+            payload: { codebaseId: "codebase-1" },
+            status: "QUEUED",
+            error: null,
+            result: null,
+            updatedAt: new Date(1).toISOString(),
+          };
+          request.mockImplementation(async (query) => {
+            if (query.includes("fetchCodebases"))
+              return { fetchCodebases: { jobs: [job], skipped: [] } } as never;
+            if (query.includes("agentJobsByIds")) return (await jobs) as never;
+            if (query.includes("query WorktreeOverview")) {
+              completionReads += 1;
+              return (await (completionReads === 1
+                ? staleOverview.promise
+                : finalOverview)) as never;
+            }
+            return original as never;
+          });
+
+          fireEvent.click(screen.getByRole("button", { name: "Fetch now" }));
+          const fetching = await screen.findByRole("button", {
+            name: "Fetching…",
+          });
+          expect(fetching.hasAttribute("disabled")).toBe(true);
+          expect(screen.getByText("0 of 1 checkouts processed")).toBeDefined();
+          expect(request).toHaveBeenCalledWith(
+            expect.stringContaining("fetchCodebases"),
+            {
+              input: {
+                codebaseIds: ["codebase-1"],
+                requestId: expect.any(String),
+              },
+            },
+            expect.anything(),
+          );
+          // A background read already started before the fetch completed. Its
+          // cached snapshot must not satisfy the completion refresh.
+          act(() => invalidateOverview());
+          expect(completionReads).toBe(1);
+          await act(async () =>
+            resolveJobs({
+              agentJobsByIds: [
+                {
+                  ...job,
+                  status: "SUCCEEDED",
+                  updatedAt: new Date(2).toISOString(),
+                  result: { worktreesRefreshedAt: new Date(2).toISOString() },
+                },
+              ],
+            }),
+          );
+          const updating = await screen.findByRole("button", {
+            name: "Updating page…",
+          });
+          expect(updating.hasAttribute("disabled")).toBe(true);
+          expect(screen.queryByText("Page updated.")).toBeNull();
+          await act(async () => staleOverview.resolve(original));
+          expect(completionReads).toBe(2);
+          expect(screen.queryByText("Page updated.")).toBeNull();
+          expect(updating.hasAttribute("disabled")).toBe(true);
+          expect(request).toHaveBeenCalledWith(
+            expect.stringContaining("query WorktreeOverview"),
+            { appId: appId ?? null },
+            expect.anything(),
+          );
+
+          await act(async () => resolveOverview(updated));
+          expect(await screen.findByText("feature/fetched")).toBeDefined();
+          expect(await screen.findByText("Page updated.")).toBeDefined();
+          expect(
+            screen
+              .getByRole("button", { name: "Fetch now" })
+              .hasAttribute("disabled"),
+          ).toBe(false);
+          fireEvent.click(
+            screen.getByRole("button", { name: "Dismiss fetch results" }),
+          );
+          expect(screen.queryByText("Fetch finished")).toBeNull();
+        },
+      );
+
+      test("retains fetch results after a failed page update and retries only the read", async () => {
+        render(<WorktreesPage />);
+        await screen.findByText("feature/AIDE-24");
+        const original = await request.mock.results[0]!.value;
+        let failRead = true;
+        request.mockImplementation(async (query) => {
+          if (query.includes("fetchCodebases"))
+            return {
+              fetchCodebases: {
+                jobs: [
+                  {
+                    id: "fetch-job-1",
+                    agentId: "agent-1",
+                    payload: { codebaseId: "codebase-1" },
+                    status: "SUCCEEDED",
+                    error: null,
+                    updatedAt: new Date(2).toISOString(),
+                    result: { worktreesRefreshedAt: new Date(2).toISOString() },
+                  },
+                ],
+                skipped: [],
+              },
+            } as never;
+          if (query.includes("query WorktreeOverview") && failRead)
+            throw new Error("Overview unavailable");
+          return original as never;
+        });
+        fireEvent.click(screen.getByRole("button", { name: "Fetch now" }));
+        expect(await screen.findByText("Page update failed")).toBeDefined();
+        expect(screen.queryByText("Page updated.")).toBeNull();
+        expect(
+          screen.getByText("1 fetched · 0 failed · 0 skipped"),
+        ).toBeDefined();
+        failRead = false;
+        fireEvent.click(
+          screen.getByRole("button", { name: "Retry page update" }),
+        );
+        expect(await screen.findByText("Page updated.")).toBeDefined();
+        expect(
+          request.mock.calls.filter(([query]) =>
+            query.includes("fetchCodebases"),
+          ),
+        ).toHaveLength(1);
+      });
+    }
 
     if (section === "cards") {
       test("renders the primary worktree card with Jira and tag metadata", async () => {
@@ -1422,76 +1593,99 @@ export function registerWorktreesPageTests(
         expect(screen.queryByRole("table", { name: "Commits (1)" })).toBeNull();
       });
 
-      test("refreshes the inspection for an expanded worktree", async () => {
-        render(<WorktreesPage />);
-        await screen.findByText("feature/AIDE-24");
-        const overviewResponse = await request.mock.results[0]?.value;
-        request.mockResolvedValueOnce({
-          inspectWorktree: {
-            commits: [],
-            changes: [
-              {
-                path: "old-file.ts",
-                staged: false,
-                unstaged: true,
-                untracked: false,
-                conflicted: false,
-                stagedAdditions: null,
-                stagedDeletions: null,
-                unstagedAdditions: 1,
-                unstagedDeletions: 0,
-              },
-            ],
-            commitsTruncated: false,
-            changesTruncated: false,
-          },
-        } as never);
-        fireEvent.click(
-          screen.getByRole("button", { name: "feature/AIDE-24" }),
-        );
-        expect(await screen.findByText("old-file.ts")).toBeDefined();
+      test.each(["Refresh", "Fetch now"])(
+        "refreshes the inspection for an expanded worktree after %s",
+        async (button) => {
+          render(<WorktreesPage />);
+          await screen.findByText("feature/AIDE-24");
+          const overviewResponse = await request.mock.results[0]?.value;
+          request.mockResolvedValueOnce({
+            inspectWorktree: {
+              commits: [],
+              changes: [
+                {
+                  path: "old-file.ts",
+                  staged: false,
+                  unstaged: true,
+                  untracked: false,
+                  conflicted: false,
+                  stagedAdditions: null,
+                  stagedDeletions: null,
+                  unstagedAdditions: 1,
+                  unstagedDeletions: 0,
+                },
+              ],
+              commitsTruncated: false,
+              changesTruncated: false,
+            },
+          } as never);
+          fireEvent.click(
+            screen.getByRole("button", { name: "feature/AIDE-24" }),
+          );
+          expect(await screen.findByText("old-file.ts")).toBeDefined();
 
-        const refreshedInspection = {
-          inspectWorktree: {
-            commits: [],
-            changes: [
-              {
-                path: "new-file.ts",
-                staged: true,
-                unstaged: false,
-                untracked: false,
-                conflicted: false,
-                stagedAdditions: 2,
-                stagedDeletions: 1,
-                unstagedAdditions: null,
-                unstagedDeletions: null,
-              },
-            ],
-            commitsTruncated: false,
-            changesTruncated: false,
-          },
-        };
-        // Quick actions also load on a timer. Match requests by operation so that
-        // background work cannot consume the refresh or inspection response.
-        request.mockImplementation(async (query) => {
-          if (query.includes("mutation RefreshWorktrees"))
-            return { refreshWorktrees: 1 } as never;
-          if (query.includes("mutation InspectWorktree"))
-            return refreshedInspection as never;
-          return overviewResponse as never;
-        });
-        fireEvent.click(screen.getByRole("button", { name: "Refresh" }));
+          const refreshedInspection = {
+            inspectWorktree: {
+              commits: [],
+              changes: [
+                {
+                  path: "new-file.ts",
+                  staged: true,
+                  unstaged: false,
+                  untracked: false,
+                  conflicted: false,
+                  stagedAdditions: 2,
+                  stagedDeletions: 1,
+                  unstagedAdditions: null,
+                  unstagedDeletions: null,
+                },
+              ],
+              commitsTruncated: false,
+              changesTruncated: false,
+            },
+          };
+          // Quick actions also load on a timer. Match requests by operation so that
+          // background work cannot consume the refresh or inspection response.
+          request.mockImplementation(async (query) => {
+            if (query.includes("fetchCodebases"))
+              return {
+                fetchCodebases: {
+                  jobs: [
+                    {
+                      id: "fetch-job-1",
+                      agentId: "agent-1",
+                      payload: { codebaseId: "codebase-1" },
+                      status: "SUCCEEDED",
+                      error: null,
+                      updatedAt: new Date().toISOString(),
+                      result: {
+                        worktreesRefreshedAt: new Date().toISOString(),
+                      },
+                    },
+                  ],
+                  skipped: [],
+                },
+              } as never;
+            if (query.includes("mutation RefreshWorktrees"))
+              return { refreshWorktrees: 1 } as never;
+            if (query.includes("mutation InspectWorktree"))
+              return refreshedInspection as never;
+            return overviewResponse as never;
+          });
+          fireEvent.click(screen.getByRole("button", { name: button }));
 
-        expect(
-          await screen.findByText("new-file.ts", undefined, {
-            timeout: 10_000,
-          }),
-        ).toBeDefined();
-        expect(screen.queryByText("old-file.ts")).toBeNull();
-        expect(request).toHaveBeenCalledWith(
-          expect.stringContaining("mutation RefreshWorktrees"),
-        );
-      });
+          expect(
+            await screen.findByText("new-file.ts", undefined, {
+              timeout: 10_000,
+            }),
+          ).toBeDefined();
+          expect(screen.queryByText("old-file.ts")).toBeNull();
+          if (button === "Refresh")
+            expect(request).toHaveBeenCalledWith(
+              expect.stringContaining("mutation RefreshWorktrees"),
+            );
+        },
+      );
 
       test("refreshes expanded details when live worktree activity arrives", async () => {
         const activityCallbacks: Array<() => void> = [];

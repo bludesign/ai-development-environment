@@ -2,6 +2,7 @@ import { AgentGraphQLClient, type AgentJob } from "./graphql-client.js";
 import { handlers } from "./handlers/index.js";
 import { closeAllWorktreeWatches } from "./handlers/worktrees.js";
 import type { ProcessResult } from "./process-runner.js";
+import { refreshFetchedCodebase } from "./refresh-fetched-codebase.js";
 import { RepositoryCoordinator } from "./repository-coordinator.js";
 
 export class JobExecutor {
@@ -68,6 +69,13 @@ export class JobExecutor {
             agentId: claimed.agentId,
             reportWorktreeActivity: (input) =>
               this.client.reportWorktreeActivity(input),
+            refreshFetchedCodebase: (input) =>
+              refreshFetchedCodebase(
+                this.client,
+                input,
+                claimed.timeoutSeconds * 1_000,
+                controller.signal,
+              ),
             reportBuildProgress: (input) =>
               this.client.reportBuildProgress(input),
             appendBuildLogChunks: (buildId, chunks) =>

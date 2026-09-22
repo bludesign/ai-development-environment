@@ -163,6 +163,8 @@ import {
 } from "./worktree-branch-form";
 import { QuickActionsRow } from "./quick-actions-row";
 import { WorktreeDetailPanel } from "./worktree-detail-panel";
+import { WorktreeFetchProgress } from "./worktree-fetch-progress";
+import { useWorktreeFetch } from "./use-worktree-fetch";
 import { CODEBASE_FIELDS, WORKTREE_FIELDS } from "./worktree-graphql";
 import {
   inspectWorktree,
@@ -675,9 +677,24 @@ export function WorktreesPage({ appId }: { appId?: string }) {
 
   const overviewOwner = useRef<RefreshCoalescer | null>(null);
   const load = useCallback(
-    () => overviewOwner.current?.refresh() ?? Promise.resolve(),
+    // Background invalidations display errors through fetchOverview. Explicit
+    // completion refreshes below retain the rejection so success is truthful.
+    () =>
+      overviewOwner.current?.refresh().catch(() => undefined) ??
+      Promise.resolve(),
     [],
   );
+  const refreshPage = useCallback(async () => {
+    const owner = overviewOwner.current;
+    if (!owner) return;
+    await owner.refresh();
+    if (overviewOwner.current === owner)
+      setInspectionRefreshToken((value) => value + 1);
+  }, []);
+  const fetchOperation = useWorktreeFetch({
+    scopeKey: appId ?? "all-worktrees",
+    refreshPage,
+  });
   const fetchOverview = useCallback(
     async (signal: AbortSignal) => {
       const request = ++latestLoad.current;
@@ -727,6 +744,7 @@ export function WorktreesPage({ appId }: { appId?: string }) {
         if (signal.aborted) return;
         if (request === latestLoad.current && !signal.aborted)
           setError(value instanceof Error ? value.message : String(value));
+        throw value;
       } finally {
         if (request === latestLoad.current && !signal.aborted)
           setLoading(false);
@@ -742,8 +760,10 @@ export function WorktreesPage({ appId }: { appId?: string }) {
     overviewOwner.current = owner;
     const recovery = onControlPlaneRecovery(
       (event) => {
-        if (event?.initialConnection) void owner.refreshIfIdle();
-        else void owner.refresh();
+        const refresh = event?.initialConnection
+          ? owner.refreshIfIdle()
+          : owner.refresh();
+        void refresh.catch(() => undefined);
       },
       { includeInitial: true },
     );
@@ -857,8 +877,7 @@ export function WorktreesPage({ appId }: { appId?: string }) {
           refreshWorktrees
         }`,
       );
-      await load();
-      setInspectionRefreshToken((value) => value + 1);
+      await refreshPage();
       setError(null);
     } catch (value) {
       setError(value instanceof Error ? value.message : String(value));
@@ -868,30 +887,17 @@ export function WorktreesPage({ appId }: { appId?: string }) {
     }
   };
 
-  const fetchNow = async () => {
-    const ids =
-      overview?.agents.flatMap((agent) =>
-        agent.codebases.map((group) => group.codebase.id),
-      ) ?? [];
-    if (!ids.length) return;
-    setBusy(true);
-    try {
-      await controlPlaneRequest(
-        `mutation FetchWorktreeCodebases($input: RunCodebaseOperationInput!) {
-          fetchCodebases(input: $input) { jobs { id } skipped { codebaseId reason } }
-        }`,
-        { input: { codebaseIds: ids, requestId: createClientId() } },
-      );
-      setNotice(t("fetchStarted"));
-      setError(null);
-      await load();
-    } catch (value) {
-      setError(value instanceof Error ? value.message : String(value));
-      setNotice(null);
-    } finally {
-      setBusy(false);
-    }
-  };
+  const fetchNow = () =>
+    fetchOperation.start(
+      overview?.agents.flatMap(({ agent, codebases }) =>
+        codebases.map(({ repository, codebase }) => ({
+          codebaseId: codebase.id,
+          repositoryName: repository.name,
+          agentName: agent.name,
+          folder: codebase.folder,
+        })),
+      ) ?? [],
+    );
 
   const updateLocalWorktree = (next: Worktree) => {
     setOverview((current) =>
@@ -1006,7 +1012,7 @@ export function WorktreesPage({ appId }: { appId?: string }) {
         </div>
         <div className="flex flex-wrap gap-2">
           <Button
-            disabled={busy}
+            disabled={busy || fetchOperation.active}
             onClick={() => void refresh()}
             variant="outline"
           >
@@ -1014,11 +1020,18 @@ export function WorktreesPage({ appId }: { appId?: string }) {
             {t("refresh")}
           </Button>
           <Button
-            disabled={busy || !overview?.agents.length}
+            disabled={busy || fetchOperation.active || !overview?.agents.length}
             onClick={() => void fetchNow()}
             variant="outline"
           >
-            <Upload /> {t("fetchNow")}
+            {fetchOperation.active ? (
+              <Spinner aria-hidden="true" />
+            ) : (
+              <Download />
+            )}{" "}
+            {fetchOperation.active && fetchOperation.batch
+              ? t(`fetchProgress.${fetchOperation.batch.phase}`)
+              : t("fetchNow")}
           </Button>
           <Button onClick={() => setHiddenOpen(true)} variant="outline">
             <Archive /> {t("hidden", { count: overview?.hiddenCount ?? 0 })}
@@ -1070,6 +1083,14 @@ export function WorktreesPage({ appId }: { appId?: string }) {
           </ToggleGroup>
         </div>
       </div>
+
+      {fetchOperation.batch && (
+        <WorktreeFetchProgress
+          batch={fetchOperation.batch}
+          onDismiss={fetchOperation.dismiss}
+          onRetry={() => void fetchOperation.retryPageUpdate()}
+        />
+      )}
 
       {error && (
         <Alert variant="destructive">
