@@ -93,10 +93,6 @@ function createAuth(
               clientSecret: provider.clientSecret,
               scopes: provider.scopes,
               discoveryUrl: provider.discoveryUrl,
-              // Better Auth 1.7 keys accounts by issuer and provider subject.
-              // Existing releases keyed them by providerId and subject, so keep
-              // that stable namespace across the required issuer backfill.
-              accountIssuer: `local:oauth:${provider.providerId}`,
               authorizationUrl: provider.authorizationUrl,
               tokenUrl: provider.tokenUrl,
               userInfoUrl: provider.userInfoUrl,
@@ -171,7 +167,7 @@ function createAuth(
       apiKey({
         // Better Auth's logical table name is `apikey`; Prisma exposes this
         // schema model as `apiKey`, regardless of its database-level @@map.
-        schema: { apikey: { modelName: "ApiKey" } },
+        schema: { apikey: { modelName: "apiKey" } },
         defaultPrefix: "aide_",
         requireName: true,
         startingCharactersConfig: {

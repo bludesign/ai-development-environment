@@ -95,6 +95,9 @@ export default defineConfig({
     // second locally were tripping Vitest's 5s default and failing the workflow.
     testTimeout: 20_000,
     hookTimeout: 20_000,
+    // Running every project at the machine's full worker count starves jsdom
+    // timers and makes otherwise-fast async component assertions time out.
+    maxWorkers: 4,
     exclude: sharedTestExcludes,
     projects: [
       {

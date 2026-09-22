@@ -76,8 +76,8 @@
     "@apollo/subgraph": "2.15.1",
     "@as-integrations/next": "4.1.0",
     "@base-ui/react": "1.8.0",
-    "@better-auth/api-key": "^1.7.2",
-    "@better-auth/prisma-adapter": "^1.7.2",
+    "@better-auth/api-key": "^1.7.5",
+    "@better-auth/prisma-adapter": "^1.7.5",
     "@expo-google-fonts/noto-emoji": "0.4.7",
     "@fontpkg/unifont": "15.0.1",
     "@graphql-tools/merge": "9.2.4",
@@ -95,7 +95,7 @@
     "@xterm/xterm": "^6.0.0",
     "@xyflow/react": "^12.11.6",
     "asn1js": "3.0.10",
-    "better-auth": "^1.7.2",
+    "better-auth": "^1.7.5",
     "better-sqlite3": "12.11.1",
     "class-variance-authority": "0.7.1",
     "clsx": "2.1.1",
@@ -109,7 +109,7 @@
     "jira.js": "6.2.0",
     "jira2md": "3.0.1",
     "jose": "6.2.12",
-    "lucide-react": "1.46.0",
+    "lucide-react": "1.47.0",
     "next": "16.3.5",
     "next-intl": "4.14.5",
     "pdfkit": "0.20.2",
@@ -136,7 +136,7 @@
   },
   "devDependencies": {
     "@babel/plugin-transform-runtime": "7.29.0",
-    "@graphql-codegen/cli": "7.4.1",
+    "@graphql-codegen/cli": "7.4.2",
     "@graphql-codegen/typescript": "6.1.0",
     "@graphql-codegen/typescript-resolvers": "6.1.0",
     "@mdx-js/rollup": "3.1.1",
@@ -153,23 +153,23 @@
     "@types/web-push": "3.6.4",
     "@types/ws": "8.18.1",
     "@vitejs/plugin-react": "6.1.1",
-    "@vitest/coverage-v8": "^4.1.11",
+    "@vitest/coverage-v8": "^5.0.1",
     "concurrently": "10.0.5",
-    "dotenv": "17.4.2",
+    "dotenv": "18.0.1",
     "esbuild": "0.28.2",
     "eslint": "^9",
     "eslint-config-next": "16.3.5",
     "jsdom": "30.0.1",
     "npm-check-updates": "23.1.0",
-    "prettier": "3.9.7",
+    "prettier": "3.9.8",
     "prisma": "7.10.0",
     "tailwindcss": "4.3",
-    "tsx": "4.23.13",
+    "tsx": "4.23.15",
     "typescript": "^6",
-    "vitest": "4.1.11"
+    "vitest": "5.0.1"
   },
   "overrides": {
-    "@better-auth/core": "1.7.2"
+    "@better-auth/core": "1.7.5"
   },
   "optionalDependencies": {
     "@apollo/rover": "0.41.0"
@@ -183,7 +183,7 @@
     "@apollo/protobufjs@1.2.8": true,
     "@parcel/watcher@2.6.0": true,
     "@prisma/engines@7.10.0": true,
-    "@swc/core@1.15.47": true,
-    "re2@1.26.1": true
+    "re2@1.26.1": true,
+    "@swc/core@1.16.2": true
   }
 }
