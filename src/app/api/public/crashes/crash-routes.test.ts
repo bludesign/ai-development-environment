@@ -41,10 +41,10 @@ vi.mock("@/services/auth", async () => {
   };
 });
 
-import { GET as dwarfGet } from "../agent/dsyms/[dsymId]/dwarf/route";
-import { POST as dsymPost } from "../dsyms/route";
-import { PATCH as chunkPatch } from "../dsyms/uploads/[uploadId]/route";
-import { POST as dsymBegin } from "../dsyms/uploads/route";
+import { GET as dwarfGet } from "@/app/api/agent/dsyms/[dsymId]/dwarf/route";
+import { POST as dsymPost } from "@/app/api/dsyms/route";
+import { PATCH as chunkPatch } from "@/app/api/dsyms/uploads/[uploadId]/route";
+import { POST as dsymBegin } from "@/app/api/dsyms/uploads/route";
 import { POST as crashPost } from "./route";
 
 const anonymous = { principal: { kind: "anonymous" } };
@@ -108,7 +108,7 @@ afterEach(async () => {
 });
 
 function crashRequest(body: BodyInit, headers: Record<string, string> = {}) {
-  return new Request("http://localhost/api/crashes", {
+  return new Request("http://localhost/api/public/crashes", {
     method: "POST",
     headers: { "content-type": "application/json", ...headers },
     body,

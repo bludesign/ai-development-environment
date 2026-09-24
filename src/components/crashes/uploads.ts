@@ -56,7 +56,7 @@ export async function uploadCrashReport(
   file: File,
   signal?: AbortSignal,
 ): Promise<CrashUploadResult> {
-  const response = await fetch("/api/crashes", {
+  const response = await fetch("/api/public/crashes", {
     method: "POST",
     body: file,
     headers: {

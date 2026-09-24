@@ -130,7 +130,7 @@ const errors = {
 export const crashesOpenApiDocument = {
   tags: [{ name: "Crashes" }],
   paths: {
-    "/api/crashes": {
+    "/api/public/crashes": {
       post: {
         tags: ["Crashes"],
         summary: "Upload a crash report",

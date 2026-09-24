@@ -40,7 +40,7 @@ describe("authentication and locale proxy", () => {
     "/api/ios/devices/export.tsv",
     "/api/telemetry/export",
     "/api/sse/history/export",
-    "/api/crashes",
+    "/api/public/crashes",
     "/api/dsyms",
     "/api/dsyms/uploads/upload-1",
     "/api/dsyms/uploads/upload-1/complete",

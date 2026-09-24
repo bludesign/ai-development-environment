@@ -32,7 +32,7 @@ curl -sSf -X POST -H "X-API-Key: $AIDE_API_KEY" \\
 `;
 
 export function crashApiDocumentation(baseUrl: string): string {
-  const crashes = `${baseUrl}/api/crashes`;
+  const crashes = `${baseUrl}/api/public/crashes`;
   const dsyms = `${baseUrl}/api/dsyms`;
   return `# Crash and dSYM upload API
 

@@ -153,7 +153,7 @@ describe("crash upload helpers", () => {
 
   test("documents every upload endpoint with the server's address", () => {
     const docs = crashApiDocumentation("https://aide.example.com");
-    expect(docs).toContain("POST https://aide.example.com/api/crashes");
+    expect(docs).toContain("POST https://aide.example.com/api/public/crashes");
     expect(docs).toContain("'https://aide.example.com/api/dsyms'");
     expect(docs).toContain("${{ secrets.AIDE_API_KEY }}");
     expect(docs).toContain(DSYM_UPLOAD_SCRIPT);
