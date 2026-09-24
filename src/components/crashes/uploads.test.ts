@@ -156,6 +156,10 @@ describe("crash upload helpers", () => {
     expect(docs).toContain("POST https://aide.example.com/api/public/crashes");
     expect(docs).toContain("'https://aide.example.com/api/dsyms'");
     expect(docs).toContain("${{ secrets.AIDE_API_KEY }}");
+    expect(docs).toContain(
+      "uses: bludesign/ai-development-environment-upload-dsyms@v1",
+    );
+    expect(docs).toContain("    url: https://aide.example.com\n");
     expect(docs).toContain(DSYM_UPLOAD_SCRIPT);
     expect(DSYM_UPLOAD_SCRIPT).toContain('"${PROJECT_NAME:-}"');
   });

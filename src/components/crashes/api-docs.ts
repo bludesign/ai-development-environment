@@ -84,19 +84,19 @@ The response lists every dSYM with its UUIDs, which match \`xcrun dwarfdump --uu
 
 ### GitHub Actions
 
+The \`bludesign/ai-development-environment-upload-dsyms\` action finds and zips the dSYMs, uploads them through the resumable protocol below, and retries through proxies such as Cloudflare. It records the repository, run ID, and run link. Store the key as the \`AIDE_API_KEY\` secret:
+
 \`\`\`yaml
 - name: Upload dSYMs
-  env:
-    AIDE_URL: \${{ vars.AIDE_URL }}
-    AIDE_API_KEY: \${{ secrets.AIDE_API_KEY }}
-  run: |
-    (cd "$ARCHIVE_PATH/dSYMs" && zip -qry "$RUNNER_TEMP/dSYMs.zip" .)
-    curl --fail-with-body -H "X-API-Key: $AIDE_API_KEY" \\
-      -F file=@"$RUNNER_TEMP/dSYMs.zip" \\
-      -F projectName="\${{ github.repository }}" \\
-      -F buildId="\${{ github.run_id }}" \\
-      -F url="\${{ github.server_url }}/\${{ github.repository }}/actions/runs/\${{ github.run_id }}" \\
-      "$AIDE_URL/api/dsyms"
+  uses: bludesign/ai-development-environment-upload-dsyms@v1
+  with:
+    url: ${baseUrl}
+    api_key: \${{ secrets.AIDE_API_KEY }}
+    dsym_paths: \${{ runner.temp }}/MyApp.xcarchive
+    # Behind Cloudflare Access, send a service token's headers:
+    # headers: |
+    #   CF-Access-Client-Id: \${{ secrets.CF_ACCESS_CLIENT_ID }}
+    #   CF-Access-Client-Secret: \${{ secrets.CF_ACCESS_CLIENT_SECRET }}
 \`\`\`
 
 ### Large zips
