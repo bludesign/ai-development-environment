@@ -1,0 +1,51 @@
+Incident Identifier: 2C9B3E3A-7D1F-4F0B-8A3E-6B1C2D3E4F50
+CrashReporter Key:   REDACTED
+Hardware Model:      iPhone17,1
+Process:             CrashDemo [4821]
+Path:                /private/var/containers/Bundle/Application/5E0F/CrashDemo.app/CrashDemo
+Identifier:          com.example.CrashDemo
+Version:             2.4.0 (512)
+AppStoreTools:       17A5021
+Code Type:           ARM-64 (Native)
+Role:                Foreground
+Parent Process:      launchd [1]
+Coalition:           com.example.CrashDemo [1204]
+
+Date/Time:           2026-09-20 14:21:33.4051 -0700
+Launch Time:         2026-09-20 14:20:01.1123 -0700
+OS Version:          iPhone OS 26.0 (23A341)
+Release Type:        User
+Report Version:      104
+
+Exception Type:  EXC_BREAKPOINT (SIGTRAP)
+Exception Codes: 0x0000000000000001, 0x0000000104da8d6c
+Termination Reason: SIGNAL 5 Trace/BPT trap: 5
+Terminating Process: exc handler [4821]
+
+Triggered by Thread:  0
+
+Application Specific Information:
+Swift/ContiguousArrayBuffer.swift:692: Fatal error: Index out of range
+
+Thread 0 name:   Dispatch queue: com.apple.main-thread
+Thread 0 Crashed:
+0   libswiftCore.dylib            	0x0000000194a44510 _assertionFailure(_:_:file:line:flags:) + 276
+1   libswiftCore.dylib            	0x00000001949a8c7c Array._checkSubscript(_:wasNativeTypeChecked:) + 160
+2   CrashDemo                     	0x0000000104da8d6c 0x104da8000 + 3436
+3   CrashDemo                     	0x0000000104da8b18 0x104da8000 + 2840
+4   CrashDemo                     	0x0000000104da89c8 0x104da8000 + 2504
+5   dyld                          	0x0000000180d7e4e4 start + 6992
+
+Thread 1:
+0   libsystem_pthread.dylib       	0x00000001f2b0e0cc start_wqthread + 0
+
+Thread 0 crashed with ARM Thread State (64-bit):
+    x0: 0x0000000000000000   x1: 0x0000000000000000   x2: 0x0000000000000000   x3: 0x0000000000000000
+    pc: 0x0000000194a44510   cpsr: 0x60000000
+
+Binary Images:
+       0x104da8000 -        0x104dabfff CrashDemo arm64  <776386d043863f249b215f7c02eb2873> /private/var/containers/Bundle/Application/5E0F/CrashDemo.app/CrashDemo
+       0x19489a000 -        0x194e3dfff libswiftCore.dylib arm64e  <7e39e8f612cf3deda3886a2d0338dd7e> /usr/lib/swift/libswiftCore.dylib
+       0x180d5c000 -        0x180e0ffff dyld arm64e  <0263b88e0b223b33bbc0483be879b513> /usr/lib/dyld
+       0x1f2b0b000 -        0x1f2b17fff libsystem_pthread.dylib arm64e  <3c5bf1f3a7c83c4d8f2b5e5f5a0c9d11> /usr/lib/system/libsystem_pthread.dylib
+

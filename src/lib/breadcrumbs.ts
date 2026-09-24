@@ -18,9 +18,11 @@ export type BreadcrumbLabelKey =
   | "consoleLogs"
   | "costs"
   | "coverage"
+  | "crashes"
   | "credentials"
   | "devices"
   | "drafts"
+  | "dsyms"
   | "edit"
   | "enroll"
   | "entries"
@@ -85,9 +87,11 @@ const STATIC_SEGMENTS: Record<string, BreadcrumbLabelKey> = {
   "console-logs": "consoleLogs",
   costs: "costs",
   coverage: "coverage",
+  crashes: "crashes",
   credentials: "credentials",
   devices: "devices",
   drafts: "drafts",
+  dsyms: "dsyms",
   edit: "edit",
   enroll: "enroll",
   entries: "entries",
@@ -142,6 +146,7 @@ const STATIC_NESTED_PATHS = new Set([
   "/codebases/repositories",
   "/commands/new",
   "/commands/runs",
+  "/crashes/dsyms",
   "/devices/enroll",
   "/gitlab/cache",
   "/gitlab/comments",
@@ -190,6 +195,8 @@ const ROUTABLE_STATIC_PATHS = new Set([
   "/comments",
   "/console-logs",
   "/costs",
+  "/crashes",
+  "/crashes/dsyms",
   "/credentials",
   "/devices",
   "/devices/enroll",
@@ -236,6 +243,8 @@ const ROUTABLE_DYNAMIC_PATHS = [
   /^\/agents\/[^/]+$/,
   /^\/builds\/[^/]+$/,
   /^\/codebases\/(?!repositories(?:\/|$))[^/]+$/,
+  /^\/crashes\/(?!dsyms$)[^/]+$/,
+  /^\/crashes\/dsyms\/[^/]+$/,
   /^\/devices\/(?!enroll$)[^/]+$/,
   /^\/github-cache\/entries\/[^/]+$/,
   /^\/jira-cache\/tickets\/[^/]+$/,

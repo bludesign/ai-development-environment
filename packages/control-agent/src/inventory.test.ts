@@ -40,6 +40,7 @@ describe("agent inventory", () => {
     expect(capabilities).not.toContain("buildData.scan");
     expect(capabilities).not.toContain("ios.build.run");
     expect(capabilities).not.toContain("ios.signing.assets.scan");
+    expect(capabilities).not.toContain("ios.crash.symbolicate");
     expect(capabilities).toContain("codebase.refresh");
     expect(capabilities).toContain("runs.protocol.v1");
   });

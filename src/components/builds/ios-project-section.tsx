@@ -61,6 +61,7 @@ import type {
   BuildScript,
   IosAppProject,
 } from "./types";
+import { CollectDsymsSelect } from "./collect-dsyms-select";
 import {
   BUILD_CONFIGURATION_ICON_KEYS,
   ConfigurationIcon,
@@ -544,6 +545,11 @@ function BuildConfigurationDialog({
   const [parseTestResults, setParseTestResults] = useState(
     configuration?.advancedSettings?.parseTestResults !== false,
   );
+  const [collectDsyms, setCollectDsyms] = useState<boolean | null>(
+    typeof configuration?.advancedSettings?.collectDsyms === "boolean"
+      ? configuration.advancedSettings.collectDsyms
+      : null,
+  );
   const [testPlan, setTestPlan] = useState(
     typeof configuration?.advancedSettings?.testPlan === "string"
       ? configuration.advancedSettings.testPlan
@@ -679,6 +685,7 @@ function BuildConfigurationDialog({
         ...(advancedSettings as Record<string, unknown>),
         testPlan: testPlan === "__SCHEME_DEFAULT__" ? null : testPlan,
         parseTestResults,
+        collectDsyms,
       };
       const data = await controlPlaneRequest<{
         saveBuildConfiguration: { id: string };
@@ -1000,6 +1007,13 @@ function BuildConfigurationDialog({
               {t("advancedSettings")}
             </summary>
             <div className="mt-3 space-y-2">
+              <div className="pb-2">
+                <CollectDsymsSelect
+                  id="configuration-collect-dsyms"
+                  onChange={setCollectDsyms}
+                  value={collectDsyms}
+                />
+              </div>
               <label className="flex items-center gap-2 pb-2">
                 <Checkbox
                   checked={parseTestResults}

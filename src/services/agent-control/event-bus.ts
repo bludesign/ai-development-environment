@@ -124,6 +124,8 @@ export const tailscaleServeOperationChangedTopic = (operationId: string) =>
   `tailscale-serve.operation.${operationId}.changed`;
 export const TELEMETRY_CHANGED_TOPIC = "telemetry.changed";
 export const TELEMETRY_SETTINGS_CHANGED_TOPIC = "telemetry.settings.changed";
+export const CRASH_REPORTS_CHANGED_TOPIC = "crashes.reports.changed";
+export const DSYMS_CHANGED_TOPIC = "crashes.dsyms.changed";
 export const SSE_ENDPOINTS_CHANGED_TOPIC = "sse.endpoints.changed";
 export const SSE_STORAGE_CHANGED_TOPIC = "sse.storage.changed";
 export const SSE_BREAKPOINTS_CHANGED_TOPIC = "sse.breakpoints.changed";

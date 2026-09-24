@@ -12,6 +12,7 @@
     "./commands": "./src/commands.ts",
     "./cli-health": "./src/cli-health.ts",
     "./coverage": "./src/coverage.ts",
+    "./crashes": "./src/crashes.ts",
     "./plist": "./src/plist.ts",
     "./runs": "./src/runs.ts",
     "./skills": "./src/skills.ts",

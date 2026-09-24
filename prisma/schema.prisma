@@ -190,6 +190,7 @@ model Agent {
   tailscaleServeAssignments        TailscaleServeAssignment[]
   tailscaleState                   TailscaleAgentState?
   tailscaleOperationItems          TailscaleServeOperationAgent[]
+  crashSettings                    CrashSettings[]
 }
 
 model AgentEnrollmentToken {
@@ -1615,6 +1616,7 @@ model Build {
   deployments       BuildDeployment[]
   exports           BuildExport[]
   reports           BuildReport[]
+  dsymUploads       DsymUpload[]
 
   @@index([status, createdAt])
   @@index([agentId, createdAt])
@@ -1636,6 +1638,7 @@ model BuildArtifact {
   build        Build                   @relation(fields: [buildId], references: [id], onDelete: Cascade)
   report       BuildReport?
   transfers    BuildArtifactTransfer[]
+  dsymUpload   DsymUpload?
 
   @@unique([buildId, relativePath])
   @@index([buildId, kind])
@@ -1748,6 +1751,165 @@ model TelemetrySettings {
   analyticsCollectionEnabled Boolean  @default(true)
   createdAt                  DateTime @default(now())
   updatedAt                  DateTime @updatedAt
+}
+
+// iOS crash reports and the dSYMs that name their frames. Original files live under
+// `crash-data/` next to the database (see src/services/crashes/crash-store.ts); every
+// path column below is relative to that directory so the folder can move.
+model CrashReport {
+  id                String             @id
+  format            String
+  source            String
+  uploadedBy        String?
+  apiKeyId          String?
+  apiKeyName        String?
+  clientIp          String?
+  filename          String
+  storagePath       String
+  sha256            String
+  payloadIndex      Int                @default(0)
+  sizeBytes         Float
+  incidentId        String?
+  appName           String?
+  bundleId          String?
+  appVersion        String?
+  buildVersion      String?
+  osVersion         String?
+  deviceModel       String?
+  arch              String?
+  exceptionType     String?
+  exceptionCodes    String?
+  signal            String?
+  terminationReason String?
+  crashedThread     Int?
+  crashedAt         DateTime?
+  signature         String
+  signatureTitle    String
+  status            String             @default("PENDING")
+  statusMessage     String?
+  attempts          Int                @default(0)
+  generation        Int                @default(0)
+  jobId             String?
+  agentId           String?
+  symbolicatedAt    DateTime?
+  normalizedJson    String
+  symbolicationJson String             @default("{}")
+  searchText        String             @default("")
+  createdAt         DateTime           @default(now())
+  updatedAt         DateTime           @updatedAt
+  binaryImages      CrashBinaryImage[]
+
+  @@unique([sha256, payloadIndex])
+  @@index([createdAt])
+  @@index([signature, createdAt])
+  @@index([bundleId, appVersion])
+  @@index([status, updatedAt])
+}
+
+// The app-owned images of a crash, the ones a dSYM can name. System libraries stay in
+// `CrashReport.normalizedJson` only.
+model CrashBinaryImage {
+  id          String      @id
+  crashId     String
+  imageIndex  Int
+  uuid        String
+  name        String
+  arch        String?
+  loadAddress String?
+  path        String?
+  frameCount  Int         @default(0)
+  dsymId      String?
+  crash       CrashReport @relation(fields: [crashId], references: [id], onDelete: Cascade)
+  dsym        Dsym?       @relation(fields: [dsymId], references: [id], onDelete: SetNull)
+
+  @@unique([crashId, imageIndex])
+  @@index([uuid])
+  @@index([dsymId])
+}
+
+// One uploaded zip (or build artifact). Its dSYM bundles are extracted into
+// `storageDirectory`; the zip itself is discarded once indexed.
+model DsymUpload {
+  id               String         @id
+  filename         String
+  sha256           String?
+  sizeBytes        Float
+  uploadOffset     Float          @default(0)
+  stagingPath      String?
+  storageDirectory String?
+  source           String
+  uploadedBy       String?
+  ownerKey         String?
+  apiKeyId         String?
+  buildId          String?
+  linkedBuildId    String?
+  buildArtifactId  String?        @unique
+  url              String?
+  projectName      String?
+  status           String         @default("PROCESSING")
+  error            String?
+  attempts         Int            @default(0)
+  completedAt      DateTime?
+  createdAt        DateTime       @default(now())
+  updatedAt        DateTime       @updatedAt
+  linkedBuild      Build?         @relation(fields: [linkedBuildId], references: [id], onDelete: SetNull)
+  buildArtifact    BuildArtifact? @relation(fields: [buildArtifactId], references: [id], onDelete: SetNull)
+  dsyms            Dsym[]
+
+  @@index([sha256])
+  @@index([status, createdAt])
+  @@index([linkedBuildId])
+  @@index([buildId])
+  @@index([createdAt])
+}
+
+// One `.dSYM` bundle.
+model Dsym {
+  id               String             @id
+  uploadId         String
+  bundleName       String
+  binaryName       String
+  bundleIdentifier String?
+  shortVersion     String?
+  bundleVersion    String?
+  dwarfPath        String
+  dwarfSha256      String
+  dwarfSizeBytes   Float
+  infoPlistPath    String?
+  searchText       String             @default("")
+  createdAt        DateTime           @default(now())
+  upload           DsymUpload         @relation(fields: [uploadId], references: [id], onDelete: Cascade)
+  slices           DsymSlice[]
+  binaryImages     CrashBinaryImage[]
+
+  @@index([uploadId])
+  @@index([createdAt])
+}
+
+// One architecture slice of a dSYM's DWARF file, identified by the UUID crash reports cite.
+model DsymSlice {
+  id         String @id
+  dsymId     String
+  uuid       String
+  arch       String
+  textVmAddr String
+  dsym       Dsym   @relation(fields: [dsymId], references: [id], onDelete: Cascade)
+
+  @@unique([dsymId, uuid])
+  @@index([uuid])
+}
+
+model CrashSettings {
+  id                   String   @id
+  collectionEnabled    Boolean  @default(true)
+  symbolicationAgentId String?
+  retentionDays        Int      @default(90)
+  dsymRetentionDays    Int?
+  createdAt            DateTime @default(now())
+  updatedAt            DateTime @updatedAt
+  symbolicationAgent   Agent?   @relation(fields: [symbolicationAgentId], references: [id], onDelete: SetNull)
+
+  @@index([symbolicationAgentId])
 }
 
 model TelemetryViewSettings {

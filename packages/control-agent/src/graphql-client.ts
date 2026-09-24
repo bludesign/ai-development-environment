@@ -794,6 +794,94 @@ export class AgentGraphQLClient {
     };
   }
 
+  /**
+   * Downloads a dSYM's DWARF file for crash symbolication in 16 MiB ranges,
+   * resuming a partial file and retrying each range, then checks the sha256
+   * the job payload promised.
+   */
+  async downloadDsymDwarf(input: {
+    downloadPath: string;
+    path: string;
+    sizeBytes: number;
+    sha256: string;
+    signal: AbortSignal;
+  }): Promise<void> {
+    if (!input.downloadPath.startsWith("/api/agent/dsyms/")) {
+      throw new Error("dSYM download path is not an agent route");
+    }
+    const url = `${this.server}${input.downloadPath}`;
+    let offset = 0;
+    try {
+      offset = (await stat(input.path)).size;
+    } catch {
+      // A new download starts at byte zero.
+    }
+    if (offset > input.sizeBytes) {
+      await rm(input.path, { force: true });
+      offset = 0;
+    }
+    const handle = await open(input.path, offset === 0 ? "w" : "r+");
+    try {
+      while (offset < input.sizeBytes) {
+        const end = Math.min(
+          input.sizeBytes - 1,
+          offset + 16 * 1024 * 1024 - 1,
+        );
+        let bytes: Buffer | null = null;
+        let attempt = 0;
+        while (!bytes) {
+          let failure = new Error("dSYM range download failed");
+          try {
+            const response = await fetch(url, {
+              headers: this.artifactTransferHeaders({
+                range: `bytes=${offset}-${end}`,
+              }),
+              signal: input.signal,
+            });
+            if (response.status !== 206 && response.status !== 200) {
+              failure = new Error(
+                `dSYM download failed: HTTP ${response.status} ${await response.text()}`,
+              );
+              // The server refused the agent outright; retrying cannot help.
+              if (response.status === 401 || response.status === 403) {
+                throw failure;
+              }
+            } else {
+              const received = Buffer.from(await response.arrayBuffer());
+              const expected = end - offset + 1;
+              if (response.status === 200 && offset === 0) {
+                bytes = received.subarray(0, expected);
+              } else if (received.length === expected) {
+                bytes = received;
+              } else {
+                failure = new Error("dSYM range length did not match");
+              }
+            }
+          } catch (error) {
+            if (input.signal.aborted) throw error;
+            if (error === failure) throw error;
+            failure = error instanceof Error ? error : new Error(String(error));
+          }
+          if (bytes) break;
+          if (++attempt >= 5) throw failure;
+          await artifactTransferRetryDelay(attempt, input.signal);
+        }
+        await writeArtifactTransferBytes(handle, bytes, offset);
+        offset += bytes.length;
+      }
+      await handle.sync();
+    } finally {
+      await handle.close();
+    }
+    const digest = createHash("sha256");
+    for await (const chunk of createReadStream(input.path))
+      digest.update(chunk);
+    if (digest.digest("hex") !== input.sha256) {
+      await rm(input.path, { force: true });
+      throw new Error("Downloaded dSYM checksum did not match");
+    }
+  }
+
   completeJob(
     jobId: string,
     status: AgentJob["status"],

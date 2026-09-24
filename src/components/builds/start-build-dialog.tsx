@@ -50,6 +50,7 @@ import type {
   BuildSourceObservation,
   IosAppProject,
 } from "./types";
+import { CollectDsymsSelect } from "./collect-dsyms-select";
 import { ConfigurationIcon } from "./configuration-icon";
 import {
   DEFAULT_EXPORT_SETTINGS,
@@ -1088,6 +1089,13 @@ function StartBuildDialog({
                   />
                   {t("allowProvisioningUpdates")}
                 </label>
+                <CollectDsymsSelect
+                  id="collect-dsyms"
+                  onChange={(collectDsyms) =>
+                    setAdvanced((current) => ({ ...current, collectDsyms }))
+                  }
+                  value={advanced.collectDsyms}
+                />
                 <div className="space-y-2 sm:col-span-2">
                   <Label htmlFor="build-setting-overrides">
                     {t("buildSettingOverrides")}

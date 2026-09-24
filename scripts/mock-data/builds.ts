@@ -420,6 +420,30 @@ export async function seedBuilds(prisma: PrismaClient): Promise<void> {
             }),
             createdAt: hoursAgo(3),
           },
+          {
+            // Collected because archives keep their dSYMs automatically; the
+            // crash seed imports it as the build's dSYM upload.
+            id: "artifact-archive-dsyms",
+            kind: "DSYMS",
+            relativePath: "dSYMs.zip",
+            sizeBytes: 48_210_000,
+            metadataJson: JSON.stringify({
+              count: 2,
+              uuids: [
+                {
+                  uuid: "3F9C7E2A-1B4D-4C8E-9A0B-1C2D3E4F5A6B",
+                  arch: "arm64",
+                  name: "AcmeApp",
+                },
+                {
+                  uuid: "8D2E4F60-7A1B-4C3D-9E8F-0A1B2C3D4E5F",
+                  arch: "arm64",
+                  name: "AcmeWidgets",
+                },
+              ],
+            }),
+            createdAt: hoursAgo(3),
+          },
         ],
       },
       reports: {

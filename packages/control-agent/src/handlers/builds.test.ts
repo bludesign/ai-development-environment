@@ -45,6 +45,8 @@ import {
   signingRequirementsFromBuildSettings,
   testPlanNames,
   workspaceProjectPaths,
+  captureDsyms,
+  parseDwarfdumpUuids,
   xcodeBuildArguments,
   xcodeBuildSettingsArguments,
 } from "./builds.js";
@@ -137,6 +139,62 @@ describe("iOS build command construction", () => {
         );
       }
     }
+  });
+
+  test("builds dSYMs when they are collected, unless an override says otherwise", () => {
+    expect(xcodeBuildArguments(payload({ action: "ARCHIVE" }))).toContain(
+      "DEBUG_INFORMATION_FORMAT=dwarf-with-dsym",
+    );
+    expect(xcodeBuildArguments(payload({ action: "BUILD" }))).not.toContain(
+      "DEBUG_INFORMATION_FORMAT=dwarf-with-dsym",
+    );
+    expect(
+      xcodeBuildArguments(
+        payload({
+          action: "BUILD",
+          advancedSettings: {
+            ...DEFAULT_BUILD_ADVANCED_SETTINGS,
+            collectDsyms: true,
+          },
+        }),
+      ),
+    ).toContain("DEBUG_INFORMATION_FORMAT=dwarf-with-dsym");
+    const overridden = xcodeBuildArguments(
+      payload({
+        action: "ARCHIVE",
+        advancedSettings: {
+          ...DEFAULT_BUILD_ADVANCED_SETTINGS,
+          buildSettingOverrides: { DEBUG_INFORMATION_FORMAT: "dwarf" },
+        },
+      }),
+    );
+    expect(overridden).toContain("DEBUG_INFORMATION_FORMAT=dwarf");
+    expect(overridden).not.toContain(
+      "DEBUG_INFORMATION_FORMAT=dwarf-with-dsym",
+    );
+  });
+
+  test("reads the UUIDs dwarfdump prints", () => {
+    expect(
+      parseDwarfdumpUuids(
+        [
+          "UUID: 776386D0-4386-3F24-9B21-5F7C02EB2873 (arm64) /b/App.app.dSYM/Contents/Resources/DWARF/App",
+          "UUID: 11111111-2222-3333-4444-555555555555 (x86_64) /b/App.app.dSYM/Contents/Resources/DWARF/App",
+          "warning: something else",
+        ].join("\n"),
+      ),
+    ).toEqual([
+      {
+        uuid: "776386D0-4386-3F24-9B21-5F7C02EB2873",
+        arch: "arm64",
+        name: "App",
+      },
+      {
+        uuid: "11111111-2222-3333-4444-555555555555",
+        arch: "x86_64",
+        name: "App",
+      },
+    ]);
   });
 
   test("maps typed package, signing, test, and approved override settings", () => {
@@ -1204,5 +1262,63 @@ describe("per-file coverage lines", () => {
         changedExecutable: 0,
       });
     }
+  });
+});
+
+describe.skipIf(process.platform !== "darwin")("dSYM collection", () => {
+  test("zips an archive's dSYMs with their UUIDs", async () => {
+    const folder = await mkdtemp(join(tmpdir(), "aide-dsyms-"));
+    temporaryDirectories.push(folder);
+    const archiveDsyms = join(folder, "archive.xcarchive", "dSYMs");
+    await mkdir(archiveDsyms, { recursive: true });
+    await execute("/usr/bin/ditto", [
+      "-x",
+      "-k",
+      join(
+        __dirname,
+        "../../../../src/services/crashes/__fixtures__/CrashDemo.dSYM.zip",
+      ),
+      archiveDsyms,
+    ]);
+    const artifact = await captureDsyms(
+      payload({ action: "ARCHIVE", artifactDirectory: folder }),
+      [],
+      new AbortController().signal,
+    );
+    expect(artifact).toMatchObject({
+      kind: "DSYMS",
+      relativePath: "dSYMs.zip",
+      metadata: {
+        count: 1,
+        uuids: [
+          {
+            uuid: "776386D0-4386-3F24-9B21-5F7C02EB2873",
+            arch: "arm64",
+            name: "CrashDemo",
+          },
+        ],
+      },
+    });
+    const { stdout } = await execute("/usr/bin/unzip", [
+      "-l",
+      join(folder, "dSYMs.zip"),
+    ]);
+    expect(stdout).toContain(
+      "dSYMs/CrashDemo.dSYM/Contents/Resources/DWARF/CrashDemo",
+    );
+    expect(stdout).not.toContain("._");
+    expect(existsSync(join(folder, "dSYMs"))).toBe(false);
+  });
+
+  test("keeps nothing when an archive has no dSYMs", async () => {
+    const folder = await mkdtemp(join(tmpdir(), "aide-dsyms-"));
+    temporaryDirectories.push(folder);
+    await expect(
+      captureDsyms(
+        payload({ action: "ARCHIVE", artifactDirectory: folder }),
+        [],
+        new AbortController().signal,
+      ),
+    ).resolves.toBeNull();
   });
 });

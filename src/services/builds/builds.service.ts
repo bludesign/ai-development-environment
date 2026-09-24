@@ -30,6 +30,7 @@ import {
   parseBuildDestination,
   parseBuildExportSettings,
   parseBuildSource,
+  resolveCollectDsyms,
   type BuildAction,
   type BuildAdvancedSettings,
   type BuildDestination,
@@ -336,6 +337,12 @@ function commandPreview(input: {
   for (const test of settings.onlyTesting) args.push(`-only-testing:${test}`);
   for (const test of settings.skipTesting) args.push(`-skip-testing:${test}`);
   if (!usesCapturedTestProducts) {
+    if (
+      resolveCollectDsyms(settings, input.action) &&
+      !settings.buildSettingOverrides.DEBUG_INFORMATION_FORMAT
+    ) {
+      args.push("DEBUG_INFORMATION_FORMAT=dwarf-with-dsym");
+    }
     for (const [key, value] of Object.entries(settings.buildSettingOverrides)) {
       args.push(`${key}=${value}`);
     }

@@ -177,6 +177,12 @@ export type BuildAdvancedSettings = {
   parseTestResults: boolean;
   parallelTesting: boolean | null;
   parallelTestingWorkers: number | null;
+  /**
+   * Keep the build's dSYMs for crash symbolication. Null is automatic: on for
+   * archives, whose dSYMs are the ones shipped builds crash with, and off for
+   * everything else. See `resolveCollectDsyms`.
+   */
+  collectDsyms: boolean | null;
   onlyTesting: string[];
   skipTesting: string[];
   buildSettingOverrides: Partial<Record<ApprovedBuildSettingOverride, string>>;
@@ -200,6 +206,7 @@ export const DEFAULT_BUILD_ADVANCED_SETTINGS: BuildAdvancedSettings = {
   parseTestResults: true,
   parallelTesting: null,
   parallelTestingWorkers: null,
+  collectDsyms: null,
   onlyTesting: [],
   skipTesting: [],
   buildSettingOverrides: {},
@@ -207,6 +214,23 @@ export const DEFAULT_BUILD_ADVANCED_SETTINGS: BuildAdvancedSettings = {
   priorTestProductsPath: null,
   priorXctestrunPath: null,
 };
+
+/** Artifact kind for the zipped dSYM bundles a build kept. */
+export const DSYMS_ARTIFACT_KIND = "DSYMS";
+/** File name of that zip inside the build folder. */
+export const DSYMS_ARTIFACT_FILENAME = "dSYMs.zip";
+
+/**
+ * Whether a build keeps its dSYMs. Automatic (null) collects them for archives
+ * only: those are the builds that reach devices and later crash, while debug
+ * builds for the simulator would fill the dSYM table with symbols nobody needs.
+ */
+export function resolveCollectDsyms(
+  settings: Pick<BuildAdvancedSettings, "collectDsyms">,
+  action: BuildAction,
+): boolean {
+  return settings.collectDsyms ?? action === "ARCHIVE";
+}
 
 export type BuildScriptSnapshot = {
   id: string;
@@ -524,6 +548,10 @@ export function parseBuildAdvancedSettings(
   if (parallel !== null && typeof parallel !== "boolean") {
     throw new Error("parallelTesting must be a boolean or null");
   }
+  const collectDsyms = input.collectDsyms ?? null;
+  if (collectDsyms !== null && typeof collectDsyms !== "boolean") {
+    throw new Error("collectDsyms must be a boolean or null");
+  }
   return {
     packageResolution: enumValue(
       input.packageResolution,
@@ -579,6 +607,7 @@ export function parseBuildAdvancedSettings(
     ),
     parallelTesting: parallel as boolean | null,
     parallelTestingWorkers: (workers ?? null) as number | null,
+    collectDsyms: collectDsyms as boolean | null,
     onlyTesting: stringArray(
       input.onlyTesting,
       "advanced settings.onlyTesting",

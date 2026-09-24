@@ -40,6 +40,13 @@ describe("authentication and locale proxy", () => {
     "/api/ios/devices/export.tsv",
     "/api/telemetry/export",
     "/api/sse/history/export",
+    "/api/public/crashes",
+    "/api/dsyms",
+    "/api/dsyms/uploads/upload-1",
+    "/api/dsyms/uploads/upload-1/complete",
+    "/api/crash-files/reports/crash-1",
+    "/api/crash-files/dsyms/dsym-1",
+    "/api/agent/dsyms/dsym-1/dwarf",
   ])("leaves API authorization to the route handler for %s", async (path) => {
     const response = await proxy(request(path));
     expect(response.headers.get("x-middleware-next")).toBe("1");

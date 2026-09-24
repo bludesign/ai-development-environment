@@ -5,6 +5,7 @@ import { CcusageService } from "@/services/ccusage";
 import { BuildDataService } from "@/services/build-data";
 import { BuildsService } from "@/services/builds";
 import { CodebasesService, CodebaseToolsService } from "@/services/codebases";
+import { CrashesService } from "@/services/crashes/crashes.service";
 import {
   GitHubActionsNotificationsService,
   GitHubPipelineStatusService,
@@ -55,6 +56,7 @@ export type ServerServices = {
   buildsService: BuildsService;
   codebasesService: CodebasesService;
   codebaseToolsService: CodebaseToolsService;
+  crashesService: CrashesService;
   jiraService: JiraService;
   jiraWebhookService: JiraWebhookService;
   iosDevicesService: IosDevicesService;
@@ -107,6 +109,11 @@ function createServerServices(): ServerServices {
   const buildDataService = new BuildDataService(agentControlService);
   const tailscaleServeService = new TailscaleServeService(agentControlService);
   const telemetryService = new TelemetryService();
+  const crashesService = new CrashesService(
+    agentControlService,
+    pollingService,
+  );
+  crashesService.startRuntime();
   const signingAssetsService = new SigningAssetsService(
     agentControlService,
     undefined,
@@ -302,6 +309,7 @@ function createServerServices(): ServerServices {
     buildsService,
     codebasesService,
     codebaseToolsService,
+    crashesService,
     jiraService,
     jiraWebhookService,
     iosDevicesService,

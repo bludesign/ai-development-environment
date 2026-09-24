@@ -18,10 +18,12 @@ import {
 } from "@ai-development-environment/agent-contract/commands";
 
 import { COVERAGE_IMPORT_JOB_KIND } from "@ai-development-environment/agent-contract/coverage";
+import { CRASH_SYMBOLICATE_JOB_KIND } from "@ai-development-environment/agent-contract/crashes";
 import { CLI_HEALTH_JOB_KIND } from "@ai-development-environment/agent-contract/cli-health";
 
 import { runCommand } from "./commands.js";
 import { importCoverageReport } from "./coverage.js";
+import { symbolicateCrash } from "./crashes.js";
 import { runCliHealth } from "./cli-health.js";
 import { inspectIosSigning } from "./signing.js";
 import { runCcusage } from "./ccusage.js";
@@ -177,6 +179,13 @@ export type AgentJobHandlerContext = {
     path: string;
     signal: AbortSignal;
   }) => Promise<{ filename: string; contentType: string; checksum: string }>;
+  downloadDsymDwarf?: (input: {
+    downloadPath: string;
+    path: string;
+    sizeBytes: number;
+    sha256: string;
+    signal: AbortSignal;
+  }) => Promise<void>;
   claimSigningSecretTransfer?: (transferId: string) => Promise<{
     p12Base64: string;
     passphrase: string;
@@ -247,6 +256,7 @@ export const handlers: Readonly<Record<string, AgentJobHandler>> = {
   [IOS_COVERAGE_REPORT_JOB_KIND]: generateIosBuildReport,
   [IOS_SIGNING_INSPECT_JOB_KIND]: inspectIosSigning,
   [COVERAGE_IMPORT_JOB_KIND]: importCoverageReport,
+  [CRASH_SYMBOLICATE_JOB_KIND]: symbolicateCrash,
   [SIGNING_ASSETS_SCAN_JOB_KIND]: scanSigningAssets,
   [SIGNING_PROFILE_READ_JOB_KIND]: readSigningProfile,
   [SIGNING_PROFILE_INSTALL_JOB_KIND]: installSigningProfile,

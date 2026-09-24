@@ -34,7 +34,12 @@ const buildRunAgents = [
 
 beforeEach(() => vi.clearAllMocks());
 
-afterEach(cleanup);
+afterEach(async () => {
+  cleanup();
+  // Radix FocusScope dispatches its unmount event on a zero-delay timer.
+  // Let it fire before Vitest tears down this test's jsdom globals.
+  await new Promise((resolve) => setTimeout(resolve, 0));
+});
 
 describe("RunBuildControls", () => {
   test("preselects the concrete destination used for the build", () => {
