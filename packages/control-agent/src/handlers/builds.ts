@@ -42,6 +42,9 @@ import {
   parseBuildSourceDiscoverPayload,
   parseBuildSourceParsePayload,
   genericBuildDestinations,
+  resolveCollectDsyms,
+  DSYMS_ARTIFACT_FILENAME,
+  DSYMS_ARTIFACT_KIND,
   type BuildAction,
   type BuildAdvancedSettings,
   type BuildDestination,
@@ -1417,7 +1420,10 @@ function testArguments(settings: BuildAdvancedSettings): string[] {
   return args;
 }
 
-function advancedArguments(settings: BuildAdvancedSettings): string[] {
+function advancedArguments(
+  settings: BuildAdvancedSettings,
+  action: BuildAction,
+): string[] {
   const args: string[] = [];
   if (settings.packageResolution === "RESOLVED_ONLY") {
     args.push("-onlyUsePackageVersionsFromResolvedFile");
@@ -1451,6 +1457,14 @@ function advancedArguments(settings: BuildAdvancedSettings): string[] {
     args.push("-allowProvisioningDeviceRegistration");
   }
   args.push(...testArguments(settings));
+  // Crash symbolication needs the separate dSYM bundle; an explicit override
+  // is the user's choice and wins.
+  if (
+    resolveCollectDsyms(settings, action) &&
+    !settings.buildSettingOverrides.DEBUG_INFORMATION_FORMAT
+  ) {
+    args.push("DEBUG_INFORMATION_FORMAT=dwarf-with-dsym");
+  }
   for (const [key, value] of Object.entries(settings.buildSettingOverrides)) {
     args.push(`${key}=${value}`);
   }
@@ -1501,7 +1515,7 @@ export function xcodeBuildArguments(input: BuildJobPayload): string[] {
     resultBundle,
     ...(usesCapturedTestProducts
       ? testArguments(input.advancedSettings)
-      : advancedArguments(input.advancedSettings)),
+      : advancedArguments(input.advancedSettings, input.action)),
   ];
   if (input.action === "ARCHIVE") {
     args.push(
@@ -1551,7 +1565,7 @@ export function xcodeBuildSettingsArguments(
     input.configuration,
     "-destination",
     destinationArgument(input.destination),
-    ...advancedArguments(input.advancedSettings),
+    ...advancedArguments(input.advancedSettings, input.action),
     "-showBuildSettings",
     "-json",
   ];
@@ -2421,6 +2435,136 @@ async function findFiles(
   return results;
 }
 
+type DsymUuid = { uuid: string; arch: string; name: string };
+
+/** Reads `dwarfdump --uuid` lines: `UUID: <uuid> (<arch>) <path>`. */
+export function parseDwarfdumpUuids(output: string): DsymUuid[] {
+  const found: DsymUuid[] = [];
+  for (const line of output.split(/\r?\n/)) {
+    const match = /^UUID:\s+([0-9A-Fa-f-]{36})\s+\(([^)]+)\)\s+(.+)$/.exec(
+      line.trim(),
+    );
+    if (match) {
+      found.push({
+        uuid: match[1]!.toUpperCase(),
+        arch: match[2]!,
+        name: basename(match[3]!),
+      });
+    }
+  }
+  return found;
+}
+
+async function dwarfdumpUuids(
+  paths: string[],
+  signal: AbortSignal,
+): Promise<DsymUuid[]> {
+  if (!paths.length) return [];
+  const result = await command(
+    "xcrun",
+    ["dwarfdump", "--uuid", ...paths],
+    60_000,
+    signal,
+    undefined,
+    xcodeEnvironment(),
+  );
+  return parseDwarfdumpUuids(result.stdout);
+}
+
+/**
+ * Keeps a build's dSYMs as one zip for crash symbolication. Archives hold
+ * exactly the dSYMs of what they archived. Other builds write theirs into the
+ * shared products folder, which also holds dSYMs of earlier builds and other
+ * schemes, so only bundles whose UUIDs match a binary this build produced are
+ * kept.
+ */
+export async function captureDsyms(
+  input: BuildJobPayload,
+  entries: BuildSettingEntry[],
+  signal: AbortSignal,
+): Promise<Artifact | null> {
+  const sources: string[] = [];
+  const archiveDsyms = join(
+    input.artifactDirectory,
+    "archive.xcarchive",
+    "dSYMs",
+  );
+  if (input.action === "ARCHIVE" && (await pathExists(archiveDsyms))) {
+    for (const name of await readdir(archiveDsyms)) {
+      if (name.endsWith(".dSYM")) sources.push(join(archiveDsyms, name));
+    }
+  } else {
+    const binaries = entries
+      .map(({ buildSettings: settings }) =>
+        settings.TARGET_BUILD_DIR && settings.EXECUTABLE_PATH
+          ? join(settings.TARGET_BUILD_DIR, settings.EXECUTABLE_PATH)
+          : null,
+      )
+      .filter((path): path is string => Boolean(path));
+    const existing: string[] = [];
+    for (const binary of new Set(binaries)) {
+      if (await pathExists(binary)) existing.push(binary);
+    }
+    const built = new Set(
+      (await dwarfdumpUuids(existing, signal)).map((entry) => entry.uuid),
+    );
+    const folders = new Set(
+      entries
+        .map(({ buildSettings: settings }) => settings.DWARF_DSYM_FOLDER_PATH)
+        .filter((path): path is string => Boolean(path)),
+    );
+    for (const folder of folders) {
+      if (!(await pathExists(folder))) continue;
+      for (const name of await readdir(folder)) {
+        if (!name.endsWith(".dSYM")) continue;
+        const bundle = join(folder, name);
+        const uuids = await dwarfdumpUuids([bundle], signal);
+        if (uuids.some((entry) => built.has(entry.uuid))) sources.push(bundle);
+      }
+    }
+  }
+  if (!sources.length) return null;
+  const staging = join(input.artifactDirectory, "dSYMs");
+  const zipPath = join(input.artifactDirectory, DSYMS_ARTIFACT_FILENAME);
+  await rm(staging, { recursive: true, force: true });
+  await rm(zipPath, { force: true });
+  await mkdir(staging, { recursive: true, mode: 0o700 });
+  try {
+    for (const source of sources) {
+      await cp(source, join(staging, basename(source)), {
+        recursive: true,
+        preserveTimestamps: true,
+      });
+    }
+    const zipped = await command(
+      "/usr/bin/ditto",
+      ["-c", "-k", "--norsrc", "--noextattr", "--keepParent", staging, zipPath],
+      10 * 60_000,
+      signal,
+    );
+    if (zipped.exitCode !== 0) {
+      throw new Error(
+        `Could not zip dSYMs: ${zipped.stderr.trim() || `ditto exited with ${zipped.exitCode}`}`,
+      );
+    }
+    const uuids = await dwarfdumpUuids(
+      sources.map((source) => join(staging, basename(source))),
+      signal,
+    );
+    return await artifact(
+      input.artifactDirectory,
+      DSYMS_ARTIFACT_KIND,
+      zipPath,
+      {
+        count: sources.length,
+        uuids,
+      },
+    );
+  } finally {
+    await rm(staging, { recursive: true, force: true });
+  }
+}
+
 async function captureArtifacts(
   input: BuildJobPayload,
   folder: string,
@@ -2469,8 +2613,22 @@ async function captureArtifacts(
     folder,
     xcodeEnvironment(),
   );
-  if (settingsResult.exitCode !== 0) return artifacts;
+  const collectDsyms = resolveCollectDsyms(
+    input.advancedSettings,
+    input.action,
+  );
+  if (settingsResult.exitCode !== 0) {
+    if (collectDsyms) {
+      const dsyms = await captureDsyms(input, [], signal);
+      if (dsyms) artifacts.push(dsyms);
+    }
+    return artifacts;
+  }
   const entries = parseBuildSettings(settingsResult.stdout);
+  if (collectDsyms) {
+    const dsyms = await captureDsyms(input, entries, signal);
+    if (dsyms) artifacts.push(dsyms);
+  }
   const apps = entries.filter((entry) => {
     const settings = entry.buildSettings;
     return (

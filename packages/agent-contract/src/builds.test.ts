@@ -15,6 +15,7 @@ import {
   parseBuildReportPayload,
   parseBuildSource,
   parseBuildSourceParsePayload,
+  resolveCollectDsyms,
 } from "./builds.js";
 
 const destination = {
@@ -188,6 +189,28 @@ describe("iOS build agent contract", () => {
         buildSettingOverrides: { DERIVED_DATA_DIR: "/tmp/DerivedData" },
       }),
     ).toThrow("not approved");
+  });
+
+  test("collects dSYMs automatically for archives only", () => {
+    const automatic = parseBuildAdvancedSettings({});
+    expect(automatic.collectDsyms).toBeNull();
+    expect(resolveCollectDsyms(automatic, "ARCHIVE")).toBe(true);
+    expect(resolveCollectDsyms(automatic, "BUILD")).toBe(false);
+    expect(
+      resolveCollectDsyms(
+        parseBuildAdvancedSettings({ collectDsyms: true }),
+        "BUILD",
+      ),
+    ).toBe(true);
+    expect(
+      resolveCollectDsyms(
+        parseBuildAdvancedSettings({ collectDsyms: false }),
+        "ARCHIVE",
+      ),
+    ).toBe(false);
+    expect(() => parseBuildAdvancedSettings({ collectDsyms: "yes" })).toThrow(
+      "collectDsyms must be a boolean or null",
+    );
   });
 
   test("requires a normalized absolute captured test path", () => {

@@ -24,6 +24,11 @@ import {
   parseCoverageImportPayload,
 } from "@ai-development-environment/agent-contract/coverage";
 import {
+  CRASH_JOB_KINDS,
+  CRASH_SYMBOLICATE_JOB_KIND,
+  parseCrashSymbolicationPayload,
+} from "@ai-development-environment/agent-contract/crashes";
+import {
   IOS_BUILD_JOB_KIND,
   IOS_BUILD_DELETE_JOB_KIND,
   IOS_BUILD_JOB_KINDS,
@@ -205,6 +210,7 @@ export const SUPPORTED_AGENT_JOBS = [
   COMMAND_RUN_JOB_KIND,
   CCUSAGE_REPORT_JOB_KIND,
   ...COVERAGE_JOB_KINDS,
+  ...CRASH_JOB_KINDS,
   ...BUILD_DATA_JOB_KINDS,
   ...CODEBASE_JOB_KINDS,
   ...WORKTREE_JOB_KINDS,
@@ -283,6 +289,10 @@ export function validateJob(kind: string, payload: unknown): void {
   }
   if (kind === COVERAGE_IMPORT_JOB_KIND) {
     parseCoverageImportPayload(value);
+    return;
+  }
+  if (kind === CRASH_SYMBOLICATE_JOB_KIND) {
+    parseCrashSymbolicationPayload(value);
     return;
   }
   if (kind === BUILD_DATA_SCAN_JOB_KIND) {

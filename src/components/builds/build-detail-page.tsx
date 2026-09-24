@@ -144,6 +144,7 @@ const ADVANCED_SETTING_ORDER = [
   "parseTestResults",
   "parallelTesting",
   "parallelTestingWorkers",
+  "collectDsyms",
   "onlyTesting",
   "skipTesting",
   "buildSettingOverrides",
@@ -167,6 +168,7 @@ const ADVANCED_SETTING_DEFAULTS: Record<string, unknown> = {
   parseTestResults: true,
   parallelTesting: null,
   parallelTestingWorkers: null,
+  collectDsyms: null,
   onlyTesting: [],
   skipTesting: [],
   buildSettingOverrides: {},
@@ -960,7 +962,9 @@ export function BuildDetailPage({
                     <div className="rounded-lg border p-2" key={artifact.id}>
                       <div className="flex items-center justify-between gap-2">
                         <Badge variant="outline">
-                          {humanizeConstant(artifact.kind)}
+                          {artifact.kind === "DSYMS"
+                            ? t("dsymsArtifact")
+                            : humanizeConstant(artifact.kind)}
                         </Badge>
                         <Button asChild size="sm" variant="outline">
                           <a
@@ -975,6 +979,25 @@ export function BuildDetailPage({
                       <p className="mt-1 break-all font-mono text-xs text-muted-foreground">
                         {artifact.relativePath}
                       </p>
+                      {artifact.kind === "DSYMS" && (
+                        <div className="mt-2 flex items-center justify-between gap-2 text-xs text-muted-foreground">
+                          <span>
+                            {t("dsymsArtifactCount", {
+                              count:
+                                typeof metadata.count === "number"
+                                  ? metadata.count
+                                  : 0,
+                            })}
+                          </span>
+                          <Button asChild size="sm" variant="ghost">
+                            <Link
+                              href={`/crashes/dsyms?buildId=${encodeURIComponent(build.id)}`}
+                            >
+                              {t("viewDsyms")}
+                            </Link>
+                          </Button>
+                        </div>
+                      )}
                       {ipa && (
                         <>
                           <dl className="mt-2 space-y-1 text-xs text-muted-foreground">
@@ -1177,6 +1200,7 @@ function AdvancedSettingsCard({
     parseTestResults: t("parseTestResults"),
     parallelTesting: t("parallelTesting"),
     parallelTestingWorkers: t("parallelTestingWorkers"),
+    collectDsyms: t("collectDsyms"),
     onlyTesting: t("onlyTesting"),
     skipTesting: t("skipTesting"),
     buildSettingOverrides: t("buildSettingOverrides"),

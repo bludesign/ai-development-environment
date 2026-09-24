@@ -35,6 +35,7 @@ export function allowed(
   namespace: string,
   ip: string,
   now = Date.now(),
+  limit = RATE_LIMIT,
 ): boolean {
   const rateLimits = bucketsFor(namespace);
   if (rateLimits.size > 10_000) {
@@ -48,7 +49,7 @@ export function allowed(
     return true;
   }
   current.count += 1;
-  return current.count <= RATE_LIMIT;
+  return current.count <= limit;
 }
 
 export function resetRateLimitsForTests(namespace?: string): void {

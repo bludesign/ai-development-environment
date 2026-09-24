@@ -107,6 +107,7 @@ class GraphQLServerService {
       this.services.cliHealthService,
       this.services.tailscaleServeService,
       this.services.sseService,
+      this.services.crashesService,
     );
 
     // Introspection + the local Apollo sandbox are enabled outside production, or when

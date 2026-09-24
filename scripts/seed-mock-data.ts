@@ -19,6 +19,7 @@ import { seedSkills } from "./mock-data/skills";
 import { seedTools } from "./mock-data/tools";
 import { seedCommands } from "./mock-data/commands";
 import { seedTelemetry } from "./mock-data/telemetry";
+import { seedCrashes } from "./mock-data/crashes";
 import { seedNotifications } from "./mock-data/notifications";
 import { seedSigning } from "./mock-data/signing";
 import { seedCredentials } from "./mock-data/credentials";
@@ -51,6 +52,7 @@ const seeders: Seeder[] = [
   { name: "tools", run: seedTools },
   { name: "commands", run: seedCommands },
   { name: "telemetry", run: seedTelemetry },
+  { name: "crashes", run: seedCrashes },
   { name: "sse", run: seedSse },
   { name: "notifications", run: seedNotifications },
   { name: "signing", run: seedSigning },

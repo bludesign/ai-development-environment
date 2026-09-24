@@ -1,0 +1,506 @@
+"File formats a crash report can arrive in."
+enum CrashReportFormat {
+  "An iOS 15+ JSON report (`.ips`), as devices and Xcode write it."
+  IPS
+  "A text report (`.crash`), as Xcode exports it and crash-reporter libraries write it."
+  CRASH
+  "A MetricKit crash diagnostic an app received and sent as JSON."
+  METRICKIT
+}
+
+"How a crash report reached the server."
+enum CrashReportSource {
+  "Uploaded by a signed-in user from the dashboard or iOS app."
+  UPLOAD
+  "Posted to the crash API, anonymously or with an API key."
+  API
+}
+
+"Where a crash report is in symbolication."
+enum CrashReportStatus {
+  "Stored and waiting for the runtime to match dSYMs."
+  PENDING
+  "Needs an online macOS agent with Xcode to symbolicate."
+  WAITING_FOR_AGENT
+  "An agent is symbolicating the app frames."
+  SYMBOLICATING
+  "Every app frame has a name."
+  SYMBOLICATED
+  "Some app frames have names; others still need dSYMs or failed."
+  PARTIALLY_SYMBOLICATED
+  "No uploaded dSYM matches the app's image UUIDs yet."
+  MISSING_DSYMS
+  "Symbolication failed; the message says why."
+  FAILED
+}
+
+"How a dSYM upload reached the server."
+enum DsymSource {
+  "Uploaded by a signed-in user from the dashboard."
+  UPLOAD
+  "Posted to the dSYM API with an API key, such as from CI."
+  API
+  "Collected from a build this server ran."
+  BUILD
+}
+
+"Where a dSYM upload is in processing."
+enum DsymUploadStatus {
+  "A resumable upload is still receiving chunks."
+  UPLOADING
+  "A build's dSYMs are waiting to be copied from its agent."
+  PENDING_TRANSFER
+  "The zip is being extracted and indexed."
+  PROCESSING
+  "The dSYMs are indexed and used for symbolication."
+  READY
+  "The upload could not be indexed; the error says why."
+  FAILED
+}
+
+"One stack frame of a crash, after symbolication."
+type CrashFrame {
+  "Position in the backtrace, 0 for the frame that crashed. Inlined frames repeat the index of the frame they were inlined into."
+  index: Int!
+  "Binary the frame's code belongs to. May be null when the report does not name it."
+  imageName: String
+  "UUID of that binary, dashed. May be null when the report omits it."
+  imageUuid: String
+  "Instruction address, 0x hexadecimal. May be null when the report omits it."
+  address: String
+  "Offset from the binary's load address, 0x hexadecimal. May be null when it cannot be computed."
+  imageOffset: String
+  "Function name. May be null when neither the device nor a dSYM named the frame."
+  symbol: String
+  "Bytes past the start of the function. May be null when a source line is known instead."
+  symbolOffset: Int
+  "Source file, as the dSYM recorded it. May be null when unknown."
+  sourceFile: String
+  "Source line. May be null when unknown."
+  sourceLine: Int
+  "Whether the compiler inlined this function into the frame listed after it."
+  inlined: Boolean!
+  "Whether the frame belongs to the app rather than the operating system."
+  isAppFrame: Boolean!
+  "Whether a dSYM on this server supplied the name, rather than the device."
+  symbolicated: Boolean!
+}
+
+"One thread of a crashed process."
+type CrashThread {
+  "Thread number from the report."
+  index: Int!
+  "Thread name. May be null when the thread had none."
+  name: String
+  "Dispatch queue the thread was running. May be null when unknown."
+  queue: String
+  "Whether this thread triggered the crash."
+  crashed: Boolean!
+  "The backtrace, innermost frame first."
+  frames: [CrashFrame!]!
+}
+
+"A binary loaded into the crashed process."
+type CrashBinaryImage {
+  "Identifier of this image within its crash."
+  id: ID!
+  "Binary UUID, dashed. May be null when the report omits it."
+  uuid: String
+  "Binary name."
+  name: String!
+  "Architecture the report lists. May be null, as MetricKit only reports the device's."
+  arch: String
+  "Load address, 0x hexadecimal. May be null when unknown."
+  loadAddress: String
+  "Path on the device. May be null when the report omits it."
+  path: String
+  "Whether the binary ships with the app, so an uploaded dSYM can name its frames."
+  isApp: Boolean!
+  "Frames a dSYM for this binary would name or add source lines to."
+  frameCount: Int!
+  "The dSYM matched to this binary. Null when none is uploaded, or it was deleted."
+  dsym: Dsym
+}
+
+"An uploaded iOS crash report."
+type CrashReport {
+  "Stable identifier for this crash report."
+  id: ID!
+  "Format the report arrived in."
+  format: CrashReportFormat!
+  "How the report reached the server."
+  source: CrashReportSource!
+  "Where the report is in symbolication."
+  status: CrashReportStatus!
+  "Why the report is in its status, such as which dSYMs are missing. May be null."
+  statusMessage: String
+  "Name of the uploaded file."
+  filename: String!
+  "Size of the uploaded file in bytes."
+  sizeBytes: Float!
+  "Incident identifier from the report. May be null for MetricKit diagnostics."
+  incidentId: String
+  "App name. May be null when the report omits it."
+  appName: String
+  "App bundle identifier. May be null when the report omits it."
+  bundleId: String
+  "App version (CFBundleShortVersionString). May be null when the report omits it."
+  appVersion: String
+  "App build number (CFBundleVersion). May be null when the report omits it."
+  buildVersion: String
+  "Operating system version. May be null when the report omits it."
+  osVersion: String
+  "Device model identifier, such as iPhone17,1. May be null when the report omits it."
+  deviceModel: String
+  "CPU type the report lists. May be null when the report omits it."
+  arch: String
+  "Mach exception type, such as EXC_BAD_ACCESS. May be null when the report omits it."
+  exceptionType: String
+  "Exception codes. May be null when the report omits them."
+  exceptionCodes: String
+  "Signal, such as SIGSEGV. May be null when the report omits it."
+  signal: String
+  "Exception subtype, such as KERN_INVALID_ADDRESS. May be null when the report omits it."
+  exceptionSubtype: String
+  "Reason of an uncaught Objective-C exception. May be null when there was none."
+  exceptionReason: String
+  "Why the operating system terminated the process. May be null when the report omits it."
+  terminationReason: String
+  "Application-specific information lines, such as a Swift fatal error message."
+  applicationSpecificInformation: [String!]!
+  "Number of the thread that crashed. May be null when the report does not say."
+  crashedThread: Int
+  "ISO 8601 time the app crashed. May be null when the report omits it."
+  crashedAt: String
+  "ISO 8601 time the report was uploaded."
+  createdAt: String!
+  "ISO 8601 time the report last changed."
+  updatedAt: String!
+  "ISO 8601 time an agent last symbolicated the report. May be null when none has."
+  symbolicatedAt: String
+  "Hash grouping crashes that failed the same way."
+  signature: String!
+  "Readable form of the signature: the exception and the top app frame."
+  signatureTitle: String!
+  "Email of the user who uploaded the report. May be null for API uploads."
+  uploadedBy: String
+  "Name of the API key that sent the report. May be null when none was used."
+  apiKeyName: String
+  "Address the report was sent from. May be null when unknown."
+  clientIp: String
+  "Symbolication attempts in the current run."
+  attempts: Int!
+  "Identifier of the agent that last symbolicated the report. May be null when none has."
+  agentId: ID
+  "The first app frame of the crashed thread. May be null when that thread has no app frames."
+  topAppFrame: CrashFrame
+  "Every thread's backtrace, symbolicated as far as possible."
+  threads: [CrashThread!]!
+  "Backtrace of the uncaught exception. May be null when there was none."
+  lastExceptionBacktrace: [CrashFrame!]
+  "Binaries loaded into the process."
+  binaryImages: [CrashBinaryImage!]!
+  "App binaries with unnamed frames and no uploaded dSYM."
+  missingImages: [CrashBinaryImage!]!
+  "The dSYMs used to symbolicate this report."
+  attachedDsyms: [Dsym!]!
+  "Other reports with the same signature, newest first."
+  similarCrashes(
+    "Maximum number of reports to return; defaults to 20."
+    first: Int
+  ): [CrashReport!]!
+  "Number of other reports with the same signature."
+  similarCrashCount: Int!
+  "The report in Apple's text format with every added symbol."
+  symbolicatedText: String!
+  "Path that downloads the file as uploaded."
+  originalDownloadUrl: String!
+  "Path that downloads the symbolicated text report."
+  symbolicatedDownloadUrl: String!
+}
+
+"A page of crash reports."
+type CrashReportConnection {
+  "Crash reports on this page, newest first."
+  nodes: [CrashReport!]!
+  "Cursor for the next page. Null on the last page."
+  nextCursor: String
+  "Number of crash reports stored."
+  totalCount: Int!
+  "Number of crash reports matching the filter."
+  matchingCount: Int!
+}
+
+"Filters for listing crash reports."
+input CrashReportFilter {
+  "Text matched against app, version, exception, device, and signature."
+  search: String
+  "Only reports in this status."
+  status: CrashReportStatus
+  "Only reports of this bundle identifier."
+  bundleId: String
+  "Only reports of this app version."
+  appVersion: String
+  "Only reports with this signature."
+  signature: String
+}
+
+"An app that has sent crash reports."
+type CrashAppFacet {
+  "Bundle identifier."
+  bundleId: String!
+  "App name. May be null when the reports omit it."
+  appName: String
+  "Number of crash reports from the app."
+  count: Int!
+}
+
+"Values the crash filters can choose from."
+type CrashFacets {
+  "Apps that have sent crash reports."
+  apps: [CrashAppFacet!]!
+  "App versions that have crashed, newest first."
+  appVersions: [String!]!
+}
+
+"One architecture slice of a dSYM, identified by the UUID crash reports cite."
+type DsymSlice {
+  "Stable identifier for this slice."
+  id: ID!
+  "Binary UUID, dashed."
+  uuid: String!
+  "Architecture, such as arm64."
+  arch: String!
+  "Address of the __TEXT segment, 0x hexadecimal."
+  textVmAddr: String!
+}
+
+"One uploaded zip of dSYMs, or the dSYMs a build kept."
+type DsymUpload {
+  "Stable identifier for this upload."
+  id: ID!
+  "Name of the uploaded file."
+  filename: String!
+  "Where the upload is in processing."
+  status: DsymUploadStatus!
+  "Why the upload failed. May be null when it did not."
+  error: String
+  "How the upload reached the server."
+  source: DsymSource!
+  "Who uploaded it: a user's email or an API key's name. May be null for build imports."
+  uploadedBy: String
+  "Build identifier attached to the upload. May be null when none was sent."
+  buildId: String
+  "Identifier of the dashboard build the upload belongs to. May be null when it matches none."
+  linkedBuildId: ID
+  "Link attached to the upload, such as a CI run. May be null when none was sent."
+  url: String
+  "Project name attached to the upload. May be null when none was sent."
+  projectName: String
+  "Size of the uploaded zip in bytes."
+  sizeBytes: Float!
+  "Bytes received so far by a resumable upload."
+  uploadOffset: Float!
+  "Import attempts for a build's dSYMs."
+  attempts: Int!
+  "Number of dSYM bundles the upload holds."
+  dsymCount: Int!
+  "ISO 8601 time the upload started."
+  createdAt: String!
+  "ISO 8601 time the upload last changed."
+  updatedAt: String!
+  "ISO 8601 time indexing finished. May be null until it has."
+  completedAt: String
+}
+
+"One `.dSYM` bundle."
+type Dsym {
+  "Stable identifier for this dSYM."
+  id: ID!
+  "Bundle name, such as App.app.dSYM."
+  bundleName: String!
+  "Name of the DWARF binary inside the bundle."
+  binaryName: String!
+  "Bundle identifier of the binary. May be null when the bundle's Info.plist omits it."
+  bundleIdentifier: String
+  "Version (CFBundleShortVersionString). May be null when the Info.plist omits it."
+  shortVersion: String
+  "Build number (CFBundleVersion). May be null when the Info.plist omits it."
+  bundleVersion: String
+  "Size of the DWARF binary in bytes."
+  dwarfSizeBytes: Float!
+  "sha256 digest of the DWARF binary."
+  dwarfSha256: String!
+  "ISO 8601 time the dSYM was indexed."
+  createdAt: String!
+  "The upload this dSYM arrived in, with its build, link, and project."
+  upload: DsymUpload!
+  "Architecture slices and their UUIDs."
+  slices: [DsymSlice!]!
+  "Other dSYMs from the same upload."
+  siblingDsyms: [Dsym!]!
+  "Crash reports this dSYM symbolicated, newest first."
+  crashes(
+    "Maximum number of reports to return; defaults to 50."
+    first: Int
+    "Cursor from a previous page."
+    after: String
+  ): CrashReportConnection!
+  "Number of crash reports this dSYM symbolicated."
+  crashCount: Int!
+  "Path that downloads the bundle as a zip."
+  downloadUrl: String!
+}
+
+"A page of dSYMs."
+type DsymConnection {
+  "dSYMs on this page, newest first."
+  nodes: [Dsym!]!
+  "Cursor for the next page. Null on the last page."
+  nextCursor: String
+  "Number of dSYMs stored."
+  totalCount: Int!
+  "Number of dSYMs matching the filter."
+  matchingCount: Int!
+}
+
+"Filters for listing dSYMs."
+input DsymFilter {
+  "Text matched against names, versions, UUIDs, build IDs, and projects."
+  search: String
+  "Only dSYMs uploaded with this build identifier or collected from this build."
+  buildId: String
+  "Only dSYMs uploaded for this project."
+  projectName: String
+  "Only dSYMs with this UUID, dashed or not."
+  uuid: String
+}
+
+"Values to attach to a dSYM upload."
+input DsymUploadMetadataInput {
+  "Build identifier, or null to clear it."
+  buildId: String
+  "http(s) link, or null to clear it."
+  url: String
+  "Project name, or null to clear it."
+  projectName: String
+}
+
+"An agent that can symbolicate crashes."
+type CrashSymbolicationAgent {
+  "Stable identifier for the agent."
+  id: ID!
+  "Display name of the agent."
+  name: String!
+  "Host name of the agent."
+  hostname: String!
+  "Whether the agent is connected now."
+  online: Boolean!
+}
+
+"Crash collection and symbolication settings."
+type CrashSettings {
+  "Whether anonymous and API-key crash uploads are stored. Signed-in uploads are always accepted."
+  collectionEnabled: Boolean!
+  "Agent to symbolicate on when it is online. May be null to use any capable agent."
+  symbolicationAgentId: ID
+  "That agent. May be null when none is chosen or it was removed."
+  symbolicationAgent: CrashSymbolicationAgent
+  "Days crash reports are kept."
+  retentionDays: Int!
+  "Days dSYMs are kept. May be null to keep them until deleted."
+  dsymRetentionDays: Int
+}
+
+"Changes to crash settings. Omitted fields stay as they are."
+input CrashSettingsInput {
+  "Whether anonymous and API-key crash uploads are stored."
+  collectionEnabled: Boolean
+  "Agent to prefer for symbolication, or null to use any capable agent."
+  symbolicationAgentId: ID
+  "Days crash reports are kept, from 1 to 3650."
+  retentionDays: Int
+  "Days dSYMs are kept, from 1 to 3650, or null to keep them until deleted."
+  dsymRetentionDays: Int
+}
+
+"What changed among crash reports or dSYMs."
+type CrashChange {
+  "Kind of change, such as CREATED or UPDATED."
+  reason: String!
+  "Identifiers of the changed records. May be empty when many changed."
+  ids: [ID!]!
+}
+
+extend type Query {
+  "Lists crash reports, newest first."
+  crashReports(
+    "Filters to apply."
+    filter: CrashReportFilter
+    "Maximum number of reports to return, up to 200; defaults to 50."
+    first: Int
+    "Cursor from a previous page."
+    after: String
+  ): CrashReportConnection!
+  "Returns one crash report. Null when it does not exist."
+  crashReport("Identifier of the crash report." id: ID!): CrashReport
+  "Returns the apps and versions the crash filters can choose from."
+  crashFacets: CrashFacets!
+  "Lists indexed dSYMs, newest first."
+  dsyms(
+    "Filters to apply."
+    filter: DsymFilter
+    "Maximum number of dSYMs to return, up to 200; defaults to 50."
+    first: Int
+    "Cursor from a previous page."
+    after: String
+  ): DsymConnection!
+  "Returns one dSYM. Null when it does not exist."
+  dsym("Identifier of the dSYM." id: ID!): Dsym
+  "Lists the project names dSYMs were uploaded with."
+  dsymProjects: [String!]!
+  "Lists dSYM uploads that are in progress or failed, newest first."
+  dsymUploads(
+    "Statuses to include; defaults to every status except READY."
+    statuses: [DsymUploadStatus!]
+  ): [DsymUpload!]!
+  "Returns the crash settings."
+  crashSettings: CrashSettings!
+  "Lists agents that can symbolicate crashes."
+  crashSymbolicationAgents: [CrashSymbolicationAgent!]!
+}
+
+extend type Mutation {
+  "Symbolicates a crash report again from scratch with the dSYMs uploaded now."
+  symbolicateCrashReport(
+    "Identifier of the crash report."
+    id: ID!
+  ): CrashReport!
+  "Deletes crash reports and their files. Returns how many were deleted."
+  deleteCrashReports("Identifiers of the crash reports." ids: [ID!]!): Int!
+  "Deletes dSYMs and their files. Crashes keep the symbols already added. Returns how many were deleted."
+  deleteDsyms("Identifiers of the dSYMs." ids: [ID!]!): Int!
+  "Deletes a dSYM upload with every dSYM in it."
+  deleteDsymUpload("Identifier of the upload." id: ID!): Boolean!
+  "Retries importing a build's dSYMs after a failure."
+  retryDsymUpload("Identifier of the upload." id: ID!): DsymUpload!
+  "Changes the build ID, link, and project attached to a dSYM upload."
+  updateDsymUpload(
+    "Identifier of the upload."
+    id: ID!
+    "Values to attach."
+    input: DsymUploadMetadataInput!
+  ): DsymUpload!
+  "Changes the crash settings."
+  updateCrashSettings(
+    "The changes to apply."
+    input: CrashSettingsInput!
+  ): CrashSettings!
+}
+
+extend type Subscription {
+  "Emits when crash reports are uploaded, symbolicated, or deleted."
+  crashReportsChanged: CrashChange!
+  "Emits when dSYMs are uploaded, imported, or deleted."
+  dsymsChanged: CrashChange!
+}

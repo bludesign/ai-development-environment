@@ -23,6 +23,7 @@ import { SIGNING_ASSET_JOB_KINDS } from "@ai-development-environment/agent-contr
 import { WORKFLOW_JOB_KINDS } from "@ai-development-environment/agent-contract/workflows";
 import { COMMAND_RUN_JOB_KIND } from "@ai-development-environment/agent-contract/commands";
 import { COVERAGE_JOB_KINDS } from "@ai-development-environment/agent-contract/coverage";
+import { CRASH_JOB_KINDS } from "@ai-development-environment/agent-contract/crashes";
 import { CLI_HEALTH_JOB_KIND } from "@ai-development-environment/agent-contract/cli-health";
 import { TAILSCALE_SERVE_JOB_KINDS } from "@ai-development-environment/agent-contract/tailscale";
 
@@ -49,6 +50,8 @@ const MACOS_AGENT_CAPABILITIES = [
   ...BUILD_DATA_JOB_KINDS,
   ...IOS_BUILD_JOB_KINDS,
   ...SIGNING_ASSET_JOB_KINDS,
+  // `atos` ships with Xcode, so only a Mac can name crash frames.
+  ...CRASH_JOB_KINDS,
 ] as const;
 
 const UNIX_AGENT_CAPABILITIES = [...TAILSCALE_SERVE_JOB_KINDS] as const;

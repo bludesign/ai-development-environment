@@ -287,6 +287,32 @@ export const routes: RouteEntry[] = [
   { name: "analytics-events", path: "/analytics-events" },
   { name: "unified-events", path: "/unified-events" },
 
+  // Crash reports and dSYMs
+  {
+    name: "crashes",
+    path: "/crashes",
+    readyGraphqlOperation: "CrashesPage",
+    readyTexts: ["EXC_BREAKPOINT · CartViewModel.item(at:)"],
+  },
+  {
+    name: "crash-detail",
+    path: `/crashes/${ids.crashes.checkout}`,
+    readyGraphqlOperation: "CrashDetail",
+    readyTexts: ["CheckoutView.submit()"],
+  },
+  {
+    name: "crashes-dsyms",
+    path: "/crashes/dsyms",
+    readyGraphqlOperation: "DsymsPage",
+    readyTexts: ["AcmeWidgets.appex.dSYM"],
+  },
+  {
+    name: "dsym-detail",
+    path: `/crashes/dsyms/${ids.dsyms.app}`,
+    readyGraphqlOperation: "DsymDetail",
+    readyTexts: ["3F9C7E2A-1B4D-4C8E-9A0B-1C2D3E4F5A6B"],
+  },
+
   // Hosted SSE endpoints
   {
     name: "sse-endpoints",

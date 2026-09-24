@@ -25,9 +25,11 @@ const labels: Record<BreadcrumbLabelKey, string> = {
   consoleLogs: "Console Logs",
   costs: "Costs",
   coverage: "Coverage",
+  crashes: "Crashes",
   credentials: "Credentials",
   devices: "Devices",
   drafts: "Drafts",
+  dsyms: "dSYMs",
   edit: "Edit",
   enroll: "Enroll",
   entries: "Entries",
@@ -88,6 +90,18 @@ describe("buildAppBreadcrumbs", () => {
     expect(buildAppBreadcrumbs("/apps/app-123", translate)).toEqual([
       { href: "/apps", isCurrent: false, label: "Apps" },
       { href: undefined, isCurrent: true, label: "app-123" },
+    ]);
+  });
+
+  test("links the crash and dSYM lists from their detail routes", () => {
+    expect(buildAppBreadcrumbs("/crashes/crash-123", translate)).toEqual([
+      { href: "/crashes", isCurrent: false, label: "Crashes" },
+      { href: undefined, isCurrent: true, label: "crash-123" },
+    ]);
+    expect(buildAppBreadcrumbs("/crashes/dsyms/dsym-123", translate)).toEqual([
+      { href: "/crashes", isCurrent: false, label: "Crashes" },
+      { href: "/crashes/dsyms", isCurrent: false, label: "dSYMs" },
+      { href: undefined, isCurrent: true, label: "dsym-123" },
     ]);
   });
 

@@ -50,6 +50,8 @@ next-env.d.ts
 /prisma/*.db
 /prisma/*.db-*
 /prisma/run-data/
+/prisma/crash-data/
+/prisma/mock-crash-data/
 /supergraph.graphql
 
 # screenshots (generated on demand via `npm run screenshots`)

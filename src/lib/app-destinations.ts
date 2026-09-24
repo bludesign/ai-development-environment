@@ -3,6 +3,7 @@ import {
   Bell,
   BellRing,
   Boxes,
+  Bug,
   ChartNoAxesCombined,
   CircleDollarSign,
   ClipboardList,
@@ -292,6 +293,16 @@ export const APP_DESTINATIONS: AppDestination[] = [
     icon: Combine,
     section: "debugging",
     sidebar: true,
+  },
+  {
+    key: "crashes",
+    href: "/crashes",
+    labelKey: "crashes",
+    aliases: ["crash reports", "dsym", "dsyms", "symbolication", "symbolicate"],
+    icon: Bug,
+    section: "debugging",
+    sidebar: true,
+    activePrefixes: ["/crashes"],
   },
 
   {

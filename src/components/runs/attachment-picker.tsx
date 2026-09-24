@@ -1,6 +1,5 @@
 "use client";
 
-import { useState } from "react";
 import { File, Trash2, Upload } from "lucide-react";
 import { useTranslations } from "next-intl";
 
@@ -14,8 +13,8 @@ import {
   AttachmentMedia,
   AttachmentTitle,
 } from "@/components/ui/attachment";
+import { FileDropZone } from "@/components/common/file-drop-zone";
 import { Spinner } from "@/components/ui/spinner";
-import { cn } from "@/lib/utils";
 
 import type { RunAttachmentView } from "./types";
 
@@ -39,7 +38,6 @@ export function AttachmentPicker({
   compact?: boolean;
 }) {
   const t = useTranslations("runs");
-  const [dragging, setDragging] = useState(false);
 
   return (
     <div className="space-y-2">
@@ -75,45 +73,13 @@ export function AttachmentPicker({
           ))}
         </AttachmentGroup>
       )}
-      <label
-        className={cn(
-          "relative flex cursor-pointer items-center justify-center gap-2 rounded-lg border border-dashed px-4 text-sm text-muted-foreground transition-colors hover:border-foreground/30 hover:bg-muted/40 hover:text-foreground",
-          compact ? "min-h-9" : "min-h-20",
-          dragging && "border-primary bg-primary/5 text-primary",
-          uploading && "pointer-events-none opacity-60",
-        )}
-        onDragEnter={(event) => {
-          event.preventDefault();
-          setDragging(true);
-        }}
-        onDragLeave={(event) => {
-          if (event.currentTarget.contains(event.relatedTarget as Node)) return;
-          setDragging(false);
-        }}
-        onDragOver={(event) => event.preventDefault()}
-        onDrop={(event) => {
-          event.preventDefault();
-          setDragging(false);
-          void onFiles(Array.from(event.dataTransfer.files));
-        }}
-      >
+      <FileDropZone compact={compact} disabled={uploading} onFiles={onFiles}>
         {uploading ? <Spinner /> : <Upload />}
         <span>{t("attachFiles")}</span>
         <span className="hidden text-xs sm:inline">
           · {t("attachmentLimits")}
         </span>
-        <input
-          className="sr-only"
-          disabled={uploading}
-          multiple
-          onChange={(event) => {
-            const files = Array.from(event.currentTarget.files ?? []);
-            event.currentTarget.value = "";
-            void onFiles(files);
-          }}
-          type="file"
-        />
-      </label>
+      </FileDropZone>
     </div>
   );
 }

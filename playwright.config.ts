@@ -151,6 +151,13 @@ export default defineConfig({
         // route was photographed. The poll still runs and reports on schedule; only the
         // collection is skipped, and the sidebar shows the seeded usage summary.
         SIDEBAR_USAGE_COLLECTION_DISABLED: "true",
+        // Seeded crash reports and dSYMs, apart from dev's crash-data folder. The
+        // symbolication runtime stays off so no seeded crash changes status mid-capture.
+        CRASH_DATA_DIRECTORY: path.resolve(
+          process.cwd(),
+          "prisma/mock-crash-data",
+        ),
+        CRASH_RUNTIME_DISABLED: "1",
         // Device enrollment refuses to issue a profile unless the app is served over public
         // HTTPS. The captured page only renders the form, so a placeholder origin is enough.
         PUBLIC_BASE_URL: SCREENSHOT_PUBLIC_ORIGIN,

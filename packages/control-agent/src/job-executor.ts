@@ -86,6 +86,7 @@ export class JobExecutor {
               this.client.uploadBuildArtifactTransfer(input),
             downloadBuildArtifactTransfer: (input) =>
               this.client.downloadBuildArtifactTransfer(input),
+            downloadDsymDwarf: (input) => this.client.downloadDsymDwarf(input),
             claimSigningSecretTransfer: (transferId) =>
               this.client.claimSigningSecretTransfer(transferId),
             claimWorkflowJobSecrets: () =>

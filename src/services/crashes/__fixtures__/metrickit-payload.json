@@ -1,0 +1,90 @@
+{
+  "timeStampBegin": "2026-09-20 14:00:00",
+  "timeStampEnd": "2026-09-20 14:59:00",
+  "crashDiagnostics": [
+    {
+      "version": "1.0.0",
+      "callStackTree": {
+        "callStackPerThread": true,
+        "callStacks": [
+          {
+            "threadAttributed": true,
+            "callStackRootFrames": [
+              {
+                "binaryUUID": "7E39E8F6-12CF-3DED-A388-6A2D0338DD7E",
+                "binaryName": "libswiftCore.dylib",
+                "address": 6788464612,
+                "offsetIntoBinaryTextSegment": 6787014656,
+                "sampleCount": 1,
+                "subFrames": [
+                  {
+                    "binaryUUID": "7E39E8F6-12CF-3DED-A388-6A2D0338DD7E",
+                    "binaryName": "libswiftCore.dylib",
+                    "address": 6787077244,
+                    "offsetIntoBinaryTextSegment": 6787014656,
+                    "sampleCount": 1,
+                    "subFrames": [
+                      {
+                        "binaryUUID": "776386D0-4386-3F24-9B21-5F7C02EB2873",
+                        "binaryName": "CrashDemo",
+                        "address": 4376399212,
+                        "offsetIntoBinaryTextSegment": 3436,
+                        "sampleCount": 1,
+                        "subFrames": [
+                          {
+                            "binaryUUID": "776386D0-4386-3F24-9B21-5F7C02EB2873",
+                            "binaryName": "CrashDemo",
+                            "address": 4376398616,
+                            "offsetIntoBinaryTextSegment": 2840,
+                            "sampleCount": 1,
+                            "subFrames": [
+                              {
+                                "binaryUUID": "776386D0-4386-3F24-9B21-5F7C02EB2873",
+                                "binaryName": "CrashDemo",
+                                "address": 4376398280,
+                                "offsetIntoBinaryTextSegment": 2504,
+                                "sampleCount": 1
+                              }
+                            ]
+                          }
+                        ]
+                      }
+                    ]
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "threadAttributed": false,
+            "callStackRootFrames": [
+              {
+                "binaryUUID": "3C5BF1F3-A7C8-3C4D-8F2B-5E5F5A0C9D11",
+                "binaryName": "libsystem_pthread.dylib",
+                "address": 8366645452,
+                "offsetIntoBinaryTextSegment": 8366632960,
+                "sampleCount": 1
+              }
+            ]
+          }
+        ]
+      },
+      "diagnosticMetaData": {
+        "appBuildVersion": "512",
+        "appVersion": "2.4.0",
+        "bundleIdentifier": "com.example.CrashDemo",
+        "deviceType": "iPhone17,1",
+        "osVersion": "iPhone OS 26.0 (23A341)",
+        "platformArchitecture": "arm64e",
+        "exceptionType": 6,
+        "exceptionCode": 1,
+        "signal": 5,
+        "regionFormat": "US",
+        "isTestFlightApp": false,
+        "lowPowerModeEnabled": false,
+        "pid": 4821,
+        "terminationReason": "Namespace SIGNAL, Code 5 Trace/BPT trap: 5"
+      }
+    }
+  ]
+}

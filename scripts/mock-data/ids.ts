@@ -152,6 +152,22 @@ export const ids = {
   notifications: {
     buildFailed: "notification-build-failed",
   },
+  crashes: {
+    checkout: "crash-acme-checkout",
+    checkoutRepeat: "crash-acme-checkout-repeat",
+    metrickit: "crash-acme-metrickit",
+    failed: "crash-acme-failed",
+  },
+  dsymUploads: {
+    build: "dsym-upload-acme-build",
+    ci: "dsym-upload-acme-ci",
+    failed: "dsym-upload-acme-failed",
+  },
+  dsyms: {
+    app: "dsym-acme-app",
+    widgets: "dsym-acme-widgets",
+    ciApp: "dsym-acme-app-ci",
+  },
   sse: {
     productFeed: "sse-endpoint-product-feed",
     assistant: "sse-endpoint-assistant",

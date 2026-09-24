@@ -74,6 +74,10 @@ const ALLOWED_IDENTICAL_TRANSLATIONS = new Map([
   ["workflows.inputResourceKind.WORKTREE", "Worktree"],
   ["apps.worktrees", "Worktrees"],
   ["apps.views.worktrees", "Worktrees"],
+  // Apple's name for a debug symbol bundle and the binary identifier crash
+  // reports cite; Xcode leaves both untranslated.
+  ["crashes.dsym", "dSYM"],
+  ["crashes.uuid", "UUID"],
 ]);
 
 function isTranslationData(value: unknown): value is TranslationData {

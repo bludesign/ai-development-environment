@@ -74,6 +74,8 @@ import type { TailscaleServeService } from "@/services/tailscale";
 import { createTailscaleResolvers } from "./resolvers/tailscale";
 import type { SseService } from "@/services/sse";
 import { createSseResolvers } from "./resolvers/sse";
+import type { CrashesService } from "@/services/crashes/crashes.service";
+import { createCrashResolvers } from "./resolvers/crashes";
 
 // Pre-generated SDL strings (see scripts/prebuild-schema.ts) → DocumentNodes for the subgraph.
 const typeDefs = concatAST(schemaDefinitions.map((schema) => gql(schema)));
@@ -120,6 +122,7 @@ export const createSchema = (
   cliHealthService: CliHealthService,
   tailscaleServeService: TailscaleServeService,
   sseService: SseService,
+  crashesService: CrashesService,
 ): GraphQLSchema => {
   const resolvers = mergeResolvers([
     createHealthResolvers(prismaService),
@@ -153,6 +156,7 @@ export const createSchema = (
     createCliHealthResolvers(cliHealthService),
     createTailscaleResolvers(tailscaleServeService),
     createSseResolvers(sseService),
+    createCrashResolvers(crashesService),
   ]);
 
   return buildSubgraphSchema([
