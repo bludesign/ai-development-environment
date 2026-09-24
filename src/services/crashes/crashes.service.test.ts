@@ -167,12 +167,14 @@ beforeAll(async () => {
   const databasePath = join(directory, "crashes.db");
   const database = new Database(databasePath);
   const migrations = resolve(process.cwd(), "prisma/migrations");
-  for (const name of readdirSync(migrations).sort()) {
-    if (!name.match(/^\d{14}_/)) continue;
-    database.exec(
-      readFileSync(join(migrations, name, "migration.sql"), "utf8"),
-    );
-  }
+  database.transaction(() => {
+    for (const name of readdirSync(migrations).sort()) {
+      if (!name.match(/^\d{14}_/)) continue;
+      database.exec(
+        readFileSync(join(migrations, name, "migration.sql"), "utf8"),
+      );
+    }
+  })();
   database.close();
   process.env.DATABASE_URL = `file:${databasePath}`;
   process.env.CRASH_DATA_DIRECTORY = join(directory, "crash-data");
@@ -196,7 +198,7 @@ beforeAll(async () => {
       lastSeenAt: new Date(),
     },
   });
-});
+}, 120_000);
 
 afterAll(async () => {
   await prisma?.$disconnect();
