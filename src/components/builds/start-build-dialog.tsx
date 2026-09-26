@@ -334,6 +334,7 @@ function StartBuildDialog({
     configurationId === "__custom__"
       ? customConfiguration
       : project?.configurations.find((entry) => entry.id === configurationId);
+  const selectedConfigurationId = customOpen ? "__custom__" : configurationId;
   const observation = configuration
     ? (observations[configuration.id] ?? configuration.observation)
     : null;
@@ -770,9 +771,9 @@ function StartBuildDialog({
                 <div className="grid gap-2 sm:grid-cols-2">
                   {project.configurations.map((entry) => (
                     <button
-                      className={`rounded-xl border p-3 text-left transition-colors ${entry.id === configurationId ? "border-primary bg-primary/5" : "hover:bg-muted/50"}`}
+                      className={`rounded-xl border p-3 text-left transition-colors ${entry.id === selectedConfigurationId ? "border-primary bg-primary/5" : "hover:bg-muted/50"}`}
                       key={entry.id}
-                      aria-pressed={entry.id === configurationId}
+                      aria-pressed={entry.id === selectedConfigurationId}
                       onClick={() => {
                         if (entry.id !== configurationId) {
                           destinationRequest.current += 1;
@@ -825,13 +826,9 @@ function StartBuildDialog({
                   ))}
                   <button
                     type="button"
-                    aria-pressed={configurationId === "__custom__"}
-                    className={`rounded-xl border p-3 text-left ${configurationId === "__custom__" ? "border-primary bg-primary/5" : "hover:bg-muted/50"}`}
-                    onClick={() => {
-                      destinationRequest.current += 1;
-                      setConfigurationId("__custom__");
-                      setCustomOpen(true);
-                    }}
+                    aria-pressed={selectedConfigurationId === "__custom__"}
+                    className={`rounded-xl border p-3 text-left ${selectedConfigurationId === "__custom__" ? "border-primary bg-primary/5" : "hover:bg-muted/50"}`}
+                    onClick={() => setCustomOpen(true)}
                   >
                     <span className="font-medium">{t("custom")}</span>
                     <p className="text-xs text-muted-foreground">

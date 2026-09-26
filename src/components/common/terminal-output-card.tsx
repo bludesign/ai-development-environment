@@ -23,6 +23,18 @@ export type TerminalOutputEntry = {
   dividerKey?: string;
 };
 
+const INITIAL_SCROLLBACK = 100_000;
+
+function reserveScrollback(
+  terminal: import("@xterm/xterm").Terminal,
+  requiredLines: number,
+) {
+  const capacity = terminal.options.scrollback ?? INITIAL_SCROLLBACK;
+  if (requiredLines > capacity) {
+    terminal.options.scrollback = Math.max(capacity * 2, requiredLines);
+  }
+}
+
 export function decodeTerminalBase64(value: string): Uint8Array {
   const binary = atob(value);
   const bytes = new Uint8Array(binary.length);
@@ -89,7 +101,7 @@ export function TerminalOutputCard({
     null,
   );
   const terminalRef = useRef<import("@xterm/xterm").Terminal | null>(null);
-  const fitRef = useRef<import("@xterm/addon-fit").FitAddon | null>(null);
+  const fitRef = useRef<{ fit: () => void } | null>(null);
   const searchRef = useRef<import("@xterm/addon-search").SearchAddon | null>(
     null,
   );
@@ -152,12 +164,6 @@ export function TerminalOutputCard({
       dividerRef.current = null;
       entryLinesRef.current.clear();
     }
-    // The buffer must retain every loaded line, including wrapped output. xterm
-    // allocates lines lazily, so a byte-based upper bound does not preallocate it.
-    terminal.options.scrollback = Math.max(
-      100_000,
-      nextEntries.reduce((size, entry) => size + entry.data.length + 100, 0),
-    );
     const start = appendOnly ? previous.length : 0;
     for (let index = start; index < nextEntries.length; index++) {
       const entry = nextEntries[index];
@@ -242,7 +248,7 @@ export function TerminalOutputCard({
         fontFamily:
           'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace',
         fontSize: 13,
-        scrollback: 100_000,
+        scrollback: INITIAL_SCROLLBACK,
         theme: {
           background: "#09090b",
           foreground: "#fafafa",
@@ -255,14 +261,35 @@ export function TerminalOutputCard({
       terminal.loadAddon(fit);
       terminal.loadAddon(searchAddon);
       terminal.open(terminalElement);
-      fit.fit();
+      const fitTerminal = () => {
+        const dimensions = fit.proposeDimensions();
+        if (dimensions && dimensions.cols < terminal.cols) {
+          // Narrowing the terminal can expand wrapped lines. Reserve before
+          // reflow so xterm does not trim loaded history; allow a spare cell
+          // per new row for double-width characters at the wrap boundary.
+          reserveScrollback(
+            terminal,
+            terminal.buffer.normal.length *
+              Math.ceil(terminal.cols / Math.max(1, dimensions.cols - 1)),
+          );
+        }
+        fit.fit();
+      };
+      fitTerminal();
       terminalRef.current = terminal;
-      fitRef.current = fit;
+      fitRef.current = { fit: fitTerminal };
       searchRef.current = searchAddon;
       searchDisposable = searchAddon.onDidChangeResults((results) =>
         setSearchResults(results),
       );
       scrollDisposable = terminal.onScroll(() => {
+        // Xterm emits this synchronously as output adds physical lines,
+        // including wrapping and ANSI expansion. Grow before it can trim any
+        // history, and only geometrically: each resize reallocates its array.
+        reserveScrollback(
+          terminal,
+          terminal.buffer.normal.length + terminal.rows,
+        );
         if (writingRef.current) return;
         if (
           terminal.buffer.active.viewportY <= 10 &&
@@ -274,7 +301,7 @@ export function TerminalOutputCard({
         followRef.current = atBottom;
         setFollow(atBottom);
       });
-      observer = new ResizeObserver(() => fit.fit());
+      observer = new ResizeObserver(fitTerminal);
       observer.observe(terminalElement);
 
       resetTouch = () => {

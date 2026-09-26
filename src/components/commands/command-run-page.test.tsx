@@ -53,7 +53,11 @@ vi.mock("@/i18n/navigation", () => ({
 vi.mock("@xterm/xterm", () => ({
   Terminal: class {
     options = { scrollback: 100_000 };
-    buffer = { active: { viewportY: 0, baseY: 0, cursorY: 0 } };
+    buffer = {
+      active: { viewportY: 0, baseY: 0, cursorY: 0 },
+      normal: { length: 24 },
+    };
+    rows = 24;
     scrollToLine() {}
     constructor(options: unknown) {
       terminalOptions(options);
@@ -80,6 +84,9 @@ vi.mock("@xterm/xterm", () => ({
 }));
 vi.mock("@xterm/addon-fit", () => ({
   FitAddon: class {
+    proposeDimensions() {
+      return undefined;
+    }
     fit() {}
   },
 }));
