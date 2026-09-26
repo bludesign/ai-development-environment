@@ -1554,6 +1554,7 @@ model BuildConfiguration {
 }
 
 model BuildScript {
+  iconKey          String?
   id               String                          @id
   name             String                          @unique
   preBuildScript   String?
@@ -1624,6 +1625,7 @@ model Build {
   @@index([worktreeId, createdAt])
   @@index([repositoryId, createdAt])
   @@index([jobId])
+  @@index([configurationId, createdAt])
 }
 
 model BuildArtifact {

@@ -5,6 +5,7 @@ import {
   normalizeScreenshotValues,
   setScreenshotTime,
 } from "./screenshot-time";
+import { stubJiraCacheTicket } from "./jira-cache-stub";
 import { stubWorktreeAgent } from "./worktree-stub";
 import { screenshotSessionToken } from "../scripts/mock-data/auth";
 
@@ -67,6 +68,7 @@ test.describe("app screenshots", () => {
       await setScreenshotTime(page);
       if (route.initScript) await page.addInitScript(route.initScript);
       if (route.stubWorktree) await stubWorktreeAgent(page);
+      if (route.stubJiraCacheTicket) await stubJiraCacheTicket(page);
       const readyResponse = route.readyGraphqlOperation
         ? page.waitForResponse(
             (candidate) =>
@@ -123,6 +125,43 @@ test.describe("app screenshots", () => {
         const tab = page.getByRole("tab", { name: route.clickTab });
         await tab.click();
         await expect(tab).toHaveAttribute("aria-selected", "true");
+      }
+      if (route.buildWorkflow === "start" || route.buildWorkflow === "custom") {
+        await page
+          .getByRole("button", { name: "Build", exact: true })
+          .first()
+          .click();
+        await page.getByRole("dialog").waitFor();
+        await page
+          .getByText("App Store Release", { exact: true })
+          .last()
+          .waitFor();
+        if (route.buildWorkflow === "custom") {
+          await page.getByRole("button", { name: /Custom/ }).click();
+          await page
+            .getByRole("heading", { name: "Custom build", exact: true })
+            .waitFor();
+          const editor = page.getByRole("region", { name: "Custom build" });
+          await editor.getByRole("combobox").first().click();
+          await page
+            .getByRole("option", { name: /AcmeApp.xcworkspace/ })
+            .click();
+          await editor.getByText("Valid", { exact: true }).waitFor();
+        }
+      }
+      if (route.buildWorkflow === "script") {
+        await page.getByRole("tab", { name: "Build Scripts" }).click();
+        await page
+          .getByRole("button", { name: "Edit", exact: true })
+          .first()
+          .click();
+        await page.getByRole("dialog").waitFor();
+      }
+      if (route.buildWorkflow === "project") {
+        await page.getByRole("tab", { name: "iOS App" }).click();
+        await page
+          .getByRole("button", { name: "Remove iOS App project" })
+          .waitFor();
       }
       await waitForVisualSettle(page);
       await normalizeScreenshotValues(page);

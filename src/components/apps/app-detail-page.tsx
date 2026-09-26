@@ -308,6 +308,7 @@ function AppOverview({ app }: { app: ManagedApp }) {
           </Card>
         ))}
       </div>
+      <AppBuildLauncher appId={app.id} />
       <Card>
         <CardHeader>
           <CardTitle>{t("assignedRepositories")}</CardTitle>

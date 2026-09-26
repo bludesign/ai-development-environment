@@ -11,6 +11,7 @@ import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { controlPlaneRequest } from "@/lib/control-plane-client";
 
 import { StartBuildButton } from "./start-build-dialog";
+import type { IosAppProject } from "./types";
 
 vi.mock("@/lib/control-plane-client", () => ({
   controlPlaneRequest: vi.fn(),
@@ -246,6 +247,137 @@ afterEach(() => {
 });
 
 describe("StartBuildDialog", () => {
+  test.each(["Cancel", "Use settings"])(
+    "handles %s after reopening Custom without mixing saved settings",
+    async (editorAction) => {
+      const defaultImplementation = request.getMockImplementation()!;
+      request.mockImplementation(async (query, variables) => {
+        const operation = String(query);
+        if (operation.includes("query StartBuildProject")) {
+          const data = (await defaultImplementation(query, variables)) as {
+            iosAppProject: IosAppProject;
+          };
+          Object.assign(data.iosAppProject.configurations[0]!, {
+            defaultAction: "ARCHIVE",
+            autoExport: true,
+            advancedSettings: {
+              developmentTeam: "SAVEDTEAM",
+              buildSettingOverrides: { ONLY_ACTIVE_ARCH: "NO" },
+            },
+            exportSettings: {
+              method: "APP_STORE_CONNECT",
+              teamId: "SAVEDTEAM",
+            },
+          });
+          return data as never;
+        }
+        if (operation.includes("mutation DiscoverBuildSources")) {
+          return {
+            discoverBuildSources: [
+              { kind: "WORKSPACE", relativePath: "Custom.xcworkspace" },
+            ],
+          } as never;
+        }
+        if (operation.includes("mutation InspectBuildSource")) {
+          return {
+            inspectBuildSource: {
+              source: {
+                kind: "WORKSPACE",
+                relativePath: "Custom.xcworkspace",
+              },
+              schemes: ["CustomApp"],
+              configurations: ["Debug"],
+              testPlans: [],
+              signingRequirements: [],
+              headSha: "abc123",
+              xcodeVersion: "Xcode 26.0",
+            },
+          } as never;
+        }
+        return defaultImplementation(query, variables);
+      });
+
+      render(
+        <StartBuildButton codebaseId="codebase-1" worktreeId="worktree-1" />,
+      );
+      fireEvent.click(screen.getByRole("button", { name: "Build" }));
+      const saved = await screen.findByRole("button", { name: /Development/ });
+      const custom = screen.getByRole("button", { name: /^Custom / });
+      fireEvent.click(custom);
+      let editor = screen.getByRole("region", { name: "Custom build" });
+      const source = within(editor).getAllByRole("combobox")[0]!;
+      await waitFor(() => expect(source.hasAttribute("disabled")).toBe(false));
+      fireEvent.pointerDown(source, {
+        button: 0,
+        ctrlKey: false,
+        pointerType: "mouse",
+      });
+      fireEvent.click(
+        await screen.findByRole("option", { name: "Custom.xcworkspace" }),
+      );
+      const useSettings = within(editor).getByRole("button", {
+        name: "Use settings",
+      });
+      await waitFor(() =>
+        expect(useSettings.hasAttribute("disabled")).toBe(false),
+      );
+      fireEvent.click(useSettings);
+
+      fireEvent.click(saved);
+      fireEvent.click(custom);
+      expect(custom.getAttribute("aria-pressed")).toBe("true");
+      expect(saved.getAttribute("aria-pressed")).toBe("false");
+      editor = screen.getByRole("region", { name: "Custom build" });
+      fireEvent.click(
+        within(editor).getByRole("button", { name: editorAction }),
+      );
+
+      const cancelled = editorAction === "Cancel";
+      expect(saved.getAttribute("aria-pressed")).toBe(String(cancelled));
+      expect(custom.getAttribute("aria-pressed")).toBe(String(!cancelled));
+      const start = screen.getByRole("button", { name: "Start Build" });
+      await waitFor(() => expect(start.hasAttribute("disabled")).toBe(false));
+      fireEvent.click(start);
+      await waitFor(() =>
+        expect(request).toHaveBeenCalledWith(
+          expect.stringContaining("mutation StartIosBuild"),
+          {
+            input: expect.objectContaining(
+              cancelled
+                ? {
+                    configurationId: "configuration-1",
+                    action: "ARCHIVE",
+                    exportWhenComplete: true,
+                    advancedSettings: expect.objectContaining({
+                      developmentTeam: "SAVEDTEAM",
+                      buildSettingOverrides: { ONLY_ACTIVE_ARCH: "NO" },
+                    }),
+                    exportSettings: expect.objectContaining({
+                      method: "APP_STORE_CONNECT",
+                      teamId: "SAVEDTEAM",
+                    }),
+                  }
+                : {
+                    customConfiguration: {
+                      sourceKind: "WORKSPACE",
+                      sourcePath: "Custom.xcworkspace",
+                      scheme: "CustomApp",
+                      buildConfiguration: "Debug",
+                    },
+                    action: "BUILD",
+                    exportWhenComplete: false,
+                    advancedSettings: expect.objectContaining({
+                      buildSettingOverrides: {},
+                    }),
+                    exportSettings: null,
+                  },
+            ),
+          },
+        ),
+      );
+    },
+  );
+
   test("allows a generic build to start while live destinations refresh", async () => {
     const defaultImplementation = request.getMockImplementation()!;
     let finishDestinationRefresh: (() => void) | undefined;
@@ -301,7 +433,8 @@ describe("StartBuildDialog", () => {
       ),
     ).toBe(false);
 
-    const action = within(dialog).getAllByRole("combobox")[0]!;
+    fireEvent.click(await screen.findByText("Details"));
+    const action = within(dialog).getAllByRole("combobox")[1]!;
     fireEvent.pointerDown(action, {
       button: 0,
       ctrlKey: false,
@@ -519,7 +652,8 @@ describe("StartBuildDialog", () => {
     expect(screen.queryByText("VALID")).toBeNull();
 
     const dialog = screen.getByRole("dialog");
-    const action = within(dialog).getAllByRole("combobox")[0]!;
+    fireEvent.click(await screen.findByText("Details"));
+    const action = within(dialog).getAllByRole("combobox")[1]!;
     fireEvent.pointerDown(action, {
       button: 0,
       ctrlKey: false,
@@ -527,7 +661,7 @@ describe("StartBuildDialog", () => {
     });
     fireEvent.click(await screen.findByRole("option", { name: "Test" }));
     const testPlanLabel = await screen.findByText("Test plan");
-    expect(testPlanLabel.closest("details")).toBeNull();
+    expect(testPlanLabel.closest("details")).not.toBeNull();
   });
 
   test("preflights a configuration, previews a safe command, validates overrides, and snapshots default scripts", async () => {
@@ -570,7 +704,7 @@ describe("StartBuildDialog", () => {
         .getAttribute("data-state"),
     ).toBe("checked");
 
-    const device = screen.getAllByRole("combobox")[2]!;
+    const device = screen.getAllByRole("combobox")[0]!;
     fireEvent.pointerDown(device, {
       button: 0,
       ctrlKey: false,
@@ -584,15 +718,7 @@ describe("StartBuildDialog", () => {
       await screen.findByRole("option", { name: /iPhone 17 Pro/ }),
     );
 
-    const destinationType = screen.getAllByRole("combobox")[1]!;
-    fireEvent.pointerDown(destinationType, {
-      button: 0,
-      ctrlKey: false,
-      pointerType: "mouse",
-    });
-    fireEvent.click(
-      await screen.findByRole("option", { name: "Physical Device" }),
-    );
+    fireEvent.click(screen.getByRole("tab", { name: "Physical Device" }));
     fireEvent.pointerDown(device, {
       button: 0,
       ctrlKey: false,
@@ -604,12 +730,7 @@ describe("StartBuildDialog", () => {
     expect(screen.getByRole("option", { name: /iPhone/ })).toBeDefined();
     fireEvent.click(screen.getByRole("option", { name: /iPhone/ }));
 
-    fireEvent.pointerDown(destinationType, {
-      button: 0,
-      ctrlKey: false,
-      pointerType: "mouse",
-    });
-    fireEvent.click(await screen.findByRole("option", { name: "Simulator" }));
+    fireEvent.click(screen.getByRole("tab", { name: "Simulator" }));
     fireEvent.pointerDown(device, {
       button: 0,
       ctrlKey: false,

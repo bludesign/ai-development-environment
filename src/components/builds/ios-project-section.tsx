@@ -13,6 +13,7 @@ import {
 import { useLocale, useTranslations } from "next-intl";
 import { useCallback, useEffect, useState } from "react";
 
+import { ConfirmationDialog } from "@/components/confirmation-dialog";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -81,10 +82,10 @@ const PROJECT_FIELDS = `
   }
   allowedScripts {
     position
-    script { id name preBuildScript postBuildScript enabledByDefault timeoutSeconds failureBehavior }
+    script { id name iconKey preBuildScript postBuildScript enabledByDefault timeoutSeconds failureBehavior }
   }
 `;
-const SCRIPT_FIELDS = `id name preBuildScript postBuildScript enabledByDefault timeoutSeconds failureBehavior`;
+const SCRIPT_FIELDS = `id name iconKey preBuildScript postBuildScript enabledByDefault timeoutSeconds failureBehavior`;
 type SourceCandidate = {
   kind: "PROJECT" | "WORKSPACE" | "PACKAGE";
   relativePath: string;
@@ -126,6 +127,7 @@ export function IosProjectSection({
   const [error, setError] = useState<string | null>(null);
   const [editing, setEditing] = useState<BuildConfiguration | null>(null);
   const [configurationOpen, setConfigurationOpen] = useState(false);
+  const [deleteProjectOpen, setDeleteProjectOpen] = useState(false);
 
   const load = useCallback(async () => {
     try {
@@ -320,6 +322,16 @@ export function IosProjectSection({
           <Alert>
             <AlertDescription>{t("sharedProjectDescription")}</AlertDescription>
           </Alert>
+          <div className="flex justify-end">
+            <Button
+              variant="destructive"
+              size="sm"
+              onClick={() => setDeleteProjectOpen(true)}
+            >
+              <Trash2 />
+              {t("removeProject")}
+            </Button>
+          </div>
           <Card>
             <CardHeader className="flex-row items-center justify-between">
               <CardTitle>{t("buildConfigurations")}</CardTitle>
@@ -361,7 +373,9 @@ export function IosProjectSection({
                               configuration.observation?.status === "ERROR" ||
                               configuration.observation?.status === "INVALID"
                                 ? "destructive"
-                                : "outline"
+                                : configuration.observation?.status === "VALID"
+                                  ? "success"
+                                  : "outline"
                             }
                           >
                             {t(
@@ -455,7 +469,10 @@ export function IosProjectSection({
                           void toggleAllowedScript(script.id, Boolean(value))
                         }
                       />
-                      <span className="text-sm">{script.name}</span>
+                      <span className="flex items-center gap-2 text-sm">
+                        <ConfigurationIcon iconKey={script.iconKey ?? null} />
+                        {script.name}
+                      </span>
                       {script.enabledByDefault && (
                         <Badge variant="outline">{t("defaultEnabled")}</Badge>
                       )}
@@ -467,6 +484,28 @@ export function IosProjectSection({
           </Card>
         </>
       )}
+      <ConfirmationDialog
+        open={deleteProjectOpen}
+        onOpenChange={setDeleteProjectOpen}
+        title={t("removeProject")}
+        description={t("removeProjectDescription")}
+        actionLabel={t("removeProject")}
+        cancelLabel={t("cancel")}
+        onConfirm={async () => {
+          if (!project) return;
+          try {
+            await controlPlaneRequest(
+              `mutation DeleteIosAppProject($id: ID!) { deleteIosAppProject(id: $id) }`,
+              { id: project.id },
+            );
+            setDeleteProjectOpen(false);
+            await load();
+          } catch (error) {
+            setError(error instanceof Error ? error.message : String(error));
+            setDeleteProjectOpen(false);
+          }
+        }}
+      />
       {configurationOpen && worktreeId && (
         <BuildConfigurationDialog
           codebaseId={activeCodebaseId}
@@ -481,13 +520,15 @@ export function IosProjectSection({
   );
 }
 
-function BuildConfigurationDialog({
+export function BuildConfigurationDialog({
   codebaseId,
   worktreeId,
   configuration,
   open,
   onOpenChange,
   onSaved,
+  onCustom,
+  inline = false,
 }: {
   codebaseId: string;
   worktreeId: string;
@@ -495,6 +536,8 @@ function BuildConfigurationDialog({
   open: boolean;
   onOpenChange: (open: boolean) => void;
   onSaved: () => Promise<void>;
+  onCustom?: (configuration: BuildConfiguration) => void;
+  inline?: boolean;
 }) {
   const t = useTranslations("builds");
   const [name, setName] = useState(configuration?.name ?? "");
@@ -687,6 +730,40 @@ function BuildConfigurationDialog({
         parseTestResults,
         collectDsyms,
       };
+      if (onCustom) {
+        onCustom({
+          id: "__custom__",
+          name: "Custom",
+          iconKey: null,
+          source: { id: "", kind: sourceKind, relativePath: sourcePath },
+          scheme,
+          buildConfiguration,
+          defaultAction: action,
+          advancedSettings: advancedSettings as Record<string, unknown>,
+          autoExport: action === "ARCHIVE" && autoExport,
+          exportSettings,
+          observation: inspection
+            ? {
+                id: "",
+                scopeKey: `worktree:${worktreeId}`,
+                status: parseStatus,
+                schemes: inspection.schemes,
+                configurations: inspection.configurations,
+                testPlans: inspection.testPlans,
+                error: null,
+                stale: inspectionStale,
+                headSha: inspection.headSha,
+                xcodeVersion: inspection.xcodeVersion,
+                lastParseAttemptAt: new Date().toISOString(),
+                lastParsedAt: new Date().toISOString(),
+              }
+            : null,
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+        });
+        onOpenChange(false);
+        return;
+      }
       const data = await controlPlaneRequest<{
         saveBuildConfiguration: { id: string };
       }>(
@@ -729,21 +806,20 @@ function BuildConfigurationDialog({
     }
   };
 
-  return (
-    <Dialog onOpenChange={onOpenChange} open={open}>
-      <DialogContent className="max-h-[90vh] grid-cols-[minmax(0,1fr)] overflow-y-auto sm:max-w-5xl">
-        <DialogHeader>
-          <DialogTitle>
-            {configuration ? t("editConfiguration") : t("newConfiguration")}
-          </DialogTitle>
-          <DialogDescription>{t("configurationDescription")}</DialogDescription>
-        </DialogHeader>
-        {error && (
-          <Alert variant="destructive">
-            <AlertDescription>{error}</AlertDescription>
-          </Alert>
-        )}
-        <div className="space-y-5">
+  const title = onCustom
+    ? t("customBuild")
+    : configuration
+      ? t("editConfiguration")
+      : t("newConfiguration");
+  const content = (
+    <>
+      {error && (
+        <Alert variant="destructive">
+          <AlertDescription>{error}</AlertDescription>
+        </Alert>
+      )}
+      <div className="space-y-5">
+        {!onCustom && (
           <div className="grid gap-4 sm:grid-cols-2">
             <div className="space-y-2">
               <Label htmlFor="configuration-name">{t("name")}</Label>
@@ -797,263 +873,290 @@ function BuildConfigurationDialog({
               </DropdownMenu>
             </div>
           </div>
-          <Card>
-            <CardContent className="space-y-3">
-              <div className="flex items-center justify-between gap-2">
-                <div>
-                  <p className="font-medium">{t("source")}</p>
-                  <p className="font-mono text-xs text-muted-foreground">
-                    {sourcePath || t("selectSource")}
-                  </p>
-                </div>
-                {inspection && (
-                  <div className="flex items-center gap-2">
-                    {inspectionStale && (
-                      <span className="text-xs text-muted-foreground">
-                        {t("stale")}
-                      </span>
-                    )}
-                    <Badge
-                      variant={
-                        parseStatus === "VALID" ? "outline" : "destructive"
-                      }
-                    >
-                      {t(`parseStatuses.${parseStatus}`)}
-                    </Badge>
-                  </div>
-                )}
+        )}
+        <Card>
+          <CardContent className="space-y-3">
+            <div className="flex items-center justify-between gap-2">
+              <div>
+                <p className="font-medium">{t("source")}</p>
+                <p className="font-mono text-xs text-muted-foreground">
+                  {sourcePath || t("selectSource")}
+                </p>
               </div>
-              <Select
-                disabled={loadingSources || inspecting}
-                onValueChange={(value) => {
-                  const candidate = sources.find(
-                    (source) => source.relativePath === value,
-                  );
-                  if (candidate) void inspect(candidate);
-                }}
-                value={
-                  sources.some((source) => source.relativePath === sourcePath)
-                    ? sourcePath
-                    : ""
-                }
-              >
-                <SelectTrigger>
-                  <SelectValue
-                    placeholder={
-                      loadingSources ? t("loadingSources") : t("selectSource")
-                    }
-                  />
-                </SelectTrigger>
-                <SelectContent>
-                  {sources.map((source) => (
-                    <SelectItem
-                      key={source.relativePath}
-                      value={source.relativePath}
-                    >
-                      {source.relativePath}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
               {inspection && (
-                <div className="grid gap-4 sm:grid-cols-2">
-                  <div className="space-y-2">
-                    <Label>{t("scheme")}</Label>
-                    <Select
-                      onValueChange={(value) => {
-                        setScheme(value);
-                        void inspect(inspection.source, value);
-                      }}
-                      value={scheme}
-                    >
-                      <SelectTrigger>
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {scheme && !inspection.schemes.includes(scheme) && (
-                          <SelectItem value={scheme}>
-                            {scheme} · {t("savedValueUnavailable")}
-                          </SelectItem>
-                        )}
-                        {inspection.schemes.map((value) => (
-                          <SelectItem key={value} value={value}>
-                            {value}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  </div>
-                  <div className="space-y-2">
-                    <Label>{t("configuration")}</Label>
-                    <Select
-                      onValueChange={setBuildConfiguration}
-                      value={buildConfiguration}
-                    >
-                      <SelectTrigger>
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {buildConfiguration &&
-                          !inspection.configurations.includes(
-                            buildConfiguration,
-                          ) && (
-                            <SelectItem value={buildConfiguration}>
-                              {buildConfiguration} ·{" "}
-                              {t("savedValueUnavailable")}
-                            </SelectItem>
-                          )}
-                        {inspection.configurations.map((value) => (
-                          <SelectItem key={value} value={value}>
-                            {value}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  </div>
+                <div className="flex items-center gap-2">
+                  {inspectionStale && (
+                    <span className="text-xs text-muted-foreground">
+                      {t("stale")}
+                    </span>
+                  )}
+                  <Badge
+                    variant={
+                      parseStatus === "VALID" ? "success" : "destructive"
+                    }
+                  >
+                    {t(`parseStatuses.${parseStatus}`)}
+                  </Badge>
                 </div>
               )}
-              <Button
-                disabled={!sourcePath || inspecting}
-                onClick={() =>
-                  void inspect(
-                    { kind: sourceKind, relativePath: sourcePath },
-                    scheme,
-                  )
-                }
-                size="sm"
-                variant="outline"
-              >
-                {inspecting ? <Spinner /> : <RefreshCw />} {t("reparse")}
-              </Button>
-            </CardContent>
-          </Card>
-          <div className="space-y-2">
-            <Label>{t("defaultAction")}</Label>
+            </div>
             <Select
+              disabled={loadingSources || inspecting}
               onValueChange={(value) => {
-                setAction(value as BuildAction);
-                if (value !== "ARCHIVE") setAutoExport(false);
+                const candidate = sources.find(
+                  (source) => source.relativePath === value,
+                );
+                if (candidate) void inspect(candidate);
               }}
-              value={action}
+              value={
+                sources.some((source) => source.relativePath === sourcePath)
+                  ? sourcePath
+                  : ""
+              }
             >
+              <SelectTrigger>
+                <SelectValue
+                  placeholder={
+                    loadingSources ? t("loadingSources") : t("selectSource")
+                  }
+                />
+              </SelectTrigger>
+              <SelectContent>
+                {sources.map((source) => (
+                  <SelectItem
+                    key={source.relativePath}
+                    value={source.relativePath}
+                  >
+                    {source.relativePath}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            {inspection && (
+              <div className="grid gap-4 sm:grid-cols-2">
+                <div className="space-y-2">
+                  <Label>{t("scheme")}</Label>
+                  <Select
+                    onValueChange={(value) => {
+                      setScheme(value);
+                      void inspect(inspection.source, value);
+                    }}
+                    value={scheme}
+                  >
+                    <SelectTrigger>
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {scheme && !inspection.schemes.includes(scheme) && (
+                        <SelectItem value={scheme}>
+                          {scheme} · {t("savedValueUnavailable")}
+                        </SelectItem>
+                      )}
+                      {inspection.schemes.map((value) => (
+                        <SelectItem key={value} value={value}>
+                          {value}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="space-y-2">
+                  <Label>{t("configuration")}</Label>
+                  <Select
+                    onValueChange={setBuildConfiguration}
+                    value={buildConfiguration}
+                  >
+                    <SelectTrigger>
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {buildConfiguration &&
+                        !inspection.configurations.includes(
+                          buildConfiguration,
+                        ) && (
+                          <SelectItem value={buildConfiguration}>
+                            {buildConfiguration} · {t("savedValueUnavailable")}
+                          </SelectItem>
+                        )}
+                      {inspection.configurations.map((value) => (
+                        <SelectItem key={value} value={value}>
+                          {value}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+              </div>
+            )}
+            <Button
+              disabled={!sourcePath || inspecting}
+              onClick={() =>
+                void inspect(
+                  { kind: sourceKind, relativePath: sourcePath },
+                  scheme,
+                )
+              }
+              size="sm"
+              variant="outline"
+            >
+              {inspecting ? <Spinner /> : <RefreshCw />} {t("reparse")}
+            </Button>
+          </CardContent>
+        </Card>
+        <div className="space-y-2">
+          <Label>{t("defaultAction")}</Label>
+          <Select
+            onValueChange={(value) => {
+              setAction(value as BuildAction);
+              if (value !== "ARCHIVE") setAutoExport(false);
+            }}
+            value={action}
+          >
+            <SelectTrigger>
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {[
+                "BUILD",
+                "TEST",
+                "ANALYZE",
+                "ARCHIVE",
+                "BUILD_FOR_TESTING",
+                "TEST_WITHOUT_BUILDING",
+              ].map((value) => (
+                <SelectItem key={value} value={value}>
+                  {t(`actions.${value}`)}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+        {action === "ARCHIVE" && (
+          <section className="space-y-3">
+            <label className="flex items-center gap-2 font-medium">
+              <Checkbox
+                checked={autoExport}
+                onCheckedChange={(checked) => setAutoExport(Boolean(checked))}
+              />
+              {t("autoExport")}
+            </label>
+            {autoExport && (
+              <ExportSettingsForm
+                key={`${sourceKind}:${sourcePath}:${scheme}:${buildConfiguration}`}
+                onChange={setExportSettings}
+                onParseSigningRequirements={parseSigningRequirements}
+                value={exportSettings}
+              />
+            )}
+          </section>
+        )}
+        {["TEST", "BUILD_FOR_TESTING", "TEST_WITHOUT_BUILDING"].includes(
+          action,
+        ) && (
+          <div className="space-y-2">
+            <Label>{t("testPlan")}</Label>
+            <Select onValueChange={setTestPlan} value={testPlan}>
               <SelectTrigger>
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
-                {[
-                  "BUILD",
-                  "TEST",
-                  "ANALYZE",
-                  "ARCHIVE",
-                  "BUILD_FOR_TESTING",
-                  "TEST_WITHOUT_BUILDING",
-                ].map((value) => (
+                <SelectItem value="__SCHEME_DEFAULT__">
+                  {t("schemeDefaultTestPlan")}
+                </SelectItem>
+                {testPlan !== "__SCHEME_DEFAULT__" &&
+                  !inspection?.testPlans.includes(testPlan) && (
+                    <SelectItem value={testPlan}>
+                      {testPlan} · {t("savedValueUnavailable")}
+                    </SelectItem>
+                  )}
+                {inspection?.testPlans.map((value) => (
                   <SelectItem key={value} value={value}>
-                    {t(`actions.${value}`)}
+                    {value}
                   </SelectItem>
                 ))}
               </SelectContent>
             </Select>
           </div>
-          {action === "ARCHIVE" && (
-            <section className="space-y-3">
-              <label className="flex items-center gap-2 font-medium">
-                <Checkbox
-                  checked={autoExport}
-                  onCheckedChange={(checked) => setAutoExport(Boolean(checked))}
-                />
-                {t("autoExport")}
-              </label>
-              {autoExport && (
-                <ExportSettingsForm
-                  key={`${sourceKind}:${sourcePath}:${scheme}:${buildConfiguration}`}
-                  onChange={setExportSettings}
-                  onParseSigningRequirements={parseSigningRequirements}
-                  value={exportSettings}
-                />
-              )}
-            </section>
-          )}
-          {["TEST", "BUILD_FOR_TESTING", "TEST_WITHOUT_BUILDING"].includes(
-            action,
-          ) && (
-            <div className="space-y-2">
-              <Label>{t("testPlan")}</Label>
-              <Select onValueChange={setTestPlan} value={testPlan}>
-                <SelectTrigger>
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="__SCHEME_DEFAULT__">
-                    {t("schemeDefaultTestPlan")}
-                  </SelectItem>
-                  {testPlan !== "__SCHEME_DEFAULT__" &&
-                    !inspection?.testPlans.includes(testPlan) && (
-                      <SelectItem value={testPlan}>
-                        {testPlan} · {t("savedValueUnavailable")}
-                      </SelectItem>
-                    )}
-                  {inspection?.testPlans.map((value) => (
-                    <SelectItem key={value} value={value}>
-                      {value}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-          )}
-          <details className="rounded-xl border p-3">
-            <summary className="cursor-pointer font-medium">
-              {t("advancedSettings")}
-            </summary>
-            <div className="mt-3 space-y-2">
-              <div className="pb-2">
-                <CollectDsymsSelect
-                  id="configuration-collect-dsyms"
-                  onChange={setCollectDsyms}
-                  value={collectDsyms}
-                />
-              </div>
-              <label className="flex items-center gap-2 pb-2">
-                <Checkbox
-                  checked={parseTestResults}
-                  onCheckedChange={(checked) =>
-                    setParseTestResults(Boolean(checked))
-                  }
-                />
-                {t("parseTestResults")}
-              </label>
-              <Label htmlFor="configuration-advanced-json">
-                {t("advancedJson")}
-              </Label>
-              <Textarea
-                className="font-mono text-xs"
-                id="configuration-advanced-json"
-                onChange={(event) => setAdvanced(event.target.value)}
-                rows={10}
-                value={advanced}
+        )}
+        <details className="rounded-xl border p-3">
+          <summary className="cursor-pointer font-medium">
+            {t("advancedSettings")}
+          </summary>
+          <div className="mt-3 space-y-2">
+            <div className="pb-2">
+              <CollectDsymsSelect
+                id="configuration-collect-dsyms"
+                onChange={setCollectDsyms}
+                value={collectDsyms}
               />
             </div>
-          </details>
-        </div>
-        <DialogFooter>
+            <label className="flex items-center gap-2 pb-2">
+              <Checkbox
+                checked={parseTestResults}
+                onCheckedChange={(checked) =>
+                  setParseTestResults(Boolean(checked))
+                }
+              />
+              {t("parseTestResults")}
+            </label>
+            <Label htmlFor="configuration-advanced-json">
+              {t("advancedJson")}
+            </Label>
+            <Textarea
+              className="font-mono text-xs"
+              id="configuration-advanced-json"
+              onChange={(event) => setAdvanced(event.target.value)}
+              rows={10}
+              value={advanced}
+            />
+          </div>
+        </details>
+      </div>
+      <DialogFooter>
+        {(!inline || configuration) && (
           <Button onClick={() => onOpenChange(false)} variant="outline">
             {t("cancel")}
           </Button>
-          <Button
-            disabled={
-              busy ||
-              inspecting ||
-              !name.trim() ||
-              !sourcePath ||
-              !scheme ||
-              !buildConfiguration
-            }
-            onClick={() => void save()}
-          >
-            {busy && <Spinner />} {t("save")}
-          </Button>
-        </DialogFooter>
+        )}
+        <Button
+          disabled={
+            busy ||
+            inspecting ||
+            (!onCustom && !name.trim()) ||
+            !sourcePath ||
+            !scheme ||
+            !buildConfiguration
+          }
+          onClick={() => void save()}
+        >
+          {busy && <Spinner />} {t(onCustom ? "useSettings" : "save")}
+        </Button>
+      </DialogFooter>
+    </>
+  );
+
+  if (inline) {
+    return (
+      <section aria-label={title} className="space-y-4 rounded-xl border p-4">
+        <div className="space-y-1">
+          <h3 className="font-semibold">{title}</h3>
+          <p className="text-sm text-muted-foreground">
+            {t("configurationDescription")}
+          </p>
+        </div>
+        {content}
+      </section>
+    );
+  }
+
+  return (
+    <Dialog onOpenChange={onOpenChange} open={open}>
+      <DialogContent className="max-h-[90vh] grid-cols-[minmax(0,1fr)] overflow-y-auto sm:max-w-5xl">
+        <DialogHeader>
+          <DialogTitle>{title}</DialogTitle>
+          <DialogDescription>{t("configurationDescription")}</DialogDescription>
+        </DialogHeader>
+        {content}
       </DialogContent>
     </Dialog>
   );

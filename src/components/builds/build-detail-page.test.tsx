@@ -27,7 +27,9 @@ vi.mock("@/lib/control-plane-client", () => ({
 }));
 vi.mock("@xterm/xterm", () => ({
   Terminal: class {
-    buffer = { active: { viewportY: 0, baseY: 0 } };
+    buffer = { active: { viewportY: 0, baseY: 0, cursorY: 0 } };
+    options = {};
+    scrollToLine() {}
     loadAddon() {}
     open() {}
     write(value: string | Uint8Array, callback?: () => void) {
@@ -46,6 +48,9 @@ vi.mock("@xterm/xterm", () => ({
 }));
 vi.mock("@xterm/addon-fit", () => ({
   FitAddon: class {
+    proposeDimensions() {
+      return undefined;
+    }
     fit() {}
   },
 }));
@@ -586,7 +591,9 @@ describe("BuildDetailPage", () => {
       ),
     ).toBe(false);
     for (let page = 0; page < 5; page++) {
-      fireEvent.click(screen.getByRole("button", { name: "Load more" }));
+      fireEvent.wheel(screen.getByRole("log", { name: "Logs" }), {
+        deltaY: -100,
+      });
       await waitFor(() =>
         expect(
           request.mock.calls.filter(([query]) =>
@@ -596,9 +603,7 @@ describe("BuildDetailPage", () => {
       );
       await waitFor(() =>
         expect(
-          screen
-            .queryByRole("button", { name: "Load more" })
-            ?.hasAttribute("disabled") ?? false,
+          screen.queryByRole("status")?.textContent === "Loading earlier logs…",
         ).toBe(false),
       );
     }
@@ -683,7 +688,7 @@ describe("BuildDetailPage", () => {
     );
   });
 
-  test("appends late log chunks without resetting visible output", async () => {
+  test("replays late log chunks before newer output", async () => {
     render(<BuildDetailPage buildId="build-1" publicOrigin={null} />);
     expect(await screen.findByText("Development")).toBeDefined();
     await waitFor(() =>
@@ -708,9 +713,15 @@ describe("BuildDetailPage", () => {
         terminalWrite.mock.calls.filter(
           ([value]) => value instanceof Uint8Array,
         ),
-      ).toHaveLength(2),
+      ).toHaveLength(3),
     );
-    expect(terminalReset).not.toHaveBeenCalled();
+    expect(terminalReset).toHaveBeenCalledTimes(1);
+    expect(
+      terminalWrite.mock.calls
+        .filter(([value]) => value instanceof Uint8Array)
+        .slice(-2)
+        .map(([value]) => Buffer.from(value).toString("utf8")),
+    ).toEqual(["late output\r\n", "Compile Swift sources\r\n"]);
   });
 
   test("filters compact test results grouped by suite and file", async () => {
@@ -966,7 +977,7 @@ describe("BuildDetailPage", () => {
     ).toBeDefined();
 
     const destinationTrigger = screen.getByRole("button", {
-      name: /1 devices/,
+      name: "Run",
     });
     fireEvent.pointerDown(destinationTrigger, { button: 0, ctrlKey: false });
     await waitFor(() =>

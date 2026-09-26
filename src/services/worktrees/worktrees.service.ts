@@ -1509,7 +1509,7 @@ export class WorktreesService {
           blockingJob: worktree.codebase.jobs[0] ?? null,
           iosBuildConfigured:
             worktree.codebase.repository.projects?.some(
-              (project) => project.configurations.length > 0,
+              (project) => project.type === "IOS_APP",
             ) ?? false,
           quickActions: eligibleQuickActions.filter(
             (workflow) =>

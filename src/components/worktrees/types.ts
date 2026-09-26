@@ -195,6 +195,7 @@ export type WorktreeDetail = {
   commits: Array<{
     sha: string;
     subject: string;
+    message?: string | null;
     authorName: string;
     authoredAt: string;
     additions: number;

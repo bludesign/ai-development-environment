@@ -73,6 +73,8 @@ export type BuildConfiguration = {
 };
 
 export type BuildScript = {
+  iconKey?: string | null;
+  repositories?: Array<{ id: string; name: string }>;
   id: string;
   name: string;
   preBuildScript: string | null;

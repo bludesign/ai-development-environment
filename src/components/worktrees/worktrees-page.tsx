@@ -1,5 +1,7 @@
 "use client";
 
+import { OutOfDateBadge } from "@/components/builds/out-of-date-badge";
+
 import { useActiveAgent } from "@/components/active-agent/active-agent-provider";
 
 import {
@@ -16,6 +18,7 @@ import {
   ChevronDown,
   ChevronRight,
   ClipboardList,
+  Copy,
   Code2,
   Download,
   ExternalLink,
@@ -144,7 +147,7 @@ import {
 } from "@/components/ui/table";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { Textarea } from "@/components/ui/textarea";
-import { createClientId } from "@/lib/browser-utils";
+import { copyText, createClientId } from "@/lib/browser-utils";
 import { formatDateValue } from "@/lib/date-format";
 import { worktreeHighlightSurfaceClasses } from "@/lib/worktree-highlight";
 import {
@@ -1828,6 +1831,7 @@ function WorktreeCard(props: WorktreeItemProps) {
             detail={detail}
             inline
             worktreeId={worktree.id}
+            worktreeFolder={worktree.folder}
           />
         )}
       </CardContent>
@@ -2097,12 +2101,11 @@ function LatestBuildRow({
         </Badge>
       )}
       {build.outOfDate && (
-        <Badge
-          className="border-amber-500/40 text-amber-700 dark:text-amber-300"
-          variant="outline"
-        >
-          {buildsT("outOfDate")}
-        </Badge>
+        <OutOfDateBadge
+          buildId={build.id}
+          onCompleted={() => onCompleted()}
+          onError={onError}
+        />
       )}
       {runnable && (
         <RunBuildControls
@@ -2795,6 +2798,15 @@ export function WorktreeMenus(
               setChangeOpen(true);
             }}
           >
+            <DropdownMenuItem
+              onSelect={() => {
+                void copyText(worktree.folder).catch((error) =>
+                  onError(String(error)),
+                );
+              }}
+            >
+              <Copy /> {t("copyPath")}
+            </DropdownMenuItem>
             {targets.length > 0 && (
               <DropdownMenuItem
                 disabled={Boolean(moveReason)}
@@ -4132,6 +4144,7 @@ function WorktreeTableRows(props: WorktreeItemProps) {
                 detail={detail}
                 inline
                 worktreeId={worktree.id}
+                worktreeFolder={worktree.folder}
               />
             ) : null}
           </TableCell>

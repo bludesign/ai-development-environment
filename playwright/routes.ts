@@ -24,6 +24,8 @@ export type RouteEntry = {
    * For pages that inspect a checkout live; see playwright/worktree-stub.ts.
    */
   stubWorktree?: boolean;
+  /** Read the fixed Jira seed instead of the cache shared by parallel page loads. */
+  stubJiraCacheTicket?: boolean;
   /**
    * CSS selector centered in the viewport before the capture. The dashboard shell scrolls
    * inside itself, so `fullPage` never grows past the viewport height and a card below the
@@ -34,6 +36,7 @@ export type RouteEntry = {
   clickButton?: string;
   /** Accessible tab name selected after the page reaches its ready state. */
   clickTab?: string;
+  buildWorkflow?: "start" | "custom" | "script" | "project";
   /** Auth pages are intentionally captured without the seeded bearer session. */
   anonymous?: boolean;
   /** Capture the global focus menu after its catalog has loaded. */
@@ -118,6 +121,41 @@ export const routes: RouteEntry[] = [
 
   // Builds
   { name: "builds", path: "/builds" },
+  {
+    name: "build-configurations",
+    path: "/builds",
+    clickTab: "Configurations",
+  },
+  {
+    name: "build-configuration-detail",
+    path: `/builds/configurations/${ids.buildConfigurations.release}`,
+  },
+  { name: "build-custom-detail", path: "/builds/build-ios-custom" },
+  { name: "build-script-editor", path: "/builds", buildWorkflow: "script" },
+  {
+    name: "build-start",
+    path: `/apps/${ids.apps.mobileSuite}`,
+    stubWorktree: true,
+    buildWorkflow: "start",
+  },
+  {
+    name: "build-custom",
+    path: `/apps/${ids.apps.mobileSuite}`,
+    stubWorktree: true,
+    buildWorkflow: "custom",
+  },
+  {
+    name: "repository-ios-project",
+    path: `/codebases/repositories/${ids.repositories.ios}`,
+    stubWorktree: true,
+    buildWorkflow: "project",
+  },
+  {
+    name: "app-build-overview",
+    scrollTo: "[data-build-repository]",
+    path: `/apps/${ids.apps.mobileSuite}`,
+    readyTexts: ["Latest repository build"],
+  },
   { name: "build-detail", path: `/builds/${ids.builds.archive}` },
   { name: "build-coverage", path: `/builds/${ids.builds.archive}/coverage` },
   {
@@ -251,6 +289,9 @@ export const routes: RouteEntry[] = [
   { name: "jira-cache", path: "/jira-cache" },
   {
     name: "jira-cache-ticket",
+    stubJiraCacheTicket: true,
+    readyGraphqlOperation: "CachedJiraTicket",
+    readyTexts: ["Summary response"],
     path: `/jira-cache/tickets/${ids.jira.issueKey}`,
   },
 

@@ -50,13 +50,9 @@ describe("IosInstallButton", () => {
       />,
     );
 
-    expect(
-      (
-        screen.getByRole("button", {
-          name: "Install on device",
-        }) as HTMLButtonElement
-      ).disabled,
-    ).toBe(true);
+    const install = screen.getByRole("button", { name: "Install" });
+    expect(install.getAttribute("aria-disabled")).toBe("true");
+    fireEvent.click(install);
     expect(
       screen.getByText("Open this page on an iPhone or iPad to install."),
     ).toBeDefined();
@@ -64,7 +60,7 @@ describe("IosInstallButton", () => {
     fireEvent.click(screen.getByRole("button", { name: "Copy install link" }));
     await waitFor(() =>
       expect(copyTextMock).toHaveBeenCalledWith(
-        "https://ota.example.com/en/builds/build-1?source=desktop#artifacts",
+        "https://ota.example.com/en/builds/build-1",
       ),
     );
   });

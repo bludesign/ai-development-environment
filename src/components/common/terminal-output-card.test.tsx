@@ -11,12 +11,15 @@ import { TerminalOutputCard } from "./terminal-output-card";
 
 const scrollLines = vi.hoisted(() => vi.fn());
 const buffer = vi.hoisted(() => ({
-  active: { viewportY: 50, baseY: 100 },
+  active: { viewportY: 50, baseY: 100, cursorY: 0 },
 }));
 
 vi.mock("@xterm/xterm", () => ({
   Terminal: class {
     buffer = buffer;
+    options = {};
+    reset() {}
+    scrollToLine() {}
     element: HTMLElement | null = null;
     rows = 20;
     loadAddon() {}
@@ -47,6 +50,9 @@ vi.mock("@xterm/xterm", () => ({
 }));
 vi.mock("@xterm/addon-fit", () => ({
   FitAddon: class {
+    proposeDimensions() {
+      return undefined;
+    }
     fit() {}
   },
 }));

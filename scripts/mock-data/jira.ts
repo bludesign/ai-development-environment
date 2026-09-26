@@ -1,3 +1,4 @@
+import type { JiraCachedTicketDetail } from "../../src/services/jira/types";
 import type { PrismaClient } from "../../src/generated/prisma/client";
 
 import { ids } from "./ids";
@@ -10,6 +11,68 @@ function adfParagraph(text: string) {
     type: "doc",
     version: 1,
     content: [{ type: "paragraph", content: [{ type: "text", text }] }],
+  };
+}
+
+const summaryFields = {
+  summary: "Add quick search to the global navigation bar",
+  status: {
+    name: "In Progress",
+    statusCategory: { key: "indeterminate", name: "In Progress" },
+  },
+  priority: { name: "High" },
+  issuetype: { name: "Story" },
+  assignee: { displayName: "Jane Doe" },
+  reporter: { displayName: "John Smith" },
+  labels: ["frontend", "search"],
+  updated: hoursAgo(2).toISOString(),
+  created: daysAgo(6).toISOString(),
+};
+
+/** Cache-detail captures must not observe writes from parallel Jira page loads. */
+export function jiraCachedTicketFixture(): JiraCachedTicketDetail {
+  const fetchedAt = minutesAgo(4).toISOString();
+  return {
+    issueKey: ISSUE_KEY,
+    projectKey: ids.jira.projectKey,
+    summary: summaryFields.summary,
+    status: summaryFields.status.name,
+    coverage: "FULL",
+    stale: false,
+    summaryFetchedAt: fetchedAt,
+    detailFetchedAt: fetchedAt,
+    commentsFetchedAt: fetchedAt,
+    updatedAt: fetchedAt,
+    summaryData: { key: ISSUE_KEY, fields: summaryFields },
+    detailData: {
+      key: ISSUE_KEY,
+      fields: {
+        ...summaryFields,
+        description: adfParagraph(
+          "As a user, I want a quick search in the navigation bar so I can jump to any page or record with the keyboard.",
+        ),
+      },
+    },
+    commentsData: {
+      total: 2,
+      comments: [
+        {
+          id: "comment-1",
+          author: { displayName: "John Smith" },
+          body: adfParagraph("Let's make sure ⌘K opens the palette."),
+          created: daysAgo(3).toISOString(),
+        },
+        {
+          id: "comment-2",
+          author: { displayName: "Jane Doe" },
+          body: adfParagraph("Done — added keyboard navigation and tests."),
+          created: hoursAgo(3).toISOString(),
+        },
+      ],
+    },
+    cacheEntries: [
+      { id: "jira-cache-entry-sprint", operation: "searchIssues", fetchedAt },
+    ],
   };
 }
 
@@ -40,55 +103,18 @@ export async function seedJira(prisma: PrismaClient): Promise<void> {
     },
   });
 
-  const summaryFields = {
-    summary: "Add quick search to the global navigation bar",
-    status: {
-      name: "In Progress",
-      statusCategory: { key: "indeterminate", name: "In Progress" },
-    },
-    priority: { name: "High" },
-    issuetype: { name: "Story" },
-    assignee: { displayName: "Jane Doe" },
-    reporter: { displayName: "John Smith" },
-    labels: ["frontend", "search"],
-    updated: hoursAgo(2).toISOString(),
-    created: daysAgo(6).toISOString(),
-  };
-
+  const ticket = jiraCachedTicketFixture();
   await prisma.jiraCachedTicket.create({
     data: {
-      issueKey: ISSUE_KEY,
-      projectKey: ids.jira.projectKey,
-      summaryJson: JSON.stringify({ key: ISSUE_KEY, fields: summaryFields }),
-      summaryFetchedAt: minutesAgo(4),
-      detailJson: JSON.stringify({
-        key: ISSUE_KEY,
-        fields: {
-          ...summaryFields,
-          description: adfParagraph(
-            "As a user, I want a quick search in the navigation bar so I can jump to any page or record with the keyboard.",
-          ),
-        },
-      }),
-      detailFetchedAt: minutesAgo(4),
-      commentsJson: JSON.stringify({
-        total: 2,
-        comments: [
-          {
-            id: "comment-1",
-            author: { displayName: "John Smith" },
-            body: adfParagraph("Let's make sure ⌘K opens the palette."),
-            created: daysAgo(3).toISOString(),
-          },
-          {
-            id: "comment-2",
-            author: { displayName: "Jane Doe" },
-            body: adfParagraph("Done — added keyboard navigation and tests."),
-            created: hoursAgo(3).toISOString(),
-          },
-        ],
-      }),
-      commentsFetchedAt: minutesAgo(4),
+      issueKey: ticket.issueKey,
+      projectKey: ticket.projectKey,
+      summaryJson: JSON.stringify(ticket.summaryData),
+      summaryFetchedAt: ticket.summaryFetchedAt,
+      detailJson: JSON.stringify(ticket.detailData),
+      detailFetchedAt: ticket.detailFetchedAt,
+      commentsJson: JSON.stringify(ticket.commentsData),
+      commentsFetchedAt: ticket.commentsFetchedAt,
+      updatedAt: ticket.updatedAt,
     },
   });
 

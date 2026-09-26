@@ -2,11 +2,19 @@
 
 import { Hammer } from "lucide-react";
 import { useTranslations } from "next-intl";
-import { useCallback, useEffect, useMemo, useState } from "react";
-
+import { useCallback, useEffect, useState } from "react";
+import { useActiveAgent } from "@/components/active-agent/active-agent-provider";
 import { StartBuildButton } from "@/components/builds/start-build-dialog";
+import { BuildConfigurationLabel } from "@/components/builds/build-configuration-label";
+import { OutOfDateBadge } from "@/components/builds/out-of-date-badge";
+import { BUILD_LIST_FIELDS } from "@/components/builds/graphql-fields";
+import { buildStatusVariant } from "@/components/builds/build-format";
+import type { BuildRecord } from "@/components/builds/types";
 import { Alert, AlertDescription } from "@/components/ui/alert";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { DateTime } from "@/components/common/date-time";
 import {
   Select,
   SelectContent,
@@ -14,168 +22,247 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { Link } from "@/i18n/navigation";
 import {
   controlPlaneRequest,
   controlPlaneSubscriptions,
+  onControlPlaneRecovery,
 } from "@/lib/control-plane-client";
+import { createRefreshCoalescer } from "@/lib/refresh-coalescer";
 
-type BuildWorktree = {
+type Worktree = {
   id: string;
   folder: string;
   branch: string | null;
   availability: string;
   codebaseId: string;
-  repositoryName: string;
+  agentId: string;
+  agentName: string;
   enabled: boolean;
+  repositoryId: string;
+};
+type Repository = {
+  id: string;
+  name: string;
+  iosAppProject: { id: string } | null;
+  latestBuild: BuildRecord | null;
+};
+type Data = {
+  app: { repositories: Repository[] } | null;
+  worktreeOverview: {
+    agents: Array<{
+      agent: {
+        id: string;
+        name: string;
+        connectionStatus: string;
+        capabilities: string[];
+      };
+      codebases: Array<{
+        repository: { id: string };
+        codebase: { id: string };
+        worktrees: Array<{
+          id: string;
+          folder: string;
+          branch: string | null;
+          availability: string;
+        }>;
+      }>;
+    }>;
+  };
 };
 
 export function AppBuildLauncher({ appId }: { appId: string }) {
-  const t = useTranslations("apps");
-  const [items, setItems] = useState<BuildWorktree[]>([]);
-  const [selectedId, setSelectedId] = useState("");
+  const [repositories, setRepositories] = useState<Repository[]>([]);
+  const [worktrees, setWorktrees] = useState<Worktree[]>([]);
   const [error, setError] = useState<string | null>(null);
-
-  const load = useCallback(async () => {
-    try {
-      const data = await controlPlaneRequest<{
-        worktreeOverview: {
-          agents: Array<{
-            agent: { connectionStatus: string; capabilities: string[] };
-            codebases: Array<{
-              iosBuildConfigured: boolean;
-              repository: { name: string };
-              codebase: { id: string };
-              worktrees: Array<{
-                id: string;
-                folder: string;
-                branch: string | null;
-                availability: string;
-              }>;
-            }>;
-          }>;
-        };
-      }>(
-        `query AppBuildWorktrees($appId: ID!) {
-          worktreeOverview(appId: $appId) {
-            agents {
-              agent { connectionStatus capabilities }
-              codebases {
-                iosBuildConfigured
-                repository { name }
-                codebase { id }
-                worktrees { id folder branch availability }
-              }
-            }
-          }
-        }`,
-        { appId },
-      );
-      const next = data.worktreeOverview.agents.flatMap(
-        ({ agent, codebases }) =>
-          codebases.flatMap((codebase) =>
-            codebase.worktrees.map((worktree) => ({
-              ...worktree,
-              codebaseId: codebase.codebase.id,
-              repositoryName: codebase.repository.name,
-              enabled:
-                agent.connectionStatus === "ONLINE" &&
-                agent.capabilities.includes("ios.build.run") &&
-                codebase.iosBuildConfigured &&
-                worktree.availability === "AVAILABLE",
-            })),
+  const load = useCallback(
+    async (signal?: AbortSignal) => {
+      try {
+        const data = await controlPlaneRequest<Data>(
+          `query AppBuildWorktrees($appId: ID!) {
+        app(id: $appId) { repositories { id name iosAppProject { id } latestBuild { ${BUILD_LIST_FIELDS} } } }
+        worktreeOverview(appId: $appId) { agents { agent { id name connectionStatus capabilities } codebases { repository { id } codebase { id } worktrees { id folder branch availability } } } }
+      }`,
+          { appId },
+          { signal },
+        );
+        if (signal?.aborted) return;
+        setRepositories(
+          (data.app?.repositories ?? []).filter(
+            (repository) => repository.iosAppProject,
           ),
-      );
-      setItems(next);
-      setSelectedId((current) =>
-        next.some((item) => item.id === current)
-          ? current
-          : (next.find((item) => item.enabled)?.id ?? ""),
-      );
-      setError(null);
-    } catch (value) {
-      setError(value instanceof Error ? value.message : String(value));
-    }
-  }, [appId]);
-
+        );
+        setWorktrees(
+          data.worktreeOverview.agents.flatMap(({ agent, codebases }) =>
+            codebases.flatMap((group) =>
+              group.worktrees.map((tree) => ({
+                ...tree,
+                codebaseId: group.codebase.id,
+                repositoryId: group.repository.id,
+                agentId: agent.id,
+                agentName: agent.name,
+                enabled:
+                  agent.connectionStatus === "ONLINE" &&
+                  agent.capabilities.includes("ios.build.run") &&
+                  tree.availability === "AVAILABLE",
+              })),
+            ),
+          ),
+        );
+        setError(null);
+      } catch (error) {
+        if (!signal?.aborted) setError(String(error));
+      }
+    },
+    [appId],
+  );
   useEffect(() => {
-    const timer = window.setTimeout(() => void load(), 0);
-    const subscriptions = controlPlaneSubscriptions();
-    const unsubscribeCodebases = subscriptions.subscribe(
-      {
-        query:
-          "subscription AppBuildCodebasesChanged { codebaseOverviewChanged { codebaseId repositoryId } }",
-      },
-      {
-        next: () => void load(),
-        error: () => undefined,
-        complete: () => undefined,
-      },
+    const owner = createRefreshCoalescer(load);
+    void owner.refresh();
+    const disposers = [
+      "subscription AppBuildCodebasesChanged { codebaseOverviewChanged { repositoryId } }",
+      "subscription AppBuildWorktreesChanged { worktreeOverviewChanged { worktreeId } }",
+      "subscription AppBuildHistoryChanged { buildsChanged { id } }",
+      "subscription AppBuildAssignmentsChanged { appsChanged { id } }",
+    ].map((query) =>
+      controlPlaneSubscriptions().subscribe(
+        { query },
+        {
+          next: () => void owner.refresh(),
+          error: () => {},
+          complete: () => {},
+        },
+      ),
     );
-    const unsubscribeWorktrees = subscriptions.subscribe(
-      {
-        query:
-          "subscription AppBuildWorktreesChanged { worktreeOverviewChanged { worktreeId codebaseId } }",
-      },
-      {
-        next: () => void load(),
-        error: () => undefined,
-        complete: () => undefined,
-      },
-    );
+    const recover = onControlPlaneRecovery(() => void owner.refresh());
     return () => {
-      window.clearTimeout(timer);
-      unsubscribeCodebases();
-      unsubscribeWorktrees();
+      owner.dispose();
+      recover();
+      disposers.forEach((dispose) => dispose());
     };
   }, [load]);
-
-  const selected = useMemo(
-    () => items.find((item) => item.id === selectedId),
-    [items, selectedId],
-  );
-
   return (
-    <Card>
+    <div className="space-y-4">
+      {error && (
+        <Alert variant="destructive">
+          <AlertDescription>{error}</AlertDescription>
+        </Alert>
+      )}
+      <div className="grid gap-4 xl:grid-cols-2">
+        {repositories.map((repository) => (
+          <RepositoryBuildCard
+            key={repository.id}
+            repository={repository}
+            worktrees={worktrees.filter(
+              (tree) => tree.repositoryId === repository.id,
+            )}
+            onCompleted={() => load()}
+            onError={setError}
+          />
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function RepositoryBuildCard({
+  repository,
+  worktrees,
+  onCompleted,
+  onError,
+}: {
+  repository: Repository;
+  worktrees: Worktree[];
+  onCompleted: () => Promise<void>;
+  onError: (error: string | null) => void;
+}) {
+  const t = useTranslations("builds");
+  const activeAgent = useActiveAgent();
+  const [selectedId, setSelectedId] = useState("");
+  const options = worktrees.filter(
+    (tree) =>
+      !activeAgent.activeAgentId || tree.agentId === activeAgent.activeAgentId,
+  );
+  const selected =
+    options.find((tree) => tree.id === selectedId && tree.enabled) ??
+    options.find((tree) => tree.enabled);
+  const latest = repository.latestBuild;
+  return (
+    <Card data-build-repository={repository.id}>
       <CardHeader>
         <CardTitle className="flex items-center gap-2">
-          <Hammer /> {t("startBuild")}
+          <Hammer />
+          {repository.name}
         </CardTitle>
       </CardHeader>
-      <CardContent className="flex flex-wrap items-end gap-3">
-        {error && (
-          <Alert className="w-full" variant="destructive">
-            <AlertDescription>{error}</AlertDescription>
-          </Alert>
-        )}
-        <div className="min-w-64 flex-1">
-          <Select
-            onValueChange={(value) => setSelectedId(value ?? "")}
-            value={selectedId}
-          >
-            <SelectTrigger aria-label={t("buildWorktree")} className="w-full">
-              <SelectValue placeholder={t("selectBuildWorktree")} />
+      <CardContent className="space-y-4">
+        <div className="flex flex-wrap items-center gap-2">
+          <Select value={selected?.id ?? ""} onValueChange={setSelectedId}>
+            <SelectTrigger
+              className="min-w-48 flex-1"
+              aria-label={t("worktree")}
+            >
+              <SelectValue placeholder={t("selectWorktree")} />
             </SelectTrigger>
             <SelectContent>
-              {items.map((item) => (
+              {options.map((tree) => (
                 <SelectItem
-                  disabled={!item.enabled}
-                  key={item.id}
-                  value={item.id}
+                  key={tree.id}
+                  value={tree.id}
+                  disabled={!tree.enabled}
                 >
-                  {item.repositoryName} · {item.branch ?? item.folder}
+                  {tree.branch ?? tree.folder} · {tree.agentName}
                 </SelectItem>
               ))}
             </SelectContent>
           </Select>
-        </div>
-        {selected && (
           <StartBuildButton
-            codebaseId={selected.codebaseId}
-            disabled={!selected.enabled}
-            size="default"
-            worktreeId={selected.id}
+            codebaseId={selected?.codebaseId ?? ""}
+            worktreeId={selected?.id ?? ""}
+            disabled={!selected}
+            onStarted={() => void onCompleted()}
           />
+        </div>
+        {!selected && (
+          <p className="text-sm text-muted-foreground">
+            {t("noEligibleWorktrees")}
+          </p>
         )}
+        <div className="space-y-2 border-t pt-3">
+          <p className="text-xs font-medium text-muted-foreground">
+            {t("latestRepositoryBuild")}
+          </p>
+          {latest ? (
+            <>
+              <div className="flex flex-wrap items-center gap-2">
+                <Link className="hover:underline" href={`/builds/${latest.id}`}>
+                  <Badge variant={buildStatusVariant(latest.status)}>
+                    {t(`statuses.${latest.status}`)}
+                  </Badge>
+                </Link>
+                <Badge variant="outline">{t(`actions.${latest.action}`)}</Badge>
+                {latest.outOfDate && (
+                  <OutOfDateBadge
+                    buildId={latest.id}
+                    onCompleted={onCompleted}
+                    onError={onError}
+                  />
+                )}
+              </div>
+              <div className="flex flex-wrap items-center gap-2 text-sm">
+                <BuildConfigurationLabel build={latest} />
+                <span className="text-muted-foreground">
+                  <DateTime value={latest.createdAt} />
+                </span>
+                <Button asChild className="ml-auto" size="sm" variant="outline">
+                  <Link href={`/builds/${latest.id}`}>{t("viewBuild")}</Link>
+                </Button>
+              </div>
+            </>
+          ) : (
+            <p className="text-sm text-muted-foreground">{t("emptyTitle")}</p>
+          )}
+        </div>
       </CardContent>
     </Card>
   );

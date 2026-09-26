@@ -1700,3 +1700,307 @@ describe("BuildsService", () => {
     ).rejects.toThrow("AUTO, LCOV, or ISTANBUL");
   });
 });
+
+describe("build workflow persistence", () => {
+  const customConfiguration = {
+    sourceKind: "WORKSPACE" as const,
+    sourcePath: "App.xcworkspace",
+    scheme: "App",
+    buildConfiguration: "Debug",
+  };
+
+  test("requires exactly one configuration and creates a Custom snapshot without a saved configuration", async () => {
+    const create = vi.fn().mockResolvedValue({ id: "custom-build" });
+    const saved = { findUnique: vi.fn(), create: vi.fn() };
+    getPrismaClient.mockResolvedValue({
+      build: {
+        findUnique: vi.fn().mockResolvedValue(null),
+        create,
+        update: vi.fn(),
+        findUniqueOrThrow: vi.fn().mockResolvedValue({ id: "custom-build" }),
+      },
+      worktree: { findUnique: vi.fn().mockResolvedValue(worktree()) },
+      codebaseProject: {
+        findUnique: vi.fn().mockResolvedValue({ id: "project-1" }),
+      },
+      buildConfiguration: saved,
+      codebaseRepositoryBuildScript: {
+        findMany: vi.fn().mockResolvedValue([]),
+      },
+    });
+    const service = new BuildsService(control());
+    const base = {
+      worktreeId: "worktree-1",
+      destination,
+      requestId: "custom-request",
+    };
+    await expect(service.startBuild(base)).rejects.toThrow("exactly one");
+    await expect(
+      service.startBuild({
+        ...base,
+        configurationId: "configuration-1",
+        customConfiguration,
+      }),
+    ).rejects.toThrow("exactly one");
+    await expect(
+      service.startBuild({
+        ...base,
+        customConfiguration: {
+          ...customConfiguration,
+          sourcePath: "../App.xcworkspace",
+        },
+      }),
+    ).rejects.toThrow();
+    await service.startBuild({ ...base, customConfiguration });
+    const data = create.mock.calls[0][0].data;
+    expect(data.configurationId).toBeNull();
+    expect(JSON.parse(data.snapshotJson).configuration).toMatchObject({
+      kind: "CUSTOM",
+      name: "Custom",
+      scheme: "App",
+      source: { relativePath: "App.xcworkspace" },
+    });
+    expect(saved.create).not.toHaveBeenCalled();
+    expect(saved.findUnique).not.toHaveBeenCalled();
+  });
+
+  test.each([
+    ["matching", {}, true],
+    ["missing Custom marker", { kind: undefined }, false],
+    [
+      "different source kind",
+      { source: { kind: "PROJECT", relativePath: "App.xcworkspace" } },
+      false,
+    ],
+    [
+      "different source path",
+      { source: { kind: "WORKSPACE", relativePath: "Other.xcworkspace" } },
+      false,
+    ],
+    ["different scheme", { scheme: "Other" }, false],
+    ["different Xcode configuration", { buildConfiguration: "Release" }, false],
+  ])(
+    "compares Custom test-product snapshots: %s",
+    async (_name, overrides, compatible) => {
+      const create = vi.fn().mockResolvedValue({ id: "new-custom" });
+      const prior = {
+        id: "prior-custom",
+        status: "SUCCEEDED",
+        action: "BUILD_FOR_TESTING",
+        agentId: "agent-1",
+        worktreeId: "worktree-1",
+        configurationId: null,
+        destinationType: "SIMULATOR",
+        artifactDirectory: "/agent/builds/prior-custom",
+        artifacts: [],
+        snapshotJson: JSON.stringify({
+          configuration: {
+            kind: "CUSTOM",
+            source: { kind: "WORKSPACE", relativePath: "App.xcworkspace" },
+            scheme: "App",
+            buildConfiguration: "Debug",
+            ...overrides,
+          },
+        }),
+      };
+      getPrismaClient.mockResolvedValue({
+        build: {
+          findUnique: vi.fn(({ where }) =>
+            Promise.resolve(where.id === "prior-custom" ? prior : null),
+          ),
+          create,
+          update: vi.fn(),
+          findUniqueOrThrow: vi.fn().mockResolvedValue({ id: "new-custom" }),
+        },
+        worktree: { findUnique: vi.fn().mockResolvedValue(worktree()) },
+        codebaseProject: {
+          findUnique: vi.fn().mockResolvedValue({ id: "project-1" }),
+        },
+        codebaseRepositoryBuildScript: {
+          findMany: vi.fn().mockResolvedValue([]),
+        },
+      });
+      const result = new BuildsService(control()).startBuild({
+        worktreeId: "worktree-1",
+        customConfiguration,
+        destination,
+        action: "TEST_WITHOUT_BUILDING",
+        advancedSettings: { priorBuildForTestingId: "prior-custom" },
+        requestId: "custom-test",
+      });
+      if (compatible) {
+        await expect(result).resolves.toEqual({ id: "new-custom" });
+        expect(create.mock.calls[0][0].data.commandSummary).toContain(
+          "/agent/builds/prior-custom/test-products.xctestproducts",
+        );
+      } else {
+        await expect(result).rejects.toThrow(
+          "different custom source settings",
+        );
+        expect(create).not.toHaveBeenCalled();
+      }
+    },
+  );
+
+  test("paginates configuration history and finds the latest repository build without worktree or agent filters", async () => {
+    const rows = [{ id: "latest-failed", status: "FAILED" }, { id: "older" }];
+    const findMany = vi.fn().mockResolvedValue(rows);
+    getPrismaClient.mockResolvedValue({ build: { findMany } });
+    const service = new BuildsService(control());
+    const result = await service.builds({
+      configurationId: "configuration-1",
+      first: 1,
+      after: "cursor",
+    });
+    expect(result).toEqual({ items: [rows[0]], nextCursor: "latest-failed" });
+    expect(findMany.mock.calls[0][0]).toMatchObject({
+      where: { configurationId: "configuration-1" },
+      cursor: { id: "cursor" },
+      skip: 1,
+      take: 2,
+    });
+    await service.builds({ repositoryId: "repository-1", first: 1 });
+    expect(findMany.mock.calls[1][0].where).toEqual({
+      repositoryId: "repository-1",
+    });
+    expect(findMany.mock.calls[1][0].orderBy).toEqual([
+      { createdAt: "desc" },
+      { id: "desc" },
+    ]);
+  });
+
+  test("rebuilds Custom from its source snapshot but does not treat a deleted saved configuration as Custom", async () => {
+    const lookup = vi.fn().mockResolvedValue({
+      worktreeId: "worktree-1",
+      configurationId: null,
+      action: "BUILD",
+      destinationJson: JSON.stringify(destination),
+      snapshotJson: JSON.stringify({
+        configuration: {
+          kind: "CUSTOM",
+          name: "Custom",
+          source: { kind: "WORKSPACE", relativePath: "App.xcworkspace" },
+          scheme: "App",
+          buildConfiguration: "Debug",
+        },
+      }),
+    });
+    getPrismaClient.mockResolvedValue({ build: { findUnique: lookup } });
+    const service = new BuildsService(control());
+    const start = vi
+      .spyOn(service, "startBuild")
+      .mockResolvedValue({ id: "rebuilt" } as never);
+    await service.rebuildBuild("build-1", "request");
+    expect(start).toHaveBeenCalledWith(
+      expect.objectContaining({
+        customConfiguration,
+        worktreeId: "worktree-1",
+      }),
+    );
+    expect(start.mock.calls[0][0]).not.toHaveProperty("configurationId");
+    lookup.mockResolvedValue({
+      worktreeId: "worktree-1",
+      configurationId: null,
+      action: "BUILD",
+      destinationJson: "{}",
+      snapshotJson: JSON.stringify({
+        configuration: { name: "Deleted Release" },
+      }),
+    });
+    await expect(
+      service.rebuildBuild("deleted-build", "retry"),
+    ).rejects.toThrow("original build settings");
+  });
+
+  test("project deletion blocks active Custom builds and keeps history and script assignments", async () => {
+    const active = vi
+      .fn()
+      .mockResolvedValue({ id: "custom", configurationId: null });
+    const tx = {
+      codebaseProject: {
+        findUnique: vi.fn().mockResolvedValue({ repositoryId: "repo-1" }),
+        delete: vi.fn(),
+      },
+      build: { findFirst: active, deleteMany: vi.fn() },
+      buildConfiguration: { deleteMany: vi.fn() },
+      codebaseRepositoryBuildScript: { deleteMany: vi.fn() },
+    };
+    getPrismaClient.mockResolvedValue({
+      $transaction: vi.fn((callback) => callback(tx)),
+    });
+    const service = new BuildsService(control());
+    await expect(service.deleteProject("project-1")).rejects.toThrow(
+      "active build",
+    );
+    expect(tx.codebaseProject.delete).not.toHaveBeenCalled();
+    expect(active).toHaveBeenCalledWith({
+      where: {
+        repositoryId: "repo-1",
+        status: { in: ["QUEUED", "PREPARING", "RUNNING"] },
+      },
+    });
+    active.mockResolvedValue(null);
+    await expect(service.deleteProject("project-1")).resolves.toBe(true);
+    expect(tx.buildConfiguration.deleteMany).toHaveBeenCalledWith({
+      where: { projectId: "project-1" },
+    });
+    expect(tx.codebaseProject.delete).toHaveBeenCalledWith({
+      where: { id: "project-1" },
+    });
+    expect(tx.build.deleteMany).not.toHaveBeenCalled();
+    expect(tx.codebaseRepositoryBuildScript.deleteMany).not.toHaveBeenCalled();
+  });
+
+  test("script saves preserve omitted fields and unrelated order, and explicit empty assignments clear only this script", async () => {
+    const tx = {
+      buildScript: { upsert: vi.fn().mockResolvedValue({ id: "script-1" }) },
+      codebaseRepository: { count: vi.fn().mockResolvedValue(1) },
+      codebaseRepositoryBuildScript: {
+        findMany: vi
+          .fn()
+          .mockResolvedValue([{ repositoryId: "previous-repo" }]),
+        deleteMany: vi.fn(),
+        findUnique: vi.fn().mockResolvedValue(null),
+        aggregate: vi.fn().mockResolvedValue({ _max: { position: 7 } }),
+        create: vi.fn(),
+      },
+    };
+    getPrismaClient.mockResolvedValue({
+      $transaction: vi.fn((callback) => callback(tx)),
+    });
+    const service = new BuildsService(control());
+    const input = {
+      id: "script-1",
+      name: "Hook",
+      preBuildScript: "export default () => {}",
+      enabledByDefault: true,
+      failureBehavior: "FAIL_BUILD" as const,
+    };
+    await service.saveScript(input);
+    expect(tx.buildScript.upsert.mock.calls[0][0].update).not.toHaveProperty(
+      "iconKey",
+    );
+    expect(tx.codebaseRepositoryBuildScript.deleteMany).not.toHaveBeenCalled();
+    await service.saveScript({
+      ...input,
+      iconKey: "hammer",
+      repositoryIds: ["repo-1"],
+    });
+    expect(tx.codebaseRepositoryBuildScript.create).toHaveBeenCalledWith({
+      data: { repositoryId: "repo-1", scriptId: "script-1", position: 8 },
+    });
+    tx.codebaseRepository.count.mockResolvedValue(0);
+    await service.saveScript({ ...input, iconKey: null, repositoryIds: [] });
+    expect(
+      tx.codebaseRepositoryBuildScript.deleteMany,
+    ).toHaveBeenLastCalledWith({
+      where: { scriptId: "script-1", repositoryId: { notIn: [] } },
+    });
+    expect(
+      tx.buildScript.upsert.mock.calls.at(-1)![0].update.iconKey,
+    ).toBeNull();
+    await expect(
+      service.saveScript({ ...input, repositoryIds: ["missing"] }),
+    ).rejects.toThrow("Repository not found");
+  });
+});

@@ -1,4 +1,5 @@
 import { describe, expect, test } from "vitest";
+import { globSync } from "node:fs";
 
 import {
   buildAppBreadcrumbs,
@@ -22,6 +23,7 @@ const labels: Record<BreadcrumbLabelKey, string> = {
   codebases: "Codebases",
   comments: "Comments",
   commands: "Commands",
+  configurations: "Configurations",
   consoleLogs: "Console Logs",
   costs: "Costs",
   coverage: "Coverage",
@@ -72,6 +74,24 @@ const labels: Record<BreadcrumbLabelKey, string> = {
 const translate = (key: BreadcrumbLabelKey) => labels[key];
 
 describe("buildAppBreadcrumbs", () => {
+  test("localizes every static segment in the dashboard routes", () => {
+    for (const page of globSync("**/page.tsx", {
+      cwd: "src/app/[locale]/(dashboard)",
+    })) {
+      const segments = page.split("/").slice(0, -1);
+      const pathname = `/${segments.map((segment) => (segment.startsWith("[") ? "record-123" : segment)).join("/")}`;
+      const breadcrumbs = buildAppBreadcrumbs(
+        pathname,
+        (key) => `translated:${key}`,
+      );
+      segments.forEach((segment, index) => {
+        if (!segment.startsWith("[")) {
+          expect(breadcrumbs[index].label, pathname).toMatch(/^translated:/);
+        }
+      });
+    }
+  });
+
   test("returns the localized Action Center crumb for the root route", () => {
     expect(buildAppBreadcrumbs("/", translate)).toEqual([
       { isCurrent: true, label: "Action Center" },
@@ -90,6 +110,23 @@ describe("buildAppBreadcrumbs", () => {
     expect(buildAppBreadcrumbs("/apps/app-123", translate)).toEqual([
       { href: "/apps", isCurrent: false, label: "Apps" },
       { href: undefined, isCurrent: true, label: "app-123" },
+    ]);
+  });
+
+  test("links the Configurations tab from a build configuration detail route", () => {
+    expect(
+      buildAppBreadcrumbs(
+        "/builds/configurations/configuration-123",
+        translate,
+      ),
+    ).toEqual([
+      { href: "/builds", isCurrent: false, label: "Builds" },
+      {
+        href: "/builds?view=configurations",
+        isCurrent: false,
+        label: "Configurations",
+      },
+      { href: undefined, isCurrent: true, label: "configuration-123" },
     ]);
   });
 

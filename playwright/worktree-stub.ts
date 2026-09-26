@@ -238,6 +238,37 @@ export async function stubWorktreeAgent(page: Page): Promise<void> {
         body: JSON.stringify({ data }),
       });
 
+    if (query.includes("discoverBuildSources("))
+      return respond({
+        discoverBuildSources: [
+          { kind: "WORKSPACE", relativePath: "AcmeApp.xcworkspace" },
+        ],
+      });
+    if (query.includes("inspectBuildSource("))
+      return respond({
+        inspectBuildSource: {
+          source: { kind: "WORKSPACE", relativePath: "AcmeApp.xcworkspace" },
+          schemes: ["AcmeApp", "AcmeAppTests"],
+          configurations: ["Debug", "Release"],
+          testPlans: ["AcmeApp"],
+          signingRequirements: [],
+          headSha: "1a2b3c4d",
+          xcodeVersion: "26.0",
+        },
+      });
+    if (query.includes("inspectBuildDestinations("))
+      return respond({
+        inspectBuildDestinations: [
+          {
+            type: "SIMULATOR",
+            id: "sim-iphone-17",
+            name: "iPhone 17 Pro",
+            platform: "iOS Simulator",
+            osVersion: "26.0",
+            state: "Booted",
+          },
+        ],
+      });
     if (query.includes("inspectWorktree(")) {
       return respond({
         inspectWorktree: {

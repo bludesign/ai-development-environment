@@ -1,5 +1,7 @@
 "use client";
 
+import { OutOfDateBadge } from "@/components/builds/out-of-date-badge";
+
 import { readWorktreeBuildWindow } from "@/components/builds/build-history-window";
 
 import {
@@ -920,7 +922,11 @@ function LoadedWorktreeDetail({
               <Spinner /> {wt("loadingDetails")}
             </p>
           ) : detail ? (
-            <WorktreeDetailPanel detail={detail} worktreeId={worktree.id} />
+            <WorktreeDetailPanel
+              detail={detail}
+              worktreeId={worktree.id}
+              worktreeFolder={worktree.folder}
+            />
           ) : (
             <p className="text-sm text-muted-foreground">
               {canInspect ? t("inspectionFailed") : "—"}
@@ -939,6 +945,7 @@ function LoadedWorktreeDetail({
               files={detail.branchChanges ?? []}
               truncated={detail.branchChangesTruncated === true}
               worktreeId={worktree.id}
+              worktreeFolder={worktree.folder}
             />
           ) : (
             <p className="text-sm text-muted-foreground">—</p>
@@ -1154,12 +1161,11 @@ export function WorktreeBuildTable({
                         {t(`statuses.${build.status}`)}
                       </Badge>
                       {build.outOfDate && (
-                        <Badge
-                          className="border-amber-500/40 text-amber-700 dark:text-amber-300"
-                          variant="outline"
-                        >
-                          {t("outOfDate")}
-                        </Badge>
+                        <OutOfDateBadge
+                          buildId={build.id}
+                          onCompleted={() => onReload()}
+                          onError={onError}
+                        />
                       )}
                     </div>
                   </TableCell>

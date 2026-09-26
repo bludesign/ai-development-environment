@@ -1,5 +1,7 @@
 "use client";
 
+import { OutOfDateBadge } from "@/components/builds/out-of-date-badge";
+
 import { Hammer, Plus, ScrollText, Trash2 } from "lucide-react";
 import { useLocale, useTranslations } from "next-intl";
 import {
@@ -74,13 +76,19 @@ import {
   buildStatusVariant,
 } from "./build-format";
 import { BUILD_LIST_FIELDS } from "./graphql-fields";
+import { BuildConfigurationLabel } from "./build-configuration-label";
+import { IosInstallButton, latestInstallArtifact } from "./ios-install-button";
+import type { PublicOrigin } from "@/lib/public-origin";
+import { BuildConfigurations } from "./build-configurations";
+import { BuildIconPicker } from "./build-icon-picker";
+import { ConfigurationIcon } from "./configuration-icon";
 import { RebuildButton } from "./rebuild-button";
 import type { BuildRecord, BuildScript } from "./types";
 import { RunBuildControls } from "./run-build-controls";
 import { useBuildTimeTicker } from "./use-build-time-ticker";
 
 const SCRIPT_FIELDS = `
-  id name preBuildScript postBuildScript enabledByDefault timeoutSeconds failureBehavior createdAt updatedAt
+  id name iconKey repositories { id name } preBuildScript postBuildScript enabledByDefault timeoutSeconds failureBehavior createdAt updatedAt
 `;
 
 const PRE_BUILD_TEMPLATE = `export default async function preBuild({
@@ -121,7 +129,17 @@ const STATUSES = [
   "CANCELLED",
 ] as const;
 
-export function BuildsPage({ appId }: { appId?: string }) {
+export function BuildsPage({
+  appId,
+  publicOrigin = null,
+  configurationId,
+  initialTab = "history",
+}: {
+  appId?: string;
+  publicOrigin?: PublicOrigin | null;
+  configurationId?: string;
+  initialTab?: "history" | "scripts" | "configurations";
+}) {
   const t = useTranslations("builds");
   const locale = useLocale();
   const router = useRouter();
@@ -133,7 +151,7 @@ export function BuildsPage({ appId }: { appId?: string }) {
   const [loading, setLoading] = useState(true);
   const [loadingMore, setLoadingMore] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [tab, setTab] = useState("history");
+  const [tab, setTab] = useState(initialTab);
   const [scriptOpen, setScriptOpen] = useState(false);
   const [editingScript, setEditingScript] = useState<BuildScript | null>(null);
   const [selected, setSelected] = useState<Set<string>>(new Set());
@@ -158,20 +176,21 @@ export function BuildsPage({ appId }: { appId?: string }) {
       const data = await controlPlaneRequest<{
         builds: { items: BuildRecord[]; nextCursor: string | null };
       }>(
-        `query BuildsPage($after: ID, $first: Int!, $status: BuildStatus, $appId: ID) {
-        builds(first: $first, after: $after, status: $status, appId: $appId) { items { ${BUILD_LIST_FIELDS} } nextCursor }
+        `query BuildsPage($after: ID, $first: Int!, $status: BuildStatus, $appId: ID, $configurationId: ID) {
+        builds(first: $first, after: $after, status: $status, appId: $appId, configurationId: $configurationId) { items { ${BUILD_LIST_FIELDS} } nextCursor }
       }`,
         {
           after,
           first,
           status: status === "ALL" ? null : status,
           appId: appId ?? null,
+          configurationId: configurationId ?? null,
         },
         { signal },
       );
       return data.builds;
     },
-    [appId, status],
+    [appId, status, configurationId],
   );
   const load = useCallback(
     async (after?: string | null) => {
@@ -351,12 +370,281 @@ export function BuildsPage({ appId }: { appId?: string }) {
     }
   };
 
+  const history = (
+    <div className="space-y-4">
+      <div className="flex flex-wrap justify-end gap-2">
+        {selected.size > 0 && (
+          <Button
+            disabled={deleting}
+            onClick={() => setDeleteOpen(true)}
+            variant="destructive"
+          >
+            {deleting ? <Spinner /> : <Trash2 />}
+            {t("deleteSelected", { count: selected.size })}
+          </Button>
+        )}
+        <Select
+          onValueChange={(value) => {
+            setSelected(new Set());
+            setStatus(value as typeof status);
+          }}
+          value={status}
+        >
+          <SelectTrigger className="w-48" aria-label={t("filterStatus")}>
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            {STATUSES.map((value) => (
+              <SelectItem key={value} value={value}>
+                {value === "ALL" ? t("allStatuses") : t(`statuses.${value}`)}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      </div>
+      {loading && !builds.length ? (
+        <p className="flex items-center gap-2 text-muted-foreground">
+          <Spinner /> {t("loading")}
+        </p>
+      ) : !builds.length ? (
+        <Empty className="border py-12">
+          <EmptyHeader>
+            <EmptyMedia variant="icon">
+              <Hammer />
+            </EmptyMedia>
+            <EmptyTitle>{t("emptyTitle")}</EmptyTitle>
+            <EmptyDescription>{t("emptyDescription")}</EmptyDescription>
+          </EmptyHeader>
+        </Empty>
+      ) : (
+        <div className="space-y-3">
+          <Card className="gap-0 py-0">
+            <Table>
+              <TableHeader>
+                <TableRow className="hover:bg-transparent">
+                  <TableHead className="w-12">
+                    <span className="sr-only">{t("selectBuilds")}</span>
+                  </TableHead>
+                  <TableHead>{t("build")}</TableHead>
+                  <TableHead>{t("status")}</TableHead>
+                  <TableHead>{t("action")}</TableHead>
+                  <TableHead>{t("destination")}</TableHead>
+                  <TableHead>{t("startedAt")}</TableHead>
+                  <TableHead className="text-right">
+                    {t("actionsLabel")}
+                  </TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {groupedBuilds.map((group) => {
+                  const groupIds = group.items.map((build) => build.id);
+                  const selectedCount = groupIds.filter((id) =>
+                    selected.has(id),
+                  ).length;
+                  return (
+                    <Fragment key={group.key}>
+                      <TableRow className="bg-muted/20 hover:bg-muted/20">
+                        <TableCell className="py-1.5">
+                          <Checkbox
+                            aria-label={t("selectDate", {
+                              date: group.label,
+                            })}
+                            checked={
+                              selectedCount === groupIds.length
+                                ? true
+                                : selectedCount > 0
+                                  ? "indeterminate"
+                                  : false
+                            }
+                            onCheckedChange={(checked) =>
+                              setSelected((current) => {
+                                const next = new Set(current);
+                                for (const id of groupIds) {
+                                  if (checked === true) next.add(id);
+                                  else next.delete(id);
+                                }
+                                return next;
+                              })
+                            }
+                          />
+                        </TableCell>
+                        <TableCell
+                          className="py-1.5 text-xs font-normal text-muted-foreground"
+                          colSpan={6}
+                        >
+                          {group.label}
+                        </TableCell>
+                      </TableRow>
+                      {group.items.map((build) => {
+                        const names = buildSnapshotName(build);
+                        const installArtifact = latestInstallArtifact(
+                          build.artifacts,
+                        );
+                        const startedAt = build.startedAt ?? build.createdAt;
+                        const runnable =
+                          build.status === "SUCCEEDED" &&
+                          build.artifacts.some(
+                            (artifact) => artifact.kind === "RUNNABLE_APP",
+                          );
+                        const highlightColor = build.worktree?.highlightColor;
+                        return (
+                          <TableRow
+                            aria-label={t("viewBuild")}
+                            className={cn(
+                              "cursor-pointer focus-visible:bg-muted/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset",
+                              highlightColor &&
+                                worktreeHighlightBackgroundClasses[
+                                  highlightColor
+                                ],
+                            )}
+                            key={build.id}
+                            onClick={() => router.push(`/builds/${build.id}`)}
+                            onKeyDown={(event) => {
+                              if (event.key === "Enter" || event.key === " ") {
+                                event.preventDefault();
+                                router.push(`/builds/${build.id}`);
+                              }
+                            }}
+                            role="link"
+                            tabIndex={0}
+                          >
+                            <TableCell
+                              className={cn(
+                                "border-l-4 pl-2",
+                                highlightColor
+                                  ? worktreeHighlightAccentClasses[
+                                      highlightColor
+                                    ]
+                                  : "border-l-transparent",
+                              )}
+                              onClick={(event) => event.stopPropagation()}
+                              onKeyDown={(event) => event.stopPropagation()}
+                            >
+                              <Checkbox
+                                aria-label={t("selectBuild", {
+                                  id: build.id,
+                                })}
+                                checked={selected.has(build.id)}
+                                onCheckedChange={(checked) =>
+                                  setSelected((current) => {
+                                    const next = new Set(current);
+                                    if (checked === true) next.add(build.id);
+                                    else next.delete(build.id);
+                                    return next;
+                                  })
+                                }
+                              />
+                            </TableCell>
+                            <TableCell className="min-w-56 whitespace-normal">
+                              <Link
+                                className="font-medium hover:underline"
+                                href={`/builds/${build.id}`}
+                                onClick={(event) => event.stopPropagation()}
+                              >
+                                {names.repository}
+                              </Link>
+                              <p className="text-sm">
+                                <BuildConfigurationLabel build={build} />
+                              </p>
+                              <p className="font-mono text-xs text-muted-foreground">
+                                {names.worktree}
+                              </p>
+                            </TableCell>
+                            <TableCell>
+                              <div className="flex flex-wrap gap-1.5">
+                                <Badge
+                                  variant={buildStatusVariant(build.status)}
+                                >
+                                  {t(`statuses.${build.status}`)}
+                                </Badge>
+                                {build.outOfDate && (
+                                  <OutOfDateBadge
+                                    buildId={build.id}
+                                    onCompleted={() => load()}
+                                    onError={setError}
+                                  />
+                                )}
+                              </div>
+                            </TableCell>
+                            <TableCell>
+                              <Badge variant="outline">
+                                {t(`actions.${build.action}`)}
+                              </Badge>
+                            </TableCell>
+                            <TableCell>{build.destination.name}</TableCell>
+                            <TableCell className="text-muted-foreground">
+                              <div className="flex flex-col gap-0.5">
+                                <DateTime
+                                  kind="time"
+                                  relativeToday
+                                  value={startedAt}
+                                />
+                                <span className="text-xs">
+                                  {t("durationValue", {
+                                    duration: buildDuration(build, buildTime),
+                                  })}
+                                </span>
+                              </div>
+                            </TableCell>
+                            <TableCell className="text-right">
+                              <div className="flex items-center justify-end gap-2">
+                                <RebuildButton
+                                  buildId={build.id}
+                                  onCompleted={() => load()}
+                                  onError={setError}
+                                  size="sm"
+                                />
+                                {runnable && (
+                                  <RunBuildControls
+                                    buildId={build.id}
+                                    destinationType={build.destinationType}
+                                    onCompleted={load}
+                                    onError={setError}
+                                    preferredDestination={build.destination}
+                                    size="sm"
+                                  />
+                                )}
+                                {installArtifact && (
+                                  <IosInstallButton
+                                    buildId={build.id}
+                                    artifactId={installArtifact.id}
+                                    metadata={installArtifact.metadata}
+                                    publicOrigin={publicOrigin}
+                                  />
+                                )}
+                              </div>
+                            </TableCell>
+                          </TableRow>
+                        );
+                      })}
+                    </Fragment>
+                  );
+                })}
+              </TableBody>
+            </Table>
+          </Card>
+          {nextCursor && (
+            <div className="flex justify-center">
+              <Button
+                disabled={loadingMore}
+                onClick={() => void load(nextCursor)}
+                variant="outline"
+              >
+                {loadingMore && <Spinner />} {t("loadMore")}
+              </Button>
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+
   return (
     <section className="flex w-full flex-col gap-6">
       <div className="flex flex-wrap items-start justify-between gap-4">
         <div>
           <h1 className="text-2xl font-semibold tracking-tight">
-            {t("title")}
+            {t(configurationId ? "history" : "title")}
           </h1>
           <p className="mt-1 text-sm text-muted-foreground">
             {t("description")}
@@ -368,364 +656,122 @@ export function BuildsPage({ appId }: { appId?: string }) {
           <AlertDescription>{error}</AlertDescription>
         </Alert>
       )}
-      <Tabs value={tab} onValueChange={setTab}>
-        <TabsList>
-          <TabsTrigger value="history">
-            <Hammer /> {t("history")}
-          </TabsTrigger>
-          {!appId && (
-            <TabsTrigger value="scripts">
-              <ScrollText /> {t("buildScripts")}
+      {appId || configurationId ? (
+        history
+      ) : (
+        <Tabs
+          value={tab}
+          onValueChange={(value) => setTab(value as typeof tab)}
+        >
+          <TabsList>
+            <TabsTrigger value="history">
+              <Hammer /> {t("history")}
             </TabsTrigger>
-          )}
-        </TabsList>
-        <TabsContent className="space-y-4" value="history">
-          <div className="flex flex-wrap justify-end gap-2">
-            {selected.size > 0 && (
-              <Button
-                disabled={deleting}
-                onClick={() => setDeleteOpen(true)}
-                variant="destructive"
-              >
-                {deleting ? <Spinner /> : <Trash2 />}
-                {t("deleteSelected", { count: selected.size })}
-              </Button>
+            {!appId && !configurationId && (
+              <TabsTrigger value="scripts">
+                <ScrollText /> {t("buildScripts")}
+              </TabsTrigger>
             )}
-            <Select
-              onValueChange={(value) => {
-                setSelected(new Set());
-                setStatus(value as typeof status);
-              }}
-              value={status}
-            >
-              <SelectTrigger className="w-48" aria-label={t("filterStatus")}>
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                {STATUSES.map((value) => (
-                  <SelectItem key={value} value={value}>
-                    {value === "ALL"
-                      ? t("allStatuses")
-                      : t(`statuses.${value}`)}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
-          {loading && !builds.length ? (
-            <p className="flex items-center gap-2 text-muted-foreground">
-              <Spinner /> {t("loading")}
-            </p>
-          ) : !builds.length ? (
-            <Empty className="border py-12">
-              <EmptyHeader>
-                <EmptyMedia variant="icon">
-                  <Hammer />
-                </EmptyMedia>
-                <EmptyTitle>{t("emptyTitle")}</EmptyTitle>
-                <EmptyDescription>{t("emptyDescription")}</EmptyDescription>
-              </EmptyHeader>
-            </Empty>
-          ) : (
-            <div className="space-y-3">
-              <Card className="gap-0 py-0">
-                <Table>
-                  <TableHeader>
-                    <TableRow className="hover:bg-transparent">
-                      <TableHead className="w-12">
-                        <span className="sr-only">{t("selectBuilds")}</span>
-                      </TableHead>
-                      <TableHead>{t("build")}</TableHead>
-                      <TableHead>{t("status")}</TableHead>
-                      <TableHead>{t("action")}</TableHead>
-                      <TableHead>{t("destination")}</TableHead>
-                      <TableHead>{t("startedAt")}</TableHead>
-                      <TableHead className="text-right">
-                        {t("actionsLabel")}
-                      </TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {groupedBuilds.map((group) => {
-                      const groupIds = group.items.map((build) => build.id);
-                      const selectedCount = groupIds.filter((id) =>
-                        selected.has(id),
-                      ).length;
-                      return (
-                        <Fragment key={group.key}>
-                          <TableRow className="bg-muted/20 hover:bg-muted/20">
-                            <TableCell className="py-1.5">
-                              <Checkbox
-                                aria-label={t("selectDate", {
-                                  date: group.label,
-                                })}
-                                checked={
-                                  selectedCount === groupIds.length
-                                    ? true
-                                    : selectedCount > 0
-                                      ? "indeterminate"
-                                      : false
-                                }
-                                onCheckedChange={(checked) =>
-                                  setSelected((current) => {
-                                    const next = new Set(current);
-                                    for (const id of groupIds) {
-                                      if (checked === true) next.add(id);
-                                      else next.delete(id);
-                                    }
-                                    return next;
-                                  })
-                                }
-                              />
-                            </TableCell>
-                            <TableCell
-                              className="py-1.5 text-xs font-normal text-muted-foreground"
-                              colSpan={6}
-                            >
-                              {group.label}
-                            </TableCell>
-                          </TableRow>
-                          {group.items.map((build) => {
-                            const names = buildSnapshotName(build);
-                            const startedAt =
-                              build.startedAt ?? build.createdAt;
-                            const runnable =
-                              build.status === "SUCCEEDED" &&
-                              build.artifacts.some(
-                                (artifact) => artifact.kind === "RUNNABLE_APP",
-                              );
-                            const highlightColor =
-                              build.worktree?.highlightColor;
-                            return (
-                              <TableRow
-                                aria-label={t("viewBuild")}
-                                className={cn(
-                                  "cursor-pointer focus-visible:bg-muted/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset",
-                                  highlightColor &&
-                                    worktreeHighlightBackgroundClasses[
-                                      highlightColor
-                                    ],
-                                )}
-                                key={build.id}
-                                onClick={() =>
-                                  router.push(`/builds/${build.id}`)
-                                }
-                                onKeyDown={(event) => {
-                                  if (
-                                    event.key === "Enter" ||
-                                    event.key === " "
-                                  ) {
-                                    event.preventDefault();
-                                    router.push(`/builds/${build.id}`);
-                                  }
-                                }}
-                                role="link"
-                                tabIndex={0}
-                              >
-                                <TableCell
-                                  className={cn(
-                                    "border-l-4 pl-2",
-                                    highlightColor
-                                      ? worktreeHighlightAccentClasses[
-                                          highlightColor
-                                        ]
-                                      : "border-l-transparent",
-                                  )}
-                                  onClick={(event) => event.stopPropagation()}
-                                  onKeyDown={(event) => event.stopPropagation()}
-                                >
-                                  <Checkbox
-                                    aria-label={t("selectBuild", {
-                                      id: build.id,
-                                    })}
-                                    checked={selected.has(build.id)}
-                                    onCheckedChange={(checked) =>
-                                      setSelected((current) => {
-                                        const next = new Set(current);
-                                        if (checked === true)
-                                          next.add(build.id);
-                                        else next.delete(build.id);
-                                        return next;
-                                      })
-                                    }
-                                  />
-                                </TableCell>
-                                <TableCell className="min-w-56 whitespace-normal">
-                                  <Link
-                                    className="font-medium hover:underline"
-                                    href={`/builds/${build.id}`}
-                                    onClick={(event) => event.stopPropagation()}
-                                  >
-                                    {names.repository}
-                                  </Link>
-                                  <p className="font-mono text-xs text-muted-foreground">
-                                    {names.worktree}
-                                  </p>
-                                </TableCell>
-                                <TableCell>
-                                  <div className="flex flex-wrap gap-1.5">
-                                    <Badge
-                                      variant={buildStatusVariant(build.status)}
-                                    >
-                                      {t(`statuses.${build.status}`)}
-                                    </Badge>
-                                    {build.outOfDate && (
-                                      <Badge
-                                        className="border-amber-500/40 text-amber-700 dark:text-amber-300"
-                                        variant="outline"
-                                      >
-                                        {t("outOfDate")}
-                                      </Badge>
-                                    )}
-                                  </div>
-                                </TableCell>
-                                <TableCell>
-                                  <Badge variant="outline">
-                                    {t(`actions.${build.action}`)}
-                                  </Badge>
-                                </TableCell>
-                                <TableCell>{build.destination.name}</TableCell>
-                                <TableCell className="text-muted-foreground">
-                                  <div className="flex flex-col gap-0.5">
-                                    <DateTime
-                                      kind="time"
-                                      relativeToday
-                                      value={startedAt}
-                                    />
-                                    <span className="text-xs">
-                                      {t("durationValue", {
-                                        duration: buildDuration(
-                                          build,
-                                          buildTime,
-                                        ),
-                                      })}
-                                    </span>
-                                  </div>
-                                </TableCell>
-                                <TableCell className="text-right">
-                                  <div className="flex items-center justify-end gap-2">
-                                    <RebuildButton
-                                      buildId={build.id}
-                                      onCompleted={() => load()}
-                                      onError={setError}
-                                      size="sm"
-                                    />
-                                    {runnable && (
-                                      <RunBuildControls
-                                        buildId={build.id}
-                                        destinationType={build.destinationType}
-                                        onCompleted={load}
-                                        onError={setError}
-                                        preferredDestination={build.destination}
-                                        size="sm"
-                                      />
-                                    )}
-                                  </div>
-                                </TableCell>
-                              </TableRow>
-                            );
-                          })}
-                        </Fragment>
-                      );
-                    })}
-                  </TableBody>
-                </Table>
-              </Card>
-              {nextCursor && (
-                <div className="flex justify-center">
-                  <Button
-                    disabled={loadingMore}
-                    onClick={() => void load(nextCursor)}
-                    variant="outline"
-                  >
-                    {loadingMore && <Spinner />} {t("loadMore")}
-                  </Button>
+            {!appId && !configurationId && (
+              <TabsTrigger value="configurations">
+                <Hammer />
+                {t("configurationsTab")}
+              </TabsTrigger>
+            )}
+          </TabsList>
+          {!appId && !configurationId && (
+            <TabsContent className="pt-4" value="configurations">
+              <BuildConfigurations />
+            </TabsContent>
+          )}
+          <TabsContent value="history">{history}</TabsContent>
+          {!appId && (
+            <TabsContent className="space-y-4" value="scripts">
+              <div className="flex justify-end">
+                <Button
+                  onClick={() => {
+                    setEditingScript(null);
+                    setScriptOpen(true);
+                  }}
+                >
+                  <Plus /> {t("newScript")}
+                </Button>
+              </div>
+              {!scripts.length ? (
+                <Empty className="border py-12">
+                  <EmptyHeader>
+                    <EmptyMedia variant="icon">
+                      <ScrollText />
+                    </EmptyMedia>
+                    <EmptyTitle>{t("noScripts")}</EmptyTitle>
+                    <EmptyDescription>
+                      {t("noScriptsDescription")}
+                    </EmptyDescription>
+                  </EmptyHeader>
+                </Empty>
+              ) : (
+                <div className="grid gap-3 lg:grid-cols-2">
+                  {scripts.map((script) => (
+                    <Card key={script.id}>
+                      <CardHeader>
+                        <CardTitle className="flex items-center justify-between gap-2">
+                          <span className="flex items-center gap-2">
+                            <ConfigurationIcon
+                              iconKey={script.iconKey ?? null}
+                            />
+                            {script.name}
+                          </span>
+                          {script.enabledByDefault && (
+                            <Badge>{t("defaultEnabled")}</Badge>
+                          )}
+                        </CardTitle>
+                      </CardHeader>
+                      <CardContent className="space-y-3">
+                        <div className="flex flex-wrap gap-2 text-xs text-muted-foreground">
+                          {script.preBuildScript && (
+                            <Badge variant="outline">{t("preBuild")}</Badge>
+                          )}
+                          {script.postBuildScript && (
+                            <Badge variant="outline">{t("postBuild")}</Badge>
+                          )}
+                          <span>
+                            {t("timeoutSeconds", {
+                              count: script.timeoutSeconds,
+                            })}
+                          </span>
+                          <span>
+                            {t(`failureBehaviors.${script.failureBehavior}`)}
+                          </span>
+                        </div>
+                        <div className="flex justify-end gap-2">
+                          <Button
+                            onClick={() => {
+                              setEditingScript(script);
+                              setScriptOpen(true);
+                            }}
+                            size="sm"
+                            variant="outline"
+                          >
+                            {t("edit")}
+                          </Button>
+                          <Button
+                            aria-label={t("deleteScript")}
+                            onClick={() => void deleteScript(script.id)}
+                            size="icon-sm"
+                            variant="destructive"
+                          >
+                            <Trash2 />
+                          </Button>
+                        </div>
+                      </CardContent>
+                    </Card>
+                  ))}
                 </div>
               )}
-            </div>
+            </TabsContent>
           )}
-        </TabsContent>
-        {!appId && (
-          <TabsContent className="space-y-4" value="scripts">
-            <div className="flex justify-end">
-              <Button
-                onClick={() => {
-                  setEditingScript(null);
-                  setScriptOpen(true);
-                }}
-              >
-                <Plus /> {t("newScript")}
-              </Button>
-            </div>
-            {!scripts.length ? (
-              <Empty className="border py-12">
-                <EmptyHeader>
-                  <EmptyMedia variant="icon">
-                    <ScrollText />
-                  </EmptyMedia>
-                  <EmptyTitle>{t("noScripts")}</EmptyTitle>
-                  <EmptyDescription>
-                    {t("noScriptsDescription")}
-                  </EmptyDescription>
-                </EmptyHeader>
-              </Empty>
-            ) : (
-              <div className="grid gap-3 lg:grid-cols-2">
-                {scripts.map((script) => (
-                  <Card key={script.id}>
-                    <CardHeader>
-                      <CardTitle className="flex items-center justify-between gap-2">
-                        <span>{script.name}</span>
-                        {script.enabledByDefault && (
-                          <Badge>{t("defaultEnabled")}</Badge>
-                        )}
-                      </CardTitle>
-                    </CardHeader>
-                    <CardContent className="space-y-3">
-                      <div className="flex flex-wrap gap-2 text-xs text-muted-foreground">
-                        {script.preBuildScript && (
-                          <Badge variant="outline">{t("preBuild")}</Badge>
-                        )}
-                        {script.postBuildScript && (
-                          <Badge variant="outline">{t("postBuild")}</Badge>
-                        )}
-                        <span>
-                          {t("timeoutSeconds", {
-                            count: script.timeoutSeconds,
-                          })}
-                        </span>
-                        <span>
-                          {t(`failureBehaviors.${script.failureBehavior}`)}
-                        </span>
-                      </div>
-                      <div className="flex justify-end gap-2">
-                        <Button
-                          onClick={() => {
-                            setEditingScript(script);
-                            setScriptOpen(true);
-                          }}
-                          size="sm"
-                          variant="outline"
-                        >
-                          {t("edit")}
-                        </Button>
-                        <Button
-                          aria-label={t("deleteScript")}
-                          onClick={() => void deleteScript(script.id)}
-                          size="icon-sm"
-                          variant="destructive"
-                        >
-                          <Trash2 />
-                        </Button>
-                      </div>
-                    </CardContent>
-                  </Card>
-                ))}
-              </div>
-            )}
-          </TabsContent>
-        )}
-      </Tabs>
+        </Tabs>
+      )}
       {scriptOpen && (
         <BuildScriptDialog
           onOpenChange={setScriptOpen}
@@ -761,6 +807,36 @@ function BuildScriptDialog({
   onSaved: () => Promise<void>;
 }) {
   const t = useTranslations("builds");
+  const [iconKey, setIconKey] = useState(script?.iconKey ?? null);
+  const [repositories, setRepositories] = useState<
+    Array<{ id: string; name: string }>
+  >([]);
+  const [repositoryIds, setRepositoryIds] = useState(
+    new Set(script?.repositories?.map((repository) => repository.id) ?? []),
+  );
+  const [repositorySearch, setRepositorySearch] = useState("");
+  const [repositoriesLoaded, setRepositoriesLoaded] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  useEffect(() => {
+    let disposed = false;
+    void controlPlaneRequest<{
+      codebaseOverview: { repositories: Array<{ id: string; name: string }> };
+    }>(
+      `query BuildScriptRepositories { codebaseOverview { repositories { id name } } }`,
+    )
+      .then((data) => {
+        if (!disposed) {
+          setRepositories(data.codebaseOverview.repositories);
+          setRepositoriesLoaded(true);
+        }
+      })
+      .catch((error) => {
+        if (!disposed) setError(String(error));
+      });
+    return () => {
+      disposed = true;
+    };
+  }, []);
   const [name, setName] = useState(script?.name ?? "");
   const [pre, setPre] = useState(
     script ? (script.preBuildScript ?? "") : PRE_BUILD_TEMPLATE,
@@ -774,7 +850,6 @@ function BuildScriptDialog({
     script?.failureBehavior ?? "FAIL_BUILD",
   );
   const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
 
   const save = async () => {
     setBusy(true);
@@ -788,6 +863,10 @@ function BuildScriptDialog({
           input: {
             id: script?.id ?? null,
             name,
+            iconKey,
+            ...(repositoriesLoaded
+              ? { repositoryIds: [...repositoryIds] }
+              : {}),
             preBuildScript: pre || null,
             postBuildScript: post || null,
             enabledByDefault: enabled,
@@ -807,7 +886,7 @@ function BuildScriptDialog({
 
   return (
     <Dialog onOpenChange={onOpenChange} open={open}>
-      <DialogContent className="sm:max-w-2xl">
+      <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-2xl">
         <DialogHeader>
           <DialogTitle>{script ? t("editScript") : t("newScript")}</DialogTitle>
           <DialogDescription>{t("scriptDescription")}</DialogDescription>
@@ -825,6 +904,46 @@ function BuildScriptDialog({
               onChange={(event) => setName(event.target.value)}
               value={name}
             />
+          </div>
+          <div className="space-y-2">
+            <Label>{t("icon")}</Label>
+            <BuildIconPicker value={iconKey} onChange={setIconKey} />
+          </div>
+          <div className="space-y-2">
+            <Label>{t("repositories")}</Label>
+            <Input
+              aria-label={t("searchRepositories")}
+              placeholder={t("searchRepositories")}
+              value={repositorySearch}
+              onChange={(event) => setRepositorySearch(event.target.value)}
+            />
+            <div className="max-h-40 space-y-2 overflow-y-auto rounded-lg border p-3">
+              {repositories
+                .filter((repository) =>
+                  repository.name
+                    .toLowerCase()
+                    .includes(repositorySearch.toLowerCase()),
+                )
+                .map((repository) => (
+                  <label
+                    key={repository.id}
+                    className="flex items-center gap-2 text-sm"
+                  >
+                    <Checkbox
+                      checked={repositoryIds.has(repository.id)}
+                      onCheckedChange={(checked) =>
+                        setRepositoryIds((current) => {
+                          const next = new Set(current);
+                          if (checked) next.add(repository.id);
+                          else next.delete(repository.id);
+                          return next;
+                        })
+                      }
+                    />
+                    {repository.name}
+                  </label>
+                ))}
+            </div>
           </div>
           <div className="space-y-2">
             <Label htmlFor="pre-build-script">{t("preBuildScript")}</Label>

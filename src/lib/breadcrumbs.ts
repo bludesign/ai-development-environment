@@ -15,6 +15,7 @@ export type BreadcrumbLabelKey =
   | "codebases"
   | "comments"
   | "commands"
+  | "configurations"
   | "consoleLogs"
   | "costs"
   | "coverage"
@@ -84,6 +85,7 @@ const STATIC_SEGMENTS: Record<string, BreadcrumbLabelKey> = {
   codebases: "codebases",
   comments: "comments",
   commands: "commands",
+  configurations: "configurations",
   "console-logs": "consoleLogs",
   costs: "costs",
   coverage: "coverage",
@@ -143,6 +145,7 @@ const TOP_LEVEL_ALIASES: Record<
 };
 
 const STATIC_NESTED_PATHS = new Set([
+  "/builds/configurations",
   "/codebases/repositories",
   "/commands/new",
   "/commands/runs",
@@ -170,6 +173,10 @@ const STATIC_NESTED_PATHS = new Set([
 
 const STATIC_PATH_LABELS: Record<string, BreadcrumbLabelKey> = {
   "/gitlab/cache": "apiCache",
+};
+
+const STATIC_PATH_LINKS: Record<string, string> = {
+  "/builds/configurations": "/builds?view=configurations",
 };
 
 const STATIC_NESTED_PATH_PATTERNS = [
@@ -241,7 +248,7 @@ const ROUTABLE_STATIC_PATHS = new Set([
 const ROUTABLE_DYNAMIC_PATHS = [
   /^\/apps\/[^/]+$/,
   /^\/agents\/[^/]+$/,
-  /^\/builds\/[^/]+$/,
+  /^\/builds\/(?!configurations$)[^/]+$/,
   /^\/codebases\/(?!repositories(?:\/|$))[^/]+$/,
   /^\/crashes\/(?!dsyms$)[^/]+$/,
   /^\/crashes\/dsyms\/[^/]+$/,
@@ -311,7 +318,9 @@ export function buildAppBreadcrumbs(
     return {
       href: isCurrent
         ? undefined
-        : (alias?.href ?? (isRoutablePath(prefix) ? prefix : undefined)),
+        : (alias?.href ??
+          STATIC_PATH_LINKS[prefix] ??
+          (isRoutablePath(prefix) ? prefix : undefined)),
       isCurrent,
       label: labelKey ? translate(labelKey) : safeDecode(segment),
     };

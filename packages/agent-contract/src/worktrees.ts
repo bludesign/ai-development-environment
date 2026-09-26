@@ -205,6 +205,7 @@ export function validGitBranchName(value: string): boolean {
 export type WorktreeCommit = {
   sha: string;
   subject: string;
+  message?: string;
   authorName: string;
   authoredAt: string;
   additions: number;

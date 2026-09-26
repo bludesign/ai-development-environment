@@ -507,6 +507,8 @@ type WorktreeCommit {
   sha: String!
   "The subject associated with this worktree commit."
   subject: String!
+  "The full commit message, including the body. May be unavailable from older agents."
+  message: String
   "The author name associated with this worktree commit."
   authorName: String!
   "ISO 8601 timestamp when this worktree commit was authored."

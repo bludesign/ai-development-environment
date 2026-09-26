@@ -317,7 +317,14 @@ describe("worktree inventory and inspection", () => {
     const folder = await repository();
     await writeFile(join(folder, "committed.txt"), "committed\n");
     await git(folder, "add", "committed.txt");
-    await git(folder, "commit", "-m", "Committed change");
+    await git(
+      folder,
+      "commit",
+      "-m",
+      "Committed change",
+      "-m",
+      "Keep the complete message.\n12\t34\tnot-a-file-stat",
+    );
     await writeFile(join(folder, "staged.txt"), "staged\n");
     await git(folder, "add", "staged.txt");
     await writeFile(join(folder, "README.md"), "base\nunstaged\n");
@@ -333,7 +340,10 @@ describe("worktree inventory and inspection", () => {
     expect(detail.commits).toHaveLength(1);
     expect(detail.commits[0]).toMatchObject({
       subject: "Committed change",
+      message:
+        "Committed change\n\nKeep the complete message.\n12\t34\tnot-a-file-stat",
       additions: 1,
+      deletions: 0,
     });
     expect(detail.branchChanges).toContainEqual(
       expect.objectContaining({

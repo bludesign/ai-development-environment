@@ -756,8 +756,7 @@ export function registerWorktreesPageTests(
         const latestBuildRow = screen.getByText("Latest build").parentElement!;
         expect(screen.getByText("Succeeded")).toBeDefined();
         expect(screen.getByText("Out of date")).toBeDefined();
-        expect(screen.getByRole("button", { name: /1 devices/ })).toBeDefined();
-        expect(screen.queryByRole("button", { name: "Run" })).toBeNull();
+        expect(screen.getByRole("button", { name: "Run" })).toBeDefined();
         expect(
           within(latestBuildRow).queryByRole("button", { name: "Rebuild" }),
         ).toBeNull();
@@ -1027,8 +1026,9 @@ export function registerWorktreesPageTests(
 
         const menuItems = screen.getAllByRole("menuitem");
         expect(
-          menuItems.slice(0, 7).map((item) => item.textContent?.trim()),
+          menuItems.slice(0, 8).map((item) => item.textContent?.trim()),
         ).toEqual([
+          "Copy path",
           "Change branch",
           "Change branch to main",
           "Commit",
@@ -1555,6 +1555,48 @@ export function registerWorktreesPageTests(
           name: /src\/components\/worktrees\/worktrees-page\.tsx/,
         });
         expect(changeButton.getAttribute("aria-expanded")).toBe("false");
+        const writeText = vi.fn().mockResolvedValue(undefined);
+        const originalClipboard = Object.getOwnPropertyDescriptor(
+          navigator,
+          "clipboard",
+        );
+        Object.defineProperty(navigator, "clipboard", {
+          configurable: true,
+          value: { writeText },
+        });
+        try {
+          const commitRow = commitMessage.closest("tr")!;
+          for (const [row, label, value] of [
+            [
+              changeButton,
+              "Copy file path",
+              "/workspaces/repo/src/components/worktrees/worktrees-page.tsx",
+            ],
+            [
+              changeButton,
+              "Copy relative file path",
+              "src/components/worktrees/worktrees-page.tsx",
+            ],
+            [commitRow, "Copy shortened commit hash", "12345678"],
+            [commitRow, "Copy full commit hash", "1234567890abcdef"],
+            [commitRow, "Copy commit message", "Keep worktree details compact"],
+          ] as const) {
+            fireEvent.contextMenu(row);
+            fireEvent.click(
+              await screen.findByRole("menuitem", { name: label }),
+            );
+            await waitFor(() =>
+              expect(writeText).toHaveBeenLastCalledWith(value),
+            );
+            await waitFor(() => expect(screen.queryByRole("menu")).toBeNull());
+          }
+          expect(changeButton.getAttribute("aria-expanded")).toBe("false");
+          expect(navigation.push).not.toHaveBeenCalled();
+        } finally {
+          if (originalClipboard)
+            Object.defineProperty(navigator, "clipboard", originalClipboard);
+          else Reflect.deleteProperty(navigator, "clipboard");
+        }
         request.mockImplementation(async (query) => {
           if (query.includes("mutation InspectWorktreeDiff")) {
             return {

@@ -82,6 +82,10 @@ type RepositoryPreparation {
 
 "Represents a codebase repository in the GraphQL API."
 type CodebaseRepository {
+  "The repository-wide iOS App project, if enabled."
+  iosAppProject: CodebaseProject
+  "Newest build across every checkout and worktree of this repository."
+  latestBuild: Build
   "Stable identifier for this codebase repository."
   id: ID!
   "Whether this codebase repository can onical origin."

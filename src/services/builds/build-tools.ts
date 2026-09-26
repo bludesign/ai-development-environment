@@ -1,8 +1,17 @@
 import * as z from "zod/v4";
 
+const CustomBuildConfigurationSchema = z.object({
+  sourceKind: z.enum(["PROJECT", "WORKSPACE", "PACKAGE"]),
+  sourcePath: z.string().min(1),
+  scheme: z.string().min(1),
+  buildConfiguration: z.string().min(1),
+});
+
 export const GetBuildsInputSchema = z.object({
   status: z.string().optional(),
   codebaseId: z.string().optional(),
+  repositoryId: z.string().optional(),
+  configurationId: z.string().optional(),
   worktreeId: z.string().optional(),
   first: z.number().int().min(1).max(200).default(50),
   after: z.string().optional(),
@@ -36,7 +45,8 @@ export const GetBuildDestinationsInputSchema = z.union([
   }),
   z.object({
     worktreeId: z.string().min(1),
-    configurationId: z.string().min(1),
+    configurationId: z.string().min(1).optional(),
+    customConfiguration: CustomBuildConfigurationSchema.optional(),
     action: z.string().optional(),
     requestId: z.string().min(1),
   }),
@@ -47,11 +57,14 @@ export const GetBuildDestinationsOutputSchema = z.object({
 
 export const StartBuildToolInputSchema = z.object({
   worktreeId: z.string().min(1),
-  configurationId: z.string().min(1),
+  configurationId: z.string().min(1).optional(),
+  customConfiguration: CustomBuildConfigurationSchema.optional(),
   destination: z.record(z.string(), z.unknown()),
   scriptIds: z.array(z.string()).default([]),
   action: z.string().optional(),
   advancedSettings: z.record(z.string(), z.unknown()).optional(),
+  exportWhenComplete: z.boolean().optional(),
+  exportSettings: z.record(z.string(), z.unknown()).optional(),
   requestId: z.string().min(1),
 });
 export const StartBuildToolOutputSchema = z.object({ build: z.unknown() });

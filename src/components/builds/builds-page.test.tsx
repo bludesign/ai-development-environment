@@ -100,6 +100,7 @@ beforeEach(() => {
           {
             id: "script-1",
             name: "Generate Sources",
+            iconKey: null,
             preBuildScript: "console.log('before')",
             postBuildScript: "console.log('after')",
             enabledByDefault: true,
@@ -228,6 +229,7 @@ describe("BuildsPage", () => {
           input: {
             id: "script-1",
             name: "Generate Sources",
+            iconKey: null,
             preBuildScript: "console.log('updated')",
             postBuildScript: "console.log('after')",
             enabledByDefault: true,
@@ -299,7 +301,7 @@ describe("BuildsPage", () => {
     );
 
     const destinationTrigger = screen.getByRole("button", {
-      name: /1 devices/,
+      name: "Run",
     });
     fireEvent.pointerDown(destinationTrigger, { button: 0, ctrlKey: false });
     const destination = await screen.findByRole("menuitemcheckbox", {
