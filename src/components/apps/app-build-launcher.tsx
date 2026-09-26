@@ -12,6 +12,7 @@ import { buildStatusVariant } from "@/components/builds/build-format";
 import type { BuildRecord } from "@/components/builds/types";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { DateTime } from "@/components/common/date-time";
 import {
@@ -253,12 +254,9 @@ function RepositoryBuildCard({
                 <span className="text-muted-foreground">
                   <DateTime value={latest.createdAt} />
                 </span>
-                <Link
-                  className="ml-auto text-primary hover:underline"
-                  href={`/builds/${latest.id}`}
-                >
-                  {t("viewBuild")}
-                </Link>
+                <Button asChild className="ml-auto" size="sm" variant="outline">
+                  <Link href={`/builds/${latest.id}`}>{t("viewBuild")}</Link>
+                </Button>
               </div>
             </>
           ) : (

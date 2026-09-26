@@ -139,7 +139,7 @@ test.describe("app screenshots", () => {
           await page
             .getByRole("heading", { name: "Custom build", exact: true })
             .waitFor();
-          const editor = page.getByRole("dialog").last();
+          const editor = page.getByRole("region", { name: "Custom build" });
           await editor.getByRole("combobox").first().click();
           await page
             .getByRole("option", { name: /AcmeApp.xcworkspace/ })

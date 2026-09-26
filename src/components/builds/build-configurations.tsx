@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { useTranslations } from "next-intl";
-import { ArrowLeft, Pencil } from "lucide-react";
+import { Pencil } from "lucide-react";
 import { Link } from "@/i18n/navigation";
 import {
   controlPlaneRequest,
@@ -196,12 +196,6 @@ export function BuildConfigurationDetail({
   if (loading) return <Spinner />;
   return (
     <section className="space-y-6">
-      <Button asChild variant="ghost">
-        <Link href="/builds">
-          <ArrowLeft />
-          {t("buildConfigurations")}
-        </Link>
-      </Button>
       {error && (
         <Alert variant="destructive">
           <AlertDescription>{error}</AlertDescription>

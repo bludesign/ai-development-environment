@@ -31,6 +31,7 @@
     "buildData": "Datos de compilación",
     "tailscale": "Gestión de Tailscale",
     "builds": "Compilaciones",
+    "configurations": "Configuraciones",
     "workflows": "Flujos de trabajo",
     "commands": "Comandos",
     "provisioningProfiles": "Perfiles de aprovisionamiento",

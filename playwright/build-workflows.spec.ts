@@ -224,7 +224,7 @@ test("install is accessible on desktop and does not open its build row", async (
   await expect(page).toHaveURL(/\/en\/builds$/);
 });
 
-test("custom build editor omits saved configuration identity", async ({
+test("custom build editor keeps the configuration selector available", async ({
   page,
 }) => {
   await stubWorktreeAgent(page);
@@ -238,6 +238,72 @@ test("custom build editor omits saved configuration identity", async ({
     page.getByRole("heading", { name: "Custom build", exact: true }),
   ).toBeVisible();
   await expect(page.getByLabel("Name", { exact: true })).toHaveCount(0);
+  const dialog = page.getByRole("dialog", { name: "Start Build", exact: true });
+  await expect(page.getByRole("dialog")).toHaveCount(1);
+  const custom = dialog.getByRole("button", { name: /^Custom / });
+  const saved = dialog.getByRole("button", { name: /App Store Release/ });
+  await expect(custom).toHaveAttribute("aria-pressed", "true");
+  await expect(saved).toBeVisible();
+  await saved.click();
+  await expect(saved).toHaveAttribute("aria-pressed", "true");
+  await expect(
+    dialog.getByRole("region", { name: "Custom build" }),
+  ).toHaveCount(0);
+  await custom.click();
+  const editor = dialog.getByRole("region", { name: "Custom build" });
+  await editor.getByRole("combobox").first().click();
+  await page.getByRole("option", { name: /AcmeApp.xcworkspace/ }).click();
+  await editor.getByRole("button", { name: "Use settings" }).click();
+  await expect(custom).toHaveAttribute("aria-pressed", "true");
+  await expect(
+    dialog.getByRole("tab", { name: "Simulator", exact: true }),
+  ).toBeVisible();
+  await expect(
+    dialog.getByRole("button", { name: "Start Build", exact: true }),
+  ).toBeEnabled();
+  await saved.click();
+  await expect(saved).toHaveAttribute("aria-pressed", "true");
+});
+
+test("configuration details use breadcrumbs and show history without a lone tab", async ({
+  page,
+}, testInfo) => {
+  await page.goto(
+    `/en/builds/configurations/${ids.buildConfigurations.release}`,
+  );
+  await expect(
+    page.getByRole("heading", { name: "App Store Release", exact: true }),
+  ).toBeVisible();
+  await expect(
+    page.getByRole("heading", { name: "History", exact: true }),
+  ).toBeVisible();
+  await expect(
+    page.getByRole("tab", { name: "History", exact: true }),
+  ).toHaveCount(0);
+  await expect(
+    page.getByRole("link", { name: "Build configurations", exact: true }),
+  ).toHaveCount(0);
+  const breadcrumb = page.getByRole("navigation", { name: "Breadcrumb" });
+  const configurations = breadcrumb.getByRole("link", {
+    name: "Configurations",
+    exact: true,
+    includeHidden: true,
+  });
+  await expect(configurations).toHaveAttribute(
+    "href",
+    "/en/builds?view=configurations",
+  );
+  if (testInfo.project.name.startsWith("desktop")) {
+    await configurations.click();
+    await expect(
+      page.getByRole("tab", { name: "Configurations", exact: true }),
+    ).toHaveAttribute("aria-selected", "true");
+    await expect(
+      page
+        .getByRole("tabpanel", { name: "Configurations", exact: true })
+        .getByRole("link", { name: /App Store Release/ }),
+    ).toBeVisible();
+  }
 });
 
 for (const device of ["iPhone", "iPad"] as const) {
@@ -328,6 +394,11 @@ test("custom is selected automatically when a project has no configurations", as
     page.getByRole("heading", { name: "Custom build", exact: true }),
   ).toBeVisible();
   await expect(page.getByLabel("Name", { exact: true })).toHaveCount(0);
+  await expect(page.getByRole("dialog")).toHaveCount(1);
+  await expect(page.getByRole("button", { name: /^Custom / })).toHaveAttribute(
+    "aria-pressed",
+    "true",
+  );
 });
 
 test("install requires HTTPS in the app build list", async ({
