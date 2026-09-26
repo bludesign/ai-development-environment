@@ -680,7 +680,7 @@ export function BuildsPage({
             )}
           </TabsList>
           {!appId && !configurationId && (
-            <TabsContent value="configurations">
+            <TabsContent className="pt-4" value="configurations">
               <BuildConfigurations />
             </TabsContent>
           )}
