@@ -768,21 +768,6 @@ function StartBuildDialog({
               <section className="space-y-2">
                 <Label>{t("configuration")}</Label>
                 <div className="grid gap-2 sm:grid-cols-2">
-                  <button
-                    type="button"
-                    aria-pressed={configurationId === "__custom__"}
-                    className={`rounded-xl border p-3 text-left ${configurationId === "__custom__" ? "border-primary bg-primary/5" : "hover:bg-muted/50"}`}
-                    onClick={() => {
-                      destinationRequest.current += 1;
-                      setConfigurationId("__custom__");
-                      setCustomOpen(true);
-                    }}
-                  >
-                    <span className="font-medium">{t("custom")}</span>
-                    <p className="text-xs text-muted-foreground">
-                      {t("customDescription")}
-                    </p>
-                  </button>
                   {project.configurations.map((entry) => (
                     <button
                       className={`rounded-xl border p-3 text-left transition-colors ${entry.id === configurationId ? "border-primary bg-primary/5" : "hover:bg-muted/50"}`}
@@ -838,6 +823,21 @@ function StartBuildDialog({
                       </p>
                     </button>
                   ))}
+                  <button
+                    type="button"
+                    aria-pressed={configurationId === "__custom__"}
+                    className={`rounded-xl border p-3 text-left ${configurationId === "__custom__" ? "border-primary bg-primary/5" : "hover:bg-muted/50"}`}
+                    onClick={() => {
+                      destinationRequest.current += 1;
+                      setConfigurationId("__custom__");
+                      setCustomOpen(true);
+                    }}
+                  >
+                    <span className="font-medium">{t("custom")}</span>
+                    <p className="text-xs text-muted-foreground">
+                      {t("customDescription")}
+                    </p>
+                  </button>
                 </div>
               </section>
 
