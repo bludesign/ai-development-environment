@@ -5,6 +5,7 @@ import {
   normalizeScreenshotValues,
   setScreenshotTime,
 } from "./screenshot-time";
+import { stubJiraCacheTicket } from "./jira-cache-stub";
 import { stubWorktreeAgent } from "./worktree-stub";
 import { screenshotSessionToken } from "../scripts/mock-data/auth";
 
@@ -67,6 +68,7 @@ test.describe("app screenshots", () => {
       await setScreenshotTime(page);
       if (route.initScript) await page.addInitScript(route.initScript);
       if (route.stubWorktree) await stubWorktreeAgent(page);
+      if (route.stubJiraCacheTicket) await stubJiraCacheTicket(page);
       const readyResponse = route.readyGraphqlOperation
         ? page.waitForResponse(
             (candidate) =>

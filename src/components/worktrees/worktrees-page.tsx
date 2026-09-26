@@ -1831,6 +1831,7 @@ function WorktreeCard(props: WorktreeItemProps) {
             detail={detail}
             inline
             worktreeId={worktree.id}
+            worktreeFolder={worktree.folder}
           />
         )}
       </CardContent>
@@ -4143,6 +4144,7 @@ function WorktreeTableRows(props: WorktreeItemProps) {
                 detail={detail}
                 inline
                 worktreeId={worktree.id}
+                worktreeFolder={worktree.folder}
               />
             ) : null}
           </TableCell>

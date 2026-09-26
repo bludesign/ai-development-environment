@@ -24,6 +24,8 @@ export type RouteEntry = {
    * For pages that inspect a checkout live; see playwright/worktree-stub.ts.
    */
   stubWorktree?: boolean;
+  /** Read the fixed Jira seed instead of the cache shared by parallel page loads. */
+  stubJiraCacheTicket?: boolean;
   /**
    * CSS selector centered in the viewport before the capture. The dashboard shell scrolls
    * inside itself, so `fullPage` never grows past the viewport height and a card below the
@@ -287,6 +289,9 @@ export const routes: RouteEntry[] = [
   { name: "jira-cache", path: "/jira-cache" },
   {
     name: "jira-cache-ticket",
+    stubJiraCacheTicket: true,
+    readyGraphqlOperation: "CachedJiraTicket",
+    readyTexts: ["Summary response"],
     path: `/jira-cache/tickets/${ids.jira.issueKey}`,
   },
 

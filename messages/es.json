@@ -3319,7 +3319,13 @@
       "NONE": "Sin decisión"
     },
     "comments": "Comentarios: {count}",
-    "copyPath": "Copiar ruta"
+    "copyPath": "Copiar ruta",
+    "copyFilePath": "Copiar ruta del archivo",
+    "copyRelativeFilePath": "Copiar ruta relativa del archivo",
+    "copyShortCommitHash": "Copiar hash abreviado del commit",
+    "copyFullCommitHash": "Copiar hash completo del commit",
+    "copyCommitMessage": "Copiar mensaje del commit",
+    "copyChangeFailed": "No se pudo copiar al portapapeles."
   },
   "worktreeDetail": {
     "loading": "Cargando detalles del worktree…",

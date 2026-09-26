@@ -3319,7 +3319,13 @@
       "NONE": "Aucune décision"
     },
     "comments": "Commentaires : {count}",
-    "copyPath": "Copier le chemin"
+    "copyPath": "Copier le chemin",
+    "copyFilePath": "Copier le chemin du fichier",
+    "copyRelativeFilePath": "Copier le chemin relatif du fichier",
+    "copyShortCommitHash": "Copier le hash abrégé du commit",
+    "copyFullCommitHash": "Copier le hash complet du commit",
+    "copyCommitMessage": "Copier le message du commit",
+    "copyChangeFailed": "Impossible de copier dans le presse-papiers."
   },
   "worktreeDetail": {
     "loading": "Chargement des détails du worktree…",

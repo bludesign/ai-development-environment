@@ -19,6 +19,10 @@ import { createClientId } from "@/lib/browser-utils";
 import { controlPlaneRequest } from "@/lib/control-plane-client";
 
 import { INSPECT_WORKTREE_DIFF_MUTATION } from "./worktree-graphql";
+import {
+  WorktreeChangeContextMenu,
+  type WorktreeChangeCopyTarget,
+} from "./worktree-change-context-menu";
 import type {
   WorktreeDetail,
   WorktreeDiffFile,
@@ -30,15 +34,23 @@ type DiffScope = "STAGED" | "UNSTAGED" | "UNTRACKED" | "COMMIT" | "BRANCH";
 export function WorktreeDetailPanel({
   detail,
   worktreeId,
+  worktreeFolder,
   inline = false,
 }: {
   detail: WorktreeDetail;
   worktreeId: string;
+  worktreeFolder: string;
   inline?: boolean;
 }) {
   const t = useTranslations("worktrees");
   if (inline)
-    return <InlineWorktreeDetail detail={detail} worktreeId={worktreeId} />;
+    return (
+      <InlineWorktreeDetail
+        detail={detail}
+        worktreeId={worktreeId}
+        worktreeFolder={worktreeFolder}
+      />
+    );
   return (
     <div
       className={cn("w-full space-y-4", inline && "border-t pt-4")}
@@ -56,6 +68,7 @@ export function WorktreeDetailPanel({
                 change={change}
                 key={change.path}
                 worktreeId={worktreeId}
+                worktreeFolder={worktreeFolder}
               />
             ))
           ) : (
@@ -74,6 +87,7 @@ export function WorktreeDetailPanel({
           {detail.commits.length ? (
             detail.commits.map((commit) => (
               <ExpandableRow
+                copyTarget={{ commit }}
                 key={commit.sha}
                 label={commit.subject}
                 prefix={commit.sha.slice(0, 8)}
@@ -89,7 +103,11 @@ export function WorktreeDetailPanel({
                 }
               >
                 {worktreeId ? (
-                  <CommitFiles commitSha={commit.sha} worktreeId={worktreeId} />
+                  <CommitFiles
+                    commit={commit}
+                    worktreeId={worktreeId}
+                    worktreeFolder={worktreeFolder}
+                  />
                 ) : null}
               </ExpandableRow>
             ))
@@ -110,9 +128,11 @@ export function WorktreeDetailPanel({
 function InlineWorktreeDetail({
   detail,
   worktreeId,
+  worktreeFolder,
 }: {
   detail: WorktreeDetail;
   worktreeId: string;
+  worktreeFolder: string;
 }) {
   const t = useTranslations("worktrees");
   return (
@@ -136,6 +156,7 @@ function InlineWorktreeDetail({
                 change={change}
                 key={change.path}
                 worktreeId={worktreeId}
+                worktreeFolder={worktreeFolder}
               />
             ))
           ) : (
@@ -157,28 +178,30 @@ function InlineWorktreeDetail({
             >
               <TableBody>
                 {detail.commits.map((commit) => (
-                  <TableRow key={commit.sha}>
-                    <TableCell className="w-24 px-2 py-1.5 font-mono text-muted-foreground">
-                      {commit.sha.slice(0, 8)}
-                    </TableCell>
-                    <TableCell className="max-w-0 px-2 py-1.5">
-                      <div className="flex min-w-0 items-baseline gap-2">
-                        <span className="min-w-0 flex-1 break-words whitespace-normal font-medium">
-                          {commit.subject}
-                        </span>
-                        <span className="shrink-0 text-muted-foreground">
-                          {commit.authorName} ·{" "}
-                          <DateTime value={commit.authoredAt} />
-                        </span>
-                      </div>
-                    </TableCell>
-                    <TableCell className="w-24 px-2 py-1.5 text-right">
-                      <LineCounts
-                        additions={commit.additions}
-                        deletions={commit.deletions}
-                      />
-                    </TableCell>
-                  </TableRow>
+                  <WorktreeChangeContextMenu commit={commit} key={commit.sha}>
+                    <TableRow>
+                      <TableCell className="w-24 px-2 py-1.5 font-mono text-muted-foreground">
+                        {commit.sha.slice(0, 8)}
+                      </TableCell>
+                      <TableCell className="max-w-0 px-2 py-1.5">
+                        <div className="flex min-w-0 items-baseline gap-2">
+                          <span className="min-w-0 flex-1 break-words whitespace-normal font-medium">
+                            {commit.subject}
+                          </span>
+                          <span className="shrink-0 text-muted-foreground">
+                            {commit.authorName} ·{" "}
+                            <DateTime value={commit.authoredAt} />
+                          </span>
+                        </div>
+                      </TableCell>
+                      <TableCell className="w-24 px-2 py-1.5 text-right">
+                        <LineCounts
+                          additions={commit.additions}
+                          deletions={commit.deletions}
+                        />
+                      </TableCell>
+                    </TableRow>
+                  </WorktreeChangeContextMenu>
                 ))}
               </TableBody>
             </Table>
@@ -196,13 +219,16 @@ function InlineWorktreeDetail({
 function WorktreeChangeRow({
   change,
   worktreeId,
+  worktreeFolder,
 }: {
   change: WorktreeDetail["changes"][number];
   worktreeId: string;
+  worktreeFolder: string;
 }) {
   const t = useTranslations("worktrees");
   return (
     <ExpandableRow
+      copyTarget={{ file: { folder: worktreeFolder, path: change.path } }}
       label={change.path}
       summary={
         <div className="flex flex-wrap items-center gap-2">
@@ -268,10 +294,12 @@ export function BranchChangesPanel({
   files,
   truncated,
   worktreeId,
+  worktreeFolder,
 }: {
   files: WorktreeDiffFile[];
   truncated: boolean;
   worktreeId: string;
+  worktreeFolder: string;
 }) {
   const t = useTranslations("worktreeDetail");
   return (
@@ -284,6 +312,7 @@ export function BranchChangesPanel({
               key={`${file.previousPath ?? ""}:${file.path}`}
               scope="BRANCH"
               worktreeId={worktreeId}
+              worktreeFolder={worktreeFolder}
             />
           ))}
         </div>
@@ -302,40 +331,44 @@ function ExpandableRow({
   prefix,
   summary,
   children,
+  copyTarget,
 }: {
   label: string;
   prefix?: string;
   summary: React.ReactNode;
   children: React.ReactNode;
+  copyTarget: WorktreeChangeCopyTarget;
 }) {
   const [open, setOpen] = useState(false);
   return (
     <div>
-      <button
-        aria-expanded={open}
-        className="flex min-h-8 w-full items-center gap-2 px-2 py-1.5 text-left hover:bg-muted/40"
-        onClick={() => setOpen((current) => !current)}
-        type="button"
-      >
-        <ChevronDown
-          className={cn(
-            "size-3.5 shrink-0 transition-transform",
-            open && "rotate-180",
-          )}
-        />
-        {prefix && (
-          <span className="shrink-0 font-mono text-xs text-muted-foreground">
-            {prefix}
-          </span>
-        )}
-        <span
-          className="min-w-0 flex-1 truncate font-mono text-xs"
-          title={label}
+      <WorktreeChangeContextMenu {...copyTarget}>
+        <button
+          aria-expanded={open}
+          className="flex min-h-8 w-full items-center gap-2 px-2 py-1.5 text-left hover:bg-muted/40"
+          onClick={() => setOpen((current) => !current)}
+          type="button"
         >
-          {label}
-        </span>
-        <span className="shrink-0">{summary}</span>
-      </button>
+          <ChevronDown
+            className={cn(
+              "size-3.5 shrink-0 transition-transform",
+              open && "rotate-180",
+            )}
+          />
+          {prefix && (
+            <span className="shrink-0 font-mono text-xs text-muted-foreground">
+              {prefix}
+            </span>
+          )}
+          <span
+            className="min-w-0 flex-1 truncate font-mono text-xs"
+            title={label}
+          >
+            {label}
+          </span>
+          <span className="shrink-0">{summary}</span>
+        </button>
+      </WorktreeChangeContextMenu>
       {open && children && (
         <div className="border-t bg-muted/10 p-3">{children}</div>
       )}
@@ -345,17 +378,19 @@ function ExpandableRow({
 
 function CommitFiles({
   worktreeId,
-  commitSha,
+  worktreeFolder,
+  commit,
 }: {
   worktreeId: string;
-  commitSha: string;
+  worktreeFolder: string;
+  commit: WorktreeDetail["commits"][number];
 }) {
   const { value, loading, error } = useDiff(
     worktreeId,
     "COMMIT",
     null,
     null,
-    commitSha,
+    commit.sha,
   );
   if (loading) return <LoadingDiff />;
   if (error) return <DiffError value={error} />;
@@ -363,11 +398,12 @@ function CommitFiles({
     <div className="divide-y rounded-md border bg-background">
       {value?.files.map((file) => (
         <ExpandableDiffFile
-          commitSha={commitSha}
+          commit={commit}
           file={file}
           key={`${file.previousPath ?? ""}:${file.path}`}
           scope="COMMIT"
           worktreeId={worktreeId}
+          worktreeFolder={worktreeFolder}
         />
       ))}
     </div>
@@ -377,16 +413,19 @@ function CommitFiles({
 function ExpandableDiffFile({
   file,
   worktreeId,
+  worktreeFolder,
   scope,
-  commitSha,
+  commit,
 }: {
   file: WorktreeDiffFile;
   worktreeId: string;
+  worktreeFolder: string;
   scope: DiffScope;
-  commitSha?: string;
+  commit?: WorktreeDetail["commits"][number];
 }) {
   return (
     <ExpandableRow
+      copyTarget={{ file: { folder: worktreeFolder, path: file.path }, commit }}
       label={file.path}
       summary={
         <span className="inline-flex items-center gap-2">
@@ -401,7 +440,7 @@ function ExpandableDiffFile({
       }
     >
       <DiffBlock
-        commitSha={commitSha}
+        commitSha={commit?.sha}
         path={file.path}
         previousPath={file.previousPath}
         scope={scope}

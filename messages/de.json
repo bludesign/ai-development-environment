@@ -3319,7 +3319,13 @@
       "NONE": "Keine Entscheidung"
     },
     "comments": "Kommentare: {count}",
-    "copyPath": "Pfad kopieren"
+    "copyPath": "Pfad kopieren",
+    "copyFilePath": "Dateipfad kopieren",
+    "copyRelativeFilePath": "Relativen Dateipfad kopieren",
+    "copyShortCommitHash": "Gekürzten Commit-Hash kopieren",
+    "copyFullCommitHash": "Vollständigen Commit-Hash kopieren",
+    "copyCommitMessage": "Commit-Nachricht kopieren",
+    "copyChangeFailed": "Kopieren in die Zwischenablage fehlgeschlagen."
   },
   "worktreeDetail": {
     "loading": "Worktree-Details werden geladen…",

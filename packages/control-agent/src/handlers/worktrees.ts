@@ -918,7 +918,7 @@ async function inspectCommits(
       [
         "log",
         "--max-count=101",
-        "--format=%x1e%H%x1f%s%x1f%an%x1f%aI",
+        "--format=%x1e%H%x1f%s%x1f%an%x1f%aI%x1f%B%x00",
         "--numstat",
         `refs/remotes/origin/${baseBranch}..HEAD`,
       ],
@@ -931,18 +931,31 @@ async function inspectCommits(
     .split("\x1e")
     .filter(Boolean)
     .map((block) => {
-      const lines = block.trim().split("\n");
-      const [sha = "", subject = "", authorName = "", authoredAt = ""] = (
-        lines.shift() ?? ""
-      ).split("\x1f");
+      const [header = "", stats = ""] = block.split("\x00");
+      const [
+        sha = "",
+        subject = "",
+        authorName = "",
+        authoredAt = "",
+        ...messageParts
+      ] = header.split("\x1f");
+      const message = messageParts.join("\x1f").replace(/\n$/, "");
       let additions = 0;
       let deletions = 0;
-      for (const line of lines) {
+      for (const line of stats.trim().split("\n")) {
         const [added, deleted] = line.split("\t");
         if (/^\d+$/.test(added ?? "")) additions += Number(added);
         if (/^\d+$/.test(deleted ?? "")) deletions += Number(deleted);
       }
-      return { sha, subject, authorName, authoredAt, additions, deletions };
+      return {
+        sha,
+        subject,
+        message,
+        authorName,
+        authoredAt,
+        additions,
+        deletions,
+      };
     });
   return { commits: commits.slice(0, 100), truncated: commits.length > 100 };
 }

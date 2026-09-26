@@ -33,7 +33,7 @@ export const CODEBASE_FIELDS = `
 
 export const INSPECT_WORKTREE_MUTATION = `mutation InspectWorktree($id: ID!, $requestId: ID!) {
   inspectWorktree(id: $id, requestId: $requestId) {
-    commits { sha subject authorName authoredAt additions deletions }
+    commits { sha subject message authorName authoredAt additions deletions }
     changes { path previousPath changeType staged unstaged untracked conflicted stagedAdditions stagedDeletions unstagedAdditions unstagedDeletions }
     branchChanges { path previousPath changeType additions deletions binary image }
     commitsTruncated changesTruncated branchChangesTruncated commitSigningEnabled

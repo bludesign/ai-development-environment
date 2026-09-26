@@ -228,8 +228,9 @@ const initialDetail: WorktreeDetail = {
   ],
   commits: [
     {
-      sha: "abcdef1234567890",
+      sha: "abcdef1234567890abcdef1234567890abcdef1234",
       subject: "Add worktree details",
+      message: "Add worktree details\n\nShow the commits and changed files.",
       authorName: "Codex",
       authoredAt: new Date(0).toISOString(),
       additions: 30,
@@ -302,6 +303,99 @@ describe("WorktreeDetailPage", () => {
     cleanup();
     request.mockReset();
     subscriptions.mockReset();
+  });
+
+  test("copies file paths and commit details without expanding or navigating", async () => {
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    const originalClipboard = Object.getOwnPropertyDescriptor(
+      navigator,
+      "clipboard",
+    );
+    Object.defineProperty(navigator, "clipboard", {
+      configurable: true,
+      value: { writeText },
+    });
+    request.mockImplementation(async (query) => {
+      if (query.includes("WorktreeDetailOverview")) {
+        return { worktreeOverview: overview() } as never;
+      }
+      if (query.includes("InspectWorktreeDiff")) {
+        return {
+          inspectWorktreeDiff: {
+            files: [
+              { ...initialDetail.branchChanges![0]!, path: "src/committed.ts" },
+            ],
+          },
+        } as never;
+      }
+      if (query.includes("InspectWorktree")) {
+        return { inspectWorktree: initialDetail } as never;
+      }
+      throw new Error(`Unexpected request: ${query}`);
+    });
+
+    try {
+      render(<WorktreeDetailPage worktreeId="worktree-1" />);
+      const change = await screen.findByRole("button", {
+        name: /src\/worktree-details\.tsx/,
+      });
+      const branchChange = screen.getByRole("button", {
+        name: /src\/branch-change\.ts/,
+      });
+      const commit = screen.getByRole("button", {
+        name: /Add worktree details/,
+      });
+      const commitActions = [
+        ["Copy shortened commit hash", "abcdef12"],
+        ["Copy full commit hash", initialDetail.commits[0]!.sha],
+        ["Copy commit message", initialDetail.commits[0]!.message!],
+      ];
+      const copyActions = async (row: HTMLElement, actions: string[][]) => {
+        for (const [label, value] of actions) {
+          fireEvent.contextMenu(row);
+          fireEvent.click(await screen.findByRole("menuitem", { name: label }));
+          await waitFor(() =>
+            expect(writeText).toHaveBeenLastCalledWith(value),
+          );
+          await waitFor(() => expect(screen.queryByRole("menu")).toBeNull());
+        }
+      };
+
+      await copyActions(change, [
+        ["Copy file path", "/workspaces/repo-aide-43/src/worktree-details.tsx"],
+        ["Copy relative file path", "src/worktree-details.tsx"],
+      ]);
+      await copyActions(branchChange, [
+        ["Copy file path", "/workspaces/repo-aide-43/src/branch-change.ts"],
+        ["Copy relative file path", "src/branch-change.ts"],
+      ]);
+      await copyActions(commit, commitActions);
+      for (const row of [change, branchChange, commit]) {
+        expect(row.getAttribute("aria-expanded")).toBe("false");
+      }
+      expect(
+        request.mock.calls.some(([query]) =>
+          query.includes("InspectWorktreeDiff"),
+        ),
+      ).toBe(false);
+      expect(navigation.push).not.toHaveBeenCalled();
+
+      fireEvent.click(commit);
+      const committedFile = await screen.findByRole("button", {
+        name: /src\/committed\.ts/,
+      });
+      await copyActions(committedFile, [
+        ["Copy file path", "/workspaces/repo-aide-43/src/committed.ts"],
+        ["Copy relative file path", "src/committed.ts"],
+        ...commitActions,
+      ]);
+      expect(committedFile.getAttribute("aria-expanded")).toBe("false");
+      expect(commit.getAttribute("aria-expanded")).toBe("true");
+    } finally {
+      if (originalClipboard)
+        Object.defineProperty(navigator, "clipboard", originalClipboard);
+      else Reflect.deleteProperty(navigator, "clipboard");
+    }
   });
 
   test("renders management metadata and live commits and changes", async () => {

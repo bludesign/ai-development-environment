@@ -3319,7 +3319,13 @@
       "NONE": "No decision"
     },
     "comments": "Comments: {count}",
-    "copyPath": "Copy path"
+    "copyPath": "Copy path",
+    "copyFilePath": "Copy file path",
+    "copyRelativeFilePath": "Copy relative file path",
+    "copyShortCommitHash": "Copy shortened commit hash",
+    "copyFullCommitHash": "Copy full commit hash",
+    "copyCommitMessage": "Copy commit message",
+    "copyChangeFailed": "Could not copy to the clipboard."
   },
   "worktreeDetail": {
     "loading": "Loading worktree details…",
