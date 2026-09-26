@@ -76,13 +76,6 @@ export function RunBuildControls({
     string | null
   >(null);
 
-  const selectedNames = useMemo(
-    () =>
-      destinations
-        .filter((destination) => selectedDestinations.has(destination.id))
-        .map((destination) => destination.name),
-    [destinations, selectedDestinations],
-  );
   const filteredDestinations = useMemo(() => {
     const query = destinationSearch.trim().toLocaleLowerCase();
     if (!query) return destinations;
@@ -502,9 +495,7 @@ export function RunBuildControls({
             variant="outline"
           >
             {loadingDestinations ? <Spinner /> : <Play />}
-            {selectedNames.length
-              ? t("selectedDevices", { count: selectedNames.length })
-              : t("selectRunDevices")}
+            {t("run")}
             <ChevronDown />
           </Button>
         </DropdownMenuTrigger>

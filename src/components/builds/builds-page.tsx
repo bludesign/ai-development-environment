@@ -1,5 +1,7 @@
 "use client";
 
+import { OutOfDateBadge } from "@/components/builds/out-of-date-badge";
+
 import { Hammer, Plus, ScrollText, Trash2 } from "lucide-react";
 import { useLocale, useTranslations } from "next-intl";
 import {
@@ -74,13 +76,19 @@ import {
   buildStatusVariant,
 } from "./build-format";
 import { BUILD_LIST_FIELDS } from "./graphql-fields";
+import { BuildConfigurationLabel } from "./build-configuration-label";
+import { IosInstallButton, latestInstallArtifact } from "./ios-install-button";
+import type { PublicOrigin } from "@/lib/public-origin";
+import { BuildConfigurations } from "./build-configurations";
+import { BuildIconPicker } from "./build-icon-picker";
+import { ConfigurationIcon } from "./configuration-icon";
 import { RebuildButton } from "./rebuild-button";
 import type { BuildRecord, BuildScript } from "./types";
 import { RunBuildControls } from "./run-build-controls";
 import { useBuildTimeTicker } from "./use-build-time-ticker";
 
 const SCRIPT_FIELDS = `
-  id name preBuildScript postBuildScript enabledByDefault timeoutSeconds failureBehavior createdAt updatedAt
+  id name iconKey repositories { id name } preBuildScript postBuildScript enabledByDefault timeoutSeconds failureBehavior createdAt updatedAt
 `;
 
 const PRE_BUILD_TEMPLATE = `export default async function preBuild({
@@ -121,7 +129,15 @@ const STATUSES = [
   "CANCELLED",
 ] as const;
 
-export function BuildsPage({ appId }: { appId?: string }) {
+export function BuildsPage({
+  appId,
+  publicOrigin = null,
+  configurationId,
+}: {
+  appId?: string;
+  publicOrigin?: PublicOrigin | null;
+  configurationId?: string;
+}) {
   const t = useTranslations("builds");
   const locale = useLocale();
   const router = useRouter();
@@ -158,20 +174,21 @@ export function BuildsPage({ appId }: { appId?: string }) {
       const data = await controlPlaneRequest<{
         builds: { items: BuildRecord[]; nextCursor: string | null };
       }>(
-        `query BuildsPage($after: ID, $first: Int!, $status: BuildStatus, $appId: ID) {
-        builds(first: $first, after: $after, status: $status, appId: $appId) { items { ${BUILD_LIST_FIELDS} } nextCursor }
+        `query BuildsPage($after: ID, $first: Int!, $status: BuildStatus, $appId: ID, $configurationId: ID) {
+        builds(first: $first, after: $after, status: $status, appId: $appId, configurationId: $configurationId) { items { ${BUILD_LIST_FIELDS} } nextCursor }
       }`,
         {
           after,
           first,
           status: status === "ALL" ? null : status,
           appId: appId ?? null,
+          configurationId: configurationId ?? null,
         },
         { signal },
       );
       return data.builds;
     },
-    [appId, status],
+    [appId, status, configurationId],
   );
   const load = useCallback(
     async (after?: string | null) => {
@@ -356,7 +373,7 @@ export function BuildsPage({ appId }: { appId?: string }) {
       <div className="flex flex-wrap items-start justify-between gap-4">
         <div>
           <h1 className="text-2xl font-semibold tracking-tight">
-            {t("title")}
+            {t(configurationId ? "history" : "title")}
           </h1>
           <p className="mt-1 text-sm text-muted-foreground">
             {t("description")}
@@ -373,12 +390,23 @@ export function BuildsPage({ appId }: { appId?: string }) {
           <TabsTrigger value="history">
             <Hammer /> {t("history")}
           </TabsTrigger>
-          {!appId && (
+          {!appId && !configurationId && (
             <TabsTrigger value="scripts">
               <ScrollText /> {t("buildScripts")}
             </TabsTrigger>
           )}
+          {!appId && !configurationId && (
+            <TabsTrigger value="configurations">
+              <Hammer />
+              {t("configurationsTab")}
+            </TabsTrigger>
+          )}
         </TabsList>
+        {!appId && !configurationId && (
+          <TabsContent value="configurations">
+            <BuildConfigurations />
+          </TabsContent>
+        )}
         <TabsContent className="space-y-4" value="history">
           <div className="flex flex-wrap justify-end gap-2">
             {selected.size > 0 && (
@@ -487,6 +515,9 @@ export function BuildsPage({ appId }: { appId?: string }) {
                           </TableRow>
                           {group.items.map((build) => {
                             const names = buildSnapshotName(build);
+                            const installArtifact = latestInstallArtifact(
+                              build.artifacts,
+                            );
                             const startedAt =
                               build.startedAt ?? build.createdAt;
                             const runnable =
@@ -558,6 +589,9 @@ export function BuildsPage({ appId }: { appId?: string }) {
                                   >
                                     {names.repository}
                                   </Link>
+                                  <p className="text-sm">
+                                    <BuildConfigurationLabel build={build} />
+                                  </p>
                                   <p className="font-mono text-xs text-muted-foreground">
                                     {names.worktree}
                                   </p>
@@ -570,12 +604,11 @@ export function BuildsPage({ appId }: { appId?: string }) {
                                       {t(`statuses.${build.status}`)}
                                     </Badge>
                                     {build.outOfDate && (
-                                      <Badge
-                                        className="border-amber-500/40 text-amber-700 dark:text-amber-300"
-                                        variant="outline"
-                                      >
-                                        {t("outOfDate")}
-                                      </Badge>
+                                      <OutOfDateBadge
+                                        buildId={build.id}
+                                        onCompleted={() => load()}
+                                        onError={setError}
+                                      />
                                     )}
                                   </div>
                                 </TableCell>
@@ -618,6 +651,14 @@ export function BuildsPage({ appId }: { appId?: string }) {
                                         onError={setError}
                                         preferredDestination={build.destination}
                                         size="sm"
+                                      />
+                                    )}
+                                    {installArtifact && (
+                                      <IosInstallButton
+                                        buildId={build.id}
+                                        artifactId={installArtifact.id}
+                                        metadata={installArtifact.metadata}
+                                        publicOrigin={publicOrigin}
                                       />
                                     )}
                                   </div>
@@ -675,7 +716,10 @@ export function BuildsPage({ appId }: { appId?: string }) {
                   <Card key={script.id}>
                     <CardHeader>
                       <CardTitle className="flex items-center justify-between gap-2">
-                        <span>{script.name}</span>
+                        <span className="flex items-center gap-2">
+                          <ConfigurationIcon iconKey={script.iconKey ?? null} />
+                          {script.name}
+                        </span>
                         {script.enabledByDefault && (
                           <Badge>{t("defaultEnabled")}</Badge>
                         )}
@@ -761,6 +805,36 @@ function BuildScriptDialog({
   onSaved: () => Promise<void>;
 }) {
   const t = useTranslations("builds");
+  const [iconKey, setIconKey] = useState(script?.iconKey ?? null);
+  const [repositories, setRepositories] = useState<
+    Array<{ id: string; name: string }>
+  >([]);
+  const [repositoryIds, setRepositoryIds] = useState(
+    new Set(script?.repositories?.map((repository) => repository.id) ?? []),
+  );
+  const [repositorySearch, setRepositorySearch] = useState("");
+  const [repositoriesLoaded, setRepositoriesLoaded] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  useEffect(() => {
+    let disposed = false;
+    void controlPlaneRequest<{
+      codebaseOverview: { repositories: Array<{ id: string; name: string }> };
+    }>(
+      `query BuildScriptRepositories { codebaseOverview { repositories { id name } } }`,
+    )
+      .then((data) => {
+        if (!disposed) {
+          setRepositories(data.codebaseOverview.repositories);
+          setRepositoriesLoaded(true);
+        }
+      })
+      .catch((error) => {
+        if (!disposed) setError(String(error));
+      });
+    return () => {
+      disposed = true;
+    };
+  }, []);
   const [name, setName] = useState(script?.name ?? "");
   const [pre, setPre] = useState(
     script ? (script.preBuildScript ?? "") : PRE_BUILD_TEMPLATE,
@@ -774,7 +848,6 @@ function BuildScriptDialog({
     script?.failureBehavior ?? "FAIL_BUILD",
   );
   const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
 
   const save = async () => {
     setBusy(true);
@@ -788,6 +861,10 @@ function BuildScriptDialog({
           input: {
             id: script?.id ?? null,
             name,
+            iconKey,
+            ...(repositoriesLoaded
+              ? { repositoryIds: [...repositoryIds] }
+              : {}),
             preBuildScript: pre || null,
             postBuildScript: post || null,
             enabledByDefault: enabled,
@@ -807,7 +884,7 @@ function BuildScriptDialog({
 
   return (
     <Dialog onOpenChange={onOpenChange} open={open}>
-      <DialogContent className="sm:max-w-2xl">
+      <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-2xl">
         <DialogHeader>
           <DialogTitle>{script ? t("editScript") : t("newScript")}</DialogTitle>
           <DialogDescription>{t("scriptDescription")}</DialogDescription>
@@ -825,6 +902,46 @@ function BuildScriptDialog({
               onChange={(event) => setName(event.target.value)}
               value={name}
             />
+          </div>
+          <div className="space-y-2">
+            <Label>{t("icon")}</Label>
+            <BuildIconPicker value={iconKey} onChange={setIconKey} />
+          </div>
+          <div className="space-y-2">
+            <Label>{t("repositories")}</Label>
+            <Input
+              aria-label={t("searchRepositories")}
+              placeholder={t("searchRepositories")}
+              value={repositorySearch}
+              onChange={(event) => setRepositorySearch(event.target.value)}
+            />
+            <div className="max-h-40 space-y-2 overflow-y-auto rounded-lg border p-3">
+              {repositories
+                .filter((repository) =>
+                  repository.name
+                    .toLowerCase()
+                    .includes(repositorySearch.toLowerCase()),
+                )
+                .map((repository) => (
+                  <label
+                    key={repository.id}
+                    className="flex items-center gap-2 text-sm"
+                  >
+                    <Checkbox
+                      checked={repositoryIds.has(repository.id)}
+                      onCheckedChange={(checked) =>
+                        setRepositoryIds((current) => {
+                          const next = new Set(current);
+                          if (checked) next.add(repository.id);
+                          else next.delete(repository.id);
+                          return next;
+                        })
+                      }
+                    />
+                    {repository.name}
+                  </label>
+                ))}
+            </div>
           </div>
           <div className="space-y-2">
             <Label htmlFor="pre-build-script">{t("preBuildScript")}</Label>

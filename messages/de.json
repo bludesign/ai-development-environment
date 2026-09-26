@@ -3317,7 +3317,8 @@
       "REVIEW_REQUIRED": "Prüfung erforderlich",
       "NONE": "Keine Entscheidung"
     },
-    "comments": "Kommentare: {count}"
+    "comments": "Kommentare: {count}",
+    "copyPath": "Pfad kopieren"
   },
   "worktreeDetail": {
     "loading": "Worktree-Details werden geladen…",
@@ -3695,7 +3696,7 @@
     "save": "Speichern",
     "cancel": "Abbrechen",
     "startBuild": "Build starten",
-    "startBuildDescription": "Wähle eine gespeicherte Konfiguration und ein Ziel. Der Befehl wird im Stammverzeichnis dieses Worktrees ausgeführt.",
+    "startBuildDescription": "Wähle eine gespeicherte Konfiguration oder erstelle einen benutzerdefinierten Build und wähle ein Ziel. Der Befehl wird im Stammverzeichnis dieses Worktrees ausgeführt.",
     "configuration": "Konfiguration",
     "agent": "Agent",
     "configurationInvalid": "Die gespeicherte Quelle, das Schema oder die Konfiguration ist in diesem Worktree nicht verfügbar.",
@@ -3822,7 +3823,7 @@
     "outOfDate": "Veraltet",
     "configureBuilds": "Gehe zu den Repository-Einstellungen, um Builds zu konfigurieren",
     "selectedDevices": "{count} Geräte",
-    "selectRunDevices": "Ausführungsgeräte",
+    "selectRunDevices": "Ausführen",
     "runAgents": "Ausführungs-Agenten",
     "buildAgent": "Build-Agent",
     "runAgentUnavailable": {
@@ -4000,7 +4001,26 @@
     },
     "dsymsArtifact": "dSYMs",
     "dsymsArtifactCount": "{count, plural, one {# dSYM-Bundle} other {# dSYM-Bundles}}",
-    "viewDsyms": "dSYMs ansehen"
+    "viewDsyms": "dSYMs ansehen",
+    "custom": "Benutzerdefiniert",
+    "customBuild": "Benutzerdefinierter Build",
+    "customDescription": "Einen einmaligen Build konfigurieren.",
+    "useSettings": "Einstellungen verwenden",
+    "details": "Details",
+    "loadingOlderLogs": "Frühere Protokolle werden geladen…",
+    "retryOlderLogs": "Frühere Protokolle erneut laden",
+    "install": "Installieren",
+    "removeProject": "iOS-App-Projekt entfernen",
+    "removeProjectDescription": "Dieses Projekt und seine gespeicherten Konfigurationen entfernen? Build-Verlauf, Artefakte, Repository-Dateien und Skriptzuweisungen bleiben erhalten. Aktive Builds müssen zuerst beendet werden.",
+    "repositories": "Repositorys",
+    "searchRepositories": "Repositorys suchen",
+    "configurationNotFound": "Build-Konfiguration nicht gefunden.",
+    "noEligibleWorktrees": "Keine verfügbaren Worktrees passen zum ausgewählten Agenten.",
+    "latestRepositoryBuild": "Neuester Repository-Build",
+    "selectWorktree": "Worktree auswählen",
+    "worktree": "Arbeitsverzeichnis",
+    "repository": "Repository",
+    "configurationsTab": "Konfigurationen"
   },
   "devices": {
     "title": "Geräte",

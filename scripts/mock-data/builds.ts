@@ -60,6 +60,7 @@ function buildSnapshot(overrides: {
     },
     configuration: {
       id: ids.buildConfigurations.release,
+      kind: "SAVED",
       name: "App Store Release",
       iconKey: "rocket",
       source: {
@@ -350,6 +351,7 @@ export async function seedBuilds(prisma: PrismaClient): Promise<void> {
     data: {
       id: ids.buildScripts.swiftlint,
       name: "SwiftLint",
+      iconKey: "shield",
       preBuildScript: "swiftlint --strict",
       enabledByDefault: true,
       timeoutSeconds: 300,
@@ -375,6 +377,7 @@ export async function seedBuilds(prisma: PrismaClient): Promise<void> {
       agentId: ids.agents.build,
       codebaseId: ids.codebases.ios,
       worktreeId: ids.worktrees.iosMain,
+      repositoryId: ids.repositories.ios,
       configurationId: ids.buildConfigurations.release,
       status: "SUCCEEDED",
       action: "ARCHIVE",
@@ -397,6 +400,17 @@ export async function seedBuilds(prisma: PrismaClient): Promise<void> {
             relativePath: "AcmeApp.xcarchive",
             sizeBytes: 184_320_000,
             createdAt: hoursAgo(3),
+          },
+          {
+            id: "artifact-archive-ipa",
+            kind: "IPA",
+            relativePath: "export/AcmeApp.ipa",
+            sizeBytes: 98240000,
+            metadataJson: JSON.stringify({
+              bundleIdentifier: "com.acme.mobile",
+              exportMethod: "DEBUGGING",
+            }),
+            createdAt: hoursAgo(2),
           },
           {
             id: "artifact-archive-log",
@@ -560,6 +574,7 @@ export async function seedBuilds(prisma: PrismaClient): Promise<void> {
       agentId: ids.agents.build,
       codebaseId: ids.codebases.ios,
       worktreeId: ids.worktrees.iosMain,
+      repositoryId: ids.repositories.ios,
       configurationId: ids.buildConfigurations.release,
       status: "FAILED",
       action: "TEST",
@@ -610,6 +625,7 @@ export async function seedBuilds(prisma: PrismaClient): Promise<void> {
         agentId: ids.agents.build,
         codebaseId: ids.codebases.ios,
         worktreeId: ids.worktrees.iosMain,
+        repositoryId: ids.repositories.ios,
         configurationId: ids.buildConfigurations.release,
         status: build.status,
         action: build.action,
@@ -634,4 +650,39 @@ export async function seedBuilds(prisma: PrismaClient): Promise<void> {
       },
     });
   }
+  const customSnapshot = buildSnapshot({
+    action: "BUILD",
+    destination: TEST_DESTINATION,
+  });
+  await prisma.build.create({
+    data: {
+      id: "build-ios-custom",
+      requestKey: "request-custom",
+      artifactDirectory: `${BUILDS_DIR}/build-ios-custom`,
+      requestId: "request-custom",
+      repositoryId: ids.repositories.ios,
+      agentId: ids.agents.build,
+      codebaseId: ids.codebases.ios,
+      worktreeId: ids.worktrees.iosMain,
+      status: "SUCCEEDED",
+      action: "BUILD",
+      destinationType: "SIMULATOR",
+      destinationJson: JSON.stringify(TEST_DESTINATION),
+      snapshotJson: JSON.stringify({
+        ...customSnapshot,
+        configuration: {
+          ...customSnapshot.configuration,
+          id: null,
+          kind: "CUSTOM",
+          name: "Custom",
+          autoExport: false,
+        },
+      }),
+      commandSummary:
+        "xcrun xcodebuild -workspace AcmeApp.xcworkspace -scheme AcmeApp -configuration Debug build",
+      createdAt: minutesAgo(12),
+      startedAt: minutesAgo(12),
+      finishedAt: minutesAgo(10),
+    },
+  });
 }

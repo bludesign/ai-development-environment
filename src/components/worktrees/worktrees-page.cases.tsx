@@ -756,8 +756,7 @@ export function registerWorktreesPageTests(
         const latestBuildRow = screen.getByText("Latest build").parentElement!;
         expect(screen.getByText("Succeeded")).toBeDefined();
         expect(screen.getByText("Out of date")).toBeDefined();
-        expect(screen.getByRole("button", { name: /1 devices/ })).toBeDefined();
-        expect(screen.queryByRole("button", { name: "Run" })).toBeNull();
+        expect(screen.getByRole("button", { name: "Run" })).toBeDefined();
         expect(
           within(latestBuildRow).queryByRole("button", { name: "Rebuild" }),
         ).toBeNull();
@@ -1027,8 +1026,9 @@ export function registerWorktreesPageTests(
 
         const menuItems = screen.getAllByRole("menuitem");
         expect(
-          menuItems.slice(0, 7).map((item) => item.textContent?.trim()),
+          menuItems.slice(0, 8).map((item) => item.textContent?.trim()),
         ).toEqual([
+          "Copy path",
           "Change branch",
           "Change branch to main",
           "Commit",

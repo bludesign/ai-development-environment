@@ -388,11 +388,8 @@ describe("WorktreeDetailPage", () => {
     ).toBeDefined();
     expect(within(buildsCard!).getByText("Out of date")).toBeDefined();
     expect(
-      within(buildsCard!).getByRole("button", { name: /1 devices/ }),
+      within(buildsCard!).getByRole("button", { name: "Run" }),
     ).toBeDefined();
-    expect(
-      within(buildsCard!).queryByRole("button", { name: "Run" }),
-    ).toBeNull();
     fireEvent.click(
       within(buildsCard!).getByRole("button", { name: "Rebuild" }),
     );

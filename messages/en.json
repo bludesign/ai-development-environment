@@ -3317,7 +3317,8 @@
       "REVIEW_REQUIRED": "Review required",
       "NONE": "No decision"
     },
-    "comments": "Comments: {count}"
+    "comments": "Comments: {count}",
+    "copyPath": "Copy path"
   },
   "worktreeDetail": {
     "loading": "Loading worktree details…",
@@ -3695,7 +3696,7 @@
     "save": "Save",
     "cancel": "Cancel",
     "startBuild": "Start Build",
-    "startBuildDescription": "Choose one saved configuration and destination. The command runs from this worktree root.",
+    "startBuildDescription": "Choose a saved configuration or create a Custom build, then select a destination. The command runs from this worktree root.",
     "configuration": "Configuration",
     "agent": "Agent",
     "configurationInvalid": "The saved source, scheme, or configuration is unavailable in this worktree.",
@@ -3822,7 +3823,7 @@
     "outOfDate": "Out of date",
     "configureBuilds": "Go to repository settings to configure builds",
     "selectedDevices": "{count} devices",
-    "selectRunDevices": "Run devices",
+    "selectRunDevices": "Run",
     "runAgents": "Run agents",
     "buildAgent": "Build agent",
     "runAgentUnavailable": {
@@ -4000,7 +4001,26 @@
     },
     "dsymsArtifact": "dSYMs",
     "dsymsArtifactCount": "{count, plural, one {# dSYM bundle} other {# dSYM bundles}}",
-    "viewDsyms": "View dSYMs"
+    "viewDsyms": "View dSYMs",
+    "custom": "Custom",
+    "customBuild": "Custom build",
+    "customDescription": "Configure a build to use once.",
+    "useSettings": "Use settings",
+    "details": "Details",
+    "loadingOlderLogs": "Loading earlier logs…",
+    "retryOlderLogs": "Retry earlier logs",
+    "install": "Install",
+    "removeProject": "Remove iOS App project",
+    "removeProjectDescription": "Remove this project and its saved configurations? Build history, artifacts, repository files, and script assignments are preserved. Active builds must finish first.",
+    "repositories": "Repositories",
+    "searchRepositories": "Search repositories",
+    "configurationNotFound": "Build configuration not found.",
+    "noEligibleWorktrees": "No available worktrees match the selected agent.",
+    "latestRepositoryBuild": "Latest repository build",
+    "selectWorktree": "Select a worktree",
+    "worktree": "Worktree",
+    "repository": "Repository",
+    "configurationsTab": "Configurations"
   },
   "devices": {
     "title": "Devices",

@@ -124,6 +124,43 @@ test.describe("app screenshots", () => {
         await tab.click();
         await expect(tab).toHaveAttribute("aria-selected", "true");
       }
+      if (route.buildWorkflow === "start" || route.buildWorkflow === "custom") {
+        await page
+          .getByRole("button", { name: "Build", exact: true })
+          .first()
+          .click();
+        await page.getByRole("dialog").waitFor();
+        await page
+          .getByText("App Store Release", { exact: true })
+          .last()
+          .waitFor();
+        if (route.buildWorkflow === "custom") {
+          await page.getByRole("button", { name: /Custom/ }).click();
+          await page
+            .getByRole("heading", { name: "Custom build", exact: true })
+            .waitFor();
+          const editor = page.getByRole("dialog").last();
+          await editor.getByRole("combobox").first().click();
+          await page
+            .getByRole("option", { name: /AcmeApp.xcworkspace/ })
+            .click();
+          await editor.getByText("Valid", { exact: true }).waitFor();
+        }
+      }
+      if (route.buildWorkflow === "script") {
+        await page.getByRole("tab", { name: "Build Scripts" }).click();
+        await page
+          .getByRole("button", { name: "Edit", exact: true })
+          .first()
+          .click();
+        await page.getByRole("dialog").waitFor();
+      }
+      if (route.buildWorkflow === "project") {
+        await page.getByRole("tab", { name: "iOS App" }).click();
+        await page
+          .getByRole("button", { name: "Remove iOS App project" })
+          .waitFor();
+      }
       await waitForVisualSettle(page);
       await normalizeScreenshotValues(page);
 

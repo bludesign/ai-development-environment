@@ -32,6 +32,15 @@ export const createCodebaseResolvers = (service: CodebasesService) => ({
       Array.isArray(value) ? value : (value.repositories ?? []),
   },
   CodebaseRepository: {
+    codebases: async (value: { id: string; codebases?: unknown[] }) => {
+      if (value.codebases) return value.codebases;
+      const prisma = await getPrismaClient();
+      return prisma.codebase.findMany({
+        where: { repositoryId: value.id },
+        include: { agent: true, repository: true },
+        orderBy: { folder: "asc" },
+      });
+    },
     preparations: async (value: { id: string }) => {
       const prisma = await getPrismaClient();
       return prisma.codebaseRepositoryPreparation.findMany({

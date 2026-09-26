@@ -50,6 +50,7 @@ import {
   AgentControlService,
   BUILDS_CHANGED_TOPIC,
   BUILD_SCRIPTS_CHANGED_TOPIC,
+  CODEBASE_CHANGED_TOPIC,
   ACTION_CENTER_CHANGED_TOPIC,
   SIDEBAR_STATUS_CHANGED_TOPIC,
   agentEventBus,
@@ -426,11 +427,25 @@ export type SaveBuildConfigurationInput = {
 export type SaveBuildScriptInput = {
   id?: string | null;
   name: string;
+  iconKey?: string | null;
+  repositoryIds?: string[] | null;
   preBuildScript?: string | null;
   postBuildScript?: string | null;
   enabledByDefault: boolean;
   timeoutSeconds?: number | null;
   failureBehavior: "FAIL_BUILD" | "CONTINUE";
+};
+
+export type CustomBuildConfigurationInput = {
+  sourceKind: BuildSourceKind;
+  sourcePath: string;
+  scheme: string;
+  buildConfiguration: string;
+};
+
+type BuildConfigurationSelection = {
+  configurationId?: string | null;
+  customConfiguration?: CustomBuildConfigurationInput | null;
 };
 
 export class BuildsService {
@@ -533,6 +548,147 @@ export class BuildsService {
     agentEventBus.publish(ACTION_CENTER_CHANGED_TOPIC, {
       actionCenterChanged: true,
     });
+  }
+
+  private publishRepository(repositoryId: string) {
+    agentEventBus.publish(CODEBASE_CHANGED_TOPIC, {
+      codebaseOverviewChanged: {
+        repositoryId,
+        codebaseId: null,
+        agentId: null,
+      },
+    });
+  }
+
+  async repositoryProject(repositoryId: string) {
+    const prisma = await getPrismaClient();
+    const project = await prisma.codebaseProject.findUnique({
+      where: { repositoryId_type: { repositoryId, type: "IOS_APP" } },
+      include: {
+        repository: true,
+        configurations: { orderBy: { name: "asc" }, include: { source: true } },
+      },
+    });
+    if (!project) return null;
+    const allowedScripts = await prisma.codebaseRepositoryBuildScript.findMany({
+      where: { repositoryId, script: { deletedAt: null } },
+      include: { script: true },
+      orderBy: [{ position: "asc" }, { scriptId: "asc" }],
+    });
+    return { ...project, allowedScripts };
+  }
+
+  async configurations(
+    input: { repositoryId?: string | null; appId?: string | null } = {},
+  ) {
+    const prisma = await getPrismaClient();
+    return prisma.buildConfiguration.findMany({
+      where: {
+        project: {
+          ...(input.repositoryId ? { repositoryId: input.repositoryId } : {}),
+          ...(input.appId
+            ? { repository: { apps: { some: { appId: input.appId } } } }
+            : {}),
+        },
+      },
+      include: { source: true, project: { include: { repository: true } } },
+      orderBy: [{ name: "asc" }, { id: "asc" }],
+    });
+  }
+
+  async configuration(id: string) {
+    const prisma = await getPrismaClient();
+    return prisma.buildConfiguration.findUnique({
+      where: { id },
+      include: { source: true, project: { include: { repository: true } } },
+    });
+  }
+
+  async configurationRepository(id: string) {
+    return (await this.configuration(id))?.project.repository ?? null;
+  }
+
+  async scriptRepositories(id: string) {
+    const prisma = await getPrismaClient();
+    return prisma.codebaseRepository.findMany({
+      where: { buildScripts: { some: { scriptId: id } } },
+      orderBy: [{ name: "asc" }, { id: "asc" }],
+    });
+  }
+
+  async deleteProject(id: string) {
+    const prisma = await getPrismaClient();
+    const repositoryId = await prisma.$transaction(async (tx) => {
+      const project = await tx.codebaseProject.findUnique({ where: { id } });
+      if (!project) return null;
+      const active = await tx.build.findFirst({
+        where: {
+          repositoryId: project.repositoryId,
+          status: { in: ACTIVE_BUILD_STATUSES },
+        },
+      });
+      if (active) throw new Error("The iOS App project has an active build");
+      // Delete configurations first because their source relation is restrictive.
+      await tx.buildConfiguration.deleteMany({ where: { projectId: id } });
+      await tx.codebaseProject.delete({ where: { id } });
+      return project.repositoryId;
+    });
+    if (repositoryId) this.publishRepository(repositoryId);
+    return repositoryId !== null;
+  }
+
+  private async resolveConfiguration(
+    input: BuildConfigurationSelection,
+    repositoryId: string,
+  ) {
+    if (Boolean(input.configurationId) === Boolean(input.customConfiguration)) {
+      throw new Error(
+        "Provide exactly one saved or custom build configuration",
+      );
+    }
+    const prisma = await getPrismaClient();
+    if (input.customConfiguration) {
+      const project = await prisma.codebaseProject.findUnique({
+        where: { repositoryId_type: { repositoryId, type: "IOS_APP" } },
+      });
+      if (!project)
+        throw new Error(
+          "Enable the iOS App project before starting a custom build",
+        );
+      const custom = input.customConfiguration;
+      const source = parseBuildSource({
+        kind: custom.sourceKind,
+        relativePath: custom.sourcePath,
+      });
+      return {
+        id: null,
+        sourceId: null,
+        name: "Custom",
+        iconKey: null,
+        source,
+        scheme: cleanName(custom.scheme, "Scheme", 256),
+        buildConfiguration: cleanName(
+          custom.buildConfiguration,
+          "Xcode configuration",
+          256,
+        ),
+        defaultAction: "BUILD",
+        advancedSettingsJson: "{}",
+        autoExport: false,
+        exportSettingsJson: null,
+      };
+    }
+    const configuration = await prisma.buildConfiguration.findUnique({
+      where: { id: input.configurationId! },
+      include: { source: { include: { project: true } } },
+    });
+    if (
+      !configuration ||
+      configuration.source.project.repositoryId !== repositoryId
+    ) {
+      throw new Error("Build configuration is not available for this worktree");
+    }
+    return configuration;
   }
 
   private async requireWorktree(
@@ -645,7 +801,8 @@ export class BuildsService {
   }
 
   async createProject(codebaseId: string) {
-    await this.ensureProject(codebaseId);
+    const project = await this.ensureProject(codebaseId);
+    this.publishRepository(project.repositoryId);
     return this.project(codebaseId);
   }
 
@@ -714,7 +871,7 @@ export class BuildsService {
       update: { kind: source.kind },
     });
     const id = existing?.id ?? randomUUID();
-    return prisma.buildConfiguration.upsert({
+    const saved = await prisma.buildConfiguration.upsert({
       where: { id },
       create: {
         id,
@@ -746,10 +903,13 @@ export class BuildsService {
       },
       include: { source: true },
     });
+    this.publishRepository(project.repositoryId);
+    return saved;
   }
 
   async deleteConfiguration(id: string): Promise<boolean> {
     const prisma = await getPrismaClient();
+    const configuration = await this.configuration(id);
     const active = await prisma.build.findFirst({
       where: { configurationId: id, status: { in: ACTIVE_BUILD_STATUSES } },
     });
@@ -757,6 +917,8 @@ export class BuildsService {
     const removed = await prisma.buildConfiguration.deleteMany({
       where: { id },
     });
+    if (configuration)
+      this.publishRepository(configuration.project.repositoryId);
     return removed.count === 1;
   }
 
@@ -788,30 +950,75 @@ export class BuildsService {
     }
     const prisma = await getPrismaClient();
     const id = input.id ?? randomUUID();
-    const script = await prisma.buildScript.upsert({
-      where: { id },
-      create: {
-        id,
-        name,
-        preBuildScript,
-        postBuildScript,
-        enabledByDefault: input.enabledByDefault,
-        timeoutSeconds,
-        failureBehavior: input.failureBehavior,
+    const iconKey = input.iconKey?.trim() || null;
+    if (iconKey && !ICON_KEYS.has(iconKey)) throw new Error("Icon is invalid");
+    const repositoryIds =
+      input.repositoryIds == null ? null : [...new Set(input.repositoryIds)];
+    const { script, changedRepositories } = await prisma.$transaction(
+      async (tx) => {
+        const previous = repositoryIds
+          ? await tx.codebaseRepositoryBuildScript.findMany({
+              where: { scriptId: id },
+              select: { repositoryId: true },
+            })
+          : [];
+        if (repositoryIds) {
+          const count = await tx.codebaseRepository.count({
+            where: { id: { in: repositoryIds } },
+          });
+          if (count !== repositoryIds.length)
+            throw new Error("Repository not found");
+        }
+        const values = {
+          name,
+          preBuildScript,
+          postBuildScript,
+          enabledByDefault: input.enabledByDefault,
+          timeoutSeconds,
+          failureBehavior: input.failureBehavior,
+          ...(input.iconKey !== undefined ? { iconKey } : {}),
+        };
+        const saved = await tx.buildScript.upsert({
+          where: { id },
+          create: { id, ...values },
+          update: { ...values, deletedAt: null },
+        });
+        if (repositoryIds) {
+          await tx.codebaseRepositoryBuildScript.deleteMany({
+            where: { scriptId: id, repositoryId: { notIn: repositoryIds } },
+          });
+          for (const repositoryId of repositoryIds) {
+            const existing = await tx.codebaseRepositoryBuildScript.findUnique({
+              where: { repositoryId_scriptId: { repositoryId, scriptId: id } },
+            });
+            if (existing) continue;
+            const last = await tx.codebaseRepositoryBuildScript.aggregate({
+              where: { repositoryId },
+              _max: { position: true },
+            });
+            await tx.codebaseRepositoryBuildScript.create({
+              data: {
+                repositoryId,
+                scriptId: id,
+                position: (last._max.position ?? -1) + 1,
+              },
+            });
+          }
+        }
+        return {
+          script: saved,
+          changedRepositories: new Set([
+            ...previous.map((row) => row.repositoryId),
+            ...(repositoryIds ?? []),
+          ]),
+        };
       },
-      update: {
-        name,
-        preBuildScript,
-        postBuildScript,
-        enabledByDefault: input.enabledByDefault,
-        timeoutSeconds,
-        failureBehavior: input.failureBehavior,
-        deletedAt: null,
-      },
-    });
+    );
     agentEventBus.publish(BUILD_SCRIPTS_CHANGED_TOPIC, {
       buildScriptsChanged: true,
     });
+    for (const repositoryId of changedRepositories)
+      this.publishRepository(repositoryId);
     return script;
   }
 
@@ -856,6 +1063,10 @@ export class BuildsService {
           })),
         });
       }
+    });
+    this.publishRepository(codebase.repositoryId);
+    agentEventBus.publish(BUILD_SCRIPTS_CHANGED_TOPIC, {
+      buildScriptsChanged: true,
     });
     return this.project(codebaseId);
   }
@@ -1085,7 +1296,8 @@ export class BuildsService {
 
   async destinations(input: {
     worktreeId: string;
-    configurationId: string;
+    configurationId?: string | null;
+    customConfiguration?: CustomBuildConfigurationInput | null;
     action?: BuildAction | null;
     requestId: string;
   }) {
@@ -1094,17 +1306,10 @@ export class BuildsService {
       IOS_DESTINATIONS_JOB_KIND,
     );
     const prisma = await getPrismaClient();
-    const configuration = await prisma.buildConfiguration.findUnique({
-      where: { id: input.configurationId },
-      include: { source: { include: { project: true } } },
-    });
-    if (
-      !configuration ||
-      configuration.source.project.repositoryId !==
-        worktree.codebase.repositoryId
-    ) {
-      throw new Error("Build configuration is not available for this worktree");
-    }
+    const configuration = await this.resolveConfiguration(
+      input,
+      worktree.codebase.repositoryId,
+    );
     const action = input.action ?? (configuration.defaultAction as BuildAction);
     if (!BUILD_ACTIONS.includes(action))
       throw new Error("Build action is invalid");
@@ -1369,7 +1574,8 @@ export class BuildsService {
 
   async startBuild(input: {
     worktreeId: string;
-    configurationId: string;
+    configurationId?: string | null;
+    customConfiguration?: CustomBuildConfigurationInput | null;
     destination: unknown;
     scriptIds?: string[] | null;
     action?: BuildAction | null;
@@ -1419,25 +1625,20 @@ export class BuildsService {
     ) {
       throw new Error("Build agent must be updated for worktree coverage");
     }
-    const configuration = await prisma.buildConfiguration.findUnique({
-      where: { id: input.configurationId },
-      include: { source: { include: { project: true } } },
-    });
-    if (
-      !configuration ||
-      configuration.source.project.repositoryId !==
-        worktree.codebase.repositoryId
-    ) {
-      throw new Error("Build configuration is not available for this worktree");
-    }
-    const observation = await prisma.buildSourceObservation.findUnique({
-      where: {
-        sourceId_scopeKey: {
-          sourceId: configuration.sourceId,
-          scopeKey: `worktree:${worktree.id}`,
-        },
-      },
-    });
+    const configuration = await this.resolveConfiguration(
+      input,
+      worktree.codebase.repositoryId,
+    );
+    const observation = configuration.sourceId
+      ? await prisma.buildSourceObservation.findUnique({
+          where: {
+            sourceId_scopeKey: {
+              sourceId: configuration.sourceId,
+              scopeKey: `worktree:${worktree.id}`,
+            },
+          },
+        })
+      : null;
     const action = input.action ?? (configuration.defaultAction as BuildAction);
     if (!BUILD_ACTIONS.includes(action))
       throw new Error("Build action is invalid");
@@ -1546,6 +1747,24 @@ export class BuildsService {
         priorSnapshot.configuration ?? {},
         "prior Build for Testing configuration snapshot",
       );
+      if (!configuration.id) {
+        const priorSource = objectValue(
+          priorConfiguration.source ?? {},
+          "prior source",
+        );
+        if (
+          priorConfiguration.kind !== "CUSTOM" ||
+          priorSource.kind !== configuration.source.kind ||
+          priorSource.relativePath !== configuration.source.relativePath ||
+          priorConfiguration.scheme !== configuration.scheme ||
+          priorConfiguration.buildConfiguration !==
+            configuration.buildConfiguration
+        ) {
+          throw new Error(
+            "The prior Build for Testing result uses different custom source settings",
+          );
+        }
+      }
       const priorAdvancedSettings = parseBuildAdvancedSettings(
         priorConfiguration.advancedSettings ?? {},
       );
@@ -1691,6 +1910,7 @@ export class BuildsService {
         hostname: worktree.codebase.agent.hostname,
       },
       configuration: {
+        kind: configuration.id ? "SAVED" : "CUSTOM",
         id: configuration.id,
         name: configuration.name,
         iconKey: configuration.iconKey,
@@ -1890,13 +2110,33 @@ export class BuildsService {
       (typeof snapshotConfiguration.id === "string"
         ? snapshotConfiguration.id
         : null);
-    if (!worktreeId || !configurationId) {
+    if (
+      !worktreeId ||
+      (!configurationId && snapshotConfiguration.kind !== "CUSTOM")
+    ) {
       throw new Error("The original build settings are unavailable");
     }
 
     return this.startBuild({
       worktreeId,
-      configurationId,
+      ...(snapshotConfiguration.kind === "CUSTOM"
+        ? {
+            customConfiguration: {
+              sourceKind: objectValue(
+                snapshotConfiguration.source,
+                "build source",
+              ).kind as BuildSourceKind,
+              sourcePath: String(
+                objectValue(snapshotConfiguration.source, "build source")
+                  .relativePath,
+              ),
+              scheme: String(snapshotConfiguration.scheme),
+              buildConfiguration: String(
+                snapshotConfiguration.buildConfiguration,
+              ),
+            },
+          }
+        : { configurationId }),
       destination: parseJson(build.destinationJson, {}),
       scriptIds: snapshotScripts.flatMap((script) => {
         if (!script || typeof script !== "object" || Array.isArray(script)) {
@@ -1918,7 +2158,8 @@ export class BuildsService {
 
   async startWorktreeCoverage(input: {
     worktreeId: string;
-    configurationId: string;
+    configurationId?: string | null;
+    customConfiguration?: CustomBuildConfigurationInput | null;
     destination: unknown;
     scriptIds?: string[] | null;
     advancedSettings?: unknown;
@@ -2386,12 +2627,18 @@ export class BuildsService {
       codebaseId?: string | null;
       worktreeId?: string | null;
       appId?: string | null;
+      repositoryId?: string | null;
+      configurationId?: string | null;
     } = {},
   ) {
     const prisma = await getPrismaClient();
     const take = Math.max(1, Math.min(input.first ?? 50, 200));
     const rows = await prisma.build.findMany({
       where: {
+        ...(input.repositoryId ? { repositoryId: input.repositoryId } : {}),
+        ...(input.configurationId
+          ? { configurationId: input.configurationId }
+          : {}),
         ...(input.status ? { status: input.status } : {}),
         ...(input.codebaseId ? { codebaseId: input.codebaseId } : {}),
         ...(input.worktreeId ? { worktreeId: input.worktreeId } : {}),

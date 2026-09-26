@@ -1,5 +1,7 @@
 "use client";
 
+import { OutOfDateBadge } from "@/components/builds/out-of-date-badge";
+
 import {
   Archive,
   ArrowLeft,
@@ -67,7 +69,8 @@ import {
 
 import { buildStatusVariant } from "./build-format";
 import { ExportArchiveDialog } from "./export-archive-dialog";
-import { IosInstallButton } from "./ios-install-button";
+import { IosInstallButton, latestInstallArtifact } from "./ios-install-button";
+import { BuildConfigurationLabel } from "./build-configuration-label";
 import { RebuildButton } from "./rebuild-button";
 import { RunBuildControls } from "./run-build-controls";
 import type { BuildLogChunk, BuildRecord, BuildReport } from "./types";
@@ -233,7 +236,7 @@ export function BuildDetailPage({
   const olderLogRequest = useRef<AbortController | null>(null);
   const [hasOlderLogs, setHasOlderLogs] = useState(false);
   const [loadingOlderLogs, setLoadingOlderLogs] = useState(false);
-  const tc = useTranslations("common");
+  const [olderLogError, setOlderLogError] = useState<string | null>(null);
   const buildEventVersion = useRef(0);
   const reconcileOwner = useRef<ReturnType<
     typeof createRefreshCoalescer
@@ -283,10 +286,11 @@ export function BuildDetailPage({
 
   const loadOlderLogs = useCallback(async () => {
     const before = logChunksRef.current[0]?.id;
-    if (!before || olderLogRequest.current) return;
+    if (!before || !olderLogsRemain.current || olderLogRequest.current) return;
     const controller = new AbortController();
     olderLogRequest.current = controller;
     setLoadingOlderLogs(true);
+    setOlderLogError(null);
     try {
       const data = await controlPlaneRequest<{
         buildLogChunks: BuildLogChunk[];
@@ -301,7 +305,9 @@ export function BuildDetailPage({
       setHasOlderLogs(olderLogsRemain.current);
     } catch (value) {
       if (!controller.signal.aborted)
-        setError(value instanceof Error ? value.message : String(value));
+        setOlderLogError(
+          value instanceof Error ? value.message : String(value),
+        );
     } finally {
       if (olderLogRequest.current === controller)
         olderLogRequest.current = null;
@@ -548,6 +554,9 @@ export function BuildDetailPage({
   const runnable = build?.artifacts.some(
     (artifact) => artifact.kind === "RUNNABLE_APP",
   );
+  const installArtifact = build
+    ? latestInstallArtifact(build.artifacts)
+    : undefined;
   const archive = build?.artifacts.some(
     (artifact) => artifact.kind === "ARCHIVE",
   );
@@ -698,19 +707,21 @@ export function BuildDetailPage({
         <div>
           <div className="flex flex-wrap items-center gap-2">
             <h1 className="text-2xl font-semibold">
-              {configuration?.name ?? build.id}
+              <BuildConfigurationLabel build={build} />
             </h1>
             <Badge variant={buildStatusVariant(build.status)}>
               {t(`statuses.${build.status}`)}
             </Badge>
             <Badge variant="outline">{t(`actions.${build.action}`)}</Badge>
             {build.outOfDate && (
-              <Badge
-                className="border-amber-500/40 text-amber-700 dark:text-amber-300"
-                variant="outline"
-              >
-                {t("outOfDate")}
-              </Badge>
+              <OutOfDateBadge
+                buildId={build.id}
+                onCompleted={async (rebuilt) => {
+                  setRebuiltBuildId(rebuilt.id);
+                  await load();
+                }}
+                onError={setError}
+              />
             )}
           </div>
           <p className="mt-1 text-sm text-muted-foreground">
@@ -749,6 +760,14 @@ export function BuildDetailPage({
               onCompleted={load}
               onError={setError}
               preferredDestination={build.destination}
+            />
+          )}
+          {installArtifact && (
+            <IosInstallButton
+              buildId={build.id}
+              artifactId={installArtifact.id}
+              metadata={installArtifact.metadata}
+              publicOrigin={publicOrigin}
             />
           )}
           {build.status === "SUCCEEDED" && archive && (
@@ -813,17 +832,26 @@ export function BuildDetailPage({
 
       <div className="grid min-w-0 gap-5 lg:grid-cols-[minmax(0,2fr)_minmax(18rem,1fr)]">
         <div className="min-w-0 space-y-5">
-          {hasOlderLogs ? (
-            <Button
-              disabled={loadingOlderLogs}
-              onClick={() => void loadOlderLogs()}
-              variant="outline"
+          {olderLogError && (
+            <div
+              role="alert"
+              className="flex items-center gap-3 text-sm text-destructive"
             >
-              {loadingOlderLogs ? <Spinner /> : null}
-              {tc("loadMore")}
-            </Button>
-          ) : null}
+              <span>{olderLogError}</span>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => void loadOlderLogs()}
+                disabled={loadingOlderLogs}
+              >
+                {t("retryOlderLogs")}
+              </Button>
+            </div>
+          )}
           <TerminalOutputCard
+            onLoadOlder={hasOlderLogs ? () => void loadOlderLogs() : undefined}
+            loadingOlder={loadingOlderLogs}
+            loadingOlderLabel={t("loadingOlderLogs")}
             ariaLabel={t("logs")}
             collapseLabel={t("collapseLogs")}
             emptyText={t("noLogs")}

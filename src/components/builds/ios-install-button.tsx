@@ -1,13 +1,38 @@
 "use client";
 
 import { Link, Smartphone } from "lucide-react";
-import { useTranslations } from "next-intl";
+import { useLocale, useTranslations } from "next-intl";
 import { useState, useSyncExternalStore } from "react";
 
 import { Button } from "@/components/ui/button";
+import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from "@/components/ui/popover";
+import type { BuildArtifact } from "./types";
 import { Spinner } from "@/components/ui/spinner";
 import { copyText } from "@/lib/browser-utils";
 import type { PublicOrigin } from "@/lib/public-origin";
+
+export function latestInstallArtifact(
+  artifacts: BuildArtifact[],
+): BuildArtifact | undefined {
+  const ipas = artifacts
+    .filter((artifact) => artifact.kind === "IPA")
+    .sort(
+      (a, b) =>
+        b.createdAt.localeCompare(a.createdAt) || b.id.localeCompare(a.id),
+    );
+  return (
+    ipas.find(
+      (artifact) =>
+        artifact.metadata.exportMethod !== "APP_STORE_CONNECT" &&
+        typeof artifact.metadata.bundleIdentifier === "string" &&
+        artifact.metadata.bundleIdentifier.trim().length > 0,
+    ) ?? ipas[0]
+  );
+}
 
 type InstallEnvironment = {
   origin: string;
@@ -57,6 +82,7 @@ export function IosInstallButton({
   publicOrigin: Pick<PublicOrigin, "origin" | "secure"> | null;
 }) {
   const t = useTranslations("builds");
+  const locale = useLocale();
   // The server has no way to know the browsing origin or the device, so it
   // renders the disabled state and the client fills it in on hydration.
   const environment = useSyncExternalStore(
@@ -79,7 +105,10 @@ export function IosInstallButton({
     if (metadata.exportMethod === "APP_STORE_CONNECT") {
       return t("installNotSupportedForAppStore");
     }
-    if (typeof metadata.bundleIdentifier !== "string") {
+    if (
+      typeof metadata.bundleIdentifier !== "string" ||
+      !metadata.bundleIdentifier.trim()
+    ) {
       return t("installMissingBundleIdentifier");
     }
     return null;
@@ -105,26 +134,47 @@ export function IosInstallButton({
 
   const copyLink = async () => {
     const origin = installOrigin?.origin ?? window.location.origin;
-    await copyText(
-      `${origin}${window.location.pathname}${window.location.search}${window.location.hash}`,
-    );
+    await copyText(`${origin}/${locale}/builds/${encodeURIComponent(buildId)}`);
     setCopied(true);
     setTimeout(() => setCopied(false), 2_000);
   };
 
+  const explanation =
+    environment && !environment.apple ? t("installOpenOnDevice") : reason;
+  const label = (
+    <>
+      {busy ? <Spinner /> : <Smartphone />}
+      {busy ? t("installPreparing") : t("install")}
+    </>
+  );
   return (
-    <div className="flex flex-col items-end gap-1">
-      <div className="flex items-center gap-2">
-        {environment && !environment.apple && !reason && (
-          <Button
-            onClick={() => void copyLink()}
-            size="sm"
-            type="button"
-            variant="ghost"
-          >
-            <Link /> {copied ? t("installLinkCopied") : t("copyInstallLink")}
-          </Button>
-        )}
+    <span
+      className="inline-flex"
+      onClick={(event) => event.stopPropagation()}
+      onKeyDown={(event) => event.stopPropagation()}
+    >
+      {explanation ? (
+        <Popover>
+          <PopoverTrigger asChild>
+            <Button
+              aria-disabled="true"
+              className="cursor-not-allowed opacity-50"
+              size="sm"
+              type="button"
+              variant="outline"
+            >
+              {label}
+            </Button>
+          </PopoverTrigger>
+          <PopoverContent className="w-72 space-y-2 text-sm" align="end">
+            <p>{explanation}</p>
+            <Button onClick={() => void copyLink()} size="sm" variant="ghost">
+              <Link />
+              {copied ? t("installLinkCopied") : t("copyInstallLink")}
+            </Button>
+          </PopoverContent>
+        </Popover>
+      ) : (
         <Button
           disabled={disabled}
           onClick={() => void install()}
@@ -132,18 +182,9 @@ export function IosInstallButton({
           type="button"
           variant="outline"
         >
-          {busy ? <Spinner /> : <Smartphone />}
-          {busy ? t("installPreparing") : t("installOnDevice")}
+          {label}
         </Button>
-      </div>
-      {reason && (
-        <p className="text-right text-xs text-muted-foreground">{reason}</p>
       )}
-      {!reason && environment && !environment.apple && (
-        <p className="text-right text-xs text-muted-foreground">
-          {t("installOpenOnDevice")}
-        </p>
-      )}
-    </div>
+    </span>
   );
 }

@@ -43,6 +43,13 @@ const lineNumbers = (value: unknown): number[] =>
   Array.isArray(value) ? value.filter((line) => typeof line === "number") : [];
 
 export const createBuildResolvers = (service: BuildsService) => ({
+  CodebaseRepository: {
+    iosAppProject: (value: { id: string }) =>
+      service.repositoryProject(value.id),
+    latestBuild: async (value: { id: string }) =>
+      (await service.builds({ repositoryId: value.id, first: 1 })).items[0] ??
+      null,
+  },
   BuildChange: {
     repositoryId: (value: { id: string }) =>
       service.repositoryIdForBuild(value.id),
@@ -52,6 +59,8 @@ export const createBuildResolvers = (service: BuildsService) => ({
     updatedAt: (value: { updatedAt: Date }) => value.updatedAt.toISOString(),
   },
   BuildConfiguration: {
+    repository: (value: { id: string }) =>
+      service.configurationRepository(value.id),
     advancedSettings: (value: { advancedSettingsJson: string }) =>
       json(value.advancedSettingsJson, {}),
     exportSettings: (value: { exportSettingsJson: string | null }) =>
@@ -73,6 +82,8 @@ export const createBuildResolvers = (service: BuildsService) => ({
       iso(value.lastParsedAt),
   },
   BuildScript: {
+    repositories: (value: { id: string }) =>
+      service.scriptRepositories(value.id),
     createdAt: (value: { createdAt: Date }) => value.createdAt.toISOString(),
     updatedAt: (value: { updatedAt: Date }) => value.updatedAt.toISOString(),
   },
@@ -206,6 +217,22 @@ export const createBuildResolvers = (service: BuildsService) => ({
         : value.createdAt,
   },
   Query: {
+    buildConfigurations: (
+      _root: unknown,
+      args: { repositoryId?: string | null; appId?: string | null },
+      context: GraphQLContext,
+    ) => {
+      requireControlPlane(context);
+      return service.configurations(args);
+    },
+    buildConfiguration: (
+      _root: unknown,
+      { id }: { id: string },
+      context: GraphQLContext,
+    ) => {
+      requireControlPlane(context);
+      return service.configuration(id);
+    },
     iosAppProject: (
       _root: unknown,
       { codebaseId }: { codebaseId: string },
@@ -278,6 +305,14 @@ export const createBuildResolvers = (service: BuildsService) => ({
     },
   },
   Mutation: {
+    deleteIosAppProject: (
+      _root: unknown,
+      { id }: { id: string },
+      context: GraphQLContext,
+    ) => {
+      requireControlPlane(context);
+      return service.deleteProject(id);
+    },
     createIosAppProject: (
       _root: unknown,
       { codebaseId }: { codebaseId: string },

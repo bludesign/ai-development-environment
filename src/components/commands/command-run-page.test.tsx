@@ -52,7 +52,9 @@ vi.mock("@/i18n/navigation", () => ({
 }));
 vi.mock("@xterm/xterm", () => ({
   Terminal: class {
-    buffer = { active: { viewportY: 0, baseY: 0 } };
+    options = { scrollback: 100_000 };
+    buffer = { active: { viewportY: 0, baseY: 0, cursorY: 0 } };
+    scrollToLine() {}
     constructor(options: unknown) {
       terminalOptions(options);
       terminalBuffers.push(this.buffer);
@@ -331,7 +333,7 @@ describe("CommandRunPage", () => {
     );
   });
 
-  test("appends late output chunks without resetting visible output", async () => {
+  test("replays late output chunks in their chronological position", async () => {
     render(<CommandRunPage runId="run-1" />);
     expect(await screen.findByText("Color output")).toBeDefined();
     await waitFor(() =>
@@ -359,9 +361,16 @@ describe("CommandRunPage", () => {
         terminalWrite.mock.calls.filter(
           ([value]) => value instanceof Uint8Array,
         ),
-      ).toHaveLength(3),
+      ).toHaveLength(5),
     );
-    expect(terminalReset).not.toHaveBeenCalled();
+    expect(terminalReset).toHaveBeenCalledTimes(1);
+    const replay = terminalWrite.mock.calls
+      .map(([value]) => value)
+      .filter((value): value is Uint8Array => value instanceof Uint8Array)
+      .slice(2);
+    expect(
+      Buffer.concat(replay.map((value) => Buffer.from(value))).toString("utf8"),
+    ).toBe("late output\n\u001b[31m🙂\u001b[0m");
   });
 
   test("offers follow output after the terminal is scrolled away from the bottom", async () => {

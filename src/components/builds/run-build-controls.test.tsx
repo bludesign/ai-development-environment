@@ -59,8 +59,7 @@ describe("RunBuildControls", () => {
       />,
     );
 
-    expect(screen.getByRole("button", { name: /1 devices/ })).toBeDefined();
-    expect(screen.queryByRole("button", { name: "Run" })).toBeNull();
+    expect(screen.getAllByRole("button", { name: "Run" })).toHaveLength(1);
   });
 
   test("does not preselect a generic destination", () => {
@@ -81,8 +80,8 @@ describe("RunBuildControls", () => {
       />,
     );
 
-    expect(screen.getByRole("button", { name: "Run devices" })).toBeDefined();
-    expect(screen.queryByRole("button", { name: "Run" })).toBeNull();
+    expect(screen.getByRole("button", { name: "Run" })).toBeDefined();
+    expect(screen.getAllByRole("button", { name: "Run" })).toHaveLength(1);
   });
 
   test("runs from one compact device-picker button", async () => {
@@ -208,7 +207,7 @@ describe("RunBuildControls", () => {
       />,
     );
 
-    fireEvent.pointerDown(screen.getByRole("button", { name: "Run devices" }), {
+    fireEvent.pointerDown(screen.getByRole("button", { name: "Run" }), {
       button: 0,
       ctrlKey: false,
     });
@@ -299,7 +298,7 @@ describe("RunBuildControls", () => {
       />,
     );
 
-    fireEvent.pointerDown(screen.getByRole("button", { name: "Run devices" }), {
+    fireEvent.pointerDown(screen.getByRole("button", { name: "Run" }), {
       button: 0,
       ctrlKey: false,
     });

@@ -118,6 +118,8 @@ type BuildSource {
 
 "Configuration for build."
 type BuildConfiguration {
+  "Repository that owns this reusable configuration."
+  repository: CodebaseRepository!
   "Stable identifier for this build configuration."
   id: ID!
   "Display name of this build configuration."
@@ -148,6 +150,10 @@ type BuildConfiguration {
 
 "Represents a build script in the GraphQL API."
 type BuildScript {
+  "Optional icon from the build configuration icon library."
+  iconKey: String
+  "Repositories where this script is allowed."
+  repositories: [CodebaseRepository!]!
   "Stable identifier for this build script."
   id: ID!
   "Display name of this build script."
@@ -683,6 +689,10 @@ input SaveBuildConfigurationInput {
 
 "Values used to save a build script."
 input SaveBuildScriptInput {
+  "Optional icon. Omit to preserve the current icon; null clears it."
+  iconKey: String
+  "Replace repository assignments. Omit to preserve them; an empty list clears them."
+  repositoryIds: [ID!]
   "Identifier of the save build script to affect."
   id: ID
   "The name to use for the request."
@@ -699,12 +709,26 @@ input SaveBuildScriptInput {
   failureBehavior: BuildScriptFailureBehavior!
 }
 
+"One-time build source settings, never saved as a reusable configuration."
+input CustomBuildConfigurationInput {
+  "Kind of Xcode source."
+  sourceKind: BuildSourceKind!
+  "Repository-relative source path."
+  sourcePath: String!
+  "Scheme to build."
+  scheme: String!
+  "Xcode build configuration."
+  buildConfiguration: String!
+}
+
 "Values used to inspect build destinations."
 input InspectBuildDestinationsInput {
   "Identifier of the worktree to use."
   worktreeId: ID!
   "Identifier of the configuration to use."
-  configurationId: ID!
+  configurationId: ID
+  "One-time source settings. Provide exactly one of this or configurationId."
+  customConfiguration: CustomBuildConfigurationInput
   "The action to use for the request."
   action: BuildAction
   "Identifier of the request to use."
@@ -732,7 +756,9 @@ input StartBuildInput {
   "Identifier of the worktree to use."
   worktreeId: ID!
   "Identifier of the configuration to use."
-  configurationId: ID!
+  configurationId: ID
+  "One-time source settings. Provide exactly one of this or configurationId."
+  customConfiguration: CustomBuildConfigurationInput
   "The destination to use for the request."
   destination: JSON!
   "Identifiers of the scripts to use."
@@ -916,6 +942,15 @@ type BuildSigningOptions {
 }
 
 extend type Query {
+  "Returns saved configurations, optionally scoped to a repository or app."
+  buildConfigurations(
+    "Repository whose configurations to return."
+    repositoryId: ID
+    "App whose repositories to include."
+    appId: ID
+  ): [BuildConfiguration!]!
+  "Returns one saved configuration, or null if it was removed."
+  buildConfiguration("Configuration identifier." id: ID!): BuildConfiguration
   "Returns a codebase project, or null when it cannot be found."
   iosAppProject("Identifier of the codebase." codebaseId: ID!): CodebaseProject
   "Returns build signing options."
@@ -939,6 +974,10 @@ extend type Query {
     worktreeId: ID
     "Identifier of an app whose assigned repositories should scope the results."
     appId: ID
+    "Repository whose builds to return, across all checkouts."
+    repositoryId: ID
+    "Saved configuration whose builds to return."
+    configurationId: ID
   ): BuildPage!
   "Returns a build, or null when it cannot be found."
   build("Identifier of the resource to return or affect." id: ID!): Build
@@ -969,6 +1008,8 @@ extend type Query {
 }
 
 extend type Mutation {
+  "Removes an iOS project and its configurations, preserving completed build history. Active builds prevent removal."
+  deleteIosAppProject("Project identifier." id: ID!): Boolean!
   "Creates an iOS app project and returns a codebase project."
   createIosAppProject(
     "Identifier of the codebase."

@@ -1,5 +1,8 @@
 import { BuildsPage } from "@/components/builds/builds-page";
 
-export default function BuildsRoute() {
-  return <BuildsPage />;
+import { headers } from "next/headers";
+import { resolvePublicOrigin } from "@/lib/public-origin";
+
+export default async function BuildsRoute() {
+  return <BuildsPage publicOrigin={resolvePublicOrigin(await headers())} />;
 }

@@ -4,7 +4,13 @@ import {
   genericBuildDestinations,
   type BuildSigningRequirement,
 } from "@ai-development-environment/agent-contract/builds";
-import { Hammer, RefreshCw, TestTube2 } from "lucide-react";
+import {
+  Hammer,
+  RefreshCw,
+  TestTube2,
+  Smartphone,
+  Monitor,
+} from "lucide-react";
 import { useLocale, useTranslations } from "next-intl";
 import { useEffect, useMemo, useRef, useState } from "react";
 
@@ -36,6 +42,8 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Spinner } from "@/components/ui/spinner";
+import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { BuildConfigurationDialog } from "./ios-project-section";
 import { Textarea } from "@/components/ui/textarea";
 import { Link } from "@/i18n/navigation";
 import { createClientId } from "@/lib/browser-utils";
@@ -88,7 +96,7 @@ const PROJECT_FIELDS = `
   }
   allowedScripts {
     position
-    script { id name preBuildScript postBuildScript enabledByDefault timeoutSeconds failureBehavior }
+    script { id name iconKey preBuildScript postBuildScript enabledByDefault timeoutSeconds failureBehavior }
   }
 `;
 
@@ -281,6 +289,20 @@ function StartBuildDialog({
   const [priorBuilds, setPriorBuilds] = useState<PriorBuildForTesting[]>([]);
   const [priorBuildsLoading, setPriorBuildsLoading] = useState(false);
   const [configurationId, setConfigurationId] = useState("");
+  const [customConfiguration, setCustomConfiguration] =
+    useState<BuildConfiguration | null>(null);
+  const [customOpen, setCustomOpen] = useState(false);
+  const selectionInput = (entry: BuildConfiguration) =>
+    entry.id === "__custom__"
+      ? {
+          customConfiguration: {
+            sourceKind: entry.source.kind,
+            sourcePath: entry.source.relativePath,
+            scheme: entry.scheme,
+            buildConfiguration: entry.buildConfiguration,
+          },
+        }
+      : { configurationId: entry.id };
   const [action, setAction] = useState<BuildAction>("BUILD");
   const [observations, setObservations] = useState<
     Record<string, BuildSourceObservation>
@@ -308,9 +330,10 @@ function StartBuildDialog({
   const destinationIdRef = useRef("");
   const priorBuildsLoaded = useRef(false);
 
-  const configuration = project?.configurations.find(
-    (entry) => entry.id === configurationId,
-  );
+  const configuration =
+    configurationId === "__custom__"
+      ? customConfiguration
+      : project?.configurations.find((entry) => entry.id === configurationId);
   const observation = configuration
     ? (observations[configuration.id] ?? configuration.observation)
     : null;
@@ -331,11 +354,25 @@ function StartBuildDialog({
         if (disposed) return;
         setProject(data.iosAppProject);
         setAgent(data.codebase?.agent ?? null);
+        setScriptIds(
+          new Set(
+            data.iosAppProject?.allowedScripts
+              .filter(({ script }) => script.enabledByDefault)
+              .map(({ script }) => script.id) ?? [],
+          ),
+        );
         const first = data.iosAppProject?.configurations[0];
+        if (!first && data.iosAppProject) {
+          setConfigurationId("__custom__");
+          setCustomOpen(true);
+        }
         if (first) {
           setConfigurationId(first.id);
           setAction(coverageMode ? "TEST" : first.defaultAction);
           setAdvanced(first.advancedSettings ?? {});
+          setOverrides(
+            JSON.stringify(first.advancedSettings?.buildSettingOverrides ?? {}),
+          );
           setExportWhenComplete(
             Boolean(
               !coverageMode &&
@@ -397,19 +434,41 @@ function StartBuildDialog({
         if (build.action !== "BUILD_FOR_TESTING") return false;
         if (build.destinationType !== destinationType) return false;
         const snapshotConfiguration = build.snapshot.configuration as
-          | { id?: string; advancedSettings?: { testPlan?: string | null } }
+          | {
+              id?: string;
+              kind?: string;
+              source?: { kind: string; relativePath: string };
+              scheme?: string;
+              buildConfiguration?: string;
+              advancedSettings?: { testPlan?: string | null };
+            }
           | undefined;
         const currentTestPlan =
           typeof advanced.testPlan === "string" ? advanced.testPlan : null;
         const priorTestPlan = snapshotConfiguration?.advancedSettings?.testPlan;
         return (
-          snapshotConfiguration?.id === configurationId &&
+          (configurationId === "__custom__"
+            ? snapshotConfiguration?.kind === "CUSTOM" &&
+              snapshotConfiguration.source?.kind ===
+                customConfiguration?.source.kind &&
+              snapshotConfiguration.source?.relativePath ===
+                customConfiguration?.source.relativePath &&
+              snapshotConfiguration.scheme === customConfiguration?.scheme &&
+              snapshotConfiguration.buildConfiguration ===
+                customConfiguration?.buildConfiguration
+            : snapshotConfiguration?.id === configurationId) &&
           (!currentTestPlan ||
             !priorTestPlan ||
             currentTestPlan === priorTestPlan)
         );
       }),
-    [advanced.testPlan, configurationId, destinationType, priorBuilds],
+    [
+      advanced.testPlan,
+      configurationId,
+      customConfiguration,
+      destinationType,
+      priorBuilds,
+    ],
   );
   const selectedPriorBuildId =
     compatiblePriorBuilds.find(
@@ -457,7 +516,7 @@ function StartBuildDialog({
     selectedAction: BuildAction,
   ) => {
     const request = ++destinationRequest.current;
-    const cacheKey = `${worktreeId}:${selected.id}:${selectedAction}`;
+    const cacheKey = `${worktreeId}:${JSON.stringify(selectionInput(selected))}:${selectedAction}`;
     const cached = destinationCache.get(cacheKey);
     if (cached && cached.expiresAt <= Date.now()) {
       destinationCache.delete(cacheKey);
@@ -479,18 +538,35 @@ function StartBuildDialog({
         {
           input: {
             worktreeId,
-            configurationId: selected.id,
+            ...selectionInput(selected),
             action: selectedAction,
             requestId: createClientId(),
           },
         },
       );
       if (request !== destinationRequest.current) return;
+      const generic = genericBuildDestinations(
+        selectedAction,
+      ) as BuildDestination[];
+      const refreshed =
+        selectedAction === "ARCHIVE"
+          ? generic
+          : [
+              ...generic,
+              ...data.inspectBuildDestinations.filter(
+                (destination) =>
+                  !generic.some(
+                    (entry) =>
+                      entry.type === destination.type &&
+                      entry.id === destination.id,
+                  ),
+              ),
+            ];
       destinationCache.set(cacheKey, {
-        destinations: data.inspectBuildDestinations,
+        destinations: refreshed,
         expiresAt: Date.now() + DESTINATION_CACHE_TTL_MS,
       });
-      applyDestinations(data.inspectBuildDestinations, selectedAction, true);
+      applyDestinations(refreshed, selectedAction, true);
     } catch (value) {
       if (request !== destinationRequest.current) return;
       const message = value instanceof Error ? value.message : String(value);
@@ -578,7 +654,7 @@ function StartBuildDialog({
     };
     // Prepare only when the selected configuration/action changes.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [configurationId, action, loading]);
+  }, [configurationId, customConfiguration, action, loading]);
 
   const filteredDestinations = useMemo(
     () =>
@@ -617,7 +693,7 @@ function StartBuildDialog({
         {
           input: {
             worktreeId,
-            configurationId: configuration.id,
+            ...selectionInput(configuration),
             destination,
             scriptIds: [...scriptIds],
             action,
@@ -654,494 +730,570 @@ function StartBuildDialog({
   };
 
   return (
-    <Dialog onOpenChange={onOpenChange} open={open}>
-      <DialogContent className="max-h-[90vh] grid-cols-[minmax(0,1fr)] overflow-y-auto sm:max-w-5xl">
-        <DialogHeader>
-          <DialogTitle>
-            {t(coverageMode ? "startWorktreeCoverage" : "startBuild")}
-          </DialogTitle>
-          <DialogDescription>
-            {t(
-              coverageMode
-                ? "startWorktreeCoverageDescription"
-                : "startBuildDescription",
-            )}
-          </DialogDescription>
-        </DialogHeader>
-        {error && (
-          <Alert variant="destructive">
-            <AlertDescription>{error}</AlertDescription>
-          </Alert>
-        )}
-        {destinationWarning && (
-          <Alert>
-            <AlertDescription>{destinationWarning}</AlertDescription>
-          </Alert>
-        )}
-        {loading ? (
-          <p className="flex items-center gap-2 text-muted-foreground">
-            <Spinner /> {t("loading")}
-          </p>
-        ) : !project?.configurations.length ? (
-          <Alert>
-            <AlertDescription>{t("noConfigurations")}</AlertDescription>
-          </Alert>
-        ) : (
-          <div className="space-y-5">
-            <section className="space-y-2">
-              <Label>{t("configuration")}</Label>
-              <div className="grid gap-2 sm:grid-cols-2">
-                {project.configurations.map((entry) => (
+    <>
+      <Dialog onOpenChange={onOpenChange} open={open}>
+        <DialogContent className="max-h-[90vh] grid-cols-[minmax(0,1fr)] overflow-y-auto sm:max-w-5xl">
+          <DialogHeader>
+            <DialogTitle>
+              {t(coverageMode ? "startWorktreeCoverage" : "startBuild")}
+            </DialogTitle>
+            <DialogDescription>
+              {t(
+                coverageMode
+                  ? "startWorktreeCoverageDescription"
+                  : "startBuildDescription",
+              )}
+            </DialogDescription>
+          </DialogHeader>
+          {error && (
+            <Alert variant="destructive">
+              <AlertDescription>{error}</AlertDescription>
+            </Alert>
+          )}
+          {destinationWarning && (
+            <Alert>
+              <AlertDescription>{destinationWarning}</AlertDescription>
+            </Alert>
+          )}
+          {loading ? (
+            <p className="flex items-center gap-2 text-muted-foreground">
+              <Spinner /> {t("loading")}
+            </p>
+          ) : !project ? (
+            <Alert>
+              <AlertDescription>{t("noConfigurations")}</AlertDescription>
+            </Alert>
+          ) : (
+            <div className="space-y-5">
+              <section className="space-y-2">
+                <Label>{t("configuration")}</Label>
+                <div className="grid gap-2 sm:grid-cols-2">
                   <button
-                    className={`rounded-xl border p-3 text-left transition-colors ${entry.id === configurationId ? "border-primary bg-primary/5" : "hover:bg-muted/50"}`}
-                    key={entry.id}
-                    onClick={() => {
-                      if (entry.id !== configurationId) {
-                        destinationRequest.current += 1;
-                      }
-                      setConfigurationId(entry.id);
-                      setAction(coverageMode ? "TEST" : entry.defaultAction);
-                      setAdvanced(entry.advancedSettings ?? {});
-                      setExportWhenComplete(
-                        Boolean(
-                          !coverageMode &&
-                          entry.defaultAction === "ARCHIVE" &&
-                          entry.autoExport,
-                        ),
-                      );
-                      setExportSettings({
-                        ...DEFAULT_EXPORT_SETTINGS,
-                        ...(entry.exportSettings ?? {}),
-                      } as ExportSettingsValue);
-                    }}
                     type="button"
+                    className={`rounded-xl border p-3 text-left ${configurationId === "__custom__" ? "border-primary bg-primary/5" : "hover:bg-muted/50"}`}
+                    onClick={() => {
+                      destinationRequest.current += 1;
+                      setConfigurationId("__custom__");
+                      setCustomOpen(true);
+                    }}
                   >
-                    <div className="flex items-center justify-between gap-2">
-                      <span className="flex items-center gap-2 font-medium">
-                        <ConfigurationIcon iconKey={entry.iconKey} />
-                        {entry.name}
-                      </span>
-                      <Badge variant="outline">
-                        {t(
-                          `parseStatuses.${(observations[entry.id] ?? entry.observation)?.status ?? "UNPARSED"}`,
-                        )}
-                      </Badge>
-                    </div>
-                    <p className="mt-1 text-xs text-muted-foreground">
-                      {entry.scheme} · {entry.buildConfiguration}
+                    <span className="font-medium">{t("custom")}</span>
+                    <p className="text-xs text-muted-foreground">
+                      {t("customDescription")}
                     </p>
                   </button>
-                ))}
-              </div>
-            </section>
-
-            {configuration && (
-              <Card>
-                <CardContent className="space-y-2 text-sm">
-                  <div className="flex items-center justify-between gap-2">
-                    <div className="min-w-0 flex-1">
-                      <p
-                        className="truncate font-mono text-xs"
-                        title={configuration.source.relativePath}
-                      >
-                        {configuration.source.relativePath}
-                      </p>
-                      <p className="text-xs text-muted-foreground">
-                        {configuration.scheme} ·{" "}
-                        {configuration.buildConfiguration}
-                      </p>
-                      {agent && (
-                        <p
-                          className="truncate text-xs text-muted-foreground"
-                          title={`${agent.name} (${agent.hostname})`}
-                        >
-                          {t("agent")}: {agent.name}
-                        </p>
-                      )}
-                    </div>
-                    <Button
-                      disabled={reparsing}
-                      onClick={() => void reparse(configuration)}
-                      size="sm"
+                  {project.configurations.map((entry) => (
+                    <button
+                      className={`rounded-xl border p-3 text-left transition-colors ${entry.id === configurationId ? "border-primary bg-primary/5" : "hover:bg-muted/50"}`}
+                      key={entry.id}
+                      onClick={() => {
+                        if (entry.id !== configurationId) {
+                          destinationRequest.current += 1;
+                        }
+                        setConfigurationId(entry.id);
+                        setAction(coverageMode ? "TEST" : entry.defaultAction);
+                        setAdvanced(entry.advancedSettings ?? {});
+                        setOverrides(
+                          JSON.stringify(
+                            entry.advancedSettings?.buildSettingOverrides ?? {},
+                          ),
+                        );
+                        setExportWhenComplete(
+                          Boolean(
+                            !coverageMode &&
+                            entry.defaultAction === "ARCHIVE" &&
+                            entry.autoExport,
+                          ),
+                        );
+                        setExportSettings({
+                          ...DEFAULT_EXPORT_SETTINGS,
+                          ...(entry.exportSettings ?? {}),
+                        } as ExportSettingsValue);
+                      }}
                       type="button"
-                      variant="outline"
                     >
-                      {reparsing ? <Spinner /> : <RefreshCw />} {t("reparse")}
-                    </Button>
-                  </div>
-                  {observation?.error && (
-                    <p className="text-xs text-destructive">
-                      {observation.error}
-                    </p>
-                  )}
-                </CardContent>
-              </Card>
-            )}
-
-            <div className="grid gap-4 sm:grid-cols-3">
-              <div className={cn("space-y-2", coverageMode && "hidden")}>
-                <Label>{t("action")}</Label>
-                <Select
-                  onValueChange={(value) => {
-                    if (value !== action) destinationRequest.current += 1;
-                    setAction(value as BuildAction);
-                    if (value !== "ARCHIVE") setExportWhenComplete(false);
-                  }}
-                  value={action}
-                >
-                  <SelectTrigger>
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {ACTIONS.map((value) => (
-                      <SelectItem key={value} value={value}>
-                        {t(`actions.${value}`)}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-              <div className="space-y-2">
-                <Label>{t("destinationType")}</Label>
-                <Select
-                  disabled={action === "ARCHIVE"}
-                  onValueChange={(value) => {
-                    const type = value as BuildDestination["type"];
-                    destinationTypeRef.current = type;
-                    setDestinationType(type);
-                    const id =
-                      destinations.find((entry) => entry.type === type)?.id ??
-                      "";
-                    destinationIdRef.current = id;
-                    setDestinationId(id);
-                  }}
-                  value={destinationType}
-                >
-                  <SelectTrigger>
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="SIMULATOR">{t("simulator")}</SelectItem>
-                    <SelectItem value="PHYSICAL_DEVICE">
-                      {t("physicalDevice")}
-                    </SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-              <div className="space-y-2">
-                <Label>{t("device")}</Label>
-                <Select
-                  disabled={!filteredDestinations.length}
-                  onValueChange={(value) => {
-                    destinationIdRef.current = value;
-                    setDestinationId(value);
-                  }}
-                  value={destinationId}
-                >
-                  <SelectTrigger>
-                    <SelectValue placeholder={t("selectDevice")} />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {filteredDestinations.map((entry) => (
-                      <SelectItem key={entry.id} value={entry.id}>
-                        {entry.generic
-                          ? entry.type === "SIMULATOR"
-                            ? t("anySimulator")
-                            : t("anyPhysicalDevice")
-                          : entry.name}
-                        {entry.osVersion ? ` · ${entry.osVersion}` : ""}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-            </div>
-
-            {!coverageMode && action === "ARCHIVE" && (
-              <section className="space-y-3">
-                <label className="flex items-center gap-2 font-medium">
-                  <Checkbox
-                    checked={exportWhenComplete}
-                    onCheckedChange={(checked) =>
-                      setExportWhenComplete(Boolean(checked))
-                    }
-                  />
-                  {t("exportWhenComplete")}
-                </label>
-                {exportWhenComplete && (
-                  <ExportSettingsForm
-                    key={configurationId}
-                    onChange={setExportSettings}
-                    onParseSigningRequirements={parseSigningRequirements}
-                    value={exportSettings}
-                  />
-                )}
-              </section>
-            )}
-
-            {action === "TEST_WITHOUT_BUILDING" && (
-              <div className="space-y-2">
-                <Label>{t("priorBuildForTesting")}</Label>
-                <Select
-                  disabled={priorBuildsLoading || !compatiblePriorBuilds.length}
-                  onValueChange={(value) =>
-                    setAdvanced((current) => ({
-                      ...current,
-                      priorBuildForTestingId: value,
-                      priorTestProductsPath: null,
-                      priorXctestrunPath: null,
-                    }))
-                  }
-                  value={selectedPriorBuildId ?? ""}
-                >
-                  <SelectTrigger>
-                    <SelectValue
-                      placeholder={t("selectPriorBuildForTesting")}
-                    />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {compatiblePriorBuilds.map((build) => (
-                      <SelectItem key={build.id} value={build.id}>
-                        {formatDateValue(build.createdAt, "short", {
-                          locale,
-                        })}{" "}
-                        · {build.id}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-                {priorBuildsLoading && (
-                  <p className="flex items-center gap-2 text-xs text-muted-foreground">
-                    <Spinner /> {t("loading")}
-                  </p>
-                )}
-                {!priorBuildsLoading && !compatiblePriorBuilds.length && (
-                  <p className="text-xs text-destructive">
-                    {t("noPriorBuildForTesting")}
-                  </p>
-                )}
-              </div>
-            )}
-
-            {["TEST", "BUILD_FOR_TESTING", "TEST_WITHOUT_BUILDING"].includes(
-              action,
-            ) && (
-              <div className="space-y-2">
-                <Label>{t("testPlan")}</Label>
-                <Select
-                  onValueChange={(value) =>
-                    setAdvanced((current) => ({
-                      ...current,
-                      testPlan: value === "__SCHEME_DEFAULT__" ? null : value,
-                    }))
-                  }
-                  value={String(advanced.testPlan ?? "__SCHEME_DEFAULT__")}
-                >
-                  <SelectTrigger>
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="__SCHEME_DEFAULT__">
-                      {t("schemeDefaultTestPlan")}
-                    </SelectItem>
-                    {typeof advanced.testPlan === "string" &&
-                      advanced.testPlan &&
-                      !observation?.testPlans.includes(advanced.testPlan) && (
-                        <SelectItem value={advanced.testPlan}>
-                          {advanced.testPlan} · {t("savedValueUnavailable")}
-                        </SelectItem>
-                      )}
-                    {observation?.testPlans.map((testPlan) => (
-                      <SelectItem key={testPlan} value={testPlan}>
-                        {testPlan}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-            )}
-
-            {project.allowedScripts.length > 0 && (
-              <section className="space-y-2">
-                <Label>{t("scripts")}</Label>
-                <div className="grid gap-2 sm:grid-cols-2">
-                  {project.allowedScripts.map(({ script }) => (
-                    <label
-                      className="flex items-start gap-2 rounded-lg border p-2"
-                      key={script.id}
-                    >
-                      <Checkbox
-                        checked={scriptIds.has(script.id)}
-                        onCheckedChange={(checked) => {
-                          setScriptIds((current) => {
-                            const next = new Set(current);
-                            if (checked) next.add(script.id);
-                            else next.delete(script.id);
-                            return next;
-                          });
-                        }}
-                      />
-                      <span>
-                        <span className="block text-sm font-medium">
-                          {script.name}
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="flex items-center gap-2 font-medium">
+                          <ConfigurationIcon iconKey={entry.iconKey} />
+                          {entry.name}
                         </span>
-                        <span className="text-xs text-muted-foreground">
-                          {script.preBuildScript ? t("preBuild") : ""}
-                          {script.preBuildScript && script.postBuildScript
-                            ? " · "
-                            : ""}
-                          {script.postBuildScript ? t("postBuild") : ""}
-                        </span>
-                      </span>
-                    </label>
+                        <Badge
+                          variant={
+                            (observations[entry.id] ?? entry.observation)
+                              ?.status === "VALID"
+                              ? "success"
+                              : "outline"
+                          }
+                        >
+                          {t(
+                            `parseStatuses.${(observations[entry.id] ?? entry.observation)?.status ?? "UNPARSED"}`,
+                          )}
+                        </Badge>
+                      </div>
+                      <p className="mt-1 text-xs text-muted-foreground">
+                        {entry.scheme} · {entry.buildConfiguration}
+                      </p>
+                    </button>
                   ))}
                 </div>
               </section>
-            )}
 
-            <details className="rounded-xl border p-3">
-              <summary className="cursor-pointer font-medium">
-                {t("advancedSettings")}
-              </summary>
-              <div className="mt-4 grid gap-4 sm:grid-cols-2">
+              <div className="grid gap-4 sm:grid-cols-2">
                 <div className="space-y-2">
-                  <Label htmlFor="development-team">
-                    {t("developmentTeam")}
-                  </Label>
-                  <Input
-                    id="development-team"
-                    onChange={(event) =>
-                      setAdvanced((current) => ({
-                        ...current,
-                        developmentTeam: event.target.value || null,
-                      }))
-                    }
-                    value={String(advanced.developmentTeam ?? "")}
-                  />
+                  <Label>{t("destinationType")}</Label>
+                  <Tabs
+                    value={destinationType}
+                    onValueChange={(value) => {
+                      const type = value as BuildDestination["type"];
+                      destinationTypeRef.current = type;
+                      setDestinationType(type);
+                      const id =
+                        destinations.find((entry) => entry.type === type)?.id ??
+                        "";
+                      destinationIdRef.current = id;
+                      setDestinationId(id);
+                    }}
+                  >
+                    <TabsList>
+                      <TabsTrigger value="PHYSICAL_DEVICE">
+                        <Smartphone />
+                        {t("physicalDevice")}
+                      </TabsTrigger>
+                      <TabsTrigger
+                        value="SIMULATOR"
+                        disabled={action === "ARCHIVE"}
+                      >
+                        <Monitor />
+                        {t("simulator")}
+                      </TabsTrigger>
+                    </TabsList>
+                  </Tabs>
                 </div>
                 <div className="space-y-2">
-                  <Label>{t("packageResolution")}</Label>
+                  <Label>{t("device")}</Label>
                   <Select
-                    onValueChange={(value) =>
-                      setAdvanced((current) => ({
-                        ...current,
-                        packageResolution: value,
-                      }))
-                    }
-                    value={String(advanced.packageResolution ?? "DEFAULT")}
+                    disabled={!filteredDestinations.length}
+                    onValueChange={(value) => {
+                      destinationIdRef.current = value;
+                      setDestinationId(value);
+                    }}
+                    value={destinationId}
                   >
                     <SelectTrigger>
-                      <SelectValue />
+                      <SelectValue placeholder={t("selectDevice")} />
                     </SelectTrigger>
                     <SelectContent>
-                      {[
-                        "DEFAULT",
-                        "RESOLVED_ONLY",
-                        "SKIP_UPDATES",
-                        "DISABLE_AUTOMATIC",
-                      ].map((value) => (
-                        <SelectItem key={value} value={value}>
-                          {value}
+                      {filteredDestinations.map((entry) => (
+                        <SelectItem key={entry.id} value={entry.id}>
+                          {entry.generic
+                            ? entry.type === "SIMULATOR"
+                              ? t("anySimulator")
+                              : t("anyPhysicalDevice")
+                            : entry.name}
+                          {entry.osVersion ? ` · ${entry.osVersion}` : ""}
                         </SelectItem>
                       ))}
                     </SelectContent>
                   </Select>
                 </div>
-                <label className="flex items-center gap-2">
-                  <Checkbox
-                    checked={coverageMode || Boolean(advanced.codeCoverage)}
-                    disabled={coverageMode}
-                    onCheckedChange={(checked) =>
-                      setAdvanced((current) => ({
-                        ...current,
-                        codeCoverage: Boolean(checked),
-                      }))
-                    }
-                  />
-                  {t("codeCoverage")}
-                </label>
-                {["TEST", "TEST_WITHOUT_BUILDING"].includes(action) && (
-                  <label className="flex items-center gap-2">
-                    <Checkbox
-                      checked={
-                        coverageMode || advanced.parseTestResults !== false
-                      }
-                      disabled={coverageMode}
-                      onCheckedChange={(checked) =>
-                        setAdvanced((current) => ({
-                          ...current,
-                          parseTestResults: Boolean(checked),
-                        }))
-                      }
-                    />
-                    {t("parseTestResults")}
-                  </label>
-                )}
-                <label className="flex items-center gap-2">
-                  <Checkbox
-                    checked={Boolean(advanced.allowProvisioningUpdates)}
-                    onCheckedChange={(checked) =>
-                      setAdvanced((current) => ({
-                        ...current,
-                        allowProvisioningUpdates: Boolean(checked),
-                      }))
-                    }
-                  />
-                  {t("allowProvisioningUpdates")}
-                </label>
-                <CollectDsymsSelect
-                  id="collect-dsyms"
-                  onChange={(collectDsyms) =>
-                    setAdvanced((current) => ({ ...current, collectDsyms }))
-                  }
-                  value={advanced.collectDsyms}
-                />
-                <div className="space-y-2 sm:col-span-2">
-                  <Label htmlFor="build-setting-overrides">
-                    {t("buildSettingOverrides")}
-                  </Label>
-                  <Textarea
-                    className="font-mono text-xs"
-                    id="build-setting-overrides"
-                    onChange={(event) => setOverrides(event.target.value)}
-                    rows={4}
-                    value={overrides}
-                  />
-                </div>
               </div>
-            </details>
 
-            <section className="space-y-2">
-              <Label>{t("commandPreview")}</Label>
-              <pre className="overflow-x-auto rounded-lg bg-muted p-3 text-xs whitespace-pre-wrap">
-                {preview}
-              </pre>
-            </section>
-          </div>
-        )}
-        <DialogFooter>
-          <Button
-            onClick={() => onOpenChange(false)}
-            type="button"
-            variant="outline"
-          >
-            {t("cancel")}
-          </Button>
-          <Button
-            disabled={
-              loading ||
-              starting ||
-              !configuration ||
-              !destination ||
-              (action === "TEST_WITHOUT_BUILDING" && !selectedPriorBuildId)
-            }
-            onClick={() => void start()}
-            type="button"
-          >
-            {starting && <Spinner />} {t("startBuild")}
-          </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
+              {project.allowedScripts.length > 0 && (
+                <section className="space-y-2">
+                  <Label>{t("scripts")}</Label>
+                  <div className="grid gap-2 sm:grid-cols-2">
+                    {project.allowedScripts.map(({ script }) => (
+                      <label
+                        className="flex items-start gap-2 rounded-lg border p-2"
+                        key={script.id}
+                      >
+                        <Checkbox
+                          checked={scriptIds.has(script.id)}
+                          onCheckedChange={(checked) => {
+                            setScriptIds((current) => {
+                              const next = new Set(current);
+                              if (checked) next.add(script.id);
+                              else next.delete(script.id);
+                              return next;
+                            });
+                          }}
+                        />
+                        <span>
+                          <span className="flex items-center gap-2 text-sm font-medium">
+                            <ConfigurationIcon
+                              iconKey={script.iconKey ?? null}
+                            />{" "}
+                            {script.name}
+                          </span>
+                          <span className="text-xs text-muted-foreground">
+                            {script.preBuildScript ? t("preBuild") : ""}
+                            {script.preBuildScript && script.postBuildScript
+                              ? " · "
+                              : ""}
+                            {script.postBuildScript ? t("postBuild") : ""}
+                          </span>
+                        </span>
+                      </label>
+                    ))}
+                  </div>
+                </section>
+              )}
+
+              <details className="rounded-xl border p-3">
+                <summary className="cursor-pointer font-medium">
+                  {t("details")}
+                </summary>
+                <div className="mt-4 space-y-4">
+                  {configuration && (
+                    <Card>
+                      <CardContent className="space-y-2 text-sm">
+                        <div className="flex items-center justify-between gap-2">
+                          <div className="min-w-0 flex-1">
+                            <p
+                              className="truncate font-mono text-xs"
+                              title={configuration.source.relativePath}
+                            >
+                              {configuration.source.relativePath}
+                            </p>
+                            <p className="text-xs text-muted-foreground">
+                              {configuration.scheme} ·{" "}
+                              {configuration.buildConfiguration}
+                            </p>
+                            {agent && (
+                              <p
+                                className="truncate text-xs text-muted-foreground"
+                                title={`${agent.name} (${agent.hostname})`}
+                              >
+                                {t("agent")}: {agent.name}
+                              </p>
+                            )}
+                          </div>
+                          <Button
+                            disabled={reparsing}
+                            onClick={() =>
+                              configuration.id === "__custom__"
+                                ? setCustomOpen(true)
+                                : void reparse(configuration)
+                            }
+                            size="sm"
+                            type="button"
+                            variant="outline"
+                          >
+                            {reparsing ? <Spinner /> : <RefreshCw />}{" "}
+                            {t("reparse")}
+                          </Button>
+                        </div>
+                        {observation?.error && (
+                          <p className="text-xs text-destructive">
+                            {observation.error}
+                          </p>
+                        )}
+                      </CardContent>
+                    </Card>
+                  )}
+
+                  <div className={cn("space-y-2", coverageMode && "hidden")}>
+                    <Label>{t("action")}</Label>
+                    <Select
+                      onValueChange={(value) => {
+                        if (value !== action) destinationRequest.current += 1;
+                        setAction(value as BuildAction);
+                        if (value !== "ARCHIVE") setExportWhenComplete(false);
+                      }}
+                      value={action}
+                    >
+                      <SelectTrigger>
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {ACTIONS.map((value) => (
+                          <SelectItem key={value} value={value}>
+                            {t(`actions.${value}`)}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  {!coverageMode && action === "ARCHIVE" && (
+                    <section className="space-y-3">
+                      <label className="flex items-center gap-2 font-medium">
+                        <Checkbox
+                          checked={exportWhenComplete}
+                          onCheckedChange={(checked) =>
+                            setExportWhenComplete(Boolean(checked))
+                          }
+                        />
+                        {t("exportWhenComplete")}
+                      </label>
+                      {exportWhenComplete && (
+                        <ExportSettingsForm
+                          key={configurationId}
+                          onChange={setExportSettings}
+                          onParseSigningRequirements={parseSigningRequirements}
+                          value={exportSettings}
+                        />
+                      )}
+                    </section>
+                  )}
+
+                  {action === "TEST_WITHOUT_BUILDING" && (
+                    <div className="space-y-2">
+                      <Label>{t("priorBuildForTesting")}</Label>
+                      <Select
+                        disabled={
+                          priorBuildsLoading || !compatiblePriorBuilds.length
+                        }
+                        onValueChange={(value) =>
+                          setAdvanced((current) => ({
+                            ...current,
+                            priorBuildForTestingId: value,
+                            priorTestProductsPath: null,
+                            priorXctestrunPath: null,
+                          }))
+                        }
+                        value={selectedPriorBuildId ?? ""}
+                      >
+                        <SelectTrigger>
+                          <SelectValue
+                            placeholder={t("selectPriorBuildForTesting")}
+                          />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {compatiblePriorBuilds.map((build) => (
+                            <SelectItem key={build.id} value={build.id}>
+                              {formatDateValue(build.createdAt, "short", {
+                                locale,
+                              })}{" "}
+                              · {build.id}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                      {priorBuildsLoading && (
+                        <p className="flex items-center gap-2 text-xs text-muted-foreground">
+                          <Spinner /> {t("loading")}
+                        </p>
+                      )}
+                      {!priorBuildsLoading && !compatiblePriorBuilds.length && (
+                        <p className="text-xs text-destructive">
+                          {t("noPriorBuildForTesting")}
+                        </p>
+                      )}
+                    </div>
+                  )}
+
+                  {[
+                    "TEST",
+                    "BUILD_FOR_TESTING",
+                    "TEST_WITHOUT_BUILDING",
+                  ].includes(action) && (
+                    <div className="space-y-2">
+                      <Label>{t("testPlan")}</Label>
+                      <Select
+                        onValueChange={(value) =>
+                          setAdvanced((current) => ({
+                            ...current,
+                            testPlan:
+                              value === "__SCHEME_DEFAULT__" ? null : value,
+                          }))
+                        }
+                        value={String(
+                          advanced.testPlan ?? "__SCHEME_DEFAULT__",
+                        )}
+                      >
+                        <SelectTrigger>
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="__SCHEME_DEFAULT__">
+                            {t("schemeDefaultTestPlan")}
+                          </SelectItem>
+                          {typeof advanced.testPlan === "string" &&
+                            advanced.testPlan &&
+                            !observation?.testPlans.includes(
+                              advanced.testPlan,
+                            ) && (
+                              <SelectItem value={advanced.testPlan}>
+                                {advanced.testPlan} ·{" "}
+                                {t("savedValueUnavailable")}
+                              </SelectItem>
+                            )}
+                          {observation?.testPlans.map((testPlan) => (
+                            <SelectItem key={testPlan} value={testPlan}>
+                              {testPlan}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                  )}
+
+                  <div className="mt-4 grid gap-4 sm:grid-cols-2">
+                    <div className="space-y-2">
+                      <Label htmlFor="development-team">
+                        {t("developmentTeam")}
+                      </Label>
+                      <Input
+                        id="development-team"
+                        onChange={(event) =>
+                          setAdvanced((current) => ({
+                            ...current,
+                            developmentTeam: event.target.value || null,
+                          }))
+                        }
+                        value={String(advanced.developmentTeam ?? "")}
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <Label>{t("packageResolution")}</Label>
+                      <Select
+                        onValueChange={(value) =>
+                          setAdvanced((current) => ({
+                            ...current,
+                            packageResolution: value,
+                          }))
+                        }
+                        value={String(advanced.packageResolution ?? "DEFAULT")}
+                      >
+                        <SelectTrigger>
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {[
+                            "DEFAULT",
+                            "RESOLVED_ONLY",
+                            "SKIP_UPDATES",
+                            "DISABLE_AUTOMATIC",
+                          ].map((value) => (
+                            <SelectItem key={value} value={value}>
+                              {value}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    <label className="flex items-center gap-2">
+                      <Checkbox
+                        checked={coverageMode || Boolean(advanced.codeCoverage)}
+                        disabled={coverageMode}
+                        onCheckedChange={(checked) =>
+                          setAdvanced((current) => ({
+                            ...current,
+                            codeCoverage: Boolean(checked),
+                          }))
+                        }
+                      />
+                      {t("codeCoverage")}
+                    </label>
+                    {["TEST", "TEST_WITHOUT_BUILDING"].includes(action) && (
+                      <label className="flex items-center gap-2">
+                        <Checkbox
+                          checked={
+                            coverageMode || advanced.parseTestResults !== false
+                          }
+                          disabled={coverageMode}
+                          onCheckedChange={(checked) =>
+                            setAdvanced((current) => ({
+                              ...current,
+                              parseTestResults: Boolean(checked),
+                            }))
+                          }
+                        />
+                        {t("parseTestResults")}
+                      </label>
+                    )}
+                    <label className="flex items-center gap-2">
+                      <Checkbox
+                        checked={Boolean(advanced.allowProvisioningUpdates)}
+                        onCheckedChange={(checked) =>
+                          setAdvanced((current) => ({
+                            ...current,
+                            allowProvisioningUpdates: Boolean(checked),
+                          }))
+                        }
+                      />
+                      {t("allowProvisioningUpdates")}
+                    </label>
+                    <CollectDsymsSelect
+                      id="collect-dsyms"
+                      onChange={(collectDsyms) =>
+                        setAdvanced((current) => ({ ...current, collectDsyms }))
+                      }
+                      value={advanced.collectDsyms}
+                    />
+                    <div className="space-y-2 sm:col-span-2">
+                      <Label htmlFor="build-setting-overrides">
+                        {t("buildSettingOverrides")}
+                      </Label>
+                      <Textarea
+                        className="font-mono text-xs"
+                        id="build-setting-overrides"
+                        onChange={(event) => setOverrides(event.target.value)}
+                        rows={4}
+                        value={overrides}
+                      />
+                    </div>
+                  </div>
+                  <section className="space-y-2">
+                    <Label>{t("commandPreview")}</Label>
+                    <pre className="overflow-x-auto rounded-lg bg-muted p-3 text-xs whitespace-pre-wrap">
+                      {preview}
+                    </pre>
+                  </section>
+                </div>
+              </details>
+            </div>
+          )}
+          <DialogFooter>
+            <Button
+              onClick={() => onOpenChange(false)}
+              type="button"
+              variant="outline"
+            >
+              {t("cancel")}
+            </Button>
+            <Button
+              disabled={
+                loading ||
+                starting ||
+                !configuration ||
+                !destination ||
+                (action === "TEST_WITHOUT_BUILDING" && !selectedPriorBuildId)
+              }
+              onClick={() => void start()}
+              type="button"
+            >
+              {starting && <Spinner />} {t("startBuild")}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+      {customOpen && (
+        <BuildConfigurationDialog
+          codebaseId={codebaseId}
+          worktreeId={worktreeId}
+          configuration={customConfiguration}
+          open={customOpen}
+          onOpenChange={setCustomOpen}
+          onSaved={async () => {}}
+          onCustom={(value) => {
+            setCustomConfiguration(value);
+            setConfigurationId("__custom__");
+            setAction(coverageMode ? "TEST" : value.defaultAction);
+            setAdvanced(value.advancedSettings);
+            setOverrides(
+              JSON.stringify(
+                value.advancedSettings.buildSettingOverrides ?? {},
+              ),
+            );
+            setExportWhenComplete(Boolean(value.autoExport));
+            setExportSettings({
+              ...DEFAULT_EXPORT_SETTINGS,
+              ...value.exportSettings,
+            } as ExportSettingsValue);
+          }}
+        />
+      )}
+    </>
   );
 }

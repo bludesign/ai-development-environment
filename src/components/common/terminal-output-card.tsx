@@ -60,6 +60,9 @@ export function TerminalOutputCard({
   collapseLabel,
   expandLabel,
   className,
+  onLoadOlder,
+  loadingOlder = false,
+  loadingOlderLabel,
 }: {
   sourceKey: string;
   title: string;
@@ -78,6 +81,9 @@ export function TerminalOutputCard({
   collapseLabel?: string;
   expandLabel?: string;
   className?: string;
+  onLoadOlder?: () => void;
+  loadingOlder?: boolean;
+  loadingOlderLabel?: string;
 }) {
   const [terminalElement, setTerminalElement] = useState<HTMLDivElement | null>(
     null,
@@ -88,7 +94,13 @@ export function TerminalOutputCard({
     null,
   );
   const entriesRef = useRef(entries);
-  const writtenRef = useRef(new Set<string>());
+  const renderedRef = useRef<TerminalOutputEntry[]>([]);
+  const entryLinesRef = useRef(new Map<string, number>());
+  const writingRef = useRef(false);
+  const olderRef = useRef({ onLoadOlder, loadingOlder });
+  useEffect(() => {
+    olderRef.current = { onLoadOlder, loadingOlder };
+  }, [onLoadOlder, loadingOlder]);
   const dividerRef = useRef<string | null>(null);
   const followRef = useRef(true);
   const [follow, setFollow] = useState(true);
@@ -118,28 +130,70 @@ export function TerminalOutputCard({
     [],
   );
 
-  const writeEntries = useCallback((nextEntries: TerminalOutputEntry[]) => {
+  const writeEntries = useCallback(function flush(
+    nextEntries: TerminalOutputEntry[],
+  ) {
     const terminal = terminalRef.current;
-    if (!terminal) return;
-    // Catch-up queries can insert a late chunk before entries already shown.
-    // Keep the live terminal stable and append only that unseen chunk; a new
-    // terminal lifecycle still replays the complete canonical entry order.
-    for (const entry of nextEntries) {
-      if (writtenRef.current.has(entry.id)) continue;
-      const hasRenderedEntries = writtenRef.current.size > 0;
-      writtenRef.current.add(entry.id);
+    if (!terminal || writingRef.current) return;
+    const previous = renderedRef.current;
+    const appendOnly =
+      previous.length <= nextEntries.length &&
+      previous.every((entry, index) => entry.id === nextEntries[index].id);
+    if (appendOnly && previous.length === nextEntries.length) return;
+    writingRef.current = true;
+    const wasFollowing = followRef.current;
+    const viewport = terminal.buffer.active.viewportY;
+    const lines = [...entryLinesRef.current];
+    const anchor =
+      lines.toReversed().find(([, line]) => line <= viewport) ?? lines[0];
+    const offset = anchor ? viewport - anchor[1] : 0;
+    if (!appendOnly) {
+      terminal.reset();
+      dividerRef.current = null;
+      entryLinesRef.current.clear();
+    }
+    // The buffer must retain every loaded line, including wrapped output. xterm
+    // allocates lines lazily, so a byte-based upper bound does not preallocate it.
+    terminal.options.scrollback = Math.max(
+      100_000,
+      nextEntries.reduce((size, entry) => size + entry.data.length + 100, 0),
+    );
+    const start = appendOnly ? previous.length : 0;
+    for (let index = start; index < nextEntries.length; index++) {
+      const entry = nextEntries[index];
       const dividerKey = entry.dividerKey ?? entry.divider;
       if (entry.divider && dividerKey !== dividerRef.current) {
         dividerRef.current = dividerKey ?? null;
-        // The blank line separates a divider from the block above it, so the
-        // first divider skips it and stays flush with the top of the terminal.
-        const lead = hasRenderedEntries ? "\r\n" : "";
-        terminal.write(`${lead}\x1b[90m── ${entry.divider} ──\x1b[0m\r\n`);
+        terminal.write(
+          `${index ? "\r\n" : ""}\x1b[90m── ${entry.divider} ──\x1b[0m\r\n`,
+        );
       }
-      terminal.write(entry.data, () => {
-        if (followRef.current) terminal.scrollToBottom();
+      terminal.write("", () => {
+        if (terminalRef.current === terminal)
+          entryLinesRef.current.set(
+            entry.id,
+            terminal.buffer.active.baseY + terminal.buffer.active.cursorY,
+          );
       });
+      terminal.write(entry.data);
     }
+    terminal.write("", () => {
+      if (terminalRef.current !== terminal) return;
+      renderedRef.current = nextEntries;
+      if (searchTermRef.current)
+        searchRef.current?.findNext(searchTermRef.current, SEARCH_OPTIONS);
+      if (wasFollowing) terminal.scrollToBottom();
+      else if (!appendOnly)
+        terminal.scrollToLine(
+          anchor
+            ? (entryLinesRef.current.get(anchor[0]) ?? viewport) + offset
+            : viewport,
+        );
+      followRef.current = wasFollowing;
+      setFollow(wasFollowing);
+      writingRef.current = false;
+      if (entriesRef.current !== nextEntries) flush(entriesRef.current);
+    });
   }, []);
 
   useEffect(() => {
@@ -158,7 +212,19 @@ export function TerminalOutputCard({
     let resetTouch: (() => void) | null = null;
     let handleTouchStart: ((event: TouchEvent) => void) | null = null;
     let handleTouchMove: ((event: TouchEvent) => void) | null = null;
-    writtenRef.current.clear();
+    const handleWheel = (event: WheelEvent) => {
+      if (
+        event.deltaY < 0 &&
+        (terminalRef.current?.buffer.active.viewportY ?? Infinity) <= 10 &&
+        !writingRef.current &&
+        !olderRef.current.loadingOlder
+      )
+        olderRef.current.onLoadOlder?.();
+    };
+    terminalElement.addEventListener("wheel", handleWheel, { passive: true });
+    renderedRef.current = [];
+    entryLinesRef.current.clear();
+    writingRef.current = false;
     dividerRef.current = null;
     followRef.current = true;
     void Promise.all([
@@ -197,6 +263,12 @@ export function TerminalOutputCard({
         setSearchResults(results),
       );
       scrollDisposable = terminal.onScroll(() => {
+        if (writingRef.current) return;
+        if (
+          terminal.buffer.active.viewportY <= 10 &&
+          !olderRef.current.loadingOlder
+        )
+          olderRef.current.onLoadOlder?.();
         const atBottom =
           terminal.buffer.active.viewportY >= terminal.buffer.active.baseY;
         followRef.current = atBottom;
@@ -227,6 +299,12 @@ export function TerminalOutputCard({
           (delta > 0 && buffer.viewportY < buffer.baseY) ||
           (delta < 0 && buffer.viewportY > 0);
         if (!canScroll) {
+          if (
+            delta < 0 &&
+            buffer.viewportY === 0 &&
+            !olderRef.current.loadingOlder
+          )
+            olderRef.current.onLoadOlder?.();
           touchRemainder = 0;
           return;
         }
@@ -270,6 +348,7 @@ export function TerminalOutputCard({
     });
     return () => {
       cancelled = true;
+      terminalElement.removeEventListener("wheel", handleWheel);
       observer?.disconnect();
       scrollDisposable?.dispose();
       searchDisposable?.dispose();
@@ -296,6 +375,11 @@ export function TerminalOutputCard({
     <Card className={cn("gap-0 py-0", className)}>
       <CardHeader className="grid-cols-1 has-data-[slot=card-action]:grid-cols-1 @md/card-header:has-data-[slot=card-action]:grid-cols-[1fr_auto]">
         <CardTitle className="min-w-0">
+          {loadingOlder && (
+            <span role="status" className="text-xs text-muted-foreground">
+              {loadingOlderLabel}
+            </span>
+          )}
           {onOpenChange ? (
             <Button
               aria-expanded={open}

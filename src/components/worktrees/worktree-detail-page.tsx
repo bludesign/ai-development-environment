@@ -1,5 +1,7 @@
 "use client";
 
+import { OutOfDateBadge } from "@/components/builds/out-of-date-badge";
+
 import { readWorktreeBuildWindow } from "@/components/builds/build-history-window";
 
 import {
@@ -1154,12 +1156,11 @@ export function WorktreeBuildTable({
                         {t(`statuses.${build.status}`)}
                       </Badge>
                       {build.outOfDate && (
-                        <Badge
-                          className="border-amber-500/40 text-amber-700 dark:text-amber-300"
-                          variant="outline"
-                        >
-                          {t("outOfDate")}
-                        </Badge>
+                        <OutOfDateBadge
+                          buildId={build.id}
+                          onCompleted={() => onReload()}
+                          onError={onError}
+                        />
                       )}
                     </div>
                   </TableCell>

@@ -301,7 +301,8 @@ describe("StartBuildDialog", () => {
       ),
     ).toBe(false);
 
-    const action = within(dialog).getAllByRole("combobox")[0]!;
+    fireEvent.click(await screen.findByText("Details"));
+    const action = within(dialog).getAllByRole("combobox")[1]!;
     fireEvent.pointerDown(action, {
       button: 0,
       ctrlKey: false,
@@ -519,7 +520,8 @@ describe("StartBuildDialog", () => {
     expect(screen.queryByText("VALID")).toBeNull();
 
     const dialog = screen.getByRole("dialog");
-    const action = within(dialog).getAllByRole("combobox")[0]!;
+    fireEvent.click(await screen.findByText("Details"));
+    const action = within(dialog).getAllByRole("combobox")[1]!;
     fireEvent.pointerDown(action, {
       button: 0,
       ctrlKey: false,
@@ -527,7 +529,7 @@ describe("StartBuildDialog", () => {
     });
     fireEvent.click(await screen.findByRole("option", { name: "Test" }));
     const testPlanLabel = await screen.findByText("Test plan");
-    expect(testPlanLabel.closest("details")).toBeNull();
+    expect(testPlanLabel.closest("details")).not.toBeNull();
   });
 
   test("preflights a configuration, previews a safe command, validates overrides, and snapshots default scripts", async () => {
@@ -570,7 +572,7 @@ describe("StartBuildDialog", () => {
         .getAttribute("data-state"),
     ).toBe("checked");
 
-    const device = screen.getAllByRole("combobox")[2]!;
+    const device = screen.getAllByRole("combobox")[0]!;
     fireEvent.pointerDown(device, {
       button: 0,
       ctrlKey: false,
@@ -584,15 +586,7 @@ describe("StartBuildDialog", () => {
       await screen.findByRole("option", { name: /iPhone 17 Pro/ }),
     );
 
-    const destinationType = screen.getAllByRole("combobox")[1]!;
-    fireEvent.pointerDown(destinationType, {
-      button: 0,
-      ctrlKey: false,
-      pointerType: "mouse",
-    });
-    fireEvent.click(
-      await screen.findByRole("option", { name: "Physical Device" }),
-    );
+    fireEvent.click(screen.getByRole("tab", { name: "Physical Device" }));
     fireEvent.pointerDown(device, {
       button: 0,
       ctrlKey: false,
@@ -604,12 +598,7 @@ describe("StartBuildDialog", () => {
     expect(screen.getByRole("option", { name: /iPhone/ })).toBeDefined();
     fireEvent.click(screen.getByRole("option", { name: /iPhone/ }));
 
-    fireEvent.pointerDown(destinationType, {
-      button: 0,
-      ctrlKey: false,
-      pointerType: "mouse",
-    });
-    fireEvent.click(await screen.findByRole("option", { name: "Simulator" }));
+    fireEvent.click(screen.getByRole("tab", { name: "Simulator" }));
     fireEvent.pointerDown(device, {
       button: 0,
       ctrlKey: false,

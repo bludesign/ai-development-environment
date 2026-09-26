@@ -13,6 +13,7 @@ import {
 import { useLocale, useTranslations } from "next-intl";
 import { useCallback, useEffect, useState } from "react";
 
+import { ConfirmationDialog } from "@/components/confirmation-dialog";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -81,10 +82,10 @@ const PROJECT_FIELDS = `
   }
   allowedScripts {
     position
-    script { id name preBuildScript postBuildScript enabledByDefault timeoutSeconds failureBehavior }
+    script { id name iconKey preBuildScript postBuildScript enabledByDefault timeoutSeconds failureBehavior }
   }
 `;
-const SCRIPT_FIELDS = `id name preBuildScript postBuildScript enabledByDefault timeoutSeconds failureBehavior`;
+const SCRIPT_FIELDS = `id name iconKey preBuildScript postBuildScript enabledByDefault timeoutSeconds failureBehavior`;
 type SourceCandidate = {
   kind: "PROJECT" | "WORKSPACE" | "PACKAGE";
   relativePath: string;
@@ -126,6 +127,7 @@ export function IosProjectSection({
   const [error, setError] = useState<string | null>(null);
   const [editing, setEditing] = useState<BuildConfiguration | null>(null);
   const [configurationOpen, setConfigurationOpen] = useState(false);
+  const [deleteProjectOpen, setDeleteProjectOpen] = useState(false);
 
   const load = useCallback(async () => {
     try {
@@ -320,6 +322,16 @@ export function IosProjectSection({
           <Alert>
             <AlertDescription>{t("sharedProjectDescription")}</AlertDescription>
           </Alert>
+          <div className="flex justify-end">
+            <Button
+              variant="destructive"
+              size="sm"
+              onClick={() => setDeleteProjectOpen(true)}
+            >
+              <Trash2 />
+              {t("removeProject")}
+            </Button>
+          </div>
           <Card>
             <CardHeader className="flex-row items-center justify-between">
               <CardTitle>{t("buildConfigurations")}</CardTitle>
@@ -361,7 +373,9 @@ export function IosProjectSection({
                               configuration.observation?.status === "ERROR" ||
                               configuration.observation?.status === "INVALID"
                                 ? "destructive"
-                                : "outline"
+                                : configuration.observation?.status === "VALID"
+                                  ? "success"
+                                  : "outline"
                             }
                           >
                             {t(
@@ -455,7 +469,10 @@ export function IosProjectSection({
                           void toggleAllowedScript(script.id, Boolean(value))
                         }
                       />
-                      <span className="text-sm">{script.name}</span>
+                      <span className="flex items-center gap-2 text-sm">
+                        <ConfigurationIcon iconKey={script.iconKey ?? null} />
+                        {script.name}
+                      </span>
                       {script.enabledByDefault && (
                         <Badge variant="outline">{t("defaultEnabled")}</Badge>
                       )}
@@ -467,6 +484,28 @@ export function IosProjectSection({
           </Card>
         </>
       )}
+      <ConfirmationDialog
+        open={deleteProjectOpen}
+        onOpenChange={setDeleteProjectOpen}
+        title={t("removeProject")}
+        description={t("removeProjectDescription")}
+        actionLabel={t("removeProject")}
+        cancelLabel={t("cancel")}
+        onConfirm={async () => {
+          if (!project) return;
+          try {
+            await controlPlaneRequest(
+              `mutation DeleteIosAppProject($id: ID!) { deleteIosAppProject(id: $id) }`,
+              { id: project.id },
+            );
+            setDeleteProjectOpen(false);
+            await load();
+          } catch (error) {
+            setError(error instanceof Error ? error.message : String(error));
+            setDeleteProjectOpen(false);
+          }
+        }}
+      />
       {configurationOpen && worktreeId && (
         <BuildConfigurationDialog
           codebaseId={activeCodebaseId}
@@ -481,13 +520,14 @@ export function IosProjectSection({
   );
 }
 
-function BuildConfigurationDialog({
+export function BuildConfigurationDialog({
   codebaseId,
   worktreeId,
   configuration,
   open,
   onOpenChange,
   onSaved,
+  onCustom,
 }: {
   codebaseId: string;
   worktreeId: string;
@@ -495,6 +535,7 @@ function BuildConfigurationDialog({
   open: boolean;
   onOpenChange: (open: boolean) => void;
   onSaved: () => Promise<void>;
+  onCustom?: (configuration: BuildConfiguration) => void;
 }) {
   const t = useTranslations("builds");
   const [name, setName] = useState(configuration?.name ?? "");
@@ -687,6 +728,40 @@ function BuildConfigurationDialog({
         parseTestResults,
         collectDsyms,
       };
+      if (onCustom) {
+        onCustom({
+          id: "__custom__",
+          name: "Custom",
+          iconKey: null,
+          source: { id: "", kind: sourceKind, relativePath: sourcePath },
+          scheme,
+          buildConfiguration,
+          defaultAction: action,
+          advancedSettings: advancedSettings as Record<string, unknown>,
+          autoExport: action === "ARCHIVE" && autoExport,
+          exportSettings,
+          observation: inspection
+            ? {
+                id: "",
+                scopeKey: `worktree:${worktreeId}`,
+                status: parseStatus,
+                schemes: inspection.schemes,
+                configurations: inspection.configurations,
+                testPlans: inspection.testPlans,
+                error: null,
+                stale: inspectionStale,
+                headSha: inspection.headSha,
+                xcodeVersion: inspection.xcodeVersion,
+                lastParseAttemptAt: new Date().toISOString(),
+                lastParsedAt: new Date().toISOString(),
+              }
+            : null,
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+        });
+        onOpenChange(false);
+        return;
+      }
       const data = await controlPlaneRequest<{
         saveBuildConfiguration: { id: string };
       }>(
@@ -734,7 +809,11 @@ function BuildConfigurationDialog({
       <DialogContent className="max-h-[90vh] grid-cols-[minmax(0,1fr)] overflow-y-auto sm:max-w-5xl">
         <DialogHeader>
           <DialogTitle>
-            {configuration ? t("editConfiguration") : t("newConfiguration")}
+            {onCustom
+              ? t("customBuild")
+              : configuration
+                ? t("editConfiguration")
+                : t("newConfiguration")}
           </DialogTitle>
           <DialogDescription>{t("configurationDescription")}</DialogDescription>
         </DialogHeader>
@@ -744,59 +823,63 @@ function BuildConfigurationDialog({
           </Alert>
         )}
         <div className="space-y-5">
-          <div className="grid gap-4 sm:grid-cols-2">
-            <div className="space-y-2">
-              <Label htmlFor="configuration-name">{t("name")}</Label>
-              <Input
-                id="configuration-name"
-                onChange={(event) => setName(event.target.value)}
-                value={name}
-              />
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="configuration-icon">{t("icon")}</Label>
-              <DropdownMenu>
-                <DropdownMenuTrigger asChild>
-                  <Button
-                    aria-label={`${t("icon")}: ${t(`configurationIcons.${iconKey}`)}`}
-                    className="justify-between"
-                    id="configuration-icon"
-                    type="button"
-                    variant="outline"
-                  >
-                    <span className="flex min-w-0 items-center gap-2">
-                      {iconKey === "none" ? (
-                        <CircleOff className="size-4 shrink-0" />
-                      ) : (
-                        <ConfigurationIcon iconKey={iconKey} />
-                      )}
-                      <span className="truncate">
-                        {t(`configurationIcons.${iconKey}`)}
-                      </span>
-                    </span>
-                    <ChevronDown className="text-muted-foreground" />
-                  </Button>
-                </DropdownMenuTrigger>
-                <DropdownMenuContent align="start" className="min-w-56">
-                  <DropdownMenuRadioGroup
-                    onValueChange={setIconKey}
-                    value={iconKey}
-                  >
-                    {["none", ...BUILD_CONFIGURATION_ICON_KEYS].map((value) => (
-                      <DropdownMenuRadioItem key={value} value={value}>
-                        {value === "none" ? (
-                          <CircleOff className="size-4" />
+          {!onCustom && (
+            <div className="grid gap-4 sm:grid-cols-2">
+              <div className="space-y-2">
+                <Label htmlFor="configuration-name">{t("name")}</Label>
+                <Input
+                  id="configuration-name"
+                  onChange={(event) => setName(event.target.value)}
+                  value={name}
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="configuration-icon">{t("icon")}</Label>
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <Button
+                      aria-label={`${t("icon")}: ${t(`configurationIcons.${iconKey}`)}`}
+                      className="justify-between"
+                      id="configuration-icon"
+                      type="button"
+                      variant="outline"
+                    >
+                      <span className="flex min-w-0 items-center gap-2">
+                        {iconKey === "none" ? (
+                          <CircleOff className="size-4 shrink-0" />
                         ) : (
-                          <ConfigurationIcon iconKey={value} />
+                          <ConfigurationIcon iconKey={iconKey} />
                         )}
-                        {t(`configurationIcons.${value}`)}
-                      </DropdownMenuRadioItem>
-                    ))}
-                  </DropdownMenuRadioGroup>
-                </DropdownMenuContent>
-              </DropdownMenu>
+                        <span className="truncate">
+                          {t(`configurationIcons.${iconKey}`)}
+                        </span>
+                      </span>
+                      <ChevronDown className="text-muted-foreground" />
+                    </Button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent align="start" className="min-w-56">
+                    <DropdownMenuRadioGroup
+                      onValueChange={setIconKey}
+                      value={iconKey}
+                    >
+                      {["none", ...BUILD_CONFIGURATION_ICON_KEYS].map(
+                        (value) => (
+                          <DropdownMenuRadioItem key={value} value={value}>
+                            {value === "none" ? (
+                              <CircleOff className="size-4" />
+                            ) : (
+                              <ConfigurationIcon iconKey={value} />
+                            )}
+                            {t(`configurationIcons.${value}`)}
+                          </DropdownMenuRadioItem>
+                        ),
+                      )}
+                    </DropdownMenuRadioGroup>
+                  </DropdownMenuContent>
+                </DropdownMenu>
+              </div>
             </div>
-          </div>
+          )}
           <Card>
             <CardContent className="space-y-3">
               <div className="flex items-center justify-between gap-2">
@@ -815,7 +898,7 @@ function BuildConfigurationDialog({
                     )}
                     <Badge
                       variant={
-                        parseStatus === "VALID" ? "outline" : "destructive"
+                        parseStatus === "VALID" ? "success" : "destructive"
                       }
                     >
                       {t(`parseStatuses.${parseStatus}`)}
@@ -1044,14 +1127,14 @@ function BuildConfigurationDialog({
             disabled={
               busy ||
               inspecting ||
-              !name.trim() ||
+              (!onCustom && !name.trim()) ||
               !sourcePath ||
               !scheme ||
               !buildConfiguration
             }
             onClick={() => void save()}
           >
-            {busy && <Spinner />} {t("save")}
+            {busy && <Spinner />} {t(onCustom ? "useSettings" : "save")}
           </Button>
         </DialogFooter>
       </DialogContent>
