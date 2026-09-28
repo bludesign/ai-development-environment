@@ -1,11 +1,25 @@
 "use client";
 
+import { ChevronRight } from "lucide-react";
 import { useTranslations } from "next-intl";
 
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
+import {
+  Collapsible,
+  CollapsibleContent,
+  CollapsibleTrigger,
+} from "@/components/ui/collapsible";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 
 import { isTransferItemSelected, transferValueLabel } from "./selection";
 import {
@@ -13,6 +27,8 @@ import {
   type TransferChoice,
   type TransferItem,
 } from "./types";
+
+const AUTOMATIC_TARGET = "__automatic__";
 
 export function TransferSelectionTree({
   items,
@@ -147,31 +163,37 @@ export function TransferSelectionTree({
                   checked && (
                     <div className="flex flex-wrap items-center gap-2">
                       <Label htmlFor={`${id}-action`}>{t("resolution")}</Label>
-                      <select
-                        id={`${id}-action`}
-                        className="h-9 rounded-md border bg-background px-2"
+                      <Select
                         disabled={readOnly}
                         value={action}
-                        onChange={(event) =>
+                        onValueChange={(value) =>
                           onChoice({
                             ...choice,
                             key: item.key,
-                            action: event.target
-                              .value as TransferChoice["action"],
+                            action: value as TransferChoice["action"],
                           })
                         }
                       >
-                        <option value="IMPORT">{t("useImported")}</option>
-                        <option
-                          disabled={!isConflict && !choice?.targetId}
-                          value="KEEP"
-                        >
-                          {t("keepExisting")}
-                        </option>
-                        {canCopy && (
-                          <option value="COPY">{t("createCopy")}</option>
-                        )}
-                      </select>
+                        <SelectTrigger id={`${id}-action`} className="min-w-44">
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent position="popper" align="start">
+                          <SelectItem value="IMPORT">
+                            {t("useImported")}
+                          </SelectItem>
+                          <SelectItem
+                            disabled={!isConflict && !choice?.targetId}
+                            value="KEEP"
+                          >
+                            {t("keepExisting")}
+                          </SelectItem>
+                          {canCopy && (
+                            <SelectItem value="COPY">
+                              {t("createCopy")}
+                            </SelectItem>
+                          )}
+                        </SelectContent>
+                      </Select>
                       {action === "COPY" && (
                         <Input
                           aria-label={t("copyName", { name: item.label })}
@@ -194,27 +216,45 @@ export function TransferSelectionTree({
                           <Label htmlFor={`${id}-target`}>
                             {t("existingDestination")}
                           </Label>
-                          <select
-                            id={`${id}-target`}
-                            className="h-9 w-full rounded-md border bg-background px-2"
+                          <Select
                             disabled={readOnly}
-                            value={choice?.targetId ?? item.targetId ?? ""}
-                            onChange={(event) =>
+                            value={
+                              choice && Object.hasOwn(choice, "targetId")
+                                ? (choice.targetId ?? AUTOMATIC_TARGET)
+                                : (item.targetId ?? AUTOMATIC_TARGET)
+                            }
+                            onValueChange={(value) =>
                               onChoice({
                                 ...choice,
                                 key: item.key,
                                 action,
-                                targetId: event.target.value || undefined,
+                                targetId:
+                                  value === AUTOMATIC_TARGET
+                                    ? undefined
+                                    : value,
                               })
                             }
                           >
-                            <option value="">{t("matchAutomatically")}</option>
-                            {item.candidates.map((candidate) => (
-                              <option key={candidate.id} value={candidate.id}>
-                                {candidate.label}
-                              </option>
-                            ))}
-                          </select>
+                            <SelectTrigger
+                              id={`${id}-target`}
+                              className="w-full"
+                            >
+                              <SelectValue />
+                            </SelectTrigger>
+                            <SelectContent position="popper" align="start">
+                              <SelectItem value={AUTOMATIC_TARGET}>
+                                {t("matchAutomatically")}
+                              </SelectItem>
+                              {item.candidates.map((candidate) => (
+                                <SelectItem
+                                  key={candidate.id}
+                                  value={candidate.id}
+                                >
+                                  {candidate.label}
+                                </SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
                         </div>
                       )}
                     </div>
@@ -238,11 +278,19 @@ export function TransferSelectionTree({
                     </div>
                   )}
                 {(item.current !== null || item.incoming !== null) && (
-                  <details className="text-sm">
-                    <summary className="cursor-pointer text-muted-foreground">
-                      {t(onChoice ? "viewChanges" : "viewContents")}
-                    </summary>
-                    <div
+                  <Collapsible className="text-sm">
+                    <CollapsibleTrigger asChild>
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="sm"
+                        className="group -ml-2 text-muted-foreground"
+                      >
+                        <ChevronRight className="transition-transform group-data-[state=open]:rotate-90" />
+                        {t(onChoice ? "viewChanges" : "viewContents")}
+                      </Button>
+                    </CollapsibleTrigger>
+                    <CollapsibleContent
                       className={`mt-2 grid gap-3 ${onChoice && isConflict ? "md:grid-cols-2" : ""}`}
                     >
                       {onChoice && isConflict && (
@@ -261,8 +309,8 @@ export function TransferSelectionTree({
                           {transferValueLabel(item.incoming)}
                         </pre>
                       </div>
-                    </div>
-                  </details>
+                    </CollapsibleContent>
+                  </Collapsible>
                 )}
               </div>
             </div>

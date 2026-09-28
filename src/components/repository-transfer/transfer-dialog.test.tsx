@@ -13,6 +13,12 @@ import { controlPlaneRequest } from "@/lib/control-plane-client";
 import { RepositoryTransferDialog } from "./transfer-dialog";
 import type { TransferItem, TransferPreview } from "./types";
 
+Object.defineProperties(HTMLElement.prototype, {
+  hasPointerCapture: { configurable: true, value: () => false },
+  releasePointerCapture: { configurable: true, value: () => undefined },
+  setPointerCapture: { configurable: true, value: () => undefined },
+  scrollIntoView: { configurable: true, value: () => undefined },
+});
 vi.mock("@/lib/control-plane-client", () => ({
   controlPlaneRequest: vi.fn(),
   onControlPlaneRecovery: vi.fn(() => () => undefined),
@@ -97,6 +103,139 @@ function upload() {
     target: { files: [file] },
   });
 }
+
+function packageFile(name = "mobile.repository.json", contents = "{}") {
+  const file = new File([contents], name, { type: "application/json" });
+  Object.defineProperty(file, "text", { value: async () => contents });
+  return file;
+}
+
+function drop(files: File[]) {
+  const area = screen.getByLabelText("JSON package").closest("label")!;
+  fireEvent.drop(area, { dataTransfer: { files } });
+}
+
+test("dropped packages use the reviewed import flow and block another upload while loading", async () => {
+  let finishReading!: (value: string) => void;
+  const file = new File(["{}"], "dropped.app.json", {
+    type: "application/json",
+  });
+  Object.defineProperty(file, "text", {
+    value: () =>
+      new Promise<string>((resolve) => {
+        finishReading = resolve;
+      }),
+  });
+  request.mockResolvedValue({ previewRepositoryTransfer: preview } as never);
+  render(<RepositoryTransferDialog direction="import" onClose={vi.fn()} />);
+  const picker = screen.getByLabelText("JSON package") as HTMLInputElement;
+  expect(picker.multiple).toBe(false);
+  drop([file]);
+  expect(picker.disabled).toBe(true);
+  drop([packageFile("ignored.json")]);
+  expect(request).not.toHaveBeenCalled();
+  finishReading(JSON.stringify({ format: "dropped-package" }));
+  expect(await screen.findByText("dropped.app.json")).toBeDefined();
+  await waitFor(() => expect(picker.disabled).toBe(false));
+  expect(request).toHaveBeenCalledTimes(1);
+  expect(request.mock.calls[0]?.[1]).toMatchObject({
+    input: { payload: { format: "dropped-package" } },
+  });
+  expect(request.mock.calls[0]?.[0]).toContain(
+    "query PreviewRepositoryTransfer",
+  );
+});
+
+test("invalid replacement drops clear the previous reviewed package", async () => {
+  request.mockResolvedValue({ previewRepositoryTransfer: preview } as never);
+  render(<RepositoryTransferDialog direction="import" onClose={vi.fn()} />);
+  upload();
+  await waitFor(() =>
+    expect(
+      (
+        screen.getByRole("button", {
+          name: "Import selected",
+        }) as HTMLButtonElement
+      ).disabled,
+    ).toBe(false),
+  );
+  drop([packageFile("one.json"), packageFile("two.json")]);
+  expect(
+    await screen.findByText("Choose one JSON package at a time."),
+  ).toBeDefined();
+  expect(screen.queryByRole("button", { name: "Import selected" })).toBeNull();
+  expect(screen.queryByRole("button", { name: "Review import" })).toBeNull();
+  const large = packageFile("large.json");
+  Object.defineProperty(large, "size", { value: 100 * 1024 * 1024 + 1 });
+  drop([large]);
+  expect(
+    await screen.findByText("Choose a JSON package smaller than 100 MiB."),
+  ).toBeDefined();
+  expect(request).toHaveBeenCalledTimes(1);
+});
+
+test("shadcn template and dependency selectors preserve choices for the next review", async () => {
+  const secondRepository = {
+    ...repository,
+    key: "repository:two",
+    label: "Backend",
+    repositoryKey: "repository:two",
+  };
+  request.mockResolvedValue({
+    previewRepositoryTransfer: {
+      ...preview,
+      items: [repository, secondRepository],
+      dependencies: [
+        {
+          key: "signing",
+          itemKey: repository.key,
+          kind: "WORKFLOW",
+          label: "Signing workflow",
+          targetId: null,
+          resolved: false,
+          candidates: [{ id: "local-signing", label: "Local signing" }],
+        },
+      ],
+    },
+  } as never);
+  render(
+    <RepositoryTransferDialog
+      direction="import"
+      repositoryId="destination"
+      onClose={vi.fn()}
+    />,
+  );
+  upload();
+  const template = await screen.findByRole("combobox", {
+    name: "Repository to use as the template",
+  });
+  fireEvent.pointerDown(template, {
+    button: 0,
+    ctrlKey: false,
+    pointerType: "mouse",
+  });
+  fireEvent.click(await screen.findByRole("option", { name: "Backend" }));
+  fireEvent.pointerDown(
+    screen.getByRole("combobox", { name: "Signing workflow" }),
+    { button: 0, ctrlKey: false, pointerType: "mouse" },
+  );
+  fireEvent.click(await screen.findByRole("option", { name: "Local signing" }));
+  expect(
+    (
+      screen.getByRole("button", {
+        name: "Import selected",
+      }) as HTMLButtonElement
+    ).disabled,
+  ).toBe(true);
+  fireEvent.click(screen.getByRole("button", { name: "Review import" }));
+  await waitFor(() => expect(request).toHaveBeenCalledTimes(2));
+  expect(request.mock.calls[1]?.[1]).toMatchObject({
+    input: {
+      sourceRepositoryKey: secondRepository.key,
+      mappings: [{ key: "signing", targetId: "local-signing" }],
+    },
+  });
+});
 
 test("changing a reviewed import invalidates confirmation and preserves selections in the next preview", async () => {
   const operation = {
@@ -258,7 +397,12 @@ test("keeping an existing workflow clears its import activation opt-in", async (
   const choices = screen.getAllByRole("combobox", {
     name: "When this item exists",
   });
-  fireEvent.change(choices.at(-1)!, { target: { value: "KEEP" } });
+  fireEvent.pointerDown(choices.at(-1)!, {
+    button: 0,
+    ctrlKey: false,
+    pointerType: "mouse",
+  });
+  fireEvent.click(await screen.findByRole("option", { name: "Keep existing" }));
   expect(
     screen.queryByRole("checkbox", {
       name: "Enable this workflow after import",

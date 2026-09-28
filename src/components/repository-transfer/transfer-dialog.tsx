@@ -4,6 +4,7 @@ import { Download, FileJson, Upload } from "lucide-react";
 import { useTranslations } from "next-intl";
 import { useCallback, useEffect, useRef, useState } from "react";
 
+import { FileDropZone } from "@/components/common/file-drop-zone";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import {
@@ -14,8 +15,14 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
+import { Field, FieldLabel } from "@/components/ui/field";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { Spinner } from "@/components/ui/spinner";
 import {
   createClientId,
@@ -41,6 +48,7 @@ import {
 } from "./types";
 
 const MAX_FILE_BYTES = 100 * 1024 * 1024;
+const AUTOMATIC_MAPPING = "__automatic__";
 
 export function RepositoryTransferDialog({
   direction,
@@ -145,30 +153,44 @@ export function RepositoryTransferDialog({
     }
   }, []);
 
-  const readFile = async (file: File) => {
+  const readFiles = async (files: File[]) => {
+    if (busy || !files.length) return;
+    const sequence = ++requestSequence.current;
+    const emptyInput: TransferInput = {
+      payload: null,
+      excludedKeys: [],
+      includedKeys: [],
+      choices: [],
+      mappings: [],
+      destinations: [],
+      enableWorkflowKeys: [],
+      ...(repositoryId ? { targetRepositoryId: repositoryId } : {}),
+    };
+    setBusy(true);
     setError(null);
     setPreview(null);
     setReviewedInput(null);
+    setFileName("");
+    setInput(emptyInput);
+    inputRef.current = emptyInput;
+    applyRequestId.current = null;
     try {
+      if (files.length !== 1) throw new Error(t("singlePackage"));
+      const file = files[0];
       if (file.size > MAX_FILE_BYTES) throw new Error(t("fileTooLarge"));
       const payload: unknown = JSON.parse(await file.text());
-      const next: TransferInput = {
-        payload,
-        excludedKeys: [],
-        includedKeys: [],
-        choices: [],
-        mappings: [],
-        destinations: [],
-        enableWorkflowKeys: [],
-        ...(repositoryId ? { targetRepositoryId: repositoryId } : {}),
-      };
+      if (requestSequence.current !== sequence) return;
+      const next: TransferInput = { ...emptyInput, payload };
       setFileName(file.name);
       setInput(next);
       inputRef.current = next;
       applyRequestId.current = null;
       await review(next);
     } catch (value) {
-      setError(value instanceof Error ? value.message : String(value));
+      if (requestSequence.current === sequence)
+        setError(value instanceof Error ? value.message : String(value));
+    } finally {
+      if (requestSequence.current === sequence) setBusy(false);
     }
   };
 
@@ -325,28 +347,37 @@ export function RepositoryTransferDialog({
         ) : (
           <>
             {direction === "import" && (
-              <div className="space-y-2">
-                <Label htmlFor="repository-transfer-file">
+              <Field>
+                <FieldLabel htmlFor="repository-transfer-file">
                   {t("packageFile")}
-                </Label>
-                <Input
+                </FieldLabel>
+                <FileDropZone
                   id="repository-transfer-file"
-                  type="file"
+                  aria-label={t("packageFile")}
+                  aria-describedby="repository-transfer-file-hint"
                   accept="application/json,.json"
+                  className="min-h-32 flex-col p-4 text-center"
                   disabled={busy}
-                  onChange={(event) => {
-                    const file = event.target.files?.[0];
-                    if (file) void readFile(file);
-                    event.target.value = "";
-                  }}
-                />
+                  multiple={false}
+                  onFiles={readFiles}
+                >
+                  {busy ? (
+                    <Spinner className="size-6" />
+                  ) : (
+                    <Upload className="size-6" aria-hidden="true" />
+                  )}
+                  <span className="font-medium">{t("dropPackage")}</span>
+                  <span id="repository-transfer-file-hint" className="text-xs">
+                    {t("packageFileHint")}
+                  </span>
+                </FileDropZone>
                 {fileName && (
                   <p className="flex items-center gap-2 text-sm text-muted-foreground">
                     <FileJson className="size-4" />
                     {fileName}
                   </p>
                 )}
-              </div>
+              </Field>
             )}
             {direction === "export" && !exportPreview && !error && (
               <p className="flex items-center gap-2">
@@ -364,30 +395,35 @@ export function RepositoryTransferDialog({
             {repositoryId &&
               direction === "import" &&
               allRepositories.length > 1 && (
-                <div className="space-y-2">
-                  <Label htmlFor="transfer-template-source">
+                <Field>
+                  <FieldLabel htmlFor="transfer-template-source">
                     {t("templateSource")}
-                  </Label>
-                  <select
-                    id="transfer-template-source"
-                    className="h-9 w-full rounded-md border bg-background px-2"
+                  </FieldLabel>
+                  <Select
                     value={sourceKey ?? ""}
                     disabled={busy}
-                    onChange={(event) =>
+                    onValueChange={(value) =>
                       update({
-                        sourceRepositoryKey: event.target.value || undefined,
+                        sourceRepositoryKey: value,
                         destinations: [],
                       })
                     }
                   >
-                    <option value="">{t("chooseRepository")}</option>
-                    {allRepositories.map((item) => (
-                      <option value={item.key} key={item.key}>
-                        {item.label}
-                      </option>
-                    ))}
-                  </select>
-                </div>
+                    <SelectTrigger
+                      id="transfer-template-source"
+                      className="w-full"
+                    >
+                      <SelectValue placeholder={t("chooseRepository")} />
+                    </SelectTrigger>
+                    <SelectContent position="popper">
+                      {allRepositories.map((item) => (
+                        <SelectItem value={item.key} key={item.key}>
+                          {item.label}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </Field>
               )}
             {items.length > 0 && (
               <section className="space-y-3">
@@ -442,35 +478,33 @@ export function RepositoryTransferDialog({
                       {t("dependenciesDescription")}
                     </p>
                     {preview.dependencies.map((dependency) => (
-                      <div
-                        className="space-y-2 rounded-lg border p-3"
+                      <Field
+                        className="rounded-lg border p-3"
                         key={dependency.key}
                       >
-                        <Label htmlFor={`mapping-${dependency.key}`}>
+                        <FieldLabel htmlFor={`mapping-${dependency.key}`}>
                           {dependency.label}
-                        </Label>
-                        <select
-                          id={`mapping-${dependency.key}`}
-                          className="h-9 w-full rounded-md border bg-background px-2"
+                        </FieldLabel>
+                        <Select
                           disabled={busy}
                           value={
                             input.mappings.find(
                               (mapping) => mapping.key === dependency.key,
                             )?.targetId ??
                             dependency.targetId ??
-                            ""
+                            AUTOMATIC_MAPPING
                           }
-                          onChange={(event) =>
+                          onValueChange={(value) =>
                             update({
                               mappings: [
                                 ...input.mappings.filter(
                                   (mapping) => mapping.key !== dependency.key,
                                 ),
-                                ...(event.target.value
+                                ...(value !== AUTOMATIC_MAPPING
                                   ? [
                                       {
                                         key: dependency.key,
-                                        targetId: event.target.value,
+                                        targetId: value,
                                       },
                                     ]
                                   : []),
@@ -478,19 +512,32 @@ export function RepositoryTransferDialog({
                             })
                           }
                         >
-                          <option value="">{t("chooseMapping")}</option>
-                          {dependency.candidates.map((candidate) => (
-                            <option key={candidate.id} value={candidate.id}>
-                              {candidate.label}
-                            </option>
-                          ))}
-                        </select>
+                          <SelectTrigger
+                            id={`mapping-${dependency.key}`}
+                            className="w-full"
+                          >
+                            <SelectValue placeholder={t("chooseMapping")} />
+                          </SelectTrigger>
+                          <SelectContent position="popper">
+                            <SelectItem value={AUTOMATIC_MAPPING}>
+                              {t("chooseMapping")}
+                            </SelectItem>
+                            {dependency.candidates.map((candidate) => (
+                              <SelectItem
+                                key={candidate.id}
+                                value={candidate.id}
+                              >
+                                {candidate.label}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
                         {!dependency.resolved && (
                           <p className="text-sm text-amber-700 dark:text-amber-300">
                             {t("unresolvedDependency")}
                           </p>
                         )}
-                      </div>
+                      </Field>
                     ))}
                   </section>
                 )}

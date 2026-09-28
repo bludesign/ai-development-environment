@@ -127,7 +127,10 @@ export async function openRepositoryTransfer(
   await expect(
     dialog.getByRole("button", { name: "Import selected", exact: true }),
   ).toBeEnabled();
-  await dialog.getByText("Review values", { exact: true }).first().click();
+  await dialog
+    .getByRole("button", { name: "Review values", exact: true })
+    .first()
+    .click();
   await dialog.evaluate((element) => {
     element.scrollTop = 0;
   });

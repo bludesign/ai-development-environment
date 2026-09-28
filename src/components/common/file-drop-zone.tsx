@@ -11,6 +11,9 @@ import { cn } from "@/lib/utils";
  */
 export function FileDropZone({
   accept,
+  id,
+  "aria-label": ariaLabel,
+  "aria-describedby": ariaDescribedBy,
   children,
   className,
   compact = false,
@@ -20,6 +23,9 @@ export function FileDropZone({
   onFiles,
 }: {
   accept?: string;
+  id?: string;
+  "aria-label"?: string;
+  "aria-describedby"?: string;
   children: ReactNode;
   className?: string;
   compact?: boolean;
@@ -32,7 +38,7 @@ export function FileDropZone({
   return (
     <label
       className={cn(
-        "relative flex cursor-pointer items-center justify-center gap-2 rounded-lg border border-dashed px-4 text-sm text-muted-foreground transition-colors hover:border-foreground/30 hover:bg-muted/40 hover:text-foreground",
+        "relative flex cursor-pointer items-center justify-center gap-2 rounded-lg border border-dashed px-4 text-sm text-muted-foreground transition-colors hover:border-foreground/30 hover:bg-muted/40 hover:text-foreground focus-within:border-ring focus-within:ring-3 focus-within:ring-ring/50",
         compact ? "min-h-9" : "min-h-20",
         dragging && "border-primary bg-primary/5 text-primary",
         disabled && "pointer-events-none opacity-60",
@@ -57,6 +63,9 @@ export function FileDropZone({
     >
       {children}
       <input
+        id={id}
+        aria-label={ariaLabel}
+        aria-describedby={ariaDescribedBy}
         accept={accept}
         className="sr-only"
         disabled={disabled}

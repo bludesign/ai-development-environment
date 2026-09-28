@@ -4,6 +4,13 @@ import { useTranslations } from "next-intl";
 
 import { Badge } from "@/components/ui/badge";
 import { Checkbox } from "@/components/ui/checkbox";
+import {
+  Field,
+  FieldError,
+  FieldLabel,
+  FieldLegend,
+  FieldSet,
+} from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 
@@ -98,8 +105,8 @@ export function TransferDestinationEditor({
           ),
         ).length;
         return (
-          <fieldset className="space-y-3 rounded-lg border p-3" key={agent.id}>
-            <legend className="px-1 font-medium">{agent.name}</legend>
+          <FieldSet className="gap-3 rounded-lg border p-3" key={agent.id}>
+            <FieldLegend className="mb-0 px-1">{agent.name}</FieldLegend>
             <div className="flex items-start gap-2">
               <Checkbox
                 id={`transfer-agent-${agent.id}`}
@@ -205,10 +212,10 @@ export function TransferDestinationEditor({
                   </div>
                   {value && (
                     <div className="grid gap-3 sm:grid-cols-2">
-                      <div className="space-y-1">
-                        <Label htmlFor={`${id}-path`}>
+                      <Field className="gap-1">
+                        <FieldLabel htmlFor={`${id}-path`}>
                           {t("relativePath")}
-                        </Label>
+                        </FieldLabel>
                         <Input
                           id={`${id}-path`}
                           value={value.relativePath ?? ""}
@@ -219,9 +226,11 @@ export function TransferDestinationEditor({
                             })
                           }
                         />
-                      </div>
-                      <div className="space-y-1">
-                        <Label htmlFor={`${id}-remote`}>{t("remoteUrl")}</Label>
+                      </Field>
+                      <Field className="gap-1">
+                        <FieldLabel htmlFor={`${id}-remote`}>
+                          {t("remoteUrl")}
+                        </FieldLabel>
                         <Input
                           id={`${id}-remote`}
                           value={value.remoteUrl ?? ""}
@@ -232,7 +241,7 @@ export function TransferDestinationEditor({
                             })
                           }
                         />
-                      </div>
+                      </Field>
                     </div>
                   )}
                   {(review?.destinationPath || value) && (
@@ -243,12 +252,12 @@ export function TransferDestinationEditor({
                     </p>
                   )}
                   {review?.error && value && (
-                    <p className="text-sm text-destructive">{review.error}</p>
+                    <FieldError>{review.error}</FieldError>
                   )}
                 </div>
               );
             })}
-          </fieldset>
+          </FieldSet>
         );
       })}
     </div>
