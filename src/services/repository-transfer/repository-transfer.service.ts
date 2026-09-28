@@ -831,7 +831,7 @@ export class RepositoryTransferService {
             orderBy: { id: "asc" },
           })
         ).map((v) => ({
-          id: v.id,
+          id: `external:${v.id}`,
           label: v.name,
           identity: { name: v.name },
           value: {},

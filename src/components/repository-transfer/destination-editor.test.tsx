@@ -1,4 +1,10 @@
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import {
+  cleanup,
+  fireEvent,
+  render,
+  screen,
+  within,
+} from "@testing-library/react";
 import { useState } from "react";
 import { afterEach, expect, test, vi } from "vitest";
 
@@ -138,3 +144,87 @@ test("sync skips present checkouts and distinguishes missing, blocked, unavailab
   expect((selectors[1] as HTMLButtonElement).disabled).toBe(false);
   expect((selectors[3] as HTMLButtonElement).disabled).toBe(true);
 });
+
+test.each(["Import to this agent", "Mobile"])(
+  "the import label %s only changes its editor while Sync is mounted",
+  (label) => {
+    const syncChanged = vi.fn();
+    const importChanged = vi.fn();
+    function Harness({
+      allowExisting = false,
+      onChange,
+    }: {
+      allowExisting?: boolean;
+      onChange: (values: TransferDestinationInput[]) => void;
+    }) {
+      const [destinations, setDestinations] = useState<
+        TransferDestinationInput[]
+      >([]);
+      return (
+        <TransferDestinationEditor
+          allowExisting={allowExisting}
+          agents={[agent]}
+          repositories={[repository]}
+          destinations={destinations}
+          coverage={[{ ...existing, status: "READY" }]}
+          onChange={(values) => {
+            setDestinations(values);
+            onChange(values);
+          }}
+        />
+      );
+    }
+    render(
+      <>
+        <section aria-label="Background Sync">
+          <Harness onChange={syncChanged} />
+        </section>
+        <div role="dialog" aria-label="Import package">
+          <Harness allowExisting onChange={importChanged} />
+        </div>
+      </>,
+    );
+    const sync = within(
+      screen.getByRole("region", { name: "Background Sync" }),
+    );
+    const dialog = within(
+      screen.getByRole("dialog", { name: "Import package" }),
+    );
+
+    fireEvent.click(dialog.getByText(label, { selector: "label" }));
+
+    expect(syncChanged).not.toHaveBeenCalled();
+    expect(importChanged).toHaveBeenLastCalledWith([
+      {
+        repositoryKey: repository.key,
+        agentId: agent.id,
+        relativePath: "mobile",
+        remoteUrl: existing.remoteUrl,
+      },
+    ]);
+
+    fireEvent.click(
+      sync.getByText("Select missing repositories on this agent", {
+        selector: "label",
+      }),
+    );
+    for (const editor of [sync, dialog]) {
+      for (const name of ["Folder relative to base directory", "Clone URL"]) {
+        const fieldLabel = editor.getByText(name, {
+          selector: "label",
+        }) as HTMLLabelElement;
+        expect(fieldLabel.control).toBe(editor.getByRole("textbox", { name }));
+      }
+    }
+    fireEvent.change(
+      dialog.getByLabelText("Folder relative to base directory"),
+      {
+        target: { value: "imported/mobile" },
+      },
+    );
+    expect(syncChanged).toHaveBeenCalledTimes(1);
+    expect(importChanged).toHaveBeenLastCalledWith([
+      expect.objectContaining({ relativePath: "imported/mobile" }),
+    ]);
+  },
+);

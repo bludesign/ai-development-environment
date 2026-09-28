@@ -149,6 +149,90 @@ async function apply(value: TransferImportInput, requestId = "request") {
 }
 
 describe("portable repository transfers", () => {
+  test.each(["automatic", "explicit"] as const)(
+    "preserves MCP tool-group IDs with %s server mapping",
+    async (mapping) => {
+      await prisma.externalMcpServer.create({
+        data: {
+          id: "source-mcp-server",
+          name: "Remote tools",
+          url: "https://source.example/mcp",
+          transport: "STREAMABLE_HTTP",
+        },
+      });
+      const definition = validPublished("MCP workflow");
+      await prisma.workflow.create({
+        data: {
+          id: "mcp-workflow",
+          name: definition.name,
+          draftDefinitionJson: JSON.stringify({
+            ...definition,
+            nodes: definition.nodes.map((node) => ({
+              ...node,
+              kind: "MCP_CALL",
+              config: {
+                groupId: "external:source-mcp-server",
+                name: "lookup",
+                arguments: {},
+              },
+            })),
+          }),
+          quickActionRepositories: { create: { repositoryId: "source" } },
+        },
+      });
+      const value = await input();
+      const payload = parseTransferPackage(value.payload);
+      const reference = payload.entities
+        .find((entity) => entity.kind === "WORKFLOW")!
+        .references.find((ref) => ref.kind === "MCP_SERVER")!;
+      expect(reference.identity).toEqual({ name: "Remote tools" });
+      expect(reference.label).toBe("Remote tools");
+
+      await prisma.externalMcpServer.delete({
+        where: { id: "source-mcp-server" },
+      });
+      const destinationName =
+        mapping === "automatic" ? "Remote tools" : "Other tools";
+      await prisma.externalMcpServer.create({
+        data: {
+          id: "destination-mcp-server",
+          name: destinationName,
+          url: "https://destination.example/mcp",
+          transport: "STREAMABLE_HTTP",
+        },
+      });
+      if (mapping === "explicit")
+        value.mappings = [
+          {
+            key: reference.key,
+            targetId: "external:destination-mcp-server",
+          },
+        ];
+      const preview = await service.preview(value);
+      expect(preview.blockers).toEqual([]);
+      expect(
+        preview.dependencies.find(
+          (dependency) => dependency.key === reference.key,
+        ),
+      ).toMatchObject({
+        resolved: true,
+        targetId: "external:destination-mcp-server",
+        candidates: [
+          { id: "external:destination-mcp-server", label: destinationName },
+        ],
+      });
+      await service.apply(value, preview.fingerprint, `mcp-${mapping}`);
+      const imported = await prisma.workflow.findUniqueOrThrow({
+        where: { id: "mcp-workflow" },
+      });
+      expect(JSON.parse(imported.draftDefinitionJson).nodes[0].config).toEqual({
+        groupId: "external:destination-mcp-server",
+        name: "lookup",
+        arguments: {},
+      });
+    },
+  );
+
   test("previews without writes and imports selected settings without changing target identity", async () => {
     const value = await input();
     value.excludedKeys = ["repository:source/field/description"];

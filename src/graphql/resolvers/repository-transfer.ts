@@ -107,7 +107,7 @@ export const createRepositoryTransferResolvers = (
   Subscription: {
     repositoryTransferChanged: {
       resolve: (event: { repositoryTransferChanged: string }) =>
-        service.clones.get(event.repositoryTransferChanged),
+        service.clones.read(event.repositoryTransferChanged),
       subscribe: (
         _root: unknown,
         { operationId }: { operationId: string },

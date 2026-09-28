@@ -473,7 +473,8 @@ export class RepositoryCloneService {
     });
   }
 
-  private async read(id: string) {
+  /** Read persisted progress without dispatching jobs or publishing updates. */
+  async read(id: string) {
     const prisma = await getPrismaClient();
     return prisma.repositoryTransferOperation.findUnique({
       where: { id },

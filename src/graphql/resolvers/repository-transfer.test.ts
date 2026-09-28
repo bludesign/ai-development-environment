@@ -49,15 +49,15 @@ describe("repository transfer resolvers", () => {
   });
   test("subscription IDs are resolved into durable operation progress", async () => {
     const operation = { id: "operation", status: "RUNNING" };
-    const get = vi.fn().mockResolvedValue(operation);
+    const read = vi.fn().mockResolvedValue(operation);
     const r = createRepositoryTransferResolvers({
-      clones: { get },
+      clones: { read },
     } as unknown as RepositoryTransferService);
     await expect(
       r.Subscription.repositoryTransferChanged.resolve({
         repositoryTransferChanged: "operation",
       }),
     ).resolves.toEqual(operation);
-    expect(get).toHaveBeenCalledWith("operation");
+    expect(read).toHaveBeenCalledWith("operation");
   });
 });

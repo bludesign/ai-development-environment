@@ -1,6 +1,7 @@
 "use client";
 
 import { useTranslations } from "next-intl";
+import { useId } from "react";
 
 import { Badge } from "@/components/ui/badge";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -75,6 +76,7 @@ export function TransferDestinationEditor({
   allowExisting?: boolean;
 }) {
   const t = useTranslations("repositoryTransfer");
+  const editorId = useId();
   const update = (
     repositoryKey: string,
     agentId: string,
@@ -100,6 +102,7 @@ export function TransferDestinationEditor({
         <p className="text-sm text-muted-foreground">{t("noAgents")}</p>
       )}
       {agents.map((agent) => {
+        const agentCheckboxId = `${editorId}-transfer-agent-${agent.id}`;
         const availableRepositories = repositories.filter((repository) => {
           const state = coverage
             .find(
@@ -122,7 +125,7 @@ export function TransferDestinationEditor({
             <FieldLegend className="mb-0 px-1">{agent.name}</FieldLegend>
             <div className="flex items-start gap-2">
               <Checkbox
-                id={`transfer-agent-${agent.id}`}
+                id={agentCheckboxId}
                 checked={
                   selectedCount === 0
                     ? false
@@ -158,7 +161,7 @@ export function TransferDestinationEditor({
                 }}
               />
               <div className="min-w-0">
-                <Label htmlFor={`transfer-agent-${agent.id}`}>
+                <Label htmlFor={agentCheckboxId}>
                   {t(allowExisting ? "importToAgent" : "selectMissing")}
                 </Label>
                 <p className="mt-1 break-all font-mono text-xs text-muted-foreground">
@@ -196,7 +199,7 @@ export function TransferDestinationEditor({
                     : ["READY", "MISSING"].includes(state)
                       ? "missing"
                       : "destinationNotReviewed";
-              const id = `destination-${agent.id}-${repository.key}`;
+              const id = `${editorId}-destination-${agent.id}-${repository.key}`;
               return (
                 <div
                   className="ml-2 space-y-3 border-l pl-3"

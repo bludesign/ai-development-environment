@@ -25,11 +25,14 @@ vi.mock("@/data/prisma-client", () => ({
 }));
 
 import { PrismaClient } from "@/generated/prisma/client";
+import { createRepositoryTransferResolvers } from "@/graphql/resolvers/repository-transfer";
 import {
   AgentControlService,
+  agentEventBus,
   SUPPORTED_AGENT_JOBS,
   validateJob,
 } from "@/services/agent-control";
+import type { RepositoryTransferService } from "./repository-transfer.service";
 import {
   CODEBASE_CLONE_JOB_KIND,
   CODEBASE_CLONE_INSPECT_JOB_KIND,
@@ -477,6 +480,71 @@ describe("repository transfer clone persistence", () => {
       null,
     );
     expect(await prisma.codebase.count()).toBe(1);
+  });
+
+  test("resolving partial clone progress does not write or publish another update", async () => {
+    const operation = await service.dispatch(
+      (await create([await preview("web"), await preview("ios", "agent-2")]))
+        .id,
+    );
+    const web = operation.items.find((item) => item.repositoryId === "web")!;
+    const ios = operation.items.find((item) => item.repositoryId === "ios")!;
+    const resolvers = createRepositoryTransferResolvers({
+      clones: service,
+    } as RepositoryTransferService);
+    const events = service.subscribe(operation.id);
+    try {
+      await control.completeJob(
+        web.agentId,
+        web.jobId!,
+        "SUCCEEDED",
+        result(),
+        null,
+      );
+      const event = await events.next();
+      expect(event.done).toBe(false);
+      const before = await prisma.repositoryTransferOperation.findUniqueOrThrow(
+        {
+          where: { id: operation.id },
+          include: { items: { orderBy: { createdAt: "asc" } } },
+        },
+      );
+      expect(before.status).toBe("RUNNING");
+      const publish = vi.spyOn(agentEventBus, "publish");
+      await expect(
+        resolvers.Subscription.repositoryTransferChanged.resolve(event.value),
+      ).resolves.toEqual(before);
+      expect(publish).not.toHaveBeenCalled();
+      expect(
+        await prisma.repositoryTransferOperation.findUniqueOrThrow({
+          where: { id: operation.id },
+          include: { items: { orderBy: { createdAt: "asc" } } },
+        }),
+      ).toEqual(before);
+
+      await control.completeJob(
+        ios.agentId,
+        ios.jobId!,
+        "SUCCEEDED",
+        result("/repositories/ios", "github.com/acme/ios"),
+        null,
+      );
+      const completed = await events.next();
+      expect(completed.done).toBe(false);
+      await expect(
+        resolvers.Subscription.repositoryTransferChanged.resolve(
+          completed.value,
+        ),
+      ).resolves.toMatchObject({
+        status: "SUCCEEDED",
+        items: [
+          expect.objectContaining({ status: "SUCCEEDED" }),
+          expect.objectContaining({ status: "SUCCEEDED" }),
+        ],
+      });
+    } finally {
+      await events.return?.();
+    }
   });
 
   test("recovers completion after a crash before saving the job link without creating a second job", async () => {
