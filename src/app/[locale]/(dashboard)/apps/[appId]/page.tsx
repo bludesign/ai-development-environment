@@ -6,6 +6,7 @@ import {
 const VIEWS = new Set<AppDetailView>([
   "overview",
   "repositories",
+  "sync",
   "worktrees",
   "plans",
   "sessions",

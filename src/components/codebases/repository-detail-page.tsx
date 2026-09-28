@@ -6,6 +6,7 @@ import { FormEvent, useCallback, useEffect, useRef, useState } from "react";
 
 import { AGENT_FIELDS, JOB_FIELDS } from "@/components/agents/graphql-fields";
 import { IosProjectSection } from "@/components/builds/ios-project-section";
+import { RepositoryTransferActions } from "@/components/repository-transfer/transfer-actions";
 import { AutoRetryDialog } from "@/components/github/auto-retry-dialog";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
@@ -81,6 +82,7 @@ export function RepositoryDetailPage({
   const [jiraBranchRegex, setJiraBranchRegex] = useState("");
   const [keepBaseBranchUpToDate, setKeepBaseBranchUpToDate] = useState(true);
   const [skillGroupIds, setSkillGroupIds] = useState<string[]>([]);
+  const [preparationsDirty, setPreparationsDirty] = useState(false);
   const [quickActionWorkflows, setQuickActionWorkflows] = useState<
     Array<{
       id: string;
@@ -266,19 +268,36 @@ export function RepositoryDetailPage({
       codebase.agent.connectionStatus === "ONLINE" &&
       codebase.availability === "AVAILABLE",
   }));
+  const hasUnsavedChanges =
+    preparationsDirty ||
+    name !== repository.name ||
+    description !== repository.description ||
+    jiraBranchRegex !== (repository.jiraBranchRegex ?? "") ||
+    keepBaseBranchUpToDate !== repository.keepBaseBranchUpToDate ||
+    JSON.stringify([...skillGroupIds].sort()) !==
+      JSON.stringify(
+        (repository.skillGroups ?? []).map((group) => group.id).sort(),
+      );
 
   return (
     <section className="mx-auto flex w-full max-w-6xl flex-col gap-6">
-      <div>
-        <h1 className="text-2xl font-semibold tracking-tight">
-          {t("editTitle")}
-        </h1>
-        <p className="mt-1 font-mono text-xs text-muted-foreground">
-          {repository.displayOrigin}
-        </p>
-        <p className="mt-2 text-sm text-muted-foreground">
-          {t("repositorySharedDescription")}
-        </p>
+      <div className="flex flex-wrap items-start justify-between gap-4">
+        <div>
+          <h1 className="text-2xl font-semibold tracking-tight">
+            {t("editTitle")}
+          </h1>
+          <p className="mt-1 font-mono text-xs text-muted-foreground">
+            {repository.displayOrigin}
+          </p>
+          <p className="mt-2 text-sm text-muted-foreground">
+            {t("repositorySharedDescription")}
+          </p>
+        </div>
+        <RepositoryTransferActions
+          repositoryId={repositoryId}
+          hasUnsavedChanges={hasUnsavedChanges}
+          onImported={load}
+        />
       </div>
       {error && (
         <Alert variant="destructive">
@@ -408,6 +427,7 @@ export function RepositoryDetailPage({
               key={repository.updatedAt}
               repository={repository}
               onSaved={load}
+              onDirtyChange={setPreparationsDirty}
             />
           ) : (
             <Spinner />

@@ -1,0 +1,324 @@
+"Scope of a portable settings package."
+enum RepositoryTransferScope {
+  "An app and its selected repositories."
+  APP
+  "One repository and its selected settings."
+  REPOSITORY
+}
+
+"How to resolve an incoming item."
+enum RepositoryTransferAction {
+  "Apply the selected incoming values."
+  IMPORT
+  "Preserve the existing item."
+  KEEP
+  "Create a separately named copy."
+  COPY
+}
+
+"Selects saved configuration for export."
+input RepositoryTransferExportInput {
+  "Kind of resource to export."
+  scope: RepositoryTransferScope!
+  "App or repository identifier."
+  id: ID!
+  "Item keys excluded from the package."
+  excludedKeys: [String!]
+  "Dependency item keys explicitly included in the package."
+  includedKeys: [String!]
+}
+
+"Resolution of one incoming package item."
+input RepositoryTransferChoiceInput {
+  "Package item key."
+  key: String!
+  "Selected resolution."
+  action: RepositoryTransferAction!
+  "Explicit existing destination identifier."
+  targetId: ID
+  "Name for a new or copied item."
+  name: String
+}
+
+"Maps a portable dependency to a local resource."
+input RepositoryTransferMappingInput {
+  "Dependency key shown in the preview."
+  key: String!
+  "Selected local resource identifier."
+  targetId: ID!
+}
+
+"One requested repository checkout."
+input RepositoryTransferDestinationInput {
+  "Repository key from the package or Sync overview."
+  repositoryKey: String!
+  "Destination agent identifier."
+  agentId: ID!
+  "Optional folder relative to the agent's base repository directory."
+  relativePath: String
+  "Optional credential-free Git clone URL with the same canonical origin."
+  remoteUrl: String
+}
+
+"Selections and mappings reviewed before importing."
+input RepositoryTransferImportInput {
+  "Versioned portable package."
+  payload: JSON!
+  "Item keys to omit, including their children."
+  excludedKeys: [String!]
+  "Dependency item keys explicitly selected for import."
+  includedKeys: [String!]
+  "Per-item conflict resolutions."
+  choices: [RepositoryTransferChoiceInput!]
+  "Explicit dependency mappings."
+  mappings: [RepositoryTransferMappingInput!]
+  "Repository being edited when applying a template."
+  targetRepositoryId: ID
+  "Source repository key when selecting a template from an app package."
+  sourceRepositoryKey: String
+  "Requested missing checkouts."
+  destinations: [RepositoryTransferDestinationInput!]
+  "Workflow item keys explicitly enabled after validation."
+  enableWorkflowKeys: [String!]
+}
+
+"A selectable item or field in a package."
+type RepositoryTransferSelectionItem {
+  "Stable package item key."
+  key: String!
+  "Parent selection key, if nested."
+  parentKey: String
+  "Item category."
+  kind: String!
+  "Human-readable item label."
+  label: String!
+  "Owning repository key, if any."
+  repositoryKey: String
+  "Whether this item is currently included."
+  selected: Boolean!
+  "Whether this is an optional external dependency."
+  dependency: Boolean!
+  "Selected or proposed resolution."
+  action: RepositoryTransferAction!
+  "Matching destination identifier, if any."
+  targetId: ID
+  "Existing resources available for an explicit conflict resolution."
+  candidates: [RepositoryTransferCandidate!]!
+  "Existing value rendered as JSON."
+  current: JSON
+  "Incoming value rendered as JSON."
+  incoming: JSON
+  "Other repositories affected by updating a shared definition."
+  affectedRepositories: [String!]!
+  "Item-specific conflicts or validation messages."
+  warnings: [String!]!
+}
+
+"An available destination resource."
+type RepositoryTransferCandidate {
+  "Local resource identifier."
+  id: ID!
+  "Resource display name."
+  label: String!
+}
+
+"A portable reference requiring a destination resource."
+type RepositoryTransferDependency {
+  "Mapping key."
+  key: String!
+  "Item containing this reference."
+  itemKey: String!
+  "Referenced resource category."
+  kind: String!
+  "Human-readable reference description."
+  label: String!
+  "Resolved destination identifier, if any."
+  targetId: ID
+  "Whether this reference has a valid destination."
+  resolved: Boolean!
+  "Matching or selectable local resources."
+  candidates: [RepositoryTransferCandidate!]!
+}
+
+"An agent eligible or unavailable for cloning."
+type RepositoryTransferAgent {
+  "Agent identifier."
+  id: ID!
+  "Agent name."
+  name: String!
+  "Configured base repository directory."
+  baseRepoDirectory: String
+  "Whether cloning is currently available."
+  eligible: Boolean!
+  "Reason cloning is unavailable."
+  reason: String
+}
+
+"Preview of a repository checkout destination."
+type RepositoryTransferDestination {
+  "Repository package key."
+  repositoryKey: String!
+  "Destination repository identifier, if already saved."
+  repositoryId: ID
+  "Destination agent identifier."
+  agentId: ID!
+  "Credential-free clone URL."
+  remoteUrl: String!
+  "Folder relative to the agent base directory."
+  relativePath: String!
+  "Absolute destination folder."
+  destinationPath: String!
+  "Presence or eligibility state."
+  status: String!
+  "Reason this destination cannot be used."
+  error: String
+}
+
+"Selectable export contents and their portable document."
+type RepositoryTransferExportPreview {
+  "Versioned portable package."
+  payload: JSON!
+  "Selectable content, including optional dependencies."
+  items: [RepositoryTransferSelectionItem!]!
+  "Export warnings."
+  warnings: [String!]!
+}
+
+"Authoritative review of an import."
+type RepositoryTransferPreview {
+  "Fingerprint required to apply this exact review."
+  fingerprint: String!
+  "Reviewed item selections and overrides."
+  items: [RepositoryTransferSelectionItem!]!
+  "References requiring local mappings."
+  dependencies: [RepositoryTransferDependency!]!
+  "All registered agents."
+  agents: [RepositoryTransferAgent!]!
+  "Reviewed checkout destinations."
+  destinations: [RepositoryTransferDestination!]!
+  "Non-blocking warnings."
+  warnings: [String!]!
+  "Problems that must be resolved before confirmation."
+  blockers: [String!]!
+}
+
+"Durable result for one checkout."
+type RepositoryTransferOperationItem {
+  "Transfer item identifier."
+  id: ID!
+  "Repository identifier."
+  repositoryId: ID!
+  "Destination agent identifier."
+  agentId: ID!
+  "Registered checkout identifier."
+  codebaseId: ID
+  "Checkout destination path."
+  destinationPath: String!
+  "Current job status."
+  status: String!
+  "Agent job identifier."
+  jobId: ID
+  "Failure reason."
+  error: String
+}
+
+"Durable import or Sync progress."
+type RepositoryTransferOperation {
+  "Operation identifier."
+  id: ID!
+  "Idempotent request identifier."
+  requestId: ID!
+  "IMPORT or SYNC."
+  kind: String!
+  "Current aggregate status."
+  status: String!
+  "Imported or synchronized app identifier."
+  appId: ID
+  "Configuration import result."
+  result: JSON!
+  "Per-checkout results."
+  items: [RepositoryTransferOperationItem!]!
+  "ISO 8601 creation timestamp."
+  createdAt: String!
+  "ISO 8601 last update timestamp."
+  updatedAt: String!
+}
+
+"Repository coverage across an app's agents."
+type RepositorySyncOverview {
+  "App identifier."
+  appId: ID!
+  "Fingerprint of the current app and checkout coverage."
+  fingerprint: String!
+  "App's configured agent identifiers."
+  selectedAgentIds: [ID!]!
+  "All registered agents and eligibility."
+  agents: [RepositoryTransferAgent!]!
+  "Repository labels and identities."
+  repositories: [RepositoryTransferSelectionItem!]!
+  "Repository-by-agent checkout coverage."
+  destinations: [RepositoryTransferDestination!]!
+}
+
+extend type Query {
+  "Previews saved configuration and selectable dependencies for export."
+  repositoryTransferExportPreview(
+    "Export scope and selections."
+    input: RepositoryTransferExportInput!
+  ): RepositoryTransferExportPreview!
+  "Downloads the selected portable configuration package."
+  exportRepositoryTransfer(
+    "Export scope and selections."
+    input: RepositoryTransferExportInput!
+  ): JSON!
+  "Reviews an import without changing configuration or cloning repositories."
+  previewRepositoryTransfer(
+    "Incoming package and user choices."
+    input: RepositoryTransferImportInput!
+  ): RepositoryTransferPreview!
+  "Returns durable progress for an import or Sync operation."
+  repositoryTransferOperation(
+    "Operation identifier."
+    id: ID!
+  ): RepositoryTransferOperation
+  "Shows missing repository checkouts on all registered agents."
+  appRepositorySync("App identifier." appId: ID!): RepositorySyncOverview!
+}
+
+extend type Mutation {
+  "Applies reviewed settings and queues selected missing checkouts."
+  applyRepositoryTransfer(
+    "Reviewed package and choices."
+    input: RepositoryTransferImportInput!
+    "Preview fingerprint."
+    fingerprint: String!
+    "Idempotent request identifier."
+    requestId: ID!
+  ): RepositoryTransferOperation!
+  "Retries failed checkout work without reapplying imported configuration."
+  retryRepositoryTransfer(
+    "Operation identifier."
+    id: ID!
+    "Idempotent retry identifier."
+    requestId: ID!
+  ): RepositoryTransferOperation!
+  "Queues missing app checkouts on selected agents."
+  syncAppRepositories(
+    "App identifier."
+    appId: ID!
+    "Selected checkout destinations."
+    destinations: [RepositoryTransferDestinationInput!]!
+    "Coverage preview fingerprint."
+    fingerprint: String!
+    "Idempotent request identifier."
+    requestId: ID!
+  ): RepositoryTransferOperation!
+}
+
+extend type Subscription {
+  "Emits when durable import or Sync progress changes."
+  repositoryTransferChanged(
+    "Operation identifier."
+    operationId: ID!
+  ): RepositoryTransferOperation!
+}

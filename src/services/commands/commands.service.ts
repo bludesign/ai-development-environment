@@ -471,7 +471,8 @@ export class CommandsService {
     return definition ? commandDefinitionResult(definition) : null;
   }
 
-  private normalizeDefinition(input: CommandDefinitionInput) {
+  /** Shared side-effect-free validation for editors and portable imports. */
+  normalizeDefinition(input: CommandDefinitionInput) {
     const targetKind = enumValue(TARGETS, input.targetKind, "Target scope");
     const restartPolicy = enumValue(
       RESTART_POLICIES,

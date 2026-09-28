@@ -477,6 +477,44 @@ model AppRepository {
   @@index([repositoryId, appId])
 }
 
+model RepositoryTransferOperation {
+  id         String                   @id
+  requestId  String                   @unique
+  kind       String
+  status     String                   @default("QUEUING")
+  appId      String?
+  resultJson String                   @default("{}")
+  requestHash String
+  createdAt  DateTime                 @default(now())
+  updatedAt  DateTime                 @updatedAt
+  finishedAt DateTime?
+  items      RepositoryTransferItem[]
+
+  @@index([status, createdAt])
+  @@index([appId, createdAt])
+}
+
+model RepositoryTransferItem {
+  id              String                      @id
+  operationId     String
+  repositoryId    String
+  agentId         String
+  codebaseId      String?
+  remoteUrl       String
+  baseDirectory   String
+  relativePath    String
+  destinationPath String
+  status          String                      @default("PENDING")
+  jobId           String?                     @unique
+  error           String?
+  createdAt       DateTime                    @default(now())
+  updatedAt       DateTime                    @updatedAt
+  operation       RepositoryTransferOperation @relation(fields: [operationId], references: [id], onDelete: Cascade)
+
+  @@unique([operationId, repositoryId, agentId])
+  @@index([agentId, destinationPath, status])
+}
+
 model Codebase {
   id                 String                   @id
   repositoryId       String
