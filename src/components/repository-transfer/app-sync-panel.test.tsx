@@ -64,7 +64,7 @@ test("sync offers only missing checkouts on eligible agents and preserves the ov
       },
     ],
     destinations: [
-      { ...destination, agentId: "present", status: "PRESENT" },
+      { ...destination, agentId: "present", status: "REUSE" },
       { ...destination, agentId: "missing", status: "MISSING" },
       { ...destination, agentId: "offline", status: "MISSING" },
     ],

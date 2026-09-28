@@ -5311,6 +5311,11 @@
     "refresh": "Actualizar",
     "cloneSelected": "Clonar selección ({count})",
     "existingDestination": "Destino existente",
-    "matchAutomatically": "Asignar automáticamente"
+    "matchAutomatically": "Asignar automáticamente",
+    "importDestinationsDescription": "Selecciona los agentes de destino de la importación. Se reutilizan las copias existentes; los repositorios que faltan se clonan en el directorio base de repositorios de cada agente.",
+    "importToAgent": "Importar a este agente",
+    "destinationUnavailable": "No disponible",
+    "destinationBlocked": "Requiere atención",
+    "destinationNotReviewed": "Sin comprobar"
   }
 }

@@ -1388,17 +1388,45 @@ export class RepositoryTransferService {
         repositoryId: repo.id.startsWith("planned:") ? null : repo.id,
       };
     });
-    const destinations =
+    const selectedDestinations =
       await this.clones.previewDestinations(destinationsInput);
-    for (const d of destinations)
+    for (const d of selectedDestinations)
       if (d.status === "BLOCKED")
         blockers.push(d.error ?? "Clone destination is blocked");
     if (
       pack.scope === "APP" &&
       !input.targetRepositoryId &&
-      !destinations.length
+      !selectedDestinations.length
     )
       blockers.push("Select at least one destination agent for this app");
+    const agents = await this.clones.agents();
+    const selectedPairs = new Set(
+      destinationsInput.map((d) => `${d.repositoryKey}:${d.agentId}`),
+    );
+    const coverageInput = [...resolved.values()]
+      .filter((value) => value.entity.kind === "REPOSITORY")
+      .flatMap((repo) =>
+        agents
+          .filter(
+            (agent) => !selectedPairs.has(`${repo.entity.key}:${agent.id}`),
+          )
+          .map((agent) => ({
+            repositoryKey: repo.entity.key,
+            repositoryId: repo.id.startsWith("planned:") ? null : repo.id,
+            agentId: agent.id,
+            remoteUrl: string(repo.fields.remoteUrl),
+          })),
+      );
+    // Show registered checkout coverage before the user chooses an agent. Only
+    // selected pairs receive on-agent inspection or become operation items.
+    const destinations = [...selectedDestinations];
+    for (let offset = 0; offset < coverageInput.length; offset += 500)
+      destinations.push(
+        ...(await this.clones.previewDestinations(
+          coverageInput.slice(offset, offset + 500),
+          { inspect: false },
+        )),
+      );
     const app = [...resolved.values()].find((v) => v.entity.kind === "APP");
     if (app && !strings(app.fields.repositoryIds).length)
       blockers.push("An app requires at least one repository");
@@ -1489,7 +1517,6 @@ export class RepositoryTransferService {
         blockers.push(`${v.entity.name}: ${errorMessage(error)}`);
       }
     }
-    const agents = await this.clones.agents();
     const stamp = fingerprint({
       input,
       items,
@@ -1523,6 +1550,7 @@ export class RepositoryTransferService {
       pack,
       resolved,
       catalog,
+      selectedDestinations,
     };
   }
   private hasReferencePath(
@@ -1823,7 +1851,7 @@ export class RepositoryTransferService {
         v.id.startsWith("planned:") ? randomUUID() : v.id,
       ]),
     );
-    for (const d of review.preview.destinations)
+    for (const d of review.selectedDestinations)
       idMap.set(
         `planned:checkout:${d.repositoryKey}:${d.agentId}`,
         d.codebaseId ?? randomUUID(),
@@ -2224,7 +2252,7 @@ export class RepositoryTransferService {
               update: { position },
             });
         }
-        const destinations = review.preview.destinations.map((d) => ({
+        const destinations = review.selectedDestinations.map((d) => ({
           ...d,
           repositoryId: byKey.get(d.repositoryKey)!.id,
           codebaseId:

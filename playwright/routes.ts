@@ -38,7 +38,7 @@ export type RouteEntry = {
   clickTab?: string;
   buildWorkflow?: "start" | "custom" | "script" | "project";
   /** Open a transfer review without applying configuration or queuing clones. */
-  transferWorkflow?: "export" | "import";
+  transferWorkflow?: "export" | "import" | "import-destinations";
   /** Auth pages are intentionally captured without the seeded bearer session. */
   anonymous?: boolean;
   /** Capture the global focus menu after its catalog has loaded. */
@@ -83,6 +83,13 @@ export const routes: RouteEntry[] = [
     readyGraphqlOperation: "AppDetail",
     readyTexts: ["Customer Portal"],
     transferWorkflow: "import",
+  },
+  {
+    name: "app-import-destinations",
+    path: `/apps/${ids.apps.customerPortal}`,
+    readyGraphqlOperation: "AppDetail",
+    readyTexts: ["Customer Portal"],
+    transferWorkflow: "import-destinations",
   },
 
   // Agents

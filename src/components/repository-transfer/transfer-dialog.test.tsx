@@ -439,7 +439,7 @@ test("unresolved dependencies block confirmation and destination choices use age
   ).toBe(true);
   fireEvent.click(
     screen.getByRole("checkbox", {
-      name: "Select missing repositories on this agent",
+      name: "Import to this agent",
     }),
   );
   expect(
@@ -467,5 +467,64 @@ test("unresolved dependencies block confirmation and destination choices use age
         ],
       },
     }),
+  );
+});
+
+test("an app import reviews an agent with existing checkouts without asking for a clone path", async () => {
+  request.mockImplementation(async (query, variables) => {
+    if (!query.includes("query PreviewRepositoryTransfer"))
+      throw new Error(`Unexpected operation ${query}`);
+    const input = variables?.input as { destinations: unknown[] };
+    return {
+      previewRepositoryTransfer: {
+        ...preview,
+        items: [repository],
+        blockers: input.destinations.length
+          ? []
+          : ["Select at least one destination agent for this app"],
+        destinations: [
+          {
+            repositoryKey: repository.key,
+            repositoryId: "local-repository",
+            agentId: "agent-1",
+            remoteUrl: "git@github.com:acme/mobile.git",
+            relativePath: "mobile",
+            destinationPath: "/Workspaces/mobile-existing",
+            status: "REUSE",
+            error: null,
+          },
+        ],
+      },
+    } as never;
+  });
+  render(<RepositoryTransferDialog direction="import" onClose={vi.fn()} />);
+  upload();
+  expect(await screen.findByText("Already present")).toBeDefined();
+  expect(screen.queryByText("Missing")).toBeNull();
+  fireEvent.click(
+    screen.getByRole("checkbox", { name: "Import to this agent" }),
+  );
+  expect(
+    screen.queryByLabelText("Folder relative to base directory"),
+  ).toBeNull();
+  expect(screen.queryByLabelText("Clone URL")).toBeNull();
+  expect(screen.getByText("/Workspaces/mobile-existing")).toBeDefined();
+  fireEvent.click(screen.getByRole("button", { name: "Review import" }));
+  await waitFor(() =>
+    expect(
+      (
+        screen.getByRole("button", {
+          name: "Import selected",
+        }) as HTMLButtonElement
+      ).disabled,
+    ).toBe(false),
+  );
+  expect(request.mock.calls.at(-1)?.[1]).toMatchObject({
+    input: {
+      destinations: [{ repositoryKey: repository.key, agentId: "agent-1" }],
+    },
+  });
+  expect(request.mock.calls.some(([query]) => query.includes("mutation"))).toBe(
+    false,
   );
 });

@@ -5311,6 +5311,11 @@
     "refresh": "Refresh",
     "cloneSelected": "Clone selected ({count})",
     "existingDestination": "Existing destination",
-    "matchAutomatically": "Match automatically"
+    "matchAutomatically": "Match automatically",
+    "importDestinationsDescription": "Select the agents to import to. Existing checkouts are reused; missing repositories are cloned beneath each agent’s base repository directory.",
+    "importToAgent": "Import to this agent",
+    "destinationUnavailable": "Unavailable",
+    "destinationBlocked": "Needs attention",
+    "destinationNotReviewed": "Not checked"
   }
 }

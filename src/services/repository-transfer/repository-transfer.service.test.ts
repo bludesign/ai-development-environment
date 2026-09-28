@@ -32,7 +32,7 @@ import {
 } from "@/services/agent-control";
 import type { GitHubService } from "@/services/github";
 import { emptyWorkflowDefinition } from "@/lib/workflows/definition";
-import type { RepositoryCloneService } from "./clone.service";
+import { RepositoryCloneService } from "./clone.service";
 import { RepositoryTransferService } from "./repository-transfer.service";
 import {
   parseTransferPackage,
@@ -835,6 +835,162 @@ describe("complete repository settings", () => {
     expect(app.references.map((r) => r.entityKey)).toEqual([
       "repository:source",
     ]);
+  });
+
+  describe("import destination coverage", () => {
+    beforeEach(async () => {
+      await prisma.agent.createMany({
+        data: ["present", "missing", "offline"].map((id) => ({
+          id,
+          name: id,
+          hostname: id,
+          version: "test",
+          osVersion: "test",
+          architecture: "arm64",
+          capabilitiesJson: '["codebase.clone","codebase.clone.inspect"]',
+          secretHash: id,
+          baseRepoDirectory: "/base",
+          lastSeenAt: id === "offline" ? null : new Date(),
+        })),
+      });
+      await prisma.codebase.createMany({
+        data: ["source", "destination"].map((repositoryId) => ({
+          id: `checkout-${repositoryId}`,
+          agentId: "present",
+          repositoryId,
+          folder: `/custom/workspaces/${repositoryId}`,
+          observedOrigin: `git@github.com:acme/${repositoryId}.git`,
+        })),
+      });
+      await prisma.app.create({
+        data: {
+          id: "app",
+          name: "App",
+          normalizedName: "app",
+          repositories: {
+            create: [
+              { repositoryId: "source" },
+              { repositoryId: "destination" },
+            ],
+          },
+        },
+      });
+      vi.mocked(service.clones.agents).mockImplementation(
+        RepositoryCloneService.prototype.agents.bind(service.clones),
+      );
+      // Use real persisted checkout lookup; on-agent inspection is tested in
+      // clone.service.test.ts and unavailable in this database-only fixture.
+      vi.mocked(service.clones.previewDestinations).mockImplementation(
+        (destinations) =>
+          RepositoryCloneService.prototype.previewDestinations.call(
+            service.clones,
+            destinations,
+            { inspect: false },
+          ),
+      );
+      vi.mocked(service.clones.createOperation).mockImplementation(
+        RepositoryCloneService.prototype.createOperation.bind(service.clones),
+      );
+    });
+
+    test("shows all agents' registered checkouts before selecting destinations", async () => {
+      const payload = await service.export({ scope: "APP", id: "app" });
+      const preview = await service.preview({ payload });
+      expect(preview.destinations).toHaveLength(6);
+      expect(
+        preview.destinations.filter((d) => d.agentId === "present"),
+      ).toEqual(
+        expect.arrayContaining(
+          ["source", "destination"].map((id) =>
+            expect.objectContaining({
+              repositoryKey: `repository:${id}`,
+              repositoryId: id,
+              status: "REUSE",
+              codebaseId: `checkout-${id}`,
+              destinationPath: `/custom/workspaces/${id}`,
+            }),
+          ),
+        ),
+      );
+      expect(
+        preview.destinations.filter((d) => d.agentId === "missing"),
+      ).toEqual([
+        expect.objectContaining({ status: "READY" }),
+        expect.objectContaining({ status: "READY" }),
+      ]);
+      expect(
+        preview.destinations.filter((d) => d.agentId === "offline"),
+      ).toEqual([
+        expect.objectContaining({
+          status: "BLOCKED",
+          error: "Agent is offline",
+        }),
+        expect.objectContaining({
+          status: "BLOCKED",
+          error: "Agent is offline",
+        }),
+      ]);
+      expect(preview.blockers).toEqual([
+        "Select at least one destination agent for this app",
+      ]);
+      expect(service.clones.previewDestinations).toHaveBeenNthCalledWith(1, []);
+      expect(service.clones.previewDestinations).toHaveBeenNthCalledWith(
+        2,
+        expect.any(Array),
+        { inspect: false },
+      );
+      expect(await prisma.agentJob.count()).toBe(0);
+    });
+
+    test("imports to an agent with every checkout and does not clone unselected coverage", async () => {
+      const payload = await service.export({ scope: "APP", id: "app" });
+      const destinations = ["source", "destination"].map((id) => ({
+        repositoryKey: `repository:${id}`,
+        agentId: "present",
+      }));
+      const value = { payload, destinations };
+      const preview = await service.preview(value);
+      expect(preview.blockers).toEqual([]);
+      expect(preview.destinations).toHaveLength(6);
+      await service.apply(value, preview.fingerprint, "existing-checkouts");
+      const operation =
+        await prisma.repositoryTransferOperation.findUniqueOrThrow({
+          where: { requestId: "existing-checkouts" },
+          include: { items: true },
+        });
+      expect(operation.items).toHaveLength(2);
+      expect(operation.items).toEqual(
+        expect.arrayContaining(
+          ["source", "destination"].map((id) =>
+            expect.objectContaining({
+              repositoryId: id,
+              agentId: "present",
+              status: "REUSED",
+              codebaseId: `checkout-${id}`,
+              destinationPath: `/custom/workspaces/${id}`,
+            }),
+          ),
+        ),
+      );
+      expect(await prisma.codebase.count()).toBe(2);
+      expect(await prisma.agentJob.count()).toBe(0);
+      expect(
+        JSON.parse(
+          (await prisma.app.findUniqueOrThrow({ where: { id: "app" } }))
+            .agentIdsJson,
+        ),
+      ).toEqual(["present"]);
+    });
+
+    test("repository settings can import without selecting any clone destinations", async () => {
+      await apply(await input(), "settings-only");
+      expect(service.clones.createOperation).toHaveBeenCalledWith(
+        expect.anything(),
+        expect.objectContaining({ destinations: [] }),
+      );
+      expect(await prisma.repositoryTransferItem.count()).toBe(0);
+      expect(await prisma.codebase.count()).toBe(2);
+    });
   });
 });
 

@@ -21,6 +21,15 @@ import type {
   TransferItem,
 } from "./types";
 
+const PRESENT_STATUSES = new Set([
+  "REUSE",
+  "REUSED",
+  "PRESENT",
+  "EXISTING",
+  "REGISTERED",
+  "AVAILABLE",
+]);
+
 function destinationDefaults(
   repository: TransferItem,
   agent: TransferAgent,
@@ -55,6 +64,7 @@ export function TransferDestinationEditor({
   coverage,
   onChange,
   disabled = false,
+  allowExisting = false,
 }: {
   agents: TransferAgent[];
   repositories: TransferItem[];
@@ -62,6 +72,7 @@ export function TransferDestinationEditor({
   coverage: TransferDestination[];
   onChange: (destinations: TransferDestinationInput[]) => void;
   disabled?: boolean;
+  allowExisting?: boolean;
 }) {
   const t = useTranslations("repositoryTransfer");
   const update = (
@@ -79,7 +90,11 @@ export function TransferDestinationEditor({
   return (
     <div className="space-y-4">
       <p className="text-sm text-muted-foreground">
-        {t("destinationsDescription")}
+        {t(
+          allowExisting
+            ? "importDestinationsDescription"
+            : "destinationsDescription",
+        )}
       </p>
       {!agents.length && (
         <p className="text-sm text-muted-foreground">{t("noAgents")}</p>
@@ -93,9 +108,7 @@ export function TransferDestinationEditor({
                 entry.repositoryKey === repository.key,
             )
             ?.status.toUpperCase();
-          return !["PRESENT", "EXISTING", "REGISTERED", "AVAILABLE"].includes(
-            state ?? "",
-          );
+          return allowExisting || !PRESENT_STATUSES.has(state ?? "");
         });
         const selectedCount = availableRepositories.filter((repository) =>
           destinations.some(
@@ -146,7 +159,7 @@ export function TransferDestinationEditor({
               />
               <div className="min-w-0">
                 <Label htmlFor={`transfer-agent-${agent.id}`}>
-                  {t("selectMissing")}
+                  {t(allowExisting ? "importToAgent" : "selectMissing")}
                 </Label>
                 <p className="mt-1 break-all font-mono text-xs text-muted-foreground">
                   {agent.baseRepoDirectory ?? t("baseDirectoryMissing")}
@@ -169,12 +182,20 @@ export function TransferDestinationEditor({
                   entry.agentId === agent.id &&
                   entry.repositoryKey === repository.key,
               );
-              const present = [
-                "PRESENT",
-                "EXISTING",
-                "REGISTERED",
-                "AVAILABLE",
-              ].includes(review?.status.toUpperCase() ?? "");
+              const state = review?.status.toUpperCase() ?? "";
+              const present = PRESENT_STATUSES.has(state);
+              const unavailable =
+                !agent.eligible || ["UNAVAILABLE", "OFFLINE"].includes(state);
+              const blocked = ["BLOCKED", "CONFLICT", "ERROR"].includes(state);
+              const statusLabel = present
+                ? "present"
+                : unavailable
+                  ? "destinationUnavailable"
+                  : blocked
+                    ? "destinationBlocked"
+                    : ["READY", "MISSING"].includes(state)
+                      ? "missing"
+                      : "destinationNotReviewed";
               const id = `destination-${agent.id}-${repository.key}`;
               return (
                 <div
@@ -185,7 +206,11 @@ export function TransferDestinationEditor({
                     <Checkbox
                       id={id}
                       checked={Boolean(value)}
-                      disabled={disabled || !agent.eligible || present}
+                      disabled={
+                        disabled ||
+                        !agent.eligible ||
+                        (present && !allowExisting)
+                      }
                       onCheckedChange={(checked) =>
                         onChange(
                           checked === true
@@ -206,11 +231,17 @@ export function TransferDestinationEditor({
                       }
                     />
                     <Label htmlFor={id}>{repository.label}</Label>
-                    <Badge variant="secondary">
-                      {present ? t("present") : t("missing")}
+                    <Badge
+                      variant={
+                        !present && blocked && !unavailable
+                          ? "destructive"
+                          : "secondary"
+                      }
+                    >
+                      {t(statusLabel)}
                     </Badge>
                   </div>
-                  {value && (
+                  {value && !present && (
                     <div className="grid gap-3 sm:grid-cols-2">
                       <Field className="gap-1">
                         <FieldLabel htmlFor={`${id}-path`}>
@@ -246,12 +277,14 @@ export function TransferDestinationEditor({
                   )}
                   {(review?.destinationPath || value) && (
                     <p className="break-all font-mono text-xs text-muted-foreground">
-                      {value
-                        ? `${agent.baseRepoDirectory ?? ""}/${value.relativePath ?? ""}`
-                        : review?.destinationPath}
+                      {present
+                        ? review?.destinationPath
+                        : value
+                          ? `${agent.baseRepoDirectory ?? ""}/${value.relativePath ?? ""}`
+                          : review?.destinationPath}
                     </p>
                   )}
-                  {review?.error && value && (
+                  {review?.error && (value || blocked) && (
                     <FieldError>{review.error}</FieldError>
                   )}
                 </div>

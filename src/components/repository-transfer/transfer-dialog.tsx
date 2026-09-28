@@ -547,6 +547,7 @@ export function RepositoryTransferDialog({
                       {t(repositoryId ? "optionalClones" : "destinationAgents")}
                     </h3>
                     <TransferDestinationEditor
+                      allowExisting
                       agents={preview.agents}
                       repositories={repositories}
                       destinations={input.destinations}

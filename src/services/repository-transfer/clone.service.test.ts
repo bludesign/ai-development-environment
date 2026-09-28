@@ -216,6 +216,129 @@ describe("repository transfer clone persistence", () => {
     expect(await prisma.agentJob.count()).toBe(0);
   });
 
+  test("read-only coverage finds an available checkout by canonical origin and preserves its actual folder", async () => {
+    await prisma.codebase.createMany({
+      data: [
+        {
+          id: "old-missing-checkout",
+          agentId: "agent-1",
+          repositoryId: "web",
+          folder: "/repositories/web",
+          observedOrigin: "https://github.com/acme/web.git",
+          availability: "MISSING",
+          createdAt: new Date("2025-01-01T00:00:00Z"),
+        },
+        {
+          id: "existing-custom-checkout",
+          agentId: "agent-1",
+          repositoryId: "web",
+          folder: "/other-volume/customer-portal",
+          observedOrigin: "git@github.com:acme/web.git",
+          availability: "AVAILABLE",
+        },
+      ],
+    });
+    const coverage = await service.previewDestinations(
+      ["agent-1", "agent-2"].map((agentId) => ({
+        repositoryKey: "imported-web",
+        agentId,
+        remoteUrl: "https://github.com/Acme/Web.git",
+      })),
+      { inspect: false },
+    );
+    expect(coverage).toEqual([
+      expect.objectContaining({
+        agentId: "agent-1",
+        repositoryId: "web",
+        status: "REUSE",
+        codebaseId: "existing-custom-checkout",
+        destinationPath: "/other-volume/customer-portal",
+      }),
+      expect.objectContaining({
+        agentId: "agent-2",
+        repositoryId: "web",
+        status: "READY",
+        codebaseId: null,
+        destinationPath: "/repositories/web",
+      }),
+    ]);
+    expect(createJob).not.toHaveBeenCalled();
+    expect(await prisma.agentJob.count()).toBe(0);
+    expect(await prisma.codebase.count()).toBe(2);
+  });
+
+  test("read-only coverage retains an existing checkout on an offline agent without clone prerequisites", async () => {
+    await prisma.codebase.create({
+      data: {
+        id: "offline-existing",
+        agentId: "agent-1",
+        repositoryId: "web",
+        folder: "/original-location/customer-portal",
+        observedOrigin: "git@github.com:acme/web.git",
+      },
+    });
+    await prisma.agent.update({
+      where: { id: "agent-1" },
+      data: {
+        disconnectedAt: new Date(),
+        baseRepoDirectory: null,
+        capabilitiesJson: "[]",
+      },
+    });
+    const [coverage] = await service.previewDestinations(
+      [
+        {
+          repositoryKey: "web",
+          repositoryId: "web",
+          agentId: "agent-1",
+          remoteUrl: "https://github.com/acme/web.git",
+        },
+      ],
+      { inspect: false },
+    );
+    expect(coverage).toMatchObject({
+      status: "REUSE",
+      codebaseId: "offline-existing",
+      destinationPath: "/original-location/customer-portal",
+      error: null,
+    });
+    expect(createJob).not.toHaveBeenCalled();
+    expect(await prisma.agentJob.count()).toBe(0);
+  });
+
+  test.each(["MISSING", "NOT_REPOSITORY", "ORIGIN_MISMATCH", "ERROR"])(
+    "read-only coverage does not mark a %s registration as an available checkout",
+    async (availability) => {
+      await prisma.codebase.create({
+        data: {
+          id: "unavailable-checkout",
+          agentId: "agent-1",
+          repositoryId: "web",
+          folder: "/repositories/web",
+          observedOrigin: "https://github.com/acme/web.git",
+          availability,
+        },
+      });
+      const [coverage] = await service.previewDestinations(
+        [
+          {
+            repositoryKey: "web",
+            repositoryId: "web",
+            agentId: "agent-1",
+            remoteUrl: "https://github.com/acme/web.git",
+          },
+        ],
+        { inspect: false },
+      );
+      expect(coverage).toMatchObject({
+        status: "READY",
+        codebaseId: "unavailable-checkout",
+        destinationPath: "/repositories/web",
+      });
+      expect(createJob).not.toHaveBeenCalled();
+    },
+  );
+
   test("blocks offline agents, unsupported agents, absent base directories and colliding paths", async () => {
     await prisma.agent.update({
       where: { id: "agent-1" },
