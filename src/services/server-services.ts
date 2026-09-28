@@ -1,3 +1,5 @@
+import { RepositoryCloneService } from "@/services/repository-transfer/clone.service";
+import { RepositoryTransferService } from "@/services/repository-transfer/repository-transfer.service";
 import "server-only";
 
 import { AgentControlService } from "@/services/agent-control";
@@ -81,6 +83,7 @@ export type ServerServices = {
   systemStatusService: SystemStatusService;
   actionCenterService: ActionCenterService;
   appsService: AppsService;
+  repositoryTransferService: RepositoryTransferService;
   globalSearchService: GlobalSearchService;
   cliHealthService: CliHealthService;
   tailscaleServeService: TailscaleServeService;
@@ -196,6 +199,18 @@ function createServerServices(): ServerServices {
   );
   const actionCenterService = new ActionCenterService();
   const appsService = new AppsService();
+  const repositoryCloneService = new RepositoryCloneService(
+    agentControlService,
+  );
+  const repositoryTransferService = new RepositoryTransferService(
+    repositoryCloneService,
+    commandsService,
+    gitHubService,
+    skillsService,
+  );
+  void repositoryCloneService
+    .recover()
+    .catch((error) => console.error("Repository clone recovery failed", error));
   const globalSearchService = new GlobalSearchService();
   const toolsService = new ToolsService(
     codebaseToolsService,
@@ -333,6 +348,7 @@ function createServerServices(): ServerServices {
     systemStatusService,
     actionCenterService,
     appsService,
+    repositoryTransferService,
     globalSearchService,
     cliHealthService,
     tailscaleServeService,

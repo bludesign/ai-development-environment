@@ -3351,6 +3351,27 @@ export class GitHubService {
     requestSource: GitHubRequestSource = "ACTIONS_PAGE",
   ): Promise<GitHubRepositoryWorkflowView[]> {
     const target = await this.actionsTargetByIdentifier(codebaseRepositoryId);
+    return this.listRepositoryWorkflows(target, requestSource);
+  }
+
+  /** Read workflow targets before a portable repository has been registered. */
+  async repositoryWorkflowsForOrigin(
+    canonicalOrigin: string,
+  ): Promise<GitHubRepositoryWorkflowView[]> {
+    const target = actionsRepositoryTarget({
+      id: canonicalOrigin,
+      canonicalOrigin,
+      jiraBranchRegex: null,
+    });
+    if (!target)
+      throw new Error("Repository does not have a supported GitHub origin");
+    return this.listRepositoryWorkflows(target, "ACTIONS_PAGE");
+  }
+
+  private async listRepositoryWorkflows(
+    target: ActionsRepositoryTarget,
+    requestSource: GitHubRequestSource,
+  ): Promise<GitHubRepositoryWorkflowView[]> {
     const token = await this.requireToken();
     const workflows: RawRepositoryWorkflow[] = [];
     let page = 1;

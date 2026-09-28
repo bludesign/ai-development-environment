@@ -8,6 +8,7 @@ import {
   Hammer,
   MessagesSquare,
   Pencil,
+  RefreshCw,
   Trash2,
 } from "lucide-react";
 import { useTranslations } from "next-intl";
@@ -35,6 +36,8 @@ import {
   EmptyTitle,
 } from "@/components/ui/empty";
 import { Spinner } from "@/components/ui/spinner";
+import { RepositoryTransferActions } from "@/components/repository-transfer/transfer-actions";
+import { AppSyncPanel } from "@/components/repository-transfer/app-sync-panel";
 import { Link, useRouter } from "@/i18n/navigation";
 import { controlPlaneRequest } from "@/lib/control-plane-client";
 import { cn } from "@/lib/utils";
@@ -50,7 +53,13 @@ import {
 } from "./types";
 
 export type AppDetailView =
-  "overview" | "repositories" | "worktrees" | "plans" | "sessions" | "builds";
+  | "overview"
+  | "repositories"
+  | "sync"
+  | "worktrees"
+  | "plans"
+  | "sessions"
+  | "builds";
 
 const VIEWS: Array<{
   value: AppDetailView;
@@ -58,6 +67,7 @@ const VIEWS: Array<{
 }> = [
   { value: "overview", icon: Boxes },
   { value: "repositories", icon: FolderGit2 },
+  { value: "sync", icon: RefreshCw },
   { value: "worktrees", icon: GitBranch },
   { value: "plans", icon: ClipboardList },
   { value: "sessions", icon: MessagesSquare },
@@ -199,7 +209,8 @@ export function AppDetailPage({
             {app.description || t("noDescription")}
           </p>
         </div>
-        <div className="flex gap-2">
+        <div className="flex flex-wrap gap-2">
+          <RepositoryTransferActions appId={appId} onImported={load} />
           <Button onClick={() => setEditorOpen(true)} variant="outline">
             <Pencil /> {t("edit")}
           </Button>
@@ -234,6 +245,7 @@ export function AppDetailPage({
 
       {view === "overview" && <AppOverview app={app} />}
       {view === "repositories" && <AppRepositories app={app} />}
+      {view === "sync" && <AppSyncPanel appId={app.id} />}
       {view === "worktrees" && (
         <WorktreesPage appId={app.id} key={`${scopeKey}:worktrees`} />
       )}

@@ -23,6 +23,7 @@ import {
   EmptyTitle,
 } from "@/components/ui/empty";
 import { Spinner } from "@/components/ui/spinner";
+import { RepositoryTransferActions } from "@/components/repository-transfer/transfer-actions";
 import { Link, useRouter } from "@/i18n/navigation";
 import { controlPlaneRequest } from "@/lib/control-plane-client";
 import { isRowActivation } from "@/lib/row-activation";
@@ -110,9 +111,12 @@ export function AppsPage() {
             {t("description")}
           </p>
         </div>
-        <Button onClick={() => setEditorOpen(true)}>
-          <Plus /> {t("createApp")}
-        </Button>
+        <div className="flex flex-wrap gap-2">
+          <RepositoryTransferActions onImported={load} />
+          <Button onClick={() => setEditorOpen(true)}>
+            <Plus /> {t("createApp")}
+          </Button>
+        </div>
       </div>
       {error && (
         <Alert variant="destructive">

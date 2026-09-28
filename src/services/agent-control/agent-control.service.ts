@@ -79,6 +79,8 @@ import {
 } from "@ai-development-environment/agent-contract/disk-space";
 import {
   CODEBASE_BROWSE_JOB_KIND,
+  CODEBASE_CLONE_JOB_KIND,
+  CODEBASE_CLONE_INSPECT_JOB_KIND,
   CODEBASE_FETCH_JOB_KIND,
   CODEBASE_GIT_INSPECT_JOB_KIND,
   CODEBASE_GIT_OPERATION_JOB_KIND,
@@ -90,6 +92,7 @@ import {
   MAX_CODEBASE_RECONCILE_INTERVAL_SECONDS,
   MIN_CODEBASE_RECONCILE_INTERVAL_SECONDS,
   codebaseBrowsePayload,
+  codebaseClonePayload,
   codebaseGitInspectPayload,
   codebaseGitOperationPayload,
   codebaseJobPayload,
@@ -309,6 +312,13 @@ export function validateJob(kind: string, payload: unknown): void {
   }
   if (kind === CODEBASE_BROWSE_JOB_KIND) {
     codebaseBrowsePayload(value);
+    return;
+  }
+  if (
+    kind === CODEBASE_CLONE_JOB_KIND ||
+    kind === CODEBASE_CLONE_INSPECT_JOB_KIND
+  ) {
+    codebaseClonePayload(value);
     return;
   }
   if (

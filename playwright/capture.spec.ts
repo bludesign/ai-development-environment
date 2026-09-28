@@ -7,6 +7,7 @@ import {
 } from "./screenshot-time";
 import { stubJiraCacheTicket } from "./jira-cache-stub";
 import { stubWorktreeAgent } from "./worktree-stub";
+import { openRepositoryTransfer } from "./repository-transfer";
 import { screenshotSessionToken } from "../scripts/mock-data/auth";
 
 async function waitForVisualSettle(page: Page): Promise<void> {
@@ -162,6 +163,9 @@ test.describe("app screenshots", () => {
         await page
           .getByRole("button", { name: "Remove iOS App project" })
           .waitFor();
+      }
+      if (route.transferWorkflow) {
+        await openRepositoryTransfer(page, route.transferWorkflow);
       }
       await waitForVisualSettle(page);
       await normalizeScreenshotValues(page);

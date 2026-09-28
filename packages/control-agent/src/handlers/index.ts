@@ -6,6 +6,8 @@ import {
 } from "@ai-development-environment/agent-contract/build-data";
 import {
   CODEBASE_BROWSE_JOB_KIND,
+  CODEBASE_CLONE_JOB_KIND,
+  CODEBASE_CLONE_INSPECT_JOB_KIND,
   CODEBASE_FETCH_JOB_KIND,
   CODEBASE_GIT_INSPECT_JOB_KIND,
   CODEBASE_GIT_OPERATION_JOB_KIND,
@@ -22,6 +24,7 @@ import { CRASH_SYMBOLICATE_JOB_KIND } from "@ai-development-environment/agent-co
 import { CLI_HEALTH_JOB_KIND } from "@ai-development-environment/agent-contract/cli-health";
 
 import { runCommand } from "./commands.js";
+import { cloneCodebase, inspectCloneDestination } from "./codebase-clone.js";
 import { importCoverageReport } from "./coverage.js";
 import { symbolicateCrash } from "./crashes.js";
 import { runCliHealth } from "./cli-health.js";
@@ -215,6 +218,8 @@ export const handlers: Readonly<Record<string, AgentJobHandler>> = {
   [BUILD_DATA_SIZE_JOB_KIND]: sizeBuildData,
   [BUILD_DATA_DELETE_JOB_KIND]: deleteBuildData,
   [CODEBASE_BROWSE_JOB_KIND]: browseCodebaseDirectories,
+  [CODEBASE_CLONE_JOB_KIND]: cloneCodebase,
+  [CODEBASE_CLONE_INSPECT_JOB_KIND]: inspectCloneDestination,
   [CODEBASE_INSPECT_JOB_KIND]: inspectCodebaseFolder,
   [CODEBASE_REFRESH_JOB_KIND]: refreshCodebase,
   [CODEBASE_FETCH_JOB_KIND]: fetchCodebase,

@@ -37,6 +37,8 @@ export type RouteEntry = {
   /** Accessible tab name selected after the page reaches its ready state. */
   clickTab?: string;
   buildWorkflow?: "start" | "custom" | "script" | "project";
+  /** Open a transfer review without applying configuration or queuing clones. */
+  transferWorkflow?: "export" | "import" | "import-destinations";
   /** Auth pages are intentionally captured without the seeded bearer session. */
   anonymous?: boolean;
   /** Capture the global focus menu after its catalog has loaded. */
@@ -62,6 +64,33 @@ export const routes: RouteEntry[] = [
     readyGraphqlOperation: "AppDetail",
     readyTexts: ["Customer Portal"],
   },
+  {
+    name: "app-sync",
+    path: `/apps/${ids.apps.customerPortal}?view=sync`,
+    readyGraphqlOperation: "AppRepositorySync",
+    readyTexts: ["Sync repositories"],
+  },
+  {
+    name: "app-export",
+    path: `/apps/${ids.apps.customerPortal}`,
+    readyGraphqlOperation: "AppDetail",
+    readyTexts: ["Customer Portal"],
+    transferWorkflow: "export",
+  },
+  {
+    name: "app-import-review",
+    path: `/apps/${ids.apps.customerPortal}`,
+    readyGraphqlOperation: "AppDetail",
+    readyTexts: ["Customer Portal"],
+    transferWorkflow: "import",
+  },
+  {
+    name: "app-import-destinations",
+    path: `/apps/${ids.apps.customerPortal}`,
+    readyGraphqlOperation: "AppDetail",
+    readyTexts: ["Customer Portal"],
+    transferWorkflow: "import-destinations",
+  },
 
   // Agents
   { name: "agents", path: "/agents" },
@@ -81,6 +110,11 @@ export const routes: RouteEntry[] = [
   {
     name: "repository-detail",
     path: `/codebases/repositories/${ids.repositories.web}`,
+  },
+  {
+    name: "repository-export",
+    path: `/codebases/repositories/${ids.repositories.ios}`,
+    transferWorkflow: "export",
   },
   {
     name: "repository-preparations",

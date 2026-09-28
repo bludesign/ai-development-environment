@@ -2,6 +2,8 @@ export const CODEBASE_BROWSE_JOB_KIND = "codebase.browse";
 export const CODEBASE_INSPECT_JOB_KIND = "codebase.inspect";
 export const CODEBASE_REFRESH_JOB_KIND = "codebase.refresh";
 export const CODEBASE_FETCH_JOB_KIND = "codebase.fetch";
+export const CODEBASE_CLONE_JOB_KIND = "codebase.clone";
+export const CODEBASE_CLONE_INSPECT_JOB_KIND = "codebase.clone.inspect";
 export const CODEBASE_GIT_INSPECT_JOB_KIND = "codebase.git.inspect";
 export const CODEBASE_GIT_OPERATION_JOB_KIND = "codebase.git.operation";
 export const CODEBASE_RECONCILE_EVENT_CAPABILITY =
@@ -31,6 +33,8 @@ export const CODEBASE_JOB_KINDS = [
   CODEBASE_INSPECT_JOB_KIND,
   CODEBASE_REFRESH_JOB_KIND,
   CODEBASE_FETCH_JOB_KIND,
+  CODEBASE_CLONE_JOB_KIND,
+  CODEBASE_CLONE_INSPECT_JOB_KIND,
   CODEBASE_GIT_INSPECT_JOB_KIND,
   CODEBASE_GIT_OPERATION_JOB_KIND,
 ] as const;
@@ -302,6 +306,122 @@ export type NormalizedGitOrigin = {
   displayOrigin: string;
   sanitizedOrigin: string;
 };
+
+export type CodebaseClonePayload = {
+  operationId: string;
+  itemId: string;
+  codebaseId: string;
+  baseDirectory: string;
+  relativePath: string;
+  remoteUrl: string;
+  expectedOrigin: string;
+};
+
+/** Restrict clone transports and never carry HTTP credentials in portable files/jobs. */
+export function validateCloneRemote(value: string): string {
+  if (!value || value.length > 4_096 || /[\u0000-\u0020\u007f]/.test(value)) {
+    throw new Error(
+      "Clone remote must be a host-based Git URL without whitespace",
+    );
+  }
+  if (/^[a-z][a-z0-9+.-]*:\/\//i.test(value)) {
+    const url = new URL(value);
+    if (!["https:", "http:", "ssh:", "git:"].includes(url.protocol)) {
+      throw new Error("Clone remote transport is not supported");
+    }
+    if (
+      url.password ||
+      url.search ||
+      url.hash ||
+      (url.protocol !== "ssh:" && url.username)
+    ) {
+      throw new Error(
+        "Clone remote must not contain credentials, query parameters, or fragments",
+      );
+    }
+  } else if (
+    !/^(?:[a-z0-9._-]+@)?[a-z0-9][a-z0-9.-]*:[^/:].*$/i.test(value) ||
+    /^[a-z]:/i.test(value)
+  ) {
+    throw new Error("Clone remote must be an HTTPS, SSH, or Git URL");
+  }
+  normalizeGitOrigin(value);
+  return value;
+}
+
+export function validateCloneRelativePath(value: string): string {
+  if (!value || value.length > 512 || /[\\\u0000-\u001f\u007f:]/.test(value)) {
+    throw new Error(
+      "Clone destination must be a safe repository-relative path",
+    );
+  }
+  const segments = value.split("/");
+  if (
+    segments.some(
+      (segment) =>
+        !segment ||
+        segment === "." ||
+        segment === ".." ||
+        segment.toLowerCase() === ".git" ||
+        segment.startsWith(".aide-clone-"),
+    )
+  ) {
+    throw new Error(
+      "Clone destination must not contain traversal or Git metadata paths",
+    );
+  }
+  return value;
+}
+
+export function codebaseClonePayload(value: unknown): CodebaseClonePayload {
+  const payload = objectValue(value, "codebase clone payload");
+  const allowed = new Set([
+    "operationId",
+    "itemId",
+    "codebaseId",
+    "baseDirectory",
+    "relativePath",
+    "remoteUrl",
+    "expectedOrigin",
+  ]);
+  const unexpected = Object.keys(payload).find((key) => !allowed.has(key));
+  if (unexpected)
+    throw new Error(`Unexpected codebase clone payload field: ${unexpected}`);
+  const baseDirectory = stringValue(
+    payload.baseDirectory,
+    "payload.baseDirectory",
+  );
+  if (
+    baseDirectory.length > 4_096 ||
+    /[\u0000-\u001f\u007f]/.test(baseDirectory) ||
+    !/^(?:\/|[a-z]:[\\/])/i.test(baseDirectory)
+  ) {
+    throw new Error("Clone base directory must be an absolute path");
+  }
+  const remoteUrl = validateCloneRemote(
+    stringValue(payload.remoteUrl, "payload.remoteUrl"),
+  );
+  const expectedOrigin = stringValue(
+    payload.expectedOrigin,
+    "payload.expectedOrigin",
+  );
+  if (normalizeGitOrigin(remoteUrl).canonicalOrigin !== expectedOrigin) {
+    throw new Error(
+      "Clone remote does not match the expected repository origin",
+    );
+  }
+  return {
+    operationId: stringValue(payload.operationId, "payload.operationId"),
+    itemId: stringValue(payload.itemId, "payload.itemId"),
+    codebaseId: stringValue(payload.codebaseId, "payload.codebaseId"),
+    baseDirectory,
+    relativePath: validateCloneRelativePath(
+      stringValue(payload.relativePath, "payload.relativePath"),
+    ),
+    remoteUrl,
+    expectedOrigin,
+  };
+}
 
 const CASE_INSENSITIVE_PATH_HOSTS = new Set([
   "github.com",

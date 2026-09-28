@@ -2,7 +2,7 @@
 
 import { FilePlus2, Plus, Save, Trash2, Upload } from "lucide-react";
 import { useTranslations } from "next-intl";
-import { ChangeEvent, useMemo, useState } from "react";
+import { ChangeEvent, useEffect, useMemo, useState } from "react";
 
 import { ConfirmationDialog } from "@/components/confirmation-dialog";
 import { Alert, AlertDescription } from "@/components/ui/alert";
@@ -147,9 +147,11 @@ function size(value: number | null): string {
 export function RepositoryPreparations({
   repository,
   onSaved,
+  onDirtyChange,
 }: {
   repository: CodebaseRepository;
   onSaved: () => Promise<void>;
+  onDirtyChange?: (dirty: boolean) => void;
 }) {
   const t = useTranslations("codebases");
   const [drafts, setDrafts] = useState<DraftPreparation[]>(() =>
@@ -158,6 +160,22 @@ export function RepositoryPreparations({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
+  const dirty =
+    drafts.length !== (repository.preparations ?? []).length ||
+    drafts.some((draft, index) => {
+      const saved = repository.preparations?.[index];
+      return (
+        !saved ||
+        draft.id !== saved.id ||
+        draft.kind !== saved.kind ||
+        draft.path !== saved.path ||
+        draft.contentChanged
+      );
+    });
+  useEffect(() => {
+    onDirtyChange?.(dirty);
+    return () => onDirtyChange?.(false);
+  }, [dirty, onDirtyChange]);
 
   const totalBytes = useMemo(
     () =>
