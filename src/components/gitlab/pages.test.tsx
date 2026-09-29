@@ -213,6 +213,123 @@ describe("GitLabMergeRequestsPage", () => {
     ).toBe("true");
   });
 
+  test("keeps failed merge follow-ups available after the Open list removes the merged request", async () => {
+    let merged = false;
+    const operation = {
+      id: "merge-operation-1",
+      state: "ACTION_REQUIRED",
+      autoMerge: false,
+      worktreeId: null,
+      ticketKey: "APP-17",
+      lastError: "Jira unavailable",
+      mergeConfirmedAt: "2026-09-29T12:00:00.000Z",
+      ticketMovedAt: null,
+      worktreeDeletedAt: null,
+      updatedAt: "2026-09-29T12:00:00.000Z",
+    };
+    requestMock.mockImplementation(async (query, variables) => {
+      if (query.includes("GitLabPageConfiguration"))
+        return configuration as never;
+      if (query.includes("query GitLabMergeRequests")) {
+        expect(variables).toEqual({
+          scope: "MINE",
+          projectId: null,
+          state: "OPENED",
+          page: 1,
+        });
+        return {
+          gitlabMergeRequests: {
+            items: merged ? [] : [mergeRequest],
+            total: merged ? 0 : 1,
+            page: 1,
+            perPage: 25,
+            nextPage: null,
+          },
+        } as never;
+      }
+      if (query.includes("query GitLabMergeRequestMergeOptions"))
+        return {
+          gitlabMergeRequestMergeOptions: {
+            ...mergeRequest,
+            mergeMethod: "merge",
+            squashPolicy: "default_off",
+            squash: false,
+            removeSourceBranch: false,
+            canRemoveSourceBranch: true,
+            canMerge: true,
+            canAutoMerge: false,
+            canCancelAutoMerge: false,
+            autoMergeEnabled: false,
+            mergeBlockedReason: null,
+            autoMergeBlockedReason: null,
+            mergeCommitMessage: null,
+            squashCommitMessage: null,
+            worktreeId: null,
+            worktreeFolder: null,
+            canDeleteWorktree: false,
+            ticketKey: "APP-17",
+            ticketDoneStatusConfigured: true,
+            defaultMoveTicketToDone: true,
+            defaultDeleteWorktree: false,
+            operation: null,
+          },
+        } as never;
+      if (query.includes("mutation SubmitGitLabMergeRequestMerge")) {
+        merged = true;
+        return {
+          submitGitLabMergeRequestMerge: {
+            mergeRequest: { ...mergeRequest, state: "MERGED" },
+            operation,
+            postMergeError: "Jira unavailable",
+          },
+        } as never;
+      }
+      if (query.includes("mutation RetryGitLabMergeFollowUps"))
+        return {
+          retryGitLabMergeFollowUps: {
+            mergeRequest: { ...mergeRequest, state: "MERGED" },
+            operation: { ...operation, state: "COMPLETED", lastError: null },
+            postMergeError: null,
+          },
+        } as never;
+      throw new Error(`Unexpected operation: ${query}`);
+    });
+
+    render(<GitLabMergeRequestsPage />);
+    fireEvent.pointerDown(
+      await screen.findByRole("button", { name: "Actions: !17" }),
+      { button: 0, ctrlKey: false },
+    );
+    fireEvent.click(screen.getByRole("menuitem", { name: "Merge" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Merge now" }));
+
+    await screen.findByText("No merge requests match these filters.");
+    expect(screen.getByRole("dialog")).toBeDefined();
+    expect(screen.getByText("Jira unavailable")).toBeDefined();
+    expect(
+      screen.getByText("The merge succeeded, but a follow-up needs attention."),
+    ).toBeDefined();
+    expect(screen.queryByRole("button", { name: "Merge now" })).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Retry follow-ups" }));
+
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+    expect(
+      requestMock.mock.calls.filter(([query]) =>
+        query.includes("mutation SubmitGitLabMergeRequestMerge"),
+      ),
+    ).toHaveLength(1);
+    expect(
+      requestMock.mock.calls.filter(([query]) =>
+        query.includes("mutation RetryGitLabMergeFollowUps"),
+      ),
+    ).toEqual([
+      [
+        expect.any(String),
+        { projectId: mergeRequest.projectId, iid: mergeRequest.iid },
+      ],
+    ]);
+  });
+
   test("does not describe a failed request as an empty result", async () => {
     requestMock.mockImplementation(async (query) => {
       if (query.includes("GitLabPageConfiguration")) {

@@ -1,5 +1,6 @@
 import type { GitLabPipelineStatus } from "@/services/gitlab";
 
+// Provider filter values; UNKNOWN is only a local presentation fallback.
 export const gitLabPipelineStatuses = [
   "CREATED",
   "WAITING_FOR_RESOURCE",
@@ -14,7 +15,6 @@ export const gitLabPipelineStatuses = [
   "SKIPPED",
   "MANUAL",
   "SCHEDULED",
-  "UNKNOWN",
 ] as const;
 
 export const gitLabPipelineSources = [

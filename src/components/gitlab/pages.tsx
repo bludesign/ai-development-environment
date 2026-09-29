@@ -350,6 +350,9 @@ export function GitLabMergeRequestsPage({
     reload: reloadConfiguration,
   } = useConfiguration();
   const [ticketKey, setTicketKey] = useState<string | null>(null);
+  const [mergeTarget, setMergeTarget] = useState<GitLabMergeRequestView | null>(
+    null,
+  );
   const [items, setItems] = useState<GitLabMergeRequestView[]>([]);
   const [observedProjects, setObservedProjects] = useState<
     GitLabProjectOption[]
@@ -596,7 +599,7 @@ export function GitLabMergeRequestsPage({
         <GitLabMergeRequestTable
           items={items}
           projects={configuration.projects}
-          onChanged={load}
+          onMerge={setMergeTarget}
           onTicket={setTicketKey}
         />
       ) : null}
@@ -605,6 +608,17 @@ export function GitLabMergeRequestsPage({
           busy={busy}
           onPageChange={(value) => changeFilters({ page: value })}
           pagination={pagination}
+        />
+      )}
+      {mergeTarget && (
+        <MergeRequestDialog
+          mergeRequest={mergeTarget}
+          worktreeId={mergeTarget.worktreeId}
+          open
+          onOpenChange={(open) => {
+            if (!open) setMergeTarget(null);
+          }}
+          onMerged={load}
         />
       )}
       <JiraTicketDrawer

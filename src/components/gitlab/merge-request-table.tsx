@@ -40,12 +40,12 @@ import { GitLabPipelineStatusBadge } from "./pipeline-status-badge";
 export function GitLabMergeRequestTable({
   items,
   projects,
-  onChanged,
+  onMerge,
   onTicket,
 }: {
   items: GitLabMergeRequestView[];
   projects: GitLabProjectView[];
-  onChanged: () => Promise<void>;
+  onMerge: (mergeRequest: GitLabMergeRequestView) => void;
   onTicket: (key: string) => void;
 }) {
   const t = useTranslations("gitlabPages");
@@ -212,7 +212,7 @@ export function GitLabMergeRequestTable({
                   <MergeRequestMenu
                     label={`!${mr.iid}`}
                     mergeRequest={mr}
-                    onMerged={onChanged}
+                    onMergeOptions={() => onMerge(mr)}
                     variant="actions"
                   />
                 </TableCell>

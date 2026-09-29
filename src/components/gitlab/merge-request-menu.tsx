@@ -30,11 +30,13 @@ export function MergeRequestMenu({
   mergeRequest,
   variant = "badge",
   onMerged,
+  onMergeOptions,
 }: {
   label: string;
   mergeRequest: MergeRequestMenuTarget;
   variant?: "badge" | "actions";
   onMerged?: () => void | Promise<void>;
+  onMergeOptions?: () => void;
 }) {
   const gitLabT = useTranslations("gitlabPages");
   const worktreesT = useTranslations("worktrees");
@@ -80,7 +82,11 @@ export function MergeRequestMenu({
                 mergeRequest.state === "MERGED") && (
                 <>
                   <DropdownMenuSeparator />
-                  <DropdownMenuItem onSelect={() => setMergeOpen(true)}>
+                  <DropdownMenuItem
+                    onSelect={() =>
+                      onMergeOptions ? onMergeOptions() : setMergeOpen(true)
+                    }
+                  >
                     <GitMerge />
                     {gitLabT(
                       mergeRequest.state === "MERGED"
@@ -94,7 +100,7 @@ export function MergeRequestMenu({
           ) : null}
         </DropdownMenuContent>
       </DropdownMenu>
-      {mergeRequest.projectId ? (
+      {mergeRequest.projectId && !onMergeOptions ? (
         <MergeRequestDialog
           mergeRequest={{
             iid: mergeRequest.iid,
