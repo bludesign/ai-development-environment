@@ -188,6 +188,60 @@ describe("GitLab comments pagination", () => {
     expect(read.enrich).toHaveBeenCalledTimes(1);
   });
 
+  test("retains explicit refresh across continuation pages without rereading buffered discussions", async () => {
+    const { feed, context, read } = setup();
+    read.discussions.mockImplementation(async (_request, page) => ({
+      items:
+        page === 1
+          ? [discussion("first"), discussion("buffered")]
+          : [discussion("next-page")],
+      nextPage: page === 1 ? 2 : null,
+    }));
+    const selection = { projectId: "21", iid: 1, first: 1 };
+    const first = await feed.load(
+      { ...selection, refresh: true },
+      context,
+      read,
+    );
+    const second = await feed.load(
+      { ...selection, after: first.endCursor },
+      context,
+      read,
+    );
+    expect(second.threads[0].discussion.id).toBe("buffered");
+    expect(read.discussions).toHaveBeenCalledTimes(1);
+    const third = await feed.load(
+      { ...selection, after: second.endCursor },
+      context,
+      read,
+    );
+    expect(third.threads[0].discussion.id).toBe("next-page");
+    expect(read.request.mock.calls[0][2]).toBe(true);
+    expect(
+      read.discussions.mock.calls.map(([, page, refresh]) => [page, refresh]),
+    ).toEqual([
+      [1, true],
+      [2, true],
+    ]);
+    expect(third.hasNextPage).toBe(false);
+  });
+
+  test("retains explicit refresh when continuation discovers more requests", async () => {
+    const { feed, context, read } = setup();
+    read.discover.mockImplementation(async (source) => ({
+      items: [mr(source.page!)],
+      nextPage: source.page === 1 ? 2 : null,
+    }));
+    const first = await feed.load({ refresh: true }, context, read);
+    const second = await feed.load({ after: first.endCursor }, context, read);
+    expect(second.threads[0].mergeRequest.iid).toBe(2);
+    expect(read.discover.mock.calls).toHaveLength(8);
+    expect(read.discover.mock.calls.every(([, refresh]) => refresh)).toBe(true);
+    expect(read.discussions.mock.calls.every(([, , refresh]) => refresh)).toBe(
+      true,
+    );
+  });
+
   test("bounds each response and eventually includes later managed projects and provider pages", async () => {
     const { feed, context, read } = setup(["21", "22", "23", "24", "25"]);
     read.discover.mockImplementation(async (source) => ({

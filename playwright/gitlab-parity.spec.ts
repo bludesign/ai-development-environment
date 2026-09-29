@@ -262,6 +262,46 @@ test("gitlab comment replies keep drafts on provider errors", async ({
   expect(replies).toBe(1);
 });
 
+test("gitlab comments refresh retrieves comments posted after the cached result", async ({
+  page,
+}) => {
+  const refreshes: boolean[] = [];
+  let refreshedResult: unknown;
+  await page.route("**/api/graphql", async (route) => {
+    const { query, variables } = route.request().postDataJSON();
+    if (!query?.includes("query GitLabComments(")) {
+      await route.continue();
+      return;
+    }
+    refreshes.push(variables?.refresh === true);
+    if (variables?.refresh) {
+      // The screenshot environment seeds GitLab responses in its local cache.
+      // Keep provider refresh simulated here; the service test exercises cache bypass.
+      expect(refreshedResult).toBeDefined();
+      await route.fulfill({ json: refreshedResult });
+      return;
+    }
+    const response = await route.fetch();
+    const result = await response.json();
+    expect(result.errors).toBeUndefined();
+    refreshedResult = structuredClone(result);
+    result.data.gitlabComments.threads = [];
+    await route.fulfill({ response, json: result });
+  });
+  await page.goto(`/en/gitlab/comments?project=${ids.gitlab.projectId}&iid=42`);
+  const refresh = page.getByRole("button", { name: "Refresh", exact: true });
+  await expect(refresh).toBeEnabled();
+  expect(refreshes.length).toBeGreaterThan(0);
+  expect(refreshes.every((refresh) => !refresh)).toBe(true);
+  await expect(page.getByText(/Retrying here can race/)).toHaveCount(0);
+  await refresh.click();
+  await expect(page.getByText(/Retrying here can race/)).toBeVisible();
+  await expect(
+    page.getByText("General comment", { exact: true }),
+  ).toBeVisible();
+  expect(refreshes.filter(Boolean)).toEqual([true]);
+});
+
 test("gitlab merge request timeouts offer narrowing guidance and retry", async ({
   page,
 }) => {

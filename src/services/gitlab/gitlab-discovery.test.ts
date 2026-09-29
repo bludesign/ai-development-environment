@@ -11,6 +11,7 @@ type Read = {
   path: string;
   query?: Record<string, unknown>;
   allowStaleOnError?: boolean;
+  force?: boolean;
 };
 type Response = { data: unknown; headers: Headers };
 const viewer = {
@@ -178,6 +179,9 @@ describe("GitLab accessible discovery", () => {
     expect(
       read.mock.calls.every(([input]) => input.allowStaleOnError === false),
     ).toBe(true);
+    expect(read.mock.calls.every(([input]) => input.force === false)).toBe(
+      true,
+    );
   });
 
   test.each([undefined, "thread"])(
@@ -212,6 +216,7 @@ describe("GitLab accessible discovery", () => {
         projectId: "99",
         iid: 2,
         discussionId,
+        refresh: true,
       });
       expect(result).toMatchObject({
         partial: true,
@@ -226,6 +231,9 @@ describe("GitLab accessible discovery", () => {
       expect(
         read.mock.calls.every(([input]) => input.allowStaleOnError === false),
       ).toBe(true);
+      expect(read.mock.calls.every(([input]) => input.force === true)).toBe(
+        true,
+      );
     },
   );
 });

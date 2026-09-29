@@ -72,6 +72,7 @@ export const createGitLabResolvers = (
             discussionId?: string | null;
             after?: string | null;
             first?: number | null;
+            refresh?: boolean | null;
           },
           context: GraphQLContext,
         ) => checked(context, () => gitLabService.comments(args)),

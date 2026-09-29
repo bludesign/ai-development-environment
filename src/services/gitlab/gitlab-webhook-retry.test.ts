@@ -88,6 +88,19 @@ describe("GitLab webhook retries", () => {
       "workflow storage unavailable",
     );
     expect(outcome).toBe("ERROR");
+    expect(prisma.gitLabRestCacheEntry.deleteMany).toHaveBeenCalledWith({
+      where: {
+        OR: [
+          { endpoint: { contains: "/projects/42/" } },
+          {
+            operation: {
+              in: ["GitLabMergeRequests", "GitLabCommentMergeRequests"],
+            },
+            endpoint: { contains: "/api/v4/merge_requests?" },
+          },
+        ],
+      },
+    });
 
     await expect(service.handleWebhook({ rawBody, headers })).resolves.toEqual({
       duplicate: false,

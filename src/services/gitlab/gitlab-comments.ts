@@ -14,6 +14,7 @@ export type GitLabCommentsInput = {
   discussionId?: string | null;
   after?: string | null;
   first?: number | null;
+  refresh?: boolean | null;
 };
 export type CommentSource = {
   scope: "created_by_me" | "assigned_to_me" | "reviews_for_me" | "all";
@@ -31,6 +32,7 @@ type Pending = {
 };
 type Continuation = {
   identity: string;
+  refresh: boolean;
   sources: CommentSource[];
   sourceTurn: number;
   pending: Pending[];
@@ -38,15 +40,24 @@ type Continuation = {
   warnings: string[];
 };
 export type CommentReader = {
-  discover: (source: CommentSource) => Promise<Page<GitLabMergeRequestView>>;
-  request: (projectId: string, iid: number) => Promise<GitLabMergeRequestView>;
+  discover: (
+    source: CommentSource,
+    refresh: boolean,
+  ) => Promise<Page<GitLabMergeRequestView>>;
+  request: (
+    projectId: string,
+    iid: number,
+    refresh: boolean,
+  ) => Promise<GitLabMergeRequestView>;
   discussions: (
     mr: GitLabMergeRequestView,
     page: number,
+    refresh: boolean,
   ) => Promise<Page<GitLabDiscussionView>>;
   discussion: (
     mr: GitLabMergeRequestView,
     id: string,
+    refresh: boolean,
   ) => Promise<GitLabDiscussionView>;
   enrich: (mr: GitLabMergeRequestView) => Promise<GitLabMergeRequestView>;
 };
@@ -97,9 +108,11 @@ export class GitLabCommentsFeed {
         );
       }
       state = structuredClone(saved.state);
+      state.refresh ||= input.refresh === true;
     } else {
       state = {
         identity,
+        refresh: input.refresh === true,
         sources:
           input.iid != null
             ? []
@@ -125,7 +138,11 @@ export class GitLabCommentsFeed {
         warnings: [],
       };
       if (input.iid != null) {
-        const mr = await read.request(input.projectId!, input.iid);
+        const mr = await read.request(
+          input.projectId!,
+          input.iid,
+          state.refresh,
+        );
         state.pending.push({ mr, page: 1, offset: 0, seen: [], failed: false });
         state.seenRequests.push(requestKey(mr));
       }
@@ -154,7 +171,7 @@ export class GitLabCommentsFeed {
       }
       const pages = await mapIntegrationRequests(sources, async (source) => {
         try {
-          return { source, page: await read.discover(source) };
+          return { source, page: await read.discover(source, state.refresh) };
         } catch {
           return { source, page: null };
         }
@@ -206,10 +223,16 @@ export class GitLabCommentsFeed {
       try {
         const page = input.discussionId
           ? {
-              items: [await read.discussion(pending.mr, input.discussionId)],
+              items: [
+                await read.discussion(
+                  pending.mr,
+                  input.discussionId,
+                  state.refresh,
+                ),
+              ],
               nextPage: null,
             }
-          : await read.discussions(pending.mr, pending.page);
+          : await read.discussions(pending.mr, pending.page, state.refresh);
         return {
           pending,
           page,

@@ -134,6 +134,56 @@ afterEach(() => {
 });
 
 describe("GitLab Comments", () => {
+  test("explicit refresh fetches newly posted general comments instead of reusing an empty cached result", async () => {
+    const newComments = [
+      thread("first", [
+        note("first", { body: "Test comment", resolvable: false }),
+      ]),
+      thread("second", [
+        note("second", { body: "Test new comment", resolvable: false }),
+      ]),
+    ];
+    request.mockImplementation(async (query, variables) => {
+      if (query.includes("GitLabCommentsConfiguration"))
+        return { gitlabSettings: { configured: true } } as never;
+      if (query.includes("query GitLabComments("))
+        return {
+          gitlabComments: commentsPage({
+            threads: variables?.refresh ? newComments : [],
+          }),
+        } as never;
+      throw new Error(`Unexpected request ${query}`);
+    });
+    render(<GitLabCommentsPage initialProjectId="42" initialIid={17} />);
+    await waitFor(() => {
+      expect(request).toHaveBeenCalledWith(
+        expect.stringContaining("query GitLabComments("),
+        expect.objectContaining({ projectId: "42", iid: 17, after: null }),
+        expect.anything(),
+      );
+      expect(
+        screen
+          .getByRole("button", { name: "Refresh" })
+          .hasAttribute("disabled"),
+      ).toBe(false);
+    });
+    expect(screen.queryByText("Test comment")).toBeNull();
+    expect(screen.queryByText("Test new comment")).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Refresh" }));
+    await screen.findByText("Test comment");
+    expect(screen.getByText("Test new comment")).toBeDefined();
+    expect(request).toHaveBeenLastCalledWith(
+      expect.stringContaining("refresh: $refresh"),
+      expect.objectContaining({
+        projectId: "42",
+        iid: 17,
+        after: null,
+        refresh: true,
+      }),
+      expect.anything(),
+    );
+  });
+
   test("opens linked discussions as conversations and preserves the saved table preference", async () => {
     window.localStorage.setItem("gitlab-comments-layout", "table");
     mockPage(commentsPage({ threads: [other] }));

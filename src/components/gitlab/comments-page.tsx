@@ -68,8 +68,8 @@ const ALL_REQUESTS = "__all_merge_requests__";
 const USER_FIELDS = "id username name avatarUrl webUrl";
 const REQUEST_FIELDS = `id projectId iid projectPath title webUrl state draft sourceBranch targetBranch sha worktreeId worktreeHighlightColor author { ${USER_FIELDS} }`;
 const DISCUSSION_FIELDS = `id individualNote notes { id body createdAt updatedAt system resolvable resolved webUrl filePath oldLine newLine author { ${USER_FIELDS} } resolvedBy { ${USER_FIELDS} } }`;
-const COMMENTS_QUERY = `query GitLabComments($projectId: ID, $iid: Int, $discussionId: ID, $after: String, $first: Int!) {
-  gitlabComments(projectId: $projectId, iid: $iid, discussionId: $discussionId, after: $after, first: $first) {
+const COMMENTS_QUERY = `query GitLabComments($projectId: ID, $iid: Int, $discussionId: ID, $after: String, $first: Int!, $refresh: Boolean) {
+  gitlabComments(projectId: $projectId, iid: $iid, discussionId: $discussionId, after: $after, first: $first, refresh: $refresh) {
     viewerId viewerUsername endCursor hasNextPage partial warnings
     mergeRequests { ${REQUEST_FIELDS} }
     threads { id mergeRequest { ${REQUEST_FIELDS} } discussion { ${DISCUSSION_FIELDS} } }
@@ -148,6 +148,7 @@ export function GitLabCommentsPage({
   const mounted = useRef(true);
   const cursor = useRef<string | null>(null);
   const reloadAfterAction = useRef(false);
+  const refreshAfterAction = useRef(false);
   const initialScope = JSON.stringify([
     initialProjectId,
     initialIid,
@@ -205,13 +206,16 @@ export function GitLabCommentsPage({
   }, [cancelLoad, configurationAttempt]);
 
   const load = useCallback(
-    async (append = false) => {
+    async (append = false, refresh = false) => {
       if (!configured) return;
       if (inFlight.current.size > 0) {
         reloadAfterAction.current = true;
+        refreshAfterAction.current ||= refresh;
         return;
       }
       if (append && controller.current) return;
+      refresh ||= refreshAfterAction.current;
+      refreshAfterAction.current = false;
       controller.current?.abort();
       const current = new AbortController();
       controller.current = current;
@@ -228,6 +232,7 @@ export function GitLabCommentsPage({
             discussionId: selection?.discussionId ?? null,
             after: append ? cursor.current : null,
             first: 25,
+            ...(refresh ? { refresh: true } : {}),
           },
           { signal: current.signal },
         );
@@ -471,7 +476,7 @@ export function GitLabCommentsPage({
             onClick={() =>
               configured === null
                 ? setConfigurationAttempt((value) => value + 1)
-                : void load()
+                : void load(false, true)
             }
             variant="outline"
           >

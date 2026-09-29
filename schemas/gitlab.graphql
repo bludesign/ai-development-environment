@@ -925,6 +925,8 @@ extend type Query {
     after: String
     "Maximum human discussions to return, from one to twenty-five."
     first: Int = 25
+    "Bypass cached provider responses for this feed and its continuation pages."
+    refresh: Boolean = false
   ): GitLabCommentPage!
   "Gitlab merge requests for Query."
   gitlabMergeRequests(

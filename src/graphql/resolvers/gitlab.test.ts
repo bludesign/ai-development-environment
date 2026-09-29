@@ -316,6 +316,7 @@ describe("GitLab discovery and comments contracts", () => {
       discussionId: "thread",
       after: "cursor",
       first: 12,
+      refresh: true,
     };
     await expect(
       resolvers.Query.gitlabComments({}, args, context(null)),

@@ -530,6 +530,7 @@ export function GitLabMergeRequestsPage({
           <Button
             disabled={busy || requiresProject}
             onClick={() => void load()}
+            size="lg"
             type="button"
             variant="outline"
           >

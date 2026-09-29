@@ -79,6 +79,25 @@ type QueryValue = string | number | boolean | null | undefined;
 type Query = Record<string, QueryValue | QueryValue[]>;
 type WebhookSecrets = Record<string, string>;
 
+function projectCacheInvalidation(projectId: string) {
+  return {
+    OR: [
+      {
+        endpoint: {
+          contains: `/projects/${encodeURIComponent(projectId)}/`,
+        },
+      },
+      {
+        // Global lists can contain this project's newly created or updated MRs.
+        operation: {
+          in: ["GitLabMergeRequests", "GitLabCommentMergeRequests"],
+        },
+        endpoint: { contains: "/api/v4/merge_requests?" },
+      },
+    ],
+  };
+}
+
 type RateLimit = {
   limit: number | null;
   remaining: number | null;
@@ -1415,11 +1434,7 @@ export class GitLabService {
     await prisma.gitLabRestCacheEntry.deleteMany(
       projectId
         ? {
-            where: {
-              endpoint: {
-                contains: `/projects/${encodeURIComponent(projectId)}/`,
-              },
-            },
+            where: projectCacheInvalidation(projectId),
           }
         : undefined,
     );
@@ -1818,7 +1833,7 @@ export class GitLabService {
           .map((project) => project.id),
       },
       {
-        discover: async (source) => {
+        discover: async (source, refresh) => {
           const response = await this.get<RawGitLabMergeRequest[]>({
             path: source.projectId
               ? `/projects/${encodeURIComponent(source.projectId)}/merge_requests`
@@ -1826,6 +1841,7 @@ export class GitLabService {
             operation: "GitLabCommentMergeRequests",
             source: "COMMENTS_PAGE",
             allowStaleOnError: false,
+            force: refresh,
             query: {
               scope: source.scope,
               state: "opened",
@@ -1840,7 +1856,7 @@ export class GitLabService {
             nextPage: pageValue(response.headers.get("x-next-page")),
           };
         },
-        request: async (projectId, iid) =>
+        request: async (projectId, iid, refresh) =>
           projectPath(
             mapMergeRequest(
               (
@@ -1849,17 +1865,19 @@ export class GitLabService {
                   operation: "GitLabMergeRequest",
                   source: "COMMENTS_PAGE",
                   allowStaleOnError: false,
+                  force: refresh,
                   query: { include_rebase_in_progress: true },
                 })
               ).data,
             ),
           ),
-        discussions: async (mr, page) => {
+        discussions: async (mr, page, refresh) => {
           const response = await this.get<RawGitLabDiscussion[]>({
             path: `/projects/${encodeURIComponent(mr.projectId)}/merge_requests/${mr.iid}/discussions`,
             operation: "GitLabCommentDiscussions",
             source: "COMMENTS_PAGE",
             allowStaleOnError: false,
+            force: refresh,
             query: { page, per_page: 50 },
           });
           return {
@@ -1867,7 +1885,7 @@ export class GitLabService {
             nextPage: pageValue(response.headers.get("x-next-page")),
           };
         },
-        discussion: async (mr, id) =>
+        discussion: async (mr, id, refresh) =>
           mapGitLabDiscussion(
             (
               await this.get<RawGitLabDiscussion>({
@@ -1875,6 +1893,7 @@ export class GitLabService {
                 operation: "GitLabDiscussion",
                 source: "COMMENTS_PAGE",
                 allowStaleOnError: false,
+                force: refresh,
               })
             ).data,
           ),
@@ -3410,11 +3429,7 @@ export class GitLabService {
           data: { webhookLastReceivedAt: new Date(), webhookError: null },
         }),
         prisma.gitLabRestCacheEntry.deleteMany({
-          where: {
-            endpoint: {
-              contains: `/projects/${encodeURIComponent(projectId)}/`,
-            },
-          },
+          where: projectCacheInvalidation(projectId),
         }),
       ]);
       publishIntegrationConfiguration("gitlab");
