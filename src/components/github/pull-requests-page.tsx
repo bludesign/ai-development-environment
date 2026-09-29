@@ -44,6 +44,7 @@ import { JiraTicketDrawer } from "@/components/jira/ticket-drawer";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/checkbox";
 import { Card } from "@/components/ui/card";
 import { DateTime } from "@/components/common/date-time";
 import {
@@ -101,6 +102,7 @@ import {
   worktreeHighlightInsetAccentClasses,
 } from "@/lib/worktree-highlight";
 import type {
+  GitHubMergeMethod,
   GitHubPullRequestPage,
   GitHubPullRequestScope,
   GitHubPullRequestStateFilter,
@@ -993,6 +995,17 @@ function GitHubRepositoryManager({
   const [defaultJiraKeyRegex, setDefaultJiraKeyRegex] = useState(
     settings?.defaultJiraKeyRegex ?? "",
   );
+  const [defaultMergeMethod, setDefaultMergeMethod] =
+    useState<GitHubMergeMethod>(settings?.defaultMergeMethod ?? "SQUASH");
+  const [emptyMergeCommitDescription, setEmptyMergeCommitDescription] =
+    useState(settings?.emptyMergeCommitDescription ?? false);
+  const [defaultMoveTicketToDone, setDefaultMoveTicketToDone] = useState(
+    settings?.defaultMoveTicketToDone ?? false,
+  );
+  const [defaultDeleteWorktree, setDefaultDeleteWorktree] = useState(
+    settings?.defaultDeleteWorktree ?? false,
+  );
+
   const [busy, setBusy] = useState(false);
   const [browseLoading, setBrowseLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -1079,10 +1092,40 @@ function GitHubRepositoryManager({
           $input: SaveGitHubSettingsInput!
         ) {
           saveGitHubSettings(input: $input) {
-            tokenConfigured defaultJiraKeyRegex updatedAt
+            tokenConfigured defaultJiraKeyRegex defaultMergeMethod emptyMergeCommitDescription defaultMoveTicketToDone defaultDeleteWorktree updatedAt
           }
         }`,
         { input: { defaultJiraKeyRegex } },
+      );
+      onSettingsChanged(data.saveGitHubSettings);
+      setError(null);
+    } catch (value) {
+      setError(value instanceof Error ? value.message : String(value));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const saveMergeDefaults = async () => {
+    setBusy(true);
+    try {
+      const data = await controlPlaneRequest<{
+        saveGitHubSettings: GitHubSettingsView;
+      }>(
+        `mutation SaveGitHubMergeDefaults($input: SaveGitHubSettingsInput!) {
+          saveGitHubSettings(input: $input) {
+            tokenConfigured defaultJiraKeyRegex defaultMergeMethod emptyMergeCommitDescription
+            defaultMoveTicketToDone defaultDeleteWorktree updatedAt
+          }
+        }`,
+        {
+          input: {
+            defaultMergeMethod,
+            emptyMergeCommitDescription,
+            defaultMoveTicketToDone,
+            defaultDeleteWorktree,
+          },
+        },
       );
       onSettingsChanged(data.saveGitHubSettings);
       setError(null);
@@ -1123,6 +1166,92 @@ function GitHubRepositoryManager({
         ) : (
           <div className="grid min-w-0 gap-6 md:grid-cols-2">
             <section className="min-w-0 space-y-3">
+              <Item className="block space-y-3 p-3" variant="outline">
+                <h3 className="font-medium">{t("mergeDefaults")}</h3>
+                <div className="space-y-1.5">
+                  <Label htmlFor="default-merge-method">
+                    {t("defaultMergeMethod")}
+                  </Label>
+                  <Select
+                    disabled={busy}
+                    value={defaultMergeMethod}
+                    onValueChange={(value) =>
+                      setDefaultMergeMethod(value as GitHubMergeMethod)
+                    }
+                  >
+                    <SelectTrigger id="default-merge-method">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {(["SQUASH", "MERGE", "REBASE"] as const).map(
+                        (method) => (
+                          <SelectItem key={method} value={method}>
+                            {t(`mergeTypes.${method}`)}
+                          </SelectItem>
+                        ),
+                      )}
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="space-y-1.5">
+                  <Label htmlFor="default-merge-description">
+                    {t("defaultCommitDescription")}
+                  </Label>
+                  <Select
+                    disabled={busy}
+                    value={emptyMergeCommitDescription ? "empty" : "contents"}
+                    onValueChange={(value) =>
+                      setEmptyMergeCommitDescription(value === "empty")
+                    }
+                  >
+                    <SelectTrigger id="default-merge-description">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="contents">
+                        {t("usePullRequestContents")}
+                      </SelectItem>
+                      <SelectItem value="empty">
+                        {t("emptyDescription")}
+                      </SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="flex items-start gap-2">
+                  <Checkbox
+                    id="default-move-jira"
+                    disabled={busy}
+                    checked={defaultMoveTicketToDone}
+                    onCheckedChange={(value) =>
+                      setDefaultMoveTicketToDone(value === true)
+                    }
+                  />
+                  <Label htmlFor="default-move-jira">
+                    {t("defaultMoveTicketToDone")}
+                  </Label>
+                </div>
+                <div className="flex items-start gap-2">
+                  <Checkbox
+                    id="default-delete-worktree"
+                    disabled={busy}
+                    checked={defaultDeleteWorktree}
+                    onCheckedChange={(value) =>
+                      setDefaultDeleteWorktree(value === true)
+                    }
+                  />
+                  <Label htmlFor="default-delete-worktree">
+                    {t("defaultDeleteWorktree")}
+                  </Label>
+                </div>
+                <Button
+                  disabled={busy}
+                  onClick={() => void saveMergeDefaults()}
+                  type="button"
+                >
+                  {busy ? <Spinner /> : <Save />}
+                  {t("saveMergeDefaults")}
+                </Button>
+              </Item>
               <h3 className="font-medium">{t("managedRepositories")}</h3>
               <Item className="block space-y-2 p-3" variant="outline">
                 <Label htmlFor="default-github-jira-regex">

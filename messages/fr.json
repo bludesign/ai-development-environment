@@ -2510,7 +2510,7 @@
     "loadingMore": "Chargement…",
     "retryLoad": "Réessayer",
     "empty": "Aucune demande de tirage",
-    "emptyDescription": "Aucune demande de tirage ne correspond actuellement à cette vue.",
+    "emptyDescription": "Vide",
     "repository": "Dépôt",
     "number": "Numéro",
     "pullRequest": "Demande de tirage",
@@ -2612,7 +2612,19 @@
     "removeRepository": "Supprimer le dépôt",
     "confirmRemoveRepository": "Supprimer ce dépôt géré ?",
     "confirmRemoveRepositoryDescription": "Son onglet de demandes et sa configuration d’expression Jira seront supprimés.",
-    "saveRegex": "Enregistrer l’expression Jira"
+    "saveRegex": "Enregistrer l’expression Jira",
+    "mergeDefaults": "Valeurs par défaut de fusion",
+    "defaultMergeMethod": "Méthode de fusion par défaut",
+    "defaultCommitDescription": "Description du commit par défaut",
+    "usePullRequestContents": "Utiliser le contenu de la pull request",
+    "defaultMoveTicketToDone": "Terminer les tickets Jira liés par défaut",
+    "defaultDeleteWorktree": "Supprimer les worktrees admissibles après fusion par défaut",
+    "saveMergeDefaults": "Enregistrer les valeurs de fusion",
+    "deleteWorktreeAfterMerge": "Supprimer le worktree après fusion",
+    "moveTicketToDoneAfterMerge": "Déplacer {ticket} vers le statut terminé configuré du projet",
+    "jiraDoneStatusRequired": "Configurez le statut terminé de ce projet Jira avant d’utiliser cette option.",
+    "mergedFollowUpFailed": "Pull request fusionnée, mais une action ultérieure a échoué.",
+    "closeMergeResult": "Fermer"
   },
   "githubComments": {
     "title": "Commentaires",
@@ -3326,7 +3338,8 @@
     "copyShortCommitHash": "Copier le hash abrégé du commit",
     "copyFullCommitHash": "Copier le hash complet du commit",
     "copyCommitMessage": "Copier le message du commit",
-    "copyChangeFailed": "Impossible de copier dans le presse-papiers."
+    "copyChangeFailed": "Impossible de copier dans le presse-papiers.",
+    "openPullRequests": "Pull requests ouvertes"
   },
   "worktreeDetail": {
     "loading": "Chargement des détails du worktree…",

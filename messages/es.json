@@ -2510,7 +2510,7 @@
     "loadingMore": "Cargando más…",
     "retryLoad": "Intentar de nuevo",
     "empty": "No hay solicitudes de extracción",
-    "emptyDescription": "Actualmente no hay solicitudes de extracción que coincidan con esta vista.",
+    "emptyDescription": "Vacía",
     "repository": "Repositorio",
     "number": "Número",
     "pullRequest": "Solicitud de extracción",
@@ -2612,7 +2612,19 @@
     "removeRepository": "Eliminar repositorio",
     "confirmRemoveRepository": "¿Eliminar este repositorio gestionado?",
     "confirmRemoveRepositoryDescription": "Se eliminarán su pestaña de solicitudes y su configuración de expresión regular de Jira.",
-    "saveRegex": "Guardar expresión de Jira"
+    "saveRegex": "Guardar expresión de Jira",
+    "mergeDefaults": "Valores predeterminados de fusión",
+    "defaultMergeMethod": "Método de fusión predeterminado",
+    "defaultCommitDescription": "Descripción del commit predeterminada",
+    "usePullRequestContents": "Usar el contenido de la solicitud de incorporación",
+    "defaultMoveTicketToDone": "Marcar los tickets de Jira vinculados como finalizados de forma predeterminada",
+    "defaultDeleteWorktree": "Eliminar los worktrees aptos después de fusionar de forma predeterminada",
+    "saveMergeDefaults": "Guardar valores de fusión",
+    "deleteWorktreeAfterMerge": "Eliminar worktree después de fusionar",
+    "moveTicketToDoneAfterMerge": "Mover {ticket} al estado de finalización configurado del proyecto",
+    "jiraDoneStatusRequired": "Configura el estado de finalización de este proyecto de Jira antes de usar esta opción.",
+    "mergedFollowUpFailed": "Solicitud fusionada, pero falló una acción posterior.",
+    "closeMergeResult": "Cerrar"
   },
   "githubComments": {
     "title": "Comentarios",
@@ -3326,7 +3338,8 @@
     "copyShortCommitHash": "Copiar hash abreviado del commit",
     "copyFullCommitHash": "Copiar hash completo del commit",
     "copyCommitMessage": "Copiar mensaje del commit",
-    "copyChangeFailed": "No se pudo copiar al portapapeles."
+    "copyChangeFailed": "No se pudo copiar al portapapeles.",
+    "openPullRequests": "Solicitudes de incorporación abiertas"
   },
   "worktreeDetail": {
     "loading": "Cargando detalles del worktree…",

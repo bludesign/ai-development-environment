@@ -2510,7 +2510,7 @@
     "loadingMore": "Weitere werden geladen…",
     "retryLoad": "Erneut versuchen",
     "empty": "Keine Pull Requests",
-    "emptyDescription": "Derzeit entsprechen keine Pull Requests dieser Ansicht.",
+    "emptyDescription": "Leer",
     "repository": "Repository",
     "number": "Nummer",
     "pullRequest": "Pull Request",
@@ -2612,7 +2612,19 @@
     "removeRepository": "Repository entfernen",
     "confirmRemoveRepository": "Dieses verwaltete Repository entfernen?",
     "confirmRemoveRepositoryDescription": "Der Pull-Request-Tab und die Jira-Ausdruckskonfiguration werden entfernt.",
-    "saveRegex": "Jira-Ausdruck speichern"
+    "saveRegex": "Jira-Ausdruck speichern",
+    "mergeDefaults": "Merge-Standardeinstellungen",
+    "defaultMergeMethod": "Standard-Merge-Methode",
+    "defaultCommitDescription": "Standard-Commit-Beschreibung",
+    "usePullRequestContents": "Pull-Request-Inhalt verwenden",
+    "defaultMoveTicketToDone": "Verknüpfte Jira-Tickets standardmäßig abschließen",
+    "defaultDeleteWorktree": "Geeignete Worktrees nach dem Merge standardmäßig löschen",
+    "saveMergeDefaults": "Merge-Standardeinstellungen speichern",
+    "deleteWorktreeAfterMerge": "Worktree nach dem Merge löschen",
+    "moveTicketToDoneAfterMerge": "{ticket} in den konfigurierten Abschlussstatus des Projekts verschieben",
+    "jiraDoneStatusRequired": "Konfigurieren Sie zuerst den Abschlussstatus dieses Jira-Projekts.",
+    "mergedFollowUpFailed": "Pull Request zusammengeführt, aber eine Folgeaktion ist fehlgeschlagen.",
+    "closeMergeResult": "Schließen"
   },
   "githubComments": {
     "title": "Kommentare",
@@ -3326,7 +3338,8 @@
     "copyShortCommitHash": "Gekürzten Commit-Hash kopieren",
     "copyFullCommitHash": "Vollständigen Commit-Hash kopieren",
     "copyCommitMessage": "Commit-Nachricht kopieren",
-    "copyChangeFailed": "Kopieren in die Zwischenablage fehlgeschlagen."
+    "copyChangeFailed": "Kopieren in die Zwischenablage fehlgeschlagen.",
+    "openPullRequests": "Offene Pull Requests"
   },
   "worktreeDetail": {
     "loading": "Worktree-Details werden geladen…",

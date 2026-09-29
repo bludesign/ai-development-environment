@@ -1711,6 +1711,12 @@ export class GitHubService {
         CREDENTIALS.githubPersonalAccessToken,
       ),
       defaultJiraKeyRegex: settings.defaultJiraKeyRegex,
+      defaultMergeMethod: (settings.defaultMergeMethod ??
+        "SQUASH") as GitHubMergeMethod,
+      emptyMergeCommitDescription:
+        settings.emptyMergeCommitDescription ?? false,
+      defaultMoveTicketToDone: settings.defaultMoveTicketToDone ?? false,
+      defaultDeleteWorktree: settings.defaultDeleteWorktree ?? false,
       actionsNotificationPollIntervalSeconds:
         settings.actionsNotificationPollIntervalSeconds,
       cacheTtlSeconds: settings.cacheTtlSeconds,
@@ -1719,6 +1725,10 @@ export class GitHubService {
   }
 
   async saveSettings(input: {
+    defaultMergeMethod?: GitHubMergeMethod | null;
+    emptyMergeCommitDescription?: boolean | null;
+    defaultMoveTicketToDone?: boolean | null;
+    defaultDeleteWorktree?: boolean | null;
     apiToken?: string | null;
     defaultJiraKeyRegex?: string | null;
     actionsNotificationPollIntervalSeconds?: number | null;
@@ -1755,7 +1765,23 @@ export class GitHubService {
         `Actions notification poll interval must be an integer from ${MIN_ACTIONS_NOTIFICATION_POLL_INTERVAL_SECONDS} to ${MAX_ACTIONS_NOTIFICATION_POLL_INTERVAL_SECONDS} seconds`,
       );
     }
+    const defaultMergeMethod =
+      input.defaultMergeMethod ?? existing?.defaultMergeMethod ?? "SQUASH";
+    if (!["SQUASH", "MERGE", "REBASE"].includes(defaultMergeMethod)) {
+      throw new Error("Invalid default merge method");
+    }
     const settingsData = {
+      defaultMergeMethod,
+      emptyMergeCommitDescription:
+        input.emptyMergeCommitDescription ??
+        existing?.emptyMergeCommitDescription ??
+        false,
+      defaultMoveTicketToDone:
+        input.defaultMoveTicketToDone ??
+        existing?.defaultMoveTicketToDone ??
+        false,
+      defaultDeleteWorktree:
+        input.defaultDeleteWorktree ?? existing?.defaultDeleteWorktree ?? false,
       defaultJiraKeyRegex,
       actionsNotificationPollIntervalSeconds,
     };
@@ -5487,12 +5513,30 @@ export class GitHubService {
       (state.availableMethods.length === 0
         ? "This repository does not have an available merge method."
         : null);
+    const settings = await this.getSettings();
     return {
+      defaultMethod: state.availableMethods.includes(
+        settings.defaultMergeMethod,
+      )
+        ? settings.defaultMergeMethod
+        : (state.availableMethods[0] ?? null),
+      defaultMoveTicketToDone: settings.defaultMoveTicketToDone,
+      defaultDeleteWorktree: settings.defaultDeleteWorktree,
+      headRefName: state.pullRequest.headRefName,
+      headRepositoryNameWithOwner:
+        state.pullRequest.headRepository?.nameWithOwner ?? null,
+      worktreeId: null,
+      worktreeFolder: null,
+      canDeleteWorktree: false,
+      ticketKey: null,
+      ticketDoneStatusConfigured: false,
       availableMethods: state.availableMethods,
       commitEmails: commitEmailOptions.emails,
       defaultCommitEmail: commitEmailOptions.primaryEmail,
       defaultCommitHeadline: state.pullRequest.title,
-      defaultCommitBody: state.pullRequest.body,
+      defaultCommitBody: settings.emptyMergeCommitDescription
+        ? ""
+        : state.pullRequest.body,
       canMerge: blockedReason === null,
       canEnableAutoMerge:
         state.pullRequest.state === "OPEN" &&

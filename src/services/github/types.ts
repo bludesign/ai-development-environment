@@ -40,6 +40,10 @@ export type GitHubPipelineObservationSource =
   "LEGACY" | "GRAPHQL" | "REST" | "WEBHOOK" | "MUTATION";
 
 export type GitHubSettingsView = {
+  defaultMergeMethod: GitHubMergeMethod;
+  emptyMergeCommitDescription: boolean;
+  defaultMoveTicketToDone: boolean;
+  defaultDeleteWorktree: boolean;
   tokenConfigured: boolean;
   defaultJiraKeyRegex: string;
   actionsNotificationPollIntervalSeconds: number;
@@ -604,6 +608,16 @@ export type GitHubPullRequestDetail = GitHubPullRequestView & {
 };
 
 export type GitHubPullRequestMergeOptions = {
+  defaultMethod: GitHubMergeMethod | null;
+  defaultMoveTicketToDone: boolean;
+  defaultDeleteWorktree: boolean;
+  headRefName: string;
+  headRepositoryNameWithOwner: string | null;
+  worktreeId: string | null;
+  worktreeFolder: string | null;
+  canDeleteWorktree: boolean;
+  ticketKey: string | null;
+  ticketDoneStatusConfigured: boolean;
   availableMethods: GitHubMergeMethod[];
   commitEmails: string[];
   defaultCommitEmail: string | null;
@@ -633,7 +647,22 @@ export type GitHubPullRequestAutomationState = {
   viewerCanDisableAutoMerge: boolean;
 };
 
+export type GitHubPullRequestMergeInput = {
+  owner: string;
+  name: string;
+  number: number;
+  method: GitHubMergeMethod;
+  commitHeadline: string;
+  commitBody: string;
+  authorEmail?: string | null;
+  worktreeId?: string | null;
+  moveTicketToDone?: boolean;
+  deleteWorktree?: boolean;
+};
+
 export type GitHubPullRequestMergeResult = {
+  postMergeError?: string | null;
+  ticketKey?: string | null;
   id: string;
   state: "OPEN" | "CLOSED" | "MERGED";
   url: string;

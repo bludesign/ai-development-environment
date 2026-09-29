@@ -7,6 +7,7 @@ import {
 
 import type { GraphQLContext } from "@/services/graphql-server/graphql-server.service";
 import type { GitHubService } from "@/services/github";
+import type { WorktreeAutomationService } from "@/services/worktrees";
 import type { WorktreesService } from "@/services/worktrees";
 
 import { createGitHubResolvers } from "./github";
@@ -59,7 +60,11 @@ describe("GitHub resolvers", () => {
       webhooksEnabled: vi.fn(),
       webhookDeliveries: vi.fn(),
     } as unknown as GitHubService;
-    const resolvers = createGitHubResolvers(service, worktreesService());
+    const resolvers = createGitHubResolvers(
+      service,
+      worktreesService(),
+      service as unknown as WorktreeAutomationService,
+    );
 
     expect(() =>
       resolvers.Query.githubSettings({}, {}, context("agent-1")),
@@ -143,7 +148,11 @@ describe("GitHub resolvers", () => {
       webhookDeliveries: vi.fn().mockResolvedValue(page),
       clearWebhookDeliveries: vi.fn().mockResolvedValue(true),
     } as unknown as GitHubService;
-    const resolvers = createGitHubResolvers(service, worktreesService());
+    const resolvers = createGitHubResolvers(
+      service,
+      worktreesService(),
+      service as unknown as WorktreeAutomationService,
+    );
 
     await expect(
       resolvers.Query.githubWebhooksEnabled({}, {}, context(null)),
@@ -178,7 +187,11 @@ describe("GitHub resolvers", () => {
       saveCacheTtlOverride: vi.fn().mockResolvedValue(override),
       deleteCacheTtlOverride: vi.fn().mockResolvedValue(true),
     } as unknown as GitHubService;
-    const resolvers = createGitHubResolvers(service, worktreesService());
+    const resolvers = createGitHubResolvers(
+      service,
+      worktreesService(),
+      service as unknown as WorktreeAutomationService,
+    );
 
     await expect(
       resolvers.Query.githubCacheTtlOverrides({}, {}, context(null)),
@@ -237,7 +250,11 @@ describe("GitHub resolvers", () => {
         .mockResolvedValue({ id: "thread-1", isResolved: true }),
     } as unknown as GitHubService;
     const worktrees = worktreesService();
-    const resolvers = createGitHubResolvers(service, worktrees);
+    const resolvers = createGitHubResolvers(
+      service,
+      worktrees,
+      service as unknown as WorktreeAutomationService,
+    );
     const input = { apiToken: "secret-token" };
     const appInput = {
       appId: "123",
@@ -427,6 +444,7 @@ describe("GitHub resolvers", () => {
       "widgets",
       17,
       "PULL_REQUEST_DETAILS",
+      undefined,
     );
     expect(service.mergePullRequest).toHaveBeenCalledWith(
       mergeInput,
@@ -473,7 +491,11 @@ describe("GitHub resolvers", () => {
     const service = {
       pullRequests: vi.fn().mockResolvedValue({ items: [], truncated: false }),
     } as unknown as GitHubService;
-    const resolvers = createGitHubResolvers(service, worktreesService());
+    const resolvers = createGitHubResolvers(
+      service,
+      worktreesService(),
+      service as unknown as WorktreeAutomationService,
+    );
     const info = resolveInfo(`
       query PullRequests($scope: GitHubPullRequestScope!) {
         githubPullRequests(scope: $scope) {
@@ -509,7 +531,11 @@ describe("GitHub resolvers", () => {
     const service = {
       actionsWorkflowRunAttempt: vi.fn().mockResolvedValue({ jobs: [] }),
     } as unknown as GitHubService;
-    const resolvers = createGitHubResolvers(service, worktreesService());
+    const resolvers = createGitHubResolvers(
+      service,
+      worktreesService(),
+      service as unknown as WorktreeAutomationService,
+    );
     const args = {
       source: "ACTIONS_PAGE" as const,
       repositoryId: "repository-1",
@@ -577,7 +603,11 @@ describe("GitHub resolvers", () => {
       subscribe: vi.fn().mockReturnValue(iterator),
     };
     const service = { pipelineStatus } as unknown as GitHubService;
-    const resolvers = createGitHubResolvers(service, worktreesService());
+    const resolvers = createGitHubResolvers(
+      service,
+      worktreesService(),
+      service as unknown as WorktreeAutomationService,
+    );
     const snapshotKeys = [
       { repositoryGithubId: "repository-1", headSha: "sha-1" },
     ];

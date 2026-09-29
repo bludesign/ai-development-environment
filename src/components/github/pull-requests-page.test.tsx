@@ -737,6 +737,85 @@ describe("PullRequestsPage", () => {
     expect(screen.getByRole("menuitem", { name: "Merge" })).toBeDefined();
   });
 
+  test("saves shared merge defaults and reloads them in Manage", async () => {
+    configureRequests();
+    const original = requestMock.getMockImplementation()!;
+    requestMock.mockImplementation(async (query, variables, ...rest) => {
+      if (query.includes("SaveGitHubMergeDefaults"))
+        return {
+          saveGitHubSettings: {
+            tokenConfigured: true,
+            defaultJiraKeyRegex: "APP",
+            updatedAt: new Date(1).toISOString(),
+            ...(variables?.input as object),
+          },
+        } as never;
+      return original(query, variables, ...rest);
+    });
+    render(<PullRequestsPage />);
+    await screen.findByRole("tab", { name: "Mine" });
+    fireEvent.click(screen.getByRole("button", { name: "Manage" }));
+    await screen.findByText("acme/platform");
+    expect(
+      screen
+        .getByRole("checkbox", {
+          name: "Delete eligible worktrees after merge by default",
+        })
+        .getAttribute("aria-checked"),
+    ).toBe("false");
+    fireEvent.pointerDown(
+      screen.getByRole("combobox", { name: "Default merge method" }),
+      { button: 0, ctrlKey: false, pointerType: "mouse" },
+    );
+    fireEvent.click(
+      await screen.findByRole("option", { name: "Rebase and merge" }),
+    );
+    fireEvent.pointerDown(
+      screen.getByRole("combobox", { name: "Default commit description" }),
+      { button: 0, ctrlKey: false, pointerType: "mouse" },
+    );
+    fireEvent.click(await screen.findByRole("option", { name: "Empty" }));
+    fireEvent.click(
+      screen.getByRole("checkbox", {
+        name: "Move linked Jira tickets to done by default",
+      }),
+    );
+    fireEvent.click(
+      screen.getByRole("checkbox", {
+        name: "Delete eligible worktrees after merge by default",
+      }),
+    );
+    fireEvent.click(
+      screen.getByRole("button", { name: "Save merge defaults" }),
+    );
+    await waitFor(() =>
+      expect(requestMock).toHaveBeenCalledWith(
+        expect.stringContaining("SaveGitHubMergeDefaults"),
+        {
+          input: {
+            defaultMergeMethod: "REBASE",
+            emptyMergeCommitDescription: true,
+            defaultMoveTicketToDone: true,
+            defaultDeleteWorktree: true,
+          },
+        },
+      ),
+    );
+    await waitFor(() =>
+      expect(
+        screen.getByRole("combobox", { name: "Default merge method" })
+          .textContent,
+      ).toContain("Rebase and merge"),
+    );
+    expect(
+      screen
+        .getByRole("checkbox", {
+          name: "Delete eligible worktrees after merge by default",
+        })
+        .getAttribute("aria-checked"),
+    ).toBe("true");
+  });
+
   test("browses repositories and supports exact owner/name entry", async () => {
     configureRequests();
     render(<PullRequestsPage />);

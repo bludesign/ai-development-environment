@@ -4,6 +4,10 @@ import { GitMerge, RefreshCw } from "lucide-react";
 import { useTranslations } from "next-intl";
 import { useEffect, useMemo, useState } from "react";
 
+import {
+  MergeFollowUpFields,
+  MERGE_FOLLOW_UP_FIELDS,
+} from "@/components/github/merge-follow-up-fields";
 import { MergePullRequestButton } from "@/components/github/merge-pull-request-button";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
@@ -372,6 +376,9 @@ export function AutoMergeButton({
       ? rule
       : null;
   const [open, setOpen] = useState(false);
+  const [manualOpen, setManualOpen] = useState(false);
+  const repositoryName = pullRequest?.repositoryNameWithOwner;
+  const pullRequestNumber = pullRequest?.number;
   const [loading, setLoading] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -386,85 +393,106 @@ export function AutoMergeButton({
   const [moveTicketToDone, setMoveTicketToDone] = useState(false);
 
   useEffect(() => {
-    if (!open || !pullRequest) return;
+    if (!open || !repositoryName || !pullRequestNumber) return;
     let active = true;
-    const [owner = "", name = ""] = pullRequest.repositoryNameWithOwner.split(
-      "/",
-      2,
-    );
-    void controlPlaneRequest<{
-      githubPullRequestMergeOptions: GitHubPullRequestMergeOptions;
-    }>(
-      `query GitHubPullRequestMergeOptions(
+    const [owner = "", name = ""] = repositoryName.split("/", 2);
+    const timer = window.setTimeout(() => {
+      setLoading(true);
+      setOptions(null);
+      setError(null);
+      void controlPlaneRequest<{
+        githubPullRequestMergeOptions: GitHubPullRequestMergeOptions;
+      }>(
+        `query GitHubPullRequestMergeOptions(
         $owner: String!
         $name: String!
         $number: Int!
+        $worktreeId: ID
       ) {
         githubPullRequestMergeOptions(
           source: WORKTREE_AUTOMATION
+          worktreeId: $worktreeId
           owner: $owner
           name: $name
           number: $number
         ) {
+          ${MERGE_FOLLOW_UP_FIELDS}
           availableMethods commitEmails defaultCommitEmail
           defaultCommitHeadline defaultCommitBody canMerge
           canEnableAutoMerge autoMergeEnabled viewerCanDisableAutoMerge
           mergeStateStatus headRefOid blockedReason
         }
       }`,
-      { owner, name, number: pullRequest.number },
-    )
-      .then((data) => {
-        if (!active) return;
-        const next = data.githubPullRequestMergeOptions;
-        setOptions(next);
-        setMethod(currentRule?.mergeMethod ?? next.availableMethods[0] ?? "");
-        setHeadline(currentRule?.commitHeadline ?? next.defaultCommitHeadline);
-        setBody(currentRule?.commitBody ?? next.defaultCommitBody);
-        setAuthorEmail(
-          currentRule?.authorEmail ?? next.defaultCommitEmail ?? DEFAULT_EMAIL,
-        );
-        setDeleteWorktree(currentRule?.deleteWorktree ?? false);
-        setMoveTicketToDone(currentRule?.moveTicketToDone ?? false);
-      })
-      .catch((value) => active && setError(errorMessage(value)))
-      .finally(() => active && setLoading(false));
+        { owner, name, number: pullRequestNumber, worktreeId: worktree.id },
+      )
+        .then((data) => {
+          if (!active) return;
+          const next = data.githubPullRequestMergeOptions;
+          setOptions(next);
+          setMethod(next.defaultMethod ?? next.availableMethods[0] ?? "");
+          setHeadline(next.defaultCommitHeadline);
+          setBody(next.defaultCommitBody);
+          setAuthorEmail(next.defaultCommitEmail ?? DEFAULT_EMAIL);
+          setDeleteWorktree(
+            Boolean(next.canDeleteWorktree && next.defaultDeleteWorktree),
+          );
+          setMoveTicketToDone(
+            Boolean(next.ticketKey && next.defaultMoveTicketToDone),
+          );
+        })
+        .catch((value) => active && setError(errorMessage(value)))
+        .finally(() => active && setLoading(false));
+    }, 0);
     return () => {
       active = false;
+      window.clearTimeout(timer);
     };
-  }, [currentRule, open, pullRequest]);
+  }, [open, repositoryName, pullRequestNumber, worktree.id]);
 
   if (
     pullRequest &&
-    currentRule?.state !== "COMPLETED" &&
-    directlyMergeable(worktree)
+    (manualOpen ||
+      (!open &&
+        currentRule?.state !== "COMPLETED" &&
+        directlyMergeable(worktree)))
   ) {
     return (
       <MergePullRequestButton
-        onMerged={async () => {
-          if (currentRule) {
-            await controlPlaneRequest(
-              `mutation RetryWorktreeAutoMerge($worktreeId: ID!) {
-                retryWorktreeAutoMerge(worktreeId: $worktreeId) {
-                  worktreeId state
-                }
-              }`,
-              { worktreeId: worktree.id },
-            );
-          }
-          await onCompleted();
-        }}
+        onMerged={() => onCompleted()}
+        onOpenChange={setManualOpen}
+        open={manualOpen}
+        worktreeId={worktree.id}
         pullRequest={pullRequest}
         requestSource="WORKTREE_AUTOMATION"
       />
     );
   }
 
+  const postMerge = pullRequest?.state === "MERGED" && Boolean(currentRule);
+
   const save = async () => {
-    if (!pullRequest || !method || !headline.trim()) return;
+    if (
+      !pullRequest ||
+      !method ||
+      !headline.trim() ||
+      (!postMerge && moveTicketToDone && !options?.ticketDoneStatusConfigured)
+    )
+      return;
     setBusy(true);
     setError(null);
     try {
+      if (postMerge) {
+        await controlPlaneRequest(
+          `mutation RetryWorktreeAutoMerge($worktreeId: ID!) {
+          retryWorktreeAutoMerge(worktreeId: $worktreeId) { worktreeId state }
+        }`,
+          { worktreeId: worktree.id },
+        );
+        onError(null);
+        setOpen(false);
+        await onCompleted();
+        return;
+      }
       await controlPlaneRequest<{
         configureWorktreeAutoMerge: WorktreeAutoMerge;
       }>(
@@ -576,7 +604,7 @@ export function AutoMergeButton({
                   <div>
                     <Label className="mb-1.5 block">{tp("mergeType")}</Label>
                     <Select
-                      disabled={busy}
+                      disabled={busy || postMerge}
                       onValueChange={(value) =>
                         setMethod(value as GitHubMergeMethod)
                       }
@@ -599,7 +627,7 @@ export function AutoMergeButton({
                       {tp("commitMessage")}
                     </Label>
                     <Input
-                      disabled={busy}
+                      disabled={busy || postMerge}
                       onChange={(event) => setHeadline(event.target.value)}
                       value={headline}
                     />
@@ -610,7 +638,7 @@ export function AutoMergeButton({
                     </Label>
                     <Textarea
                       className="min-h-24"
-                      disabled={busy}
+                      disabled={busy || postMerge}
                       onChange={(event) => setBody(event.target.value)}
                       value={body}
                     />
@@ -618,7 +646,7 @@ export function AutoMergeButton({
                   <div>
                     <Label className="mb-1.5 block">{tp("commitEmail")}</Label>
                     <Select
-                      disabled={busy}
+                      disabled={busy || postMerge}
                       onValueChange={setAuthorEmail}
                       value={authorEmail}
                     >
@@ -637,36 +665,14 @@ export function AutoMergeButton({
                       </SelectContent>
                     </Select>
                   </div>
-                  {!worktree.primary && (
-                    <div className="flex items-start gap-2">
-                      <Checkbox
-                        checked={deleteWorktree}
-                        disabled={busy}
-                        id={`delete-after-merge-${worktree.id}`}
-                        onCheckedChange={(checked) =>
-                          setDeleteWorktree(Boolean(checked))
-                        }
-                      />
-                      <Label htmlFor={`delete-after-merge-${worktree.id}`}>
-                        {t("deleteAfterMerge")}
-                      </Label>
-                    </div>
-                  )}
-                  {worktree.ticketKey && (
-                    <div className="flex items-start gap-2">
-                      <Checkbox
-                        checked={moveTicketToDone}
-                        disabled={busy}
-                        id={`done-after-merge-${worktree.id}`}
-                        onCheckedChange={(checked) =>
-                          setMoveTicketToDone(Boolean(checked))
-                        }
-                      />
-                      <Label htmlFor={`done-after-merge-${worktree.id}`}>
-                        {t("moveTicketToDone")}
-                      </Label>
-                    </div>
-                  )}
+                  <MergeFollowUpFields
+                    options={options}
+                    disabled={busy || postMerge}
+                    deleteWorktree={deleteWorktree}
+                    moveTicketToDone={moveTicketToDone}
+                    onDeleteWorktreeChange={setDeleteWorktree}
+                    onMoveTicketToDoneChange={setMoveTicketToDone}
+                  />
                 </>
               )}
             </div>
@@ -696,6 +702,9 @@ export function AutoMergeButton({
                 busy ||
                 !method ||
                 !headline.trim() ||
+                (!postMerge &&
+                  moveTicketToDone &&
+                  !options?.ticketDoneStatusConfigured) ||
                 (!currentRule && !options?.canEnableAutoMerge)
               }
               onClick={() => void save()}

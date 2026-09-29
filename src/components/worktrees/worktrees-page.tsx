@@ -229,6 +229,7 @@ const ALL_FILTER_VALUE = "__all__";
 const DIRTY_FILTER_VALUE = "dirty";
 const CLEAN_FILTER_VALUE = "clean";
 const NON_DEFAULT_BRANCH_FILTER_VALUE = "non-default";
+const OPEN_PULL_REQUEST_FILTER_VALUE = "open-pull-requests";
 
 export type WorktreeListFilters = {
   query: string;
@@ -236,6 +237,7 @@ export type WorktreeListFilters = {
   repositoryId: string | null;
   dirty: boolean | null;
   nonDefaultBranch: boolean;
+  openPullRequests?: boolean;
 };
 
 type StoredFilters = {
@@ -281,7 +283,8 @@ function readStoredFilters(appId?: string): StoredFilters {
           ? stored.changes
           : fallback.changes,
       branches:
-        stored.branches === NON_DEFAULT_BRANCH_FILTER_VALUE
+        stored.branches === NON_DEFAULT_BRANCH_FILTER_VALUE ||
+        stored.branches === OPEN_PULL_REQUEST_FILTER_VALUE
           ? stored.branches
           : fallback.branches,
     };
@@ -339,7 +342,8 @@ export function filterWorktreeAgentGroups(
     !filters.agentId &&
     !filters.repositoryId &&
     filters.dirty === null &&
-    !filters.nonDefaultBranch
+    !filters.nonDefaultBranch &&
+    !filters.openPullRequests
   ) {
     return agents;
   }
@@ -403,13 +407,18 @@ export function filterWorktreeAgentGroups(
           : searched.filter(
               (worktree) => worktreeIsDirty(worktree) === filters.dirty,
             );
-      const worktrees = filters.nonDefaultBranch
+      const branchWorktrees = filters.nonDefaultBranch
         ? group.codebase.defaultBranch
           ? changedWorktrees.filter(
               (worktree) => worktree.branch !== group.codebase.defaultBranch,
             )
           : []
         : changedWorktrees;
+      const worktrees = filters.openPullRequests
+        ? branchWorktrees.filter(
+            (worktree) => worktree.pullRequest?.state === "OPEN",
+          )
+        : branchWorktrees;
       return worktrees.length ? [{ ...group, worktrees }] : [];
     });
     return codebases.length ? [{ ...agentGroup, codebases }] : [];
@@ -979,6 +988,7 @@ export function WorktreesPage({ appId }: { appId?: string }) {
             ? null
             : changesFilter === DIRTY_FILTER_VALUE,
         nonDefaultBranch: branchFilter === NON_DEFAULT_BRANCH_FILTER_VALUE,
+        openPullRequests: branchFilter === OPEN_PULL_REQUEST_FILTER_VALUE,
       }),
     [
       activeAgentFilter,
@@ -1217,6 +1227,9 @@ export function WorktreesPage({ appId }: { appId?: string }) {
                 </SelectItem>
                 <SelectItem value={NON_DEFAULT_BRANCH_FILTER_VALUE}>
                   {t("nonDefaultBranches")}
+                </SelectItem>
+                <SelectItem value={OPEN_PULL_REQUEST_FILTER_VALUE}>
+                  {t("openPullRequests")}
                 </SelectItem>
               </SelectContent>
             </Select>

@@ -240,6 +240,9 @@ describe("WorktreeAutomationService", () => {
                 branch: worktreeBranch,
                 headSha: worktreeHead,
                 primary: false,
+                codebase: {
+                  repository: { canonicalOrigin: "github.com/acme/widgets" },
+                },
               },
             },
           ]),
@@ -257,6 +260,7 @@ describe("WorktreeAutomationService", () => {
           state: "MERGED",
           headRefName: "feature/AIDE-71",
           headRefOid: "pr-head",
+          headRepositoryNameWithOwner: "acme/widgets",
         }),
       } as unknown as GitHubService;
       const agentControl = {
@@ -307,6 +311,9 @@ describe("WorktreeAutomationService", () => {
               branch: "feature/AIDE-71",
               headSha: "pr-head",
               primary: false,
+              codebase: {
+                repository: { canonicalOrigin: "github.com/acme/widgets" },
+              },
             },
           },
         ]),
@@ -324,6 +331,7 @@ describe("WorktreeAutomationService", () => {
         state: "MERGED",
         headRefName: "feature/AIDE-71",
         headRefOid: "pr-head",
+        headRepositoryNameWithOwner: "acme/widgets",
       }),
     } as unknown as GitHubService;
     const agentControl = {

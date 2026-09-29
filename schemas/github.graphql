@@ -176,6 +176,14 @@ enum GitHubRequestSource {
 
 "Configurable settings for GitHub."
 type GitHubSettings {
+  "Preferred merge method."
+  defaultMergeMethod: GitHubMergeMethod!
+  "Start new merge commit descriptions empty."
+  emptyMergeCommitDescription: Boolean!
+  "Select Jira completion for new merges."
+  defaultMoveTicketToDone: Boolean!
+  "Select eligible worktree deletion for new merges."
+  defaultDeleteWorktree: Boolean!
   "Whether the token configured condition is true for this GitHub settings."
   tokenConfigured: Boolean!
   "The default Jira key regex associated with this GitHub settings."
@@ -1216,6 +1224,14 @@ type GitHubPullRequestDetail {
 
 "Represents GitHub pull request merge options in the GraphQL API."
 type GitHubPullRequestMergeOptions {
+  defaultMethod: GitHubMergeMethod
+  defaultMoveTicketToDone: Boolean!
+  defaultDeleteWorktree: Boolean!
+  worktreeId: ID
+  worktreeFolder: String
+  canDeleteWorktree: Boolean!
+  ticketKey: String
+  ticketDoneStatusConfigured: Boolean!
   "Available methods associated with this GitHub pull request merge options."
   availableMethods: [GitHubMergeMethod!]!
   "Commit emails associated with this GitHub pull request merge options."
@@ -1244,6 +1260,8 @@ type GitHubPullRequestMergeOptions {
 
 "The result of GitHub pull request merge."
 type GitHubPullRequestMergeResult {
+  postMergeError: String
+  ticketKey: String
   "Stable identifier for this GitHub pull request merge result."
   id: ID!
   "Current state of this GitHub pull request merge result."
@@ -1268,6 +1286,10 @@ type GitHubPullRequestPage {
 
 "Values used to save GitHub settings."
 input SaveGitHubSettingsInput {
+  defaultMergeMethod: GitHubMergeMethod
+  emptyMergeCommitDescription: Boolean
+  defaultMoveTicketToDone: Boolean
+  defaultDeleteWorktree: Boolean
   "The API token to use for the request."
   apiToken: String
   "The default Jira key regex to use for the request."
@@ -1316,6 +1338,9 @@ input UpdateGitHubRepositoryInput {
 
 "Values used to merge a GitHub pull request."
 input MergeGitHubPullRequestInput {
+  worktreeId: ID
+  moveTicketToDone: Boolean = false
+  deleteWorktree: Boolean = false
   "The owner to use for the request."
   owner: String!
   "The name to use for the request."
@@ -1498,6 +1523,7 @@ extend type Query {
   ): GitHubPullRequestDetail
   "Returns GitHub pull request merge options."
   githubPullRequestMergeOptions(
+    worktreeId: ID
     "The source used to filter or perform the operation."
     source: GitHubRequestSource!
     "The owner used to filter or perform the operation."

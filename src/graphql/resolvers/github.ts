@@ -5,7 +5,6 @@ import type { GraphQLContext } from "@/services/graphql-server/graphql-server.se
 import type {
   GitHubAuditContext,
   GitHubApiCallFilters,
-  GitHubMergeMethod,
   GitHubPullRequestScope,
   GitHubPullRequestStateFilter,
   GitHubRequestSource,
@@ -16,6 +15,8 @@ import type {
   GitHubService,
 } from "@/services/github";
 import { normalizeGitHubRepositoryName } from "@/services/github";
+import type { GitHubPullRequestMergeInput } from "@/services/github/types";
+import type { WorktreeAutomationService } from "@/services/worktrees";
 import type { WorktreesService } from "@/services/worktrees";
 
 function requireControlPlane(context: GraphQLContext): void {
@@ -93,6 +94,7 @@ function requestsPipelineJobs(info?: GraphQLResolveInfo): boolean {
 export const createGitHubResolvers = (
   gitHubService: GitHubService,
   worktreesService: WorktreesService,
+  worktreeAutomationService: WorktreeAutomationService,
 ) =>
   withIntegrationConfigurationEvents(
     {
@@ -381,20 +383,23 @@ export const createGitHubResolvers = (
             owner,
             name,
             number,
+            worktreeId,
           }: {
             source: GitHubRequestSource;
             owner: string;
             name: string;
             number: number;
+            worktreeId?: string | null;
           },
           context: GraphQLContext,
         ) => {
           requireControlPlane(context);
-          return gitHubService.pullRequestMergeOptions(
+          return worktreeAutomationService.pullRequestMergeOptions(
             owner,
             name,
             number,
             source,
+            worktreeId,
           );
         },
         githubReviewThreads: (
@@ -428,11 +433,7 @@ export const createGitHubResolvers = (
           {
             input,
           }: {
-            input: {
-              apiToken?: string | null;
-              defaultJiraKeyRegex?: string | null;
-              actionsNotificationPollIntervalSeconds?: number | null;
-            };
+            input: Parameters<GitHubService["saveSettings"]>[0];
           },
           context: GraphQLContext,
         ) => {
@@ -594,21 +595,16 @@ export const createGitHubResolvers = (
             input,
             source,
           }: {
-            input: {
-              owner: string;
-              name: string;
-              number: number;
-              method: GitHubMergeMethod;
-              commitHeadline: string;
-              commitBody: string;
-              authorEmail?: string | null;
-            };
+            input: GitHubPullRequestMergeInput;
             source: GitHubRequestSource;
           },
           context: GraphQLContext,
         ) => {
           requireControlPlane(context);
-          const result = await gitHubService.mergePullRequest(input, source);
+          const result = await worktreeAutomationService.mergePullRequest(
+            input,
+            source,
+          );
           return result;
         },
         createGitHubPullRequest: async (
