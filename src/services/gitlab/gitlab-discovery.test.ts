@@ -1,7 +1,8 @@
 import { afterEach, describe, expect, test, vi } from "vitest";
 const findMany = vi.hoisted(() => vi.fn(async () => [{ id: "21" }]));
+const upsert = vi.hoisted(() => vi.fn());
 vi.mock("@/data/prisma-client", () => ({
-  getPrismaClient: async () => ({ gitLabProject: { findMany } }),
+  getPrismaClient: async () => ({ gitLabProject: { findMany, upsert } }),
 }));
 import { GitLabService } from "./gitlab.service";
 import type { GitLabSettingsView } from "./types";
@@ -39,8 +40,11 @@ const rawMR = {
 afterEach(() => vi.restoreAllMocks());
 
 describe("GitLab accessible discovery", () => {
-  test("searches accessible namespace paths and later pages without changing Settings membership discovery", async () => {
+  test("limits both project discovery surfaces to memberships by default", async () => {
     const service = new GitLabService();
+    vi.spyOn(service, "getSettings").mockResolvedValue({
+      memberProjectsOnly: true,
+    } as GitLabSettingsView);
     vi.spyOn(service, "projects").mockResolvedValue([]);
     const read = vi
       .spyOn(
@@ -70,7 +74,7 @@ describe("GitLab accessible discovery", () => {
         page: 2,
       },
     });
-    expect(read.mock.calls[0][0].query).not.toHaveProperty("membership");
+    expect(read.mock.calls[0][0].query).toMatchObject({ membership: true });
     expect(page).toMatchObject({
       page: 2,
       perPage: 25,
@@ -87,6 +91,9 @@ describe("GitLab accessible discovery", () => {
 
   test("clamps project pagination and preserves a truthful empty end page", async () => {
     const service = new GitLabService();
+    vi.spyOn(service, "getSettings").mockResolvedValue({
+      memberProjectsOnly: true,
+    } as GitLabSettingsView);
     vi.spyOn(service, "projects").mockResolvedValue([]);
     const read = vi
       .spyOn(
@@ -101,9 +108,57 @@ describe("GitLab accessible discovery", () => {
       items: [],
     });
     expect(read.mock.calls[0][0].query).toMatchObject({
+      membership: true,
       page: 1,
       per_page: 100,
     });
+  });
+
+  test("can include every project visible to the token on both discovery surfaces", async () => {
+    const service = new GitLabService();
+    vi.spyOn(service, "getSettings").mockResolvedValue({
+      memberProjectsOnly: false,
+    } as GitLabSettingsView);
+    vi.spyOn(service, "projects").mockResolvedValue([]);
+    const read = vi
+      .spyOn(
+        service as unknown as { get(input: Read): Promise<Response> },
+        "get",
+      )
+      .mockResolvedValue({ data: [], headers: new Headers() });
+
+    await service.accessibleProjects();
+    await service.availableProjects();
+
+    expect(read.mock.calls[0][0].query).not.toHaveProperty("membership");
+    expect(read.mock.calls[1][0].query).not.toHaveProperty("membership");
+  });
+
+  test("adds a project by an encoded namespace path", async () => {
+    const service = new GitLabService();
+    vi.spyOn(service, "projects").mockResolvedValue([]);
+    const read = vi
+      .spyOn(
+        service as unknown as { get(input: Read): Promise<Response> },
+        "get",
+      )
+      .mockResolvedValue({
+        data: {
+          id: 99,
+          name: "mobile",
+          path_with_namespace: "acme/mobile",
+          web_url: "https://gitlab.example/acme/mobile",
+          visibility: "private",
+        },
+        headers: new Headers(),
+      });
+
+    await service.addProject("acme/mobile");
+
+    expect(read.mock.calls[0][0].path).toBe("/projects/acme%2Fmobile");
+    expect(upsert).toHaveBeenCalledWith(
+      expect.objectContaining({ where: { id: "99" } }),
+    );
   });
 
   test("loads comments without approval, commit, or pipeline fan-out and maps inline context", async () => {

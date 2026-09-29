@@ -2758,6 +2758,10 @@ model GitLabSettings {
   verifiedAt                  DateTime?
   pipelinePollIntervalSeconds Int       @default(60)
   cacheTtlSeconds             Int       @default(300)
+  memberProjectsOnly          Boolean   @default(true)
+  defaultSquash               Boolean   @default(true)
+  defaultMoveTicketToDone     Boolean   @default(false)
+  defaultDeleteWorktree       Boolean   @default(false)
   createdAt                   DateTime  @default(now())
   updatedAt                   DateTime  @updatedAt
 }

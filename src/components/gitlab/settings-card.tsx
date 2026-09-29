@@ -4,11 +4,9 @@ import {
   CheckCircle2,
   ExternalLink,
   GitFork,
-  Plus,
   Save,
   Trash2,
   Unplug,
-  Webhook,
 } from "lucide-react";
 import { useTranslations } from "next-intl";
 import { type FormEvent, useCallback, useEffect, useState } from "react";
@@ -23,17 +21,10 @@ import { Label } from "@/components/ui/label";
 import { Spinner } from "@/components/ui/spinner";
 import { useCredentialStoreReadOnly } from "@/hooks/use-credential-store-read-only";
 import { controlPlaneRequest } from "@/lib/control-plane-client";
-import type {
-  GitLabProjectCandidateView,
-  GitLabProjectView,
-  GitLabSettingsView,
-  GitLabWebhookSetupView,
-} from "@/services/gitlab";
+import type { GitLabSettingsView } from "@/services/gitlab";
 
 const SETTINGS_FIELDS =
-  "configured tokenConfigured baseUrl version revision pipelinePollIntervalSeconds cacheTtlSeconds verifiedAt updatedAt viewer { id username name avatarUrl webUrl }";
-const PROJECT_FIELDS =
-  "id name pathWithNamespace webUrl defaultBranch visibility enabled webhookId webhookState webhookError webhookConfiguredAt webhookLastReceivedAt";
+  "configured tokenConfigured baseUrl version revision pipelinePollIntervalSeconds cacheTtlSeconds memberProjectsOnly defaultSquash defaultMoveTicketToDone defaultDeleteWorktree verifiedAt updatedAt viewer { id username name avatarUrl webUrl }";
 
 function announceChange() {
   window.dispatchEvent(new Event("source-control-settings-changed"));
@@ -44,15 +35,9 @@ export function GitLabSettingsCard() {
   const common = useTranslations("common");
   const credentialsReadOnly = useCredentialStoreReadOnly();
   const [settings, setSettings] = useState<GitLabSettingsView | null>(null);
-  const [projects, setProjects] = useState<GitLabProjectView[]>([]);
-  const [candidates, setCandidates] = useState<GitLabProjectCandidateView[]>(
-    [],
-  );
   const [baseUrl, setBaseUrl] = useState("https://gitlab.com");
   const [token, setToken] = useState("");
   const [pollInterval, setPollInterval] = useState(60);
-  const [search, setSearch] = useState("");
-  const [manualToken, setManualToken] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
@@ -69,13 +54,10 @@ export function GitLabSettingsCard() {
     try {
       const data = await controlPlaneRequest<{
         gitlabSettings: GitLabSettingsView;
-        gitlabProjects: GitLabProjectView[];
       }>(`query GitLabSettingsCard {
         gitlabSettings { ${SETTINGS_FIELDS} }
-        gitlabProjects { ${PROJECT_FIELDS} }
       }`);
       applySettings(data.gitlabSettings);
-      setProjects(data.gitlabProjects);
     } catch (value) {
       setError(value instanceof Error ? value.message : String(value));
     } finally {
@@ -146,123 +128,12 @@ export function GitLabSettingsCard() {
         `mutation ClearGitLabCredentials { clearGitLabCredentials { ${SETTINGS_FIELDS} } }`,
       );
       applySettings(data.clearGitLabCredentials);
-      setProjects([]);
-      setCandidates([]);
-      setManualToken(null);
       setError(null);
       setNotice(t("removed"));
       announceChange();
     } catch (value) {
       setError(value instanceof Error ? value.message : String(value));
       setNotice(null);
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  const findProjects = async () => {
-    setBusy(true);
-    try {
-      const data = await controlPlaneRequest<{
-        gitlabAvailableProjects: { items: GitLabProjectCandidateView[] };
-      }>(
-        `query GitLabAvailableProjects($search: String) {
-        gitlabAvailableProjects(search: $search) {
-          items { id name pathWithNamespace webUrl defaultBranch visibility alreadyManaged }
-        }
-      }`,
-        { search: search.trim() || null },
-      );
-      setCandidates(data.gitlabAvailableProjects.items);
-      setError(null);
-    } catch (value) {
-      setError(value instanceof Error ? value.message : String(value));
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  const addProject = async (projectId: string) => {
-    setBusy(true);
-    try {
-      const data = await controlPlaneRequest<{
-        addGitLabProject: GitLabProjectView[];
-      }>(
-        `mutation AddGitLabProject($projectId: ID!) {
-          addGitLabProject(projectId: $projectId) { ${PROJECT_FIELDS} }
-        }`,
-        { projectId },
-      );
-      setProjects(data.addGitLabProject);
-      setCandidates((items) =>
-        items.map((item) =>
-          item.id === projectId ? { ...item, alreadyManaged: true } : item,
-        ),
-      );
-      setNotice(t("projectAdded"));
-      setError(null);
-    } catch (value) {
-      setError(value instanceof Error ? value.message : String(value));
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  const configureWebhook = async (projectId: string) => {
-    setBusy(true);
-    try {
-      const data = await controlPlaneRequest<{
-        configureGitLabProjectWebhook: GitLabWebhookSetupView;
-      }>(
-        `mutation ConfigureGitLabProjectWebhook($projectId: ID!) {
-        configureGitLabProjectWebhook(projectId: $projectId) {
-          callbackUrl signingToken manualConfigurationRequired
-          project { ${PROJECT_FIELDS} }
-        }
-      }`,
-        { projectId },
-      );
-      const setup = data.configureGitLabProjectWebhook;
-      setProjects((items) =>
-        items.map((item) => (item.id === projectId ? setup.project : item)),
-      );
-      setManualToken(setup.signingToken);
-      setNotice(
-        setup.manualConfigurationRequired
-          ? t("manualWebhookRequired", { callbackUrl: setup.callbackUrl })
-          : t("webhookConfigured"),
-      );
-      setError(null);
-      announceChange();
-    } catch (value) {
-      setError(value instanceof Error ? value.message : String(value));
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  const removeProject = async (projectId: string) => {
-    setBusy(true);
-    try {
-      const data = await controlPlaneRequest<{
-        removeGitLabProject: GitLabProjectView[];
-      }>(
-        `mutation RemoveGitLabProject($projectId: ID!) {
-          removeGitLabProject(projectId: $projectId) { ${PROJECT_FIELDS} }
-        }`,
-        { projectId },
-      );
-      setProjects(data.removeGitLabProject);
-      setCandidates((items) =>
-        items.map((item) =>
-          item.id === projectId ? { ...item, alreadyManaged: false } : item,
-        ),
-      );
-      setNotice(t("projectRemoved"));
-      setError(null);
-      announceChange();
-    } catch (value) {
-      setError(value instanceof Error ? value.message : String(value));
     } finally {
       setBusy(false);
     }
@@ -307,22 +178,11 @@ export function GitLabSettingsCard() {
               {notice && (
                 <Alert className="border-emerald-500/30 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300">
                   <CheckCircle2 />
-                  <AlertDescription className="whitespace-pre-wrap text-current">
+                  <AlertDescription className="text-current">
                     {notice}
                   </AlertDescription>
                 </Alert>
               )}
-              {manualToken && (
-                <Alert>
-                  <AlertDescription>
-                    <p>{t("manualSigningToken")}</p>
-                    <code className="mt-2 block break-all rounded bg-muted p-2 text-xs">
-                      {manualToken}
-                    </code>
-                  </AlertDescription>
-                </Alert>
-              )}
-
               <div>
                 <Label className="mb-1.5 block" htmlFor="gitlab-base-url">
                   {t("baseUrl")}
@@ -430,129 +290,6 @@ export function GitLabSettingsCard() {
                   {t("save")}
                 </Button>
               </div>
-
-              {settings?.configured && (
-                <div className="space-y-4 border-t pt-5">
-                  <div>
-                    <h3 className="font-medium">{t("projectsTitle")}</h3>
-                    <p className="text-xs text-muted-foreground">
-                      {t("projectsDescription")}
-                    </p>
-                  </div>
-                  <div className="flex gap-2">
-                    <Input
-                      onChange={(event) => setSearch(event.target.value)}
-                      placeholder={t("searchProjects")}
-                      value={search}
-                    />
-                    <Button
-                      disabled={busy}
-                      onClick={() => void findProjects()}
-                      type="button"
-                      variant="outline"
-                    >
-                      {t("search")}
-                    </Button>
-                  </div>
-                  {candidates.length > 0 && (
-                    <div className="max-h-56 space-y-2 overflow-y-auto rounded-lg border p-2">
-                      {candidates.map((candidate) => (
-                        <div
-                          className="flex items-center justify-between gap-2 rounded-md p-2 hover:bg-muted/50"
-                          key={candidate.id}
-                        >
-                          <div className="min-w-0">
-                            <p className="truncate text-sm font-medium">
-                              {candidate.pathWithNamespace}
-                            </p>
-                            <p className="text-xs text-muted-foreground">
-                              {candidate.visibility}
-                            </p>
-                          </div>
-                          <Button
-                            disabled={busy || candidate.alreadyManaged}
-                            onClick={() => void addProject(candidate.id)}
-                            size="sm"
-                            type="button"
-                            variant="outline"
-                          >
-                            <Plus />
-                            {candidate.alreadyManaged ? t("managed") : t("add")}
-                          </Button>
-                        </div>
-                      ))}
-                    </div>
-                  )}
-                  <div className="space-y-2">
-                    {projects.length === 0 ? (
-                      <p className="text-sm text-muted-foreground">
-                        {t("noProjects")}
-                      </p>
-                    ) : (
-                      projects.map((project) => (
-                        <div className="rounded-lg border p-3" key={project.id}>
-                          <div className="flex flex-wrap items-center justify-between gap-3">
-                            <div className="min-w-0">
-                              <a
-                                className="truncate text-sm font-medium text-primary hover:underline"
-                                href={project.webUrl}
-                                rel="noreferrer"
-                                target="_blank"
-                              >
-                                {project.pathWithNamespace}
-                              </a>
-                              <p className="text-xs text-muted-foreground">
-                                {t("webhookState", {
-                                  state: project.webhookState,
-                                })}
-                              </p>
-                              {project.webhookError && (
-                                <p className="mt-1 text-xs text-amber-700 dark:text-amber-300">
-                                  {project.webhookError}
-                                </p>
-                              )}
-                            </div>
-                            <div className="flex gap-2">
-                              <Button
-                                disabled={busy}
-                                onClick={() =>
-                                  void configureWebhook(project.id)
-                                }
-                                size="sm"
-                                type="button"
-                                variant="outline"
-                              >
-                                <Webhook />
-                                {t("configureWebhook")}
-                              </Button>
-                              <ConfirmationDialog
-                                actionLabel={t("removeProject")}
-                                cancelLabel={common("cancel")}
-                                description={t("removeProjectDescription")}
-                                onConfirm={() => removeProject(project.id)}
-                                title={t("removeProject")}
-                                trigger={
-                                  <Button
-                                    disabled={busy}
-                                    size="sm"
-                                    type="button"
-                                    variant="ghost"
-                                  >
-                                    <Trash2 />
-                                    <span className="sr-only">
-                                      {t("removeProject")}
-                                    </span>
-                                  </Button>
-                                }
-                              />
-                            </div>
-                          </div>
-                        </div>
-                      ))
-                    )}
-                  </div>
-                </div>
-              )}
             </>
           )}
         </CardContent>

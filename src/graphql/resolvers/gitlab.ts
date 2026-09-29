@@ -268,6 +268,11 @@ export const createGitLabResolvers = (
           { input }: { input: Parameters<GitLabService["saveSettings"]>[0] },
           context: GraphQLContext,
         ) => checked(context, () => gitLabService.saveSettings(input)),
+        saveGitLabPreferences: (
+          _root: unknown,
+          { input }: { input: Parameters<GitLabService["savePreferences"]>[0] },
+          context: GraphQLContext,
+        ) => checked(context, () => gitLabService.savePreferences(input)),
         testGitLabConnection: (
           _root: unknown,
           _args: unknown,
@@ -473,6 +478,7 @@ export const createGitLabResolvers = (
     "gitlab",
     [
       "saveGitLabSettings",
+      "saveGitLabPreferences",
       "clearGitLabCredentials",
       "addGitLabProject",
       "removeGitLabProject",

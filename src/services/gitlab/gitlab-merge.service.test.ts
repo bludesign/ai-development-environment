@@ -92,9 +92,22 @@ const input = { projectId: "7", iid: 3, sha: "abc" };
 function setup() {
   const gitlab = {
     setMergeCoordinator: vi.fn(),
-    getSettings: vi
-      .fn()
-      .mockResolvedValue({ configured: true, baseUrl: "https://gitlab.test" }),
+    getSettings: vi.fn().mockResolvedValue({
+      configured: true,
+      baseUrl: "https://gitlab.test",
+      viewer: null,
+      defaultSquash: true,
+      defaultMoveTicketToDone: false,
+      defaultDeleteWorktree: false,
+    }),
+    mergeReadiness: vi.fn().mockResolvedValue({
+      mr,
+      project: { squash_option: "default_off", merge_method: "merge" },
+      canMerge: true,
+      autoMergeUserId: null,
+      removeSourceBranch: false,
+      forceRemoveSourceBranch: false,
+    }),
     mergeRequestState: vi.fn().mockResolvedValue({ ...mr, state: "MERGED" }),
     mergeMergeRequestDirect: vi
       .fn()
@@ -122,7 +135,13 @@ function setup() {
   vi.spyOn(
     service as unknown as { context: () => Promise<unknown> },
     "context",
-  ).mockResolvedValue({ sourceOrigin: "gitlab.test/fork/repo" });
+  ).mockResolvedValue({
+    sourceOrigin: "gitlab.test/fork/repo",
+    projectPath: "team/repo",
+    worktree: null,
+    ticketKey: "AIDE-145",
+    ticketDoneStatusConfigured: true,
+  });
   return { service, gitlab, jira, worktrees, agents };
 }
 
@@ -187,6 +206,34 @@ describe("merge readiness", () => {
     expect(
       gitLabMergeBlocker({ ...mr, detailedMergeStatus: "future_policy" }, true),
     ).toBeTruthy();
+  });
+});
+
+test("initializes editable merge choices from GitLab preferences", async () => {
+  const { service, gitlab } = setup();
+  vi.mocked(service.options).mockRestore();
+  gitlab.getSettings.mockResolvedValue({
+    configured: true,
+    baseUrl: "https://gitlab.test",
+    viewer: null,
+    defaultSquash: true,
+    defaultMoveTicketToDone: true,
+    defaultDeleteWorktree: true,
+  });
+
+  await expect(service.options("7", 3)).resolves.toMatchObject({
+    squash: true,
+    defaultMoveTicketToDone: true,
+    defaultDeleteWorktree: true,
+  });
+
+  gitlab.mergeReadiness.mockResolvedValue({
+    ...(await gitlab.mergeReadiness.mock.results[0]!.value),
+    project: { squash_option: "never", merge_method: "merge" },
+  });
+  await expect(service.options("7", 3)).resolves.toMatchObject({
+    squash: false,
+    squashPolicy: "never",
   });
 });
 

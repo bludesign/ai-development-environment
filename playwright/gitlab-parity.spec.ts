@@ -79,6 +79,173 @@ test("gitlab merge sheet shows project policy and deferred follow-ups", async ({
   });
 });
 
+test("gitlab project manager saves preferences and supports browse, manual, and webhook flows", async ({
+  page,
+}, info) => {
+  const preferenceUpdates: Record<string, boolean>[] = [];
+  const projectAdds: string[] = [];
+  const webhookProjects: string[] = [];
+  const candidate = {
+    id: "204",
+    name: "Mobile",
+    pathWithNamespace: "acme/mobile",
+    webUrl: "https://gitlab.acme.example.com/gitlab/acme/mobile",
+    defaultBranch: "main",
+    visibility: "private",
+    alreadyManaged: false,
+  };
+  await page.route("**/api/graphql", async (route) => {
+    const { query, variables } = route.request().postDataJSON();
+    if (query?.includes("query GitLabAvailableProjects")) {
+      return route.fulfill({
+        json: {
+          data: {
+            gitlabAvailableProjects: {
+              items: [candidate],
+              total: 1,
+              page: 1,
+              perPage: 50,
+              nextPage: null,
+            },
+          },
+        },
+      });
+    }
+    if (query?.includes("mutation SaveGitLabPreferences")) {
+      preferenceUpdates.push(variables.input);
+      return route.fulfill({
+        json: {
+          data: {
+            saveGitLabPreferences: {
+              configured: true,
+              tokenConfigured: true,
+              baseUrl: "https://gitlab.acme.example.com/gitlab",
+              version: "19.2.0",
+              revision: null,
+              pipelinePollIntervalSeconds: 30,
+              cacheTtlSeconds: 300,
+              ...variables.input,
+              verifiedAt: "2026-09-28T12:00:00.000Z",
+              updatedAt: "2026-09-28T12:00:00.000Z",
+              viewer: null,
+            },
+          },
+        },
+      });
+    }
+    if (query?.includes("mutation AddGitLabProject")) {
+      projectAdds.push(variables.projectId);
+      return route.fulfill({
+        json: {
+          data: {
+            addGitLabProject: {
+              ...candidate,
+              enabled: true,
+              webhookId: null,
+              webhookState: "NOT_CONFIGURED",
+              webhookError: null,
+              webhookConfiguredAt: null,
+              webhookLastReceivedAt: null,
+            },
+          },
+        },
+      });
+    }
+    if (query?.includes("mutation ConfigureGitLabProjectWebhook")) {
+      webhookProjects.push(variables.projectId);
+      return route.fulfill({
+        json: {
+          data: {
+            configureGitLabProjectWebhook: {
+              callbackUrl: "https://aide.example.com/api/public/gitlab/webhook",
+              signingToken: "whsec_screenshot-token",
+              manualConfigurationRequired: true,
+              project: {
+                id: variables.projectId,
+                name: "Platform",
+                pathWithNamespace: "acme/platform",
+                webUrl: "https://gitlab.acme.example.com/gitlab/acme/platform",
+                defaultBranch: "main",
+                visibility: "private",
+                enabled: true,
+                webhookId: null,
+                webhookState: "MANUAL_REQUIRED",
+                webhookError: null,
+                webhookConfiguredAt: null,
+                webhookLastReceivedAt: null,
+              },
+            },
+          },
+        },
+      });
+    }
+    await route.continue();
+  });
+
+  await page.goto("/en/gitlab/merge-requests");
+  await page
+    .getByRole("button", { name: "Manage GitLab projects", exact: true })
+    .click();
+  const manager = page.getByRole("dialog");
+  await expect(
+    manager.getByRole("heading", {
+      name: "Manage GitLab projects",
+      exact: true,
+    }),
+  ).toBeVisible();
+  await expect(manager.getByText("acme/mobile", { exact: true })).toBeVisible();
+  await mkdir(`screenshots/${info.project.name}`, { recursive: true });
+  await page.screenshot({
+    animations: "disabled",
+    path: `screenshots/${info.project.name}/gitlab-project-manager.png`,
+    fullPage: true,
+  });
+
+  await manager
+    .getByRole("checkbox", {
+      name: "Only discover projects where I am a member",
+      exact: true,
+    })
+    .uncheck();
+  await manager
+    .getByRole("checkbox", {
+      name: "Move linked Jira tickets to Done by default",
+      exact: true,
+    })
+    .check();
+  await manager
+    .getByRole("button", { name: "Save preferences", exact: true })
+    .click();
+  await expect.poll(() => preferenceUpdates.length).toBe(1);
+  expect(preferenceUpdates[0]).toMatchObject({
+    memberProjectsOnly: false,
+    defaultMoveTicketToDone: true,
+  });
+
+  await manager
+    .getByRole("tabpanel", { name: "Browse" })
+    .getByRole("button", { name: "Add", exact: true })
+    .click();
+  await expect.poll(() => projectAdds).toContain("204");
+
+  await manager.getByRole("tab", { name: "Enter manually" }).click();
+  await manager
+    .getByLabel("Project ID or namespace path", { exact: true })
+    .fill("team/manual-project");
+  await manager
+    .getByRole("tabpanel", { name: "Enter manually" })
+    .getByRole("button", { name: "Add", exact: true })
+    .click();
+  await expect.poll(() => projectAdds).toContain("team/manual-project");
+
+  await manager
+    .getByRole("button", { name: "Configure webhook" })
+    .first()
+    .click();
+  await expect.poll(() => webhookProjects.length).toBe(1);
+  await expect(manager.getByText("whsec_screenshot-token")).toBeVisible();
+});
+
 test("gitlab pipeline expands stages and retry history", async ({
   page,
 }, info) => {

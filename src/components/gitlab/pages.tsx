@@ -23,6 +23,7 @@ import { Alert, AlertDescription } from "@/components/ui/alert";
 import { JiraTicketDrawer } from "@/components/jira/ticket-drawer";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { MergeRequestDialog } from "./merge-request-dialog";
+import { GitLabProjectManagerDialog } from "./project-manager-dialog";
 import { GITLAB_MERGE_REQUEST_FIELDS } from "./merge-request-fields";
 import { GitLabMergeRequestTable } from "./merge-request-table";
 import {
@@ -85,7 +86,7 @@ import {
 import { GitLabPipelinesTable } from "./pipelines-table";
 
 const SETTINGS =
-  "configured baseUrl version tokenConfigured pipelinePollIntervalSeconds";
+  "configured baseUrl version tokenConfigured pipelinePollIntervalSeconds memberProjectsOnly defaultSquash defaultMoveTicketToDone defaultDeleteWorktree";
 const PROJECT =
   "id name pathWithNamespace webUrl defaultBranch visibility enabled webhookId webhookState webhookError webhookConfiguredAt webhookLastReceivedAt";
 const USER = "id username name avatarUrl webUrl";
@@ -346,6 +347,7 @@ export function GitLabMergeRequestsPage({
     configuration,
     loading,
     error: configurationError,
+    reload: reloadConfiguration,
   } = useConfiguration();
   const [ticketKey, setTicketKey] = useState<string | null>(null);
   const [items, setItems] = useState<GitLabMergeRequestView[]>([]);
@@ -482,10 +484,17 @@ export function GitLabMergeRequestsPage({
     error && (/\(408\)/.test(error) || /timed? out/i.test(error));
   return (
     <section className="space-y-6">
-      <PageHeader
-        description={t("mergeRequestsDescription")}
-        title={t("mergeRequestsTitle")}
-      />
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <PageHeader
+          description={t("mergeRequestsDescription")}
+          title={t("mergeRequestsTitle")}
+        />
+        <GitLabProjectManagerDialog
+          onChanged={reloadConfiguration}
+          projects={configuration.projects}
+          settings={configuration.settings}
+        />
+      </div>
       <ErrorAlert error={configurationError} />
       <div className="overflow-x-auto pb-1">
         <Tabs

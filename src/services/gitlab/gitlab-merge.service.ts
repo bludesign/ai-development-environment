@@ -238,11 +238,12 @@ export class GitLabMergeService {
       removeSourceBranch,
       forceRemoveSourceBranch,
     } = await this.gitlab.mergeReadiness(projectId, iid);
-    const [context, saved] = await Promise.all([
+    const [context, saved, settings] = await Promise.all([
       this.context(mr, mr.state === "MERGED" ? null : worktreeId),
       this.record(projectId, iid),
+      this.gitlab.getSettings(),
     ]);
-    const viewerId = (await this.gitlab.getSettings()).viewer?.id;
+    const viewerId = settings.viewer?.id;
     const canCancel =
       canMerge ||
       Boolean(
@@ -261,7 +262,7 @@ export class GitLabMergeService {
       mergeMethod: project.merge_method ?? "merge",
       squashPolicy,
       squash: editable
-        ? (saved?.squash ?? mr.squashOnMerge ?? squashPolicy === "default_on")
+        ? (saved?.squash ?? settings.defaultSquash)
         : squashPolicy === "always",
       removeSourceBranch:
         forceRemoveSourceBranch ||
@@ -290,8 +291,10 @@ export class GitLabMergeService {
         Boolean(context.worktree && !context.worktree.primary),
       ticketKey: context.ticketKey,
       ticketDoneStatusConfigured: context.ticketDoneStatusConfigured,
-      defaultMoveTicketToDone: saved?.moveTicketToDone ?? false,
-      defaultDeleteWorktree: saved?.deleteWorktree ?? false,
+      defaultMoveTicketToDone:
+        saved?.moveTicketToDone ?? settings.defaultMoveTicketToDone,
+      defaultDeleteWorktree:
+        saved?.deleteWorktree ?? settings.defaultDeleteWorktree,
       operation: saved ? gitLabMergeOperationView(saved) : null,
     };
   }

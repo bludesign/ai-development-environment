@@ -307,7 +307,7 @@ export const routes: RouteEntry[] = [
     stubWorktree: true,
   },
   {
-    // Settings → Integrations → GitLab, the card the setup and managed-project pages describe.
+    // Settings → Integrations → GitLab, the credential-only card the setup page describes.
     // It sits below the fold behind the Jira and GitHub cards, hence the scroll.
     name: "gitlab-settings",
     path: "/settings",

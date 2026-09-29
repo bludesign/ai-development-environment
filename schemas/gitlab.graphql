@@ -154,6 +154,14 @@ type GitLabSettings {
   pipelinePollIntervalSeconds: Int!
   "Cache ttl seconds for GitLabSettings."
   cacheTtlSeconds: Int!
+  "Whether project discovery only returns projects where the viewer is a member."
+  memberProjectsOnly: Boolean!
+  "Whether editable merge requests default to squashing commits."
+  defaultSquash: Boolean!
+  "Whether eligible linked Jira tickets default to moving to Done after merge."
+  defaultMoveTicketToDone: Boolean!
+  "Whether eligible linked worktrees default to deletion after merge."
+  defaultDeleteWorktree: Boolean!
   "Verified at for GitLabSettings."
   verifiedAt: String
   "Updated at for GitLabSettings."
@@ -800,6 +808,18 @@ input SaveGitLabSettingsInput {
   pipelinePollIntervalSeconds: Int
 }
 
+"Local project discovery and merge preferences for GitLab."
+input SaveGitLabPreferencesInput {
+  "Whether project discovery only returns projects where the viewer is a member."
+  memberProjectsOnly: Boolean
+  "Whether editable merge requests default to squashing commits."
+  defaultSquash: Boolean
+  "Whether eligible linked Jira tickets default to moving to Done after merge."
+  defaultMoveTicketToDone: Boolean
+  "Whether eligible linked worktrees default to deletion after merge."
+  defaultDeleteWorktree: Boolean
+}
+
 "CreateGitLabMergeRequestInput values exposed by the GitLab integration."
 input CreateGitLabMergeRequestInput {
   "Project id for CreateGitLabMergeRequestInput."
@@ -1019,6 +1039,11 @@ extend type Mutation {
   saveGitLabSettings(
     "Input used by saveGitLabSettings."
     input: SaveGitLabSettingsInput!
+  ): GitLabSettings!
+  "Save local GitLab project discovery and merge preferences."
+  saveGitLabPreferences(
+    "Preferences to update. Omitted values retain their current setting."
+    input: SaveGitLabPreferencesInput!
   ): GitLabSettings!
   "Test git lab connection for Mutation."
   testGitLabConnection: GitLabSettings!

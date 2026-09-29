@@ -26,6 +26,10 @@ const configuration = {
     baseUrl: "https://gitlab.com",
     version: "19.2.0",
     tokenConfigured: true,
+    memberProjectsOnly: true,
+    defaultSquash: true,
+    defaultMoveTicketToDone: false,
+    defaultDeleteWorktree: false,
   },
   gitlabProjects: [
     {
@@ -92,6 +96,90 @@ afterEach(() => {
 });
 
 describe("GitLabMergeRequestsPage", () => {
+  test("manages discovery and merge defaults and accepts a namespace path", async () => {
+    requestMock.mockImplementation(async (query, variables) => {
+      if (query.includes("GitLabPageConfiguration"))
+        return configuration as never;
+      if (query.includes("query GitLabMergeRequests"))
+        return {
+          gitlabMergeRequests: {
+            items: [mergeRequest],
+            total: 1,
+            page: 1,
+            perPage: 25,
+            nextPage: null,
+          },
+        } as never;
+      if (query.includes("query GitLabAvailableProjects"))
+        return {
+          gitlabAvailableProjects: {
+            items: [],
+            total: 0,
+            page: 1,
+            perPage: 50,
+            nextPage: null,
+          },
+        } as never;
+      if (query.includes("mutation SaveGitLabPreferences"))
+        return {
+          saveGitLabPreferences: {
+            ...configuration.gitlabSettings,
+            ...(variables as { input: object }).input,
+          },
+        } as never;
+      if (query.includes("mutation AddGitLabProject"))
+        return { addGitLabProject: configuration.gitlabProjects } as never;
+      throw new Error(`Unexpected operation: ${query}`);
+    });
+
+    render(<GitLabMergeRequestsPage />);
+    await screen.findByText("Add the API");
+    fireEvent.click(
+      screen.getByRole("button", { name: "Manage GitLab projects" }),
+    );
+    const members = screen.getByRole("checkbox", {
+      name: "Only discover projects where I am a member",
+    });
+    const squash = screen.getByRole("checkbox", {
+      name: "Check Squash commits by default",
+    });
+    expect((members as HTMLButtonElement).dataset.state).toBe("checked");
+    expect((squash as HTMLButtonElement).dataset.state).toBe("checked");
+    fireEvent.click(members);
+    fireEvent.click(
+      screen.getByRole("checkbox", {
+        name: "Move linked Jira tickets to Done by default",
+      }),
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Save preferences" }));
+    await waitFor(() =>
+      expect(
+        requestMock.mock.calls.some(
+          ([query, variables]) =>
+            query.includes("mutation SaveGitLabPreferences") &&
+            (variables as { input: { memberProjectsOnly: boolean } }).input
+              .memberProjectsOnly === false,
+        ),
+      ).toBe(true),
+    );
+
+    fireEvent.click(screen.getByRole("tab", { name: "Enter manually" }));
+    fireEvent.change(
+      screen.getByRole("textbox", { name: "Project ID or namespace path" }),
+      { target: { value: "acme/mobile" } },
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Add" }));
+    await waitFor(() =>
+      expect(
+        requestMock.mock.calls.some(
+          ([query, variables]) =>
+            query.includes("mutation AddGitLabProject") &&
+            (variables as { projectId: string }).projectId === "acme/mobile",
+        ),
+      ).toBe(true),
+    );
+  });
+
   test("loads authored merge requests by default", async () => {
     requestMock.mockImplementation(async (query, variables) => {
       if (query.includes("GitLabPageConfiguration")) {

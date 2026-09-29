@@ -70,6 +70,31 @@ describe("GitLab resolvers", () => {
     expect(gitLabService.getSettings).not.toHaveBeenCalled();
     expect(gitHubService.getSettings).not.toHaveBeenCalled();
   });
+
+  test("forwards local preference updates without using the credential mutation", async () => {
+    const preferences = {
+      memberProjectsOnly: false,
+      defaultSquash: true,
+      defaultMoveTicketToDone: true,
+      defaultDeleteWorktree: false,
+    };
+    const result = { ...preferences, configured: true };
+    const gitLabService = {
+      savePreferences: vi.fn().mockResolvedValue(result),
+    } as unknown as GitLabService;
+    const resolvers = createGitLabResolvers(gitLabService, {} as GitHubService);
+
+    await expect(
+      resolvers.Mutation.saveGitLabPreferences(
+        {},
+        { input: preferences },
+        context(null),
+      ),
+    ).resolves.toBe(result);
+    expect(gitLabService.savePreferences).toHaveBeenCalledExactlyOnceWith(
+      preferences,
+    );
+  });
 });
 
 const mergeResult: GitLabMergeResult = {

@@ -36,6 +36,10 @@ export type GitLabSettingsView = {
   viewer: GitLabUserView | null;
   pipelinePollIntervalSeconds: number;
   cacheTtlSeconds: number;
+  memberProjectsOnly: boolean;
+  defaultSquash: boolean;
+  defaultMoveTicketToDone: boolean;
+  defaultDeleteWorktree: boolean;
   verifiedAt: string | null;
   updatedAt: string;
 };

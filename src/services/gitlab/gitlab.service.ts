@@ -1477,6 +1477,10 @@ export class GitLabService {
       viewer,
       pipelinePollIntervalSeconds: row.pipelinePollIntervalSeconds,
       cacheTtlSeconds: row.cacheTtlSeconds,
+      memberProjectsOnly: row.memberProjectsOnly,
+      defaultSquash: row.defaultSquash,
+      defaultMoveTicketToDone: row.defaultMoveTicketToDone,
+      defaultDeleteWorktree: row.defaultDeleteWorktree,
       verifiedAt: row.verifiedAt?.toISOString() ?? null,
       updatedAt: row.updatedAt.toISOString(),
     };
@@ -1569,6 +1573,40 @@ export class GitLabService {
       });
     });
     await this.invalidateCache();
+    return this.getSettings();
+  }
+
+  async savePreferences(input: {
+    memberProjectsOnly?: boolean | null;
+    defaultSquash?: boolean | null;
+    defaultMoveTicketToDone?: boolean | null;
+    defaultDeleteWorktree?: boolean | null;
+  }): Promise<GitLabSettingsView> {
+    const prisma = await getPrismaClient();
+    await prisma.gitLabSettings.upsert({
+      where: { id: SETTINGS_ID },
+      create: {
+        id: SETTINGS_ID,
+        memberProjectsOnly: input.memberProjectsOnly ?? true,
+        defaultSquash: input.defaultSquash ?? true,
+        defaultMoveTicketToDone: input.defaultMoveTicketToDone ?? false,
+        defaultDeleteWorktree: input.defaultDeleteWorktree ?? false,
+      },
+      update: {
+        ...(input.memberProjectsOnly == null
+          ? {}
+          : { memberProjectsOnly: input.memberProjectsOnly }),
+        ...(input.defaultSquash == null
+          ? {}
+          : { defaultSquash: input.defaultSquash }),
+        ...(input.defaultMoveTicketToDone == null
+          ? {}
+          : { defaultMoveTicketToDone: input.defaultMoveTicketToDone }),
+        ...(input.defaultDeleteWorktree == null
+          ? {}
+          : { defaultDeleteWorktree: input.defaultDeleteWorktree }),
+      },
+    });
     return this.getSettings();
   }
 
@@ -1718,12 +1756,13 @@ export class GitLabService {
     perPage = 50,
   ): Promise<Paginated<GitLabProjectCandidateView>> {
     const size = Math.max(1, Math.min(MAX_PAGE_SIZE, perPage));
+    const settings = await this.getSettings();
     const response = await this.get<RawGitLabProject[]>({
       path: "/projects",
       operation: "GitLabAvailableProjects",
       source: "GITLAB_SETTINGS",
       query: {
-        membership: true,
+        ...(settings.memberProjectsOnly ? { membership: true } : {}),
         simple: true,
         order_by: "path",
         sort: "asc",
@@ -1763,11 +1802,13 @@ export class GitLabService {
   ): Promise<Paginated<GitLabProjectCandidateView>> {
     page = Math.max(1, page);
     const size = Math.max(1, Math.min(MAX_PAGE_SIZE, perPage));
+    const settings = await this.getSettings();
     const response = await this.get<RawGitLabProject[]>({
       path: "/projects",
       operation: "GitLabAccessibleProjects",
       source: "MERGE_REQUESTS_PAGE",
       query: {
+        ...(settings.memberProjectsOnly ? { membership: true } : {}),
         simple: true,
         search_namespaces: true,
         with_merge_requests_enabled: true,
