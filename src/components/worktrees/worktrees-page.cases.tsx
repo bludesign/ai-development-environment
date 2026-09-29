@@ -1971,7 +1971,21 @@ export function registerWorktreesPageTests(
 
         render(<WorktreesPage />);
         await screen.findByText("feature/AIDE-24");
-        expect(screen.getByRole("button", { name: "MR !24" })).toBeDefined();
+        fireEvent.pointerDown(screen.getByRole("button", { name: "MR !24" }), {
+          button: 0,
+          ctrlKey: false,
+        });
+        expect(
+          screen
+            .getByRole("menuitem", { name: "Open in GitLab" })
+            .getAttribute("href"),
+        ).toBe("https://gitlab.com/acme/widgets/-/merge_requests/24");
+        expect(
+          screen
+            .getByRole("menuitem", { name: "Open details" })
+            .getAttribute("href"),
+        ).toBe("/gitlab/merge-requests/project-1/24");
+        fireEvent.keyDown(screen.getByRole("menu"), { key: "Escape" });
         fireEvent.pointerDown(
           screen.getByRole("button", { name: "Pipelines: SUCCESS" }),
           { button: 0, ctrlKey: false },

@@ -443,9 +443,21 @@ describe("ActionsPage", () => {
     const row = await screen.findByRole("row", {
       name: /APP-42 Ship widgets/,
     });
+    fireEvent.pointerDown(within(row).getByRole("button", { name: "#17" }), {
+      button: 0,
+      ctrlKey: false,
+    });
     expect(
-      within(row).getByRole("link", { name: "#17" }).getAttribute("href"),
+      screen
+        .getByRole("menuitem", { name: "Open in GitHub" })
+        .getAttribute("href"),
+    ).toBe("https://github.com/acme/widgets/pull/17");
+    expect(
+      screen
+        .getByRole("menuitem", { name: "Open details" })
+        .getAttribute("href"),
     ).toBe("/pull-requests/acme/widgets/17");
+    fireEvent.keyDown(screen.getByRole("menu"), { key: "Escape" });
     const workflowLink = within(row)
       .getAllByRole("link")
       .find((link) => link.getAttribute("href") === run.url);
@@ -601,15 +613,10 @@ describe("ActionsPage", () => {
     const expandJob = await screen.findByRole("button", {
       name: "Show steps for test",
     });
-    const pullRequestLink = within(runRow).getByRole("link", { name: "#17" });
-    pullRequestLink.addEventListener(
-      "click",
-      (event) => event.preventDefault(),
-      {
-        once: true,
-      },
-    );
-    fireEvent.click(pullRequestLink);
+    const pullRequestButton = within(runRow).getByRole("button", {
+      name: "#17",
+    });
+    fireEvent.click(pullRequestButton);
     expect(expandRun.getAttribute("aria-expanded")).toBe("true");
     fireEvent.click(expandJob);
     expect(screen.getByText("Set up job")).toBeDefined();

@@ -290,12 +290,25 @@ describe("GitLabPipelinesPage", () => {
         .getAttribute("href"),
     ).toBe("/worktrees/worktree-1");
     expect(
+      screen.getByText("Improve pipeline retry diagnostics"),
+    ).toBeDefined();
+    fireEvent.pointerDown(
+      screen.getByRole("button", {
+        name: "MR !17",
+      }),
+      { button: 0, ctrlKey: false },
+    );
+    expect(
       screen
-        .getByRole("link", {
-          name: "!17 · Improve pipeline retry diagnostics",
-        })
+        .getByRole("menuitem", { name: "Open in GitLab" })
+        .getAttribute("href"),
+    ).toBe("https://gitlab.com/acme/widgets/-/merge_requests/17");
+    expect(
+      screen
+        .getByRole("menuitem", { name: "Open details" })
         .getAttribute("href"),
     ).toBe("/gitlab/merge-requests/project-1/17");
+    fireEvent.keyDown(screen.getByRole("menu"), { key: "Escape" });
     expect(screen.getByText("Duration 1m 1s")).toBeDefined();
     expect(screen.getByText("RUNNING").className).toContain("amber-500");
     expect(screen.getByText("RUNNING").closest("tr")?.className).toContain(

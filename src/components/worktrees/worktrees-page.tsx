@@ -26,7 +26,6 @@ import {
   GitBranch,
   GitCommitHorizontal,
   GitMerge,
-  GitPullRequest,
   Grid2X2,
   List,
   LockOpen,
@@ -66,11 +65,10 @@ import {
 import { WorkflowQuickActions } from "@/components/workflows/workflow-quick-actions";
 import { CommandQuickActions } from "@/components/commands/command-quick-actions";
 import { PipelineMenu } from "@/components/github/pipeline-menu";
+import { PullRequestMenu } from "@/components/github/pull-request-menu";
+import { MergeRequestMenu } from "@/components/gitlab/merge-request-menu";
 import { GitLabWorktreePipelinesMenu } from "@/components/gitlab/worktree-pipelines-menu";
-import {
-  pullRequestCommentsHref,
-  pullRequestDetailHref,
-} from "@/components/github/pull-request-links";
+import { pullRequestCommentsHref } from "@/components/github/pull-request-links";
 import { JiraTicketDrawer } from "@/components/jira/ticket-drawer";
 import { useJiraTicketChanges } from "@/components/jira/use-jira-ticket-changes";
 import { Alert, AlertDescription } from "@/components/ui/alert";
@@ -2213,7 +2211,6 @@ export function PullRequestBadges({
   onToggleDetails?: () => void;
 }) {
   const t = useTranslations("worktrees");
-  const gitLabT = useTranslations("gitlabPages");
   const commits = worktree.baseAhead ?? 0;
   const gitLabMergeRequest =
     worktree.sourceControlRequest?.provider === "GITLAB"
@@ -2223,7 +2220,10 @@ export function PullRequestBadges({
     <>
       {worktree.pullRequest ? (
         <>
-          <PullRequestMenu pullRequest={worktree.pullRequest} />
+          <PullRequestMenu
+            label={`PR #${worktree.pullRequest.number}`}
+            pullRequest={worktree.pullRequest}
+          />
           <PipelineMenu
             pipelineStatus={worktree.pullRequest.pipelineStatus}
             pipelines={worktree.pullRequest.pipelines}
@@ -2255,31 +2255,14 @@ export function PullRequestBadges({
           </Badge>
         </>
       ) : gitLabMergeRequest ? (
-        <DropdownMenu>
-          <DropdownMenuTrigger asChild>
-            <Badge asChild>
-              <button type="button">MR !{gitLabMergeRequest.number}</button>
-            </Badge>
-          </DropdownMenuTrigger>
-          <DropdownMenuContent align="start" className="w-44">
-            <DropdownMenuItem asChild>
-              <a href={gitLabMergeRequest.url} rel="noreferrer" target="_blank">
-                <ExternalLink />
-                {gitLabT("openInGitLab")}
-              </a>
-            </DropdownMenuItem>
-            {gitLabMergeRequest.projectId ? (
-              <DropdownMenuItem asChild>
-                <Link
-                  href={`/gitlab/merge-requests/${encodeURIComponent(gitLabMergeRequest.projectId)}/${gitLabMergeRequest.number}`}
-                >
-                  <GitMerge />
-                  {t("openDetails")}
-                </Link>
-              </DropdownMenuItem>
-            ) : null}
-          </DropdownMenuContent>
-        </DropdownMenu>
+        <MergeRequestMenu
+          label={`MR !${gitLabMergeRequest.number}`}
+          mergeRequest={{
+            iid: gitLabMergeRequest.number,
+            projectId: gitLabMergeRequest.projectId,
+            webUrl: gitLabMergeRequest.url,
+          }}
+        />
       ) : null}
       <GitLabWorktreePipelinesMenu pipelines={worktree.gitLabPipelines ?? []} />
       {!worktree.pullRequest &&
@@ -2305,37 +2288,6 @@ export function PullRequestBadges({
           </Badge>
         ))}
     </>
-  );
-}
-
-function PullRequestMenu({
-  pullRequest,
-}: {
-  pullRequest: NonNullable<Worktree["pullRequest"]>;
-}) {
-  const t = useTranslations("worktrees");
-  return (
-    <DropdownMenu>
-      <DropdownMenuTrigger asChild>
-        <Badge asChild>
-          <button type="button">PR #{pullRequest.number}</button>
-        </Badge>
-      </DropdownMenuTrigger>
-      <DropdownMenuContent align="start" className="w-44">
-        <DropdownMenuItem asChild>
-          <a href={pullRequest.url} rel="noreferrer" target="_blank">
-            <ExternalLink />
-            {t("openInGitHub")}
-          </a>
-        </DropdownMenuItem>
-        <DropdownMenuItem asChild>
-          <Link href={pullRequestDetailHref(pullRequest)}>
-            <GitPullRequest />
-            {t("openDetails")}
-          </Link>
-        </DropdownMenuItem>
-      </DropdownMenuContent>
-    </DropdownMenu>
   );
 }
 
