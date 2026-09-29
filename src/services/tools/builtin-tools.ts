@@ -217,7 +217,10 @@ function catalogGroup(group: BuiltInToolGroup): ToolCatalogGroup {
       name: tool.name,
       title: tool.title,
       description: tool.description,
-      inputSchema: z.toJSONSchema(tool.inputSchema) as Record<string, unknown>,
+      inputSchema: z.toJSONSchema(tool.inputSchema, { io: "input" }) as Record<
+        string,
+        unknown
+      >,
       outputSchema: z.toJSONSchema(tool.outputSchema) as Record<
         string,
         unknown

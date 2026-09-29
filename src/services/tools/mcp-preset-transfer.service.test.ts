@@ -1,6 +1,9 @@
 import { describe, expect, test, vi } from "vitest";
 import { McpPresetTransferService } from "./mcp-preset-transfer.service";
-import { parseMcpPresetDocument } from "./mcp-preset-format";
+import {
+  MAX_MCP_IMPORT_BYTES,
+  parseMcpPresetDocument,
+} from "./mcp-preset-format";
 import type { ToolsService } from "./tools.service";
 import type { McpToolPresetView, ToolCatalogGroup } from "./types";
 
@@ -256,6 +259,52 @@ describe("portable MCP presets", () => {
     ])
       expect(result.content).not.toContain(secret);
   });
+
+  test.each([
+    { label: "ASCII", count: 100, toolCount: 300, toolPrefix: "tool" },
+    {
+      label: "Unicode",
+      count: 50,
+      toolCount: 200,
+      toolPrefix: "工具".repeat(20),
+    },
+  ])(
+    "rejects oversized exports and allows smaller selections: $label",
+    async ({ count, toolCount, toolPrefix }) => {
+      const { transfer, service, server } = setup();
+      const presets: McpToolPresetView[] = Array.from(
+        { length: count },
+        (_, i) => ({
+          ...preset,
+          id: `preset-${i}`,
+          name: `Preset ${i}`,
+          toolNames: [],
+          tools: Array.from({ length: toolCount }, (_, j) => ({
+            source: "EXTERNAL",
+            serverId: server.id,
+            name: `${toolPrefix}_${j}`,
+          })),
+          createdAt: "now",
+          updatedAt: "now",
+        }),
+      );
+      service.mcpToolPresets.mockResolvedValue(presets);
+
+      await expect(
+        transfer
+          .exportPresets(presets.map(({ id }) => id))
+          .then(() => undefined),
+      ).rejects.toThrow("Select fewer presets");
+
+      const result = await transfer.exportPresets([presets[0]!.id]);
+      expect(
+        new TextEncoder().encode(result.content).length,
+      ).toBeLessThanOrEqual(MAX_MCP_IMPORT_BYTES);
+      expect(
+        parseMcpPresetDocument(result.content).presets[0]!.tools,
+      ).toHaveLength(toolCount);
+    },
+  );
 
   test("exports full schemas, availability, group filters, and examples drawn only from selected tools", async () => {
     const { transfer, service, catalog, server } = setup();

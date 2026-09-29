@@ -321,7 +321,8 @@ describe("built-in tool registry", () => {
         expect(variant.required).toEqual(
           expect.arrayContaining(["targetMode", ...commonFields]),
         );
-        expect(variant.additionalProperties).toBe(false);
+        // These input objects accept extra keys and strip them during parsing.
+        expect(variant.additionalProperties).toBeUndefined();
       }
     }
   });

@@ -7,12 +7,15 @@ import {
 import { afterEach, describe, expect, test, vi } from "vitest";
 
 import type { CodebaseToolsService } from "@/services/codebases";
+import type { ActionCenterService } from "@/services/action-center";
 
 import {
   createBuiltInToolRegistry,
   READ_ONLY_ANNOTATIONS,
 } from "./builtin-tools";
 import { createScopedMcpServer } from "./scoped-mcp";
+import { compileMcpJsonSchema } from "./mcp-json-schema";
+import { ToolsService } from "./tools.service";
 import type { McpToolSnapshotEntry } from "./types";
 
 const closeCallbacks: Array<() => Promise<void>> = [];
@@ -71,6 +74,47 @@ function externalTool(): McpToolSnapshotEntry {
 }
 
 describe("scoped MCP protocol compatibility", () => {
+  test("keeps defaulted built-in arguments optional in snapshots and catalog exports", async () => {
+    const page = {
+      items: [],
+      nextCursor: null,
+      totalCount: 0,
+      needsAttentionCount: 0,
+      activeCount: 0,
+    };
+    const list = vi.fn().mockResolvedValue(page);
+    const service = new ToolsService(
+      {} as CodebaseToolsService,
+      undefined,
+      { actionCenter: { list } as unknown as ActionCenterService },
+      { isConfigured: vi.fn().mockResolvedValue(false) } as never,
+    );
+    const snapshot = await service.resolveMcpToolReferences([
+      { source: "BUILTIN", name: "get_action_center" },
+    ]);
+    const client = await clientFor(snapshot.tools, (entry, args) =>
+      service.builtInTools.callByName(entry.reference.name, args),
+    );
+    const listed = await client.listTools();
+    const validate = compileMcpJsonSchema(listed.tools[0]!.inputSchema);
+    expect(validate({}).valid).toBe(true);
+    expect(validate({ first: "invalid" }).valid).toBe(false);
+    await expect(
+      client.callTool({ name: "get_action_center", arguments: {} }),
+    ).resolves.toMatchObject({ structuredContent: { page } });
+    expect(list).toHaveBeenCalledWith({ first: 50 });
+
+    const exported = await service.presetTransfers.exportCatalog(
+      "JSON",
+      "BUILTIN",
+      ["builtin:action-center"],
+    );
+    const catalog = JSON.parse(exported.content);
+    expect(
+      compileMcpJsonSchema(catalog.groups[0].tools[0].inputSchema)({}).valid,
+    ).toBe(true);
+  });
+
   test("lists the real get_codebase union input through the SDK object-schema contract", async () => {
     const registry = createBuiltInToolRegistry({
       codebaseTools: {} as CodebaseToolsService,

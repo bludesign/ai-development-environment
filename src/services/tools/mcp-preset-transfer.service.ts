@@ -9,6 +9,7 @@ import type {
   ToolCatalogGroup,
 } from "./types";
 import {
+  MAX_MCP_IMPORT_BYTES,
   MCP_PRESET_EXPORT_FORMAT,
   MCP_PRESET_GENERATION_INSTRUCTIONS,
   mcpPresetJsonSchema,
@@ -66,7 +67,7 @@ export class McpPresetTransferService {
     const keys = new Map(
       external.map((server, index) => [server.id, `server-${index + 1}`]),
     );
-    return jsonExport("mcp-presets.json", {
+    const exported = jsonExport("mcp-presets.json", {
       format: MCP_PRESET_EXPORT_FORMAT,
       schemaVersion: 1,
       externalServers: external.map((server) => ({
@@ -100,6 +101,13 @@ export class McpPresetTransferService {
         }),
       ),
     });
+    if (
+      new TextEncoder().encode(exported.content).length > MAX_MCP_IMPORT_BYTES
+    )
+      throw new Error(
+        "Preset export exceeds the 2 MiB import limit. Select fewer presets and export them separately.",
+      );
+    return exported;
   }
 
   async exportCatalog(
