@@ -58,9 +58,7 @@ test("gitlab merge sheet shows project policy and deferred follow-ups", async ({
   await page.goto(
     `/en/gitlab/merge-requests/${ids.gitlab.projectId}/${ids.gitlab.mergeRequestIid}`,
   );
-  await page
-    .getByRole("button", { name: "Merge options", exact: true })
-    .click();
+  await page.getByRole("button", { name: "Merge", exact: true }).click();
   const sheet = page.getByRole("dialog");
   await expect(sheet.getByText("The pipeline is still running.")).toBeVisible();
   await expect(
@@ -99,4 +97,200 @@ test("gitlab pipeline expands stages and retry history", async ({
     path: `screenshots/${info.project.name}/gitlab-pipeline-details.png`,
     fullPage: true,
   });
+});
+
+test("gitlab scopes require a project only for All accessible and search unmanaged projects", async ({
+  page,
+}, info) => {
+  const requests: { scope: string; projectId?: string }[] = [];
+  await page.route("**/api/graphql", async (route) => {
+    const { query, variables } = route.request().postDataJSON();
+    if (query?.includes("query GitLabMergeRequests(")) requests.push(variables);
+    if (query?.includes("query GitLabAccessibleProjects") && variables.search) {
+      return route.fulfill({
+        json: {
+          data: {
+            gitlabAccessibleProjects: {
+              items: [
+                {
+                  id: "204",
+                  name: "Mobile",
+                  pathWithNamespace: "acme/mobile",
+                  webUrl: "https://gitlab.acme.example.com/gitlab/acme/mobile",
+                  defaultBranch: "main",
+                  visibility: "private",
+                  alreadyManaged: false,
+                },
+              ],
+              total: 1,
+              page: 1,
+              perPage: 25,
+              nextPage: null,
+            },
+          },
+        },
+      });
+    }
+    await route.continue();
+  });
+  await page.goto("/en/gitlab/merge-requests");
+  await expect(
+    page.getByRole("heading", { name: "Merge Requests", exact: true }),
+  ).toBeVisible();
+  await expect(
+    page.getByText("Improve pipeline retry diagnostics", { exact: true }),
+  ).toBeVisible();
+  expect(requests.at(-1)?.scope).toBe("MINE");
+  await page.getByRole("tab", { name: "All accessible", exact: true }).click();
+  await expect(
+    page.getByRole("button", { name: "Refresh", exact: true }),
+  ).toBeDisabled();
+  expect(requests.some((request) => request.scope === "ALL")).toBe(false);
+  await page.getByRole("combobox", { name: "Project", exact: true }).click();
+  await page
+    .getByRole("option", { name: "acme/platform", exact: true })
+    .click();
+  await expect(
+    page.getByText("Improve pipeline retry diagnostics", { exact: true }),
+  ).toBeVisible();
+  expect(requests.at(-1)).toMatchObject({
+    scope: "ALL",
+    projectId: ids.gitlab.projectId,
+  });
+  await page.getByRole("tab", { name: "Review requests", exact: true }).click();
+  await expect(
+    page.getByText("Improve pipeline retry diagnostics", { exact: true }),
+  ).toBeVisible();
+  expect(requests.at(-1)).toMatchObject({
+    scope: "REVIEW_REQUESTED",
+    projectId: ids.gitlab.projectId,
+  });
+  await expect(page).toHaveURL(/scope=REVIEW_REQUESTED/);
+  await page.getByRole("combobox", { name: "Project", exact: true }).click();
+  await page
+    .getByRole("combobox", { name: "Search accessible projects…", exact: true })
+    .fill("acme/mobile");
+  await expect(
+    page.getByRole("option", { name: "acme/mobile", exact: true }),
+  ).toBeVisible();
+  await mkdir(`screenshots/${info.project.name}`, { recursive: true });
+  await page.screenshot({
+    animations: "disabled",
+    path: `screenshots/${info.project.name}/gitlab-project-selector.png`,
+    fullPage: true,
+  });
+});
+
+test("gitlab comments shows human conversations with filters and remembered layout", async ({
+  page,
+}, info) => {
+  await page.goto("/en/gitlab/comments");
+  await expect(
+    page.getByRole("heading", { name: "Comments", exact: true }),
+  ).toBeVisible();
+  await expect(
+    page.getByText("General comment", { exact: true }),
+  ).toBeVisible();
+  await expect(page.getByText(/Retrying here can race/)).toBeVisible();
+  await expect(
+    page.getByText("src/services/gitlab/auto-retry.ts · L84", { exact: true }),
+  ).toBeVisible();
+  await page.getByRole("checkbox", { name: "Unresolved", exact: true }).check();
+  await expect(page.getByText("General comment", { exact: true })).toHaveCount(
+    0,
+  );
+  await expect(page.getByText(/Retrying here can race/)).toBeVisible();
+  await page
+    .getByRole("checkbox", { name: "Unresolved", exact: true })
+    .uncheck();
+  await page
+    .getByRole("checkbox", { name: "Other Users", exact: true })
+    .uncheck();
+  await expect(
+    page.getByText("General comment", { exact: true }),
+  ).toBeVisible();
+  await expect(page.getByText(/Retrying here can race/)).toHaveCount(0);
+  await page
+    .getByRole("checkbox", { name: "Other Users", exact: true })
+    .check();
+  await page.getByRole("radio", { name: "Table layout", exact: true }).click();
+  await expect(page.getByRole("table")).toBeVisible();
+  await page.reload();
+  await expect(page.getByRole("table")).toBeVisible();
+  await mkdir(`screenshots/${info.project.name}`, { recursive: true });
+  await page.screenshot({
+    animations: "disabled",
+    path: `screenshots/${info.project.name}/gitlab-comments-table.png`,
+    fullPage: true,
+  });
+  await page.getByRole("radio", { name: "Card layout", exact: true }).click();
+  await page
+    .getByRole("link", { name: "Open discussion", exact: true })
+    .first()
+    .click();
+  await expect(page).toHaveURL(/project=.*&iid=42&discussion=/);
+  await expect(
+    page.getByRole("textbox", { name: "Reply", exact: true }),
+  ).toHaveCount(1);
+  await expect(
+    page.getByText("General comment", { exact: true }),
+  ).toBeVisible();
+});
+
+test("gitlab comment replies keep drafts on provider errors", async ({
+  page,
+}) => {
+  let replies = 0;
+  await page.route("**/api/graphql", async (route) => {
+    const { query } = route.request().postDataJSON();
+    if (query?.includes("mutation ReplyToGitLabDiscussion")) {
+      replies++;
+      return route.fulfill({
+        json: { errors: [{ message: "GitLab denied this reply." }] },
+      });
+    }
+    await route.continue();
+  });
+  await page.goto(
+    `/en/gitlab/comments?project=${ids.gitlab.projectId}&iid=42&discussion=c7d6e5f40312a9b8c7d6e5f403122a9b8c7d6e5f`,
+  );
+  const reply = page.getByRole("textbox", { name: "Reply", exact: true });
+  await reply.fill("Please keep this draft.");
+  await page.getByRole("button", { name: "Send reply", exact: true }).click();
+  await expect(page.getByText("GitLab denied this reply.")).toBeVisible();
+  await expect(reply).toHaveValue("Please keep this draft.");
+  expect(replies).toBe(1);
+});
+
+test("gitlab merge request timeouts offer narrowing guidance and retry", async ({
+  page,
+}) => {
+  let fail = true;
+  await page.route("**/api/graphql", async (route) => {
+    const { query } = route.request().postDataJSON();
+    if (query?.includes("query GitLabMergeRequests(") && fail) {
+      fail = false;
+      return route.fulfill({
+        json: {
+          errors: [
+            {
+              message:
+                'GitLab API request failed (408): {"error":"Request timed out"}',
+            },
+          ],
+        },
+      });
+    }
+    await route.continue();
+  });
+  await page.goto("/en/gitlab/merge-requests");
+  const timeout = page
+    .getByRole("alert")
+    .filter({ hasText: "GitLab took too long" });
+  await expect(timeout).toContainText(/project/i);
+  await page.getByRole("button", { name: "Retry", exact: true }).click();
+  await expect(
+    page.getByText("Improve pipeline retry diagnostics", { exact: true }),
+  ).toBeVisible();
+  await expect(timeout).toHaveCount(0);
 });

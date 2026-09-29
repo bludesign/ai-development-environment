@@ -1,4 +1,5 @@
 import {
+  act,
   cleanup,
   fireEvent,
   render,
@@ -77,6 +78,13 @@ const mergeRequest = {
 
 beforeEach(() => {
   requestMock.mockReset();
+  window.history.replaceState(null, "", "/gitlab/merge-requests");
+  global.ResizeObserver = class {
+    observe() {}
+    unobserve() {}
+    disconnect() {}
+  };
+  Element.prototype.scrollIntoView = vi.fn();
 });
 
 afterEach(() => {
@@ -113,8 +121,8 @@ describe("GitLabMergeRequestsPage", () => {
 
     expect(await screen.findByText("Add the API")).toBeDefined();
     expect(
-      screen.getByRole("combobox", { name: "Scope" }).textContent,
-    ).toContain("Authored by me");
+      screen.getByRole("tab", { name: "Mine" }).getAttribute("aria-selected"),
+    ).toBe("true");
   });
 
   test("does not describe a failed request as an empty result", async () => {
@@ -131,7 +139,9 @@ describe("GitLabMergeRequestsPage", () => {
     render(<GitLabMergeRequestsPage />);
 
     expect(
-      await screen.findByText("GitLab API request failed (408)"),
+      await screen.findByText(
+        "GitLab took too long to respond. Retry or choose a project to narrow the results.",
+      ),
     ).toBeDefined();
     await waitFor(() => {
       expect(
@@ -178,6 +188,279 @@ describe("GitLabMergeRequestsPage", () => {
           (variables as { page?: number })?.page === 2,
       ),
     ).toBe(true);
+  });
+
+  test("requires a project for All accessible and loads an unmanaged selection", async () => {
+    window.history.replaceState(null, "", "/gitlab/merge-requests?scope=ALL");
+    requestMock.mockImplementation(async (query, variables) => {
+      if (query.includes("GitLabPageConfiguration"))
+        return configuration as never;
+      if (query.includes("GitLabAccessibleProjects"))
+        return {
+          gitlabAccessibleProjects: {
+            items: [{ id: "remote-9", pathWithNamespace: "outside/mobile" }],
+            page: 1,
+            perPage: 25,
+            total: 1,
+            nextPage: null,
+          },
+        } as never;
+      if (query.includes("query GitLabMergeRequests")) {
+        expect(variables).toEqual({
+          scope: "ALL",
+          projectId: "remote-9",
+          state: "OPENED",
+          page: 1,
+        });
+        return {
+          gitlabMergeRequests: {
+            items: [
+              {
+                ...mergeRequest,
+                projectId: "remote-9",
+                projectPath: "outside/mobile",
+              },
+            ],
+            page: 1,
+            perPage: 25,
+            total: 1,
+            nextPage: null,
+          },
+        } as never;
+      }
+      throw new Error(`Unexpected operation: ${query}`);
+    });
+    render(<GitLabMergeRequestsPage />);
+    await screen.findByText(
+      "Choose a project to view all its accessible merge requests.",
+    );
+    expect(
+      requestMock.mock.calls.filter(([query]) =>
+        query.includes("query GitLabMergeRequests"),
+      ),
+    ).toHaveLength(0);
+    expect(
+      (screen.getByRole("button", { name: "Refresh" }) as HTMLButtonElement)
+        .disabled,
+    ).toBe(true);
+    expect(
+      screen.getByRole("combobox", { name: "Project" }).textContent,
+    ).toContain("Choose a project");
+    fireEvent.click(screen.getByRole("combobox", { name: "Project" }));
+    expect(screen.queryByRole("option", { name: "All projects" })).toBeNull();
+    fireEvent.click(
+      await screen.findByRole("option", { name: "outside/mobile" }),
+    );
+    await screen.findByText("Add the API");
+    expect(
+      screen.getByRole("combobox", { name: "Project" }).textContent,
+    ).toContain("outside/mobile");
+    expect(new URLSearchParams(window.location.search).get("project")).toBe(
+      "remote-9",
+    );
+  });
+
+  test("restores URL state and keeps personal scope independent of the project", async () => {
+    window.history.replaceState(
+      null,
+      "",
+      "/gitlab/merge-requests?scope=REVIEW_REQUESTED&project=project-1&state=MERGED&page=3",
+    );
+    requestMock.mockImplementation(async (query, variables) => {
+      if (query.includes("GitLabPageConfiguration"))
+        return configuration as never;
+      if (query.includes("query GitLabMergeRequests"))
+        return {
+          gitlabMergeRequests: {
+            items: [
+              {
+                ...mergeRequest,
+                title: `Scope ${(variables as { scope: string }).scope}`,
+              },
+            ],
+            page: 3,
+            perPage: 25,
+            total: 51,
+            nextPage: null,
+          },
+        } as never;
+      throw new Error(`Unexpected operation: ${query}`);
+    });
+    render(<GitLabMergeRequestsPage />);
+    await screen.findByText("Scope REVIEW_REQUESTED");
+    expect(
+      requestMock.mock.calls.find(([query]) =>
+        query.includes("query GitLabMergeRequests"),
+      )?.[1],
+    ).toEqual({
+      scope: "REVIEW_REQUESTED",
+      projectId: "project-1",
+      state: "MERGED",
+      page: 3,
+    });
+    fireEvent.click(screen.getByRole("tab", { name: "Mine" }));
+    await screen.findByText("Scope MINE");
+    expect(
+      requestMock.mock.calls
+        .filter(([query]) => query.includes("query GitLabMergeRequests"))
+        .at(-1)?.[1],
+    ).toEqual({
+      scope: "MINE",
+      projectId: "project-1",
+      state: "MERGED",
+      page: 1,
+    });
+    expect(new URLSearchParams(window.location.search).get("page")).toBeNull();
+    window.history.replaceState(null, "", "/gitlab/merge-requests?scope=ALL");
+    fireEvent.popState(window);
+    await screen.findByText(
+      "Choose a project to view all its accessible merge requests.",
+    );
+    expect(screen.queryByText("Scope MINE")).toBeNull();
+  });
+
+  test("ignores an old response after changing scope and retains observed project choices", async () => {
+    let finishOld: (value: unknown) => void = () => {};
+    const old = new Promise((resolve) => {
+      finishOld = resolve;
+    });
+    requestMock.mockImplementation(async (query, variables) => {
+      if (query.includes("GitLabPageConfiguration"))
+        return configuration as never;
+      if (query.includes("GitLabAccessibleProjects"))
+        return {
+          gitlabAccessibleProjects: { items: [], nextPage: null },
+        } as never;
+      if (query.includes("query GitLabMergeRequests")) {
+        if ((variables as { scope: string }).scope === "MINE")
+          return old as never;
+        return {
+          gitlabMergeRequests: {
+            items: [
+              {
+                ...mergeRequest,
+                title: "Current review",
+                projectId: "unmanaged",
+                projectPath: "team/unmanaged",
+              },
+            ],
+            page: 1,
+            perPage: 25,
+            total: 1,
+            nextPage: null,
+          },
+        } as never;
+      }
+      throw new Error(`Unexpected operation: ${query}`);
+    });
+    render(<GitLabMergeRequestsPage />);
+    await waitFor(() =>
+      expect(
+        requestMock.mock.calls.some(([query]) =>
+          query.includes("query GitLabMergeRequests"),
+        ),
+      ).toBe(true),
+    );
+    const originalSignal = requestMock.mock.calls.find(([query]) =>
+      query.includes("query GitLabMergeRequests"),
+    )?.[2]?.signal;
+    fireEvent.click(screen.getByRole("tab", { name: "Review requests" }));
+    await screen.findByText("Current review");
+    expect(originalSignal?.aborted).toBe(true);
+    await act(async () =>
+      finishOld({
+        gitlabMergeRequests: {
+          items: [{ ...mergeRequest, title: "Stale result" }],
+          page: 1,
+          perPage: 25,
+          total: 1,
+          nextPage: null,
+        },
+      }),
+    );
+    expect(screen.queryByText("Stale result")).toBeNull();
+    fireEvent.click(screen.getByRole("combobox", { name: "Project" }));
+    fireEvent.click(
+      await screen.findByRole("option", { name: "team/unmanaged" }),
+    );
+    await waitFor(() =>
+      expect(
+        requestMock.mock.calls
+          .filter(([query]) => query.includes("query GitLabMergeRequests"))
+          .at(-1)?.[1],
+      ).toEqual({
+        scope: "REVIEW_REQUESTED",
+        projectId: "unmanaged",
+        state: "OPENED",
+        page: 1,
+      }),
+    );
+  });
+
+  test("restores a same-route navigation from updated server search parameters", async () => {
+    requestMock.mockImplementation(async (query) => {
+      if (query.includes("GitLabPageConfiguration"))
+        return configuration as never;
+      if (query.includes("query GitLabMergeRequests"))
+        return {
+          gitlabMergeRequests: {
+            items: [mergeRequest],
+            total: 1,
+            page: 1,
+            perPage: 25,
+            nextPage: null,
+          },
+        } as never;
+      throw new Error(`Unexpected operation: ${query}`);
+    });
+    const view = render(<GitLabMergeRequestsPage initialSearch="" />);
+    await screen.findByText("Add the API");
+    view.rerender(
+      <GitLabMergeRequestsPage initialSearch="scope=REVIEW_REQUESTED&project=project-1&state=CLOSED" />,
+    );
+    await waitFor(() =>
+      expect(
+        requestMock.mock.calls
+          .filter(([query]) => query.includes("query GitLabMergeRequests"))
+          .at(-1)?.[1],
+      ).toEqual({
+        scope: "REVIEW_REQUESTED",
+        projectId: "project-1",
+        state: "CLOSED",
+        page: 1,
+      }),
+    );
+    expect(
+      screen
+        .getByRole("tab", { name: "Review requests" })
+        .getAttribute("aria-selected"),
+    ).toBe("true");
+  });
+
+  test("retries a friendly timeout without showing an empty result", async () => {
+    let attempts = 0;
+    requestMock.mockImplementation(async (query) => {
+      if (query.includes("GitLabPageConfiguration"))
+        return configuration as never;
+      if (query.includes("query GitLabMergeRequests")) {
+        if (attempts++ === 0)
+          throw new Error("GitLab API request failed (408)");
+        return {
+          gitlabMergeRequests: {
+            items: [mergeRequest],
+            page: 1,
+            perPage: 25,
+            total: 1,
+            nextPage: null,
+          },
+        } as never;
+      }
+      throw new Error(`Unexpected operation: ${query}`);
+    });
+    render(<GitLabMergeRequestsPage />);
+    fireEvent.click(await screen.findByRole("button", { name: "Retry" }));
+    await screen.findByText("Add the API");
+    expect(screen.queryByRole("alert")).toBeNull();
   });
 });
 

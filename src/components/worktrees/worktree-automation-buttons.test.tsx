@@ -85,7 +85,7 @@ describe("AutoMergeButton", () => {
         worktree={worktree}
       />,
     );
-    fireEvent.click(screen.getByRole("button", { name: "Merge options" }));
+    fireEvent.click(screen.getByRole("button", { name: "Merge" }));
     await screen.findByText("GitLab options unavailable");
     expect(request).toHaveBeenCalledWith(
       expect.stringContaining("query GitLabMergeRequestMergeOptions"),

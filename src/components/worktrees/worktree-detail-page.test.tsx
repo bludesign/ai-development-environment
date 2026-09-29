@@ -646,7 +646,7 @@ describe("WorktreeDetailPage", () => {
 
     render(<WorktreeDetailPage worktreeId="worktree-1" />);
 
-    const title = await screen.findByText("GitLab pipelines");
+    const title = await screen.findByText("Pipelines");
     const card = title.closest<HTMLElement>('[data-slot="card"]');
     expect(card).not.toBeNull();
     const queueCard = screen

@@ -45,6 +45,11 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Spinner } from "@/components/ui/spinner";
+import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import {
+  GitLabAccessibleProjectSelect,
+  type GitLabProjectOption,
+} from "./accessible-project-select";
 import { Textarea } from "@/components/ui/textarea";
 import { worktreeDetailHref } from "@/components/worktrees/worktree-navigation";
 import { Link } from "@/i18n/navigation";
@@ -289,7 +294,53 @@ function useConfiguration(): {
   return { configuration, loading, error, reload };
 }
 
-export function GitLabMergeRequestsPage() {
+type MergeRequestFilters = {
+  scope: Exclude<GitLabMergeRequestScope, "PROJECT">;
+  projectId: string;
+  state: "OPENED" | "MERGED" | "CLOSED" | "ALL";
+  page: number;
+};
+
+function mergeRequestFiltersFromUrl(search: string): MergeRequestFilters {
+  const params = new URLSearchParams(search);
+  const scope = params.get("scope");
+  const state = params.get("state");
+  const page = Number(params.get("page"));
+  return {
+    scope:
+      scope === "ALL" || scope === "PROJECT"
+        ? "ALL"
+        : scope === "REVIEW_REQUESTED"
+          ? scope
+          : "MINE",
+    projectId: params.get("project") ?? "",
+    state:
+      state === "MERGED" || state === "CLOSED" || state === "ALL"
+        ? state
+        : "OPENED",
+    page: Number.isSafeInteger(page) && page > 0 ? page : 1,
+  };
+}
+
+function observedMergeRequestProject(
+  mr: GitLabMergeRequestView,
+): GitLabProjectOption {
+  let path = mr.projectPath;
+  if (!path) {
+    try {
+      path = new URL(mr.webUrl).pathname
+        .split("/-/merge_requests/")[0]
+        ?.replace(/^\//, "");
+    } catch {
+      /* The provider ID remains a usable fallback. */
+    }
+  }
+  return { id: mr.projectId, pathWithNamespace: path || mr.projectId };
+}
+
+export function GitLabMergeRequestsPage({
+  initialSearch,
+}: { initialSearch?: string } = {}) {
   const t = useTranslations("gitlabPages");
   const {
     configuration,
@@ -298,98 +349,175 @@ export function GitLabMergeRequestsPage() {
   } = useConfiguration();
   const [ticketKey, setTicketKey] = useState<string | null>(null);
   const [items, setItems] = useState<GitLabMergeRequestView[]>([]);
-  const [scope, setScope] = useState<GitLabMergeRequestScope>("MINE");
-  const [projectId, setProjectId] = useState("");
-  const [state, setState] = useState("OPENED");
-  const [page, setPage] = useState(1);
+  const [observedProjects, setObservedProjects] = useState<
+    GitLabProjectOption[]
+  >([]);
+  const [filters, setFilters] = useState<MergeRequestFilters>({
+    scope: "MINE",
+    projectId: "",
+    state: "OPENED",
+    page: 1,
+  });
+  const [restored, setRestored] = useState(false);
   const [pagination, setPagination] = useState<GitLabPagination | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const controllerRef = useRef<AbortController | null>(null);
+  const { scope, projectId, state, page } = filters;
+  const requiresProject = scope === "ALL" && !projectId;
+
+  useEffect(() => {
+    const restore = (search: string) => {
+      controllerRef.current?.abort();
+      const next = mergeRequestFiltersFromUrl(search);
+      setFilters(next);
+      setItems([]);
+      setPagination(null);
+      setError(null);
+      setBusy(!(next.scope === "ALL" && !next.projectId));
+      setRestored(true);
+    };
+    const restoreHistory = () => restore(window.location.search);
+    const timer = window.setTimeout(
+      () => restore(initialSearch ?? window.location.search),
+      0,
+    );
+    window.addEventListener("popstate", restoreHistory);
+    return () => {
+      window.clearTimeout(timer);
+      window.removeEventListener("popstate", restoreHistory);
+      controllerRef.current?.abort();
+    };
+  }, [initialSearch]);
+
+  const changeFilters = (changes: Partial<MergeRequestFilters>) => {
+    controllerRef.current?.abort();
+    const next = { ...filters, page: 1, ...changes };
+    const params = new URLSearchParams(window.location.search);
+    for (const [key, value] of Object.entries({
+      scope: next.scope === "MINE" ? "" : next.scope,
+      project: next.projectId,
+      state: next.state === "OPENED" ? "" : next.state,
+      page: next.page > 1 ? String(next.page) : "",
+    })) {
+      if (value) params.set(key, value);
+      else params.delete(key);
+    }
+    const query = params.toString();
+    window.history.pushState(
+      null,
+      "",
+      `${window.location.pathname}${query ? `?${query}` : ""}${window.location.hash}`,
+    );
+    setFilters(next);
+    setItems([]);
+    setPagination(null);
+    setError(null);
+    setBusy(!(next.scope === "ALL" && !next.projectId));
+  };
 
   const load = useCallback(async () => {
-    if (!configuration?.settings.configured) return;
+    if (
+      !configuration?.settings.configured ||
+      !restored ||
+      (scope === "ALL" && !projectId)
+    )
+      return;
+    controllerRef.current?.abort();
+    const controller = new AbortController();
+    controllerRef.current = controller;
     setBusy(true);
+    setError(null);
     try {
       const data = await controlPlaneRequest<{
         gitlabMergeRequests: Paginated<GitLabMergeRequestView>;
       }>(
         `query GitLabMergeRequests($scope: GitLabMergeRequestScope!, $projectId: ID, $state: GitLabMergeRequestState!, $page: Int!) {
-        gitlabMergeRequests(scope: $scope, projectId: $projectId, state: $state, page: $page) {
-          total page perPage nextPage items { ${MR} }
-        }
-      }`,
-        {
-          scope: projectId ? "PROJECT" : scope,
-          projectId: projectId || null,
-          state,
-          page,
-        },
+          gitlabMergeRequests(scope: $scope, projectId: $projectId, state: $state, page: $page) {
+            total page perPage nextPage items { ${MR} }
+          }
+        }`,
+        { scope, projectId: projectId || null, state, page },
+        { signal: controller.signal },
       );
+      if (controller.signal.aborted) return;
       setItems(data.gitlabMergeRequests.items);
       setPagination(data.gitlabMergeRequests);
-      setError(null);
+      setObservedProjects((previous) => [
+        ...new Map(
+          [
+            ...previous,
+            ...data.gitlabMergeRequests.items.map(observedMergeRequestProject),
+          ].map((project) => [project.id, project]),
+        ).values(),
+      ]);
     } catch (value) {
+      if (controller.signal.aborted) return;
       setItems([]);
       setPagination(null);
       setError(value instanceof Error ? value.message : String(value));
     } finally {
-      setBusy(false);
+      if (!controller.signal.aborted) setBusy(false);
     }
-  }, [configuration?.settings.configured, page, projectId, scope, state]);
+  }, [
+    configuration?.settings.configured,
+    restored,
+    page,
+    projectId,
+    scope,
+    state,
+  ]);
 
   useEffect(() => {
-    if (!configuration?.settings.configured) return;
-    const timeout = window.setTimeout(() => void load(), 0);
-    return () => window.clearTimeout(timeout);
-  }, [configuration?.settings.configured, load]);
+    const timer = window.setTimeout(() => void load(), 0);
+    return () => {
+      window.clearTimeout(timer);
+      controllerRef.current?.abort();
+    };
+  }, [load]);
 
-  if (loading) return <Spinner />;
+  if (loading || !restored) return <Spinner />;
   if (!configuration?.settings.configured) return <ProviderNotConfigured />;
+  const timedOut =
+    error && (/\(408\)/.test(error) || /timed? out/i.test(error));
   return (
     <section className="space-y-6">
       <PageHeader
         description={t("mergeRequestsDescription")}
         title={t("mergeRequestsTitle")}
       />
-      <ErrorAlert error={configurationError ?? error} />
-      <Card>
-        <CardContent className="flex flex-wrap items-center gap-3 py-4">
-          <ProjectSelect
-            allowAll
-            onChange={(value) => {
-              setPage(1);
-              setProjectId(value);
-            }}
-            projects={configuration.projects}
+      <ErrorAlert error={configurationError} />
+      <div className="overflow-x-auto pb-1">
+        <Tabs
+          value={scope}
+          onValueChange={(value) =>
+            changeFilters({ scope: value as MergeRequestFilters["scope"] })
+          }
+        >
+          <TabsList aria-label={t("scope")}>
+            <TabsTrigger value="MINE">{t("mine")}</TabsTrigger>
+            <TabsTrigger value="REVIEW_REQUESTED">
+              {t("reviewRequests")}
+            </TabsTrigger>
+            <TabsTrigger value="ALL">{t("allAccessible")}</TabsTrigger>
+          </TabsList>
+        </Tabs>
+      </div>
+      <div className="space-y-2">
+        <div className="flex flex-wrap items-center gap-3">
+          <GitLabAccessibleProjectSelect
+            allowAll={scope !== "ALL"}
             value={projectId}
+            onChange={(value) => changeFilters({ projectId: value })}
+            knownProjects={[...configuration.projects, ...observedProjects]}
           />
           <Select
-            disabled={Boolean(projectId)}
-            onValueChange={(value) => {
-              setPage(1);
-              setScope(value as GitLabMergeRequestScope);
-            }}
-            value={scope}
-          >
-            <SelectTrigger aria-label={t("scope")} className="h-9">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="ALL">{t("allAccessible")}</SelectItem>
-              <SelectItem value="MINE">{t("authoredByMe")}</SelectItem>
-              <SelectItem value="REVIEW_REQUESTED">
-                {t("reviewRequested")}
-              </SelectItem>
-            </SelectContent>
-          </Select>
-          <Select
-            onValueChange={(value) => {
-              setPage(1);
-              setState(value);
-            }}
             value={state}
+            onValueChange={(value) =>
+              changeFilters({ state: value as MergeRequestFilters["state"] })
+            }
           >
-            <SelectTrigger aria-label={t("state")} className="h-9">
+            <SelectTrigger aria-label={t("status")} className="h-9 min-w-36">
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
@@ -400,7 +528,7 @@ export function GitLabMergeRequestsPage() {
             </SelectContent>
           </Select>
           <Button
-            disabled={busy}
+            disabled={busy || requiresProject}
             onClick={() => void load()}
             type="button"
             variant="outline"
@@ -408,27 +536,64 @@ export function GitLabMergeRequestsPage() {
             {busy ? <Spinner /> : <RefreshCw />}
             {t("refresh")}
           </Button>
-        </CardContent>
-      </Card>
-      {items.length === 0 && !busy && !error ? (
+        </div>
+        {scope === "MINE" && (
+          <p className="text-sm text-muted-foreground">
+            {t("mineDescription")}
+          </p>
+        )}
+      </div>
+      {error && (
+        <Alert variant="destructive">
+          <AlertDescription className="flex flex-wrap items-center justify-between gap-3">
+            <span>{timedOut ? t("mergeRequestsTimedOut") : error}</span>
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              disabled={busy}
+              onClick={() => void load()}
+            >
+              {t("retry")}
+            </Button>
+          </AlertDescription>
+        </Alert>
+      )}
+      {requiresProject ? (
+        <Card>
+          <CardContent className="py-8 text-sm text-muted-foreground">
+            {t("allAccessibleChooseProject")}
+          </CardContent>
+        </Card>
+      ) : busy && items.length === 0 ? (
+        <div
+          role="status"
+          className="flex items-center gap-2 text-sm text-muted-foreground"
+        >
+          <Spinner />
+          {t("loadingMergeRequests")}
+        </div>
+      ) : items.length === 0 && !error ? (
         <Card>
           <CardContent className="py-8 text-sm text-muted-foreground">
             {t("noMergeRequests")}
           </CardContent>
         </Card>
-      ) : (
+      ) : items.length > 0 ? (
         <GitLabMergeRequestTable
           items={items}
           projects={configuration.projects}
           onChanged={load}
           onTicket={setTicketKey}
         />
+      ) : null}
+      {!requiresProject && (
+        <PaginationControls
+          busy={busy}
+          onPageChange={(value) => changeFilters({ page: value })}
+          pagination={pagination}
+        />
       )}
-      <PaginationControls
-        busy={busy}
-        onPageChange={setPage}
-        pagination={pagination}
-      />
       <JiraTicketDrawer
         issueKey={ticketKey}
         onClose={() => setTicketKey(null)}
@@ -1370,94 +1535,7 @@ export function GitLabPipelinesPage() {
   );
 }
 
-export function GitLabCommentsPage() {
-  const t = useTranslations("gitlabPages");
-  const { configuration, loading } = useConfiguration();
-  const [items, setItems] = useState<GitLabMergeRequestView[]>([]);
-  const [page, setPage] = useState(1);
-  const [pagination, setPagination] = useState<GitLabPagination | null>(null);
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const load = useCallback(async () => {
-    if (!configuration?.settings.configured) return;
-    setBusy(true);
-    try {
-      const data = await controlPlaneRequest<{
-        gitlabMergeRequests: Paginated<GitLabMergeRequestView>;
-      }>(
-        `query GitLabCommentMergeRequests($page: Int!) {
-          gitlabMergeRequests(scope: REVIEW_REQUESTED, state: OPENED, page: $page) {
-            total page perPage nextPage items { ${MR} }
-          }
-        }`,
-        { page },
-      );
-      setItems(data.gitlabMergeRequests.items);
-      setPagination(data.gitlabMergeRequests);
-      setError(null);
-    } catch (value) {
-      setItems([]);
-      setPagination(null);
-      setError(value instanceof Error ? value.message : String(value));
-    } finally {
-      setBusy(false);
-    }
-  }, [configuration?.settings.configured, page]);
-  useEffect(() => {
-    if (!configuration?.settings.configured) return;
-    const timeout = window.setTimeout(() => void load(), 0);
-    return () => window.clearTimeout(timeout);
-  }, [configuration?.settings.configured, load]);
-  if (loading) return <Spinner />;
-  if (!configuration?.settings.configured) return <ProviderNotConfigured />;
-  return (
-    <section className="space-y-6">
-      <PageHeader
-        description={t("commentsDescription")}
-        title={t("commentsTitle")}
-      />
-      <ErrorAlert error={error} />
-      <div className="space-y-3">
-        {items.map((mr) => (
-          <Card key={mr.id}>
-            <CardContent className="py-4">
-              <Link
-                className="font-medium text-primary hover:underline"
-                href={`/gitlab/merge-requests/${mr.projectId}/${mr.iid}`}
-              >
-                {mr.title}
-              </Link>
-              <div className="mt-1 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
-                <span>!{mr.iid}</span>
-                <GitLabMergeRequestStateBadge
-                  state={mr.state}
-                  draft={mr.draft}
-                />
-                <GitLabMergeReadinessBadge
-                  state={mr.state}
-                  status={mr.detailedMergeStatus}
-                  hasConflicts={mr.hasConflicts}
-                />
-              </div>
-            </CardContent>
-          </Card>
-        ))}
-        {items.length === 0 && !busy && !error && (
-          <Card>
-            <CardContent className="py-8 text-sm text-muted-foreground">
-              {t("noReviewRequests")}
-            </CardContent>
-          </Card>
-        )}
-      </div>
-      <PaginationControls
-        busy={busy}
-        onPageChange={setPage}
-        pagination={pagination}
-      />
-    </section>
-  );
-}
+export { GitLabCommentsPage } from "./comments-page";
 
 export function GitLabWebhooksPage() {
   const t = useTranslations("gitlabPages");

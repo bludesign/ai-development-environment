@@ -52,6 +52,29 @@ export const createGitLabResolvers = (
         headRefOid: (value: { sha: string }) => value.sha,
       },
       Query: {
+        gitlabAccessibleProjects: (
+          _root: unknown,
+          args: { search?: string | null; page?: number; perPage?: number },
+          context: GraphQLContext,
+        ) =>
+          checked(context, () =>
+            gitLabService.accessibleProjects(
+              args.search,
+              args.page,
+              args.perPage,
+            ),
+          ),
+        gitlabComments: (
+          _root: unknown,
+          args: {
+            projectId?: string | null;
+            iid?: number | null;
+            discussionId?: string | null;
+            after?: string | null;
+            first?: number | null;
+          },
+          context: GraphQLContext,
+        ) => checked(context, () => gitLabService.comments(args)),
         gitlabMergeRequestMergeOptions: (
           _root: unknown,
           args: { projectId: string; iid: number; worktreeId?: string | null },

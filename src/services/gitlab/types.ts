@@ -138,6 +138,10 @@ export type GitLabJobView = {
 
 export type GitLabDiscussionNoteView = {
   id: string;
+  webUrl?: string | null;
+  filePath?: string | null;
+  oldLine?: number | null;
+  newLine?: number | null;
   body: string;
   author: GitLabUserView;
   createdAt: string;
@@ -152,6 +156,23 @@ export type GitLabDiscussionView = {
   id: string;
   individualNote: boolean;
   notes: GitLabDiscussionNoteView[];
+};
+
+export type GitLabCommentThreadView = {
+  id: string;
+  mergeRequest: GitLabMergeRequestView;
+  discussion: GitLabDiscussionView;
+};
+
+export type GitLabCommentPageView = {
+  viewerId: string;
+  viewerUsername: string;
+  mergeRequests: GitLabMergeRequestView[];
+  threads: GitLabCommentThreadView[];
+  endCursor: string | null;
+  hasNextPage: boolean;
+  partial: boolean;
+  warnings: string[];
 };
 
 export type GitLabMergeRequestView = {

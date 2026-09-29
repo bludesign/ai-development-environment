@@ -286,3 +286,56 @@ describe("GitLab merge API contracts", () => {
     expect(directMerge).not.toHaveBeenCalled();
   });
 });
+
+describe("GitLab discovery and comments contracts", () => {
+  test("forwards project search and all comments continuation/selection arguments", async () => {
+    const projects = { items: [], nextPage: 2 };
+    const comments = {
+      threads: [],
+      hasNextPage: true,
+      endCursor: "cursor",
+      partial: true,
+      warnings: ["Retry one source"],
+    };
+    const service = {
+      accessibleProjects: vi.fn().mockResolvedValue(projects),
+      comments: vi.fn().mockResolvedValue(comments),
+    } as unknown as GitLabService;
+    const resolvers = createGitLabResolvers(service, {} as GitHubService);
+    await expect(
+      resolvers.Query.gitlabAccessibleProjects(
+        {},
+        { search: "team", page: 2, perPage: 25 },
+        context(null),
+      ),
+    ).resolves.toBe(projects);
+    expect(service.accessibleProjects).toHaveBeenCalledWith("team", 2, 25);
+    const args = {
+      projectId: "99",
+      iid: 2,
+      discussionId: "thread",
+      after: "cursor",
+      first: 12,
+    };
+    await expect(
+      resolvers.Query.gitlabComments({}, args, context(null)),
+    ).resolves.toBe(comments);
+    expect(service.comments).toHaveBeenCalledWith(args);
+  });
+
+  test("denies agent credentials before project or comment provider access", () => {
+    const service = {
+      accessibleProjects: vi.fn(),
+      comments: vi.fn(),
+    } as unknown as GitLabService;
+    const resolvers = createGitLabResolvers(service, {} as GitHubService);
+    expect(() =>
+      resolvers.Query.gitlabAccessibleProjects({}, {}, context("agent")),
+    ).toThrow("control-plane");
+    expect(() =>
+      resolvers.Query.gitlabComments({}, {}, context("agent")),
+    ).toThrow("control-plane");
+    expect(service.accessibleProjects).not.toHaveBeenCalled();
+    expect(service.comments).not.toHaveBeenCalled();
+  });
+});

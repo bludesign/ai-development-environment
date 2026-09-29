@@ -263,6 +263,12 @@ const mergeRequestDiscussions = [
         resolvable: true,
         resolved: false,
         resolved_by: null,
+        position: {
+          new_path: "src/services/gitlab/auto-retry.ts",
+          old_path: "src/services/gitlab/auto-retry.ts",
+          new_line: 84,
+          old_line: null,
+        },
       },
       {
         id: 71002,
@@ -461,6 +467,97 @@ export async function seedGitLab(prisma: PrismaClient): Promise<void> {
 
   await prisma.gitLabRestCacheEntry.createMany({
     data: [
+      cacheEntry({
+        id: "gitlab-cache-accessible-projects",
+        operation: "GitLabAccessibleProjects",
+        path: "/projects",
+        query: {
+          simple: true,
+          search_namespaces: true,
+          with_merge_requests_enabled: true,
+          order_by: "path",
+          sort: "asc",
+          page: 1,
+          per_page: 25,
+        },
+        response: [
+          {
+            id: Number(PROJECT_ID),
+            name: "Platform",
+            path_with_namespace: PROJECT_PATH,
+            web_url: `${BASE_URL}/${PROJECT_PATH}`,
+            default_branch: "main",
+            visibility: "private",
+          },
+          {
+            id: 204,
+            name: "Mobile",
+            path_with_namespace: "acme/mobile",
+            web_url: `${BASE_URL}/acme/mobile`,
+            default_branch: "main",
+            visibility: "private",
+          },
+        ],
+      }),
+      ...["created_by_me", "assigned_to_me", "reviews_for_me", "all"].map(
+        (scope) =>
+          cacheEntry({
+            id: `gitlab-cache-comment-discovery-${scope}`,
+            operation: "GitLabCommentMergeRequests",
+            path:
+              scope === "all"
+                ? `/projects/${PROJECT_ID}/merge_requests`
+                : "/merge_requests",
+            query: {
+              scope,
+              state: "opened",
+              order_by: "updated_at",
+              sort: "desc",
+              page: 1,
+              per_page: 25,
+            },
+            response:
+              scope === "reviews_for_me" ? [mergeRequests[0]] : mergeRequests,
+          }),
+      ),
+      ...mergeRequests.map((mr) =>
+        cacheEntry({
+          id: `gitlab-cache-comment-discussions-${mr.iid}`,
+          operation: "GitLabCommentDiscussions",
+          path: `/projects/${PROJECT_ID}/merge_requests/${mr.iid}/discussions`,
+          query: { page: 1, per_page: 50 },
+          response:
+            mr.iid === ids.gitlab.mergeRequestIid
+              ? mergeRequestDiscussions
+              : [],
+        }),
+      ),
+      ...mergeRequestDiscussions.map((discussion) =>
+        cacheEntry({
+          id: `gitlab-cache-comment-direct-${discussion.id}`,
+          operation: "GitLabDiscussion",
+          path: `${mergeRequestPath}/discussions/${discussion.id}`,
+          query: {},
+          response: discussion,
+        }),
+      ),
+      ...["created_by_me", "reviews_for_me", "all"].map((scope) =>
+        cacheEntry({
+          id: `gitlab-cache-project-merge-requests-${scope}`,
+          operation: "GitLabMergeRequests",
+          path: `/projects/${PROJECT_ID}/merge_requests`,
+          query: {
+            scope,
+            state: "opened",
+            order_by: "updated_at",
+            sort: "desc",
+            page: 1,
+            per_page: 25,
+          },
+          response:
+            scope === "reviews_for_me" ? [mergeRequests[0]] : mergeRequests,
+        }),
+      ),
       cacheEntry({
         id: "gitlab-cache-merge-requests-all",
         operation: "GitLabMergeRequests",

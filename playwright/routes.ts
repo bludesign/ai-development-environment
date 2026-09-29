@@ -292,10 +292,10 @@ export const routes: RouteEntry[] = [
   {
     name: "gitlab-comments",
     path: "/gitlab/comments",
-    readyGraphqlOperation: "GitLabCommentMergeRequests",
+    readyGraphqlOperation: "GitLabComments",
     readyTexts: [
-      "Improve pipeline retry diagnostics",
-      "No open merge requests",
+      "Ready for another look — the pipeline failure is the flaky integration job, not this change.",
+      "No comments",
     ],
   },
   {

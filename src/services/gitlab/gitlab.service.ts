@@ -26,6 +26,10 @@ import type { WorkflowEventsService } from "@/services/workflows/workflow-events
 import type { PollingService } from "@/services/polling";
 import { agentEventBus } from "@/services/agent-control";
 import type { GitLabMergeService } from "./gitlab-merge.service";
+import {
+  GitLabCommentsFeed,
+  type GitLabCommentsInput,
+} from "./gitlab-comments";
 import type { NotificationsService } from "@/services/notifications";
 
 import type {
@@ -148,6 +152,7 @@ type RawGitLabMergeRequest = {
   id: number;
   iid: number;
   project_id: number;
+  references?: { full?: string };
   source_project_id?: number | null;
   head_pipeline?: RawGitLabPipeline | null;
   user?: { can_merge?: boolean };
@@ -190,6 +195,13 @@ type RawGitLabDiscussion = {
     resolvable: boolean;
     resolved?: boolean | null;
     resolved_by?: RawGitLabUser | null;
+    web_url?: string | null;
+    position?: {
+      new_path?: string | null;
+      old_path?: string | null;
+      old_line?: number | null;
+      new_line?: number | null;
+    } | null;
   }>;
 };
 
@@ -385,6 +397,7 @@ function mapMergeRequest(mr: RawGitLabMergeRequest): GitLabMergeRequestView {
     id: String(mr.id),
     iid: mr.iid,
     projectId: String(mr.project_id),
+    projectPath: mr.references?.full?.replace(/!\d+$/, "") ?? null,
     sourceProjectId:
       mr.source_project_id == null ? null : String(mr.source_project_id),
     headPipeline: mr.head_pipeline
@@ -423,6 +436,10 @@ export function mapGitLabDiscussion(
     individualNote: discussion.individual_note,
     notes: discussion.notes.map((note) => ({
       id: String(note.id),
+      webUrl: note.web_url ?? null,
+      filePath: note.position?.new_path ?? note.position?.old_path ?? null,
+      oldLine: note.position?.old_line ?? null,
+      newLine: note.position?.new_line ?? null,
       body: note.body,
       author: mapUser(note.author),
       createdAt: note.created_at,
@@ -749,6 +766,7 @@ export function verifyGitLabWebhookSignature(input: {
 
 export class GitLabService {
   private mergeCoordinator?: GitLabMergeService;
+  private readonly commentFeed = new GitLabCommentsFeed();
 
   setMergeCoordinator(coordinator: GitLabMergeService): void {
     this.mergeCoordinator = coordinator;
@@ -1715,6 +1733,157 @@ export class GitLabService {
       perPage: size,
       nextPage: pageValue(response.headers.get("x-next-page")),
     };
+  }
+
+  async accessibleProjects(
+    search?: string | null,
+    page = 1,
+    perPage = 25,
+  ): Promise<Paginated<GitLabProjectCandidateView>> {
+    page = Math.max(1, page);
+    const size = Math.max(1, Math.min(MAX_PAGE_SIZE, perPage));
+    const response = await this.get<RawGitLabProject[]>({
+      path: "/projects",
+      operation: "GitLabAccessibleProjects",
+      source: "MERGE_REQUESTS_PAGE",
+      query: {
+        simple: true,
+        search_namespaces: true,
+        with_merge_requests_enabled: true,
+        order_by: "path",
+        sort: "asc",
+        search: search?.trim() || undefined,
+        page,
+        per_page: size,
+      },
+    });
+    const managed = new Set(
+      (await this.projects()).map((project) => project.id),
+    );
+    return {
+      items: response.data.map((project) => ({
+        id: String(project.id),
+        name: project.name,
+        pathWithNamespace: project.path_with_namespace,
+        webUrl: project.web_url,
+        defaultBranch: project.default_branch ?? null,
+        visibility: project.visibility,
+        alreadyManaged: managed.has(String(project.id)),
+      })),
+      total:
+        positiveInt(response.headers.get("x-total")) ?? response.data.length,
+      page,
+      perPage: size,
+      nextPage: pageValue(response.headers.get("x-next-page")),
+    };
+  }
+
+  async comments(input: GitLabCommentsInput = {}) {
+    const [settings, connection, projects] = await Promise.all([
+      this.getSettings(),
+      this.connection(),
+      this.projects(),
+    ]);
+    if (!settings.viewer)
+      throw new Error("Verify the GitLab connection before loading comments.");
+    const projectPath = (mr: GitLabMergeRequestView) => {
+      if (mr.projectPath) return mr;
+      const path = new URL(mr.webUrl).pathname;
+      const base = new URL(connection.baseUrl).pathname.replace(/\/$/, "");
+      return {
+        ...mr,
+        projectPath: decodeURIComponent(
+          path
+            .slice(base.length)
+            .replace(/^\//, "")
+            .replace(/\/-\/merge_requests\/\d+.*$/, ""),
+        ),
+      };
+    };
+    return this.commentFeed.load(
+      input,
+      {
+        identity: createHash("sha256")
+          .update(
+            JSON.stringify([
+              connection.baseUrl,
+              connection.token,
+              settings.viewer.id,
+            ]),
+          )
+          .digest("hex"),
+        viewer: settings.viewer,
+        projectIds: projects
+          .filter((project) => project.enabled)
+          .map((project) => project.id),
+      },
+      {
+        discover: async (source) => {
+          const response = await this.get<RawGitLabMergeRequest[]>({
+            path: source.projectId
+              ? `/projects/${encodeURIComponent(source.projectId)}/merge_requests`
+              : "/merge_requests",
+            operation: "GitLabCommentMergeRequests",
+            source: "COMMENTS_PAGE",
+            allowStaleOnError: false,
+            query: {
+              scope: source.scope,
+              state: "opened",
+              order_by: "updated_at",
+              sort: "desc",
+              page: source.page,
+              per_page: 25,
+            },
+          });
+          return {
+            items: response.data.map((mr) => projectPath(mapMergeRequest(mr))),
+            nextPage: pageValue(response.headers.get("x-next-page")),
+          };
+        },
+        request: async (projectId, iid) =>
+          projectPath(
+            mapMergeRequest(
+              (
+                await this.get<RawGitLabMergeRequest>({
+                  path: `/projects/${encodeURIComponent(projectId)}/merge_requests/${iid}`,
+                  operation: "GitLabMergeRequest",
+                  source: "COMMENTS_PAGE",
+                  allowStaleOnError: false,
+                  query: { include_rebase_in_progress: true },
+                })
+              ).data,
+            ),
+          ),
+        discussions: async (mr, page) => {
+          const response = await this.get<RawGitLabDiscussion[]>({
+            path: `/projects/${encodeURIComponent(mr.projectId)}/merge_requests/${mr.iid}/discussions`,
+            operation: "GitLabCommentDiscussions",
+            source: "COMMENTS_PAGE",
+            allowStaleOnError: false,
+            query: { page, per_page: 50 },
+          });
+          return {
+            items: response.data.map(mapGitLabDiscussion),
+            nextPage: pageValue(response.headers.get("x-next-page")),
+          };
+        },
+        discussion: async (mr, id) =>
+          mapGitLabDiscussion(
+            (
+              await this.get<RawGitLabDiscussion>({
+                path: `/projects/${encodeURIComponent(mr.projectId)}/merge_requests/${mr.iid}/discussions/${encodeURIComponent(id)}`,
+                operation: "GitLabDiscussion",
+                source: "COMMENTS_PAGE",
+                allowStaleOnError: false,
+              })
+            ).data,
+          ),
+        enrich: async (mr) => ({
+          ...mr,
+          ...(await this.mergeCoordinator?.summary(mr)),
+        }),
+      },
+    );
   }
 
   async addProject(projectId: string): Promise<GitLabProjectView[]> {

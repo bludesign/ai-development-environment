@@ -320,6 +320,14 @@ type GitLabMergeRequestPage {
 type GitLabDiscussionNote {
   "Id for GitLabDiscussionNote."
   id: ID!
+  "Link to the note in GitLab, when request context is available."
+  webUrl: String
+  "File path associated with an inline review comment."
+  filePath: String
+  "Line on the old side of the change, when present."
+  oldLine: Int
+  "Line on the new side of the change, when present."
+  newLine: Int
   "Body for GitLabDiscussionNote."
   body: String!
   "Author for GitLabDiscussionNote."
@@ -346,6 +354,36 @@ type GitLabDiscussion {
   individualNote: Boolean!
   "Notes for GitLabDiscussion."
   notes: [GitLabDiscussionNote!]!
+}
+
+"A human discussion and its merge-request context."
+type GitLabCommentThread {
+  "Stable identifier combining the project, request and discussion."
+  id: ID!
+  "The merge request containing this discussion."
+  mergeRequest: GitLabMergeRequest!
+  "Chronologically ordered human notes in the discussion."
+  discussion: GitLabDiscussion!
+}
+
+"A bounded page of comments from relevant merge requests."
+type GitLabCommentPage {
+  "Authenticated GitLab user identifier for author filtering."
+  viewerId: ID!
+  "Authenticated GitLab username."
+  viewerUsername: String!
+  "Request summaries discovered in this page."
+  mergeRequests: [GitLabMergeRequest!]!
+  "Human discussions loaded in this page."
+  threads: [GitLabCommentThread!]!
+  "Opaque continuation for remaining discovery or discussion pages."
+  endCursor: String
+  "Whether additional requests or discussions remain to load."
+  hasNextPage: Boolean!
+  "Whether one or more sources could not be loaded."
+  partial: Boolean!
+  "Actionable descriptions of sources that could not be loaded."
+  warnings: [String!]!
 }
 
 "GitLabMergeRequestDetail values exposed by the GitLab integration."
@@ -866,6 +904,28 @@ extend type Query {
     "Per page used by gitlabAvailableProjects."
     perPage: Int = 50
   ): GitLabProjectCandidatePage!
+  "Search projects accessible to the token without requiring local registration."
+  gitlabAccessibleProjects(
+    "Project name, path or namespace to search."
+    search: String
+    "Provider page number."
+    page: Int = 1
+    "Maximum project candidates per page."
+    perPage: Int = 25
+  ): GitLabProjectCandidatePage!
+  "Load human comments from relevant open requests or a directly selected request."
+  gitlabComments(
+    "Optional project filter; required when selecting a request directly."
+    projectId: ID
+    "Select a request directly, including merged or closed requests."
+    iid: Int
+    "Select a discussion directly within the selected request."
+    discussionId: ID
+    "Opaque continuation returned by the preceding page."
+    after: String
+    "Maximum human discussions to return, from one to twenty-five."
+    first: Int = 25
+  ): GitLabCommentPage!
   "Gitlab merge requests for Query."
   gitlabMergeRequests(
     "Scope used by gitlabMergeRequests."

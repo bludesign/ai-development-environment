@@ -66,6 +66,10 @@ const ALLOWED_IDENTICAL_TRANSLATIONS = new Map([
   ["notifications.categories.GITHUB", "GitHub"],
   ["notifications.categories.GITLAB", "GitLab"],
   ["gitlabSettings.version", "GitLab {version}"],
+  ["gitlabComments.gitlab", "GitLab"],
+  // Provider-neutral headings use the established CI/CD terminology.
+  ["gitlabPages.pipelinesTitle", "Pipelines"],
+  ["gitlabPages.webhooksTitle", "Webhooks"],
   ["pullRequests.jira", "Jira"],
   ["polling.duration", "{milliseconds} ms"],
   // Apple ships this product name untranslated in every locale.

@@ -106,7 +106,7 @@ describe("GitLab merge request presentation", () => {
     mockRequests();
     render(<GitLabMergeRequestsPage />);
     const table = await screen.findByRole("table", {
-      name: "GitLab merge requests",
+      name: "Merge Requests",
     });
     expect(within(table).getAllByRole("columnheader")).toHaveLength(9);
     expect(within(table).getByText("Success").className).toContain("emerald");
@@ -115,7 +115,7 @@ describe("GitLab merge request presentation", () => {
       within(table)
         .getByRole("link", { name: "View 0 open discussions" })
         .getAttribute("href"),
-    ).toBe("/gitlab/merge-requests/42/17#discussions");
+    ).toBe("/gitlab/comments?project=42&iid=17");
     expect(within(table).getByText(/acme\/group\/widgets/)).toBeDefined();
     expect(
       within(table).getByText("APP-42 Improve API").closest("tr")?.className,

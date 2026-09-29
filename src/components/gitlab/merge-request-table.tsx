@@ -27,6 +27,7 @@ import type {
 } from "@/services/gitlab";
 
 import { MergeRequestMenu } from "./merge-request-menu";
+import { gitLabCommentsHref } from "./merge-request-links";
 import {
   GitLabApprovalBadge,
   GitLabMergeReadinessBadge,
@@ -187,7 +188,7 @@ export function GitLabMergeRequestTable({
                     }
                   >
                     <Link
-                      href={`${href}#discussions`}
+                      href={gitLabCommentsHref(mr)}
                       aria-label={
                         discussions == null
                           ? t("discussionsUnavailable")
