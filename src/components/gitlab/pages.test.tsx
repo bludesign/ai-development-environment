@@ -4,6 +4,7 @@ import {
   render,
   screen,
   waitFor,
+  within,
 } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 
@@ -271,6 +272,16 @@ describe("GitLabPipelinesPage", () => {
           ],
         } as never;
       }
+      if (query.includes("query GitLabMergeRequestForMerge")) {
+        expect(variables).toEqual({ projectId: "project-1", iid: 17 });
+        return {
+          gitlabMergeRequest: {
+            ...mergeRequest,
+            title: "Improve pipeline retry diagnostics",
+            sha: "abcdef1234567890",
+          },
+        } as never;
+      }
       throw new Error(`Unexpected operation: ${query}`);
     });
 
@@ -308,7 +319,17 @@ describe("GitLabPipelinesPage", () => {
         .getByRole("menuitem", { name: "Open details" })
         .getAttribute("href"),
     ).toBe("/gitlab/merge-requests/project-1/17");
-    fireEvent.keyDown(screen.getByRole("menu"), { key: "Escape" });
+    fireEvent.click(screen.getByRole("menuitem", { name: "Merge" }));
+    const mergeDialog = await screen.findByRole("dialog", {
+      name: "Merge request",
+    });
+    expect(
+      within(mergeDialog).getByText("!17 · Improve pipeline retry diagnostics"),
+    ).toBeDefined();
+    expect(await within(mergeDialog).findByText("mergeable")).toBeDefined();
+    fireEvent.click(
+      within(mergeDialog).getByRole("button", { name: "Cancel" }),
+    );
     expect(screen.getByText("Duration 1m 1s")).toBeDefined();
     expect(screen.getByText("RUNNING").className).toContain("amber-500");
     expect(screen.getByText("RUNNING").closest("tr")?.className).toContain(

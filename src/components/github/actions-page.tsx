@@ -1101,6 +1101,7 @@ function ActionsTable({
                                   repositoryNameWithOwner:
                                     run.repositoryNameWithOwner,
                                 }}
+                                requestSource="ACTIONS_PAGE"
                               />
                             ))}
                           </div>

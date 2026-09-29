@@ -48,7 +48,7 @@ export function MergePullRequestButton({
 }: {
   pullRequest: Pick<
     GitHubPullRequestView,
-    "number" | "repositoryNameWithOwner" | "title"
+    "number" | "repositoryNameWithOwner"
   >;
   onMerged?: (result: GitHubPullRequestMergeResult) => void | Promise<void>;
   size?: "default" | "sm" | "xs" | "icon" | "icon-sm" | "icon-xs";

@@ -209,6 +209,19 @@ beforeEach(() => {
     if (query.includes("CancelGitHubActionsWorkflowRun")) {
       return { cancelGitHubActionsWorkflowRun: true } as never;
     }
+    if (query.includes("GitHubPullRequestMergeOptions")) {
+      return {
+        githubPullRequestMergeOptions: {
+          availableMethods: ["SQUASH"],
+          commitEmails: [],
+          defaultCommitEmail: null,
+          defaultCommitHeadline: "APP-42 Ship widgets (#17)",
+          defaultCommitBody: "",
+          canMerge: true,
+          blockedReason: null,
+        },
+      } as never;
+    }
     if (query.includes("query JiraTicket")) {
       throw new Error("Jira is not configured in this test");
     }
@@ -457,7 +470,16 @@ describe("ActionsPage", () => {
         .getByRole("menuitem", { name: "Open details" })
         .getAttribute("href"),
     ).toBe("/pull-requests/acme/widgets/17");
-    fireEvent.keyDown(screen.getByRole("menu"), { key: "Escape" });
+    fireEvent.click(screen.getByRole("menuitem", { name: "Merge" }));
+    const mergeDialog = await screen.findByRole("dialog", {
+      name: "Merge pull request",
+    });
+    expect(
+      await within(mergeDialog).findByDisplayValue("APP-42 Ship widgets (#17)"),
+    ).toBeDefined();
+    fireEvent.click(
+      within(mergeDialog).getByRole("button", { name: "Cancel" }),
+    );
     const workflowLink = within(row)
       .getAllByRole("link")
       .find((link) => link.getAttribute("href") === run.url);

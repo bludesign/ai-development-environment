@@ -2223,6 +2223,7 @@ export function PullRequestBadges({
           <PullRequestMenu
             label={`PR #${worktree.pullRequest.number}`}
             pullRequest={worktree.pullRequest}
+            requestSource="WORKTREES"
           />
           <PipelineMenu
             pipelineStatus={worktree.pullRequest.pipelineStatus}
@@ -2260,6 +2261,7 @@ export function PullRequestBadges({
           mergeRequest={{
             iid: gitLabMergeRequest.number,
             projectId: gitLabMergeRequest.projectId,
+            title: gitLabMergeRequest.title,
             webUrl: gitLabMergeRequest.url,
           }}
         />
