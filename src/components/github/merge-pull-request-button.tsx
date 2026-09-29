@@ -4,6 +4,11 @@ import { GitMerge } from "lucide-react";
 import { useTranslations } from "next-intl";
 import { useEffect, useState } from "react";
 
+import { Link } from "@/i18n/navigation";
+import {
+  MergeFollowUpFields,
+  MERGE_FOLLOW_UP_FIELDS,
+} from "./merge-follow-up-fields";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import {
@@ -45,11 +50,13 @@ export function MergePullRequestButton({
   onOpenChange,
   showTrigger = true,
   requestSource,
+  worktreeId,
 }: {
   pullRequest: Pick<
     GitHubPullRequestView,
-    "number" | "repositoryNameWithOwner" | "title"
+    "number" | "repositoryNameWithOwner"
   >;
+  worktreeId?: string;
   onMerged?: (result: GitHubPullRequestMergeResult) => void | Promise<void>;
   size?: "default" | "sm" | "xs" | "icon" | "icon-sm" | "icon-xs";
   variant?:
@@ -68,6 +75,10 @@ export function MergePullRequestButton({
   const [commitHeadline, setCommitHeadline] = useState("");
   const [commitBody, setCommitBody] = useState("");
   const [authorEmail, setAuthorEmail] = useState(DEFAULT_EMAIL);
+  const [deleteWorktree, setDeleteWorktree] = useState(false);
+  const [moveTicketToDone, setMoveTicketToDone] = useState(false);
+  const [mergedResult, setMergedResult] =
+    useState<GitHubPullRequestMergeResult | null>(null);
   const [loading, setLoading] = useState(false);
   const [merging, setMerging] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -78,6 +89,10 @@ export function MergePullRequestButton({
   const open = controlledOpen ?? internalOpen;
   const setOpen = (next: boolean) => {
     if (!next) {
+      if (mergedResult) {
+        setMergedResult(null);
+        void onMerged?.(mergedResult);
+      }
       setLoading(false);
       setOptions(null);
       setError(null);
@@ -101,13 +116,16 @@ export function MergePullRequestButton({
           $name: String!
           $number: Int!
           $source: GitHubRequestSource!
+          $worktreeId: ID
         ) {
           githubPullRequestMergeOptions(
             source: $source
+            worktreeId: $worktreeId
             owner: $owner
             name: $name
             number: $number
           ) {
+            ${MERGE_FOLLOW_UP_FIELDS}
             availableMethods
             commitEmails
             defaultCommitEmail
@@ -117,13 +135,25 @@ export function MergePullRequestButton({
             blockedReason
           }
         }`,
-        { owner, name, number: pullRequest.number, source: requestSource },
+        {
+          owner,
+          name,
+          number: pullRequest.number,
+          source: requestSource,
+          worktreeId,
+        },
       )
         .then((data) => {
           if (!active) return;
           const next = data.githubPullRequestMergeOptions;
           setOptions(next);
-          setMethod(next.availableMethods[0] ?? "");
+          setMethod(next.defaultMethod ?? next.availableMethods[0] ?? "");
+          setDeleteWorktree(
+            Boolean(next.canDeleteWorktree && next.defaultDeleteWorktree),
+          );
+          setMoveTicketToDone(
+            Boolean(next.ticketKey && next.defaultMoveTicketToDone),
+          );
           setCommitHeadline(next.defaultCommitHeadline);
           setCommitBody(next.defaultCommitBody);
           setAuthorEmail(next.defaultCommitEmail ?? DEFAULT_EMAIL);
@@ -140,10 +170,17 @@ export function MergePullRequestButton({
       active = false;
       window.clearTimeout(timeout);
     };
-  }, [name, open, owner, pullRequest.number, requestSource]);
+  }, [name, open, owner, pullRequest.number, requestSource, worktreeId]);
 
   const merge = async () => {
-    if (!method || !options?.canMerge || !commitHeadline.trim()) return;
+    if (
+      !method ||
+      !options?.canMerge ||
+      !commitHeadline.trim() ||
+      mergedResult ||
+      (moveTicketToDone && !options.ticketDoneStatusConfigured)
+    )
+      return;
     setMerging(true);
     setError(null);
     try {
@@ -155,7 +192,7 @@ export function MergePullRequestButton({
           $source: GitHubRequestSource!
         ) {
           mergeGitHubPullRequest(input: $input, source: $source) {
-            id state url mergedAt
+            id state url mergedAt postMergeError ticketKey
           }
         }`,
         {
@@ -167,12 +204,19 @@ export function MergePullRequestButton({
             commitHeadline,
             commitBody,
             authorEmail: authorEmail === DEFAULT_EMAIL ? null : authorEmail,
+            worktreeId: worktreeId ?? options.worktreeId,
+            deleteWorktree,
+            moveTicketToDone,
           },
           source: requestSource,
         },
       );
-      setOpen(false);
-      await onMerged?.(data.mergeGitHubPullRequest);
+      if (data.mergeGitHubPullRequest.postMergeError) {
+        setMergedResult(data.mergeGitHubPullRequest);
+      } else {
+        setOpen(false);
+        await onMerged?.(data.mergeGitHubPullRequest);
+      }
     } catch (value) {
       setError(value instanceof Error ? value.message : String(value));
     } finally {
@@ -214,7 +258,22 @@ export function MergePullRequestButton({
             </DialogDescription>
           </DialogHeader>
 
-          {loading || (!options && !error) ? (
+          {mergedResult ? (
+            <Alert>
+              <AlertDescription>
+                <p>{t("mergedFollowUpFailed")}</p>
+                <p>{mergedResult.postMergeError}</p>
+                {mergedResult.ticketKey && (
+                  <Link
+                    className="underline"
+                    href={`/jira/tickets/${encodeURIComponent(mergedResult.ticketKey)}`}
+                  >
+                    {mergedResult.ticketKey}
+                  </Link>
+                )}
+              </AlertDescription>
+            </Alert>
+          ) : loading || (!options && !error) ? (
             <div className="flex items-center gap-2 py-6 text-sm text-muted-foreground">
               <Spinner /> {t("loadingMergeOptions")}
             </div>
@@ -280,6 +339,14 @@ export function MergePullRequestButton({
                       value={commitBody}
                     />
                   </div>
+                  <MergeFollowUpFields
+                    options={options}
+                    disabled={merging}
+                    deleteWorktree={deleteWorktree}
+                    moveTicketToDone={moveTicketToDone}
+                    onDeleteWorktreeChange={setDeleteWorktree}
+                    onMoveTicketToDoneChange={setMoveTicketToDone}
+                  />
                   <div>
                     <Label className="mb-1.5 block" htmlFor="merge-email">
                       {t("commitEmail")}
@@ -316,10 +383,12 @@ export function MergePullRequestButton({
               type="button"
               variant="outline"
             >
-              {t("cancelMerge")}
+              {mergedResult ? t("closeMergeResult") : t("cancelMerge")}
             </Button>
             <Button
               disabled={
+                Boolean(mergedResult) ||
+                (moveTicketToDone && !options?.ticketDoneStatusConfigured) ||
                 loading ||
                 merging ||
                 !options?.canMerge ||

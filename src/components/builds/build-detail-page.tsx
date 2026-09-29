@@ -768,6 +768,7 @@ export function BuildDetailPage({
               artifactId={installArtifact.id}
               metadata={installArtifact.metadata}
               publicOrigin={publicOrigin}
+              size="default"
             />
           )}
           {build.status === "SUCCEEDED" && archive && (

@@ -26,7 +26,6 @@ import {
   GitBranch,
   GitCommitHorizontal,
   GitMerge,
-  GitPullRequest,
   Grid2X2,
   List,
   LockOpen,
@@ -66,11 +65,10 @@ import {
 import { WorkflowQuickActions } from "@/components/workflows/workflow-quick-actions";
 import { CommandQuickActions } from "@/components/commands/command-quick-actions";
 import { PipelineMenu } from "@/components/github/pipeline-menu";
+import { PullRequestMenu } from "@/components/github/pull-request-menu";
+import { MergeRequestMenu } from "@/components/gitlab/merge-request-menu";
 import { GitLabWorktreePipelinesMenu } from "@/components/gitlab/worktree-pipelines-menu";
-import {
-  pullRequestCommentsHref,
-  pullRequestDetailHref,
-} from "@/components/github/pull-request-links";
+import { pullRequestCommentsHref } from "@/components/github/pull-request-links";
 import { JiraTicketDrawer } from "@/components/jira/ticket-drawer";
 import { useJiraTicketChanges } from "@/components/jira/use-jira-ticket-changes";
 import { Alert, AlertDescription } from "@/components/ui/alert";
@@ -231,6 +229,7 @@ const ALL_FILTER_VALUE = "__all__";
 const DIRTY_FILTER_VALUE = "dirty";
 const CLEAN_FILTER_VALUE = "clean";
 const NON_DEFAULT_BRANCH_FILTER_VALUE = "non-default";
+const OPEN_PULL_REQUEST_FILTER_VALUE = "open-pull-requests";
 
 export type WorktreeListFilters = {
   query: string;
@@ -238,6 +237,7 @@ export type WorktreeListFilters = {
   repositoryId: string | null;
   dirty: boolean | null;
   nonDefaultBranch: boolean;
+  openPullRequests?: boolean;
 };
 
 type StoredFilters = {
@@ -283,7 +283,8 @@ function readStoredFilters(appId?: string): StoredFilters {
           ? stored.changes
           : fallback.changes,
       branches:
-        stored.branches === NON_DEFAULT_BRANCH_FILTER_VALUE
+        stored.branches === NON_DEFAULT_BRANCH_FILTER_VALUE ||
+        stored.branches === OPEN_PULL_REQUEST_FILTER_VALUE
           ? stored.branches
           : fallback.branches,
     };
@@ -341,7 +342,8 @@ export function filterWorktreeAgentGroups(
     !filters.agentId &&
     !filters.repositoryId &&
     filters.dirty === null &&
-    !filters.nonDefaultBranch
+    !filters.nonDefaultBranch &&
+    !filters.openPullRequests
   ) {
     return agents;
   }
@@ -405,13 +407,18 @@ export function filterWorktreeAgentGroups(
           : searched.filter(
               (worktree) => worktreeIsDirty(worktree) === filters.dirty,
             );
-      const worktrees = filters.nonDefaultBranch
+      const branchWorktrees = filters.nonDefaultBranch
         ? group.codebase.defaultBranch
           ? changedWorktrees.filter(
               (worktree) => worktree.branch !== group.codebase.defaultBranch,
             )
           : []
         : changedWorktrees;
+      const worktrees = filters.openPullRequests
+        ? branchWorktrees.filter(
+            (worktree) => worktree.pullRequest?.state === "OPEN",
+          )
+        : branchWorktrees;
       return worktrees.length ? [{ ...group, worktrees }] : [];
     });
     return codebases.length ? [{ ...agentGroup, codebases }] : [];
@@ -981,6 +988,7 @@ export function WorktreesPage({ appId }: { appId?: string }) {
             ? null
             : changesFilter === DIRTY_FILTER_VALUE,
         nonDefaultBranch: branchFilter === NON_DEFAULT_BRANCH_FILTER_VALUE,
+        openPullRequests: branchFilter === OPEN_PULL_REQUEST_FILTER_VALUE,
       }),
     [
       activeAgentFilter,
@@ -1219,6 +1227,9 @@ export function WorktreesPage({ appId }: { appId?: string }) {
                 </SelectItem>
                 <SelectItem value={NON_DEFAULT_BRANCH_FILTER_VALUE}>
                   {t("nonDefaultBranches")}
+                </SelectItem>
+                <SelectItem value={OPEN_PULL_REQUEST_FILTER_VALUE}>
+                  {t("openPullRequests")}
                 </SelectItem>
               </SelectContent>
             </Select>
@@ -2213,7 +2224,6 @@ export function PullRequestBadges({
   onToggleDetails?: () => void;
 }) {
   const t = useTranslations("worktrees");
-  const gitLabT = useTranslations("gitlabPages");
   const commits = worktree.baseAhead ?? 0;
   const gitLabMergeRequest =
     worktree.sourceControlRequest?.provider === "GITLAB"
@@ -2223,7 +2233,11 @@ export function PullRequestBadges({
     <>
       {worktree.pullRequest ? (
         <>
-          <PullRequestMenu pullRequest={worktree.pullRequest} />
+          <PullRequestMenu
+            label={`PR #${worktree.pullRequest.number}`}
+            pullRequest={worktree.pullRequest}
+            requestSource="WORKTREES"
+          />
           <PipelineMenu
             pipelineStatus={worktree.pullRequest.pipelineStatus}
             pipelines={worktree.pullRequest.pipelines}
@@ -2255,31 +2269,15 @@ export function PullRequestBadges({
           </Badge>
         </>
       ) : gitLabMergeRequest ? (
-        <DropdownMenu>
-          <DropdownMenuTrigger asChild>
-            <Badge asChild>
-              <button type="button">MR !{gitLabMergeRequest.number}</button>
-            </Badge>
-          </DropdownMenuTrigger>
-          <DropdownMenuContent align="start" className="w-44">
-            <DropdownMenuItem asChild>
-              <a href={gitLabMergeRequest.url} rel="noreferrer" target="_blank">
-                <ExternalLink />
-                {gitLabT("openInGitLab")}
-              </a>
-            </DropdownMenuItem>
-            {gitLabMergeRequest.projectId ? (
-              <DropdownMenuItem asChild>
-                <Link
-                  href={`/gitlab/merge-requests/${encodeURIComponent(gitLabMergeRequest.projectId)}/${gitLabMergeRequest.number}`}
-                >
-                  <GitMerge />
-                  {t("openDetails")}
-                </Link>
-              </DropdownMenuItem>
-            ) : null}
-          </DropdownMenuContent>
-        </DropdownMenu>
+        <MergeRequestMenu
+          label={`MR !${gitLabMergeRequest.number}`}
+          mergeRequest={{
+            iid: gitLabMergeRequest.number,
+            projectId: gitLabMergeRequest.projectId,
+            title: gitLabMergeRequest.title,
+            webUrl: gitLabMergeRequest.url,
+          }}
+        />
       ) : null}
       <GitLabWorktreePipelinesMenu pipelines={worktree.gitLabPipelines ?? []} />
       {!worktree.pullRequest &&
@@ -2305,37 +2303,6 @@ export function PullRequestBadges({
           </Badge>
         ))}
     </>
-  );
-}
-
-function PullRequestMenu({
-  pullRequest,
-}: {
-  pullRequest: NonNullable<Worktree["pullRequest"]>;
-}) {
-  const t = useTranslations("worktrees");
-  return (
-    <DropdownMenu>
-      <DropdownMenuTrigger asChild>
-        <Badge asChild>
-          <button type="button">PR #{pullRequest.number}</button>
-        </Badge>
-      </DropdownMenuTrigger>
-      <DropdownMenuContent align="start" className="w-44">
-        <DropdownMenuItem asChild>
-          <a href={pullRequest.url} rel="noreferrer" target="_blank">
-            <ExternalLink />
-            {t("openInGitHub")}
-          </a>
-        </DropdownMenuItem>
-        <DropdownMenuItem asChild>
-          <Link href={pullRequestDetailHref(pullRequest)}>
-            <GitPullRequest />
-            {t("openDetails")}
-          </Link>
-        </DropdownMenuItem>
-      </DropdownMenuContent>
-    </DropdownMenu>
   );
 }
 

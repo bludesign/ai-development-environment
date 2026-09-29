@@ -97,6 +97,168 @@ describe("AutoMergeButton", () => {
   });
 });
 
+describe("Auto Merge form state", () => {
+  function fixture() {
+    const worktree = worktreeForLaterPullRequest("UNKNOWN");
+    worktree.primary = false;
+    worktree.ticketKey = "APP-42";
+    const options = {
+      availableMethods: ["SQUASH", "MERGE"],
+      defaultMethod: "MERGE",
+      defaultCommitHeadline: "Saved headline",
+      defaultCommitBody: "",
+      defaultCommitEmail: null,
+      commitEmails: [],
+      canEnableAutoMerge: true,
+      defaultDeleteWorktree: false,
+      defaultMoveTicketToDone: false,
+      worktreeId: worktree.id,
+      worktreeFolder: "/worktrees/api",
+      canDeleteWorktree: true,
+      ticketKey: "APP-42",
+      ticketDoneStatusConfigured: true,
+    };
+    request.mockResolvedValue({
+      githubPullRequestMergeOptions: options,
+    } as never);
+    const props = {
+      conflictWorkflows: [],
+      disabled: false,
+      onCompleted: vi.fn(async () => undefined),
+      onError: vi.fn(),
+      worktree,
+    };
+    return { worktree, props, options };
+  }
+
+  test("keeps checkbox and text edits across refreshes and mergeability changes", async () => {
+    const { worktree, props } = fixture();
+    const { rerender } = render(<AutoMergeButton {...props} />);
+    fireEvent.click(screen.getByRole("button", { name: "Auto Merge" }));
+    const headline = await screen.findByDisplayValue("Saved headline");
+    fireEvent.change(headline, { target: { value: "My headline" } });
+    fireEvent.click(screen.getByRole("checkbox", { name: /Move APP-42/ }));
+    fireEvent.click(
+      screen.getByRole("checkbox", { name: "Delete worktree after merge" }),
+    );
+    rerender(
+      <AutoMergeButton
+        {...props}
+        worktree={{
+          ...worktree,
+          autoMerge: { ...worktree.autoMerge! },
+          pullRequest: {
+            ...worktree.pullRequest!,
+            mergeable: "MERGEABLE",
+            mergeStateStatus: "CLEAN",
+          },
+        }}
+      />,
+    );
+    await waitFor(() =>
+      expect(screen.getByDisplayValue("My headline")).toBeDefined(),
+    );
+    expect(
+      screen
+        .getByRole("checkbox", { name: /Move APP-42/ })
+        .getAttribute("aria-checked"),
+    ).toBe("true");
+    expect(
+      screen
+        .getByRole("checkbox", { name: "Delete worktree after merge" })
+        .getAttribute("aria-checked"),
+    ).toBe("true");
+    expect(screen.queryByRole("button", { name: "Manual merge" })).toBeNull();
+    expect(request).toHaveBeenCalledTimes(1);
+  });
+
+  test("reopens with defaults and reinitializes when the PR identity changes", async () => {
+    const { props, worktree } = fixture();
+    const { rerender } = render(<AutoMergeButton {...props} />);
+    fireEvent.click(screen.getByRole("button", { name: "Auto Merge" }));
+    await screen.findByDisplayValue("Saved headline");
+    fireEvent.click(screen.getByRole("checkbox", { name: /Move APP-42/ }));
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    fireEvent.click(screen.getByRole("button", { name: "Auto Merge" }));
+    await screen.findByDisplayValue("Saved headline");
+    expect(
+      screen
+        .getByRole("checkbox", { name: /Move APP-42/ })
+        .getAttribute("aria-checked"),
+    ).toBe("false");
+    rerender(
+      <AutoMergeButton
+        {...props}
+        worktree={{
+          ...worktree,
+          pullRequest: { ...worktree.pullRequest!, number: 19 },
+        }}
+      />,
+    );
+    await waitFor(() => expect(request).toHaveBeenCalledTimes(3));
+    await screen.findByDisplayValue("Saved headline");
+  });
+
+  test("ignores a late response for the previous PR", async () => {
+    const { props, worktree, options } = fixture();
+    let resolveOld!: (value: unknown) => void;
+    request.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          resolveOld = resolve;
+        }),
+    );
+    const { rerender } = render(<AutoMergeButton {...props} />);
+    fireEvent.click(screen.getByRole("button", { name: "Auto Merge" }));
+    await waitFor(() => expect(request).toHaveBeenCalledTimes(1));
+    rerender(
+      <AutoMergeButton
+        {...props}
+        worktree={{
+          ...worktree,
+          pullRequest: { ...worktree.pullRequest!, number: 19 },
+        }}
+      />,
+    );
+    await screen.findByDisplayValue("Saved headline");
+    resolveOld({
+      githubPullRequestMergeOptions: {
+        ...options,
+        defaultCommitHeadline: "Stale headline",
+      },
+    });
+    await waitFor(() =>
+      expect(screen.getByDisplayValue("Saved headline")).toBeDefined(),
+    );
+    expect(screen.queryByDisplayValue("Stale headline")).toBeNull();
+  });
+
+  test("retries post-merge actions without re-enabling auto merge", async () => {
+    const { props, worktree } = fixture();
+    worktree.pullRequest!.state = "MERGED";
+    worktree.autoMerge = {
+      ...worktree.autoMerge!,
+      pullRequestNumber: 18,
+      state: "ACTION_REQUIRED",
+    };
+    render(<AutoMergeButton {...props} />);
+    fireEvent.click(screen.getByRole("button", { name: "Auto Merge paused" }));
+    await screen.findByDisplayValue("Saved headline");
+    fireEvent.click(screen.getByRole("button", { name: "Resume Auto Merge" }));
+    await waitFor(() =>
+      expect(request).toHaveBeenCalledWith(
+        expect.stringContaining("mutation RetryWorktreeAutoMerge"),
+        { worktreeId: worktree.id },
+      ),
+    );
+    expect(
+      request.mock.calls.some(([query]) =>
+        query.includes("mutation ConfigureWorktreeAutoMerge"),
+      ),
+    ).toBe(false);
+  });
+});
+
 describe("AutoSyncButton", () => {
   test("offers a confirmed force retry only for preparation conflicts", async () => {
     const worktree = {

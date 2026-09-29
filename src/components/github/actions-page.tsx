@@ -40,7 +40,7 @@ import {
   githubJobWorkflowResource,
   githubPipelineWorkflowResource,
 } from "@/components/github/workflow-resource-context";
-import { pullRequestDetailHref } from "@/components/github/pull-request-links";
+import { PullRequestMenu } from "@/components/github/pull-request-menu";
 import { JiraTicketDrawer } from "@/components/jira/ticket-drawer";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
@@ -1093,21 +1093,16 @@ function ActionsTable({
                         ) : (
                           <div className="flex flex-wrap gap-1">
                             {run.pullRequests.map((pullRequest) => (
-                              <Badge
-                                asChild
-                                className="cursor-pointer hover:bg-muted/80"
+                              <PullRequestMenu
                                 key={pullRequest.number}
-                              >
-                                <Link
-                                  href={pullRequestDetailHref({
-                                    repositoryNameWithOwner:
-                                      run.repositoryNameWithOwner,
-                                    number: pullRequest.number,
-                                  })}
-                                >
-                                  #{pullRequest.number}
-                                </Link>
-                              </Badge>
+                                label={`#${pullRequest.number}`}
+                                pullRequest={{
+                                  ...pullRequest,
+                                  repositoryNameWithOwner:
+                                    run.repositoryNameWithOwner,
+                                }}
+                                requestSource="ACTIONS_PAGE"
+                              />
                             ))}
                           </div>
                         )}

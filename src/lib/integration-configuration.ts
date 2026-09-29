@@ -6,7 +6,7 @@ import {
   onControlPlaneRecovery,
 } from "./control-plane-client";
 
-export const GITHUB_CONFIGURATION_QUERY = `query GitHubPageConfiguration { githubSettings { tokenConfigured defaultJiraKeyRegex updatedAt } }`;
+export const GITHUB_CONFIGURATION_QUERY = `query GitHubPageConfiguration { githubSettings { tokenConfigured defaultJiraKeyRegex defaultMergeMethod emptyMergeCommitDescription defaultMoveTicketToDone defaultDeleteWorktree updatedAt } }`;
 const cache = new Map<string, { provider: string; value: unknown }>();
 const revisions = new Map<string, number>();
 const listeners = new Set<{ provider: string | null; listener: () => void }>();

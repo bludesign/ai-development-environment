@@ -2510,7 +2510,7 @@
     "loadingMore": "Loading more…",
     "retryLoad": "Try again",
     "empty": "No pull requests",
-    "emptyDescription": "No pull requests currently match this view.",
+    "emptyDescription": "Empty",
     "repository": "Repository",
     "number": "Number",
     "pullRequest": "Pull request",
@@ -2612,7 +2612,19 @@
     "removeRepository": "Remove repository",
     "confirmRemoveRepository": "Remove this managed repository?",
     "confirmRemoveRepositoryDescription": "Its pull request tab and Jira regex configuration will be removed.",
-    "saveRegex": "Save Jira regex"
+    "saveRegex": "Save Jira regex",
+    "mergeDefaults": "Merge defaults",
+    "defaultMergeMethod": "Default merge method",
+    "defaultCommitDescription": "Default commit description",
+    "usePullRequestContents": "Use pull request contents",
+    "defaultMoveTicketToDone": "Move linked Jira tickets to done by default",
+    "defaultDeleteWorktree": "Delete eligible worktrees after merge by default",
+    "saveMergeDefaults": "Save merge defaults",
+    "deleteWorktreeAfterMerge": "Delete worktree after merge",
+    "moveTicketToDoneAfterMerge": "Move {ticket} to the project’s configured done status",
+    "jiraDoneStatusRequired": "Configure this Jira project’s done status before using this option.",
+    "mergedFollowUpFailed": "Pull request merged, but a follow-up action failed.",
+    "closeMergeResult": "Close"
   },
   "githubComments": {
     "title": "Comments",
@@ -3326,7 +3338,8 @@
     "copyShortCommitHash": "Copy shortened commit hash",
     "copyFullCommitHash": "Copy full commit hash",
     "copyCommitMessage": "Copy commit message",
-    "copyChangeFailed": "Could not copy to the clipboard."
+    "copyChangeFailed": "Could not copy to the clipboard.",
+    "openPullRequests": "Open pull requests"
   },
   "worktreeDetail": {
     "loading": "Loading worktree details…",

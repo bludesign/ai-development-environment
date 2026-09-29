@@ -2735,6 +2735,10 @@ model JiraApiCallLog {
 
 model GitHubSettings {
   id                                     String   @id
+  defaultMergeMethod                     String   @default("SQUASH")
+  emptyMergeCommitDescription            Boolean  @default(false)
+  defaultMoveTicketToDone                 Boolean  @default(false)
+  defaultDeleteWorktree                   Boolean  @default(false)
   defaultJiraKeyRegex                    String   @default("\\b([A-Z][A-Z0-9_]*-\\d+)\\b")
   actionsNotificationPollIntervalSeconds Int      @default(60)
   cacheTtlSeconds                        Int      @default(300)

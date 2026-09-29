@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, test, vi } from "vitest";
 import { GITHUB_REST_OPERATIONS } from "./github-rest-operations";
 
 const state = vi.hoisted(() => ({
+  mergePreferences: {} as Record<string, unknown>,
   apiToken: "secret-token" as string | null,
   webhookSecret: null as string | null,
   credentialStoreReadOnly: false,
@@ -403,6 +404,7 @@ vi.mock("@/data/prisma-client", () => ({
         findUnique: async () => ({
           id: "default",
           defaultJiraKeyRegex: String.raw`\b([A-Z]+-\d+)\b`,
+          ...state.mergePreferences,
           actionsNotificationPollIntervalSeconds: 60,
           cacheTtlSeconds: 300,
           createdAt: new Date(0),
@@ -414,16 +416,24 @@ vi.mock("@/data/prisma-client", () => ({
         }: {
           create: Record<string, unknown>;
           update: Record<string, unknown>;
-        }) => ({
-          id: "default",
-          defaultJiraKeyRegex: String.raw`\b([A-Z]+-\d+)\b`,
-          actionsNotificationPollIntervalSeconds: 60,
-          cacheTtlSeconds: 300,
-          createdAt: new Date(0),
-          updatedAt: new Date(0),
-          ...create,
-          ...update,
-        }),
+        }) => {
+          state.mergePreferences = {
+            ...state.mergePreferences,
+            ...create,
+            ...update,
+          };
+          return {
+            id: "default",
+            defaultJiraKeyRegex: String.raw`\b([A-Z]+-\d+)\b`,
+            ...state.mergePreferences,
+            actionsNotificationPollIntervalSeconds: 60,
+            cacheTtlSeconds: 300,
+            createdAt: new Date(0),
+            updatedAt: new Date(0),
+            ...create,
+            ...update,
+          };
+        },
       },
       gitHubRepository: {
         findMany: async () => state.repositories,
@@ -754,6 +764,7 @@ function rawReviewThread(
 }
 
 beforeEach(() => {
+  state.mergePreferences = {};
   cacheClient.clear.mockReset();
   cacheClient.clear.mockResolvedValue(true);
   cacheClient.clearForCredentialChange.mockReset();
@@ -897,6 +908,25 @@ beforeEach(() => {
 });
 
 describe("GitHub service", () => {
+  test("persists merge preferences and preserves them on unrelated settings updates", async () => {
+    const service = new GitHubService();
+    const preferences = {
+      defaultMergeMethod: "REBASE" as const,
+      emptyMergeCommitDescription: true,
+      defaultMoveTicketToDone: true,
+      defaultDeleteWorktree: true,
+    };
+    expect(await service.saveSettings(preferences)).toMatchObject(preferences);
+    expect(
+      await service.saveSettings({
+        actionsNotificationPollIntervalSeconds: 120,
+      }),
+    ).toMatchObject(preferences);
+    expect(
+      await service.saveSettings({ defaultDeleteWorktree: false }),
+    ).toMatchObject({ ...preferences, defaultDeleteWorktree: false });
+  });
+
   test("lists webhook deliveries only when GitHub webhooks are configured", async () => {
     const service = new GitHubService();
 
@@ -3381,7 +3411,10 @@ describe("GitHub service", () => {
 
     await expect(
       service.pullRequestMergeOptions("acme", "widgets", 17),
-    ).resolves.toEqual({
+    ).resolves.toMatchObject({
+      defaultMethod: "SQUASH",
+      defaultDeleteWorktree: false,
+      defaultMoveTicketToDone: false,
       availableMethods: ["SQUASH", "MERGE"],
       commitEmails: ["octocat@example.com"],
       defaultCommitEmail: "octocat@example.com",
@@ -3394,6 +3427,23 @@ describe("GitHub service", () => {
       mergeStateStatus: "CLEAN",
       headRefOid: "head-oid-1",
       blockedReason: null,
+    });
+    state.mergePreferences = {
+      defaultMergeMethod: "MERGE",
+      emptyMergeCommitDescription: true,
+    };
+    await expect(
+      service.pullRequestMergeOptions("acme", "widgets", 17),
+    ).resolves.toMatchObject({ defaultMethod: "MERGE", defaultCommitBody: "" });
+    state.mergePreferences = {
+      defaultMergeMethod: "REBASE",
+      emptyMergeCommitDescription: false,
+    };
+    await expect(
+      service.pullRequestMergeOptions("acme", "widgets", 17),
+    ).resolves.toMatchObject({
+      defaultMethod: "SQUASH",
+      defaultCommitBody: "Detailed description",
     });
     await expect(
       service.mergePullRequest({

@@ -75,11 +75,13 @@ export function IosInstallButton({
   artifactId,
   metadata,
   publicOrigin,
+  size = "sm",
 }: {
   buildId: string;
   artifactId: string;
   metadata: Record<string, unknown>;
   publicOrigin: Pick<PublicOrigin, "origin" | "secure"> | null;
+  size?: "sm" | "default";
 }) {
   const t = useTranslations("builds");
   const locale = useLocale();
@@ -159,7 +161,7 @@ export function IosInstallButton({
             <Button
               aria-disabled="true"
               className="cursor-not-allowed opacity-50"
-              size="sm"
+              size={size}
               type="button"
               variant="outline"
             >
@@ -178,7 +180,7 @@ export function IosInstallButton({
         <Button
           disabled={disabled}
           onClick={() => void install()}
-          size="sm"
+          size={size}
           type="button"
           variant="outline"
         >

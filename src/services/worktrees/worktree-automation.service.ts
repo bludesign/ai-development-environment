@@ -4,7 +4,14 @@ import { randomUUID } from "node:crypto";
 
 import { WORKTREE_AUTO_SYNC_JOB_KIND } from "@ai-development-environment/agent-contract/worktrees";
 
-import type { GitHubMergeMethod } from "@/services/github";
+import { parseJiraKey } from "@/services/github/github.service";
+import type {
+  GitHubMergeMethod,
+  GitHubPullRequestMergeInput,
+  GitHubPullRequestMergeOptions,
+  GitHubPullRequestMergeResult,
+  GitHubRequestSource,
+} from "@/services/github/types";
 import type { GitHubService } from "@/services/github";
 import type { JiraService } from "@/services/jira";
 import type { PollingService } from "@/services/polling";
@@ -119,6 +126,23 @@ export class WorktreeAutomationService {
   private timer: ReturnType<typeof setTimeout> | null = null;
   private running = false;
   private rerunRequested = false;
+  private mergeOperationTail: Promise<void> = Promise.resolve();
+
+  // A manual merge must finish saving its chosen follow-ups before the worker
+  // can observe the merged PR and act on an older auto-merge rule.
+  private async withMergeLock<T>(operation: () => Promise<T>): Promise<T> {
+    const previous = this.mergeOperationTail;
+    let release!: () => void;
+    this.mergeOperationTail = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    await previous;
+    try {
+      return await operation();
+    } finally {
+      release();
+    }
+  }
 
   constructor(
     private readonly worktrees: WorktreesService,
@@ -307,6 +331,190 @@ export class WorktreeAutomationService {
       where: { worktreeId },
     });
     return rule ? mergeView(rule) : null;
+  }
+
+  async pullRequestMergeOptions(
+    owner: string,
+    name: string,
+    number: number,
+    source: GitHubRequestSource,
+    worktreeId?: string | null,
+  ): Promise<GitHubPullRequestMergeOptions> {
+    const options = await this.github.pullRequestMergeOptions(
+      owner,
+      name,
+      number,
+      source,
+    );
+    const prisma = await getPrismaClient();
+    const origin = options.headRepositoryNameWithOwner
+      ? `github.com/${options.headRepositoryNameWithOwner.toLowerCase()}`
+      : null;
+    const worktree =
+      worktreeId || origin
+        ? await prisma.worktree.findFirst({
+            where: worktreeId
+              ? { id: worktreeId, missingAt: null }
+              : {
+                  missingAt: null,
+                  branch: options.headRefName,
+                  codebase: { repository: { canonicalOrigin: origin! } },
+                },
+            orderBy: { updatedAt: "desc" },
+            include: {
+              autoMerge: true,
+              codebase: { include: { repository: true } },
+            },
+          })
+        : null;
+    if (worktreeId && !worktree)
+      throw new Error("The linked worktree is no longer available");
+    if (
+      worktree &&
+      (!origin ||
+        worktree.branch !== options.headRefName ||
+        worktree.codebase.repository.canonicalOrigin.toLowerCase() !== origin)
+    ) {
+      throw new Error(
+        "The pull request head repository or branch does not match this worktree",
+      );
+    }
+    const branchTicket = worktree
+      ? await this.worktrees.ticketKeyForWorktree(worktree.id)
+      : null;
+    const settings = await this.github.getSettings();
+    const repositories = await prisma.gitHubRepository.findMany();
+    const repository = repositories.find(
+      (item) =>
+        item.nameWithOwner.toLowerCase() === `${owner}/${name}`.toLowerCase(),
+    );
+    const titleTicket = parseJiraKey(
+      options.defaultCommitHeadline,
+      repository?.jiraKeyRegex ?? settings.defaultJiraKeyRegex,
+    );
+    const ticketKey =
+      worktreeId && source === "WORKTREE_AUTOMATION"
+        ? branchTicket
+        : (titleTicket ?? branchTicket);
+    const project = ticketKey
+      ? await prisma.jiraProject.findUnique({
+          where: { key: ticketKey.split("-")[0]! },
+          select: { doneStatusId: true },
+        })
+      : null;
+    const rule = worktree?.autoMerge;
+    const saved =
+      rule &&
+      rule.pullRequestNumber === number &&
+      rule.repositoryNameWithOwner.toLowerCase() ===
+        `${owner}/${name}`.toLowerCase()
+        ? rule
+        : null;
+    return {
+      ...options,
+      defaultMethod:
+        saved &&
+        options.availableMethods.includes(
+          saved.mergeMethod as GitHubMergeMethod,
+        )
+          ? (saved.mergeMethod as GitHubMergeMethod)
+          : options.defaultMethod,
+      defaultCommitHeadline:
+        saved?.commitHeadline ?? options.defaultCommitHeadline,
+      defaultCommitBody: saved?.commitBody ?? options.defaultCommitBody,
+      defaultCommitEmail: saved
+        ? saved.authorEmail
+        : options.defaultCommitEmail,
+      defaultMoveTicketToDone:
+        saved?.moveTicketToDone ?? options.defaultMoveTicketToDone,
+      defaultDeleteWorktree:
+        saved?.deleteWorktree ?? options.defaultDeleteWorktree,
+      worktreeId: worktree?.id ?? null,
+      worktreeFolder: worktree?.folder ?? null,
+      canDeleteWorktree: Boolean(worktree && !worktree.primary),
+      ticketKey,
+      ticketDoneStatusConfigured: Boolean(project?.doneStatusId),
+    };
+  }
+
+  async mergePullRequest(
+    input: GitHubPullRequestMergeInput,
+    source: GitHubRequestSource,
+  ): Promise<GitHubPullRequestMergeResult> {
+    return this.withMergeLock(() =>
+      this.mergePullRequestWithFollowUps(input, source),
+    );
+  }
+
+  private async mergePullRequestWithFollowUps(
+    input: GitHubPullRequestMergeInput,
+    source: GitHubRequestSource,
+  ): Promise<GitHubPullRequestMergeResult> {
+    const options = await this.pullRequestMergeOptions(
+      input.owner,
+      input.name,
+      input.number,
+      source,
+      input.worktreeId,
+    );
+    if (input.deleteWorktree && !options.canDeleteWorktree) {
+      throw new Error(
+        "Only a linked, non-primary worktree can be deleted after merge",
+      );
+    }
+    if (
+      input.moveTicketToDone &&
+      (!options.ticketKey || !options.ticketDoneStatusConfigured)
+    ) {
+      throw new Error(
+        options.ticketKey
+          ? "Configure this Jira project's done status before enabling this option"
+          : "This pull request is not linked to a Jira ticket",
+      );
+    }
+    const result = await this.github.mergePullRequest(input, source);
+    if (result.state !== "MERGED") return result;
+    try {
+      if (options.worktreeId) {
+        const prisma = await getPrismaClient();
+        const data = {
+          state:
+            input.moveTicketToDone || input.deleteWorktree
+              ? "POST_MERGE"
+              : "COMPLETED",
+          repositoryNameWithOwner: `${input.owner}/${input.name}`,
+          pullRequestNumber: input.number,
+          branch: options.headRefName,
+          mergeMethod: input.method,
+          commitHeadline: input.commitHeadline.trim(),
+          commitBody: input.commitBody,
+          authorEmail: input.authorEmail?.trim() || null,
+          deleteWorktree: input.deleteWorktree ?? false,
+          moveTicketToDone: input.moveTicketToDone ?? false,
+          ticketKey: options.ticketKey,
+          ticketMovedAt: null,
+          deleteJobId: null,
+          lastError: null,
+        };
+        await prisma.worktreeAutoMerge.upsert({
+          where: { worktreeId: options.worktreeId },
+          create: { worktreeId: options.worktreeId, ...data },
+          update: data,
+        });
+        this.worktrees.publishAutomationChange(options.worktreeId);
+        this.changed();
+      } else if (input.moveTicketToDone && options.ticketKey) {
+        await this.jira.transitionTicketToConfiguredDone(options.ticketKey);
+      }
+      return { ...result, ticketKey: options.ticketKey, postMergeError: null };
+    } catch (error) {
+      // GitHub has already merged. Never turn a follow-up failure into a merge retry.
+      return {
+        ...result,
+        ticketKey: options.ticketKey,
+        postMergeError: error instanceof Error ? error.message : String(error),
+      };
+    }
   }
 
   async configureAutoMerge(input: {
@@ -766,6 +974,10 @@ export class WorktreeAutomationService {
   }
 
   private async reconcileAutoMerge(): Promise<void> {
+    return this.withMergeLock(() => this.reconcileAutoMergeRules());
+  }
+
+  private async reconcileAutoMergeRules(): Promise<void> {
     const prisma = await getPrismaClient();
     const rules = await prisma.worktreeAutoMerge.findMany({
       where: { state: { in: ["ACTIVE", "POST_MERGE"] } },
@@ -776,6 +988,9 @@ export class WorktreeAutomationService {
             branch: true,
             headSha: true,
             primary: true,
+            codebase: {
+              select: { repository: { select: { canonicalOrigin: true } } },
+            },
           },
         },
       },
@@ -827,6 +1042,15 @@ export class WorktreeAutomationService {
           );
           if (pullRequest.state !== "MERGED") {
             throw new Error("The pull request is no longer merged");
+          }
+          if (
+            !pullRequest.headRepositoryNameWithOwner ||
+            rule.worktree.codebase.repository.canonicalOrigin.toLowerCase() !==
+              `github.com/${pullRequest.headRepositoryNameWithOwner.toLowerCase()}`
+          ) {
+            throw new Error(
+              "The merged pull request head repository does not match the worktree",
+            );
           }
           if (pullRequest.headRefName !== rule.branch) {
             throw new Error(

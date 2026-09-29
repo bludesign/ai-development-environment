@@ -176,6 +176,14 @@ enum GitHubRequestSource {
 
 "Configurable settings for GitHub."
 type GitHubSettings {
+  "Preferred merge method."
+  defaultMergeMethod: GitHubMergeMethod!
+  "Start new merge commit descriptions empty."
+  emptyMergeCommitDescription: Boolean!
+  "Select Jira completion for new merges."
+  defaultMoveTicketToDone: Boolean!
+  "Select eligible worktree deletion for new merges."
+  defaultDeleteWorktree: Boolean!
   "Whether the token configured condition is true for this GitHub settings."
   tokenConfigured: Boolean!
   "The default Jira key regex associated with this GitHub settings."
@@ -1216,6 +1224,22 @@ type GitHubPullRequestDetail {
 
 "Represents GitHub pull request merge options in the GraphQL API."
 type GitHubPullRequestMergeOptions {
+  "The merge method selected by default. May be null when the repository has no available merge method."
+  defaultMethod: GitHubMergeMethod
+  "Whether moving the linked Jira ticket to Done is selected by default."
+  defaultMoveTicketToDone: Boolean!
+  "Whether deleting the linked worktree after merge is selected by default."
+  defaultDeleteWorktree: Boolean!
+  "Identifier of the linked worktree. May be null when no matching worktree is available."
+  worktreeId: ID
+  "Filesystem path of the linked worktree. May be null when no matching worktree is available."
+  worktreeFolder: String
+  "Whether the linked worktree can be deleted after merge."
+  canDeleteWorktree: Boolean!
+  "Key of the linked Jira ticket. May be null when no ticket can be resolved."
+  ticketKey: String
+  "Whether the linked Jira project's Done status is configured."
+  ticketDoneStatusConfigured: Boolean!
   "Available methods associated with this GitHub pull request merge options."
   availableMethods: [GitHubMergeMethod!]!
   "Commit emails associated with this GitHub pull request merge options."
@@ -1244,6 +1268,10 @@ type GitHubPullRequestMergeOptions {
 
 "The result of GitHub pull request merge."
 type GitHubPullRequestMergeResult {
+  "Error raised while scheduling or performing post-merge actions. May be null when the actions succeed or are not requested."
+  postMergeError: String
+  "Key of the Jira ticket associated with post-merge actions. May be null when no ticket is linked."
+  ticketKey: String
   "Stable identifier for this GitHub pull request merge result."
   id: ID!
   "Current state of this GitHub pull request merge result."
@@ -1268,6 +1296,14 @@ type GitHubPullRequestPage {
 
 "Values used to save GitHub settings."
 input SaveGitHubSettingsInput {
+  "The preferred merge method for pull requests."
+  defaultMergeMethod: GitHubMergeMethod
+  "Whether new merge commit descriptions should start empty."
+  emptyMergeCommitDescription: Boolean
+  "Whether moving linked Jira tickets to Done should be selected by default."
+  defaultMoveTicketToDone: Boolean
+  "Whether deleting eligible worktrees after merge should be selected by default."
+  defaultDeleteWorktree: Boolean
   "The API token to use for the request."
   apiToken: String
   "The default Jira key regex to use for the request."
@@ -1316,6 +1352,12 @@ input UpdateGitHubRepositoryInput {
 
 "Values used to merge a GitHub pull request."
 input MergeGitHubPullRequestInput {
+  "Identifier of the linked worktree to use for validation and post-merge actions."
+  worktreeId: ID
+  "Whether to move the linked Jira ticket to its configured Done status after merge."
+  moveTicketToDone: Boolean = false
+  "Whether to delete the linked non-primary worktree after merge."
+  deleteWorktree: Boolean = false
   "The owner to use for the request."
   owner: String!
   "The name to use for the request."
@@ -1498,6 +1540,8 @@ extend type Query {
   ): GitHubPullRequestDetail
   "Returns GitHub pull request merge options."
   githubPullRequestMergeOptions(
+    "Identifier of the linked worktree used to resolve merge defaults and follow-up actions."
+    worktreeId: ID
     "The source used to filter or perform the operation."
     source: GitHubRequestSource!
     "The owner used to filter or perform the operation."

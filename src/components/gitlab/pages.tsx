@@ -22,6 +22,7 @@ import { useTranslations } from "next-intl";
 import { Fragment, useCallback, useEffect, useRef, useState } from "react";
 
 import { Alert, AlertDescription } from "@/components/ui/alert";
+import { MergeRequestMenu } from "@/components/gitlab/merge-request-menu";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -1245,15 +1246,18 @@ export function GitLabPipelinesPage() {
                       ) : (
                         <div className="flex flex-col gap-1">
                           {pipeline.mergeRequests.map((mergeRequest) => (
-                            <Link
-                              className="rounded-md px-1.5 py-1 transition-colors hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                              href={`/gitlab/merge-requests/${encodeURIComponent(mergeRequest.projectId)}/${mergeRequest.iid}`}
+                            <div
+                              className="flex items-center gap-2"
                               key={`${mergeRequest.projectId}:${mergeRequest.iid}`}
                             >
-                              <span className="block text-sm font-medium text-primary">
-                                !{mergeRequest.iid} · {mergeRequest.title}
+                              <MergeRequestMenu
+                                label={`MR !${mergeRequest.iid}`}
+                                mergeRequest={mergeRequest}
+                              />
+                              <span className="text-sm font-medium">
+                                {mergeRequest.title}
                               </span>
-                            </Link>
+                            </div>
                           ))}
                         </div>
                       )}

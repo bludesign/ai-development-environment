@@ -27,7 +27,7 @@ import {
   WorktreesPage,
   worktreeChangeActionState,
 } from "./worktrees-page";
-import type { WorktreeAgentGroup, WorktreeOverview } from "./types";
+import type { Worktree, WorktreeAgentGroup, WorktreeOverview } from "./types";
 
 vi.mock("@/lib/control-plane-client", () => ({
   onControlPlaneRecovery: vi.fn(() => vi.fn()),
@@ -353,6 +353,38 @@ export function registerWorktreesPageTests(
             dirty: null,
             nonDefaultBranch: false,
           }),
+        ).toEqual([]);
+      });
+
+      test("open pull requests includes drafts and combines with the other filters", () => {
+        const candidates = structuredClone(groups);
+        const group = candidates[0]!.codebases[0]!;
+        const base = group.worktrees[0]!;
+        group.worktrees = ["OPEN", "OPEN", "CLOSED", "MERGED", null].map(
+          (state, index) => ({
+            ...base,
+            id: `candidate-${index}`,
+            pullRequest: state
+              ? ({ state, isDraft: index === 1 } as Worktree["pullRequest"])
+              : null,
+          }),
+        );
+        const filters = {
+          query: "Codex",
+          agentId: "agent-1",
+          repositoryId: "repository-1",
+          dirty: true,
+          nonDefaultBranch: false,
+          openPullRequests: true,
+        };
+        expect(
+          filterWorktreeAgentGroups(
+            candidates,
+            filters,
+          )[0]!.codebases[0]!.worktrees.map((item) => item.id),
+        ).toEqual(["candidate-0", "candidate-1"]);
+        expect(
+          filterWorktreeAgentGroups(candidates, { ...filters, dirty: false }),
         ).toEqual([]);
       });
 
@@ -1971,7 +2003,21 @@ export function registerWorktreesPageTests(
 
         render(<WorktreesPage />);
         await screen.findByText("feature/AIDE-24");
-        expect(screen.getByRole("button", { name: "MR !24" })).toBeDefined();
+        fireEvent.pointerDown(screen.getByRole("button", { name: "MR !24" }), {
+          button: 0,
+          ctrlKey: false,
+        });
+        expect(
+          screen
+            .getByRole("menuitem", { name: "Open in GitLab" })
+            .getAttribute("href"),
+        ).toBe("https://gitlab.com/acme/widgets/-/merge_requests/24");
+        expect(
+          screen
+            .getByRole("menuitem", { name: "Open details" })
+            .getAttribute("href"),
+        ).toBe("/gitlab/merge-requests/project-1/24");
+        fireEvent.keyDown(screen.getByRole("menu"), { key: "Escape" });
         fireEvent.pointerDown(
           screen.getByRole("button", { name: "Pipelines: SUCCESS" }),
           { button: 0, ctrlKey: false },
@@ -2098,6 +2144,36 @@ export function registerWorktreesPageTests(
           await screen.findByRole("option", { name: "Clean worktrees" }),
         );
         expect(await screen.findByText("feature/AIDE-24")).toBeDefined();
+      });
+
+      test("remembers the open pull requests filter independently for app views", async () => {
+        render(<WorktreesPage appId="app-1" />);
+        await screen.findByText("feature/AIDE-24");
+        fireEvent.pointerDown(
+          screen.getByRole("combobox", { name: "Filter by branch" }),
+          {
+            button: 0,
+            ctrlKey: false,
+            pointerType: "mouse",
+          },
+        );
+        fireEvent.click(
+          await screen.findByRole("option", { name: "Open pull requests" }),
+        );
+        await waitFor(() =>
+          expect(
+            JSON.parse(
+              window.localStorage.getItem("worktrees-filters:app-1") ?? "{}",
+            ),
+          ).toMatchObject({ branches: "open-pull-requests" }),
+        );
+        expect(window.localStorage.getItem("worktrees-filters")).toBeNull();
+        cleanup();
+        render(<WorktreesPage appId="app-1" />);
+        expect(
+          (await screen.findByRole("combobox", { name: "Filter by branch" }))
+            .textContent,
+        ).toContain("Open pull requests");
       });
 
       test("filters and remembers worktrees not on the default branch", async () => {
