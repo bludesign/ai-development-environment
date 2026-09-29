@@ -64,6 +64,8 @@ const mergeRequests = [
     id: 8101,
     iid: ids.gitlab.mergeRequestIid,
     project_id: Number(PROJECT_ID),
+    source_project_id: Number(PROJECT_ID),
+    user: { can_merge: true },
     title: "Improve pipeline retry diagnostics",
     description:
       "Adds structured retry history and makes failed jobs easier to inspect.",
@@ -98,6 +100,8 @@ const mergeRequests = [
     id: 8102,
     iid: 41,
     project_id: Number(PROJECT_ID),
+    source_project_id: Number(PROJECT_ID),
+    user: { can_merge: true },
     title: "Document the release pipeline",
     description: "Documents deployment gates for maintainers.",
     state: "opened",
@@ -155,6 +159,57 @@ const pipelines = [
     queued_duration: 7,
   },
 ];
+
+const pipelineJobs = pipelines.flatMap((pipeline) => [
+  {
+    id: pipeline.id * 10 + 1,
+    pipeline: { id: pipeline.id },
+    name: "compile",
+    stage: "build",
+    status: "success",
+    ref: pipeline.ref,
+    web_url: `${BASE_URL}/${PROJECT_PATH}/-/jobs/${pipeline.id * 10 + 1}`,
+    allow_failure: false,
+    created_at: pipeline.created_at,
+    started_at: pipeline.started_at,
+    finished_at: pipeline.finished_at,
+    duration: 120,
+    queued_duration: 3,
+    retried: false,
+  },
+  {
+    id: pipeline.id * 10 + 2,
+    pipeline: { id: pipeline.id },
+    name: "unit-tests",
+    stage: "test",
+    status: pipeline.status,
+    ref: pipeline.ref,
+    web_url: `${BASE_URL}/${PROJECT_PATH}/-/jobs/${pipeline.id * 10 + 2}`,
+    allow_failure: false,
+    created_at: pipeline.created_at,
+    started_at: pipeline.started_at,
+    finished_at: pipeline.finished_at,
+    duration: 181,
+    queued_duration: 1,
+    retried: false,
+  },
+  {
+    id: pipeline.id * 10,
+    pipeline: { id: pipeline.id },
+    name: "unit-tests",
+    stage: "test",
+    status: "failed",
+    ref: pipeline.ref,
+    web_url: `${BASE_URL}/${PROJECT_PATH}/-/jobs/${pipeline.id * 10}`,
+    allow_failure: false,
+    created_at: pipeline.created_at,
+    started_at: pipeline.started_at,
+    finished_at: pipeline.finished_at,
+    duration: 29,
+    queued_duration: 1,
+    retried: true,
+  },
+]);
 
 /** Mirrors the prefix GitLabService.mergeRequest() builds, so the cache keys line up. */
 const mergeRequestPath = `/projects/${encodeURIComponent(PROJECT_ID)}/merge_requests/${mergeRequests[0]!.iid}`;
@@ -460,6 +515,48 @@ export async function seedGitLab(prisma: PrismaClient): Promise<void> {
         },
         response: pipelines,
       }),
+      cacheEntry({
+        id: "gitlab-cache-project-summary",
+        operation: "GitLabMergeProject",
+        path: `/projects/${PROJECT_ID}`,
+        query: {},
+        response: {
+          id: Number(PROJECT_ID),
+          name: "Platform",
+          path_with_namespace: PROJECT_PATH,
+          web_url: `${BASE_URL}/${PROJECT_PATH}`,
+          visibility: "private",
+          merge_method: "merge",
+          squash_option: "default_on",
+        },
+      }),
+      ...mergeRequests.map((mr, index) =>
+        cacheEntry({
+          id: `gitlab-cache-approval-${mr.iid}`,
+          operation: "GitLabMergeRequestApprovals",
+          path: `/projects/${PROJECT_ID}/merge_requests/${mr.iid}/approvals`,
+          query: {},
+          response: {
+            approvals_required: 1,
+            approvals_left: index,
+            approved_by: index ? [] : [{ user }],
+          },
+        }),
+      ),
+      cacheEntry({
+        id: "gitlab-cache-second-merge-request",
+        operation: "GitLabMergeRequest",
+        path: `/projects/${PROJECT_ID}/merge_requests/41`,
+        query: { include_rebase_in_progress: true },
+        response: mergeRequests[1],
+      }),
+      cacheEntry({
+        id: "gitlab-cache-second-discussions",
+        operation: "GitLabMergeRequestDiscussions",
+        path: `/projects/${PROJECT_ID}/merge_requests/41/discussions`,
+        query: { per_page: 100, page: 1 },
+        response: [],
+      }),
       // The merge request detail page issues these four requests in parallel; all of them must
       // hit the cache or the page renders its error alert, since no GitLab host is reachable.
       cacheEntry({
@@ -467,29 +564,47 @@ export async function seedGitLab(prisma: PrismaClient): Promise<void> {
         operation: "GitLabMergeRequest",
         path: mergeRequestPath,
         query: { include_rebase_in_progress: true },
-        response: mergeRequests[0],
+        response: { ...mergeRequests[0], head_pipeline: pipelines[0] },
       }),
       cacheEntry({
         id: "gitlab-cache-merge-request-commits",
         operation: "GitLabMergeRequestCommits",
         path: `${mergeRequestPath}/commits`,
-        query: { per_page: 100 },
+        query: { per_page: 100, page: 1 },
         response: mergeRequestCommits,
       }),
       cacheEntry({
         id: "gitlab-cache-merge-request-discussions",
         operation: "GitLabMergeRequestDiscussions",
         path: `${mergeRequestPath}/discussions`,
-        query: { per_page: 100 },
+        query: { per_page: 100, page: 1 },
         response: mergeRequestDiscussions,
       }),
       cacheEntry({
         id: "gitlab-cache-merge-request-pipelines",
         operation: "GitLabMergeRequestPipelines",
         path: `${mergeRequestPath}/pipelines`,
-        query: { per_page: 100 },
+        query: { per_page: 100, page: 1 },
         response: [pipelines[0]],
       }),
+      ...pipelines.flatMap((pipeline) => [
+        cacheEntry({
+          id: `gitlab-cache-pipeline-detail-${pipeline.id}`,
+          operation: "GitLabPipeline",
+          path: `/projects/${PROJECT_ID}/pipelines/${pipeline.id}`,
+          query: {},
+          response: pipeline,
+        }),
+        cacheEntry({
+          id: `gitlab-cache-pipeline-jobs-${pipeline.id}`,
+          operation: "GitLabPipelineJobs",
+          path: `/projects/${PROJECT_ID}/pipelines/${pipeline.id}/jobs`,
+          query: { include_retried: true, per_page: 100, page: 1 },
+          response: pipelineJobs.filter(
+            (job) => job.pipeline.id === pipeline.id,
+          ),
+        }),
+      ]),
       ...pipelines.map((pipeline, index) =>
         cacheEntry({
           id: `gitlab-cache-pipeline-merge-requests-${pipeline.id}`,

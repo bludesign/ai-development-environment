@@ -287,7 +287,7 @@ export const routes: RouteEntry[] = [
     name: "gitlab-pipelines",
     path: "/gitlab/pipelines",
     readyGraphqlOperation: "GitLabPipelines",
-    readyTexts: ["#9401 · feature/retry-diagnostics", "No pipelines"],
+    readyTexts: ["#118 · feature/retry-diagnostics", "No pipelines"],
   },
   {
     name: "gitlab-comments",

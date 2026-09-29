@@ -2019,7 +2019,7 @@ export function registerWorktreesPageTests(
         ).toBe("/gitlab/merge-requests/project-1/24");
         fireEvent.keyDown(screen.getByRole("menu"), { key: "Escape" });
         fireEvent.pointerDown(
-          screen.getByRole("button", { name: "Pipelines: SUCCESS" }),
+          screen.getByRole("button", { name: "Pipelines: Success" }),
           { button: 0, ctrlKey: false },
         );
         expect(
@@ -2027,6 +2027,10 @@ export function registerWorktreesPageTests(
             .closest("a")
             ?.getAttribute("href"),
         ).toBe("https://gitlab.com/acme/widgets/-/pipelines/42");
+        expect(
+          within(screen.getByRole("menu")).getByText("Success").className,
+        ).toContain("text-emerald");
+        expect(screen.queryByText("SUCCESS")).toBeNull();
       });
 
       test("names the agent on the card instead of its hostname", async () => {

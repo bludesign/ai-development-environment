@@ -19,6 +19,10 @@ import type { WorkflowsService } from "@/services/workflows";
 import type { AgentControlService } from "@/services/agent-control";
 import { getPrismaClient } from "@/data/prisma-client";
 
+import {
+  validateMergeFollowUps,
+  completeMergeTicketFollowUp,
+} from "./merge-follow-ups";
 import type { WorktreesService } from "./worktrees.service";
 
 const POLLING_OPERATION_ID = "server:worktree-automations";
@@ -457,21 +461,7 @@ export class WorktreeAutomationService {
       source,
       input.worktreeId,
     );
-    if (input.deleteWorktree && !options.canDeleteWorktree) {
-      throw new Error(
-        "Only a linked, non-primary worktree can be deleted after merge",
-      );
-    }
-    if (
-      input.moveTicketToDone &&
-      (!options.ticketKey || !options.ticketDoneStatusConfigured)
-    ) {
-      throw new Error(
-        options.ticketKey
-          ? "Configure this Jira project's done status before enabling this option"
-          : "This pull request is not linked to a Jira ticket",
-      );
-    }
+    validateMergeFollowUps(input, options);
     const result = await this.github.mergePullRequest(input, source);
     if (result.state !== "MERGED") return result;
     try {
@@ -1018,10 +1008,13 @@ export class WorktreeAutomationService {
           continue;
         }
         if (rule.moveTicketToDone && rule.ticketKey && !rule.ticketMovedAt) {
-          await this.jira.transitionTicketToConfiguredDone(rule.ticketKey);
+          const ticketMovedAt = await completeMergeTicketFollowUp(
+            this.jira,
+            rule,
+          );
           await prisma.worktreeAutoMerge.update({
             where: { worktreeId: rule.worktreeId },
-            data: { ticketMovedAt: new Date(), lastError: null },
+            data: { ticketMovedAt, lastError: null },
           });
         }
         if (!rule.deleteWorktree) {

@@ -1,5 +1,60 @@
 import type { GitLabPipelineStatus } from "@/services/gitlab";
 
+export const gitLabPipelineStatuses = [
+  "CREATED",
+  "WAITING_FOR_RESOURCE",
+  "WAITING_FOR_CALLBACK",
+  "PREPARING",
+  "PENDING",
+  "RUNNING",
+  "CANCELING",
+  "SUCCESS",
+  "FAILED",
+  "CANCELED",
+  "SKIPPED",
+  "MANUAL",
+  "SCHEDULED",
+  "UNKNOWN",
+] as const;
+
+export const gitLabPipelineSources = [
+  "push",
+  "web",
+  "trigger",
+  "schedule",
+  "api",
+  "external",
+  "pipeline",
+  "chat",
+  "webide",
+  "merge_request_event",
+  "external_pull_request_event",
+  "parent_pipeline",
+  "ondemand_dast_scan",
+  "ondemand_dast_validation",
+  "security_orchestration_policy",
+] as const;
+
+export function isActiveGitLabPipeline(status: GitLabPipelineStatus) {
+  return [
+    "CREATED",
+    "WAITING_FOR_RESOURCE",
+    "WAITING_FOR_CALLBACK",
+    "PREPARING",
+    "PENDING",
+    "RUNNING",
+    "CANCELING",
+  ].includes(status);
+}
+
+export function canRetryGitLabPipeline(status: GitLabPipelineStatus) {
+  return status === "FAILED" || status === "CANCELED";
+}
+
+export function canCancelGitLabPipeline(status: GitLabPipelineStatus) {
+  return isActiveGitLabPipeline(status) && status !== "CANCELING";
+}
+
 type GitLabTimedItem = {
   duration: number | null;
   startedAt: string | null;
@@ -10,25 +65,18 @@ export function canRetryGitLabJob(status: GitLabPipelineStatus) {
   return status === "SUCCESS" || status === "FAILED" || status === "CANCELED";
 }
 
-export function gitLabDuration(item: GitLabTimedItem) {
+export function gitLabDuration(item: GitLabTimedItem, now = Date.now()) {
   let totalSeconds = item.duration;
-  if (
-    totalSeconds === null &&
-    [
-      "CREATED",
-      "WAITING_FOR_RESOURCE",
-      "PREPARING",
-      "PENDING",
-      "RUNNING",
-    ].includes(item.status) &&
-    item.startedAt
-  ) {
+  if (isActiveGitLabPipeline(item.status) && item.startedAt) {
     const startedAt = Date.parse(item.startedAt);
     if (Number.isFinite(startedAt)) {
-      totalSeconds = Math.max(0, Math.floor((Date.now() - startedAt) / 1000));
+      totalSeconds = Math.max(
+        totalSeconds ?? 0,
+        Math.floor((now - startedAt) / 1000),
+      );
     }
   }
-  if (totalSeconds === null) return "—";
+  if (totalSeconds === null || !Number.isFinite(totalSeconds)) return "—";
   const seconds = Math.max(0, Math.floor(totalSeconds));
   const hours = Math.floor(seconds / 3600);
   const minutes = Math.floor((seconds % 3600) / 60);
@@ -46,11 +94,7 @@ export function gitLabPipelineStatusClass(status: GitLabPipelineStatus) {
     return "border-red-500/30 bg-red-500/10 text-red-700 dark:text-red-300";
   }
   if (
-    status === "CREATED" ||
-    status === "WAITING_FOR_RESOURCE" ||
-    status === "PREPARING" ||
-    status === "PENDING" ||
-    status === "RUNNING" ||
+    isActiveGitLabPipeline(status) ||
     status === "MANUAL" ||
     status === "SCHEDULED"
   ) {
@@ -64,7 +108,11 @@ export function aggregateGitLabPipelineStatus(
 ): GitLabPipelineStatus {
   if (statuses.some((status) => status === "FAILED")) return "FAILED";
   if (statuses.some((status) => status === "CANCELED")) return "CANCELED";
-  if (statuses.some((status) => status === "RUNNING")) return "RUNNING";
-  if (statuses.some((status) => status === "PENDING")) return "PENDING";
+  const active = statuses.find(isActiveGitLabPipeline);
+  if (active) return active;
+  if (statuses.includes("MANUAL")) return "MANUAL";
+  if (statuses.includes("SCHEDULED")) return "SCHEDULED";
+  if (statuses.includes("UNKNOWN")) return "UNKNOWN";
+  if (statuses.includes("SUCCESS")) return "SUCCESS";
   return statuses[0] ?? "UNKNOWN";
 }

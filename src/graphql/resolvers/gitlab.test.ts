@@ -1,7 +1,13 @@
 import { describe, expect, test, vi } from "vitest";
 
 import type { GitHubService } from "@/services/github";
-import type { GitLabService } from "@/services/gitlab";
+import {
+  GitLabService,
+  type GitLabMergeOptions,
+  type GitLabMergeResult,
+  type SubmitGitLabMergeRequestMergeInput,
+} from "@/services/gitlab";
+import type { GitLabMergeService } from "@/services/gitlab/gitlab-merge.service";
 import type { GraphQLContext } from "@/services/graphql-server/graphql-server.service";
 
 import { createGitLabResolvers } from "./gitlab";
@@ -63,5 +69,220 @@ describe("GitLab resolvers", () => {
     ).rejects.toThrow("control-plane");
     expect(gitLabService.getSettings).not.toHaveBeenCalled();
     expect(gitHubService.getSettings).not.toHaveBeenCalled();
+  });
+});
+
+const mergeResult: GitLabMergeResult = {
+  mergeRequest: {
+    id: "101",
+    projectId: "7",
+    iid: 3,
+    title: "[AIDE-145] Improve GitLab",
+    description: "",
+    state: "MERGED",
+    draft: false,
+    webUrl: "https://gitlab.example/team/repo/-/merge_requests/3",
+    sourceBranch: "feature/AIDE-145",
+    targetBranch: "main",
+    sha: "reviewed-sha",
+    author: {
+      id: "1",
+      username: "user",
+      name: "User",
+      webUrl: "https://gitlab.example/user",
+      avatarUrl: null,
+    },
+    reviewers: [],
+    labels: [],
+    detailedMergeStatus: "not_open",
+    mergeWhenPipelineSucceeds: false,
+    squashOnMerge: true,
+    hasConflicts: false,
+    blockingDiscussionsResolved: true,
+    createdAt: "2026-09-28T00:00:00Z",
+    updatedAt: "2026-09-28T01:00:00Z",
+    mergedAt: "2026-09-28T01:00:00Z",
+  },
+  operation: {
+    id: "operation-1",
+    state: "ACTION_REQUIRED",
+    autoMerge: false,
+    worktreeId: "worktree-1",
+    ticketKey: "AIDE-145",
+    mergeConfirmedAt: "2026-09-28T01:00:00Z",
+    ticketMovedAt: null,
+    worktreeDeletedAt: null,
+    updatedAt: "2026-09-28T01:00:00Z",
+    lastError: "Jira unavailable",
+  },
+  postMergeError: "Jira unavailable",
+};
+
+const mergeOptions: GitLabMergeOptions = {
+  projectId: "7",
+  iid: 3,
+  title: mergeResult.mergeRequest.title,
+  state: "OPENED",
+  sha: "reviewed-sha",
+  sourceBranch: "feature/AIDE-145",
+  targetBranch: "main",
+  mergeMethod: "merge",
+  squashPolicy: "default_off",
+  squash: false,
+  removeSourceBranch: true,
+  canRemoveSourceBranch: true,
+  canMerge: true,
+  canAutoMerge: true,
+  canCancelAutoMerge: false,
+  autoMergeEnabled: false,
+  mergeBlockedReason: null,
+  autoMergeBlockedReason: null,
+  mergeCommitMessage: null,
+  squashCommitMessage: null,
+  worktreeId: "worktree-1",
+  worktreeFolder: "/workspaces/repo",
+  canDeleteWorktree: true,
+  ticketKey: "AIDE-145",
+  ticketDoneStatusConfigured: true,
+  defaultMoveTicketToDone: false,
+  defaultDeleteWorktree: false,
+  operation: null,
+};
+
+function mergeResolvers() {
+  const coordinator = {
+    options: vi.fn().mockResolvedValue(mergeOptions),
+    submit: vi.fn().mockResolvedValue(mergeResult),
+    cancel: vi.fn().mockResolvedValue(mergeResult),
+    retryFollowUps: vi.fn().mockResolvedValue(mergeResult),
+  };
+  const service = new GitLabService();
+  service.setMergeCoordinator(coordinator as unknown as GitLabMergeService);
+  const state = vi
+    .spyOn(service, "mergeRequestState")
+    .mockResolvedValue({ ...mergeResult.mergeRequest, state: "OPENED" });
+  const directMerge = vi.spyOn(service, "mergeMergeRequestDirect");
+  return {
+    coordinator,
+    state,
+    directMerge,
+    resolvers: createGitLabResolvers(service, {} as GitHubService),
+  };
+}
+
+describe("GitLab merge API contracts", () => {
+  test.each([undefined, null, "worktree-1"])(
+    "loads policy and follow-up options with worktree context %s",
+    async (worktreeId) => {
+      const { resolvers, coordinator } = mergeResolvers();
+      await expect(
+        resolvers.Query.gitlabMergeRequestMergeOptions(
+          {},
+          { projectId: "7", iid: 3, worktreeId },
+          context(null),
+        ),
+      ).resolves.toBe(mergeOptions);
+      expect(coordinator.options).toHaveBeenCalledExactlyOnceWith(
+        "7",
+        3,
+        worktreeId,
+      );
+    },
+  );
+
+  test("preserves reviewed merge choices and a successful merge with failed follow-ups", async () => {
+    const { resolvers, coordinator } = mergeResolvers();
+    const input: SubmitGitLabMergeRequestMergeInput = {
+      projectId: "7",
+      iid: 3,
+      sha: "reviewed-sha",
+      autoMerge: false,
+      squash: true,
+      removeSourceBranch: false,
+      mergeCommitMessage: "Merge reviewed changes",
+      squashCommitMessage: "Improve GitLab",
+      worktreeId: "worktree-1",
+      deleteWorktree: true,
+      moveTicketToDone: true,
+    };
+    await expect(
+      resolvers.Mutation.submitGitLabMergeRequestMerge(
+        {},
+        { input },
+        context(null),
+      ),
+    ).resolves.toBe(mergeResult);
+    expect(coordinator.submit).toHaveBeenCalledExactlyOnceWith(input);
+  });
+
+  test.each([
+    ["cancelGitLabAutoMerge", "cancel"],
+    ["retryGitLabMergeFollowUps", "retryFollowUps"],
+  ] as const)(
+    "%s preserves confirmed merge and follow-up outcomes without resubmitting",
+    async (mutation, method) => {
+      const { resolvers, coordinator } = mergeResolvers();
+      await expect(
+        resolvers.Mutation[mutation](
+          {},
+          { projectId: "7", iid: 3 },
+          context(null),
+        ),
+      ).resolves.toBe(mergeResult);
+      expect(coordinator[method]).toHaveBeenCalledExactlyOnceWith("7", 3);
+      expect(coordinator.submit).not.toHaveBeenCalled();
+    },
+  );
+
+  test.each([undefined, null, "reviewed-sha"])(
+    "keeps the legacy mutation response as a merge request with SHA %s",
+    async (sha) => {
+      const { resolvers, coordinator, state, directMerge } = mergeResolvers();
+      const input = {
+        projectId: "7",
+        iid: 3,
+        sha,
+        squash: true,
+        removeSourceBranch: false,
+        autoMerge: true,
+      };
+      await expect(
+        resolvers.Mutation.mergeGitLabMergeRequest(
+          {},
+          { input },
+          context(null),
+        ),
+      ).resolves.toBe(mergeResult.mergeRequest);
+      expect(coordinator.submit).toHaveBeenCalledExactlyOnceWith({
+        ...input,
+        sha: "reviewed-sha",
+      });
+      if (sha) expect(state).not.toHaveBeenCalled();
+      else expect(state).toHaveBeenCalledExactlyOnceWith("7", 3);
+      expect(directMerge).not.toHaveBeenCalled();
+    },
+  );
+
+  test("denies agent credentials before any new or legacy merge service operation", () => {
+    const { resolvers, coordinator, state, directMerge } = mergeResolvers();
+    const args = { projectId: "7", iid: 3 };
+    const input = { ...args, sha: "reviewed-sha" };
+    const agent = context("agent-1");
+    for (const call of [
+      () => resolvers.Query.gitlabMergeRequestMergeOptions({}, args, agent),
+      () =>
+        resolvers.Mutation.submitGitLabMergeRequestMerge({}, { input }, agent),
+      () => resolvers.Mutation.cancelGitLabAutoMerge({}, args, agent),
+      () => resolvers.Mutation.retryGitLabMergeFollowUps({}, args, agent),
+      () => resolvers.Mutation.mergeGitLabMergeRequest({}, { input }, agent),
+    ]) {
+      expect(call).toThrow(
+        "Agent credentials cannot perform control-plane operations",
+      );
+    }
+    for (const method of Object.values(coordinator))
+      expect(method).not.toHaveBeenCalled();
+    expect(state).not.toHaveBeenCalled();
+    expect(directMerge).not.toHaveBeenCalled();
   });
 });

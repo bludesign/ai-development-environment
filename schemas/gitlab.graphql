@@ -108,6 +108,10 @@ enum GitLabPipelineStatus {
   FAILED
   "Represents the canceled value."
   CANCELED
+  "Cancellation is completing."
+  CANCELING
+  "Waiting for an external callback."
+  WAITING_FOR_CALLBACK
   "Represents the skipped value."
   SKIPPED
   "Represents the manual value."
@@ -218,6 +222,28 @@ type GitLabProjectCandidatePage {
 
 "GitLabMergeRequest values exposed by the GitLab integration."
 type GitLabMergeRequest implements SourceControlRequest {
+  "Project namespace and name."
+  projectPath: String
+  "Source project identity, including fork sources."
+  sourceProjectId: ID
+  "Linked checkout for the source project and branch."
+  worktreeId: ID
+  "Linked checkout highlight."
+  worktreeHighlightColor: String
+  "Linked Jira ticket."
+  ticketKey: String
+  "Approval summary; null when unavailable."
+  approvalState: String
+  "Required approval count when known."
+  approvalsRequired: Int
+  "Remaining approval count when known."
+  approvalsLeft: Int
+  "Unresolved resolvable discussion threads; null when unavailable."
+  unresolvedDiscussionsCount: Int
+  "Current head pipeline when reported."
+  headPipeline: GitLabPipeline
+  "Durable merge and follow-up status."
+  mergeOperation: GitLabMergeOperation
   "Provider for GitLabMergeRequest."
   provider: SourceControlProvider!
   "Id for GitLabMergeRequest."
@@ -324,6 +350,28 @@ type GitLabDiscussion {
 
 "GitLabMergeRequestDetail values exposed by the GitLab integration."
 type GitLabMergeRequestDetail {
+  "Project namespace and name."
+  projectPath: String
+  "Source project identity, including fork sources."
+  sourceProjectId: ID
+  "Linked checkout for the source project and branch."
+  worktreeId: ID
+  "Linked checkout highlight."
+  worktreeHighlightColor: String
+  "Linked Jira ticket."
+  ticketKey: String
+  "Approval summary; null when unavailable."
+  approvalState: String
+  "Required approval count when known."
+  approvalsRequired: Int
+  "Remaining approval count when known."
+  approvalsLeft: Int
+  "Unresolved resolvable discussion threads; null when unavailable."
+  unresolvedDiscussionsCount: Int
+  "Current head pipeline when reported."
+  headPipeline: GitLabPipeline
+  "Durable merge and follow-up status."
+  mergeOperation: GitLabMergeOperation
   "Id for GitLabMergeRequestDetail."
   id: ID!
   "Iid for GitLabMergeRequestDetail."
@@ -846,6 +894,12 @@ extend type Query {
     page: Int = 1
     "Per page used by gitlabPipelines."
     perPage: Int = 25
+    "Filter by branch or ref."
+    ref: String
+    "Filter by pipeline status."
+    status: GitLabPipelineStatus
+    "Filter by trigger source."
+    source: String
   ): GitLabPipelinePage!
   "Gitlab pipeline for Query."
   gitlabPipeline(
@@ -1038,4 +1092,158 @@ extend type Mutation {
 extend type Subscription {
   "Gitlab pipeline status changed for Subscription."
   gitlabPipelineStatusChanged: GitLabPipeline!
+}
+
+"Persisted merge intent and independently retryable follow-ups."
+type GitLabMergeOperation {
+  "Stable identifier of the saved merge operation."
+  id: ID!
+  "Current merge-request state or durable merge-operation lifecycle state."
+  state: String!
+  "Whether native GitLab auto-merge was requested."
+  autoMerge: Boolean!
+  "Linked source checkout, when one exists."
+  worktreeId: ID
+  "Linked Jira issue key."
+  ticketKey: String
+  "Actionable error from reconciliation or an unfinished follow-up."
+  lastError: String
+  "Time GitLab was confirmed to have merged the request."
+  mergeConfirmedAt: String
+  "Time the Jira follow-up completed."
+  ticketMovedAt: String
+  "Time the worktree cleanup completed."
+  worktreeDeletedAt: String
+  "Time this operation last changed."
+  updatedAt: String!
+}
+
+"Current GitLab project policy, readiness, defaults and linked follow-ups."
+type GitLabMergeOptions {
+  "Numeric GitLab target project identifier."
+  projectId: ID!
+  "Project-scoped merge-request number."
+  iid: Int!
+  "Merge-request title."
+  title: String!
+  "Current merge-request state or durable merge-operation lifecycle state."
+  state: String!
+  "Source commit reviewed in the sheet; submission rejects a changed commit."
+  sha: String!
+  "Source branch of the merge request."
+  sourceBranch: String!
+  "Target branch of the merge request."
+  targetBranch: String!
+  "Read-only project merge method: merge, rebase_merge or ff."
+  mergeMethod: String!
+  "Project squash policy: always, never, default_on or default_off."
+  squashPolicy: String!
+  "Whether to squash source commits when merging."
+  squash: Boolean!
+  "Whether GitLab should remove the remote source branch after merge."
+  removeSourceBranch: Boolean!
+  "Whether the source-branch removal choice is editable."
+  canRemoveSourceBranch: Boolean!
+  "Whether current provider requirements permit an immediate merge."
+  canMerge: Boolean!
+  "Whether native auto-merge can be enabled for the current request."
+  canAutoMerge: Boolean!
+  "Whether the current user may cancel enabled auto-merge."
+  canCancelAutoMerge: Boolean!
+  "Whether GitLab currently reports native auto-merge enabled."
+  autoMergeEnabled: Boolean!
+  "Reason an immediate merge is unavailable, when known."
+  mergeBlockedReason: String
+  "Reason enabling auto-merge is unavailable, when known."
+  autoMergeBlockedReason: String
+  "Optional merge-commit message override; null preserves GitLab defaults."
+  mergeCommitMessage: String
+  "Optional squash-commit message override; null preserves GitLab defaults."
+  squashCommitMessage: String
+  "Linked source checkout, when one exists."
+  worktreeId: ID
+  "Display path of the linked checkout."
+  worktreeFolder: String
+  "Whether a matching non-primary checkout can be selected for safe cleanup."
+  canDeleteWorktree: Boolean!
+  "Linked Jira issue key."
+  ticketKey: String
+  "Whether the linked Jira project has a configured done status."
+  ticketDoneStatusConfigured: Boolean!
+  "Previously selected Jira follow-up, false for new merge operations."
+  defaultMoveTicketToDone: Boolean!
+  "Previously selected worktree cleanup, false for new merge operations."
+  defaultDeleteWorktree: Boolean!
+  "Persisted merge intent and follow-up outcome, when available."
+  operation: GitLabMergeOperation
+}
+
+"Merge outcome is separate from deferred follow-up errors."
+type GitLabMergeResult {
+  "Fresh provider merge-request state after the requested action."
+  mergeRequest: GitLabMergeRequest!
+  "Persisted merge intent and follow-up outcome, when available."
+  operation: GitLabMergeOperation
+  "Follow-up error after a confirmed merge; this does not indicate merge failure."
+  postMergeError: String
+}
+
+"Submit the SHA reviewed in the merge sheet. Omitted messages use GitLab defaults."
+input SubmitGitLabMergeRequestMergeInput {
+  "Numeric GitLab target project identifier."
+  projectId: ID!
+  "Project-scoped merge-request number."
+  iid: Int!
+  "Source commit reviewed in the sheet; submission rejects a changed commit."
+  sha: String!
+  "Whether native GitLab auto-merge was requested."
+  autoMerge: Boolean
+  "Whether to squash source commits when merging."
+  squash: Boolean
+  "Whether GitLab should remove the remote source branch after merge."
+  removeSourceBranch: Boolean
+  "Optional merge-commit message override; null preserves GitLab defaults."
+  mergeCommitMessage: String
+  "Optional squash-commit message override; null preserves GitLab defaults."
+  squashCommitMessage: String
+  "Linked source checkout, when one exists."
+  worktreeId: ID
+  "Schedule clean, matching non-primary checkout deletion after confirmed merge."
+  deleteWorktree: Boolean
+  "Move the linked Jira issue to its configured done status after confirmed merge."
+  moveTicketToDone: Boolean
+}
+
+extend type Query {
+  "Refresh readiness and project policy before displaying a merge sheet."
+  gitlabMergeRequestMergeOptions(
+    "Target project identifier."
+    projectId: ID!
+    "Project-scoped merge-request number."
+    iid: Int!
+    "Explicit source checkout to validate, when one exists."
+    worktreeId: ID
+  ): GitLabMergeOptions!
+}
+
+extend type Mutation {
+  "Persist merge choices before submitting to GitLab."
+  submitGitLabMergeRequestMerge(
+    "Reviewed commit and selected merge and follow-up options."
+    input: SubmitGitLabMergeRequestMergeInput!
+  ): GitLabMergeResult!
+  "Cancel native GitLab auto-merge, reconciling races with completed merges."
+  cancelGitLabAutoMerge(
+    "Target project identifier."
+    projectId: ID!
+    "Project-scoped merge-request number."
+    iid: Int!
+  ): GitLabMergeResult!
+  "Retry unfinished follow-ups without resubmitting the merge."
+  retryGitLabMergeFollowUps(
+    "Target project identifier."
+    projectId: ID!
+    "Project-scoped merge-request number."
+    iid: Int!
+  ): GitLabMergeResult!
 }

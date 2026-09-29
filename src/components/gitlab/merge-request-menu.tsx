@@ -1,11 +1,12 @@
 "use client";
 
-import { ExternalLink, GitMerge } from "lucide-react";
+import { ExternalLink, GitMerge, MoreHorizontal } from "lucide-react";
 import { useTranslations } from "next-intl";
 import { useState } from "react";
 
 import { MergeRequestDialog } from "@/components/gitlab/merge-request-dialog";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -20,14 +21,20 @@ type MergeRequestMenuTarget = {
   projectId?: string | null;
   title: string;
   webUrl: string;
+  state?: string;
+  worktreeId?: string | null;
 };
 
 export function MergeRequestMenu({
   label,
   mergeRequest,
+  variant = "badge",
+  onMerged,
 }: {
   label: string;
   mergeRequest: MergeRequestMenuTarget;
+  variant?: "badge" | "actions";
+  onMerged?: () => void | Promise<void>;
 }) {
   const gitLabT = useTranslations("gitlabPages");
   const worktreesT = useTranslations("worktrees");
@@ -37,9 +44,19 @@ export function MergeRequestMenu({
     <>
       <DropdownMenu>
         <DropdownMenuTrigger asChild>
-          <Badge asChild className="cursor-pointer hover:bg-primary/80">
-            <button type="button">{label}</button>
-          </Badge>
+          {variant === "actions" ? (
+            <Button
+              aria-label={`${gitLabT("actions")}: !${mergeRequest.iid}`}
+              size="icon-sm"
+              variant="outline"
+            >
+              <MoreHorizontal />
+            </Button>
+          ) : (
+            <Badge asChild className="cursor-pointer hover:bg-primary/80">
+              <button type="button">{label}</button>
+            </Badge>
+          )}
         </DropdownMenuTrigger>
         <DropdownMenuContent align="start" className="w-44">
           <DropdownMenuItem asChild>
@@ -58,11 +75,21 @@ export function MergeRequestMenu({
                   {worktreesT("openDetails")}
                 </Link>
               </DropdownMenuItem>
-              <DropdownMenuSeparator />
-              <DropdownMenuItem onSelect={() => setMergeOpen(true)}>
-                <GitMerge />
-                {gitLabT("merge")}
-              </DropdownMenuItem>
+              {(mergeRequest.state == null ||
+                mergeRequest.state === "OPENED" ||
+                mergeRequest.state === "MERGED") && (
+                <>
+                  <DropdownMenuSeparator />
+                  <DropdownMenuItem onSelect={() => setMergeOpen(true)}>
+                    <GitMerge />
+                    {gitLabT(
+                      mergeRequest.state === "MERGED"
+                        ? "mergeFollowUps"
+                        : "mergeOptions",
+                    )}
+                  </DropdownMenuItem>
+                </>
+              )}
             </>
           ) : null}
         </DropdownMenuContent>
@@ -76,6 +103,8 @@ export function MergeRequestMenu({
           }}
           onOpenChange={setMergeOpen}
           open={mergeOpen}
+          worktreeId={mergeRequest.worktreeId}
+          onMerged={onMerged}
         />
       ) : null}
     </>

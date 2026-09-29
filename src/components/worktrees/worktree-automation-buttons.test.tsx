@@ -64,6 +64,38 @@ function worktreeForLaterPullRequest(
 }
 
 describe("AutoMergeButton", () => {
+  test("opens the GitLab merge sheet with the linked checkout and never loads GitHub options", async () => {
+    const worktree = {
+      ...worktreeForLaterPullRequest("UNKNOWN"),
+      pullRequest: null,
+      sourceControlRequest: {
+        provider: "GITLAB",
+        projectId: "42",
+        number: 17,
+        title: "Improve API",
+      },
+    } as Worktree;
+    request.mockRejectedValue(new Error("GitLab options unavailable"));
+    render(
+      <AutoMergeButton
+        conflictWorkflows={[]}
+        disabled={false}
+        onCompleted={vi.fn()}
+        onError={vi.fn()}
+        worktree={worktree}
+      />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Merge options" }));
+    await screen.findByText("GitLab options unavailable");
+    expect(request).toHaveBeenCalledWith(
+      expect.stringContaining("query GitLabMergeRequestMergeOptions"),
+      { projectId: "42", iid: 17, worktreeId: "worktree-1" },
+    );
+    expect(request.mock.calls.some(([query]) => query.includes("GitHub"))).toBe(
+      false,
+    );
+  });
+
   test("allows a later directly mergeable pull request to be merged manually", () => {
     render(
       <AutoMergeButton

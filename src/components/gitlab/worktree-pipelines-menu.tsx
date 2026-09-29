@@ -16,6 +16,11 @@ import {
 import type { GitLabPipelineView } from "@/services/gitlab";
 
 import {
+  GitLabPipelineSource,
+  GitLabPipelineStatusBadge,
+} from "./pipeline-status-badge";
+
+import {
   aggregateGitLabPipelineStatus,
   gitLabPipelineStatusClass,
 } from "./pipeline-format";
@@ -37,12 +42,12 @@ export function GitLabWorktreePipelinesMenu({
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
         <Button
-          aria-label={`${t("pipelines")}: ${status}`}
+          aria-label={`${t("pipelines")}: ${t(`pipelineStatuses.${status}`)}`}
           className={`h-5 rounded-full px-2 py-0.5 text-xs ${gitLabPipelineStatusClass(status)}`}
           onClick={stopPropagation}
           variant="outline"
         >
-          {status}
+          {t(`pipelineStatuses.${status}`)}
           <ChevronDown className="size-3" />
         </Button>
       </DropdownMenuTrigger>
@@ -61,7 +66,8 @@ export function GitLabWorktreePipelinesMenu({
                   #{pipeline.iid ?? pipeline.id} · {pipeline.ref}
                 </span>
                 <span className="block text-xs text-muted-foreground">
-                  {pipeline.source} · {pipeline.status}
+                  <GitLabPipelineSource source={pipeline.source} /> ·{" "}
+                  <GitLabPipelineStatusBadge status={pipeline.status} />
                 </span>
               </span>
               <ExternalLink className="size-3.5 shrink-0" />

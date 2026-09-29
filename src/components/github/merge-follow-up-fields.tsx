@@ -4,7 +4,13 @@ import { useId } from "react";
 import { useTranslations } from "next-intl";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Label } from "@/components/ui/label";
-import type { GitHubPullRequestMergeOptions } from "@/services/github/types";
+
+export type MergeFollowUpOptions = {
+  canDeleteWorktree: boolean;
+  worktreeFolder: string | null;
+  ticketKey: string | null;
+  ticketDoneStatusConfigured: boolean;
+};
 
 export const MERGE_FOLLOW_UP_FIELDS = `defaultMethod defaultMoveTicketToDone defaultDeleteWorktree
   worktreeId worktreeFolder canDeleteWorktree ticketKey ticketDoneStatusConfigured`;
@@ -17,7 +23,7 @@ export function MergeFollowUpFields({
   onDeleteWorktreeChange,
   onMoveTicketToDoneChange,
 }: {
-  options: GitHubPullRequestMergeOptions;
+  options: MergeFollowUpOptions;
   disabled: boolean;
   deleteWorktree: boolean;
   moveTicketToDone: boolean;

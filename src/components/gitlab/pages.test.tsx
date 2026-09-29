@@ -4,7 +4,6 @@ import {
   render,
   screen,
   waitFor,
-  within,
 } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 
@@ -183,45 +182,48 @@ describe("GitLabMergeRequestsPage", () => {
 });
 
 describe("GitLabPipelinesPage", () => {
-  test("expands a pipeline row and shows jobs with status colors", async () => {
-    requestMock.mockImplementation(async (query, variables) => {
-      if (query.includes("GitLabPageConfiguration")) {
+  const pipeline = {
+    id: "9401",
+    projectId: "project-1",
+    iid: "214",
+    ref: "feature/retry-diagnostics",
+    branch: "feature/retry-diagnostics",
+    sha: "abcdef1234567890",
+    source: "push",
+    status: "FAILED",
+    webUrl: "https://gitlab.com/acme/widgets/-/pipelines/9401",
+    mergeRequests: [
+      {
+        projectId: "project-1",
+        iid: 17,
+        title: "Improve pipeline retry diagnostics",
+        webUrl: "https://gitlab.com/acme/widgets/-/merge_requests/17",
+        sourceBranch: "feature/retry-diagnostics",
+      },
+    ],
+    worktreeId: "worktree-1",
+    worktreeHighlightColor: "violet",
+    startedAt: "2026-08-07T12:00:02.000Z",
+    createdAt: "2026-08-07T12:00:00.000Z",
+    updatedAt: "2026-08-07T12:01:03.000Z",
+    finishedAt: "2026-08-07T12:01:03.000Z",
+    duration: 61,
+    queuedDuration: 2,
+  };
+  beforeEach(() => {
+    window.history.replaceState(null, "", "/gitlab/pipelines");
+  });
+  afterEach(() => {
+    window.history.replaceState(null, "", "/");
+  });
+  const mockPage = () => {
+    requestMock.mockImplementation(async (query) => {
+      if (query.includes("GitLabPageConfiguration"))
         return configuration as never;
-      }
-      if (query.includes("query GitLabPipelines")) {
+      if (query.includes("query GitLabPipelines"))
         return {
           gitlabPipelines: {
-            items: [
-              {
-                id: "9401",
-                projectId: "project-1",
-                iid: "214",
-                ref: "feature/retry-diagnostics",
-                branch: "feature/retry-diagnostics",
-                sha: "abcdef1234567890",
-                source: "push",
-                status: "RUNNING",
-                webUrl: "https://gitlab.com/acme/widgets/-/pipelines/9401",
-                mergeRequests: [
-                  {
-                    projectId: "project-1",
-                    iid: 17,
-                    title: "Improve pipeline retry diagnostics",
-                    webUrl:
-                      "https://gitlab.com/acme/widgets/-/merge_requests/17",
-                    sourceBranch: "feature/retry-diagnostics",
-                  },
-                ],
-                worktreeId: "worktree-1",
-                worktreeHighlightColor: "violet",
-                startedAt: "2026-08-07T12:00:02.000Z",
-                createdAt: "2026-08-07T12:00:00.000Z",
-                updatedAt: "2026-08-07T12:01:00.000Z",
-                finishedAt: null,
-                duration: 61,
-                queuedDuration: 2,
-              },
-            ],
+            items: [pipeline],
             total: 1,
             page: 1,
             perPage: 25,
@@ -229,13 +231,9 @@ describe("GitLabPipelinesPage", () => {
           },
           gitlabAutoRetryRules: [],
         } as never;
-      }
-      if (query.includes("query GitLabPipelineJobs")) {
-        expect(variables).toEqual({
-          projectId: "project-1",
-          pipelineId: "9401",
-        });
+      if (query.includes("query GitLabPipelineDetails"))
         return {
+          gitlabPipeline: pipeline,
           gitlabPipelineJobs: [
             {
               id: "job-1",
@@ -243,58 +241,32 @@ describe("GitLabPipelinesPage", () => {
               name: "unit",
               stage: "test",
               status: "SUCCESS",
-              ref: "feature/retry-diagnostics",
+              ref: pipeline.ref,
               webUrl: "https://gitlab.com/acme/widgets/-/jobs/job-1",
               allowFailure: false,
-              createdAt: "2026-08-07T12:00:00.000Z",
+              createdAt: pipeline.createdAt,
               startedAt: "2026-08-07T12:00:01.000Z",
               finishedAt: "2026-08-07T12:01:00.000Z",
               duration: 59,
               queuedDuration: 1,
               retried: false,
             },
-            {
-              id: "job-2",
-              pipelineId: "9401",
-              name: "lint",
-              stage: "verify",
-              status: "FAILED",
-              ref: "feature/retry-diagnostics",
-              webUrl: "https://gitlab.com/acme/widgets/-/jobs/job-2",
-              allowFailure: false,
-              createdAt: "2026-08-07T12:00:00.000Z",
-              startedAt: "2026-08-07T12:00:01.000Z",
-              finishedAt: "2026-08-07T12:00:30.000Z",
-              duration: 29,
-              queuedDuration: 1,
-              retried: false,
-            },
           ],
         } as never;
-      }
-      if (query.includes("query GitLabMergeRequestForMerge")) {
-        expect(variables).toEqual({ projectId: "project-1", iid: 17 });
-        return {
-          gitlabMergeRequest: {
-            ...mergeRequest,
-            title: "Improve pipeline retry diagnostics",
-            sha: "abcdef1234567890",
-          },
-        } as never;
-      }
       throw new Error(`Unexpected operation: ${query}`);
     });
+  };
 
+  test("shows a consistent table with readable statuses, context links and staged job details", async () => {
+    mockPage();
     render(<GitLabPipelinesPage />);
-
     const expand = await screen.findByRole("button", {
-      name: "Show jobs for #9401 · feature/retry-diagnostics",
+      name: "Show jobs for #214 · feature/retry-diagnostics",
     });
     expect(screen.getByRole("columnheader", { name: "Branch" })).toBeDefined();
     expect(
       screen.getByRole("columnheader", { name: "Merge request" }),
     ).toBeDefined();
-    expect(screen.getByRole("columnheader", { name: "Started" })).toBeDefined();
     expect(
       screen
         .getByRole("link", { name: "feature/retry-diagnostics" })
@@ -303,79 +275,80 @@ describe("GitLabPipelinesPage", () => {
     expect(
       screen.getByText("Improve pipeline retry diagnostics"),
     ).toBeDefined();
-    fireEvent.pointerDown(
-      screen.getByRole("button", {
-        name: "MR !17",
-      }),
-      { button: 0, ctrlKey: false },
-    );
-    expect(
-      screen
-        .getByRole("menuitem", { name: "Open in GitLab" })
-        .getAttribute("href"),
-    ).toBe("https://gitlab.com/acme/widgets/-/merge_requests/17");
-    expect(
-      screen
-        .getByRole("menuitem", { name: "Open details" })
-        .getAttribute("href"),
-    ).toBe("/gitlab/merge-requests/project-1/17");
-    fireEvent.click(screen.getByRole("menuitem", { name: "Merge" }));
-    const mergeDialog = await screen.findByRole("dialog", {
-      name: "Merge request",
-    });
-    expect(
-      within(mergeDialog).getByText("!17 · Improve pipeline retry diagnostics"),
-    ).toBeDefined();
-    expect(await within(mergeDialog).findByText("mergeable")).toBeDefined();
-    fireEvent.click(
-      within(mergeDialog).getByRole("button", { name: "Cancel" }),
-    );
-    expect(screen.getByText("Duration 1m 1s")).toBeDefined();
-    expect(screen.getByText("RUNNING").className).toContain("amber-500");
-    expect(screen.getByText("RUNNING").closest("tr")?.className).toContain(
+    expect(screen.getByText("Failed").closest("tr")?.className).toContain(
       "violet-500",
     );
-
+    expect(screen.getByText("Failed").className).toContain("red-500");
+    expect(screen.getByText("Duration 1m 1s")).toBeDefined();
     fireEvent.click(expand);
-
-    expect(await screen.findByText("test / unit")).toBeDefined();
-    expect(screen.getByText("SUCCESS").className).toContain("emerald-500");
-    expect(screen.getByText("FAILED").className).toContain("red-500");
-    expect(screen.getByText("Duration 59s")).toBeDefined();
-    expect(screen.getByText("Duration 29s")).toBeDefined();
-    expect(screen.getAllByText("Started")).toHaveLength(3);
     expect(
-      (
-        screen.getByRole("button", {
-          name: "Retry unit",
-        }) as HTMLButtonElement
-      ).disabled,
-    ).toBe(false);
+      await screen.findByRole("heading", { name: "Stage · test" }),
+    ).toBeDefined();
+    expect(screen.getByRole("link", { name: "unit" })).toBeDefined();
+    expect(screen.getByText("Success").className).toContain("emerald-500");
     expect(
-      (
-        screen.getByRole("button", {
-          name: "Retry lint",
-        }) as HTMLButtonElement
-      ).disabled,
+      (screen.getByRole("button", { name: "Retry unit" }) as HTMLButtonElement)
+        .disabled,
     ).toBe(false);
-
     fireEvent.click(
       screen.getByRole("button", {
-        name: "Hide jobs for #9401 · feature/retry-diagnostics",
+        name: "Hide jobs for #214 · feature/retry-diagnostics",
       }),
     );
-    expect(screen.queryByText("test / unit")).toBeNull();
-
+    expect(screen.queryByRole("link", { name: "unit" })).toBeNull();
     fireEvent.click(
       screen.getByRole("button", {
-        name: "Show jobs for #9401 · feature/retry-diagnostics",
+        name: "Show jobs for #214 · feature/retry-diagnostics",
       }),
     );
-    expect(screen.getByText("test / unit")).toBeDefined();
+    expect(screen.getByRole("link", { name: "unit" })).toBeDefined();
     expect(
       requestMock.mock.calls.filter(([query]) =>
-        query.includes("query GitLabPipelineJobs"),
+        query.includes("query GitLabPipelineDetails"),
       ),
     ).toHaveLength(1);
+  });
+
+  test("restores URL filters and sends them to the provider, then resets pagination for a new branch", async () => {
+    mockPage();
+    window.history.replaceState(
+      null,
+      "",
+      "/gitlab/pipelines?project=project-1&branch=feature%2Fapi&status=FAILED&source=push&page=3",
+    );
+    render(<GitLabPipelinesPage />);
+    await screen.findByRole("button", {
+      name: "Show jobs for #214 · feature/retry-diagnostics",
+    });
+    expect(
+      requestMock.mock.calls.find(([query]) =>
+        query.includes("query GitLabPipelines"),
+      )?.[1],
+    ).toEqual({
+      projectId: "project-1",
+      page: 3,
+      ref: "feature/api",
+      status: "FAILED",
+      source: "push",
+    });
+    fireEvent.change(
+      screen.getByRole("textbox", { name: "Filter by branch" }),
+      { target: { value: " release " } },
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Apply filters" }));
+    await waitFor(() =>
+      expect(
+        requestMock.mock.calls.some(
+          ([query, variables]) =>
+            query.includes("query GitLabPipelines") &&
+            (variables as { ref: string; page: number }).ref === "release" &&
+            (variables as { page: number }).page === 1,
+        ),
+      ).toBe(true),
+    );
+    expect(new URLSearchParams(window.location.search).get("branch")).toBe(
+      "release",
+    );
+    expect(new URLSearchParams(window.location.search).get("page")).toBeNull();
   });
 });

@@ -3825,3 +3825,38 @@ model SseHistorySavedFilter {
   @@unique([view, name])
   @@index([view, updatedAt])
 }
+
+// Separate from GitHub worktree automation: an MR can have Jira follow-ups without a checkout.
+model GitLabMergeOperation {
+  id String @id
+  instanceUrl String
+  projectId String
+  iid Int
+  state String @default("PREPARING")
+  sourceProjectId String?
+  sourceOrigin String?
+  branch String
+  sha String
+  autoMerge Boolean @default(false)
+  squash Boolean @default(false)
+  removeSourceBranch Boolean @default(false)
+  mergeCommitMessage String?
+  squashCommitMessage String?
+  worktreeId String?
+  worktreeFolder String?
+  deleteWorktree Boolean @default(false)
+  moveTicketToDone Boolean @default(false)
+  ticketKey String?
+  mergeConfirmedAt DateTime?
+  ticketMovedAt DateTime?
+  worktreeDeletedAt DateTime?
+  deleteJobId String?
+  deleteRequestId String?
+  lastError String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([instanceUrl, projectId, iid])
+  @@index([state, updatedAt])
+  @@index([worktreeId])
+}
