@@ -317,6 +317,8 @@ type WorktreeAutoMerge {
   repositoryNameWithOwner: String!
   "The pull request number associated with this worktree auto merge."
   pullRequestNumber: Int!
+  "The worktree branch associated with this worktree auto merge."
+  branch: String!
   "The merge method associated with this worktree auto merge."
   mergeMethod: GitHubMergeMethod!
   "The commit headline associated with this worktree auto merge."

@@ -5533,7 +5533,7 @@ export class GitHubService {
       availableMethods: state.availableMethods,
       commitEmails: commitEmailOptions.emails,
       defaultCommitEmail: commitEmailOptions.primaryEmail,
-      defaultCommitHeadline: state.pullRequest.title,
+      defaultCommitHeadline: `${state.pullRequest.title} (#${number})`,
       defaultCommitBody: settings.emptyMergeCommitDescription
         ? ""
         : state.pullRequest.body,

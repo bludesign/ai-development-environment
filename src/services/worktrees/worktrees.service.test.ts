@@ -1020,6 +1020,94 @@ describe("WorktreesService", () => {
     ]);
   });
 
+  test("attaches GitLab approval and discussion summaries to their worktree", async () => {
+    const mergeRequest = {
+      id: "merge-request-24",
+      iid: 24,
+      projectId: "project-1",
+    };
+    const mergeRequestSummary = vi.fn().mockResolvedValue({
+      ...mergeRequest,
+      approvalState: "APPROVED",
+      unresolvedDiscussionsCount: 2,
+    });
+    const worktrees = new WorktreesService(
+      { registerCompletionHandler: vi.fn() } as unknown as AgentControlService,
+      {} as JiraService,
+      {} as GitHubService,
+      undefined,
+      undefined,
+      pipelineStatus,
+      { mergeRequestSummary } as unknown as GitLabService,
+    );
+    const target = {
+      gitLabMergeRequest: mergeRequest,
+    };
+
+    await (
+      worktrees as unknown as {
+        hydrateGitLabMergeRequestSummaries(values: unknown[]): Promise<void>;
+      }
+    ).hydrateGitLabMergeRequestSummaries([target]);
+
+    expect(mergeRequestSummary).toHaveBeenCalledWith(mergeRequest);
+    expect(target.gitLabMergeRequest).toEqual(
+      expect.objectContaining({
+        approvalState: "APPROVED",
+        unresolvedDiscussionsCount: 2,
+      }),
+    );
+  });
+
+  test("refreshes GitLab merge readiness while a pipeline status is still pending", async () => {
+    const mergeRequestForBranch = vi
+      .fn()
+      .mockRejectedValue(new Error("GitLab temporarily unavailable"));
+    const worktrees = new WorktreesService(
+      { registerCompletionHandler: vi.fn() } as unknown as AgentControlService,
+      {} as JiraService,
+      {} as GitHubService,
+      undefined,
+      undefined,
+      pipelineStatus,
+      {
+        projectForCanonicalOrigin: vi
+          .fn()
+          .mockResolvedValue({ id: "project-1" }),
+        mergeRequestForBranch,
+      } as unknown as GitLabService,
+    );
+    const target = {
+      id: "worktree-1",
+      branch: "feature/AIDE-24",
+      pullRequestLookupOrigin: "gitlab.com/acme/widgets",
+      pullRequestLookupBranch: "feature/AIDE-24",
+      pullRequestLookupAt: new Date(),
+      gitLabMergeRequest: { detailedMergeStatus: "ci_still_running" },
+      codebase: {
+        repository: { canonicalOrigin: "gitlab.com/acme/widgets" },
+      },
+    };
+    const synchronize = () =>
+      (
+        worktrees as unknown as {
+          synchronizeGitLabMergeRequests(values: unknown[]): Promise<void>;
+        }
+      ).synchronizeGitLabMergeRequests([target]);
+
+    await synchronize();
+
+    expect(mergeRequestForBranch).toHaveBeenCalledWith(
+      "project-1",
+      "feature/AIDE-24",
+      true,
+    );
+
+    target.gitLabMergeRequest.detailedMergeStatus = "mergeable";
+    await synchronize();
+    expect(mergeRequestForBranch).toHaveBeenCalledTimes(1);
+  });
+
   test("honors a recent successful negative pull request lookup", async () => {
     getPrismaClient.mockResolvedValue({
       gitHubSettings: {

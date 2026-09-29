@@ -9,11 +9,13 @@ export const WORKTREE_FIELDS = `
   tags { id name color createdAt updatedAt }
   activeJob { id agentId kind payload status idempotencyKey result error timeoutSeconds createdAt startedAt finishedAt updatedAt }
   autoSync { worktreeId state conflictWorkflowId conflictWorkflowChoice lastError pauseReason lastSyncedAt updatedAt }
-  autoMerge { worktreeId state repositoryNameWithOwner pullRequestNumber mergeMethod commitHeadline commitBody authorEmail deleteWorktree moveTicketToDone ticketKey lastError updatedAt }
+  autoMerge { worktreeId state repositoryNameWithOwner pullRequestNumber branch mergeMethod commitHeadline commitBody authorEmail deleteWorktree moveTicketToDone ticketKey lastError updatedAt }
   pullRequest { ${PULL_REQUEST_FIELDS} }
   sourceControlRequest {
     provider id number title url isDraft headRefName headRefOid createdAt
-    ... on GitLabMergeRequest { projectId detailedMergeStatus }
+    ... on GitLabMergeRequest {
+      projectId state worktreeId detailedMergeStatus approvalState unresolvedDiscussionsCount
+    }
   }
   gitLabPipelines {
     id projectId iid ref branch sha source status webUrl

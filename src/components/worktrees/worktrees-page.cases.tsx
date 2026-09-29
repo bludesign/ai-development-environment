@@ -1975,7 +1975,11 @@ export function registerWorktreesPageTests(
           headRefOid: "abc",
           createdAt: new Date(0).toISOString(),
           projectId: "project-1",
+          state: "OPENED",
+          worktreeId: "worktree-1",
           detailedMergeStatus: "mergeable",
+          approvalState: "APPROVED",
+          unresolvedDiscussionsCount: 2,
         };
         worktree.gitLabPipelines = [
           {
@@ -2003,6 +2007,12 @@ export function registerWorktreesPageTests(
 
         render(<WorktreesPage />);
         await screen.findByText("feature/AIDE-24");
+        expect(screen.getByText("Approved")).toBeDefined();
+        expect(
+          screen
+            .getByRole("link", { name: "Comments: 2" })
+            .getAttribute("href"),
+        ).toBe("/gitlab/comments?project=project-1&iid=24");
         fireEvent.pointerDown(screen.getByRole("button", { name: "MR !24" }), {
           button: 0,
           ctrlKey: false,

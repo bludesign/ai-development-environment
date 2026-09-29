@@ -1136,10 +1136,14 @@ export class WorktreesService {
           worktree.pullRequestLookupOrigin?.toLowerCase() ===
             origin.toLowerCase() &&
           worktree.pullRequestLookupBranch === worktree.branch;
+        const pipelineReadinessPending =
+          worktree.gitLabMergeRequest?.detailedMergeStatus ===
+          "ci_still_running";
         if (
           lookupMatches &&
           worktree.pullRequestLookupAt &&
-          now - worktree.pullRequestLookupAt.getTime() < retryAfterMs
+          now - worktree.pullRequestLookupAt.getTime() < retryAfterMs &&
+          !pipelineReadinessPending
         ) {
           return;
         }
@@ -1147,6 +1151,7 @@ export class WorktreesService {
           const mergeRequest = await this.gitLabService!.mergeRequestForBranch(
             project.id,
             worktree.branch,
+            pipelineReadinessPending,
           );
           await this.storeGitLabMergeRequest(
             worktree.id,
@@ -1231,11 +1236,31 @@ export class WorktreesService {
     );
   }
 
+  private async hydrateGitLabMergeRequestSummaries(
+    worktrees: PullRequestTarget[],
+  ): Promise<void> {
+    if (!this.gitLabService) return;
+    await Promise.all(
+      worktrees.map(async (worktree) => {
+        if (!worktree.gitLabMergeRequest) return;
+        try {
+          worktree.gitLabMergeRequest =
+            await this.gitLabService!.mergeRequestSummary(
+              worktree.gitLabMergeRequest,
+            );
+        } catch {
+          // Approval and discussion summaries are optional in worktree responses.
+        }
+      }),
+    );
+  }
+
   private async hydratedView(worktree: WorktreeRecord, defaultRegex = "") {
     const view = this.view(worktree, defaultRegex);
     await Promise.all([
       this.hydratePullRequestPipelines([view]),
       this.hydrateGitLabPipelines([view]),
+      this.hydrateGitLabMergeRequestSummaries([view]),
     ]);
     view.sourceControlRequest = view.gitLabMergeRequest ?? view.pullRequest;
     return view;
@@ -1447,6 +1472,7 @@ export class WorktreesService {
     await Promise.all([
       this.hydratePullRequestPipelines(views),
       this.hydrateGitLabPipelines(views),
+      this.hydrateGitLabMergeRequestSummaries(views),
     ]);
     for (const item of views) {
       item.sourceControlRequest = item.gitLabMergeRequest ?? item.pullRequest;

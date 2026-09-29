@@ -37,6 +37,7 @@ function worktreeForLaterPullRequest(
   return {
     id: "worktree-1",
     primary: true,
+    branch: "feature/widgets",
     pullRequest: {
       number: 18,
       repositoryNameWithOwner: "acme/widgets",
@@ -50,6 +51,7 @@ function worktreeForLaterPullRequest(
       state: "COMPLETED",
       repositoryNameWithOwner: "acme/widgets",
       pullRequestNumber: 17,
+      branch: "feature/widgets",
       mergeMethod: "SQUASH",
       commitHeadline: "Previous pull request",
       commitBody: "",
@@ -63,18 +65,28 @@ function worktreeForLaterPullRequest(
   } as Worktree;
 }
 
+function gitLabWorktree(
+  detailedMergeStatus: string,
+  pipelineStatus: "RUNNING" | "SUCCESS",
+): Worktree {
+  return {
+    ...worktreeForLaterPullRequest("UNKNOWN"),
+    pullRequest: null,
+    sourceControlRequest: {
+      provider: "GITLAB",
+      projectId: "42",
+      number: 17,
+      title: "Improve API",
+      isDraft: false,
+      detailedMergeStatus,
+    },
+    gitLabPipelines: [{ status: pipelineStatus }],
+  } as Worktree;
+}
+
 describe("AutoMergeButton", () => {
   test("opens the GitLab merge sheet with the linked checkout and never loads GitHub options", async () => {
-    const worktree = {
-      ...worktreeForLaterPullRequest("UNKNOWN"),
-      pullRequest: null,
-      sourceControlRequest: {
-        provider: "GITLAB",
-        projectId: "42",
-        number: 17,
-        title: "Improve API",
-      },
-    } as Worktree;
+    const worktree = gitLabWorktree("ci_still_running", "RUNNING");
     request.mockRejectedValue(new Error("GitLab options unavailable"));
     render(
       <AutoMergeButton
@@ -85,7 +97,7 @@ describe("AutoMergeButton", () => {
         worktree={worktree}
       />,
     );
-    fireEvent.click(screen.getByRole("button", { name: "Merge" }));
+    fireEvent.click(screen.getByRole("button", { name: "Auto-merge" }));
     await screen.findByText("GitLab options unavailable");
     expect(request).toHaveBeenCalledWith(
       expect.stringContaining("query GitLabMergeRequestMergeOptions"),
@@ -94,6 +106,33 @@ describe("AutoMergeButton", () => {
     expect(request.mock.calls.some(([query]) => query.includes("GitHub"))).toBe(
       false,
     );
+  });
+
+  test("replaces GitLab Auto-merge with Merge once the pipeline finishes and the MR is mergeable", () => {
+    const props = {
+      conflictWorkflows: [],
+      disabled: false,
+      onCompleted: vi.fn(async () => undefined),
+      onError: vi.fn(),
+    };
+    const { rerender } = render(
+      <AutoMergeButton
+        {...props}
+        worktree={gitLabWorktree("mergeable", "RUNNING")}
+      />,
+    );
+
+    expect(screen.getByRole("button", { name: "Auto-merge" })).toBeDefined();
+
+    rerender(
+      <AutoMergeButton
+        {...props}
+        worktree={gitLabWorktree("mergeable", "SUCCESS")}
+      />,
+    );
+
+    expect(screen.getByRole("button", { name: "Merge" })).toBeDefined();
+    expect(screen.queryByRole("button", { name: "Auto-merge" })).toBeNull();
   });
 
   test("allows a later directly mergeable pull request to be merged manually", () => {
@@ -126,6 +165,44 @@ describe("AutoMergeButton", () => {
         .getByRole("button", { name: "Auto Merge" })
         .hasAttribute("disabled"),
     ).toBe(false);
+  });
+
+  test("shows completed casing and resets the button when the branch changes", () => {
+    const worktree = worktreeForLaterPullRequest("UNKNOWN");
+    worktree.pullRequest = {
+      ...worktree.pullRequest!,
+      number: 17,
+      state: "MERGED",
+    };
+    const props = {
+      conflictWorkflows: [],
+      disabled: false,
+      onCompleted: vi.fn(async () => undefined),
+      onError: vi.fn(),
+    };
+    const { rerender } = render(
+      <AutoMergeButton {...props} worktree={worktree} />,
+    );
+
+    expect(
+      screen.getByRole("button", { name: "Auto Merge Complete" }),
+    ).toBeDefined();
+
+    rerender(
+      <AutoMergeButton
+        {...props}
+        worktree={{
+          ...worktree,
+          branch: "feature/new-widgets",
+          pullRequest: null,
+        }}
+      />,
+    );
+
+    expect(screen.getByRole("button", { name: "Auto Merge" })).toBeDefined();
+    expect(
+      screen.queryByRole("button", { name: "Auto Merge Complete" }),
+    ).toBeNull();
   });
 });
 

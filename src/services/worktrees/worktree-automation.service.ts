@@ -109,6 +109,7 @@ function mergeView(rule: {
   state: string;
   repositoryNameWithOwner: string;
   pullRequestNumber: number;
+  branch: string;
   mergeMethod: string;
   commitHeadline: string;
   commitBody: string;

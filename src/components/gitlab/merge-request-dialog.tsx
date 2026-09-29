@@ -285,53 +285,73 @@ export function MergeRequestDialog({
                 <p className="text-sm">{t("mergeRequestClosed")}</p>
               ) : (
                 <>
-                  <div>
-                    <Label>{t("mergeMethod")}</Label>
-                    <p className="mt-1 text-sm font-medium">
-                      {t(`mergeMethods.${method}`)}
-                    </p>
-                    <p className="text-xs text-muted-foreground">
-                      {t("projectMergeMethod")}
-                    </p>
-                  </div>
-                  <div className="space-y-1">
-                    <div className="flex items-center gap-2">
-                      <Checkbox
-                        id={`${id}-squash`}
-                        checked={squash}
-                        disabled={
-                          disabled ||
-                          options.squashPolicy === "always" ||
-                          options.squashPolicy === "never"
-                        }
-                        onCheckedChange={(value) => setSquash(value === true)}
-                      />
-                      <Label htmlFor={`${id}-squash`}>
-                        {t("squashCommits")}
-                      </Label>
+                  <div className="overflow-hidden rounded-lg border">
+                    <div className="flex flex-wrap items-center gap-3 bg-muted/30 p-3">
+                      <div className="flex size-9 shrink-0 items-center justify-center rounded-md border bg-background text-muted-foreground">
+                        <GitMerge className="size-4" />
+                      </div>
+                      <div className="min-w-40 flex-1">
+                        <p className="text-sm font-medium">
+                          {t("mergeMethod")}
+                        </p>
+                        <p className="text-xs text-muted-foreground">
+                          {t("projectMergeMethod")}
+                        </p>
+                      </div>
+                      <Badge variant="secondary" className="h-6 px-2.5">
+                        {t(`mergeMethods.${method}`)}
+                      </Badge>
                     </div>
-                    {["always", "never"].includes(options.squashPolicy) && (
-                      <p className="text-xs text-muted-foreground">
-                        {t(
-                          options.squashPolicy === "always"
-                            ? "squashRequired"
-                            : "squashForbidden",
-                        )}
-                      </p>
-                    )}
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <Checkbox
-                      id={`${id}-source`}
-                      checked={removeSourceBranch}
-                      disabled={disabled || !options.canRemoveSourceBranch}
-                      onCheckedChange={(value) =>
-                        setRemoveSourceBranch(value === true)
-                      }
-                    />
-                    <Label htmlFor={`${id}-source`}>
-                      {t("removeSourceBranch")}
-                    </Label>
+                    <div className="divide-y border-t">
+                      <div className="flex items-start gap-3 p-3">
+                        <Checkbox
+                          id={`${id}-squash`}
+                          aria-label={t("squashCommits")}
+                          checked={squash}
+                          disabled={
+                            disabled ||
+                            options.squashPolicy === "always" ||
+                            options.squashPolicy === "never"
+                          }
+                          onCheckedChange={(value) => setSquash(value === true)}
+                        />
+                        <Label
+                          className="cursor-pointer items-start"
+                          htmlFor={`${id}-squash`}
+                        >
+                          <span className="space-y-1">
+                            <span className="block">{t("squashCommits")}</span>
+                            {["always", "never"].includes(
+                              options.squashPolicy,
+                            ) && (
+                              <span className="block text-xs font-normal text-muted-foreground">
+                                {t(
+                                  options.squashPolicy === "always"
+                                    ? "squashRequired"
+                                    : "squashForbidden",
+                                )}
+                              </span>
+                            )}
+                          </span>
+                        </Label>
+                      </div>
+                      <div className="flex items-center gap-3 p-3">
+                        <Checkbox
+                          id={`${id}-source`}
+                          checked={removeSourceBranch}
+                          disabled={disabled || !options.canRemoveSourceBranch}
+                          onCheckedChange={(value) =>
+                            setRemoveSourceBranch(value === true)
+                          }
+                        />
+                        <Label
+                          className="cursor-pointer"
+                          htmlFor={`${id}-source`}
+                        >
+                          {t("removeSourceBranch")}
+                        </Label>
+                      </div>
+                    </div>
                   </div>
                   {mergeMessageApplicable && (
                     <div className="space-y-2">

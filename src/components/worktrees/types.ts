@@ -22,7 +22,11 @@ export type WorktreeSourceControlRequest = {
   headRefOid: string;
   createdAt: string;
   projectId?: string;
+  state?: string;
+  worktreeId?: string | null;
   detailedMergeStatus?: string;
+  approvalState?: string | null;
+  unresolvedDiscussionsCount?: number | null;
 };
 
 export type WorktreeTag = {
@@ -62,6 +66,7 @@ export type WorktreeAutoMerge = {
   state: string;
   repositoryNameWithOwner: string;
   pullRequestNumber: number;
+  branch: string;
   mergeMethod: "MERGE" | "REBASE" | "SQUASH";
   commitHeadline: string;
   commitBody: string;

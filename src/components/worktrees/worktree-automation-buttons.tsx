@@ -10,6 +10,7 @@ import {
 } from "@/components/github/merge-follow-up-fields";
 import { MergePullRequestButton } from "@/components/github/merge-pull-request-button";
 import { MergeRequestDialog } from "@/components/gitlab/merge-request-dialog";
+import { isActiveGitLabPipeline } from "@/components/gitlab/pipeline-format";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -358,6 +359,20 @@ function directlyMergeable(worktree: Worktree): boolean {
   );
 }
 
+function directlyMergeableGitLab(worktree: Worktree): boolean {
+  const mergeRequest = worktree.sourceControlRequest;
+  if (
+    mergeRequest?.provider !== "GITLAB" ||
+    mergeRequest.isDraft ||
+    mergeRequest.detailedMergeStatus !== "mergeable"
+  ) {
+    return false;
+  }
+  return !(worktree.gitLabPipelines ?? []).some((pipeline) =>
+    isActiveGitLabPipeline(pipeline.status),
+  );
+}
+
 export function AutoMergeButton(props: AutomationButtonProps) {
   return props.worktree.sourceControlRequest?.provider === "GITLAB" ? (
     <GitLabAutoMergeButton {...props} />
@@ -375,6 +390,7 @@ function GitLabAutoMergeButton({
   const [open, setOpen] = useState(false);
   const request = worktree.sourceControlRequest;
   if (!request?.projectId) return null;
+  const canMergeNow = directlyMergeableGitLab(worktree);
   return (
     <>
       <Button
@@ -384,7 +400,7 @@ function GitLabAutoMergeButton({
         onClick={() => setOpen(true)}
       >
         <GitMerge />
-        {t("mergeOptions")}
+        {t(canMergeNow ? "merge" : "autoMerge")}
       </Button>
       <MergeRequestDialog
         mergeRequest={{
@@ -413,6 +429,7 @@ function GitHubAutoMergeButton({
   const rule = worktree.autoMerge;
   const currentRule =
     rule &&
+    rule.branch === worktree.branch &&
     (!pullRequest ||
       (rule.pullRequestNumber === pullRequest.number &&
         rule.repositoryNameWithOwner.toLowerCase() ===

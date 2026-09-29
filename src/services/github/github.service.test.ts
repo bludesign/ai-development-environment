@@ -3418,7 +3418,7 @@ describe("GitHub service", () => {
       availableMethods: ["SQUASH", "MERGE"],
       commitEmails: ["octocat@example.com"],
       defaultCommitEmail: "octocat@example.com",
-      defaultCommitHeadline: "APP-42 Add API",
+      defaultCommitHeadline: "APP-42 Add API (#17)",
       defaultCommitBody: "Detailed description",
       canMerge: true,
       canEnableAutoMerge: false,

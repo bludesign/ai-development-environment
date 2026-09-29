@@ -517,7 +517,10 @@ export function GitLabMergeRequestsPage({
               changeFilters({ state: value as MergeRequestFilters["state"] })
             }
           >
-            <SelectTrigger aria-label={t("status")} className="h-9 min-w-36">
+            <SelectTrigger
+              aria-label={t("status")}
+              className="min-w-36 data-[size=default]:h-9"
+            >
               <SelectValue />
             </SelectTrigger>
             <SelectContent>

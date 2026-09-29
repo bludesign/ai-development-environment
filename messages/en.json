@@ -3468,7 +3468,7 @@
     "autoMerge": "Auto Merge",
     "autoMerging": "Auto Merging",
     "autoMergePaused": "Auto Merge paused",
-    "autoMergeComplete": "Auto Merge complete",
+    "autoMergeComplete": "Auto Merge Complete",
     "autoMergeTitle": "Configure Auto Merge",
     "autoMergeDescription": "Let GitHub merge this pull request as soon as its required checks, reviews, and branch rules are satisfied.",
     "deleteAfterMerge": "Delete this worktree after the pull request merges",

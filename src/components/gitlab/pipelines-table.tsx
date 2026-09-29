@@ -3,11 +3,11 @@
 import {
   ChevronDown,
   ChevronRight,
+  CircleStop,
   ExternalLink,
   MoreHorizontal,
   RefreshCw,
   RotateCcw,
-  Square,
 } from "lucide-react";
 import { useTranslations } from "next-intl";
 import {
@@ -511,7 +511,7 @@ function PipelineRow({
                 disabled={Boolean(cancelUnavailable)}
                 onSelect={() => void action("cancel")}
               >
-                <Square />
+                <CircleStop />
                 <span>
                   {t("cancel")}
                   {cancelUnavailable && (

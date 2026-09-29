@@ -1706,6 +1706,12 @@ export class GitLabService {
     return response.data[0] ? mapMergeRequest(response.data[0]) : null;
   }
 
+  async mergeRequestSummary(
+    mergeRequest: GitLabMergeRequestView,
+  ): Promise<GitLabMergeRequestView> {
+    return this.enrichMergeRequest(mergeRequest);
+  }
+
   async availableProjects(
     search?: string | null,
     page = 1,
