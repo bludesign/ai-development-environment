@@ -54,4 +54,20 @@ describe("workflow trigger metadata", () => {
     ).resolves.toEqual([]);
     expect(runQueueForWorkflowRun).toHaveBeenCalledWith("run-1");
   });
+
+  test("forwards batched workflow target summaries", async () => {
+    const targets = [{ resourceKind: "WORKTREE", resourceId: "worktree-1" }];
+    const targetSummaries = vi.fn().mockResolvedValue([]);
+
+    await expect(
+      createWorkflowResolvers({
+        targetSummaries,
+      } as unknown as WorkflowsService).Query.workflowTargetSummaries(
+        undefined,
+        { targets },
+        {} as never,
+      ),
+    ).resolves.toEqual([]);
+    expect(targetSummaries).toHaveBeenCalledWith(targets);
+  });
 });

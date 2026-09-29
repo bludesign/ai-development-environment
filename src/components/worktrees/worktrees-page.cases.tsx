@@ -1975,7 +1975,11 @@ export function registerWorktreesPageTests(
           headRefOid: "abc",
           createdAt: new Date(0).toISOString(),
           projectId: "project-1",
+          state: "OPENED",
+          worktreeId: "worktree-1",
           detailedMergeStatus: "mergeable",
+          approvalState: "APPROVED",
+          unresolvedDiscussionsCount: 2,
         };
         worktree.gitLabPipelines = [
           {
@@ -2003,6 +2007,12 @@ export function registerWorktreesPageTests(
 
         render(<WorktreesPage />);
         await screen.findByText("feature/AIDE-24");
+        expect(screen.getByText("Approved")).toBeDefined();
+        expect(
+          screen
+            .getByRole("link", { name: "Comments: 2" })
+            .getAttribute("href"),
+        ).toBe("/gitlab/comments?project=project-1&iid=24");
         fireEvent.pointerDown(screen.getByRole("button", { name: "MR !24" }), {
           button: 0,
           ctrlKey: false,
@@ -2019,7 +2029,7 @@ export function registerWorktreesPageTests(
         ).toBe("/gitlab/merge-requests/project-1/24");
         fireEvent.keyDown(screen.getByRole("menu"), { key: "Escape" });
         fireEvent.pointerDown(
-          screen.getByRole("button", { name: "Pipelines: SUCCESS" }),
+          screen.getByRole("button", { name: "Pipelines: Success" }),
           { button: 0, ctrlKey: false },
         );
         expect(
@@ -2027,6 +2037,10 @@ export function registerWorktreesPageTests(
             .closest("a")
             ?.getAttribute("href"),
         ).toBe("https://gitlab.com/acme/widgets/-/pipelines/42");
+        expect(
+          within(screen.getByRole("menu")).getByText("Success").className,
+        ).toContain("text-emerald");
+        expect(screen.queryByText("SUCCESS")).toBeNull();
       });
 
       test("names the agent on the card instead of its hostname", async () => {

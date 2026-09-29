@@ -287,15 +287,15 @@ export const routes: RouteEntry[] = [
     name: "gitlab-pipelines",
     path: "/gitlab/pipelines",
     readyGraphqlOperation: "GitLabPipelines",
-    readyTexts: ["#9401 · feature/retry-diagnostics", "No pipelines"],
+    readyTexts: ["#118 · feature/retry-diagnostics", "No pipelines"],
   },
   {
     name: "gitlab-comments",
     path: "/gitlab/comments",
-    readyGraphqlOperation: "GitLabCommentMergeRequests",
+    readyGraphqlOperation: "GitLabComments",
     readyTexts: [
-      "Improve pipeline retry diagnostics",
-      "No open merge requests",
+      "Ready for another look — the pipeline failure is the flaky integration job, not this change.",
+      "No comments",
     ],
   },
   {
@@ -307,7 +307,7 @@ export const routes: RouteEntry[] = [
     stubWorktree: true,
   },
   {
-    // Settings → Integrations → GitLab, the card the setup and managed-project pages describe.
+    // Settings → Integrations → GitLab, the credential-only card the setup page describes.
     // It sits below the fold behind the Jira and GitHub cards, hence the scroll.
     name: "gitlab-settings",
     path: "/settings",

@@ -246,6 +246,16 @@ export const createWorkflowResolvers = (service: WorkflowsService) => ({
         args.first,
       );
     },
+    workflowTargetSummaries: (
+      _root: unknown,
+      {
+        targets,
+      }: { targets: Parameters<WorkflowsService["targetSummaries"]>[0] },
+      context: GraphQLContext,
+    ) => {
+      requireControlPlane(context);
+      return service.targetSummaries(targets);
+    },
     workflowRunsForResource: (
       _root: unknown,
       args: { kind: string; resourceId: string; first?: number | null },

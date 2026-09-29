@@ -183,6 +183,115 @@ test("keeps valid cache hits local and lets forced reads refresh upstream", asyn
   expect(upstream).toHaveBeenCalledOnce();
 });
 
+test("explicit comments refresh replaces a cached system-only page with new human comments", async () => {
+  const instance = service();
+  const publicService = instance as unknown as GitLabService;
+  const author = {
+    id: 7,
+    username: "alex",
+    name: "Alex",
+    web_url: "https://gitlab.example/alex",
+  };
+  vi.spyOn(publicService, "getSettings").mockResolvedValue({
+    viewer: author,
+  } as never);
+  vi.spyOn(publicService, "projects").mockResolvedValue([]);
+  vi.mocked(instance.ttl).mockResolvedValue(300);
+  const entries = new Map<string, { responseJson: string; fetchedAt: Date }>();
+  cache.findUnique.mockImplementation(
+    async ({ where }) => entries.get(where.cacheKey) ?? null,
+  );
+  cache.upsert.mockImplementation(async ({ create }) => {
+    entries.set(create.cacheKey, create);
+    return create;
+  });
+  const mr = {
+    id: 2,
+    iid: 2,
+    project_id: 21,
+    title: "Test merge request",
+    state: "opened",
+    web_url: "https://gitlab.example/team/app/-/merge_requests/2",
+    author,
+    source_branch: "test",
+    target_branch: "main",
+    sha: "abc",
+    created_at: "2026-09-29T04:40:00Z",
+    updated_at: "2026-09-29T04:48:00Z",
+  };
+  const note = (id: number, body: string, system: boolean) => ({
+    id: String(id),
+    individual_note: true,
+    notes: [
+      {
+        id,
+        body,
+        system,
+        author,
+        resolvable: false,
+        created_at: `2026-09-29T04:${48 + id}:00Z`,
+        updated_at: "2026-09-29T04:49:00Z",
+      },
+    ],
+  });
+  let discussions = [note(0, "Added a commit", true)];
+  const upstream = vi
+    .spyOn(instance, "fetchRaw")
+    .mockImplementation(async (input) => ({
+      ...response(
+        (input as { path: string }).path.endsWith("/discussions")
+          ? discussions
+          : mr,
+      ),
+      headers: new Headers(),
+    }));
+  const selection = { projectId: "21", iid: 2 };
+  expect((await publicService.comments(selection)).threads).toHaveLength(0);
+  expect(upstream).toHaveBeenCalledTimes(2);
+  discussions = [
+    ...discussions,
+    note(1, "First human comment", false),
+    note(2, "Second human comment", false),
+  ];
+  expect((await publicService.comments(selection)).threads).toHaveLength(0);
+  expect(upstream).toHaveBeenCalledTimes(2);
+  const refreshed = await publicService.comments({
+    ...selection,
+    refresh: true,
+  });
+  expect(
+    refreshed.threads.flatMap((thread) =>
+      thread.discussion.notes.map((item) => item.body),
+    ),
+  ).toEqual(
+    expect.arrayContaining(["First human comment", "Second human comment"]),
+  );
+  expect(refreshed.threads).toHaveLength(2);
+  expect(upstream).toHaveBeenCalledTimes(4);
+  expect((await publicService.comments(selection)).threads).toHaveLength(2);
+  expect(upstream).toHaveBeenCalledTimes(4);
+});
+
+test("project invalidation also expires global merge-request discovery", async () => {
+  const instance = service() as ServiceInternals & {
+    invalidateCache(projectId: string): Promise<void>;
+  };
+  await instance.invalidateCache("21");
+  expect(cache.deleteMany).toHaveBeenCalledWith({
+    where: {
+      OR: [
+        { endpoint: { contains: "/projects/21/" } },
+        {
+          operation: {
+            in: ["GitLabMergeRequests", "GitLabCommentMergeRequests"],
+          },
+          endpoint: { contains: "/api/v4/merge_requests?" },
+        },
+      ],
+    },
+  });
+});
+
 test("deduplicates GitLab enrichment SHAs and caps parallel associations while preserving order", async () => {
   const instance = service();
   const gates = new Map(

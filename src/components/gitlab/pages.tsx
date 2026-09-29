@@ -6,23 +6,33 @@ import {
 } from "@/lib/integration-configuration";
 import {
   CheckCircle2,
-  ChevronDown,
-  ChevronRight,
+  GitBranch,
   ExternalLink,
   GitMerge,
   GitFork,
   Play,
   RefreshCw,
   RotateCcw,
-  Square,
   Trash2,
   Webhook,
 } from "lucide-react";
 import { useTranslations } from "next-intl";
-import { Fragment, useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 import { Alert, AlertDescription } from "@/components/ui/alert";
-import { MergeRequestMenu } from "@/components/gitlab/merge-request-menu";
+import { JiraTicketDrawer } from "@/components/jira/ticket-drawer";
+import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
+import { MergeRequestDialog } from "./merge-request-dialog";
+import { GitLabProjectManagerDialog } from "./project-manager-dialog";
+import { GITLAB_MERGE_REQUEST_FIELDS } from "./merge-request-fields";
+import { GitLabMergeRequestTable } from "./merge-request-table";
+import {
+  GitLabApprovalBadge,
+  GitLabMergeReadinessBadge,
+  GitLabMergeRequestStateBadge,
+  gitLabStatusColors,
+} from "./merge-request-status";
+import { GitLabMarkdown } from "./markdown";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -36,14 +46,11 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Spinner } from "@/components/ui/spinner";
+import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table";
+  GitLabAccessibleProjectSelect,
+  type GitLabProjectOption,
+} from "./accessible-project-select";
 import { Textarea } from "@/components/ui/textarea";
 import { worktreeDetailHref } from "@/components/worktrees/worktree-navigation";
 import { Link } from "@/i18n/navigation";
@@ -53,18 +60,13 @@ import {
   onControlPlaneRecovery,
 } from "@/lib/control-plane-client";
 import { createRefreshCoalescer } from "@/lib/refresh-coalescer";
-import { isRowActivation } from "@/lib/row-activation";
 import { cn } from "@/lib/utils";
-import {
-  worktreeHighlightBackgroundClasses,
-  worktreeHighlightInsetAccentClasses,
-} from "@/lib/worktree-highlight";
+import { worktreeHighlightBackgroundClasses } from "@/lib/worktree-highlight";
 import type {
   GitLabApiCallView,
   GitLabAutoRetryRuleView,
   GitLabCacheEntryView,
   GitLabDiscussionView,
-  GitLabJobView,
   GitLabMergeRequestDetailView,
   GitLabMergeRequestScope,
   GitLabMergeRequestView,
@@ -72,33 +74,28 @@ import type {
   GitLabProjectView,
   GitLabSettingsView,
   GitLabWebhookDeliveryView,
+  GitLabUserView,
   Paginated,
 } from "@/services/gitlab";
 
 import {
-  canRetryGitLabJob,
-  gitLabDuration,
-  gitLabPipelineStatusClass,
+  gitLabPipelineSources,
+  gitLabPipelineStatuses,
+  isActiveGitLabPipeline,
 } from "./pipeline-format";
+import { GitLabPipelinesTable } from "./pipelines-table";
 
-const SETTINGS = "configured baseUrl version tokenConfigured";
+const SETTINGS =
+  "configured baseUrl version tokenConfigured pipelinePollIntervalSeconds memberProjectsOnly defaultSquash defaultMoveTicketToDone defaultDeleteWorktree";
 const PROJECT =
   "id name pathWithNamespace webUrl defaultBranch visibility enabled webhookId webhookState webhookError webhookConfiguredAt webhookLastReceivedAt";
 const USER = "id username name avatarUrl webUrl";
 const PIPELINE =
   "id projectId iid ref branch sha source status webUrl mergeRequests { projectId iid title webUrl sourceBranch } worktreeId worktreeHighlightColor startedAt createdAt updatedAt finishedAt duration queuedDuration";
-const MR = `id iid projectId title description state draft webUrl sourceBranch targetBranch sha
-  author { ${USER} } reviewers { ${USER} } labels detailedMergeStatus mergeWhenPipelineSucceeds
-  squashOnMerge hasConflicts blockingDiscussionsResolved createdAt updatedAt mergedAt`;
+const MR = GITLAB_MERGE_REQUEST_FIELDS;
 const DISCUSSION = `id individualNote notes {
   id body author { ${USER} } createdAt updatedAt system resolvable resolved resolvedBy { ${USER} }
 }`;
-
-type GitLabJobState = {
-  loading: boolean;
-  error: string | null;
-  jobs: GitLabJobView[] | null;
-};
 
 type Configuration = {
   settings: GitLabSettingsView;
@@ -298,106 +295,244 @@ function useConfiguration(): {
   return { configuration, loading, error, reload };
 }
 
-export function GitLabMergeRequestsPage() {
+type MergeRequestFilters = {
+  scope: Exclude<GitLabMergeRequestScope, "PROJECT">;
+  projectId: string;
+  state: "OPENED" | "MERGED" | "CLOSED" | "ALL";
+  page: number;
+};
+
+function mergeRequestFiltersFromUrl(search: string): MergeRequestFilters {
+  const params = new URLSearchParams(search);
+  const scope = params.get("scope");
+  const state = params.get("state");
+  const page = Number(params.get("page"));
+  return {
+    scope:
+      scope === "ALL" || scope === "PROJECT"
+        ? "ALL"
+        : scope === "REVIEW_REQUESTED"
+          ? scope
+          : "MINE",
+    projectId: params.get("project") ?? "",
+    state:
+      state === "MERGED" || state === "CLOSED" || state === "ALL"
+        ? state
+        : "OPENED",
+    page: Number.isSafeInteger(page) && page > 0 ? page : 1,
+  };
+}
+
+function observedMergeRequestProject(
+  mr: GitLabMergeRequestView,
+): GitLabProjectOption {
+  let path = mr.projectPath;
+  if (!path) {
+    try {
+      path = new URL(mr.webUrl).pathname
+        .split("/-/merge_requests/")[0]
+        ?.replace(/^\//, "");
+    } catch {
+      /* The provider ID remains a usable fallback. */
+    }
+  }
+  return { id: mr.projectId, pathWithNamespace: path || mr.projectId };
+}
+
+export function GitLabMergeRequestsPage({
+  initialSearch,
+}: { initialSearch?: string } = {}) {
   const t = useTranslations("gitlabPages");
   const {
     configuration,
     loading,
     error: configurationError,
+    reload: reloadConfiguration,
   } = useConfiguration();
+  const [ticketKey, setTicketKey] = useState<string | null>(null);
+  const [mergeTarget, setMergeTarget] = useState<GitLabMergeRequestView | null>(
+    null,
+  );
   const [items, setItems] = useState<GitLabMergeRequestView[]>([]);
-  const [scope, setScope] = useState<GitLabMergeRequestScope>("MINE");
-  const [projectId, setProjectId] = useState("");
-  const [state, setState] = useState("OPENED");
-  const [page, setPage] = useState(1);
+  const [observedProjects, setObservedProjects] = useState<
+    GitLabProjectOption[]
+  >([]);
+  const [filters, setFilters] = useState<MergeRequestFilters>({
+    scope: "MINE",
+    projectId: "",
+    state: "OPENED",
+    page: 1,
+  });
+  const [restored, setRestored] = useState(false);
   const [pagination, setPagination] = useState<GitLabPagination | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const controllerRef = useRef<AbortController | null>(null);
+  const { scope, projectId, state, page } = filters;
+  const requiresProject = scope === "ALL" && !projectId;
+
+  useEffect(() => {
+    const restore = (search: string) => {
+      controllerRef.current?.abort();
+      const next = mergeRequestFiltersFromUrl(search);
+      setFilters(next);
+      setItems([]);
+      setPagination(null);
+      setError(null);
+      setBusy(!(next.scope === "ALL" && !next.projectId));
+      setRestored(true);
+    };
+    const restoreHistory = () => restore(window.location.search);
+    const timer = window.setTimeout(
+      () => restore(initialSearch ?? window.location.search),
+      0,
+    );
+    window.addEventListener("popstate", restoreHistory);
+    return () => {
+      window.clearTimeout(timer);
+      window.removeEventListener("popstate", restoreHistory);
+      controllerRef.current?.abort();
+    };
+  }, [initialSearch]);
+
+  const changeFilters = (changes: Partial<MergeRequestFilters>) => {
+    controllerRef.current?.abort();
+    const next = { ...filters, page: 1, ...changes };
+    const params = new URLSearchParams(window.location.search);
+    for (const [key, value] of Object.entries({
+      scope: next.scope === "MINE" ? "" : next.scope,
+      project: next.projectId,
+      state: next.state === "OPENED" ? "" : next.state,
+      page: next.page > 1 ? String(next.page) : "",
+    })) {
+      if (value) params.set(key, value);
+      else params.delete(key);
+    }
+    const query = params.toString();
+    window.history.pushState(
+      null,
+      "",
+      `${window.location.pathname}${query ? `?${query}` : ""}${window.location.hash}`,
+    );
+    setFilters(next);
+    setItems([]);
+    setPagination(null);
+    setError(null);
+    setBusy(!(next.scope === "ALL" && !next.projectId));
+  };
 
   const load = useCallback(async () => {
-    if (!configuration?.settings.configured) return;
+    if (
+      !configuration?.settings.configured ||
+      !restored ||
+      (scope === "ALL" && !projectId)
+    )
+      return;
+    controllerRef.current?.abort();
+    const controller = new AbortController();
+    controllerRef.current = controller;
     setBusy(true);
+    setError(null);
     try {
       const data = await controlPlaneRequest<{
         gitlabMergeRequests: Paginated<GitLabMergeRequestView>;
       }>(
         `query GitLabMergeRequests($scope: GitLabMergeRequestScope!, $projectId: ID, $state: GitLabMergeRequestState!, $page: Int!) {
-        gitlabMergeRequests(scope: $scope, projectId: $projectId, state: $state, page: $page) {
-          total page perPage nextPage items { ${MR} }
-        }
-      }`,
-        {
-          scope: projectId ? "PROJECT" : scope,
-          projectId: projectId || null,
-          state,
-          page,
-        },
+          gitlabMergeRequests(scope: $scope, projectId: $projectId, state: $state, page: $page) {
+            total page perPage nextPage items { ${MR} }
+          }
+        }`,
+        { scope, projectId: projectId || null, state, page },
+        { signal: controller.signal },
       );
+      if (controller.signal.aborted) return;
       setItems(data.gitlabMergeRequests.items);
       setPagination(data.gitlabMergeRequests);
-      setError(null);
+      setObservedProjects((previous) => [
+        ...new Map(
+          [
+            ...previous,
+            ...data.gitlabMergeRequests.items.map(observedMergeRequestProject),
+          ].map((project) => [project.id, project]),
+        ).values(),
+      ]);
     } catch (value) {
+      if (controller.signal.aborted) return;
       setItems([]);
       setPagination(null);
       setError(value instanceof Error ? value.message : String(value));
     } finally {
-      setBusy(false);
+      if (!controller.signal.aborted) setBusy(false);
     }
-  }, [configuration?.settings.configured, page, projectId, scope, state]);
+  }, [
+    configuration?.settings.configured,
+    restored,
+    page,
+    projectId,
+    scope,
+    state,
+  ]);
 
   useEffect(() => {
-    if (!configuration?.settings.configured) return;
-    const timeout = window.setTimeout(() => void load(), 0);
-    return () => window.clearTimeout(timeout);
-  }, [configuration?.settings.configured, load]);
+    const timer = window.setTimeout(() => void load(), 0);
+    return () => {
+      window.clearTimeout(timer);
+      controllerRef.current?.abort();
+    };
+  }, [load]);
 
-  if (loading) return <Spinner />;
+  if (loading || !restored) return <Spinner />;
   if (!configuration?.settings.configured) return <ProviderNotConfigured />;
+  const timedOut =
+    error && (/\(408\)/.test(error) || /timed? out/i.test(error));
   return (
     <section className="space-y-6">
-      <PageHeader
-        description={t("mergeRequestsDescription")}
-        title={t("mergeRequestsTitle")}
-      />
-      <ErrorAlert error={configurationError ?? error} />
-      <Card>
-        <CardContent className="flex flex-wrap items-center gap-3 py-4">
-          <ProjectSelect
-            allowAll
-            onChange={(value) => {
-              setPage(1);
-              setProjectId(value);
-            }}
-            projects={configuration.projects}
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <PageHeader
+          description={t("mergeRequestsDescription")}
+          title={t("mergeRequestsTitle")}
+        />
+        <GitLabProjectManagerDialog
+          onChanged={reloadConfiguration}
+          projects={configuration.projects}
+          settings={configuration.settings}
+        />
+      </div>
+      <ErrorAlert error={configurationError} />
+      <div className="overflow-x-auto pb-1">
+        <Tabs
+          value={scope}
+          onValueChange={(value) =>
+            changeFilters({ scope: value as MergeRequestFilters["scope"] })
+          }
+        >
+          <TabsList aria-label={t("scope")}>
+            <TabsTrigger value="MINE">{t("mine")}</TabsTrigger>
+            <TabsTrigger value="REVIEW_REQUESTED">
+              {t("reviewRequests")}
+            </TabsTrigger>
+            <TabsTrigger value="ALL">{t("allAccessible")}</TabsTrigger>
+          </TabsList>
+        </Tabs>
+      </div>
+      <div className="space-y-2">
+        <div className="flex flex-wrap items-center gap-3">
+          <GitLabAccessibleProjectSelect
+            allowAll={scope !== "ALL"}
             value={projectId}
+            onChange={(value) => changeFilters({ projectId: value })}
+            knownProjects={[...configuration.projects, ...observedProjects]}
           />
           <Select
-            disabled={Boolean(projectId)}
-            onValueChange={(value) => {
-              setPage(1);
-              setScope(value as GitLabMergeRequestScope);
-            }}
-            value={scope}
-          >
-            <SelectTrigger aria-label={t("scope")} className="h-9">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="ALL">{t("allAccessible")}</SelectItem>
-              <SelectItem value="MINE">{t("authoredByMe")}</SelectItem>
-              <SelectItem value="REVIEW_REQUESTED">
-                {t("reviewRequested")}
-              </SelectItem>
-            </SelectContent>
-          </Select>
-          <Select
-            onValueChange={(value) => {
-              setPage(1);
-              setState(value);
-            }}
             value={state}
+            onValueChange={(value) =>
+              changeFilters({ state: value as MergeRequestFilters["state"] })
+            }
           >
-            <SelectTrigger aria-label={t("state")} className="h-9">
+            <SelectTrigger
+              aria-label={t("status")}
+              className="min-w-36 data-[size=default]:h-9"
+            >
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
@@ -408,59 +543,87 @@ export function GitLabMergeRequestsPage() {
             </SelectContent>
           </Select>
           <Button
-            disabled={busy}
+            disabled={busy || requiresProject}
             onClick={() => void load()}
+            size="lg"
             type="button"
             variant="outline"
           >
             {busy ? <Spinner /> : <RefreshCw />}
             {t("refresh")}
           </Button>
-        </CardContent>
-      </Card>
-      <div className="space-y-3">
-        {items.length === 0 && !busy && !error ? (
-          <Card>
-            <CardContent className="py-8 text-sm text-muted-foreground">
-              {t("noMergeRequests")}
-            </CardContent>
-          </Card>
-        ) : (
-          items.map((mr) => (
-            <Card key={mr.id}>
-              <CardContent className="flex flex-col gap-3 py-4 sm:flex-row sm:items-start sm:justify-between">
-                <div className="min-w-0">
-                  <Link
-                    className="font-medium text-primary hover:underline"
-                    href={`/gitlab/merge-requests/${mr.projectId}/${mr.iid}`}
-                  >
-                    {mr.title}
-                  </Link>
-                  <p className="mt-1 text-xs text-muted-foreground">
-                    !{mr.iid} · {mr.sourceBranch} → {mr.targetBranch} · @
-                    {mr.author.username}
-                  </p>
-                  <div className="mt-2 flex flex-wrap gap-1">
-                    {mr.labels.map((label) => (
-                      <Badge key={label} variant="secondary">
-                        {label}
-                      </Badge>
-                    ))}
-                  </div>
-                </div>
-                <div className="flex shrink-0 gap-2">
-                  <Badge variant="outline">{mr.state}</Badge>
-                  <Badge variant="outline">{mr.detailedMergeStatus}</Badge>
-                </div>
-              </CardContent>
-            </Card>
-          ))
+        </div>
+        {scope === "MINE" && (
+          <p className="text-sm text-muted-foreground">
+            {t("mineDescription")}
+          </p>
         )}
       </div>
-      <PaginationControls
-        busy={busy}
-        onPageChange={setPage}
-        pagination={pagination}
+      {error && (
+        <Alert variant="destructive">
+          <AlertDescription className="flex flex-wrap items-center justify-between gap-3">
+            <span>{timedOut ? t("mergeRequestsTimedOut") : error}</span>
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              disabled={busy}
+              onClick={() => void load()}
+            >
+              {t("retry")}
+            </Button>
+          </AlertDescription>
+        </Alert>
+      )}
+      {requiresProject ? (
+        <Card>
+          <CardContent className="py-8 text-sm text-muted-foreground">
+            {t("allAccessibleChooseProject")}
+          </CardContent>
+        </Card>
+      ) : busy && items.length === 0 ? (
+        <div
+          role="status"
+          className="flex items-center gap-2 text-sm text-muted-foreground"
+        >
+          <Spinner />
+          {t("loadingMergeRequests")}
+        </div>
+      ) : items.length === 0 && !error ? (
+        <Card>
+          <CardContent className="py-8 text-sm text-muted-foreground">
+            {t("noMergeRequests")}
+          </CardContent>
+        </Card>
+      ) : items.length > 0 ? (
+        <GitLabMergeRequestTable
+          items={items}
+          projects={configuration.projects}
+          onMerge={setMergeTarget}
+          onTicket={setTicketKey}
+        />
+      ) : null}
+      {!requiresProject && (
+        <PaginationControls
+          busy={busy}
+          onPageChange={(value) => changeFilters({ page: value })}
+          pagination={pagination}
+        />
+      )}
+      {mergeTarget && (
+        <MergeRequestDialog
+          mergeRequest={mergeTarget}
+          worktreeId={mergeTarget.worktreeId}
+          open
+          onOpenChange={(open) => {
+            if (!open) setMergeTarget(null);
+          }}
+          onMerged={load}
+        />
+      )}
+      <JiraTicketDrawer
+        issueKey={ticketKey}
+        onClose={() => setTicketKey(null)}
       />
     </section>
   );
@@ -474,50 +637,82 @@ export function GitLabMergeRequestDetailPage({
   iid: number;
 }) {
   const t = useTranslations("gitlabPages");
-  const { configuration, loading: configurationLoading } = useConfiguration();
+  const {
+    configuration,
+    loading: configurationLoading,
+    error: configurationError,
+  } = useConfiguration();
   const [mr, setMr] = useState<GitLabMergeRequestDetailView | null>(null);
   const [reviewBody, setReviewBody] = useState("");
   const [replyBodies, setReplyBodies] = useState<Record<string, string>>({});
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [mergeOpen, setMergeOpen] = useState(false);
+  const [ticketKey, setTicketKey] = useState<string | null>(null);
+  const controllerRef = useRef<AbortController | null>(null);
 
   const load = useCallback(async () => {
     if (!configuration?.settings.configured) return;
+    controllerRef.current?.abort();
+    const controller = new AbortController();
+    controllerRef.current = controller;
     setBusy(true);
     try {
       const data = await controlPlaneRequest<{
         gitlabMergeRequest: GitLabMergeRequestDetailView;
       }>(
         `query GitLabMergeRequest($projectId: ID!, $iid: Int!) {
-        gitlabMergeRequest(projectId: $projectId, iid: $iid) {
-          ${MR} changesCount commitsCount discussions { ${DISCUSSION} } pipelines { ${PIPELINE} }
-        }
-      }`,
+          gitlabMergeRequest(projectId: $projectId, iid: $iid) { ${MR} changesCount commitsCount discussions { ${DISCUSSION} } pipelines { ${PIPELINE} } }
+        }`,
         { projectId, iid },
+        { signal: controller.signal },
       );
+      if (controller.signal.aborted) return;
       setMr(data.gitlabMergeRequest);
       setError(null);
     } catch (value) {
-      setError(value instanceof Error ? value.message : String(value));
+      if (!controller.signal.aborted)
+        setError(value instanceof Error ? value.message : String(value));
     } finally {
-      setBusy(false);
+      if (!controller.signal.aborted) setBusy(false);
     }
   }, [configuration?.settings.configured, iid, projectId]);
 
   useEffect(() => {
     if (!configuration?.settings.configured) return;
-    const timeout = window.setTimeout(() => void load(), 0);
-    return () => window.clearTimeout(timeout);
+    const timer = window.setTimeout(() => void load(), 0);
+    const dispose = subscribeIntegrationConfiguration(
+      "gitlab",
+      () => void load(),
+    );
+    const recover = onControlPlaneRecovery(() => void load());
+    return () => {
+      window.clearTimeout(timer);
+      dispose();
+      recover();
+      controllerRef.current?.abort();
+    };
   }, [configuration?.settings.configured, load]);
+  useEffect(() => {
+    if (
+      !mr?.mergeWhenPipelineSucceeds &&
+      !["PREPARING", "WAITING", "POST_MERGE"].includes(
+        mr?.mergeOperation?.state ?? "",
+      )
+    )
+      return;
+    const timer = window.setInterval(() => {
+      if (document.visibilityState !== "hidden") void load();
+    }, 15000);
+    return () => window.clearInterval(timer);
+  }, [load, mr?.mergeWhenPipelineSucceeds, mr?.mergeOperation?.state]);
 
   const review = async (outcome: "APPROVE" | "COMMENT" | "REQUEST_CHANGES") => {
     setBusy(true);
     try {
       await controlPlaneRequest(
-        `mutation SubmitGitLabReview($input: SubmitGitLabReviewInput!) {
-        submitGitLabReview(input: $input)
-      }`,
-        { input: { projectId, iid, outcome, body: reviewBody || null } },
+        `mutation SubmitGitLabReview($input: SubmitGitLabReviewInput!) { submitGitLabReview(input: $input) }`,
+        { input: { projectId, iid, outcome, body: reviewBody.trim() || null } },
       );
       setReviewBody("");
       await load();
@@ -526,40 +721,13 @@ export function GitLabMergeRequestDetailPage({
       setBusy(false);
     }
   };
-
-  const merge = async (autoMerge: boolean) => {
-    setBusy(true);
-    try {
-      await controlPlaneRequest(
-        `mutation MergeGitLabMergeRequest($input: MergeGitLabMergeRequestInput!) {
-        mergeGitLabMergeRequest(input: $input) { id }
-      }`,
-        {
-          input: {
-            projectId,
-            iid,
-            autoMerge,
-            squash: mr?.squashOnMerge ?? false,
-            sha: mr?.sha,
-          },
-        },
-      );
-      await load();
-    } catch (value) {
-      setError(value instanceof Error ? value.message : String(value));
-      setBusy(false);
-    }
-  };
-
   const reply = async (discussionId: string) => {
     const body = replyBodies[discussionId]?.trim();
     if (!body) return;
     setBusy(true);
     try {
       await controlPlaneRequest(
-        `mutation ReplyToGitLabDiscussion($input: GitLabDiscussionInput!, $body: String!) {
-        replyToGitLabDiscussion(input: $input, body: $body) { id }
-      }`,
+        `mutation ReplyToGitLabDiscussion($input: GitLabDiscussionInput!, $body: String!) { replyToGitLabDiscussion(input: $input, body: $body) { id } }`,
         { input: { projectId, iid, discussionId }, body },
       );
       setReplyBodies((items) => ({ ...items, [discussionId]: "" }));
@@ -569,7 +737,6 @@ export function GitLabMergeRequestDetailPage({
       setBusy(false);
     }
   };
-
   const resolve = async (
     discussion: GitLabDiscussionView,
     resolved: boolean,
@@ -577,9 +744,7 @@ export function GitLabMergeRequestDetailPage({
     setBusy(true);
     try {
       await controlPlaneRequest(
-        `mutation ResolveGitLabDiscussion($input: GitLabDiscussionInput!, $resolved: Boolean!) {
-        setGitLabDiscussionResolved(input: $input, resolved: $resolved) { id }
-      }`,
+        `mutation ResolveGitLabDiscussion($input: GitLabDiscussionInput!, $resolved: Boolean!) { setGitLabDiscussionResolved(input: $input, resolved: $resolved) { id } }`,
         { input: { projectId, iid, discussionId: discussion.id }, resolved },
       );
       await load();
@@ -592,207 +757,370 @@ export function GitLabMergeRequestDetailPage({
   if (configurationLoading) return <Spinner />;
   if (!configuration?.settings.configured) return <ProviderNotConfigured />;
   if (!mr && busy) return <Spinner />;
+  if (!mr)
+    return (
+      <section className="space-y-4">
+        <ErrorAlert error={configurationError ?? error} />
+        <p className="text-muted-foreground">{t("noMergeRequest")}</p>
+        <Button asChild variant="outline">
+          <Link href="/gitlab/merge-requests">{t("backToMergeRequests")}</Link>
+        </Button>
+      </section>
+    );
+  const projectPath =
+    mr.projectPath ??
+    configuration.projects.find((project) => project.id === mr.projectId)
+      ?.pathWithNamespace ??
+    mr.projectId;
+  const highlighted = mr.worktreeHighlightColor;
   return (
-    <section className="space-y-6">
-      <ErrorAlert error={error} />
-      {mr && (
-        <>
-          <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-            <div>
-              <h1 className="text-2xl font-semibold tracking-tight">
-                {mr.title}
-              </h1>
-              <p className="mt-1 text-sm text-muted-foreground">
-                !{mr.iid} · {mr.sourceBranch} → {mr.targetBranch}
-              </p>
-            </div>
-            <Button asChild variant="outline">
-              <a href={mr.webUrl} rel="noreferrer" target="_blank">
-                {t("openInGitLab")}
-                <ExternalLink />
-              </a>
-            </Button>
+    <section className="mx-auto flex w-full min-w-0 max-w-6xl flex-col gap-5">
+      <ErrorAlert error={configurationError ?? error} />
+      <div
+        className={cn(
+          "flex flex-wrap items-start justify-between gap-4",
+          highlighted && "rounded-lg border-l-4 p-4",
+          highlighted && worktreeHighlightBackgroundClasses[highlighted],
+        )}
+      >
+        <div className="min-w-0">
+          <Link
+            className="text-sm text-muted-foreground hover:underline"
+            href="/gitlab/merge-requests"
+          >
+            {t("backToMergeRequests")}
+          </Link>
+          <h1 className="mt-2 text-2xl font-semibold break-words tracking-tight [overflow-wrap:anywhere]">
+            {mr.title}
+          </h1>
+          <p className="mt-1 text-sm text-muted-foreground">
+            {projectPath} !{mr.iid}
+          </p>
+          <div className="mt-3 flex flex-wrap gap-2">
+            <GitLabMergeRequestStateBadge state={mr.state} draft={mr.draft} />
+            {mr.draft && <Badge variant="secondary">{t("draft")}</Badge>}
+            <GitLabApprovalBadge state={mr.approvalState} />
+            <GitLabMergeReadinessBadge
+              state={mr.state}
+              status={mr.detailedMergeStatus}
+              hasConflicts={mr.hasConflicts}
+            />
+            {mr.mergeWhenPipelineSucceeds && mr.state === "OPENED" && (
+              <Badge className={gitLabStatusColors.warning}>
+                {t("autoMergeEnabled")}
+              </Badge>
+            )}
+            {mr.ticketKey && (
+              <Badge asChild>
+                <button
+                  type="button"
+                  onClick={() => setTicketKey(mr.ticketKey!)}
+                >
+                  {mr.ticketKey}
+                </button>
+              </Badge>
+            )}
+            {mr.labels.map((label) => (
+              <Badge key={label} variant="secondary">
+                {label}
+              </Badge>
+            ))}
           </div>
-          <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_20rem]">
-            <div className="space-y-4">
-              <Card>
-                <CardHeader>
-                  <CardTitle>{t("description")}</CardTitle>
-                </CardHeader>
-                <CardContent>
-                  <p className="whitespace-pre-wrap text-sm">
-                    {mr.description || t("noDescription")}
-                  </p>
-                </CardContent>
-              </Card>
-              <Card>
-                <CardHeader>
-                  <CardTitle>{t("review")}</CardTitle>
-                </CardHeader>
-                <CardContent className="space-y-3">
+        </div>
+        <div className="flex flex-wrap gap-2">
+          {mr.worktreeId && (
+            <Button asChild variant="outline">
+              <Link href={worktreeDetailHref(mr.worktreeId)}>
+                <GitBranch />
+                {t("viewWorktree")}
+              </Link>
+            </Button>
+          )}
+          {(mr.state === "OPENED" || mr.mergeOperation) && (
+            <Button onClick={() => setMergeOpen(true)} variant="outline">
+              <GitMerge />
+              {t(mr.state === "MERGED" ? "mergeFollowUps" : "mergeOptions")}
+            </Button>
+          )}
+          <Button disabled={busy} onClick={() => void load()} variant="outline">
+            <RefreshCw className={busy ? "animate-spin" : undefined} />
+            {t("refresh")}
+          </Button>
+          <Button asChild>
+            <a href={mr.webUrl} rel="noreferrer" target="_blank">
+              {t("openInGitLab")}
+              <ExternalLink />
+            </a>
+          </Button>
+        </div>
+      </div>
+      {mr.mergeOperation?.lastError && (
+        <Alert variant="destructive">
+          <AlertDescription>{mr.mergeOperation.lastError}</AlertDescription>
+        </Alert>
+      )}
+      <div className="grid min-w-0 gap-5 lg:grid-cols-2">
+        <Card className="min-w-0">
+          <CardHeader>
+            <CardTitle>{t("details")}</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <dl className="space-y-3 text-sm">
+              <GitLabDetailRow label={t("branches")}>
+                <span className="font-mono text-xs">
+                  {mr.sourceBranch} → {mr.targetBranch}
+                </span>
+              </GitLabDetailRow>
+              <GitLabDetailRow label={t("commit")}>
+                <span className="font-mono text-xs">{mr.sha.slice(0, 12)}</span>
+              </GitLabDetailRow>
+              <GitLabDetailRow label={t("changedFiles")}>
+                {mr.changesCount ?? "—"}
+              </GitLabDetailRow>
+              <GitLabDetailRow label={t("commitCount")}>
+                {mr.commitsCount}
+              </GitLabDetailRow>
+              <GitLabDetailRow label={t("openDiscussions")}>
+                {mr.unresolvedDiscussionsCount ?? t("unavailable")}
+              </GitLabDetailRow>
+              <GitLabDetailRow label={t("created")}>
+                <DateTime value={mr.createdAt} />
+              </GitLabDetailRow>
+              <GitLabDetailRow label={t("updated")}>
+                <DateTime value={mr.updatedAt} />
+              </GitLabDetailRow>
+              {mr.mergedAt && (
+                <GitLabDetailRow label={t("mergedAt")}>
+                  <DateTime value={mr.mergedAt} />
+                </GitLabDetailRow>
+              )}
+            </dl>
+          </CardContent>
+        </Card>
+        <Card className="min-w-0">
+          <CardHeader>
+            <CardTitle>{t("people")}</CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <div>
+              <p className="mb-2 text-xs text-muted-foreground">
+                {t("author")}
+              </p>
+              <GitLabPerson user={mr.author} />
+            </div>
+            <div>
+              <p className="mb-2 text-xs text-muted-foreground">
+                {t("reviewers")}
+              </p>
+              {mr.reviewers.length ? (
+                <div className="space-y-2">
+                  {mr.reviewers.map((user) => (
+                    <GitLabPerson key={user.id} user={user} />
+                  ))}
+                </div>
+              ) : (
+                <p className="text-sm text-muted-foreground">
+                  {t("noReviewers")}
+                </p>
+              )}
+            </div>
+          </CardContent>
+        </Card>
+      </div>
+      <Card className="min-w-0">
+        <CardHeader>
+          <CardTitle>{t("description")}</CardTitle>
+        </CardHeader>
+        <CardContent>
+          <GitLabMarkdown
+            body={mr.description}
+            emptyLabel={t("noDescription")}
+            actions
+          />
+        </CardContent>
+      </Card>
+      <Card className="min-w-0 gap-0 py-0" id="pipelines">
+        <CardHeader>
+          <CardTitle>{t("pipelines")}</CardTitle>
+        </CardHeader>
+        <CardContent className="px-0 pb-0">
+          <GitLabPipelinesTable
+            pipelines={mr.pipelines}
+            pollIntervalSeconds={
+              configuration.settings.pipelinePollIntervalSeconds
+            }
+            onChanged={load}
+            showMergeRequests={false}
+          />
+        </CardContent>
+      </Card>
+      <div id="discussions" className="space-y-4">
+        <div className="flex items-center gap-2">
+          <h2 className="text-lg font-semibold">{t("discussions")}</h2>
+          <Badge variant="secondary">{mr.discussions.length}</Badge>
+        </div>
+        {mr.discussions.length === 0 ? (
+          <Card>
+            <CardContent className="py-6 text-sm text-muted-foreground">
+              {t("noDiscussions")}
+            </CardContent>
+          </Card>
+        ) : (
+          mr.discussions.map((discussion) => {
+            const resolvableNotes = discussion.notes.filter(
+              (note) => note.resolvable,
+            );
+            const resolved =
+              resolvableNotes.length > 0 &&
+              resolvableNotes.every((note) => note.resolved);
+            return (
+              <Card key={discussion.id} className="min-w-0">
+                <CardContent className="space-y-4">
+                  {resolvableNotes.length > 0 && (
+                    <Badge
+                      className={
+                        resolved
+                          ? gitLabStatusColors.success
+                          : gitLabStatusColors.warning
+                      }
+                    >
+                      {t(resolved ? "resolved" : "unresolved")}
+                    </Badge>
+                  )}
+                  {discussion.notes.map((note) => (
+                    <div key={note.id} className="space-y-2">
+                      <div className="flex flex-wrap items-center justify-between gap-2">
+                        <GitLabPerson user={note.author} />
+                        <span className="text-xs text-muted-foreground">
+                          <DateTime value={note.createdAt} />
+                        </span>
+                      </div>
+                      <GitLabMarkdown body={note.body} />
+                    </div>
+                  ))}
                   <Textarea
-                    onChange={(event) => setReviewBody(event.target.value)}
-                    placeholder={t("reviewSummary")}
-                    value={reviewBody}
+                    aria-label={t("reply")}
+                    placeholder={t("reply")}
+                    value={replyBodies[discussion.id] ?? ""}
+                    onChange={(event) =>
+                      setReplyBodies((items) => ({
+                        ...items,
+                        [discussion.id]: event.target.value,
+                      }))
+                    }
                   />
                   <div className="flex flex-wrap gap-2">
                     <Button
-                      disabled={busy}
-                      onClick={() => void review("APPROVE")}
-                      type="button"
+                      size="sm"
+                      disabled={
+                        busy || !(replyBodies[discussion.id] ?? "").trim()
+                      }
+                      onClick={() => void reply(discussion.id)}
                     >
-                      <CheckCircle2 />
-                      {t("approve")}
+                      {t("reply")}
                     </Button>
-                    <Button
-                      disabled={busy}
-                      onClick={() => void review("COMMENT")}
-                      type="button"
-                      variant="outline"
-                    >
-                      {t("comment")}
-                    </Button>
-                    <Button
-                      disabled={busy}
-                      onClick={() => void review("REQUEST_CHANGES")}
-                      type="button"
-                      variant="outline"
-                    >
-                      {t("requestChanges")}
-                    </Button>
+                    {resolvableNotes.length > 0 && (
+                      <Button
+                        size="sm"
+                        disabled={busy}
+                        variant="outline"
+                        onClick={() => void resolve(discussion, !resolved)}
+                      >
+                        {t(resolved ? "reopen" : "resolve")}
+                      </Button>
+                    )}
                   </div>
                 </CardContent>
               </Card>
-              <Card>
-                <CardHeader>
-                  <CardTitle>{t("discussions")}</CardTitle>
-                </CardHeader>
-                <CardContent className="space-y-4">
-                  {mr.discussions.length === 0 ? (
-                    <p className="text-sm text-muted-foreground">
-                      {t("noDiscussions")}
-                    </p>
-                  ) : (
-                    mr.discussions.map((discussion) => {
-                      const resolvable = discussion.notes.some(
-                        (note) => note.resolvable,
-                      );
-                      const resolved = discussion.notes.some(
-                        (note) => note.resolved,
-                      );
-                      return (
-                        <div
-                          className="space-y-3 rounded-lg border p-3"
-                          key={discussion.id}
-                        >
-                          {discussion.notes.map((note) => (
-                            <div key={note.id}>
-                              <p className="text-xs font-medium">
-                                @{note.author.username}
-                              </p>
-                              <p className="mt-1 whitespace-pre-wrap text-sm">
-                                {note.body}
-                              </p>
-                            </div>
-                          ))}
-                          <Textarea
-                            onChange={(event) =>
-                              setReplyBodies((items) => ({
-                                ...items,
-                                [discussion.id]: event.target.value,
-                              }))
-                            }
-                            placeholder={t("reply")}
-                            value={replyBodies[discussion.id] ?? ""}
-                          />
-                          <div className="flex gap-2">
-                            <Button
-                              disabled={
-                                busy ||
-                                !(replyBodies[discussion.id] ?? "").trim()
-                              }
-                              onClick={() => void reply(discussion.id)}
-                              size="sm"
-                              type="button"
-                            >
-                              {t("reply")}
-                            </Button>
-                            {resolvable && (
-                              <Button
-                                disabled={busy}
-                                onClick={() =>
-                                  void resolve(discussion, !resolved)
-                                }
-                                size="sm"
-                                type="button"
-                                variant="outline"
-                              >
-                                {resolved ? t("reopen") : t("resolve")}
-                              </Button>
-                            )}
-                          </div>
-                        </div>
-                      );
-                    })
-                  )}
-                </CardContent>
-              </Card>
+            );
+          })
+        )}
+      </div>
+      {mr.state === "OPENED" && (
+        <Card>
+          <CardHeader>
+            <CardTitle>{t("review")}</CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-3">
+            <Textarea
+              aria-label={t("reviewSummary")}
+              placeholder={t("reviewSummary")}
+              value={reviewBody}
+              onChange={(event) => setReviewBody(event.target.value)}
+            />
+            <div className="flex flex-wrap gap-2">
+              <Button disabled={busy} onClick={() => void review("APPROVE")}>
+                <CheckCircle2 />
+                {t("approve")}
+              </Button>
+              <Button
+                disabled={busy}
+                variant="outline"
+                onClick={() => void review("COMMENT")}
+              >
+                {t("comment")}
+              </Button>
+              <Button
+                disabled={busy}
+                variant="outline"
+                onClick={() => void review("REQUEST_CHANGES")}
+              >
+                {t("requestChanges")}
+              </Button>
             </div>
-            <div className="space-y-4">
-              <Card>
-                <CardContent className="space-y-3 py-4">
-                  <Badge>{mr.state}</Badge>
-                  <p className="text-sm">{mr.detailedMergeStatus}</p>
-                  <p className="text-xs text-muted-foreground">
-                    {t("commits", { count: mr.commitsCount })} ·{" "}
-                    {t("changes", { count: mr.changesCount ?? "—" })}
-                  </p>
-                  <Button
-                    className="w-full"
-                    disabled={busy || mr.state !== "OPENED"}
-                    onClick={() => void merge(false)}
-                    type="button"
-                  >
-                    <GitMerge />
-                    {t("merge")}
-                  </Button>
-                  <Button
-                    className="w-full"
-                    disabled={busy || mr.state !== "OPENED"}
-                    onClick={() => void merge(true)}
-                    type="button"
-                    variant="outline"
-                  >
-                    {t("autoMerge")}
-                  </Button>
-                </CardContent>
-              </Card>
-              <Card>
-                <CardHeader>
-                  <CardTitle>{t("pipelines")}</CardTitle>
-                </CardHeader>
-                <CardContent className="space-y-2">
-                  {mr.pipelines.map((pipeline) => (
-                    <a
-                      className="flex items-center justify-between gap-2 rounded border p-2 text-sm hover:bg-muted/50"
-                      href={pipeline.webUrl}
-                      key={pipeline.id}
-                      rel="noreferrer"
-                      target="_blank"
-                    >
-                      <span>
-                        #{pipeline.id} · {pipeline.ref}
-                      </span>
-                      <Badge variant="outline">{pipeline.status}</Badge>
-                    </a>
-                  ))}
-                </CardContent>
-              </Card>
-            </div>
-          </div>
-        </>
+          </CardContent>
+        </Card>
       )}
+      <MergeRequestDialog
+        mergeRequest={mr}
+        worktreeId={mr.worktreeId}
+        onMerged={async () => {
+          await load();
+        }}
+        open={mergeOpen}
+        onOpenChange={setMergeOpen}
+      />
+      <JiraTicketDrawer
+        issueKey={ticketKey}
+        onClose={() => setTicketKey(null)}
+      />
     </section>
+  );
+}
+
+function GitLabDetailRow({
+  label,
+  children,
+}: {
+  label: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <div className="grid min-w-0 grid-cols-[auto_minmax(0,1fr)] items-start gap-4">
+      <dt className="text-muted-foreground">{label}</dt>
+      <dd className="min-w-0 text-right break-words [overflow-wrap:anywhere]">
+        {children}
+      </dd>
+    </div>
+  );
+}
+
+function GitLabPerson({ user }: { user: GitLabUserView }) {
+  return (
+    <a
+      className="inline-flex items-center gap-2 text-sm hover:underline"
+      href={user.webUrl}
+      rel="noreferrer"
+      target="_blank"
+    >
+      <Avatar size="sm">
+        <AvatarImage alt="" src={user.avatarUrl ?? undefined} />
+        <AvatarFallback>
+          {user.username.slice(0, 1).toUpperCase()}
+        </AvatarFallback>
+      </Avatar>
+      @{user.username}
+    </a>
   );
 }
 
@@ -807,88 +1135,136 @@ export function GitLabPipelinesPage() {
   const [pipelines, setPipelines] = useState<GitLabPipelineView[]>([]);
   const [page, setPage] = useState(1);
   const [pagination, setPagination] = useState<GitLabPagination | null>(null);
-  const [expandedPipelines, setExpandedPipelines] = useState<Set<string>>(
-    new Set(),
-  );
-  const [jobStates, setJobStates] = useState<Record<string, GitLabJobState>>(
-    {},
-  );
+  const [branch, setBranch] = useState("");
+  const [branchInput, setBranchInput] = useState("");
+  const [status, setStatus] = useState("all");
+  const [source, setSource] = useState("all");
   const [ref, setRef] = useState("");
   const [autoRetryRules, setAutoRetryRules] = useState<
     GitLabAutoRetryRuleView[]
   >([]);
   const [maxAttempts, setMaxAttempts] = useState("1");
   const [busy, setBusy] = useState(false);
+  const [actionBusy, setActionBusy] = useState(false);
+  const actionInFlight = useRef(false);
   const [error, setError] = useState<string | null>(null);
+  const currentScope = `${projectId}:${page}:${branch}:${status}:${source}`;
+  const scopeRef = useRef(currentScope);
+  useEffect(() => {
+    scopeRef.current = currentScope;
+  }, [currentScope]);
 
   useEffect(() => {
-    if (!projectId && configuration?.projects[0]) {
-      const firstProject = configuration.projects[0];
-      const timeout = window.setTimeout(() => {
-        setProjectId(firstProject.id);
-        setRef(firstProject.defaultBranch ?? "main");
-      }, 0);
-      return () => window.clearTimeout(timeout);
-    }
-  }, [configuration?.projects, projectId]);
-
-  const rulesLoadedFor = useRef<string | null>(null);
-  const loadController = useRef<AbortController | null>(null);
-  const load = useCallback(
-    async (includeRules = true) => {
-      if (!projectId) return;
-      loadController.current?.abort();
-      const controller = new AbortController();
-      loadController.current = controller;
-      setBusy(true);
-      try {
-        const data = await controlPlaneRequest<{
-          gitlabPipelines: Paginated<GitLabPipelineView>;
-          gitlabAutoRetryRules: GitLabAutoRetryRuleView[];
-        }>(
-          `query GitLabPipelines($projectId: ID!, $page: Int!, $includeRules: Boolean!) { gitlabPipelines(projectId: $projectId, page: $page) { total page perPage nextPage items { ${PIPELINE} } } gitlabAutoRetryRules(projectId: $projectId) @include(if: $includeRules) { id projectId pipelineId enabled maxAttempts attempts lastError lastAttemptAt createdAt updatedAt executions { id pipelineId attempt status lastError createdAt updatedAt } } }`,
-          {
-            projectId,
-            page,
-            includeRules: includeRules || rulesLoadedFor.current !== projectId,
-          },
-          { signal: controller.signal },
-        );
-        if (controller.signal.aborted) return;
-        setPipelines(data.gitlabPipelines.items);
-        setPagination(data.gitlabPipelines);
-        if (data.gitlabAutoRetryRules) {
-          setAutoRetryRules(data.gitlabAutoRetryRules);
-          rulesLoadedFor.current = projectId;
-        }
-        setError(null);
-      } catch (value) {
-        if (controller.signal.aborted) return;
-        setError(value instanceof Error ? value.message : String(value));
-      } finally {
-        if (!controller.signal.aborted) setBusy(false);
-      }
-    },
-    [page, projectId],
-  );
+    const projects = configuration?.projects;
+    if (!projects?.length) return;
+    const restore = () => {
+      const params = new URLSearchParams(window.location.search);
+      const project =
+        projects.find((item) => item.id === params.get("project")) ??
+        projects[0];
+      setProjectId(project.id);
+      setRef(project.defaultBranch ?? "main");
+      setBranch(params.get("branch")?.trim() ?? "");
+      setBranchInput(params.get("branch")?.trim() ?? "");
+      setStatus(
+        gitLabPipelineStatuses.find(
+          (value) => value === params.get("status"),
+        ) ?? "all",
+      );
+      setSource(
+        gitLabPipelineSources.find((value) => value === params.get("source")) ??
+          "all",
+      );
+      const requestedPage = Number(params.get("page"));
+      setPage(
+        Number.isSafeInteger(requestedPage) && requestedPage > 0
+          ? requestedPage
+          : 1,
+      );
+    };
+    const initial = window.setTimeout(restore, 0);
+    window.addEventListener("popstate", restore);
+    return () => {
+      window.clearTimeout(initial);
+      window.removeEventListener("popstate", restore);
+    };
+  }, [configuration?.projects]);
 
   useEffect(() => {
     if (!projectId) return;
-    const timeout = window.setTimeout(() => void load(false), 0);
+    const params = new URLSearchParams(window.location.search);
+    params.set("project", projectId);
+    if (branch) params.set("branch", branch);
+    else params.delete("branch");
+    if (status !== "all") params.set("status", status);
+    else params.delete("status");
+    if (source !== "all") params.set("source", source);
+    else params.delete("source");
+    if (page > 1) params.set("page", String(page));
+    else params.delete("page");
+    window.history.replaceState(
+      null,
+      "",
+      `${window.location.pathname}?${params.toString()}`,
+    );
+  }, [branch, page, projectId, source, status]);
+
+  const loadController = useRef<AbortController | null>(null);
+  const load = useCallback(async () => {
+    if (!projectId) return;
+    loadController.current?.abort();
+    const controller = new AbortController();
+    loadController.current = controller;
+    setBusy(true);
+    try {
+      const data = await controlPlaneRequest<{
+        gitlabPipelines: Paginated<GitLabPipelineView>;
+        gitlabAutoRetryRules: GitLabAutoRetryRuleView[];
+      }>(
+        `query GitLabPipelines($projectId: ID!, $page: Int!, $ref: String, $status: GitLabPipelineStatus, $source: String) {
+        gitlabPipelines(projectId: $projectId, page: $page, ref: $ref, status: $status, source: $source) { total page perPage nextPage items { ${PIPELINE} } }
+        gitlabAutoRetryRules(projectId: $projectId) { id projectId pipelineId enabled maxAttempts attempts lastError lastAttemptAt createdAt updatedAt executions { id pipelineId attempt status lastError createdAt updatedAt } }
+      }`,
+        {
+          projectId,
+          page,
+          ref: branch || null,
+          status: status === "all" ? null : status,
+          source: source === "all" ? null : source,
+        },
+        { signal: controller.signal },
+      );
+      if (controller.signal.aborted) return;
+      setPipelines(data.gitlabPipelines.items);
+      setPagination(data.gitlabPipelines);
+      setAutoRetryRules(data.gitlabAutoRetryRules);
+      setError(null);
+    } catch (value) {
+      if (!controller.signal.aborted)
+        setError(value instanceof Error ? value.message : String(value));
+    } finally {
+      if (!controller.signal.aborted) setBusy(false);
+    }
+  }, [branch, page, projectId, source, status]);
+
+  useEffect(() => {
+    const timeout = window.setTimeout(() => void load(), 0);
     return () => {
       window.clearTimeout(timeout);
       loadController.current?.abort();
     };
-  }, [load, projectId]);
+  }, [load]);
 
   const latestLoad = useRef(load);
   useEffect(() => {
     latestLoad.current = load;
   }, [load]);
   useEffect(() => {
+    if (!projectId) return;
     const refresh = createRefreshCoalescer(() => latestLoad.current());
     const requestRefresh = () => {
-      void refresh.refresh().catch(() => undefined);
+      if (document.visibilityState !== "hidden")
+        void refresh.refresh().catch(() => undefined);
     };
     const off = controlPlaneSubscriptions().subscribe<{
       gitlabPipelineStatusChanged: { projectId: string };
@@ -907,137 +1283,79 @@ export function GitLabPipelinesPage() {
       },
     );
     const recover = onControlPlaneRecovery(requestRefresh);
+    document.addEventListener("visibilitychange", requestRefresh);
     return () => {
       off();
       recover();
       refresh.dispose();
+      document.removeEventListener("visibilitychange", requestRefresh);
     };
   }, [projectId]);
 
-  const loadJobs = async (pipelineId: string) => {
-    setJobStates((items) => ({
-      ...items,
-      [pipelineId]: {
-        loading: true,
-        error: null,
-        jobs: items[pipelineId]?.jobs ?? null,
+  const active = pipelines.some((pipeline) =>
+    isActiveGitLabPipeline(pipeline.status),
+  );
+  useEffect(() => {
+    if (!projectId || !active) return;
+    const timer = window.setInterval(
+      () => {
+        if (document.visibilityState !== "hidden") void latestLoad.current();
       },
-    }));
+      Math.max(30, configuration?.settings.pipelinePollIntervalSeconds ?? 60) *
+        1_000,
+    );
+    return () => window.clearInterval(timer);
+  }, [active, projectId, configuration?.settings.pipelinePollIntervalSeconds]);
+
+  const perform = async (request: () => Promise<unknown>) => {
+    if (actionInFlight.current) return;
+    actionInFlight.current = true;
+    setActionBusy(true);
+    const scope = currentScope;
     try {
-      const data = await controlPlaneRequest<{
-        gitlabPipelineJobs: GitLabJobView[];
-      }>(
-        `query GitLabPipelineJobs($projectId: ID!, $pipelineId: ID!) { gitlabPipelineJobs(projectId: $projectId, pipelineId: $pipelineId) { id pipelineId name stage status ref webUrl allowFailure createdAt startedAt finishedAt duration queuedDuration retried } }`,
-        { projectId, pipelineId },
-      );
-      setJobStates((items) => ({
-        ...items,
-        [pipelineId]: {
-          loading: false,
-          error: null,
-          jobs: data.gitlabPipelineJobs,
-        },
-      }));
+      await request();
+      if (scopeRef.current === scope) await load();
     } catch (value) {
-      setJobStates((items) => ({
-        ...items,
-        [pipelineId]: {
-          loading: false,
-          error: value instanceof Error ? value.message : String(value),
-          jobs: items[pipelineId]?.jobs ?? null,
-        },
-      }));
+      if (scopeRef.current === scope)
+        setError(value instanceof Error ? value.message : String(value));
+    } finally {
+      actionInFlight.current = false;
+      setActionBusy(false);
     }
   };
 
-  const togglePipeline = (pipelineId: string) => {
-    const expanding = !expandedPipelines.has(pipelineId);
-    setExpandedPipelines((items) => {
-      const next = new Set(items);
-      if (next.has(pipelineId)) next.delete(pipelineId);
-      else next.add(pipelineId);
-      return next;
-    });
-    if (expanding && !jobStates[pipelineId]) void loadJobs(pipelineId);
-  };
-
-  const pipelineMutation = async (
-    operation: "retry" | "cancel",
-    pipelineId: string,
-  ) => {
-    setBusy(true);
-    try {
-      const mutation =
-        operation === "retry" ? "retryGitLabPipeline" : "cancelGitLabPipeline";
-      await controlPlaneRequest(
-        `mutation GitLabPipelineAction($projectId: ID!, $pipelineId: ID!) { ${mutation}(projectId: $projectId, pipelineId: $pipelineId) { id } }`,
-        { projectId, pipelineId },
-      );
-      await load();
-    } catch (value) {
-      setError(value instanceof Error ? value.message : String(value));
-      setBusy(false);
-    }
-  };
-
-  const create = async () => {
+  const create = () => {
     if (!projectId || !ref.trim()) return;
-    setBusy(true);
-    try {
-      await controlPlaneRequest(
-        `mutation CreateGitLabPipeline($projectId: ID!, $ref: String!) { createGitLabPipeline(projectId: $projectId, ref: $ref) { id } }`,
+    void perform(() =>
+      controlPlaneRequest(
+        "mutation CreateGitLabPipeline($projectId: ID!, $ref: String!) { createGitLabPipeline(projectId: $projectId, ref: $ref) { id } }",
         { projectId, ref: ref.trim() },
-      );
-      await load();
-    } catch (value) {
-      setError(value instanceof Error ? value.message : String(value));
-      setBusy(false);
-    }
+      ),
+    );
   };
-
-  const retryJob = async (jobId: string, pipelineId: string) => {
-    try {
-      await controlPlaneRequest(
-        `mutation RetryGitLabJob($projectId: ID!, $jobId: ID!) { retryGitLabJob(projectId: $projectId, jobId: $jobId) { id } }`,
-        { projectId, jobId },
-      );
-      await loadJobs(pipelineId);
-    } catch (value) {
-      setError(value instanceof Error ? value.message : String(value));
-    }
-  };
-
-  const saveAutoRetry = async (pipelineId?: string) => {
+  const saveAutoRetry = () => {
     const attempts = Number(maxAttempts);
-    if (!projectId || !Number.isInteger(attempts)) return;
-    try {
-      await controlPlaneRequest(
-        `mutation SaveGitLabAutoRetryRule($input: SaveGitLabAutoRetryRuleInput!) { saveGitLabAutoRetryRule(input: $input) { id } }`,
-        {
-          input: {
-            projectId,
-            pipelineId,
-            maxAttempts: attempts,
-            enabled: true,
-          },
-        },
-      );
-      await load();
-    } catch (value) {
-      setError(value instanceof Error ? value.message : String(value));
-    }
+    if (
+      !projectId ||
+      !Number.isInteger(attempts) ||
+      attempts < 1 ||
+      attempts > 100
+    )
+      return;
+    void perform(() =>
+      controlPlaneRequest(
+        "mutation SaveGitLabAutoRetryRule($input: SaveGitLabAutoRetryRuleInput!) { saveGitLabAutoRetryRule(input: $input) { id } }",
+        { input: { projectId, maxAttempts: attempts, enabled: true } },
+      ),
+    );
   };
-
-  const deleteAutoRetry = async (id: string) => {
-    try {
-      await controlPlaneRequest(
-        `mutation DeleteGitLabAutoRetryRule($id: ID!) { deleteGitLabAutoRetryRule(id: $id) }`,
+  const deleteAutoRetry = (id: string) => {
+    void perform(() =>
+      controlPlaneRequest(
+        "mutation DeleteGitLabAutoRetryRule($id: ID!) { deleteGitLabAutoRetryRule(id: $id) }",
         { id },
-      );
-      await load();
-    } catch (value) {
-      setError(value instanceof Error ? value.message : String(value));
-    }
+      ),
+    );
   };
 
   if (loading) return <Spinner />;
@@ -1050,44 +1368,111 @@ export function GitLabPipelinesPage() {
       />
       <ErrorAlert error={configurationError ?? error} />
       <Card>
-        <CardContent className="flex flex-wrap gap-3 py-4">
-          <ProjectSelect
-            onChange={(value) => {
-              setPage(1);
-              setProjectId(value);
-              setExpandedPipelines(new Set());
-              setJobStates({});
-              const project = configuration.projects.find(
-                (item) => item.id === value,
-              );
-              setRef(project?.defaultBranch ?? "main");
-            }}
-            projects={configuration.projects}
-            value={projectId}
-          />
-          <Input
-            className="max-w-64"
-            onChange={(event) => setRef(event.target.value)}
-            placeholder={t("ref")}
-            value={ref}
-          />
-          <Button
-            disabled={busy || !projectId || !ref.trim()}
-            onClick={() => void create()}
-            type="button"
-          >
-            <Play />
-            {t("runPipeline")}
-          </Button>
-          <Button
-            disabled={busy || !projectId}
-            onClick={() => void load()}
-            type="button"
-            variant="outline"
-          >
-            <RefreshCw />
-            {t("refresh")}
-          </Button>
+        <CardContent className="space-y-3 py-4">
+          <div className="flex flex-wrap gap-3">
+            <ProjectSelect
+              onChange={(value) => {
+                setPage(1);
+                setProjectId(value);
+                setPipelines([]);
+                setPagination(null);
+                setAutoRetryRules([]);
+                setBranch("");
+                setBranchInput("");
+                setRef(
+                  configuration.projects.find((item) => item.id === value)
+                    ?.defaultBranch ?? "main",
+                );
+              }}
+              projects={configuration.projects}
+              value={projectId}
+            />
+            <Input
+              aria-label={t("filterBranch")}
+              className="max-w-64"
+              onChange={(event) => setBranchInput(event.target.value)}
+              onKeyDown={(event) => {
+                if (event.key === "Enter") {
+                  setBranch(branchInput.trim());
+                  setPage(1);
+                }
+              }}
+              placeholder={t("filterBranch")}
+              value={branchInput}
+            />
+            <Button
+              disabled={!projectId}
+              onClick={() => {
+                setBranch(branchInput.trim());
+                setPage(1);
+              }}
+              variant="outline"
+            >
+              {t("applyFilters")}
+            </Button>
+            <Select
+              onValueChange={(value) => {
+                setStatus(value);
+                setPage(1);
+              }}
+              value={status}
+            >
+              <SelectTrigger aria-label={t("status")} className="w-48">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">{t("allStatuses")}</SelectItem>
+                {gitLabPipelineStatuses.map((value) => (
+                  <SelectItem key={value} value={value}>
+                    {t(`pipelineStatuses.${value}`)}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            <Select
+              onValueChange={(value) => {
+                setSource(value);
+                setPage(1);
+              }}
+              value={source}
+            >
+              <SelectTrigger aria-label={t("source")} className="w-48">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">{t("allSources")}</SelectItem>
+                {gitLabPipelineSources.map((value) => (
+                  <SelectItem key={value} value={value}>
+                    {t(`pipelineSources.${value}`)}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            <Button
+              disabled={busy || !projectId}
+              onClick={() => void load()}
+              variant="outline"
+            >
+              <RefreshCw />
+              {t("refresh")}
+            </Button>
+          </div>
+          <div className="flex flex-wrap gap-3">
+            <Input
+              aria-label={t("ref")}
+              className="max-w-64"
+              onChange={(event) => setRef(event.target.value)}
+              placeholder={t("ref")}
+              value={ref}
+            />
+            <Button
+              disabled={actionBusy || !projectId || !ref.trim()}
+              onClick={create}
+            >
+              <Play />
+              {t("runPipeline")}
+            </Button>
+          </div>
         </CardContent>
       </Card>
       <Card>
@@ -1097,6 +1482,7 @@ export function GitLabPipelinesPage() {
         <CardContent className="space-y-3">
           <div className="flex flex-wrap gap-2">
             <Input
+              aria-label={t("autoRetry")}
               className="max-w-36"
               min={1}
               max={100}
@@ -1105,9 +1491,14 @@ export function GitLabPipelinesPage() {
               value={maxAttempts}
             />
             <Button
-              disabled={!projectId}
-              onClick={() => void saveAutoRetry()}
-              type="button"
+              disabled={
+                actionBusy ||
+                !projectId ||
+                !Number.isInteger(Number(maxAttempts)) ||
+                Number(maxAttempts) < 1 ||
+                Number(maxAttempts) > 100
+              }
+              onClick={saveAutoRetry}
               variant="outline"
             >
               <RotateCcw />
@@ -1139,9 +1530,9 @@ export function GitLabPipelinesPage() {
                   )}
                 </div>
                 <Button
-                  onClick={() => void deleteAutoRetry(rule.id)}
+                  disabled={actionBusy}
+                  onClick={() => deleteAutoRetry(rule.id)}
                   size="sm"
-                  type="button"
                   variant="ghost"
                 >
                   <Trash2 />
@@ -1153,349 +1544,15 @@ export function GitLabPipelinesPage() {
         </CardContent>
       </Card>
       <Card className="gap-0 py-0">
-        <Table>
-          <TableHeader>
-            <TableRow className="hover:bg-transparent">
-              <TableHead className="w-10">
-                <span className="sr-only">{t("expand")}</span>
-              </TableHead>
-              <TableHead>{t("pipeline")}</TableHead>
-              <TableHead>{t("branch")}</TableHead>
-              <TableHead>{t("source")}</TableHead>
-              <TableHead>{t("status")}</TableHead>
-              <TableHead>{t("mergeRequest")}</TableHead>
-              <TableHead>{t("started")}</TableHead>
-              <TableHead className="text-right">{t("actions")}</TableHead>
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {pipelines.map((pipeline) => {
-              const expanded = expandedPipelines.has(pipeline.id);
-              const highlight = pipeline.worktreeHighlightColor;
-              return (
-                <Fragment key={pipeline.id}>
-                  <TableRow
-                    className={cn(
-                      "cursor-pointer",
-                      highlight &&
-                        worktreeHighlightBackgroundClasses[highlight],
-                    )}
-                    onClick={(event) => {
-                      if (isRowActivation(event)) togglePipeline(pipeline.id);
-                    }}
-                  >
-                    <TableCell
-                      className={cn(
-                        "pr-0",
-                        highlight &&
-                          worktreeHighlightInsetAccentClasses[highlight],
-                      )}
-                    >
-                      <Button
-                        aria-expanded={expanded}
-                        aria-label={t(expanded ? "hideJobs" : "showJobs", {
-                          pipeline: `#${pipeline.id} · ${pipeline.ref}`,
-                        })}
-                        onClick={() => togglePipeline(pipeline.id)}
-                        size="icon-sm"
-                        type="button"
-                        variant="ghost"
-                      >
-                        {expanded ? <ChevronDown /> : <ChevronRight />}
-                      </Button>
-                    </TableCell>
-                    <TableCell className="min-w-64 whitespace-normal">
-                      <a
-                        className="inline-flex items-center gap-1 font-medium text-primary hover:underline"
-                        href={pipeline.webUrl}
-                        rel="noreferrer"
-                        target="_blank"
-                      >
-                        #{pipeline.id} · {pipeline.ref}
-                        <ExternalLink className="size-3.5 shrink-0" />
-                      </a>
-                      <p className="mt-1 font-mono text-xs text-muted-foreground">
-                        {pipeline.sha.slice(0, 8)}
-                      </p>
-                    </TableCell>
-                    <TableCell className="min-w-48 whitespace-normal">
-                      {pipeline.worktreeId ? (
-                        <Link
-                          className="inline-flex rounded-md px-1.5 py-1 font-mono text-xs text-primary transition-colors hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                          href={worktreeDetailHref(pipeline.worktreeId)}
-                        >
-                          {pipeline.branch}
-                        </Link>
-                      ) : (
-                        <span className="font-mono text-xs">
-                          {pipeline.branch}
-                        </span>
-                      )}
-                    </TableCell>
-                    <TableCell>{pipeline.source}</TableCell>
-                    <TableCell>
-                      <Badge
-                        className={gitLabPipelineStatusClass(pipeline.status)}
-                      >
-                        {pipeline.status}
-                      </Badge>
-                    </TableCell>
-                    <TableCell className="min-w-64 whitespace-normal">
-                      {pipeline.mergeRequests.length === 0 ? (
-                        "—"
-                      ) : (
-                        <div className="flex flex-col gap-1">
-                          {pipeline.mergeRequests.map((mergeRequest) => (
-                            <div
-                              className="flex items-center gap-2"
-                              key={`${mergeRequest.projectId}:${mergeRequest.iid}`}
-                            >
-                              <MergeRequestMenu
-                                label={`MR !${mergeRequest.iid}`}
-                                mergeRequest={mergeRequest}
-                              />
-                              <span className="text-sm font-medium">
-                                {mergeRequest.title}
-                              </span>
-                            </div>
-                          ))}
-                        </div>
-                      )}
-                    </TableCell>
-                    <TableCell className="text-muted-foreground">
-                      <div className="flex flex-col gap-0.5">
-                        <DateTime
-                          kind="time"
-                          relativeToday
-                          value={pipeline.startedAt}
-                        />
-                        <span className="text-xs">
-                          {t("duration", {
-                            duration: gitLabDuration(pipeline),
-                          })}
-                        </span>
-                      </div>
-                    </TableCell>
-                    <TableCell>
-                      <div className="flex items-center justify-end gap-2">
-                        <Button
-                          disabled={
-                            busy ||
-                            !["FAILED", "CANCELED"].includes(pipeline.status)
-                          }
-                          onClick={() =>
-                            void pipelineMutation("retry", pipeline.id)
-                          }
-                          size="sm"
-                          type="button"
-                          variant="outline"
-                        >
-                          <RotateCcw />
-                          {t("retry")}
-                        </Button>
-                        <Button
-                          disabled={
-                            busy ||
-                            ![
-                              "CREATED",
-                              "PENDING",
-                              "RUNNING",
-                              "PREPARING",
-                              "WAITING_FOR_RESOURCE",
-                            ].includes(pipeline.status)
-                          }
-                          onClick={() =>
-                            void pipelineMutation("cancel", pipeline.id)
-                          }
-                          size="sm"
-                          type="button"
-                          variant="outline"
-                        >
-                          <Square />
-                          {t("cancel")}
-                        </Button>
-                      </div>
-                    </TableCell>
-                  </TableRow>
-                  {expanded && (
-                    <TableRow className="bg-muted/20 hover:bg-muted/20">
-                      <TableCell className="p-0" colSpan={8}>
-                        <GitLabJobsPanel
-                          onReload={() => void loadJobs(pipeline.id)}
-                          onRetry={(jobId) => void retryJob(jobId, pipeline.id)}
-                          state={jobStates[pipeline.id]}
-                        />
-                      </TableCell>
-                    </TableRow>
-                  )}
-                </Fragment>
-              );
-            })}
-          </TableBody>
-        </Table>
-      </Card>
-      <PaginationControls
-        busy={busy}
-        onPageChange={(nextPage) => {
-          setExpandedPipelines(new Set());
-          setJobStates({});
-          setPage(nextPage);
-        }}
-        pagination={pagination}
-      />
-    </section>
-  );
-}
-
-function GitLabJobsPanel({
-  state,
-  onReload,
-  onRetry,
-}: {
-  state: GitLabJobState | undefined;
-  onReload: () => void;
-  onRetry: (jobId: string) => void;
-}) {
-  const t = useTranslations("gitlabPages");
-
-  return (
-    <div className="border-l-2 border-muted-foreground/20 px-4 py-3">
-      <p className="mb-2 text-xs font-medium uppercase tracking-wide text-muted-foreground">
-        {state?.jobs ? t("jobCount", { count: state.jobs.length }) : t("jobs")}
-      </p>
-      {state?.loading && !state.jobs ? (
-        <div className="flex items-center gap-2 px-2 py-3 text-sm text-muted-foreground">
-          <Spinner /> {t("loadingJobs")}
-        </div>
-      ) : state?.error ? (
-        <Alert variant="destructive">
-          <AlertDescription className="flex items-center justify-between gap-3">
-            <span>{state.error}</span>
-            <Button
-              onClick={onReload}
-              size="sm"
-              type="button"
-              variant="outline"
-            >
-              <RefreshCw /> {t("retryLoad")}
-            </Button>
-          </AlertDescription>
-        </Alert>
-      ) : state?.jobs?.length === 0 ? (
-        <p className="px-2 py-3 text-sm text-muted-foreground">{t("noJobs")}</p>
-      ) : state?.jobs ? (
-        <div className="divide-y">
-          {state.jobs.map((job) => (
-            <div className="flex items-center gap-2 px-2 py-1.5" key={job.id}>
-              <a
-                className="flex min-w-0 flex-1 items-center gap-2 rounded-md px-2 py-2 text-left hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                href={job.webUrl}
-                rel="noreferrer"
-                target="_blank"
-              >
-                <span className="min-w-0 flex-1 truncate text-sm font-medium">
-                  {job.stage} / {job.name}
-                </span>
-                <Badge className={gitLabPipelineStatusClass(job.status)}>
-                  {job.status}
-                </Badge>
-              </a>
-              <div className="min-w-32 text-right text-xs text-muted-foreground">
-                <div>
-                  {t("started")}{" "}
-                  <DateTime kind="time" relativeToday value={job.startedAt} />
-                </div>
-                <div>{t("duration", { duration: gitLabDuration(job) })}</div>
-              </div>
-              <Button
-                aria-label={t("retryJob", { job: job.name })}
-                disabled={!canRetryGitLabJob(job.status)}
-                onClick={() => onRetry(job.id)}
-                size="icon-sm"
-                type="button"
-                variant="ghost"
-              >
-                <RotateCcw />
-              </Button>
-            </div>
-          ))}
-        </div>
-      ) : null}
-    </div>
-  );
-}
-
-export function GitLabCommentsPage() {
-  const t = useTranslations("gitlabPages");
-  const { configuration, loading } = useConfiguration();
-  const [items, setItems] = useState<GitLabMergeRequestView[]>([]);
-  const [page, setPage] = useState(1);
-  const [pagination, setPagination] = useState<GitLabPagination | null>(null);
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const load = useCallback(async () => {
-    if (!configuration?.settings.configured) return;
-    setBusy(true);
-    try {
-      const data = await controlPlaneRequest<{
-        gitlabMergeRequests: Paginated<GitLabMergeRequestView>;
-      }>(
-        `query GitLabCommentMergeRequests($page: Int!) {
-          gitlabMergeRequests(scope: REVIEW_REQUESTED, state: OPENED, page: $page) {
-            total page perPage nextPage items { ${MR} }
+        <GitLabPipelinesTable
+          key={currentScope}
+          pipelines={pipelines}
+          onChanged={load}
+          pollIntervalSeconds={
+            configuration.settings.pipelinePollIntervalSeconds
           }
-        }`,
-        { page },
-      );
-      setItems(data.gitlabMergeRequests.items);
-      setPagination(data.gitlabMergeRequests);
-      setError(null);
-    } catch (value) {
-      setItems([]);
-      setPagination(null);
-      setError(value instanceof Error ? value.message : String(value));
-    } finally {
-      setBusy(false);
-    }
-  }, [configuration?.settings.configured, page]);
-  useEffect(() => {
-    if (!configuration?.settings.configured) return;
-    const timeout = window.setTimeout(() => void load(), 0);
-    return () => window.clearTimeout(timeout);
-  }, [configuration?.settings.configured, load]);
-  if (loading) return <Spinner />;
-  if (!configuration?.settings.configured) return <ProviderNotConfigured />;
-  return (
-    <section className="space-y-6">
-      <PageHeader
-        description={t("commentsDescription")}
-        title={t("commentsTitle")}
-      />
-      <ErrorAlert error={error} />
-      <div className="space-y-3">
-        {items.map((mr) => (
-          <Card key={mr.id}>
-            <CardContent className="py-4">
-              <Link
-                className="font-medium text-primary hover:underline"
-                href={`/gitlab/merge-requests/${mr.projectId}/${mr.iid}`}
-              >
-                {mr.title}
-              </Link>
-              <p className="mt-1 text-xs text-muted-foreground">
-                !{mr.iid} · {mr.detailedMergeStatus}
-              </p>
-            </CardContent>
-          </Card>
-        ))}
-        {items.length === 0 && !busy && !error && (
-          <Card>
-            <CardContent className="py-8 text-sm text-muted-foreground">
-              {t("noReviewRequests")}
-            </CardContent>
-          </Card>
-        )}
-      </div>
+        />
+      </Card>
       <PaginationControls
         busy={busy}
         onPageChange={setPage}
@@ -1504,6 +1561,8 @@ export function GitLabCommentsPage() {
     </section>
   );
 }
+
+export { GitLabCommentsPage } from "./comments-page";
 
 export function GitLabWebhooksPage() {
   const t = useTranslations("gitlabPages");

@@ -3,6 +3,7 @@ import type { GraphQLContext } from "@/services/graphql-server/graphql-server.se
 import type { GitHubService } from "@/services/github";
 import type {
   GitLabMergeRequestScope,
+  GitLabPipelineStatus,
   GitLabMergeRequestState,
   GitLabReviewOutcome,
   GitLabService,
@@ -36,7 +37,13 @@ export const createGitLabResolvers = (
       GitHubPullRequest: {
         provider: () => "GITHUB",
       },
+      GitLabMergeRequestDetail: {
+        mergeOperation: (value: { projectId: string; iid: number }) =>
+          gitLabService.mergeOperation(value.projectId, value.iid),
+      },
       GitLabMergeRequest: {
+        mergeOperation: (value: { projectId: string; iid: number }) =>
+          gitLabService.mergeOperation(value.projectId, value.iid),
         provider: () => "GITLAB",
         number: (value: { iid: number }) => value.iid,
         url: (value: { webUrl: string }) => value.webUrl,
@@ -45,6 +52,42 @@ export const createGitLabResolvers = (
         headRefOid: (value: { sha: string }) => value.sha,
       },
       Query: {
+        gitlabAccessibleProjects: (
+          _root: unknown,
+          args: { search?: string | null; page?: number; perPage?: number },
+          context: GraphQLContext,
+        ) =>
+          checked(context, () =>
+            gitLabService.accessibleProjects(
+              args.search,
+              args.page,
+              args.perPage,
+            ),
+          ),
+        gitlabComments: (
+          _root: unknown,
+          args: {
+            projectId?: string | null;
+            iid?: number | null;
+            discussionId?: string | null;
+            after?: string | null;
+            first?: number | null;
+            refresh?: boolean | null;
+          },
+          context: GraphQLContext,
+        ) => checked(context, () => gitLabService.comments(args)),
+        gitlabMergeRequestMergeOptions: (
+          _root: unknown,
+          args: { projectId: string; iid: number; worktreeId?: string | null },
+          context: GraphQLContext,
+        ) =>
+          checked(context, () =>
+            gitLabService.mergeOptions(
+              args.projectId,
+              args.iid,
+              args.worktreeId,
+            ),
+          ),
         sourceControlIntegrationState: async (
           _root: unknown,
           _args: unknown,
@@ -121,11 +164,23 @@ export const createGitLabResolvers = (
           ),
         gitlabPipelines: (
           _root: unknown,
-          args: { projectId: string; page?: number; perPage?: number },
+          args: {
+            projectId: string;
+            page?: number;
+            perPage?: number;
+            ref?: string | null;
+            status?: GitLabPipelineStatus | null;
+            source?: string | null;
+          },
           context: GraphQLContext,
         ) =>
           checked(context, () =>
-            gitLabService.pipelines(args.projectId, args.page, args.perPage),
+            gitLabService.pipelines(
+              args.projectId,
+              args.page,
+              args.perPage,
+              args,
+            ),
           ),
         gitlabPipeline: (
           _root: unknown,
@@ -189,11 +244,35 @@ export const createGitLabResolvers = (
         ) => checked(context, () => gitLabService.autoRetryRules(projectId)),
       },
       Mutation: {
+        submitGitLabMergeRequestMerge: (
+          _root: unknown,
+          { input }: { input: Parameters<GitLabService["submitMerge"]>[0] },
+          context: GraphQLContext,
+        ) => checked(context, () => gitLabService.submitMerge(input)),
+        cancelGitLabAutoMerge: (
+          _root: unknown,
+          { projectId, iid }: { projectId: string; iid: number },
+          context: GraphQLContext,
+        ) =>
+          checked(context, () => gitLabService.cancelAutoMerge(projectId, iid)),
+        retryGitLabMergeFollowUps: (
+          _root: unknown,
+          { projectId, iid }: { projectId: string; iid: number },
+          context: GraphQLContext,
+        ) =>
+          checked(context, () =>
+            gitLabService.retryMergeFollowUps(projectId, iid),
+          ),
         saveGitLabSettings: (
           _root: unknown,
           { input }: { input: Parameters<GitLabService["saveSettings"]>[0] },
           context: GraphQLContext,
         ) => checked(context, () => gitLabService.saveSettings(input)),
+        saveGitLabPreferences: (
+          _root: unknown,
+          { input }: { input: Parameters<GitLabService["savePreferences"]>[0] },
+          context: GraphQLContext,
+        ) => checked(context, () => gitLabService.savePreferences(input)),
         testGitLabConnection: (
           _root: unknown,
           _args: unknown,
@@ -399,6 +478,7 @@ export const createGitLabResolvers = (
     "gitlab",
     [
       "saveGitLabSettings",
+      "saveGitLabPreferences",
       "clearGitLabCredentials",
       "addGitLabProject",
       "removeGitLabProject",

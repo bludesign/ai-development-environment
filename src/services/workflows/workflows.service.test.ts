@@ -1928,6 +1928,93 @@ describe("workflow runtime lifecycle guards", () => {
       }),
     );
   });
+
+  test("batches every active workflow run linked to rendered resources", async () => {
+    prisma.workflowRun.findMany.mockResolvedValue([
+      {
+        id: "run-1",
+        workflowId: "workflow-1",
+        displayNumber: 7,
+        status: "RUNNING",
+        resourceLinks: [{ kind: "WORKTREE", resourceId: "worktree-1" }],
+      },
+      {
+        id: "run-2",
+        workflowId: "workflow-1",
+        displayNumber: 8,
+        status: "WAITING",
+        resourceLinks: [
+          { kind: "WORKTREE", resourceId: "worktree-1" },
+          { kind: "WORKTREE", resourceId: "worktree-2" },
+        ],
+      },
+    ]);
+    const service = new WorkflowsService(new WorkflowEventsService());
+
+    const summaries = await service.targetSummaries([
+      { resourceKind: "worktree", resourceId: "worktree-1" },
+      { resourceKind: "WORKTREE", resourceId: "worktree-1" },
+      { resourceKind: "WORKTREE", resourceId: "worktree-2" },
+    ]);
+
+    expect(summaries).toEqual([
+      {
+        resourceKind: "WORKTREE",
+        resourceId: "worktree-1",
+        activeRuns: [
+          {
+            id: "run-1",
+            workflowId: "workflow-1",
+            displayNumber: 7,
+            status: "RUNNING",
+          },
+          {
+            id: "run-2",
+            workflowId: "workflow-1",
+            displayNumber: 8,
+            status: "WAITING",
+          },
+        ],
+      },
+      {
+        resourceKind: "WORKTREE",
+        resourceId: "worktree-2",
+        activeRuns: [
+          {
+            id: "run-2",
+            workflowId: "workflow-1",
+            displayNumber: 8,
+            status: "WAITING",
+          },
+        ],
+      },
+    ]);
+    expect(prisma.workflowRun.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          archivedAt: null,
+          status: {
+            in: [
+              "QUEUED",
+              "RUNNING",
+              "PAUSING",
+              "PAUSED",
+              "WAITING",
+              "BLOCKED",
+            ],
+          },
+          resourceLinks: {
+            some: {
+              OR: [
+                { kind: "WORKTREE", resourceId: "worktree-1" },
+                { kind: "WORKTREE", resourceId: "worktree-2" },
+              ],
+            },
+          },
+        }),
+      }),
+    );
+  });
 });
 
 describe("workflow command output matching", () => {

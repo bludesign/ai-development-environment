@@ -67,6 +67,11 @@ import { CommandQuickActions } from "@/components/commands/command-quick-actions
 import { PipelineMenu } from "@/components/github/pipeline-menu";
 import { PullRequestMenu } from "@/components/github/pull-request-menu";
 import { MergeRequestMenu } from "@/components/gitlab/merge-request-menu";
+import { gitLabCommentsHref } from "@/components/gitlab/merge-request-links";
+import {
+  GitLabApprovalBadge,
+  gitLabStatusColors,
+} from "@/components/gitlab/merge-request-status";
 import { GitLabWorktreePipelinesMenu } from "@/components/gitlab/worktree-pipelines-menu";
 import { pullRequestCommentsHref } from "@/components/github/pull-request-links";
 import { JiraTicketDrawer } from "@/components/jira/ticket-drawer";
@@ -2276,10 +2281,40 @@ export function PullRequestBadges({
             projectId: gitLabMergeRequest.projectId,
             title: gitLabMergeRequest.title,
             webUrl: gitLabMergeRequest.url,
+            state: gitLabMergeRequest.state,
+            worktreeId: gitLabMergeRequest.worktreeId,
           }}
         />
       ) : null}
       <GitLabWorktreePipelinesMenu pipelines={worktree.gitLabPipelines ?? []} />
+      {gitLabMergeRequest ? (
+        <>
+          <GitLabApprovalBadge state={gitLabMergeRequest.approvalState} />
+          {gitLabMergeRequest.projectId ? (
+            <Badge
+              asChild
+              className={
+                gitLabMergeRequest.unresolvedDiscussionsCount == null
+                  ? gitLabStatusColors.neutral
+                  : gitLabMergeRequest.unresolvedDiscussionsCount === 0
+                    ? gitLabStatusColors.success
+                    : gitLabStatusColors.warning
+              }
+            >
+              <Link
+                href={gitLabCommentsHref({
+                  projectId: gitLabMergeRequest.projectId,
+                  iid: gitLabMergeRequest.number,
+                })}
+              >
+                {t("comments", {
+                  count: gitLabMergeRequest.unresolvedDiscussionsCount ?? "—",
+                })}
+              </Link>
+            </Badge>
+          ) : null}
+        </>
+      ) : null}
       {!worktree.pullRequest &&
       !gitLabMergeRequest &&
       !(worktree.gitLabPipelines ?? []).length &&

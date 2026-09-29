@@ -14,6 +14,7 @@ import {
   GitHubService,
 } from "@/services/github";
 import { GitLabService } from "@/services/gitlab";
+import { GitLabMergeService } from "@/services/gitlab/gitlab-merge.service";
 import { CacheServerService } from "@/services/cache-server";
 import { JiraService, JiraWebhookService } from "@/services/jira";
 import { IosDevicesService } from "@/services/ios-devices";
@@ -314,6 +315,12 @@ function createServerServices(): ServerServices {
   workflowEventBridge.start();
   workflowsService.startRuntime();
   worktreeAutomationService.startRuntime();
+  new GitLabMergeService(
+    gitLabService,
+    worktreesService,
+    jiraService,
+    agentControlService,
+  ).startRuntime();
   systemStatusService.startRuntime();
   return {
     prismaService,

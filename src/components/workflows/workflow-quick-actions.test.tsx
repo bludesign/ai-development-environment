@@ -13,8 +13,12 @@ import { controlPlaneRequest } from "@/lib/control-plane-client";
 
 import { WorkflowQuickActions } from "./workflow-quick-actions";
 
+const subscribe = vi.hoisted(() => vi.fn());
+
 vi.mock("@/lib/control-plane-client", () => ({
   controlPlaneRequest: vi.fn(),
+  controlPlaneSubscriptions: () => ({ subscribe }),
+  onControlPlaneRecovery: () => () => undefined,
 }));
 
 vi.mock("@/i18n/navigation", () => ({
@@ -43,14 +47,75 @@ Object.defineProperties(HTMLElement.prototype, {
 
 afterEach(() => {
   cleanup();
-  vi.useRealTimers();
+  workflowSink = undefined;
+  subscribe.mockReset();
   vi.mocked(controlPlaneRequest).mockReset();
 });
 
-test("starts a selected worktree quick action and links to the run", async () => {
-  vi.mocked(controlPlaneRequest).mockResolvedValue({
-    triggerWorkflow: { id: "run-1" },
-  } as never);
+type ActiveRun = {
+  id: string;
+  workflowId: string;
+  displayNumber: number;
+  status: string;
+};
+
+let workflowSink:
+  { next: (value: { data: { workflowChanges: unknown } }) => void } | undefined;
+
+function respondWithRuns(initial: ActiveRun[] = []) {
+  let runs = initial;
+  subscribe.mockImplementation((_operation, sink) => {
+    workflowSink = sink;
+    return () => undefined;
+  });
+  vi.mocked(controlPlaneRequest).mockImplementation(async (query: string) => {
+    if (query.includes("WorkflowTargetSummaries")) {
+      return {
+        workflowTargetSummaries: [
+          {
+            resourceKind: "WORKTREE",
+            resourceId: "worktree-1",
+            activeRuns: runs,
+          },
+        ],
+      } as never;
+    }
+    if (query.includes("RunWorktreeQuickAction")) {
+      const run = {
+        id: "run-1",
+        workflowId: "workflow-1",
+        displayNumber: 1,
+        status: "RUNNING",
+      };
+      runs = [...runs, run];
+      return { triggerWorkflow: run } as never;
+    }
+    return {} as never;
+  });
+  return {
+    setRuns(value: ActiveRun[]) {
+      runs = value;
+    },
+  };
+}
+
+async function openRunMenu() {
+  const trigger = await screen.findByRole("button", {
+    name: "Manage running Prepare review",
+  });
+  fireEvent.pointerDown(
+    trigger,
+    new PointerEvent("pointerdown", {
+      bubbles: true,
+      ctrlKey: false,
+      button: 0,
+    }),
+  );
+  return trigger;
+}
+
+test("starts a selected worktree quick action and opens its active run", async () => {
+  respondWithRuns();
   render(
     <WorkflowQuickActions
       sessionData={{ worktree: { id: "worktree-1" } }}
@@ -87,17 +152,17 @@ test("starts a selected worktree quick action and links to the run", async () =>
       },
     ),
   );
-  const viewLink = await screen.findByRole("link", { name: /View/ });
+  const runMenu = await openRunMenu();
+  expect(runMenu.querySelector('[data-slot="spinner"]')).not.toBeNull();
+  expect(runMenu.textContent).not.toContain("View");
+  const viewLink = screen.getByRole("menuitem", { name: /View/ });
   expect(viewLink.getAttribute("href")).toBe("/workflows/runs/run-1");
-  expect(viewLink.querySelector('[data-slot="spinner"]')).not.toBeNull();
-  expect(viewLink.className).toContain("rounded-r-none");
+  expect(runMenu.className).toContain("rounded-r-none");
   expect(button.className).toContain("rounded-l-none");
 });
 
 test("asks which choice to run before starting a choice workflow", async () => {
-  vi.mocked(controlPlaneRequest).mockResolvedValue({
-    triggerWorkflow: { id: "run-2" },
-  } as never);
+  respondWithRuns();
   render(
     <WorkflowQuickActions
       sessionData={{ worktree: { id: "worktree-1" } }}
@@ -148,9 +213,7 @@ test("asks which choice to run before starting a choice workflow", async () => {
 });
 
 test("keeps the plain trigger available beside choice triggers", async () => {
-  vi.mocked(controlPlaneRequest).mockResolvedValue({
-    triggerWorkflow: { id: "run-plain" },
-  } as never);
+  respondWithRuns();
   render(
     <WorkflowQuickActions
       sessionData={{ worktree: { id: "worktree-1" } }}
@@ -187,14 +250,8 @@ test("keeps the plain trigger available beside choice triggers", async () => {
   );
 });
 
-test("hides the view button five seconds after the run starts", async () => {
-  // A frozen clock, deliberately: `shouldAdvanceTime` would tick the hide timer
-  // along with real time, so the 4999ms assertion below raced the machine and
-  // failed whenever the surrounding suite made the render slow.
-  vi.useFakeTimers();
-  vi.mocked(controlPlaneRequest).mockResolvedValue({
-    triggerWorkflow: { id: "run-1" },
-  } as never);
+test("keeps the spinner visible until the workflow run finishes", async () => {
+  const response = respondWithRuns();
   render(
     <WorkflowQuickActions
       sessionData={{ worktree: { id: "worktree-1" } }}
@@ -212,20 +269,120 @@ test("hides the view button five seconds after the run starts", async () => {
   );
 
   fireEvent.click(screen.getByRole("button", { name: "Prepare review" }));
-  // Flush the trigger mutation without advancing the hide timer.
-  await act(async () => {});
-  expect(screen.queryByRole("link", { name: /View/ })).not.toBeNull();
-
-  await act(async () => {
-    await vi.advanceTimersByTimeAsync(4999);
+  await openRunMenu();
+  fireEvent.keyDown(screen.getByRole("menuitem", { name: /View/ }), {
+    key: "Escape",
   });
-  expect(screen.queryByRole("link", { name: /View/ })).not.toBeNull();
 
+  response.setRuns([]);
   await act(async () => {
-    await vi.advanceTimersByTimeAsync(1);
+    workflowSink?.next({
+      data: { workflowChanges: { definitionsChanged: false } },
+    });
   });
-  expect(screen.queryByRole("link", { name: /View/ })).toBeNull();
+  await waitFor(() =>
+    expect(
+      screen.queryByRole("button", {
+        name: "Manage running Prepare review",
+      }),
+    ).toBeNull(),
+  );
+});
+
+test("lists every active run from the spinner menu", async () => {
+  respondWithRuns([
+    {
+      id: "run-3",
+      workflowId: "workflow-1",
+      displayNumber: 3,
+      status: "WAITING",
+    },
+    {
+      id: "run-4",
+      workflowId: "workflow-1",
+      displayNumber: 4,
+      status: "RUNNING",
+    },
+  ]);
+  render(
+    <WorkflowQuickActions
+      sessionData={{ worktree: { id: "worktree-1" } }}
+      workflows={[
+        {
+          id: "workflow-1",
+          name: "Prepare review",
+          description: "Runs the review preparation workflow",
+          quickActionIconKey: "rocket",
+          quickActionButtonVariant: "secondary",
+        },
+      ]}
+      worktreeId="worktree-1"
+    />,
+  );
+
+  const trigger = await openRunMenu();
+  expect(trigger.textContent).toContain("2");
+  expect(screen.getByText("Workflow run #3")).toBeDefined();
+  expect(screen.getByText("Workflow run #4")).toBeDefined();
   expect(
-    screen.getByRole("button", { name: "Prepare review" }).className,
-  ).not.toContain("rounded-l-none");
+    screen
+      .getAllByRole("menuitem", { name: /View/ })
+      .map((item) => item.getAttribute("href")),
+  ).toEqual(["/workflows/runs/run-3", "/workflows/runs/run-4"]);
+});
+
+test("batches active-run summaries for rendered worktrees", async () => {
+  subscribe.mockImplementation(() => () => undefined);
+  vi.mocked(controlPlaneRequest).mockImplementation(
+    async (query: string, variables) => {
+      if (!query.includes("WorkflowTargetSummaries")) return {} as never;
+      return {
+        workflowTargetSummaries: (
+          variables?.targets as Array<{
+            resourceKind: string;
+            resourceId: string;
+          }>
+        ).map((target) => ({ ...target, activeRuns: [] })),
+      } as never;
+    },
+  );
+  const workflow = {
+    id: "workflow-1",
+    name: "Prepare review",
+    description: "Runs the review preparation workflow",
+    quickActionIconKey: "rocket",
+    quickActionButtonVariant: "secondary" as const,
+  };
+
+  render(
+    <>
+      <WorkflowQuickActions
+        sessionData={{ worktree: { id: "worktree-1" } }}
+        workflows={[workflow]}
+        worktreeId="worktree-1"
+      />
+      <WorkflowQuickActions
+        sessionData={{ worktree: { id: "worktree-2" } }}
+        workflows={[workflow]}
+        worktreeId="worktree-2"
+      />
+    </>,
+  );
+
+  await waitFor(() =>
+    expect(
+      vi
+        .mocked(controlPlaneRequest)
+        .mock.calls.filter(([query]) =>
+          query.includes("WorkflowTargetSummaries"),
+        ),
+    ).toHaveLength(1),
+  );
+  const summaryCall = vi
+    .mocked(controlPlaneRequest)
+    .mock.calls.find(([query]) => query.includes("WorkflowTargetSummaries"));
+  expect(summaryCall?.[1]?.targets).toEqual([
+    { resourceKind: "WORKTREE", resourceId: "worktree-1" },
+    { resourceKind: "WORKTREE", resourceId: "worktree-2" },
+  ]);
 });

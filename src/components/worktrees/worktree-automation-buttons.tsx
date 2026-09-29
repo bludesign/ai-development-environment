@@ -9,6 +9,8 @@ import {
   MERGE_FOLLOW_UP_FIELDS,
 } from "@/components/github/merge-follow-up-fields";
 import { MergePullRequestButton } from "@/components/github/merge-pull-request-button";
+import { MergeRequestDialog } from "@/components/gitlab/merge-request-dialog";
+import { isActiveGitLabPipeline } from "@/components/gitlab/pipeline-format";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -357,7 +359,65 @@ function directlyMergeable(worktree: Worktree): boolean {
   );
 }
 
-export function AutoMergeButton({
+function directlyMergeableGitLab(worktree: Worktree): boolean {
+  const mergeRequest = worktree.sourceControlRequest;
+  if (
+    mergeRequest?.provider !== "GITLAB" ||
+    mergeRequest.isDraft ||
+    mergeRequest.detailedMergeStatus !== "mergeable"
+  ) {
+    return false;
+  }
+  return !(worktree.gitLabPipelines ?? []).some((pipeline) =>
+    isActiveGitLabPipeline(pipeline.status),
+  );
+}
+
+export function AutoMergeButton(props: AutomationButtonProps) {
+  return props.worktree.sourceControlRequest?.provider === "GITLAB" ? (
+    <GitLabAutoMergeButton {...props} />
+  ) : (
+    <GitHubAutoMergeButton {...props} />
+  );
+}
+
+function GitLabAutoMergeButton({
+  worktree,
+  disabled,
+  onCompleted,
+}: AutomationButtonProps) {
+  const t = useTranslations("gitlabPages");
+  const [open, setOpen] = useState(false);
+  const request = worktree.sourceControlRequest;
+  if (!request?.projectId) return null;
+  const canMergeNow = directlyMergeableGitLab(worktree);
+  return (
+    <>
+      <Button
+        size="sm"
+        variant="outline"
+        disabled={disabled}
+        onClick={() => setOpen(true)}
+      >
+        <GitMerge />
+        {t(canMergeNow ? "merge" : "autoMerge")}
+      </Button>
+      <MergeRequestDialog
+        mergeRequest={{
+          projectId: request.projectId,
+          iid: request.number,
+          title: request.title,
+        }}
+        worktreeId={worktree.id}
+        onMerged={onCompleted}
+        open={open}
+        onOpenChange={setOpen}
+      />
+    </>
+  );
+}
+
+function GitHubAutoMergeButton({
   worktree,
   disabled,
   onCompleted,
@@ -369,6 +429,7 @@ export function AutoMergeButton({
   const rule = worktree.autoMerge;
   const currentRule =
     rule &&
+    rule.branch === worktree.branch &&
     (!pullRequest ||
       (rule.pullRequestNumber === pullRequest.number &&
         rule.repositoryNameWithOwner.toLowerCase() ===

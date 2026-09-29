@@ -138,10 +138,11 @@ export async function openRepositoryTransfer(
   await expect(
     dialog.getByRole("heading", { name: "Destination agents", exact: true }),
   ).toBeVisible();
-  // Stable id links the mock agent to its actual destination-selection control.
+  // The React-generated editor prefix keeps repeated destination controls unique;
+  // the stable suffix links the mock agent to its selection control.
   const selectedAgent =
     direction === "import-destinations" ? ids.agents.studio : ids.agents.build;
-  await dialog.locator(`[id="transfer-agent-${selectedAgent}"]`).click();
+  await dialog.locator(`[id$="-transfer-agent-${selectedAgent}"]`).click();
   await dialog
     .getByRole("button", { name: "Review import", exact: true })
     .click();

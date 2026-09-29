@@ -36,6 +36,10 @@ export type GitLabSettingsView = {
   viewer: GitLabUserView | null;
   pipelinePollIntervalSeconds: number;
   cacheTtlSeconds: number;
+  memberProjectsOnly: boolean;
+  defaultSquash: boolean;
+  defaultMoveTicketToDone: boolean;
+  defaultDeleteWorktree: boolean;
   verifiedAt: string | null;
   updatedAt: string;
 };
@@ -83,6 +87,8 @@ export type GitLabPipelineStatus =
   | "SUCCESS"
   | "FAILED"
   | "CANCELED"
+  | "CANCELING"
+  | "WAITING_FOR_CALLBACK"
   | "SKIPPED"
   | "MANUAL"
   | "SCHEDULED"
@@ -136,6 +142,10 @@ export type GitLabJobView = {
 
 export type GitLabDiscussionNoteView = {
   id: string;
+  webUrl?: string | null;
+  filePath?: string | null;
+  oldLine?: number | null;
+  newLine?: number | null;
   body: string;
   author: GitLabUserView;
   createdAt: string;
@@ -152,7 +162,35 @@ export type GitLabDiscussionView = {
   notes: GitLabDiscussionNoteView[];
 };
 
+export type GitLabCommentThreadView = {
+  id: string;
+  mergeRequest: GitLabMergeRequestView;
+  discussion: GitLabDiscussionView;
+};
+
+export type GitLabCommentPageView = {
+  viewerId: string;
+  viewerUsername: string;
+  mergeRequests: GitLabMergeRequestView[];
+  threads: GitLabCommentThreadView[];
+  endCursor: string | null;
+  hasNextPage: boolean;
+  partial: boolean;
+  warnings: string[];
+};
+
 export type GitLabMergeRequestView = {
+  projectPath?: string | null;
+  sourceProjectId?: string | null;
+  worktreeId?: string | null;
+  worktreeHighlightColor?: string | null;
+  ticketKey?: string | null;
+  approvalState?: string | null;
+  approvalsRequired?: number | null;
+  approvalsLeft?: number | null;
+  unresolvedDiscussionsCount?: number | null;
+  headPipeline?: GitLabPipelineView | null;
+  mergeOperation?: GitLabMergeOperationView | null;
   id: string;
   iid: number;
   projectId: string;
@@ -175,6 +213,70 @@ export type GitLabMergeRequestView = {
   createdAt: string;
   updatedAt: string;
   mergedAt: string | null;
+};
+
+export type GitLabMergeOperationView = {
+  id: string;
+  state: string;
+  autoMerge: boolean;
+  worktreeId: string | null;
+  ticketKey: string | null;
+  lastError: string | null;
+  mergeConfirmedAt: string | null;
+  ticketMovedAt: string | null;
+  worktreeDeletedAt: string | null;
+  updatedAt: string;
+};
+
+export type GitLabMergeOptions = {
+  projectId: string;
+  iid: number;
+  title: string;
+  state: string;
+  sha: string;
+  sourceBranch: string;
+  targetBranch: string;
+  mergeMethod: string;
+  squashPolicy: string;
+  squash: boolean;
+  removeSourceBranch: boolean;
+  canRemoveSourceBranch: boolean;
+  canMerge: boolean;
+  canAutoMerge: boolean;
+  canCancelAutoMerge: boolean;
+  autoMergeEnabled: boolean;
+  mergeBlockedReason: string | null;
+  autoMergeBlockedReason: string | null;
+  mergeCommitMessage: string | null;
+  squashCommitMessage: string | null;
+  worktreeId: string | null;
+  worktreeFolder: string | null;
+  canDeleteWorktree: boolean;
+  ticketKey: string | null;
+  ticketDoneStatusConfigured: boolean;
+  defaultMoveTicketToDone: boolean;
+  defaultDeleteWorktree: boolean;
+  operation: GitLabMergeOperationView | null;
+};
+
+export type SubmitGitLabMergeRequestMergeInput = {
+  projectId: string;
+  iid: number;
+  sha: string;
+  autoMerge?: boolean | null;
+  squash?: boolean | null;
+  removeSourceBranch?: boolean | null;
+  mergeCommitMessage?: string | null;
+  squashCommitMessage?: string | null;
+  worktreeId?: string | null;
+  deleteWorktree?: boolean | null;
+  moveTicketToDone?: boolean | null;
+};
+
+export type GitLabMergeResult = {
+  mergeRequest: GitLabMergeRequestView;
+  operation: GitLabMergeOperationView | null;
+  postMergeError: string | null;
 };
 
 export type GitLabMergeRequestDetailView = GitLabMergeRequestView & {

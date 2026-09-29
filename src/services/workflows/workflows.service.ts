@@ -284,6 +284,11 @@ export type TriggerWorkflowInput = {
   choice?: string | null;
 };
 
+export type WorkflowTargetSummaryInput = {
+  resourceKind: string;
+  resourceId: string;
+};
+
 export type ImportWorkflowInput = {
   payload: unknown;
   name?: string | null;
@@ -2387,6 +2392,59 @@ export class WorkflowsService {
       },
       orderBy: [{ createdAt: "desc" }, { id: "desc" }],
     });
+  }
+
+  async targetSummaries(input: WorkflowTargetSummaryInput[]) {
+    if (input.length > 200)
+      throw new Error("At most 200 workflow targets are allowed");
+    const unique = new Map<string, WorkflowTargetSummaryInput>();
+    for (const target of input) {
+      const resourceKind = target.resourceKind.trim().toUpperCase();
+      const resourceId = target.resourceId.trim();
+      if (!resourceKind || !resourceId)
+        throw new Error("Invalid workflow target");
+      unique.set(JSON.stringify([resourceKind, resourceId]), {
+        resourceKind,
+        resourceId,
+      });
+    }
+    const targets = [...unique.values()];
+    if (!targets.length) return [];
+    const resourceWhere = targets.map(({ resourceKind, resourceId }) => ({
+      kind: resourceKind,
+      resourceId,
+    }));
+    const prisma = await getPrismaClient();
+    const runs = await prisma.workflowRun.findMany({
+      where: {
+        archivedAt: null,
+        status: { in: [...ACTIVE_RUN_STATUSES] },
+        resourceLinks: { some: { OR: resourceWhere } },
+      },
+      select: {
+        id: true,
+        workflowId: true,
+        displayNumber: true,
+        status: true,
+        resourceLinks: {
+          where: { OR: resourceWhere },
+          select: { kind: true, resourceId: true },
+        },
+      },
+      orderBy: [{ displayNumber: "asc" }, { id: "asc" }],
+    });
+    return targets.map((target) => ({
+      ...target,
+      activeRuns: runs
+        .filter((run) =>
+          run.resourceLinks.some(
+            (link) =>
+              link.kind === target.resourceKind &&
+              link.resourceId === target.resourceId,
+          ),
+        )
+        .map(({ resourceLinks: _links, ...run }) => run),
+    }));
   }
 
   async runsForResource(

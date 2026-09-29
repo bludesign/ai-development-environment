@@ -678,6 +678,11 @@ input ImportWorkflowInput {
 }
 
 extend type Query {
+  "Batch compact active-run summaries for rendered workflow resources."
+  workflowTargetSummaries(
+    "Resource targets to retrieve in one batch; duplicate targets are combined."
+    targets: [WorkflowTargetSummaryInput!]!
+  ): [WorkflowTargetSummary!]!
   "Returns a workflow page."
   workflows(
     "Text used to filter matching records. Omit it to leave this dimension unfiltered."
@@ -953,4 +958,34 @@ type WorkflowResourceRunDefinition {
   id: ID!
   "Display name of this resource."
   name: String!
+}
+
+"A resource whose active workflow runs should be summarized."
+input WorkflowTargetSummaryInput {
+  "Kind of linked resource whose workflow runs are being observed."
+  resourceKind: String!
+  "Identifier of the linked resource."
+  resourceId: ID!
+}
+
+"An active workflow run linked to a rendered resource."
+type WorkflowActiveRunSummary {
+  "Stable identifier of the workflow run."
+  id: ID!
+  "Identifier of the workflow that created this run."
+  workflowId: ID!
+  "Human-readable sequential run number."
+  displayNumber: Int!
+  "Current execution status."
+  status: WorkflowRunStatus!
+}
+
+"One keyed active-run result for a rendered resource."
+type WorkflowTargetSummary {
+  "Kind of linked resource whose workflow runs are being observed."
+  resourceKind: String!
+  "Identifier of the linked resource."
+  resourceId: ID!
+  "All non-terminal workflow runs linked to this resource."
+  activeRuns: [WorkflowActiveRunSummary!]!
 }
