@@ -5,6 +5,7 @@ import "server-only";
 import { randomUUID } from "node:crypto";
 
 import type { Prisma } from "@/generated/prisma/client";
+import type { McpToolSnapshot } from "@/services/tools/types";
 import { getPrismaClient } from "@/data/prisma-client";
 import {
   RUNS_CHANGED_TOPIC,
@@ -50,7 +51,11 @@ type Provider = (typeof PROVIDERS)[number];
 export type RunMcpPresetResolver = (
   kind: RunKind,
   ids: string[],
-) => Promise<{ presetIds: string[]; toolNames: string[] }>;
+) => Promise<{
+  presetIds: string[];
+  toolNames: string[];
+  snapshot?: McpToolSnapshot;
+}>;
 
 export type RunConfigurationInput = {
   kind: string;
@@ -1141,6 +1146,9 @@ export class RunsService {
           webSearchEnabled: input.webSearchEnabled !== false,
           mcpPresetIdsJson: JSON.stringify(mcp.presetIds),
           mcpToolNamesJson: JSON.stringify(mcp.toolNames),
+          mcpToolSnapshotJson: mcp.snapshot
+            ? JSON.stringify(mcp.snapshot)
+            : null,
           worktreeConcurrencyLimit: concurrencyLimit,
           workflowRunId: input.workflowRunId ?? null,
           initialPrompt: prompt,

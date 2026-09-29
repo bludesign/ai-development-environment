@@ -21,6 +21,10 @@ import {
   type ServerResponse,
 } from "node:http";
 
+import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
+import * as z from "zod/v4";
+
 import { NOW } from "./mock-data/time";
 
 const PORT = Number(
@@ -1467,7 +1471,59 @@ const server = createServer(
     let payload: unknown = {};
     let status = 200;
     try {
-      if (url.pathname === "/graphql") {
+      if (url.pathname === "/mcp") {
+        const mcp = new McpServer({
+          name: "screenshot-issues",
+          version: "1.0.0",
+        });
+        mcp.registerTool(
+          "search_issues",
+          {
+            title: "Search issues",
+            description:
+              "Search issue titles and descriptions in the connected workspace.",
+            inputSchema: z.object({ query: z.string().min(1) }),
+            outputSchema: z.object({
+              issues: z.array(z.object({ key: z.string(), title: z.string() })),
+            }),
+            annotations: {
+              readOnlyHint: true,
+              destructiveHint: false,
+              idempotentHint: true,
+              openWorldHint: true,
+            },
+          },
+          async () => {
+            const result = {
+              issues: [
+                {
+                  key: "ACME-1234",
+                  title: "Add quick search to the global navigation bar",
+                },
+              ],
+            };
+            return {
+              content: [{ type: "text", text: JSON.stringify(result) }],
+              structuredContent: result,
+            };
+          },
+        );
+        const transport = new StreamableHTTPServerTransport({
+          sessionIdGenerator: undefined,
+          enableJsonResponse: true,
+        });
+        response.once("close", () => {
+          void transport.close();
+          void mcp.close();
+        });
+        await mcp.connect(transport);
+        await transport.handleRequest(
+          request,
+          response,
+          raw ? JSON.parse(raw) : undefined,
+        );
+        return;
+      } else if (url.pathname === "/graphql") {
         payload = githubGraphql(raw ? JSON.parse(raw) : {});
       } else if (url.pathname.startsWith("/rest/")) {
         payload = jiraRest(url.pathname, url.searchParams);

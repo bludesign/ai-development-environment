@@ -127,7 +127,7 @@ export function createSseToolGroup(service: SseService): BuiltInToolGroup {
           "Create a hosted SSE endpoint. New endpoints default to Forward mode.",
         inputSchema: EndpointInputSchema,
         outputSchema: z.object({ endpoint: z.unknown() }),
-        annotations: WRITE_ANNOTATIONS,
+        annotations: { ...WRITE_ANNOTATIONS, idempotentHint: false },
         handler: async (input) => ({
           endpoint: await service.createEndpoint(input as SseEndpointInput),
         }),
@@ -379,7 +379,7 @@ export function createSseToolGroup(service: SseService): BuiltInToolGroup {
           delta: z.number().default(1),
         }),
         outputSchema: ObjectOutput,
-        annotations: WRITE_ANNOTATIONS,
+        annotations: { ...WRITE_ANNOTATIONS, idempotentHint: false },
         handler: async ({ key, delta }) => ({
           value: await service.storageIncrement(key, delta, "mcp"),
         }),

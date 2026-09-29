@@ -55,12 +55,16 @@ export async function GET(request: Request): Promise<Response> {
     if (params.get("summary") === "1") {
       const summary = (group: ToolCatalogGroup): ToolCatalogSummaryGroup => ({
         ...group,
-        tools: group.tools.map(({ name, title, description, annotations }) => ({
-          name,
-          title,
-          description,
-          annotations,
-        })),
+        tools: group.tools.map(
+          ({ name, title, description, annotations, reference, mcpName }) => ({
+            name,
+            title,
+            description,
+            annotations,
+            reference,
+            mcpName,
+          }),
+        ),
         children: group.children.map(summary),
       });
       return Response.json({ groups: catalog.groups.map(summary) });

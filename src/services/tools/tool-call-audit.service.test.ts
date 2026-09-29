@@ -9,6 +9,34 @@ import {
 } from "./tool-call-audit.service";
 
 describe("tool-call auditing", () => {
+  test("records protocol error results as failed while preserving their content", async () => {
+    const update = vi.fn().mockResolvedValue({});
+    getPrismaClient.mockResolvedValue({
+      toolCallAudit: { create: vi.fn(), update },
+    });
+    const result = {
+      isError: true,
+      content: [{ type: "text", text: "Upstream rejected the call" }],
+    };
+    await expect(
+      new ToolCallAuditService().execute(
+        {
+          caller: "user:one",
+          correlationId: "one",
+          source: "MCP",
+          groupId: "external:one",
+          toolName: "search",
+          arguments: {},
+        },
+        async () => result,
+      ),
+    ).resolves.toBe(result);
+    expect(update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({ resultStatus: "FAILED" }),
+      }),
+    );
+  });
   test("hashes canonical arguments without retaining their values", async () => {
     const create = vi.fn().mockResolvedValue({});
     const update = vi.fn().mockResolvedValue({});

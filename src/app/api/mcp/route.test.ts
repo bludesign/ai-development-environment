@@ -4,7 +4,7 @@ const mocks = vi.hoisted(() => ({
   callBuiltInTool: vi.fn(),
   callRunBuiltInTool: vi.fn(),
   mcpRunToolNames: vi.fn(),
-  mcpPresetToolNames: vi.fn().mockResolvedValue(null),
+  mcpPresetSnapshot: vi.fn().mockResolvedValue(null),
   builtInTools: { definitions: () => [] },
 }));
 const authorization = vi.hoisted(() => ({
@@ -69,7 +69,7 @@ describe("MCP endpoint authentication", () => {
     await expect(response.json()).resolves.toMatchObject({
       error: { code: "MCP_PRESET_NOT_FOUND" },
     });
-    expect(mocks.mcpPresetToolNames).toHaveBeenCalledWith("preset-1");
+    expect(mocks.mcpPresetSnapshot).toHaveBeenCalledWith("preset-1");
   });
 
   test.each([GET, POST, DELETE])(

@@ -1,21 +1,64 @@
 import * as z from "zod/v4";
+import { BUILD_CONFIGURATION_ICON_KEYS } from "@ai-development-environment/agent-contract/builds";
 
 import type { ToolCallAuditService } from "../tool-call-audit.service";
 import {
   READ_ONLY_EXTERNAL_ANNOTATIONS,
+  defineTool,
   type BuiltInToolGroup,
 } from "../builtin-tools";
 import { serviceTool } from "./service-tool";
 
+const McpPresetSchema = z.object({
+  id: z.string(),
+  name: z.string(),
+  description: z.string(),
+  iconKey: z.enum(BUILD_CONFIGURATION_ICON_KEYS),
+  enabledForPlans: z.boolean(),
+  enabledForSessions: z.boolean(),
+  toolNames: z.array(z.string()),
+  tools: z.array(
+    z.discriminatedUnion("source", [
+      z.object({ source: z.literal("BUILTIN"), name: z.string() }),
+      z.object({
+        source: z.literal("EXTERNAL"),
+        name: z.string(),
+        serverId: z.string(),
+        serverName: z.string().nullable().optional(),
+      }),
+    ]),
+  ),
+  createdAt: z.string(),
+  updatedAt: z.string(),
+});
+
 export function createToolAdministrationGroup(
   audit: ToolCallAuditService,
   testExternalServer: (id: string) => Promise<unknown>,
+  listMcpToolPresets?: (kind?: "PLAN" | "SESSION") => Promise<unknown>,
 ): BuiltInToolGroup {
   return {
     id: "builtin:tool-administration",
     name: "Tool Administration",
     children: [],
     tools: [
+      ...(listMcpToolPresets
+        ? [
+            defineTool({
+              name: "get_mcp_tool_presets",
+              title: "Get MCP tool presets",
+              description:
+                "List saved MCP presets with local IDs, descriptions, enabled run kinds, and built-in or external tool selections. Pass selected IDs as mcpPresetIds when creating a run or playing a plan.",
+              inputSchema: z.object({
+                kind: z.enum(["PLAN", "SESSION"]).optional(),
+              }),
+              outputSchema: z.object({ presets: z.array(McpPresetSchema) }),
+              handler: async ({ kind }) => ({
+                presets: await listMcpToolPresets(kind),
+              }),
+            }),
+          ]
+        : []),
       serviceTool({
         name: "test_external_mcp_server",
         title: "Test external MCP server",

@@ -8,12 +8,9 @@ export async function seedTools(prisma: PrismaClient): Promise<void> {
     data: {
       id: ids.externalMcpServers.linear,
       name: "Linear",
-      url: "https://mcp.linear.app/sse",
-      transport: "SSE",
+      url: `http://127.0.0.1:${process.env.MOCK_API_PORT || "4322"}/mcp`,
+      transport: "STREAMABLE_HTTP",
       toolNamePrefix: "linear_",
-      headers: {
-        create: [{ id: "mcp-header-linear-auth", name: "Authorization" }],
-      },
     },
   });
 
@@ -26,13 +23,16 @@ export async function seedTools(prisma: PrismaClient): Promise<void> {
       iconKey: "wrench",
       enabledForPlans: true,
       enabledForSessions: true,
-      tools: {
+      externalTools: {
         create: [
-          { toolName: "linear_create_issue" },
-          { toolName: "linear_update_issue" },
-          { toolName: "github_create_pull_request" },
-          { toolName: "github_list_checks" },
+          {
+            serverId: ids.externalMcpServers.linear,
+            toolName: "search_issues",
+          },
         ],
+      },
+      tools: {
+        create: [{ toolName: "get_codebases" }, { toolName: "get_agent_runs" }],
       },
     },
   });

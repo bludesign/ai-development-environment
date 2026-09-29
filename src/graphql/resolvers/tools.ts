@@ -3,6 +3,7 @@ import type { ToolsService } from "@/services/tools";
 import type {
   ExternalMcpServerInput,
   McpToolPresetInput,
+  McpToolPresetImportInput,
 } from "@/services/tools/types";
 
 function requireControlPlane(context: GraphQLContext): void {
@@ -15,6 +16,38 @@ function requireControlPlane(context: GraphQLContext): void {
 
 export const createToolsResolvers = (service: ToolsService) => ({
   Query: {
+    exportMcpToolCatalog: (
+      _root: unknown,
+      {
+        format,
+        source,
+        groupIds,
+      }: {
+        format: "JSON" | "MARKDOWN";
+        source?: "ALL" | "BUILTIN" | "EXTERNAL";
+        groupIds?: string[] | null;
+      },
+      context: GraphQLContext,
+    ) => {
+      requireControlPlane(context);
+      return service.presetTransfers.exportCatalog(format, source, groupIds);
+    },
+    exportMcpToolPresets: (
+      _root: unknown,
+      { ids }: { ids: string[] },
+      context: GraphQLContext,
+    ) => {
+      requireControlPlane(context);
+      return service.presetTransfers.exportPresets(ids);
+    },
+    previewMcpToolPresetImport: (
+      _root: unknown,
+      { input }: { input: McpToolPresetImportInput },
+      context: GraphQLContext,
+    ) => {
+      requireControlPlane(context);
+      return service.presetTransfers.preview(input);
+    },
     externalMcpServers: (
       _root: unknown,
       _args: unknown,
@@ -49,6 +82,17 @@ export const createToolsResolvers = (service: ToolsService) => ({
     },
   },
   Mutation: {
+    importMcpToolPresets: (
+      _root: unknown,
+      {
+        input,
+        previewToken,
+      }: { input: McpToolPresetImportInput; previewToken: string },
+      context: GraphQLContext,
+    ) => {
+      requireControlPlane(context);
+      return service.presetTransfers.import(input, previewToken);
+    },
     clearToolCallAudits: (
       _root: unknown,
       _args: unknown,

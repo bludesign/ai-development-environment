@@ -43,6 +43,7 @@ export type RouteEntry = {
   anonymous?: boolean;
   /** Capture the global focus menu after its catalog has loaded. */
   activeAgentMenu?: boolean;
+  mcpImportReview?: boolean;
 };
 
 export const routes: RouteEntry[] = [
@@ -340,7 +341,25 @@ export const routes: RouteEntry[] = [
   { name: "skill-sync-run", path: `/skills/sync/${ids.skillSyncRuns.latest}` },
 
   // Tools
-  { name: "tools", path: "/tools" },
+  { name: "tools", path: "/tools", readyTexts: ["Core Tools"] },
+  {
+    name: "tools-catalog-export",
+    path: "/tools",
+    readyTexts: ["Core Tools"],
+    clickButton: "Export tool catalog",
+  },
+  {
+    name: "tools-preset-editor",
+    path: "/tools",
+    readyTexts: ["Core Tools"],
+    clickButton: "Edit preset",
+  },
+  {
+    name: "tools-preset-import",
+    path: "/tools",
+    readyTexts: ["Core Tools"],
+    mcpImportReview: true,
+  },
 
   // Workflows
   { name: "workflows", path: "/workflows" },

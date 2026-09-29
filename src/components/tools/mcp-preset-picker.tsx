@@ -10,6 +10,8 @@ import { Spinner } from "@/components/ui/spinner";
 import { controlPlaneRequest } from "@/lib/control-plane-client";
 import { cn } from "@/lib/utils";
 
+import type { PresetToolReference } from "./mcp-tool-selection";
+
 export type McpToolPresetView = {
   id: string;
   name: string;
@@ -18,12 +20,13 @@ export type McpToolPresetView = {
   enabledForPlans: boolean;
   enabledForSessions: boolean;
   toolNames: string[];
+  tools?: PresetToolReference[];
   createdAt: string;
   updatedAt: string;
 };
 
 export const MCP_PRESET_FIELDS =
-  "id name description iconKey enabledForPlans enabledForSessions toolNames createdAt updatedAt";
+  "id name description iconKey enabledForPlans enabledForSessions toolNames tools { source name serverId serverName } createdAt updatedAt";
 
 export async function loadMcpToolPresets(
   kind?: "PLAN" | "SESSION" | null,

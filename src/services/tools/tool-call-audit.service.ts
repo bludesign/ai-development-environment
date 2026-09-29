@@ -126,7 +126,13 @@ export class ToolCallAuditService {
       await prisma.toolCallAudit.update({
         where: { id },
         data: {
-          resultStatus: "SUCCEEDED",
+          resultStatus:
+            result &&
+            typeof result === "object" &&
+            "isError" in result &&
+            result.isError === true
+              ? "FAILED"
+              : "SUCCEEDED",
           durationMs: Math.max(0, finishedAt.getTime() - startedAt.getTime()),
           finishedAt,
         },
