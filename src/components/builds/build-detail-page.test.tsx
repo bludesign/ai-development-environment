@@ -382,6 +382,47 @@ describe("BuildDetailPage", () => {
     expect(link.getAttribute("href")).toBe("/en/builds/build-1/output");
   });
 
+  test("uses the standard action size for install in the header", async () => {
+    request.mockImplementation(async (query) => {
+      const operation = String(query);
+      if (operation.includes("query BuildDetail")) {
+        return {
+          build: {
+            ...build,
+            artifacts: [
+              ...build.artifacts,
+              {
+                id: "ipa-artifact",
+                kind: "IPA",
+                relativePath: "Example.ipa",
+                sizeBytes: 4096,
+                checksum: null,
+                metadata: {
+                  bundleIdentifier: "com.example.app",
+                  exportMethod: "DEBUGGING",
+                },
+                createdAt: now,
+              },
+            ],
+          },
+        } as never;
+      }
+      if (operation.includes("query BuildLogChunks")) {
+        return { buildLogChunks: [] } as never;
+      }
+      throw new Error(`Unexpected request: ${operation}`);
+    });
+
+    render(<BuildDetailPage buildId="build-1" publicOrigin={null} />);
+
+    const installButtons = await screen.findAllByRole("button", {
+      name: "Install",
+    });
+    expect(installButtons).toHaveLength(2);
+    expect(installButtons[0]?.getAttribute("data-size")).toBe("default");
+    expect(installButtons[1]?.getAttribute("data-size")).toBe("sm");
+  });
+
   test("shows the build ID, downloads artifacts, and deletes the build", async () => {
     render(<BuildDetailPage buildId="build-1" publicOrigin={null} />);
 
