@@ -20,12 +20,10 @@ describe("preset persistence safeguards", () => {
     const transaction = vi.fn();
     getPrismaClient.mockResolvedValue({
       mcpToolPreset: {
-        findUnique: vi
-          .fn()
-          .mockResolvedValue({
-            id: "one",
-            externalTools: [{ serverId: "server", toolName: "search" }],
-          }),
+        findUnique: vi.fn().mockResolvedValue({
+          id: "one",
+          externalTools: [{ serverId: "server", toolName: "search" }],
+        }),
       },
       $transaction: transaction,
     });
@@ -62,15 +60,13 @@ describe("preset persistence safeguards", () => {
     const transaction = {
       mcpToolPreset: { findMany: vi.fn().mockResolvedValue([]), upsert },
       externalMcpServer: {
-        findMany: vi
-          .fn()
-          .mockResolvedValue([
-            {
-              id: "server",
-              url: "https://changed.example/mcp",
-              transport: "STREAMABLE_HTTP",
-            },
-          ]),
+        findMany: vi.fn().mockResolvedValue([
+          {
+            id: "server",
+            url: "https://changed.example/mcp",
+            transport: "STREAMABLE_HTTP",
+          },
+        ]),
       },
     };
     getPrismaClient.mockResolvedValue({
