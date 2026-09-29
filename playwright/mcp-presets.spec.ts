@@ -10,6 +10,9 @@ test("portable mixed preset imports, exports, and calls only selected MCP tools"
   baseURL,
 }, testInfo) => {
   test.setTimeout(120_000);
+  await page.context().grantPermissions(["clipboard-read", "clipboard-write"], {
+    origin: baseURL,
+  });
   const headers = { Authorization: `Bearer ${screenshotSessionToken}` };
   await page.setExtraHTTPHeaders(headers);
   const graphql = async (
@@ -33,7 +36,8 @@ test("portable mixed preset imports, exports, and calls only selected MCP tools"
     await page
       .getByRole("button", { name: "Export tool catalog", exact: true })
       .click();
-    await page.getByLabel("Format", { exact: true }).selectOption("JSON");
+    await page.getByRole("combobox", { name: "Format", exact: true }).click();
+    await page.getByRole("option", { name: "JSON", exact: true }).click();
     const catalogDownload = page.waitForEvent("download");
     await page.getByRole("button", { name: "Download", exact: true }).click();
     const catalogStream = await (await catalogDownload).createReadStream();
@@ -72,9 +76,41 @@ test("portable mixed preset imports, exports, and calls only selected MCP tools"
     await page
       .getByRole("button", { name: "Import presets", exact: true })
       .click();
+    const aiPrompt = page.getByRole("button", {
+      name: "Prompt for an AI to create presets",
+      exact: true,
+    });
+    await aiPrompt.hover();
+    await expect(aiPrompt).toHaveCSS("text-decoration-line", "none");
+    await aiPrompt.click();
+    await expect(
+      page.getByLabel("AI preset generation prompt", { exact: true }),
+    ).toBeVisible();
+    const copiedPrompt = await page
+      .getByLabel("AI preset generation prompt", { exact: true })
+      .inputValue();
+    expect(copiedPrompt).toContain('"format": "aide.mcp-presets.export"');
+    await page
+      .getByRole("button", { name: "Copy AI prompt", exact: true })
+      .click();
+    await expect(
+      page.getByRole("button", { name: "Prompt copied", exact: true }),
+    ).toBeVisible();
+    expect(await page.evaluate(() => navigator.clipboard.readText())).toBe(
+      copiedPrompt,
+    );
+    await aiPrompt.click();
+    await page.getByLabel("Preset JSON file", { exact: true }).setInputFiles({
+      name: "portable-presets.json",
+      mimeType: "application/json",
+      buffer: Buffer.from(JSON.stringify(portable)),
+    });
+    await expect(page.getByLabel("Preset JSON", { exact: true })).toHaveValue(
+      JSON.stringify(portable),
+    );
     await page
       .getByLabel("Preset JSON", { exact: true })
-      .fill(JSON.stringify(portable));
+      .fill(JSON.stringify(portable, null, 2));
     await page
       .getByRole("button", { name: "Review import", exact: true })
       .click();
@@ -86,7 +122,10 @@ test("portable mixed preset imports, exports, and calls only selected MCP tools"
         exact: true,
       }),
     ).toBeDisabled();
-    await map.selectOption(ids.externalMcpServers.linear);
+    await map.click();
+    await page
+      .getByRole("option", { name: "Linear (suggested)", exact: true })
+      .click();
     await page
       .getByRole("button", { name: "Review import", exact: true })
       .click();

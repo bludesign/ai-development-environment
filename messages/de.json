@@ -3642,6 +3642,7 @@
     "importTitle": "MCP-Voreinstellungen importieren",
     "importDescription": "Wähle eine JSON-Datei oder füge von einer KI erstelltes JSON ein. Prüfe Konflikte und ordne externe Tools konfigurierten Servern zu. Entferne unerwünschte Tools im JSON.",
     "chooseFile": "JSON-Datei mit Voreinstellungen",
+    "dropJsonFile": "JSON-Datei hier ablegen oder zum Auswählen klicken.",
     "pasteJson": "Voreinstellungs-JSON",
     "reviewAgain": "Auswahl geändert. Vor dem Import erneut prüfen.",
     "mapServer": "{name} einem konfigurierten Server zuordnen",
@@ -3657,7 +3658,16 @@
     "choosePreset": "Voreinstellung auswählen",
     "reviewDetails": "Angeforderte Tools und Einstellungen prüfen",
     "reviewImport": "Import prüfen",
-    "importReviewed": "Geprüfte Voreinstellungen importieren"
+    "importReviewed": "Geprüfte Voreinstellungen importieren",
+    "aiPromptTitle": "Prompt für eine KI zum Erstellen von Vorlagen",
+    "aiPromptHelp": "Kopiere diesen Prompt, beschreibe dein Ziel und füge einen exportierten Werkzeugkatalog hinzu. Füge die JSON-Antwort der KI unten zur Prüfung ein.",
+    "aiPromptText": "KI-Prompt zur Erstellung von Werkzeugvorlagen",
+    "copyAiPrompt": "KI-Prompt kopieren",
+    "aiPromptCopyFailed": "Der Prompt konnte nicht kopiert werden. Markiere und kopiere ihn manuell.",
+    "aiPromptExample": "Beispieldokument (verwende nur Werkzeuge aus dem angehängten Katalog):",
+    "aiPromptSchema": "Erforderliches JSON-Schema:",
+    "aiPromptInstructions": "Erstelle MCP-Werkzeugvorlagen für dieses Ziel: [beschreibe deine Aufgabe und Einschränkungen].\n\nIch werde einen exportierten Werkzeugkatalog von AI Development Environment anhängen. Nutze dessen genaue Werkzeugreferenzen, Beschreibungen, Schemas und Risikohinweise, um die kleinste sinnvolle Werkzeugauswahl zu treffen. Gib ein einzelnes JSON-Dokument gemäß dem folgenden Schema mit format \"aide.mcp-presets.export\" und schemaVersion 1 zurück. Gib ausschließlich JSON zurück, ohne Markdown-Codeblöcke oder Kommentare.\n\nFüge Vorlagennamen, Beschreibungen, einen unterstützten iconKey, enabledForPlans, enabledForSessions und explizite tools hinzu. Integrierte Referenzen verwenden source \"BUILTIN\" und name. Externe Referenzen verwenden source \"EXTERNAL\", serverKey aus dem Katalog und den genauen ursprünglichen Werkzeugnamen. Füge die passenden dokumentlokalen externalServers-Einträge hinzu; verwende bei rein integrierten Vorlagen ein leeres Array. Gib niemals Server-URLs, Zugangsdaten, Header, lokale IDs, Aufrufargumente oder neue Serverkonfigurationen an. Erfinde keine Werkzeuge und wiederhole keine Referenzen. Begrenze das Dokument auf 100 Vorlagen und 2 MiB. Vor dem Import prüfe ich Konflikte und ordne externe Server konfigurierten Servern zu.",
+    "aiPromptCopied": "Prompt kopiert"
   },
   "tools": {
     "title": "Werkzeuge",

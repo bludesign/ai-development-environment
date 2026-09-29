@@ -5,10 +5,14 @@ import {
   screen,
   waitFor,
 } from "@testing-library/react";
-import { afterEach, describe, expect, test, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 
 import { controlPlaneRequest } from "@/lib/control-plane-client";
 import type { ToolCatalogSummaryGroup } from "@/services/tools/types";
+import {
+  mcpPresetJsonSchema,
+  parseMcpPresetDocument,
+} from "@/services/tools/mcp-preset-format";
 
 import {
   McpCatalogExport,
@@ -23,6 +27,27 @@ import {
 
 vi.mock("@/lib/control-plane-client", () => ({ controlPlaneRequest: vi.fn() }));
 const request = vi.mocked(controlPlaneRequest);
+Object.defineProperties(HTMLElement.prototype, {
+  hasPointerCapture: { configurable: true, value: () => false },
+  releasePointerCapture: { configurable: true, value: () => undefined },
+  setPointerCapture: { configurable: true, value: () => undefined },
+  scrollIntoView: { configurable: true, value: () => undefined },
+});
+beforeEach(() => {
+  vi.stubGlobal(
+    "ResizeObserver",
+    class {
+      observe() {}
+      unobserve() {}
+      disconnect() {}
+    },
+  );
+});
+
+function selectOption(label: string, option: string) {
+  fireEvent.keyDown(screen.getByLabelText(label), { key: "ArrowDown" });
+  fireEvent.click(screen.getByRole("option", { name: option }));
+}
 const document = JSON.stringify({
   format: "aide.mcp-presets.export",
   schemaVersion: 1,
@@ -124,8 +149,11 @@ describe("portable MCP preset review", () => {
     const mapping = await screen.findByLabelText(
       "Map Search MCP to a configured server",
     );
-    expect((mapping as HTMLSelectElement).value).toBe("");
-    fireEvent.change(mapping, { target: { value: "local" } });
+    expect(mapping.textContent).toContain("Choose a server");
+    selectOption(
+      "Map Search MCP to a configured server",
+      "Search MCP (suggested)",
+    );
     expect(
       screen.getByText("Selections changed. Review again before importing."),
     ).toBeDefined();
@@ -159,12 +187,9 @@ describe("portable MCP preset review", () => {
     } as never);
     renderImport();
     fireEvent.click(screen.getByRole("button", { name: "Review import" }));
-    fireEvent.change(await screen.findByLabelText("Import action"), {
-      target: { value: "REPLACE" },
-    });
-    fireEvent.change(screen.getByLabelText("Preset to replace"), {
-      target: { value: "existing" },
-    });
+    await screen.findByLabelText("Import action");
+    selectOption("Import action", "Replace existing preset");
+    selectOption("Preset to replace", "Existing");
     expect(
       (
         screen.getByRole("button", {
@@ -231,7 +256,7 @@ describe("portable MCP preset review", () => {
     ).toBe(true);
   });
 
-  test("reads a JSON file and rejects an oversized file before reading it", async () => {
+  test("reads selected and dropped JSON files and rejects oversized files before reading", async () => {
     renderImport();
     const file = new File([document], "preset.json", {
       type: "application/json",
@@ -244,6 +269,21 @@ describe("portable MCP preset review", () => {
       expect(
         (screen.getByLabelText("Preset JSON") as HTMLTextAreaElement).value,
       ).toBe(document + " "),
+    );
+    const dropped = new File([document], "dropped.json", {
+      type: "application/json",
+    });
+    Object.defineProperty(dropped, "text", { value: async () => document });
+    fireEvent.drop(
+      screen.getByText("Drop a JSON file here or click to browse."),
+      {
+        dataTransfer: { files: [dropped] },
+      },
+    );
+    await waitFor(() =>
+      expect(
+        (screen.getByLabelText("Preset JSON") as HTMLTextAreaElement).value,
+      ).toBe(document),
     );
     const oversized = new File([], "large.json");
     const read = vi.fn();
@@ -310,6 +350,36 @@ describe("catalog portability", () => {
     );
   });
 
+  test("shadcn format and source dropdowns export the chosen values", async () => {
+    vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(
+      () => undefined,
+    );
+    Object.defineProperty(URL, "createObjectURL", {
+      configurable: true,
+      value: vi.fn(() => "blob:catalog"),
+    });
+    request.mockResolvedValue({
+      exportMcpToolCatalog: {
+        filename: "tools.json",
+        contentType: "application/json",
+        content: "{}",
+      },
+    } as never);
+    render(<McpCatalogExport groups={[]} />);
+    fireEvent.click(
+      screen.getByRole("button", { name: "Export tool catalog" }),
+    );
+    selectOption("Format", "JSON");
+    selectOption("Tool sources", "External tools");
+    fireEvent.click(screen.getByRole("button", { name: "Download" }));
+    await waitFor(() =>
+      expect(request).toHaveBeenCalledWith(
+        expect.stringContaining("query ExportMcpToolCatalog"),
+        { format: "JSON", source: "EXTERNAL", groupIds: null },
+      ),
+    );
+  });
+
   test("keeps external identities distinct and excludes display metadata from mutations", () => {
     const first = {
       source: "EXTERNAL" as const,
@@ -335,5 +405,66 @@ describe("catalog portability", () => {
       tools: [{ name: "prefix_search", reference: first }],
     } as unknown as ToolCatalogSummaryGroup;
     expect(catalogSelections(group)[0].reference.name).toBe("search");
+  });
+});
+
+describe("AI import instructions", () => {
+  test("expands and copies a prompt with a valid example and the authoritative schema", async () => {
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.defineProperty(navigator, "clipboard", {
+      configurable: true,
+      value: { writeText },
+    });
+    renderImport();
+    const trigger = screen.getByRole("button", {
+      name: "Prompt for an AI to create presets",
+    });
+    expect(trigger.getAttribute("aria-expanded")).toBe("false");
+    fireEvent.click(trigger);
+    const prompt = (
+      screen.getByLabelText(
+        "AI preset generation prompt",
+      ) as HTMLTextAreaElement
+    ).value;
+    expect(prompt).toContain("[describe your task and constraints]");
+    const [example, schema] = prompt
+      .split(
+        "Example document (use only tools present in the attached catalog):\n\n",
+      )[1]
+      .split("\n\nRequired JSON Schema:\n\n");
+    expect(parseMcpPresetDocument(example).presets[0].tools).toEqual([
+      { source: "BUILTIN", name: "get_codebases" },
+    ]);
+    expect(JSON.parse(schema)).toEqual(mcpPresetJsonSchema());
+    fireEvent.click(screen.getByRole("button", { name: "Copy AI prompt" }));
+    await waitFor(() => expect(writeText).toHaveBeenCalledWith(prompt));
+    expect(
+      await screen.findByRole("button", { name: "Prompt copied" }),
+    ).toBeDefined();
+    expect(request).not.toHaveBeenCalled();
+  });
+
+  test("keeps the prompt selectable when clipboard access fails", async () => {
+    Object.defineProperty(navigator, "clipboard", {
+      configurable: true,
+      value: { writeText: vi.fn().mockRejectedValue(new Error("denied")) },
+    });
+    renderImport();
+    fireEvent.click(
+      screen.getByRole("button", {
+        name: "Prompt for an AI to create presets",
+      }),
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Copy AI prompt" }));
+    expect((await screen.findByRole("alert")).textContent).toContain(
+      "Select and copy it manually",
+    );
+    expect(
+      (
+        screen.getByLabelText(
+          "AI preset generation prompt",
+        ) as HTMLTextAreaElement
+      ).readOnly,
+    ).toBe(true);
   });
 });

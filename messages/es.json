@@ -3642,6 +3642,7 @@
     "importTitle": "Importar preajustes MCP",
     "importDescription": "Elige un archivo JSON o pega el JSON generado por una IA. Revisa los conflictos y asigna las herramientas externas a servidores configurados. Edita el JSON para quitar herramientas.",
     "chooseFile": "Archivo JSON de preajustes",
+    "dropJsonFile": "Arrastra un archivo JSON aquí o haz clic para seleccionarlo.",
     "pasteJson": "JSON de preajustes",
     "reviewAgain": "La selección cambió. Vuelve a revisarla antes de importar.",
     "mapServer": "Asignar {name} a un servidor configurado",
@@ -3657,7 +3658,16 @@
     "choosePreset": "Elegir un preajuste",
     "reviewDetails": "Revisar herramientas y ajustes solicitados",
     "reviewImport": "Revisar importación",
-    "importReviewed": "Importar preajustes revisados"
+    "importReviewed": "Importar preajustes revisados",
+    "aiPromptTitle": "Instrucciones para que una IA cree preajustes",
+    "aiPromptHelp": "Copia estas instrucciones, describe tu objetivo y adjunta un catálogo de herramientas exportado. Pega abajo la respuesta JSON de la IA para revisarla.",
+    "aiPromptText": "Instrucciones de IA para generar preajustes",
+    "copyAiPrompt": "Copiar instrucciones de IA",
+    "aiPromptCopyFailed": "No se pudieron copiar las instrucciones. Selecciónalas y cópialas manualmente.",
+    "aiPromptExample": "Documento de ejemplo (usa solo herramientas del catálogo adjunto):",
+    "aiPromptSchema": "Esquema JSON requerido:",
+    "aiPromptInstructions": "Crea preajustes de herramientas MCP para este objetivo: [describe tu tarea y restricciones].\n\nAdjuntaré un catálogo de herramientas exportado de AI Development Environment. Usa sus referencias exactas, descripciones, esquemas e indicaciones de riesgo para elegir la selección mínima de herramientas útil. Devuelve un único documento JSON que cumpla el esquema de abajo, con format \"aide.mcp-presets.export\" y schemaVersion 1. Devuelve solo JSON, sin bloques Markdown ni comentarios.\n\nIncluye nombres de preajustes, descripciones, un iconKey admitido, enabledForPlans, enabledForSessions y tools explícitas. Las referencias integradas usan source \"BUILTIN\" y name. Las referencias externas usan source \"EXTERNAL\", serverKey del catálogo y el nombre original exacto de la herramienta. Incluye las entradas externalServers correspondientes, con claves locales al documento; usa un arreglo vacío para preajustes solo de herramientas integradas. Nunca incluyas URLs de servidores, credenciales, cabeceras, IDs locales, argumentos de invocación ni nuevas configuraciones de servidores. No inventes herramientas ni repitas referencias. Limita el documento a 100 preajustes y 2 MiB. Revisaré los conflictos y asignaré los servidores externos a servidores configurados antes de importar.",
+    "aiPromptCopied": "Instrucciones copiadas"
   },
   "tools": {
     "title": "Herramientas",

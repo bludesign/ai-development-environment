@@ -1,11 +1,19 @@
 "use client";
 
-import { Download, Upload } from "lucide-react";
+import { Check, Copy, Download, Upload } from "lucide-react";
 import { useTranslations } from "next-intl";
-import { useRef, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 
+import { FileDropZone } from "@/components/common/file-drop-zone";
+import {
+  Accordion,
+  AccordionContent,
+  AccordionItem,
+  AccordionTrigger,
+} from "@/components/ui/accordion";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
+import { Card } from "@/components/ui/card";
 import { Checkbox } from "@/components/ui/checkbox";
 import {
   Dialog,
@@ -17,10 +25,24 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { ScrollArea } from "@/components/ui/scroll-area";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { Spinner } from "@/components/ui/spinner";
 import { Textarea } from "@/components/ui/textarea";
 import { controlPlaneRequest } from "@/lib/control-plane-client";
+import { copyText } from "@/lib/browser-utils";
 import type { ToolCatalogSummaryGroup } from "@/services/tools/types";
+import {
+  MCP_PRESET_EXPORT_FORMAT,
+  mcpPresetJsonSchema,
+  type McpPresetDocument,
+} from "@/services/tools/mcp-preset-format";
 
 import type { McpToolPresetView } from "./mcp-preset-picker";
 
@@ -50,9 +72,86 @@ export async function exportPresetFiles(ids: string[]) {
   downloadMcpDocument(result.exportMcpToolPresets);
 }
 
-const selectClassName =
-  "h-9 w-full min-w-0 rounded-md border bg-background px-3 text-sm";
 const MAX_IMPORT_BYTES = 2 * 1024 * 1024;
+const UNSELECTED = "__unselected";
+
+const AI_PRESET_EXAMPLE = {
+  format: MCP_PRESET_EXPORT_FORMAT,
+  schemaVersion: 1,
+  externalServers: [],
+  presets: [
+    {
+      name: "Investigation",
+      description: "Inspect registered codebases.",
+      iconKey: "wrench",
+      enabledForPlans: true,
+      enabledForSessions: true,
+      tools: [{ source: "BUILTIN", name: "get_codebases" }],
+    },
+  ],
+} satisfies McpPresetDocument;
+
+function McpPresetAiPrompt() {
+  const t = useTranslations("mcpPresets");
+  const [copied, setCopied] = useState(false);
+  const [error, setError] = useState(false);
+  const prompt = useMemo(
+    () =>
+      [
+        t("aiPromptInstructions"),
+        t("aiPromptExample"),
+        JSON.stringify(AI_PRESET_EXAMPLE, null, 2),
+        t("aiPromptSchema"),
+        JSON.stringify(mcpPresetJsonSchema(), null, 2),
+      ].join("\n\n"),
+    [t],
+  );
+  const copy = async () => {
+    setError(false);
+    setCopied(false);
+    try {
+      await copyText(prompt);
+      setCopied(true);
+    } catch {
+      setError(true);
+    }
+  };
+  return (
+    <Accordion type="single" collapsible className="rounded-md border px-3">
+      <AccordionItem value="ai-prompt">
+        <AccordionTrigger className="hover:no-underline">
+          {t("aiPromptTitle")}
+        </AccordionTrigger>
+        <AccordionContent className="space-y-3">
+          <p className="text-sm text-muted-foreground">{t("aiPromptHelp")}</p>
+          <Textarea
+            aria-label={t("aiPromptText")}
+            className="h-56 resize-none overflow-y-auto font-mono text-xs"
+            readOnly
+            value={prompt}
+          />
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            onClick={() => void copy()}
+          >
+            {copied ? <Check /> : <Copy />}
+            {copied ? t("aiPromptCopied") : t("copyAiPrompt")}
+          </Button>
+          <span role="status" className="sr-only">
+            {copied ? t("aiPromptCopied") : ""}
+          </span>
+          {error && (
+            <p role="alert" className="text-sm text-destructive">
+              {t("aiPromptCopyFailed")}
+            </p>
+          )}
+        </AccordionContent>
+      </AccordionItem>
+    </Accordion>
+  );
+}
 
 export function McpCatalogExport({
   groups,
@@ -121,64 +220,77 @@ export function McpCatalogExport({
             <div className="grid gap-3 sm:grid-cols-2">
               <div className="space-y-2">
                 <Label htmlFor="mcp-export-format">{t("format")}</Label>
-                <select
-                  id="mcp-export-format"
-                  className={selectClassName}
+                <Select
                   value={format}
-                  onChange={(event) => setFormat(event.target.value)}
+                  onValueChange={setFormat}
+                  disabled={busy}
                 >
-                  <option value="MARKDOWN">Markdown</option>
-                  <option value="JSON">JSON</option>
-                </select>
+                  <SelectTrigger id="mcp-export-format" className="w-full">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="MARKDOWN">Markdown</SelectItem>
+                    <SelectItem value="JSON">JSON</SelectItem>
+                  </SelectContent>
+                </Select>
               </div>
               <div className="space-y-2">
                 <Label htmlFor="mcp-export-source">{t("source")}</Label>
-                <select
-                  id="mcp-export-source"
-                  className={selectClassName}
+                <Select
                   value={source}
-                  onChange={(event) => {
-                    setSource(event.target.value);
+                  disabled={busy}
+                  onValueChange={(value) => {
+                    setSource(value);
                     setGroupIds([]);
                   }}
                 >
-                  <option value="ALL">{t("allTools")}</option>
-                  <option value="BUILTIN">{t("builtInTools")}</option>
-                  <option value="EXTERNAL">{t("externalTools")}</option>
-                </select>
+                  <SelectTrigger id="mcp-export-source" className="w-full">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="ALL">{t("allTools")}</SelectItem>
+                    <SelectItem value="BUILTIN">{t("builtInTools")}</SelectItem>
+                    <SelectItem value="EXTERNAL">
+                      {t("externalTools")}
+                    </SelectItem>
+                  </SelectContent>
+                </Select>
               </div>
             </div>
             <p className="text-sm text-muted-foreground">
               {t("catalogGroupsHelp")}
             </p>
-            <div className="relative max-h-56 space-y-2 overflow-y-auto rounded-md border p-3">
-              {choices.map(({ group, depth }) => (
-                <label
-                  className="flex items-start gap-2 text-sm"
-                  style={{ marginLeft: depth * 16 }}
-                  key={group.id}
-                >
-                  <Checkbox
-                    checked={groupIds.includes(group.id)}
-                    onCheckedChange={(checked) =>
-                      setGroupIds(
-                        checked
-                          ? [...groupIds, group.id]
-                          : groupIds.filter((id) => id !== group.id),
-                      )
-                    }
-                  />
-                  <span>
-                    {group.name}
-                    {group.error && (
-                      <span className="block text-destructive">
-                        {t("unavailableSelection")}
-                      </span>
-                    )}
-                  </span>
-                </label>
-              ))}
-            </div>
+            <ScrollArea className="h-56 rounded-md border">
+              <div className="space-y-2 p-3">
+                {choices.map(({ group, depth }) => (
+                  <Label
+                    className="flex items-start gap-2 text-sm"
+                    style={{ marginLeft: depth * 16 }}
+                    key={group.id}
+                  >
+                    <Checkbox
+                      disabled={busy}
+                      checked={groupIds.includes(group.id)}
+                      onCheckedChange={(checked) =>
+                        setGroupIds(
+                          checked
+                            ? [...groupIds, group.id]
+                            : groupIds.filter((id) => id !== group.id),
+                        )
+                      }
+                    />
+                    <span>
+                      {group.name}
+                      {group.error && (
+                        <span className="block text-destructive">
+                          {t("unavailableSelection")}
+                        </span>
+                      )}
+                    </span>
+                  </Label>
+                ))}
+              </div>
+            </ScrollArea>
           </fieldset>
           <DialogFooter>
             <Button
@@ -351,6 +463,7 @@ export function McpPresetImportDialog({
           <DialogTitle>{t("importTitle")}</DialogTitle>
           <DialogDescription>{t("importDescription")}</DialogDescription>
         </DialogHeader>
+        <McpPresetAiPrompt />
         {error && (
           <Alert variant="destructive">
             <AlertDescription>{error}</AlertDescription>
@@ -359,15 +472,18 @@ export function McpPresetImportDialog({
         <fieldset disabled={busy} className="min-w-0 space-y-4">
           <div className="space-y-2">
             <Label htmlFor="mcp-import-file">{t("chooseFile")}</Label>
-            <Input
+            <FileDropZone
               id="mcp-import-file"
-              type="file"
+              aria-label={t("chooseFile")}
               accept=".json,application/json,text/plain"
-              onChange={(event) => {
-                void readFile(event.target.files?.[0]);
-                event.target.value = "";
-              }}
-            />
+              className="rounded-md border-input"
+              disabled={busy}
+              multiple={false}
+              onFiles={(files) => readFile(files[0])}
+            >
+              <Upload className="size-4 shrink-0" aria-hidden="true" />
+              <span>{t("dropJsonFile")}</span>
+            </FileDropZone>
           </div>
           <div className="space-y-2">
             <Label htmlFor="mcp-import-json">{t("pasteJson")}</Label>
@@ -392,31 +508,27 @@ export function McpPresetImportDialog({
                 </p>
               ))}
               {preview.externalServers.map((server) => (
-                <div
-                  className="space-y-2 rounded-md border p-3"
-                  key={server.key}
-                >
+                <Card className="gap-2 p-3" key={server.key}>
                   <Label htmlFor={`mcp-map-${server.key}`}>
                     {t("mapServer", { name: server.name })}
                   </Label>
-                  <select
-                    id={`mcp-map-${server.key}`}
-                    className={selectClassName}
+                  <Select
+                    disabled={busy}
                     value={
                       serverMappings.find(
                         (mapping) => mapping.serverKey === server.key,
-                      )?.serverId ?? ""
+                      )?.serverId ?? UNSELECTED
                     }
-                    onChange={(event) => {
+                    onValueChange={(value) => {
                       setServerMappings([
                         ...serverMappings.filter(
                           (mapping) => mapping.serverKey !== server.key,
                         ),
-                        ...(event.target.value
+                        ...(value !== UNSELECTED
                           ? [
                               {
                                 serverKey: server.key,
-                                serverId: event.target.value,
+                                serverId: value,
                               },
                             ]
                           : []),
@@ -425,22 +537,32 @@ export function McpPresetImportDialog({
                       requestVersion.current++;
                     }}
                   >
-                    <option value="">{t("chooseServer")}</option>
-                    {server.candidates.map((candidate) => (
-                      <option key={candidate.id} value={candidate.id}>
-                        {candidate.name}
-                        {candidate.id === server.suggestedServerId
-                          ? ` (${t("suggested")})`
-                          : ""}
-                      </option>
-                    ))}
-                  </select>
+                    <SelectTrigger
+                      id={`mcp-map-${server.key}`}
+                      className="w-full"
+                    >
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value={UNSELECTED}>
+                        {t("chooseServer")}
+                      </SelectItem>
+                      {server.candidates.map((candidate) => (
+                        <SelectItem key={candidate.id} value={candidate.id}>
+                          {candidate.name}
+                          {candidate.id === server.suggestedServerId
+                            ? ` (${t("suggested")})`
+                            : ""}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
                   {!server.candidates.length && (
                     <p className="text-sm text-muted-foreground">
                       {t("noConfiguredServers")}
                     </p>
                   )}
-                </div>
+                </Card>
               ))}
               {preview.entries.map((entry) => {
                 const decision = decisions.find(
@@ -448,10 +570,7 @@ export function McpPresetImportDialog({
                 );
                 const action = decision?.action ?? entry.action;
                 return (
-                  <div
-                    className="space-y-3 rounded-md border p-3"
-                    key={entry.index}
-                  >
+                  <Card className="gap-3 p-3" key={entry.index}>
                     <p className="font-medium">
                       {entry.name}{" "}
                       <span className="text-sm font-normal text-muted-foreground">
@@ -463,47 +582,65 @@ export function McpPresetImportDialog({
                         <Label htmlFor={`mcp-action-${entry.index}`}>
                           {t("importAction")}
                         </Label>
-                        <select
-                          id={`mcp-action-${entry.index}`}
-                          className={selectClassName}
+                        <Select
+                          disabled={busy}
                           value={action}
-                          onChange={(event) =>
+                          onValueChange={(value) =>
                             decide(entry.index, {
-                              action: event.target
-                                .value as ImportDecision["action"],
+                              action: value as ImportDecision["action"],
                               targetId: undefined,
                             })
                           }
                         >
-                          <option value="CREATE">{t("createNew")}</option>
-                          <option value="REPLACE">
-                            {t("replaceExisting")}
-                          </option>
-                          <option value="SKIP">{t("skip")}</option>
-                        </select>
+                          <SelectTrigger
+                            id={`mcp-action-${entry.index}`}
+                            className="w-full"
+                          >
+                            <SelectValue />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="CREATE">
+                              {t("createNew")}
+                            </SelectItem>
+                            <SelectItem value="REPLACE">
+                              {t("replaceExisting")}
+                            </SelectItem>
+                            <SelectItem value="SKIP">{t("skip")}</SelectItem>
+                          </SelectContent>
+                        </Select>
                       </div>
                       {action === "REPLACE" ? (
                         <div className="space-y-2">
                           <Label htmlFor={`mcp-target-${entry.index}`}>
                             {t("replaceTarget")}
                           </Label>
-                          <select
-                            id={`mcp-target-${entry.index}`}
-                            className={selectClassName}
-                            value={decision?.targetId ?? ""}
-                            onChange={(event) =>
+                          <Select
+                            disabled={busy}
+                            value={decision?.targetId ?? UNSELECTED}
+                            onValueChange={(value) =>
                               decide(entry.index, {
-                                targetId: event.target.value || undefined,
+                                targetId:
+                                  value === UNSELECTED ? undefined : value,
                               })
                             }
                           >
-                            <option value="">{t("choosePreset")}</option>
-                            {presets.map((preset) => (
-                              <option key={preset.id} value={preset.id}>
-                                {preset.name}
-                              </option>
-                            ))}
-                          </select>
+                            <SelectTrigger
+                              id={`mcp-target-${entry.index}`}
+                              className="w-full"
+                            >
+                              <SelectValue />
+                            </SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value={UNSELECTED}>
+                                {t("choosePreset")}
+                              </SelectItem>
+                              {presets.map((preset) => (
+                                <SelectItem key={preset.id} value={preset.id}>
+                                  {preset.name}
+                                </SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
                         </div>
                       ) : (
                         action === "CREATE" && (
@@ -535,15 +672,19 @@ export function McpPresetImportDialog({
                         {message}
                       </p>
                     ))}
-                    <details>
-                      <summary className="cursor-pointer text-sm">
-                        {t("reviewDetails")}
-                      </summary>
-                      <pre className="mt-2 max-h-48 overflow-auto whitespace-pre-wrap rounded-md bg-muted p-3 text-xs">
-                        {presetDetails(document, entry.index)}
-                      </pre>
-                    </details>
-                  </div>
+                    <Accordion type="single" collapsible>
+                      <AccordionItem value="details">
+                        <AccordionTrigger>
+                          {t("reviewDetails")}
+                        </AccordionTrigger>
+                        <AccordionContent>
+                          <pre className="mt-2 max-h-48 overflow-auto whitespace-pre-wrap rounded-md bg-muted p-3 text-xs">
+                            {presetDetails(document, entry.index)}
+                          </pre>
+                        </AccordionContent>
+                      </AccordionItem>
+                    </Accordion>
+                  </Card>
                 );
               })}
             </div>

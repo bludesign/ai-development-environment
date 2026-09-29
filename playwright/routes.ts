@@ -44,6 +44,7 @@ export type RouteEntry = {
   /** Capture the global focus menu after its catalog has loaded. */
   activeAgentMenu?: boolean;
   mcpImportReview?: boolean;
+  mcpAiPrompt?: boolean;
 };
 
 export const routes: RouteEntry[] = [
@@ -359,6 +360,13 @@ export const routes: RouteEntry[] = [
     path: "/tools",
     readyTexts: ["Core Tools"],
     mcpImportReview: true,
+  },
+  {
+    name: "tools-preset-ai-prompt",
+    path: "/tools",
+    readyTexts: ["Core Tools"],
+    clickButton: "Import presets",
+    mcpAiPrompt: true,
   },
 
   // Workflows

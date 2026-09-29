@@ -3642,6 +3642,7 @@
     "importTitle": "Importer des préréglages MCP",
     "importDescription": "Choisissez un fichier JSON ou collez celui généré par une IA. Vérifiez les conflits et associez les outils externes aux serveurs configurés. Modifiez le JSON pour retirer des outils.",
     "chooseFile": "Fichier JSON des préréglages",
+    "dropJsonFile": "Déposez un fichier JSON ici ou cliquez pour le sélectionner.",
     "pasteJson": "JSON des préréglages",
     "reviewAgain": "La sélection a changé. Vérifiez-la à nouveau avant l’import.",
     "mapServer": "Associer {name} à un serveur configuré",
@@ -3657,7 +3658,16 @@
     "choosePreset": "Choisir un préréglage",
     "reviewDetails": "Vérifier les outils et paramètres demandés",
     "reviewImport": "Vérifier l’import",
-    "importReviewed": "Importer les préréglages vérifiés"
+    "importReviewed": "Importer les préréglages vérifiés",
+    "aiPromptTitle": "Consigne pour créer des préréglages avec une IA",
+    "aiPromptHelp": "Copiez cette consigne, décrivez votre objectif et joignez un catalogue d’outils exporté. Collez la réponse JSON de l’IA ci-dessous pour la vérifier.",
+    "aiPromptText": "Consigne IA de génération de préréglages",
+    "copyAiPrompt": "Copier la consigne IA",
+    "aiPromptCopyFailed": "Impossible de copier la consigne. Sélectionnez-la et copiez-la manuellement.",
+    "aiPromptExample": "Exemple de document (utilisez uniquement les outils du catalogue joint) :",
+    "aiPromptSchema": "Schéma JSON requis :",
+    "aiPromptInstructions": "Créez des préréglages d’outils MCP pour cet objectif : [décrivez votre tâche et ses contraintes].\n\nJe joindrai un catalogue d’outils exporté d’AI Development Environment. Utilisez ses références exactes, descriptions, schémas et indications de risque pour choisir la plus petite sélection d’outils utile. Renvoyez un seul document JSON conforme au schéma ci-dessous, avec format \"aide.mcp-presets.export\" et schemaVersion 1. Renvoyez uniquement du JSON, sans blocs Markdown ni commentaires.\n\nIncluez les noms des préréglages, leurs descriptions, un iconKey pris en charge, enabledForPlans, enabledForSessions et des tools explicites. Les références intégrées utilisent source \"BUILTIN\" et name. Les références externes utilisent source \"EXTERNAL\", le serverKey du catalogue et le nom original exact de l’outil. Incluez les entrées externalServers correspondantes avec des clés propres au document ; utilisez un tableau vide pour les préréglages entièrement intégrés. N’incluez jamais d’URL de serveur, d’identifiants de connexion, d’en-têtes, d’ID locaux, d’arguments d’appel ou de nouvelles configurations de serveur. N’inventez pas d’outils et ne répétez pas de références. Limitez le document à 100 préréglages et 2 MiB. Je vérifierai les conflits et associerai les serveurs externes aux serveurs configurés avant l’importation.",
+    "aiPromptCopied": "Consigne copiée"
   },
   "tools": {
     "title": "Outils",

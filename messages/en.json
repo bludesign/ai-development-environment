@@ -3642,6 +3642,7 @@
     "importTitle": "Import MCP presets",
     "importDescription": "Choose a JSON file or paste AI-generated preset JSON. Review conflicts and map external tools to configured servers before importing. Edit the JSON to remove unwanted tools.",
     "chooseFile": "Preset JSON file",
+    "dropJsonFile": "Drop a JSON file here or click to browse.",
     "pasteJson": "Preset JSON",
     "reviewAgain": "Selections changed. Review again before importing.",
     "mapServer": "Map {name} to a configured server",
@@ -3657,7 +3658,16 @@
     "choosePreset": "Choose a preset",
     "reviewDetails": "Review requested tools and settings",
     "reviewImport": "Review import",
-    "importReviewed": "Import reviewed presets"
+    "importReviewed": "Import reviewed presets",
+    "aiPromptTitle": "Prompt for an AI to create presets",
+    "aiPromptHelp": "Copy this prompt, describe your goal, and attach an exported tool catalog. Paste the AI’s JSON response below to review it.",
+    "aiPromptText": "AI preset generation prompt",
+    "copyAiPrompt": "Copy AI prompt",
+    "aiPromptCopyFailed": "Could not copy the prompt. Select and copy it manually.",
+    "aiPromptExample": "Example document (use only tools present in the attached catalog):",
+    "aiPromptSchema": "Required JSON Schema:",
+    "aiPromptInstructions": "Create MCP tool presets for this goal: [describe your task and constraints].\n\nI will attach an exported AI Development Environment tool catalog. Use its exact tool references, descriptions, schemas, and risk annotations to choose the smallest useful tool selection. Return a single JSON document matching the schema below, with format \"aide.mcp-presets.export\" and schemaVersion 1. Return JSON only, without Markdown fences or commentary.\n\nInclude preset names, descriptions, a supported iconKey, enabledForPlans, enabledForSessions, and explicit tools. Built-in references use source \"BUILTIN\" and name. External references use source \"EXTERNAL\", serverKey from the catalog, and the exact upstream name. Include the matching document-local externalServers entries; use an empty array for built-in-only presets. Never include server URLs, credentials, headers, local IDs, invocation arguments, or new server configurations. Do not invent tools or repeat references. Limit the document to 100 presets and 2 MiB. I will review conflicts and map external servers to configured servers before importing.",
+    "aiPromptCopied": "Prompt copied"
   },
   "tools": {
     "title": "Tools",

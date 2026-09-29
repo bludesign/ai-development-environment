@@ -112,6 +112,17 @@ test.describe("app screenshots", () => {
         await page.getByRole("button", { name: route.clickButton }).click();
         await page.getByRole("dialog").waitFor({ state: "visible" });
       }
+      if (route.mcpAiPrompt) {
+        await page
+          .getByRole("button", {
+            name: "Prompt for an AI to create presets",
+            exact: true,
+          })
+          .click();
+        await page
+          .getByLabel("AI preset generation prompt", { exact: true })
+          .waitFor({ state: "visible" });
+      }
       if (route.mcpImportReview) {
         await page
           .getByRole("button", { name: "Import presets", exact: true })
