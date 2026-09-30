@@ -56,6 +56,20 @@ function textParts(parts: Record<string, unknown>[]): string {
     .join("\n\n");
 }
 
+function userPrompt(parts: Record<string, unknown>[]): string {
+  const originalParts = parts.filter((part) => part.synthetic !== true);
+  return (
+    textParts(originalParts) ||
+    originalParts
+      .filter(
+        (part) => part.type === "subtask" && typeof part.prompt === "string",
+      )
+      .map((part) => String(part.prompt).trim())
+      .filter(Boolean)
+      .join("\n\n")
+  );
+}
+
 /** Project native v2 content into the envelopes used by the activity renderer. */
 function nativePart(value: unknown): Record<string, unknown> {
   const part = asRecord(value);
@@ -161,7 +175,8 @@ export function opencodeImportedHistory(
       parts.push({
         id: "text",
         type: "text",
-        text: original.text ?? original.summary,
+        text:
+          role === "user" ? original.text : (original.text ?? original.summary),
       });
     if (!legacy && role === "shell")
       parts.push({
@@ -216,7 +231,7 @@ export function opencodeImportedHistory(
         typeof asRecord(original.model).variant === "string"
           ? String(asRecord(original.model).variant)
           : undefined;
-      if (role === "user" && !prompt) prompt = textParts(parts) || undefined;
+      if (role === "user" && !prompt) prompt = userPrompt(parts) || undefined;
     }
     if (role !== "assistant") continue;
     const actualModel =

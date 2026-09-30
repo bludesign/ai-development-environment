@@ -127,6 +127,7 @@ describe("OpenCode history discovery", () => {
       model: "anthropic/claude",
       usage: [{ inputTokens: 30, estimatedCost: 0.1 }],
     });
+    expect(results[1]?.prompt).toBeUndefined();
     expect(client.v2.session.list).toHaveBeenLastCalledWith(
       { directory: "/workspace", limit: 200, cursor: "sessions-next" },
       { throwOnError: true },
@@ -192,11 +193,13 @@ describe("OpenCode history discovery", () => {
     client.session.status.mockResolvedValue({
       data: { "session-1": { type: "retry" } },
     } as never);
-    expect((await new OpenCodeAdapter().discover(worktrees))[0]).toMatchObject({
+    const [run] = await new OpenCodeAdapter().discover(worktrees);
+    expect(run).toMatchObject({
       nativeId: "session-1",
       status: "IN_PROGRESS",
       events: [],
     });
+    expect(run?.prompt).toBeUndefined();
   });
 
   test("hydrates legacy transcripts exposed by the v2 session list using supported page sizes", async () => {
@@ -337,6 +340,7 @@ describe("OpenCode history discovery", () => {
       expect(runs[1]?.events).toBeUndefined();
       expect(runs[1]?.usage).toBeUndefined();
       expect(runs[1]?.model).toBeUndefined();
+      expect(runs[1]?.prompt).toBeUndefined();
       expect(warning).toHaveBeenCalledWith(
         expect.stringContaining("unavailable: History unavailable"),
       );

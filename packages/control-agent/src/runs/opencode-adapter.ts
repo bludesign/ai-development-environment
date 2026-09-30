@@ -1020,10 +1020,7 @@ export class OpenCodeAdapter implements ProviderAdapter {
           status: active ? "IN_PROGRESS" : (history.status ?? "COMPLETED"),
           archived: Boolean(time.archived),
           model: history.model,
-          prompt:
-            history.prompt ??
-            firstString(session.title) ??
-            "Imported OpenCode session",
+          prompt: history.prompt,
           branch: worktree.branch || undefined,
           createdAt: opencodeTimestamp(time.created),
           updatedAt: opencodeTimestamp(time.updated),

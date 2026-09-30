@@ -15,6 +15,7 @@ function database(origin = "IMPORTED") {
       id: "run-1",
       origin,
       model: "unknown",
+      initialPrompt: "Generated conversation title",
       effort: "high",
       finalOutput: "Previous answer",
     },
@@ -138,6 +139,45 @@ describe("imported run history", () => {
     expect(transaction.runModelUsage.deleteMany).toHaveBeenCalledTimes(2);
   });
 
+  test("backfills the displayed prompt and initial input even when the history is unchanged", async () => {
+    const { transaction, prisma } = database();
+    const service = new RunsService();
+    await service.importRuns("agent-1", "OPENCODE", [record]);
+    await service.importRuns("agent-1", "OPENCODE", [
+      {
+        ...record,
+        prompt: "  Original user prompt.\n\nInclude all details.  ",
+      },
+    ]);
+    expect(prisma.agentRun.update).toHaveBeenLastCalledWith({
+      where: { id: "run-1" },
+      data: expect.objectContaining({
+        initialPrompt: "Original user prompt.\n\nInclude all details.",
+        inputs: {
+          updateMany: {
+            where: { kind: "INITIAL", sequence: 0 },
+            data: { prompt: "Original user prompt.\n\nInclude all details." },
+          },
+        },
+      }),
+    });
+    expect(transaction.runEvent.createMany).toHaveBeenCalledTimes(1);
+    expect(transaction.runModelUsage.create).toHaveBeenCalledTimes(1);
+  });
+
+  test.each([undefined, null, " \n "])(
+    "preserves the previous prompt when the imported prompt is missing or blank (%s)",
+    async (prompt) => {
+      const { prisma } = database();
+      await new RunsService().importRuns("agent-1", "OPENCODE", [
+        { nativeId: "native-1", worktreeId: "worktree-1", prompt },
+      ]);
+      const data = prisma.agentRun.update.mock.calls[0]![0].data;
+      expect(data).not.toHaveProperty("initialPrompt");
+      expect(data).not.toHaveProperty("inputs");
+    },
+  );
+
   test("imports a new session and retains histories longer than one event batch", async () => {
     const { prisma, transaction } = database();
     prisma.runAttempt.findUnique.mockResolvedValue(null as never);
@@ -167,11 +207,24 @@ describe("imported run history", () => {
       summary: `Message ${sequence}`,
     }));
     await expect(
-      new RunsService().importRuns("agent-1", "CODEX", [{ ...record, events }]),
+      new RunsService().importRuns("agent-1", "CODEX", [
+        { ...record, events, prompt: "Original prompt" },
+      ]),
     ).resolves.toBe(1);
     expect(create).toHaveBeenCalledWith(
       expect.objectContaining({
-        data: expect.objectContaining({ model: "model-a", origin: "IMPORTED" }),
+        data: expect.objectContaining({
+          model: "model-a",
+          origin: "IMPORTED",
+          initialPrompt: "Original prompt",
+          inputs: {
+            create: expect.objectContaining({
+              kind: "INITIAL",
+              sequence: 0,
+              prompt: "Original prompt",
+            }),
+          },
+        }),
       }),
     );
     expect(
@@ -201,7 +254,9 @@ describe("imported run history", () => {
 
   test("leaves managed run history untouched", async () => {
     const { transaction, prisma } = database("MANAGED");
-    await new RunsService().importRuns("agent-1", "CODEX", [record]);
+    await new RunsService().importRuns("agent-1", "OPENCODE", [
+      { ...record, prompt: "Imported prompt" },
+    ]);
     expect(transaction.runEvent.deleteMany).not.toHaveBeenCalled();
     expect(prisma.agentRun.update).not.toHaveBeenCalled();
   });

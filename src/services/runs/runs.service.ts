@@ -2943,6 +2943,7 @@ export class RunsService {
     const prisma = await getPrismaClient();
     let imported = 0;
     for (const record of records) {
+      const prompt = record.prompt?.trim() || undefined;
       const nativeKey = `${agentId}:${provider}:${requiredText(record.nativeId, "Native ID", 500)}`;
       const historyDigest =
         record.events || record.usage || record.estimatedCost !== undefined
@@ -3018,6 +3019,17 @@ export class RunsService {
                 phase: collision
                   ? "IMPORTED_ACTIVE_COLLISION"
                   : "IMPORTED_SYNCED",
+                ...(prompt
+                  ? {
+                      initialPrompt: prompt,
+                      inputs: {
+                        updateMany: {
+                          where: { kind: "INITIAL", sequence: 0 },
+                          data: { prompt },
+                        },
+                      },
+                    }
+                  : {}),
                 model: record.model || existing.run.model,
                 effort:
                   record.effort === undefined
@@ -3096,7 +3108,7 @@ export class RunsService {
           model: record.model || "unknown",
           effort: optionalText(record.effort, 100),
           worktreeConcurrencyLimit: worktreeConcurrencyLimit(kind, undefined),
-          initialPrompt: record.prompt?.trim() || "Imported provider history",
+          initialPrompt: prompt ?? "Imported provider history",
           finalOutput: optionalText(record.finalOutput, 2_000_000),
           archivedAt: record.archived ? new Date() : null,
           nativeArchivedAt: record.archived ? new Date() : null,
@@ -3118,7 +3130,7 @@ export class RunsService {
               id: randomUUID(),
               sequence: 0,
               kind: "INITIAL",
-              prompt: record.prompt?.trim() || "Imported provider history",
+              prompt: prompt ?? "Imported provider history",
             },
           },
         },

@@ -25,6 +25,83 @@ const assistant = (id: string, model: string, created: number) => ({
 });
 
 describe("OpenCode imported snapshots", () => {
+  test("uses the first original user message instead of summaries or synthetic context", () => {
+    const result = opencodeImportedHistory(
+      { ...session, title: "Generated conversation title" },
+      [
+        {
+          info: { id: "followup", role: "user", time: { created: 3_000 } },
+          parts: [{ type: "text", text: "A later prompt" }],
+        },
+        {
+          info: { id: "resume", role: "user", time: { created: 500 } },
+          parts: [{ type: "text", synthetic: true, text: "Chat summary" }],
+        },
+        {
+          info: {
+            id: "user",
+            role: "user",
+            time: { created: 1_000 },
+            summary: { title: "Generated title", body: "Generated summary" },
+          },
+          parts: [
+            { id: "prompt", type: "text", text: "  Fix the imports.  " },
+            {
+              id: "context",
+              type: "text",
+              synthetic: true,
+              text: "File context",
+            },
+            {
+              id: "details",
+              type: "text",
+              text: "Keep the original prompt.\nInclude details.",
+            },
+          ],
+        },
+      ],
+    );
+    expect(result.prompt).toBe(
+      "Fix the imports.\n\nKeep the original prompt.\nInclude details.",
+    );
+    expect(
+      result.events?.find((event) => event.id === "user:part:context")
+        ?.detailMarkdown,
+    ).toBe("File context");
+  });
+
+  test("reads the full prompt from legacy subtask messages", () => {
+    const result = opencodeImportedHistory(session, [
+      {
+        info: { id: "user", role: "user", time: { created: 1_000 } },
+        parts: [
+          {
+            type: "subtask",
+            prompt: "Review the changes.\nExplain each issue.",
+            description: "Short review summary",
+            command: "review",
+          },
+        ],
+      },
+    ]);
+    expect(result.prompt).toBe("Review the changes.\nExplain each issue.");
+  });
+
+  test("does not substitute a native user summary when the original text is missing", () => {
+    const result = opencodeImportedHistory(
+      { ...session, title: "Generated conversation title" },
+      [
+        {
+          id: "user",
+          type: "user",
+          summary: "Generated summary",
+          time: { created: 1_000 },
+        },
+      ],
+    );
+    expect(result.prompt).toBeUndefined();
+  });
+
   test("keeps whitespace-only provider parts from invalidating the import batch", () => {
     const history = opencodeImportedHistory(session, [
       {
