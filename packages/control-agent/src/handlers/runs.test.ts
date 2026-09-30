@@ -51,6 +51,18 @@ describe("session file resolution", () => {
     await expect(findCodexSessionFile("019f-other", home)).resolves.toBeNull();
   });
 
+  test("finds archived rollouts in a custom Codex home", async () => {
+    const home = await makeHome();
+    const codexHome = join(home, "custom-codex");
+    const archive = join(codexHome, "archived_sessions");
+    await mkdir(archive, { recursive: true });
+    const file = join(archive, "rollout-date-thread-1.jsonl");
+    await writeFile(file, "{}\n");
+    await expect(
+      findCodexSessionFile("thread-1", home, codexHome),
+    ).resolves.toBe(file);
+  });
+
   test("returns null when the session directories do not exist", async () => {
     const home = await makeHome();
     await expect(findClaudeSessionFile("any", home)).resolves.toBeNull();

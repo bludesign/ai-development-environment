@@ -117,6 +117,8 @@ export type ProviderImportedRun = {
   createdAt?: string;
   updatedAt?: string;
   rawMetadata?: unknown;
+  events?: Array<ProviderEvent & { id: string; sequence: number }>;
+  usage?: ProviderUsage[];
 };
 
 export interface ProviderAdapter {

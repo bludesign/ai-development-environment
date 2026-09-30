@@ -2,7 +2,7 @@ import { workflowQueueUsesWorktree } from "@/services/workflows/workflow-queue-s
 import { filterAsyncIterator } from "@/lib/filter-async-iterator";
 import "server-only";
 
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 
 import type { Prisma } from "@/generated/prisma/client";
 import type { McpToolSnapshot } from "@/services/tools/types";
@@ -124,6 +124,8 @@ export type ImportedRunInput = {
   createdAt?: string | null;
   updatedAt?: string | null;
   rawMetadata?: unknown;
+  events?: RunEventInput[] | null;
+  usage?: Array<Parameters<RunsService["reportUsage"]>[3]> | null;
 };
 
 function enumValue<T extends readonly string[]>(
@@ -2743,6 +2745,137 @@ export class RunsService {
     return this.get(runIds.replacementRunId);
   }
 
+  /** Replace imported snapshots atomically; managed runs never enter this path. */
+  private async importHistory(
+    runId: string,
+    attemptId: string,
+    record: ImportedRunInput,
+  ) {
+    const prisma = await getPrismaClient();
+    await prisma.$transaction(async (transaction) => {
+      if (record.events) {
+        const events = record.events.map((event, sequence) => ({
+          id: `${attemptId}:import:${event.id}`,
+          runId,
+          attemptId,
+          sequence,
+          type: requiredText(event.type, "Event type", 100).toUpperCase(),
+          summary: requiredText(event.summary, "Event summary", 2_000),
+          searchText: (
+            event.searchText ?? JSON.stringify(event.raw ?? event.summary)
+          ).slice(0, 100_000),
+          detailMarkdown: event.detailMarkdown?.slice(0, 500_000) ?? null,
+          rawJson: event.raw === undefined ? null : JSON.stringify(event.raw),
+          createdAt:
+            parseDate(event.createdAt) ??
+            parseDate(record.createdAt) ??
+            new Date(),
+        }));
+        await transaction.runToolCall.deleteMany({
+          where: { runId, attemptId },
+        });
+        await transaction.runEvent.deleteMany({ where: { runId, attemptId } });
+        for (let offset = 0; offset < events.length; offset += 500) {
+          await transaction.runEvent.createMany({
+            data: events.slice(offset, offset + 500),
+          });
+        }
+        const toolCalls = events.flatMap((event) => {
+          const raw = event.rawJson ? JSON.parse(event.rawJson) : {};
+          const item = raw.params?.item;
+          if (
+            !item ||
+            ![
+              "commandExecution",
+              "fileChange",
+              "mcpToolCall",
+              "dynamicToolCall",
+              "webSearch",
+            ].includes(item.type)
+          )
+            return [];
+          return [
+            {
+              id: `event:${event.id}`,
+              runId,
+              attemptId,
+              sequence: event.sequence,
+              name: item.tool ?? item.command ?? item.type,
+              status: String(item.status ?? "COMPLETED").toUpperCase(),
+              inputJson: event.rawJson,
+              outputJson: JSON.stringify(
+                item.result ?? item.aggregatedOutput ?? null,
+              ),
+              error: item.error ? JSON.stringify(item.error) : null,
+              startedAt: event.createdAt,
+              finishedAt: event.createdAt,
+            },
+          ];
+        });
+        for (let offset = 0; offset < toolCalls.length; offset += 500) {
+          await transaction.runToolCall.createMany({
+            data: toolCalls.slice(offset, offset + 500),
+          });
+        }
+        await transaction.agentRun.update({
+          where: { id: runId },
+          data: {
+            toolCallCount: await transaction.runToolCall.count({
+              where: { runId },
+            }),
+          },
+        });
+      }
+      if (record.usage) {
+        await transaction.runModelUsage.deleteMany({
+          where: { runId, attemptId },
+        });
+        for (const usage of record.usage) {
+          const numeric = (value?: number | null) =>
+            Number.isFinite(value) && (value ?? 0) >= 0
+              ? Math.floor(value!)
+              : 0;
+          await transaction.runModelUsage.create({
+            data: {
+              id: randomUUID(),
+              runId,
+              attemptId,
+              model: requiredText(usage.model, "Model", 500),
+              inputTokens: numeric(usage.inputTokens),
+              outputTokens: numeric(usage.outputTokens),
+              reasoningTokens: numeric(usage.reasoningTokens),
+              cacheReadTokens: numeric(usage.cacheReadTokens),
+              cacheWriteTokens: numeric(usage.cacheWriteTokens),
+              estimatedCost: usage.estimatedCost ?? null,
+            },
+          });
+        }
+        const totals = await transaction.runModelUsage.aggregate({
+          where: { runId },
+          _sum: {
+            inputTokens: true,
+            outputTokens: true,
+            reasoningTokens: true,
+            cacheReadTokens: true,
+            cacheWriteTokens: true,
+          },
+        });
+        await transaction.agentRun.update({
+          where: { id: runId },
+          data: {
+            inputTokens: totals._sum.inputTokens ?? 0,
+            outputTokens: totals._sum.outputTokens ?? 0,
+            reasoningTokens: totals._sum.reasoningTokens ?? 0,
+            cacheReadTokens: totals._sum.cacheReadTokens ?? 0,
+            cacheWriteTokens: totals._sum.cacheWriteTokens ?? 0,
+            pricingSource: "codex-transcript",
+            pricingUpdatedAt: new Date(),
+          },
+        });
+      }
+    });
+  }
+
   async importRuns(
     agentId: string,
     providerValue: string,
@@ -2753,6 +2886,20 @@ export class RunsService {
     let imported = 0;
     for (const record of records) {
       const nativeKey = `${agentId}:${provider}:${requiredText(record.nativeId, "Native ID", 500)}`;
+      const historyDigest =
+        record.events || record.usage
+          ? createHash("sha256")
+              .update(JSON.stringify([record.events, record.usage]))
+              .digest("hex")
+          : undefined;
+      const metadata =
+        record.rawMetadata && typeof record.rawMetadata === "object"
+          ? record.rawMetadata
+          : {};
+      const rawMetadataJson = JSON.stringify({
+        ...metadata,
+        ...(historyDigest ? { importedHistoryDigest: historyDigest } : {}),
+      });
       const importedStatus = (() => {
         const value = record.status?.toUpperCase() ?? "COMPLETED";
         if (
@@ -2776,6 +2923,7 @@ export class RunsService {
       });
       if (existing) {
         if (existing.run.origin === "IMPORTED") {
+          const previousMetadata = JSON.parse(existing.rawMetadataJson ?? "{}");
           const collision =
             existing.run.kind === "SESSION" && importedStatus === "IN_PROGRESS"
               ? await prisma.worktreeRunLease.findFirst({
@@ -2793,7 +2941,9 @@ export class RunsService {
             prisma.runAttempt.update({
               where: { id: existing.id },
               data: {
-                rawMetadataJson: JSON.stringify(record.rawMetadata ?? {}),
+                rawMetadataJson: historyDigest
+                  ? JSON.stringify(metadata)
+                  : rawMetadataJson,
               },
             }),
             prisma.agentRun.update({
@@ -2804,8 +2954,14 @@ export class RunsService {
                   ? "IMPORTED_ACTIVE_COLLISION"
                   : "IMPORTED_SYNCED",
                 model: record.model || existing.run.model,
-                effort: optionalText(record.effort, 100),
-                finalOutput: optionalText(record.finalOutput, 2_000_000),
+                effort:
+                  record.effort === undefined
+                    ? existing.run.effort
+                    : optionalText(record.effort, 100),
+                finalOutput:
+                  record.finalOutput === undefined
+                    ? existing.run.finalOutput
+                    : optionalText(record.finalOutput, 2_000_000),
                 branch: record.branch ?? existing.run.branch,
                 jiraIssueKey: optionalJiraIssueKey(record.jiraIssueKey),
                 nativeArchivedAt: record.archived ? new Date() : null,
@@ -2818,6 +2974,17 @@ export class RunsService {
               },
             }),
           ]);
+          if (
+            historyDigest &&
+            previousMetadata.importedHistoryDigest !== historyDigest
+          ) {
+            await this.importHistory(existing.runId, existing.id, record);
+          }
+          if (historyDigest)
+            await prisma.runAttempt.update({
+              where: { id: existing.id },
+              data: { rawMetadataJson },
+            });
           publishRun(existing.runId);
         }
         continue;
@@ -2845,6 +3012,7 @@ export class RunsService {
         nextDisplayNumber(transaction, kind),
       );
       const id = randomUUID();
+      const attemptId = randomUUID();
       await prisma.agentRun.create({
         data: {
           id,
@@ -2872,12 +3040,12 @@ export class RunsService {
           createdAt: parseDate(record.createdAt),
           attempts: {
             create: {
-              id: randomUUID(),
+              id: attemptId,
               generation: 0,
               nativeId: record.nativeId,
               nativeKey,
               status: "IMPORTED",
-              rawMetadataJson: JSON.stringify(record.rawMetadata ?? {}),
+              rawMetadataJson: JSON.stringify(metadata),
             },
           },
           inputs: {
@@ -2890,6 +3058,13 @@ export class RunsService {
           },
         },
       });
+      if (historyDigest) {
+        await this.importHistory(id, attemptId, record);
+        await prisma.runAttempt.update({
+          where: { id: attemptId },
+          data: { rawMetadataJson },
+        });
+      }
       publishRun(id);
       imported += 1;
     }

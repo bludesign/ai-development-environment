@@ -793,9 +793,11 @@ export function RunsPage({
                           className="text-right"
                           title={t("estimatedCost")}
                         >
-                          {run.estimatedCost === null
+                          {(run.estimatedCost ?? run.catalogCost) == null
                             ? "—"
-                            : currency.format(run.estimatedCost)}
+                            : currency.format(
+                                (run.estimatedCost ?? run.catalogCost)!,
+                              )}
                         </TableCell>
                         <TableCell>
                           <div

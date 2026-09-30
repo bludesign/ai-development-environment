@@ -88,6 +88,28 @@ afterEach(() => {
 });
 
 describe("RunsPage", () => {
+  test("shows the catalog estimate when imported sessions have no reported cost", async () => {
+    request.mockResolvedValue({
+      agentRuns: {
+        items: [
+          {
+            ...run("imported", 1, "COMPLETED", timestamp),
+            origin: "IMPORTED",
+            catalogCost: 1.25,
+          },
+        ],
+        nextCursor: null,
+        totalCount: 1,
+      },
+    } as never);
+    render(
+      <TooltipProvider>
+        <RunsPage kind="SESSION" />
+      </TooltipProvider>,
+    );
+    expect(await screen.findByRole("cell", { name: "$1.25" })).toBeDefined();
+  });
+
   test.each(["PLAN", "SESSION"] as const)(
     "shows active %s rows before newer completed rows",
     async (kind) => {

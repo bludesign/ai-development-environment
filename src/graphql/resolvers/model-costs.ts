@@ -23,7 +23,7 @@ type UsageRow = {
   cacheWriteTokens: number;
 };
 
-type RunRow = UsageRow & { modelUsage?: UsageRow[] };
+type RunRow = UsageRow & { origin?: string; modelUsage?: UsageRow[] };
 
 export const createModelCostResolvers = (service: ModelCostsService) => ({
   AgentRun: {
@@ -34,14 +34,27 @@ export const createModelCostResolvers = (service: ModelCostsService) => ({
      * imported run without usage rows carries.
      */
     catalogCost: async (value: RunRow) => {
+      // An imported model name alone does not establish zero-cost usage.
+      if (value.origin === "IMPORTED" && !value.modelUsage?.length) return null;
       await service.ensureFresh();
-      const rows = value.modelUsage?.length ? value.modelUsage : [value];
+      const rows = value.modelUsage?.length
+        ? value.modelUsage.filter((row) => row.model !== "estimated-total")
+        : [value];
       const prices = await service.lookup(rows.map(({ model }) => model));
       let total = 0;
       let priced = false;
       for (const row of rows) {
         const cost = service.estimate(prices.get(row.model), row);
-        if (cost === null) continue;
+        if (cost === null) {
+          if (
+            row.inputTokens ||
+            row.outputTokens ||
+            row.cacheReadTokens ||
+            row.cacheWriteTokens
+          )
+            return null;
+          continue;
+        }
         total += cost;
         priced = true;
       }
