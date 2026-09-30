@@ -401,11 +401,19 @@ test("gitlab comments shows human conversations with filters and remembered layo
   await expect(
     page.getByRole("button", { name: "Refresh", exact: true }),
   ).toBeEnabled();
+  await page.mouse.move(0, 0);
+  await page.evaluate(async () => {
+    await document.fonts.ready;
+    await new Promise<void>((resolve) =>
+      requestAnimationFrame(() => requestAnimationFrame(() => resolve())),
+    );
+  });
   await mkdir(`screenshots/${info.project.name}`, { recursive: true });
   await page.screenshot({
     animations: "disabled",
     path: `screenshots/${info.project.name}/gitlab-comments-table.png`,
     fullPage: true,
+    style: "*, *::before, *::after { transition: none !important; }",
   });
   await page.getByRole("radio", { name: "Card layout", exact: true }).click();
   await page
