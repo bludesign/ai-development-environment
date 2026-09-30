@@ -77,6 +77,67 @@ test("global focus survives navigation and reload, then restores each page filte
   });
   await expect(usageAgent).toBeDisabled();
   await expect(usageAgent).toHaveText("Build Mac");
+  if (test.info().project.name.startsWith("desktop")) {
+    await expect
+      .poll(async () => {
+        const [agentBox, rangeBox] = await Promise.all([
+          usageAgent.boundingBox(),
+          page.getByRole("tablist", { name: "Usage range" }).boundingBox(),
+        ]);
+        if (!agentBox || !rangeBox) return Number.POSITIVE_INFINITY;
+        return Math.abs(agentBox.y - rangeBox.y);
+      })
+      .toBeLessThanOrEqual(1);
+    await page.screenshot({
+      path: test.info().outputPath("usage-active-agent.png"),
+    });
+  }
+  for (const route of ["commands", "workflows", "plans", "sessions"]) {
+    const queryName =
+      route === "commands"
+        ? "CommandManagement"
+        : route === "workflows"
+          ? "WorkflowManagement"
+          : "AgentRuns";
+    const response = page.waitForResponse((response) => {
+      if (!response.url().endsWith("/api/graphql")) return false;
+      const request = response.request().postDataJSON();
+      return (
+        request?.query?.includes(`query ${queryName}`) &&
+        request.variables?.agentId === ids.agents.build
+      );
+    });
+    await page.goto(`/en/${route}`);
+    const filter = page.getByRole("combobox", {
+      name: "Filter by agent",
+      exact: true,
+    });
+    await expect(filter).toBeDisabled();
+    await expect(filter).toHaveText("Build Mac");
+    await expect(
+      page.getByText("Controlled by Active Agent", { exact: true }),
+    ).toBeVisible();
+    const body = await (await response).json();
+    expect(body.errors).toBeUndefined();
+    const runs =
+      route === "commands"
+        ? body.data.commandRuns.nodes
+        : route === "workflows"
+          ? body.data.workflowRuns.items
+          : body.data.agentRuns.items;
+    expect(
+      runs.every(
+        (run: { agentId?: string; agent?: { id: string } }) =>
+          (run.agentId ?? run.agent?.id) === ids.agents.build,
+      ),
+    ).toBe(true);
+    if (test.info().project.name.startsWith("desktop")) {
+      await page.screenshot({
+        path: test.info().outputPath(`${route}-active-agent.png`),
+      });
+    }
+  }
+  await page.goto("/en/usage");
   await page
     .getByRole("combobox", { name: "Active agent: Build Mac", exact: true })
     .click();

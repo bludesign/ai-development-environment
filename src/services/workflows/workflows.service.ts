@@ -1,4 +1,5 @@
 import { workflowQueueUsesWorktree } from "./workflow-queue-scope";
+import { workflowRunIdsForAgent } from "./workflow-run-agent-filter";
 import { filterAsyncIterator } from "@/lib/filter-async-iterator";
 import "server-only";
 
@@ -1603,6 +1604,7 @@ export class WorkflowsService {
   async runs(
     input: {
       workflowId?: string | null;
+      agentId?: string | null;
       status?: string | null;
       search?: string | null;
       archive?: string | null;
@@ -1620,9 +1622,13 @@ export class WorkflowsService {
         : archive === "ARCHIVED"
           ? { archivedAt: { not: null } }
           : { archivedAt: null };
+    const agentWhere = input.agentId
+      ? { id: { in: await workflowRunIdsForAgent(prisma, input.agentId) } }
+      : {};
     const items = await prisma.workflowRun.findMany({
       where: {
         ...archiveWhere,
+        ...agentWhere,
         ...(input.workflowId ? { workflowId: input.workflowId } : {}),
         ...(input.status ? { status: input.status.toUpperCase() } : {}),
         ...(Number.isInteger(searchNumber) && searchNumber > 0
@@ -1647,6 +1653,7 @@ export class WorkflowsService {
       totalCount: await prisma.workflowRun.count({
         where: {
           ...archiveWhere,
+          ...agentWhere,
           ...(input.workflowId ? { workflowId: input.workflowId } : {}),
         },
       }),

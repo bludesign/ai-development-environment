@@ -16,7 +16,7 @@ import {
   useActiveAgent,
   usePageAgentFilter,
 } from "@/components/active-agent/active-agent-provider";
-import { SearchableSelect } from "@/components/common/searchable-select";
+import { PageAgentFilter } from "@/components/active-agent/page-agent-filter";
 import { ConfirmationDialog } from "@/components/confirmation-dialog";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
@@ -192,7 +192,6 @@ export function UsagePage() {
   const [clearingHistory, setClearingHistory] = useState(false);
   const [reconcileVersion, setReconcileVersion] = useState(0);
   const globalAgent = useActiveAgent();
-  const activeAgentTranslations = useTranslations("activeAgent");
   const [selectedAgentId, setSelectedAgentId] = usePageAgentFilter(
     "usage",
     ALL_AGENTS,
@@ -229,21 +228,6 @@ export function UsagePage() {
     (record) => terminal(record.status) && record.status !== "SUCCEEDED",
   );
   const aggregateAgents = usageAgentOptions(usage);
-  const agentOptions = [
-    ...(globalAgent.activeAgentId &&
-    !aggregateAgents.some(({ value }) => value === globalAgent.activeAgentId)
-      ? [
-          {
-            value: globalAgent.activeAgentId,
-            label:
-              globalAgent.activeAgent?.name ??
-              activeAgentTranslations("unavailable"),
-          },
-        ]
-      : []),
-    { value: ALL_AGENTS, label: t("allAgents") },
-    ...aggregateAgents,
-  ];
   const localAgentId = aggregateAgents.some(
     ({ value }) => value === selectedAgentId,
   )
@@ -465,29 +449,18 @@ export function UsagePage() {
             {t("description")}
           </p>
         </div>
-        <div className="flex flex-wrap items-center gap-2">
+        <div className="flex flex-wrap items-start gap-2">
           {(aggregateAgents.length > 1 || globalAgent.activeAgentId) && (
-            <div className="w-full sm:w-64">
-              <SearchableSelect
-                disabled={Boolean(globalAgent.activeAgentId)}
-                ariaLabel={t("agentFilterLabel")}
-                emptyMessage={t("noAgentsFound")}
-                onValueChange={(nextAgentId) => {
-                  if (nextAgentId === selectedAgentId) return;
-                  viewVersionRef.current += 1;
-                  setSelectedAgentId(nextAgentId);
-                }}
-                options={agentOptions}
-                placeholder={t("allAgents")}
-                searchPlaceholder={t("searchAgents")}
-                value={activeAgentId ?? ALL_AGENTS}
-              />
-              {globalAgent.activeAgentId && (
-                <p className="mt-1 text-xs text-muted-foreground">
-                  {activeAgentTranslations("controlled")}
-                </p>
-              )}
-            </div>
+            <PageAgentFilter
+              ariaLabel={t("agentFilterLabel")}
+              onValueChange={(nextAgentId) => {
+                if (nextAgentId === selectedAgentId) return;
+                viewVersionRef.current += 1;
+                setSelectedAgentId(nextAgentId);
+              }}
+              options={aggregateAgents}
+              value={activeAgentId ?? ALL_AGENTS}
+            />
           )}
           <Tabs
             onValueChange={(value) => {

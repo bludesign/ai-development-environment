@@ -5496,6 +5496,8 @@
     "revokeDescription": "{name} widerrufen? Verwendende Clients verlieren sofort den Zugriff."
   },
   "activeAgent": {
+    "allAgents": "Alle Agenten",
+    "filterLabel": "Nach Agent filtern",
     "title": "Aktiver Agent",
     "none": "Keiner",
     "label": "Aktiver Agent: {name}",

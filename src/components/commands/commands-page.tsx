@@ -26,6 +26,14 @@ import {
   useState,
 } from "react";
 
+import {
+  useActiveAgent,
+  usePageAgentFilter,
+} from "@/components/active-agent/active-agent-provider";
+import {
+  ALL_PAGE_AGENTS,
+  PageAgentFilter,
+} from "@/components/active-agent/page-agent-filter";
 import { ConfirmationDialog } from "@/components/confirmation-dialog";
 import { DateTime } from "@/components/common/date-time";
 import { SelectAllCheckbox } from "@/components/common/select-all-checkbox";
@@ -99,6 +107,14 @@ const statusVariant = (status: string) =>
 
 export function CommandsPage() {
   const t = useTranslations("commands");
+  const globalAgent = useActiveAgent();
+  const [selectedAgentId, setSelectedAgentId] = usePageAgentFilter(
+    "commands",
+    ALL_PAGE_AGENTS,
+  );
+  const agentId =
+    globalAgent.activeAgentId ??
+    (selectedAgentId === ALL_PAGE_AGENTS ? null : selectedAgentId);
   const locale = useLocale();
   const router = useRouter();
   const [tab, setTab] = useState<"runs" | "definitions">("runs");
@@ -110,6 +126,11 @@ export function CommandsPage() {
   const [archive, setArchive] = useState("ACTIVE");
   const [editMode, setEditMode] = useState(false);
   const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [selectionAgentId, setSelectionAgentId] = useState(agentId);
+  if (selectionAgentId !== agentId) {
+    setSelectionAgentId(agentId);
+    setSelected(new Set());
+  }
   const [deleteIds, setDeleteIds] = useState<string[]>([]);
   const [deleteDefinitionIds, setDeleteDefinitionIds] = useState<string[]>([]);
   const fileRef = useRef<HTMLInputElement>(null);
@@ -124,6 +145,7 @@ export function CommandsPage() {
   const needsDefinitions = useRef(true);
   const load = useCallback(
     async (signal?: AbortSignal) => {
+      if (!globalAgent.ready) return;
       const includeDefinitions =
         needsDefinitions.current || !definitionsLoaded.current;
       needsDefinitions.current = false;
@@ -132,11 +154,15 @@ export function CommandsPage() {
           commandDefinitions?: CommandDefinition[];
           commandRuns: { nodes: CommandRun[] };
         }>(
-          `query CommandManagement($includeArchived: Boolean!, $includeDefinitions: Boolean!) {
+          `query CommandManagement($includeArchived: Boolean!, $includeDefinitions: Boolean!, $agentId: ID) {
           commandDefinitions(includeArchived: true) @include(if: $includeDefinitions) { ${COMMAND_DEFINITION_FIELDS} }
-          commandRuns(includeArchived: $includeArchived, first: 200) { nodes { ${COMMAND_RUN_FIELDS} } }
+          commandRuns(includeArchived: $includeArchived, agentId: $agentId, first: 200) { nodes { ${COMMAND_RUN_FIELDS} } }
         }`,
-          { includeArchived: archive !== "ACTIVE", includeDefinitions },
+          {
+            includeArchived: archive !== "ACTIVE",
+            includeDefinitions,
+            agentId,
+          },
           { signal },
         );
         if (signal?.aborted) return;
@@ -162,7 +188,7 @@ export function CommandsPage() {
         if (!signal?.aborted) setLoading(false);
       }
     },
-    [archive],
+    [agentId, globalAgent.ready, archive],
   );
   const refreshOwner = useRef<ReturnType<typeof createRefreshCoalescer> | null>(
     null,
@@ -508,7 +534,7 @@ export function CommandsPage() {
           </AlertDescription>
         </Alert>
       )}
-      <div className="flex flex-wrap items-center justify-between gap-3">
+      <div className="flex flex-wrap items-start justify-between gap-3">
         <Tabs
           value={tab}
           onValueChange={(value) => {
@@ -522,7 +548,7 @@ export function CommandsPage() {
             <TabsTrigger value="definitions">{t("definitions")}</TabsTrigger>
           </TabsList>
         </Tabs>
-        <div className="flex flex-wrap gap-2">
+        <div className="flex flex-wrap items-start gap-2">
           <div className="relative">
             <Search className="absolute top-2.5 left-2.5 size-4 text-muted-foreground" />
             <Input
@@ -532,6 +558,12 @@ export function CommandsPage() {
               placeholder={t("search")}
             />
           </div>
+          {tab === "runs" && (
+            <PageAgentFilter
+              onValueChange={setSelectedAgentId}
+              value={selectedAgentId}
+            />
+          )}
           {tab === "runs" && (
             <Select
               value={archive}

@@ -798,6 +798,8 @@ extend type Query {
     provider: String
     "The origin used to filter or perform the operation. Omit it to leave this dimension unfiltered."
     origin: RunOrigin
+    "Identifier of the agent. Omit it to leave this dimension unfiltered."
+    agentId: ID
     "Identifier of an app whose assigned repositories should scope the results."
     appId: ID
     "Maximum number of records to return. Defaults to `100`."

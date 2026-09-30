@@ -714,6 +714,8 @@ extend type Query {
   workflowRuns(
     "Identifier of the workflow. Omit it to leave this dimension unfiltered."
     workflowId: ID
+    "Identifier of the agent. Omit it to leave this dimension unfiltered."
+    agentId: ID
     "The status used to filter or perform the operation. Omit it to leave this dimension unfiltered."
     status: String
     "Text used to filter matching records. Omit it to leave this dimension unfiltered."

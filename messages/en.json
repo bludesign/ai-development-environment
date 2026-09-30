@@ -5496,6 +5496,8 @@
     "revokeDescription": "Revoke {name}? Clients using it will immediately lose access."
   },
   "activeAgent": {
+    "allAgents": "All agents",
+    "filterLabel": "Filter by agent",
     "title": "Active Agent",
     "none": "None",
     "label": "Active agent: {name}",
