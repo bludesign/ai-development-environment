@@ -866,6 +866,15 @@
       "FAILED": "Fehlgeschlagen",
       "OBSERVED": "Beobachtet"
     },
+    "toolCallTypes": {
+      "commandExecution": "Befehle",
+      "fileChange": "Dateiänderungen",
+      "mcpToolCall": "MCP-Aufrufe",
+      "dynamicToolCall": "Benutzerdefinierte Werkzeugaufrufe",
+      "webSearch": "Websuche",
+      "fileRead": "Dateizugriffe",
+      "fileSearch": "Dateisuche"
+    },
     "toolCalls": "Werkzeugaufrufe",
     "unpinPreset": "Voreinstellung lösen",
     "unrestrictedWarning": "Sitzungen laufen ohne Genehmigungsdialoge und mit uneingeschränktem Zugriff, während sie eine exklusive Arbeitsbaumreservierung halten.",

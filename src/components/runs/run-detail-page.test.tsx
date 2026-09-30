@@ -215,6 +215,39 @@ describe("RunDetailPage", () => {
     }
   });
 
+  test("shows counted tool categories on the details page", async () => {
+    runData = {
+      ...failedRun,
+      toolCallCount: 2,
+      toolCalls: ["npm test", "npm run build"].map((name, sequence) => ({
+        id: `call-${sequence}`,
+        sequence,
+        name,
+        status: "COMPLETED",
+        input: {
+          params: { item: { type: "commandExecution", command: name } },
+        },
+        output: null,
+        error: null,
+        startedAt: failedRun.createdAt,
+        finishedAt: null,
+        supersededAt: null,
+      })),
+    };
+    render(<RunDetailPage runId="run-353" />);
+    const group = (await screen.findByText("Commands")).closest(
+      "details",
+    ) as HTMLDetailsElement;
+    expect(
+      within(group.querySelector("summary")!).getByText("2"),
+    ).toBeDefined();
+    expect(group.open).toBe(false);
+    fireEvent.click(group.querySelector("summary")!);
+    expect(group.open).toBe(true);
+    expect(within(group).getByText("npm test")).toBeDefined();
+    expect(within(group).getByText("npm run build")).toBeDefined();
+  });
+
   test("shows the persisted error for a failed session", async () => {
     render(<RunDetailPage runId="run-353" />);
 

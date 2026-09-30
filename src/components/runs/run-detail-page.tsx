@@ -27,7 +27,6 @@ import {
   Search,
   Send,
   Trash2,
-  Wrench,
 } from "lucide-react";
 import { useLocale, useTranslations } from "next-intl";
 
@@ -99,6 +98,7 @@ import {
 
 import { RUN_DETAIL_FIELDS, RUN_EVENT_FIELDS } from "./graphql-fields";
 import { ActivityRows } from "./activity-rows";
+import { ToolCallGroups } from "./tool-call-groups";
 import { AttachmentPicker } from "./attachment-picker";
 import { MarkdownActions, MarkdownView } from "./markdown-view";
 import { RunWorktreeCards } from "./run-worktree-cards";
@@ -1144,7 +1144,7 @@ export function RunDetailPage({
   );
 
   return (
-    <div className="space-y-5">
+    <div className="min-w-0 space-y-5">
       <div
         className={cn(
           "space-y-4",
@@ -1314,12 +1314,12 @@ export function RunDetailPage({
           ) : null}
         </CardContent>
       </Card>
-      <Card>
+      <Card className="min-w-0">
         <CardHeader>
           <CardTitle>{t("usageCost")}</CardTitle>
           <CardDescription>{t("estimatedCost")}</CardDescription>
         </CardHeader>
-        <CardContent className="space-y-4">
+        <CardContent className="min-w-0 space-y-4">
           <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
             {[
               [t("reportedCost"), money(run.estimatedCost)],
@@ -1430,43 +1430,9 @@ export function RunDetailPage({
             </Table>
           )}
           {run.toolCalls.length > 0 && (
-            <div>
+            <div className="min-w-0">
               <h3 className="mb-2 font-medium">{t("toolCalls")}</h3>
-              <div className="space-y-2">
-                {run.toolCalls.map((call) => (
-                  <details
-                    className={cn(
-                      "rounded-lg border p-3",
-                      call.supersededAt && "opacity-60",
-                    )}
-                    key={call.id}
-                  >
-                    <summary className="cursor-pointer">
-                      <Wrench className="mr-2 inline size-4" />
-                      {call.name}{" "}
-                      <Badge className="ml-2" variant="outline">
-                        {labels.toolCallStatus(call.status)}
-                      </Badge>
-                      {call.supersededAt && (
-                        <Badge className="ml-2" variant="outline">
-                          {t("superseded")}
-                        </Badge>
-                      )}
-                    </summary>
-                    <pre className="mt-3 overflow-auto text-xs">
-                      {JSON.stringify(
-                        {
-                          input: call.input,
-                          output: call.output,
-                          error: call.error,
-                        },
-                        null,
-                        2,
-                      )}
-                    </pre>
-                  </details>
-                ))}
-              </div>
+              <ToolCallGroups calls={run.toolCalls} />
             </div>
           )}
         </CardContent>

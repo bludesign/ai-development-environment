@@ -866,6 +866,15 @@
       "FAILED": "Échec",
       "OBSERVED": "Observé"
     },
+    "toolCallTypes": {
+      "commandExecution": "Commandes",
+      "fileChange": "Modifications de fichiers",
+      "mcpToolCall": "Appels MCP",
+      "dynamicToolCall": "Appels d’outils personnalisés",
+      "webSearch": "Recherche web",
+      "fileRead": "Lectures de fichiers",
+      "fileSearch": "Recherche de fichiers"
+    },
     "toolCalls": "Appels d’outil",
     "unpinPreset": "Détacher le préréglage",
     "unrestrictedWarning": "Les Sessions s’exécutent sans demande d’autorisation, avec un accès illimité et un verrou exclusif sur l’arborescence.",

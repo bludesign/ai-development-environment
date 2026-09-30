@@ -866,6 +866,15 @@
       "FAILED": "Failed",
       "OBSERVED": "Observed"
     },
+    "toolCallTypes": {
+      "commandExecution": "Commands",
+      "fileChange": "File changes",
+      "mcpToolCall": "MCP calls",
+      "dynamicToolCall": "Custom tool calls",
+      "webSearch": "Web search",
+      "fileRead": "File reads",
+      "fileSearch": "File search"
+    },
     "toolCalls": "Tool calls",
     "unpinPreset": "Unpin preset",
     "unrestrictedWarning": "Sessions run without approval prompts and with unrestricted access while holding an exclusive worktree lease.",

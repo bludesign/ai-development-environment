@@ -6,7 +6,7 @@ export const RUN_LIST_FIELDS = `
   id kind displayNumber status phase origin provider providerVersion
   worktreeId agentId worktree { id folder branch highlightColor }
   jiraIssueKey repositoryName branch model effort webSearchEnabled mcpPresetIds mcpToolNames
-  initialPrompt finalOutput estimatedCost pricingSource sourcePlanId sourcePlanNumber
+  initialPrompt finalOutput estimatedCost catalogCost pricingSource sourcePlanId sourcePlanNumber
   playedAt playedSessionNumber
   sourcePlan { ${RUN_LINK_FIELDS} }
   playedSession { ${RUN_LINK_FIELDS} }
@@ -15,7 +15,7 @@ export const RUN_LIST_FIELDS = `
 
 export const RUN_DETAIL_FIELDS = `
   ${RUN_LIST_FIELDS}
-  finalOutput error pricingUpdatedAt catalogCost inputTokens outputTokens reasoningTokens
+  finalOutput error pricingUpdatedAt inputTokens outputTokens reasoningTokens
   cacheReadTokens cacheWriteTokens toolCallCount parentRunId parentRunNumber
   parentRun { ${RUN_LINK_FIELDS} }
   followUps { ${RUN_LINK_FIELDS} }

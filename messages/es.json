@@ -866,6 +866,15 @@
       "FAILED": "Fallido",
       "OBSERVED": "Observado"
     },
+    "toolCallTypes": {
+      "commandExecution": "Comandos",
+      "fileChange": "Cambios de archivos",
+      "mcpToolCall": "Llamadas MCP",
+      "dynamicToolCall": "Llamadas a herramientas personalizadas",
+      "webSearch": "Búsqueda web",
+      "fileRead": "Lecturas de archivos",
+      "fileSearch": "Búsqueda de archivos"
+    },
     "toolCalls": "Llamadas a herramientas",
     "unpinPreset": "Quitar preajuste",
     "unrestrictedWarning": "Las sesiones se ejecutan sin solicitudes de aprobación y con acceso sin restricciones mientras mantienen una reserva exclusiva del árbol de trabajo.",
