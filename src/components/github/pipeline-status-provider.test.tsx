@@ -1,8 +1,8 @@
 // @vitest-environment jsdom
 
-import { act, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, render, screen, waitFor } from "@testing-library/react";
 import { useMemo } from "react";
-import { beforeEach, describe, expect, test, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 
 import type {
   GitHubPipelineStatusChangeView,
@@ -130,6 +130,15 @@ function Records({ ids, revision = 1 }: { ids: string[]; revision?: number }) {
 }
 
 describe("GitHubPipelineStatusProvider", () => {
+  afterEach(async () => {
+    // Vitest globals are disabled, so RTL does not register automatic cleanup.
+    // Await React's pending work before jsdom removes the window.
+    await act(async () => {
+      cleanup();
+    });
+    expect(client.connected).toBeNull();
+  });
+
   beforeEach(() => {
     vi.clearAllMocks();
     client.connected = null;

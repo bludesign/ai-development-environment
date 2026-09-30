@@ -5,6 +5,7 @@ import type { RunsService } from "@/services/runs";
 import {
   DESTRUCTIVE_ANNOTATIONS,
   WRITE_ANNOTATIONS,
+  defineTool,
   type BuiltInToolGroup,
 } from "../builtin-tools";
 import { serviceTool } from "./service-tool";
@@ -20,6 +21,7 @@ const runConfiguration = z.object({
   webSearchEnabled: z.boolean().nullable().optional(),
   prompt: z.string().min(1),
   attachmentIds: z.array(z.string().min(1)).nullable().optional(),
+  mcpPresetIds: z.array(z.string().min(1)).default([]),
   draftId: z.string().nullable().optional(),
   sourcePlanId: z.string().nullable().optional(),
   parentRunId: z.string().nullable().optional(),
@@ -137,10 +139,13 @@ export function createRunToolGroup(service: RunsService): BuiltInToolGroup {
         name: "play_plan",
         title: "Play plan",
         description: "Create a run from an existing plan run.",
-        inputSchema: z.object({ planId: z.string().min(1) }),
+        inputSchema: z.object({
+          planId: z.string().min(1),
+          mcpPresetIds: z.array(z.string().min(1)).default([]),
+        }),
         service,
         method: "playPlan",
-        arguments: ({ planId }) => [planId],
+        arguments: ({ planId, mcpPresetIds }) => [planId, mcpPresetIds],
         resultKey: "run",
         annotations: { ...WRITE_ANNOTATIONS, idempotentHint: false },
       }),
@@ -186,6 +191,28 @@ export function createRunToolGroup(service: RunsService): BuiltInToolGroup {
         resultKey: "run",
         annotations: WRITE_ANNOTATIONS,
       }),
+      defineTool({
+        name: "prepare_run_answer_revision",
+        title: "Prepare run answer revision",
+        description:
+          "Queue an agent to prepare an answered question's rollback preview and reserve worktree capacity. Read get_run_questions until revisionPreparedAt is set before calling revise_run_answer.",
+        inputSchema: z.object({ batchId: z.string().min(1).max(256) }),
+        outputSchema: z.object({
+          run: z
+            .object({
+              id: z.string(),
+              kind: z.enum(["PLAN", "SESSION"]),
+              status: z.string(),
+              phase: z.string(),
+              worktreeId: z.string().nullable(),
+            })
+            .nullable(),
+        }),
+        handler: async ({ batchId }) => ({
+          run: await service.prepareAnswerRevision(batchId),
+        }),
+        annotations: { ...WRITE_ANNOTATIONS, idempotentHint: false },
+      }),
       serviceTool({
         name: "revise_run_answer",
         title: "Revise run answer",
@@ -206,7 +233,7 @@ export function createRunToolGroup(service: RunsService): BuiltInToolGroup {
           value.rollback,
         ],
         resultKey: "run",
-        annotations: WRITE_ANNOTATIONS,
+        annotations: { ...DESTRUCTIVE_ANNOTATIONS, idempotentHint: false },
       }),
       serviceTool({
         name: "pause_agent_run",

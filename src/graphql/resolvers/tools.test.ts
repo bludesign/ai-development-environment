@@ -10,6 +10,30 @@ function context(agentId: string | null): GraphQLContext {
 }
 
 describe("tools resolvers", () => {
+  test("rejects agent credentials for every preset transfer operation before calling services", () => {
+    const resolvers = createToolsResolvers({} as ToolsService);
+    const actor = context("agent-1");
+    expect(() =>
+      resolvers.Query.exportMcpToolCatalog({}, { format: "JSON" }, actor),
+    ).toThrow("control-plane");
+    expect(() =>
+      resolvers.Query.exportMcpToolPresets({}, { ids: ["one"] }, actor),
+    ).toThrow("control-plane");
+    expect(() =>
+      resolvers.Query.previewMcpToolPresetImport(
+        {},
+        { input: { document: "{}" } },
+        actor,
+      ),
+    ).toThrow("control-plane");
+    expect(() =>
+      resolvers.Mutation.importMcpToolPresets(
+        {},
+        { input: { document: "{}" }, previewToken: "token" },
+        actor,
+      ),
+    ).toThrow("control-plane");
+  });
   test("forwards tool operations for control-plane callers", async () => {
     const service = {
       externalServers: vi.fn().mockResolvedValue([]),

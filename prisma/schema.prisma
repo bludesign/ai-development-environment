@@ -820,6 +820,7 @@ model AgentRun {
   webSearchEnabled         Boolean             @default(false)
   mcpPresetIdsJson         String              @default("[]")
   mcpToolNamesJson         String              @default("[]")
+  mcpToolSnapshotJson       String?
   worktreeConcurrencyLimit Int                 @default(0)
   workflowRunId            String?
   initialPrompt            String
@@ -2468,14 +2469,15 @@ model WorktreeSettings {
 }
 
 model ExternalMcpServer {
-  id             String                    @id
-  name           String                    @unique
+  id             String                      @id
+  name           String                      @unique
   url            String
   transport      String
-  toolNamePrefix String                    @default("")
-  createdAt      DateTime                  @default(now())
-  updatedAt      DateTime                  @updatedAt
+  toolNamePrefix String                      @default("")
+  createdAt      DateTime                    @default(now())
+  updatedAt      DateTime                    @updatedAt
   headers        ExternalMcpServerHeader[]
+  presetTools    McpToolPresetExternalTool[]
 
   @@index([name])
 }
@@ -2493,15 +2495,16 @@ model ExternalMcpServerHeader {
 }
 
 model McpToolPreset {
-  id                 String              @id
+  id                 String                      @id
   name               String
-  description        String              @default("")
-  iconKey            String              @default("wrench")
-  enabledForPlans    Boolean             @default(false)
-  enabledForSessions Boolean             @default(false)
-  createdAt          DateTime            @default(now())
-  updatedAt          DateTime            @updatedAt
+  description        String                      @default("")
+  iconKey            String                      @default("wrench")
+  enabledForPlans    Boolean                     @default(false)
+  enabledForSessions Boolean                     @default(false)
+  createdAt          DateTime                    @default(now())
+  updatedAt          DateTime                    @updatedAt
   tools              McpToolPresetTool[]
+  externalTools      McpToolPresetExternalTool[]
 
   @@index([name])
   @@index([enabledForPlans, name])
@@ -2516,6 +2519,17 @@ model McpToolPresetTool {
 
   @@id([presetId, toolName])
   @@index([toolName])
+}
+
+model McpToolPresetExternalTool {
+  presetId String
+  serverId String
+  toolName String
+  preset   McpToolPreset     @relation(fields: [presetId], references: [id], onDelete: Cascade)
+  server   ExternalMcpServer @relation(fields: [serverId], references: [id], onDelete: Restrict)
+
+  @@id([presetId, serverId, toolName])
+  @@index([serverId])
 }
 
 model ToolCallAudit {

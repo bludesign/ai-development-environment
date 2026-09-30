@@ -338,6 +338,7 @@ export function ToolsPage({
 
       {tab === "tools" ? (
         <>
+          <McpPresetManagement baseMcpUrl={mcpBaseUrl} groups={groups} />
           <ConnectClientsCard
             baseMcpUrl={mcpBaseUrl}
             customServerOrigin={customServerOrigin}
@@ -346,8 +347,6 @@ export function ToolsPage({
             selectedServerOrigin={selectedServerOrigin}
             serverOrigins={serverOrigins}
           />
-
-          <McpPresetManagement baseMcpUrl={mcpBaseUrl} groups={groups} />
 
           {error && (
             <Alert variant="destructive">

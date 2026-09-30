@@ -10,7 +10,10 @@ import type { DiskSpaceService } from "@/services/disk-space";
 import type { PushNotificationsService } from "@/services/push-notifications";
 import type { TelemetryService } from "@/services/telemetry";
 
-import { createBuiltInToolRegistry } from "./builtin-tools";
+import {
+  BuiltInToolRegistry,
+  createBuiltInToolRegistry,
+} from "./builtin-tools";
 
 function registry() {
   const telemetry = {
@@ -216,9 +219,79 @@ describe("built-in tool registry", () => {
       ]),
     );
     const tools = expanded.definitions();
-    expect(tools).toHaveLength(333);
+    expect(tools).toHaveLength(334);
     expect(new Set(tools.map(({ name }) => name)).size).toBe(tools.length);
     expect(tools.every(({ annotations }) => Boolean(annotations))).toBe(true);
+  });
+
+  test("includes every production domain and preserves unique proxy-safe names", () => {
+    const placeholder = {} as never;
+    const services = {
+      codebaseTools: placeholder,
+      codebases: placeholder,
+      builds: placeholder,
+      telemetry: placeholder,
+      pushNotifications: placeholder,
+      agents: placeholder,
+      diskSpace: placeholder,
+      worktrees: placeholder,
+      runs: placeholder,
+      commands: placeholder,
+      jira: placeholder,
+      jiraWebhooks: placeholder,
+      github: placeholder,
+      gitlab: placeholder,
+      skills: placeholder,
+      buildData: placeholder,
+      tailscale: placeholder,
+      signingAssets: placeholder,
+      iosDevices: placeholder,
+      notifications: placeholder,
+      ccusage: placeholder,
+      modelCosts: placeholder,
+      systemStatus: placeholder,
+      polling: placeholder,
+      credentials: placeholder,
+      cacheServer: placeholder,
+      toolAudit: placeholder,
+      testExternalMcpServer: vi.fn(),
+      listMcpToolPresets: vi.fn(),
+      workflows: () => placeholder,
+      worktreeAutomations: () => placeholder,
+      sse: placeholder,
+      globalSearch: placeholder,
+      actionCenter: placeholder,
+      apps: placeholder,
+      cliHealth: placeholder,
+      crashes: placeholder,
+    };
+    const complete = createBuiltInToolRegistry(services);
+    expect(complete.definitions()).toHaveLength(415);
+    expect(complete.catalog()).toHaveLength(29);
+    expect(new Set(complete.definitions().map(({ name }) => name)).size).toBe(
+      415,
+    );
+    expect(complete.catalog().map(({ id }) => id)).toEqual(
+      expect.arrayContaining([
+        "builtin:search",
+        "builtin:action-center",
+        "builtin:apps",
+        "builtin:cli-health",
+        "builtin:crashes",
+      ]),
+    );
+    const original = complete.definitions()[0]!;
+    expect(
+      () =>
+        new BuiltInToolRegistry([
+          {
+            id: "builtin:test",
+            name: "Test",
+            children: [],
+            tools: [{ ...original, name: "aide_ext_reserved" }],
+          },
+        ]),
+    ).toThrow("reserved external prefix");
   });
 
   test("advertises satisfiable JSON schemas for push send tools", () => {
@@ -248,7 +321,8 @@ describe("built-in tool registry", () => {
         expect(variant.required).toEqual(
           expect.arrayContaining(["targetMode", ...commonFields]),
         );
-        expect(variant.additionalProperties).toBe(false);
+        // These input objects accept extra keys and strip them during parsing.
+        expect(variant.additionalProperties).toBeUndefined();
       }
     }
   });

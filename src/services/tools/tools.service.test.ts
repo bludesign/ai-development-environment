@@ -364,6 +364,10 @@ describe("MCP tool presets", () => {
     };
     const transaction = {
       mcpToolPreset: {
+        findMany: vi.fn(async () =>
+          state.id ? [{ id: state.id, name: state.name }] : [],
+        ),
+        findUnique: vi.fn(async () => (state.id ? state : null)),
         upsert: vi.fn(
           async ({
             create,
@@ -388,6 +392,11 @@ describe("MCP tool presets", () => {
             return { count: data.length };
           },
         ),
+      },
+      mcpToolPresetExternalTool: {
+        deleteMany: vi.fn(),
+        createMany: vi.fn(),
+        count: vi.fn().mockResolvedValue(0),
       },
     };
     const remove = vi.fn(async () => state);
@@ -472,10 +481,14 @@ describe("MCP tool presets", () => {
   test("enforces case-insensitive preset names", async () => {
     const service = new ToolsService({} as never);
     const toolName = service.builtInTools.definitions()[0]!.name;
-    getPrismaClient.mockResolvedValue({
+    const transaction = {
       mcpToolPreset: {
         findMany: vi.fn().mockResolvedValue([{ id: "preset-1", name: "Safe" }]),
       },
+    };
+    getPrismaClient.mockResolvedValue({
+      ...transaction,
+      $transaction: vi.fn(async (callback) => callback(transaction)),
     });
 
     await expect(
@@ -512,7 +525,7 @@ describe("MCP tool presets", () => {
         "preset-1",
         "preset-2",
       ]),
-    ).resolves.toEqual({
+    ).resolves.toMatchObject({
       presetIds: ["preset-1", "preset-2"],
       toolNames: [first, second].sort(),
     });

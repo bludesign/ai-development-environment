@@ -58,6 +58,8 @@ type McpToolPreset {
   enabledForSessions: Boolean!
   "Tool names associated with this MCP tool preset."
   toolNames: [String!]!
+  "Source-qualified membership, including external tools."
+  tools: [McpToolReference!]!
   "ISO 8601 timestamp when this MCP tool preset was created."
   createdAt: String!
   "ISO 8601 timestamp when this MCP tool preset was last updated."
@@ -139,10 +141,177 @@ input McpToolPresetInput {
   "Whether enabled for sessions applies to the request."
   enabledForSessions: Boolean!
   "Tool names to use for the request."
-  toolNames: [String!]!
+  toolNames: [String!]
+  "Complete source-qualified membership. Do not also provide toolNames."
+  tools: [McpToolReferenceInput!]
+}
+
+"The provider of an MCP tool."
+enum McpToolSource {
+  "builtin option."
+  BUILTIN
+  "external option."
+  EXTERNAL
+}
+
+"A stable tool reference. External names are upstream names without prefixes."
+type McpToolReference {
+  "Whether this reference identifies a built-in or external tool."
+  source: McpToolSource!
+  "The exact tool name, or the human-readable name of this preset or server."
+  name: String!
+  "The identifier of an already configured local external server; absent for built-in tools."
+  serverId: ID
+  "The display name of the configured external server."
+  serverName: String
+}
+
+"A tool selected for a preset."
+input McpToolReferenceInput {
+  "Whether this reference identifies a built-in or external tool."
+  source: McpToolSource!
+  "The exact tool name, or the human-readable name of this preset or server."
+  name: String!
+  "The identifier of an already configured local external server; absent for built-in tools."
+  serverId: ID
+}
+
+"Supported catalog download formats."
+enum McpToolExportFormat {
+  "json option."
+  JSON
+  "markdown option."
+  MARKDOWN
+}
+
+"Catalog sources included in a download."
+enum McpToolCatalogSource {
+  "all option."
+  ALL
+  "builtin option."
+  BUILTIN
+  "external option."
+  EXTERNAL
+}
+
+"An exported document ready to save or share."
+type McpToolDocumentExport {
+  "Suggested filename for saving the exported document."
+  filename: String!
+  "MIME type of the exported document."
+  contentType: String!
+  "The complete UTF-8 document text."
+  content: String!
+}
+
+"How an imported preset should be handled."
+enum McpToolPresetImportAction {
+  "create option."
+  CREATE
+  "replace option."
+  REPLACE
+  "skip option."
+  SKIP
+}
+
+"A reviewed action for one preset in a document."
+input McpToolPresetImportDecisionInput {
+  "Zero-based index of a preset in the portable document."
+  index: Int!
+  "Create a new preset, replace a selected preset, or skip this entry."
+  action: McpToolPresetImportAction!
+  "The exact tool name, or the human-readable name of this preset or server."
+  name: String
+  "Local identifier of the preset explicitly chosen for replacement."
+  targetId: ID
+}
+
+"Mapping to an already configured external MCP server."
+input McpToolPresetServerMappingInput {
+  "serverkey option."
+  serverKey: String!
+  "The identifier of an already configured local external server; absent for built-in tools."
+  serverId: ID!
+}
+
+"A portable preset document and the user's import choices."
+input McpToolPresetImportInput {
+  "The complete portable preset JSON document, limited to 2 MiB."
+  document: String!
+  "Reviewed actions for individual presets; omitted entries default to CREATE."
+  decisions: [McpToolPresetImportDecisionInput!]
+  "Mappings from portable server keys to existing configured local servers."
+  serverMappings: [McpToolPresetServerMappingInput!]
+}
+
+"Validation results for one imported preset."
+type McpToolPresetImportEntry {
+  "Zero-based index of a preset in the portable document."
+  index: Int!
+  "The exact tool name, or the human-readable name of this preset or server."
+  name: String!
+  "Create a new preset, replace a selected preset, or skip this entry."
+  action: McpToolPresetImportAction!
+  "Local identifier of the preset explicitly chosen for replacement."
+  targetId: ID
+  "Number of selected tools in this imported preset."
+  toolCount: Int!
+  "Validation errors that must be resolved before importing."
+  errors: [String!]!
+  "Non-blocking information about availability or configuration."
+  warnings: [String!]!
+}
+
+"A portable external server and its available local mappings."
+type McpToolPresetImportServer {
+  "Portable document-local external server key."
+  key: String!
+  "The exact tool name, or the human-readable name of this preset or server."
+  name: String!
+  "Optional transport hint from the portable document."
+  transport: ExternalMcpTransport
+  "Local server explicitly selected in the import choices."
+  selectedServerId: ID
+  "An unambiguous matching server suggested for review; never applied automatically."
+  suggestedServerId: ID
+  "Already configured servers available for explicit mapping."
+  candidates: [ExternalMcpServer!]!
+}
+
+"Server validation of a proposed import. Re-preview after changing choices."
+type McpToolPresetImportPreview {
+  "Fingerprint of this document, choices, and current validated state."
+  token: String!
+  "True when all selected entries can be imported without errors."
+  canImport: Boolean!
+  "Validation errors that must be resolved before importing."
+  errors: [String!]!
+  "Per-preset validation results in document order."
+  entries: [McpToolPresetImportEntry!]!
+  "External server references that may require a local mapping."
+  externalServers: [McpToolPresetImportServer!]!
 }
 
 extend type Query {
+  "Export current tool definitions with an AI preset-generation contract."
+  exportMcpToolCatalog(
+    "The desired document format."
+    format: McpToolExportFormat!
+    "Whether this reference identifies a built-in or external tool."
+    source: McpToolCatalogSource = ALL
+    "Optional catalog group identifiers to include, including their descendants."
+    groupIds: [ID!]
+  ): McpToolDocumentExport!
+  "Export one or more portable presets without local IDs or credentials."
+  exportMcpToolPresets(
+    "Local preset identifiers to include in the export."
+    ids: [ID!]!
+  ): McpToolDocumentExport!
+  "Validate an import without saving changes."
+  previewMcpToolPresetImport(
+    "The portable document and reviewed import choices."
+    input: McpToolPresetImportInput!
+  ): McpToolPresetImportPreview!
   "Returns external MCP servers."
   externalMcpServers: [ExternalMcpServer!]!
   "Returns MCP tool presets."
@@ -162,6 +331,13 @@ extend type Query {
 }
 
 extend type Mutation {
+  "Apply an unchanged, valid preview in one transaction."
+  importMcpToolPresets(
+    "The portable document and reviewed import choices."
+    input: McpToolPresetImportInput!
+    "Token returned by the latest unchanged and valid import preview."
+    previewToken: String!
+  ): [McpToolPreset!]!
   "Clears tool call audits and returns a tool call audit clear result."
   clearToolCallAudits: ToolCallAuditClearResult!
   "Creates an external MCP server and returns an external MCP server."

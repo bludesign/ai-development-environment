@@ -1,6 +1,11 @@
 import * as z from "zod/v4";
 
 import type { AgentControlService } from "@/services/agent-control";
+import type { ActionCenterService } from "@/services/action-center";
+import type { AppsService } from "@/services/apps";
+import type { CliHealthService } from "@/services/cli-health";
+import type { CrashesService } from "@/services/crashes/crashes.service";
+import type { GlobalSearchService } from "@/services/global-search";
 import type { BuildsService } from "@/services/builds";
 import type { BuildDataService } from "@/services/build-data";
 import type { CacheServerService } from "@/services/cache-server";
@@ -34,6 +39,13 @@ import type {
 } from "@/services/worktrees";
 
 import { createAgentToolGroup } from "./builtin-tools/agents";
+import {
+  createActionCenterToolGroup,
+  createAppsToolGroup,
+  createCliHealthToolGroup,
+  createSearchToolGroup,
+} from "./builtin-tools/discovery";
+import { createCrashToolGroup } from "./builtin-tools/crashes";
 import { createBuildToolGroup } from "./builtin-tools/builds";
 import { createBuildDataToolGroup } from "./builtin-tools/build-data";
 import { createCacheAdministrationGroup } from "./builtin-tools/cache-administration";
@@ -117,6 +129,11 @@ export type BuiltInToolGroup = {
 
 export type BuiltInToolServices = {
   codebaseTools: CodebaseToolsService;
+  actionCenter?: ActionCenterService;
+  apps?: AppsService;
+  cliHealth?: CliHealthService;
+  crashes?: CrashesService;
+  globalSearch?: GlobalSearchService;
   builds?: BuildsService;
   codebases?: CodebasesService;
   telemetry?: TelemetryService;
@@ -145,6 +162,7 @@ export type BuiltInToolServices = {
   sse?: SseService;
   toolAudit?: ToolCallAuditService;
   testExternalMcpServer?: (id: string) => Promise<unknown>;
+  listMcpToolPresets?: (kind?: "PLAN" | "SESSION") => Promise<unknown>;
   /**
    * Supplied as a thunk rather than an instance: `WorkflowsService` is
    * constructed after `ToolsService` and takes it as a dependency, so the two
@@ -199,7 +217,10 @@ function catalogGroup(group: BuiltInToolGroup): ToolCatalogGroup {
       name: tool.name,
       title: tool.title,
       description: tool.description,
-      inputSchema: z.toJSONSchema(tool.inputSchema) as Record<string, unknown>,
+      inputSchema: z.toJSONSchema(tool.inputSchema, { io: "input" }) as Record<
+        string,
+        unknown
+      >,
       outputSchema: z.toJSONSchema(tool.outputSchema) as Record<
         string,
         unknown
@@ -247,6 +268,11 @@ export class BuiltInToolRegistry {
     };
     groups.forEach(visit);
     for (const indexed of this.indexed) {
+      if (indexed.definition.name.startsWith("aide_ext_")) {
+        throw new Error(
+          `Built-in MCP tool names may not use the reserved external prefix: ${indexed.definition.name}`,
+        );
+      }
       if (this.byName.has(indexed.definition.name)) {
         throw new Error(
           `Duplicate built-in MCP tool name: ${indexed.definition.name}`,
@@ -294,6 +320,14 @@ export function createBuiltInToolRegistry(
     createCodebaseToolGroup(services.codebaseTools, services.codebases),
   ];
   if (services.builds) groups.push(createBuildToolGroup(services.builds));
+  if (services.globalSearch)
+    groups.push(createSearchToolGroup(services.globalSearch));
+  if (services.actionCenter)
+    groups.push(createActionCenterToolGroup(services.actionCenter));
+  if (services.apps) groups.push(createAppsToolGroup(services.apps));
+  if (services.cliHealth)
+    groups.push(createCliHealthToolGroup(services.cliHealth));
+  if (services.crashes) groups.push(createCrashToolGroup(services.crashes));
   if (services.telemetry && services.pushNotifications) {
     groups.push(
       createDebuggingToolGroup(services.telemetry, services.pushNotifications),
@@ -347,6 +381,7 @@ export function createBuiltInToolRegistry(
       createToolAdministrationGroup(
         services.toolAudit,
         services.testExternalMcpServer,
+        services.listMcpToolPresets,
       ),
     );
   }

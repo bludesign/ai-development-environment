@@ -217,6 +217,11 @@ function createServerServices(): ServerServices {
     codebaseToolsService,
     buildsService,
     {
+      actionCenter: actionCenterService,
+      apps: appsService,
+      cliHealth: cliHealthService,
+      crashes: crashesService,
+      globalSearch: globalSearchService,
       codebases: codebasesService,
       telemetry: telemetryService,
       pushNotifications: pushNotificationsService,

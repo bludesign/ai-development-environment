@@ -35,7 +35,16 @@ export type McpToolPresetInput = {
   iconKey: string;
   enabledForPlans: boolean;
   enabledForSessions: boolean;
-  toolNames: string[];
+  toolNames?: string[] | null;
+  tools?: McpToolReference[] | null;
+};
+
+/** Names are upstream names, without an external server's display prefix. */
+export type McpToolReference = {
+  source: "BUILTIN" | "EXTERNAL";
+  name: string;
+  serverId?: string | null;
+  serverName?: string | null;
 };
 
 export type McpToolPresetView = {
@@ -46,6 +55,7 @@ export type McpToolPresetView = {
   enabledForPlans: boolean;
   enabledForSessions: boolean;
   toolNames: string[];
+  tools: McpToolReference[];
   createdAt: string;
   updatedAt: string;
 };
@@ -64,6 +74,61 @@ export type ToolCatalogItem = {
   inputSchema: Record<string, unknown>;
   outputSchema: Record<string, unknown> | null;
   annotations: ToolAnnotations | null;
+  reference?: McpToolReference;
+  mcpName?: string;
+  available?: boolean;
+  availabilityReason?: string | null;
+  taskSupport?: "optional" | "required" | "forbidden";
+};
+
+export type McpToolSnapshotEntry = ToolCatalogItem & {
+  reference: McpToolReference;
+  endpointHash?: string;
+};
+
+export type McpToolSnapshot = {
+  schemaVersion: 1;
+  tools: McpToolSnapshotEntry[];
+};
+
+export type McpToolDocumentExport = {
+  filename: string;
+  contentType: string;
+  content: string;
+};
+
+export type McpToolPresetImportInput = {
+  document: string;
+  decisions?: Array<{
+    index: number;
+    action: "CREATE" | "REPLACE" | "SKIP";
+    name?: string | null;
+    targetId?: string | null;
+  }> | null;
+  serverMappings?: Array<{ serverKey: string; serverId: string }> | null;
+};
+
+export type McpToolPresetImportPreview = {
+  token: string;
+  canImport: boolean;
+  errors: string[];
+  entries: Array<{
+    index: number;
+    name: string;
+    action: "CREATE" | "REPLACE" | "SKIP";
+    targetId: string | null;
+    toolCount: number;
+    errors: string[];
+    warnings: string[];
+  }>;
+  externalServers: Array<{
+    key: string;
+    name: string;
+    transport: ExternalMcpTransport | null;
+    selectedServerId: string | null;
+    suggestedServerId: string | null;
+    candidates: ExternalMcpServerView[];
+  }>;
 };
 
 export type ToolCallAuditView = {

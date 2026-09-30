@@ -4,3 +4,4 @@ export * from "./tool-api-auth";
 export * from "./tool-call-audit.service";
 export * from "./codebases-mcp";
 export * from "./builtin-tools";
+export * from "./scoped-mcp";

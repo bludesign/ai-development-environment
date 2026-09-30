@@ -112,6 +112,54 @@ test.describe("app screenshots", () => {
         await page.getByRole("button", { name: route.clickButton }).click();
         await page.getByRole("dialog").waitFor({ state: "visible" });
       }
+      if (route.mcpAiPrompt) {
+        await page
+          .getByRole("button", {
+            name: "Prompt for an AI to create presets",
+            exact: true,
+          })
+          .click();
+        await page
+          .getByLabel("AI preset generation prompt", { exact: true })
+          .waitFor({ state: "visible" });
+      }
+      if (route.mcpImportReview) {
+        await page
+          .getByRole("button", { name: "Import presets", exact: true })
+          .click();
+        await page.getByLabel("Preset JSON", { exact: true }).fill(
+          JSON.stringify(
+            {
+              format: "aide.mcp-presets.export",
+              schemaVersion: 1,
+              externalServers: [{ key: "issues", name: "Linear" }],
+              presets: [
+                {
+                  name: "Investigation",
+                  description: "Inspect codebases and related issues.",
+                  iconKey: "wrench",
+                  enabledForPlans: true,
+                  enabledForSessions: true,
+                  tools: [
+                    { source: "BUILTIN", name: "get_codebases" },
+                    {
+                      source: "EXTERNAL",
+                      serverKey: "issues",
+                      name: "search_issues",
+                    },
+                  ],
+                },
+              ],
+            },
+            null,
+            2,
+          ),
+        );
+        await page
+          .getByRole("button", { name: "Review import", exact: true })
+          .click();
+        await page.getByLabel("Map Linear to a configured server").waitFor();
+      }
       if (route.activeAgentMenu) {
         await page
           .getByRole("combobox", { name: "Active agent: None", exact: true })

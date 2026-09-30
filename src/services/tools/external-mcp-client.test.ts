@@ -157,6 +157,158 @@ describe("external MCP client transport", () => {
     expect(mocks.close).toHaveBeenCalledOnce();
   });
 
+  test("freezes mixed identities and routes raw names across prefix changes without losing rich content", async () => {
+    const execute = vi.fn(async (_input, operation) => operation());
+    const service = new ToolsService({} as never, undefined, {}, undefined, {
+      execute,
+    } as never);
+    const refs = [
+      { source: "EXTERNAL" as const, serverId: "http-1", name: "search" },
+      { source: "EXTERNAL" as const, serverId: "sse-1", name: "search" },
+    ];
+    const snapshot = await service.resolveMcpToolReferences(refs);
+    expect(new Set(snapshot.tools.map(({ name }) => name)).size).toBe(2);
+    expect(
+      snapshot.tools.every(({ name }) =>
+        /^aide_ext_[a-f0-9]{16}_search$/.test(name),
+      ),
+    ).toBe(true);
+    const entry = snapshot.tools.find(
+      ({ reference }) => reference.serverId === "http-1",
+    )!;
+    const database = await mocks.getPrismaClient();
+    database.externalMcpServer.findUnique.mockResolvedValue({
+      ...httpServer,
+      name: "Renamed",
+      toolNamePrefix: "changed_",
+    });
+    const richResult = {
+      content: [
+        { type: "image", mimeType: "image/png", data: "base64" },
+        {
+          type: "resource_link",
+          uri: "https://example.test/result",
+          name: "Result",
+        },
+      ],
+      structuredContent: { count: 1 },
+      _meta: { marker: "retained" },
+    };
+    mocks.callTool.mockResolvedValue(richResult);
+    const controller = new AbortController();
+    const context = {
+      caller: "agent:one",
+      correlationId: "call-1",
+      source: "MCP" as const,
+    };
+    await expect(
+      service.callSnapshotTool(
+        entry,
+        { query: "repo" },
+        context,
+        null,
+        controller.signal,
+      ),
+    ).resolves.toEqual(richResult);
+    expect(mocks.callTool).toHaveBeenCalledWith(
+      { name: "search", arguments: { query: "repo" } },
+      undefined,
+      expect.objectContaining({ signal: controller.signal }),
+    );
+    expect(execute).toHaveBeenCalledWith(
+      expect.objectContaining({
+        groupId: "external:http-1",
+        toolName: "search",
+      }),
+      expect.any(Function),
+    );
+    const current = await service.resolveMcpToolReferences([refs[0]!]);
+    expect(current.tools[0]!.name).toBe(entry.name);
+    expect(JSON.stringify(snapshot)).not.toContain("Bearer one");
+  });
+
+  test("blocks new runs with missing external tools and rejects endpoint drift before forwarding", async () => {
+    const service = new ToolsService({} as never, undefined, {}, undefined, {
+      execute: async (_input: unknown, operation: () => Promise<unknown>) =>
+        operation(),
+    } as never);
+    const database = await mocks.getPrismaClient();
+    database.mcpToolPreset = {
+      findMany: vi.fn().mockResolvedValue([
+        {
+          id: "preset-1",
+          tools: [],
+          externalTools: [{ serverId: "http-1", toolName: "search" }],
+        },
+      ]),
+    };
+    const resolved = await service.resolveRunMcpPresets("SESSION", [
+      "preset-1",
+    ]);
+    expect(resolved.toolNames).toHaveLength(1);
+    expect(resolved.snapshot?.tools[0]?.reference).toMatchObject({
+      serverId: "http-1",
+      name: "search",
+    });
+    mocks.listTools.mockResolvedValue({ tools: [] });
+    await expect(
+      service.resolveRunMcpPresets("SESSION", ["preset-1"]),
+    ).rejects.toThrow("unavailable");
+    database.externalMcpServer.findUnique.mockResolvedValue({
+      ...httpServer,
+      url: "https://changed.example/mcp",
+    });
+    await expect(
+      service.callSnapshotTool(
+        resolved.snapshot!.tools[0]!,
+        {},
+        { caller: "agent:one", correlationId: "one", source: "MCP" },
+      ),
+    ).rejects.toThrow("endpoint changed");
+    expect(mocks.callTool).not.toHaveBeenCalled();
+  });
+
+  test("shares discovery across bundle entries and preserves failure instead of silently dropping a tool", async () => {
+    const service = new ToolsService({} as never);
+    const refs = [
+      { source: "EXTERNAL" as const, serverId: "http-1", name: "search" },
+    ];
+    const discovery = new Map();
+    await service.resolveMcpToolReferences(refs, discovery);
+    await service.resolveMcpToolReferences(refs, discovery);
+    expect(mocks.listTools).toHaveBeenCalledOnce();
+    mocks.connect.mockRejectedValue(new Error("network unavailable"));
+    await expect(service.resolveMcpToolReferences(refs)).rejects.toThrow(
+      "unavailable",
+    );
+  });
+
+  test("closes a slow connection promptly when the scoped request is cancelled", async () => {
+    const service = new ToolsService({} as never, undefined, {}, undefined, {
+      execute: async (_input: unknown, operation: () => Promise<unknown>) =>
+        operation(),
+    } as never);
+    const snapshot = await service.resolveMcpToolReferences([
+      { source: "EXTERNAL", serverId: "http-1", name: "search" },
+    ]);
+    mocks.connect.mockImplementation(() => new Promise<void>(() => undefined));
+    mocks.close.mockClear();
+    const controller = new AbortController();
+    const call = service.callSnapshotTool(
+      snapshot.tools[0]!,
+      {},
+      { caller: "user:one", correlationId: "one", source: "MCP" },
+      undefined,
+      controller.signal,
+    );
+    const rejected = expect(call).rejects.toThrow("cancelled");
+    await vi.waitFor(() => expect(mocks.connect).toHaveBeenCalledTimes(2));
+    controller.abort(new Error("cancelled"));
+    await rejected;
+    expect(mocks.close).toHaveBeenCalledOnce();
+    expect(mocks.callTool).not.toHaveBeenCalled();
+  });
+
   test("times out and closes a client whose transport startup hangs", async () => {
     vi.useFakeTimers();
     mocks.connect.mockImplementation(() => new Promise<void>(() => undefined));

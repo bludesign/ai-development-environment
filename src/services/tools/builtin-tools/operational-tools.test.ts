@@ -4,12 +4,117 @@ import type { BuiltInToolGroup } from "../builtin-tools";
 import { createRunToolGroup } from "./runs";
 import { createSigningAssetToolGroup } from "./signing-assets";
 import { createUsageCostToolGroup } from "./usage-costs";
+import { createToolAdministrationGroup } from "./tool-administration";
+import { createSseToolGroup } from "./sse";
 
 function findTool(group: BuiltInToolGroup, name: string) {
   return group.tools.find((candidate) => candidate.name === name)!;
 }
 
 describe("operational tool contracts", () => {
+  test("discovers local preset IDs and forwards selections to every run creation path", async () => {
+    const presets = [
+      {
+        id: "preset-1",
+        name: "Investigate",
+        description: "Investigation tools",
+        iconKey: "wrench",
+        enabledForPlans: true,
+        enabledForSessions: true,
+        toolNames: [],
+        createdAt: "2026-09-29T00:00:00.000Z",
+        updatedAt: "2026-09-29T00:00:00.000Z",
+        tools: [{ source: "EXTERNAL", serverId: "server-1", name: "search" }],
+      },
+    ];
+    const listMcpToolPresets = vi.fn().mockResolvedValue(presets);
+    const administration = createToolAdministrationGroup(
+      {} as never,
+      vi.fn(),
+      listMcpToolPresets,
+    );
+    await expect(
+      findTool(administration, "get_mcp_tool_presets").invoke({
+        kind: "SESSION",
+      }),
+    ).resolves.toEqual({ presets });
+    expect(listMcpToolPresets).toHaveBeenCalledWith("SESSION");
+    await findTool(administration, "get_mcp_tool_presets").invoke({});
+    expect(listMcpToolPresets).toHaveBeenLastCalledWith(undefined);
+
+    const create = vi.fn().mockResolvedValue({ id: "run-1" });
+    const followUp = vi.fn().mockResolvedValue({ id: "run-2" });
+    const playPlan = vi.fn().mockResolvedValue({ id: "run-3" });
+    const group = createRunToolGroup({ create, followUp, playPlan } as never);
+    const input = {
+      kind: "SESSION",
+      worktreeId: "worktree-1",
+      provider: "CODEX",
+      model: "model",
+      prompt: "Investigate",
+      mcpPresetIds: ["preset-1"],
+    };
+    await findTool(group, "create_agent_run").invoke(input);
+    await findTool(group, "create_run_follow_up").invoke({
+      sourceId: "run-1",
+      input,
+    });
+    await findTool(group, "play_plan").invoke({
+      planId: "plan-1",
+      mcpPresetIds: ["preset-1"],
+    });
+    expect(create).toHaveBeenCalledWith(input);
+    expect(followUp).toHaveBeenCalledWith("run-1", input);
+    expect(playPlan).toHaveBeenCalledWith("plan-1", ["preset-1"]);
+    await findTool(group, "play_plan").invoke({ planId: "plan-2" });
+    expect(playPlan).toHaveBeenLastCalledWith("plan-2", []);
+  });
+
+  test("queues revision preparation and advertises rollback and non-idempotent effects", async () => {
+    const run = {
+      id: "run-1",
+      kind: "SESSION",
+      status: "COMPLETED",
+      phase: "IDLE",
+      worktreeId: "worktree-1",
+    };
+    const prepareAnswerRevision = vi.fn().mockResolvedValue({
+      ...run,
+      nativeTranscript: "private transcript",
+      mcpToolSnapshotJson: "internal snapshot",
+    });
+    const reviseAnswer = vi.fn().mockResolvedValue({ id: "run-2" });
+    const group = createRunToolGroup({
+      prepareAnswerRevision,
+      reviseAnswer,
+    } as never);
+    await expect(
+      findTool(group, "prepare_run_answer_revision").invoke({
+        batchId: "batch-1",
+      }),
+    ).resolves.toEqual({ run });
+    expect(prepareAnswerRevision).toHaveBeenCalledWith("batch-1");
+    await findTool(group, "revise_run_answer").invoke({
+      batchId: "batch-1",
+      answers: [],
+    });
+    expect(reviseAnswer).toHaveBeenCalledWith("batch-1", [], false, true);
+    expect(
+      findTool(group, "prepare_run_answer_revision").annotations,
+    ).toMatchObject({ readOnlyHint: false, idempotentHint: false });
+    expect(findTool(group, "revise_run_answer").annotations).toMatchObject({
+      destructiveHint: true,
+      idempotentHint: false,
+    });
+    const sse = createSseToolGroup({} as never);
+    for (const name of ["sse_endpoint_create", "sse_storage_increment"]) {
+      expect(findTool(sse, name).annotations).toMatchObject({
+        readOnlyHint: false,
+        idempotentHint: false,
+      });
+    }
+  });
+
   test("maps agent-run list filters to the service's required input", async () => {
     const list = vi.fn().mockResolvedValue({ items: [] });
     const group = createRunToolGroup({ list } as never);

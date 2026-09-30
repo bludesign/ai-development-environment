@@ -6,8 +6,9 @@ import {
   authorizeRunMcpRequest,
   authorizeToolRequest,
   createBuiltInMcpServer,
+  createScopedMcpServer,
 } from "@/services/tools";
-import type { ToolInvocationContext } from "@/services/tools";
+import type { ToolInvocationContext, McpToolSnapshot } from "@/services/tools";
 
 export const runtime = "nodejs";
 export const maxDuration = 180;
@@ -32,6 +33,7 @@ async function handle(request: Request): Promise<Response> {
   let context: ToolInvocationContext;
   let allowedToolNames: ReadonlySet<string> | undefined;
   let runRepositoryId: string | null | undefined;
+  let toolSnapshot: McpToolSnapshot | undefined;
   if (runValues.length) {
     const runId = runValues[0]!.trim();
     if (!runId) {
@@ -65,6 +67,7 @@ async function handle(request: Request): Promise<Response> {
     }
     context = authorization.context;
     allowedToolNames = new Set(snapshot.toolNames);
+    toolSnapshot = snapshot.snapshot;
     runRepositoryId = snapshot.repositoryId;
   } else if (presetValues.length) {
     const presetId = presetValues[0]!.trim();
@@ -81,8 +84,22 @@ async function handle(request: Request): Promise<Response> {
     }
     const authorization = await authorizeMcpPresetRequest(request);
     if ("response" in authorization) return authorization.response;
-    const toolNames = await tools.mcpPresetToolNames(presetId);
-    if (!toolNames) {
+    let snapshot: McpToolSnapshot | null;
+    try {
+      snapshot = await tools.mcpPresetSnapshot(presetId);
+    } catch {
+      return Response.json(
+        {
+          error: {
+            code: "MCP_PRESET_UNAVAILABLE",
+            message:
+              "Selected external tools could not be verified. Reconnect the server or update the preset.",
+          },
+        },
+        { status: 503 },
+      );
+    }
+    if (!snapshot) {
       return Response.json(
         {
           error: {
@@ -94,7 +111,7 @@ async function handle(request: Request): Promise<Response> {
       );
     }
     context = authorization.context;
-    allowedToolNames = new Set(toolNames);
+    toolSnapshot = snapshot;
   } else {
     const authorization = await authorizeToolRequest(request, "MCP");
     if ("response" in authorization) return authorization.response;
@@ -102,14 +119,24 @@ async function handle(request: Request): Promise<Response> {
   }
   try {
     const transport = new WebStandardStreamableHTTPServerTransport();
-    const server = createBuiltInMcpServer(
-      tools.builtInTools,
-      (name, input) =>
-        runRepositoryId === undefined
-          ? tools.callBuiltInTool(name, input, context)
-          : tools.callRunBuiltInTool(name, input, runRepositoryId, context),
-      allowedToolNames,
-    );
+    const server = toolSnapshot
+      ? createScopedMcpServer(toolSnapshot, (entry, args, signal) =>
+          tools.callSnapshotTool(
+            entry,
+            args,
+            context,
+            runRepositoryId,
+            AbortSignal.any([signal, request.signal]),
+          ),
+        )
+      : createBuiltInMcpServer(
+          tools.builtInTools,
+          (name, input) =>
+            runRepositoryId === undefined
+              ? tools.callBuiltInTool(name, input, context)
+              : tools.callRunBuiltInTool(name, input, runRepositoryId, context),
+          allowedToolNames,
+        );
     await server.connect(transport);
     const response = await transport.handleRequest(request);
     response.headers.set("x-request-id", context.correlationId);
