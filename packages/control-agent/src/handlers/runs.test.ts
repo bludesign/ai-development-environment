@@ -39,6 +39,18 @@ describe("session file resolution", () => {
     await expect(findClaudeSessionFile("missing", home)).resolves.toBeNull();
   });
 
+  test("finds sessions in a custom Claude configuration directory", async () => {
+    const home = await makeHome();
+    const claudeHome = join(home, "custom-claude");
+    const projectDir = join(claudeHome, "projects", "-Users-dev-app");
+    await mkdir(projectDir, { recursive: true });
+    const file = join(projectDir, "session-1.jsonl");
+    await writeFile(file, "{}\n");
+    await expect(
+      findClaudeSessionFile("session-1", home, claudeHome),
+    ).resolves.toBe(file);
+  });
+
   test("locates a Codex rollout whose filename ends with the thread id", async () => {
     const home = await makeHome();
     const threadId = "019f80ca-8092-7701-a01a-40a32a8ef040";

@@ -2782,8 +2782,61 @@ export class RunsService {
             data: events.slice(offset, offset + 500),
           });
         }
+        const claudeResults = new Map<
+          string,
+          { content: unknown; isError: boolean; createdAt: Date }
+        >();
+        for (const event of events) {
+          const raw = event.rawJson ? JSON.parse(event.rawJson) : {};
+          if (raw.type !== "user" || !Array.isArray(raw.message?.content))
+            continue;
+          for (const block of raw.message.content) {
+            if (
+              block.type === "tool_result" &&
+              typeof block.tool_use_id === "string"
+            ) {
+              claudeResults.set(block.tool_use_id, {
+                content: block.content ?? raw.tool_use_result ?? null,
+                isError: block.is_error === true,
+                createdAt: event.createdAt,
+              });
+            }
+          }
+        }
         const toolCalls = events.flatMap((event) => {
           const raw = event.rawJson ? JSON.parse(event.rawJson) : {};
+          const claudeTool =
+            raw.type === "assistant" && Array.isArray(raw.message?.content)
+              ? raw.message.content.find(
+                  (block: { type?: string }) => block.type === "tool_use",
+                )
+              : undefined;
+          if (claudeTool) {
+            const result = claudeResults.get(String(claudeTool.id));
+            return [
+              {
+                id: `event:${event.id}`,
+                runId,
+                attemptId,
+                sequence: event.sequence,
+                name: String(claudeTool.name ?? "Tool"),
+                status: result
+                  ? result.isError
+                    ? "FAILED"
+                    : "COMPLETED"
+                  : "OBSERVED",
+                inputJson: event.rawJson,
+                outputJson: JSON.stringify(result?.content ?? null),
+                error: result?.isError
+                  ? typeof result.content === "string"
+                    ? result.content
+                    : JSON.stringify(result.content)
+                  : null,
+                startedAt: event.createdAt,
+                finishedAt: result?.createdAt ?? null,
+              },
+            ];
+          }
           const item = raw.params?.item;
           const part = raw.properties?.part;
           const codexTool =

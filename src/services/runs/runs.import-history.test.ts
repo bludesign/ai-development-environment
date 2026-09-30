@@ -350,6 +350,86 @@ describe("imported run history", () => {
     expect(transaction.runEvent.createMany).toHaveBeenCalledTimes(2);
   });
 
+  test("pairs Claude tool calls with their results and persists recorded cost", async () => {
+    const { transaction } = database();
+    transaction.runToolCall.count.mockResolvedValue(3);
+    const toolEvents = [
+      { id: "search", name: "WebSearch", input: { query: "Claude docs" } },
+      { id: "bash", name: "Bash", input: { command: "npm test" } },
+      { id: "read", name: "Read", input: { file_path: "app.ts" } },
+    ].map((tool, sequence) => ({
+      id: `assistant:${tool.id}`,
+      sequence,
+      type: "ASSISTANT",
+      summary: tool.name,
+      createdAt: "2026-09-30T12:00:00Z",
+      raw: {
+        type: "assistant",
+        message: { content: [{ type: "tool_use", ...tool }] },
+      },
+    }));
+    const results = [
+      { tool_use_id: "search", content: "Search results", is_error: false },
+      { tool_use_id: "bash", content: "Tests failed", is_error: true },
+    ].map((result, sequence) => ({
+      id: `user:${result.tool_use_id}`,
+      sequence: toolEvents.length + sequence,
+      type: "USER",
+      summary: result.content,
+      createdAt: "2026-09-30T12:00:02Z",
+      raw: {
+        type: "user",
+        message: { content: [{ type: "tool_result", ...result }] },
+      },
+    }));
+    await new RunsService().importRuns("agent-1", "CLAUDE", [
+      {
+        ...record,
+        events: [...toolEvents, ...results],
+        estimatedCost: 0.75,
+        pricingSource: "claude-transcript",
+        usage: [{ ...record.usage[0]!, estimatedCost: 0.75 }],
+      },
+    ]);
+    expect(transaction.runToolCall.createMany).toHaveBeenCalledWith({
+      data: [
+        expect.objectContaining({
+          name: "WebSearch",
+          status: "COMPLETED",
+          inputJson: JSON.stringify(toolEvents[0]!.raw),
+          outputJson: '"Search results"',
+          error: null,
+          startedAt: new Date("2026-09-30T12:00:00Z"),
+          finishedAt: new Date("2026-09-30T12:00:02Z"),
+        }),
+        expect.objectContaining({
+          name: "Bash",
+          status: "FAILED",
+          outputJson: '"Tests failed"',
+          error: "Tests failed",
+        }),
+        expect.objectContaining({
+          name: "Read",
+          status: "OBSERVED",
+          outputJson: "null",
+          error: null,
+          finishedAt: null,
+        }),
+      ],
+    });
+    expect(transaction.agentRun.update).toHaveBeenCalledWith({
+      where: { id: "run-1" },
+      data: { toolCallCount: 3 },
+    });
+    expect(transaction.agentRun.update).toHaveBeenCalledWith({
+      where: { id: "run-1" },
+      data: expect.objectContaining({
+        estimatedCost: 0.75,
+        pricingSource: "claude-transcript",
+      }),
+    });
+  });
+
   test("sums complete model costs but keeps incomplete estimates unknown", async () => {
     const { transaction } = database();
     transaction.runModelUsage.aggregate.mockResolvedValue({

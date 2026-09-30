@@ -32,8 +32,9 @@ async function fileExists(path: string): Promise<boolean> {
 export async function findClaudeSessionFile(
   nativeId: string,
   home: string,
+  claudeHome = join(home, ".claude"),
 ): Promise<string | null> {
-  const projectsDir = join(home, ".claude", "projects");
+  const projectsDir = join(claudeHome, "projects");
   let entries;
   try {
     entries = await readdir(projectsDir, { withFileTypes: true });
@@ -86,7 +87,11 @@ async function locateSessionFile(
   home: string,
 ): Promise<string | null> {
   return payload.provider === "CLAUDE"
-    ? findClaudeSessionFile(payload.nativeId, home)
+    ? findClaudeSessionFile(
+        payload.nativeId,
+        home,
+        process.env.CLAUDE_CONFIG_DIR,
+      )
     : findCodexSessionFile(payload.nativeId, home, process.env.CODEX_HOME);
 }
 
