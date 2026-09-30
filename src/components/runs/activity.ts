@@ -707,6 +707,11 @@ function describeOpenCode(
     const tokens = asRecord(info.tokens);
     const total = finiteNumber(tokens.total);
     const cost = finiteNumber(info.cost);
+    const error = asRecord(info.error);
+    const errorMessage =
+      text(info.error) ??
+      text(error.message) ??
+      text(asRecord(error.data).message);
     const detailRows: ActivityDetailRow[] = [
       { label: "Role", value: formatMethodTitle(role) },
     ];
@@ -726,12 +731,17 @@ function describeOpenCode(
     pushTokenRows(detailRows, tokens, number);
     if (cost !== null)
       detailRows.push({ label: "Reported cost", value: formatCost(cost) });
+    if (errorMessage) detailRows.push({ label: "Error", value: errorMessage });
     return {
       methodTitle: `${formatMethodTitle(role)} Message`,
       line: [
         model,
         agent,
-        finish ? formatMethodTitle(finish) : "Started",
+        errorMessage
+          ? "Failed"
+          : finish
+            ? formatMethodTitle(finish)
+            : "Started",
         total !== null && total > 0 ? `${number(total)} tokens` : null,
         cost ? formatCost(cost) : null,
       ]
@@ -758,6 +768,14 @@ function describeOpenCode(
   if (eventType === "message.part.updated") {
     const part = asRecord(properties.part);
     const partType = text(part.type) ?? "part";
+    if (partType === "text" || partType === "reasoning") {
+      const body = text(part.text) ?? event.detailMarkdown ?? event.summary;
+      return {
+        methodTitle: formatMethodTitle(partType),
+        line: linePreview(body),
+        detailRows: body ? [{ label: "Text", value: body }] : [],
+      };
+    }
     if (partType === "tool") {
       const tool = text(part.tool) ?? "Tool";
       const state = asRecord(part.state);

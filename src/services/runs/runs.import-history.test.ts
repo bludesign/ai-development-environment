@@ -35,6 +35,7 @@ function database(origin = "IMPORTED") {
           outputTokens: 10,
           cacheReadTokens: 80,
           reasoningTokens: 4,
+          estimatedCost: null,
         },
       }),
     },
@@ -219,5 +220,142 @@ describe("imported run history", () => {
     ).toBeUndefined();
     await service.importRuns("agent-1", "CODEX", [record]);
     expect(transaction.runEvent.createMany).toHaveBeenCalledTimes(2);
+  });
+
+  test("persists OpenCode tool input, output, errors, timing and reported session cost", async () => {
+    const { transaction } = database();
+    const input = {
+      ...record,
+      estimatedCost: 0.25,
+      pricingSource: "opencode-history",
+      usage: [
+        {
+          ...record.usage[0]!,
+          estimatedCost: 0.2,
+          pricingSource: "opencode-history",
+        },
+      ],
+      events: [
+        {
+          id: "message:tool",
+          sequence: 0,
+          type: "MESSAGE_PART_UPDATED",
+          summary: "websearch",
+          raw: {
+            type: "message.part.updated",
+            properties: {
+              part: {
+                type: "tool",
+                tool: "websearch",
+                state: {
+                  status: "error",
+                  input: { query: "OpenCode import" },
+                  output: "Partial results",
+                  error: "Search unavailable",
+                  time: { start: 1_000, end: 2_000 },
+                },
+              },
+            },
+          },
+        },
+      ],
+    };
+    const service = new RunsService();
+    await service.importRuns("agent-1", "OPENCODE", [input]);
+    expect(transaction.runToolCall.createMany).toHaveBeenCalledWith({
+      data: [
+        expect.objectContaining({
+          name: "websearch",
+          status: "FAILED",
+          inputJson: JSON.stringify(input.events[0]!.raw),
+          outputJson: '"Partial results"',
+          error: "Search unavailable",
+          startedAt: new Date(1_000),
+          finishedAt: new Date(2_000),
+        }),
+      ],
+    });
+    expect(transaction.agentRun.update).toHaveBeenCalledWith({
+      where: { id: "run-1" },
+      data: expect.objectContaining({
+        estimatedCost: 0.25,
+        pricingSource: "opencode-history",
+      }),
+    });
+    await service.importRuns("agent-1", "OPENCODE", [
+      { ...input, estimatedCost: 0 },
+    ]);
+    expect(transaction.agentRun.update).toHaveBeenCalledWith({
+      where: { id: "run-1" },
+      data: expect.objectContaining({
+        estimatedCost: 0,
+        pricingSource: "opencode-history",
+      }),
+    });
+    expect(transaction.runEvent.createMany).toHaveBeenCalledTimes(2);
+  });
+
+  test("sums complete model costs but keeps incomplete estimates unknown", async () => {
+    const { transaction } = database();
+    transaction.runModelUsage.aggregate.mockResolvedValue({
+      _sum: {
+        inputTokens: 20,
+        outputTokens: 10,
+        cacheReadTokens: 80,
+        reasoningTokens: 4,
+        estimatedCost: 0.3,
+      },
+    } as never);
+    const service = new RunsService();
+    await service.importRuns("agent-1", "OPENCODE", [
+      {
+        ...record,
+        usage: [
+          {
+            ...record.usage[0]!,
+            estimatedCost: 0.3,
+            pricingSource: "opencode-history",
+          },
+        ],
+      },
+    ]);
+    expect(transaction.agentRun.update).toHaveBeenCalledWith({
+      where: { id: "run-1" },
+      data: expect.objectContaining({
+        estimatedCost: 0.3,
+        pricingSource: "opencode-history",
+      }),
+    });
+    await service.importRuns("agent-1", "OPENCODE", [
+      {
+        ...record,
+        usage: [
+          { ...record.usage[0]!, model: "unpriced-model" },
+          { ...record.usage[0]!, estimatedCost: 0.3 },
+        ],
+      },
+    ]);
+    expect(transaction.agentRun.update).toHaveBeenLastCalledWith({
+      where: { id: "run-1" },
+      data: expect.objectContaining({ estimatedCost: null }),
+    });
+  });
+
+  test("can update reported costs without replacing unavailable histories", async () => {
+    const { transaction } = database();
+    await new RunsService().importRuns("agent-1", "OPENCODE", [
+      {
+        nativeId: "native-1",
+        worktreeId: "worktree-1",
+        estimatedCost: 0.1,
+        pricingSource: "opencode-history",
+      },
+    ]);
+    expect(transaction.runEvent.deleteMany).not.toHaveBeenCalled();
+    expect(transaction.runModelUsage.deleteMany).not.toHaveBeenCalled();
+    expect(transaction.agentRun.update).toHaveBeenCalledWith({
+      where: { id: "run-1" },
+      data: expect.objectContaining({ estimatedCost: 0.1 }),
+    });
   });
 });

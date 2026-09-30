@@ -118,6 +118,27 @@ describe("Codex imported transcript metadata", () => {
     });
   });
 
+  test("preserves legacy usage before an upgrade to per-response records", () => {
+    const result = codexTranscriptMetadata([
+      context("older-model", "older-turn"),
+      legacy(usage(100, 80)),
+      context("newer-model", "newer-turn"),
+      {
+        type: "token_usage_record",
+        payload: {
+          turn_id: "newer-turn",
+          response_id: "newer-response",
+          usage: usage(150, 40),
+        },
+      },
+      legacy(usage(250, 120, 20)),
+    ]);
+    expect(result.usage).toMatchObject([
+      { model: "older-model", inputTokens: 20, outputTokens: 10 },
+      { model: "newer-model", inputTokens: 110, outputTokens: 10 },
+    ]);
+  });
+
   test("tolerates an incomplete trailing JSONL record", async () => {
     const directory = await mkdtemp(join(tmpdir(), "codex-import-"));
     try {
@@ -204,5 +225,43 @@ describe("Codex imported activity", () => {
         ],
       }).kind,
     ).toBe("SESSION");
+  });
+
+  test("preserves tool progress, failed turn details and interruption status", () => {
+    const history = codexImportedHistory({
+      id: "thread",
+      turns: [
+        {
+          id: "turn",
+          status: "failed",
+          error: { message: "Request failed" },
+          items: [
+            {
+              id: "tool",
+              type: "commandExecution",
+              command: "npm test",
+              status: "inProgress",
+            },
+          ],
+        },
+      ],
+    });
+    expect(history.status).toBe("FAILED");
+    expect(history.events?.[0]).toMatchObject({
+      type: "ITEM_STARTED",
+      raw: { method: "item/started" },
+    });
+    expect(history.events?.[1]).toMatchObject({
+      type: "TURN_COMPLETED",
+      summary: "Request failed",
+      raw: {
+        method: "turn/completed",
+        params: { turn: { error: "Request failed" } },
+      },
+    });
+    expect(
+      codexImportedHistory({ turns: [{ status: "interrupted", items: [] }] })
+        .status,
+    ).toBe("CANCELLED");
   });
 });

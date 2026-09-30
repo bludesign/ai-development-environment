@@ -36,27 +36,30 @@ function tokens(value: unknown, model: string): ProviderUsage {
   };
 }
 
-/** Per-response records supersede legacy cumulative token_count snapshots. */
+/** Prefer per-response usage within each turn, preserving older legacy turns. */
 export function codexTranscriptMetadata(
   records: TranscriptRecord[],
 ): Pick<ProviderImportedRun, "model" | "effort" | "usage"> {
   let model: string | undefined;
   let effort: string | undefined;
   const turnModels = new Map<string, string>();
+  const responseTurns = new Set<string>();
+  let contextTurn = "unknown-turn";
   for (const record of records) {
-    if (record.type !== "turn_context") continue;
     const context = asRecord(record.payload);
-    if (typeof context.model === "string") model = context.model;
-    if (typeof context.effort === "string") effort = context.effort;
-    if (model && typeof context.turn_id === "string")
-      turnModels.set(context.turn_id, model);
+    if (record.type === "turn_context") {
+      contextTurn = String(context.turn_id ?? "unknown-turn");
+      if (typeof context.model === "string") model = context.model;
+      if (typeof context.effort === "string") effort = context.effort;
+      if (model) turnModels.set(contextTurn, model);
+    }
+    if (record.type === "token_usage_record" && context.usage)
+      responseTurns.add(String(context.turn_id ?? contextTurn));
   }
-  const hasResponseUsage = records.some(
-    (record) => record.type === "token_usage_record",
-  );
   const totals = new Map<string, ProviderUsage>();
   const seenResponses = new Set<string>();
   let currentModel: string | undefined;
+  let currentTurn = "unknown-turn";
   let previous: ProviderUsage = { model: "unknown" };
   const add = (usage: ProviderUsage) => {
     const total = totals.get(usage.model) ?? {
@@ -69,9 +72,11 @@ export function codexTranscriptMetadata(
   };
   for (const record of records) {
     const payload = asRecord(record.payload);
-    if (record.type === "turn_context" && typeof payload.model === "string")
-      currentModel = payload.model;
-    if (hasResponseUsage && record.type === "token_usage_record") {
+    if (record.type === "turn_context") {
+      currentTurn = String(payload.turn_id ?? "unknown-turn");
+      if (typeof payload.model === "string") currentModel = payload.model;
+    }
+    if (record.type === "token_usage_record") {
       const responseId =
         typeof payload.response_id === "string"
           ? payload.response_id
@@ -84,11 +89,7 @@ export function codexTranscriptMetadata(
           : (turnModels.get(String(payload.turn_id)) ?? currentModel);
       if (responseModel && payload.usage)
         add(tokens(payload.usage, responseModel));
-    } else if (
-      !hasResponseUsage &&
-      record.type === "event_msg" &&
-      payload.type === "token_count"
-    ) {
+    } else if (record.type === "event_msg" && payload.type === "token_count") {
       const raw = asRecord(payload.info).total_token_usage;
       if (!raw) continue;
       const cumulative = tokens(raw, currentModel ?? "unknown");
@@ -102,7 +103,7 @@ export function codexTranscriptMetadata(
           (cumulative[field] ?? 0) - (previous[field] ?? 0),
         );
       previous = cumulative;
-      add(delta);
+      if (!responseTurns.has(currentTurn)) add(delta);
     }
   }
   return {
@@ -141,7 +142,7 @@ export async function readCodexTranscriptMetadata(path: string) {
 function timestamp(value: unknown): string | undefined {
   const date =
     typeof value === "number"
-      ? new Date(value * 1_000)
+      ? new Date(value < 1_000_000_000_000 ? value * 1_000 : value)
       : typeof value === "string"
         ? new Date(value)
         : undefined;
@@ -153,12 +154,13 @@ function timestamp(value: unknown): string | undefined {
 /** Reuse the live activity renderer's JSON-RPC envelopes for persisted items. */
 export function codexImportedHistory(
   threadValue: unknown,
-): Pick<ProviderImportedRun, "events" | "finalOutput" | "kind"> {
+): Pick<ProviderImportedRun, "events" | "finalOutput" | "kind" | "status"> {
   const thread = asRecord(threadValue);
   const turns = Array.isArray(thread.turns) ? thread.turns : [];
   const events: NonNullable<ProviderImportedRun["events"]> = [];
   let finalOutput: string | undefined;
   let kind: "PLAN" | "SESSION" = "SESSION";
+  let status: string | undefined;
   for (const value of turns) {
     const turn = asRecord(value);
     for (const itemValue of Array.isArray(turn.items) ? turn.items : []) {
@@ -177,21 +179,63 @@ export function codexImportedHistory(
           : typeof item.command === "string"
             ? item.command
             : undefined;
+      const inProgress = [
+        "inProgress",
+        "in_progress",
+        "running",
+        "pending",
+      ].includes(String(item.status));
       events.push({
         id: `${String(turn.id ?? turns.indexOf(value))}:${String(item.id ?? events.length)}`,
         sequence: events.length,
-        type: "ITEM_COMPLETED",
+        type: inProgress ? "ITEM_STARTED" : "ITEM_COMPLETED",
         summary: (detail || String(item.type ?? "Codex item")).slice(0, 2_000),
         detailMarkdown: detail,
         createdAt: timestamp(
           item.createdAt ?? turn.startedAt ?? thread.createdAt,
         ),
         raw: {
-          method: "item/completed",
+          method: inProgress ? "item/started" : "item/completed",
           params: { threadId: thread.id, turnId: turn.id, item },
         },
       });
     }
+    if (typeof turn.status === "string") {
+      const inProgress = turn.status === "inProgress";
+      status =
+        turn.status === "failed"
+          ? "FAILED"
+          : turn.status === "interrupted"
+            ? "CANCELLED"
+            : undefined;
+      const error = asRecord(turn.error);
+      const detail =
+        typeof error.message === "string"
+          ? error.message
+          : typeof turn.error === "string"
+            ? turn.error
+            : undefined;
+      events.push({
+        id: `${String(turn.id ?? turns.indexOf(value))}:status`,
+        sequence: events.length,
+        type: inProgress ? "TURN_STARTED" : "TURN_COMPLETED",
+        summary: detail || `Turn ${turn.status}`,
+        detailMarkdown: detail,
+        createdAt: timestamp(
+          turn.completedAt ??
+            turn.startedAt ??
+            thread.updatedAt ??
+            thread.createdAt,
+        ),
+        raw: {
+          method: inProgress ? "turn/started" : "turn/completed",
+          params: {
+            threadId: thread.id,
+            turn: { ...turn, items: undefined, error: detail ?? turn.error },
+          },
+        },
+      });
+    }
   }
-  return { events, finalOutput, kind };
+  return { events, finalOutput, kind, status };
 }

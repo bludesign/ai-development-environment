@@ -768,6 +768,10 @@ input ImportedRunInput {
   events: [RunEventInput!]
   "Token usage totals grouped by the model actually recorded in the transcript."
   usage: [RunUsageInput!]
+  "Total cost reported by the provider for this session, when available."
+  estimatedCost: Float
+  "Source of the reported session cost."
+  pricingSource: String
 }
 
 """

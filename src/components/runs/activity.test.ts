@@ -335,6 +335,42 @@ describe("describeActivity", () => {
     });
   });
 
+  test("renders imported OpenCode text and reasoning snapshots directly", () => {
+    for (const type of ["text", "reasoning"]) {
+      const description = describeActivity(
+        opencode("message.part.updated", {
+          part: {
+            id: "part",
+            messageID: "message",
+            type,
+            text: "Stored message content",
+          },
+        }),
+      );
+      expect(description.line).toBe("Stored message content");
+      expect(description.detailRows).toContainEqual({
+        label: "Text",
+        value: "Stored message content",
+      });
+    }
+  });
+
+  test("shows provider failure details on imported OpenCode messages", () => {
+    const description = describeActivity(
+      opencode("message.updated", {
+        info: {
+          role: "assistant",
+          error: { type: "unknown", message: "Provider unavailable" },
+        },
+      }),
+    );
+    expect(description.line).toContain("Failed");
+    expect(description.detailRows).toContainEqual({
+      label: "Error",
+      value: "Provider unavailable",
+    });
+  });
+
   test("summarizes OpenCode step usage and cost", () => {
     const descriptor = describeActivity(
       opencode("message.part.updated", {

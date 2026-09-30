@@ -126,6 +126,8 @@ export type ImportedRunInput = {
   rawMetadata?: unknown;
   events?: RunEventInput[] | null;
   usage?: Array<Parameters<RunsService["reportUsage"]>[3]> | null;
+  estimatedCost?: number | null;
+  pricingSource?: string | null;
 };
 
 function enumValue<T extends readonly string[]>(
@@ -2783,32 +2785,62 @@ export class RunsService {
         const toolCalls = events.flatMap((event) => {
           const raw = event.rawJson ? JSON.parse(event.rawJson) : {};
           const item = raw.params?.item;
-          if (
-            !item ||
-            ![
+          const part = raw.properties?.part;
+          const codexTool =
+            item &&
+            [
               "commandExecution",
               "fileChange",
               "mcpToolCall",
               "dynamicToolCall",
               "webSearch",
-            ].includes(item.type)
-          )
-            return [];
+            ].includes(item.type);
+          const opencodeTool =
+            raw.type === "message.part.updated" && part?.type === "tool";
+          if (!codexTool && !opencodeTool) return [];
+          const state = opencodeTool ? (part.state ?? {}) : item;
+          const status = String(state.status ?? "COMPLETED").toUpperCase();
+          const startedAt =
+            opencodeTool && typeof state.time?.start === "number"
+              ? new Date(state.time.start)
+              : event.createdAt;
+          const finishedAt = opencodeTool
+            ? typeof state.time?.end === "number"
+              ? new Date(state.time.end)
+              : null
+            : ["INPROGRESS", "IN_PROGRESS", "RUNNING", "PENDING"].includes(
+                  status,
+                )
+              ? null
+              : event.createdAt;
           return [
             {
               id: `event:${event.id}`,
               runId,
               attemptId,
               sequence: event.sequence,
-              name: item.tool ?? item.command ?? item.type,
-              status: String(item.status ?? "COMPLETED").toUpperCase(),
+              name: opencodeTool
+                ? (part.tool ?? part.name ?? "tool")
+                : (item.tool ?? item.command ?? item.type),
+              status:
+                status === "ERROR"
+                  ? "FAILED"
+                  : status === "INPROGRESS"
+                    ? "IN_PROGRESS"
+                    : status,
               inputJson: event.rawJson,
               outputJson: JSON.stringify(
-                item.result ?? item.aggregatedOutput ?? null,
+                opencodeTool
+                  ? (state.result ?? state.output ?? null)
+                  : (item.result ?? item.aggregatedOutput ?? null),
               ),
-              error: item.error ? JSON.stringify(item.error) : null,
-              startedAt: event.createdAt,
-              finishedAt: event.createdAt,
+              error: state.error
+                ? typeof state.error === "string"
+                  ? state.error
+                  : JSON.stringify(state.error)
+                : null,
+              startedAt,
+              finishedAt,
             },
           ];
         });
@@ -2858,6 +2890,7 @@ export class RunsService {
             reasoningTokens: true,
             cacheReadTokens: true,
             cacheWriteTokens: true,
+            estimatedCost: true,
           },
         });
         await transaction.agentRun.update({
@@ -2868,7 +2901,32 @@ export class RunsService {
             reasoningTokens: totals._sum.reasoningTokens ?? 0,
             cacheReadTokens: totals._sum.cacheReadTokens ?? 0,
             cacheWriteTokens: totals._sum.cacheWriteTokens ?? 0,
-            pricingSource: "codex-transcript",
+            estimatedCost:
+              record.estimatedCost ??
+              (record.usage.length &&
+              record.usage.every((usage) => usage.estimatedCost != null)
+                ? (totals._sum.estimatedCost ?? null)
+                : null),
+            pricingSource: optionalText(
+              record.pricingSource ??
+                [
+                  ...new Set(
+                    record.usage
+                      .map((usage) => usage.pricingSource)
+                      .filter(Boolean),
+                  ),
+                ].join(", "),
+              200,
+            ),
+            pricingUpdatedAt: new Date(),
+          },
+        });
+      } else if (record.estimatedCost !== undefined) {
+        await transaction.agentRun.update({
+          where: { id: runId },
+          data: {
+            estimatedCost: record.estimatedCost,
+            pricingSource: optionalText(record.pricingSource, 200),
             pricingUpdatedAt: new Date(),
           },
         });
@@ -2887,9 +2945,16 @@ export class RunsService {
     for (const record of records) {
       const nativeKey = `${agentId}:${provider}:${requiredText(record.nativeId, "Native ID", 500)}`;
       const historyDigest =
-        record.events || record.usage
+        record.events || record.usage || record.estimatedCost !== undefined
           ? createHash("sha256")
-              .update(JSON.stringify([record.events, record.usage]))
+              .update(
+                JSON.stringify([
+                  record.events,
+                  record.usage,
+                  record.estimatedCost,
+                  record.pricingSource,
+                ]),
+              )
               .digest("hex")
           : undefined;
       const metadata =
@@ -2914,7 +2979,7 @@ export class RunsService {
           return "IN_PROGRESS";
         if (value === "PAUSED") return "PAUSED";
         if (value === "CANCELLED" || value === "CANCELED") return "CANCELLED";
-        if (value === "FAILED" || value === "ERROR") return "FAILED";
+        if (["FAILED", "ERROR", "SYSTEMERROR"].includes(value)) return "FAILED";
         return "COMPLETED";
       })();
       const existing = await prisma.runAttempt.findUnique({

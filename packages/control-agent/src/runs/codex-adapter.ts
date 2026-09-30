@@ -672,6 +672,7 @@ export class CodexAdapter implements ProviderAdapter {
               cursor,
               limit: 100,
               sortDirection: "asc",
+              sourceKinds: ["cli", "vscode", "exec", "appServer"],
             }),
           );
           const threads = Array.isArray(page.data) ? page.data : [];
@@ -735,9 +736,11 @@ export class CodexAdapter implements ProviderAdapter {
               nativeId: String(thread.id),
               worktreeId: worktree.id,
               ...history,
-              status: String(
-                asRecord(thread.status).type ?? thread.status ?? "COMPLETED",
-              ).toUpperCase(),
+              status: active
+                ? "IN_PROGRESS"
+                : asRecord(thread.status).type === "systemError"
+                  ? "FAILED"
+                  : (history.status ?? "COMPLETED"),
               archived,
               prompt: String(
                 thread.preview ?? thread.name ?? "Imported Codex thread",

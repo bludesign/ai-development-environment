@@ -19,6 +19,333 @@ vi.mock("../executable-lookup.js", () => executableLookup);
 
 import { OpenCodeAdapter } from "./opencode-adapter.js";
 
+function discoveryClient() {
+  const client = {
+    v2: {
+      session: {
+        active: vi.fn(async () => ({ data: { data: {} } })),
+        list: vi.fn(async () => ({ data: { data: [], cursor: {} } })),
+        messages: vi.fn(),
+      },
+    },
+    session: {
+      list: vi.fn(async () => ({ data: [] })),
+      status: vi.fn(async () => ({ data: {} })),
+      messages: vi.fn(),
+    },
+  };
+  sdk.createOpencode.mockResolvedValue({ client, server: { close: vi.fn() } });
+  return client;
+}
+
+describe("OpenCode history discovery", () => {
+  const worktrees = [
+    { id: "worktree-1", folder: "/workspace", branch: "main" },
+  ];
+  const session = {
+    id: "session-1",
+    location: { directory: "/workspace" },
+    time: { created: 1_000, updated: 2_000 },
+    title: "Import test",
+    cost: 0.2,
+  };
+  const user = {
+    id: "user",
+    type: "user",
+    text: "Fix imports",
+    time: { created: 1_000 },
+  };
+  const answer = {
+    id: "assistant",
+    type: "assistant",
+    model: { providerID: "openai", id: "model-a" },
+    time: { created: 2_000 },
+    tokens: { input: 10 },
+    cost: 0.2,
+    content: [{ type: "text", text: "Done" }],
+  };
+
+  test("follows session and message cursors and hydrates legacy sessions too", async () => {
+    const client = discoveryClient();
+    client.v2.session.list.mockImplementation(
+      async (params?: { cursor?: string }) =>
+        ({
+          data: {
+            data: params?.cursor ? [] : [session],
+            cursor: params?.cursor ? {} : { next: "sessions-next" },
+          },
+        }) as never,
+    );
+    client.v2.session.messages.mockImplementation(
+      async (params: { cursor?: string }) => ({
+        data: {
+          data: params.cursor ? [answer] : [user],
+          cursor: params.cursor ? {} : { next: "messages-next" },
+        },
+      }),
+    );
+    client.session.list.mockResolvedValue({
+      data: [
+        {
+          id: "legacy",
+          directory: "/workspace",
+          time: { created: 1_000, updated: 2_000 },
+          title: "Legacy",
+        },
+        { id: "elsewhere", directory: "/other" },
+        { ...session, directory: "/workspace" },
+      ],
+    } as never);
+    client.session.messages.mockResolvedValue({
+      data: [
+        {
+          info: {
+            id: "legacy-assistant",
+            role: "assistant",
+            providerID: "anthropic",
+            modelID: "claude",
+            time: { created: 2_000 },
+            tokens: { input: 30 },
+            cost: 0.1,
+          },
+          parts: [{ id: "text", type: "text", text: "Legacy answer" }],
+        },
+      ],
+    });
+    const results = await new OpenCodeAdapter().discover(worktrees);
+    expect(results).toHaveLength(2);
+    expect(results[0]).toMatchObject({
+      finalOutput: "Done",
+      prompt: "Fix imports",
+      model: "openai/model-a",
+      estimatedCost: 0.2,
+      usage: [{ inputTokens: 10 }],
+    });
+    expect(results[1]).toMatchObject({
+      nativeId: "legacy",
+      finalOutput: "Legacy answer",
+      model: "anthropic/claude",
+      usage: [{ inputTokens: 30, estimatedCost: 0.1 }],
+    });
+    expect(client.v2.session.list).toHaveBeenLastCalledWith(
+      { directory: "/workspace", limit: 200, cursor: "sessions-next" },
+      { throwOnError: true },
+    );
+    expect(client.v2.session.messages).toHaveBeenLastCalledWith(
+      { sessionID: "session-1", limit: 200, cursor: "messages-next" },
+      { throwOnError: true },
+    );
+    expect(client.session.messages).toHaveBeenCalledOnce();
+  });
+
+  test("does not save a partial history and retries hydration failures", async () => {
+    const client = discoveryClient();
+    client.v2.session.list.mockResolvedValue({
+      data: { data: [session], cursor: {} },
+    } as never);
+    client.v2.session.messages
+      .mockResolvedValueOnce({
+        data: { data: [user], cursor: { next: "next" } },
+      })
+      .mockRejectedValueOnce(new Error("History unavailable"))
+      .mockResolvedValue({ data: { data: [user, answer], cursor: {} } });
+    const adapter = new OpenCodeAdapter();
+    await expect(adapter.discover(worktrees)).rejects.toThrow(
+      "OpenCode history unavailable for 1 sessions: session-1: History unavailable",
+    );
+    expect(client.session.messages).not.toHaveBeenCalled();
+    expect((await adapter.discover(worktrees))[0]?.finalOutput).toBe("Done");
+  });
+
+  test("caches idle snapshots but refreshes active sessions even with unchanged timestamps", async () => {
+    const client = discoveryClient();
+    client.v2.session.list.mockResolvedValue({
+      data: { data: [session], cursor: {} },
+    } as never);
+    client.v2.session.messages.mockResolvedValue({
+      data: { data: [answer], cursor: {} },
+    });
+    const adapter = new OpenCodeAdapter();
+    await adapter.discover(worktrees);
+    await adapter.discover(worktrees);
+    expect(client.v2.session.messages).toHaveBeenCalledOnce();
+    client.v2.session.active.mockResolvedValue({
+      data: { data: { "session-1": { type: "running" } } },
+    } as never);
+    expect((await adapter.discover(worktrees))[0]?.status).toBe("IN_PROGRESS");
+    expect(client.v2.session.messages).toHaveBeenCalledTimes(2);
+    client.v2.session.active.mockResolvedValue({ data: { data: {} } });
+    await adapter.discover(worktrees);
+    expect(client.v2.session.messages).toHaveBeenCalledTimes(3);
+  });
+
+  test("imports legacy installations when the native v2 API is unavailable", async () => {
+    const client = discoveryClient();
+    client.v2.session.list.mockRejectedValue(new Error("Unsupported endpoint"));
+    client.v2.session.active.mockRejectedValue(
+      new Error("Unsupported endpoint"),
+    );
+    client.session.list.mockResolvedValue({
+      data: [{ ...session, directory: "/workspace" }],
+    } as never);
+    client.session.messages.mockResolvedValue({ data: [] });
+    client.session.status.mockResolvedValue({
+      data: { "session-1": { type: "retry" } },
+    } as never);
+    expect((await new OpenCodeAdapter().discover(worktrees))[0]).toMatchObject({
+      nativeId: "session-1",
+      status: "IN_PROGRESS",
+      events: [],
+    });
+  });
+
+  test("hydrates legacy transcripts exposed by the v2 session list using supported page sizes", async () => {
+    const client = discoveryClient();
+    client.v2.session.list.mockResolvedValue({
+      data: { data: [session], cursor: {} },
+    } as never);
+    client.v2.session.messages.mockImplementation(
+      async (params: { limit: number }) => {
+        if (params.limit > 200)
+          throw {
+            _tag: "InvalidRequestError",
+            message: "Expected a value less than or equal to 200",
+          };
+        return { data: { data: [], cursor: { next: null, previous: null } } };
+      },
+    );
+    client.session.messages.mockResolvedValue({
+      data: [
+        {
+          info: {
+            id: "legacy-message",
+            role: "assistant",
+            providerID: "opencode-go",
+            modelID: "deepseek-v4-flash",
+            time: { created: 2_000 },
+            tokens: { input: 20 },
+            cost: 0.1,
+          },
+          parts: [{ id: "text", type: "text", text: "Restored answer" }],
+        },
+      ],
+    });
+    const [run] = await new OpenCodeAdapter().discover(worktrees);
+    expect(run).toMatchObject({
+      finalOutput: "Restored answer",
+      model: "opencode-go/deepseek-v4-flash",
+      usage: [{ inputTokens: 20 }],
+      events: [expect.anything(), expect.anything()],
+    });
+    expect(client.session.messages).toHaveBeenCalledWith(
+      { sessionID: "session-1", directory: "/workspace", limit: 200 },
+      { throwOnError: true },
+    );
+    expect(client.session.list).toHaveBeenCalledWith(
+      { directory: "/workspace", limit: 200 },
+      { throwOnError: true },
+    );
+  });
+
+  test("follows opaque legacy message cursors and keeps all model usage", async () => {
+    const client = discoveryClient();
+    client.session.list.mockResolvedValue({
+      data: [{ ...session, directory: "/workspace" }],
+    } as never);
+    const message = (id: string, created: number) => ({
+      info: {
+        id,
+        role: "assistant",
+        providerID: "openai",
+        modelID: "model-a",
+        time: { created },
+        tokens: { input: 10 },
+        cost: 0.1,
+      },
+      parts: [{ type: "text", text: id }],
+    });
+    client.session.messages
+      .mockResolvedValueOnce({
+        data: [message("newest", 2_000)],
+        response: {
+          headers: new Headers({ "x-next-cursor": "opaque-older-cursor" }),
+        },
+      })
+      .mockResolvedValueOnce({
+        data: [message("oldest", 1_000)],
+        response: { headers: new Headers() },
+      });
+    const [run] = await new OpenCodeAdapter().discover(worktrees);
+    expect(run).toMatchObject({
+      finalOutput: "newest",
+      usage: [{ inputTokens: 20, estimatedCost: 0.2 }],
+    });
+    expect(run?.events?.map((event) => event.id)).toEqual([
+      "message:oldest",
+      "oldest:part:0",
+      "message:newest",
+      "newest:part:0",
+    ]);
+    expect(client.session.messages).toHaveBeenLastCalledWith(
+      {
+        sessionID: "session-1",
+        directory: "/workspace",
+        limit: 200,
+        before: "opaque-older-cursor",
+      },
+      { throwOnError: true },
+    );
+  });
+
+  test("falls back when the projected message API is unavailable", async () => {
+    const client = discoveryClient();
+    client.v2.session.list.mockResolvedValue({
+      data: { data: [session], cursor: {} },
+    } as never);
+    client.v2.session.messages.mockRejectedValue({
+      _tag: "SessionNotFoundError",
+    });
+    client.session.messages.mockResolvedValue({
+      data: [
+        {
+          info: { id: "user", role: "user", time: { created: 1_000 } },
+          parts: [{ type: "text", text: "Original prompt" }],
+        },
+      ],
+    });
+    expect(
+      (await new OpenCodeAdapter().discover(worktrees))[0]?.events,
+    ).toHaveLength(2);
+  });
+
+  test("retains successful sessions when another history is unavailable", async () => {
+    const client = discoveryClient();
+    client.v2.session.list.mockResolvedValue({
+      data: { data: [session, { ...session, id: "unavailable" }], cursor: {} },
+    } as never);
+    client.v2.session.messages.mockImplementation(
+      async ({ sessionID }: { sessionID: string }) => {
+        if (sessionID === "unavailable") throw new Error("History unavailable");
+        return { data: { data: [answer], cursor: {} } };
+      },
+    );
+    client.session.messages.mockRejectedValue(new Error("History unavailable"));
+    const warning = vi.spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      const runs = await new OpenCodeAdapter().discover(worktrees);
+      expect(runs[0]?.finalOutput).toBe("Done");
+      expect(runs[1]?.events).toBeUndefined();
+      expect(runs[1]?.usage).toBeUndefined();
+      expect(runs[1]?.model).toBeUndefined();
+      expect(warning).toHaveBeenCalledWith(
+        expect.stringContaining("unavailable: History unavailable"),
+      );
+    } finally {
+      warning.mockRestore();
+    }
+  });
+});
+
 describe("OpenCodeAdapter questions", () => {
   test("uses a run-isolated MCP runtime and closes it when the run settles", async () => {
     const close = vi.fn();

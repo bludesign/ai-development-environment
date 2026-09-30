@@ -135,6 +135,12 @@ describe("Codex history discovery", () => {
         { id: "worktree-1", folder: directory, branch: "main" },
       ];
       const [imported] = await adapter.discover(worktrees);
+      expect(request).toHaveBeenCalledWith(
+        "thread/list",
+        expect.objectContaining({
+          sourceKinds: ["cli", "vscode", "exec", "appServer"],
+        }),
+      );
       expect(imported).toMatchObject({
         model: "model-a",
         effort: "high",
@@ -199,5 +205,39 @@ describe("Codex history discovery", () => {
     expect((await adapter.discover(worktrees))[0]?.events).toBeUndefined();
     expect((await adapter.discover(worktrees))[0]?.events).toEqual([]);
     expect(reads).toBe(2);
+  });
+
+  test("uses persisted failure status for unloaded threads and runtime system errors", async () => {
+    const adapter = new CodexAdapter();
+    const server = (
+      adapter as unknown as {
+        server: {
+          request(
+            method: string,
+            params: Record<string, unknown>,
+          ): Promise<unknown>;
+        };
+      }
+    ).server;
+    const thread = {
+      id: "thread-1",
+      path: "/nonexistent/codex-rollout",
+      status: { type: "notLoaded" },
+      updatedAt: 200,
+    };
+    vi.spyOn(server, "request").mockImplementation(async (method, params) =>
+      method === "thread/list"
+        ? { data: params.archived ? [] : [thread] }
+        : {
+            thread: {
+              ...thread,
+              turns: [{ id: "turn", status: "failed", items: [] }],
+            },
+          },
+    );
+    const worktrees = [{ id: "worktree-1", folder: "/test", branch: null }];
+    expect((await adapter.discover(worktrees))[0]?.status).toBe("FAILED");
+    thread.status.type = "systemError";
+    expect((await adapter.discover(worktrees))[0]?.status).toBe("FAILED");
   });
 });
