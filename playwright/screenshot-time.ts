@@ -9,6 +9,9 @@ export const SCREENSHOT_TIME_ZONE = "America/New_York";
 /** Stable documentation origin used in place of the capture server's ephemeral port. */
 export const SCREENSHOT_PUBLIC_ORIGIN = "https://ade.acme.example.com";
 
+/** Stable Local origin, distinct from the Remote example, for endpoint displays. */
+export const SCREENSHOT_LOCAL_ORIGIN = "http://127.0.0.1:3000";
+
 /** Freeze Date without pausing timers used to load and settle each page. */
 export async function setScreenshotTime(page: Page): Promise<void> {
   await page.clock.setFixedTime(SCREENSHOT_TIME);
@@ -40,6 +43,12 @@ export async function normalizeScreenshotValues(page: Page): Promise<void> {
       if (element.value.includes(runtimeOrigin)) {
         element.value = element.value.replaceAll(runtimeOrigin, stableOrigin);
       }
+      if (element.placeholder.includes(runtimeOrigin)) {
+        element.placeholder = element.placeholder.replaceAll(
+          runtimeOrigin,
+          stableOrigin,
+        );
+      }
     }
-  }, SCREENSHOT_PUBLIC_ORIGIN);
+  }, SCREENSHOT_LOCAL_ORIGIN);
 }

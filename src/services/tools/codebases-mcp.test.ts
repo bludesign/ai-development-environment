@@ -144,6 +144,7 @@ describe("codebases MCP server", () => {
         },
       ]),
       startBuild: vi.fn().mockResolvedValue(build),
+      startWorktreeCoverage: vi.fn().mockResolvedValue(build),
       cancelBuild: vi.fn().mockResolvedValue({ ...build, status: "CANCELLED" }),
       runBuild: vi.fn().mockResolvedValue([{ id: "deployment-1" }]),
       exportArchive: vi.fn().mockResolvedValue({ id: "export-1" }),
@@ -195,6 +196,7 @@ describe("codebases MCP server", () => {
             name: "iPhone 17 Pro",
           },
           requestId: "request-1",
+          serverUrlKind: "PROXY",
         },
       }),
     ).resolves.toMatchObject({ structuredContent: { build } });
@@ -203,7 +205,26 @@ describe("codebases MCP server", () => {
         worktreeId: "worktree-1",
         requestId: "request-1",
         scriptIds: [],
+        serverUrlKind: "PROXY",
       }),
+    );
+
+    await expect(
+      client.callTool({
+        name: "start_worktree_coverage",
+        arguments: {
+          input: {
+            worktreeId: "worktree-1",
+            configurationId: "configuration-1",
+            destination: { type: "SIMULATOR", id: "SIM-1" },
+            requestId: "coverage-1",
+            serverUrlKind: "REMOTE",
+          },
+        },
+      }),
+    ).resolves.toMatchObject({ structuredContent: { build } });
+    expect(builds.startWorktreeCoverage).toHaveBeenCalledWith(
+      expect.objectContaining({ serverUrlKind: "REMOTE" }),
     );
 
     await expect(

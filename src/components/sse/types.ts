@@ -58,6 +58,10 @@ export type SseEndpoint = {
   id: string;
   token: string;
   publicUrl: string;
+  endpointPath: string;
+  localUrl: string;
+  remoteUrl: string;
+  proxyUrl: string | null;
   name: string;
   description: string;
   mode: SseMode;

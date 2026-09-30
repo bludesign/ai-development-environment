@@ -27,7 +27,7 @@ function header(headers: Headers, name: string): string | null {
   return safeHost(headers.get(name));
 }
 
-function isLoopback(hostname: string): boolean {
+export function isLoopback(hostname: string): boolean {
   const host = hostname.toLowerCase().replace(/^\[|\]$/g, "");
   if (LOOPBACK_HOSTNAMES.has(host) || host === "::1") return true;
   if (host.endsWith(".local") || host.endsWith(".localhost")) return true;

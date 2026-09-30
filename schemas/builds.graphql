@@ -753,6 +753,8 @@ input InspectBuildSourceInput {
 
 "Values used to start a build."
 input StartBuildInput {
+  "Server address to bake into this build. Omit to use the simulator or global default."
+  serverUrlKind: ServerUrlKind
   "Identifier of the worktree to use."
   worktreeId: ID!
   "Identifier of the configuration to use."
@@ -1159,4 +1161,23 @@ extend type Subscription {
   ): BuildChange!
   "Emits a build log chunk whenever build log chunk is added."
   buildLogChunkAdded("Identifier of the build." buildId: ID!): BuildLogChunk!
+}
+
+"Artifact links generated using a configured server address."
+type BuildArtifactLinks {
+  "Signed artifact download link, valid for six hours."
+  downloadUrl: String!
+  "OTA manifest link that carries the selected server URL kind."
+  manifestUrl: String!
+}
+extend type Query {
+  "Temporary artifact download and install links at a configured server address."
+  buildArtifactLinks(
+    "Build that owns the artifact."
+    buildId: ID!
+    "Artifact to download or install."
+    artifactId: ID!
+    "Configured address to use. Omission uses the global default."
+    serverUrlKind: ServerUrlKind
+  ): BuildArtifactLinks!
 }

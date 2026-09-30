@@ -1,3 +1,4 @@
+import { serverUrlFixture } from "../../../test/fixtures/server-urls";
 import {
   cleanup,
   fireEvent,
@@ -32,6 +33,7 @@ vi.mock("@/i18n/navigation", () => ({
 }));
 
 const request = vi.mocked(controlPlaneRequest);
+let urlSettings = serverUrlFixture;
 const now = new Date().toISOString();
 const observation = {
   id: "observation-1",
@@ -49,6 +51,7 @@ const observation = {
 };
 
 beforeEach(() => {
+  urlSettings = serverUrlFixture;
   Element.prototype.hasPointerCapture = vi.fn(() => false);
   Element.prototype.setPointerCapture = vi.fn();
   Element.prototype.releasePointerCapture = vi.fn();
@@ -247,6 +250,38 @@ afterEach(() => {
 });
 
 describe("StartBuildDialog", () => {
+  test("suggests destination defaults until a server URL is explicitly selected", async () => {
+    urlSettings = {
+      ...serverUrlFixture,
+      simulatorDefaultServerUrlKind: "REMOTE",
+    };
+    render(
+      <StartBuildButton codebaseId="codebase-1" worktreeId="worktree-1" />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Build" }));
+    await screen.findByRole("button", { name: /Development/ });
+    const selector = screen.getByRole("combobox", { name: "Server URL" });
+    await waitFor(() => expect(selector.textContent).toContain("Remote"));
+    fireEvent.click(screen.getByRole("tab", { name: "Physical Device" }));
+    expect(selector.textContent).toContain("Local");
+    fireEvent.click(screen.getByRole("tab", { name: "Simulator" }));
+    expect(selector.textContent).toContain("Remote");
+    selector.focus();
+    fireEvent.keyDown(selector, { key: "ArrowDown" });
+    fireEvent.click(await screen.findByRole("option", { name: /Proxy/ }));
+    fireEvent.click(screen.getByRole("tab", { name: "Physical Device" }));
+    expect(selector.textContent).toContain("Proxy");
+    const start = screen.getByRole("button", { name: "Start Build" });
+    await waitFor(() => expect(start.hasAttribute("disabled")).toBe(false));
+    fireEvent.click(start);
+    await waitFor(() =>
+      expect(request).toHaveBeenCalledWith(
+        expect.stringContaining("mutation StartIosBuild"),
+        { input: expect.objectContaining({ serverUrlKind: "PROXY" }) },
+      ),
+    );
+  });
+
   test.each(["Cancel", "Use settings"])(
     "handles %s after reopening Custom without mixing saved settings",
     async (editorAction) => {
@@ -782,3 +817,12 @@ describe("StartBuildDialog", () => {
     expect(navigation.push).not.toHaveBeenCalled();
   });
 });
+
+vi.mock("@/hooks/use-server-url-settings", () => ({
+  useServerUrlSettings: () => ({
+    settings: urlSettings,
+    loading: false,
+    error: null,
+    refresh: vi.fn(),
+  }),
+}));

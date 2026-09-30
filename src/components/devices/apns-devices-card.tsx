@@ -1,4 +1,10 @@
 "use client";
+import {
+  EndpointUrls,
+  ServerUrlPicker,
+} from "@/components/server-urls/server-url-controls";
+import { useServerUrlSettings } from "@/hooks/use-server-url-settings";
+import { serverUrlOptions, type ServerUrlKind } from "@/lib/server-urls";
 
 import { Check, Copy, HelpCircle, MoreHorizontal, Trash2 } from "lucide-react";
 import { useTranslations } from "next-intl";
@@ -360,11 +366,18 @@ const EXAMPLE = {
 };
 
 function ApnsApiHelp() {
+  const { settings } = useServerUrlSettings();
+  const [kind, setKind] = useState<ServerUrlKind | null>(null);
+  const base =
+    settings &&
+    serverUrlOptions(settings).find(
+      (option) => option.kind === (kind ?? settings.defaultServerUrlKind),
+    )?.url;
   const t = useTranslations("apnsDevices");
   const [copied, setCopied] = useState<string | null>(null);
-  const markdown = `POST /api/ios/apns-devices\nContent-Type: application/json\n\n\`\`\`json\n${JSON.stringify(EXAMPLE, null, 2)}\n\`\`\``;
-  const curl = `curl -X POST "$BASE_URL/api/ios/apns-devices" \\\n+  -H 'Content-Type: application/json' \\\n+  --data '${JSON.stringify(EXAMPLE)}'`;
-  const swift = `let body: [String: Any] = ${JSON.stringify(EXAMPLE, null, 2)}\nvar request = URLRequest(url: baseURL.appending(path: "/api/ios/apns-devices"))\nrequest.httpMethod = "POST"\nrequest.setValue("application/json", forHTTPHeaderField: "Content-Type")\nrequest.httpBody = try JSONSerialization.data(withJSONObject: body)\nlet (_, response) = try await URLSession.shared.data(for: request)`;
+  const markdown = `POST ${base ?? "$BASE_URL"}/api/ios/apns-devices\nContent-Type: application/json\n\n\`\`\`json\n${JSON.stringify(EXAMPLE, null, 2)}\n\`\`\``;
+  const curl = `curl -X POST "${base ?? "$BASE_URL"}/api/ios/apns-devices" \\\n  -H 'Content-Type: application/json' \\\n  --data '${JSON.stringify(EXAMPLE)}'`;
+  const swift = `let body: [String: Any] = ${JSON.stringify(EXAMPLE, null, 2)}\nvar request = URLRequest(url: URL(string: "${base ?? "$BASE_URL"}/api/ios/apns-devices")!)\nrequest.httpMethod = "POST"\nrequest.setValue("application/json", forHTTPHeaderField: "Content-Type")\nrequest.httpBody = try JSONSerialization.data(withJSONObject: body)\nlet (_, response) = try await URLSession.shared.data(for: request)`;
   const copy = async (name: string, value: string) => {
     await navigator.clipboard.writeText(value);
     setCopied(name);
@@ -382,6 +395,8 @@ function ApnsApiHelp() {
           <DialogTitle>{t("apiHelpTitle")}</DialogTitle>
           <DialogDescription>{t("apiHelpDescription")}</DialogDescription>
         </DialogHeader>
+        <ServerUrlPicker value={kind} onValueChange={setKind} />
+        <EndpointUrls path="/api/ios/apns-devices" />
         <Tabs defaultValue="markdown">
           <TabsList>
             <TabsTrigger value="markdown">Markdown</TabsTrigger>

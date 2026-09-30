@@ -106,6 +106,8 @@ describe("built-in tool registry", () => {
       "clear_unified_events",
       "get_telemetry_separators",
       "add_telemetry_separator",
+      "get_server_url_settings",
+      "update_server_url_settings",
       "get_telemetry_settings",
       "update_telemetry_settings",
       "get_telemetry_view_settings",
@@ -219,7 +221,7 @@ describe("built-in tool registry", () => {
       ]),
     );
     const tools = expanded.definitions();
-    expect(tools).toHaveLength(334);
+    expect(tools).toHaveLength(336);
     expect(new Set(tools.map(({ name }) => name)).size).toBe(tools.length);
     expect(tools.every(({ annotations }) => Boolean(annotations))).toBe(true);
   });
@@ -266,10 +268,10 @@ describe("built-in tool registry", () => {
       crashes: placeholder,
     };
     const complete = createBuiltInToolRegistry(services);
-    expect(complete.definitions()).toHaveLength(415);
+    expect(complete.definitions()).toHaveLength(417);
     expect(complete.catalog()).toHaveLength(29);
     expect(new Set(complete.definitions().map(({ name }) => name)).size).toBe(
-      415,
+      417,
     );
     expect(complete.catalog().map(({ id }) => id)).toEqual(
       expect.arrayContaining([

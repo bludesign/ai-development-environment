@@ -16,13 +16,12 @@ import {
 } from "@/components/ui/empty";
 import { Spinner } from "@/components/ui/spinner";
 import { Input } from "@/components/ui/input";
+import { useServerUrlSettings } from "@/hooks/use-server-url-settings";
 import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
+  EndpointUrls,
+  ServerUrlPicker,
+} from "@/components/server-urls/server-url-controls";
+import { serverUrlOptions, type ServerUrlKind } from "@/lib/server-urls";
 import { Link } from "@/i18n/navigation";
 import { copyText } from "@/lib/browser-utils";
 import {
@@ -38,17 +37,14 @@ import { AGENT_FIELDS } from "./graphql-fields";
 import type { Agent } from "./types";
 
 const AGENTS_QUERY = `query Agents { agents { ${AGENT_FIELDS} } }`;
-const CUSTOM_SERVER_ORIGIN = "__custom__";
-
 export function shellQuote(value: string): string {
   return `'${value.replaceAll("'", `'"'"'`)}'`;
 }
 
-export function AgentsList({
-  localServerOrigins = [],
-}: {
-  localServerOrigins?: string[];
-}) {
+export function AgentsList(_props: { localServerOrigins?: string[] }) {
+  const { settings: serverUrls } = useServerUrlSettings();
+  const [selectedServerKind, setSelectedServerKind] =
+    useState<ServerUrlKind | null>(null);
   const t = useTranslations("agents");
   const detailT = useTranslations("agentDetail");
   const locale = useLocale();
@@ -59,10 +55,6 @@ export function AgentsList({
     token: string;
     expiresAt: string;
   } | null>(null);
-  const [selectedServerOrigin, setSelectedServerOrigin] = useState<
-    string | null
-  >(null);
-  const [customServerOrigin, setCustomServerOrigin] = useState("");
   const [requestHeaders, setRequestHeaders] = useState<
     Array<{ id: string; name: string; value: string }>
   >([]);
@@ -128,33 +120,27 @@ export function AgentsList({
     }
   };
 
-  const browserOrigin =
-    typeof window === "undefined" ? null : window.location.origin;
-  const serverOrigin =
-    selectedServerOrigin === CUSTOM_SERVER_ORIGIN
-      ? customServerOrigin.trim()
-      : (selectedServerOrigin ?? browserOrigin ?? "http://127.0.0.1:3090");
-  const command = enrollment
-    ? [
-        "control-agent enroll",
-        `--server ${shellQuote(serverOrigin)}`,
-        `--enrollment-token ${enrollment.token}`,
-        ...requestHeaders
-          .filter((header) => header.name.trim() && header.value)
-          .map(
-            (header) =>
-              `--header ${shellQuote(`${header.name.trim()}: ${header.value}`)}`,
-          ),
-      ].join(" ")
+  const serverOrigin = serverUrls
+    ? (serverUrlOptions(serverUrls).find(
+        (option) =>
+          option.kind ===
+          (selectedServerKind ?? serverUrls.defaultServerUrlKind),
+      )?.url ?? "")
     : "";
-  const serverOrigins = [
-    ...new Set(
-      [browserOrigin, ...localServerOrigins].filter(
-        (origin): origin is string => Boolean(origin),
-      ),
-    ),
-  ];
-
+  const command =
+    enrollment && serverOrigin
+      ? [
+          "control-agent enroll",
+          `--server ${shellQuote(serverOrigin)}`,
+          `--enrollment-token ${enrollment.token}`,
+          ...requestHeaders
+            .filter((header) => header.name.trim() && header.value)
+            .map(
+              (header) =>
+                `--header ${shellQuote(`${header.name.trim()}: ${header.value}`)}`,
+            ),
+        ].join(" ")
+      : "";
   return (
     <section className="mx-auto flex w-full max-w-6xl flex-col gap-6">
       <div className="flex flex-wrap items-start justify-between gap-4">
@@ -185,37 +171,11 @@ export function AgentsList({
             <p className="mt-1 text-sm text-muted-foreground">
               {t("enrollmentDescription")}
             </p>
-            <Select
-              onValueChange={setSelectedServerOrigin}
-              value={selectedServerOrigin ?? browserOrigin ?? undefined}
-            >
-              <SelectTrigger
-                aria-label={t("serverAddress")}
-                className="mt-3 w-full sm:w-auto sm:min-w-72"
-              >
-                <SelectValue placeholder={t("serverAddress")} />
-              </SelectTrigger>
-              <SelectContent align="start">
-                {serverOrigins.map((origin) => (
-                  <SelectItem key={origin} value={origin}>
-                    {origin}
-                  </SelectItem>
-                ))}
-                <SelectItem value={CUSTOM_SERVER_ORIGIN}>
-                  {t("customServerAddress")}
-                </SelectItem>
-              </SelectContent>
-            </Select>
-            {selectedServerOrigin === CUSTOM_SERVER_ORIGIN && (
-              <Input
-                aria-label={t("customServerAddress")}
-                className="mt-2 w-full sm:max-w-md"
-                onChange={(event) => setCustomServerOrigin(event.target.value)}
-                placeholder={t("customServerAddress")}
-                type="url"
-                value={customServerOrigin}
-              />
-            )}
+            <ServerUrlPicker
+              value={selectedServerKind}
+              onValueChange={setSelectedServerKind}
+            />
+            <EndpointUrls path="" />
             <div className="mt-4 space-y-2">
               <div className="flex items-center justify-between gap-3">
                 <div>

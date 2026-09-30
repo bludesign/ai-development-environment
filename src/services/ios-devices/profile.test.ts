@@ -5,6 +5,20 @@ import { describe, expect, test } from "vitest";
 import { enrollmentProfileXml } from "./ios-devices.service";
 
 describe("enrollmentProfileXml", () => {
+  test("includes the selected kind in the signed profile callback", () => {
+    const profile = parsePlist(
+      enrollmentProfileXml({
+        token: "abc_123-token",
+        publicOrigin: "https://aide.ts.net",
+        serverUrlKind: "PROXY",
+        organizationName: "Example",
+        profileIdentifier: "com.example.enrollment",
+      }),
+    ) as Record<string, unknown>;
+    expect((profile.PayloadContent as Record<string, unknown>).URL).toBe(
+      "https://aide.ts.net/api/public/ios/profile-response?token=abc_123-token&serverUrlKind=PROXY",
+    );
+  });
   test("uses a fixed identity, unique UUIDs, escaped values, and only approved attributes", () => {
     const input = {
       token: "abc_123-token",

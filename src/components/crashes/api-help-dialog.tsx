@@ -15,6 +15,12 @@ import {
 } from "@/components/ui/dialog";
 import { copyText } from "@/lib/browser-utils";
 
+import { useServerUrlSettings } from "@/hooks/use-server-url-settings";
+import {
+  EndpointUrls,
+  ServerUrlPicker,
+} from "@/components/server-urls/server-url-controls";
+import { serverUrlOptions, type ServerUrlKind } from "@/lib/server-urls";
 import { crashApiDocumentation } from "./api-docs";
 
 export function CrashApiHelpDialog({
@@ -26,9 +32,16 @@ export function CrashApiHelpDialog({
 }) {
   const t = useTranslations("crashes");
   const [copied, setCopied] = useState(false);
-  const documentation = crashApiDocumentation(
-    typeof window === "undefined" ? "" : window.location.origin,
-  );
+  const { settings: serverUrls } = useServerUrlSettings();
+  const [selectedKind, setSelectedKind] = useState<ServerUrlKind | null>(null);
+  const documentation = serverUrls
+    ? crashApiDocumentation(
+        serverUrlOptions(serverUrls).find(
+          (option) =>
+            option.kind === (selectedKind ?? serverUrls.defaultServerUrlKind),
+        )?.url ?? "",
+      )
+    : "";
   return (
     <Dialog
       onOpenChange={(next) => {
@@ -42,6 +55,9 @@ export function CrashApiHelpDialog({
           <DialogTitle>{t("apiHelpTitle")}</DialogTitle>
           <DialogDescription>{t("apiHelpDescription")}</DialogDescription>
         </DialogHeader>
+        <ServerUrlPicker value={selectedKind} onValueChange={setSelectedKind} />
+        <EndpointUrls path="/api/public/crashes" />
+        <EndpointUrls path="/api/dsyms" />
         <pre className="max-h-[65vh] overflow-auto rounded-lg border bg-muted/40 p-4 text-xs leading-relaxed whitespace-pre-wrap">
           <code>{documentation}</code>
         </pre>

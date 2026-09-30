@@ -1,4 +1,7 @@
-import { resolvePublicOrigin } from "@/lib/public-origin";
+import {
+  configuredServerOrigin,
+  ServerUrlSelectionError,
+} from "@/server/configured-server-origin";
 import { IosEnrollmentError, resolveClientIp } from "@/services/ios-devices";
 import { getServerServices } from "@/services/server-services";
 
@@ -51,6 +54,14 @@ export async function POST(request: Request): Promise<Response> {
       );
     }
     const url = new URL(request.url);
+    const selectedOrigin = await configuredServerOrigin(
+      request.headers,
+      url.searchParams.get("serverUrlKind"),
+    );
+    if (!selectedOrigin.secure || selectedOrigin.loopback)
+      return new Response("Device enrollment requires public HTTPS", {
+        status: 409,
+      });
     const device =
       await getServerServices().iosDevicesService.completeEnrollment(
         url.searchParams.get("token") ?? "",
@@ -58,12 +69,13 @@ export async function POST(request: Request): Promise<Response> {
         resolveClientIp(request.headers),
       );
     if (!device) throw new Error("Completed enrollment device is unavailable");
-    const origin = resolvePublicOrigin(request.headers)?.origin ?? url.origin;
+    const origin = selectedOrigin.origin;
     const completionUrl = new URL(
       "/api/public/ios/enrollment-complete",
       origin,
     );
     completionUrl.searchParams.set("deviceId", device.id);
+    completionUrl.searchParams.set("serverUrlKind", selectedOrigin.kind);
     return new Response(null, {
       // iOS Profile Service uses a permanent redirect as the browser hand-off
       // after posting device attributes. A 303 is followed inside the profile
@@ -77,10 +89,15 @@ export async function POST(request: Request): Promise<Response> {
       },
     });
   } catch (error) {
-    const status = error instanceof IosEnrollmentError ? error.status : 500;
+    const status =
+      error instanceof IosEnrollmentError ||
+      error instanceof ServerUrlSelectionError
+        ? error.status
+        : 500;
     if (status === 500) console.error("iOS profile response failed:", error);
     return new Response(
-      error instanceof IosEnrollmentError
+      error instanceof IosEnrollmentError ||
+        error instanceof ServerUrlSelectionError
         ? error.message
         : "Could not validate the device response",
       { status, headers: { "cache-control": "no-store" } },

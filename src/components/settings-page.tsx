@@ -1,4 +1,16 @@
 "use client";
+import { ServerUrlsSettingsCard } from "@/components/server-urls/server-urls-settings-card";
+import {
+  ServerUrlActionNotice,
+  EndpointUrls,
+  ServerUrlPicker,
+} from "@/components/server-urls/server-url-controls";
+import { useServerUrlSettings } from "@/hooks/use-server-url-settings";
+import {
+  serverUrlActionProblem,
+  serverUrlOptions,
+  type ServerUrlKind,
+} from "@/lib/server-urls";
 
 import {
   CheckCircle2,
@@ -98,6 +110,7 @@ export function SettingsPage() {
             id="settings-development"
             title={t("developmentGroup")}
           >
+            <ServerUrlsSettingsCard />
             <EditorSettingsCard />
           </SettingsGroup>
           <SettingsGroup
@@ -282,9 +295,19 @@ function GitHubAppSettingsCard() {
   const [appId, setAppId] = useState("");
   const [installationId, setInstallationId] = useState("");
   const [privateKey, setPrivateKey] = useState("");
-  const [deploymentUrl, setDeploymentUrl] = useState("");
-  const [webhookUrl, setWebhookUrl] = useState("");
-  const [webhookUrlIsExplicit, setWebhookUrlIsExplicit] = useState(false);
+  const { settings: serverUrls } = useServerUrlSettings();
+  const [webhookServerKind, setWebhookServerKind] =
+    useState<ServerUrlKind | null>(null);
+  const deploymentUrl = serverUrls
+    ? (serverUrlOptions(serverUrls).find(
+        (option) =>
+          option.kind ===
+          (webhookServerKind ?? serverUrls.defaultServerUrlKind),
+      )?.url ?? "")
+    : "";
+  const webhookUrl = deploymentUrl
+    ? `${deploymentUrl}/api/public/github/webhook`
+    : "";
   const [enhancedPipelineWebhooksEnabled, setEnhancedPipelineWebhooksEnabled] =
     useState(false);
   const [draggingPem, setDraggingPem] = useState(false);
@@ -301,8 +324,6 @@ function GitHubAppSettingsCard() {
     setAppId(next.appId ?? "");
     setInstallationId(next.installationId ?? "");
     setPrivateKey("");
-    setWebhookUrl((current) => next.webhookUrl ?? current);
-    setWebhookUrlIsExplicit(Boolean(next.webhookUrl));
     setEnhancedPipelineWebhooksEnabled(
       next.enhancedPipelineWebhooksEnabled ?? false,
     );
@@ -325,10 +346,6 @@ function GitHubAppSettingsCard() {
 
   useEffect(() => {
     const timeout = window.setTimeout(() => {
-      setDeploymentUrl(window.location.origin);
-      setWebhookUrl(
-        `${window.location.origin.replace(/\/$/, "")}/api/public/github/webhook`,
-      );
       void load();
     }, 0);
     return () => window.clearTimeout(timeout);
@@ -349,7 +366,7 @@ function GitHubAppSettingsCard() {
             appId: appId.trim(),
             installationId: installationId.trim(),
             privateKey: privateKey || null,
-            ...(webhookUrlIsExplicit ? { webhookUrl: webhookUrl.trim() } : {}),
+            webhookUrl,
             enhancedPipelineWebhooksEnabled,
           },
         },
@@ -566,16 +583,15 @@ function GitHubAppSettingsCard() {
                 >
                   {t("webhookUrl")}
                 </Label>
+                <ServerUrlPicker
+                  value={webhookServerKind}
+                  onValueChange={setWebhookServerKind}
+                />
+                <EndpointUrls path="/api/public/github/webhook" />
+                <ServerUrlActionNotice kind={webhookServerKind} publicHost />
                 <Input
-                  disabled={credentialsReadOnly}
                   id="github-app-webhook-url"
-                  onChange={(event) => {
-                    setWebhookUrl(event.target.value);
-                    setWebhookUrlIsExplicit(true);
-                  }}
-                  placeholder="https://example.com/api/public/github/webhook"
-                  required
-                  type="url"
+                  readOnly
                   value={webhookUrl}
                 />
                 <p className="mt-1 text-xs text-muted-foreground">
@@ -781,7 +797,15 @@ function GitHubAppSettingsCard() {
                 </Button>
                 <Button
                   disabled={
-                    busy || (credentialsReadOnly && !settings?.configured)
+                    busy ||
+                    Boolean(
+                      serverUrlActionProblem(
+                        serverUrls,
+                        webhookServerKind,
+                        true,
+                      ),
+                    ) ||
+                    (credentialsReadOnly && !settings?.configured)
                   }
                   type="submit"
                 >

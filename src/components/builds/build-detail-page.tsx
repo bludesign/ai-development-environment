@@ -1,4 +1,5 @@
 "use client";
+import { BuildArtifactDownload } from "./build-artifact-download";
 
 import { OutOfDateBadge } from "@/components/builds/out-of-date-badge";
 
@@ -7,7 +8,6 @@ import {
   ArrowLeft,
   Check,
   Copy,
-  Download,
   FileJson,
   ChartNoAxesColumn,
   ChevronDown,
@@ -995,15 +995,12 @@ export function BuildDetailPage({
                             ? t("dsymsArtifact")
                             : humanizeConstant(artifact.kind)}
                         </Badge>
-                        <Button asChild size="sm" variant="outline">
-                          <a
-                            download
-                            href={`/api/public/builds/${encodeURIComponent(build.id)}/artifacts/${encodeURIComponent(artifact.id)}`}
-                          >
-                            <Download />{" "}
-                            {ipa ? t("downloadIpa") : t("downloadArtifact")}
-                          </a>
-                        </Button>
+                        <BuildArtifactDownload
+                          buildId={build.id}
+                          artifactId={artifact.id}
+                        >
+                          {ipa ? t("downloadIpa") : t("downloadArtifact")}
+                        </BuildArtifactDownload>
                       </div>
                       <p className="mt-1 break-all font-mono text-xs text-muted-foreground">
                         {artifact.relativePath}

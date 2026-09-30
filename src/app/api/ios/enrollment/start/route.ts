@@ -1,3 +1,4 @@
+import { configuredServerOrigin } from "@/server/configured-server-origin";
 import { resolvePublicOrigin } from "@/lib/public-origin";
 import { requireUserRequest } from "@/services/auth";
 import { getServerServices } from "@/services/server-services";
@@ -22,14 +23,18 @@ export async function POST(request: Request): Promise<Response> {
         status: 403,
       });
     }
-    const origin = resolvePublicOrigin(request.headers);
+    const form = await request.formData();
+    const selectedKind = form.get("serverUrlKind");
+    const origin = await configuredServerOrigin(
+      request.headers,
+      typeof selectedKind === "string" ? selectedKind : null,
+    );
     if (!origin?.secure || origin.loopback) {
       return new Response(
-        "Device enrollment requires a public HTTPS address. Set PUBLIC_BASE_URL or use a trusted HTTPS reverse proxy.",
+        "Device enrollment requires a public HTTPS address. Choose an HTTPS address in Server URLs settings.",
         { status: 409 },
       );
     }
-    const form = await request.formData();
     if (form.get("consent") !== "yes") {
       return new Response("Consent is required before device enrollment", {
         status: 400,
@@ -46,6 +51,7 @@ export async function POST(request: Request): Promise<Response> {
       origin.origin,
     );
     location.searchParams.set("token", enrollment.token);
+    location.searchParams.set("serverUrlKind", origin.kind);
     return new Response(null, {
       status: 303,
       headers: {

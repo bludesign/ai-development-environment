@@ -139,11 +139,6 @@ export type TelemetrySettingsView = {
 };
 
 export type TelemetryBuildSettings = {
-  localBaseUrl: string;
-  remoteBaseUrl: string;
-  selectedBaseUrl: string;
-  consoleLogsUrl: string;
-  analyticsEventsUrl: string;
   consoleCollectionEnabled: boolean;
   analyticsCollectionEnabled: boolean;
 };

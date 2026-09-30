@@ -82,6 +82,8 @@ const ALLOWED_IDENTICAL_TRANSLATIONS = new Map([
   // reports cite; Xcode leaves both untranslated.
   ["crashes.dsym", "dSYM"],
   ["crashes.uuid", "UUID"],
+  // "Proxy" is the established networking term in every supported locale.
+  ["serverUrls.proxy", "Proxy"],
 ]);
 
 function isTranslationData(value: unknown): value is TranslationData {

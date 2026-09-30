@@ -17,6 +17,33 @@ vi.mock("@/services/server-services", () => ({
 }));
 vi.mock("@/services/auth", () => ({ requireUserRequest }));
 
+vi.mock(
+  "@/services/server-urls/server-urls.service",
+  async (importOriginal) => {
+    const original =
+      await importOriginal<
+        typeof import("@/services/server-urls/server-urls.service")
+      >();
+    return {
+      ...original,
+      serverUrlSettingsService: {
+        settings: async (detection: { requestOrigin?: string }) => {
+          const detected = original.detectServerOrigins(detection);
+          return {
+            ...serverUrlFixture,
+            detectedLocalBaseUrl: detected.local,
+            detectedRemoteBaseUrl: detected.remote,
+            effectiveLocalBaseUrl: detected.local,
+            effectiveRemoteBaseUrl: detected.remote,
+            defaultServerUrlKind: "REMOTE",
+          };
+        },
+      },
+    };
+  },
+);
+import { serverUrlFixture } from "../../../../../test/fixtures/server-urls";
+
 import { GET as completion } from "./enrollment-complete/route";
 import { GET as profile } from "./enrollment-profile/route";
 import { POST as start } from "../../ios/enrollment/start/route";
@@ -51,6 +78,57 @@ afterEach(() => {
 });
 
 describe("iOS enrollment routes", () => {
+  test("keeps Proxy through start, profile download, and callback despite the request host", async () => {
+    const form = new FormData();
+    form.set("displayName", "Proxy iPhone");
+    form.set("consent", "yes");
+    form.set("serverUrlKind", "PROXY");
+    const started = await start(
+      new Request("http://127.0.0.1:3000/api/ios/enrollment/start", {
+        method: "POST",
+        headers: proxyHeaders(),
+        body: form,
+      }),
+    );
+    const profileUrl = new URL(started.headers.get("location")!);
+    expect(profileUrl.origin).toBe(serverUrlFixture.proxyBaseUrl);
+    expect(profileUrl.searchParams.get("serverUrlKind")).toBe("PROXY");
+    expect(
+      (await profile(new Request(profileUrl, { headers: proxyHeaders() })))
+        .status,
+    ).toBe(200);
+    expect(mocks.enrollmentProfile).toHaveBeenCalledWith(
+      "test-token",
+      serverUrlFixture.proxyBaseUrl,
+      null,
+      "PROXY",
+    );
+    const completed = await callback(
+      new Request(
+        `${serverUrlFixture.proxyBaseUrl}/api/public/ios/profile-response?token=test-token&serverUrlKind=PROXY`,
+        { method: "POST", headers: proxyHeaders(), body: new Uint8Array([1]) },
+      ),
+    );
+    const completionUrl = new URL(completed.headers.get("location")!);
+    expect(completionUrl.origin).toBe(serverUrlFixture.proxyBaseUrl);
+    expect(completionUrl.searchParams.get("serverUrlKind")).toBe("PROXY");
+  });
+
+  test("rejects arbitrary origins and private Local before consuming the callback token", async () => {
+    for (const [kind, status] of [
+      ["https://attacker.example", 400],
+      ["LOCAL", 409],
+    ] as const) {
+      const response = await callback(
+        new Request(
+          `http://127.0.0.1:3000/api/public/ios/profile-response?token=test-token&serverUrlKind=${encodeURIComponent(kind)}`,
+          { method: "POST", body: new Uint8Array([1]) },
+        ),
+      );
+      expect(response.status).toBe(status);
+    }
+    expect(mocks.completeEnrollment).not.toHaveBeenCalled();
+  });
   test("serves the signed profile with Apple MIME and no-cache headers", async () => {
     const response = await profile(
       new Request(
@@ -76,6 +154,7 @@ describe("iOS enrollment routes", () => {
       "test-token",
       "https://devices.example.com",
       { address: "203.0.113.9", source: "CLOUDFLARE" },
+      "REMOTE",
     );
   });
 
@@ -120,7 +199,7 @@ describe("iOS enrollment routes", () => {
 
     expect(response.status).toBe(303);
     expect(response.headers.get("location")).toBe(
-      "https://devices.example.com/api/public/ios/enrollment-profile?token=test-token",
+      "https://devices.example.com/api/public/ios/enrollment-profile?token=test-token&serverUrlKind=REMOTE",
     );
     expect(mocks.createEnrollment).toHaveBeenCalledWith("Test iPhone");
   });
@@ -204,7 +283,7 @@ describe("iOS enrollment routes", () => {
 
     expect(response.status).toBe(301);
     expect(response.headers.get("location")).toBe(
-      `https://devices.example.com/api/public/ios/enrollment-complete?deviceId=${deviceId}`,
+      `https://devices.example.com/api/public/ios/enrollment-complete?deviceId=${deviceId}&serverUrlKind=REMOTE`,
     );
     expect(mocks.completeEnrollment).toHaveBeenCalledWith(
       "test-token",
@@ -216,7 +295,7 @@ describe("iOS enrollment routes", () => {
   test("serves a script-free completion page with restrictive headers", async () => {
     const response = completion(
       new Request(
-        `https://devices.example.com/api/public/ios/enrollment-complete?deviceId=${deviceId}`,
+        `https://devices.example.com/api/public/ios/enrollment-complete?deviceId=${deviceId}&serverUrlKind=REMOTE`,
       ),
     );
     expect(response.headers.get("content-type")).toContain("text/html");

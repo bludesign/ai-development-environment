@@ -18,6 +18,7 @@ import { promisify } from "node:util";
 import { afterEach, describe, expect, test } from "vitest";
 
 import {
+  BUILD_ENDPOINT_PATHS,
   DEFAULT_BUILD_ADVANCED_SETTINGS,
   type BuildJobPayload,
   type BuildLogChunk,
@@ -935,7 +936,7 @@ export default async function hook() { await writeFile(${JSON.stringify(hookMark
       `import { appendFile } from "node:fs/promises";
 export default async function hook(build) {
   await appendFile("hook-order.txt", ${JSON.stringify(`${value}\n`)});
-  await appendFile("hook-contexts.jsonl", JSON.stringify(build) + "\\n");
+  await appendFile("hook-contexts.jsonl", JSON.stringify({ ...build, hookEnvironment: Object.fromEntries(Object.entries(process.env).filter(([key]) => key.startsWith("SERVER_") || key.endsWith("_PATH") || key.endsWith("_URL"))) }) + "\\n");
   ${
     includeSecret
       ? `process.stdout.write(Buffer.from([0xf0, 0x9f]));
@@ -955,6 +956,18 @@ export default async function hook(build) {
           ).canonicalOrigin,
           branch: "feature/hooks",
           buildId: "build-ordered",
+          server: {
+            localBaseUrl: "http://127.0.0.1:3000",
+            remoteBaseUrl: "https://builds.example.com",
+            proxyBaseUrl: null,
+            selectedUrlKind: "LOCAL",
+            selectedBaseUrl: "http://127.0.0.1:3000",
+          },
+          endpointPaths: BUILD_ENDPOINT_PATHS,
+          telemetry: {
+            consoleCollectionEnabled: true,
+            analyticsCollectionEnabled: false,
+          },
           artifactDirectory,
           scripts: [
             {
@@ -1010,6 +1023,39 @@ export default async function hook(build) {
         action: "BUILD",
         destination: { id: "SIM-1" },
       });
+      for (const context of contexts) {
+        expect(context.server).toEqual({
+          localBaseUrl: "http://127.0.0.1:3000",
+          remoteBaseUrl: "https://builds.example.com",
+          proxyBaseUrl: null,
+          selectedUrlKind: "LOCAL",
+          selectedBaseUrl: "http://127.0.0.1:3000",
+        });
+        expect(context.endpointPaths).toEqual(BUILD_ENDPOINT_PATHS);
+        expect(context.telemetry).toEqual({
+          consoleCollectionEnabled: true,
+          analyticsCollectionEnabled: false,
+        });
+        expect(context.hookEnvironment).toMatchObject({
+          SERVER_LOCAL_BASE_URL: "http://127.0.0.1:3000",
+          SERVER_REMOTE_BASE_URL: "https://builds.example.com",
+          SERVER_PROXY_BASE_URL: "",
+          SERVER_BASE_URL: "http://127.0.0.1:3000",
+          SERVER_URL_KIND: "LOCAL",
+          CONSOLE_LOGS_PATH: "/api/telemetry/console-logs",
+          DSYM_UPLOAD_PATH: "/api/dsyms/uploads/{uploadId}",
+          DSYM_UPLOAD_COMPLETE_PATH: "/api/dsyms/uploads/{uploadId}/complete",
+        });
+        expect(Object.keys(context.hookEnvironment as object)).not.toContain(
+          "CONSOLE_LOGS_URL",
+        );
+        expect(Object.keys(context.hookEnvironment as object)).not.toContain(
+          "TELEMETRY_SELECTED_BASE_URL",
+        );
+        expect(JSON.stringify(context.endpointPaths)).not.toMatch(
+          /sse|mcp|enrollment|webhook/i,
+        );
+      }
       expect(contexts[2]).toMatchObject({
         buildFolder: artifactDirectory,
         failed: false,

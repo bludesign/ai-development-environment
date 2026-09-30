@@ -11,7 +11,7 @@ export const SSE_COMPOSITION_FIELDS = `
 `;
 
 export const SSE_ENDPOINT_FIELDS = `
-  id token publicUrl name description mode forwardUrl requestScript responseScript
+  id token publicUrl endpointPath localUrl remoteUrl proxyUrl name description mode forwardUrl requestScript responseScript
   activeMockCompositionId
   activeMockComposition { ${SSE_COMPOSITION_FIELDS} }
   deliveryBufferMode historyBufferMode breakpointTimeoutMs
@@ -41,7 +41,7 @@ export const SSE_HISTORY_EVENT_FIELDS = `
 `;
 
 export const SSE_ENDPOINTS_QUERY = `query SseEndpointsPage {
-  sseEndpoints { id publicUrl name description mode forwardUrl activeMockCompositionId heartbeatEnabled heartbeatIntervalMs }
+  sseEndpoints { id publicUrl endpointPath localUrl remoteUrl proxyUrl name description mode forwardUrl activeMockCompositionId heartbeatEnabled heartbeatIntervalMs }
 }`;
 
 export const SSE_ENDPOINT_DETAIL_QUERY = `query SseEndpointDetail($id: ID!, $includeMocks: Boolean! = true) {

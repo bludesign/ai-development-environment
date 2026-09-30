@@ -1,3 +1,4 @@
+import { serverUrlFixture } from "../../../test/fixtures/server-urls";
 import {
   cleanup,
   fireEvent,
@@ -23,7 +24,7 @@ afterEach(() => {
 });
 
 describe("IosInstallButton", () => {
-  test("uses the public origin for copied links and disables install off-device", async () => {
+  test("uses the shared default for copied links and disables install off-device", async () => {
     Object.defineProperty(navigator, "platform", {
       configurable: true,
       value: "Linux x86_64",
@@ -60,8 +61,17 @@ describe("IosInstallButton", () => {
     fireEvent.click(screen.getByRole("button", { name: "Copy install link" }));
     await waitFor(() =>
       expect(copyTextMock).toHaveBeenCalledWith(
-        "https://ota.example.com/en/builds/build-1",
+        "http://127.0.0.1:3000/en/builds/build-1?serverUrlKind=LOCAL",
       ),
     );
   });
 });
+
+vi.mock("@/hooks/use-server-url-settings", () => ({
+  useServerUrlSettings: () => ({
+    settings: serverUrlFixture,
+    loading: false,
+    error: null,
+    refresh: vi.fn(),
+  }),
+}));

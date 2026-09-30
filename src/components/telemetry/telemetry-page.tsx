@@ -1,4 +1,9 @@
 "use client";
+import {
+  EndpointUrls,
+  ServerUrlSettingsLink,
+} from "@/components/server-urls/server-url-controls";
+import { useServerUrlSettings } from "@/hooks/use-server-url-settings";
 
 import { createRefreshCoalescer } from "@/lib/refresh-coalescer";
 import { readCursorWindow } from "@/lib/read-cursor-window";
@@ -2771,6 +2776,7 @@ export function telemetryApiDocumentation(
   view: IngestionView,
   localBaseUrl: string,
   remoteBaseUrl: string,
+  proxyBaseUrl?: string | null,
 ): string {
   const isConsole = view === "CONSOLE";
   const path = isConsole
@@ -2806,7 +2812,7 @@ export function telemetryApiDocumentation(
 Send one JSON record directly, or send an atomic batch as \`{ "items": [...] }\`. Batches may contain up to 500 records and the request body may be up to 2 MiB. Authentication is not required.
 
 - Local endpoint: \`${localEndpoint}\`
-- Remote endpoint: \`${remoteEndpoint}\`
+- Remote endpoint: \`${remoteEndpoint}\`${proxyBaseUrl ? `\n- Proxy endpoint: \`${proxyBaseUrl}${path}\`` : ""}
 - Method: \`POST\`
 - Content-Type: \`application/json\`
 
@@ -2841,10 +2847,12 @@ function ApiHelpDialog({
 }) {
   const t = useTranslations("telemetry");
   const [copied, setCopied] = useState(false);
+  const { settings: serverUrls } = useServerUrlSettings();
   const documentation = telemetryApiDocumentation(
     view,
-    settings.effectiveLocalBaseUrl,
-    settings.effectiveRemoteBaseUrl,
+    serverUrls?.effectiveLocalBaseUrl ?? settings.effectiveLocalBaseUrl,
+    serverUrls?.effectiveRemoteBaseUrl ?? settings.effectiveRemoteBaseUrl,
+    serverUrls?.proxyBaseUrl,
   );
   return (
     <Dialog
@@ -2896,8 +2904,6 @@ function ApiHelpDialog({
 function SettingsDialog({
   open,
   onOpenChange,
-  settings,
-  onSaved,
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
@@ -2905,170 +2911,25 @@ function SettingsDialog({
   onSaved: (settings: TelemetrySettingsView) => void;
 }) {
   const t = useTranslations("telemetry");
-  const [localOverride, setLocalOverride] = useState(
-    Boolean(settings.localBaseUrlOverride),
-  );
-  const [remoteOverride, setRemoteOverride] = useState(
-    Boolean(settings.remoteBaseUrlOverride),
-  );
-  const [local, setLocal] = useState(
-    settings.localBaseUrlOverride ?? settings.detectedLocalBaseUrl,
-  );
-  const [remote, setRemote] = useState(
-    settings.remoteBaseUrlOverride ?? settings.detectedRemoteBaseUrl,
-  );
-  const [error, setError] = useState<string | null>(null);
-  const save = async () => {
-    try {
-      const data = await controlPlaneRequest<{
-        saveTelemetrySettings: TelemetrySettingsView;
-      }>(
-        `mutation SaveTelemetrySettings($input: SaveTelemetrySettingsInput!, $origin: String) {
-          saveTelemetrySettings(input: $input, requestOrigin: $origin) {
-            localBaseUrlOverride remoteBaseUrlOverride consoleCollectionEnabled analyticsCollectionEnabled
-            detectedLocalBaseUrl detectedRemoteBaseUrl effectiveLocalBaseUrl effectiveRemoteBaseUrl updatedAt
-          }
-        }`,
-        {
-          input: {
-            localBaseUrlOverride: localOverride ? local : null,
-            remoteBaseUrlOverride: remoteOverride ? remote : null,
-          },
-          origin: window.location.origin,
-        },
-      );
-      onSaved(data.saveTelemetrySettings);
-      onOpenChange(false);
-      setError(null);
-    } catch (value) {
-      setError(value instanceof Error ? value.message : String(value));
-    }
-  };
   return (
     <Dialog onOpenChange={onOpenChange} open={open}>
       <DialogContent className="sm:max-w-xl">
         <DialogHeader>
           <DialogTitle>{t("telemetrySettings")}</DialogTitle>
-          <DialogDescription>{t("settingsDescription")}</DialogDescription>
+          <DialogDescription>
+            Endpoint addresses are configured in Settings.
+          </DialogDescription>
         </DialogHeader>
-        {error && (
-          <Alert variant="destructive">
-            <AlertDescription>{error}</AlertDescription>
-          </Alert>
-        )}
-        <div className="space-y-4">
-          <UrlSetting
-            checked={localOverride}
-            detected={settings.detectedLocalBaseUrl}
-            effective={localOverride ? local : settings.effectiveLocalBaseUrl}
-            label={t("localBaseUrl")}
-            onChecked={setLocalOverride}
-            onValue={setLocal}
-            value={local}
-          />
-          <UrlSetting
-            checked={remoteOverride}
-            detected={settings.detectedRemoteBaseUrl}
-            effective={
-              remoteOverride ? remote : settings.effectiveRemoteBaseUrl
-            }
-            label={t("remoteBaseUrl")}
-            onChecked={setRemoteOverride}
-            onValue={setRemote}
-            value={remote}
-          />
-          <div className="space-y-2 rounded-lg border bg-muted/20 p-3 text-xs">
-            <Endpoint
-              value={`${localOverride ? local : settings.detectedLocalBaseUrl}/api/telemetry/console-logs`}
-              label={t("localConsoleEndpoint")}
-            />
-            <Endpoint
-              value={`${localOverride ? local : settings.detectedLocalBaseUrl}/api/telemetry/analytics-events`}
-              label={t("localAnalyticsEndpoint")}
-            />
-            <Endpoint
-              value={`${remoteOverride ? remote : settings.detectedRemoteBaseUrl}/api/telemetry/console-logs`}
-              label={t("remoteConsoleEndpoint")}
-            />
-            <Endpoint
-              value={`${remoteOverride ? remote : settings.detectedRemoteBaseUrl}/api/telemetry/analytics-events`}
-              label={t("remoteAnalyticsEndpoint")}
-            />
-          </div>
-        </div>
+        <EndpointUrls path="/api/telemetry/console-logs" />
+        <EndpointUrls path="/api/telemetry/analytics-events" />
+        <ServerUrlSettingsLink />
         <DialogFooter>
-          <Button onClick={() => void save()}>{t("saveSettings")}</Button>
           <Button onClick={() => onOpenChange(false)} variant="outline">
             {t("cancel")}
           </Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>
-  );
-}
-
-function UrlSetting({
-  label,
-  detected,
-  effective,
-  checked,
-  value,
-  onChecked,
-  onValue,
-}: {
-  label: string;
-  detected: string;
-  effective: string;
-  checked: boolean;
-  value: string;
-  onChecked: (checked: boolean) => void;
-  onValue: (value: string) => void;
-}) {
-  const t = useTranslations("telemetry");
-  return (
-    <div className="space-y-2">
-      <div className="flex items-center justify-between gap-3">
-        <Label>{label}</Label>
-        <label className="flex items-center gap-2 text-xs">
-          <Checkbox
-            checked={checked}
-            onCheckedChange={(value) => onChecked(Boolean(value))}
-          />
-          {t("override")}
-        </label>
-      </div>
-      <Input
-        disabled={!checked}
-        onChange={(event) => onValue(event.target.value)}
-        value={checked ? value : detected}
-      />
-      <p className="text-xs text-muted-foreground">
-        {t("detected", { value: detected })}
-      </p>
-      <p className="text-xs text-muted-foreground">
-        {t("effective", { value: effective })}
-      </p>
-    </div>
-  );
-}
-
-function Endpoint({ label, value }: { label: string; value: string }) {
-  const t = useTranslations("telemetry");
-  return (
-    <div className="flex items-start gap-2">
-      <div className="min-w-0 flex-1">
-        <p className="font-medium">{label}</p>
-        <code className="break-all text-muted-foreground">{value}</code>
-      </div>
-      <Button
-        aria-label={t("copyEndpoint", { label })}
-        onClick={() => void copyText(value)}
-        size="icon-sm"
-        variant="ghost"
-      >
-        <Clipboard />
-      </Button>
-    </div>
   );
 }
 

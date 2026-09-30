@@ -1,3 +1,4 @@
+import { serverUrlSettingsService } from "@/services/server-urls/server-urls.service";
 import * as z from "zod/v4";
 
 import type { PushNotificationsService } from "@/services/push-notifications";
@@ -291,6 +292,38 @@ export function createDebuggingToolGroup(
       handler: async ({ name }) => ({
         separator: await telemetry.addSeparator(name),
       }),
+    }),
+    defineTool({
+      name: "get_server_url_settings",
+      title: "Get server URL settings",
+      description:
+        "Get shared Local, Remote, and Proxy URLs and build defaults.",
+      inputSchema: z.object({}),
+      outputSchema: z.object({ settings: z.record(z.string(), z.unknown()) }),
+      annotations: READ_ONLY_ANNOTATIONS,
+      handler: async () => ({
+        settings: await serverUrlSettingsService.settings(),
+      }),
+    }),
+    serviceTool({
+      name: "update_server_url_settings",
+      title: "Update server URL settings",
+      description:
+        "Configure shared HTTP(S) origins and global or simulator defaults.",
+      inputSchema: z.object({
+        localBaseUrlOverride: z.string().nullable().optional(),
+        remoteBaseUrlOverride: z.string().nullable().optional(),
+        proxyBaseUrl: z.string().nullable().optional(),
+        defaultServerUrlKind: z.enum(["LOCAL", "REMOTE", "PROXY"]).optional(),
+        simulatorDefaultServerUrlKind: z
+          .enum(["LOCAL", "REMOTE", "PROXY"])
+          .nullable()
+          .optional(),
+      }),
+      service: serverUrlSettingsService,
+      method: "saveSettings",
+      resultKey: "settings",
+      annotations: WRITE_ANNOTATIONS,
     }),
     defineTool({
       name: "get_telemetry_settings",

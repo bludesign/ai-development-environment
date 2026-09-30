@@ -1,3 +1,5 @@
+import { serverUrlSettingsService } from "@/services/server-urls/server-urls.service";
+import { serverBaseUrl, type ServerUrlKind } from "@/lib/server-urls";
 import { withIntegrationConfigurationEvents } from "@/services/integration-configuration-events";
 import type { GraphQLContext } from "@/services/graphql-server/graphql-server.service";
 import type { GitHubService } from "@/services/github";
@@ -299,15 +301,21 @@ export const createGitLabResolvers = (
           {
             projectId,
             callbackUrl,
-          }: { projectId: string; callbackUrl?: string | null },
+            serverUrlKind,
+          }: {
+            projectId: string;
+            callbackUrl?: string | null;
+            serverUrlKind?: ServerUrlKind | null;
+          },
           context: GraphQLContext,
         ) =>
-          checked(context, () => {
+          checked(context, async () => {
+            const settings = await serverUrlSettingsService.settings({
+              requestOrigin: context.requestOrigin,
+            });
             const url =
               callbackUrl?.trim() ||
-              (context.requestOrigin
-                ? `${context.requestOrigin.replace(/\/$/, "")}/api/public/gitlab/webhook`
-                : null);
+              `${serverBaseUrl(settings, serverUrlKind ?? settings.defaultServerUrlKind)}/api/public/gitlab/webhook`;
             if (!url)
               throw new Error("A public GitLab webhook URL is required");
             return gitLabService.configureProjectWebhook(projectId, url);

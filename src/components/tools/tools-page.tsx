@@ -24,7 +24,6 @@ import {
   useMemo,
   useRef,
   useState,
-  useSyncExternalStore,
 } from "react";
 
 import { ConfirmationDialog } from "@/components/confirmation-dialog";
@@ -48,6 +47,12 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
+import { useServerUrlSettings } from "@/hooks/use-server-url-settings";
+import {
+  EndpointUrls,
+  ServerUrlPicker,
+} from "@/components/server-urls/server-url-controls";
+import { serverUrlOptions, type ServerUrlKind } from "@/lib/server-urls";
 import { Label } from "@/components/ui/label";
 import {
   Select,
@@ -85,7 +90,6 @@ const SERVER_FIELDS =
 
 /** Suggested key for the client's own MCP config file; purely a local alias. */
 const BUILT_IN_SERVER_NAME = "ai-development-environment";
-const CUSTOM_SERVER_ORIGIN = "__custom__";
 type JsonSchema = Record<string, unknown>;
 
 const emptyDraft = (): ExternalMcpServerDraft => ({
@@ -127,11 +131,10 @@ async function responseJson(response: Response): Promise<unknown> {
   return body;
 }
 
-export function ToolsPage({
-  localServerOrigins = [],
-}: {
-  localServerOrigins?: string[];
-}) {
+export function ToolsPage(_props: { localServerOrigins?: string[] }) {
+  const { settings: serverUrls } = useServerUrlSettings();
+  const [selectedServerKind, setSelectedServerKind] =
+    useState<ServerUrlKind | null>(null);
   const t = useTranslations("tools");
   const tc = useTranslations("common");
   const [tab, setTab] = useState<"tools" | "audit">("tools");
@@ -146,24 +149,14 @@ export function ToolsPage({
   const [draft, setDraft] = useState<ExternalMcpServerDraft>(emptyDraft);
   const [saving, setSaving] = useState(false);
   const [dialogError, setDialogError] = useState<string | null>(null);
-  const browserOrigin = useSyncExternalStore(
-    subscribeToNothing,
-    readOrigin,
-    () => "",
-  );
-  const [selectedServerOrigin, setSelectedServerOrigin] = useState<
-    string | null
-  >(null);
-  const [customServerOrigin, setCustomServerOrigin] = useState("");
-  const serverOrigins = useMemo(
-    () => [...new Set([browserOrigin, ...localServerOrigins].filter(Boolean))],
-    [browserOrigin, localServerOrigins],
-  );
-  const selectedOrigin =
-    selectedServerOrigin === CUSTOM_SERVER_ORIGIN
-      ? customServerOrigin.trim()
-      : (selectedServerOrigin ?? browserOrigin);
-  const mcpBaseUrl = `${selectedOrigin.replace(/\/$/, "")}/api/mcp`;
+  const selectedOrigin = serverUrls
+    ? (serverUrlOptions(serverUrls).find(
+        (option) =>
+          option.kind ===
+          (selectedServerKind ?? serverUrls.defaultServerUrlKind),
+      )?.url ?? "")
+    : "";
+  const mcpBaseUrl = selectedOrigin ? `${selectedOrigin}/api/mcp` : "";
 
   const catalogRequest = useRef<AbortController | null>(null);
   const loadServers = useCallback(async (signal?: AbortSignal) => {
@@ -341,11 +334,8 @@ export function ToolsPage({
           <McpPresetManagement baseMcpUrl={mcpBaseUrl} groups={groups} />
           <ConnectClientsCard
             baseMcpUrl={mcpBaseUrl}
-            customServerOrigin={customServerOrigin}
-            onCustomServerOriginChange={setCustomServerOrigin}
-            onServerOriginChange={setSelectedServerOrigin}
-            selectedServerOrigin={selectedServerOrigin}
-            serverOrigins={serverOrigins}
+            selectedServerKind={selectedServerKind}
+            onServerKindChange={setSelectedServerKind}
           />
 
           {error && (
@@ -502,27 +492,18 @@ export function ToolsPage({
   );
 }
 
-const subscribeToNothing = () => () => {};
-const readOrigin = () => window.location.origin;
-
 /**
  * Shows external MCP clients how to reach this app's own built-in tool server,
  * which is mounted at /api/mcp on the same origin.
  */
 function ConnectClientsCard({
   baseMcpUrl,
-  customServerOrigin,
-  onCustomServerOriginChange,
-  onServerOriginChange,
-  selectedServerOrigin,
-  serverOrigins,
+  selectedServerKind,
+  onServerKindChange,
 }: {
   baseMcpUrl: string;
-  customServerOrigin: string;
-  onCustomServerOriginChange: (value: string) => void;
-  onServerOriginChange: (value: string) => void;
-  selectedServerOrigin: string | null;
-  serverOrigins: string[];
+  selectedServerKind: ServerUrlKind | null;
+  onServerKindChange: (kind: ServerUrlKind) => void;
 }) {
   const t = useTranslations("tools");
   const [copied, setCopied] = useState<"URL" | "CONFIG" | null>(null);
@@ -563,38 +544,11 @@ function ConnectClientsCard({
       <CardContent className="space-y-4">
         <div className="space-y-1.5">
           <Label>{t("serverHost")}</Label>
-          <Select
-            onValueChange={onServerOriginChange}
-            value={selectedServerOrigin ?? serverOrigins[0]}
-          >
-            <SelectTrigger
-              aria-label={t("serverHost")}
-              className="w-full sm:max-w-md"
-            >
-              <SelectValue placeholder={t("serverHost")} />
-            </SelectTrigger>
-            <SelectContent>
-              {serverOrigins.map((origin) => (
-                <SelectItem key={origin} value={origin}>
-                  {origin}
-                </SelectItem>
-              ))}
-              <SelectItem value={CUSTOM_SERVER_ORIGIN}>
-                {t("customServerHost")}
-              </SelectItem>
-            </SelectContent>
-          </Select>
-          {selectedServerOrigin === CUSTOM_SERVER_ORIGIN && (
-            <Input
-              aria-label={t("customServerHost")}
-              onChange={(event) =>
-                onCustomServerOriginChange(event.target.value)
-              }
-              placeholder="https://aide.example.com"
-              type="url"
-              value={customServerOrigin}
-            />
-          )}
+          <ServerUrlPicker
+            value={selectedServerKind}
+            onValueChange={onServerKindChange}
+          />
+          <EndpointUrls path="/api/mcp" />
         </div>
         <div className="space-y-1.5">
           <h3 className="text-sm font-medium">{t("serverUrl")}</h3>

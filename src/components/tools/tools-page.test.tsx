@@ -1,3 +1,4 @@
+import { serverUrlFixture } from "../../../test/fixtures/server-urls";
 import {
   cleanup,
   fireEvent,
@@ -502,8 +503,8 @@ describe("ToolsPage", () => {
 
     render(<ToolsPage />);
 
-    const url = `${window.location.origin}/api/mcp`;
-    expect(await screen.findByText(url)).toBeDefined();
+    const url = `${serverUrlFixture.effectiveLocalBaseUrl}/api/mcp`;
+    expect((await screen.findAllByText(url)).length).toBeGreaterThan(0);
 
     fireEvent.click(screen.getByRole("button", { name: "Copy server URL" }));
     await waitFor(() => expect(copyTextMock).toHaveBeenCalledWith(url));
@@ -549,3 +550,12 @@ describe("ToolsPage", () => {
     ).toBeDefined();
   });
 });
+
+vi.mock("@/hooks/use-server-url-settings", () => ({
+  useServerUrlSettings: () => ({
+    settings: serverUrlFixture,
+    loading: false,
+    error: null,
+    refresh: vi.fn(),
+  }),
+}));

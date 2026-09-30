@@ -423,6 +423,10 @@ describe("BuildsService", () => {
           action: "TEST",
           snapshotJson: JSON.stringify({
             worktree: { id: "worktree-snapshot" },
+            server: {
+              selectedUrlKind: "PROXY",
+              selectedBaseUrl: "https://old.ts.net",
+            },
             configuration: {
               id: "configuration-snapshot",
               advancedSettings: {
@@ -455,6 +459,7 @@ describe("BuildsService", () => {
       },
       exportWhenComplete: false,
       requestId: "rebuild-request",
+      serverUrlKind: "PROXY",
     });
   });
 
@@ -519,6 +524,20 @@ describe("BuildsService", () => {
     expect(data.commandSummary).toContain(
       '-destination "generic/platform=iOS Simulator"',
     );
+    expect(JSON.parse(data.snapshotJson).server).toMatchObject({
+      selectedUrlKind: "LOCAL",
+      selectedBaseUrl: "http://127.0.0.1:3000",
+      proxyBaseUrl: "https://aide.example.ts.net",
+    });
+    expect(createJob.mock.calls[0]![0].payload.server).toEqual(
+      JSON.parse(data.snapshotJson).server,
+    );
+    expect(createJob.mock.calls[0]![0].payload.endpointPaths).toEqual(
+      JSON.parse(data.snapshotJson).endpointPaths,
+    );
+    expect(
+      JSON.stringify(createJob.mock.calls[0]![0].payload.endpointPaths),
+    ).not.toMatch(/sse|mcp|webhook/);
     expect(JSON.parse(data.snapshotJson).configuration.parse.status).toBe(
       "UNPARSED",
     );
@@ -2004,3 +2023,20 @@ describe("build workflow persistence", () => {
     ).rejects.toThrow("Repository not found");
   });
 });
+
+vi.mock("@/services/server-urls/server-urls.service", () => ({
+  serverUrlSettingsService: {
+    buildSettings: vi.fn(async (_destination, kind) => ({
+      localBaseUrl: "http://127.0.0.1:3000",
+      remoteBaseUrl: "https://builds.example.com",
+      proxyBaseUrl: "https://aide.example.ts.net",
+      selectedUrlKind: kind ?? "LOCAL",
+      selectedBaseUrl:
+        kind === "REMOTE"
+          ? "https://builds.example.com"
+          : kind === "PROXY"
+            ? "https://aide.example.ts.net"
+            : "http://127.0.0.1:3000",
+    })),
+  },
+}));

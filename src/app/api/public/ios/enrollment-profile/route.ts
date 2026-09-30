@@ -1,4 +1,7 @@
-import { resolvePublicOrigin } from "@/lib/public-origin";
+import {
+  configuredServerOrigin,
+  ServerUrlSelectionError,
+} from "@/server/configured-server-origin";
 import { IosEnrollmentError, resolveClientIp } from "@/services/ios-devices";
 import { getServerServices } from "@/services/server-services";
 
@@ -9,7 +12,10 @@ export async function GET(request: Request): Promise<Response> {
   try {
     const url = new URL(request.url);
     const token = url.searchParams.get("token") ?? "";
-    const origin = resolvePublicOrigin(request.headers);
+    const origin = await configuredServerOrigin(
+      request.headers,
+      url.searchParams.get("serverUrlKind"),
+    );
     if (!origin?.secure || origin.loopback) {
       return new Response("Device enrollment requires public HTTPS", {
         status: 409,
@@ -20,6 +26,7 @@ export async function GET(request: Request): Promise<Response> {
         token,
         origin.origin,
         resolveClientIp(request.headers),
+        origin.kind,
       );
     const body = profile.buffer.slice(
       profile.byteOffset,
@@ -36,10 +43,15 @@ export async function GET(request: Request): Promise<Response> {
       },
     });
   } catch (error) {
-    const status = error instanceof IosEnrollmentError ? error.status : 500;
+    const status =
+      error instanceof IosEnrollmentError ||
+      error instanceof ServerUrlSelectionError
+        ? error.status
+        : 500;
     if (status === 500) console.error("iOS enrollment profile failed:", error);
     return new Response(
-      error instanceof IosEnrollmentError
+      error instanceof IosEnrollmentError ||
+        error instanceof ServerUrlSelectionError
         ? error.message
         : "Could not create the enrollment profile",
       { status, headers: { "cache-control": "no-store" } },

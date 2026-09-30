@@ -1,4 +1,5 @@
 "use client";
+import { EndpointUrls } from "@/components/server-urls/server-url-controls";
 
 import {
   ArrowDown,
@@ -96,6 +97,10 @@ type EndpointDraft = Omit<
   | "id"
   | "token"
   | "publicUrl"
+  | "endpointPath"
+  | "localUrl"
+  | "remoteUrl"
+  | "proxyUrl"
   | "activeMockComposition"
   | "createdAt"
   | "updatedAt"
@@ -547,7 +552,7 @@ function PublicUrlCard({
   return (
     <Card>
       <CardHeader>
-        <CardTitle>Public endpoint URL</CardTitle>
+        <CardTitle>Endpoint URLs</CardTitle>
         <CardDescription>
           Accepts GET, POST, and wildcard CORS OPTIONS requests. Treat it like a
           bearer credential.
@@ -557,15 +562,9 @@ function PublicUrlCard({
         </CardAction>
       </CardHeader>
       <CardContent className="flex flex-col gap-3 sm:flex-row">
-        <code className="min-w-0 flex-1 truncate rounded-lg border bg-muted/40 px-3 py-2 text-xs">
-          {endpoint.publicUrl}
-        </code>
-        <Button
-          onClick={() => void navigator.clipboard.writeText(endpoint.publicUrl)}
-          variant="outline"
-        >
-          <Copy /> Copy URL
-        </Button>
+        <div className="min-w-0 flex-1">
+          <EndpointUrls path={endpoint.endpointPath} />
+        </div>
         <Button onClick={() => setConfirm(true)} variant="outline">
           <KeyRound /> Rotate token
         </Button>

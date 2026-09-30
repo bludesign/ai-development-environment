@@ -1,3 +1,6 @@
+import { serverUrlSettingsService } from "@/services/server-urls/server-urls.service";
+import type { ServerUrlKind } from "@/lib/server-urls";
+import { BUILD_ENDPOINT_PATHS } from "@ai-development-environment/agent-contract/builds";
 import { filterAsyncIterator } from "@/lib/filter-async-iterator";
 import { randomUUID } from "node:crypto";
 import { basename, isAbsolute, join, relative, resolve } from "node:path";
@@ -1584,6 +1587,7 @@ export class BuildsService {
     exportSettings?: unknown;
     worktreeCoverage?: boolean;
     requestId: string;
+    serverUrlKind?: ServerUrlKind | null;
     telemetryRequestOrigin?: string | null;
   }) {
     const requestId = cleanName(input.requestId, "Request ID", 200);
@@ -1885,9 +1889,13 @@ export class BuildsService {
       failureBehavior: script.failureBehavior as "FAIL_BUILD" | "CONTINUE",
       position,
     }));
-    const telemetry = await this.telemetry?.buildSettings(destination.type, {
-      requestOrigin: input.telemetryRequestOrigin,
-    });
+    const server = await serverUrlSettingsService.buildSettings(
+      destination.type,
+      input.serverUrlKind,
+      { requestOrigin: input.telemetryRequestOrigin },
+    );
+    const endpointPaths = BUILD_ENDPOINT_PATHS;
+    const telemetry = await this.telemetry?.buildSettings();
     const snapshot = {
       repository: {
         id: worktree.codebase.repository.id,
@@ -1943,6 +1951,8 @@ export class BuildsService {
       },
       destination,
       scripts,
+      server,
+      endpointPaths,
       ...(telemetry ? { telemetry } : {}),
       worktreeCoverage: input.worktreeCoverage === true,
     };
@@ -2040,6 +2050,8 @@ export class BuildsService {
           destination,
           advancedSettings,
           scripts,
+          server,
+          endpointPaths,
           ...(telemetry ? { telemetry } : {}),
           worktreeCoverage: input.worktreeCoverage === true,
         },
@@ -2137,6 +2149,9 @@ export class BuildsService {
             },
           }
         : { configurationId }),
+      serverUrlKind: (
+        snapshot.server as { selectedUrlKind?: ServerUrlKind } | undefined
+      )?.selectedUrlKind,
       destination: parseJson(build.destinationJson, {}),
       scriptIds: snapshotScripts.flatMap((script) => {
         if (!script || typeof script !== "object" || Array.isArray(script)) {
@@ -2164,6 +2179,7 @@ export class BuildsService {
     scriptIds?: string[] | null;
     advancedSettings?: unknown;
     requestId: string;
+    serverUrlKind?: ServerUrlKind | null;
     telemetryRequestOrigin?: string | null;
   }) {
     const prisma = await getPrismaClient();

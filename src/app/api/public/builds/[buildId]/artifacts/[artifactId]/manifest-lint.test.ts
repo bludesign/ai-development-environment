@@ -10,6 +10,14 @@ import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 const getServerServices = vi.hoisted(() => vi.fn());
 vi.mock("@/services/server-services", () => ({ getServerServices }));
 
+vi.mock("@/services/server-urls/server-urls.service", () => ({
+  serverUrlSettingsService: { settings: async () => serverUrlFixture },
+}));
+import { serverUrlFixture as fixture } from "../../../../../../../../test/fixtures/server-urls";
+const serverUrlFixture = {
+  ...fixture,
+  defaultServerUrlKind: "REMOTE" as const,
+};
 import { GET as manifest } from "@/app/api/public/builds/[buildId]/artifacts/[artifactId]/manifest.plist/route";
 
 const execFileAsync = promisify(execFile);

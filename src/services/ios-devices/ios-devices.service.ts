@@ -117,14 +117,16 @@ export function enrollmentProfileXml({
   organizationName,
   profileIdentifier,
   payloadUuid = randomUUID().toUpperCase(),
+  serverUrlKind,
 }: {
   token: string;
   publicOrigin: string;
   organizationName: string;
   profileIdentifier: string;
   payloadUuid?: string;
+  serverUrlKind?: string;
 }): string {
-  const callback = `${publicOrigin}/api/public/ios/profile-response?token=${encodeURIComponent(token)}`;
+  const callback = `${publicOrigin}/api/public/ios/profile-response?token=${encodeURIComponent(token)}${serverUrlKind ? `&serverUrlKind=${encodeURIComponent(serverUrlKind)}` : ""}`;
   return plistDocument({
     PayloadContent: {
       URL: callback,
@@ -440,6 +442,7 @@ export class IosDevicesService {
     token: string,
     publicOrigin: string,
     ip: ClientIp | null,
+    serverUrlKind?: string,
   ): Promise<Uint8Array> {
     const enrollment = await this.enrollmentForToken(token);
     if (enrollment.consumedAt) {
@@ -462,6 +465,7 @@ export class IosDevicesService {
       publicOrigin,
       organizationName: settings.organizationName,
       profileIdentifier: settings.profileIdentifier,
+      serverUrlKind,
     });
     const signed = await signMobileConfig(
       profile,
