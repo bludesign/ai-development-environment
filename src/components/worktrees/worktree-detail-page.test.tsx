@@ -1,3 +1,4 @@
+import { serverUrlFixture } from "../../../test/fixtures/server-urls";
 import {
   act,
   cleanup,
@@ -1179,3 +1180,11 @@ describe("WorktreeDetailPage", () => {
     );
   });
 });
+
+vi.mock("@/hooks/use-server-url-settings", () => ({
+  useServerUrlSettings: () => ({
+    settings: serverUrlFixture,
+    error: null,
+    refresh: vi.fn(),
+  }),
+}));

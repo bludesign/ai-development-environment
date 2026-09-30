@@ -8,6 +8,8 @@ import {
 } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 
+import { serverUrlFixture } from "../../../test/fixtures/server-urls";
+
 import {
   controlPlaneRequest,
   controlPlaneSubscriptions,
@@ -20,6 +22,14 @@ import type { IosDeviceRecord, IosDeviceSettings } from "./types";
 vi.mock("@/lib/control-plane-client", () => ({
   controlPlaneRequest: vi.fn(),
   controlPlaneSubscriptions: vi.fn(),
+}));
+
+vi.mock("@/hooks/use-server-url-settings", () => ({
+  useServerUrlSettings: () => ({
+    settings: serverUrlFixture,
+    loading: false,
+    error: null,
+  }),
 }));
 
 const navigation = vi.hoisted(() => ({ push: vi.fn() }));

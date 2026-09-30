@@ -284,6 +284,19 @@ export async function seedSettings(prisma: PrismaClient): Promise<void> {
     },
   });
 
+  await prisma.serverUrlSettings.upsert({
+    where: { id: "default" },
+    create: {
+      id: "default",
+      proxyBaseUrl: "https://aide.acme.ts.net",
+      defaultServerUrlKind: "LOCAL",
+    },
+    update: {
+      proxyBaseUrl: "https://aide.acme.ts.net",
+      defaultServerUrlKind: "LOCAL",
+    },
+  });
+
   await prisma.modelCostEntry.deleteMany({});
   await prisma.modelCostEntry.createMany({ data: MODEL_COST_ENTRIES });
 

@@ -4,10 +4,16 @@ import {
   type ChildProcessWithoutNullStreams,
 } from "node:child_process";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
+import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 import { createInterface } from "node:readline";
 import { promisify } from "node:util";
+
+import { findCodexSessionFile } from "../handlers/runs.js";
+import {
+  codexImportedHistory,
+  readCodexTranscriptMetadata,
+} from "./codex-import.js";
 
 import { findExecutable } from "../executable-lookup.js";
 
@@ -398,7 +404,7 @@ export class CodexAdapter implements ProviderAdapter {
   private readonly server = new CodexAppServer();
   private readonly hydrationCache = new Map<
     string,
-    { updatedAt: string; kind: "PLAN" | "SESSION"; finalOutput?: string }
+    { updatedAt: string; history: Partial<ProviderImportedRun> }
   >();
 
   async catalog(): Promise<ProviderCatalog> {
@@ -666,6 +672,7 @@ export class CodexAdapter implements ProviderAdapter {
               cursor,
               limit: 100,
               sortDirection: "asc",
+              sourceKinds: ["cli", "vscode", "exec", "appServer"],
             }),
           );
           const threads = Array.isArray(page.data) ? page.data : [];
@@ -673,12 +680,14 @@ export class CodexAdapter implements ProviderAdapter {
             const thread = asRecord(value);
             const updatedAtKey = String(thread.updatedAt ?? "");
             const cached = this.hydrationCache.get(String(thread.id));
-            let finalOutput: string | undefined;
-            let kind: "PLAN" | "SESSION" = "SESSION";
-            if (cached && cached.updatedAt === updatedAtKey) {
-              kind = cached.kind;
-              finalOutput = cached.finalOutput;
+            let history: Partial<ProviderImportedRun> = {};
+            // Active threads can grow within one updatedAt second.
+            const active = asRecord(thread.status).type === "active";
+            if (active) this.hydrationCache.delete(String(thread.id));
+            if (cached && cached.updatedAt === updatedAtKey && !active) {
+              history = cached.history;
             } else {
+              let hydratedSuccessfully = false;
               try {
                 const detail = asRecord(
                   await this.server.request("thread/read", {
@@ -687,34 +696,55 @@ export class CodexAdapter implements ProviderAdapter {
                   }),
                 );
                 const hydrated = asRecord(detail.thread);
-                const serialized = JSON.stringify(hydrated.turns ?? []);
-                if (serialized.includes('"type":"plan"')) kind = "PLAN";
-                finalOutput = firstString(
-                  Array.isArray(hydrated.turns)
-                    ? [...hydrated.turns].reverse()
-                    : [],
-                );
+                if (Array.isArray(hydrated.turns)) {
+                  history = codexImportedHistory(hydrated);
+                  hydratedSuccessfully = true;
+                }
+              } catch {
+                // Preserve previous enrichment when stored history is unavailable.
+              }
+              try {
+                const path =
+                  typeof thread.path === "string"
+                    ? thread.path
+                    : await findCodexSessionFile(
+                        String(thread.id),
+                        homedir(),
+                        process.env.CODEX_HOME,
+                      );
+                if (path)
+                  Object.assign(
+                    history,
+                    await readCodexTranscriptMetadata(path),
+                  );
+              } catch {
+                // Missing local logs must not prevent metadata or activity imports.
+              }
+              if (
+                !active &&
+                hydratedSuccessfully &&
+                history.model &&
+                history.usage
+              ) {
                 this.hydrationCache.set(String(thread.id), {
                   updatedAt: updatedAtKey,
-                  kind,
-                  finalOutput,
+                  history,
                 });
-              } catch {
-                // Keep list metadata when a history cannot be fully hydrated.
               }
             }
             results.push({
               nativeId: String(thread.id),
               worktreeId: worktree.id,
-              kind,
-              status: String(
-                asRecord(thread.status).type ?? thread.status ?? "COMPLETED",
-              ).toUpperCase(),
+              ...history,
+              status: active
+                ? "IN_PROGRESS"
+                : asRecord(thread.status).type === "systemError"
+                  ? "FAILED"
+                  : (history.status ?? "COMPLETED"),
               archived,
               prompt: String(
                 thread.preview ?? thread.name ?? "Imported Codex thread",
               ),
-              finalOutput,
               branch:
                 firstString(asRecord(thread.gitInfo).branch) ||
                 worktree.branch ||

@@ -1,4 +1,5 @@
 "use client";
+import { EndpointUrls } from "@/components/server-urls/server-url-controls";
 
 import {
   Copy,
@@ -42,6 +43,7 @@ import {
 import { Spinner } from "@/components/ui/spinner";
 import { Link } from "@/i18n/navigation";
 import { useOwnedRead } from "@/hooks/use-owned-read";
+import { useServerUrlSettings } from "@/hooks/use-server-url-settings";
 import { controlPlaneRequest } from "@/lib/control-plane-client";
 
 import { SSE_ENDPOINT_FIELDS, SSE_ENDPOINTS_QUERY } from "./graphql";
@@ -50,6 +52,7 @@ import type { SseEndpoint, SseMode } from "./types";
 import { useSseLiveReload } from "./use-sse-live-reload";
 
 export function SseEndpointsPage() {
+  const { settings: serverUrls } = useServerUrlSettings();
   const [endpoints, setEndpoints] = useState<SseEndpoint[]>([]);
   const [loading, setLoading] = useState(true);
   const [busyId, setBusyId] = useState<string | null>(null);
@@ -162,130 +165,134 @@ export function SseEndpointsPage() {
           </Button>
         </Empty>
       ) : (
-        <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-          {endpoints.map((endpoint) => (
-            <Card key={endpoint.id}>
-              <CardHeader>
-                <CardTitle className="flex min-w-0 items-center gap-2">
-                  <span className="truncate">{endpoint.name}</span>
-                  <ModeBadge mode={endpoint.mode} />
-                </CardTitle>
-                <CardDescription className="line-clamp-2 min-h-10">
-                  {endpoint.description || "No description"}
-                </CardDescription>
-                <CardAction>
-                  <DropdownMenu>
-                    <DropdownMenuTrigger asChild>
-                      <Button
-                        aria-label={`Actions for ${endpoint.name}`}
-                        size="icon-sm"
-                        variant="ghost"
-                      >
-                        <MoreHorizontal />
-                      </Button>
-                    </DropdownMenuTrigger>
-                    <DropdownMenuContent align="end">
-                      <DropdownMenuItem
-                        onClick={() =>
-                          void navigator.clipboard.writeText(endpoint.publicUrl)
-                        }
-                      >
-                        <Copy /> Copy public URL
-                      </DropdownMenuItem>
-                      <DropdownMenuItem asChild>
-                        <Link href={`/sse/${endpoint.id}`}>
-                          <ExternalLink /> Open endpoint
-                        </Link>
-                      </DropdownMenuItem>
-                      <DropdownMenuSeparator />
-                      <DropdownMenuItem
-                        className="text-destructive"
-                        onClick={() => setDeleteEndpoint(endpoint)}
-                      >
-                        <Trash2 /> Delete endpoint
-                      </DropdownMenuItem>
-                    </DropdownMenuContent>
-                  </DropdownMenu>
-                </CardAction>
-              </CardHeader>
-              <CardContent className="space-y-4">
-                <button
-                  className="block w-full truncate rounded-lg border bg-muted/30 px-3 py-2 text-left font-mono text-xs hover:bg-muted"
-                  onClick={() =>
-                    void navigator.clipboard.writeText(endpoint.publicUrl)
-                  }
-                  title="Copy public URL"
-                  type="button"
-                >
-                  {endpoint.publicUrl}
-                </button>
-                <div
-                  className="grid grid-cols-3 gap-1 rounded-lg bg-muted p-1"
-                  role="group"
-                  aria-label={`Mode for ${endpoint.name}`}
-                >
-                  {(["FORWARD", "MOCK", "BREAKPOINT"] as const).map((mode) => (
-                    <Button
-                      disabled={
-                        busyId === endpoint.id ||
-                        (mode === "MOCK" && !endpoint.activeMockCompositionId)
-                      }
-                      key={mode}
-                      onClick={() => void setMode(endpoint, mode)}
-                      size="sm"
-                      variant={endpoint.mode === mode ? "default" : "ghost"}
-                    >
-                      {mode === "FORWARD" ? (
-                        <RadioTower />
-                      ) : mode === "MOCK" ? (
-                        <Library />
-                      ) : (
-                        <ShieldAlert />
-                      )}
-                      <span className="hidden 2xl:inline">
-                        {mode
-                          .toLocaleLowerCase()
-                          .replace(/^./, (v) => v.toUpperCase())}
-                      </span>
-                    </Button>
-                  ))}
-                </div>
-                <dl className="grid grid-cols-2 gap-3 text-xs">
-                  <div>
-                    <dt className="text-muted-foreground">Forward URL</dt>
-                    <dd className="mt-1 truncate font-mono">
-                      {endpoint.forwardUrl}
-                    </dd>
+        <div className="@container/sse-endpoints">
+          <div
+            data-testid="sse-endpoint-grid"
+            className="grid grid-cols-1 gap-4 @min-[45rem]/sse-endpoints:grid-cols-2 @min-[68rem]/sse-endpoints:grid-cols-3"
+          >
+            {endpoints.map((endpoint) => (
+              <Card key={endpoint.id} className="min-w-0">
+                <CardHeader>
+                  <CardTitle className="flex min-w-0 items-center gap-2">
+                    <span className="truncate">{endpoint.name}</span>
+                    <ModeBadge mode={endpoint.mode} />
+                  </CardTitle>
+                  <CardDescription className="line-clamp-2 min-h-10">
+                    {endpoint.description || "No description"}
+                  </CardDescription>
+                  <CardAction>
+                    <DropdownMenu>
+                      <DropdownMenuTrigger asChild>
+                        <Button
+                          aria-label={`Actions for ${endpoint.name}`}
+                          size="icon-sm"
+                          variant="ghost"
+                        >
+                          <MoreHorizontal />
+                        </Button>
+                      </DropdownMenuTrigger>
+                      <DropdownMenuContent align="end">
+                        <DropdownMenuItem
+                          onClick={() =>
+                            void navigator.clipboard.writeText(
+                              serverUrls
+                                ? serverUrls.effectiveLocalBaseUrl +
+                                    endpoint.endpointPath
+                                : endpoint.localUrl,
+                            )
+                          }
+                        >
+                          <Copy /> Copy Local URL
+                        </DropdownMenuItem>
+                        <DropdownMenuItem asChild>
+                          <Link href={`/sse/${endpoint.id}`}>
+                            <ExternalLink /> Open endpoint
+                          </Link>
+                        </DropdownMenuItem>
+                        <DropdownMenuSeparator />
+                        <DropdownMenuItem
+                          className="text-destructive"
+                          onClick={() => setDeleteEndpoint(endpoint)}
+                        >
+                          <Trash2 /> Delete endpoint
+                        </DropdownMenuItem>
+                      </DropdownMenuContent>
+                    </DropdownMenu>
+                  </CardAction>
+                </CardHeader>
+                <CardContent className="space-y-4">
+                  <EndpointUrls path={endpoint.endpointPath} />
+                  <div
+                    className="grid grid-cols-3 gap-1 rounded-lg bg-muted p-1"
+                    role="group"
+                    aria-label={`Mode for ${endpoint.name}`}
+                  >
+                    {(["FORWARD", "MOCK", "BREAKPOINT"] as const).map(
+                      (mode) => (
+                        <Button
+                          disabled={
+                            busyId === endpoint.id ||
+                            (mode === "MOCK" &&
+                              !endpoint.activeMockCompositionId)
+                          }
+                          key={mode}
+                          onClick={() => void setMode(endpoint, mode)}
+                          size="sm"
+                          variant={endpoint.mode === mode ? "default" : "ghost"}
+                        >
+                          {mode === "FORWARD" ? (
+                            <RadioTower />
+                          ) : mode === "MOCK" ? (
+                            <Library />
+                          ) : (
+                            <ShieldAlert />
+                          )}
+                          <span className="hidden 2xl:inline">
+                            {mode
+                              .toLocaleLowerCase()
+                              .replace(/^./, (v) => v.toUpperCase())}
+                          </span>
+                        </Button>
+                      ),
+                    )}
                   </div>
-                  <div>
-                    <dt className="text-muted-foreground">Heartbeat</dt>
-                    <dd className="mt-1">
-                      {endpoint.heartbeatEnabled
-                        ? `${endpoint.heartbeatIntervalMs / 1000}s`
-                        : "Off"}
-                    </dd>
-                  </div>
-                </dl>
-              </CardContent>
-              <CardFooter className="grid grid-cols-3 gap-2">
-                <Button asChild size="sm" variant="outline">
-                  <Link href={`/sse/${endpoint.id}`}>
-                    <ExternalLink /> Configure
-                  </Link>
-                </Button>
-                <Button asChild size="sm" variant="outline">
-                  <Link href={`/sse/${endpoint.id}/mocks`}>
-                    <Library /> Mocks
-                  </Link>
-                </Button>
-                <Button asChild size="sm" variant="outline">
-                  <Link href={`/sse/history?endpointId=${endpoint.id}`}>
-                    <History /> History
-                  </Link>
-                </Button>
-              </CardFooter>
-            </Card>
-          ))}
+                  <dl className="grid grid-cols-2 gap-3 text-xs">
+                    <div>
+                      <dt className="text-muted-foreground">Forward URL</dt>
+                      <dd className="mt-1 truncate font-mono">
+                        {endpoint.forwardUrl}
+                      </dd>
+                    </div>
+                    <div>
+                      <dt className="text-muted-foreground">Heartbeat</dt>
+                      <dd className="mt-1">
+                        {endpoint.heartbeatEnabled
+                          ? `${endpoint.heartbeatIntervalMs / 1000}s`
+                          : "Off"}
+                      </dd>
+                    </div>
+                  </dl>
+                </CardContent>
+                <CardFooter className="grid grid-cols-3 gap-2">
+                  <Button asChild size="sm" variant="outline">
+                    <Link href={`/sse/${endpoint.id}`}>
+                      <ExternalLink /> Configure
+                    </Link>
+                  </Button>
+                  <Button asChild size="sm" variant="outline">
+                    <Link href={`/sse/${endpoint.id}/mocks`}>
+                      <Library /> Mocks
+                    </Link>
+                  </Button>
+                  <Button asChild size="sm" variant="outline">
+                    <Link href={`/sse/history?endpointId=${endpoint.id}`}>
+                      <History /> History
+                    </Link>
+                  </Button>
+                </CardFooter>
+              </Card>
+            ))}
+          </div>
         </div>
       )}
       <ConfirmationDialog

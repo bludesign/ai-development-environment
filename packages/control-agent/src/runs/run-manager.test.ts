@@ -118,3 +118,38 @@ describe("RunManager command priority", () => {
     expect(completeRunCommand).toHaveBeenCalledWith("delete-1", "SUCCEEDED");
   });
 });
+
+describe("RunManager history sync", () => {
+  test("splits large snapshots across requests without truncating a session", async () => {
+    const records = ["thread-1", "thread-2"].map((nativeId) => ({
+      nativeId,
+      worktreeId: "worktree-1",
+      events: [{ detailMarkdown: "x".repeat(3 * 1024 * 1024) }],
+    }));
+    const client = {
+      agentCodebases: vi.fn().mockResolvedValue([]),
+      reportRunProviderImportStatus: vi.fn(),
+      importProviderRuns: vi.fn(),
+    };
+    const manager = new RunManager(client as never);
+    const testable = manager as unknown as {
+      adapters: { values(): unknown[] };
+      syncImports(): Promise<void>;
+    };
+    vi.spyOn(testable.adapters, "values").mockReturnValue([
+      {
+        key: "CODEX",
+        capabilities: {},
+        discover: vi.fn().mockResolvedValue(records),
+      },
+    ]);
+    try {
+      await testable.syncImports();
+      expect(
+        client.importProviderRuns.mock.calls.map(([, batch]) => batch),
+      ).toEqual([[records[0]], [records[1]]]);
+    } finally {
+      await manager.close();
+    }
+  });
+});

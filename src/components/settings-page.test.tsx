@@ -1,3 +1,4 @@
+import { serverUrlFixture } from "../../test/fixtures/server-urls";
 import {
   cleanup,
   fireEvent,
@@ -270,9 +271,7 @@ describe("SettingsPage", () => {
     fireEvent.change(appId, { target: { value: "123" } });
     fireEvent.change(installationId, { target: { value: "456" } });
     expect(webhookUrl.value).toContain("/api/public/github/webhook");
-    fireEvent.change(webhookUrl, {
-      target: { value: "https://hooks.example/github-actions" },
-    });
+    expect(webhookUrl.readOnly).toBe(true);
     const dropZone = screen.getByRole("group", {
       name: "PEM private key drop zone",
     });
@@ -325,7 +324,7 @@ describe("SettingsPage", () => {
             appId: "123",
             installationId: "456",
             privateKey: pem,
-            webhookUrl: "https://hooks.example/github-actions",
+            webhookUrl: "https://builds.example.com/api/public/github/webhook",
             enhancedPipelineWebhooksEnabled: false,
           },
         },
@@ -420,3 +419,12 @@ describe("SettingsPage", () => {
     }
   });
 });
+
+vi.mock("@/hooks/use-server-url-settings", () => ({
+  useServerUrlSettings: () => ({
+    settings: { ...serverUrlFixture, defaultServerUrlKind: "REMOTE" },
+    loading: false,
+    error: null,
+    refresh: vi.fn(),
+  }),
+}));

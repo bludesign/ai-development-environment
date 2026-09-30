@@ -1,7 +1,10 @@
 import { plistDocument } from "@ai-development-environment/agent-contract/plist";
 
 import { signArtifactToken } from "@/lib/artifact-token";
-import { resolvePublicOrigin } from "@/lib/public-origin";
+import {
+  configuredServerOrigin,
+  ServerUrlSelectionError,
+} from "@/server/configured-server-origin";
 import { getServerServices } from "@/services/server-services";
 
 export const runtime = "nodejs";
@@ -51,10 +54,13 @@ export async function GET(
       );
     }
 
-    const origin = resolvePublicOrigin(request.headers);
+    const origin = await configuredServerOrigin(
+      request.headers,
+      new URL(request.url).searchParams.get("serverUrlKind"),
+    );
     if (!origin || !origin.secure) {
       return new Response(
-        "Over-the-air installation requires a public HTTPS address. Serve this control plane over HTTPS or set PUBLIC_BASE_URL.",
+        "Over-the-air installation requires an HTTPS server URL. Choose Remote or configure an HTTPS address in Settings.",
         { status: 409 },
       );
     }
@@ -86,6 +92,8 @@ export async function GET(
       },
     });
   } catch (error) {
+    if (error instanceof ServerUrlSelectionError)
+      return new Response(error.message, { status: error.status });
     console.error("Build artifact manifest failed:", error);
     return new Response("Could not build the install manifest", {
       status: 500,

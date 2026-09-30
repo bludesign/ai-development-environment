@@ -1,3 +1,6 @@
+import { serverUrlSettingsService } from "@/services/server-urls/server-urls.service";
+import { serverBaseUrl, type ServerUrlKind } from "@/lib/server-urls";
+import { signArtifactToken } from "@/lib/artifact-token";
 import type { GraphQLContext } from "@/services/graphql-server/graphql-server.service";
 import type { BuildLogRange } from "@/lib/build-log-ranges";
 import { buildOutOfDate } from "@/services/builds/build-freshness";
@@ -217,6 +220,34 @@ export const createBuildResolvers = (service: BuildsService) => ({
         : value.createdAt,
   },
   Query: {
+    buildArtifactLinks: async (
+      _: unknown,
+      {
+        buildId,
+        artifactId,
+        serverUrlKind,
+      }: {
+        buildId: string;
+        artifactId: string;
+        serverUrlKind?: ServerUrlKind | null;
+      },
+      context: GraphQLContext,
+    ) => {
+      requireControlPlane(context);
+      if (!(await service.artifactForInstall(buildId, artifactId)))
+        throw new Error("Artifact not found");
+      const settings = await serverUrlSettingsService.settings({
+        requestOrigin: context.requestOrigin,
+      });
+      const kind = serverUrlKind ?? settings.defaultServerUrlKind;
+      const base = serverBaseUrl(settings, kind);
+      const path = `/api/public/builds/${encodeURIComponent(buildId)}/artifacts/${encodeURIComponent(artifactId)}`;
+      const { token, expires } = signArtifactToken(artifactId);
+      return {
+        downloadUrl: `${base}${path}?token=${token}&expires=${expires}`,
+        manifestUrl: `${base}${path}/manifest.plist?serverUrlKind=${kind}`,
+      };
+    },
     buildConfigurations: (
       _root: unknown,
       args: { repositoryId?: string | null; appId?: string | null },

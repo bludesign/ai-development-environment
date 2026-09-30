@@ -1,3 +1,4 @@
+import { serverUrlFixture } from "../../../test/fixtures/server-urls";
 import { beforeEach, describe, expect, test, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({ getPrismaClient: vi.fn() }));
@@ -302,3 +303,7 @@ describe("SseService parameterized templates", () => {
     expect(deleteMany).not.toHaveBeenCalled();
   });
 });
+
+vi.mock("@/services/server-urls/server-urls.service", () => ({
+  serverUrlSettingsService: { settings: async () => serverUrlFixture },
+}));

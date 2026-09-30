@@ -1,3 +1,4 @@
+import { serverUrlFixture } from "../../../test/fixtures/server-urls";
 import {
   cleanup,
   fireEvent,
@@ -36,7 +37,7 @@ afterEach(() => {
 });
 
 describe("AgentsList", () => {
-  test("switches the enrollment command between the page origin and local server origins", async () => {
+  test("switches enrollment commands between shared Local, Remote, and Proxy", async () => {
     subscriptionsMock.mockReturnValue({
       subscribe: vi.fn(() => vi.fn()),
     } as never);
@@ -58,44 +59,30 @@ describe("AgentsList", () => {
     fireEvent.click(screen.getByRole("button", { name: "Enroll agent" }));
 
     const code = await screen.findByText(/enroll-once/);
-    expect(code.textContent).toContain(`--server '${window.location.origin}'`);
-
-    fireEvent.pointerDown(
-      screen.getByRole("combobox", { name: "Server address" }),
-      { button: 0, ctrlKey: false, pointerType: "mouse" },
+    expect(code.textContent).toContain(
+      `--server '${serverUrlFixture.effectiveLocalBaseUrl}'`,
     );
-    const localOrigins = await screen.findAllByText("http://192.168.1.24:3000");
-    fireEvent.click(
-      localOrigins.find((element) => element.tagName === "SPAN") ??
-        localOrigins[0],
-    );
-
+    for (const [name, url] of [
+      ["Remote", serverUrlFixture.effectiveRemoteBaseUrl],
+      ["Proxy", serverUrlFixture.proxyBaseUrl],
+    ] as const) {
+      fireEvent.pointerDown(
+        screen.getByRole("combobox", { name: "Server URL" }),
+        { button: 0, ctrlKey: false, pointerType: "mouse" },
+      );
+      fireEvent.click(
+        await screen.findByRole("option", { name: new RegExp(name) }),
+      );
+      await waitFor(() =>
+        expect(code.textContent).toContain(`--server '${url}'`),
+      );
+    }
+    expect(screen.queryByLabelText("Custom server address")).toBeNull();
     await waitFor(() =>
-      expect(code.textContent).toContain("--server 'http://192.168.1.24:3000'"),
-    );
-
-    fireEvent.pointerDown(
-      screen.getByRole("combobox", { name: "Server address" }),
-      { button: 0, ctrlKey: false, pointerType: "mouse" },
-    );
-    const customOptions = await screen.findAllByText("Custom server address");
-    fireEvent.click(
-      customOptions.find((element) => element.tagName === "SPAN") ??
-        customOptions[0],
-    );
-    const customServerAddress = await screen.findByLabelText(
-      "Custom server address",
-    );
-    fireEvent.change(customServerAddress, {
-      target: {
-        value: "https://agents.example.com/enroll?tenant=acme&mode='strict'",
-      },
-    });
-
-    await waitFor(() =>
-      expect(code.textContent).toContain(
-        `--server 'https://agents.example.com/enroll?tenant=acme&mode='"'"'strict'"'"''`,
-      ),
+      expect(
+        screen.getAllByRole("link", { name: "Manage server URLs in Settings" })
+          .length,
+      ).toBeGreaterThan(0),
     );
   });
 
@@ -143,3 +130,12 @@ describe("AgentsList", () => {
     );
   });
 });
+
+vi.mock("@/hooks/use-server-url-settings", () => ({
+  useServerUrlSettings: () => ({
+    settings: serverUrlFixture,
+    loading: false,
+    error: null,
+    refresh: vi.fn(),
+  }),
+}));

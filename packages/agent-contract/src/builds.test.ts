@@ -1,6 +1,7 @@
 import { describe, expect, test } from "vitest";
 
 import {
+  BUILD_ENDPOINT_PATHS,
   BUILD_EXPORT_METHODS,
   BUILD_CONFIGURATION_ICON_KEYS,
   EXPORT_METHOD_PROFILE_TYPES,
@@ -262,27 +263,50 @@ describe("iOS build agent contract", () => {
     ).toThrow("must be unique");
   });
 
-  test("validates optional observability URLs and collection settings", () => {
+  test("validates shared server snapshots, endpoint paths, and collection flags", () => {
     const telemetry = {
-      localBaseUrl: "http://127.0.0.1:3000",
-      remoteBaseUrl: "https://builds.example.com",
-      selectedBaseUrl: "http://127.0.0.1:3000",
-      consoleLogsUrl: "http://127.0.0.1:3000/api/telemetry/console-logs",
-      analyticsEventsUrl:
-        "http://127.0.0.1:3000/api/telemetry/analytics-events",
       consoleCollectionEnabled: true,
       analyticsCollectionEnabled: false,
     };
-    expect(
-      parseBuildJobPayload({ ...buildPayload(), telemetry }).telemetry,
-    ).toEqual(telemetry);
+    const server = {
+      localBaseUrl: "http://127.0.0.1:3000",
+      remoteBaseUrl: "https://builds.example.com",
+      proxyBaseUrl: "https://aide.ts.net",
+      selectedUrlKind: "PROXY",
+      selectedBaseUrl: "https://aide.ts.net",
+    };
+    const parsed = parseBuildJobPayload({
+      ...buildPayload(),
+      server,
+      endpointPaths: BUILD_ENDPOINT_PATHS,
+      telemetry,
+    });
+    expect(parsed.server).toEqual(server);
+    expect(parsed.endpointPaths).toEqual(BUILD_ENDPOINT_PATHS);
+    expect(parsed.telemetry).toEqual(telemetry);
+    expect(Object.keys(parsed.endpointPaths!)).not.toContain("sse");
     expect(() =>
       parseBuildJobPayload({
         ...buildPayload(),
-        telemetry: { ...telemetry, selectedBaseUrl: "file:///tmp/events" },
+        server: { ...server, selectedBaseUrl: "file:///tmp/events" },
       }),
     ).toThrow("HTTP(S)");
-    expect(parseBuildJobPayload(buildPayload()).telemetry).toBeUndefined();
+    expect(() =>
+      parseBuildJobPayload({
+        ...buildPayload(),
+        server: { ...server, selectedBaseUrl: server.localBaseUrl },
+      }),
+    ).toThrow("must match");
+    expect(() =>
+      parseBuildJobPayload({
+        ...buildPayload(),
+        endpointPaths: {
+          ...BUILD_ENDPOINT_PATHS,
+          consoleLogs: "https://aide.ts.net/api/telemetry/console-logs",
+        },
+      }),
+    ).toThrow("endpoint path");
+    expect(parseBuildJobPayload(buildPayload()).server).toBeUndefined();
   });
 
   test("enforces action-specific destination and test-product invariants", () => {

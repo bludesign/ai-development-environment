@@ -843,10 +843,21 @@ export class RunManager {
             { ...catalog, capabilities: adapter.capabilities },
           );
           const runs = await adapter.discover(worktrees);
-          await this.client.importProviderRuns(
-            adapter.key,
-            runs as unknown as Array<Record<string, unknown>>,
-          );
+          // Activity snapshots can be much larger than list metadata. Keep
+          // requests bounded across sessions without truncating any history.
+          let batch: Array<Record<string, unknown>> = [];
+          let batchBytes = 0;
+          for (const run of runs) {
+            const bytes = Buffer.byteLength(JSON.stringify(run), "utf8");
+            if (batch.length && batchBytes + bytes > 4 * 1024 * 1024) {
+              await this.client.importProviderRuns(adapter.key, batch);
+              batch = [];
+              batchBytes = 0;
+            }
+            batch.push(run as unknown as Record<string, unknown>);
+            batchBytes += bytes;
+          }
+          await this.client.importProviderRuns(adapter.key, batch);
         } catch (error) {
           await this.client
             .reportRunProviderImportStatus(

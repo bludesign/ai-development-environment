@@ -1,4 +1,14 @@
 "use client";
+import { useServerUrlSettings } from "@/hooks/use-server-url-settings";
+import {
+  defaultServerUrlKind,
+  serverUrlOptions,
+  type ServerUrlKind,
+} from "@/lib/server-urls";
+import {
+  ServerUrlSelect,
+  ServerUrlSettingsLink,
+} from "@/components/server-urls/server-url-controls";
 
 import {
   genericBuildDestinations,
@@ -282,6 +292,10 @@ function StartBuildDialog({
   destinationCache: Map<string, DestinationCacheEntry>;
   coverageMode?: boolean;
 }) {
+  const { settings: serverUrls, error: serverUrlsError } =
+    useServerUrlSettings();
+  const [serverUrlKindOverride, setServerUrlKindOverride] =
+    useState<ServerUrlKind | null>(null);
   const t = useTranslations("builds");
   const locale = useLocale();
   const [project, setProject] = useState<IosAppProject | null>(null);
@@ -670,7 +684,7 @@ function StartBuildDialog({
     : "";
 
   const start = async () => {
-    if (!configuration || !destination) return;
+    if (!configuration || !destination || !serverUrls) return;
     setStarting(true);
     setError(null);
     try {
@@ -694,6 +708,11 @@ function StartBuildDialog({
         {
           input: {
             worktreeId,
+            serverUrlKind:
+              serverUrlKindOverride ??
+              (serverUrls
+                ? defaultServerUrlKind(serverUrls, destinationType)
+                : null),
             ...selectionInput(configuration),
             destination,
             scriptIds: [...scriptIds],
@@ -1294,6 +1313,25 @@ function StartBuildDialog({
               )}
             </div>
           )}
+          <div className="space-y-2">
+            {serverUrls ? (
+              <ServerUrlSelect
+                settings={serverUrls}
+                value={
+                  serverUrlKindOverride ??
+                  defaultServerUrlKind(serverUrls, destinationType)
+                }
+                onValueChange={(kind) => {
+                  if (kind !== "INHERIT") setServerUrlKindOverride(kind);
+                }}
+              />
+            ) : (
+              <p className="text-sm text-muted-foreground">
+                {serverUrlsError ?? "Loading server URLs…"}
+              </p>
+            )}
+            <ServerUrlSettingsLink />
+          </div>
           <DialogFooter>
             <Button
               onClick={() => onOpenChange(false)}
@@ -1308,6 +1346,13 @@ function StartBuildDialog({
                 starting ||
                 customOpen ||
                 !configuration ||
+                !serverUrls ||
+                !serverUrlOptions(serverUrls).some(
+                  (option) =>
+                    option.kind ===
+                    (serverUrlKindOverride ??
+                      defaultServerUrlKind(serverUrls, destinationType)),
+                ) ||
                 !destination ||
                 (action === "TEST_WITHOUT_BUILDING" && !selectedPriorBuildId)
               }

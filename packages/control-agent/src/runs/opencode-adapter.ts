@@ -1,9 +1,13 @@
-import { dirname } from "node:path";
+import { dirname, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 
 import { createOpencode, type OpencodeClient } from "@opencode-ai/sdk/v2";
 
 import { findExecutable, prependPathDirectory } from "../executable-lookup.js";
+import {
+  opencodeImportedHistory,
+  opencodeTimestamp,
+} from "./opencode-import.js";
 
 import {
   answerArrays,
@@ -24,6 +28,8 @@ import {
 const QUESTION_RECONCILIATION_INTERVAL_MS = 1_000;
 const QUESTION_RECONCILIATION_TIMEOUT_MS = 5_000;
 const POST_ANSWER_COMPLETION_TIMEOUT_MS = 15 * 60_000;
+// The message endpoint rejects larger pages (the session list only clamps them).
+const IMPORT_PAGE_SIZE = 200;
 
 type OpenCodeQuestionSurface = "LEGACY" | "V2";
 
@@ -344,6 +350,10 @@ export class OpenCodeAdapter implements ProviderAdapter {
     nativeDelete: true,
   } as const;
   private runtime?: Awaited<ReturnType<typeof createOpencode>>;
+  private hydrationCache = new Map<
+    string,
+    { key: string; history: Partial<ProviderImportedRun> }
+  >();
 
   private async client(): Promise<OpencodeClient> {
     // The SDK spawns `opencode` by bare name through cross-spawn, so the only
@@ -775,82 +785,253 @@ export class OpenCodeAdapter implements ProviderAdapter {
     await client.session.delete({ sessionID: nativeId, directory: cwd });
   }
 
+  private async legacyHistory(
+    client: OpencodeClient,
+    nativeId: string,
+    directory: string,
+  ): Promise<unknown[]> {
+    const messages: unknown[] = [];
+    const seenCursors = new Set<string>();
+    let before: string | undefined;
+    do {
+      const response = await client.session.messages(
+        {
+          sessionID: nativeId,
+          directory,
+          limit: IMPORT_PAGE_SIZE,
+          ...(before ? { before } : {}),
+        },
+        { throwOnError: true },
+      );
+      const page = resultData(response);
+      if (!Array.isArray(page))
+        throw new Error("Invalid legacy OpenCode message history");
+      messages.push(...page);
+      // `before` is an opaque cursor, not a message ID. Older releases return
+      // their complete history without this header.
+      before = response.response?.headers.get("x-next-cursor") ?? undefined;
+      if (before && seenCursors.has(before))
+        throw new Error("Repeated legacy OpenCode message cursor");
+      if (before) seenCursors.add(before);
+    } while (before);
+    return messages;
+  }
+
+  private async importedHistory(
+    client: OpencodeClient,
+    nativeId: string,
+    directory: string,
+    surface: "V2" | "LEGACY",
+  ): Promise<unknown[]> {
+    if (surface === "LEGACY")
+      return this.legacyHistory(client, nativeId, directory);
+    const messages: unknown[] = [];
+    let cursor: string | undefined;
+    const seenCursors = new Set<string>();
+    try {
+      do {
+        const page = asRecord(
+          resultData(
+            await client.v2.session.messages(
+              {
+                sessionID: nativeId,
+                limit: IMPORT_PAGE_SIZE,
+                ...(cursor ? { cursor } : { order: "asc" }),
+              },
+              { throwOnError: true },
+            ),
+          ),
+        );
+        if (!Array.isArray(page.data))
+          throw new Error("Invalid OpenCode message history");
+        messages.push(...page.data);
+        cursor =
+          typeof asRecord(page.cursor).next === "string"
+            ? String(asRecord(page.cursor).next)
+            : undefined;
+        if (cursor && seenCursors.has(cursor))
+          throw new Error("Repeated OpenCode message cursor");
+        if (cursor) seenCursors.add(cursor);
+      } while (cursor);
+    } catch (error) {
+      // A failure after the first page must not replace complete native history
+      // with a partial snapshot from another API.
+      if (messages.length || cursor) throw error;
+      return this.legacyHistory(client, nativeId, directory);
+    }
+    if (messages.length) return messages;
+    // The v2 list also includes legacy sessions whose projected v2 history is
+    // empty. Their transcript remains available from the compatibility API.
+    try {
+      return await this.legacyHistory(client, nativeId, directory);
+    } catch (error) {
+      const name = String(asRecord(error)._tag ?? asRecord(error).name ?? "");
+      if (["NotFoundError", "SessionNotFoundError"].includes(name))
+        return messages;
+      throw error;
+    }
+  }
+
   async discover(
     worktrees: ProviderImportWorktree[],
   ): Promise<ProviderImportedRun[]> {
     const client = await this.client();
     const results: ProviderImportedRun[] = [];
-    const activeResponse = asRecord(
-      resultData(await client.v2.session.active()),
-    );
-    const activeIds = new Set(Object.keys(asRecord(activeResponse.data)));
+    const hydrationFailures: string[] = [];
+    let hydratedCount = 0;
+    const activeIds = new Set<string>();
+    try {
+      const active = asRecord(
+        resultData(await client.v2.session.active({ throwOnError: true })),
+      );
+      for (const id of Object.keys(asRecord(active.data))) activeIds.add(id);
+    } catch {
+      // Older installations expose only the legacy status endpoint.
+    }
     for (const worktree of worktrees) {
-      let cursor: string | undefined;
-      do {
-        const response = asRecord(
-          resultData(
-            await client.v2.session.list({
-              directory: worktree.folder,
-              limit: 500,
-              order: "asc",
-              cursor,
-            }),
+      const sessions = new Map<
+        string,
+        { session: Record<string, unknown>; surface: "V2" | "LEGACY" }
+      >();
+      let listed = false;
+      let listError: unknown;
+      try {
+        let cursor: string | undefined;
+        const seenCursors = new Set<string>();
+        do {
+          const response = asRecord(
+            resultData(
+              await client.v2.session.list(
+                {
+                  directory: worktree.folder,
+                  limit: IMPORT_PAGE_SIZE,
+                  ...(cursor ? { cursor } : { order: "asc" }),
+                },
+                { throwOnError: true },
+              ),
+            ),
+          );
+          if (!Array.isArray(response.data))
+            throw new Error("Invalid OpenCode session list");
+          for (const value of response.data) {
+            const session = asRecord(value);
+            if (typeof session.id === "string")
+              sessions.set(session.id, { session, surface: "V2" });
+          }
+          cursor =
+            typeof asRecord(response.cursor).next === "string"
+              ? String(asRecord(response.cursor).next)
+              : undefined;
+          if (cursor && seenCursors.has(cursor))
+            throw new Error("Repeated OpenCode session cursor");
+          if (cursor) seenCursors.add(cursor);
+        } while (cursor);
+        listed = true;
+      } catch (error) {
+        listError = error;
+      }
+      // Native v2 and legacy installations can have separate session stores.
+      try {
+        const legacy = resultData(
+          await client.session.list(
+            { directory: worktree.folder, limit: IMPORT_PAGE_SIZE },
+            { throwOnError: true },
           ),
         );
-        const sessions = Array.isArray(response.data) ? response.data : [];
-        for (const value of sessions) {
+        if (!Array.isArray(legacy))
+          throw new Error("Invalid legacy OpenCode session list");
+        for (const value of legacy) {
           const session = asRecord(value);
-          const time = asRecord(session.time);
-          const selectedModel = asRecord(session.model);
-          let finalOutput: string | undefined;
-          try {
-            const messages = asRecord(
-              resultData(
-                await client.v2.session.messages({
-                  sessionID: String(session.id),
-                  limit: 1,
-                  order: "desc",
-                }),
-              ),
-            );
-            finalOutput = firstString(
-              Array.isArray(messages.data) ? messages.data[0] : messages,
-            );
-          } catch {
-            // Preserve the list metadata when message hydration is unavailable.
-          }
-          results.push({
-            nativeId: String(session.id),
-            worktreeId: worktree.id,
-            kind: session.agent === "plan" ? "PLAN" : "SESSION",
-            status: activeIds.has(String(session.id))
-              ? "IN_PROGRESS"
-              : "COMPLETED",
-            archived: Boolean(time.archived),
-            model:
-              typeof selectedModel.providerID === "string" &&
-              typeof selectedModel.id === "string"
-                ? `${selectedModel.providerID}/${selectedModel.id}`
-                : undefined,
-            prompt:
-              firstString(session.title ?? session.summary) ||
-              "Imported OpenCode session",
-            finalOutput: finalOutput || firstString(session.summary),
-            branch: worktree.branch || undefined,
-            createdAt: time.created
-              ? new Date(Number(time.created)).toISOString()
-              : undefined,
-            updatedAt: time.updated
-              ? new Date(Number(time.updated)).toISOString()
-              : undefined,
-            rawMetadata: session,
-          });
+          if (typeof session.id === "string" && !sessions.has(session.id))
+            sessions.set(session.id, { session, surface: "LEGACY" });
         }
-        cursor =
-          typeof asRecord(response.cursor).next === "string"
-            ? String(asRecord(response.cursor).next)
-            : undefined;
-      } while (cursor);
+        listed = true;
+      } catch (error) {
+        listError ??= error;
+      }
+      if (!listed) throw listError;
+      try {
+        const statuses = asRecord(
+          resultData(
+            await client.session.status(
+              { directory: worktree.folder },
+              { throwOnError: true },
+            ),
+          ),
+        );
+        for (const [id, value] of Object.entries(statuses))
+          if (["busy", "retry"].includes(String(asRecord(value).type)))
+            activeIds.add(id);
+      } catch {
+        // Native v2 activity is still available when the legacy API is absent.
+      }
+      for (const [nativeId, { session, surface }] of sessions) {
+        const directory =
+          session.directory ?? asRecord(session.location).directory;
+        if (
+          typeof directory === "string" &&
+          resolve(directory) !== resolve(worktree.folder)
+        )
+          continue;
+        const time = asRecord(session.time);
+        const active = activeIds.has(nativeId);
+        const key = JSON.stringify([
+          surface,
+          time.updated,
+          session.cost,
+          session.tokens,
+          session.model,
+        ]);
+        const cached = this.hydrationCache.get(nativeId);
+        if (active) this.hydrationCache.delete(nativeId);
+        let history: Partial<ProviderImportedRun> = {};
+        if (!active && cached?.key === key) history = cached.history;
+        else {
+          try {
+            const messages = await this.importedHistory(
+              client,
+              nativeId,
+              worktree.folder,
+              surface,
+            );
+            history = opencodeImportedHistory(session, messages);
+            if (!active) this.hydrationCache.set(nativeId, { key, history });
+          } catch (error) {
+            // A partial read must never replace a previously complete snapshot.
+            const detail =
+              error instanceof Error
+                ? error.message
+                : (firstString(asRecord(error).message) ??
+                  String(asRecord(error)._tag ?? error));
+            hydrationFailures.push(`${nativeId}: ${detail}`);
+          }
+        }
+        if (history.events) hydratedCount += 1;
+        results.push({
+          nativeId,
+          worktreeId: worktree.id,
+          ...(typeof session.cost === "number" &&
+          Number.isFinite(session.cost) &&
+          session.cost >= 0
+            ? { estimatedCost: session.cost, pricingSource: "opencode-history" }
+            : {}),
+          ...history,
+          kind: history.kind ?? (session.agent === "plan" ? "PLAN" : "SESSION"),
+          status: active ? "IN_PROGRESS" : (history.status ?? "COMPLETED"),
+          archived: Boolean(time.archived),
+          model: history.model,
+          prompt: history.prompt,
+          branch: worktree.branch || undefined,
+          createdAt: opencodeTimestamp(time.created),
+          updatedAt: opencodeTimestamp(time.updated),
+          rawMetadata: session,
+        });
+      }
+    }
+    if (hydrationFailures.length) {
+      const detail = `OpenCode history unavailable for ${hydrationFailures.length} sessions: ${hydrationFailures.slice(0, 3).join("; ")}`;
+      if (!hydratedCount) throw new Error(detail);
+      console.warn(detail);
     }
     return results;
   }

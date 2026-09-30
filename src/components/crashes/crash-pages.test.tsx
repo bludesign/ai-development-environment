@@ -1,3 +1,4 @@
+import { serverUrlFixture } from "../../../test/fixtures/server-urls";
 import { cleanup, render, screen, waitFor } from "@testing-library/react";
 import type { ReactNode } from "react";
 import { afterEach, expect, test, vi } from "vitest";
@@ -234,3 +235,11 @@ test("shows missing dSYMs and the symbolicated threads of a crash", async () => 
     ).toBe("/api/crash-files/reports/crash-1?variant=symbolicated"),
   );
 });
+
+vi.mock("@/hooks/use-server-url-settings", () => ({
+  useServerUrlSettings: () => ({
+    settings: serverUrlFixture,
+    error: null,
+    refresh: vi.fn(),
+  }),
+}));

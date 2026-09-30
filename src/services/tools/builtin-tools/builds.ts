@@ -303,8 +303,15 @@ export function createBuildToolGroup(builds: BuildsService): BuiltInToolGroup {
       serviceTool({
         name: "start_worktree_coverage",
         title: "Start worktree coverage",
-        description: "Start the configured coverage workflow for a worktree.",
-        inputSchema: z.object({ input: z.record(z.string(), z.unknown()) }),
+        description:
+          "Start the configured coverage workflow for a worktree with an optional Local, Remote, or Proxy server URL choice.",
+        inputSchema: z.object({
+          input: StartBuildToolInputSchema.omit({
+            action: true,
+            exportWhenComplete: true,
+            exportSettings: true,
+          }),
+        }),
         service: builds,
         method: "startWorktreeCoverage",
         arguments: ({ input }) => [input],

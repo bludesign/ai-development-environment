@@ -92,15 +92,12 @@ const SCRIPT_FIELDS = `
 `;
 
 const PRE_BUILD_TEMPLATE = `export default async function preBuild({
-  buildId,
-  branch,
-  destination,
-  action,
-  telemetry,
+  buildId, branch, destination, action, server, endpointPaths, telemetry,
 }) {
   // Runs before the build from the worktree root.
-    // telemetry includes localBaseUrl, remoteBaseUrl, selectedBaseUrl,
-    // consoleLogsUrl, analyticsEventsUrl, and both collection-enabled flags.
+  const consoleLogsUrl = new URL(endpointPaths.consoleLogs, server.selectedBaseUrl).href;
+  // server includes all three base URLs and the selected URL kind.
+  // telemetry contains the collection-enabled flags.
 }`;
 
 const POST_BUILD_TEMPLATE = `export default async function postBuild({
@@ -113,6 +110,8 @@ const POST_BUILD_TEMPLATE = `export default async function postBuild({
   cancelled,
   errorCode,
   error,
+  server,
+  endpointPaths,
   telemetry,
   }) {
     // Runs after every build attempt from the worktree root.

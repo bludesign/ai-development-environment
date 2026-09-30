@@ -11,6 +11,16 @@ import {
   PopoverTrigger,
 } from "@/components/ui/popover";
 import type { BuildArtifact } from "./types";
+import { useServerUrlSettings } from "@/hooks/use-server-url-settings";
+import {
+  ServerUrlPicker,
+  EndpointUrls,
+} from "@/components/server-urls/server-url-controls";
+import {
+  serverUrlOptions,
+  serverUrlKindFromLocation,
+  type ServerUrlKind,
+} from "@/lib/server-urls";
 import { Spinner } from "@/components/ui/spinner";
 import { copyText } from "@/lib/browser-utils";
 import type { PublicOrigin } from "@/lib/public-origin";
@@ -74,7 +84,7 @@ export function IosInstallButton({
   buildId,
   artifactId,
   metadata,
-  publicOrigin,
+  publicOrigin: _publicOrigin,
   size = "sm",
 }: {
   buildId: string;
@@ -83,6 +93,10 @@ export function IosInstallButton({
   publicOrigin: Pick<PublicOrigin, "origin" | "secure"> | null;
   size?: "sm" | "default";
 }) {
+  const { settings: serverUrls } = useServerUrlSettings();
+  const [selectedKind, setSelectedKind] = useState<ServerUrlKind | null>(
+    serverUrlKindFromLocation,
+  );
   const t = useTranslations("builds");
   const locale = useLocale();
   // The server has no way to know the browsing origin or the device, so it
@@ -96,9 +110,16 @@ export function IosInstallButton({
   const [copied, setCopied] = useState(false);
 
   const artifactPath = `/api/public/builds/${encodeURIComponent(buildId)}/artifacts/${encodeURIComponent(artifactId)}`;
-  const installOrigin = publicOrigin ?? environment;
+  const serverKind = selectedKind ?? serverUrls?.defaultServerUrlKind;
+  const selectedBase =
+    serverUrls &&
+    serverUrlOptions(serverUrls).find((option) => option.kind === serverKind)
+      ?.url;
+  const installOrigin = selectedBase
+    ? { origin: selectedBase, secure: selectedBase.startsWith("https://") }
+    : null;
   const manifestUrl = installOrigin
-    ? `${installOrigin.origin}${artifactPath}/manifest.plist`
+    ? `${installOrigin.origin}${artifactPath}/manifest.plist?serverUrlKind=${serverKind}`
     : null;
 
   const blocked = (): string | null => {
@@ -135,8 +156,11 @@ export function IosInstallButton({
   };
 
   const copyLink = async () => {
-    const origin = installOrigin?.origin ?? window.location.origin;
-    await copyText(`${origin}/${locale}/builds/${encodeURIComponent(buildId)}`);
+    if (!installOrigin || !serverKind) return;
+    const origin = installOrigin.origin;
+    await copyText(
+      `${origin}/${locale}/builds/${encodeURIComponent(buildId)}?serverUrlKind=${serverKind}`,
+    );
     setCopied(true);
     setTimeout(() => setCopied(false), 2_000);
   };
@@ -155,6 +179,20 @@ export function IosInstallButton({
       onClick={(event) => event.stopPropagation()}
       onKeyDown={(event) => event.stopPropagation()}
     >
+      <Popover>
+        <PopoverTrigger asChild>
+          <Button size="icon-sm" variant="ghost" aria-label="Choose server URL">
+            <Link />
+          </Button>
+        </PopoverTrigger>
+        <PopoverContent className="space-y-3">
+          <ServerUrlPicker
+            value={selectedKind}
+            onValueChange={setSelectedKind}
+          />
+          <EndpointUrls path={artifactPath} />
+        </PopoverContent>
+      </Popover>
       {explanation ? (
         <Popover>
           <PopoverTrigger asChild>
@@ -170,7 +208,12 @@ export function IosInstallButton({
           </PopoverTrigger>
           <PopoverContent className="w-72 space-y-2 text-sm" align="end">
             <p>{explanation}</p>
-            <Button onClick={() => void copyLink()} size="sm" variant="ghost">
+            <Button
+              disabled={!installOrigin}
+              onClick={() => void copyLink()}
+              size="sm"
+              variant="ghost"
+            >
               <Link />
               {copied ? t("installLinkCopied") : t("copyInstallLink")}
             </Button>

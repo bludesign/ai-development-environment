@@ -1,3 +1,4 @@
+import { serverUrlFixture } from "../../../test/fixtures/server-urls";
 import {
   cleanup,
   fireEvent,
@@ -198,7 +199,7 @@ describe("JiraSettingsPage", () => {
 
       expect(
         await screen.findByDisplayValue(
-          "http://localhost:3000/api/public/jira/webhook",
+          "http://127.0.0.1:3000/api/public/jira/webhook",
         ),
       ).toBeDefined();
       expect(screen.getByText("Webhook not configured")).toBeDefined();
@@ -284,3 +285,12 @@ describe("JiraSettingsPage", () => {
     });
   });
 });
+
+vi.mock("@/hooks/use-server-url-settings", () => ({
+  useServerUrlSettings: () => ({
+    settings: serverUrlFixture,
+    loading: false,
+    error: null,
+    refresh: vi.fn(),
+  }),
+}));

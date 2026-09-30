@@ -2,7 +2,7 @@ import { workflowQueueUsesWorktree } from "@/services/workflows/workflow-queue-s
 import { filterAsyncIterator } from "@/lib/filter-async-iterator";
 import "server-only";
 
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 
 import type { Prisma } from "@/generated/prisma/client";
 import type { McpToolSnapshot } from "@/services/tools/types";
@@ -124,6 +124,10 @@ export type ImportedRunInput = {
   createdAt?: string | null;
   updatedAt?: string | null;
   rawMetadata?: unknown;
+  events?: RunEventInput[] | null;
+  usage?: Array<Parameters<RunsService["reportUsage"]>[3]> | null;
+  estimatedCost?: number | null;
+  pricingSource?: string | null;
 };
 
 function enumValue<T extends readonly string[]>(
@@ -2743,6 +2747,246 @@ export class RunsService {
     return this.get(runIds.replacementRunId);
   }
 
+  /** Replace imported snapshots atomically; managed runs never enter this path. */
+  private async importHistory(
+    runId: string,
+    attemptId: string,
+    record: ImportedRunInput,
+  ) {
+    const prisma = await getPrismaClient();
+    await prisma.$transaction(async (transaction) => {
+      if (record.events) {
+        const events = record.events.map((event, sequence) => ({
+          id: `${attemptId}:import:${event.id}`,
+          runId,
+          attemptId,
+          sequence,
+          type: requiredText(event.type, "Event type", 100).toUpperCase(),
+          summary: requiredText(event.summary, "Event summary", 2_000),
+          searchText: (
+            event.searchText ?? JSON.stringify(event.raw ?? event.summary)
+          ).slice(0, 100_000),
+          detailMarkdown: event.detailMarkdown?.slice(0, 500_000) ?? null,
+          rawJson: event.raw === undefined ? null : JSON.stringify(event.raw),
+          createdAt:
+            parseDate(event.createdAt) ??
+            parseDate(record.createdAt) ??
+            new Date(),
+        }));
+        await transaction.runToolCall.deleteMany({
+          where: { runId, attemptId },
+        });
+        await transaction.runEvent.deleteMany({ where: { runId, attemptId } });
+        for (let offset = 0; offset < events.length; offset += 500) {
+          await transaction.runEvent.createMany({
+            data: events.slice(offset, offset + 500),
+          });
+        }
+        const claudeResults = new Map<
+          string,
+          { content: unknown; isError: boolean; createdAt: Date }
+        >();
+        for (const event of events) {
+          const raw = event.rawJson ? JSON.parse(event.rawJson) : {};
+          if (raw.type !== "user" || !Array.isArray(raw.message?.content))
+            continue;
+          for (const block of raw.message.content) {
+            if (
+              block.type === "tool_result" &&
+              typeof block.tool_use_id === "string"
+            ) {
+              claudeResults.set(block.tool_use_id, {
+                content: block.content ?? raw.tool_use_result ?? null,
+                isError: block.is_error === true,
+                createdAt: event.createdAt,
+              });
+            }
+          }
+        }
+        const toolCalls = events.flatMap((event) => {
+          const raw = event.rawJson ? JSON.parse(event.rawJson) : {};
+          const claudeTool =
+            raw.type === "assistant" && Array.isArray(raw.message?.content)
+              ? raw.message.content.find(
+                  (block: { type?: string }) => block.type === "tool_use",
+                )
+              : undefined;
+          if (claudeTool) {
+            const result = claudeResults.get(String(claudeTool.id));
+            return [
+              {
+                id: `event:${event.id}`,
+                runId,
+                attemptId,
+                sequence: event.sequence,
+                name: String(claudeTool.name ?? "Tool"),
+                status: result
+                  ? result.isError
+                    ? "FAILED"
+                    : "COMPLETED"
+                  : "OBSERVED",
+                inputJson: event.rawJson,
+                outputJson: JSON.stringify(result?.content ?? null),
+                error: result?.isError
+                  ? typeof result.content === "string"
+                    ? result.content
+                    : JSON.stringify(result.content)
+                  : null,
+                startedAt: event.createdAt,
+                finishedAt: result?.createdAt ?? null,
+              },
+            ];
+          }
+          const item = raw.params?.item;
+          const part = raw.properties?.part;
+          const codexTool =
+            item &&
+            [
+              "commandExecution",
+              "fileChange",
+              "mcpToolCall",
+              "dynamicToolCall",
+              "webSearch",
+            ].includes(item.type);
+          const opencodeTool =
+            raw.type === "message.part.updated" && part?.type === "tool";
+          if (!codexTool && !opencodeTool) return [];
+          const state = opencodeTool ? (part.state ?? {}) : item;
+          const status = String(state.status ?? "COMPLETED").toUpperCase();
+          const startedAt =
+            opencodeTool && typeof state.time?.start === "number"
+              ? new Date(state.time.start)
+              : event.createdAt;
+          const finishedAt = opencodeTool
+            ? typeof state.time?.end === "number"
+              ? new Date(state.time.end)
+              : null
+            : ["INPROGRESS", "IN_PROGRESS", "RUNNING", "PENDING"].includes(
+                  status,
+                )
+              ? null
+              : event.createdAt;
+          return [
+            {
+              id: `event:${event.id}`,
+              runId,
+              attemptId,
+              sequence: event.sequence,
+              name: opencodeTool
+                ? (part.tool ?? part.name ?? "tool")
+                : (item.tool ?? item.command ?? item.type),
+              status:
+                status === "ERROR"
+                  ? "FAILED"
+                  : status === "INPROGRESS"
+                    ? "IN_PROGRESS"
+                    : status,
+              inputJson: event.rawJson,
+              outputJson: JSON.stringify(
+                opencodeTool
+                  ? (state.result ?? state.output ?? null)
+                  : (item.result ?? item.aggregatedOutput ?? null),
+              ),
+              error: state.error
+                ? typeof state.error === "string"
+                  ? state.error
+                  : JSON.stringify(state.error)
+                : null,
+              startedAt,
+              finishedAt,
+            },
+          ];
+        });
+        for (let offset = 0; offset < toolCalls.length; offset += 500) {
+          await transaction.runToolCall.createMany({
+            data: toolCalls.slice(offset, offset + 500),
+          });
+        }
+        await transaction.agentRun.update({
+          where: { id: runId },
+          data: {
+            toolCallCount: await transaction.runToolCall.count({
+              where: { runId },
+            }),
+          },
+        });
+      }
+      if (record.usage) {
+        await transaction.runModelUsage.deleteMany({
+          where: { runId, attemptId },
+        });
+        for (const usage of record.usage) {
+          const numeric = (value?: number | null) =>
+            Number.isFinite(value) && (value ?? 0) >= 0
+              ? Math.floor(value!)
+              : 0;
+          await transaction.runModelUsage.create({
+            data: {
+              id: randomUUID(),
+              runId,
+              attemptId,
+              model: requiredText(usage.model, "Model", 500),
+              inputTokens: numeric(usage.inputTokens),
+              outputTokens: numeric(usage.outputTokens),
+              reasoningTokens: numeric(usage.reasoningTokens),
+              cacheReadTokens: numeric(usage.cacheReadTokens),
+              cacheWriteTokens: numeric(usage.cacheWriteTokens),
+              estimatedCost: usage.estimatedCost ?? null,
+            },
+          });
+        }
+        const totals = await transaction.runModelUsage.aggregate({
+          where: { runId },
+          _sum: {
+            inputTokens: true,
+            outputTokens: true,
+            reasoningTokens: true,
+            cacheReadTokens: true,
+            cacheWriteTokens: true,
+            estimatedCost: true,
+          },
+        });
+        await transaction.agentRun.update({
+          where: { id: runId },
+          data: {
+            inputTokens: totals._sum.inputTokens ?? 0,
+            outputTokens: totals._sum.outputTokens ?? 0,
+            reasoningTokens: totals._sum.reasoningTokens ?? 0,
+            cacheReadTokens: totals._sum.cacheReadTokens ?? 0,
+            cacheWriteTokens: totals._sum.cacheWriteTokens ?? 0,
+            estimatedCost:
+              record.estimatedCost ??
+              (record.usage.length &&
+              record.usage.every((usage) => usage.estimatedCost != null)
+                ? (totals._sum.estimatedCost ?? null)
+                : null),
+            pricingSource: optionalText(
+              record.pricingSource ??
+                [
+                  ...new Set(
+                    record.usage
+                      .map((usage) => usage.pricingSource)
+                      .filter(Boolean),
+                  ),
+                ].join(", "),
+              200,
+            ),
+            pricingUpdatedAt: new Date(),
+          },
+        });
+      } else if (record.estimatedCost !== undefined) {
+        await transaction.agentRun.update({
+          where: { id: runId },
+          data: {
+            estimatedCost: record.estimatedCost,
+            pricingSource: optionalText(record.pricingSource, 200),
+            pricingUpdatedAt: new Date(),
+          },
+        });
+      }
+    });
+  }
+
   async importRuns(
     agentId: string,
     providerValue: string,
@@ -2752,7 +2996,29 @@ export class RunsService {
     const prisma = await getPrismaClient();
     let imported = 0;
     for (const record of records) {
+      const prompt = record.prompt?.trim() || undefined;
       const nativeKey = `${agentId}:${provider}:${requiredText(record.nativeId, "Native ID", 500)}`;
+      const historyDigest =
+        record.events || record.usage || record.estimatedCost !== undefined
+          ? createHash("sha256")
+              .update(
+                JSON.stringify([
+                  record.events,
+                  record.usage,
+                  record.estimatedCost,
+                  record.pricingSource,
+                ]),
+              )
+              .digest("hex")
+          : undefined;
+      const metadata =
+        record.rawMetadata && typeof record.rawMetadata === "object"
+          ? record.rawMetadata
+          : {};
+      const rawMetadataJson = JSON.stringify({
+        ...metadata,
+        ...(historyDigest ? { importedHistoryDigest: historyDigest } : {}),
+      });
       const importedStatus = (() => {
         const value = record.status?.toUpperCase() ?? "COMPLETED";
         if (
@@ -2767,7 +3033,7 @@ export class RunsService {
           return "IN_PROGRESS";
         if (value === "PAUSED") return "PAUSED";
         if (value === "CANCELLED" || value === "CANCELED") return "CANCELLED";
-        if (value === "FAILED" || value === "ERROR") return "FAILED";
+        if (["FAILED", "ERROR", "SYSTEMERROR"].includes(value)) return "FAILED";
         return "COMPLETED";
       })();
       const existing = await prisma.runAttempt.findUnique({
@@ -2776,6 +3042,7 @@ export class RunsService {
       });
       if (existing) {
         if (existing.run.origin === "IMPORTED") {
+          const previousMetadata = JSON.parse(existing.rawMetadataJson ?? "{}");
           const collision =
             existing.run.kind === "SESSION" && importedStatus === "IN_PROGRESS"
               ? await prisma.worktreeRunLease.findFirst({
@@ -2793,7 +3060,9 @@ export class RunsService {
             prisma.runAttempt.update({
               where: { id: existing.id },
               data: {
-                rawMetadataJson: JSON.stringify(record.rawMetadata ?? {}),
+                rawMetadataJson: historyDigest
+                  ? JSON.stringify(metadata)
+                  : rawMetadataJson,
               },
             }),
             prisma.agentRun.update({
@@ -2803,9 +3072,26 @@ export class RunsService {
                 phase: collision
                   ? "IMPORTED_ACTIVE_COLLISION"
                   : "IMPORTED_SYNCED",
+                ...(prompt
+                  ? {
+                      initialPrompt: prompt,
+                      inputs: {
+                        updateMany: {
+                          where: { kind: "INITIAL", sequence: 0 },
+                          data: { prompt },
+                        },
+                      },
+                    }
+                  : {}),
                 model: record.model || existing.run.model,
-                effort: optionalText(record.effort, 100),
-                finalOutput: optionalText(record.finalOutput, 2_000_000),
+                effort:
+                  record.effort === undefined
+                    ? existing.run.effort
+                    : optionalText(record.effort, 100),
+                finalOutput:
+                  record.finalOutput === undefined
+                    ? existing.run.finalOutput
+                    : optionalText(record.finalOutput, 2_000_000),
                 branch: record.branch ?? existing.run.branch,
                 jiraIssueKey: optionalJiraIssueKey(record.jiraIssueKey),
                 nativeArchivedAt: record.archived ? new Date() : null,
@@ -2818,6 +3104,17 @@ export class RunsService {
               },
             }),
           ]);
+          if (
+            historyDigest &&
+            previousMetadata.importedHistoryDigest !== historyDigest
+          ) {
+            await this.importHistory(existing.runId, existing.id, record);
+          }
+          if (historyDigest)
+            await prisma.runAttempt.update({
+              where: { id: existing.id },
+              data: { rawMetadataJson },
+            });
           publishRun(existing.runId);
         }
         continue;
@@ -2845,6 +3142,7 @@ export class RunsService {
         nextDisplayNumber(transaction, kind),
       );
       const id = randomUUID();
+      const attemptId = randomUUID();
       await prisma.agentRun.create({
         data: {
           id,
@@ -2863,7 +3161,7 @@ export class RunsService {
           model: record.model || "unknown",
           effort: optionalText(record.effort, 100),
           worktreeConcurrencyLimit: worktreeConcurrencyLimit(kind, undefined),
-          initialPrompt: record.prompt?.trim() || "Imported provider history",
+          initialPrompt: prompt ?? "Imported provider history",
           finalOutput: optionalText(record.finalOutput, 2_000_000),
           archivedAt: record.archived ? new Date() : null,
           nativeArchivedAt: record.archived ? new Date() : null,
@@ -2872,12 +3170,12 @@ export class RunsService {
           createdAt: parseDate(record.createdAt),
           attempts: {
             create: {
-              id: randomUUID(),
+              id: attemptId,
               generation: 0,
               nativeId: record.nativeId,
               nativeKey,
               status: "IMPORTED",
-              rawMetadataJson: JSON.stringify(record.rawMetadata ?? {}),
+              rawMetadataJson: JSON.stringify(metadata),
             },
           },
           inputs: {
@@ -2885,11 +3183,18 @@ export class RunsService {
               id: randomUUID(),
               sequence: 0,
               kind: "INITIAL",
-              prompt: record.prompt?.trim() || "Imported provider history",
+              prompt: prompt ?? "Imported provider history",
             },
           },
         },
       });
+      if (historyDigest) {
+        await this.importHistory(id, attemptId, record);
+        await prisma.runAttempt.update({
+          where: { id: attemptId },
+          data: { rawMetadataJson },
+        });
+      }
       publishRun(id);
       imported += 1;
     }

@@ -39,6 +39,18 @@ describe("session file resolution", () => {
     await expect(findClaudeSessionFile("missing", home)).resolves.toBeNull();
   });
 
+  test("finds sessions in a custom Claude configuration directory", async () => {
+    const home = await makeHome();
+    const claudeHome = join(home, "custom-claude");
+    const projectDir = join(claudeHome, "projects", "-Users-dev-app");
+    await mkdir(projectDir, { recursive: true });
+    const file = join(projectDir, "session-1.jsonl");
+    await writeFile(file, "{}\n");
+    await expect(
+      findClaudeSessionFile("session-1", home, claudeHome),
+    ).resolves.toBe(file);
+  });
+
   test("locates a Codex rollout whose filename ends with the thread id", async () => {
     const home = await makeHome();
     const threadId = "019f80ca-8092-7701-a01a-40a32a8ef040";
@@ -49,6 +61,18 @@ describe("session file resolution", () => {
 
     await expect(findCodexSessionFile(threadId, home)).resolves.toBe(file);
     await expect(findCodexSessionFile("019f-other", home)).resolves.toBeNull();
+  });
+
+  test("finds archived rollouts in a custom Codex home", async () => {
+    const home = await makeHome();
+    const codexHome = join(home, "custom-codex");
+    const archive = join(codexHome, "archived_sessions");
+    await mkdir(archive, { recursive: true });
+    const file = join(archive, "rollout-date-thread-1.jsonl");
+    await writeFile(file, "{}\n");
+    await expect(
+      findCodexSessionFile("thread-1", home, codexHome),
+    ).resolves.toBe(file);
   });
 
   test("returns null when the session directories do not exist", async () => {

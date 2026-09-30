@@ -3,6 +3,33 @@ import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 const getServerServices = vi.hoisted(() => vi.fn());
 vi.mock("@/services/server-services", () => ({ getServerServices }));
 
+vi.mock(
+  "@/services/server-urls/server-urls.service",
+  async (importOriginal) => {
+    const original =
+      await importOriginal<
+        typeof import("@/services/server-urls/server-urls.service")
+      >();
+    return {
+      ...original,
+      serverUrlSettingsService: {
+        settings: async (detection: { requestOrigin?: string }) => {
+          const detected = original.detectServerOrigins(detection);
+          return {
+            ...serverUrlFixture,
+            detectedLocalBaseUrl: detected.local,
+            detectedRemoteBaseUrl: detected.remote,
+            effectiveLocalBaseUrl: detected.local,
+            effectiveRemoteBaseUrl: detected.remote,
+            defaultServerUrlKind: "REMOTE",
+          };
+        },
+      },
+    };
+  },
+);
+import { serverUrlFixture } from "../../../../../../../../test/fixtures/server-urls";
+
 import { GET as manifest } from "./manifest.plist/route";
 
 const artifactForInstall = vi.fn();
@@ -60,6 +87,30 @@ afterEach(() => {
 });
 
 describe("install manifest route", () => {
+  test("uses the selected Proxy for the signed package URL", async () => {
+    artifactForInstall.mockResolvedValue(ipa());
+    const response = await manifest(
+      new Request(`${request().url}?serverUrlKind=PROXY`, {
+        headers: { host: "attacker.example" },
+      }),
+      params(),
+    );
+    expect(response.status).toBe(200);
+    const body = await response.text();
+    expect(body).toContain(
+      `${serverUrlFixture.proxyBaseUrl}/api/public/builds/build-1/artifacts/artifact-1?token=`,
+    );
+    expect(body).not.toContain("attacker.example");
+  });
+
+  test("rejects origins passed in place of the configured kind", async () => {
+    artifactForInstall.mockResolvedValue(ipa());
+    const response = await manifest(
+      new Request(`${request().url}?serverUrlKind=https://attacker.example`),
+      params(),
+    );
+    expect(response.status).toBe(400);
+  });
   test("serves a manifest for an exported IPA", async () => {
     artifactForInstall.mockResolvedValue(ipa());
 
@@ -153,7 +204,7 @@ describe("install manifest route", () => {
       params(),
     );
     expect(response.status).toBe(409);
-    await expect(response.text()).resolves.toContain("PUBLIC_BASE_URL");
+    await expect(response.text()).resolves.toContain("Settings");
   });
 
   test("escapes metadata that would otherwise break the document", async () => {

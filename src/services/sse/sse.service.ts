@@ -1,3 +1,5 @@
+import { serverUrlSettingsService } from "@/services/server-urls/server-urls.service";
+import { serverEndpointUrls, type ServerUrlSettings } from "@/lib/server-urls";
 import "server-only";
 
 import { randomBytes, randomUUID } from "node:crypto";
@@ -474,10 +476,19 @@ function snapshot(value: EndpointRecord): SseEndpointSnapshot {
   };
 }
 
-function endpointView(value: EndpointRecord, origin?: string | null) {
+async function endpointView(
+  value: EndpointRecord,
+  origin?: string | null,
+  settings?: ServerUrlSettings,
+) {
   const result = snapshot(value);
+  const urls =
+    settings ??
+    (await serverUrlSettingsService.settings({ requestOrigin: origin }));
   return {
     ...result,
+    ...serverEndpointUrls(urls, `/api/public/sse/${value.token}`),
+    endpointPath: `/api/public/sse/${value.token}`,
     publicUrl: origin
       ? `${origin}/api/public/sse/${value.token}`
       : `/api/public/sse/${value.token}`,
@@ -581,7 +592,12 @@ export class SseService {
         },
       },
     });
-    return values.map((value) => endpointView(value, origin));
+    const settings = await serverUrlSettingsService.settings({
+      requestOrigin: origin,
+    });
+    return Promise.all(
+      values.map((value) => endpointView(value, origin, settings)),
+    );
   }
 
   async endpoint(id: string, origin?: string | null) {

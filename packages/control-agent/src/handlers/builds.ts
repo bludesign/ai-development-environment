@@ -1675,13 +1675,25 @@ if (typeof hookModule.default === "function") {
         BUILD_PHASE: options.phase,
         BUILD_CONTEXT_PATH: options.contextPath,
         BUILD_ARTIFACT_DIRECTORY: options.input.artifactDirectory,
+        ...(options.input.server
+          ? {
+              SERVER_LOCAL_BASE_URL: options.input.server.localBaseUrl,
+              SERVER_REMOTE_BASE_URL: options.input.server.remoteBaseUrl,
+              SERVER_PROXY_BASE_URL: options.input.server.proxyBaseUrl ?? "",
+              SERVER_BASE_URL: options.input.server.selectedBaseUrl,
+              SERVER_URL_KIND: options.input.server.selectedUrlKind,
+            }
+          : {}),
+        ...Object.fromEntries(
+          Object.entries(options.input.endpointPaths ?? {}).map(
+            ([key, value]) => [
+              `${key.replace(/[A-Z]/g, (letter) => `_${letter}`).toUpperCase()}_PATH`,
+              value,
+            ],
+          ),
+        ),
         ...(options.input.telemetry
           ? {
-              TELEMETRY_LOCAL_BASE_URL: options.input.telemetry.localBaseUrl,
-              TELEMETRY_REMOTE_BASE_URL: options.input.telemetry.remoteBaseUrl,
-              TELEMETRY_BASE_URL: options.input.telemetry.selectedBaseUrl,
-              CONSOLE_LOGS_URL: options.input.telemetry.consoleLogsUrl,
-              ANALYTICS_EVENTS_URL: options.input.telemetry.analyticsEventsUrl,
               CONSOLE_LOG_COLLECTION_ENABLED: String(
                 options.input.telemetry.consoleCollectionEnabled,
               ),
@@ -2756,6 +2768,8 @@ export const runIosBuild: AgentJobHandler = async (
       scheme: input.scheme,
       configuration: input.configuration,
       telemetry: input.telemetry ?? null,
+      server: input.server ?? null,
+      endpointPaths: input.endpointPaths ?? null,
     };
     let buildResult: CommandResult | null = null;
     let preflightResult: CommandResult | null = null;

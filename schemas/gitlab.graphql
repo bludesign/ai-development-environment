@@ -1068,7 +1068,9 @@ extend type Mutation {
   configureGitLabProjectWebhook(
     "Project id used by configureGitLabProjectWebhook."
     projectId: ID!
-    "Callback url used by configureGitLabProjectWebhook."
+    "Configured server address to use when callbackUrl is omitted."
+    serverUrlKind: ServerUrlKind
+    "Explicit callback URL for older API clients."
     callbackUrl: String
   ): GitLabWebhookSetup!
   "Remove git lab project webhook for Mutation."

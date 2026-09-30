@@ -764,6 +764,14 @@ input ImportedRunInput {
   updatedAt: String
   "The raw metadata to use for the request."
   rawMetadata: JSON
+  "Complete stored activity snapshot; omitted when history is unavailable."
+  events: [RunEventInput!]
+  "Token usage totals grouped by the model actually recorded in the transcript."
+  usage: [RunUsageInput!]
+  "Total cost reported by the provider for this session, when available."
+  estimatedCost: Float
+  "Source of the reported session cost."
+  pricingSource: String
 }
 
 """

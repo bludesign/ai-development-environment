@@ -1,4 +1,11 @@
 import { randomUUID } from "node:crypto";
+import { homedir } from "node:os";
+import { findClaudeSessionFile } from "../handlers/runs.js";
+import {
+  claudeImportedHistory,
+  claudeTranscriptMetadata,
+  readClaudeTranscript,
+} from "./claude-import.js";
 
 import {
   deleteSession,
@@ -219,7 +226,7 @@ export class ClaudeAdapter implements ProviderAdapter {
   private catalogPromise?: Promise<ProviderCatalog>;
   private readonly hydrationCache = new Map<
     string,
-    { lastModified: string; kind: "PLAN" | "SESSION"; finalOutput?: string }
+    { lastModified: string; history: Partial<ProviderImportedRun> }
   >();
 
   catalog(): Promise<ProviderCatalog> {
@@ -420,40 +427,54 @@ export class ClaudeAdapter implements ProviderAdapter {
   ): Promise<ProviderImportedRun[]> {
     const results: ProviderImportedRun[] = [];
     for (const worktree of worktrees) {
-      const sessions = await listSessions({ dir: worktree.folder, limit: 500 });
+      const sessions = await listSessions({
+        dir: worktree.folder,
+        includeWorktrees: false,
+      });
       for (const session of sessions) {
-        const lastModifiedKey = String(session.lastModified ?? "");
+        const lastModifiedKey = `${session.lastModified ?? ""}:${session.fileSize ?? ""}`;
         const cached = this.hydrationCache.get(session.sessionId);
-        let kind: "PLAN" | "SESSION" = "SESSION";
-        let finalOutput: string | undefined;
+        let history: Partial<ProviderImportedRun> = {};
         if (cached && cached.lastModified === lastModifiedKey) {
-          kind = cached.kind;
-          finalOutput = cached.finalOutput;
+          history = cached.history;
         } else {
+          let transcript: unknown[] = [];
           try {
-            const history = await getSessionMessages(session.sessionId, {
-              dir: worktree.folder,
-              limit: 500,
-            });
-            const serialized = JSON.stringify(history);
-            if (serialized.includes('"permissionMode":"plan"')) kind = "PLAN";
-            finalOutput = firstString([...history].reverse());
-            this.hydrationCache.set(session.sessionId, {
-              lastModified: lastModifiedKey,
-              kind,
-              finalOutput,
-            });
+            const path = await findClaudeSessionFile(
+              session.sessionId,
+              homedir(),
+              process.env.CLAUDE_CONFIG_DIR,
+            );
+            if (path) transcript = await readClaudeTranscript(path);
+            history = claudeTranscriptMetadata(transcript);
           } catch {
-            // Metadata is still useful when an older history cannot be hydrated.
+            // SDK messages can still provide activity, model, and token usage.
+          }
+          try {
+            const messages = await getSessionMessages(session.sessionId, {
+              dir: worktree.folder,
+              includeSystemMessages: true,
+            });
+            // An empty result can mean the SDK could not locate the transcript.
+            if (messages.length) {
+              history = claudeImportedHistory(messages, transcript);
+              if (history.model && history.usage) {
+                this.hydrationCache.set(session.sessionId, {
+                  lastModified: lastModifiedKey,
+                  history,
+                });
+              }
+            }
+          } catch {
+            // Omit activity snapshots on failure so previous imports remain intact.
           }
         }
         results.push({
           nativeId: session.sessionId,
           worktreeId: worktree.id,
-          kind,
+          ...history,
           status: "COMPLETED",
-          prompt: session.firstPrompt || session.summary,
-          finalOutput: finalOutput || session.summary,
+          prompt: history.prompt || session.firstPrompt || session.summary,
           branch: session.gitBranch || worktree.branch || undefined,
           createdAt: session.createdAt
             ? new Date(session.createdAt).toISOString()

@@ -1784,6 +1784,17 @@ model TelemetryEntry {
   @@index([sessionId])
 }
 
+model ServerUrlSettings {
+  id                            String   @id
+  localBaseUrlOverride          String?
+  remoteBaseUrlOverride         String?
+  proxyBaseUrl                  String?
+  defaultServerUrlKind          String   @default("LOCAL")
+  simulatorDefaultServerUrlKind String?
+  createdAt                     DateTime @default(now())
+  updatedAt                     DateTime @updatedAt
+}
+
 model TelemetrySettings {
   id                         String   @id
   localBaseUrlOverride       String?

@@ -56,6 +56,7 @@ export const GetBuildDestinationsOutputSchema = z.object({
 });
 
 export const StartBuildToolInputSchema = z.object({
+  serverUrlKind: z.enum(["LOCAL", "REMOTE", "PROXY"]).nullable().optional(),
   worktreeId: z.string().min(1),
   configurationId: z.string().min(1).optional(),
   customConfiguration: CustomBuildConfigurationSchema.optional(),

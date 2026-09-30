@@ -4,6 +4,7 @@
 const React = require("react");
 
 const mockTranslations = {
+  serverUrls: require("../../messages/en.json").serverUrls,
   activeAgent: {
     title: "Active Agent",
     none: "None",

@@ -1,0 +1,70 @@
+"A named, operator-configured address for reaching this control plane."
+enum ServerUrlKind {
+  "The detected local origin or its saved override."
+  LOCAL
+  "The detected remote origin or its saved override."
+  REMOTE
+  "An optional custom proxy origin. Unavailable until configured."
+  PROXY
+}
+"Shared client-facing origins and selector defaults for this control plane."
+type ServerUrlSettings {
+  "Saved Local override, or null to use detection."
+  localBaseUrlOverride: String
+  "Saved Remote override, or null to use detection."
+  remoteBaseUrlOverride: String
+  "Optional HTTP(S) proxy origin, with no path or trailing slash."
+  proxyBaseUrl: String
+  "Local origin detected from the private request origin or server interfaces."
+  detectedLocalBaseUrl: String!
+  "Remote origin detected from PUBLIC_BASE_URL or the request origin."
+  detectedRemoteBaseUrl: String!
+  "Local origin after applying its override."
+  effectiveLocalBaseUrl: String!
+  "Remote origin after applying its override."
+  effectiveRemoteBaseUrl: String!
+  "Default choice for selectors and builds. Initially LOCAL."
+  defaultServerUrlKind: ServerUrlKind!
+  "Optional simulator build default. Null inherits the global default."
+  simulatorDefaultServerUrlKind: ServerUrlKind
+  "ISO timestamp of the last saved settings change."
+  updatedAt: String!
+}
+"Partial update of shared origins and defaults. Omitted fields are retained."
+input SaveServerUrlSettingsInput {
+  "HTTP(S) Local origin override. Null or blank resumes detection."
+  localBaseUrlOverride: String
+  "HTTP(S) Remote origin override. Null or blank resumes detection."
+  remoteBaseUrlOverride: String
+  "HTTP(S) proxy origin. Null clears it unless a default still selects PROXY."
+  proxyBaseUrl: String
+  "Global default. Selecting PROXY requires a configured proxy origin."
+  defaultServerUrlKind: ServerUrlKind
+  "Simulator default. Null inherits the global default."
+  simulatorDefaultServerUrlKind: ServerUrlKind
+}
+"A notification that shared settings changed; refetch with the client's origin."
+type ServerUrlSettingsChange {
+  "ISO timestamp of the settings change."
+  updatedAt: String!
+}
+extend type Query {
+  "Read detected origins, effective addresses, and shared defaults."
+  serverUrlSettings(
+    "Optional client browsing origin used for detection. It is not persisted."
+    requestOrigin: String
+  ): ServerUrlSettings!
+}
+extend type Mutation {
+  "Save origin-only settings and publish settings-change notifications."
+  saveServerUrlSettings(
+    "Overrides and defaults to update."
+    input: SaveServerUrlSettingsInput!
+    "Optional client browsing origin used for detected values in the response."
+    requestOrigin: String
+  ): ServerUrlSettings!
+}
+extend type Subscription {
+  "Notify clients after shared server URL settings are saved."
+  serverUrlSettingsChanged: ServerUrlSettingsChange!
+}

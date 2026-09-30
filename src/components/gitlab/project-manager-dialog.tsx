@@ -1,4 +1,11 @@
 "use client";
+import {
+  ServerUrlActionNotice,
+  EndpointUrls,
+  ServerUrlPicker,
+} from "@/components/server-urls/server-url-controls";
+import { useServerUrlSettings } from "@/hooks/use-server-url-settings";
+import { serverUrlActionProblem, type ServerUrlKind } from "@/lib/server-urls";
 
 import {
   CheckCircle2,
@@ -55,6 +62,10 @@ export function GitLabProjectManagerDialog({
   projects: GitLabProjectView[];
   settings: GitLabSettingsView;
 }) {
+  const { settings: serverUrls } = useServerUrlSettings();
+  const [serverUrlKind, setServerUrlKind] = useState<ServerUrlKind | null>(
+    null,
+  );
   const t = useTranslations("gitlabSettings");
   const common = useTranslations("common");
   const [open, setOpen] = useState(false);
@@ -209,13 +220,16 @@ export function GitLabProjectManagerDialog({
       const data = await controlPlaneRequest<{
         configureGitLabProjectWebhook: GitLabWebhookSetupView;
       }>(
-        `mutation ConfigureGitLabProjectWebhook($projectId: ID!) {
-          configureGitLabProjectWebhook(projectId: $projectId) {
+        `mutation ConfigureGitLabProjectWebhook($projectId: ID!, $serverUrlKind: ServerUrlKind) {
+          configureGitLabProjectWebhook(projectId: $projectId, serverUrlKind: $serverUrlKind) {
             callbackUrl signingToken manualConfigurationRequired
             project { ${PROJECT_FIELDS} }
           }
         }`,
-        { projectId },
+        {
+          projectId,
+          serverUrlKind: serverUrlKind ?? serverUrls?.defaultServerUrlKind,
+        },
       );
       const setup = data.configureGitLabProjectWebhook;
       setManualToken(setup.signingToken);
@@ -244,6 +258,13 @@ export function GitLabProjectManagerDialog({
         </Button>
       </DialogTrigger>
       <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-5xl">
+        <ServerUrlPicker
+          value={serverUrlKind}
+          onValueChange={setServerUrlKind}
+        />
+        <EndpointUrls path="/api/public/gitlab/webhook" />
+        <ServerUrlActionNotice kind={serverUrlKind} />
+
         <DialogHeader>
           <DialogTitle>{t("manageTitle")}</DialogTitle>
           <DialogDescription>{t("manageDescription")}</DialogDescription>
@@ -361,7 +382,12 @@ export function GitLabProjectManagerDialog({
                       </div>
                       <div className="flex gap-2">
                         <Button
-                          disabled={busy}
+                          disabled={
+                            busy ||
+                            Boolean(
+                              serverUrlActionProblem(serverUrls, serverUrlKind),
+                            )
+                          }
                           onClick={() => void configureWebhook(project.id)}
                           size="sm"
                           type="button"

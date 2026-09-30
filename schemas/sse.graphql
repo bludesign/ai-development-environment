@@ -184,6 +184,15 @@ type SseEndpoint {
   token: String!
   "public url field."
   publicUrl: String!
+    @deprecated(reason: "Use localUrl, remoteUrl, and proxyUrl")
+  "Opaque bearer route shared by every origin variant."
+  endpointPath: String!
+  "Endpoint URL at the shared Local origin."
+  localUrl: String!
+  "Endpoint URL at the shared Remote origin."
+  remoteUrl: String!
+  "Endpoint URL at the configured Proxy origin, or null when unconfigured."
+  proxyUrl: String
   "name field."
   name: String!
   "description field."

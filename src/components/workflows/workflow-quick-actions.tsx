@@ -1,6 +1,6 @@
 "use client";
 
-import { ExternalLink } from "lucide-react";
+import { CirclePause, CircleStop, ExternalLink } from "lucide-react";
 import { useTranslations } from "next-intl";
 import { useState } from "react";
 
@@ -60,6 +60,7 @@ function WorkflowQuickActionButtons({
     resourceId: worktreeId,
   });
   const [triggering, setTriggering] = useState<string | null>(null);
+  const [managingRun, setManagingRun] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const active: Record<string, typeof summary.activeRuns> = {};
   for (const run of summary.activeRuns)
@@ -94,6 +95,24 @@ function WorkflowQuickActionButtons({
       setError(value instanceof Error ? value.message : String(value));
     } finally {
       setTriggering(null);
+    }
+  };
+
+  const lifecycle = async (runId: string, action: "pause" | "cancel") => {
+    setManagingRun(runId);
+    setError(null);
+    try {
+      const mutation =
+        action === "pause" ? "pauseWorkflowRun" : "cancelWorkflowRun";
+      await controlPlaneRequest(
+        `mutation WorktreeQuickActionLifecycle($id: ID!) { ${mutation}(id: $id) { id status } }`,
+        { id: runId },
+      );
+      await summary.refresh();
+    } catch (value) {
+      setError(value instanceof Error ? value.message : String(value));
+    } finally {
+      setManagingRun(null);
     }
   };
 
@@ -133,6 +152,24 @@ function WorkflowQuickActionButtons({
                             {t("runNumber", { number: run.displayNumber })}
                           </DropdownMenuLabel>
                         )}
+                        {["RUNNING", "WAITING", "BLOCKED"].includes(
+                          run.status,
+                        ) && (
+                          <DropdownMenuItem
+                            disabled={managingRun !== null}
+                            onSelect={() => void lifecycle(run.id, "pause")}
+                          >
+                            <CirclePause />
+                            {t("pause")}
+                          </DropdownMenuItem>
+                        )}
+                        <DropdownMenuItem
+                          disabled={managingRun !== null}
+                          onSelect={() => void lifecycle(run.id, "cancel")}
+                        >
+                          <CircleStop />
+                          {t("cancelRun")}
+                        </DropdownMenuItem>
                         <DropdownMenuItem asChild>
                           <Link href={`/workflows/runs/${run.id}`}>
                             <ExternalLink />

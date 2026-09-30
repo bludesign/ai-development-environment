@@ -1,3 +1,4 @@
+import { serverUrlFixture } from "../../../test/fixtures/server-urls";
 import {
   act,
   cleanup,
@@ -329,3 +330,12 @@ describe("BuildsPage", () => {
     );
   });
 });
+
+vi.mock("@/hooks/use-server-url-settings", () => ({
+  useServerUrlSettings: () => ({
+    settings: serverUrlFixture,
+    loading: false,
+    error: null,
+    refresh: vi.fn(),
+  }),
+}));

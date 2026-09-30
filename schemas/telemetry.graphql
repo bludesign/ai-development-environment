@@ -116,8 +116,10 @@ type TelemetryTimelinePage {
 type TelemetrySettings {
   "The local base URL override associated with this telemetry settings. May be null when unavailable or not applicable."
   localBaseUrlOverride: String
+    @deprecated(reason: "Use serverUrlSettings and saveServerUrlSettings")
   "The remote base URL override associated with this telemetry settings. May be null when unavailable or not applicable."
   remoteBaseUrlOverride: String
+    @deprecated(reason: "Use serverUrlSettings and saveServerUrlSettings")
   "Whether the console collection enabled condition is true for this telemetry settings."
   consoleCollectionEnabled: Boolean!
   "Whether the analytics collection enabled condition is true for this telemetry settings."
@@ -242,8 +244,10 @@ input TelemetryTimelineInput {
 input SaveTelemetrySettingsInput {
   "The local base URL override to use for the request."
   localBaseUrlOverride: String
+    @deprecated(reason: "Use serverUrlSettings and saveServerUrlSettings")
   "The remote base URL override to use for the request."
   remoteBaseUrlOverride: String
+    @deprecated(reason: "Use serverUrlSettings and saveServerUrlSettings")
   "Whether console collection enabled applies to the request."
   consoleCollectionEnabled: Boolean
   "Whether analytics collection enabled applies to the request."

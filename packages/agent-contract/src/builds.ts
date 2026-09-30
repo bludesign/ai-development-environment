@@ -242,12 +242,27 @@ export type BuildScriptSnapshot = {
   position: number;
 };
 
-export type BuildTelemetrySettings = {
+export const BUILD_ENDPOINT_PATHS = {
+  consoleLogs: "/api/telemetry/console-logs",
+  analyticsEvents: "/api/telemetry/analytics-events",
+  apnsRegistration: "/api/ios/apns-devices",
+  crashReports: "/api/public/crashes",
+  dsyms: "/api/dsyms",
+  dsymUploads: "/api/dsyms/uploads",
+  dsymUpload: "/api/dsyms/uploads/{uploadId}",
+  dsymUploadComplete: "/api/dsyms/uploads/{uploadId}/complete",
+} as const;
+export type BuildEndpointPaths = {
+  [K in keyof typeof BUILD_ENDPOINT_PATHS]: string;
+};
+export type BuildServerSettings = {
   localBaseUrl: string;
   remoteBaseUrl: string;
+  proxyBaseUrl: string | null;
+  selectedUrlKind: "LOCAL" | "REMOTE" | "PROXY";
   selectedBaseUrl: string;
-  consoleLogsUrl: string;
-  analyticsEventsUrl: string;
+};
+export type BuildTelemetrySettings = {
   consoleCollectionEnabled: boolean;
   analyticsCollectionEnabled: boolean;
 };
@@ -295,6 +310,8 @@ export type BuildJobPayload = BuildWorktreeIdentity & {
   scripts: BuildScriptSnapshot[];
   /** Optional only for jobs queued by a server version that predates telemetry. */
   telemetry?: BuildTelemetrySettings;
+  server?: BuildServerSettings;
+  endpointPaths?: BuildEndpointPaths;
   worktreeCoverage?: boolean;
 };
 
@@ -700,26 +717,6 @@ function parseBuildTelemetrySettings(
   if (value === undefined || value === null) return undefined;
   const input = objectValue(value, "build job payload.telemetry");
   return {
-    localBaseUrl: httpUrl(
-      input.localBaseUrl,
-      "build job payload.telemetry.localBaseUrl",
-    ),
-    remoteBaseUrl: httpUrl(
-      input.remoteBaseUrl,
-      "build job payload.telemetry.remoteBaseUrl",
-    ),
-    selectedBaseUrl: httpUrl(
-      input.selectedBaseUrl,
-      "build job payload.telemetry.selectedBaseUrl",
-    ),
-    consoleLogsUrl: httpUrl(
-      input.consoleLogsUrl,
-      "build job payload.telemetry.consoleLogsUrl",
-    ),
-    analyticsEventsUrl: httpUrl(
-      input.analyticsEventsUrl,
-      "build job payload.telemetry.analyticsEventsUrl",
-    ),
     consoleCollectionEnabled: booleanValue(
       input.consoleCollectionEnabled,
       "build job payload.telemetry.consoleCollectionEnabled",
@@ -729,6 +726,61 @@ function parseBuildTelemetrySettings(
       "build job payload.telemetry.analyticsCollectionEnabled",
     ),
   };
+}
+
+function parseBuildServer(value: unknown): BuildServerSettings | undefined {
+  if (value == null) return undefined;
+  const input = objectValue(value, "build job payload.server");
+  const selectedUrlKind = input.selectedUrlKind;
+  if (
+    selectedUrlKind !== "LOCAL" &&
+    selectedUrlKind !== "REMOTE" &&
+    selectedUrlKind !== "PROXY"
+  )
+    throw new Error("Invalid build server URL kind");
+  const origin = (value: unknown, name: string) => {
+    const result = httpUrl(value, name);
+    const parsed = new URL(result);
+    if (
+      parsed.pathname !== "/" ||
+      parsed.search ||
+      parsed.hash ||
+      parsed.username ||
+      parsed.password
+    )
+      throw new Error(`${name} must be an HTTP(S) origin`);
+    return parsed.origin;
+  };
+  const server: BuildServerSettings = {
+    localBaseUrl: origin(input.localBaseUrl, "server.localBaseUrl"),
+    remoteBaseUrl: origin(input.remoteBaseUrl, "server.remoteBaseUrl"),
+    proxyBaseUrl:
+      input.proxyBaseUrl == null
+        ? null
+        : origin(input.proxyBaseUrl, "server.proxyBaseUrl"),
+    selectedUrlKind,
+    selectedBaseUrl: origin(input.selectedBaseUrl, "server.selectedBaseUrl"),
+  };
+  const selected =
+    selectedUrlKind === "LOCAL"
+      ? server.localBaseUrl
+      : selectedUrlKind === "REMOTE"
+        ? server.remoteBaseUrl
+        : server.proxyBaseUrl;
+  if (selected !== server.selectedBaseUrl)
+    throw new Error("Selected server URL must match its configured base URL");
+  return server;
+}
+function parseBuildEndpointPaths(
+  value: unknown,
+): BuildEndpointPaths | undefined {
+  if (value == null) return undefined;
+  const input = objectValue(value, "build job payload.endpointPaths");
+  for (const [key, expected] of Object.entries(BUILD_ENDPOINT_PATHS)) {
+    if (input[key] !== expected)
+      throw new Error(`Invalid build endpoint path: ${key}`);
+  }
+  return { ...BUILD_ENDPOINT_PATHS };
 }
 
 export function parseBuildSourceDiscoverPayload(
@@ -842,6 +894,8 @@ export function parseBuildJobPayload(value: unknown): BuildJobPayload {
     advancedSettings,
     scripts,
     telemetry: parseBuildTelemetrySettings(input.telemetry),
+    server: parseBuildServer(input.server),
+    endpointPaths: parseBuildEndpointPaths(input.endpointPaths),
     worktreeCoverage:
       input.worktreeCoverage === undefined
         ? false

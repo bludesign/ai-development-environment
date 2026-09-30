@@ -68,30 +68,44 @@ function respondWithRuns(initial: ActiveRun[] = []) {
     workflowSink = sink;
     return () => undefined;
   });
-  vi.mocked(controlPlaneRequest).mockImplementation(async (query: string) => {
-    if (query.includes("WorkflowTargetSummaries")) {
-      return {
-        workflowTargetSummaries: [
-          {
-            resourceKind: "WORKTREE",
-            resourceId: "worktree-1",
-            activeRuns: runs,
-          },
-        ],
-      } as never;
-    }
-    if (query.includes("RunWorktreeQuickAction")) {
-      const run = {
-        id: "run-1",
-        workflowId: "workflow-1",
-        displayNumber: 1,
-        status: "RUNNING",
-      };
-      runs = [...runs, run];
-      return { triggerWorkflow: run } as never;
-    }
-    return {} as never;
-  });
+  vi.mocked(controlPlaneRequest).mockImplementation(
+    async (query: string, variables) => {
+      if (query.includes("WorkflowTargetSummaries")) {
+        return {
+          workflowTargetSummaries: [
+            {
+              resourceKind: "WORKTREE",
+              resourceId: "worktree-1",
+              activeRuns: runs,
+            },
+          ],
+        } as never;
+      }
+      if (query.includes("RunWorktreeQuickAction")) {
+        const run = {
+          id: "run-1",
+          workflowId: "workflow-1",
+          displayNumber: 1,
+          status: "RUNNING",
+        };
+        runs = [...runs, run];
+        return { triggerWorkflow: run } as never;
+      }
+      if (query.includes("pauseWorkflowRun")) {
+        const id = variables?.id;
+        runs = runs.map((run) =>
+          run.id === id ? { ...run, status: "PAUSING" } : run,
+        );
+        return { pauseWorkflowRun: { id, status: "PAUSING" } } as never;
+      }
+      if (query.includes("cancelWorkflowRun")) {
+        const id = variables?.id;
+        runs = runs.filter((run) => run.id !== id);
+        return { cancelWorkflowRun: { id, status: "CANCELLED" } } as never;
+      }
+      return {} as never;
+    },
+  );
   return {
     setRuns(value: ActiveRun[]) {
       runs = value;
@@ -159,6 +173,115 @@ test("starts a selected worktree quick action and opens its active run", async (
   expect(viewLink.getAttribute("href")).toBe("/workflows/runs/run-1");
   expect(runMenu.className).toContain("rounded-r-none");
   expect(button.className).toContain("rounded-l-none");
+});
+
+const quickActionProps = {
+  sessionData: { worktree: { id: "worktree-1" } },
+  workflows: [
+    {
+      id: "workflow-1",
+      name: "Prepare review",
+      description: "Runs the review preparation workflow",
+      quickActionIconKey: "rocket",
+      quickActionButtonVariant: "secondary" as const,
+    },
+  ],
+  worktreeId: "worktree-1",
+};
+
+test.each([
+  { label: "Pause", mutation: "pauseWorkflowRun" },
+  { label: "Cancel run", mutation: "cancelWorkflowRun" },
+])(
+  "$label affects the selected run and refreshes the menu",
+  async ({ label, mutation }) => {
+    respondWithRuns([
+      {
+        id: "run-3",
+        workflowId: "workflow-1",
+        displayNumber: 3,
+        status: "WAITING",
+      },
+      {
+        id: "run-4",
+        workflowId: "workflow-1",
+        displayNumber: 4,
+        status: "RUNNING",
+      },
+    ]);
+    render(<WorkflowQuickActions {...quickActionProps} />);
+    await openRunMenu();
+    fireEvent.click(screen.getAllByRole("menuitem", { name: label })[1]);
+
+    await waitFor(() =>
+      expect(controlPlaneRequest).toHaveBeenCalledWith(
+        expect.stringContaining(`${mutation}(id: $id)`),
+        { id: "run-4" },
+      ),
+    );
+    await waitFor(() =>
+      expect(
+        vi
+          .mocked(controlPlaneRequest)
+          .mock.calls.filter(([query]) =>
+            query.includes("WorkflowTargetSummaries"),
+          ),
+      ).toHaveLength(2),
+    );
+    await openRunMenu();
+    expect(screen.getAllByRole("menuitem", { name: "Pause" })).toHaveLength(1);
+    expect(
+      screen
+        .getAllByRole("menuitem", { name: /View/ })
+        .map((item) => item.getAttribute("href")),
+    ).toEqual(
+      mutation === "pauseWorkflowRun"
+        ? ["/workflows/runs/run-3", "/workflows/runs/run-4"]
+        : ["/workflows/runs/run-3"],
+    );
+  },
+);
+
+test.each(["QUEUED", "PAUSING", "PAUSED"])(
+  "keeps cancel and view available without pause for a %s run",
+  async (status) => {
+    respondWithRuns([
+      { id: "run-1", workflowId: "workflow-1", displayNumber: 1, status },
+    ]);
+    render(<WorkflowQuickActions {...quickActionProps} />);
+    await openRunMenu();
+
+    expect(screen.queryByRole("menuitem", { name: "Pause" })).toBeNull();
+    expect(screen.getByRole("menuitem", { name: "Cancel run" })).toBeDefined();
+    expect(screen.getByRole("menuitem", { name: /View/ })).toBeDefined();
+  },
+);
+
+test("shows lifecycle errors and allows retrying the action", async () => {
+  respondWithRuns([
+    {
+      id: "run-1",
+      workflowId: "workflow-1",
+      displayNumber: 1,
+      status: "BLOCKED",
+    },
+  ]);
+  render(<WorkflowQuickActions {...quickActionProps} />);
+  await openRunMenu();
+  vi.mocked(controlPlaneRequest).mockRejectedValueOnce(
+    new Error("Pause failed"),
+  );
+  fireEvent.click(screen.getByRole("menuitem", { name: "Pause" }));
+
+  expect(await screen.findByRole("alert")).toHaveProperty(
+    "textContent",
+    "Pause failed",
+  );
+  await openRunMenu();
+  fireEvent.click(screen.getByRole("menuitem", { name: "Pause" }));
+  await waitFor(() => expect(screen.queryByRole("alert")).toBeNull());
+  await openRunMenu();
+  expect(screen.queryByRole("menuitem", { name: "Pause" })).toBeNull();
 });
 
 test("asks which choice to run before starting a choice workflow", async () => {

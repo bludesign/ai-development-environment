@@ -1,3 +1,4 @@
+import { serverUrlFixture } from "../../../test/fixtures/server-urls";
 import {
   act,
   cleanup,
@@ -432,10 +433,10 @@ describe("BuildDetailPage", () => {
     expect(summary.className).toContain("border-l-blue-500");
     expect(screen.getAllByText(/build-1/).length).toBeGreaterThan(0);
     expect(screen.getByText("Out of date")).toBeDefined();
-    const downloads = screen.getAllByRole("link", { name: "Download" });
-    expect(downloads[0]?.getAttribute("href")).toBe(
-      "/api/public/builds/build-1/artifacts/app-artifact",
-    );
+    const downloads = screen.getAllByRole("button", { name: "Download" });
+    fireEvent.click(downloads[0]!);
+    expect(screen.getByRole("combobox", { name: "Server URL" })).toBeDefined();
+    fireEvent.keyDown(document, { key: "Escape" });
     expect(screen.getByText("Runnable App")).toBeDefined();
     expect(screen.getByText("Raw Log")).toBeDefined();
     await waitFor(() =>
@@ -1098,3 +1099,12 @@ describe("BuildDetailPage", () => {
     );
   });
 });
+
+vi.mock("@/hooks/use-server-url-settings", () => ({
+  useServerUrlSettings: () => ({
+    settings: serverUrlFixture,
+    loading: false,
+    error: null,
+    refresh: vi.fn(),
+  }),
+}));

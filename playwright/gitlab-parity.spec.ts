@@ -2,7 +2,10 @@ import { mkdir } from "node:fs/promises";
 import { expect, test } from "@playwright/test";
 import { screenshotSessionToken } from "../scripts/mock-data/auth";
 import { ids } from "../scripts/mock-data/ids";
-import { setScreenshotTime } from "./screenshot-time";
+import {
+  normalizeScreenshotValues,
+  setScreenshotTime,
+} from "./screenshot-time";
 
 const mergeOptions = {
   projectId: ids.gitlab.projectId,
@@ -194,6 +197,10 @@ test("gitlab project manager saves preferences and supports browse, manual, and 
     }),
   ).toBeVisible();
   await expect(manager.getByText("acme/mobile", { exact: true })).toBeVisible();
+  await expect(
+    manager.getByRole("combobox", { name: "Server URL" }),
+  ).toBeVisible();
+  await normalizeScreenshotValues(page);
   await mkdir(`screenshots/${info.project.name}`, { recursive: true });
   await page.screenshot({
     animations: "disabled",
@@ -238,6 +245,9 @@ test("gitlab project manager saves preferences and supports browse, manual, and 
     .click();
   await expect.poll(() => projectAdds).toContain("team/manual-project");
 
+  // The default Local HTTP URL cannot configure a webhook; use the seeded Remote HTTPS URL.
+  await manager.getByRole("combobox", { name: "Server URL" }).click();
+  await page.getByRole("option", { name: /^Remote/ }).click();
   await manager
     .getByRole("button", { name: "Configure webhook" })
     .first()
@@ -384,11 +394,26 @@ test("gitlab comments shows human conversations with filters and remembered layo
   await expect(page.getByRole("table")).toBeVisible();
   await page.reload();
   await expect(page.getByRole("table")).toBeVisible();
+  // The saved layout renders before the comments reload finishes.
+  await expect(
+    page.getByRole("table").getByText(/Retrying here can race/),
+  ).toBeVisible();
+  await expect(
+    page.getByRole("button", { name: "Refresh", exact: true }),
+  ).toBeEnabled();
+  await page.mouse.move(0, 0);
+  await page.evaluate(async () => {
+    await document.fonts.ready;
+    await new Promise<void>((resolve) =>
+      requestAnimationFrame(() => requestAnimationFrame(() => resolve())),
+    );
+  });
   await mkdir(`screenshots/${info.project.name}`, { recursive: true });
   await page.screenshot({
     animations: "disabled",
     path: `screenshots/${info.project.name}/gitlab-comments-table.png`,
     fullPage: true,
+    style: "*, *::before, *::after { transition: none !important; }",
   });
   await page.getByRole("radio", { name: "Card layout", exact: true }).click();
   await page

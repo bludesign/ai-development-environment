@@ -1,4 +1,15 @@
 "use client";
+import {
+  ServerUrlActionNotice,
+  EndpointUrls,
+  ServerUrlPicker,
+} from "@/components/server-urls/server-url-controls";
+import { useServerUrlSettings } from "@/hooks/use-server-url-settings";
+import {
+  serverUrlActionProblem,
+  serverUrlOptions,
+  type ServerUrlKind,
+} from "@/lib/server-urls";
 
 import {
   CheckCircle2,
@@ -118,7 +129,18 @@ function JiraWebhookCard() {
   const credentialsReadOnly = useCredentialStoreReadOnly();
   const [webhook, setWebhook] = useState<JiraWebhookSettingsView | null>(null);
   const [secret, setSecret] = useState<string | null>(null);
-  const [webhookUrl, setWebhookUrl] = useState("");
+  const { settings: serverUrls } = useServerUrlSettings();
+  const [webhookServerKind, setWebhookServerKind] =
+    useState<ServerUrlKind | null>(null);
+  const selectedBase =
+    serverUrls &&
+    serverUrlOptions(serverUrls).find(
+      (option) =>
+        option.kind === (webhookServerKind ?? serverUrls.defaultServerUrlKind),
+    )?.url;
+  const webhookUrl = selectedBase
+    ? `${selectedBase}/api/public/jira/webhook`
+    : "";
   const [jql, setJql] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -130,11 +152,6 @@ function JiraWebhookCard() {
         jiraWebhookSettings: JiraWebhookSettingsView;
       }>(`query { jiraWebhookSettings { ${WEBHOOK_FIELDS} } }`);
       setWebhook(data.jiraWebhookSettings);
-      // Registration owns these values once it succeeds, so the fields follow
-      // what Jira actually has rather than what was last typed.
-      if (data.jiraWebhookSettings.registeredUrl) {
-        setWebhookUrl(data.jiraWebhookSettings.registeredUrl);
-      }
       setJql(data.jiraWebhookSettings.jql ?? "");
     } catch (value) {
       setError(value instanceof Error ? value.message : String(value));
@@ -143,9 +160,6 @@ function JiraWebhookCard() {
 
   useEffect(() => {
     const timeout = window.setTimeout(() => {
-      setWebhookUrl(
-        `${window.location.origin.replace(/\/$/, "")}/api/public/jira/webhook`,
-      );
       void load();
     }, 0);
     return () => window.clearTimeout(timeout);
@@ -266,10 +280,16 @@ function JiraWebhookCard() {
           >
             {t("webhookUrl")}
           </Label>
+          <ServerUrlPicker
+            value={webhookServerKind}
+            onValueChange={setWebhookServerKind}
+          />
+          <EndpointUrls path="/api/public/jira/webhook" />
+          <ServerUrlActionNotice kind={webhookServerKind} publicHost />
           <Input
             disabled={busy || credentialsReadOnly}
             id="jira-webhook-url"
-            onChange={(event) => setWebhookUrl(event.target.value)}
+            readOnly
             value={webhookUrl}
           />
           <p className="mt-1 text-xs text-muted-foreground">
@@ -439,7 +459,13 @@ function JiraWebhookCard() {
             </Button>
           )}
           <Button
-            disabled={busy || credentialsReadOnly || !webhookUrl.trim()}
+            disabled={
+              busy ||
+              credentialsReadOnly ||
+              Boolean(
+                serverUrlActionProblem(serverUrls, webhookServerKind, true),
+              )
+            }
             onClick={() => void register()}
             type="button"
           >

@@ -9,7 +9,14 @@ import {
   TELEMETRY_SETTINGS_CHANGED_TOPIC,
   agentEventBus,
 } from "@/services/agent-control";
-import { getEnrollmentServerOrigins } from "@/server/enrollment-server-origins";
+import {
+  serverUrlSettingsService,
+  detectServerOrigins,
+  type ServerUrlDetection,
+} from "@/services/server-urls/server-urls.service";
+import { normalizeServerOrigin } from "@/lib/server-urls";
+export const normalizeTelemetryOrigin = normalizeServerOrigin;
+export const detectTelemetryOrigins = detectServerOrigins;
 
 import {
   fieldsForFacet,
@@ -71,11 +78,7 @@ type RawEntry = {
   separatorName: string | null;
 };
 
-type DetectionInput = {
-  requestOrigin?: string | null;
-  localOrigins?: string[];
-  publicBaseUrl?: string | null;
-};
+type DetectionInput = ServerUrlDetection;
 
 type Cursor = { clientTime: string; receivedAt: string; id: string };
 
@@ -129,83 +132,6 @@ function normalizeName(value: string): {
   if (!name || name.length > 100)
     throw new Error("Name must contain 1-100 characters");
   return { name, normalizedName: name.toLocaleLowerCase() };
-}
-
-export function normalizeTelemetryOrigin(value: string): string {
-  let url: URL;
-  try {
-    url = new URL(value.trim());
-  } catch {
-    throw new Error("Telemetry URL must be a valid HTTP(S) origin");
-  }
-  if (
-    !["http:", "https:"].includes(url.protocol) ||
-    url.username ||
-    url.password ||
-    (url.pathname !== "/" && url.pathname !== "") ||
-    url.search ||
-    url.hash
-  ) {
-    throw new Error(
-      "Telemetry URL must be an HTTP(S) origin without a path, credentials, query, or fragment",
-    );
-  }
-  return url.origin;
-}
-
-function optionalOrigin(value: string | null | undefined): string | null {
-  return value?.trim() ? normalizeTelemetryOrigin(value) : null;
-}
-
-function detectedOrigin(value: string | null | undefined): string | null {
-  if (!value?.trim()) return null;
-  try {
-    const url = new URL(value.trim());
-    return ["http:", "https:"].includes(url.protocol) ? url.origin : null;
-  } catch {
-    return null;
-  }
-}
-
-function privateHostname(hostname: string): boolean {
-  const value = hostname.toLowerCase().replace(/^\[|\]$/g, "");
-  return (
-    value === "localhost" ||
-    value === "::1" ||
-    value.endsWith(".local") ||
-    /^127\./.test(value) ||
-    /^10\./.test(value) ||
-    /^192\.168\./.test(value) ||
-    /^172\.(1[6-9]|2\d|3[01])\./.test(value)
-  );
-}
-
-export function detectTelemetryOrigins(input: DetectionInput = {}): {
-  local: string;
-  remote: string;
-} {
-  const request = detectedOrigin(input.requestOrigin);
-  const locals = (input.localOrigins ?? getEnrollmentServerOrigins()).flatMap(
-    (value) => {
-      try {
-        return [normalizeTelemetryOrigin(value)];
-      } catch {
-        return [];
-      }
-    },
-  );
-  const configured = detectedOrigin(
-    input.publicBaseUrl ?? process.env.PUBLIC_BASE_URL,
-  );
-  const requestIsPrivate = request
-    ? privateHostname(new URL(request).hostname)
-    : false;
-  const local =
-    request && requestIsPrivate
-      ? request
-      : (locals[0] ?? request ?? "http://127.0.0.1:3000");
-  const remote = configured ?? request ?? local;
-  return { local, remote };
 }
 
 function cursor(value: string | null | undefined): Cursor | null {
@@ -429,17 +355,17 @@ export class TelemetryService {
   ): Promise<TelemetrySettingsView> {
     const [settings, detected] = await Promise.all([
       this.rawSettings(),
-      Promise.resolve(detectTelemetryOrigins(detection)),
+      serverUrlSettingsService.settings(detection),
     ]);
     return {
-      localBaseUrlOverride: settings.localBaseUrlOverride,
-      remoteBaseUrlOverride: settings.remoteBaseUrlOverride,
+      localBaseUrlOverride: detected.localBaseUrlOverride,
+      remoteBaseUrlOverride: detected.remoteBaseUrlOverride,
       consoleCollectionEnabled: settings.consoleCollectionEnabled,
       analyticsCollectionEnabled: settings.analyticsCollectionEnabled,
-      detectedLocalBaseUrl: detected.local,
-      detectedRemoteBaseUrl: detected.remote,
-      effectiveLocalBaseUrl: settings.localBaseUrlOverride ?? detected.local,
-      effectiveRemoteBaseUrl: settings.remoteBaseUrlOverride ?? detected.remote,
+      detectedLocalBaseUrl: detected.detectedLocalBaseUrl,
+      detectedRemoteBaseUrl: detected.detectedRemoteBaseUrl,
+      effectiveLocalBaseUrl: detected.effectiveLocalBaseUrl,
+      effectiveRemoteBaseUrl: detected.effectiveRemoteBaseUrl,
       updatedAt: settings.updatedAt.toISOString(),
     };
   }
@@ -455,17 +381,21 @@ export class TelemetryService {
   ): Promise<TelemetrySettingsView> {
     const prisma = await getPrismaClient();
     const current = await this.rawSettings();
+    if (
+      input.localBaseUrlOverride !== undefined ||
+      input.remoteBaseUrlOverride !== undefined
+    ) {
+      await serverUrlSettingsService.saveSettings(
+        {
+          localBaseUrlOverride: input.localBaseUrlOverride,
+          remoteBaseUrlOverride: input.remoteBaseUrlOverride,
+        },
+        detection,
+      );
+    }
     const updated = await prisma.telemetrySettings.update({
       where: { id: SETTINGS_ID },
       data: {
-        localBaseUrlOverride:
-          input.localBaseUrlOverride === undefined
-            ? current.localBaseUrlOverride
-            : optionalOrigin(input.localBaseUrlOverride),
-        remoteBaseUrlOverride:
-          input.remoteBaseUrlOverride === undefined
-            ? current.remoteBaseUrlOverride
-            : optionalOrigin(input.remoteBaseUrlOverride),
         consoleCollectionEnabled:
           input.consoleCollectionEnabled ?? current.consoleCollectionEnabled,
         analyticsCollectionEnabled:
@@ -479,21 +409,9 @@ export class TelemetryService {
     return this.settings(detection);
   }
 
-  async buildSettings(
-    destinationType: "SIMULATOR" | "PHYSICAL_DEVICE",
-    detection: DetectionInput = {},
-  ): Promise<TelemetryBuildSettings> {
-    const settings = await this.settings(detection);
-    const selectedBaseUrl =
-      destinationType === "SIMULATOR"
-        ? settings.effectiveLocalBaseUrl
-        : settings.effectiveRemoteBaseUrl;
+  async buildSettings(): Promise<TelemetryBuildSettings> {
+    const settings = await this.rawSettings();
     return {
-      localBaseUrl: settings.effectiveLocalBaseUrl,
-      remoteBaseUrl: settings.effectiveRemoteBaseUrl,
-      selectedBaseUrl,
-      consoleLogsUrl: `${selectedBaseUrl}/api/telemetry/console-logs`,
-      analyticsEventsUrl: `${selectedBaseUrl}/api/telemetry/analytics-events`,
       consoleCollectionEnabled: settings.consoleCollectionEnabled,
       analyticsCollectionEnabled: settings.analyticsCollectionEnabled,
     };

@@ -42,6 +42,7 @@ import { createBuildResolvers } from "./resolvers/builds";
 import { createIosDeviceResolvers } from "./resolvers/devices";
 import type { IosDevicesService } from "@/services/ios-devices";
 import type { TelemetryService } from "@/services/telemetry";
+import { createServerUrlResolvers } from "./resolvers/server-urls";
 import { createTelemetryResolvers } from "./resolvers/telemetry";
 import { createSigningAssetsResolvers } from "./resolvers/signing-assets";
 import type { SigningAssetsService } from "@/services/signing-assets";
@@ -146,6 +147,7 @@ export const createSchema = (
     createBuildResolvers(buildsService),
     createIosDeviceResolvers(iosDevicesService),
     createTelemetryResolvers(telemetryService),
+    createServerUrlResolvers(),
     createSigningAssetsResolvers(signingAssetsService),
     createPushNotificationsResolvers(pushNotificationsService),
     createCacheServerResolvers(cacheServerService),
