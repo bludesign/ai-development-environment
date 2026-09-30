@@ -814,6 +814,7 @@ export class RunsService {
           worktree: true,
           sourcePlan: true,
           playedSession: true,
+          modelUsage: { orderBy: { model: "asc" } },
         },
       }),
       prisma.agentRun.count({ where }),
