@@ -2052,7 +2052,21 @@ export class BuildsService {
           scripts,
           server,
           endpointPaths,
-          ...(telemetry ? { telemetry } : {}),
+          ...(telemetry
+            ? {
+                // Older agents still require telemetry URLs on the job wire payload.
+                telemetry: {
+                  ...telemetry,
+                  localBaseUrl: server.localBaseUrl,
+                  remoteBaseUrl: server.remoteBaseUrl,
+                  selectedBaseUrl: server.selectedBaseUrl,
+                  consoleLogsUrl:
+                    server.selectedBaseUrl + endpointPaths.consoleLogs,
+                  analyticsEventsUrl:
+                    server.selectedBaseUrl + endpointPaths.analyticsEvents,
+                },
+              }
+            : {}),
           worktreeCoverage: input.worktreeCoverage === true,
         },
         idempotencyKey: `ios:build:${requestId}:${worktree.id}`,

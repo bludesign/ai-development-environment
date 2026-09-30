@@ -39,15 +39,27 @@ afterEach(() => {
 
 test("copies each configured endpoint variant and links to centralized settings", async () => {
   mocks.copy.mockResolvedValue(undefined);
-  render(<EndpointUrls path="/api/telemetry/console-logs" />);
-  fireEvent.click(
-    screen.getByRole("button", { name: "Copy Proxy endpoint URL" }),
+  const submit = vi.fn((event: React.FormEvent) => event.preventDefault());
+  render(
+    <form onSubmit={submit}>
+      <EndpointUrls path="/api/telemetry/console-logs" />
+    </form>,
   );
-  await waitFor(() =>
-    expect(mocks.copy).toHaveBeenCalledWith(
-      `${serverUrlFixture.proxyBaseUrl}/api/telemetry/console-logs`,
-    ),
-  );
+  for (const [name, baseUrl] of [
+    ["Local", serverUrlFixture.effectiveLocalBaseUrl],
+    ["Remote", serverUrlFixture.effectiveRemoteBaseUrl],
+    ["Proxy", serverUrlFixture.proxyBaseUrl],
+  ]) {
+    fireEvent.click(
+      screen.getByRole("button", { name: `Copy ${name} endpoint URL` }),
+    );
+    await waitFor(() =>
+      expect(mocks.copy).toHaveBeenLastCalledWith(
+        `${baseUrl}/api/telemetry/console-logs`,
+      ),
+    );
+  }
+  expect(submit).not.toHaveBeenCalled();
   expect(
     screen
       .getByRole("link", { name: "Manage server URLs in Settings" })

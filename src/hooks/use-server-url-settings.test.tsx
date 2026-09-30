@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { act, cleanup, renderHook, waitFor } from "@testing-library/react";
-import { afterEach, expect, test, vi } from "vitest";
+import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import { serverUrlFixture } from "../../test/fixtures/server-urls";
 
 const mocks = vi.hoisted(() => ({
@@ -13,10 +13,26 @@ vi.mock("@/lib/control-plane-client", () => ({
   controlPlaneSubscriptions: () => ({ subscribe: mocks.subscribe }),
 }));
 import { useServerUrlSettings } from "./use-server-url-settings";
+beforeEach(() => {
+  mocks.request.mockReset();
+  mocks.subscribe.mockReturnValue(mocks.dispose);
+});
 afterEach(() => {
   cleanup();
   vi.clearAllMocks();
 });
+
+function deferredSettings() {
+  let resolve!: (value: { serverUrlSettings: typeof serverUrlFixture }) => void;
+  let reject!: (error: Error) => void;
+  const promise = new Promise<{ serverUrlSettings: typeof serverUrlFixture }>(
+    (yes, no) => {
+      resolve = yes;
+      reject = no;
+    },
+  );
+  return { promise, resolve, reject };
+}
 
 test("shares loading and refetches every consumer after a settings notification", async () => {
   mocks.request.mockResolvedValue({ serverUrlSettings: serverUrlFixture });
@@ -50,3 +66,42 @@ test("shares loading and refetches every consumer after a settings notification"
   second.unmount();
   expect(mocks.dispose).toHaveBeenCalledOnce();
 });
+
+test.each(["success", "failure"])(
+  "refetches all consumers when settings change during a pending read that ends in %s",
+  async (outcome) => {
+    const initialRead = deferredSettings();
+    const trailingRead = deferredSettings();
+    const updated = {
+      ...serverUrlFixture,
+      proxyBaseUrl: "https://updated.ts.net",
+    };
+    mocks.request
+      .mockReturnValueOnce(initialRead.promise)
+      .mockReturnValueOnce(trailingRead.promise);
+    const first = renderHook(useServerUrlSettings);
+    const second = renderHook(useServerUrlSettings);
+    expect(mocks.request).toHaveBeenCalledOnce();
+
+    await act(async () => {
+      const sink = mocks.subscribe.mock.calls[0]![1];
+      for (let index = 0; index < 3; index++) {
+        sink.next({
+          data: { serverUrlSettingsChanged: { updatedAt: "later" } },
+        });
+      }
+      if (outcome === "failure") initialRead.reject(new Error("offline"));
+      else initialRead.resolve({ serverUrlSettings: serverUrlFixture });
+    });
+    expect(mocks.request).toHaveBeenCalledTimes(2);
+
+    await act(async () => {
+      trailingRead.resolve({ serverUrlSettings: updated });
+    });
+    expect(first.result.current.settings).toEqual(updated);
+    expect(second.result.current.settings).toEqual(updated);
+    expect(first.result.current.error).toBeNull();
+    expect(second.result.current.error).toBeNull();
+    expect(mocks.request).toHaveBeenCalledTimes(2);
+  },
+);

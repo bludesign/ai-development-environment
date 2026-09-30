@@ -168,6 +168,7 @@ export function EndpointUrls({ path }: { path: string }) {
               </code>
             </div>
             <Button
+              type="button"
               size="icon-sm"
               variant="ghost"
               aria-label={t("copyEndpoint", {

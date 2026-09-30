@@ -1,9 +1,10 @@
 "use client";
-import { useEffect, useSyncExternalStore } from "react";
+import { useSyncExternalStore } from "react";
 import {
   controlPlaneRequest,
   controlPlaneSubscriptions,
 } from "@/lib/control-plane-client";
+import { createRefreshCoalescer } from "@/lib/refresh-coalescer";
 import {
   SERVER_URL_SETTINGS_FIELDS,
   type ServerUrlSettings,
@@ -12,29 +13,29 @@ import {
 type Snapshot = { settings: ServerUrlSettings | null; error: string | null };
 const initial: Snapshot = { settings: null, error: null };
 let snapshot = initial;
-let pending: Promise<void> | null = null;
 let unsubscribe: (() => void) | null = null;
 const listeners = new Set<() => void>();
 const emit = () => listeners.forEach((listener) => listener());
+const refreshOwner = createRefreshCoalescer(async () => {
+  try {
+    const data = await controlPlaneRequest<{
+      serverUrlSettings: ServerUrlSettings;
+    }>(
+      `query SharedServerUrlSettings($origin: String) { serverUrlSettings(requestOrigin: $origin) { ${SERVER_URL_SETTINGS_FIELDS} } }`,
+      { origin: window.location.origin },
+    );
+    snapshot = { settings: data.serverUrlSettings, error: null };
+  } catch (error) {
+    snapshot = {
+      ...snapshot,
+      error: error instanceof Error ? error.message : String(error),
+    };
+  } finally {
+    emit();
+  }
+});
 export function refreshServerUrlSettings(): Promise<void> {
-  pending ??= controlPlaneRequest<{ serverUrlSettings: ServerUrlSettings }>(
-    `query SharedServerUrlSettings($origin: String) { serverUrlSettings(requestOrigin: $origin) { ${SERVER_URL_SETTINGS_FIELDS} } }`,
-    { origin: window.location.origin },
-  )
-    .then((data) => {
-      snapshot = { settings: data.serverUrlSettings, error: null };
-    })
-    .catch((error) => {
-      snapshot = {
-        ...snapshot,
-        error: error instanceof Error ? error.message : String(error),
-      };
-    })
-    .finally(() => {
-      pending = null;
-      emit();
-    });
-  return pending;
+  return refreshOwner.refresh();
 }
 function subscribe(listener: () => void) {
   listeners.add(listener);
@@ -49,7 +50,7 @@ function subscribe(listener: () => void) {
         complete: () => undefined,
       },
     );
-    void refreshServerUrlSettings();
+    void refreshOwner.refreshIfIdle();
   }
   return () => {
     listeners.delete(listener);
@@ -65,9 +66,6 @@ export function useServerUrlSettings() {
     () => snapshot,
     () => initial,
   );
-  useEffect(() => {
-    if (!snapshot.settings) void refreshServerUrlSettings();
-  }, []);
   return {
     ...value,
     loading: !value.settings && !value.error,

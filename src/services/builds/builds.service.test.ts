@@ -14,6 +14,7 @@ import {
   IOS_DEPLOY_JOB_KIND,
   IOS_REMOTE_DEPLOY_JOB_KIND,
   IOS_RUN_DESTINATIONS_JOB_KIND,
+  parseBuildJobPayload,
   type BuildDestination,
 } from "@ai-development-environment/agent-contract/builds";
 import { COVERAGE_IMPORT_JOB_KIND } from "@ai-development-environment/agent-contract/coverage";
@@ -26,6 +27,7 @@ import {
 } from "@/services/agent-control";
 
 import { BuildsService } from "./builds.service";
+import type { TelemetryService } from "@/services/telemetry";
 
 const destination: BuildDestination = {
   type: "SIMULATOR",
@@ -547,6 +549,74 @@ describe("BuildsService", () => {
       hasUnstagedChanges: false,
     });
   });
+
+  test.each([
+    ["LOCAL", "http://127.0.0.1:3000"],
+    ["REMOTE", "https://builds.example.com"],
+    ["PROXY", "https://aide.example.ts.net"],
+  ] as const)(
+    "keeps %s build jobs compatible with agents requiring telemetry URLs",
+    async (serverUrlKind, selectedBaseUrl) => {
+      const buildCreate = vi.fn().mockResolvedValue({ id: "build-1" });
+      const createJob = vi.fn().mockResolvedValue({ id: "build-job" });
+      const telemetrySettings = {
+        consoleCollectionEnabled: true,
+        analyticsCollectionEnabled: false,
+      };
+      const telemetry = {
+        buildSettings: vi.fn().mockResolvedValue(telemetrySettings),
+        notifyChange: vi.fn(),
+      } as unknown as TelemetryService;
+      getPrismaClient.mockResolvedValue({
+        build: {
+          findUnique: vi.fn().mockResolvedValue(null),
+          create: buildCreate,
+          update: vi.fn().mockResolvedValue({ id: "build-1" }),
+          findUniqueOrThrow: vi
+            .fn()
+            .mockResolvedValue({ id: "build-1", status: "QUEUED" }),
+        },
+        worktree: { findUnique: vi.fn().mockResolvedValue(worktree()) },
+        buildConfiguration: {
+          findUnique: vi.fn().mockResolvedValue(configuration()),
+        },
+        buildSourceObservation: {
+          findUnique: vi.fn().mockResolvedValue(observation()),
+        },
+        codebaseRepositoryBuildScript: {
+          findMany: vi.fn().mockResolvedValue([]),
+        },
+        telemetryEntry: { create: vi.fn().mockResolvedValue({}) },
+        $transaction: vi.fn((operations) => Promise.all(operations)),
+      });
+
+      await new BuildsService(control(createJob), telemetry).startBuild({
+        worktreeId: "worktree-1",
+        configurationId: "configuration-1",
+        destination,
+        serverUrlKind,
+        action: "BUILD",
+        requestId: `compatible-build-${serverUrlKind}`,
+      });
+
+      const payload = createJob.mock.calls[0]![0].payload;
+      expect(payload.telemetry).toEqual({
+        ...telemetrySettings,
+        localBaseUrl: "http://127.0.0.1:3000",
+        remoteBaseUrl: "https://builds.example.com",
+        selectedBaseUrl,
+        consoleLogsUrl: `${selectedBaseUrl}/api/telemetry/console-logs`,
+        analyticsEventsUrl: `${selectedBaseUrl}/api/telemetry/analytics-events`,
+      });
+      const parsed = parseBuildJobPayload(payload);
+      expect(parsed.telemetry).toEqual(telemetrySettings);
+      expect(parsed.server).toEqual(payload.server);
+      expect(parsed.endpointPaths).toEqual(payload.endpointPaths);
+      expect(
+        JSON.parse(buildCreate.mock.calls[0]![0].data.snapshotJson).telemetry,
+      ).toEqual(telemetrySettings);
+    },
+  );
 
   test("captures the pre-hook code state and restores the final worktree state on completion", async () => {
     let completeBuild:
