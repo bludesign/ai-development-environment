@@ -46,7 +46,12 @@ function toolType(call: ToolCall): string {
 }
 
 function toolCallLabel(call: ToolCall, type: string): string {
-  if (type !== "webSearch") return call.name;
+  const isAgent = /^(agent|task)$/i.test(type);
+  if (
+    !isAgent &&
+    !["webSearch", "commandExecution", "fileChange", "fileRead"].includes(type)
+  )
+    return call.name;
   const input = record(call.input);
   const item = record(record(input.params).item);
   const part = record(record(input.properties).part);
@@ -54,6 +59,14 @@ function toolCallLabel(call: ToolCall, type: string): string {
   const tool = Array.isArray(content)
     ? content.map(record).find((block) => block.type === "tool_use")
     : undefined;
+  const fields =
+    type === "commandExecution"
+      ? ["command", "cmd"]
+      : type === "fileChange" || type === "fileRead"
+        ? ["file_path", "filePath", "path"]
+        : isAgent
+          ? ["prompt"]
+          : [];
   for (const source of [
     record(item.action),
     item,
@@ -62,6 +75,11 @@ function toolCallLabel(call: ToolCall, type: string): string {
     record(input.input),
     input,
   ]) {
+    for (const field of fields) {
+      const value = source[field];
+      if (typeof value === "string" && value.trim()) return value.trim();
+    }
+    if (type !== "webSearch") continue;
     const queries = Array.isArray(source.queries)
       ? source.queries.filter(
           (query): query is string =>
@@ -112,6 +130,10 @@ export function ToolCallGroups({ calls }: { calls: ToolCall[] }) {
           <div className="min-w-0 space-y-2 border-t p-3">
             {group.map((call) => {
               const label = toolCallLabel(call, type);
+              const preview =
+                /^(agent|task)$/i.test(type) && label !== call.name
+                  ? `${label.replace(/\s+/g, " ").slice(0, 160).trimEnd()}…`
+                  : label;
               return (
                 <details
                   className={cn(
@@ -123,7 +145,7 @@ export function ToolCallGroups({ calls }: { calls: ToolCall[] }) {
                   <summary className="flex min-w-0 cursor-pointer list-none flex-wrap items-center gap-2 p-3 [&::-webkit-details-marker]:hidden">
                     <ChevronRight className="size-4 shrink-0 transition-transform group-open/tool-call:rotate-90" />
                     <span className="min-w-0 flex-1 truncate" title={label}>
-                      {label}
+                      {preview}
                     </span>
                     <Badge className="shrink-0" variant="outline">
                       {labels.toolCallStatus(call.status)}
