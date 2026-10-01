@@ -55,6 +55,7 @@ import {
 } from "react";
 
 import { buildStatusVariant } from "@/components/builds/build-format";
+import { displayedRepositoryPath as displayedWorktreePath } from "@/lib/agent-paths";
 import { useRebuildBuild } from "@/components/builds/rebuild-button";
 import { RunBuildControls } from "@/components/builds/run-build-controls";
 import { StartBuildButton } from "@/components/builds/start-build-dialog";
@@ -458,32 +459,7 @@ export function groupWorktreesByRepository(
   );
 }
 
-export function displayedWorktreePath(
-  folder: string,
-  baseRepoDirectory: string | null | undefined,
-): string {
-  if (!baseRepoDirectory) return folder;
-  const windows =
-    /^[A-Za-z]:[\\/]/.test(baseRepoDirectory) ||
-    baseRepoDirectory.startsWith("\\\\");
-  const separator = windows ? "\\" : "/";
-  const normalize = (value: string) =>
-    windows ? value.replaceAll("/", "\\") : value;
-  const trimTrailingSeparators = (value: string) => {
-    const root = windows ? /^[A-Za-z]:\\$/.test(value) : value === "/";
-    return root ? value : value.replace(/[\\/]+$/, "");
-  };
-  const base = trimTrailingSeparators(normalize(baseRepoDirectory));
-  const worktree = trimTrailingSeparators(normalize(folder));
-  const comparableBase = windows ? base.toLocaleLowerCase() : base;
-  const comparableWorktree = windows ? worktree.toLocaleLowerCase() : worktree;
-  if (comparableWorktree === comparableBase) return ".";
-  const prefix = base.endsWith(separator) ? base : `${base}${separator}`;
-  const comparablePrefix = windows ? prefix.toLocaleLowerCase() : prefix;
-  return comparableWorktree.startsWith(comparablePrefix)
-    ? worktree.slice(prefix.length)
-    : folder;
-}
+export { displayedWorktreePath };
 
 function replaceIssueParam(issueKey: string | null) {
   const params = new URLSearchParams(window.location.search);

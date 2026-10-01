@@ -38,12 +38,15 @@ import {
 } from "@/components/ui/table";
 import { createClientId } from "@/lib/browser-utils";
 import { controlPlaneRequest } from "@/lib/control-plane-client";
+import { displayedRepositoryPath } from "@/lib/agent-paths";
+import { cn } from "@/lib/utils";
 
 import {
   branchKey,
   filterBranchRows,
   localBranchRows,
   reconcileBranchSelection,
+  type BranchRestriction,
   type BranchRow,
 } from "./branches-model";
 import type { CodebaseRepository } from "./types";
@@ -63,6 +66,16 @@ interface ProgressRow {
 const RESULT_FIELDS = "codebaseId branch outcome reason";
 const JOB_FIELDS = `id codebaseId status error branchDeletionResults { ${RESULT_FIELDS} }`;
 const PAGE_SIZE = 50;
+
+function restrictionBadgeColor(restriction: BranchRestriction): string {
+  if (["current", "default", "worktree"].includes(restriction)) {
+    return "border-blue-500/30 bg-blue-500/10 text-blue-700 dark:text-blue-300";
+  }
+  if (["unavailable", "scanFailed"].includes(restriction)) {
+    return "border-destructive/30 bg-destructive/10 text-destructive";
+  }
+  return "border-amber-500/30 bg-amber-500/10 text-amber-800 dark:text-amber-300";
+}
 
 export function BranchesTab({
   repositories,
@@ -403,11 +416,21 @@ export function BranchesTab({
           </Button>
         </div>
       </div>
-      <div className="rounded-md border">
-        <Table>
+      <div className="min-w-0 rounded-md border">
+        <Table className="min-w-[1200px] table-fixed [&_td]:align-top [&_td]:whitespace-normal [&_td]:[overflow-wrap:anywhere] [&_th]:whitespace-normal">
+          <colgroup>
+            <col className="w-[3%]" />
+            <col className="w-[18%]" />
+            <col className="w-[18%]" />
+            <col className="w-[11%]" />
+            <col className="w-[22%]" />
+            <col className="w-[6%]" />
+            <col className="w-[11%]" />
+            <col className="w-[11%]" />
+          </colgroup>
           <TableHeader>
             <TableRow>
-              <TableHead className="w-10" />
+              <TableHead />
               <TableHead>{t("branch")}</TableHead>
               <TableHead>{t("repository")}</TableHead>
               <TableHead>{t("agent")}</TableHead>
@@ -444,8 +467,14 @@ export function BranchesTab({
                   <TableCell className="font-mono">{row.branch.name}</TableCell>
                   <TableCell>
                     <div>{row.repository.name}</div>
-                    <div className="max-w-72 break-all text-xs text-muted-foreground">
-                      {row.codebase.folder}
+                    <div
+                      className="text-xs text-muted-foreground"
+                      title={row.codebase.folder}
+                    >
+                      {displayedRepositoryPath(
+                        row.codebase.folder,
+                        row.codebase.agent.baseRepoDirectory,
+                      )}
                     </div>
                   </TableCell>
                   <TableCell>
@@ -457,9 +486,7 @@ export function BranchesTab({
                     )}
                   </TableCell>
                   <TableCell>
-                    <div className="max-w-72 break-words">
-                      {row.branch.lastCommitMessage || t("unknown")}
-                    </div>
+                    <div>{row.branch.lastCommitMessage || t("unknown")}</div>
                     {row.branch.lastCommitAt && (
                       <DateTime
                         value={row.branch.lastCommitAt}
@@ -488,19 +515,25 @@ export function BranchesTab({
                     )}
                   </TableCell>
                   <TableCell>
-                    {row.restriction ? (
-                      <span
-                        title={
-                          row.branch.checkedOutPath ||
-                          row.codebase.localBranchInventoryError ||
-                          undefined
-                        }
-                      >
-                        {t(`restrictions.${row.restriction}`)}
-                      </span>
-                    ) : (
-                      t("ready")
-                    )}
+                    <Badge
+                      variant={row.restriction ? "outline" : "success"}
+                      className={cn(
+                        "h-auto max-w-full justify-start whitespace-normal [overflow-wrap:anywhere]",
+                        row.restriction &&
+                          restrictionBadgeColor(row.restriction),
+                      )}
+                      title={
+                        row.restriction
+                          ? row.branch.checkedOutPath ||
+                            row.codebase.localBranchInventoryError ||
+                            undefined
+                          : undefined
+                      }
+                    >
+                      {row.restriction
+                        ? t(`restrictions.${row.restriction}`)
+                        : t("ready")}
+                    </Badge>
                   </TableCell>
                 </TableRow>
               ))}
