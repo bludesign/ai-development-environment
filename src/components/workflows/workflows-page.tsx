@@ -29,6 +29,14 @@ import {
   useState,
 } from "react";
 
+import {
+  useActiveAgent,
+  usePageAgentFilter,
+} from "@/components/active-agent/active-agent-provider";
+import {
+  ALL_PAGE_AGENTS,
+  PageAgentFilter,
+} from "@/components/active-agent/page-agent-filter";
 import { ConfirmationDialog } from "@/components/confirmation-dialog";
 import { DateTime } from "@/components/common/date-time";
 import { SelectAllCheckbox } from "@/components/common/select-all-checkbox";
@@ -121,6 +129,14 @@ const RUN_FIELDS = `
 
 export function WorkflowsPage() {
   const t = useTranslations("workflows");
+  const globalAgent = useActiveAgent();
+  const [selectedAgentId, setSelectedAgentId] = usePageAgentFilter(
+    "workflows",
+    ALL_PAGE_AGENTS,
+  );
+  const agentId =
+    globalAgent.activeAgentId ??
+    (selectedAgentId === ALL_PAGE_AGENTS ? null : selectedAgentId);
   const labels = useWorkflowLabels();
   const locale = useLocale();
   const router = useRouter();
@@ -134,6 +150,11 @@ export function WorkflowsPage() {
   const [runArchiveFilter, setRunArchiveFilter] = useState("ACTIVE");
   const [editMode, setEditMode] = useState(false);
   const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [selectionAgentId, setSelectionAgentId] = useState(agentId);
+  if (selectionAgentId !== agentId) {
+    setSelectionAgentId(agentId);
+    setSelected(new Set());
+  }
   const [deleteIds, setDeleteIds] = useState<string[]>([]);
   const [deleteWorkflowIds, setDeleteWorkflowIds] = useState<string[]>([]);
   const [loading, setLoading] = useState(true);
@@ -142,6 +163,7 @@ export function WorkflowsPage() {
   const catalogDirty = useRef(true);
   const load = useCallback(
     async (signal?: AbortSignal) => {
+      if (!globalAgent.ready) return;
       const includeDefinitions = catalogDirty.current || tab === "workflows";
       catalogDirty.current = false;
       try {
@@ -149,11 +171,11 @@ export function WorkflowsPage() {
           workflows?: { items: WorkflowSummary[] };
           workflowRuns: { items: WorkflowRun[] };
         }>(
-          `query WorkflowManagement($archive: String!, $includeDefinitions: Boolean!) {
+          `query WorkflowManagement($archive: String!, $includeDefinitions: Boolean!, $agentId: ID) {
         workflows(first: 200) @include(if: $includeDefinitions) { items { ${WORKFLOW_FIELDS} } }
-        workflowRuns(archive: $archive, first: 200) { items { ${RUN_FIELDS} } }
+        workflowRuns(archive: $archive, agentId: $agentId, first: 200) { items { ${RUN_FIELDS} } }
       }`,
-          { archive: runArchiveFilter, includeDefinitions },
+          { archive: runArchiveFilter, includeDefinitions, agentId },
           { signal },
         );
         if (signal?.aborted) return;
@@ -168,7 +190,7 @@ export function WorkflowsPage() {
         if (!signal?.aborted) setLoading(false);
       }
     },
-    [runArchiveFilter, tab],
+    [agentId, globalAgent.ready, runArchiveFilter, tab],
   );
 
   const ownerRef = useRef<ReturnType<typeof createRefreshCoalescer> | null>(
@@ -436,7 +458,7 @@ export function WorkflowsPage() {
           </AlertDescription>
         </Alert>
       )}
-      <div className="flex flex-wrap items-center justify-between gap-3">
+      <div className="flex flex-wrap items-start justify-between gap-3">
         <Tabs
           onValueChange={(value) => {
             setTab(value as "runs" | "workflows");
@@ -450,7 +472,7 @@ export function WorkflowsPage() {
             <TabsTrigger value="workflows">{t("workflowsTab")}</TabsTrigger>
           </TabsList>
         </Tabs>
-        <div className="flex flex-wrap items-center gap-2">
+        <div className="flex flex-wrap items-start gap-2">
           <InputGroup className="w-64">
             <InputGroupAddon>
               <Search />
@@ -462,6 +484,12 @@ export function WorkflowsPage() {
               value={search}
             />
           </InputGroup>
+          {tab === "runs" && (
+            <PageAgentFilter
+              onValueChange={setSelectedAgentId}
+              value={selectedAgentId}
+            />
+          )}
           {/* The archive filter only applies to runs, but both tabs support a
               multi-selection mode, so the edit toggle sits outside it. */}
           {tab === "runs" && (

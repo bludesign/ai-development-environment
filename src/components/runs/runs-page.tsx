@@ -21,6 +21,14 @@ import {
 } from "lucide-react";
 import { useLocale, useTranslations } from "next-intl";
 
+import {
+  useActiveAgent,
+  usePageAgentFilter,
+} from "@/components/active-agent/active-agent-provider";
+import {
+  ALL_PAGE_AGENTS,
+  PageAgentFilter,
+} from "@/components/active-agent/page-agent-filter";
 import { ConfirmationDialog } from "@/components/confirmation-dialog";
 import { JiraTicketDrawer } from "@/components/jira/ticket-drawer";
 import { DateTime } from "@/components/common/date-time";
@@ -143,6 +151,14 @@ export function RunsPage({
   appId?: string;
 }) {
   const t = useTranslations("runs");
+  const globalAgent = useActiveAgent();
+  const [selectedAgentId, setSelectedAgentId] = usePageAgentFilter(
+    kind === "PLAN" ? "plans" : "sessions",
+    ALL_PAGE_AGENTS,
+  );
+  const agentId =
+    globalAgent.activeAgentId ??
+    (selectedAgentId === ALL_PAGE_AGENTS ? null : selectedAgentId);
   const labels = useRunLabels();
   const locale = useLocale();
   const router = useRouter();
@@ -156,6 +172,11 @@ export function RunsPage({
   const [error, setError] = useState<string | null>(null);
   const [editMode, setEditMode] = useState(false);
   const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [selectionAgentId, setSelectionAgentId] = useState(agentId);
+  if (selectionAgentId !== agentId) {
+    setSelectionAgentId(agentId);
+    setSelected(new Set());
+  }
   const [deleteIds, setDeleteIds] = useState<string[]>([]);
   const [nextCursor, setNextCursor] = useState<string | null>(null);
   const [totalCount, setTotalCount] = useState(0);
@@ -191,13 +212,14 @@ export function RunsPage({
           totalCount: number;
         };
       }>(
-        `query AgentRuns($kind: RunKind!, $search: String, $archive: String!, $provider: String, $origin: RunOrigin, $appId: ID, $after: ID, $first: Int!) {
-      agentRuns(kind: $kind, search: $search, archive: $archive, provider: $provider, origin: $origin, appId: $appId, after: $after, first: $first) {
+        `query AgentRuns($kind: RunKind!, $search: String, $archive: String!, $provider: String, $origin: RunOrigin, $appId: ID, $agentId: ID, $after: ID, $first: Int!) {
+      agentRuns(kind: $kind, search: $search, archive: $archive, provider: $provider, origin: $origin, appId: $appId, agentId: $agentId, after: $after, first: $first) {
         items { ${RUN_LIST_FIELDS} } nextCursor totalCount
       }
     }`,
         {
           kind,
+          agentId,
           search: search.trim() || null,
           archive: archiveFilter,
           provider: provider === "ALL" ? null : provider,
@@ -210,7 +232,7 @@ export function RunsPage({
       );
       return data.agentRuns;
     },
-    [appId, archiveFilter, kind, origin, provider, search],
+    [agentId, appId, archiveFilter, kind, origin, provider, search],
   );
   const refresh = useCallback(async () => {
     await refreshOwner.current?.refresh();
@@ -256,6 +278,7 @@ export function RunsPage({
   }, [error, loadMore, loading, loadingMore, nextCursor]);
 
   useEffect(() => {
+    if (!globalAgent.ready) return;
     loadedCount.current = 0;
     const owner = createRefreshCoalescer(async (signal) => {
       const version = ++generation.current;
@@ -313,7 +336,7 @@ export function RunsPage({
       pageRequest.current = null;
       if (refreshOwner.current === owner) refreshOwner.current = null;
     };
-  }, [appId, kind, origin, provider, readPage]);
+  }, [appId, globalAgent.ready, kind, origin, provider, readPage]);
 
   const groups = useMemo(() => {
     const result: Array<{
@@ -416,7 +439,7 @@ export function RunsPage({
       </div>
       <Card>
         <CardContent className="space-y-4">
-          <div className="flex flex-wrap items-center gap-2">
+          <div className="flex flex-wrap items-start gap-2">
             <div className="relative w-full md:mr-auto md:w-auto md:min-w-56 md:flex-1">
               <Search className="pointer-events-none absolute top-2.5 left-3 size-4 text-muted-foreground" />
               <Input
@@ -427,6 +450,10 @@ export function RunsPage({
                 value={search}
               />
             </div>
+            <PageAgentFilter
+              onValueChange={setSelectedAgentId}
+              value={selectedAgentId}
+            />
             <Select
               onValueChange={(value) => setArchiveFilter(value ?? "ACTIVE")}
               value={archiveFilter}

@@ -57,6 +57,7 @@ function run(
     initialPrompt: `Prompt for ${id}`,
     finalOutput: status === "COMPLETED" ? "Done" : null,
     estimatedCost: null,
+    catalogCost: null,
     sourcePlan: null,
     sourcePlanNumber: null,
     playedAt: null,
@@ -88,15 +89,20 @@ afterEach(() => {
 });
 
 describe("RunsPage", () => {
-  test.each(["PLAN", "SESSION"] as const)(
-    "fetches and shows the catalog estimate on the %s table",
-    async (kind) => {
+  test.each(
+    (["PLAN", "SESSION"] as const).flatMap((kind) =>
+      ["CODEX", "CLAUDE", "OPENCODE"].map((provider) => ({ kind, provider })),
+    ),
+  )(
+    "shows the catalog estimate for $provider on the $kind table",
+    async ({ kind, provider }) => {
       request.mockResolvedValue({
         agentRuns: {
           items: [
             {
               ...run("imported", 1, "COMPLETED", timestamp),
               origin: "IMPORTED",
+              provider,
               catalogCost: 1.25,
             },
           ],
@@ -114,6 +120,40 @@ describe("RunsPage", () => {
         String(query).includes("query AgentRuns"),
       )?.[0];
       expect(query).toContain("catalogCost");
+    },
+  );
+
+  test.each(
+    (["PLAN", "SESSION"] as const).flatMap((kind) =>
+      [0, 2.5].map((estimatedCost) => ({ kind, estimatedCost })),
+    ),
+  )(
+    "prefers the reported cost of $estimatedCost on the $kind table",
+    async ({ kind, estimatedCost }) => {
+      request.mockResolvedValue({
+        agentRuns: {
+          items: [
+            {
+              ...run("reported", 1, "COMPLETED", timestamp),
+              estimatedCost,
+              catalogCost: 1.25,
+            },
+          ],
+          nextCursor: null,
+          totalCount: 1,
+        },
+      } as never);
+      render(
+        <TooltipProvider>
+          <RunsPage kind={kind} />
+        </TooltipProvider>,
+      );
+      expect(
+        await screen.findByRole("cell", {
+          name: estimatedCost === 0 ? "$0.00" : "$2.50",
+        }),
+      ).toBeDefined();
+      expect(screen.queryByRole("cell", { name: "$1.25" })).toBeNull();
     },
   );
 

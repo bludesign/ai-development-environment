@@ -761,6 +761,7 @@ export class RunsService {
 
   async list(input: {
     kind: string;
+    agentId?: string | null;
     search?: string | null;
     archive?: string | null;
     provider?: string | null;
@@ -775,6 +776,7 @@ export class RunsService {
     const archive = input.archive?.toUpperCase() ?? "ACTIVE";
     const where: Prisma.AgentRunWhereInput = {
       kind,
+      ...(input.agentId ? { agentId: input.agentId } : {}),
       ...(archive === "ARCHIVED"
         ? { archivedAt: { not: null } }
         : archive === "ALL"
@@ -814,6 +816,7 @@ export class RunsService {
           worktree: true,
           sourcePlan: true,
           playedSession: true,
+          modelUsage: { orderBy: { model: "asc" } },
         },
       }),
       prisma.agentRun.count({ where }),
