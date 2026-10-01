@@ -108,6 +108,7 @@ export const routes: RouteEntry[] = [
 
   // Codebases & worktrees
   { name: "codebases", path: "/codebases" },
+  { name: "codebase-branches", path: "/codebases", clickTab: "Branches" },
   { name: "codebase-detail", path: `/codebases/${ids.codebases.web}` },
   {
     name: "repository-detail",

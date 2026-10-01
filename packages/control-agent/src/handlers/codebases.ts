@@ -20,6 +20,7 @@ import {
 
 import { captureCommand, type CaptureResult } from "../capture-command.js";
 import type { AgentJobHandler } from "./index.js";
+import { localBranchReport } from "./local-branches.js";
 
 const successfulProcess = {
   exitCode: 0,
@@ -383,7 +384,32 @@ export const inspectCodebaseFolder: AgentJobHandler = async (
   return inspectCodebaseProcess(input.folder, timeoutMs, signal);
 };
 
-export const refreshCodebase: AgentJobHandler = inspectCodebaseFolder;
+export const refreshCodebase: AgentJobHandler = async (
+  payload,
+  timeoutMs,
+  signal,
+) => {
+  const input = codebaseJobPayload(payload);
+  const result = await inspectCodebaseProcess(
+    input.folder,
+    timeoutMs,
+    signal,
+    input.expectedOrigin,
+  );
+  if (!("snapshot" in result)) return result;
+  const snapshot = result.snapshot;
+  return {
+    ...result,
+    ...(await localBranchReport(
+      snapshot.folder,
+      Math.min(timeoutMs, 30_000),
+      signal,
+      snapshot.availability === "AVAILABLE"
+        ? undefined
+        : snapshot.error || "Codebase is unavailable",
+    )),
+  };
+};
 
 export async function updateBaseBranchAfterFetch(
   folder: string,
@@ -567,6 +593,14 @@ export const fetchCodebase: AgentJobHandler = async (
     cancelled: result.cancelled || signal.aborted,
     snapshot,
     ...(worktreesRefreshedAt ? { worktreesRefreshedAt } : {}),
+    ...(await localBranchReport(
+      snapshot.folder,
+      Math.min(timeoutMs, 30_000),
+      signal,
+      snapshot.availability === "AVAILABLE"
+        ? undefined
+        : snapshot.error || "Codebase is unavailable",
+    )),
     ...(worktreeRefreshError ? { worktreeRefreshError } : {}),
   };
 };
@@ -1146,5 +1180,6 @@ export const operateCodebaseGit: AgentJobHandler = async (
       Math.min(timeoutMs, 30_000),
       signal,
     ),
+    ...(await localBranchReport(folder, Math.min(timeoutMs, 30_000), signal)),
   };
 };

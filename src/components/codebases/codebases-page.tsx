@@ -86,12 +86,14 @@ import type {
   CodebaseSettings,
   Inspection,
 } from "./types";
+import { BranchesTab } from "./branches-tab";
 
 const RECONCILE_INTERVAL_MS = 30_000;
 const OVERVIEW_EVENT_DEBOUNCE_MS = 100;
 const CODEBASE_FIELDS = `
   id folder observedOrigin branch headSha upstream ahead behind syncState availability
   statusError defaultBranch localBranches remoteBranches lastCheckedAt lastFetchedAt lastFetchAttemptAt lastFetchError
+  localBranchInventoryError localBranchInventory { scannedAt branches { name headSha lastCommitAt lastCommitMessage current checkedOutPath } }
   agent { ${AGENT_FIELDS} }
   activeJob { id agentId kind payload status idempotencyKey result error timeoutSeconds createdAt startedAt finishedAt updatedAt }
 `;
@@ -100,7 +102,7 @@ const REPOSITORY_FIELDS = `
   codebases { ${CODEBASE_FIELDS} }
 `;
 
-type GroupMode = "agents" | "repositories";
+type GroupMode = "agents" | "repositories" | "branches";
 
 export function CodebasesPage() {
   const t = useTranslations("codebases");
@@ -329,6 +331,7 @@ export function CodebasesPage() {
         <TabsList aria-label={t("groupBy")}>
           <TabsTrigger value="agents">{t("agents")}</TabsTrigger>
           <TabsTrigger value="repositories">{t("repositories")}</TabsTrigger>
+          <TabsTrigger value="branches">{t("branchesTab.title")}</TabsTrigger>
         </TabsList>
       </Tabs>
 
@@ -346,6 +349,12 @@ export function CodebasesPage() {
             <EmptyDescription>{t("emptyDescription")}</EmptyDescription>
           </EmptyHeader>
         </Empty>
+      ) : groupMode === "branches" ? (
+        <BranchesTab
+          repositories={repositories}
+          onReload={load}
+          onRefresh={() => runOperation("refreshCodebases")}
+        />
       ) : groupMode === "agents" ? (
         <AgentGroups
           agents={agents}

@@ -4,6 +4,7 @@ import type {
   CodebaseGitState,
   CodebaseStash,
   CodebaseStashDiff,
+  LocalBranchInventory,
 } from "@ai-development-environment/agent-contract/codebases";
 
 export type Codebase = {
@@ -29,6 +30,8 @@ export type Codebase = {
   defaultBranch: string | null;
   localBranches: string[];
   remoteBranches: string[];
+  localBranchInventory?: LocalBranchInventory | null;
+  localBranchInventoryError?: string | null;
   lastCheckedAt: string | null;
   lastFetchedAt: string | null;
   lastFetchAttemptAt: string | null;

@@ -10,6 +10,46 @@ function context(agentId: string | null): GraphQLContext {
 }
 
 describe("codebase Git management resolvers", () => {
+  test("keeps cleanup on the control plane and exposes only validated cached local inventory", async () => {
+    const service = {
+      deleteBranches: vi.fn().mockResolvedValue({ jobs: [], skipped: [] }),
+    } as unknown as CodebasesService;
+    const resolvers = createCodebaseResolvers(service);
+    const input = {
+      requestId: "request",
+      targets: [
+        {
+          codebaseId: "checkout",
+          branch: "local",
+          expectedHeadSha: "a".repeat(40),
+        },
+      ],
+    };
+    expect(() =>
+      resolvers.Mutation.deleteCodebaseBranches(
+        {},
+        { input },
+        context("agent"),
+      ),
+    ).toThrow("cannot perform control-plane operations");
+    await expect(
+      resolvers.Mutation.deleteCodebaseBranches({}, { input }, context(null)),
+    ).resolves.toEqual({ jobs: [], skipped: [] });
+    expect(service.deleteBranches).toHaveBeenCalledWith(input);
+    expect(
+      resolvers.Codebase.localBranchInventory({
+        localBranchInventoryJson: "not-json",
+      }),
+    ).toBeNull();
+    expect(
+      resolvers.Codebase.localBranchInventory({
+        localBranchInventoryJson: JSON.stringify({
+          scannedAt: "2026-10-01T00:00:00Z",
+          branches: [],
+        }),
+      }),
+    ).toEqual({ scannedAt: "2026-10-01T00:00:00.000Z", branches: [] });
+  });
   test("exposes write preparation contents as base64 for repository editing", () => {
     const resolvers = createCodebaseResolvers({} as CodebasesService);
 

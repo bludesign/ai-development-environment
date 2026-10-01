@@ -5,6 +5,8 @@ import {
   CODEBASE_REFRESH_JOB_KIND,
   type CodebaseGitOperation,
   type CodebaseStatusReport,
+  parseLocalBranchInventory,
+  type CodebaseBranchTarget,
 } from "@ai-development-environment/agent-contract/codebases";
 
 import type { CodebasesService } from "@/services/codebases";
@@ -83,6 +85,18 @@ export const createCodebaseResolvers = (service: CodebasesService) => ({
     updatedAt: (value: { updatedAt: Date }) => value.updatedAt.toISOString(),
   },
   Codebase: {
+    localBranchInventory: (value: {
+      localBranchInventoryJson?: string | null;
+    }) => {
+      if (!value.localBranchInventoryJson) return null;
+      try {
+        return parseLocalBranchInventory(
+          JSON.parse(value.localBranchInventoryJson),
+        );
+      } catch {
+        return null;
+      }
+    },
     lastCheckedAt: (value: { lastCheckedAt: Date | null }) =>
       iso(value.lastCheckedAt),
     lastFetchedAt: (value: { lastFetchedAt: Date | null }) =>
@@ -167,6 +181,22 @@ export const createCodebaseResolvers = (service: CodebasesService) => ({
     ) => service.agentConfiguration(requireAgent(context)),
   },
   Mutation: {
+    deleteCodebaseBranches: (
+      _root: unknown,
+      {
+        input,
+      }: {
+        input: {
+          targets: CodebaseBranchTarget[];
+          requestId: string;
+          force?: boolean | null;
+        };
+      },
+      context: GraphQLContext,
+    ) => {
+      requireControlPlane(context);
+      return service.deleteBranches(input);
+    },
     browseAgentDirectory: (
       _root: unknown,
       {

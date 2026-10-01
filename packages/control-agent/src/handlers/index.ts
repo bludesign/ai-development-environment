@@ -6,6 +6,7 @@ import {
 } from "@ai-development-environment/agent-contract/build-data";
 import {
   CODEBASE_BROWSE_JOB_KIND,
+  CODEBASE_BRANCHES_DELETE_JOB_KIND,
   CODEBASE_CLONE_JOB_KIND,
   CODEBASE_CLONE_INSPECT_JOB_KIND,
   CODEBASE_FETCH_JOB_KIND,
@@ -13,6 +14,7 @@ import {
   CODEBASE_GIT_OPERATION_JOB_KIND,
   CODEBASE_INSPECT_JOB_KIND,
   CODEBASE_REFRESH_JOB_KIND,
+  type CodebaseBranchDeletionOutcome,
 } from "@ai-development-environment/agent-contract/codebases";
 import {
   COMMAND_RUN_JOB_KIND,
@@ -24,6 +26,7 @@ import { CRASH_SYMBOLICATE_JOB_KIND } from "@ai-development-environment/agent-co
 import { CLI_HEALTH_JOB_KIND } from "@ai-development-environment/agent-contract/cli-health";
 
 import { runCommand } from "./commands.js";
+import { deleteLocalBranches } from "./branches.js";
 import { cloneCodebase, inspectCloneDestination } from "./codebase-clone.js";
 import { importCoverageReport } from "./coverage.js";
 import { symbolicateCrash } from "./crashes.js";
@@ -150,6 +153,9 @@ import {
 
 export type AgentJobHandlerContext = {
   agentId: string;
+  reportBranchDeletionResult?: (
+    result: CodebaseBranchDeletionOutcome,
+  ) => Promise<unknown>;
   reportWorktreeActivity: (input: WorktreeActivityReport) => Promise<unknown>;
   refreshFetchedCodebase?: (input: FetchedCodebaseRefresh) => Promise<string>;
   reportBuildProgress?: (input: {
@@ -225,6 +231,7 @@ export const handlers: Readonly<Record<string, AgentJobHandler>> = {
   [CODEBASE_FETCH_JOB_KIND]: fetchCodebase,
   [CODEBASE_GIT_INSPECT_JOB_KIND]: inspectCodebaseGit,
   [CODEBASE_GIT_OPERATION_JOB_KIND]: operateCodebaseGit,
+  [CODEBASE_BRANCHES_DELETE_JOB_KIND]: deleteLocalBranches,
   [WORKTREE_INSPECT_JOB_KIND]: inspectWorktree,
   [WORKTREE_AUTO_SYNC_JOB_KIND]: autoSyncWorktree,
   [WORKTREE_BRANCH_JOB_KIND]: branchWorktree,

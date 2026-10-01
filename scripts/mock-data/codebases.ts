@@ -115,6 +115,39 @@ export async function seedCodebases(prisma: PrismaClient): Promise<void> {
     ],
   });
 
+  for (const codebase of await prisma.codebase.findMany()) {
+    const names = [
+      codebase.branch || "main",
+      "feature/archived-search",
+      "fix/old-layout",
+      "experiment/cache",
+    ];
+    const scannedAt = minutesAgo(3).toISOString();
+    await prisma.codebase.update({
+      where: { id: codebase.id },
+      data: {
+        localBranchesJson: JSON.stringify(names),
+        localBranchInventoryAttemptedAt: new Date(scannedAt),
+        localBranchInventoryJson: JSON.stringify({
+          scannedAt,
+          branches: names.map((name, index) => ({
+            name,
+            headSha: "a".repeat(40),
+            lastCommitAt: daysAgo([1, 120, 46, 9][index]!).toISOString(),
+            lastCommitMessage: [
+              "Keep the base branch up to date",
+              "Add archived search results",
+              "Fix compact layout spacing",
+              "Explore cache improvements",
+            ][index],
+            current: index === 0,
+            checkedOutPath: index === 0 ? codebase.folder : null,
+          })),
+        }),
+      },
+    });
+  }
+
   await prisma.worktree.createMany({
     data: [
       {
