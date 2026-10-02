@@ -26,6 +26,13 @@ jobs:
           node-version: 24.18.0
           cache: npm
 
+      - name: Set up SWC native cache
+        # SWC rejects the ARC runner's shared writable home. Use a private cache.
+        run: |
+          swc_cache="$(mktemp -d /tmp/swc-native.XXXXXX)"
+          swc_cache="$(cd "$swc_cache" && pwd -P)"
+          echo "SWC_NATIVE_BINDING_CACHE=$swc_cache" >> "$GITHUB_ENV"
+
       - name: Install Aikido safe chain
         run: curl -fsSL https://github.com/AikidoSec/safe-chain/releases/latest/download/install-safe-chain.sh | sh -s -- --ci
 
@@ -99,6 +106,13 @@ jobs:
         with:
           node-version: 24.18.0
           cache: npm
+
+      - name: Set up SWC native cache
+        # SWC rejects the ARC runner's shared writable home. Use a private cache.
+        run: |
+          swc_cache="$(mktemp -d /tmp/swc-native.XXXXXX)"
+          swc_cache="$(cd "$swc_cache" && pwd -P)"
+          echo "SWC_NATIVE_BINDING_CACHE=$swc_cache" >> "$GITHUB_ENV"
 
       - name: Install Aikido safe chain
         run: curl -fsSL https://github.com/AikidoSec/safe-chain/releases/latest/download/install-safe-chain.sh | sh -s -- --ci
