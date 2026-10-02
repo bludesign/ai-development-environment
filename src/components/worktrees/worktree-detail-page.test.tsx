@@ -637,7 +637,12 @@ describe("WorktreeDetailPage", () => {
         return { inspectWorktree: initialDetail } as never;
       }
       if (query.includes("GitLabPipelineAction")) {
-        return { retryGitLabPipeline: { id: "2741253240" } } as never;
+        return {
+          runGitLabPipelineAction: {
+            pipeline: { id: "2741253240" },
+            execution: null,
+          },
+        } as never;
       }
       if (query.includes("RetryGitLabJob")) {
         return { retryGitLabJob: { id: "job-1" } } as never;
@@ -695,8 +700,13 @@ describe("WorktreeDetailPage", () => {
     fireEvent.click(retryPipeline);
     await waitFor(() =>
       expect(request).toHaveBeenCalledWith(
-        expect.stringContaining("retryGitLabPipeline"),
-        { projectId: "project-1", pipelineId: "2741253240" },
+        expect.stringContaining("runGitLabPipelineAction"),
+        {
+          projectId: "project-1",
+          pipelineId: "2741253240",
+          action: "RETRY",
+          jobId: null,
+        },
       ),
     );
 

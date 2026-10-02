@@ -1,5 +1,16 @@
 import { publishIntegrationConfiguration } from "@/services/integration-configuration-events";
 import "server-only";
+import {
+  externalPipelineActionsService,
+  eligibleExternalJob,
+  activeStates,
+  type ExternalAction,
+  type ActionOrigin,
+} from "./external-pipeline-actions";
+import {
+  combineExternalStatuses,
+  type GitLabCommitStatus,
+} from "./external-statuses";
 
 import {
   createHash,
@@ -372,7 +383,8 @@ function mapPipeline(pipeline: RawGitLabPipeline): GitLabPipelineView {
 }
 
 export function resolveGitLabPipelineBranch(
-  pipeline: Pick<GitLabPipelineView, "ref" | "source">,
+  pipeline: Pick<GitLabPipelineView, "ref" | "source"> &
+    Partial<Pick<GitLabPipelineView, "projectId">>,
   mergeRequests: GitLabPipelineMergeRequestView[],
 ): string {
   const syntheticRef = pipeline.ref.match(
@@ -380,13 +392,20 @@ export function resolveGitLabPipelineBranch(
   );
   const matchingMergeRequest = syntheticRef
     ? mergeRequests.find(
-        (mergeRequest) => mergeRequest.iid === Number(syntheticRef[1]),
+        (mergeRequest) =>
+          mergeRequest.iid === Number(syntheticRef[1]) &&
+          (!pipeline.projectId ||
+            mergeRequest.projectId === pipeline.projectId),
       )
     : mergeRequests.find(
         (mergeRequest) => mergeRequest.sourceBranch === pipeline.ref,
       );
   if (matchingMergeRequest) return matchingMergeRequest.sourceBranch;
-  if (pipeline.source === "merge_request_event" && mergeRequests[0]) {
+  if (
+    !syntheticRef &&
+    pipeline.source === "merge_request_event" &&
+    mergeRequests.length === 1
+  ) {
     return mergeRequests[0].sourceBranch;
   }
   return pipeline.ref;
@@ -394,6 +413,12 @@ export function resolveGitLabPipelineBranch(
 
 function mapJob(job: RawGitLabJob): GitLabJobView {
   return {
+    kind: "NATIVE",
+    targetUrl: null,
+    author: null,
+    canRetry:
+      !job.retried && ["success", "failed", "canceled"].includes(job.status),
+    canCancel: false,
     id: String(job.id),
     pipelineId: String(job.pipeline.id),
     name: job.name,
@@ -894,6 +919,7 @@ export class GitLabService {
     source: GitLabRequestSource;
     query?: Query;
     force?: boolean;
+    allowStaleOnError?: boolean;
   }) {
     const items: T[] = [];
     let page = 1;
@@ -2474,18 +2500,24 @@ export class GitLabService {
     sha: string,
   ): Promise<GitLabPipelineMergeRequestView[]> {
     try {
-      const response = await this.get<RawGitLabMergeRequest[]>({
+      const response = await this.allPages<RawGitLabMergeRequest>({
         path: `/projects/${encodeURIComponent(projectId)}/repository/commits/${encodeURIComponent(sha)}/merge_requests`,
         operation: "GitLabPipelineMergeRequests",
         source: "PIPELINES_PAGE",
         query: { per_page: 100 },
       });
-      return response.data.map((mergeRequest) => ({
+      return response.map((mergeRequest) => ({
         projectId: String(mergeRequest.project_id),
         iid: mergeRequest.iid,
         title: mergeRequest.title,
         webUrl: mergeRequest.web_url,
         sourceBranch: mergeRequest.source_branch,
+        targetBranch: mergeRequest.target_branch,
+        sourceProjectId:
+          mergeRequest.source_project_id == null
+            ? null
+            : String(mergeRequest.source_project_id),
+        targetProjectId: String(mergeRequest.project_id),
       }));
     } catch {
       // Commit association is supplementary; keep the pipeline visible when
@@ -2547,6 +2579,45 @@ export class GitLabService {
           [sha, await this.pipelineMergeRequests(projectId, sha)] as const,
       ),
     );
+    // Synthetic MR refs can point at a merge SHA that the commit association endpoint omits.
+    for (const pipeline of pipelines) {
+      const match = pipeline.ref.match(
+        /^refs\/merge-requests\/(\d+)\/(?:head|merge)$/,
+      );
+      const associated = mergeRequestsBySha.get(pipeline.sha) ?? [];
+      if (
+        !match ||
+        associated.some(
+          (mr) => mr.projectId === projectId && mr.iid === Number(match[1]),
+        )
+      )
+        continue;
+      try {
+        const { data: mr } = await this.get<RawGitLabMergeRequest>({
+          path: `/projects/${encodeURIComponent(projectId)}/merge_requests/${match[1]}`,
+          operation: "GitLabPipelineMergeRequestRef",
+          source: "PIPELINES_PAGE",
+        });
+        mergeRequestsBySha.set(pipeline.sha, [
+          ...associated,
+          {
+            projectId: String(mr.project_id),
+            iid: mr.iid,
+            title: mr.title,
+            webUrl: mr.web_url,
+            sourceBranch: mr.source_branch,
+            targetBranch: mr.target_branch,
+            sourceProjectId:
+              mr.source_project_id == null
+                ? null
+                : String(mr.source_project_id),
+            targetProjectId: String(mr.project_id),
+          },
+        ]);
+      } catch {
+        /* MR association remains nullable when the token cannot read it. */
+      }
+    }
     const branches = pipelines.map((pipeline) =>
       resolveGitLabPipelineBranch(
         pipeline,
@@ -2694,6 +2765,7 @@ export class GitLabService {
   async pipeline(
     projectId: string,
     pipelineId: string,
+    strict = false,
   ): Promise<GitLabPipelineView> {
     const pipeline = mapPipeline(
       (
@@ -2702,6 +2774,7 @@ export class GitLabService {
           operation: "GitLabPipeline",
           source: "PIPELINES_PAGE",
           force: true,
+          allowStaleOnError: !strict,
         })
       ).data,
     );
@@ -2712,16 +2785,73 @@ export class GitLabService {
   async pipelineJobs(
     projectId: string,
     pipelineId: string,
+    strict = false,
+    knownPipeline?: GitLabPipelineView,
   ): Promise<GitLabJobView[]> {
-    const jobs = (
+    const native = (
       await this.allPages<RawGitLabJob>({
         path: `/projects/${encodeURIComponent(projectId)}/pipelines/${encodeURIComponent(pipelineId)}/jobs`,
         operation: "GitLabPipelineJobs",
         source: "PIPELINES_PAGE",
         query: { include_retried: true },
         force: true,
+        allowStaleOnError: !strict,
       })
     ).map(mapJob);
+    const pipeline =
+      knownPipeline ?? (await this.pipeline(projectId, pipelineId, strict));
+    const [bridges, statuses, match] = await Promise.all([
+      this.allPages<RawGitLabJob>({
+        path: `/projects/${encodeURIComponent(projectId)}/pipelines/${encodeURIComponent(pipelineId)}/bridges`,
+        operation: "GitLabPipelineBridges",
+        source: "PIPELINES_PAGE",
+        query: { include_retried: true },
+        force: true,
+        allowStaleOnError: !strict,
+      }),
+      this.allPages<GitLabCommitStatus>({
+        path: `/projects/${encodeURIComponent(projectId)}/repository/commits/${encodeURIComponent(pipeline.sha)}/statuses`,
+        operation: "GitLabPipelineExternalStatuses",
+        source: "PIPELINES_PAGE",
+        query: { all: true, pipeline_id: pipelineId },
+        force: true,
+        allowStaleOnError: !strict,
+      }),
+      externalPipelineActionsService.repositoryForProject(projectId),
+    ]);
+    const nativeIds = new Set([
+      ...native.map((job) => job.id),
+      ...bridges.map((job) => String(job.id)),
+    ]);
+    const hasExternal = statuses.some(
+      (status) =>
+        String(status.pipeline_id) === pipeline.id &&
+        !nativeIds.has(String(status.id)),
+    );
+    const currentStatuses = hasExternal
+      ? await this.allPages<GitLabCommitStatus>({
+          path: `/projects/${encodeURIComponent(projectId)}/repository/commits/${encodeURIComponent(pipeline.sha)}/statuses`,
+          operation: "GitLabPipelineCurrentStatuses",
+          source: "PIPELINES_PAGE",
+          query: { all: false, pipeline_id: pipelineId },
+          force: true,
+          allowStaleOnError: !strict,
+        })
+      : [];
+    const config = match
+      ? await externalPipelineActionsService.configuration(match.repository.id)
+      : null;
+    const jobs = combineExternalStatuses(
+      pipeline,
+      native,
+      bridges.map((job) => ({ ...mapJob(job), kind: "BRIDGE" })),
+      statuses,
+      {
+        retry: !!config?.enabled && !!config.retryScript.trim(),
+        cancel: !!config?.enabled && !!config.cancelScript.trim(),
+      },
+      new Set(currentStatuses.map((status) => String(status.id))),
+    );
     const prisma = await getPrismaClient();
     await prisma.gitLabPipelineRecord.updateMany({
       where: { pipelineId, snapshot: { projectId } },
@@ -2756,15 +2886,40 @@ export class GitLabService {
     return pipeline;
   }
 
-  async retryPipeline(
+  async pipelineActionCapabilities(
     projectId: string,
     pipelineId: string,
-  ): Promise<GitLabPipelineView> {
+    pipeline?: GitLabPipelineView,
+  ) {
+    const jobs = await this.pipelineJobs(
+      projectId,
+      pipelineId,
+      false,
+      pipeline,
+    );
+    return {
+      canRetry: jobs.some((job) =>
+        job.kind === "EXTERNAL"
+          ? job.canRetry
+          : !job.retried && ["FAILED", "CANCELED"].includes(job.status),
+      ),
+      canCancel: jobs.some((job) =>
+        job.kind === "EXTERNAL" ? job.canCancel : activeStates.has(job.status),
+      ),
+    };
+  }
+
+  private async nativePipelineAction(
+    projectId: string,
+    pipelineId: string,
+    action: ExternalAction,
+  ) {
     const pipeline = mapPipeline(
       await this.mutate<RawGitLabPipeline>({
         method: "POST",
-        path: `/projects/${encodeURIComponent(projectId)}/pipelines/${encodeURIComponent(pipelineId)}/retry`,
-        operation: "GitLabRetryPipeline",
+        path: `/projects/${encodeURIComponent(projectId)}/pipelines/${encodeURIComponent(pipelineId)}/${action.toLowerCase()}`,
+        operation:
+          action === "RETRY" ? "GitLabRetryPipeline" : "GitLabCancelPipeline",
         source: "PIPELINES_PAGE",
         invalidateProjectId: projectId,
       }),
@@ -2774,22 +2929,115 @@ export class GitLabService {
     return pipeline;
   }
 
+  async dispatchPipelineAction(
+    projectId: string,
+    pipelineId: string,
+    action: ExternalAction,
+    origin: ActionOrigin = "MANUAL",
+    jobId?: string,
+    automaticJobs?: GitLabJobView[],
+    nativeAllowed = true,
+  ) {
+    const pipeline = await this.pipeline(projectId, pipelineId, true);
+    const jobs = await this.pipelineJobs(projectId, pipelineId, true, pipeline);
+    const selectedJob = jobId
+      ? jobs.find((job) => job.id === jobId && job.kind === "EXTERNAL")
+      : undefined;
+    if (jobId && !selectedJob)
+      throw new Error("External job not found in the selected pipeline");
+    const eligible = jobs.filter(
+      (job) =>
+        eligibleExternalJob(job, action, origin === "AUTOMATIC") &&
+        (!jobId || job.id === jobId) &&
+        (!automaticJobs ||
+          automaticJobs.some((target) => target.id === job.id)),
+    );
+    if (jobId && !eligible.length)
+      throw new Error(
+        "This external status is no longer eligible for the requested action",
+      );
+    const native =
+      !jobId &&
+      nativeAllowed &&
+      jobs.some(
+        (job) =>
+          job.kind !== "EXTERNAL" &&
+          !job.retried &&
+          (action === "RETRY"
+            ? ["FAILED", "CANCELED"].includes(job.status)
+            : activeStates.has(job.status)),
+      );
+    if (!eligible.length) {
+      if (jobId || automaticJobs) {
+        if (!native) throw new Error("No eligible pipeline work remains");
+      }
+      return {
+        pipeline:
+          native || !jobs.length
+            ? await this.nativePipelineAction(projectId, pipelineId, action)
+            : pipeline,
+        execution: null,
+      };
+    }
+    // Configuration and credential preflight happen before either component is sent.
+    const connection = await this.connection();
+    const execution = await externalPipelineActionsService.execute({
+      projectId,
+      pipeline,
+      jobs: eligible,
+      selectedJob,
+      action,
+      origin,
+      native: native
+        ? () => this.nativePipelineAction(projectId, pipelineId, action)
+        : undefined,
+      baseUrl: connection.baseUrl,
+    });
+    const refreshed = await this.pipeline(projectId, pipelineId);
+    await this.pipelineJobs(projectId, pipelineId);
+    this.publishPipeline(refreshed);
+    return { pipeline: refreshed, execution };
+  }
+
+  async retryPipeline(
+    projectId: string,
+    pipelineId: string,
+    origin: ActionOrigin = "MANUAL",
+  ): Promise<GitLabPipelineView> {
+    const result = await this.dispatchPipelineAction(
+      projectId,
+      pipelineId,
+      "RETRY",
+      origin,
+    );
+    if (
+      result.execution &&
+      ["FAILED", "PARTIAL", "UNCERTAIN"].includes(result.execution.status)
+    )
+      throw new Error(
+        `${result.execution.status}: ${result.execution.message}`,
+      );
+    return result.pipeline;
+  }
   async cancelPipeline(
     projectId: string,
     pipelineId: string,
+    origin: ActionOrigin = "MANUAL",
   ): Promise<GitLabPipelineView> {
-    const pipeline = mapPipeline(
-      await this.mutate<RawGitLabPipeline>({
-        method: "POST",
-        path: `/projects/${encodeURIComponent(projectId)}/pipelines/${encodeURIComponent(pipelineId)}/cancel`,
-        operation: "GitLabCancelPipeline",
-        source: "PIPELINES_PAGE",
-        invalidateProjectId: projectId,
-      }),
+    const result = await this.dispatchPipelineAction(
+      projectId,
+      pipelineId,
+      "CANCEL",
+      origin,
     );
-    await this.observePipelines([pipeline]);
-    this.publishPipeline(pipeline);
-    return pipeline;
+    if (
+      result.execution &&
+      ["FAILED", "PARTIAL", "UNCERTAIN"].includes(result.execution.status)
+    )
+      throw new Error(
+        `${result.execution.status}: ${result.execution.message}`,
+      );
+    return result.pipeline;
   }
 
   async retryJob(projectId: string, jobId: string): Promise<GitLabJobView> {
@@ -3127,14 +3375,54 @@ export class GitLabService {
       where: {
         projectId,
         enabled: true,
-        OR: [{ pipelineId: null }, { pipelineId }],
       },
     });
+    if (!rules.length) return;
+    const pipeline = await this.pipeline(projectId, pipelineId);
+    const jobs = await this.pipelineJobs(projectId, pipelineId);
     for (const rule of rules) {
+      if (
+        !(await externalPipelineActionsService.ruleApplies(
+          rule,
+          pipeline,
+          jobs,
+        ))
+      )
+        continue;
       const attempts = await prisma.gitLabAutoRetryExecution.count({
         where: { ruleId: rule.id, pipelineId },
       });
-      if (attempts >= rule.maxAttempts) continue;
+      const externalCandidates = jobs.filter((job) =>
+        eligibleExternalJob(job, "RETRY", true),
+      );
+      try {
+        await externalPipelineActionsService.preflight(
+          projectId,
+          "RETRY",
+          externalCandidates,
+        );
+      } catch (error) {
+        await prisma.gitLabAutoRetryRule.update({
+          where: { id: rule.id },
+          data: { lastError: sanitizedError(error), lastAttemptAt: new Date() },
+        });
+        continue;
+      }
+      const externalJobs = await externalPipelineActionsService.automaticJobs(
+        rule,
+        pipeline,
+        jobs,
+      );
+      const nativeAllowed =
+        (!rule.pipelineId || rule.pipelineId === pipelineId) &&
+        attempts < rule.maxAttempts &&
+        jobs.some(
+          (job) =>
+            job.kind !== "EXTERNAL" &&
+            !job.retried &&
+            ["FAILED", "CANCELED"].includes(job.status),
+        );
+      if (!nativeAllowed && !externalJobs.length) continue;
       const attempt = attempts + 1;
       let execution;
       try {
@@ -3148,10 +3436,44 @@ export class GitLabService {
           },
         });
       } catch {
+        // Another worker can win the native attempt while this worker owns external observations.
+        // No request was sent here, so release those observations for a bounded later attempt.
+        await externalPipelineActionsService.finishAutomatic(
+          rule.id,
+          pipeline,
+          externalJobs,
+          "FAILED",
+        );
         continue;
       }
+      let externalOutcomeRecorded = false;
       try {
-        await this.retryPipeline(projectId, pipelineId);
+        const dispatched = await this.dispatchPipelineAction(
+          projectId,
+          pipelineId,
+          "RETRY",
+          "AUTOMATIC",
+          undefined,
+          externalJobs,
+          nativeAllowed,
+        );
+        if (dispatched.execution)
+          await externalPipelineActionsService.finishAutomatic(
+            rule.id,
+            pipeline,
+            externalJobs,
+            dispatched.execution.externalStatus,
+          );
+        externalOutcomeRecorded = true;
+        if (
+          dispatched.execution &&
+          ["FAILED", "PARTIAL", "UNCERTAIN"].includes(
+            dispatched.execution.status,
+          )
+        )
+          throw new Error(
+            `${dispatched.execution.status}: ${dispatched.execution.message}`,
+          );
         await prisma.$transaction([
           prisma.gitLabAutoRetryExecution.update({
             where: { id: execution.id },
@@ -3167,6 +3489,13 @@ export class GitLabService {
           }),
         ]);
       } catch (error) {
+        if (!externalOutcomeRecorded)
+          await externalPipelineActionsService.finishAutomatic(
+            rule.id,
+            pipeline,
+            externalJobs,
+            "FAILED",
+          );
         const message = sanitizedError(error);
         await prisma.$transaction([
           prisma.gitLabAutoRetryExecution.update({
@@ -3191,10 +3520,21 @@ export class GitLabService {
     });
     for (const { projectId } of rules) {
       const page = await this.pipelines(projectId, 1, 100);
+      const match =
+        await externalPipelineActionsService.repositoryForProject(projectId);
+      const externalEnabled = match
+        ? (
+            await externalPipelineActionsService.configuration(
+              match.repository.id,
+            )
+          ).enabled
+        : false;
       for (const pipeline of page.items) {
-        if (["FAILED", "CANCELED"].includes(pipeline.status)) {
+        if (
+          ["FAILED", "CANCELED"].includes(pipeline.status) ||
+          (externalEnabled && ["SUCCESS", "SKIPPED"].includes(pipeline.status))
+        )
           await this.autoRetryFailedPipeline(projectId, pipeline.id);
-        }
       }
     }
     return rules.length;
@@ -3494,7 +3834,7 @@ export class GitLabService {
       });
       if (
         String(source.object_kind ?? "").toLowerCase() === "pipeline" &&
-        ["failed", "canceled"].includes(
+        ["failed", "canceled", "success", "skipped"].includes(
           String(
             source.object_attributes &&
               typeof source.object_attributes === "object" &&

@@ -1128,7 +1128,8 @@
       "mcp": "External MCP server",
       "ios": "iOS devices",
       "push": "Push notifications",
-      "notifications": "Notifications"
+      "notifications": "Notifications",
+      "externalPipeline": "External pipeline actions"
     },
     "kinds": {
       "jira-api-token": "API token",
@@ -1142,7 +1143,8 @@
       "app-store-connect-private-key": "App Store Connect private key",
       "apns-token-private-key": "APNs token private key",
       "apns-certificate-bundle": "APNs certificate bundle",
-      "web-push-vapid-private-key": "Web Push VAPID private key"
+      "web-push-vapid-private-key": "Web Push VAPID private key",
+      "external-pipeline-secret": "External pipeline secret"
     },
     "details": {
       "configuredValue": "Configured value",
@@ -2370,7 +2372,12 @@
     "noAccessibleProjects": "No accessible projects match your search.",
     "loadingProjects": "Loading projects…",
     "projectSearchFailed": "Projects could not be loaded. Try again.",
-    "loadMoreProjects": "Load more projects"
+    "loadMoreProjects": "Load more projects",
+    "externalJob": "External",
+    "cancelJob": "Cancel {job}",
+    "externalActionResults": "External action results",
+    "nativeRequest": "Native request",
+    "externalRequest": "External request"
   },
   "gitlabSettings": {
     "title": "GitLab credentials",
@@ -5719,5 +5726,42 @@
     "proxyMissing": "Proxy URL is not configured",
     "httpsRequired": "This action requires an HTTPS server URL. Choose Remote or Proxy, or update Server URLs in Settings.",
     "publicHostRequired": "This action requires a public hostname. Choose another server URL or update Server URLs in Settings."
+  },
+  "externalPipelineActions": {
+    "title": "External pipeline actions",
+    "description": "Run repository JavaScript scripts to retry or cancel external CI work. All checkouts share this configuration.",
+    "enabled": "Enable external actions",
+    "retryScript": "Retry script",
+    "cancelScript": "Cancel script",
+    "contextHelp": "Available globals: context, fetch, JSON, encodeURIComponent, and console.log/info/warn/error. Limits: 30-second execution, 15-second fetch, 32 MiB memory, and 100,000 script characters. Successful execution records an accepted request; provider callbacks update the actual statuses. Accepted or uncertain requests cannot repeat for the same observed status, including context-preview requests.",
+    "save": "Save scripts",
+    "secrets": "Secrets",
+    "secretHelp": "Values use the configured credential store. Existing values are never shown.",
+    "replace": "Replace",
+    "delete": "Delete",
+    "secretName": "Secret name",
+    "secretValue": "New secret value",
+    "setSecret": "Save secret",
+    "saved": "Saved",
+    "loading": "Loading external pipeline actions…",
+    "entryPointTitle": "How variables are passed",
+    "entryPointHelp": "The app injects one context object into an asynchronous script body. Define your function, then call it with context as shown below. Named functions are not called automatically; top-level await and return are supported.",
+    "exampleHelp": "Example buttons replace the editor draft; use Save scripts to apply it. The context example logs and returns the supplied variables without HTTP requests or provider status changes. The HTTP example needs ACTION_BASE_URL and API_TOKEN secrets and must be adapted to your provider.",
+    "contextExample": "Use context example",
+    "httpExample": "Use HTTP example",
+    "contextExampleFor": "Use context example for {script}",
+    "httpExampleFor": "Use HTTP example for {script}",
+    "contextReference": "Script context reference",
+    "sampleContext": "Example context object",
+    "sampleContextHelp": "Illustrative values and selected fields only. Each execution supplies the real repository, pipeline, job, MR, and configured secret values.",
+    "fieldVersion": "Contract version: 1.",
+    "fieldAction": "action is retry or cancel; origin is manual, automatic, workflow, or mcp.",
+    "fieldRepository": "Canonical repository id, name, and canonicalOrigin shared by all checkouts.",
+    "fieldProject": "GitLab baseUrl; project id, name, pathWithNamespace, and webUrl.",
+    "fieldPipeline": "id, sha, rawRef, ref, branch, resolvedBranch, source, status, webUrl, and timing fields. Use sha for the original commit and resolvedBranch for the source branch.",
+    "fieldExternalJobs": "Eligible external statuses with id, pipelineId, name, status, author, targetUrl, retried, and timing fields. A pipeline action passes all eligible statuses; group shared provider runs before requesting actions.",
+    "fieldJob": "Selected external status for an individual job action; null for a whole-pipeline action. targetUrl and author can also be null.",
+    "fieldMergeRequests": "mergeRequests contains matching MRs with iid, title, source/target branches and project IDs. mergeRequest is the unique match, or null when none or several match.",
+    "fieldSecrets": "Access named repository secrets with context.secrets.API_TOKEN. No application GitLab credential is injected. Log secret names only, not values."
   }
 }

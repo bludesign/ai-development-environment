@@ -693,6 +693,61 @@ export async function seedGitLab(prisma: PrismaClient): Promise<void> {
           response: pipeline,
         }),
         cacheEntry({
+          id: `gitlab-cache-pipeline-bridges-${pipeline.id}`,
+          operation: "GitLabPipelineBridges",
+          path: `/projects/${PROJECT_ID}/pipelines/${pipeline.id}/bridges`,
+          query: { include_retried: true, per_page: 100, page: 1 },
+          response: [],
+        }),
+        cacheEntry({
+          id: `gitlab-cache-current-statuses-${pipeline.id}`,
+          operation: "GitLabPipelineCurrentStatuses",
+          path: `/projects/${PROJECT_ID}/repository/commits/${pipeline.sha}/statuses`,
+          query: {
+            all: false,
+            pipeline_id: String(pipeline.id),
+            per_page: 100,
+            page: 1,
+          },
+          response: [
+            {
+              id: pipeline.id * 100,
+              pipeline_id: pipeline.id,
+              name: "ci/external-tests",
+              status: pipeline.status,
+              ref: pipeline.ref,
+              target_url: "https://ci.example.com/runs/123",
+              author: user,
+              created_at: pipeline.created_at,
+              finished_at: pipeline.finished_at,
+            },
+          ],
+        }),
+        cacheEntry({
+          id: `gitlab-cache-external-statuses-${pipeline.id}`,
+          operation: "GitLabPipelineExternalStatuses",
+          path: `/projects/${PROJECT_ID}/repository/commits/${pipeline.sha}/statuses`,
+          query: {
+            all: true,
+            pipeline_id: String(pipeline.id),
+            per_page: 100,
+            page: 1,
+          },
+          response: [
+            {
+              id: pipeline.id * 100,
+              pipeline_id: pipeline.id,
+              name: "ci/external-tests",
+              status: pipeline.status,
+              ref: pipeline.ref,
+              target_url: "https://ci.example.com/runs/123",
+              author: user,
+              created_at: pipeline.created_at,
+              finished_at: pipeline.finished_at,
+            },
+          ],
+        }),
+        cacheEntry({
           id: `gitlab-cache-pipeline-jobs-${pipeline.id}`,
           operation: "GitLabPipelineJobs",
           path: `/projects/${PROJECT_ID}/pipelines/${pipeline.id}/jobs`,
@@ -707,13 +762,23 @@ export async function seedGitLab(prisma: PrismaClient): Promise<void> {
           id: `gitlab-cache-pipeline-merge-requests-${pipeline.id}`,
           operation: "GitLabPipelineMergeRequests",
           path: `/projects/${PROJECT_ID}/repository/commits/${pipeline.sha}/merge_requests`,
-          query: { per_page: 100 },
+          query: { per_page: 100, page: 1 },
           response: index === 0 ? [mergeRequests[0]] : [],
         }),
       ),
     ],
   });
 
+  await prisma.externalPipelineActions.create({
+    data: {
+      repositoryId: REPOSITORY_ID,
+      enabled: true,
+      retryScript:
+        'const response = await fetch(context.externalJobs[0].targetUrl + "/retry", {method: "POST"});\nif (!response.ok) throw new Error("Provider HTTP " + response.status);\nreturn {requested: true};',
+      cancelScript:
+        'const response = await fetch(context.externalJobs[0].targetUrl + "/cancel", {method: "POST"});\nif (!response.ok) throw new Error("Provider HTTP " + response.status);\nreturn {requested: true};',
+    },
+  });
   await prisma.gitLabPipelineSnapshot.create({
     data: {
       id: "gitlab-pipeline-snapshot-retry",

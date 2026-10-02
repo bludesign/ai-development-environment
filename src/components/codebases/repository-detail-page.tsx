@@ -43,6 +43,7 @@ import {
 } from "@/lib/refresh-coalescer";
 
 import type { CodebaseRepository } from "./types";
+import { ExternalPipelineActionsSettings } from "./external-pipeline-actions";
 import { RepositoryPreparations } from "./repository-preparations";
 
 const REPOSITORY_FIELDS = `
@@ -65,6 +66,8 @@ export function RepositoryDetailPage({
 }) {
   const t = useTranslations("codebases");
   const buildsT = useTranslations("builds");
+  const externalT = useTranslations("externalPipelineActions");
+  const externalTitle = externalT("title");
   const [repository, setRepository] = useState<CodebaseRepository | null>(null);
   const [skillGroups, setSkillGroups] = useState<
     Array<{ id: string; name: string }>
@@ -310,13 +313,28 @@ export function RepositoryDetailPage({
         </Alert>
       )}
 
-      <Tabs value={tab} onValueChange={(value) => setTab(String(value))}>
-        <TabsList>
-          <TabsTrigger value="details">{t("repositoryDetails")}</TabsTrigger>
-          <TabsTrigger value="preparations">{t("preparations")}</TabsTrigger>
-          <TabsTrigger value="ios-app">{buildsT("iosApp")}</TabsTrigger>
-          <TabsTrigger value="auto-retry">{t("autoRetry")}</TabsTrigger>
-          <TabsTrigger value="quick-actions">{t("quickActions")}</TabsTrigger>
+      <Tabs
+        className="min-w-0"
+        value={tab}
+        onValueChange={(value) => setTab(String(value))}
+      >
+        <TabsList className="flex min-w-0 w-full justify-start gap-1 overflow-x-auto overflow-y-hidden p-1 group-data-horizontal/tabs:h-auto">
+          {[
+            { value: "details", label: t("repositoryDetails") },
+            { value: "preparations", label: t("preparations") },
+            { value: "external-pipelines", label: externalTitle },
+            { value: "ios-app", label: buildsT("iosApp") },
+            { value: "auto-retry", label: t("autoRetry") },
+            { value: "quick-actions", label: t("quickActions") },
+          ].map(({ value, label }) => (
+            <TabsTrigger
+              className="h-7 flex-none px-2.5 after:hidden"
+              key={value}
+              value={value}
+            >
+              {label}
+            </TabsTrigger>
+          ))}
         </TabsList>
         <TabsContent value="details">
           <form className="space-y-5" onSubmit={save}>
@@ -432,6 +450,9 @@ export function RepositoryDetailPage({
           ) : (
             <Spinner />
           )}
+        </TabsContent>
+        <TabsContent value="external-pipelines">
+          <ExternalPipelineActionsSettings repositoryId={repositoryId} />
         </TabsContent>
         <TabsContent value="ios-app">
           <IosProjectSection

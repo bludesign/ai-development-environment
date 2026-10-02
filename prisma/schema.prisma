@@ -410,27 +410,29 @@ model TailscaleServeOperationAgent {
 }
 
 model CodebaseRepository {
-  id                     String                          @id
-  canonicalOrigin        String                          @unique
-  displayOrigin          String
-  name                   String
-  description            String                          @default("")
-  jiraBranchRegex        String?
-  keepBaseBranchUpToDate Boolean                         @default(true)
-  createdAt              DateTime                        @default(now())
-  updatedAt              DateTime                        @updatedAt
-  codebases              Codebase[]
-  skillGroups            CodebaseRepositorySkillGroup[]
-  projects               CodebaseProject[]
-  buildScripts           CodebaseRepositoryBuildScript[]
-  githubWorkflowRuns     GitHubWorkflowRunObservation[]
-  githubPollingState     GitHubActionsPollingState?
-  quickActionWorkflows   WorkflowQuickActionRepository[]
-  commandDefinitions     CommandDefinitionRepository[]
-  apps                   AppRepository[]
-  runs                   AgentRun[]
-  builds                 Build[]
-  preparations           CodebaseRepositoryPreparation[]
+  id                         String                          @id
+  canonicalOrigin            String                          @unique
+  displayOrigin              String
+  name                       String
+  description                String                          @default("")
+  jiraBranchRegex            String?
+  keepBaseBranchUpToDate     Boolean                         @default(true)
+  createdAt                  DateTime                        @default(now())
+  updatedAt                  DateTime                        @updatedAt
+  codebases                  Codebase[]
+  skillGroups                CodebaseRepositorySkillGroup[]
+  projects                   CodebaseProject[]
+  buildScripts               CodebaseRepositoryBuildScript[]
+  githubWorkflowRuns         GitHubWorkflowRunObservation[]
+  githubPollingState         GitHubActionsPollingState?
+  quickActionWorkflows       WorkflowQuickActionRepository[]
+  commandDefinitions         CommandDefinitionRepository[]
+  apps                       AppRepository[]
+  runs                       AgentRun[]
+  builds                     Build[]
+  preparations               CodebaseRepositoryPreparation[]
+  externalPipelineActions    ExternalPipelineActions?
+  externalPipelineExecutions ExternalPipelineExecution[]
 
   @@index([name])
 }
@@ -478,17 +480,17 @@ model AppRepository {
 }
 
 model RepositoryTransferOperation {
-  id         String                   @id
-  requestId  String                   @unique
-  kind       String
-  status     String                   @default("QUEUING")
-  appId      String?
-  resultJson String                   @default("{}")
+  id          String                   @id
+  requestId   String                   @unique
+  kind        String
+  status      String                   @default("QUEUING")
+  appId       String?
+  resultJson  String                   @default("{}")
   requestHash String
-  createdAt  DateTime                 @default(now())
-  updatedAt  DateTime                 @updatedAt
-  finishedAt DateTime?
-  items      RepositoryTransferItem[]
+  createdAt   DateTime                 @default(now())
+  updatedAt   DateTime                 @updatedAt
+  finishedAt  DateTime?
+  items       RepositoryTransferItem[]
 
   @@index([status, createdAt])
   @@index([appId, createdAt])
@@ -823,7 +825,7 @@ model AgentRun {
   webSearchEnabled         Boolean             @default(false)
   mcpPresetIdsJson         String              @default("[]")
   mcpToolNamesJson         String              @default("[]")
-  mcpToolSnapshotJson       String?
+  mcpToolSnapshotJson      String?
   worktreeConcurrencyLimit Int                 @default(0)
   workflowRunId            String?
   initialPrompt            String
@@ -2765,8 +2767,8 @@ model GitHubSettings {
   id                                     String   @id
   defaultMergeMethod                     String   @default("SQUASH")
   emptyMergeCommitDescription            Boolean  @default(false)
-  defaultMoveTicketToDone                 Boolean  @default(false)
-  defaultDeleteWorktree                   Boolean  @default(false)
+  defaultMoveTicketToDone                Boolean  @default(false)
+  defaultDeleteWorktree                  Boolean  @default(false)
   defaultJiraKeyRegex                    String   @default("\\b([A-Z][A-Z0-9_]*-\\d+)\\b")
   actionsNotificationPollIntervalSeconds Int      @default(60)
   cacheTtlSeconds                        Int      @default(300)
@@ -3860,35 +3862,100 @@ model SseHistorySavedFilter {
 
 // Separate from GitHub worktree automation: an MR can have Jira follow-ups without a checkout.
 model GitLabMergeOperation {
-  id String @id
-  instanceUrl String
-  projectId String
-  iid Int
-  state String @default("PREPARING")
-  sourceProjectId String?
-  sourceOrigin String?
-  branch String
-  sha String
-  autoMerge Boolean @default(false)
-  squash Boolean @default(false)
-  removeSourceBranch Boolean @default(false)
-  mergeCommitMessage String?
+  id                  String    @id
+  instanceUrl         String
+  projectId           String
+  iid                 Int
+  state               String    @default("PREPARING")
+  sourceProjectId     String?
+  sourceOrigin        String?
+  branch              String
+  sha                 String
+  autoMerge           Boolean   @default(false)
+  squash              Boolean   @default(false)
+  removeSourceBranch  Boolean   @default(false)
+  mergeCommitMessage  String?
   squashCommitMessage String?
-  worktreeId String?
-  worktreeFolder String?
-  deleteWorktree Boolean @default(false)
-  moveTicketToDone Boolean @default(false)
-  ticketKey String?
-  mergeConfirmedAt DateTime?
-  ticketMovedAt DateTime?
-  worktreeDeletedAt DateTime?
-  deleteJobId String?
-  deleteRequestId String?
-  lastError String?
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  worktreeId          String?
+  worktreeFolder      String?
+  deleteWorktree      Boolean   @default(false)
+  moveTicketToDone    Boolean   @default(false)
+  ticketKey           String?
+  mergeConfirmedAt    DateTime?
+  ticketMovedAt       DateTime?
+  worktreeDeletedAt   DateTime?
+  deleteJobId         String?
+  deleteRequestId     String?
+  lastError           String?
+  createdAt           DateTime  @default(now())
+  updatedAt           DateTime  @updatedAt
 
   @@unique([instanceUrl, projectId, iid])
   @@index([state, updatedAt])
   @@index([worktreeId])
+}
+
+// Scripts are shared by every checkout of the canonical repository.
+model ExternalPipelineActions {
+  repositoryId String             @id
+  enabled      Boolean            @default(false)
+  retryScript  String             @default("")
+  cancelScript String             @default("")
+  updatedAt    DateTime           @updatedAt
+  repository   CodebaseRepository @relation(fields: [repositoryId], references: [id], onDelete: Cascade)
+}
+
+model ExternalPipelineExecution {
+  id                    String             @id
+  repositoryId          String
+  projectId             String
+  pipelineId            String
+  action                String
+  origin                String
+  status                String
+  targetedStatusIdsJson String
+  nativeStatus          String             @default("NOT_REQUESTED")
+  externalStatus        String             @default("NOT_REQUESTED")
+  message               String?
+  outputJson            String?
+  startedAt             DateTime           @default(now())
+  completedAt           DateTime?
+  repository            CodebaseRepository @relation(fields: [repositoryId], references: [id], onDelete: Cascade)
+
+  @@index([projectId, pipelineId, startedAt])
+}
+
+// Accepted/uncertain claims remain until the observed provider statuses change.
+model ExternalPipelineActionClaim {
+  key         String   @id
+  executionId String
+  createdAt   DateTime @default(now())
+}
+
+model ExternalPipelineRetryState {
+  key            String   @id
+  ruleId         String
+  identityKey    String
+  attempts       Int      @default(0)
+  observedKey    String?
+  awaitingUpdate Boolean  @default(false)
+  updatedAt      DateTime @updatedAt
+
+  @@index([ruleId])
+}
+
+model ExternalPipelineCancellation {
+  targetUrl   String?
+  identityKey String   @id
+  statusId    String
+  canceledAt  DateTime @default(now())
+}
+
+model ExternalPipelineRetryObservation {
+  key       String   @id
+  stateKey  String
+  status    String   @default("CLAIMED")
+  updatedAt DateTime @updatedAt
+
+  @@index([stateKey])
 }

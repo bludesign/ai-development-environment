@@ -1128,7 +1128,8 @@
       "mcp": "Externer MCP-Server",
       "ios": "iOS-Geräte",
       "push": "Push-Benachrichtigungen",
-      "notifications": "Benachrichtigungen"
+      "notifications": "Benachrichtigungen",
+      "externalPipeline": "Aktionen für externe Pipelines"
     },
     "kinds": {
       "jira-api-token": "API-Token",
@@ -1142,7 +1143,8 @@
       "app-store-connect-private-key": "Privater App-Store-Connect-Schlüssel",
       "apns-token-private-key": "Privater APNs-Token-Schlüssel",
       "apns-certificate-bundle": "APNs-Zertifikatspaket",
-      "web-push-vapid-private-key": "Privater VAPID-Schlüssel für Web-Push"
+      "web-push-vapid-private-key": "Privater VAPID-Schlüssel für Web-Push",
+      "external-pipeline-secret": "Geheimnis für externe Pipelines"
     },
     "details": {
       "configuredValue": "Konfigurierter Wert",
@@ -2370,7 +2372,12 @@
     "noAccessibleProjects": "Keine zugänglichen Projekte entsprechen deiner Suche.",
     "loadingProjects": "Projekte werden geladen…",
     "projectSearchFailed": "Projekte konnten nicht geladen werden. Versuche es erneut.",
-    "loadMoreProjects": "Weitere Projekte laden"
+    "loadMoreProjects": "Weitere Projekte laden",
+    "externalJob": "Extern",
+    "cancelJob": "{job} abbrechen",
+    "externalActionResults": "Ergebnisse externer Aktionen",
+    "nativeRequest": "Native Anfrage",
+    "externalRequest": "Externe Anfrage"
   },
   "gitlabSettings": {
     "title": "GitLab-Zugangsdaten",
@@ -5719,5 +5726,42 @@
     "proxyMissing": "Die Proxy-URL ist nicht konfiguriert",
     "httpsRequired": "Diese Aktion erfordert eine HTTPS-Server-URL. Wähle Remote oder Proxy oder ändere die Server-URLs in den Einstellungen.",
     "publicHostRequired": "Diese Aktion erfordert einen öffentlichen Hostnamen. Wähle eine andere Server-URL oder ändere die Server-URLs in den Einstellungen."
+  },
+  "externalPipelineActions": {
+    "title": "Aktionen für externe Pipelines",
+    "description": "Führen Sie JavaScript-Skripte des Repositorys aus, um externe CI-Aufgaben erneut zu starten oder abzubrechen. Alle Checkouts teilen diese Konfiguration.",
+    "enabled": "Externe Aktionen aktivieren",
+    "retryScript": "Skript für Wiederholung",
+    "cancelScript": "Skript für Abbruch",
+    "contextHelp": "Verfügbare globale Werte: context, fetch, JSON, encodeURIComponent und console.log/info/warn/error. Grenzen: 30 Sekunden Ausführung, 15 Sekunden je Fetch, 32 MiB Speicher und 100.000 Skriptzeichen. Erfolgreiche Ausführung erfasst eine angenommene Anfrage; Anbieter-Callbacks aktualisieren die tatsächlichen Status. Angenommene oder ungewisse Anfragen können für denselben beobachteten Status nicht wiederholt werden, auch bei Kontextvorschauen.",
+    "save": "Skripte speichern",
+    "secrets": "Geheimnisse",
+    "secretHelp": "Werte verwenden den konfigurierten Anmeldedatenspeicher. Vorhandene Werte werden nie angezeigt.",
+    "replace": "Ersetzen",
+    "delete": "Löschen",
+    "secretName": "Name des Geheimnisses",
+    "secretValue": "Neuer geheimer Wert",
+    "setSecret": "Geheimnis speichern",
+    "saved": "Gespeichert",
+    "loading": "Aktionen für externe Pipelines werden geladen…",
+    "entryPointTitle": "So werden Variablen übergeben",
+    "entryPointHelp": "Die App stellt ein context-Objekt in einem asynchronen Skript bereit. Definieren Sie Ihre Funktion und rufen Sie sie wie unten mit context auf. Benannte Funktionen werden nicht automatisch aufgerufen; await und return sind auf oberster Ebene möglich.",
+    "exampleHelp": "Die Beispielschaltflächen ersetzen den Entwurf im Editor. Mit Skripte speichern übernehmen Sie ihn. Das Kontextbeispiel protokolliert und liefert die Variablen ohne HTTP-Anfragen oder Statusänderungen beim Anbieter. Das HTTP-Beispiel benötigt die Secrets ACTION_BASE_URL und API_TOKEN und muss an Ihren Anbieter angepasst werden.",
+    "contextExample": "Kontextbeispiel verwenden",
+    "httpExample": "HTTP-Beispiel verwenden",
+    "contextExampleFor": "Kontextbeispiel für {script} verwenden",
+    "httpExampleFor": "HTTP-Beispiel für {script} verwenden",
+    "contextReference": "Referenz zum Skriptkontext",
+    "sampleContext": "Beispiel eines context-Objekts",
+    "sampleContextHelp": "Nur illustrative Werte und ausgewählte Felder. Jede Ausführung erhält die tatsächlichen Repository-, Pipeline-, Job- und MR-Daten sowie die konfigurierten Secret-Werte.",
+    "fieldVersion": "Vertragsversion: 1.",
+    "fieldAction": "action ist retry oder cancel; origin ist manual, automatic, workflow oder mcp.",
+    "fieldRepository": "id, name und canonicalOrigin des kanonischen Repositorys, gemeinsam für alle Checkouts.",
+    "fieldProject": "GitLab-baseUrl; id, name, pathWithNamespace und webUrl des Projekts.",
+    "fieldPipeline": "id, sha, rawRef, ref, branch, resolvedBranch, source, status, webUrl und Zeitangaben. sha bezeichnet den ursprünglichen Commit, resolvedBranch den Quellbranch.",
+    "fieldExternalJobs": "Geeignete externe Status mit id, pipelineId, name, status, author, targetUrl, retried und Zeitangaben. Eine Pipeline-Aktion übergibt alle geeigneten Status. Gruppieren Sie gemeinsame Anbieterläufe vor dem Senden von Anfragen.",
+    "fieldJob": "Ausgewählter externer Status bei einer einzelnen Job-Aktion; null bei einer Aktion für die gesamte Pipeline. Auch targetUrl und author können null sein.",
+    "fieldMergeRequests": "mergeRequests enthält passende MRs mit iid, title, Quell-/Zielbranches und Projekt-IDs. mergeRequest ist der eindeutige Treffer oder null, wenn kein oder mehrere Treffer vorliegen.",
+    "fieldSecrets": "Greifen Sie mit context.secrets.API_TOKEN auf benannte Repository-Secrets zu. Das GitLab-Zugangsmittel der App wird nicht bereitgestellt. Protokollieren Sie nur Secret-Namen, keine Werte."
   }
 }

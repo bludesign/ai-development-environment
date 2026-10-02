@@ -115,6 +115,11 @@ export const routes: RouteEntry[] = [
     path: `/codebases/repositories/${ids.repositories.web}`,
   },
   {
+    name: "repository-external-actions",
+    path: "/codebases/repositories/repo-acme-gitlab-platform",
+    clickTab: "External pipeline actions",
+  },
+  {
     name: "repository-export",
     path: `/codebases/repositories/${ids.repositories.ios}`,
     transferWorkflow: "export",

@@ -69,9 +69,9 @@ import {
 } from "./pipeline-status-badge";
 
 export const GITLAB_PIPELINE_FIELDS =
-  "id projectId iid ref branch sha source status webUrl mergeRequests { projectId iid title webUrl sourceBranch } worktreeId worktreeHighlightColor startedAt createdAt updatedAt finishedAt duration queuedDuration";
+  "id projectId iid ref branch sha source status webUrl canRetry canCancel mergeRequests { projectId iid title webUrl sourceBranch } worktreeId worktreeHighlightColor startedAt createdAt updatedAt finishedAt duration queuedDuration";
 const JOB_FIELDS =
-  "id pipelineId name stage status ref webUrl allowFailure createdAt startedAt finishedAt duration queuedDuration retried";
+  "id pipelineId name stage status ref webUrl kind targetUrl canRetry canCancel author { id name username avatarUrl webUrl } allowFailure createdAt startedAt finishedAt duration queuedDuration retried";
 
 type TimedItem = Pick<GitLabPipelineView, "status" | "startedAt" | "duration">;
 
@@ -166,6 +166,21 @@ function PipelineRow({
   const [jobs, setJobs] = useState<GitLabJobView[] | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [executions, setExecutions] = useState<
+    Array<{
+      id: string;
+      action: string;
+      origin: string;
+      status: string;
+      nativeStatus: string;
+      externalStatus: string;
+      message: string | null;
+      output: string | null;
+      targetedStatusIds: string[];
+      startedAt: string;
+      completedAt: string | null;
+    }>
+  >([]);
   const [actionError, setActionError] = useState<string | null>(null);
   const [pendingAction, setPendingAction] = useState<{
     id: string;
@@ -210,9 +225,11 @@ function PipelineRow({
         const data = await controlPlaneRequest<{
           gitlabPipeline: GitLabPipelineView;
           gitlabPipelineJobs: GitLabJobView[];
+          externalPipelineExecutions: typeof executions;
         }>(
           `query GitLabPipelineDetails($projectId: ID!, $pipelineId: ID!) {
             gitlabPipeline(projectId: $projectId, pipelineId: $pipelineId) { ${GITLAB_PIPELINE_FIELDS} }
+            externalPipelineExecutions(projectId: $projectId, pipelineId: $pipelineId) { id action origin status nativeStatus externalStatus message output targetedStatusIds startedAt completedAt }
             gitlabPipelineJobs(projectId: $projectId, pipelineId: $pipelineId) { ${JOB_FIELDS} }
           }`,
           { projectId: seed.projectId, pipelineId: seed.id },
@@ -221,6 +238,7 @@ function PipelineRow({
         if (signal.aborted) return;
         setDetail(data.gitlabPipeline);
         setJobs(data.gitlabPipelineJobs);
+        setExecutions(data.externalPipelineExecutions ?? []);
         hasLoaded.current = true;
         setError(null);
       } catch (value) {
@@ -287,7 +305,20 @@ function PipelineRow({
 
   const active =
     isActiveGitLabPipeline(displayed.status) ||
-    jobs?.some((job) => !job.retried && isActiveGitLabPipeline(job.status));
+    jobs?.some((job) => !job.retried && isActiveGitLabPipeline(job.status)) ||
+    executions.some(
+      (execution) =>
+        ["RUNNING", "ACCEPTED", "UNCERTAIN", "PARTIAL"].includes(
+          execution.status,
+        ) &&
+        jobs?.some(
+          (job) =>
+            !job.retried &&
+            execution.targetedStatusIds?.includes(job.id) &&
+            (!job.finishedAt ||
+              Date.parse(job.finishedAt) < Date.parse(execution.startedAt)),
+        ),
+    );
   useEffect(() => {
     if (!expanded || !active) return;
     const timer = window.setInterval(
@@ -301,19 +332,26 @@ function PipelineRow({
   }, [active, expanded, pollIntervalSeconds]);
 
   const action = async (
-    operation: "retry" | "cancel" | "job",
+    operation: "retry" | "cancel" | "job" | "job-cancel",
     job?: GitLabJobView,
   ) => {
     if (actionInFlight.current) return;
-    if (operation === "retry" && !canRetryGitLabPipeline(displayed.status))
+    if (
+      operation === "retry" &&
+      !(displayed.canRetry ?? canRetryGitLabPipeline(displayed.status))
+    )
       return;
-    if (operation === "cancel" && !canCancelGitLabPipeline(displayed.status))
+    if (
+      operation === "cancel" &&
+      !(displayed.canCancel ?? canCancelGitLabPipeline(displayed.status))
+    )
       return;
     if (
       operation === "job" &&
-      (!job || job.retried || !canRetryGitLabJob(job.status))
+      (!job || job.retried || !(job.canRetry ?? canRetryGitLabJob(job.status)))
     )
       return;
+    if (operation === "job-cancel" && (!job?.canCancel || job.retried)) return;
     actionInFlight.current = true;
     setPendingAction({
       id: job ? `job:${job.id}` : operation,
@@ -321,20 +359,34 @@ function PipelineRow({
     });
     setActionError(null);
     try {
-      if (job) {
+      if (job && job.kind !== "EXTERNAL") {
         await controlPlaneRequest(
           "mutation RetryGitLabJob($projectId: ID!, $jobId: ID!) { retryGitLabJob(projectId: $projectId, jobId: $jobId) { id } }",
           { projectId: seed.projectId, jobId: job.id },
         );
       } else {
-        const mutation =
-          operation === "retry"
-            ? "retryGitLabPipeline"
-            : "cancelGitLabPipeline";
-        await controlPlaneRequest(
-          `mutation GitLabPipelineAction($projectId: ID!, $pipelineId: ID!) { ${mutation}(projectId: $projectId, pipelineId: $pipelineId) { id } }`,
-          { projectId: seed.projectId, pipelineId: seed.id },
+        const data = await controlPlaneRequest<{
+          runGitLabPipelineAction: {
+            execution: { status: string; message: string | null } | null;
+          };
+        }>(
+          "mutation GitLabPipelineAction($projectId: ID!, $pipelineId: ID!, $action: ExternalPipelineAction!, $jobId: ID) { runGitLabPipelineAction(projectId: $projectId, pipelineId: $pipelineId, action: $action, jobId: $jobId) { pipeline { id } execution { id status message } } }",
+          {
+            projectId: seed.projectId,
+            pipelineId: seed.id,
+            jobId: job?.id ?? null,
+            action:
+              operation === "cancel" || operation === "job-cancel"
+                ? "CANCEL"
+                : "RETRY",
+          },
         );
+        const execution = data.runGitLabPipelineAction.execution;
+        if (
+          execution &&
+          ["FAILED", "PARTIAL", "UNCERTAIN"].includes(execution.status)
+        )
+          setActionError(`${execution.status}: ${execution.message ?? ""}`);
       }
       if (!mounted.current) return;
       await Promise.all([
@@ -361,12 +413,12 @@ function PipelineRow({
     : null;
   const retryUnavailable = busy
     ? t("pipelineActionPending")
-    : !canRetryGitLabPipeline(displayed.status)
+    : !(displayed.canRetry ?? canRetryGitLabPipeline(displayed.status))
       ? t("pipelineRetryUnavailable")
       : null;
   const cancelUnavailable = busy
     ? t("pipelineActionPending")
-    : !canCancelGitLabPipeline(displayed.status)
+    : !(displayed.canCancel ?? canCancelGitLabPipeline(displayed.status))
       ? t("pipelineCancelUnavailable")
       : null;
   return (
@@ -578,6 +630,30 @@ function PipelineRow({
                     <AlertDescription>{error}</AlertDescription>
                   </Alert>
                 )}
+                {executions.length > 0 && (
+                  <details className="rounded border p-3 text-sm">
+                    <summary>{t("externalActionResults")}</summary>
+                    {executions.map((execution) => (
+                      <div key={execution.id} className="space-y-2 py-2">
+                        <Badge variant="outline">{execution.status}</Badge>
+                        <p className="text-xs text-muted-foreground">
+                          {execution.action} · {execution.origin} ·{" "}
+                          <DateTime value={execution.startedAt} />
+                        </p>
+                        <p>
+                          {t("nativeRequest")}: {execution.nativeStatus} ·{" "}
+                          {t("externalRequest")}: {execution.externalStatus}
+                        </p>
+                        <p>{execution.message}</p>
+                        {execution.output && (
+                          <pre className="max-h-48 overflow-auto whitespace-pre-wrap text-xs">
+                            {execution.output}
+                          </pre>
+                        )}
+                      </div>
+                    ))}
+                  </details>
+                )}
                 {loading && !jobs ? (
                   <div className="flex items-center gap-2 text-sm text-muted-foreground">
                     <Spinner />
@@ -594,6 +670,7 @@ function PipelineRow({
                           : null
                       }
                       onRetry={(job) => void action("job", job)}
+                      onCancel={(job) => void action("job-cancel", job)}
                     />
                   )
                 )}
@@ -611,11 +688,13 @@ export function GitLabPipelineJobs({
   busy,
   pendingJobId,
   onRetry,
+  onCancel,
 }: {
   jobs: GitLabJobView[];
   busy: boolean;
   pendingJobId?: string | null;
   onRetry: (job: GitLabJobView) => void;
+  onCancel?: (job: GitLabJobView) => void;
 }) {
   const t = useTranslations("gitlabPages");
   const [showHistory, setShowHistory] = useState(false);
@@ -659,6 +738,7 @@ export function GitLabPipelineJobs({
                   busy={busy}
                   pending={pendingJobId === job.id}
                   onRetry={onRetry}
+                  onCancel={onCancel}
                 />
               ))}
           </div>
@@ -677,6 +757,7 @@ export function GitLabPipelineJobs({
                 busy={busy}
                 pending={pendingJobId === job.id}
                 onRetry={onRetry}
+                onCancel={onCancel}
               />
             ))}
           </div>
@@ -691,11 +772,13 @@ function JobRow({
   busy,
   pending,
   onRetry,
+  onCancel,
 }: {
   job: GitLabJobView;
   busy: boolean;
   pending: boolean;
   onRetry: (job: GitLabJobView) => void;
+  onCancel?: (job: GitLabJobView) => void;
 }) {
   const t = useTranslations("gitlabPages");
   const helpId = useId();
@@ -705,7 +788,7 @@ function JobRow({
       ? t("pipelineActionPending")
       : job.retried
         ? t("jobRetryHistoryUnavailable")
-        : !canRetryGitLabJob(job.status)
+        : !(job.canRetry ?? canRetryGitLabJob(job.status))
           ? t("jobRetryUnavailable")
           : null;
   return (
@@ -719,6 +802,9 @@ function JobRow({
         {job.name}
         <ExternalLink className="ml-1 inline size-3" />
       </a>
+      {job.kind === "EXTERNAL" && (
+        <Badge variant="outline">{t("externalJob")}</Badge>
+      )}
       {job.allowFailure && (
         <Badge variant="outline">{t("allowedFailure")}</Badge>
       )}
@@ -746,6 +832,17 @@ function JobRow({
       >
         {pending ? <Spinner aria-hidden="true" /> : <RotateCcw />}
       </Button>
+      {job.kind === "EXTERNAL" && onCancel && (
+        <Button
+          aria-label={t("cancelJob", { job: job.name })}
+          disabled={busy || pending || !job.canCancel || job.retried}
+          onClick={() => onCancel(job)}
+          size="icon-sm"
+          variant="ghost"
+        >
+          <CircleStop />
+        </Button>
+      )}
       {unavailable && (
         <span className="sr-only" id={helpId}>
           {unavailable}

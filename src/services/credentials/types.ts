@@ -22,6 +22,7 @@ export const CREDENTIAL_KINDS = {
   gitlabWebhookSigningSecrets: "gitlab-webhook-signing-secrets",
   cacheServerSettings: "cache-server-settings",
   cacheServerApiKey: "cache-server-api-key",
+  externalPipelineSecret: "external-pipeline-secret",
   externalMcpServerHeaders: "external-mcp-server-headers",
   iosProfileSignerPrivateKey: "ios-profile-signer-private-key",
   appStoreConnectSettings: "app-store-connect-settings",
@@ -275,6 +276,8 @@ export function credentialOwnerFeature(kind: string): string {
     case CREDENTIAL_KINDS.cacheServerSettings:
     case CREDENTIAL_KINDS.cacheServerApiKey:
       return "Actions cache";
+    case CREDENTIAL_KINDS.externalPipelineSecret:
+      return "External pipeline actions";
     case CREDENTIAL_KINDS.externalMcpServerHeaders:
       return "External MCP server";
     case CREDENTIAL_KINDS.iosProfileSignerPrivateKey:
@@ -291,4 +294,15 @@ export function credentialOwnerFeature(kind: string): string {
     default:
       return "Unknown";
   }
+}
+
+export function externalPipelineSecretCredential(
+  repositoryId: string,
+  name: string,
+): CredentialDescriptor {
+  return {
+    id: `external-pipeline/${encodeURIComponent(repositoryId)}/${encodeURIComponent(name)}`,
+    kind: CREDENTIAL_KINDS.externalPipelineSecret,
+    ownerId: repositoryId,
+  };
 }
