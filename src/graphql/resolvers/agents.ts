@@ -1,6 +1,11 @@
 import { prependAsyncIterator } from "@/lib/filter-async-iterator";
 import { GraphQLScalarType, Kind, type ValueNode } from "graphql";
 import { COMMAND_RUN_JOB_KIND } from "@ai-development-environment/agent-contract/commands";
+import {
+  CODEBASE_BRANCHES_DELETE_JOB_KIND,
+  parseBranchDeletionOutcomes,
+  type CodebaseBranchDeletionOutcome,
+} from "@ai-development-environment/agent-contract/codebases";
 
 import type { AgentControlService } from "@/services/agent-control";
 import { effectiveBuildsDirectory } from "@/services/builds/build-directory";
@@ -130,6 +135,17 @@ export const createAgentResolvers = (
     updatedAt: (agent: { updatedAt: Date }) => agent.updatedAt.toISOString(),
   },
   AgentJob: {
+    branchDeletionResults: (job: {
+      kind: string;
+      resultJson: string | null;
+    }) => {
+      if (job.kind !== CODEBASE_BRANCHES_DELETE_JOB_KIND || !job.resultJson)
+        return null;
+      const result = JSON.parse(job.resultJson) as Record<string, unknown>;
+      return result.branchDeletionResults
+        ? parseBranchDeletionOutcomes(result.branchDeletionResults)
+        : null;
+    },
     payload: (job: { payloadJson: string }) => parseJson(job.payloadJson),
     result: (job: { resultJson: string | null }) => parseJson(job.resultJson),
     createdAt: (job: { createdAt: Date }) => job.createdAt.toISOString(),
@@ -295,6 +311,19 @@ export const createAgentResolvers = (
       { jobId, logs }: { jobId: string; logs: never[] },
       context: GraphQLContext,
     ) => agentControlService.appendLogs(requireAgent(context), jobId, logs),
+    reportBranchDeletionResult: (
+      _root: unknown,
+      {
+        jobId,
+        result,
+      }: { jobId: string; result: CodebaseBranchDeletionOutcome },
+      context: GraphQLContext,
+    ) =>
+      agentControlService.reportBranchDeletionResult(
+        requireAgent(context),
+        jobId,
+        result,
+      ),
     completeAgentJob: (
       _root: unknown,
       args: {

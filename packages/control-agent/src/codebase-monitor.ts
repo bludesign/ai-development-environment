@@ -13,6 +13,7 @@ import {
 import { discoverWorktrees } from "./handlers/worktrees.js";
 import { captureCommand } from "./capture-command.js";
 import { RepositoryCoordinator } from "./repository-coordinator.js";
+import { scanLocalBranches } from "./handlers/local-branches.js";
 
 const INSPECTION_TIMEOUT_MS = 30_000;
 const CONCURRENCY = 4;
@@ -137,8 +138,32 @@ export class CodebaseMonitor {
               }
               // Keep persistence under the repository lock too: a delayed
               // inventory report must not overwrite a newer manual fetch.
+              const localBranchInventoryAttemptedAt = new Date().toISOString();
+              let localBranchInventory = null;
+              let localBranchInventoryError = null;
+              try {
+                if (snapshot.availability !== "AVAILABLE")
+                  throw new Error(snapshot.error || "Codebase is unavailable");
+                localBranchInventory = await scanLocalBranches(
+                  codebase.folder,
+                  INSPECTION_TIMEOUT_MS,
+                  signal,
+                );
+              } catch (error) {
+                localBranchInventoryError =
+                  error instanceof Error
+                    ? error.message.slice(0, 2_000)
+                    : String(error).slice(0, 2_000);
+              }
+              if (signal.aborted) return;
               await this.client.reportCodebaseStatuses([
-                { codebaseId: codebase.id, snapshot },
+                {
+                  codebaseId: codebase.id,
+                  snapshot,
+                  localBranchInventory,
+                  localBranchInventoryError,
+                  localBranchInventoryAttemptedAt,
+                },
               ]);
               await this.client.reportWorktrees([
                 {

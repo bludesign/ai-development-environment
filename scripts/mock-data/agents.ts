@@ -40,6 +40,7 @@ const AGENT_CAPABILITIES = [
   "codebase.clone",
   "codebase.clone.inspect",
   "codebase.git.operation",
+  "codebase.branches.delete",
   "codebase.reconcile.requested",
   "worktree.inspect",
   "worktree.operation",

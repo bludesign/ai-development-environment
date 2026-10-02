@@ -79,6 +79,7 @@ import {
 } from "@ai-development-environment/agent-contract/disk-space";
 import {
   CODEBASE_BROWSE_JOB_KIND,
+  CODEBASE_BRANCHES_DELETE_JOB_KIND,
   CODEBASE_CLONE_JOB_KIND,
   CODEBASE_CLONE_INSPECT_JOB_KIND,
   CODEBASE_FETCH_JOB_KIND,
@@ -92,6 +93,9 @@ import {
   MAX_CODEBASE_RECONCILE_INTERVAL_SECONDS,
   MIN_CODEBASE_RECONCILE_INTERVAL_SECONDS,
   codebaseBrowsePayload,
+  codebaseBranchesDeletePayload,
+  parseBranchDeletionOutcomes,
+  type CodebaseBranchDeletionOutcome,
   codebaseClonePayload,
   codebaseGitInspectPayload,
   codebaseGitOperationPayload,
@@ -335,6 +339,10 @@ export function validateJob(kind: string, payload: unknown): void {
   }
   if (kind === CODEBASE_GIT_OPERATION_JOB_KIND) {
     codebaseGitOperationPayload(value);
+    return;
+  }
+  if (kind === CODEBASE_BRANCHES_DELETE_JOB_KIND) {
+    codebaseBranchesDeletePayload(value);
     return;
   }
   if (kind === WORKTREE_BRANCH_JOB_KIND) {
@@ -1064,6 +1072,25 @@ export class AgentControlService {
         ? 0
         : Math.max(10, Math.min(input.timeoutSeconds ?? 86_400, 7 * 86_400));
     const prisma = await getPrismaClient();
+    if (input.kind === CODEBASE_BRANCHES_DELETE_JOB_KIND) {
+      const payload = codebaseBranchesDeletePayload(input.payload);
+      if (input.codebaseId !== payload.codebaseId)
+        throw new Error("Local branch cleanup must use deleteCodebaseBranches");
+      const codebase = await prisma.codebase.findUnique({
+        where: { id: payload.codebaseId },
+        include: { repository: true },
+      });
+      if (!codebase || codebase.agentId !== input.agentId)
+        throw new Error("Codebase not found for this agent");
+      if (
+        payload.folder !== codebase.folder ||
+        payload.expectedOrigin !== codebase.repository.canonicalOrigin ||
+        payload.defaultBranch !== codebase.defaultBranch
+      )
+        throw new Error(
+          "Cleanup target no longer matches the registered codebase; refresh before retrying",
+        );
+    }
     const existing = await prisma.agentJob.findUnique({
       where: {
         agentId_idempotencyKey: {
@@ -1263,6 +1290,58 @@ export class AgentControlService {
     return persisted;
   }
 
+  async reportBranchDeletionResult(
+    agentId: string,
+    jobId: string,
+    value: CodebaseBranchDeletionOutcome,
+  ) {
+    const result = parseBranchDeletionOutcomes([value])[0]!;
+    const prisma = await getPrismaClient();
+    const updated = await prisma.$transaction(async (transaction) => {
+      const job = await transaction.agentJob.findUnique({
+        where: { id: jobId },
+      });
+      if (
+        !job ||
+        job.agentId !== agentId ||
+        job.kind !== CODEBASE_BRANCHES_DELETE_JOB_KIND
+      )
+        throw new Error("Branch cleanup job not found for this agent");
+      const payload = codebaseBranchesDeletePayload(
+        JSON.parse(job.payloadJson),
+      );
+      if (
+        !payload.targets.some(
+          (target) =>
+            target.codebaseId === result.codebaseId &&
+            target.branch === result.branch,
+        )
+      )
+        throw new Error("Branch is not a target of this cleanup job");
+      const previous = job.resultJson
+        ? (JSON.parse(job.resultJson) as { branchDeletionResults?: unknown })
+        : {};
+      const outcomes = previous.branchDeletionResults
+        ? parseBranchDeletionOutcomes(previous.branchDeletionResults)
+        : [];
+      if (outcomes.some((outcome) => outcome.branch === result.branch))
+        return job;
+      if (job.status !== "RUNNING")
+        throw new Error("Branch cleanup job is no longer running");
+      return transaction.agentJob.update({
+        where: { id: job.id, status: "RUNNING" },
+        data: {
+          resultJson: JSON.stringify({
+            ...previous,
+            branchDeletionResults: [...outcomes, result],
+          }),
+        },
+      });
+    });
+    publishJob(updated);
+    return updated;
+  }
+
   async completeJob(
     agentId: string,
     jobId: string,
@@ -1286,7 +1365,9 @@ export class AgentControlService {
         status,
         resultJson:
           result === undefined || result === null
-            ? null
+            ? job.kind === CODEBASE_BRANCHES_DELETE_JOB_KIND
+              ? job.resultJson
+              : null
             : JSON.stringify(result),
         error,
         finishedAt: new Date(),

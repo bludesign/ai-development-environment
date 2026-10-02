@@ -6,6 +6,7 @@ export const CODEBASE_CLONE_JOB_KIND = "codebase.clone";
 export const CODEBASE_CLONE_INSPECT_JOB_KIND = "codebase.clone.inspect";
 export const CODEBASE_GIT_INSPECT_JOB_KIND = "codebase.git.inspect";
 export const CODEBASE_GIT_OPERATION_JOB_KIND = "codebase.git.operation";
+export const CODEBASE_BRANCHES_DELETE_JOB_KIND = "codebase.branches.delete";
 export const CODEBASE_RECONCILE_EVENT_CAPABILITY =
   "codebase.reconcile.requested";
 
@@ -37,6 +38,7 @@ export const CODEBASE_JOB_KINDS = [
   CODEBASE_CLONE_INSPECT_JOB_KIND,
   CODEBASE_GIT_INSPECT_JOB_KIND,
   CODEBASE_GIT_OPERATION_JOB_KIND,
+  CODEBASE_BRANCHES_DELETE_JOB_KIND,
 ] as const;
 
 export type CodebaseSyncState =
@@ -80,7 +82,172 @@ export type CodebaseDirectoryListing = {
 export type CodebaseStatusReport = {
   codebaseId: string;
   snapshot: CodebaseSnapshot;
+  localBranchInventory?: LocalBranchInventory | null;
+  localBranchInventoryError?: string | null;
+  localBranchInventoryAttemptedAt?: string;
 };
+
+export interface LocalBranch {
+  name: string;
+  headSha: string;
+  lastCommitAt: string | null;
+  lastCommitMessage: string | null;
+  current: boolean;
+  checkedOutPath: string | null;
+}
+
+export interface LocalBranchInventory {
+  scannedAt: string;
+  branches: LocalBranch[];
+}
+
+export interface CodebaseBranchTarget {
+  codebaseId: string;
+  branch: string;
+  expectedHeadSha: string;
+}
+
+export interface CodebaseBranchDeletionOutcome {
+  codebaseId: string;
+  branch: string;
+  outcome: "DELETED" | "SKIPPED" | "FAILED";
+  reason: string | null;
+}
+
+export interface CodebaseBranchesDeletePayload {
+  codebaseId: string;
+  folder: string;
+  expectedOrigin: string;
+  defaultBranch: string | null;
+  force: boolean;
+  targets: CodebaseBranchTarget[];
+}
+
+function branchHeadSha(value: unknown): string {
+  if (
+    typeof value !== "string" ||
+    !/^(?:[a-f0-9]{40}|[a-f0-9]{64})$/i.test(value)
+  ) {
+    throw new Error("Invalid branch tip SHA");
+  }
+  return value.toLowerCase();
+}
+
+export function parseCodebaseBranchTarget(
+  value: unknown,
+): CodebaseBranchTarget {
+  const target = objectValue(value, "branch target");
+  const branch = stringValue(target.branch, "branch target.branch");
+  if (!validCodebaseGitBranchName(branch))
+    throw new Error("Invalid Git branch name");
+  return {
+    codebaseId: stringValue(target.codebaseId, "branch target.codebaseId"),
+    branch,
+    expectedHeadSha: branchHeadSha(target.expectedHeadSha),
+  };
+}
+
+export function parseLocalBranchInventory(
+  value: unknown,
+): LocalBranchInventory {
+  const inventory = objectValue(value, "local branch inventory");
+  const scannedAt = stringValue(inventory.scannedAt, "inventory.scannedAt");
+  if (
+    !Number.isFinite(Date.parse(scannedAt)) ||
+    !Array.isArray(inventory.branches)
+  ) {
+    throw new Error("Invalid local branch inventory");
+  }
+  const names = new Set<string>();
+  return {
+    scannedAt: new Date(scannedAt).toISOString(),
+    branches: inventory.branches.map((value) => {
+      const branch = objectValue(value, "local branch");
+      const name = stringValue(branch.name, "local branch.name");
+      if (!validCodebaseGitBranchName(name) || names.has(name))
+        throw new Error("Invalid or duplicate local branch");
+      names.add(name);
+      const lastCommitAt = nullableString(
+        branch.lastCommitAt,
+        "local branch.lastCommitAt",
+      );
+      if (lastCommitAt && !Number.isFinite(Date.parse(lastCommitAt)))
+        throw new Error("Invalid local commit date");
+      return {
+        name,
+        headSha: branchHeadSha(branch.headSha),
+        lastCommitAt,
+        lastCommitMessage: nullableString(
+          branch.lastCommitMessage,
+          "local branch.lastCommitMessage",
+        ),
+        current: booleanValue(branch.current, "local branch.current"),
+        checkedOutPath: nullableString(
+          branch.checkedOutPath,
+          "local branch.checkedOutPath",
+        ),
+      };
+    }),
+  };
+}
+
+export function codebaseBranchesDeletePayload(
+  value: unknown,
+): CodebaseBranchesDeletePayload {
+  const payload = objectValue(value, "local branch deletion payload");
+  const allowed = new Set([
+    "codebaseId",
+    "folder",
+    "expectedOrigin",
+    "defaultBranch",
+    "force",
+    "targets",
+  ]);
+  if (Object.keys(payload).some((key) => !allowed.has(key)))
+    throw new Error("Unexpected local branch deletion field");
+  const codebaseId = stringValue(payload.codebaseId, "payload.codebaseId");
+  if (!Array.isArray(payload.targets) || !payload.targets.length)
+    throw new Error("Branch targets are required");
+  const targets = payload.targets.map(parseCodebaseBranchTarget);
+  if (targets.some((target) => target.codebaseId !== codebaseId))
+    throw new Error("Branch target belongs to another codebase");
+  if (new Set(targets.map((target) => target.branch)).size !== targets.length)
+    throw new Error("Duplicate branch target");
+  return {
+    codebaseId,
+    folder: stringValue(payload.folder, "payload.folder"),
+    expectedOrigin: stringValue(
+      payload.expectedOrigin,
+      "payload.expectedOrigin",
+    ),
+    defaultBranch: nullableString(
+      payload.defaultBranch,
+      "payload.defaultBranch",
+    ),
+    force: booleanValue(payload.force, "payload.force"),
+    targets,
+  };
+}
+
+export function parseBranchDeletionOutcomes(
+  value: unknown,
+): CodebaseBranchDeletionOutcome[] {
+  if (!Array.isArray(value))
+    throw new Error("Invalid branch deletion outcomes");
+  return value.map((value) => {
+    const item = objectValue(value, "branch deletion outcome");
+    return {
+      codebaseId: stringValue(item.codebaseId, "outcome.codebaseId"),
+      branch: stringValue(item.branch, "outcome.branch"),
+      outcome: enumValue(
+        item.outcome,
+        ["DELETED", "SKIPPED", "FAILED"] as const,
+        "outcome.outcome",
+      ),
+      reason: nullableString(item.reason, "outcome.reason"),
+    };
+  });
+}
 
 export type CodebaseGitBranch = {
   name: string;

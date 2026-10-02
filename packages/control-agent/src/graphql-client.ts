@@ -9,7 +9,10 @@ import WebSocket from "ws";
 import type { AgentConfig } from "./config.js";
 import type { AgentInventory } from "./inventory.js";
 import type { ProcessLog } from "./process-runner.js";
-import type { CodebaseStatusReport } from "@ai-development-environment/agent-contract/codebases";
+import type {
+  CodebaseStatusReport,
+  CodebaseBranchDeletionOutcome,
+} from "@ai-development-environment/agent-contract/codebases";
 import type {
   CodebaseWorktreeReport,
   WorktreeActivityReport,
@@ -483,6 +486,18 @@ export class AgentGraphQLClient {
         appendAgentJobLogs(jobId: $jobId, logs: $logs) { id }
       }`,
       { jobId, logs: [log] },
+    );
+  }
+
+  reportBranchDeletionResult(
+    jobId: string,
+    result: CodebaseBranchDeletionOutcome,
+  ) {
+    return this.request<{ reportBranchDeletionResult: { id: string } }>(
+      `mutation ReportBranchDeletionResult($jobId: ID!, $result: BranchDeletionResultInput!) {
+        reportBranchDeletionResult(jobId: $jobId, result: $result) { id }
+      }`,
+      { jobId, result },
     );
   }
 

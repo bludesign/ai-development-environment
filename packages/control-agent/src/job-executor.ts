@@ -67,6 +67,8 @@ export class JobExecutor {
           (log) => this.client.appendLog(claimed.id, log).then(() => undefined),
           {
             agentId: claimed.agentId,
+            reportBranchDeletionResult: (result) =>
+              this.client.reportBranchDeletionResult(claimed.id, result),
             reportWorktreeActivity: (input) =>
               this.client.reportWorktreeActivity(input),
             refreshFetchedCodebase: (input) =>

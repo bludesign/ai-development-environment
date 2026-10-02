@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, test, vi } from "vitest";
 
 vi.mock("./handlers/index.js", () => ({
-  handlers: { "codebase.fetch": vi.fn() },
+  handlers: { "codebase.fetch": vi.fn(), "codebase.branches.delete": vi.fn() },
 }));
 vi.mock("./handlers/worktrees.js", () => ({
   closeAllWorktreeWatches: vi.fn(),
@@ -25,6 +25,60 @@ const job: AgentJob = {
 };
 
 describe("JobExecutor", () => {
+  test("serializes cleanup with other operations on the same codebase while retaining per-branch results", async () => {
+    const entered = Promise.withResolvers<void>();
+    const release = Promise.withResolvers<void>();
+    const complete = Promise.withResolvers<void>();
+    const cleanupJob = {
+      ...job,
+      kind: "codebase.branches.delete",
+      payload: { codebaseId: "checkout", folder: "/repo" },
+    };
+    const result = {
+      exitCode: 0,
+      signal: null,
+      timedOut: false,
+      cancelled: false,
+      branchDeletionResults: [
+        {
+          codebaseId: "checkout",
+          branch: "old",
+          outcome: "DELETED",
+          reason: null,
+        },
+      ],
+    };
+    vi.mocked(handlers[cleanupJob.kind]!).mockImplementation(async () => {
+      entered.resolve();
+      await release.promise;
+      return result;
+    });
+    const api = {
+      claimJob: vi.fn().mockResolvedValue(cleanupJob),
+      completeJob: vi.fn(async () => complete.resolve()),
+    };
+    const coordinator = new RepositoryCoordinator();
+    const executor = new JobExecutor(
+      api as unknown as AgentGraphQLClient,
+      coordinator,
+    );
+    executor.execute(cleanupJob);
+    await entered.promise;
+    const nextOperation = vi.fn(async () => {});
+    const next = coordinator.run("checkout", nextOperation);
+    await Promise.resolve();
+    expect(nextOperation).not.toHaveBeenCalled();
+    release.resolve();
+    await complete.promise;
+    await next;
+    expect(api.completeJob).toHaveBeenCalledWith(
+      cleanupJob.id,
+      "SUCCEEDED",
+      result,
+      undefined,
+    );
+    await executor.cancelAll();
+  });
   afterEach(() => {
     vi.restoreAllMocks();
   });

@@ -142,6 +142,10 @@ type Codebase {
   defaultBranch: String
   "Local branches associated with this codebase."
   localBranches: [String!]!
+  "Last successful inventory of local refs only; null before an updated agent reports it."
+  localBranchInventory: LocalBranchInventory
+  "Latest local branch scan failure. Cached inventory is retained on failure."
+  localBranchInventoryError: String
   "Remote branches associated with this codebase."
   remoteBranches: [String!]!
   "ISO 8601 timestamp when this codebase was last checked. May be null when unavailable or not applicable."
@@ -540,6 +544,144 @@ input CodebaseStatusReportInput {
   codebaseId: ID!
   "The snapshot to use for the request."
   snapshot: CodebaseSnapshotInput!
+  "Optional local-only inventory from updated agents."
+  localBranchInventory: LocalBranchInventoryInput
+  "Failure from the latest local branch scan, or null on success."
+  localBranchInventoryError: String
+  "ISO 8601 time the local branch scan began; orders inventory reports."
+  localBranchInventoryAttemptedAt: String
+}
+
+"A local branch in refs/heads, with metadata from its own tip."
+type LocalBranch {
+  "Short branch name under refs/heads; remote-tracking refs are excluded."
+  name: String!
+  "Full object ID of this local branch's commit tip."
+  headSha: String!
+  "ISO 8601 committer date of the local tip, or null when unknown."
+  lastCommitAt: String
+  "Subject of the local tip commit, or null when unknown."
+  lastCommitMessage: String
+  "Whether this is the registered checkout's current branch."
+  current: Boolean!
+  "Git worktree path using this branch, or null when not checked out."
+  checkedOutPath: String
+}
+
+"The last complete local branch scan, retained while an agent is offline."
+type LocalBranchInventory {
+  "ISO 8601 completion time of the last successful scan."
+  scannedAt: String!
+  "All local branch refs from the registered checkout, without a branch-count limit."
+  branches: [LocalBranch!]!
+}
+
+"A local branch reported by an updated agent."
+input LocalBranchInput {
+  "Short local branch name under refs/heads."
+  name: String!
+  "Full object ID of the local tip commit."
+  headSha: String!
+  "ISO 8601 local tip committer date, or null when unknown."
+  lastCommitAt: String
+  "Local tip commit subject, or null when unknown."
+  lastCommitMessage: String
+  "Whether this is the registered checkout's current branch."
+  current: Boolean!
+  "Path of the worktree using this branch, or null."
+  checkedOutPath: String
+}
+
+"A complete successful local-only scan reported by an agent."
+input LocalBranchInventoryInput {
+  "ISO 8601 completion time of the successful scan."
+  scannedAt: String!
+  "Every local branch in the checkout."
+  branches: [LocalBranchInput!]!
+}
+
+"An exact local branch and the tip reviewed before deletion."
+input CodebaseBranchTargetInput {
+  "Registered checkout that owns the branch."
+  codebaseId: ID!
+  "Exact local branch name to delete."
+  branch: String!
+  "Full local tip object ID reviewed by the client; changed tips are skipped."
+  expectedHeadSha: String!
+}
+
+"A reviewed selection of local branches grouped into one cleanup job per codebase."
+input DeleteCodebaseBranchesInput {
+  "Local branches selected for cleanup, each with its expected commit tip."
+  targets: [CodebaseBranchTargetInput!]!
+  "Stable identifier for replaying this exact request without creating duplicate jobs."
+  requestId: ID!
+  "Explicit opt-in to deleting unmerged local branches. Protected branches remain protected."
+  force: Boolean = false
+}
+
+"The outcome of deleting a single local branch."
+enum BranchDeletionOutcome {
+  "The local branch was removed."
+  DELETED
+  "Deletion was prevented by validation, availability, or branch protections."
+  SKIPPED
+  "Git deletion failed, or completion could not be confirmed."
+  FAILED
+}
+
+"The outcome and optional reason for one selected local branch."
+type BranchDeletionResult {
+  "Registered checkout that owns the branch."
+  codebaseId: ID!
+  "Local branch selected for deletion."
+  branch: String!
+  "Deleted, skipped, or failed outcome for this branch."
+  outcome: BranchDeletionOutcome!
+  "Explanation for a skipped or failed deletion, when available."
+  reason: String
+}
+
+"A completed local branch outcome reported while its cleanup job is running."
+input BranchDeletionResultInput {
+  "Registered checkout that owns the selected local branch."
+  codebaseId: ID!
+  "Exact local branch name from the job's targets."
+  branch: String!
+  "The completed outcome for this target."
+  outcome: BranchDeletionOutcome!
+  "Explanation for a skipped or failed deletion, when available."
+  reason: String
+}
+
+"Queued cleanup jobs and targets that could not be scheduled."
+type BranchDeletionBatch {
+  "One job per eligible codebase, including existing jobs for idempotent replays."
+  jobs: [AgentJob!]!
+  "Targets rejected before scheduling, with per-branch reasons."
+  skipped: [BranchDeletionResult!]!
+}
+
+extend type AgentJob {
+  "Registered checkout this job operates on, when applicable."
+  codebaseId: ID
+  "Per-branch outcomes from a local branch cleanup job; null until results are available."
+  branchDeletionResults: [BranchDeletionResult!]
+}
+
+extend type Mutation {
+  "Persists a per-branch cleanup outcome using the owning agent's credentials."
+  reportBranchDeletionResult(
+    "Running local branch cleanup job owned by the reporting agent."
+    jobId: ID!
+    "Completed outcome for one of this job's selected local branches."
+    result: BranchDeletionResultInput!
+  ): AgentJob!
+  "Queues one local-only cleanup job per codebase. Never changes remote refs."
+  deleteCodebaseBranches(
+    "Reviewed local targets, idempotent request identifier, and explicit force option."
+    input: DeleteCodebaseBranchesInput!
+  ): BranchDeletionBatch!
 }
 
 extend type Query {

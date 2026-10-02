@@ -516,36 +516,39 @@ model RepositoryTransferItem {
 }
 
 model Codebase {
-  id                 String                   @id
-  repositoryId       String
-  agentId            String
-  folder             String
-  observedOrigin     String
-  branch             String?
-  headSha            String?
-  upstream           String?
-  ahead              Int?
-  behind             Int?
-  syncState          String                   @default("UNKNOWN")
-  availability       String                   @default("AVAILABLE")
-  statusError        String?
-  defaultBranch      String?
-  localBranchesJson  String                   @default("[]")
-  remoteBranchesJson String                   @default("[]")
-  lastCheckedAt      DateTime?
-  lastFetchedAt      DateTime?
-  lastFetchAttemptAt DateTime?
-  lastFetchError     String?
-  createdAt          DateTime                 @default(now())
-  updatedAt          DateTime                 @updatedAt
-  repository         CodebaseRepository       @relation(fields: [repositoryId], references: [id], onDelete: Cascade)
-  agent              Agent                    @relation(fields: [agentId], references: [id], onDelete: Cascade)
-  jobs               AgentJob[]
-  worktrees          Worktree[]
-  skillInstallations SkillInstallation[]
-  skillDeployments   SkillDeployment[]
-  sourceObservations BuildSourceObservation[]
-  builds             Build[]
+  id                              String                   @id
+  repositoryId                    String
+  agentId                         String
+  folder                          String
+  observedOrigin                  String
+  branch                          String?
+  headSha                         String?
+  upstream                        String?
+  ahead                           Int?
+  behind                          Int?
+  syncState                       String                   @default("UNKNOWN")
+  availability                    String                   @default("AVAILABLE")
+  statusError                     String?
+  defaultBranch                   String?
+  localBranchesJson               String                   @default("[]")
+  remoteBranchesJson              String                   @default("[]")
+  localBranchInventoryJson        String?
+  localBranchInventoryError       String?
+  localBranchInventoryAttemptedAt DateTime?
+  lastCheckedAt                   DateTime?
+  lastFetchedAt                   DateTime?
+  lastFetchAttemptAt              DateTime?
+  lastFetchError                  String?
+  createdAt                       DateTime                 @default(now())
+  updatedAt                       DateTime                 @updatedAt
+  repository                      CodebaseRepository       @relation(fields: [repositoryId], references: [id], onDelete: Cascade)
+  agent                           Agent                    @relation(fields: [agentId], references: [id], onDelete: Cascade)
+  jobs                            AgentJob[]
+  worktrees                       Worktree[]
+  skillInstallations              SkillInstallation[]
+  skillDeployments                SkillDeployment[]
+  sourceObservations              BuildSourceObservation[]
+  builds                          Build[]
 
   @@unique([agentId, folder])
   @@index([repositoryId])

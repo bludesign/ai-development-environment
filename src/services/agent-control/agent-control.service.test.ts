@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, test, vi } from "vitest";
 
 import { IOS_ARTIFACT_DOWNLOAD_JOB_KIND } from "@ai-development-environment/agent-contract/builds";
+import { CODEBASE_BRANCHES_DELETE_JOB_KIND } from "@ai-development-environment/agent-contract/codebases";
 
 import { CodebaseBusyError } from "@/lib/codebase-busy";
 
@@ -23,6 +24,105 @@ function persistedJob(status: string, resultJson: string | null = null) {
     resultJson,
   };
 }
+
+describe("AgentControlService branch deletion progress", () => {
+  beforeEach(() => vi.clearAllMocks());
+  test("publishes durable outcomes only for the owning agent and selected local targets, without replacing replays", async () => {
+    let job = {
+      ...persistedJob("RUNNING"),
+      kind: CODEBASE_BRANCHES_DELETE_JOB_KIND,
+      payloadJson: JSON.stringify({
+        codebaseId: "checkout",
+        folder: "/repo",
+        expectedOrigin: "example.com/app",
+        defaultBranch: "main",
+        force: false,
+        targets: [
+          {
+            codebaseId: "checkout",
+            branch: "old",
+            expectedHeadSha: "a".repeat(40),
+          },
+        ],
+      }),
+    };
+    const update = vi.fn(async ({ data }) => {
+      job = { ...job, ...data };
+      return job;
+    });
+    const transaction = {
+      agentJob: { findUnique: vi.fn(async () => job), update },
+    };
+    getPrismaClient.mockResolvedValue({
+      $transaction: async (body: (value: typeof transaction) => unknown) =>
+        body(transaction),
+    });
+    const service = new AgentControlService();
+    const result = {
+      codebaseId: "checkout",
+      branch: "old",
+      outcome: "DELETED" as const,
+      reason: null,
+    };
+    await expect(
+      service.reportBranchDeletionResult("other-agent", job.id, result),
+    ).rejects.toThrow("not found for this agent");
+    await expect(
+      service.reportBranchDeletionResult(job.agentId, job.id, {
+        ...result,
+        branch: "unselected",
+      }),
+    ).rejects.toThrow("not a target");
+    await service.reportBranchDeletionResult(job.agentId, job.id, result);
+    await service.reportBranchDeletionResult(job.agentId, job.id, result);
+    expect(update).toHaveBeenCalledTimes(1);
+    expect(update.mock.calls[0]![0].where).toEqual({
+      id: job.id,
+      status: "RUNNING",
+    });
+    expect(JSON.parse(job.resultJson!)).toEqual({
+      branchDeletionResults: [result],
+    });
+  });
+  test("retains known deleted outcomes when a cleanup job fails without its final payload", async () => {
+    const partial = JSON.stringify({
+      branchDeletionResults: [
+        {
+          codebaseId: "checkout",
+          branch: "old",
+          outcome: "DELETED",
+          reason: null,
+        },
+      ],
+    });
+    const job = {
+      ...persistedJob("RUNNING", partial),
+      kind: CODEBASE_BRANCHES_DELETE_JOB_KIND,
+    };
+    const updateMany = vi.fn().mockResolvedValue({ count: 1 });
+    getPrismaClient.mockResolvedValue({
+      agentJob: {
+        findUnique: vi
+          .fn()
+          .mockResolvedValueOnce(job)
+          .mockResolvedValueOnce({ ...job, status: "FAILED" }),
+        updateMany,
+      },
+    });
+    await new AgentControlService().completeJob(
+      job.agentId,
+      job.id,
+      "FAILED",
+      null,
+      "Connection lost",
+    );
+    expect(updateMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({ resultJson: partial }),
+      }),
+    );
+  });
+});
 
 describe("AgentControlService.completeJob", () => {
   beforeEach(() => vi.clearAllMocks());
@@ -110,6 +210,59 @@ describe("AgentControlService.claimJob", () => {
 
 describe("AgentControlService.createJob", () => {
   beforeEach(() => vi.clearAllMocks());
+
+  test("requires cleanup jobs to use registered agent, folder, origin, and default branch", async () => {
+    const payload = {
+      codebaseId: "checkout",
+      folder: "/registered",
+      expectedOrigin: "example.com/app",
+      defaultBranch: "main",
+      force: true,
+      targets: [
+        {
+          codebaseId: "checkout",
+          branch: "old",
+          expectedHeadSha: "a".repeat(40),
+        },
+      ],
+    };
+    const input = {
+      agentId: "agent",
+      codebaseId: "checkout",
+      kind: CODEBASE_BRANCHES_DELETE_JOB_KIND,
+      payload,
+      idempotencyKey: "request",
+    };
+    const existing = { id: "job" };
+    getPrismaClient.mockResolvedValue({
+      codebase: {
+        findUnique: vi.fn().mockResolvedValue({
+          id: "checkout",
+          agentId: "agent",
+          folder: "/registered",
+          defaultBranch: "main",
+          repository: { canonicalOrigin: "example.com/app" },
+        }),
+      },
+      agentJob: { findUnique: vi.fn().mockResolvedValue(existing) },
+    });
+    const service = new AgentControlService();
+    await expect(
+      service.createJob({ ...input, codebaseId: null }),
+    ).rejects.toThrow("must use deleteCodebaseBranches");
+    await expect(
+      service.createJob({ ...input, agentId: "other" }),
+    ).rejects.toThrow("not found for this agent");
+    for (const field of ["folder", "expectedOrigin", "defaultBranch"]) {
+      await expect(
+        service.createJob({
+          ...input,
+          payload: { ...payload, [field]: "other" },
+        }),
+      ).rejects.toThrow("no longer matches the registered codebase");
+    }
+    await expect(service.createJob(input)).resolves.toBe(existing);
+  });
 
   const gitInspect = {
     agentId: "agent-1",

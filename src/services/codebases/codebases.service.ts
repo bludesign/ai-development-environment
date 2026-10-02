@@ -3,6 +3,7 @@ import { randomUUID } from "node:crypto";
 
 import {
   CODEBASE_BROWSE_JOB_KIND,
+  CODEBASE_BRANCHES_DELETE_JOB_KIND,
   DEFAULT_CODEBASE_RECONCILE_INTERVAL_SECONDS,
   CODEBASE_FETCH_JOB_KIND,
   CODEBASE_GIT_INSPECT_JOB_KIND,
@@ -16,6 +17,11 @@ import {
   parseCodebaseGitState,
   parseCodebaseSnapshot,
   parseCodebaseStashDiff,
+  parseCodebaseBranchTarget,
+  codebaseBranchesDeletePayload,
+  parseLocalBranchInventory,
+  type CodebaseBranchTarget,
+  type CodebaseBranchDeletionOutcome,
   type CodebaseGitOperation,
   type CodebaseSnapshot,
   type CodebaseStatusReport,
@@ -117,6 +123,24 @@ export class CodebasesService {
     this.agentControl.registerCompletionHandler(
       CODEBASE_GIT_OPERATION_JOB_KIND,
       (job) => this.projectGitOperation(job),
+    );
+    this.agentControl.registerCompletionHandler(
+      CODEBASE_BRANCHES_DELETE_JOB_KIND,
+      async (job) => {
+        if (job.resultJson && job.codebaseId) {
+          const result = JSON.parse(job.resultJson) as Record<string, unknown>;
+          if (result.snapshot)
+            await this.applySnapshot(
+              job.agentId,
+              job.codebaseId,
+              parseCodebaseSnapshot(result.snapshot),
+            );
+          await this.applyBranchInventory(job.agentId, job.codebaseId, result);
+          const codebase = await this.detail(job.codebaseId);
+          this.publish(job.codebaseId, codebase?.repositoryId ?? null);
+        }
+        await this.agentControl.requestCodebaseReconcile([job.agentId]);
+      },
     );
   }
 
@@ -715,6 +739,12 @@ export class CodebasesService {
         );
         updated.push(applied.codebase);
         changed ||= applied.changed;
+        changed =
+          (await this.applyBranchInventory(
+            agentId,
+            report.codebaseId,
+            report,
+          )) || changed;
       }
     } finally {
       if (changed) this.publish(null, null);
@@ -917,6 +947,148 @@ export class CodebasesService {
     });
   }
 
+  async deleteBranches(input: {
+    targets: CodebaseBranchTarget[];
+    requestId: string;
+    force?: boolean | null;
+  }) {
+    if (!input.requestId.trim()) throw new Error("requestId is required");
+    if (!input.targets.length) throw new Error("Branch targets are required");
+    const groups = new Map<string, CodebaseBranchTarget[]>();
+    for (const value of input.targets) {
+      const target = parseCodebaseBranchTarget(value);
+      const group = groups.get(target.codebaseId) ?? [];
+      if (group.some((item) => item.branch === target.branch))
+        throw new Error("Duplicate branch target");
+      group.push(target);
+      groups.set(target.codebaseId, group);
+    }
+    const prisma = await getPrismaClient();
+    const jobs = [];
+    const skipped: CodebaseBranchDeletionOutcome[] = [];
+    for (const [codebaseId, targets] of groups) {
+      try {
+        const idempotencyKey = `codebase:branches:delete:${input.requestId}:${codebaseId}`;
+        const existing = await prisma.agentJob.findFirst({
+          where: {
+            idempotencyKey,
+            codebaseId,
+            kind: CODEBASE_BRANCHES_DELETE_JOB_KIND,
+          },
+        });
+        if (existing) {
+          const previous = JSON.parse(existing.payloadJson) as {
+            targets: CodebaseBranchTarget[];
+            force: boolean;
+          };
+          if (
+            JSON.stringify(previous.targets) !== JSON.stringify(targets) ||
+            previous.force !== Boolean(input.force)
+          )
+            throw new Error(
+              "requestId was already used for a different branch selection",
+            );
+          jobs.push(existing);
+          continue;
+        }
+        const codebase = await this.requireRunnableCodebase(
+          codebaseId,
+          CODEBASE_BRANCHES_DELETE_JOB_KIND,
+        );
+        const job = await this.agentControl.createJob({
+          agentId: codebase.agentId,
+          codebaseId,
+          kind: CODEBASE_BRANCHES_DELETE_JOB_KIND,
+          payload: {
+            codebaseId,
+            folder: codebase.folder,
+            expectedOrigin: codebase.repository.canonicalOrigin,
+            defaultBranch: codebase.defaultBranch,
+            targets,
+            force: Boolean(input.force),
+          },
+          idempotencyKey,
+          timeoutSeconds: 300,
+        });
+        // createJob can return the winner of a concurrent idempotency request.
+        const createdPayload = codebaseBranchesDeletePayload(
+          JSON.parse(job.payloadJson),
+        );
+        if (
+          JSON.stringify(createdPayload.targets) !== JSON.stringify(targets) ||
+          createdPayload.force !== Boolean(input.force)
+        )
+          throw new Error(
+            "requestId was already used for a different branch selection",
+          );
+        jobs.push(job);
+      } catch (error) {
+        const reason = error instanceof Error ? error.message : String(error);
+        skipped.push(
+          ...targets.map((target) => ({
+            codebaseId,
+            branch: target.branch,
+            outcome: "SKIPPED" as const,
+            reason,
+          })),
+        );
+      }
+    }
+    return { jobs, skipped };
+  }
+
+  private async applyBranchInventory(
+    agentId: string,
+    codebaseId: string,
+    report: {
+      localBranchInventory?: unknown;
+      localBranchInventoryError?: unknown;
+      localBranchInventoryAttemptedAt?: unknown;
+    },
+  ) {
+    if (report.localBranchInventoryAttemptedAt == null) return false;
+    if (
+      typeof report.localBranchInventoryAttemptedAt !== "string" ||
+      !Number.isFinite(Date.parse(report.localBranchInventoryAttemptedAt))
+    )
+      throw new Error("Invalid branch inventory timestamp");
+    const inventory =
+      report.localBranchInventory == null
+        ? null
+        : parseLocalBranchInventory(report.localBranchInventory);
+    if (
+      report.localBranchInventoryError != null &&
+      typeof report.localBranchInventoryError !== "string"
+    )
+      throw new Error("Invalid branch inventory error");
+    const attemptedAt = new Date(report.localBranchInventoryAttemptedAt);
+    const prisma = await getPrismaClient();
+    const changed = await prisma.codebase.updateMany({
+      where: {
+        id: codebaseId,
+        agentId,
+        OR: [
+          { localBranchInventoryAttemptedAt: null },
+          { localBranchInventoryAttemptedAt: { lt: attemptedAt } },
+        ],
+      },
+      data: {
+        localBranchInventoryAttemptedAt: attemptedAt,
+        localBranchInventoryError:
+          report.localBranchInventoryError?.slice(0, 2_000) ?? null,
+        ...(inventory
+          ? {
+              localBranchInventoryJson: JSON.stringify(inventory),
+              localBranchesJson: JSON.stringify(
+                inventory.branches.map((branch) => branch.name),
+              ),
+            }
+          : {}),
+      },
+    });
+    return changed.count > 0;
+  }
+
   subscribe(agentId?: string | null) {
     const events = agentEventBus.iterate<{
       codebaseOverviewChanged: {
@@ -963,7 +1135,12 @@ export class CodebasesService {
       job.codebaseId,
       parseCodebaseSnapshot(snapshotValue),
     );
-    if (applied.changed) {
+    const inventoryChanged = await this.applyBranchInventory(
+      job.agentId,
+      job.codebaseId,
+      result as Record<string, unknown>,
+    );
+    if (applied.changed || inventoryChanged) {
       this.publish(applied.codebase.id, applied.codebase.repositoryId);
     }
   }

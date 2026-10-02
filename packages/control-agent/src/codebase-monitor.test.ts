@@ -6,6 +6,11 @@ vi.mock("./handlers/codebases.js", () => ({
 }));
 vi.mock("./handlers/worktrees.js", () => ({ discoverWorktrees: vi.fn() }));
 vi.mock("./capture-command.js", () => ({ captureCommand: vi.fn() }));
+vi.mock("./handlers/local-branches.js", () => ({
+  scanLocalBranches: vi
+    .fn()
+    .mockResolvedValue({ scannedAt: "2026-10-01T00:00:00.000Z", branches: [] }),
+}));
 
 import { captureCommand } from "./capture-command.js";
 import { CodebaseMonitor } from "./codebase-monitor.js";
@@ -91,10 +96,16 @@ describe("CodebaseMonitor", () => {
     expect(inspect).toHaveBeenCalledTimes(2);
     expect(monitor.reconcileIntervalMs).toBe(120_000);
     expect(client.reportCodebaseStatuses).toHaveBeenCalledWith([
-      { codebaseId: "a", snapshot: { ...snapshot, folder: "/a" } },
+      expect.objectContaining({
+        codebaseId: "a",
+        snapshot: { ...snapshot, folder: "/a" },
+      }),
     ]);
     expect(client.reportCodebaseStatuses).toHaveBeenCalledWith([
-      { codebaseId: "b", snapshot: { ...snapshot, folder: "/b" } },
+      expect.objectContaining({
+        codebaseId: "b",
+        snapshot: { ...snapshot, folder: "/b" },
+      }),
     ]);
   });
 
