@@ -100,9 +100,14 @@ export type GitLabPipelineMergeRequestView = {
   title: string;
   webUrl: string;
   sourceBranch: string;
+  targetBranch?: string;
+  sourceProjectId?: string | null;
+  targetProjectId?: string;
 };
 
 export type GitLabPipelineView = {
+  canRetry?: boolean;
+  canCancel?: boolean;
   id: string;
   projectId: string;
   iid: string | null;
@@ -124,6 +129,11 @@ export type GitLabPipelineView = {
 };
 
 export type GitLabJobView = {
+  kind?: "NATIVE" | "BRIDGE" | "EXTERNAL";
+  targetUrl?: string | null;
+  author?: GitLabUserView | null;
+  canRetry?: boolean;
+  canCancel?: boolean;
   id: string;
   pipelineId: string;
   name: string;

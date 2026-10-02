@@ -325,7 +325,10 @@ export function RunWorktreeCards({ worktreeId }: { worktreeId: string }) {
             </DetailItem>
             <DetailItem className="md:col-span-2" label={wt("pullRequest")}>
               <span className="flex flex-wrap items-center gap-2">
-                <PullRequestBadges worktree={worktree} />
+                <PullRequestBadges
+                  onPipelinesChanged={refresh}
+                  worktree={worktree}
+                />
               </span>
             </DetailItem>
           </DetailList>

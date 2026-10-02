@@ -1128,7 +1128,8 @@
       "mcp": "Servidor MCP externo",
       "ios": "Dispositivos iOS",
       "push": "Notificaciones push",
-      "notifications": "Notificaciones"
+      "notifications": "Notificaciones",
+      "externalPipeline": "Acciones de canalización externa"
     },
     "kinds": {
       "jira-api-token": "Token de API",
@@ -1142,7 +1143,8 @@
       "app-store-connect-private-key": "Clave privada de App Store Connect",
       "apns-token-private-key": "Clave privada del token APNs",
       "apns-certificate-bundle": "Paquete de certificado APNs",
-      "web-push-vapid-private-key": "Clave privada VAPID de push web"
+      "web-push-vapid-private-key": "Clave privada VAPID de push web",
+      "external-pipeline-secret": "Secreto de canalización externa"
     },
     "details": {
       "configuredValue": "Valor configurado",
@@ -2370,7 +2372,12 @@
     "noAccessibleProjects": "No hay proyectos accesibles que coincidan con tu búsqueda.",
     "loadingProjects": "Cargando proyectos…",
     "projectSearchFailed": "No se pudieron cargar los proyectos. Inténtalo de nuevo.",
-    "loadMoreProjects": "Cargar más proyectos"
+    "loadMoreProjects": "Cargar más proyectos",
+    "externalJob": "Externo",
+    "cancelJob": "Cancelar {job}",
+    "externalActionResults": "Resultados de acciones externas",
+    "nativeRequest": "Solicitud nativa",
+    "externalRequest": "Solicitud externa"
   },
   "gitlabSettings": {
     "title": "Credenciales de GitLab",
@@ -5719,5 +5726,42 @@
     "proxyMissing": "La URL del proxy no está configurada",
     "httpsRequired": "Esta acción requiere una URL HTTPS. Elige Remota o Proxy, o actualiza las URL del servidor en Configuración.",
     "publicHostRequired": "Esta acción requiere un nombre de host público. Elige otra URL o actualiza las URL del servidor en Configuración."
+  },
+  "externalPipelineActions": {
+    "title": "Acciones de pipelines externos",
+    "description": "Ejecuta scripts JavaScript del repositorio para reintentar o cancelar CI externo. Todos los clones comparten esta configuración.",
+    "enabled": "Activar acciones externas",
+    "retryScript": "Script de reintento",
+    "cancelScript": "Script de cancelación",
+    "contextHelp": "Variables globales disponibles: context, fetch, JSON, encodeURIComponent y console.log/info/warn/error. Límites: 30 segundos de ejecución, 15 por fetch, 32 MiB de memoria y 100.000 caracteres de script. Una ejecución exitosa registra una solicitud aceptada; los callbacks del proveedor actualizan los estados reales. Las solicitudes aceptadas o inciertas no se pueden repetir para el mismo estado observado, incluidas las vistas previas del contexto.",
+    "save": "Guardar scripts",
+    "secrets": "Secretos",
+    "secretHelp": "Los valores usan el almacén de credenciales configurado. Los valores existentes nunca se muestran.",
+    "replace": "Reemplazar",
+    "delete": "Eliminar",
+    "secretName": "Nombre del secreto",
+    "secretValue": "Nuevo valor del secreto",
+    "setSecret": "Guardar secreto",
+    "saved": "Guardado",
+    "loading": "Cargando acciones de pipelines externos…",
+    "entryPointTitle": "Cómo se pasan las variables",
+    "entryPointHelp": "La app proporciona un objeto context en un cuerpo de script asíncrono. Define tu función y llámala con context como se muestra abajo. Las funciones con nombre no se invocan automáticamente; se admiten await y return en el nivel superior.",
+    "exampleHelp": "Los botones de ejemplo reemplazan el borrador del editor; usa Guardar scripts para aplicarlo. El ejemplo de contexto registra y devuelve las variables sin solicitudes HTTP ni cambios de estado del proveedor. El ejemplo HTTP necesita los secretos ACTION_BASE_URL y API_TOKEN y debe adaptarse a tu proveedor.",
+    "contextExample": "Usar ejemplo de contexto",
+    "httpExample": "Usar ejemplo HTTP",
+    "contextExampleFor": "Usar ejemplo de contexto para {script}",
+    "httpExampleFor": "Usar ejemplo HTTP para {script}",
+    "contextReference": "Referencia del contexto del script",
+    "sampleContext": "Objeto context de ejemplo",
+    "sampleContextHelp": "Solo valores ilustrativos y campos seleccionados. Cada ejecución recibe los valores reales del repositorio, pipeline, trabajo, MR y secretos configurados.",
+    "fieldVersion": "Versión del contrato: 1.",
+    "fieldAction": "action es retry o cancel; origin es manual, automatic, workflow o mcp.",
+    "fieldRepository": "id, name y canonicalOrigin del repositorio canónico, compartidos por todos los checkouts.",
+    "fieldProject": "baseUrl de GitLab; id, name, pathWithNamespace y webUrl del proyecto.",
+    "fieldPipeline": "id, sha, rawRef, ref, branch, resolvedBranch, source, status, webUrl y campos de tiempo. Usa sha para el commit original y resolvedBranch para la rama de origen.",
+    "fieldExternalJobs": "Estados externos elegibles con id, pipelineId, name, status, author, targetUrl, retried y campos de tiempo. Una acción de pipeline pasa todos los estados elegibles; agrupa las ejecuciones del proveedor compartidas antes de solicitar acciones.",
+    "fieldJob": "Estado externo seleccionado para una acción individual de trabajo; null para una acción de todo el pipeline. targetUrl y author también pueden ser null.",
+    "fieldMergeRequests": "mergeRequests contiene los MR coincidentes con iid, title, ramas de origen/destino e ID de proyectos. mergeRequest es la coincidencia única, o null si no hay coincidencias o hay varias.",
+    "fieldSecrets": "Accede a los secretos del repositorio con context.secrets.API_TOKEN. No se proporciona la credencial de GitLab de la app. Registra solo los nombres de los secretos, no sus valores."
   }
 }

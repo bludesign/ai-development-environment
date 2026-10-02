@@ -86,7 +86,7 @@
     "@mdx-js/loader": "3.1.1",
     "@modelcontextprotocol/sdk": "1.31.0",
     "@napi-rs/keyring": "2.1.0",
-    "@next/mdx": "16.3.6",
+    "@next/mdx": "16.3.7",
     "@peculiar/x509": "2.1.0",
     "@prisma/adapter-better-sqlite3": "7.10.0",
     "@prisma/client": "7.10.0",
@@ -113,9 +113,9 @@
     "jira.js": "6.2.0",
     "jira2md": "3.0.1",
     "jose": "6.2.12",
-    "lucide-react": "1.48.0",
-    "next": "16.3.6",
-    "next-intl": "4.14.7",
+    "lucide-react": "1.49.0",
+    "next": "16.3.7",
+    "next-intl": "4.14.8",
     "pdfkit": "0.20.2",
     "pixelmatch": "7.2.0",
     "pkijs": "3.4.1",
@@ -156,7 +156,7 @@
     "@types/react": "19.3",
     "@types/react-dom": "19.3",
     "@types/web-push": "3.6.4",
-    "@types/ws": "8.18.1",
+    "@types/ws": "8.18.2",
     "@types/yauzl": "3.4.0",
     "@vitejs/plugin-react": "6.1.1",
     "@vitest/coverage-v8": "5.0.2",
@@ -164,7 +164,7 @@
     "dotenv": "18.0.4",
     "esbuild": "0.28.2",
     "eslint": "^9",
-    "eslint-config-next": "16.3.6",
+    "eslint-config-next": "16.3.7",
     "jsdom": "30.0.1",
     "npm-check-updates": "23.1.0",
     "prettier": "3.9.9",
@@ -190,6 +190,6 @@
     "@parcel/watcher@2.6.0": true,
     "@prisma/engines@7.10.0": true,
     "re2@1.27.0": true,
-    "@swc/core@1.16.2": true
+    "@swc/core@1.16.12": true
   }
 }

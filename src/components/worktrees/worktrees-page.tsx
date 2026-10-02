@@ -2008,6 +2008,7 @@ export function WorktreeMetadata(
       <MetadataRow label={t("pullRequest")}>
         <PullRequestBadges
           detailsExpanded={detailsExpanded}
+          onPipelinesChanged={props.onReload}
           onToggleDetails={onToggleDetails}
           worktree={worktree}
         />
@@ -2198,10 +2199,12 @@ export function BaseFreshnessBadge({ worktree }: { worktree: Worktree }) {
 export function PullRequestBadges({
   worktree,
   detailsExpanded,
+  onPipelinesChanged,
   onToggleDetails,
 }: {
   worktree: Worktree;
   detailsExpanded?: boolean;
+  onPipelinesChanged?: () => Promise<void>;
   onToggleDetails?: () => void;
 }) {
   const t = useTranslations("worktrees");
@@ -2262,7 +2265,10 @@ export function PullRequestBadges({
           }}
         />
       ) : null}
-      <GitLabWorktreePipelinesMenu pipelines={worktree.gitLabPipelines ?? []} />
+      <GitLabWorktreePipelinesMenu
+        onChanged={onPipelinesChanged}
+        pipelines={worktree.gitLabPipelines ?? []}
+      />
       {gitLabMergeRequest ? (
         <>
           <GitLabApprovalBadge state={gitLabMergeRequest.approvalState} />
@@ -4069,6 +4075,7 @@ function WorktreeTableRows(props: WorktreeItemProps) {
           <div className="flex flex-wrap items-center gap-1.5">
             <PullRequestBadges
               detailsExpanded={expanded}
+              onPipelinesChanged={props.onReload}
               onToggleDetails={expand}
               worktree={worktree}
             />

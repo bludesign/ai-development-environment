@@ -112,6 +112,33 @@ describe("GitLab service primitives", () => {
     ).toBe("feature/retry-diagnostics");
     expect(
       resolveGitLabPipelineBranch(
+        {
+          projectId: "project-1",
+          ref: "refs/merge-requests/17/merge",
+          source: "merge_request_event",
+        },
+        [
+          {
+            ...mergeRequests[0],
+            projectId: "other-project",
+            sourceBranch: "unrelated",
+          },
+          ...mergeRequests,
+        ],
+      ),
+    ).toBe("feature/retry-diagnostics");
+    expect(
+      resolveGitLabPipelineBranch(
+        {
+          projectId: "missing-project",
+          ref: "refs/merge-requests/17/head",
+          source: "merge_request_event",
+        },
+        mergeRequests,
+      ),
+    ).toBe("refs/merge-requests/17/head");
+    expect(
+      resolveGitLabPipelineBranch(
         { ref: "feature/retry-diagnostics", source: "push" },
         mergeRequests,
       ),

@@ -260,10 +260,15 @@ export function createGitLabToolGroup(
         inputSchema: z.object({
           projectId: z.string().min(1),
           pipelineId: z.string().min(1),
+          origin: z.enum(["MCP", "WORKFLOW"]).default("MCP"),
         }),
         service,
         method: "retryPipeline",
-        arguments: ({ projectId, pipelineId }) => [projectId, pipelineId],
+        arguments: ({ projectId, pipelineId, origin }) => [
+          projectId,
+          pipelineId,
+          origin,
+        ],
         resultKey: "pipeline",
         annotations: WRITE_EXTERNAL_ANNOTATIONS,
       }),
@@ -274,10 +279,15 @@ export function createGitLabToolGroup(
         inputSchema: z.object({
           projectId: z.string().min(1),
           pipelineId: z.string().min(1),
+          origin: z.enum(["MCP", "WORKFLOW"]).default("MCP"),
         }),
         service,
         method: "cancelPipeline",
-        arguments: ({ projectId, pipelineId }) => [projectId, pipelineId],
+        arguments: ({ projectId, pipelineId, origin }) => [
+          projectId,
+          pipelineId,
+          origin,
+        ],
         resultKey: "pipeline",
         annotations: WRITE_EXTERNAL_ANNOTATIONS,
       }),

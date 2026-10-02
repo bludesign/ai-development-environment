@@ -1256,6 +1256,7 @@ function registerExpansionAdapters(
             "GitLab project ID",
           ),
           [idKey]: contextual(context, idKey, sessionPath, idKey),
+          ...(idKey === "pipelineId" ? { origin: "WORKFLOW" } : {}),
         },
         {
           sessionPatch: (output) =>

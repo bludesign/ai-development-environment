@@ -355,6 +355,7 @@ function kindName(t: ReturnType<typeof useTranslations>, kind: string): string {
     "cache-server-api-key",
     "cache-server-headers",
     "external-mcp-server-headers",
+    "external-pipeline-secret",
     "ios-profile-signer-private-key",
     "app-store-connect-private-key",
     "apns-token-private-key",
@@ -377,12 +378,14 @@ function featureName(
         ? "cache"
         : kind.startsWith("external-mcp-")
           ? "mcp"
-          : kind.startsWith("ios-") || kind.startsWith("app-store-")
-            ? "ios"
-            : kind.startsWith("apns-")
-              ? "push"
-              : kind.startsWith("web-push-")
-                ? "notifications"
-                : null;
+          : kind === "external-pipeline-secret"
+            ? "externalPipeline"
+            : kind.startsWith("ios-") || kind.startsWith("app-store-")
+              ? "ios"
+              : kind.startsWith("apns-")
+                ? "push"
+                : kind.startsWith("web-push-")
+                  ? "notifications"
+                  : null;
   return group ? t(`features.${group}`) : fallback;
 }

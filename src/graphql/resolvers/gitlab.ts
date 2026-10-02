@@ -1,3 +1,27 @@
+import {
+  externalPipelineActionsService,
+  type ExternalAction,
+} from "@/services/gitlab/external-pipeline-actions";
+import type {
+  GitLabJobView,
+  GitLabPipelineView,
+} from "@/services/gitlab/types";
+const capabilityRequests = new WeakMap<
+  GitLabPipelineView,
+  Promise<{ canRetry: boolean; canCancel: boolean }>
+>();
+function capabilities(service: GitLabService, pipeline: GitLabPipelineView) {
+  let request = capabilityRequests.get(pipeline);
+  if (!request) {
+    request = service.pipelineActionCapabilities(
+      pipeline.projectId,
+      pipeline.id,
+      pipeline,
+    );
+    capabilityRequests.set(pipeline, request);
+  }
+  return request;
+}
 import { serverUrlSettingsService } from "@/services/server-urls/server-urls.service";
 import { serverBaseUrl, type ServerUrlKind } from "@/lib/server-urls";
 import { withIntegrationConfigurationEvents } from "@/services/integration-configuration-events";
@@ -53,7 +77,47 @@ export const createGitLabResolvers = (
         headRefName: (value: { sourceBranch: string }) => value.sourceBranch,
         headRefOid: (value: { sha: string }) => value.sha,
       },
+      GitLabPipeline: {
+        canRetry: (pipeline: GitLabPipelineView) =>
+          capabilities(gitLabService, pipeline).then((value) => value.canRetry),
+        canCancel: (pipeline: GitLabPipelineView) =>
+          capabilities(gitLabService, pipeline).then(
+            (value) => value.canCancel,
+          ),
+        externalExecutions: (pipeline: GitLabPipelineView) =>
+          externalPipelineActionsService.executions(
+            pipeline.projectId,
+            pipeline.id,
+          ),
+      },
+      GitLabJob: {
+        kind: (job: GitLabJobView) => job.kind ?? "NATIVE",
+        canRetry: (job: GitLabJobView) =>
+          job.canRetry ??
+          (!job.retried &&
+            ["SUCCESS", "FAILED", "CANCELED"].includes(job.status)),
+        canCancel: (job: GitLabJobView) => job.canCancel ?? false,
+      },
       Query: {
+        externalPipelineActions: (
+          _: unknown,
+          args: { repositoryId: string },
+          context: GraphQLContext,
+        ) =>
+          checked(context, () =>
+            externalPipelineActionsService.configuration(args.repositoryId),
+          ),
+        externalPipelineExecutions: (
+          _: unknown,
+          args: { projectId: string; pipelineId: string },
+          context: GraphQLContext,
+        ) =>
+          checked(context, () =>
+            externalPipelineActionsService.executions(
+              args.projectId,
+              args.pipelineId,
+            ),
+          ),
         gitlabAccessibleProjects: (
           _root: unknown,
           args: { search?: string | null; page?: number; perPage?: number },
@@ -246,6 +310,67 @@ export const createGitLabResolvers = (
         ) => checked(context, () => gitLabService.autoRetryRules(projectId)),
       },
       Mutation: {
+        saveExternalPipelineActions: (
+          _: unknown,
+          args: {
+            repositoryId: string;
+            input: {
+              enabled: boolean;
+              retryScript: string;
+              cancelScript: string;
+            };
+          },
+          context: GraphQLContext,
+        ) =>
+          checked(context, () =>
+            externalPipelineActionsService.saveConfiguration(
+              args.repositoryId,
+              args.input,
+            ),
+          ),
+        setExternalPipelineSecret: (
+          _: unknown,
+          args: { repositoryId: string; name: string; value: string },
+          context: GraphQLContext,
+        ) =>
+          checked(context, () =>
+            externalPipelineActionsService.setSecret(
+              args.repositoryId,
+              args.name,
+              args.value,
+            ),
+          ),
+        deleteExternalPipelineSecret: (
+          _: unknown,
+          args: { repositoryId: string; name: string },
+          context: GraphQLContext,
+        ) =>
+          checked(context, () =>
+            externalPipelineActionsService.setSecret(
+              args.repositoryId,
+              args.name,
+              null,
+            ),
+          ),
+        runGitLabPipelineAction: (
+          _: unknown,
+          args: {
+            projectId: string;
+            pipelineId: string;
+            action: ExternalAction;
+            jobId?: string | null;
+          },
+          context: GraphQLContext,
+        ) =>
+          checked(context, () =>
+            gitLabService.dispatchPipelineAction(
+              args.projectId,
+              args.pipelineId,
+              args.action,
+              "MANUAL",
+              args.jobId ?? undefined,
+            ),
+          ),
         submitGitLabMergeRequestMerge: (
           _root: unknown,
           { input }: { input: Parameters<GitLabService["submitMerge"]>[0] },

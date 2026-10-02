@@ -18,7 +18,7 @@ export const WORKTREE_FIELDS = `
     }
   }
   gitLabPipelines {
-    id projectId iid ref branch sha source status webUrl
+    id projectId iid ref branch sha source status webUrl canRetry canCancel
     mergeRequests { projectId iid title webUrl sourceBranch }
     worktreeId worktreeHighlightColor startedAt createdAt updatedAt finishedAt duration queuedDuration
   }
