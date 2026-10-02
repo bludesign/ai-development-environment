@@ -1991,6 +1991,7 @@ export function registerWorktreesPageTests(
             sha: "abc",
             source: "push",
             status: "SUCCESS",
+            canRetry: true,
             webUrl: "https://gitlab.com/acme/widgets/-/pipelines/42",
             mergeRequests: [],
             worktreeId: "worktree-1",
@@ -2004,6 +2005,19 @@ export function registerWorktreesPageTests(
           },
         ];
         request.mockClear();
+        request.mockImplementation(async (query) => {
+          if (query.includes("mutation GitLabWorktreePipelineRetry(")) {
+            worktree.gitLabPipelines![0] = {
+              ...worktree.gitLabPipelines![0]!,
+              status: "PENDING",
+              canRetry: false,
+            };
+            return {
+              runGitLabPipelineAction: { execution: null },
+            } as never;
+          }
+          return response as never;
+        });
 
         render(<WorktreesPage />);
         await screen.findByText("feature/AIDE-24");
@@ -2041,6 +2055,27 @@ export function registerWorktreesPageTests(
           within(screen.getByRole("menu")).getByText("Success").className,
         ).toContain("text-emerald");
         expect(screen.queryByText("SUCCESS")).toBeNull();
+        fireEvent.click(
+          within(screen.getByRole("menu")).getByRole("menuitem", {
+            name: "Retry",
+          }),
+        );
+        await screen.findByLabelText("Pipelines: Pending");
+        expect(request).toHaveBeenCalledWith(
+          expect.stringContaining("runGitLabPipelineAction"),
+          { projectId: "project-1", pipelineId: "pipeline-42" },
+        );
+        expect(request).toHaveBeenCalledWith(
+          expect.stringMatching(/gitLabPipelines\s*\{[^}]*\bcanRetry\b/),
+          { appId: null },
+          expect.objectContaining({ signal: expect.any(AbortSignal) }),
+        );
+        expect(
+          within(screen.getByRole("menu"))
+            .getByRole("menuitem", { name: "Retry" })
+            .getAttribute("aria-disabled"),
+        ).toBe("true");
+        expect(navigation.push).not.toHaveBeenCalled();
       });
 
       test("names the agent on the card instead of its hostname", async () => {
