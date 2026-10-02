@@ -1,6 +1,6 @@
 // @vitest-environment node
 import { randomBytes } from "node:crypto";
-import { mkdtemp, readFile, readdir, rm } from "node:fs/promises";
+import { copyFile, mkdtemp, readFile, readdir, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import Database from "better-sqlite3";
@@ -26,6 +26,7 @@ import type { GitLabJobView, GitLabPipelineView } from "./types";
 import { runScript, ScriptExecutionError } from "@/services/scripts/runtime";
 
 let directory: string,
+  templateDatabasePath: string,
   prisma: PrismaClient,
   service: ExternalPipelineActionsService,
   databaseCount = 0;
@@ -95,19 +96,27 @@ const execute = (
   });
 beforeAll(async () => {
   directory = await mkdtemp(join(tmpdir(), "aide-external-pipelines-"));
+  templateDatabasePath = join(directory, "template.db");
+  // Avoid syncing every migration statement to disk on the CI runner.
+  // Back up the migrated schema once, then give each test its own on-disk copy.
+  const db = new Database(":memory:");
+  try {
+    for (const migration of (await readdir("prisma/migrations")).sort())
+      if (/^\d/.test(migration))
+        db.exec(
+          await readFile(
+            join("prisma/migrations", migration, "migration.sql"),
+            "utf8",
+          ),
+        );
+    await db.backup(templateDatabasePath);
+  } finally {
+    db.close();
+  }
 });
 beforeEach(async () => {
   const path = join(directory, `test-${++databaseCount}.db`);
-  const db = new Database(path);
-  for (const migration of (await readdir("prisma/migrations")).sort())
-    if (/^\d/.test(migration))
-      db.exec(
-        await readFile(
-          join("prisma/migrations", migration, "migration.sql"),
-          "utf8",
-        ),
-      );
-  db.close();
+  await copyFile(templateDatabasePath, path);
   prisma = new PrismaClient({
     adapter: new PrismaBetterSqlite3({ url: path }),
   });
