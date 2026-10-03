@@ -135,7 +135,7 @@ export function SkillGroupDetailPage({ groupId }: { groupId: string }) {
         }`,
         { groupId },
       );
-      router.push(`/skills/sync/${data.prepareSkillSync.id}`);
+      router.push(`/ai/skills/sync/${data.prepareSkillSync.id}`);
     } catch (value) {
       setError(value instanceof Error ? value.message : String(value));
       setBusy(false);
@@ -149,7 +149,7 @@ export function SkillGroupDetailPage({ groupId }: { groupId: string }) {
         `mutation DeleteSkillGroup($id: ID!) { deleteSkillGroup(id: $id) }`,
         { id: groupId },
       );
-      router.push("/skills/groups");
+      router.push("/ai/skills/groups");
     } catch (value) {
       setError(value instanceof Error ? value.message : String(value));
       setBusy(false);

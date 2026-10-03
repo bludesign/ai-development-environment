@@ -222,7 +222,7 @@ describe("Auto Merge form state", () => {
       defaultDeleteWorktree: false,
       defaultMoveTicketToDone: false,
       worktreeId: worktree.id,
-      worktreeFolder: "/worktrees/api",
+      worktreeFolder: "/dashboard/worktrees/api",
       canDeleteWorktree: true,
       ticketKey: "APP-42",
       ticketDoneStatusConfigured: true,

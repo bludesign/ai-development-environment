@@ -2068,7 +2068,7 @@ function LatestBuildRow({
         </DropdownMenuTrigger>
         <DropdownMenuContent align="start" className="w-36">
           <DropdownMenuItem asChild>
-            <Link href={`/builds/${build.id}`}>
+            <Link href={`/dashboard/builds/${build.id}`}>
               <ExternalLink />
               {buildsT("viewBuild")}
             </Link>
@@ -2084,7 +2084,7 @@ function LatestBuildRow({
       </DropdownMenu>
       {build.status === "SUCCEEDED" ? (
         <Badge asChild variant={buildStatusVariant(build.status)}>
-          <Link href={`/builds/${build.id}`}>
+          <Link href={`/dashboard/builds/${build.id}`}>
             {buildsT(`statuses.${build.status}`)}
           </Link>
         </Badge>
@@ -2849,13 +2849,13 @@ export function WorktreeMenus(
               />
             )}
             <DropdownMenuItem asChild>
-              <Link href={`/codebases/${props.group.codebase.id}`}>
+              <Link href={`/dashboard/codebases/${props.group.codebase.id}`}>
                 <Code2 /> {t("viewCodebase")}
               </Link>
             </DropdownMenuItem>
             <DropdownMenuItem asChild>
               <Link
-                href={`/codebases/repositories/${props.group.repository.id}`}
+                href={`/dashboard/codebases/repositories/${props.group.repository.id}`}
               >
                 <FolderGit2 /> {t("viewRepository")}
               </Link>
@@ -3618,7 +3618,7 @@ export function PrimaryWorktreeActions(
       <StartBuildButton
         buildSettingsHref={
           buildDisabledForSettings
-            ? `/codebases/repositories/${props.group.repository.id}`
+            ? `/dashboard/codebases/repositories/${props.group.repository.id}`
             : undefined
         }
         codebaseId={props.group.codebase.id}
@@ -3644,7 +3644,7 @@ export function PrimaryWorktreeActions(
       ) : (
         <Button asChild size="sm" variant="outline">
           <Link
-            href={`/runs/new?kind=session&worktree=${worktree.id}${appId ? `&app=${encodeURIComponent(appId)}` : ""}`}
+            href={`/ai/drafts/new?kind=session&worktree=${worktree.id}${appId ? `&app=${encodeURIComponent(appId)}` : ""}`}
           >
             <Terminal /> {t("newSession")}
           </Link>
@@ -3657,7 +3657,7 @@ export function PrimaryWorktreeActions(
       ) : (
         <Button asChild size="sm" variant="outline">
           <Link
-            href={`/runs/new?kind=plan&worktree=${worktree.id}${appId ? `&app=${encodeURIComponent(appId)}` : ""}`}
+            href={`/ai/drafts/new?kind=plan&worktree=${worktree.id}${appId ? `&app=${encodeURIComponent(appId)}` : ""}`}
           >
             <ClipboardList /> {t("newPlan")}
           </Link>

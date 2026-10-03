@@ -16,7 +16,7 @@ export default async function AuthLayout({
     getAuth(),
   ]);
   const session = await auth.api.getSession({ headers: requestHeaders });
-  if (session) redirect(`/${locale}`);
+  if (session) redirect(`/${locale}/dashboard/action-center`);
 
   return children;
 }

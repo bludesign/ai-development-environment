@@ -16,8 +16,8 @@ vi.mock("@/lib/raw-terminal-output", () => ({
   rawOutputResponse: mocks.rawOutputResponse,
 }));
 
-import { GET as buildOutput } from "./builds/[buildId]/output/route";
-import { GET as commandOutput } from "./commands/runs/[runId]/output/route";
+import { GET as buildOutput } from "./dashboard/builds/[buildId]/output/route";
+import { GET as commandOutput } from "./dashboard/commands/runs/[runId]/output/route";
 
 beforeEach(() => {
   vi.clearAllMocks();
@@ -31,12 +31,12 @@ describe("dashboard raw output routes", () => {
   test.each([
     [
       buildOutput,
-      "https://control.example/en/builds/build-1/output",
+      "https://control.example/en/dashboard/builds/build-1/output",
       { buildId: "build-1" },
     ],
     [
       commandOutput,
-      "https://control.example/en/commands/runs/run-1/output",
+      "https://control.example/en/dashboard/commands/runs/run-1/output",
       { runId: "run-1" },
     ],
   ])(
@@ -57,11 +57,13 @@ describe("dashboard raw output routes", () => {
 
   test("streams output after authenticating the user", async () => {
     await buildOutput(
-      new Request("https://control.example/en/builds/build-1/output"),
+      new Request("https://control.example/en/dashboard/builds/build-1/output"),
       { params: Promise.resolve({ buildId: "build-1" }) },
     );
     await commandOutput(
-      new Request("https://control.example/en/commands/runs/run-1/output"),
+      new Request(
+        "https://control.example/en/dashboard/commands/runs/run-1/output",
+      ),
       { params: Promise.resolve({ runId: "run-1" }) },
     );
 

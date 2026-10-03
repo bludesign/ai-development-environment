@@ -831,7 +831,7 @@ export function SseHistoryPage() {
               editMode={editMode}
               hour12={hour12}
               onRemoveColumn={removeColumn}
-              openStream={(id) => router.push(`/sse/history/${id}`)}
+              openStream={(id) => router.push(`/debugging/sse/history/${id}`)}
             />
           ) : (
             <SseHistoryEventsTable

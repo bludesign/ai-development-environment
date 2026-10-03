@@ -108,7 +108,7 @@ function OperationsTable({
                   typeof operation.details.agentName === "string" ? (
                     <Link
                       className="font-medium underline-offset-4 hover:underline"
-                      href={`/agents/${operation.details.agentId}`}
+                      href={`/dashboard/agents/${operation.details.agentId}`}
                     >
                       {operation.details.agentName}
                     </Link>

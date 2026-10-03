@@ -284,7 +284,7 @@ describe("workflow run adapters", () => {
       expect.objectContaining({
         kind: "AGENT_RUN",
         resourceId: "agent-run",
-        url: "/sessions/agent-run",
+        url: "/ai/sessions/agent-run",
         metadata: { runKind: "SESSION" },
       }),
     ]);
@@ -494,7 +494,7 @@ describe("workflow expansion adapters", () => {
       kind: "TAILSCALE_SERVE_OPERATION",
       resourceId: "tailscale-operation-1",
       label: "Tailscale Serve",
-      url: "/tailscale",
+      url: "/system/tailscale",
     });
     expect(result.sessionPatch).toMatchObject({
       tailscale: {
@@ -1264,7 +1264,7 @@ describe("saved command workflow adapter", () => {
       expect.objectContaining({
         kind: "COMMAND_RUN",
         resourceId: "command-run-1",
-        url: "/commands/runs/command-run-1",
+        url: "/dashboard/commands/runs/command-run-1",
       }),
     ]);
   });
@@ -1505,7 +1505,7 @@ describe("coverage import workflow adapter", () => {
       expect.objectContaining({
         kind: "BUILD",
         resourceId: "build-1",
-        url: "/builds/build-1",
+        url: "/dashboard/builds/build-1",
       }),
       expect.objectContaining({ kind: "AGENT_JOB", resourceId: "job-1" }),
     ]);

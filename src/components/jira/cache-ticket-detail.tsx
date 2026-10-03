@@ -81,7 +81,7 @@ export function JiraCacheTicketDetailPage({ issueKey }: { issueKey: string }) {
         "mutation DeleteCachedTicket($issueKey: ID!) { deleteJiraCachedTicket(issueKey: $issueKey) }",
         { issueKey },
       );
-      router.replace("/jira-cache");
+      router.replace("/jira/cache");
     } catch (value) {
       setError(value instanceof Error ? value.message : String(value));
       setBusy(false);

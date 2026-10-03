@@ -345,7 +345,7 @@ export function NotificationsSidebar() {
         <div className="flex min-h-10 items-center gap-1 px-2">
           <Link
             className="mr-auto text-sm font-semibold hover:underline"
-            href="/notifications"
+            href="/dashboard/notifications"
           >
             {ts("notifications")}
           </Link>

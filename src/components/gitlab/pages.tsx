@@ -122,7 +122,7 @@ function ProviderNotConfigured() {
           </p>
         </div>
         <Button asChild>
-          <Link href="/settings#settings-integrations">
+          <Link href="/system/settings#settings-integrations">
             {t("openSettings")}
           </Link>
         </Button>

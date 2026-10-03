@@ -36,7 +36,7 @@ const options: GitLabMergeOptions = {
   mergeCommitMessage: null,
   squashCommitMessage: null,
   worktreeId: "worktree-1",
-  worktreeFolder: "/worktrees/api",
+  worktreeFolder: "/dashboard/worktrees/api",
   canDeleteWorktree: true,
   ticketKey: "APP-42",
   ticketDoneStatusConfigured: true,

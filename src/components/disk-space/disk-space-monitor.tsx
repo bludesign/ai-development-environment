@@ -218,7 +218,7 @@ export function DiskSpaceMonitor() {
                     <div>
                       <Link
                         className="font-medium hover:underline"
-                        href={`/agents/${agent.agent.id}`}
+                        href={`/dashboard/agents/${agent.agent.id}`}
                       >
                         {agent.agent.name}
                       </Link>

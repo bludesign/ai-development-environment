@@ -1101,7 +1101,7 @@ export class GitHubActionsNotificationsService {
         body: [target.name, run.name, run.headBranch]
           .filter((value): value is string => Boolean(value))
           .join(" · "),
-        href: `/actions?${params.toString()}`,
+        href: `/github/actions?${params.toString()}`,
         resourceKind: "GITHUB_WORKFLOW_RUN",
         resourceId: `${target.id}:${run.id}:${run.runAttempt}`,
         worktreeId: worktree?.id ?? null,

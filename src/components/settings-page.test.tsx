@@ -411,7 +411,7 @@ describe("SettingsPage", () => {
     if (webhookConfigured) {
       expect(
         screen.getByRole("link", { name: "View deliveries" }),
-      ).toHaveProperty("href", "http://localhost:3000/webhooks");
+      ).toHaveProperty("href", "http://localhost:3000/github/webhooks");
     } else {
       expect(
         screen.queryByRole("link", { name: "View deliveries" }),

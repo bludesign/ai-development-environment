@@ -7,7 +7,7 @@ export function GET(request: Request): Response {
   const deviceId = new URL(request.url).searchParams.get("deviceId");
   const deviceHref =
     deviceId && DEVICE_ID_PATTERN.test(deviceId)
-      ? `/devices/${encodeURIComponent(deviceId)}`
+      ? `/system/devices/${encodeURIComponent(deviceId)}`
       : null;
   return new Response(
     `<!doctype html>

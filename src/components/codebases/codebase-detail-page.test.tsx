@@ -32,6 +32,7 @@ const request = vi.mocked(controlPlaneRequest);
 const subscriptions = vi.mocked(controlPlaneSubscriptions);
 const copyTextMock = vi.mocked(copyText);
 let jobNext: ((job: typeof queuedJob) => void) | null = null;
+let overviewNext: (() => void) | null = null;
 
 class ResizeObserverMock {
   observe() {}
@@ -158,11 +159,22 @@ describe("CodebaseDetailPage", () => {
     Element.prototype.releasePointerCapture = vi.fn();
     Element.prototype.scrollIntoView = vi.fn();
     jobNext = null;
+    overviewNext = null;
     subscriptions.mockReturnValue({
       subscribe: vi.fn((operation, sink) => {
         if (String(operation.query).includes("CodebaseJobChanged")) {
           jobNext = (job) =>
             sink.next({ data: { agentJobChanged: job } } as never);
+        } else if (String(operation.query).includes("CodebaseDetailChanged")) {
+          overviewNext = () =>
+            sink.next({
+              data: {
+                codebaseOverviewChanged: {
+                  codebaseId: codebase.id,
+                  repositoryId: codebase.repository.id,
+                },
+              },
+            } as never);
         }
         return vi.fn();
       }),
@@ -325,6 +337,75 @@ describe("CodebaseDetailPage", () => {
         }),
       ),
     );
+
+    request.mockResolvedValueOnce({ codebase } as never).mockResolvedValueOnce({
+      inspectCodebaseGitState: { ...gitState, stashes: [] },
+    } as never);
+    act(() => {
+      jobNext?.({ ...queuedJob, status: "SUCCEEDED" });
+    });
+    expect(await screen.findByText("No stashes")).toBeDefined();
+    expect(screen.queryByText("file.ts")).toBeNull();
+  });
+
+  test("preserves stash previews across background refreshes and selector changes", async () => {
+    render(<CodebaseDetailPage codebaseId="codebase-1" />);
+    await screen.findByRole("heading", { name: "Codex" });
+    fireEvent.click(screen.getByRole("tab", { name: "Stashes (1)" }));
+    fireEvent.click(screen.getByRole("button", { name: "Preview stash@{0}" }));
+    const patchFile = await screen.findByText("file.ts");
+
+    request
+      .mockResolvedValueOnce({
+        codebase: {
+          ...codebase,
+          lastCheckedAt: new Date(60_000).toISOString(),
+        },
+      } as never)
+      .mockResolvedValueOnce({
+        inspectCodebaseGitState: {
+          ...gitState,
+          stashes: [
+            {
+              ...gitState.stashes[0],
+              oid: "b".repeat(40),
+              message: "New stash",
+            },
+            { ...gitState.stashes[0], selector: "stash@{1}" },
+          ],
+        },
+      } as never);
+    act(() => overviewNext?.());
+
+    const preview = await screen.findByRole("button", {
+      name: "Preview stash@{1}",
+    });
+    expect(preview.textContent).toContain("Hide preview");
+    expect(screen.getByText("file.ts")).toBe(patchFile);
+    expect(
+      screen.getByRole("button", { name: "Preview stash@{0}" }),
+    ).toBeDefined();
+
+    fireEvent.click(preview);
+    request
+      .mockResolvedValueOnce({
+        codebase: {
+          ...codebase,
+          lastCheckedAt: new Date(120_000).toISOString(),
+        },
+      } as never)
+      .mockResolvedValueOnce({ inspectCodebaseGitState: gitState } as never);
+    act(() => overviewNext?.());
+
+    await screen.findByRole("tab", { name: "Stashes (1)" });
+    expect(screen.queryByText("file.ts")).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Preview stash@{0}" }));
+    expect(screen.getByText("file.ts")).toBeDefined();
+    expect(
+      request.mock.calls.filter(([query]) =>
+        String(query).includes("mutation InspectCodebaseStash"),
+      ),
+    ).toHaveLength(1);
   });
 
   test("deletes non-main remote branches with confirmation", async () => {

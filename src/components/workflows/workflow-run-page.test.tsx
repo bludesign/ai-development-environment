@@ -56,7 +56,7 @@ vi.mock("./workflow-graph", () => ({
       <button
         onClick={() =>
           onNodeClick?.("linked", {
-            destination: { href: "/sessions/session-1", external: false },
+            destination: { href: "/ai/sessions/session-1", external: false },
             locked: true,
             trigger: false,
           })
@@ -420,7 +420,7 @@ describe("workflow question answers", () => {
             kind: "AGENT_JOB",
             resourceId: "job-1",
             label: "Agent job",
-            url: "/jobs/job-1",
+            url: "/dashboard/jobs/job-1",
             metadata: null,
             createdAt: "2026-07-24T12:00:01.000Z",
           },
@@ -435,7 +435,7 @@ describe("workflow question answers", () => {
 
     const target = await screen.findByRole("link", { name: "Agent job" });
     const card = target.closest<HTMLElement>('[data-slot="card"]');
-    expect(target.getAttribute("href")).toBe("/jobs/job-1");
+    expect(target.getAttribute("href")).toBe("/dashboard/jobs/job-1");
     expect(card?.textContent).toContain("Commit changes");
     expect(card?.textContent).toContain("Times out");
   });
@@ -519,7 +519,7 @@ describe("workflow question answers", () => {
     fireEvent.click(
       await screen.findByRole("button", { name: "Locked linked step" }),
     );
-    expect(routerPush).toHaveBeenCalledWith("/sessions/session-1");
+    expect(routerPush).toHaveBeenCalledWith("/ai/sessions/session-1");
 
     const prepare = screen.getByRole("button", { name: "Prepare replay" });
     fireEvent.click(screen.getByRole("button", { name: "Unlocked trigger" }));

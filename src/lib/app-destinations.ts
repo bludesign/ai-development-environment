@@ -87,7 +87,7 @@ export const NAVIGATION_SECTIONS: NavigationSection[] = [
 export const APP_DESTINATIONS: AppDestination[] = [
   {
     key: "action-center",
-    href: "/",
+    href: "/dashboard/action-center",
     labelKey: "actionCenter",
     aliases: ["attention", "tasks", "home"],
     icon: ListTodo,
@@ -98,7 +98,7 @@ export const APP_DESTINATIONS: AppDestination[] = [
   },
   {
     key: "apps",
-    href: "/apps",
+    href: "/dashboard/apps",
     labelKey: "apps",
     aliases: ["products", "projects", "application management"],
     icon: Boxes,
@@ -108,7 +108,7 @@ export const APP_DESTINATIONS: AppDestination[] = [
   },
   {
     key: "notifications",
-    href: "/notifications",
+    href: "/dashboard/notifications",
     labelKey: "notifications",
     aliases: ["alerts"],
     icon: Bell,
@@ -117,18 +117,18 @@ export const APP_DESTINATIONS: AppDestination[] = [
   },
   {
     key: "agents",
-    href: "/agents",
+    href: "/dashboard/agents",
     labelKey: "agents",
     aliases: ["workers", "jobs"],
     icon: Cpu,
     section: "dashboard",
     sidebar: true,
     common: true,
-    activePrefixes: ["/agents", "/jobs"],
+    activePrefixes: ["/dashboard/agents", "/dashboard/jobs"],
   },
   {
     key: "workflows",
-    href: "/workflows",
+    href: "/dashboard/workflows",
     labelKey: "workflows",
     aliases: ["automations", "workflow runs"],
     icon: Waypoints,
@@ -138,7 +138,7 @@ export const APP_DESTINATIONS: AppDestination[] = [
   },
   {
     key: "commands",
-    href: "/commands",
+    href: "/dashboard/commands",
     labelKey: "commands",
     aliases: ["scripts", "command runs"],
     icon: Terminal,
@@ -148,7 +148,7 @@ export const APP_DESTINATIONS: AppDestination[] = [
   },
   {
     key: "codebases",
-    href: "/codebases",
+    href: "/dashboard/codebases",
     labelKey: "codebases",
     aliases: ["repositories", "repos"],
     icon: FolderGit2,
@@ -158,7 +158,7 @@ export const APP_DESTINATIONS: AppDestination[] = [
   },
   {
     key: "worktrees",
-    href: "/worktrees",
+    href: "/dashboard/worktrees",
     labelKey: "worktrees",
     aliases: ["branches", "checkouts"],
     icon: GitBranch,
@@ -168,7 +168,7 @@ export const APP_DESTINATIONS: AppDestination[] = [
   },
   {
     key: "changes",
-    href: "/changes",
+    href: "/dashboard/changes",
     labelKey: "changes",
     aliases: ["diffs", "patches", "review", "coverage"],
     icon: GitCompare,
@@ -178,7 +178,7 @@ export const APP_DESTINATIONS: AppDestination[] = [
   },
   {
     key: "builds",
-    href: "/builds",
+    href: "/dashboard/builds",
     labelKey: "builds",
     aliases: ["recent builds", "xcode"],
     icon: Hammer,
@@ -189,7 +189,7 @@ export const APP_DESTINATIONS: AppDestination[] = [
 
   {
     key: "plans",
-    href: "/plans",
+    href: "/ai/plans",
     labelKey: "plans",
     aliases: ["ai plans"],
     icon: ClipboardList,
@@ -198,7 +198,7 @@ export const APP_DESTINATIONS: AppDestination[] = [
   },
   {
     key: "sessions",
-    href: "/sessions",
+    href: "/ai/sessions",
     labelKey: "sessions",
     aliases: ["ai sessions", "chats"],
     icon: MessagesSquare,
@@ -207,17 +207,17 @@ export const APP_DESTINATIONS: AppDestination[] = [
   },
   {
     key: "drafts",
-    href: "/drafts",
+    href: "/ai/drafts",
     labelKey: "drafts",
     aliases: ["new run"],
     icon: FilePenLine,
     section: "ai",
     sidebar: true,
-    activePrefixes: ["/drafts", "/runs/new"],
+    activePrefixes: ["/ai/drafts", "/ai/drafts/new"],
   },
   {
     key: "usage",
-    href: "/usage",
+    href: "/ai/usage",
     labelKey: "usage",
     aliases: ["tokens"],
     icon: ChartNoAxesCombined,
@@ -226,7 +226,7 @@ export const APP_DESTINATIONS: AppDestination[] = [
   },
   {
     key: "costs",
-    href: "/costs",
+    href: "/ai/costs",
     labelKey: "costs",
     aliases: ["spend", "pricing"],
     icon: CircleDollarSign,
@@ -235,7 +235,7 @@ export const APP_DESTINATIONS: AppDestination[] = [
   },
   {
     key: "skills",
-    href: "/skills",
+    href: "/ai/skills",
     labelKey: "skills",
     aliases: ["capabilities"],
     icon: Sparkles,
@@ -245,7 +245,7 @@ export const APP_DESTINATIONS: AppDestination[] = [
 
   {
     key: "sse",
-    href: "/sse",
+    href: "/debugging/sse",
     labelKey: "sseEndpoints",
     aliases: [
       "server sent events",
@@ -256,11 +256,11 @@ export const APP_DESTINATIONS: AppDestination[] = [
     icon: RadioTower,
     section: "debugging",
     sidebar: true,
-    activePrefixes: ["/sse"],
+    activePrefixes: ["/debugging/sse"],
   },
   {
     key: "push-notifications",
-    href: "/push-notifications",
+    href: "/debugging/push-notifications",
     labelKey: "pushNotifications",
     aliases: ["apns"],
     icon: BellRing,
@@ -269,7 +269,7 @@ export const APP_DESTINATIONS: AppDestination[] = [
   },
   {
     key: "console-logs",
-    href: "/console-logs",
+    href: "/debugging/console-logs",
     labelKey: "consoleLogs",
     aliases: ["logs"],
     icon: Terminal,
@@ -278,7 +278,7 @@ export const APP_DESTINATIONS: AppDestination[] = [
   },
   {
     key: "analytics-events",
-    href: "/analytics-events",
+    href: "/debugging/analytics-events",
     labelKey: "analyticsEvents",
     aliases: ["analytics"],
     icon: MousePointerClick,
@@ -287,7 +287,7 @@ export const APP_DESTINATIONS: AppDestination[] = [
   },
   {
     key: "unified-events",
-    href: "/unified-events",
+    href: "/debugging/unified-events",
     labelKey: "unifiedEvents",
     aliases: ["events"],
     icon: Combine,
@@ -296,18 +296,18 @@ export const APP_DESTINATIONS: AppDestination[] = [
   },
   {
     key: "crashes",
-    href: "/crashes",
+    href: "/debugging/crashes",
     labelKey: "crashes",
     aliases: ["crash reports", "dsym", "dsyms", "symbolication", "symbolicate"],
     icon: Bug,
     section: "debugging",
     sidebar: true,
-    activePrefixes: ["/crashes"],
+    activePrefixes: ["/debugging/crashes"],
   },
 
   {
     key: "pull-requests",
-    href: "/pull-requests",
+    href: "/github/pull-requests",
     labelKey: "pullRequests",
     aliases: ["prs", "github prs"],
     icon: GitPullRequest,
@@ -317,7 +317,7 @@ export const APP_DESTINATIONS: AppDestination[] = [
   },
   {
     key: "actions",
-    href: "/actions",
+    href: "/github/actions",
     labelKey: "actions",
     aliases: ["github actions", "ci", "pipelines"],
     icon: PlayCircle,
@@ -327,7 +327,7 @@ export const APP_DESTINATIONS: AppDestination[] = [
   },
   {
     key: "webhooks",
-    href: "/webhooks",
+    href: "/github/webhooks",
     labelKey: "webhooks",
     aliases: ["github webhooks"],
     icon: Webhook,
@@ -337,7 +337,7 @@ export const APP_DESTINATIONS: AppDestination[] = [
   },
   {
     key: "comments",
-    href: "/comments",
+    href: "/github/comments",
     labelKey: "comments",
     aliases: ["reviews", "review threads"],
     icon: MessageSquareText,
@@ -347,7 +347,7 @@ export const APP_DESTINATIONS: AppDestination[] = [
   },
   {
     key: "github-cache",
-    href: "/github-cache",
+    href: "/github/cache",
     labelKey: "cache",
     aliases: ["github cache"],
     icon: Database,
@@ -357,7 +357,7 @@ export const APP_DESTINATIONS: AppDestination[] = [
   },
   {
     key: "actions-cache",
-    href: "/actions-cache",
+    href: "/github/actions-cache",
     labelKey: "actionsCache",
     aliases: ["github actions cache"],
     icon: DatabaseZap,
@@ -409,8 +409,8 @@ export const APP_DESTINATIONS: AppDestination[] = [
   {
     key: "gitlab-cache",
     href: "/gitlab/cache",
-    labelKey: "apiCache",
-    aliases: ["gitlab api cache"],
+    labelKey: "cache",
+    aliases: ["gitlab cache", "gitlab api cache"],
     icon: Database,
     section: "gitlab",
     sidebar: true,
@@ -429,7 +429,7 @@ export const APP_DESTINATIONS: AppDestination[] = [
   },
   {
     key: "jira-webhooks",
-    href: "/jira-webhooks",
+    href: "/jira/webhooks",
     labelKey: "webhooks",
     aliases: ["jira webhooks"],
     icon: Webhook,
@@ -439,7 +439,7 @@ export const APP_DESTINATIONS: AppDestination[] = [
   },
   {
     key: "jira-cache",
-    href: "/jira-cache",
+    href: "/jira/cache",
     labelKey: "cache",
     aliases: ["jira cache"],
     icon: Database,
@@ -449,7 +449,7 @@ export const APP_DESTINATIONS: AppDestination[] = [
 
   {
     key: "status",
-    href: "/status",
+    href: "/system/status",
     labelKey: "status",
     aliases: ["health", "versions", "cli health"],
     icon: Activity,
@@ -458,7 +458,7 @@ export const APP_DESTINATIONS: AppDestination[] = [
   },
   {
     key: "prepare",
-    href: "/prepare",
+    href: "/system/prepare",
     labelKey: "prepare",
     aliases: ["preparations", "worktree preparations"],
     icon: Sparkles,
@@ -467,7 +467,7 @@ export const APP_DESTINATIONS: AppDestination[] = [
   },
   {
     key: "polling",
-    href: "/polling",
+    href: "/system/polling",
     labelKey: "polling",
     aliases: ["pollers"],
     icon: TimerReset,
@@ -476,7 +476,7 @@ export const APP_DESTINATIONS: AppDestination[] = [
   },
   {
     key: "build-data",
-    href: "/build-data",
+    href: "/system/build-data",
     labelKey: "buildData",
     aliases: ["derived data", "storage"],
     icon: HardDrive,
@@ -485,7 +485,7 @@ export const APP_DESTINATIONS: AppDestination[] = [
   },
   {
     key: "tailscale",
-    href: "/tailscale",
+    href: "/system/tailscale",
     labelKey: "tailscale",
     aliases: ["tailscale serve", "funnel", "port forwarding", "tailnet"],
     icon: Network,
@@ -494,7 +494,7 @@ export const APP_DESTINATIONS: AppDestination[] = [
   },
   {
     key: "provisioning-profiles",
-    href: "/provisioning-profiles",
+    href: "/system/provisioning-profiles",
     labelKey: "provisioningProfiles",
     aliases: ["profiles", "signing"],
     icon: ShieldCheck,
@@ -503,7 +503,7 @@ export const APP_DESTINATIONS: AppDestination[] = [
   },
   {
     key: "devices",
-    href: "/devices",
+    href: "/system/devices",
     labelKey: "devices",
     aliases: ["ios devices"],
     icon: Smartphone,
@@ -512,7 +512,7 @@ export const APP_DESTINATIONS: AppDestination[] = [
   },
   {
     key: "users",
-    href: "/users",
+    href: "/system/users",
     labelKey: "users",
     aliases: ["accounts", "authentication"],
     icon: UsersRound,
@@ -521,7 +521,7 @@ export const APP_DESTINATIONS: AppDestination[] = [
   },
   {
     key: "api-keys",
-    href: "/api-keys",
+    href: "/system/api-keys",
     labelKey: "apiKeys",
     aliases: ["tokens", "mcp authentication"],
     icon: KeyRound,
@@ -530,7 +530,7 @@ export const APP_DESTINATIONS: AppDestination[] = [
   },
   {
     key: "tools",
-    href: "/tools",
+    href: "/system/tools",
     labelKey: "tools",
     aliases: ["mcp tools"],
     icon: Wrench,
@@ -539,7 +539,7 @@ export const APP_DESTINATIONS: AppDestination[] = [
   },
   {
     key: "credentials",
-    href: "/credentials",
+    href: "/system/credentials",
     labelKey: "credentials",
     aliases: ["secrets", "tokens"],
     icon: KeyRound,
@@ -548,7 +548,7 @@ export const APP_DESTINATIONS: AppDestination[] = [
   },
   {
     key: "settings",
-    href: "/settings",
+    href: "/system/settings",
     labelKey: "settings",
     aliases: ["configuration"],
     icon: Settings,
@@ -558,7 +558,7 @@ export const APP_DESTINATIONS: AppDestination[] = [
 
   {
     key: "new-workflow",
-    href: "/workflows/new",
+    href: "/dashboard/workflows/new",
     labelKey: "newWorkflow",
     aliases: ["create workflow", "automation"],
     icon: Plus,
@@ -567,7 +567,7 @@ export const APP_DESTINATIONS: AppDestination[] = [
   },
   {
     key: "new-command",
-    href: "/commands/new",
+    href: "/dashboard/commands/new",
     labelKey: "newCommand",
     aliases: ["create command", "script"],
     icon: Plus,
@@ -576,7 +576,7 @@ export const APP_DESTINATIONS: AppDestination[] = [
   },
   {
     key: "new-run",
-    href: "/runs/new",
+    href: "/ai/drafts/new",
     labelKey: "newRun",
     aliases: ["start run", "draft"],
     icon: PlayCircle,
@@ -585,7 +585,7 @@ export const APP_DESTINATIONS: AppDestination[] = [
   },
   {
     key: "enroll-device",
-    href: "/devices/enroll",
+    href: "/system/devices/enroll",
     labelKey: "enrollDevice",
     aliases: ["add device", "register device"],
     icon: UserPlus,
@@ -594,7 +594,7 @@ export const APP_DESTINATIONS: AppDestination[] = [
   },
   {
     key: "skill-groups",
-    href: "/skills/groups",
+    href: "/ai/skills/groups",
     labelKey: "skillGroups",
     aliases: ["groups"],
     icon: Sparkles,

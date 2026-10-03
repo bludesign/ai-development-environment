@@ -129,7 +129,7 @@ export function CrashUploadDialog({
                       {result.crashIds?.map((id, position) => (
                         <Link
                           className="mr-2 underline"
-                          href={`/crashes/${encodeURIComponent(id)}`}
+                          href={`/debugging/crashes/${encodeURIComponent(id)}`}
                           key={id}
                           onClick={() => onOpenChange(false)}
                         >

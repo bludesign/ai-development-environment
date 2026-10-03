@@ -134,7 +134,7 @@ const runResult = (
             kind: "AGENT_RUN",
             resourceId: run.id,
             label: typeof run.kind === "string" ? run.kind : "Agent run",
-            url: `/${run.kind === "PLAN" ? "plans" : "sessions"}/${run.id}`,
+            url: `/ai/${run.kind === "PLAN" ? "plans" : "sessions"}/${run.id}`,
             metadata: { runKind: run.kind },
           },
         ]
@@ -164,7 +164,7 @@ const jobResult = (
       kind: "AGENT_JOB",
       resourceId: job.id,
       label: "Agent job",
-      url: `/jobs/${job.id}`,
+      url: `/dashboard/jobs/${job.id}`,
     },
   ],
   wait: {
@@ -254,7 +254,7 @@ function contextualAgentRunLink(
     "AGENT_RUN",
     id,
     kind,
-    `/${kind === "PLAN" ? "plans" : "sessions"}/${id}`,
+    `/ai/${kind === "PLAN" ? "plans" : "sessions"}/${id}`,
     { runKind: kind },
   );
 }
@@ -832,7 +832,7 @@ function registerExpansionAdapters(
           kind: "TAILSCALE_SERVE_OPERATION",
           resourceId: text(operation.id, "Tailscale operation ID", 500),
           label: "Tailscale Serve",
-          url: "/tailscale",
+          url: "/system/tailscale",
         },
       ],
     };
@@ -2806,7 +2806,7 @@ function registerBuildAdapters(
           kind: "BUILD",
           resourceId: build.id,
           label: `${build.action} build`,
-          url: `/builds/${build.id}`,
+          url: `/dashboard/builds/${build.id}`,
         },
       ],
       wait: {
@@ -2858,7 +2858,7 @@ function registerBuildAdapters(
           changedCoverageFiles: data.changedFiles ?? [],
         },
       },
-      links: [buildLink(id, `/builds/${id}/coverage`)],
+      links: [buildLink(id, `/dashboard/builds/${id}/coverage`)],
     };
   });
   executor.register("BUILD_IMPORT_COVERAGE", async (context) => {
@@ -2882,7 +2882,7 @@ function registerBuildAdapters(
     });
     const links = [
       worktreeLink(worktree),
-      buildLink(build.id, `/builds/${build.id}`),
+      buildLink(build.id, `/dashboard/builds/${build.id}`),
     ];
     // The build exists either way; without a job the import already ran, so the
     // step has nothing left to wait on.
@@ -2968,7 +2968,7 @@ function registerDiskSpaceAdapters(
           "AGENT",
           agentId,
           snapshot.agent.name,
-          `/agents/${encodeURIComponent(agentId)}`,
+          `/dashboard/agents/${encodeURIComponent(agentId)}`,
         ),
       ],
     };
@@ -2987,7 +2987,7 @@ function registerDiskSpaceAdapters(
           "AGENT",
           agentId,
           "Agent",
-          `/agents/${encodeURIComponent(agentId)}`,
+          `/dashboard/agents/${encodeURIComponent(agentId)}`,
         ),
       ],
       wait: {
@@ -3341,7 +3341,7 @@ function registerMiscellaneousAdapters(
           kind: "COMMAND_RUN",
           resourceId: run.id,
           label: `Command #${run.displayNumber}`,
-          url: `/commands/runs/${run.id}`,
+          url: `/dashboard/commands/runs/${run.id}`,
         },
       ],
       wait:
@@ -3450,7 +3450,7 @@ function registerMiscellaneousAdapters(
           kind: "COMMAND_RUN",
           resourceId: run.id,
           label: `Command #${run.displayNumber}`,
-          url: `/commands/runs/${run.id}`,
+          url: `/dashboard/commands/runs/${run.id}`,
         },
       ],
       wait:
@@ -3493,7 +3493,7 @@ function registerMiscellaneousAdapters(
           kind: "SKILL_RUN",
           resourceId: run.id,
           label: "Skill sync",
-          url: `/skills/sync/${run.id}`,
+          url: `/ai/skills/sync/${run.id}`,
         },
       ],
       wait: {
@@ -3515,7 +3515,7 @@ function registerMiscellaneousAdapters(
         href:
           typeof context.node.config.href === "string"
             ? context.node.config.href
-            : `/workflows/runs/${context.run.id}`,
+            : `/dashboard/workflows/runs/${context.run.id}`,
         resourceKind: "WORKFLOW_RUN",
         resourceId: context.run.id,
         worktreeId:

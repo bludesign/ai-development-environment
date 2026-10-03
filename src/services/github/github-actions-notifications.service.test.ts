@@ -568,7 +568,7 @@ describe("GitHub Actions webhook notifications", () => {
       expect.anything(),
       expect.objectContaining({
         typeKey,
-        href: "/actions?repository=repository-1&branch=feature%2FAPP-42&pipeline=202",
+        href: "/github/actions?repository=repository-1&branch=feature%2FAPP-42&pipeline=202",
         worktreeId: "worktree-1",
         highlightColor: "blue",
       }),

@@ -22,7 +22,7 @@ describe("workflow resource navigation", () => {
         url: "https://github.com/openai/codex/pull/17",
       }),
     ).toEqual({
-      href: "/pull-requests/open%20ai/codex%20app/17",
+      href: "/github/pull-requests/open%20ai/codex%20app/17",
       external: false,
     });
   });
@@ -32,9 +32,9 @@ describe("workflow resource navigation", () => {
       workflowResourceDestination({
         kind: "BUILD",
         resourceId: "build-1",
-        url: "/builds/build-1/coverage",
+        url: "/dashboard/builds/build-1/coverage",
       }),
-    ).toEqual({ href: "/builds/build-1/coverage", external: false });
+    ).toEqual({ href: "/dashboard/builds/build-1/coverage", external: false });
     expect(
       workflowResourceDestination({
         kind: "GITHUB_WORKFLOW_RUN",
@@ -60,7 +60,7 @@ describe("workflow resource navigation", () => {
         { kind: "AGENT_JOB", resourceId: "job-1" },
         { kind: "WORKTREE", resourceId: "worktree-1" },
       ]),
-    ).toEqual({ href: "/worktrees/worktree-1", external: false });
+    ).toEqual({ href: "/dashboard/worktrees/worktree-1", external: false });
   });
 
   test("prefers a created build over its supporting worktree", () => {
@@ -69,7 +69,7 @@ describe("workflow resource navigation", () => {
         { kind: "BUILD", resourceId: "build-1" },
         { kind: "WORKTREE", resourceId: "worktree-1" },
       ]),
-    ).toEqual({ href: "/builds/build-1", external: false });
+    ).toEqual({ href: "/dashboard/builds/build-1", external: false });
   });
 
   test("maps trigger payloads to their primary resources", () => {

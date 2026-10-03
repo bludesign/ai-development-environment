@@ -1645,7 +1645,7 @@ describe("command reconciliation", () => {
           typeKey,
           title,
           body: status === "FAILED" ? "main · Command failed" : "main",
-          href: "/commands/runs/run-1",
+          href: "/dashboard/commands/runs/run-1",
           resourceKind: "COMMAND_RUN",
           resourceId: "run-1",
           worktreeId: "worktree-1",

@@ -147,7 +147,7 @@ export function AppsPage() {
                  footer button inside it keep their own behaviour. */
               onClick={(event) => {
                 if (!isRowActivation(event)) return;
-                router.push(`/apps/${app.id}`);
+                router.push(`/dashboard/apps/${app.id}`);
               }}
             >
               <CardHeader>
@@ -203,7 +203,7 @@ export function AppsPage() {
               </CardContent>
               <CardFooter className="mt-auto justify-end">
                 <Button asChild>
-                  <Link href={`/apps/${app.id}`}>{t("openApp")}</Link>
+                  <Link href={`/dashboard/apps/${app.id}`}>{t("openApp")}</Link>
                 </Button>
               </CardFooter>
             </Card>
@@ -246,7 +246,7 @@ function AppListCount({
           ? "bg-destructive/10 text-destructive hover:bg-destructive/15"
           : "bg-muted/50 hover:bg-muted",
       )}
-      href={`/apps/${appId}?view=${view}`}
+      href={`/dashboard/apps/${appId}?view=${view}`}
     >
       <div className="text-lg font-semibold tabular-nums">{value}</div>
       <div

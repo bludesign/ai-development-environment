@@ -365,7 +365,7 @@ export function SseEndpointEditorPage({
           }`,
           { input: inputFor(draft) },
         );
-        router.replace(`/sse/${data.createSseEndpoint.id}`);
+        router.replace(`/debugging/sse/${data.createSseEndpoint.id}`);
       } else {
         const data = await controlPlaneRequest<{
           updateSseEndpoint: SseEndpoint;
@@ -451,7 +451,7 @@ export function SseEndpointEditorPage({
       action={
         <div className="flex gap-2">
           <Button asChild variant="outline">
-            <Link href="/sse">
+            <Link href="/debugging/sse">
               <ArrowLeft /> Endpoints
             </Link>
           </Button>
@@ -2410,7 +2410,7 @@ function EndpointHistory({ endpointId }: { endpointId: string }) {
         </CardDescription>
         <CardAction>
           <Button asChild variant="outline">
-            <Link href={`/sse/history?endpointId=${endpointId}`}>
+            <Link href={`/debugging/sse/history?endpointId=${endpointId}`}>
               <History /> Open full history
             </Link>
           </Button>

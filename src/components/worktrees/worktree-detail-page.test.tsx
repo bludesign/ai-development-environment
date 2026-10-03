@@ -295,7 +295,7 @@ describe("WorktreeDetailPage", () => {
   beforeEach(() => {
     global.ResizeObserver = ResizeObserverMock;
     Element.prototype.scrollIntoView = vi.fn();
-    window.history.replaceState(null, "", "/worktrees/worktree-1");
+    window.history.replaceState(null, "", "/dashboard/worktrees/worktree-1");
     navigation.push.mockReset();
     subscriptions.mockReturnValue({ subscribe: vi.fn(() => vi.fn()) } as never);
   });
@@ -458,7 +458,7 @@ describe("WorktreeDetailPage", () => {
     expect(summary.className).toContain("border-l-blue-500");
     expect(
       screen.getByRole("link", { name: "Codex" }).getAttribute("href"),
-    ).toBe("/codebases/codebase-1");
+    ).toBe("/dashboard/codebases/codebase-1");
     expect(screen.getByText("Studio Mac · studio.local")).toBeDefined();
     expect(screen.getByText("/workspaces/repo-aide-43")).toBeDefined();
     expect(screen.getByText("1234567890abcdef")).toBeDefined();
@@ -471,7 +471,9 @@ describe("WorktreeDetailPage", () => {
     const viewLatestBuild = await screen.findByRole("menuitem", {
       name: "View build",
     });
-    expect(viewLatestBuild.getAttribute("href")).toBe("/builds/build-1");
+    expect(viewLatestBuild.getAttribute("href")).toBe(
+      "/dashboard/builds/build-1",
+    );
     fireEvent.keyDown(viewLatestBuild, { key: "Escape" });
     expect(screen.getAllByText("Succeeded")).toHaveLength(2);
     const buildsCard = screen
@@ -504,7 +506,7 @@ describe("WorktreeDetailPage", () => {
       within(queueCard!)
         .getByRole("link", { name: "Workflow #4" })
         .getAttribute("href"),
-    ).toBe("/workflows/runs/workflow-run-4");
+    ).toBe("/dashboard/workflows/runs/workflow-run-4");
     expect(within(queueCard!).getByText("#1")).toBeDefined();
     expect(within(queueCard!).getByText("Exclusive")).toBeDefined();
     const changeRow = screen.getByRole("button", {
@@ -561,12 +563,12 @@ describe("WorktreeDetailPage", () => {
       (
         await screen.findByRole("menuitem", { name: "View codebase" })
       ).getAttribute("href"),
-    ).toBe("/codebases/codebase-1");
+    ).toBe("/dashboard/codebases/codebase-1");
     expect(
       screen
         .getByRole("menuitem", { name: "View repository" })
         .getAttribute("href"),
-    ).toBe("/codebases/repositories/repository-1");
+    ).toBe("/dashboard/codebases/repositories/repository-1");
   });
 
   test("shows GitLab pipelines as a dedicated detail card", async () => {
@@ -1053,7 +1055,7 @@ describe("WorktreeDetailPage", () => {
     );
 
     await waitFor(() =>
-      expect(navigation.push).toHaveBeenCalledWith("/worktrees"),
+      expect(navigation.push).toHaveBeenCalledWith("/dashboard/worktrees"),
     );
   });
 
@@ -1109,7 +1111,9 @@ describe("WorktreeDetailPage", () => {
     );
 
     await waitFor(() =>
-      expect(navigation.push).toHaveBeenCalledWith("/worktrees/worktree-2"),
+      expect(navigation.push).toHaveBeenCalledWith(
+        "/dashboard/worktrees/worktree-2",
+      ),
     );
   });
 

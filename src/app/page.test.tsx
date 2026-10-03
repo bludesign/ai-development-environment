@@ -1,7 +1,7 @@
 import { cleanup, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 
-import Home from "@/app/[locale]/(dashboard)/page";
+import Home from "@/app/[locale]/(dashboard)/dashboard/action-center/page";
 import { ActionCenterProvider } from "@/components/action-center/action-center-provider";
 import {
   controlPlaneRequest,
@@ -36,7 +36,7 @@ beforeEach(() => {
 
 afterEach(cleanup);
 
-test("renders the Action Center at the root route", async () => {
+test("renders the Action Center at its Dashboard route", async () => {
   render(
     <ActionCenterProvider>
       <Home />

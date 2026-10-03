@@ -299,10 +299,10 @@ describe("WorkflowsPage", () => {
       (
         await screen.findByRole("link", { name: "feature/AIDE-505" })
       ).getAttribute("href"),
-    ).toBe("/worktrees/worktree-1");
+    ).toBe("/dashboard/worktrees/worktree-1");
     expect(
       screen.getByRole("link", { name: "Studio Mac" }).getAttribute("href"),
-    ).toBe("/agents/agent-1");
+    ).toBe("/dashboard/agents/agent-1");
     expect(screen.queryByRole("columnheader", { name: "Generation" })).toBe(
       null,
     );

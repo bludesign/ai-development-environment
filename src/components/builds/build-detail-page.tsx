@@ -542,7 +542,7 @@ export function BuildDetailPage({
         `mutation DeleteBuild($ids: [ID!]!) { deleteBuilds(ids: $ids) }`,
         { ids: [buildId] },
       );
-      router.replace("/builds");
+      router.replace("/dashboard/builds");
     } catch (value) {
       setError(value instanceof Error ? value.message : String(value));
       setDeleteOpen(false);
@@ -659,7 +659,7 @@ export function BuildDetailPage({
           <EmptyDescription>{t("buildNotFoundDescription")}</EmptyDescription>
         </EmptyHeader>
         <Button asChild variant="outline">
-          <Link href="/builds">
+          <Link href="/dashboard/builds">
             <ArrowLeft /> {t("backToBuilds")}
           </Link>
         </Button>
@@ -680,7 +680,7 @@ export function BuildDetailPage({
             {t("rebuildStarted")}
             <Link
               className="font-medium underline underline-offset-4"
-              href={`/builds/${rebuiltBuildId}`}
+              href={`/dashboard/builds/${rebuiltBuildId}`}
             >
               {t("viewBuild")}
             </Link>
@@ -812,7 +812,7 @@ export function BuildDetailPage({
             )}
           {coverageReport?.status === "READY" && (
             <Button asChild variant="outline">
-              <Link href={`/builds/${build.id}/coverage`}>
+              <Link href={`/dashboard/builds/${build.id}/coverage`}>
                 <ChartNoAxesColumn /> {t("viewCoverageReport")}
               </Link>
             </Button>
@@ -865,7 +865,7 @@ export function BuildDetailPage({
             onOpenChange={setLogsOpen}
             open={logsOpen}
             previousMatchLabel={t("previousTerminalMatch")}
-            rawOutputHref={`/${locale}/builds/${encodeURIComponent(buildId)}/output`}
+            rawOutputHref={`/${locale}/dashboard/builds/${encodeURIComponent(buildId)}/output`}
             rawOutputLabel={t("viewRawOutput")}
             searchLabel={t("searchTerminal")}
             sourceKey={buildId}
@@ -1017,7 +1017,7 @@ export function BuildDetailPage({
                           </span>
                           <Button asChild size="sm" variant="ghost">
                             <Link
-                              href={`/crashes/dsyms?buildId=${encodeURIComponent(build.id)}`}
+                              href={`/debugging/crashes/dsyms?buildId=${encodeURIComponent(build.id)}`}
                             >
                               {t("viewDsyms")}
                             </Link>

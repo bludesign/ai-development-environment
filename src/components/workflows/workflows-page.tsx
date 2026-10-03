@@ -332,7 +332,7 @@ export function WorkflowsPage() {
           `mutation TriggerWorkflow($input: TriggerWorkflowInput!) { triggerWorkflow(input: $input) { id } }`,
           { input: { workflowId: workflow.id, sessionData: {}, choice } },
         );
-        router.push(`/workflows/runs/${data.triggerWorkflow.id}`);
+        router.push(`/dashboard/workflows/runs/${data.triggerWorkflow.id}`);
       }
       await refresh();
     } catch (value) {
@@ -365,7 +365,7 @@ export function WorkflowsPage() {
     }
     setError(failures.length ? failures.join("\n") : null);
     if (files.length === 1 && imported.length === 1) {
-      router.push(`/workflows/${imported[0]}/edit`);
+      router.push(`/dashboard/workflows/${imported[0]}/edit`);
       return;
     }
     if (imported.length) {
@@ -444,7 +444,7 @@ export function WorkflowsPage() {
             <FileUp /> {t("import")}
           </Button>
           <Button asChild>
-            <Link href="/workflows/new">
+            <Link href="/dashboard/workflows/new">
               <Plus /> {t("newWorkflow")}
             </Link>
           </Button>
@@ -635,7 +635,7 @@ export function WorkflowsPage() {
                 onClick={(event) => {
                   if (!isRowActivation(event)) return;
                   if (editMode) toggleSelected(workflow.id);
-                  else router.push(`/workflows/${workflow.id}`);
+                  else router.push(`/dashboard/workflows/${workflow.id}`);
                 }}
               >
                 {/* `CardAction` parks the menu in the header's own top-right
@@ -658,7 +658,7 @@ export function WorkflowsPage() {
                         and middle-click users can still reach the workflow. */}
                     <Link
                       className="truncate"
-                      href={`/workflows/${workflow.id}`}
+                      href={`/dashboard/workflows/${workflow.id}`}
                     >
                       {workflow.name}
                     </Link>
@@ -684,7 +684,9 @@ export function WorkflowsPage() {
                       </Tooltip>
                       <DropdownMenuContent align="end">
                         <DropdownMenuItem asChild>
-                          <Link href={`/workflows/${workflow.id}/edit`}>
+                          <Link
+                            href={`/dashboard/workflows/${workflow.id}/edit`}
+                          >
                             <Pencil /> {t("edit")}
                           </Link>
                         </DropdownMenuItem>
@@ -749,7 +751,7 @@ export function WorkflowsPage() {
                   </div>
                   <div className="flex gap-2">
                     <Button asChild className="flex-1" variant="outline">
-                      <Link href={`/workflows/${workflow.id}/edit`}>
+                      <Link href={`/dashboard/workflows/${workflow.id}/edit`}>
                         <GitFork /> {t("edit")}
                       </Link>
                     </Button>
@@ -866,7 +868,8 @@ export function WorkflowsPage() {
                         onClick={(event) => {
                           if (!isRowActivation(event)) return;
                           if (editMode) toggleSelected(run.id);
-                          else router.push(`/workflows/runs/${run.id}`);
+                          else
+                            router.push(`/dashboard/workflows/runs/${run.id}`);
                         }}
                       >
                         {editMode && (
@@ -893,7 +896,7 @@ export function WorkflowsPage() {
                               rowLinkClass,
                               "inline-block font-mono font-medium",
                             )}
-                            href={`/workflows/runs/${run.id}`}
+                            href={`/dashboard/workflows/runs/${run.id}`}
                           >
                             #{run.displayNumber}
                           </Link>
@@ -904,7 +907,7 @@ export function WorkflowsPage() {
                               rowLinkClass,
                               "block min-w-0 truncate",
                             )}
-                            href={`/workflows/${run.workflow.id}`}
+                            href={`/dashboard/workflows/${run.workflow.id}`}
                             title={run.workflow.name}
                           >
                             {run.workflow.name}
@@ -933,7 +936,7 @@ export function WorkflowsPage() {
                                 rowLinkClass,
                                 "block min-w-0 truncate",
                               )}
-                              href={`/agents/${run.agent.id}`}
+                              href={`/dashboard/agents/${run.agent.id}`}
                               title={run.agent.name}
                             >
                               {run.agent.name}
@@ -949,7 +952,7 @@ export function WorkflowsPage() {
                                 rowLinkClass,
                                 "block min-w-0 truncate",
                               )}
-                              href={`/worktrees/${run.worktree.id}`}
+                              href={`/dashboard/worktrees/${run.worktree.id}`}
                               title={run.worktree.folder}
                             >
                               {run.worktree.branch ?? run.worktree.folder}

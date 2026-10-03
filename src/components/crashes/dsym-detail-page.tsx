@@ -208,7 +208,7 @@ export function DsymDetailPage({ dsymId }: { dsymId: string }) {
   async function remove() {
     try {
       await controlPlaneRequest(DELETE_DSYMS_MUTATION, { ids: [dsymId] });
-      router.push("/crashes/dsyms");
+      router.push("/debugging/crashes/dsyms");
     } catch (value) {
       setError(value instanceof Error ? value.message : String(value));
     }

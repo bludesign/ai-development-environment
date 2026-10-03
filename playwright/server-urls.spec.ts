@@ -10,7 +10,7 @@ test.beforeEach(async ({ page }) => {
 test("SSE columns follow content width and URL rows stay inside their cards", async ({
   page,
 }) => {
-  await page.goto("/en/sse");
+  await page.goto("/en/debugging/sse");
   const grid = page.getByTestId("sse-endpoint-grid");
   await expect(grid).toBeVisible();
   await expect(grid.getByText("Proxy endpoint URL").first()).toBeVisible();
@@ -44,7 +44,7 @@ test("SSE columns follow content width and URL rows stay inside their cards", as
 test("the two-line server selector supports keyboard choices", async ({
   page,
 }) => {
-  await page.goto("/en/settings");
+  await page.goto("/en/system/settings");
   const selector = page.locator("#server-default");
   await expect(selector).toContainText("Local");
   await expect(selector).toContainText("http://");

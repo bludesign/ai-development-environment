@@ -143,7 +143,7 @@ type ProviderCatalog = ProviderCatalogEntry & {
 
 function LinkedRun({ value }: { value: RunLinkView }) {
   const labels = useRunLabels();
-  const href = `/${value.kind === "PLAN" ? "plans" : "sessions"}/${value.id}`;
+  const href = `/ai/${value.kind === "PLAN" ? "plans" : "sessions"}/${value.id}`;
   return (
     <Link
       className="flex items-center gap-2 rounded-lg border p-3 hover:bg-muted/50"
@@ -296,7 +296,7 @@ function QuestionBatch({
       );
       setEditOpen(false);
       router.push(
-        `/${data.reviseRunAnswer.kind === "PLAN" ? "plans" : "sessions"}/${data.reviseRunAnswer.id}`,
+        `/ai/${data.reviseRunAnswer.kind === "PLAN" ? "plans" : "sessions"}/${data.reviseRunAnswer.id}`,
       );
     } catch (value) {
       setError(value instanceof Error ? value.message : String(value));
@@ -1032,7 +1032,7 @@ export function RunDetailPage({
         },
       );
       router.push(
-        `/${data.createRunFollowUp.kind === "PLAN" ? "plans" : "sessions"}/${data.createRunFollowUp.id}`,
+        `/ai/${data.createRunFollowUp.kind === "PLAN" ? "plans" : "sessions"}/${data.createRunFollowUp.id}`,
       );
     } catch (value) {
       setError(value instanceof Error ? value.message : String(value));
@@ -1048,7 +1048,7 @@ export function RunDetailPage({
         "mutation DeleteRun($id: ID!) { deleteAgentRuns(ids: [$id]) }",
         { id: runId },
       );
-      router.push(run?.kind === "PLAN" ? "/plans" : "/sessions");
+      router.push(run?.kind === "PLAN" ? "/ai/plans" : "/ai/sessions");
     } catch (value) {
       setError(value instanceof Error ? value.message : String(value));
     }

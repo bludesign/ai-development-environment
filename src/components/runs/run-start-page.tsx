@@ -446,7 +446,7 @@ export function RunStartPage({
         `mutation SaveRunDraft($input: SaveRunDraftInput!) { saveRunDraft(input: $input) { id } }`,
         { input: { ...configuration(), id: draftId ?? null } },
       );
-      router.push("/drafts");
+      router.push("/ai/drafts");
     } catch (value) {
       setError(value instanceof Error ? value.message : String(value));
     } finally {
@@ -464,7 +464,7 @@ export function RunStartPage({
         { input: { ...configuration(), draftId: draftId ?? null } },
       );
       router.push(
-        `/${data.createAgentRun.kind === "PLAN" ? "plans" : "sessions"}/${data.createAgentRun.id}`,
+        `/ai/${data.createAgentRun.kind === "PLAN" ? "plans" : "sessions"}/${data.createAgentRun.id}`,
       );
     } catch (value) {
       setError(value instanceof Error ? value.message : String(value));

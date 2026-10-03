@@ -55,7 +55,7 @@ function notification(overrides: Record<string, unknown> = {}) {
     typeKey: "RUN_COMPLETED",
     title: "Plan or session completed",
     body: "Session #923 completed",
-    href: "/runs/run-1",
+    href: "/ai/drafts/run-1",
     resourceKind: "RUN",
     resourceId: "run-1",
     worktreeId: null,
@@ -145,7 +145,7 @@ describe("APNs notification delivery", () => {
             body: "Session #923 completed",
           },
         }),
-        href: "/runs/run-1",
+        href: "/ai/drafts/run-1",
       }),
     });
     expect(updateMany).toHaveBeenCalledWith(

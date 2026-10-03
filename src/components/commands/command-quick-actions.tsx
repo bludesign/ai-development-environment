@@ -161,7 +161,7 @@ export function CommandQuickActions({
                           {t("restartRun")}
                         </DropdownMenuItem>
                         <DropdownMenuItem asChild>
-                          <Link href={`/commands/runs/${run.id}`}>
+                          <Link href={`/dashboard/commands/runs/${run.id}`}>
                             <ExternalLink />
                             {t("view")}
                           </Link>
@@ -236,7 +236,7 @@ export function CommandQuickActions({
 export function CommandRunLink({ id, label }: { id: string; label: string }) {
   return (
     <Button asChild size="sm" variant="ghost">
-      <Link href={`/commands/runs/${id}`}>
+      <Link href={`/dashboard/commands/runs/${id}`}>
         {label}
         <ExternalLink />
       </Link>

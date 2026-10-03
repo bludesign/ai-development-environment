@@ -393,7 +393,7 @@ export function RunsPage({
     });
 
   const title = kind === "PLAN" ? t("plans") : t("sessions");
-  const detailBase = kind === "PLAN" ? "/plans" : "/sessions";
+  const detailBase = kind === "PLAN" ? "/ai/plans" : "/ai/sessions";
   /** Sessions carry a source-plan column that Plans do not. */
   const session = kind === "SESSION";
   const toggleSelected = (id: string) =>
@@ -427,7 +427,7 @@ export function RunsPage({
           </Button>
           <Button asChild>
             <Link
-              href={`/runs/new?kind=${kind.toLowerCase()}${appId ? `&app=${encodeURIComponent(appId)}` : ""}`}
+              href={`/ai/drafts/new?kind=${kind.toLowerCase()}${appId ? `&app=${encodeURIComponent(appId)}` : ""}`}
             >
               <Plus />{" "}
               {t("newRun", {
@@ -739,7 +739,7 @@ export function RunsPage({
                           {run.worktree ? (
                             <Link
                               className={cn(rowLinkClass, "block min-w-0")}
-                              href={`/worktrees/${run.worktree.id}`}
+                              href={`/dashboard/worktrees/${run.worktree.id}`}
                               title={run.worktree.folder}
                             >
                               <span className="block truncate">
@@ -792,7 +792,7 @@ export function RunsPage({
                                   rowLinkClass,
                                   "inline-block font-mono",
                                 )}
-                                href={`/plans/${run.sourcePlan.id}`}
+                                href={`/ai/plans/${run.sourcePlan.id}`}
                               >
                                 #{run.sourcePlan.displayNumber}
                               </Link>

@@ -250,7 +250,7 @@ export function SkillsPage() {
       const data = await controlPlaneRequest<{
         prepareSkillSync: SkillSyncRun;
       }>(`mutation PrepareSkillSync { prepareSkillSync(kind: ALL) { id } }`);
-      router.push(`/skills/sync/${data.prepareSkillSync.id}`);
+      router.push(`/ai/skills/sync/${data.prepareSkillSync.id}`);
     } catch (value) {
       setError(value instanceof Error ? value.message : String(value));
     } finally {
@@ -269,7 +269,7 @@ export function SkillsPage() {
         </div>
         <div className="flex flex-wrap gap-2">
           <Button asChild variant="outline">
-            <Link href="/skills/groups">
+            <Link href="/ai/skills/groups">
               <FolderTree /> {t("manageGroups")}
             </Link>
           </Button>
@@ -277,7 +277,7 @@ export function SkillsPage() {
             <Settings /> {t("settings")}
           </Button>
           <Button asChild variant="outline">
-            <Link href="/skills/new">
+            <Link href="/ai/skills/new">
               <Plus /> {t("addSkill")}
             </Link>
           </Button>
@@ -395,7 +395,7 @@ function DatabaseTable({ overview }: { overview: SkillsOverview }) {
                 <TableCell>
                   <Link
                     className="font-medium text-primary hover:underline"
-                    href={`/skills/${skill.id}`}
+                    href={`/ai/skills/${skill.id}`}
                   >
                     {skill.name}
                   </Link>

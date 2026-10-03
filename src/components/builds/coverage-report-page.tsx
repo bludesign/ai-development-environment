@@ -232,7 +232,7 @@ export function CoverageReportPage({ buildId }: { buildId: string }) {
           </EmptyDescription>
         </EmptyHeader>
         <Button asChild variant="outline">
-          <Link href={`/builds/${buildId}`}>
+          <Link href={`/dashboard/builds/${buildId}`}>
             <ArrowLeft /> {t("backToBuild")}
           </Link>
         </Button>
@@ -262,7 +262,7 @@ export function CoverageReportPage({ buildId }: { buildId: string }) {
         {worktreeId && (
           <Button asChild variant="outline">
             <Link
-              href={`/changes?worktree=${encodeURIComponent(worktreeId)}&scope=BRANCH&coverage=${encodeURIComponent(report.id)}`}
+              href={`/dashboard/changes?worktree=${encodeURIComponent(worktreeId)}&scope=BRANCH&coverage=${encodeURIComponent(report.id)}`}
             >
               <GitCompare /> {t("viewChangesWithCoverage")}
             </Link>

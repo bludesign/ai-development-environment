@@ -73,7 +73,7 @@ export function GitHubCacheEntryDetailPage({ id }: { id: string }) {
         "mutation DeleteGitHubCachedEntry($id: ID!) { deleteGitHubCachedEntry(id: $id) }",
         { id },
       );
-      router.replace("/github-cache");
+      router.replace("/github/cache");
     } catch (value) {
       setError(value instanceof Error ? value.message : String(value));
       setBusy(false);

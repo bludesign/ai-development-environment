@@ -151,7 +151,7 @@ describe("DevicesPage", () => {
     render(<DevicesPage />);
 
     const link = await screen.findByRole("link", { name: "Test iPhone" });
-    expect(link.getAttribute("href")).toBe("/devices/device-1");
+    expect(link.getAttribute("href")).toBe("/system/devices/device-1");
     expect(screen.getByText("0000••••002E")).toBeDefined();
     expect(screen.queryByText(udid)).toBeNull();
     expect(
@@ -166,7 +166,7 @@ describe("DevicesPage", () => {
     fireEvent.keyDown(row, { key: "Enter" });
     fireEvent.keyDown(row, { key: " " });
     expect(navigation.push).toHaveBeenCalledTimes(3);
-    expect(navigation.push).toHaveBeenCalledWith("/devices/device-1");
+    expect(navigation.push).toHaveBeenCalledWith("/system/devices/device-1");
     expect(
       screen.getByRole("columnheader", { name: "Enrolled" }),
     ).toBeDefined();

@@ -422,7 +422,7 @@ export function registerWorktreesPageTests(
   describe("WorktreesPage", () => {
     beforeEach(() => {
       global.ResizeObserver = ResizeObserverMock;
-      window.history.replaceState(null, "", "/worktrees");
+      window.history.replaceState(null, "", "/dashboard/worktrees");
       window.localStorage.clear();
       navigation.push.mockReset();
       Element.prototype.scrollIntoView = vi.fn();
@@ -800,7 +800,7 @@ export function registerWorktreesPageTests(
           (
             await screen.findByRole("menuitem", { name: "View build" })
           ).getAttribute("href"),
-        ).toBe("/builds/build-1");
+        ).toBe("/dashboard/builds/build-1");
         request.mockResolvedValueOnce({
           rebuildBuild: { id: "build-rebuilt", status: "QUEUED" },
         } as never);
@@ -960,7 +960,9 @@ export function registerWorktreesPageTests(
         expect(navigation.push).not.toHaveBeenCalled();
 
         fireEvent.click(screen.getByText("Path"));
-        expect(navigation.push).toHaveBeenCalledWith("/worktrees/worktree-1");
+        expect(navigation.push).toHaveBeenCalledWith(
+          "/dashboard/worktrees/worktree-1",
+        );
 
         navigation.push.mockClear();
         fireEvent.click(screen.getByRole("radio", { name: "Table layout" }));
@@ -974,12 +976,14 @@ export function registerWorktreesPageTests(
         expect(row).not.toBeNull();
         expect(row?.className).toContain("hover:bg-blue-500/20");
         expect(tableDetailsLink.getAttribute("href")).toBe(
-          "/worktrees/worktree-1",
+          "/dashboard/worktrees/worktree-1",
         );
         tableDetailsLink.focus();
         expect(document.activeElement).toBe(tableDetailsLink);
         fireEvent.click(row!);
-        expect(navigation.push).toHaveBeenCalledWith("/worktrees/worktree-1");
+        expect(navigation.push).toHaveBeenCalledWith(
+          "/dashboard/worktrees/worktree-1",
+        );
 
         navigation.push.mockClear();
         fireEvent.click(
@@ -1048,9 +1052,11 @@ export function registerWorktreesPageTests(
         const repositoryLink = screen.getByRole("menuitem", {
           name: "View repository",
         });
-        expect(codebaseLink.getAttribute("href")).toBe("/codebases/codebase-1");
+        expect(codebaseLink.getAttribute("href")).toBe(
+          "/dashboard/codebases/codebase-1",
+        );
         expect(repositoryLink.getAttribute("href")).toBe(
-          "/codebases/repositories/repository-1",
+          "/dashboard/codebases/repositories/repository-1",
         );
         const refreshItem = screen.getByRole("menuitem", {
           name: "Refresh pull request",
@@ -1124,10 +1130,10 @@ export function registerWorktreesPageTests(
           screen
             .getByRole("link", { name: "New session" })
             .getAttribute("href"),
-        ).toBe("/runs/new?kind=session&worktree=worktree-1");
+        ).toBe("/ai/drafts/new?kind=session&worktree=worktree-1");
         expect(
           screen.getByRole("link", { name: "New plan" }).getAttribute("href"),
-        ).toBe("/runs/new?kind=plan&worktree=worktree-1");
+        ).toBe("/ai/drafts/new?kind=plan&worktree=worktree-1");
       });
 
       test("does not link to a new run from an unavailable worktree", async () => {
@@ -1440,7 +1446,7 @@ export function registerWorktreesPageTests(
           screen
             .getByRole("link", { name: "Comments: 0" })
             .getAttribute("href"),
-        ).toBe("/comments?pullRequest=openai%2Fcodex%2317");
+        ).toBe("/github/comments?pullRequest=openai%2Fcodex%2317");
 
         fireEvent.pointerDown(screen.getByRole("button", { name: "PR #17" }), {
           button: 0,
@@ -1456,7 +1462,7 @@ export function registerWorktreesPageTests(
         );
         expect(github.getAttribute("target")).toBe("_blank");
         expect(details.getAttribute("href")).toContain(
-          "/pull-requests/openai/codex/17",
+          "/github/pull-requests/openai/codex/17",
         );
       });
 

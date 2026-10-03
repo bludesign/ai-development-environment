@@ -212,12 +212,12 @@ describe("CommandsPage", () => {
     render(<CommandsPage />);
     expect(
       (await screen.findByRole("link", { name: "#42" })).getAttribute("href"),
-    ).toBe("/commands/runs/run-1");
+    ).toBe("/dashboard/commands/runs/run-1");
     expect(
       screen
         .getByRole("link", { name: "feature/AIDE-75" })
         .getAttribute("href"),
-    ).toBe("/worktrees/worktree-1");
+    ).toBe("/dashboard/worktrees/worktree-1");
   });
 
   test("wraps long agent names instead of truncating them", async () => {
@@ -284,7 +284,7 @@ describe("CommandsPage", () => {
     expect(agent.className).toContain("hover:bg-muted");
 
     fireEvent.click(screen.getByText("Succeeded"));
-    expect(push).toHaveBeenCalledWith("/commands/runs/run-1");
+    expect(push).toHaveBeenCalledWith("/dashboard/commands/runs/run-1");
   });
 
   test("tints worktree command rows with their configured highlight color", async () => {
@@ -412,6 +412,6 @@ describe("CommandsPage", () => {
         },
       ),
     );
-    expect(push).toHaveBeenCalledWith("/commands/runs/custom-run");
+    expect(push).toHaveBeenCalledWith("/dashboard/commands/runs/custom-run");
   });
 });

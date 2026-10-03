@@ -198,7 +198,7 @@ export function DsymUploadDialog({
                   <div className="min-w-0">
                     <Link
                       className="font-medium underline"
-                      href={`/crashes/dsyms/${encodeURIComponent(dsym.id)}`}
+                      href={`/debugging/crashes/dsyms/${encodeURIComponent(dsym.id)}`}
                       onClick={close}
                     >
                       {dsym.bundleName}

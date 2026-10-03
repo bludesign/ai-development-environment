@@ -74,7 +74,10 @@ export function BuildConfigurations() {
       )}
       <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
         {items.map((item) => (
-          <Link href={`/builds/configurations/${item.id}`} key={item.id}>
+          <Link
+            href={`/dashboard/builds/configurations/${item.id}`}
+            key={item.id}
+          >
             <Card className="h-full hover:bg-muted/40">
               <CardHeader>
                 <CardTitle className="flex items-center gap-2">
@@ -220,7 +223,7 @@ export function BuildConfigurationDetail({
                   {t("repository")}
                 </p>
                 <Link
-                  href={`/codebases/repositories/${configuration.repository.id}`}
+                  href={`/dashboard/codebases/repositories/${configuration.repository.id}`}
                 >
                   {configuration.repository.name}
                 </Link>

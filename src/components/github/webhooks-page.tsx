@@ -130,7 +130,7 @@ export function GitHubWebhooksPage() {
   }, [load, offset]);
 
   useEffect(() => {
-    if (page?.enabled === false) router.replace("/");
+    if (page?.enabled === false) router.replace("/dashboard/action-center");
   }, [page?.enabled, router]);
 
   const groups = useMemo(() => {

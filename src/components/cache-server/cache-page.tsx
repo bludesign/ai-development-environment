@@ -380,7 +380,7 @@ export function CacheServerPage() {
             <EmptyDescription>{t("notConfiguredDescription")}</EmptyDescription>
           </EmptyHeader>
           <Button asChild>
-            <Link href="/settings">
+            <Link href="/system/settings">
               <Settings2 />
               {t("goToSettings")}
             </Link>

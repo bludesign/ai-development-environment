@@ -16,7 +16,7 @@ export function BuildConfigurationLabel({
   const name = captured?.name ?? build.configuration?.name ?? "—";
   return build.configuration ? (
     <Link
-      href={`/builds/configurations/${build.configuration.id}`}
+      href={`/dashboard/builds/configurations/${build.configuration.id}`}
       className="hover:underline"
       onClick={(event) => event.stopPropagation()}
       onKeyDown={(event) => event.stopPropagation()}

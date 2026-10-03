@@ -256,7 +256,7 @@ export function RepositoryDetailPage({
           </EmptyDescription>
         </EmptyHeader>
         <Button asChild variant="outline">
-          <Link href="/codebases">
+          <Link href="/dashboard/codebases">
             <ArrowLeft /> {t("backToCodebases")}
           </Link>
         </Button>
@@ -496,7 +496,7 @@ export function RepositoryDetailPage({
                 {quickActionWorkflows.map((workflow) => (
                   <Link
                     className="flex items-start gap-2 rounded-md px-2 py-2 hover:bg-muted"
-                    href={`/workflows/${workflow.id}`}
+                    href={`/dashboard/workflows/${workflow.id}`}
                     key={workflow.id}
                   >
                     <span className="min-w-0">

@@ -174,7 +174,7 @@ describe("linked workflow resource highlighting", () => {
     fireEvent.click(
       screen.getByRole("button", { name: "Step resource-trigger" }),
     );
-    expect(routerPush).toHaveBeenCalledWith("/worktrees/worktree-1");
+    expect(routerPush).toHaveBeenCalledWith("/dashboard/worktrees/worktree-1");
   });
 });
 
@@ -277,6 +277,8 @@ describe("answering a waiting workflow from a resource page", () => {
     const link = await screen.findByRole("link", {
       name: "Answer on the run page",
     });
-    expect(link.getAttribute("href")).toBe("/workflows/runs/workflow-run-1");
+    expect(link.getAttribute("href")).toBe(
+      "/dashboard/workflows/runs/workflow-run-1",
+    );
   });
 });

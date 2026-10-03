@@ -725,7 +725,7 @@ function WorkflowEditorInner({ workflowId }: { workflowId?: string | null }) {
         setWorkflow(data.createWorkflow);
         setDefinition(data.createWorkflow.draftDefinition);
         setNotice(t("saved"));
-        router.replace(`/workflows/${data.createWorkflow.id}/edit`);
+        router.replace(`/dashboard/workflows/${data.createWorkflow.id}/edit`);
       }
       return true;
     } catch (value) {
@@ -778,7 +778,7 @@ function WorkflowEditorInner({ workflowId }: { workflowId?: string | null }) {
         { id: workflow.id },
       );
       setNotice(t("published"));
-      router.push(`/workflows/${workflow.id}`);
+      router.push(`/dashboard/workflows/${workflow.id}`);
     } catch (value) {
       setError(value instanceof Error ? value.message : String(value));
     } finally {
@@ -806,7 +806,7 @@ function WorkflowEditorInner({ workflowId }: { workflowId?: string | null }) {
           },
         },
       );
-      router.push(`/workflows/${data.createWorkflow.id}/edit`);
+      router.push(`/dashboard/workflows/${data.createWorkflow.id}/edit`);
     } catch (value) {
       setError(value instanceof Error ? value.message : String(value));
     }

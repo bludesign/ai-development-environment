@@ -164,13 +164,13 @@ describe("CodebasesPage", () => {
     expect(screen.getByText("Developer tooling")).toBeDefined();
     expect(
       screen.getByRole("link", { name: "View" }).getAttribute("href"),
-    ).toBe("/codebases/codebase-1");
+    ).toBe("/dashboard/codebases/codebase-1");
 
     fireEvent.click(screen.getByRole("tab", { name: "Repositories" }));
     expect(await screen.findByText("github.com/openai/codex")).toBeDefined();
     expect(
       screen.getByRole("link", { name: "Edit" }).getAttribute("href"),
-    ).toBe("/codebases/repositories/repository-1");
+    ).toBe("/dashboard/codebases/repositories/repository-1");
 
     fireEvent.click(screen.getByRole("button", { name: "Fetch" }));
     await waitFor(() => {

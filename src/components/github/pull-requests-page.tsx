@@ -533,7 +533,7 @@ export function PullRequestsPage() {
             </EmptyDescription>
           </EmptyHeader>
           <Button asChild className="mt-4">
-            <Link href="/settings">{t("openSettings")}</Link>
+            <Link href="/system/settings">{t("openSettings")}</Link>
           </Button>
         </Empty>
       ) : (
@@ -1158,7 +1158,7 @@ function GitHubRepositoryManager({
           <Alert>
             <AlertDescription>
               {t("manageCredentialsRequired")}{" "}
-              <Link className="text-primary underline" href="/settings">
+              <Link className="text-primary underline" href="/system/settings">
                 {t("openSettings")}
               </Link>
             </AlertDescription>

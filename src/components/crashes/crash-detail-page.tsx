@@ -134,7 +134,7 @@ export function CrashDetailPage({ crashId }: { crashId: string }) {
     setBusy(true);
     try {
       await controlPlaneRequest(DELETE_CRASHES_MUTATION, { ids: [crashId] });
-      router.push("/crashes");
+      router.push("/debugging/crashes");
     } catch (value) {
       setError(value instanceof Error ? value.message : String(value));
       setBusy(false);
@@ -337,7 +337,7 @@ export function CrashDetailPage({ crashId }: { crashId: string }) {
             <DetailItem className="lg:col-span-2" label={t("signature")} mono>
               <Link
                 className="underline"
-                href={`/crashes?signature=${encodeURIComponent(crash.signature)}`}
+                href={`/debugging/crashes?signature=${encodeURIComponent(crash.signature)}`}
               >
                 {crash.signature}
               </Link>
@@ -432,7 +432,7 @@ export function CrashDetailPage({ crashId }: { crashId: string }) {
                       {image.dsym ? (
                         <Link
                           className="underline"
-                          href={`/crashes/dsyms/${encodeURIComponent(image.dsym.id)}`}
+                          href={`/debugging/crashes/dsyms/${encodeURIComponent(image.dsym.id)}`}
                         >
                           {image.dsym.bundleName}
                         </Link>

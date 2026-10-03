@@ -187,7 +187,15 @@ export function CodebaseDetailPage({ codebaseId }: { codebaseId: string }) {
         );
         if (signal.aborted) return false;
         setGitState(data.inspectCodebaseGitState);
-        setDiffs({});
+        // Stash OIDs identify immutable patches, even when selectors change.
+        const stashOids = new Set(
+          data.inspectCodebaseGitState.stashes.map((stash) => stash.oid),
+        );
+        setDiffs((current) =>
+          Object.fromEntries(
+            Object.entries(current).filter(([oid]) => stashOids.has(oid)),
+          ),
+        );
         setLoadError(null);
         return true;
       } catch (value) {
@@ -482,7 +490,7 @@ export function CodebaseDetailPage({ codebaseId }: { codebaseId: string }) {
           <EmptyDescription>{t("notFoundDescription")}</EmptyDescription>
         </EmptyHeader>
         <Button asChild variant="outline">
-          <Link href="/codebases">
+          <Link href="/dashboard/codebases">
             <ArrowLeft /> {t("back")}
           </Link>
         </Button>
@@ -550,7 +558,9 @@ export function CodebaseDetailPage({ codebaseId }: { codebaseId: string }) {
         </div>
         <div className="flex flex-wrap gap-2">
           <Button asChild variant="outline">
-            <Link href={`/codebases/repositories/${codebase.repository.id}`}>
+            <Link
+              href={`/dashboard/codebases/repositories/${codebase.repository.id}`}
+            >
               <Settings2 /> {t("repositorySettings")}
             </Link>
           </Button>

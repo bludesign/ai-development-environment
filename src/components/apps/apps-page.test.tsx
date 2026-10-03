@@ -74,7 +74,7 @@ describe("AppsPage", () => {
     expect(within(cleanCard!).queryByText("Dirty worktrees")).toBeNull();
 
     const worktreeLinks = dirtyCard!.querySelectorAll(
-      'a[href="/apps/dirty-app?view=worktrees"]',
+      'a[href="/dashboard/apps/dirty-app?view=worktrees"]',
     );
     expect(worktreeLinks).toHaveLength(2);
     expect(worktreeLinks[0]?.textContent).toContain("Dirty worktrees");

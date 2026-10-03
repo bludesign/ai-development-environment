@@ -758,7 +758,7 @@ describe("BuildsService", () => {
           typeKey,
           title,
           body: "Example · Debug · main",
-          href: "/builds/build-1",
+          href: "/dashboard/builds/build-1",
           highlightColor: "blue",
         }),
       );

@@ -23,7 +23,7 @@ describe("discovery MCP tools", () => {
           group: "PLANS_SESSIONS",
           title: "Login",
           subtitle: null,
-          href: "/plans/run-1",
+          href: "/ai/plans/run-1",
           status: "RUNNING",
           updatedAt: null,
           children: [],

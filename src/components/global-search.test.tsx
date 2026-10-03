@@ -80,12 +80,14 @@ describe("GlobalSearch", () => {
     fireEvent.change(input, { target: { value: "Builds" } });
     fireEvent.click(await screen.findByText("Builds"));
 
-    expect(navigation.push).toHaveBeenCalledWith("/builds");
+    expect(navigation.push).toHaveBeenCalledWith("/dashboard/builds");
     expect(
       JSON.parse(
         window.localStorage.getItem("aide:global-search:recent:v1") ?? "[]",
       ),
-    ).toEqual([expect.objectContaining({ title: "Builds", href: "/builds" })]);
+    ).toEqual([
+      expect.objectContaining({ title: "Builds", href: "/dashboard/builds" }),
+    ]);
 
     expect(openWithShortcut("control").defaultPrevented).toBe(true);
     const reopenedInput = await screen.findByPlaceholderText(
@@ -112,7 +114,7 @@ describe("GlobalSearch", () => {
             group: "WORKTREES",
             title: "feature/AIDE-42-search",
             subtitle: "AIDE",
-            href: "/worktrees/worktree-one",
+            href: "/dashboard/worktrees/worktree-one",
             status: "AVAILABLE",
             updatedAt: "2026-06-01T00:00:00.000Z",
             children: [
@@ -122,7 +124,7 @@ describe("GlobalSearch", () => {
                 group: "WORKFLOWS",
                 title: "Release #19",
                 subtitle: null,
-                href: "/workflows/runs/run-one",
+                href: "/dashboard/workflows/runs/run-one",
                 status: "SUCCEEDED",
                 updatedAt: "2026-06-02T00:00:00.000Z",
                 children: [],
@@ -146,7 +148,9 @@ describe("GlobalSearch", () => {
     fireEvent.keyDown(input, { key: "ArrowDown" });
     fireEvent.keyDown(input, { key: "Enter" });
 
-    expect(navigation.push).toHaveBeenCalledWith("/workflows/runs/run-one");
+    expect(navigation.push).toHaveBeenCalledWith(
+      "/dashboard/workflows/runs/run-one",
+    );
   });
 
   test("ignores a slower response from an older query", async () => {
@@ -165,7 +169,7 @@ describe("GlobalSearch", () => {
               group: "AGENTS_JOBS",
               title: "Second Agent",
               subtitle: null,
-              href: "/agents/second",
+              href: "/dashboard/agents/second",
               status: null,
               updatedAt: null,
               children: [],
@@ -194,7 +198,7 @@ describe("GlobalSearch", () => {
             group: "AGENTS_JOBS",
             title: "First Agent",
             subtitle: null,
-            href: "/agents/first",
+            href: "/dashboard/agents/first",
             status: null,
             updatedAt: null,
             children: [],

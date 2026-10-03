@@ -94,7 +94,9 @@ describe("GitHubWebhooksPage", () => {
     render(<GitHubWebhooksPage />);
 
     await waitFor(() => {
-      expect(navigation.replace).toHaveBeenCalledWith("/");
+      expect(navigation.replace).toHaveBeenCalledWith(
+        "/dashboard/action-center",
+      );
     });
     expect(
       screen.queryByRole("heading", { name: "GitHub Webhooks" }),

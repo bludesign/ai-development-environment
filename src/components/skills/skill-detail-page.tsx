@@ -212,7 +212,7 @@ export function SkillDetailPage({ skillId }: { skillId: string }) {
           },
         },
       );
-      router.replace(`/skills/${data.saveSkill.id}`);
+      router.replace(`/ai/skills/${data.saveSkill.id}`);
     } catch (value) {
       setError(value instanceof Error ? value.message : String(value));
     } finally {
@@ -227,7 +227,7 @@ export function SkillDetailPage({ skillId }: { skillId: string }) {
         `mutation DeleteSkill($id: ID!) { deleteSkill(id: $id) }`,
         { id: skillId },
       );
-      router.push("/skills");
+      router.push("/ai/skills");
     } catch (value) {
       setError(value instanceof Error ? value.message : String(value));
       setBusy(false);

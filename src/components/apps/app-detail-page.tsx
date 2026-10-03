@@ -160,7 +160,7 @@ export function AppDetailPage({
         `mutation DeleteApp($id: ID!) { deleteApp(id: $id) { id } }`,
         { id: appId },
       );
-      router.push("/apps");
+      router.push("/dashboard/apps");
     } catch (value) {
       setError(value instanceof Error ? value.message : String(value));
       setDeleteOpen(false);
@@ -236,7 +236,7 @@ export function AppDetailPage({
             size="sm"
             variant={view === value ? "default" : "ghost"}
           >
-            <Link href={`/apps/${app.id}?view=${value}`}>
+            <Link href={`/dashboard/apps/${app.id}?view=${value}`}>
               <Icon /> {t(`views.${value}`)}
             </Link>
           </Button>
@@ -311,7 +311,7 @@ function AppOverview({ app }: { app: ManagedApp }) {
                 </div>
                 <Link
                   className="text-sm text-muted-foreground hover:text-foreground"
-                  href={`/apps/${app.id}?view=${view}`}
+                  href={`/dashboard/apps/${app.id}?view=${view}`}
                 >
                   {t(`views.${view}`)}
                 </Link>
@@ -361,7 +361,9 @@ function AppRepositories({ app }: { app: ManagedApp }) {
                 {t("checkoutCount", { count: repository.codebases.length })}
               </Badge>
               <Button asChild size="sm" variant="outline">
-                <Link href={`/codebases/repositories/${repository.id}`}>
+                <Link
+                  href={`/dashboard/codebases/repositories/${repository.id}`}
+                >
                   {t("manageRepository")}
                 </Link>
               </Button>
@@ -378,7 +380,9 @@ function AppRepositories({ app }: { app: ManagedApp }) {
                     </p>
                   </div>
                   <Button asChild size="sm" variant="ghost">
-                    <Link href={`/codebases/${codebase.id}`}>{t("open")}</Link>
+                    <Link href={`/dashboard/codebases/${codebase.id}`}>
+                      {t("open")}
+                    </Link>
                   </Button>
                 </div>
               </div>

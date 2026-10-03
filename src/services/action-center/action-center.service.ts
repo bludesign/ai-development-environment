@@ -103,15 +103,15 @@ function parseJson(value: string): unknown {
 }
 
 function runHref(kind: string, id: string): string {
-  return `/${kind === "PLAN" ? "plans" : "sessions"}/${encodeURIComponent(id)}`;
+  return `/ai/${kind === "PLAN" ? "plans" : "sessions"}/${encodeURIComponent(id)}`;
 }
 
 function workflowHref(id: string): string {
-  return `/workflows/runs/${encodeURIComponent(id)}`;
+  return `/dashboard/workflows/runs/${encodeURIComponent(id)}`;
 }
 
 function buildHref(id: string): string {
-  return `/builds/${encodeURIComponent(id)}`;
+  return `/dashboard/builds/${encodeURIComponent(id)}`;
 }
 
 function failureFingerprint(

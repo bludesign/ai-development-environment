@@ -250,7 +250,7 @@ export function JobMonitor({
       <div className="flex flex-wrap gap-2">
         {compact && (
           <Button asChild size="sm" variant="outline">
-            <Link href={`/jobs/${job.id}`}>{t("open")}</Link>
+            <Link href={`/dashboard/jobs/${job.id}`}>{t("open")}</Link>
           </Button>
         )}
         {(job.status === "QUEUED" || job.status === "RUNNING") && (

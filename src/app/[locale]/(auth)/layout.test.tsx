@@ -41,6 +41,6 @@ describe("authentication layout", () => {
       params: Promise.resolve({ locale: "fr" }),
     });
 
-    expect(mocks.redirect).toHaveBeenCalledWith("/fr");
+    expect(mocks.redirect).toHaveBeenCalledWith("/fr/dashboard/action-center");
   });
 });

@@ -397,7 +397,7 @@ export function CommandsPage() {
     }
     setError(failures.length ? failures.join("\n") : null);
     if (files.length === 1 && imported.length === 1) {
-      router.push(`/commands/${imported[0]}/edit`);
+      router.push(`/dashboard/commands/${imported[0]}/edit`);
       return;
     }
     if (imported.length) {
@@ -462,7 +462,7 @@ export function CommandsPage() {
         { input: { commandId: command.id, origin: "MANUAL", ...target } },
       );
       setTargetCommand(null);
-      router.push(`/commands/runs/${data.startCommandRun.id}`);
+      router.push(`/dashboard/commands/runs/${data.startCommandRun.id}`);
     } catch (value) {
       setError(value instanceof Error ? value.message : String(value));
     }
@@ -480,7 +480,7 @@ export function CommandsPage() {
         { input: { script, origin: "MANUAL", ...target } },
       );
       setCustomOpen(false);
-      router.push(`/commands/runs/${data.startCustomCommandRun.id}`);
+      router.push(`/dashboard/commands/runs/${data.startCustomCommandRun.id}`);
     } catch (value) {
       setError(value instanceof Error ? value.message : String(value));
     } finally {
@@ -519,7 +519,7 @@ export function CommandsPage() {
             {t("import")}
           </Button>
           <Button asChild>
-            <Link href="/commands/new">
+            <Link href="/dashboard/commands/new">
               <Plus />
               {t("newCommand")}
             </Link>
@@ -770,7 +770,7 @@ export function CommandsPage() {
                             return next;
                           });
                         } else {
-                          router.push(`/commands/runs/${run.id}`);
+                          router.push(`/dashboard/commands/runs/${run.id}`);
                         }
                       }}
                     >
@@ -796,7 +796,7 @@ export function CommandsPage() {
                             rowLinkClass,
                             "inline-block font-mono text-xs",
                           )}
-                          href={`/commands/runs/${run.id}`}
+                          href={`/dashboard/commands/runs/${run.id}`}
                         >
                           #{run.displayNumber}
                         </Link>
@@ -807,7 +807,7 @@ export function CommandsPage() {
                             rowLinkClass,
                             "inline-block font-medium",
                           )}
-                          href={`/commands/runs/${run.id}`}
+                          href={`/dashboard/commands/runs/${run.id}`}
                         >
                           {run.snapshotName}
                         </Link>
@@ -824,7 +824,7 @@ export function CommandsPage() {
                               rowLinkClass,
                               "inline whitespace-normal break-words",
                             )}
-                            href={`/agents/${run.agentId}`}
+                            href={`/dashboard/agents/${run.agentId}`}
                             title={run.agentName}
                           >
                             {run.agentName}
@@ -840,7 +840,7 @@ export function CommandsPage() {
                               rowLinkClass,
                               "inline whitespace-normal break-words",
                             )}
-                            href={`/worktrees/${run.worktreeId}`}
+                            href={`/dashboard/worktrees/${run.worktreeId}`}
                             title={
                               run.worktreeBranch ||
                               run.worktreePath ||
@@ -898,7 +898,7 @@ export function CommandsPage() {
                                     { id: run.id },
                                   );
                                   router.push(
-                                    `/commands/runs/${data.rerunCommandRun.id}`,
+                                    `/dashboard/commands/runs/${data.rerunCommandRun.id}`,
                                   );
                                 }}
                               >
@@ -998,7 +998,7 @@ export function CommandsPage() {
                     {t("run")}
                   </Button>
                   <Button asChild variant="outline">
-                    <Link href={`/commands/${definition.id}/edit`}>
+                    <Link href={`/dashboard/commands/${definition.id}/edit`}>
                       <FilePenLine />
                       {t("edit")}
                     </Link>

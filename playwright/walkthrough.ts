@@ -8,7 +8,7 @@ import { ids } from "../scripts/mock-data/ids";
 export const MOBILE_BREAKPOINT = 768;
 
 /** Where the tour opens, and — so the recording loops without a jump cut — where it ends. */
-export const WALKTHROUGH_START = "/";
+export const WALKTHROUGH_START = "/dashboard/action-center";
 
 export type WalkthroughStop = {
   /** Stable name, used in the step titles the run logs. */
@@ -44,14 +44,14 @@ export type WalkthroughStop = {
  * its card sits within the desktop fold, so the tour reaches it without scrolling the page.
  */
 export const WALKTHROUGH_STOPS: WalkthroughStop[] = [
-  { name: "worktrees", path: "/worktrees", via: "nav" },
+  { name: "worktrees", path: "/dashboard/worktrees", via: "nav" },
   {
     name: "worktree-detail",
-    path: `/worktrees/${ids.worktrees.apiFeature}`,
+    path: `/dashboard/worktrees/${ids.worktrees.apiFeature}`,
     via: "card",
     title: "feature/oauth-device-flow",
   },
-  { name: "sessions", path: "/sessions", via: "nav" },
+  { name: "sessions", path: "/ai/sessions", via: "nav" },
   { name: "action-center", path: WALKTHROUGH_START, via: "nav" },
 ];
 

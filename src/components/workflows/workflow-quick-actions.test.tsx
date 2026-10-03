@@ -170,7 +170,7 @@ test("starts a selected worktree quick action and opens its active run", async (
   expect(runMenu.querySelector('[data-slot="spinner"]')).not.toBeNull();
   expect(runMenu.textContent).not.toContain("View");
   const viewLink = screen.getByRole("menuitem", { name: /View/ });
-  expect(viewLink.getAttribute("href")).toBe("/workflows/runs/run-1");
+  expect(viewLink.getAttribute("href")).toBe("/dashboard/workflows/runs/run-1");
   expect(runMenu.className).toContain("rounded-r-none");
   expect(button.className).toContain("rounded-l-none");
 });
@@ -236,8 +236,8 @@ test.each([
         .map((item) => item.getAttribute("href")),
     ).toEqual(
       mutation === "pauseWorkflowRun"
-        ? ["/workflows/runs/run-3", "/workflows/runs/run-4"]
-        : ["/workflows/runs/run-3"],
+        ? ["/dashboard/workflows/runs/run-3", "/dashboard/workflows/runs/run-4"]
+        : ["/dashboard/workflows/runs/run-3"],
     );
   },
 );
@@ -451,7 +451,10 @@ test("lists every active run from the spinner menu", async () => {
     screen
       .getAllByRole("menuitem", { name: /View/ })
       .map((item) => item.getAttribute("href")),
-  ).toEqual(["/workflows/runs/run-3", "/workflows/runs/run-4"]);
+  ).toEqual([
+    "/dashboard/workflows/runs/run-3",
+    "/dashboard/workflows/runs/run-4",
+  ]);
 });
 
 test("batches active-run summaries for rendered worktrees", async () => {

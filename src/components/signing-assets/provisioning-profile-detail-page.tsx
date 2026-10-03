@@ -219,7 +219,7 @@ export function ProvisioningProfileDetailPage({ id }: { id: string }) {
                     {device.deviceId && device.displayName ? (
                       <Link
                         className="font-medium hover:underline"
-                        href={`/devices/${device.deviceId}`}
+                        href={`/system/devices/${device.deviceId}`}
                       >
                         {device.displayName}
                       </Link>

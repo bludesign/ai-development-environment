@@ -182,7 +182,7 @@ export function SseStreamHistoryPage({ requestId }: { requestId: string }) {
     <SsePageShell
       action={
         <Button asChild variant="outline">
-          <Link href="/sse/history">
+          <Link href="/debugging/sse/history">
             <ArrowLeft /> Back to History
           </Link>
         </Button>

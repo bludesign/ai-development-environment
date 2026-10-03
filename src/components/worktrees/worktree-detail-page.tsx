@@ -491,7 +491,7 @@ export function WorktreeDetailPage({ worktreeId }: { worktreeId: string }) {
             <EmptyDescription>{t("notFoundDescription")}</EmptyDescription>
           </EmptyHeader>
           <Button asChild className="mt-4" variant="outline">
-            <Link href="/worktrees">
+            <Link href="/dashboard/worktrees">
               <ArrowLeft /> {t("back")}
             </Link>
           </Button>
@@ -680,7 +680,7 @@ function LoadedWorktreeDetail({
     onError: setOperationError,
     onManageTags: () => setTagManagerOpen(true),
     onOpenTicket: (issueKey) => openTicket(issueKey),
-    onDeleted: () => router.push("/worktrees"),
+    onDeleted: () => router.push("/dashboard/worktrees"),
     onMoved: (move) => {
       if (move.targetWorktreeId) {
         router.push(worktreeDetailHref(move.targetWorktreeId));
@@ -846,7 +846,7 @@ function LoadedWorktreeDetail({
               <DetailItem label={t("repository")}>
                 <Link
                   className="text-primary hover:underline"
-                  href={`/codebases/${entry.group.codebase.id}`}
+                  href={`/dashboard/codebases/${entry.group.codebase.id}`}
                 >
                   {entry.group.repository.name}
                 </Link>
@@ -1062,7 +1062,9 @@ function WorktreeCoverageCard({
                   <TableCell className="text-right">
                     {report.status === "READY" && (
                       <Button asChild size="sm" variant="outline">
-                        <Link href={`/builds/${report.build.id}/coverage`}>
+                        <Link
+                          href={`/dashboard/builds/${report.build.id}/coverage`}
+                        >
                           {t("viewReport")}
                         </Link>
                       </Button>
@@ -1133,11 +1135,11 @@ export function WorktreeBuildTable({
                   aria-label={t("viewBuild")}
                   className="cursor-pointer focus-visible:bg-muted/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset"
                   key={build.id}
-                  onClick={() => router.push(`/builds/${build.id}`)}
+                  onClick={() => router.push(`/dashboard/builds/${build.id}`)}
                   onKeyDown={(event) => {
                     if (event.key === "Enter" || event.key === " ") {
                       event.preventDefault();
-                      router.push(`/builds/${build.id}`);
+                      router.push(`/dashboard/builds/${build.id}`);
                     }
                   }}
                   role="link"
@@ -1146,7 +1148,7 @@ export function WorktreeBuildTable({
                   <TableCell className="min-w-52 whitespace-normal">
                     <Link
                       className="font-medium hover:underline"
-                      href={`/builds/${build.id}`}
+                      href={`/dashboard/builds/${build.id}`}
                       onClick={(event) => event.stopPropagation()}
                     >
                       {configuration?.name ?? build.id}

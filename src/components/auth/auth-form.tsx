@@ -26,14 +26,14 @@ type PublicAuthConfig = {
 };
 
 export function safeReturnTo(value: string | undefined): string {
-  if (!value || !value.startsWith("/")) return "/";
+  if (!value || !value.startsWith("/")) return "/dashboard/action-center";
   try {
     const base = new URL("https://aide.invalid");
     const destination = new URL(value, base);
-    if (destination.origin !== base.origin) return "/";
+    if (destination.origin !== base.origin) return "/dashboard/action-center";
     return `${destination.pathname}${destination.search}${destination.hash}`;
   } catch {
-    return "/";
+    return "/dashboard/action-center";
   }
 }
 

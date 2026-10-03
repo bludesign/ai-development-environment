@@ -56,7 +56,7 @@ export async function POST(request: Request): Promise<Response> {
         crashes: result.crashes.map((crash) => ({
           id: crash.id,
           status: crash.status,
-          url: `/crashes/${crash.id}`,
+          url: `/debugging/crashes/${crash.id}`,
         })),
       },
       { status: result.duplicate ? 200 : 201, headers: NO_STORE },

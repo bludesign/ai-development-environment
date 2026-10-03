@@ -475,7 +475,7 @@ export function AgentDetail({ agentId }: { agentId: string }) {
         `mutation DeleteAgent($agentId: ID!) { deleteAgent(agentId: $agentId) }`,
         { agentId },
       );
-      router.push("/agents");
+      router.push("/dashboard/agents");
     } catch (value) {
       setLoadError(value instanceof Error ? value.message : String(value));
       setDeleting(false);
@@ -1609,7 +1609,7 @@ function AgentCodebasesCard({ codebases }: { codebases: AgentCodebase[] }) {
                 </TableCell>
                 <TableCell>
                   <Button asChild size="sm" variant="ghost">
-                    <Link href={`/codebases/${codebase.id}`}>
+                    <Link href={`/dashboard/codebases/${codebase.id}`}>
                       {codebaseT("view")}
                     </Link>
                   </Button>

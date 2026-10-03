@@ -11,8 +11,8 @@ const labels: Record<BreadcrumbLabelKey, string> = {
   actions: "Actions",
   actionsCache: "Actions Cache",
   agents: "Agents",
+  ai: "AI",
   analyticsEvents: "Analytics Events",
-  apiCache: "API Cache",
   apiKeys: "API Keys",
   apps: "Apps",
   buildData: "Build Data",
@@ -29,6 +29,8 @@ const labels: Record<BreadcrumbLabelKey, string> = {
   coverage: "Coverage",
   crashes: "Crashes",
   credentials: "Credentials",
+  dashboard: "Dashboard",
+  debugging: "Debugging",
   devices: "Devices",
   drafts: "Drafts",
   dsyms: "dSYMs",
@@ -59,6 +61,7 @@ const labels: Record<BreadcrumbLabelKey, string> = {
   status: "Status",
   scriptStorage: "Script Storage",
   sync: "Sync",
+  system: "System",
   sseEndpoints: "SSE Endpoints",
   tailscale: "Tailscale",
   tickets: "Tickets",
@@ -92,8 +95,9 @@ describe("buildAppBreadcrumbs", () => {
     }
   });
 
-  test("returns the localized Action Center crumb for the root route", () => {
-    expect(buildAppBreadcrumbs("/", translate)).toEqual([
+  test("returns Dashboard and Action Center for the home page", () => {
+    expect(buildAppBreadcrumbs("/dashboard/action-center", translate)).toEqual([
+      { href: undefined, isCurrent: false, label: "Dashboard" },
       { isCurrent: true, label: "Action Center" },
     ]);
   });
@@ -107,8 +111,9 @@ describe("buildAppBreadcrumbs", () => {
   });
 
   test("links the Apps index from an app detail route", () => {
-    expect(buildAppBreadcrumbs("/apps/app-123", translate)).toEqual([
-      { href: "/apps", isCurrent: false, label: "Apps" },
+    expect(buildAppBreadcrumbs("/dashboard/apps/app-123", translate)).toEqual([
+      { href: undefined, isCurrent: false, label: "Dashboard" },
+      { href: "/dashboard/apps", isCurrent: false, label: "Apps" },
       { href: undefined, isCurrent: true, label: "app-123" },
     ]);
   });
@@ -116,13 +121,14 @@ describe("buildAppBreadcrumbs", () => {
   test("links the Configurations tab from a build configuration detail route", () => {
     expect(
       buildAppBreadcrumbs(
-        "/builds/configurations/configuration-123",
+        "/dashboard/builds/configurations/configuration-123",
         translate,
       ),
     ).toEqual([
-      { href: "/builds", isCurrent: false, label: "Builds" },
+      { href: undefined, isCurrent: false, label: "Dashboard" },
+      { href: "/dashboard/builds", isCurrent: false, label: "Builds" },
       {
-        href: "/builds?view=configurations",
+        href: "/dashboard/builds?view=configurations",
         isCurrent: false,
         label: "Configurations",
       },
@@ -131,50 +137,64 @@ describe("buildAppBreadcrumbs", () => {
   });
 
   test("links the crash and dSYM lists from their detail routes", () => {
-    expect(buildAppBreadcrumbs("/crashes/crash-123", translate)).toEqual([
-      { href: "/crashes", isCurrent: false, label: "Crashes" },
+    expect(
+      buildAppBreadcrumbs("/debugging/crashes/crash-123", translate),
+    ).toEqual([
+      { href: undefined, isCurrent: false, label: "Debugging" },
+      { href: "/debugging/crashes", isCurrent: false, label: "Crashes" },
       { href: undefined, isCurrent: true, label: "crash-123" },
     ]);
-    expect(buildAppBreadcrumbs("/crashes/dsyms/dsym-123", translate)).toEqual([
-      { href: "/crashes", isCurrent: false, label: "Crashes" },
-      { href: "/crashes/dsyms", isCurrent: false, label: "dSYMs" },
+    expect(
+      buildAppBreadcrumbs("/debugging/crashes/dsyms/dsym-123", translate),
+    ).toEqual([
+      { href: undefined, isCurrent: false, label: "Debugging" },
+      { href: "/debugging/crashes", isCurrent: false, label: "Crashes" },
+      { href: "/debugging/crashes/dsyms", isCurrent: false, label: "dSYMs" },
       { href: undefined, isCurrent: true, label: "dsym-123" },
     ]);
   });
 
   test("links the GitHub cache from an entry detail route", () => {
     expect(
-      buildAppBreadcrumbs("/github-cache/entries/cache-123", translate),
+      buildAppBreadcrumbs("/github/cache/entries/cache-123", translate),
     ).toEqual([
-      { href: "/github-cache", isCurrent: false, label: "Cache" },
+      { href: undefined, isCurrent: false, label: "GitHub" },
+      { href: "/github/cache", isCurrent: false, label: "Cache" },
       { href: undefined, isCurrent: false, label: "Entries" },
       { href: undefined, isCurrent: true, label: "cache-123" },
     ]);
   });
 
-  test("uses top-level breadcrumbs for provider cache pages", () => {
-    expect(buildAppBreadcrumbs("/github-cache", translate)).toEqual([
+  test("includes the provider in cache breadcrumbs", () => {
+    expect(buildAppBreadcrumbs("/github/cache", translate)).toEqual([
+      { href: undefined, isCurrent: false, label: "GitHub" },
       { isCurrent: true, label: "Cache" },
     ]);
-    expect(buildAppBreadcrumbs("/jira-cache", translate)).toEqual([
+    expect(buildAppBreadcrumbs("/jira/cache", translate)).toEqual([
+      { href: undefined, isCurrent: false, label: "Jira" },
       { isCurrent: true, label: "Cache" },
     ]);
   });
 
   test("localizes newer System destinations", () => {
-    expect(buildAppBreadcrumbs("/prepare", translate)).toEqual([
+    expect(buildAppBreadcrumbs("/system/prepare", translate)).toEqual([
+      { href: undefined, isCurrent: false, label: "System" },
       { isCurrent: true, label: "Prepare" },
     ]);
-    expect(buildAppBreadcrumbs("/status", translate)).toEqual([
+    expect(buildAppBreadcrumbs("/system/status", translate)).toEqual([
+      { href: undefined, isCurrent: false, label: "System" },
       { isCurrent: true, label: "Status" },
     ]);
-    expect(buildAppBreadcrumbs("/users", translate)).toEqual([
+    expect(buildAppBreadcrumbs("/system/users", translate)).toEqual([
+      { href: undefined, isCurrent: false, label: "System" },
       { isCurrent: true, label: "Users" },
     ]);
-    expect(buildAppBreadcrumbs("/api-keys", translate)).toEqual([
+    expect(buildAppBreadcrumbs("/system/api-keys", translate)).toEqual([
+      { href: undefined, isCurrent: false, label: "System" },
       { isCurrent: true, label: "API Keys" },
     ]);
-    expect(buildAppBreadcrumbs("/tailscale", translate)).toEqual([
+    expect(buildAppBreadcrumbs("/system/tailscale", translate)).toEqual([
+      { href: undefined, isCurrent: false, label: "System" },
       { isCurrent: true, label: "Tailscale" },
     ]);
   });
@@ -186,15 +206,16 @@ describe("buildAppBreadcrumbs", () => {
     ]);
     expect(buildAppBreadcrumbs("/gitlab/cache", translate)).toEqual([
       { href: undefined, isCurrent: false, label: "GitLab" },
-      { isCurrent: true, label: "API Cache" },
+      { isCurrent: true, label: "Cache" },
     ]);
   });
 
   test("links the Jira cache from a cached ticket detail route", () => {
     expect(
-      buildAppBreadcrumbs("/jira-cache/tickets/APP-123", translate),
+      buildAppBreadcrumbs("/jira/cache/tickets/APP-123", translate),
     ).toEqual([
-      { href: "/jira-cache", isCurrent: false, label: "Cache" },
+      { href: undefined, isCurrent: false, label: "Jira" },
+      { href: "/jira/cache", isCurrent: false, label: "Cache" },
       { href: undefined, isCurrent: false, label: "Tickets" },
       { href: undefined, isCurrent: true, label: "APP-123" },
     ]);
@@ -202,10 +223,11 @@ describe("buildAppBreadcrumbs", () => {
 
   test("preserves deep pull request context without invalid links", () => {
     expect(
-      buildAppBreadcrumbs("/pull-requests/acme/widgets/42", translate),
+      buildAppBreadcrumbs("/github/pull-requests/acme/widgets/42", translate),
     ).toEqual([
+      { href: undefined, isCurrent: false, label: "GitHub" },
       {
-        href: "/pull-requests",
+        href: "/github/pull-requests",
         isCurrent: false,
         label: "Pull Requests",
       },
@@ -217,10 +239,14 @@ describe("buildAppBreadcrumbs", () => {
 
   test("does not translate dynamic identifiers that match static segments", () => {
     expect(
-      buildAppBreadcrumbs("/pull-requests/actions/settings/42", translate),
+      buildAppBreadcrumbs(
+        "/github/pull-requests/actions/settings/42",
+        translate,
+      ),
     ).toEqual([
+      { href: undefined, isCurrent: false, label: "GitHub" },
       {
-        href: "/pull-requests",
+        href: "/github/pull-requests",
         isCurrent: false,
         label: "Pull Requests",
       },
@@ -228,20 +254,27 @@ describe("buildAppBreadcrumbs", () => {
       { href: undefined, isCurrent: false, label: "settings" },
       { href: undefined, isCurrent: true, label: "42" },
     ]);
-    expect(buildAppBreadcrumbs("/skills/groups/settings", translate)).toEqual([
-      { href: "/skills", isCurrent: false, label: "Skills" },
-      { href: "/skills/groups", isCurrent: false, label: "Groups" },
+    expect(
+      buildAppBreadcrumbs("/ai/skills/groups/settings", translate),
+    ).toEqual([
+      { href: undefined, isCurrent: false, label: "AI" },
+      { href: "/ai/skills", isCurrent: false, label: "Skills" },
+      { href: "/ai/skills/groups", isCurrent: false, label: "Groups" },
       { href: undefined, isCurrent: true, label: "settings" },
     ]);
   });
 
   test("decodes dynamic identifiers and links real detail ancestors", () => {
     expect(
-      buildAppBreadcrumbs("/workflows/release%20workflow/edit", translate),
+      buildAppBreadcrumbs(
+        "/dashboard/workflows/release%20workflow/edit",
+        translate,
+      ),
     ).toEqual([
-      { href: "/workflows", isCurrent: false, label: "Workflows" },
+      { href: undefined, isCurrent: false, label: "Dashboard" },
+      { href: "/dashboard/workflows", isCurrent: false, label: "Workflows" },
       {
-        href: "/workflows/release%20workflow",
+        href: "/dashboard/workflows/release%20workflow",
         isCurrent: false,
         label: "release workflow",
       },
@@ -250,21 +283,25 @@ describe("buildAppBreadcrumbs", () => {
   });
 
   test("maps top-level route aliases to their navigation destinations", () => {
-    expect(buildAppBreadcrumbs("/runs/new", translate)).toEqual([
-      { href: "/drafts", isCurrent: false, label: "Drafts" },
+    expect(buildAppBreadcrumbs("/ai/drafts/new", translate)).toEqual([
+      { href: undefined, isCurrent: false, label: "AI" },
+      { href: "/ai/drafts", isCurrent: false, label: "Drafts" },
       { href: undefined, isCurrent: true, label: "New" },
     ]);
-    expect(buildAppBreadcrumbs("/jobs/job-17", translate)).toEqual([
-      { href: "/agents", isCurrent: false, label: "Agents" },
+    expect(buildAppBreadcrumbs("/dashboard/jobs/job-17", translate)).toEqual([
+      { href: undefined, isCurrent: false, label: "Dashboard" },
+      { href: "/dashboard/agents", isCurrent: false, label: "Agents" },
       { href: undefined, isCurrent: true, label: "job-17" },
     ]);
   });
 
   test("falls back safely when a dynamic segment is malformed", () => {
-    expect(buildAppBreadcrumbs("/plans/%E0%A4%A", translate).at(-1)).toEqual({
-      href: undefined,
-      isCurrent: true,
-      label: "%E0%A4%A",
-    });
+    expect(buildAppBreadcrumbs("/ai/plans/%E0%A4%A", translate).at(-1)).toEqual(
+      {
+        href: undefined,
+        isCurrent: true,
+        label: "%E0%A4%A",
+      },
+    );
   });
 });

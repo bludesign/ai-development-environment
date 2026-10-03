@@ -159,7 +159,7 @@ export function IosInstallButton({
     if (!installOrigin || !serverKind) return;
     const origin = installOrigin.origin;
     await copyText(
-      `${origin}/${locale}/builds/${encodeURIComponent(buildId)}?serverUrlKind=${serverKind}`,
+      `${origin}/${locale}/dashboard/builds/${encodeURIComponent(buildId)}?serverUrlKind=${serverKind}`,
     );
     setCopied(true);
     setTimeout(() => setCopied(false), 2_000);

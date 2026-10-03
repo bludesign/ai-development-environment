@@ -171,7 +171,7 @@ function WorkflowQuickActionButtons({
                           {t("cancelRun")}
                         </DropdownMenuItem>
                         <DropdownMenuItem asChild>
-                          <Link href={`/workflows/runs/${run.id}`}>
+                          <Link href={`/dashboard/workflows/runs/${run.id}`}>
                             <ExternalLink />
                             {t("quickActionView")}
                           </Link>

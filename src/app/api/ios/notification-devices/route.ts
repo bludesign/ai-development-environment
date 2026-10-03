@@ -13,7 +13,7 @@ const RATE_LIMIT_NAMESPACE = "notification-devices";
 
 /**
  * Where the control plane's own iOS app posts its APNs token so this server can deliver the
- * notifications shown at `/notifications`. Separate from `/api/ios/apns-devices`, which feeds the
+ * notifications shown at `/dashboard/notifications`. Separate from `/api/ios/apns-devices`, which feeds the
  * push-notifications test console with devices belonging to apps built using this server.
  */
 export async function POST(request: Request): Promise<Response> {

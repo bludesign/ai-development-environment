@@ -51,95 +51,106 @@ export const routes: RouteEntry[] = [
   { name: "sign-in", path: "/sign-in", anonymous: true },
   { name: "register", path: "/register", anonymous: true },
   // Overview / action center
-  { name: "dashboard", path: "/" },
+  { name: "dashboard", path: "/dashboard/action-center" },
 
   // Apps
   {
     name: "apps",
-    path: "/apps",
+    path: "/dashboard/apps",
     readyGraphqlOperation: "AppsPage",
     readyTexts: ["Customer Portal"],
   },
   {
     name: "app-detail",
-    path: `/apps/${ids.apps.customerPortal}`,
+    path: `/dashboard/apps/${ids.apps.customerPortal}`,
     readyGraphqlOperation: "AppDetail",
     readyTexts: ["Customer Portal"],
   },
   {
     name: "app-sync",
-    path: `/apps/${ids.apps.customerPortal}?view=sync`,
+    path: `/dashboard/apps/${ids.apps.customerPortal}?view=sync`,
     readyGraphqlOperation: "AppRepositorySync",
     readyTexts: ["Sync repositories"],
   },
   {
     name: "app-export",
-    path: `/apps/${ids.apps.customerPortal}`,
+    path: `/dashboard/apps/${ids.apps.customerPortal}`,
     readyGraphqlOperation: "AppDetail",
     readyTexts: ["Customer Portal"],
     transferWorkflow: "export",
   },
   {
     name: "app-import-review",
-    path: `/apps/${ids.apps.customerPortal}`,
+    path: `/dashboard/apps/${ids.apps.customerPortal}`,
     readyGraphqlOperation: "AppDetail",
     readyTexts: ["Customer Portal"],
     transferWorkflow: "import",
   },
   {
     name: "app-import-destinations",
-    path: `/apps/${ids.apps.customerPortal}`,
+    path: `/dashboard/apps/${ids.apps.customerPortal}`,
     readyGraphqlOperation: "AppDetail",
     readyTexts: ["Customer Portal"],
     transferWorkflow: "import-destinations",
   },
 
   // Agents
-  { name: "agents", path: "/agents" },
-  { name: "agent-detail", path: `/agents/${ids.agents.studio}` },
+  { name: "agents", path: "/dashboard/agents" },
+  { name: "agent-detail", path: `/dashboard/agents/${ids.agents.studio}` },
 
   // Runs
-  { name: "sessions", path: "/sessions" },
-  { name: "session-detail", path: `/sessions/${ids.runs.sessionSearch}` },
-  { name: "plans", path: "/plans" },
-  { name: "plan-detail", path: `/plans/${ids.runs.planSearch}` },
-  { name: "drafts", path: "/drafts" },
-  { name: "run-new", path: "/runs/new" },
+  { name: "sessions", path: "/ai/sessions" },
+  { name: "session-detail", path: `/ai/sessions/${ids.runs.sessionSearch}` },
+  { name: "plans", path: "/ai/plans" },
+  { name: "plan-detail", path: `/ai/plans/${ids.runs.planSearch}` },
+  { name: "drafts", path: "/ai/drafts" },
+  { name: "run-new", path: "/ai/drafts/new" },
 
   // Codebases & worktrees
-  { name: "codebases", path: "/codebases" },
-  { name: "codebase-branches", path: "/codebases", clickTab: "Branches" },
-  { name: "codebase-detail", path: `/codebases/${ids.codebases.web}` },
+  { name: "codebases", path: "/dashboard/codebases" },
+  {
+    name: "codebase-branches",
+    path: "/dashboard/codebases",
+    clickTab: "Branches",
+  },
+  {
+    name: "codebase-detail",
+    path: `/dashboard/codebases/${ids.codebases.web}`,
+  },
   {
     name: "repository-detail",
-    path: `/codebases/repositories/${ids.repositories.web}`,
+    path: `/dashboard/codebases/repositories/${ids.repositories.web}`,
   },
   {
     name: "repository-external-actions",
-    path: "/codebases/repositories/repo-acme-gitlab-platform",
+    path: "/dashboard/codebases/repositories/repo-acme-gitlab-platform",
     clickTab: "External pipeline actions",
   },
   {
     name: "repository-export",
-    path: `/codebases/repositories/${ids.repositories.ios}`,
+    path: `/dashboard/codebases/repositories/${ids.repositories.ios}`,
     transferWorkflow: "export",
   },
   {
     name: "repository-preparations",
-    path: `/codebases/repositories/${ids.repositories.web}`,
+    path: `/dashboard/codebases/repositories/${ids.repositories.web}`,
     clickTab: "Preparations",
   },
-  { name: "worktrees", path: "/worktrees" },
-  { name: "active-agent-selector", path: "/worktrees", activeAgentMenu: true },
+  { name: "worktrees", path: "/dashboard/worktrees" },
+  {
+    name: "active-agent-selector",
+    path: "/dashboard/worktrees",
+    activeAgentMenu: true,
+  },
   {
     name: "active-agent-worktrees",
-    path: "/worktrees",
+    path: "/dashboard/worktrees",
     initScript: `localStorage.setItem("ade.active-agent.user-screenshot-admin", JSON.stringify({activeAgentId: "${ids.agents.studio}", pageAgents: {}}));`,
     readyTexts: ["Controlled by Active Agent"],
   },
   {
     name: "prepare",
-    path: "/prepare",
+    path: "/system/prepare",
     readyGraphqlOperation: "WorktreePreparationOverview",
     readyTexts: ["web-app"],
   },
@@ -150,59 +161,66 @@ export const routes: RouteEntry[] = [
     // The stub answers the inspection instead, so the commits and changes render and no job is
     // dispatched.
     name: "worktree-detail",
-    path: `/worktrees/${ids.worktrees.webFeature}`,
+    path: `/dashboard/worktrees/${ids.worktrees.webFeature}`,
     stubWorktree: true,
   },
   {
     // Pinned to the worktree the seeded coverage report measured, with that report selected,
     // so the capture shows the coverage overlay rather than an unannotated diff.
     name: "changes",
-    path: `/changes?worktree=${ids.worktrees.iosMain}&scope=BRANCH&coverage=report-archive-coverage&path=AcmeApp/Search/SearchCoordinator.swift`,
+    path: `/dashboard/changes?worktree=${ids.worktrees.iosMain}&scope=BRANCH&coverage=report-archive-coverage&path=AcmeApp/Search/SearchCoordinator.swift`,
     stubWorktree: true,
   },
 
   // Builds
-  { name: "builds", path: "/builds" },
+  { name: "builds", path: "/dashboard/builds" },
   {
     name: "build-configurations",
-    path: "/builds",
+    path: "/dashboard/builds",
     clickTab: "Configurations",
   },
   {
     name: "build-configuration-detail",
-    path: `/builds/configurations/${ids.buildConfigurations.release}`,
+    path: `/dashboard/builds/configurations/${ids.buildConfigurations.release}`,
   },
-  { name: "build-custom-detail", path: "/builds/build-ios-custom" },
-  { name: "build-script-editor", path: "/builds", buildWorkflow: "script" },
+  { name: "build-custom-detail", path: "/dashboard/builds/build-ios-custom" },
+  {
+    name: "build-script-editor",
+    path: "/dashboard/builds",
+    buildWorkflow: "script",
+  },
   {
     name: "build-start",
-    path: `/apps/${ids.apps.mobileSuite}`,
+    path: `/dashboard/apps/${ids.apps.mobileSuite}`,
     stubWorktree: true,
     buildWorkflow: "start",
   },
   {
     name: "build-custom",
-    path: `/apps/${ids.apps.mobileSuite}`,
+    path: `/dashboard/apps/${ids.apps.mobileSuite}`,
     stubWorktree: true,
     buildWorkflow: "custom",
   },
   {
     name: "repository-ios-project",
-    path: `/codebases/repositories/${ids.repositories.ios}`,
+    path: `/dashboard/codebases/repositories/${ids.repositories.ios}`,
     stubWorktree: true,
     buildWorkflow: "project",
   },
   {
     name: "app-build-overview",
     scrollTo: "[data-build-repository]",
-    path: `/apps/${ids.apps.mobileSuite}`,
+    path: `/dashboard/apps/${ids.apps.mobileSuite}`,
     readyTexts: ["Latest repository build"],
   },
-  { name: "build-detail", path: `/builds/${ids.builds.archive}` },
-  { name: "build-coverage", path: `/builds/${ids.builds.archive}/coverage` },
+  { name: "build-detail", path: `/dashboard/builds/${ids.builds.archive}` },
+  {
+    name: "build-coverage",
+    path: `/dashboard/builds/${ids.builds.archive}/coverage`,
+  },
   {
     name: "build-data",
-    path: "/build-data",
+    path: "/system/build-data",
     // The page starts a Derived Data scan under a request id from `createClientId()` and waits
     // for every online agent to answer. No agent is connected during a capture, so a random id
     // photographs the queued progress card and leaves three QUEUED jobs behind — jobs the
@@ -216,7 +234,7 @@ export const routes: RouteEntry[] = [
   },
   {
     name: "tailscale",
-    path: "/tailscale",
+    path: "/system/tailscale",
     readyGraphqlOperation: "TailscaleServeOverview",
     readyTexts: ["Developer dashboard", "studio.acme-tailnet.ts.net"],
     // The page automatically inspects every agent. Reuse the finished inspection seeded in
@@ -229,23 +247,29 @@ export const routes: RouteEntry[] = [
   },
 
   // Commands
-  { name: "commands", path: "/commands" },
-  { name: "command-new", path: "/commands/new" },
-  { name: "command-edit", path: `/commands/${ids.commands.runTests}/edit` },
-  { name: "command-run", path: `/commands/runs/${ids.commandRuns.latest}` },
+  { name: "commands", path: "/dashboard/commands" },
+  { name: "command-new", path: "/dashboard/commands/new" },
+  {
+    name: "command-edit",
+    path: `/dashboard/commands/${ids.commands.runTests}/edit`,
+  },
+  {
+    name: "command-run",
+    path: `/dashboard/commands/runs/${ids.commandRuns.latest}`,
+  },
 
   // Devices
-  { name: "devices", path: "/devices" },
-  { name: "device-detail", path: `/devices/${ids.devices.iphone}` },
-  { name: "device-enroll", path: "/devices/enroll" },
+  { name: "devices", path: "/system/devices" },
+  { name: "device-detail", path: `/system/devices/${ids.devices.iphone}` },
+  { name: "device-enroll", path: "/system/devices/enroll" },
 
   // Jobs
-  { name: "job-detail", path: `/jobs/${ids.jobs.codebaseRefresh}` },
+  { name: "job-detail", path: `/dashboard/jobs/${ids.jobs.codebaseRefresh}` },
 
   // GitHub
   {
     name: "pull-requests",
-    path: "/pull-requests",
+    path: "/github/pull-requests",
     readyGraphqlOperation: "GitHubPullRequests",
     readyTexts: [
       "Add quick search to the global navigation bar",
@@ -254,25 +278,25 @@ export const routes: RouteEntry[] = [
   },
   {
     name: "pull-request-detail",
-    path: `/pull-requests/${ids.pullRequests.owner}/${ids.pullRequests.repository}/${ids.pullRequests.number}`,
+    path: `/github/pull-requests/${ids.pullRequests.owner}/${ids.pullRequests.repository}/${ids.pullRequests.number}`,
   },
-  { name: "actions", path: "/actions" },
-  { name: "actions-cache", path: "/actions-cache" },
+  { name: "actions", path: "/github/actions" },
+  { name: "actions-cache", path: "/github/actions-cache" },
   {
     name: "comments",
-    path: "/comments",
+    path: "/github/comments",
     readyGraphqlOperation: "GitHubReviewThreads",
     readyTexts: [
       "This debounce is recreated on every render — move it into a ref so typing does not reset the timer.",
       "No review comments",
     ],
   },
-  { name: "webhooks", path: "/webhooks" },
-  { name: "polling", path: "/polling" },
-  { name: "github-cache", path: "/github-cache" },
+  { name: "webhooks", path: "/github/webhooks" },
+  { name: "polling", path: "/system/polling" },
+  { name: "github-cache", path: "/github/cache" },
   {
     name: "github-cache-entry",
-    path: `/github-cache/entries/${ids.githubCacheEntries.pullRequests}`,
+    path: `/github/cache/entries/${ids.githubCacheEntries.pullRequests}`,
   },
 
   // GitLab
@@ -311,14 +335,14 @@ export const routes: RouteEntry[] = [
     // it photographs the merge-request and pipeline cards instead of their GitHub equivalents.
     // Stubbed for the same reason: the page inspects the checkout on load.
     name: "gitlab-worktree-detail",
-    path: `/worktrees/${ids.worktrees.gitlabRetry}`,
+    path: `/dashboard/worktrees/${ids.worktrees.gitlabRetry}`,
     stubWorktree: true,
   },
   {
     // Settings → Integrations → GitLab, the credential-only card the setup page describes.
     // It sits below the fold behind the Jira and GitHub cards, hence the scroll.
     name: "gitlab-settings",
-    path: "/settings",
+    path: "/system/settings",
     scrollTo: "#gitlab-token",
   },
   { name: "gitlab-webhooks", path: "/gitlab/webhooks" },
@@ -327,96 +351,108 @@ export const routes: RouteEntry[] = [
   // Jira
   { name: "jira-tickets", path: "/jira/tickets" },
   { name: "jira-ticket-detail", path: `/jira/tickets/${ids.jira.issueKey}` },
-  { name: "jira-webhooks", path: "/jira-webhooks" },
-  { name: "jira-cache", path: "/jira-cache" },
+  { name: "jira-webhooks", path: "/jira/webhooks" },
+  { name: "jira-cache", path: "/jira/cache" },
   {
     name: "jira-cache-ticket",
     stubJiraCacheTicket: true,
     readyGraphqlOperation: "CachedJiraTicket",
     readyTexts: ["Summary response"],
-    path: `/jira-cache/tickets/${ids.jira.issueKey}`,
+    path: `/jira/cache/tickets/${ids.jira.issueKey}`,
   },
 
   // Skills
-  { name: "skills", path: "/skills" },
-  { name: "skill-detail", path: `/skills/${ids.skills.lint}` },
-  { name: "skill-groups", path: "/skills/groups" },
+  { name: "skills", path: "/ai/skills" },
+  { name: "skill-detail", path: `/ai/skills/${ids.skills.lint}` },
+  { name: "skill-groups", path: "/ai/skills/groups" },
   {
     name: "skill-group-detail",
-    path: `/skills/groups/${ids.skillGroups.core}`,
+    path: `/ai/skills/groups/${ids.skillGroups.core}`,
   },
-  { name: "skill-sync-run", path: `/skills/sync/${ids.skillSyncRuns.latest}` },
+  {
+    name: "skill-sync-run",
+    path: `/ai/skills/sync/${ids.skillSyncRuns.latest}`,
+  },
 
   // Tools
-  { name: "tools", path: "/tools", readyTexts: ["Core Tools"] },
+  { name: "tools", path: "/system/tools", readyTexts: ["Core Tools"] },
   {
     name: "tools-catalog-export",
-    path: "/tools",
+    path: "/system/tools",
     readyTexts: ["Core Tools"],
     clickButton: "Export tool catalog",
   },
   {
     name: "tools-preset-editor",
-    path: "/tools",
+    path: "/system/tools",
     readyTexts: ["Core Tools"],
     clickButton: "Edit preset",
   },
   {
     name: "tools-preset-import",
-    path: "/tools",
+    path: "/system/tools",
     readyTexts: ["Core Tools"],
     mcpImportReview: true,
   },
   {
     name: "tools-preset-ai-prompt",
-    path: "/tools",
+    path: "/system/tools",
     readyTexts: ["Core Tools"],
     clickButton: "Import presets",
     mcpAiPrompt: true,
   },
 
   // Workflows
-  { name: "workflows", path: "/workflows" },
-  { name: "workflow-detail", path: `/workflows/${ids.workflows.prReview}` },
-  { name: "workflow-edit", path: `/workflows/${ids.workflows.prReview}/edit` },
-  { name: "workflow-new", path: "/workflows/new" },
-  { name: "workflow-run", path: `/workflows/runs/${ids.workflowRuns.latest}` },
+  { name: "workflows", path: "/dashboard/workflows" },
+  {
+    name: "workflow-detail",
+    path: `/dashboard/workflows/${ids.workflows.prReview}`,
+  },
+  {
+    name: "workflow-edit",
+    path: `/dashboard/workflows/${ids.workflows.prReview}/edit`,
+  },
+  { name: "workflow-new", path: "/dashboard/workflows/new" },
+  {
+    name: "workflow-run",
+    path: `/dashboard/workflows/runs/${ids.workflowRuns.latest}`,
+  },
 
   // Signing
-  { name: "provisioning-profiles", path: "/provisioning-profiles" },
+  { name: "provisioning-profiles", path: "/system/provisioning-profiles" },
   {
     // Signing profiles are addressed by their composite `uuid:contentHash`, not the row id.
     name: "provisioning-profile-detail",
-    path: `/provisioning-profiles/${ids.signing.profileAppStoreUuid}:${ids.signing.profileAppStoreContentHash}`,
+    path: `/system/provisioning-profiles/${ids.signing.profileAppStoreUuid}:${ids.signing.profileAppStoreContentHash}`,
   },
 
   // Observability
-  { name: "console-logs", path: "/console-logs" },
-  { name: "analytics-events", path: "/analytics-events" },
-  { name: "unified-events", path: "/unified-events" },
+  { name: "console-logs", path: "/debugging/console-logs" },
+  { name: "analytics-events", path: "/debugging/analytics-events" },
+  { name: "unified-events", path: "/debugging/unified-events" },
 
   // Crash reports and dSYMs
   {
     name: "crashes",
-    path: "/crashes",
+    path: "/debugging/crashes",
     readyGraphqlOperation: "CrashesPage",
     readyTexts: ["EXC_BREAKPOINT · CartViewModel.item(at:)"],
   },
   {
     name: "crash-detail",
-    path: `/crashes/${ids.crashes.checkout}`,
+    path: `/debugging/crashes/${ids.crashes.checkout}`,
     readyGraphqlOperation: "CrashDetail",
     readyTexts: ["CheckoutView.submit()"],
   },
   {
     name: "crashes-dsyms",
-    path: "/crashes/dsyms",
+    path: "/debugging/crashes/dsyms",
     readyGraphqlOperation: "DsymsPage",
     readyTexts: ["AcmeWidgets.appex.dSYM"],
   },
   {
     name: "dsym-detail",
-    path: `/crashes/dsyms/${ids.dsyms.app}`,
+    path: `/debugging/crashes/dsyms/${ids.dsyms.app}`,
     readyGraphqlOperation: "DsymDetail",
     readyTexts: ["3F9C7E2A-1B4D-4C8E-9A0B-1C2D3E4F5A6B"],
   },
@@ -424,43 +460,43 @@ export const routes: RouteEntry[] = [
   // Hosted SSE endpoints
   {
     name: "sse-endpoints",
-    path: "/sse",
+    path: "/debugging/sse",
     readyGraphqlOperation: "SseEndpointsPage",
     readyTexts: ["Product recommendation stream"],
   },
   {
     name: "sse-endpoint-detail",
-    path: `/sse/${ids.sse.productFeed}`,
+    path: `/debugging/sse/${ids.sse.productFeed}`,
     readyGraphqlOperation: "SseEndpointDetail",
     readyTexts: ["Product recommendation stream"],
   },
   {
     name: "sse-mocks",
-    path: `/sse/${ids.sse.productFeed}/mocks`,
+    path: `/debugging/sse/${ids.sse.productFeed}/mocks`,
     readyGraphqlOperation: "SseEndpointDetail",
     readyTexts: ["Mock composition builder"],
   },
   {
     name: "sse-breakpoints",
-    path: "/sse/breakpoints",
+    path: "/debugging/sse/breakpoints",
     readyGraphqlOperation: "SseBreakpointsPage",
     readyTexts: ["Assistant response stream"],
   },
   {
     name: "sse-storage",
-    path: "/sse/storage",
+    path: "/debugging/sse/storage",
     readyGraphqlOperation: "SseStoragePage",
     readyTexts: ["tenant-config"],
   },
   {
     name: "sse-history",
-    path: "/sse/history",
+    path: "/debugging/sse/history",
     readyGraphqlOperation: "SseHistoryPage",
     readyTexts: ["Product recommendation stream"],
   },
   {
     name: "sse-stream-history",
-    path: `/sse/history/${ids.sse.history}`,
+    path: `/debugging/sse/history/${ids.sse.history}`,
     readyGraphqlOperation: "SseHistoryDetail",
     readyTexts: ["Product recommendation Stream", "display_card"],
   },
@@ -468,7 +504,7 @@ export const routes: RouteEntry[] = [
   // Usage & costs
   {
     name: "usage",
-    path: "/usage",
+    path: "/ai/usage",
     // The page collects ccusage afresh under a request id from `createClientId()` and waits
     // for every online agent to report. No agent is connected during a capture, so a random
     // id leaves it on its spinner until the 150s collection deadline. Pinning the id to the
@@ -479,28 +515,28 @@ export const routes: RouteEntry[] = [
       value: () => "${ids.ccusageCollections.captured}",
     });`,
   },
-  { name: "costs", path: "/costs" },
+  { name: "costs", path: "/ai/costs" },
 
   // Notifications & push
-  { name: "notifications", path: "/notifications" },
-  { name: "push-notifications", path: "/push-notifications" },
+  { name: "notifications", path: "/dashboard/notifications" },
+  { name: "push-notifications", path: "/debugging/push-notifications" },
 
   // System
   {
     name: "status",
-    path: "/status",
+    path: "/system/status",
     readyGraphqlOperation: "InstallationStatus",
     readyTexts: ["Studio Mac"],
   },
   {
     name: "cli-health-checks",
-    path: "/status",
+    path: "/system/status",
     readyGraphqlOperation: "InstallationStatus",
     readyTexts: ["Studio Mac"],
     clickButton: "CLI health check settings",
   },
-  { name: "users", path: "/users", readyTexts: ["Avery Morgan"] },
-  { name: "api-keys", path: "/api-keys", readyTexts: ["CI automation"] },
-  { name: "credentials", path: "/credentials" },
-  { name: "settings", path: "/settings" },
+  { name: "users", path: "/system/users", readyTexts: ["Avery Morgan"] },
+  { name: "api-keys", path: "/system/api-keys", readyTexts: ["CI automation"] },
+  { name: "credentials", path: "/system/credentials" },
+  { name: "settings", path: "/system/settings" },
 ];

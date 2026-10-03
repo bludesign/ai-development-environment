@@ -269,7 +269,7 @@ export function WorkflowQuestionActions({
                   {batch.questions[0]!.header || batch.questions[0]!.prompt}
                 </p>
                 <Button asChild size="sm" variant="outline">
-                  <Link href={`/workflows/runs/${run.id}`}>
+                  <Link href={`/dashboard/workflows/runs/${run.id}`}>
                     {t("answerOnRunPage")}
                   </Link>
                 </Button>

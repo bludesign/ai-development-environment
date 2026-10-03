@@ -136,7 +136,7 @@ beforeEach(() => {
   intersectionCallback = null;
   intersectionTarget = null;
   intersectionObserver = null;
-  window.history.replaceState(null, "", "/actions");
+  window.history.replaceState(null, "", "/github/actions");
   requestMock.mockImplementation(async (query, variables) => {
     if (query.includes("GitHubPageConfiguration")) {
       return {
@@ -431,7 +431,7 @@ describe("ActionsPage", () => {
   });
 
   test("loads an explicitly disabled latest-only filter from the URL", async () => {
-    window.history.replaceState(null, "", "/actions?latest=false");
+    window.history.replaceState(null, "", "/github/actions?latest=false");
 
     render(<ActionsPage />);
 
@@ -469,7 +469,7 @@ describe("ActionsPage", () => {
       screen
         .getByRole("menuitem", { name: "Open details" })
         .getAttribute("href"),
-    ).toBe("/pull-requests/acme/widgets/17");
+    ).toBe("/github/pull-requests/acme/widgets/17");
     fireEvent.click(screen.getByRole("menuitem", { name: "Merge" }));
     const mergeDialog = await screen.findByRole("dialog", {
       name: "Merge pull request",
@@ -505,7 +505,7 @@ describe("ActionsPage", () => {
     ).toBe(run.url);
     expect(
       screen.getByRole("menuitem", { name: "Worktree" }).getAttribute("href"),
-    ).toBe("/worktrees/worktree-1");
+    ).toBe("/dashboard/worktrees/worktree-1");
     fireEvent.keyDown(screen.getByRole("menu"), { key: "Escape" });
     expect(screen.getByText("acme/private:")).toBeDefined();
 
@@ -602,7 +602,7 @@ describe("ActionsPage", () => {
     window.history.replaceState(
       null,
       "",
-      "/actions?repository=codebase-repository-1&branch=feature%2FAPP-42&pipeline=workflow-1",
+      "/github/actions?repository=codebase-repository-1&branch=feature%2FAPP-42&pipeline=workflow-1",
     );
 
     render(<ActionsPage />);

@@ -223,37 +223,37 @@ export function SidebarStatusFooter() {
   const activity = [
     {
       key: "actions",
-      href: "/",
+      href: "/dashboard/action-center",
       icon: ListTodo,
       count: actionCenter?.totalCount ?? 0,
     },
     {
       key: "workflows",
-      href: "/workflows",
+      href: "/dashboard/workflows",
       icon: Waypoints,
       count: status?.activity.workflows ?? 0,
     },
     {
       key: "plans",
-      href: "/plans",
+      href: "/ai/plans",
       icon: ClipboardList,
       count: status?.activity.plans ?? 0,
     },
     {
       key: "sessions",
-      href: "/sessions",
+      href: "/ai/sessions",
       icon: MessagesSquare,
       count: status?.activity.sessions ?? 0,
     },
     {
       key: "builds",
-      href: "/builds",
+      href: "/dashboard/builds",
       icon: Hammer,
       count: status?.activity.builds ?? 0,
     },
     {
       key: "commands",
-      href: "/commands",
+      href: "/dashboard/commands",
       icon: Terminal,
       count: status?.activity.commands ?? 0,
     },
@@ -272,7 +272,7 @@ export function SidebarStatusFooter() {
     <div className="space-y-2 border-t border-sidebar-border p-2">
       <Link
         className="flex items-center justify-between rounded-md px-2 py-1.5 text-xs hover:bg-sidebar-accent"
-        href="/usage"
+        href="/ai/usage"
         onClick={closeMobileNavigation}
       >
         <span className="flex items-center gap-2">
@@ -372,7 +372,7 @@ export function SidebarStatusFooter() {
               <PopoverTitle>
                 <Link
                   className="hover:underline"
-                  href="/build-data"
+                  href="/system/build-data"
                   onClick={closeMobileNavigation}
                 >
                   {t("freeDiskSpace")}
@@ -409,7 +409,7 @@ export function SidebarStatusFooter() {
                 <div className="flex items-center justify-between gap-2">
                   <Link
                     className="font-medium hover:underline"
-                    href={`/agents/${agent.agent.id}`}
+                    href={`/dashboard/agents/${agent.agent.id}`}
                     onClick={closeMobileNavigation}
                   >
                     {agent.agent.name}

@@ -248,7 +248,7 @@ export function PullRequestDetailPage({
             <EmptyDescription>{t("notFoundDescription")}</EmptyDescription>
           </EmptyHeader>
           <Button asChild className="mt-4" variant="outline">
-            <Link href="/pull-requests">{t("back")}</Link>
+            <Link href="/github/pull-requests">{t("back")}</Link>
           </Button>
         </Empty>
       </section>

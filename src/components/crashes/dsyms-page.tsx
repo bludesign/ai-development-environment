@@ -89,7 +89,7 @@ export function DsymBuildLink({ upload }: { upload: DsymUpload }) {
     return (
       <Link
         className={rowLinkClass}
-        href={`/builds/${encodeURIComponent(upload.linkedBuildId)}`}
+        href={`/dashboard/builds/${encodeURIComponent(upload.linkedBuildId)}`}
       >
         <span className="font-mono text-xs">
           {upload.buildId ?? upload.linkedBuildId.slice(0, 8)}
@@ -146,7 +146,7 @@ export function DsymTable({
       </TableHeader>
       <TableBody>
         {dsyms.map((dsym) => {
-          const href = `/crashes/dsyms/${encodeURIComponent(dsym.id)}`;
+          const href = `/debugging/crashes/dsyms/${encodeURIComponent(dsym.id)}`;
           return (
             <TableRow
               className="cursor-pointer"

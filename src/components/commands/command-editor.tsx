@@ -190,7 +190,7 @@ export function CommandEditor({ commandId }: { commandId?: string }) {
         commandId ? { id: commandId, input } : { input },
       );
       router.push(
-        `/commands/${data.updateCommandDefinition?.id ?? data.createCommandDefinition?.id}/edit`,
+        `/dashboard/commands/${data.updateCommandDefinition?.id ?? data.createCommandDefinition?.id}/edit`,
       );
       router.refresh();
       setError(null);

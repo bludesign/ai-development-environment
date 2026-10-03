@@ -254,7 +254,7 @@ describe("BuildDataPage", () => {
 
     expect(await screen.findByText("App-hash")).toBeDefined();
     expect(screen.getByRole("link", { name: "App" }).getAttribute("href")).toBe(
-      "/worktrees/worktree-1",
+      "/dashboard/worktrees/worktree-1",
     );
     expect(screen.getByText("Build starting")).toBeDefined();
     for (const agentLink of screen.getAllByRole("link", { name: "Builder" })) {

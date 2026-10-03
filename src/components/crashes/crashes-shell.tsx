@@ -28,11 +28,16 @@ export function CrashesShell({
   const [dialog, setDialog] = useState<
     "crashes" | "dsyms" | "settings" | "api" | null
   >(null);
-  const onDsyms = pathname.startsWith("/crashes/dsyms");
+  const onDsyms = pathname.startsWith("/debugging/crashes/dsyms");
   const tabs = [
-    { href: "/crashes", label: t("crashesTab"), icon: Bug, active: !onDsyms },
     {
-      href: "/crashes/dsyms",
+      href: "/debugging/crashes",
+      label: t("crashesTab"),
+      icon: Bug,
+      active: !onDsyms,
+    },
+    {
+      href: "/debugging/crashes/dsyms",
       label: t("dsymsTab"),
       icon: FileArchive,
       active: onDsyms,

@@ -13,7 +13,10 @@ import { TooltipProvider } from "@/components/ui/tooltip";
 import { controlPlaneRequest } from "@/lib/control-plane-client";
 import { LEFT_SIDEBAR_COOKIE, RIGHT_SIDEBAR_COOKIE } from "@/lib/sidebar-state";
 
-const navigation = vi.hoisted(() => ({ pathname: "/", push: vi.fn() }));
+const navigation = vi.hoisted(() => ({
+  pathname: "/dashboard/action-center",
+  push: vi.fn(),
+}));
 
 vi.mock("@/i18n/navigation", async () => {
   const React = await import("react");
@@ -94,7 +97,7 @@ function clearCookies() {
 describe("AppShell", () => {
   beforeEach(() => {
     setViewportWidth(1280);
-    navigation.pathname = "/";
+    navigation.pathname = "/dashboard/action-center";
     navigation.push.mockReset();
     clearCookies();
     requestMock.mockReset();
@@ -127,21 +130,23 @@ describe("AppShell", () => {
 
     expect(
       screen.getByRole("link", { name: "Usage" }).getAttribute("href"),
-    ).toBe("/usage");
+    ).toBe("/ai/usage");
     expect(
       screen
         .getAllByRole("link", { name: "Action Center" })
-        .some((link) => link.getAttribute("href") === "/"),
+        .some(
+          (link) => link.getAttribute("href") === "/dashboard/action-center",
+        ),
     ).toBe(true);
     expect(
       screen.getByRole("link", { name: "Comments" }).getAttribute("href"),
-    ).toBe("/comments");
+    ).toBe("/github/comments");
     expect(
       screen.getByRole("link", { name: "Actions" }).getAttribute("href"),
-    ).toBe("/actions");
+    ).toBe("/github/actions");
     expect(
       screen.getByRole("link", { name: "Devices" }).getAttribute("href"),
-    ).toBe("/devices");
+    ).toBe("/system/devices");
     expect(
       screen
         .getByText("Screenshot User")
@@ -151,7 +156,7 @@ describe("AppShell", () => {
       screen
         .getAllByRole("link", { name: "Cache" })
         .map((link) => link.getAttribute("href")),
-    ).toEqual(["/github-cache", "/jira-cache"]);
+    ).toEqual(["/github/cache", "/jira/cache"]);
 
     const leftToggle = screen.getByRole("button", {
       name: "Hide navigation",
@@ -208,7 +213,7 @@ describe("AppShell", () => {
       (await screen.findByRole("link", { name: "Webhooks" })).getAttribute(
         "href",
       ),
-    ).toBe("/webhooks");
+    ).toBe("/github/webhooks");
   });
 
   test.each([
@@ -303,18 +308,22 @@ describe("AppShell", () => {
   });
 
   test("compacts deep breadcrumbs on small screens without invalid links", () => {
-    navigation.pathname = "/pull-requests/acme/widgets/42";
+    navigation.pathname = "/github/pull-requests/acme/widgets/42";
     setViewportWidth(375);
     renderShell();
 
     const breadcrumb = screen.getByRole("navigation", {
       name: "Breadcrumb",
     });
+    expect(within(breadcrumb).getByText("GitHub")).toBeDefined();
+    expect(
+      within(breadcrumb).queryByRole("link", { name: "GitHub" }),
+    ).toBeNull();
     expect(
       within(breadcrumb)
         .getByRole("link", { name: "Pull Requests" })
         .getAttribute("href"),
-    ).toBe("/pull-requests");
+    ).toBe("/github/pull-requests");
     expect(within(breadcrumb).queryByRole("link", { name: "acme" })).toBeNull();
     expect(
       within(breadcrumb).getByText("acme").parentElement?.className,
@@ -327,6 +336,32 @@ describe("AppShell", () => {
     expect(
       within(breadcrumb).getByText("42").getAttribute("aria-current"),
     ).toBe("page");
+  });
+
+  test.each([
+    ["/dashboard/apps", "Dashboard", "Apps"],
+    ["/ai/skills", "AI", "Skills"],
+    ["/debugging/sse", "Debugging", "SSE Endpoints"],
+    ["/github/cache", "GitHub", "Cache"],
+    ["/gitlab/cache", "GitLab", "Cache"],
+    ["/jira/webhooks", "Jira", "Webhooks"],
+    ["/system/settings", "System", "Settings"],
+  ])("shows the section and current page for %s", (pathname, section, page) => {
+    navigation.pathname = pathname;
+    renderShell();
+
+    const breadcrumb = screen.getByRole("navigation", { name: "Breadcrumb" });
+    expect(
+      within(breadcrumb)
+        .getAllByRole("listitem")
+        .map((item) => item.textContent),
+    ).toEqual([section, page]);
+    expect(
+      within(breadcrumb).getByText(page).getAttribute("aria-current"),
+    ).toBe("page");
+    expect(
+      within(breadcrumb).queryByRole("link", { name: section }),
+    ).toBeNull();
   });
 
   test("owns consistent page gutters and removes page-level width caps", () => {

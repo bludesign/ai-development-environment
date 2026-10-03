@@ -335,7 +335,7 @@ export function WorkflowDetailPage({ workflowId }: { workflowId: string }) {
         `mutation RunWorkflow($input: TriggerWorkflowInput!) { triggerWorkflow(input: $input) { id } }`,
         { input: { workflowId: workflow.id, sessionData: {}, choice } },
       );
-      router.push(`/workflows/runs/${data.triggerWorkflow.id}`);
+      router.push(`/dashboard/workflows/runs/${data.triggerWorkflow.id}`);
     } catch (value) {
       setError(value instanceof Error ? value.message : String(value));
     }
@@ -449,7 +449,7 @@ export function WorkflowDetailPage({ workflowId }: { workflowId: string }) {
             <Download /> {t("export")}
           </Button>
           <Button asChild variant="outline">
-            <Link href={`/workflows/${workflow.id}/edit`}>
+            <Link href={`/dashboard/workflows/${workflow.id}/edit`}>
               <Pencil /> {t("edit")}
             </Link>
           </Button>
@@ -732,7 +732,7 @@ export function WorkflowDetailPage({ workflowId }: { workflowId: string }) {
                       <TableCell>
                         <Link
                           className="font-medium hover:underline"
-                          href={`/workflows/runs/${run.id}`}
+                          href={`/dashboard/workflows/runs/${run.id}`}
                         >
                           #{run.displayNumber}
                         </Link>

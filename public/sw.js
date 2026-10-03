@@ -11,7 +11,7 @@ self.addEventListener("push", (event) => {
     data.href.startsWith("/") &&
     !data.href.startsWith("//")
       ? data.href
-      : "/notifications";
+      : "/dashboard/notifications";
   event.waitUntil(
     self.registration.showNotification(data.title || "Notification", {
       body: typeof data.body === "string" ? data.body : "",
@@ -25,7 +25,7 @@ self.addEventListener("push", (event) => {
 
 self.addEventListener("notificationclick", (event) => {
   event.notification.close();
-  const href = event.notification.data?.href || "/notifications";
+  const href = event.notification.data?.href || "/dashboard/notifications";
   const target = new URL(href, self.location.origin).href;
   event.waitUntil(
     clients

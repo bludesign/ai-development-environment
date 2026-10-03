@@ -638,7 +638,7 @@ describe("StartBuildDialog", () => {
   test("links to repository settings when builds are not configured", async () => {
     render(
       <StartBuildButton
-        buildSettingsHref="/codebases/repositories/repository-1"
+        buildSettingsHref="/dashboard/codebases/repositories/repository-1"
         codebaseId="codebase-1"
         disabled
         disabledReason="Build settings are missing"
@@ -659,7 +659,7 @@ describe("StartBuildDialog", () => {
       name: "Go to repository settings to configure builds",
     });
     expect(settingsLink.getAttribute("href")).toBe(
-      "/codebases/repositories/repository-1",
+      "/dashboard/codebases/repositories/repository-1",
     );
 
     fireEvent.keyDown(document, { key: "Escape" });

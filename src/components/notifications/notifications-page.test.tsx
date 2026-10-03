@@ -44,7 +44,7 @@ const notification = {
   typeKey: "IOS_BUILD_SUCCEEDED",
   title: "iOS build succeeded",
   body: "Example · Debug · main",
-  href: "/builds/build-1",
+  href: "/dashboard/builds/build-1",
   resourceKind: "BUILD",
   resourceId: "build-1",
   worktreeId: "worktree-1",
