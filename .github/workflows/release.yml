@@ -247,6 +247,17 @@ jobs:
               formula = formula.replace(urlLine, `${urlLine}\n${shaLine}`);
             }
 
+            // Source archives keep the development package version. Stamp the
+            // formula's release version before esbuild embeds the manifest.
+            const versionCommand = '    system "npm", "version", version.to_s, "--no-git-tag-version", "--allow-same-version", "--prefix", "packages/control-agent" unless build.head?';
+            if (!formula.includes(versionCommand)) {
+              const buildCommand = '    system "npm", "run", "agent:build"';
+              if (!formula.includes(buildCommand)) {
+                throw new Error(`${path} is missing the control-agent build command`);
+              }
+              formula = formula.replace(buildCommand, `${versionCommand}\n${buildCommand}`);
+            }
+
             await github.rest.repos.createOrUpdateFileContents({
               owner,
               repo,

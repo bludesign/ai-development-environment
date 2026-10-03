@@ -27,7 +27,11 @@ import { CRASH_JOB_KINDS } from "@ai-development-environment/agent-contract/cras
 import { CLI_HEALTH_JOB_KIND } from "@ai-development-environment/agent-contract/cli-health";
 import { TAILSCALE_SERVE_JOB_KINDS } from "@ai-development-environment/agent-contract/tailscale";
 
-export const AGENT_VERSION = process.env.CONTROL_AGENT_VERSION ?? "0.1.0";
+import packageManifest from "../package.json" with { type: "json" };
+
+// esbuild embeds the manifest so the standalone Homebrew executable keeps its version.
+export const AGENT_VERSION =
+  process.env.CONTROL_AGENT_VERSION ?? packageManifest.version;
 
 const PORTABLE_AGENT_CAPABILITIES = [
   CLI_HEALTH_JOB_KIND,
