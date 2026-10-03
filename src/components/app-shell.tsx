@@ -300,20 +300,33 @@ function HeaderBreadcrumbItem({
   const labelClassName = breadcrumb.isCurrent
     ? "block min-w-0 truncate"
     : "block max-w-48 truncate lg:max-w-64";
+  const content = breadcrumb.isLoading ? (
+    <>
+      <span className="sr-only">{breadcrumb.label}</span>
+      <span
+        aria-hidden="true"
+        data-slot="breadcrumb-loading"
+        className="inline-block h-4 w-24 animate-pulse rounded-md bg-muted align-middle motion-reduce:animate-none"
+      />
+    </>
+  ) : (
+    breadcrumb.label
+  );
 
   return (
-    <BreadcrumbItem className={`min-w-0 ${className ?? ""}`}>
+    <BreadcrumbItem
+      aria-busy={breadcrumb.isLoading || undefined}
+      className={`min-w-0 ${className ?? ""}`}
+    >
       {breadcrumb.isCurrent ? (
-        <BreadcrumbPage className={labelClassName}>
-          {breadcrumb.label}
-        </BreadcrumbPage>
-      ) : breadcrumb.href ? (
+        <BreadcrumbPage className={labelClassName}>{content}</BreadcrumbPage>
+      ) : breadcrumb.href && !breadcrumb.isLoading ? (
         <BreadcrumbLink asChild className={labelClassName}>
           <Link href={breadcrumb.href}>{breadcrumb.label}</Link>
         </BreadcrumbLink>
       ) : (
         <span className={`${labelClassName} text-muted-foreground`}>
-          {breadcrumb.label}
+          {content}
         </span>
       )}
     </BreadcrumbItem>

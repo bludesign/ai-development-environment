@@ -1,6 +1,9 @@
 "use client";
 
-import { useBreadcrumbLabel } from "@/components/breadcrumb-labels-provider";
+import {
+  useBreadcrumbLabel,
+  useBreadcrumbFallback,
+} from "@/components/breadcrumb-labels-provider";
 
 import {
   createRefreshCoalescer,
@@ -555,6 +558,14 @@ export function RunDetailPage({
   const [outputRaw, setOutputRaw] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+  useBreadcrumbFallback(
+    ["ai", "plans", runId],
+    Boolean(error) || (!loading && !run),
+  );
+  useBreadcrumbFallback(
+    ["ai", "sessions", runId],
+    Boolean(error) || (!loading && !run),
+  );
   const [busy, setBusy] = useState<string | null>(null);
   const [steering, setSteering] = useState("");
   const [steeringAttachments, setSteeringAttachments] = useState<

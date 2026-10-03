@@ -1,6 +1,9 @@
 "use client";
 
-import { useBreadcrumbLabel } from "@/components/breadcrumb-labels-provider";
+import {
+  useBreadcrumbLabel,
+  useBreadcrumbFallback,
+} from "@/components/breadcrumb-labels-provider";
 
 import { useCallback, useEffect, useState } from "react";
 import { useTranslations } from "next-intl";
@@ -125,6 +128,10 @@ export function BuildConfigurationDetail({
   const [editing, setEditing] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  useBreadcrumbFallback(
+    ["dashboard", "builds", "configurations", id],
+    Boolean(error) || (!loading && !configuration),
+  );
   const load = useCallback(async () => {
     try {
       const data = await controlPlaneRequest<{

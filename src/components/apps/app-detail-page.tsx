@@ -1,6 +1,9 @@
 "use client";
 
-import { useBreadcrumbLabel } from "@/components/breadcrumb-labels-provider";
+import {
+  useBreadcrumbLabel,
+  useBreadcrumbFallback,
+} from "@/components/breadcrumb-labels-provider";
 
 import {
   Boxes,
@@ -90,6 +93,10 @@ export function AppDetailPage({
   const [repositories, setRepositories] = useState<AppRepository[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  useBreadcrumbFallback(
+    ["dashboard", "apps", appId],
+    Boolean(error) || (!loading && !app),
+  );
   const [editorOpen, setEditorOpen] = useState(false);
   const [deleteOpen, setDeleteOpen] = useState(false);
 

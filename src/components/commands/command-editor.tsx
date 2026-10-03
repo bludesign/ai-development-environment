@@ -1,6 +1,9 @@
 "use client";
 
-import { useBreadcrumbLabel } from "@/components/breadcrumb-labels-provider";
+import {
+  useBreadcrumbLabel,
+  useBreadcrumbFallback,
+} from "@/components/breadcrumb-labels-provider";
 
 import { Archive, ChevronDown, CircleOff, Save } from "lucide-react";
 import { useTranslations } from "next-intl";
@@ -93,6 +96,7 @@ export function CommandEditor({ commandId }: { commandId?: string }) {
   const router = useRouter();
   const [form, setForm] = useState(initial);
   const [command, setCommand] = useState<CommandDefinition | null>(null);
+  const [commandLoaded, setCommandLoaded] = useState(false);
   useBreadcrumbLabel(["dashboard", "commands", command?.id], command?.name);
   const [agents, setAgents] = useState<CommandAgent[]>([]);
   const [repositories, setRepositories] = useState<
@@ -101,6 +105,10 @@ export function CommandEditor({ commandId }: { commandId?: string }) {
   const [archived, setArchived] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  useBreadcrumbFallback(
+    ["dashboard", "commands", commandId],
+    Boolean(error) || (commandLoaded && !command),
+  );
 
   useEffect(() => {
     void controlPlaneRequest<{
@@ -151,7 +159,8 @@ export function CommandEditor({ commandId }: { commandId?: string }) {
       })
       .catch((value) =>
         setError(value instanceof Error ? value.message : String(value)),
-      );
+      )
+      .finally(() => setCommandLoaded(true));
   }, [commandId]);
 
   const update = <K extends keyof Form>(key: K, value: Form[K]) =>

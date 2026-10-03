@@ -1,6 +1,9 @@
 "use client";
 
-import { useBreadcrumbLabel } from "@/components/breadcrumb-labels-provider";
+import {
+  useBreadcrumbLabel,
+  useBreadcrumbFallback,
+} from "@/components/breadcrumb-labels-provider";
 
 import { ArrowLeft, FolderGit2, Save } from "lucide-react";
 import { useTranslations } from "next-intl";
@@ -85,6 +88,10 @@ export function RepositoryDetailPage({
   const loadOwner = useRef<RefreshCoalescer | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  useBreadcrumbFallback(
+    ["dashboard", "codebases", "repositories", repositoryId],
+    Boolean(error) || (!loading && !repository),
+  );
   const [notice, setNotice] = useState<string | null>(null);
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");

@@ -1,6 +1,9 @@
 "use client";
 
-import { useBreadcrumbLabel } from "@/components/breadcrumb-labels-provider";
+import {
+  useBreadcrumbLabel,
+  useBreadcrumbFallback,
+} from "@/components/breadcrumb-labels-provider";
 
 import { CircleStop } from "lucide-react";
 import { useTranslations } from "next-intl";
@@ -47,6 +50,10 @@ export function JobMonitor({
   const [logs, setLogs] = useState<AgentJobLog[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  useBreadcrumbFallback(
+    ["dashboard", "jobs", jobId],
+    Boolean(error) || (!loading && !job),
+  );
   const output = useRef<HTMLDivElement>(null);
   const stickToBottom = useRef(true);
 

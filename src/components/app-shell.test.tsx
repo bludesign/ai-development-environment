@@ -8,6 +8,7 @@ import {
   within,
 } from "@testing-library/react";
 import type { ReactNode } from "react";
+import { renderToString } from "react-dom/server";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 
 import { AppShell } from "@/components/app-shell";
@@ -378,7 +379,9 @@ describe("AppShell", () => {
         .closest('[data-slot="breadcrumb-item"]')?.className,
     ).toContain("sm:hidden");
     expect(
-      within(breadcrumb).getByText("42").getAttribute("aria-current"),
+      within(breadcrumb)
+        .getByText("Loading…")
+        .parentElement?.getAttribute("aria-current"),
     ).toBe("page");
   });
 
@@ -399,6 +402,11 @@ describe("AppShell", () => {
       children: <AppDetailPage appId="app-id" view="worktrees" />,
     });
     const breadcrumb = screen.getByRole("navigation", { name: "Breadcrumb" });
+    expect(within(breadcrumb).queryByText("app-id")).toBeNull();
+    expect(
+      breadcrumb.querySelector('[data-slot="breadcrumb-loading"]'),
+    ).not.toBeNull();
+    expect(breadcrumb.querySelector('[aria-busy="true"]')).not.toBeNull();
     await waitFor(() => {
       expect(
         requestMock.mock.calls.some(([query]) =>
@@ -413,6 +421,10 @@ describe("AppShell", () => {
       ),
     ).toBe("page");
     expect(within(breadcrumb).queryByText("app-id")).toBeNull();
+    expect(
+      breadcrumb.querySelector('[data-slot="breadcrumb-loading"]'),
+    ).toBeNull();
+    expect(breadcrumb.querySelector('[aria-busy="true"]')).toBeNull();
     expect(
       within(breadcrumb)
         .getByRole("link", { name: "Apps" })
@@ -446,6 +458,43 @@ describe("AppShell", () => {
     ).toHaveLength(2);
   });
 
+  test("uses a placeholder in server-rendered HTML before detail-page effects run", () => {
+    navigation.pathname =
+      "/dashboard/apps/9b635047-5ca5-44ae-b4c6-572a935fc1dd";
+    const html = renderToString(
+      shell({
+        children: (
+          <AppDetailPage
+            appId="9b635047-5ca5-44ae-b4c6-572a935fc1dd"
+            view="worktrees"
+          />
+        ),
+      }),
+    );
+    expect(html).toContain('data-slot="breadcrumb-loading"');
+    expect(html).toContain("Loading…");
+    expect(html).not.toContain("9b635047-5ca5-44ae-b4c6-572a935fc1dd");
+  });
+
+  test("replaces the skeleton with Details when loading fails", async () => {
+    const originalRequest = requestMock.getMockImplementation()!;
+    requestMock.mockImplementation((query, variables, options) =>
+      query.includes("query AppDetail")
+        ? Promise.reject(new Error("Failed to load app"))
+        : originalRequest(query, variables, options),
+    );
+    navigation.pathname = "/dashboard/apps/app-id";
+    renderShell({
+      children: <AppDetailPage appId="app-id" view="worktrees" />,
+    });
+    const breadcrumb = screen.getByRole("navigation", { name: "Breadcrumb" });
+    await within(breadcrumb).findByText("Details");
+    expect(within(breadcrumb).queryByText("app-id")).toBeNull();
+    expect(
+      breadcrumb.querySelector('[data-slot="breadcrumb-loading"]'),
+    ).toBeNull();
+  });
+
   test("does not carry an app's title to a different app while it is loading or missing", async () => {
     const originalRequest = requestMock.getMockImplementation()!;
     let resolveSecond!: (value: { app: ManagedApp | null }) => void;
@@ -473,11 +522,16 @@ describe("AppShell", () => {
     );
     expect(within(breadcrumb).queryByText("First app")).toBeNull();
     expect(
-      within(breadcrumb).getByText("second").getAttribute("aria-current"),
+      within(breadcrumb)
+        .getByText("Loading…")
+        .parentElement?.getAttribute("aria-current"),
     ).toBe("page");
     await act(async () => resolveSecond({ app: null }));
     expect(within(breadcrumb).queryByText("First app")).toBeNull();
-    expect(within(breadcrumb).getByText("second")).toBeDefined();
+    expect(await within(breadcrumb).findByText("Details")).toBeDefined();
+    expect(
+      breadcrumb.querySelector('[data-slot="breadcrumb-loading"]'),
+    ).toBeNull();
 
     navigation.pathname = "/dashboard/apps";
     page.rerender(shell());

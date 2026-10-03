@@ -1,6 +1,9 @@
 "use client";
 
-import { useBreadcrumbLabel } from "@/components/breadcrumb-labels-provider";
+import {
+  useBreadcrumbLabel,
+  useBreadcrumbFallback,
+} from "@/components/breadcrumb-labels-provider";
 
 import {
   createRefreshCoalescer,
@@ -174,6 +177,10 @@ export function AgentDetail({ agentId }: { agentId: string }) {
   const [selectedJobId, setSelectedJobId] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
+  useBreadcrumbFallback(
+    ["dashboard", "agents", agentId],
+    Boolean(loadError) || (!loading && !agent),
+  );
   const [deleting, setDeleting] = useState(false);
   const [directoryBusy, setDirectoryBusy] = useState(false);
   const [directoryError, setDirectoryError] = useState<string | null>(null);

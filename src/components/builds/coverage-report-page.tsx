@@ -1,6 +1,9 @@
 "use client";
 
-import { useBreadcrumbLabel } from "@/components/breadcrumb-labels-provider";
+import {
+  useBreadcrumbLabel,
+  useBreadcrumbFallback,
+} from "@/components/breadcrumb-labels-provider";
 
 import {
   ArrowLeft,
@@ -98,6 +101,10 @@ export function CoverageReportPage({ buildId }: { buildId: string }) {
   const [worktreeId, setWorktreeId] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  useBreadcrumbFallback(
+    ["dashboard", "builds", buildId],
+    Boolean(error) || (!loading && !buildTitle),
+  );
   const [search, setSearch] = useState("");
   const [allFilesOpen, setAllFilesOpen] = useState(false);
   const [sort, setSort] = useState<CoverageSort>({

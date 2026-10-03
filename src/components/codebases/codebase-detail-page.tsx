@@ -1,6 +1,9 @@
 "use client";
 
-import { useBreadcrumbLabel } from "@/components/breadcrumb-labels-provider";
+import {
+  useBreadcrumbLabel,
+  useBreadcrumbFallback,
+} from "@/components/breadcrumb-labels-provider";
 
 import {
   CODEBASE_FETCH_JOB_KIND,
@@ -160,6 +163,10 @@ export function CodebaseDetailPage({ codebaseId }: { codebaseId: string }) {
   const [loading, setLoading] = useState(true);
   const [inspecting, setInspecting] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
+  useBreadcrumbFallback(
+    ["dashboard", "codebases", codebaseId],
+    Boolean(loadError) || (!loading && !codebase),
+  );
   const [operationError, setOperationError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [diffs, setDiffs] = useState<Record<string, DiffEntry>>({});

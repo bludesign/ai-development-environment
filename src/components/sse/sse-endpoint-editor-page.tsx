@@ -1,6 +1,9 @@
 "use client";
 
-import { useBreadcrumbLabel } from "@/components/breadcrumb-labels-provider";
+import {
+  useBreadcrumbLabel,
+  useBreadcrumbFallback,
+} from "@/components/breadcrumb-labels-provider";
 import { EndpointUrls } from "@/components/server-urls/server-url-controls";
 
 import {
@@ -277,6 +280,10 @@ export function SseEndpointEditorPage({
   const [mocksReadyId, setMocksReadyId] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  useBreadcrumbFallback(
+    ["debugging", "sse", endpointId],
+    Boolean(error) || (!loading && !endpoint && !isNew),
+  );
   const [notice, setNotice] = useState<string | null>(null);
 
   const fetchEndpoint = useCallback(

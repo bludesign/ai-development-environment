@@ -1,6 +1,9 @@
 "use client";
 
-import { useBreadcrumbLabel } from "@/components/breadcrumb-labels-provider";
+import {
+  useBreadcrumbLabel,
+  useBreadcrumbFallback,
+} from "@/components/breadcrumb-labels-provider";
 import { BuildArtifactDownload } from "./build-artifact-download";
 
 import { OutOfDateBadge } from "@/components/builds/out-of-date-badge";
@@ -252,6 +255,10 @@ export function BuildDetailPage({
   > | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  useBreadcrumbFallback(
+    ["dashboard", "builds", buildId],
+    Boolean(error) || (!loading && !build),
+  );
   const [rebuiltBuildId, setRebuiltBuildId] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [reportBusy, setReportBusy] = useState<

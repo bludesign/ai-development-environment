@@ -1,6 +1,9 @@
 "use client";
 
-import { useBreadcrumbLabel } from "@/components/breadcrumb-labels-provider";
+import {
+  useBreadcrumbLabel,
+  useBreadcrumbFallback,
+} from "@/components/breadcrumb-labels-provider";
 
 import {
   CirclePause,
@@ -195,6 +198,10 @@ export function WorkflowRunPage({ runId }: { runId: string }) {
   );
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  useBreadcrumbFallback(
+    ["dashboard", "workflows", "runs", runId],
+    Boolean(error) || (!loading && !run),
+  );
   const [busy, setBusy] = useState(false);
   const [repairText, setRepairText] = useState("{}");
   const [answers, setAnswers] = useState<Record<string, string[]>>({});

@@ -15,6 +15,8 @@
     "ai": "AI",
     "navigation": "Navigation",
     "breadcrumbLabel": "Breadcrumb",
+    "loadingBreadcrumb": "Loading…",
+    "details": "Details",
     "navigationDescription": "Primary navigation for AI Development Environment.",
     "actionCenter": "Action Center",
     "apps": "Apps",

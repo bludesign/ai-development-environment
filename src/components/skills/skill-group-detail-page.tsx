@@ -1,6 +1,9 @@
 "use client";
 
-import { useBreadcrumbLabel } from "@/components/breadcrumb-labels-provider";
+import {
+  useBreadcrumbLabel,
+  useBreadcrumbFallback,
+} from "@/components/breadcrumb-labels-provider";
 
 import { RefreshCw, Save, Search, Trash2 } from "lucide-react";
 import { useTranslations } from "next-intl";
@@ -39,6 +42,10 @@ export function SkillGroupDetailPage({ groupId }: { groupId: string }) {
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  useBreadcrumbFallback(
+    ["ai", "skills", "groups", groupId],
+    Boolean(error) || (!loading && !group),
+  );
 
   const notFoundMessage = t("groupNotFound");
   const load = useCallback(

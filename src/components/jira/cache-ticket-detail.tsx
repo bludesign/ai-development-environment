@@ -1,6 +1,9 @@
 "use client";
 
-import { useBreadcrumbLabel } from "@/components/breadcrumb-labels-provider";
+import {
+  useBreadcrumbLabel,
+  useBreadcrumbFallback,
+} from "@/components/breadcrumb-labels-provider";
 
 import { RefreshCw, Trash2 } from "lucide-react";
 import { useTranslations } from "next-intl";
@@ -41,6 +44,10 @@ export function JiraCacheTicketDetailPage({ issueKey }: { issueKey: string }) {
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  useBreadcrumbFallback(
+    ["jira", "cache", "tickets", issueKey],
+    Boolean(error) || (!loading && !ticket),
+  );
 
   const load = useCallback(async () => {
     setLoading(true);

@@ -1,6 +1,9 @@
 "use client";
 
-import { useBreadcrumbLabel } from "@/components/breadcrumb-labels-provider";
+import {
+  useBreadcrumbLabel,
+  useBreadcrumbFallback,
+} from "@/components/breadcrumb-labels-provider";
 
 import { ArrowLeft } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
@@ -38,6 +41,10 @@ export function SseStreamHistoryPage({ requestId }: { requestId: string }) {
   );
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  useBreadcrumbFallback(
+    ["debugging", "sse", "history", requestId],
+    Boolean(error) || (!loading && !request),
+  );
 
   const currentRequest = useRef<SseHistoryRequest | null>(null);
   const owner = useRef<RefreshCoalescer | null>(null);

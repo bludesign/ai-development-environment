@@ -1,6 +1,9 @@
 "use client";
 
-import { useBreadcrumbLabel } from "@/components/breadcrumb-labels-provider";
+import {
+  useBreadcrumbLabel,
+  useBreadcrumbFallback,
+} from "@/components/breadcrumb-labels-provider";
 
 import { Download, FilePlus2, PencilLine, Save, Trash2 } from "lucide-react";
 import { useTranslations } from "next-intl";
@@ -129,6 +132,10 @@ export function SkillDetailPage({ skillId }: { skillId: string }) {
   const [loading, setLoading] = useState(!creating);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  useBreadcrumbFallback(
+    ["ai", "skills", skillId],
+    Boolean(error) || (!loading && !loadedSkillId && !creating),
+  );
 
   const load = useCallback(async () => {
     if (creating) return;

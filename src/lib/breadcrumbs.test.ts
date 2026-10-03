@@ -32,6 +32,7 @@ const labels: Record<BreadcrumbLabelKey, string> = {
   dashboard: "Dashboard",
   debugging: "Debugging",
   devices: "Devices",
+  details: "Details",
   drafts: "Drafts",
   dsyms: "dSYMs",
   edit: "Edit",
@@ -43,6 +44,7 @@ const labels: Record<BreadcrumbLabelKey, string> = {
   gitlab: "GitLab",
   jira: "Jira",
   mergeRequests: "Merge Requests",
+  loadingBreadcrumb: "Loading…",
   mocks: "Mocks",
   new: "New",
   notifications: "Notifications",
@@ -77,6 +79,40 @@ const labels: Record<BreadcrumbLabelKey, string> = {
 const translate = (key: BreadcrumbLabelKey) => labels[key];
 
 describe("buildAppBreadcrumbs", () => {
+  test("marks every detail title as pending before the page publishes it", () => {
+    for (const page of globSync("**/page.tsx", {
+      cwd: "src/app/[locale]/(dashboard)",
+    })) {
+      const segments = page.split("/").slice(0, -1);
+      const pathname = `/${segments.map((segment) => (segment.startsWith("[") ? "record-123" : segment)).join("/")}`;
+      const crumbs = buildAppBreadcrumbs(pathname, translate);
+      segments.forEach((segment, index) => {
+        if (!segment.startsWith("[")) return;
+        // GitHub owner and repository slugs are useful readable context.
+        if (segment === "[owner]" || segment === "[repository]") return;
+        expect(crumbs[index].isLoading, pathname).toBe(true);
+        expect(crumbs[index].label, pathname).toBe("Loading…");
+      });
+    }
+  });
+
+  test("ends placeholders when a record is missing and retains nested navigation", () => {
+    expect(
+      buildAppBreadcrumbs("/dashboard/builds/build-id/coverage", translate, {
+        "/dashboard/builds/build-id": null,
+      }),
+    ).toEqual([
+      { href: undefined, isCurrent: false, label: "Dashboard" },
+      { href: "/dashboard/builds", isCurrent: false, label: "Builds" },
+      {
+        href: "/dashboard/builds/build-id",
+        isCurrent: false,
+        label: "Details",
+      },
+      { href: undefined, isCurrent: true, label: "Coverage" },
+    ]);
+  });
+
   test("uses loaded ancestor titles while retaining nested page labels and links", () => {
     expect(
       buildAppBreadcrumbs("/dashboard/workflows/workflow-id/edit", translate, {
@@ -142,7 +178,7 @@ describe("buildAppBreadcrumbs", () => {
     expect(buildAppBreadcrumbs("/jira/tickets/APP-123", translate)).toEqual([
       { href: undefined, isCurrent: false, label: "Jira" },
       { href: "/jira/tickets", isCurrent: false, label: "Tickets" },
-      { href: undefined, isCurrent: true, label: "APP-123" },
+      { href: undefined, isCurrent: true, label: "Loading…", isLoading: true },
     ]);
   });
 
@@ -150,7 +186,7 @@ describe("buildAppBreadcrumbs", () => {
     expect(buildAppBreadcrumbs("/dashboard/apps/app-123", translate)).toEqual([
       { href: undefined, isCurrent: false, label: "Dashboard" },
       { href: "/dashboard/apps", isCurrent: false, label: "Apps" },
-      { href: undefined, isCurrent: true, label: "app-123" },
+      { href: undefined, isCurrent: true, label: "Loading…", isLoading: true },
     ]);
   });
 
@@ -168,7 +204,7 @@ describe("buildAppBreadcrumbs", () => {
         isCurrent: false,
         label: "Configurations",
       },
-      { href: undefined, isCurrent: true, label: "configuration-123" },
+      { href: undefined, isCurrent: true, label: "Loading…", isLoading: true },
     ]);
   });
 
@@ -178,7 +214,7 @@ describe("buildAppBreadcrumbs", () => {
     ).toEqual([
       { href: undefined, isCurrent: false, label: "Debugging" },
       { href: "/debugging/crashes", isCurrent: false, label: "Crashes" },
-      { href: undefined, isCurrent: true, label: "crash-123" },
+      { href: undefined, isCurrent: true, label: "Loading…", isLoading: true },
     ]);
     expect(
       buildAppBreadcrumbs("/debugging/crashes/dsyms/dsym-123", translate),
@@ -186,7 +222,7 @@ describe("buildAppBreadcrumbs", () => {
       { href: undefined, isCurrent: false, label: "Debugging" },
       { href: "/debugging/crashes", isCurrent: false, label: "Crashes" },
       { href: "/debugging/crashes/dsyms", isCurrent: false, label: "dSYMs" },
-      { href: undefined, isCurrent: true, label: "dsym-123" },
+      { href: undefined, isCurrent: true, label: "Loading…", isLoading: true },
     ]);
   });
 
@@ -197,7 +233,7 @@ describe("buildAppBreadcrumbs", () => {
       { href: undefined, isCurrent: false, label: "GitHub" },
       { href: "/github/cache", isCurrent: false, label: "Cache" },
       { href: undefined, isCurrent: false, label: "Entries" },
-      { href: undefined, isCurrent: true, label: "cache-123" },
+      { href: undefined, isCurrent: true, label: "Loading…", isLoading: true },
     ]);
   });
 
@@ -253,7 +289,7 @@ describe("buildAppBreadcrumbs", () => {
       { href: undefined, isCurrent: false, label: "Jira" },
       { href: "/jira/cache", isCurrent: false, label: "Cache" },
       { href: undefined, isCurrent: false, label: "Tickets" },
-      { href: undefined, isCurrent: true, label: "APP-123" },
+      { href: undefined, isCurrent: true, label: "Loading…", isLoading: true },
     ]);
   });
 
@@ -269,7 +305,7 @@ describe("buildAppBreadcrumbs", () => {
       },
       { href: undefined, isCurrent: false, label: "acme" },
       { href: undefined, isCurrent: false, label: "widgets" },
-      { href: undefined, isCurrent: true, label: "42" },
+      { href: undefined, isCurrent: true, label: "Loading…", isLoading: true },
     ]);
   });
 
@@ -288,7 +324,7 @@ describe("buildAppBreadcrumbs", () => {
       },
       { href: undefined, isCurrent: false, label: "actions" },
       { href: undefined, isCurrent: false, label: "settings" },
-      { href: undefined, isCurrent: true, label: "42" },
+      { href: undefined, isCurrent: true, label: "Loading…", isLoading: true },
     ]);
     expect(
       buildAppBreadcrumbs("/ai/skills/groups/settings", translate),
@@ -296,7 +332,7 @@ describe("buildAppBreadcrumbs", () => {
       { href: undefined, isCurrent: false, label: "AI" },
       { href: "/ai/skills", isCurrent: false, label: "Skills" },
       { href: "/ai/skills/groups", isCurrent: false, label: "Groups" },
-      { href: undefined, isCurrent: true, label: "settings" },
+      { href: undefined, isCurrent: true, label: "Loading…", isLoading: true },
     ]);
   });
 
@@ -305,6 +341,7 @@ describe("buildAppBreadcrumbs", () => {
       buildAppBreadcrumbs(
         "/dashboard/workflows/release%20workflow/edit",
         translate,
+        { "/dashboard/workflows/release%20workflow": "release workflow" },
       ),
     ).toEqual([
       { href: undefined, isCurrent: false, label: "Dashboard" },
@@ -327,17 +364,15 @@ describe("buildAppBreadcrumbs", () => {
     expect(buildAppBreadcrumbs("/dashboard/jobs/job-17", translate)).toEqual([
       { href: undefined, isCurrent: false, label: "Dashboard" },
       { href: "/dashboard/agents", isCurrent: false, label: "Agents" },
-      { href: undefined, isCurrent: true, label: "job-17" },
+      { href: undefined, isCurrent: true, label: "Loading…", isLoading: true },
     ]);
   });
 
   test("falls back safely when a dynamic segment is malformed", () => {
-    expect(buildAppBreadcrumbs("/ai/plans/%E0%A4%A", translate).at(-1)).toEqual(
-      {
-        href: undefined,
-        isCurrent: true,
-        label: "%E0%A4%A",
-      },
-    );
+    expect(buildAppBreadcrumbs("/unknown/%E0%A4%A", translate).at(-1)).toEqual({
+      href: undefined,
+      isCurrent: true,
+      label: "%E0%A4%A",
+    });
   });
 });

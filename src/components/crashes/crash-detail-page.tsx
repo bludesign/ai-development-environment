@@ -1,6 +1,9 @@
 "use client";
 
-import { useBreadcrumbLabel } from "@/components/breadcrumb-labels-provider";
+import {
+  useBreadcrumbLabel,
+  useBreadcrumbFallback,
+} from "@/components/breadcrumb-labels-provider";
 
 import {
   ChevronRight,
@@ -99,6 +102,10 @@ export function CrashDetailPage({ crashId }: { crashId: string }) {
   );
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  useBreadcrumbFallback(
+    ["debugging", "crashes", crashId],
+    Boolean(error) || (!loading && !crash),
+  );
   const [busy, setBusy] = useState(false);
   const [uploadOpen, setUploadOpen] = useState(false);
 

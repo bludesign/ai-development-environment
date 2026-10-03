@@ -27,6 +27,7 @@ export type BreadcrumbLabelKey =
   | "crashes"
   | "credentials"
   | "devices"
+  | "details"
   | "drafts"
   | "dsyms"
   | "edit"
@@ -38,6 +39,7 @@ export type BreadcrumbLabelKey =
   | "gitlab"
   | "jira"
   | "mergeRequests"
+  | "loadingBreadcrumb"
   | "mocks"
   | "new"
   | "notifications"
@@ -71,7 +73,10 @@ export type AppBreadcrumb = {
   href?: string;
   isCurrent: boolean;
   label: string;
+  isLoading?: true;
 };
+
+export type BreadcrumbLabels = Readonly<Record<string, string | null>>;
 
 type BreadcrumbTranslator = (key: BreadcrumbLabelKey) => string;
 
@@ -271,6 +276,22 @@ const ROUTABLE_DYNAMIC_PATHS = [
   /^\/dashboard\/worktrees\/[^/]+$/,
 ];
 
+// These segments are record titles supplied by their detail pages. Owner and
+// repository slugs in GitHub URLs remain readable while the PR title loads.
+const TITLE_PATH_PATTERNS = [
+  ...ROUTABLE_DYNAMIC_PATHS,
+  /^\/dashboard\/builds\/configurations\/[^/]+$/,
+  /^\/dashboard\/codebases\/repositories\/[^/]+$/,
+  /^\/dashboard\/commands\/(?!new$|runs$)[^/]+$/,
+  /^\/dashboard\/commands\/runs\/[^/]+$/,
+  /^\/dashboard\/jobs\/[^/]+$/,
+  /^\/dashboard\/workflows\/runs\/[^/]+$/,
+  /^\/ai\/skills\/sync\/[^/]+$/,
+  /^\/debugging\/sse\/history\/[^/]+$/,
+  /^\/github\/pull-requests\/[^/]+\/[^/]+\/[^/]+$/,
+  /^\/gitlab\/merge-requests\/[^/]+(?:\/[^/]+)?$/,
+];
+
 function safeDecode(segment: string): string {
   try {
     return decodeURIComponent(segment);
@@ -302,7 +323,7 @@ function staticLabelKey(
 export function buildAppBreadcrumbs(
   pathname: string,
   translate: BreadcrumbTranslator,
-  labels: Readonly<Record<string, string>> = {},
+  labels: BreadcrumbLabels = {},
 ): AppBreadcrumb[] {
   const path = pathname.split(/[?#]/, 1)[0] || "/";
   const segments = path.split("/").filter(Boolean);
@@ -316,6 +337,9 @@ export function buildAppBreadcrumbs(
       .slice(0, index + 1)
       .map((part) => encodeURIComponent(safeDecode(part)))
       .join("/")}`;
+    const titlePath =
+      !labelKey && TITLE_PATH_PATTERNS.some((pattern) => pattern.test(prefix));
+    const isLoading = titlePath && labels[labelPath] === undefined;
 
     return {
       href: isCurrent
@@ -326,7 +350,12 @@ export function buildAppBreadcrumbs(
       isCurrent,
       label:
         labels[labelPath] ??
-        (labelKey ? translate(labelKey) : safeDecode(segment)),
+        (labelKey
+          ? translate(labelKey)
+          : titlePath
+            ? translate(isLoading ? "loadingBreadcrumb" : "details")
+            : safeDecode(segment)),
+      ...(isLoading ? { isLoading: true as const } : {}),
     };
   });
 

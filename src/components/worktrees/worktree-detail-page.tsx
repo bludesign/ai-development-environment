@@ -1,6 +1,9 @@
 "use client";
 
-import { useBreadcrumbLabel } from "@/components/breadcrumb-labels-provider";
+import {
+  useBreadcrumbLabel,
+  useBreadcrumbFallback,
+} from "@/components/breadcrumb-labels-provider";
 
 import { OutOfDateBadge } from "@/components/builds/out-of-date-badge";
 
@@ -428,6 +431,10 @@ export function WorktreeDetailPage({ worktreeId }: { worktreeId: string }) {
   const entry = useMemo(
     () => (overview ? findWorktreeOverviewEntry(overview, worktreeId) : null),
     [overview, worktreeId],
+  );
+  useBreadcrumbFallback(
+    ["dashboard", "worktrees", worktreeId],
+    Boolean(error) || (!loading && !entry),
   );
 
   const updateWorktree = useCallback((next: Worktree) => {

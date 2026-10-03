@@ -1,6 +1,9 @@
 "use client";
 
-import { useBreadcrumbLabel } from "@/components/breadcrumb-labels-provider";
+import {
+  useBreadcrumbLabel,
+  useBreadcrumbFallback,
+} from "@/components/breadcrumb-labels-provider";
 
 import {
   Check,
@@ -142,6 +145,10 @@ export function CommandRunPage({ runId }: { runId: string }) {
   const output =
     outputState.runId === runId ? outputState.chunks : EMPTY_OUTPUT;
   const [error, setError] = useState<string | null>(null);
+  useBreadcrumbFallback(
+    ["dashboard", "commands", "runs", runId],
+    Boolean(error),
+  );
   const [mutating, setMutating] = useState(false);
   const [snapshotCopied, setSnapshotCopied] = useState(false);
 

@@ -1,6 +1,9 @@
 "use client";
 
-import { useBreadcrumbLabel } from "@/components/breadcrumb-labels-provider";
+import {
+  useBreadcrumbLabel,
+  useBreadcrumbFallback,
+} from "@/components/breadcrumb-labels-provider";
 
 import {
   readIntegrationConfiguration,
@@ -666,6 +669,18 @@ export function GitLabMergeRequestDetailPage({
   const [replyBodies, setReplyBodies] = useState<Record<string, string>>({});
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const breadcrumbUnavailable =
+    Boolean(error || configurationError) ||
+    (!configurationLoading && !configuration?.settings.configured);
+  useBreadcrumbFallback(
+    ["gitlab", "merge-requests", projectId],
+    breadcrumbUnavailable,
+  );
+  useBreadcrumbFallback(
+    ["gitlab", "merge-requests", projectId, iid],
+    breadcrumbUnavailable,
+  );
+
   const [mergeOpen, setMergeOpen] = useState(false);
   const [ticketKey, setTicketKey] = useState<string | null>(null);
   const controllerRef = useRef<AbortController | null>(null);

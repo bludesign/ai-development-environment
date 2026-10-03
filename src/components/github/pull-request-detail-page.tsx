@@ -1,6 +1,9 @@
 "use client";
 
-import { useBreadcrumbLabel } from "@/components/breadcrumb-labels-provider";
+import {
+  useBreadcrumbLabel,
+  useBreadcrumbFallback,
+} from "@/components/breadcrumb-labels-provider";
 
 import {
   ExternalLink,
@@ -126,6 +129,10 @@ export function PullRequestDetailPage({
   );
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  useBreadcrumbFallback(
+    ["github", "pull-requests", owner, repository, number],
+    Boolean(error) || (!loading && !pullRequest),
+  );
   const [historicalAttempts, setHistoricalAttempts] = useState<
     Record<string, GitHubWorkflowRunAttemptView | null>
   >({});

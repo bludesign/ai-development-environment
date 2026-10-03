@@ -1,6 +1,9 @@
 "use client";
 
-import { useBreadcrumbLabel } from "@/components/breadcrumb-labels-provider";
+import {
+  useBreadcrumbLabel,
+  useBreadcrumbFallback,
+} from "@/components/breadcrumb-labels-provider";
 
 import { RefreshCw, Trash2 } from "lucide-react";
 import { useTranslations } from "next-intl";
@@ -33,6 +36,10 @@ export function GitHubCacheEntryDetailPage({ id }: { id: string }) {
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  useBreadcrumbFallback(
+    ["github", "cache", "entries", id],
+    Boolean(error) || (!loading && !entry),
+  );
 
   const load = useCallback(async () => {
     setLoading(true);

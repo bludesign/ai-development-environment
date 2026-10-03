@@ -5,12 +5,18 @@ import { afterEach, describe, expect, test } from "vitest";
 import {
   BreadcrumbLabelsProvider,
   useBreadcrumbLabel,
+  useBreadcrumbFallback,
   useBreadcrumbLabels,
 } from "./breadcrumb-labels-provider";
 import { buildAppBreadcrumbs } from "@/lib/breadcrumbs";
 
 function Publisher({ id, title }: { id?: string; title?: string }) {
   useBreadcrumbLabel(["dashboard", "apps", id], title);
+  return null;
+}
+
+function Fallback({ unavailable }: { unavailable: boolean }) {
+  useBreadcrumbFallback(["dashboard", "apps", "app-id"], unavailable);
   return null;
 }
 
@@ -28,6 +34,42 @@ function Trail({ pathname }: { pathname: string }) {
 afterEach(cleanup);
 
 describe("BreadcrumbLabelsProvider", () => {
+  test("ends failed loading states without overwriting loaded titles", () => {
+    function Page({
+      unavailable,
+      title,
+    }: {
+      unavailable: boolean;
+      title?: string;
+    }) {
+      return (
+        <BreadcrumbLabelsProvider>
+          <Trail pathname="/dashboard/apps/app-id" />
+          <Publisher id="app-id" title={title} />
+          <Fallback unavailable={unavailable} />
+        </BreadcrumbLabelsProvider>
+      );
+    }
+    const page = render(<Page unavailable={false} />);
+    expect(screen.getByTestId("trail").textContent).toBe(
+      "dashboard > apps > loadingBreadcrumb",
+    );
+    page.rerender(<Page unavailable />);
+    expect(screen.getByTestId("trail").textContent).toBe(
+      "dashboard > apps > details",
+    );
+    page.rerender(<Page unavailable title="Available app" />);
+    expect(screen.getByTestId("trail").textContent).toBe(
+      "dashboard > apps > Available app",
+    );
+    page.rerender(<Page unavailable={false} title="Available app" />);
+    expect(screen.getByTestId("trail").textContent).toContain("Available app");
+    page.rerender(<Page unavailable={false} />);
+    expect(screen.getByTestId("trail").textContent).toContain(
+      "loadingBreadcrumb",
+    );
+  });
+
   test("updates loaded titles and never applies another record's title on navigation", () => {
     function Page({
       pathname,
@@ -49,7 +91,7 @@ describe("BreadcrumbLabelsProvider", () => {
     const second = "/dashboard/apps/second";
     const page = render(<Page pathname={first} />);
     expect(screen.getByTestId("trail").textContent).toBe(
-      "dashboard > apps > first",
+      "dashboard > apps > loadingBreadcrumb",
     );
 
     page.rerender(<Page pathname={first} id="first" title="First app" />);
@@ -61,14 +103,14 @@ describe("BreadcrumbLabelsProvider", () => {
 
     page.rerender(<Page pathname={second} id="first" title="Renamed app" />);
     expect(screen.getByTestId("trail").textContent).toBe(
-      "dashboard > apps > second",
+      "dashboard > apps > loadingBreadcrumb",
     );
     page.rerender(<Page pathname={second} id="second" title="Second app" />);
     expect(screen.getByTestId("trail").textContent).toContain("Second app");
     // A late response for the previous record remains scoped to that record.
     page.rerender(<Page pathname={second} id="first" title="Late first app" />);
     expect(screen.getByTestId("trail").textContent).toBe(
-      "dashboard > apps > second",
+      "dashboard > apps > loadingBreadcrumb",
     );
   });
 
@@ -93,7 +135,7 @@ describe("BreadcrumbLabelsProvider", () => {
     expect(screen.getByTestId("trail").textContent).toContain("Second title");
     page.rerender(<Page first={false} second={false} />);
     expect(screen.getByTestId("trail").textContent).toBe(
-      "dashboard > apps > shared",
+      "dashboard > apps > loadingBreadcrumb",
     );
   });
 
@@ -115,7 +157,7 @@ describe("BreadcrumbLabelsProvider", () => {
       </BreadcrumbLabelsProvider>,
     );
     expect(screen.getByTestId("trail").textContent).toBe(
-      "dashboard > apps > app/with spaces",
+      "dashboard > apps > loadingBreadcrumb",
     );
   });
 

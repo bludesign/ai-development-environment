@@ -1,6 +1,9 @@
 "use client";
 
-import { useBreadcrumbLabel } from "@/components/breadcrumb-labels-provider";
+import {
+  useBreadcrumbLabel,
+  useBreadcrumbFallback,
+} from "@/components/breadcrumb-labels-provider";
 
 import {
   ChevronDown,
@@ -128,6 +131,10 @@ export function WorkflowDetailPage({ workflowId }: { workflowId: string }) {
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  useBreadcrumbFallback(
+    ["dashboard", "workflows", workflowId],
+    Boolean(error) || (!loading && !workflow),
+  );
   const [repositories, setRepositories] = useState<
     Array<{ id: string; name: string; displayOrigin: string }>
   >([]);

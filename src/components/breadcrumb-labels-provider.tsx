@@ -9,11 +9,13 @@ import {
   useState,
   type ReactNode,
 } from "react";
+import type { BreadcrumbLabels } from "@/lib/breadcrumbs";
 
-type Registration = { path: string; label: string };
-type RegisterLabel = (path: string, label: string) => () => void;
+type Registration = { path: string; label: string | null };
+type RegisterLabel = (path: string, label: string | null) => () => void;
+type RouteSegments = readonly (string | number | null | undefined)[];
 
-const LabelsContext = createContext<Readonly<Record<string, string>>>({});
+const LabelsContext = createContext<BreadcrumbLabels>({});
 const RegisterContext = createContext<RegisterLabel | null>(null);
 
 export function BreadcrumbLabelsProvider({
@@ -42,7 +44,11 @@ export function BreadcrumbLabelsProvider({
   const labels = useMemo(
     () =>
       Object.fromEntries(
-        Array.from(registrations.values(), ({ path, label }) => [path, label]),
+        Array.from(registrations.values())
+          // A loaded title takes precedence over a missing-record fallback
+          // from another mounted publisher for the same route.
+          .sort((a, b) => Number(a.label !== null) - Number(b.label !== null))
+          .map(({ path, label }) => [path, label]),
       ),
     [registrations],
   );
@@ -56,20 +62,37 @@ export function BreadcrumbLabelsProvider({
 
 /** Publish the loaded record's title for its route, including on nested pages. */
 export function useBreadcrumbLabel(
-  segments: readonly (string | number | null | undefined)[],
+  segments: RouteSegments,
   label: string | null | undefined,
 ) {
   const register = useContext(RegisterContext);
   // Use the loaded record's ID, so stale data cannot label a newly opened route.
-  const path = segments.every((segment) => segment != null)
-    ? `/${segments.map((segment) => encodeURIComponent(String(segment))).join("/")}`
-    : undefined;
+  const path = routePath(segments);
   const title = label?.trim();
 
   useEffect(() => {
     if (!register || !path || !title) return;
     return register(path, title);
   }, [register, path, title]);
+}
+
+/** End the placeholder when fetching fails or the requested record is missing. */
+export function useBreadcrumbFallback(
+  segments: RouteSegments,
+  unavailable: boolean,
+) {
+  const register = useContext(RegisterContext);
+  const path = routePath(segments);
+  useEffect(() => {
+    if (!register || !path || !unavailable) return;
+    return register(path, null);
+  }, [register, path, unavailable]);
+}
+
+function routePath(segments: RouteSegments) {
+  return segments.every((segment) => segment != null)
+    ? `/${segments.map((segment) => encodeURIComponent(String(segment))).join("/")}`
+    : undefined;
 }
 
 export function useBreadcrumbLabels() {
