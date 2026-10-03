@@ -1,5 +1,7 @@
 "use client";
 
+import { useBreadcrumbLabel } from "@/components/breadcrumb-labels-provider";
+
 import {
   createRefreshCoalescer,
   type RefreshCoalescer,
@@ -155,6 +157,7 @@ export function AgentDetail({ agentId }: { agentId: string }) {
   const locale = useLocale();
   const router = useRouter();
   const [agent, setAgent] = useState<Agent | null>(null);
+  useBreadcrumbLabel(["dashboard", "agents", agent?.id], agent?.name);
   const agentRevision = useRef(0);
   const applyAgent = useCallback((value: Agent) => {
     ++agentRevision.current;

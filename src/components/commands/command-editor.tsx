@@ -1,5 +1,7 @@
 "use client";
 
+import { useBreadcrumbLabel } from "@/components/breadcrumb-labels-provider";
+
 import { Archive, ChevronDown, CircleOff, Save } from "lucide-react";
 import { useTranslations } from "next-intl";
 import { useEffect, useState } from "react";
@@ -90,6 +92,8 @@ export function CommandEditor({ commandId }: { commandId?: string }) {
   const buildsT = useTranslations("builds");
   const router = useRouter();
   const [form, setForm] = useState(initial);
+  const [command, setCommand] = useState<CommandDefinition | null>(null);
+  useBreadcrumbLabel(["dashboard", "commands", command?.id], command?.name);
   const [agents, setAgents] = useState<CommandAgent[]>([]);
   const [repositories, setRepositories] = useState<
     Array<{ id: string; name: string; displayOrigin: string }>
@@ -122,6 +126,7 @@ export function CommandEditor({ commandId }: { commandId?: string }) {
         setRepositories(data.codebaseOverview.repositories);
         if (data.commandDefinition) {
           const value = data.commandDefinition;
+          setCommand(value);
           setArchived(Boolean(value.archivedAt));
           setForm({
             name: value.name,
@@ -193,6 +198,9 @@ export function CommandEditor({ commandId }: { commandId?: string }) {
         `/dashboard/commands/${data.updateCommandDefinition?.id ?? data.createCommandDefinition?.id}/edit`,
       );
       router.refresh();
+      setCommand((current) =>
+        current ? { ...current, name: input.name } : current,
+      );
       setError(null);
     } catch (value) {
       setError(value instanceof Error ? value.message : String(value));

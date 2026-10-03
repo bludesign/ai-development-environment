@@ -1,4 +1,6 @@
 "use client";
+
+import { useBreadcrumbLabel } from "@/components/breadcrumb-labels-provider";
 import { BuildArtifactDownload } from "./build-artifact-download";
 
 import { OutOfDateBadge } from "@/components/builds/out-of-date-badge";
@@ -70,7 +72,10 @@ import {
 import { buildStatusVariant } from "./build-format";
 import { ExportArchiveDialog } from "./export-archive-dialog";
 import { IosInstallButton, latestInstallArtifact } from "./ios-install-button";
-import { BuildConfigurationLabel } from "./build-configuration-label";
+import {
+  BuildConfigurationLabel,
+  buildConfigurationName,
+} from "./build-configuration-label";
 import { RebuildButton } from "./rebuild-button";
 import { RunBuildControls } from "./run-build-controls";
 import type { BuildLogChunk, BuildRecord, BuildReport } from "./types";
@@ -224,6 +229,10 @@ export function BuildDetailPage({
   const locale = useLocale();
   const router = useRouter();
   const [build, setBuild] = useState<BuildRecord | null>(null);
+  useBreadcrumbLabel(
+    ["dashboard", "builds", build?.id],
+    build ? buildConfigurationName(build, t("custom")) : undefined,
+  );
   const [logState, setLogState] = useState<{
     buildId: string;
     chunks: BuildLogChunk[];

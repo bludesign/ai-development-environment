@@ -1,5 +1,7 @@
 "use client";
 
+import { useBreadcrumbLabel } from "@/components/breadcrumb-labels-provider";
+
 import { RefreshCw, Save, Search, Trash2 } from "lucide-react";
 import { useTranslations } from "next-intl";
 import { useCallback, useEffect, useMemo, useState } from "react";
@@ -26,6 +28,7 @@ export function SkillGroupDetailPage({ groupId }: { groupId: string }) {
   const t = useTranslations("skills");
   const router = useRouter();
   const [group, setGroup] = useState<SkillGroupSummary | null>(null);
+  useBreadcrumbLabel(["ai", "skills", "groups", group?.id], group?.name);
   const [skills, setSkills] = useState<SkillSummary[]>([]);
   const [repositories, setRepositories] = useState<RepositorySummary[]>([]);
   const [name, setName] = useState("");

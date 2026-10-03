@@ -1,5 +1,7 @@
 "use client";
 
+import { useBreadcrumbLabel } from "@/components/breadcrumb-labels-provider";
+
 import {
   CODEBASE_FETCH_JOB_KIND,
   CODEBASE_GIT_INSPECT_JOB_KIND,
@@ -150,6 +152,10 @@ export function CodebaseDetailPage({ codebaseId }: { codebaseId: string }) {
   const t = useTranslations("codebaseDetail");
   const codebaseT = useTranslations("codebases");
   const [codebase, setCodebase] = useState<CodebaseDetail | null>(null);
+  useBreadcrumbLabel(
+    ["dashboard", "codebases", codebase?.id],
+    codebase?.repository.name,
+  );
   const [gitState, setGitState] = useState<CodebaseGitState | null>(null);
   const [loading, setLoading] = useState(true);
   const [inspecting, setInspecting] = useState(false);

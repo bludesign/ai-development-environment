@@ -1,5 +1,7 @@
 "use client";
 
+import { useBreadcrumbLabel } from "@/components/breadcrumb-labels-provider";
+
 import {
   ChevronDown,
   CircleOff,
@@ -119,6 +121,7 @@ export function WorkflowDetailPage({ workflowId }: { workflowId: string }) {
   const labels = useWorkflowLabels();
   const router = useRouter();
   const [workflow, setWorkflow] = useState<WorkflowDetail | null>(null);
+  useBreadcrumbLabel(["dashboard", "workflows", workflow?.id], workflow?.name);
   const [runs, setRuns] = useState<WorkflowRun[]>([]);
   const [queue, setQueue] = useState<WorktreeRunQueueEntry[]>([]);
   const [catalog, setCatalog] = useState<WorkflowCatalog | null>(null);

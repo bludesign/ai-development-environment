@@ -1,5 +1,7 @@
 "use client";
 
+import { useBreadcrumbLabel } from "@/components/breadcrumb-labels-provider";
+
 import {
   Check,
   CircleStop,
@@ -129,6 +131,10 @@ export function CommandRunPage({ runId }: { runId: string }) {
   const locale = useLocale();
   const router = useRouter();
   const [run, setRun] = useState<CommandRun | null>(null);
+  useBreadcrumbLabel(
+    ["dashboard", "commands", "runs", run?.id],
+    run?.snapshotName,
+  );
   const [outputState, setOutputState] = useState<{
     runId: string;
     chunks: OutputChunk[];

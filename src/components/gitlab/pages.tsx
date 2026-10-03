@@ -1,5 +1,7 @@
 "use client";
 
+import { useBreadcrumbLabel } from "@/components/breadcrumb-labels-provider";
+
 import {
   readIntegrationConfiguration,
   subscribeIntegrationConfiguration,
@@ -643,6 +645,23 @@ export function GitLabMergeRequestDetailPage({
     error: configurationError,
   } = useConfiguration();
   const [mr, setMr] = useState<GitLabMergeRequestDetailView | null>(null);
+  const loadedProjectId =
+    mr && (projectId === mr.projectId || projectId === mr.projectPath)
+      ? projectId
+      : undefined;
+  const projectPath =
+    mr?.projectPath ??
+    configuration?.projects.find((project) => project.id === mr?.projectId)
+      ?.pathWithNamespace ??
+    mr?.projectId;
+  useBreadcrumbLabel(
+    ["gitlab", "merge-requests", loadedProjectId],
+    projectPath,
+  );
+  useBreadcrumbLabel(
+    ["gitlab", "merge-requests", loadedProjectId, mr?.iid],
+    mr?.title,
+  );
   const [reviewBody, setReviewBody] = useState("");
   const [replyBodies, setReplyBodies] = useState<Record<string, string>>({});
   const [busy, setBusy] = useState(false);
@@ -767,11 +786,6 @@ export function GitLabMergeRequestDetailPage({
         </Button>
       </section>
     );
-  const projectPath =
-    mr.projectPath ??
-    configuration.projects.find((project) => project.id === mr.projectId)
-      ?.pathWithNamespace ??
-    mr.projectId;
   const highlighted = mr.worktreeHighlightColor;
   return (
     <section className="mx-auto flex w-full min-w-0 max-w-6xl flex-col gap-5">

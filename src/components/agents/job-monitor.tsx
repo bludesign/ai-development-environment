@@ -1,5 +1,7 @@
 "use client";
 
+import { useBreadcrumbLabel } from "@/components/breadcrumb-labels-provider";
+
 import { CircleStop } from "lucide-react";
 import { useTranslations } from "next-intl";
 import { useCallback, useEffect, useRef, useState } from "react";
@@ -40,6 +42,7 @@ export function JobMonitor({
   const common = useTranslations("common");
   const [loadedJob, setJob] = useState<AgentJob | null>(null);
   const job = seed ?? loadedJob;
+  useBreadcrumbLabel(["dashboard", "jobs", job?.id], job?.kind);
   const seeded = Boolean(seed);
   const [logs, setLogs] = useState<AgentJobLog[]>([]);
   const [loading, setLoading] = useState(true);

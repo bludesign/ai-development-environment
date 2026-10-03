@@ -1,4 +1,6 @@
 "use client";
+
+import { useBreadcrumbLabel } from "@/components/breadcrumb-labels-provider";
 import { EndpointUrls } from "@/components/server-urls/server-url-controls";
 
 import {
@@ -267,6 +269,7 @@ export function SseEndpointEditorPage({
   const isNew = !endpointId;
   const [tab, setTab] = useState(initialTab);
   const [endpoint, setEndpoint] = useState<SseEndpoint | null>(null);
+  useBreadcrumbLabel(["debugging", "sse", endpoint?.id], endpoint?.name);
   const [draft, setDraft] = useState<EndpointDraft>(DEFAULT_DRAFT);
   const [templates, setTemplates] = useState<SseMockTemplate[]>([]);
   const [compositions, setCompositions] = useState<SseMockComposition[]>([]);

@@ -1,5 +1,7 @@
 "use client";
 
+import { useBreadcrumbLabel } from "@/components/breadcrumb-labels-provider";
+
 import {
   createRefreshCoalescer,
   type RefreshCoalescer,
@@ -526,6 +528,12 @@ export function RunDetailPage({
   const locale = useLocale();
   const router = useRouter();
   const [run, setRun] = useState<AgentRunView | null>(null);
+  useBreadcrumbLabel(
+    ["ai", run?.kind === "PLAN" ? "plans" : "sessions", run?.id],
+    run
+      ? `${run.kind === "PLAN" ? t("plan") : t("session")} #${run.displayNumber}`
+      : undefined,
+  );
   const [events, setEvents] = useState<RunEventView[]>([]);
   const [search, setSearch] = useState("");
   const latestSearch = useRef(search);

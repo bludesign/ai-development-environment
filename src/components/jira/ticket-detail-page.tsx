@@ -1,5 +1,7 @@
 "use client";
 
+import { useBreadcrumbLabel } from "@/components/breadcrumb-labels-provider";
+
 import {
   createRefreshCoalescer,
   type RefreshCoalescer,
@@ -116,6 +118,7 @@ export function JiraTicketDetailPage({ issueKey }: { issueKey: string }) {
   const ticketHistory = useJiraTicketHistory(issueKey);
   const resetHistory = ticketHistory.reset;
   const [ticket, setTicket] = useState<JiraTicketDetail | null>(null);
+  useBreadcrumbLabel(["jira", "tickets", ticket?.key], ticket?.summary);
   const [editFields, setEditFields] = useState<JiraEditField[]>([]);
   const [editFieldsIssueKey, setEditFieldsIssueKey] = useState<string | null>(
     null,

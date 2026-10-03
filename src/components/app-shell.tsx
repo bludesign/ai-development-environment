@@ -14,6 +14,10 @@ import { GitHubPipelineStatusProvider } from "@/components/github/pipeline-statu
 import { ActiveAgentProvider } from "@/components/active-agent/active-agent-provider";
 import { ActiveAgentSelector } from "@/components/active-agent/active-agent-selector";
 import { GlobalSearch } from "@/components/global-search";
+import {
+  BreadcrumbLabelsProvider,
+  useBreadcrumbLabels,
+} from "@/components/breadcrumb-labels-provider";
 import { NotificationsSidebar } from "@/components/notifications/notifications-sidebar";
 import {
   Breadcrumb,
@@ -141,13 +145,15 @@ export function AppShell({
     <ActiveAgentProvider userId={currentUser.id}>
       <GitHubPipelineStatusProvider>
         <ActionCenterProvider>
-          <AppShellFrame
-            currentUser={currentUser}
-            leftDefaultOpen={leftDefaultOpen}
-            rightDefaultOpen={rightDefaultOpen}
-          >
-            {children}
-          </AppShellFrame>
+          <BreadcrumbLabelsProvider>
+            <AppShellFrame
+              currentUser={currentUser}
+              leftDefaultOpen={leftDefaultOpen}
+              rightDefaultOpen={rightDefaultOpen}
+            >
+              {children}
+            </AppShellFrame>
+          </BreadcrumbLabelsProvider>
         </ActionCenterProvider>
       </GitHubPipelineStatusProvider>
     </ActiveAgentProvider>
@@ -317,7 +323,8 @@ function HeaderBreadcrumbItem({
 function AppBreadcrumbs() {
   const pathname = usePathname();
   const t = useTranslations("shell");
-  const breadcrumbs = buildAppBreadcrumbs(pathname, (key) => t(key));
+  const labels = useBreadcrumbLabels();
+  const breadcrumbs = buildAppBreadcrumbs(pathname, (key) => t(key), labels);
   const lastIndex = breadcrumbs.length - 1;
 
   return (

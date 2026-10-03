@@ -1,5 +1,7 @@
 "use client";
 
+import { useBreadcrumbLabel } from "@/components/breadcrumb-labels-provider";
+
 import {
   ExternalLink,
   GitCommitHorizontal,
@@ -109,6 +111,19 @@ export function PullRequestDetailPage({
   const issueKey = searchParams.get("issue");
   const [pullRequest, setPullRequest] =
     useState<GitHubPullRequestDetail | null>(null);
+  useBreadcrumbLabel(
+    [
+      "github",
+      "pull-requests",
+      owner,
+      repository,
+      pullRequest?.repositoryNameWithOwner.toLowerCase() ===
+        `${owner}/${repository}`.toLowerCase() && pullRequest.number === number
+        ? pullRequest.number
+        : undefined,
+    ],
+    pullRequest?.title,
+  );
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [historicalAttempts, setHistoricalAttempts] = useState<

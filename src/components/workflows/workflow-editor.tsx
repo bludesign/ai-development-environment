@@ -1,5 +1,7 @@
 "use client";
 
+import { useBreadcrumbLabel } from "@/components/breadcrumb-labels-provider";
+
 import {
   addEdge,
   Background,
@@ -309,6 +311,7 @@ function WorkflowEditorInner({ workflowId }: { workflowId?: string | null }) {
   const wrapperRef = useRef<HTMLDivElement>(null);
   const fileRef = useRef<HTMLInputElement>(null);
   const [workflow, setWorkflow] = useState<WorkflowSummary | null>(null);
+  useBreadcrumbLabel(["dashboard", "workflows", workflow?.id], workflow?.name);
   const [definition, setDefinition] = useState<WorkflowDefinition>(() =>
     emptyDefinition(),
   );

@@ -1,5 +1,7 @@
 "use client";
 
+import { useBreadcrumbLabel } from "@/components/breadcrumb-labels-provider";
+
 import { ArrowLeft, FolderGit2, Save } from "lucide-react";
 import { useTranslations } from "next-intl";
 import { FormEvent, useCallback, useEffect, useRef, useState } from "react";
@@ -69,6 +71,10 @@ export function RepositoryDetailPage({
   const externalT = useTranslations("externalPipelineActions");
   const externalTitle = externalT("title");
   const [repository, setRepository] = useState<CodebaseRepository | null>(null);
+  useBreadcrumbLabel(
+    ["dashboard", "codebases", "repositories", repository?.id],
+    repository?.name,
+  );
   const [skillGroups, setSkillGroups] = useState<
     Array<{ id: string; name: string }>
   >([]);

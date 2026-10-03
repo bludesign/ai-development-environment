@@ -302,6 +302,7 @@ function staticLabelKey(
 export function buildAppBreadcrumbs(
   pathname: string,
   translate: BreadcrumbTranslator,
+  labels: Readonly<Record<string, string>> = {},
 ): AppBreadcrumb[] {
   const path = pathname.split(/[?#]/, 1)[0] || "/";
   const segments = path.split("/").filter(Boolean);
@@ -311,6 +312,10 @@ export function buildAppBreadcrumbs(
     const prefix = `/${segments.slice(0, index + 1).join("/")}`;
     const alias = STATIC_PATH_ALIASES[prefix];
     const labelKey = alias?.labelKey ?? staticLabelKey(segment, index, prefix);
+    const labelPath = `/${segments
+      .slice(0, index + 1)
+      .map((part) => encodeURIComponent(safeDecode(part)))
+      .join("/")}`;
 
     return {
       href: isCurrent
@@ -319,7 +324,9 @@ export function buildAppBreadcrumbs(
           STATIC_PATH_LINKS[prefix] ??
           (isRoutablePath(prefix) ? prefix : undefined)),
       isCurrent,
-      label: labelKey ? translate(labelKey) : safeDecode(segment),
+      label:
+        labels[labelPath] ??
+        (labelKey ? translate(labelKey) : safeDecode(segment)),
     };
   });
 

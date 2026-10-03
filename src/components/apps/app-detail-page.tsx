@@ -1,5 +1,7 @@
 "use client";
 
+import { useBreadcrumbLabel } from "@/components/breadcrumb-labels-provider";
+
 import {
   Boxes,
   ClipboardList,
@@ -84,6 +86,7 @@ export function AppDetailPage({
   const t = useTranslations("apps");
   const router = useRouter();
   const [app, setApp] = useState<ManagedApp | null>(null);
+  useBreadcrumbLabel(["dashboard", "apps", app?.id], app?.name);
   const [repositories, setRepositories] = useState<AppRepository[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);

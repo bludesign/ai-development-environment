@@ -1,5 +1,7 @@
 "use client";
 
+import { useBreadcrumbLabel } from "@/components/breadcrumb-labels-provider";
+
 import {
   ChevronRight,
   Download,
@@ -91,6 +93,10 @@ export function CrashDetailPage({ crashId }: { crashId: string }) {
   const locale = useLocale();
   const router = useRouter();
   const [crash, setCrash] = useState<CrashDetail | null>(null);
+  useBreadcrumbLabel(
+    ["debugging", "crashes", crash?.id],
+    crash?.appName ?? crash?.filename,
+  );
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);

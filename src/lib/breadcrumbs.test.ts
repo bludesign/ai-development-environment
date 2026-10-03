@@ -77,6 +77,42 @@ const labels: Record<BreadcrumbLabelKey, string> = {
 const translate = (key: BreadcrumbLabelKey) => labels[key];
 
 describe("buildAppBreadcrumbs", () => {
+  test("uses loaded ancestor titles while retaining nested page labels and links", () => {
+    expect(
+      buildAppBreadcrumbs("/dashboard/workflows/workflow-id/edit", translate, {
+        "/dashboard/workflows/workflow-id": "Release workflow",
+        "/dashboard/workflows/other-id": "Other workflow",
+      }),
+    ).toEqual([
+      { href: undefined, isCurrent: false, label: "Dashboard" },
+      { href: "/dashboard/workflows", isCurrent: false, label: "Workflows" },
+      {
+        href: "/dashboard/workflows/workflow-id",
+        isCurrent: false,
+        label: "Release workflow",
+      },
+      { href: undefined, isCurrent: true, label: "Edit" },
+    ]);
+  });
+
+  test("resolves all dynamic levels of a merge request without inventing parent links", () => {
+    expect(
+      buildAppBreadcrumbs("/gitlab/merge-requests/123/42", translate, {
+        "/gitlab/merge-requests/123": "acme/mobile",
+        "/gitlab/merge-requests/123/42": "Fix sign in",
+      }),
+    ).toEqual([
+      { href: undefined, isCurrent: false, label: "GitLab" },
+      {
+        href: "/gitlab/merge-requests",
+        isCurrent: false,
+        label: "Merge Requests",
+      },
+      { href: undefined, isCurrent: false, label: "acme/mobile" },
+      { href: undefined, isCurrent: true, label: "Fix sign in" },
+    ]);
+  });
+
   test("localizes every static segment in the dashboard routes", () => {
     for (const page of globSync("**/page.tsx", {
       cwd: "src/app/[locale]/(dashboard)",

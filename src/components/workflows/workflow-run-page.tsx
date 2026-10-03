@@ -1,5 +1,7 @@
 "use client";
 
+import { useBreadcrumbLabel } from "@/components/breadcrumb-labels-provider";
+
 import {
   CirclePause,
   CirclePlay,
@@ -187,6 +189,10 @@ export function WorkflowRunPage({ runId }: { runId: string }) {
   const common = useTranslations("common");
   const openDestination = useOpenWorkflowDestination();
   const [run, setRun] = useState<WorkflowRunDetail | null>(null);
+  useBreadcrumbLabel(
+    ["dashboard", "workflows", "runs", run?.id],
+    run ? `${run.workflow.name} #${run.displayNumber}` : undefined,
+  );
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);

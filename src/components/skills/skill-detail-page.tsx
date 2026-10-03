@@ -1,5 +1,7 @@
 "use client";
 
+import { useBreadcrumbLabel } from "@/components/breadcrumb-labels-provider";
+
 import { Download, FilePlus2, PencilLine, Save, Trash2 } from "lucide-react";
 import { useTranslations } from "next-intl";
 import { useCallback, useEffect, useMemo, useState } from "react";
@@ -98,6 +100,8 @@ export function SkillDetailPage({ skillId }: { skillId: string }) {
   const router = useRouter();
   const creating = skillId === "new";
   const [name, setName] = useState(creating ? "new-skill" : "");
+  const [loadedSkillId, setLoadedSkillId] = useState<string | null>(null);
+  useBreadcrumbLabel(["ai", "skills", loadedSkillId], name);
   const [description, setDescription] = useState(
     creating ? "Describe when this skill should be used." : "",
   );
@@ -140,6 +144,7 @@ export function SkillDetailPage({ skillId }: { skillId: string }) {
         { id: skillId },
       );
       if (!data.skill) throw new Error(t("skillNotFound"));
+      setLoadedSkillId(data.skill.id);
       setName(data.skill.name);
       setDescription(data.skill.description);
       setSyncGlobally(data.skill.syncGlobally);

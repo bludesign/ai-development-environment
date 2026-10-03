@@ -1,5 +1,7 @@
 "use client";
 
+import { useBreadcrumbLabel } from "@/components/breadcrumb-labels-provider";
+
 import { OutOfDateBadge } from "@/components/builds/out-of-date-badge";
 
 import { readWorktreeBuildWindow } from "@/components/builds/build-history-window";
@@ -573,6 +575,10 @@ function LoadedWorktreeDetail({
   const detailRequest = useRef(0);
   const { worktree, applyActivity, setUnstagedChanges } = useLiveWorktree(
     entry.worktree,
+  );
+  useBreadcrumbLabel(
+    ["dashboard", "worktrees", worktree.id],
+    worktree.branch ?? worktree.headSha?.slice(0, 10) ?? wt("detached"),
   );
   const activeMove = overview.activeMoves.some(
     (move) =>

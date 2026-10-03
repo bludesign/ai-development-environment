@@ -1,5 +1,7 @@
 "use client";
 
+import { useBreadcrumbLabel } from "@/components/breadcrumb-labels-provider";
+
 import {
   ArrowDownToLine,
   ArrowUpFromLine,
@@ -149,6 +151,7 @@ export function SkillSyncPage({ runId }: { runId: string }) {
   const t = useTranslations("skills");
   const tStatus = useTranslations("status");
   const [run, setRun] = useState<SkillSyncRun | null>(null);
+  useBreadcrumbLabel(["ai", "skills", "sync", run?.id], t("syncTitle"));
   const [groups, setGroups] = useState<SkillGroupSummary[]>([]);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);

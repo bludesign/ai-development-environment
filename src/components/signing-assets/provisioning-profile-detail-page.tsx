@@ -1,5 +1,7 @@
 "use client";
 
+import { useBreadcrumbLabel } from "@/components/breadcrumb-labels-provider";
+
 import { Smartphone } from "lucide-react";
 import { useTranslations } from "next-intl";
 import { useCallback, useEffect, useState } from "react";
@@ -57,6 +59,10 @@ type Profile = {
 export function ProvisioningProfileDetailPage({ id }: { id: string }) {
   const t = useTranslations("provisioningProfiles");
   const [profile, setProfile] = useState<Profile | null>(null);
+  useBreadcrumbLabel(
+    ["system", "provisioning-profiles", profile?.id],
+    profile?.name,
+  );
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 

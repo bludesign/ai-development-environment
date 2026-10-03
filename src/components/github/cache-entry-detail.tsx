@@ -1,5 +1,7 @@
 "use client";
 
+import { useBreadcrumbLabel } from "@/components/breadcrumb-labels-provider";
+
 import { RefreshCw, Trash2 } from "lucide-react";
 import { useTranslations } from "next-intl";
 import { useCallback, useEffect, useState } from "react";
@@ -24,6 +26,10 @@ export function GitHubCacheEntryDetailPage({ id }: { id: string }) {
   const tc = useTranslations("common");
   const router = useRouter();
   const [entry, setEntry] = useState<GitHubCachedEntryDetail | null>(null);
+  useBreadcrumbLabel(
+    ["github", "cache", "entries", entry?.id],
+    entry?.operation,
+  );
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);

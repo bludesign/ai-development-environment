@@ -1,5 +1,7 @@
 "use client";
 
+import { useBreadcrumbLabel } from "@/components/breadcrumb-labels-provider";
+
 import { Download, ExternalLink, Pencil, Trash2 } from "lucide-react";
 import { useLocale, useTranslations } from "next-intl";
 import { useCallback, useState } from "react";
@@ -156,6 +158,10 @@ export function DsymDetailPage({ dsymId }: { dsymId: string }) {
   const locale = useLocale();
   const router = useRouter();
   const [dsym, setDsym] = useState<DsymDetail | null>(null);
+  useBreadcrumbLabel(
+    ["debugging", "crashes", "dsyms", dsym?.id],
+    dsym?.bundleName,
+  );
   const [moreCrashes, setMoreCrashes] = useState<CrashSummary[]>([]);
   const [cursor, setCursor] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);

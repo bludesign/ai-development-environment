@@ -1,5 +1,7 @@
 "use client";
 
+import { useBreadcrumbLabel } from "@/components/breadcrumb-labels-provider";
+
 import {
   Apple,
   ArrowLeft,
@@ -81,6 +83,7 @@ export function DeviceDetailPage({ id }: { id: string }) {
   const locale = useLocale();
   const router = useRouter();
   const [device, setDevice] = useState<IosDeviceRecord | null>(null);
+  useBreadcrumbLabel(["system", "devices", device?.id], device?.displayName);
   const [settings, setSettings] = useState<IosDeviceSettings | null>(null);
   const [firmware, setFirmware] = useState<IosDeviceFirmware | null>(null);
   const [firmwareLoading, setFirmwareLoading] = useState(false);

@@ -1,5 +1,7 @@
 "use client";
 
+import { useBreadcrumbLabel } from "@/components/breadcrumb-labels-provider";
+
 import { useCallback, useEffect, useState } from "react";
 import { useTranslations } from "next-intl";
 import { Pencil } from "lucide-react";
@@ -113,6 +115,10 @@ export function BuildConfigurationDetail({
   const t = useTranslations("builds");
   const [configuration, setConfiguration] = useState<Configuration | null>(
     null,
+  );
+  useBreadcrumbLabel(
+    ["dashboard", "builds", "configurations", configuration?.id],
+    configuration?.name,
   );
   const [checkouts, setCheckouts] = useState<Checkout[]>([]);
   const [selected, setSelected] = useState("");
