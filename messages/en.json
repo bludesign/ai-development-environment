@@ -1549,7 +1549,7 @@
     "save": "Save"
   },
   "cacheServer": {
-    "title": "Actions Cache",
+    "title": "GitHub Actions Cache",
     "description": "Browse and manage entries on the GitHub Actions Cache Server.",
     "matchLookup": "Match lookup",
     "refresh": "Refresh",
@@ -2112,6 +2112,7 @@
     "allProjects": "All projects",
     "chooseProject": "Choose a project",
     "mergeRequestsTitle": "Merge Requests",
+    "mergeRequestsPageTitle": "GitLab Merge Requests",
     "mergeRequestsDescription": "Review and manage merge requests across the configured GitLab instance.",
     "scope": "Scope",
     "state": "State",
@@ -2146,6 +2147,7 @@
     "autoMerge": "Auto-merge",
     "pipelines": "Pipelines",
     "pipelinesTitle": "Pipelines",
+    "pipelinesPageTitle": "GitLab Pipelines",
     "pipelineCount": "{count} pipeline",
     "pipelineCountPlural": "{count} pipelines",
     "pipelinesDescription": "Run, inspect, cancel, and retry GitLab CI/CD pipelines and jobs.",
@@ -2178,7 +2180,7 @@
     "projectHooks": "Project hooks",
     "deliveries": "Deliveries",
     "noDeliveries": "No GitLab webhook deliveries have been received.",
-    "cacheTitle": "Cache",
+    "cacheTitle": "GitLab Cache",
     "cacheDescription": "Inspect cached REST responses and sanitized GitLab API call logs.",
     "cacheEntries": "Cached responses",
     "clear": "Clear",
@@ -2700,7 +2702,7 @@
     }
   },
   "pullRequests": {
-    "title": "Pull Requests",
+    "title": "GitHub Pull Requests",
     "description": "Review your GitHub pull requests and monitored repositories in one place.",
     "refresh": "Refresh",
     "manage": "Manage",
@@ -2840,7 +2842,7 @@
     "closeMergeResult": "Close"
   },
   "githubComments": {
-    "title": "Comments",
+    "title": "GitHub Comments",
     "description": "Review and respond to GitHub review threads on your open pull requests.",
     "refresh": "Refresh",
     "layout": "Comments layout",
@@ -5652,7 +5654,7 @@
     "destinationNotReviewed": "Not checked"
   },
   "gitlabComments": {
-    "title": "Comments",
+    "title": "GitLab Comments",
     "description": "Review and respond to discussions on your merge requests.",
     "refresh": "Refresh",
     "layout": "Comments layout",

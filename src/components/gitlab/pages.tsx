@@ -490,7 +490,7 @@ export function GitLabMergeRequestsPage({
       <div className="flex flex-wrap items-start justify-between gap-3">
         <PageHeader
           description={t("mergeRequestsDescription")}
-          title={t("mergeRequestsTitle")}
+          title={t("mergeRequestsPageTitle")}
         />
         <GitLabProjectManagerDialog
           onChanged={reloadConfiguration}
@@ -1364,7 +1364,7 @@ export function GitLabPipelinesPage() {
     <section className="space-y-6">
       <PageHeader
         description={t("pipelinesDescription")}
-        title={t("pipelinesTitle")}
+        title={t("pipelinesPageTitle")}
       />
       <ErrorAlert error={configurationError ?? error} />
       <Card>

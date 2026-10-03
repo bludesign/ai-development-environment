@@ -1549,7 +1549,7 @@
     "save": "Enregistrer"
   },
   "cacheServer": {
-    "title": "Cache des Actions",
+    "title": "Cache GitHub Actions",
     "description": "Parcourez et gérez les entrées du serveur de cache GitHub Actions.",
     "matchLookup": "Recherche de correspondance",
     "refresh": "Actualiser",
@@ -2112,6 +2112,7 @@
     "allProjects": "Tous les projets",
     "chooseProject": "Choisir un projet",
     "mergeRequestsTitle": "Demandes de fusion",
+    "mergeRequestsPageTitle": "Demandes de fusion GitLab",
     "mergeRequestsDescription": "Examinez et gérez les demandes de fusion de l’instance GitLab configurée.",
     "scope": "Portée",
     "state": "État",
@@ -2146,6 +2147,7 @@
     "autoMerge": "Fusion automatique",
     "pipelines": "Pipelines",
     "pipelinesTitle": "Pipelines",
+    "pipelinesPageTitle": "Pipelines GitLab",
     "pipelineCount": "{count} pipeline",
     "pipelineCountPlural": "{count} pipelines",
     "pipelinesDescription": "Lancez, inspectez, annulez et relancez les pipelines et tâches CI/CD GitLab.",
@@ -2178,7 +2180,7 @@
     "projectHooks": "Webhooks de projet",
     "deliveries": "Livraisons",
     "noDeliveries": "Aucune livraison de webhook GitLab n’a été reçue.",
-    "cacheTitle": "Cache",
+    "cacheTitle": "Cache GitLab",
     "cacheDescription": "Inspectez les réponses REST mises en cache et les journaux assainis des appels à l’API GitLab.",
     "cacheEntries": "Réponses en cache",
     "clear": "Vider",
@@ -2700,7 +2702,7 @@
     }
   },
   "pullRequests": {
-    "title": "Demandes de tirage",
+    "title": "Demandes de tirage GitHub",
     "description": "Consultez vos demandes GitHub et les dépôts surveillés au même endroit.",
     "refresh": "Actualiser",
     "manage": "Gérer",
@@ -2840,7 +2842,7 @@
     "closeMergeResult": "Fermer"
   },
   "githubComments": {
-    "title": "Commentaires",
+    "title": "Commentaires GitHub",
     "description": "Consultez et répondez aux fils de révision GitHub de vos demandes ouvertes.",
     "refresh": "Actualiser",
     "layout": "Disposition des commentaires",
@@ -5652,7 +5654,7 @@
     "destinationNotReviewed": "Non vérifié"
   },
   "gitlabComments": {
-    "title": "Commentaires",
+    "title": "Commentaires GitLab",
     "description": "Consultez les discussions de vos demandes de fusion et répondez-y.",
     "refresh": "Actualiser",
     "layout": "Affichage des commentaires",

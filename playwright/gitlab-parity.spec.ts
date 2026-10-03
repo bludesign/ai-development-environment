@@ -312,7 +312,7 @@ test("gitlab scopes require a project only for All accessible and search unmanag
   });
   await page.goto("/en/gitlab/merge-requests");
   await expect(
-    page.getByRole("heading", { name: "Merge Requests", exact: true }),
+    page.getByRole("heading", { name: "GitLab Merge Requests", exact: true }),
   ).toBeVisible();
   await expect(
     page.getByText("Improve pipeline retry diagnostics", { exact: true }),
@@ -363,7 +363,7 @@ test("gitlab comments shows human conversations with filters and remembered layo
 }, info) => {
   await page.goto("/en/gitlab/comments");
   await expect(
-    page.getByRole("heading", { name: "Comments", exact: true }),
+    page.getByRole("heading", { name: "GitLab Comments", exact: true }),
   ).toBeVisible();
   await expect(
     page.getByText("General comment", { exact: true }),
