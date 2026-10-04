@@ -60,8 +60,11 @@ const show = () =>
   render(
     <MergeRequestDialog mergeRequest={target} onOpenChange={vi.fn()} open />,
   );
-afterEach(() => {
+afterEach(async () => {
   cleanup();
+  // Radix restores focus on a zero-delay timer after unmounting the dialog.
+  // Let it dispatch its event before Vitest tears down the jsdom globals.
+  await new Promise<void>((resolve) => window.setTimeout(resolve, 0));
   request.mockReset();
 });
 
