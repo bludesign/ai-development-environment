@@ -465,7 +465,7 @@ export function dsymUploadBody(upload: UploadWithDsyms, duplicate: boolean) {
       bundleName: dsym.bundleName,
       version: dsym.shortVersion,
       build: dsym.bundleVersion,
-      url: `/crashes/dsyms/${dsym.id}`,
+      url: `/debugging/crashes/dsyms/${dsym.id}`,
       slices: dsym.slices.map((slice) => ({
         uuid: dashed(slice.uuid),
         arch: slice.arch,

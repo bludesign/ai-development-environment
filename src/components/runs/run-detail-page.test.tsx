@@ -362,7 +362,7 @@ describe("RunDetailPage", () => {
     );
     expect(
       screen.getByRole("link", { name: "Open Worktree" }).getAttribute("href"),
-    ).toBe("/worktrees/worktree-1");
+    ).toBe("/dashboard/worktrees/worktree-1");
     expect(screen.getByRole("button", { name: "Build" })).toBeDefined();
     expect(screen.getByRole("link", { name: "New plan" })).toBeDefined();
     expect(screen.getByRole("link", { name: "New session" })).toBeDefined();

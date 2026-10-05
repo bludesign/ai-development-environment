@@ -33,7 +33,7 @@ const question = {
   resourceKind: "PLAN",
   reason: "QUESTION",
   resourceId: "plan-1",
-  href: "/plans/plan-1",
+  href: "/ai/plans/plan-1",
   displayNumber: 4,
   label: "Choose the implementation approach.",
   summary: "aide · feature/AIDE-101",
@@ -89,7 +89,7 @@ const workflowQuestion = {
   key: "WORKFLOW:workflow-1",
   resourceKind: "WORKFLOW",
   resourceId: "workflow-1",
-  href: "/workflows/runs/workflow-1",
+  href: "/dashboard/workflows/runs/workflow-1",
   displayNumber: 8,
   label: "Deploy application",
   summary: "WORKTREE:worktree-1",
@@ -121,7 +121,7 @@ const failed = {
   resourceKind: "BUILD",
   reason: "FAILED",
   resourceId: "build-failed",
-  href: "/builds/build-failed",
+  href: "/dashboard/builds/build-failed",
   displayNumber: null,
   label: "Debug",
   summary: "aide · feature/AIDE-101",
@@ -139,7 +139,7 @@ const active = {
   resourceKind: "SESSION",
   reason: "ACTIVE",
   resourceId: "session-active",
-  href: "/sessions/session-active",
+  href: "/ai/sessions/session-active",
   displayNumber: 9,
   label: "Continue implementation.",
   status: "QUEUED",
@@ -153,7 +153,7 @@ const unrun = {
   resourceKind: "BUILD",
   reason: "UNRUN_BUILD",
   resourceId: "build-unrun",
-  href: "/builds/build-unrun",
+  href: "/dashboard/builds/build-unrun",
   displayNumber: null,
   label: "Debug runnable build",
   status: "SUCCEEDED",
@@ -243,12 +243,12 @@ describe("ActionCenterPage", () => {
     expect(
       screen.getByRole("heading", { name: "Action Center" }),
     ).toBeDefined();
-    expect(planLink.getAttribute("href")).toBe("/plans/plan-1");
+    expect(planLink.getAttribute("href")).toBe("/ai/plans/plan-1");
     expect(
       screen
         .getAllByRole("link", { name: /feature-aide/ })[0]
         ?.getAttribute("href"),
-    ).toBe("/worktrees/worktree-1");
+    ).toBe("/dashboard/worktrees/worktree-1");
     expect(screen.getByText("xcodebuild failed")).toBeDefined();
     expect(
       screen.getByRole("heading", { name: "Needs attention" }),
@@ -282,7 +282,7 @@ describe("ActionCenterPage", () => {
     expect(workflowWorktreeLinks).toHaveLength(2);
     expect(workflowWorktreeLinks[0]?.textContent).toBe("feature-aide");
     expect(workflowWorktreeLinks[0]?.getAttribute("href")).toBe(
-      "/worktrees/worktree-1",
+      "/dashboard/worktrees/worktree-1",
     );
     expect(workflowWorktreeLinks[1]?.textContent).toContain("feature/AIDE-101");
     expect(
@@ -395,7 +395,7 @@ describe("MiniActionCenter", () => {
     expect(screen.queryByRole("button", { name: "Submit answer" })).toBeNull();
     expect(
       screen.getByRole("link", { name: "Action Center" }).getAttribute("href"),
-    ).toBe("/");
+    ).toBe("/dashboard/action-center");
     const compactItem = document.querySelector(
       '[data-slot="action-center-compact-item"]',
     );
@@ -403,7 +403,7 @@ describe("MiniActionCenter", () => {
     expect(compactItem?.className).toContain("space-y-1.5");
     expect(compactItem?.className).toContain("py-1.5");
     const worktreeLink = compactItem?.querySelector(
-      'a[href="/worktrees/worktree-1"]',
+      'a[href="/dashboard/worktrees/worktree-1"]',
     );
     expect(worktreeLink?.className).toContain("overflow-hidden");
     expect(worktreeLink?.textContent).toBe("feature-aide");

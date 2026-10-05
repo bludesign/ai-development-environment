@@ -1,6 +1,11 @@
 "use client";
 
 import {
+  useBreadcrumbLabel,
+  useBreadcrumbFallback,
+} from "@/components/breadcrumb-labels-provider";
+
+import {
   addEdge,
   Background,
   ControlButton,
@@ -309,6 +314,7 @@ function WorkflowEditorInner({ workflowId }: { workflowId?: string | null }) {
   const wrapperRef = useRef<HTMLDivElement>(null);
   const fileRef = useRef<HTMLInputElement>(null);
   const [workflow, setWorkflow] = useState<WorkflowSummary | null>(null);
+  useBreadcrumbLabel(["dashboard", "workflows", workflow?.id], workflow?.name);
   const [definition, setDefinition] = useState<WorkflowDefinition>(() =>
     emptyDefinition(),
   );
@@ -329,6 +335,10 @@ function WorkflowEditorInner({ workflowId }: { workflowId?: string | null }) {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  useBreadcrumbFallback(
+    ["dashboard", "workflows", workflowId],
+    Boolean(error) || (!loading && !workflow),
+  );
   const [notice, setNotice] = useState<string | null>(null);
   const [diagnostics, setDiagnostics] = useState<WorkflowDiagnostic[]>([]);
   const [overlapPolicy, setOverlapPolicy] = useState("QUEUE");
@@ -725,7 +735,7 @@ function WorkflowEditorInner({ workflowId }: { workflowId?: string | null }) {
         setWorkflow(data.createWorkflow);
         setDefinition(data.createWorkflow.draftDefinition);
         setNotice(t("saved"));
-        router.replace(`/workflows/${data.createWorkflow.id}/edit`);
+        router.replace(`/dashboard/workflows/${data.createWorkflow.id}/edit`);
       }
       return true;
     } catch (value) {
@@ -778,7 +788,7 @@ function WorkflowEditorInner({ workflowId }: { workflowId?: string | null }) {
         { id: workflow.id },
       );
       setNotice(t("published"));
-      router.push(`/workflows/${workflow.id}`);
+      router.push(`/dashboard/workflows/${workflow.id}`);
     } catch (value) {
       setError(value instanceof Error ? value.message : String(value));
     } finally {
@@ -806,7 +816,7 @@ function WorkflowEditorInner({ workflowId }: { workflowId?: string | null }) {
           },
         },
       );
-      router.push(`/workflows/${data.createWorkflow.id}/edit`);
+      router.push(`/dashboard/workflows/${data.createWorkflow.id}/edit`);
     } catch (value) {
       setError(value instanceof Error ? value.message : String(value));
     }

@@ -190,7 +190,7 @@ function parseDate(value: string | null | undefined): Date | undefined {
 }
 
 function runHref(run: { id: string; kind: string }): string {
-  return `/${run.kind === "PLAN" ? "plans" : "sessions"}/${encodeURIComponent(run.id)}`;
+  return `/ai/${run.kind === "PLAN" ? "plans" : "sessions"}/${encodeURIComponent(run.id)}`;
 }
 
 function publishRun(runId: string): void {

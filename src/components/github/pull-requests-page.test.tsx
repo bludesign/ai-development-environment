@@ -136,7 +136,7 @@ beforeEach(() => {
   intersectionCallback = null;
   intersectionTarget = null;
   intersectionObserver = null;
-  window.history.replaceState(null, "", "/pull-requests");
+  window.history.replaceState(null, "", "/github/pull-requests");
 });
 
 afterEach(() => {
@@ -509,7 +509,7 @@ describe("PullRequestsPage", () => {
       within(row as HTMLTableRowElement)
         .getByRole("link", { name: "View 2 open comments" })
         .getAttribute("href"),
-    ).toBe("/comments?pullRequest=acme%2Fwidgets%2317");
+    ).toBe("/github/comments?pullRequest=acme%2Fwidgets%2317");
     const jiraBadge = within(row as HTMLTableRowElement).getByRole("button", {
       name: "APP-42",
     });
@@ -526,7 +526,7 @@ describe("PullRequestsPage", () => {
     );
     expect(
       screen.getByRole("menuitem", { name: "Details" }).getAttribute("href"),
-    ).toBe("/pull-requests/acme/widgets/17");
+    ).toBe("/github/pull-requests/acme/widgets/17");
     expect(
       screen
         .getByRole("menuitem", { name: "Open in GitHub" })
@@ -538,7 +538,9 @@ describe("PullRequestsPage", () => {
     ).toBeDefined();
     fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
 
-    expect(title.getAttribute("href")).toBe("/pull-requests/acme/widgets/17");
+    expect(title.getAttribute("href")).toBe(
+      "/github/pull-requests/acme/widgets/17",
+    );
     expect(
       within(row as HTMLTableRowElement).getByText("feature/app-42"),
     ).toBeDefined();

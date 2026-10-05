@@ -1,6 +1,11 @@
 "use client";
 
 import {
+  useBreadcrumbLabel,
+  useBreadcrumbFallback,
+} from "@/components/breadcrumb-labels-provider";
+
+import {
   Apple,
   ArrowLeft,
   Check,
@@ -81,6 +86,7 @@ export function DeviceDetailPage({ id }: { id: string }) {
   const locale = useLocale();
   const router = useRouter();
   const [device, setDevice] = useState<IosDeviceRecord | null>(null);
+  useBreadcrumbLabel(["system", "devices", device?.id], device?.displayName);
   const [settings, setSettings] = useState<IosDeviceSettings | null>(null);
   const [firmware, setFirmware] = useState<IosDeviceFirmware | null>(null);
   const [firmwareLoading, setFirmwareLoading] = useState(false);
@@ -94,6 +100,10 @@ export function DeviceDetailPage({ id }: { id: string }) {
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  useBreadcrumbFallback(
+    ["system", "devices", id],
+    Boolean(error) || (!loading && !device),
+  );
   const [registerOpen, setRegisterOpen] = useState(false);
   const [rejectOpen, setRejectOpen] = useState(false);
   const [deleteOpen, setDeleteOpen] = useState(false);
@@ -250,7 +260,7 @@ export function DeviceDetailPage({ id }: { id: string }) {
         "mutation DeleteIosDevice($id: ID!) { deleteIosDevice(id: $id) }",
         { id },
       );
-      router.push("/devices");
+      router.push("/system/devices");
     } catch (value) {
       setError(value instanceof Error ? value.message : String(value));
       setBusy(false);
@@ -286,7 +296,7 @@ export function DeviceDetailPage({ id }: { id: string }) {
           {error && <EmptyDescription>{error}</EmptyDescription>}
         </EmptyHeader>
         <Button asChild variant="outline">
-          <Link href="/devices">
+          <Link href="/system/devices">
             <ArrowLeft /> {t("back")}
           </Link>
         </Button>
@@ -331,7 +341,10 @@ export function DeviceDetailPage({ id }: { id: string }) {
           <Check />
           <AlertDescription>
             {t("rebuildWarning")}{" "}
-            <Link className="text-primary hover:underline" href="/builds">
+            <Link
+              className="text-primary hover:underline"
+              href="/dashboard/builds"
+            >
               {t("openBuilds")}
             </Link>
           </AlertDescription>
@@ -342,7 +355,10 @@ export function DeviceDetailPage({ id }: { id: string }) {
           <Settings />
           <AlertDescription>
             {t("configureAppleFirst")}{" "}
-            <Link className="text-primary hover:underline" href="/settings">
+            <Link
+              className="text-primary hover:underline"
+              href="/system/settings"
+            >
               {t("openSettings")}
             </Link>
           </AlertDescription>

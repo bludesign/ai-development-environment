@@ -171,7 +171,7 @@ export function StatusPage() {
                           <CardTitle>
                             <Link
                               className="hover:underline"
-                              href={`/agents/${agent.agentId}`}
+                              href={`/dashboard/agents/${agent.agentId}`}
                             >
                               {agent.name}
                             </Link>

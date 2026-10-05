@@ -53,10 +53,10 @@ describe("SkillGroupsPage", () => {
     expect(screen.getAllByText("Skill groups")).toHaveLength(2);
 
     fireEvent.click(row);
-    expect(push).toHaveBeenCalledWith("/skills/groups/group-1");
+    expect(push).toHaveBeenCalledWith("/ai/skills/groups/group-1");
 
     push.mockClear();
     fireEvent.keyDown(row, { key: "Enter" });
-    expect(push).toHaveBeenCalledWith("/skills/groups/group-1");
+    expect(push).toHaveBeenCalledWith("/ai/skills/groups/group-1");
   });
 });

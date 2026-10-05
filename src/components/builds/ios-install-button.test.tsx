@@ -36,7 +36,7 @@ describe("IosInstallButton", () => {
     window.history.replaceState(
       {},
       "",
-      "/en/builds/build-1?source=desktop#artifacts",
+      "/en/dashboard/builds/build-1?source=desktop#artifacts",
     );
 
     render(
@@ -61,7 +61,7 @@ describe("IosInstallButton", () => {
     fireEvent.click(screen.getByRole("button", { name: "Copy install link" }));
     await waitFor(() =>
       expect(copyTextMock).toHaveBeenCalledWith(
-        "http://127.0.0.1:3000/en/builds/build-1?serverUrlKind=LOCAL",
+        "http://127.0.0.1:3000/en/dashboard/builds/build-1?serverUrlKind=LOCAL",
       ),
     );
   });

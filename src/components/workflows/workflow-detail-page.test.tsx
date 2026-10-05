@@ -170,11 +170,12 @@ describe("workflow detail read-only inspector", () => {
       ).closest<HTMLElement>('[data-slot="card"]');
       expect(queueCard).not.toBeNull();
       expect(
-        queueCard?.querySelector('a[href="/sessions/session-3"]')?.textContent,
+        queueCard?.querySelector('a[href="/ai/sessions/session-3"]')
+          ?.textContent,
       ).toBe("Session #3");
       expect(queueCard?.textContent).toContain("#2");
       expect(
-        queueCard?.querySelector('a[href="/worktrees/worktree-1"]'),
+        queueCard?.querySelector('a[href="/dashboard/worktrees/worktree-1"]'),
       ).toBeTruthy();
 
       fireEvent.click(

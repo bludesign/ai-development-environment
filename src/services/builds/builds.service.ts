@@ -3746,7 +3746,7 @@ export class BuildsService {
                 ? "iOS build succeeded"
                 : "iOS build failed",
             body: context.join(" · ") || `Build ${build.id}`,
-            href: `/builds/${build.id}`,
+            href: `/dashboard/builds/${build.id}`,
             resourceKind: "BUILD",
             resourceId: build.id,
             worktreeId: build.worktreeId,

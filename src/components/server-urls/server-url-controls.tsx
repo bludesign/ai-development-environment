@@ -140,7 +140,7 @@ export function ServerUrlSettingsLink() {
   return (
     <Link
       className="text-xs text-primary underline underline-offset-4"
-      href="/settings#server-urls"
+      href="/system/settings#server-urls"
     >
       {t("manage")}
     </Link>

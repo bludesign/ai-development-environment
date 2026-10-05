@@ -163,7 +163,7 @@ export function DevicesPage() {
             </a>
           </Button>
           <Button asChild>
-            <Link href="/devices/enroll">
+            <Link href="/system/devices/enroll">
               <Plus /> {t("addDevice")}
             </Link>
           </Button>
@@ -243,11 +243,11 @@ export function DevicesPage() {
                   aria-label={t("viewDevice", { name: device.displayName })}
                   className="cursor-pointer focus-visible:bg-muted/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset"
                   key={device.id}
-                  onClick={() => router.push(`/devices/${device.id}`)}
+                  onClick={() => router.push(`/system/devices/${device.id}`)}
                   onKeyDown={(event) => {
                     if (event.key === "Enter" || event.key === " ") {
                       event.preventDefault();
-                      router.push(`/devices/${device.id}`);
+                      router.push(`/system/devices/${device.id}`);
                     }
                   }}
                   role="link"
@@ -256,7 +256,7 @@ export function DevicesPage() {
                   <TableCell className="min-w-52 whitespace-normal">
                     <Link
                       className="font-medium hover:underline"
-                      href={`/devices/${device.id}`}
+                      href={`/system/devices/${device.id}`}
                       onClick={(event) => event.stopPropagation()}
                     >
                       {device.displayName}

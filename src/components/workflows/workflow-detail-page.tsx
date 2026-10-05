@@ -1,6 +1,11 @@
 "use client";
 
 import {
+  useBreadcrumbLabel,
+  useBreadcrumbFallback,
+} from "@/components/breadcrumb-labels-provider";
+
+import {
   ChevronDown,
   CircleOff,
   CirclePause,
@@ -119,12 +124,17 @@ export function WorkflowDetailPage({ workflowId }: { workflowId: string }) {
   const labels = useWorkflowLabels();
   const router = useRouter();
   const [workflow, setWorkflow] = useState<WorkflowDetail | null>(null);
+  useBreadcrumbLabel(["dashboard", "workflows", workflow?.id], workflow?.name);
   const [runs, setRuns] = useState<WorkflowRun[]>([]);
   const [queue, setQueue] = useState<WorktreeRunQueueEntry[]>([]);
   const [catalog, setCatalog] = useState<WorkflowCatalog | null>(null);
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  useBreadcrumbFallback(
+    ["dashboard", "workflows", workflowId],
+    Boolean(error) || (!loading && !workflow),
+  );
   const [repositories, setRepositories] = useState<
     Array<{ id: string; name: string; displayOrigin: string }>
   >([]);
@@ -335,7 +345,7 @@ export function WorkflowDetailPage({ workflowId }: { workflowId: string }) {
         `mutation RunWorkflow($input: TriggerWorkflowInput!) { triggerWorkflow(input: $input) { id } }`,
         { input: { workflowId: workflow.id, sessionData: {}, choice } },
       );
-      router.push(`/workflows/runs/${data.triggerWorkflow.id}`);
+      router.push(`/dashboard/workflows/runs/${data.triggerWorkflow.id}`);
     } catch (value) {
       setError(value instanceof Error ? value.message : String(value));
     }
@@ -449,7 +459,7 @@ export function WorkflowDetailPage({ workflowId }: { workflowId: string }) {
             <Download /> {t("export")}
           </Button>
           <Button asChild variant="outline">
-            <Link href={`/workflows/${workflow.id}/edit`}>
+            <Link href={`/dashboard/workflows/${workflow.id}/edit`}>
               <Pencil /> {t("edit")}
             </Link>
           </Button>
@@ -732,7 +742,7 @@ export function WorkflowDetailPage({ workflowId }: { workflowId: string }) {
                       <TableCell>
                         <Link
                           className="font-medium hover:underline"
-                          href={`/workflows/runs/${run.id}`}
+                          href={`/dashboard/workflows/runs/${run.id}`}
                         >
                           #{run.displayNumber}
                         </Link>

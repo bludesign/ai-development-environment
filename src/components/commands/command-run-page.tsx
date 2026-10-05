@@ -1,6 +1,11 @@
 "use client";
 
 import {
+  useBreadcrumbLabel,
+  useBreadcrumbFallback,
+} from "@/components/breadcrumb-labels-provider";
+
+import {
   Check,
   CircleStop,
   Copy,
@@ -129,6 +134,10 @@ export function CommandRunPage({ runId }: { runId: string }) {
   const locale = useLocale();
   const router = useRouter();
   const [run, setRun] = useState<CommandRun | null>(null);
+  useBreadcrumbLabel(
+    ["dashboard", "commands", "runs", run?.id],
+    run?.snapshotName,
+  );
   const [outputState, setOutputState] = useState<{
     runId: string;
     chunks: OutputChunk[];
@@ -136,6 +145,10 @@ export function CommandRunPage({ runId }: { runId: string }) {
   const output =
     outputState.runId === runId ? outputState.chunks : EMPTY_OUTPUT;
   const [error, setError] = useState<string | null>(null);
+  useBreadcrumbFallback(
+    ["dashboard", "commands", "runs", runId],
+    Boolean(error),
+  );
   const [mutating, setMutating] = useState(false);
   const [snapshotCopied, setSnapshotCopied] = useState(false);
 
@@ -278,7 +291,7 @@ export function CommandRunPage({ runId }: { runId: string }) {
           "mutation RerunCommandRun($id: ID!) { rerunCommandRun(id: $id) { id } }",
           { id: runId },
         );
-        router.push(`/commands/runs/${data.rerunCommandRun.id}`);
+        router.push(`/dashboard/commands/runs/${data.rerunCommandRun.id}`);
       }
     } catch (value) {
       setError(value instanceof Error ? value.message : String(value));
@@ -358,7 +371,7 @@ export function CommandRunPage({ runId }: { runId: string }) {
         </div>
         {run.commandId && (
           <Button asChild variant="outline">
-            <Link href={`/commands/${run.commandId}/edit`}>
+            <Link href={`/dashboard/commands/${run.commandId}/edit`}>
               <FilePenLine />
               {t("editCommand")}
             </Link>
@@ -419,7 +432,7 @@ export function CommandRunPage({ runId }: { runId: string }) {
                   className="h-auto w-full min-w-0 items-start justify-start px-0 text-left whitespace-normal"
                   variant="link"
                 >
-                  <Link href={`/agents/${run.agentId}`}>
+                  <Link href={`/dashboard/agents/${run.agentId}`}>
                     <span className="min-w-0 break-words">{run.agentName}</span>
                     <ExternalLink />
                   </Link>
@@ -438,7 +451,7 @@ export function CommandRunPage({ runId }: { runId: string }) {
                   className="h-auto w-full min-w-0 items-start justify-start px-0 text-left whitespace-normal"
                   variant="link"
                 >
-                  <Link href={`/worktrees/${run.worktreeId}`}>
+                  <Link href={`/dashboard/worktrees/${run.worktreeId}`}>
                     <span className="min-w-0 break-words">
                       {run.worktreeBranch || run.worktreePath}
                     </span>
@@ -492,7 +505,7 @@ export function CommandRunPage({ runId }: { runId: string }) {
         key={runId}
         nextMatchLabel={t("nextTerminalMatch")}
         previousMatchLabel={t("previousTerminalMatch")}
-        rawOutputHref={`/${locale}/commands/runs/${encodeURIComponent(runId)}/output`}
+        rawOutputHref={`/${locale}/dashboard/commands/runs/${encodeURIComponent(runId)}/output`}
         rawOutputLabel={t("viewRawOutput")}
         searchLabel={t("searchTerminal")}
         sourceKey={runId}
@@ -529,7 +542,7 @@ export function CommandRunPage({ runId }: { runId: string }) {
                       entry.displayNumber
                     ) : (
                       <Button asChild className="h-auto px-0" variant="link">
-                        <Link href={`/commands/runs/${entry.id}`}>
+                        <Link href={`/dashboard/commands/runs/${entry.id}`}>
                           {entry.displayNumber}
                         </Link>
                       </Button>

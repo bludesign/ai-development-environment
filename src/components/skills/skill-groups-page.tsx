@@ -83,7 +83,7 @@ export function SkillGroupsPage() {
         { input: { name, skillIds: [], repositoryIds: [] } },
       );
       setOpen(false);
-      router.push(`/skills/groups/${data.saveSkillGroup.id}`);
+      router.push(`/ai/skills/groups/${data.saveSkillGroup.id}`);
     } catch (value) {
       setError(value instanceof Error ? value.message : String(value));
     } finally {
@@ -136,11 +136,11 @@ export function SkillGroupsPage() {
                   <TableRow
                     className="cursor-pointer focus-visible:bg-muted/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset"
                     key={group.id}
-                    onClick={() => router.push(`/skills/groups/${group.id}`)}
+                    onClick={() => router.push(`/ai/skills/groups/${group.id}`)}
                     onKeyDown={(event) => {
                       if (event.key === "Enter" || event.key === " ") {
                         event.preventDefault();
-                        router.push(`/skills/groups/${group.id}`);
+                        router.push(`/ai/skills/groups/${group.id}`);
                       }
                     }}
                     role="link"

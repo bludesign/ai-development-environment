@@ -219,7 +219,7 @@ export function WorkflowResourcePanel({
         <CardDescription>{t("resourceWorkflowsDescription")}</CardDescription>
         <CardAction>
           <Button asChild size="sm" variant="outline">
-            <Link href="/workflows">{t("manageWorkflows")}</Link>
+            <Link href="/dashboard/workflows">{t("manageWorkflows")}</Link>
           </Button>
         </CardAction>
       </CardHeader>
@@ -265,7 +265,7 @@ export function WorkflowResourcePanel({
               <div className="flex items-center gap-2">
                 <Link
                   className="font-medium hover:underline"
-                  href={`/workflows/runs/${current.id}`}
+                  href={`/dashboard/workflows/runs/${current.id}`}
                 >
                   {current.workflow.name} #{current.displayNumber}
                 </Link>
@@ -274,7 +274,7 @@ export function WorkflowResourcePanel({
                 </Badge>
               </div>
               <Button asChild size="sm" variant="ghost">
-                <Link href={`/workflows/runs/${current.id}`}>
+                <Link href={`/dashboard/workflows/runs/${current.id}`}>
                   <ExternalLink /> {t("fullRun")}
                 </Link>
               </Button>
@@ -300,7 +300,7 @@ export function WorkflowResourcePanel({
                     <Button asChild key={run.id} size="sm" variant="ghost">
                       <Link
                         className="gap-2"
-                        href={`/workflows/runs/${run.id}`}
+                        href={`/dashboard/workflows/runs/${run.id}`}
                       >
                         <span>
                           #{run.displayNumber} · {run.workflow.name}

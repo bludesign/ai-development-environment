@@ -24,7 +24,7 @@ export const INTERACTIVE_SELECTOR = [
 ].join(",");
 
 export function worktreeDetailHref(worktreeId: string): string {
-  return `/worktrees/${encodeURIComponent(worktreeId)}`;
+  return `/dashboard/worktrees/${encodeURIComponent(worktreeId)}`;
 }
 
 export function shouldNavigateWorktreeSurface(

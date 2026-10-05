@@ -32,8 +32,8 @@ import type { WorktreeRunQueueEntry } from "./types";
 import { useWorkflowLabels } from "./workflow-labels";
 
 function entryHref(entry: WorktreeRunQueueEntry): string {
-  if (entry.kind === "WORKFLOW") return `/workflows/runs/${entry.id}`;
-  return `/${entry.kind === "PLAN" ? "plans" : "sessions"}/${entry.id}`;
+  if (entry.kind === "WORKFLOW") return `/dashboard/workflows/runs/${entry.id}`;
+  return `/ai/${entry.kind === "PLAN" ? "plans" : "sessions"}/${entry.id}`;
 }
 
 export function WorktreeRunQueueCard({
@@ -132,7 +132,7 @@ export function WorktreeRunQueueCard({
                         {entry.worktree ? (
                           <Link
                             className="font-mono text-xs hover:underline"
-                            href={`/worktrees/${entry.worktree.id}`}
+                            href={`/dashboard/worktrees/${entry.worktree.id}`}
                           >
                             {entry.worktree.branch ?? entry.worktree.folder}
                           </Link>

@@ -304,7 +304,7 @@ describe("iOS enrollment routes", () => {
     );
     const html = await response.text();
     expect(html).toContain("Device received");
-    expect(html).toContain(`href="/devices/${deviceId}"`);
+    expect(html).toContain(`href="/system/devices/${deviceId}"`);
     expect(html).toContain("View device");
   });
 });

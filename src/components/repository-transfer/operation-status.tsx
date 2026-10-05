@@ -163,7 +163,7 @@ export function TransferOperationStatus({
           {item.codebaseId && (
             <Link
               className="text-sm underline"
-              href={`/codebases/${item.codebaseId}`}
+              href={`/dashboard/codebases/${item.codebaseId}`}
             >
               {t("openCheckout")}
             </Link>
@@ -182,7 +182,7 @@ export function TransferOperationStatus({
       )}
       {operation.appId && (
         <Button asChild variant="outline">
-          <Link href={`/apps/${operation.appId}?view=sync`}>
+          <Link href={`/dashboard/apps/${operation.appId}?view=sync`}>
             {t("openApp")}
           </Link>
         </Button>

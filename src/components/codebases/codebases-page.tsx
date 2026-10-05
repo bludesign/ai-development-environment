@@ -630,7 +630,7 @@ function RepositoryGroups({
               )}
             </div>
             <Button asChild size="sm" variant="outline">
-              <Link href={`/codebases/repositories/${repository.id}`}>
+              <Link href={`/dashboard/codebases/repositories/${repository.id}`}>
                 <Pencil /> {t("edit")}
               </Link>
             </Button>
@@ -761,7 +761,7 @@ function CodebaseCard({
           </p>
           <div className="flex items-center gap-2">
             <Button asChild size="sm" variant="outline">
-              <Link href={`/codebases/${codebase.id}`}>
+              <Link href={`/dashboard/codebases/${codebase.id}`}>
                 {t("view")} <ArrowRight />
               </Link>
             </Button>

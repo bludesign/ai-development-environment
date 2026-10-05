@@ -139,7 +139,11 @@ const detail = {
 };
 
 beforeEach(() => {
-  window.history.replaceState(null, "", "/pull-requests/acme/widgets/17");
+  window.history.replaceState(
+    null,
+    "",
+    "/github/pull-requests/acme/widgets/17",
+  );
   requestMock.mockImplementation(async (query) => {
     if (query.includes("query GitHubPullRequestDetail")) {
       return { githubPullRequest: detail } as never;
@@ -236,7 +240,7 @@ describe("PullRequestDetailPage", () => {
     expect(screen.getByText("feature/app-42 → main")).toBeDefined();
     expect(
       screen.getByRole("link", { name: "View Worktree" }).getAttribute("href"),
-    ).toBe("/worktrees/worktree-1");
+    ).toBe("/dashboard/worktrees/worktree-1");
     expect(screen.getByText("+20")).toBeDefined();
     expect(screen.getByText("−5")).toBeDefined();
     expect(screen.getByText("CI")).toBeDefined();
@@ -276,7 +280,9 @@ describe("PullRequestDetailPage", () => {
     const pipelineRow = screen.getByRole("row", { name: /CI/ });
     expect(
       screen.getByRole("link", { name: "View all" }).getAttribute("href"),
-    ).toBe("/actions?repository=codebase-repository-1&branch=feature%2Fapp-42");
+    ).toBe(
+      "/github/actions?repository=codebase-repository-1&branch=feature%2Fapp-42",
+    );
     const actionsButton = within(pipelineRow).getByRole("button", {
       name: "Actions: CI",
     });
@@ -291,7 +297,7 @@ describe("PullRequestDetailPage", () => {
     expect(
       screen.getByRole("menuitem", { name: "View all" }).getAttribute("href"),
     ).toBe(
-      "/actions?repository=codebase-repository-1&branch=feature%2Fapp-42&pipeline=workflow-1",
+      "/github/actions?repository=codebase-repository-1&branch=feature%2Fapp-42&pipeline=workflow-1",
     );
     expect(screen.getByRole("menuitem", { name: "Cancel" })).toBeDefined();
     expect(

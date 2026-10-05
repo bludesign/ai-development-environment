@@ -258,6 +258,10 @@ export function GitLabProjectManagerDialog({
         </Button>
       </DialogTrigger>
       <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-5xl">
+        <DialogHeader>
+          <DialogTitle>{t("manageTitle")}</DialogTitle>
+          <DialogDescription>{t("manageDescription")}</DialogDescription>
+        </DialogHeader>
         <ServerUrlPicker
           value={serverUrlKind}
           onValueChange={setServerUrlKind}
@@ -265,10 +269,6 @@ export function GitLabProjectManagerDialog({
         <EndpointUrls path="/api/public/gitlab/webhook" />
         <ServerUrlActionNotice kind={serverUrlKind} />
 
-        <DialogHeader>
-          <DialogTitle>{t("manageTitle")}</DialogTitle>
-          <DialogDescription>{t("manageDescription")}</DialogDescription>
-        </DialogHeader>
         {error && (
           <Alert variant="destructive">
             <AlertDescription>{error}</AlertDescription>

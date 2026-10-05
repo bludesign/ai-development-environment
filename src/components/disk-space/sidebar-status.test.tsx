@@ -173,7 +173,7 @@ describe("SidebarStatusFooter", () => {
       screen
         .getByRole("link", { name: "Free Disk Space" })
         .getAttribute("href"),
-    ).toBe("/build-data");
+    ).toBe("/system/build-data");
     for (const badge of screen.getAllByText("Pressure")) {
       expect(badge.className).toContain("bg-amber-500/10");
     }
@@ -205,12 +205,16 @@ describe("SidebarStatusFooter", () => {
     renderFooter();
 
     await screen.findByText("$1.25");
-    const activity = ["Actions", "Workflows", "Plans", "Sessions", "Builds"];
-    for (const [index, label] of activity.entries()) {
+    const activity = [
+      ["Actions", "/dashboard/action-center"],
+      ["Workflows", "/dashboard/workflows"],
+      ["Plans", "/ai/plans"],
+      ["Sessions", "/ai/sessions"],
+      ["Builds", "/dashboard/builds"],
+    ];
+    for (const [label, href] of activity) {
       const link = screen.getByRole("link", { name: new RegExp(label) });
-      expect(link.getAttribute("href")).toBe(
-        index === 0 ? "/" : `/${label.toLowerCase()}`,
-      );
+      expect(link.getAttribute("href")).toBe(href);
     }
     // Without an ActionCenterProvider the footer falls back to zero items.
     expect(screen.getByRole("link", { name: /Actions/ }).textContent).toContain(
@@ -218,7 +222,7 @@ describe("SidebarStatusFooter", () => {
     );
     expect(
       screen.getByRole("link", { name: /Commands/ }).getAttribute("href"),
-    ).toBe("/commands");
+    ).toBe("/dashboard/commands");
     expect(
       screen.getByRole("link", { name: /Commands/ }).textContent,
     ).toContain("5");

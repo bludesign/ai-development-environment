@@ -190,16 +190,16 @@ describe("GlobalSearchService", () => {
     expect(result.items).toHaveLength(1);
     expect(result.items[0]).toMatchObject({
       key: "worktree:worktree/one",
-      href: "/worktrees/worktree%2Fone",
+      href: "/dashboard/worktrees/worktree%2Fone",
     });
     expect(result.items[0]?.children).toEqual([
       expect.objectContaining({
         key: "workflow-run:workflow/run",
-        href: "/workflows/runs/workflow%2Frun",
+        href: "/dashboard/workflows/runs/workflow%2Frun",
       }),
       expect.objectContaining({
         key: "build:build/one",
-        href: "/builds/build%2Fone",
+        href: "/dashboard/builds/build%2Fone",
       }),
     ]);
     expect(result.items.filter((item) => item.kind === "BUILD")).toHaveLength(
@@ -489,23 +489,23 @@ describe("GlobalSearchService", () => {
 
     expect(hrefByKind).toEqual({
       JIRA_TICKET: "/jira/tickets/NEEDLE-1",
-      REPOSITORY: "/codebases/repositories/repository%2Fone",
-      CODEBASE: "/codebases/codebase%2Fone",
-      WORKFLOW: "/workflows/workflow%2Fone",
-      WORKFLOW_RUN: "/workflows/runs/workflow-run%2Fone",
+      REPOSITORY: "/dashboard/codebases/repositories/repository%2Fone",
+      CODEBASE: "/dashboard/codebases/codebase%2Fone",
+      WORKFLOW: "/dashboard/workflows/workflow%2Fone",
+      WORKFLOW_RUN: "/dashboard/workflows/runs/workflow-run%2Fone",
       GITHUB_ACTIONS_RUN:
-        "/actions?repository=repository%2Fone&pipeline=remote-workflow%2Fone",
-      BUILD: "/builds/build%2Fone",
-      AGENT: "/agents/agent%2Fone",
-      AGENT_JOB: "/jobs/job%2Fone",
-      PLAN: "/plans/plan%2Fone",
-      SESSION: "/sessions/session%2Fone",
-      COMMAND: "/commands/command%2Fone/edit",
-      COMMAND_RUN: "/commands/runs/command-run%2Fone",
-      SKILL: "/skills/skill%2Fone",
-      SKILL_GROUP: "/skills/groups/skill-group%2Fone",
-      DEVICE: "/devices/device%2Fone",
-      PROVISIONING_PROFILE: "/provisioning-profiles/profile%2Fone",
+        "/github/actions?repository=repository%2Fone&pipeline=remote-workflow%2Fone",
+      BUILD: "/dashboard/builds/build%2Fone",
+      AGENT: "/dashboard/agents/agent%2Fone",
+      AGENT_JOB: "/dashboard/jobs/job%2Fone",
+      PLAN: "/ai/plans/plan%2Fone",
+      SESSION: "/ai/sessions/session%2Fone",
+      COMMAND: "/dashboard/commands/command%2Fone/edit",
+      COMMAND_RUN: "/dashboard/commands/runs/command-run%2Fone",
+      SKILL: "/ai/skills/skill%2Fone",
+      SKILL_GROUP: "/ai/skills/groups/skill-group%2Fone",
+      DEVICE: "/system/devices/device%2Fone",
+      PROVISIONING_PROFILE: "/system/provisioning-profiles/profile%2Fone",
     });
   });
 
@@ -529,7 +529,7 @@ describe("GlobalSearchService", () => {
     expect(result.items).toEqual([
       expect.objectContaining({
         kind: "GITHUB_PULL_REQUEST",
-        href: "/pull-requests/acme/aide%20web/42",
+        href: "/github/pull-requests/acme/aide%20web/42",
       }),
     ]);
     expect(prisma.worktree.findMany).toHaveBeenCalledWith(
@@ -600,7 +600,7 @@ describe("GlobalSearchService", () => {
     expect(result.items).toEqual([
       expect.objectContaining({
         key: "github-actions:pipeline/one",
-        href: "/actions?repository=repository%2Fone&pipeline=remote-workflow%2Fone",
+        href: "/github/actions?repository=repository%2Fone&pipeline=remote-workflow%2Fone",
       }),
     ]);
   });

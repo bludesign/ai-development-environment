@@ -127,7 +127,9 @@ describe("crash upload route", () => {
     expect(await response.json()).toEqual({
       collected: true,
       duplicate: false,
-      crashes: [{ id: "crash-1", status: "PENDING", url: "/crashes/crash-1" }],
+      crashes: [
+        { id: "crash-1", status: "PENDING", url: "/debugging/crashes/crash-1" },
+      ],
     });
     const [input] = service.ingestCrashReport.mock.calls[0]!;
     expect(Buffer.from(input.bytes).toString()).toBe('{"bug_type":"309"}\n{}');
@@ -240,7 +242,7 @@ describe("dSYM upload routes", () => {
           id: "dsym-1",
           version: "2.4.0",
           build: "512",
-          url: "/crashes/dsyms/dsym-1",
+          url: "/debugging/crashes/dsyms/dsym-1",
           slices: [
             { uuid: "776386D0-4386-3F24-9B21-5F7C02EB2873", arch: "arm64" },
           ],

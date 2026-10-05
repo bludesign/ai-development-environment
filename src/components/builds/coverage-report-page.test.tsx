@@ -99,7 +99,9 @@ describe("CoverageReportPage", () => {
       screen
         .getByRole("link", { name: "View changes with coverage" })
         .getAttribute("href"),
-    ).toBe("/changes?worktree=worktree-1&scope=BRANCH&coverage=report-1");
+    ).toBe(
+      "/dashboard/changes?worktree=worktree-1&scope=BRANCH&coverage=report-1",
+    );
     const changedCoverageCard = screen
       .getByText("Changed coverage")
       .closest('[data-slot="card"]');

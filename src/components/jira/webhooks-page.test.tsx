@@ -163,7 +163,9 @@ describe("JiraWebhooksPage", () => {
     render(<JiraWebhooksPage />);
 
     await waitFor(() => {
-      expect(navigation.replace).toHaveBeenCalledWith("/");
+      expect(navigation.replace).toHaveBeenCalledWith(
+        "/dashboard/action-center",
+      );
     });
     expect(screen.queryByRole("heading", { name: "Jira Webhooks" })).toBeNull();
   });

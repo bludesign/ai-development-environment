@@ -497,11 +497,13 @@ export function BuildsPage({
                                 ],
                             )}
                             key={build.id}
-                            onClick={() => router.push(`/builds/${build.id}`)}
+                            onClick={() =>
+                              router.push(`/dashboard/builds/${build.id}`)
+                            }
                             onKeyDown={(event) => {
                               if (event.key === "Enter" || event.key === " ") {
                                 event.preventDefault();
-                                router.push(`/builds/${build.id}`);
+                                router.push(`/dashboard/builds/${build.id}`);
                               }
                             }}
                             role="link"
@@ -537,7 +539,7 @@ export function BuildsPage({
                             <TableCell className="min-w-56 whitespace-normal">
                               <Link
                                 className="font-medium hover:underline"
-                                href={`/builds/${build.id}`}
+                                href={`/dashboard/builds/${build.id}`}
                                 onClick={(event) => event.stopPropagation()}
                               >
                                 {names.repository}

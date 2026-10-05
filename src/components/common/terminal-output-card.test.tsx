@@ -81,7 +81,7 @@ function outputCard() {
       followLabel="Follow output"
       nextMatchLabel="Next match"
       previousMatchLabel="Previous match"
-      rawOutputHref="/en/commands/runs/run-1/output"
+      rawOutputHref="/en/dashboard/commands/runs/run-1/output"
       rawOutputLabel="View raw output"
       searchLabel="Search terminal"
       sourceKey="run-1"
@@ -150,7 +150,9 @@ test("places the raw output link immediately before the fit control", () => {
   const rawOutput = screen.getByRole("link", { name: "View raw output" });
   const fit = screen.getByRole("button", { name: "Fit terminal" });
 
-  expect(rawOutput.getAttribute("href")).toBe("/en/commands/runs/run-1/output");
+  expect(rawOutput.getAttribute("href")).toBe(
+    "/en/dashboard/commands/runs/run-1/output",
+  );
   expect(
     rawOutput.compareDocumentPosition(fit) & Node.DOCUMENT_POSITION_FOLLOWING,
   ).toBeTruthy();

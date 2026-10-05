@@ -14,6 +14,10 @@ import { GitHubPipelineStatusProvider } from "@/components/github/pipeline-statu
 import { ActiveAgentProvider } from "@/components/active-agent/active-agent-provider";
 import { ActiveAgentSelector } from "@/components/active-agent/active-agent-selector";
 import { GlobalSearch } from "@/components/global-search";
+import {
+  BreadcrumbLabelsProvider,
+  useBreadcrumbLabels,
+} from "@/components/breadcrumb-labels-provider";
 import { NotificationsSidebar } from "@/components/notifications/notifications-sidebar";
 import {
   Breadcrumb,
@@ -141,13 +145,15 @@ export function AppShell({
     <ActiveAgentProvider userId={currentUser.id}>
       <GitHubPipelineStatusProvider>
         <ActionCenterProvider>
-          <AppShellFrame
-            currentUser={currentUser}
-            leftDefaultOpen={leftDefaultOpen}
-            rightDefaultOpen={rightDefaultOpen}
-          >
-            {children}
-          </AppShellFrame>
+          <BreadcrumbLabelsProvider>
+            <AppShellFrame
+              currentUser={currentUser}
+              leftDefaultOpen={leftDefaultOpen}
+              rightDefaultOpen={rightDefaultOpen}
+            >
+              {children}
+            </AppShellFrame>
+          </BreadcrumbLabelsProvider>
         </ActionCenterProvider>
       </GitHubPipelineStatusProvider>
     </ActiveAgentProvider>
@@ -294,20 +300,33 @@ function HeaderBreadcrumbItem({
   const labelClassName = breadcrumb.isCurrent
     ? "block min-w-0 truncate"
     : "block max-w-48 truncate lg:max-w-64";
+  const content = breadcrumb.isLoading ? (
+    <>
+      <span className="sr-only">{breadcrumb.label}</span>
+      <span
+        aria-hidden="true"
+        data-slot="breadcrumb-loading"
+        className="inline-block h-4 w-24 animate-pulse rounded-md bg-muted align-middle motion-reduce:animate-none"
+      />
+    </>
+  ) : (
+    breadcrumb.label
+  );
 
   return (
-    <BreadcrumbItem className={`min-w-0 ${className ?? ""}`}>
+    <BreadcrumbItem
+      aria-busy={breadcrumb.isLoading || undefined}
+      className={`min-w-0 ${className ?? ""}`}
+    >
       {breadcrumb.isCurrent ? (
-        <BreadcrumbPage className={labelClassName}>
-          {breadcrumb.label}
-        </BreadcrumbPage>
-      ) : breadcrumb.href ? (
+        <BreadcrumbPage className={labelClassName}>{content}</BreadcrumbPage>
+      ) : breadcrumb.href && !breadcrumb.isLoading ? (
         <BreadcrumbLink asChild className={labelClassName}>
           <Link href={breadcrumb.href}>{breadcrumb.label}</Link>
         </BreadcrumbLink>
       ) : (
         <span className={`${labelClassName} text-muted-foreground`}>
-          {breadcrumb.label}
+          {content}
         </span>
       )}
     </BreadcrumbItem>
@@ -317,7 +336,8 @@ function HeaderBreadcrumbItem({
 function AppBreadcrumbs() {
   const pathname = usePathname();
   const t = useTranslations("shell");
-  const breadcrumbs = buildAppBreadcrumbs(pathname, (key) => t(key));
+  const labels = useBreadcrumbLabels();
+  const breadcrumbs = buildAppBreadcrumbs(pathname, (key) => t(key), labels);
   const lastIndex = breadcrumbs.length - 1;
 
   return (

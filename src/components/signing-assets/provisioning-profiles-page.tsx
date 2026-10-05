@@ -646,7 +646,7 @@ export function ProvisioningProfilesPage() {
                     const missing = agents.filter(
                       (agent) => agent.supported && !installed.has(agent.id),
                     );
-                    const profileHref = `/provisioning-profiles/${encodeURIComponent(profile.id)}`;
+                    const profileHref = `/system/provisioning-profiles/${encodeURIComponent(profile.id)}`;
                     return (
                       <TableRow
                         aria-label={t("viewProfile", { name: profile.name })}

@@ -18,10 +18,14 @@ const NAVIGATION: Array<{
   icon: typeof RadioTower;
   exact?: boolean;
 }> = [
-  { href: "/sse", label: "Endpoints", icon: RadioTower, exact: true },
-  { href: "/sse/breakpoints", label: "Breakpoints", icon: ShieldAlert },
-  { href: "/sse/storage", label: "Script storage", icon: Braces },
-  { href: "/sse/history", label: "History", icon: History },
+  { href: "/debugging/sse", label: "Endpoints", icon: RadioTower, exact: true },
+  {
+    href: "/debugging/sse/breakpoints",
+    label: "Breakpoints",
+    icon: ShieldAlert,
+  },
+  { href: "/debugging/sse/storage", label: "Script storage", icon: Braces },
+  { href: "/debugging/sse/history", label: "History", icon: History },
 ] as const;
 
 export function SsePageShell({
@@ -65,7 +69,7 @@ export function SsePageShell({
         {NAVIGATION.map((item) => {
           const active = item.exact
             ? pathname === item.href ||
-              /^\/sse\/(?:new|(?!(?:breakpoints|storage|history)$)[^/]+)$/.test(
+              /^\/debugging\/sse\/(?:new|(?!(?:breakpoints|storage|history)$)[^/]+)$/.test(
                 pathname,
               )
             : pathname.startsWith(item.href);

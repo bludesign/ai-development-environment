@@ -239,7 +239,9 @@ describe("CommandRunPage", () => {
     render(<CommandRunPage runId="run-1" />);
 
     const link = await screen.findByRole("link", { name: "View raw output" });
-    expect(link.getAttribute("href")).toBe("/en/commands/runs/run-1/output");
+    expect(link.getAttribute("href")).toBe(
+      "/en/dashboard/commands/runs/run-1/output",
+    );
   });
 
   test("does not offer definition editing for a custom command run", async () => {
@@ -465,7 +467,7 @@ describe("CommandRunPage", () => {
     render(<CommandRunPage runId="run-1" />);
     fireEvent.click(await screen.findByRole("button", { name: "Rerun" }));
     await waitFor(() =>
-      expect(push).toHaveBeenCalledWith("/commands/runs/run-2"),
+      expect(push).toHaveBeenCalledWith("/dashboard/commands/runs/run-2"),
     );
   });
 
@@ -475,7 +477,9 @@ describe("CommandRunPage", () => {
     const editLink = await screen.findByRole("link", {
       name: "Edit command",
     });
-    expect(editLink.getAttribute("href")).toBe("/commands/command-1/edit");
+    expect(editLink.getAttribute("href")).toBe(
+      "/dashboard/commands/command-1/edit",
+    );
   });
 
   test("does not show a restart count when restarts are disabled", async () => {
@@ -517,13 +521,15 @@ describe("CommandRunPage", () => {
     expect(detailList?.className).toContain("sm:grid-cols-6");
     expect(detailList?.querySelectorAll(".sm\\:col-span-3")).toHaveLength(2);
     expect(detailList?.querySelectorAll(".sm\\:col-span-2")).toHaveLength(3);
-    const agentLink = overviewCard?.querySelector('a[href="/agents/agent-1"]');
+    const agentLink = overviewCard?.querySelector(
+      'a[href="/dashboard/agents/agent-1"]',
+    );
     expect(agentLink?.className).toContain("whitespace-normal");
     expect(agentLink?.querySelector("span")?.className).toContain(
       "break-words",
     );
     const worktreeLink = overviewCard?.querySelector(
-      'a[href="/worktrees/worktree-1"]',
+      'a[href="/dashboard/worktrees/worktree-1"]',
     );
     expect(worktreeLink?.className).toContain("whitespace-normal");
     expect(worktreeLink?.querySelector("span")?.className).toContain(
@@ -689,12 +695,12 @@ describe("CommandRunPage", () => {
     expect(queueCard.textContent).toContain("Migrate");
     expect(queueCard.textContent).toContain("Blocking");
     expect(
-      queueCard.querySelector('a[href="/commands/runs/run-9"]'),
+      queueCard.querySelector('a[href="/dashboard/commands/runs/run-9"]'),
     ).not.toBeNull();
     // The run being inspected is already open, so it is the one row that is
     // listed without a link back to itself.
     expect(
-      queueCard.querySelector('a[href="/commands/runs/run-1"]'),
+      queueCard.querySelector('a[href="/dashboard/commands/runs/run-1"]'),
     ).toBeNull();
   });
 

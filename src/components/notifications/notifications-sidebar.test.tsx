@@ -37,7 +37,7 @@ const existing = {
   typeKey: "IOS_BUILD_SUCCEEDED",
   title: "iOS build succeeded",
   body: "Example · Debug · main",
-  href: "/builds/build-1",
+  href: "/dashboard/builds/build-1",
   resourceKind: "BUILD",
   resourceId: "build-1",
   worktreeId: "worktree-1",
@@ -265,12 +265,12 @@ describe("NotificationsSidebar", () => {
     ).toBeDefined();
     expect(
       screen.getByRole("menuitem", { name: "Open build" }).getAttribute("href"),
-    ).toBe("/builds/build-1");
+    ).toBe("/dashboard/builds/build-1");
     expect(
       screen
         .getByRole("menuitem", { name: "Open worktree" })
         .getAttribute("href"),
-    ).toBe("/worktrees/worktree-1");
+    ).toBe("/dashboard/worktrees/worktree-1");
     expect(screen.getByRole("menuitem", { name: "Dismiss" })).toBeDefined();
 
     fireEvent.click(screen.getByRole("menuitem", { name: "Delete" }));

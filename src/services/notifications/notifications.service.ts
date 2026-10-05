@@ -700,7 +700,7 @@ export class NotificationsService {
           id: `test:${Date.now()}`,
           title: "Test notification",
           body: "Web Push is working for this browser.",
-          href: "/notifications",
+          href: "/dashboard/notifications",
           icon: "/icon-192.png",
           badge: "/icon-192.png",
         }),
@@ -963,7 +963,7 @@ export class NotificationsService {
       id: `test:${Date.now()}`,
       title: "Test notification",
       body: "Native notifications are working on this device.",
-      href: "/notifications",
+      href: "/dashboard/notifications",
       typeKey: "TEST",
     });
     if (!delivered) {

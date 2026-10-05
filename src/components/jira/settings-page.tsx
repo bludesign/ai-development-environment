@@ -390,7 +390,7 @@ function JiraWebhookCard() {
         <div className="flex flex-wrap items-center justify-end gap-2 border-t pt-4">
           {configured && (
             <Button asChild className="mr-auto" variant="link">
-              <Link href="/jira-webhooks">{t("viewDeliveries")}</Link>
+              <Link href="/jira/webhooks">{t("viewDeliveries")}</Link>
             </Button>
           )}
           {configured && (

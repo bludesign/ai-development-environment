@@ -1,7 +1,8 @@
 import { cleanup, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 
-import Home from "@/app/[locale]/(dashboard)/page";
+import Home from "@/app/[locale]/(dashboard)/dashboard/action-center/page";
+import Homepage from "@/app/[locale]/page";
 import { ActionCenterProvider } from "@/components/action-center/action-center-provider";
 import {
   controlPlaneRequest,
@@ -36,7 +37,18 @@ beforeEach(() => {
 
 afterEach(cleanup);
 
-test("renders the Action Center at the root route", async () => {
+test.each(["en", "es", "fr", "de"])(
+  "redirects the %s homepage to its Action Center",
+  async (locale) => {
+    await expect(
+      Homepage({ params: Promise.resolve({ locale }) }),
+    ).rejects.toMatchObject({
+      digest: `NEXT_REDIRECT;replace;/${locale}/dashboard/action-center;307;`,
+    });
+  },
+);
+
+test("renders the Action Center at its Dashboard route", async () => {
   render(
     <ActionCenterProvider>
       <Home />

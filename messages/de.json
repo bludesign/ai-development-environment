@@ -15,6 +15,8 @@
     "ai": "KI",
     "navigation": "Navigation",
     "breadcrumbLabel": "Breadcrumb-Navigation",
+    "loadingBreadcrumb": "Wird geladen…",
+    "details": "Details",
     "navigationDescription": "Hauptnavigation von AI Development Environment.",
     "actionCenter": "Aktionszentrum",
     "apps": "Apps",
@@ -56,7 +58,6 @@
     "jira": "Jira",
     "tickets": "Vorgänge",
     "cache": "Zwischenspeicher",
-    "apiCache": "API-Cache",
     "system": "System",
     "polling": "Polling",
     "status": "Status",
@@ -1550,7 +1551,7 @@
     "save": "Speichern"
   },
   "cacheServer": {
-    "title": "Actions-Cache",
+    "title": "GitHub Actions-Cache",
     "description": "Durchsuchen und verwalten Sie Einträge auf dem GitHub-Actions-Cache-Server.",
     "matchLookup": "Übereinstimmungssuche",
     "refresh": "Aktualisieren",
@@ -2113,6 +2114,7 @@
     "allProjects": "Alle Projekte",
     "chooseProject": "Projekt auswählen",
     "mergeRequestsTitle": "Merge Requests",
+    "mergeRequestsPageTitle": "GitLab Merge Requests",
     "mergeRequestsDescription": "Prüfe und verwalte Merge-Requests der konfigurierten GitLab-Instanz.",
     "scope": "Bereich",
     "state": "Status",
@@ -2147,6 +2149,7 @@
     "autoMerge": "Automatisch zusammenführen",
     "pipelines": "Pipelines",
     "pipelinesTitle": "Pipelines",
+    "pipelinesPageTitle": "GitLab-Pipelines",
     "pipelineCount": "{count} Pipeline",
     "pipelineCountPlural": "{count} Pipelines",
     "pipelinesDescription": "Starte, prüfe, brich GitLab-CI/CD-Pipelines und Jobs ab oder wiederhole sie.",
@@ -2179,7 +2182,7 @@
     "projectHooks": "Projekt-Webhooks",
     "deliveries": "Zustellungen",
     "noDeliveries": "Es wurden keine GitLab-Webhook-Zustellungen empfangen.",
-    "cacheTitle": "API-Cache",
+    "cacheTitle": "GitLab-Cache",
     "cacheDescription": "Prüfe zwischengespeicherte REST-Antworten und bereinigte GitLab-API-Aufrufprotokolle.",
     "cacheEntries": "Zwischengespeicherte Antworten",
     "clear": "Leeren",
@@ -2701,7 +2704,7 @@
     }
   },
   "pullRequests": {
-    "title": "Pull Requests",
+    "title": "GitHub Pull Requests",
     "description": "Prüfe deine GitHub Pull Requests und überwachten Repositories an einem Ort.",
     "refresh": "Aktualisieren",
     "manage": "Verwalten",
@@ -2841,7 +2844,7 @@
     "closeMergeResult": "Schließen"
   },
   "githubComments": {
-    "title": "Kommentare",
+    "title": "GitHub-Kommentare",
     "description": "Prüfen und beantworten Sie GitHub-Review-Threads in Ihren offenen Pull Requests.",
     "refresh": "Aktualisieren",
     "layout": "Kommentarlayout",
@@ -5653,7 +5656,7 @@
     "destinationNotReviewed": "Nicht geprüft"
   },
   "gitlabComments": {
-    "title": "Kommentare",
+    "title": "GitLab-Kommentare",
     "description": "Lies und beantworte Diskussionen zu deinen Merge Requests.",
     "refresh": "Aktualisieren",
     "layout": "Kommentarlayout",

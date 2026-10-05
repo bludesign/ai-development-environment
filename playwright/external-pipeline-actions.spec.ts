@@ -46,7 +46,7 @@ test("repository scripts and write-only secrets preserve unsaved script drafts",
     }
     await route.continue();
   });
-  await page.goto("/en/codebases/repositories/" + repositoryId);
+  await page.goto("/en/dashboard/codebases/repositories/" + repositoryId);
   await page
     .getByRole("tab", { name: "External pipeline actions", exact: true })
     .click();

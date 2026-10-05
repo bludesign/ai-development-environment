@@ -1,6 +1,11 @@
 "use client";
 
 import {
+  useBreadcrumbLabel,
+  useBreadcrumbFallback,
+} from "@/components/breadcrumb-labels-provider";
+
+import {
   readIntegrationConfiguration,
   subscribeIntegrationConfiguration,
 } from "@/lib/integration-configuration";
@@ -122,7 +127,7 @@ function ProviderNotConfigured() {
           </p>
         </div>
         <Button asChild>
-          <Link href="/settings#settings-integrations">
+          <Link href="/system/settings#settings-integrations">
             {t("openSettings")}
           </Link>
         </Button>
@@ -490,7 +495,7 @@ export function GitLabMergeRequestsPage({
       <div className="flex flex-wrap items-start justify-between gap-3">
         <PageHeader
           description={t("mergeRequestsDescription")}
-          title={t("mergeRequestsTitle")}
+          title={t("mergeRequestsPageTitle")}
         />
         <GitLabProjectManagerDialog
           onChanged={reloadConfiguration}
@@ -643,10 +648,39 @@ export function GitLabMergeRequestDetailPage({
     error: configurationError,
   } = useConfiguration();
   const [mr, setMr] = useState<GitLabMergeRequestDetailView | null>(null);
+  const loadedProjectId =
+    mr && (projectId === mr.projectId || projectId === mr.projectPath)
+      ? projectId
+      : undefined;
+  const projectPath =
+    mr?.projectPath ??
+    configuration?.projects.find((project) => project.id === mr?.projectId)
+      ?.pathWithNamespace ??
+    mr?.projectId;
+  useBreadcrumbLabel(
+    ["gitlab", "merge-requests", loadedProjectId],
+    projectPath,
+  );
+  useBreadcrumbLabel(
+    ["gitlab", "merge-requests", loadedProjectId, mr?.iid],
+    mr?.title,
+  );
   const [reviewBody, setReviewBody] = useState("");
   const [replyBodies, setReplyBodies] = useState<Record<string, string>>({});
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const breadcrumbUnavailable =
+    Boolean(error || configurationError) ||
+    (!configurationLoading && !configuration?.settings.configured);
+  useBreadcrumbFallback(
+    ["gitlab", "merge-requests", projectId],
+    breadcrumbUnavailable,
+  );
+  useBreadcrumbFallback(
+    ["gitlab", "merge-requests", projectId, iid],
+    breadcrumbUnavailable,
+  );
+
   const [mergeOpen, setMergeOpen] = useState(false);
   const [ticketKey, setTicketKey] = useState<string | null>(null);
   const controllerRef = useRef<AbortController | null>(null);
@@ -767,11 +801,6 @@ export function GitLabMergeRequestDetailPage({
         </Button>
       </section>
     );
-  const projectPath =
-    mr.projectPath ??
-    configuration.projects.find((project) => project.id === mr.projectId)
-      ?.pathWithNamespace ??
-    mr.projectId;
   const highlighted = mr.worktreeHighlightColor;
   return (
     <section className="mx-auto flex w-full min-w-0 max-w-6xl flex-col gap-5">
@@ -1364,7 +1393,7 @@ export function GitLabPipelinesPage() {
     <section className="space-y-6">
       <PageHeader
         description={t("pipelinesDescription")}
-        title={t("pipelinesTitle")}
+        title={t("pipelinesPageTitle")}
       />
       <ErrorAlert error={configurationError ?? error} />
       <Card>

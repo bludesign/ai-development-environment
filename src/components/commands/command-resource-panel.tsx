@@ -62,7 +62,7 @@ export function CommandResourcePanel({
           },
         },
       );
-      router.push(`/commands/runs/${data.startCommandRun.id}`);
+      router.push(`/dashboard/commands/runs/${data.startCommandRun.id}`);
     } catch (value) {
       setError(value instanceof Error ? value.message : String(value));
     } finally {
@@ -85,7 +85,7 @@ export function CommandResourcePanel({
             </CardDescription>
           </div>
           <Button asChild size="sm" variant="outline">
-            <Link href="/commands">{t("manage")}</Link>
+            <Link href="/dashboard/commands">{t("manage")}</Link>
           </Button>
         </div>
       </CardHeader>
@@ -133,7 +133,7 @@ export function CommandResourcePanel({
             {runs.map((run) => (
               <Link
                 className="flex items-center gap-3 rounded-md border px-3 py-2 text-sm hover:bg-muted/40"
-                href={`/commands/runs/${run.id}`}
+                href={`/dashboard/commands/runs/${run.id}`}
                 key={run.id}
               >
                 <span className="font-mono text-xs">#{run.displayNumber}</span>

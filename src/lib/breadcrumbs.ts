@@ -1,10 +1,15 @@
+import {
+  APP_DESTINATIONS,
+  type NavigationSection,
+} from "@/lib/app-destinations";
+
 export type BreadcrumbLabelKey =
+  | NavigationSection
   | "actionCenter"
   | "actions"
   | "actionsCache"
   | "agents"
   | "analyticsEvents"
-  | "apiCache"
   | "apiKeys"
   | "apps"
   | "buildData"
@@ -22,6 +27,7 @@ export type BreadcrumbLabelKey =
   | "crashes"
   | "credentials"
   | "devices"
+  | "details"
   | "drafts"
   | "dsyms"
   | "edit"
@@ -33,6 +39,7 @@ export type BreadcrumbLabelKey =
   | "gitlab"
   | "jira"
   | "mergeRequests"
+  | "loadingBreadcrumb"
   | "mocks"
   | "new"
   | "notifications"
@@ -66,11 +73,16 @@ export type AppBreadcrumb = {
   href?: string;
   isCurrent: boolean;
   label: string;
+  isLoading?: true;
 };
+
+export type BreadcrumbLabels = Readonly<Record<string, string | null>>;
 
 type BreadcrumbTranslator = (key: BreadcrumbLabelKey) => string;
 
 const STATIC_SEGMENTS: Record<string, BreadcrumbLabelKey> = {
+  "action-center": "actionCenter",
+  ai: "ai",
   actions: "actions",
   "actions-cache": "actionsCache",
   agents: "agents",
@@ -91,6 +103,8 @@ const STATIC_SEGMENTS: Record<string, BreadcrumbLabelKey> = {
   coverage: "coverage",
   crashes: "crashes",
   credentials: "credentials",
+  dashboard: "dashboard",
+  debugging: "debugging",
   devices: "devices",
   drafts: "drafts",
   dsyms: "dsyms",
@@ -101,12 +115,9 @@ const STATIC_SEGMENTS: Record<string, BreadcrumbLabelKey> = {
   history: "history",
   github: "github",
   gitlab: "gitlab",
-  "github-cache": "cache",
   jira: "jira",
   "merge-requests": "mergeRequests",
   mocks: "mocks",
-  "jira-cache": "cache",
-  "jira-webhooks": "webhooks",
   new: "new",
   notifications: "notifications",
   plans: "plans",
@@ -124,6 +135,7 @@ const STATIC_SEGMENTS: Record<string, BreadcrumbLabelKey> = {
   skills: "skills",
   status: "status",
   sync: "sync",
+  system: "system",
   sse: "sseEndpoints",
   tailscale: "tailscale",
   tickets: "tickets",
@@ -136,135 +148,148 @@ const STATIC_SEGMENTS: Record<string, BreadcrumbLabelKey> = {
   worktrees: "worktrees",
 };
 
-const TOP_LEVEL_ALIASES: Record<
+const STATIC_PATH_ALIASES: Record<
   string,
   { href: string; labelKey: BreadcrumbLabelKey }
 > = {
-  jobs: { href: "/agents", labelKey: "agents" },
-  runs: { href: "/drafts", labelKey: "drafts" },
+  "/dashboard/jobs": { href: "/dashboard/agents", labelKey: "agents" },
 };
 
 const STATIC_NESTED_PATHS = new Set([
-  "/builds/configurations",
-  "/codebases/repositories",
-  "/commands/new",
-  "/commands/runs",
-  "/crashes/dsyms",
-  "/devices/enroll",
+  ...APP_DESTINATIONS.map((destination) => destination.href),
+  "/dashboard/builds/configurations",
+  "/dashboard/codebases/repositories",
+  "/dashboard/commands/new",
+  "/dashboard/commands/runs",
+  "/debugging/crashes/dsyms",
+  "/system/devices/enroll",
   "/gitlab/cache",
   "/gitlab/comments",
   "/gitlab/merge-requests",
   "/gitlab/pipelines",
   "/gitlab/webhooks",
-  "/github-cache/entries",
-  "/jira-cache/tickets",
+  "/github/cache/entries",
+  "/jira/cache/tickets",
   "/jira/tickets",
-  "/runs/new",
-  "/skills/groups",
-  "/skills/sync",
-  "/sse/breakpoints",
-  "/sse/history",
-  "/sse/mocks",
-  "/sse/new",
-  "/sse/storage",
-  "/workflows/new",
-  "/workflows/runs",
+  "/ai/drafts/new",
+  "/ai/skills/groups",
+  "/ai/skills/sync",
+  "/debugging/sse/breakpoints",
+  "/debugging/sse/history",
+  "/debugging/sse/mocks",
+  "/debugging/sse/new",
+  "/debugging/sse/storage",
+  "/dashboard/workflows/new",
+  "/dashboard/workflows/runs",
 ]);
 
-const STATIC_PATH_LABELS: Record<string, BreadcrumbLabelKey> = {
-  "/gitlab/cache": "apiCache",
-};
-
 const STATIC_PATH_LINKS: Record<string, string> = {
-  "/builds/configurations": "/builds?view=configurations",
+  "/dashboard/builds/configurations": "/dashboard/builds?view=configurations",
 };
 
 const STATIC_NESTED_PATH_PATTERNS = [
-  /^\/builds\/[^/]+\/coverage$/,
-  /^\/commands\/(?!new(?:\/|$)|runs(?:\/|$))[^/]+\/edit$/,
-  /^\/workflows\/(?!new(?:\/|$)|runs(?:\/|$))[^/]+\/edit$/,
-  /^\/sse\/(?!new(?:\/|$)|breakpoints(?:\/|$)|history(?:\/|$)|storage(?:\/|$))[^/]+\/mocks$/,
+  /^\/dashboard\/builds\/[^/]+\/coverage$/,
+  /^\/dashboard\/commands\/(?!new(?:\/|$)|runs(?:\/|$))[^/]+\/edit$/,
+  /^\/dashboard\/workflows\/(?!new(?:\/|$)|runs(?:\/|$))[^/]+\/edit$/,
+  /^\/debugging\/sse\/(?!new(?:\/|$)|breakpoints(?:\/|$)|history(?:\/|$)|storage(?:\/|$))[^/]+\/mocks$/,
 ];
 
 const ROUTABLE_STATIC_PATHS = new Set([
-  "/actions",
-  "/actions-cache",
-  "/agents",
-  "/analytics-events",
-  "/api-keys",
-  "/apps",
-  "/build-data",
-  "/builds",
-  "/changes",
-  "/codebases",
-  "/commands",
-  "/commands/new",
-  "/comments",
-  "/console-logs",
-  "/costs",
-  "/crashes",
-  "/crashes/dsyms",
-  "/credentials",
-  "/devices",
-  "/devices/enroll",
-  "/drafts",
+  "/dashboard/action-center",
+  "/github/actions",
+  "/github/actions-cache",
+  "/dashboard/agents",
+  "/debugging/analytics-events",
+  "/system/api-keys",
+  "/dashboard/apps",
+  "/system/build-data",
+  "/dashboard/builds",
+  "/dashboard/changes",
+  "/dashboard/codebases",
+  "/dashboard/commands",
+  "/dashboard/commands/new",
+  "/github/comments",
+  "/debugging/console-logs",
+  "/ai/costs",
+  "/debugging/crashes",
+  "/debugging/crashes/dsyms",
+  "/system/credentials",
+  "/system/devices",
+  "/system/devices/enroll",
+  "/ai/drafts",
   "/gitlab/cache",
   "/gitlab/comments",
   "/gitlab/merge-requests",
   "/gitlab/pipelines",
   "/gitlab/webhooks",
-  "/github-cache",
-  "/jira-cache",
+  "/github/cache",
+  "/jira/cache",
   "/jira/tickets",
-  "/notifications",
-  "/plans",
-  "/polling",
-  "/prepare",
-  "/provisioning-profiles",
-  "/pull-requests",
-  "/push-notifications",
-  "/sessions",
-  "/sse",
-  "/sse/breakpoints",
-  "/sse/history",
-  "/sse/new",
-  "/sse/storage",
-  "/settings",
-  "/status",
-  "/tailscale",
-  "/skills",
-  "/skills/groups",
-  "/tools",
-  "/unified-events",
-  "/usage",
-  "/users",
-  "/jira-webhooks",
-  "/webhooks",
-  "/workflows",
-  "/workflows/new",
-  "/worktrees",
+  "/dashboard/notifications",
+  "/ai/plans",
+  "/system/polling",
+  "/system/prepare",
+  "/system/provisioning-profiles",
+  "/github/pull-requests",
+  "/debugging/push-notifications",
+  "/ai/sessions",
+  "/debugging/sse",
+  "/debugging/sse/breakpoints",
+  "/debugging/sse/history",
+  "/debugging/sse/new",
+  "/debugging/sse/storage",
+  "/system/settings",
+  "/system/status",
+  "/system/tailscale",
+  "/ai/skills",
+  "/ai/skills/groups",
+  "/system/tools",
+  "/debugging/unified-events",
+  "/ai/usage",
+  "/system/users",
+  "/jira/webhooks",
+  "/github/webhooks",
+  "/dashboard/workflows",
+  "/dashboard/workflows/new",
+  "/dashboard/worktrees",
 ]);
 
 const ROUTABLE_DYNAMIC_PATHS = [
-  /^\/apps\/[^/]+$/,
-  /^\/agents\/[^/]+$/,
-  /^\/builds\/(?!configurations$)[^/]+$/,
-  /^\/codebases\/(?!repositories(?:\/|$))[^/]+$/,
-  /^\/crashes\/(?!dsyms$)[^/]+$/,
-  /^\/crashes\/dsyms\/[^/]+$/,
-  /^\/devices\/(?!enroll$)[^/]+$/,
-  /^\/github-cache\/entries\/[^/]+$/,
-  /^\/jira-cache\/tickets\/[^/]+$/,
+  /^\/dashboard\/apps\/[^/]+$/,
+  /^\/dashboard\/agents\/[^/]+$/,
+  /^\/dashboard\/builds\/(?!configurations$)[^/]+$/,
+  /^\/dashboard\/codebases\/(?!repositories(?:\/|$))[^/]+$/,
+  /^\/debugging\/crashes\/(?!dsyms$)[^/]+$/,
+  /^\/debugging\/crashes\/dsyms\/[^/]+$/,
+  /^\/system\/devices\/(?!enroll$)[^/]+$/,
+  /^\/github\/cache\/entries\/[^/]+$/,
+  /^\/jira\/cache\/tickets\/[^/]+$/,
   /^\/jira\/tickets\/[^/]+$/,
-  /^\/plans\/[^/]+$/,
-  /^\/provisioning-profiles\/[^/]+$/,
-  /^\/sessions\/[^/]+$/,
-  /^\/sse\/(?!new$|breakpoints$|history$|storage$)[^/]+$/,
-  /^\/sse\/(?!new$|breakpoints$|history$|storage$)[^/]+\/mocks$/,
-  /^\/skills\/(?!groups(?:\/|$)|sync(?:\/|$))[^/]+$/,
-  /^\/skills\/groups\/[^/]+$/,
-  /^\/workflows\/(?!new$|runs(?:\/|$))[^/]+$/,
-  /^\/worktrees\/[^/]+$/,
+  /^\/ai\/plans\/[^/]+$/,
+  /^\/system\/provisioning-profiles\/[^/]+$/,
+  /^\/ai\/sessions\/[^/]+$/,
+  /^\/debugging\/sse\/(?!new$|breakpoints$|history$|storage$)[^/]+$/,
+  /^\/debugging\/sse\/(?!new$|breakpoints$|history$|storage$)[^/]+\/mocks$/,
+  /^\/ai\/skills\/(?!groups(?:\/|$)|sync(?:\/|$))[^/]+$/,
+  /^\/ai\/skills\/groups\/[^/]+$/,
+  /^\/dashboard\/workflows\/(?!new$|runs(?:\/|$))[^/]+$/,
+  /^\/dashboard\/worktrees\/[^/]+$/,
+];
+
+// These segments are record titles supplied by their detail pages. Owner and
+// repository slugs in GitHub URLs remain readable while the PR title loads.
+const TITLE_PATH_PATTERNS = [
+  ...ROUTABLE_DYNAMIC_PATHS,
+  /^\/dashboard\/builds\/configurations\/[^/]+$/,
+  /^\/dashboard\/codebases\/repositories\/[^/]+$/,
+  /^\/dashboard\/commands\/(?!new$|runs$)[^/]+$/,
+  /^\/dashboard\/commands\/runs\/[^/]+$/,
+  /^\/dashboard\/jobs\/[^/]+$/,
+  /^\/dashboard\/workflows\/runs\/[^/]+$/,
+  /^\/ai\/skills\/sync\/[^/]+$/,
+  /^\/debugging\/sse\/history\/[^/]+$/,
+  /^\/github\/pull-requests\/[^/]+\/[^/]+\/[^/]+$/,
+  /^\/gitlab\/merge-requests\/[^/]+(?:\/[^/]+)?$/,
 ];
 
 function safeDecode(segment: string): string {
@@ -298,22 +323,23 @@ function staticLabelKey(
 export function buildAppBreadcrumbs(
   pathname: string,
   translate: BreadcrumbTranslator,
+  labels: BreadcrumbLabels = {},
 ): AppBreadcrumb[] {
   const path = pathname.split(/[?#]/, 1)[0] || "/";
   const segments = path.split("/").filter(Boolean);
 
-  if (segments.length === 0) {
-    return [{ isCurrent: true, label: translate("actionCenter") }];
-  }
-
-  return segments.map((segment, index) => {
+  const breadcrumbs: AppBreadcrumb[] = segments.map((segment, index) => {
     const isCurrent = index === segments.length - 1;
-    const alias = index === 0 ? TOP_LEVEL_ALIASES[segment] : undefined;
     const prefix = `/${segments.slice(0, index + 1).join("/")}`;
-    const labelKey =
-      alias?.labelKey ??
-      STATIC_PATH_LABELS[prefix] ??
-      staticLabelKey(segment, index, prefix);
+    const alias = STATIC_PATH_ALIASES[prefix];
+    const labelKey = alias?.labelKey ?? staticLabelKey(segment, index, prefix);
+    const labelPath = `/${segments
+      .slice(0, index + 1)
+      .map((part) => encodeURIComponent(safeDecode(part)))
+      .join("/")}`;
+    const titlePath =
+      !labelKey && TITLE_PATH_PATTERNS.some((pattern) => pattern.test(prefix));
+    const isLoading = titlePath && labels[labelPath] === undefined;
 
     return {
       href: isCurrent
@@ -322,7 +348,20 @@ export function buildAppBreadcrumbs(
           STATIC_PATH_LINKS[prefix] ??
           (isRoutablePath(prefix) ? prefix : undefined)),
       isCurrent,
-      label: labelKey ? translate(labelKey) : safeDecode(segment),
+      label:
+        labels[labelPath] ??
+        (labelKey
+          ? translate(labelKey)
+          : titlePath
+            ? translate(isLoading ? "loadingBreadcrumb" : "details")
+            : safeDecode(segment)),
+      ...(isLoading ? { isLoading: true as const } : {}),
     };
   });
+
+  if (breadcrumbs.length === 0) {
+    breadcrumbs.push({ isCurrent: true, label: translate("actionCenter") });
+  }
+
+  return breadcrumbs;
 }

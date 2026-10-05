@@ -52,7 +52,8 @@ vi.mock("@/components/worktrees/worktree-detail-page", () => ({
 vi.mock("@/components/worktrees/worktree-navigation", () => ({
   findWorktreeOverviewEntry: (overview: { entry?: unknown }) =>
     overview.entry ?? null,
-  worktreeDetailHref: (worktreeId: string) => `/worktrees/${worktreeId}`,
+  worktreeDetailHref: (worktreeId: string) =>
+    `/dashboard/worktrees/${worktreeId}`,
 }));
 
 vi.mock("@/components/worktrees/worktrees-page", () => ({

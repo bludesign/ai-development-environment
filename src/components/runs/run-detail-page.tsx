@@ -1,6 +1,11 @@
 "use client";
 
 import {
+  useBreadcrumbLabel,
+  useBreadcrumbFallback,
+} from "@/components/breadcrumb-labels-provider";
+
+import {
   createRefreshCoalescer,
   type RefreshCoalescer,
 } from "@/lib/refresh-coalescer";
@@ -143,7 +148,7 @@ type ProviderCatalog = ProviderCatalogEntry & {
 
 function LinkedRun({ value }: { value: RunLinkView }) {
   const labels = useRunLabels();
-  const href = `/${value.kind === "PLAN" ? "plans" : "sessions"}/${value.id}`;
+  const href = `/ai/${value.kind === "PLAN" ? "plans" : "sessions"}/${value.id}`;
   return (
     <Link
       className="flex items-center gap-2 rounded-lg border p-3 hover:bg-muted/50"
@@ -296,7 +301,7 @@ function QuestionBatch({
       );
       setEditOpen(false);
       router.push(
-        `/${data.reviseRunAnswer.kind === "PLAN" ? "plans" : "sessions"}/${data.reviseRunAnswer.id}`,
+        `/ai/${data.reviseRunAnswer.kind === "PLAN" ? "plans" : "sessions"}/${data.reviseRunAnswer.id}`,
       );
     } catch (value) {
       setError(value instanceof Error ? value.message : String(value));
@@ -526,6 +531,12 @@ export function RunDetailPage({
   const locale = useLocale();
   const router = useRouter();
   const [run, setRun] = useState<AgentRunView | null>(null);
+  useBreadcrumbLabel(
+    ["ai", run?.kind === "PLAN" ? "plans" : "sessions", run?.id],
+    run
+      ? `${run.kind === "PLAN" ? t("plan") : t("session")} #${run.displayNumber}`
+      : undefined,
+  );
   const [events, setEvents] = useState<RunEventView[]>([]);
   const [search, setSearch] = useState("");
   const latestSearch = useRef(search);
@@ -547,6 +558,14 @@ export function RunDetailPage({
   const [outputRaw, setOutputRaw] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+  useBreadcrumbFallback(
+    ["ai", "plans", runId],
+    Boolean(error) || (!loading && !run),
+  );
+  useBreadcrumbFallback(
+    ["ai", "sessions", runId],
+    Boolean(error) || (!loading && !run),
+  );
   const [busy, setBusy] = useState<string | null>(null);
   const [steering, setSteering] = useState("");
   const [steeringAttachments, setSteeringAttachments] = useState<
@@ -1032,7 +1051,7 @@ export function RunDetailPage({
         },
       );
       router.push(
-        `/${data.createRunFollowUp.kind === "PLAN" ? "plans" : "sessions"}/${data.createRunFollowUp.id}`,
+        `/ai/${data.createRunFollowUp.kind === "PLAN" ? "plans" : "sessions"}/${data.createRunFollowUp.id}`,
       );
     } catch (value) {
       setError(value instanceof Error ? value.message : String(value));
@@ -1048,7 +1067,7 @@ export function RunDetailPage({
         "mutation DeleteRun($id: ID!) { deleteAgentRuns(ids: [$id]) }",
         { id: runId },
       );
-      router.push(run?.kind === "PLAN" ? "/plans" : "/sessions");
+      router.push(run?.kind === "PLAN" ? "/ai/plans" : "/ai/sessions");
     } catch (value) {
       setError(value instanceof Error ? value.message : String(value));
     }

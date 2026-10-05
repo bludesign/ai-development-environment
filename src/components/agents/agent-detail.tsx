@@ -1,6 +1,11 @@
 "use client";
 
 import {
+  useBreadcrumbLabel,
+  useBreadcrumbFallback,
+} from "@/components/breadcrumb-labels-provider";
+
+import {
   createRefreshCoalescer,
   type RefreshCoalescer,
 } from "@/lib/refresh-coalescer";
@@ -155,6 +160,7 @@ export function AgentDetail({ agentId }: { agentId: string }) {
   const locale = useLocale();
   const router = useRouter();
   const [agent, setAgent] = useState<Agent | null>(null);
+  useBreadcrumbLabel(["dashboard", "agents", agent?.id], agent?.name);
   const agentRevision = useRef(0);
   const applyAgent = useCallback((value: Agent) => {
     ++agentRevision.current;
@@ -171,6 +177,10 @@ export function AgentDetail({ agentId }: { agentId: string }) {
   const [selectedJobId, setSelectedJobId] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
+  useBreadcrumbFallback(
+    ["dashboard", "agents", agentId],
+    Boolean(loadError) || (!loading && !agent),
+  );
   const [deleting, setDeleting] = useState(false);
   const [directoryBusy, setDirectoryBusy] = useState(false);
   const [directoryError, setDirectoryError] = useState<string | null>(null);
@@ -475,7 +485,7 @@ export function AgentDetail({ agentId }: { agentId: string }) {
         `mutation DeleteAgent($agentId: ID!) { deleteAgent(agentId: $agentId) }`,
         { agentId },
       );
-      router.push("/agents");
+      router.push("/dashboard/agents");
     } catch (value) {
       setLoadError(value instanceof Error ? value.message : String(value));
       setDeleting(false);
@@ -1609,7 +1619,7 @@ function AgentCodebasesCard({ codebases }: { codebases: AgentCodebase[] }) {
                 </TableCell>
                 <TableCell>
                   <Button asChild size="sm" variant="ghost">
-                    <Link href={`/codebases/${codebase.id}`}>
+                    <Link href={`/dashboard/codebases/${codebase.id}`}>
                       {codebaseT("view")}
                     </Link>
                   </Button>

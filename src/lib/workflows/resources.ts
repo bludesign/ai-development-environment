@@ -272,7 +272,7 @@ export function workflowTriggerResourceLink(
       kind === "SSE_EVENT_EMITTED" ? "SSE_EVENT" : "SSE_REQUEST",
       kind === "SSE_EVENT_EMITTED" ? nested(sse, "event", "id") : requestId,
       {
-        url: `/sse/history?requestId=${encodeURIComponent(String(requestId ?? ""))}`,
+        url: `/debugging/sse/history?requestId=${encodeURIComponent(String(requestId ?? ""))}`,
       },
     );
   }
@@ -355,7 +355,7 @@ function pullRequestHref(resourceId: string): string | null {
   if (slash < 1 || slash === repository.length - 1) return null;
   const number = Number(resourceId.slice(separator + 1));
   if (!Number.isInteger(number) || number < 1) return null;
-  return `/pull-requests/${segment(repository.slice(0, slash))}/${segment(repository.slice(slash + 1))}/${number}`;
+  return `/github/pull-requests/${segment(repository.slice(0, slash))}/${segment(repository.slice(slash + 1))}/${number}`;
 }
 
 /**
@@ -378,41 +378,41 @@ export function workflowResourceDestination(
       : null;
   const derived =
     kind === "BUILD"
-      ? `/builds/${segment(id)}`
+      ? `/dashboard/builds/${segment(id)}`
       : kind === "CODEBASE"
-        ? `/codebases/${segment(id)}`
+        ? `/dashboard/codebases/${segment(id)}`
         : kind === "JIRA_TICKET"
           ? `/jira/tickets/${segment(id)}`
           : kind === "WORKTREE"
-            ? `/worktrees/${segment(id)}`
+            ? `/dashboard/worktrees/${segment(id)}`
             : kind === "AGENT_RUN" && runKind === "PLAN"
-              ? `/plans/${segment(id)}`
+              ? `/ai/plans/${segment(id)}`
               : kind === "AGENT_RUN" && runKind === "SESSION"
-                ? `/sessions/${segment(id)}`
+                ? `/ai/sessions/${segment(id)}`
                 : kind === "PULL_REQUEST"
                   ? pullRequestHref(id)
                   : kind === "AGENT_JOB"
-                    ? `/jobs/${segment(id)}`
+                    ? `/dashboard/jobs/${segment(id)}`
                     : kind === "COMMAND_RUN"
-                      ? `/commands/runs/${segment(id)}`
+                      ? `/dashboard/commands/runs/${segment(id)}`
                       : kind === "WORKFLOW_RUN"
-                        ? `/workflows/runs/${segment(id)}`
+                        ? `/dashboard/workflows/runs/${segment(id)}`
                         : kind === "SKILL_SYNC"
-                          ? `/skills/sync/${segment(id)}`
+                          ? `/ai/skills/sync/${segment(id)}`
                           : kind === "SKILL"
-                            ? `/skills/${segment(id)}`
+                            ? `/ai/skills/${segment(id)}`
                             : kind === "IOS_DEVICE"
-                              ? `/devices/${segment(id)}`
+                              ? `/system/devices/${segment(id)}`
                               : kind === "SIGNING_PROFILE"
-                                ? `/provisioning-profiles/${segment(id)}`
+                                ? `/system/provisioning-profiles/${segment(id)}`
                                 : kind === "PUSH_NOTIFICATION_BATCH"
-                                  ? `/push-notifications`
+                                  ? `/debugging/push-notifications`
                                   : kind === "BUILD_DATA_COLLECTION"
-                                    ? `/build-data`
+                                    ? `/system/build-data`
                                     : kind === "AGENT"
-                                      ? `/agents/${segment(id)}`
+                                      ? `/dashboard/agents/${segment(id)}`
                                       : kind === "CODEBASE_REPOSITORY"
-                                        ? `/codebases/repositories/${segment(id)}`
+                                        ? `/dashboard/codebases/repositories/${segment(id)}`
                                         : null;
   if (derived) return { href: derived, external: false };
 

@@ -1,6 +1,11 @@
 "use client";
 
 import {
+  useBreadcrumbLabel,
+  useBreadcrumbFallback,
+} from "@/components/breadcrumb-labels-provider";
+
+import {
   ArrowDownToLine,
   ArrowUpFromLine,
   Check,
@@ -149,10 +154,15 @@ export function SkillSyncPage({ runId }: { runId: string }) {
   const t = useTranslations("skills");
   const tStatus = useTranslations("status");
   const [run, setRun] = useState<SkillSyncRun | null>(null);
+  useBreadcrumbLabel(["ai", "skills", "sync", run?.id], t("syncTitle"));
   const [groups, setGroups] = useState<SkillGroupSummary[]>([]);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  useBreadcrumbFallback(
+    ["ai", "skills", "sync", runId],
+    Boolean(error) || (!loading && !run),
+  );
   const [manualItem, setManualItem] = useState<SkillSyncItem | null>(null);
   const [databaseFiles, setDatabaseFiles] = useState<PackageFile[]>([]);
   const [manualFiles, setManualFiles] = useState<PackageFile[]>([]);

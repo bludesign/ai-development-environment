@@ -1,6 +1,11 @@
 "use client";
 
 import {
+  useBreadcrumbLabel,
+  useBreadcrumbFallback,
+} from "@/components/breadcrumb-labels-provider";
+
+import {
   ChevronRight,
   Download,
   FileArchive,
@@ -91,8 +96,16 @@ export function CrashDetailPage({ crashId }: { crashId: string }) {
   const locale = useLocale();
   const router = useRouter();
   const [crash, setCrash] = useState<CrashDetail | null>(null);
+  useBreadcrumbLabel(
+    ["debugging", "crashes", crash?.id],
+    crash?.appName ?? crash?.filename,
+  );
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  useBreadcrumbFallback(
+    ["debugging", "crashes", crashId],
+    Boolean(error) || (!loading && !crash),
+  );
   const [busy, setBusy] = useState(false);
   const [uploadOpen, setUploadOpen] = useState(false);
 
@@ -134,7 +147,7 @@ export function CrashDetailPage({ crashId }: { crashId: string }) {
     setBusy(true);
     try {
       await controlPlaneRequest(DELETE_CRASHES_MUTATION, { ids: [crashId] });
-      router.push("/crashes");
+      router.push("/debugging/crashes");
     } catch (value) {
       setError(value instanceof Error ? value.message : String(value));
       setBusy(false);
@@ -337,7 +350,7 @@ export function CrashDetailPage({ crashId }: { crashId: string }) {
             <DetailItem className="lg:col-span-2" label={t("signature")} mono>
               <Link
                 className="underline"
-                href={`/crashes?signature=${encodeURIComponent(crash.signature)}`}
+                href={`/debugging/crashes?signature=${encodeURIComponent(crash.signature)}`}
               >
                 {crash.signature}
               </Link>
@@ -432,7 +445,7 @@ export function CrashDetailPage({ crashId }: { crashId: string }) {
                       {image.dsym ? (
                         <Link
                           className="underline"
-                          href={`/crashes/dsyms/${encodeURIComponent(image.dsym.id)}`}
+                          href={`/debugging/crashes/dsyms/${encodeURIComponent(image.dsym.id)}`}
                         >
                           {image.dsym.bundleName}
                         </Link>

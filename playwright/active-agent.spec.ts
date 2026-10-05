@@ -17,7 +17,7 @@ test("global focus survives navigation and reload, then restores each page filte
       value: () => collectionId,
     });
   }, ids.ccusageCollections.captured);
-  await page.goto("/en/worktrees");
+  await page.goto("/en/dashboard/worktrees");
   const localAgent = page.getByRole("combobox", {
     name: "Filter by agent",
     exact: true,
@@ -62,7 +62,7 @@ test("global focus survives navigation and reload, then restores each page filte
   await expect(localAgent).toHaveText("Build Mac");
 
   const secondTab = await context.newPage();
-  await secondTab.goto("/en/worktrees");
+  await secondTab.goto("/en/dashboard/worktrees");
   await expect(
     secondTab.getByRole("combobox", {
       name: "Active agent: Build Mac",
@@ -70,7 +70,7 @@ test("global focus survives navigation and reload, then restores each page filte
     }),
   ).toBeVisible();
 
-  await page.goto("/en/usage");
+  await page.goto("/en/ai/usage");
   const usageAgent = page.getByRole("combobox", {
     name: "Filter usage by agent",
     exact: true,
@@ -107,7 +107,10 @@ test("global focus survives navigation and reload, then restores each page filte
         request.variables?.agentId === ids.agents.build
       );
     });
-    await page.goto(`/en/${route}`);
+    const section = ["commands", "workflows"].includes(route)
+      ? "dashboard"
+      : "ai";
+    await page.goto(`/en/${section}/${route}`);
     const filter = page.getByRole("combobox", {
       name: "Filter by agent",
       exact: true,
@@ -137,7 +140,7 @@ test("global focus survives navigation and reload, then restores each page filte
       });
     }
   }
-  await page.goto("/en/usage");
+  await page.goto("/en/ai/usage");
   await page
     .getByRole("combobox", { name: "Active agent: Build Mac", exact: true })
     .click();
@@ -153,7 +156,7 @@ test("global focus survives navigation and reload, then restores each page filte
   await expect(
     secondTab.getByRole("combobox", { name: "Filter by agent", exact: true }),
   ).toHaveText("Studio Mac");
-  await page.goto("/en/worktrees");
+  await page.goto("/en/dashboard/worktrees");
   await expect(localAgent).toHaveText("Studio Mac");
   await expect(localAgent).toBeEnabled();
 });

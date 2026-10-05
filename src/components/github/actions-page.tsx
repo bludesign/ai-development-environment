@@ -685,7 +685,7 @@ export function ActionsPage() {
             </EmptyDescription>
           </EmptyHeader>
           <Button asChild className="mt-4">
-            <Link href="/settings">{t("openSettings")}</Link>
+            <Link href="/system/settings">{t("openSettings")}</Link>
           </Button>
         </Empty>
       ) : (

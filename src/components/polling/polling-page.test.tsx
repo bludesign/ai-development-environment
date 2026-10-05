@@ -64,7 +64,7 @@ describe("PollingPage", () => {
     const { container } = render(<PollingPage />);
 
     const agentLink = await screen.findByRole("link", { name: "Builder" });
-    expect(agentLink.getAttribute("href")).toBe("/agents/agent-1");
+    expect(agentLink.getAttribute("href")).toBe("/dashboard/agents/agent-1");
 
     const agentTable = agentLink.closest("table");
     expect(agentTable).not.toBeNull();

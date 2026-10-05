@@ -156,7 +156,7 @@ function configureRequests() {
 beforeEach(() => {
   global.ResizeObserver = ResizeObserverMock;
   Element.prototype.scrollIntoView = vi.fn();
-  window.history.replaceState(null, "", "/comments");
+  window.history.replaceState(null, "", "/github/comments");
   window.localStorage.clear();
   configureRequests();
 });
@@ -315,7 +315,7 @@ describe("CommentsPage", () => {
     window.history.replaceState(
       null,
       "",
-      "/comments?pullRequest=acme%2Fwidgets%2322",
+      "/github/comments?pullRequest=acme%2Fwidgets%2322",
     );
     render(<CommentsPage initialPullRequest="acme/widgets#22" />);
     const pullRequestFilter = await screen.findByRole("combobox", {
@@ -333,7 +333,7 @@ describe("CommentsPage", () => {
     window.history.replaceState(
       null,
       "",
-      "/comments?pullRequest=missing%2Frepo%231",
+      "/github/comments?pullRequest=missing%2Frepo%231",
     );
     render(<CommentsPage initialPullRequest="missing/repo#1" />);
     await waitFor(() =>

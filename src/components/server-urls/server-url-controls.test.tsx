@@ -64,7 +64,7 @@ test("copies each configured endpoint variant and links to centralized settings"
     screen
       .getByRole("link", { name: "Manage server URLs in Settings" })
       .getAttribute("href"),
-  ).toContain("/settings#server-urls");
+  ).toContain("/system/settings#server-urls");
   expect(
     screen.getByText(
       `${serverUrlFixture.effectiveLocalBaseUrl}/api/telemetry/console-logs`,

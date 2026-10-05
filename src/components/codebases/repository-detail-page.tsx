@@ -1,5 +1,10 @@
 "use client";
 
+import {
+  useBreadcrumbLabel,
+  useBreadcrumbFallback,
+} from "@/components/breadcrumb-labels-provider";
+
 import { ArrowLeft, FolderGit2, Save } from "lucide-react";
 import { useTranslations } from "next-intl";
 import { FormEvent, useCallback, useEffect, useRef, useState } from "react";
@@ -69,6 +74,10 @@ export function RepositoryDetailPage({
   const externalT = useTranslations("externalPipelineActions");
   const externalTitle = externalT("title");
   const [repository, setRepository] = useState<CodebaseRepository | null>(null);
+  useBreadcrumbLabel(
+    ["dashboard", "codebases", "repositories", repository?.id],
+    repository?.name,
+  );
   const [skillGroups, setSkillGroups] = useState<
     Array<{ id: string; name: string }>
   >([]);
@@ -79,6 +88,10 @@ export function RepositoryDetailPage({
   const loadOwner = useRef<RefreshCoalescer | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  useBreadcrumbFallback(
+    ["dashboard", "codebases", "repositories", repositoryId],
+    Boolean(error) || (!loading && !repository),
+  );
   const [notice, setNotice] = useState<string | null>(null);
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
@@ -256,7 +269,7 @@ export function RepositoryDetailPage({
           </EmptyDescription>
         </EmptyHeader>
         <Button asChild variant="outline">
-          <Link href="/codebases">
+          <Link href="/dashboard/codebases">
             <ArrowLeft /> {t("backToCodebases")}
           </Link>
         </Button>
@@ -496,7 +509,7 @@ export function RepositoryDetailPage({
                 {quickActionWorkflows.map((workflow) => (
                   <Link
                     className="flex items-start gap-2 rounded-md px-2 py-2 hover:bg-muted"
-                    href={`/workflows/${workflow.id}`}
+                    href={`/dashboard/workflows/${workflow.id}`}
                     key={workflow.id}
                   >
                     <span className="min-w-0">

@@ -528,7 +528,7 @@ export function GitLabCommentsPage({
             <EmptyDescription>{t("credentialsDescription")}</EmptyDescription>
           </EmptyHeader>
           <Button asChild>
-            <Link href="/settings">{t("openSettings")}</Link>
+            <Link href="/system/settings">{t("openSettings")}</Link>
           </Button>
         </Empty>
       ) : (

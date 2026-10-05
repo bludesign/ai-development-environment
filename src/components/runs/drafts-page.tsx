@@ -205,7 +205,7 @@ export function DraftsPage() {
             <FilePenLine /> {editMode ? t("done") : t("edit")}
           </Button>
           <Button asChild>
-            <Link href="/runs/new">
+            <Link href="/ai/drafts/new">
               <Plus /> {t("newDraft")}
             </Link>
           </Button>
@@ -346,7 +346,7 @@ export function DraftsPage() {
                       onClick={(event) => {
                         if (!isRowActivation(event)) return;
                         if (editMode) toggleSelected(draft.id);
-                        else router.push(`/runs/new?draft=${draft.id}`);
+                        else router.push(`/ai/drafts/new?draft=${draft.id}`);
                       }}
                     >
                       {editMode && (
@@ -374,7 +374,7 @@ export function DraftsPage() {
                         {draft.worktree ? (
                           <Link
                             className={cn(rowLinkClass, "block min-w-0")}
-                            href={`/worktrees/${draft.worktree.id}`}
+                            href={`/dashboard/worktrees/${draft.worktree.id}`}
                             title={draft.worktree.folder}
                           >
                             <span className="block truncate">
@@ -395,7 +395,7 @@ export function DraftsPage() {
                             rowLinkClass,
                             "block max-w-96 truncate",
                           )}
-                          href={`/runs/new?draft=${draft.id}`}
+                          href={`/ai/drafts/new?draft=${draft.id}`}
                           title={draft.prompt}
                         >
                           {draft.prompt}

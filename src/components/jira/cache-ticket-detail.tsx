@@ -1,5 +1,10 @@
 "use client";
 
+import {
+  useBreadcrumbLabel,
+  useBreadcrumbFallback,
+} from "@/components/breadcrumb-labels-provider";
+
 import { RefreshCw, Trash2 } from "lucide-react";
 import { useTranslations } from "next-intl";
 import { useCallback, useEffect, useState } from "react";
@@ -32,9 +37,17 @@ export function JiraCacheTicketDetailPage({ issueKey }: { issueKey: string }) {
   const tc = useTranslations("common");
   const router = useRouter();
   const [ticket, setTicket] = useState<JiraCachedTicketDetail | null>(null);
+  useBreadcrumbLabel(
+    ["jira", "cache", "tickets", ticket?.issueKey],
+    ticket?.issueKey,
+  );
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  useBreadcrumbFallback(
+    ["jira", "cache", "tickets", issueKey],
+    Boolean(error) || (!loading && !ticket),
+  );
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -81,7 +94,7 @@ export function JiraCacheTicketDetailPage({ issueKey }: { issueKey: string }) {
         "mutation DeleteCachedTicket($issueKey: ID!) { deleteJiraCachedTicket(issueKey: $issueKey) }",
         { issueKey },
       );
-      router.replace("/jira-cache");
+      router.replace("/jira/cache");
     } catch (value) {
       setError(value instanceof Error ? value.message : String(value));
       setBusy(false);

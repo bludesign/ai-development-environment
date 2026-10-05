@@ -58,7 +58,7 @@ describe("workflow resource graph projection", () => {
         ["ticket", { href: "/jira/tickets/AIDE-1", external: false }],
         [
           "resource-trigger",
-          { href: "/worktrees/worktree-1", external: false },
+          { href: "/dashboard/worktrees/worktree-1", external: false },
         ],
       ]),
     );
@@ -99,7 +99,7 @@ describe("workflow resource graph projection", () => {
     ).toEqual(
       new Map([
         ["jira", { href: "/jira/tickets/AIDE-69", external: false }],
-        ["stage", { href: "/worktrees/worktree-1", external: false }],
+        ["stage", { href: "/dashboard/worktrees/worktree-1", external: false }],
       ]),
     );
   });

@@ -241,7 +241,7 @@ export function WorktreeFetchProgress({
                   className="h-auto px-0"
                 >
                   <Link
-                    href={`/jobs/${row.jobId}`}
+                    href={`/dashboard/jobs/${row.jobId}`}
                     target="_blank"
                     rel="noreferrer"
                   >

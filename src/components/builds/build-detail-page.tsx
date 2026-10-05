@@ -1,4 +1,9 @@
 "use client";
+
+import {
+  useBreadcrumbLabel,
+  useBreadcrumbFallback,
+} from "@/components/breadcrumb-labels-provider";
 import { BuildArtifactDownload } from "./build-artifact-download";
 
 import { OutOfDateBadge } from "@/components/builds/out-of-date-badge";
@@ -70,7 +75,10 @@ import {
 import { buildStatusVariant } from "./build-format";
 import { ExportArchiveDialog } from "./export-archive-dialog";
 import { IosInstallButton, latestInstallArtifact } from "./ios-install-button";
-import { BuildConfigurationLabel } from "./build-configuration-label";
+import {
+  BuildConfigurationLabel,
+  buildConfigurationName,
+} from "./build-configuration-label";
 import { RebuildButton } from "./rebuild-button";
 import { RunBuildControls } from "./run-build-controls";
 import type { BuildLogChunk, BuildRecord, BuildReport } from "./types";
@@ -224,6 +232,10 @@ export function BuildDetailPage({
   const locale = useLocale();
   const router = useRouter();
   const [build, setBuild] = useState<BuildRecord | null>(null);
+  useBreadcrumbLabel(
+    ["dashboard", "builds", build?.id],
+    build ? buildConfigurationName(build, t("custom")) : undefined,
+  );
   const [logState, setLogState] = useState<{
     buildId: string;
     chunks: BuildLogChunk[];
@@ -243,6 +255,10 @@ export function BuildDetailPage({
   > | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  useBreadcrumbFallback(
+    ["dashboard", "builds", buildId],
+    Boolean(error) || (!loading && !build),
+  );
   const [rebuiltBuildId, setRebuiltBuildId] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [reportBusy, setReportBusy] = useState<
@@ -542,7 +558,7 @@ export function BuildDetailPage({
         `mutation DeleteBuild($ids: [ID!]!) { deleteBuilds(ids: $ids) }`,
         { ids: [buildId] },
       );
-      router.replace("/builds");
+      router.replace("/dashboard/builds");
     } catch (value) {
       setError(value instanceof Error ? value.message : String(value));
       setDeleteOpen(false);
@@ -659,7 +675,7 @@ export function BuildDetailPage({
           <EmptyDescription>{t("buildNotFoundDescription")}</EmptyDescription>
         </EmptyHeader>
         <Button asChild variant="outline">
-          <Link href="/builds">
+          <Link href="/dashboard/builds">
             <ArrowLeft /> {t("backToBuilds")}
           </Link>
         </Button>
@@ -680,7 +696,7 @@ export function BuildDetailPage({
             {t("rebuildStarted")}
             <Link
               className="font-medium underline underline-offset-4"
-              href={`/builds/${rebuiltBuildId}`}
+              href={`/dashboard/builds/${rebuiltBuildId}`}
             >
               {t("viewBuild")}
             </Link>
@@ -812,7 +828,7 @@ export function BuildDetailPage({
             )}
           {coverageReport?.status === "READY" && (
             <Button asChild variant="outline">
-              <Link href={`/builds/${build.id}/coverage`}>
+              <Link href={`/dashboard/builds/${build.id}/coverage`}>
                 <ChartNoAxesColumn /> {t("viewCoverageReport")}
               </Link>
             </Button>
@@ -865,7 +881,7 @@ export function BuildDetailPage({
             onOpenChange={setLogsOpen}
             open={logsOpen}
             previousMatchLabel={t("previousTerminalMatch")}
-            rawOutputHref={`/${locale}/builds/${encodeURIComponent(buildId)}/output`}
+            rawOutputHref={`/${locale}/dashboard/builds/${encodeURIComponent(buildId)}/output`}
             rawOutputLabel={t("viewRawOutput")}
             searchLabel={t("searchTerminal")}
             sourceKey={buildId}
@@ -1017,7 +1033,7 @@ export function BuildDetailPage({
                           </span>
                           <Button asChild size="sm" variant="ghost">
                             <Link
-                              href={`/crashes/dsyms?buildId=${encodeURIComponent(build.id)}`}
+                              href={`/debugging/crashes/dsyms?buildId=${encodeURIComponent(build.id)}`}
                             >
                               {t("viewDsyms")}
                             </Link>

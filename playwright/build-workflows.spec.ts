@@ -113,7 +113,7 @@ test("terminal tails, prepends 6005 chunks, reconciles late output, and preserve
     }
     return route.fallback();
   });
-  await page.goto(`/en/builds/${ids.builds.archive}`);
+  await page.goto(`/en/dashboard/builds/${ids.builds.archive}`);
   const rows = page.locator(".xterm-rows").first();
   await expect(rows).toContainText("split 🌍 last");
   const scrollToStart = async () => {
@@ -210,7 +210,7 @@ test("install is accessible on desktop and does not open its build row", async (
   page,
 }, testInfo) => {
   test.skip(!testInfo.project.name.startsWith("desktop"));
-  await page.goto("/en/builds");
+  await page.goto("/en/dashboard/builds");
   const install = page
     .getByRole("button", { name: "Install", exact: true })
     .first();
@@ -221,14 +221,14 @@ test("install is accessible on desktop and does not open its build row", async (
       exact: true,
     }),
   ).toBeVisible();
-  await expect(page).toHaveURL(/\/en\/builds$/);
+  await expect(page).toHaveURL(/\/en\/dashboard\/builds$/);
 });
 
 test("custom build editor keeps the configuration selector available", async ({
   page,
 }) => {
   await stubWorktreeAgent(page);
-  await page.goto(`/en/worktrees/${ids.worktrees.iosMain}`);
+  await page.goto(`/en/dashboard/worktrees/${ids.worktrees.iosMain}`);
   await page
     .getByRole("button", { name: "Build", exact: true })
     .first()
@@ -269,7 +269,7 @@ test("configuration details use breadcrumbs and show history without a lone tab"
   page,
 }, testInfo) => {
   await page.goto(
-    `/en/builds/configurations/${ids.buildConfigurations.release}`,
+    `/en/dashboard/builds/configurations/${ids.buildConfigurations.release}`,
   );
   await expect(
     page.getByRole("heading", { name: "App Store Release", exact: true }),
@@ -291,7 +291,7 @@ test("configuration details use breadcrumbs and show history without a lone tab"
   });
   await expect(configurations).toHaveAttribute(
     "href",
-    "/en/builds?view=configurations",
+    "/en/dashboard/builds?view=configurations",
   );
   if (testInfo.project.name.startsWith("desktop")) {
     await configurations.click();
@@ -346,7 +346,7 @@ for (const device of ["iPhone", "iPad"] as const) {
       ];
       return route.fulfill({ json });
     });
-    await page.goto(`/en/builds/${ids.builds.archive}`);
+    await page.goto(`/en/dashboard/builds/${ids.builds.archive}`);
     const install = page
       .getByRole("button", { name: "Install", exact: true })
       .first();
@@ -385,7 +385,7 @@ test("custom is selected automatically when a project has no configurations", as
     json.data.iosAppProject.configurations = [];
     return route.fulfill({ json });
   });
-  await page.goto(`/en/worktrees/${ids.worktrees.iosMain}`);
+  await page.goto(`/en/dashboard/worktrees/${ids.worktrees.iosMain}`);
   await page
     .getByRole("button", { name: "Build", exact: true })
     .first()
@@ -405,7 +405,7 @@ test("install requires HTTPS in the app build list", async ({
   page,
 }, testInfo) => {
   test.skip(testInfo.project.name !== "mobile-light");
-  await page.goto(`/en/apps/${ids.apps.mobileSuite}?view=builds`);
+  await page.goto(`/en/dashboard/apps/${ids.apps.mobileSuite}?view=builds`);
   const install = page
     .getByRole("button", { name: "Install", exact: true })
     .first();

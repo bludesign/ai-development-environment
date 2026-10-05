@@ -711,7 +711,7 @@ export function BuildDataPage() {
                         {entry.worktreeId && entry.worktreePath ? (
                           <Link
                             className="underline-offset-4 hover:underline"
-                            href={`/worktrees/${entry.worktreeId}`}
+                            href={`/dashboard/worktrees/${entry.worktreeId}`}
                           >
                             {entry.worktreePath}
                           </Link>
@@ -734,7 +734,7 @@ export function BuildDataPage() {
                       <TableCell>
                         <Link
                           className={cn(rowLinkClass, "inline-block")}
-                          href={`/agents/${entry.agent.id}`}
+                          href={`/dashboard/agents/${entry.agent.id}`}
                         >
                           {entry.agent.name}
                         </Link>
@@ -1048,7 +1048,7 @@ function DeviceSupportCard({
                 <TableCell>
                   <Link
                     className={cn(rowLinkClass, "inline-block")}
-                    href={`/agents/${entry.agent.id}`}
+                    href={`/dashboard/agents/${entry.agent.id}`}
                   >
                     {entry.agent.name}
                   </Link>

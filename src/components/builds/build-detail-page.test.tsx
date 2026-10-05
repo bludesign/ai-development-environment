@@ -380,7 +380,9 @@ describe("BuildDetailPage", () => {
     render(<BuildDetailPage buildId="build-1" publicOrigin={null} />);
 
     const link = await screen.findByRole("link", { name: "View raw output" });
-    expect(link.getAttribute("href")).toBe("/en/builds/build-1/output");
+    expect(link.getAttribute("href")).toBe(
+      "/en/dashboard/builds/build-1/output",
+    );
   });
 
   test("uses the standard action size for install in the header", async () => {
@@ -519,7 +521,10 @@ describe("BuildDetailPage", () => {
     expect(
       screen
         .getAllByRole("link", { name: "View build" })
-        .find((link) => link.getAttribute("href") === "/builds/build-rebuilt"),
+        .find(
+          (link) =>
+            link.getAttribute("href") === "/dashboard/builds/build-rebuilt",
+        ),
     ).toBeDefined();
 
     fireEvent.click(screen.getByRole("button", { name: "Delete build" }));

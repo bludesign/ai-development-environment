@@ -117,7 +117,7 @@ export function CrashTable({
       </TableHeader>
       <TableBody>
         {crashes.map((crash) => {
-          const href = `/crashes/${encodeURIComponent(crash.id)}`;
+          const href = `/debugging/crashes/${encodeURIComponent(crash.id)}`;
           const location = crash.topAppFrame
             ? frameLocation(crash.topAppFrame)
             : null;

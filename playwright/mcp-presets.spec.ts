@@ -31,7 +31,7 @@ test("portable mixed preset imports, exports, and calls only selected MCP tools"
   const created: string[] = [];
   const client = new Client({ name: "preset-acceptance", version: "1.0" });
   try {
-    await page.goto("/en/tools");
+    await page.goto("/en/system/tools");
     await page.getByText("Core Tools", { exact: true }).waitFor();
     await page
       .getByRole("button", { name: "Export tool catalog", exact: true })

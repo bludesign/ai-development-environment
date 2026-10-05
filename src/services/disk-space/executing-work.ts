@@ -103,7 +103,7 @@ export async function executingResourcesByWorktree(
       kind: "BUILD",
       id: build.id,
       label: "Build",
-      href: `/builds/${encodeURIComponent(build.id)}`,
+      href: `/dashboard/builds/${encodeURIComponent(build.id)}`,
     });
   }
   for (const run of runs) {
@@ -112,7 +112,7 @@ export async function executingResourcesByWorktree(
       kind,
       id: run.id,
       label: `${kind === "PLAN" ? "Plan" : "Session"} #${run.displayNumber}`,
-      href: `/${kind === "PLAN" ? "plans" : "sessions"}/${encodeURIComponent(run.id)}`,
+      href: `/ai/${kind === "PLAN" ? "plans" : "sessions"}/${encodeURIComponent(run.id)}`,
     });
   }
   for (const attempt of workflowAttempts) {
@@ -120,7 +120,7 @@ export async function executingResourcesByWorktree(
       kind: "WORKFLOW",
       id: attempt.run.id,
       label: `Workflow run #${attempt.run.displayNumber}`,
-      href: `/workflows/runs/${encodeURIComponent(attempt.run.id)}`,
+      href: `/dashboard/workflows/runs/${encodeURIComponent(attempt.run.id)}`,
     });
   }
   for (const job of workflowJobs) {
@@ -128,7 +128,7 @@ export async function executingResourcesByWorktree(
       kind: "WORKFLOW_JOB",
       id: job.id,
       label: "Workflow terminal job",
-      href: `/jobs/${encodeURIComponent(job.id)}`,
+      href: `/dashboard/jobs/${encodeURIComponent(job.id)}`,
     });
   }
   return result;

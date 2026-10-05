@@ -1,6 +1,11 @@
 "use client";
 
 import {
+  useBreadcrumbLabel,
+  useBreadcrumbFallback,
+} from "@/components/breadcrumb-labels-provider";
+
+import {
   ExternalLink,
   GitCommitHorizontal,
   GitPullRequest,
@@ -109,8 +114,25 @@ export function PullRequestDetailPage({
   const issueKey = searchParams.get("issue");
   const [pullRequest, setPullRequest] =
     useState<GitHubPullRequestDetail | null>(null);
+  useBreadcrumbLabel(
+    [
+      "github",
+      "pull-requests",
+      owner,
+      repository,
+      pullRequest?.repositoryNameWithOwner.toLowerCase() ===
+        `${owner}/${repository}`.toLowerCase() && pullRequest.number === number
+        ? pullRequest.number
+        : undefined,
+    ],
+    pullRequest?.title,
+  );
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  useBreadcrumbFallback(
+    ["github", "pull-requests", owner, repository, number],
+    Boolean(error) || (!loading && !pullRequest),
+  );
   const [historicalAttempts, setHistoricalAttempts] = useState<
     Record<string, GitHubWorkflowRunAttemptView | null>
   >({});
@@ -248,7 +270,7 @@ export function PullRequestDetailPage({
             <EmptyDescription>{t("notFoundDescription")}</EmptyDescription>
           </EmptyHeader>
           <Button asChild className="mt-4" variant="outline">
-            <Link href="/pull-requests">{t("back")}</Link>
+            <Link href="/github/pull-requests">{t("back")}</Link>
           </Button>
         </Empty>
       </section>

@@ -764,7 +764,7 @@ function GitHubAppSettingsCard() {
               <div className="flex flex-wrap items-center justify-end gap-2 border-t pt-4">
                 {settings?.webhookConfigured && (
                   <Button asChild className="mr-auto" variant="link">
-                    <Link href="/webhooks">{t("viewDeliveries")}</Link>
+                    <Link href="/github/webhooks">{t("viewDeliveries")}</Link>
                   </Button>
                 )}
                 <ConfirmationDialog

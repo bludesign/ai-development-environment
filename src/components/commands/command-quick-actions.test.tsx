@@ -135,7 +135,7 @@ describe("CommandQuickActions", () => {
     // "View" moved out of the button and into the menu, still linking the run.
     expect(
       screen.getByRole("menuitem", { name: /View/ }).getAttribute("href"),
-    ).toBe("/commands/runs/run-1");
+    ).toBe("/dashboard/commands/runs/run-1");
   });
 
   test("shows no run menu once every run has finished", async () => {

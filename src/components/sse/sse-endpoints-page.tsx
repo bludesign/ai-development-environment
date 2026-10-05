@@ -122,7 +122,7 @@ export function SseEndpointsPage() {
     <SsePageShell
       action={
         <Button asChild>
-          <Link href="/sse/new">
+          <Link href="/debugging/sse/new">
             <Plus /> Create endpoint
           </Link>
         </Button>
@@ -159,7 +159,7 @@ export function SseEndpointsPage() {
             </EmptyDescription>
           </EmptyHeader>
           <Button asChild>
-            <Link href="/sse/new">
+            <Link href="/debugging/sse/new">
               <Plus /> Create endpoint
             </Link>
           </Button>
@@ -205,7 +205,7 @@ export function SseEndpointsPage() {
                           <Copy /> Copy Local URL
                         </DropdownMenuItem>
                         <DropdownMenuItem asChild>
-                          <Link href={`/sse/${endpoint.id}`}>
+                          <Link href={`/debugging/sse/${endpoint.id}`}>
                             <ExternalLink /> Open endpoint
                           </Link>
                         </DropdownMenuItem>
@@ -275,17 +275,19 @@ export function SseEndpointsPage() {
                 </CardContent>
                 <CardFooter className="grid grid-cols-3 gap-2">
                   <Button asChild size="sm" variant="outline">
-                    <Link href={`/sse/${endpoint.id}`}>
+                    <Link href={`/debugging/sse/${endpoint.id}`}>
                       <ExternalLink /> Configure
                     </Link>
                   </Button>
                   <Button asChild size="sm" variant="outline">
-                    <Link href={`/sse/${endpoint.id}/mocks`}>
+                    <Link href={`/debugging/sse/${endpoint.id}/mocks`}>
                       <Library /> Mocks
                     </Link>
                   </Button>
                   <Button asChild size="sm" variant="outline">
-                    <Link href={`/sse/history?endpointId=${endpoint.id}`}>
+                    <Link
+                      href={`/debugging/sse/history?endpointId=${endpoint.id}`}
+                    >
                       <History /> History
                     </Link>
                   </Button>

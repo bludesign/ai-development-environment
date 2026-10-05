@@ -235,7 +235,10 @@ function RepositoryBuildCard({
           {latest ? (
             <>
               <div className="flex flex-wrap items-center gap-2">
-                <Link className="hover:underline" href={`/builds/${latest.id}`}>
+                <Link
+                  className="hover:underline"
+                  href={`/dashboard/builds/${latest.id}`}
+                >
                   <Badge variant={buildStatusVariant(latest.status)}>
                     {t(`statuses.${latest.status}`)}
                   </Badge>
@@ -255,7 +258,9 @@ function RepositoryBuildCard({
                   <DateTime value={latest.createdAt} />
                 </span>
                 <Button asChild className="ml-auto" size="sm" variant="outline">
-                  <Link href={`/builds/${latest.id}`}>{t("viewBuild")}</Link>
+                  <Link href={`/dashboard/builds/${latest.id}`}>
+                    {t("viewBuild")}
+                  </Link>
                 </Button>
               </div>
             </>

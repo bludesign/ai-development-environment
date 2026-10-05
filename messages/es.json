@@ -15,6 +15,8 @@
     "ai": "IA",
     "navigation": "Navegación",
     "breadcrumbLabel": "Ruta de navegación",
+    "loadingBreadcrumb": "Cargando…",
+    "details": "Detalles",
     "navigationDescription": "Navegación principal de AI Development Environment.",
     "actionCenter": "Centro de acciones",
     "apps": "Apps",
@@ -56,7 +58,6 @@
     "jira": "Jira",
     "tickets": "Incidencias",
     "cache": "Caché",
-    "apiCache": "Caché de API",
     "system": "Sistema",
     "polling": "Sondeo",
     "status": "Estado",
@@ -1550,7 +1551,7 @@
     "save": "Guardar"
   },
   "cacheServer": {
-    "title": "Caché de Acciones",
+    "title": "Caché de GitHub Actions",
     "description": "Explora y gestiona las entradas del servidor de caché de GitHub Actions.",
     "matchLookup": "Búsqueda de coincidencias",
     "refresh": "Actualizar",
@@ -2113,6 +2114,7 @@
     "allProjects": "Todos los proyectos",
     "chooseProject": "Elegir un proyecto",
     "mergeRequestsTitle": "Solicitudes de fusión",
+    "mergeRequestsPageTitle": "Solicitudes de fusión de GitLab",
     "mergeRequestsDescription": "Revisa y administra solicitudes de fusión en la instancia de GitLab configurada.",
     "scope": "Ámbito",
     "state": "Estado",
@@ -2147,6 +2149,7 @@
     "autoMerge": "Fusión automática",
     "pipelines": "Canalizaciones",
     "pipelinesTitle": "Pipelines",
+    "pipelinesPageTitle": "Pipelines de GitLab",
     "pipelineCount": "{count} canalización",
     "pipelineCountPlural": "{count} canalizaciones",
     "pipelinesDescription": "Ejecuta, inspecciona, cancela y reintenta canalizaciones y trabajos de CI/CD de GitLab.",
@@ -2179,7 +2182,7 @@
     "projectHooks": "Webhooks de proyecto",
     "deliveries": "Entregas",
     "noDeliveries": "No se han recibido entregas de webhooks de GitLab.",
-    "cacheTitle": "Caché de la API",
+    "cacheTitle": "Caché de GitLab",
     "cacheDescription": "Inspecciona respuestas REST almacenadas y registros saneados de llamadas a la API de GitLab.",
     "cacheEntries": "Respuestas almacenadas",
     "clear": "Vaciar",
@@ -2701,7 +2704,7 @@
     }
   },
   "pullRequests": {
-    "title": "Solicitudes de extracción",
+    "title": "Solicitudes de extracción de GitHub",
     "description": "Revisa tus solicitudes de GitHub y los repositorios supervisados en un solo lugar.",
     "refresh": "Actualizar",
     "manage": "Gestionar",
@@ -2841,7 +2844,7 @@
     "closeMergeResult": "Cerrar"
   },
   "githubComments": {
-    "title": "Comentarios",
+    "title": "Comentarios de GitHub",
     "description": "Revisa y responde a los hilos de revisión de GitHub en tus solicitudes abiertas.",
     "refresh": "Actualizar",
     "layout": "Diseño de comentarios",
@@ -5653,7 +5656,7 @@
     "destinationNotReviewed": "Sin comprobar"
   },
   "gitlabComments": {
-    "title": "Comentarios",
+    "title": "Comentarios de GitLab",
     "description": "Revisa y responde a las discusiones de tus solicitudes de fusión.",
     "refresh": "Actualizar",
     "layout": "Vista de comentarios",

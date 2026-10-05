@@ -1,6 +1,11 @@
 "use client";
 
 import {
+  useBreadcrumbLabel,
+  useBreadcrumbFallback,
+} from "@/components/breadcrumb-labels-provider";
+
+import {
   CODEBASE_FETCH_JOB_KIND,
   CODEBASE_GIT_INSPECT_JOB_KIND,
   CODEBASE_GIT_OPERATION_JOB_KIND,
@@ -150,10 +155,18 @@ export function CodebaseDetailPage({ codebaseId }: { codebaseId: string }) {
   const t = useTranslations("codebaseDetail");
   const codebaseT = useTranslations("codebases");
   const [codebase, setCodebase] = useState<CodebaseDetail | null>(null);
+  useBreadcrumbLabel(
+    ["dashboard", "codebases", codebase?.id],
+    codebase?.repository.name,
+  );
   const [gitState, setGitState] = useState<CodebaseGitState | null>(null);
   const [loading, setLoading] = useState(true);
   const [inspecting, setInspecting] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
+  useBreadcrumbFallback(
+    ["dashboard", "codebases", codebaseId],
+    Boolean(loadError) || (!loading && !codebase),
+  );
   const [operationError, setOperationError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [diffs, setDiffs] = useState<Record<string, DiffEntry>>({});
@@ -187,7 +200,15 @@ export function CodebaseDetailPage({ codebaseId }: { codebaseId: string }) {
         );
         if (signal.aborted) return false;
         setGitState(data.inspectCodebaseGitState);
-        setDiffs({});
+        // Stash OIDs identify immutable patches, even when selectors change.
+        const stashOids = new Set(
+          data.inspectCodebaseGitState.stashes.map((stash) => stash.oid),
+        );
+        setDiffs((current) =>
+          Object.fromEntries(
+            Object.entries(current).filter(([oid]) => stashOids.has(oid)),
+          ),
+        );
         setLoadError(null);
         return true;
       } catch (value) {
@@ -482,7 +503,7 @@ export function CodebaseDetailPage({ codebaseId }: { codebaseId: string }) {
           <EmptyDescription>{t("notFoundDescription")}</EmptyDescription>
         </EmptyHeader>
         <Button asChild variant="outline">
-          <Link href="/codebases">
+          <Link href="/dashboard/codebases">
             <ArrowLeft /> {t("back")}
           </Link>
         </Button>
@@ -550,7 +571,9 @@ export function CodebaseDetailPage({ codebaseId }: { codebaseId: string }) {
         </div>
         <div className="flex flex-wrap gap-2">
           <Button asChild variant="outline">
-            <Link href={`/codebases/repositories/${codebase.repository.id}`}>
+            <Link
+              href={`/dashboard/codebases/repositories/${codebase.repository.id}`}
+            >
               <Settings2 /> {t("repositorySettings")}
             </Link>
           </Button>

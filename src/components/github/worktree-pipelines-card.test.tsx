@@ -90,7 +90,9 @@ describe("WorktreePipelinesCard", () => {
     const pipelineRow = await screen.findByRole("row", { name: /CI Passed/ });
     expect(
       screen.getByRole("link", { name: "View all" }).getAttribute("href"),
-    ).toBe("/actions?repository=codebase-repository-1&branch=feature%2FAPP-1");
+    ).toBe(
+      "/github/actions?repository=codebase-repository-1&branch=feature%2FAPP-1",
+    );
     fireEvent.pointerDown(
       within(pipelineRow).getByRole("button", {
         name: "Actions: Feature build",
@@ -102,7 +104,7 @@ describe("WorktreePipelinesCard", () => {
     expect(
       screen.getByRole("menuitem", { name: "View all" }).getAttribute("href"),
     ).toBe(
-      "/actions?repository=codebase-repository-1&branch=feature%2FAPP-1&pipeline=workflow-1",
+      "/github/actions?repository=codebase-repository-1&branch=feature%2FAPP-1&pipeline=workflow-1",
     );
     fireEvent.keyDown(document.activeElement ?? document.body, {
       key: "Escape",

@@ -1324,7 +1324,7 @@ export function NotificationsPage() {
                   )
                 ) : (
                   <Button asChild size="sm" type="button" variant="outline">
-                    <Link href="/settings">{t("configureApns")}</Link>
+                    <Link href="/system/settings">{t("configureApns")}</Link>
                   </Button>
                 )}
               </div>

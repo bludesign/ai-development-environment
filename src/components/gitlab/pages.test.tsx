@@ -759,7 +759,7 @@ describe("GitLabPipelinesPage", () => {
       screen
         .getByRole("link", { name: "feature/retry-diagnostics" })
         .getAttribute("href"),
-    ).toBe("/worktrees/worktree-1");
+    ).toBe("/dashboard/worktrees/worktree-1");
     expect(
       screen.getByText("Improve pipeline retry diagnostics"),
     ).toBeDefined();

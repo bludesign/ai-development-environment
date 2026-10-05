@@ -14,7 +14,7 @@ describe("discovery DTO schema compatibility", () => {
       group: "WORKTREES",
       title: "Feature",
       subtitle: null,
-      href: "/worktrees/one",
+      href: "/dashboard/worktrees/one",
       status: null,
       updatedAt: null,
       children: [],

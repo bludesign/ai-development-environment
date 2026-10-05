@@ -1035,7 +1035,7 @@ export class WorkflowsService {
         typeKey,
         title,
         body,
-        href: `/workflows/runs/${runId}`,
+        href: `/dashboard/workflows/runs/${runId}`,
         resourceKind: "WORKFLOW_RUN",
         resourceId: runId,
         worktreeId: worktree?.id ?? null,
@@ -1943,7 +1943,7 @@ export class WorkflowsService {
           kind: "AGENT_JOB",
           resourceId: job.id,
           label: "Workflow terminal job",
-          url: `/jobs/${job.id}`,
+          url: `/dashboard/jobs/${job.id}`,
         },
       ],
       wait: {
@@ -1990,7 +1990,7 @@ export class WorkflowsService {
           kind: "AGENT_JOB",
           resourceId: job.id,
           label: "Workflow checkpoint job",
-          url: `/jobs/${job.id}`,
+          url: `/dashboard/jobs/${job.id}`,
         },
       ],
       wait: {
@@ -5420,7 +5420,7 @@ export class WorkflowsService {
           kind: "WORKFLOW_RUN",
           resourceId: child.id,
           label: `Workflow run #${child.displayNumber}`,
-          url: `/workflows/runs/${child.id}`,
+          url: `/dashboard/workflows/runs/${child.id}`,
         },
       ],
       wait: {

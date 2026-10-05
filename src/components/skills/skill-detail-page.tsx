@@ -1,5 +1,10 @@
 "use client";
 
+import {
+  useBreadcrumbLabel,
+  useBreadcrumbFallback,
+} from "@/components/breadcrumb-labels-provider";
+
 import { Download, FilePlus2, PencilLine, Save, Trash2 } from "lucide-react";
 import { useTranslations } from "next-intl";
 import { useCallback, useEffect, useMemo, useState } from "react";
@@ -98,6 +103,8 @@ export function SkillDetailPage({ skillId }: { skillId: string }) {
   const router = useRouter();
   const creating = skillId === "new";
   const [name, setName] = useState(creating ? "new-skill" : "");
+  const [loadedSkillId, setLoadedSkillId] = useState<string | null>(null);
+  useBreadcrumbLabel(["ai", "skills", loadedSkillId], name);
   const [description, setDescription] = useState(
     creating ? "Describe when this skill should be used." : "",
   );
@@ -125,6 +132,10 @@ export function SkillDetailPage({ skillId }: { skillId: string }) {
   const [loading, setLoading] = useState(!creating);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  useBreadcrumbFallback(
+    ["ai", "skills", skillId],
+    Boolean(error) || (!loading && !loadedSkillId && !creating),
+  );
 
   const load = useCallback(async () => {
     if (creating) return;
@@ -140,6 +151,7 @@ export function SkillDetailPage({ skillId }: { skillId: string }) {
         { id: skillId },
       );
       if (!data.skill) throw new Error(t("skillNotFound"));
+      setLoadedSkillId(data.skill.id);
       setName(data.skill.name);
       setDescription(data.skill.description);
       setSyncGlobally(data.skill.syncGlobally);
@@ -212,7 +224,7 @@ export function SkillDetailPage({ skillId }: { skillId: string }) {
           },
         },
       );
-      router.replace(`/skills/${data.saveSkill.id}`);
+      router.replace(`/ai/skills/${data.saveSkill.id}`);
     } catch (value) {
       setError(value instanceof Error ? value.message : String(value));
     } finally {
@@ -227,7 +239,7 @@ export function SkillDetailPage({ skillId }: { skillId: string }) {
         `mutation DeleteSkill($id: ID!) { deleteSkill(id: $id) }`,
         { id: skillId },
       );
-      router.push("/skills");
+      router.push("/ai/skills");
     } catch (value) {
       setError(value instanceof Error ? value.message : String(value));
       setBusy(false);

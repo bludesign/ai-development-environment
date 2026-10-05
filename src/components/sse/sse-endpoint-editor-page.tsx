@@ -1,4 +1,9 @@
 "use client";
+
+import {
+  useBreadcrumbLabel,
+  useBreadcrumbFallback,
+} from "@/components/breadcrumb-labels-provider";
 import { EndpointUrls } from "@/components/server-urls/server-url-controls";
 
 import {
@@ -267,6 +272,7 @@ export function SseEndpointEditorPage({
   const isNew = !endpointId;
   const [tab, setTab] = useState(initialTab);
   const [endpoint, setEndpoint] = useState<SseEndpoint | null>(null);
+  useBreadcrumbLabel(["debugging", "sse", endpoint?.id], endpoint?.name);
   const [draft, setDraft] = useState<EndpointDraft>(DEFAULT_DRAFT);
   const [templates, setTemplates] = useState<SseMockTemplate[]>([]);
   const [compositions, setCompositions] = useState<SseMockComposition[]>([]);
@@ -274,6 +280,10 @@ export function SseEndpointEditorPage({
   const [mocksReadyId, setMocksReadyId] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  useBreadcrumbFallback(
+    ["debugging", "sse", endpointId],
+    Boolean(error) || (!loading && !endpoint && !isNew),
+  );
   const [notice, setNotice] = useState<string | null>(null);
 
   const fetchEndpoint = useCallback(
@@ -365,7 +375,7 @@ export function SseEndpointEditorPage({
           }`,
           { input: inputFor(draft) },
         );
-        router.replace(`/sse/${data.createSseEndpoint.id}`);
+        router.replace(`/debugging/sse/${data.createSseEndpoint.id}`);
       } else {
         const data = await controlPlaneRequest<{
           updateSseEndpoint: SseEndpoint;
@@ -451,7 +461,7 @@ export function SseEndpointEditorPage({
       action={
         <div className="flex gap-2">
           <Button asChild variant="outline">
-            <Link href="/sse">
+            <Link href="/debugging/sse">
               <ArrowLeft /> Endpoints
             </Link>
           </Button>
@@ -2410,7 +2420,7 @@ function EndpointHistory({ endpointId }: { endpointId: string }) {
         </CardDescription>
         <CardAction>
           <Button asChild variant="outline">
-            <Link href={`/sse/history?endpointId=${endpointId}`}>
+            <Link href={`/debugging/sse/history?endpointId=${endpointId}`}>
               <History /> Open full history
             </Link>
           </Button>

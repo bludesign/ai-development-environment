@@ -54,7 +54,7 @@ export function actionsForBranchHref(
 ) {
   const params = new URLSearchParams({ repository: repositoryId, branch });
   if (workflowId) params.set("pipeline", workflowId);
-  return `/actions?${params.toString()}`;
+  return `/github/actions?${params.toString()}`;
 }
 
 type WorkflowRunMenuRun = Omit<

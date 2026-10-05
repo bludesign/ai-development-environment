@@ -85,7 +85,7 @@ test("shows actual settled checkout progress and readable repository outcomes", 
     within(rows[0]!)
       .getByRole("link", { name: "View job logs" })
       .getAttribute("href"),
-  ).toBe("/jobs/job-a");
+  ).toBe("/dashboard/jobs/job-a");
   expect(within(rows[2]!).getByText("The agent is offline.")).toBeDefined();
   expect(
     within(rows[3]!).getByText("Remote authentication failed"),

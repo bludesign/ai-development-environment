@@ -151,7 +151,7 @@ describe("MergePullRequestButton", () => {
           defaultDeleteWorktree: true,
           canDeleteWorktree: eligible,
           worktreeId: eligible ? "wt-1" : null,
-          worktreeFolder: "/worktrees/api",
+          worktreeFolder: "/dashboard/worktrees/api",
           ticketKey: "APP-42",
           ticketDoneStatusConfigured: true,
         },
@@ -181,7 +181,8 @@ describe("MergePullRequestButton", () => {
           }),
         ),
       ).toBe(eligible);
-      if (eligible) expect(screen.getByText("/worktrees/api")).toBeDefined();
+      if (eligible)
+        expect(screen.getByText("/dashboard/worktrees/api")).toBeDefined();
       fireEvent.click(screen.getByRole("checkbox", { name: /Move APP-42/ }));
       rerender(
         <MergePullRequestButton

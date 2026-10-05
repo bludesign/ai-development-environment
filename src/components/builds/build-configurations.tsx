@@ -1,5 +1,10 @@
 "use client";
 
+import {
+  useBreadcrumbLabel,
+  useBreadcrumbFallback,
+} from "@/components/breadcrumb-labels-provider";
+
 import { useCallback, useEffect, useState } from "react";
 import { useTranslations } from "next-intl";
 import { Pencil } from "lucide-react";
@@ -74,7 +79,10 @@ export function BuildConfigurations() {
       )}
       <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
         {items.map((item) => (
-          <Link href={`/builds/configurations/${item.id}`} key={item.id}>
+          <Link
+            href={`/dashboard/builds/configurations/${item.id}`}
+            key={item.id}
+          >
             <Card className="h-full hover:bg-muted/40">
               <CardHeader>
                 <CardTitle className="flex items-center gap-2">
@@ -111,11 +119,19 @@ export function BuildConfigurationDetail({
   const [configuration, setConfiguration] = useState<Configuration | null>(
     null,
   );
+  useBreadcrumbLabel(
+    ["dashboard", "builds", "configurations", configuration?.id],
+    configuration?.name,
+  );
   const [checkouts, setCheckouts] = useState<Checkout[]>([]);
   const [selected, setSelected] = useState("");
   const [editing, setEditing] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  useBreadcrumbFallback(
+    ["dashboard", "builds", "configurations", id],
+    Boolean(error) || (!loading && !configuration),
+  );
   const load = useCallback(async () => {
     try {
       const data = await controlPlaneRequest<{
@@ -220,7 +236,7 @@ export function BuildConfigurationDetail({
                   {t("repository")}
                 </p>
                 <Link
-                  href={`/codebases/repositories/${configuration.repository.id}`}
+                  href={`/dashboard/codebases/repositories/${configuration.repository.id}`}
                 >
                   {configuration.repository.name}
                 </Link>

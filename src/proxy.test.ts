@@ -53,10 +53,12 @@ describe("authentication and locale proxy", () => {
   });
 
   test("redirects an anonymous dashboard request with a safe return path", async () => {
-    const response = await proxy(request("/en/builds?status=running"));
+    const response = await proxy(
+      request("/en/dashboard/builds?status=running"),
+    );
     expect(response.status).toBe(307);
     expect(response.headers.get("location")).toBe(
-      "https://control.example.com/en/sign-in?returnTo=%2Fen%2Fbuilds%3Fstatus%3Drunning",
+      "https://control.example.com/en/sign-in?returnTo=%2Fen%2Fdashboard%2Fbuilds%3Fstatus%3Drunning",
     );
   });
 
@@ -97,7 +99,7 @@ describe("authentication and locale proxy", () => {
       unstable_doesMiddlewareMatch({
         config,
         nextConfig: {},
-        url: "/en/worktrees",
+        url: "/en/dashboard/worktrees",
       }),
     ).toBe(true);
   });

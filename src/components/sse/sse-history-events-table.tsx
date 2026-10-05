@@ -266,7 +266,9 @@ export function SseHistoryEventDetails({
               </Button>
             ) : null}
             <Button asChild size="sm" variant="outline">
-              <Link href={`/sse/history/${request.id}`}>View Stream</Link>
+              <Link href={`/debugging/sse/history/${request.id}`}>
+                View Stream
+              </Link>
             </Button>
           </div>
         </div>

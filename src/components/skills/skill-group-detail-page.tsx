@@ -1,5 +1,10 @@
 "use client";
 
+import {
+  useBreadcrumbLabel,
+  useBreadcrumbFallback,
+} from "@/components/breadcrumb-labels-provider";
+
 import { RefreshCw, Save, Search, Trash2 } from "lucide-react";
 import { useTranslations } from "next-intl";
 import { useCallback, useEffect, useMemo, useState } from "react";
@@ -26,6 +31,7 @@ export function SkillGroupDetailPage({ groupId }: { groupId: string }) {
   const t = useTranslations("skills");
   const router = useRouter();
   const [group, setGroup] = useState<SkillGroupSummary | null>(null);
+  useBreadcrumbLabel(["ai", "skills", "groups", group?.id], group?.name);
   const [skills, setSkills] = useState<SkillSummary[]>([]);
   const [repositories, setRepositories] = useState<RepositorySummary[]>([]);
   const [name, setName] = useState("");
@@ -36,6 +42,10 @@ export function SkillGroupDetailPage({ groupId }: { groupId: string }) {
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  useBreadcrumbFallback(
+    ["ai", "skills", "groups", groupId],
+    Boolean(error) || (!loading && !group),
+  );
 
   const notFoundMessage = t("groupNotFound");
   const load = useCallback(
@@ -135,7 +145,7 @@ export function SkillGroupDetailPage({ groupId }: { groupId: string }) {
         }`,
         { groupId },
       );
-      router.push(`/skills/sync/${data.prepareSkillSync.id}`);
+      router.push(`/ai/skills/sync/${data.prepareSkillSync.id}`);
     } catch (value) {
       setError(value instanceof Error ? value.message : String(value));
       setBusy(false);
@@ -149,7 +159,7 @@ export function SkillGroupDetailPage({ groupId }: { groupId: string }) {
         `mutation DeleteSkillGroup($id: ID!) { deleteSkillGroup(id: $id) }`,
         { id: groupId },
       );
-      router.push("/skills/groups");
+      router.push("/ai/skills/groups");
     } catch (value) {
       setError(value instanceof Error ? value.message : String(value));
       setBusy(false);

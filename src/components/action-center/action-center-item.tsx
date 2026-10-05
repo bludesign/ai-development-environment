@@ -182,7 +182,7 @@ export function ActionCenterItem({
   const worktree = item.worktree && (
     <Link
       className="flex min-w-0 max-w-full items-center gap-1 overflow-hidden font-mono text-xs text-muted-foreground hover:text-foreground hover:underline"
-      href={`/worktrees/${item.worktree.id}`}
+      href={`/dashboard/worktrees/${item.worktree.id}`}
       title={worktreeLabel ?? undefined}
     >
       <GitBranch className="size-3 shrink-0" />
@@ -282,7 +282,7 @@ export function ActionCenterItem({
               {rawWorktreeSummary && item.worktree ? (
                 <Link
                   className="block max-w-full truncate font-mono hover:text-foreground hover:underline"
-                  href={`/worktrees/${item.worktree.id}`}
+                  href={`/dashboard/worktrees/${item.worktree.id}`}
                   title={worktreeLabel ?? undefined}
                 >
                   {worktreeName(item.worktree.folder)}

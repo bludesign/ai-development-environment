@@ -1,6 +1,11 @@
 "use client";
 
 import {
+  useBreadcrumbLabel,
+  useBreadcrumbFallback,
+} from "@/components/breadcrumb-labels-provider";
+
+import {
   ArrowLeft,
   ChevronDown,
   ChevronRight,
@@ -86,11 +91,20 @@ export function CoverageReportPage({ buildId }: { buildId: string }) {
   const t = useTranslations("builds");
   const locale = useLocale();
   const [report, setReport] = useState<BuildReport | null>(null);
-  const [buildName, setBuildName] = useState(buildId);
+  const [buildTitle, setBuildTitle] = useState<{
+    id: string;
+    name: string;
+  } | null>(null);
+  const buildName = buildTitle?.id === buildId ? buildTitle.name : buildId;
+  useBreadcrumbLabel(["dashboard", "builds", buildTitle?.id], buildTitle?.name);
   const [worktreeFolder, setWorktreeFolder] = useState<string | null>(null);
   const [worktreeId, setWorktreeId] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  useBreadcrumbFallback(
+    ["dashboard", "builds", buildId],
+    Boolean(error) || (!loading && !buildTitle),
+  );
   const [search, setSearch] = useState("");
   const [allFilesOpen, setAllFilesOpen] = useState(false);
   const [sort, setSort] = useState<CoverageSort>({
@@ -130,7 +144,11 @@ export function CoverageReportPage({ buildId }: { buildId: string }) {
           { name?: string } | undefined;
         const worktree = data.build?.snapshot.worktree as
           { folder?: string } | undefined;
-        setBuildName(configuration?.name ?? buildId);
+        setBuildTitle(
+          data.build
+            ? { id: data.build.id, name: configuration?.name ?? buildId }
+            : null,
+        );
         setWorktreeFolder(worktree?.folder ?? null);
         setWorktreeId(data.build?.worktree?.id ?? null);
         setError(null);
@@ -232,7 +250,7 @@ export function CoverageReportPage({ buildId }: { buildId: string }) {
           </EmptyDescription>
         </EmptyHeader>
         <Button asChild variant="outline">
-          <Link href={`/builds/${buildId}`}>
+          <Link href={`/dashboard/builds/${buildId}`}>
             <ArrowLeft /> {t("backToBuild")}
           </Link>
         </Button>
@@ -262,7 +280,7 @@ export function CoverageReportPage({ buildId }: { buildId: string }) {
         {worktreeId && (
           <Button asChild variant="outline">
             <Link
-              href={`/changes?worktree=${encodeURIComponent(worktreeId)}&scope=BRANCH&coverage=${encodeURIComponent(report.id)}`}
+              href={`/dashboard/changes?worktree=${encodeURIComponent(worktreeId)}&scope=BRANCH&coverage=${encodeURIComponent(report.id)}`}
             >
               <GitCompare /> {t("viewChangesWithCoverage")}
             </Link>

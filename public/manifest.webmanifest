@@ -2,7 +2,7 @@
   "name": "AI Development Environment",
   "short_name": "AI Dev Environment",
   "description": "An AI-focused development environment.",
-  "start_url": "/",
+  "start_url": "/dashboard/action-center",
   "scope": "/",
   "display": "standalone",
   "background_color": "#ffffff",

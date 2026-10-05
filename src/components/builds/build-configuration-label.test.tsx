@@ -17,7 +17,7 @@ test("captured configuration names survive renaming and deletion without broken 
   );
   expect(
     screen.getByRole("link", { name: "Captured Release" }).getAttribute("href"),
-  ).toContain("/builds/configurations/configuration-1");
+  ).toContain("/dashboard/builds/configurations/configuration-1");
   rerender(
     <BuildConfigurationLabel build={{ snapshot, configuration: null }} />,
   );

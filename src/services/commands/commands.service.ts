@@ -1765,7 +1765,7 @@ export class CommandsService {
               : "COMMAND_RUN_FAILED",
           title: `${run.snapshotName} ${run.status.toLowerCase()}`,
           body,
-          href: `/commands/runs/${run.id}`,
+          href: `/dashboard/commands/runs/${run.id}`,
           resourceKind: "COMMAND_RUN",
           resourceId: run.id,
           worktreeId: run.worktreeId,

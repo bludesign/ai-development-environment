@@ -307,7 +307,7 @@ export function AgentsList(_props: { localServerOrigins?: string[] }) {
                   <div className="min-w-0">
                     <Link
                       className="truncate font-medium outline-none after:absolute after:inset-0 after:rounded-[inherit]"
-                      href={`/agents/${agent.id}`}
+                      href={`/dashboard/agents/${agent.id}`}
                     >
                       <h2>{agent.name}</h2>
                     </Link>

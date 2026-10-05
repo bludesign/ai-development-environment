@@ -19,7 +19,7 @@ vi.mock("@/i18n/navigation", () => ({
   Link: ({ children, href }: { children: ReactNode; href: string }) => (
     <a href={href}>{children}</a>
   ),
-  usePathname: () => "/crashes",
+  usePathname: () => "/debugging/crashes",
   useRouter: () => ({ push: vi.fn(), refresh: vi.fn() }),
 }));
 vi.mock("next/navigation", () => ({
@@ -155,7 +155,7 @@ test("filters dSYMs by the build in the address and links the build", async () =
   });
   expect(screen.getByText("776386D0-4386-3F24-9B21-5F7C02EB2873")).toBeTruthy();
   expect(screen.getByText("build-1").closest("a")?.getAttribute("href")).toBe(
-    "/builds/build-1",
+    "/dashboard/builds/build-1",
   );
   expect(screen.getByText("The zip holds no dSYM bundles")).toBeTruthy();
 });

@@ -79,7 +79,7 @@ describe("SkillsPage", () => {
       (await screen.findByRole("link", { name: "swift-review" })).getAttribute(
         "href",
       ),
-    ).toBe("/skills/skill-1");
+    ).toBe("/ai/skills/skill-1");
     expect(screen.getByRole("tab", { name: "Cursor" })).toBeTruthy();
     expect(screen.queryByRole("tab", { name: "Claude Code" })).toBeNull();
     const mobileSelector = screen.getByRole("combobox", {

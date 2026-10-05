@@ -1,5 +1,10 @@
 "use client";
 
+import {
+  useBreadcrumbLabel,
+  useBreadcrumbFallback,
+} from "@/components/breadcrumb-labels-provider";
+
 import { CircleStop } from "lucide-react";
 import { useTranslations } from "next-intl";
 import { useCallback, useEffect, useRef, useState } from "react";
@@ -40,10 +45,15 @@ export function JobMonitor({
   const common = useTranslations("common");
   const [loadedJob, setJob] = useState<AgentJob | null>(null);
   const job = seed ?? loadedJob;
+  useBreadcrumbLabel(["dashboard", "jobs", job?.id], job?.kind);
   const seeded = Boolean(seed);
   const [logs, setLogs] = useState<AgentJobLog[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  useBreadcrumbFallback(
+    ["dashboard", "jobs", jobId],
+    Boolean(error) || (!loading && !job),
+  );
   const output = useRef<HTMLDivElement>(null);
   const stickToBottom = useRef(true);
 
@@ -250,7 +260,7 @@ export function JobMonitor({
       <div className="flex flex-wrap gap-2">
         {compact && (
           <Button asChild size="sm" variant="outline">
-            <Link href={`/jobs/${job.id}`}>{t("open")}</Link>
+            <Link href={`/dashboard/jobs/${job.id}`}>{t("open")}</Link>
           </Button>
         )}
         {(job.status === "QUEUED" || job.status === "RUNNING") && (
