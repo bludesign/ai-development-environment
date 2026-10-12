@@ -266,10 +266,11 @@ export async function extractDsymArchive(input: {
         let infoPlistPath: string | null = null;
         if (bundle.plist) {
           infoPlistPath = `${relativeBundle}/Contents/Info.plist`;
+          // Uploaded archives are created at runtime and are not build assets.
           await extract(
             zip,
             bundle.plist,
-            join(input.destination, infoPlistPath),
+            join(/* turbopackIgnore: true */ input.destination, infoPlistPath),
           );
         }
         indexed.push({

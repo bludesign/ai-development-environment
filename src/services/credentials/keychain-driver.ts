@@ -1,13 +1,14 @@
+import type { AsyncEntry } from "@napi-rs/keyring";
+
 import type { KeychainCredentialStoreConfig } from "./config";
 import type { CredentialDriver } from "./driver";
 import { CredentialStoreOperationError } from "./driver";
 import type { CredentialDescriptor } from "./types";
 
-type KeychainEntry = {
-  getSecret(signal?: AbortSignal | null): Promise<Uint8Array | undefined>;
-  setSecret(secret: Uint8Array, signal?: AbortSignal | null): Promise<void>;
-  deleteCredential(signal?: AbortSignal | null): Promise<boolean>;
-};
+type KeychainEntry = Pick<
+  AsyncEntry,
+  "getSecret" | "setSecret" | "deleteCredential"
+>;
 
 type KeychainModule = {
   AsyncEntry: new (service: string, username: string) => KeychainEntry;
