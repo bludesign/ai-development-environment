@@ -29,7 +29,7 @@ describe("KeychainCredentialDriver", () => {
   });
 
   test("performs CRUD through an injected native adapter on Darwin", async () => {
-    const values = new Map<string, Uint8Array>();
+    const values = new Map<string, number[]>();
     const loader = vi.fn(async () => ({
       AsyncEntry: class {
         constructor(
@@ -37,10 +37,10 @@ describe("KeychainCredentialDriver", () => {
           readonly username: string,
         ) {}
         async getSecret() {
-          return values.get(this.username);
+          return values.get(this.username) ?? null;
         }
         async setSecret(value: Uint8Array) {
-          values.set(this.username, Uint8Array.from(value));
+          values.set(this.username, Array.from(value));
         }
         async deleteCredential() {
           return values.delete(this.username);
@@ -53,6 +53,15 @@ describe("KeychainCredentialDriver", () => {
     await driver.set(CREDENTIALS.jiraApiToken, Buffer.from("jira-secret"));
     await expect(driver.get(CREDENTIALS.jiraApiToken)).resolves.toEqual(
       Buffer.from("jira-secret"),
+    );
+    const binarySecret = Buffer.from([0, 128, 255]);
+    await driver.set(CREDENTIALS.jiraApiToken, binarySecret);
+    await expect(driver.get(CREDENTIALS.jiraApiToken)).resolves.toEqual(
+      binarySecret,
+    );
+    await driver.set(CREDENTIALS.jiraApiToken, Buffer.alloc(0));
+    await expect(driver.get(CREDENTIALS.jiraApiToken)).resolves.toEqual(
+      Buffer.alloc(0),
     );
     await driver.delete(CREDENTIALS.jiraApiToken);
     await expect(driver.get(CREDENTIALS.jiraApiToken)).resolves.toBeNull();

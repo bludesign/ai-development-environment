@@ -461,7 +461,7 @@ describe("CredentialService database backend", () => {
   });
 
   test("serializes overlapping external writes through rollback and metadata commit", async () => {
-    const values = new Map<string, Uint8Array>();
+    const values = new Map<string, number[]>();
     const operations: string[] = [];
     const keychainModuleLoader = vi.fn(async () => ({
       AsyncEntry: class {
@@ -471,7 +471,7 @@ describe("CredentialService database backend", () => {
         ) {}
 
         async getSecret() {
-          return values.get(this.username);
+          return values.get(this.username) ?? null;
         }
 
         async setSecret(value: Uint8Array) {
@@ -479,7 +479,7 @@ describe("CredentialService database backend", () => {
           operations.push(
             `set:${this.username}:${Buffer.from(copy).toString("utf8")}`,
           );
-          values.set(this.username, copy);
+          values.set(this.username, Array.from(copy));
         }
 
         async deleteCredential() {
@@ -558,7 +558,7 @@ describe("CredentialService database backend", () => {
   });
 
   test("rolls back mixed external sets and deletes when metadata fails", async () => {
-    const values = new Map<string, Uint8Array>();
+    const values = new Map<string, number[]>();
     const service = new CredentialService({
       env: { CREDENTIAL_STORAGE_TYPE: "keychain" },
       platform: "darwin",
@@ -571,11 +571,11 @@ describe("CredentialService database backend", () => {
           ) {}
 
           async getSecret() {
-            return values.get(this.username);
+            return values.get(this.username) ?? null;
           }
 
           async setSecret(value: Uint8Array) {
-            values.set(this.username, Uint8Array.from(value));
+            values.set(this.username, Array.from(value));
           }
 
           async deleteCredential() {
