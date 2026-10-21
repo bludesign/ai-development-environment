@@ -1,2 +1,9 @@
 safe-chain:
   minimumPackageAgeHours: 48
+  npm:
+    minimumPackageAgeExclusions:
+      # The native form integration requires the pinned OpenCode 2.1.1 packages.
+      # Remove after 2026-10-22 13:47 UTC, when all three releases are 48 hours old.
+      - "@opencode/client"
+      - "@opencode/protocol"
+      - "@opencode/schema"
