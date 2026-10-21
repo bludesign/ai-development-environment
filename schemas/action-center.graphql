@@ -50,6 +50,8 @@ type ActionCenterQuestionOption {
 
 "Represents an action center question in the GraphQL API."
 type ActionCenterQuestion {
+  "Native typed form field definition, when supplied by the provider."
+  field: JSON
   "Stable identifier for this action center question."
   id: ID!
   "Zero-based position within the containing collection."
@@ -68,6 +70,8 @@ type ActionCenterQuestion {
 
 "A batch of action center questions processed together."
 type ActionCenterQuestionBatch {
+  "Most recent native answer delivery error."
+  error: String
   "Stable identifier for this action center question batch."
   id: ID!
   "The source kind associated with this action center question batch. May be null when unavailable or not applicable."
