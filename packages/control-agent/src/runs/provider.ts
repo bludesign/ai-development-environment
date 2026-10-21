@@ -1,4 +1,5 @@
 import type { RunRecord } from "../graphql-client.js";
+import type { RunQuestionField } from "@ai-development-environment/agent-contract/run-forms";
 
 export type StagedAttachment = {
   id: string;
@@ -22,6 +23,7 @@ export type ProviderQuestion = {
   multiSelect?: boolean;
   allowCustom?: boolean;
   options?: Array<{ label: string; description?: string }>;
+  field?: RunQuestionField;
 };
 
 export type ProviderUsage = {
@@ -37,6 +39,7 @@ export type ProviderUsage = {
 };
 
 export type ProviderCatalog = {
+  worktrees?: Record<string, { models: ProviderCatalog["models"] }>;
   /**
    * `group` names the sub-catalog a model came from, for providers that front
    * more than one. The picker sections its models by it and falls back to the
@@ -68,6 +71,14 @@ export type ProviderCallbacks = {
     questions: ProviderQuestion[],
   ) => Promise<void>;
   onUsage: (usage: ProviderUsage) => Promise<void>;
+  onQuestionResolved?: (
+    nativeRequestId: string,
+    resolution: {
+      status: "ANSWERED" | "CANCELLED" | "PENDING";
+      answers?: unknown;
+      error?: string;
+    },
+  ) => Promise<void>;
 };
 
 export type ProviderStartInput = {
@@ -95,6 +106,7 @@ export interface ProviderHandle {
   interrupt(reason: "PAUSED" | "CANCELLED"): Promise<void>;
   steer(prompt: string, attachments: StagedAttachment[]): Promise<void>;
   answer(nativeRequestId: string, answers: unknown): Promise<void>;
+  cancelQuestion?(nativeRequestId: string): Promise<void>;
 }
 
 export type ProviderImportWorktree = {
@@ -126,7 +138,7 @@ export type ProviderImportedRun = {
 export interface ProviderAdapter {
   readonly key: RunRecord["provider"];
   readonly capabilities: ProviderCapabilities;
-  catalog?(): Promise<ProviderCatalog>;
+  catalog?(worktrees?: ProviderImportWorktree[]): Promise<ProviderCatalog>;
   start(
     input: ProviderStartInput,
     callbacks: ProviderCallbacks,

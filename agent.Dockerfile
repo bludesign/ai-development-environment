@@ -46,8 +46,8 @@ RUN --mount=type=cache,target=/root/.npm \
     apt-get update \
     && apt-get install --yes --no-install-recommends bash ca-certificates git openssh-client tini \
     && rm -rf /var/lib/apt/lists/* \
-    && npm install --global --no-audit --no-fund \
-      opencode-ai@1.18.4
+    && npm install --global --no-audit --no-fund --allow-scripts=@opencode/cli@2.1.1 \
+      @opencode/cli@2.1.1
 
 WORKDIR /app
 

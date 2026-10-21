@@ -1,3 +1,5 @@
+import type { RunQuestionField } from "@ai-development-environment/agent-contract/run-forms";
+
 export type RunWorktreeRef = {
   id: string;
   folder: string;
@@ -144,10 +146,12 @@ export type RunEventView = {
 };
 
 export type RunQuestionBatchView = {
+  error?: string | null;
   id: string;
   nativeRequestId: string | null;
   status: string;
   questions: Array<{
+    field?: RunQuestionField | null;
     id: string;
     position: number;
     header: string | null;

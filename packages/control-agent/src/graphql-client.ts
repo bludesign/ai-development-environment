@@ -1000,6 +1000,21 @@ export class AgentGraphQLClient {
     ).then(({ reportRunQuestion }) => reportRunQuestion);
   }
 
+  reportRunQuestionResolution(input: {
+    runId: string;
+    nativeRequestId: string;
+    status: "ANSWERED" | "CANCELLED" | "PENDING";
+    answers?: unknown;
+    error?: string;
+  }) {
+    return this.request<{ reportRunQuestionResolution: { id: string } }>(
+      `mutation ResolveRunQuestion($runId: ID!, $nativeRequestId: String!, $status: String!, $answers: JSON, $error: String) {
+        reportRunQuestionResolution(runId: $runId, nativeRequestId: $nativeRequestId, status: $status, answers: $answers, error: $error) { id }
+      }`,
+      input,
+    );
+  }
+
   reportRunUsage(
     runId: string,
     attemptId: string | null,

@@ -309,6 +309,13 @@ describe("run review regressions", () => {
             status: "IDLE",
             catalogJson: JSON.stringify({
               models: [{ id: "model-b", label: "Model B", efforts: ["high"] }],
+              worktrees: {
+                "worktree-b": {
+                  models: [
+                    { id: "scoped-b", label: "Scoped B", efforts: ["low"] },
+                  ],
+                },
+              },
             }),
           },
         ]),
@@ -327,7 +334,7 @@ describe("run review regressions", () => {
       expect.objectContaining({ where: { agentId: "agent-b" } }),
     );
     expect(catalog.find(({ key }) => key === "CODEX")?.models).toEqual([
-      { id: "model-b", label: "Model B", efforts: ["high"] },
+      { id: "scoped-b", label: "Scoped B", efforts: ["low"] },
     ]);
   });
 

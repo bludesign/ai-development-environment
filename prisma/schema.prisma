@@ -1059,6 +1059,7 @@ model RunQuestionBatch {
   nativeRequestId       String?
   eventSequence         Int?
   status                String               @default("PENDING")
+  error                 String?
   createdAt             DateTime             @default(now())
   answeredAt            DateTime?
   supersededAt          DateTime?
@@ -1086,6 +1087,7 @@ model RunQuestion {
   prompt      String
   multiSelect Boolean             @default(false)
   allowCustom Boolean             @default(true)
+  fieldJson   String?
   batch       RunQuestionBatch    @relation(fields: [batchId], references: [id], onDelete: Cascade)
   options     RunQuestionOption[]
 

@@ -891,7 +891,37 @@
     "reportedCost": "Communiqué par le fournisseur",
     "catalogCost": "Catalogue des coûts de modèles",
     "selectAll": "Tout sélectionner",
-    "selectDay": "Sélectionner tout du {day}"
+    "selectDay": "Sélectionner tout du {day}",
+    "form": {
+      "yes": "Oui",
+      "no": "Non",
+      "required": "Obligatoire",
+      "choose": "Choisir une réponse",
+      "unanswered": "Sans réponse",
+      "openLink": "Ouvrir le lien",
+      "acknowledge": "J’ai terminé l’étape externe",
+      "custom": "Réponse personnalisée",
+      "customMultiple": "Une réponse personnalisée par ligne",
+      "cancel": "Annuler le formulaire",
+      "cancelled": "Formulaire annulé",
+      "invalidAnswer": "{field} : {reason}",
+      "errors": {
+        "required": "Une réponse est obligatoire",
+        "type": "Utilisez le type de valeur demandé",
+        "minimum": "La valeur est inférieure au minimum",
+        "maximum": "La valeur dépasse le maximum",
+        "minLength": "La réponse est trop courte",
+        "maxLength": "La réponse est trop longue",
+        "pattern": "La réponse ne correspond pas au motif requis",
+        "format": "Utilisez le format demandé",
+        "option": "Choisissez une option disponible",
+        "minItems": "Sélectionnez plus d’options",
+        "maxItems": "Sélectionnez moins d’options",
+        "inactive": "Ce champ n’est pas actif",
+        "unknown": "Champ inconnu",
+        "external": "Confirmez que vous avez terminé l’étape externe"
+      }
+    }
   },
   "notifications": {
     "title": "Notifications",

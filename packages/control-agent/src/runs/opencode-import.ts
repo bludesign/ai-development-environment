@@ -85,7 +85,7 @@ function nativePart(value: unknown): Record<string, unknown> {
     state: {
       ...state,
       output: textParts(content),
-      metadata: state.structured,
+      metadata: state.metadata ?? state.structured,
       time: { start: time.ran ?? time.created, end: time.completed },
     },
   };
@@ -233,6 +233,24 @@ export function opencodeImportedHistory(
           : undefined;
       if (role === "user" && !prompt) prompt = userPrompt(parts) || undefined;
     }
+    if (role === "idle") {
+      status =
+        original.outcome === "failed"
+          ? "FAILED"
+          : original.outcome === "interrupted"
+            ? "CANCELLED"
+            : "COMPLETED";
+      continue;
+    }
+    if (role === "compaction" && original.status === "completed") {
+      const usage = tokenUsage(
+        original.tokens,
+        opencodeModel(original.model) ?? "unknown",
+      );
+      usage.estimatedCost = amount(original.cost);
+      if (original.tokens || usage.estimatedCost !== undefined) addUsage(usage);
+      continue;
+    }
     if (role !== "assistant") continue;
     const actualModel =
       opencodeModel(original) ?? opencodeModel(original.model);
@@ -250,7 +268,7 @@ export function opencodeImportedHistory(
     agent = typeof original.agent === "string" ? original.agent : agent;
     const error = asRecord(original.error);
     status = original.error
-      ? error.name === "MessageAbortedError"
+      ? (error.name ?? error.type) === "MessageAbortedError"
         ? "CANCELLED"
         : "FAILED"
       : "COMPLETED";

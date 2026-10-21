@@ -1,14 +1,17 @@
-import { dirname, resolve } from "node:path";
+import { resolve } from "node:path";
 import { pathToFileURL } from "node:url";
-
-import { createOpencode, type OpencodeClient } from "@opencode-ai/sdk/v2";
-
-import { findExecutable, prependPathDirectory } from "../executable-lookup.js";
+import { setTimeout as delay } from "node:timers/promises";
+import type { OpenCodeClient } from "@opencode/client";
+import {
+  parseRunQuestionField,
+  runFormAnswers,
+  type RunQuestionField,
+} from "@ai-development-environment/agent-contract/run-forms";
+import { OpenCodeRuntime, sharedOpenCodeClient } from "./opencode-runtime.js";
 import {
   opencodeImportedHistory,
   opencodeTimestamp,
 } from "./opencode-import.js";
-
 import {
   answerArrays,
   asRecord,
@@ -25,318 +28,135 @@ import {
   type StagedAttachment,
 } from "./provider.js";
 
-const QUESTION_RECONCILIATION_INTERVAL_MS = 1_000;
-const QUESTION_RECONCILIATION_TIMEOUT_MS = 5_000;
-const POST_ANSWER_COMPLETION_TIMEOUT_MS = 15 * 60_000;
-// The message endpoint rejects larger pages (the session list only clamps them).
-const IMPORT_PAGE_SIZE = 200;
-
-type OpenCodeQuestionSurface = "LEGACY" | "V2";
-
-type OpenCodeQuestionRequest = {
-  id: string;
-  sessionId?: string;
-  surface: OpenCodeQuestionSurface;
-  questions: ProviderQuestion[];
-};
-
-type OpenCodePermissionRequest = {
-  id: string;
-  sessionId?: string;
-  surface: OpenCodeQuestionSurface;
-  permission: string;
-  patterns: string[];
-  always: string[];
-};
-
-type OpenCodePermissionReply = "once" | "always" | "reject";
-
-function resultData(value: unknown): unknown {
-  const record = asRecord(value);
-  return "data" in record ? record.data : value;
-}
-
-function model(
-  value: string,
-): { providerID: string; modelID: string } | undefined {
-  if (!value || value === "default") return undefined;
-  const separator = value.indexOf("/");
-  return separator > 0
-    ? {
-        providerID: value.slice(0, separator),
-        modelID: value.slice(separator + 1),
-      }
-    : undefined;
-}
-
-function eventSessionId(value: unknown): string | undefined {
-  const event = asRecord(value);
-  const payload = asRecord(event.payload);
-  const properties = asRecord(payload.properties ?? event.properties);
-  const data = asRecord(payload.data ?? event.data ?? properties.data);
-  const info = asRecord(properties.info ?? data.info);
-  for (const candidate of [
-    properties.sessionID,
-    data.sessionID,
-    info.sessionID,
-  ]) {
-    if (typeof candidate === "string") return candidate;
-  }
-  return undefined;
-}
+const PAGE_SIZE = 200;
+const requestOptions = () => ({ signal: AbortSignal.timeout(10_000) });
+const message = (error: unknown) =>
+  error instanceof Error ? error.message : String(error);
 
 export function opencodeResponseText(value: unknown): string {
-  const response = asRecord(value);
-  const parts = Array.isArray(response.parts) ? response.parts : [];
-  const text = parts
-    .map((part) => {
-      const record = asRecord(part);
-      return record.type === "text" && typeof record.text === "string"
-        ? record.text.trim()
-        : "";
-    })
+  const record = asRecord(value);
+  const content = Array.isArray(record.content) ? record.content : [];
+  return content
+    .map(asRecord)
+    .filter((part) => part.type === "text" && typeof part.text === "string")
+    .map((part) => String(part.text).trim())
     .filter(Boolean)
     .join("\n\n");
-  return text || firstString(response.structured ?? response.output) || "";
 }
-
 export function opencodeEventText(value: unknown): string | undefined {
-  const event = asRecord(value);
-  const payload = asRecord(event.payload);
-  const body = asRecord(
-    payload.properties ?? payload.data ?? event.properties ?? event.data,
-  );
-  return (
-    opencodeResponseText(body) ||
-    firstString(body.part ?? body.message ?? body.info ?? body)
-  );
+  const data = asRecord(asRecord(value).data);
+  return firstString(data.text ?? data.content ?? data.error);
 }
-
-export function opencodePartType(value: unknown): string | undefined {
-  const event = asRecord(value);
-  const payload = asRecord(event.payload);
-  const body = asRecord(
-    payload.properties ?? payload.data ?? event.properties ?? event.data,
-  );
-  const part = asRecord(body.part);
-  return typeof part.type === "string" ? part.type : undefined;
-}
-
 export function opencodeQuestions(
   value: unknown,
 ): { id: string; questions: ProviderQuestion[] } | null {
-  const request = opencodeQuestionRequest(value);
-  return request ? { id: request.id, questions: request.questions } : null;
-}
-
-function opencodeQuestionRequest(
-  value: unknown,
-  fallbackSurface?: OpenCodeQuestionSurface,
-): OpenCodeQuestionRequest | null {
   const event = asRecord(value);
-  const payload = asRecord(event.payload);
-  const type = String(payload.type ?? event.type ?? "");
-  if (type && type !== "question.asked" && type !== "question.v2.asked")
-    return null;
-  const properties = asRecord(payload.properties ?? event.properties);
-  const request = type
-    ? asRecord(
-        properties.request ??
-          properties.data ??
-          payload.data ??
-          event.data ??
-          properties,
-      )
-    : event;
-  const candidates = request.questions;
-  if (!Array.isArray(candidates)) return null;
+  if (event.type && event.type !== "form.created") return null;
+  const form = event.type ? asRecord(asRecord(event.data).form) : event;
+  if (typeof form.id !== "string" || !Array.isArray(form.fields)) return null;
   return {
-    id: String(request.id ?? properties.id ?? "question"),
-    sessionId:
-      typeof request.sessionID === "string"
-        ? request.sessionID
-        : typeof properties.sessionID === "string"
-          ? properties.sessionID
-          : undefined,
-    surface:
-      type === "question.v2.asked" ? "V2" : (fallbackSurface ?? "LEGACY"),
-    questions: candidates.map((candidate, index) => {
-      const question = asRecord(candidate);
+    id: form.id,
+    questions: form.fields.map((value) => {
+      const field = parseRunQuestionField(value);
       return {
-        id: String(question.id ?? index),
-        header:
-          typeof question.header === "string" ? question.header : undefined,
-        prompt: String(question.question ?? question.prompt ?? "Question"),
-        multiSelect: Boolean(question.multiple ?? question.multiSelect),
-        allowCustom: question.custom !== false,
-        options: Array.isArray(question.options)
-          ? question.options.map((candidate) => {
-              const option = asRecord(candidate);
-              return {
-                label: String(option.label ?? "Option"),
-                description:
-                  typeof option.description === "string"
-                    ? option.description
-                    : undefined,
-              };
-            })
-          : [],
+        id: field.key,
+        header: String(form.title ?? ""),
+        prompt: field.title || field.description || field.key,
+        multiSelect: field.type === "multiselect",
+        allowCustom:
+          (field.type === "string" || field.type === "multiselect") &&
+          field.custom === true,
+        options:
+          "options" in field
+            ? field.options?.map(({ label, description }) => ({
+                label,
+                description,
+              }))
+            : [],
+        field,
       };
     }),
   };
 }
-
-function opencodeQuestionResolution(value: unknown): string | undefined {
-  const event = asRecord(value);
-  const payload = asRecord(event.payload);
-  const type = String(payload.type ?? event.type ?? "");
-  if (
-    ![
-      "question.replied",
-      "question.rejected",
-      "question.v2.replied",
-      "question.v2.rejected",
-    ].includes(type)
-  )
-    return undefined;
-  const properties = asRecord(payload.properties ?? event.properties);
-  const data = asRecord(payload.data ?? event.data ?? properties.data);
-  const requestId = data.requestID ?? properties.requestID;
-  return typeof requestId === "string" ? requestId : undefined;
-}
-
-function stringArray(value: unknown): string[] {
-  return Array.isArray(value) ? value.map(String) : [];
-}
-
-function opencodePermissionRequest(
-  value: unknown,
-  fallbackSurface?: OpenCodeQuestionSurface,
-): OpenCodePermissionRequest | null {
-  const event = asRecord(value);
-  const payload = asRecord(event.payload);
-  const type = String(payload.type ?? event.type ?? "");
-  if (type && type !== "permission.asked" && type !== "permission.v2.asked")
-    return null;
-  const properties = asRecord(payload.properties ?? event.properties);
-  const request = type
-    ? asRecord(
-        properties.request ??
-          properties.data ??
-          payload.data ??
-          event.data ??
-          properties,
-      )
-    : event;
-  const permission = request.permission ?? request.action;
-  if (typeof permission !== "string") return null;
-  return {
-    id: String(request.id ?? properties.id ?? "permission"),
-    sessionId:
-      typeof request.sessionID === "string"
-        ? request.sessionID
-        : typeof properties.sessionID === "string"
-          ? properties.sessionID
-          : undefined,
-    surface:
-      type === "permission.v2.asked" ? "V2" : (fallbackSurface ?? "LEGACY"),
-    permission,
-    patterns: stringArray(request.patterns ?? request.resources),
-    always: stringArray(request.always ?? request.save),
-  };
-}
-
-function opencodePermissionResolution(value: unknown): string | undefined {
-  const event = asRecord(value);
-  const payload = asRecord(event.payload);
-  const type = String(payload.type ?? event.type ?? "");
-  if (type !== "permission.replied" && type !== "permission.v2.replied")
-    return undefined;
-  const properties = asRecord(payload.properties ?? event.properties);
-  const data = asRecord(payload.data ?? event.data ?? properties.data);
-  const requestId = data.requestID ?? properties.requestID;
-  return typeof requestId === "string" ? requestId : undefined;
-}
-
 function permissionQuestions(
-  request: OpenCodePermissionRequest,
+  request: Record<string, unknown>,
 ): ProviderQuestion[] {
-  const permission = request.permission.replaceAll("_", " ");
-  const targets = request.patterns.length
-    ? ` for ${request.patterns.join(", ")}`
-    : "";
   return [
     {
       id: "permission",
-      header: "Permission required",
-      prompt: `OpenCode requests ${permission} permission${targets}.`,
-      multiSelect: false,
+      header: "Permission",
+      prompt: String(
+        request.message ??
+          `OpenCode requests ${String(request.action)} permission: ${Array.isArray(request.resources) ? request.resources.join(", ") : ""}`,
+      ),
       allowCustom: false,
       options: [
-        {
-          label: "Allow once",
-          description: "Approve only this request.",
-        },
-        ...(request.always.length
-          ? [
-              {
-                label: "Always allow",
-                description: `Approve this request and remember ${request.always.join(", ")}.`,
-              },
-            ]
-          : []),
-        {
-          label: "Reject",
-          description: "Deny this request and let OpenCode continue safely.",
-        },
+        { label: "Allow once" },
+        { label: "Always allow" },
+        { label: "Reject" },
       ],
     },
   ];
 }
-
-function permissionReply(value: unknown): OpenCodePermissionReply {
-  const selected = answerArrays(value)
-    .flat()
-    .map((answer) => answer.trim().toLowerCase())
-    .filter(Boolean);
+function permissionDecision(answers: unknown): "once" | "always" | "reject" {
+  const selected = answerArrays(answers).flat();
   if (selected.length !== 1)
     throw new Error("Select one response for the OpenCode permission request");
-  switch (selected[0]) {
+  switch (selected[0]?.toLowerCase()) {
     case "allow once":
     case "once":
       return "once";
     case "always allow":
-    case "allow always":
     case "always":
       return "always";
     case "reject":
-    case "deny":
       return "reject";
     default:
       throw new Error(`Unknown OpenCode permission response: ${selected[0]}`);
   }
 }
-
-function responseItems(value: unknown): unknown[] {
-  const data = resultData(value);
-  if (Array.isArray(data)) return data;
-  const record = asRecord(data);
-  return Array.isArray(record.data) ? record.data : [];
+function selectedModel(input: ProviderStartInput) {
+  const value = input.run.model;
+  const separator = value.indexOf("/");
+  if (!value || value === "default" || separator < 1) return undefined;
+  return {
+    providerID: value.slice(0, separator),
+    id: value.slice(separator + 1),
+    ...(input.run.effort && input.run.effort !== "auto"
+      ? { variant: input.run.effort }
+      : {}),
+  };
 }
-
-function waitForPoll(signal: AbortSignal): Promise<void> {
-  if (signal.aborted) return Promise.resolve();
-  return new Promise((resolve) => {
-    const finish = () => {
-      clearTimeout(timer);
-      signal.removeEventListener("abort", finish);
-      resolve();
-    };
-    const timer = setTimeout(finish, QUESTION_RECONCILIATION_INTERVAL_MS);
-    timer.unref();
-    signal.addEventListener("abort", finish, { once: true });
-  });
+async function paginated<T>(
+  read: (
+    cursor?: string,
+  ) => Promise<{ data: T[]; cursor: { next?: string | null } }>,
+): Promise<T[]> {
+  const results: T[] = [];
+  const seen = new Set<string>();
+  let cursor: string | undefined;
+  do {
+    const page = await read(cursor);
+    if (!Array.isArray(page.data)) throw new Error("Invalid OpenCode page");
+    results.push(...page.data);
+    cursor = page.cursor?.next ?? undefined;
+    if (cursor && seen.has(cursor))
+      throw new Error("Repeated OpenCode pagination cursor");
+    if (cursor) seen.add(cursor);
+  } while (cursor);
+  return results;
 }
+export const openCodeMessages = (client: OpenCodeClient, sessionID: string) =>
+  paginated((cursor) =>
+    client.message.list(
+      {
+        sessionID,
+        limit: PAGE_SIZE,
+        ...(cursor ? { cursor } : { order: "asc" }),
+      },
+      requestOptions(),
+    ),
+  );
 
 export class OpenCodeAdapter implements ProviderAdapter {
   readonly key = "OPENCODE" as const;
@@ -349,695 +169,688 @@ export class OpenCodeAdapter implements ProviderAdapter {
     resume: true,
     nativeDelete: true,
   } as const;
-  private runtime?: Awaited<ReturnType<typeof createOpencode>>;
+  private runtime = new OpenCodeRuntime();
+  private isolated = new Set<OpenCodeRuntime>();
   private hydrationCache = new Map<
     string,
     { key: string; history: Partial<ProviderImportedRun> }
   >();
 
-  private async client(): Promise<OpencodeClient> {
-    // The SDK spawns `opencode` by bare name through cross-spawn, so the only
-    // lever is the PATH it inherits. Resolve first to fail with instructions
-    // instead of an opaque ENOENT, and to honor an explicitly pinned install.
-    if (!this.runtime) {
-      const executable = findExecutable("opencode", {
-        overrideVariable: "CONTROL_AGENT_OPENCODE_EXECUTABLE",
-      });
-      if (!executable) {
-        throw new Error(
-          "opencode was not found. Install it (brew install sst/tap/opencode, or npm install -g opencode-ai) or set CONTROL_AGENT_OPENCODE_EXECUTABLE to its full path.",
-        );
-      }
-      prependPathDirectory(dirname(executable));
-      // Bind an ephemeral port. The SDK otherwise defaults to 4096, where a
-      // user's own `opencode serve` — or one orphaned by a control agent that
-      // was killed before it could close its runtime — makes the spawn exit
-      // with `ServeError` and takes the whole provider offline.
-      this.runtime = await createOpencode({ port: 0 });
-    }
-    return this.runtime.client;
-  }
-
-  async catalog(): Promise<ProviderCatalog> {
-    const client = await this.client();
-    // `v2.model.list` only reports the anonymous OpenCode Zen catalog — it
-    // leaves out every authenticated provider, OpenCode Go included. The
-    // config endpoint is the one that resolves auth, so ask it instead.
-    const response = asRecord(resultData(await client.config.providers()));
-    const providers = Array.isArray(response.providers)
-      ? response.providers
-      : [];
-    return {
-      models: providers
-        .flatMap((value) => {
-          const provider = asRecord(value);
-          const providerId = String(provider.id);
-          const released = (value: unknown) =>
-            String(asRecord(value).release_date ?? "");
-          return Object.entries(asRecord(provider.models))
-            .sort(([, left], [, right]) =>
-              released(right).localeCompare(released(left)),
-            )
-            .map(([modelId, value]) => {
-              const model = asRecord(value);
-              const variants = Object.keys(asRecord(model.variants));
-              return {
-                id: `${providerId}/${modelId}`,
-                label: String(model.name ?? modelId),
-                efforts: [
-                  "auto",
-                  ...variants.filter((variant) => variant !== "auto"),
-                ],
-                /*
-                 * OpenCode fronts several catalogs — Go and Zen today — that
-                 * the picker shows under one provider. Carrying each one's
-                 * own name lets it split them into sections without the UI
-                 * having to recognise provider ids.
-                 */
-                group: String(provider.name ?? providerId),
-              };
-            });
-        })
-        .filter(({ id }) => !id.includes("undefined")),
+  async catalog(
+    worktrees: ProviderImportWorktree[] = [],
+  ): Promise<ProviderCatalog> {
+    const { client } = await this.runtime.client();
+    const read = async (
+      directory?: string,
+    ): Promise<ProviderCatalog["models"]> => {
+      const location = directory ? { directory } : undefined;
+      const [models, providers] = await Promise.all([
+        client.model.list({ location }, requestOptions()),
+        client.provider.list({ location }, requestOptions()),
+      ]);
+      const names = new Map(
+        providers.data
+          .filter((provider) => provider.activation !== "disabled")
+          .map((provider) => [provider.id, provider.name]),
+      );
+      return models.data
+        .filter((model) => model.enabled && names.has(model.providerID))
+        .map((model) => ({
+          id: `${model.providerID}/${model.id}`,
+          label: model.name,
+          efforts: [
+            "auto",
+            ...model.variants
+              .map((variant) => variant.id)
+              .filter((id) => id !== "auto"),
+          ],
+          group: names.get(model.providerID),
+        }));
     };
+    const scoped: NonNullable<ProviderCatalog["worktrees"]> = {};
+    for (const worktree of worktrees)
+      scoped[worktree.id] = { models: await read(worktree.folder) };
+    return { models: await read(), worktrees: scoped };
   }
 
   async start(
     input: ProviderStartInput,
     callbacks: ProviderCallbacks,
   ): Promise<ProviderHandle> {
-    const isolatedRuntime = input.mcpServer
-      ? await createOpencode({
-          port: 0,
-          config: {
-            mcp: {
-              [input.mcpServer.name]: {
-                type: "remote",
-                url: input.mcpServer.url,
-                headers: input.mcpServer.headers,
-                oauth: false,
-              },
+    const isolated = input.mcpServer ? new OpenCodeRuntime(true) : undefined;
+    if (isolated) this.isolated.add(isolated);
+    let closed = false;
+    const cleanup = async () => {
+      if (isolated && !closed) {
+        closed = true;
+        this.isolated.delete(isolated);
+        await isolated.close();
+      }
+    };
+    let client: OpenCodeClient;
+    let nativeId: string;
+    let initial: Set<string>;
+    const cwd = resolve(input.run.worktree!.folder);
+    try {
+      const runtime = await (isolated ?? this.runtime).client();
+      client = runtime.client;
+      await this.migrationReady(client);
+      if (input.mcpServer)
+        await client.mcp.add(
+          {
+            server: input.mcpServer.name,
+            location: { directory: cwd },
+            config: {
+              type: "remote",
+              url: input.mcpServer.url,
+              headers: input.mcpServer.headers,
+              oauth: false,
             },
           },
-        })
-      : undefined;
-    const client = isolatedRuntime?.client ?? (await this.client());
-    const cwd = input.run.worktree!.folder;
-    let nativeId: string;
-    try {
-      if (input.resumeNativeId && input.fork !== false) {
-        const forked = resultData(
-          await client.session.fork({
-            sessionID: input.resumeNativeId,
-            directory: cwd,
-          }),
+          requestOptions(),
         );
-        nativeId = String(asRecord(forked).id);
-      } else if (input.resumeNativeId) {
-        nativeId = input.resumeNativeId;
+      const agent = input.run.kind === "PLAN" ? "plan" : "build";
+      const permissions = [
+        ...(input.run.kind === "SESSION"
+          ? [{ action: "*", resource: "*", effect: "allow" as const }]
+          : []),
+        {
+          action: "websearch",
+          resource: "*",
+          effect: input.run.webSearchEnabled
+            ? ("allow" as const)
+            : ("deny" as const),
+        },
+      ];
+      if (input.resumeNativeId) {
+        const session =
+          input.fork !== false
+            ? await client.session.fork(
+                { sessionID: input.resumeNativeId },
+                requestOptions(),
+              )
+            : await client.session.get(
+                { sessionID: input.resumeNativeId },
+                requestOptions(),
+              );
+        nativeId = session.id;
+        if (resolve(session.location.directory) !== cwd) {
+          if (input.fork === false)
+            throw new Error(
+              "Cannot continue an OpenCode session in a different worktree; fork it instead",
+            );
+          await client.session.move(
+            { sessionID: nativeId, directory: cwd },
+            requestOptions(),
+          );
+          await client.session.wait({ sessionID: nativeId }, requestOptions());
+        }
+        await client.session.switchAgent(
+          { sessionID: nativeId, agent },
+          requestOptions(),
+        );
+        const model = selectedModel(input);
+        if (model)
+          await client.session.switchModel(
+            { sessionID: nativeId, model },
+            requestOptions(),
+          );
+        await client.session.update(
+          { sessionID: nativeId, permissions },
+          requestOptions(),
+        );
       } else {
-        const created = resultData(
-          await client.session.create({
-            directory: cwd,
-            agent: input.run.kind === "PLAN" ? "plan" : "build",
-            permission:
-              input.run.kind === "SESSION"
-                ? [{ permission: "*", pattern: "*", action: "allow" }]
-                : undefined,
-          }),
+        const session = await client.session.create(
+          {
+            location: { directory: cwd },
+            agent,
+            model: selectedModel(input),
+            permissions,
+          },
+          requestOptions(),
         );
-        nativeId = String(asRecord(created).id);
+        nativeId = session.id;
       }
-      if (!nativeId || nativeId === "undefined") {
-        throw new Error("OpenCode did not return a session ID");
-      }
-      await callbacks.onNativeId(nativeId, "1.18.4");
+      if (!nativeId) throw new Error("OpenCode did not return a session ID");
+      initial = new Set(
+        (await openCodeMessages(client, nativeId)).map((entry) => entry.id),
+      );
+      await callbacks.onNativeId(nativeId, runtime.version);
     } catch (error) {
-      isolatedRuntime?.server.close();
+      await cleanup();
       throw error;
     }
 
-    let stopReason: "PAUSED" | "CANCELLED" | null = null;
-    const streamController = new AbortController();
-    const questionSurfaces = new Map<string, OpenCodeQuestionSurface>();
-    const permissionSurfaces = new Map<string, OpenCodeQuestionSurface>();
-    const pendingQuestions = new Set<string>();
-    let sawQuestion = false;
-
-    const reportQuestion = async (request: OpenCodeQuestionRequest) => {
-      if (questionSurfaces.has(request.id)) return;
-      questionSurfaces.set(request.id, request.surface);
-      pendingQuestions.add(request.id);
-      sawQuestion = true;
+    let stopReason: "PAUSED" | "CANCELLED" | undefined;
+    const controller = new AbortController();
+    const executionController = new AbortController();
+    const resolvedRequests = new Set<string>();
+    const pending = new Map<
+      string,
+      {
+        kind: "form" | "permission";
+        fields: RunQuestionField[];
+        ready: Promise<void>;
+      }
+    >();
+    const report = async (
+      id: string,
+      kind: "form" | "permission",
+      questions: ProviderQuestion[],
+    ) => {
+      if (pending.has(id) || resolvedRequests.has(id)) return;
+      const ready = callbacks.onQuestion(id, questions);
+      pending.set(id, {
+        kind,
+        fields: questions.flatMap((question) =>
+          question.field ? [question.field] : [],
+        ),
+        ready,
+      });
       try {
-        await callbacks.onQuestion(request.id, request.questions);
+        await ready;
       } catch (error) {
-        questionSurfaces.delete(request.id);
-        pendingQuestions.delete(request.id);
+        pending.delete(id);
         throw error;
       }
     };
-
-    const reportPermission = async (request: OpenCodePermissionRequest) => {
-      if (permissionSurfaces.has(request.id)) return;
-      permissionSurfaces.set(request.id, request.surface);
-      pendingQuestions.add(request.id);
-      sawQuestion = true;
-      try {
-        await callbacks.onQuestion(request.id, permissionQuestions(request));
-      } catch (error) {
-        permissionSurfaces.delete(request.id);
-        pendingQuestions.delete(request.id);
-        throw error;
-      }
+    const settle = async (
+      id: string,
+      status: "ANSWERED" | "CANCELLED",
+      answers?: unknown,
+    ) => {
+      const request = pending.get(id);
+      if (!request) return;
+      await request.ready;
+      await callbacks.onQuestionResolved?.(id, { status, answers });
+      resolvedRequests.add(id);
+      pending.delete(id);
     };
-
-    const reconcileLegacyQuestions = async () => {
-      const response = await client.question.list(
-        { directory: cwd },
-        { signal: AbortSignal.timeout(QUESTION_RECONCILIATION_TIMEOUT_MS) },
-      );
-      const items = responseItems(response);
-      for (const value of items) {
-        const request = opencodeQuestionRequest(value, "LEGACY");
-        if (request?.sessionId === nativeId) await reportQuestion(request);
+    const reconcile = async () => {
+      const previouslyPending = new Set(pending.keys());
+      const [forms, permissions] = await Promise.all([
+        client.session.form.list({ sessionID: nativeId }, requestOptions()),
+        client.permission.list({ sessionID: nativeId }, requestOptions()),
+      ]);
+      for (const form of forms) {
+        const request = opencodeQuestions(form);
+        if (request) await report(request.id, "form", request.questions);
       }
-    };
-
-    const reconcileV2Questions = async () => {
-      const response = await client.v2.session.question.list(
-        { sessionID: nativeId },
-        { signal: AbortSignal.timeout(QUESTION_RECONCILIATION_TIMEOUT_MS) },
-      );
-      for (const value of responseItems(response)) {
-        const request = opencodeQuestionRequest(value, "V2");
-        if (request && (!request.sessionId || request.sessionId === nativeId))
-          await reportQuestion(request);
-      }
-    };
-
-    const reconcileLegacyPermissions = async () => {
-      const response = await client.permission.list(
-        { directory: cwd },
-        { signal: AbortSignal.timeout(QUESTION_RECONCILIATION_TIMEOUT_MS) },
-      );
-      for (const value of responseItems(response)) {
-        const request = opencodePermissionRequest(value, "LEGACY");
-        if (request?.sessionId === nativeId) await reportPermission(request);
-      }
-    };
-
-    const reconcileV2Permissions = async () => {
-      const response = await client.v2.session.permission.list(
-        { sessionID: nativeId },
-        { signal: AbortSignal.timeout(QUESTION_RECONCILIATION_TIMEOUT_MS) },
-      );
-      for (const value of responseItems(response)) {
-        const request = opencodePermissionRequest(value, "V2");
-        if (request && (!request.sessionId || request.sessionId === nativeId))
-          await reportPermission(request);
-      }
-    };
-
-    const eventTask = (async () => {
-      try {
-        const subscription = await client.event.subscribe(
-          { directory: cwd },
-          { signal: streamController.signal },
+      for (const permission of permissions)
+        await report(
+          permission.id,
+          "permission",
+          permissionQuestions(asRecord(permission)),
         );
-        for await (const event of subscription.stream) {
-          if (eventSessionId(event) !== nativeId) continue;
-          const question = opencodeQuestionRequest(event);
-          if (question) await reportQuestion(question);
-          const permission = opencodePermissionRequest(event);
-          if (permission) await reportPermission(permission);
-          const resolvedRequestId = opencodeQuestionResolution(event);
-          if (resolvedRequestId) pendingQuestions.delete(resolvedRequestId);
-          const resolvedPermissionId = opencodePermissionResolution(event);
-          if (resolvedPermissionId)
-            pendingQuestions.delete(resolvedPermissionId);
-          const record = asRecord(event);
-          const payload = asRecord(record.payload);
-          const type = String(payload.type ?? record.type ?? "event");
-          // Text and reasoning parts stream one update per chunk; skip them so
-          // the journal is not flooded. Tool parts and the final
-          // message.updated event still record a single entry each.
-          if (type === "message.part.updated") {
-            const partType = opencodePartType(event);
-            if (partType === "text" || partType === "reasoning") continue;
+      for (const [id, request] of pending) {
+        if (!previouslyPending.has(id)) continue;
+        if (
+          request.kind === "permission" &&
+          !permissions.some((permission) => permission.id === id)
+        )
+          await settle(id, "ANSWERED");
+        if (request.kind === "form" && !forms.some((form) => form.id === id)) {
+          const detail = await client.session.form.get(
+            { sessionID: nativeId, formID: id },
+            requestOptions(),
+          );
+          if (detail.state.status === "answered")
+            await settle(
+              id,
+              "ANSWERED",
+              Object.fromEntries(
+                Object.entries(detail.state.answer).map(([key, value]) => [
+                  key,
+                  { value },
+                ]),
+              ),
+            );
+          else if (detail.state.status === "cancelled")
+            await settle(id, "CANCELLED");
+        }
+      }
+    };
+    const toolSnapshots = new Map<string, string>();
+    const emitSnapshot = async (
+      event: Parameters<ProviderCallbacks["onEvent"]>[0],
+    ) => {
+      const part = asRecord(asRecord(asRecord(event.raw).properties).part);
+      if (part.type === "tool") {
+        const key = `${String(part.messageID)}:${String(part.id)}`;
+        const snapshot = JSON.stringify(part);
+        if (toolSnapshots.get(key) === snapshot) return;
+        toolSnapshots.set(key, snapshot);
+      }
+      await callbacks.onEvent(event);
+    };
+    let delivery = Promise.resolve();
+    const events = (async () => {
+      while (!controller.signal.aborted) {
+        try {
+          for await (const event of client.event.subscribe({
+            signal: controller.signal,
+          })) {
+            const record = asRecord(event);
+            const data = asRecord(record.data);
+            if (
+              (data.sessionID ?? asRecord(data.form).sessionID) !== nativeId ||
+              String(event.type).endsWith(".delta")
+            )
+              continue;
+            // Drain the live-only stream promptly; persist events in order off the reader.
+            delivery = delivery
+              .then(async () => {
+                const form = opencodeQuestions(event);
+                if (form) await report(form.id, "form", form.questions);
+                if (event.type === "permission.asked")
+                  await report(
+                    String(data.id),
+                    "permission",
+                    permissionQuestions(data),
+                  );
+                if (event.type === "form.replied")
+                  await settle(
+                    String(data.id),
+                    "ANSWERED",
+                    Object.fromEntries(
+                      Object.entries(asRecord(data.answer)).map(
+                        ([key, value]) => [key, { value }],
+                      ),
+                    ),
+                  );
+                if (event.type === "form.cancelled")
+                  await settle(String(data.id), "CANCELLED");
+                if (event.type === "permission.replied")
+                  await settle(String(data.requestID), "ANSWERED");
+                if (
+                  [
+                    "session.tool.called",
+                    "session.tool.success",
+                    "session.tool.failed",
+                  ].includes(String(event.type)) &&
+                  typeof data.assistantMessageID === "string"
+                ) {
+                  const nativeMessage = await client.session.message.get(
+                    { sessionID: nativeId, messageID: data.assistantMessageID },
+                    requestOptions(),
+                  );
+                  const history = opencodeImportedHistory({ id: nativeId }, [
+                    nativeMessage,
+                  ]);
+                  for (const snapshot of history.events ?? []) {
+                    const part = asRecord(
+                      asRecord(asRecord(snapshot.raw).properties).part,
+                    );
+                    if (part.type === "tool" && part.id === data.id)
+                      await emitSnapshot(snapshot);
+                  }
+                }
+                await callbacks.onEvent({
+                  type: String(event.type).toUpperCase().replaceAll(".", "_"),
+                  summary: (
+                    opencodeEventText(event) || String(event.type)
+                  ).slice(0, 2_000),
+                  raw: event,
+                });
+              })
+              .catch((error: unknown) => {
+                console.error(
+                  "OpenCode event delivery failed:",
+                  message(error),
+                );
+              });
           }
-          const text = opencodeEventText(event);
-          await callbacks.onEvent({
-            type: type.toUpperCase().replaceAll(".", "_"),
-            summary: (text || type).slice(0, 2_000),
-            detailMarkdown: text,
-            raw: event,
-          });
+        } catch (error) {
+          if (!controller.signal.aborted)
+            console.error(
+              "OpenCode event stream reconnecting:",
+              message(error),
+            );
         }
-      } catch (error) {
-        if (!streamController.signal.aborted) {
-          await callbacks.onEvent({
-            type: "ERROR",
-            summary: `OpenCode event stream failed: ${error instanceof Error ? error.message : String(error)}`,
-          });
-        }
+        if (!controller.signal.aborted)
+          await delay(1_000, undefined, { signal: controller.signal }).catch(
+            () => undefined,
+          );
       }
     })();
-
-    const questionReconciliationTask = (
-      surface: string,
-      reconcile: () => Promise<void>,
-    ) =>
-      (async () => {
-        let errorReported = false;
-        while (!streamController.signal.aborted) {
-          try {
-            await reconcile();
-            errorReported = false;
-          } catch (error) {
-            if (!errorReported) {
-              errorReported = true;
-              try {
-                await callbacks.onEvent({
-                  type: "ERROR",
-                  summary: `OpenCode ${surface.toLowerCase()} question reconciliation failed: ${error instanceof Error ? error.message : String(error)}`,
-                });
-              } catch {
-                // The live event path may still deliver the question.
-              }
-            }
+    const polling = (async () => {
+      let warned = false;
+      while (!controller.signal.aborted) {
+        try {
+          await reconcile();
+          warned = false;
+        } catch (error) {
+          if (!warned && !controller.signal.aborted) {
+            warned = true;
+            await callbacks
+              .onEvent({
+                type: "ERROR",
+                summary: `OpenCode question reconciliation failed: ${message(error)}`,
+              })
+              .catch(() => undefined);
           }
-          await waitForPoll(streamController.signal);
         }
-      })();
-    const legacyQuestionReconciliationTask = questionReconciliationTask(
-      "LEGACY",
-      reconcileLegacyQuestions,
-    );
-    const v2QuestionReconciliationTask = questionReconciliationTask(
-      "V2",
-      reconcileV2Questions,
-    );
-    const legacyPermissionReconciliationTask = questionReconciliationTask(
-      "LEGACY permission",
-      reconcileLegacyPermissions,
-    );
-    const v2PermissionReconciliationTask = questionReconciliationTask(
-      "V2 permission",
-      reconcileV2Permissions,
-    );
-
-    const send = async (prompt: string, attachments: StagedAttachment[]) => {
-      const response = await client.session.prompt({
-        sessionID: nativeId,
-        directory: cwd,
-        ...(model(input.run.model) ? { model: model(input.run.model) } : {}),
-        agent: input.run.kind === "PLAN" ? "plan" : "build",
-        variant:
-          input.run.effort && input.run.effort !== "auto"
-            ? input.run.effort
-            : undefined,
-        tools: { websearch: input.run.webSearchEnabled },
-        parts: [
-          { type: "text", text: prompt },
-          ...attachments.map((attachment) => ({
-            type: "file" as const,
-            mime: attachment.contentType,
-            filename: attachment.filename,
-            url: pathToFileURL(attachment.path).href,
+        await delay(1_000, undefined, { signal: controller.signal }).catch(
+          () => undefined,
+        );
+      }
+    })();
+    const send = (
+      text: string,
+      attachments: StagedAttachment[],
+      steer = false,
+    ) =>
+      client.session.prompt(
+        {
+          sessionID: nativeId,
+          text,
+          files: attachments.map((attachment) => ({
+            uri: pathToFileURL(attachment.path).href,
+            name: attachment.filename,
           })),
-        ],
-      });
-      return resultData(response);
-    };
-
+          ...(steer ? { delivery: "steer" as const } : {}),
+        },
+        requestOptions(),
+      );
     const completion = (async (): Promise<ProviderCompletion> => {
       try {
-        let response = await send(input.prompt, input.attachments);
-        await Promise.allSettled([
-          reconcileLegacyQuestions(),
-          reconcileV2Questions(),
-          reconcileLegacyPermissions(),
-          reconcileV2Permissions(),
-        ]);
-        while (!stopReason && pendingQuestions.size) {
-          await waitForPoll(streamController.signal);
-        }
-        if (!stopReason && sawQuestion) {
-          const busyDeadline = Date.now() + POST_ANSWER_COMPLETION_TIMEOUT_MS;
-          while (!stopReason && Date.now() < busyDeadline) {
-            const statuses = asRecord(
-              resultData(await client.session.status({ directory: cwd })),
+        const receipt = await send(input.prompt, input.attachments);
+        let session;
+        let messages;
+        while (!stopReason) {
+          // prompt() acknowledges durable input. wait() waits for execution to become idle.
+          try {
+            await client.session.wait(
+              { sessionID: nativeId },
+              {
+                signal: AbortSignal.any([
+                  executionController.signal,
+                  AbortSignal.timeout(30_000),
+                ]),
+              },
             );
-            if (asRecord(statuses[nativeId]).type !== "busy") break;
-            await waitForPoll(streamController.signal);
+          } catch (error) {
+            if (!stopReason && executionController.signal.aborted) throw error;
           }
-          const messages = responseItems(
-            await client.session.messages({
-              sessionID: nativeId,
-              directory: cwd,
-              limit: 1,
-            }),
+          session = await client.session.get(
+            { sessionID: nativeId },
+            requestOptions(),
           );
-          if (messages[0]) response = messages[0];
+          messages = (await openCodeMessages(client, nativeId)).filter(
+            (entry) => !initial.has(entry.id),
+          );
+          const idle = messages.findLast((entry) => entry.type === "idle");
+          if (
+            idle &&
+            idle.time.created >= receipt.time.created &&
+            !pending.size &&
+            !Object.hasOwn(
+              await client.session.active(requestOptions()),
+              nativeId,
+            ) &&
+            !(
+              await client.session.inbox.list(
+                { sessionID: nativeId },
+                requestOptions(),
+              )
+            ).length
+          )
+            break;
+          if (!stopReason)
+            await delay(500, undefined, {
+              signal: executionController.signal,
+            }).catch((error: unknown) => {
+              if (!stopReason) throw error;
+            });
         }
-        const finalOutput = opencodeResponseText(response);
-        const info = asRecord(asRecord(response).info);
-        const tokens = asRecord(info.tokens);
-        await callbacks.onUsage({
-          model: input.run.model,
-          inputTokens: Number(tokens.input ?? 0),
-          outputTokens: Number(tokens.output ?? 0),
-          reasoningTokens: Number(tokens.reasoning ?? 0),
-          cacheReadTokens: Number(asRecord(tokens.cache).read ?? 0),
-          cacheWriteTokens: Number(asRecord(tokens.cache).write ?? 0),
-          estimatedCost: Number(info.cost ?? 0),
-          pricingSource: "opencode-sdk",
-        });
-        return stopReason
-          ? { status: stopReason, finalOutput }
-          : { status: "COMPLETED", finalOutput };
+        session ??= await client.session.get(
+          { sessionID: nativeId },
+          requestOptions(),
+        );
+        if (!messages || stopReason)
+          messages = (await openCodeMessages(client, nativeId)).filter(
+            (entry) => !initial.has(entry.id),
+          );
+        const history = opencodeImportedHistory(
+          { ...session, tokens: undefined, cost: undefined },
+          messages,
+        );
+        await delivery;
+        for (const event of history.events ?? []) await emitSnapshot(event);
+        for (const usage of history.usage ?? [])
+          await callbacks.onUsage({ ...usage, pricingSource: "opencode-sdk" });
+        const idle = messages.findLast((entry) => entry.type === "idle");
+        const error = firstString(asRecord(idle).error);
+        return {
+          status:
+            stopReason ??
+            (idle?.type === "idle" && idle.outcome === "failed"
+              ? "FAILED"
+              : idle?.type === "idle" && idle.outcome === "interrupted"
+                ? "CANCELLED"
+                : "COMPLETED"),
+          finalOutput: history.finalOutput,
+          ...(error ? { error } : {}),
+        };
       } catch (error) {
         return stopReason
           ? { status: stopReason }
-          : {
-              status: "FAILED",
-              error: error instanceof Error ? error.message : String(error),
-            };
+          : { status: "FAILED", error: message(error) };
       } finally {
-        streamController.abort();
-        await Promise.allSettled([
-          eventTask,
-          legacyQuestionReconciliationTask,
-          v2QuestionReconciliationTask,
-          legacyPermissionReconciliationTask,
-          v2PermissionReconciliationTask,
-        ]);
-        isolatedRuntime?.server.close();
+        controller.abort();
+        executionController.abort();
+        await Promise.allSettled([events, polling]);
+        await delivery;
+        await cleanup();
       }
     })();
-
     return {
       nativeId,
       completion,
       async interrupt(reason) {
         stopReason = reason;
-        await client.v2.session.interrupt({ sessionID: nativeId });
+        await client.session.interrupt(
+          { sessionID: nativeId },
+          requestOptions(),
+        );
+        executionController.abort();
       },
       async steer(prompt, attachments) {
-        await send(prompt, attachments);
+        await send(prompt, attachments, true);
       },
-      async answer(requestId, answers) {
-        const permissionSurface = permissionSurfaces.get(requestId);
-        if (permissionSurface === "V2") {
-          await client.v2.session.permission.reply({
-            sessionID: nativeId,
-            requestID: requestId,
-            reply: permissionReply(answers),
+      async answer(id, answers) {
+        if (resolvedRequests.has(id)) return;
+        const request = pending.get(id);
+        if (!request) throw new Error("OpenCode request is no longer pending");
+        await request.ready;
+        try {
+          if (request.kind === "form")
+            await client.session.form.reply(
+              {
+                sessionID: nativeId,
+                formID: id,
+                answer: runFormAnswers(request.fields, answers),
+              },
+              requestOptions(),
+            );
+          else
+            await client.permission.reply(
+              {
+                sessionID: nativeId,
+                requestID: id,
+                decision: permissionDecision(answers),
+              },
+              requestOptions(),
+            );
+          await settle(id, "ANSWERED", answers);
+        } catch (error) {
+          if (resolvedRequests.has(id)) return;
+          if (request.kind === "form") {
+            const detail = await client.session.form
+              .get({ sessionID: nativeId, formID: id }, requestOptions())
+              .catch(() => undefined);
+            if (detail?.state.status === "answered") {
+              await settle(
+                id,
+                "ANSWERED",
+                Object.fromEntries(
+                  Object.entries(detail.state.answer).map(([key, value]) => [
+                    key,
+                    { value },
+                  ]),
+                ),
+              );
+              return;
+            }
+            if (detail?.state.status === "cancelled") {
+              await settle(id, "CANCELLED");
+              return;
+            }
+          }
+          await callbacks.onQuestionResolved?.(id, {
+            status: "PENDING",
+            error: message(error),
           });
-        } else if (permissionSurface === "LEGACY") {
-          await client.permission.reply({
-            requestID: requestId,
-            directory: cwd,
-            reply: permissionReply(answers),
-          });
-        } else if (questionSurfaces.get(requestId) === "V2") {
-          await client.v2.session.question.reply({
-            sessionID: nativeId,
-            requestID: requestId,
-            questionV2Reply: { answers: answerArrays(answers) },
-          });
-        } else {
-          await client.question.reply({
-            requestID: requestId,
-            directory: cwd,
-            answers: answerArrays(answers),
-          });
+          throw error;
         }
-        pendingQuestions.delete(requestId);
-        permissionSurfaces.delete(requestId);
+      },
+      async cancelQuestion(id) {
+        const request = pending.get(id);
+        if (!request) return;
+        if (request?.kind !== "form")
+          throw new Error("Only OpenCode forms can be cancelled");
+        await client.session.form.cancel(
+          { sessionID: nativeId, formID: id },
+          requestOptions(),
+        );
+        await settle(id, "CANCELLED");
       },
     };
   }
 
   async delete(nativeId: string, cwd: string): Promise<void> {
-    const client = await this.client();
-    await client.session.delete({ sessionID: nativeId, directory: cwd });
+    const { client } = await this.runtime.client();
+    const session = await client.session.get(
+      { sessionID: nativeId },
+      requestOptions(),
+    );
+    if (resolve(session.location.directory) !== resolve(cwd))
+      throw new Error("OpenCode session belongs to a different worktree");
+    await client.session.remove({ sessionID: nativeId }, requestOptions());
+    this.hydrationCache.delete(nativeId);
   }
-
-  private async legacyHistory(
-    client: OpencodeClient,
-    nativeId: string,
-    directory: string,
-  ): Promise<unknown[]> {
-    const messages: unknown[] = [];
-    const seenCursors = new Set<string>();
-    let before: string | undefined;
-    do {
-      const response = await client.session.messages(
-        {
-          sessionID: nativeId,
-          directory,
-          limit: IMPORT_PAGE_SIZE,
-          ...(before ? { before } : {}),
-        },
-        { throwOnError: true },
+  private async migrationReady(client: OpenCodeClient): Promise<void> {
+    const migration = await client.migration.v1.status(requestOptions());
+    if (migration.status === "error")
+      throw new Error(`OpenCode history migration failed: ${migration.error}`);
+    if (migration.status !== "completed")
+      throw new Error(
+        "OpenCode history migration is pending; history sync will retry when migration completes",
       );
-      const page = resultData(response);
-      if (!Array.isArray(page))
-        throw new Error("Invalid legacy OpenCode message history");
-      messages.push(...page);
-      // `before` is an opaque cursor, not a message ID. Older releases return
-      // their complete history without this header.
-      before = response.response?.headers.get("x-next-cursor") ?? undefined;
-      if (before && seenCursors.has(before))
-        throw new Error("Repeated legacy OpenCode message cursor");
-      if (before) seenCursors.add(before);
-    } while (before);
-    return messages;
   }
-
-  private async importedHistory(
-    client: OpencodeClient,
-    nativeId: string,
-    directory: string,
-    surface: "V2" | "LEGACY",
-  ): Promise<unknown[]> {
-    if (surface === "LEGACY")
-      return this.legacyHistory(client, nativeId, directory);
-    const messages: unknown[] = [];
-    let cursor: string | undefined;
-    const seenCursors = new Set<string>();
-    try {
-      do {
-        const page = asRecord(
-          resultData(
-            await client.v2.session.messages(
-              {
-                sessionID: nativeId,
-                limit: IMPORT_PAGE_SIZE,
-                ...(cursor ? { cursor } : { order: "asc" }),
-              },
-              { throwOnError: true },
-            ),
-          ),
-        );
-        if (!Array.isArray(page.data))
-          throw new Error("Invalid OpenCode message history");
-        messages.push(...page.data);
-        cursor =
-          typeof asRecord(page.cursor).next === "string"
-            ? String(asRecord(page.cursor).next)
-            : undefined;
-        if (cursor && seenCursors.has(cursor))
-          throw new Error("Repeated OpenCode message cursor");
-        if (cursor) seenCursors.add(cursor);
-      } while (cursor);
-    } catch (error) {
-      // A failure after the first page must not replace complete native history
-      // with a partial snapshot from another API.
-      if (messages.length || cursor) throw error;
-      return this.legacyHistory(client, nativeId, directory);
-    }
-    if (messages.length) return messages;
-    // The v2 list also includes legacy sessions whose projected v2 history is
-    // empty. Their transcript remains available from the compatibility API.
-    try {
-      return await this.legacyHistory(client, nativeId, directory);
-    } catch (error) {
-      const name = String(asRecord(error)._tag ?? asRecord(error).name ?? "");
-      if (["NotFoundError", "SessionNotFoundError"].includes(name))
-        return messages;
-      throw error;
-    }
-  }
-
   async discover(
     worktrees: ProviderImportWorktree[],
   ): Promise<ProviderImportedRun[]> {
-    const client = await this.client();
-    const results: ProviderImportedRun[] = [];
-    const hydrationFailures: string[] = [];
-    let hydratedCount = 0;
-    const activeIds = new Set<string>();
-    try {
-      const active = asRecord(
-        resultData(await client.v2.session.active({ throwOnError: true })),
-      );
-      for (const id of Object.keys(asRecord(active.data))) activeIds.add(id);
-    } catch {
-      // Older installations expose only the legacy status endpoint.
-    }
-    for (const worktree of worktrees) {
-      const sessions = new Map<
-        string,
-        { session: Record<string, unknown>; surface: "V2" | "LEGACY" }
-      >();
-      let listed = false;
-      let listError: unknown;
-      try {
-        let cursor: string | undefined;
-        const seenCursors = new Set<string>();
-        do {
-          const response = asRecord(
-            resultData(
-              await client.v2.session.list(
-                {
-                  directory: worktree.folder,
-                  limit: IMPORT_PAGE_SIZE,
-                  ...(cursor ? { cursor } : { order: "asc" }),
-                },
-                { throwOnError: true },
-              ),
-            ),
-          );
-          if (!Array.isArray(response.data))
-            throw new Error("Invalid OpenCode session list");
-          for (const value of response.data) {
-            const session = asRecord(value);
-            if (typeof session.id === "string")
-              sessions.set(session.id, { session, surface: "V2" });
-          }
-          cursor =
-            typeof asRecord(response.cursor).next === "string"
-              ? String(asRecord(response.cursor).next)
-              : undefined;
-          if (cursor && seenCursors.has(cursor))
-            throw new Error("Repeated OpenCode session cursor");
-          if (cursor) seenCursors.add(cursor);
-        } while (cursor);
-        listed = true;
-      } catch (error) {
-        listError = error;
-      }
-      // Native v2 and legacy installations can have separate session stores.
-      try {
-        const legacy = resultData(
-          await client.session.list(
-            { directory: worktree.folder, limit: IMPORT_PAGE_SIZE },
-            { throwOnError: true },
+    const { client } = await this.runtime.client();
+    await this.migrationReady(client);
+    const clients = [
+      client,
+      ...(
+        await Promise.all(
+          [...this.isolated].map((runtime) =>
+            runtime
+              .client()
+              .then(({ client }) => client)
+              .catch(() => undefined),
           ),
-        );
-        if (!Array.isArray(legacy))
-          throw new Error("Invalid legacy OpenCode session list");
-        for (const value of legacy) {
-          const session = asRecord(value);
-          if (typeof session.id === "string" && !sessions.has(session.id))
-            sessions.set(session.id, { session, surface: "LEGACY" });
-        }
-        listed = true;
-      } catch (error) {
-        listError ??= error;
-      }
-      if (!listed) throw listError;
-      try {
-        const statuses = asRecord(
-          resultData(
-            await client.session.status(
-              { directory: worktree.folder },
-              { throwOnError: true },
-            ),
-          ),
-        );
-        for (const [id, value] of Object.entries(statuses))
-          if (["busy", "retry"].includes(String(asRecord(value).type)))
-            activeIds.add(id);
-      } catch {
-        // Native v2 activity is still available when the legacy API is absent.
-      }
-      for (const [nativeId, { session, surface }] of sessions) {
-        const directory =
-          session.directory ?? asRecord(session.location).directory;
-        if (
-          typeof directory === "string" &&
-          resolve(directory) !== resolve(worktree.folder)
         )
+      ).filter((client): client is OpenCodeClient => !!client),
+    ];
+    const shared = await sharedOpenCodeClient().catch(() => undefined);
+    if (shared) clients.push(shared);
+    const active = new Set<string>();
+    const activity = await Promise.allSettled(
+      clients.map((client) => client.session.active(requestOptions())),
+    );
+    if (activity[0]?.status === "rejected") throw activity[0].reason;
+    for (const result of activity)
+      if (result.status === "fulfilled")
+        for (const id of Object.keys(result.value)) active.add(id);
+    const results: ProviderImportedRun[] = [];
+    const failures: string[] = [];
+    let hydrated = 0;
+    for (const worktree of worktrees) {
+      const sessions = await paginated((cursor) =>
+        client.session.list(
+          {
+            directory: worktree.folder,
+            limit: PAGE_SIZE,
+            ...(cursor ? { cursor } : { order: "asc" }),
+          },
+          requestOptions(),
+        ),
+      );
+      for (const session of sessions) {
+        if (resolve(session.location.directory) !== resolve(worktree.folder))
           continue;
-        const time = asRecord(session.time);
-        const active = activeIds.has(nativeId);
         const key = JSON.stringify([
-          surface,
-          time.updated,
-          session.cost,
+          session.time.updated,
           session.tokens,
+          session.cost,
           session.model,
+          session.outcome,
         ]);
-        const cached = this.hydrationCache.get(nativeId);
-        if (active) this.hydrationCache.delete(nativeId);
+        if (active.has(session.id)) this.hydrationCache.delete(session.id);
+        const cached = this.hydrationCache.get(session.id);
         let history: Partial<ProviderImportedRun> = {};
-        if (!active && cached?.key === key) history = cached.history;
-        else {
-          try {
-            const messages = await this.importedHistory(
-              client,
-              nativeId,
-              worktree.folder,
-              surface,
-            );
-            history = opencodeImportedHistory(session, messages);
-            if (!active) this.hydrationCache.set(nativeId, { key, history });
-          } catch (error) {
-            // A partial read must never replace a previously complete snapshot.
-            const detail =
-              error instanceof Error
-                ? error.message
-                : (firstString(asRecord(error).message) ??
-                  String(asRecord(error)._tag ?? error));
-            hydrationFailures.push(`${nativeId}: ${detail}`);
-          }
+        try {
+          history =
+            cached?.key === key
+              ? cached.history
+              : opencodeImportedHistory(
+                  session,
+                  await openCodeMessages(client, session.id),
+                );
+          if (!active.has(session.id))
+            this.hydrationCache.set(session.id, { key, history });
+          hydrated++;
+        } catch (error) {
+          failures.push(`${session.id}: ${message(error)}`);
         }
-        if (history.events) hydratedCount += 1;
         results.push({
-          nativeId,
+          nativeId: session.id,
           worktreeId: worktree.id,
-          ...(typeof session.cost === "number" &&
-          Number.isFinite(session.cost) &&
-          session.cost >= 0
-            ? { estimatedCost: session.cost, pricingSource: "opencode-history" }
-            : {}),
           ...history,
+          status: active.has(session.id)
+            ? "IN_PROGRESS"
+            : session.outcome === "failed"
+              ? "FAILED"
+              : session.outcome === "interrupted"
+                ? "CANCELLED"
+                : (history.status ?? "COMPLETED"),
           kind: history.kind ?? (session.agent === "plan" ? "PLAN" : "SESSION"),
-          status: active ? "IN_PROGRESS" : (history.status ?? "COMPLETED"),
-          archived: Boolean(time.archived),
-          model: history.model,
-          prompt: history.prompt,
-          branch: worktree.branch || undefined,
-          createdAt: opencodeTimestamp(time.created),
-          updatedAt: opencodeTimestamp(time.updated),
+          archived: !!session.time.archived,
+          branch: worktree.branch ?? undefined,
+          estimatedCost: session.cost,
+          pricingSource: "opencode-history",
+          createdAt: opencodeTimestamp(session.time.created),
+          updatedAt: opencodeTimestamp(session.time.updated),
           rawMetadata: session,
         });
       }
     }
-    if (hydrationFailures.length) {
-      const detail = `OpenCode history unavailable for ${hydrationFailures.length} sessions: ${hydrationFailures.slice(0, 3).join("; ")}`;
-      if (!hydratedCount) throw new Error(detail);
-      console.warn(detail);
+    if (failures.length) {
+      const error = `OpenCode history unavailable for ${failures.length} sessions: ${failures.slice(0, 3).join("; ")}`;
+      if (!hydrated) throw new Error(error);
+      console.warn(error);
     }
     return results;
   }
-
   async close(): Promise<void> {
-    this.runtime?.server.close();
-    this.runtime = undefined;
+    await Promise.all([
+      this.runtime.close(),
+      ...[...this.isolated].map((runtime) => runtime.close()),
+    ]);
+    this.isolated.clear();
   }
 }

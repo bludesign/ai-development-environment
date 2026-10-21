@@ -112,7 +112,7 @@ describe("provider protocol fixtures", () => {
     expect(
       opencodeQuestions(await fixture("opencode-v2-question.json")),
     ).toEqual({
-      id: "request-1",
+      id: "frm_request-1",
       questions: [
         expect.objectContaining({
           id: "strategy",
@@ -126,8 +126,8 @@ describe("provider protocol fixtures", () => {
   test("collects OpenCode response text parts as final output", () => {
     expect(
       opencodeResponseText({
-        info: { role: "assistant" },
-        parts: [
+        type: "assistant",
+        content: [
           { type: "text", text: "First paragraph." },
           { type: "tool", name: "git_status" },
           { type: "text", text: "Second paragraph." },
@@ -139,10 +139,10 @@ describe("provider protocol fixtures", () => {
   test("extracts text from OpenCode v2 message part events", () => {
     expect(
       opencodeEventText({
-        type: "message.part.updated",
+        type: "session.text.ended",
         data: {
           sessionID: "session-1",
-          part: { type: "text", text: "Changed files listed." },
+          text: "Changed files listed.",
         },
       }),
     ).toBe("Changed files listed.");

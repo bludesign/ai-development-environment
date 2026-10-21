@@ -63,9 +63,8 @@ export function findExecutable(
   return [...new Set(candidates)].find(canExecute);
 }
 
-// Third-party SDKs spawn their own binaries by bare name — the OpenCode SDK
-// runs `opencode serve` through cross-spawn — so those lookups can only be
-// fixed by repairing the PATH every child inherits.
+// Some third-party SDKs spawn their own binaries by bare name, so repair the
+// PATH inherited by their children as well as resolving tools directly.
 export function extendedPath(options: ExecutableLookupOptions = {}): string {
   const env = options.env ?? process.env;
   const existing = (env.PATH ?? "").split(delimiter).filter(Boolean);

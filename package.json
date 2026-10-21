@@ -48,6 +48,7 @@
     "type-check:generated": "next typegen && tsc --noEmit --project tsconfig.typecheck.json && npm run agent:type-check",
     "test": "vitest",
     "test:run": "vitest run",
+    "test:opencode-v2": "tsx scripts/test-opencode-v2.mts",
     "test:coverage": "vitest run --coverage",
     "test:standalone-credentials": "node scripts/test-standalone-credentials.mjs",
     "check-translations": "npx tsx scripts/check-translations.ts",
