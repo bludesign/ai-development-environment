@@ -595,6 +595,130 @@ export function registerWorktreesPageTests(
     });
 
     if (section === "fetch") {
+      test.each([
+        { appId: undefined, layout: "cards", clearError: "dismiss" },
+        { appId: "app-1", layout: "table", clearError: "retry" },
+      ])(
+        "retains branch errors through background refreshes in $layout for $appId",
+        async ({ appId, layout, clearError }) => {
+          let invalidateOverview!: () => void;
+          let invalidateInspection!: () => void;
+          window.localStorage.setItem("worktrees-layout", layout);
+          subscriptions.mockReturnValue({
+            subscribe: vi.fn(
+              (
+                operation: { query: string },
+                sink: { next: (value: unknown) => void },
+              ) => {
+                if (operation.query.includes("subscription WorktreesChanged"))
+                  invalidateOverview = () => sink.next({ data: {} });
+                if (operation.query.includes("WorktreeInspectionChanged"))
+                  invalidateInspection = () =>
+                    sink.next({
+                      data: {
+                        worktreeInspectionChanged: {
+                          worktreeId: "worktree-1",
+                          headSha: null,
+                          hasStagedChanges: null,
+                          hasUnstagedChanges: null,
+                          rebaseInProgress: null,
+                          hasConflicts: null,
+                          pushStatus: null,
+                        },
+                      },
+                    });
+                return vi.fn();
+              },
+            ),
+          } as never);
+          render(<WorktreesPage appId={appId} />);
+          await screen.findByText("feature/AIDE-24");
+          const original = await request.mock.results[0]!.value;
+          const branchError =
+            "Your local changes to package.json would be overwritten by checkout. Please commit or stash them before you switch branches.";
+          let overviewFails = false;
+          let inspectionFails = false;
+          let branchFails = true;
+          request.mockImplementation(async (query) => {
+            if (query.includes("mutation ChangeWorktreeBranch"))
+              return { changeWorktreeBranch: { id: "branch-job" } } as never;
+            if (query.includes("query WorktreeJob"))
+              return {
+                agentJob: {
+                  status: branchFails ? "FAILED" : "SUCCEEDED",
+                  error: branchFails ? branchError : null,
+                },
+              } as never;
+            if (query.includes("query WorktreeOverview") && overviewFails)
+              throw new Error("Overview unavailable");
+            if (query.includes("mutation InspectWorktree")) {
+              if (inspectionFails) throw new Error("Inspection unavailable");
+              return {
+                inspectWorktree: {
+                  changes: [],
+                  commits: [],
+                  changesTruncated: false,
+                  commitsTruncated: false,
+                },
+              } as never;
+            }
+            return original as never;
+          });
+          await act(async () =>
+            fireEvent.click(
+              screen.getByRole("button", { name: "feature/AIDE-24" }),
+            ),
+          );
+          const changeBranch = async () => {
+            fireEvent.pointerDown(
+              screen.getByRole("button", { name: "Customize worktree" }),
+              { button: 0, ctrlKey: false },
+            );
+            fireEvent.click(
+              await screen.findByRole("menuitem", {
+                name: "Change branch to main",
+              }),
+            );
+          };
+          await changeBranch();
+          await screen.findByText(branchError, undefined, { timeout: 3_000 });
+
+          inspectionFails = true;
+          await act(async () => invalidateInspection());
+          expect(screen.getByText("Inspection unavailable")).toBeDefined();
+          expect(screen.getByText(branchError)).toBeDefined();
+          inspectionFails = false;
+          await act(async () => invalidateInspection());
+          expect(screen.queryByText("Inspection unavailable")).toBeNull();
+          expect(screen.getByText(branchError)).toBeDefined();
+
+          overviewFails = true;
+          await act(async () => invalidateOverview());
+          expect(screen.getByText(branchError)).toBeDefined();
+          expect(screen.getByText("Overview unavailable")).toBeDefined();
+          overviewFails = false;
+          await act(async () => invalidateOverview());
+          expect(screen.queryByText("Overview unavailable")).toBeNull();
+          expect(screen.getByText(branchError)).toBeDefined();
+
+          if (clearError === "retry") {
+            branchFails = false;
+            await changeBranch();
+            await waitFor(
+              () => expect(screen.queryByText(branchError)).toBeNull(),
+              { timeout: 3_000 },
+            );
+          } else {
+            fireEvent.click(
+              screen.getByRole("button", { name: "Dismiss error" }),
+            );
+            expect(screen.queryByText(branchError)).toBeNull();
+            await act(async () => invalidateOverview());
+            expect(screen.queryByText(branchError)).toBeNull();
+          }
+        },
+      );
+
       test.each([undefined, "app-1"])(
         "waits for a fresh trailing overview read on the %s page",
         async (appId) => {

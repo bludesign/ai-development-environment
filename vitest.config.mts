@@ -129,6 +129,7 @@ export default defineConfig({
           name: "jsdom",
           environment: "jsdom",
           pool: "threads",
+          setupFiles: [path.resolve(rootDirectory, "test/setup-jsdom.ts")],
           include: [
             "src/components/**/*.test.{ts,tsx}",
             "src/app/**/*.test.tsx",

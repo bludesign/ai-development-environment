@@ -1117,6 +1117,66 @@ describe("WorktreeDetailPage", () => {
     );
   });
 
+  test("keeps branch errors visible while inspection fails and recovers", async () => {
+    let activitySink: { next: (value: unknown) => void } | undefined;
+    subscriptions.mockReturnValue({
+      subscribe: vi.fn(
+        (
+          operation: { query: string },
+          sink: { next: (value: unknown) => void },
+        ) => {
+          if (operation.query.includes("WorktreeInspectionChanged"))
+            activitySink = sink;
+          return vi.fn();
+        },
+      ),
+    } as never);
+    const branchError =
+      "Commit or stash your local changes before switching branches.";
+    let inspectionFails = false;
+    request.mockImplementation(async (query) => {
+      if (query.includes("WorktreeDetailOverview"))
+        return { worktreeOverview: overview() } as never;
+      if (query.includes("mutation InspectWorktree")) {
+        if (inspectionFails) throw new Error("Inspection unavailable");
+        return { inspectWorktree: initialDetail } as never;
+      }
+      if (query.includes("ChangeWorktreeBranch")) throw new Error(branchError);
+      if (query.includes("GitHubWorktreeWorkflowRuns"))
+        return { githubWorktreeWorkflowRuns: [] } as never;
+      throw new Error(`Unexpected request: ${query}`);
+    });
+    render(<WorktreeDetailPage worktreeId="worktree-1" />);
+    await screen.findByText("src/worktree-details.tsx");
+    fireEvent.pointerDown(
+      screen.getByRole("button", { name: "Customize worktree" }),
+      { button: 0, ctrlKey: false },
+    );
+    fireEvent.click(
+      await screen.findByRole("menuitem", { name: "Change branch to main" }),
+    );
+    await screen.findByText(branchError);
+    const invalidateInspection = () =>
+      activitySink!.next({
+        data: {
+          worktreeInspectionChanged: {
+            ...overview().agents[0]!.codebases[0]!.worktrees[0],
+            worktreeId: "worktree-1",
+          },
+        },
+      });
+    inspectionFails = true;
+    await act(async () => invalidateInspection());
+    expect(screen.getByText("Inspection unavailable")).toBeDefined();
+    expect(screen.getByText(branchError)).toBeDefined();
+    inspectionFails = false;
+    await act(async () => invalidateInspection());
+    expect(screen.queryByText("Inspection unavailable")).toBeNull();
+    expect(screen.getByText(branchError)).toBeDefined();
+    fireEvent.click(screen.getByRole("button", { name: "Dismiss error" }));
+    expect(screen.queryByText(branchError)).toBeNull();
+  });
+
   test("refreshes inspection after live activity and manual refresh", async () => {
     let inspection = initialDetail;
     let activitySink: { next: (value: unknown) => void } | undefined;
