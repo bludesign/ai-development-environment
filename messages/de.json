@@ -891,7 +891,37 @@
     "reportedCost": "Vom Anbieter gemeldet",
     "catalogCost": "Modellkostenkatalog",
     "selectAll": "Alle auswählen",
-    "selectDay": "Alles vom {day} auswählen"
+    "selectDay": "Alles vom {day} auswählen",
+    "form": {
+      "yes": "Ja",
+      "no": "Nein",
+      "required": "Erforderlich",
+      "choose": "Antwort auswählen",
+      "unanswered": "Unbeantwortet",
+      "openLink": "Link öffnen",
+      "acknowledge": "Ich habe den externen Schritt abgeschlossen",
+      "custom": "Eigene Antwort",
+      "customMultiple": "Eine eigene Antwort pro Zeile",
+      "cancel": "Formular abbrechen",
+      "cancelled": "Formular abgebrochen",
+      "invalidAnswer": "{field}: {reason}",
+      "errors": {
+        "required": "Eine Antwort ist erforderlich",
+        "type": "Verwende den angeforderten Werttyp",
+        "minimum": "Der Wert liegt unter dem Minimum",
+        "maximum": "Der Wert überschreitet das Maximum",
+        "minLength": "Die Antwort ist zu kurz",
+        "maxLength": "Die Antwort ist zu lang",
+        "pattern": "Die Antwort entspricht nicht dem erforderlichen Muster",
+        "format": "Verwende das angeforderte Format",
+        "option": "Wähle eine verfügbare Option",
+        "minItems": "Wähle mehr Optionen",
+        "maxItems": "Wähle weniger Optionen",
+        "inactive": "Dieses Feld ist nicht aktiv",
+        "unknown": "Unbekanntes Feld",
+        "external": "Bestätige, dass du den externen Schritt abgeschlossen hast"
+      }
+    }
   },
   "notifications": {
     "title": "Benachrichtigungen",

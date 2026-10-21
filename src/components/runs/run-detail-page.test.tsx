@@ -377,6 +377,121 @@ describe("RunDetailPage", () => {
     expect(screen.queryByText("Worktree Status")).toBeNull();
   });
 
+  test("submits native keys with typed false and zero, and restores a rejected draft after reload", async () => {
+    runData = {
+      ...failedRun,
+      provider: "OPENCODE",
+      status: "IN_PROGRESS",
+      phase: "WAITING_FOR_ANSWER",
+      error: null,
+      questionBatches: [
+        {
+          id: "batch-native",
+          nativeRequestId: "frm_native",
+          status: "PENDING",
+          error: "Please retry",
+          createdAt: failedRun.createdAt,
+          answeredAt: null,
+          supersededAt: null,
+          revisionPreparedAt: null,
+          rollbackPatch: null,
+          pushedCommitWarning: null,
+          checkpoint: null,
+          questions: [
+            {
+              id: "database-enabled",
+              position: 0,
+              header: null,
+              prompt: "Enabled",
+              multiSelect: false,
+              allowCustom: false,
+              options: [],
+              field: {
+                key: "enabled",
+                title: "Enabled",
+                type: "boolean",
+                default: true,
+                required: true,
+              },
+            },
+            {
+              id: "database-count",
+              position: 1,
+              header: null,
+              prompt: "Count",
+              multiSelect: false,
+              allowCustom: false,
+              options: [],
+              field: {
+                key: "count",
+                title: "Count",
+                type: "integer",
+                default: 1,
+              },
+            },
+          ],
+          answerRevisions: [
+            {
+              id: "rejected",
+              revision: 0,
+              answers: { enabled: { value: false }, count: { value: 0 } },
+              createdAt: failedRun.createdAt,
+              supersededAt: failedRun.createdAt,
+              replacementAttemptId: null,
+            },
+          ],
+        },
+      ],
+    };
+    const original = request.getMockImplementation()!;
+    request.mockImplementation(async (query, variables) =>
+      String(query).includes("mutation AnswerQuestion") ||
+      String(query).includes("mutation CancelForm")
+        ? ({ answerRunQuestion: { id: failedRun.id } } as never)
+        : original(query, variables),
+    );
+    render(<RunDetailPage runId="run-353" />);
+    expect(
+      (
+        (await screen.findByRole("spinbutton", {
+          name: "Count",
+        })) as HTMLInputElement
+      ).value,
+    ).toBe("0");
+    expect(screen.getByText("No")).toBeDefined();
+    await act(async () =>
+      fireEvent.click(screen.getByRole("button", { name: "Submit answers" })),
+    );
+    expect(request).toHaveBeenCalledWith(
+      expect.stringContaining("mutation AnswerQuestion"),
+      {
+        batchId: "batch-native",
+        answers: { enabled: { value: false }, count: { value: 0 } },
+      },
+    );
+    fireEvent.change(screen.getByRole("spinbutton", { name: "Count" }), {
+      target: { value: "1.5" },
+    });
+    await act(async () =>
+      fireEvent.click(screen.getByRole("button", { name: "Submit answers" })),
+    );
+    expect(
+      await screen.findByText("Count: Use the requested value type"),
+    ).toBeDefined();
+    expect(
+      request.mock.calls.filter(([query]) =>
+        String(query).includes("mutation AnswerQuestion"),
+      ),
+    ).toHaveLength(1);
+    await act(async () =>
+      fireEvent.click(screen.getByRole("button", { name: "Cancel form" })),
+    );
+    expect(request).toHaveBeenCalledWith(
+      expect.stringContaining("mutation CancelForm"),
+      { batchId: "batch-native" },
+    );
+  });
+
   test("formats answers and keeps prompt, result, activity, and changes controls compact", async () => {
     runData = {
       ...failedRun,

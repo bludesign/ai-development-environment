@@ -3,6 +3,7 @@ import { filterAsyncIterator } from "@/lib/filter-async-iterator";
 import "server-only";
 
 import { createHash, randomUUID } from "node:crypto";
+import { isDeepStrictEqual } from "node:util";
 
 import type { Prisma } from "@/generated/prisma/client";
 import type { McpToolSnapshot } from "@/services/tools/types";
@@ -21,6 +22,10 @@ import {
 } from "@/services/agent-control";
 import type { AgentControlService } from "@/services/agent-control";
 import { RUN_SESSION_READ_JOB_KIND } from "@ai-development-environment/agent-contract/runs";
+import {
+  parseRunQuestionField,
+  runFormAnswers,
+} from "@ai-development-environment/agent-contract/run-forms";
 import type { NotificationsService } from "@/services/notifications";
 import type { DiskSpaceService } from "@/services/disk-space";
 
@@ -101,6 +106,7 @@ export type RunEventInput = {
 };
 
 export type RunQuestionInput = {
+  field?: unknown;
   id?: string | null;
   header?: string | null;
   prompt: string;
@@ -1598,7 +1604,11 @@ export class RunsService {
     const result = await prisma.$transaction(async (transaction) => {
       const batch = await transaction.runQuestionBatch.findUnique({
         where: { id: batchId },
-        include: { run: true, answerRevisions: true },
+        include: {
+          run: true,
+          answerRevisions: true,
+          questions: { orderBy: { position: "asc" } },
+        },
       });
       if (
         !batch?.runId ||
@@ -1618,6 +1628,17 @@ export class RunsService {
         throw new Error("Run is not active");
       }
       const revision = batch.answerRevisions.length;
+      const fields = batch.questions
+        .filter((question) => question.fieldJson)
+        .map((question) =>
+          parseRunQuestionField(JSON.parse(question.fieldJson!)),
+        );
+      if (fields.length)
+        answers = Object.fromEntries(
+          Object.entries(runFormAnswers(fields, answers)).map(
+            ([key, value]) => [key, { value }],
+          ),
+        );
       await transaction.runAnswerRevision.create({
         data: {
           id: randomUUID(),
@@ -1628,7 +1649,7 @@ export class RunsService {
       });
       await transaction.runQuestionBatch.update({
         where: { id: batchId },
-        data: { status: "ANSWERED", answeredAt: new Date() },
+        data: { status: "ANSWERED", answeredAt: new Date(), error: null },
       });
       await transaction.agentRun.update({
         where: { id: batch.runId },
@@ -1653,6 +1674,128 @@ export class RunsService {
     });
     publishCommand(result.command, result.sourceAgentId);
     return this.get(result.sourceRunId);
+  }
+
+  async cancelQuestion(batchId: string) {
+    const prisma = await getPrismaClient();
+    const result = await prisma.$transaction(async (transaction) => {
+      const batch = await transaction.runQuestionBatch.findUnique({
+        where: { id: batchId },
+        include: { run: true, questions: true },
+      });
+      if (
+        !batch?.run?.agentId ||
+        batch.run.origin !== "MANAGED" ||
+        batch.run.provider !== "OPENCODE" ||
+        batch.status !== "PENDING" ||
+        !batch.nativeRequestId ||
+        !batch.questions.some((question) => question.fieldJson)
+      )
+        throw new Error("Native form is not pending");
+      if (
+        batch.run.status !== "IN_PROGRESS" ||
+        ["PAUSE_REQUESTED", "CANCEL_REQUESTED", "DELETE_REQUESTED"].includes(
+          batch.run.phase,
+        )
+      )
+        throw new Error("Run is not active");
+      const command = await enqueueCommand(transaction, {
+        runId: batch.run.id,
+        agentId: batch.run.agentId,
+        type: "CANCEL_QUESTION",
+        payload: { batchId, nativeRequestId: batch.nativeRequestId },
+      });
+      return { run: batch.run, command };
+    });
+    publishCommand(result.command, result.run.agentId!);
+    return this.get(result.run.id);
+  }
+
+  async resolveQuestion(
+    agentId: string,
+    runId: string,
+    nativeRequestId: string,
+    input: { status: string; answers?: unknown; error?: string | null },
+  ) {
+    if (!["ANSWERED", "CANCELLED", "PENDING"].includes(input.status))
+      throw new Error("Invalid question resolution");
+    const prisma = await getPrismaClient();
+    const result = await prisma.$transaction(async (transaction) => {
+      const batch = await transaction.runQuestionBatch.findUnique({
+        where: { runId_nativeRequestId: { runId, nativeRequestId } },
+        include: {
+          run: true,
+          answerRevisions: { orderBy: { revision: "asc" } },
+        },
+      });
+      if (!batch || batch.run?.agentId !== agentId)
+        throw new Error("Question not found for this agent");
+      if (
+        ["SUPERSEDED", "CANCELLED"].includes(batch.status) ||
+        batch.run.status !== "IN_PROGRESS"
+      )
+        return batch;
+      // Reconciliation can observe the same native reply through events and polling.
+      const nativeAnswers =
+        input.answers === undefined ? undefined : JSON.stringify(input.answers);
+      const latest = batch.answerRevisions.at(-1);
+      if (
+        input.status === "ANSWERED" &&
+        (batch.status === "PENDING" ||
+          (nativeAnswers !== undefined &&
+            (!latest ||
+              !isDeepStrictEqual(
+                JSON.parse(latest.answersJson),
+                input.answers,
+              ))))
+      ) {
+        if (latest)
+          await transaction.runAnswerRevision.updateMany({
+            where: { batchId: batch.id, supersededAt: null },
+            data: { supersededAt: new Date() },
+          });
+        await transaction.runAnswerRevision.create({
+          data: {
+            id: randomUUID(),
+            batchId: batch.id,
+            revision: batch.answerRevisions.length,
+            answersJson: nativeAnswers ?? "{}",
+          },
+        });
+      }
+      if (input.status === "PENDING")
+        await transaction.runAnswerRevision.updateMany({
+          where: { batchId: batch.id, supersededAt: null },
+          data: { supersededAt: new Date() },
+        });
+      const updated = await transaction.runQuestionBatch.update({
+        where: { id: batch.id },
+        data: {
+          status: input.status,
+          answeredAt:
+            input.status === "ANSWERED"
+              ? (batch.answeredAt ?? new Date())
+              : null,
+          error: optionalText(input.error, 20_000),
+        },
+      });
+      const remaining = await transaction.runQuestionBatch.count({
+        where: { runId, status: "PENDING" },
+      });
+      await transaction.agentRun.update({
+        where: { id: runId },
+        data: {
+          phase: remaining ? "WAITING_FOR_ANSWER" : "RUNNING",
+          error: optionalText(input.error, 20_000),
+        },
+      });
+      return updated;
+    });
+    publishRun(runId);
+    agentEventBus.publish(runQuestionTopic(runId), {
+      runQuestionChanged: { id: result.id, runId },
+    });
+    return result;
   }
 
   async prepareAnswerRevision(batchId: string) {
@@ -1817,6 +1960,17 @@ export class RunsService {
       const transfersSlot = lease?.worktreeId === batch.run.worktreeId;
       const revisionId = randomUUID();
       const revision = batch.answerRevisions.length;
+      const fields = batch.questions
+        .filter((question) => question.fieldJson)
+        .map((question) =>
+          parseRunQuestionField(JSON.parse(question.fieldJson!)),
+        );
+      if (fields.length)
+        answers = Object.fromEntries(
+          Object.entries(runFormAnswers(fields, answers)).map(
+            ([key, value]) => [key, { value }],
+          ),
+        );
       await transaction.runAnswerRevision.create({
         data: {
           id: revisionId,
@@ -2040,6 +2194,11 @@ export class RunsService {
           },
         });
       }
+      const rejectedAnswer =
+        updated.type === "ANSWER" &&
+        (await prisma.runQuestionBatch.count({
+          where: { runId: updated.runId, status: "PENDING" },
+        }));
       await prisma.agentRun.updateMany({
         where: {
           id: updated.runId,
@@ -2047,7 +2206,9 @@ export class RunsService {
         },
         data: {
           error: updated.error,
-          phase: `${updated.type}_FAILED`,
+          phase: rejectedAnswer
+            ? "WAITING_FOR_ANSWER"
+            : `${updated.type}_FAILED`,
           ...(["START", "PLAY_PLAN", "CONTINUE"].includes(updated.type)
             ? { status: "FAILED", finishedAt: new Date() }
             : {}),
@@ -2265,7 +2426,12 @@ export class RunsService {
     eventSequence: number | null,
     questions: RunQuestionInput[],
   ) {
-    if (!questions.length || questions.length > 10)
+    if (
+      !questions.length ||
+      (questions.some((question) => !question.field) &&
+        questions.length > 10) ||
+      questions.length > 200
+    )
       throw new Error("Question batch is invalid");
     const prisma = await getPrismaClient();
     const result = await prisma.$transaction(async (transaction) => {
@@ -2306,6 +2472,9 @@ export class RunsService {
               prompt: requiredText(question.prompt, "Question", 10_000),
               multiSelect: Boolean(question.multiSelect),
               allowCustom: question.allowCustom !== false,
+              fieldJson: question.field
+                ? JSON.stringify(parseRunQuestionField(question.field))
+                : null,
               options: {
                 create: (question.options ?? []).map(
                   (option, optionPosition) => ({
@@ -3226,6 +3395,16 @@ export class RunsService {
   ) {
     const prisma = await getPrismaClient();
     const scoped = Boolean(args.runId || args.worktreeId);
+    const selectedWorktreeId =
+      args.worktreeId ??
+      (args.runId
+        ? (
+            await prisma.agentRun.findUnique({
+              where: { id: args.runId },
+              select: { worktreeId: true },
+            })
+          )?.worktreeId
+        : null);
     const selectedAgentId = args.runId
       ? (
           await prisma.agentRun.findUnique({
@@ -3282,6 +3461,17 @@ export class RunsService {
       )?.catalogJson;
       const catalog = discovered
         ? (JSON.parse(discovered) as {
+            worktrees?: Record<
+              string,
+              {
+                models: Array<{
+                  id: string;
+                  label: string;
+                  efforts: string[];
+                  group?: string;
+                }>;
+              }
+            >;
             models?: Array<{
               id: string;
               label: string;
@@ -3299,6 +3489,10 @@ export class RunsService {
             };
           })
         : null;
+      const models =
+        selectedWorktreeId && catalog?.worktrees
+          ? (catalog.worktrees[selectedWorktreeId]?.models ?? [])
+          : catalog?.models;
       return {
         key,
         label:
@@ -3308,8 +3502,8 @@ export class RunsService {
               ? "Claude"
               : "Codex",
         available,
-        models: catalog?.models?.length
-          ? catalog.models
+        models: models?.length
+          ? models
           : [
               {
                 id: "default",

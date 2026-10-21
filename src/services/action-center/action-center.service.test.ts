@@ -23,9 +23,15 @@ const worktree = {
 const questionBatch = {
   id: "batch-1",
   createdAt: at(9),
+  error: "Native submission was rejected",
   questions: [
     {
       id: "question-1",
+      fieldJson: JSON.stringify({
+        key: "approach",
+        type: "string",
+        options: [{ value: "recommended", label: "Recommended" }],
+      }),
       position: 0,
       header: "Approach",
       prompt: "Which approach should be used?",
@@ -298,6 +304,21 @@ describe("ActionCenterService", () => {
     expect(result.items[0]?.questionBatches[0]?.questions[0]?.prompt).toBe(
       "Which approach should be used?",
     );
+    expect(result.items[0]?.questionBatches[0]).toMatchObject({
+      error: "Native submission was rejected",
+      questions: [
+        {
+          field: {
+            key: "approach",
+            type: "string",
+            options: [{ value: "recommended", label: "Recommended" }],
+          },
+        },
+      ],
+    });
+    expect(
+      result.items[0]?.questionBatches[0]?.questions[0],
+    ).not.toHaveProperty("fieldJson");
     expect(result.items[1]?.worktree).toEqual(worktree);
     expect(result).toMatchObject({
       totalCount: 6,

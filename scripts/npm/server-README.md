@@ -24,35 +24,39 @@ The command applies pending database migrations, then starts the server on `http
 
 Override with environment variables:
 
-| Variable                       | Default                                            |
-| ------------------------------ | -------------------------------------------------- |
-| `HOSTNAME`                     | `127.0.0.1`                                        |
-| `PORT`                         | `3090`                                             |
-| `AGENT_WS_HOSTNAME`            | `127.0.0.1`                                        |
-| `AGENT_WS_PORT`                | `3091`                                             |
-| `DATABASE_URL`                 | `file:~/.ai-development-environment/production.db` |
-| `APP_SECRET`                   | Required; base64 or hex of exactly 32 bytes        |
-| `APP_SECRET_PREVIOUS`          | unset; set only while rotating `APP_SECRET`        |
-| `APP_ORIGINS`                  | unset; required in production                      |
-| `TRUST_PROXY_HEADERS`          | `false`                                            |
-| `AUTH_MODE`                    | `password`                                         |
-| `CREDENTIAL_STORAGE_TYPE`      | `database`                                         |
-| `VAULT_ADDR`                   | required for Vault                                 |
-| `VAULT_TOKEN`                  | unset                                              |
-| `VAULT_NAMESPACE`              | unset                                              |
-| `CREDENTIAL_VAULT_MOUNT`       | `secret`                                           |
-| `CREDENTIAL_VAULT_PATH_PREFIX` | `ai-development-environment/credentials`           |
-| `CREDENTIAL_VAULT_HEADERS`     | `{}`                                               |
-| `VAULT_CACERT`                 | unset                                              |
-| `VAULT_TLS_SERVER_NAME`        | unset                                              |
-| `VAULT_SKIP_VERIFY`            | `false`                                            |
-| `CREDENTIAL_VAULT_READ_ONLY`   | `false`                                            |
+| Variable                       | Default                                                                                 |
+| ------------------------------ | --------------------------------------------------------------------------------------- |
+| `HOSTNAME`                     | `127.0.0.1`                                                                             |
+| `PORT`                         | `3090`                                                                                  |
+| `AGENT_WS_HOSTNAME`            | `127.0.0.1`                                                                             |
+| `AGENT_WS_PORT`                | `3091`                                                                                  |
+| `DATABASE_URL`                 | `file:~/.ai-development-environment/production.db`                                      |
+| `APP_SECRET`                   | Required except for automatic macOS Keychain storage; base64 or hex of exactly 32 bytes |
+| `APP_SECRET_PREVIOUS`          | unset; set only while rotating `APP_SECRET`                                             |
+| `APP_ORIGINS`                  | unset; inferred from each request's host                                                |
+| `TRUST_PROXY_HEADERS`          | `false`                                                                                 |
+| `AUTH_MODE`                    | `password`                                                                              |
+| `CREDENTIAL_STORAGE_TYPE`      | `database`                                                                              |
+| `VAULT_ADDR`                   | required for Vault                                                                      |
+| `VAULT_TOKEN`                  | unset                                                                                   |
+| `VAULT_NAMESPACE`              | unset                                                                                   |
+| `CREDENTIAL_VAULT_MOUNT`       | `secret`                                                                                |
+| `CREDENTIAL_VAULT_PATH_PREFIX` | `ai-development-environment/credentials`                                                |
+| `CREDENTIAL_VAULT_HEADERS`     | `{}`                                                                                    |
+| `VAULT_CACERT`                 | unset                                                                                   |
+| `VAULT_TLS_SERVER_NAME`        | unset                                                                                   |
+| `VAULT_SKIP_VERIFY`            | `false`                                                                                 |
+| `CREDENTIAL_VAULT_READ_ONLY`   | `false`                                                                                 |
 
 Only SQLite `file:` URLs are supported for `DATABASE_URL`.
 
-Generate `APP_SECRET` once with `openssl rand -base64 32`, back it up, and keep it stable across upgrades. It must be base64 or hex encoding of exactly 32 random bytes — a passphrase is rejected, because session signing, credential encryption, and install-link signing are all derived from it. Changing it signs everyone out and makes stored credentials unreadable unless the old value is passed as `APP_SECRET_PREVIOUS`, which re-encrypts them on the next start; remove it once the server has started cleanly.
+For database or Vault storage, generate `APP_SECRET` once with `openssl rand -base64 32`, back it up, and keep it stable across upgrades. It must be base64 or hex encoding of exactly 32 random bytes — a passphrase is rejected, because session signing, database credential encryption, and install-link signing are all derived from it. Changing it signs everyone out and invalidates outstanding install links. For database credentials, pass the old value as `APP_SECRET_PREVIOUS` to re-encrypt them on the next start; remove it once the server has started cleanly. Keychain and Vault credentials do not depend on this secret.
 
-`APP_ORIGINS` is the comma-separated list of origins this server is reached at, and is required in production. Localhost is always trusted outside production. Leaving it unset makes the server trust each request's own `Host`, which means the absolute URLs it generates follow whatever host the caller asked for.
+On macOS with `CREDENTIAL_STORAGE_TYPE=keychain`, leave `APP_SECRET` unset or blank to use automatic storage. Before starting services, the server reads service `com.bludesign.ai-development-environment.app-secret`, account `APP_SECRET`, from your login Keychain. If the entry is absent, it generates and persists a 32-byte secret. Every server installation under the same macOS account shares it across restarts and upgrades. An explicit environment value always takes precedence, must still be valid, and is never copied into Keychain. No secret is written to an environment file. The Homebrew formula already selects Keychain storage; npm and source installs must select it explicitly.
+
+Back up the Keychain entry. Removing an environment override switches to the stored or newly generated Keychain root and can invalidate existing sessions and signed links. A locked, inaccessible, or malformed entry stops startup instead of replacing the secret: unlock your login Keychain and grant access, restore the original entry, or supply `APP_SECRET` explicitly. Initialization uses a temporary lock under `~/.ai-development-environment/`; concurrent starts wait up to 30 seconds, and abandoned locks expire automatically. If the lock cannot be acquired, check directory permissions and retry. Builds never access Keychain. Automatic storage is available only on macOS.
+
+`APP_ORIGINS` is the optional comma-separated list of origins this server is reached at. Localhost is always trusted outside production. Leaving both it and `PUBLIC_BASE_URL` unset makes the server trust each request's own `Host`, which means the absolute URLs it generates follow whatever host the caller asked for.
 
 The first account to register claims the instance and closes public registration. Every account then has identical, complete authority: any signed-in user can create and delete accounts, set anyone's password, revoke sessions, and issue API keys. There are no roles.
 

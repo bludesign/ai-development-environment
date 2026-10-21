@@ -72,6 +72,9 @@ export const createRunResolvers = (service: RunsService) => ({
     supersededAt: (value: { supersededAt?: Date | null }) =>
       iso(value.supersededAt),
   },
+  RunQuestion: {
+    field: (value: { fieldJson?: string | null }) => json(value.fieldJson),
+  },
   RunQuestionBatch: {
     createdAt: (value: { createdAt: Date }) => value.createdAt.toISOString(),
     answeredAt: (value: { answeredAt?: Date | null }) => iso(value.answeredAt),
@@ -321,6 +324,31 @@ export const createRunResolvers = (service: RunsService) => ({
       requireControlPlane(context);
       return service.answerQuestion(batchId, answers);
     },
+    cancelRunQuestion: (
+      _root: unknown,
+      { batchId }: { batchId: string },
+      context: GraphQLContext,
+    ) => {
+      requireControlPlane(context);
+      return service.cancelQuestion(batchId);
+    },
+    reportRunQuestionResolution: (
+      _root: unknown,
+      args: {
+        runId: string;
+        nativeRequestId: string;
+        status: string;
+        answers?: unknown;
+        error?: string | null;
+      },
+      context: GraphQLContext,
+    ) =>
+      service.resolveQuestion(
+        requireAgent(context),
+        args.runId,
+        args.nativeRequestId,
+        args,
+      ),
     prepareRunAnswerRevision: (
       _root: unknown,
       { batchId }: { batchId: string },

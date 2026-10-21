@@ -250,7 +250,7 @@ describe("CliHealthService", () => {
         "Next.js",
         "Claude SDK",
         "Codex SDK",
-        "OpenCode SDK",
+        "OpenCode client",
       ]);
     } finally {
       if (previous === undefined) delete process.env.AIDE_VERSION;

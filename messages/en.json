@@ -891,7 +891,37 @@
     "reportedCost": "Reported by provider",
     "catalogCost": "Model cost catalog",
     "selectAll": "Select all",
-    "selectDay": "Select everything from {day}"
+    "selectDay": "Select everything from {day}",
+    "form": {
+      "yes": "Yes",
+      "no": "No",
+      "required": "Required",
+      "choose": "Choose an answer",
+      "unanswered": "Unanswered",
+      "openLink": "Open link",
+      "acknowledge": "I completed the external step",
+      "custom": "Custom answer",
+      "customMultiple": "One custom answer per line",
+      "cancel": "Cancel form",
+      "cancelled": "Form cancelled",
+      "invalidAnswer": "{field}: {reason}",
+      "errors": {
+        "required": "An answer is required",
+        "type": "Use the requested value type",
+        "minimum": "Value is below the minimum",
+        "maximum": "Value exceeds the maximum",
+        "minLength": "Answer is too short",
+        "maxLength": "Answer is too long",
+        "pattern": "Answer does not match the required pattern",
+        "format": "Use the requested format",
+        "option": "Choose an available option",
+        "minItems": "Select more options",
+        "maxItems": "Select fewer options",
+        "inactive": "This field is not active",
+        "unknown": "Unknown field",
+        "external": "Confirm that you completed the external step"
+      }
+    }
   },
   "notifications": {
     "title": "Notifications",

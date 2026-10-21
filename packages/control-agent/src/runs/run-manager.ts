@@ -193,6 +193,7 @@ export class RunManager {
         "REVISE_ANSWER",
         "STEER",
         "ANSWER",
+        "CANCEL_QUESTION",
         "PAUSE",
         "CANCEL",
         "PREPARE_ANSWER_REVISION",
@@ -235,6 +236,16 @@ export class RunManager {
         case "ANSWER":
           await this.answerRun(claimed);
           return;
+        case "CANCEL_QUESTION": {
+          const active = this.active.get(claimed.runId);
+          if (!active?.handle.cancelQuestion)
+            throw new Error("Native form cancellation is unavailable");
+          await active.handle.cancelQuestion(
+            String(claimed.payload.nativeRequestId),
+          );
+          await this.completeCommand(claimed.id, "SUCCEEDED");
+          return;
+        }
         case "PREPARE_ANSWER_REVISION":
           await this.prepareAnswerRevision(claimed);
           return;
@@ -396,6 +407,18 @@ export class RunManager {
             usage as unknown as Record<string, unknown>,
           ),
         );
+      },
+      onQuestionResolved: async (nativeRequestId, resolution) => {
+        await this.retry(() =>
+          this.client.reportRunQuestionResolution({
+            runId: run.id,
+            nativeRequestId,
+            ...resolution,
+          }),
+        );
+        if (resolution.status !== "PENDING") {
+          await this.releaseQuestion(run.id, nativeRequestId);
+        }
       },
     };
 
@@ -608,19 +631,30 @@ export class RunManager {
     this.executingCommands.delete(command.id);
   }
 
+  private async releaseQuestion(
+    runId: string,
+    requestId: string,
+  ): Promise<void> {
+    const pending = this.pendingQuestions.get(runId);
+    pending?.delete(requestId);
+    if (pending?.size) return;
+    this.pendingQuestions.delete(runId);
+    // Native interruption cancels its forms. Do not resume deferred input as
+    // those cancellation events arrive; interruptRun will fail the commands.
+    const active = this.active.get(runId);
+    if (!active || active.interrupted || this.interruptionRequests.has(runId))
+      return;
+    const deferred = this.deferredSteering.get(runId) ?? [];
+    this.deferredSteering.delete(runId);
+    for (const steering of deferred) await this.sendSteering(steering);
+  }
+
   private async answerRun(command: RunCommand): Promise<void> {
     const active = this.active.get(command.runId);
     if (!active) throw new Error("Run is not active on this agent");
     const requestId = String(command.payload.nativeRequestId ?? "");
     await active.handle.answer(requestId, command.payload.answers);
-    const pending = this.pendingQuestions.get(command.runId);
-    pending?.delete(requestId);
-    if (!pending?.size) {
-      this.pendingQuestions.delete(command.runId);
-      const deferred = this.deferredSteering.get(command.runId) ?? [];
-      this.deferredSteering.delete(command.runId);
-      for (const steering of deferred) await this.sendSteering(steering);
-    }
+    await this.releaseQuestion(command.runId, requestId);
     await this.completeCommand(command.id, "SUCCEEDED");
   }
 
@@ -795,8 +829,10 @@ export class RunManager {
     provider: RunRecord["provider"],
     nativeId: string,
   ): Promise<ProviderUsage | null> {
-    const command =
-      provider === "OPENCODE" ? "opencode" : provider.toLowerCase();
+    // OpenCode 2 reports authoritative per-attempt usage through the client;
+    // ccusage's older OpenCode reader can recount earlier session history.
+    if (provider === "OPENCODE") return null;
+    const command = provider.toLowerCase();
     for (const offline of [false, true]) {
       try {
         const args = [command, "session", "--id", nativeId, "--json"];
@@ -835,7 +871,7 @@ export class RunManager {
       );
       for (const adapter of this.adapters.values()) {
         try {
-          const catalog = await adapter.catalog?.();
+          const catalog = await adapter.catalog?.(worktrees);
           await this.client.reportRunProviderImportStatus(
             adapter.key,
             "SYNCING",

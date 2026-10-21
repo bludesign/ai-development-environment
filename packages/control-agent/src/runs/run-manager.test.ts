@@ -18,6 +18,23 @@ function command(id: string, type: string): RunCommand {
 }
 
 describe("RunManager command priority", () => {
+  test("native form cancellation during interruption does not restart deferred steering", async () => {
+    const manager = new RunManager({} as never);
+    const testable = manager as unknown as {
+      active: Map<string, unknown>;
+      pendingQuestions: Map<string, Set<string>>;
+      deferredSteering: Map<string, RunCommand[]>;
+      sendSteering: (value: RunCommand) => Promise<void>;
+      releaseQuestion: (runId: string, requestId: string) => Promise<void>;
+    };
+    testable.active.set("run-1", { interrupted: true });
+    testable.pendingQuestions.set("run-1", new Set(["frm_one"]));
+    testable.deferredSteering.set("run-1", [command("steer", "STEER")]);
+    testable.sendSteering = vi.fn();
+    await testable.releaseQuestion("run-1", "frm_one");
+    expect(testable.sendSteering).not.toHaveBeenCalled();
+    expect(testable.deferredSteering.get("run-1")).toHaveLength(1);
+  });
   test("runs cancellation without waiting for the active run command", async () => {
     let releaseStart!: () => void;
     const startBlocked = new Promise<void>((resolve) => {

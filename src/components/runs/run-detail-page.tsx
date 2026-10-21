@@ -1,6 +1,17 @@
 "use client";
 
 import {
+  RunFormError,
+  runFormAnswers,
+  type RunFormValue,
+} from "@ai-development-environment/agent-contract/run-forms";
+import {
+  NativeRunForm,
+  nativeFormValues,
+  type NativeFormDraft,
+} from "./native-run-form";
+
+import {
   useBreadcrumbLabel,
   useBreadcrumbFallback,
 } from "@/components/breadcrumb-labels-provider";
@@ -188,6 +199,21 @@ function answerValues(value: unknown): Record<string, string[]> {
   );
 }
 
+function typedAnswers(
+  input: unknown,
+  fields: Array<{ key: string }> = [],
+): NativeFormDraft {
+  if (!input || typeof input !== "object" || Array.isArray(input)) return {};
+  return Object.fromEntries([
+    ...fields.map((field) => [field.key, undefined]),
+    ...Object.entries(input).flatMap(([key, entry]) =>
+      entry && typeof entry === "object" && "value" in entry
+        ? [[key, (entry as { value: RunFormValue }).value]]
+        : [],
+    ),
+  ]);
+}
+
 function QuestionBatch({
   batch,
   editable,
@@ -201,6 +227,14 @@ function QuestionBatch({
   const diffLabels = useDiffViewLabels();
   const router = useRouter();
   const [answers, setAnswers] = useState<Record<string, string[]>>({});
+  const [nativeDraft, setNativeDraft] = useState<NativeFormDraft>(() =>
+    typedAnswers(
+      batch.answerRevisions.at(-1)?.answers,
+      batch.questions.flatMap((question) =>
+        question.field ? [question.field] : [],
+      ),
+    ),
+  );
   const [custom, setCustom] = useState<Record<string, string>>({});
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -208,24 +242,68 @@ function QuestionBatch({
   const [editOpen, setEditOpen] = useState(false);
   const [stash, setStash] = useState(false);
   const [rollback, setRollback] = useState(true);
+  const nativeFields = batch.questions.flatMap((question) =>
+    question.field ? [question.field] : [],
+  );
+  const formAnswers = () => {
+    const envelope = Object.fromEntries(
+      Object.entries(nativeFormValues(nativeFields, nativeDraft)).map(
+        ([key, value]) => [key, { value }],
+      ),
+    );
+    return Object.fromEntries(
+      Object.entries(runFormAnswers(nativeFields, envelope)).map(
+        ([key, value]) => [key, { value }],
+      ),
+    );
+  };
+  const questionError = (value: unknown) =>
+    value instanceof RunFormError
+      ? t("form.invalidAnswer", {
+          field:
+            nativeFields.find((field) => field.key === value.fieldKey)?.title ??
+            value.fieldKey,
+          reason: t(`form.errors.${value.code}`),
+        })
+      : value instanceof Error
+        ? value.message
+        : String(value);
+  const cancelForm = async () => {
+    setBusy(true);
+    setError(null);
+    try {
+      await controlPlaneRequest(
+        "mutation CancelForm($batchId: ID!) { cancelRunQuestion(batchId: $batchId) { id } }",
+        { batchId: batch.id },
+      );
+      await onAnswered();
+    } catch (value) {
+      setError(questionError(value));
+    } finally {
+      setBusy(false);
+    }
+  };
   const submit = async () => {
     setBusy(true);
+    setError(null);
     try {
-      const value = Object.fromEntries(
-        batch.questions.map((question) => {
-          const selected = [...(answers[question.id] ?? [])];
-          if (custom[question.id]?.trim())
-            selected.push(custom[question.id].trim());
-          return [question.id, { answers: selected }];
-        }),
-      );
+      const value = nativeFields.length
+        ? formAnswers()
+        : Object.fromEntries(
+            batch.questions.map((question) => {
+              const selected = [...(answers[question.id] ?? [])];
+              if (custom[question.id]?.trim())
+                selected.push(custom[question.id].trim());
+              return [question.id, { answers: selected }];
+            }),
+          );
       await controlPlaneRequest(
         "mutation AnswerQuestion($batchId: ID!, $answers: JSON!) { answerRunQuestion(batchId: $batchId, answers: $answers) { id } }",
         { batchId: batch.id, answers: value },
       );
       await onAnswered();
     } catch (value) {
-      setError(value instanceof Error ? value.message : String(value));
+      setError(questionError(value));
     } finally {
       setBusy(false);
     }
@@ -249,6 +327,14 @@ function QuestionBatch({
         }
         setAnswers(selected);
         setCustom(customValues);
+        setNativeDraft(
+          typedAnswers(
+            latest?.answers,
+            batch.questions.flatMap((question) =>
+              question.field ? [question.field] : [],
+            ),
+          ),
+        );
         setPreparing(false);
         setEditOpen(true);
       }, 0);
@@ -279,15 +365,18 @@ function QuestionBatch({
   };
   const revise = async () => {
     setBusy(true);
+    setError(null);
     try {
-      const value = Object.fromEntries(
-        batch.questions.map((question) => {
-          const selected = [...(answers[question.id] ?? [])];
-          if (custom[question.id]?.trim())
-            selected.push(custom[question.id].trim());
-          return [question.id, { answers: selected }];
-        }),
-      );
+      const value = nativeFields.length
+        ? formAnswers()
+        : Object.fromEntries(
+            batch.questions.map((question) => {
+              const selected = [...(answers[question.id] ?? [])];
+              if (custom[question.id]?.trim())
+                selected.push(custom[question.id].trim());
+              return [question.id, { answers: selected }];
+            }),
+          );
       const data = await controlPlaneRequest<{
         reviseRunAnswer: { id: string; kind: "PLAN" | "SESSION" };
       }>(
@@ -304,62 +393,71 @@ function QuestionBatch({
         `/ai/${data.reviseRunAnswer.kind === "PLAN" ? "plans" : "sessions"}/${data.reviseRunAnswer.id}`,
       );
     } catch (value) {
-      setError(value instanceof Error ? value.message : String(value));
+      setError(questionError(value));
     } finally {
       setBusy(false);
     }
   };
-  const answerEditor = batch.questions.map((question) => (
-    <div className="space-y-3" key={question.id}>
-      {question.header && <Badge variant="outline">{question.header}</Badge>}
-      <p className="font-medium">{question.prompt}</p>
-      <div className="space-y-2">
-        {question.options.map((option) => {
-          const checked = answers[question.id]?.includes(option.label) ?? false;
-          return (
-            <label
-              className="flex items-start gap-3 rounded-lg border p-3"
-              key={option.id}
-            >
-              <Checkbox
-                checked={checked}
-                onCheckedChange={(next) =>
-                  setAnswers((current) => {
-                    const selected = new Set(current[question.id] ?? []);
-                    if (!question.multiSelect) selected.clear();
-                    if (next) selected.add(option.label);
-                    else selected.delete(option.label);
-                    return { ...current, [question.id]: [...selected] };
-                  })
-                }
-              />
-              <span>
-                <span className="block font-medium">{option.label}</span>
-                {option.description && (
-                  <span className="text-sm text-muted-foreground">
-                    {option.description}
-                  </span>
-                )}
-              </span>
-            </label>
-          );
-        })}
+  const answerEditor = nativeFields.length ? (
+    <NativeRunForm
+      fields={nativeFields}
+      draft={nativeDraft}
+      onChange={setNativeDraft}
+    />
+  ) : (
+    batch.questions.map((question) => (
+      <div className="space-y-3" key={question.id}>
+        {question.header && <Badge variant="outline">{question.header}</Badge>}
+        <p className="font-medium">{question.prompt}</p>
+        <div className="space-y-2">
+          {question.options.map((option) => {
+            const checked =
+              answers[question.id]?.includes(option.label) ?? false;
+            return (
+              <label
+                className="flex items-start gap-3 rounded-lg border p-3"
+                key={option.id}
+              >
+                <Checkbox
+                  checked={checked}
+                  onCheckedChange={(next) =>
+                    setAnswers((current) => {
+                      const selected = new Set(current[question.id] ?? []);
+                      if (!question.multiSelect) selected.clear();
+                      if (next) selected.add(option.label);
+                      else selected.delete(option.label);
+                      return { ...current, [question.id]: [...selected] };
+                    })
+                  }
+                />
+                <span>
+                  <span className="block font-medium">{option.label}</span>
+                  {option.description && (
+                    <span className="text-sm text-muted-foreground">
+                      {option.description}
+                    </span>
+                  )}
+                </span>
+              </label>
+            );
+          })}
+        </div>
+        {question.allowCustom && (
+          <Input
+            aria-label={t("customAnswer")}
+            onChange={(event) =>
+              setCustom((current) => ({
+                ...current,
+                [question.id]: event.target.value,
+              }))
+            }
+            placeholder={t("customAnswer")}
+            value={custom[question.id] ?? ""}
+          />
+        )}
       </div>
-      {question.allowCustom && (
-        <Input
-          aria-label={t("customAnswer")}
-          onChange={(event) =>
-            setCustom((current) => ({
-              ...current,
-              [question.id]: event.target.value,
-            }))
-          }
-          placeholder={t("customAnswer")}
-          value={custom[question.id] ?? ""}
-        />
-      )}
-    </div>
-  ));
+    ))
+  );
   const latestAnswers = answerValues(latest?.answers);
   return (
     <>
@@ -370,9 +468,11 @@ function QuestionBatch({
           <div className="flex items-start justify-between gap-3">
             <div>
               <CardTitle className="flex items-center gap-2 text-base">
-                {batch.status === "PENDING"
-                  ? t("answerNeeded")
-                  : t("answeredQuestions")}
+                {batch.status === "CANCELLED"
+                  ? t("form.cancelled")
+                  : batch.status === "PENDING"
+                    ? t("answerNeeded")
+                    : t("answeredQuestions")}
               </CardTitle>
               <CardDescription>
                 <DateTime value={batch.createdAt} />
@@ -392,13 +492,20 @@ function QuestionBatch({
           </div>
         </CardHeader>
         <CardContent className="space-y-5">
-          {error && (
+          {(error || batch.error) && (
             <Alert variant="destructive">
-              <AlertDescription>{error}</AlertDescription>
+              <AlertDescription>{error || batch.error}</AlertDescription>
             </Alert>
           )}
           {batch.status === "PENDING" ? (
             answerEditor
+          ) : nativeFields.length ? (
+            <NativeRunForm
+              fields={nativeFields}
+              draft={typedAnswers(latest?.answers, nativeFields)}
+              onChange={() => undefined}
+              readOnly
+            />
           ) : (
             <div className="divide-y rounded-lg border">
               {batch.questions.map((question) => (
@@ -439,9 +546,20 @@ function QuestionBatch({
             </div>
           )}
           {batch.status === "PENDING" && (
-            <Button disabled={busy} onClick={() => void submit()}>
-              {busy ? <Spinner /> : <Send />} {t("submitAnswers")}
-            </Button>
+            <div className="flex gap-2">
+              <Button disabled={busy} onClick={() => void submit()}>
+                {busy ? <Spinner /> : <Send />} {t("submitAnswers")}
+              </Button>
+              {!!nativeFields.length && (
+                <Button
+                  disabled={busy}
+                  variant="outline"
+                  onClick={() => void cancelForm()}
+                >
+                  {t("form.cancel")}
+                </Button>
+              )}
+            </div>
           )}
         </CardContent>
       </Card>

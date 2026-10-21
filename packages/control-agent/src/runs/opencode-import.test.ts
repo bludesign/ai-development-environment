@@ -25,6 +25,32 @@ const assistant = (id: string, model: string, created: number) => ({
 });
 
 describe("OpenCode imported snapshots", () => {
+  test("accounts for native compaction usage without showing its summary as the final answer", () => {
+    const result = opencodeImportedHistory(session, [
+      assistant("answer", "test", 1000),
+      {
+        id: "compact",
+        type: "compaction",
+        status: "completed",
+        time: { created: 2000 },
+        model: { id: "compact", providerID: "openai" },
+        summary: "Internal summary",
+        tokens: { input: 5, output: 6 },
+        cost: 0.02,
+      },
+      { id: "idle", type: "idle", time: { created: 3000 }, outcome: "failed" },
+    ]);
+    expect(result.finalOutput).toBe("Answer answer");
+    expect(result.status).toBe("FAILED");
+    expect(result.usage).toContainEqual(
+      expect.objectContaining({
+        model: "openai/compact",
+        inputTokens: 5,
+        outputTokens: 6,
+        estimatedCost: 0.02,
+      }),
+    );
+  });
   test("uses the first original user message instead of summaries or synthetic context", () => {
     const result = opencodeImportedHistory(
       { ...session, title: "Generated conversation title" },

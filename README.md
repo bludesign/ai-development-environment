@@ -42,6 +42,19 @@ brew install ai-development-environment
 brew services start ai-development-environment
 ```
 
+On macOS, the Homebrew server uses Keychain credential storage by default. When
+`APP_SECRET` is unset or blank, the server loads it from your login Keychain and
+generates it on first startup. All server installations under the same macOS
+account share this secret. An explicit `APP_SECRET` takes precedence and is never
+copied into Keychain. Run `brew services` without `sudo`.
+
+The secret lives under service `com.bludesign.ai-development-environment.app-secret`,
+account `APP_SECRET`, separately from integration credentials. Back up this entry.
+If Keychain access fails, unlock your login Keychain and grant server access, or
+configure `APP_SECRET` explicitly in the server's environment. Restore the original
+value if the entry is malformed. Removing an environment override switches to the
+Keychain secret and can invalidate existing sessions and signed download links.
+
 Or from npm:
 
 ```bash

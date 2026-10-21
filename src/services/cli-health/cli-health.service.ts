@@ -353,8 +353,8 @@ export class CliHealthService {
           version: controlAgentPackage.dependencies["@openai/codex-sdk"],
         },
         {
-          name: "OpenCode SDK",
-          version: controlAgentPackage.dependencies["@opencode-ai/sdk"],
+          name: "OpenCode client",
+          version: controlAgentPackage.dependencies["@opencode/client"],
         },
       ],
       customChecks,

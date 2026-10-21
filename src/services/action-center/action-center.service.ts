@@ -24,8 +24,10 @@ export type ActionCenterReason =
 export type ActionCenterQuestionBatchView = {
   id: string;
   sourceKind: string | null;
+  error: string | null;
   createdAt: string;
   questions: Array<{
+    field: unknown;
     id: string;
     position: number;
     header: string | null;
@@ -177,7 +179,9 @@ function mapQuestionBatch(
   batch: {
     id: string;
     createdAt: Date;
+    error?: string | null;
     questions: Array<{
+      fieldJson?: string | null;
       id: string;
       position: number;
       header: string | null;
@@ -197,8 +201,12 @@ function mapQuestionBatch(
   return {
     id: batch.id,
     sourceKind,
+    error: batch.error ?? null,
     createdAt: iso(batch.createdAt),
-    questions: batch.questions,
+    questions: batch.questions.map(({ fieldJson, ...question }) => ({
+      ...question,
+      field: fieldJson ? parseJson(fieldJson) : null,
+    })),
   };
 }
 

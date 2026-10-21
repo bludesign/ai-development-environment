@@ -1,21 +1,31 @@
 {
   "id": "event-1",
-  "type": "question.asked",
+  "type": "form.created",
   "data": {
-    "id": "request-1",
-    "sessionID": "session-1",
-    "questions": [
-      {
-        "id": "strategy",
-        "header": "Strategy",
-        "question": "Choose an implementation strategy",
-        "multiple": false,
-        "custom": true,
-        "options": [
-          { "label": "Incremental", "description": "Change in stages" },
-          { "label": "Rewrite", "description": "Replace the component" }
-        ]
-      }
-    ]
+    "form": {
+      "id": "frm_request-1",
+      "sessionID": "ses_session-1",
+      "title": "Strategy",
+      "fields": [
+        {
+          "key": "strategy",
+          "type": "string",
+          "title": "Choose an implementation strategy",
+          "custom": true,
+          "options": [
+            {
+              "value": "incremental",
+              "label": "Incremental",
+              "description": "Change in stages"
+            },
+            {
+              "value": "rewrite",
+              "label": "Rewrite",
+              "description": "Replace the component"
+            }
+          ]
+        }
+      ]
+    }
   }
 }

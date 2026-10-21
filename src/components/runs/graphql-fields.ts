@@ -32,10 +32,10 @@ export const RUN_DETAIL_FIELDS = `
     id sequence name status input output error startedAt finishedAt supersededAt
   }
   questionBatches {
-    id nativeRequestId status createdAt answeredAt supersededAt
+    id nativeRequestId status error createdAt answeredAt supersededAt
     revisionPreparedAt rollbackPatch pushedCommitWarning
     questions {
-      id position header prompt multiSelect allowCustom
+      id position header prompt multiSelect allowCustom field
       options { id position label description }
     }
     answerRevisions {

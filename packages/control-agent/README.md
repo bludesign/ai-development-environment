@@ -64,6 +64,59 @@ control-agent status
 control-agent doctor
 ```
 
+## OpenCode 2
+
+The OpenCode integration requires OpenCode `>=2.1.1 <3`. The agent uses
+`@opencode/client` 2.1.1; the Docker image includes `@opencode/cli` 2.1.1.
+Install the CLI on each machine running a control agent:
+
+```bash
+npm install -g @opencode/cli@2.1.1
+# Or, on macOS:
+brew install anomalyco/tap/opencode-v2
+opencode --version
+```
+
+OpenCode 1's `opencode-ai` package and the former `@opencode-ai/sdk/v2` entrypoint
+do not provide this integration. Remove a package-managed OpenCode 1 installation
+before installing OpenCode 2, since both expose the `opencode` command. Set
+`CONTROL_AGENT_OPENCODE_EXECUTABLE` to the full executable path when the agent
+should use a specific installation. An invalid override fails explicitly.
+
+Connect providers using OpenCode's `/connect` interface or `opencode auth login`.
+Models, credentials, and variants are resolved for each registered worktree.
+The agent starts authenticated services on loopback with private state under
+its configuration directory. Runs with control-plane MCP tools receive their
+own service and connection headers. The agent does not start or stop the user's
+shared OpenCode service.
+
+Supported existing configuration and `.opencode/skills` files can remain in
+place. Native v2 MCP configuration groups connections under `mcp.servers`.
+OpenCode 1 plugin implementations require porting to the new plugin API;
+terminal preferences migrate to global `cli.json`. Review the official
+[migration guide](https://opencode.ai/v2/docs/migrate-v1/) and
+[MCP configuration](https://opencode.ai/v2/docs/mcp-servers/).
+
+History sync retries while OpenCode's native history migration is pending and
+reports migration errors without replacing saved transcripts. Full native forms
+support typed fields, defaults, conditional visibility, validation, external-step
+acknowledgements, and cancellation. A rejected native answer remains editable.
+
+Deploy the server and its additive database migration before upgrading agents.
+Existing questions and answers retain their original representation; new native
+fields are stored alongside it.
+
+From the repository root, verify the integration with:
+
+```bash
+npm run agent:test:run
+npm run test:opencode-v2
+```
+
+The native smoke test requires the CLI. It uses temporary XDG directories and a
+deterministic local model endpoint, then closes its owned service and removes
+the temporary data.
+
 The credential and stable agent ID are stored at `~/.config/control-agent/config.json`.
 
 ## See also
