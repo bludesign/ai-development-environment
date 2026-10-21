@@ -3334,6 +3334,7 @@
     "noMatchingStashes": "Aucune remise ne correspond à votre recherche."
   },
   "worktrees": {
+    "dismissError": "Masquer l’erreur",
     "title": "Arbres de travail",
     "description": "Gérez les worktrees Git principaux et liés sur tous les agents inscrits.",
     "agentOffline": "L’agent est hors ligne.",

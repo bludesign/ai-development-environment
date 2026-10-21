@@ -3334,6 +3334,7 @@
     "noMatchingStashes": "Keine Stashes entsprechen deiner Suche."
   },
   "worktrees": {
+    "dismissError": "Fehler ausblenden",
     "title": "Arbeitsbäume",
     "description": "Primäre und verknüpfte Git-Worktrees auf allen registrierten Agents verwalten.",
     "agentOffline": "Der Agent ist offline.",

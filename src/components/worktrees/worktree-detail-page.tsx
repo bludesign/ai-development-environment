@@ -82,6 +82,7 @@ import {
   BranchChangesPanel,
   WorktreeDetailPanel,
 } from "./worktree-detail-panel";
+import { WorktreeErrorAlert } from "./worktree-error-alert";
 import { CODEBASE_FIELDS, WORKTREE_FIELDS } from "./worktree-graphql";
 import {
   inspectWorktree,
@@ -579,6 +580,7 @@ function LoadedWorktreeDetail({
   const [inspectionLoading, setInspectionLoading] = useState(false);
   const [operationBusy, setOperationBusy] = useState(false);
   const [operationError, setOperationError] = useState<string | null>(null);
+  const [inspectionError, setInspectionError] = useState<string | null>(null);
   const detailRequest = useRef(0);
   const { worktree, applyActivity, setUnstagedChanges } = useLiveWorktree(
     entry.worktree,
@@ -615,10 +617,10 @@ function LoadedWorktreeDetail({
           (change) => change.unstaged || change.untracked || change.conflicted,
         ),
       );
-      setOperationError(null);
+      setInspectionError(null);
     } catch (value) {
       if (requestId === detailRequest.current) {
-        setOperationError(
+        setInspectionError(
           value instanceof Error ? value.message : String(value),
         );
       }
@@ -771,13 +773,12 @@ function LoadedWorktreeDetail({
         </div>
       </div>
 
-      {(loadError || operationError || worktree.statusError) && (
-        <Alert variant="destructive">
-          <AlertDescription>
-            {operationError || loadError || worktree.statusError}
-          </AlertDescription>
-        </Alert>
-      )}
+      <WorktreeErrorAlert
+        error={operationError}
+        onDismiss={() => setOperationError(null)}
+      />
+      <WorktreeErrorAlert error={loadError || worktree.statusError} />
+      <WorktreeErrorAlert error={inspectionError} />
       {inspectionUnavailable && (
         <Alert>
           <AlertDescription>{inspectionUnavailable}</AlertDescription>

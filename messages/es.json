@@ -3334,6 +3334,7 @@
     "noMatchingStashes": "Ningún stash coincide con tu búsqueda."
   },
   "worktrees": {
+    "dismissError": "Descartar error",
     "title": "Árboles de trabajo",
     "description": "Gestiona worktrees de Git principales y vinculados en todos los agentes inscritos.",
     "agentOffline": "El agente está desconectado.",

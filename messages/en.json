@@ -3334,6 +3334,7 @@
     "noMatchingStashes": "No stashes match your search."
   },
   "worktrees": {
+    "dismissError": "Dismiss error",
     "title": "Worktrees",
     "description": "Manage primary and linked Git worktrees across every enrolled agent.",
     "agentOffline": "The agent is offline.",

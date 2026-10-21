@@ -185,6 +185,7 @@ import {
   waitForWorktreeMove,
   waitForWorktreeOperationJob,
 } from "./worktree-jobs";
+import { WorktreeErrorAlert } from "./worktree-error-alert";
 import { WorktreeRebaseConflictItem } from "./worktree-rebase-conflict-item";
 import {
   shouldNavigateWorktreeSurface,
@@ -650,6 +651,7 @@ export function WorktreesPage({ appId }: { appId?: string }) {
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [inspectionRefreshToken, setInspectionRefreshToken] = useState(0);
   const [tagManagerOpen, setTagManagerOpen] = useState(false);
@@ -730,11 +732,11 @@ export function WorktreesPage({ appId }: { appId?: string }) {
         );
         if (request !== latestLoad.current || signal.aborted) return;
         setOverview(data.worktreeOverview);
-        setError(null);
+        setLoadError(null);
       } catch (value) {
         if (signal.aborted) return;
         if (request === latestLoad.current && !signal.aborted)
-          setError(value instanceof Error ? value.message : String(value));
+          setLoadError(value instanceof Error ? value.message : String(value));
         throw value;
       } finally {
         if (request === latestLoad.current && !signal.aborted)
@@ -1084,11 +1086,8 @@ export function WorktreesPage({ appId }: { appId?: string }) {
         />
       )}
 
-      {error && (
-        <Alert variant="destructive">
-          <AlertDescription>{error}</AlertDescription>
-        </Alert>
-      )}
+      <WorktreeErrorAlert error={error} onDismiss={() => setError(null)} />
+      <WorktreeErrorAlert error={loadError} />
       {notice && (
         <Alert>
           <AlertDescription>{notice}</AlertDescription>
@@ -1703,7 +1702,7 @@ function FetchAge({
 }
 
 function WorktreeCard(props: WorktreeItemProps) {
-  const { inspectionRefreshToken, onError } = props;
+  const { inspectionRefreshToken } = props;
   const { worktree, applyActivity, setUnstagedChanges } = useLiveWorktree(
     props.worktree,
   );
@@ -1711,6 +1710,7 @@ function WorktreeCard(props: WorktreeItemProps) {
   const [expanded, setExpanded] = useState(false);
   const [detail, setDetail] = useState<WorktreeDetail | null>(null);
   const [detailLoading, setDetailLoading] = useState(false);
+  const [inspectionError, setInspectionError] = useState<string | null>(null);
   const detailRequest = useRef(0);
   const lastInspectionRefreshToken = useRef(inspectionRefreshToken);
   const t = useTranslations("worktrees");
@@ -1727,14 +1727,16 @@ function WorktreeCard(props: WorktreeItemProps) {
           (change) => change.unstaged || change.untracked || change.conflicted,
         ),
       );
-      onError(null);
+      setInspectionError(null);
     } catch (value) {
       if (request === detailRequest.current)
-        onError(value instanceof Error ? value.message : String(value));
+        setInspectionError(
+          value instanceof Error ? value.message : String(value),
+        );
     } finally {
       if (request === detailRequest.current) setDetailLoading(false);
     }
-  }, [onError, setUnstagedChanges, worktree.id]);
+  }, [setUnstagedChanges, worktree.id]);
   const refreshInspection = useQueuedWorktreeInspection(inspect);
   const handleActivity = useCallback(
     (activity: WorktreeActivity) => {
@@ -1818,6 +1820,7 @@ function WorktreeCard(props: WorktreeItemProps) {
             <Spinner /> {t("loadingDetails")}
           </p>
         )}
+        {expanded && <WorktreeErrorAlert error={inspectionError} />}
         {expanded && detail && (
           <WorktreeDetailPanel
             detail={detail}
@@ -3972,7 +3975,7 @@ function WorktreeTable(props: Omit<WorktreeItemProps, "worktree">) {
 }
 
 function WorktreeTableRows(props: WorktreeItemProps) {
-  const { baseRepoDirectory, inspectionRefreshToken, onError } = props;
+  const { baseRepoDirectory, inspectionRefreshToken } = props;
   const { worktree, applyActivity, setUnstagedChanges } = useLiveWorktree(
     props.worktree,
   );
@@ -3982,6 +3985,7 @@ function WorktreeTableRows(props: WorktreeItemProps) {
   const [expanded, setExpanded] = useState(false);
   const [detail, setDetail] = useState<WorktreeDetail | null>(null);
   const [detailLoading, setDetailLoading] = useState(false);
+  const [inspectionError, setInspectionError] = useState<string | null>(null);
   const detailRequest = useRef(0);
   const lastInspectionRefreshToken = useRef(inspectionRefreshToken);
   const inspect = useCallback(async () => {
@@ -3996,14 +4000,16 @@ function WorktreeTableRows(props: WorktreeItemProps) {
           (change) => change.unstaged || change.untracked || change.conflicted,
         ),
       );
-      onError(null);
+      setInspectionError(null);
     } catch (value) {
       if (request === detailRequest.current)
-        onError(value instanceof Error ? value.message : String(value));
+        setInspectionError(
+          value instanceof Error ? value.message : String(value),
+        );
     } finally {
       if (request === detailRequest.current) setDetailLoading(false);
     }
-  }, [onError, setUnstagedChanges, worktree.id]);
+  }, [setUnstagedChanges, worktree.id]);
   const refreshInspection = useQueuedWorktreeInspection(inspect);
   const handleActivity = useCallback(
     (activity: WorktreeActivity) => {
@@ -4122,6 +4128,7 @@ function WorktreeTableRows(props: WorktreeItemProps) {
       {expanded && (
         <TableRow className={cn(highlight)}>
           <TableCell colSpan={8}>
+            <WorktreeErrorAlert error={inspectionError} />
             {detailLoading && !detail ? (
               <Spinner />
             ) : detail ? (
