@@ -68,6 +68,7 @@ describe("OpenCode runtime ownership", () => {
       expect.objectContaining({
         file: "/tmp/control/opencode/agent/opencode/service.json",
         env: { XDG_STATE_HOME: "/tmp/control/opencode/agent" },
+        version: "2.1.1",
         command: [
           "/opt/homebrew/bin/opencode",
           "serve",
@@ -99,6 +100,33 @@ describe("OpenCode runtime ownership", () => {
     );
     mocks.lookup.mockReturnValue("/opt/homebrew/bin/opencode");
     await expect(new OpenCodeRuntime().client()).rejects.toThrow("not found");
+  });
+  test.each(["2.1.3", "v2.1.3", "opencode 2.1.3", "opencode v2.1.3\n"])(
+    "requires the installed CLI version for banner %s",
+    async (banner) => {
+      mocks.execute.mockResolvedValue({ stdout: banner });
+      mocks.info.mockResolvedValue({ version: "2.1.3" });
+      const runtime = new OpenCodeRuntime();
+      await expect(runtime.client()).resolves.toHaveProperty(
+        "version",
+        "2.1.3",
+      );
+      expect(mocks.ensure).toHaveBeenCalledWith(
+        expect.objectContaining({ version: "2.1.3" }),
+      );
+      await runtime.close();
+    },
+  );
+  test("rejects a supported server that does not match the installed CLI", async () => {
+    mocks.execute.mockResolvedValue({ stdout: "opencode v2.1.3\n" });
+    const runtime = new OpenCodeRuntime();
+    await expect(runtime.client()).rejects.toThrow(
+      "OpenCode server version 2.1.1 does not match installed CLI 2.1.3",
+    );
+    expect(mocks.stop).toHaveBeenCalledWith({ file: runtime.file });
+    mocks.info.mockResolvedValueOnce({ version: "2.1.3" });
+    await expect(runtime.client()).resolves.toHaveProperty("version", "2.1.3");
+    await runtime.close();
   });
   test.each(["1.19.0", "2.0.30", "2.1.0", "3.0.0", "2.1.1-beta.1"])(
     "rejects incompatible CLI %s before starting a service",

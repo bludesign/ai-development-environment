@@ -70,6 +70,7 @@ export class OpenCodeRuntime {
       throw new Error(
         `OpenCode >=2.1.1 <3 is required; found ${stdout.trim()}`,
       );
+    const version = stdout.trim().replace(/^(?:opencode\s+)?v?/, "");
     await mkdir(dirname(this.file), { recursive: true, mode: 0o700 });
     try {
       // The client reads `file`, but the native CLI derives its registration
@@ -77,7 +78,9 @@ export class OpenCodeRuntime {
       const endpoint = await Service.ensure({
         file: this.file,
         env: { XDG_STATE_HOME: this.stateDirectory },
-        version: supportedOpenCodeVersion,
+        // Replace an older owned service after a CLI upgrade, even when its
+        // API version is still supported.
+        version,
         command: [
           executable,
           "serve",
@@ -97,6 +100,10 @@ export class OpenCodeRuntime {
       });
       if (!supportedOpenCodeVersion(info.version))
         throw new Error(`Unsupported OpenCode server version: ${info.version}`);
+      if (info.version !== version)
+        throw new Error(
+          `OpenCode server version ${info.version} does not match installed CLI ${version}`,
+        );
       return { client, version: info.version };
     } catch (error) {
       await Service.stop({ file: this.file }).catch(() => undefined);
