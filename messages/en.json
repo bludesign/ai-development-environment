@@ -3640,6 +3640,7 @@
     },
     "comments": "Comments: {count}",
     "copyPath": "Copy path",
+    "copyBranchName": "Copy branch name",
     "copyFilePath": "Copy file path",
     "copyRelativeFilePath": "Copy relative file path",
     "copyShortCommitHash": "Copy shortened commit hash",

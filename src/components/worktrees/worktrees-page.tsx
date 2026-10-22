@@ -2794,6 +2794,17 @@ export function WorktreeMenus(
             >
               <Copy /> {t("copyPath")}
             </DropdownMenuItem>
+            <DropdownMenuItem
+              disabled={!worktree.branch}
+              onSelect={() => {
+                if (!worktree.branch) return;
+                void copyText(worktree.branch).catch((error) =>
+                  onError(String(error)),
+                );
+              }}
+            >
+              <GitBranch /> {t("copyBranchName")}
+            </DropdownMenuItem>
             {targets.length > 0 && (
               <DropdownMenuItem
                 disabled={Boolean(moveReason)}

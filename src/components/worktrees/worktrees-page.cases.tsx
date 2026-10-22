@@ -1188,9 +1188,10 @@ export function registerWorktreesPageTests(
 
         const menuItems = screen.getAllByRole("menuitem");
         expect(
-          menuItems.slice(0, 8).map((item) => item.textContent?.trim()),
+          menuItems.slice(0, 9).map((item) => item.textContent?.trim()),
         ).toEqual([
           "Copy path",
+          "Copy branch name",
           "Change branch",
           "Change branch to main",
           "Commit",

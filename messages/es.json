@@ -3640,6 +3640,7 @@
     },
     "comments": "Comentarios: {count}",
     "copyPath": "Copiar ruta",
+    "copyBranchName": "Copiar nombre de la rama",
     "copyFilePath": "Copiar ruta del archivo",
     "copyRelativeFilePath": "Copiar ruta relativa del archivo",
     "copyShortCommitHash": "Copiar hash abreviado del commit",
