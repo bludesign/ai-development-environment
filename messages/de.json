@@ -3640,6 +3640,7 @@
     },
     "comments": "Kommentare: {count}",
     "copyPath": "Pfad kopieren",
+    "copyBranchName": "Branch-Namen kopieren",
     "copyFilePath": "Dateipfad kopieren",
     "copyRelativeFilePath": "Relativen Dateipfad kopieren",
     "copyShortCommitHash": "Gekürzten Commit-Hash kopieren",
