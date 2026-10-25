@@ -3224,7 +3224,12 @@
     "jiraBranchRegexHelp": "Uses RE2; lookarounds and backreferences are unsupported. The first capture group is used when present; otherwise the entire branch match is used.",
     "inheritDefaultRegex": "Inherit the default regex",
     "settingsSaved": "Agent refresh interval saved.",
+    "emptyFiltered": "No codebases match this agent.",
     "branchesTab": {
+      "author": "Author",
+      "allAuthors": "All authors",
+      "searchAuthors": "Search authors…",
+      "noAuthors": "No authors found.",
       "title": "Branches",
       "description": "Review local branches across all agents. Age is measured from the last local commit. Remote branches are never changed.",
       "agent": "Agent",

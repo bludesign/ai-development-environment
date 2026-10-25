@@ -92,6 +92,7 @@ export interface LocalBranch {
   headSha: string;
   lastCommitAt: string | null;
   lastCommitMessage: string | null;
+  lastCommitAuthor: string | null;
   current: boolean;
   checkedOutPath: string | null;
 }
@@ -181,6 +182,13 @@ export function parseLocalBranchInventory(
           branch.lastCommitMessage,
           "local branch.lastCommitMessage",
         ),
+        lastCommitAuthor:
+          branch.lastCommitAuthor == null || branch.lastCommitAuthor === ""
+            ? null
+            : stringValue(
+                branch.lastCommitAuthor,
+                "local branch.lastCommitAuthor",
+              ),
         current: booleanValue(branch.current, "local branch.current"),
         checkedOutPath: nullableString(
           branch.checkedOutPath,

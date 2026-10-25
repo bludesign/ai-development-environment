@@ -3224,7 +3224,12 @@
     "jiraBranchRegexHelp": "Usa RE2; las aserciones de anticipación y las referencias inversas no son compatibles. Se usa el primer grupo capturado; si no existe, se usa toda la coincidencia de la rama.",
     "inheritDefaultRegex": "Heredar la expresión predeterminada",
     "settingsSaved": "Se guardaron los ajustes de las bases de código.",
+    "emptyFiltered": "No hay bases de código para este agente.",
     "branchesTab": {
+      "author": "Autor",
+      "allAuthors": "Todos los autores",
+      "searchAuthors": "Buscar autores…",
+      "noAuthors": "No se encontraron autores.",
       "title": "Ramas",
       "description": "Revisa las ramas locales de todos los agentes. La antigüedad se mide desde el último commit local. Las ramas remotas nunca se modifican.",
       "agent": "Agente",

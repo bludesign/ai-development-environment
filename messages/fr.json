@@ -3224,7 +3224,12 @@
     "jiraBranchRegexHelp": "Utilise RE2 ; les anticipations et les références arrière ne sont pas prises en charge. Le premier groupe capturé est utilisé, sinon la correspondance complète du nom de branche.",
     "inheritDefaultRegex": "Hériter de l’expression par défaut",
     "settingsSaved": "Réglages des bases de code enregistrés.",
+    "emptyFiltered": "Aucune base de code ne correspond à cet agent.",
     "branchesTab": {
+      "author": "Auteur",
+      "allAuthors": "Tous les auteurs",
+      "searchAuthors": "Rechercher des auteurs…",
+      "noAuthors": "Aucun auteur trouvé.",
       "title": "Branches",
       "description": "Examinez les branches locales de tous les agents. L’ancienneté est calculée depuis le dernier commit local. Les branches distantes ne sont jamais modifiées.",
       "agent": "Agent",

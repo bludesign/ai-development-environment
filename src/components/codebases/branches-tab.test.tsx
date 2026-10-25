@@ -40,6 +40,7 @@ const repositories = (count = 2): CodebaseRepository[] =>
               headSha: "a".repeat(40),
               lastCommitAt: "2026-01-01T00:00:00Z",
               lastCommitMessage: "Old work",
+              lastCommitAuthor: index % 2 ? "Priya Nair" : "Dana Alvarez",
               current: false,
               checkedOutPath: null,
             })),
@@ -69,6 +70,39 @@ beforeEach(() => {
 afterEach(cleanup);
 
 describe("branch cleanup tab", () => {
+  test("filters by searchable author, resets pagination and selection, and renders unknown authors", async () => {
+    const data = repositories(52);
+    data[0]!.codebases[0]!.localBranchInventory!.branches[0]!.lastCommitAuthor =
+      null;
+    render(
+      <BranchesTab repositories={data} onReload={reload} onRefresh={refresh} />,
+    );
+    expect(screen.getByText("Unknown").className).toContain(
+      "text-xs text-muted-foreground",
+    );
+    fireEvent.click(
+      screen.getByRole("checkbox", {
+        name: "Select all matching eligible branches",
+      }),
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Next" }));
+    fireEvent.click(screen.getByRole("combobox", { name: "Author" }));
+    fireEvent.change(
+      screen.getByRole("combobox", { name: "Search authors…" }),
+      { target: { value: "Dana" } },
+    );
+    fireEvent.click(screen.getByRole("option", { name: "Dana Alvarez" }));
+    expect(screen.getByText("0 selected")).toBeTruthy();
+    expect(
+      screen.getByRole("button", { name: "Previous" }).hasAttribute("disabled"),
+    ).toBe(true);
+    expect(screen.getAllByRole("row")).toHaveLength(26);
+    expect(screen.queryByText("Priya Nair")).toBeNull();
+    expect(screen.queryByText("Unknown")).toBeNull();
+    fireEvent.click(screen.getByRole("combobox", { name: "Author" }));
+    fireEvent.click(screen.getByRole("option", { name: "All authors" }));
+    expect(screen.getAllByRole("row")).toHaveLength(51);
+  });
   test("selects eligible branches across pages and cancels review without dispatching deletion", () => {
     render(
       <BranchesTab

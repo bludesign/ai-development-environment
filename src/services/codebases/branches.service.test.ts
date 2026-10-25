@@ -139,6 +139,7 @@ describe("branch cleanup scheduling and cache", () => {
           headSha: sha,
           lastCommitAt: null,
           lastCommitMessage: null,
+          lastCommitAuthor: "Dana Alvarez",
           current: false,
           checkedOutPath: null,
         },

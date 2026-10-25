@@ -140,6 +140,12 @@ export async function seedCodebases(prisma: PrismaClient): Promise<void> {
               "Fix compact layout spacing",
               "Explore cache improvements",
             ][index],
+            lastCommitAuthor: [
+              "Dana Alvarez",
+              "Priya Nair",
+              "John Smith",
+              "Dana Alvarez",
+            ][index],
             current: index === 0,
             checkedOutPath: index === 0 ? codebase.folder : null,
           })),

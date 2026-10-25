@@ -41,6 +41,7 @@ export function localBranchRows(
           headSha: "",
           lastCommitAt: null,
           lastCommitMessage: null,
+          lastCommitAuthor: null,
           current: name === codebase.branch,
           checkedOutPath: null,
         }));
@@ -84,12 +85,14 @@ export function filterBranchRows(
   repositoryId: string,
   olderThanDays: number | null,
   now = Date.now(),
+  author: string | null = null,
 ): BranchRow[] {
   return rows
     .filter(
       (row) =>
         (agentId === "all" || row.codebase.agent.id === agentId) &&
         (repositoryId === "all" || row.repository.id === repositoryId) &&
+        (author === null || row.branch.lastCommitAuthor === author) &&
         (olderThanDays === null ||
           (row.branch.lastCommitAt !== null &&
             Date.parse(row.branch.lastCommitAt) <=

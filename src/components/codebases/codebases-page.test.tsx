@@ -15,6 +15,10 @@ import {
 } from "@/lib/control-plane-client";
 
 import { CodebasesPage } from "./codebases-page";
+import {
+  ActiveAgentProvider,
+  useActiveAgent,
+} from "@/components/active-agent/active-agent-provider";
 
 vi.mock("@/lib/control-plane-client", () => ({
   onControlPlaneRecovery: vi.fn(() => () => {}),
@@ -101,8 +105,20 @@ const repository = {
   codebases: [codebase],
 };
 
+function GlobalSelection() {
+  const { selectAgent } = useActiveAgent();
+  return (
+    <>
+      <button onClick={() => selectAgent("agent-1")}>Focus Studio</button>
+      <button onClick={() => selectAgent("empty")}>Focus Empty</button>
+      <button onClick={() => selectAgent(null)}>Clear focus</button>
+    </>
+  );
+}
+
 describe("CodebasesPage", () => {
   beforeEach(() => {
+    localStorage.clear();
     global.ResizeObserver = ResizeObserverMock;
     Element.prototype.hasPointerCapture = vi.fn(() => false);
     Element.prototype.setPointerCapture = vi.fn();
@@ -153,6 +169,131 @@ describe("CodebasesPage", () => {
     cleanup();
     request.mockReset();
     subscriptions.mockReset();
+  });
+
+  test("saves independent tab filters and restores them after global focus changes and remounts", async () => {
+    const build = {
+      ...agent,
+      id: "build",
+      name: "Build Mac",
+      hostname: "build.local",
+    };
+    const empty = { ...agent, id: "empty", name: "Empty Mac" };
+    const agents = [agent, build, empty];
+    const data = {
+      ...repository,
+      codebases: [agent, build].map((item) => ({
+        ...codebase,
+        id: item.id,
+        agent: {
+          ...item,
+          capabilities: [...item.capabilities, "codebase.branches.delete"],
+        },
+        folder: `/${item.id}`,
+        localBranchInventory: {
+          scannedAt: "2026-10-01T00:00:00Z",
+          branches: [
+            {
+              name: "old",
+              headSha: "a".repeat(40),
+              lastCommitAt: null,
+              lastCommitMessage: null,
+              lastCommitAuthor: "Dana Alvarez",
+              current: false,
+              checkedOutPath: null,
+            },
+          ],
+        },
+      })),
+    };
+    request.mockImplementation(async (query) => {
+      if (query.includes("query ActiveAgentOptions"))
+        return { agents } as never;
+      if (query.includes("query CodebaseOverview"))
+        return {
+          agents,
+          codebaseOverview: { repositories: [data] },
+          codebaseSettings: { refreshIntervalSeconds: 30 },
+        } as never;
+      throw new Error(`Unexpected query: ${query}`);
+    });
+    const surface = (
+      <ActiveAgentProvider userId="codebases-filter-test">
+        <GlobalSelection />
+        <CodebasesPage />
+      </ActiveAgentProvider>
+    );
+    const view = render(surface);
+    const filter = await screen.findByRole("combobox", {
+      name: "Filter by agent",
+    });
+    await waitFor(() => expect(filter.hasAttribute("disabled")).toBe(false));
+    fireEvent.click(filter);
+    fireEvent.change(screen.getByRole("combobox", { name: "Search agents…" }), {
+      target: { value: "studio.local" },
+    });
+    fireEvent.click(screen.getByRole("option", { name: "Studio Mac" }));
+    expect(
+      screen
+        .getAllByRole("heading", { level: 2 })
+        .map((element) => element.textContent),
+    ).toEqual(["Studio Mac"]);
+
+    fireEvent.click(screen.getByRole("tab", { name: "Branches" }));
+    const branchesFilter = screen.getByRole("combobox", {
+      name: "Agent",
+    });
+    expect(branchesFilter.textContent).toBe("All agents");
+    fireEvent.click(branchesFilter);
+    fireEvent.click(screen.getByRole("option", { name: "Build Mac" }));
+    expect(screen.getAllByRole("row")).toHaveLength(2);
+    expect(
+      within(screen.getAllByRole("row")[1]!).getByText("Build Mac"),
+    ).toBeTruthy();
+    fireEvent.click(
+      screen.getByRole("checkbox", {
+        name: "Select all matching eligible branches",
+      }),
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Delete selected" }));
+    expect(screen.getByRole("dialog")).toBeTruthy();
+    fireEvent.click(screen.getByText("Focus Studio"));
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(screen.getByText("0 selected")).toBeTruthy();
+    expect(branchesFilter.textContent).toBe("Studio Mac");
+    expect(branchesFilter.hasAttribute("disabled")).toBe(true);
+    expect(
+      within(screen.getAllByRole("row")[1]!).getByText("Studio Mac"),
+    ).toBeTruthy();
+
+    fireEvent.click(screen.getByRole("button", { name: "Focus Empty" }));
+    expect(
+      screen.getByText("No local branches match these filters."),
+    ).toBeTruthy();
+    fireEvent.click(screen.getByRole("tab", { name: "Agents" }));
+    expect(screen.getByText("No codebases match this agent.")).toBeTruthy();
+    expect(
+      screen.getByRole("combobox", { name: "Filter by agent" }).textContent,
+    ).toBe("Empty Mac");
+    fireEvent.click(screen.getByRole("button", { name: "Clear focus" }));
+    expect(
+      screen.getByRole("combobox", { name: "Filter by agent" }).textContent,
+    ).toBe("Studio Mac");
+    fireEvent.click(screen.getByRole("tab", { name: "Branches" }));
+    expect(screen.getByRole("combobox", { name: "Agent" }).textContent).toBe(
+      "Build Mac",
+    );
+
+    view.unmount();
+    render(surface);
+    await screen.findByRole("heading", { name: "Studio Mac" });
+    expect(
+      screen.getByRole("combobox", { name: "Filter by agent" }).textContent,
+    ).toBe("Studio Mac");
+    fireEvent.click(screen.getByRole("tab", { name: "Branches" }));
+    expect(screen.getByRole("combobox", { name: "Agent" }).textContent).toBe(
+      "Build Mac",
+    );
   });
 
   test("groups by agent and repository and exposes fetch actions", async () => {

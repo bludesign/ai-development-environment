@@ -3224,7 +3224,12 @@
     "jiraBranchRegexHelp": "Verwendet RE2; Lookarounds und Rückverweise werden nicht unterstützt. Die erste Erfassungsgruppe wird verwendet; ohne Gruppe gilt der gesamte Treffer im Branchnamen.",
     "inheritDefaultRegex": "Standard-Regex übernehmen",
     "settingsSaved": "Codebase-Einstellungen gespeichert.",
+    "emptyFiltered": "Keine Codebasen für diesen Agenten gefunden.",
     "branchesTab": {
+      "author": "Autor",
+      "allAuthors": "Alle Autoren",
+      "searchAuthors": "Autoren suchen…",
+      "noAuthors": "Keine Autoren gefunden.",
       "title": "Branches",
       "description": "Prüfe lokale Branches auf allen Agents. Das Alter wird seit dem letzten lokalen Commit berechnet. Remote-Branches werden niemals geändert.",
       "agent": "Agent",
