@@ -77,6 +77,8 @@ const AppSchema = z.object({
     codebases: z.number().int(),
     worktrees: z.number().int(),
     dirtyWorktrees: z.number().int(),
+    nonMainWorktrees: z.number().int(),
+    openRequests: z.number().int(),
     plans: z.number().int(),
     sessions: z.number().int(),
     builds: z.number().int(),

@@ -187,42 +187,64 @@ export class AppsService {
     const prisma = await getPrismaClient();
     const repositoryIds = app.repositories.map((item) => item.repositoryId);
     const repositoryScope = { in: repositoryIds };
-    const [codebases, worktrees, dirtyWorktrees, plans, sessions, builds] =
-      await Promise.all([
-        prisma.codebase.count({
-          where: { repositoryId: repositoryScope },
-        }),
-        prisma.worktree.count({
-          where: {
-            missingAt: null,
-            codebase: { repositoryId: repositoryScope },
-          },
-        }),
-        prisma.worktree.count({
-          where: {
-            missingAt: null,
-            codebase: { repositoryId: repositoryScope },
-            OR: [{ hasStagedChanges: true }, { hasUnstagedChanges: true }],
-          },
-        }),
-        prisma.agentRun.count({
-          where: {
-            kind: "PLAN",
-            archivedAt: null,
-            repositoryId: repositoryScope,
-          },
-        }),
-        prisma.agentRun.count({
-          where: {
-            kind: "SESSION",
-            archivedAt: null,
-            repositoryId: repositoryScope,
-          },
-        }),
-        prisma.build.count({
-          where: { repositoryId: repositoryScope },
-        }),
-      ]);
+    const worktreeScope = {
+      missingAt: null,
+      codebase: { repositoryId: repositoryScope },
+    } satisfies Prisma.WorktreeWhereInput;
+    const [
+      codebases,
+      worktrees,
+      dirtyWorktrees,
+      nonMainWorktrees,
+      openPullRequests,
+      openMergeRequests,
+      plans,
+      sessions,
+      builds,
+    ] = await Promise.all([
+      prisma.codebase.count({
+        where: { repositoryId: repositoryScope },
+      }),
+      prisma.worktree.count({
+        where: worktreeScope,
+      }),
+      prisma.worktree.count({
+        where: {
+          ...worktreeScope,
+          OR: [{ hasStagedChanges: true }, { hasUnstagedChanges: true }],
+        },
+      }),
+      prisma.worktree.count({
+        where: { ...worktreeScope, branch: { not: "main" } },
+      }),
+      prisma.worktreePullRequest.findMany({
+        where: { state: "OPEN", worktree: worktreeScope },
+        distinct: ["url"],
+        select: { url: true },
+      }),
+      prisma.worktreeGitLabMergeRequest.findMany({
+        where: { state: "OPENED", worktree: worktreeScope },
+        distinct: ["webUrl"],
+        select: { webUrl: true },
+      }),
+      prisma.agentRun.count({
+        where: {
+          kind: "PLAN",
+          archivedAt: null,
+          repositoryId: repositoryScope,
+        },
+      }),
+      prisma.agentRun.count({
+        where: {
+          kind: "SESSION",
+          archivedAt: null,
+          repositoryId: repositoryScope,
+        },
+      }),
+      prisma.build.count({
+        where: { repositoryId: repositoryScope },
+      }),
+    ]);
 
     const { repositories, agentIdsJson, ...details } = app;
     return {
@@ -234,6 +256,8 @@ export class AppsService {
         codebases,
         worktrees,
         dirtyWorktrees,
+        nonMainWorktrees,
+        openRequests: openPullRequests.length + openMergeRequests.length,
         plans,
         sessions,
         builds,

@@ -17,7 +17,8 @@ const request = vi.mocked(controlPlaneRequest);
 function app(
   id: string,
   name: string,
-  counts: Pick<ManagedApp["counts"], "worktrees" | "dirtyWorktrees">,
+  counts: Pick<ManagedApp["counts"], "worktrees" | "dirtyWorktrees"> &
+    Partial<Pick<ManagedApp["counts"], "nonMainWorktrees" | "openRequests">>,
 ): ManagedApp {
   return {
     id,
@@ -28,6 +29,8 @@ function app(
     counts: {
       repositories: 0,
       codebases: 0,
+      nonMainWorktrees: 0,
+      openRequests: 0,
       plans: 0,
       sessions: 0,
       builds: 0,
@@ -50,6 +53,8 @@ describe("AppsPage", () => {
         app("dirty-app", "Dirty app", {
           worktrees: 4,
           dirtyWorktrees: 2,
+          nonMainWorktrees: 3,
+          openRequests: 1,
         }),
         app("clean-app", "Clean app", {
           worktrees: 3,
@@ -76,9 +81,19 @@ describe("AppsPage", () => {
     const worktreeLinks = dirtyCard!.querySelectorAll(
       'a[href="/dashboard/apps/dirty-app?view=worktrees"]',
     );
-    expect(worktreeLinks).toHaveLength(2);
+    expect(worktreeLinks).toHaveLength(4);
     expect(worktreeLinks[0]?.textContent).toContain("Dirty worktrees");
     expect(worktreeLinks[1]?.textContent).toContain("Worktrees");
+    expect(worktreeLinks[2]?.textContent).toBe("3Worktrees off main");
+    expect(worktreeLinks[3]?.textContent).toBe("1Open PRs");
+    expect(within(dirtyCard!).queryByText("Plans")).toBeNull();
+    expect(within(dirtyCard!).queryByText("Sessions")).toBeNull();
+    expect(
+      within(cleanCard!).getByRole("link", { name: "0 Worktrees off main" }),
+    ).toBeDefined();
+    expect(
+      within(cleanCard!).getByRole("link", { name: "0 Open PRs" }),
+    ).toBeDefined();
   });
 
   test("anchors each footer to the bottom of its stretched grid card", async () => {

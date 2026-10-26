@@ -110,6 +110,7 @@ describe("AppsService", () => {
         folder: "/tmp/web",
         relativePath: ".",
         primary: true,
+        branch: "main",
         hasStagedChanges: true,
         hasUnstagedChanges: true,
       },
@@ -186,6 +187,8 @@ describe("AppsService", () => {
       codebases: 1,
       worktrees: 1,
       dirtyWorktrees: 1,
+      nonMainWorktrees: 0,
+      openRequests: 0,
       plans: 1,
       sessions: 1,
       builds: 1,
@@ -196,6 +199,147 @@ describe("AppsService", () => {
         repositoryIds: ["repository-1"],
       }),
     ).rejects.toThrow("App names must be unique");
+  });
+
+  test("counts only visible named branches other than main in assigned repositories", async () => {
+    await prisma.codebase.create({
+      data: {
+        id: "other-codebase",
+        repositoryId: "repository-2",
+        agentId: "agent-1",
+        folder: "/tmp/other",
+        observedOrigin: "https://example.com/ios.git",
+      },
+    });
+    await prisma.worktree.createMany({
+      data: [
+        { id: "feature", branch: "feature/AIDE-156" },
+        { id: "master", branch: "master" },
+        { id: "detached", branch: null },
+        { id: "missing", branch: "feature/missing", missingAt: new Date() },
+        {
+          id: "other-repository",
+          branch: "feature/other",
+          codebaseId: "other-codebase",
+        },
+      ].map((worktree) => ({
+        codebaseId: "codebase-1",
+        gitDirectory: `/tmp/${worktree.id}/.git`,
+        folder: `/tmp/${worktree.id}`,
+        relativePath: worktree.id,
+        ...worktree,
+      })),
+    });
+
+    const app = await new AppsService().create({
+      name: "Web",
+      repositoryIds: ["repository-1"],
+    });
+
+    expect(app.counts).toMatchObject({ worktrees: 4, nonMainWorktrees: 2 });
+  });
+
+  test("counts distinct open GitHub and GitLab requests including drafts within visible app worktrees", async () => {
+    await prisma.codebase.create({
+      data: {
+        id: "other-codebase",
+        repositoryId: "repository-2",
+        agentId: "agent-1",
+        folder: "/tmp/other",
+        observedOrigin: "https://example.com/ios.git",
+      },
+    });
+    const cases = [
+      { id: "open", state: "OPEN" },
+      { id: "duplicate", state: "OPEN", requestId: "open" },
+      { id: "draft", state: "OPEN", draft: true },
+      { id: "closed", state: "CLOSED" },
+      { id: "merged", state: "MERGED" },
+      { id: "missing", state: "OPEN", missingAt: new Date() },
+      { id: "other", state: "OPEN", codebaseId: "other-codebase" },
+    ];
+    for (const provider of ["github", "gitlab"]) {
+      for (const [index, value] of cases.entries()) {
+        const worktreeId = `${provider}-${value.id}`;
+        const requestId = value.requestId ?? value.id;
+        await prisma.worktree.create({
+          data: {
+            id: worktreeId,
+            codebaseId: value.codebaseId ?? "codebase-1",
+            gitDirectory: `/tmp/${worktreeId}/.git`,
+            folder: `/tmp/${worktreeId}`,
+            relativePath: worktreeId,
+            branch: `feature/${requestId}`,
+            missingAt: value.missingAt,
+          },
+        });
+        if (provider === "github") {
+          await prisma.worktreePullRequest.create({
+            data: {
+              worktreeId,
+              githubId: requestId,
+              number: index + 1,
+              title: requestId,
+              url: `https://github.com/example/web/pull/${requestId}`,
+              repositoryGithubId: "github-web",
+              repositoryNameWithOwner: "example/web",
+              repositoryUrl: "https://github.com/example/web",
+              labelsJson: "[]",
+              reviewDecision: "REVIEW_REQUIRED",
+              unresolvedReviewThreadCount: 0,
+              state: value.state,
+              isDraft: value.draft ?? false,
+              mergeable: "UNKNOWN",
+              mergeStateStatus: "UNKNOWN",
+              autoMergeEnabled: false,
+              viewerCanEnableAutoMerge: false,
+              viewerCanDisableAutoMerge: false,
+              headRefOid: "sha",
+              headRefName: `feature/${requestId}`,
+              githubCreatedAt: new Date(),
+            },
+          });
+        } else {
+          await prisma.worktreeGitLabMergeRequest.create({
+            data: {
+              worktreeId,
+              gitlabId: requestId,
+              iid: index + 1,
+              projectId: "gitlab-web",
+              title: requestId,
+              description: "",
+              webUrl: `https://gitlab.com/example/web/-/merge_requests/${requestId}`,
+              state: value.state === "OPEN" ? "OPENED" : value.state,
+              draft: value.draft ?? false,
+              sourceBranch: `feature/${requestId}`,
+              targetBranch: "main",
+              sha: "sha",
+              authorJson: "{}",
+              reviewersJson: "[]",
+              labelsJson: "[]",
+              detailedMergeStatus: "mergeable",
+              mergeWhenPipelineSucceeds: false,
+              squashOnMerge: false,
+              hasConflicts: false,
+              blockingDiscussionsResolved: true,
+              gitlabCreatedAt: new Date(),
+              gitlabUpdatedAt: new Date(),
+            },
+          });
+        }
+      }
+    }
+
+    const service = new AppsService();
+    const app = await service.create({
+      name: "Web",
+      repositoryIds: ["repository-1"],
+    });
+    expect(app.counts.openRequests).toBe(4);
+    expect((await service.list())[0]?.counts.openRequests).toBe(4);
+
+    await prisma.worktree.updateMany({ data: { missingAt: new Date() } });
+    expect((await service.get(app.id))?.counts.openRequests).toBe(0);
   });
 
   test("updates assignments, deletes only the grouping, and preserves assigned repositories without checkouts", async () => {
@@ -221,6 +365,8 @@ describe("AppsService", () => {
         codebases: 0,
         worktrees: 0,
         dirtyWorktrees: 0,
+        nonMainWorktrees: 0,
+        openRequests: 0,
         plans: 1,
         sessions: 1,
         builds: 1,
