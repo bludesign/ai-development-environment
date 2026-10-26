@@ -86,6 +86,8 @@ describe("discovery MCP tools", () => {
         codebases: 1,
         worktrees: 2,
         dirtyWorktrees: 0,
+        nonMainWorktrees: 1,
+        openRequests: 1,
         plans: 1,
         sessions: 1,
         builds: 2,
@@ -104,6 +106,7 @@ describe("discovery MCP tools", () => {
           id: "app-1",
           createdAt: now.toISOString(),
           repositories: [{ id: "repo-1", name: "App" }],
+          counts: { nonMainWorktrees: 1, openRequests: 1 },
         },
       ],
     });

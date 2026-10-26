@@ -1520,7 +1520,7 @@ extend type Query {
     source: GitHubRequestSource!
     "The scope used to filter or perform the operation."
     scope: GitHubPullRequestScope!
-    "Identifier of the repository. Omit it to leave this dimension unfiltered."
+    "Optional managed repository filter for any scope; required for REPOSITORY scope."
     repositoryId: ID
     "The state used to filter or perform the operation. Defaults to `OPEN`."
     state: GitHubPullRequestStateFilter = OPEN

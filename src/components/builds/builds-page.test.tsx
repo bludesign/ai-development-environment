@@ -30,6 +30,14 @@ let buildStatus = "RUNNING";
 let nextBuild: (() => void) | null = null;
 
 beforeEach(() => {
+  vi.stubGlobal(
+    "ResizeObserver",
+    class {
+      observe() {}
+      unobserve() {}
+      disconnect() {}
+    },
+  );
   Element.prototype.hasPointerCapture = vi.fn(() => false);
   Element.prototype.setPointerCapture = vi.fn();
   Element.prototype.releasePointerCapture = vi.fn();
@@ -45,6 +53,24 @@ beforeEach(() => {
   } as never);
   request.mockImplementation(async (query) => {
     const operation = String(query);
+    if (operation.includes("query BuildHistoryRepositories")) {
+      const repositories = [
+        {
+          id: "repo-1",
+          name: "Example App",
+          displayOrigin: "github.com/acme/example",
+        },
+        {
+          id: "repo-2",
+          name: "Other App",
+          displayOrigin: "gitlab.com/acme/other",
+        },
+      ];
+      return {
+        codebaseOverview: { repositories },
+        app: { repositories },
+      } as never;
+    }
     if (
       operation.includes("query BuildsPage") ||
       operation.includes("query BuildScriptCatalog")
@@ -178,10 +204,125 @@ afterEach(async () => {
   // Let it fire before Vitest tears down this test's jsdom globals.
   await new Promise((resolve) => setTimeout(resolve, 0));
   vi.restoreAllMocks();
+  vi.unstubAllGlobals();
   vi.clearAllMocks();
 });
 
 describe("BuildsPage", () => {
+  test.each([undefined, "app-1"])(
+    "filters repository history on the server, including pagination and live refresh for %s",
+    async (appId) => {
+      const original = request.getMockImplementation()!;
+      request.mockImplementation(async (query, variables, ...rest) => {
+        const result = await original(query, variables, ...rest);
+        if (!query.includes("query BuildsPage")) return result;
+        const page = (
+          result as unknown as {
+            builds: {
+              items: Array<{
+                id: string;
+                snapshot: { repository: { name: string } };
+              }>;
+              nextCursor: string | null;
+            };
+          }
+        ).builds;
+        if (variables?.repositoryId) {
+          const item = page.items[0]!;
+          page.items = Array.from(
+            { length: variables.after ? 1 : 50 },
+            (_, index) => ({
+              ...item,
+              id: variables.after ? "filtered-next" : `filtered-${index}`,
+              snapshot: {
+                ...item.snapshot,
+                repository: { name: "Filtered App" },
+              },
+            }),
+          );
+          page.nextCursor = variables.after ? null : "cursor-filtered";
+        }
+        return result;
+      });
+      render(<BuildsPage appId={appId} />);
+      await screen.findByRole("table");
+      fireEvent.click(
+        screen.getByRole("checkbox", { name: /Select all builds for/ }),
+      );
+      expect(
+        screen.getByRole("button", { name: "Delete selected (1)" }),
+      ).toBeTruthy();
+      const repository = screen.getByRole("combobox", {
+        name: "Filter builds by repository",
+      });
+      fireEvent.click(repository);
+      fireEvent.click(
+        await screen.findByRole("option", { name: "All repositories" }),
+      );
+      expect(screen.getByText("Example App")).toBeTruthy();
+      fireEvent.click(repository);
+      fireEvent.change(
+        await screen.findByRole("combobox", { name: "Search repositories" }),
+        { target: { value: "gitlab.com/acme/other" } },
+      );
+      fireEvent.click(await screen.findByRole("option", { name: "Other App" }));
+      expect(await screen.findAllByText("Filtered App")).toHaveLength(50);
+      expect(
+        screen.queryByRole("button", { name: /Delete selected/ }),
+      ).toBeNull();
+      const historyRequests = () =>
+        request.mock.calls.filter(([query]) =>
+          query.includes("query BuildsPage"),
+        );
+      expect(historyRequests().at(-1)?.[1]).toMatchObject({
+        repositoryId: "repo-2",
+        appId: appId ?? null,
+        after: null,
+      });
+      fireEvent.click(screen.getByRole("button", { name: "Load more" }));
+      await waitFor(() =>
+        expect(screen.getAllByText("Filtered App")).toHaveLength(51),
+      );
+      expect(historyRequests().at(-1)?.[1]).toMatchObject({
+        repositoryId: "repo-2",
+        after: "cursor-filtered",
+      });
+      const beforeRefresh = historyRequests().length;
+      act(() => nextBuild?.());
+      await waitFor(() =>
+        expect(historyRequests().length).toBeGreaterThanOrEqual(
+          beforeRefresh + 2,
+        ),
+      );
+      await waitFor(() =>
+        expect(historyRequests().at(-1)?.[1]).toMatchObject({
+          repositoryId: "repo-2",
+          after: "cursor-filtered",
+        }),
+      );
+      fireEvent.keyDown(
+        screen.getByRole("combobox", { name: "Filter builds by status" }),
+        { key: "ArrowDown", code: "ArrowDown" },
+      );
+      fireEvent.click(await screen.findByRole("option", { name: "Succeeded" }));
+      await waitFor(() =>
+        expect(historyRequests().at(-1)?.[1]).toMatchObject({
+          repositoryId: "repo-2",
+          status: "SUCCEEDED",
+        }),
+      );
+      fireEvent.click(repository);
+      fireEvent.click(
+        await screen.findByRole("option", { name: "All repositories" }),
+      );
+      expect(await screen.findByText("Example App")).toBeTruthy();
+      expect(historyRequests().at(-1)?.[1]).toMatchObject({
+        repositoryId: null,
+        status: "SUCCEEDED",
+        after: null,
+      });
+    },
+  );
   test("updates running durations on the clock ticker", async () => {
     const startedAt = Date.parse(now);
     const dateNow = vi.spyOn(Date, "now").mockReturnValue(startedAt);

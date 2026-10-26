@@ -8,7 +8,46 @@ import {
   parseCodebaseGitState,
   parseCodebaseStashDiff,
   parseCodebaseSnapshot,
+  parseLocalBranchInventory,
 } from "@ai-development-environment/agent-contract/codebases";
+
+describe("local branch authors", () => {
+  const branch = {
+    name: "main",
+    headSha: "a".repeat(40),
+    lastCommitAt: null,
+    lastCommitMessage: null,
+    current: true,
+    checkedOutPath: null,
+  };
+  const inventory = { scannedAt: "2026-10-01T00:00:00Z", branches: [branch] };
+
+  test.each([undefined, null, ""])(
+    "accepts legacy or unknown author %s",
+    (lastCommitAuthor) => {
+      expect(
+        parseLocalBranchInventory({
+          ...inventory,
+          branches: [{ ...branch, lastCommitAuthor }],
+        }).branches[0]?.lastCommitAuthor,
+      ).toBeNull();
+    },
+  );
+  test("preserves author names and rejects malformed metadata", () => {
+    expect(
+      parseLocalBranchInventory({
+        ...inventory,
+        branches: [{ ...branch, lastCommitAuthor: "Dana Alvarez" }],
+      }).branches[0]?.lastCommitAuthor,
+    ).toBe("Dana Alvarez");
+    expect(() =>
+      parseLocalBranchInventory({
+        ...inventory,
+        branches: [{ ...branch, lastCommitAuthor: 123 }],
+      }),
+    ).toThrow("lastCommitAuthor");
+  });
+});
 
 describe("Git origin normalization", () => {
   test("matches common SSH and HTTPS forms for case-insensitive hosts", () => {

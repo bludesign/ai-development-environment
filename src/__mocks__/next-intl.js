@@ -1204,6 +1204,7 @@ const mockTranslations = {
       "The first capture group is used when present; otherwise the entire branch match is used.",
     inheritDefaultRegex: "Inherit the default regex",
     settingsSaved: "Agent refresh interval saved.",
+    emptyFiltered: "No codebases match this agent.",
   },
   codebaseDetail: {
     iosApp: "iOS App",

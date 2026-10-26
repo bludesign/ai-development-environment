@@ -185,6 +185,8 @@
     "emptyDescription": "Create an app to bring repositories, worktrees, AI runs, and builds together.",
     "noDescription": "No description",
     "dirtyWorktrees": "Dirty worktrees",
+    "nonMainWorktrees": "Worktrees off main",
+    "openRequests": "Open PRs",
     "worktrees": "Worktrees",
     "plans": "Plans",
     "sessions": "Sessions",
@@ -2734,6 +2736,7 @@
     }
   },
   "pullRequests": {
+    "allRepositories": "All repositories",
     "title": "GitHub Pull Requests",
     "description": "Review your GitHub pull requests and monitored repositories in one place.",
     "refresh": "Refresh",
@@ -3224,7 +3227,14 @@
     "jiraBranchRegexHelp": "Uses RE2; lookarounds and backreferences are unsupported. The first capture group is used when present; otherwise the entire branch match is used.",
     "inheritDefaultRegex": "Inherit the default regex",
     "settingsSaved": "Agent refresh interval saved.",
+    "emptyFiltered": "No codebases match this agent.",
     "branchesTab": {
+      "searchRepositories": "Search repositories…",
+      "noRepositories": "No repositories found.",
+      "author": "Author",
+      "allAuthors": "All authors",
+      "searchAuthors": "Search authors…",
+      "noAuthors": "No authors found.",
       "title": "Branches",
       "description": "Review local branches across all agents. Age is measured from the last local commit. Remote branches are never changed.",
       "agent": "Agent",
@@ -3364,6 +3374,8 @@
     "noMatchingStashes": "No stashes match your search."
   },
   "worktrees": {
+    "searchRepositories": "Search repositories…",
+    "noRepositories": "No repositories found.",
     "dismissError": "Dismiss error",
     "title": "Worktrees",
     "description": "Manage primary and linked Git worktrees across every enrolled agent.",
@@ -4023,6 +4035,9 @@
     "useManualVersion": "Use edited version"
   },
   "builds": {
+    "filterRepository": "Filter builds by repository",
+    "allRepositories": "All repositories",
+    "noRepositories": "No repositories found.",
     "title": "Builds",
     "description": "Configure, run, inspect, deploy, and export iOS builds across codebases and worktrees.",
     "build": "Build",

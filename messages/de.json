@@ -185,6 +185,8 @@
     "emptyDescription": "Erstellen Sie eine App, um Repositories, Worktrees, KI-Läufe und Builds zusammenzuführen.",
     "noDescription": "Keine Beschreibung",
     "dirtyWorktrees": "Geänderte Worktrees",
+    "nonMainWorktrees": "Worktrees außerhalb von main",
+    "openRequests": "Offene PRs",
     "worktrees": "Worktrees",
     "plans": "Pläne",
     "sessions": "Sitzungen",
@@ -2734,6 +2736,7 @@
     }
   },
   "pullRequests": {
+    "allRepositories": "Alle Repositories",
     "title": "GitHub Pull Requests",
     "description": "Prüfe deine GitHub Pull Requests und überwachten Repositories an einem Ort.",
     "refresh": "Aktualisieren",
@@ -3224,7 +3227,14 @@
     "jiraBranchRegexHelp": "Verwendet RE2; Lookarounds und Rückverweise werden nicht unterstützt. Die erste Erfassungsgruppe wird verwendet; ohne Gruppe gilt der gesamte Treffer im Branchnamen.",
     "inheritDefaultRegex": "Standard-Regex übernehmen",
     "settingsSaved": "Codebase-Einstellungen gespeichert.",
+    "emptyFiltered": "Keine Codebasen für diesen Agenten gefunden.",
     "branchesTab": {
+      "searchRepositories": "Repositories suchen…",
+      "noRepositories": "Keine Repositories gefunden.",
+      "author": "Autor",
+      "allAuthors": "Alle Autoren",
+      "searchAuthors": "Autoren suchen…",
+      "noAuthors": "Keine Autoren gefunden.",
       "title": "Branches",
       "description": "Prüfe lokale Branches auf allen Agents. Das Alter wird seit dem letzten lokalen Commit berechnet. Remote-Branches werden niemals geändert.",
       "agent": "Agent",
@@ -3364,6 +3374,8 @@
     "noMatchingStashes": "Keine Stashes entsprechen deiner Suche."
   },
   "worktrees": {
+    "searchRepositories": "Repositories suchen…",
+    "noRepositories": "Keine Repositories gefunden.",
     "dismissError": "Fehler ausblenden",
     "title": "Arbeitsbäume",
     "description": "Primäre und verknüpfte Git-Worktrees auf allen registrierten Agents verwalten.",
@@ -4023,6 +4035,9 @@
     "useManualVersion": "Bearbeitete Version verwenden"
   },
   "builds": {
+    "filterRepository": "Builds nach Repository filtern",
+    "allRepositories": "Alle Repositories",
+    "noRepositories": "Keine Repositories gefunden.",
     "title": "Builds",
     "description": "iOS-Builds für Codebasen und Worktrees konfigurieren, ausführen, prüfen, bereitstellen und exportieren.",
     "build": "Build",

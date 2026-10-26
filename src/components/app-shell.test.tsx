@@ -120,6 +120,8 @@ function managedApp(id: string, name: string): ManagedApp {
       codebases: 0,
       worktrees: 0,
       dirtyWorktrees: 0,
+      nonMainWorktrees: 0,
+      openRequests: 0,
       plans: 0,
       sessions: 0,
       builds: 0,

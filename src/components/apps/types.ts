@@ -23,6 +23,8 @@ export type AppCounts = {
   codebases: number;
   worktrees: number;
   dirtyWorktrees: number;
+  nonMainWorktrees: number;
+  openRequests: number;
   plans: number;
   sessions: number;
   builds: number;
@@ -49,6 +51,6 @@ export const APP_REPOSITORY_FIELDS = `
 
 export const APP_FIELDS = `
   id name description agentIds createdAt updatedAt
-  counts { repositories codebases worktrees dirtyWorktrees plans sessions builds }
+  counts { repositories codebases worktrees dirtyWorktrees nonMainWorktrees openRequests plans sessions builds }
   repositories { ${APP_REPOSITORY_FIELDS} }
 `;

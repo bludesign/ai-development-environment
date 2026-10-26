@@ -26,7 +26,15 @@ async function repository() {
   await git(folder, "init", "-b", "main");
   await git(folder, "config", "user.email", "test@example.com");
   await git(folder, "config", "user.name", "Test");
-  await git(folder, "commit", "--allow-empty", "-m", "Initial");
+  await git(
+    folder,
+    "commit",
+    "--allow-empty",
+    "--author",
+    "Original Author <author@example.com>",
+    "-m",
+    "Initial",
+  );
   await git(
     folder,
     "remote",
@@ -78,7 +86,15 @@ describe("local branch cleanup", () => {
   test("uses the local tip even when origin has a newer same-named branch and includes more than 1000 refs", async () => {
     const { folder, sha } = await repository();
     await git(folder, "checkout", "-b", "remote-change");
-    await git(folder, "commit", "--allow-empty", "-m", "Newer remote commit");
+    await git(
+      folder,
+      "commit",
+      "--allow-empty",
+      "--author",
+      "Remote Author <remote@example.com>",
+      "-m",
+      "Newer remote commit",
+    );
     const remoteSha = (await git(folder, "rev-parse", "HEAD")).stdout.trim();
     await git(folder, "checkout", "main");
     await git(folder, "update-ref", "refs/remotes/origin/main", remoteSha);
@@ -107,6 +123,7 @@ describe("local branch cleanup", () => {
     ).toMatchObject({
       headSha: sha,
       lastCommitMessage: "Initial",
+      lastCommitAuthor: "Original Author",
       current: true,
     });
     expect(

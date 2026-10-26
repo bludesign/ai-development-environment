@@ -928,12 +928,16 @@ export function WorktreesPage({ appId }: { appId?: string }) {
   };
 
   const repositoryOptions = useMemo(() => {
-    const repositories = new Map<string, { id: string; name: string }>();
+    const repositories = new Map<
+      string,
+      { id: string; name: string; displayOrigin: string }
+    >();
     overview?.agents.forEach((agentGroup) =>
       agentGroup.codebases.forEach((group) =>
         repositories.set(group.repository.id, {
           id: group.repository.id,
           name: group.repository.name,
+          displayOrigin: group.repository.displayOrigin,
         }),
       ),
     );
@@ -1112,37 +1116,36 @@ export function WorktreesPage({ appId }: { appId?: string }) {
             />
           </div>
           <div className="min-w-0 flex-[1_1_12rem]">
-            <Select
+            <SearchableSelect
               disabled={Boolean(globalAgent.activeAgentId)}
               onValueChange={setAgentFilter}
               value={activeAgentFilter}
-            >
-              <SelectTrigger aria-label={t("filterByAgent")} className="w-full">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value={ALL_FILTER_VALUE}>
-                  {t("allAgents")}
-                </SelectItem>
-                {globalAgent.activeAgentId &&
-                  !overview.agents.some(
-                    ({ agent }) => agent.id === globalAgent.activeAgentId,
-                  ) && (
-                    <SelectItem value={globalAgent.activeAgentId}>
-                      {globalAgent.activeAgent?.name ??
-                        activeAgentTranslations("unavailable")}
-                    </SelectItem>
-                  )}
-                {overview.agents.map((agentGroup) => (
-                  <SelectItem
-                    key={agentGroup.agent.id}
-                    value={agentGroup.agent.id}
-                  >
-                    {agentGroup.agent.name}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+              options={[
+                { value: ALL_FILTER_VALUE, label: t("allAgents") },
+                ...overview.agents.map(({ agent }) => ({
+                  value: agent.id,
+                  label: agent.name,
+                  keywords: agent.hostname,
+                })),
+                ...(globalAgent.activeAgentId &&
+                !overview.agents.some(
+                  ({ agent }) => agent.id === globalAgent.activeAgentId,
+                )
+                  ? [
+                      {
+                        value: globalAgent.activeAgentId,
+                        label:
+                          globalAgent.activeAgent?.name ??
+                          activeAgentTranslations("unavailable"),
+                      },
+                    ]
+                  : []),
+              ]}
+              ariaLabel={t("filterByAgent")}
+              placeholder={t("allAgents")}
+              searchPlaceholder={activeAgentTranslations("search")}
+              emptyMessage={activeAgentTranslations("empty")}
+            />
             {globalAgent.activeAgentId && (
               <p className="mt-1 text-xs text-muted-foreground">
                 {activeAgentTranslations("controlled")}
@@ -1150,27 +1153,22 @@ export function WorktreesPage({ appId }: { appId?: string }) {
             )}
           </div>
           <div className="min-w-0 flex-[1_1_12rem]">
-            <Select
+            <SearchableSelect
               onValueChange={setRepositoryFilter}
               value={activeRepositoryFilter}
-            >
-              <SelectTrigger
-                aria-label={t("filterByRepository")}
-                className="w-full"
-              >
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value={ALL_FILTER_VALUE}>
-                  {t("allRepositories")}
-                </SelectItem>
-                {repositoryOptions.map((repository) => (
-                  <SelectItem key={repository.id} value={repository.id}>
-                    {repository.name}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+              options={[
+                { value: ALL_FILTER_VALUE, label: t("allRepositories") },
+                ...repositoryOptions.map((repository) => ({
+                  value: repository.id,
+                  label: repository.name,
+                  keywords: repository.displayOrigin,
+                })),
+              ]}
+              ariaLabel={t("filterByRepository")}
+              placeholder={t("allRepositories")}
+              searchPlaceholder={t("searchRepositories")}
+              emptyMessage={t("noRepositories")}
+            />
           </div>
           <div className="min-w-0 flex-[1_1_12rem]">
             <Select onValueChange={setChangesFilter} value={changesFilter}>

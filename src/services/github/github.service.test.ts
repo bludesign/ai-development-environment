@@ -1992,6 +1992,89 @@ describe("GitHub service", () => {
     expect(allRepository.items[0]?.state).toBe("CLOSED");
   });
 
+  test.each(["MINE", "REVIEW_REQUESTED"] as const)(
+    "narrows %s searches by repository and binds pagination to that filter",
+    async (scope) => {
+      const queries: string[] = [];
+      vi.stubGlobal(
+        "fetch",
+        vi.fn(async (_url: string, init?: RequestInit) => {
+          const body = JSON.parse(String(init?.body)) as {
+            query: string;
+            variables: Record<string, unknown>;
+          };
+          if (body.query.includes("query GitHubViewer"))
+            return response({
+              data: {
+                viewer: {
+                  login: "octocat",
+                  name: "Octo Cat",
+                  avatarUrl: "https://avatars.example/octocat",
+                  url: "https://github.com/octocat",
+                },
+              },
+            });
+          if (body.query.includes("GitHubPullRequestSearch"))
+            return response({
+              data: aliasedSearchData(body.variables, (query) => {
+                queries.push(query);
+                return {
+                  nodes: query.includes("-author:@me")
+                    ? []
+                    : [
+                        rawPullRequest("filtered-1", "Newer"),
+                        rawPullRequest("filtered-2", "Older"),
+                      ],
+                  pageInfo: { hasNextPage: false, endCursor: null },
+                };
+              }),
+            });
+          throw new Error(`Unexpected query: ${body.query}`);
+        }),
+      );
+      const service = new GitHubService();
+      const first = await service.pullRequests(scope, "local-repository-1", {
+        first: 1,
+      });
+      expect(first.hasNextPage).toBe(true);
+      const next = await service.pullRequests(scope, "local-repository-1", {
+        first: 1,
+        after: first.endCursor,
+      });
+      expect(first.items[0]?.id).toBe("filtered-1");
+      expect(next.items[0]?.id).toBe("filtered-2");
+      expect(
+        queries.every(
+          (query) =>
+            query.includes("repo:acme/widgets") && query.includes("is:open"),
+        ),
+      ).toBe(true);
+      if (scope === "MINE") {
+        expect(
+          queries.some(
+            (query) =>
+              query.includes("author:@me") && !query.includes("-author:@me"),
+          ),
+        ).toBe(true);
+        expect(
+          queries.some(
+            (query) =>
+              query.includes("assignee:@me") && query.includes("-author:@me"),
+          ),
+        ).toBe(true);
+      } else
+        expect(
+          queries.every((query) => query.includes("review-requested:@me")),
+        ).toBe(true);
+      await expect(
+        service.pullRequests(scope, null, { after: first.endCursor }),
+      ).rejects.toThrow("pagination cursor is invalid");
+      await expect(service.pullRequests(scope, "missing")).rejects.toThrow(
+        "Managed repository was not found",
+      );
+    },
+  );
+
   test("paginates repository pull requests with a filter-specific cursor", async () => {
     const repositoryQueries: Array<Record<string, unknown>> = [];
     vi.stubGlobal(

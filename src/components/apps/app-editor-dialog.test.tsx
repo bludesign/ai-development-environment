@@ -114,6 +114,8 @@ describe("AppEditorDialog", () => {
               codebases: 1,
               worktrees: 0,
               dirtyWorktrees: 0,
+              nonMainWorktrees: 0,
+              openRequests: 0,
               plans: 0,
               sessions: 0,
               builds: 0,

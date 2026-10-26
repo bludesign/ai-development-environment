@@ -562,6 +562,8 @@ type LocalBranch {
   lastCommitAt: String
   "Subject of the local tip commit, or null when unknown."
   lastCommitMessage: String
+  "Author name of the local tip commit, or null when unknown."
+  lastCommitAuthor: String
   "Whether this is the registered checkout's current branch."
   current: Boolean!
   "Git worktree path using this branch, or null when not checked out."
@@ -586,6 +588,8 @@ input LocalBranchInput {
   lastCommitAt: String
   "Local tip commit subject, or null when unknown."
   lastCommitMessage: String
+  "Author name of the local tip commit, or null when unknown."
+  lastCommitAuthor: String
   "Whether this is the registered checkout's current branch."
   current: Boolean!
   "Path of the worktree using this branch, or null."

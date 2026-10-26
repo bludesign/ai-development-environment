@@ -20,6 +20,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Checkbox } from "@/components/ui/checkbox";
 import { DateTime } from "@/components/common/date-time";
+import { SearchableSelect } from "@/components/common/searchable-select";
 import {
   Dialog,
   DialogContent,
@@ -146,6 +147,10 @@ export function BuildsPage({
   const [builds, setBuilds] = useState<BuildRecord[]>([]);
   const [scripts, setScripts] = useState<BuildScript[]>([]);
   const [status, setStatus] = useState<(typeof STATUSES)[number]>("ALL");
+  const [repositoryId, setRepositoryId] = useState("");
+  const [repositories, setRepositories] = useState<
+    Array<{ id: string; name: string; displayOrigin: string }>
+  >([]);
   const [nextCursor, setNextCursor] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [loadingMore, setLoadingMore] = useState(false);
@@ -167,6 +172,42 @@ export function BuildsPage({
   const scriptsOwner = useRef<ReturnType<typeof createRefreshCoalescer> | null>(
     null,
   );
+  const loadRepositories = useCallback(
+    async (signal: AbortSignal) => {
+      if (configurationId) return;
+      const fields = "repositories { id name displayOrigin }";
+      const data = await controlPlaneRequest<{
+        codebaseOverview?: { repositories: typeof repositories };
+        app?: { repositories: typeof repositories } | null;
+      }>(
+        appId
+          ? `query BuildHistoryRepositories($id: ID!) { app(id: $id) { ${fields} } }`
+          : `query BuildHistoryRepositories { codebaseOverview { ${fields} } }`,
+        appId ? { id: appId } : undefined,
+        { signal },
+      );
+      if (!signal.aborted)
+        setRepositories(
+          (data.app?.repositories ?? data.codebaseOverview?.repositories ?? [])
+            .slice()
+            .sort((a, b) => a.name.localeCompare(b.name)),
+        );
+    },
+    [appId, configurationId],
+  );
+  useEffect(() => {
+    const controller = new AbortController();
+    const timer = window.setTimeout(() => {
+      void loadRepositories(controller.signal).catch((value) => {
+        if (!controller.signal.aborted)
+          setError(value instanceof Error ? value.message : String(value));
+      });
+    }, 0);
+    return () => {
+      window.clearTimeout(timer);
+      controller.abort();
+    };
+  }, [loadRepositories]);
   useEffect(() => {
     loadedCount.current = builds.length;
   }, [builds.length]);
@@ -175,8 +216,8 @@ export function BuildsPage({
       const data = await controlPlaneRequest<{
         builds: { items: BuildRecord[]; nextCursor: string | null };
       }>(
-        `query BuildsPage($after: ID, $first: Int!, $status: BuildStatus, $appId: ID, $configurationId: ID) {
-        builds(first: $first, after: $after, status: $status, appId: $appId, configurationId: $configurationId) { items { ${BUILD_LIST_FIELDS} } nextCursor }
+        `query BuildsPage($after: ID, $first: Int!, $status: BuildStatus, $appId: ID, $configurationId: ID, $repositoryId: ID) {
+        builds(first: $first, after: $after, status: $status, appId: $appId, configurationId: $configurationId, repositoryId: $repositoryId) { items { ${BUILD_LIST_FIELDS} } nextCursor }
       }`,
         {
           after,
@@ -184,12 +225,13 @@ export function BuildsPage({
           status: status === "ALL" ? null : status,
           appId: appId ?? null,
           configurationId: configurationId ?? null,
+          repositoryId: repositoryId || null,
         },
         { signal },
       );
       return data.builds;
     },
-    [appId, status, configurationId],
+    [appId, status, configurationId, repositoryId],
   );
   const load = useCallback(
     async (after?: string | null) => {
@@ -381,6 +423,34 @@ export function BuildsPage({
             {deleting ? <Spinner /> : <Trash2 />}
             {t("deleteSelected", { count: selected.size })}
           </Button>
+        )}
+        {!configurationId && (
+          <SearchableSelect
+            value={repositoryId}
+            onValueChange={(value) => {
+              if (value === repositoryId) return;
+              setRepositoryId(value);
+              setSelected(new Set());
+              setDeleteOpen(false);
+              setBuilds([]);
+              setNextCursor(null);
+              setLoading(true);
+              loadedCount.current = 0;
+            }}
+            options={[
+              { value: "", label: t("allRepositories") },
+              ...repositories.map((repository) => ({
+                value: repository.id,
+                label: repository.name,
+                keywords: repository.displayOrigin,
+              })),
+            ]}
+            ariaLabel={t("filterRepository")}
+            placeholder={t("allRepositories")}
+            searchPlaceholder={t("searchRepositories")}
+            emptyMessage={t("noRepositories")}
+            className="w-48"
+          />
         )}
         <Select
           onValueChange={(value) => {

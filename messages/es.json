@@ -185,6 +185,8 @@
     "emptyDescription": "Crea una app para reunir repositorios, worktrees, ejecuciones de IA y compilaciones.",
     "noDescription": "Sin descripción",
     "dirtyWorktrees": "Worktrees modificados",
+    "nonMainWorktrees": "Worktrees fuera de main",
+    "openRequests": "PRs abiertas",
     "worktrees": "Worktrees",
     "plans": "Planes",
     "sessions": "Sesiones",
@@ -2734,6 +2736,7 @@
     }
   },
   "pullRequests": {
+    "allRepositories": "Todos los repositorios",
     "title": "Solicitudes de extracción de GitHub",
     "description": "Revisa tus solicitudes de GitHub y los repositorios supervisados en un solo lugar.",
     "refresh": "Actualizar",
@@ -3224,7 +3227,14 @@
     "jiraBranchRegexHelp": "Usa RE2; las aserciones de anticipación y las referencias inversas no son compatibles. Se usa el primer grupo capturado; si no existe, se usa toda la coincidencia de la rama.",
     "inheritDefaultRegex": "Heredar la expresión predeterminada",
     "settingsSaved": "Se guardaron los ajustes de las bases de código.",
+    "emptyFiltered": "No hay bases de código para este agente.",
     "branchesTab": {
+      "searchRepositories": "Buscar repositorios…",
+      "noRepositories": "No se encontraron repositorios.",
+      "author": "Autor",
+      "allAuthors": "Todos los autores",
+      "searchAuthors": "Buscar autores…",
+      "noAuthors": "No se encontraron autores.",
       "title": "Ramas",
       "description": "Revisa las ramas locales de todos los agentes. La antigüedad se mide desde el último commit local. Las ramas remotas nunca se modifican.",
       "agent": "Agente",
@@ -3364,6 +3374,8 @@
     "noMatchingStashes": "Ningún stash coincide con tu búsqueda."
   },
   "worktrees": {
+    "searchRepositories": "Buscar repositorios…",
+    "noRepositories": "No se encontraron repositorios.",
     "dismissError": "Descartar error",
     "title": "Árboles de trabajo",
     "description": "Gestiona worktrees de Git principales y vinculados en todos los agentes inscritos.",
@@ -4023,6 +4035,9 @@
     "useManualVersion": "Usar versión editada"
   },
   "builds": {
+    "filterRepository": "Filtrar compilaciones por repositorio",
+    "allRepositories": "Todos los repositorios",
+    "noRepositories": "No se encontraron repositorios.",
     "title": "Compilaciones",
     "description": "Configura, ejecuta, inspecciona, instala y exporta compilaciones de iOS en bases de código y worktrees.",
     "build": "Compilar",

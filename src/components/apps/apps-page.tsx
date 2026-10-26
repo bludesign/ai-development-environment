@@ -189,15 +189,15 @@ export function AppsPage() {
                   />
                   <AppListCount
                     appId={app.id}
-                    label={t("plans")}
-                    value={app.counts.plans}
-                    view="plans"
+                    label={t("nonMainWorktrees")}
+                    value={app.counts.nonMainWorktrees}
+                    view="worktrees"
                   />
                   <AppListCount
                     appId={app.id}
-                    label={t("sessions")}
-                    value={app.counts.sessions}
-                    view="sessions"
+                    label={t("openRequests")}
+                    value={app.counts.openRequests}
+                    view="worktrees"
                   />
                 </div>
               </CardContent>

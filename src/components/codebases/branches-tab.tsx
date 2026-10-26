@@ -6,6 +6,15 @@ import { useTranslations } from "next-intl";
 import { useEffect, useMemo, useRef, useState } from "react";
 
 import { DateTime } from "@/components/common/date-time";
+import { SearchableSelect } from "@/components/common/searchable-select";
+import {
+  useActiveAgent,
+  usePageAgentFilter,
+} from "@/components/active-agent/active-agent-provider";
+import {
+  ALL_PAGE_AGENTS,
+  PageAgentFilter,
+} from "@/components/active-agent/page-agent-filter";
 import { ConfirmationDialog } from "@/components/confirmation-dialog";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
@@ -87,7 +96,14 @@ export function BranchesTab({
   onRefresh: () => Promise<void>;
 }) {
   const t = useTranslations("codebases.branchesTab");
-  const [agent, setAgent] = useState("all");
+  const { activeAgentId } = useActiveAgent();
+  const [selectedAgentId, setSelectedAgentId] = usePageAgentFilter(
+    "codebases-branches",
+    ALL_PAGE_AGENTS,
+  );
+  const agentId = activeAgentId ?? selectedAgentId;
+  const agent = agentId === ALL_PAGE_AGENTS ? "all" : agentId;
+  const [author, setAuthor] = useState("");
   const [repository, setRepository] = useState("all");
   const [age, setAge] = useState("all");
   const [customAge, setCustomAge] = useState("30");
@@ -100,6 +116,22 @@ export function BranchesTab({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [progress, setProgress] = useState<ProgressRow[]>([]);
+  const filterContext = JSON.stringify([
+    agent,
+    repository,
+    age,
+    customAge,
+    author,
+  ]);
+  const [selectionContext, setSelectionContext] = useState(filterContext);
+  if (selectionContext !== filterContext) {
+    setSelectionContext(filterContext);
+    setSelection({});
+    setPage(0);
+    setReview(false);
+    setForceReview(false);
+    setForce(false);
+  }
   const controller = useRef<AbortController | null>(null);
   const allRows = useMemo(() => localBranchRows(repositories), [repositories]);
   const invalidAge =
@@ -111,8 +143,17 @@ export function BranchesTab({
     age === "all" ? null : age === "custom" ? Number(customAge) : Number(age);
   const rows = useMemo(
     () =>
-      invalidAge ? [] : filterBranchRows(allRows, agent, repository, days, now),
-    [allRows, agent, repository, days, invalidAge, now],
+      invalidAge
+        ? []
+        : filterBranchRows(
+            allRows,
+            agent,
+            repository,
+            days,
+            now,
+            author || null,
+          ),
+    [allRows, agent, repository, days, invalidAge, now, author],
   );
   const validSelection = reconcileBranchSelection(selection, rows);
   const selected = rows.filter(
@@ -130,6 +171,13 @@ export function BranchesTab({
       ),
     ).values(),
   ];
+  const authors = [
+    ...new Set(
+      allRows.flatMap(({ branch }) =>
+        branch.lastCommitAuthor ? [branch.lastCommitAuthor] : [],
+      ),
+    ),
+  ].sort((a, b) => a.localeCompare(b));
 
   useEffect(() => {
     const timer = window.setTimeout(
@@ -280,44 +328,56 @@ export function BranchesTab({
   return (
     <div className="space-y-4">
       <p className="text-sm text-muted-foreground">{t("description")}</p>
-      <div className="flex flex-wrap items-end gap-3">
+      <div className="flex flex-wrap items-start gap-3">
         <div className="space-y-1">
           <Label>{t("agent")}</Label>
-          <Select
-            value={agent}
-            onValueChange={(value) => changeFilter(setAgent, value)}
-          >
-            <SelectTrigger aria-label={t("agent")} className="w-48">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">{t("allAgents")}</SelectItem>
-              {agents.map((agent) => (
-                <SelectItem key={agent.id} value={agent.id}>
-                  {agent.name}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
+          <PageAgentFilter
+            value={selectedAgentId}
+            onValueChange={setSelectedAgentId}
+            ariaLabel={t("agent")}
+            className="sm:w-48"
+            options={agents.map((agent) => ({
+              value: agent.id,
+              label: agent.name,
+              keywords: agent.hostname,
+            }))}
+          />
+        </div>
+        <div className="space-y-1">
+          <Label>{t("author")}</Label>
+          <SearchableSelect
+            value={author}
+            onValueChange={setAuthor}
+            options={[
+              { value: "", label: t("allAuthors") },
+              ...authors.map((name) => ({ value: name, label: name })),
+            ]}
+            ariaLabel={t("author")}
+            placeholder={t("allAuthors")}
+            searchPlaceholder={t("searchAuthors")}
+            emptyMessage={t("noAuthors")}
+            className="w-48"
+          />
         </div>
         <div className="space-y-1">
           <Label>{t("repository")}</Label>
-          <Select
+          <SearchableSelect
             value={repository}
             onValueChange={(value) => changeFilter(setRepository, value)}
-          >
-            <SelectTrigger aria-label={t("repository")} className="w-48">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">{t("allRepositories")}</SelectItem>
-              {repositories.map((repository) => (
-                <SelectItem key={repository.id} value={repository.id}>
-                  {repository.name}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
+            options={[
+              { value: "all", label: t("allRepositories") },
+              ...repositories.map((repository) => ({
+                value: repository.id,
+                label: repository.name,
+                keywords: repository.displayOrigin,
+              })),
+            ]}
+            ariaLabel={t("repository")}
+            placeholder={t("allRepositories")}
+            searchPlaceholder={t("searchRepositories")}
+            emptyMessage={t("noRepositories")}
+            className="w-48"
+          />
         </div>
         <div className="space-y-1">
           <Label>{t("olderThan")}</Label>
@@ -358,6 +418,7 @@ export function BranchesTab({
         )}
         <Button
           variant="outline"
+          className="mt-5"
           disabled={busy}
           onClick={() => void onRefresh()}
         >
@@ -478,7 +539,10 @@ export function BranchesTab({
                     </div>
                   </TableCell>
                   <TableCell>
-                    {row.codebase.agent.name}
+                    <div>{row.codebase.agent.name}</div>
+                    <div className="text-xs text-muted-foreground">
+                      {row.branch.lastCommitAuthor || t("unknown")}
+                    </div>
                     {row.codebase.agent.connectionStatus !== "ONLINE" && (
                       <Badge variant="outline" className="mt-1 block w-fit">
                         {t("cached")}

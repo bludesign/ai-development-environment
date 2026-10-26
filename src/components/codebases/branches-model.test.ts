@@ -33,6 +33,7 @@ const repositories = [
             current: false,
             checkedOutPath: null,
             lastCommitMessage: "Work",
+            lastCommitAuthor: id === "a" ? "Dana Alvarez" : "Priya Nair",
             lastCommitAt: new Date(now - 30 * 86_400_000).toISOString(),
           },
           {
@@ -41,6 +42,7 @@ const repositories = [
             current: true,
             checkedOutPath: `/${id}`,
             lastCommitMessage: null,
+            lastCommitAuthor: null,
             lastCommitAt: null,
           },
         ],
@@ -84,6 +86,23 @@ describe("branch inventory filters and selection", () => {
       ),
     ).toEqual({});
   });
+  test("combines author with agent, repository and age filters while excluding unknown authors", () => {
+    const rows = localBranchRows(repositories);
+    expect(
+      filterBranchRows(rows, "all", "repo", 30, now, "Dana Alvarez").map(
+        ({ key }) => key,
+      ),
+    ).toEqual(["a:feature"]);
+    expect(
+      filterBranchRows(rows, "b", "repo", null, now, "Dana Alvarez"),
+    ).toEqual([]);
+    expect(
+      filterBranchRows(rows, "all", "repo", 31, now, "Dana Alvarez"),
+    ).toEqual([]);
+    expect(
+      filterBranchRows(rows, "all", "other", null, now, "Dana Alvarez"),
+    ).toEqual([]);
+  });
   test("keeps legacy local names visible with unknown ages and no cleanup capability", () => {
     const legacy = {
       ...repositories[0],
@@ -99,7 +118,7 @@ describe("branch inventory filters and selection", () => {
     const rows = localBranchRows([legacy]);
     expect(rows).toHaveLength(1);
     expect(rows[0]).toMatchObject({
-      branch: { name: "legacy", lastCommitAt: null },
+      branch: { name: "legacy", lastCommitAt: null, lastCommitAuthor: null },
       restriction: "metadataMissing",
     });
   });

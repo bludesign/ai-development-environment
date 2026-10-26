@@ -54,7 +54,7 @@ export async function scanLocalBranches(
       folder,
       [
         "for-each-ref",
-        "--format=%(refname:strip=2)%00%(objectname)%00%(committerdate:iso-strict)%00%(contents:subject)%00%(worktreepath)",
+        "--format=%(refname:strip=2)%00%(objectname)%00%(committerdate:iso-strict)%00%(contents:subject)%00%(worktreepath)%00%(authorname)",
         branch ? `refs/heads/${branch}` : "refs/heads",
       ],
       timeoutMs,
@@ -71,7 +71,7 @@ export async function scanLocalBranches(
       .split("\n")
       .filter(Boolean)
       .map((line) => {
-        const [name, headSha, date, subject, path] = line.split("\0");
+        const [name, headSha, date, subject, path, author] = line.split("\0");
         return {
           name,
           headSha,
@@ -80,6 +80,7 @@ export async function scanLocalBranches(
               ? new Date(date).toISOString()
               : null,
           lastCommitMessage: subject?.slice(0, 2_000) || null,
+          lastCommitAuthor: author || null,
           current: current.exitCode === 0 && name === current.stdout.trim(),
           checkedOutPath: path || null,
         };

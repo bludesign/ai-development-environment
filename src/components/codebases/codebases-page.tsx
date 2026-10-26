@@ -36,6 +36,14 @@ import {
 
 const AGENT_FIELDS =
   "id name hostname connectionStatus capabilities baseRepoDirectory";
+import {
+  useActiveAgent,
+  usePageAgentFilter,
+} from "@/components/active-agent/active-agent-provider";
+import {
+  ALL_PAGE_AGENTS,
+  PageAgentFilter,
+} from "@/components/active-agent/page-agent-filter";
 import { AgentDirectoryBrowser } from "@/components/agents/agent-directory-browser";
 import type { Agent } from "@/components/agents/types";
 import { ConfirmationDialog } from "@/components/confirmation-dialog";
@@ -93,7 +101,7 @@ const OVERVIEW_EVENT_DEBOUNCE_MS = 100;
 const CODEBASE_FIELDS = `
   id folder observedOrigin branch headSha upstream ahead behind syncState availability
   statusError defaultBranch localBranches remoteBranches lastCheckedAt lastFetchedAt lastFetchAttemptAt lastFetchError
-  localBranchInventoryError localBranchInventory { scannedAt branches { name headSha lastCommitAt lastCommitMessage current checkedOutPath } }
+  localBranchInventoryError localBranchInventory { scannedAt branches { name headSha lastCommitAt lastCommitMessage lastCommitAuthor current checkedOutPath } }
   agent { ${AGENT_FIELDS} }
   activeJob { id agentId kind payload status idempotencyKey result error timeoutSeconds createdAt startedAt finishedAt updatedAt }
 `;
@@ -106,6 +114,12 @@ type GroupMode = "agents" | "repositories" | "branches";
 
 export function CodebasesPage() {
   const t = useTranslations("codebases");
+  const { activeAgentId } = useActiveAgent();
+  const [selectedAgentId, setSelectedAgentId] = usePageAgentFilter(
+    "codebases-agents",
+    ALL_PAGE_AGENTS,
+  );
+  const agentId = activeAgentId ?? selectedAgentId;
   const [repositories, setRepositories] = useState<CodebaseRepository[]>([]);
   const [agents, setAgents] = useState<Agent[]>([]);
   const [settings, setSettings] = useState<CodebaseSettings | null>(null);
@@ -212,6 +226,10 @@ export function CodebasesPage() {
         repository.codebases.map((codebase) => ({ codebase, repository })),
       ),
     [repositories],
+  );
+  const filteredCodebases = codebases.filter(
+    ({ codebase }) =>
+      agentId === ALL_PAGE_AGENTS || codebase.agent.id === agentId,
   );
 
   const runOperation = async (
@@ -335,10 +353,30 @@ export function CodebasesPage() {
         </TabsList>
       </Tabs>
 
+      {groupMode === "agents" && (
+        <div className="flex items-start">
+          <PageAgentFilter
+            value={selectedAgentId}
+            onValueChange={setSelectedAgentId}
+            options={agents.map((agent) => ({
+              value: agent.id,
+              label: agent.name,
+              keywords: agent.hostname,
+            }))}
+          />
+        </div>
+      )}
+
       {loading ? (
         <p className="flex items-center gap-2 text-sm text-muted-foreground">
           <Spinner /> {t("loading")}
         </p>
+      ) : groupMode === "branches" ? (
+        <BranchesTab
+          repositories={repositories}
+          onReload={load}
+          onRefresh={() => runOperation("refreshCodebases")}
+        />
       ) : codebases.length === 0 ? (
         <Empty className="border py-12">
           <EmptyHeader>
@@ -349,19 +387,19 @@ export function CodebasesPage() {
             <EmptyDescription>{t("emptyDescription")}</EmptyDescription>
           </EmptyHeader>
         </Empty>
-      ) : groupMode === "branches" ? (
-        <BranchesTab
-          repositories={repositories}
-          onReload={load}
-          onRefresh={() => runOperation("refreshCodebases")}
-        />
       ) : groupMode === "agents" ? (
-        <AgentGroups
-          agents={agents}
-          entries={codebases}
-          onFetch={(id) => runOperation("fetchCodebases", [id])}
-          onRemove={removeCodebase}
-        />
+        filteredCodebases.length ? (
+          <AgentGroups
+            agents={agents}
+            entries={filteredCodebases}
+            onFetch={(id) => runOperation("fetchCodebases", [id])}
+            onRemove={removeCodebase}
+          />
+        ) : (
+          <p className="py-8 text-center text-sm text-muted-foreground">
+            {t("emptyFiltered")}
+          </p>
+        )
       ) : (
         <RepositoryGroups
           repositories={repositories}
