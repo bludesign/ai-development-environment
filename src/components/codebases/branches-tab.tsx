@@ -361,22 +361,23 @@ export function BranchesTab({
         </div>
         <div className="space-y-1">
           <Label>{t("repository")}</Label>
-          <Select
+          <SearchableSelect
             value={repository}
             onValueChange={(value) => changeFilter(setRepository, value)}
-          >
-            <SelectTrigger aria-label={t("repository")} className="w-48">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">{t("allRepositories")}</SelectItem>
-              {repositories.map((repository) => (
-                <SelectItem key={repository.id} value={repository.id}>
-                  {repository.name}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
+            options={[
+              { value: "all", label: t("allRepositories") },
+              ...repositories.map((repository) => ({
+                value: repository.id,
+                label: repository.name,
+                keywords: repository.displayOrigin,
+              })),
+            ]}
+            ariaLabel={t("repository")}
+            placeholder={t("allRepositories")}
+            searchPlaceholder={t("searchRepositories")}
+            emptyMessage={t("noRepositories")}
+            className="w-48"
+          />
         </div>
         <div className="space-y-1">
           <Label>{t("olderThan")}</Label>

@@ -2734,6 +2734,7 @@
     }
   },
   "pullRequests": {
+    "allRepositories": "All repositories",
     "title": "GitHub Pull Requests",
     "description": "Review your GitHub pull requests and monitored repositories in one place.",
     "refresh": "Refresh",
@@ -3226,6 +3227,8 @@
     "settingsSaved": "Agent refresh interval saved.",
     "emptyFiltered": "No codebases match this agent.",
     "branchesTab": {
+      "searchRepositories": "Search repositories…",
+      "noRepositories": "No repositories found.",
       "author": "Author",
       "allAuthors": "All authors",
       "searchAuthors": "Search authors…",
@@ -3369,6 +3372,8 @@
     "noMatchingStashes": "No stashes match your search."
   },
   "worktrees": {
+    "searchRepositories": "Search repositories…",
+    "noRepositories": "No repositories found.",
     "dismissError": "Dismiss error",
     "title": "Worktrees",
     "description": "Manage primary and linked Git worktrees across every enrolled agent.",
@@ -4028,6 +4033,9 @@
     "useManualVersion": "Use edited version"
   },
   "builds": {
+    "filterRepository": "Filter builds by repository",
+    "allRepositories": "All repositories",
+    "noRepositories": "No repositories found.",
     "title": "Builds",
     "description": "Configure, run, inspect, deploy, and export iOS builds across codebases and worktrees.",
     "build": "Build",

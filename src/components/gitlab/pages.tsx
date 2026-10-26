@@ -227,15 +227,31 @@ function ProjectSelect({
       }
       value={allowAll && !value ? ALL_PROJECTS_VALUE : value}
     >
-      <SelectTrigger aria-label={t("project")} className="h-9 min-w-56">
+      <SelectTrigger
+        aria-label={t("project")}
+        className="h-9 w-full min-w-0 max-w-full sm:w-80 *:data-[slot=select-value]:min-w-0 *:data-[slot=select-value]:flex-1 *:data-[slot=select-value]:block *:data-[slot=select-value]:truncate"
+        title={
+          projects.find((project) => project.id === value)?.pathWithNamespace ??
+          t(allowAll ? "allProjects" : "chooseProject")
+        }
+      >
         <SelectValue placeholder={t("chooseProject")} />
       </SelectTrigger>
-      <SelectContent>
+      <SelectContent
+        position="popper"
+        align="start"
+        className="w-(--radix-select-trigger-width) max-w-[calc(100vw-2rem)]"
+      >
         {allowAll && (
           <SelectItem value={ALL_PROJECTS_VALUE}>{t("allProjects")}</SelectItem>
         )}
         {projects.map((project) => (
-          <SelectItem key={project.id} value={project.id}>
+          <SelectItem
+            key={project.id}
+            value={project.id}
+            title={project.pathWithNamespace}
+            className="[&>span:last-child]:min-w-0 [&>span:last-child]:flex-1 [&>span:last-child]:block [&>span:last-child]:truncate"
+          >
             {project.pathWithNamespace}
           </SelectItem>
         ))}

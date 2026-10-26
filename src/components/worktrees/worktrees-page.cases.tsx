@@ -1034,10 +1034,6 @@ export function registerWorktreesPageTests(
         const repositoryFilter = screen.getByRole("combobox", {
           name: "Filter by repository",
         });
-        expect(agentFilter.getAttribute("data-slot")).toBe("select-trigger");
-        expect(repositoryFilter.getAttribute("data-slot")).toBe(
-          "select-trigger",
-        );
 
         fireEvent.change(search, { target: { value: "Add worktrees page" } });
         expect(screen.getByText("feature/AIDE-24")).toBeDefined();
@@ -1045,21 +1041,21 @@ export function registerWorktreesPageTests(
         expect(await screen.findByText("No matching worktrees")).toBeDefined();
         fireEvent.change(search, { target: { value: "" } });
 
-        fireEvent.pointerDown(agentFilter, {
-          button: 0,
-          ctrlKey: false,
-          pointerType: "mouse",
-        });
+        fireEvent.click(agentFilter);
+        fireEvent.change(
+          screen.getByRole("combobox", { name: "Search agents…" }),
+          { target: { value: "Studio" } },
+        );
         fireEvent.click(
           await screen.findByRole("option", { name: "Studio Mac" }),
         );
         expect(screen.getByText("feature/AIDE-24")).toBeDefined();
 
-        fireEvent.pointerDown(repositoryFilter, {
-          button: 0,
-          ctrlKey: false,
-          pointerType: "mouse",
-        });
+        fireEvent.click(repositoryFilter);
+        fireEvent.change(
+          screen.getByRole("combobox", { name: "Search repositories…" }),
+          { target: { value: "Codex" } },
+        );
         fireEvent.click(await screen.findByRole("option", { name: "Codex" }));
         expect(screen.getByText("feature/AIDE-24")).toBeDefined();
       });

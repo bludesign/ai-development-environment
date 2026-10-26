@@ -260,6 +260,71 @@ function configureRequests() {
 }
 
 describe("PullRequestsPage", () => {
+  test("filters Mine and Review requests by repository without changing their scope or mixing pagination", async () => {
+    configureRequests();
+    render(<PullRequestsPage />);
+    await screen.findByText(pullRequest.title);
+    const filter = screen.getByRole("combobox", { name: "Repository" });
+    expect(filter.textContent).toBe("All repositories");
+    fireEvent.click(filter);
+    fireEvent.change(
+      await screen.findByRole("combobox", { name: "Search repositories" }),
+      { target: { value: "widgets" } },
+    );
+    fireEvent.click(
+      await screen.findByRole("option", { name: "acme/widgets" }),
+    );
+    await waitFor(() =>
+      expect(requestMock).toHaveBeenCalledWith(
+        expect.stringContaining("query GitHubPullRequests"),
+        expect.objectContaining({
+          scope: "MINE",
+          repositoryId: repository.id,
+          after: null,
+        }),
+      ),
+    );
+    await waitFor(() => expect(intersectionTarget).not.toBeNull());
+    act(() => intersectPaginationTrigger());
+    await screen.findByText("Older merged pull request");
+    expect(requestMock).toHaveBeenCalledWith(
+      expect.stringContaining("query GitHubPullRequests"),
+      expect.objectContaining({
+        scope: "MINE",
+        repositoryId: repository.id,
+        after: "cursor-1",
+      }),
+    );
+    activateTab(screen.getByRole("tab", { name: "Review requests" }));
+    await screen.findByText("Review this");
+    expect(filter.textContent).toBe("acme/widgets");
+    expect(requestMock).toHaveBeenCalledWith(
+      expect.stringContaining("query GitHubPullRequests"),
+      expect.objectContaining({
+        scope: "REVIEW_REQUESTED",
+        repositoryId: repository.id,
+        after: null,
+      }),
+    );
+    fireEvent.click(filter);
+    fireEvent.click(
+      await screen.findByRole("option", { name: "All repositories" }),
+    );
+    await waitFor(() =>
+      expect(requestMock).toHaveBeenCalledWith(
+        expect.stringContaining("query GitHubPullRequests"),
+        expect.objectContaining({
+          scope: "REVIEW_REQUESTED",
+          repositoryId: null,
+          after: null,
+        }),
+      ),
+    );
+    activateTab(screen.getByRole("tab", { name: "Mine" }));
+    expect(filter.textContent).toBe("All repositories");
+    expect(screen.queryByText("Older merged pull request")).toBeNull();
+  });
+
   test("does not retry pull-request loading after an error", async () => {
     requestMock.mockImplementation(async (query) => {
       if (

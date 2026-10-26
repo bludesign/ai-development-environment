@@ -25,6 +25,10 @@ test("global focus survives navigation and reload, then restores each page filte
   await localAgent.click();
   await page.getByRole("option", { name: "Studio Mac", exact: true }).click();
   await expect(localAgent).toHaveText("Studio Mac");
+  // Let the local picker's exit animation finish before opening another agent picker.
+  await expect(
+    page.getByPlaceholder("Search agents…", { exact: true }),
+  ).toHaveCount(0);
 
   const globalAgent = page.getByRole("combobox", {
     name: "Active agent: None",

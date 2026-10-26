@@ -73,6 +73,11 @@ export const routes: RouteEntry[] = [
     readyTexts: ["Sync repositories"],
   },
   {
+    name: "app-worktrees",
+    path: `/dashboard/apps/${ids.apps.customerPortal}?view=worktrees`,
+    readyGraphqlOperation: "WorktreeOverview",
+  },
+  {
     name: "app-export",
     path: `/dashboard/apps/${ids.apps.customerPortal}`,
     readyGraphqlOperation: "AppDetail",

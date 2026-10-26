@@ -135,6 +135,9 @@ export function GitLabAccessibleProjectSelect({
     setItems([]);
     setNextPage(null);
   };
+  const selectedLabel = value
+    ? (known.get(value)?.pathWithNamespace ?? t("projectWithId", { id: value }))
+    : t(allowAll ? "allProjects" : "chooseProject");
 
   return (
     <Popover
@@ -156,20 +159,18 @@ export function GitLabAccessibleProjectSelect({
           aria-label={t("project")}
           aria-expanded={open}
           variant="outline"
-          className="h-9 w-full justify-between font-normal sm:w-80"
+          className="h-9 w-full min-w-0 max-w-full justify-between font-normal sm:w-80"
+          title={selectedLabel}
         >
-          <span className="truncate">
-            {value
-              ? (known.get(value)?.pathWithNamespace ??
-                t("projectWithId", { id: value }))
-              : t(allowAll ? "allProjects" : "chooseProject")}
+          <span className="min-w-0 flex-1 truncate text-left">
+            {selectedLabel}
           </span>
           <ChevronsUpDown className="shrink-0 opacity-50" />
         </Button>
       </PopoverTrigger>
       <PopoverContent
         align="start"
-        className="w-(--radix-popover-trigger-width) min-w-64 p-0"
+        className="w-(--radix-popover-trigger-width) min-w-0 max-w-[calc(100vw-2rem)] p-0"
       >
         <Command shouldFilter={false} label={t("searchProjects")}>
           <CommandInput
@@ -204,6 +205,7 @@ export function GitLabAccessibleProjectSelect({
                   key={project.id}
                   value={project.id}
                   aria-label={project.pathWithNamespace}
+                  title={project.pathWithNamespace}
                   data-checked={project.id === value}
                   onSelect={() => choose(project)}
                 >

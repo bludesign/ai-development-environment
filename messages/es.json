@@ -2734,6 +2734,7 @@
     }
   },
   "pullRequests": {
+    "allRepositories": "Todos los repositorios",
     "title": "Solicitudes de extracción de GitHub",
     "description": "Revisa tus solicitudes de GitHub y los repositorios supervisados en un solo lugar.",
     "refresh": "Actualizar",
@@ -3226,6 +3227,8 @@
     "settingsSaved": "Se guardaron los ajustes de las bases de código.",
     "emptyFiltered": "No hay bases de código para este agente.",
     "branchesTab": {
+      "searchRepositories": "Buscar repositorios…",
+      "noRepositories": "No se encontraron repositorios.",
       "author": "Autor",
       "allAuthors": "Todos los autores",
       "searchAuthors": "Buscar autores…",
@@ -3369,6 +3372,8 @@
     "noMatchingStashes": "Ningún stash coincide con tu búsqueda."
   },
   "worktrees": {
+    "searchRepositories": "Buscar repositorios…",
+    "noRepositories": "No se encontraron repositorios.",
     "dismissError": "Descartar error",
     "title": "Árboles de trabajo",
     "description": "Gestiona worktrees de Git principales y vinculados en todos los agentes inscritos.",
@@ -4028,6 +4033,9 @@
     "useManualVersion": "Usar versión editada"
   },
   "builds": {
+    "filterRepository": "Filtrar compilaciones por repositorio",
+    "allRepositories": "Todos los repositorios",
+    "noRepositories": "No se encontraron repositorios.",
     "title": "Compilaciones",
     "description": "Configura, ejecuta, inspecciona, instala y exporta compilaciones de iOS en bases de código y worktrees.",
     "build": "Compilar",

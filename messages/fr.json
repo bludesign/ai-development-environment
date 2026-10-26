@@ -2734,6 +2734,7 @@
     }
   },
   "pullRequests": {
+    "allRepositories": "Tous les dépôts",
     "title": "Demandes de tirage GitHub",
     "description": "Consultez vos demandes GitHub et les dépôts surveillés au même endroit.",
     "refresh": "Actualiser",
@@ -3226,6 +3227,8 @@
     "settingsSaved": "Réglages des bases de code enregistrés.",
     "emptyFiltered": "Aucune base de code ne correspond à cet agent.",
     "branchesTab": {
+      "searchRepositories": "Rechercher des dépôts…",
+      "noRepositories": "Aucun dépôt trouvé.",
       "author": "Auteur",
       "allAuthors": "Tous les auteurs",
       "searchAuthors": "Rechercher des auteurs…",
@@ -3369,6 +3372,8 @@
     "noMatchingStashes": "Aucune remise ne correspond à votre recherche."
   },
   "worktrees": {
+    "searchRepositories": "Rechercher des dépôts…",
+    "noRepositories": "Aucun dépôt trouvé.",
     "dismissError": "Masquer l’erreur",
     "title": "Arbres de travail",
     "description": "Gérez les worktrees Git principaux et liés sur tous les agents inscrits.",
@@ -4028,6 +4033,9 @@
     "useManualVersion": "Utiliser la version modifiée"
   },
   "builds": {
+    "filterRepository": "Filtrer les builds par dépôt",
+    "allRepositories": "Tous les dépôts",
+    "noRepositories": "Aucun dépôt trouvé.",
     "title": "Builds",
     "description": "Configurez, lancez, inspectez, déployez et exportez les builds iOS des bases de code et worktrees.",
     "build": "Builder",

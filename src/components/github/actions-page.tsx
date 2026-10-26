@@ -691,19 +691,24 @@ export function ActionsPage() {
       ) : (
         <>
           {repositories.length > 0 && (
-            <div className="grid max-w-7xl gap-3 sm:grid-cols-2 xl:grid-cols-4">
-              <SearchableSelect
-                ariaLabel={t("repositoryFilter")}
-                emptyMessage={t("noRepositoryMatches")}
-                onValueChange={selectRepository}
-                options={repositoryOptions}
-                placeholder={t("repositoryFilter")}
-                searchPlaceholder={t("searchRepositories")}
-                value={selectedRepositoryId}
-              />
+            <div className="flex max-w-7xl flex-wrap items-start gap-3">
+              <div className="w-full min-w-0 sm:w-80 lg:w-96">
+                <SearchableSelect
+                  ariaLabel={t("repositoryFilter")}
+                  emptyMessage={t("noRepositoryMatches")}
+                  onValueChange={selectRepository}
+                  options={repositoryOptions}
+                  placeholder={t("repositoryFilter")}
+                  searchPlaceholder={t("searchRepositories")}
+                  value={selectedRepositoryId}
+                />
+              </div>
               {selectedRepositoryId !== ALL_REPOSITORIES && (
                 <>
-                  <form className="flex gap-2" onSubmit={applyBranchFilter}>
+                  <form
+                    className="flex w-full min-w-0 gap-2 sm:w-64"
+                    onSubmit={applyBranchFilter}
+                  >
                     <Input
                       aria-label={t("branchFilter")}
                       autoCapitalize="none"
@@ -737,10 +742,11 @@ export function ActionsPage() {
                     placeholder={t("pipelineFilter")}
                     searchPlaceholder={t("searchPipelines")}
                     value={selectedPipeline}
+                    className="w-full sm:w-64"
                   />
                 </>
               )}
-              <div className="flex min-h-9 items-center gap-2 rounded-md border px-3">
+              <div className="flex h-8 shrink-0 items-center gap-2 rounded-md border px-3">
                 <Checkbox
                   checked={latestOnly}
                   id="latest-actions-only"

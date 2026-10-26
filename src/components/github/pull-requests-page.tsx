@@ -128,7 +128,7 @@ function pullRequestPageKey(
 ) {
   return tab === "repositories"
     ? `${state}:repository:${repositoryId}`
-    : `${state}:${tab}`;
+    : `${state}:${tab}:${repositoryId}`;
 }
 
 function replaceIssueParam(issueKey: string | null) {
@@ -164,6 +164,9 @@ export function PullRequestsPage() {
   const [pullRequestState, setPullRequestState] =
     useState<GitHubPullRequestStateFilter>("OPEN");
   const [selectedRepositoryId, setSelectedRepositoryId] = useState("");
+  const [repositoryFilterId, setRepositoryFilterId] = useState("");
+  const filteredRepositoryId =
+    activeTab === "repositories" ? selectedRepositoryId : repositoryFilterId;
   const [pages, setPages] = useState<Record<string, GitHubPullRequestPage>>({});
   const [loadingTabs, setLoadingTabs] = useState<Record<string, boolean>>({});
   const [loadingMoreTabs, setLoadingMoreTabs] = useState<
@@ -208,6 +211,11 @@ export function PullRequestsPage() {
       const data = { ...settingsData, ...repositoryData };
       setSettings(data.githubSettings);
       setRepositories(data.githubRepositories);
+      setRepositoryFilterId((current) =>
+        data.githubRepositories.some((repository) => repository.id === current)
+          ? current
+          : "",
+      );
       setSelectedRepositoryId((current) =>
         data.githubRepositories.some((repository) => repository.id === current)
           ? current
@@ -284,12 +292,13 @@ export function PullRequestsPage() {
         }));
       }
       try {
-        const scopedRepositoryId = tab === "repositories" ? repositoryId : null;
-        const scope: GitHubPullRequestScope = scopedRepositoryId
-          ? "REPOSITORY"
-          : tab === "review"
-            ? "REVIEW_REQUESTED"
-            : "MINE";
+        const scopedRepositoryId = repositoryId || null;
+        const scope: GitHubPullRequestScope =
+          tab === "repositories"
+            ? "REPOSITORY"
+            : tab === "review"
+              ? "REVIEW_REQUESTED"
+              : "MINE";
         const data = await controlPlaneRequest<{
           githubPullRequests: GitHubPullRequestPage;
         }>(
@@ -378,20 +387,20 @@ export function PullRequestsPage() {
 
   const pageKey = pullRequestPageKey(
     activeTab,
-    selectedRepositoryId,
+    filteredRepositoryId,
     pullRequestState,
   );
 
   useEffect(() => {
     if (
       settings?.tokenConfigured &&
-      (activeTab !== "repositories" || selectedRepositoryId) &&
+      (activeTab !== "repositories" || filteredRepositoryId) &&
       !pages[pageKey] &&
       !loadingTabs[pageKey] &&
       !pageErrors[pageKey]
     ) {
       const timeout = window.setTimeout(
-        () => void loadTab(activeTab, selectedRepositoryId, pullRequestState),
+        () => void loadTab(activeTab, filteredRepositoryId, pullRequestState),
         0,
       );
       return () => window.clearTimeout(timeout);
@@ -404,7 +413,7 @@ export function PullRequestsPage() {
     pageErrors,
     pages,
     pullRequestState,
-    selectedRepositoryId,
+    filteredRepositoryId,
     settings?.tokenConfigured,
   ]);
 
@@ -442,7 +451,7 @@ export function PullRequestsPage() {
     const observer = new IntersectionObserver(
       (entries) => {
         if (!entries.some((entry) => entry.isIntersecting)) return;
-        void loadTab(activeTab, selectedRepositoryId, pullRequestState, {
+        void loadTab(activeTab, filteredRepositoryId, pullRequestState, {
           append: true,
           cursor: page.endCursor,
         });
@@ -460,12 +469,15 @@ export function PullRequestsPage() {
     page?.hasNextPage,
     paginationError,
     pullRequestState,
-    selectedRepositoryId,
+    filteredRepositoryId,
     settings?.tokenConfigured,
   ]);
 
   const repositoriesChanged = (next: GitHubRepositoryView[]) => {
     setRepositories(next);
+    setRepositoryFilterId((current) =>
+      next.some((repository) => repository.id === current) ? current : "",
+    );
     setPages({});
     setPageErrors({});
     setSelectedRepositoryId((current) =>
@@ -496,7 +508,7 @@ export function PullRequestsPage() {
           <Button
             disabled={!settings?.tokenConfigured || loading}
             onClick={() =>
-              void loadTab(activeTab, selectedRepositoryId, pullRequestState)
+              void loadTab(activeTab, filteredRepositoryId, pullRequestState)
             }
             variant="outline"
           >
@@ -571,22 +583,35 @@ export function PullRequestsPage() {
                 ))}
               </SelectContent>
             </Select>
-            {activeTab === "repositories" && repositories.length > 0 && (
-              <div className="min-w-64 max-w-lg flex-1">
+            {(activeTab !== "repositories" || repositories.length > 0) && (
+              <div className="w-full min-w-0 sm:w-96">
                 <SearchableSelect
                   ariaLabel={t("repositoryFilter")}
                   emptyMessage={t("noRepositoryMatches")}
-                  onValueChange={setSelectedRepositoryId}
-                  options={repositories.map<SearchableSelectOption>(
-                    (repository) => ({
-                      value: repository.id,
-                      label: repository.nameWithOwner,
-                      keywords: `${repository.owner} ${repository.name}`,
-                    }),
-                  )}
-                  placeholder={t("selectRepository")}
+                  onValueChange={
+                    activeTab === "repositories"
+                      ? setSelectedRepositoryId
+                      : setRepositoryFilterId
+                  }
+                  options={[
+                    ...(activeTab === "repositories"
+                      ? []
+                      : [{ value: "", label: t("allRepositories") }]),
+                    ...repositories.map<SearchableSelectOption>(
+                      (repository) => ({
+                        value: repository.id,
+                        label: repository.nameWithOwner,
+                        keywords: `${repository.owner} ${repository.name}`,
+                      }),
+                    ),
+                  ]}
+                  placeholder={
+                    activeTab === "repositories"
+                      ? t("selectRepository")
+                      : t("allRepositories")
+                  }
                   searchPlaceholder={t("searchRepositories")}
-                  value={selectedRepositoryId}
+                  value={filteredRepositoryId}
                 />
               </div>
             )}
@@ -627,7 +652,7 @@ export function PullRequestsPage() {
               items={page.items}
               locale={locale}
               onMerged={() =>
-                loadTab(activeTab, selectedRepositoryId, pullRequestState)
+                loadTab(activeTab, filteredRepositoryId, pullRequestState)
               }
             />
           ) : null}
@@ -641,7 +666,7 @@ export function PullRequestsPage() {
                   onClick={() =>
                     void loadTab(
                       activeTab,
-                      selectedRepositoryId,
+                      filteredRepositoryId,
                       pullRequestState,
                       { append: true, cursor: page.endCursor },
                     )

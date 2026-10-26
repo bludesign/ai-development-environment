@@ -2734,6 +2734,7 @@
     }
   },
   "pullRequests": {
+    "allRepositories": "Alle Repositories",
     "title": "GitHub Pull Requests",
     "description": "Prüfe deine GitHub Pull Requests und überwachten Repositories an einem Ort.",
     "refresh": "Aktualisieren",
@@ -3226,6 +3227,8 @@
     "settingsSaved": "Codebase-Einstellungen gespeichert.",
     "emptyFiltered": "Keine Codebasen für diesen Agenten gefunden.",
     "branchesTab": {
+      "searchRepositories": "Repositories suchen…",
+      "noRepositories": "Keine Repositories gefunden.",
       "author": "Autor",
       "allAuthors": "Alle Autoren",
       "searchAuthors": "Autoren suchen…",
@@ -3369,6 +3372,8 @@
     "noMatchingStashes": "Keine Stashes entsprechen deiner Suche."
   },
   "worktrees": {
+    "searchRepositories": "Repositories suchen…",
+    "noRepositories": "Keine Repositories gefunden.",
     "dismissError": "Fehler ausblenden",
     "title": "Arbeitsbäume",
     "description": "Primäre und verknüpfte Git-Worktrees auf allen registrierten Agents verwalten.",
@@ -4028,6 +4033,9 @@
     "useManualVersion": "Bearbeitete Version verwenden"
   },
   "builds": {
+    "filterRepository": "Builds nach Repository filtern",
+    "allRepositories": "Alle Repositories",
+    "noRepositories": "Keine Repositories gefunden.",
     "title": "Builds",
     "description": "iOS-Builds für Codebasen und Worktrees konfigurieren, ausführen, prüfen, bereitstellen und exportieren.",
     "build": "Build",

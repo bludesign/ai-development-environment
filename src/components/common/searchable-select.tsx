@@ -102,8 +102,20 @@ export function SearchableSelect({
         <Button
           aria-expanded={open}
           aria-label={ariaLabel}
+          title={
+            selected
+              ? [
+                  selected.label,
+                  ...(showSelectedDetails
+                    ? [selected.description, selected.secondaryDescription]
+                    : []),
+                ]
+                  .filter(Boolean)
+                  .join("\n")
+              : displayValue
+          }
           className={cn(
-            "min-w-0 w-full justify-between font-normal",
+            "min-w-0 w-full max-w-full justify-between font-normal",
             showSelectedDetails && selected && "h-auto min-h-8 py-2",
             className,
           )}
@@ -113,7 +125,7 @@ export function SearchableSelect({
           variant="outline"
         >
           {showSelectedDetails && selected ? (
-            <span className="min-w-0 text-left">
+            <span className="min-w-0 flex-1 text-left">
               <span className="block truncate">{selected.label}</span>
               {selected.description && (
                 <span className="block truncate text-xs text-muted-foreground">
@@ -127,7 +139,9 @@ export function SearchableSelect({
               )}
             </span>
           ) : (
-            <span className="min-w-0 truncate">{displayValue}</span>
+            <span className="min-w-0 flex-1 truncate text-left">
+              {displayValue}
+            </span>
           )}
           <ChevronsUpDown className="shrink-0 opacity-50" />
         </Button>
@@ -135,7 +149,7 @@ export function SearchableSelect({
       <PopoverContent
         ref={popoverRef}
         align="start"
-        className="z-70 max-h-[min(24rem,var(--radix-popover-content-available-height))] w-(--radix-popover-trigger-width) overflow-hidden p-0"
+        className="z-70 max-h-[min(24rem,var(--radix-popover-content-available-height))] w-(--radix-popover-trigger-width) max-w-[calc(100vw-2rem)] overflow-hidden p-0"
       >
         <Command className="min-h-0" label={searchPlaceholder}>
           <CommandInput
@@ -175,7 +189,7 @@ export function SearchableSelect({
                 >
                   <Item className="min-w-0 flex-1 border-0 p-0" size="xs">
                     <ItemContent className="min-w-0">
-                      <ItemTitle className="block truncate">
+                      <ItemTitle className="block w-full truncate">
                         {customValue}
                       </ItemTitle>
                     </ItemContent>
@@ -208,10 +222,17 @@ export function SearchableSelect({
                     setOpen(false);
                   }}
                   value={option.value}
+                  title={[
+                    option.label,
+                    option.description,
+                    option.secondaryDescription,
+                  ]
+                    .filter(Boolean)
+                    .join("\n")}
                 >
                   <Item className="min-w-0 flex-1 border-0 p-0" size="xs">
                     <ItemContent className="min-w-0">
-                      <ItemTitle className="block truncate">
+                      <ItemTitle className="block w-full truncate">
                         {option.label}
                       </ItemTitle>
                       {option.description && (

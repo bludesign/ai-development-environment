@@ -4640,6 +4640,14 @@ export class GitHubService {
     const state = options.state ?? "OPEN";
     const searchState = pullRequestSearchState(state);
     const scopedRepositoryId = repositoryId ?? null;
+    const repository = repositoryId
+      ? repositories.find((item) => item.id === repositoryId)
+      : null;
+    if (repositoryId && !repository)
+      throw new Error("Managed repository was not found");
+    const repositoryQualifier = repository
+      ? `repo:${repository.owner}/${repository.name}`
+      : null;
     const cursor = decodePullRequestCursor(
       options.after,
       scope,
@@ -4693,7 +4701,6 @@ export class GitHubService {
           "repositoryId is required for repository pull requests",
         );
       }
-      const repository = repositories.find((item) => item.id === repositoryId);
       if (!repository) throw new Error("Managed repository was not found");
       loaders.set("repository", (after) =>
         this.repositoryPullRequestPage(
@@ -4705,16 +4712,12 @@ export class GitHubService {
         ),
       );
     } else {
-      if (repositoryId) {
-        throw new Error(
-          "repositoryId is only valid for repository pull requests",
-        );
-      }
       if (scope === "REVIEW_REQUESTED") {
         const query = pullRequestSearchQuery(
           "is:pr",
           searchState,
           "review-requested:@me",
+          repositoryQualifier,
           "sort:updated-desc",
         );
         loaders.set("review", (after) =>
@@ -4725,6 +4728,7 @@ export class GitHubService {
           "is:pr",
           searchState,
           "author:@me",
+          repositoryQualifier,
           "sort:updated-desc",
         );
         const assignedQuery = pullRequestSearchQuery(
@@ -4732,6 +4736,7 @@ export class GitHubService {
           searchState,
           "assignee:@me",
           "-author:@me",
+          repositoryQualifier,
           "sort:updated-desc",
         );
         loaders.set("authored", (after) =>
