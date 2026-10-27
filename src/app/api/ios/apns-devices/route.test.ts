@@ -8,7 +8,8 @@ vi.mock("@/services/server-services", () => ({
   }),
 }));
 
-import { POST, resetApnsRegistrationRateLimitsForTests } from "./route";
+import { POST } from "./route";
+import { resetRateLimitsForTests } from "@/lib/ios-registration-request";
 
 const input = {
   clientRegistrationId: "installation-1",
@@ -34,7 +35,7 @@ function request(body: unknown = input, headers: Record<string, string> = {}) {
 
 beforeEach(() => {
   register.mockReset();
-  resetApnsRegistrationRateLimitsForTests();
+  resetRateLimitsForTests("apns-devices");
 });
 
 describe("POST /api/ios/apns-devices", () => {

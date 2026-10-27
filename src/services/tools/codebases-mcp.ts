@@ -1,4 +1,4 @@
-import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import { McpServer } from "@modelcontextprotocol/server";
 
 import type { BuildsService } from "@/services/builds";
 import type { CodebaseToolsService } from "@/services/codebases";
@@ -22,21 +22,9 @@ export function createBuiltInMcpServer(
     version: "0.1.0",
   });
 
-  const registerTool = server.registerTool.bind(server) as unknown as (
-    name: string,
-    config: {
-      title: string;
-      description: string;
-      inputSchema: unknown;
-      outputSchema: unknown;
-      annotations: Record<string, boolean>;
-    },
-    handler: (input: unknown) => ReturnType<BuiltInToolRegistry["callByName"]>,
-  ) => void;
-
   for (const tool of registry.definitions()) {
     if (allowedToolNames && !allowedToolNames.has(tool.name)) continue;
-    registerTool(
+    server.registerTool(
       tool.name,
       {
         title: tool.title,

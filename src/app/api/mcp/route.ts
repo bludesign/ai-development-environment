@@ -1,4 +1,7 @@
-import { WebStandardStreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js";
+import {
+  createMcpHandler,
+  readRequestBody,
+} from "@modelcontextprotocol/server";
 
 import { getServerServices } from "@/services/server-services";
 import {
@@ -118,27 +121,34 @@ async function handle(request: Request): Promise<Response> {
     context = authorization.context;
   }
   try {
-    const transport = new WebStandardStreamableHTTPServerTransport();
-    const server = toolSnapshot
-      ? createScopedMcpServer(toolSnapshot, (entry, args, signal) =>
-          tools.callSnapshotTool(
-            entry,
-            args,
-            context,
-            runRepositoryId,
-            AbortSignal.any([signal, request.signal]),
-          ),
-        )
-      : createBuiltInMcpServer(
-          tools.builtInTools,
-          (name, input) =>
-            runRepositoryId === undefined
-              ? tools.callBuiltInTool(name, input, context)
-              : tools.callRunBuiltInTool(name, input, runRepositoryId, context),
-          allowedToolNames,
-        );
-    await server.connect(transport);
-    const response = await transport.handleRequest(request);
+    const handler = createMcpHandler(
+      () =>
+        toolSnapshot
+          ? createScopedMcpServer(toolSnapshot, (entry, args, signal) =>
+              tools.callSnapshotTool(
+                entry,
+                args,
+                context,
+                runRepositoryId,
+                AbortSignal.any([signal, request.signal]),
+              ),
+            )
+          : createBuiltInMcpServer(
+              tools.builtInTools,
+              (name, input) =>
+                runRepositoryId === undefined
+                  ? tools.callBuiltInTool(name, input, context)
+                  : tools.callRunBuiltInTool(
+                      name,
+                      input,
+                      runRepositoryId,
+                      context,
+                    ),
+              allowedToolNames,
+            ),
+      { legacy: "stateless" },
+    );
+    const response = await handler.fetch(request);
     response.headers.set("x-request-id", context.correlationId);
     return response;
   } catch (error) {

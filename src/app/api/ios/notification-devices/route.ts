@@ -1,7 +1,6 @@
 import {
   guardedRegistration,
   jsonResponse,
-  resetRateLimitsForTests,
 } from "@/lib/ios-registration-request";
 import { getServerServices } from "@/services/server-services";
 import { requireUserRequest } from "@/services/auth";
@@ -39,8 +38,4 @@ export async function POST(request: Request): Promise<Response> {
       );
     },
   );
-}
-
-export function resetNotificationDeviceRateLimitsForTests(): void {
-  resetRateLimitsForTests(RATE_LIMIT_NAMESPACE);
 }
