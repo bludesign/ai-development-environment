@@ -144,11 +144,11 @@ function actionCenterIndex(acknowledgedResourceIds: string[] = []) {
         },
       ]);
     }
-    const hasCursor = values[0] === 1;
-    const cursorPriority = Number(values[1]);
-    const cursorUpdatedAt = String(values[3]);
-    const cursorKey = String(values[5]);
-    const limit = Number(values[6]);
+    const hasCursor = values[2] === 1;
+    const cursorPriority = Number(values[3]);
+    const cursorUpdatedAt = String(values[5]);
+    const cursorKey = String(values[7]);
+    const limit = Number(values[8]);
     const remaining = hasCursor
       ? rows.filter((row) => {
           const priority =

@@ -454,3 +454,67 @@ describe("MiniActionCenter", () => {
     expect(await screen.findByText("Acknowledge failed")).toBeDefined();
   });
 });
+
+describe("Action Center requests", () => {
+  const pr = {
+    ...active,
+    key: "PULL_REQUEST:pr",
+    resourceKind: "PULL_REQUEST",
+    reason: "READY_TO_MERGE",
+    href: "/github/pull-requests/acme/app/42",
+    label: "Ship search",
+    request: {
+      provider: "GITHUB",
+      repositoryId: "repo",
+      repositoryName: "acme/app",
+      number: 42,
+      branch: "feature",
+      headSha: "sha",
+      url: "https://github.com/acme/app/pull/42",
+      draft: false,
+      pipelineStatus: "SUCCESS",
+      pipelineUrl: "https://github.com/acme/app/actions",
+      approvalStatus: "APPROVED",
+      isMine: true,
+      requiresMyApproval: false,
+      canMerge: true,
+      mergeBlockedReason: null,
+    },
+  };
+  test("shows pipeline and approval and offers Merge only for confirmed readiness", async () => {
+    request.mockResolvedValue({
+      actionCenter: { ...page, items: [pr] },
+    } as never);
+    renderPage();
+    expect(
+      await screen.findByRole("link", { name: "#42 Ship search" }),
+    ).toBeDefined();
+    expect(screen.getByText("Approval: Approved")).toBeDefined();
+    expect(
+      screen
+        .getByRole("link", { name: "Pipeline: Success" })
+        .getAttribute("href"),
+    ).toContain("/actions");
+    expect(screen.getByRole("button", { name: "Merge" })).toBeDefined();
+  });
+  test("does not offer a green merge action for blocked or draft requests", async () => {
+    request.mockResolvedValue({
+      actionCenter: {
+        ...page,
+        items: [{ ...pr, request: { ...pr.request, canMerge: false } }],
+      },
+    } as never);
+    renderPage();
+    await screen.findByRole("link", { name: "#42 Ship search" });
+    expect(screen.queryByRole("button", { name: "Merge" })).toBeNull();
+  });
+  test("requests the independently filtered sidebar surface", async () => {
+    render(<MiniActionCenter />);
+    await screen.findByRole("link", { name: "Plan #4" });
+    expect(
+      request.mock.calls.some(
+        ([, variables]) => variables?.surface === "SIDEBAR",
+      ),
+    ).toBe(true);
+  });
+});

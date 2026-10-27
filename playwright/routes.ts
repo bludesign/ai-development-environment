@@ -52,6 +52,11 @@ export const routes: RouteEntry[] = [
   { name: "register", path: "/register", anonymous: true },
   // Overview / action center
   { name: "dashboard", path: "/dashboard/action-center" },
+  {
+    name: "action-center-pull-requests",
+    path: "/dashboard/action-center",
+    scrollTo: 'main [data-slot="action-center-request-status"] >> nth=0',
+  },
 
   // Apps
   {

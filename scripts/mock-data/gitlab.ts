@@ -1,3 +1,4 @@
+import { NOW } from "./time";
 import { createHash } from "node:crypto";
 
 import type { PrismaClient } from "../../src/generated/prisma/client";
@@ -558,6 +559,46 @@ export async function seedGitLab(prisma: PrismaClient): Promise<void> {
             scope === "reviews_for_me" ? [mergeRequests[0]] : mergeRequests,
         }),
       ),
+      ...["created_by_me", "reviews_for_me"].map((scope) =>
+        cacheEntry({
+          id: `gitlab-cache-action-center-${scope}`,
+          operation: "GitLabMergeRequests",
+          path: "/merge_requests",
+          query: {
+            scope,
+            state: "opened",
+            order_by: "updated_at",
+            sort: "desc",
+            page: 1,
+            per_page: 25,
+            created_after: new Date(
+              NOW.getTime() - 30 * 86_400_000,
+            ).toISOString(),
+          },
+          response:
+            scope === "reviews_for_me" ? [mergeRequests[0]] : mergeRequests,
+        }),
+      ),
+      ...mergeRequests.map((mr) =>
+        cacheEntry({
+          id: `gitlab-cache-action-center-readiness-${mr.iid}`,
+          operation: "GitLabMergeReadiness",
+          path: `/projects/${PROJECT_ID}/merge_requests/${mr.iid}`,
+          query: { include_rebase_in_progress: true },
+          response: mr,
+        }),
+      ),
+      cacheEntry({
+        id: "gitlab-cache-action-center-policy",
+        operation: "GitLabMergeProjectPolicy",
+        path: `/projects/${PROJECT_ID}`,
+        query: {},
+        response: {
+          id: Number(PROJECT_ID),
+          merge_method: "merge",
+          squash_option: "default_on",
+        },
+      }),
       cacheEntry({
         id: "gitlab-cache-merge-requests-all",
         operation: "GitLabMergeRequests",

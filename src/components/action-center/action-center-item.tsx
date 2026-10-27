@@ -5,6 +5,7 @@ import {
   CheckCheck,
   ClipboardList,
   GitBranch,
+  GitPullRequest,
   Hammer,
   MessagesSquare,
   X,
@@ -13,6 +14,7 @@ import {
 import type { LucideIcon } from "lucide-react";
 import { useTranslations } from "next-intl";
 
+import { RequestStatus } from "./request-status";
 import { DateTime } from "@/components/common/date-time";
 import { RunBuildControls } from "@/components/builds/run-build-controls";
 import { useRunLabels } from "@/components/runs/run-labels";
@@ -48,6 +50,8 @@ const KIND_ICONS: Record<ActionCenterResourceKind, LucideIcon> = {
   SESSION: MessagesSquare,
   BUILD: Hammer,
   WORKFLOW: Waypoints,
+  PULL_REQUEST: GitPullRequest,
+  MERGE_REQUEST: GitPullRequest,
 };
 
 function itemTitle(item: ActionCenterItemView, kind: string): string {
@@ -57,6 +61,8 @@ function itemTitle(item: ActionCenterItemView, kind: string): string {
   if (item.resourceKind === "WORKFLOW" && item.displayNumber !== null) {
     return `${item.label} #${item.displayNumber}`;
   }
+  if (item.request)
+    return `${item.request.provider === "GITHUB" ? "#" : "!"}${item.request.number} ${item.label}`;
   return item.label;
 }
 
@@ -68,11 +74,11 @@ function worktreeName(folder: string): string {
 function reasonClass(
   reason: ActionCenterItemView["reason"],
 ): string | undefined {
-  if (reason === "QUESTION")
+  if (reason === "QUESTION" || reason === "REVIEW_REQUIRED")
     return "border-amber-500/40 bg-amber-500/10 text-amber-700 dark:text-amber-300";
   if (reason === "UNRUN_BUILD")
     return "border-blue-500/40 bg-blue-500/10 text-blue-700 dark:text-blue-300";
-  if (reason === "ACTIVE")
+  if (reason === "ACTIVE" || reason === "READY_TO_MERGE")
     return "border-emerald-500/40 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300";
   return undefined;
 }
@@ -234,6 +240,7 @@ export function ActionCenterItem({
             {t(`reasons.${item.reason}`)}
           </Badge>
         </div>
+        {item.request && <RequestStatus item={item} compact />}
         {question && (
           <p className="line-clamp-2 break-words text-xs leading-tight font-medium">
             {question.header || question.prompt}
@@ -299,6 +306,7 @@ export function ActionCenterItem({
         <CardAction>{actions}</CardAction>
       </CardHeader>
       <CardContent className="space-y-4">
+        {item.request && <RequestStatus item={item} />}
         <div className="flex flex-wrap items-center gap-2">
           <Badge
             className={reasonClass(item.reason)}

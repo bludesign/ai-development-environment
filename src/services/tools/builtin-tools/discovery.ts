@@ -52,7 +52,7 @@ export function createActionCenterToolGroup(
         name: "get_action_center",
         title: "Get action center",
         description:
-          "List active work, pending questions, blocked or failed runs, and builds awaiting action, with cursor pagination.",
+          "List active work, pending questions, blocked or failed runs, builds awaiting action, and pull/merge requests, with cursor pagination.",
         inputSchema: z.object({
           first: z.number().int().min(1).max(200).default(50),
           after: z.string().max(4096).nullable().optional(),

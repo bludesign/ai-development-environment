@@ -730,6 +730,10 @@ function graphqlData(query: string, variables: Record<string, unknown>) {
       PULL_REQUESTS.find((item) => id.endsWith(`_${item.number}`)) ??
       PULL_REQUESTS[0]!;
     const node: Record<string, unknown> = { id };
+    if (/GitHubActionCenterApproval/.test(query))
+      node.reviews = connection(
+        seed.reviewDecision === "APPROVED" ? [{ state: "APPROVED" }] : [],
+      );
     if (/reviewThreads\s*\(/.test(query)) {
       node.reviewThreads = connection(reviewThreads(seed));
     }

@@ -1,12 +1,14 @@
 // @vitest-environment node
 import { PrismaBetterSqlite3 } from "@prisma/adapter-better-sqlite3";
-import { afterEach, beforeEach, describe, expect, test } from "vitest";
+import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 
 import { PrismaClient } from "@/generated/prisma/client";
 
 import { queryActionCenterIndex } from "./action-center-index";
 
 const TABLES = [
+  `CREATE TABLE ActionCenterSettings (id TEXT PRIMARY KEY, maximumRequestAgeDays INTEGER, showMyRequestsInSidebar BOOLEAN, showReviewRequestsInSidebar BOOLEAN)`,
+  `CREATE TABLE ActionCenterRequest (id TEXT PRIMARY KEY, resourceKind TEXT, reason TEXT, isMine BOOLEAN, requiresMyApproval BOOLEAN, createdAt DATETIME, updatedAt DATETIME)`,
   `CREATE TABLE AgentRun (
     id TEXT PRIMARY KEY,
     kind TEXT NOT NULL,
@@ -259,5 +261,106 @@ describe("Action Center index", () => {
       "workflow-1",
       "build-active",
     ]);
+  });
+});
+
+describe("request visibility in the mixed index", () => {
+  let prisma: InstanceType<typeof PrismaClient>;
+  beforeEach(async () => {
+    prisma = new PrismaClient({
+      adapter: new PrismaBetterSqlite3({ url: ":memory:" }),
+    });
+    for (const table of TABLES) await prisma.$executeRawUnsafe(table);
+    for (const [id, mine, review, age] of [
+      ["mine", 1, 0, 1],
+      ["review", 0, 1, 1],
+      ["both", 1, 1, 1],
+      ["approved", 0, 0, 1],
+      ["old", 1, 0, 31],
+    ] as const) {
+      await prisma.$executeRawUnsafe(
+        `INSERT INTO ActionCenterRequest VALUES (?, 'PULL_REQUEST', 'ACTIVE', ?, ?, ?, ?)`,
+        id,
+        mine,
+        review,
+        new Date(Date.now() - age * 86_400_000).toISOString(),
+        new Date().toISOString(),
+      );
+    }
+  });
+  afterEach(async () => {
+    await prisma.$disconnect();
+  });
+  test.each([
+    [true, true, 3],
+    [true, false, 2],
+    [false, true, 2],
+    [false, false, 0],
+  ])(
+    "sidebar mine=%s review=%s filters before counting",
+    async (mine, review, count) => {
+      await prisma.$executeRawUnsafe(
+        `INSERT INTO ActionCenterSettings VALUES ('default', 30, ?, ?)`,
+        mine,
+        review,
+      );
+      expect(
+        (
+          await queryActionCenterIndex(prisma, {
+            first: 1,
+            cursor: null,
+            surface: "SIDEBAR",
+          })
+        ).totalCount,
+      ).toBe(count);
+      expect(
+        (await queryActionCenterIndex(prisma, { first: 1, cursor: null }))
+          .totalCount,
+      ).toBe(3);
+    },
+  );
+  test("uses the server clock and includes the exact creation-age boundary", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date("2026-01-31T00:00:00.000Z"));
+    try {
+      for (const [id, createdAt] of [
+        ["boundary", "2026-01-01T00:00:00.000Z"],
+        ["too-old", "2025-12-31T23:59:59.999Z"],
+      ]) {
+        await prisma.$executeRawUnsafe(
+          `INSERT INTO ActionCenterRequest VALUES (?, 'MERGE_REQUEST', 'ACTIVE', 1, 0, ?, ?)`,
+          id,
+          createdAt,
+          createdAt,
+        );
+      }
+      const result = await queryActionCenterIndex(prisma, {
+        first: 10,
+        cursor: null,
+        resourceKinds: ["MERGE_REQUEST"],
+      });
+      expect(result.rows.map((row) => row.resourceId)).toEqual(["boundary"]);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  test("zero disables age filtering and kind filters affect totals", async () => {
+    await prisma.$executeRawUnsafe(
+      `INSERT INTO ActionCenterSettings VALUES ('default', 0, 1, 1)`,
+    );
+    expect(
+      (await queryActionCenterIndex(prisma, { first: 10, cursor: null }))
+        .totalCount,
+    ).toBe(4);
+    expect(
+      (
+        await queryActionCenterIndex(prisma, {
+          first: 10,
+          cursor: null,
+          resourceKinds: ["MERGE_REQUEST"],
+        })
+      ).totalCount,
+    ).toBe(0);
   });
 });

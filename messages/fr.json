@@ -145,14 +145,18 @@
       "PLAN": "Plan",
       "SESSION": "Session",
       "BUILD": "Build",
-      "WORKFLOW": "Workflow"
+      "WORKFLOW": "Workflow",
+      "PULL_REQUEST": "Pull request",
+      "MERGE_REQUEST": "Demande de fusion"
     },
     "reasons": {
       "QUESTION": "Réponse requise",
       "BLOCKED": "Bloqué",
       "FAILED": "Échec",
       "UNRUN_BUILD": "Prêt à exécuter",
-      "ACTIVE": "Actif"
+      "ACTIVE": "Actif",
+      "REVIEW_REQUIRED": "Approbation requise",
+      "READY_TO_MERGE": "Prête à fusionner"
     },
     "acknowledge": "Acquitter",
     "acknowledgeNamed": "Acquitter {name}",
@@ -161,7 +165,17 @@
     "questionFrom": "Question de {source}",
     "customAnswerFor": "Réponse personnalisée pour {question}",
     "customAnswer": "Réponse personnalisée",
-    "submitAnswer": "Envoyer la réponse"
+    "submitAnswer": "Envoyer la réponse",
+    "pipeline": "Pipeline",
+    "approval": "Approbation",
+    "merge": "Fusionner",
+    "settingsTitle": "Centre d’actions",
+    "settingsDescription": "Paramètres des demandes partagés entre les applications web et iOS.",
+    "maximumAge": "Ancienneté maximale des demandes (jours)",
+    "maximumAgeHelp": "Depuis la création. Saisissez 0 pour afficher toutes les demandes.",
+    "showMyRequestsInSidebar": "Afficher mes demandes ouvertes dans la barre latérale",
+    "showReviewRequestsInSidebar": "Afficher les demandes en attente de mon approbation dans la barre latérale",
+    "saveSettings": "Enregistrer les paramètres"
   },
   "apps": {
     "title": "Apps",

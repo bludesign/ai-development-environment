@@ -2200,6 +2200,31 @@ model SidebarUsageSummary {
   updatedAt   DateTime @updatedAt
 }
 
+model ActionCenterSettings {
+  id                            String   @id
+  maximumRequestAgeDays         Int      @default(30)
+  showMyRequestsInSidebar       Boolean  @default(true)
+  showReviewRequestsInSidebar   Boolean  @default(true)
+  updatedAt                     DateTime @updatedAt
+}
+
+model ActionCenterRequest {
+  id                 String   @id
+  provider           String
+  accountKey         String
+  resourceKind       String
+  reason             String
+  isMine             Boolean
+  requiresMyApproval Boolean
+  payloadJson        String
+  createdAt          DateTime
+  updatedAt          DateTime
+
+  @@index([provider, accountKey])
+  @@index([reason, updatedAt, id])
+  @@index([createdAt])
+}
+
 model ActionCenterAcknowledgement {
   id                 String   @id
   resourceKind       String

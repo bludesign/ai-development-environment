@@ -1,10 +1,17 @@
+import type { ActionCenterRequestView } from "@/services/action-center/action-center-requests";
 import type { BuildDestination } from "@/components/builds/types";
 
 export type ActionCenterResourceKind =
-  "PLAN" | "SESSION" | "BUILD" | "WORKFLOW";
+  "PLAN" | "SESSION" | "BUILD" | "WORKFLOW" | "PULL_REQUEST" | "MERGE_REQUEST";
 
 export type ActionCenterReason =
-  "QUESTION" | "BLOCKED" | "FAILED" | "UNRUN_BUILD" | "ACTIVE";
+  | "QUESTION"
+  | "BLOCKED"
+  | "FAILED"
+  | "UNRUN_BUILD"
+  | "REVIEW_REQUIRED"
+  | "READY_TO_MERGE"
+  | "ACTIVE";
 
 export type ActionCenterQuestion = {
   id: string;
@@ -29,6 +36,7 @@ export type ActionCenterQuestionBatch = {
 };
 
 export type ActionCenterItem = {
+  request?: ActionCenterRequestView | null;
   key: string;
   resourceKind: ActionCenterResourceKind;
   reason: ActionCenterReason;
@@ -59,6 +67,7 @@ export type ActionCenterItem = {
 };
 
 export type ActionCenterPageView = {
+  warnings?: string[];
   items: ActionCenterItem[];
   nextCursor: string | null;
   totalCount: number;
@@ -69,6 +78,7 @@ export type ActionCenterPageView = {
 export const ACTION_CENTER_ITEM_FIELDS = `
   key resourceKind reason resourceId href displayNumber label summary status phase error
   createdAt updatedAt failureFingerprint dismissalFingerprint
+  request { provider repositoryId repositoryName number branch headSha url draft pipelineStatus pipelineUrl approvalStatus isMine requiresMyApproval canMerge mergeBlockedReason }
   worktree { id folder branch highlightColor }
   questionBatches {
     id sourceKind createdAt

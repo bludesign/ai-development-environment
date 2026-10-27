@@ -145,14 +145,18 @@
       "PLAN": "Plan",
       "SESSION": "Session",
       "BUILD": "Build",
-      "WORKFLOW": "Workflow"
+      "WORKFLOW": "Workflow",
+      "PULL_REQUEST": "Pull request",
+      "MERGE_REQUEST": "Merge request"
     },
     "reasons": {
       "QUESTION": "Answer needed",
       "BLOCKED": "Blocked",
       "FAILED": "Failed",
       "UNRUN_BUILD": "Ready to run",
-      "ACTIVE": "Active"
+      "ACTIVE": "Active",
+      "REVIEW_REQUIRED": "Approval required",
+      "READY_TO_MERGE": "Ready to merge"
     },
     "acknowledge": "Acknowledge",
     "acknowledgeNamed": "Acknowledge {name}",
@@ -161,7 +165,17 @@
     "questionFrom": "Question from {source}",
     "customAnswerFor": "Custom answer for {question}",
     "customAnswer": "Custom answer",
-    "submitAnswer": "Submit answer"
+    "submitAnswer": "Submit answer",
+    "pipeline": "Pipeline",
+    "approval": "Approval",
+    "merge": "Merge",
+    "settingsTitle": "Action Center",
+    "settingsDescription": "Shared pull request settings for the web and iOS apps.",
+    "maximumAge": "Maximum request age (days)",
+    "maximumAgeHelp": "Based on creation date. Enter 0 to show requests of every age.",
+    "showMyRequestsInSidebar": "Show my open requests in sidebar",
+    "showReviewRequestsInSidebar": "Show requests awaiting my approval in sidebar",
+    "saveSettings": "Save settings"
   },
   "apps": {
     "title": "Apps",

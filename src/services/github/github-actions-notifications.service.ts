@@ -1,4 +1,5 @@
 import "server-only";
+import { publishIntegrationConfiguration } from "@/services/integration-configuration-events";
 
 import { createHmac, randomUUID, timingSafeEqual } from "node:crypto";
 
@@ -1369,6 +1370,9 @@ export class GitHubActionsNotificationsService {
             : false,
           this.recordWebhookTrigger(target, event, action, deliveryId, payload),
         ]);
+        if (event.startsWith("pull_request") || event === "push")
+          await this.cache.invalidatePullRequests();
+        publishIntegrationConfiguration("github");
         const recorded = pipelineRecorded || triggerRecorded;
         await finish(recorded ? "PROCESSED" : "IGNORED");
         return {

@@ -11,6 +11,14 @@ function requireControlPlane(context: GraphQLContext): void {
 
 export const createActionCenterResolvers = (service: ActionCenterService) => ({
   Query: {
+    actionCenterSettings: (
+      _root: unknown,
+      _args: unknown,
+      context: GraphQLContext,
+    ) => {
+      requireControlPlane(context);
+      return service.settings();
+    },
     actionCenter: (
       _root: unknown,
       args: Parameters<ActionCenterService["list"]>[0],
@@ -21,6 +29,22 @@ export const createActionCenterResolvers = (service: ActionCenterService) => ({
     },
   },
   Mutation: {
+    saveActionCenterSettings: (
+      _root: unknown,
+      { input }: { input: Parameters<ActionCenterService["saveSettings"]>[0] },
+      context: GraphQLContext,
+    ) => {
+      requireControlPlane(context);
+      return service.saveSettings(input);
+    },
+    refreshActionCenter: (
+      _root: unknown,
+      _args: unknown,
+      context: GraphQLContext,
+    ) => {
+      requireControlPlane(context);
+      return service.refresh();
+    },
     acknowledgeActionCenterItem: (
       _root: unknown,
       { input }: { input: Parameters<ActionCenterService["acknowledge"]>[0] },

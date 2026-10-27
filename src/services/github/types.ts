@@ -478,6 +478,7 @@ export type GitHubActionsWorkflowRunPage = {
 };
 
 export type GitHubPullRequestView = {
+  updatedAt?: string;
   id: string;
   number: number;
   title: string;

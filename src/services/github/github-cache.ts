@@ -604,6 +604,23 @@ export class GitHubCache {
     });
   }
 
+  async invalidatePullRequests(): Promise<void> {
+    const { cacheWrites } = this.beginInvalidation();
+    await Promise.allSettled(cacheWrites);
+    const prisma = await getPrismaClient();
+    await prisma.gitHubGraphqlCacheEntry.deleteMany({
+      where: {
+        operation: {
+          in: [
+            "GitHubPullRequestSearch",
+            "GitHubPullRequestMergeOptions",
+            "GitHubActionCenterApproval",
+          ],
+        },
+      },
+    });
+  }
+
   async clear(): Promise<boolean> {
     const { cacheWrites } = this.beginInvalidation();
     await Promise.allSettled(cacheWrites);

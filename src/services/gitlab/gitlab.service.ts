@@ -822,6 +822,29 @@ export class GitLabService {
     return this.mergeCoordinator.options(projectId, iid, worktreeId);
   }
 
+  async actionCenterApproval(
+    projectId: string,
+    iid: number,
+    viewerId: string,
+  ): Promise<boolean> {
+    const response = await this.get<{
+      user_has_approved?: boolean;
+      approved_by?: Array<{ user: { id: number } }>;
+    }>({
+      path: `/projects/${encodeURIComponent(projectId)}/merge_requests/${iid}/approvals`,
+      operation: "GitLabMergeRequestApprovals",
+      source: "MERGE_REQUESTS_PAGE",
+      allowStaleOnError: false,
+    });
+    return (
+      response.data.user_has_approved ??
+      response.data.approved_by?.some(
+        ({ user }) => String(user.id) === viewerId,
+      ) ??
+      false
+    );
+  }
+
   submitMerge(input: SubmitGitLabMergeRequestMergeInput) {
     if (!this.mergeCoordinator)
       throw new Error("GitLab merge service is unavailable");
@@ -844,14 +867,14 @@ export class GitLabService {
     return this.mergeCoordinator?.operation(projectId, iid) ?? null;
   }
 
-  async mergeReadiness(projectId: string, iid: number) {
+  async mergeReadiness(projectId: string, iid: number, force = true) {
     const mr = (
       await this.get<RawGitLabMergeRequest>({
         path: `/projects/${encodeURIComponent(projectId)}/merge_requests/${iid}`,
         operation: "GitLabMergeReadiness",
         source: "MERGE_REQUEST_DETAILS",
         query: { include_rebase_in_progress: true },
-        force: true,
+        force,
         allowStaleOnError: false,
       })
     ).data;
@@ -860,7 +883,7 @@ export class GitLabService {
         path: `/projects/${encodeURIComponent(projectId)}`,
         operation: "GitLabMergeProjectPolicy",
         source: "MERGE_REQUEST_DETAILS",
-        force: true,
+        force,
         allowStaleOnError: false,
       })
     ).data;
@@ -1436,6 +1459,7 @@ export class GitLabService {
         }),
         this.invalidateCache(input.invalidateProjectId),
       ]);
+      publishIntegrationConfiguration("gitlab");
       return response.data;
     } catch (error) {
       await this.logCall({
@@ -2208,6 +2232,7 @@ export class GitLabService {
     state?: GitLabMergeRequestState | null;
     page?: number;
     perPage?: number;
+    createdAfter?: string | null;
   }): Promise<Paginated<GitLabMergeRequestView>> {
     const page = Math.max(1, input.page ?? 1);
     const perPage = Math.max(1, Math.min(MAX_PAGE_SIZE, input.perPage ?? 25));
@@ -2239,6 +2264,7 @@ export class GitLabService {
         sort: "desc",
         page,
         per_page: perPage,
+        created_after: input.createdAfter ?? undefined,
       },
     });
     return {

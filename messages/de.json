@@ -145,14 +145,18 @@
       "PLAN": "Planung",
       "SESSION": "Sitzung",
       "BUILD": "Build",
-      "WORKFLOW": "Workflow"
+      "WORKFLOW": "Workflow",
+      "PULL_REQUEST": "Pull Request",
+      "MERGE_REQUEST": "Merge Request"
     },
     "reasons": {
       "QUESTION": "Antwort erforderlich",
       "BLOCKED": "Blockiert",
       "FAILED": "Fehlgeschlagen",
       "UNRUN_BUILD": "Ausführbereit",
-      "ACTIVE": "Aktiv"
+      "ACTIVE": "Aktiv",
+      "REVIEW_REQUIRED": "Freigabe erforderlich",
+      "READY_TO_MERGE": "Bereit zum Zusammenführen"
     },
     "acknowledge": "Bestätigen",
     "acknowledgeNamed": "{name} bestätigen",
@@ -161,7 +165,17 @@
     "questionFrom": "Frage von {source}",
     "customAnswerFor": "Eigene Antwort für {question}",
     "customAnswer": "Eigene Antwort",
-    "submitAnswer": "Antwort senden"
+    "submitAnswer": "Antwort senden",
+    "pipeline": "Pipeline",
+    "approval": "Freigabe",
+    "merge": "Zusammenführen",
+    "settingsTitle": "Aktionszentrale",
+    "settingsDescription": "Gemeinsame Pull-Request-Einstellungen für die Web- und iOS-Apps.",
+    "maximumAge": "Maximales Alter der Anfragen (Tage)",
+    "maximumAgeHelp": "Ab Erstellungsdatum. Mit 0 werden Anfragen jeden Alters angezeigt.",
+    "showMyRequestsInSidebar": "Meine offenen Anfragen in der Seitenleiste anzeigen",
+    "showReviewRequestsInSidebar": "Anfragen, die auf meine Freigabe warten, in der Seitenleiste anzeigen",
+    "saveSettings": "Einstellungen speichern"
   },
   "apps": {
     "title": "Apps",
