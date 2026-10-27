@@ -164,6 +164,10 @@ async function issue(
 
 beforeAll(async () => {
   const sqlite = new Database(databasePath);
+  // Use the application's WAL/NORMAL settings for the full migration replay
+  // on CI runners with slower filesystem syncs.
+  sqlite.pragma("journal_mode = WAL");
+  sqlite.pragma("synchronous = NORMAL");
   const migrations = readdirSync("prisma/migrations")
     .filter((name) => /^\d/.test(name))
     .sort();
@@ -241,7 +245,7 @@ beforeAll(async () => {
       return originalFetch(input, init);
     },
   );
-});
+}, 60_000);
 
 afterAll(async () => {
   vi.unstubAllGlobals();
