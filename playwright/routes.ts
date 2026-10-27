@@ -45,6 +45,7 @@ export type RouteEntry = {
   activeAgentMenu?: boolean;
   mcpImportReview?: boolean;
   mcpAiPrompt?: boolean;
+  mcpAuthorizationReview?: boolean;
 };
 
 export const routes: RouteEntry[] = [
@@ -547,6 +548,17 @@ export const routes: RouteEntry[] = [
   },
   { name: "users", path: "/system/users", readyTexts: ["Avery Morgan"] },
   { name: "api-keys", path: "/system/api-keys", readyTexts: ["CI automation"] },
+  {
+    name: "connected-applications",
+    path: "/system/connected-applications",
+    readyTexts: ["https://chatgpt.com/oauth/client.json"],
+  },
+  {
+    name: "connected-applications-revoke",
+    path: "/system/connected-applications",
+    readyTexts: ["https://chatgpt.com/oauth/client.json"],
+    mcpAuthorizationReview: true,
+  },
   { name: "credentials", path: "/system/credentials" },
   { name: "settings", path: "/system/settings" },
 ];
