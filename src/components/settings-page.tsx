@@ -1,4 +1,5 @@
 "use client";
+import { ActionCenterSettingsCard } from "@/components/action-center/action-center-settings";
 import { ServerUrlsSettingsCard } from "@/components/server-urls/server-urls-settings-card";
 import {
   ServerUrlActionNotice,
@@ -112,6 +113,7 @@ export function SettingsPage() {
           >
             <ServerUrlsSettingsCard />
             <EditorSettingsCard />
+            <ActionCenterSettingsCard />
           </SettingsGroup>
           <SettingsGroup
             description={t("appleGroupDescription")}

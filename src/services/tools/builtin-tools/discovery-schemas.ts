@@ -56,17 +56,47 @@ export const SearchResultsSchema = z.object({
 });
 
 export const ActionCenterPageSchema = z.object({
+  warnings: z.array(z.string()).optional(),
   items: z.array(
     z.object({
       key: z.string(),
-      resourceKind: z.enum(["PLAN", "SESSION", "BUILD", "WORKFLOW"]),
+      resourceKind: z.enum([
+        "PLAN",
+        "SESSION",
+        "BUILD",
+        "WORKFLOW",
+        "PULL_REQUEST",
+        "MERGE_REQUEST",
+      ]),
       reason: z.enum([
         "QUESTION",
         "BLOCKED",
         "FAILED",
         "UNRUN_BUILD",
+        "REVIEW_REQUIRED",
+        "READY_TO_MERGE",
         "ACTIVE",
       ]),
+      request: z
+        .object({
+          provider: z.enum(["GITHUB", "GITLAB"]),
+          repositoryId: z.string(),
+          repositoryName: z.string(),
+          number: z.number().int(),
+          branch: z.string(),
+          headSha: z.string(),
+          url: z.string(),
+          draft: z.boolean(),
+          pipelineStatus: z.string(),
+          pipelineUrl: z.string().nullable(),
+          approvalStatus: z.string(),
+          isMine: z.boolean(),
+          requiresMyApproval: z.boolean(),
+          canMerge: z.boolean(),
+          mergeBlockedReason: z.string().nullable(),
+        })
+        .nullable()
+        .optional(),
       resourceId: z.string(),
       href: z.string(),
       displayNumber: z.number().int().nullable(),

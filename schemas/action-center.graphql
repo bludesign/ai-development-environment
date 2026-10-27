@@ -1,5 +1,9 @@
 "Values supported for action center resource."
 enum ActionCenterResourceKind {
+  "A GitHub pull request."
+  PULL_REQUEST
+  "A GitLab merge request."
+  MERGE_REQUEST
   "Represents the plan option."
   PLAN
   "Represents the session option."
@@ -12,6 +16,10 @@ enum ActionCenterResourceKind {
 
 "Reasons reported for action center."
 enum ActionCenterReason {
+  "The connected account is requested to review this request."
+  REVIEW_REQUIRED
+  "The provider confirms that this request can merge."
+  READY_TO_MERGE
   "Indicates question as the reason."
   QUESTION
   "Indicates blocked as the reason."
@@ -94,6 +102,8 @@ type ActionCenterBuildRun {
 
 "Represents an action center item in the GraphQL API."
 type ActionCenterItem {
+  "Source control request status, when this item is a pull or merge request."
+  request: ActionCenterRequest
   "The key associated with this action center item."
   key: ID!
   "The resource kind associated with this action center item."
@@ -134,6 +144,8 @@ type ActionCenterItem {
 
 "A paginated collection of action centers."
 type ActionCenterPage {
+  "Provider failures or incomplete discovery; existing items remain available."
+  warnings: [String!]!
   "Items associated with this action center page."
   items: [ActionCenterItem!]!
   "The next cursor associated with this action center page. May be null when unavailable or not applicable."
@@ -167,16 +179,29 @@ input DismissActionCenterItemInput {
 }
 
 extend type Query {
+  "Shared settings for Action Center request discovery and sidebar visibility."
+  actionCenterSettings: ActionCenterSettings!
   "Returns an action center page."
   actionCenter(
     "Maximum number of records to return. Defaults to `50`."
     first: Int = 50
+    "Selects the full queue or applies the saved sidebar switches."
+    surface: ActionCenterSurface = FULL
+    "Optional resource kinds to include before pagination and counting."
+    resourceKinds: [ActionCenterResourceKind!]
     "Cursor or identifier after which to return records. Omit it to leave this dimension unfiltered."
     after: String
   ): ActionCenterPage!
 }
 
 extend type Mutation {
+  "Updates shared Action Center settings."
+  saveActionCenterSettings(
+    "The shared request preferences to save."
+    input: SaveActionCenterSettingsInput!
+  ): ActionCenterSettings!
+  "Refreshes the local request index using the configured provider caches."
+  refreshActionCenter: Boolean!
   "Acknowledges an action center item and reports whether the operation succeeded."
   acknowledgeActionCenterItem(
     "Values for the requested operation."
@@ -192,4 +217,66 @@ extend type Mutation {
 extend type Subscription {
   "Emits a change signal whenever action center changes."
   actionCenterChanged: Boolean!
+}
+
+"The Action Center surface to read."
+enum ActionCenterSurface {
+  "The complete queue."
+  FULL
+  "The queue filtered by saved sidebar preferences."
+  SIDEBAR
+}
+
+"A provider-qualified request and its current status."
+type ActionCenterRequest {
+  "The provider reported for this request."
+  provider: SourceControlProvider!
+  "The repositoryId reported for this request."
+  repositoryId: ID!
+  "The repositoryName reported for this request."
+  repositoryName: String!
+  "The number reported for this request."
+  number: Int!
+  "The branch reported for this request."
+  branch: String!
+  "The headSha reported for this request."
+  headSha: String!
+  "The url reported for this request."
+  url: String!
+  "The draft reported for this request."
+  draft: Boolean!
+  "The pipelineStatus reported for this request."
+  pipelineStatus: String!
+  "The pipelineUrl reported for this request."
+  pipelineUrl: String
+  "The approvalStatus reported for this request."
+  approvalStatus: String!
+  "The isMine reported for this request."
+  isMine: Boolean!
+  "The requiresMyApproval reported for this request."
+  requiresMyApproval: Boolean!
+  "The canMerge reported for this request."
+  canMerge: Boolean!
+  "The mergeBlockedReason reported for this request."
+  mergeBlockedReason: String
+}
+
+"Shared Action Center request preferences."
+type ActionCenterSettings {
+  "Exclude requests created more than this many days ago; zero disables the cutoff."
+  maximumRequestAgeDays: Int!
+  "Include the connected account’s open requests in the sidebar."
+  showMyRequestsInSidebar: Boolean!
+  "Include requests awaiting the connected account’s approval in the sidebar."
+  showReviewRequestsInSidebar: Boolean!
+}
+
+"Shared Action Center request preferences."
+input SaveActionCenterSettingsInput {
+  "Exclude requests created more than this many days ago; zero disables the cutoff."
+  maximumRequestAgeDays: Int!
+  "Include the connected account’s open requests in the sidebar."
+  showMyRequestsInSidebar: Boolean!
+  "Include requests awaiting the connected account’s approval in the sidebar."
+  showReviewRequestsInSidebar: Boolean!
 }

@@ -269,7 +269,10 @@ function setup(
     polling as never,
     false,
     workflowEvents as never,
-    { recordRestCall: mocks.recordRestCall } as never,
+    {
+      recordRestCall: mocks.recordRestCall,
+      invalidatePullRequests: vi.fn().mockResolvedValue(undefined),
+    } as never,
     pipelineStatus as never,
   );
   return {

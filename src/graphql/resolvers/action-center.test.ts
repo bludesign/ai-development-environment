@@ -78,6 +78,25 @@ describe("Action Center resolvers", () => {
     const resolvers = createActionCenterResolvers(service);
 
     expect(() =>
+      resolvers.Query.actionCenterSettings({}, {}, context("agent-1")),
+    ).toThrow("Agent credentials");
+    expect(() =>
+      resolvers.Mutation.refreshActionCenter({}, {}, context("agent-1")),
+    ).toThrow("Agent credentials");
+    expect(() =>
+      resolvers.Mutation.saveActionCenterSettings(
+        {},
+        {
+          input: {
+            maximumRequestAgeDays: 30,
+            showMyRequestsInSidebar: true,
+            showReviewRequestsInSidebar: true,
+          },
+        },
+        context("agent-1"),
+      ),
+    ).toThrow("Agent credentials");
+    expect(() =>
       resolvers.Query.actionCenter({}, {}, context("agent-1")),
     ).toThrow("Agent credentials");
     expect(() =>

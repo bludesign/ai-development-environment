@@ -40,6 +40,7 @@ type ActionCenterContextValue = {
   error: string | null;
   hasMore: boolean;
   refresh: () => Promise<void>;
+  refreshRequests: () => Promise<void>;
   loadMore: () => Promise<void>;
   answerQuestion: (
     item: ActionCenterItem,
@@ -59,17 +60,18 @@ async function fetchActionCenter(
   after: string | null = null,
   first = PAGE_SIZE,
   signal?: AbortSignal,
+  surface: "FULL" | "SIDEBAR" = "FULL",
 ): Promise<ActionCenterPageView> {
   const data = await controlPlaneRequest<{
     actionCenter: ActionCenterPageView;
   }>(
-    `query ActionCenter($first: Int!, $after: String) {
-      actionCenter(first: $first, after: $after) {
+    `query ActionCenter($first: Int!, $after: String, $surface: ActionCenterSurface!) {
+      actionCenter(first: $first, after: $after, surface: $surface) {
         items { ${ACTION_CENTER_ITEM_FIELDS} }
-        nextCursor totalCount needsAttentionCount activeCount
+        nextCursor totalCount needsAttentionCount activeCount warnings
       }
     }`,
-    { first, after },
+    { first, after, surface },
     { signal },
   );
   if (!data.actionCenter) {
@@ -78,7 +80,13 @@ async function fetchActionCenter(
   return data.actionCenter;
 }
 
-export function ActionCenterProvider({ children }: { children: ReactNode }) {
+export function ActionCenterProvider({
+  children,
+  surface = "FULL",
+}: {
+  children: ReactNode;
+  surface?: "FULL" | "SIDEBAR";
+}) {
   const [items, setItems] = useState<ActionCenterItem[]>([]);
   const [nextCursor, setNextCursor] = useState<string | null>(null);
   const [totalCount, setTotalCount] = useState(0);
@@ -106,7 +114,7 @@ export function ActionCenterProvider({ children }: { children: ReactNode }) {
     setTotalCount(page.totalCount);
     setNeedsAttentionCount(page.needsAttentionCount);
     setActiveCount(page.activeCount);
-    setError(null);
+    setError(page.warnings?.join(" · ") || null);
   }, []);
 
   const refreshOwner = useRef<ReturnType<typeof createRefreshCoalescer> | null>(
@@ -119,6 +127,17 @@ export function ActionCenterProvider({ children }: { children: ReactNode }) {
     await refreshOwner.current?.refresh();
   }, []);
 
+  const refreshRequests = useCallback(async () => {
+    try {
+      await controlPlaneRequest(
+        "mutation RefreshActionCenter { refreshActionCenter }",
+      );
+      await refresh();
+    } catch (value) {
+      setError(value instanceof Error ? value.message : String(value));
+    }
+  }, [refresh]);
+
   const loadMore = useCallback(async () => {
     if (!nextCursor || loadingMore || pageRequest.current) return;
     const controller = new AbortController();
@@ -127,7 +146,12 @@ export function ActionCenterProvider({ children }: { children: ReactNode }) {
     const signal = controller.signal;
     setLoadingMore(true);
     try {
-      const page = await fetchActionCenter(nextCursor, PAGE_SIZE, signal);
+      const page = await fetchActionCenter(
+        nextCursor,
+        PAGE_SIZE,
+        signal,
+        surface,
+      );
       if (!signal?.aborted && generation === pageGeneration.current)
         apply(page, true);
     } catch (value) {
@@ -138,7 +162,7 @@ export function ActionCenterProvider({ children }: { children: ReactNode }) {
       if (!signal.aborted && generation === pageGeneration.current)
         setLoadingMore(false);
     }
-  }, [apply, loadingMore, nextCursor]);
+  }, [apply, loadingMore, nextCursor, surface]);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -151,7 +175,7 @@ export function ActionCenterProvider({ children }: { children: ReactNode }) {
       try {
         const first = Math.max(PAGE_SIZE, loadedCount.current);
         const result = await readCursorWindow(
-          (after, count) => fetchActionCenter(after, count, signal),
+          (after, count) => fetchActionCenter(after, count, signal, surface),
           first,
           200,
           (item: ActionCenterItem) => item.key,
@@ -195,7 +219,7 @@ export function ActionCenterProvider({ children }: { children: ReactNode }) {
       pageRequest.current = null;
       refreshOwner.current = null;
     };
-  }, [apply]);
+  }, [apply, surface]);
 
   const answerQuestion = useCallback(
     async (
@@ -299,6 +323,7 @@ export function ActionCenterProvider({ children }: { children: ReactNode }) {
         error,
         hasMore: Boolean(nextCursor),
         refresh,
+        refreshRequests,
         loadMore,
         answerQuestion,
         acknowledge,

@@ -10,9 +10,20 @@ import { Spinner } from "@/components/ui/spinner";
 import { Link } from "@/i18n/navigation";
 
 import { ActionCenterItem } from "./action-center-item";
-import { useOptionalActionCenter } from "./action-center-provider";
+import {
+  ActionCenterProvider,
+  useOptionalActionCenter,
+} from "./action-center-provider";
 
 export function MiniActionCenter() {
+  return (
+    <ActionCenterProvider surface="SIDEBAR">
+      <MiniActionCenterContent />
+    </ActionCenterProvider>
+  );
+}
+
+function MiniActionCenterContent() {
   const t = useTranslations("actionCenter");
   const center = useOptionalActionCenter();
   if (!center) return null;

@@ -1,6 +1,7 @@
 import type { PrismaClient } from "@/generated/prisma/client";
 
 export type ActionCenterIndexCursor = {
+  scope?: string;
   priority: number;
   updatedAt: string;
   key: string;
@@ -151,6 +152,19 @@ const CANDIDATES_SQL = `
         WHERE deployment.buildId = build.id
       )
   ),
+  request_settings AS (
+    SELECT COALESCE((SELECT maximumRequestAgeDays FROM ActionCenterSettings WHERE id = 'default'), 30) AS ageDays,
+      COALESCE((SELECT showMyRequestsInSidebar FROM ActionCenterSettings WHERE id = 'default'), 1) AS showMine,
+      COALESCE((SELECT showReviewRequestsInSidebar FROM ActionCenterSettings WHERE id = 'default'), 1) AS showReviews
+  ),
+  request_candidates AS (
+    SELECT request.resourceKind, request.id AS resourceId, request.resourceKind || ':' || request.id AS key,
+      request.reason, strftime('%Y-%m-%dT%H:%M:%fZ', request.updatedAt) AS updatedAt, NULL AS failureFingerprint
+    FROM ActionCenterRequest AS request CROSS JOIN request_settings AS settings
+    WHERE (request.isMine = 1 OR request.requiresMyApproval = 1)
+      AND (settings.ageDays = 0 OR julianday(request.createdAt) >= julianday(?) - settings.ageDays)
+      AND (? = 0 OR (settings.showMine = 1 AND request.isMine = 1) OR (settings.showReviews = 1 AND request.requiresMyApproval = 1))
+  ),
   candidates AS (
     SELECT * FROM agent_candidates
     UNION ALL
@@ -159,6 +173,8 @@ const CANDIDATES_SQL = `
     SELECT * FROM build_status_candidates
     UNION ALL
     SELECT * FROM unrun_build_candidates
+    UNION ALL
+    SELECT * FROM request_candidates
   ),
   visible AS (
     SELECT
@@ -168,7 +184,9 @@ const CANDIDATES_SQL = `
         WHEN 'BLOCKED' THEN 1
         WHEN 'FAILED' THEN 2
         WHEN 'UNRUN_BUILD' THEN 3
-        ELSE 4
+        WHEN 'REVIEW_REQUIRED' THEN 4
+        WHEN 'READY_TO_MERGE' THEN 5
+        ELSE 6
       END AS priority
     FROM candidates AS candidate
     WHERE candidate.failureFingerprint IS NULL
@@ -188,28 +206,43 @@ function countValue(value: number | bigint | undefined): number {
 
 export async function queryActionCenterIndex(
   prisma: PrismaClient,
-  input: { first: number; cursor: ActionCenterIndexCursor | null },
+  input: {
+    first: number;
+    cursor: ActionCenterIndexCursor | null;
+    surface?: string | null;
+    resourceKinds?: string[] | null;
+  },
 ) {
   const cursor = input.cursor;
+  const now = new Date().toISOString();
+  const kinds = input.resourceKinds?.length ? input.resourceKinds : null;
+  const filter = kinds
+    ? ` AND resourceKind IN (${kinds.map(() => "?").join(",")})`
+    : "";
+  const surface = input.surface === "SIDEBAR" ? 1 : 0;
   const [rows, countRows] = await Promise.all([
     prisma.$queryRawUnsafe<ActionCenterIndexRow[]>(
       `${CANDIDATES_SQL}
        SELECT resourceKind, resourceId, reason, key, updatedAt
        FROM visible
-       WHERE ? = 0
+       WHERE ( ? = 0
          OR priority > ?
          OR (
            priority = ?
            AND (updatedAt < ? OR (updatedAt = ? AND key > ?))
          )
+       ) ${filter}
        ORDER BY priority ASC, updatedAt DESC, key ASC
        LIMIT ?`,
+      now,
+      surface,
       cursor ? 1 : 0,
       cursor?.priority ?? 0,
       cursor?.priority ?? 0,
       cursor?.updatedAt ?? "",
       cursor?.updatedAt ?? "",
       cursor?.key ?? "",
+      ...(kinds ?? []),
       input.first + 1,
     ),
     prisma.$queryRawUnsafe<ActionCenterCountRow[]>(
@@ -220,7 +253,10 @@ export async function queryActionCenterIndex(
            SUM(CASE WHEN reason <> 'ACTIVE' THEN 1 ELSE 0 END),
            0
          ) AS needsAttentionCount
-       FROM visible`,
+       FROM visible WHERE 1 = 1 ${filter}`,
+      now,
+      surface,
+      ...(kinds ?? []),
     ),
   ]);
   const counts = countRows[0];

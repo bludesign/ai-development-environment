@@ -36,6 +36,7 @@ import { RunsService } from "@/services/runs";
 import { CommandsService } from "@/services/commands";
 import { DiskSpaceService } from "@/services/disk-space";
 import { SystemStatusService } from "@/services/system-status";
+import { ActionCenterRequests } from "@/services/action-center/action-center-requests";
 import { ActionCenterService } from "@/services/action-center";
 import { AppsService } from "@/services/apps";
 import { GlobalSearchService } from "@/services/global-search";
@@ -198,7 +199,12 @@ function createServerServices(): ServerServices {
     diskSpaceService,
     pollingService,
   );
-  const actionCenterService = new ActionCenterService();
+  const actionCenterRequests = new ActionCenterRequests(
+    gitHubService,
+    gitLabService,
+    pollingService,
+  );
+  const actionCenterService = new ActionCenterService(actionCenterRequests);
   const appsService = new AppsService();
   const repositoryCloneService = new RepositoryCloneService(
     agentControlService,
@@ -327,6 +333,7 @@ function createServerServices(): ServerServices {
     agentControlService,
   ).startRuntime();
   systemStatusService.startRuntime();
+  actionCenterRequests.start();
   return {
     prismaService,
     credentialService,

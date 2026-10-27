@@ -1,5 +1,11 @@
 import "server-only";
 
+import {
+  actionCenterSettings,
+  type ActionCenterRequests,
+  type ActionCenterRequestView,
+} from "./action-center-requests";
+
 import { randomUUID } from "node:crypto";
 
 import { getPrismaClient } from "@/data/prisma-client";
@@ -15,11 +21,24 @@ import {
   type ActionCenterIndexCursor,
 } from "./action-center-index";
 
-const RESOURCE_KINDS = ["PLAN", "SESSION", "BUILD", "WORKFLOW"] as const;
+const RESOURCE_KINDS = [
+  "PLAN",
+  "SESSION",
+  "BUILD",
+  "WORKFLOW",
+  "PULL_REQUEST",
+  "MERGE_REQUEST",
+] as const;
 
 export type ActionCenterResourceKind = (typeof RESOURCE_KINDS)[number];
 export type ActionCenterReason =
-  "QUESTION" | "BLOCKED" | "FAILED" | "UNRUN_BUILD" | "ACTIVE";
+  | "QUESTION"
+  | "BLOCKED"
+  | "FAILED"
+  | "UNRUN_BUILD"
+  | "REVIEW_REQUIRED"
+  | "READY_TO_MERGE"
+  | "ACTIVE";
 
 export type ActionCenterQuestionBatchView = {
   id: string;
@@ -44,6 +63,7 @@ export type ActionCenterQuestionBatchView = {
 };
 
 export type ActionCenterItemView = {
+  request?: ActionCenterRequestView | null;
   key: string;
   resourceKind: ActionCenterResourceKind;
   reason: ActionCenterReason;
@@ -139,23 +159,29 @@ function priority(reason: ActionCenterReason): number {
       return 2;
     case "UNRUN_BUILD":
       return 3;
-    case "ACTIVE":
+    case "REVIEW_REQUIRED":
       return 4;
+    case "READY_TO_MERGE":
+      return 5;
+    case "ACTIVE":
+      return 6;
   }
 }
 
-function encodeCursor(item: ActionCenterItemView): string {
+function encodeCursor(item: ActionCenterItemView, scope: string): string {
   return Buffer.from(
     JSON.stringify({
       priority: priority(item.reason),
       updatedAt: item.updatedAt,
       key: item.key,
+      scope,
     } satisfies ActionCenterIndexCursor),
   ).toString("base64url");
 }
 
 function decodeCursor(
   value: string | null | undefined,
+  scope: string,
 ): ActionCenterIndexCursor | null {
   if (!value) return null;
   try {
@@ -169,6 +195,10 @@ function decodeCursor(
     ) {
       return null;
     }
+    if (parsed.scope && parsed.scope !== scope)
+      throw new Error(
+        "Action Center cursor belongs to another surface or filter",
+      );
     return parsed as ActionCenterIndexCursor;
   } catch {
     return null;
@@ -223,12 +253,58 @@ function workflowWorktreeId(sessionDataJson: string): string | null {
 }
 
 export class ActionCenterService {
-  async list(input: { first?: number | null; after?: string | null } = {}) {
+  constructor(private readonly requests?: ActionCenterRequests) {}
+
+  settings() {
+    return actionCenterSettings();
+  }
+
+  async saveSettings(input: {
+    maximumRequestAgeDays: number;
+    showMyRequestsInSidebar: boolean;
+    showReviewRequestsInSidebar: boolean;
+  }) {
+    if (
+      !Number.isInteger(input.maximumRequestAgeDays) ||
+      input.maximumRequestAgeDays < 0
+    )
+      throw new Error("Maximum request age must be a non-negative integer");
+    const prisma = await getPrismaClient();
+    const result = await prisma.actionCenterSettings.upsert({
+      where: { id: "default" },
+      create: { id: "default", ...input },
+      update: input,
+    });
+    agentEventBus.publish(ACTION_CENTER_CHANGED_TOPIC, {
+      actionCenterChanged: true,
+    });
+    void this.requests?.refresh().catch(() => undefined);
+    return result;
+  }
+
+  async refresh() {
+    return this.requests ? this.requests.refresh() : true;
+  }
+
+  async list(
+    input: {
+      first?: number | null;
+      after?: string | null;
+      surface?: string | null;
+      resourceKinds?: string[] | null;
+    } = {},
+  ) {
     const prisma = await getPrismaClient();
     const first = Math.max(1, Math.min(input.first ?? 50, 200));
+    const scope = JSON.stringify([
+      input.surface ?? "FULL",
+      [...(input.resourceKinds ?? [])].sort(),
+    ]);
     const index = await queryActionCenterIndex(prisma, {
       first,
-      cursor: decodeCursor(input.after),
+      surface: input.surface,
+      resourceKinds: input.resourceKinds,
+      cursor: decodeCursor(input.after, scope),
     });
     const selectedRows = index.rows.slice(0, first);
     const runIds = selectedRows.flatMap((row) =>
@@ -317,6 +393,71 @@ export class ActionCenterService {
       selectedRows.map((row) => [row.key, row.reason as ActionCenterReason]),
     );
     const hydratedItems: ActionCenterItemView[] = [];
+    const requestIds = selectedRows
+      .filter(
+        (row) =>
+          row.resourceKind === "PULL_REQUEST" ||
+          row.resourceKind === "MERGE_REQUEST",
+      )
+      .map((row) => row.resourceId);
+    if (requestIds.length) {
+      const records = await prisma.actionCenterRequest.findMany({
+        where: { id: { in: requestIds } },
+      });
+      const parsed = records.map((record) => ({
+        record,
+        data: JSON.parse(record.payloadJson) as {
+          label: string;
+          worktreeId: string | null;
+          request: ActionCenterRequestView;
+        },
+      }));
+      const worktreeIds = parsed.flatMap(({ data }) =>
+        data.worktreeId ? [data.worktreeId] : [],
+      );
+      const worktrees = worktreeIds.length
+        ? await prisma.worktree.findMany({ where: { id: { in: worktreeIds } } })
+        : [];
+      for (const { record, data } of parsed) {
+        const request = data.request;
+        if (
+          this.requests
+            ?.getWarnings()
+            .some((warning) => warning.startsWith(request.provider))
+        ) {
+          request.canMerge = false;
+          request.mergeBlockedReason =
+            "Provider refresh is incomplete. Open the request to recheck readiness.";
+        }
+        const href =
+          request.provider === "GITHUB"
+            ? `/github/pull-requests/${request.repositoryName.split("/").map(encodeURIComponent).join("/")}/${request.number}`
+            : `/gitlab/merge-requests/${encodeURIComponent(request.repositoryId)}/${request.number}`;
+        hydratedItems.push({
+          key: `${record.resourceKind}:${record.id}`,
+          resourceKind: record.resourceKind as ActionCenterResourceKind,
+          reason: record.reason as ActionCenterReason,
+          resourceId: record.id,
+          href,
+          displayNumber: request.number,
+          label: data.label,
+          summary: `${request.repositoryName} · ${request.branch}`,
+          status: request.draft ? "DRAFT" : "OPEN",
+          phase: null,
+          error: null,
+          createdAt: record.createdAt.toISOString(),
+          updatedAt: record.updatedAt.toISOString(),
+          worktree:
+            worktrees.find((worktree) => worktree.id === data.worktreeId) ??
+            null,
+          questionBatches: [],
+          buildRun: null,
+          failureFingerprint: null,
+          dismissalFingerprint: null,
+          request,
+        });
+      }
+    }
     for (const run of runs) {
       const key = `${run.kind}:${run.id}`;
       const reason = indexedReasons.get(key);
@@ -453,9 +594,10 @@ export class ActionCenterService {
 
     return {
       items,
+      warnings: this.requests?.getWarnings() ?? [],
       nextCursor:
         index.rows.length > first && items.length
-          ? encodeCursor(items[items.length - 1]!)
+          ? encodeCursor(items[items.length - 1]!, scope)
           : null,
       totalCount: index.totalCount,
       needsAttentionCount: index.needsAttentionCount,
@@ -508,7 +650,7 @@ export class ActionCenterService {
           run.generation,
         );
       }
-    } else {
+    } else if (resourceKind === "BUILD") {
       const build = await prisma.build.findUnique({
         where: { id: input.resourceId },
         select: { id: true, status: true, finishedAt: true, updatedAt: true },

@@ -31,7 +31,7 @@ export function ActionCenterPage() {
     error,
     hasMore,
     loadMore,
-    refresh,
+    refreshRequests,
   } = useActionCenter();
   const attention = items.filter(({ reason }) => reason !== "ACTIVE");
   const active = items.filter(({ reason }) => reason === "ACTIVE");
@@ -50,7 +50,7 @@ export function ActionCenterPage() {
         <Button
           aria-label={t("refresh")}
           disabled={loading}
-          onClick={() => void refresh()}
+          onClick={() => void refreshRequests()}
           size="icon"
           title={t("refresh")}
           variant="outline"

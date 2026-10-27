@@ -1,3 +1,4 @@
+import { publishIntegrationConfiguration } from "@/services/integration-configuration-events";
 import { createHash, randomBytes, randomUUID } from "node:crypto";
 
 import { getPrismaClient } from "@/data/prisma-client";
@@ -1252,7 +1253,9 @@ export class GitHubService {
     if (prepared.kind === "mutation") {
       this.restRequests.clear();
       try {
-        return await this.cache.mutation(requestInput);
+        const result = await this.cache.mutation<T>(requestInput);
+        publishIntegrationConfiguration("github");
+        return result;
       } finally {
         this.restRequests.clear();
       }
@@ -2606,6 +2609,53 @@ export class GitHubService {
       },
     );
     return data.viewer;
+  }
+
+  async actionCenterIdentity(): Promise<string | null> {
+    if (!(await this.getSettings()).tokenConfigured) return null;
+    return (await this.viewer(await this.requireToken())).login;
+  }
+
+  async actionCenterRequestState(
+    pullRequest: GitHubPullRequestView,
+    login: string,
+  ) {
+    const token = await this.requireToken();
+    const [owner, name] = pullRequest.repositoryNameWithOwner.split("/");
+    const [state, reviews] = await Promise.all([
+      this.mergeState(
+        owner!,
+        name!,
+        pullRequest.number,
+        token,
+        "PULL_REQUESTS_PAGE",
+      ),
+      this.request<{
+        node: { reviews: { nodes: Array<{ state: string }> } } | null;
+      }>(
+        `query GitHubActionCenterApproval($id: ID!, $login: String!) {
+          node(id: $id) { ... on PullRequest {
+            reviews(author: $login, last: 1, states: [APPROVED, CHANGES_REQUESTED, DISMISSED]) { nodes { state } }
+          } }
+        }`,
+        { id: pullRequest.id, login },
+        token,
+        { requestSource: "PULL_REQUESTS_PAGE", allowStaleOnError: false },
+      ),
+    ]);
+    if (!reviews.node)
+      throw new Error("Pull request approval state is unavailable");
+    const blockedReason =
+      this.mergeBlockedReason(state.pullRequest, state.viewerPermission) ??
+      (state.availableMethods.length ? null : "No merge method is available.");
+    return {
+      viewerHasApproved: reviews.node.reviews.nodes[0]?.state === "APPROVED",
+      viewerReviewState: reviews.node.reviews.nodes[0]?.state ?? null,
+      canMerge:
+        blockedReason === null &&
+        state.pullRequest.headRefOid === pullRequest.headRefOid,
+      mergeBlockedReason: blockedReason,
+    };
   }
 
   async testConnection(): Promise<GitHubViewer> {
@@ -4536,6 +4586,7 @@ export class GitHubService {
       worktreeId: null,
       worktreeHighlightColor: null,
       createdAt: pullRequest.createdAt,
+      updatedAt: pullRequest.updatedAt,
     };
   }
 
@@ -4602,6 +4653,8 @@ export class GitHubService {
     repositoryId?: string | null,
     options: {
       includePipelineJobs?: boolean;
+      createdAfter?: string | null;
+      reviewedByViewer?: boolean;
       state?: GitHubPullRequestStateFilter;
       first?: number;
       after?: string | null;
@@ -4645,9 +4698,13 @@ export class GitHubService {
       : null;
     if (repositoryId && !repository)
       throw new Error("Managed repository was not found");
-    const repositoryQualifier = repository
-      ? `repo:${repository.owner}/${repository.name}`
-      : null;
+    const repositoryQualifier =
+      [
+        repository ? `repo:${repository.owner}/${repository.name}` : null,
+        options.createdAfter ? `created:>=${options.createdAfter}` : null,
+      ]
+        .filter(Boolean)
+        .join(" ") || null;
     const cursor = decodePullRequestCursor(
       options.after,
       scope,
@@ -4716,7 +4773,7 @@ export class GitHubService {
         const query = pullRequestSearchQuery(
           "is:pr",
           searchState,
-          "review-requested:@me",
+          options.reviewedByViewer ? "reviewed-by:@me" : "review-requested:@me",
           repositoryQualifier,
           "sort:updated-desc",
         );
