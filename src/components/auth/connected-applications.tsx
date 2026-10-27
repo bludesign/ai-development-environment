@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { Plug, RefreshCw, ShieldCheck, Unplug } from "lucide-react";
+import { Plug, RefreshCw, ShieldCheck, ShieldOff, Unplug } from "lucide-react";
 import { useLocale, useTranslations } from "next-intl";
 import { ConfirmationDialog } from "@/components/confirmation-dialog";
 import { Alert, AlertDescription } from "@/components/ui/alert";
@@ -20,8 +20,14 @@ import { Link } from "@/i18n/navigation";
 import { formatDateValue } from "@/lib/date-format";
 import type {
   McpConnection,
+  McpConnectionAuthorization,
   McpConnectionsResponse,
 } from "@/lib/mcp-connections";
+
+type ConnectionAction = {
+  client: McpConnection;
+  authorization?: McpConnectionAuthorization;
+};
 
 const permissions = [
   { scope: "mcp:read", label: "readPermission", details: "readDetails" },
@@ -75,8 +81,10 @@ export function ConnectedApplications() {
   const [enabled, setEnabled] = useState<boolean | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
-  const [disconnecting, setDisconnecting] = useState<string | null>(null);
-  const [confirming, setConfirming] = useState<McpConnection | null>(null);
+  const [pendingAction, setPendingAction] = useState<ConnectionAction | null>(
+    null,
+  );
+  const [confirming, setConfirming] = useState<ConnectionAction | null>(null);
   const activeLoad = useRef<AbortController | null>(null);
   const failureMessage = t("error");
 
@@ -117,26 +125,51 @@ export function ConnectedApplications() {
     return () => activeLoad.current?.abort();
   }, [failureMessage]);
 
-  async function disconnect(clientId: string) {
+  async function revoke({ client, authorization }: ConnectionAction) {
+    const clientId = client.clientId;
     setConfirming(null);
-    setDisconnecting(clientId);
+    setPendingAction({ client, authorization });
     setError(null);
     try {
       const response = await fetch("/api/auth/mcp-connections", {
         method: "DELETE",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ clientId }),
+        body: JSON.stringify(
+          authorization
+            ? { clientId, authorizationId: authorization.id ?? null }
+            : { clientId },
+        ),
       });
       if (!response.ok) throw new Error();
       setClients(
         (current) =>
-          current?.filter((client) => client.clientId !== clientId) ?? null,
+          current?.flatMap((connection) => {
+            if (connection.clientId !== clientId) return [connection];
+            if (!authorization) return [];
+            const authorizations = connection.authorizations.filter(
+              (item) => item.id !== authorization.id,
+            );
+            if (authorizations.length === 0) return [];
+            return [
+              {
+                ...connection,
+                authorizations,
+                authorizationCount: authorizations.length,
+                scopes: [
+                  ...new Set(authorizations.flatMap((item) => item.scopes)),
+                ],
+                connectedAt: authorizations[0].authorizedAt,
+                firstAuthorizedAt:
+                  authorizations[authorizations.length - 1].authorizedAt,
+              },
+            ];
+          }) ?? null,
       );
       await load();
     } catch {
       setError(failureMessage);
     } finally {
-      setDisconnecting(null);
+      setPendingAction(null);
     }
   }
 
@@ -151,7 +184,7 @@ export function ConnectedApplications() {
         </div>
         <Button
           variant="outline"
-          disabled={loading || disconnecting !== null}
+          disabled={loading || pendingAction !== null}
           onClick={() => void load()}
         >
           <RefreshCw
@@ -210,12 +243,13 @@ export function ConnectedApplications() {
                 <Button
                   variant="destructive"
                   size="sm"
-                  disabled={loading || disconnecting !== null}
-                  onClick={() => setConfirming(client)}
+                  disabled={loading || pendingAction !== null}
+                  onClick={() => setConfirming({ client })}
                 >
                   <Unplug aria-hidden="true" />
                   {t(
-                    disconnecting === client.clientId
+                    pendingAction?.client.clientId === client.clientId &&
+                      !pendingAction.authorization
                       ? "disconnecting"
                       : "disconnect",
                   )}
@@ -310,11 +344,14 @@ export function ConnectedApplications() {
                       <TableHead scope="col">
                         {t("grantedPermissions")}
                       </TableHead>
+                      <TableHead scope="col" className="text-right">
+                        {t("authorizationActions")}
+                      </TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
-                    {client.authorizations.map((authorization, index) => (
-                      <TableRow key={`${authorization.authorizedAt}-${index}`}>
+                    {client.authorizations.map((authorization) => (
+                      <TableRow key={authorization.id}>
                         <TableCell className="align-top whitespace-normal">
                           <time dateTime={authorization.authorizedAt}>
                             {formatDateValue(
@@ -347,6 +384,32 @@ export function ConnectedApplications() {
                               );
                             })}
                           </ul>
+                        </TableCell>
+                        <TableCell className="text-right align-top">
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            disabled={loading || pendingAction !== null}
+                            aria-label={t("revokeAuthorizationLabel", {
+                              client: client.name,
+                              date: formatDateValue(
+                                authorization.authorizedAt,
+                                "short",
+                                { locale },
+                              ),
+                            })}
+                            onClick={() =>
+                              setConfirming({ client, authorization })
+                            }
+                          >
+                            <ShieldOff aria-hidden="true" />
+                            {t(
+                              pendingAction?.authorization?.id ===
+                                authorization.id
+                                ? "revoking"
+                                : "revoke",
+                            )}
+                          </Button>
                         </TableCell>
                       </TableRow>
                     ))}
@@ -383,13 +446,26 @@ export function ConnectedApplications() {
         onOpenChange={(open) => {
           if (!open) setConfirming(null);
         }}
-        title={t("confirmDisconnect", { client: confirming?.name ?? "" })}
-        description={t("disconnectDescription")}
-        actionLabel={t("disconnect")}
-        cancelLabel={common("cancel")}
-        onConfirm={() =>
-          confirming ? disconnect(confirming.clientId) : undefined
+        title={t(
+          confirming?.authorization
+            ? "confirmRevokeAuthorization"
+            : "confirmDisconnect",
+          { client: confirming?.client.name ?? "" },
+        )}
+        description={
+          confirming?.authorization
+            ? t("revokeAuthorizationDescription", {
+                date: formatDateValue(
+                  confirming.authorization.authorizedAt,
+                  "long",
+                  { locale },
+                ),
+              })
+            : t("disconnectDescription")
         }
+        actionLabel={t(confirming?.authorization ? "revoke" : "disconnect")}
+        cancelLabel={common("cancel")}
+        onConfirm={() => (confirming ? revoke(confirming) : undefined)}
       />
     </section>
   );

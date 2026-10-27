@@ -5878,6 +5878,12 @@
     "confirmDisconnect": "Déconnecter {client} ?",
     "authorizedAt": "Date d’autorisation",
     "authorizationsFor": "Autorisations actuelles de {client}",
-    "authorizationsDescription": "Chaque ligne correspond à une approbation distincte, la plus récente en premier. Les permissions s’appliquent uniquement aux jetons issus de cette approbation. Ces enregistrements peuvent subsister après l’expiration des jetons."
+    "authorizationsDescription": "Chaque ligne correspond à une approbation distincte, la plus récente en premier. Les permissions s’appliquent uniquement aux jetons issus de cette approbation. Ces enregistrements peuvent subsister après l’expiration des jetons.",
+    "authorizationActions": "Actions",
+    "revoke": "Révoquer",
+    "revoking": "Révocation…",
+    "revokeAuthorizationLabel": "Révoquer l’autorisation de {client} approuvée le {date}",
+    "confirmRevokeAuthorization": "Révoquer l’autorisation de {client} ?",
+    "revokeAuthorizationDescription": "L’approbation du {date} sera révoquée. Ses jetons d’accès, jetons de renouvellement et code d’autorisation en attente cesseront de fonctionner immédiatement. Les autres autorisations de cette application ne sont pas affectées. Les tâches en cours continueront."
   }
 }

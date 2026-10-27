@@ -1,4 +1,5 @@
 export type McpConnectionAuthorization = {
+  id: string;
   authorizedAt: string;
   scopes: string[];
 };

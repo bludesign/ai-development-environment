@@ -80,12 +80,26 @@ async function token(body: Record<string, string>) {
   );
 }
 
+async function revokeApproval(
+  authorizationId: string,
+  oauthClientId = clientId,
+) {
+  return disconnect(
+    new Request(`${origin}/api/auth/mcp-connections`, {
+      method: "DELETE",
+      headers: { cookie, origin, "content-type": "application/json" },
+      body: JSON.stringify({ clientId: oauthClientId, authorizationId }),
+    }),
+  );
+}
+
 async function begin(
   scopes = "mcp:read mcp:write mcp:destructive offline_access",
+  oauthClientId = clientId,
 ) {
   const verifier = randomBytes(32).toString("base64url");
   const query = new URLSearchParams({
-    client_id: clientId,
+    client_id: oauthClientId,
     redirect_uri: redirectUri,
     response_type: "code",
     scope: scopes,
@@ -107,8 +121,11 @@ async function begin(
   return { verifier, oauthQuery: new URL(result.url, origin).search.slice(1) };
 }
 
-async function approve(scope = "mcp:read offline_access") {
-  const flow = await begin();
+async function approve(
+  scope = "mcp:read offline_access",
+  oauthClientId = clientId,
+) {
+  const flow = await begin(undefined, oauthClientId);
   const consent = await request(
     "/api/auth/oauth2/consent",
     { accept: true, scope, oauth_query: flow.oauthQuery },
@@ -121,11 +138,14 @@ async function approve(scope = "mcp:read offline_access") {
   return { code: callback.searchParams.get("code")!, verifier: flow.verifier };
 }
 
-async function issue(scope = "mcp:read offline_access") {
-  const flow = await approve(scope);
+async function issue(
+  scope = "mcp:read offline_access",
+  oauthClientId = clientId,
+) {
+  const flow = await approve(scope, oauthClientId);
   const response = await token({
     grant_type: "authorization_code",
-    client_id: clientId,
+    client_id: oauthClientId,
     redirect_uri: redirectUri,
     resource: config.resource,
     code: flow.code,
@@ -440,6 +460,249 @@ describe("MCP OAuth provider with SQLite", () => {
     );
     expect(await principalFromMcpClaims(claims)).toBeNull();
   });
+  test("revokes one approval and its rotated credentials without affecting another approval", async () => {
+    const issued = await issue("mcp:read mcp:write offline_access");
+    const survivor = await issue();
+    const claims = decodeJwt(issued.access_token);
+    const authorizationId = claims[MCP_AUTHORIZATION_CLAIM] as string;
+    const principal = (await principalFromMcpClaims(claims))!;
+    const authorization = await prisma.mcpAuthorization.findUniqueOrThrow({
+      where: { id: authorizationId },
+    });
+    // Cover opaque provider credentials bound by code id as well as JWT/refresh references.
+    await prisma.oauthAccessToken.create({
+      data: {
+        id: "single-revoke-opaque",
+        token: "single-revoke-opaque-hash",
+        userId,
+        clientId,
+        authorizationCodeId: authorization.authorizationCodeId,
+        scopes: "mcp:read",
+        createdAt: new Date(),
+        expiresAt: new Date(Date.now() + 300_000),
+      },
+    });
+    const rotation = await token({
+      grant_type: "refresh_token",
+      client_id: clientId,
+      resource: config.resource,
+      refresh_token: issued.refresh_token!,
+    });
+    expect(rotation.status).toBe(200);
+    const rotated = await rotation.json();
+    const consentBefore = await prisma.oauthConsent.findMany({
+      where: { userId, clientId },
+    });
+    expect(consentBefore.length).toBeGreaterThan(0);
+
+    const response = await revokeApproval(authorizationId);
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({ revoked: true });
+    expect(response.headers.get("cache-control")).toBe("no-store");
+    expect(await activeMcpAuthorization(principal)).toBe(false);
+    expect(await principalFromMcpClaims(claims)).toBeNull();
+    expect(
+      await principalFromMcpClaims(decodeJwt(rotated.access_token)),
+    ).toBeNull();
+    const denied = await authorizeMcpOAuthRequest(
+      new Request(config.resource, {
+        headers: { authorization: `Bearer ${issued.access_token}` },
+      }),
+    );
+    expect("response" in denied && denied.response.status).toBe(401);
+    expect(
+      await prisma.oauthRefreshToken.count({
+        where: { userId, clientId, referenceId: authorizationId },
+      }),
+    ).toBe(0);
+    expect(
+      await prisma.oauthAccessToken.findUnique({
+        where: { id: "single-revoke-opaque" },
+      }),
+    ).toBeNull();
+    for (const refreshToken of [issued.refresh_token!, rotated.refresh_token]) {
+      expect(
+        (
+          await token({
+            grant_type: "refresh_token",
+            client_id: clientId,
+            resource: config.resource,
+            refresh_token: refreshToken,
+          })
+        ).status,
+      ).toBe(400);
+    }
+    expect(
+      await principalFromMcpClaims(decodeJwt(survivor.access_token)),
+    ).not.toBeNull();
+    expect(
+      (
+        await token({
+          grant_type: "refresh_token",
+          client_id: clientId,
+          resource: config.resource,
+          refresh_token: survivor.refresh_token!,
+        })
+      ).status,
+    ).toBe(200);
+    expect(
+      await prisma.oauthConsent.findMany({ where: { userId, clientId } }),
+    ).toEqual(consentBefore);
+    expect((await revokeApproval(authorizationId)).status).toBe(200);
+    const listing = await connections(
+      new Request(`${origin}/api/auth/mcp-connections`, {
+        headers: { cookie, origin },
+      }),
+    );
+    const client = (await listing.json()).clients.find(
+      (item: { clientId: string }) => item.clientId === clientId,
+    );
+    expect(
+      client.authorizations.some(
+        (item: { id: string }) => item.id === authorizationId,
+      ),
+    ).toBe(false);
+    expect(
+      client.authorizations.some(
+        (item: { id: string }) =>
+          item.id === decodeJwt(survivor.access_token)[MCP_AUTHORIZATION_CLAIM],
+      ),
+    ).toBe(true);
+  });
+  test("revoking an approval invalidates its pending code and checks user and client ownership", async () => {
+    const before = await prisma.mcpAuthorization.findMany({
+      where: { userId, clientId },
+      select: { id: true },
+    });
+    const flow = await approve();
+    const authorization = await prisma.mcpAuthorization.findFirstOrThrow({
+      where: { userId, clientId, id: { notIn: before.map((item) => item.id) } },
+    });
+    const foreign = await prisma.mcpAuthorization.create({
+      data: {
+        id: "single-revoke-foreign",
+        authorizationCodeId: "single-revoke-foreign-code",
+        userId: "existing-user",
+        clientId,
+        clientName: "Other user's approval",
+        scopes: "mcp:read",
+      },
+    });
+    for (const [id, requestedClient] of [
+      [foreign.id, clientId],
+      [authorization.id, "wrong-client"],
+      ["missing-approval", clientId],
+    ]) {
+      expect((await revokeApproval(id, requestedClient)).status).toBe(404);
+    }
+    for (const body of [
+      { clientId, authorizationId: "" },
+      { clientId, authorizationId: null },
+      { clientId, authorizationID: authorization.id },
+    ]) {
+      expect(
+        (
+          await disconnect(
+            new Request(`${origin}/api/auth/mcp-connections`, {
+              method: "DELETE",
+              headers: { cookie, origin, "content-type": "application/json" },
+              body: JSON.stringify(body),
+            }),
+          )
+        ).status,
+      ).toBe(400);
+    }
+    expect(
+      (
+        await disconnect(
+          new Request(`${origin}/api/auth/mcp-connections`, {
+            method: "DELETE",
+            headers: {
+              cookie,
+              origin: "https://attacker.example",
+              "content-type": "application/json",
+            },
+            body: JSON.stringify({
+              clientId,
+              authorizationId: authorization.id,
+            }),
+          }),
+        )
+      ).status,
+    ).toBe(403);
+    expect(
+      (
+        await prisma.mcpAuthorization.findUniqueOrThrow({
+          where: { id: authorization.id },
+        })
+      ).revokedAt,
+    ).toBeNull();
+    expect((await revokeApproval(authorization.id)).status).toBe(200);
+    expect(
+      (
+        await token({
+          grant_type: "authorization_code",
+          client_id: clientId,
+          redirect_uri: redirectUri,
+          resource: config.resource,
+          code: flow.code,
+          code_verifier: flow.verifier,
+        })
+      ).status,
+    ).toBe(400);
+    expect(
+      (
+        await prisma.mcpAuthorization.findUniqueOrThrow({
+          where: { id: foreign.id },
+        })
+      ).revokedAt,
+    ).toBeNull();
+  });
+  test("revoking the last approval removes the application and clears its consent", async () => {
+    const registration = await request("/api/auth/oauth2/register", {
+      client_name: "Single approval client",
+      redirect_uris: [redirectUri],
+      token_endpoint_auth_method: "none",
+      grant_types: ["authorization_code", "refresh_token"],
+    });
+    const isolatedClientId = (await registration.json()).client_id;
+    const issued = await issue("mcp:read offline_access", isolatedClientId);
+    const claims = decodeJwt(issued.access_token);
+    expect(
+      await prisma.oauthConsent.count({
+        where: { userId, clientId: isolatedClientId },
+      }),
+    ).toBeGreaterThan(0);
+    expect(
+      (
+        await revokeApproval(
+          claims[MCP_AUTHORIZATION_CLAIM] as string,
+          isolatedClientId,
+        )
+      ).status,
+    ).toBe(200);
+    expect(
+      await prisma.oauthConsent.count({
+        where: { userId, clientId: isolatedClientId },
+      }),
+    ).toBe(0);
+    expect(await principalFromMcpClaims(claims)).toBeNull();
+    const listing = await connections(
+      new Request(`${origin}/api/auth/mcp-connections`, {
+        headers: { cookie, origin },
+      }),
+    );
+    expect(
+      (await listing.json()).clients.some(
+        (item: { clientId: string }) => item.clientId === isolatedClientId,
+      ),
+    ).toBe(false);
+    const fresh = await issue("mcp:read offline_access", isolatedClientId);
+    expect(decodeJwt(fresh.access_token)[MCP_AUTHORIZATION_CLAIM]).not.toBe(
+      claims[MCP_AUTHORIZATION_CLAIM],
+    );
+    expect(await principalFromMcpClaims(claims)).toBeNull();
+  });
   test("rejects invalid signatures, issuers, audiences, expiry and mixed identities", async () => {
     const issued = await issue();
     const claims = decodeJwt(issued.access_token);
@@ -584,10 +847,12 @@ describe("MCP OAuth provider with SQLite", () => {
       authorizationCount: 2,
       authorizations: [
         {
+          id: "details-latest",
           authorizedAt: "2026-08-01T12:00:00.000Z",
           scopes: ["mcp:read", "mcp:write", "offline_access"],
         },
         {
+          id: "details-first",
           authorizedAt: "2026-07-01T12:00:00.000Z",
           scopes: ["mcp:read"],
         },

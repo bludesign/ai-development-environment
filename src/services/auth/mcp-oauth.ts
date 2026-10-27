@@ -128,6 +128,43 @@ export async function authorizeMcpOAuthRequest(
   return principal ? { principal } : { response };
 }
 
+/** Revoke one generation, retaining other approvals for this user/client. */
+export async function revokeMcpAuthorization(
+  userId: string,
+  clientId: string,
+  authorizationId: string,
+): Promise<boolean> {
+  const prisma = await getPrismaClient();
+  return prisma.$transaction(async (tx) => {
+    const authorization = await tx.mcpAuthorization.findFirst({
+      where: { id: authorizationId, userId, clientId },
+      select: { id: true, authorizationCodeId: true },
+    });
+    if (!authorization) return false;
+    await tx.mcpAuthorization.updateMany({
+      where: { id: authorization.id, userId, clientId, revokedAt: null },
+      data: { revokedAt: new Date() },
+    });
+    const credentials = {
+      userId,
+      clientId,
+      OR: [
+        { referenceId: authorization.id },
+        { authorizationCodeId: authorization.authorizationCodeId },
+      ],
+    };
+    await tx.oauthAccessToken.deleteMany({ where: credentials });
+    await tx.oauthRefreshToken.deleteMany({ where: credentials });
+    const remaining = await tx.mcpAuthorization.findFirst({
+      where: { userId, clientId, revokedAt: null },
+      select: { id: true },
+    });
+    if (!remaining)
+      await tx.oauthConsent.deleteMany({ where: { userId, clientId } });
+    return true;
+  });
+}
+
 /** Disconnect all generations for this user/client; future consent gets fresh ids. */
 export async function disconnectMcpClient(
   userId: string,

@@ -7,8 +7,29 @@ import {
 } from "@testing-library/react";
 import { afterEach, expect, test, vi } from "vitest";
 import { ConnectedApplications } from "./connected-applications";
+import type { McpConnection } from "@/lib/mcp-connections";
 
 afterEach(() => vi.unstubAllGlobals());
+
+const readApproval = {
+  id: "approval-read",
+  authorizedAt: "2026-10-20T12:00:00Z",
+  scopes: ["mcp:read"],
+};
+const writeApproval = {
+  id: "approval-write",
+  authorizedAt: "2026-10-27T12:00:00Z",
+  scopes: ["mcp:read", "mcp:write"],
+};
+const readClient: McpConnection = {
+  clientId: "test-client",
+  name: "Test client",
+  scopes: readApproval.scopes,
+  firstAuthorizedAt: readApproval.authorizedAt,
+  connectedAt: readApproval.authorizedAt,
+  authorizationCount: 1,
+  authorizations: [readApproval],
+};
 
 test("shows granted permissions and removes a client after disconnect", async () => {
   const fetch = vi
@@ -26,10 +47,12 @@ test("shows granted permissions and removes a client after disconnect", async ()
             authorizationCount: 2,
             authorizations: [
               {
+                id: "approval-new",
                 authorizedAt: "2026-10-27T12:00:00Z",
                 scopes: ["mcp:read", "mcp:write", "offline_access"],
               },
               {
+                id: "approval-old",
                 authorizedAt: "2026-10-20T12:00:00Z",
                 scopes: ["mcp:read"],
               },
@@ -133,7 +156,11 @@ test("explains read-only access and preserves a connection after a failed discon
             firstAuthorizedAt: "2026-10-27T12:00:00Z",
             authorizationCount: 1,
             authorizations: [
-              { authorizedAt: "2026-10-27T12:00:00Z", scopes: ["mcp:read"] },
+              {
+                id: "chatgpt-approval",
+                authorizedAt: "2026-10-27T12:00:00Z",
+                scopes: ["mcp:read"],
+              },
             ],
           },
         ],
@@ -159,4 +186,139 @@ test("explains read-only access and preserves a connection after a failed discon
     (screen.getByRole("button", { name: "Disconnect" }) as HTMLButtonElement)
       .disabled,
   ).toBe(false);
+});
+
+test("confirms and revokes one approval while updating the remaining connection", async () => {
+  let completeRevoke!: (response: Response) => void;
+  const revokeResponse = new Promise<Response>((resolve) => {
+    completeRevoke = resolve;
+  });
+  const client: McpConnection = {
+    ...readClient,
+    scopes: writeApproval.scopes,
+    connectedAt: writeApproval.authorizedAt,
+    authorizationCount: 2,
+    authorizations: [writeApproval, readApproval],
+  };
+  const fetch = vi
+    .fn()
+    .mockResolvedValueOnce(Response.json({ enabled: true, clients: [client] }))
+    .mockReturnValueOnce(revokeResponse)
+    .mockResolvedValueOnce(
+      Response.json({ enabled: true, clients: [readClient] }),
+    );
+  vi.stubGlobal("fetch", fetch);
+  render(<ConnectedApplications />);
+  const table = await screen.findByRole("table", {
+    name: "Current authorizations for Test client",
+  });
+  const targetRow = within(table).getAllByRole("row")[1];
+  fireEvent.click(
+    within(targetRow).getByRole("button", { name: /^Revoke authorization/ }),
+  );
+  const dialog = await screen.findByRole("alertdialog");
+  expect(
+    within(dialog).getByText("Revoke authorization for Test client?"),
+  ).toBeTruthy();
+  expect(
+    within(dialog).getByText(/approval from .*October 27, 2026/),
+  ).toBeTruthy();
+  expect(
+    within(dialog).getByText(
+      /Other authorizations for this application are unaffected/,
+    ),
+  ).toBeTruthy();
+  expect(fetch).toHaveBeenCalledTimes(1);
+  fireEvent.click(within(dialog).getByRole("button", { name: "Revoke" }));
+  await waitFor(() => expect(screen.queryByRole("alertdialog")).toBeNull());
+  expect(
+    (screen.getByRole("button", { name: "Disconnect" }) as HTMLButtonElement)
+      .disabled,
+  ).toBe(true);
+  expect(
+    (
+      within(targetRow).getByRole("button", {
+        name: /^Revoke authorization/,
+      }) as HTMLButtonElement
+    ).disabled,
+  ).toBe(true);
+  completeRevoke(Response.json({ revoked: true }));
+  await waitFor(() =>
+    expect(within(table).getAllByRole("row")).toHaveLength(2),
+  );
+  expect(screen.getByText("Test client")).toBeTruthy();
+  expect(screen.getByText("1")).toBeTruthy();
+  expect(screen.queryByText("Write")).toBeNull();
+  expect(
+    within(table)
+      .getAllByRole("row")[1]
+      .querySelector("time")
+      ?.getAttribute("dateTime"),
+  ).toBe(readApproval.authorizedAt);
+  expect(fetch).toHaveBeenCalledWith(
+    "/api/auth/mcp-connections",
+    expect.objectContaining({
+      method: "DELETE",
+      body: JSON.stringify({
+        clientId: client.clientId,
+        authorizationId: writeApproval.id,
+      }),
+    }),
+  );
+});
+
+test("removes an application after revoking its last approval", async () => {
+  const fetch = vi
+    .fn()
+    .mockResolvedValueOnce(
+      Response.json({ enabled: true, clients: [readClient] }),
+    )
+    .mockResolvedValueOnce(Response.json({ revoked: true }))
+    .mockResolvedValueOnce(Response.json({ enabled: true, clients: [] }));
+  vi.stubGlobal("fetch", fetch);
+  render(<ConnectedApplications />);
+  const table = await screen.findByRole("table");
+  fireEvent.click(
+    within(table).getByRole("button", { name: /^Revoke authorization/ }),
+  );
+  const dialog = await screen.findByRole("alertdialog");
+  fireEvent.click(within(dialog).getByRole("button", { name: "Revoke" }));
+  expect(
+    await screen.findByText("You have no connected applications."),
+  ).toBeTruthy();
+  expect(screen.queryByRole("table")).toBeNull();
+});
+
+test("keeps the approval visible and allows retry after a failed revocation", async () => {
+  const fetch = vi
+    .fn()
+    .mockResolvedValueOnce(
+      Response.json({ enabled: true, clients: [readClient] }),
+    )
+    .mockResolvedValueOnce(new Response(null, { status: 500 }));
+  vi.stubGlobal("fetch", fetch);
+  render(<ConnectedApplications />);
+  const table = await screen.findByRole("table");
+  fireEvent.click(
+    within(table).getByRole("button", { name: /^Revoke authorization/ }),
+  );
+  let dialog = await screen.findByRole("alertdialog");
+  fireEvent.click(within(dialog).getByRole("button", { name: "Cancel" }));
+  await waitFor(() => expect(screen.queryByRole("alertdialog")).toBeNull());
+  expect(fetch).toHaveBeenCalledTimes(1);
+  fireEvent.click(
+    within(table).getByRole("button", { name: /^Revoke authorization/ }),
+  );
+  dialog = await screen.findByRole("alertdialog");
+  fireEvent.click(within(dialog).getByRole("button", { name: "Revoke" }));
+  expect(await screen.findByRole("alert")).toBeTruthy();
+  expect(within(table).getAllByRole("row")).toHaveLength(2);
+  expect(
+    (
+      within(table).getByRole("button", {
+        name: /^Revoke authorization/,
+      }) as HTMLButtonElement
+    ).disabled,
+  ).toBe(false);
+  expect(fetch).toHaveBeenCalledTimes(2);
 });

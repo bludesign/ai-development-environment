@@ -1,9 +1,13 @@
+import { APIError } from "better-auth/api";
 import { getPrismaClient } from "@/data/prisma-client";
 import type {
   McpConnection,
   McpConnectionsResponse,
 } from "@/lib/mcp-connections";
-import { disconnectMcpClient } from "@/services/auth/mcp-oauth";
+import {
+  disconnectMcpClient,
+  revokeMcpAuthorization,
+} from "@/services/auth/mcp-oauth";
 import { getMcpOAuthConfig } from "@/services/auth/mcp-oauth-config";
 import { authenticated } from "../management/http";
 import * as z from "zod/v4";
@@ -17,6 +21,7 @@ export async function GET(request: Request): Promise<Response> {
       where: { userId: principal.userId, revokedAt: null },
       orderBy: { createdAt: "desc" },
       select: {
+        id: true,
         clientId: true,
         clientName: true,
         scopes: true,
@@ -28,6 +33,7 @@ export async function GET(request: Request): Promise<Response> {
       const client = clients.get(authorization.clientId);
       const scopes = authorization.scopes.split(/\s+/).filter(Boolean);
       const detail = {
+        id: authorization.id,
         authorizedAt: authorization.createdAt.toISOString(),
         scopes,
       };
@@ -58,9 +64,24 @@ export async function GET(request: Request): Promise<Response> {
 
 export async function DELETE(request: Request): Promise<Response> {
   const response = await authenticated(request, async (principal) => {
-    const { clientId } = z
-      .object({ clientId: z.string().min(1).max(2048) })
+    const { clientId, authorizationId } = z
+      .strictObject({
+        clientId: z.string().min(1).max(2048),
+        authorizationId: z.string().min(1).max(128).optional(),
+      })
       .parse(await request.json());
+    if (authorizationId !== undefined) {
+      const revoked = await revokeMcpAuthorization(
+        principal.userId,
+        clientId,
+        authorizationId,
+      );
+      if (!revoked)
+        throw new APIError("NOT_FOUND", {
+          message: "Authorization not found.",
+        });
+      return { revoked: true };
+    }
     await disconnectMcpClient(principal.userId, clientId);
     return { disconnected: true };
   });

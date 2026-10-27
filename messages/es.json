@@ -5878,6 +5878,12 @@
     "confirmDisconnect": "¿Desconectar {client}?",
     "authorizedAt": "Fecha de autorización",
     "authorizationsFor": "Autorizaciones actuales de {client}",
-    "authorizationsDescription": "Cada fila es una aprobación independiente, con la más reciente primero. Los permisos solo se aplican a los tokens de esa aprobación. Estos registros pueden permanecer después de que caduquen los tokens."
+    "authorizationsDescription": "Cada fila es una aprobación independiente, con la más reciente primero. Los permisos solo se aplican a los tokens de esa aprobación. Estos registros pueden permanecer después de que caduquen los tokens.",
+    "authorizationActions": "Acciones",
+    "revoke": "Revocar",
+    "revoking": "Revocando…",
+    "revokeAuthorizationLabel": "Revocar la autorización de {client} aprobada el {date}",
+    "confirmRevokeAuthorization": "¿Revocar la autorización de {client}?",
+    "revokeAuthorizationDescription": "Se revocará la aprobación del {date}. Sus tokens de acceso, tokens de actualización y código de autorización pendiente dejarán de funcionar inmediatamente. Las demás autorizaciones de esta aplicación no se verán afectadas. Los trabajos en curso continuarán."
   }
 }

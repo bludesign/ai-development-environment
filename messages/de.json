@@ -5878,6 +5878,12 @@
     "confirmDisconnect": "{client} trennen?",
     "authorizedAt": "Autorisiert am",
     "authorizationsFor": "Aktuelle Autorisierungen für {client}",
-    "authorizationsDescription": "Jede Zeile ist eine separate Genehmigung, die neueste zuerst. Berechtigungen gelten nur für Tokens dieser Genehmigung. Diese Einträge können nach Ablauf der Tokens bestehen bleiben."
+    "authorizationsDescription": "Jede Zeile ist eine separate Genehmigung, die neueste zuerst. Berechtigungen gelten nur für Tokens dieser Genehmigung. Diese Einträge können nach Ablauf der Tokens bestehen bleiben.",
+    "authorizationActions": "Aktionen",
+    "revoke": "Widerrufen",
+    "revoking": "Wird widerrufen…",
+    "revokeAuthorizationLabel": "Autorisierung für {client} vom {date} widerrufen",
+    "confirmRevokeAuthorization": "Autorisierung für {client} widerrufen?",
+    "revokeAuthorizationDescription": "Die Genehmigung vom {date} wird widerrufen. Ihre Zugriffstokens, Refresh-Tokens und der ausstehende Autorisierungscode werden sofort ungültig. Andere Autorisierungen dieser Anwendung bleiben unverändert. Laufende Jobs werden fortgesetzt."
   }
 }

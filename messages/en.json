@@ -5878,6 +5878,12 @@
     "confirmDisconnect": "Disconnect {client}?",
     "authorizedAt": "Authorized",
     "authorizationsFor": "Current authorizations for {client}",
-    "authorizationsDescription": "Each row is a separate approval, newest first. Permissions apply only to tokens from that approval. These records may remain after tokens expire."
+    "authorizationsDescription": "Each row is a separate approval, newest first. Permissions apply only to tokens from that approval. These records may remain after tokens expire.",
+    "authorizationActions": "Actions",
+    "revoke": "Revoke",
+    "revoking": "Revoking…",
+    "revokeAuthorizationLabel": "Revoke authorization for {client} approved {date}",
+    "confirmRevokeAuthorization": "Revoke authorization for {client}?",
+    "revokeAuthorizationDescription": "The approval from {date} will be revoked. Its access tokens, refresh tokens, and pending authorization code stop working immediately. Other authorizations for this application are unaffected. Running jobs continue."
   }
 }
