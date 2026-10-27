@@ -93,7 +93,8 @@
     "runs": "Exécutions",
     "sync": "Synchronisation",
     "changes": "Modifications",
-    "dsyms": "dSYM"
+    "dsyms": "dSYM",
+    "connectedApplications": "Applications connectées"
   },
   "globalSearch": {
     "title": "Rechercher dans l’application",
@@ -5827,5 +5828,27 @@
     "fieldJob": "Statut externe sélectionné pour une action individuelle sur une tâche ; null pour une action sur tout le pipeline. targetUrl et author peuvent également être null.",
     "fieldMergeRequests": "mergeRequests contient les MR correspondantes avec iid, title, branches source/cible et identifiants des projets. mergeRequest est la correspondance unique, ou null si aucune ou plusieurs MR correspondent.",
     "fieldSecrets": "Accédez aux secrets du dépôt avec context.secrets.API_TOKEN. L’identifiant GitLab de l’app n’est pas fourni. Journalisez uniquement les noms des secrets, jamais leurs valeurs."
+  },
+  "mcpOAuth": {
+    "consentTitle": "Connecter {client}",
+    "consentDescription": "Choisissez les autorisations que cette application peut utiliser via MCP.",
+    "readDescription": "Lecture : consulter les données de développement et les résultats des outils.",
+    "writeDescription": "Écriture : apporter des modifications courantes aux données de développement.",
+    "destructiveDescription": "Actions destructives : supprimer des données, exécuter des commandes et des agents, et configurer les exécutions et automatisations.",
+    "offlineDescription": "Accès hors ligne : renouveler l’accès avec des jetons de renouvellement rotatifs expirant chacun après 30 jours.",
+    "allow": "Autoriser les permissions sélectionnées",
+    "deny": "Refuser",
+    "error": "La demande n’a pas pu aboutir. Veuillez réessayer.",
+    "connectionsTitle": "Applications connectées",
+    "connectionsDescription": "Gérez les applications autorisées à utiliser MCP en votre nom. La déconnexion bloque immédiatement les jetons d’accès et de renouvellement. Les tâches en cours continuent.",
+    "disabled": "OAuth pour MCP est désactivé sur ce serveur.",
+    "loading": "Chargement des applications connectées…",
+    "empty": "Vous n’avez aucune application connectée.",
+    "disconnect": "Déconnecter",
+    "readPermission": "Lecture",
+    "writePermission": "Écriture",
+    "destructivePermission": "Actions destructives et exécution",
+    "offlinePermission": "Accès hors ligne",
+    "readRequired": "Ce client doit demander mcp:read avant que vous puissiez autoriser l’accès."
   }
 }

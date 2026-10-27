@@ -93,7 +93,8 @@
     "runs": "Ausführungen",
     "sync": "Synchronisierung",
     "changes": "Änderungen",
-    "dsyms": "dSYMs"
+    "dsyms": "dSYMs",
+    "connectedApplications": "Verbundene Anwendungen"
   },
   "globalSearch": {
     "title": "App durchsuchen",
@@ -5827,5 +5828,27 @@
     "fieldJob": "Ausgewählter externer Status bei einer einzelnen Job-Aktion; null bei einer Aktion für die gesamte Pipeline. Auch targetUrl und author können null sein.",
     "fieldMergeRequests": "mergeRequests enthält passende MRs mit iid, title, Quell-/Zielbranches und Projekt-IDs. mergeRequest ist der eindeutige Treffer oder null, wenn kein oder mehrere Treffer vorliegen.",
     "fieldSecrets": "Greifen Sie mit context.secrets.API_TOKEN auf benannte Repository-Secrets zu. Das GitLab-Zugangsmittel der App wird nicht bereitgestellt. Protokollieren Sie nur Secret-Namen, keine Werte."
+  },
+  "mcpOAuth": {
+    "consentTitle": "{client} verbinden",
+    "consentDescription": "Wähle die Berechtigungen, die diese Anwendung über MCP verwenden darf.",
+    "readDescription": "Lesen: Entwicklungsdaten und Werkzeugergebnisse anzeigen.",
+    "writeDescription": "Schreiben: gewöhnliche Änderungen an Entwicklungsdaten vornehmen.",
+    "destructiveDescription": "Destruktiv: Daten löschen, Befehle und Agenten ausführen sowie Ausführungen und Automatisierungen konfigurieren.",
+    "offlineDescription": "Offlinezugriff: den Zugriff mit rotierenden Aktualisierungstoken verlängern, die jeweils nach 30 Tagen ablaufen.",
+    "allow": "Ausgewählte Berechtigungen erlauben",
+    "deny": "Ablehnen",
+    "error": "Die Anfrage konnte nicht abgeschlossen werden. Bitte versuche es erneut.",
+    "connectionsTitle": "Verbundene Anwendungen",
+    "connectionsDescription": "Verwalte Anwendungen, die MCP in deinem Namen verwenden dürfen. Das Trennen sperrt Zugriffs- und Aktualisierungstoken sofort. Laufende Aufträge werden fortgesetzt.",
+    "disabled": "MCP OAuth ist auf diesem Server deaktiviert.",
+    "loading": "Verbundene Anwendungen werden geladen…",
+    "empty": "Du hast keine verbundenen Anwendungen.",
+    "disconnect": "Trennen",
+    "readPermission": "Lesen",
+    "writePermission": "Schreiben",
+    "destructivePermission": "Destruktive Aktionen und Ausführung",
+    "offlinePermission": "Offlinezugriff",
+    "readRequired": "Dieser Client muss mcp:read anfordern, bevor du den Zugriff erlauben kannst."
   }
 }

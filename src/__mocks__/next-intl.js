@@ -4,6 +4,7 @@
 const React = require("react");
 
 const mockTranslations = {
+  mcpOAuth: require("../../messages/en.json").mcpOAuth,
   serverUrls: require("../../messages/en.json").serverUrls,
   activeAgent: {
     allAgents: "All agents",
@@ -31,6 +32,8 @@ const mockTranslations = {
     cannotBeUndone: "This action cannot be undone.",
   },
   shell: {
+    connectedApplications: require("../../messages/en.json").shell
+      .connectedApplications,
     productName: "AI Development Environment",
     welcome: "Welcome",
     dashboard: "Dashboard",

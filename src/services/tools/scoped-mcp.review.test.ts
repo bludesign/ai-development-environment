@@ -144,6 +144,15 @@ describe("scoped MCP protocol compatibility", () => {
     expect(result.tools).toEqual([
       {
         name: tool.name,
+        _meta: {
+          "aide/requiredScopes": ["mcp:read", "mcp:write", "mcp:destructive"],
+          securitySchemes: [
+            {
+              type: "oauth2",
+              scopes: ["mcp:read", "mcp:write", "mcp:destructive"],
+            },
+          ],
+        },
         title: tool.title,
         description: tool.description,
         inputSchema: tool.inputSchema,

@@ -93,7 +93,8 @@
     "runs": "Runs",
     "sync": "Sync",
     "changes": "Changes",
-    "dsyms": "dSYMs"
+    "dsyms": "dSYMs",
+    "connectedApplications": "Connected applications"
   },
   "globalSearch": {
     "title": "Search the app",
@@ -5827,5 +5828,27 @@
     "fieldJob": "Selected external status for an individual job action; null for a whole-pipeline action. targetUrl and author can also be null.",
     "fieldMergeRequests": "mergeRequests contains matching MRs with iid, title, source/target branches and project IDs. mergeRequest is the unique match, or null when none or several match.",
     "fieldSecrets": "Access named repository secrets with context.secrets.API_TOKEN. No application GitLab credential is injected. Log secret names only, not values."
+  },
+  "mcpOAuth": {
+    "consentTitle": "Connect {client}",
+    "consentDescription": "Choose the permissions this application can use through MCP.",
+    "readDescription": "Read: view development data and tool results.",
+    "writeDescription": "Write: make ordinary changes to development data.",
+    "destructiveDescription": "Destructive: delete data, run commands and agents, and configure execution and automations.",
+    "offlineDescription": "Offline access: renew access with rotating refresh tokens that each expire after 30 days.",
+    "allow": "Allow selected permissions",
+    "deny": "Deny",
+    "error": "The request could not be completed. Please try again.",
+    "connectionsTitle": "Connected applications",
+    "connectionsDescription": "Manage applications authorized to use MCP as you. Disconnecting blocks existing access and refresh tokens immediately. Running jobs continue.",
+    "disabled": "MCP OAuth is disabled on this server.",
+    "loading": "Loading connected applications…",
+    "empty": "You have no connected applications.",
+    "disconnect": "Disconnect",
+    "readPermission": "Read",
+    "writePermission": "Write",
+    "destructivePermission": "Destructive actions and execution",
+    "offlinePermission": "Offline access",
+    "readRequired": "This client must request mcp:read before you can grant access."
   }
 }

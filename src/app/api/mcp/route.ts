@@ -2,6 +2,7 @@ import {
   createMcpHandler,
   readRequestBody,
 } from "@modelcontextprotocol/server";
+import { mcpRequestScopeError } from "@/services/tools/mcp-oauth-dispatch";
 
 import { getServerServices } from "@/services/server-services";
 import {
@@ -121,6 +122,29 @@ async function handle(request: Request): Promise<Response> {
     context = authorization.context;
   }
   try {
+    if (context.oauthPrincipal && request.method === "POST") {
+      const body = await readRequestBody(request.clone());
+      if (body.tooLarge)
+        return new Response("Request body too large", { status: 413 });
+      let parsed: unknown;
+      try {
+        parsed = JSON.parse(body.text);
+      } catch {
+        /* SDK returns its protocol parse error. */
+      }
+      const denied = mcpRequestScopeError(
+        parsed,
+        context,
+        toolSnapshot,
+        toolSnapshot
+          ? undefined
+          : new Set(tools.builtInTools.definitions().map((tool) => tool.name)),
+      );
+      if (denied) {
+        denied.headers.set("x-request-id", context.correlationId);
+        return denied;
+      }
+    }
     const handler = createMcpHandler(
       () =>
         toolSnapshot

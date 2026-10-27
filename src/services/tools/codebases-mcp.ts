@@ -1,5 +1,7 @@
 import { McpServer } from "@modelcontextprotocol/server";
 
+import { mcpScopeMetadata } from "./mcp-permissions";
+
 import type { BuildsService } from "@/services/builds";
 import type { CodebaseToolsService } from "@/services/codebases";
 
@@ -32,6 +34,7 @@ export function createBuiltInMcpServer(
         inputSchema: tool.inputSchema,
         outputSchema: tool.outputSchema,
         annotations: tool.annotations,
+        _meta: mcpScopeMetadata(tool.name),
       },
       async (input) => invoke(tool.name, input),
     );

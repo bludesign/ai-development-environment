@@ -1,5 +1,6 @@
 "use client";
 import { ActionCenterSettingsCard } from "@/components/action-center/action-center-settings";
+import { ConnectedApplicationsLink } from "@/components/auth/connected-applications";
 import { ServerUrlsSettingsCard } from "@/components/server-urls/server-urls-settings-card";
 import {
   ServerUrlActionNotice,
@@ -114,6 +115,7 @@ export function SettingsPage() {
             <ServerUrlsSettingsCard />
             <EditorSettingsCard />
             <ActionCenterSettingsCard />
+            <ConnectedApplicationsLink />
           </SettingsGroup>
           <SettingsGroup
             description={t("appleGroupDescription")}

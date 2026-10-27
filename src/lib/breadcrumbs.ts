@@ -20,6 +20,7 @@ export type BreadcrumbLabelKey =
   | "codebases"
   | "comments"
   | "commands"
+  | "connectedApplications"
   | "configurations"
   | "consoleLogs"
   | "costs"
@@ -97,6 +98,7 @@ const STATIC_SEGMENTS: Record<string, BreadcrumbLabelKey> = {
   codebases: "codebases",
   comments: "comments",
   commands: "commands",
+  "connected-applications": "connectedApplications",
   configurations: "configurations",
   "console-logs": "consoleLogs",
   costs: "costs",
@@ -163,6 +165,7 @@ const STATIC_NESTED_PATHS = new Set([
   "/dashboard/commands/runs",
   "/debugging/crashes/dsyms",
   "/system/devices/enroll",
+  "/system/connected-applications",
   "/gitlab/cache",
   "/gitlab/comments",
   "/gitlab/merge-requests",

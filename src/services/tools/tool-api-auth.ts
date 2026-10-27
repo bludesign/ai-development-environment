@@ -10,6 +10,12 @@ import {
 } from "@/services/auth";
 
 import type { ToolInvocationContext } from "./tool-call-audit.service";
+import {
+  authorizeMcpOAuthRequest,
+  isMcpOAuthCredential,
+  mcpOAuthChallenge,
+} from "@/services/auth/mcp-oauth";
+import { getMcpOAuthConfig } from "@/services/auth/mcp-oauth-config";
 
 type ToolEndpoint = "MCP" | "TOOLS_PAGE";
 
@@ -26,12 +32,17 @@ function requestAddress(request: Request): string {
   );
 }
 
-function unauthorized(message: string): Response {
+function unauthorized(message: string, status = 401): Response {
   return Response.json(
     { error: { code: "TOOL_API_UNAUTHORIZED", message } },
     {
-      status: 401,
-      headers: { "www-authenticate": "Bearer" },
+      status,
+      headers: {
+        "www-authenticate":
+          status === 401 && getMcpOAuthConfig()
+            ? mcpOAuthChallenge().headers.get("www-authenticate")!
+            : "Bearer",
+      },
     },
   );
 }
@@ -45,6 +56,18 @@ export async function authorizeToolRequest(
   const crossOrigin = crossOriginError(request);
   if (crossOrigin) return { response: crossOrigin };
   try {
+    if (endpoint === "MCP" && isMcpOAuthCredential(request.headers)) {
+      const result = await authorizeMcpOAuthRequest(request);
+      if ("response" in result) return result;
+      return {
+        context: {
+          caller: `oauth:user:${result.principal.userId}:client:${encodeURIComponent(result.principal.clientId)}@${requestAddress(request)}`,
+          correlationId: requestCorrelationId(request),
+          source: endpoint,
+          oauthPrincipal: result.principal,
+        },
+      };
+    }
     const principal = await resolveRequestPrincipal(request.headers);
     if (
       principal.kind !== "user" &&
@@ -71,7 +94,7 @@ export async function authorizeToolRequest(
     };
   } catch (error) {
     if (error instanceof PrincipalResolutionError) {
-      return { response: unauthorized(error.message) };
+      return { response: unauthorized(error.message, error.status) };
     }
     throw error;
   }
@@ -106,7 +129,7 @@ export async function authorizeRunMcpRequest(
     };
   } catch (error) {
     if (error instanceof PrincipalResolutionError) {
-      return { response: unauthorized(error.message) };
+      return { response: unauthorized(error.message, error.status) };
     }
     throw error;
   }

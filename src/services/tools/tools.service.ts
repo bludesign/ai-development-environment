@@ -35,6 +35,7 @@ import {
 } from "./mcp-tool-reference";
 import { McpPresetTransferService } from "./mcp-preset-transfer.service";
 import { compileMcpJsonSchema } from "./mcp-json-schema";
+import { assertMcpToolPermission } from "./mcp-oauth-dispatch";
 
 import type {
   ExternalMcpServerInput,
@@ -846,6 +847,7 @@ export class ToolsService {
     signal?: AbortSignal,
   ): Promise<CallToolResult> {
     const ref = entry.reference;
+    await assertMcpToolPermission(context, ref.name, ref.source === "EXTERNAL");
     if (ref.source === "BUILTIN")
       return repositoryId === undefined
         ? this.callBuiltInTool(ref.name, args, context)
@@ -1196,6 +1198,11 @@ export class ToolsService {
     },
     context?: ToolInvocationContext,
   ): Promise<unknown> {
+    await assertMcpToolPermission(
+      context,
+      input.name,
+      !this.builtInTools.hasGroup(input.groupId),
+    );
     const operation = () => this.invokeTool(input);
     return context
       ? this.audit.execute(
@@ -1215,6 +1222,7 @@ export class ToolsService {
     args: unknown,
     context?: ToolInvocationContext,
   ): ReturnType<BuiltInToolRegistry["callByName"]> {
+    await assertMcpToolPermission(context, name);
     const groupId = this.builtInTools.groupIdForName(name);
     if (!groupId) throw new Error(`Unknown built-in tool: ${name}`);
     await this.assertProviderToolConfigured(groupId);

@@ -25,6 +25,8 @@ import {
 import { logBetterAuth } from "./auth-logger";
 import { fetchGitHubProfile } from "./github-profile";
 import { authDatabaseHooks } from "./registration";
+import { getMcpOAuthConfig } from "./mcp-oauth-config";
+import { mcpOAuthPlugins, mcpVerificationHook } from "./mcp-oauth-provider";
 
 const managementStatements = {
   user: ["create", "list", "set-password", "set-email", "get", "update"],
@@ -74,9 +76,10 @@ function managementAdminPlugin() {
   return { ...plugin, endpoints };
 }
 
-function createAuth(
+export function createAuth(
   prisma: Awaited<ReturnType<typeof getPrismaClient>>,
   runtime = getAuthRuntimeConfig(),
+  mcpOAuth = getMcpOAuthConfig(),
 ) {
   const provider = runtime.provider;
   const githubUserInfoUrl =
@@ -119,7 +122,8 @@ function createAuth(
     // Anything broader resolves per request against the APP_ORIGINS allowlist,
     // which is also what Better Auth derives its trusted origins from — so the
     // CSRF check and the callbackURL/redirectTo check follow APP_ORIGINS too.
-    baseURL: betterAuthBaseURL(runtime.origins),
+    baseURL: mcpOAuth?.origin ?? betterAuthBaseURL(runtime.origins),
+    disabledPaths: mcpOAuth ? ["/token"] : [],
     // Add the request's actual origin when it is on our allowlist. This keeps
     // APP_ORIGINS' port-insensitive entries working for non-default ports, even
     // when Better Auth's static trusted-origin list was built at startup.
@@ -161,7 +165,16 @@ function createAuth(
         allowDifferentEmails: false,
       },
     },
-    databaseHooks: authDatabaseHooks,
+    databaseHooks: {
+      ...authDatabaseHooks,
+      ...(mcpOAuth
+        ? {
+            verification: {
+              create: { before: mcpVerificationHook(prisma, mcpOAuth) },
+            },
+          }
+        : {}),
+    },
     plugins: [
       managementAdminPlugin(),
       apiKey({
@@ -190,6 +203,7 @@ function createAuth(
         storeToken: "hashed",
       }),
       ...(oauthPlugin ? [oauthPlugin] : []),
+      ...(mcpOAuth ? mcpOAuthPlugins(prisma, mcpOAuth) : []),
       nextCookies(),
     ],
   });

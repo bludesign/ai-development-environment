@@ -5,7 +5,7 @@ const mocks = vi.hoisted(() => ({
   callRunBuiltInTool: vi.fn(),
   mcpRunToolNames: vi.fn(),
   mcpPresetSnapshot: vi.fn().mockResolvedValue(null),
-  builtInTools: { definitions: () => [] },
+  builtInTools: { definitions: vi.fn(() => [] as Array<{ name: string }>) },
 }));
 const authorization = vi.hoisted(() => ({
   authorizeMcpPresetRequest: vi.fn(),
@@ -29,6 +29,7 @@ import { DELETE, GET, POST } from "./route";
 
 beforeEach(() => {
   vi.clearAllMocks();
+  mocks.builtInTools.definitions.mockReturnValue([]);
   const allowed = {
     context: {
       caller: "api-key:key-1@unknown",
@@ -96,5 +97,101 @@ describe("MCP endpoint authentication", () => {
       }),
     );
     expect(response.status).toBe(401);
+  });
+
+  test("returns an HTTP scope challenge for the whole batch before any tool side effects", async () => {
+    mocks.builtInTools.definitions.mockReturnValue([
+      { name: "get_codebases" },
+      { name: "create_agent_run" },
+    ]);
+    authorization.authorizeToolRequest.mockResolvedValueOnce({
+      context: {
+        caller: "oauth:user:u:client:c",
+        correlationId: "scope-test",
+        source: "MCP",
+        oauthPrincipal: {
+          kind: "mcpOAuth",
+          userId: "u",
+          clientId: "c",
+          authorizationId: "a",
+          scopes: ["mcp:read"],
+        },
+      },
+    });
+    const response = await POST(
+      new Request("https://control.example/api/mcp", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify([
+          {
+            jsonrpc: "2.0",
+            id: 1,
+            method: "tools/call",
+            params: { name: "get_codebases", arguments: {} },
+          },
+          {
+            jsonrpc: "2.0",
+            id: 2,
+            method: "tools/call",
+            params: { name: "create_agent_run", arguments: {} },
+          },
+        ]),
+      }),
+    );
+    expect(response.status).toBe(403);
+    expect(response.headers.get("www-authenticate")).toContain(
+      'error="insufficient_scope"',
+    );
+    expect(response.headers.get("www-authenticate")).toContain(
+      "mcp:destructive",
+    );
+    expect(response.headers.get("x-request-id")).toBe("scope-test");
+    expect(mocks.callBuiltInTool).not.toHaveBeenCalled();
+    expect(mocks.callRunBuiltInTool).not.toHaveBeenCalled();
+  });
+
+  test("a preset's externally supplied read-only annotation never grants OAuth permission", async () => {
+    authorization.authorizeMcpPresetRequest.mockResolvedValueOnce({
+      context: {
+        caller: "oauth:user:u:client:c",
+        correlationId: "scope-test",
+        source: "MCP",
+        oauthPrincipal: {
+          kind: "mcpOAuth",
+          userId: "u",
+          clientId: "c",
+          authorizationId: "a",
+          scopes: ["mcp:read", "mcp:write"],
+        },
+      },
+    });
+    mocks.mcpPresetSnapshot.mockResolvedValueOnce({
+      schemaVersion: 1,
+      tools: [
+        {
+          name: "external_read",
+          reference: { source: "EXTERNAL", name: "read", serverId: "s" },
+          inputSchema: { type: "object" },
+          annotations: { readOnlyHint: true },
+        },
+      ],
+    });
+    const response = await POST(
+      new Request("https://control.example/api/mcp?preset=one", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          jsonrpc: "2.0",
+          id: 1,
+          method: "tools/call",
+          params: { name: "external_read", arguments: {} },
+        }),
+      }),
+    );
+    expect(response.status).toBe(403);
+    expect(response.headers.get("www-authenticate")).toContain(
+      "mcp:destructive",
+    );
+    expect(mocks.callBuiltInTool).not.toHaveBeenCalled();
   });
 });

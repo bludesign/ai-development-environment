@@ -83,6 +83,9 @@ describe.each(["auto", "legacy"] as const)(
           compileMcpJsonSchema(catalog.tools[0].inputSchema)({ limit: 0 })
             .valid,
         ).toBe(false);
+        expect(catalog.tools[0]._meta).toMatchObject({
+          "aide/requiredScopes": ["mcp:read"],
+        });
         const results = await Promise.all(
           clients.map(({ client }) =>
             client.callTool({ name: "get_codebases", arguments: {} }),
@@ -159,6 +162,11 @@ describe.each(["auto", "legacy"] as const)(
         const catalog = await client.listTools();
         expect(catalog.tools[0].inputSchema).toEqual(inputSchema);
         expect(catalog.tools[0].outputSchema).toEqual(outputSchema);
+        expect(catalog.tools[0]._meta?.["aide/requiredScopes"]).toEqual([
+          "mcp:read",
+          "mcp:write",
+          "mcp:destructive",
+        ]);
         const result = await client.callTool({
           name: "external_search",
           arguments: { query: "find" },

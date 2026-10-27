@@ -7,8 +7,10 @@ import {
 } from "@/services/agent-control";
 
 import type { ToolCallAuditView } from "./types";
+import type { McpOAuthPrincipal } from "@/services/auth/mcp-oauth";
 
 export type ToolInvocationContext = {
+  oauthPrincipal?: McpOAuthPrincipal;
   caller: string;
   correlationId: string;
   source: "MCP" | "TOOLS_PAGE" | "WORKFLOW";

@@ -1,4 +1,5 @@
 import { McpServer, type CallToolResult } from "@modelcontextprotocol/server";
+import { mcpScopeMetadata } from "./mcp-permissions";
 import type { McpToolSnapshot, McpToolSnapshotEntry } from "./types";
 
 /** JSON Schema is forwarded exactly; remote tools are not approximated as Zod. */
@@ -26,8 +27,13 @@ export function createScopedMcpServer(
         inputSchema,
         outputSchema,
         annotations,
+        reference,
       }) => ({
         name,
+        _meta: mcpScopeMetadata(
+          reference.name,
+          reference.source === "EXTERNAL",
+        ),
         ...(title ? { title } : {}),
         ...(description ? { description } : {}),
         inputSchema: { type: "object" as const, ...inputSchema },

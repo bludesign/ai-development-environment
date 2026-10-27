@@ -72,7 +72,12 @@ export function AuthForm({
       setSubmitting(false);
       return;
     }
-    window.location.assign(destination);
+    const data = result.data;
+    window.location.assign(
+      data && "url" in data && typeof data.url === "string"
+        ? data.url
+        : destination,
+    );
   }
 
   async function startOAuth() {
@@ -204,7 +209,7 @@ export function AuthForm({
                     {t("needAccount")}{" "}
                     <Link
                       className="font-medium text-foreground underline"
-                      href="/register"
+                      href={`/register?returnTo=${encodeURIComponent(destination)}`}
                     >
                       {configuration.registration.setupRequired
                         ? t("completeSetup")
@@ -217,7 +222,7 @@ export function AuthForm({
                   {t("haveAccount")}{" "}
                   <Link
                     className="font-medium text-foreground underline"
-                    href="/sign-in"
+                    href={`/sign-in?returnTo=${encodeURIComponent(destination)}`}
                   >
                     {t("signIn")}
                   </Link>

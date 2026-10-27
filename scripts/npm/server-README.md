@@ -35,6 +35,8 @@ Override with environment variables:
 | `APP_SECRET_PREVIOUS`          | unset; set only while rotating `APP_SECRET`                                             |
 | `APP_ORIGINS`                  | unset; inferred from each request's host                                                |
 | `TRUST_PROXY_HEADERS`          | `false`                                                                                 |
+| `MCP_OAUTH_ENABLED`            | `false`                                                                                 |
+| `MCP_OAUTH_DCR_ENABLED`        | `false`                                                                                 |
 | `AUTH_MODE`                    | `password`                                                                              |
 | `CREDENTIAL_STORAGE_TYPE`      | `database`                                                                              |
 | `VAULT_ADDR`                   | required for Vault                                                                      |
@@ -61,6 +63,8 @@ Back up the Keychain entry. Removing an environment override switches to the sto
 The first account to register claims the instance and closes public registration. Every account then has identical, complete authority: any signed-in user can create and delete accounts, set anyone's password, revoke sessions, and issue API keys. There are no roles.
 
 `AUTH_MODE` accepts `password`, `oidc`, or `both`. OIDC modes require a generic provider client ID and secret plus either a discovery URL or a complete authorization, token, and user-info endpoint set. See the [authentication documentation](https://ai-development-environment.mintlify.app/reference/authentication) for the complete `AUTH_OAUTH_*` variable list and redirect URL.
+
+Incoming MCP OAuth is independent of `AUTH_MODE` and disabled by default. Set a canonical HTTPS `PUBLIC_BASE_URL` (or an exact `APP_ORIGINS`), deploy migrations, then set `MCP_OAUTH_ENABLED=true`. CIMD identifies clients by default; enable `MCP_OAUTH_DCR_ENABLED=true` only for older clients that require dynamic registration. OAuth access is limited to `/api/mcp`, with separate read, write, and destructive consent. Manage revocation in **Settings → Connected applications**. Existing sessions, API keys, and enrolled agents continue working. See the [MCP OAuth setup and rollout guide](https://ai-development-environment.mintlify.app/reference/mcp-oauth).
 
 ### Credential backends
 
