@@ -1,3 +1,8 @@
+export type McpConnectionAuthorization = {
+  authorizedAt: string;
+  scopes: string[];
+};
+
 export type McpConnection = {
   clientId: string;
   name: string;
@@ -5,6 +10,7 @@ export type McpConnection = {
   connectedAt: string;
   firstAuthorizedAt: string;
   authorizationCount: number;
+  authorizations: McpConnectionAuthorization[];
 };
 
 export type McpConnectionsResponse = {

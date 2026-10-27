@@ -24,6 +24,16 @@ test("shows granted permissions and removes a client after disconnect", async ()
             connectedAt: "2026-10-27T12:00:00Z",
             firstAuthorizedAt: "2026-10-20T12:00:00Z",
             authorizationCount: 2,
+            authorizations: [
+              {
+                authorizedAt: "2026-10-27T12:00:00Z",
+                scopes: ["mcp:read", "mcp:write", "offline_access"],
+              },
+              {
+                authorizedAt: "2026-10-20T12:00:00Z",
+                scopes: ["mcp:read"],
+              },
+            ],
           },
         ],
       }),
@@ -33,15 +43,33 @@ test("shows granted permissions and removes a client after disconnect", async ()
   vi.stubGlobal("fetch", fetch);
   const view = render(<ConnectedApplications />);
   expect(await screen.findByText("Example client")).toBeTruthy();
-  expect(screen.getByText("Write")).toBeTruthy();
-  expect(screen.getByText("mcp:write")).toBeTruthy();
+  expect(
+    screen.getByRole("heading", { name: "Connected Applications" }),
+  ).toBeTruthy();
   expect(screen.getByText("client-1")).toBeTruthy();
   expect(screen.getByText("2")).toBeTruthy();
   expect(
-    [...view.container.querySelectorAll("time")].map((element) =>
+    [...view.container.querySelectorAll("dl time")].map((element) =>
       element.getAttribute("dateTime"),
     ),
   ).toEqual(["2026-10-20T12:00:00Z", "2026-10-27T12:00:00Z"]);
+  const table = screen.getByRole("table", {
+    name: "Current authorizations for Example client",
+  });
+  const rows = within(table).getAllByRole("row");
+  expect(rows).toHaveLength(3);
+  expect(rows[1].querySelector("time")?.getAttribute("dateTime")).toBe(
+    "2026-10-27T12:00:00Z",
+  );
+  expect(within(rows[1]).getByText("Write")).toBeTruthy();
+  expect(within(rows[1]).getByText("mcp:write")).toBeTruthy();
+  expect(within(rows[1]).getByText("offline_access")).toBeTruthy();
+  expect(rows[2].querySelector("time")?.getAttribute("dateTime")).toBe(
+    "2026-10-20T12:00:00Z",
+  );
+  expect(within(rows[2]).getByText("Read")).toBeTruthy();
+  expect(within(rows[2]).queryByText("Write")).toBeNull();
+  expect(within(rows[2]).queryByText("offline_access")).toBeNull();
   expect(
     screen.getByText(/Renew access without another interactive sign-in/),
   ).toBeTruthy();
@@ -104,6 +132,9 @@ test("explains read-only access and preserves a connection after a failed discon
             connectedAt: "2026-10-27T12:00:00Z",
             firstAuthorizedAt: "2026-10-27T12:00:00Z",
             authorizationCount: 1,
+            authorizations: [
+              { authorizedAt: "2026-10-27T12:00:00Z", scopes: ["mcp:read"] },
+            ],
           },
         ],
       }),

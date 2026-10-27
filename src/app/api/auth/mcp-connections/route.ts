@@ -27,10 +27,15 @@ export async function GET(request: Request): Promise<Response> {
     for (const authorization of authorizations) {
       const client = clients.get(authorization.clientId);
       const scopes = authorization.scopes.split(/\s+/).filter(Boolean);
+      const detail = {
+        authorizedAt: authorization.createdAt.toISOString(),
+        scopes,
+      };
       if (client) {
         client.scopes = [...new Set([...client.scopes, ...scopes])];
         client.firstAuthorizedAt = authorization.createdAt.toISOString();
         client.authorizationCount += 1;
+        client.authorizations.push(detail);
       } else
         clients.set(authorization.clientId, {
           clientId: authorization.clientId,
@@ -39,6 +44,7 @@ export async function GET(request: Request): Promise<Response> {
           connectedAt: authorization.createdAt.toISOString(),
           firstAuthorizedAt: authorization.createdAt.toISOString(),
           authorizationCount: 1,
+          authorizations: [detail],
         });
     }
     return {

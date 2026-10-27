@@ -5875,6 +5875,9 @@
     "disconnectTitle": "Auswirkung des Trennens",
     "disconnectDescription": "Alle aktuellen Autorisierungen dieser Anwendung für dein Konto werden widerrufen. Ihre Zugriffstokens, Refresh-Tokens und ausstehenden Autorisierungscodes werden sofort ungültig. Laufende Jobs werden fortgesetzt. Für erneuten Zugriff muss die Anwendung erneut autorisiert werden.",
     "authorizationDetails": "Daten und Anzahl beziehen sich auf aktuelle Autorisierungen, einschließlich wiederholter Genehmigungen. Sie zeigen nicht die letzte Aktivität der Anwendung. Verbindungen anderer Nutzer und API-Schlüssel werden separat verwaltet.",
-    "confirmDisconnect": "{client} trennen?"
+    "confirmDisconnect": "{client} trennen?",
+    "authorizedAt": "Autorisiert am",
+    "authorizationsFor": "Aktuelle Autorisierungen für {client}",
+    "authorizationsDescription": "Jede Zeile ist eine separate Genehmigung, die neueste zuerst. Berechtigungen gelten nur für Tokens dieser Genehmigung. Diese Einträge können nach Ablauf der Tokens bestehen bleiben."
   }
 }

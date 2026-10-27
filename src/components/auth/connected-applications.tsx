@@ -8,6 +8,14 @@ import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
 import { Link } from "@/i18n/navigation";
 import { formatDateValue } from "@/lib/date-format";
 import type {
@@ -287,6 +295,63 @@ export function ConnectedApplications() {
                     {t("noOfflineAccess")}
                   </p>
                 )}
+              </div>
+              <div className="space-y-3 border-t pt-4">
+                <h2 className="font-medium">{t("authorizations")}</h2>
+                <p className="text-sm text-muted-foreground">
+                  {t("authorizationsDescription")}
+                </p>
+                <Table
+                  aria-label={t("authorizationsFor", { client: client.name })}
+                >
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead scope="col">{t("authorizedAt")}</TableHead>
+                      <TableHead scope="col">
+                        {t("grantedPermissions")}
+                      </TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {client.authorizations.map((authorization, index) => (
+                      <TableRow key={`${authorization.authorizedAt}-${index}`}>
+                        <TableCell className="align-top whitespace-normal">
+                          <time dateTime={authorization.authorizedAt}>
+                            {formatDateValue(
+                              authorization.authorizedAt,
+                              "short",
+                              { locale },
+                            )}
+                          </time>
+                        </TableCell>
+                        <TableCell className="whitespace-normal">
+                          <ul className="flex flex-wrap gap-2">
+                            {authorization.scopes.map((scope) => {
+                              const permission = permissions.find(
+                                (item) => item.scope === scope,
+                              );
+                              return (
+                                <li key={scope}>
+                                  <Badge
+                                    variant="outline"
+                                    className="h-auto flex-wrap rounded-md py-1 whitespace-normal"
+                                  >
+                                    {permission && (
+                                      <span>{t(permission.label)}</span>
+                                    )}
+                                    <code className="text-xs text-muted-foreground">
+                                      {scope}
+                                    </code>
+                                  </Badge>
+                                </li>
+                              );
+                            })}
+                          </ul>
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
               </div>
             </CardContent>
           </Card>

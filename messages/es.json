@@ -5875,6 +5875,9 @@
     "disconnectTitle": "Qué ocurre al desconectar",
     "disconnectDescription": "Se revocarán todas las autorizaciones actuales de esta aplicación en tu cuenta. Sus tokens de acceso, tokens de actualización y códigos de autorización pendientes dejarán de funcionar inmediatamente. Los trabajos en curso continuarán. La aplicación deberá autorizarse de nuevo para recuperar el acceso.",
     "authorizationDetails": "Las fechas y los recuentos corresponden a las autorizaciones actuales, incluidas las aprobaciones repetidas. No muestran la última actividad de la aplicación. Las conexiones de otros usuarios y las claves de API se gestionan por separado.",
-    "confirmDisconnect": "¿Desconectar {client}?"
+    "confirmDisconnect": "¿Desconectar {client}?",
+    "authorizedAt": "Fecha de autorización",
+    "authorizationsFor": "Autorizaciones actuales de {client}",
+    "authorizationsDescription": "Cada fila es una aprobación independiente, con la más reciente primero. Los permisos solo se aplican a los tokens de esa aprobación. Estos registros pueden permanecer después de que caduquen los tokens."
   }
 }

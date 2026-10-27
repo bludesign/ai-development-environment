@@ -582,6 +582,16 @@ describe("MCP OAuth provider with SQLite", () => {
       connectedAt: "2026-08-01T12:00:00.000Z",
       firstAuthorizedAt: "2026-07-01T12:00:00.000Z",
       authorizationCount: 2,
+      authorizations: [
+        {
+          authorizedAt: "2026-08-01T12:00:00.000Z",
+          scopes: ["mcp:read", "mcp:write", "offline_access"],
+        },
+        {
+          authorizedAt: "2026-07-01T12:00:00.000Z",
+          scopes: ["mcp:read"],
+        },
+      ],
     });
   });
   test("lists and disconnects only the current user's clients", async () => {

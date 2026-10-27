@@ -5875,6 +5875,9 @@
     "disconnectTitle": "Effet de la déconnexion",
     "disconnectDescription": "Toutes les autorisations actuelles de cette application sur votre compte seront révoquées. Ses jetons d’accès, jetons de renouvellement et codes d’autorisation en attente cesseront de fonctionner immédiatement. Les tâches en cours continueront. L’application devra être autorisée à nouveau pour retrouver l’accès.",
     "authorizationDetails": "Les dates et les décomptes concernent les autorisations actuelles, y compris les approbations répétées. Ils n’indiquent pas la dernière activité de l’application. Les connexions des autres utilisateurs et les clés API sont gérées séparément.",
-    "confirmDisconnect": "Déconnecter {client} ?"
+    "confirmDisconnect": "Déconnecter {client} ?",
+    "authorizedAt": "Date d’autorisation",
+    "authorizationsFor": "Autorisations actuelles de {client}",
+    "authorizationsDescription": "Chaque ligne correspond à une approbation distincte, la plus récente en premier. Les permissions s’appliquent uniquement aux jetons issus de cette approbation. Ces enregistrements peuvent subsister après l’expiration des jetons."
   }
 }

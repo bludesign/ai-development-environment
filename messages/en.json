@@ -94,7 +94,7 @@
     "sync": "Sync",
     "changes": "Changes",
     "dsyms": "dSYMs",
-    "connectedApplications": "Connected applications"
+    "connectedApplications": "Connected Applications"
   },
   "globalSearch": {
     "title": "Search the app",
@@ -5839,7 +5839,7 @@
     "allow": "Allow selected permissions",
     "deny": "Deny",
     "error": "The request could not be completed. Please try again.",
-    "connectionsTitle": "Connected applications",
+    "connectionsTitle": "Connected Applications",
     "connectionsDescription": "Review applications authorized to use MCP as you. Only connections for your account appear here.",
     "disabled": "MCP OAuth is disabled on this server.",
     "loading": "Loading connected applications…",
@@ -5875,6 +5875,9 @@
     "disconnectTitle": "What disconnecting does",
     "disconnectDescription": "All current authorizations for this application on your account will be revoked. Its access tokens, refresh tokens, and pending authorization codes stop working immediately. Running jobs continue. The application must be authorized again to regain access.",
     "authorizationDetails": "Dates and counts cover current authorizations, including repeated approvals. They do not show the application’s last activity. Other users’ connections and API keys are managed separately.",
-    "confirmDisconnect": "Disconnect {client}?"
+    "confirmDisconnect": "Disconnect {client}?",
+    "authorizedAt": "Authorized",
+    "authorizationsFor": "Current authorizations for {client}",
+    "authorizationsDescription": "Each row is a separate approval, newest first. Permissions apply only to tokens from that approval. These records may remain after tokens expire."
   }
 }
