@@ -1,4 +1,8 @@
 import { getPrismaClient } from "@/data/prisma-client";
+import type {
+  McpConnection,
+  McpConnectionsResponse,
+} from "@/lib/mcp-connections";
 import { disconnectMcpClient } from "@/services/auth/mcp-oauth";
 import { getMcpOAuthConfig } from "@/services/auth/mcp-oauth-config";
 import { authenticated } from "../management/http";
@@ -19,26 +23,28 @@ export async function GET(request: Request): Promise<Response> {
         createdAt: true,
       },
     });
-    const clients = new Map<
-      string,
-      { clientId: string; name: string; scopes: string[]; connectedAt: string }
-    >();
+    const clients = new Map<string, McpConnection>();
     for (const authorization of authorizations) {
       const client = clients.get(authorization.clientId);
       const scopes = authorization.scopes.split(/\s+/).filter(Boolean);
-      if (client) client.scopes = [...new Set([...client.scopes, ...scopes])];
-      else
+      if (client) {
+        client.scopes = [...new Set([...client.scopes, ...scopes])];
+        client.firstAuthorizedAt = authorization.createdAt.toISOString();
+        client.authorizationCount += 1;
+      } else
         clients.set(authorization.clientId, {
           clientId: authorization.clientId,
           name: authorization.clientName,
           scopes,
           connectedAt: authorization.createdAt.toISOString(),
+          firstAuthorizedAt: authorization.createdAt.toISOString(),
+          authorizationCount: 1,
         });
     }
     return {
       enabled: Boolean(getMcpOAuthConfig()),
       clients: [...clients.values()],
-    };
+    } satisfies McpConnectionsResponse;
   });
   response.headers.set("cache-control", "no-store");
   return response;

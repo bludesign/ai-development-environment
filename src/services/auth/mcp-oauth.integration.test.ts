@@ -521,6 +521,69 @@ describe("MCP OAuth provider with SQLite", () => {
     expect("response" in result && result.response.status).toBe(401);
     vi.stubEnv("MCP_OAUTH_ENABLED", "true");
   });
+  test("summarizes only the user's current authorizations without exposing credential data", async () => {
+    const base = {
+      userId,
+      clientId: "connection-details-client",
+      clientName: "Original name",
+      scopes: "mcp:read",
+      createdAt: new Date("2026-07-01T12:00:00Z"),
+    };
+    await prisma.mcpAuthorization.createMany({
+      data: [
+        {
+          ...base,
+          id: "details-first",
+          authorizationCodeId: "details-first-code",
+        },
+        {
+          ...base,
+          id: "details-latest",
+          authorizationCodeId: "details-latest-code",
+          clientName: "Current name",
+          scopes: "mcp:read mcp:write offline_access",
+          createdAt: new Date("2026-08-01T12:00:00Z"),
+        },
+        {
+          ...base,
+          id: "details-revoked",
+          authorizationCodeId: "details-revoked-code",
+          scopes: "mcp:destructive",
+          createdAt: new Date("2026-09-01T12:00:00Z"),
+          revokedAt: new Date(),
+        },
+        {
+          ...base,
+          id: "details-foreign",
+          authorizationCodeId: "details-foreign-code",
+          userId: "existing-user",
+          clientName: "Other user's name",
+          scopes: "mcp:destructive",
+          createdAt: new Date("2026-10-01T12:00:00Z"),
+        },
+      ],
+    });
+    const response = await connections(
+      new Request(`${origin}/api/auth/mcp-connections`, {
+        headers: { cookie, origin },
+      }),
+    );
+    expect(response.status).toBe(200);
+    expect(response.headers.get("cache-control")).toBe("no-store");
+    const body = await response.json();
+    expect(
+      body.clients.find(
+        (client: { clientId: string }) => client.clientId === base.clientId,
+      ),
+    ).toEqual({
+      clientId: base.clientId,
+      name: "Current name",
+      scopes: ["mcp:read", "mcp:write", "offline_access"],
+      connectedAt: "2026-08-01T12:00:00.000Z",
+      firstAuthorizedAt: "2026-07-01T12:00:00.000Z",
+      authorizationCount: 2,
+    });
+  });
   test("lists and disconnects only the current user's clients", async () => {
     const other = await prisma.mcpAuthorization.create({
       data: {
