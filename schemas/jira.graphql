@@ -182,6 +182,20 @@ type JiraTicketBoard {
   warnings: [String!]!
 }
 
+"Tickets combined from all configured Jira sources after project display filters."
+type JiraTicketCollection {
+  "Tickets deduplicated by issue key, preferring the newest update."
+  tickets: [JiraTicketSummary!]!
+  "Workflow status names in configured source order."
+  statusOrder: [String!]!
+  "Combined source cache metadata; stale when any source fails."
+  cache: JiraCacheMeta!
+  "Whether any source reached its ticket limit."
+  truncated: Boolean!
+  "Project and source labelled warnings, including failed sources."
+  warnings: [String!]!
+}
+
 "Represents a Jira person in the GraphQL API."
 type JiraPerson {
   "Identifier of the related account. May be null when unavailable or not applicable."
@@ -833,6 +847,8 @@ extend type Query {
   ): [JiraProjectStatus!]!
   "Returns a Jira ticket board."
   jiraTicketBoard("Identifier of the source." sourceId: ID!): JiraTicketBoard!
+  "Returns tickets from every configured source, preserving project display filters."
+  jiraAllTickets: JiraTicketCollection!
   "Returns a Jira ticket detail."
   jiraTicketSummary(
     "Issue key to summarize without loading comments or custom fields."
@@ -964,6 +980,8 @@ extend type Mutation {
   ): [JiraProject!]!
   "Refreshes a Jira source and returns a Jira ticket board."
   refreshJiraSource("Identifier of the source." sourceId: ID!): JiraTicketBoard!
+  "Refreshes every configured Jira source and returns their combined tickets."
+  refreshAllJiraTickets: JiraTicketCollection!
   "Updates a Jira cache TTL and returns the updated Jira settings."
   updateJiraCacheTtl(
     "The TTL minutes used to filter or perform the operation."

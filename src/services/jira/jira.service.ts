@@ -49,6 +49,7 @@ import type {
   JiraSourceKind,
   JiraSourceView,
   JiraTicketBoard,
+  JiraTicketCollection,
   JiraTicketAssignmentFilter,
   JiraTicketChange,
   JiraTicketDetail,
@@ -333,7 +334,9 @@ function cacheMeta(result: CacheResult<unknown>): JiraCacheMeta {
   };
 }
 
-function combineCacheMeta(results: CacheResult<unknown>[]): JiraCacheMeta {
+function combineCacheMeta(
+  results: Pick<CacheResult<unknown>, "source" | "stale" | "fetchedAt">[],
+): JiraCacheMeta {
   if (results.length === 0) {
     return {
       source: "CACHE",
@@ -1058,6 +1061,86 @@ export class JiraService {
       });
     });
     return this.listProjects();
+  }
+
+  async allTickets(force = false): Promise<JiraTicketCollection> {
+    const projects = await this.listProjects();
+    const sources = projects.flatMap((project) =>
+      project.sources.map((source) => ({ project, source })),
+    );
+    const results: PromiseSettledResult<JiraTicketBoard>[] = new Array(
+      sources.length,
+    );
+    let cursor = 0;
+    await Promise.all(
+      Array.from({ length: Math.min(4, sources.length) }, async () => {
+        while (cursor < sources.length) {
+          const index = cursor++;
+          try {
+            results[index] = {
+              status: "fulfilled",
+              value: await this.ticketBoard(sources[index].source.id, force),
+            };
+          } catch (reason) {
+            results[index] = { status: "rejected", reason };
+          }
+        }
+      }),
+    );
+    const tickets = new Map<string, JiraTicketSummary>();
+    const statuses = new Set<string>();
+    const warnings: string[] = [];
+    const boards: JiraTicketBoard[] = [];
+    for (const [index, result] of results.entries()) {
+      const { project, source } = sources[index];
+      const label = `${project.key} / ${source.name}`;
+      if (result.status === "rejected") {
+        warnings.push(
+          `${label}: ${result.reason instanceof Error ? result.reason.message : String(result.reason)}`,
+        );
+        continue;
+      }
+      const board = result.value;
+      boards.push(board);
+      for (const status of board.statusOrder) statuses.add(status);
+      warnings.push(...board.warnings.map((warning) => `${label}: ${warning}`));
+      for (const ticket of board.tickets) {
+        const previous = tickets.get(ticket.key);
+        const timestamp = (value: string | null) =>
+          value ? Date.parse(value) || 0 : 0;
+        if (
+          !previous ||
+          timestamp(ticket.updatedAt) > timestamp(previous.updatedAt)
+        ) {
+          tickets.set(ticket.key, ticket);
+        }
+      }
+    }
+    if (sources.length > 0 && boards.length === 0) {
+      throw new Error(
+        `Unable to load Jira tickets from any configured source. ${warnings.join("; ")}`,
+      );
+    }
+    const visibleStatuses = new Set(
+      [...tickets.values()].map((ticket) => ticket.status),
+    );
+    for (const status of visibleStatuses) statuses.add(status);
+    const failed = boards.length < sources.length;
+    const cache = combineCacheMeta(
+      boards.map((board) => ({
+        ...board.cache,
+        fetchedAt: new Date(board.cache.fetchedAt),
+      })),
+    );
+    return {
+      tickets: [...tickets.values()],
+      statusOrder: [...statuses].filter((status) =>
+        visibleStatuses.has(status),
+      ),
+      cache: failed ? { ...cache, source: "ERROR", stale: true } : cache,
+      truncated: boards.some((board) => board.truncated),
+      warnings: [...new Set(warnings)],
+    };
   }
 
   async ticketBoard(sourceId: string, force = false): Promise<JiraTicketBoard> {

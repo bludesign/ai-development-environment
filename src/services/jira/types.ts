@@ -80,13 +80,16 @@ export type JiraTicketSummary = {
   updatedAt: string | null;
 };
 
-export type JiraTicketBoard = {
-  source: JiraSourceView;
+export type JiraTicketCollection = {
   tickets: JiraTicketSummary[];
   statusOrder: string[];
   cache: JiraCacheMeta;
   truncated: boolean;
   warnings: string[];
+};
+
+export type JiraTicketBoard = JiraTicketCollection & {
+  source: JiraSourceView;
 };
 
 export type JiraPerson = {

@@ -84,6 +84,14 @@ export const createJiraResolvers = (
           requireControlPlane(context);
           return jiraService.projectStatuses(projectId);
         },
+        jiraAllTickets: (
+          _root: unknown,
+          _args: unknown,
+          context: GraphQLContext,
+        ) => {
+          requireControlPlane(context);
+          return jiraService.allTickets();
+        },
         jiraTicketBoard: (
           _root: unknown,
           { sourceId }: { sourceId: string },
@@ -362,6 +370,14 @@ export const createJiraResolvers = (
             projectId,
             branchNamingScript,
           );
+        },
+        refreshAllJiraTickets: (
+          _root: unknown,
+          _args: unknown,
+          context: GraphQLContext,
+        ) => {
+          requireControlPlane(context);
+          return jiraService.allTickets(true);
         },
         refreshJiraSource: (
           _root: unknown,

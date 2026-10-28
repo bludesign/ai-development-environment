@@ -10,6 +10,23 @@ function context(agentId: string | null): GraphQLContext {
 }
 
 describe("Jira resolvers", () => {
+  test("guards aggregate operations and forwards forced refresh", async () => {
+    const service = {
+      allTickets: vi.fn().mockResolvedValue({ tickets: [] }),
+    } as unknown as JiraService;
+    const resolvers = createJiraResolvers(service, {} as JiraWebhookService);
+    expect(() =>
+      resolvers.Query.jiraAllTickets({}, {}, context("agent-1")),
+    ).toThrow("control-plane");
+    expect(() =>
+      resolvers.Mutation.refreshAllJiraTickets({}, {}, context("agent-1")),
+    ).toThrow("control-plane");
+    expect(service.allTickets).not.toHaveBeenCalled();
+    await resolvers.Query.jiraAllTickets({}, {}, context(null));
+    expect(service.allTickets).toHaveBeenLastCalledWith();
+    await resolvers.Mutation.refreshAllJiraTickets({}, {}, context(null));
+    expect(service.allTickets).toHaveBeenLastCalledWith(true);
+  });
   test("rejects agent credentials from Jira configuration and data", () => {
     const service = {
       getSettings: vi.fn(),

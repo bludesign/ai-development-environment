@@ -126,6 +126,9 @@ export const ids = {
     projectId: "jira-project-acme",
     projectKey: "ACME",
     sourceId: "jira-source-active-sprint",
+    overlapSourceId: "jira-source-platform-backlog",
+    opsProjectId: "jira-project-ops",
+    opsSourceId: "jira-source-ops-queue",
     issueKey: "ACME-1234",
   },
   pullRequests: {

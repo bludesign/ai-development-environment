@@ -330,12 +330,16 @@ const mockTranslations = {
     emptyTickets: "No tickets matched this source.",
     addProject: "Add project",
     addSource: "Add source",
+    allProjects: "All",
+    allStatuses: "All statuses",
+    statusTabs: "Ticket statuses",
+    emptyFilteredTickets: "No tickets match the selected filters.",
     projectTabs: "Jira projects",
     sourceTabs: "Ticket sources",
     staleWarning:
-      "Jira could not be reached, so this view is showing expired cached data.",
+      "Some Jira data could not be refreshed. Cached or partial results are shown.",
     truncatedWarning:
-      "This source has more than 1,000 tickets. Refine it to see the remaining results.",
+      "One or more sources reached the 1,000-ticket limit. Refine those sources to see the remaining results.",
     issue: "Issue",
     unassigned: "Unassigned",
     manageTitle: "Manage Jira projects and sources",

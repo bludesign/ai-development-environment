@@ -9,12 +9,15 @@ import {
 import { afterEach, describe, expect, test, vi } from "vitest";
 
 import { controlPlaneRequest } from "@/lib/control-plane-client";
+import { useJiraTicketChanges } from "./use-jira-ticket-changes";
 
 import { JiraTicketsPage } from "./tickets-page";
 
 vi.mock("next/navigation", () => ({
   useSearchParams: () => new URLSearchParams(window.location.search),
 }));
+
+vi.mock("./use-jira-ticket-changes", () => ({ useJiraTicketChanges: vi.fn() }));
 
 vi.mock("@/lib/control-plane-client", () => ({
   controlPlaneRequest: vi.fn(),
@@ -50,11 +53,13 @@ afterEach(async () => {
   // unmounts. Let it run before Vitest tears down JSDOM's Event globals.
   await new Promise<void>((resolve) => window.setTimeout(resolve, 0));
   requestMock.mockReset();
+  vi.mocked(useJiraTicketChanges).mockClear();
   window.history.replaceState(null, "", "/");
 });
 
 describe("JiraTicketsPage", () => {
   test("defaults to status tables, switches layouts, and refreshes", async () => {
+    window.history.replaceState(null, "", "/?project=project-1");
     const board = {
       source: {
         id: "source-1",
@@ -121,7 +126,9 @@ describe("JiraTicketsPage", () => {
 
     expect(await screen.findByRole("tab", { name: "APP" })).toBeDefined();
     expect(screen.queryByRole("tab", { name: "Current sprint" })).toBeNull();
-    expect(await screen.findByText("In Progress")).toBeDefined();
+    expect(
+      await screen.findByRole("tab", { name: "In Progress" }),
+    ).toBeDefined();
     expect(screen.getByText("Done")).toBeDefined();
     expect(screen.getByText("Open login screen")).toBeDefined();
     expect(screen.getByText("High").className).toContain("bg-orange-500/10");
@@ -295,6 +302,7 @@ describe("JiraTicketsPage", () => {
   });
 
   test("reloads the filtered board after a drawer ticket mutation", async () => {
+    window.history.replaceState(null, "", "/?project=project-1");
     const source = {
       id: "source-1",
       projectId: "project-1",
@@ -375,7 +383,9 @@ describe("JiraTicketsPage", () => {
 
     await waitFor(() => expect(boardRequests).toBe(2));
     expect(screen.queryByText("Visible ticket")).toBeNull();
-    expect(screen.getByText("No tickets matched this source.")).toBeDefined();
+    expect(
+      screen.getByText("No tickets match the selected filters."),
+    ).toBeDefined();
   });
 
   test("adds a source to the project selected in the manager", async () => {
@@ -540,5 +550,228 @@ describe("JiraTicketsPage", () => {
         { jiraId: "10001" },
       ),
     );
+  });
+});
+
+function allViewFixture() {
+  const source = {
+    id: "source-1",
+    projectId: "project-1",
+    name: "Sprint",
+    kind: "JQL",
+    value: "project = APP",
+    boardId: null,
+    position: 0,
+  };
+  const projects = [
+    {
+      id: "project-1",
+      jiraId: "1",
+      key: "APP",
+      name: "App",
+      position: 0,
+      avatarUrl: null,
+      ticketAssignmentFilter: "ALL",
+      hideCompletedTickets: false,
+      completedStatusIds: [],
+      sources: [source],
+    },
+    {
+      id: "project-2",
+      jiraId: "2",
+      key: "OPS",
+      name: "Ops",
+      position: 1,
+      avatarUrl: null,
+      ticketAssignmentFilter: "ALL",
+      hideCompletedTickets: false,
+      completedStatusIds: [],
+      sources: [{ ...source, id: "source-2", projectId: "project-2" }],
+    },
+  ];
+  const tickets = [
+    {
+      id: "1",
+      key: "APP-1",
+      summary: "App ticket",
+      statusId: "doing",
+      status: "In Progress",
+      statusCategory: "indeterminate",
+      issueType: "Task",
+      priority: null,
+      assignee: null,
+      assigneeAccountId: null,
+      assigneeAvatarUrl: null,
+      projectKey: "APP",
+      updatedAt: null,
+    },
+    {
+      id: "2",
+      key: "OPS-1",
+      summary: "Ops ticket",
+      statusId: "review",
+      status: "Review",
+      statusCategory: "indeterminate",
+      issueType: "Task",
+      priority: null,
+      assignee: null,
+      assigneeAccountId: null,
+      assigneeAvatarUrl: null,
+      projectKey: "OPS",
+      updatedAt: null,
+    },
+  ];
+  const collection = {
+    tickets,
+    statusOrder: ["In Progress", "Review"],
+    cache: { source: "CACHE", stale: false, fetchedAt: "2026-10-01T00:00:00Z" },
+    truncated: false,
+    warnings: [],
+  };
+  const projectBoard = {
+    ...collection,
+    tickets: [tickets[0]],
+    statusOrder: ["In Progress"],
+  };
+  requestMock.mockImplementation(async (query) => {
+    if (query.includes("query JiraProjects"))
+      return { jiraProjects: projects } as never;
+    if (query.includes("RefreshAllJiraTickets"))
+      return { refreshAllJiraTickets: collection } as never;
+    if (query.includes("JiraAllTickets"))
+      return { jiraAllTickets: collection } as never;
+    if (query.includes("JiraTicketBoard"))
+      return { jiraTicketBoard: projectBoard } as never;
+    throw new Error(`Unexpected query: ${query}`);
+  });
+  return { collection, projectBoard };
+}
+
+describe("Jira All view and status filters", () => {
+  test("reloads All for configured-project webhook changes and reconnections", async () => {
+    allViewFixture();
+    render(<JiraTicketsPage />);
+    await screen.findByText("Ops ticket");
+    const listener = vi.mocked(useJiraTicketChanges).mock.calls.at(-1)!;
+    const allReads = () =>
+      requestMock.mock.calls.filter(([query]) =>
+        query.includes("query JiraAllTickets"),
+      ).length;
+    expect(allReads()).toBe(1);
+    act(() =>
+      listener[0]({
+        issueKey: "OTHER-1",
+        projectKey: "OTHER",
+        event: "jira:issue_updated",
+      }),
+    );
+    expect(allReads()).toBe(1);
+    act(() =>
+      listener[0]({
+        issueKey: "OPS-2",
+        projectKey: "OPS",
+        event: "jira:issue_created",
+      }),
+    );
+    await waitFor(() => expect(allReads()).toBe(2));
+    act(() => listener[1]?.());
+    await waitFor(() => expect(allReads()).toBe(3));
+  });
+  test("defaults to All, filters both layouts, and retains available statuses across navigation", async () => {
+    allViewFixture();
+    const { rerender } = render(<JiraTicketsPage />);
+    expect(await screen.findByText("App ticket")).toBeDefined();
+    expect(screen.getByText("Ops ticket")).toBeDefined();
+    expect(
+      screen.getByRole("tab", { name: "All", selected: true }),
+    ).toBeDefined();
+    expect(new URLSearchParams(window.location.search).has("project")).toBe(
+      false,
+    );
+    fireEvent.click(screen.getByRole("tab", { name: "In Progress" }));
+    rerender(<JiraTicketsPage />);
+    expect(new URLSearchParams(window.location.search).get("status")).toBe(
+      "In Progress",
+    );
+    expect(screen.queryByText("Ops ticket")).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Board layout" }));
+    expect(screen.queryByText("Ops ticket")).toBeNull();
+    expect(screen.getByText("App ticket")).toBeDefined();
+    fireEvent.click(screen.getByRole("tab", { name: "APP" }));
+    rerender(<JiraTicketsPage />);
+    expect(await screen.findByText("App ticket")).toBeDefined();
+    expect(
+      screen.getByRole("tab", { name: "In Progress", selected: true }),
+    ).toBeDefined();
+    fireEvent.click(screen.getByRole("tab", { name: "All" }));
+    rerender(<JiraTicketsPage />);
+    await screen.findByRole("tab", { name: "Review" });
+    fireEvent.click(screen.getByRole("tab", { name: "Review" }));
+    rerender(<JiraTicketsPage />);
+    expect(screen.getByText("Ops ticket")).toBeDefined();
+    fireEvent.click(screen.getByRole("tab", { name: "APP" }));
+    rerender(<JiraTicketsPage />);
+    await waitFor(() =>
+      expect(new URLSearchParams(window.location.search).has("status")).toBe(
+        false,
+      ),
+    );
+    rerender(<JiraTicketsPage />);
+    expect(
+      screen.getByRole("tab", { name: "All statuses", selected: true }),
+    ).toBeDefined();
+  });
+
+  test("restores a URL status and keeps loaded tickets when refreshing All fails", async () => {
+    allViewFixture();
+    window.history.replaceState(null, "", "/?status=Review&issue=OPS-1");
+    const original = requestMock.getMockImplementation()!;
+    requestMock.mockImplementation(async (query, variables) => {
+      if (query.includes("RefreshAllJiraTickets"))
+        throw new Error("Jira unavailable");
+      return original(query, variables);
+    });
+    render(<JiraTicketsPage />);
+    expect(await screen.findByText("Ops ticket")).toBeDefined();
+    expect(screen.queryByText("App ticket")).toBeNull();
+    expect(new URLSearchParams(window.location.search).get("issue")).toBe(
+      "OPS-1",
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Refresh" }));
+    expect(await screen.findByText("Jira unavailable")).toBeDefined();
+    expect(screen.getByText("Ops ticket")).toBeDefined();
+    expect(requestMock).toHaveBeenCalledWith(
+      expect.stringContaining("mutation RefreshAllJiraTickets"),
+      {},
+    );
+  });
+
+  test("ignores an old All response after selecting a project", async () => {
+    const { collection } = allViewFixture();
+    const original = requestMock.getMockImplementation()!;
+    let resolveAll!: (value: unknown) => void;
+    const pending = new Promise((resolve) => {
+      resolveAll = resolve;
+    });
+    requestMock.mockImplementation(async (query, variables) =>
+      query.includes("query JiraAllTickets")
+        ? (pending as never)
+        : original(query, variables),
+    );
+    const { rerender } = render(<JiraTicketsPage />);
+    await waitFor(() =>
+      expect(requestMock).toHaveBeenCalledWith(
+        expect.stringContaining("query JiraAllTickets"),
+        {},
+      ),
+    );
+    fireEvent.click(screen.getByRole("tab", { name: "APP" }));
+    rerender(<JiraTicketsPage />);
+    expect(await screen.findByText("App ticket")).toBeDefined();
+    await act(async () => {
+      resolveAll({ jiraAllTickets: collection });
+      await pending;
+    });
+    expect(screen.queryByText("Ops ticket")).toBeNull();
   });
 });
