@@ -20,6 +20,21 @@ export async function validMcpOAuthQuery(query: string): Promise<boolean> {
   return verifyOAuthQueryParams(query, getAuthRuntimeConfig().secret);
 }
 
+/** An existing session may still need reauthentication for this OAuth request. */
+export function canContinueMcpAuthorization(
+  query: string,
+  sessionCreatedAt: Date,
+): boolean {
+  const params = new URLSearchParams(query);
+  if (params.get("prompt")?.split(" ").includes("login")) return false;
+  const maxAge = params.get("max_age");
+  if (maxAge === null) return true;
+  return (
+    Number(maxAge) > 0 &&
+    Date.now() - new Date(sessionCreatedAt).getTime() <= Number(maxAge) * 1000
+  );
+}
+
 export function authorizationContinuation(query: string): string {
   const params = new URLSearchParams(query);
   for (const key of ["sig", "exp", "ba_iat", "ba_pl", "ba_param"])

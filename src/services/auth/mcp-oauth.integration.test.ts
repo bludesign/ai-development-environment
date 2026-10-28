@@ -255,6 +255,135 @@ afterAll(async () => {
 });
 
 describe("MCP OAuth provider with SQLite", () => {
+  test.each(
+    (
+      [
+        ["http://192.168.1.50:3000", false],
+        ["https://control.example", true],
+      ] as const
+    ).flatMap(([browserOrigin, secure]) =>
+      [true, false].map((enabled) => ({
+        browserOrigin,
+        secure,
+        enabled,
+      })),
+    ),
+  )(
+    "preserves browser sessions on $browserOrigin with MCP OAuth $enabled",
+    async ({ browserOrigin, secure, enabled }) => {
+      const multiOriginEnvironment = {
+        ...environment,
+        NODE_ENV: "production",
+        PUBLIC_BASE_URL: "https://control.example",
+        APP_ORIGINS: "https://control.example,http://192.168.1.50:3000",
+      };
+      const oauthConfig = getMcpOAuthConfig(multiOriginEnvironment)!;
+      const instance = createAuth(
+        prisma,
+        getAuthRuntimeConfig(multiOriginEnvironment),
+        enabled ? oauthConfig : null,
+      );
+      const signedIn = await instance.handler(
+        new Request(`${browserOrigin}/api/auth/sign-in/email`, {
+          method: "POST",
+          headers: {
+            origin: browserOrigin,
+            "content-type": "application/json",
+          },
+          body: JSON.stringify({
+            email: "mcp@example.com",
+            password: "example-password-123",
+          }),
+        }),
+      );
+      expect(signedIn.status).toBe(200);
+      const sessionCookie = signedIn.headers
+        .getSetCookie()
+        .find((value) => value.includes("session_token="))!;
+      expect(sessionCookie.includes("; Secure")).toBe(secure);
+      expect(sessionCookie.startsWith("__Secure-")).toBe(secure);
+      const headers = new Headers({
+        cookie: sessionCookie.split(";")[0],
+        host: new URL(browserOrigin).host,
+      });
+      const session = await instance.handler(
+        new Request(`${browserOrigin}/api/auth/get-session`, { headers }),
+      );
+      expect((await session.json()).user.id).toBe(userId);
+      expect((await instance.api.getSession({ headers }))?.user.id).toBe(
+        userId,
+      );
+      const metadata = await instance.handler(
+        new Request(
+          `${oauthConfig.origin}/.well-known/oauth-authorization-server/api/auth`,
+        ),
+      );
+      if (!enabled) {
+        expect(metadata.status).toBe(404);
+        return;
+      }
+      expect(await metadata.json()).toMatchObject({
+        issuer: oauthConfig.issuer,
+        authorization_endpoint: `${oauthConfig.issuer}/oauth2/authorize`,
+        token_endpoint: `${oauthConfig.issuer}/oauth2/token`,
+        jwks_uri: `${oauthConfig.issuer}/jwks`,
+      });
+    },
+  );
+
+  test.each(["0", "60"])(
+    "continues max_age=%s authorization after fresh password authentication",
+    async (maxAge) => {
+      const session = (await auth.api.getSession({
+        headers: new Headers({ cookie }),
+      }))!.session;
+      await prisma.session.update({
+        where: { id: session.id },
+        data: { createdAt: new Date(Date.now() - 3_600_000) },
+      });
+      try {
+        const verifier = randomBytes(32).toString("base64url");
+        const query = new URLSearchParams({
+          client_id: clientId,
+          redirect_uri: redirectUri,
+          response_type: "code",
+          scope: "mcp:read",
+          resource: config.resource,
+          code_challenge: createHash("sha256")
+            .update(verifier)
+            .digest("base64url"),
+          code_challenge_method: "S256",
+          max_age: maxAge,
+        });
+        const authorization = await request(
+          `/api/auth/oauth2/authorize?${query}`,
+          undefined,
+          true,
+        );
+        const signIn = new URL((await authorization.json()).url, origin);
+        expect(signIn.pathname).toBe("/mcp/sign-in");
+        const signedIn = await request(
+          "/api/auth/sign-in/email",
+          {
+            email: "mcp@example.com",
+            password: "example-password-123",
+            oauth_query: signIn.search.slice(1),
+          },
+          true,
+        );
+        expect(signedIn.status).toBe(200);
+        const consent = new URL((await signedIn.json()).url, origin);
+        expect(consent.pathname).toBe("/mcp/consent");
+        expect(consent.searchParams.has("max_age")).toBe(false);
+      } finally {
+        await prisma.session.update({
+          where: { id: session.id },
+          data: { createdAt: session.createdAt },
+        });
+      }
+    },
+  );
+
   test("preserves populated data and serves canonical public discovery and durable keys", async () => {
     expect(
       await prisma.user.findUnique({ where: { id: "existing-user" } }),

@@ -1,6 +1,7 @@
 import "server-only";
 
-import { requireMcpAuth } from "@better-auth/mcp";
+import { createMcpProtectedRequestHandler } from "@better-auth/mcp";
+import { createDpopReplayStore } from "better-auth/oauth2";
 import type { JWTPayload } from "jose";
 
 import { getPrismaClient } from "@/data/prisma-client";
@@ -110,19 +111,24 @@ export async function authorizeMcpOAuthRequest(
   if (!config) return { response: mcpOAuthChallenge() };
   let principal: McpOAuthPrincipal | null = null;
   const auth = await getAuth();
-  const response = await requireMcpAuth(
-    auth,
+  const { internalAdapter } = await auth.$context;
+  // Browser authentication resolves its base URL per request. Token validation
+  // always uses the configured canonical OAuth identity, including DPoP replay
+  // protection backed by the shared database.
+  const response = await createMcpProtectedRequestHandler(
+    {
+      audience: config.resource,
+      issuer: config.issuer,
+      jwksUrl: `${config.issuer}/jwks`,
+      jwtVerifyOptions: { requiredClaims: ["azp"] },
+      requiredScopes: ["mcp:read"],
+      dpop: { replayStore: createDpopReplayStore(internalAdapter) },
+    },
     async (_request, claims) => {
       principal = await principalFromMcpClaims(claims);
       return principal
         ? new Response(null, { status: 204 })
         : mcpOAuthChallenge();
-    },
-    {
-      resource: config.resource,
-      issuer: config.issuer,
-      jwksUrl: `${config.issuer}/jwks`,
-      requiredScopes: ["mcp:read"],
     },
   )(request);
   return principal ? { principal } : { response };

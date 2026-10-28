@@ -9,6 +9,7 @@ import {
 import { getMcpOAuthConfig } from "@/services/auth/mcp-oauth-config";
 import {
   authorizationContinuation,
+  canContinueMcpAuthorization,
   oauthQueryString,
   validMcpOAuthQuery,
 } from "@/services/auth/mcp-oauth-query";
@@ -23,10 +24,7 @@ export default async function McpSignInPage({
   if (!(await validMcpOAuthQuery(query))) notFound();
   const auth = await getAuth();
   const session = await auth.api.getSession({ headers: await headers() });
-  if (
-    session &&
-    !new URLSearchParams(query).get("prompt")?.split(" ").includes("login")
-  )
+  if (session && canContinueMcpAuthorization(query, session.session.createdAt))
     redirect(authorizationContinuation(query));
   const runtime = getAuthRuntimeConfig();
   return (

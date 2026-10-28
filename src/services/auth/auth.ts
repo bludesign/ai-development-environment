@@ -1,6 +1,8 @@
 import { apiKey } from "@better-auth/api-key";
 import { prismaAdapter } from "@better-auth/prisma-adapter";
 import { betterAuth } from "better-auth";
+import { createAuthMiddleware } from "better-auth/api";
+import { createCookieGetter, getCookies } from "better-auth/cookies";
 import { nextCookies } from "better-auth/next-js";
 import {
   admin,
@@ -82,6 +84,7 @@ export function createAuth(
   mcpOAuth = getMcpOAuthConfig(),
 ) {
   const provider = runtime.provider;
+  const browserBaseURL = betterAuthBaseURL(runtime.origins);
   const githubUserInfoUrl =
     provider?.providerId.toLowerCase() === "github"
       ? provider.userInfoUrl
@@ -122,7 +125,10 @@ export function createAuth(
     // Anything broader resolves per request against the APP_ORIGINS allowlist,
     // which is also what Better Auth derives its trusted origins from — so the
     // CSRF check and the callbackURL/redirectTo check follow APP_ORIGINS too.
-    baseURL: mcpOAuth?.origin ?? betterAuthBaseURL(runtime.origins),
+    baseURL:
+      typeof browserBaseURL === "object"
+        ? { ...browserBaseURL, protocol: "auto" }
+        : browserBaseURL,
     disabledPaths: mcpOAuth ? ["/token"] : [],
     // Add the request's actual origin when it is on our allowlist. This keeps
     // APP_ORIGINS' port-insensitive entries working for non-default ports, even
@@ -139,6 +145,33 @@ export function createAuth(
     },
     secret: runtime.secret,
     logger: { log: logBetterAuth },
+    hooks: {
+      before: createAuthMiddleware(async (ctx) => {
+        // Cookie flags follow the receiving origin. A direct auth.api call may
+        // have only headers (no scheme), so retain the existing session cookie's
+        // namespace when looking it up; its signature is still verified normally.
+        const origin = ctx.request
+          ? originFromRequest(ctx.request, runtime.trustProxyHeaders)
+          : null;
+        const cookie = ctx.headers?.get("cookie") ?? "";
+        const secure = origin
+          ? new URL(origin).protocol === "https:"
+          : /(?:^|;\s*)__Secure-better-auth\.session_token=/.test(cookie)
+            ? true
+            : /(?:^|;\s*)better-auth\.session_token=/.test(cookie)
+              ? false
+              : undefined;
+        const options = {
+          ...ctx.context.options,
+          advanced: {
+            ...ctx.context.options.advanced,
+            useSecureCookies: secure,
+          },
+        };
+        ctx.context.authCookies = getCookies(options);
+        ctx.context.createAuthCookie = createCookieGetter(options);
+      }),
+    },
     advanced: {
       // Honour x-forwarded-host only when an operator has declared a proxy in
       // front. The allowlist is still what constrains the value.

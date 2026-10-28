@@ -150,6 +150,50 @@ describe("MCP endpoint authentication", () => {
     expect(mocks.callRunBuiltInTool).not.toHaveBeenCalled();
   });
 
+  test.each([
+    "sse_endpoint_get",
+    "sse_endpoint_list",
+    "sse_breakpoint_list",
+    "sse_history_query",
+    "sse_history_export",
+  ])(
+    "requires destructive consent before exposing SSE capabilities through %s",
+    async (name) => {
+      mocks.builtInTools.definitions.mockReturnValue([{ name }]);
+      authorization.authorizeToolRequest.mockResolvedValueOnce({
+        context: {
+          caller: "oauth:user:u:client:c",
+          correlationId: "sse-scope-test",
+          source: "MCP",
+          oauthPrincipal: {
+            kind: "mcpOAuth",
+            userId: "u",
+            clientId: "c",
+            authorizationId: "a",
+            scopes: ["mcp:read", "mcp:write"],
+          },
+        },
+      });
+      const response = await POST(
+        new Request("https://control.example/api/mcp", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({
+            jsonrpc: "2.0",
+            id: 1,
+            method: "tools/call",
+            params: { name, arguments: {} },
+          }),
+        }),
+      );
+      expect(response.status).toBe(403);
+      expect(response.headers.get("www-authenticate")).toContain(
+        "mcp:destructive",
+      );
+      expect(mocks.callBuiltInTool).not.toHaveBeenCalled();
+    },
+  );
+
   test("a preset's externally supplied read-only annotation never grants OAuth permission", async () => {
     authorization.authorizeMcpPresetRequest.mockResolvedValueOnce({
       context: {
