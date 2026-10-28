@@ -121,6 +121,7 @@ describe("Jira service input helpers", () => {
         ticket("APP-4", "done", "Released", "done", "me"),
       ],
       statusOrder: ["To Do", "In Progress", "Released"],
+      availableStatuses: ["To Do", "In Progress", "Released"],
       cache: {
         source: "CACHE",
         stale: false,

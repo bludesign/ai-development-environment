@@ -360,7 +360,24 @@ export const routes: RouteEntry[] = [
   { name: "gitlab-cache", path: "/gitlab/cache" },
 
   // Jira
-  { name: "jira-tickets", path: "/jira/tickets" },
+  {
+    name: "jira-tickets",
+    path: "/jira/tickets",
+    readyGraphqlOperation: "JiraAllTickets",
+    readyTexts: ["Improve deployment health checks"],
+  },
+  {
+    name: "jira-tickets-filtered",
+    path: "/jira/tickets?status=In%20Progress",
+    readyGraphqlOperation: "JiraAllTickets",
+    readyTexts: ["Improve deployment health checks"],
+  },
+  {
+    name: "jira-tickets-project",
+    path: `/jira/tickets?project=${ids.jira.projectId}&source=${ids.jira.sourceId}&status=In%20Progress`,
+    readyGraphqlOperation: "JiraTicketBoard",
+    readyTexts: ["Add quick search to the global navigation bar"],
+  },
   { name: "jira-ticket-detail", path: `/jira/tickets/${ids.jira.issueKey}` },
   { name: "jira-webhooks", path: "/jira/webhooks" },
   { name: "jira-cache", path: "/jira/cache" },

@@ -106,6 +106,8 @@ type JiraProject {
   hideCompletedTickets: Boolean!
   "Identifiers of the related completed statuses."
   completedStatusIds: [ID!]!
+  "Status IDs hidden under All statuses; explicitly selecting a status reveals it."
+  excludedStatusIds: [ID!]!
   "Identifier of the related done status. May be null when unavailable or not applicable."
   doneStatusId: ID
   "The branch naming script associated with this Jira project."
@@ -174,11 +176,29 @@ type JiraTicketBoard {
   tickets: [JiraTicketSummary!]!
   "Status orders associated with this Jira ticket board."
   statusOrder: [String!]!
+  "Selectable workflow names before default status exclusions, preserving assignment filters."
+  availableStatuses: [String!]!
   "The cache associated with this Jira ticket board."
   cache: JiraCacheMeta!
   "Whether this Jira ticket board is truncated."
   truncated: Boolean!
   "Warnings associated with this Jira ticket board."
+  warnings: [String!]!
+}
+
+"Tickets combined from all configured Jira sources after project display filters."
+type JiraTicketCollection {
+  "Tickets deduplicated by issue key, preferring the newest update."
+  tickets: [JiraTicketSummary!]!
+  "Workflow status names in configured source order."
+  statusOrder: [String!]!
+  "Selectable workflow names before default status exclusions, preserving assignment filters."
+  availableStatuses: [String!]!
+  "Combined source cache metadata; stale when any source fails."
+  cache: JiraCacheMeta!
+  "Whether any source reached its ticket limit."
+  truncated: Boolean!
+  "Project and source labelled warnings, including failed sources."
   warnings: [String!]!
 }
 
@@ -660,6 +680,8 @@ input UpdateJiraProjectDisplaySettingsInput {
   hideCompletedTickets: Boolean!
   "Identifiers of the completed statuses to use."
   completedStatusIds: [ID!]!
+  "Status IDs hidden under All statuses. Omit to preserve the current exclusions."
+  excludedStatusIds: [ID!]
   "Identifier of the done status to use."
   doneStatusId: ID
 }
@@ -832,7 +854,17 @@ extend type Query {
     projectId: ID!
   ): [JiraProjectStatus!]!
   "Returns a Jira ticket board."
-  jiraTicketBoard("Identifier of the source." sourceId: ID!): JiraTicketBoard!
+  jiraTicketBoard(
+    "Identifier of the source."
+    sourceId: ID!
+    "Exact workflow name to show, overriding default completed and excluded statuses."
+    status: String
+  ): JiraTicketBoard!
+  "Returns tickets from every configured source, preserving project display filters."
+  jiraAllTickets(
+    "Exact workflow name to show, overriding default completed and excluded statuses."
+    status: String
+  ): JiraTicketCollection!
   "Returns a Jira ticket detail."
   jiraTicketSummary(
     "Issue key to summarize without loading comments or custom fields."
@@ -963,7 +995,17 @@ extend type Mutation {
     branchNamingScript: String!
   ): [JiraProject!]!
   "Refreshes a Jira source and returns a Jira ticket board."
-  refreshJiraSource("Identifier of the source." sourceId: ID!): JiraTicketBoard!
+  refreshJiraSource(
+    "Identifier of the source."
+    sourceId: ID!
+    "Exact workflow name to show, overriding default completed and excluded statuses."
+    status: String
+  ): JiraTicketBoard!
+  "Refreshes every configured Jira source and returns their combined tickets."
+  refreshAllJiraTickets(
+    "Exact workflow name to show, overriding default completed and excluded statuses."
+    status: String
+  ): JiraTicketCollection!
   "Updates a Jira cache TTL and returns the updated Jira settings."
   updateJiraCacheTtl(
     "The TTL minutes used to filter or perform the operation."

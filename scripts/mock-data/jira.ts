@@ -98,6 +98,36 @@ export async function seedJira(prisma: PrismaClient): Promise<void> {
             value: "project = ACME AND sprint in openSprints() ORDER BY rank",
             position: 0,
           },
+          {
+            id: ids.jira.overlapSourceId,
+            name: "Platform backlog",
+            kind: "JQL",
+            value: "project = ACME ORDER BY updated DESC",
+            position: 1,
+          },
+        ],
+      },
+    },
+  });
+
+  await prisma.jiraProject.create({
+    data: {
+      id: ids.jira.opsProjectId,
+      jiraId: "10043",
+      key: "OPS",
+      name: "Acme Operations",
+      position: 1,
+      ticketAssignmentFilter: "ALL",
+      hideCompletedTickets: false,
+      sources: {
+        create: [
+          {
+            id: ids.jira.opsSourceId,
+            name: "Operations queue",
+            kind: "JQL",
+            value: "project = OPS ORDER BY updated DESC",
+            position: 0,
+          },
         ],
       },
     },

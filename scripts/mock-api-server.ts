@@ -1044,6 +1044,7 @@ const JIRA_STATUSES = [
   { id: "10000", name: "To Do", key: "new" },
   { id: "10001", name: "In Progress", key: "indeterminate" },
   { id: "10003", name: "Done", key: "done" },
+  { id: "10004", name: "In Review", key: "indeterminate" },
 ];
 
 type JiraSeed = {
@@ -1117,6 +1118,29 @@ const JIRA_ISSUES: JiraSeed[] = [
     labels: ["frontend", "dependencies"],
     storyPoints: 5,
     description: "Migrate the deprecated token names introduced by v4.",
+  },
+  {
+    key: "OPS-42",
+    summary: "Improve deployment health checks",
+    status: JIRA_STATUSES[1]!,
+    type: "Task",
+    priority: "High",
+    assignee: "Sam Rivera",
+    labels: ["operations"],
+    storyPoints: 3,
+    description:
+      "Add readiness checks before sending traffic to a new deployment.",
+  },
+  {
+    key: "OPS-43",
+    summary: "Review production incident runbook",
+    status: JIRA_STATUSES[3]!,
+    type: "Task",
+    priority: "Medium",
+    assignee: "Jane Doe",
+    labels: ["operations"],
+    storyPoints: 2,
+    description: "Review the updated response steps and escalation contacts.",
   },
 ];
 
@@ -1256,9 +1280,9 @@ const jiraIssue = (seed: JiraSeed, index: number) => ({
     resolution:
       seed.status.key === "done" ? { id: "10000", name: "Done" } : null,
     project: {
-      id: "10042",
-      key: "ACME",
-      name: "Acme Platform",
+      id: seed.key.startsWith("OPS-") ? "10043" : "10042",
+      key: seed.key.split("-")[0],
+      name: seed.key.startsWith("OPS-") ? "Acme Operations" : "Acme Platform",
       avatarUrls: { "48x48": AVATAR },
     },
     customfield_10016: seed.storyPoints,
@@ -1294,7 +1318,11 @@ const jiraIssue = (seed: JiraSeed, index: number) => ({
 
 const JIRA_ISSUE_PAYLOADS = JIRA_ISSUES.map(jiraIssue);
 
-function jiraRest(pathname: string, search: URLSearchParams): unknown {
+function jiraRest(
+  pathname: string,
+  search: URLSearchParams,
+  body: Record<string, unknown> = {},
+): unknown {
   const path = pathname.replace(/^\/rest\/(api|agile)\/[^/]+/, "");
 
   if (path === "/myself") return jiraUser("Jane Doe");
@@ -1302,8 +1330,15 @@ function jiraRest(pathname: string, search: URLSearchParams): unknown {
   if (path === "/project/search") {
     return {
       isLast: true,
-      total: 1,
+      total: 2,
       values: [
+        {
+          id: "10043",
+          key: "OPS",
+          name: "Acme Operations",
+          avatarUrls: { "48x48": AVATAR },
+          projectTypeKey: "software",
+        },
         {
           id: "10042",
           key: "ACME",
@@ -1339,13 +1374,20 @@ function jiraRest(pathname: string, search: URLSearchParams): unknown {
   }
 
   if (path === "/search" || path === "/search/jql") {
-    const maxResults = Number(search.get("maxResults") ?? 50);
+    const maxResults = Number(
+      search.get("maxResults") ?? body.maxResults ?? 50,
+    );
+    const jql = String(search.get("jql") ?? body.jql ?? "");
+    const project = jql.match(/project\s*=\s*([A-Z]+)/i)?.[1]?.toUpperCase();
+    const issues = JIRA_ISSUE_PAYLOADS.filter(
+      (issue) => !project || issue.fields.project.key === project,
+    );
     return {
       startAt: 0,
       maxResults,
-      total: JIRA_ISSUE_PAYLOADS.length,
+      total: issues.length,
       isLast: true,
-      issues: JIRA_ISSUE_PAYLOADS.slice(0, maxResults),
+      issues: issues.slice(0, maxResults),
     };
   }
 
@@ -1529,7 +1571,11 @@ const server = createServer(
       } else if (url.pathname === "/graphql") {
         payload = githubGraphql(raw ? JSON.parse(raw) : {});
       } else if (url.pathname.startsWith("/rest/")) {
-        payload = jiraRest(url.pathname, url.searchParams);
+        payload = jiraRest(
+          url.pathname,
+          url.searchParams,
+          raw ? JSON.parse(raw) : {},
+        );
       } else {
         payload = githubRest(url.pathname, url.searchParams);
       }

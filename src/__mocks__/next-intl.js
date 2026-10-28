@@ -330,12 +330,18 @@ const mockTranslations = {
     emptyTickets: "No tickets matched this source.",
     addProject: "Add project",
     addSource: "Add source",
+    allProjects: "All",
+    allStatuses: "All statuses",
+    statusFilter: "Ticket status",
+    searchStatuses: "Search statuses…",
+    noStatuses: "No matching statuses.",
+    emptyFilteredTickets: "No tickets match the selected filters.",
     projectTabs: "Jira projects",
     sourceTabs: "Ticket sources",
     staleWarning:
-      "Jira could not be reached, so this view is showing expired cached data.",
+      "Some Jira data could not be refreshed. Cached or partial results are shown.",
     truncatedWarning:
-      "This source has more than 1,000 tickets. Refine it to see the remaining results.",
+      "One or more sources reached the 1,000-ticket limit. Refine those sources to see the remaining results.",
     issue: "Issue",
     unassigned: "Unassigned",
     manageTitle: "Manage Jira projects and sources",
@@ -357,6 +363,10 @@ const mockTranslations = {
     hideCompletedTickets: "Hide completed tickets",
     hideCompletedTicketsDescription:
       "Choose which project statuses count as completed.",
+    excludedStatuses: "Statuses excluded from All statuses",
+    selectExcludedStatuses: "Select statuses to exclude",
+    excludedStatusesDescription:
+      "Hidden in All statuses for this project in both views. Select a specific status in the filter to show its tickets.",
     completedStatuses: "Completed statuses",
     loadingStatuses: "Loading statuses…",
     selectCompletedStatuses: "Select completed statuses",

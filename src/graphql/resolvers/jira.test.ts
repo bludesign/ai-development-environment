@@ -10,6 +10,50 @@ function context(agentId: string | null): GraphQLContext {
 }
 
 describe("Jira resolvers", () => {
+  test("forwards explicit status overrides for All and individual sources", async () => {
+    const service = {
+      allTickets: vi.fn(),
+      ticketBoard: vi.fn(),
+    } as unknown as JiraService;
+    const resolvers = createJiraResolvers(service, {} as JiraWebhookService);
+    await resolvers.Query.jiraAllTickets({}, { status: "Done" }, context(null));
+    expect(service.allTickets).toHaveBeenLastCalledWith(false, "Done");
+    await resolvers.Mutation.refreshAllJiraTickets(
+      {},
+      { status: "Done" },
+      context(null),
+    );
+    expect(service.allTickets).toHaveBeenLastCalledWith(true, "Done");
+    await resolvers.Query.jiraTicketBoard(
+      {},
+      { sourceId: "s", status: "Done" },
+      context(null),
+    );
+    expect(service.ticketBoard).toHaveBeenLastCalledWith("s", false, "Done");
+    await resolvers.Mutation.refreshJiraSource(
+      {},
+      { sourceId: "s", status: "Done" },
+      context(null),
+    );
+    expect(service.ticketBoard).toHaveBeenLastCalledWith("s", true, "Done");
+  });
+  test("guards aggregate operations and forwards forced refresh", async () => {
+    const service = {
+      allTickets: vi.fn().mockResolvedValue({ tickets: [] }),
+    } as unknown as JiraService;
+    const resolvers = createJiraResolvers(service, {} as JiraWebhookService);
+    expect(() =>
+      resolvers.Query.jiraAllTickets({}, {}, context("agent-1")),
+    ).toThrow("control-plane");
+    expect(() =>
+      resolvers.Mutation.refreshAllJiraTickets({}, {}, context("agent-1")),
+    ).toThrow("control-plane");
+    expect(service.allTickets).not.toHaveBeenCalled();
+    await resolvers.Query.jiraAllTickets({}, {}, context(null));
+    expect(service.allTickets).toHaveBeenLastCalledWith();
+    await resolvers.Mutation.refreshAllJiraTickets({}, {}, context(null));
+    expect(service.allTickets).toHaveBeenLastCalledWith(true);
+  });
   test("rejects agent credentials from Jira configuration and data", () => {
     const service = {
       getSettings: vi.fn(),

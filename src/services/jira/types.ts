@@ -32,6 +32,7 @@ export type JiraProjectView = {
   ticketAssignmentFilter: JiraTicketAssignmentFilter;
   hideCompletedTickets: boolean;
   completedStatusIds: string[];
+  excludedStatusIds: string[];
   doneStatusId: string | null;
   branchNamingScript: string;
   sources: JiraSourceView[];
@@ -80,13 +81,17 @@ export type JiraTicketSummary = {
   updatedAt: string | null;
 };
 
-export type JiraTicketBoard = {
-  source: JiraSourceView;
+export type JiraTicketCollection = {
+  availableStatuses: string[];
   tickets: JiraTicketSummary[];
   statusOrder: string[];
   cache: JiraCacheMeta;
   truncated: boolean;
   warnings: string[];
+};
+
+export type JiraTicketBoard = JiraTicketCollection & {
+  source: JiraSourceView;
 };
 
 export type JiraPerson = {
