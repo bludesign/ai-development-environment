@@ -8,6 +8,7 @@ import { MergeRequestDialog } from "@/components/gitlab/merge-request-dialog";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { formatEnumLabel } from "@/lib/enum-label";
+import { cn } from "@/lib/utils";
 import type { ActionCenterItem } from "./types";
 import { useActionCenter } from "./action-center-provider";
 
@@ -32,9 +33,12 @@ export function RequestStatus({
         : "outline";
   const warning =
     "border-amber-500/40 bg-amber-500/10 text-amber-700 dark:text-amber-300";
+  const badgeClassName = compact
+    ? "h-4 px-1.5 py-0 text-[9px] leading-none"
+    : undefined;
   const pipeline = (
     <Badge
-      className={pipelineVariant === "outline" ? warning : undefined}
+      className={cn(badgeClassName, pipelineVariant === "outline" && warning)}
       variant={pipelineVariant}
     >
       {formatEnumLabel(request.pipelineStatus)}
@@ -53,7 +57,7 @@ export function RequestStatus({
         pipeline
       )}
       <Badge
-        className={approved ? undefined : warning}
+        className={cn(badgeClassName, !approved && warning)}
         variant={approved ? "success" : "outline"}
       >
         {t(approved ? "approved" : "notApproved")}
@@ -64,7 +68,6 @@ export function RequestStatus({
           {request.repositoryName} · {request.branch}
         </span>
       )}
-      {compact && <RequestMergeAction item={item} compact />}
     </div>
   );
 }
@@ -83,7 +86,7 @@ export function RequestMergeAction({
   if (!request?.canMerge || request.draft) return null;
 
   return (
-    <div className={compact ? undefined : "mt-auto flex justify-end pt-4"}>
+    <>
       {request.provider === "GITHUB" ? (
         <span className="[&_button]:bg-emerald-600 [&_button]:text-white [&_button]:hover:bg-emerald-700">
           <MergePullRequestButton
@@ -124,6 +127,6 @@ export function RequestMergeAction({
           }}
         />
       )}
-    </div>
+    </>
   );
 }

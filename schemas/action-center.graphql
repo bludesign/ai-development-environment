@@ -38,6 +38,8 @@ type ActionCenterWorktree {
   id: ID!
   "The folder associated with this action center worktree."
   folder: String!
+  "Display path relative to the agent's repository directory."
+  relativePath: String!
   "Git branch associated with this action center worktree. May be null when unavailable or not applicable."
   branch: String
   "The highlight color associated with this action center worktree. May be null when unavailable or not applicable."

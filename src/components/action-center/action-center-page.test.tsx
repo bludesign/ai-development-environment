@@ -44,7 +44,8 @@ const question = {
   updatedAt: "2026-07-26T12:00:00.000Z",
   worktree: {
     id: "worktree-1",
-    folder: "feature-aide",
+    folder: "/Users/dev/Repositories/projects/feature-aide",
+    relativePath: "projects/feature-aide",
     branch: "feature/AIDE-101",
     highlightColor: "blue",
   },
@@ -280,7 +281,7 @@ describe("ActionCenterPage", () => {
       workflowCard as HTMLElement,
     ).getAllByRole("link", { name: /feature-aide/ });
     expect(workflowWorktreeLinks).toHaveLength(2);
-    expect(workflowWorktreeLinks[0]?.textContent).toBe("feature-aide");
+    expect(workflowWorktreeLinks[0]?.textContent).toBe("projects/feature-aide");
     expect(workflowWorktreeLinks[0]?.getAttribute("href")).toBe(
       "/dashboard/worktrees/worktree-1",
     );
@@ -406,7 +407,7 @@ describe("MiniActionCenter", () => {
       'a[href="/dashboard/worktrees/worktree-1"]',
     );
     expect(worktreeLink?.className).toContain("overflow-hidden");
-    expect(worktreeLink?.textContent).toBe("feature-aide");
+    expect(worktreeLink?.textContent).toBe("projects/feature-aide");
     expect(worktreeLink?.querySelectorAll("span")).toHaveLength(1);
     expect(
       screen

@@ -99,8 +99,11 @@ export function ActionCenterItem({
   const kind = t(`kinds.${item.resourceKind}`);
   const title = itemTitle(item, kind);
   const color = item.worktree?.highlightColor;
+  const worktreePath = item.worktree
+    ? (item.worktree.relativePath ?? worktreeName(item.worktree.folder))
+    : null;
   const worktreeLabel = item.worktree
-    ? `${item.worktree.folder}${item.worktree.branch ? ` · ${item.worktree.branch}` : ""}`
+    ? `${worktreePath}${item.worktree.branch ? ` · ${item.worktree.branch}` : ""}`
     : null;
   const rawWorktreeSummary =
     item.resourceKind === "WORKFLOW" &&
@@ -119,7 +122,7 @@ export function ActionCenterItem({
   const reasonBadge = (
     <Badge
       className={cn(
-        compact && !item.request && "h-4 shrink-0 px-1.5 py-0 text-[9px]",
+        compact && "h-4 px-1.5 py-0 text-[9px] leading-none",
         reasonClass(item.reason),
       )}
       variant={item.reason === "FAILED" ? "destructive" : "outline"}
@@ -152,6 +155,7 @@ export function ActionCenterItem({
 
   const actions = (
     <div className="flex shrink-0 flex-wrap items-center gap-2">
+      {item.request && <RequestMergeAction item={item} compact={compact} />}
       {item.buildRun && (
         <RunBuildControls
           buildId={item.buildRun.buildId}
@@ -204,7 +208,7 @@ export function ActionCenterItem({
     >
       <GitBranch className="size-3 shrink-0" />
       <span className="min-w-0 truncate">
-        {compact ? worktreeName(item.worktree.folder) : worktreeLabel}
+        {compact ? worktreePath : worktreeLabel}
       </span>
     </Link>
   );
@@ -314,7 +318,7 @@ export function ActionCenterItem({
                   href={`/dashboard/worktrees/${item.worktree.id}`}
                   title={worktreeLabel ?? undefined}
                 >
-                  {worktreeName(item.worktree.folder)}
+                  {worktreePath}
                 </Link>
               ) : item.resourceKind === "PLAN" ||
                 item.resourceKind === "SESSION" ? (
@@ -327,9 +331,7 @@ export function ActionCenterItem({
         </div>
         <CardAction>{actions}</CardAction>
       </CardHeader>
-      <CardContent
-        className={cn("space-y-4", item.request && "flex flex-1 flex-col")}
-      >
+      <CardContent className="space-y-4">
         {item.request ? (
           <RequestStatus item={item}>
             {reasonBadge}
@@ -338,20 +340,18 @@ export function ActionCenterItem({
             </span>
           </RequestStatus>
         ) : (
-          <>
-            <div className="flex flex-wrap items-center gap-2">
-              {reasonBadge}
-              <Badge variant="secondary">{statusLabel}</Badge>
-              {item.phase && item.phase !== item.status && (
-                <Badge variant="outline">{phaseLabel}</Badge>
-              )}
-              <span className="text-xs text-muted-foreground">
-                <DateTime value={item.updatedAt} />
-              </span>
-            </div>
-            {worktree}
-          </>
+          <div className="flex flex-wrap items-center gap-2">
+            {reasonBadge}
+            <Badge variant="secondary">{statusLabel}</Badge>
+            {item.phase && item.phase !== item.status && (
+              <Badge variant="outline">{phaseLabel}</Badge>
+            )}
+            <span className="text-xs text-muted-foreground">
+              <DateTime value={item.updatedAt} />
+            </span>
+          </div>
         )}
+        {worktree}
         {item.error && (
           <Alert variant="destructive">
             <AlertDescription className="break-words">
@@ -362,7 +362,6 @@ export function ActionCenterItem({
         {item.questionBatches.map((batch) => (
           <ActionCenterQuestionForm batch={batch} item={item} key={batch.id} />
         ))}
-        {item.request && <RequestMergeAction item={item} />}
       </CardContent>
     </Card>
   );

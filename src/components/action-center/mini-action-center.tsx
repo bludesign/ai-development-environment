@@ -43,7 +43,10 @@ function MiniActionCenterContent() {
         >
           {t("title")}
         </Link>
-        <Badge className="h-5 min-w-5 px-1.5 text-[10px]" variant="secondary">
+        <Badge
+          className="h-4 min-w-4 px-1.5 py-0 text-[9px] leading-none"
+          variant="secondary"
+        >
           {totalCount}
         </Badge>
       </div>

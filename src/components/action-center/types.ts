@@ -53,6 +53,7 @@ export type ActionCenterItem = {
   worktree: {
     id: string;
     folder: string;
+    relativePath: string;
     branch: string | null;
     highlightColor: string | null;
   } | null;
@@ -79,7 +80,7 @@ export const ACTION_CENTER_ITEM_FIELDS = `
   key resourceKind reason resourceId href displayNumber label summary status phase error
   createdAt updatedAt failureFingerprint dismissalFingerprint
   request { provider repositoryId repositoryName number branch headSha url draft pipelineStatus pipelineUrl approvalStatus isMine requiresMyApproval canMerge mergeBlockedReason }
-  worktree { id folder branch highlightColor }
+  worktree { id folder relativePath branch highlightColor }
   questionBatches {
     id sourceKind createdAt
     questions {

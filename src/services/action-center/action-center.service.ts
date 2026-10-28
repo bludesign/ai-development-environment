@@ -112,6 +112,12 @@ const questionInclude = {
   },
 } as const;
 
+const worktreeInclude = {
+  codebase: {
+    select: { agent: { select: { baseRepoDirectory: true } } },
+  },
+} as const;
+
 function iso(value: Date): string {
   return value.toISOString();
 }
@@ -324,7 +330,7 @@ export class ActionCenterService {
             where: { id: { in: runIds } },
             take: runIds.length,
             include: {
-              worktree: true,
+              worktree: { include: worktreeInclude },
               questionBatches: {
                 where: { status: "PENDING" },
                 orderBy: { createdAt: "asc" },
@@ -357,7 +363,7 @@ export class ActionCenterService {
             where: { id: { in: buildIds } },
             take: buildIds.length,
             include: {
-              worktree: true,
+              worktree: { include: worktreeInclude },
               codebase: { include: { repository: true } },
               configuration: true,
             },
@@ -382,6 +388,7 @@ export class ActionCenterService {
             folder: true,
             branch: true,
             highlightColor: true,
+            ...worktreeInclude,
           },
         })
       : [];
@@ -416,7 +423,10 @@ export class ActionCenterService {
         data.worktreeId ? [data.worktreeId] : [],
       );
       const worktrees = worktreeIds.length
-        ? await prisma.worktree.findMany({ where: { id: { in: worktreeIds } } })
+        ? await prisma.worktree.findMany({
+            where: { id: { in: worktreeIds } },
+            include: worktreeInclude,
+          })
         : [];
       for (const { record, data } of parsed) {
         const request = data.request;
