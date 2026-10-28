@@ -25,12 +25,13 @@ function localeAndPage(pathname: string): {
 
 export default async function proxy(request: NextRequest): Promise<Response> {
   const { pathname, search } = request.nextUrl;
-  if (pathname.startsWith("/api/")) {
+  if (pathname.startsWith("/api/") || pathname.startsWith("/.well-known/")) {
     return NextResponse.next();
   }
 
   const { locale, page } = localeAndPage(pathname);
-  const isAuthPage = page === "sign-in" || page === "register";
+  const isAuthPage =
+    page === "sign-in" || page === "register" || page === "mcp";
   const hasOptimisticSession = Boolean(
     getSessionCookie(request) || request.headers.get("authorization"),
   );

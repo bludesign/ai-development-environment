@@ -10,7 +10,8 @@ vi.mock("@/services/server-services", () => ({
 }));
 vi.mock("@/services/auth", () => ({ requireUserRequest }));
 
-import { POST, resetNotificationDeviceRateLimitsForTests } from "./route";
+import { POST } from "./route";
+import { resetRateLimitsForTests } from "@/lib/ios-registration-request";
 
 const input = {
   clientRegistrationId: "installation-1",
@@ -36,7 +37,7 @@ function request(body: unknown = input, headers: Record<string, string> = {}) {
 beforeEach(() => {
   registerDevice.mockReset();
   requireUserRequest.mockResolvedValue(null);
-  resetNotificationDeviceRateLimitsForTests();
+  resetRateLimitsForTests("notification-devices");
 });
 
 describe("POST /api/ios/notification-devices", () => {
@@ -107,9 +108,8 @@ describe("POST /api/ios/notification-devices", () => {
   });
 
   test("keeps its rate-limit budget separate from the push console", async () => {
-    const { POST: pushPost, resetApnsRegistrationRateLimitsForTests } =
-      await import("../apns-devices/route");
-    resetApnsRegistrationRateLimitsForTests();
+    const { POST: pushPost } = await import("../apns-devices/route");
+    resetRateLimitsForTests("apns-devices");
     registerDevice.mockResolvedValue({
       created: false,
       device: {

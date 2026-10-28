@@ -17,6 +17,13 @@ datasource db {
 }
 
 model User {
+  mcpAuthorizations McpAuthorization[]
+
+  oauthClient_userId       OauthClient[]       @relation("OauthClient_userId")
+  oauthRefreshToken_userId OauthRefreshToken[] @relation("OauthRefreshToken_userId")
+  oauthAccessToken_userId  OauthAccessToken[]  @relation("OauthAccessToken_userId")
+  oauthConsent_userId      OauthConsent[]      @relation("OauthConsent_userId")
+
   id            String    @id
   name          String
   email         String    @unique
@@ -36,6 +43,9 @@ model User {
 }
 
 model Session {
+  oauthRefreshToken_sessionId OauthRefreshToken[] @relation("OauthRefreshToken_sessionId")
+  oauthAccessToken_sessionId  OauthAccessToken[]  @relation("OauthAccessToken_sessionId")
+
   id             String   @id
   expiresAt      DateTime
   token          String   @unique
@@ -2201,11 +2211,11 @@ model SidebarUsageSummary {
 }
 
 model ActionCenterSettings {
-  id                            String   @id
-  maximumRequestAgeDays         Int      @default(30)
-  showMyRequestsInSidebar       Boolean  @default(true)
-  showReviewRequestsInSidebar   Boolean  @default(true)
-  updatedAt                     DateTime @updatedAt
+  id                          String   @id
+  maximumRequestAgeDays       Int      @default(30)
+  showMyRequestsInSidebar     Boolean  @default(true)
+  showReviewRequestsInSidebar Boolean  @default(true)
+  updatedAt                   DateTime @updatedAt
 }
 
 model ActionCenterRequest {
@@ -3985,4 +3995,202 @@ model ExternalPipelineRetryObservation {
   updatedAt DateTime @updatedAt
 
   @@index([stateKey])
+}
+
+// Better Auth MCP/OAuth provider and durable JWT signing keys.
+model OauthClient {
+  oauthClientResource_clientId OauthClientResource[] @relation("OauthClientResource_clientId")
+  oauthRefreshToken_clientId   OauthRefreshToken[]   @relation("OauthRefreshToken_clientId")
+  oauthAccessToken_clientId    OauthAccessToken[]    @relation("OauthAccessToken_clientId")
+  oauthConsent_clientId        OauthConsent[]        @relation("OauthConsent_clientId")
+
+  id                               String    @id
+  clientId                         String    @unique
+  clientSecret                     String?
+  clientDiscoveryId                String?
+  disabled                         Boolean?
+  skipConsent                      Boolean?
+  enableEndSession                 Boolean?
+  subjectType                      String?
+  scopes                           String?
+  clientCredentialsScopes          String?
+  userId                           String?
+  createdAt                        DateTime?
+  updatedAt                        DateTime?
+  name                             String?
+  uri                              String?
+  icon                             String?
+  contacts                         String?
+  tos                              String?
+  policy                           String?
+  softwareId                       String?
+  softwareVersion                  String?
+  softwareStatement                String?
+  redirectUris                     String
+  postLogoutRedirectUris           String?
+  backchannelLogoutUri             String?
+  backchannelLogoutSessionRequired Boolean?
+  tokenEndpointAuthMethod          String?
+  applicationType                  String?
+  jwks                             String?
+  jwksUri                          String?
+  grantTypes                       String?
+  responseTypes                    String?
+  requirePKCE                      Boolean?
+  dpopBoundAccessTokens            Boolean?
+  referenceId                      String?
+  metadata                         Json?
+  userIdRelation                   User?     @relation("OauthClient_userId", fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@map("oauthClient")
+}
+
+model OauthResource {
+  oauthClientResource_resourceId OauthClientResource[] @relation("OauthClientResource_resourceId")
+
+  id                            String    @id
+  identifier                    String    @unique
+  name                          String
+  accessTokenTtl                Int?
+  refreshTokenTtl               Int?
+  signingAlgorithm              String?
+  signingKeyId                  String?
+  allowedScopes                 String?
+  customClaims                  Json?
+  dpopBoundAccessTokensRequired Boolean?
+  disabled                      Boolean?
+  createdAt                     DateTime?
+  updatedAt                     DateTime?
+  policyVersion                 Int?
+  metadata                      Json?
+
+  @@map("oauthResource")
+}
+
+model OauthClientResource {
+  id                 String        @id
+  clientId           String
+  resourceId         String
+  metadata           Json?
+  createdAt          DateTime?
+  clientIdRelation   OauthClient   @relation("OauthClientResource_clientId", fields: [clientId], references: [clientId], onDelete: Cascade)
+  resourceIdRelation OauthResource @relation("OauthClientResource_resourceId", fields: [resourceId], references: [identifier], onDelete: Cascade)
+
+  @@index([clientId])
+  @@index([resourceId])
+  @@map("oauthClientResource")
+}
+
+model OauthRefreshToken {
+  oauthAccessToken_refreshId OauthAccessToken[] @relation("OauthAccessToken_refreshId")
+
+  id                      String      @id
+  token                   String      @unique
+  clientId                String
+  sessionId               String?
+  userId                  String
+  referenceId             String?
+  authorizationCodeId     String?
+  resources               String?
+  requestedUserInfoClaims String?
+  expiresAt               DateTime
+  createdAt               DateTime
+  revoked                 DateTime?
+  rotatedAt               DateTime?
+  rotationReplayResponse  String?
+  rotationReplayExpiresAt DateTime?
+  authTime                DateTime?
+  confirmation            Json?
+  scopes                  String
+  clientIdRelation        OauthClient @relation("OauthRefreshToken_clientId", fields: [clientId], references: [clientId], onDelete: Cascade)
+  sessionIdRelation       Session?    @relation("OauthRefreshToken_sessionId", fields: [sessionId], references: [id], onDelete: SetNull)
+  userIdRelation          User        @relation("OauthRefreshToken_userId", fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([clientId])
+  @@index([sessionId])
+  @@index([userId])
+  @@index([authorizationCodeId])
+  @@map("oauthRefreshToken")
+}
+
+model OauthAccessToken {
+  id                      String             @id
+  token                   String             @unique
+  clientId                String
+  sessionId               String?
+  userId                  String?
+  referenceId             String?
+  authorizationCodeId     String?
+  resources               String?
+  requestedUserInfoClaims String?
+  refreshId               String?
+  expiresAt               DateTime
+  createdAt               DateTime
+  revoked                 DateTime?
+  confirmation            Json?
+  scopes                  String
+  clientIdRelation        OauthClient        @relation("OauthAccessToken_clientId", fields: [clientId], references: [clientId], onDelete: Cascade)
+  sessionIdRelation       Session?           @relation("OauthAccessToken_sessionId", fields: [sessionId], references: [id], onDelete: SetNull)
+  userIdRelation          User?              @relation("OauthAccessToken_userId", fields: [userId], references: [id], onDelete: Cascade)
+  refreshIdRelation       OauthRefreshToken? @relation("OauthAccessToken_refreshId", fields: [refreshId], references: [id], onDelete: Cascade)
+
+  @@index([clientId])
+  @@index([sessionId])
+  @@index([userId])
+  @@index([authorizationCodeId])
+  @@index([refreshId])
+  @@map("oauthAccessToken")
+}
+
+model OauthConsent {
+  id                      String      @id
+  clientId                String
+  userId                  String?
+  referenceId             String?
+  resources               String?
+  requestedUserInfoClaims String?
+  scopes                  String
+  createdAt               DateTime
+  updatedAt               DateTime
+  clientIdRelation        OauthClient @relation("OauthConsent_clientId", fields: [clientId], references: [clientId], onDelete: Cascade)
+  userIdRelation          User?       @relation("OauthConsent_userId", fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([clientId])
+  @@index([userId])
+  @@map("oauthConsent")
+}
+
+model OauthClientAssertion {
+  id        String   @id
+  expiresAt DateTime
+
+  @@map("oauthClientAssertion")
+}
+
+model Jwks {
+  id         String    @id
+  publicKey  String
+  privateKey String
+  createdAt  DateTime
+  expiresAt  DateTime?
+  alg        String?
+  crv        String?
+
+  @@map("jwks")
+}
+
+// An authorization is immutable after revocation. Reconsent always creates a new id.
+model McpAuthorization {
+  id                  String    @id
+  authorizationCodeId String    @unique
+  userId              String
+  clientId            String
+  clientName          String
+  scopes              String
+  createdAt           DateTime  @default(now())
+  revokedAt           DateTime?
+  user                User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, clientId])
 }

@@ -1,5 +1,5 @@
-import { Client } from "@modelcontextprotocol/sdk/client/index.js";
-import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
+import { Client } from "@modelcontextprotocol/client";
+import { InMemoryTransport } from "@modelcontextprotocol/server";
 import { afterEach, describe, expect, test, vi } from "vitest";
 
 import type { CodebaseToolsService } from "@/services/codebases";
@@ -361,6 +361,6 @@ describe("codebases MCP server", () => {
     });
     await expect(
       client.callTool({ name: "get_codebase", arguments: { path: "/tmp" } }),
-    ).resolves.toMatchObject({ isError: true });
+    ).rejects.toMatchObject({ code: -32602 });
   });
 });

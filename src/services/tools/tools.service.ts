@@ -2,10 +2,12 @@ import { createHash, randomUUID } from "node:crypto";
 
 import { BUILD_CONFIGURATION_ICON_KEYS } from "@ai-development-environment/agent-contract/builds";
 
-import { Client } from "@modelcontextprotocol/sdk/client/index.js";
-import { SSEClientTransport } from "@modelcontextprotocol/sdk/client/sse.js";
-import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
-import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
+import {
+  Client,
+  SSEClientTransport,
+  StreamableHTTPClientTransport,
+} from "@modelcontextprotocol/client";
+import type { CallToolResult } from "@modelcontextprotocol/server";
 
 import { getPrismaClient } from "@/data/prisma-client";
 import type { Prisma } from "@/generated/prisma/client";
@@ -33,6 +35,7 @@ import {
 } from "./mcp-tool-reference";
 import { McpPresetTransferService } from "./mcp-preset-transfer.service";
 import { compileMcpJsonSchema } from "./mcp-json-schema";
+import { assertMcpToolPermission } from "./mcp-oauth-dispatch";
 
 import type {
   ExternalMcpServerInput,
@@ -844,6 +847,7 @@ export class ToolsService {
     signal?: AbortSignal,
   ): Promise<CallToolResult> {
     const ref = entry.reference;
+    await assertMcpToolPermission(context, ref.name, ref.source === "EXTERNAL");
     if (ref.source === "BUILTIN")
       return repositoryId === undefined
         ? this.callBuiltInTool(ref.name, args, context)
@@ -867,11 +871,14 @@ export class ToolsService {
         const result = await this.withClient(
           server,
           (client) =>
-            client.callTool({ name: ref.name, arguments: args }, undefined, {
-              timeout: CALL_TIMEOUT_MS,
-              resetTimeoutOnProgress: true,
-              signal,
-            }),
+            client.callTool(
+              { name: ref.name, arguments: args },
+              {
+                timeout: CALL_TIMEOUT_MS,
+                resetTimeoutOnProgress: true,
+                signal,
+              },
+            ),
           signal,
         );
         if (!result.isError && entry.outputSchema) {
@@ -1191,6 +1198,11 @@ export class ToolsService {
     },
     context?: ToolInvocationContext,
   ): Promise<unknown> {
+    await assertMcpToolPermission(
+      context,
+      input.name,
+      !this.builtInTools.hasGroup(input.groupId),
+    );
     const operation = () => this.invokeTool(input);
     return context
       ? this.audit.execute(
@@ -1210,6 +1222,7 @@ export class ToolsService {
     args: unknown,
     context?: ToolInvocationContext,
   ): ReturnType<BuiltInToolRegistry["callByName"]> {
+    await assertMcpToolPermission(context, name);
     const groupId = this.builtInTools.groupIdForName(name);
     if (!groupId) throw new Error(`Unknown built-in tool: ${name}`);
     await this.assertProviderToolConfigured(groupId);
@@ -1264,7 +1277,6 @@ export class ToolsService {
     return this.withClient(server, (client) =>
       client.callTool(
         { name: remoteName, arguments: input.arguments },
-        undefined,
         { timeout: CALL_TIMEOUT_MS, resetTimeoutOnProgress: true },
       ),
     );
@@ -1327,10 +1339,17 @@ export class ToolsService {
     signal?: AbortSignal,
   ): Promise<T> {
     signal?.throwIfAborted();
-    const client = new Client({
-      name: "ai-development-environment-tools",
-      version: "0.1.0",
-    });
+    const client = new Client(
+      { name: "ai-development-environment-tools", version: "0.1.0" },
+      {
+        versionNegotiation: {
+          mode:
+            transport(server.transport) === "STREAMABLE_HTTP"
+              ? "auto"
+              : "legacy",
+        },
+      },
+    );
     const configuredFetch = createConfiguredMcpFetch(server);
     const clientTransport =
       transport(server.transport) === "STREAMABLE_HTTP"

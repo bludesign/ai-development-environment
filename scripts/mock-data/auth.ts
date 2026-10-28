@@ -90,4 +90,26 @@ export async function seedAuth(prisma: PrismaClient): Promise<void> {
       updatedAt: daysAgo(10),
     },
   });
+  await prisma.mcpAuthorization.createMany({
+    data: [
+      {
+        id: "mcp-authorization-screenshot-read",
+        authorizationCodeId: "screenshot-only-unused-code-read",
+        userId: "user-screenshot-admin",
+        clientId: "https://chatgpt.com/oauth/client.json",
+        clientName: "ChatGPT",
+        scopes: "mcp:read",
+        createdAt: daysAgo(7),
+      },
+      {
+        id: "mcp-authorization-screenshot-full",
+        authorizationCodeId: "screenshot-only-unused-code-full",
+        userId: "user-screenshot-admin",
+        clientId: "https://chatgpt.com/oauth/client.json",
+        clientName: "ChatGPT",
+        scopes: "mcp:read mcp:write mcp:destructive offline_access",
+        createdAt: hoursAgo(2),
+      },
+    ],
+  });
 }

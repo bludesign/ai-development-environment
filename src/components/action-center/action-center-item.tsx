@@ -14,7 +14,7 @@ import {
 import type { LucideIcon } from "lucide-react";
 import { useTranslations } from "next-intl";
 
-import { RequestStatus } from "./request-status";
+import { RequestMergeAction, RequestStatus } from "./request-status";
 import { DateTime } from "@/components/common/date-time";
 import { RunBuildControls } from "@/components/builds/run-build-controls";
 import { useRunLabels } from "@/components/runs/run-labels";
@@ -30,6 +30,11 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { Spinner } from "@/components/ui/spinner";
+import {
+  HoverCard,
+  HoverCardContent,
+  HoverCardTrigger,
+} from "@/components/ui/hover-card";
 import { Link } from "@/i18n/navigation";
 import { formatEnumLabel } from "@/lib/enum-label";
 import { cn } from "@/lib/utils";
@@ -99,9 +104,13 @@ export function ActionCenterItem({
   const kind = t(`kinds.${item.resourceKind}`);
   const title = itemTitle(item, kind);
   const color = item.worktree?.highlightColor;
-  const worktreeLabel = item.worktree
-    ? `${item.worktree.folder}${item.worktree.branch ? ` · ${item.worktree.branch}` : ""}`
+  const worktreePath = item.worktree
+    ? (item.worktree.relativePath ?? worktreeName(item.worktree.folder))
     : null;
+  const worktreeLabel = item.worktree
+    ? `${worktreePath}${item.worktree.branch ? ` · ${item.worktree.branch}` : ""}`
+    : null;
+  const branch = item.request?.branch ?? item.worktree?.branch;
   const rawWorktreeSummary =
     item.resourceKind === "WORKFLOW" &&
     item.worktree &&
@@ -116,6 +125,17 @@ export function ActionCenterItem({
       ? runLabels.phase(item.phase)
       : formatEnumLabel(item.phase)
     : null;
+  const reasonBadge = (
+    <Badge
+      className={cn(
+        compact && "h-4 px-1.5 py-0 text-[9px] leading-none",
+        reasonClass(item.reason),
+      )}
+      variant={item.reason === "FAILED" ? "destructive" : "outline"}
+    >
+      {t(`reasons.${item.reason}`)}
+    </Badge>
+  );
 
   const acknowledgeFailure = async () => {
     setAcknowledging(true);
@@ -141,6 +161,7 @@ export function ActionCenterItem({
 
   const actions = (
     <div className="flex shrink-0 flex-wrap items-center gap-2">
+      {item.request && <RequestMergeAction item={item} compact={compact} />}
       {item.buildRun && (
         <RunBuildControls
           buildId={item.buildRun.buildId}
@@ -185,18 +206,43 @@ export function ActionCenterItem({
     </div>
   );
 
-  const worktree = item.worktree && (
+  const worktreeLink = (item.worktree || (compact && item.request)) && (
     <Link
       className="flex min-w-0 max-w-full items-center gap-1 overflow-hidden font-mono text-xs text-muted-foreground hover:text-foreground hover:underline"
-      href={`/dashboard/worktrees/${item.worktree.id}`}
-      title={worktreeLabel ?? undefined}
+      href={
+        item.worktree ? `/dashboard/worktrees/${item.worktree.id}` : item.href
+      }
+      title={compact ? undefined : (worktreeLabel ?? undefined)}
     >
       <GitBranch className="size-3 shrink-0" />
       <span className="min-w-0 truncate">
-        {compact ? worktreeName(item.worktree.folder) : worktreeLabel}
+        {compact ? (branch ?? "—") : worktreeLabel}
       </span>
     </Link>
   );
+  const worktree =
+    compact && worktreeLink ? (
+      <HoverCard openDelay={200}>
+        <HoverCardTrigger asChild>{worktreeLink}</HoverCardTrigger>
+        <HoverCardContent
+          align="start"
+          className="w-72 max-w-[calc(100vw-2rem)] space-y-1 break-words"
+          side="right"
+        >
+          {item.request && (
+            <p className="text-xs font-medium">{item.request.repositoryName}</p>
+          )}
+          <p className="font-mono text-xs break-all">{branch ?? "—"}</p>
+          {worktreePath && (
+            <p className="font-mono text-xs break-all text-muted-foreground">
+              {worktreePath}
+            </p>
+          )}
+        </HoverCardContent>
+      </HoverCard>
+    ) : (
+      worktreeLink
+    );
 
   if (compact) {
     const question = item.questionBatches[0]?.questions[0];
@@ -230,17 +276,13 @@ export function ActionCenterItem({
               </p>
             )}
           </div>
-          <Badge
-            className={cn(
-              "h-4 shrink-0 px-1.5 py-0 text-[9px]",
-              reasonClass(item.reason),
-            )}
-            variant={item.reason === "FAILED" ? "destructive" : "outline"}
-          >
-            {t(`reasons.${item.reason}`)}
-          </Badge>
+          {!item.request && reasonBadge}
         </div>
-        {item.request && <RequestStatus item={item} compact />}
+        {item.request && (
+          <RequestStatus item={item} compact>
+            {reasonBadge}
+          </RequestStatus>
+        )}
         {question && (
           <p className="line-clamp-2 break-words text-xs leading-tight font-medium">
             {question.header || question.prompt}
@@ -285,14 +327,21 @@ export function ActionCenterItem({
                 {title}
               </Link>
             </CardTitle>
-            <CardDescription className="mt-1 line-clamp-2 break-words">
-              {rawWorktreeSummary && item.worktree ? (
+            <CardDescription
+              className={cn(
+                "mt-1 break-words",
+                !item.request && "line-clamp-2",
+              )}
+            >
+              {item.request ? (
+                item.request.repositoryName
+              ) : rawWorktreeSummary && item.worktree ? (
                 <Link
                   className="block max-w-full truncate font-mono hover:text-foreground hover:underline"
                   href={`/dashboard/worktrees/${item.worktree.id}`}
                   title={worktreeLabel ?? undefined}
                 >
-                  {worktreeName(item.worktree.folder)}
+                  {worktreePath}
                 </Link>
               ) : item.resourceKind === "PLAN" ||
                 item.resourceKind === "SESSION" ? (
@@ -306,22 +355,25 @@ export function ActionCenterItem({
         <CardAction>{actions}</CardAction>
       </CardHeader>
       <CardContent className="space-y-4">
-        {item.request && <RequestStatus item={item} />}
-        <div className="flex flex-wrap items-center gap-2">
-          <Badge
-            className={reasonClass(item.reason)}
-            variant={item.reason === "FAILED" ? "destructive" : "outline"}
-          >
-            {t(`reasons.${item.reason}`)}
-          </Badge>
-          <Badge variant="secondary">{statusLabel}</Badge>
-          {item.phase && item.phase !== item.status && (
-            <Badge variant="outline">{phaseLabel}</Badge>
-          )}
-          <span className="text-xs text-muted-foreground">
-            <DateTime value={item.updatedAt} />
-          </span>
-        </div>
+        {item.request ? (
+          <RequestStatus item={item}>
+            {reasonBadge}
+            <span className="text-xs text-muted-foreground">
+              <DateTime value={item.updatedAt} />
+            </span>
+          </RequestStatus>
+        ) : (
+          <div className="flex flex-wrap items-center gap-2">
+            {reasonBadge}
+            <Badge variant="secondary">{statusLabel}</Badge>
+            {item.phase && item.phase !== item.status && (
+              <Badge variant="outline">{phaseLabel}</Badge>
+            )}
+            <span className="text-xs text-muted-foreground">
+              <DateTime value={item.updatedAt} />
+            </span>
+          </div>
+        )}
         {worktree}
         {item.error && (
           <Alert variant="destructive">

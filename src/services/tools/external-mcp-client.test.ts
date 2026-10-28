@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
   callTool: vi.fn(),
+  clientOptions: vi.fn(),
   close: vi.fn(),
   connect: vi.fn(),
   credentialHeaders: new Map<
@@ -35,24 +36,21 @@ vi.mock("@/services/credentials", async (importOriginal) => {
   };
 });
 
-vi.mock("@modelcontextprotocol/sdk/client/index.js", () => ({
+vi.mock("@modelcontextprotocol/client", () => ({
   Client: class {
+    constructor(...args: unknown[]) {
+      mocks.clientOptions(...args);
+    }
     connect = mocks.connect;
     close = mocks.close;
     listTools = mocks.listTools;
     callTool = mocks.callTool;
   },
-}));
-
-vi.mock("@modelcontextprotocol/sdk/client/streamableHttp.js", () => ({
   StreamableHTTPClientTransport: class {
     constructor(...args: unknown[]) {
       mocks.httpTransport(...args);
     }
   },
-}));
-
-vi.mock("@modelcontextprotocol/sdk/client/sse.js", () => ({
   SSEClientTransport: class {
     constructor(...args: unknown[]) {
       mocks.sseTransport(...args);
@@ -124,6 +122,13 @@ describe("external MCP client transport", () => {
 
     const catalog = await service.catalog();
 
+    expect(mocks.clientOptions).toHaveBeenCalledWith(expect.any(Object), {
+      versionNegotiation: { mode: "auto" },
+    });
+    expect(mocks.clientOptions).toHaveBeenCalledWith(expect.any(Object), {
+      versionNegotiation: { mode: "legacy" },
+    });
+
     expect(mocks.httpTransport).toHaveBeenCalledWith(
       new URL(httpServer.url),
       expect.objectContaining({ fetch: expect.any(Function) }),
@@ -151,7 +156,6 @@ describe("external MCP client transport", () => {
 
     expect(mocks.callTool).toHaveBeenCalledWith(
       { name: "search", arguments: { query: "repo" } },
-      undefined,
       expect.objectContaining({ timeout: 120_000 }),
     );
     expect(mocks.close).toHaveBeenCalledOnce();
@@ -212,7 +216,6 @@ describe("external MCP client transport", () => {
     ).resolves.toEqual(richResult);
     expect(mocks.callTool).toHaveBeenCalledWith(
       { name: "search", arguments: { query: "repo" } },
-      undefined,
       expect.objectContaining({ signal: controller.signal }),
     );
     expect(execute).toHaveBeenCalledWith(

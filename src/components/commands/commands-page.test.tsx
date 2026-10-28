@@ -73,6 +73,7 @@ function commandRun({
     },
     worktreePath: "/code/project",
     worktreeBranch: "feature/AIDE-75",
+    repositoryName: "Example repository",
     restartCount: 0,
     stopRequested: false,
     nextRestartAt: null,
@@ -215,7 +216,7 @@ describe("CommandsPage", () => {
     ).toBe("/dashboard/commands/runs/run-1");
     expect(
       screen
-        .getByRole("link", { name: "feature/AIDE-75" })
+        .getByRole("link", { name: "Example repository feature/AIDE-75" })
         .getAttribute("href"),
     ).toBe("/dashboard/worktrees/worktree-1");
   });
@@ -262,9 +263,11 @@ describe("CommandsPage", () => {
     render(<CommandsPage />);
 
     const worktreeLink = await screen.findByRole("link", {
-      name: longWorktreeName,
+      name: `Example repository ${longWorktreeName}`,
     });
-    expect(worktreeLink.textContent).toBe(longWorktreeName);
+    expect(worktreeLink.textContent).toBe(
+      `Example repository ${longWorktreeName}`,
+    );
     expect(worktreeLink.className).toContain("whitespace-normal");
     expect(worktreeLink.className).toContain("break-words");
     expect(worktreeLink.className).not.toContain("truncate");

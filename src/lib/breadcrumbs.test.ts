@@ -23,6 +23,7 @@ const labels: Record<BreadcrumbLabelKey, string> = {
   codebases: "Codebases",
   comments: "Comments",
   commands: "Commands",
+  connectedApplications: "Connected Applications",
   configurations: "Configurations",
   consoleLogs: "Console Logs",
   costs: "Costs",

@@ -55,6 +55,18 @@ function hasBetterAuthCookie(headers: Headers): boolean {
   );
 }
 
+export function assertSingleCredential(headers: Headers): void {
+  const count =
+    Number(Boolean(headers.get("x-api-key")?.trim())) +
+    Number(Boolean(headers.get("authorization")?.trim())) +
+    Number(hasBetterAuthCookie(headers));
+  if (count > 1)
+    throw new PrincipalResolutionError(
+      "Provide exactly one application credential.",
+      400,
+    );
+}
+
 /**
  * Whether the only credential on this request is one the browser attached by
  * itself. Those are the requests a cross-site caller can cause to be sent, so
@@ -73,20 +85,10 @@ export async function resolveRequestPrincipal(
   headers: Headers,
   agents?: AgentControlService,
 ): Promise<RequestPrincipal> {
+  assertSingleCredential(headers);
   const apiKey = headers.get("x-api-key")?.trim() || null;
   const bearer = bearerCredential(headers);
   const hasSessionCookie = hasBetterAuthCookie(headers);
-
-  const credentialCount =
-    Number(Boolean(apiKey)) +
-    Number(Boolean(bearer)) +
-    Number(hasSessionCookie);
-  if (credentialCount > 1) {
-    throw new PrincipalResolutionError(
-      "Provide exactly one application credential.",
-      400,
-    );
-  }
 
   if (apiKey) {
     const auth = await getAuth();
@@ -116,6 +118,11 @@ export async function resolveRequestPrincipal(
   }
 
   if (bearer || hasSessionCookie) {
+    if (bearer && bearer.split(".").length === 3) {
+      throw new PrincipalResolutionError(
+        "OAuth access tokens are accepted only by the MCP endpoint.",
+      );
+    }
     const auth = await getAuth();
     const result = await auth.api.getSession({ headers });
     if (!result?.session || !result.user) {

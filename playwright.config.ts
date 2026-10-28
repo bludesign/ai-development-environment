@@ -170,6 +170,8 @@ export default defineConfig({
         APP_SECRET: MOCK_APP_SECRET,
         APP_ORIGINS: new URL(baseURL).host,
         AUTH_MODE: "password",
+        MCP_OAUTH_ENABLED: "true",
+        MCP_OAUTH_DCR_ENABLED: "false",
         SCREENSHOT_SESSION_TOKEN: screenshotSessionToken,
       },
     },

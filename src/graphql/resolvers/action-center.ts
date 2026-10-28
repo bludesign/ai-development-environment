@@ -1,3 +1,5 @@
+import { posix, win32 } from "node:path";
+
 import type { GraphQLContext } from "@/services/graphql-server/graphql-server.service";
 import type { ActionCenterService } from "@/services/action-center";
 
@@ -10,6 +12,23 @@ function requireControlPlane(context: GraphQLContext): void {
 }
 
 export const createActionCenterResolvers = (service: ActionCenterService) => ({
+  ActionCenterWorktree: {
+    relativePath: (worktree: {
+      folder: string;
+      codebase?: { agent: { baseRepoDirectory: string | null } };
+    }) => {
+      const path = /^(?:[A-Za-z]:[\\/]|\\\\)/.test(worktree.folder)
+        ? win32
+        : posix;
+      const baseDirectory = worktree.codebase?.agent.baseRepoDirectory;
+      const relativePath = baseDirectory
+        ? path.relative(baseDirectory, worktree.folder)
+        : path.basename(worktree.folder);
+      return path.isAbsolute(relativePath)
+        ? path.basename(worktree.folder)
+        : relativePath || ".";
+    },
+  },
   Query: {
     actionCenterSettings: (
       _root: unknown,

@@ -1,9 +1,7 @@
-import { Client } from "@modelcontextprotocol/sdk/client/index.js";
-import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
-import {
-  CallToolResultSchema,
-  type CallToolResult,
-} from "@modelcontextprotocol/sdk/types.js";
+import type { CallToolResult } from "@modelcontextprotocol/server";
+import { Client } from "@modelcontextprotocol/client";
+import { InMemoryTransport } from "@modelcontextprotocol/server";
+import { CallToolResultSchema } from "@modelcontextprotocol/core";
 import { afterEach, describe, expect, test, vi } from "vitest";
 
 import type { CodebaseToolsService } from "@/services/codebases";
@@ -146,6 +144,15 @@ describe("scoped MCP protocol compatibility", () => {
     expect(result.tools).toEqual([
       {
         name: tool.name,
+        _meta: {
+          "aide/requiredScopes": ["mcp:read", "mcp:write", "mcp:destructive"],
+          securitySchemes: [
+            {
+              type: "oauth2",
+              scopes: ["mcp:read", "mcp:write", "mcp:destructive"],
+            },
+          ],
+        },
         title: tool.title,
         description: tool.description,
         inputSchema: tool.inputSchema,
@@ -263,7 +270,7 @@ describe("scoped MCP protocol compatibility", () => {
         },
         CallToolResultSchema,
       ),
-    ).rejects.toThrow("Server does not support task creation");
+    ).resolves.toMatchObject({ isError: true });
     expect(invoke).not.toHaveBeenCalled();
   });
 
@@ -287,7 +294,6 @@ describe("scoped MCP protocol compatibility", () => {
     const controller = new AbortController();
     const call = client.callTool(
       { name: tool.name, arguments: { query: "example" } },
-      undefined,
       { signal: controller.signal },
     );
     const rejectedCall = expect(call).rejects.toThrow();

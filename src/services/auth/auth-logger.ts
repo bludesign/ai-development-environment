@@ -1,12 +1,18 @@
 import { inspect } from "node:util";
 
 const sensitiveLogValue = new RegExp(
-  String.raw`((?:"?(?:authorization|password|accessToken|refreshToken|idToken|sessionToken|clientSecret|secret|privateKey)"?)\s*:\s*)(?:"(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'|[^,\n}\]]+)`,
+  String.raw`((?:"?(?:authorization|password|access[_-]?token|refresh[_-]?token|id[_-]?token|session[_-]?token|client[_-]?secret|client_assertion|code_verifier|code|token|secret|privateKey)"?)\s*:\s*)(?:"(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'|[^,\n}\]]+)`,
   "gi",
 );
 
 export function redactSensitiveAuthLogOutput(output: string): string {
-  return output.replace(sensitiveLogValue, '$1"[REDACTED]"');
+  return output
+    .replace(sensitiveLogValue, '$1"[REDACTED]"')
+    .replace(/\b(Bearer|DPoP)\s+[A-Za-z0-9._~+\/-]+/gi, "$1 [REDACTED]")
+    .replace(
+      /([?&](?:access_token|refresh_token|client_secret|code|code_verifier)=)[^&\s]+/gi,
+      "$1[REDACTED]",
+    );
 }
 
 export function formatBetterAuthLogArguments(

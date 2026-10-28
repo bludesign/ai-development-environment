@@ -15,6 +15,18 @@ beforeEach(() => {
 });
 
 describe("request principal resolution", () => {
+  test("never resolves an MCP OAuth JWT as a general application session", async () => {
+    getSession.mockResolvedValue({
+      user: { id: "should-not-be-used" },
+      session: { id: "s" },
+    });
+    await expect(
+      resolveRequestPrincipal(
+        new Headers({ authorization: "Bearer header.payload.signature" }),
+      ),
+    ).rejects.toThrow("only by the MCP endpoint");
+    expect(getSession).not.toHaveBeenCalled();
+  });
   test("returns anonymous only when no credential was supplied", async () => {
     await expect(resolveRequestPrincipal(new Headers())).resolves.toEqual({
       kind: "anonymous",

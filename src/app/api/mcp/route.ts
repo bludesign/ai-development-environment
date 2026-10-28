@@ -1,4 +1,8 @@
-import { WebStandardStreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js";
+import {
+  createMcpHandler,
+  readRequestBody,
+} from "@modelcontextprotocol/server";
+import { mcpRequestScopeError } from "@/services/tools/mcp-oauth-dispatch";
 
 import { getServerServices } from "@/services/server-services";
 import {
@@ -118,27 +122,57 @@ async function handle(request: Request): Promise<Response> {
     context = authorization.context;
   }
   try {
-    const transport = new WebStandardStreamableHTTPServerTransport();
-    const server = toolSnapshot
-      ? createScopedMcpServer(toolSnapshot, (entry, args, signal) =>
-          tools.callSnapshotTool(
-            entry,
-            args,
-            context,
-            runRepositoryId,
-            AbortSignal.any([signal, request.signal]),
-          ),
-        )
-      : createBuiltInMcpServer(
-          tools.builtInTools,
-          (name, input) =>
-            runRepositoryId === undefined
-              ? tools.callBuiltInTool(name, input, context)
-              : tools.callRunBuiltInTool(name, input, runRepositoryId, context),
-          allowedToolNames,
-        );
-    await server.connect(transport);
-    const response = await transport.handleRequest(request);
+    if (context.oauthPrincipal && request.method === "POST") {
+      const body = await readRequestBody(request.clone());
+      if (body.tooLarge)
+        return new Response("Request body too large", { status: 413 });
+      let parsed: unknown;
+      try {
+        parsed = JSON.parse(body.text);
+      } catch {
+        /* SDK returns its protocol parse error. */
+      }
+      const denied = mcpRequestScopeError(
+        parsed,
+        context,
+        toolSnapshot,
+        toolSnapshot
+          ? undefined
+          : new Set(tools.builtInTools.definitions().map((tool) => tool.name)),
+      );
+      if (denied) {
+        denied.headers.set("x-request-id", context.correlationId);
+        return denied;
+      }
+    }
+    const handler = createMcpHandler(
+      () =>
+        toolSnapshot
+          ? createScopedMcpServer(toolSnapshot, (entry, args, signal) =>
+              tools.callSnapshotTool(
+                entry,
+                args,
+                context,
+                runRepositoryId,
+                AbortSignal.any([signal, request.signal]),
+              ),
+            )
+          : createBuiltInMcpServer(
+              tools.builtInTools,
+              (name, input) =>
+                runRepositoryId === undefined
+                  ? tools.callBuiltInTool(name, input, context)
+                  : tools.callRunBuiltInTool(
+                      name,
+                      input,
+                      runRepositoryId,
+                      context,
+                    ),
+              allowedToolNames,
+            ),
+      { legacy: "stateless" },
+    );
+    const response = await handler.fetch(request);
     response.headers.set("x-request-id", context.correlationId);
     return response;
   } catch (error) {

@@ -112,6 +112,14 @@ test.describe("app screenshots", () => {
         await page.getByRole("button", { name: route.clickButton }).click();
         await page.getByRole("dialog").waitFor({ state: "visible" });
       }
+      if (route.mcpAuthorizationReview) {
+        await page
+          .getByRole("table", { name: "Current authorizations for ChatGPT" })
+          .getByRole("button", { name: /^Revoke authorization/ })
+          .first()
+          .click();
+        await page.getByRole("alertdialog").waitFor({ state: "visible" });
+      }
       if (route.mcpAiPrompt) {
         await page
           .getByRole("button", {
