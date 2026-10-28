@@ -61,7 +61,10 @@ test("gitlab merge sheet shows project policy and deferred follow-ups", async ({
   await page.goto(
     `/en/gitlab/merge-requests/${ids.gitlab.projectId}/${ids.gitlab.mergeRequestIid}`,
   );
-  await page.getByRole("button", { name: "Merge", exact: true }).click();
+  await page
+    .getByRole("main")
+    .getByRole("button", { name: "Merge", exact: true })
+    .click();
   const sheet = page.getByRole("dialog");
   await expect(sheet.getByText("The pipeline is still running.")).toBeVisible();
   await expect(
@@ -315,9 +318,11 @@ test("gitlab scopes require a project only for All accessible and search unmanag
     page.getByRole("heading", { name: "GitLab Merge Requests", exact: true }),
   ).toBeVisible();
   await expect(
-    page.getByText("Improve pipeline retry diagnostics", { exact: true }),
+    page
+      .getByRole("main")
+      .getByText("Improve pipeline retry diagnostics", { exact: true }),
   ).toBeVisible();
-  expect(requests.at(-1)?.scope).toBe("MINE");
+  await expect.poll(() => requests.at(-1)?.scope).toBe("MINE");
   await page.getByRole("tab", { name: "All accessible", exact: true }).click();
   await expect(
     page.getByRole("button", { name: "Refresh", exact: true }),
@@ -328,20 +333,28 @@ test("gitlab scopes require a project only for All accessible and search unmanag
     .getByRole("option", { name: "acme/platform", exact: true })
     .click();
   await expect(
-    page.getByText("Improve pipeline retry diagnostics", { exact: true }),
+    page
+      .getByRole("main")
+      .getByText("Improve pipeline retry diagnostics", { exact: true }),
   ).toBeVisible();
-  expect(requests.at(-1)).toMatchObject({
-    scope: "ALL",
-    projectId: ids.gitlab.projectId,
-  });
+  await expect
+    .poll(() => requests.at(-1))
+    .toMatchObject({
+      scope: "ALL",
+      projectId: ids.gitlab.projectId,
+    });
   await page.getByRole("tab", { name: "Review requests", exact: true }).click();
   await expect(
-    page.getByText("Improve pipeline retry diagnostics", { exact: true }),
+    page
+      .getByRole("main")
+      .getByText("Improve pipeline retry diagnostics", { exact: true }),
   ).toBeVisible();
-  expect(requests.at(-1)).toMatchObject({
-    scope: "REVIEW_REQUESTED",
-    projectId: ids.gitlab.projectId,
-  });
+  await expect
+    .poll(() => requests.at(-1))
+    .toMatchObject({
+      scope: "REVIEW_REQUESTED",
+      projectId: ids.gitlab.projectId,
+    });
   await expect(page).toHaveURL(/scope=REVIEW_REQUESTED/);
   await page.getByRole("combobox", { name: "Project", exact: true }).click();
   await page
@@ -522,7 +535,9 @@ test("gitlab merge request timeouts offer narrowing guidance and retry", async (
   await expect(timeout).toContainText(/project/i);
   await page.getByRole("button", { name: "Retry", exact: true }).click();
   await expect(
-    page.getByText("Improve pipeline retry diagnostics", { exact: true }),
+    page
+      .getByRole("main")
+      .getByText("Improve pipeline retry diagnostics", { exact: true }),
   ).toBeVisible();
   await expect(timeout).toHaveCount(0);
 });

@@ -8,11 +8,17 @@ import { ids } from "../scripts/mock-data/ids";
 test("portable mixed preset imports, exports, and calls only selected MCP tools", async ({
   page,
   baseURL,
+  browserName,
 }, testInfo) => {
   test.setTimeout(120_000);
-  await page.context().grantPermissions(["clipboard-read", "clipboard-write"], {
-    origin: baseURL,
-  });
+  await page
+    .context()
+    .grantPermissions(
+      browserName === "webkit"
+        ? ["clipboard-read"]
+        : ["clipboard-read", "clipboard-write"],
+      { origin: baseURL },
+    );
   const headers = { Authorization: `Bearer ${screenshotSessionToken}` };
   await page.setExtraHTTPHeaders(headers);
   const graphql = async (
@@ -96,9 +102,9 @@ test("portable mixed preset imports, exports, and calls only selected MCP tools"
     await expect(
       page.getByRole("button", { name: "Prompt copied", exact: true }),
     ).toBeVisible();
-    expect(await page.evaluate(() => navigator.clipboard.readText())).toBe(
-      copiedPrompt,
-    );
+    await expect
+      .poll(() => page.evaluate(() => navigator.clipboard.readText()))
+      .toBe(copiedPrompt);
     await aiPrompt.click();
     await page.getByLabel("Preset JSON file", { exact: true }).setInputFiles({
       name: "portable-presets.json",

@@ -346,7 +346,9 @@ for (const device of ["iPhone", "iPad"] as const) {
       ];
       return route.fulfill({ json });
     });
-    await page.goto(`/en/dashboard/builds/${ids.builds.archive}`);
+    await page.goto(
+      `/en/dashboard/builds/${ids.builds.archive}?serverUrlKind=REMOTE`,
+    );
     const install = page
       .getByRole("button", { name: "Install", exact: true })
       .first();
@@ -405,13 +407,17 @@ test("install requires HTTPS in the app build list", async ({
   page,
 }, testInfo) => {
   test.skip(testInfo.project.name !== "mobile-light");
-  await page.goto(`/en/dashboard/apps/${ids.apps.mobileSuite}?view=builds`);
+  await page.goto(
+    `/en/dashboard/apps/${ids.apps.mobileSuite}?view=builds&serverUrlKind=LOCAL`,
+  );
   const install = page
     .getByRole("button", { name: "Install", exact: true })
     .first();
   await expect(install).toHaveAttribute("aria-disabled", "true");
   await install.click({ force: true });
   await expect(
-    page.getByText(/Over-the-air installation requires a public HTTPS address/),
+    page.getByText(
+      /Select a reachable HTTPS address using the server URL picker/,
+    ),
   ).toBeVisible();
 });
