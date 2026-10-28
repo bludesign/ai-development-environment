@@ -30,6 +30,11 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { Spinner } from "@/components/ui/spinner";
+import {
+  HoverCard,
+  HoverCardContent,
+  HoverCardTrigger,
+} from "@/components/ui/hover-card";
 import { Link } from "@/i18n/navigation";
 import { formatEnumLabel } from "@/lib/enum-label";
 import { cn } from "@/lib/utils";
@@ -105,6 +110,7 @@ export function ActionCenterItem({
   const worktreeLabel = item.worktree
     ? `${worktreePath}${item.worktree.branch ? ` · ${item.worktree.branch}` : ""}`
     : null;
+  const branch = item.request?.branch ?? item.worktree?.branch;
   const rawWorktreeSummary =
     item.resourceKind === "WORKFLOW" &&
     item.worktree &&
@@ -200,18 +206,43 @@ export function ActionCenterItem({
     </div>
   );
 
-  const worktree = item.worktree && (
+  const worktreeLink = (item.worktree || (compact && item.request)) && (
     <Link
       className="flex min-w-0 max-w-full items-center gap-1 overflow-hidden font-mono text-xs text-muted-foreground hover:text-foreground hover:underline"
-      href={`/dashboard/worktrees/${item.worktree.id}`}
-      title={worktreeLabel ?? undefined}
+      href={
+        item.worktree ? `/dashboard/worktrees/${item.worktree.id}` : item.href
+      }
+      title={compact ? undefined : (worktreeLabel ?? undefined)}
     >
       <GitBranch className="size-3 shrink-0" />
       <span className="min-w-0 truncate">
-        {compact ? worktreePath : worktreeLabel}
+        {compact ? (branch ?? "—") : worktreeLabel}
       </span>
     </Link>
   );
+  const worktree =
+    compact && worktreeLink ? (
+      <HoverCard openDelay={200}>
+        <HoverCardTrigger asChild>{worktreeLink}</HoverCardTrigger>
+        <HoverCardContent
+          align="start"
+          className="w-72 max-w-[calc(100vw-2rem)] space-y-1 break-words"
+          side="right"
+        >
+          {item.request && (
+            <p className="text-xs font-medium">{item.request.repositoryName}</p>
+          )}
+          <p className="font-mono text-xs break-all">{branch ?? "—"}</p>
+          {worktreePath && (
+            <p className="font-mono text-xs break-all text-muted-foreground">
+              {worktreePath}
+            </p>
+          )}
+        </HoverCardContent>
+      </HoverCard>
+    ) : (
+      worktreeLink
+    );
 
   if (compact) {
     const question = item.questionBatches[0]?.questions[0];
@@ -303,15 +334,7 @@ export function ActionCenterItem({
               )}
             >
               {item.request ? (
-                <>
-                  <span className="block">{item.request.repositoryName}</span>
-                  <span className="mt-1 flex min-w-0 items-center gap-1 font-mono text-xs">
-                    <GitBranch className="size-3 shrink-0" />
-                    <span className="min-w-0 break-all">
-                      {item.request.branch}
-                    </span>
-                  </span>
-                </>
+                item.request.repositoryName
               ) : rawWorktreeSummary && item.worktree ? (
                 <Link
                   className="block max-w-full truncate font-mono hover:text-foreground hover:underline"

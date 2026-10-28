@@ -50,7 +50,12 @@ export function RequestStatus({
       data-slot="action-center-request-status"
     >
       {request.pipelineUrl ? (
-        <a href={request.pipelineUrl} target="_blank" rel="noreferrer">
+        <a
+          className="inline-flex shrink-0 items-center"
+          href={request.pipelineUrl}
+          target="_blank"
+          rel="noreferrer"
+        >
           {pipeline}
         </a>
       ) : (
@@ -63,11 +68,6 @@ export function RequestStatus({
         {t(approved ? "approved" : "notApproved")}
       </Badge>
       {children}
-      {compact && (
-        <span className="w-full truncate text-xs text-muted-foreground">
-          {request.repositoryName} · {request.branch}
-        </span>
-      )}
     </div>
   );
 }

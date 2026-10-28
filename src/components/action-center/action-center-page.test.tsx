@@ -407,7 +407,7 @@ describe("MiniActionCenter", () => {
       'a[href="/dashboard/worktrees/worktree-1"]',
     );
     expect(worktreeLink?.className).toContain("overflow-hidden");
-    expect(worktreeLink?.textContent).toBe("projects/feature-aide");
+    expect(worktreeLink?.textContent).toBe("feature/AIDE-101");
     expect(worktreeLink?.querySelectorAll("span")).toHaveLength(1);
     expect(
       screen
