@@ -51,6 +51,7 @@ function setup(count = 2) {
     source: sources[index],
     tickets,
     statusOrder: [...new Set(tickets.map((item) => item.status))],
+    availableStatuses: [...new Set(tickets.map((item) => item.status))],
     cache: {
       source: "CACHE",
       stale: false,
@@ -86,10 +87,31 @@ describe("All Jira tickets", () => {
     expect(result.statusOrder).toEqual(["To Do", "In Progress", "Review"]);
     expect(result.truncated).toBe(true);
     expect(load.mock.calls).toEqual([
-      ["s0", false],
-      ["s1", false],
-      ["s2", false],
+      ["s0", false, undefined],
+      ["s1", false, undefined],
+      ["s2", false, undefined],
     ]);
+  });
+
+  test("keeps hidden statuses in the aggregate catalog and forwards explicit status selections", async () => {
+    const { service, board } = setup();
+    const load = vi
+      .spyOn(service, "ticketBoard")
+      .mockImplementation(async (_id, _force, status) =>
+        board(0, status === "Done" ? [ticket("APP-1", "Done")] : [], {
+          statusOrder: status === "Done" ? ["Done"] : [],
+          availableStatuses: ["Done"],
+        }),
+      );
+    expect(await service.allTickets()).toMatchObject({
+      tickets: [],
+      statusOrder: [],
+      availableStatuses: ["Done"],
+    });
+    expect(
+      (await service.allTickets(false, "Done")).tickets.map((item) => item.key),
+    ).toEqual(["APP-1"]);
+    expect(load).toHaveBeenLastCalledWith("s1", false, "Done");
   });
 
   test("handles empty configuration without calling Jira", async () => {

@@ -86,19 +86,23 @@ export const createJiraResolvers = (
         },
         jiraAllTickets: (
           _root: unknown,
-          _args: unknown,
+          { status }: { status?: string | null },
           context: GraphQLContext,
         ) => {
           requireControlPlane(context);
-          return jiraService.allTickets();
+          return status == null
+            ? jiraService.allTickets()
+            : jiraService.allTickets(false, status);
         },
         jiraTicketBoard: (
           _root: unknown,
-          { sourceId }: { sourceId: string },
+          { sourceId, status }: { sourceId: string; status?: string | null },
           context: GraphQLContext,
         ) => {
           requireControlPlane(context);
-          return jiraService.ticketBoard(sourceId);
+          return status == null
+            ? jiraService.ticketBoard(sourceId)
+            : jiraService.ticketBoard(sourceId, false, status);
         },
         jiraTicketSummary: (
           _root: unknown,
@@ -349,6 +353,7 @@ export const createJiraResolvers = (
               ticketAssignmentFilter: JiraTicketAssignmentFilter;
               hideCompletedTickets: boolean;
               completedStatusIds: string[];
+              excludedStatusIds?: string[] | null;
               doneStatusId?: string | null;
             };
           },
@@ -373,19 +378,23 @@ export const createJiraResolvers = (
         },
         refreshAllJiraTickets: (
           _root: unknown,
-          _args: unknown,
+          { status }: { status?: string | null },
           context: GraphQLContext,
         ) => {
           requireControlPlane(context);
-          return jiraService.allTickets(true);
+          return status == null
+            ? jiraService.allTickets(true)
+            : jiraService.allTickets(true, status);
         },
         refreshJiraSource: (
           _root: unknown,
-          { sourceId }: { sourceId: string },
+          { sourceId, status }: { sourceId: string; status?: string | null },
           context: GraphQLContext,
         ) => {
           requireControlPlane(context);
-          return jiraService.ticketBoard(sourceId, true);
+          return status == null
+            ? jiraService.ticketBoard(sourceId, true)
+            : jiraService.ticketBoard(sourceId, true, status);
         },
         updateJiraCacheTtl: (
           _root: unknown,

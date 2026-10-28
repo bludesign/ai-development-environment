@@ -6,7 +6,7 @@ import {
   screen,
   waitFor,
 } from "@testing-library/react";
-import { afterEach, describe, expect, test, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 
 import { controlPlaneRequest } from "@/lib/control-plane-client";
 import { useJiraTicketChanges } from "./use-jira-ticket-changes";
@@ -33,6 +33,17 @@ vi.mock("@/components/jira/ticket-drawer", () => ({
 
 const requestMock = vi.mocked(controlPlaneRequest);
 
+beforeEach(() => {
+  vi.stubGlobal(
+    "ResizeObserver",
+    class {
+      observe() {}
+      unobserve() {}
+      disconnect() {}
+    },
+  );
+});
+
 Object.defineProperties(HTMLElement.prototype, {
   hasPointerCapture: { configurable: true, value: () => false },
   releasePointerCapture: { configurable: true, value: () => undefined },
@@ -47,12 +58,18 @@ async function chooseSelectOption(label: string, option: string) {
   fireEvent.click(await screen.findByRole("option", { name: option }));
 }
 
+async function chooseStatusOption(status: string) {
+  fireEvent.click(screen.getByRole("combobox", { name: "Ticket status" }));
+  fireEvent.click(await screen.findByRole("option", { name: status }));
+}
+
 afterEach(async () => {
   cleanup();
   // Radix FocusScope restores focus in a zero-delay timer when a dialog
   // unmounts. Let it run before Vitest tears down JSDOM's Event globals.
   await new Promise<void>((resolve) => window.setTimeout(resolve, 0));
   requestMock.mockReset();
+  vi.unstubAllGlobals();
   vi.mocked(useJiraTicketChanges).mockClear();
   window.history.replaceState(null, "", "/");
 });
@@ -127,7 +144,7 @@ describe("JiraTicketsPage", () => {
     expect(await screen.findByRole("tab", { name: "APP" })).toBeDefined();
     expect(screen.queryByRole("tab", { name: "Current sprint" })).toBeNull();
     expect(
-      await screen.findByRole("tab", { name: "In Progress" }),
+      await screen.findByRole("combobox", { name: "Ticket status" }),
     ).toBeDefined();
     expect(screen.getByText("Done")).toBeDefined();
     expect(screen.getByText("Open login screen")).toBeDefined();
@@ -477,6 +494,16 @@ describe("JiraTicketsPage", () => {
       await screen.findByRole("menuitemcheckbox", { name: /Released/ }),
     );
     fireEvent.keyDown(document, { key: "Escape" });
+    fireEvent.pointerDown(
+      screen.getByRole("button", {
+        name: "Statuses excluded from All statuses",
+      }),
+      { button: 0, ctrlKey: false },
+    );
+    fireEvent.click(
+      await screen.findByRole("menuitemcheckbox", { name: /Released/ }),
+    );
+    fireEvent.keyDown(document, { key: "Escape" });
     fireEvent.click(
       await screen.findByRole("button", { name: "Save display settings" }),
     );
@@ -490,6 +517,7 @@ describe("JiraTicketsPage", () => {
             ticketAssignmentFilter: "SELF_IN_PROGRESS",
             hideCompletedTickets: true,
             completedStatusIds: ["done"],
+            excludedStatusIds: ["done"],
           },
         },
       ),
@@ -681,14 +709,14 @@ describe("Jira All view and status filters", () => {
     allViewFixture();
     const { rerender } = render(<JiraTicketsPage />);
     expect(await screen.findByText("App ticket")).toBeDefined();
-    expect(screen.getByText("Ops ticket")).toBeDefined();
+    expect(await screen.findByText("Ops ticket")).toBeDefined();
     expect(
       screen.getByRole("tab", { name: "All", selected: true }),
     ).toBeDefined();
     expect(new URLSearchParams(window.location.search).has("project")).toBe(
       false,
     );
-    fireEvent.click(screen.getByRole("tab", { name: "In Progress" }));
+    await chooseStatusOption("In Progress");
     rerender(<JiraTicketsPage />);
     expect(new URLSearchParams(window.location.search).get("status")).toBe(
       "In Progress",
@@ -696,19 +724,18 @@ describe("Jira All view and status filters", () => {
     expect(screen.queryByText("Ops ticket")).toBeNull();
     fireEvent.click(screen.getByRole("button", { name: "Board layout" }));
     expect(screen.queryByText("Ops ticket")).toBeNull();
-    expect(screen.getByText("App ticket")).toBeDefined();
+    expect(await screen.findByText("App ticket")).toBeDefined();
     fireEvent.click(screen.getByRole("tab", { name: "APP" }));
     rerender(<JiraTicketsPage />);
     expect(await screen.findByText("App ticket")).toBeDefined();
     expect(
-      screen.getByRole("tab", { name: "In Progress", selected: true }),
-    ).toBeDefined();
+      screen.getByRole("combobox", { name: "Ticket status" }).textContent,
+    ).toContain("In Progress");
     fireEvent.click(screen.getByRole("tab", { name: "All" }));
     rerender(<JiraTicketsPage />);
-    await screen.findByRole("tab", { name: "Review" });
-    fireEvent.click(screen.getByRole("tab", { name: "Review" }));
+    await chooseStatusOption("Review");
     rerender(<JiraTicketsPage />);
-    expect(screen.getByText("Ops ticket")).toBeDefined();
+    expect(await screen.findByText("Ops ticket")).toBeDefined();
     fireEvent.click(screen.getByRole("tab", { name: "APP" }));
     rerender(<JiraTicketsPage />);
     await waitFor(() =>
@@ -718,8 +745,56 @@ describe("Jira All view and status filters", () => {
     );
     rerender(<JiraTicketsPage />);
     expect(
-      screen.getByRole("tab", { name: "All statuses", selected: true }),
-    ).toBeDefined();
+      screen.getByRole("combobox", { name: "Ticket status" }).textContent,
+    ).toContain("All statuses");
+  });
+
+  test("keeps hidden statuses selectable and loads them explicitly", async () => {
+    const { collection } = allViewFixture();
+    const original = requestMock.getMockImplementation()!;
+    requestMock.mockImplementation(async (query, variables) => {
+      if (query.includes("query JiraAllTickets")) {
+        const status = variables?.status;
+        return {
+          jiraAllTickets: {
+            ...collection,
+            availableStatuses: ["Released", "Backlog"],
+            statusOrder: status ? [status] : [],
+            tickets: status
+              ? [
+                  {
+                    ...collection.tickets[0],
+                    key: "APP-hidden",
+                    summary: "Hidden ticket",
+                    status,
+                    statusId: "hidden",
+                  },
+                ]
+              : [],
+          },
+        } as never;
+      }
+      return original(query, variables);
+    });
+    const { rerender } = render(<JiraTicketsPage />);
+    await screen.findByText("No tickets match the selected filters.");
+    await chooseStatusOption("Released");
+    rerender(<JiraTicketsPage />);
+    expect(await screen.findByText("Hidden ticket")).toBeDefined();
+    expect(requestMock).toHaveBeenCalledWith(
+      expect.stringContaining("query JiraAllTickets"),
+      { status: "Released" },
+    );
+    await chooseStatusOption("All statuses");
+    rerender(<JiraTicketsPage />);
+    await screen.findByText("No tickets match the selected filters.");
+    await chooseStatusOption("Backlog");
+    rerender(<JiraTicketsPage />);
+    expect(await screen.findByText("Hidden ticket")).toBeDefined();
+    expect(requestMock).toHaveBeenCalledWith(
+      expect.stringContaining("query JiraAllTickets"),
+      { status: "Backlog" },
+    );
   });
 
   test("restores a URL status and keeps loaded tickets when refreshing All fails", async () => {
@@ -739,10 +814,10 @@ describe("Jira All view and status filters", () => {
     );
     fireEvent.click(screen.getByRole("button", { name: "Refresh" }));
     expect(await screen.findByText("Jira unavailable")).toBeDefined();
-    expect(screen.getByText("Ops ticket")).toBeDefined();
+    expect(await screen.findByText("Ops ticket")).toBeDefined();
     expect(requestMock).toHaveBeenCalledWith(
       expect.stringContaining("mutation RefreshAllJiraTickets"),
-      {},
+      { status: "Review" },
     );
   });
 

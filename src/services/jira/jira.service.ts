@@ -418,19 +418,12 @@ export function filterJiraTicketBoard(
     ticketAssignmentFilter: JiraTicketAssignmentFilter;
     hideCompletedTickets: boolean;
     completedStatusIds: string[];
+    excludedStatusIds?: string[];
   },
   currentAccountId: string | null,
+  status?: string | null,
 ): JiraTicketBoard {
-  const completedStatusIds = settings.hideCompletedTickets
-    ? new Set(settings.completedStatusIds)
-    : new Set<string>();
-  const hiddenStatusNames = new Set(
-    board.tickets
-      .filter((ticket) => completedStatusIds.has(ticket.statusId))
-      .map((ticket) => ticket.status),
-  );
-  const tickets = board.tickets.filter((ticket) => {
-    if (completedStatusIds.has(ticket.statusId)) return false;
+  const candidates = board.tickets.filter((ticket) => {
     if (settings.ticketAssignmentFilter === "ALL") return true;
     if (settings.ticketAssignmentFilter === "UNASSIGNED_OR_SELF") {
       return (
@@ -444,12 +437,23 @@ export function filterJiraTicketBoard(
       isInProgress(ticket.statusCategory)
     );
   });
+  const present = new Set(candidates.map((ticket) => ticket.status));
+  const availableStatuses = [
+    ...new Set([...board.statusOrder, ...present]),
+  ].filter((name) => present.has(name));
+  const hidden = new Set([
+    ...(settings.excludedStatusIds ?? []),
+    ...(settings.hideCompletedTickets ? settings.completedStatusIds : []),
+  ]);
+  const tickets = candidates.filter((ticket) =>
+    status ? ticket.status === status : !hidden.has(ticket.statusId),
+  );
+  const visible = new Set(tickets.map((ticket) => ticket.status));
   return {
     ...board,
     tickets,
-    statusOrder: board.statusOrder.filter(
-      (status) => !hiddenStatusNames.has(status),
-    ),
+    availableStatuses,
+    statusOrder: availableStatuses.filter((name) => visible.has(name)),
   };
 }
 
@@ -785,6 +789,7 @@ export class JiraService {
       ),
       hideCompletedTickets: project.hideCompletedTickets,
       completedStatusIds: parseStringArray(project.completedStatusIdsJson),
+      excludedStatusIds: parseStringArray(project.excludedStatusIdsJson),
       doneStatusId: project.doneStatusId,
       branchNamingScript:
         project.branchNamingScript ?? DEFAULT_JIRA_BRANCH_NAMING_SCRIPT,
@@ -837,6 +842,7 @@ export class JiraService {
     ticketAssignmentFilter: JiraTicketAssignmentFilter;
     hideCompletedTickets: boolean;
     completedStatusIds: string[];
+    excludedStatusIds?: string[] | null;
     doneStatusId?: string | null;
   }): Promise<JiraProjectView[]> {
     if (!TICKET_ASSIGNMENT_FILTERS.has(input.ticketAssignmentFilter)) {
@@ -866,6 +872,19 @@ export class JiraService {
         ticketAssignmentFilter: input.ticketAssignmentFilter,
         hideCompletedTickets: input.hideCompletedTickets,
         completedStatusIdsJson: JSON.stringify(completedStatusIds),
+        ...(input.excludedStatusIds == null
+          ? {}
+          : {
+              excludedStatusIdsJson: JSON.stringify(
+                [
+                  ...new Set(
+                    input.excludedStatusIds
+                      .map((id) => id.trim())
+                      .filter(Boolean),
+                  ),
+                ].slice(0, 200),
+              ),
+            }),
         ...(doneStatusId === undefined ? {} : { doneStatusId }),
       },
     });
@@ -1063,7 +1082,10 @@ export class JiraService {
     return this.listProjects();
   }
 
-  async allTickets(force = false): Promise<JiraTicketCollection> {
+  async allTickets(
+    force = false,
+    status?: string | null,
+  ): Promise<JiraTicketCollection> {
     const projects = await this.listProjects();
     const sources = projects.flatMap((project) =>
       project.sources.map((source) => ({ project, source })),
@@ -1079,7 +1101,11 @@ export class JiraService {
           try {
             results[index] = {
               status: "fulfilled",
-              value: await this.ticketBoard(sources[index].source.id, force),
+              value: await this.ticketBoard(
+                sources[index].source.id,
+                force,
+                status,
+              ),
             };
           } catch (reason) {
             results[index] = { status: "rejected", reason };
@@ -1089,6 +1115,7 @@ export class JiraService {
     );
     const tickets = new Map<string, JiraTicketSummary>();
     const statuses = new Set<string>();
+    const availableStatuses = new Set<string>();
     const warnings: string[] = [];
     const boards: JiraTicketBoard[] = [];
     for (const [index, result] of results.entries()) {
@@ -1102,7 +1129,8 @@ export class JiraService {
       }
       const board = result.value;
       boards.push(board);
-      for (const status of board.statusOrder) statuses.add(status);
+      for (const name of board.availableStatuses) availableStatuses.add(name);
+      for (const name of board.statusOrder) statuses.add(name);
       warnings.push(...board.warnings.map((warning) => `${label}: ${warning}`));
       for (const ticket of board.tickets) {
         const previous = tickets.get(ticket.key);
@@ -1134,6 +1162,7 @@ export class JiraService {
     );
     return {
       tickets: [...tickets.values()],
+      availableStatuses: [...availableStatuses],
       statusOrder: [...statuses].filter((status) =>
         visibleStatuses.has(status),
       ),
@@ -1143,7 +1172,11 @@ export class JiraService {
     };
   }
 
-  async ticketBoard(sourceId: string, force = false): Promise<JiraTicketBoard> {
+  async ticketBoard(
+    sourceId: string,
+    force = false,
+    status?: string | null,
+  ): Promise<JiraTicketBoard> {
     const prisma = await getPrismaClient();
     const source = await prisma.jiraSource.findUnique({
       where: { id: sourceId },
@@ -1167,6 +1200,7 @@ export class JiraService {
         source.project.ticketAssignmentFilter,
       ),
       hideCompletedTickets: source.project.hideCompletedTickets,
+      excludedStatusIds: parseStringArray(source.project.excludedStatusIdsJson),
       completedStatusIds: parseStringArray(
         source.project.completedStatusIdsJson,
       ),
@@ -1179,10 +1213,18 @@ export class JiraService {
       { source: sourceView(source), ...loaded },
       settings,
       currentAccountId,
+      status,
     );
+    const observationBoard = status
+      ? filterJiraTicketBoard(
+          { source: sourceView(source), ...loaded },
+          settings,
+          currentAccountId,
+        )
+      : board;
     if (this.workflowEvents && previous) {
       await Promise.allSettled(
-        board.tickets
+        observationBoard.tickets
           .filter(({ key }) => !previousKeys.has(key))
           .map((ticket) => {
             const sessionData = {
@@ -2915,6 +2957,7 @@ export class JiraService {
     return {
       tickets,
       statusOrder: statuses.map((status) => status.status),
+      availableStatuses: statuses.map((status) => status.status),
       cache: combineCacheMeta(results),
       truncated,
       warnings: [...new Set(warnings)],

@@ -24,6 +24,7 @@ import {
   useState,
 } from "react";
 
+import { SearchableSelect } from "@/components/common/searchable-select";
 import { ConfirmationDialog } from "@/components/confirmation-dialog";
 import { JiraPersonAvatar } from "@/components/jira/jira-user";
 import { JiraTicketDrawer } from "@/components/jira/ticket-drawer";
@@ -89,11 +90,11 @@ import type {
 } from "@/services/jira/types";
 
 const SOURCE_FIELDS = "id projectId name kind value boardId position";
-const PROJECT_FIELDS = `id jiraId key name avatarUrl position ticketAssignmentFilter hideCompletedTickets completedStatusIds doneStatusId branchNamingScript sources { ${SOURCE_FIELDS} }`;
+const PROJECT_FIELDS = `id jiraId key name avatarUrl position ticketAssignmentFilter hideCompletedTickets completedStatusIds excludedStatusIds doneStatusId branchNamingScript sources { ${SOURCE_FIELDS} }`;
 const SUMMARY_FIELDS =
   "id key summary statusId status statusCategory issueType priority assignee assigneeAccountId assigneeAvatarUrl projectKey updatedAt";
 const CACHE_FIELDS = "source stale fetchedAt";
-const COLLECTION_FIELDS = `tickets { ${SUMMARY_FIELDS} } statusOrder cache { ${CACHE_FIELDS} } truncated warnings`;
+const COLLECTION_FIELDS = `tickets { ${SUMMARY_FIELDS} } statusOrder availableStatuses cache { ${CACHE_FIELDS} } truncated warnings`;
 
 const PRIORITY_CLASSES: Record<string, string> = {
   highest: "border-red-500/30 bg-red-500/10 text-red-700 dark:text-red-300",
@@ -132,6 +133,7 @@ export function JiraTicketsPage() {
   const [projects, setProjects] = useState<JiraProjectView[]>([]);
   const [board, setBoard] = useState<{
     scope: string;
+    status: string | null;
     data: JiraTicketCollection;
   } | null>(null);
   const [loading, setLoading] = useState(true);
@@ -145,7 +147,7 @@ export function JiraTicketsPage() {
 
   const requestedProjectId = searchParams.get("project");
   const requestedSourceId = searchParams.get("source");
-  const requestedStatus = searchParams.get("status");
+  const requestedStatus = searchParams.get("status") || null;
   const issueKey = searchParams.get("issue");
   const selectedProject =
     projects.find((project) => project.id === requestedProjectId) ?? null;
@@ -164,7 +166,11 @@ export function JiraTicketsPage() {
     ? projects.some((project) => project.sources.length > 0)
     : selectedSource !== null;
   const boardRequestIdRef = useRef(0);
-  const displayedBoard = board?.scope === scope ? board.data : null;
+  const statusCatalog = board?.scope === scope ? board.data : null;
+  const displayedBoard =
+    board?.scope === scope && board.status === requestedStatus
+      ? board.data
+      : null;
 
   const loadProjects = useCallback(async () => {
     try {
@@ -198,7 +204,12 @@ export function JiraTicketsPage() {
   }, [loading, allSelected, requestedProjectId, requestedSourceId, sourceId]);
 
   const loadBoard = useCallback(
-    async (scope: string, sourceId: string | null, force = false) => {
+    async (
+      scope: string,
+      sourceId: string | null,
+      status: string | null,
+      force = false,
+    ) => {
       const requestId = ++boardRequestIdRef.current;
       setBoardLoading(true);
       setBoard((current) => (current?.scope === scope ? current : null));
@@ -210,14 +221,17 @@ export function JiraTicketsPage() {
           ? "refreshAllJiraTickets"
           : "jiraAllTickets";
       const operation = sourceId
-        ? `${force ? "mutation RefreshJiraSource" : "query JiraTicketBoard"}($sourceId: ID!) { ${field}(sourceId: $sourceId) { ${COLLECTION_FIELDS} } }`
-        : `${force ? "mutation RefreshAllJiraTickets" : "query JiraAllTickets"} { ${field} { ${COLLECTION_FIELDS} } }`;
+        ? `${force ? "mutation RefreshJiraSource" : "query JiraTicketBoard"}($sourceId: ID!, $status: String) { ${field}(sourceId: $sourceId, status: $status) { ${COLLECTION_FIELDS} } }`
+        : `${force ? "mutation RefreshAllJiraTickets" : "query JiraAllTickets"}($status: String) { ${field}(status: $status) { ${COLLECTION_FIELDS} } }`;
       try {
         const data = await controlPlaneRequest<
           Record<string, JiraTicketCollection>
-        >(operation, sourceId ? { sourceId } : {});
+        >(operation, {
+          ...(sourceId ? { sourceId } : {}),
+          ...(status ? { status } : {}),
+        });
         if (requestId !== boardRequestIdRef.current) return;
-        setBoard({ scope, data: data[field] });
+        setBoard({ scope, status, data: data[field] });
         setError(null);
       } catch (value) {
         if (requestId !== boardRequestIdRef.current) return;
@@ -230,7 +244,7 @@ export function JiraTicketsPage() {
   );
 
   const reloadBoardAfterTicketChange = () => {
-    if (hasSources) void loadBoard(scope, sourceId);
+    if (hasSources) void loadBoard(scope, sourceId, requestedStatus);
   };
 
   useJiraTicketChanges((change) => {
@@ -250,25 +264,29 @@ export function JiraTicketsPage() {
       boardRequestIdRef.current += 1;
       return;
     }
-    const timeout = window.setTimeout(() => void loadBoard(scope, sourceId), 0);
+    const timeout = window.setTimeout(
+      () => void loadBoard(scope, sourceId, requestedStatus),
+      0,
+    );
     return () => {
       window.clearTimeout(timeout);
       boardRequestIdRef.current += 1;
     };
-  }, [loadBoard, loading, hasSources, scope, sourceId, projects]);
+  }, [
+    loadBoard,
+    loading,
+    hasSources,
+    scope,
+    sourceId,
+    requestedStatus,
+    projects,
+  ]);
 
-  const statuses = useMemo(() => {
-    const present = new Set(
-      displayedBoard?.tickets.map((ticket) => ticket.status),
-    );
-    return [
-      ...new Set([...(displayedBoard?.statusOrder ?? []), ...present]),
-    ].filter((status) => present.has(status));
-  }, [displayedBoard]);
-  const selectedStatus =
-    requestedStatus && statuses.includes(requestedStatus)
-      ? requestedStatus
-      : null;
+  const statuses = useMemo(
+    () => statusCatalog?.availableStatuses ?? statusCatalog?.statusOrder ?? [],
+    [statusCatalog],
+  );
+  const selectedStatus = requestedStatus;
   useEffect(() => {
     if (
       displayedBoard &&
@@ -331,7 +349,10 @@ export function JiraTicketsPage() {
           </Button>
           <Button
             disabled={!hasSources || boardLoading}
-            onClick={() => hasSources && void loadBoard(scope, sourceId, true)}
+            onClick={() =>
+              hasSources &&
+              void loadBoard(scope, sourceId, requestedStatus, true)
+            }
             variant="outline"
           >
             <RefreshCw className={boardLoading ? "animate-spin" : undefined} />
@@ -371,27 +392,51 @@ export function JiraTicketsPage() {
         </Empty>
       ) : (
         <>
-          <div className="overflow-x-auto pb-1">
-            <Tabs
-              value={selectedProject?.id ?? "all"}
-              onValueChange={(projectId) => {
-                const project = projects.find((item) => item.id === projectId);
-                replaceParams({
-                  project: project?.id ?? null,
-                  source: project?.sources[0]?.id ?? null,
-                  issue: null,
-                });
-              }}
-            >
-              <TabsList aria-label={t("projectTabs")}>
-                <TabsTrigger value="all">{t("allProjects")}</TabsTrigger>
-                {projects.map((project) => (
-                  <TabsTrigger key={project.id} value={project.id}>
-                    {project.key}
-                  </TabsTrigger>
-                ))}
-              </TabsList>
-            </Tabs>
+          <div className="flex min-w-0 items-center gap-3">
+            <div className="min-w-0 overflow-x-auto">
+              <Tabs
+                value={selectedProject?.id ?? "all"}
+                onValueChange={(projectId) => {
+                  const project = projects.find(
+                    (item) => item.id === projectId,
+                  );
+                  replaceParams({
+                    project: project?.id ?? null,
+                    source: project?.sources[0]?.id ?? null,
+                    issue: null,
+                  });
+                }}
+              >
+                <TabsList aria-label={t("projectTabs")}>
+                  <TabsTrigger value="all">{t("allProjects")}</TabsTrigger>
+                  {projects.map((project) => (
+                    <TabsTrigger key={project.id} value={project.id}>
+                      {project.key}
+                    </TabsTrigger>
+                  ))}
+                </TabsList>
+              </Tabs>
+            </div>
+            {hasSources && (
+              <SearchableSelect
+                ariaLabel={t("statusFilter")}
+                className="w-44 shrink-0 sm:w-52"
+                emptyMessage={t("noStatuses")}
+                onValueChange={(status) =>
+                  replaceParams({ status: status || null })
+                }
+                options={[
+                  { value: "", label: t("allStatuses") },
+                  ...statuses.map((status) => ({
+                    value: status,
+                    label: status,
+                  })),
+                ]}
+                placeholder={t("allStatuses")}
+                searchPlaceholder={t("searchStatuses")}
+                value={selectedStatus ?? ""}
+              />
+            )}
           </div>
 
           {selectedProject && selectedProject.sources.length > 1 ? (
@@ -425,30 +470,6 @@ export function JiraTicketsPage() {
               </Button>
             </Empty>
           ) : null}
-
-          {hasSources && (
-            <div className="overflow-x-auto pb-1">
-              <Tabs
-                value={
-                  selectedStatus === null ? "all" : `status:${selectedStatus}`
-                }
-                onValueChange={(value) =>
-                  replaceParams({
-                    status: value === "all" ? null : value.slice(7),
-                  })
-                }
-              >
-                <TabsList aria-label={t("statusTabs")} variant="line">
-                  <TabsTrigger value="all">{t("allStatuses")}</TabsTrigger>
-                  {statuses.map((status) => (
-                    <TabsTrigger key={status} value={`status:${status}`}>
-                      {status}
-                    </TabsTrigger>
-                  ))}
-                </TabsList>
-              </Tabs>
-            </div>
-          )}
 
           {displayedBoard?.cache.stale && (
             <Alert className="border-amber-500/30 bg-amber-500/10 text-amber-800 dark:text-amber-300">
@@ -754,6 +775,7 @@ function JiraManagerDialog({
     useState<JiraTicketAssignmentFilter>("ALL");
   const [hideCompletedTickets, setHideCompletedTickets] = useState(false);
   const [completedStatusIds, setCompletedStatusIds] = useState<string[]>([]);
+  const [excludedStatusIds, setExcludedStatusIds] = useState<string[]>([]);
   const [doneStatusId, setDoneStatusId] = useState<string | null>(null);
   const [branchNamingScript, setBranchNamingScript] = useState("");
   const [busy, setBusy] = useState(false);
@@ -791,6 +813,7 @@ function JiraManagerDialog({
       setAssignmentFilter(selectedProject.ticketAssignmentFilter);
       setHideCompletedTickets(selectedProject.hideCompletedTickets);
       setCompletedStatusIds(selectedProject.completedStatusIds);
+      setExcludedStatusIds(selectedProject.excludedStatusIds ?? []);
       setDoneStatusId(selectedProject.doneStatusId);
       setBranchNamingScript(selectedProject.branchNamingScript ?? "");
       setStatusesLoading(true);
@@ -947,6 +970,7 @@ function JiraManagerDialog({
         ticketAssignmentFilter: assignmentFilter,
         hideCompletedTickets,
         completedStatusIds,
+        excludedStatusIds,
         doneStatusId,
       };
       const data = await controlPlaneRequest<{
@@ -1277,6 +1301,26 @@ function JiraManagerDialog({
                     statuses={statuses}
                     value={completedStatusIds}
                   />
+                </div>
+                <div>
+                  <p className="mb-1 text-xs font-medium">
+                    {t("excludedStatuses")}
+                  </p>
+                  <StatusMultiSelect
+                    disabled={statusesLoading}
+                    label={t("excludedStatuses")}
+                    onChange={setExcludedStatusIds}
+                    placeholder={
+                      statusesLoading
+                        ? t("loadingStatuses")
+                        : t("selectExcludedStatuses")
+                    }
+                    statuses={statuses}
+                    value={excludedStatusIds}
+                  />
+                  <p className="mt-1 text-xs text-muted-foreground">
+                    {t("excludedStatusesDescription")}
+                  </p>
                 </div>
                 <div>
                   <Label
