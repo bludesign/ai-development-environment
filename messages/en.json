@@ -169,6 +169,8 @@
     "submitAnswer": "Submit answer",
     "pipeline": "Pipeline",
     "approval": "Approval",
+    "approved": "Approved",
+    "notApproved": "Not Approved",
     "merge": "Merge",
     "settingsTitle": "Action Center",
     "settingsDescription": "Shared pull request settings for the web and iOS apps.",
@@ -5210,6 +5212,7 @@
     "timed_out": "Timed out"
   },
   "commands": {
+    "repoBranch": "Repository / branch",
     "title": "Commands",
     "description": "Create reusable shell commands and inspect their durable runs.",
     "newCommand": "New command",

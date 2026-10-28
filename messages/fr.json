@@ -169,6 +169,8 @@
     "submitAnswer": "Envoyer la réponse",
     "pipeline": "Pipeline",
     "approval": "Approbation",
+    "approved": "Approuvé",
+    "notApproved": "Non approuvé",
     "merge": "Fusionner",
     "settingsTitle": "Centre d’actions",
     "settingsDescription": "Paramètres des demandes partagés entre les applications web et iOS.",
@@ -5210,6 +5212,7 @@
     "timed_out": "Délai dépassé"
   },
   "commands": {
+    "repoBranch": "Dépôt / branche",
     "title": "Commands",
     "description": "Create reusable shell commands and inspect their durable runs.",
     "newCommand": "New command",

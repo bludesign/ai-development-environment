@@ -14,7 +14,7 @@ import {
 import type { LucideIcon } from "lucide-react";
 import { useTranslations } from "next-intl";
 
-import { RequestStatus } from "./request-status";
+import { RequestMergeAction, RequestStatus } from "./request-status";
 import { DateTime } from "@/components/common/date-time";
 import { RunBuildControls } from "@/components/builds/run-build-controls";
 import { useRunLabels } from "@/components/runs/run-labels";
@@ -116,6 +116,17 @@ export function ActionCenterItem({
       ? runLabels.phase(item.phase)
       : formatEnumLabel(item.phase)
     : null;
+  const reasonBadge = (
+    <Badge
+      className={cn(
+        compact && !item.request && "h-4 shrink-0 px-1.5 py-0 text-[9px]",
+        reasonClass(item.reason),
+      )}
+      variant={item.reason === "FAILED" ? "destructive" : "outline"}
+    >
+      {t(`reasons.${item.reason}`)}
+    </Badge>
+  );
 
   const acknowledgeFailure = async () => {
     setAcknowledging(true);
@@ -230,17 +241,13 @@ export function ActionCenterItem({
               </p>
             )}
           </div>
-          <Badge
-            className={cn(
-              "h-4 shrink-0 px-1.5 py-0 text-[9px]",
-              reasonClass(item.reason),
-            )}
-            variant={item.reason === "FAILED" ? "destructive" : "outline"}
-          >
-            {t(`reasons.${item.reason}`)}
-          </Badge>
+          {!item.request && reasonBadge}
         </div>
-        {item.request && <RequestStatus item={item} compact />}
+        {item.request && (
+          <RequestStatus item={item} compact>
+            {reasonBadge}
+          </RequestStatus>
+        )}
         {question && (
           <p className="line-clamp-2 break-words text-xs leading-tight font-medium">
             {question.header || question.prompt}
@@ -285,8 +292,23 @@ export function ActionCenterItem({
                 {title}
               </Link>
             </CardTitle>
-            <CardDescription className="mt-1 line-clamp-2 break-words">
-              {rawWorktreeSummary && item.worktree ? (
+            <CardDescription
+              className={cn(
+                "mt-1 break-words",
+                !item.request && "line-clamp-2",
+              )}
+            >
+              {item.request ? (
+                <>
+                  <span className="block">{item.request.repositoryName}</span>
+                  <span className="mt-1 flex min-w-0 items-center gap-1 font-mono text-xs">
+                    <GitBranch className="size-3 shrink-0" />
+                    <span className="min-w-0 break-all">
+                      {item.request.branch}
+                    </span>
+                  </span>
+                </>
+              ) : rawWorktreeSummary && item.worktree ? (
                 <Link
                   className="block max-w-full truncate font-mono hover:text-foreground hover:underline"
                   href={`/dashboard/worktrees/${item.worktree.id}`}
@@ -305,24 +327,31 @@ export function ActionCenterItem({
         </div>
         <CardAction>{actions}</CardAction>
       </CardHeader>
-      <CardContent className="space-y-4">
-        {item.request && <RequestStatus item={item} />}
-        <div className="flex flex-wrap items-center gap-2">
-          <Badge
-            className={reasonClass(item.reason)}
-            variant={item.reason === "FAILED" ? "destructive" : "outline"}
-          >
-            {t(`reasons.${item.reason}`)}
-          </Badge>
-          <Badge variant="secondary">{statusLabel}</Badge>
-          {item.phase && item.phase !== item.status && (
-            <Badge variant="outline">{phaseLabel}</Badge>
-          )}
-          <span className="text-xs text-muted-foreground">
-            <DateTime value={item.updatedAt} />
-          </span>
-        </div>
-        {worktree}
+      <CardContent
+        className={cn("space-y-4", item.request && "flex flex-1 flex-col")}
+      >
+        {item.request ? (
+          <RequestStatus item={item}>
+            {reasonBadge}
+            <span className="text-xs text-muted-foreground">
+              <DateTime value={item.updatedAt} />
+            </span>
+          </RequestStatus>
+        ) : (
+          <>
+            <div className="flex flex-wrap items-center gap-2">
+              {reasonBadge}
+              <Badge variant="secondary">{statusLabel}</Badge>
+              {item.phase && item.phase !== item.status && (
+                <Badge variant="outline">{phaseLabel}</Badge>
+              )}
+              <span className="text-xs text-muted-foreground">
+                <DateTime value={item.updatedAt} />
+              </span>
+            </div>
+            {worktree}
+          </>
+        )}
         {item.error && (
           <Alert variant="destructive">
             <AlertDescription className="break-words">
@@ -333,6 +362,7 @@ export function ActionCenterItem({
         {item.questionBatches.map((batch) => (
           <ActionCenterQuestionForm batch={batch} item={item} key={batch.id} />
         ))}
+        {item.request && <RequestMergeAction item={item} />}
       </CardContent>
     </Card>
   );

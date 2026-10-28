@@ -169,6 +169,8 @@
     "submitAnswer": "Enviar respuesta",
     "pipeline": "Canalización",
     "approval": "Aprobación",
+    "approved": "Aprobado",
+    "notApproved": "No aprobado",
     "merge": "Fusionar",
     "settingsTitle": "Centro de acciones",
     "settingsDescription": "Configuración compartida de solicitudes para las aplicaciones web e iOS.",
@@ -5210,6 +5212,7 @@
     "timed_out": "Tiempo agotado"
   },
   "commands": {
+    "repoBranch": "Repositorio / rama",
     "title": "Commands",
     "description": "Create reusable shell commands and inspect their durable runs.",
     "newCommand": "New command",

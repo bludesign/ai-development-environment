@@ -169,6 +169,8 @@
     "submitAnswer": "Antwort senden",
     "pipeline": "Pipeline",
     "approval": "Freigabe",
+    "approved": "Genehmigt",
+    "notApproved": "Nicht genehmigt",
     "merge": "Zusammenführen",
     "settingsTitle": "Aktionszentrale",
     "settingsDescription": "Gemeinsame Pull-Request-Einstellungen für die Web- und iOS-Apps.",
@@ -5210,6 +5212,7 @@
     "timed_out": "Zeitüberschreitung"
   },
   "commands": {
+    "repoBranch": "Repository / Branch",
     "title": "Befehle",
     "description": "Wiederverwendbare Shell-Befehle erstellen und dauerhafte Ausführungen prüfen.",
     "newCommand": "Neuer Befehl",

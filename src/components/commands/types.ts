@@ -121,6 +121,7 @@ export type CommandRun = {
   agent: CommandAgent | null;
   worktreeId: string | null;
   worktree: CommandWorktree | null;
+  repositoryName: string | null;
   agentName: string;
   agentHostname: string;
   worktreePath: string | null;
@@ -158,7 +159,7 @@ export const COMMAND_RUN_FIELDS = `
   id displayNumber commandId origin status snapshotName snapshotDescription
   snapshotScript snapshotTargetKind snapshotRestartPolicy snapshotRestartLimit
   snapshotConcurrency snapshotBlocksGitOperations snapshotNotificationsEnabled snapshot
-  agentId worktreeId agentName agentHostname worktreePath worktreeBranch
+  agentId worktreeId repositoryName agentName agentHostname worktreePath worktreeBranch
   restartCount stopRequested nextRestartAt predecessorRunId error exitCode signal
   queuedAt startedAt finishedAt archivedAt createdAt updatedAt
   command { id name }

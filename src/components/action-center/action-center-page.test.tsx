@@ -489,11 +489,9 @@ describe("Action Center requests", () => {
     expect(
       await screen.findByRole("link", { name: "#42 Ship search" }),
     ).toBeDefined();
-    expect(screen.getByText("Approval: Approved")).toBeDefined();
+    expect(screen.getByText("Approved")).toBeDefined();
     expect(
-      screen
-        .getByRole("link", { name: "Pipeline: Success" })
-        .getAttribute("href"),
+      screen.getByRole("link", { name: "Success" }).getAttribute("href"),
     ).toContain("/actions");
     expect(screen.getByRole("button", { name: "Merge" })).toBeDefined();
   });

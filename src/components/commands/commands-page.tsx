@@ -319,7 +319,7 @@ export function CommandsPage() {
     () =>
       prioritizeActiveTableRows(
         runs.filter((run) =>
-          `${run.displayNumber} ${run.snapshotName} ${run.agentName} ${run.worktreePath ?? ""} ${run.status}`
+          `${run.displayNumber} ${run.snapshotName} ${run.agentName} ${run.repositoryName ?? ""} ${run.worktreeBranch ?? ""} ${run.worktreePath ?? ""} ${run.status}`
             .toLowerCase()
             .includes(search.toLowerCase()),
         ),
@@ -710,7 +710,7 @@ export function CommandsPage() {
                 <TableHead>{t("command")}</TableHead>
                 <TableHead>{t("status")}</TableHead>
                 <TableHead>{t("agent")}</TableHead>
-                <TableHead>{t("worktree")}</TableHead>
+                <TableHead>{t("repoBranch")}</TableHead>
                 <TableHead>{t("started")}</TableHead>
                 <TableHead className="w-12" />
               </TableRow>
@@ -834,27 +834,31 @@ export function CommandsPage() {
                         )}
                       </TableCell>
                       <TableCell className="whitespace-normal">
-                        {run.worktreeId ? (
+                        {run.worktree ? (
                           <Link
                             className={cn(
                               rowLinkClass,
-                              "inline whitespace-normal break-words",
+                              "block min-w-0 whitespace-normal break-words",
                             )}
-                            href={`/dashboard/worktrees/${run.worktreeId}`}
-                            title={
-                              run.worktreeBranch ||
-                              run.worktreePath ||
-                              undefined
-                            }
+                            href={`/dashboard/worktrees/${run.worktree.id}`}
+                            title={run.worktreePath ?? undefined}
                           >
-                            {run.worktreeBranch || run.worktreePath}
+                            <span className="block">
+                              {run.repositoryName ?? "—"}
+                            </span>{" "}
+                            <span className="block font-mono text-xs text-muted-foreground">
+                              {run.worktreeBranch ?? "—"}
+                            </span>
                           </Link>
                         ) : run.snapshotTargetKind.includes("WORKTREE") ? (
-                          <span className="text-muted-foreground">
-                            {run.worktreeBranch ||
-                              run.worktreePath ||
-                              t("targetUnavailable")}
-                          </span>
+                          <div className="min-w-0 break-words text-muted-foreground">
+                            <p>
+                              {run.repositoryName ?? t("targetUnavailable")}
+                            </p>
+                            <p className="font-mono text-xs">
+                              {run.worktreeBranch ?? "—"}
+                            </p>
+                          </div>
                         ) : (
                           <span className="text-muted-foreground">
                             {t("home")}

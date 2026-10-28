@@ -33,6 +33,11 @@ const dates = {
 export const createCommandResolvers = (service: CommandsService) => ({
   CommandDefinition: dates,
   CommandRun: {
+    repositoryName: (value: {
+      worktree?: {
+        codebase: { repository: { name: string } | null };
+      } | null;
+    }) => value.worktree?.codebase.repository?.name ?? null,
     snapshot: (value: { snapshotJson: string }) =>
       JSON.parse(value.snapshotJson) as unknown,
     queuedAt: (value: { queuedAt: Date }) => value.queuedAt.toISOString(),
