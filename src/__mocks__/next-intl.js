@@ -365,7 +365,8 @@ const mockTranslations = {
       "Choose which project statuses count as completed.",
     excludedStatuses: "Statuses excluded from All statuses",
     selectExcludedStatuses: "Select statuses to exclude",
-    excludedStatusesDescription: "Hidden in All statuses for this project in both views. Select a specific status in the filter to show its tickets.",
+    excludedStatusesDescription:
+      "Hidden in All statuses for this project in both views. Select a specific status in the filter to show its tickets.",
     completedStatuses: "Completed statuses",
     loadingStatuses: "Loading statuses…",
     selectCompletedStatuses: "Select completed statuses",
