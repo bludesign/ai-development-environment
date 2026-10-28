@@ -362,6 +362,20 @@ export const createJiraResolvers = (
           requireControlPlane(context);
           return jiraService.updateProjectDisplaySettings(input);
         },
+        updateJiraProjectAiBranchNaming: (
+          _root: unknown,
+          {
+            input,
+          }: {
+            input: Parameters<
+              typeof jiraService.updateProjectAiBranchNaming
+            >[0];
+          },
+          context: GraphQLContext,
+        ) => {
+          requireControlPlane(context);
+          return jiraService.updateProjectAiBranchNaming(input);
+        },
         updateJiraProjectBranchNaming: (
           _root: unknown,
           {

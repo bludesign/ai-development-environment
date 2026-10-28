@@ -138,3 +138,33 @@ export async function waitForWorktreeJobs(
       "Worktree operation is still running; check the agent job history",
     );
 }
+
+export async function waitForTicketBranchJob(
+  jobId: string,
+  signal: AbortSignal,
+): Promise<string> {
+  const deadline = Date.now() + 125_000;
+  while (Date.now() < deadline) {
+    const { agentJob: job } = await controlPlaneRequest<{
+      agentJob: {
+        status: string;
+        error: string | null;
+        worktreeTicketBranchResult: { branchName: string } | null;
+      } | null;
+    }>(
+      `query TicketBranchJob($id: ID!) { agentJob(id: $id) { status error worktreeTicketBranchResult { branchName } } }`,
+      { id: jobId },
+      { signal },
+    );
+    if (!job) throw new Error("Branch generation job disappeared");
+    if (job.status === "SUCCEEDED") {
+      if (!job.worktreeTicketBranchResult)
+        throw new Error("Branch generation returned no name");
+      return job.worktreeTicketBranchResult.branchName;
+    }
+    if (!["QUEUED", "RUNNING"].includes(job.status))
+      throw new Error(job.error ?? "Branch generation failed");
+    await waitForPoll(signal);
+  }
+  throw new Error("Branch generation timed out");
+}

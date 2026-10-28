@@ -1,3 +1,27 @@
+"How a Jira project names ticket branches."
+enum JiraBranchNamingMode {
+  "Run the saved JavaScript naming function."
+  JAVASCRIPT
+  "Generate names using the configured model and prompt."
+  AI
+}
+
+"AI naming settings. Switching modes preserves both configurations."
+input UpdateJiraProjectAiBranchNamingInput {
+  "Jira project whose naming settings should change."
+  projectId: ID!
+  "Active naming strategy; inactive settings are preserved."
+  mode: JiraBranchNamingMode!
+  "AI provider identifier: CODEX, CLAUDE, or OPENCODE."
+  provider: String
+  "Model identifier from the agent provider catalog."
+  model: String
+  "Model reasoning effort; auto uses the provider default."
+  effort: String
+  "Prompt template with supported ticket tokens; at most 10,000 characters."
+  prompt: String
+}
+
 "Values supported for Jira source."
 enum JiraSourceKind {
   "Represents the jql option."
@@ -112,6 +136,16 @@ type JiraProject {
   doneStatusId: ID
   "The branch naming script associated with this Jira project."
   branchNamingScript: String!
+  "Active strategy for naming ticket branches."
+  branchNamingMode: JiraBranchNamingMode!
+  "Saved AI provider identifier, even when JavaScript is active."
+  branchNamingProvider: String
+  "Saved AI model identifier."
+  branchNamingModel: String
+  "Saved model reasoning effort."
+  branchNamingEffort: String
+  "Saved AI prompt template; description is included only when referenced."
+  branchNamingPrompt: String!
   "Sources associated with this Jira project."
   sources: [JiraSource!]!
 }
@@ -987,7 +1021,12 @@ extend type Mutation {
     "Values for the requested operation."
     input: UpdateJiraProjectDisplaySettingsInput!
   ): [JiraProject!]!
-  "Updates a Jira project branch naming and returns the updated Jira project."
+  "Save project AI branch naming settings without discarding the JavaScript function."
+  updateJiraProjectAiBranchNaming(
+    "Project and AI naming settings to save."
+    input: UpdateJiraProjectAiBranchNamingInput!
+  ): [JiraProject!]!
+  "Updates the saved JavaScript branch naming function."
   updateJiraProjectBranchNaming(
     "Identifier of the project."
     projectId: ID!

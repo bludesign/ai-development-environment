@@ -221,7 +221,7 @@ describe("built-in tool registry", () => {
       ]),
     );
     const tools = expanded.definitions();
-    expect(tools).toHaveLength(336);
+    expect(tools).toHaveLength(339);
     expect(new Set(tools.map(({ name }) => name)).size).toBe(tools.length);
     expect(tools.every(({ annotations }) => Boolean(annotations))).toBe(true);
   });
@@ -268,10 +268,10 @@ describe("built-in tool registry", () => {
       crashes: placeholder,
     };
     const complete = createBuiltInToolRegistry(services);
-    expect(complete.definitions()).toHaveLength(417);
+    expect(complete.definitions()).toHaveLength(420);
     expect(complete.catalog()).toHaveLength(29);
     expect(new Set(complete.definitions().map(({ name }) => name)).size).toBe(
-      417,
+      420,
     );
     expect(complete.catalog().map(({ id }) => id)).toEqual(
       expect.arrayContaining([

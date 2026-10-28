@@ -288,6 +288,17 @@ export class ClaudeAdapter implements ProviderAdapter {
       options: {
         ...(pathToClaudeCodeExecutable ? { pathToClaudeCodeExecutable } : {}),
         cwd: input.run.worktree!.folder,
+        ...(input.textOnly
+          ? {
+              tools: [],
+              mcpServers: {},
+              strictMcpConfig: true,
+              settingSources: [],
+              persistSession: false,
+              systemPrompt:
+                "Generate text only. Return only one valid Git branch name. Do not ask questions.",
+            }
+          : {}),
         ...(input.run.model !== "default" ? { model: input.run.model } : {}),
         ...(effort ? { effort } : {}),
         ...(input.resumeNativeId
@@ -299,10 +310,15 @@ export class ClaudeAdapter implements ProviderAdapter {
         includePartialMessages: true,
         env: claudeEnvironment(),
         disallowedTools: input.run.webSearchEnabled ? [] : ["WebSearch"],
-        ...(input.mcpServer
+        ...(input.mcpServer && !input.textOnly
           ? { mcpServers: claudeMcpServers(input.mcpServer) }
           : {}),
         canUseTool: async (toolName, toolInput, options) => {
+          if (input.textOnly)
+            return {
+              behavior: "deny",
+              message: "Tools are disabled for branch naming",
+            };
           if (toolName !== "AskUserQuestion") {
             return { behavior: "allow", updatedInput: toolInput };
           }

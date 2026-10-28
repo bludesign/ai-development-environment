@@ -1,3 +1,5 @@
+import { generateBranchName } from "../runs/branch-naming.js";
+import { jiraBranchNameCandidates } from "@ai-development-environment/agent-contract/worktrees";
 import { createWriteStream, watch, type FSWatcher } from "node:fs";
 import { mkdtemp, open, readFile, realpath, rm, stat } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -1932,6 +1934,16 @@ export const branchWorktree: AgentJobHandler = async (
   signal,
 ) => {
   const input = worktreeBranchJobPayload(payload);
+  if (input.aiNaming) {
+    const branchName = await generateBranchName(input.aiNaming.naming, signal);
+    input.candidates = jiraBranchNameCandidates(branchName).filter(
+      (branch) =>
+        branch === input.aiNaming!.currentBranch ||
+        !input.aiNaming!.takenBranches.includes(branch),
+    );
+    if (!input.candidates.length)
+      throw new Error("Every generated ticket branch name is already taken");
+  }
   const rootFolder = await validateBranchRoot(input, timeoutMs, signal);
   const changeFolder =
     input.action === "CHANGE"

@@ -1,3 +1,7 @@
+import {
+  DEFAULT_JIRA_BRANCH_NAMING_PROMPT,
+  validateJiraBranchPrompt,
+} from "@ai-development-environment/agent-contract/worktrees";
 import "server-only";
 
 import { createHash, randomUUID } from "node:crypto";
@@ -793,6 +797,12 @@ export class JiraService {
       doneStatusId: project.doneStatusId,
       branchNamingScript:
         project.branchNamingScript ?? DEFAULT_JIRA_BRANCH_NAMING_SCRIPT,
+      branchNamingMode: project.branchNamingMode === "AI" ? "AI" : "JAVASCRIPT",
+      branchNamingProvider: project.branchNamingProvider ?? null,
+      branchNamingModel: project.branchNamingModel ?? null,
+      branchNamingEffort: project.branchNamingEffort ?? null,
+      branchNamingPrompt:
+        project.branchNamingPrompt ?? DEFAULT_JIRA_BRANCH_NAMING_PROMPT,
       sources: project.sources.map(sourceView),
     }));
   }
@@ -908,6 +918,59 @@ export class JiraService {
     await prisma.jiraProject.update({
       where: { id: projectId },
       data: { branchNamingScript: validated },
+    });
+    return this.listProjects();
+  }
+
+  async updateProjectAiBranchNaming(input: {
+    projectId: string;
+    mode: string;
+    provider?: string | null;
+    model?: string | null;
+    effort?: string | null;
+    prompt?: string | null;
+  }): Promise<JiraProjectView[]> {
+    const prisma = await getPrismaClient();
+    const project = await prisma.jiraProject.findUnique({
+      where: { id: input.projectId },
+    });
+    if (!project) throw new Error("Jira project not found");
+    if (!["AI", "JAVASCRIPT"].includes(input.mode))
+      throw new Error("Invalid branch naming mode");
+    if (input.mode === "JAVASCRIPT") {
+      await prisma.jiraProject.update({
+        where: { id: input.projectId },
+        data: { branchNamingMode: "JAVASCRIPT" },
+      });
+      return this.listProjects();
+    }
+    const provider = input.provider?.trim() || project.branchNamingProvider;
+    const model = input.model?.trim() || project.branchNamingModel;
+    if (
+      input.mode === "AI" &&
+      (!provider ||
+        !["CODEX", "CLAUDE", "OPENCODE"].includes(provider) ||
+        !model)
+    )
+      throw new Error("Choose an AI provider and model");
+    if (model && model.length > 200) throw new Error("Model name is too long");
+    const prompt = validateJiraBranchPrompt(
+      input.prompt ??
+        project.branchNamingPrompt ??
+        DEFAULT_JIRA_BRANCH_NAMING_PROMPT,
+    );
+    await prisma.jiraProject.update({
+      where: { id: input.projectId },
+      data: {
+        branchNamingMode: input.mode,
+        branchNamingProvider: provider,
+        branchNamingModel: model,
+        branchNamingEffort:
+          input.effort === undefined
+            ? project.branchNamingEffort
+            : input.effort,
+        branchNamingPrompt: prompt,
+      },
     });
     return this.listProjects();
   }
@@ -2021,28 +2084,45 @@ export class JiraService {
     return this.ticket(inwardIssueKey, true);
   }
 
-  async branchTicket(issueKey: string): Promise<JiraBranchTicket> {
+  async branchTicket(
+    issueKey: string,
+    includeDescription = false,
+  ): Promise<JiraBranchTicket> {
     const key = normalizeIssueKey(issueKey);
     const projectKey = key.replace(/-\d+$/, "");
     const prisma = await getPrismaClient();
     const project = await prisma.jiraProject.findUnique({
       where: { key: projectKey },
-      select: { key: true, branchNamingScript: true },
+      select: {
+        key: true,
+        branchNamingScript: true,
+        branchNamingMode: true,
+        branchNamingProvider: true,
+        branchNamingModel: true,
+        branchNamingEffort: true,
+        branchNamingPrompt: true,
+      },
     });
     if (!project) {
       throw new Error(
         `Jira project ${projectKey} is not managed; add it in Manage Jira projects and sources`,
       );
     }
+    const branchFields = [
+      "summary",
+      "issuetype",
+      "project",
+      ...(includeDescription ? ["description"] : []),
+    ];
     const result = await this.cachedCall<RawIssue>({
       operation: "ISSUE_BRANCH",
-      params: { issueKey: key, fields: ["summary", "issuetype", "project"] },
+      params: { issueKey: key, fields: branchFields },
       requestSummary: `Branch details for ${key}`,
       fetcher: async () => {
         const { cloud } = await this.getClients();
         return cloud.issues.getIssue({
           issueIdOrKey: key,
-          fields: ["summary", "issuetype", "project"],
+          fields: branchFields,
           updateHistory: false,
         });
       },
@@ -2062,6 +2142,15 @@ export class JiraService {
       ticketTitle: asString(fields.summary) ?? key,
       ticketType: asString(asRecord(fields.issuetype).name),
       projectKey: project.key,
+      ticketDescription: includeDescription
+        ? (normalizeJiraRichText(fields.description)?.markdown ?? "")
+        : "",
+      branchNamingMode: project.branchNamingMode === "AI" ? "AI" : "JAVASCRIPT",
+      branchNamingProvider: project.branchNamingProvider ?? null,
+      branchNamingModel: project.branchNamingModel ?? null,
+      branchNamingEffort: project.branchNamingEffort ?? null,
+      branchNamingPrompt:
+        project.branchNamingPrompt ?? DEFAULT_JIRA_BRANCH_NAMING_PROMPT,
       branchNamingScript:
         project.branchNamingScript ?? DEFAULT_JIRA_BRANCH_NAMING_SCRIPT,
     };

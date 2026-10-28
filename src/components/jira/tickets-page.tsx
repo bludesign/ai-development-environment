@@ -1,5 +1,7 @@
 "use client";
 
+import { JiraAiBranchNamingSettings } from "./ai-branch-naming-settings";
+
 import {
   AlertTriangle,
   ChevronDown,
@@ -90,7 +92,7 @@ import type {
 } from "@/services/jira/types";
 
 const SOURCE_FIELDS = "id projectId name kind value boardId position";
-const PROJECT_FIELDS = `id jiraId key name avatarUrl position ticketAssignmentFilter hideCompletedTickets completedStatusIds excludedStatusIds doneStatusId branchNamingScript sources { ${SOURCE_FIELDS} }`;
+const PROJECT_FIELDS = `id jiraId key name avatarUrl position ticketAssignmentFilter hideCompletedTickets completedStatusIds excludedStatusIds doneStatusId branchNamingScript branchNamingMode branchNamingProvider branchNamingModel branchNamingEffort branchNamingPrompt sources { ${SOURCE_FIELDS} }`;
 const SUMMARY_FIELDS =
   "id key summary statusId status statusCategory issueType priority assignee assigneeAccountId assigneeAvatarUrl projectKey updatedAt";
 const CACHE_FIELDS = "source stale fetchedAt";
@@ -1373,6 +1375,13 @@ function JiraManagerDialog({
                     {t("branchNamingDescription")}
                   </p>
                 </div>
+                <JiraAiBranchNamingSettings
+                  key={selectedProject.id}
+                  project={selectedProject}
+                  fields={PROJECT_FIELDS}
+                  onSaved={onProjectsChanged}
+                  onError={setError}
+                />
                 <div>
                   <Label
                     className="mb-1 block text-xs font-medium"

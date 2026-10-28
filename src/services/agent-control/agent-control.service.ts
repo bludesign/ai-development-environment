@@ -1,3 +1,7 @@
+import {
+  JIRA_BRANCH_GENERATE_JOB_KIND,
+  jiraBranchGenerationPayload,
+} from "@ai-development-environment/agent-contract/worktrees";
 import { createHash, randomBytes, randomUUID } from "node:crypto";
 import { posix, win32 } from "node:path";
 
@@ -343,6 +347,10 @@ export function validateJob(kind: string, payload: unknown): void {
   }
   if (kind === CODEBASE_BRANCHES_DELETE_JOB_KIND) {
     codebaseBranchesDeletePayload(value);
+    return;
+  }
+  if (kind === JIRA_BRANCH_GENERATE_JOB_KIND) {
+    jiraBranchGenerationPayload(value);
     return;
   }
   if (kind === WORKTREE_BRANCH_JOB_KIND) {

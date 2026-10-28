@@ -1745,7 +1745,7 @@
     "selectCompletedStatuses": "Seleccionar estados completados",
     "saveDisplaySettings": "Guardar configuración de visualización",
     "branchNaming": "Nombres de ramas",
-    "branchNamingDescription": "Esta función se usa al crear una rama de worktree desde un ticket de este proyecto.",
+    "branchNamingDescription": "Elige cómo nombrar las ramas de los tickets de este proyecto.",
     "branchNamingFunction": "Función JavaScript para nombrar ramas",
     "branchNamingFunctionHelp": "Recibe ticketKey, type, title y alreadyTaken. Devuelve un nombre de rama Git válido; alreadyTaken se omite en la primera llamada.",
     "saveBranchNaming": "Guardar nombres de ramas",
@@ -1823,7 +1823,12 @@
     "noAssignees": "No se encontraron usuarios asignables.",
     "status": "Estado",
     "changeStatus": "Cambiar estado",
-    "requiresJira": "Requiere Jira"
+    "requiresJira": "Requiere Jira",
+    "aiBranchNaming": "Nombres de ramas con IA",
+    "aiBranchNamingHelp": "Usa el modelo seleccionado en el agente del código base en lugar de la función JavaScript. Ambas configuraciones se guardan por separado.",
+    "aiBranchPrompt": "Instrucciones para nombrar ramas",
+    "aiBranchTokensHelp": "Inserta variables del ticket para elegir qué recibe el modelo. La descripción solo se obtiene y comparte al usar su variable.",
+    "saveAiBranchNaming": "Guardar modo y configuración de IA"
   },
   "jiraTicketDetail": {
     "loading": "Cargando incidencia de Jira…",
@@ -3685,7 +3690,12 @@
     "copyFullCommitHash": "Copiar hash completo del commit",
     "copyCommitMessage": "Copiar mensaje del commit",
     "copyChangeFailed": "No se pudo copiar al portapapeles.",
-    "openPullRequests": "Solicitudes de incorporación abiertas"
+    "openPullRequests": "Solicitudes de incorporación abiertas",
+    "aiBranchPlaceholder": "Genera un nombre o déjalo vacío",
+    "aiBranchSubmitHelp": "Genera y edita un nombre, o envía para generarlo automáticamente.",
+    "generatingBranchName": "Generando nombre de rama…",
+    "generateBranchName": "Generar nombre de rama",
+    "regenerateBranchName": "Volver a generar nombre de rama"
   },
   "worktreeDetail": {
     "loading": "Cargando detalles del worktree…",

@@ -13,6 +13,7 @@ export const WORKTREE_GIT_INSPECT_JOB_KIND = "worktree.git.inspect";
 export const WORKTREE_GIT_OPERATION_JOB_KIND = "worktree.git.operation";
 export const WORKTREE_WATCH_JOB_KIND = "worktree.watch";
 export const WORKTREE_BRANCH_JOB_KIND = "worktree.branch";
+export const JIRA_BRANCH_GENERATE_JOB_KIND = "jira.branch.generate";
 export const WORKTREE_MOVE_PUSH_JOB_KIND = "worktree.move.push";
 export const WORKTREE_MOVE_CHECKOUT_JOB_KIND = "worktree.move.checkout";
 export const WORKTREE_DELETE_JOB_KIND = "worktree.delete";
@@ -28,6 +29,7 @@ export const WORKTREE_JOB_KINDS = [
   WORKTREE_GIT_OPERATION_JOB_KIND,
   WORKTREE_WATCH_JOB_KIND,
   WORKTREE_BRANCH_JOB_KIND,
+  JIRA_BRANCH_GENERATE_JOB_KIND,
   WORKTREE_MOVE_PUSH_JOB_KIND,
   WORKTREE_MOVE_CHECKOUT_JOB_KIND,
   WORKTREE_DELETE_JOB_KIND,
@@ -200,6 +202,94 @@ export function validGitBranchName(value: string): boolean {
   return value
     .split("/")
     .every((part) => part && !part.startsWith(".") && !part.endsWith(".lock"));
+}
+
+export const JIRA_BRANCH_PROMPT_TOKENS = [
+  "ticket.key",
+  "ticket.type",
+  "ticket.title",
+  "ticket.description",
+] as const;
+export const DEFAULT_JIRA_BRANCH_NAMING_PROMPT = `Name a Git branch for {{ticket.key}} ({{ticket.type}}): {{ticket.title}}.
+Use bugfix/ for bugs and feature/ otherwise. Keep the ticket key and add a concise lowercase hyphenated slug. Return only the branch name.`;
+
+export type JiraAiBranchNaming = {
+  provider: "CODEX" | "CLAUDE" | "OPENCODE";
+  model: string;
+  effort: string | null;
+  prompt: string;
+};
+
+export function validateJiraBranchPrompt(value: string): string {
+  const prompt = value.trim();
+  if (!prompt || prompt.length > 10_000)
+    throw new Error("Branch naming prompt must contain 1–10,000 characters");
+  const remaining = prompt.replace(
+    /\{\{\s*([^{}]+?)\s*\}\}/g,
+    (_match, token: string) => {
+      if (
+        !(JIRA_BRANCH_PROMPT_TOKENS as readonly string[]).includes(token.trim())
+      )
+        throw new Error(`Unsupported branch naming token: ${token}`);
+      return "";
+    },
+  );
+  if (remaining.includes("{{") || remaining.includes("}}"))
+    throw new Error("Invalid branch naming token syntax");
+  return prompt;
+}
+
+export function renderJiraBranchPrompt(
+  prompt: string,
+  ticket: { key: string; type: string; title: string; description: string },
+): string {
+  return validateJiraBranchPrompt(prompt).replace(
+    /\{\{\s*ticket\.(key|type|title|description)\s*\}\}/g,
+    (_match, key: keyof typeof ticket) => ticket[key],
+  );
+}
+
+export function jiraBranchNameCandidates(value: string): string[] {
+  const branch = value.trim();
+  if (!validGitBranchName(branch))
+    throw new Error(
+      `Invalid generated Git branch name: ${branch || "(empty)"}`,
+    );
+  return Array.from({ length: 100 }, (_, index) => {
+    if (index === 0) return branch;
+    const suffix = `-${index + 1}`;
+    const candidate = `${branch.slice(0, 255 - suffix.length).replace(/[/.]+$/, "")}${suffix}`;
+    if (!validGitBranchName(candidate))
+      throw new Error("Cannot add a collision suffix to this branch name");
+    return candidate;
+  });
+}
+
+export function parseJiraAiBranchNaming(value: unknown): JiraAiBranchNaming {
+  const input = objectValue(value, "AI branch naming");
+  if (!["CODEX", "CLAUDE", "OPENCODE"].includes(String(input.provider)))
+    throw new Error("Invalid AI branch naming provider");
+  const model = stringValue(input.model, "AI branch naming model");
+  const prompt = stringValue(input.prompt, "AI branch naming prompt");
+  if (model.length > 200 || prompt.length > 200_000)
+    throw new Error("AI branch naming input is too long");
+  return {
+    provider: input.provider as JiraAiBranchNaming["provider"],
+    model,
+    effort: nullableString(input.effort, "AI branch naming effort"),
+    prompt,
+  };
+}
+
+export function jiraBranchGenerationPayload(value: unknown) {
+  const input = objectValue(value, "Jira branch generation");
+  return {
+    naming: parseJiraAiBranchNaming(input.naming),
+    takenBranches: Array.isArray(input.takenBranches)
+      ? input.takenBranches.map((branch) => stringValue(branch, "taken branch"))
+      : [],
+    currentBranch: nullableString(input.currentBranch, "current branch"),
+  };
 }
 
 export type WorktreeCommit = {
@@ -598,6 +688,7 @@ export function worktreeBranchJobPayload(value: unknown): {
   action: WorktreeBranchAction;
   mode: WorktreeBranchJobMode;
   candidates: string[];
+  aiNaming?: ReturnType<typeof jiraBranchGenerationPayload>;
   stashOnFailure: boolean;
   preparations: WorktreePreparationDefinition[];
 } {
@@ -612,6 +703,7 @@ export function worktreeBranchJobPayload(value: unknown): {
     "action",
     "mode",
     "candidates",
+    "aiNaming",
     "stashOnFailure",
     "preparations",
   ]);
@@ -627,11 +719,17 @@ export function worktreeBranchJobPayload(value: unknown): {
   }
   if (
     !Array.isArray(payload.candidates) ||
-    payload.candidates.length < 1 ||
+    (payload.candidates.length < 1 && !payload.aiNaming) ||
     payload.candidates.length > 100
   ) {
     throw new Error("worktree branch payload.candidates is invalid");
   }
+  const aiNaming =
+    payload.aiNaming == null
+      ? undefined
+      : jiraBranchGenerationPayload(payload.aiNaming);
+  if (aiNaming && (payload.mode !== "NEW" || payload.candidates.length))
+    throw new Error("AI naming requires NEW mode without concrete candidates");
   const candidates = payload.candidates.map((candidate, index) => {
     const branch = stringValue(
       candidate,
@@ -683,6 +781,7 @@ export function worktreeBranchJobPayload(value: unknown): {
     action: payload.action,
     mode: payload.mode,
     candidates,
+    ...(aiNaming ? { aiNaming } : {}),
     stashOnFailure: payload.stashOnFailure,
     preparations: preparationDefinitions(
       payload.preparations ?? [],

@@ -1745,7 +1745,7 @@
     "selectCompletedStatuses": "Abgeschlossene Status auswählen",
     "saveDisplaySettings": "Anzeigeeinstellungen speichern",
     "branchNaming": "Branch-Benennung",
-    "branchNamingDescription": "Diese Funktion wird verwendet, wenn für ein Ticket dieses Projekts ein Worktree-Branch erstellt wird.",
+    "branchNamingDescription": "Wählen Sie, wie Branches für Tickets dieses Projekts benannt werden.",
     "branchNamingFunction": "JavaScript-Funktion zur Branch-Benennung",
     "branchNamingFunctionHelp": "Erhält ticketKey, type, title und alreadyTaken. Gib einen gültigen Git-Branch-Namen zurück; alreadyTaken fehlt beim ersten Aufruf.",
     "saveBranchNaming": "Branch-Benennung speichern",
@@ -1823,7 +1823,12 @@
     "noAssignees": "Keine zuweisbaren Benutzer gefunden.",
     "status": "Status",
     "changeStatus": "Status ändern",
-    "requiresJira": "Erfordert Jira"
+    "requiresJira": "Erfordert Jira",
+    "aiBranchNaming": "KI für Branchnamen",
+    "aiBranchNamingHelp": "Verwenden Sie das gewählte Modell auf dem Agenten der Codebasis statt der JavaScript-Funktion. Beide Konfigurationen werden getrennt gespeichert.",
+    "aiBranchPrompt": "Anweisung für Branchnamen",
+    "aiBranchTokensHelp": "Fügen Sie Ticketvariablen ein, um die übermittelten Daten auszuwählen. Die Beschreibung wird nur bei Verwendung ihrer Variable geladen und geteilt.",
+    "saveAiBranchNaming": "Modus und KI-Einstellungen speichern"
   },
   "jiraTicketDetail": {
     "loading": "Jira-Vorgang wird geladen…",
@@ -3685,7 +3690,12 @@
     "copyFullCommitHash": "Vollständigen Commit-Hash kopieren",
     "copyCommitMessage": "Commit-Nachricht kopieren",
     "copyChangeFailed": "Kopieren in die Zwischenablage fehlgeschlagen.",
-    "openPullRequests": "Offene Pull Requests"
+    "openPullRequests": "Offene Pull Requests",
+    "aiBranchPlaceholder": "Namen generieren oder leer lassen",
+    "aiBranchSubmitHelp": "Generieren und bearbeiten Sie einen Namen oder senden Sie ab, um ihn automatisch zu generieren.",
+    "generatingBranchName": "Branchname wird generiert…",
+    "generateBranchName": "Branchnamen generieren",
+    "regenerateBranchName": "Branchnamen erneut generieren"
   },
   "worktreeDetail": {
     "loading": "Worktree-Details werden geladen…",

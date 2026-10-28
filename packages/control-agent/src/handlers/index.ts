@@ -1,3 +1,5 @@
+import { generateTicketBranch } from "../runs/branch-naming.js";
+import { JIRA_BRANCH_GENERATE_JOB_KIND } from "@ai-development-environment/agent-contract/worktrees";
 import { CCUSAGE_REPORT_JOB_KIND } from "@ai-development-environment/agent-contract";
 import {
   BUILD_DATA_DELETE_JOB_KIND,
@@ -217,6 +219,7 @@ export type AgentJobHandler = (
 ) => Promise<ProcessResult>;
 
 export const handlers: Readonly<Record<string, AgentJobHandler>> = {
+  [JIRA_BRANCH_GENERATE_JOB_KIND]: generateTicketBranch,
   [CLI_HEALTH_JOB_KIND]: runCliHealth,
   [COMMAND_RUN_JOB_KIND]: runCommand,
   [CCUSAGE_REPORT_JOB_KIND]: runCcusage,

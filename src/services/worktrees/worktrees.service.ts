@@ -1,3 +1,9 @@
+import {
+  JIRA_BRANCH_GENERATE_JOB_KIND,
+  jiraBranchNameCandidates,
+  renderJiraBranchPrompt,
+  parseJiraAiBranchNaming,
+} from "@ai-development-environment/agent-contract/worktrees";
 import { randomUUID } from "node:crypto";
 import { posix, win32 } from "node:path";
 
@@ -2032,29 +2038,7 @@ export class WorktreesService {
     return baseBranch;
   }
 
-  private async ticketBranch(
-    codebase: { repositoryId: string },
-    ticketKeyValue: string | null | undefined,
-    currentBranch: string | null,
-  ) {
-    const ticketKey = ticketKeyValue?.trim() ?? "";
-    const ticket = await this.jiraService.branchTicket(ticketKey);
-    const candidates = await jiraBranchCandidates(ticket.branchNamingScript, {
-      ticketKey: ticket.ticketKey,
-      type: ticket.ticketType ?? "",
-      title: ticket.ticketTitle,
-    });
-    const taken = await this.repositoryTakenBranches(codebase.repositoryId);
-    const available = candidates.filter(
-      (candidate) => candidate === currentBranch || !taken.has(candidate),
-    );
-    if (!available.length) {
-      throw new Error("Every generated ticket branch name is already taken");
-    }
-    return { ticket, candidates: available };
-  }
-
-  async previewTicketBranch(input: {
+  private async ticketContext(input: {
     codebaseId: string;
     worktreeId?: string | null;
     ticketKey: string;
@@ -2078,18 +2062,178 @@ export class WorktreesService {
       if (!worktree) throw new Error("Worktree not found for this codebase");
       currentBranch = worktree.branch;
     }
-    const { ticket, candidates } = await this.ticketBranch(
-      codebase,
-      input.ticketKey,
-      currentBranch,
+    const ticket = await this.jiraService.branchTicket(input.ticketKey);
+    return { codebase, currentBranch, ticket };
+  }
+
+  private async aiTicketNaming(
+    codebase: Pick<RunnableCodebase, "id" | "agentId" | "agent">,
+    initialTicket: Awaited<ReturnType<JiraService["branchTicket"]>>,
+  ) {
+    if (!online(codebase.agent)) throw new Error("Agent is offline");
+    if (!capabilities(codebase.agent).includes(JIRA_BRANCH_GENERATE_JOB_KIND))
+      throw new Error("Update this agent to use AI branch naming");
+    const ticket = /\{\{\s*ticket\.description\s*\}\}/.test(
+      initialTicket.branchNamingPrompt,
+    )
+      ? await this.jiraService.branchTicket(initialTicket.ticketKey, true)
+      : initialTicket;
+    const naming = parseJiraAiBranchNaming({
+      provider: ticket.branchNamingProvider,
+      model: ticket.branchNamingModel,
+      effort: ticket.branchNamingEffort,
+      prompt: renderJiraBranchPrompt(ticket.branchNamingPrompt, {
+        key: ticket.ticketKey,
+        type: ticket.ticketType ?? "",
+        title: ticket.ticketTitle,
+        description: ticket.ticketDescription ?? "",
+      }),
+    });
+    const prisma = await getPrismaClient();
+    const sync = await prisma.runProviderSync.findUnique({
+      where: {
+        agentId_provider: {
+          agentId: codebase.agentId,
+          provider: naming.provider,
+        },
+      },
+    });
+    if (
+      !capabilities(codebase.agent).includes(
+        `runs.provider.${naming.provider.toLowerCase()}`,
+      ) ||
+      sync?.status === "FAILED"
+    )
+      throw new Error(`${naming.provider} is unavailable on this agent`);
+    const catalog = sync?.catalogJson
+      ? (JSON.parse(sync.catalogJson) as {
+          models?: Array<{ id: string; efforts?: string[] }>;
+          worktrees?: Record<string, unknown>;
+        })
+      : null;
+    const model = catalog?.models?.find((entry) => entry.id === naming.model);
+    if (naming.model !== "default" && !model)
+      throw new Error(
+        `Model ${naming.model} is unavailable on this agent; select an available model in Jira project settings`,
+      );
+    if (
+      model?.efforts?.length &&
+      naming.effort &&
+      naming.effort !== "auto" &&
+      !model.efforts.includes(naming.effort)
+    )
+      throw new Error("The selected model does not support this effort");
+    return naming;
+  }
+
+  private async ticketBranch(
+    codebase: { repositoryId: string },
+    ticketKeyValue: string | null | undefined,
+    currentBranch: string | null,
+    override?: string | null,
+  ) {
+    const ticket = await this.jiraService.branchTicket(
+      ticketKeyValue?.trim() ?? "",
     );
+    let candidates: string[];
+    if (override != null && override.trim())
+      candidates = jiraBranchNameCandidates(override);
+    else if (ticket.branchNamingMode === "AI")
+      throw new Error("Generate an AI branch name before previewing it");
+    else
+      candidates = await jiraBranchCandidates(ticket.branchNamingScript, {
+        ticketKey: ticket.ticketKey,
+        type: ticket.ticketType ?? "",
+        title: ticket.ticketTitle,
+      });
+    const taken = await this.repositoryTakenBranches(codebase.repositoryId);
+    const available = candidates.filter(
+      (candidate) => candidate === currentBranch || !taken.has(candidate),
+    );
+    if (!available.length)
+      throw new Error("Every generated ticket branch name is already taken");
+    return { ticket, candidates: available };
+  }
+
+  async worktreeTicketBranchContext(input: {
+    codebaseId: string;
+    worktreeId?: string | null;
+    ticketKey: string;
+  }) {
+    const { codebase, currentBranch, ticket } = await this.ticketContext(input);
+    const branchName =
+      ticket.branchNamingMode === "AI"
+        ? null
+        : (await this.ticketBranch(codebase, ticket.ticketKey, currentBranch))
+            .candidates[0]!;
     return {
       ticketKey: ticket.ticketKey,
       ticketTitle: ticket.ticketTitle,
       ticketType: ticket.ticketType,
       projectKey: ticket.projectKey,
-      branchName: candidates[0]!,
+      branchNamingMode: ticket.branchNamingMode ?? "JAVASCRIPT",
+      branchName,
     };
+  }
+
+  async generateTicketBranch(input: {
+    codebaseId: string;
+    worktreeId?: string | null;
+    ticketKey: string;
+    requestId: string;
+  }) {
+    const { codebase, currentBranch, ticket } = await this.ticketContext(input);
+    if (ticket.branchNamingMode !== "AI")
+      throw new Error("AI branch naming is not enabled for this Jira project");
+    const naming = await this.aiTicketNaming(codebase, ticket);
+    return this.agentControl.createJob({
+      agentId: codebase.agentId,
+      codebaseId: codebase.id,
+      worktreeId: input.worktreeId ?? null,
+      kind: JIRA_BRANCH_GENERATE_JOB_KIND,
+      payload: {
+        naming,
+        takenBranches: [
+          ...(await this.repositoryTakenBranches(codebase.repositoryId)),
+        ],
+        currentBranch,
+      },
+      idempotencyKey: `jira:branch:generate:${input.requestId}:${codebase.id}`,
+      timeoutSeconds: 120,
+    });
+  }
+
+  async previewTicketBranch(input: {
+    codebaseId: string;
+    worktreeId?: string | null;
+    ticketKey: string;
+  }) {
+    const context = await this.worktreeTicketBranchContext(input);
+    if (context.branchName)
+      return { ...context, branchName: context.branchName };
+    const job = await this.generateTicketBranch({
+      ...input,
+      requestId: randomUUID(),
+    });
+    const deadline = Date.now() + 125_000;
+    while (Date.now() < deadline) {
+      const completed = await this.agentControl.getJob(job.id);
+      if (!completed) throw new Error("Branch generation job disappeared");
+      if (completed.status === "SUCCEEDED") {
+        const branchName = (
+          JSON.parse(completed.resultJson ?? "{}") as { branchName?: string }
+        ).branchName;
+        return {
+          ...context,
+          branchName: jiraBranchNameCandidates(branchName ?? "")[0]!,
+        };
+      }
+      if (!["QUEUED", "RUNNING"].includes(completed.status))
+        throw new Error(completed.error ?? "Branch generation failed");
+      await new Promise((resolve) => setTimeout(resolve, 250));
+    }
+    await this.agentControl.cancelJob(job.id);
+    throw new Error("Branch generation timed out");
   }
 
   /**
@@ -2296,10 +2440,29 @@ export class WorktreesService {
   ) {
     const baseBranch = this.requireBaseBranch(codebase, selection.baseBranch);
     if (selection.mode === "TICKET") {
+      const ticket = await this.jiraService.branchTicket(
+        selection.ticketKey ?? "",
+      );
+      if (ticket.branchNamingMode === "AI" && !selection.branchName?.trim()) {
+        const naming = await this.aiTicketNaming(codebase, ticket);
+        return {
+          baseBranch,
+          mode: "NEW" as const,
+          candidates: [],
+          aiNaming: {
+            naming,
+            takenBranches: [
+              ...(await this.repositoryTakenBranches(codebase.repositoryId)),
+            ],
+            currentBranch: currentWorktree?.branch ?? null,
+          },
+        };
+      }
       const { candidates } = await this.ticketBranch(
         codebase,
         selection.ticketKey,
         currentWorktree?.branch ?? null,
+        selection.branchName,
       );
       return { baseBranch, mode: "NEW" as const, candidates };
     }
@@ -2366,6 +2529,7 @@ export class WorktreesService {
         action: "CREATE",
         mode: resolved.mode,
         candidates: resolved.candidates,
+        ...(resolved.aiNaming ? { aiNaming: resolved.aiNaming } : {}),
         stashOnFailure: false,
         preparations: (codebase.repository.preparations ?? []).map(
           preparationPayload,
@@ -2414,6 +2578,7 @@ export class WorktreesService {
         action: "CHANGE",
         mode: resolved.mode,
         candidates: resolved.candidates,
+        ...(resolved.aiNaming ? { aiNaming: resolved.aiNaming } : {}),
         stashOnFailure: Boolean(input.stashOnFailure),
         preparations: (worktree.codebase.repository.preparations ?? []).map(
           preparationPayload,
