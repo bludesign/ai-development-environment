@@ -14,6 +14,7 @@ import { discoverWorktrees } from "./handlers/worktrees.js";
 import { JobExecutor } from "./job-executor.js";
 import type { FetchedCodebaseRefresh } from "./refresh-fetched-codebase.js";
 import { RepositoryCoordinator } from "./repository-coordinator.js";
+import { AgentRequestError } from "./request-errors.js";
 
 const job: AgentJob = {
   id: "job-1",
@@ -81,6 +82,93 @@ describe("JobExecutor", () => {
   });
   afterEach(() => {
     vi.restoreAllMocks();
+    vi.useRealTimers();
+  });
+
+  test("limits completion retries and releases the job after persistent failures", async () => {
+    vi.useFakeTimers();
+    const logged = vi.spyOn(console, "error").mockImplementation(() => {});
+    const client = {
+      claimJob: vi.fn().mockResolvedValue(job),
+      completeJob: vi.fn().mockRejectedValue(new Error("offline")),
+    };
+    const executor = new JobExecutor(client as unknown as AgentGraphQLClient);
+    executor.execute(job);
+    await vi.runAllTimersAsync();
+    expect(client.completeJob).toHaveBeenCalledTimes(5);
+    expect(logged).toHaveBeenLastCalledWith(
+      `Could not report completion for ${job.id}; giving up after 5 attempts:`,
+      "offline",
+    );
+    expect(executor.cancel(job.id)).toBe(false);
+    await executor.cancelAll();
+  });
+
+  test("stops immediately when the server permanently rejects completion", async () => {
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    const complete = Promise.withResolvers<void>();
+    const client = {
+      claimJob: vi.fn().mockResolvedValue(job),
+      completeJob: vi.fn(async () => {
+        complete.resolve();
+        throw new AgentRequestError("Job not found for this agent", 200);
+      }),
+    };
+    const executor = new JobExecutor(client as unknown as AgentGraphQLClient);
+    executor.execute(job);
+    await complete.promise;
+    await executor.cancelAll();
+    expect(client.completeJob).toHaveBeenCalledOnce();
+  });
+
+  test("shutdown interrupts completion backoff without another request", async () => {
+    vi.useFakeTimers();
+    const waiting = Promise.withResolvers<void>();
+    vi.spyOn(console, "error").mockImplementation((message) => {
+      if (String(message).includes("retrying:")) waiting.resolve();
+    });
+    const client = {
+      claimJob: vi.fn().mockResolvedValue(job),
+      completeJob: vi.fn().mockRejectedValue(new Error("offline")),
+    };
+    const executor = new JobExecutor(client as unknown as AgentGraphQLClient);
+    executor.execute(job);
+    await waiting.promise;
+    await executor.cancelAll();
+    expect(client.completeJob).toHaveBeenCalledOnce();
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  test("retries transient completion errors without rerunning the handler", async () => {
+    vi.useFakeTimers();
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    const result = {
+      exitCode: 0,
+      signal: null,
+      timedOut: false,
+      cancelled: false,
+    };
+    const fetchJob = { ...job, kind: "codebase.fetch" };
+    vi.mocked(handlers[fetchJob.kind]!).mockResolvedValue(result);
+    const client = {
+      claimJob: vi.fn().mockResolvedValue(fetchJob),
+      completeJob: vi
+        .fn()
+        .mockRejectedValueOnce(new Error("offline"))
+        .mockResolvedValue({}),
+    };
+    const executor = new JobExecutor(client as unknown as AgentGraphQLClient);
+    executor.execute(fetchJob);
+    await vi.runAllTimersAsync();
+    expect(client.claimJob).toHaveBeenCalledOnce();
+    expect(client.completeJob).toHaveBeenCalledTimes(2);
+    expect(client.completeJob).toHaveBeenLastCalledWith(
+      job.id,
+      "SUCCEEDED",
+      result,
+      undefined,
+    );
+    await executor.cancelAll();
   });
 
   test("does not fail a job when claiming it has a transient error", async () => {

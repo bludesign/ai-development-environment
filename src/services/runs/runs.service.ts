@@ -3187,9 +3187,21 @@ export class RunsService {
         record.rawMetadata && typeof record.rawMetadata === "object"
           ? record.rawMetadata
           : {};
+      // Include list metadata as well as history: a prompt, archive flag or
+      // status can change without any transcript events changing.
+      const snapshotDigest = createHash("sha256")
+        .update(
+          JSON.stringify({
+            ...record,
+            events: historyDigest,
+            usage: undefined,
+          }),
+        )
+        .digest("hex");
       const rawMetadataJson = JSON.stringify({
         ...metadata,
         ...(historyDigest ? { importedHistoryDigest: historyDigest } : {}),
+        importedSnapshotDigest: snapshotDigest,
       });
       const importedStatus = (() => {
         const value = record.status?.toUpperCase() ?? "COMPLETED";
@@ -3228,11 +3240,23 @@ export class RunsService {
                   },
                 })
               : null;
+          const phase = collision
+            ? "IMPORTED_ACTIVE_COLLISION"
+            : "IMPORTED_SYNCED";
+          if (
+            previousMetadata.importedSnapshotDigest === snapshotDigest &&
+            existing.run.phase === phase
+          )
+            continue;
+          const historyChanged =
+            historyDigest &&
+            previousMetadata.importedHistoryDigest !== historyDigest;
           await prisma.$transaction([
             prisma.runAttempt.update({
               where: { id: existing.id },
               data: {
-                rawMetadataJson: historyDigest
+                // Save the success digests only after history persistence.
+                rawMetadataJson: historyChanged
                   ? JSON.stringify(metadata)
                   : rawMetadataJson,
               },
@@ -3241,9 +3265,7 @@ export class RunsService {
               where: { id: existing.runId },
               data: {
                 status: importedStatus,
-                phase: collision
-                  ? "IMPORTED_ACTIVE_COLLISION"
-                  : "IMPORTED_SYNCED",
+                phase,
                 ...(prompt
                   ? {
                       initialPrompt: prompt,
@@ -3266,7 +3288,9 @@ export class RunsService {
                     : optionalText(record.finalOutput, 2_000_000),
                 branch: record.branch ?? existing.run.branch,
                 jiraIssueKey: optionalJiraIssueKey(record.jiraIssueKey),
-                nativeArchivedAt: record.archived ? new Date() : null,
+                nativeArchivedAt: record.archived
+                  ? (existing.run.nativeArchivedAt ?? new Date())
+                  : null,
                 startedAt:
                   parseDate(record.createdAt) ?? existing.run.startedAt,
                 finishedAt:
@@ -3276,17 +3300,13 @@ export class RunsService {
               },
             }),
           ]);
-          if (
-            historyDigest &&
-            previousMetadata.importedHistoryDigest !== historyDigest
-          ) {
+          if (historyChanged) {
             await this.importHistory(existing.runId, existing.id, record);
-          }
-          if (historyDigest)
             await prisma.runAttempt.update({
               where: { id: existing.id },
               data: { rawMetadataJson },
             });
+          }
           publishRun(existing.runId);
         }
         continue;
@@ -3347,7 +3367,9 @@ export class RunsService {
               nativeId: record.nativeId,
               nativeKey,
               status: "IMPORTED",
-              rawMetadataJson: JSON.stringify(metadata),
+              rawMetadataJson: historyDigest
+                ? JSON.stringify(metadata)
+                : rawMetadataJson,
             },
           },
           inputs: {

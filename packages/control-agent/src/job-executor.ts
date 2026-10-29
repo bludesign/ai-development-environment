@@ -4,6 +4,11 @@ import { closeAllWorktreeWatches } from "./handlers/worktrees.js";
 import type { ProcessResult } from "./process-runner.js";
 import { refreshFetchedCodebase } from "./refresh-fetched-codebase.js";
 import { RepositoryCoordinator } from "./repository-coordinator.js";
+import {
+  isRetryableAgentError,
+  MAX_AGENT_REQUEST_ATTEMPTS,
+  waitForAgentRetry,
+} from "./request-errors.js";
 
 export class JobExecutor {
   private readonly running = new Map<
@@ -11,6 +16,7 @@ export class JobExecutor {
     { controller: AbortController; task: Promise<void> }
   >();
   private stopping = false;
+  private readonly shutdown = new AbortController();
 
   constructor(
     private readonly client: AgentGraphQLClient,
@@ -34,6 +40,7 @@ export class JobExecutor {
 
   async cancelAll(): Promise<void> {
     this.stopping = true;
+    this.shutdown.abort();
     closeAllWorktreeWatches();
     const jobs = [...this.running.values()];
     for (const { controller } of jobs) controller.abort();
@@ -125,8 +132,7 @@ export class JobExecutor {
       console.error(`Job ${claimed.id} failed:`, completionError);
     }
 
-    let retry = 0;
-    while (true) {
+    for (let attempt = 1; attempt <= MAX_AGENT_REQUEST_ATTEMPTS; attempt++) {
       try {
         await this.client.completeJob(
           claimed.id,
@@ -136,13 +142,24 @@ export class JobExecutor {
         );
         return;
       } catch (error) {
+        if (this.stopping) return;
+        if (
+          !isRetryableAgentError(error) ||
+          attempt === MAX_AGENT_REQUEST_ATTEMPTS
+        ) {
+          console.error(
+            `Could not report completion for ${claimed.id}; giving up after ${attempt} attempts:`,
+            error instanceof Error ? error.message : error,
+          );
+          return;
+        }
         console.error(
           `Could not report completion for ${claimed.id}; retrying:`,
           error instanceof Error ? error.message : error,
         );
+        const delay = Math.min(30_000, 1_000 * 2 ** (attempt - 1));
+        await waitForAgentRetry(delay, this.shutdown.signal);
         if (this.stopping) return;
-        const delay = Math.min(30_000, 1_000 * 2 ** Math.min(retry++, 5));
-        await new Promise((resolve) => setTimeout(resolve, delay));
       }
     }
   }
