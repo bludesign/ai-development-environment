@@ -682,6 +682,21 @@ export function registerWorktreesPageTests(
           };
           await changeBranch();
           await screen.findByText(branchError, undefined, { timeout: 3_000 });
+          const branchButton = screen.getByRole("button", {
+            name: "feature/AIDE-24",
+          });
+          const branchAlert = screen
+            .getByText(branchError)
+            .closest('[role="alert"]');
+          if (layout === "cards") {
+            expect(branchAlert?.closest('[data-slot="card"]')).toBe(
+              branchButton.closest('[data-slot="card"]'),
+            );
+          } else {
+            expect(branchAlert?.closest("tr")).toBe(
+              branchButton.closest("tr")?.nextElementSibling,
+            );
+          }
 
           inspectionFails = true;
           await act(async () => invalidateInspection());
@@ -1348,6 +1363,101 @@ export function registerWorktreesPageTests(
           ),
         );
       });
+
+      test.each(["cards", "table"])(
+        "keeps action errors local and independently dismissible in %s",
+        async (layout) => {
+          const response = (await request("query Fixture")) as unknown as {
+            worktreeOverview: WorktreeOverview;
+          };
+          const group = response.worktreeOverview.agents[0]!.codebases[0]!;
+          group.worktrees.push({
+            ...group.worktrees[0]!,
+            id: "worktree-2",
+            branch: "feature/AIDE-25",
+            folder: "/workspaces/repo-aide-25",
+            relativePath: "repo-aide-25",
+            primary: false,
+            ticketKey: null,
+            ticketTitle: null,
+            ticketStatus: null,
+            pullRequest: null,
+            latestBuild: null,
+          });
+          const failures = new Map([["worktree-1", "First push failed"]]);
+          request.mockImplementation(async (query, variables) => {
+            if (query.includes("query CommandTargetSummaries")) {
+              const { targets } = variables as {
+                targets: { resourceKind: string; resourceId: string }[];
+              };
+              return {
+                commandTargetSummaries: targets.map((target) => ({
+                  ...target,
+                  commands: [],
+                  activeRuns: [],
+                  recentRuns: [],
+                })),
+              } as never;
+            }
+            if (query.includes("mutation RunWorktreeOperation")) {
+              const { input } = variables as {
+                input: { worktreeId: string };
+              };
+              const failure = failures.get(input.worktreeId);
+              if (failure) throw new Error(failure);
+              return { runWorktreeOperation: { id: "push-job" } } as never;
+            }
+            return response as never;
+          });
+          window.localStorage.setItem("worktrees-layout", layout);
+          render(<WorktreesPage />);
+          const firstBranch = await screen.findByRole("button", {
+            name: "feature/AIDE-24",
+          });
+          const secondBranch = screen.getByRole("button", {
+            name: "feature/AIDE-25",
+          });
+          const actionsFor = (branch: HTMLElement) =>
+            (layout === "cards"
+              ? branch.closest('[data-slot="card"]')
+              : branch.closest("tr")?.nextElementSibling) as HTMLElement;
+          const firstActions = within(actionsFor(firstBranch));
+          const secondActions = within(actionsFor(secondBranch));
+
+          fireEvent.click(firstActions.getByRole("button", { name: "Push" }));
+          await firstActions.findByText("First push failed");
+          expect(firstBranch.getAttribute("aria-expanded")).toBe("false");
+          expect(secondActions.queryByRole("alert")).toBeNull();
+          expect(screen.getAllByRole("alert")).toHaveLength(1);
+
+          // A successful action on another worktree must preserve this error.
+          await act(async () =>
+            fireEvent.click(
+              secondActions.getByRole("button", { name: "Push" }),
+            ),
+          );
+          expect(firstActions.getByText("First push failed")).toBeDefined();
+
+          failures.set("worktree-2", "Second push failed");
+          fireEvent.click(secondActions.getByRole("button", { name: "Push" }));
+          await secondActions.findByText("Second push failed");
+          expect(screen.getAllByRole("alert")).toHaveLength(2);
+          fireEvent.click(
+            firstActions.getByRole("button", { name: "Dismiss error" }),
+          );
+          expect(screen.queryByText("First push failed")).toBeNull();
+          expect(secondActions.getByText("Second push failed")).toBeDefined();
+          expect(navigation.push).not.toHaveBeenCalled();
+
+          failures.delete("worktree-2");
+          await act(async () =>
+            fireEvent.click(
+              secondActions.getByRole("button", { name: "Push" }),
+            ),
+          );
+          expect(screen.queryByRole("alert")).toBeNull();
+        },
+      );
 
       test("clears a worktree index lock after confirmation", async () => {
         render(<WorktreesPage />);

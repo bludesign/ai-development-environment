@@ -1270,7 +1270,6 @@ export function WorktreesPage({ appId }: { appId?: string }) {
             inspectionRefreshToken={inspectionRefreshToken}
             key={repositoryGroup.repository.id}
             layout={layout}
-            onError={setError}
             onManageTags={() => setTagManagerOpen(true)}
             onOpenTicket={(issueKey) => selectJiraIssue(issueKey)}
             onReload={load}
@@ -1289,7 +1288,6 @@ export function WorktreesPage({ appId }: { appId?: string }) {
             inspectionRefreshToken={inspectionRefreshToken}
             key={agentGroup.agent.id}
             layout={layout}
-            onError={setError}
             onManageTags={() => setTagManagerOpen(true)}
             onOpenTicket={(issueKey) => selectJiraIssue(issueKey)}
             onReload={load}
@@ -1552,7 +1550,6 @@ type WorktreeSectionProps = {
   inspectionRefreshToken: number;
   onReload: () => Promise<void>;
   onUpdate: (worktree: Worktree) => void;
-  onError: (error: string | null) => void;
   onManageTags: () => void;
   onOpenTicket: (issueKey: string) => void;
   overview: WorktreeOverview;
@@ -1700,12 +1697,13 @@ function FetchAge({
   );
 }
 
-function WorktreeCard(props: WorktreeItemProps) {
+function WorktreeCard(props: Omit<WorktreeItemProps, "onError">) {
   const { inspectionRefreshToken } = props;
   const { worktree, applyActivity, setUnstagedChanges } = useLiveWorktree(
     props.worktree,
   );
-  const liveProps = { ...props, worktree };
+  const [operationError, setOperationError] = useState<string | null>(null);
+  const liveProps = { ...props, worktree, onError: setOperationError };
   const [expanded, setExpanded] = useState(false);
   const [detail, setDetail] = useState<WorktreeDetail | null>(null);
   const [detailLoading, setDetailLoading] = useState(false);
@@ -1811,7 +1809,7 @@ function WorktreeCard(props: WorktreeItemProps) {
         <WorktreeRebaseConflictItem
           group={props.group}
           onCompleted={props.onReload}
-          onError={props.onError}
+          onError={setOperationError}
           worktree={worktree}
         />
         {detailLoading && (
@@ -1833,6 +1831,10 @@ function WorktreeCard(props: WorktreeItemProps) {
         className="flex-col items-stretch gap-2"
         data-worktree-navigation-ignore
       >
+        <WorktreeErrorAlert
+          error={operationError}
+          onDismiss={() => setOperationError(null)}
+        />
         <ActionRow
           {...liveProps}
           onCompleted={async () => {
@@ -3957,7 +3959,7 @@ function OperationMenuItem({
   );
 }
 
-function WorktreeTable(props: Omit<WorktreeItemProps, "worktree">) {
+function WorktreeTable(props: Omit<WorktreeItemProps, "worktree" | "onError">) {
   const t = useTranslations("worktrees");
   return (
     <div className="rounded-xl border">
@@ -3988,12 +3990,13 @@ function WorktreeTable(props: Omit<WorktreeItemProps, "worktree">) {
   );
 }
 
-function WorktreeTableRows(props: WorktreeItemProps) {
+function WorktreeTableRows(props: Omit<WorktreeItemProps, "onError">) {
   const { baseRepoDirectory, inspectionRefreshToken } = props;
   const { worktree, applyActivity, setUnstagedChanges } = useLiveWorktree(
     props.worktree,
   );
-  const liveProps = { ...props, worktree };
+  const [operationError, setOperationError] = useState<string | null>(null);
+  const liveProps = { ...props, worktree, onError: setOperationError };
   const t = useTranslations("worktrees");
   const router = useRouter();
   const [expanded, setExpanded] = useState(false);
@@ -4122,14 +4125,18 @@ function WorktreeTableRows(props: WorktreeItemProps) {
             <WorktreeRebaseConflictItem
               group={props.group}
               onCompleted={props.onReload}
-              onError={props.onError}
+              onError={setOperationError}
               worktree={worktree}
             />
           </TableCell>
         </TableRow>
       )}
       <TableRow className={cn(highlight)}>
-        <TableCell colSpan={8}>
+        <TableCell className="space-y-2" colSpan={8}>
+          <WorktreeErrorAlert
+            error={operationError}
+            onDismiss={() => setOperationError(null)}
+          />
           <ActionRow
             {...liveProps}
             onCompleted={async () => {
