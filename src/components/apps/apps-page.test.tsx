@@ -84,14 +84,12 @@ describe("AppsPage", () => {
     expect(worktreeLinks).toHaveLength(4);
     expect(worktreeLinks[0]?.textContent).toContain("Dirty worktrees");
     expect(worktreeLinks[1]?.textContent).toContain("Worktrees");
-    expect(worktreeLinks[2]?.textContent).toBe("3Worktrees off default branch");
+    expect(worktreeLinks[2]?.textContent).toBe("3Worktrees off main");
     expect(worktreeLinks[3]?.textContent).toBe("1Open PRs");
     expect(within(dirtyCard!).queryByText("Plans")).toBeNull();
     expect(within(dirtyCard!).queryByText("Sessions")).toBeNull();
     expect(
-      within(cleanCard!).getByRole("link", {
-        name: "0 Worktrees off default branch",
-      }),
+      within(cleanCard!).getByRole("link", { name: "0 Worktrees off main" }),
     ).toBeDefined();
     expect(
       within(cleanCard!).getByRole("link", { name: "0 Open PRs" }),

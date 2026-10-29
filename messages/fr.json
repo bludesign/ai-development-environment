@@ -202,7 +202,7 @@
     "emptyDescription": "Créez une app pour réunir dépôts, worktrees, exécutions IA et builds.",
     "noDescription": "Aucune description",
     "dirtyWorktrees": "Worktrees modifiés",
-    "nonMainWorktrees": "Worktrees hors branche par défaut",
+    "nonMainWorktrees": "Worktrees hors main",
     "openRequests": "PRs ouvertes",
     "worktrees": "Worktrees",
     "plans": "Plans",

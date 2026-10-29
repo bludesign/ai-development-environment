@@ -202,7 +202,7 @@
     "emptyDescription": "Create an app to bring repositories, worktrees, AI runs, and builds together.",
     "noDescription": "No description",
     "dirtyWorktrees": "Dirty worktrees",
-    "nonMainWorktrees": "Worktrees off default branch",
+    "nonMainWorktrees": "Worktrees off main",
     "openRequests": "Open PRs",
     "worktrees": "Worktrees",
     "plans": "Plans",
