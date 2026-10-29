@@ -908,6 +908,94 @@ beforeEach(() => {
 });
 
 describe("GitHub service", () => {
+  test("counts all running and queued Actions across codebase repositories without enrichment", async () => {
+    state.codebaseRepositories.push(
+      {
+        ...state.codebaseRepositories[0],
+        id: "codebase-repository-2",
+        canonicalOrigin: "github.com/acme/api",
+      },
+      {
+        ...state.codebaseRepositories[0],
+        id: "gitlab-repository",
+        canonicalOrigin: "gitlab.com/acme/widgets",
+      },
+    );
+    const totals: Record<string, number> = {
+      in_progress: 128,
+      queued: 3,
+      requested: 2,
+      waiting: 1,
+      pending: 4,
+    };
+    let running = 0;
+    let maximumRunning = 0;
+    const fetchMock = vi.fn(async (url: string) => {
+      running += 1;
+      maximumRunning = Math.max(maximumRunning, running);
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      running -= 1;
+      const request = new URL(url);
+      expect(request.pathname).toMatch(
+        /^\/repos\/acme\/(widgets|api)\/actions\/runs$/,
+      );
+      expect(request.searchParams.get("per_page")).toBe("1");
+      expect(request.searchParams.get("exclude_pull_requests")).toBe("true");
+      const status = request.searchParams.get("status")!;
+      expect(totals).toHaveProperty(status);
+      return response({ total_count: totals[status], workflow_runs: [] });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    expect(await new GitHubService().activeActionsCount()).toBe(276);
+    expect(fetchMock).toHaveBeenCalledTimes(10);
+    expect(maximumRunning).toBeLessThanOrEqual(4);
+    expect(cacheClient.recordRestCall).toHaveBeenCalledWith(
+      expect.objectContaining({
+        operation: GITHUB_REST_OPERATIONS.actions.listWorkflowRunsForRepo,
+      }),
+    );
+  });
+
+  test.each(["unconfigured", "no repositories"])(
+    "returns zero active Actions when %s without provider requests",
+    async (mode) => {
+      if (mode === "unconfigured") state.apiToken = null;
+      else state.codebaseRepositories = [];
+      const fetchMock = vi.fn();
+      vi.stubGlobal("fetch", fetchMock);
+      expect(await new GitHubService().activeActionsCount()).toBe(0);
+      expect(fetchMock).not.toHaveBeenCalled();
+    },
+  );
+
+  test.each([-1, 1.5, "12", null])(
+    "rejects an invalid active Actions count %s",
+    async (total) => {
+      vi.stubGlobal(
+        "fetch",
+        vi.fn(async () => response({ total_count: total })),
+      );
+      await expect(new GitHubService().activeActionsCount()).rejects.toThrow(
+        "invalid active workflow run count",
+      );
+    },
+  );
+
+  test("rejects a partial active Actions scan rather than reporting a smaller total", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string) =>
+        new URL(url).searchParams.get("status") === "queued"
+          ? response({ message: "Provider unavailable" }, 503)
+          : response({ total_count: 10 }),
+      ),
+    );
+    await expect(new GitHubService().activeActionsCount()).rejects.toThrow(
+      "Provider unavailable",
+    );
+  });
+
   test("persists merge preferences and preserves them on unrelated settings updates", async () => {
     const service = new GitHubService();
     const preferences = {

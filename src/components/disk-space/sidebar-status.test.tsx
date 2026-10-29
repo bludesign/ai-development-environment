@@ -5,6 +5,7 @@ import {
   render,
   screen,
   waitFor,
+  within,
 } from "@testing-library/react";
 import type { AnchorHTMLAttributes, ReactNode } from "react";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
@@ -43,6 +44,16 @@ vi.mock("@/i18n/navigation", () => ({
 
 const request = vi.mocked(controlPlaneRequest);
 const subscriptions = vi.mocked(controlPlaneSubscriptions);
+let integrationState: {
+  github: { configured: boolean };
+  gitlab: { configured: boolean };
+};
+let providerActivity: {
+  pullRequests: number | null;
+  actions: number | null;
+  mergeRequests: number | null;
+  pipelines: number | null;
+};
 
 /** jsdom ships no `matchMedia`, and the sidebar asks it for the viewport. */
 function setViewportWidth(width: number) {
@@ -131,6 +142,16 @@ const sidebarStatus = {
 describe("SidebarStatusFooter", () => {
   beforeEach(() => {
     setViewportWidth(1280);
+    integrationState = {
+      github: { configured: false },
+      gitlab: { configured: false },
+    };
+    providerActivity = {
+      pullRequests: 12,
+      actions: 6,
+      mergeRequests: 8,
+      pipelines: 3,
+    };
     subscriptions.mockReturnValue({ subscribe: vi.fn(() => vi.fn()) } as never);
     request.mockImplementation(async (query) => {
       const operation = String(query);
@@ -138,8 +159,10 @@ describe("SidebarStatusFooter", () => {
         return {
           sidebarStatus: {
             ...sidebarStatus,
+            activity: { ...sidebarStatus.activity, ...providerActivity },
             diskSummary: sidebarStatus.diskSpace,
           },
+          sourceControlIntegrationState: integrationState,
           derivedDataDeletionHistory: { items: [] },
         } as never;
       }
@@ -217,9 +240,9 @@ describe("SidebarStatusFooter", () => {
       expect(link.getAttribute("href")).toBe(href);
     }
     // Without an ActionCenterProvider the footer falls back to zero items.
-    expect(screen.getByRole("link", { name: /Actions/ }).textContent).toContain(
-      "0",
-    );
+    expect(
+      screen.getByRole("link", { name: /^Actions/ }).textContent,
+    ).toContain("0");
     expect(
       screen.getByRole("link", { name: /Commands/ }).getAttribute("href"),
     ).toBe("/dashboard/commands");
@@ -228,18 +251,168 @@ describe("SidebarStatusFooter", () => {
     ).toContain("5");
   });
 
-  test("closes the mobile navigation when a counter is followed", async () => {
-    setViewportWidth(390);
+  test.each([
+    { name: "GitHub only", github: true, gitlab: false },
+    { name: "GitLab only", github: false, gitlab: true },
+    { name: "both providers", github: true, gitlab: true },
+    { name: "neither provider", github: false, gitlab: false },
+  ])("shows provider activity for $name", async ({ github, gitlab }) => {
+    integrationState = {
+      github: { configured: github },
+      gitlab: { configured: gitlab },
+    };
     renderFooter();
 
     await screen.findByText("$1.25");
-    fireEvent.click(screen.getByRole("button", { name: "sheet closed" }));
-    expect(screen.getByRole("button", { name: "sheet open" })).toBeTruthy();
-
-    fireEvent.click(screen.getByRole("link", { name: /Workflows/ }));
-
-    expect(screen.getByRole("button", { name: "sheet closed" })).toBeTruthy();
+    const counters = [
+      ["Pull Reqs", "/github/pull-requests", "12", github],
+      ["Actions", "/github/actions", "6", github],
+      ["Merge Reqs", "/gitlab/merge-requests", "8", gitlab],
+      ["Pipelines", "/gitlab/pipelines", "3", gitlab],
+    ] as const;
+    for (const [label, href, count, visible] of counters) {
+      const link = screen
+        .queryAllByRole("link", { name: new RegExp(`^${label}`) })
+        .find((candidate) => candidate.getAttribute("href") === href);
+      if (visible) {
+        expect(link?.getAttribute("href")).toBe(href);
+        expect(within(link!).getByText(count)).toBeDefined();
+      } else {
+        expect(link).toBeUndefined();
+      }
+    }
+    expect(
+      request.mock.calls.some(
+        ([query]) =>
+          query.includes("pullRequests actions mergeRequests pipelines") &&
+          query.includes("sourceControlIntegrationState"),
+      ),
+    ).toBe(true);
   });
+
+  test("keeps zero totals visible and distinguishes unavailable totals", async () => {
+    integrationState = {
+      github: { configured: true },
+      gitlab: { configured: true },
+    };
+    providerActivity = {
+      pullRequests: 0,
+      actions: null,
+      mergeRequests: 0,
+      pipelines: null,
+    };
+    renderFooter();
+
+    await screen.findByText("$1.25");
+    for (const label of ["Pull Reqs", "Merge Reqs"]) {
+      expect(
+        within(
+          screen.getByRole("link", { name: new RegExp(`^${label}`) }),
+        ).getByText("0"),
+      ).toBeDefined();
+    }
+    for (const [label, href] of [
+      ["Actions", "/github/actions"],
+      ["Pipelines", "/gitlab/pipelines"],
+    ]) {
+      const link = screen
+        .getAllByRole("link", { name: new RegExp(`^${label}`) })
+        .find((candidate) => candidate.getAttribute("href") === href)!;
+      expect(within(link).getByText("—")).toBeDefined();
+    }
+  });
+
+  test("refreshes counts and provider visibility when integration settings change", async () => {
+    let notifyConfiguration!: () => void;
+    subscriptions.mockReturnValue({
+      subscribe: vi.fn(
+        (
+          { query }: { query: string },
+          sink: {
+            next: (result: {
+              data: { integrationConfigurationChanged: string };
+            }) => void;
+          },
+        ) => {
+          if (query.includes("IntegrationConfigurationChanged"))
+            notifyConfiguration = () =>
+              sink.next({
+                data: { integrationConfigurationChanged: "github" },
+              });
+          return vi.fn();
+        },
+      ),
+    } as never);
+    renderFooter();
+    await screen.findByText("$1.25");
+    expect(screen.queryByRole("link", { name: /^Pull Reqs/ })).toBeNull();
+
+    integrationState = {
+      github: { configured: true },
+      gitlab: { configured: false },
+    };
+    await act(async () => notifyConfiguration());
+    expect(
+      within(await screen.findByRole("link", { name: /^Pull Reqs/ })).getByText(
+        "12",
+      ),
+    ).toBeDefined();
+
+    integrationState = {
+      github: { configured: false },
+      gitlab: { configured: true },
+    };
+    await act(async () => notifyConfiguration());
+    await screen.findByRole("link", { name: /^Merge Reqs/ });
+    expect(screen.queryByRole("link", { name: /^Pull Reqs/ })).toBeNull();
+    expect(
+      screen
+        .queryAllByRole("link", { name: /^Actions/ })
+        .some((link) => link.getAttribute("href") === "/github/actions"),
+    ).toBe(false);
+  });
+
+  test("keeps the last totals during a failed status refresh", async () => {
+    integrationState.github.configured = true;
+    renderFooter();
+    const pullRequests = await screen.findByRole("link", {
+      name: /^Pull Reqs/,
+    });
+    request.mockRejectedValueOnce(new Error("Temporarily unavailable"));
+    const recover = vi.mocked(onControlPlaneRecovery).mock.calls.at(-1)![0];
+    await act(async () => recover({ initialConnection: false }));
+    expect(within(pullRequests).getByText("12")).toBeDefined();
+  });
+
+  test.each([
+    ["Workflows", "/dashboard/workflows"],
+    ["Pull Reqs", "/github/pull-requests"],
+    ["Actions", "/github/actions"],
+    ["Merge Reqs", "/gitlab/merge-requests"],
+    ["Pipelines", "/gitlab/pipelines"],
+  ])(
+    "closes the mobile navigation when %s is followed",
+    async (label, href) => {
+      setViewportWidth(390);
+      integrationState = {
+        github: { configured: true },
+        gitlab: { configured: true },
+      };
+      renderFooter();
+
+      await screen.findByText("$1.25");
+      fireEvent.click(screen.getByRole("button", { name: "sheet closed" }));
+      expect(screen.getByRole("button", { name: "sheet open" })).toBeTruthy();
+
+      fireEvent.click(
+        screen
+          .getAllByRole("link", { name: new RegExp(`^${label}`) })
+          .find((link) => link.getAttribute("href") === href)!,
+      );
+
+      expect(screen.getByRole("button", { name: "sheet closed" })).toBeTruthy();
+    },
+  );
 
   test("keeps the sidebar open on a desktop viewport", async () => {
     renderFooter();
@@ -259,6 +432,7 @@ describe("SidebarStatusFooter", () => {
       return {
         sidebarStatus: {
           ...sidebarStatus,
+          activity: { ...sidebarStatus.activity, ...providerActivity },
           diskSummary: {
             ...sidebarStatus.diskSpace,
             agents: [
@@ -274,6 +448,7 @@ describe("SidebarStatusFooter", () => {
             ],
           },
         },
+        sourceControlIntegrationState: integrationState,
         derivedDataDeletionHistory: { items: [] },
       } as never;
     });

@@ -36,6 +36,7 @@ import { RunsService } from "@/services/runs";
 import { CommandsService } from "@/services/commands";
 import { DiskSpaceService } from "@/services/disk-space";
 import { SystemStatusService } from "@/services/system-status";
+import { SidebarIntegrationsService } from "@/services/system-status/sidebar-integrations.service";
 import { ActionCenterRequests } from "@/services/action-center/action-center-requests";
 import { ActionCenterService } from "@/services/action-center";
 import { AppsService } from "@/services/apps";
@@ -194,15 +195,21 @@ function createServerServices(): ServerServices {
     gitHubPipelineStatusService,
     gitLabService,
   );
-  const systemStatusService = new SystemStatusService(
-    ccusageService,
-    diskSpaceService,
-    pollingService,
-  );
   const actionCenterRequests = new ActionCenterRequests(
     gitHubService,
     gitLabService,
     pollingService,
+  );
+  const systemStatusService = new SystemStatusService(
+    ccusageService,
+    diskSpaceService,
+    pollingService,
+    new SidebarIntegrationsService(
+      gitHubService,
+      gitLabService,
+      pollingService,
+      actionCenterRequests,
+    ),
   );
   const actionCenterService = new ActionCenterService(actionCenterRequests);
   const appsService = new AppsService();

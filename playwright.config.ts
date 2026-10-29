@@ -52,6 +52,10 @@ const fixedServerTimePath = path.resolve(
   process.cwd(),
   "playwright/fixed-server-time.cjs",
 );
+const mockGitLabFetchPath = path.resolve(
+  process.cwd(),
+  "playwright/mock-gitlab-fetch.cjs",
+);
 
 // Absolute file URL so the standalone server resolves the same database regardless of its CWD.
 const mockDatabaseUrl = `file:${path.resolve(process.cwd(), "prisma/mock.db")}`;
@@ -131,7 +135,7 @@ export default defineConfig({
         DATABASE_URL: mockDatabaseUrl,
         NODE_ENV: "production",
         NODE_OPTIONS:
-          `${process.env.NODE_OPTIONS ?? ""} --require=${fixedServerTimePath}`.trim(),
+          `${process.env.NODE_OPTIONS ?? ""} --require=${fixedServerTimePath} --require=${mockGitLabFetchPath}`.trim(),
         // The instrumentation hook binds this port while Next starts. It must be unique per
         // capture run because Playwright can run alongside dev servers and other captures.
         AGENT_WS_HOSTNAME: HOST,
@@ -139,6 +143,7 @@ export default defineConfig({
         // Keep every GitHub call on the stub above; nothing reaches github.com.
         GITHUB_API_BASE_URL: mockApiURL,
         GITHUB_GRAPHQL_URL: `${mockApiURL}/graphql`,
+        SCREENSHOT_GITLAB_API_ORIGIN: mockApiURL,
         // Runtime GitHub calls would otherwise make the cache metrics depend on route order.
         // The seeded call history remains visible and deterministic.
         GITHUB_CACHE_LOGGING_DISABLED: "true",

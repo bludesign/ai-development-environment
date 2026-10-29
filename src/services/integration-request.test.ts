@@ -43,9 +43,14 @@ test("does not start queued enrichment after the caller has failed", async () =>
     },
     2,
   );
-  await expect(result).rejects.toThrow("unavailable");
+  let settled = false;
+  void result.catch(() => {
+    settled = true;
+  });
+  await Promise.resolve();
+  await Promise.resolve();
+  expect(settled).toBe(false);
   gate.resolve();
-  await Promise.resolve();
-  await Promise.resolve();
+  await expect(result).rejects.toThrow("unavailable");
   expect(started).toEqual([0, 1]);
 });

@@ -1,4 +1,7 @@
 import type { GitLabPipelineStatus } from "@/services/gitlab";
+import { isActiveGitLabPipeline } from "@/services/gitlab/pipeline-status";
+
+export { isActiveGitLabPipeline } from "@/services/gitlab/pipeline-status";
 
 // Provider filter values; UNKNOWN is only a local presentation fallback.
 export const gitLabPipelineStatuses = [
@@ -34,18 +37,6 @@ export const gitLabPipelineSources = [
   "ondemand_dast_validation",
   "security_orchestration_policy",
 ] as const;
-
-export function isActiveGitLabPipeline(status: GitLabPipelineStatus) {
-  return [
-    "CREATED",
-    "WAITING_FOR_RESOURCE",
-    "WAITING_FOR_CALLBACK",
-    "PREPARING",
-    "PENDING",
-    "RUNNING",
-    "CANCELING",
-  ].includes(status);
-}
 
 export function canRetryGitLabPipeline(status: GitLabPipelineStatus) {
   return status === "FAILED" || status === "CANCELED";

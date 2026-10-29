@@ -159,6 +159,38 @@ const pipelines = [
     duration: 416,
     queued_duration: 7,
   },
+  {
+    id: 9403,
+    iid: 120,
+    project_id: Number(PROJECT_ID),
+    ref: "docs/release-pipeline",
+    sha: mergeRequests[1]!.sha,
+    source: "push",
+    status: "running",
+    web_url: `${BASE_URL}/${PROJECT_PATH}/-/pipelines/9403`,
+    created_at: minutesAgo(4).toISOString(),
+    started_at: minutesAgo(3).toISOString(),
+    updated_at: minutesAgo(1).toISOString(),
+    finished_at: null,
+    duration: 180,
+    queued_duration: 5,
+  },
+  {
+    id: 9402,
+    iid: 119,
+    project_id: Number(PROJECT_ID),
+    ref: "main",
+    sha: "8192a3b4c5d6e7f8091a2b3c4d5e6f708192a3b4",
+    source: "push",
+    status: "pending",
+    web_url: `${BASE_URL}/${PROJECT_PATH}/-/pipelines/9402`,
+    created_at: minutesAgo(5).toISOString(),
+    started_at: null,
+    updated_at: minutesAgo(1).toISOString(),
+    finished_at: null,
+    duration: 0,
+    queued_duration: 60,
+  },
 ];
 
 const pipelineJobs = pipelines.flatMap((pipeline) => [
@@ -319,6 +351,19 @@ const mergeRequestDiscussions = [
     ],
   },
 ];
+
+/** Shared by seeded caches and the local screenshot API, including forced reads. */
+export const gitlabMockData = {
+  baseUrl: BASE_URL,
+  projectId: PROJECT_ID,
+  projectPath: PROJECT_PATH,
+  user,
+  mergeRequests,
+  pipelines,
+  pipelineJobs,
+  mergeRequestCommits,
+  mergeRequestDiscussions,
+};
 
 function cacheEntry(input: {
   id: string;

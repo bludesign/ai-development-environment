@@ -182,6 +182,14 @@ input UpdateDiskSpaceSettingsInput {
 
 "Represents sidebar activity counts in the GraphQL API."
 type SidebarActivityCounts {
+  "Open GitHub Mine requests and requests awaiting personal approval, within the Action Center age limit. Null when GitHub is not configured."
+  pullRequests: Int
+  "Running and queued GitHub Actions workflow runs across managed repositories. Null before a successful refresh or when GitHub is not configured."
+  actions: Int
+  "Open GitLab Mine requests and requests awaiting personal approval, within the Action Center age limit. Null when GitLab is not configured."
+  mergeRequests: Int
+  "Active GitLab pipelines across managed projects. Null before a successful refresh or when GitLab is not configured."
+  pipelines: Int
   "The plans associated with this sidebar activity counts."
   plans: Int!
   "The sessions associated with this sidebar activity counts."

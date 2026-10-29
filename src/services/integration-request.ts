@@ -7,7 +7,7 @@ export async function mapIntegrationRequests<T, R>(
   const results = new Array<R>(items.length);
   let next = 0;
   let failed = false;
-  await Promise.all(
+  const workers = await Promise.allSettled(
     Array.from(
       { length: Math.min(items.length, Math.max(1, concurrency)) },
       async () => {
@@ -23,5 +23,8 @@ export async function mapIntegrationRequests<T, R>(
       },
     ),
   );
+  // Drain in-flight requests before a caller starts another bounded scan.
+  const failure = workers.find((worker) => worker.status === "rejected");
+  if (failure?.status === "rejected") throw failure.reason;
   return results;
 }
