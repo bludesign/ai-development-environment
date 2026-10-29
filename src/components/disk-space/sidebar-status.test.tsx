@@ -265,9 +265,9 @@ describe("SidebarStatusFooter", () => {
 
     await screen.findByText("$1.25");
     const counters = [
-      ["Pull Requests", "/github/pull-requests", "12", github],
+      ["Pull Reqs", "/github/pull-requests", "12", github],
       ["Actions", "/github/actions", "6", github],
-      ["Merge Requests", "/gitlab/merge-requests", "8", gitlab],
+      ["Merge Reqs", "/gitlab/merge-requests", "8", gitlab],
       ["Pipelines", "/gitlab/pipelines", "3", gitlab],
     ] as const;
     for (const [label, href, count, visible] of counters) {
@@ -304,7 +304,7 @@ describe("SidebarStatusFooter", () => {
     renderFooter();
 
     await screen.findByText("$1.25");
-    for (const label of ["Pull Requests", "Merge Requests"]) {
+    for (const label of ["Pull Reqs", "Merge Reqs"]) {
       expect(
         within(
           screen.getByRole("link", { name: new RegExp(`^${label}`) }),
@@ -345,7 +345,7 @@ describe("SidebarStatusFooter", () => {
     } as never);
     renderFooter();
     await screen.findByText("$1.25");
-    expect(screen.queryByRole("link", { name: /^Pull Requests/ })).toBeNull();
+    expect(screen.queryByRole("link", { name: /^Pull Reqs/ })).toBeNull();
 
     integrationState = {
       github: { configured: true },
@@ -353,9 +353,9 @@ describe("SidebarStatusFooter", () => {
     };
     await act(async () => notifyConfiguration());
     expect(
-      within(
-        await screen.findByRole("link", { name: /^Pull Requests/ }),
-      ).getByText("12"),
+      within(await screen.findByRole("link", { name: /^Pull Reqs/ })).getByText(
+        "12",
+      ),
     ).toBeDefined();
 
     integrationState = {
@@ -363,8 +363,8 @@ describe("SidebarStatusFooter", () => {
       gitlab: { configured: true },
     };
     await act(async () => notifyConfiguration());
-    await screen.findByRole("link", { name: /^Merge Requests/ });
-    expect(screen.queryByRole("link", { name: /^Pull Requests/ })).toBeNull();
+    await screen.findByRole("link", { name: /^Merge Reqs/ });
+    expect(screen.queryByRole("link", { name: /^Pull Reqs/ })).toBeNull();
     expect(
       screen
         .queryAllByRole("link", { name: /^Actions/ })
@@ -376,7 +376,7 @@ describe("SidebarStatusFooter", () => {
     integrationState.github.configured = true;
     renderFooter();
     const pullRequests = await screen.findByRole("link", {
-      name: /^Pull Requests/,
+      name: /^Pull Reqs/,
     });
     request.mockRejectedValueOnce(new Error("Temporarily unavailable"));
     const recover = vi.mocked(onControlPlaneRecovery).mock.calls.at(-1)![0];
@@ -386,9 +386,9 @@ describe("SidebarStatusFooter", () => {
 
   test.each([
     ["Workflows", "/dashboard/workflows"],
-    ["Pull Requests", "/github/pull-requests"],
+    ["Pull Reqs", "/github/pull-requests"],
     ["Actions", "/github/actions"],
-    ["Merge Requests", "/gitlab/merge-requests"],
+    ["Merge Reqs", "/gitlab/merge-requests"],
     ["Pipelines", "/gitlab/pipelines"],
   ])(
     "closes the mobile navigation when %s is followed",

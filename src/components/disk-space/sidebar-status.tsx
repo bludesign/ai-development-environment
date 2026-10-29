@@ -286,7 +286,7 @@ export function SidebarStatusFooter() {
     ...(integrations?.github.configured
       ? ([
           {
-            key: "pullRequests",
+            key: "pullReqs",
             href: "/github/pull-requests",
             icon: GitPullRequest,
             count: status?.activity.pullRequests,
@@ -302,7 +302,7 @@ export function SidebarStatusFooter() {
     ...(integrations?.gitlab.configured
       ? ([
           {
-            key: "mergeRequests",
+            key: "mergeReqs",
             href: "/gitlab/merge-requests",
             icon: GitMerge,
             count: status?.activity.mergeRequests,

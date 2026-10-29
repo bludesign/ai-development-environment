@@ -50,6 +50,8 @@
     "gitlab": "GitLab",
     "pullRequests": "Solicitudes de extracción",
     "mergeRequests": "Solicitudes de fusión",
+    "pullReqs": "Solic. extracción",
+    "mergeReqs": "Solic. fusión",
     "actions": "Acciones",
     "pipelines": "Canalizaciones",
     "webhooks": "Webhooks",

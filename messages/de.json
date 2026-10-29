@@ -50,6 +50,8 @@
     "gitlab": "GitLab",
     "pullRequests": "Pull Requests",
     "mergeRequests": "Merge Requests",
+    "pullReqs": "Pull Reqs",
+    "mergeReqs": "Merge Reqs",
     "actions": "Actions",
     "pipelines": "CI/CD-Pipelines",
     "webhooks": "Webhooks",

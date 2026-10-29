@@ -228,9 +228,9 @@ test.describe("app screenshots", () => {
         // Wait for the real background summary scan and request discovery, so
         // screenshots never capture a transient dash or a false zero total.
         for (const [path, label, count] of [
-          ["/github/pull-requests", "Pull Requests", 11],
+          ["/github/pull-requests", "Pull Reqs", 11],
           ["/github/actions", "Actions", 2],
-          ["/gitlab/merge-requests", "Merge Requests", 2],
+          ["/gitlab/merge-requests", "Merge Reqs", 2],
           ["/gitlab/pipelines", "Pipelines", 2],
         ] as const) {
           await expect(footer.locator(`a[href$="${path}"]`)).toHaveText(
