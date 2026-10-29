@@ -254,10 +254,12 @@ describe("crash investigation MCP tools", () => {
       tool(group, "get_dsym").invoke({ id: "missing" }),
     ).resolves.toEqual({ dsym: null });
     expect(
-      group.tools.every(
-        ({ annotations }) =>
-          annotations.readOnlyHint && !annotations.destructiveHint,
-      ),
+      group.tools
+        .filter(({ name }) => name.startsWith("get_"))
+        .every(
+          ({ annotations }) =>
+            annotations.readOnlyHint && !annotations.destructiveHint,
+        ),
     ).toBe(true);
   });
 });

@@ -15,6 +15,7 @@ import {
   type BuiltInToolGroup,
 } from "../builtin-tools";
 import { emptyInput, serviceTool } from "./service-tool";
+import { createWorktreeAdministrationTools } from "./administration-tools";
 
 const idInput = z.object({ id: z.string().min(1) });
 const requestInput = z.object({
@@ -101,6 +102,7 @@ export function createWorktreeToolGroup(
     name: "Worktrees",
     children: [],
     tools: [
+      ...createWorktreeAdministrationTools(service),
       serviceTool({
         name: "get_worktrees",
         title: "Get worktrees",

@@ -202,7 +202,7 @@
     "emptyDescription": "Erstellen Sie eine App, um Repositories, Worktrees, KI-Läufe und Builds zusammenzuführen.",
     "noDescription": "Keine Beschreibung",
     "dirtyWorktrees": "Geänderte Worktrees",
-    "nonMainWorktrees": "Worktrees außerhalb von main",
+    "nonMainWorktrees": "Worktrees außerhalb des Standardzweigs",
     "openRequests": "Offene PRs",
     "worktrees": "Worktrees",
     "plans": "Pläne",

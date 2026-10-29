@@ -117,6 +117,9 @@ describe("built-in tool registry", () => {
       "get_saved_telemetry_filters",
       "save_telemetry_filter",
       "export_telemetry",
+      "save_telemetry_view_settings",
+      "delete_telemetry_preset",
+      "delete_telemetry_filter",
     ]);
     expect(debugging.children[0]!.tools.map(({ name }) => name)).toEqual([
       "get_console_logs",
@@ -221,7 +224,7 @@ describe("built-in tool registry", () => {
       ]),
     );
     const tools = expanded.definitions();
-    expect(tools).toHaveLength(339);
+    expect(tools).toHaveLength(428);
     expect(new Set(tools.map(({ name }) => name)).size).toBe(tools.length);
     expect(tools.every(({ annotations }) => Boolean(annotations))).toBe(true);
   });
@@ -266,12 +269,14 @@ describe("built-in tool registry", () => {
       apps: placeholder,
       cliHealth: placeholder,
       crashes: placeholder,
+      repositoryTransfer: placeholder,
+      toolAdministration: placeholder,
     };
     const complete = createBuiltInToolRegistry(services);
-    expect(complete.definitions()).toHaveLength(420);
-    expect(complete.catalog()).toHaveLength(29);
+    expect(complete.definitions()).toHaveLength(560);
+    expect(complete.catalog()).toHaveLength(30);
     expect(new Set(complete.definitions().map(({ name }) => name)).size).toBe(
-      420,
+      560,
     );
     expect(complete.catalog().map(({ id }) => id)).toEqual(
       expect.arrayContaining([

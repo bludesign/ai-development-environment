@@ -18,6 +18,7 @@ import {
   agentEventBus,
   agentJobChangedTopic,
   CODEBASE_CHANGED_TOPIC,
+  REPOSITORY_TRANSFER_CHANGED_TOPIC,
 } from "@/services/agent-control";
 
 export type RepositoryCloneDestination = {
@@ -736,6 +737,9 @@ export class RepositoryCloneService {
       },
     });
     agentEventBus.publish(topic(id), { repositoryTransferChanged: id });
+    agentEventBus.publish(REPOSITORY_TRANSFER_CHANGED_TOPIC, {
+      repositoryTransferChanged: id,
+    });
   }
 
   async retry(id: string, requestId: string) {

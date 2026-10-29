@@ -22,6 +22,7 @@ import {
   type WorkflowTriggerKind,
 } from "./kinds";
 import { workflowValueSessionPaths } from "./session";
+import { WORKFLOW_CAPABILITY_ACTIONS } from "./capability-actions";
 
 /**
  * The config every step and trigger kind accepts, described declaratively.
@@ -349,6 +350,12 @@ const runInputFields = (
 // ---------------------------------------------------------------------------
 
 const STEP_CONFIG_DESCRIPTORS: StepConfigDescriptors = {
+  ...Object.fromEntries(
+    WORKFLOW_CAPABILITY_ACTIONS.map((action) => [
+      action.kind,
+      { fields: action.fields },
+    ]),
+  ),
   // -- Jira ------------------------------------------------------------------
   JIRA_LOAD_TICKET: {
     fields: [
@@ -1690,6 +1697,22 @@ const ALL_TRIGGER_KINDS: WorkflowTriggerKind[] = [
   "SSE_BREAKPOINT_RESOLVED",
   "SSE_STREAM_COMPLETED",
   "SSE_STREAM_FAILED",
+  "CRASH_REPORT_CHANGED",
+  "DSYM_CHANGED",
+  "TELEMETRY_CONSOLE_INGESTED",
+  "TELEMETRY_ANALYTICS_INGESTED",
+  "CLI_HEALTH_RESULT",
+  "TAILSCALE_SERVE_STATE_CHANGED",
+  "TAILSCALE_SERVE_OPERATION_RESULT",
+  "REPOSITORY_TRANSFER_RESULT",
+  "APP_CHANGED",
+  "COMMAND_DEFINITION_CHANGED",
+  "BUILD_SCRIPT_CHANGED",
+  "SKILL_DEFINITION_CHANGED",
+  "NOTIFICATION_CREATED",
+  "ACTION_CENTER_CHANGED",
+  "SSE_ENDPOINT_CHANGED",
+  "SSE_STORAGE_CHANGED",
 ];
 
 const TRIGGER_CONFIG_DESCRIPTORS: TriggerConfigDescriptors = Object.fromEntries(
@@ -1777,6 +1800,34 @@ const TRIGGER_CONFIG_DESCRIPTORS: TriggerConfigDescriptors = Object.fromEntries(
             required: true,
             valueModes: ["literal", "interpolation"],
           }),
+        ]),
+      ];
+    }
+    if (kind === "WORKTREE_DIRTY_DURATION") {
+      return [
+        kind,
+        triggerWithFilters([
+          num("durationSeconds", "Dirty duration (seconds)", {
+            default: 3600,
+            minimum: 1,
+            maximum: 31536000,
+            integer: true,
+            help: "Fire once after continuously dirty for this long; resets when clean.",
+          }),
+        ]),
+      ];
+    }
+    if (kind === "SIGNING_ASSET_EXPIRING") {
+      return [
+        kind,
+        triggerWithFilters([
+          text("thresholdPath", "Threshold path", {
+            default: "signingProfile.expiresInDays",
+          }),
+          enumField("thresholdOperator", "Operator", OPERATOR_OPTIONS, {
+            default: "LTE",
+          }),
+          json("thresholdValue", "Threshold value", { default: 30 }),
         ]),
       ];
     }

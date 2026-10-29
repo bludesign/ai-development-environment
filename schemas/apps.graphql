@@ -28,7 +28,7 @@ type AppCounts {
   worktrees: Int!
   "Number of visible worktrees with staged or unstaged changes."
   dirtyWorktrees: Int!
-  "Number of visible worktrees on a named branch other than main."
+  "Number of visible worktrees on a named branch other than their checkout's known default branch. Excludes checkouts whose default branch is unknown."
   nonMainWorktrees: Int!
   "Number of distinct open pull requests and merge requests linked to visible worktrees."
   openRequests: Int!

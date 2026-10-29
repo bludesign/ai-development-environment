@@ -8,6 +8,7 @@ import {
   type BuiltInToolGroup,
 } from "../builtin-tools";
 import { serviceTool } from "./service-tool";
+import { createGitHubAdministrationTools } from "./administration-tools";
 
 const source = "WORKFLOW_AUTOMATION";
 const audit = { actor: "workflow", ipAddress: null };
@@ -25,6 +26,7 @@ export function createGitHubToolGroup(
     name: "GitHub",
     children: [],
     tools: [
+      ...createGitHubAdministrationTools(service),
       serviceTool({
         name: "get_github_status",
         title: "Get GitHub status",

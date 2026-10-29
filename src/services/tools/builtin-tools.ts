@@ -31,6 +31,7 @@ import type { PushNotificationsService } from "@/services/push-notifications";
 import type { TelemetryService } from "@/services/telemetry";
 import type { TailscaleServeService } from "@/services/tailscale";
 import type { RunsService } from "@/services/runs";
+import type { RepositoryTransferService } from "@/services/repository-transfer/repository-transfer.service";
 import type { SseService } from "@/services/sse";
 import type { WorkflowsService } from "@/services/workflows";
 import type {
@@ -59,6 +60,7 @@ import { createJiraToolGroup } from "./builtin-tools/jira";
 import { createIosDeviceToolGroup } from "./builtin-tools/ios-devices";
 import { createNotificationToolGroup } from "./builtin-tools/notifications";
 import { createRunToolGroup } from "./builtin-tools/runs";
+import { createRepositoryTransferToolGroup } from "./builtin-tools/repository-transfer";
 import { createSigningAssetToolGroup } from "./builtin-tools/signing-assets";
 import { createSkillToolGroup } from "./builtin-tools/skills";
 import { createSystemToolGroup } from "./builtin-tools/system";
@@ -66,6 +68,7 @@ import { createUsageCostToolGroup } from "./builtin-tools/usage-costs";
 import { createWorkflowToolGroup } from "./builtin-tools/workflows";
 import { createWorktreeToolGroup } from "./builtin-tools/worktrees";
 import { createToolAdministrationGroup } from "./builtin-tools/tool-administration";
+import type { ToolAdministrationCallbacks } from "./builtin-tools/tool-administration";
 import { createTailscaleToolGroup } from "./builtin-tools/tailscale";
 import type { ToolCallAuditService } from "./tool-call-audit.service";
 import { createWorktreeAutomationToolGroup } from "./builtin-tools/worktree-automations";
@@ -142,6 +145,7 @@ export type BuiltInToolServices = {
   diskSpace?: DiskSpaceService;
   worktrees?: WorktreesService;
   runs?: RunsService;
+  repositoryTransfer?: RepositoryTransferService;
   commands?: CommandsService;
   jira?: JiraService;
   jiraWebhooks?: JiraWebhookService;
@@ -163,6 +167,7 @@ export type BuiltInToolServices = {
   toolAudit?: ToolCallAuditService;
   testExternalMcpServer?: (id: string) => Promise<unknown>;
   listMcpToolPresets?: (kind?: "PLAN" | "SESSION") => Promise<unknown>;
+  toolAdministration?: ToolAdministrationCallbacks;
   /**
    * Supplied as a thunk rather than an instance: `WorkflowsService` is
    * constructed after `ToolsService` and takes it as a dependency, so the two
@@ -339,6 +344,8 @@ export function createBuiltInToolRegistry(
   if (services.worktrees)
     groups.push(createWorktreeToolGroup(services.worktrees));
   if (services.runs) groups.push(createRunToolGroup(services.runs));
+  if (services.repositoryTransfer)
+    groups.push(createRepositoryTransferToolGroup(services.repositoryTransfer));
   if (services.commands) groups.push(createCommandToolGroup(services.commands));
   if (services.jira && services.jiraWebhooks)
     groups.push(createJiraToolGroup(services.jira, services.jiraWebhooks));
@@ -382,6 +389,7 @@ export function createBuiltInToolRegistry(
         services.toolAudit,
         services.testExternalMcpServer,
         services.listMcpToolPresets,
+        services.toolAdministration,
       ),
     );
   }

@@ -10,6 +10,7 @@ import {
   type BuiltInToolGroup,
 } from "../builtin-tools";
 import { serviceTool } from "./service-tool";
+import { createUsageAdministrationTools } from "./administration-tools";
 
 export function createUsageCostToolGroup(
   ccusage: CcusageService,
@@ -20,6 +21,7 @@ export function createUsageCostToolGroup(
     name: "Usage and Costs",
     children: [],
     tools: [
+      ...createUsageAdministrationTools(ccusage, modelCosts),
       serviceTool({
         name: "collect_ccusage",
         title: "Collect ccusage",

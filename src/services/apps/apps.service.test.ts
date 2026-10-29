@@ -100,6 +100,7 @@ describe("AppsService", () => {
         agentId: "agent-1",
         folder: "/tmp/web",
         observedOrigin: "https://example.com/web.git",
+        defaultBranch: "main",
       },
     });
     await prisma.worktree.create({
@@ -201,29 +202,101 @@ describe("AppsService", () => {
     ).rejects.toThrow("App names must be unique");
   });
 
-  test("counts only visible named branches other than main in assigned repositories", async () => {
-    await prisma.codebase.create({
-      data: {
-        id: "other-codebase",
-        repositoryId: "repository-2",
+  test.each(["main", "master", "develop", "release/stable"])(
+    "counts only visible named branches other than the default branch %s in assigned repositories",
+    async (defaultBranch) => {
+      await prisma.codebase.update({
+        where: { id: "codebase-1" },
+        data: { defaultBranch },
+      });
+      await prisma.worktree.update({
+        where: { id: "worktree-1" },
+        data: { branch: defaultBranch },
+      });
+      await prisma.codebase.create({
+        data: {
+          id: "other-codebase",
+          repositoryId: "repository-2",
+          agentId: "agent-1",
+          folder: "/tmp/other",
+          observedOrigin: "https://example.com/ios.git",
+        },
+      });
+      await prisma.worktree.createMany({
+        data: [
+          { id: "feature", branch: "feature/AIDE-156" },
+          { id: "other-branch", branch: "feature/other-branch" },
+          { id: "detached", branch: null },
+          { id: "missing", branch: "feature/missing", missingAt: new Date() },
+          {
+            id: "other-repository",
+            branch: "feature/other",
+            codebaseId: "other-codebase",
+          },
+        ].map((worktree) => ({
+          codebaseId: "codebase-1",
+          gitDirectory: `/tmp/${worktree.id}/.git`,
+          folder: `/tmp/${worktree.id}`,
+          relativePath: worktree.id,
+          ...worktree,
+        })),
+      });
+
+      const app = await new AppsService().create({
+        name: "Web",
+        repositoryIds: ["repository-1"],
+      });
+
+      expect(app.counts).toMatchObject({ worktrees: 4, nonMainWorktrees: 2 });
+    },
+  );
+
+  test("compares each checkout with its own default branch across app repositories", async () => {
+    await prisma.codebase.createMany({
+      data: [
+        {
+          id: "ios-codebase",
+          repositoryId: "repository-2",
+          defaultBranch: "master",
+        },
+        {
+          id: "alternate-codebase",
+          repositoryId: "repository-1",
+          defaultBranch: "develop",
+        },
+        {
+          id: "unknown-codebase",
+          repositoryId: "repository-1",
+          defaultBranch: null,
+        },
+      ].map((codebase) => ({
         agentId: "agent-1",
-        folder: "/tmp/other",
-        observedOrigin: "https://example.com/ios.git",
-      },
+        folder: `/tmp/${codebase.id}`,
+        observedOrigin: "https://example.com/repository.git",
+        ...codebase,
+      })),
     });
     await prisma.worktree.createMany({
       data: [
-        { id: "feature", branch: "feature/AIDE-156" },
-        { id: "master", branch: "master" },
-        { id: "detached", branch: null },
-        { id: "missing", branch: "feature/missing", missingAt: new Date() },
+        { id: "web-feature", codebaseId: "codebase-1", branch: "master" },
+        { id: "ios-default", codebaseId: "ios-codebase", branch: "master" },
+        { id: "ios-feature", codebaseId: "ios-codebase", branch: "main" },
         {
-          id: "other-repository",
-          branch: "feature/other",
-          codebaseId: "other-codebase",
+          id: "alternate-default",
+          codebaseId: "alternate-codebase",
+          branch: "develop",
+        },
+        {
+          id: "alternate-feature",
+          codebaseId: "alternate-codebase",
+          branch: "main",
+        },
+        {
+          id: "unknown-feature",
+          codebaseId: "unknown-codebase",
+          branch: "feature/unknown",
         },
       ].map((worktree) => ({
-        codebaseId: "codebase-1",
         gitDirectory: `/tmp/${worktree.id}/.git`,
         folder: `/tmp/${worktree.id}`,
         relativePath: worktree.id,
@@ -232,12 +305,46 @@ describe("AppsService", () => {
     });
 
     const app = await new AppsService().create({
-      name: "Web",
-      repositoryIds: ["repository-1"],
+      name: "Web and iOS",
+      repositoryIds: ["repository-1", "repository-2"],
     });
 
-    expect(app.counts).toMatchObject({ worktrees: 4, nonMainWorktrees: 2 });
+    expect(app.counts).toMatchObject({ worktrees: 7, nonMainWorktrees: 3 });
   });
+
+  test.each([null, ""])(
+    "excludes checkouts with an unknown default branch (%j)",
+    async (defaultBranch) => {
+      await prisma.codebase.update({
+        where: { id: "codebase-1" },
+        data: { defaultBranch },
+      });
+      await prisma.worktree.create({
+        data: {
+          id: "feature",
+          codebaseId: "codebase-1",
+          gitDirectory: "/tmp/feature/.git",
+          folder: "/tmp/feature",
+          relativePath: "feature",
+          branch: "feature/unknown-default",
+        },
+      });
+      const service = new AppsService();
+      const app = await service.create({
+        name: "Web",
+        repositoryIds: ["repository-1"],
+      });
+
+      expect(app.counts).toMatchObject({ worktrees: 2, nonMainWorktrees: 0 });
+
+      await prisma.codebase.update({
+        where: { id: "codebase-1" },
+        data: { defaultBranch: "master" },
+      });
+      expect((await service.get(app.id))?.counts.nonMainWorktrees).toBe(2);
+      expect((await service.list())[0]?.counts.nonMainWorktrees).toBe(2);
+    },
+  );
 
   test("counts distinct open GitHub and GitLab requests including drafts within visible app worktrees", async () => {
     await prisma.codebase.create({

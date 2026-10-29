@@ -1014,11 +1014,12 @@ export class BuildDataService {
   }
 
   private publish(id: string): void {
+    const change = { id, changeId: randomUUID() };
     agentEventBus.publish(BUILD_DATA_CHANGED_TOPIC, {
-      buildDataCollectionChanged: { id },
+      buildDataCollectionChanged: change,
     });
     agentEventBus.publish(buildDataCollectionChangedTopic(id), {
-      buildDataCollectionChanged: { id },
+      buildDataCollectionChanged: change,
     });
   }
 }

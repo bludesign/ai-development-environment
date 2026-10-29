@@ -191,6 +191,13 @@ export class AppsService {
       missingAt: null,
       codebase: { repositoryId: repositoryScope },
     } satisfies Prisma.WorktreeWhereInput;
+    const nonDefaultBranchScopes = app.repositories.flatMap(({ repository }) =>
+      repository.codebases.flatMap(({ id, defaultBranch }) =>
+        defaultBranch
+          ? [{ codebaseId: id, branch: { not: defaultBranch } }]
+          : [],
+      ),
+    );
     const [
       codebases,
       worktrees,
@@ -215,7 +222,7 @@ export class AppsService {
         },
       }),
       prisma.worktree.count({
-        where: { ...worktreeScope, branch: { not: "main" } },
+        where: { ...worktreeScope, OR: nonDefaultBranchScopes },
       }),
       prisma.worktreePullRequest.findMany({
         where: { state: "OPEN", worktree: worktreeScope },

@@ -496,7 +496,8 @@ test("gitlab comments refresh retrieves comments posted after the cached result"
   await page.goto(`/en/gitlab/comments?project=${ids.gitlab.projectId}&iid=42`);
   const refresh = page.getByRole("button", { name: "Refresh", exact: true });
   await expect(refresh).toBeEnabled();
-  expect(refreshes.length).toBeGreaterThan(0);
+  await expect.poll(() => refreshes.length).toBeGreaterThan(0);
+  await expect.poll(() => refreshedResult).toBeDefined();
   expect(refreshes.every((refresh) => !refresh)).toBe(true);
   await expect(page.getByText(/Retrying here can race/)).toHaveCount(0);
   await refresh.click();

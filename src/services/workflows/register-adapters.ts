@@ -1,4 +1,5 @@
 import "server-only";
+import { registerCapabilityActionAdapters } from "./capability-action-adapters";
 
 import {
   BUILD_ACTIONS,
@@ -356,6 +357,7 @@ export function registerWorkflowAdapters(
   registerRunAdapters(executor, services);
   registerMiscellaneousAdapters(executor, services);
   registerExpansionAdapters(executor, services);
+  registerCapabilityActionAdapters(executor, services.tools);
 }
 
 function registerExpansionAdapters(
