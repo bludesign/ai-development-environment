@@ -64,6 +64,50 @@ describe("CODEOWNERS provider syntax", () => {
   });
 
   test.each([
+    ["internal/README.md", "docs/internal/README.md", true],
+    ["internal/README.md", "docs/api/internal/README.md", true],
+    ["internal/", "docs/internal/nested/README.md", true],
+    ["internal/[A-Z]*.md", "docs/internal/README.md", true],
+    ["/internal/README.md", "docs/internal/README.md", false],
+    ["/internal/README.md", "internal/README.md", true],
+  ])(
+    "matches GitLab relative path %s against %s",
+    (pattern, path, expected) => {
+      const entries = parseCodeowners(`${pattern} @alice`, "GITLAB");
+      expect(applicableCodeowners(entries, [path])).toHaveLength(
+        expected ? 1 : 0,
+      );
+    },
+  );
+
+  test("GitLab relative exclusions also match nested paths", () => {
+    const entries = parseCodeowners("* @alice\n!internal/generated/", "GITLAB");
+    expect(
+      applicableCodeowners(entries, ["docs/internal/generated/schema.ts"]),
+    ).toEqual([]);
+  });
+
+  test("GitHub paths containing slashes stay anchored after GitLab matching", () => {
+    const path = "docs/internal/README.md";
+    expect(
+      applicableCodeowners(
+        parseCodeowners("internal/[A-Z]*.md @alice", "GITLAB"),
+        [path],
+      ),
+    ).toHaveLength(1);
+    expect(
+      applicableCodeowners(
+        parseCodeowners("internal/README.md @alice", "GITHUB"),
+        [path],
+      ),
+    ).toEqual([]);
+    expect(reviewerRuleApplies(["internal/[A-Z]*.md"], [path])).toBe(false);
+    expect(
+      reviewerRuleApplies(["internal/[A-Z]*.md"], ["internal/README.md"]),
+    ).toBe(true);
+  });
+
+  test.each([
     ["*.js", "src/app.js", true],
     ["docs/*", "docs/guide.md", true],
     ["docs/*", "docs/nested/guide.md", false],

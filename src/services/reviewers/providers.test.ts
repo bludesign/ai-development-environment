@@ -426,6 +426,47 @@ describe("GitLab reviewer adapter", () => {
     expect(snapshot.requirements[0].poolKeys).toEqual([]);
   });
 
+  test("maps duplicate CODEOWNERS patterns to the last entry despite slower earlier lookups", async () => {
+    const { provider, reviewerRest, rule } = gitlabFixture();
+    rule.patterns = ["src/"];
+    rule.eligibleApprovers = [alice];
+    const read = reviewerRest.getMockImplementation()!;
+    const groupLookupStarted = Promise.withResolvers<void>();
+    const releaseGroupLookup = Promise.withResolvers<void>();
+    reviewerRest.mockImplementation(async (path) => {
+      if (path === "/projects/10/repository/files/CODEOWNERS")
+        return encoded("src/ @org/backend\nsrc/ @alice");
+      if (path === "/groups/org%2Fbackend") {
+        groupLookupStarted.resolve();
+        await releaseGroupLookup.promise;
+      }
+      if (path === "/groups/101/members") return [bob];
+      return read(path);
+    });
+
+    const discovery = provider.discover(
+      { id: "repo", canonicalOrigin: "gitlab.example/org/project" },
+      undefined,
+      { id: "77", number: 8, projectId: "10" },
+    );
+    await groupLookupStarted.promise;
+    // Drain the direct user's resolution before completing the earlier group.
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    releaseGroupLookup.resolve();
+    const snapshot = await discovery;
+
+    expect(snapshot.discoveryComplete).toBe(true);
+    expect(snapshot.requirements[0]).toMatchObject({
+      poolKeys: [ownerPoolKey(snapshot.repositoryIdentity, ["user:1"])],
+      eligibleReviewerIds: ["1"],
+    });
+    expect(
+      snapshot.pools
+        .find((pool) => pool.key === snapshot.requirements[0].poolKeys[0])
+        ?.candidates.map((person) => person.id),
+    ).toEqual(["1"]);
+  });
+
   test("includes native MR-only groups in repository setup", async () => {
     const { provider, reviewerRest, reviewerGraphql } = gitlabFixture();
     const read = reviewerRest.getMockImplementation()!;

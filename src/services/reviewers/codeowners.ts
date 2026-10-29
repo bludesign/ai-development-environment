@@ -106,9 +106,12 @@ const matchers = new Map<string, ReturnType<typeof compileRe2>>();
 export function ownershipPathMatches(
   pattern: string,
   path: string,
-  characterClasses = false,
+  {
+    characterClasses = false,
+    relativePathsAnywhere = false,
+  }: { characterClasses?: boolean; relativePathsAnywhere?: boolean } = {},
 ): boolean {
-  const cacheKey = `${characterClasses}\0${pattern}`;
+  const cacheKey = `${characterClasses}\0${relativePathsAnywhere}\0${pattern}`;
   const cached = matchers.get(cacheKey);
   if (cached) return cached.test(path.replace(/^\/+/, ""));
   let value = pattern;
@@ -117,7 +120,7 @@ export function ownershipPathMatches(
   const directory = value.endsWith("/");
   if (directory) value = value.slice(0, -1);
   if (!value) return false;
-  const anywhere = !anchored && !value.includes("/");
+  const anywhere = !anchored && (relativePathsAnywhere || !value.includes("/"));
   let expression = "";
   for (let index = 0; index < value.length; index += 1) {
     const char = value[index];
@@ -164,11 +167,10 @@ export function applicableCodeowners(
       for (const entry of entries) {
         if (
           entry.section !== section ||
-          !ownershipPathMatches(
-            entry.pattern,
-            path,
-            entry.provider === "GITLAB",
-          )
+          !ownershipPathMatches(entry.pattern, path, {
+            characterClasses: entry.provider === "GITLAB",
+            relativePathsAnywhere: entry.provider === "GITLAB",
+          })
         )
           continue;
         if (entry.exclusion) excluded = true;
@@ -188,7 +190,11 @@ export function reviewerRuleApplies(
   return paths.some((path) => {
     let included = false;
     for (const pattern of patterns) {
-      if (ownershipPathMatches(pattern.replace(/^!/, ""), path, true)) {
+      if (
+        ownershipPathMatches(pattern.replace(/^!/, ""), path, {
+          characterClasses: true,
+        })
+      ) {
         included = !pattern.startsWith("!");
       }
     }

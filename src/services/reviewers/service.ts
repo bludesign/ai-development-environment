@@ -361,6 +361,9 @@ export class ReviewersService {
         key: input.key,
         name: pool?.name ?? previous?.name ?? input.key,
         kind: pool?.kind ?? previous?.kind ?? "GENERAL",
+        discoveryRef: pool
+          ? discovery.ref
+          : (previous?.discoveryRef ?? discovery.ref),
         members,
       };
     });
@@ -369,14 +372,12 @@ export class ReviewersService {
   private async writePools(
     tx: Prisma.TransactionClient,
     repositoryId: string,
-    discovery: Pick<
-      ReviewerDiscovery,
-      "provider" | "repositoryIdentity" | "ref"
-    >,
+    discovery: Pick<ReviewerDiscovery, "provider" | "repositoryIdentity">,
     pools: Array<{
       key: string;
       name: string;
       kind: string;
+      discoveryRef: string;
       members: ReviewerPerson[];
     }>,
   ) {
@@ -397,14 +398,14 @@ export class ReviewersService {
           kind: pool.kind,
           provider: discovery.provider,
           repositoryIdentity: discovery.repositoryIdentity,
-          discoveryRef: discovery.ref,
+          discoveryRef: pool.discoveryRef,
         },
         update: {
           name: pool.name,
           kind: pool.kind,
           provider: discovery.provider,
           repositoryIdentity: discovery.repositoryIdentity,
-          discoveryRef: discovery.ref,
+          discoveryRef: pool.discoveryRef,
         },
       });
       await tx.repositoryReviewerMember.deleteMany({
@@ -518,9 +519,8 @@ export class ReviewersService {
         {
           provider: pool.provider,
           repositoryIdentity: pool.repositoryIdentity,
-          ref: pool.ref,
         },
-        [{ ...pool, members: pool.reviewers }],
+        [{ ...pool, discoveryRef: pool.ref, members: pool.reviewers }],
       );
     }
     await this.updateConfiguredFlag(tx, repositoryId);

@@ -309,30 +309,38 @@ export class GitLabReviewerProvider {
       }
       return pending;
     };
-    await mapIntegrationRequests(
+    const resolvedEntries = await mapIntegrationRequests(
       entries.filter((entry) => !entry.exclusion && entry.owners.length),
       async (entry) => {
         try {
           const resolved = await mapIntegrationRequests(entry.owners, resolve);
-          const key = ownerPoolKey(
-            identity,
-            resolved.map((value) => value.principal),
-          );
-          mergePool(pools, {
-            key,
-            name: resolved.map((value) => value.label).join(" or "),
-            kind: "CODEOWNERS",
-            candidates: resolved.flatMap((value) => value.people),
-          });
-          entryPool.set(`${entry.section}\0${entry.pattern}`, key);
+          return { entry, resolved };
         } catch (error) {
-          unavailable(
-            `GitLab owners for ${entry.pattern} could not be resolved`,
-            error,
-          );
+          return { entry, error };
         }
       },
     );
+    // Concurrent lookups must not change which duplicate pattern wins.
+    for (const result of resolvedEntries) {
+      if (!result.resolved) {
+        unavailable(
+          `GitLab owners for ${result.entry.pattern} could not be resolved`,
+          result.error,
+        );
+        continue;
+      }
+      const key = ownerPoolKey(
+        identity,
+        result.resolved.map((value) => value.principal),
+      );
+      mergePool(pools, {
+        key,
+        name: result.resolved.map((value) => value.label).join(" or "),
+        kind: "CODEOWNERS",
+        candidates: result.resolved.flatMap((value) => value.people),
+      });
+      entryPool.set(`${result.entry.section}\0${result.entry.pattern}`, key);
+    }
 
     const requirements: ReviewerRequirementDiscovery[] = [];
     const approvedReviewers: ReviewerPerson[] = [];

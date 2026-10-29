@@ -250,6 +250,63 @@ test("branch discovery and partial saves retain other configured groups", async 
   expect(await prisma.repositoryReviewerPool.count()).toBe(2);
 });
 
+test("saving all pools on another branch preserves refs for unavailable groups through transfer", async () => {
+  const releaseKey = `${identity}:owners:release`;
+  const releaseDiscovery: ReviewerDiscovery = {
+    ...discovery,
+    ref: "release",
+    pools: [
+      ...discovery.pools,
+      {
+        key: releaseKey,
+        name: "Release owners",
+        kind: "CODEOWNERS",
+        candidates: [person("bob")],
+      },
+    ],
+  };
+  discover.mockImplementation(async (_repository, ref) =>
+    structuredClone(ref === "release" ? releaseDiscovery : discovery),
+  );
+  await service.saveRepositoryCodeReviewers({
+    repositoryId: "repo",
+    ref: "release",
+    pools: [
+      { key, reviewerIds: ["alice"] },
+      { key: releaseKey, reviewerIds: ["bob"] },
+    ],
+  });
+
+  const mainSettings = await service.repositoryCodeReviewers("repo", "main");
+  expect(
+    mainSettings.pools.find((pool) => pool.key === releaseKey),
+  ).toMatchObject({
+    candidates: [],
+    selectedReviewerIds: ["bob"],
+    unavailableReviewerIds: ["bob"],
+  });
+  await service.saveRepositoryCodeReviewers({
+    repositoryId: "repo",
+    ref: "main",
+    pools: mainSettings.pools.map((pool) => ({
+      key: pool.key,
+      reviewerIds: pool.key === key ? ["carol"] : pool.selectedReviewerIds,
+    })),
+  });
+
+  const exported = await service.exportPools("repo");
+  expect(exported.find((pool) => pool.key === key)?.ref).toBe("main");
+  expect(exported.find((pool) => pool.key === releaseKey)?.ref).toBe("release");
+  const validated = await service.validateTransferredPools(
+    { id: "repo", canonicalOrigin: "github.com/acme/repo" },
+    exported,
+  );
+  await prisma.$transaction((tx) =>
+    service.applyTransferredPools(tx, "repo", validated),
+  );
+  expect(await service.exportPools("repo")).toEqual(exported);
+});
+
 test("random fills two distinct slots, excludes the author and never sends requests", async () => {
   await save();
   await worktree();
