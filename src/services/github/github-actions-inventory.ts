@@ -131,14 +131,21 @@ export class GitHubActionsInventory {
     if (!runs.length) return;
     const prisma = await getPrismaClient();
     await prisma.$transaction(async (transaction) => {
-      for (const run of runs)
-        await this.write(
-          transaction,
-          repositoryId,
-          run,
-          source,
-          run.observedAt ?? new Date(Date.now()),
-        );
+      const state = await transaction.gitHubActionsPollingState.findUnique({
+        where: { codebaseRepositoryId: repositoryId },
+        select: { activeReconciledAt: true },
+      });
+      for (const run of runs) {
+        const observedAt = run.observedAt ?? new Date(Date.now());
+        // A complete scan also fences stale active runs that have no stored row.
+        if (
+          state?.activeReconciledAt &&
+          observedAt < state.activeReconciledAt &&
+          ACTIVE_WORKFLOW_STATUSES.some((status) => status === run.status)
+        )
+          continue;
+        await this.write(transaction, repositoryId, run, source, observedAt);
+      }
     });
     this.publish();
   }

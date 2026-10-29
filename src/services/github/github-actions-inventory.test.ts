@@ -93,6 +93,39 @@ test("missed completions reconcile away, and cached active observations cannot r
   expect(await inventory.count(["repo"], "credential")).toBe(1);
 });
 
+test.each(["queued", "unseen", "rerun"])(
+  "reconciliation fences cached progress for a %s run",
+  async (previous) => {
+    await inventory.reconcile(
+      "repo",
+      "credential",
+      previous === "unseen" ? [] : [run()],
+      new Date(),
+    );
+    vi.setSystemTime(new Date(Date.now() + 1_000));
+    const cached = {
+      ...run(
+        "in_progress",
+        previous === "rerun" ? 2 : 1,
+        new Date().toISOString(),
+      ),
+      observedAt: new Date(),
+    };
+    vi.setSystemTime(new Date(Date.now() + 1_000));
+    await inventory.reconcile("repo", "credential", [], new Date());
+    await inventory.observe("repo", [cached], "REST");
+    expect(await inventory.count(["repo"], "credential")).toBe(0);
+
+    vi.setSystemTime(new Date(Date.now() + 1_000));
+    await inventory.observe(
+      "repo",
+      [{ ...cached, observedAt: new Date() }],
+      "REST",
+    );
+    expect(await inventory.count(["repo"], "credential")).toBe(1);
+  },
+);
+
 test("a webhook received during reconciliation wins over an older empty scan", async () => {
   await inventory.reconcile("repo", "credential", [], new Date());
   const startedAt = new Date();

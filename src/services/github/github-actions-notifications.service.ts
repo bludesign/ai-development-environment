@@ -917,8 +917,9 @@ export class GitHubActionsNotificationsService {
     target: RepositoryTarget,
     token: string,
     updatedAfter: Date | null,
-  ): Promise<WorkflowRun[]> {
+  ): Promise<{ runs: WorkflowRun[]; fetchedAt: Date }> {
     const runs: WorkflowRun[] = [];
+    let fetchedAt: Date | undefined;
     for (let page = 1; ; page += 1) {
       const url = `${GITHUB_API_BASE_URL}/repos/${encodeURIComponent(target.owner)}/${encodeURIComponent(target.repository)}/actions/runs?per_page=${GITHUB_RUNS_PAGE_SIZE}&page=${page}`;
       const result = await this.workflowRunCache.read(token, url, async () => {
@@ -976,6 +977,9 @@ export class GitHubActionsNotificationsService {
           workflow_runs: Array<Record<string, unknown>>;
         };
       });
+      // The checkpoint must also cover empty pages and mixed-age cached pages.
+      if (!fetchedAt || result.fetchedAt < fetchedAt)
+        fetchedAt = result.fetchedAt;
       if (result.cached)
         await this.cache
           .recordRestCall({
@@ -1038,7 +1042,7 @@ export class GitHubActionsNotificationsService {
         body.workflow_runs.length < GITHUB_RUNS_PAGE_SIZE ||
         pageRuns.some((run) => run.updatedAt <= updatedAfter)
       ) {
-        return runs;
+        return { runs, fetchedAt };
       }
     }
   }
@@ -1190,7 +1194,9 @@ export class GitHubActionsNotificationsService {
       update: { lastPollStartedAt: startedAt },
     });
     try {
-      const runs = await this.fetchRuns(
+      const previousCheckpoint =
+        state?.lastPollSucceededAt ?? state?.initializedAt ?? startedAt;
+      const { runs, fetchedAt } = await this.fetchRuns(
         target,
         token,
         state ? (state.lastPollSucceededAt ?? state.initializedAt) : null,
@@ -1216,7 +1222,8 @@ export class GitHubActionsNotificationsService {
           where: { codebaseRepositoryId: target.id },
           data: {
             lastPollCompletedAt: completedAt,
-            lastPollSucceededAt: completedAt,
+            lastPollSucceededAt:
+              previousCheckpoint > fetchedAt ? previousCheckpoint : fetchedAt,
             lastError: null,
           },
         });

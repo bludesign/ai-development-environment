@@ -329,6 +329,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  vi.useRealTimers();
   vi.restoreAllMocks();
   clearGitHubRestRateLimitPause("PAT");
 });
@@ -789,6 +790,59 @@ describe("GitHub Actions webhook notifications", () => {
 });
 
 describe("GitHub Actions fallback polling", () => {
+  test.each([false, true])(
+    "notifies unseen completions after a cached page (empty: %s)",
+    async (empty) => {
+      vi.useFakeTimers({ toFake: ["Date"] });
+      const fetchedAt = new Date("2026-10-29T12:00:00Z");
+      vi.setSystemTime(fetchedAt);
+      const cache = new GitHubWorkflowRunCache();
+      const url =
+        "https://api.github.com/repos/acme/widgets/actions/runs?per_page=100&page=1";
+      const older = workflowPayload("success", {
+        id: 100,
+        updated_at: "2026-10-29T11:58:00Z",
+      }).workflow_run;
+      await cache.read("personal-token", url, async () => ({
+        workflow_runs: empty ? [] : [older],
+      }));
+      const { service, pollingStates, notifications } = setup(
+        undefined,
+        undefined,
+        false,
+        false,
+        cache,
+      );
+      const previousPoll = new Date("2026-10-29T11:59:00Z");
+      pollingStates.set("repository-1", {
+        initializedAt: previousPoll,
+        lastPollSucceededAt: previousPoll,
+      });
+      const completed = workflowPayload("success", {
+        updated_at: "2026-10-29T12:00:05Z",
+      }).workflow_run;
+      const fetchMock = vi.fn(async () => githubResponse([completed, older]));
+      vi.stubGlobal("fetch", fetchMock);
+      const poll = () =>
+        (
+          service as unknown as { pollRepositories(): Promise<unknown> }
+        ).pollRepositories();
+
+      vi.setSystemTime(new Date("2026-10-29T12:00:10Z"));
+      await expect(poll()).resolves.toMatchObject({ notificationsCreated: 0 });
+      expect(fetchMock).not.toHaveBeenCalled();
+      expect(pollingStates.get("repository-1")).toMatchObject({
+        lastPollSucceededAt: fetchedAt,
+        lastPollCompletedAt: new Date(),
+      });
+
+      vi.setSystemTime(new Date("2026-10-29T12:01:10Z"));
+      await expect(poll()).resolves.toMatchObject({ notificationsCreated: 1 });
+      await expect(poll()).resolves.toMatchObject({ notificationsCreated: 0 });
+      expect(notifications.recordInTransaction).toHaveBeenCalledOnce();
+    },
+  );
+
   test("pauses outbound polling after observed REST exhaustion and resumes when the window resets", async () => {
     const { service } = setup();
     const now = Date.now();
@@ -821,6 +875,49 @@ describe("GitHub Actions fallback polling", () => {
     clock.mockReturnValue(reset * 1000);
     await expect(poll()).resolves.toMatchObject({ failures: 0 });
     expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  test("bounds the polling checkpoint by an older cached pagination page", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    const fetchedAt = new Date("2026-10-29T12:00:00Z");
+    vi.setSystemTime(fetchedAt);
+    const cache = new GitHubWorkflowRunCache();
+    await cache.read(
+      "personal-token",
+      "https://api.github.com/repos/acme/widgets/actions/runs?per_page=100&page=2",
+      async () => ({ workflow_runs: [] }),
+    );
+    const { service, pollingStates } = setup(
+      undefined,
+      undefined,
+      false,
+      false,
+      cache,
+    );
+    const previousPoll = new Date("2026-10-29T11:59:00Z");
+    pollingStates.set("repository-1", {
+      initializedAt: previousPoll,
+      lastPollSucceededAt: previousPoll,
+    });
+    vi.setSystemTime(new Date("2026-10-29T12:00:10Z"));
+    const fetchMock = vi.fn(async () =>
+      githubResponse(
+        Array.from({ length: 100 }, (_, index) => ({
+          id: 1_000 + index,
+          workflow_id: 202,
+          status: "in_progress",
+          updated_at: "2026-10-29T12:00:05Z",
+        })),
+      ),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    await (
+      service as unknown as { pollRepositories(): Promise<unknown> }
+    ).pollRepositories();
+    expect(fetchMock).toHaveBeenCalledOnce();
+    expect(pollingStates.get("repository-1")?.lastPollSucceededAt).toEqual(
+      fetchedAt,
+    );
   });
 
   test("keeps completed PAT-polled runs non-retryable without a GitHub App", async () => {

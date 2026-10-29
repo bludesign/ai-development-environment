@@ -54,6 +54,7 @@ export class SidebarIntegrationsService {
   private running: Promise<void> | null = null;
   private active = false;
   private readonly pending = new Set<Provider>();
+  private readonly refreshDeadlines = new Map<Provider, number>();
   private lastStarted = -Infinity;
 
   constructor(
@@ -126,6 +127,8 @@ export class SidebarIntegrationsService {
     this.active = false;
     if (this.timer) clearTimeout(this.timer);
     this.timer = undefined;
+    this.refreshDeadlines.clear();
+    this.pending.clear();
     for (const stream of this.streams.splice(0)) void stream.return?.();
     for (const snapshot of Object.values(this.snapshots)) ++snapshot.generation;
   }
@@ -146,12 +149,25 @@ export class SidebarIntegrationsService {
     providers: Provider[] = ["github", "gitlab"],
   ): void {
     if (!this.active) return;
+    const deadline = Date.now() + delay;
+    for (const provider of providers)
+      this.refreshDeadlines.set(
+        provider,
+        Math.min(this.refreshDeadlines.get(provider) ?? Infinity, deadline),
+      );
+    const nextDeadline = Math.min(...this.refreshDeadlines.values());
     if (this.timer) clearTimeout(this.timer);
-    this.polling.schedule(POLL_ID, new Date(Date.now() + delay));
-    this.timer = setTimeout(() => {
-      this.timer = undefined;
-      void this.refresh(providers);
-    }, delay);
+    this.polling.schedule(POLL_ID, new Date(nextDeadline));
+    this.timer = setTimeout(
+      () => {
+        this.timer = undefined;
+        const dueProviders = [...this.refreshDeadlines]
+          .filter(([, refreshAt]) => refreshAt <= Date.now())
+          .map(([provider]) => provider);
+        void this.refresh(dueProviders);
+      },
+      Math.max(0, nextDeadline - Date.now()),
+    );
     this.timer.unref?.();
   }
 
@@ -202,6 +218,9 @@ export class SidebarIntegrationsService {
       return this.running;
     }
     this.lastStarted = Date.now();
+    if (this.timer) clearTimeout(this.timer);
+    this.timer = undefined;
+    for (const provider of providers) this.refreshDeadlines.delete(provider);
     this.polling.schedule(POLL_ID, null);
     this.running = this.polling
       .run(POLL_ID, async () => {
@@ -243,14 +262,15 @@ export class SidebarIntegrationsService {
       })
       .finally(() => {
         this.running = null;
-        const delay = this.pending.size
-          ? Math.max(0, this.lastStarted + EVENT_MS - Date.now())
-          : POLL_MS;
-        const nextProviders = this.pending.size
-          ? [...this.pending]
-          : (["github", "gitlab"] as Provider[]);
-        this.pending.clear();
-        this.schedule(delay, nextProviders);
+        this.schedule(POLL_MS, providers);
+        if (this.pending.size) {
+          const nextProviders = [...this.pending];
+          this.pending.clear();
+          this.schedule(
+            Math.max(0, this.lastStarted + EVENT_MS - Date.now()),
+            nextProviders,
+          );
+        }
       });
     return this.running;
   }
