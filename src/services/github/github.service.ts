@@ -2723,6 +2723,45 @@ export class GitHubService {
     };
   }
 
+  /** Count every active workflow run without loading jobs or request metadata. */
+  async activeActionsCount(): Promise<number> {
+    if (!(await this.getSettings()).tokenConfigured) return 0;
+    const token = await this.requireToken();
+    const repositories = await (
+      await getPrismaClient()
+    ).codebaseRepository.findMany({
+      select: { id: true, canonicalOrigin: true, jiraBranchRegex: true },
+    });
+    const statuses = [
+      "in_progress",
+      "queued",
+      "requested",
+      "waiting",
+      "pending",
+    ] as const;
+    const requests = repositories.flatMap((repository) => {
+      const target = actionsRepositoryTarget(repository);
+      return target ? statuses.map((status) => ({ target, status })) : [];
+    });
+    const counts = await mapIntegrationRequests(
+      requests,
+      async ({ target, status }) => {
+        const result = await this.restRequest<{ total_count: number }>(
+          `${GITHUB_API_BASE_URL}/repos/${encodeURIComponent(target.owner)}/${encodeURIComponent(target.name)}/actions/runs?status=${status}&per_page=1&exclude_pull_requests=true`,
+          GITHUB_REST_OPERATIONS.actions.listWorkflowRunsForRepo,
+          token,
+          "ACTIONS_PAGE",
+        );
+        if (!Number.isSafeInteger(result.total_count) || result.total_count < 0)
+          throw new Error(
+            "GitHub returned an invalid active workflow run count",
+          );
+        return result.total_count;
+      },
+    );
+    return counts.reduce((total, count) => total + count, 0);
+  }
+
   async actionsWorkflowRuns(
     codebaseRepositoryId?: string | null,
     first = ACTIONS_PAGE_SIZE,

@@ -26,6 +26,8 @@ import { toNodeHandler } from "@modelcontextprotocol/node";
 import * as z from "zod/v4";
 
 import { NOW } from "./mock-data/time";
+import { mockActionsRuns } from "./mock-api-pagination";
+import { mockGitLabApi } from "./mock-gitlab-api";
 
 const PORT = Number(
   process.argv[process.argv.indexOf("--port") + 1] ||
@@ -824,8 +826,16 @@ const WORKFLOW_RUNS = REPOS.flatMap((repository, repositoryIndex) =>
       run_number: 412 - index,
       run_attempt: 1,
       event: workflow.event,
-      status: "completed",
-      conclusion: workflow.conclusion,
+      status:
+        index === 0 && repositoryIndex === 0
+          ? "in_progress"
+          : index === 0 && repositoryIndex === 2
+            ? "queued"
+            : "completed",
+      conclusion:
+        index === 0 && (repositoryIndex === 0 || repositoryIndex === 2)
+          ? null
+          : workflow.conclusion,
       // Required by the Actions run mapping; a missing check suite node id makes the run
       // un-retryable and a missing repository node_id throws while normalizing.
       check_suite_node_id: `CS_run_${id}`,
@@ -975,11 +985,7 @@ function githubRest(pathname: string, search: URLSearchParams): unknown {
     const runs = WORKFLOW_RUNS.filter(
       (run) => run.repository.name === repository,
     );
-    const page = Number(search.get("page") ?? 1);
-    return {
-      total_count: runs.length,
-      workflow_runs: page > 1 ? [] : runs,
-    };
+    return mockActionsRuns(runs, search);
   }
 
   // Single workflow run. The pull request pipeline store reads `updated_at` off this payload,
@@ -1516,6 +1522,7 @@ const server = createServer(
 
     let payload: unknown = {};
     let status = 200;
+    let extraHeaders: Record<string, string> = {};
     try {
       if (url.pathname === "/mcp") {
         const handler = createMcpHandler(
@@ -1568,6 +1575,14 @@ const server = createServer(
           raw ? JSON.parse(raw) : undefined,
         );
         return;
+      } else if (url.pathname.startsWith("/gitlab/api/v4/")) {
+        const result = mockGitLabApi(
+          url.pathname.slice("/gitlab/api/v4".length),
+          url.searchParams,
+        );
+        payload = result.payload;
+        status = result.status;
+        extraHeaders = result.headers;
       } else if (url.pathname === "/graphql") {
         payload = githubGraphql(raw ? JSON.parse(raw) : {});
       } else if (url.pathname.startsWith("/rest/")) {
@@ -1604,6 +1619,7 @@ const server = createServer(
       ),
       "x-ratelimit-resource": url.pathname === "/graphql" ? "graphql" : "core",
       "x-github-request-id": "MOCK:0000:0000",
+      ...extraHeaders,
     });
     response.end(body);
   },

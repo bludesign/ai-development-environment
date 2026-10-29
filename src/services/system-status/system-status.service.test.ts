@@ -74,6 +74,10 @@ describe("SystemStatusService", () => {
       builds: 4,
       workflows: 5,
       commands: 6,
+      pullRequests: null,
+      actions: null,
+      mergeRequests: null,
+      pipelines: null,
     });
     expect(agentRunCount).toHaveBeenNthCalledWith(1, {
       where: {

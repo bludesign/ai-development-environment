@@ -223,6 +223,22 @@ test.describe("app screenshots", () => {
       if (route.transferWorkflow) {
         await openRepositoryTransfer(page, route.transferWorkflow);
       }
+      if (!route.anonymous && testInfo.project.name.startsWith("desktop")) {
+        const footer = page.locator('[data-slot="sidebar-footer"]');
+        // Wait for the real background summary scan and request discovery, so
+        // screenshots never capture a transient dash or a false zero total.
+        for (const [path, label, count] of [
+          ["/github/pull-requests", "Pull Requests", 11],
+          ["/github/actions", "Actions", 2],
+          ["/gitlab/merge-requests", "Merge Requests", 2],
+          ["/gitlab/pipelines", "Pipelines", 2],
+        ] as const) {
+          await expect(footer.locator(`a[href$="${path}"]`)).toHaveText(
+            new RegExp(`^${label}\\s*${count}$`),
+            { timeout: 30_000 },
+          );
+        }
+      }
       await waitForVisualSettle(page);
       await normalizeScreenshotValues(page);
 

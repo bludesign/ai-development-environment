@@ -3,9 +3,13 @@
 import {
   CircleDollarSign,
   ClipboardList,
+  GitBranch,
+  GitMerge,
+  GitPullRequest,
   Hammer,
   ListTodo,
   MessagesSquare,
+  PlayCircle,
   Terminal,
   Waypoints,
 } from "lucide-react";
@@ -30,6 +34,7 @@ import {
   controlPlaneSubscriptions,
   onControlPlaneRecovery,
 } from "@/lib/control-plane-client";
+import { subscribeIntegrationConfiguration } from "@/lib/integration-configuration";
 
 import {
   DISK_SPACE_FIELDS,
@@ -49,6 +54,10 @@ type SidebarStatusData = {
     builds: number;
     workflows: number;
     commands: number;
+    pullRequests: number | null;
+    actions: number | null;
+    mergeRequests: number | null;
+    pipelines: number | null;
   };
   diskSummary: {
     agents: Array<
@@ -58,6 +67,11 @@ type SidebarStatusData = {
       > & { agent: { id: string; name: string } }
     >;
   };
+};
+
+type SourceControlIntegrationState = {
+  github: { configured: boolean };
+  gitlab: { configured: boolean };
 };
 
 type HistoryItem = {
@@ -98,6 +112,8 @@ export function SidebarStatusFooter() {
   const actionCenter = useOptionalActionCenter();
   const { isMobile, setOpenMobile } = useSidebar();
   const [status, setStatus] = useState<SidebarStatusData | null>(null);
+  const [integrations, setIntegrations] =
+    useState<SourceControlIntegrationState | null>(null);
   const [history, setHistory] = useState<HistoryItem[]>([]);
   const [busy, setBusy] = useState<string | null>(null);
   const [popoverOpen, setPopoverOpen] = useState(false);
@@ -118,18 +134,26 @@ export function SidebarStatusFooter() {
       try {
         const data = await controlPlaneRequest<{
           sidebarStatus: SidebarStatusData;
+          sourceControlIntegrationState: SourceControlIntegrationState;
         }>(
           `query SidebarStatus {
           sidebarStatus {
             usageToday { totalCost collectedAt }
-            activity { plans sessions builds workflows commands }
+            activity { plans sessions builds workflows commands pullRequests actions mergeRequests pipelines }
             diskSummary { agents { agent { id name } enabled status volumes { id totalBytes freeBytes roles paths status effectiveThresholdBytes monitored } } }
+          }
+          sourceControlIntegrationState {
+            github { configured }
+            gitlab { configured }
           }
         }`,
           undefined,
           { signal },
         );
-        if (!signal.aborted) setStatus(data.sidebarStatus);
+        if (!signal.aborted) {
+          setStatus(data.sidebarStatus);
+          setIntegrations(data.sourceControlIntegrationState);
+        }
       } catch {
         /* Keep the last visible status during temporary failures. */
       }
@@ -144,6 +168,7 @@ export function SidebarStatusFooter() {
       { query: "subscription SidebarStatusChanged { sidebarStatusChanged }" },
       { next: refresh, error: () => undefined, complete: () => undefined },
     );
+    const offConfiguration = subscribeIntegrationConfiguration(null, refresh);
     const offRecovery = onControlPlaneRecovery((event) => {
       // The initial mount already reads status; recovery is for a lost stream.
       if (!event?.initialConnection) refresh();
@@ -152,6 +177,7 @@ export function SidebarStatusFooter() {
     return () => {
       window.clearTimeout(initialLoad);
       unsubscribe();
+      offConfiguration();
       offRecovery();
       window.clearInterval(timer);
       updates.dispose();
@@ -218,11 +244,11 @@ export function SidebarStatusFooter() {
     }
   };
 
-  // Action Center items come from the provider that already streams them into
-  // the shell; the rest are running-work counts from the sidebar status query.
+  // Reuse the shell's streamed Action Center total; provider and running-work
+  // totals come from the shared sidebar status query.
   const activity = [
     {
-      key: "actions",
+      key: "actionCenter",
       href: "/dashboard/action-center",
       icon: ListTodo,
       count: actionCenter?.totalCount ?? 0,
@@ -257,6 +283,38 @@ export function SidebarStatusFooter() {
       icon: Terminal,
       count: status?.activity.commands ?? 0,
     },
+    ...(integrations?.github.configured
+      ? ([
+          {
+            key: "pullRequests",
+            href: "/github/pull-requests",
+            icon: GitPullRequest,
+            count: status?.activity.pullRequests,
+          },
+          {
+            key: "actions",
+            href: "/github/actions",
+            icon: PlayCircle,
+            count: status?.activity.actions,
+          },
+        ] as const)
+      : []),
+    ...(integrations?.gitlab.configured
+      ? ([
+          {
+            key: "mergeRequests",
+            href: "/gitlab/merge-requests",
+            icon: GitMerge,
+            count: status?.activity.mergeRequests,
+          },
+          {
+            key: "pipelines",
+            href: "/gitlab/pipelines",
+            icon: GitBranch,
+            count: status?.activity.pipelines,
+          },
+        ] as const)
+      : []),
   ] as const;
 
   /**
@@ -291,16 +349,18 @@ export function SidebarStatusFooter() {
       <div className="grid grid-cols-2 gap-1">
         {activity.map(({ key, href, icon: Icon, count }) => (
           <Link
-            className="flex items-center justify-between rounded-md px-2 py-1 text-xs hover:bg-sidebar-accent"
+            className="grid min-w-0 grid-cols-[minmax(0,1fr)_auto] items-center gap-1.5 rounded-md px-2 py-1 text-xs hover:bg-sidebar-accent"
             href={href}
             key={key}
             onClick={closeMobileNavigation}
           >
-            <span className="flex items-center gap-1.5">
-              <Icon className="size-3.5" />
-              {shell(key)}
+            <span className="flex min-w-0 items-center gap-1.5">
+              <Icon className="size-3.5 shrink-0" />
+              <span className="min-w-0 leading-snug [overflow-wrap:anywhere]">
+                {shell(key)}
+              </span>
             </span>
-            <span className="tabular-nums">{count}</span>
+            <span className="tabular-nums">{count ?? "—"}</span>
           </Link>
         ))}
       </div>

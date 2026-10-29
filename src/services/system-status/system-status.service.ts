@@ -17,6 +17,10 @@ import type { CcusageService } from "@/services/ccusage";
 import type { CcusageCollectionSnapshot } from "@/services/ccusage";
 import type { DiskSpaceService } from "@/services/disk-space";
 import type { PollingService } from "@/services/polling";
+import {
+  EMPTY_INTEGRATION_COUNTS,
+  type SidebarIntegrationsService,
+} from "./sidebar-integrations.service";
 
 const USAGE_POLL_SECONDS = 5 * 60;
 
@@ -35,6 +39,7 @@ export class SystemStatusService {
     private readonly ccusage: CcusageService,
     private readonly diskSpace: DiskSpaceService,
     private readonly polling: PollingService,
+    private readonly integrations?: SidebarIntegrationsService,
   ) {
     this.ccusage.registerCompletionObserver((snapshot) =>
       this.recordCompletedUsage(snapshot),
@@ -50,6 +55,7 @@ export class SystemStatusService {
   }
 
   startRuntime(): void {
+    this.integrations?.start();
     this.polling.register({
       id: "sidebar-usage",
       kind: "SIDEBAR_USAGE",
@@ -69,6 +75,7 @@ export class SystemStatusService {
   }
 
   stopRuntime(): void {
+    this.integrations?.stop();
     if (this.usageTimer) clearTimeout(this.usageTimer);
     this.usageTimer = undefined;
   }
@@ -234,6 +241,7 @@ export class SystemStatusService {
       workflows,
       commands,
       diskSpace,
+      integrations,
     ] = await Promise.all([
       prisma.sidebarUsageSummary.findUnique({ where: { id: "default" } }),
       prisma.agentRun.count({
@@ -272,6 +280,7 @@ export class SystemStatusService {
         where: { archivedAt: null, status: "RUNNING" },
       }),
       includeDiskSpace ? this.diskSpace.overview() : Promise.resolve(undefined),
+      this.integrations?.counts() ?? Promise.resolve(EMPTY_INTEGRATION_COUNTS),
     ]);
     let usageToday =
       storedUsage?.period === period
@@ -297,7 +306,14 @@ export class SystemStatusService {
         totalCost: usageToday?.totalCost ?? null,
         collectedAt: usageToday?.collectedAt.toISOString() ?? null,
       },
-      activity: { plans, sessions, builds, workflows, commands },
+      activity: {
+        plans,
+        sessions,
+        builds,
+        workflows,
+        commands,
+        ...integrations,
+      },
       diskSpace,
     };
   }

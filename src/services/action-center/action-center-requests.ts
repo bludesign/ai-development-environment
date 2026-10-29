@@ -58,11 +58,19 @@ type Candidate = {
   worktreeId: string | null;
   request: ActionCenterRequestView;
 };
+type RequestProvider = "GITHUB" | "GITLAB";
+
 export const ACTION_CENTER_DEFAULTS = {
   maximumRequestAgeDays: 30,
   showMyRequestsInSidebar: true,
   showReviewRequestsInSidebar: true,
 };
+
+export function actionCenterRequestCutoff(maximumRequestAgeDays: number) {
+  return maximumRequestAgeDays
+    ? new Date(Date.now() - maximumRequestAgeDays * 86_400_000)
+    : null;
+}
 
 export async function actionCenterSettings() {
   const prisma = await getPrismaClient();
@@ -79,6 +87,12 @@ export class ActionCenterRequests {
   private timer: ReturnType<typeof setTimeout> | null = null;
   private warnings: string[] = [];
   private requested = false;
+  private started = false;
+  private readonly accountKeys = new Map<RequestProvider, string | null>();
+  private readonly accountGenerations: Record<RequestProvider, number> = {
+    GITHUB: 0,
+    GITLAB: 0,
+  };
 
   constructor(
     private readonly github: GitHubService,
@@ -90,7 +104,22 @@ export class ActionCenterRequests {
     return this.warnings;
   }
 
+  /** Undefined until this account's request projection has been reconciled. */
+  currentAccountKey(provider: RequestProvider): string | null | undefined {
+    return this.accountKeys.get(provider);
+  }
+
+  invalidateAccount(provider: RequestProvider): void {
+    ++this.accountGenerations[provider];
+    this.accountKeys.delete(provider);
+    if (this.started) {
+      if (this.running) this.requested = true;
+      else this.schedule(250);
+    }
+  }
+
   start() {
+    this.started = true;
     this.polling.register({
       id: "server:action-center-requests",
       kind: "ACTION_CENTER_REQUESTS",
@@ -106,7 +135,18 @@ export class ActionCenterRequests {
     ]) {
       const changes = agentEventBus.iterate(topic);
       void (async () => {
-        for await (const _change of changes) {
+        for await (const change of changes) {
+          if (topic === INTEGRATION_CONFIGURATION_CHANGED_TOPIC) {
+            const provider = (
+              change as { integrationConfigurationChanged?: string }
+            ).integrationConfigurationChanged?.toUpperCase();
+            for (const candidate of ["GITHUB", "GITLAB"] as const) {
+              if (!provider || provider === "ALL" || provider === candidate)
+                // Provider mutations also emit this event. Fence in-flight reads;
+                // the sidebar invalidates the key when connection settings change.
+                ++this.accountGenerations[candidate];
+            }
+          }
           // Snapshot observations themselves can emit pipeline updates; polling
           // already includes those observations, so do not recurse into a scan.
           if (!this.running) this.schedule(250);
@@ -225,14 +265,17 @@ export class ActionCenterRequests {
   private async scan() {
     this.warnings = [];
     const settings = await actionCenterSettings();
-    const cutoff = settings.maximumRequestAgeDays
-      ? new Date(
-          Date.now() - settings.maximumRequestAgeDays * 86_400_000,
-        ).toISOString()
-      : null;
+    const cutoff =
+      actionCenterRequestCutoff(
+        settings.maximumRequestAgeDays,
+      )?.toISOString() ?? null;
     const outcomes = await Promise.allSettled([
       (async () => {
+        const generation = this.accountGenerations.GITHUB;
         const login = await this.github.actionCenterIdentity();
+        if (generation !== this.accountGenerations.GITHUB) return;
+        if (this.accountKeys.get("GITHUB") !== login)
+          this.accountKeys.delete("GITHUB");
         await this.reconcile("GITHUB", login, async (add) => {
           for (const scope of [
             "MINE",
@@ -303,13 +346,19 @@ export class ActionCenterRequests {
             } while (after);
           }
         });
+        if (generation === this.accountGenerations.GITHUB)
+          this.accountKeys.set("GITHUB", login);
       })(),
       (async () => {
+        const generation = this.accountGenerations.GITLAB;
         const config = await this.gitlab.getSettings();
+        if (generation !== this.accountGenerations.GITLAB) return;
         const account =
           config.configured && config.viewer
             ? `${config.baseUrl}:${config.viewer.id}`
             : null;
+        if (this.accountKeys.get("GITLAB") !== account)
+          this.accountKeys.delete("GITLAB");
         await this.reconcile("GITLAB", account, async (add) => {
           for (const scope of ["MINE", "REVIEW_REQUESTED"] as const) {
             let pageNumber: number | null = 1;
@@ -371,6 +420,8 @@ export class ActionCenterRequests {
             } while (pageNumber);
           }
         });
+        if (generation === this.accountGenerations.GITLAB)
+          this.accountKeys.set("GITLAB", account);
       })(),
     ]);
     for (const [index, result] of outcomes.entries())

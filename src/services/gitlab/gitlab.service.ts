@@ -42,6 +42,7 @@ import {
   type GitLabCommentsInput,
 } from "./gitlab-comments";
 import type { NotificationsService } from "@/services/notifications";
+import { ACTIVE_GITLAB_PIPELINE_STATUSES } from "./pipeline-status";
 
 import type {
   GitLabApiCallView,
@@ -2720,6 +2721,72 @@ export class GitLabService {
         });
       }
     });
+  }
+
+  /** Count all active project pipelines without enriching or observing them. */
+  async activePipelinesCount(): Promise<number> {
+    if (!(await this.getSettings()).configured) return 0;
+    const projects = await this.projects();
+    const requests = projects.flatMap(({ id }) =>
+      ACTIVE_GITLAB_PIPELINE_STATUSES.map((status) => ({
+        projectId: id,
+        status: status.toLowerCase(),
+      })),
+    );
+    const counts = await mapIntegrationRequests(
+      requests,
+      async ({ projectId, status }) => {
+        const read = (page: number, perPage: number) =>
+          this.get<RawGitLabPipeline[]>({
+            path: `/projects/${encodeURIComponent(projectId)}/pipelines`,
+            operation: "GitLabPipelines",
+            source: "PIPELINES_PAGE",
+            force: true,
+            allowStaleOnError: false,
+            query: { status, page, per_page: perPage },
+          });
+        const first = await read(1, 1);
+        if (!Array.isArray(first.data))
+          throw new Error(
+            "GitLab returned an invalid active pipelines response",
+          );
+        const total = positiveInt(first.headers.get("x-total"));
+        if (total !== null) return total;
+        if (first.data.length === 0 || first.headers.get("x-next-page") === "")
+          return first.data.length;
+
+        // Some instances omit total headers. Fetch full pages rather than making
+        // one request for every active pipeline after the lightweight probe.
+        let count = 0;
+        let page = 1;
+        const seen = new Set<number>();
+        while (!seen.has(page)) {
+          seen.add(page);
+          const response = await read(page, MAX_PAGE_SIZE);
+          if (!Array.isArray(response.data))
+            throw new Error(
+              "GitLab returned an invalid active pipelines response",
+            );
+          count += response.data.length;
+          const nextHeader = response.headers.get("x-next-page");
+          if (
+            nextHeader === "" ||
+            (nextHeader === null && response.data.length < MAX_PAGE_SIZE)
+          )
+            return count;
+          const next = nextHeader === null ? page + 1 : pageValue(nextHeader);
+          if (!next || next <= page || seen.has(next))
+            throw new Error(
+              "GitLab returned an invalid pipeline pagination cursor",
+            );
+          page = next;
+        }
+        throw new Error(
+          "GitLab returned a repeated pipeline pagination cursor",
+        );
+      },
+    );
+    return counts.reduce((total, count) => total + count, 0);
   }
 
   async pipelines(

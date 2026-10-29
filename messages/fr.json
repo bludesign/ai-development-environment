@@ -2699,6 +2699,7 @@
       "AGENT_JOB_RECONCILIATION": "Rapprochement durable des tâches",
       "AGENT_DISK_SPACE": "Espace disque de l’agent",
       "SIDEBAR_USAGE": "Utilisation de la barre latérale",
+      "SIDEBAR_INTEGRATIONS": "Totaux du contrôle de source dans la barre latérale",
       "CODEBASE_SCAN": "Analyse du code",
       "GIT_FETCH": "Git fetch",
       "WORKTREE_AUTOMATION": "Automatisation des worktrees",

@@ -2699,6 +2699,7 @@
       "AGENT_JOB_RECONCILIATION": "Durable job reconciliation",
       "AGENT_DISK_SPACE": "Agent disk space",
       "SIDEBAR_USAGE": "Sidebar usage",
+      "SIDEBAR_INTEGRATIONS": "Sidebar source control totals",
       "CODEBASE_SCAN": "Codebase scan",
       "GIT_FETCH": "Git fetch",
       "WORKTREE_AUTOMATION": "Worktree automation",

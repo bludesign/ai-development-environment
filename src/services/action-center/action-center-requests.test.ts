@@ -7,6 +7,12 @@ import type { GitHubService } from "@/services/github";
 import type { GitLabService } from "@/services/gitlab";
 import type { PollingService } from "@/services/polling";
 import {
+  agentEventBus,
+  GITHUB_PIPELINE_STATUS_CHANGED_TOPIC,
+  INTEGRATION_CONFIGURATION_CHANGED_TOPIC,
+} from "@/services/agent-control";
+import { AsyncEventBus } from "@/services/agent-control/event-bus";
+import {
   ActionCenterRequests,
   actionCenterMergeReady,
 } from "./action-center-requests";
@@ -15,6 +21,14 @@ const { getPrismaClient } = vi.hoisted(() => ({ getPrismaClient: vi.fn() }));
 vi.mock("@/data/prisma-client", () => ({ getPrismaClient }));
 
 const now = new Date().toISOString();
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>((finish) => {
+    resolve = finish;
+  });
+  return { promise, resolve };
+}
+
 const request = (id: string, extra = {}) => ({
   id,
   number: 42,
@@ -70,6 +84,8 @@ describe("Action Center request discovery", () => {
     };
   }
   const polling = {
+    register: vi.fn(),
+    schedule: vi.fn(),
     run: (_id: string, fn: () => Promise<boolean>) => fn(),
   } as unknown as PollingService;
   const service = () =>
@@ -93,7 +109,155 @@ describe("Action Center request discovery", () => {
     gitlab = gitlabStub();
   });
   afterEach(async () => {
+    if (vi.isFakeTimers()) vi.clearAllTimers();
+    vi.restoreAllMocks();
+    vi.useRealTimers();
     await prisma.$disconnect();
+  });
+
+  test("exposes account keys only after initial reconciliation", async () => {
+    const index = service();
+    expect(index.currentAccountKey("GITHUB")).toBeUndefined();
+    expect(index.currentAccountKey("GITLAB")).toBeUndefined();
+
+    await index.refresh();
+
+    expect(index.currentAccountKey("GITHUB")).toBe("alice");
+    expect(index.currentAccountKey("GITLAB")).toBe("https://gitlab.example:1");
+  });
+
+  test("preserves a reconciled account when identity refresh fails", async () => {
+    const index = service();
+    await index.refresh();
+    github.actionCenterIdentity.mockRejectedValueOnce(
+      new Error("GitHub offline"),
+    );
+    gitlab.getSettings.mockRejectedValueOnce(new Error("GitLab offline"));
+
+    await index.refresh();
+
+    expect(index.currentAccountKey("GITHUB")).toBe("alice");
+    expect(index.currentAccountKey("GITLAB")).toBe("https://gitlab.example:1");
+    expect(index.getWarnings().join()).toContain("GitHub offline");
+    expect(index.getWarnings().join()).toContain("GitLab offline");
+  });
+
+  test("replaces account keys after reconciling a changed identity", async () => {
+    const index = service();
+    await index.refresh();
+    github.actionCenterIdentity.mockResolvedValue("bob");
+    gitlab.getSettings.mockResolvedValue({
+      configured: true,
+      baseUrl: "https://another.gitlab.example",
+      viewer: { id: "2" },
+    });
+
+    await index.refresh();
+
+    expect(index.currentAccountKey("GITHUB")).toBe("bob");
+    expect(index.currentAccountKey("GITLAB")).toBe(
+      "https://another.gitlab.example:2",
+    );
+    expect(
+      await prisma.actionCenterRequest.count({
+        where: { provider: "GITHUB", accountKey: { not: "bob" } },
+      }),
+    ).toBe(0);
+  });
+
+  test.each(["GITHUB", "GITLAB"] as const)(
+    "does not restore %s account keys from an identity resolved before invalidation",
+    async (provider) => {
+      const index = service();
+      await index.refresh();
+      const started = deferred<void>();
+      const released = deferred<void>();
+      if (provider === "GITHUB")
+        github.actionCenterIdentity.mockImplementationOnce(async () => {
+          started.resolve();
+          await released.promise;
+          return "alice";
+        });
+      else
+        gitlab.getSettings.mockImplementationOnce(async () => {
+          started.resolve();
+          await released.promise;
+          return {
+            configured: true,
+            baseUrl: "https://gitlab.example",
+            viewer: { id: "1" },
+          };
+        });
+
+      const scan = index.refresh();
+      await started.promise;
+      index.invalidateAccount(provider);
+      expect(index.currentAccountKey(provider)).toBeUndefined();
+      released.resolve();
+      await scan;
+      expect(index.currentAccountKey(provider)).toBeUndefined();
+
+      await index.refresh();
+      expect(index.currentAccountKey(provider)).toBe(
+        provider === "GITHUB" ? "alice" : "https://gitlab.example:1",
+      );
+    },
+  );
+
+  test("does not publish an account key when configuration changes during discovery", async () => {
+    const index = service();
+    await index.refresh();
+    const started = deferred<void>();
+    const released = deferred<void>();
+    github.pullRequests.mockImplementationOnce(async () => {
+      started.resolve();
+      await released.promise;
+      return {
+        items: [request("old-account")],
+        hasNextPage: false,
+        endCursor: null,
+      };
+    });
+
+    const scan = index.refresh();
+    await started.promise;
+    index.invalidateAccount("GITHUB");
+    released.resolve();
+    await scan;
+
+    expect(index.currentAccountKey("GITHUB")).toBeUndefined();
+    expect(index.currentAccountKey("GITLAB")).toBe("https://gitlab.example:1");
+  });
+
+  test("provider mutation events preserve known accounts when the connection is unchanged", async () => {
+    vi.useFakeTimers();
+    const events = new AsyncEventBus();
+    vi.spyOn(agentEventBus, "iterate").mockImplementation((topic) =>
+      events.iterate(topic),
+    );
+    const index = service();
+    await index.refresh();
+    index.start();
+
+    events.publish(GITHUB_PIPELINE_STATUS_CHANGED_TOPIC, {});
+    await Promise.resolve();
+    expect(index.currentAccountKey("GITHUB")).toBe("alice");
+    expect(index.currentAccountKey("GITLAB")).toBe("https://gitlab.example:1");
+
+    events.publish(INTEGRATION_CONFIGURATION_CHANGED_TOPIC, {
+      integrationConfigurationChanged: "github",
+    });
+    await Promise.resolve();
+    expect(index.currentAccountKey("GITHUB")).toBe("alice");
+    expect(index.currentAccountKey("GITLAB")).toBe("https://gitlab.example:1");
+
+    await index.refresh();
+    events.publish(INTEGRATION_CONFIGURATION_CHANGED_TOPIC, {
+      integrationConfigurationChanged: "all",
+    });
+    await Promise.resolve();
+    expect(index.currentAccountKey("GITHUB")).toBe("alice");
+    expect(index.currentAccountKey("GITLAB")).toBe("https://gitlab.example:1");
   });
 
   test("deduplicates categories and retains my approved requests", async () => {
@@ -197,8 +361,15 @@ describe("Action Center request discovery", () => {
     const index = service();
     await index.refresh();
     github.actionCenterIdentity.mockResolvedValue(null);
+    gitlab.getSettings.mockResolvedValue({
+      configured: false,
+      baseUrl: "https://gitlab.example",
+      viewer: { id: "1" },
+    });
     await index.refresh();
     expect(await prisma.actionCenterRequest.count()).toBe(0);
+    expect(index.currentAccountKey("GITHUB")).toBeNull();
+    expect(index.currentAccountKey("GITLAB")).toBeNull();
   });
   test("filters GitLab personal approval independently of overall approval", async () => {
     gitlab.mergeRequests.mockResolvedValue({

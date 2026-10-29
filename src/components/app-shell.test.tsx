@@ -140,6 +140,30 @@ function clearCookies() {
   }
 }
 
+function sidebarStatusResponse(github = true, gitlab = false) {
+  return {
+    sidebarStatus: {
+      usageToday: { totalCost: null, collectedAt: null },
+      activity: {
+        plans: 0,
+        sessions: 0,
+        builds: 0,
+        workflows: 0,
+        commands: 0,
+        pullRequests: github ? 0 : null,
+        actions: github ? 0 : null,
+        mergeRequests: gitlab ? 0 : null,
+        pipelines: gitlab ? 0 : null,
+      },
+      diskSummary: { agents: [] },
+    },
+    sourceControlIntegrationState: {
+      github: { configured: github },
+      gitlab: { configured: gitlab },
+    },
+  };
+}
+
 describe("AppShell", () => {
   beforeEach(() => {
     setViewportWidth(1280);
@@ -151,6 +175,8 @@ describe("AppShell", () => {
     requestMock.mockImplementation(async (query) => {
       if (query.includes("query ActiveAgentOptions"))
         return { agents: [] } as never;
+      if (query.includes("query SidebarStatus"))
+        return sidebarStatusResponse() as never;
       if (query.includes("query NavigationFeatures")) {
         return {
           cacheServerSettings: { configured: false },
@@ -242,6 +268,8 @@ describe("AppShell", () => {
     disabled.unmount();
 
     requestMock.mockImplementation(async (query) => {
+      if (query.includes("query SidebarStatus"))
+        return sidebarStatusResponse() as never;
       if (query.includes("query NavigationFeatures")) {
         return {
           cacheServerSettings: { configured: false },
@@ -270,6 +298,8 @@ describe("AppShell", () => {
     { name: "neither provider", github: false, gitlab: false },
   ])("shows provider navigation for $name", async ({ github, gitlab }) => {
     requestMock.mockImplementation(async (query) => {
+      if (query.includes("query SidebarStatus"))
+        return sidebarStatusResponse(github, gitlab) as never;
       if (query.includes("query NavigationFeatures")) {
         return {
           cacheServerSettings: { configured: false },
