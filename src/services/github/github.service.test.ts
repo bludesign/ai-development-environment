@@ -1,8 +1,14 @@
-import { beforeEach, describe, expect, test, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
+
+import {
+  clearGitHubRestRateLimitPause,
+  type GitHubRateLimitMetadata,
+} from "./github-rate-limit";
 
 import { GITHUB_REST_OPERATIONS } from "./github-rest-operations";
 
 const state = vi.hoisted(() => ({
+  restRateLimit: null as GitHubRateLimitMetadata | null,
   mergePreferences: {} as Record<string, unknown>,
   apiToken: "secret-token" as string | null,
   webhookSecret: null as string | null,
@@ -141,6 +147,7 @@ const appClient = vi.hoisted(() => ({
 }));
 
 const cacheClient = vi.hoisted(() => ({
+  query: vi.fn(),
   clear: vi.fn(),
   clearForCredentialChange: vi.fn(),
   recordGraphqlTransportCall: vi.fn(),
@@ -226,16 +233,7 @@ vi.mock("./github-pipeline-status.service", () => ({
 
 vi.mock("@/services/github/github-cache", () => ({
   GitHubCache: class {
-    async query<T>(input: { fetcher: () => Promise<{ data: T }> }) {
-      const result = await input.fetcher();
-      return {
-        data: result.data,
-        source: "LIVE",
-        stale: false,
-        fetchedAt: new Date(),
-        entryId: "test-entry",
-      };
-    }
+    query = cacheClient.query;
 
     async mutation<T>(input: { fetcher: () => Promise<{ data: T }> }) {
       return (await input.fetcher()).data;
@@ -515,6 +513,10 @@ vi.mock("@/data/prisma-client", () => ({
           return { count: 1 };
         },
       },
+      gitHubRateLimitSnapshot: {
+        findUnique: async () => state.restRateLimit,
+        upsert: async () => ({}),
+      },
       gitHubAuditEvent: {
         create: async ({ data }: { data: Record<string, unknown> }) => {
           state.auditEvents.push(data);
@@ -764,6 +766,18 @@ function rawReviewThread(
 }
 
 beforeEach(() => {
+  state.restRateLimit = null;
+  clearGitHubRestRateLimitPause("PAT");
+  cacheClient.query.mockReset().mockImplementation(async (input) => {
+    const result = await input.fetcher();
+    return {
+      data: result.data,
+      source: "LIVE",
+      stale: false,
+      fetchedAt: new Date(),
+      entryId: "test-entry",
+    };
+  });
   state.mergePreferences = {};
   cacheClient.clear.mockReset();
   cacheClient.clear.mockResolvedValue(true);
@@ -907,7 +921,105 @@ beforeEach(() => {
   vi.unstubAllGlobals();
 });
 
+afterEach(() => {
+  vi.restoreAllMocks();
+  clearGitHubRestRateLimitPause("PAT");
+});
+
 describe("GitHub service", () => {
+  test("reuses sidebar count reads for five minutes and invalidates them when the cache is cleared", async () => {
+    const clock = vi.spyOn(Date, "now").mockReturnValue(Date.now());
+    const fetchMock = vi.fn(async () => response({ total_count: 2 }));
+    vi.stubGlobal("fetch", fetchMock);
+    const service = new GitHubService();
+    expect(
+      await Promise.all([
+        service.activeActionsCount(),
+        service.activeActionsCount(),
+      ]),
+    ).toEqual([10, 10]);
+    expect(fetchMock).toHaveBeenCalledTimes(5);
+    clock.mockReturnValue(Date.now() + 60_000);
+    expect(await service.activeActionsCount()).toBe(10);
+    expect(fetchMock).toHaveBeenCalledTimes(5);
+    expect(cacheClient.recordRestCall).toHaveBeenCalledWith(
+      expect.objectContaining({ cached: true }),
+    );
+    clock.mockReturnValue(Date.now() + 5 * 60_000);
+    expect(await service.activeActionsCount()).toBe(10);
+    expect(fetchMock).toHaveBeenCalledTimes(10);
+    await service.clearCache();
+    await service.activeActionsCount();
+    expect(fetchMock).toHaveBeenCalledTimes(15);
+  });
+
+  test("caches repository reviewer reads and missing CODEOWNERS, with live refresh and worktree validation", async () => {
+    const clock = vi.spyOn(Date, "now").mockReturnValue(Date.now());
+    const fetchMock = vi.fn(async (url: string) =>
+      url.includes("/contents/")
+        ? response({ message: "Not Found" }, 404)
+        : response({ id: 10 }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    const service = new GitHubService();
+    const metadata = "/repos/acme/widgets";
+    const codeowners = `${metadata}/contents/.github/CODEOWNERS?ref=main`;
+    await service.reviewerRest(metadata);
+    await service.reviewerRest(metadata);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    await service.reviewerRest(metadata, false, true);
+    await service.reviewerRest(metadata, true);
+    await service.reviewerRest(metadata, true);
+    expect(fetchMock).toHaveBeenCalledTimes(4);
+    await expect(service.reviewerRest(codeowners)).rejects.toThrow("Not Found");
+    await expect(service.reviewerRest(codeowners)).rejects.toThrow("Not Found");
+    expect(fetchMock).toHaveBeenCalledTimes(5);
+    clock.mockReturnValue(Date.now() + 5 * 60_000);
+    await expect(service.reviewerRest(codeowners)).rejects.toThrow("Not Found");
+    expect(fetchMock).toHaveBeenCalledTimes(6);
+  });
+
+  test("does not cache reviewer provider failures or share cached results across credentials", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(response({ message: "Unavailable" }, 503))
+      .mockImplementation(async () => response({ id: 10 }));
+    vi.stubGlobal("fetch", fetchMock);
+    const service = new GitHubService();
+    await expect(service.reviewerRest("/repos/acme/widgets")).rejects.toThrow(
+      "Unavailable",
+    );
+    await expect(service.reviewerRest("/repos/acme/widgets")).resolves.toEqual({
+      id: 10,
+    });
+    state.apiToken = "different-token";
+    await service.reviewerRest("/repos/acme/widgets");
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+  });
+
+  test("serves cached reads during REST exhaustion but prevents new network requests until reset", async () => {
+    const clock = vi.spyOn(Date, "now").mockReturnValue(Date.now());
+    const fetchMock = vi.fn(async () => response({ id: 10 }));
+    vi.stubGlobal("fetch", fetchMock);
+    const service = new GitHubService();
+    await service.reviewerRest("/repos/acme/widgets");
+    const resetAt = new Date(Date.now() + 60_000);
+    state.restRateLimit = {
+      limit: 5000,
+      remaining: 0,
+      used: 5000,
+      resource: "core",
+      resetAt,
+    };
+    await service.reviewerRest("/repos/acme/widgets");
+    await expect(
+      service.reviewerRest("/repos/acme/widgets/branches"),
+    ).rejects.toThrow("REST rate limit is exhausted");
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    clock.mockReturnValue(resetAt.getTime());
+    await service.reviewerRest("/repos/acme/widgets/branches");
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
   test("counts all running and queued Actions across codebase repositories without enrichment", async () => {
     state.codebaseRepositories.push(
       {
@@ -3628,6 +3740,124 @@ describe("GitHub service", () => {
       }),
     ).resolves.toMatchObject({ state: "MERGED" });
   });
+
+  test.each(["blocked", "unavailable", "new head"])(
+    "rechecks merge status live after the dialog is cached: %s",
+    async (change) => {
+      let dialogLoaded = false;
+      let cachedStatus: unknown;
+      const normalQuery = cacheClient.query.getMockImplementation()!;
+      cacheClient.query.mockImplementation(async (input) => {
+        if (input.operation === "GitHubPullRequestMergeOptions") {
+          if (cachedStatus && !input.force)
+            return { data: cachedStatus, fetchedAt: new Date() };
+          try {
+            const result = await normalQuery(input);
+            cachedStatus = result.data;
+            return result;
+          } catch (error) {
+            if (cachedStatus && input.allowStaleOnError !== false)
+              return { data: cachedStatus, fetchedAt: new Date() };
+            throw error;
+          }
+        }
+        return normalQuery(input);
+      });
+      const mergeWrite = vi.fn();
+      const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
+        if (url.includes("/actions/runs")) return response({ total_count: 0 });
+        if (url.includes("/user/emails")) return response([]);
+        const body = JSON.parse(String(init?.body));
+        if (body.query.includes("query GitHubPullRequestMergeOptions")) {
+          if (dialogLoaded && change === "unavailable")
+            return response({ message: "GitHub unavailable" }, 503);
+          return response({
+            data: {
+              viewer: { email: "" },
+              repository: {
+                mergeCommitAllowed: true,
+                squashMergeAllowed: true,
+                rebaseMergeAllowed: true,
+                viewerPermission: "WRITE",
+                pullRequest: {
+                  id: "pull-request-1",
+                  title: "Ship feature",
+                  body: "",
+                  url: "https://github.com/acme/widgets/pull/17",
+                  state: "OPEN",
+                  isDraft: false,
+                  mergeable: "MERGEABLE",
+                  mergeStateStatus:
+                    dialogLoaded && change === "blocked" ? "BLOCKED" : "CLEAN",
+                  headRefOid: dialogLoaded ? "new-head" : "dialog-head",
+                  mergedAt: null,
+                },
+              },
+            },
+          });
+        }
+        if (body.query.includes("mutation MergeGitHubPullRequest")) {
+          mergeWrite(body.variables);
+          return response({
+            data: {
+              mergePullRequest: {
+                pullRequest: {
+                  id: "pull-request-1",
+                  state: "MERGED",
+                  url: "https://github.com/acme/widgets/pull/17",
+                  mergedAt: new Date().toISOString(),
+                },
+              },
+            },
+          });
+        }
+        throw new Error("Unexpected request");
+      });
+      vi.stubGlobal("fetch", fetchMock);
+      const service = new GitHubService();
+      await service.activeActionsCount();
+      await expect(
+        service.pullRequestMergeOptions("acme", "widgets", 17),
+      ).resolves.toMatchObject({ canMerge: true, headRefOid: "dialog-head" });
+      dialogLoaded = true;
+      // An exhausted REST bucket must not turn a GraphQL merge check into a cache hit.
+      state.restRateLimit = {
+        limit: 5000,
+        used: 5000,
+        remaining: 0,
+        resource: "core",
+        resetAt: new Date(Date.now() + 60_000),
+      };
+      const result = service.mergePullRequest({
+        owner: "acme",
+        name: "widgets",
+        number: 17,
+        method: "SQUASH",
+        commitHeadline: "Ship feature",
+        commitBody: "",
+      });
+      if (change === "new head") {
+        await expect(result).resolves.toMatchObject({ state: "MERGED" });
+        expect(mergeWrite).toHaveBeenCalledWith(
+          expect.objectContaining({ expectedHeadOid: "new-head" }),
+        );
+      } else {
+        await expect(result).rejects.toThrow(
+          change === "blocked"
+            ? "Required reviews"
+            : "GitHub returned HTTP 503",
+        );
+        expect(mergeWrite).not.toHaveBeenCalled();
+      }
+      expect(cacheClient.query).toHaveBeenLastCalledWith(
+        expect.objectContaining({
+          operation: "GitHubPullRequestMergeOptions",
+          force: true,
+          allowStaleOnError: false,
+        }),
+      );
+    },
+  );
 
   test("reports unmet GitHub merge requirements before mutation", async () => {
     vi.stubGlobal(

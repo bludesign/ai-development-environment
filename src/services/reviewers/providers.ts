@@ -28,7 +28,7 @@ export class ReviewerProviders implements ReviewerProviderAdapter {
     refresh = false,
   ) {
     return /^github\.com\//i.test(repository.canonicalOrigin)
-      ? this.github.discover(repository, ref, request)
+      ? this.github.discover(repository, ref, request, refresh)
       : this.gitlab.discover(repository, ref, request, refresh);
   }
 

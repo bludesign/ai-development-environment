@@ -95,10 +95,11 @@ export class GitHubReviewerProvider {
     repository: ReviewerRepository,
     requestedRef?: string,
     locator?: ReviewerRequestLocator,
+    refresh = false,
   ): Promise<ReviewerDiscovery> {
     const { owner, name, prefix } = this.parts(repository);
     const read = <T>(path: string) =>
-      this.service.reviewerRest<T>(path, Boolean(locator));
+      this.service.reviewerRest<T>(path, Boolean(locator), refresh);
     const all = <T>(path: string) =>
       paginated<T>((page) =>
         read(
@@ -178,6 +179,7 @@ export class GitHubReviewerProvider {
         }`,
           { owner, name, ref: `refs/heads/${ref}` },
           Boolean(locator),
+          refresh,
         )
         .then((result) => result.repository?.ref?.branchProtectionRule ?? null)
         .catch((error) => {

@@ -128,6 +128,27 @@ function githubFixture() {
 }
 
 describe("GitHub reviewer adapter", () => {
+  test("forwards explicit refresh to all repository discovery reads", async () => {
+    const { provider, reviewerRest, reviewerGraphql } = githubFixture();
+    await provider.discover(
+      { id: "repo", canonicalOrigin: "github.com/acme/project" },
+      undefined,
+      undefined,
+      true,
+    );
+    expect(reviewerRest).toHaveBeenCalledWith(
+      "/repos/acme/project",
+      false,
+      true,
+    );
+    expect(reviewerGraphql).toHaveBeenCalledWith(
+      expect.any(String),
+      expect.any(Object),
+      false,
+      true,
+    );
+  });
+
   test("shares owner pools, combines active rule counts, and preserves valid approvals", async () => {
     const { provider } = githubFixture();
     const snapshot = await provider.discover(

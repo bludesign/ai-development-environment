@@ -2872,7 +2872,6 @@ export class GitLabService {
             path: `/projects/${encodeURIComponent(projectId)}/pipelines`,
             operation: "GitLabPipelines",
             source: "PIPELINES_PAGE",
-            force: true,
             allowStaleOnError: false,
             query: { status, page, per_page: perPage },
           });

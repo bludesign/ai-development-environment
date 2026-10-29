@@ -21,6 +21,7 @@ import type { WorkflowEventsService } from "@/services/workflows/workflow-events
 import { GitHubCache } from "./github-cache";
 import { GITHUB_API_BASE_URL } from "./github-endpoints";
 import {
+  assertGitHubRestRateLimitAvailable,
   observeGitHubRateLimit,
   type GitHubRateLimitMetadata,
 } from "./github-rate-limit";
@@ -907,6 +908,7 @@ export class GitHubActionsNotificationsService {
   ): Promise<WorkflowRun[]> {
     const runs: WorkflowRun[] = [];
     for (let page = 1; ; page += 1) {
+      await assertGitHubRestRateLimitAvailable("PAT");
       const url = `${GITHUB_API_BASE_URL}/repos/${encodeURIComponent(target.owner)}/${encodeURIComponent(target.repository)}/actions/runs?per_page=${GITHUB_RUNS_PAGE_SIZE}&page=${page}`;
       const startedAt = Date.now();
       const record = (input: {

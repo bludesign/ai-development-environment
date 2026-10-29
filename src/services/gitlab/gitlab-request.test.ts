@@ -27,6 +27,9 @@ type RequestInput = {
   allowStaleOnError?: boolean;
 };
 type ServiceInternals = {
+  activePipelinesCount(): Promise<number>;
+  getSettings(): Promise<{ configured: boolean }>;
+  projects(): Promise<Array<{ id: string }>>;
   get(input: RequestInput): Promise<ResponseView>;
   connection(): Promise<{ baseUrl: string; token: string }>;
   ttl(operation: string): Promise<number>;
@@ -94,6 +97,48 @@ test("coalesces concurrent cache misses, preserves page headers, and does not ca
   expect(instance.logCall).toHaveBeenCalledOnce();
   await instance.get(request);
   expect(upstream).toHaveBeenCalledTimes(2);
+});
+
+test("sidebar pipeline counts reuse the configured cache until expiry and after clearing fetch fresh totals", async () => {
+  const instance = service();
+  const now = Date.now();
+  const clock = vi.spyOn(Date, "now").mockReturnValue(now);
+  const entries = new Map<string, unknown>();
+  cache.findUnique.mockImplementation(
+    async ({ where }) => entries.get(where.cacheKey) ?? null,
+  );
+  cache.upsert.mockImplementation(async ({ where, create }) => {
+    const entry = { ...create, fetchedAt: new Date(Date.now()) };
+    entries.set(where.cacheKey, entry);
+    return entry;
+  });
+  cache.deleteMany.mockImplementation(async () => {
+    entries.clear();
+    return { count: 7 };
+  });
+  vi.spyOn(instance, "getSettings").mockResolvedValue({ configured: true });
+  vi.spyOn(instance, "projects").mockResolvedValue([{ id: "1" }]);
+  vi.mocked(instance.ttl).mockResolvedValue(300);
+  const upstream = vi
+    .spyOn(instance, "fetchRaw")
+    .mockImplementation(async () => ({
+      ...response([]),
+      headers: new Headers({ "x-total": "5" }),
+    }));
+  try {
+    expect(await instance.activePipelinesCount()).toBe(35);
+    clock.mockReturnValue(now + 60_000);
+    expect(await instance.activePipelinesCount()).toBe(35);
+    expect(upstream).toHaveBeenCalledTimes(7);
+    clock.mockReturnValue(now + 300_000);
+    expect(await instance.activePipelinesCount()).toBe(35);
+    expect(upstream).toHaveBeenCalledTimes(14);
+    await instance.clearCache();
+    await instance.activePipelinesCount();
+    expect(upstream).toHaveBeenCalledTimes(21);
+  } finally {
+    vi.restoreAllMocks();
+  }
 });
 
 test("separates credential scopes and prevents invalidated replies from repopulating cache", async () => {
