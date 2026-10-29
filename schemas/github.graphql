@@ -158,6 +158,10 @@ enum GitHubRequestSource {
   PULL_REQUEST_DETAILS
   "Represents the actions page option."
   ACTIONS_PAGE
+  "Server-side sidebar count reconciliation."
+  SIDEBAR_COUNTS
+  "Background Action Center request synchronization."
+  ACTION_CENTER_REQUESTS
   "Represents the worktrees option."
   WORKTREES
   "Represents the worktree pipelines option."
@@ -1470,6 +1474,8 @@ extend type Query {
     workflowId: ID
     "Whether to return only the newest run for each repository, workflow, event, and branch. Defaults to `false`."
     latestOnly: Boolean = false
+    "Bypass the workflow list cache for an explicit refresh."
+    forceRefresh: Boolean = false
     "Maximum number of records to return. Defaults to `25`."
     first: Int = 25
     "Cursor or identifier after which to return records. Omit it to leave this dimension unfiltered."

@@ -4,16 +4,27 @@ import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 
 import { clearGitHubRestRateLimitPause } from "./github-rate-limit";
 
+import { GitHubWorkflowRunCache } from "./github-workflow-run-cache";
+
 import { GITHUB_REST_OPERATIONS } from "./github-rest-operations";
 
 const mocks = vi.hoisted(() => ({
   getPrismaClient: vi.fn(),
   recordRestCall: vi.fn(async () => undefined),
   rateLimit: { findUnique: vi.fn(), upsert: vi.fn() },
+  inventoryObserve: vi.fn(async () => undefined),
 }));
 
 vi.mock("@/data/prisma-client", () => ({
   getPrismaClient: mocks.getPrismaClient,
+}));
+
+vi.mock("./github-actions-inventory", async (original) => ({
+  ...(await original<typeof import("./github-actions-inventory")>()),
+  GitHubActionsInventory: class {
+    observe = mocks.inventoryObserve;
+    async markWebhookCoverage() {}
+  },
 }));
 
 import { GitHubActionsNotificationsService } from "./github-actions-notifications.service";
@@ -71,6 +82,7 @@ function setup(
   jiraBranchRegex: string | null = "([A-Z]+-\\d+)",
   enhancedPipelineWebhooksEnabled = false,
   appConfigured = true,
+  workflowRunCache = new GitHubWorkflowRunCache(),
 ) {
   const deliveries = new Map<string, Record<string, unknown>>();
   const observations = new Map<string, Observation>();
@@ -278,6 +290,7 @@ function setup(
       invalidatePullRequests: vi.fn().mockResolvedValue(undefined),
     } as never,
     pipelineStatus as never,
+    workflowRunCache,
   );
   return {
     service,
@@ -305,6 +318,7 @@ function webhookInput(
 }
 
 beforeEach(() => {
+  mocks.inventoryObserve.mockClear();
   clearGitHubRestRateLimitPause("PAT");
   mocks.rateLimit.findUnique.mockReset().mockResolvedValue(null);
   mocks.rateLimit.upsert.mockReset().mockResolvedValue({});
@@ -315,6 +329,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  vi.useRealTimers();
   vi.restoreAllMocks();
   clearGitHubRestRateLimitPause("PAT");
 });
@@ -336,6 +351,83 @@ describe("GitHub Actions webhook notifications", () => {
             source: "WEBHOOK",
           }),
         ],
+      }),
+    );
+  });
+
+  test("records nonterminal workflow status even when enhanced pipeline webhooks are disabled", async () => {
+    const { service } = setup();
+    const payload = workflowPayload("success", {
+      status: "in_progress",
+      conclusion: null,
+    });
+    payload.action = "in_progress";
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+    await service.handleWebhook(webhookInput(payload));
+    expect(mocks.inventoryObserve).toHaveBeenCalledWith(
+      "repository-1",
+      [expect.objectContaining({ id: "101", status: "in_progress" })],
+      "WEBHOOK",
+    );
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  test("a completed job never marks its entire workflow complete in the count inventory", async () => {
+    const { service } = setup();
+    const payload = {
+      ...workflowPayload("success"),
+      action: "completed",
+      workflow_job: {
+        run_id: 101,
+        run_attempt: 1,
+        head_sha: "abc123",
+        status: "completed",
+        completed_at: "2026-07-22T12:00:00Z",
+      },
+    };
+    await service.handleWebhook({
+      ...webhookInput(payload),
+      event: "workflow_job",
+    });
+    expect(mocks.inventoryObserve).not.toHaveBeenCalled();
+  });
+
+  test("a page/count observation does not consume the later completion notification", async () => {
+    const { service, observations, notifications } = setup();
+    observations.set("repository-1:101:1", {
+      status: "completed",
+      conclusion: "success",
+      notifiedAt: null,
+      notificationObservedAt: null,
+      githubUpdatedAt: new Date("2026-07-22T12:00:00Z"),
+    });
+    await service.handleWebhook(webhookInput(workflowPayload("success")));
+    expect(notifications.recordInTransaction).toHaveBeenCalledOnce();
+  });
+
+  test("notification polling reuses a matching page cached by the Actions page", async () => {
+    const cache = new GitHubWorkflowRunCache();
+    const payload = workflowPayload("success");
+    const url =
+      "https://api.github.com/repos/acme/widgets/actions/runs?per_page=100&page=1";
+    await cache.read("personal-token", url, async () => ({
+      total_count: 1,
+      workflow_runs: [
+        { ...payload.workflow_run, repository: payload.repository },
+      ],
+    }));
+    const { service } = setup(undefined, "([A-Z]+-\\d+)", false, false, cache);
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+    await (
+      service as unknown as { pollRepositories(): Promise<unknown> }
+    ).pollRepositories();
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(mocks.recordRestCall).toHaveBeenCalledWith(
+      expect.objectContaining({
+        requestSource: "ACTIONS_NOTIFICATIONS",
+        cached: true,
       }),
     );
   });
@@ -698,6 +790,59 @@ describe("GitHub Actions webhook notifications", () => {
 });
 
 describe("GitHub Actions fallback polling", () => {
+  test.each([false, true])(
+    "notifies unseen completions after a cached page (empty: %s)",
+    async (empty) => {
+      vi.useFakeTimers({ toFake: ["Date"] });
+      const fetchedAt = new Date("2026-10-29T12:00:00Z");
+      vi.setSystemTime(fetchedAt);
+      const cache = new GitHubWorkflowRunCache();
+      const url =
+        "https://api.github.com/repos/acme/widgets/actions/runs?per_page=100&page=1";
+      const older = workflowPayload("success", {
+        id: 100,
+        updated_at: "2026-10-29T11:58:00Z",
+      }).workflow_run;
+      await cache.read("personal-token", url, async () => ({
+        workflow_runs: empty ? [] : [older],
+      }));
+      const { service, pollingStates, notifications } = setup(
+        undefined,
+        undefined,
+        false,
+        false,
+        cache,
+      );
+      const previousPoll = new Date("2026-10-29T11:59:00Z");
+      pollingStates.set("repository-1", {
+        initializedAt: previousPoll,
+        lastPollSucceededAt: previousPoll,
+      });
+      const completed = workflowPayload("success", {
+        updated_at: "2026-10-29T12:00:05Z",
+      }).workflow_run;
+      const fetchMock = vi.fn(async () => githubResponse([completed, older]));
+      vi.stubGlobal("fetch", fetchMock);
+      const poll = () =>
+        (
+          service as unknown as { pollRepositories(): Promise<unknown> }
+        ).pollRepositories();
+
+      vi.setSystemTime(new Date("2026-10-29T12:00:10Z"));
+      await expect(poll()).resolves.toMatchObject({ notificationsCreated: 0 });
+      expect(fetchMock).not.toHaveBeenCalled();
+      expect(pollingStates.get("repository-1")).toMatchObject({
+        lastPollSucceededAt: fetchedAt,
+        lastPollCompletedAt: new Date(),
+      });
+
+      vi.setSystemTime(new Date("2026-10-29T12:01:10Z"));
+      await expect(poll()).resolves.toMatchObject({ notificationsCreated: 1 });
+      await expect(poll()).resolves.toMatchObject({ notificationsCreated: 0 });
+      expect(notifications.recordInTransaction).toHaveBeenCalledOnce();
+    },
+  );
+
   test("pauses outbound polling after observed REST exhaustion and resumes when the window resets", async () => {
     const { service } = setup();
     const now = Date.now();
@@ -730,6 +875,49 @@ describe("GitHub Actions fallback polling", () => {
     clock.mockReturnValue(reset * 1000);
     await expect(poll()).resolves.toMatchObject({ failures: 0 });
     expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  test("bounds the polling checkpoint by an older cached pagination page", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    const fetchedAt = new Date("2026-10-29T12:00:00Z");
+    vi.setSystemTime(fetchedAt);
+    const cache = new GitHubWorkflowRunCache();
+    await cache.read(
+      "personal-token",
+      "https://api.github.com/repos/acme/widgets/actions/runs?per_page=100&page=2",
+      async () => ({ workflow_runs: [] }),
+    );
+    const { service, pollingStates } = setup(
+      undefined,
+      undefined,
+      false,
+      false,
+      cache,
+    );
+    const previousPoll = new Date("2026-10-29T11:59:00Z");
+    pollingStates.set("repository-1", {
+      initializedAt: previousPoll,
+      lastPollSucceededAt: previousPoll,
+    });
+    vi.setSystemTime(new Date("2026-10-29T12:00:10Z"));
+    const fetchMock = vi.fn(async () =>
+      githubResponse(
+        Array.from({ length: 100 }, (_, index) => ({
+          id: 1_000 + index,
+          workflow_id: 202,
+          status: "in_progress",
+          updated_at: "2026-10-29T12:00:05Z",
+        })),
+      ),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    await (
+      service as unknown as { pollRepositories(): Promise<unknown> }
+    ).pollRepositories();
+    expect(fetchMock).toHaveBeenCalledOnce();
+    expect(pollingStates.get("repository-1")?.lastPollSucceededAt).toEqual(
+      fetchedAt,
+    );
   });
 
   test("keeps completed PAT-polled runs non-retryable without a GitHub App", async () => {
@@ -853,6 +1041,7 @@ describe("GitHub Actions fallback polling", () => {
   });
 
   test("seeds history, then notifies a terminal transition once", async () => {
+    const clock = vi.spyOn(Date, "now").mockReturnValue(Date.now());
     const { service, notifications, observations } = setup();
     const fetchMock = vi
       .fn()
@@ -897,6 +1086,7 @@ describe("GitHub Actions fallback polling", () => {
     await expect(poll()).resolves.toMatchObject({ notificationsCreated: 0 });
     expect(notifications.recordInTransaction).not.toHaveBeenCalled();
 
+    clock.mockReturnValue(Date.now() + 60_000);
     await expect(poll()).resolves.toMatchObject({ notificationsCreated: 1 });
     await expect(poll()).resolves.toMatchObject({ notificationsCreated: 0 });
     expect(notifications.recordInTransaction).toHaveBeenCalledTimes(1);

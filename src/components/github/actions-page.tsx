@@ -221,7 +221,6 @@ export function ActionsPage() {
   const [error, setError] = useState<string | null>(null);
   const [expandedRuns, setExpandedRuns] = useState<Set<string>>(new Set());
   const [jobStates, setJobStates] = useState<Record<string, JobState>>({});
-  const loadMoreTriggerRef = useRef<HTMLDivElement>(null);
   const requestGenerationRef = useRef(0);
   const appendInFlightGenerationRef = useRef<number | null>(null);
 
@@ -231,7 +230,11 @@ export function ActionsPage() {
       branch: string,
       pipeline: string,
       latestOnlyFilter: boolean,
-      options: { append: boolean; cursor?: string | null } = {
+      options: {
+        append: boolean;
+        cursor?: string | null;
+        forceRefresh?: boolean;
+      } = {
         append: false,
       },
     ) => {
@@ -269,6 +272,7 @@ export function ActionsPage() {
             $branch: String
             $workflowId: ID
             $latestOnly: Boolean!
+            $forceRefresh: Boolean!
             $first: Int!
             $after: String
           ) {
@@ -278,6 +282,7 @@ export function ActionsPage() {
               branch: $branch
               workflowId: $workflowId
               latestOnly: $latestOnly
+              forceRefresh: $forceRefresh
               first: $first
               after: $after
             ) {
@@ -298,6 +303,7 @@ export function ActionsPage() {
                 ? null
                 : pipeline,
             latestOnly: latestOnlyFilter,
+            forceRefresh: options.forceRefresh ?? false,
             first: 25,
             after: options.cursor ?? null,
           },
@@ -413,51 +419,6 @@ export function ActionsPage() {
       controller?.abort();
     };
   }, [loadRuns]);
-
-  useEffect(() => {
-    if (
-      !settings?.tokenConfigured ||
-      !hasNextPage ||
-      !endCursor ||
-      loading ||
-      loadingMore ||
-      paginationError
-    ) {
-      return;
-    }
-    const trigger = loadMoreTriggerRef.current;
-    if (!trigger) return;
-    const observer = new IntersectionObserver(
-      (entries) => {
-        if (!entries.some((entry) => entry.isIntersecting)) return;
-        void loadRuns(
-          selectedRepositoryId,
-          selectedBranch,
-          selectedPipeline,
-          latestOnly,
-          {
-            append: true,
-            cursor: endCursor,
-          },
-        );
-      },
-      { rootMargin: "400px 0px" },
-    );
-    observer.observe(trigger);
-    return () => observer.disconnect();
-  }, [
-    endCursor,
-    hasNextPage,
-    loadRuns,
-    loading,
-    loadingMore,
-    latestOnly,
-    paginationError,
-    selectedRepositoryId,
-    selectedBranch,
-    selectedPipeline,
-    settings?.tokenConfigured,
-  ]);
 
   const selectRepository = (repositoryId: string) => {
     setSelectedRepositoryId(repositoryId);
@@ -653,6 +614,7 @@ export function ActionsPage() {
               selectedBranch,
               selectedPipeline,
               latestOnly,
+              { append: false, forceRefresh: true },
             )
           }
           variant="outline"
@@ -784,7 +746,7 @@ export function ActionsPage() {
                 </EmptyDescription>
               </EmptyHeader>
             </Empty>
-          ) : runs.length === 0 ? (
+          ) : runs.length === 0 && !hasNextPage ? (
             <Empty className="border py-12">
               <EmptyHeader>
                 <EmptyTitle>{t("empty")}</EmptyTitle>
@@ -831,16 +793,28 @@ export function ActionsPage() {
               </AlertDescription>
             </Alert>
           ) : hasNextPage ? (
-            <div
-              className="flex min-h-10 items-center justify-center gap-2 text-sm text-muted-foreground"
-              ref={loadMoreTriggerRef}
-              role="status"
-            >
-              {loadingMore && (
-                <>
-                  <Spinner /> {t("loadingMore")}
-                </>
+            <div className="flex flex-col items-center gap-2 py-3">
+              {runs.length === 0 && (
+                <p className="text-sm text-muted-foreground">
+                  {t("moreHistory")}
+                </p>
               )}
+              <Button
+                variant="outline"
+                disabled={loadingMore || !endCursor}
+                onClick={() =>
+                  void loadRuns(
+                    selectedRepositoryId,
+                    selectedBranch,
+                    selectedPipeline,
+                    latestOnly,
+                    { append: true, cursor: endCursor },
+                  )
+                }
+              >
+                {loadingMore ? <Spinner /> : <ChevronDown />}
+                {loadingMore ? t("loadingMore") : t("loadMore")}
+              </Button>
             </div>
           ) : null}
         </>

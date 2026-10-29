@@ -6,6 +6,46 @@ import {
 } from "./github-rate-limit";
 
 import { GITHUB_REST_OPERATIONS } from "./github-rest-operations";
+import {
+  githubCredentialKey,
+  githubWebhookCoverageKey,
+} from "./github-actions-inventory";
+
+const inventory = vi.hoisted(() => ({
+  states: new Map<
+    string,
+    {
+      activeCredentialKey: string;
+      activeReconciledAt: Date;
+      activeWebhookKey?: string;
+    }
+  >(),
+  counts: new Map<string, number>(),
+  observe: vi.fn(async () => undefined),
+}));
+vi.mock("./github-actions-inventory", async (original) => ({
+  ...(await original<typeof import("./github-actions-inventory")>()),
+  GitHubActionsInventory: class {
+    observe = inventory.observe;
+    async state(id: string) {
+      return inventory.states.get(id) ?? null;
+    }
+    async reconcile(id: string, key: string, runs: unknown[], startedAt: Date) {
+      inventory.states.set(id, {
+        activeCredentialKey: key,
+        activeReconciledAt: startedAt,
+      });
+      inventory.counts.set(id, runs.length);
+    }
+    async count(ids: string[], key: string) {
+      return ids.every(
+        (id) => inventory.states.get(id)?.activeCredentialKey === key,
+      )
+        ? ids.reduce((sum, id) => sum + (inventory.counts.get(id) ?? 0), 0)
+        : null;
+    }
+  },
+}));
 
 const state = vi.hoisted(() => ({
   restRateLimit: null as GitHubRateLimitMetadata | null,
@@ -766,6 +806,9 @@ function rawReviewThread(
 }
 
 beforeEach(() => {
+  inventory.states.clear();
+  inventory.counts.clear();
+  inventory.observe.mockClear();
   state.restRateLimit = null;
   clearGitHubRestRateLimitPause("PAT");
   cacheClient.query.mockReset().mockImplementation(async (input) => {
@@ -922,14 +965,23 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  vi.useRealTimers();
   vi.restoreAllMocks();
   clearGitHubRestRateLimitPause("PAT");
 });
 
 describe("GitHub service", () => {
-  test("reuses sidebar count reads for five minutes and invalidates them when the cache is cleared", async () => {
+  test("reuses reconciled sidebar counts for five minutes independently of page cache clearing", async () => {
     const clock = vi.spyOn(Date, "now").mockReturnValue(Date.now());
-    const fetchMock = vi.fn(async () => response({ total_count: 2 }));
+    const fetchMock = vi.fn(async (url: string) =>
+      response({
+        total_count: 2,
+        workflow_runs: [1, 2].map((id) => ({
+          ...rawActionsWorkflowRun(id, "acme/widgets", "2026-07-21T12:00:00Z"),
+          status: new URL(url).searchParams.get("status"),
+        })),
+      }),
+    );
     vi.stubGlobal("fetch", fetchMock);
     const service = new GitHubService();
     expect(
@@ -943,14 +995,157 @@ describe("GitHub service", () => {
     expect(await service.activeActionsCount()).toBe(10);
     expect(fetchMock).toHaveBeenCalledTimes(5);
     expect(cacheClient.recordRestCall).toHaveBeenCalledWith(
-      expect.objectContaining({ cached: true }),
+      expect.objectContaining({ requestSource: "SIDEBAR_COUNTS" }),
     );
     clock.mockReturnValue(Date.now() + 5 * 60_000);
     expect(await service.activeActionsCount()).toBe(10);
     expect(fetchMock).toHaveBeenCalledTimes(10);
     await service.clearCache();
     await service.activeActionsCount();
-    expect(fetchMock).toHaveBeenCalledTimes(15);
+    expect(fetchMock).toHaveBeenCalledTimes(10);
+  });
+
+  test("uses fifteen-minute reconciliation only for repositories with verified webhook coverage", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date("2026-10-29T12:00:00Z"));
+    state.webhookSecret = "secret";
+    state.appSettings!.webhookUrl = "https://hooks.example/github";
+    state.appSettings!.webhookConfiguredAt = new Date();
+    const key = githubCredentialKey(state.apiToken!);
+    inventory.states.set("codebase-repository-1", {
+      activeCredentialKey: key,
+      activeReconciledAt: new Date(),
+      activeWebhookKey: githubWebhookCoverageKey(
+        "456",
+        state.appSettings!.verifiedAt,
+      ),
+    });
+    inventory.counts.set("codebase-repository-1", 3);
+    const fetchMock = vi.fn(async () =>
+      response({ total_count: 0, workflow_runs: [] }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    const service = new GitHubService();
+    vi.setSystemTime(new Date(Date.now() + 5 * 60_000));
+    expect(await service.activeActionsCount()).toBe(3);
+    expect(fetchMock).not.toHaveBeenCalled();
+    vi.setSystemTime(new Date(Date.now() + 10 * 60_000));
+    expect(await service.activeActionsCount()).toBe(0);
+    expect(fetchMock).toHaveBeenCalledTimes(5);
+    vi.useRealTimers();
+  });
+
+  test("shares settled workflow pages and caches empty PR associations, with explicit live refresh", async () => {
+    const fetchMock = vi.fn(async (url: string) =>
+      url.includes("/commits/")
+        ? response([])
+        : response({
+            total_count: 1,
+            workflow_runs: [
+              rawActionsWorkflowRun(44, "acme/widgets", "2026-10-29T12:00:00Z"),
+            ],
+          }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    const service = new GitHubService();
+    await service.actionsWorkflowRuns();
+    await service.actionsWorkflowRuns();
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(
+      fetchMock.mock.calls.some(([url]) => url.includes("per_page=100&page=1")),
+    ).toBe(true);
+    await service.actionsWorkflowRuns(
+      null,
+      25,
+      null,
+      null,
+      null,
+      "ACTIONS_PAGE",
+      false,
+      true,
+    );
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+    state.apiToken = "another-credential";
+    await service.actionsWorkflowRuns();
+    expect(fetchMock).toHaveBeenCalledTimes(5);
+  });
+
+  test("does not scan duplicate history after selecting the final requested row", async () => {
+    const runs = Array.from({ length: 100 }, (_, i) =>
+      rawActionsWorkflowRun(
+        100 - i,
+        "acme/widgets",
+        new Date(Date.UTC(2026, 9, 29, 12, 0, -i)).toISOString(),
+        { workflowId: i < 25 ? i + 1 : 1, pullRequests: [17] },
+      ),
+    );
+    const fetchMock = vi.fn(async () =>
+      response({ total_count: 10_000, workflow_runs: runs }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    const service = new GitHubService();
+    const first = await service.actionsWorkflowRuns(
+      null,
+      25,
+      null,
+      null,
+      null,
+      "ACTIONS_PAGE",
+      true,
+    );
+    expect(first.items).toHaveLength(25);
+    expect(fetchMock).toHaveBeenCalledOnce();
+    const second = await service.actionsWorkflowRuns(
+      null,
+      25,
+      first.endCursor,
+      null,
+      null,
+      "ACTIONS_PAGE",
+      true,
+    );
+    expect(second.items).toEqual([]);
+    expect(second.hasNextPage).toBe(true);
+    expect(second.endCursor).not.toBe(first.endCursor);
+    expect(fetchMock).toHaveBeenCalledOnce();
+  });
+
+  test("batches Action Center states once per twenty-five unique PRs", async () => {
+    const fetchMock = vi.fn(async (_url: string, init?: RequestInit) => {
+      const { variables } = JSON.parse(String(init?.body));
+      return response({
+        data: {
+          nodes: variables.ids.map((id: string) => ({
+            id,
+            state: "OPEN",
+            isDraft: false,
+            mergeable: "MERGEABLE",
+            mergeStateStatus: "CLEAN",
+            headRefOid: "head",
+            repository: { viewerPermission: "WRITE", squashMergeAllowed: true },
+            reviews: { nodes: [{ state: "APPROVED" }] },
+          })),
+        },
+      });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const prs = Array.from({ length: 26 }, (_, i) => ({
+      id: String(i),
+      headRefOid: "head",
+    }));
+    const states = await new GitHubService().actionCenterRequestStates(
+      [...prs, prs[0]],
+      "alice",
+    );
+    expect(states.size).toBe(26);
+    expect(states.get("0")).toMatchObject({
+      viewerHasApproved: true,
+      canMerge: true,
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(cacheClient.query).toHaveBeenCalledWith(
+      expect.objectContaining({ requestSource: "ACTION_CENTER_REQUESTS" }),
+    );
   });
 
   test("caches repository reviewer reads and missing CODEOWNERS, with live refresh and worktree validation", async () => {
@@ -1051,16 +1246,24 @@ describe("GitHub service", () => {
       expect(request.pathname).toMatch(
         /^\/repos\/acme\/(widgets|api)\/actions\/runs$/,
       );
-      expect(request.searchParams.get("per_page")).toBe("1");
+      expect(request.searchParams.get("per_page")).toBe("100");
       expect(request.searchParams.get("exclude_pull_requests")).toBe("true");
       const status = request.searchParams.get("status")!;
       expect(totals).toHaveProperty(status);
-      return response({ total_count: totals[status], workflow_runs: [] });
+      const page = Number(request.searchParams.get("page"));
+      const runs = Array.from({ length: totals[status] }, (_, i) => ({
+        ...rawActionsWorkflowRun(i + 1, "acme/widgets", "2026-07-21T12:00:00Z"),
+        status,
+      }));
+      return response({
+        total_count: runs.length,
+        workflow_runs: runs.slice((page - 1) * 100, page * 100),
+      });
     });
     vi.stubGlobal("fetch", fetchMock);
 
     expect(await new GitHubService().activeActionsCount()).toBe(276);
-    expect(fetchMock).toHaveBeenCalledTimes(10);
+    expect(fetchMock).toHaveBeenCalledTimes(12);
     expect(maximumRunning).toBeLessThanOrEqual(4);
     expect(cacheClient.recordRestCall).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -1100,7 +1303,7 @@ describe("GitHub service", () => {
       vi.fn(async (url: string) =>
         new URL(url).searchParams.get("status") === "queued"
           ? response({ message: "Provider unavailable" }, 503)
-          : response({ total_count: 10 }),
+          : response({ total_count: 0, workflow_runs: [] }),
       ),
     );
     await expect(new GitHubService().activeActionsCount()).rejects.toThrow(
@@ -1726,9 +1929,9 @@ describe("GitHub service", () => {
   });
 
   test("carries latest-only groups across GitHub pages and rejects cursor mode changes", async () => {
-    const duplicateRuns = Array.from({ length: 25 }, (_, index) =>
+    const duplicateRuns = Array.from({ length: 100 }, (_, index) =>
       rawActionsWorkflowRun(
-        100 - index,
+        200 - index,
         "acme/widgets",
         new Date(Date.UTC(2026, 6, 20, 12, 0, -index)).toISOString(),
         { pullRequests: [17], workflowId: 100 },
@@ -1764,10 +1967,10 @@ describe("GitHub service", () => {
     ];
     const fetchMock = vi.fn(async (url: string) => {
       const page = Number(new URL(url).searchParams.get("page") ?? 1);
-      const start = (page - 1) * 25;
+      const start = (page - 1) * 100;
       return response({
         total_count: runs.length,
-        workflow_runs: runs.slice(start, start + 25),
+        workflow_runs: runs.slice(start, start + 100),
       });
     });
     vi.stubGlobal("fetch", fetchMock);
@@ -1782,9 +1985,9 @@ describe("GitHub service", () => {
       "ACTIONS_PAGE",
       true,
     );
-    expect(firstPage.items.map((item) => item.id)).toEqual(["100", "75"]);
+    expect(firstPage.items.map((item) => item.id)).toEqual(["200"]);
     expect(fetchMock.mock.calls.some(([url]) => url.includes("page=2"))).toBe(
-      true,
+      false,
     );
 
     const secondPage = await service.actionsWorkflowRuns(
@@ -1796,7 +1999,7 @@ describe("GitHub service", () => {
       "ACTIONS_PAGE",
       true,
     );
-    expect(secondPage.items.map((item) => item.id)).toEqual(["74", "73"]);
+    expect(secondPage.items.map((item) => item.id)).toEqual(["75", "74"]);
 
     const thirdPage = await service.actionsWorkflowRuns(
       "codebase-repository-1",
@@ -1807,8 +2010,19 @@ describe("GitHub service", () => {
       "ACTIONS_PAGE",
       true,
     );
-    expect(thirdPage.items.map((item) => item.id)).toEqual(["72"]);
-    expect(thirdPage.hasNextPage).toBe(false);
+    expect(thirdPage.items.map((item) => item.id)).toEqual(["73", "72"]);
+    expect(thirdPage.hasNextPage).toBe(true);
+    const lastPage = await service.actionsWorkflowRuns(
+      "codebase-repository-1",
+      2,
+      thirdPage.endCursor,
+      null,
+      null,
+      "ACTIONS_PAGE",
+      true,
+    );
+    expect(lastPage.items).toEqual([]);
+    expect(lastPage.hasNextPage).toBe(false);
     await expect(
       service.actionsWorkflowRuns(
         "codebase-repository-1",
@@ -3765,7 +3979,8 @@ describe("GitHub service", () => {
       });
       const mergeWrite = vi.fn();
       const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
-        if (url.includes("/actions/runs")) return response({ total_count: 0 });
+        if (url.includes("/actions/runs"))
+          return response({ total_count: 0, workflow_runs: [] });
         if (url.includes("/user/emails")) return response([]);
         const body = JSON.parse(String(init?.body));
         if (body.query.includes("query GitHubPullRequestMergeOptions")) {

@@ -1961,6 +1961,8 @@
       "PULL_REQUESTS_PAGE": "Página de pull requests",
       "PULL_REQUEST_DETAILS": "Detalles del pull request",
       "ACTIONS_PAGE": "Página de Actions",
+      "SIDEBAR_COUNTS": "Contadores de la barra lateral",
+      "ACTION_CENTER_REQUESTS": "Solicitudes del centro de acciones",
       "WORKTREES": "Árboles de trabajo",
       "WORKTREE_PIPELINES": "Pipelines de árboles de trabajo",
       "WORKTREE_AUTOMATION": "Automatización de árboles de trabajo",
@@ -3073,7 +3075,9 @@
     "steps": "Pasos",
     "noSteps": "Aún no se han informado pasos para este trabajo.",
     "loadMore": "Cargar más",
-    "loadingMore": "Cargando más…"
+    "loadingMore": "Cargando más…",
+    "loadMore": "Cargar más",
+    "moreHistory": "Queda más historial. Carga otro lote para buscar ejecuciones anteriores."
   },
   "githubAutomation": {
     "autoRetry": "Reintento automático",

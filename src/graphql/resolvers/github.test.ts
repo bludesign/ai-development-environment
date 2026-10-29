@@ -419,6 +419,7 @@ describe("GitHub resolvers", () => {
       "workflow-1",
       "ACTIONS_PAGE",
       true,
+      false,
     );
     await resolvers.Query.githubActionsWorkflowRuns(
       {},
@@ -432,6 +433,7 @@ describe("GitHub resolvers", () => {
       undefined,
       undefined,
       "ACTIONS_PAGE",
+      false,
       false,
     );
     expect(service.actionsWorkflowJobs).toHaveBeenCalledWith(

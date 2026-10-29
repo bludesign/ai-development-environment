@@ -1,3 +1,4 @@
+import { GitHubWorkflowRunCache } from "@/services/github/github-workflow-run-cache";
 import { RepositoryCloneService } from "@/services/repository-transfer/clone.service";
 import { RepositoryTransferService } from "@/services/repository-transfer/repository-transfer.service";
 import { ReviewersService } from "@/services/reviewers/service";
@@ -160,6 +161,7 @@ function createServerServices(): ServerServices {
   );
   const iosDevicesService = new IosDevicesService(undefined, credentialService);
   const gitHubPipelineStatusService = new GitHubPipelineStatusService();
+  const gitHubWorkflowRunCache = new GitHubWorkflowRunCache();
   const gitHubActionsNotificationsService =
     new GitHubActionsNotificationsService(
       credentialService,
@@ -169,6 +171,7 @@ function createServerServices(): ServerServices {
       workflowEventsService,
       undefined,
       gitHubPipelineStatusService,
+      gitHubWorkflowRunCache,
     );
   const gitHubService = new GitHubService(
     true,
@@ -176,6 +179,7 @@ function createServerServices(): ServerServices {
     pollingService,
     () => gitHubActionsNotificationsService.configurationChanged(),
     gitHubPipelineStatusService,
+    gitHubWorkflowRunCache,
   );
   const gitLabService = new GitLabService(
     credentialService,

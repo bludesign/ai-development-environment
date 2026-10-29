@@ -83,6 +83,13 @@ import {
 import { normalizePipelineState } from "./pipeline-status";
 import type { PollingService } from "@/services/polling";
 import { GitHubCache } from "./github-cache";
+import { GitHubWorkflowRunCache } from "./github-workflow-run-cache";
+import {
+  GitHubActionsInventory,
+  ACTIVE_WORKFLOW_STATUSES,
+  githubCredentialKey,
+  githubWebhookCoverageKey,
+} from "./github-actions-inventory";
 import { GITHUB_API_BASE_URL, GITHUB_GRAPHQL_URL } from "./github-endpoints";
 import {
   extractGitHubGraphqlCost,
@@ -103,6 +110,7 @@ const SETTINGS_ID = "default";
 const GITHUB_APP_SETTINGS_ID = "default";
 const SEARCH_RESULT_LIMIT = 1000;
 const ACTIONS_PAGE_SIZE = 25;
+const ACTIONS_UPSTREAM_PAGE_SIZE = 100;
 const REST_DISCOVERY_CACHE_TTL_MS = 5 * 60_000;
 const REST_CACHE_MAX_ENTRIES = 500;
 const PULL_REQUEST_PAGE_SIZE = 25;
@@ -1155,6 +1163,8 @@ function normalizeReviewThreadState(thread: {
 }
 
 export class GitHubService {
+  private activeCountFlight: { key: string; request: Promise<number> } | null =
+    null;
   private autoRetryService: GitHubAutoRetryService | null = null;
   private readonly cache = new GitHubCache();
   private readonly graphqlFetchedAt = new WeakMap<object, Date>();
@@ -1176,6 +1186,8 @@ export class GitHubService {
     private readonly polling?: PollingService,
     private readonly notificationsConfigurationChanged?: () => void,
     readonly pipelineStatus = new GitHubPipelineStatusService(),
+    private readonly workflowRunCache = new GitHubWorkflowRunCache(),
+    private readonly actionsInventory = new GitHubActionsInventory(),
   ) {
     if (startAutoRetry)
       this.autoRetryService = new GitHubAutoRetryService(this, this.polling);
@@ -1352,6 +1364,50 @@ export class GitHubService {
     requestSource: GitHubRequestSource,
     options: { cache?: boolean; force?: boolean; cacheNotFound?: boolean } = {},
   ): Promise<T> {
+    if (
+      (requestSource === "ACTIONS_PAGE" ||
+        requestSource === "ACTIONS_NOTIFICATIONS") &&
+      (operation === GITHUB_REST_OPERATIONS.actions.listWorkflowRunsForRepo ||
+        operation === GITHUB_REST_OPERATIONS.actions.listWorkflowRuns)
+    ) {
+      const result = await this.workflowRunCache.read(
+        token,
+        url,
+        async () => {
+          const data = await this.liveRestRequest<T>(
+            url,
+            operation,
+            token,
+            requestSource,
+          );
+          if (
+            !data ||
+            typeof data !== "object" ||
+            !Array.isArray((data as { workflow_runs?: unknown }).workflow_runs)
+          )
+            throw new Error(
+              "GitHub returned an invalid workflow runs response",
+            );
+          return data;
+        },
+        options.force,
+      );
+      if (result.cached)
+        await this.cache
+          .recordRestCall({
+            authentication: "PAT",
+            method: "GET",
+            endpoint: url,
+            operation,
+            requestSource,
+            durationMs: 0,
+            statusCode: 200,
+            cached: true,
+          })
+          .catch(() => undefined);
+      this.rememberGraphqlFetchedAt(result.data, result.fetchedAt);
+      return result.data;
+    }
     const key = `${createHash("sha256").update(token).digest("hex")}\0${url}`;
     const cached =
       options.cache && !options.force ? this.restReadCache.get(key) : undefined;
@@ -1420,7 +1476,10 @@ export class GitHubService {
     });
   }
 
-  private invalidateRestRequests(): void {
+  private invalidateRestRequests(repositoryNameWithOwner?: string): void {
+    if (repositoryNameWithOwner)
+      this.workflowRunCache.invalidateRepository(repositoryNameWithOwner);
+    else this.workflowRunCache.clear();
     this.restRequests.clear();
     this.restReadCache.clear();
   }
@@ -1748,6 +1807,7 @@ export class GitHubService {
         GITHUB_REST_OPERATIONS.repos.listPullRequestsAssociatedWithCommit,
         token,
         requestSource,
+        { cache: true },
       );
       return [
         ...new Set(
@@ -1954,12 +2014,12 @@ export class GitHubService {
     return this.cache.updateTtl(ttlMinutes, () => this.getSettings());
   }
 
-  async clearCache(): Promise<boolean> {
-    this.invalidateRestRequests();
+  async clearCache(repositoryNameWithOwner?: string): Promise<boolean> {
+    this.invalidateRestRequests(repositoryNameWithOwner);
     try {
       return await this.cache.clear();
     } finally {
-      this.invalidateRestRequests();
+      this.invalidateRestRequests(repositoryNameWithOwner);
     }
   }
 
@@ -2667,13 +2727,17 @@ export class GitHubService {
     return this.getAppSettings();
   }
 
-  private async viewer(token: string, force = false): Promise<GitHubViewer> {
+  private async viewer(
+    token: string,
+    force = false,
+    requestSource: GitHubRequestSource = "GITHUB_SETTINGS",
+  ): Promise<GitHubViewer> {
     const data = await this.request<{ viewer: GitHubViewer }>(
       `query GitHubViewer { viewer { login name avatarUrl url } }`,
       {},
       token,
       {
-        requestSource: "GITHUB_SETTINGS",
+        requestSource,
         force,
         allowStaleOnError: !force,
       },
@@ -2683,49 +2747,87 @@ export class GitHubService {
 
   async actionCenterIdentity(): Promise<string | null> {
     if (!(await this.getSettings()).tokenConfigured) return null;
-    return (await this.viewer(await this.requireToken())).login;
+    return (
+      await this.viewer(
+        await this.requireToken(),
+        false,
+        "ACTION_CENTER_REQUESTS",
+      )
+    ).login;
   }
 
-  async actionCenterRequestState(
-    pullRequest: GitHubPullRequestView,
+  async actionCenterRequestStates(
+    pullRequests: Pick<GitHubPullRequestView, "id" | "headRefOid">[],
     login: string,
+    force = false,
   ) {
+    type State = {
+      viewerHasApproved: boolean;
+      viewerReviewState: string | null;
+      canMerge: boolean;
+      mergeBlockedReason: string | null;
+    };
+    const result = new Map<string, State>();
+    if (!pullRequests.length) return result;
     const token = await this.requireToken();
-    const [owner, name] = pullRequest.repositoryNameWithOwner.split("/");
-    const [state, reviews] = await Promise.all([
-      this.mergeState(
-        owner!,
-        name!,
-        pullRequest.number,
-        token,
-        "PULL_REQUESTS_PAGE",
-      ),
-      this.request<{
-        node: { reviews: { nodes: Array<{ state: string }> } } | null;
+    const unique = [
+      ...new Map(pullRequests.map((pr) => [pr.id, pr])).values(),
+    ].sort((a, b) => a.id.localeCompare(b.id));
+    for (let offset = 0; offset < unique.length; offset += 25) {
+      const batch = unique.slice(offset, offset + 25);
+      const data = await this.request<{
+        nodes: Array<
+          | (RawPullRequestMergeState & {
+              reviews: { nodes: Array<{ state: string }> };
+              repository: {
+                viewerPermission: RepositoryPermission | null;
+                mergeCommitAllowed: boolean;
+                rebaseMergeAllowed: boolean;
+                squashMergeAllowed: boolean;
+              };
+            })
+          | null
+        >;
       }>(
-        `query GitHubActionCenterApproval($id: ID!, $login: String!) {
-          node(id: $id) { ... on PullRequest {
+        `query GitHubActionCenterRequestStates($ids: [ID!]!, $login: String!) {
+          nodes(ids: $ids) { ... on PullRequest {
+            id title body url state isDraft mergeable mergeStateStatus headRefOid headRefName
+            headRepository { nameWithOwner } mergedAt autoMergeRequest { enabledAt }
+            viewerCanEnableAutoMerge viewerCanDisableAutoMerge
+            repository { viewerPermission mergeCommitAllowed rebaseMergeAllowed squashMergeAllowed }
             reviews(author: $login, last: 1, states: [APPROVED, CHANGES_REQUESTED, DISMISSED]) { nodes { state } }
           } }
         }`,
-        { id: pullRequest.id, login },
+        { ids: batch.map((pr) => pr.id), login },
         token,
-        { requestSource: "PULL_REQUESTS_PAGE", allowStaleOnError: false },
-      ),
-    ]);
-    if (!reviews.node)
-      throw new Error("Pull request approval state is unavailable");
-    const blockedReason =
-      this.mergeBlockedReason(state.pullRequest, state.viewerPermission) ??
-      (state.availableMethods.length ? null : "No merge method is available.");
-    return {
-      viewerHasApproved: reviews.node.reviews.nodes[0]?.state === "APPROVED",
-      viewerReviewState: reviews.node.reviews.nodes[0]?.state ?? null,
-      canMerge:
-        blockedReason === null &&
-        state.pullRequest.headRefOid === pullRequest.headRefOid,
-      mergeBlockedReason: blockedReason,
-    };
+        {
+          requestSource: "ACTION_CENTER_REQUESTS",
+          allowStaleOnError: false,
+          force,
+        },
+      );
+      for (const pr of batch) {
+        const node = data.nodes.find((node) => node?.id === pr.id);
+        if (!node)
+          throw new Error("Pull request approval state is unavailable");
+        const repository = node.repository;
+        const blockedReason =
+          this.mergeBlockedReason(node, repository.viewerPermission) ??
+          (repository.mergeCommitAllowed ||
+          repository.rebaseMergeAllowed ||
+          repository.squashMergeAllowed
+            ? null
+            : "No merge method is available.");
+        const review = node.reviews.nodes[0]?.state ?? null;
+        result.set(pr.id, {
+          viewerHasApproved: review === "APPROVED",
+          viewerReviewState: review,
+          canMerge: blockedReason === null && node.headRefOid === pr.headRefOid,
+          mergeBlockedReason: blockedReason,
+        });
+      }
+    }
+    return result;
   }
 
   async testConnection(): Promise<GitHubViewer> {
@@ -2793,44 +2895,142 @@ export class GitHubService {
     };
   }
 
-  /** Count every active workflow run without loading jobs or request metadata. */
+  /** Reconcile complete inventories on a schedule; ordinary page observations never start scans. */
   async activeActionsCount(): Promise<number> {
     if (!(await this.getSettings()).tokenConfigured) return 0;
     const token = await this.requireToken();
+    const key = githubCredentialKey(token);
+    if (this.activeCountFlight?.key === key)
+      return this.activeCountFlight.request;
+    const request = this.reconcileActiveActions(token);
+    const flight = { key, request };
+    this.activeCountFlight = flight;
+    try {
+      return await request;
+    } finally {
+      if (this.activeCountFlight === flight) this.activeCountFlight = null;
+    }
+  }
+
+  private async reconcileActiveActions(token: string): Promise<number> {
+    const credentialKey = githubCredentialKey(token);
+    const prisma = await getPrismaClient();
+    const repositories = (
+      await prisma.codebaseRepository.findMany({
+        select: { id: true, canonicalOrigin: true, jiraBranchRegex: true },
+      })
+    )
+      .map(actionsRepositoryTarget)
+      .filter((target): target is ActionsRepositoryTarget => target !== null);
+    if (!repositories.length) return 0;
+    const [app, connection, webhookSecretConfigured] = await Promise.all([
+      prisma.gitHubAppSettings.findUnique({
+        where: { id: GITHUB_APP_SETTINGS_ID },
+      }),
+      this.storedAppConnection(),
+      this.credentials.isConfigured(CREDENTIALS.githubAppWebhookSecret),
+    ]);
+    const events = app ? jsonStringArray(app.webhookEventsJson) : [];
+    const coverageKey =
+      webhookSecretConfigured &&
+      app?.webhookConfiguredAt &&
+      connection?.value.webhookUrl &&
+      permissionCanRead(app.actionsPermission) &&
+      events.includes("workflow_run") &&
+      events.includes("workflow_job")
+        ? githubWebhookCoverageKey(
+            connection.value.installationId,
+            app.verifiedAt,
+          )
+        : null;
+    await mapIntegrationRequests(repositories, async (target) => {
+      const state = await this.actionsInventory.state(target.id);
+      const interval =
+        coverageKey && state?.activeWebhookKey === coverageKey
+          ? 15 * 60_000
+          : 5 * 60_000;
+      if (
+        state?.activeCredentialKey === credentialKey &&
+        state.activeReconciledAt &&
+        Date.now() - state.activeReconciledAt.getTime() < interval
+      )
+        return;
+      const startedAt = new Date(Date.now());
+      const runs: RawActionsWorkflowRun[] = [];
+      for (const status of ACTIVE_WORKFLOW_STATUSES) {
+        for (let page = 1; ; page++) {
+          const result = await this.restRequest<{
+            total_count: number;
+            workflow_runs: RawActionsWorkflowRun[];
+          }>(
+            `${GITHUB_API_BASE_URL}/repos/${encodeURIComponent(target.owner)}/${encodeURIComponent(target.name)}/actions/runs?status=${status}&per_page=100&page=${page}&exclude_pull_requests=true`,
+            GITHUB_REST_OPERATIONS.actions.listWorkflowRunsForRepo,
+            token,
+            "SIDEBAR_COUNTS",
+            { force: true },
+          );
+          if (
+            !Number.isSafeInteger(result.total_count) ||
+            result.total_count < 0 ||
+            !Array.isArray(result.workflow_runs)
+          )
+            throw new Error(
+              "GitHub returned an invalid active workflow run count",
+            );
+          if (result.total_count >= SEARCH_RESULT_LIMIT)
+            throw new Error(
+              "GitHub active workflow discovery reached the search limit; inventory is incomplete",
+            );
+          if (
+            result.workflow_runs.length <
+            Math.min(100, Math.max(0, result.total_count - (page - 1) * 100))
+          )
+            throw new Error("GitHub active workflow discovery is incomplete");
+          runs.push(...result.workflow_runs);
+          if (page * 100 >= result.total_count) break;
+        }
+      }
+      await this.actionsInventory.reconcile(
+        target.id,
+        credentialKey,
+        runs.map((run) => ({
+          id: String(run.id),
+          workflowId: String(run.workflow_id),
+          runAttempt: run.run_attempt ?? 1,
+          status: run.status,
+          conclusion: run.conclusion,
+          updatedAt: new Date(run.updated_at),
+        })),
+        startedAt,
+      );
+    });
+    const count = await this.actionsInventory.count(
+      repositories.map((target) => target.id),
+      credentialKey,
+    );
+    if (count === null)
+      throw new Error("GitHub active workflow inventory is not initialized");
+    return count;
+  }
+
+  /** Local-only count for notifications from the shared inventory. */
+  async cachedActiveActionsCount(): Promise<number | null> {
+    const token = await this.credentials.getText(
+      CREDENTIALS.githubPersonalAccessToken,
+    );
+    if (!token) return null;
     const repositories = await (
       await getPrismaClient()
     ).codebaseRepository.findMany({
       select: { id: true, canonicalOrigin: true, jiraBranchRegex: true },
     });
-    const statuses = [
-      "in_progress",
-      "queued",
-      "requested",
-      "waiting",
-      "pending",
-    ] as const;
-    const requests = repositories.flatMap((repository) => {
-      const target = actionsRepositoryTarget(repository);
-      return target ? statuses.map((status) => ({ target, status })) : [];
-    });
-    const counts = await mapIntegrationRequests(
-      requests,
-      async ({ target, status }) => {
-        const result = await this.restRequest<{ total_count: number }>(
-          `${GITHUB_API_BASE_URL}/repos/${encodeURIComponent(target.owner)}/${encodeURIComponent(target.name)}/actions/runs?status=${status}&per_page=1&exclude_pull_requests=true`,
-          GITHUB_REST_OPERATIONS.actions.listWorkflowRunsForRepo,
-          token,
-          "ACTIONS_PAGE",
-          { cache: true },
-        );
-        if (!Number.isSafeInteger(result.total_count) || result.total_count < 0)
-          throw new Error(
-            "GitHub returned an invalid active workflow run count",
-          );
-        return result.total_count;
-      },
+    return this.actionsInventory.count(
+      repositories
+        .map(actionsRepositoryTarget)
+        .filter((target): target is ActionsRepositoryTarget => target !== null)
+        .map((target) => target.id),
+      githubCredentialKey(token),
     );
-    return counts.reduce((total, count) => total + count, 0);
   }
 
   async actionsWorkflowRuns(
@@ -2841,6 +3041,7 @@ export class GitHubService {
     workflowId?: string | null,
     requestSource: GitHubRequestSource = "ACTIONS_PAGE",
     latestOnly = false,
+    forceRefresh = false,
   ): Promise<GitHubActionsWorkflowRunPage> {
     if (!Number.isInteger(first) || first < 1 || first > ACTIONS_PAGE_SIZE) {
       throw new Error(
@@ -2893,6 +3094,7 @@ export class GitHubService {
       totalCount: number;
       current: RawActionsWorkflowRun | null;
       failed: boolean;
+      paused: boolean;
       seenGroups: Set<string>;
     };
     const streams: WorkflowRunStream[] = targets.map((target) => ({
@@ -2903,6 +3105,7 @@ export class GitHubService {
       totalCount: Number.POSITIVE_INFINITY,
       current: null,
       failed: false,
+      paused: false,
       seenGroups: new Set(cursor.seenGroups[target.id] ?? []),
     }));
     const repositoryErrors: GitHubActionsRepositoryErrorView[] = [];
@@ -2910,9 +3113,15 @@ export class GitHubService {
     const ensureCurrent = async (stream: WorkflowRunStream) => {
       try {
         while (!stream.failed && stream.consumed < stream.totalCount) {
-          const page = Math.floor(stream.consumed / ACTIONS_PAGE_SIZE) + 1;
-          const offset = stream.consumed % ACTIONS_PAGE_SIZE;
+          const page =
+            Math.floor(stream.consumed / ACTIONS_UPSTREAM_PAGE_SIZE) + 1;
+          const offset = stream.consumed % ACTIONS_UPSTREAM_PAGE_SIZE;
           if (stream.loadedPage !== page) {
+            if (stream.loadedPage !== null) {
+              stream.current = null;
+              stream.paused = true;
+              return;
+            }
             const workflowPath = selectedWorkflowId
               ? `/actions/workflows/${encodeURIComponent(selectedWorkflowId)}/runs`
               : "/actions/runs";
@@ -2927,7 +3136,7 @@ export class GitHubService {
                 stream.target.owner,
               )}/${encodeURIComponent(
                 stream.target.name,
-              )}${workflowPath}?per_page=${ACTIONS_PAGE_SIZE}&page=${page}${
+              )}${workflowPath}?per_page=${ACTIONS_UPSTREAM_PAGE_SIZE}&page=${page}${
                 selectedBranch
                   ? `&branch=${encodeURIComponent(selectedBranch)}`
                   : ""
@@ -2935,6 +3144,7 @@ export class GitHubService {
               operation,
               token,
               requestSource,
+              { force: forceRefresh },
             );
             if (
               !Number.isInteger(result.total_count) ||
@@ -2944,6 +3154,19 @@ export class GitHubService {
                 "GitHub returned an invalid workflow runs response",
               );
             }
+            await this.actionsInventory.observe(
+              stream.target.id,
+              result.workflow_runs.map((run) => ({
+                id: String(run.id),
+                workflowId: String(run.workflow_id),
+                runAttempt: run.run_attempt ?? 1,
+                status: run.status,
+                conclusion: run.conclusion,
+                updatedAt: new Date(run.updated_at),
+                observedAt: this.graphqlFetchedAt.get(result),
+              })),
+              "REST",
+            );
             stream.loadedPage = page;
             stream.runs = result.workflow_runs;
             stream.totalCount = result.total_count;
@@ -2980,6 +3203,8 @@ export class GitHubService {
       target: ActionsRepositoryTarget;
     }> = [];
     while (selectedRuns.length < first) {
+      // An unknown frontier may contain a newer row than any other stream.
+      if (streams.some((stream) => stream.paused)) break;
       const next = streams
         .filter(
           (
@@ -3000,7 +3225,7 @@ export class GitHubService {
         next.stream.seenGroups.add(actionsLatestGroupKey(next.run));
       }
       next.stream.consumed += 1;
-      await ensureCurrent(next.stream);
+      if (selectedRuns.length < first) await ensureCurrent(next.stream);
     }
 
     const [settings, codebaseSettings, appSettings, managedRepositories] =
@@ -3156,9 +3381,7 @@ export class GitHubService {
         : item;
     });
     const hasNextPage = streams.some(
-      (stream) =>
-        !stream.failed &&
-        (stream.current !== null || stream.consumed < stream.totalCount),
+      (stream) => !stream.failed && stream.consumed < stream.totalCount,
     );
     const endCursor = hasNextPage
       ? encodeActionsCursor({
@@ -3857,7 +4080,7 @@ export class GitHubService {
           })
         ).githubRequestId;
       }
-      await this.clearCache();
+      await this.clearCache(target.nameWithOwner);
       if (action === "JOB" && jobId) {
         await this.pipelineStatus.optimisticJobByWorkflowRun(
           null,
@@ -3933,7 +4156,7 @@ export class GitHubService {
         force,
         requestSource,
       });
-      await this.clearCache();
+      await this.clearCache(target.nameWithOwner);
       await this.pipelineStatus.optimisticByWorkflowRun(null, workflowRunId, {
         status: "CANCELLED",
       });
@@ -6745,7 +6968,9 @@ export class GitHubService {
         workflowRunId: String(checkSuite.workflowRun.databaseId),
         requestSource,
       });
-      await this.clearCache();
+      await this.clearCache(
+        `${checkSuite.repository.owner.login}/${checkSuite.repository.name}`,
+      );
       await this.audit(auditContext, {
         operation: "GITHUB_ACTIONS_WORKFLOW_RERUN",
         repositoryId,
@@ -6877,7 +7102,9 @@ export class GitHubService {
         jobId,
         requestSource,
       });
-      await this.clearCache();
+      await this.clearCache(
+        `${checkSuite.repository.owner.login}/${checkSuite.repository.name}`,
+      );
       await this.audit(auditContext, {
         operation: "GITHUB_ACTIONS_JOB_RERUN",
         repositoryId,

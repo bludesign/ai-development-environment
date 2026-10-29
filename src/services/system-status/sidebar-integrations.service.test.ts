@@ -4,12 +4,14 @@ import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { PrismaClient } from "@/generated/prisma/client";
 import {
   ACTION_CENTER_CHANGED_TOPIC,
+  GITHUB_ACTIONS_COUNT_CHANGED_TOPIC,
   GITHUB_PIPELINE_STATUS_CHANGED_TOPIC,
   INTEGRATION_CONFIGURATION_CHANGED_TOPIC,
   SIDEBAR_STATUS_CHANGED_TOPIC,
   agentEventBus,
 } from "@/services/agent-control";
 import type { PollingService } from "@/services/polling";
+import { GITLAB_PIPELINE_STATUS_CHANGED_TOPIC } from "@/services/gitlab/gitlab.service";
 
 const getPrismaClient = vi.hoisted(() => vi.fn());
 vi.mock("@/data/prisma-client", () => ({ getPrismaClient }));
@@ -22,6 +24,7 @@ function dependencies() {
       .fn()
       .mockResolvedValue({ tokenConfigured: true, updatedAt: "github-1" }),
     activeActionsCount: vi.fn().mockResolvedValue(4),
+    cachedActiveActionsCount: vi.fn().mockResolvedValue(4),
   };
   const gitlab = {
     getSettings: vi.fn().mockResolvedValue({
@@ -221,7 +224,7 @@ describe("sidebar CI refresh lifecycle", () => {
     );
   });
 
-  test("coalesces pipeline event bursts and publishes request invalidations without scanning CI", async () => {
+  test("pipeline observations never scan CI and request invalidations only publish local counts", async () => {
     const { service, github } = current;
     service.start();
     await service.refresh();
@@ -230,7 +233,7 @@ describe("sidebar CI refresh lifecycle", () => {
     await vi.advanceTimersByTimeAsync(29_000);
     expect(github.activeActionsCount).toHaveBeenCalledOnce();
     await vi.advanceTimersByTimeAsync(1_000);
-    expect(github.activeActionsCount).toHaveBeenCalledTimes(2);
+    expect(github.activeActionsCount).toHaveBeenCalledOnce();
     const stream = agentEventBus.iterate(SIDEBAR_STATUS_CHANGED_TOPIC);
     agentEventBus.publish(ACTION_CENTER_CHANGED_TOPIC, {
       actionCenterChanged: true,
@@ -239,7 +242,70 @@ describe("sidebar CI refresh lifecycle", () => {
       value: { sidebarStatusChanged: true },
     });
     await stream.return?.();
+    expect(github.activeActionsCount).toHaveBeenCalledOnce();
+  });
+
+  test("inventory count events update the sidebar without scanning either provider", async () => {
+    const { service, github, gitlab } = current;
+    service.start();
+    await service.refresh();
+    github.cachedActiveActionsCount.mockResolvedValue(9);
+    agentEventBus.publish(GITHUB_ACTIONS_COUNT_CHANGED_TOPIC, {
+      githubActionsCountChanged: true,
+    });
+    await vi.advanceTimersByTimeAsync(0);
+    expect((await service.counts()).actions).toBe(9);
+    expect(github.activeActionsCount).toHaveBeenCalledOnce();
+    expect(gitlab.activePipelinesCount).toHaveBeenCalledOnce();
+  });
+
+  test("GitHub configuration refreshes never initiate GitLab scans", async () => {
+    const { service, github, gitlab } = current;
+    service.start();
+    await service.refresh();
+    agentEventBus.publish(INTEGRATION_CONFIGURATION_CHANGED_TOPIC, {
+      integrationConfigurationChanged: "github",
+    });
+    await vi.advanceTimersByTimeAsync(0);
     expect(github.activeActionsCount).toHaveBeenCalledTimes(2);
+    expect(gitlab.activePipelinesCount).toHaveBeenCalledOnce();
+  });
+
+  test.each(["github", "gitlab"] as const)(
+    "frequent %s events preserve the other provider's periodic refresh",
+    async (provider) => {
+      const { service, github, gitlab } = current;
+      service.start();
+      await service.refresh();
+      for (let i = 0; i < 40; i++) {
+        await vi.advanceTimersByTimeAsync(30_000);
+        if (provider === "gitlab")
+          agentEventBus.publish(GITLAB_PIPELINE_STATUS_CHANGED_TOPIC, {});
+        else
+          agentEventBus.publish(INTEGRATION_CONFIGURATION_CHANGED_TOPIC, {
+            integrationConfigurationChanged: "github",
+          });
+        await vi.advanceTimersByTimeAsync(0);
+      }
+      const other =
+        provider === "gitlab"
+          ? github.activeActionsCount
+          : gitlab.activePipelinesCount;
+      expect(other).toHaveBeenCalledTimes(21);
+    },
+  );
+
+  test("coalesces simultaneous configuration changes for both providers", async () => {
+    const { service, github, gitlab } = current;
+    service.start();
+    await service.refresh();
+    for (const provider of ["github", "gitlab"])
+      agentEventBus.publish(INTEGRATION_CONFIGURATION_CHANGED_TOPIC, {
+        integrationConfigurationChanged: provider,
+      });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(github.activeActionsCount).toHaveBeenCalledTimes(2);
+    expect(gitlab.activePipelinesCount).toHaveBeenCalledTimes(2);
   });
 
   test("ordinary provider mutations preserve totals when the same connection's refresh fails", async () => {

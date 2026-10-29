@@ -1,0 +1,10 @@
+ALTER TABLE "GitHubWorkflowRunObservation" ADD COLUMN "countedActive" BOOLEAN NOT NULL DEFAULT false;
+ALTER TABLE "GitHubWorkflowRunObservation" ADD COLUMN "notificationObservedAt" DATETIME;
+UPDATE "GitHubWorkflowRunObservation" SET "notificationObservedAt" = "lastObservedAt";
+ALTER TABLE "GitHubWorkflowRunObservation" ADD COLUMN "activeUpdatedAt" DATETIME;
+ALTER TABLE "GitHubWorkflowRunObservation" ADD COLUMN "activeStatus" TEXT;
+ALTER TABLE "GitHubWorkflowRunObservation" ADD COLUMN "activeObservedAt" DATETIME;
+ALTER TABLE "GitHubActionsPollingState" ADD COLUMN "activeReconciledAt" DATETIME;
+ALTER TABLE "GitHubActionsPollingState" ADD COLUMN "activeCredentialKey" TEXT;
+ALTER TABLE "GitHubActionsPollingState" ADD COLUMN "activeWebhookKey" TEXT;
+CREATE INDEX "GitHubWorkflowRunObservation_codebaseRepositoryId_countedActive_idx" ON "GitHubWorkflowRunObservation"("codebaseRepositoryId", "countedActive");
