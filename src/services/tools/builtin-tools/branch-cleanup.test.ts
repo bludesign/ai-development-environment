@@ -2,22 +2,20 @@ import { expect, test, vi } from "vitest";
 import { createCodebaseToolGroup } from "./codebases";
 
 test("branch cleanup preserves reviewed tips and explicit force, validates before dispatch and hides job payloads", async () => {
-  const deleteBranches = vi
-    .fn()
-    .mockResolvedValue({
-      jobs: [
-        {
-          id: "job",
-          agentId: "agent",
-          codebaseId: "repo",
-          kind: "DELETE_BRANCHES",
-          status: "QUEUED",
-          error: null,
-          payloadJson: "private payload",
-        },
-      ],
-      skipped: [],
-    });
+  const deleteBranches = vi.fn().mockResolvedValue({
+    jobs: [
+      {
+        id: "job",
+        agentId: "agent",
+        codebaseId: "repo",
+        kind: "DELETE_BRANCHES",
+        status: "QUEUED",
+        error: null,
+        payloadJson: "private payload",
+      },
+    ],
+    skipped: [],
+  });
   const group = createCodebaseToolGroup(
     {} as never,
     { deleteBranches } as never,
