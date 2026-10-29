@@ -29,6 +29,7 @@ import {
 import { SearchableSelect } from "@/components/common/searchable-select";
 import { ConfirmationDialog } from "@/components/confirmation-dialog";
 import { JiraPersonAvatar } from "@/components/jira/jira-user";
+import { JiraAvailableProjectSelect } from "@/components/jira/available-project-select";
 import { JiraTicketDrawer } from "@/components/jira/ticket-drawer";
 import { useJiraTicketChanges } from "@/components/jira/use-jira-ticket-changes";
 import { Alert, AlertDescription } from "@/components/ui/alert";
@@ -764,8 +765,9 @@ function JiraManagerDialog({
 }) {
   const t = useTranslations("jiraTickets");
   const tc = useTranslations("common");
-  const [available, setAvailable] = useState<JiraAvailableProject[]>([]);
-  const [projectId, setProjectId] = useState("");
+  const [availableProject, setAvailableProject] =
+    useState<JiraAvailableProject | null>(null);
+  const projectId = availableProject?.jiraId ?? "";
   const [managedProjectId, setManagedProjectId] = useState<string | null>(null);
   const [sourceName, setSourceName] = useState("");
   const [sourceKind, setSourceKind] = useState<JiraSourceKind>("JQL");
@@ -783,30 +785,11 @@ function JiraManagerDialog({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  useEffect(() => {
-    if (!open) return;
-    const timeout = window.setTimeout(async () => {
-      try {
-        const data = await controlPlaneRequest<{
-          jiraAvailableProjects: JiraAvailableProject[];
-        }>("query { jiraAvailableProjects { jiraId key name avatarUrl } }");
-        setAvailable(data.jiraAvailableProjects);
-      } catch (value) {
-        setError(value instanceof Error ? value.message : String(value));
-      }
-    }, 0);
-    return () => window.clearTimeout(timeout);
-  }, [open]);
-
   const selectedProject =
     projects.find((project) => project.id === managedProjectId) ??
     projects.find((project) => project.id === selectedProjectId) ??
     projects[0] ??
     null;
-  const unusedProjects = available.filter(
-    (candidate) =>
-      !projects.some((project) => project.jiraId === candidate.jiraId),
-  );
 
   useEffect(() => {
     if (!open || !selectedProject) return;
@@ -866,7 +849,7 @@ function JiraManagerDialog({
         (project) => project.jiraId === projectId,
       );
       if (addedProject) setManagedProjectId(addedProject.id);
-      setProjectId("");
+      setAvailableProject(null);
       setError(null);
     } catch (value) {
       setError(value instanceof Error ? value.message : String(value));
@@ -1032,22 +1015,15 @@ function JiraManagerDialog({
         <div className="grid min-w-0 gap-6 md:grid-cols-2">
           <section className="min-w-0 space-y-3">
             <h3 className="font-medium">{t("projects")}</h3>
-            <div className="flex gap-2">
-              <Select onValueChange={setProjectId} value={projectId}>
-                <SelectTrigger
-                  aria-label={t("availableProjects")}
-                  className="w-full"
-                >
-                  <SelectValue placeholder={t("selectProject")} />
-                </SelectTrigger>
-                <SelectContent className="z-60">
-                  {unusedProjects.map((project) => (
-                    <SelectItem key={project.jiraId} value={project.jiraId}>
-                      {project.key} · {project.name}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+            <div className="flex min-w-0 gap-2">
+              {open && (
+                <JiraAvailableProjectSelect
+                  value={availableProject}
+                  onValueChange={setAvailableProject}
+                  managedProjectIds={projects.map((project) => project.jiraId)}
+                  disabled={busy}
+                />
+              )}
               <Button
                 disabled={!projectId || busy}
                 onClick={() => void addProject()}

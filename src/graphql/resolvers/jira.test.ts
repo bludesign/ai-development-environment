@@ -10,6 +10,41 @@ function context(agentId: string | null): GraphQLContext {
 }
 
 describe("Jira resolvers", () => {
+  test("forwards project search pages with defaults and rejects agent credentials", async () => {
+    const service = {
+      availableProjectsPage: vi.fn().mockResolvedValue({ items: [] }),
+    } as unknown as JiraService;
+    const resolvers = createJiraResolvers(service, {} as JiraWebhookService);
+
+    expect(() =>
+      resolvers.Query.jiraAvailableProjectPage({}, {}, context("agent-1")),
+    ).toThrow("control-plane");
+    expect(service.availableProjectsPage).not.toHaveBeenCalled();
+
+    await resolvers.Query.jiraAvailableProjectPage({}, {}, context(null));
+    expect(service.availableProjectsPage).toHaveBeenLastCalledWith(
+      undefined,
+      0,
+      25,
+    );
+    await resolvers.Query.jiraAvailableProjectPage(
+      {},
+      { search: "OPS", startAt: 50, maxResults: 25 },
+      context(null),
+    );
+    expect(service.availableProjectsPage).toHaveBeenLastCalledWith(
+      "OPS",
+      50,
+      25,
+    );
+    await resolvers.Query.jiraAvailableProjectPage(
+      {},
+      { search: null, startAt: null, maxResults: null },
+      context(null),
+    );
+    expect(service.availableProjectsPage).toHaveBeenLastCalledWith(null, 0, 25);
+  });
+
   test("forwards explicit status overrides for All and individual sources", async () => {
     const service = {
       allTickets: vi.fn(),

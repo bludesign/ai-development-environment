@@ -33,6 +33,7 @@ import type { WorkflowEventsService } from "@/services/workflows/workflow-events
 import type {
   JiraApiCallView,
   JiraAvailableProject,
+  JiraAvailableProjectPage,
   JiraCachedTicketDetail,
   JiraCachedTicketView,
   JiraCacheMeta,
@@ -979,45 +980,74 @@ export class JiraService {
     const projects: JiraAvailableProject[] = [];
     let startAt = 0;
     while (true) {
-      const result = await this.cachedCall({
-        operation: "PROJECTS",
-        params: { startAt, maxResults: PAGE_SIZE },
-        requestSummary: `Visible projects from ${startAt}`,
-        fetcher: async () => {
-          const { cloud } = await this.getClients();
-          return cloud.projects.searchProjects({
-            startAt,
-            maxResults: PAGE_SIZE,
-            orderBy: "name",
-          });
-        },
-        itemCount: (value) => asArray(asRecord(value).values).length,
-      });
-      const page = asRecord(result.value);
-      const values = asArray(page.values).map(asRecord);
-      projects.push(
-        ...values.flatMap((project) => {
-          const jiraId = asString(project.id);
-          const key = asString(project.key);
-          const name = asString(project.name);
-          if (!jiraId || !key || !name) return [];
-          const avatars = asRecord(project.avatarUrls);
-          return [
-            {
-              jiraId,
-              key,
-              name,
-              avatarUrl:
-                asString(avatars["48x48"]) ?? asString(avatars["32x32"]),
-            },
-          ];
-        }),
+      const page = await this.availableProjectsPage(
+        undefined,
+        startAt,
+        PAGE_SIZE,
       );
-      const total = asNumber(page.total) ?? projects.length;
-      if (values.length === 0 || projects.length >= total) break;
-      startAt += values.length;
+      projects.push(...page.items);
+      if (page.nextStartAt === null) break;
+      startAt = page.nextStartAt;
     }
     return projects;
+  }
+
+  async availableProjectsPage(
+    search?: string | null,
+    startAt = 0,
+    maxResults = 25,
+  ): Promise<JiraAvailableProjectPage> {
+    const query = search?.trim() || undefined;
+    const offset = Math.max(0, Math.trunc(startAt));
+    const size = Math.max(1, Math.min(PAGE_SIZE, Math.trunc(maxResults)));
+    const params = {
+      startAt: offset,
+      maxResults: size,
+      ...(query ? { query } : {}),
+    };
+    const result = await this.cachedCall({
+      operation: "PROJECTS",
+      params,
+      requestSummary: query
+        ? `Projects matching ${query} from ${offset}`
+        : `Visible projects from ${offset}`,
+      fetcher: async () => {
+        const { cloud } = await this.getClients();
+        return cloud.projects.searchProjects({ ...params, orderBy: "name" });
+      },
+      itemCount: (value) => asArray(asRecord(value).values).length,
+    });
+    const page = asRecord(result.value);
+    const values = asArray(page.values).map(asRecord);
+    const pageStart = asNumber(page.startAt) ?? offset;
+    const nextStartAt = pageStart + values.length;
+    const total = asNumber(page.total) ?? nextStartAt;
+    return {
+      items: values.flatMap((project) => {
+        const jiraId = asString(project.id);
+        const key = asString(project.key);
+        const name = asString(project.name);
+        if (!jiraId || !key || !name) return [];
+        const avatars = asRecord(project.avatarUrls);
+        return [
+          {
+            jiraId,
+            key,
+            name,
+            avatarUrl: asString(avatars["48x48"]) ?? asString(avatars["32x32"]),
+          },
+        ];
+      }),
+      total,
+      startAt: pageStart,
+      maxResults: asNumber(page.maxResults) ?? size,
+      nextStartAt:
+        values.length === 0 ||
+        page.isLast === true ||
+        (page.isLast !== false && nextStartAt >= total)
+          ? null
+          : nextStartAt,
+    };
   }
 
   async addProject(jiraId: string): Promise<JiraProjectView[]> {

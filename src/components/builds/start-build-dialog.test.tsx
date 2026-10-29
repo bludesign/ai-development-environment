@@ -1,5 +1,6 @@
 import { serverUrlFixture } from "../../../test/fixtures/server-urls";
 import {
+  act,
   cleanup,
   fireEvent,
   render,
@@ -12,7 +13,7 @@ import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { controlPlaneRequest } from "@/lib/control-plane-client";
 
 import { StartBuildButton } from "./start-build-dialog";
-import type { IosAppProject } from "./types";
+import type { BuildDestination, IosAppProject } from "./types";
 
 vi.mock("@/lib/control-plane-client", () => ({
   controlPlaneRequest: vi.fn(),
@@ -33,6 +34,17 @@ vi.mock("@/i18n/navigation", () => ({
 }));
 
 const request = vi.mocked(controlPlaneRequest);
+type DestinationResponse = { inspectBuildDestinations: BuildDestination[] };
+
+const liveDestination: BuildDestination = {
+  type: "SIMULATOR",
+  id: "SIM-1",
+  name: "iPhone 17 Pro",
+  platform: "iOS Simulator",
+  osVersion: "26.0",
+  state: "Booted",
+};
+
 let urlSettings = serverUrlFixture;
 const now = new Date().toISOString();
 const observation = {
@@ -438,6 +450,14 @@ describe("StartBuildDialog", () => {
       expect((start as HTMLButtonElement).disabled).toBe(false),
     );
     expect(screen.getAllByText(/Any iOS Simulator/).length).toBeGreaterThan(0);
+    expect(
+      screen.getByRole("status", { name: "Loading devices…" }),
+    ).toBeDefined();
+    expect(
+      screen
+        .getByRole("combobox", { name: "Device" })
+        .getAttribute("aria-busy"),
+    ).toBe("true");
     fireEvent.click(start);
 
     await waitFor(() =>
@@ -454,6 +474,199 @@ describe("StartBuildDialog", () => {
       ),
     );
     finishDestinationRefresh?.();
+  });
+
+  test.each([
+    { name: "live devices", destinations: [liveDestination] },
+    { name: "no live devices", destinations: [] },
+  ])(
+    "finishes the device loading indicator with $name",
+    async ({ destinations }) => {
+      const defaultImplementation = request.getMockImplementation()!;
+      const refresh = Promise.withResolvers<DestinationResponse>();
+      request.mockImplementation(async (query, variables) => {
+        if (String(query).includes("mutation InspectStartBuildDestinations")) {
+          return (await refresh.promise) as never;
+        }
+        return defaultImplementation(query, variables);
+      });
+
+      render(
+        <StartBuildButton codebaseId="codebase-1" worktreeId="worktree-1" />,
+      );
+      fireEvent.click(screen.getByRole("button", { name: "Build" }));
+      await screen.findByRole("status", { name: "Loading devices…" });
+      const device = screen.getByRole("combobox", { name: "Device" });
+      expect(device.hasAttribute("disabled")).toBe(false);
+
+      await act(async () => {
+        refresh.resolve({ inspectBuildDestinations: destinations });
+      });
+
+      expect(
+        screen.queryByRole("status", { name: "Loading devices…" }),
+      ).toBeNull();
+      expect(device.getAttribute("aria-busy")).toBe("false");
+      expect(device.textContent).toContain("Any iOS Simulator");
+      fireEvent.pointerDown(device, {
+        button: 0,
+        ctrlKey: false,
+        pointerType: "mouse",
+      });
+      expect(
+        screen.getByRole("option", { name: "Any iOS Simulator" }),
+      ).toBeDefined();
+      expect(
+        screen.queryByRole("option", { name: /iPhone 17 Pro/ }) !== null,
+      ).toBe(destinations.length > 0);
+    },
+  );
+
+  test("stops indicating loading after a failed device refresh and keeps generic builds available", async () => {
+    const defaultImplementation = request.getMockImplementation()!;
+    const refresh = Promise.withResolvers<DestinationResponse>();
+    request.mockImplementation(async (query, variables) => {
+      if (String(query).includes("mutation InspectStartBuildDestinations")) {
+        return (await refresh.promise) as never;
+      }
+      return defaultImplementation(query, variables);
+    });
+
+    render(
+      <StartBuildButton codebaseId="codebase-1" worktreeId="worktree-1" />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Build" }));
+    await screen.findByRole("status", { name: "Loading devices…" });
+    await act(async () => {
+      refresh.reject(new Error("Agent unavailable"));
+    });
+
+    expect(
+      screen.queryByRole("status", { name: "Loading devices…" }),
+    ).toBeNull();
+    expect(
+      screen
+        .getByRole("combobox", { name: "Device" })
+        .getAttribute("aria-busy"),
+    ).toBe("false");
+    expect(
+      screen.getByText(/The live device list could not be refreshed/)
+        .textContent,
+    ).toContain("Agent unavailable");
+    expect(
+      screen
+        .getByRole("button", { name: "Start Build" })
+        .hasAttribute("disabled"),
+    ).toBe(false);
+  });
+
+  test("keeps indicating loading when an older destination request finishes", async () => {
+    const defaultImplementation = request.getMockImplementation()!;
+    const refreshes = [
+      Promise.withResolvers<DestinationResponse>(),
+      Promise.withResolvers<DestinationResponse>(),
+    ];
+    let refreshCount = 0;
+    request.mockImplementation(async (query, variables) => {
+      if (String(query).includes("mutation InspectStartBuildDestinations")) {
+        return (await refreshes[refreshCount++]!.promise) as never;
+      }
+      return defaultImplementation(query, variables);
+    });
+
+    render(
+      <StartBuildButton codebaseId="codebase-1" worktreeId="worktree-1" />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Build" }));
+    await screen.findByRole("status", { name: "Loading devices…" });
+    fireEvent.click(screen.getByText("Details"));
+    const action = within(screen.getByText("Action").parentElement!).getByRole(
+      "combobox",
+    );
+    fireEvent.pointerDown(action, {
+      button: 0,
+      ctrlKey: false,
+      pointerType: "mouse",
+    });
+    fireEvent.click(await screen.findByRole("option", { name: "Test" }));
+    await waitFor(() => expect(refreshCount).toBe(2));
+
+    await act(async () => {
+      refreshes[0]!.resolve({
+        inspectBuildDestinations: [
+          { ...liveDestination, name: "Old simulator" },
+        ],
+      });
+    });
+    expect(
+      screen.getByRole("status", { name: "Loading devices…" }),
+    ).toBeDefined();
+    const device = screen.getByRole("combobox", { name: "Device" });
+    expect(device.getAttribute("aria-busy")).toBe("true");
+    expect(device.hasAttribute("disabled")).toBe(true);
+
+    await act(async () => {
+      refreshes[1]!.resolve({ inspectBuildDestinations: [liveDestination] });
+    });
+    expect(
+      screen.queryByRole("status", { name: "Loading devices…" }),
+    ).toBeNull();
+    expect(device.getAttribute("aria-busy")).toBe("false");
+    expect(device.textContent).toContain("iPhone 17 Pro");
+    expect(screen.queryByText(/Old simulator/)).toBeNull();
+  });
+
+  test("indicates refresh while cached devices remain selectable and preserves selection", async () => {
+    const defaultImplementation = request.getMockImplementation()!;
+    const refresh = Promise.withResolvers<DestinationResponse>();
+    let refreshCount = 0;
+    request.mockImplementation(async (query, variables) => {
+      if (String(query).includes("mutation InspectStartBuildDestinations")) {
+        refreshCount += 1;
+        if (refreshCount > 1) return (await refresh.promise) as never;
+      }
+      return defaultImplementation(query, variables);
+    });
+
+    render(
+      <StartBuildButton codebaseId="codebase-1" worktreeId="worktree-1" />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Build" }));
+    await waitFor(() => {
+      expect(refreshCount).toBe(1);
+      expect(
+        screen
+          .getByRole("combobox", { name: "Device" })
+          .getAttribute("aria-busy"),
+      ).toBe("false");
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    fireEvent.click(screen.getByRole("button", { name: "Build" }));
+    await screen.findByRole("status", { name: "Loading devices…" });
+    const device = screen.getByRole("combobox", { name: "Device" });
+    expect(device.hasAttribute("disabled")).toBe(false);
+    fireEvent.pointerDown(device, {
+      button: 0,
+      ctrlKey: false,
+      pointerType: "mouse",
+    });
+    fireEvent.click(
+      await screen.findByRole("option", { name: /iPhone 17 Pro/ }),
+    );
+    expect(device.textContent).toContain("iPhone 17 Pro");
+    expect(
+      screen
+        .getByRole("button", { name: "Start Build" })
+        .hasAttribute("disabled"),
+    ).toBe(false);
+
+    await act(async () => {
+      refresh.resolve({ inspectBuildDestinations: [liveDestination] });
+    });
+    expect(
+      screen.queryByRole("status", { name: "Loading devices…" }),
+    ).toBeNull();
+    expect(device.textContent).toContain("iPhone 17 Pro");
   });
 
   test("loads prior builds only when Test Without Building is selected", async () => {
