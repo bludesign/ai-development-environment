@@ -1257,6 +1257,23 @@
     "readOnlyNotice": "Diese Installation hat nur Lesezugriff auf Vault, daher kann dieses Geheimnis hier nicht geändert werden. Aktualisieren Sie es über eine Installation mit Schreibzugriff.",
     "adopted": "{count} Anmeldedaten wurden beim Serverstart aus dem externen Backend übernommen."
   },
+  "webSocketStatus": {
+    "agent": "Agent-WebSocket",
+    "browser": "Browser-WebSocket",
+    "unknown": "Unbekannt",
+    "connecting": "Verbindung wird hergestellt",
+    "connected": "Verbunden",
+    "reconnecting": "Verbindung wird wiederhergestellt",
+    "disconnected": "Getrennt",
+    "lastVerified": "Zuletzt überprüft",
+    "lastChanged": "Zuletzt geändert",
+    "connectedSince": "Verbunden seit",
+    "lastDisconnected": "Zuletzt getrennt",
+    "never": "Nie",
+    "agentDescription": "Zeigt das authentifizierte Abonnement für Auftragsbenachrichtigungen auf diesem Server. Stille Verbindungsfehler werden nach bis zu etwa 24 Sekunden erkannt.",
+    "browserDescription": "Zeigt die Verbindung dieses Browsers für Live-Aktualisierungen. Stille Verbindungsfehler werden nach bis zu etwa 15 Sekunden erkannt.",
+    "unknownDescription": "Ein aktueller Status ist nicht verfügbar. Die zuletzt bekannten Zeitpunkte werden angezeigt."
+  },
   "agents": {
     "title": "Agenten",
     "description": "Registrierte Macs und dauerhafte Aufträge zentral verwalten.",

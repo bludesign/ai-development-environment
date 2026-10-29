@@ -35,6 +35,11 @@ import { ResourceUsage } from "./resource-usage";
 import { CommandQuickActions } from "@/components/commands/command-quick-actions";
 import { AGENT_FIELDS } from "./graphql-fields";
 import type { Agent } from "./types";
+import { useAgentWebSocketConnections } from "./use-agent-websocket-connections";
+import {
+  BrowserWebSocketStatus,
+  WebSocketStatusBadge,
+} from "./websocket-status";
 
 const AGENTS_QUERY = `query Agents { agents { ${AGENT_FIELDS} } }`;
 export function shellQuote(value: string): string {
@@ -49,6 +54,9 @@ export function AgentsList(_props: { localServerOrigins?: string[] }) {
   const detailT = useTranslations("agentDetail");
   const locale = useLocale();
   const [agents, setAgents] = useState<Agent[]>([]);
+  const webSockets = useAgentWebSocketConnections(
+    agents.map((agent) => agent.id),
+  );
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [enrollment, setEnrollment] = useState<{
@@ -148,6 +156,7 @@ export function AgentsList(_props: { localServerOrigins?: string[] }) {
           <h1 className="text-2xl font-semibold tracking-tight">
             {t("title")}
           </h1>
+          <BrowserWebSocketStatus />
           <p className="mt-1 text-sm text-muted-foreground">
             {t("description")}
           </p>
@@ -317,6 +326,10 @@ export function AgentsList(_props: { localServerOrigins?: string[] }) {
                   </div>
                   <StatusBadge status={agent.connectionStatus} />
                 </div>
+                <WebSocketStatusBadge
+                  kind="agent"
+                  snapshot={webSockets.get(agent.id)}
+                />
                 <dl className="grid grid-cols-2 gap-2 text-xs text-muted-foreground">
                   <div>
                     <dt>{t("version")}</dt>

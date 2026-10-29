@@ -1257,6 +1257,23 @@
     "readOnlyNotice": "Esta instalación tiene acceso de solo lectura a Vault, por lo que este secreto no se puede cambiar aquí. Actualízalo desde una instalación con permisos de escritura.",
     "adopted": "{count} credencial(es) se adoptaron del backend externo al iniciar el servidor."
   },
+  "webSocketStatus": {
+    "agent": "WebSocket del agente",
+    "browser": "WebSocket del navegador",
+    "unknown": "Desconocido",
+    "connecting": "Conectando",
+    "connected": "Conectado",
+    "reconnecting": "Reconectando",
+    "disconnected": "Desconectado",
+    "lastVerified": "Última verificación",
+    "lastChanged": "Último cambio",
+    "connectedSince": "Conectado desde",
+    "lastDisconnected": "Última desconexión",
+    "never": "Nunca",
+    "agentDescription": "Muestra la suscripción autenticada a notificaciones de trabajos en este servidor. Los fallos silenciosos de conexión pueden tardar aproximadamente 24 segundos en detectarse.",
+    "browserDescription": "Muestra la conexión de actualizaciones en vivo de este navegador. Los fallos silenciosos pueden tardar aproximadamente 15 segundos en detectarse.",
+    "unknownDescription": "No hay un estado actual disponible. Se muestran las últimas fechas conocidas."
+  },
   "agents": {
     "title": "Agentes",
     "description": "Gestiona los Macs inscritos y los trabajos duraderos desde un único plano de control.",

@@ -1,6 +1,7 @@
 import { useServer as createGraphQLWebSocketServer } from "graphql-ws/use/ws";
 import { WebSocketServer } from "ws";
 import { GraphQLError } from "graphql";
+import { randomUUID } from "node:crypto";
 
 import { isTrustedWebSocketOrigin, resolveAppOrigins } from "@/lib/app-origins";
 import {
@@ -9,12 +10,14 @@ import {
   SharedGraphQLServerService,
 } from "@/services/graphql-server/graphql-server.service";
 import { isAnonymousAgentEnrollment } from "@/services/graphql-server/graphql-auth";
+import { agentWebSocketRegistry } from "@/services/agent-control/websocket-registry";
 
 const globalForAgentWebSocket = globalThis as typeof globalThis & {
   agentWebSocketServer?: WebSocketServer;
   agentWebSocketStartPromise?: Promise<void>;
 };
 const operationContexts = new WeakMap<object, GraphQLContext>();
+const connectionIds = new WeakMap<object, string>();
 
 function authorizationFromParams(params: unknown): string | null {
   if (!params || typeof params !== "object") return null;
@@ -124,6 +127,13 @@ export async function startAgentWebSocketServer(): Promise<void> {
         done(false, 403, "Forbidden origin");
       },
     });
+    webSocketServer.on("connection", (socket) => {
+      const connectionId = randomUUID();
+      connectionIds.set(socket, connectionId);
+      agentWebSocketRegistry.open(connectionId);
+      socket.on("pong", () => agentWebSocketRegistry.verify(connectionId));
+      socket.once("close", () => agentWebSocketRegistry.close(connectionId));
+    });
     const disposable = createGraphQLWebSocketServer(
       {
         schema,
@@ -133,6 +143,9 @@ export async function startAgentWebSocketServer(): Promise<void> {
               await SharedGraphQLServerService.createContext(
                 connectionHeaders(context),
               );
+            graphQLContext.webSocketConnectionId = connectionIds.get(
+              context.extra.socket,
+            );
             operationContexts.set(context, graphQLContext);
             const denied = deniedWebSocketOperation(
               graphQLContext.principal,

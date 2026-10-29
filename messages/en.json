@@ -1257,6 +1257,23 @@
     "readOnlyNotice": "This install has read-only access to Vault, so this secret cannot be changed here. Update it from a read-write install.",
     "adopted": "{count} credential(s) were adopted from the external backend when the server started."
   },
+  "webSocketStatus": {
+    "agent": "Agent WebSocket",
+    "browser": "Browser WebSocket",
+    "unknown": "Unknown",
+    "connecting": "Connecting",
+    "connected": "Connected",
+    "reconnecting": "Reconnecting",
+    "disconnected": "Disconnected",
+    "lastVerified": "Last verified",
+    "lastChanged": "Last changed",
+    "connectedSince": "Connected since",
+    "lastDisconnected": "Last disconnected",
+    "never": "Never",
+    "agentDescription": "Tracks the authenticated job-notification subscription on this server. Silent connection failures can take up to approximately 24 seconds to detect.",
+    "browserDescription": "Tracks this browser’s live-update connection. Silent connection failures can take up to approximately 15 seconds to detect.",
+    "unknownDescription": "No current status is available. The last known timestamps are shown."
+  },
   "agents": {
     "title": "Agents",
     "description": "Manage enrolled Macs and durable jobs from one control plane.",

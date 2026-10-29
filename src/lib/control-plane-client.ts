@@ -7,6 +7,7 @@ import {
   type Sink,
   type SubscribePayload,
 } from "graphql-ws";
+import { updateBrowserWebSocketStatus } from "./websocket-status";
 
 type GraphQLResponse<T> = { data?: T; errors?: Array<{ message: string }> };
 
@@ -376,13 +377,30 @@ function isPermanentSubscriptionError(error: unknown): boolean {
 }
 
 function rawSubscriptionClient(): Client {
-  subscriptionClient ??= createClient({
+  if (subscriptionClient) return subscriptionClient;
+  let pongTimer: ReturnType<typeof setTimeout> | null = null;
+  let acknowledged = false;
+  const clearPongTimer = () => {
+    if (pongTimer !== null) clearTimeout(pongTimer);
+    pongTimer = null;
+  };
+  subscriptionClient = createClient({
     url: websocketUrl,
     lazy: true,
     retryAttempts: Infinity,
     shouldRetry: () => true,
+    keepAlive: 10_000,
+    connectionAckWaitTimeout: 10_000,
     on: {
+      connecting: (retrying) => {
+        acknowledged = false;
+        clearPongTimer();
+        updateBrowserWebSocketStatus(retrying ? "RECONNECTING" : "CONNECTING");
+      },
       connected: () => {
+        acknowledged = true;
+        clearPongTimer();
+        updateBrowserWebSocketStatus("CONNECTED");
         const event = { initialConnection: !hasConnected };
         hasConnected = true;
         notifyListeners([
@@ -396,6 +414,33 @@ function rawSubscriptionClient(): Client {
             )
             .map((listener) => () => listener(event)),
         ]);
+      },
+      ping: (received) => {
+        if (received) return;
+        clearPongTimer();
+        pongTimer = setTimeout(() => {
+          pongTimer = null;
+          updateBrowserWebSocketStatus("RECONNECTING");
+          subscriptionClient?.terminate();
+        }, 5_000);
+      },
+      pong: (received) => {
+        if (!received || !acknowledged) return;
+        clearPongTimer();
+        updateBrowserWebSocketStatus("CONNECTED");
+      },
+      closed: (event) => {
+        acknowledged = false;
+        clearPongTimer();
+        const code = (event as { code?: number } | undefined)?.code;
+        updateBrowserWebSocketStatus(
+          code === 1000 ? "DISCONNECTED" : "RECONNECTING",
+        );
+      },
+      error: () => {
+        acknowledged = false;
+        clearPongTimer();
+        updateBrowserWebSocketStatus("DISCONNECTED");
       },
     },
   });

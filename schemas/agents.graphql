@@ -9,6 +9,30 @@ enum AgentConnectionStatus {
   OFFLINE
 }
 
+"Server-observed presence of an authenticated agent notification subscription."
+enum AgentWebSocketStatus {
+  "An authenticated notification subscription has a responsive socket."
+  CONNECTED
+  "No active notification subscription is connected to this server."
+  DISCONNECTED
+}
+
+"Live WebSocket state on this control-plane server; reset when the server restarts."
+type AgentWebSocketConnection {
+  "Identifier of the agent whose connection is being observed."
+  agentId: ID!
+  "Current server-observed notification connection status."
+  status: AgentWebSocketStatus!
+  "ISO 8601 timestamp when continuous notification connectivity began."
+  connectedAt: String
+  "ISO 8601 timestamp of the latest subscription request or socket pong."
+  lastVerifiedAt: String
+  "ISO 8601 timestamp when the final active notification connection ended."
+  disconnectedAt: String
+  "ISO 8601 timestamp when the connection status last changed."
+  changedAt: String
+}
+
 "Lifecycle statuses for agent job."
 enum AgentJobStatus {
   "Represents the queued status for agent job."
@@ -103,6 +127,8 @@ type Agent {
   effectiveBuildsDirectory: String
   "The connection status associated with this agent."
   connectionStatus: AgentConnectionStatus!
+  "Live presence of the agent's job-notification WebSocket subscription."
+  webSocketConnection: AgentWebSocketConnection!
   "The IP address associated with this agent. May be null when unavailable or not applicable."
   ipAddress: String
   "ISO 8601 timestamp when this agent was last seen. May be null when unavailable or not applicable."
@@ -455,6 +481,8 @@ type Subscription {
   agentEvents("Identifier of the agent." agentId: ID!): AgentEvent!
   "Emits an agent whenever agent changes."
   agentChanged("Identifier of the agent." agentId: ID): Agent!
+  "Emits agent WebSocket lifecycle changes and successful liveness checks."
+  agentWebSocketConnectionChanged(agentId: ID): AgentWebSocketConnection!
   "Emits an agent job whenever agent job changes."
   agentJobChanged("Identifier of the job." jobId: ID!): AgentJob!
   "Emits an agent job log whenever agent job log is added."
