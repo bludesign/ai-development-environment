@@ -55,11 +55,45 @@ export function codexAppServerArgs(modelCatalogPath: string): string[] {
 }
 
 export function codexRunConfig(
-  input: Pick<ProviderStartInput, "run" | "mcpServer">,
+  input: Pick<ProviderStartInput, "run" | "mcpServer" | "textOnly">,
+  savedConfig: Record<string, unknown> = {},
 ): Record<string, unknown> {
   return {
     web_search: input.run.webSearchEnabled ? "live" : "disabled",
-    ...(input.mcpServer
+    ...(input.textOnly
+      ? {
+          mcp_servers: Object.fromEntries(
+            Object.keys(asRecord(savedConfig.mcp_servers)).map((name) => [
+              name,
+              { enabled: false },
+            ]),
+          ),
+          plugins: Object.fromEntries(
+            Object.keys(asRecord(savedConfig.plugins)).map((name) => [
+              name,
+              { enabled: false },
+            ]),
+          ),
+          apps: {
+            _default: { enabled: false },
+            ...Object.fromEntries(
+              Object.keys(asRecord(savedConfig.apps))
+                .filter((name) => name !== "_default")
+                .map((name) => [name, { enabled: false }]),
+            ),
+          },
+          project_doc_max_bytes: 0,
+          features: {
+            shell_tool: false,
+            apply_patch_freeform: false,
+            multi_agent: false,
+            js_repl: false,
+            apps: false,
+            view_image_tool: false,
+          },
+        }
+      : {}),
+    ...(input.mcpServer && !input.textOnly
       ? {
           mcp_servers: {
             [input.mcpServer.name]: {
@@ -443,6 +477,18 @@ export class CodexAdapter implements ProviderAdapter {
     const cwd = input.run.worktree!.folder;
     const sandbox =
       input.run.kind === "PLAN" ? "read-only" : "danger-full-access";
+    let savedConfig: Record<string, unknown> = {};
+    if (input.textOnly) {
+      const response = asRecord(
+        await this.server.request("config/read", { includeLayers: false, cwd }),
+      );
+      if (!response.config || typeof response.config !== "object")
+        throw new Error(
+          "Codex must support isolated configuration reads for AI branch naming",
+        );
+      savedConfig = asRecord(response.config);
+    }
+    const config = codexRunConfig(input, savedConfig);
     const threadResult = asRecord(
       input.resumeNativeId
         ? await this.server.request(
@@ -453,7 +499,7 @@ export class CodexAdapter implements ProviderAdapter {
               model: input.run.model === "default" ? null : input.run.model,
               approvalPolicy: "never",
               sandbox,
-              config: codexRunConfig(input),
+              config,
             },
           )
         : await this.server.request("thread/start", {
@@ -461,8 +507,14 @@ export class CodexAdapter implements ProviderAdapter {
             model: input.run.model === "default" ? null : input.run.model,
             approvalPolicy: "never",
             sandbox,
-            config: codexRunConfig(input),
-            ephemeral: false,
+            config,
+            ephemeral: input.textOnly ?? false,
+            ...(input.textOnly
+              ? {
+                  baseInstructions:
+                    "Generate text only. Do not use tools, inspect files, or ask questions. Return only one valid Git branch name.",
+                }
+              : {}),
             experimentalRawEvents: false,
           }),
     );

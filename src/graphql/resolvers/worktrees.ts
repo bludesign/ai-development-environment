@@ -1,3 +1,7 @@
+import {
+  JIRA_BRANCH_GENERATE_JOB_KIND,
+  validGitBranchName,
+} from "@ai-development-environment/agent-contract/worktrees";
 import type {
   CodebaseWorktreeReport,
   WorktreeActivityReport,
@@ -84,6 +88,27 @@ export const createWorktreeResolvers = (
     checkedAt: (value: { checkedAt: Date | null }) => iso(value.checkedAt),
   },
   AgentJob: {
+    worktreeTicketBranchResult: (value: {
+      kind: string;
+      status: string;
+      resultJson: string | null;
+    }) => {
+      if (
+        value.kind !== JIRA_BRANCH_GENERATE_JOB_KIND ||
+        value.status !== "SUCCEEDED" ||
+        !value.resultJson
+      )
+        return null;
+      try {
+        const result = JSON.parse(value.resultJson) as { branchName?: unknown };
+        return typeof result.branchName === "string" &&
+          validGitBranchName(result.branchName)
+          ? { branchName: result.branchName }
+          : null;
+      } catch {
+        return null;
+      }
+    },
     worktreeOperationResult: (value: {
       kind: string;
       resultJson: string | null;
@@ -154,6 +179,18 @@ export const createWorktreeResolvers = (
       requireControlPlane(context);
       return service.settings();
     },
+    worktreeTicketBranchContext: (
+      _root: unknown,
+      {
+        input,
+      }: {
+        input: Parameters<WorktreesService["worktreeTicketBranchContext"]>[0];
+      },
+      context: GraphQLContext,
+    ) => {
+      requireControlPlane(context);
+      return service.worktreeTicketBranchContext(input);
+    },
     previewWorktreeTicketBranch: (
       _root: unknown,
       {
@@ -196,6 +233,16 @@ export const createWorktreeResolvers = (
     },
   },
   Mutation: {
+    generateWorktreeTicketBranch: (
+      _root: unknown,
+      {
+        input,
+      }: { input: Parameters<WorktreesService["generateTicketBranch"]>[0] },
+      context: GraphQLContext,
+    ) => {
+      requireControlPlane(context);
+      return service.generateTicketBranch(input);
+    },
     runWorktreePreparations: (
       _root: unknown,
       {

@@ -1745,7 +1745,7 @@
     "selectCompletedStatuses": "Sélectionner les statuts terminés",
     "saveDisplaySettings": "Enregistrer les paramètres d’affichage",
     "branchNaming": "Nommage des branches",
-    "branchNamingDescription": "Cette fonction est utilisée lors de la création d’une branche de worktree depuis un ticket de ce projet.",
+    "branchNamingDescription": "Choisissez comment nommer les branches des tickets de ce projet.",
     "branchNamingFunction": "Fonction JavaScript de nommage des branches",
     "branchNamingFunctionHelp": "Reçoit ticketKey, type, title et alreadyTaken. Retournez un nom de branche Git valide ; alreadyTaken est omis au premier appel.",
     "saveBranchNaming": "Enregistrer le nommage des branches",
@@ -1823,7 +1823,12 @@
     "noAssignees": "Aucun utilisateur assignable trouvé.",
     "status": "Statut",
     "changeStatus": "Changer le statut",
-    "requiresJira": "Nécessite Jira"
+    "requiresJira": "Nécessite Jira",
+    "aiBranchNaming": "Noms de branches par IA",
+    "aiBranchNamingHelp": "Utilisez le modèle choisi sur l’agent de la base de code à la place de la fonction JavaScript. Les deux configurations sont conservées séparément.",
+    "aiBranchPrompt": "Instructions de nommage des branches",
+    "aiBranchTokensHelp": "Insérez des variables du ticket pour choisir les données reçues par le modèle. La description est chargée et partagée uniquement si sa variable est utilisée.",
+    "saveAiBranchNaming": "Enregistrer le mode et les réglages IA"
   },
   "jiraTicketDetail": {
     "loading": "Chargement du ticket Jira…",
@@ -3685,7 +3690,12 @@
     "copyFullCommitHash": "Copier le hash complet du commit",
     "copyCommitMessage": "Copier le message du commit",
     "copyChangeFailed": "Impossible de copier dans le presse-papiers.",
-    "openPullRequests": "Pull requests ouvertes"
+    "openPullRequests": "Pull requests ouvertes",
+    "aiBranchPlaceholder": "Générez un nom ou laissez vide",
+    "aiBranchSubmitHelp": "Générez et modifiez un nom, ou validez pour le générer automatiquement.",
+    "generatingBranchName": "Génération du nom de branche…",
+    "generateBranchName": "Générer un nom de branche",
+    "regenerateBranchName": "Régénérer le nom de branche"
   },
   "worktreeDetail": {
     "loading": "Chargement des détails du worktree…",

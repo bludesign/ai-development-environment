@@ -1745,7 +1745,7 @@
     "selectCompletedStatuses": "Select completed statuses",
     "saveDisplaySettings": "Save display settings",
     "branchNaming": "Branch naming",
-    "branchNamingDescription": "This function is used when a worktree branch is created from a ticket in this project.",
+    "branchNamingDescription": "Choose how branches are named for tickets in this project.",
     "branchNamingFunction": "JavaScript branch naming function",
     "branchNamingFunctionHelp": "Receives ticketKey, type, title, and alreadyTaken. Return a valid Git branch name; alreadyTaken is omitted on the first call.",
     "saveBranchNaming": "Save branch naming",
@@ -1823,7 +1823,12 @@
     "noAssignees": "No assignable users found.",
     "status": "Status",
     "changeStatus": "Change status",
-    "requiresJira": "Requires Jira"
+    "requiresJira": "Requires Jira",
+    "aiBranchNaming": "AI branch naming",
+    "aiBranchNamingHelp": "Use the selected model on the codebase’s agent instead of the JavaScript function. Both configurations are saved independently.",
+    "aiBranchPrompt": "Branch naming prompt",
+    "aiBranchTokensHelp": "Insert ticket tokens to choose what the model receives. The description is fetched and shared only when its token is used.",
+    "saveAiBranchNaming": "Save naming mode and AI settings"
   },
   "jiraTicketDetail": {
     "loading": "Loading Jira ticket…",
@@ -3685,7 +3690,12 @@
     "copyFullCommitHash": "Copy full commit hash",
     "copyCommitMessage": "Copy commit message",
     "copyChangeFailed": "Could not copy to the clipboard.",
-    "openPullRequests": "Open pull requests"
+    "openPullRequests": "Open pull requests",
+    "aiBranchPlaceholder": "Generate a name or leave empty",
+    "aiBranchSubmitHelp": "Generate and edit a name, or submit to generate it automatically.",
+    "generatingBranchName": "Generating branch name…",
+    "generateBranchName": "Generate branch name",
+    "regenerateBranchName": "Regenerate branch name"
   },
   "worktreeDetail": {
     "loading": "Loading worktree details…",

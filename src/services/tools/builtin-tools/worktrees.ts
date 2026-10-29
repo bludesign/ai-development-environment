@@ -112,6 +112,36 @@ export function createWorktreeToolGroup(
         arguments: () => [],
         resultKey: "overview",
       }),
+      serviceTool({
+        name: "get_worktree_ticket_branch_context",
+        title: "Get ticket branch context",
+        description:
+          "Load ticket metadata and the project's naming mode without invoking AI.",
+        inputSchema: z.object({
+          codebaseId: z.string().min(1),
+          worktreeId: z.string().nullable().optional(),
+          ticketKey: z.string().min(1),
+        }),
+        service,
+        method: "worktreeTicketBranchContext",
+        resultKey: "context",
+      }),
+      serviceTool({
+        name: "generate_worktree_ticket_branch",
+        title: "Generate ticket branch name",
+        description:
+          "Queue AI branch naming on the selected codebase's agent using the Jira project's model and prompt. Read the returned agent job for the generated branchName.",
+        inputSchema: z.object({
+          codebaseId: z.string().min(1),
+          worktreeId: z.string().nullable().optional(),
+          ticketKey: z.string().min(1),
+          requestId: z.string().min(1),
+        }),
+        service,
+        method: "generateTicketBranch",
+        resultKey: "job",
+        annotations: WRITE_ANNOTATIONS,
+      }),
       defineTool({
         name: "get_worktree_preparation_overview",
         title: "Get worktree preparation overview",

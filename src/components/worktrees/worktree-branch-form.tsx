@@ -1,5 +1,7 @@
 "use client";
 
+import { waitForTicketBranchJob } from "./worktree-jobs";
+
 import {
   FormEvent,
   ReactNode,
@@ -56,7 +58,9 @@ type TicketPreview = {
   ticketTitle: string;
   ticketType: string | null;
   projectKey: string;
-  branchName: string;
+  branchName: string | null;
+  branchNamingMode: "JAVASCRIPT" | "AI";
+  contextKey?: string;
 };
 
 const BRANCH_MODE_COOKIE = "worktree-branch-mode";
@@ -119,11 +123,24 @@ export function WorktreeBranchForm({
   const [previewLoading, setPreviewLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const previewRequest = useRef(0);
+  const [generatedName, setGeneratedName] = useState("");
+  const [generating, setGenerating] = useState(false);
+  const generationController = useRef<AbortController | null>(null);
+  const contextKey = `${mode}:${target.codebaseId}:${target.worktreeId ?? ""}:${parseJiraIssueKey(ticketKey)}`;
+  const currentPreview = preview?.contextKey === contextKey ? preview : null;
+  useEffect(
+    () => () => {
+      generationController.current?.abort();
+    },
+    [contextKey],
+  );
 
   useEffect(() => {
     const request = ++previewRequest.current;
     const normalized = parseJiraIssueKey(ticketKey);
     const timer = window.setTimeout(async () => {
+      setGeneratedName("");
+      setGenerating(false);
       if (mode !== "TICKET" || !normalized) {
         setPreviewLoading(false);
         return;
@@ -131,10 +148,10 @@ export function WorktreeBranchForm({
       setPreviewLoading(true);
       try {
         const data = await controlPlaneRequest<{
-          previewWorktreeTicketBranch: TicketPreview;
+          worktreeTicketBranchContext: TicketPreview;
         }>(
-          `query PreviewWorktreeTicketBranch($input: PreviewWorktreeTicketBranchInput!) {
-            previewWorktreeTicketBranch(input: $input) { ticketKey ticketTitle ticketType projectKey branchName }
+          `query WorktreeTicketBranchContext($input: PreviewWorktreeTicketBranchInput!) {
+            worktreeTicketBranchContext(input: $input) { ticketKey ticketTitle ticketType projectKey branchName branchNamingMode }
           }`,
           {
             input: {
@@ -145,7 +162,7 @@ export function WorktreeBranchForm({
           },
         );
         if (request !== previewRequest.current) return;
-        setPreview(data.previewWorktreeTicketBranch);
+        setPreview({ ...data.worktreeTicketBranchContext, contextKey });
       } catch (value) {
         if (request !== previewRequest.current) return;
         setError(value instanceof Error ? value.message : String(value));
@@ -154,7 +171,7 @@ export function WorktreeBranchForm({
       }
     }, 400);
     return () => window.clearTimeout(timer);
-  }, [mode, target.codebaseId, target.worktreeId, ticketKey]);
+  }, [contextKey, mode, target.codebaseId, target.worktreeId, ticketKey]);
 
   const baseOptions = useMemo<SearchableSelectOption[]>(
     () =>
@@ -190,6 +207,52 @@ export function WorktreeBranchForm({
     target.unavailableBranches,
   ]);
 
+  const generate = async () => {
+    if (
+      !currentPreview ||
+      (generationController.current &&
+        !generationController.current.signal.aborted)
+    )
+      return;
+    const controller = new AbortController();
+    generationController.current = controller;
+    const request = previewRequest.current;
+    let jobId: string | undefined;
+    setGenerating(true);
+    setError(null);
+    try {
+      const data = await controlPlaneRequest<{
+        generateWorktreeTicketBranch: { id: string };
+      }>(
+        `mutation GenerateWorktreeTicketBranch($input: GenerateWorktreeTicketBranchInput!) { generateWorktreeTicketBranch(input: $input) { id } }`,
+        {
+          input: {
+            codebaseId: target.codebaseId,
+            worktreeId: target.worktreeId ?? null,
+            ticketKey: currentPreview.ticketKey,
+            requestId: crypto.randomUUID(),
+          },
+        },
+      );
+      jobId = data.generateWorktreeTicketBranch.id;
+      const name = await waitForTicketBranchJob(jobId, controller.signal);
+      if (request === previewRequest.current && !controller.signal.aborted)
+        setGeneratedName(name);
+    } catch (value) {
+      if (jobId)
+        void controlPlaneRequest(
+          `mutation CancelBranchGeneration($id: ID!) { cancelAgentJob(jobId: $id) { id } }`,
+          { id: jobId },
+        ).catch(() => undefined);
+      if (request === previewRequest.current && !controller.signal.aborted)
+        setError(value instanceof Error ? value.message : String(value));
+    } finally {
+      if (generationController.current === controller)
+        generationController.current = null;
+      if (request === previewRequest.current) setGenerating(false);
+    }
+  };
+
   const submit = async (event: FormEvent) => {
     event.preventDefault();
     const selection: WorktreeBranchSelection = {
@@ -199,7 +262,13 @@ export function WorktreeBranchForm({
         ? { branchName }
         : mode === "EXISTING"
           ? { branchName: existingBranch }
-          : { ticketKey: parseJiraIssueKey(ticketKey) }),
+          : {
+              ticketKey: parseJiraIssueKey(ticketKey),
+              ...(currentPreview?.branchNamingMode === "AI" &&
+              generatedName.trim()
+                ? { branchName: generatedName }
+                : {}),
+            }),
     };
     try {
       setError(null);
@@ -214,10 +283,11 @@ export function WorktreeBranchForm({
 
   const submitDisabled =
     busy ||
+    generating ||
     !baseBranch ||
     (mode === "NEW" && !branchName.trim()) ||
     (mode === "EXISTING" && !existingBranch) ||
-    (mode === "TICKET" && (!preview || previewLoading));
+    (mode === "TICKET" && (!currentPreview || previewLoading));
 
   return (
     <form className="space-y-4" onSubmit={(event) => void submit(event)}>
@@ -232,9 +302,15 @@ export function WorktreeBranchForm({
           value={mode}
         >
           <TabsList className="grid w-full grid-cols-3">
-            <TabsTrigger value="NEW">{t("newBranch")}</TabsTrigger>
-            <TabsTrigger value="EXISTING">{t("existingBranch")}</TabsTrigger>
-            <TabsTrigger value="TICKET">{t("fromTicket")}</TabsTrigger>
+            <TabsTrigger disabled={busy || generating} value="NEW">
+              {t("newBranch")}
+            </TabsTrigger>
+            <TabsTrigger disabled={busy || generating} value="EXISTING">
+              {t("existingBranch")}
+            </TabsTrigger>
+            <TabsTrigger disabled={busy || generating} value="TICKET">
+              {t("fromTicket")}
+            </TabsTrigger>
           </TabsList>
         </Tabs>
       )}
@@ -277,6 +353,7 @@ export function WorktreeBranchForm({
             </Label>
             <Input
               autoComplete="off"
+              disabled={busy || generating}
               id={`${id}-ticket`}
               onChange={(event) => {
                 setTicketKey(event.target.value);
@@ -294,19 +371,53 @@ export function WorktreeBranchForm({
               <Spinner /> {t("loadingTicketBranch")}
             </p>
           )}
-          {preview && (
+          {currentPreview && (
             <Item variant="muted">
               <ItemContent>
                 <ItemTitle className="w-full flex-wrap">
-                  <span>{preview.ticketKey}</span>
-                  {preview.ticketType && (
-                    <Badge variant="secondary">{preview.ticketType}</Badge>
+                  <span>{currentPreview.ticketKey}</span>
+                  {currentPreview.ticketType && (
+                    <Badge variant="secondary">
+                      {currentPreview.ticketType}
+                    </Badge>
                   )}
                 </ItemTitle>
-                <ItemDescription>{preview.ticketTitle}</ItemDescription>
-                <ItemDescription className="break-all font-mono text-xs text-foreground">
-                  {preview.branchName}
-                </ItemDescription>
+                <ItemDescription>{currentPreview.ticketTitle}</ItemDescription>
+                {currentPreview.branchNamingMode === "AI" ? (
+                  <div className="space-y-2 pt-2">
+                    <Label htmlFor={`${id}-generated-branch`}>
+                      {t("branchName")}
+                    </Label>
+                    <Input
+                      autoComplete="off"
+                      disabled={busy || generating}
+                      id={`${id}-generated-branch`}
+                      onChange={(event) => setGeneratedName(event.target.value)}
+                      value={generatedName}
+                      placeholder={t("aiBranchPlaceholder")}
+                    />
+                    <p className="text-xs text-muted-foreground">
+                      {t("aiBranchSubmitHelp")}
+                    </p>
+                    <Button
+                      disabled={busy || generating}
+                      onClick={() => void generate()}
+                      type="button"
+                      variant="outline"
+                    >
+                      {generating && <Spinner />}
+                      {generating
+                        ? t("generatingBranchName")
+                        : generatedName
+                          ? t("regenerateBranchName")
+                          : t("generateBranchName")}
+                    </Button>
+                  </div>
+                ) : (
+                  <ItemDescription className="break-all font-mono text-xs text-foreground">
+                    {currentPreview.branchName}
+                  </ItemDescription>
+                )}
               </ItemContent>
             </Item>
           )}

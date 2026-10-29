@@ -2714,6 +2714,11 @@ model JiraProject {
   completedStatusIdsJson String       @default("[]")
   excludedStatusIdsJson  String       @default("[]")
   doneStatusId           String?
+  branchNamingMode       String       @default("JAVASCRIPT")
+  branchNamingProvider   String?
+  branchNamingModel      String?
+  branchNamingEffort     String?
+  branchNamingPrompt     String?
   branchNamingScript     String?
   createdAt              DateTime     @default(now())
   updatedAt              DateTime     @updatedAt

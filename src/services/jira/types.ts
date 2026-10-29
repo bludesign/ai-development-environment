@@ -22,7 +22,15 @@ export type JiraSourceView = {
   position: number;
 };
 
-export type JiraProjectView = {
+export type JiraBranchNamingSettings = {
+  branchNamingMode: "JAVASCRIPT" | "AI";
+  branchNamingProvider: string | null;
+  branchNamingModel: string | null;
+  branchNamingEffort: string | null;
+  branchNamingPrompt: string;
+};
+
+export type JiraProjectView = JiraBranchNamingSettings & {
   id: string;
   jiraId: string;
   key: string;
@@ -38,7 +46,8 @@ export type JiraProjectView = {
   sources: JiraSourceView[];
 };
 
-export type JiraBranchTicket = {
+export type JiraBranchTicket = JiraBranchNamingSettings & {
+  ticketDescription: string;
   ticketKey: string;
   ticketTitle: string;
   ticketType: string | null;

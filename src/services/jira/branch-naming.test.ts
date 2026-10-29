@@ -1,3 +1,9 @@
+import {
+  jiraBranchNameCandidates,
+  renderJiraBranchPrompt,
+  validateJiraBranchPrompt,
+  validGitBranchName,
+} from "@ai-development-environment/agent-contract/worktrees";
 import { describe, expect, test } from "vitest";
 
 import {
@@ -61,5 +67,38 @@ describe("Jira branch naming", () => {
         },
       ),
     ).rejects.toThrow(/process.*not defined/);
+  });
+});
+
+describe("AI branch prompts and collisions", () => {
+  test("expands only supported tokens once and preserves ticket text literally", () => {
+    expect(
+      renderJiraBranchPrompt(
+        "{{ticket.key}}: {{ ticket.title }} / {{ticket.description}}",
+        {
+          key: "APP-1",
+          type: "Story",
+          title: "{{ticket.description}} $&",
+          description: "",
+        },
+      ),
+    ).toBe("APP-1: {{ticket.description}} $& / ");
+    expect(() => validateJiraBranchPrompt("{{ticket.password}}")).toThrow(
+      "Unsupported",
+    );
+    expect(() => validateJiraBranchPrompt("{{ticket.key")).toThrow("syntax");
+  });
+  test("validates output and creates 100 unique valid candidates at the Git length limit", () => {
+    const candidates = jiraBranchNameCandidates("feature/" + "a".repeat(247));
+    expect(candidates).toHaveLength(100);
+    expect(new Set(candidates).size).toBe(100);
+    expect(candidates.every(validGitBranchName)).toBe(true);
+    expect(candidates[99]).toMatch(/-100$/);
+    expect(() => jiraBranchNameCandidates("Here is a branch")).toThrow(
+      "Invalid",
+    );
+    expect(() => jiraBranchNameCandidates("```\nfeature/APP-1\n```")).toThrow(
+      "Invalid",
+    );
   });
 });

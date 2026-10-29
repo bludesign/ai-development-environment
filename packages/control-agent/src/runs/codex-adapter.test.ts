@@ -32,6 +32,29 @@ describe("Codex app-server", () => {
     });
   });
 
+  test("isolated generation explicitly disables inherited MCP servers, plugins and apps", () => {
+    const config = codexRunConfig(
+      { run: { webSearchEnabled: false } as never, textOnly: true },
+      {
+        mcp_servers: { external: { command: "example", enabled: true } },
+        plugins: { "plugin@example": { enabled: true } },
+        apps: { external: { enabled: true } },
+      },
+    );
+    expect(config.mcp_servers).toEqual({ external: { enabled: false } });
+    expect(config.plugins).toEqual({ "plugin@example": { enabled: false } });
+    expect(config.apps).toEqual({
+      _default: { enabled: false },
+      external: { enabled: false },
+    });
+    expect(config.web_search).toBe("disabled");
+    expect(config.features).toMatchObject({
+      shell_tool: false,
+      apply_patch_freeform: false,
+      apps: false,
+    });
+  });
+
   test("uses the bundled catalog instead of refreshing through model proxies", () => {
     expect(codexAppServerArgs("/tmp/models.json")).toEqual([
       "app-server",

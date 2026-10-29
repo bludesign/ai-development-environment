@@ -82,7 +82,10 @@ export type ProviderCallbacks = {
 };
 
 export type ProviderStartInput = {
-  run: RunRecord;
+  run: Pick<RunRecord, "kind" | "model" | "effort" | "webSearchEnabled"> & {
+    worktree: { id?: string; folder: string; branch?: string | null } | null;
+  };
+  textOnly?: boolean;
   prompt: string;
   attachments: StagedAttachment[];
   resumeNativeId?: string;

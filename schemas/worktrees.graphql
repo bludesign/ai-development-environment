@@ -1146,3 +1146,56 @@ extend type Subscription {
     worktreeId: ID!
   ): WorktreeActivity!
 }
+
+"Ticket metadata, loaded without invoking a model."
+type WorktreeTicketBranchContext {
+  "Normalized Jira issue key."
+  ticketKey: ID!
+  "Ticket summary from Jira."
+  ticketTitle: String!
+  "Issue type when available."
+  ticketType: String
+  "Managed Jira project key."
+  projectKey: String!
+  "Project naming strategy."
+  branchNamingMode: JiraBranchNamingMode!
+  "JavaScript preview; null until generated for AI projects."
+  branchName: String
+}
+
+"An AI-generated branch name, checked against recorded repository branches."
+type WorktreeTicketBranchResult {
+  "Generated and validated Git branch name."
+  branchName: String!
+}
+
+"Target and idempotency key for asynchronous AI branch generation."
+input GenerateWorktreeTicketBranchInput {
+  "Codebase whose agent should execute generation."
+  codebaseId: ID!
+  "Existing worktree for a branch change; omit for a new worktree."
+  worktreeId: ID
+  "Normalized Jira issue key."
+  ticketKey: ID!
+  "Client-generated idempotency identifier; reuse when retrying the same request."
+  requestId: ID!
+}
+
+extend type Query {
+  "Load ticket metadata and naming mode without AI generation."
+  worktreeTicketBranchContext(
+    "Ticket and codebase to preview without AI."
+    input: PreviewWorktreeTicketBranchInput!
+  ): WorktreeTicketBranchContext!
+}
+extend type Mutation {
+  "Generate a ticket branch name asynchronously on the selected codebase's agent."
+  generateWorktreeTicketBranch(
+    "Target ticket, agent scope, and idempotency key."
+    input: GenerateWorktreeTicketBranchInput!
+  ): AgentJob!
+}
+extend type AgentJob {
+  "Typed output of a successful Jira branch generation job."
+  worktreeTicketBranchResult: WorktreeTicketBranchResult
+}

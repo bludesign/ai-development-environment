@@ -161,6 +161,27 @@ function createJiraAdministrationGroup(
         annotations: WRITE_ANNOTATIONS,
       }),
       serviceTool({
+        name: "update_jira_project_ai_branch_naming",
+        title: "Update Jira project AI branch naming",
+        description:
+          "Choose JavaScript or AI naming, provider, model, effort, and a prompt with ticket tokens for a Jira project.",
+        inputSchema: z.object({
+          projectId: z.string().min(1),
+          mode: z.enum(["JAVASCRIPT", "AI"]),
+          provider: z
+            .enum(["CODEX", "CLAUDE", "OPENCODE"])
+            .nullable()
+            .optional(),
+          model: z.string().nullable().optional(),
+          effort: z.string().nullable().optional(),
+          prompt: z.string().nullable().optional(),
+        }),
+        service,
+        method: "updateProjectAiBranchNaming",
+        resultKey: "projects",
+        annotations: WRITE_ANNOTATIONS,
+      }),
+      serviceTool({
         name: "update_jira_project_branch_naming",
         title: "Update Jira project branch naming",
         description:
@@ -467,7 +488,8 @@ export function createJiraToolGroup(
       serviceTool({
         name: "resolve_jira_branch",
         title: "Resolve Jira branch",
-        description: "Resolve the configured branch name for a Jira ticket.",
+        description:
+          "Get ticket metadata and its project naming configuration. Use get_worktree_ticket_branch_context for a preview or generate_worktree_ticket_branch to queue AI generation on a codebase agent.",
         inputSchema: issueInput,
         service,
         method: "branchTicket",

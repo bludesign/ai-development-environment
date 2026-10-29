@@ -114,6 +114,7 @@ const preview = {
   ticketTitle: "Add searchable worktrees",
   ticketType: "Story",
   projectKey: "APP",
+  branchNamingMode: "JAVASCRIPT",
   branchName: "feature/APP-123-add-searchable-worktrees",
 };
 
@@ -122,8 +123,8 @@ function mockRequests() {
     if (query.includes("TicketWorktreeDestinations")) {
       return { worktreeOverview: overview } as never;
     }
-    if (query.includes("PreviewWorktreeTicketBranch")) {
-      return { previewWorktreeTicketBranch: preview } as never;
+    if (query.includes("WorktreeTicketBranchContext")) {
+      return { worktreeTicketBranchContext: preview } as never;
     }
     if (query.includes("CreateTicketWorktree")) {
       return { createWorktree: { id: "job-create" } } as never;

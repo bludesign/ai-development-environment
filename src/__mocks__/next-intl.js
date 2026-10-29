@@ -372,8 +372,15 @@ const mockTranslations = {
     selectCompletedStatuses: "Select completed statuses",
     saveDisplaySettings: "Save display settings",
     branchNaming: "Branch naming",
+    aiBranchNaming: "AI branch naming",
+    aiBranchNamingHelp:
+      "Use the selected model on the codebase’s agent instead of the JavaScript function. Both configurations are saved independently.",
+    aiBranchPrompt: "Branch naming prompt",
+    aiBranchTokensHelp:
+      "Insert ticket tokens to choose what the model receives. The description is fetched and shared only when its token is used.",
+    saveAiBranchNaming: "Save naming mode and AI settings",
     branchNamingDescription:
-      "This function is used when a worktree branch is created from a ticket in this project.",
+      "Choose how branches are named for tickets in this project.",
     branchNamingFunction: "JavaScript branch naming function",
     branchNamingFunctionHelp:
       "Receives ticketKey, type, title, and alreadyTaken.",
@@ -1340,6 +1347,12 @@ const mockTranslations = {
     fromTicket: "From ticket",
     branchName: "Branch name",
     ticketKey: "Ticket key",
+    aiBranchPlaceholder: "Generate a name or leave empty",
+    aiBranchSubmitHelp:
+      "Generate and edit a name, or submit to generate it automatically.",
+    generateBranchName: "Generate branch name",
+    generatingBranchName: "Generating branch name…",
+    regenerateBranchName: "Regenerate branch name",
     loadingTicketBranch: "Loading ticket and branch name…",
     selectExistingBranch: "Select an existing branch",
     selectBaseBranch: "Select a base branch",
