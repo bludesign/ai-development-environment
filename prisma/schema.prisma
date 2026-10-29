@@ -427,6 +427,7 @@ model CodebaseRepository {
   description                String                          @default("")
   jiraBranchRegex            String?
   keepBaseBranchUpToDate     Boolean                         @default(true)
+  hasConfiguredCodeReviewers Boolean                         @default(false)
   createdAt                  DateTime                        @default(now())
   updatedAt                  DateTime                        @updatedAt
   codebases                  Codebase[]
@@ -443,8 +444,38 @@ model CodebaseRepository {
   preparations               CodebaseRepositoryPreparation[]
   externalPipelineActions    ExternalPipelineActions?
   externalPipelineExecutions ExternalPipelineExecution[]
+  reviewerPools              RepositoryReviewerPool[]
 
   @@index([name])
+}
+
+model RepositoryReviewerPool {
+  id                 String                     @id
+  repositoryId       String
+  key                String
+  provider           String
+  repositoryIdentity String
+  discoveryRef       String                     @default("")
+  name               String
+  kind               String
+  createdAt          DateTime                   @default(now())
+  updatedAt          DateTime                   @updatedAt
+  repository         CodebaseRepository         @relation(fields: [repositoryId], references: [id], onDelete: Cascade)
+  members            RepositoryReviewerMember[]
+
+  @@unique([repositoryId, key])
+}
+
+model RepositoryReviewerMember {
+  poolId    String
+  userId    String
+  username  String
+  name      String
+  avatarUrl String?
+  url       String?
+  pool      RepositoryReviewerPool @relation(fields: [poolId], references: [id], onDelete: Cascade)
+
+  @@id([poolId, userId])
 }
 
 model CodebaseRepositoryPreparation {

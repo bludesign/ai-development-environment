@@ -172,6 +172,20 @@ type JiraAvailableProject {
   avatarUrl: String
 }
 
+"A page of Jira projects visible to the configured user."
+type JiraAvailableProjectPage {
+  "Projects returned by this page."
+  items: [JiraAvailableProject!]!
+  "Total number of projects matching the search."
+  total: Int!
+  "Offset of this page in the matching Jira projects."
+  startAt: Int!
+  "Maximum number of projects Jira returns per page."
+  maxResults: Int!
+  "Offset to request next, or null when there are no more results."
+  nextStartAt: Int
+}
+
 "A summary of Jira ticket."
 type JiraTicketSummary {
   "Stable identifier for this Jira ticket summary."
@@ -880,6 +894,15 @@ extend type Query {
   ): JiraWebhookDeliveryPage!
   "Returns Jira available projects."
   jiraAvailableProjects: [JiraAvailableProject!]!
+  "Searches Jira project names and keys without loading every project."
+  jiraAvailableProjectPage(
+    "Case-insensitive literal search for a project key or name."
+    search: String
+    "Offset of the first matching project to return."
+    startAt: Int = 0
+    "Maximum projects per page, capped at 100."
+    maxResults: Int = 25
+  ): JiraAvailableProjectPage!
   "Returns Jira projects."
   jiraProjects: [JiraProject!]!
   "Returns Jira project statuses."

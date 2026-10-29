@@ -68,6 +68,14 @@ export type JiraAvailableProject = {
   avatarUrl: string | null;
 };
 
+export type JiraAvailableProjectPage = {
+  items: JiraAvailableProject[];
+  total: number;
+  startAt: number;
+  maxResults: number;
+  nextStartAt: number | null;
+};
+
 export type JiraCacheMeta = {
   source: JiraCallSource;
   stale: boolean;

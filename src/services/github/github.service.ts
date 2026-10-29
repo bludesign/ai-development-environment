@@ -93,6 +93,7 @@ import {
   type GitHubRestOperation,
 } from "./github-rest-operations";
 import {
+  assertGitHubRestRateLimitAvailable,
   listGitHubRateLimitSnapshots,
   observeGitHubRateLimit,
   type GitHubRateLimitMetadata,
@@ -102,6 +103,8 @@ const SETTINGS_ID = "default";
 const GITHUB_APP_SETTINGS_ID = "default";
 const SEARCH_RESULT_LIMIT = 1000;
 const ACTIONS_PAGE_SIZE = 25;
+const REST_DISCOVERY_CACHE_TTL_MS = 5 * 60_000;
+const REST_CACHE_MAX_ENTRIES = 500;
 const PULL_REQUEST_PAGE_SIZE = 25;
 export const MIN_ACTIONS_NOTIFICATION_POLL_INTERVAL_SECONDS = 30;
 export const MAX_ACTIONS_NOTIFICATION_POLL_INTERVAL_SECONDS = 3_600;
@@ -1155,9 +1158,17 @@ export class GitHubService {
   private autoRetryService: GitHubAutoRetryService | null = null;
   private readonly cache = new GitHubCache();
   private readonly graphqlFetchedAt = new WeakMap<object, Date>();
-  // Only concurrent GETs share work. Settled results retain their existing
-  // freshness policy, and credential material never appears in the map key.
   private readonly restRequests = new Map<string, Promise<unknown>>();
+  // Only sidebar counts and repository reviewer settings opt into this cache.
+  // Merge checks and worktree reviewer validation always retain live reads.
+  private readonly restReadCache = new Map<
+    string,
+    {
+      expiresAt: number;
+      data?: unknown;
+      error?: GitHubRequestError;
+    }
+  >();
 
   constructor(
     startAutoRetry = false,
@@ -1251,13 +1262,13 @@ export class GitHubService {
         this.livePatGraphql<T>(prepared.liveQuery, variables, token),
     };
     if (prepared.kind === "mutation") {
-      this.restRequests.clear();
+      this.invalidateRestRequests();
       try {
         const result = await this.cache.mutation<T>(requestInput);
         publishIntegrationConfiguration("github");
         return result;
       } finally {
-        this.restRequests.clear();
+        this.invalidateRestRequests();
       }
     }
     const result = await this.cache.query({ ...requestInput, ...options });
@@ -1339,9 +1350,30 @@ export class GitHubService {
     operation: GitHubRestOperation,
     token: string,
     requestSource: GitHubRequestSource,
+    options: { cache?: boolean; force?: boolean; cacheNotFound?: boolean } = {},
   ): Promise<T> {
     const key = `${createHash("sha256").update(token).digest("hex")}\0${url}`;
-    const existing = this.restRequests.get(key);
+    const cached =
+      options.cache && !options.force ? this.restReadCache.get(key) : undefined;
+    if (cached && cached.expiresAt > Date.now()) {
+      await this.cache
+        .recordRestCall({
+          authentication: "PAT",
+          method: "GET",
+          endpoint: url,
+          operation,
+          requestSource,
+          durationMs: 0,
+          statusCode: cached.error?.statusCode ?? 200,
+          error: cached.error?.message,
+          cached: true,
+        })
+        .catch(() => undefined);
+      if (cached.error) throw cached.error;
+      return cached.data as T;
+    }
+    this.restReadCache.delete(key);
+    const existing = !options.force && this.restRequests.get(key);
     if (existing) return existing as Promise<T>;
     const request = this.liveRestRequest<T>(
       url,
@@ -1351,10 +1383,46 @@ export class GitHubService {
     );
     this.restRequests.set(key, request);
     try {
-      return await request;
+      const data = await request;
+      if (options.cache && this.restRequests.get(key) === request) {
+        this.rememberRestRead(key, { data });
+      }
+      return data;
+    } catch (error) {
+      if (
+        options.cache &&
+        options.cacheNotFound &&
+        error instanceof GitHubRequestError &&
+        error.statusCode === 404 &&
+        this.restRequests.get(key) === request
+      ) {
+        this.rememberRestRead(key, { error });
+      }
+      throw error;
     } finally {
       if (this.restRequests.get(key) === request) this.restRequests.delete(key);
     }
+  }
+
+  private rememberRestRead(
+    key: string,
+    result: { data?: unknown; error?: GitHubRequestError },
+  ): void {
+    for (const [cachedKey, entry] of this.restReadCache) {
+      if (entry.expiresAt <= Date.now()) this.restReadCache.delete(cachedKey);
+    }
+    if (this.restReadCache.size >= REST_CACHE_MAX_ENTRIES) {
+      this.restReadCache.delete(this.restReadCache.keys().next().value!);
+    }
+    this.restReadCache.set(key, {
+      ...result,
+      expiresAt: Date.now() + REST_DISCOVERY_CACHE_TTL_MS,
+    });
+  }
+
+  private invalidateRestRequests(): void {
+    this.restRequests.clear();
+    this.restReadCache.clear();
   }
 
   private async liveRestRequest<T>(
@@ -1363,6 +1431,7 @@ export class GitHubService {
     token: string,
     requestSource: GitHubRequestSource,
   ): Promise<T> {
+    await assertGitHubRestRateLimitAvailable("PAT");
     const startedAt = Date.now();
     const record = (input: {
       statusCode?: number | null;
@@ -1423,7 +1492,7 @@ export class GitHubService {
         error: sanitized,
         rateLimit,
       });
-      throw new Error(sanitized);
+      throw new GitHubRequestError(sanitized, response.status, rateLimit);
     }
     await record({ statusCode: response.status, rateLimit });
     return body as T;
@@ -1436,7 +1505,7 @@ export class GitHubService {
     requestSource: GitHubRequestSource,
     body: Record<string, unknown>,
   ): Promise<void> {
-    this.restRequests.clear();
+    this.invalidateRestRequests();
     try {
       return await this.liveRestMutation(
         url,
@@ -1446,7 +1515,7 @@ export class GitHubService {
         body,
       );
     } finally {
-      this.restRequests.clear();
+      this.invalidateRestRequests();
     }
   }
 
@@ -1457,6 +1526,7 @@ export class GitHubService {
     requestSource: GitHubRequestSource,
     body: Record<string, unknown>,
   ): Promise<void> {
+    await assertGitHubRestRateLimitAvailable("PAT");
     const startedAt = Date.now();
     const record = (input: {
       statusCode?: number | null;
@@ -1557,11 +1627,11 @@ export class GitHubService {
     };
     let data: T;
     if (prepared.kind === "mutation") {
-      this.restRequests.clear();
+      this.invalidateRestRequests();
       try {
         data = await this.cache.mutation(requestInput);
       } finally {
-        this.restRequests.clear();
+        this.invalidateRestRequests();
       }
     } else {
       const result = await this.cache.query({ ...requestInput, ...options });
@@ -1801,7 +1871,7 @@ export class GitHubService {
         },
       );
       await this.cache.clearForCredentialChange("PAT");
-      this.restRequests.clear();
+      this.invalidateRestRequests();
     } else {
       await prisma.gitHubSettings.upsert({
         where: { id: SETTINGS_ID },
@@ -1825,7 +1895,7 @@ export class GitHubService {
       },
     );
     await this.cache.clearForCredentialChange("PAT");
-    this.restRequests.clear();
+    this.invalidateRestRequests();
     this.pollingConfigurationChanged();
     return this.getSettings();
   }
@@ -1885,11 +1955,11 @@ export class GitHubService {
   }
 
   async clearCache(): Promise<boolean> {
-    this.restRequests.clear();
+    this.invalidateRestRequests();
     try {
       return await this.cache.clear();
     } finally {
-      this.restRequests.clear();
+      this.invalidateRestRequests();
     }
   }
 
@@ -2452,7 +2522,7 @@ export class GitHubService {
         githubRequestId: verification.githubRequestId,
       });
       await this.cache.clearForCredentialChange("APP");
-      this.restRequests.clear();
+      this.invalidateRestRequests();
       this.notificationsConfigurationChanged?.();
       return this.getAppSettings();
     } catch (error) {
@@ -2588,7 +2658,7 @@ export class GitHubService {
     );
     clearGitHubAppTokenCache();
     await this.cache.clearForCredentialChange("APP");
-    this.restRequests.clear();
+    this.invalidateRestRequests();
     await this.audit(auditContext, {
       operation: "GITHUB_APP_SETTINGS_CLEAR",
       outcome: "SUCCESS",
@@ -2751,6 +2821,7 @@ export class GitHubService {
           GITHUB_REST_OPERATIONS.actions.listWorkflowRunsForRepo,
           token,
           "ACTIONS_PAGE",
+          { cache: true },
         );
         if (!Number.isSafeInteger(result.total_count) || result.total_count < 0)
           throw new Error(
@@ -6181,7 +6252,10 @@ export class GitHubService {
     number: number;
     reviewers?: string[] | null;
     teamReviewers?: string[] | null;
+    union?: boolean;
+    requestSource?: GitHubRequestSource;
   }): Promise<GitHubPullRequestDetail> {
+    const requestSource = input.requestSource ?? "WORKFLOW_AUTOMATION";
     const { owner, name } = normalizeGitHubRepositoryName(
       `${input.owner}/${input.name}`,
     );
@@ -6189,7 +6263,7 @@ export class GitHubService {
       owner,
       name,
       input.number,
-      "WORKFLOW_AUTOMATION",
+      requestSource,
     );
     if (!pullRequest) throw new Error("Pull request was not found");
     const reviewers = [
@@ -6214,7 +6288,7 @@ export class GitHubService {
         `query WorkflowReviewer($login: String!) { user(login: $login) { id } }`,
         { login },
         token,
-        { requestSource: "WORKFLOW_AUTOMATION" },
+        { requestSource },
       );
       if (!data.user) throw new Error(`GitHub user was not found: ${login}`);
       userIds.push(data.user.id);
@@ -6229,7 +6303,7 @@ export class GitHubService {
         }`,
         { organization: owner, slug },
         token,
-        { requestSource: "WORKFLOW_AUTOMATION" },
+        { requestSource },
       );
       const team = data.organization?.team;
       if (!team) throw new Error(`GitHub team was not found: ${slug}`);
@@ -6240,27 +6314,130 @@ export class GitHubService {
         $pullRequestId: ID!
         $userIds: [ID!]
         $teamIds: [ID!]
+        $union: Boolean
       ) {
         requestReviews(input: {
           pullRequestId: $pullRequestId
           userIds: $userIds
           teamIds: $teamIds
+          union: $union
         }) { pullRequest { id } }
       }`,
-      { pullRequestId: pullRequest.id, userIds, teamIds },
+      { pullRequestId: pullRequest.id, userIds, teamIds, union: input.union },
       token,
-      { requestSource: "WORKFLOW_AUTOMATION" },
+      { requestSource },
     );
     await this.clearCache();
     const detail = await this.pullRequest(
       owner,
       name,
       input.number,
-      "WORKFLOW_AUTOMATION",
+      requestSource,
     );
     if (!detail)
       throw new Error("The updated pull request could not be loaded");
     return detail;
+  }
+
+  /** Server-side reviewer discovery shares PAT handling, telemetry and rate limits. */
+  async reviewerRest<T>(
+    path: string,
+    worktree = false,
+    refresh = false,
+  ): Promise<T> {
+    const root = new URL(`${GITHUB_API_BASE_URL}/`);
+    const url = new URL(path.replace(/^\//, ""), root);
+    if (
+      !path.startsWith("/") ||
+      url.origin !== root.origin ||
+      !url.pathname.startsWith(root.pathname)
+    ) {
+      throw new Error(
+        "GitHub reviewer requests must stay within the configured API",
+      );
+    }
+    return this.restRequest<T>(
+      url.toString(),
+      GITHUB_REST_OPERATIONS.reviewers.discovery,
+      await this.requireToken(),
+      worktree ? "WORKTREES" : "CODEBASE_REPOSITORY",
+      {
+        cache: !worktree,
+        force: refresh || worktree,
+        cacheNotFound: /\/contents\/(?:\.github\/|docs\/)?CODEOWNERS$/.test(
+          url.pathname,
+        ),
+      },
+    );
+  }
+
+  async reviewerGraphql<T>(
+    query: string,
+    variables: Record<string, unknown>,
+    worktree = false,
+    refresh = false,
+  ): Promise<T> {
+    return this.request<T>(query, variables, await this.requireToken(), {
+      requestSource: worktree ? "WORKTREES" : "CODEBASE_REPOSITORY",
+      force: worktree || refresh,
+      allowStaleOnError: false,
+    });
+  }
+
+  /** Additive UI assignment returns after the write, without detail hydration. */
+  async addPullRequestReviewers(input: {
+    owner: string;
+    name: string;
+    number: number;
+    expectedId: string;
+    reviewers: Array<{ id: string; username: string }>;
+  }): Promise<void> {
+    const { owner, name } = normalizeGitHubRepositoryName(
+      `${input.owner}/${input.name}`,
+    );
+    const current = await this.reviewerRest<{
+      id: number;
+      node_id: string;
+      state: string;
+      merged?: boolean;
+    }>(
+      `/repos/${encodeURIComponent(owner)}/${encodeURIComponent(name)}/pulls/${input.number}`,
+      true,
+    );
+    if (
+      ![String(current.id), current.node_id].includes(input.expectedId) ||
+      current.state !== "open" ||
+      current.merged
+    ) {
+      throw new Error(
+        "The pull request changed or is no longer open. Refresh before assigning reviewers.",
+      );
+    }
+    const users = await mapIntegrationRequests(
+      input.reviewers,
+      async (person) => {
+        const user = await this.reviewerRest<{ id: number; node_id: string }>(
+          `/users/${encodeURIComponent(person.username)}`,
+          true,
+        );
+        if (String(user.id) !== person.id || !user.node_id)
+          throw new Error(
+            "A reviewer identity changed. Reload reviewer options before assigning.",
+          );
+        return user.node_id;
+      },
+    );
+    await this.request(
+      `mutation AssignWorktreeCodeReviewers($pullRequestId: ID!, $userIds: [ID!]!) {
+        requestReviews(input: { pullRequestId: $pullRequestId, userIds: $userIds, union: true }) { pullRequest { id } }
+      }`,
+      { pullRequestId: current.node_id, userIds: [...new Set(users)] },
+      await this.requireToken(),
+      { requestSource: "WORKTREES" },
+    );
+    // The external write succeeded. A cache maintenance failure must not invite
+    // a repeated request or be presented as an assignment failure.
+    await this.clearCache().catch(() => undefined);
   }
 
   async dispatchWorkflow(input: {

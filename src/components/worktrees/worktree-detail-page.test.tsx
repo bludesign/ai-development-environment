@@ -306,6 +306,29 @@ describe("WorktreeDetailPage", () => {
     subscriptions.mockReset();
   });
 
+  test.each([true, false])(
+    "uses server reviewer availability on an offline worktree: %s",
+    async (allowed) => {
+      const data = overview({ online: false });
+      data.agents[0]!.codebases[0]!.worktrees[0]!.canAssignReviewers = allowed;
+      request.mockImplementation(async (query) => {
+        if (query.includes("WorktreeDetailOverview"))
+          return { worktreeOverview: data } as never;
+        if (query.includes("InspectWorktree"))
+          return { inspectWorktree: initialDetail } as never;
+        throw new Error(`Unexpected query: ${query}`);
+      });
+      render(<WorktreeDetailPage worktreeId="worktree-1" />);
+      await screen.findByRole("button", { name: "Customize worktree" });
+      const assign = screen.queryByRole("button", { name: "Assign reviewers" });
+      if (allowed) {
+        expect(assign).not.toBeNull();
+        expect(assign!.hasAttribute("disabled")).toBe(false);
+      } else expect(assign).toBeNull();
+      expect(request.mock.calls[0]![0]).toContain("canAssignReviewers");
+    },
+  );
+
   test("copies file paths and commit details without expanding or navigating", async () => {
     const writeText = vi.fn().mockResolvedValue(undefined);
     const originalClipboard = Object.getOwnPropertyDescriptor(
@@ -337,9 +360,13 @@ describe("WorktreeDetailPage", () => {
 
     try {
       render(<WorktreeDetailPage worktreeId="worktree-1" />);
-      const change = await screen.findByRole("button", {
-        name: /src\/worktree-details\.tsx/,
-      });
+      const change = await screen.findByRole(
+        "button",
+        {
+          name: /src\/worktree-details\.tsx/,
+        },
+        { timeout: 5_000 },
+      );
       const branchChange = screen.getByRole("button", {
         name: /src\/branch-change\.ts/,
       });

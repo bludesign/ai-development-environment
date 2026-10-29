@@ -116,3 +116,30 @@ test("review values is an accessible disclosure and remains readable when choice
     ).disabled,
   ).toBe(true);
 });
+
+test("labels reviewer pools as Code reviewers and preserves the setting selection", () => {
+  const onToggle = vi.fn();
+  const reviewers: TransferItem = {
+    ...item,
+    key: "repository:app/setting/reviewerPools",
+    kind: "SETTING",
+    label: "reviewerPools",
+    targetId: null,
+    candidates: [],
+    current: [],
+    incoming: [],
+  };
+  render(
+    <TransferSelectionTree
+      items={[reviewers]}
+      excludedKeys={[]}
+      includedKeys={[]}
+      onToggle={onToggle}
+    />,
+  );
+  const checkbox = screen.getByRole("checkbox", { name: "Code reviewers" });
+  expect(checkbox.getAttribute("data-state")).toBe("checked");
+  expect(screen.queryByText("reviewerPools")).toBeNull();
+  fireEvent.click(checkbox);
+  expect(onToggle).toHaveBeenCalledWith(reviewers, false);
+});

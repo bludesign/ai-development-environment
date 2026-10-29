@@ -22,7 +22,7 @@ import {
   Monitor,
 } from "lucide-react";
 import { useLocale, useTranslations } from "next-intl";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useId, useMemo, useRef, useState } from "react";
 
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
@@ -298,6 +298,7 @@ function StartBuildDialog({
     useState<ServerUrlKind | null>(null);
   const t = useTranslations("builds");
   const locale = useLocale();
+  const deviceId = useId();
   const [project, setProject] = useState<IosAppProject | null>(null);
   const [agent, setAgent] = useState<BuildAgent | null>(null);
   const [priorBuilds, setPriorBuilds] = useState<PriorBuildForTesting[]>([]);
@@ -322,6 +323,7 @@ function StartBuildDialog({
     Record<string, BuildSourceObservation>
   >({});
   const [destinations, setDestinations] = useState<BuildDestination[]>([]);
+  const [destinationsLoading, setDestinationsLoading] = useState(false);
   const [destinationType, setDestinationType] =
     useState<BuildDestination["type"]>("SIMULATOR");
   const [destinationId, setDestinationId] = useState("");
@@ -531,6 +533,7 @@ function StartBuildDialog({
     selectedAction: BuildAction,
   ) => {
     const request = ++destinationRequest.current;
+    setDestinationsLoading(true);
     const cacheKey = `${worktreeId}:${JSON.stringify(selectionInput(selected))}:${selectedAction}`;
     const cached = destinationCache.get(cacheKey);
     if (cached && cached.expiresAt <= Date.now()) {
@@ -591,6 +594,10 @@ function StartBuildDialog({
         );
       } else {
         setError(message);
+      }
+    } finally {
+      if (request === destinationRequest.current) {
+        setDestinationsLoading(false);
       }
     }
   };
@@ -919,7 +926,15 @@ function StartBuildDialog({
                       </Tabs>
                     </div>
                     <div className="space-y-2">
-                      <Label>{t("device")}</Label>
+                      <div className="flex items-center gap-2">
+                        <Label htmlFor={deviceId}>{t("device")}</Label>
+                        {destinationsLoading && (
+                          <Spinner
+                            aria-hidden={false}
+                            aria-label={t("loadingDevices")}
+                          />
+                        )}
+                      </div>
                       <Select
                         disabled={!filteredDestinations.length}
                         onValueChange={(value) => {
@@ -928,7 +943,10 @@ function StartBuildDialog({
                         }}
                         value={destinationId}
                       >
-                        <SelectTrigger>
+                        <SelectTrigger
+                          aria-busy={destinationsLoading}
+                          id={deviceId}
+                        >
                           <SelectValue placeholder={t("selectDevice")} />
                         </SelectTrigger>
                         <SelectContent>

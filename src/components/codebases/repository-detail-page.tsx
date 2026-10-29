@@ -12,6 +12,7 @@ import { FormEvent, useCallback, useEffect, useRef, useState } from "react";
 import { AGENT_FIELDS, JOB_FIELDS } from "@/components/agents/graphql-fields";
 import { IosProjectSection } from "@/components/builds/ios-project-section";
 import { RepositoryTransferActions } from "@/components/repository-transfer/transfer-actions";
+import { CodeReviewersSettings } from "@/components/reviewers/code-reviewers-settings";
 import { AutoRetryDialog } from "@/components/github/auto-retry-dialog";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
@@ -72,6 +73,7 @@ export function RepositoryDetailPage({
   const t = useTranslations("codebases");
   const buildsT = useTranslations("builds");
   const externalT = useTranslations("externalPipelineActions");
+  const reviewersT = useTranslations("reviewers");
   const externalTitle = externalT("title");
   const [repository, setRepository] = useState<CodebaseRepository | null>(null);
   useBreadcrumbLabel(
@@ -334,6 +336,7 @@ export function RepositoryDetailPage({
         <TabsList className="flex min-w-0 w-full justify-start gap-1 overflow-x-auto overflow-y-hidden p-1 group-data-horizontal/tabs:h-auto">
           {[
             { value: "details", label: t("repositoryDetails") },
+            { value: "reviewers", label: reviewersT("title") },
             { value: "preparations", label: t("preparations") },
             { value: "external-pipelines", label: externalTitle },
             { value: "ios-app", label: buildsT("iosApp") },
@@ -451,6 +454,9 @@ export function RepositoryDetailPage({
               </CardContent>
             </Card>
           </form>
+        </TabsContent>
+        <TabsContent value="reviewers">
+          <CodeReviewersSettings repositoryId={repositoryId} />
         </TabsContent>
         <TabsContent value="preparations">
           {repository.preparations ? (

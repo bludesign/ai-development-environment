@@ -7,7 +7,7 @@ type Read = {
   operation: string;
   source: string;
   query: { status: string; page: number; per_page: number };
-  force: boolean;
+  force?: boolean;
   allowStaleOnError: boolean;
 };
 type Response = { data: unknown[]; headers: Headers };
@@ -53,10 +53,10 @@ describe("GitLab active pipeline counts", () => {
       expect(input).toMatchObject({
         operation: "GitLabPipelines",
         source: "PIPELINES_PAGE",
-        force: true,
         allowStaleOnError: false,
         query: { page: 1, per_page: 1 },
       });
+      expect(input.force).not.toBe(true);
       expect(totals).toHaveProperty(input.query.status);
       return {
         data: [],

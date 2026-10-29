@@ -662,6 +662,33 @@ describe("GitHubCache", () => {
     expect(state.entries).toHaveLength(0);
   });
 
+  test("records REST cache reuse as avoided requests instead of spent quota", async () => {
+    const cache = new GitHubCache();
+    await cache.recordRestCall({
+      authentication: "PAT",
+      method: "GET",
+      endpoint:
+        "https://api.github.com/repos/acme/widgets/contents/CODEOWNERS?ref=main",
+      operation: GITHUB_REST_OPERATIONS.reviewers.discovery,
+      requestSource: "CODEBASE_REPOSITORY",
+      durationMs: 0,
+      statusCode: 404,
+      error: "Not Found",
+      cached: true,
+    });
+    expect(state.calls[0]).toMatchObject({
+      source: "CACHE",
+      pointCost: 0,
+      pointsAvoided: 1,
+    });
+    expect((await cache.metrics()).windows[0]).toMatchObject({
+      live: 0,
+      cache: 1,
+      pointsUsed: 0,
+      pointsAvoided: 1,
+    });
+  });
+
   test("validates TTL and reports rolling point metrics", async () => {
     const cache = new GitHubCache();
     await expect(

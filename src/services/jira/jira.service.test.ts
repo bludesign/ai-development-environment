@@ -39,6 +39,157 @@ function sourceLoaderHarness(service: JiraService): SourceLoaderHarness {
   return runtime;
 }
 
+describe("Jira project discovery", () => {
+  function harness() {
+    const service = new JiraService();
+    const runtime = sourceLoaderHarness(service);
+    const searchProjects = vi.fn();
+    runtime.getClients = vi.fn().mockResolvedValue({
+      cloud: { projects: { searchProjects } },
+    });
+    return { service, runtime, searchProjects };
+  }
+
+  test("searches one page and advances by raw records before validation", async () => {
+    const { service, runtime, searchProjects } = harness();
+    searchProjects.mockResolvedValue({
+      startAt: 50,
+      maxResults: 3,
+      total: 500,
+      isLast: false,
+      values: [
+        {
+          id: "10001",
+          key: "OPS",
+          name: "Operations",
+          avatarUrls: { "48x48": "https://example.com/ops.png" },
+        },
+        { id: "incomplete", key: "MISSING_NAME" },
+        {
+          id: "10002",
+          key: "PLAT",
+          name: "Platform Operations",
+          avatarUrls: { "32x32": "https://example.com/platform.png" },
+        },
+      ],
+    });
+
+    await expect(
+      service.availableProjectsPage("  Operations  ", 50, 3),
+    ).resolves.toEqual({
+      items: [
+        {
+          jiraId: "10001",
+          key: "OPS",
+          name: "Operations",
+          avatarUrl: "https://example.com/ops.png",
+        },
+        {
+          jiraId: "10002",
+          key: "PLAT",
+          name: "Platform Operations",
+          avatarUrl: "https://example.com/platform.png",
+        },
+      ],
+      total: 500,
+      startAt: 50,
+      maxResults: 3,
+      nextStartAt: 53,
+    });
+    expect(searchProjects).toHaveBeenCalledExactlyOnceWith({
+      query: "Operations",
+      startAt: 50,
+      maxResults: 3,
+      orderBy: "name",
+    });
+    expect(runtime.cachedCall).toHaveBeenCalledWith(
+      expect.objectContaining({
+        operation: "PROJECTS",
+        params: { query: "Operations", startAt: 50, maxResults: 3 },
+      }),
+    );
+  });
+
+  test("defaults and bounds discovery page sizes and offsets", async () => {
+    const { service, searchProjects } = harness();
+    searchProjects.mockResolvedValue({ values: [], total: 0, isLast: true });
+
+    await service.availableProjectsPage();
+    expect(searchProjects).toHaveBeenLastCalledWith({
+      startAt: 0,
+      maxResults: 25,
+      orderBy: "name",
+    });
+    await service.availableProjectsPage("   ", -10, 200);
+    expect(searchProjects).toHaveBeenLastCalledWith({
+      startAt: 0,
+      maxResults: 100,
+      orderBy: "name",
+    });
+    await service.availableProjectsPage(null, 3, 0);
+    expect(searchProjects).toHaveBeenLastCalledWith({
+      startAt: 3,
+      maxResults: 1,
+      orderBy: "name",
+    });
+  });
+
+  test.each([
+    { values: [], startAt: 25, total: 100, isLast: false },
+    {
+      values: [{ id: "1", key: "OPS", name: "Operations" }],
+      startAt: 25,
+      total: 100,
+      isLast: true,
+    },
+    {
+      values: [{ id: "1", key: "OPS", name: "Operations" }],
+      startAt: 25,
+      total: 26,
+    },
+  ])("terminates discovery at the end of a page: %j", async (page) => {
+    const { service, searchProjects } = harness();
+    searchProjects.mockResolvedValue(page);
+
+    await expect(
+      service.availableProjectsPage(null, 25),
+    ).resolves.toMatchObject({
+      nextStartAt: null,
+    });
+  });
+
+  test("preserves full project discovery and stops despite filtered records", async () => {
+    const { service, searchProjects } = harness();
+    searchProjects
+      .mockResolvedValueOnce({
+        values: [
+          { id: "1", key: "APP", name: "Application" },
+          { id: "invalid" },
+        ],
+        startAt: 0,
+        total: 3,
+        isLast: false,
+      })
+      .mockResolvedValueOnce({
+        values: [{ id: "3", key: "OPS", name: "Operations" }],
+        startAt: 2,
+        total: 3,
+        isLast: true,
+      });
+
+    await expect(service.availableProjects()).resolves.toEqual([
+      { jiraId: "1", key: "APP", name: "Application", avatarUrl: null },
+      { jiraId: "3", key: "OPS", name: "Operations", avatarUrl: null },
+    ]);
+    expect(searchProjects).toHaveBeenCalledTimes(2);
+    expect(searchProjects).toHaveBeenNthCalledWith(2, {
+      startAt: 2,
+      maxResults: 100,
+      orderBy: "name",
+    });
+  });
+});
+
 describe("Jira service input helpers", () => {
   test("normalizes one Jira Cloud origin", () => {
     expect(normalizeJiraSiteUrl(" https://example.atlassian.net/path ")).toBe(

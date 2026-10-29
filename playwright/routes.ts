@@ -1,4 +1,5 @@
 import { ids } from "../scripts/mock-data/ids";
+import type { ReviewerCapture } from "./reviewers";
 
 /**
  * Every page route in the app, paired with a stable screenshot name. Detail routes reference
@@ -46,6 +47,7 @@ export type RouteEntry = {
   mcpImportReview?: boolean;
   mcpAiPrompt?: boolean;
   mcpAuthorizationReview?: boolean;
+  reviewerCapture?: ReviewerCapture;
 };
 
 export const routes: RouteEntry[] = [
@@ -131,6 +133,28 @@ export const routes: RouteEntry[] = [
   {
     name: "repository-detail",
     path: `/dashboard/codebases/repositories/${ids.repositories.web}`,
+  },
+  {
+    name: "repository-code-reviewers-github",
+    path: `/dashboard/codebases/repositories/${ids.repositories.web}`,
+    reviewerCapture: { provider: "GITHUB", view: "settings" },
+  },
+  {
+    name: "repository-code-reviewers-gitlab",
+    path: "/dashboard/codebases/repositories/repo-acme-gitlab-platform",
+    reviewerCapture: { provider: "GITLAB", view: "settings" },
+  },
+  {
+    name: "worktree-assign-reviewers-github",
+    path: `/dashboard/worktrees/${ids.worktrees.webFeature}`,
+    reviewerCapture: { provider: "GITHUB", view: "assignment" },
+    stubWorktree: true,
+  },
+  {
+    name: "worktree-assign-reviewers-gitlab",
+    path: `/dashboard/worktrees/${ids.worktrees.gitlabRetry}`,
+    reviewerCapture: { provider: "GITLAB", view: "assignment" },
+    stubWorktree: true,
   },
   {
     name: "repository-external-actions",

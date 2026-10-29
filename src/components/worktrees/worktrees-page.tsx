@@ -67,6 +67,7 @@ import { WorkflowQuickActions } from "@/components/workflows/workflow-quick-acti
 import { CommandQuickActions } from "@/components/commands/command-quick-actions";
 import { PipelineMenu } from "@/components/github/pipeline-menu";
 import { PullRequestMenu } from "@/components/github/pull-request-menu";
+import { AssignReviewersButton } from "@/components/reviewers/assign-reviewers-button";
 import { MergeRequestMenu } from "@/components/gitlab/merge-request-menu";
 import { gitLabCommentsHref } from "@/components/gitlab/merge-request-links";
 import {
@@ -3627,6 +3628,10 @@ export function PrimaryWorktreeActions(
     agent.connectionStatus !== "ONLINE";
   return (
     <div className="flex flex-wrap gap-2">
+      <AssignReviewersButton
+        onCompleted={props.onCompleted}
+        worktree={worktree}
+      />
       <StartBuildButton
         buildSettingsHref={
           buildDisabledForSettings

@@ -12,6 +12,7 @@ const state = vi.hoisted(() => ({
   },
   calls: [] as Array<Record<string, unknown>>,
   currentUser: vi.fn(),
+  searchProjects: vi.fn(),
   linkEvents: [] as string[],
   issueLinks: [] as Array<{ cacheEntryId: string; issueKey: string }>,
   ticketUpserts: [] as Array<Record<string, unknown>>,
@@ -108,7 +109,8 @@ vi.mock("@/data/prisma-client", () => ({
         }),
       },
       jiraCacheEntry: {
-        findUnique: async () => state.entry,
+        findUnique: async ({ where }: { where: { cacheKey: string } }) =>
+          state.entry?.cacheKey === where.cacheKey ? state.entry : null,
         upsert: async ({
           create,
           update,
@@ -116,9 +118,10 @@ vi.mock("@/data/prisma-client", () => ({
           create: typeof state.entry;
           update: Partial<NonNullable<typeof state.entry>>;
         }) => {
-          state.entry = state.entry
-            ? { ...state.entry, ...update }
-            : (create as NonNullable<typeof state.entry>);
+          state.entry =
+            state.entry && state.entry.cacheKey === create?.cacheKey
+              ? { ...state.entry, ...update }
+              : (create as NonNullable<typeof state.entry>);
           return state.entry;
         },
       },
@@ -177,6 +180,7 @@ beforeEach(() => {
   state.entry = null;
   state.calls = [];
   state.currentUser.mockReset();
+  state.searchProjects.mockReset();
   state.linkEvents = [];
   state.issueLinks = [];
   state.ticketUpserts = [];
@@ -187,11 +191,42 @@ beforeEach(() => {
   state.createClient.mockReturnValue(client);
   state.createCloudClient.mockReturnValue({
     myself: { getCurrentUser: state.currentUser },
+    projects: { searchProjects: state.searchProjects },
   });
   state.createAgileClient.mockReturnValue({});
 });
 
 describe("Jira SDK cache wrapper", () => {
+  test("caches normalized project search separately from other searches and pages", async () => {
+    const service = new JiraService();
+    state.searchProjects.mockImplementation(
+      async ({ query, startAt, maxResults }) => ({
+        values: [{ id: `${query}-${startAt}`, key: query, name: query }],
+        startAt,
+        maxResults,
+        total: 100,
+        isLast: false,
+      }),
+    );
+
+    await service.availableProjectsPage(" OPS ");
+    await service.availableProjectsPage("OPS");
+    expect(state.searchProjects).toHaveBeenCalledTimes(1);
+    expect(state.calls.map((call) => call.source)).toEqual(["LIVE", "CACHE"]);
+
+    await service.availableProjectsPage("APP");
+    expect(state.searchProjects).toHaveBeenCalledTimes(2);
+    await service.availableProjectsPage("APP", 25);
+    expect(state.searchProjects).toHaveBeenCalledTimes(3);
+    await service.availableProjectsPage("APP", 25, 50);
+    expect(state.searchProjects).toHaveBeenCalledTimes(4);
+    expect(JSON.parse(state.entry!.paramsJson)).toEqual({
+      query: "APP",
+      startAt: 25,
+      maxResults: 50,
+    });
+  });
+
   test("stores a live response and serves the next call from SQLite", async () => {
     const service = invoker();
     const fetcher = vi.fn().mockResolvedValue({ values: [1, 2] });

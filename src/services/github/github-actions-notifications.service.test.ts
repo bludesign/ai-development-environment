@@ -1,12 +1,15 @@
 import { createHmac } from "node:crypto";
 
-import { beforeEach, describe, expect, test, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
+
+import { clearGitHubRestRateLimitPause } from "./github-rate-limit";
 
 import { GITHUB_REST_OPERATIONS } from "./github-rest-operations";
 
 const mocks = vi.hoisted(() => ({
   getPrismaClient: vi.fn(),
   recordRestCall: vi.fn(async () => undefined),
+  rateLimit: { findUnique: vi.fn(), upsert: vi.fn() },
 }));
 
 vi.mock("@/data/prisma-client", () => ({
@@ -174,6 +177,7 @@ function setup(
     },
   };
   const prisma = {
+    gitHubRateLimitSnapshot: mocks.rateLimit,
     codebaseRepository: {
       findMany: vi.fn(async () => [
         {
@@ -301,10 +305,18 @@ function webhookInput(
 }
 
 beforeEach(() => {
+  clearGitHubRestRateLimitPause("PAT");
+  mocks.rateLimit.findUnique.mockReset().mockResolvedValue(null);
+  mocks.rateLimit.upsert.mockReset().mockResolvedValue({});
   mocks.getPrismaClient.mockReset();
   mocks.recordRestCall.mockClear();
   vi.restoreAllMocks();
   vi.unstubAllGlobals();
+});
+
+afterEach(() => {
+  vi.restoreAllMocks();
+  clearGitHubRestRateLimitPause("PAT");
 });
 
 describe("GitHub Actions webhook notifications", () => {
@@ -686,6 +698,40 @@ describe("GitHub Actions webhook notifications", () => {
 });
 
 describe("GitHub Actions fallback polling", () => {
+  test("pauses outbound polling after observed REST exhaustion and resumes when the window resets", async () => {
+    const { service } = setup();
+    const now = Date.now();
+    const reset = Math.floor(now / 1000) + 60;
+    const clock = vi.spyOn(Date, "now").mockReturnValue(now);
+    const fetchMock = vi
+      .fn()
+      .mockImplementationOnce(
+        async () =>
+          new Response(JSON.stringify({ message: "API rate limit exceeded" }), {
+            status: 403,
+            headers: {
+              "x-ratelimit-limit": "5000",
+              "x-ratelimit-remaining": "0",
+              "x-ratelimit-used": "5000",
+              "x-ratelimit-reset": String(reset),
+              "x-ratelimit-resource": "core",
+            },
+          }),
+      )
+      .mockImplementation(async () => githubResponse([]));
+    vi.stubGlobal("fetch", fetchMock);
+    const poll = () =>
+      (
+        service as unknown as { pollRepositories(): Promise<unknown> }
+      ).pollRepositories();
+    await expect(poll()).rejects.toThrow("API rate limit exceeded");
+    await expect(poll()).rejects.toThrow("REST rate limit is exhausted");
+    expect(fetchMock).toHaveBeenCalledOnce();
+    clock.mockReturnValue(reset * 1000);
+    await expect(poll()).resolves.toMatchObject({ failures: 0 });
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
   test("keeps completed PAT-polled runs non-retryable without a GitHub App", async () => {
     const { service, pipelineStatus } = setup(
       undefined,

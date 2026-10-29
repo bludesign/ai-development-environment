@@ -25,6 +25,9 @@ export const GITHUB_REST_OPERATIONS = {
     listPullRequestsAssociatedWithCommit:
       "repos.listPullRequestsAssociatedWithCommit",
   },
+  reviewers: {
+    discovery: "reviewers.discovery",
+  },
   users: {
     listEmailsForAuthenticatedUser: "users.listEmailsForAuthenticatedUser",
   },

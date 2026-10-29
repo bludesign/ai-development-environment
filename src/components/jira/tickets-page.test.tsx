@@ -136,7 +136,15 @@ describe("JiraTicketsPage", () => {
         return { refreshJiraSource: board } as never;
       if (query.includes("JiraTicketBoard"))
         return { jiraTicketBoard: board } as never;
-      return { jiraAvailableProjects: [] } as never;
+      return {
+        jiraAvailableProjectPage: {
+          items: [],
+          total: 0,
+          startAt: 0,
+          maxResults: 25,
+          nextStartAt: null,
+        },
+      } as never;
     });
 
     render(<JiraTicketsPage />);
@@ -435,8 +443,16 @@ describe("JiraTicketsPage", () => {
     requestMock.mockImplementation(async (query) => {
       if (query.includes("query JiraProjects"))
         return { jiraProjects: projects } as never;
-      if (query.includes("jiraAvailableProjects"))
-        return { jiraAvailableProjects: [] } as never;
+      if (query.includes("jiraAvailableProjectPage"))
+        return {
+          jiraAvailableProjectPage: {
+            items: [],
+            total: 0,
+            startAt: 0,
+            maxResults: 25,
+            nextStartAt: null,
+          },
+        } as never;
       if (query.includes("JiraProjectStatuses"))
         return {
           jiraProjectStatuses: [
@@ -524,6 +540,89 @@ describe("JiraTicketsPage", () => {
     );
   });
 
+  test("cancels project discovery on manager close and fetches a fresh page on reopen", async () => {
+    const project = {
+      id: "project-1",
+      jiraId: "10000",
+      key: "APP",
+      name: "Application",
+      avatarUrl: null,
+      position: 0,
+      ticketAssignmentFilter: "ALL",
+      hideCompletedTickets: false,
+      completedStatusIds: [],
+      sources: [],
+    };
+    let resolveOld: (value: unknown) => void = () => {};
+    let pageRequests = 0;
+    requestMock.mockImplementation(async (query) => {
+      if (query.includes("query JiraProjects"))
+        return { jiraProjects: [project] } as never;
+      if (query.includes("JiraProjectStatuses"))
+        return { jiraProjectStatuses: [] } as never;
+      if (query.includes("jiraAvailableProjectPage")) {
+        pageRequests += 1;
+        if (pageRequests === 1)
+          return new Promise((resolve) => {
+            resolveOld = resolve;
+          }) as never;
+        return {
+          jiraAvailableProjectPage: {
+            items: [],
+            total: 0,
+            startAt: 0,
+            maxResults: 25,
+            nextStartAt: null,
+          },
+        } as never;
+      }
+      throw new Error(`Unexpected query: ${query}`);
+    });
+
+    render(<JiraTicketsPage />);
+    await screen.findByRole("tab", { name: "APP" });
+    expect(pageRequests).toBe(0);
+    fireEvent.click(screen.getByRole("button", { name: "Manage" }));
+    expect(
+      screen.getByRole("status", { name: "Loading Jira projects…" }),
+    ).toBeDefined();
+    await waitFor(() => expect(pageRequests).toBe(1));
+    const signal = requestMock.mock.calls.find(([query]) =>
+      query.includes("jiraAvailableProjectPage"),
+    )?.[2]?.signal;
+    fireEvent.click(screen.getByRole("button", { name: "Done" }));
+    expect(signal?.aborted).toBe(true);
+    fireEvent.click(screen.getByRole("button", { name: "Manage" }));
+    await waitFor(() => expect(pageRequests).toBe(2));
+    await act(async () =>
+      resolveOld({
+        jiraAvailableProjectPage: {
+          items: [
+            {
+              jiraId: "old",
+              key: "OLD",
+              name: "Stale project",
+              avatarUrl: null,
+            },
+          ],
+          total: 1,
+          startAt: 0,
+          maxResults: 25,
+          nextStartAt: null,
+        },
+      }),
+    );
+    fireEvent.click(
+      screen.getByRole("combobox", { name: "Available Jira projects" }),
+    );
+    expect(
+      await screen.findByText("No matching projects available to add."),
+    ).toBeDefined();
+    expect(
+      screen.queryByRole("option", { name: "OLD · Stale project" }),
+    ).toBeNull();
+  });
+
   test("selects and adds an available Jira project", async () => {
     const existingProject = {
       id: "project-1",
@@ -548,16 +647,22 @@ describe("JiraTicketsPage", () => {
     requestMock.mockImplementation(async (query) => {
       if (query.includes("query JiraProjects"))
         return { jiraProjects: [existingProject] } as never;
-      if (query.includes("jiraAvailableProjects"))
+      if (query.includes("jiraAvailableProjectPage"))
         return {
-          jiraAvailableProjects: [
-            {
-              jiraId: addedProject.jiraId,
-              key: addedProject.key,
-              name: addedProject.name,
-              avatarUrl: null,
-            },
-          ],
+          jiraAvailableProjectPage: {
+            items: [
+              {
+                jiraId: addedProject.jiraId,
+                key: addedProject.key,
+                name: addedProject.name,
+                avatarUrl: null,
+              },
+            ],
+            total: 1,
+            startAt: 0,
+            maxResults: 25,
+            nextStartAt: null,
+          },
         } as never;
       if (query.includes("AddJiraProject"))
         return { addJiraProject: [existingProject, addedProject] } as never;
@@ -569,7 +674,12 @@ describe("JiraTicketsPage", () => {
     render(<JiraTicketsPage />);
     await screen.findByRole("tab", { name: "APP" });
     fireEvent.click(screen.getByRole("button", { name: "Manage" }));
-    await chooseSelectOption("Available Jira projects", "OPS · Operations");
+    fireEvent.click(
+      screen.getByRole("combobox", { name: "Available Jira projects" }),
+    );
+    fireEvent.click(
+      await screen.findByRole("option", { name: "OPS · Operations" }),
+    );
     fireEvent.click(screen.getByRole("button", { name: "Add project" }));
 
     await waitFor(() =>
@@ -578,6 +688,16 @@ describe("JiraTicketsPage", () => {
         { jiraId: "10001" },
       ),
     );
+    expect(
+      screen.getByRole("combobox", { name: "Available Jira projects" })
+        .textContent,
+    ).toContain("Select a project");
+    fireEvent.click(
+      screen.getByRole("combobox", { name: "Available Jira projects" }),
+    );
+    expect(
+      screen.queryByRole("option", { name: "OPS · Operations" }),
+    ).toBeNull();
   });
 });
 

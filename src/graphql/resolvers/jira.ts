@@ -68,6 +68,26 @@ export const createJiraResolvers = (
           requireControlPlane(context);
           return jiraService.availableProjects();
         },
+        jiraAvailableProjectPage: (
+          _root: unknown,
+          {
+            search,
+            startAt,
+            maxResults,
+          }: {
+            search?: string | null;
+            startAt?: number | null;
+            maxResults?: number | null;
+          },
+          context: GraphQLContext,
+        ) => {
+          requireControlPlane(context);
+          return jiraService.availableProjectsPage(
+            search,
+            startAt ?? 0,
+            maxResults ?? 25,
+          );
+        },
         jiraProjects: (
           _root: unknown,
           _args: unknown,

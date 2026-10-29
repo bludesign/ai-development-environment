@@ -1257,6 +1257,38 @@ export function registerWorktreesPageTests(
         ).toBe("/ai/drafts/new?kind=plan&worktree=worktree-1");
       });
 
+      test.each([
+        { layout: "cards", allowed: true },
+        { layout: "table", allowed: true },
+        { layout: "cards", allowed: false },
+        { layout: "table", allowed: false },
+      ])(
+        "shows reviewer assignment in $layout only when allowed: $allowed",
+        async ({ layout, allowed }) => {
+          const response = (await request("query Fixture")) as unknown as {
+            worktreeOverview: WorktreeOverview;
+          };
+          response.worktreeOverview.agents[0]!.codebases[0]!.worktrees[0]!.canAssignReviewers =
+            allowed;
+          response.worktreeOverview.agents[0]!.agent.connectionStatus =
+            "OFFLINE";
+          request.mockClear();
+          request.mockResolvedValue(response);
+          window.localStorage.setItem("worktrees-layout", layout);
+
+          render(<WorktreesPage />);
+          await screen.findByText("feature/AIDE-24");
+          const assign = screen.queryByRole("button", {
+            name: "Assign reviewers",
+          });
+          if (allowed) {
+            expect(assign).not.toBeNull();
+            expect(assign!.hasAttribute("disabled")).toBe(false);
+          } else expect(assign).toBeNull();
+          expect(request.mock.calls[0]![0]).toContain("canAssignReviewers");
+        },
+      );
+
       test("does not link to a new run from an unavailable worktree", async () => {
         const response = (await request("query Fixture")) as unknown as {
           worktreeOverview: WorktreeOverview;

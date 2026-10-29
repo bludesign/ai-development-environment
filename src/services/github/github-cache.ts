@@ -4,7 +4,10 @@ import { createHash, randomUUID } from "node:crypto";
 
 import { getPrismaClient } from "@/data/prisma-client";
 
-import type { GitHubRateLimitMetadata } from "./github-rate-limit";
+import {
+  clearGitHubRestRateLimitPause,
+  type GitHubRateLimitMetadata,
+} from "./github-rate-limit";
 import type { GitHubRestOperation } from "./github-rest-operations";
 import type {
   GitHubApiCallView,
@@ -549,6 +552,7 @@ export class GitHubCache {
     statusCode?: number | null;
     error?: string | null;
     rateLimit?: GitHubRateLimitMetadata | null;
+    cached?: boolean;
   }): Promise<void> {
     let path = input.endpoint;
     let variables: Record<string, unknown> = {};
@@ -571,11 +575,12 @@ export class GitHubCache {
       requestSource: input.requestSource,
       requestSummary: `${input.method.toUpperCase()} ${path}`,
       variables,
-      source: input.error ? "ERROR" : "LIVE",
+      source: input.cached ? "CACHE" : input.error ? "ERROR" : "LIVE",
       durationMs: input.durationMs,
       statusCode: input.statusCode,
       error: input.error,
-      pointCost: 1,
+      pointCost: input.cached ? 0 : 1,
+      pointsAvoided: input.cached ? 1 : 0,
       rateLimit: input.rateLimit,
     });
   }
@@ -640,6 +645,7 @@ export class GitHubCache {
     await prisma.gitHubRateLimitSnapshot.deleteMany({
       where: { authentication },
     });
+    clearGitHubRestRateLimitPause(authentication);
     return true;
   }
 

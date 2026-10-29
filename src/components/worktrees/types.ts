@@ -80,6 +80,7 @@ export type WorktreeAutoMerge = {
 
 export type Worktree = {
   id: string;
+  canAssignReviewers?: boolean;
   codebaseId: string;
   gitDirectory: string;
   folder: string;

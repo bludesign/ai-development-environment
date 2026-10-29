@@ -120,6 +120,7 @@ export const repositoryFields = [
   "description",
   "jiraBranchRegex",
   "keepBaseBranchUpToDate",
+  "reviewerPools",
 ] as const;
 
 export function parseTransferPackage(raw: unknown): TransferPackage {
