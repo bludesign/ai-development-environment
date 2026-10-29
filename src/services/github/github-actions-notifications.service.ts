@@ -1,5 +1,4 @@
 import "server-only";
-import { publishIntegrationConfiguration } from "@/services/integration-configuration-events";
 
 import { createHmac, randomUUID, timingSafeEqual } from "node:crypto";
 
@@ -19,6 +18,15 @@ import type { PollingService } from "@/services/polling";
 import type { WorkflowEventsService } from "@/services/workflows/workflow-events.service";
 
 import { GitHubCache } from "./github-cache";
+import { GitHubWorkflowRunCache } from "./github-workflow-run-cache";
+import {
+  GitHubActionsInventory,
+  githubWebhookCoverageKey,
+} from "./github-actions-inventory";
+import {
+  agentEventBus,
+  GITHUB_REQUEST_CHANGED_TOPIC,
+} from "@/services/agent-control";
 import { GITHUB_API_BASE_URL } from "./github-endpoints";
 import {
   assertGitHubRestRateLimitAvailable,
@@ -64,6 +72,7 @@ type WorkflowRun = {
   pullRequests: Array<{ number: number; url: string | null }>;
   url: string;
   updatedAt: Date;
+  observedAt?: Date;
   repositoryGithubId: string | null;
   repositoryNameWithOwner: string;
   repositoryUrl: string;
@@ -206,6 +215,8 @@ export class GitHubActionsNotificationsService {
     private readonly workflowEvents?: WorkflowEventsService,
     private readonly cache = new GitHubCache(),
     private readonly pipelineStatus = new GitHubPipelineStatusService(),
+    private readonly workflowRunCache = new GitHubWorkflowRunCache(),
+    private readonly actionsInventory = new GitHubActionsInventory(),
   ) {
     this.polling.register({
       id: OPERATION_ID,
@@ -792,6 +803,7 @@ export class GitHubActionsNotificationsService {
   }
 
   configurationChanged(): void {
+    this.workflowRunCache.clear();
     if (this.running) {
       this.rerunRequested = true;
       return;
@@ -908,54 +920,76 @@ export class GitHubActionsNotificationsService {
   ): Promise<WorkflowRun[]> {
     const runs: WorkflowRun[] = [];
     for (let page = 1; ; page += 1) {
-      await assertGitHubRestRateLimitAvailable("PAT");
       const url = `${GITHUB_API_BASE_URL}/repos/${encodeURIComponent(target.owner)}/${encodeURIComponent(target.repository)}/actions/runs?per_page=${GITHUB_RUNS_PAGE_SIZE}&page=${page}`;
-      const startedAt = Date.now();
-      const record = (input: {
-        statusCode?: number | null;
-        error?: string | null;
-        rateLimit?: GitHubRateLimitMetadata | null;
-      }) =>
-        this.cache
+      const result = await this.workflowRunCache.read(token, url, async () => {
+        await assertGitHubRestRateLimitAvailable("PAT");
+        const startedAt = Date.now();
+        const record = (input: {
+          statusCode?: number | null;
+          error?: string | null;
+          rateLimit?: GitHubRateLimitMetadata | null;
+        }) =>
+          this.cache
+            .recordRestCall({
+              authentication: "PAT",
+              method: "GET",
+              endpoint: url,
+              operation: GITHUB_REST_OPERATIONS.actions.listWorkflowRunsForRepo,
+              requestSource: "ACTIONS_NOTIFICATIONS",
+              durationMs: Date.now() - startedAt,
+              ...input,
+            })
+            .catch(() => undefined);
+        let response: Response;
+        try {
+          response = await fetch(url, {
+            headers: {
+              accept: "application/vnd.github+json",
+              authorization: `Bearer ${token}`,
+              "user-agent": "ai-development-environment",
+              "x-github-api-version": "2022-11-28",
+            },
+            cache: "no-store",
+          });
+        } catch (error) {
+          const message =
+            error instanceof Error ? error.message : String(error);
+          await record({ error: message });
+          throw error;
+        }
+        const rateLimit = await observeGitHubRateLimit("PAT", response);
+        const body = (await response.json().catch(() => null)) as {
+          total_count?: number;
+          workflow_runs?: Array<Record<string, unknown>>;
+          message?: string;
+        } | null;
+        if (!response.ok || !Array.isArray(body?.workflow_runs)) {
+          const error =
+            body?.message ||
+            `GitHub returned HTTP ${response.status} while polling ${target.owner}/${target.repository}`;
+          await record({ statusCode: response.status, error, rateLimit });
+          throw new Error(error);
+        }
+        await record({ statusCode: response.status, rateLimit });
+        return body as {
+          total_count?: number;
+          workflow_runs: Array<Record<string, unknown>>;
+        };
+      });
+      if (result.cached)
+        await this.cache
           .recordRestCall({
             authentication: "PAT",
             method: "GET",
             endpoint: url,
             operation: GITHUB_REST_OPERATIONS.actions.listWorkflowRunsForRepo,
             requestSource: "ACTIONS_NOTIFICATIONS",
-            durationMs: Date.now() - startedAt,
-            ...input,
+            durationMs: 0,
+            statusCode: 200,
+            cached: true,
           })
           .catch(() => undefined);
-      let response: Response;
-      try {
-        response = await fetch(url, {
-          headers: {
-            accept: "application/vnd.github+json",
-            authorization: `Bearer ${token}`,
-            "user-agent": "ai-development-environment",
-            "x-github-api-version": "2022-11-28",
-          },
-          cache: "no-store",
-        });
-      } catch (error) {
-        const message = error instanceof Error ? error.message : String(error);
-        await record({ error: message });
-        throw error;
-      }
-      const rateLimit = await observeGitHubRateLimit("PAT", response);
-      const body = (await response.json().catch(() => null)) as {
-        workflow_runs?: Array<Record<string, unknown>>;
-        message?: string;
-      } | null;
-      if (!response.ok || !Array.isArray(body?.workflow_runs)) {
-        const error =
-          body?.message ||
-          `GitHub returned HTTP ${response.status} while polling ${target.owner}/${target.repository}`;
-        await record({ statusCode: response.status, error, rateLimit });
-        throw new Error(error);
-      }
-      await record({ statusCode: response.status, rateLimit });
+      const body = result.data;
       const pageRuns = body.workflow_runs.flatMap((run) => {
         const id = positiveInteger(run.id);
         const workflowId = positiveInteger(run.workflow_id);
@@ -986,6 +1020,7 @@ export class GitHubActionsNotificationsService {
             pullRequests: workflowPullRequests(run.pull_requests),
             url: text(run.html_url) ?? "",
             updatedAt,
+            observedAt: result.fetchedAt,
             repositoryGithubId: text(repository?.node_id),
             repositoryNameWithOwner:
               text(repository?.full_name) ??
@@ -1043,6 +1078,15 @@ export class GitHubActionsNotificationsService {
         },
       },
     });
+    if (
+      existing?.notificationObservedAt &&
+      existing.githubUpdatedAt instanceof Date &&
+      (existing.githubUpdatedAt > run.updatedAt ||
+        (existing.githubUpdatedAt.getTime() === run.updatedAt.getTime() &&
+          existing.status === "completed" &&
+          run.status !== "completed"))
+    )
+      return null;
     await transaction.gitHubWorkflowRunObservation.upsert({
       where: {
         codebaseRepositoryId_workflowRunId_runAttempt: {
@@ -1061,6 +1105,7 @@ export class GitHubActionsNotificationsService {
         conclusion: run.conclusion,
         githubUpdatedAt: run.updatedAt,
         source,
+        notificationObservedAt: now,
         lastObservedAt: now,
       },
       update: {
@@ -1069,10 +1114,11 @@ export class GitHubActionsNotificationsService {
         conclusion: run.conclusion,
         githubUpdatedAt: run.updatedAt,
         source,
+        notificationObservedAt: now,
         lastObservedAt: now,
       },
     });
-    const isNewTerminalTransition = existing
+    const isNewTerminalTransition = existing?.notificationObservedAt
       ? existing.status !== "completed" ||
         existing.conclusion !== run.conclusion
       : shouldNotifyNewRun;
@@ -1178,6 +1224,7 @@ export class GitHubActionsNotificationsService {
       notifications.forEach((notification) =>
         this.notifications.created(notification),
       );
+      await this.actionsInventory.observe(target.id, runs, "POLL");
       await Promise.allSettled(
         runs.flatMap((run) => [
           this.observePipelineRun(target, run, "REST", appConfigured),
@@ -1241,7 +1288,7 @@ export class GitHubActionsNotificationsService {
     const prisma = await getPrismaClient();
     await Promise.all([
       prisma.gitHubWorkflowRunObservation.deleteMany({
-        where: { lastObservedAt: { lt: before } },
+        where: { lastObservedAt: { lt: before }, countedActive: false },
       }),
       prisma.gitHubWebhookDelivery.deleteMany({
         where: { receivedAt: { lt: before } },
@@ -1337,6 +1384,28 @@ export class GitHubActionsNotificationsService {
           workflowRunId: positiveInteger(workflow?.id)?.toString() ?? null,
         },
       });
+      if (
+        input.event === "installation_repositories" ||
+        input.event === "installation"
+      ) {
+        const connection = await this.appConnection();
+        const installation = payload.installation as
+          Record<string, unknown> | undefined;
+        if (
+          !connection ||
+          String(positiveInteger(installation?.id) ?? "") !==
+            connection.installationId
+        ) {
+          await finish("IGNORED", "Installation does not match configured App");
+          return { outcome: "IGNORED", notificationCreated: false };
+        }
+        await prisma.gitHubActionsPollingState.updateMany({
+          data: { activeWebhookKey: null },
+        });
+        this.workflowRunCache.clear();
+        await finish("PROCESSED");
+        return { outcome: "PROCESSED", notificationCreated: false };
+      }
       if (input.event !== "workflow_run" || action !== "completed") {
         const [app, appConnection] = await Promise.all([
           prisma.gitHubAppSettings.findUnique({ where: { id: "default" } }),
@@ -1366,6 +1435,51 @@ export class GitHubActionsNotificationsService {
           return { outcome: "IGNORED", notificationCreated: false };
         }
         const event = input.event ?? "unknown";
+        if (event === "workflow_run")
+          this.workflowRunCache.invalidateRepository(fullName!);
+        let inventoryRecorded = false;
+        if (
+          event === "workflow_run" &&
+          ["requested", "in_progress"].includes(action ?? "")
+        ) {
+          const run = webhookWorkflowRun(target, repository, workflow);
+          if (!run)
+            throw new Error("GitHub workflow_run payload is incomplete");
+          await this.actionsInventory.observe(target.id, [run], "WEBHOOK");
+          inventoryRecorded = true;
+        } else if (
+          event === "workflow_job" &&
+          ["queued", "in_progress"].includes(action ?? "")
+        ) {
+          const job = payload.workflow_job as
+            Record<string, unknown> | undefined;
+          const runId = positiveInteger(job?.run_id);
+          const updated = text(job?.started_at) ?? text(job?.created_at);
+          if (runId && updated) {
+            await this.actionsInventory.observe(
+              target.id,
+              [
+                {
+                  id: String(runId),
+                  workflowId: String(runId),
+                  runAttempt: positiveInteger(job?.run_attempt) ?? 1,
+                  status: action!,
+                  updatedAt: new Date(updated),
+                },
+              ],
+              "WEBHOOK",
+            );
+            inventoryRecorded = true;
+          }
+        }
+        if (inventoryRecorded && app.verifiedAt)
+          await this.actionsInventory.markWebhookCoverage(
+            target.id,
+            githubWebhookCoverageKey(
+              appConnection.installationId,
+              app.verifiedAt,
+            ),
+          );
         const [pipelineRecorded, triggerRecorded] = await Promise.all([
           app.enhancedPipelineWebhooksEnabled
             ? this.observeEnhancedWebhook(target, event, action, payload)
@@ -1374,8 +1488,24 @@ export class GitHubActionsNotificationsService {
         ]);
         if (event.startsWith("pull_request") || event === "push")
           await this.cache.invalidatePullRequests();
-        publishIntegrationConfiguration("github");
-        const recorded = pipelineRecorded || triggerRecorded;
+        if (event.startsWith("pull_request")) {
+          const request = payload.pull_request as
+            Record<string, unknown> | undefined;
+          agentEventBus.publish(GITHUB_REQUEST_CHANGED_TOPIC, {
+            repositoryName: fullName,
+            number:
+              positiveInteger(request?.number) ??
+              positiveInteger(payload.number),
+            action,
+            event,
+            updatedAt: text(request?.updated_at),
+          });
+        }
+        const recorded =
+          inventoryRecorded ||
+          pipelineRecorded ||
+          triggerRecorded ||
+          event.startsWith("pull_request");
         await finish(recorded ? "PROCESSED" : "IGNORED");
         return {
           outcome: recorded ? "PROCESSED" : "IGNORED",
@@ -1413,6 +1543,7 @@ export class GitHubActionsNotificationsService {
         await finish("IGNORED", "Repository is not registered");
         return { outcome: "IGNORED", notificationCreated: false };
       }
+      this.workflowRunCache.invalidateRepository(fullName);
       const run = webhookWorkflowRun(target, repository, workflow);
       if (!run) throw new Error("GitHub workflow_run payload is incomplete");
       let notification: NotificationRecord | null = null;
@@ -1426,6 +1557,15 @@ export class GitHubActionsNotificationsService {
         );
       });
       this.notifications.created(notification);
+      await this.actionsInventory.observe(target.id, [run], "WEBHOOK");
+      if (app.verifiedAt)
+        await this.actionsInventory.markWebhookCoverage(
+          target.id,
+          githubWebhookCoverageKey(
+            appConnection.installationId,
+            app.verifiedAt,
+          ),
+        );
       await this.observePipelineRun(target, run, "WEBHOOK");
       await this.recordWorkflowRunEvent(target, run);
       await finish("PROCESSED");

@@ -1961,6 +1961,8 @@
       "PULL_REQUESTS_PAGE": "Pull requests page",
       "PULL_REQUEST_DETAILS": "Pull request details",
       "ACTIONS_PAGE": "Actions page",
+      "SIDEBAR_COUNTS": "Sidebar counts",
+      "ACTION_CENTER_REQUESTS": "Action Center requests",
       "WORKTREES": "Worktrees",
       "WORKTREE_PIPELINES": "Worktree pipelines",
       "WORKTREE_AUTOMATION": "Worktree automation",
@@ -3073,7 +3075,9 @@
     "steps": "Steps",
     "noSteps": "No steps have been reported for this job yet.",
     "loadMore": "Load more",
-    "loadingMore": "Loading more…"
+    "loadingMore": "Loading more…",
+    "loadMore": "Load more",
+    "moreHistory": "More history remains. Load another batch to find older matching runs."
   },
   "githubAutomation": {
     "autoRetry": "Auto Retry",

@@ -1961,6 +1961,8 @@
       "PULL_REQUESTS_PAGE": "Page des pull requests",
       "PULL_REQUEST_DETAILS": "Détails de la pull request",
       "ACTIONS_PAGE": "Page Actions",
+      "SIDEBAR_COUNTS": "Compteurs de la barre latérale",
+      "ACTION_CENTER_REQUESTS": "Demandes du centre d’actions",
       "WORKTREES": "Arbres de travail",
       "WORKTREE_PIPELINES": "Pipelines des arbres de travail",
       "WORKTREE_AUTOMATION": "Automatisation des arbres de travail",
@@ -3073,7 +3075,9 @@
     "steps": "Étapes",
     "noSteps": "Aucune étape n’a encore été signalée pour cette tâche.",
     "loadMore": "Charger plus",
-    "loadingMore": "Chargement…"
+    "loadingMore": "Chargement…",
+    "loadMore": "Charger plus",
+    "moreHistory": "Il reste de l’historique. Chargez un autre lot pour trouver les exécutions précédentes."
   },
   "githubAutomation": {
     "autoRetry": "Relance automatique",

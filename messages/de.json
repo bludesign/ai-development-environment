@@ -1961,6 +1961,8 @@
       "PULL_REQUESTS_PAGE": "Pull-Request-Seite",
       "PULL_REQUEST_DETAILS": "Pull-Request-Details",
       "ACTIONS_PAGE": "Actions-Seite",
+      "SIDEBAR_COUNTS": "Seitenleistenzähler",
+      "ACTION_CENTER_REQUESTS": "Anfragen im Aktionscenter",
       "WORKTREES": "Arbeitsbäume",
       "WORKTREE_PIPELINES": "Arbeitsbaum-Pipelines",
       "WORKTREE_AUTOMATION": "Arbeitsbaum-Automatisierung",
@@ -3073,7 +3075,9 @@
     "steps": "Schritte",
     "noSteps": "Für diesen Job wurden noch keine Schritte gemeldet.",
     "loadMore": "Mehr laden",
-    "loadingMore": "Weitere werden geladen…"
+    "loadingMore": "Weitere werden geladen…",
+    "loadMore": "Mehr laden",
+    "moreHistory": "Weiterer Verlauf ist vorhanden. Lade weitere ältere passende Ausführungen."
   },
   "githubAutomation": {
     "autoRetry": "Automatisch wiederholen",

@@ -3137,22 +3137,28 @@ model GitHubWebhookDelivery {
 }
 
 model GitHubWorkflowRunObservation {
-  id                   String             @id
-  codebaseRepositoryId String
-  workflowRunId        String
-  runAttempt           Int
-  workflowId           String
-  status               String
-  conclusion           String?
-  githubUpdatedAt      DateTime
-  source               String
-  notifiedAt           DateTime?
-  firstObservedAt      DateTime           @default(now())
-  lastObservedAt       DateTime
-  codebaseRepository   CodebaseRepository @relation(fields: [codebaseRepositoryId], references: [id], onDelete: Cascade)
+  id                     String             @id
+  codebaseRepositoryId   String
+  workflowRunId          String
+  runAttempt             Int
+  workflowId             String
+  status                 String
+  conclusion             String?
+  githubUpdatedAt        DateTime
+  source                 String
+  notifiedAt             DateTime?
+  notificationObservedAt DateTime?
+  firstObservedAt        DateTime           @default(now())
+  lastObservedAt         DateTime
+  countedActive          Boolean            @default(false)
+  activeStatus           String?
+  activeUpdatedAt        DateTime?
+  activeObservedAt       DateTime?
+  codebaseRepository     CodebaseRepository @relation(fields: [codebaseRepositoryId], references: [id], onDelete: Cascade)
 
   @@unique([codebaseRepositoryId, workflowRunId, runAttempt])
   @@index([codebaseRepositoryId, lastObservedAt])
+  @@index([codebaseRepositoryId, countedActive])
   @@index([lastObservedAt])
 }
 
@@ -3163,6 +3169,9 @@ model GitHubActionsPollingState {
   lastPollCompletedAt  DateTime?
   lastPollSucceededAt  DateTime?
   lastError            String?
+  activeReconciledAt   DateTime?
+  activeCredentialKey  String?
+  activeWebhookKey     String?
   createdAt            DateTime           @default(now())
   updatedAt            DateTime           @updatedAt
   codebaseRepository   CodebaseRepository @relation(fields: [codebaseRepositoryId], references: [id], onDelete: Cascade)

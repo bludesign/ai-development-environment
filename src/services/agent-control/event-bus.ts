@@ -118,6 +118,9 @@ export const POLLING_CHANGED_TOPIC = "polling.changed";
 export const DISK_SPACE_CHANGED_TOPIC = "disk-space.changed";
 export const ACTION_CENTER_CHANGED_TOPIC = "action-center.changed";
 export const SIDEBAR_STATUS_CHANGED_TOPIC = "sidebar-status.changed";
+export const GITHUB_ACTIONS_COUNT_CHANGED_TOPIC =
+  "github-actions-count.changed";
+export const GITHUB_REQUEST_CHANGED_TOPIC = "github-request.changed";
 export const CLI_HEALTH_CHANGED_TOPIC = "cli-health.changed";
 export const TAILSCALE_SERVE_CHANGED_TOPIC = "tailscale-serve.changed";
 export const tailscaleServeOperationChangedTopic = (operationId: string) =>

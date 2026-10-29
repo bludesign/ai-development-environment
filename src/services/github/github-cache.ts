@@ -620,6 +620,7 @@ export class GitHubCache {
             "GitHubPullRequestSearch",
             "GitHubPullRequestMergeOptions",
             "GitHubActionCenterApproval",
+            "GitHubActionCenterRequestStates",
           ],
         },
       },

@@ -54,18 +54,36 @@ describe("Action Center request discovery", () => {
   let github: ReturnType<typeof githubStub>;
   let gitlab: ReturnType<typeof gitlabStub>;
   function githubStub() {
+    const singleState = vi.fn().mockResolvedValue({
+      viewerHasApproved: false,
+      canMerge: true,
+      mergeBlockedReason: null,
+    });
     return {
+      actionCenterRequestStates: vi.fn(
+        async (prs: Array<{ id: string }>) =>
+          new Map(
+            await Promise.all(
+              prs.map(async (pr) => [pr.id, await singleState()] as const),
+            ),
+          ),
+      ),
       actionCenterIdentity: vi.fn().mockResolvedValue("alice"),
-      pullRequests: vi.fn().mockImplementation(async (scope: string) => ({
-        items: scope === "MINE" ? [request("mine")] : [request("review")],
-        hasNextPage: false,
-        endCursor: null,
-      })),
-      actionCenterRequestState: vi.fn().mockResolvedValue({
-        viewerHasApproved: false,
-        canMerge: true,
-        mergeBlockedReason: null,
-      }),
+      pullRequests: vi.fn().mockImplementation(
+        async (
+          scope: string,
+          _repository: string | null = null,
+          _options: {
+            createdAfter?: string | null;
+            reviewedByViewer?: boolean;
+          } = {},
+        ) => ({
+          items: scope === "MINE" ? [request("mine")] : [request("review")],
+          hasNextPage: false,
+          endCursor: null,
+        }),
+      ),
+      actionCenterRequestState: singleState,
     };
   }
   function gitlabStub() {
@@ -113,6 +131,87 @@ describe("Action Center request discovery", () => {
     vi.restoreAllMocks();
     vi.useRealTimers();
     await prisma.$disconnect();
+  });
+
+  test("keeps GitHub search cutoffs stable while enforcing the exact age boundary locally", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date("2026-10-29T12:00:00Z"));
+    github.pullRequests.mockResolvedValue({
+      items: [
+        request("old", { createdAt: "2026-09-29T11:59:59Z" }),
+        request("included", { createdAt: "2026-09-29T12:00:00Z" }),
+      ],
+      hasNextPage: false,
+      endCursor: null,
+    });
+    const index = service();
+    await index.refresh(["GITHUB"]);
+    expect(
+      (await prisma.actionCenterRequest.findMany()).map(
+        (row) => JSON.parse(row.payloadJson).id,
+      ),
+    ).toEqual(["included"]);
+    expect(github.actionCenterRequestStates).toHaveBeenCalledOnce();
+    expect(github.actionCenterRequestStates.mock.calls[0][0]).toHaveLength(1);
+    const firstCutoff = github.pullRequests.mock.calls[0][2].createdAfter;
+    vi.setSystemTime(new Date("2026-10-29T12:01:00Z"));
+    await index.refresh(["GITHUB"]);
+    expect(github.pullRequests.mock.calls.at(-1)![2].createdAfter).toBe(
+      firstCutoff,
+    );
+    expect(firstCutoff).toBe("2026-09-29T00:00:00.000Z");
+    expect(await prisma.actionCenterRequest.count()).toBe(0);
+    expect(gitlab.getSettings).not.toHaveBeenCalled();
+  });
+
+  test("applies pipeline observations locally without scanning either provider", async () => {
+    const index = service();
+    await index.refresh();
+    github.pullRequests.mockClear();
+    github.actionCenterRequestStates.mockClear();
+    gitlab.mergeRequests.mockClear();
+    await (
+      index as unknown as { applyGitHubPipeline(event: unknown): Promise<void> }
+    ).applyGitHubPipeline({
+      githubPipelineStatusChanged: {
+        snapshot: {
+          repositoryGithubId: "repo",
+          headSha: "sha",
+          pipelineStatus: "PENDING",
+          pipelines: [],
+        },
+      },
+    });
+    const rows = await prisma.actionCenterRequest.findMany();
+    expect(
+      rows.every(
+        (row) =>
+          JSON.parse(row.payloadJson).request.pipelineStatus === "PENDING",
+      ),
+    ).toBe(true);
+    expect(
+      rows.every((row) => !JSON.parse(row.payloadJson).request.canMerge),
+    ).toBe(true);
+    expect(github.pullRequests).not.toHaveBeenCalled();
+    expect(github.actionCenterRequestStates).not.toHaveBeenCalled();
+    expect(gitlab.mergeRequests).not.toHaveBeenCalled();
+  });
+
+  test("closes known GitHub requests locally and fences stale discovery results", async () => {
+    const index = service();
+    await index.refresh(["GITHUB"]);
+    await (
+      index as unknown as { applyGitHubRequest(event: unknown): Promise<void> }
+    ).applyGitHubRequest({
+      repositoryName: "acme/app",
+      number: 42,
+      action: "closed",
+      event: "pull_request",
+      updatedAt: new Date(Date.now() + 1000).toISOString(),
+    });
+    expect(await prisma.actionCenterRequest.count()).toBe(0);
+    await index.refresh(["GITHUB"]);
+    expect(await prisma.actionCenterRequest.count()).toBe(0);
   });
 
   test("exposes account keys only after initial reconciliation", async () => {

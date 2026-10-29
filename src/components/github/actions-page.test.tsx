@@ -31,50 +31,8 @@ class ResizeObserverMock {
   disconnect() {}
 }
 
-let intersectionCallback: IntersectionObserverCallback | null = null;
-let intersectionTarget: Element | null = null;
-let intersectionObserver: IntersectionObserver | null = null;
-
-class IntersectionObserverMock {
-  readonly root = null;
-  readonly rootMargin = "";
-  readonly thresholds = [0];
-
-  constructor(callback: IntersectionObserverCallback) {
-    intersectionCallback = callback;
-    intersectionObserver = this as unknown as IntersectionObserver;
-  }
-
-  observe(target: Element) {
-    intersectionTarget = target;
-  }
-
-  unobserve() {}
-  disconnect() {}
-  takeRecords() {
-    return [];
-  }
-}
-
-function intersectPaginationTrigger() {
-  if (!intersectionCallback || !intersectionTarget || !intersectionObserver) {
-    throw new Error("Pagination trigger is not being observed");
-  }
-  const bounds = intersectionTarget.getBoundingClientRect();
-  intersectionCallback(
-    [
-      {
-        boundingClientRect: bounds,
-        intersectionRatio: 1,
-        intersectionRect: bounds,
-        isIntersecting: true,
-        rootBounds: null,
-        target: intersectionTarget,
-        time: 0,
-      },
-    ],
-    intersectionObserver,
-  );
+function loadNextBatch() {
+  fireEvent.click(screen.getByRole("button", { name: "Load more" }));
 }
 
 Object.defineProperties(HTMLElement.prototype, {
@@ -131,11 +89,6 @@ const jobs = [
 
 beforeEach(() => {
   global.ResizeObserver = ResizeObserverMock;
-  global.IntersectionObserver =
-    IntersectionObserverMock as unknown as typeof IntersectionObserver;
-  intersectionCallback = null;
-  intersectionTarget = null;
-  intersectionObserver = null;
   window.history.replaceState(null, "", "/github/actions");
   requestMock.mockImplementation(async (query, variables) => {
     if (query.includes("GitHubPageConfiguration")) {
@@ -356,7 +309,7 @@ describe("ActionsPage", () => {
       name: /Middle run/,
     }) as HTMLTableRowElement;
 
-    act(() => intersectPaginationTrigger());
+    act(() => loadNextBatch());
 
     const olderRow = (await screen.findByRole("row", {
       name: /Older rerun/,
@@ -404,6 +357,61 @@ describe("ActionsPage", () => {
     expect(await screen.findByText("No GitHub codebases")).toBeDefined();
   });
 
+  test("does not automatically paginate and explicit refresh bypasses the list cache", async () => {
+    render(<ActionsPage />);
+    await screen.findByRole("row", { name: /APP-42 Ship widgets/ });
+    expect(
+      requestMock.mock.calls.filter(([query]) =>
+        query.includes("query GitHubActionsWorkflowRuns"),
+      ),
+    ).toHaveLength(1);
+    expect(screen.getByRole("button", { name: "Load more" })).toBeDefined();
+    fireEvent.click(screen.getByRole("button", { name: "Refresh" }));
+    await waitFor(() =>
+      expect(requestMock).toHaveBeenCalledWith(
+        expect.stringContaining("query GitHubActionsWorkflowRuns"),
+        expect.objectContaining({ forceRefresh: true }),
+      ),
+    );
+  });
+
+  test("keeps an empty bounded batch resumable instead of displaying the terminal empty state", async () => {
+    const base = requestMock.getMockImplementation()!;
+    requestMock.mockImplementation(async (query, variables, options) =>
+      query.includes("query GitHubActionsWorkflowRuns")
+        ? ({
+            githubActionsWorkflowRuns: {
+              items: [],
+              repositories: [
+                {
+                  id: "codebase-repository-1",
+                  nameWithOwner: "acme/widgets",
+                  url: "https://github.com/acme/widgets",
+                },
+              ],
+              repositoryErrors: [],
+              hasNextPage: true,
+              endCursor: "continuation",
+            },
+          } as never)
+        : base(query, variables, options),
+    );
+    render(<ActionsPage />);
+    expect(
+      await screen.findByRole("button", { name: "Load more" }),
+    ).toBeDefined();
+    expect(
+      screen.getByText(
+        "More history remains. Load another batch to find older matching runs.",
+      ),
+    ).toBeDefined();
+    expect(
+      requestMock.mock.calls.filter(([query]) =>
+        query.includes("query GitHubActionsWorkflowRuns"),
+      ),
+    ).toHaveLength(1);
+  });
+
   test("enables latest-only by default and reloads when it is disabled", async () => {
     render(<ActionsPage />);
 
@@ -447,7 +455,7 @@ describe("ActionsPage", () => {
     );
   });
 
-  test("renders related links, filters and infinitely paginates runs", async () => {
+  test("renders related links, filters and explicitly loads more runs", async () => {
     render(<ActionsPage />);
 
     expect(
@@ -509,10 +517,10 @@ describe("ActionsPage", () => {
     fireEvent.keyDown(screen.getByRole("menu"), { key: "Escape" });
     expect(screen.getByText("acme/private:")).toBeDefined();
 
-    expect(screen.queryByRole("button", { name: "Load more" })).toBeNull();
+    expect(screen.getByRole("button", { name: "Load more" })).toBeDefined();
     act(() => {
-      intersectPaginationTrigger();
-      intersectPaginationTrigger();
+      loadNextBatch();
+      loadNextBatch();
     });
     expect(await screen.findByText("Older run")).toBeDefined();
     expect(screen.getByText("Friday, July 17, 2026")).toBeDefined();

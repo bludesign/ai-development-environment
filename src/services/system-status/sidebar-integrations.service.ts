@@ -3,7 +3,7 @@ import "server-only";
 import { getPrismaClient } from "@/data/prisma-client";
 import {
   ACTION_CENTER_CHANGED_TOPIC,
-  GITHUB_PIPELINE_STATUS_CHANGED_TOPIC,
+  GITHUB_ACTIONS_COUNT_CHANGED_TOPIC,
   INTEGRATION_CONFIGURATION_CHANGED_TOPIC,
   SIDEBAR_STATUS_CHANGED_TOPIC,
   agentEventBus,
@@ -53,13 +53,13 @@ export class SidebarIntegrationsService {
   private readonly streams: AsyncIterableIterator<unknown>[] = [];
   private running: Promise<void> | null = null;
   private active = false;
-  private pending = false;
+  private readonly pending = new Set<Provider>();
   private lastStarted = -Infinity;
 
   constructor(
     private readonly github: Pick<
       GitHubService,
-      "getSettings" | "activeActionsCount"
+      "getSettings" | "activeActionsCount" | "cachedActiveActionsCount"
     >,
     private readonly gitlab: Pick<
       GitLabService,
@@ -94,13 +94,29 @@ export class SidebarIntegrationsService {
         ++snapshot.generation;
       }
       this.publish();
-      this.requestRefresh(true);
+      this.requestRefresh(
+        true,
+        changed && changed !== "all"
+          ? [changed as Provider]
+          : ["github", "gitlab"],
+      );
     });
-    for (const topic of [
-      GITHUB_PIPELINE_STATUS_CHANGED_TOPIC,
-      GITLAB_PIPELINE_STATUS_CHANGED_TOPIC,
-    ])
-      this.observe(topic, () => this.requestRefresh());
+    this.observe(GITLAB_PIPELINE_STATUS_CHANGED_TOPIC, () =>
+      this.requestRefresh(false, ["gitlab"]),
+    );
+    this.observe(GITHUB_ACTIONS_COUNT_CHANGED_TOPIC, () => {
+      const generation = this.snapshots.github.generation;
+      void this.github
+        .cachedActiveActionsCount()
+        .then((count) => {
+          if (!this.active || generation !== this.snapshots.github.generation)
+            return;
+          if (count !== null && this.snapshots.github.configured)
+            this.snapshots.github.count = count;
+          this.publish();
+        })
+        .catch(() => undefined);
+    });
     // Reconciliation and age-setting changes affect request totals without scanning CI again.
     this.observe(ACTION_CENTER_CHANGED_TOPIC, () => this.publish());
     void this.refresh();
@@ -125,24 +141,31 @@ export class SidebarIntegrationsService {
     })();
   }
 
-  private schedule(delay: number): void {
+  private schedule(
+    delay: number,
+    providers: Provider[] = ["github", "gitlab"],
+  ): void {
     if (!this.active) return;
     if (this.timer) clearTimeout(this.timer);
     this.polling.schedule(POLL_ID, new Date(Date.now() + delay));
     this.timer = setTimeout(() => {
       this.timer = undefined;
-      void this.refresh();
+      void this.refresh(providers);
     }, delay);
     this.timer.unref?.();
   }
 
-  private requestRefresh(immediate = false): void {
+  private requestRefresh(
+    immediate = false,
+    providers: Provider[] = ["github", "gitlab"],
+  ): void {
     if (this.running) {
-      this.pending = true;
+      for (const provider of providers) this.pending.add(provider);
       return;
     }
     this.schedule(
       immediate ? 0 : Math.max(0, this.lastStarted + EVENT_MS - Date.now()),
+      providers,
     );
   }
 
@@ -173,7 +196,7 @@ export class SidebarIntegrationsService {
     return snapshot;
   }
 
-  async refresh(): Promise<void> {
+  async refresh(providers: Provider[] = ["github", "gitlab"]): Promise<void> {
     if (!this.active) return;
     if (this.running) {
       return this.running;
@@ -184,7 +207,7 @@ export class SidebarIntegrationsService {
       .run(POLL_ID, async () => {
         const failures: string[] = [];
         // Each provider bounds its scan to four requests; sequential scans preserve that global limit.
-        for (const provider of ["github", "gitlab"] as const) {
+        for (const provider of providers) {
           const previous = this.snapshots[provider].count;
           const beforeConfiguration = this.snapshots[provider].generation;
           try {
@@ -220,11 +243,14 @@ export class SidebarIntegrationsService {
       })
       .finally(() => {
         this.running = null;
-        const delay = this.pending
+        const delay = this.pending.size
           ? Math.max(0, this.lastStarted + EVENT_MS - Date.now())
           : POLL_MS;
-        this.pending = false;
-        this.schedule(delay);
+        const nextProviders = this.pending.size
+          ? [...this.pending]
+          : (["github", "gitlab"] as Provider[]);
+        this.pending.clear();
+        this.schedule(delay, nextProviders);
       });
     return this.running;
   }
