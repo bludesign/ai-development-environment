@@ -157,7 +157,7 @@ export async function openReviewerCapture(
 ) {
   if (capture.view === "settings") {
     await page
-      .getByRole("tab", { name: "Code Reviewers", exact: true })
+      .getByRole("tab", { name: "Code reviewers", exact: true })
       .click();
     await page
       .getByRole("checkbox", { name: "Choose alex-chen for Platform owners" })

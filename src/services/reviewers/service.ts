@@ -472,7 +472,7 @@ export class ReviewersService {
         !pool.key.startsWith(`${pool.repositoryIdentity}:`)
       ) {
         throw new Error(
-          "Reviewer pools belong to a different provider instance. Deselect Code Reviewers in this import and configure reviewers in the destination repository.",
+          "Reviewer pools belong to a different provider instance. Deselect Code reviewers in this import and configure reviewers in the destination repository.",
         );
       }
       const destinationKey = `${discovery.repositoryIdentity}${pool.key.slice(pool.repositoryIdentity.length)}`;
@@ -487,7 +487,7 @@ export class ReviewersService {
         pool.reviewers.some((person) => !eligible.has(person.id))
       ) {
         throw new Error(
-          `Reviewer group ${pool.name} or one of its people cannot be resolved at the destination. Deselect Code Reviewers in this import and configure reviewers in the destination repository.`,
+          `Reviewer group ${pool.name} or one of its people cannot be resolved at the destination. Deselect Code reviewers in this import and configure reviewers in the destination repository.`,
         );
       }
       result.push({

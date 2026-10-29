@@ -117,7 +117,7 @@ test("review values is an accessible disclosure and remains readable when choice
   ).toBe(true);
 });
 
-test("labels reviewer pools as Code Reviewers and preserves the setting selection", () => {
+test("labels reviewer pools as Code reviewers and preserves the setting selection", () => {
   const onToggle = vi.fn();
   const reviewers: TransferItem = {
     ...item,
@@ -137,7 +137,7 @@ test("labels reviewer pools as Code Reviewers and preserves the setting selectio
       onToggle={onToggle}
     />,
   );
-  const checkbox = screen.getByRole("checkbox", { name: "Code Reviewers" });
+  const checkbox = screen.getByRole("checkbox", { name: "Code reviewers" });
   expect(checkbox.getAttribute("data-state")).toBe("checked");
   expect(screen.queryByText("reviewerPools")).toBeNull();
   fireEvent.click(checkbox);

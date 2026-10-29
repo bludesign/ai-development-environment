@@ -1373,7 +1373,7 @@ export class RepositoryTransferService {
           );
           if (pools.length && !this.reviewers)
             throw new Error(
-              "Reviewer discovery is unavailable. Deselect Code Reviewers in this import.",
+              "Reviewer discovery is unavailable. Deselect Code reviewers in this import.",
             );
           if (this.reviewers)
             value.fields.reviewerPools =

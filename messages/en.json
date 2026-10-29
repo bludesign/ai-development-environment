@@ -5912,7 +5912,7 @@
     "revokeAuthorizationDescription": "The approval from {date} will be revoked. Its access tokens, refresh tokens, and pending authorization code stop working immediately. Other authorizations for this application are unaffected. Running jobs continue."
   },
   "reviewers": {
-    "title": "Code Reviewers",
+    "title": "Code reviewers",
     "settingsDescription": "Choose preferred people for each code owner or approval rule group. These people will be available when assigning reviewers to an open pull or merge request.",
     "branch": "Discover groups on branch",
     "noBranches": "No branches found",
