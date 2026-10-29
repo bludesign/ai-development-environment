@@ -229,7 +229,7 @@ describe("SidebarStatusFooter", () => {
 
     await screen.findByText("$1.25");
     const activity = [
-      ["Action Center", "/dashboard/action-center"],
+      ["Actions", "/dashboard/action-center"],
       ["Workflows", "/dashboard/workflows"],
       ["Plans", "/ai/plans"],
       ["Sessions", "/ai/sessions"],
@@ -241,7 +241,7 @@ describe("SidebarStatusFooter", () => {
     }
     // Without an ActionCenterProvider the footer falls back to zero items.
     expect(
-      screen.getByRole("link", { name: /Action Center/ }).textContent,
+      screen.getByRole("link", { name: /^Actions/ }).textContent,
     ).toContain("0");
     expect(
       screen.getByRole("link", { name: /Commands/ }).getAttribute("href"),
@@ -271,14 +271,14 @@ describe("SidebarStatusFooter", () => {
       ["Pipelines", "/gitlab/pipelines", "3", gitlab],
     ] as const;
     for (const [label, href, count, visible] of counters) {
-      const link = screen.queryByRole("link", {
-        name: new RegExp(`^${label}`),
-      });
+      const link = screen
+        .queryAllByRole("link", { name: new RegExp(`^${label}`) })
+        .find((candidate) => candidate.getAttribute("href") === href);
       if (visible) {
         expect(link?.getAttribute("href")).toBe(href);
         expect(within(link!).getByText(count)).toBeDefined();
       } else {
-        expect(link).toBeNull();
+        expect(link).toBeUndefined();
       }
     }
     expect(
@@ -311,12 +311,14 @@ describe("SidebarStatusFooter", () => {
         ).getByText("0"),
       ).toBeDefined();
     }
-    for (const label of ["Actions", "Pipelines"]) {
-      expect(
-        within(
-          screen.getByRole("link", { name: new RegExp(`^${label}`) }),
-        ).getByText("—"),
-      ).toBeDefined();
+    for (const [label, href] of [
+      ["Actions", "/github/actions"],
+      ["Pipelines", "/gitlab/pipelines"],
+    ]) {
+      const link = screen
+        .getAllByRole("link", { name: new RegExp(`^${label}`) })
+        .find((candidate) => candidate.getAttribute("href") === href)!;
+      expect(within(link).getByText("—")).toBeDefined();
     }
   });
 
@@ -363,7 +365,11 @@ describe("SidebarStatusFooter", () => {
     await act(async () => notifyConfiguration());
     await screen.findByRole("link", { name: /^Merge Requests/ });
     expect(screen.queryByRole("link", { name: /^Pull Requests/ })).toBeNull();
-    expect(screen.queryByRole("link", { name: /^Actions/ })).toBeNull();
+    expect(
+      screen
+        .queryAllByRole("link", { name: /^Actions/ })
+        .some((link) => link.getAttribute("href") === "/github/actions"),
+    ).toBe(false);
   });
 
   test("keeps the last totals during a failed status refresh", async () => {
@@ -379,29 +385,34 @@ describe("SidebarStatusFooter", () => {
   });
 
   test.each([
-    "Workflows",
-    "Pull Requests",
-    "Actions",
-    "Merge Requests",
-    "Pipelines",
-  ])("closes the mobile navigation when %s is followed", async (label) => {
-    setViewportWidth(390);
-    integrationState = {
-      github: { configured: true },
-      gitlab: { configured: true },
-    };
-    renderFooter();
+    ["Workflows", "/dashboard/workflows"],
+    ["Pull Requests", "/github/pull-requests"],
+    ["Actions", "/github/actions"],
+    ["Merge Requests", "/gitlab/merge-requests"],
+    ["Pipelines", "/gitlab/pipelines"],
+  ])(
+    "closes the mobile navigation when %s is followed",
+    async (label, href) => {
+      setViewportWidth(390);
+      integrationState = {
+        github: { configured: true },
+        gitlab: { configured: true },
+      };
+      renderFooter();
 
-    await screen.findByText("$1.25");
-    fireEvent.click(screen.getByRole("button", { name: "sheet closed" }));
-    expect(screen.getByRole("button", { name: "sheet open" })).toBeTruthy();
+      await screen.findByText("$1.25");
+      fireEvent.click(screen.getByRole("button", { name: "sheet closed" }));
+      expect(screen.getByRole("button", { name: "sheet open" })).toBeTruthy();
 
-    fireEvent.click(
-      screen.getByRole("link", { name: new RegExp(`^${label}`) }),
-    );
+      fireEvent.click(
+        screen
+          .getAllByRole("link", { name: new RegExp(`^${label}`) })
+          .find((link) => link.getAttribute("href") === href)!,
+      );
 
-    expect(screen.getByRole("button", { name: "sheet closed" })).toBeTruthy();
-  });
+      expect(screen.getByRole("button", { name: "sheet closed" })).toBeTruthy();
+    },
+  );
 
   test("keeps the sidebar open on a desktop viewport", async () => {
     renderFooter();

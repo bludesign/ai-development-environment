@@ -357,7 +357,7 @@ export function SidebarStatusFooter() {
             <span className="flex min-w-0 items-center gap-1.5">
               <Icon className="size-3.5 shrink-0" />
               <span className="min-w-0 leading-snug [overflow-wrap:anywhere]">
-                {shell(key)}
+                {shell(key === "actionCenter" ? "actions" : key)}
               </span>
             </span>
             <span className="tabular-nums">{count ?? "—"}</span>
