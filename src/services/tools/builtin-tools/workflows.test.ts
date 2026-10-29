@@ -94,6 +94,7 @@ describe("workflow tool group", () => {
       "get_workflow_path_availability",
     ]);
     expect(group.children[1]!.tools.map(({ name }) => name)).toEqual([
+      "set_workflow_quick_action",
       "list_workflows",
       "get_workflow",
       "create_workflow",

@@ -2,6 +2,11 @@ import "server-only";
 
 import { randomUUID } from "node:crypto";
 
+import {
+  BUILD_DATA_DELETE_JOB_KIND,
+  parseBuildDataDeleteResult,
+} from "@ai-development-environment/agent-contract/build-data";
+
 import { DISK_SPACE_POLL_INTERVAL_SECONDS } from "@ai-development-environment/agent-contract/disk-space";
 import { WORKTREE_AUTO_SYNC_JOB_KIND } from "@ai-development-environment/agent-contract/worktrees";
 
@@ -47,10 +52,14 @@ import type { SigningAssetsService } from "@/services/signing-assets";
 import type { SkillsService } from "@/services/skills";
 
 import type { WorkflowEventsService } from "./workflow-events.service";
+import {
+  DomainWorkflowEventBridge,
+  type DomainWorkflowEventServices,
+} from "./domain-event-bridge";
 
 type SessionData = Record<string, unknown>;
 
-export type WorkflowEventBridgeDomains = {
+export type WorkflowEventBridgeDomains = DomainWorkflowEventServices & {
   buildData?: Pick<BuildDataService, "getCollection">;
   commands?: Pick<CommandsService, "getRun">;
   credentials?: Pick<CredentialService, "status">;
@@ -113,7 +122,9 @@ export class WorkflowEventBridge {
   private started = false;
   private running = false;
   private diskAuditTimer: ReturnType<typeof setTimeout> | undefined;
+  private timedTriggerTimer: ReturnType<typeof setTimeout> | undefined;
   private readonly diskStateFingerprints = new Map<string, string>();
+  private readonly domainBridge: DomainWorkflowEventBridge;
 
   constructor(
     private readonly events: WorkflowEventsService,
@@ -124,12 +135,20 @@ export class WorkflowEventBridge {
     >,
     private readonly diskSpace?: DiskSpaceService,
     private readonly domains: WorkflowEventBridgeDomains = {},
-  ) {}
+  ) {
+    this.domainBridge = new DomainWorkflowEventBridge(events, domains);
+  }
 
   start(): void {
     if (this.started) return;
     this.started = true;
     this.running = true;
+    this.domainBridge.start();
+    this.scheduleTimedTriggerAudit();
+    if (this.domains.signingAssets)
+      void this.observeSigningExpiry().catch((error) =>
+        console.error("Could not audit signing expiry:", error),
+      );
     this.agentControl.registerCompletionObserver((job) =>
       this.observeAgentJob(job),
     );
@@ -157,6 +176,9 @@ export class WorkflowEventBridge {
 
   stop(): void {
     this.running = false;
+    this.domainBridge.stop();
+    if (this.timedTriggerTimer) clearTimeout(this.timedTriggerTimer);
+    this.timedTriggerTimer = undefined;
     if (this.diskAuditTimer) clearTimeout(this.diskAuditTimer);
     this.diskAuditTimer = undefined;
   }
@@ -195,8 +217,45 @@ export class WorkflowEventBridge {
     codebaseId: string | null;
     worktreeId: string | null;
     ccusageCollectionId?: string | null;
+    buildDataCollectionId?: string | null;
     resultJson: string | null;
   }): Promise<void> {
+    if (
+      job.kind === BUILD_DATA_DELETE_JOB_KIND &&
+      new Set(["SUCCEEDED", "FAILED", "CANCELLED", "TIMED_OUT", "INVALID"]).has(
+        job.status,
+      )
+    ) {
+      let deleted: ReturnType<typeof parseBuildDataDeleteResult>["deleted"] =
+        [];
+      let error = job.error;
+      if (job.status === "SUCCEEDED") {
+        try {
+          deleted = parseBuildDataDeleteResult(
+            parsed(job.resultJson ?? "{}"),
+          ).deleted;
+        } catch (failure) {
+          error = failure instanceof Error ? failure.message : String(failure);
+        }
+      }
+      const cleanup = {
+        jobId: job.id,
+        status: error && job.status === "SUCCEEDED" ? "INVALID" : job.status,
+        error,
+        deleted,
+      };
+      await this.record(
+        "BUILD_DATA_CLEANUP_RESULT",
+        job.buildDataCollectionId ?? job.id,
+        `build-data-cleanup:${job.id}:${cleanup.status}`,
+        {
+          buildData: { id: job.buildDataCollectionId ?? null },
+          agent: { id: job.agentId },
+          cleanup,
+        },
+        { cursorValue: `${job.id}:${cleanup.status}` },
+      );
+    }
     if (job.kind === WORKTREE_AUTO_SYNC_JOB_KIND && job.worktreeId) {
       const targetSessionData = await this.worktreeSessionData(
         job.worktreeId,
@@ -561,25 +620,75 @@ export class WorkflowEventBridge {
             },
           );
         }
-        for (const profile of profiles.filter((item) => item.expiresAt)) {
-          const expiresAt = profile.expiresAt!;
-          await this.record(
-            "SIGNING_ASSET_EXPIRING",
-            profile.id,
-            `signing-expiry:${profile.id}:${expiresAt}`,
-            { signingProfile: { ...profile, id: profile.id } },
-            {
-              cursorValue: expiresAt,
-              expiresInDays: Math.ceil(
-                (new Date(expiresAt).getTime() - Date.now()) / 86_400_000,
-              ),
-            },
-          );
-        }
+        await this.recordSigningExpiry(profiles);
       }
     } finally {
       await stream.return?.();
     }
+  }
+
+  private async observeSigningExpiry(): Promise<void> {
+    const profiles = await this.domains.signingAssets?.profiles();
+    if (profiles) await this.recordSigningExpiry(profiles);
+  }
+
+  private async recordSigningExpiry(
+    profiles: Awaited<ReturnType<SigningAssetsService["profiles"]>>,
+  ): Promise<void> {
+    for (const profile of profiles.filter((item) => item.expiresAt)) {
+      const expiresAt = profile.expiresAt!;
+      const expiresInSeconds = Math.ceil(
+        (new Date(expiresAt).getTime() - Date.now()) / 1000,
+      );
+      const expiresInDays = Math.ceil(expiresInSeconds / 86400);
+      await this.record(
+        "SIGNING_ASSET_EXPIRING",
+        profile.id,
+        `signing-expiry:${profile.id}:${expiresAt}:${Math.floor(Date.now() / 60000)}`,
+        {
+          signingProfile: {
+            ...profile,
+            id: profile.id,
+            expiresInDays,
+            expiresInSeconds,
+          },
+        },
+        {
+          cursorValue: expiresAt,
+          expiresInDays,
+        },
+      );
+    }
+  }
+
+  private scheduleTimedTriggerAudit(): void {
+    if (!this.running) return;
+    this.timedTriggerTimer = setTimeout(() => {
+      void this.auditTimedTriggers()
+        .catch((error) =>
+          console.error("Could not audit timed workflow triggers:", error),
+        )
+        .finally(() => this.scheduleTimedTriggerAudit());
+    }, 60000);
+    this.timedTriggerTimer.unref?.();
+  }
+
+  private async auditTimedTriggers(): Promise<void> {
+    await this.observeSigningExpiry();
+    const prisma = await getPrismaClient();
+    const observed = await prisma.workflowTrigger.findFirst({
+      where: {
+        kind: "WORKTREE_DIRTY_DURATION",
+        version: { activeFor: { is: { enabled: true, archivedAt: null } } },
+      },
+      select: { id: true },
+    });
+    if (!observed) return;
+    const worktrees = await prisma.worktree.findMany({
+      where: { OR: [{ hasStagedChanges: true }, { hasUnstagedChanges: true }] },
+      include: { codebase: { include: { repository: true } } },
+    });
+    for (const worktree of worktrees) await this.observeWorktree(worktree);
   }
 
   private async consumePushNotifications(): Promise<void> {
@@ -621,7 +730,7 @@ export class WorkflowEventBridge {
 
   private async consumeBuildData(): Promise<void> {
     const stream = agentEventBus.iterate<{
-      buildDataCollectionChanged: { id: string };
+      buildDataCollectionChanged: { id: string; changeId?: string };
     }>(BUILD_DATA_CHANGED_TOPIC);
     try {
       for await (const payload of stream) {
@@ -632,6 +741,8 @@ export class WorkflowEventBridge {
           payload.buildDataCollectionChanged.id,
         );
         if (!collection || collection.status !== "COMPLETED") continue;
+        if (collection.entries.some((entry) => entry.sizeBytes == null))
+          continue;
         const totalBytes = collection.entries.reduce(
           (total, entry) => total + (entry.sizeBytes ?? 0),
           0,
@@ -646,20 +757,14 @@ export class WorkflowEventBridge {
             successfulAgentCount: collection.progress.successfulCount,
           },
         };
-        const revision = collection.finishedAt ?? collection.deadlineAt;
+        const revision =
+          payload.buildDataCollectionChanged.changeId ?? randomUUID();
         await this.record(
           "BUILD_DATA_THRESHOLD",
           collection.id,
           `build-data-threshold:${collection.id}:${revision}`,
           sessionData,
           { cursorValue: totalBytes },
-        );
-        await this.record(
-          "BUILD_DATA_CLEANUP_RESULT",
-          collection.id,
-          `build-data-result:${collection.id}:${revision}`,
-          sessionData,
-          { cursorValue: revision },
         );
       }
     } finally {
@@ -1238,7 +1343,6 @@ export class WorkflowEventBridge {
         baseBehind: worktree.baseBehind,
         dirty,
         missingAt: worktree.missingAt?.toISOString() ?? null,
-        dirtySince: dirty ? worktree.updatedAt.toISOString() : null,
       },
     });
     const common = { cursorValue: observedAt.toISOString() };
@@ -1268,7 +1372,7 @@ export class WorkflowEventBridge {
     await this.record(
       "WORKTREE_DIRTY_DURATION",
       worktree.id,
-      `worktree-dirty:${worktree.id}:${observedAt.toISOString()}`,
+      `worktree-dirty:${worktree.id}:${worktree.updatedAt.toISOString()}:${dirty}:${Math.floor(Date.now() / 60000)}`,
       sessionData,
       common,
     );

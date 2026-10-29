@@ -9,6 +9,7 @@ import {
   type BuiltInToolGroup,
 } from "../builtin-tools";
 import { serviceTool } from "./service-tool";
+import { createRunManagementTools } from "./run-management";
 
 const runId = z.object({ runId: z.string().min(1) });
 const runConfiguration = z.object({
@@ -35,6 +36,7 @@ export function createRunToolGroup(service: RunsService): BuiltInToolGroup {
     name: "Agent Runs",
     children: [],
     tools: [
+      ...createRunManagementTools(service),
       serviceTool({
         name: "get_agent_runs",
         title: "Get agent runs",

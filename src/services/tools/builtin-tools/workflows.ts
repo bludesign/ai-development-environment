@@ -19,6 +19,7 @@
  */
 
 import * as z from "zod/v4";
+import { createWorkflowQuickActionTools } from "./administration-tools";
 
 import {
   computeWorkflowPathAvailability,
@@ -546,6 +547,11 @@ export function createWorkflowToolGroup(workflows: Service): BuiltInToolGroup {
     name: "Authoring",
     children: [],
     tools: [
+      ...createWorkflowQuickActionTools({
+        setQuickAction: (
+          input: Parameters<WorkflowsService["setQuickAction"]>[0],
+        ) => workflows().setQuickAction(input),
+      }),
       // -- Workflow CRUD -----------------------------------------------------
       defineTool({
         name: "list_workflows",

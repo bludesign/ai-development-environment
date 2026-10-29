@@ -5458,6 +5458,7 @@ export class GitHubService {
     number: number,
     token: string,
     requestSource: GitHubRequestSource,
+    force = false,
   ): Promise<{
     pullRequest: RawPullRequestMergeState;
     availableMethods: GitHubMergeMethod[];
@@ -5496,7 +5497,7 @@ export class GitHubService {
       }`,
       { owner, name, number },
       token,
-      { requestSource },
+      { requestSource, force, allowStaleOnError: !force },
     );
     const pullRequest = data.repository?.pullRequest;
     if (!pullRequest) throw new Error("Pull request was not found");
@@ -5564,6 +5565,7 @@ export class GitHubService {
       number,
       token,
       requestSource,
+      true,
     );
     const commitEmailOptions = await this.commitEmailOptions(
       token,
@@ -5837,6 +5839,7 @@ export class GitHubService {
       input.number,
       token,
       requestSource,
+      true,
     );
     const blockedReason = this.mergeBlockedReason(
       state.pullRequest,

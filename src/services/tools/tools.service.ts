@@ -293,6 +293,23 @@ export class ToolsService {
       toolAudit: this.audit,
       testExternalMcpServer: (id) => this.testExternalServer(id),
       listMcpToolPresets: (kind) => this.mcpToolPresets(kind),
+      toolAdministration: {
+        createMcpToolPreset: (input) => this.createMcpToolPreset(input),
+        updateMcpToolPreset: (id, input) => this.updateMcpToolPreset(id, input),
+        deleteMcpToolPreset: (id) => this.deleteMcpToolPreset(id),
+        externalServers: () => this.externalServers(),
+        createExternalServer: (input) => this.createExternalServer(input),
+        updateExternalServer: (id, input) =>
+          this.updateExternalServer(id, input),
+        deleteExternalServer: (id) => this.deleteExternalServer(id),
+        clearToolCallAudits: () => this.clearToolCallAudits(),
+        exportCatalog: (format, source, groupIds) =>
+          this.presetTransfers.exportCatalog(format, source, groupIds),
+        exportPresets: (ids) => this.presetTransfers.exportPresets(ids),
+        previewPresetImport: (input) => this.presetTransfers.preview(input),
+        importPresets: (input, token) =>
+          this.presetTransfers.import(input, token),
+      },
     });
   }
 

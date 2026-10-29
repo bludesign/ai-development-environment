@@ -370,8 +370,16 @@ export class CrashesService {
     agentEventBus.publish(CRASH_REPORTS_CHANGED_TOPIC, { reason, ids });
   }
 
-  private publishDsyms(reason: ChangeReason, ids: string[]): void {
-    agentEventBus.publish(DSYMS_CHANGED_TOPIC, { reason, ids });
+  private publishDsyms(
+    reason: ChangeReason,
+    ids: string[],
+    uploadId?: string,
+  ): void {
+    agentEventBus.publish(DSYMS_CHANGED_TOPIC, {
+      reason,
+      ids,
+      ...(uploadId ? { uploadId } : {}),
+    });
   }
 
   subscribeCrashReports() {
@@ -1163,6 +1171,7 @@ export class CrashesService {
     this.publishDsyms(
       "UPDATED",
       updated.dsyms.map((dsym) => dsym.id),
+      id,
     );
     return updated;
   }
@@ -1265,6 +1274,7 @@ export class CrashesService {
     this.publishDsyms(
       "DELETED",
       upload.dsyms.map((dsym) => dsym.id),
+      id,
     );
     return true;
   }
@@ -1282,7 +1292,7 @@ export class CrashesService {
       where: { id },
       data: { status: "PENDING_TRANSFER", attempts: 0, error: null },
     });
-    this.publishDsyms("UPDATED", []);
+    this.publishDsyms("UPDATED", [], id);
     this.changed();
     return updated;
   }
@@ -1374,7 +1384,7 @@ export class CrashesService {
         data: { id, ...base, linkedBuildId },
       });
     }
-    this.publishDsyms("UPDATED", []);
+    this.publishDsyms("UPDATED", [], id);
     try {
       const destination = await ensureCrashDataFolder(storageDirectory);
       const indexed = await extractDsymArchive({
@@ -1422,6 +1432,7 @@ export class CrashesService {
       this.publishDsyms(
         "CREATED",
         upload.dsyms.map((dsym) => dsym.id),
+        id,
       );
       await this.requeueCrashesFor(
         upload.dsyms.flatMap((dsym) => dsym.slices.map((slice) => slice.uuid)),
@@ -1441,7 +1452,7 @@ export class CrashesService {
           storageDirectory: null,
         },
       });
-      this.publishDsyms("UPDATED", []);
+      this.publishDsyms("UPDATED", [], id);
       throw error;
     } finally {
       await rm(input.zipPath, { force: true });
@@ -1527,7 +1538,7 @@ export class CrashesService {
         status: "UPLOADING",
       },
     });
-    this.publishDsyms("UPDATED", []);
+    this.publishDsyms("UPDATED", [], upload.id);
     return { upload, chunkBytes: DSYM_UPLOAD_CHUNK_BYTES };
   }
 
@@ -1649,7 +1660,7 @@ export class CrashesService {
             stagingPath: null,
           },
         });
-        this.publishDsyms("UPDATED", []);
+        this.publishDsyms("UPDATED", [], id);
         throw new CrashRequestError(
           "The uploaded bytes do not match the declared sha256",
           422,
@@ -1697,7 +1708,7 @@ export class CrashesService {
         where: { buildArtifactId: artifact.id },
       });
       if (exists) continue;
-      await prisma.dsymUpload
+      const upload = await prisma.dsymUpload
         .create({
           data: {
             id: randomUUID(),
@@ -1712,8 +1723,8 @@ export class CrashesService {
           },
         })
         .catch(() => null);
+      if (upload) this.publishDsyms("UPDATED", [], upload.id);
     }
-    this.publishDsyms("UPDATED", []);
     this.changed();
   }
 
@@ -1784,7 +1795,7 @@ export class CrashesService {
               error: `${message.slice(0, 1_900)}; retrying`,
             },
       });
-      this.publishDsyms("UPDATED", []);
+      this.publishDsyms("UPDATED", [], upload.id);
     }
   }
 
@@ -1924,8 +1935,8 @@ export class CrashesService {
     for (const upload of stale) {
       await removeCrashData(upload.stagingPath);
       await prisma.dsymUpload.delete({ where: { id: upload.id } });
+      this.publishDsyms("DELETED", [], upload.id);
     }
-    if (stale.length) this.publishDsyms("DELETED", []);
   }
 
   private async applyRetention() {

@@ -10,6 +10,7 @@ import {
   type BuiltInToolGroup,
 } from "../builtin-tools";
 import { serviceTool } from "./service-tool";
+import { createNotificationAdministrationTools } from "./administration-tools";
 
 export function createNotificationToolGroup(
   service: NotificationsService,
@@ -19,6 +20,7 @@ export function createNotificationToolGroup(
     name: "Notifications",
     children: [],
     tools: [
+      ...createNotificationAdministrationTools(service),
       serviceTool({
         name: "get_notification_history",
         title: "Get notification history",

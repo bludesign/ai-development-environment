@@ -1,4 +1,5 @@
 import * as z from "zod/v4";
+import { createSseViewAdministrationTools } from "./administration-tools";
 
 import type {
   SseBreakpointResolutionInput,
@@ -95,6 +96,7 @@ export function createSseToolGroup(service: SseService): BuiltInToolGroup {
     name: "SSE Endpoints",
     children: [],
     tools: [
+      ...createSseViewAdministrationTools(service),
       defineTool({
         name: "sse_endpoint_list",
         title: "List SSE endpoints",

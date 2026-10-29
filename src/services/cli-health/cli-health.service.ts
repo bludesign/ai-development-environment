@@ -198,13 +198,30 @@ export class CliHealthService {
     private readonly gitLab: GitLabService,
   ) {
     this.agentControl.registerCompletionObserver(async (job) => {
-      if (job.kind === CLI_HEALTH_JOB_KIND) this.publish(job.agentId);
+      if (job.kind === CLI_HEALTH_JOB_KIND)
+        this.publish(job.agentId, {
+          jobId: job.id,
+          status: job.status,
+          error: job.error,
+          finishedAt: new Date().toISOString(),
+        });
     });
   }
 
-  private publish(agentId: string | null): void {
+  private publish(
+    agentId: string | null,
+    completion?: {
+      jobId: string;
+      status: string;
+      error: string | null;
+      finishedAt: string | null;
+    },
+  ): void {
     agentEventBus.publish(CLI_HEALTH_CHANGED_TOPIC, {
-      cliHealthStatusChanged: { agentId },
+      cliHealthStatusChanged: {
+        agentId,
+        ...(completion ? { completion } : {}),
+      },
     });
   }
 

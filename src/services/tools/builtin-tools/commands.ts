@@ -1,6 +1,7 @@
 import * as z from "zod/v4";
 
 import type { CommandsService } from "@/services/commands";
+import { createCommandPortabilityTools } from "./command-portability";
 
 import {
   DESTRUCTIVE_ANNOTATIONS,
@@ -48,6 +49,7 @@ export function createCommandToolGroup(
     name: "Commands",
     children: [],
     tools: [
+      ...createCommandPortabilityTools(service),
       serviceTool({
         name: "get_commands",
         title: "Get commands",

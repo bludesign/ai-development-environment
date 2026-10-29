@@ -2,6 +2,7 @@ import { workflowQueueUsesWorktree } from "./workflow-queue-scope";
 import { workflowRunIdsForAgent } from "./workflow-run-agent-filter";
 import { filterAsyncIterator } from "@/lib/filter-async-iterator";
 import "server-only";
+import { observeDirtyDuration } from "@/lib/workflows/dirty-duration";
 
 import { createHash, randomUUID } from "node:crypto";
 
@@ -3228,10 +3229,19 @@ export class WorkflowsService {
       parseObject(json(trigger.configJson), "Trigger configuration"),
       payload,
     ) as Record<string, unknown>;
+    if (
+      trigger.kind === "SIGNING_ASSET_EXPIRING" &&
+      config.thresholdPath === undefined
+    ) {
+      config.thresholdPath = "signingProfile.expiresInDays";
+      config.thresholdOperator = "LTE";
+      config.thresholdValue = 30;
+    }
     let cursorChanged: boolean | null = null;
     let previousCursor: unknown;
     if (
       payload.cursorValue !== undefined &&
+      trigger.kind !== "WORKTREE_DIRTY_DURATION" &&
       !(
         typeof config.thresholdPath === "string" &&
         typeof config.thresholdOperator === "string"
@@ -3373,6 +3383,7 @@ export class WorkflowsService {
     ) {
       return false;
     }
+    let filtersMatched = true;
     if (config.filters && typeof config.filters === "object") {
       for (const [path, expected] of Object.entries(
         config.filters as Record<string, unknown>,
@@ -3382,13 +3393,66 @@ export class WorkflowsService {
           if (
             !expected.some((entry) => canonical(entry) === canonical(actual))
           ) {
-            return false;
+            filtersMatched = false;
+            break;
           }
         } else if (canonical(expected) !== canonical(actual)) {
-          return false;
+          filtersMatched = false;
+          break;
         }
       }
     }
+    if (trigger.kind === "WORKTREE_DIRTY_DURATION") {
+      const prisma = await getPrismaClient();
+      const where = {
+        triggerId_subjectKey: { triggerId: trigger.id, subjectKey },
+      };
+      const previous = await prisma.workflowTriggerState.findUnique({ where });
+      const observation = observeDirtyDuration({
+        dirty: getSessionValue(payload, "worktree.dirty") === true,
+        durationSeconds: config.durationSeconds,
+        now: Date.now(),
+        previousCursor: previous?.cursorJson
+          ? parseObject(json(previous.cursorJson), "Dirty duration cursor")
+          : undefined,
+        previouslyMatched: previous?.lastMatched,
+      });
+      const fire = observation.fire && filtersMatched;
+      const consumed = observation.matched && (previous?.lastMatched || fire);
+      const data = {
+        cursorJson: JSON.stringify(observation.cursor),
+        lastMatched: Boolean(consumed),
+        ...(fire ? { lastFiredAt: new Date() } : {}),
+      };
+      await prisma.workflowTriggerState.upsert({
+        where,
+        create: {
+          id: randomUUID(),
+          triggerId: trigger.id,
+          subjectKey,
+          ...data,
+        },
+        update: data,
+      });
+      const worktree = {
+        ...(payload.worktree as Record<string, unknown>),
+        dirtySince:
+          observation.cursor.dirtySince === null
+            ? null
+            : new Date(observation.cursor.dirtySince).toISOString(),
+        dirtyDurationSeconds:
+          observation.cursor.dirtySince === null
+            ? 0
+            : Math.floor((Date.now() - observation.cursor.dirtySince) / 1000),
+      };
+      payload.worktree = worktree;
+      payload.sessionData = {
+        ...(payload.sessionData as Record<string, unknown>),
+        worktree,
+      };
+      return fire;
+    }
+    if (!filtersMatched) return false;
     if (
       typeof config.thresholdPath === "string" &&
       typeof config.thresholdOperator === "string"

@@ -37,6 +37,11 @@ describe("external MCP configuration", () => {
       "builtin:tool-administration",
     ]);
     expect(catalog.groups[1]?.tools.map(({ name }) => name)).toEqual([
+      "delete_build_project",
+      "reparse_build_configuration",
+      "set_codebase_build_scripts",
+      "get_build_signing_options",
+      "get_build_run_agents",
       "get_builds",
       "get_build",
       "get_build_configurations",

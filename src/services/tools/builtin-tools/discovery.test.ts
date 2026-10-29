@@ -150,10 +150,12 @@ describe("discovery MCP tools", () => {
     expect(statusForAgent).toHaveBeenCalledWith("agent-1");
     expect(run).not.toHaveBeenCalled();
     expect(
-      group.tools.every(
-        ({ annotations }) =>
-          annotations.readOnlyHint && !annotations.destructiveHint,
-      ),
+      group.tools
+        .filter(({ name }) => name.startsWith("get_"))
+        .every(
+          ({ annotations }) =>
+            annotations.readOnlyHint && !annotations.destructiveHint,
+        ),
     ).toBe(true);
   });
 

@@ -5,13 +5,39 @@ import type { AppsService } from "@/services/apps";
 import type { CliHealthService } from "@/services/cli-health";
 import type { GlobalSearchService } from "@/services/global-search";
 
-import { defineTool, type BuiltInToolGroup } from "../builtin-tools";
+import {
+  DESTRUCTIVE_ANNOTATIONS,
+  WRITE_ANNOTATIONS,
+  defineTool,
+  type BuiltInToolGroup,
+} from "../builtin-tools";
 import {
   ActionCenterPageSchema,
   AgentCliHealthSchema,
   InstallationStatusSchema,
   SearchResultsSchema,
 } from "./discovery-schemas";
+
+const Id = z.string().trim().min(1).max(256);
+const ResourceKind = z.enum([
+  "PLAN",
+  "SESSION",
+  "BUILD",
+  "WORKFLOW",
+  "PULL_REQUEST",
+  "MERGE_REQUEST",
+]);
+const ActionSettings = z.object({
+  maximumRequestAgeDays: z.number().int().min(0),
+  showMyRequestsInSidebar: z.boolean(),
+  showReviewRequestsInSidebar: z.boolean(),
+});
+const AppInput = z.object({
+  name: z.string().trim().min(1).max(120),
+  description: z.string().max(2000).nullable().optional(),
+  agentIds: z.array(Id).max(500).default([]),
+  repositoryIds: z.array(Id).min(1).max(500),
+});
 
 export function createSearchToolGroup(
   service: GlobalSearchService,
@@ -56,9 +82,71 @@ export function createActionCenterToolGroup(
         inputSchema: z.object({
           first: z.number().int().min(1).max(200).default(50),
           after: z.string().max(4096).nullable().optional(),
+          surface: z.enum(["FULL", "SIDEBAR"]).optional(),
+          resourceKinds: z.array(ResourceKind).max(6).optional(),
         }),
         outputSchema: z.object({ page: ActionCenterPageSchema }),
         handler: async (input) => ({ page: await service.list(input) }),
+      }),
+      defineTool({
+        name: "get_action_center_settings",
+        title: "Get action center settings",
+        description: "Read shared request discovery and sidebar preferences.",
+        inputSchema: z.object({}),
+        outputSchema: z.object({ settings: ActionSettings }),
+        handler: async () => ({ settings: await service.settings() }),
+      }),
+      defineTool({
+        name: "save_action_center_settings",
+        title: "Save action center settings",
+        description:
+          "Replace shared request discovery and sidebar preferences.",
+        inputSchema: z.object({ input: ActionSettings }),
+        outputSchema: z.object({ settings: ActionSettings }),
+        annotations: WRITE_ANNOTATIONS,
+        handler: async ({ input }) => ({
+          settings: await service.saveSettings(input),
+        }),
+      }),
+      defineTool({
+        name: "refresh_action_center",
+        title: "Refresh action center",
+        description:
+          "Refresh the local request index using configured provider caches.",
+        inputSchema: z.object({}),
+        outputSchema: z.object({ refreshed: z.boolean() }),
+        annotations: WRITE_ANNOTATIONS,
+        handler: async () => ({ refreshed: await service.refresh() }),
+      }),
+      defineTool({
+        name: "acknowledge_action_center_item",
+        title: "Acknowledge action center item",
+        description:
+          "Acknowledge the exact failure fingerprint returned by get_action_center.",
+        inputSchema: z.object({
+          resourceKind: ResourceKind,
+          resourceId: Id,
+          failureFingerprint: z.string().min(1).max(4096),
+        }),
+        outputSchema: z.object({ acknowledged: z.boolean() }),
+        annotations: WRITE_ANNOTATIONS,
+        handler: async (input) => ({
+          acknowledged: await service.acknowledge(input),
+        }),
+      }),
+      defineTool({
+        name: "dismiss_action_center_item",
+        title: "Dismiss action center item",
+        description:
+          "Dismiss the exact dismissal fingerprint returned by get_action_center.",
+        inputSchema: z.object({
+          resourceKind: ResourceKind,
+          resourceId: Id,
+          dismissalFingerprint: z.string().min(1).max(4096),
+        }),
+        outputSchema: z.object({ dismissed: z.boolean() }),
+        annotations: WRITE_ANNOTATIONS,
+        handler: async (input) => ({ dismissed: await service.dismiss(input) }),
       }),
     ],
   };
@@ -131,6 +219,40 @@ export function createAppsToolGroup(service: AppsService): BuiltInToolGroup {
           return { app: app ? appView(app) : null };
         },
       }),
+      defineTool({
+        name: "create_app",
+        title: "Create app",
+        description:
+          "Create a product grouping with selected repositories and agents.",
+        inputSchema: AppInput,
+        outputSchema: z.object({ app: AppSchema }),
+        annotations: { ...WRITE_ANNOTATIONS, idempotentHint: false },
+        handler: async (input) => ({
+          app: appView(await service.create(input)),
+        }),
+      }),
+      defineTool({
+        name: "update_app",
+        title: "Update app",
+        description:
+          "Replace an app's name, description, and repository and agent memberships.",
+        inputSchema: AppInput.extend({ id: Id }),
+        outputSchema: z.object({ app: AppSchema }),
+        annotations: WRITE_ANNOTATIONS,
+        handler: async (input) => ({
+          app: appView(await service.update(input)),
+        }),
+      }),
+      defineTool({
+        name: "delete_app",
+        title: "Delete app",
+        description:
+          "Delete an app grouping without deleting its repositories.",
+        inputSchema: z.object({ id: Id }),
+        outputSchema: z.object({ app: z.object({ id: z.string() }) }),
+        annotations: DESTRUCTIVE_ANNOTATIONS,
+        handler: async ({ id }) => ({ app: await service.delete(id) }),
+      }),
     ],
   };
 }
@@ -161,6 +283,41 @@ export function createCliHealthToolGroup(
         outputSchema: z.object({ status: AgentCliHealthSchema }),
         handler: async ({ agentId }) => ({
           status: await service.statusForAgent(agentId),
+        }),
+      }),
+      defineTool({
+        name: "run_cli_health_checks",
+        title: "Run CLI health checks",
+        description:
+          "Queue shell-based health checks for one agent or all eligible online agents.",
+        inputSchema: z.object({ agentId: Id.nullable().optional() }),
+        outputSchema: z.object({ status: InstallationStatusSchema }),
+        annotations: { ...WRITE_ANNOTATIONS, idempotentHint: false },
+        handler: async ({ agentId }) => ({
+          status: await service.run(agentId),
+        }),
+      }),
+      defineTool({
+        name: "save_cli_health_settings",
+        title: "Save CLI health settings",
+        description:
+          "Replace the complete ordered custom shell-check definitions. Omitted checks are removed.",
+        inputSchema: z.object({
+          checks: z
+            .array(
+              z.object({
+                id: z.string().min(1).max(100).optional(),
+                name: z.string().trim().min(1).max(100),
+                command: z.string().trim().min(1).max(4096),
+                enabled: z.boolean().default(true),
+              }),
+            )
+            .max(20),
+        }),
+        outputSchema: z.object({ status: InstallationStatusSchema }),
+        annotations: { ...DESTRUCTIVE_ANNOTATIONS, idempotentHint: false },
+        handler: async ({ checks }) => ({
+          status: await service.saveSettings(checks),
         }),
       }),
     ],

@@ -261,6 +261,7 @@ export class TailscaleServeService {
   private publish(operationId?: string): void {
     agentEventBus.publish(TAILSCALE_SERVE_CHANGED_TOPIC, {
       tailscaleServeOverviewChanged: true,
+      ...(operationId ? { operationId } : {}),
     });
     if (operationId) {
       agentEventBus.publish(tailscaleServeOperationChangedTopic(operationId), {

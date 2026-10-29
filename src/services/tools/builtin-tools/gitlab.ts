@@ -8,6 +8,11 @@ import {
   type BuiltInToolGroup,
 } from "../builtin-tools";
 import { serviceTool } from "./service-tool";
+import { externalPipelineActionsService } from "@/services/gitlab/external-pipeline-actions";
+import {
+  createExternalPipelineAdministrationTools,
+  createGitLabAdministrationTools,
+} from "./administration-tools";
 
 const projectMergeRequest = z.object({
   projectId: z.string().min(1),
@@ -22,6 +27,10 @@ export function createGitLabToolGroup(
     name: "GitLab",
     children: [],
     tools: [
+      ...createGitLabAdministrationTools(service),
+      ...createExternalPipelineAdministrationTools(
+        externalPipelineActionsService,
+      ),
       serviceTool({
         name: "gitlab_get_status",
         title: "Get GitLab status",

@@ -12,6 +12,11 @@ import {
   type BuiltInToolGroup,
 } from "../builtin-tools";
 import { serviceTool } from "./service-tool";
+import {
+  createCacheServerAdministrationTools,
+  createIntegrationCacheAdministrationTools,
+  createJiraCacheAdministrationTools,
+} from "./administration-tools";
 
 export function createCacheAdministrationGroup(
   cache: CacheServerService,
@@ -29,6 +34,7 @@ export function createCacheAdministrationGroup(
         name: "Cache Server",
         children: [],
         tools: [
+          ...createCacheServerAdministrationTools(cache),
           serviceTool({
             name: "get_cache_server_entries",
             title: "Get cache-server entries",
@@ -112,6 +118,7 @@ export function createCacheAdministrationGroup(
         name: "Jira Cache",
         children: [],
         tools: [
+          ...createJiraCacheAdministrationTools(jira),
           serviceTool({
             name: "get_jira_cache_metrics",
             title: "Get Jira cache metrics",
@@ -167,6 +174,7 @@ export function createCacheAdministrationGroup(
         name: "GitHub Cache",
         children: [],
         tools: [
+          ...createIntegrationCacheAdministrationTools(github, "github"),
           serviceTool({
             name: "get_github_cache_metrics",
             title: "Get GitHub cache metrics",
@@ -223,6 +231,7 @@ export function createCacheAdministrationGroup(
               name: "GitLab Cache",
               children: [],
               tools: [
+                ...createIntegrationCacheAdministrationTools(gitlab, "gitlab"),
                 serviceTool({
                   name: "get_gitlab_cache_metrics",
                   title: "Get GitLab cache metrics",

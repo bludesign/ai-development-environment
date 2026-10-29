@@ -19,6 +19,7 @@ import {
 } from "../builtin-tools";
 import { createPushNotificationToolGroup } from "./push-notifications";
 import { serviceTool } from "./service-tool";
+import { createTelemetryAdministrationTools } from "./administration-tools";
 
 const TelemetryEntrySchema = z.object({
   id: z.string(),
@@ -452,7 +453,7 @@ export function createDebuggingToolGroup(
   return {
     id: "builtin:debugging",
     name: "Debugging",
-    tools: direct,
+    tools: [...direct, ...createTelemetryAdministrationTools(telemetry)],
     children: [
       {
         id: "builtin:debugging:console-logs",

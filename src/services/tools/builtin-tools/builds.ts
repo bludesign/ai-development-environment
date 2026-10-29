@@ -29,6 +29,7 @@ import {
   type BuiltInToolGroup,
 } from "../builtin-tools";
 import { serviceTool } from "./service-tool";
+import { createBuildManagementTools } from "./build-management";
 
 export function createBuildToolGroup(builds: BuildsService): BuiltInToolGroup {
   return {
@@ -36,6 +37,7 @@ export function createBuildToolGroup(builds: BuildsService): BuiltInToolGroup {
     name: "Builds",
     children: [],
     tools: [
+      ...createBuildManagementTools(builds),
       defineTool({
         name: "get_builds",
         title: "Get builds",
@@ -79,7 +81,12 @@ export function createBuildToolGroup(builds: BuildsService): BuiltInToolGroup {
         name: "get_build_destinations",
         title: "Get build destinations",
         description: "Inspect compatible build destinations.",
-        inputSchema: GetBuildDestinationsInputSchema,
+        inputSchema: z.union([
+          GetBuildDestinationsInputSchema.options[0].extend({
+            targetAgentId: z.string().min(1).max(256).nullable().optional(),
+          }),
+          GetBuildDestinationsInputSchema.options[1],
+        ]),
         outputSchema: GetBuildDestinationsOutputSchema,
         annotations: READ_ONLY_ANNOTATIONS,
         handler: async (input) => ({
@@ -88,6 +95,7 @@ export function createBuildToolGroup(builds: BuildsService): BuiltInToolGroup {
               ? await builds.destinationsForBuild(
                   input.buildId,
                   input.requestId,
+                  input.targetAgentId,
                 )
               : await builds.destinations(input as never),
         }),

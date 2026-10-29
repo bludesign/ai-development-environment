@@ -172,6 +172,51 @@ export function createCodebaseToolGroup(
         annotations: { ...WRITE_ANNOTATIONS, idempotentHint: false },
       }),
       serviceTool({
+        name: "delete_codebase_branches",
+        title: "Delete reviewed local branches",
+        description:
+          "Delete selected local branches only when their tips still match the reviewed commit IDs. Protected branches remain protected; returns jobs and per-target skipped outcomes.",
+        inputSchema: z.object({
+          targets: z
+            .array(
+              z.object({
+                codebaseId: z.string().min(1).max(500),
+                branch: z.string().min(1).max(1000),
+                expectedHeadSha: z
+                  .string()
+                  .regex(/^(?:[a-fA-F0-9]{40}|[a-fA-F0-9]{64})$/),
+              }),
+            )
+            .min(1)
+            .max(1000),
+          requestId: z.string().min(1).max(500),
+          force: z.boolean().default(false),
+        }),
+        service: codebases,
+        method: "deleteBranches",
+        resultKey: "result",
+        mapResult: (value) => {
+          const result = value as {
+            jobs: Array<Record<string, unknown>>;
+            skipped: unknown[];
+          };
+          return {
+            jobs: result.jobs.map(
+              ({ id, agentId, codebaseId, kind, status, error }) => ({
+                id,
+                agentId,
+                codebaseId,
+                kind,
+                status,
+                error,
+              }),
+            ),
+            skipped: result.skipped,
+          };
+        },
+        annotations: DESTRUCTIVE_ANNOTATIONS,
+      }),
+      serviceTool({
         name: "update_codebase_repository",
         title: "Update codebase repository",
         description:

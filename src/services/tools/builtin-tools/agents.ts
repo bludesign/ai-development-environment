@@ -15,6 +15,7 @@ import {
   agentSettingsView,
   agentView,
 } from "../builtin-views";
+import { createAgentAdministrationTools } from "./administration-tools";
 
 const EmptyInputSchema = z.object({});
 const AgentViewSchema = z.object({
@@ -88,6 +89,7 @@ export function createAgentToolGroup(
     name: "Agents",
     children: [],
     tools: [
+      ...createAgentAdministrationTools(agents),
       defineTool({
         name: "get_agents",
         title: "Get agents",

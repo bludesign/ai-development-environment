@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { WORKFLOW_CAPABILITY_ACTIONS } from "./capability-actions";
 
 import { requiredConfigSessionPaths } from "./config-descriptors";
 import { configSchemaForKind } from "./config-schema";
@@ -569,6 +570,30 @@ const EXPANSION_STEP_CATALOG: WorkflowCatalogEntry[] = [
 ];
 
 export const WORKFLOW_STEP_CATALOG: readonly WorkflowCatalogEntry[] = [
+  ...WORKFLOW_CAPABILITY_ACTIONS.map((action) =>
+    step(
+      action.kind,
+      action.category,
+      action.label,
+      "SERVER",
+      [],
+      ["steps.<stepId>.output"],
+      {
+        description: `${action.label} through the existing application service.`,
+        details: `Uses the same validated arguments, authorization, and audit trail as ${action.toolName}. The structured result is available at steps.<stepId>.output. Asynchronous operations return their durable operation identifier; use a result trigger or a subsequent read to observe completion.`,
+        mutatesExternal:
+          action.mutates &&
+          ["GitHub", "GitLab", "Signing", "Notifications"].includes(
+            action.category,
+          ),
+        mutatesWorktree:
+          action.mutates &&
+          ["Codebases", "Worktrees", "Signing", "Build Data"].includes(
+            action.category,
+          ),
+      },
+    ),
+  ),
   step(
     "JIRA_LOAD_TICKET",
     "Jira",
@@ -1998,17 +2023,26 @@ const EXPANSION_TRIGGER_CATALOG: WorkflowTriggerCatalogEntry[] = [
     "Signing operation result",
     ["signing.*", "signingProfile.*", "agent.*"],
   ),
-  expansionTrigger(
+  trigger(
     "SIGNING_ASSET_EXPIRING",
     "Signing",
     "Signing asset expiring",
     ["signing.*", "signingProfile.*", "agent.*"],
+    {
+      description:
+        "Fires when a provisioning profile crosses an expiry threshold.",
+      details: `Checks on startup, signing changes, and every minute. Defaults to signingProfile.expiresInDays <= 30; custom threshold paths can use expiresInDays or expiresInSeconds. ${THRESHOLD_NOTE} ${FILTERS_NOTE}`,
+    },
   ),
-  expansionTrigger(
+  trigger(
     "BUILD_DATA_THRESHOLD",
     "Build Data",
     "Build-data threshold",
     ["buildData.*", "agent.*", "worktree.*"],
+    {
+      description: "Fires when sized build-data totals cross a threshold.",
+      details: `Waits until every remaining entry has a known size. Rechecks after sizing or cleanup changes, including a return to a previously observed total. ${THRESHOLD_NOTE} ${FILTERS_NOTE}`,
+    },
   ),
   expansionTrigger(
     "BUILD_DATA_CLEANUP_RESULT",
@@ -2078,6 +2112,91 @@ const EXPANSION_TRIGGER_CATALOG: WorkflowTriggerCatalogEntry[] = [
     "sse.*",
     "endpoint.*",
     "request.*",
+  ]),
+  expansionTrigger("CRASH_REPORT_CHANGED", "Crashes", "Crash report changed", [
+    "crash.*",
+    "change.*",
+  ]),
+  expansionTrigger("DSYM_CHANGED", "Crashes", "dSYM changed", [
+    "dsym.*",
+    "change.*",
+  ]),
+  expansionTrigger(
+    "TELEMETRY_CONSOLE_INGESTED",
+    "Telemetry",
+    "Console entry received",
+    ["telemetry.*"],
+  ),
+  expansionTrigger(
+    "TELEMETRY_ANALYTICS_INGESTED",
+    "Telemetry",
+    "Analytics event received",
+    ["telemetry.*"],
+  ),
+  expansionTrigger("CLI_HEALTH_RESULT", "Agents", "CLI health result", [
+    "cliHealth.*",
+    "agent.*",
+  ]),
+  expansionTrigger(
+    "TAILSCALE_SERVE_STATE_CHANGED",
+    "Tailscale",
+    "Tailscale Serve state changed",
+    ["tailscale.*"],
+  ),
+  expansionTrigger(
+    "TAILSCALE_SERVE_OPERATION_RESULT",
+    "Tailscale",
+    "Tailscale Serve operation result",
+    ["tailscale.*"],
+  ),
+  expansionTrigger(
+    "REPOSITORY_TRANSFER_RESULT",
+    "Repositories",
+    "Repository transfer result",
+    ["repositoryTransfer.*"],
+  ),
+  expansionTrigger("APP_CHANGED", "Apps", "App changed", ["app.*", "change.*"]),
+  expansionTrigger(
+    "COMMAND_DEFINITION_CHANGED",
+    "Commands",
+    "Command definition changed",
+    ["commandDefinition.*", "change.*"],
+  ),
+  expansionTrigger("BUILD_SCRIPT_CHANGED", "Builds", "Build scripts changed", [
+    "change.*",
+  ]),
+  expansionTrigger(
+    "SKILL_DEFINITION_CHANGED",
+    "Skills",
+    "Skill definitions changed",
+    ["change.*"],
+  ),
+  expansionTrigger(
+    "NOTIFICATION_CREATED",
+    "Notifications",
+    "Notification created",
+    ["notification.*"],
+  ),
+  trigger(
+    "ACTION_CENTER_CHANGED",
+    "Notifications",
+    "Action Center attention changed",
+    ["actionCenter.*"],
+    {
+      description: "Fires when the non-workflow attention queue changes.",
+      details:
+        "Observes pending plan, session, build, pull-request and merge-request attention. Active items and workflow items are excluded to prevent workflows triggering themselves. Filters match actionCenter.items or actionCenter.count. " +
+        FILTERS_NOTE,
+    },
+  ),
+  expansionTrigger(
+    "SSE_ENDPOINT_CHANGED",
+    "SSE",
+    "SSE endpoint configuration changed",
+    ["change.*"],
+  ),
+  expansionTrigger("SSE_STORAGE_CHANGED", "SSE", "SSE storage changed", [
+    "change.*",
   ]),
 ];
 
@@ -2445,7 +2564,7 @@ export const WORKFLOW_TRIGGER_CATALOG: readonly WorkflowTriggerCatalogEntry[] =
       {
         description:
           "Fires when a worktree has had uncommitted changes for longer than expected.",
-        details: `Catches work that stalled — an AI session that edited files and was never followed up, or a human who wandered off. Usually a nudge rather than an automatic commit. ${FILTERS_NOTE}`,
+        details: `Tracks continuous dirty time from its first observation, persists the clock across polling and restarts, and resets when the worktree becomes clean. Set durationSeconds (default 3600); checks at least once per minute and fires once per dirty interval. ${FILTERS_NOTE}`,
       },
     ),
     trigger(
