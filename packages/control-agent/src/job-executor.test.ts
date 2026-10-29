@@ -85,20 +85,38 @@ describe("JobExecutor", () => {
     vi.useRealTimers();
   });
 
-  test("limits completion retries and releases the job after persistent failures", async () => {
+  test("retains completion beyond five failures without rerunning a reconciled job", async () => {
     vi.useFakeTimers();
-    const logged = vi.spyOn(console, "error").mockImplementation(() => {});
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    const result = {
+      exitCode: 0,
+      signal: null,
+      timedOut: false,
+      cancelled: false,
+    };
+    const fetchJob = { ...job, kind: "codebase.fetch" };
+    const handler = vi.mocked(handlers[fetchJob.kind]!);
+    handler.mockClear().mockResolvedValue(result);
     const client = {
-      claimJob: vi.fn().mockResolvedValue(job),
+      claimJob: vi.fn().mockResolvedValue(fetchJob),
       completeJob: vi.fn().mockRejectedValue(new Error("offline")),
     };
     const executor = new JobExecutor(client as unknown as AgentGraphQLClient);
-    executor.execute(job);
-    await vi.runAllTimersAsync();
+    executor.execute(fetchJob);
+    await vi.advanceTimersByTimeAsync(15_000);
     expect(client.completeJob).toHaveBeenCalledTimes(5);
-    expect(logged).toHaveBeenLastCalledWith(
-      `Could not report completion for ${job.id}; giving up after 5 attempts:`,
-      "offline",
+    executor.execute({ ...fetchJob, status: "RUNNING" });
+    expect(client.claimJob).toHaveBeenCalledOnce();
+    expect(handler).toHaveBeenCalledOnce();
+
+    client.completeJob.mockResolvedValue({});
+    await vi.advanceTimersByTimeAsync(16_000);
+    expect(client.completeJob).toHaveBeenCalledTimes(6);
+    expect(client.completeJob).toHaveBeenLastCalledWith(
+      job.id,
+      "SUCCEEDED",
+      result,
+      undefined,
     );
     expect(executor.cancel(job.id)).toBe(false);
     await executor.cancelAll();

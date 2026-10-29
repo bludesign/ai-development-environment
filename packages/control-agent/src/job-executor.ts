@@ -4,11 +4,7 @@ import { closeAllWorktreeWatches } from "./handlers/worktrees.js";
 import type { ProcessResult } from "./process-runner.js";
 import { refreshFetchedCodebase } from "./refresh-fetched-codebase.js";
 import { RepositoryCoordinator } from "./repository-coordinator.js";
-import {
-  isRetryableAgentError,
-  MAX_AGENT_REQUEST_ATTEMPTS,
-  waitForAgentRetry,
-} from "./request-errors.js";
+import { isRetryableAgentError, waitForAgentRetry } from "./request-errors.js";
 
 export class JobExecutor {
   private readonly running = new Map<
@@ -132,7 +128,9 @@ export class JobExecutor {
       console.error(`Job ${claimed.id} failed:`, completionError);
     }
 
-    for (let attempt = 1; attempt <= MAX_AGENT_REQUEST_ATTEMPTS; attempt++) {
+    // Keep the result and the running entry until the server accepts completion.
+    // Releasing this entry during an outage lets reconciliation rerun the handler.
+    for (let attempt = 1; ; attempt++) {
       try {
         await this.client.completeJob(
           claimed.id,
@@ -143,10 +141,7 @@ export class JobExecutor {
         return;
       } catch (error) {
         if (this.stopping) return;
-        if (
-          !isRetryableAgentError(error) ||
-          attempt === MAX_AGENT_REQUEST_ATTEMPTS
-        ) {
+        if (!isRetryableAgentError(error)) {
           console.error(
             `Could not report completion for ${claimed.id}; giving up after ${attempt} attempts:`,
             error instanceof Error ? error.message : error,
@@ -157,7 +152,7 @@ export class JobExecutor {
           `Could not report completion for ${claimed.id}; retrying:`,
           error instanceof Error ? error.message : error,
         );
-        const delay = Math.min(30_000, 1_000 * 2 ** (attempt - 1));
+        const delay = Math.min(30_000, 1_000 * 2 ** Math.min(attempt - 1, 5));
         await waitForAgentRetry(delay, this.shutdown.signal);
         if (this.stopping) return;
       }

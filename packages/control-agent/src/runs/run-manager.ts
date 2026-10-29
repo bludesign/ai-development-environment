@@ -474,7 +474,14 @@ export class RunManager {
       journal,
       adapter,
       baseline,
-    );
+    ).catch((error) => {
+      if (!this.stopped) {
+        console.error(
+          `Run ${run.id} finalization failed:`,
+          error instanceof Error ? error.message : error,
+        );
+      }
+    });
     const requestedAfterStart = this.interruptionRequests.get(run.id);
     if (requestedAfterStart)
       await this.interruptActive(active, requestedAfterStart);
@@ -504,7 +511,7 @@ export class RunManager {
           baseline,
           finalCheckpoint,
         );
-        await this.retry(() =>
+        await this.retryFinalization(() =>
           this.client.reportRunCheckpoint(run.id, attemptId, {
             ...finalCheckpoint,
             diffPatch: comparison.rollbackPatch,
@@ -524,14 +531,14 @@ export class RunManager {
             .catch(() => undefined);
         }
       }
-      await this.retry(() =>
+      await this.retryFinalization(() =>
         this.client.finishRunAttempt(attemptId, {
           status: completion.status,
           finalOutput: completion.finalOutput,
           error: completion.error,
         }),
       );
-      await this.retry(() =>
+      await this.retryFinalization(() =>
         this.client.completeRunCommand(
           command.id,
           completion.status === "FAILED" ? "FAILED" : "SUCCEEDED",
@@ -539,13 +546,14 @@ export class RunManager {
         ),
       );
     } catch (error) {
-      await this.retry(() =>
+      if (this.stopped) return;
+      await this.retryFinalization(() =>
         this.client.finishRunAttempt(attemptId, {
           status: "FAILED",
           error: error instanceof Error ? error.message : String(error),
         }),
       );
-      await this.retry(() =>
+      await this.retryFinalization(() =>
         this.client.completeRunCommand(
           command.id,
           "FAILED",
@@ -982,6 +990,12 @@ export class RunManager {
         this.importTimer.unref();
       }
     }
+  }
+
+  private retryFinalization<T>(operation: () => Promise<T>): Promise<T> {
+    // Completion must survive transient outages without replaying the provider
+    // or changing its result. Permanent errors and shutdown still stop retries.
+    return this.retry(operation, Infinity);
   }
 
   private async retry<T>(
