@@ -1193,14 +1193,17 @@ export class GitLabService {
     };
   }
 
-  private async recordRateLimit(metadata: RateLimit): Promise<void> {
+  private async recordRateLimit(
+    metadata: RateLimit,
+    resource = "REST",
+  ): Promise<void> {
     if (metadata.limit === null || metadata.remaining === null) return;
     const prisma = await getPrismaClient();
     await prisma.gitLabRateLimitSnapshot.upsert({
-      where: { resource: "REST" },
+      where: { resource },
       create: {
         id: randomUUID(),
-        resource: "REST",
+        resource,
         limit: metadata.limit,
         remaining: metadata.remaining,
         resetAt: metadata.resetAt,
@@ -2410,6 +2413,134 @@ export class GitLabService {
       invalidateProjectId: input.projectId,
     });
     return mapMergeRequest(data);
+  }
+
+  /** Reviewer reads use the same instance boundary, credentials and REST cache. */
+  async reviewerRest<T>(
+    path: string,
+    query: Query = {},
+    force = false,
+    worktree = false,
+  ): Promise<T> {
+    return (
+      await this.get<T>({
+        path,
+        query,
+        operation: "GitLabReviewerDiscovery",
+        source: worktree ? "WORKTREES" : "GITLAB_SETTINGS",
+        force,
+        allowStaleOnError: false,
+      })
+    ).data;
+  }
+
+  /** GraphQL supplies CODEOWNERS section identity omitted by the REST API. */
+  async reviewerGraphql<T>(
+    query: string,
+    variables: Record<string, unknown>,
+  ): Promise<T> {
+    const connection = await this.connection();
+    const endpoint = `${connection.baseUrl.replace(/\/+$/, "")}/api/graphql`;
+    const url = new URL(endpoint);
+    url.searchParams.set("query", query);
+    url.searchParams.set("variables", JSON.stringify(variables));
+    const startedAt = Date.now();
+    let statusCode: number | null = null;
+    try {
+      const response = await fetch(url, {
+        headers: {
+          Accept: "application/json",
+          Authorization: `Bearer ${connection.token}`,
+        },
+        cache: "no-store",
+        redirect: "manual",
+        signal: AbortSignal.timeout(30_000),
+      });
+      statusCode = response.status;
+      const rateLimit = parseGitLabRateLimitHeaders(response.headers);
+      await this.recordRateLimit(rateLimit, "GRAPHQL");
+      const body = (await response.json()) as {
+        data?: T;
+        errors?: Array<{ message?: string }>;
+      };
+      if (!response.ok || body.errors?.length || !body.data) {
+        throw new GitLabRequestError(
+          body.errors
+            ?.map((error) => error.message)
+            .filter(Boolean)
+            .join("; ") || `GitLab GraphQL request failed (${response.status})`,
+          response.status,
+        );
+      }
+      await this.logCall({
+        method: "GET",
+        endpoint,
+        operation: "GitLabReviewerApprovalRules",
+        requestSource: "WORKTREES",
+        requestSummary: stableStringify({ variables }),
+        source: "LIVE",
+        durationMs: Date.now() - startedAt,
+        statusCode,
+        rateLimit,
+      });
+      return body.data;
+    } catch (error) {
+      await this.logCall({
+        method: "GET",
+        endpoint,
+        operation: "GitLabReviewerApprovalRules",
+        requestSource: "WORKTREES",
+        requestSummary: stableStringify({ variables }),
+        source: "ERROR",
+        durationMs: Date.now() - startedAt,
+        statusCode,
+        error: sanitizedError(error, connection.token),
+      });
+      throw new GitLabRequestError(
+        sanitizedError(error, connection.token),
+        statusCode,
+      );
+    }
+  }
+
+  async addMergeRequestReviewers(input: {
+    projectId: string;
+    iid: number;
+    expectedId: string;
+    reviewerIds: string[];
+  }): Promise<void> {
+    const path = `/projects/${encodeURIComponent(input.projectId)}/merge_requests/${input.iid}`;
+    const current = (
+      await this.get<RawGitLabMergeRequest>({
+        path,
+        operation: "GitLabReviewerAssignmentState",
+        source: "WORKTREES",
+        force: true,
+        allowStaleOnError: false,
+      })
+    ).data;
+    if (String(current.id) !== input.expectedId || current.state !== "opened") {
+      throw new Error(
+        "The merge request changed or is no longer open. Refresh before assigning reviewers.",
+      );
+    }
+    const reviewerIds = [
+      ...new Set([
+        ...(current.reviewers ?? []).map((user) => user.id),
+        ...input.reviewerIds.map((id) => Number(id)),
+      ]),
+    ];
+    if (reviewerIds.some((id) => !Number.isSafeInteger(id) || id <= 0)) {
+      throw new Error("Reviewer IDs must be valid GitLab user IDs");
+    }
+    await this.mutate({
+      method: "PUT",
+      path,
+      operation: "GitLabAssignReviewers",
+      source: "WORKTREES",
+      body: { reviewer_ids: reviewerIds },
+      invalidateProjectId: input.projectId,
+    });
   }
 
   async submitReview(input: {

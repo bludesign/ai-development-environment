@@ -1423,7 +1423,7 @@ export class GitHubService {
         error: sanitized,
         rateLimit,
       });
-      throw new Error(sanitized);
+      throw new GitHubRequestError(sanitized, response.status, rateLimit);
     }
     await record({ statusCode: response.status, rateLimit });
     return body as T;
@@ -6181,7 +6181,10 @@ export class GitHubService {
     number: number;
     reviewers?: string[] | null;
     teamReviewers?: string[] | null;
+    union?: boolean;
+    requestSource?: GitHubRequestSource;
   }): Promise<GitHubPullRequestDetail> {
+    const requestSource = input.requestSource ?? "WORKFLOW_AUTOMATION";
     const { owner, name } = normalizeGitHubRepositoryName(
       `${input.owner}/${input.name}`,
     );
@@ -6189,7 +6192,7 @@ export class GitHubService {
       owner,
       name,
       input.number,
-      "WORKFLOW_AUTOMATION",
+      requestSource,
     );
     if (!pullRequest) throw new Error("Pull request was not found");
     const reviewers = [
@@ -6214,7 +6217,7 @@ export class GitHubService {
         `query WorkflowReviewer($login: String!) { user(login: $login) { id } }`,
         { login },
         token,
-        { requestSource: "WORKFLOW_AUTOMATION" },
+        { requestSource },
       );
       if (!data.user) throw new Error(`GitHub user was not found: ${login}`);
       userIds.push(data.user.id);
@@ -6229,7 +6232,7 @@ export class GitHubService {
         }`,
         { organization: owner, slug },
         token,
-        { requestSource: "WORKFLOW_AUTOMATION" },
+        { requestSource },
       );
       const team = data.organization?.team;
       if (!team) throw new Error(`GitHub team was not found: ${slug}`);
@@ -6240,27 +6243,118 @@ export class GitHubService {
         $pullRequestId: ID!
         $userIds: [ID!]
         $teamIds: [ID!]
+        $union: Boolean
       ) {
         requestReviews(input: {
           pullRequestId: $pullRequestId
           userIds: $userIds
           teamIds: $teamIds
+          union: $union
         }) { pullRequest { id } }
       }`,
-      { pullRequestId: pullRequest.id, userIds, teamIds },
+      { pullRequestId: pullRequest.id, userIds, teamIds, union: input.union },
       token,
-      { requestSource: "WORKFLOW_AUTOMATION" },
+      { requestSource },
     );
     await this.clearCache();
     const detail = await this.pullRequest(
       owner,
       name,
       input.number,
-      "WORKFLOW_AUTOMATION",
+      requestSource,
     );
     if (!detail)
       throw new Error("The updated pull request could not be loaded");
     return detail;
+  }
+
+  /** Server-side reviewer discovery shares PAT handling, telemetry and rate limits. */
+  async reviewerRest<T>(path: string, worktree = false): Promise<T> {
+    const root = new URL(`${GITHUB_API_BASE_URL}/`);
+    const url = new URL(path.replace(/^\//, ""), root);
+    if (
+      !path.startsWith("/") ||
+      url.origin !== root.origin ||
+      !url.pathname.startsWith(root.pathname)
+    ) {
+      throw new Error(
+        "GitHub reviewer requests must stay within the configured API",
+      );
+    }
+    return this.restRequest<T>(
+      url.toString(),
+      GITHUB_REST_OPERATIONS.reviewers.discovery,
+      await this.requireToken(),
+      worktree ? "WORKTREES" : "CODEBASE_REPOSITORY",
+    );
+  }
+
+  async reviewerGraphql<T>(
+    query: string,
+    variables: Record<string, unknown>,
+    worktree = false,
+  ): Promise<T> {
+    return this.request<T>(query, variables, await this.requireToken(), {
+      requestSource: worktree ? "WORKTREES" : "CODEBASE_REPOSITORY",
+      force: true,
+      allowStaleOnError: false,
+    });
+  }
+
+  /** Additive UI assignment returns after the write, without detail hydration. */
+  async addPullRequestReviewers(input: {
+    owner: string;
+    name: string;
+    number: number;
+    expectedId: string;
+    reviewers: Array<{ id: string; username: string }>;
+  }): Promise<void> {
+    const { owner, name } = normalizeGitHubRepositoryName(
+      `${input.owner}/${input.name}`,
+    );
+    const current = await this.reviewerRest<{
+      id: number;
+      node_id: string;
+      state: string;
+      merged?: boolean;
+    }>(
+      `/repos/${encodeURIComponent(owner)}/${encodeURIComponent(name)}/pulls/${input.number}`,
+      true,
+    );
+    if (
+      ![String(current.id), current.node_id].includes(input.expectedId) ||
+      current.state !== "open" ||
+      current.merged
+    ) {
+      throw new Error(
+        "The pull request changed or is no longer open. Refresh before assigning reviewers.",
+      );
+    }
+    const users = await mapIntegrationRequests(
+      input.reviewers,
+      async (person) => {
+        const user = await this.reviewerRest<{ id: number; node_id: string }>(
+          `/users/${encodeURIComponent(person.username)}`,
+          true,
+        );
+        if (String(user.id) !== person.id || !user.node_id)
+          throw new Error(
+            "A reviewer identity changed. Reload reviewer options before assigning.",
+          );
+        return user.node_id;
+      },
+    );
+    await this.request(
+      `mutation AssignWorktreeCodeReviewers($pullRequestId: ID!, $userIds: [ID!]!) {
+        requestReviews(input: { pullRequestId: $pullRequestId, userIds: $userIds, union: true }) { pullRequest { id } }
+      }`,
+      { pullRequestId: current.node_id, userIds: [...new Set(users)] },
+      await this.requireToken(),
+      { requestSource: "WORKTREES" },
+    );
+    // The external write succeeded. A cache maintenance failure must not invite
+    // a repeated request or be presented as an assignment failure.
+    await this.clearCache().catch(() => undefined);
   }
 
   async dispatchWorkflow(input: {

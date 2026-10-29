@@ -1,5 +1,7 @@
 import type { RepositoryTransferService } from "@/services/repository-transfer/repository-transfer.service";
 import { createRepositoryTransferResolvers } from "./resolvers/repository-transfer";
+import { createReviewerResolvers } from "./resolvers/reviewers";
+import type { ReviewersService } from "@/services/reviewers/service";
 import {
   buildSubgraphSchema,
   type BuildSubgraphSchemaInput,
@@ -127,6 +129,7 @@ export const createSchema = (
   sseService: SseService,
   crashesService: CrashesService,
   repositoryTransferService: RepositoryTransferService,
+  reviewersService: ReviewersService,
 ): GraphQLSchema => {
   const resolvers = mergeResolvers([
     createHealthResolvers(prismaService),
@@ -167,6 +170,7 @@ export const createSchema = (
     createSseResolvers(sseService),
     createCrashResolvers(crashesService),
     createRepositoryTransferResolvers(repositoryTransferService),
+    createReviewerResolvers(reviewersService),
   ]);
 
   return buildSubgraphSchema([

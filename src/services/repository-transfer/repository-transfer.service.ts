@@ -20,6 +20,7 @@ import {
 import {
   agentEventBus,
   CODEBASE_CHANGED_TOPIC,
+  WORKTREE_CHANGED_TOPIC,
   COMMANDS_CHANGED_TOPIC,
   BUILD_SCRIPTS_CHANGED_TOPIC,
   SKILLS_CHANGED_TOPIC,
@@ -39,6 +40,11 @@ import {
   MAX_PREPARATION_TOTAL_BYTES,
 } from "@/services/worktrees/preparations";
 import { RepositoryCloneService } from "./clone.service";
+import {
+  transferredReviewerPoolsSchema,
+  type ReviewersService,
+  type TransferredReviewerPools,
+} from "@/services/reviewers/service";
 import {
   TRANSFER_FORMAT,
   TRANSFER_VERSION,
@@ -141,6 +147,7 @@ export class RepositoryTransferService {
     private readonly commands: CommandsService,
     private readonly github: GitHubService,
     private readonly skills?: SkillsService,
+    private readonly reviewers?: ReviewersService,
   ) {}
 
   async exportPreview(input: TransferExportInput) {
@@ -250,6 +257,10 @@ export class RepositoryTransferService {
             skillGroups: { include: { group: true } },
             buildScripts: { orderBy: { position: "asc" } },
             codebases: { orderBy: { id: "asc" } },
+            reviewerPools: {
+              include: { members: true },
+              orderBy: { key: "asc" },
+            },
           },
         });
         entity.name = repo.name;
@@ -260,6 +271,23 @@ export class RepositoryTransferService {
             repo.canonicalOrigin,
             repo.codebases[0]?.observedOrigin,
           ),
+          reviewerPools: repo.reviewerPools.map((pool) => ({
+            key: pool.key,
+            name: pool.name,
+            kind: pool.kind,
+            provider: pool.provider,
+            repositoryIdentity: pool.repositoryIdentity,
+            ref: pool.discoveryRef,
+            reviewers: pool.members.map(
+              ({ userId, username, name, avatarUrl, url }) => ({
+                id: userId,
+                username,
+                name,
+                avatarUrl,
+                url,
+              }),
+            ),
+          })),
         };
         for (const preparation of repo.preparations) {
           const child: TransferEntity = {
@@ -580,7 +608,15 @@ export class RepositoryTransferService {
         }));
       case "REPOSITORY":
         return (
-          await p.codebaseRepository.findMany({ orderBy: { id: "asc" } })
+          await p.codebaseRepository.findMany({
+            orderBy: { id: "asc" },
+            include: {
+              reviewerPools: {
+                include: { members: true },
+                orderBy: { key: "asc" },
+              },
+            },
+          })
         ).map((v) => ({
           id: v.id,
           label: v.name,
@@ -588,6 +624,23 @@ export class RepositoryTransferService {
           value: {
             ...pick(v, [...repositoryFields, "canonicalOrigin"]),
             revision: v.updatedAt.toISOString(),
+            reviewerPools: v.reviewerPools.map((pool) => ({
+              key: pool.key,
+              name: pool.name,
+              kind: pool.kind,
+              provider: pool.provider,
+              repositoryIdentity: pool.repositoryIdentity,
+              ref: pool.discoveryRef,
+              reviewers: pool.members.map(
+                ({ userId, username, name, avatarUrl, url }) => ({
+                  id: userId,
+                  username,
+                  name,
+                  avatarUrl,
+                  url,
+                }),
+              ),
+            })),
           },
         }));
       case "COMMAND":
@@ -1311,6 +1364,27 @@ export class RepositoryTransferService {
           value.fields,
           value.existing?.value,
         );
+        if (
+          value.entity.kind === "REPOSITORY" &&
+          Object.hasOwn(value.fields, "reviewerPools")
+        ) {
+          const pools = transferredReviewerPoolsSchema.parse(
+            value.fields.reviewerPools,
+          );
+          if (pools.length && !this.reviewers)
+            throw new Error(
+              "Reviewer discovery is unavailable. Deselect Code Reviewers in this import.",
+            );
+          if (this.reviewers)
+            value.fields.reviewerPools =
+              await this.reviewers.validateTransferredPools(
+                {
+                  id: value.id,
+                  canonicalOrigin: String(value.fields.canonicalOrigin),
+                },
+                pools,
+              );
+        }
       } catch (error) {
         blockers.push(`${value.entity.name}: ${errorMessage(error)}`);
       }
@@ -1613,6 +1687,10 @@ export class RepositoryTransferService {
               label: "Jira branch regex",
             });
         }
+        if (Object.hasOwn(f, "reviewerPools"))
+          f.reviewerPools = transferredReviewerPoolsSchema.parse(
+            f.reviewerPools,
+          );
         return f;
       }
       case "PREPARATION": {
@@ -1902,7 +1980,7 @@ export class RepositoryTransferService {
         )) {
           const data = pick(
             e.fields,
-            repositoryFields,
+            repositoryFields.filter((field) => field !== "reviewerPools"),
           ) as Prisma.CodebaseRepositoryUncheckedUpdateInput;
           await tx.codebaseRepository.upsert({
             where: { id: e.id },
@@ -1915,6 +1993,23 @@ export class RepositoryTransferService {
             } as Prisma.CodebaseRepositoryUncheckedCreateInput,
             update: data,
           });
+          if (Object.hasOwn(e.fields, "reviewerPools")) {
+            if (this.reviewers)
+              await this.reviewers.applyTransferredPools(
+                tx,
+                e.id,
+                e.fields.reviewerPools as TransferredReviewerPools,
+              );
+            else {
+              await tx.repositoryReviewerPool.deleteMany({
+                where: { repositoryId: e.id },
+              });
+              await tx.codebaseRepository.update({
+                where: { id: e.id },
+                data: { hasConfiguredCodeReviewers: false },
+              });
+            }
+          }
         }
         const app = entries.find((e) => e.entity.kind === "APP");
         if (app && app.action !== "KEEP") {
@@ -2335,6 +2430,9 @@ export class RepositoryTransferService {
       buildScriptsChanged: true,
     });
     agentEventBus.publish(SKILLS_CHANGED_TOPIC, { skillsChanged: {} });
+    agentEventBus.publish(WORKTREE_CHANGED_TOPIC, {
+      worktreeOverviewChanged: { worktreeId: null, codebaseId: null },
+    });
   }
 
   async syncOverview(appId: string) {

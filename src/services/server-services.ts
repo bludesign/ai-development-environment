@@ -1,5 +1,7 @@
 import { RepositoryCloneService } from "@/services/repository-transfer/clone.service";
 import { RepositoryTransferService } from "@/services/repository-transfer/repository-transfer.service";
+import { ReviewersService } from "@/services/reviewers/service";
+import { ReviewerProviders } from "@/services/reviewers/providers";
 import "server-only";
 
 import { AgentControlService } from "@/services/agent-control";
@@ -87,6 +89,7 @@ export type ServerServices = {
   actionCenterService: ActionCenterService;
   appsService: AppsService;
   repositoryTransferService: RepositoryTransferService;
+  reviewersService: ReviewersService;
   globalSearchService: GlobalSearchService;
   cliHealthService: CliHealthService;
   tailscaleServeService: TailscaleServeService;
@@ -195,6 +198,10 @@ function createServerServices(): ServerServices {
     gitHubPipelineStatusService,
     gitLabService,
   );
+  const reviewersService = new ReviewersService(
+    new ReviewerProviders(gitHubService, gitLabService),
+    (id) => worktreesService.refreshPullRequest(id),
+  );
   const actionCenterRequests = new ActionCenterRequests(
     gitHubService,
     gitLabService,
@@ -221,6 +228,7 @@ function createServerServices(): ServerServices {
     commandsService,
     gitHubService,
     skillsService,
+    reviewersService,
   );
   void repositoryCloneService
     .recover()
@@ -379,6 +387,7 @@ function createServerServices(): ServerServices {
     actionCenterService,
     appsService,
     repositoryTransferService,
+    reviewersService,
     globalSearchService,
     cliHealthService,
     tailscaleServeService,

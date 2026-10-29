@@ -56,10 +56,14 @@ vi.mock("@/components/worktrees/worktree-navigation", () => ({
     `/dashboard/worktrees/${worktreeId}`,
 }));
 
-vi.mock("@/components/worktrees/worktrees-page", () => ({
+vi.mock("@/components/worktrees/worktrees-page", async (importOriginal) => ({
   BaseFreshnessBadge: () => null,
   OriginStatusBadges: () => null,
-  PrimaryWorktreeActions: () => null,
+  PrimaryWorktreeActions: (
+    await importOriginal<
+      typeof import("@/components/worktrees/worktrees-page")
+    >()
+  ).PrimaryWorktreeActions,
   PullRequestBadges: () => null,
   displayedWorktreePath: (path: string) => path,
 }));
@@ -150,7 +154,12 @@ describe("RunWorktreeCards", () => {
         overviewVariables.push(variables);
         const count = overviewRequests === 1 ? 50 : 60;
         return {
-          worktreeOverview: { entry },
+          worktreeOverview: {
+            entry,
+            agents: [
+              { agent: entry.agentGroup.agent, codebases: [entry.group] },
+            ],
+          },
           builds: {
             items: Array.from({ length: count }, (_, index) => ({
               id: `build-${index}`,
@@ -190,4 +199,28 @@ describe("RunWorktreeCards", () => {
     });
     expect(screen.getByText("build-count:60")).toBeDefined();
   });
+
+  test.each([true, false])(
+    "renders reviewer assignment from run worktree actions only when allowed: %s",
+    async (allowed) => {
+      const next = {
+        ...entry,
+        worktree: { ...entry.worktree, canAssignReviewers: allowed },
+      };
+      request.mockResolvedValue({
+        worktreeOverview: {
+          entry: next,
+          agents: [{ agent: next.agentGroup.agent, codebases: [next.group] }],
+        },
+        builds: { items: [], nextCursor: null },
+      } as never);
+      render(<RunWorktreeCards worktreeId="worktree-1" />);
+      await screen.findByText("build-count:0");
+      const assign = screen.queryByRole("button", { name: "Assign reviewers" });
+      if (allowed) {
+        expect(assign).not.toBeNull();
+        expect(assign!.hasAttribute("disabled")).toBe(false);
+      } else expect(assign).toBeNull();
+    },
+  );
 });

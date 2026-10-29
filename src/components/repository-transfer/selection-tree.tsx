@@ -53,11 +53,13 @@ export function TransferSelectionTree({
 }) {
   const t = useTranslations("repositoryTransfer");
   const codebasesT = useTranslations("codebases");
+  const reviewersT = useTranslations("reviewers");
   const settingLabels: Record<string, string> = {
     name: codebasesT("name"),
     description: codebasesT("repositoryDescription"),
     jiraBranchRegex: codebasesT("jiraBranchRegex"),
     keepBaseBranchUpToDate: codebasesT("keepBaseBranchUpToDate"),
+    reviewerPools: reviewersT("title"),
   };
   const parents = new Map(items.map((item) => [item.key, item.parentKey]));
   const children = new Map<string | null, TransferItem[]>();

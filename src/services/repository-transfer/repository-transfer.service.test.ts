@@ -34,6 +34,7 @@ import type { GitHubService } from "@/services/github";
 import { emptyWorkflowDefinition } from "@/lib/workflows/definition";
 import { RepositoryCloneService } from "./clone.service";
 import { RepositoryTransferService } from "./repository-transfer.service";
+import { ReviewersService } from "@/services/reviewers/service";
 import {
   parseTransferPackage,
   type TransferPackage,
@@ -1110,3 +1111,111 @@ function validPublished(name: string) {
     ],
   };
 }
+
+test("reviewer pools round-trip through transfer with destination eligibility validation", async () => {
+  const reviewer = {
+    id: "123",
+    username: "alice",
+    name: "Alice",
+    avatarUrl: null,
+    url: null,
+  };
+  const reviewers = new ReviewersService({
+    discover: vi.fn(async (repository) => {
+      const identity = `GITHUB:github.com:${repository.id === "source" ? "42" : "99"}`;
+      return {
+        provider: "GITHUB" as const,
+        repositoryIdentity: identity,
+        ref: "main",
+        defaultRef: "main",
+        refs: ["main"],
+        pools: [
+          {
+            key: `${identity}:general`,
+            name: "General",
+            kind: "GENERAL" as const,
+            candidates: [reviewer],
+          },
+        ],
+        requirements: [],
+        issues: [],
+        discoveryComplete: true,
+      };
+    }),
+    assign: vi.fn(),
+  });
+  service = new RepositoryTransferService(
+    service.clones,
+    {} as CommandsService,
+    {} as GitHubService,
+    undefined,
+    reviewers,
+  );
+  await reviewers.saveRepositoryCodeReviewers({
+    repositoryId: "source",
+    pools: [{ key: "GITHUB:github.com:42:general", reviewerIds: ["123"] }],
+  });
+  const value = await input();
+  await apply(value, "reviewer-transfer");
+  const saved = await reviewers.exportPools("destination");
+  expect(saved).toEqual([
+    expect.objectContaining({
+      key: "GITHUB:github.com:99:general",
+      repositoryIdentity: "GITHUB:github.com:99",
+      reviewers: [reviewer],
+    }),
+  ]);
+  expect(
+    (
+      await prisma.codebaseRepository.findUniqueOrThrow({
+        where: { id: "destination" },
+      })
+    ).hasConfiguredCodeReviewers,
+  ).toBe(true);
+
+  const pack = structuredClone(value.payload) as TransferPackage;
+  delete pack.entities.find((entity) => entity.kind === "REPOSITORY")!.fields
+    .reviewerPools;
+  await apply({ ...value, payload: pack }, "old-package");
+  expect(await reviewers.exportPools("destination")).toEqual(saved);
+});
+
+test("unresolved transferred reviewers block preview and can be omitted independently", async () => {
+  const reviewers = new ReviewersService({
+    discover: vi.fn(),
+    assign: vi.fn(),
+  });
+  vi.spyOn(reviewers, "validateTransferredPools").mockRejectedValue(
+    new Error("Omit reviewerPools: destination group is unavailable"),
+  );
+  service = new RepositoryTransferService(
+    service.clones,
+    {} as CommandsService,
+    {} as GitHubService,
+    undefined,
+    reviewers,
+  );
+  const pack = await service.export({ scope: "REPOSITORY", id: "source" });
+  const root = pack.entities.find((entity) => entity.kind === "REPOSITORY")!;
+  root.fields.reviewerPools = [
+    {
+      key: "GITHUB:github.com:42:general",
+      name: "General",
+      kind: "GENERAL",
+      provider: "GITHUB",
+      repositoryIdentity: "GITHUB:github.com:42",
+      ref: "main",
+      reviewers: [],
+    },
+  ];
+  const value = { payload: pack, targetRepositoryId: "destination" };
+  expect((await service.preview(value)).blockers).toContainEqual(
+    expect.stringContaining("Omit reviewerPools"),
+  );
+  vi.mocked(reviewers.validateTransferredPools).mockResolvedValue([]);
+  const omitted = {
+    ...value,
+    excludedKeys: [`${root.key}/field/reviewerPools`],
+  };
+  expect((await service.preview(omitted)).blockers).toEqual([]);
+});

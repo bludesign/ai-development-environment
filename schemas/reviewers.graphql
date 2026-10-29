@@ -1,0 +1,176 @@
+"A person eligible to review code at the connected provider."
+type CodeReviewerPerson {
+  "Provider-scoped stable user identifier."
+  id: ID!
+  "Provider login or username."
+  username: String!
+  "Display name."
+  name: String!
+  "Provider avatar URL, when available."
+  avatarUrl: String
+  "Provider profile URL, when available."
+  url: String
+}
+
+"A repository-wide preferred reviewer pool."
+type CodeReviewerPool {
+  "Stable provider-scoped ownership or rule key."
+  key: String!
+  "Human-readable ownership group or approval rule."
+  name: String!
+  "GENERAL, CODEOWNERS, or APPROVAL_RULE."
+  kind: String!
+  "Currently discoverable eligible members."
+  candidates: [CodeReviewerPerson!]!
+  "Preferred people saved for this group."
+  selectedReviewerIds: [ID!]!
+  "Saved people whose eligibility can no longer be verified."
+  unavailableReviewerIds: [ID!]!
+}
+
+"Reviewer preferences and provider discovery for a repository."
+type RepositoryCodeReviewers {
+  "Canonical repository identifier."
+  repositoryId: ID!
+  "Connected source control provider."
+  provider: String!
+  "Branch used to discover code ownership."
+  ref: String!
+  "Provider default branch."
+  defaultRef: String!
+  "Available discovery branches."
+  refs: [String!]!
+  "Discovered and previously configured reviewer pools."
+  pools: [CodeReviewerPool!]!
+  "Actionable discovery or capability issues."
+  issues: [String!]!
+  "Whether all applicable provider rules could be discovered."
+  discoveryComplete: Boolean!
+}
+
+"One actual approval requirement for this pull or merge request."
+type ReviewerAssignmentRequirement {
+  "Stable requirement identifier."
+  id: ID!
+  "Provider rule or ownership description."
+  name: String!
+  "Preferred reviewer pools contributing candidates."
+  poolKeys: [String!]!
+  "Number of distinct approvals required."
+  requiredApprovals: Int!
+  "People eligible under the provider rule."
+  eligibleReviewerIds: [ID!]!
+  "Eligible configured people available for new requests."
+  candidateReviewerIds: [ID!]!
+  "Valid approving people, distinct from pending requests."
+  approvedReviewerIds: [ID!]!
+  "Eligible people already requested to review."
+  requestedReviewerIds: [ID!]!
+}
+
+"Live reviewer options or a random selection preview."
+type WorktreeReviewerAssignment {
+  "Worktree being reviewed."
+  worktreeId: ID!
+  "Provider request identity to bind subsequent assignment."
+  requestId: ID!
+  "Pull or merge request URL."
+  requestUrl: String!
+  "Connected source control provider."
+  provider: String!
+  "Whether the request remains open."
+  requestOpen: Boolean!
+  "Author, excluded from new reviewer requests."
+  authorId: ID!
+  "People referenced by the options and existing reviews."
+  reviewers: [CodeReviewerPerson!]!
+  "Applicable provider requirements and fallback assignment targets."
+  requirements: [ReviewerAssignmentRequirement!]!
+  "Existing individual reviewer requests."
+  currentReviewerIds: [ID!]!
+  "People whose approvals are currently valid."
+  approvedReviewerIds: [ID!]!
+  "Proposed additions; populated by random preview."
+  selectedReviewerIds: [ID!]!
+  "Discovery issues and unmet assignment targets."
+  issues: [String!]!
+  "Whether all applicable provider rules could be discovered."
+  discoveryComplete: Boolean!
+}
+
+"Preferred people for one discovered group; an empty list clears its pool."
+input CodeReviewerPoolInput {
+  "Discovered stable pool key."
+  key: String!
+  "Provider-scoped user identifiers."
+  reviewerIds: [ID!]!
+}
+
+"Save displayed pools, retaining preferences for other branches."
+input SaveRepositoryCodeReviewersInput {
+  "Canonical repository identifier."
+  repositoryId: ID!
+  "Branch used to validate discovery."
+  ref: String
+  "Pools to update or clear."
+  pools: [CodeReviewerPoolInput!]!
+}
+
+"Add people to the existing reviewers of the loaded request."
+input AssignWorktreeReviewersInput {
+  "Worktree being reviewed."
+  worktreeId: ID!
+  "Expected provider request identity from reviewer options."
+  requestId: ID!
+  "Configured eligible people to request."
+  reviewerIds: [ID!]!
+}
+
+extend type Query {
+  "Discover eligible reviewer groups and load saved preferences."
+  repositoryCodeReviewers(
+    "Canonical repository identifier."
+    repositoryId: ID!
+    "Branch to inspect; defaults to the provider default branch."
+    ref: String
+    "Bypass cached discovery when true."
+    refresh: Boolean
+  ): RepositoryCodeReviewers!
+  "Load live reviewer assignment options for an open request."
+  worktreeReviewerAssignment(
+    "Worktree with an open pull or merge request."
+    worktreeId: ID!
+  ): WorktreeReviewerAssignment!
+  "Choose additional reviewers without sending requests or persisting changes."
+  previewRandomWorktreeReviewers(
+    "Worktree being reviewed."
+    worktreeId: ID!
+    "Expected request identity from current options."
+    requestId: ID!
+    "Manual selections to keep while filling outstanding slots."
+    selectedReviewerIds: [ID!]
+  ): WorktreeReviewerAssignment!
+}
+
+extend type Mutation {
+  "Save preferred reviewers for repository ownership and approval groups."
+  saveRepositoryCodeReviewers(
+    "Displayed reviewer pools to update or clear."
+    input: SaveRepositoryCodeReviewersInput!
+  ): RepositoryCodeReviewers!
+  "Add selected reviewers while preserving existing requests."
+  assignWorktreeReviewers(
+    "Expected request and preferred eligible people to add."
+    input: AssignWorktreeReviewersInput!
+  ): WorktreeReviewerAssignment!
+}
+
+extend type CodebaseRepository {
+  "Whether at least one preferred reviewer has been configured."
+  hasConfiguredCodeReviewers: Boolean!
+}
+
+extend type Worktree {
+  "Whether this worktree has an open PR/MR and configured reviewer pools."
+  canAssignReviewers: Boolean!
+}

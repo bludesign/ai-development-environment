@@ -2,7 +2,7 @@ export const PULL_REQUEST_FIELDS =
   "id number title url repositoryGithubId repositoryNameWithOwner repositoryUrl labels jiraKey pipelineStatus pipelineRevision pipelines { id name status url checkSuiteId canRetry retryUnavailableReason jobs { id name status url canRetry retryUnavailableReason steps { number name status } } } reviewDecision unresolvedReviewThreadCount state isDraft mergeable mergeStateStatus autoMergeEnabled viewerCanEnableAutoMerge viewerCanDisableAutoMerge headRefOid headRefName createdAt";
 
 export const WORKTREE_FIELDS = `
-  id codebaseId gitDirectory folder relativePath primary branch headSha upstream ahead behind syncState
+  id canAssignReviewers codebaseId gitDirectory folder relativePath primary branch headSha upstream ahead behind syncState
   baseBranch baseBranchOverride baseAhead baseBehind hasStagedChanges hasUnstagedChanges rebaseInProgress hasConflicts highlightColor availability statusError
   pushStatus
   ticketKey ticketTitle ticketStatus lastCheckedAt missingAt createdAt updatedAt
