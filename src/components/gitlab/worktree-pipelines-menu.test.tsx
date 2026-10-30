@@ -68,6 +68,54 @@ function openMenu() {
 }
 
 describe("GitLab worktree pipeline menu", () => {
+  test("loads action capabilities only when opened and disables retry until checked", async () => {
+    const gate = Promise.withResolvers<{
+      gitlabPipeline: { canRetry: boolean };
+    }>();
+    request.mockReturnValueOnce(gate.promise as never);
+    const value = { ...pipeline, canRetry: undefined };
+    const view = render(<GitLabWorktreePipelinesMenu pipelines={[value]} />);
+    expect(request).not.toHaveBeenCalled();
+    openMenu();
+    expect(
+      screen
+        .getByRole("menuitem", { name: /Checking actions/ })
+        .getAttribute("aria-disabled"),
+    ).toBe("true");
+    expect(request).toHaveBeenCalledWith(
+      expect.stringContaining("WorktreePipelineActions"),
+      { projectId: "21", pipelineId: "94" },
+      { signal: expect.any(AbortSignal) },
+    );
+    const signal = request.mock.calls[0]![2]!.signal!;
+    await act(async () => gate.resolve({ gitlabPipeline: { canRetry: true } }));
+    expect(
+      screen
+        .getByRole("menuitem", { name: "Retry" })
+        .getAttribute("aria-disabled"),
+    ).not.toBe("true");
+    view.unmount();
+    expect(signal.aborted).toBe(true);
+  });
+
+  test("keeps retry disabled and shows errors when action checks fail", async () => {
+    request.mockRejectedValueOnce(new Error("GitLab timed out"));
+    render(
+      <GitLabWorktreePipelinesMenu
+        pipelines={[{ ...pipeline, canRetry: undefined }]}
+      />,
+    );
+    openMenu();
+    expect((await screen.findByRole("alert")).textContent).toBe(
+      "GitLab timed out",
+    );
+    expect(
+      screen
+        .getByRole("menuitem", { name: "Retry" })
+        .getAttribute("aria-disabled"),
+    ).toBe("true");
+  });
+
   test("retries a native pipeline and refreshes the worktree without activating the card", async () => {
     const onChanged = vi.fn(async () => undefined);
     const onCardClick = vi.fn();

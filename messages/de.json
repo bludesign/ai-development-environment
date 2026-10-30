@@ -2469,7 +2469,8 @@
     "cancelJob": "{job} abbrechen",
     "externalActionResults": "Ergebnisse externer Aktionen",
     "nativeRequest": "Native Anfrage",
-    "externalRequest": "Externe Anfrage"
+    "externalRequest": "Externe Anfrage",
+    "checkingActions": "Aktionen werden geprüft…"
   },
   "gitlabSettings": {
     "title": "GitLab-Zugangsdaten",
@@ -3723,7 +3724,28 @@
     "aiBranchSubmitHelp": "Generieren und bearbeiten Sie einen Namen oder senden Sie ab, um ihn automatisch zu generieren.",
     "generatingBranchName": "Branchname wird generiert…",
     "generateBranchName": "Branchnamen generieren",
-    "regenerateBranchName": "Branchnamen erneut generieren"
+    "regenerateBranchName": "Branchnamen erneut generieren",
+    "loadingStatus": {
+      "SAVED": "Gespeicherte Worktrees",
+      "GITHUB": "GitHub-Pull-Requests",
+      "GITLAB_MERGE_REQUESTS": "GitLab-Merge-Requests",
+      "GITLAB_PIPELINES": "GitLab-Pipelines",
+      "JIRA": "Jira-Zusammenfassungen",
+      "loading": "Wird geladen: {stages}",
+      "updating": "Details werden aktualisiert: {stages}",
+      "starting": "Worktrees werden vorbereitet…",
+      "updated": "Worktrees aktualisiert",
+      "warning": "Mit Warnungen aktualisiert",
+      "details": "Ladedetails",
+      "explanation": "Worktrees werden zuerst geladen. Optionale Details werden unabhängig aktualisiert. Die verstrichene Zeit umfasst Warteschlange und Netzwerk; die Serverzeit misst die Verarbeitung.",
+      "elapsed": "Verstrichen: {time}",
+      "server": "Server: {time}",
+      "pending": "Wartet",
+      "running": "Wird geladen",
+      "complete": "Abgeschlossen",
+      "failed": "Fehlgeschlagen",
+      "retry": "Erneut versuchen"
+    }
   },
   "worktreeDetail": {
     "loading": "Worktree-Details werden geladen…",

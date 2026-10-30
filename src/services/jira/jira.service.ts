@@ -1348,6 +1348,41 @@ export class JiraService {
     return board;
   }
 
+  /** Read summaries in one local query; a cache miss must never contact Jira. */
+  async storedSummaries(
+    issueKeys: string[],
+  ): Promise<Map<string, JiraTicketSummary>> {
+    if (!issueKeys.length) return new Map();
+    const prisma = await getPrismaClient();
+    const rows = await prisma.jiraCachedTicket.findMany({
+      where: {
+        issueKey: { in: [...new Set(issueKeys.map(normalizeIssueKey))] },
+      },
+      select: {
+        issueKey: true,
+        summaryJson: true,
+        detailJson: true,
+        summaryFetchedAt: true,
+        detailFetchedAt: true,
+      },
+    });
+    const summaries = new Map<string, JiraTicketSummary>();
+    for (const row of rows) {
+      const latest =
+        row.detailFetchedAt &&
+        (!row.summaryFetchedAt || row.detailFetchedAt > row.summaryFetchedAt)
+          ? row.detailJson
+          : (row.summaryJson ?? row.detailJson);
+      if (!latest) continue;
+      try {
+        summaries.set(row.issueKey, ticketSummary(JSON.parse(latest)));
+      } catch {
+        /* A damaged cache entry can be refreshed by the optional load. */
+      }
+    }
+    return summaries;
+  }
+
   async summary(
     issueKey: string,
     preferStored = false,

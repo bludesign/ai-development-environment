@@ -2469,7 +2469,8 @@
     "cancelJob": "Annuler {job}",
     "externalActionResults": "Résultats des actions externes",
     "nativeRequest": "Requête native",
-    "externalRequest": "Requête externe"
+    "externalRequest": "Requête externe",
+    "checkingActions": "Vérification des actions…"
   },
   "gitlabSettings": {
     "title": "Identifiants GitLab",
@@ -3723,7 +3724,28 @@
     "aiBranchSubmitHelp": "Générez et modifiez un nom, ou validez pour le générer automatiquement.",
     "generatingBranchName": "Génération du nom de branche…",
     "generateBranchName": "Générer un nom de branche",
-    "regenerateBranchName": "Régénérer le nom de branche"
+    "regenerateBranchName": "Régénérer le nom de branche",
+    "loadingStatus": {
+      "SAVED": "Worktrees enregistrés",
+      "GITHUB": "Pull requests GitHub",
+      "GITLAB_MERGE_REQUESTS": "Merge requests GitLab",
+      "GITLAB_PIPELINES": "Pipelines GitLab",
+      "JIRA": "Résumés Jira",
+      "loading": "Chargement : {stages}",
+      "updating": "Mise à jour des détails : {stages}",
+      "starting": "Préparation des worktrees…",
+      "updated": "Worktrees à jour",
+      "warning": "Mis à jour avec des avertissements",
+      "details": "Détails du chargement",
+      "explanation": "Les worktrees sont chargés en premier. Les détails facultatifs sont mis à jour séparément. Le temps écoulé inclut la file et le réseau ; le temps serveur mesure le traitement.",
+      "elapsed": "Écoulé : {time}",
+      "server": "Serveur : {time}",
+      "pending": "En attente",
+      "running": "Chargement",
+      "complete": "Terminé",
+      "failed": "Échec",
+      "retry": "Réessayer"
+    }
   },
   "worktreeDetail": {
     "loading": "Chargement des détails du worktree…",

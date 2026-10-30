@@ -451,6 +451,8 @@ type WorktreeAgentGroup {
 
 "Represents a worktree overview in the GraphQL API."
 type WorktreeOverview {
+  "Server time spent loading this overview, in milliseconds."
+  durationMs: Float!
   "Agents associated with this worktree overview."
   agents: [WorktreeAgentGroup!]!
   "Tags associated with this worktree overview."
@@ -461,6 +463,33 @@ type WorktreeOverview {
   hiddenCount: Int!
   "Active moves associated with this worktree overview."
   activeMoves: [WorktreeMove!]!
+}
+
+"Optional metadata that can load independently of the saved worktrees."
+enum WorktreeEnrichmentKind {
+  GITHUB
+  GITLAB_MERGE_REQUESTS
+  GITLAB_PIPELINES
+  JIRA
+}
+
+"A worktree whose optional metadata could not be fully refreshed."
+type WorktreeEnrichmentWarning {
+  worktreeId: ID!
+  message: String!
+}
+
+"Metadata for the captured worktree identity. Only the requested kind is refreshed."
+type WorktreeEnrichmentUpdate {
+  worktree: Worktree!
+  canonicalOrigin: String!
+}
+
+"An independent worktree metadata load and its measured server duration."
+type WorktreeEnrichment {
+  updates: [WorktreeEnrichmentUpdate!]!
+  durationMs: Float!
+  warnings: [WorktreeEnrichmentWarning!]!
 }
 
 "Represents a worktree move in the GraphQL API."
@@ -948,9 +977,18 @@ extend type Query {
   worktreeOverview(
     "Scope to the repository containing this worktree, including sibling checkouts needed for move destinations."
     worktreeId: ID
+    "Return saved data without contacting external integrations."
+    savedOnly: Boolean! = false
     "Identifier of an app whose assigned repositories should scope the results."
     appId: ID
   ): WorktreeOverview!
+  "Refresh one kind of optional metadata without blocking the worktree list."
+  worktreeEnrichment(
+    appId: ID
+    worktreeId: ID
+    kind: WorktreeEnrichmentKind!
+    force: Boolean! = false
+  ): WorktreeEnrichment!
   "Returns worktrees."
   hiddenWorktrees(
     "Identifier of an app whose assigned repositories should scope the results."

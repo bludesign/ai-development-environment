@@ -2,7 +2,7 @@
 
 import { ChevronDown, RotateCcw } from "lucide-react";
 import { useTranslations } from "next-intl";
-import { type MouseEvent, useRef, useState } from "react";
+import { type MouseEvent, useEffect, useRef, useState } from "react";
 
 import { Button, buttonVariants } from "@/components/ui/button";
 import {
@@ -27,6 +27,9 @@ import {
   gitLabPipelineStatusClass,
 } from "./pipeline-format";
 
+const capabilityKey = (pipeline: GitLabPipelineView) =>
+  `${pipeline.projectId}:${pipeline.id}:${pipeline.sha}:${pipeline.status}:${pipeline.updatedAt}`;
+
 export function GitLabWorktreePipelinesMenu({
   pipelines,
   onChanged,
@@ -40,6 +43,46 @@ export function GitLabWorktreePipelinesMenu({
   const [error, setError] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
   const actionInFlight = useRef(false);
+  const [open, setOpen] = useState(false);
+  const cache = useRef(new Map<string, boolean>());
+  const [checks, setChecks] = useState<
+    Record<string, { canRetry?: boolean; failed?: boolean }>
+  >({});
+  useEffect(() => {
+    if (!open) return;
+    const controller = new AbortController();
+    for (const pipeline of pipelines) {
+      if (
+        pipeline.canRetry !== undefined ||
+        cache.current.has(capabilityKey(pipeline))
+      )
+        continue;
+      const key = capabilityKey(pipeline);
+      void controlPlaneRequest<{ gitlabPipeline: { canRetry: boolean } }>(
+        `query WorktreePipelineActions($projectId: ID!, $pipelineId: ID!) {
+          gitlabPipeline(projectId: $projectId, pipelineId: $pipelineId) { canRetry }
+        }`,
+        { projectId: pipeline.projectId, pipelineId: pipeline.id },
+        { signal: controller.signal },
+      )
+        .then((data) => {
+          if (controller.signal.aborted) return;
+          cache.current.set(key, data.gitlabPipeline.canRetry);
+          setChecks((previous) => ({
+            ...previous,
+            [key]: { canRetry: data.gitlabPipeline.canRetry },
+          }));
+        })
+        .catch((value: unknown) => {
+          if (controller.signal.aborted) return;
+          setChecks((previous) => ({ ...previous, [key]: { failed: true } }));
+          setError(value instanceof Error ? value.message : String(value));
+        });
+    }
+    return () => controller.abort();
+  }, [open, pipelines]);
+  const canRetry = (pipeline: GitLabPipelineView) =>
+    pipeline.canRetry ?? checks[capabilityKey(pipeline)]?.canRetry ?? false;
   if (!pipelines.length) return null;
 
   const status = aggregateGitLabPipelineStatus(
@@ -47,7 +90,7 @@ export function GitLabWorktreePipelinesMenu({
   );
   const stopPropagation = (event: MouseEvent) => event.stopPropagation();
   const retry = async (pipeline: GitLabPipelineView) => {
-    if (actionInFlight.current || !pipeline.canRetry) return;
+    if (actionInFlight.current || !canRetry(pipeline)) return;
     actionInFlight.current = true;
     setRetrying(pipeline.id);
     setError(null);
@@ -78,7 +121,17 @@ export function GitLabWorktreePipelinesMenu({
   };
 
   return (
-    <DropdownMenu>
+    <DropdownMenu
+      open={open}
+      onOpenChange={(next) => {
+        if (next) {
+          cache.current.clear();
+          setChecks({});
+          setError(null);
+        }
+        setOpen(next);
+      }}
+    >
       <DropdownMenuTrigger asChild>
         <Button
           aria-label={`${t("pipelines")}: ${t(`pipelineStatuses.${status}`)}`}
@@ -138,20 +191,32 @@ export function GitLabWorktreePipelinesMenu({
                 </span>
               </div>
               <DropdownMenuItem
-                aria-busy={retrying === pipeline.id}
+                aria-busy={
+                  retrying === pipeline.id ||
+                  (pipeline.canRetry === undefined &&
+                    checks[capabilityKey(pipeline)] === undefined)
+                }
                 className={buttonVariants({ size: "sm", variant: "outline" })}
-                disabled={retrying !== null || !pipeline.canRetry}
+                disabled={retrying !== null || !canRetry(pipeline)}
                 onSelect={(event) => {
                   event.preventDefault();
                   void retry(pipeline);
                 }}
               >
-                {retrying === pipeline.id ? (
+                {pipeline.canRetry === undefined &&
+                checks[capabilityKey(pipeline)] === undefined ? (
+                  <Spinner aria-hidden="true" />
+                ) : retrying === pipeline.id ? (
                   <Spinner aria-hidden="true" />
                 ) : (
                   <RotateCcw />
                 )}
-                {retrying === pipeline.id ? tp("retrying") : t("retry")}
+                {pipeline.canRetry === undefined &&
+                checks[capabilityKey(pipeline)] === undefined
+                  ? t("checkingActions")
+                  : retrying === pipeline.id
+                    ? tp("retrying")
+                    : t("retry")}
               </DropdownMenuItem>
             </div>
           ))}

@@ -173,8 +173,17 @@ import {
 import { QuickActionsRow } from "./quick-actions-row";
 import { WorktreeDetailPanel } from "./worktree-detail-panel";
 import { WorktreeFetchProgress } from "./worktree-fetch-progress";
+import { WorktreeLoadingStatus } from "./worktree-loading-status";
+import {
+  preserveWorktreeMetadata,
+  useWorktreeLoading,
+} from "./use-worktree-loading";
 import { useWorktreeFetch } from "./use-worktree-fetch";
-import { CODEBASE_FIELDS, WORKTREE_FIELDS } from "./worktree-graphql";
+import {
+  CODEBASE_FIELDS,
+  WORKTREE_FIELDS,
+  WORKTREE_LIST_FIELDS,
+} from "./worktree-graphql";
 import {
   inspectWorktree,
   useLiveWorktree,
@@ -669,6 +678,14 @@ export function WorktreesPage({ appId }: { appId?: string }) {
   const [changesFilter, setChangesFilter] = useState(storedFilters.changes);
   const [branchFilter, setBranchFilter] = useState(storedFilters.branches);
   const latestLoad = useRef(0);
+  const {
+    timings,
+    begin: beginLoad,
+    failed: failLoad,
+    saved: savedLoad,
+    forceNext,
+    retry: retryEnrichment,
+  } = useWorktreeLoading(appId, setOverview);
 
   const overviewOwner = useRef<RefreshCoalescer | null>(null);
   const load = useCallback(
@@ -693,12 +710,14 @@ export function WorktreesPage({ appId }: { appId?: string }) {
   const fetchOverview = useCallback(
     async (signal: AbortSignal) => {
       const request = ++latestLoad.current;
+      beginLoad();
       try {
         const data = await controlPlaneRequest<{
           worktreeOverview: WorktreeOverview;
         }>(
           `query WorktreeOverview($appId: ID) {
-          worktreeOverview(appId: $appId) {
+          worktreeOverview(appId: $appId, savedOnly: true) {
+            durationMs
             hiddenCount
             settings { editorVariant updatedAt }
             tags { id name color createdAt updatedAt }
@@ -724,7 +743,7 @@ export function WorktreesPage({ appId }: { appId?: string }) {
           }
                 repository { id canonicalOrigin displayOrigin name description jiraBranchRegex keepBaseBranchUpToDate createdAt updatedAt }
                 codebase { ${CODEBASE_FIELDS} }
-                worktrees { ${WORKTREE_FIELDS} }
+                worktrees { ${WORKTREE_LIST_FIELDS} }
               }
             }
           }
@@ -733,19 +752,24 @@ export function WorktreesPage({ appId }: { appId?: string }) {
           { signal },
         );
         if (request !== latestLoad.current || signal.aborted) return;
-        setOverview(data.worktreeOverview);
+        setOverview((current) =>
+          preserveWorktreeMetadata(current, data.worktreeOverview),
+        );
+        savedLoad(data.worktreeOverview);
         setLoadError(null);
       } catch (value) {
         if (signal.aborted) return;
         if (request === latestLoad.current && !signal.aborted)
           setLoadError(value instanceof Error ? value.message : String(value));
+        if (request === latestLoad.current)
+          failLoad(value instanceof Error ? value.message : String(value));
         throw value;
       } finally {
         if (request === latestLoad.current && !signal.aborted)
           setLoading(false);
       }
     },
-    [appId],
+    [appId, beginLoad, failLoad, savedLoad],
   );
 
   useJiraTicketChanges(() => void load());
@@ -872,6 +896,7 @@ export function WorktreesPage({ appId }: { appId?: string }) {
           refreshWorktrees
         }`,
       );
+      forceNext();
       await refreshPage();
       setError(null);
     } catch (value) {
@@ -1083,6 +1108,12 @@ export function WorktreesPage({ appId }: { appId?: string }) {
           </ToggleGroup>
         </div>
       </div>
+
+      <WorktreeLoadingStatus
+        timings={timings}
+        onRetry={retryEnrichment}
+        onRetrySaved={() => void load()}
+      />
 
       {fetchOperation.batch && (
         <WorktreeFetchProgress
@@ -4364,7 +4395,7 @@ function HiddenWorktreesDialog({
   const load = useCallback(async () => {
     try {
       const data = await controlPlaneRequest<{ hiddenWorktrees: Worktree[] }>(
-        `query HiddenWorktrees($appId: ID) { hiddenWorktrees(appId: $appId) { ${WORKTREE_FIELDS} } }`,
+        `query HiddenWorktrees($appId: ID) { hiddenWorktrees(appId: $appId) { ${WORKTREE_LIST_FIELDS} } }`,
         { appId: appId ?? null },
       );
       setItems(data.hiddenWorktrees);

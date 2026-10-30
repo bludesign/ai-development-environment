@@ -2469,7 +2469,8 @@
     "cancelJob": "Cancel {job}",
     "externalActionResults": "External action results",
     "nativeRequest": "Native request",
-    "externalRequest": "External request"
+    "externalRequest": "External request",
+    "checkingActions": "Checking actions…"
   },
   "gitlabSettings": {
     "title": "GitLab credentials",
@@ -3723,7 +3724,28 @@
     "aiBranchSubmitHelp": "Generate and edit a name, or submit to generate it automatically.",
     "generatingBranchName": "Generating branch name…",
     "generateBranchName": "Generate branch name",
-    "regenerateBranchName": "Regenerate branch name"
+    "regenerateBranchName": "Regenerate branch name",
+    "loadingStatus": {
+      "SAVED": "Saved worktrees",
+      "GITHUB": "GitHub pull requests",
+      "GITLAB_MERGE_REQUESTS": "GitLab merge requests",
+      "GITLAB_PIPELINES": "GitLab pipelines",
+      "JIRA": "Jira summaries",
+      "loading": "Loading: {stages}",
+      "updating": "Updating details: {stages}",
+      "starting": "Preparing worktrees…",
+      "updated": "Worktrees updated",
+      "warning": "Updated with warnings",
+      "details": "Loading details",
+      "explanation": "Worktrees load first. Optional details update independently. Elapsed time includes the request queue and network; server time measures processing.",
+      "elapsed": "Elapsed: {time}",
+      "server": "Server: {time}",
+      "pending": "Waiting",
+      "running": "Loading",
+      "complete": "Complete",
+      "failed": "Failed",
+      "retry": "Try again"
+    }
   },
   "worktreeDetail": {
     "loading": "Loading worktree details…",

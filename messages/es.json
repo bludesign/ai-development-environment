@@ -2469,7 +2469,8 @@
     "cancelJob": "Cancelar {job}",
     "externalActionResults": "Resultados de acciones externas",
     "nativeRequest": "Solicitud nativa",
-    "externalRequest": "Solicitud externa"
+    "externalRequest": "Solicitud externa",
+    "checkingActions": "Comprobando acciones…"
   },
   "gitlabSettings": {
     "title": "Credenciales de GitLab",
@@ -3723,7 +3724,28 @@
     "aiBranchSubmitHelp": "Genera y edita un nombre, o envía para generarlo automáticamente.",
     "generatingBranchName": "Generando nombre de rama…",
     "generateBranchName": "Generar nombre de rama",
-    "regenerateBranchName": "Volver a generar nombre de rama"
+    "regenerateBranchName": "Volver a generar nombre de rama",
+    "loadingStatus": {
+      "SAVED": "Worktrees guardados",
+      "GITHUB": "Pull requests de GitHub",
+      "GITLAB_MERGE_REQUESTS": "Merge requests de GitLab",
+      "GITLAB_PIPELINES": "Pipelines de GitLab",
+      "JIRA": "Resúmenes de Jira",
+      "loading": "Cargando: {stages}",
+      "updating": "Actualizando detalles: {stages}",
+      "starting": "Preparando worktrees…",
+      "updated": "Worktrees actualizados",
+      "warning": "Actualizado con advertencias",
+      "details": "Detalles de carga",
+      "explanation": "Los worktrees se cargan primero. Los detalles opcionales se actualizan por separado. El tiempo transcurrido incluye la cola y la red; el tiempo del servidor mide el procesamiento.",
+      "elapsed": "Transcurrido: {time}",
+      "server": "Servidor: {time}",
+      "pending": "En espera",
+      "running": "Cargando",
+      "complete": "Completado",
+      "failed": "Error",
+      "retry": "Reintentar"
+    }
   },
   "worktreeDetail": {
     "loading": "Cargando detalles del worktree…",

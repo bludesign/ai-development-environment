@@ -1010,7 +1010,10 @@ describe("WorktreesService", () => {
       }
     ).hydrateGitLabPipelines([target]);
 
-    expect(pipelinesForCommit).toHaveBeenCalledWith("project-1", "head-2");
+    expect(pipelinesForCommit).toHaveBeenCalledWith("project-1", "head-2", {
+      force: true,
+      onWarning: expect.any(Function),
+    });
     expect(target.gitLabPipelines).toEqual([
       expect.objectContaining({
         id: "pipeline-42",
@@ -1050,7 +1053,7 @@ describe("WorktreesService", () => {
       }
     ).hydrateGitLabMergeRequestSummaries([target]);
 
-    expect(mergeRequestSummary).toHaveBeenCalledWith(mergeRequest);
+    expect(mergeRequestSummary).toHaveBeenCalledWith(mergeRequest, undefined);
     expect(target.gitLabMergeRequest).toEqual(
       expect.objectContaining({
         approvalState: "APPROVED",

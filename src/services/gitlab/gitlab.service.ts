@@ -118,6 +118,7 @@ type RateLimit = {
 };
 
 type RawResponse<T> = {
+  servedStale?: boolean;
   data: T;
   status: number;
   headers: Headers;
@@ -967,12 +968,16 @@ export class GitLabService {
   private async enrichMergeRequest(
     mr: GitLabMergeRequestView,
     discussions?: GitLabDiscussionView[],
+    onWarning?: (message: string) => void,
   ) {
     if (!discussions)
       mr = {
         ...mr,
         ...(await this.mergeRequestState(mr.projectId, mr.iid, false).catch(
-          () => mr,
+          () => {
+            onWarning?.("Could not refresh GitLab merge readiness. Try again.");
+            return mr;
+          },
         )),
       };
     const prefix = `/projects/${encodeURIComponent(mr.projectId)}/merge_requests/${mr.iid}`;
@@ -987,7 +992,10 @@ export class GitLabService {
         source: "MERGE_REQUESTS_PAGE",
       })
         .then((r) => r.data)
-        .catch(() => null),
+        .catch(() => {
+          onWarning?.("Could not refresh GitLab approvals. Try again.");
+          return null;
+        }),
       discussions
         ? Promise.resolve(discussions)
         : this.allPages<RawGitLabDiscussion>({
@@ -996,7 +1004,10 @@ export class GitLabService {
             source: "MERGE_REQUESTS_PAGE",
           })
             .then((items) => items.map(mapGitLabDiscussion))
-            .catch(() => null),
+            .catch(() => {
+              onWarning?.("Could not refresh GitLab discussions. Try again.");
+              return null;
+            }),
       this.mergeCoordinator?.summary(mr).catch(() => ({})) ??
         Promise.resolve({}),
     ]);
@@ -1162,6 +1173,11 @@ export class GitLabService {
       body: input.body === undefined ? undefined : JSON.stringify(input.body),
       cache: "no-store",
       redirect: "manual",
+      // Keep the deadline active through response.text(), including slow bodies.
+      signal:
+        !input.method || input.method === "GET"
+          ? AbortSignal.timeout(30_000)
+          : undefined,
     });
     const metadata = parseGitLabRateLimitHeaders(response.headers);
     if (response.status >= 300 && response.status < 400) {
@@ -1273,6 +1289,7 @@ export class GitLabService {
     query?: Query;
     force?: boolean;
     allowStaleOnError?: boolean;
+    maxAgeSeconds?: number;
   }): Promise<RawResponse<T>> {
     const generation = this.cacheGeneration;
     const connection = await this.connection();
@@ -1292,7 +1309,10 @@ export class GitLabService {
     const cached = await prisma.gitLabRestCacheEntry.findUnique({
       where: { cacheKey },
     });
-    const ttl = await this.ttl(input.operation);
+    const ttl = Math.min(
+      await this.ttl(input.operation),
+      input.maxAgeSeconds ?? Infinity,
+    );
     if (
       cached &&
       input.force !== true &&
@@ -1403,6 +1423,7 @@ export class GitLabService {
         });
         return {
           data: json(cached.responseJson) as T,
+          servedStale: true,
           status: 200,
           headers: parseGitLabResponseHeaders(cached.responseHeadersJson),
           endpoint,
@@ -1800,8 +1821,9 @@ export class GitLabService {
 
   async mergeRequestSummary(
     mergeRequest: GitLabMergeRequestView,
+    onWarning?: (message: string) => void,
   ): Promise<GitLabMergeRequestView> {
-    return this.enrichMergeRequest(mergeRequest);
+    return this.enrichMergeRequest(mergeRequest, undefined, onWarning);
   }
 
   async availableProjects(
@@ -2963,12 +2985,14 @@ export class GitLabService {
   async pipelinesForCommit(
     projectId: string,
     headSha: string,
+    options: { force?: boolean; onWarning?: (message: string) => void } = {},
   ): Promise<GitLabPipelineView[]> {
     const response = await this.get<RawGitLabPipeline[]>({
       path: `/projects/${encodeURIComponent(projectId)}/pipelines`,
       operation: "GitLabWorktreePipelines",
       source: "WORKTREES",
-      force: true,
+      force: options.force ?? false,
+      maxAgeSeconds: 30,
       query: {
         sha: headSha,
         per_page: MAX_PAGE_SIZE,
@@ -2977,12 +3001,45 @@ export class GitLabService {
       },
       allowStaleOnError: true,
     });
+    if (response.servedStale)
+      options.onWarning?.(
+        "GitLab pipeline refresh failed or timed out; showing saved status. Try Refresh to retry.",
+      );
     const pipelines = await this.enrichPipelines(
       projectId,
       response.data.map(mapPipeline),
     );
     await this.observePipelines(pipelines);
     return pipelines;
+  }
+
+  /** Saved pipeline status only: no network, action checks, or observation writes. */
+  async storedPipelines(
+    keys: Array<{ projectId: string; headSha: string }>,
+  ): Promise<Map<string, GitLabPipelineView[]>> {
+    if (!keys.length) return new Map();
+    const prisma = await getPrismaClient();
+    const snapshots = await prisma.gitLabPipelineSnapshot.findMany({
+      where: { OR: keys },
+      include: { records: true },
+    });
+    return new Map(
+      snapshots.map((snapshot) => [
+        `${snapshot.projectId}\0${snapshot.headSha}`,
+        snapshot.records.map((record) => ({
+          ...mapPipeline({
+            id: Number(record.pipelineId),
+            project_id: Number(snapshot.projectId),
+            ref: record.ref,
+            sha: snapshot.headSha,
+            source: record.source,
+            status: record.status.toLowerCase(),
+            web_url: record.webUrl,
+          }),
+          updatedAt: record.gitlabUpdatedAt?.toISOString() ?? null,
+        })),
+      ]),
+    );
   }
 
   async pipeline(
