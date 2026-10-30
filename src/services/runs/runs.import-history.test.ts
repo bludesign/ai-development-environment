@@ -1,10 +1,11 @@
 // @vitest-environment node
-import { beforeEach, describe, expect, test, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 const mocks = vi.hoisted(() => ({ getPrismaClient: vi.fn() }));
 vi.mock("@/data/prisma-client", () => ({
   getPrismaClient: mocks.getPrismaClient,
 }));
 import { RunsService } from "./runs.service";
+import { agentEventBus } from "@/services/agent-control";
 
 function database(origin = "IMPORTED") {
   const attempt = {
@@ -40,7 +41,9 @@ function database(origin = "IMPORTED") {
         },
       }),
     },
-    agentRun: { update: vi.fn() },
+    agentRun: {
+      update: vi.fn(async ({ data }) => Object.assign(attempt.run, data)),
+    },
   };
   const prisma = {
     ...transaction,
@@ -98,6 +101,65 @@ const record = {
 
 describe("imported run history", () => {
   beforeEach(() => vi.clearAllMocks());
+  afterEach(() => vi.restoreAllMocks());
+
+  test.each([record, { nativeId: "native-1", worktreeId: "worktree-1" }])(
+    "does not write runs or publish changes for an identical snapshot",
+    async (input) => {
+      const { prisma, transaction } = database();
+      const publish = vi.spyOn(agentEventBus, "publish");
+      const service = new RunsService();
+      await service.importRuns("agent-1", "CODEX", [input]);
+      vi.clearAllMocks();
+
+      await service.importRuns("agent-1", "CODEX", [input]);
+
+      expect(prisma.runAttempt.update).not.toHaveBeenCalled();
+      expect(prisma.agentRun.update).not.toHaveBeenCalled();
+      expect(prisma.$transaction).not.toHaveBeenCalled();
+      expect(transaction.runEvent.createMany).not.toHaveBeenCalled();
+      expect(publish).not.toHaveBeenCalled();
+      expect(prisma.runProviderSync.upsert).toHaveBeenCalledOnce();
+    },
+  );
+
+  test("reconciles managed-session collisions even when the imported snapshot is unchanged", async () => {
+    const { prisma, attempt } = database();
+    Object.assign(attempt.run, { kind: "SESSION", worktreeId: "worktree-1" });
+    const findFirst = vi.fn().mockResolvedValue(null);
+    Object.assign(prisma, { worktreeRunLease: { findFirst } });
+    const service = new RunsService();
+    const input = { ...record, status: "IN_PROGRESS" };
+    await service.importRuns("agent-1", "CODEX", [input]);
+    findFirst.mockResolvedValue({ id: "managed-lease" });
+    await service.importRuns("agent-1", "CODEX", [input]);
+    expect(prisma.agentRun.update).toHaveBeenLastCalledWith({
+      where: { id: "run-1" },
+      data: expect.objectContaining({ phase: "IMPORTED_ACTIVE_COLLISION" }),
+    });
+  });
+
+  test("updates metadata without rewriting unchanged history or resetting the archive time", async () => {
+    const { prisma, transaction, attempt } = database();
+    const service = new RunsService();
+    await service.importRuns("agent-1", "CODEX", [
+      { ...record, archived: true },
+    ]);
+    const archivedAt = (attempt.run as unknown as { nativeArchivedAt: Date })
+      .nativeArchivedAt;
+    vi.clearAllMocks();
+    await service.importRuns("agent-1", "CODEX", [
+      { ...record, archived: true, model: "model-b" },
+    ]);
+    expect(prisma.agentRun.update).toHaveBeenCalledWith({
+      where: { id: "run-1" },
+      data: expect.objectContaining({
+        model: "model-b",
+        nativeArchivedAt: archivedAt,
+      }),
+    });
+    expect(transaction.runEvent.createMany).not.toHaveBeenCalled();
+  });
 
   test("backfills existing imports and skips identical snapshots", async () => {
     const { transaction } = database();

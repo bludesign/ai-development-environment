@@ -194,7 +194,7 @@ jobs:
           COMMITTER_TOKEN: ${{ secrets.COMMITTER_TOKEN }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Update control agent formula
+      - name: Update Homebrew service settings and control agent formula
         uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd # v8
         env:
           RELEASE_TAG: ${{ steps.release.outputs.tag }}
@@ -208,6 +208,36 @@ jobs:
             const branch = "main";
             const tag = process.env.RELEASE_TAG;
             const url = `https://github.com/${context.repo.owner}/${context.repo.repo}/archive/refs/tags/${tag}.tar.gz`;
+
+            // The server handles interactive requests while agents run builds on
+            // the same host. Keep launchd from throttling its CPU and disk I/O.
+            const serverPath = "Formula/ai-development-environment.rb";
+            const serverResponse = await github.rest.repos.getContent({
+              owner, repo, path: serverPath, ref: branch,
+            });
+            if (Array.isArray(serverResponse.data) || serverResponse.data.type !== "file") {
+              throw new Error(`${serverPath} is not a file`);
+            }
+            const serverFormula = Buffer.from(serverResponse.data.content, "base64").toString("utf8");
+            const serverService = /(^  service do\n)([\s\S]*?)(^  end$)/m;
+            if (!serverService.test(serverFormula)) {
+              throw new Error(`${serverPath} is missing the service block`);
+            }
+            const responsiveServerFormula = serverFormula.replace(serverService, (_match, start, body, end) => {
+              const processType = "    process_type :interactive\n";
+              const settings = /^    process_type .+\n/m.test(body)
+                ? body.replace(/^    process_type .+\n/m, processType)
+                : `${processType}${body}`;
+              return `${start}${settings}${end}`;
+            });
+            if (responsiveServerFormula !== serverFormula) {
+              await github.rest.repos.createOrUpdateFileContents({
+                owner, repo, path: serverPath, branch,
+                sha: serverResponse.data.sha,
+                message: "Run the server with interactive service priority",
+                content: Buffer.from(responsiveServerFormula).toString("base64"),
+              });
+            }
 
             const archive = await fetch(url);
             if (!archive.ok) {

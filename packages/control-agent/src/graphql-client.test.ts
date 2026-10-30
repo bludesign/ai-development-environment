@@ -5,6 +5,7 @@ import { join } from "node:path";
 
 import { afterEach, describe, expect, test, vi } from "vitest";
 import type { Client, Sink } from "graphql-ws";
+import { AgentRequestError } from "./request-errors.js";
 
 import {
   AgentGraphQLClient,
@@ -28,6 +29,36 @@ afterEach(async () => {
 });
 
 describe("AgentGraphQLClient", () => {
+  test.each([
+    [401, undefined, false],
+    [404, undefined, false],
+    [429, undefined, true],
+    [503, undefined, true],
+    [200, { message: "Job not found for this agent" }, false],
+    [200, { message: "Denied", extensions: { code: "FORBIDDEN" } }, false],
+    [
+      200,
+      {
+        message: "Database unavailable",
+        extensions: { code: "INTERNAL_SERVER_ERROR" },
+      },
+      true,
+    ],
+  ])(
+    "classifies HTTP %s and GraphQL errors for retries",
+    async (status, error, retryable) => {
+      vi.stubGlobal(
+        "fetch",
+        vi.fn(async () =>
+          Response.json(error ? { errors: [error] } : {}, { status }),
+        ),
+      );
+      const client = new AgentGraphQLClient("https://control.test");
+      await expect(client.health()).rejects.toBeInstanceOf(AgentRequestError);
+      await expect(client.health()).rejects.toMatchObject({ retryable });
+    },
+  );
+
   test("retries positioned writes until a downloaded chunk is complete", async () => {
     const positions: number[] = [];
     const stored: number[] = [];

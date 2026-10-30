@@ -397,10 +397,13 @@ export class GitLabReviewerProvider {
           let keys: string[];
           let count = rule.approvalsRequired;
           let label = rule.name;
+          const patterns =
+            type === "code_owner"
+              ? rule.patterns?.length
+                ? rule.patterns
+                : [rule.name]
+              : [];
           if (type === "code_owner") {
-            const patterns = rule.patterns?.length
-              ? rule.patterns
-              : [rule.name];
             keys = [
               ...new Set(
                 patterns.flatMap((pattern) => {
@@ -435,6 +438,8 @@ export class GitLabReviewerProvider {
           requirements.push({
             id: rule.id,
             name: label,
+            isRequired: rule.approvalsRequired > 0,
+            patterns,
             poolKeys: keys,
             eligibleReviewerIds: eligible.map((person) => person.id),
             requiredApprovals: count,
@@ -493,6 +498,8 @@ export class GitLabReviewerProvider {
             requirements.push({
               id: `gitlab:suggested:${entryIdentity}`,
               name: `Suggested code owners · ${entry.pattern}`,
+              isRequired: false,
+              patterns: [entry.pattern],
               poolKeys: [key],
               eligibleReviewerIds: pool.candidates.map((person) => person.id),
               requiredApprovals: 1,

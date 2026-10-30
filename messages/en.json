@@ -1257,6 +1257,23 @@
     "readOnlyNotice": "This install has read-only access to Vault, so this secret cannot be changed here. Update it from a read-write install.",
     "adopted": "{count} credential(s) were adopted from the external backend when the server started."
   },
+  "webSocketStatus": {
+    "agent": "Agent WebSocket",
+    "browser": "Browser WebSocket",
+    "unknown": "Unknown",
+    "connecting": "Connecting",
+    "connected": "Connected",
+    "reconnecting": "Reconnecting",
+    "disconnected": "Disconnected",
+    "lastVerified": "Last verified",
+    "lastChanged": "Last changed",
+    "connectedSince": "Connected since",
+    "lastDisconnected": "Last disconnected",
+    "never": "Never",
+    "agentDescription": "Tracks the authenticated job-notification subscription on this server. Silent connection failures can take up to approximately 24 seconds to detect.",
+    "browserDescription": "Tracks this browser’s live-update connection. Silent connection failures can take up to approximately 15 seconds to detect.",
+    "unknownDescription": "No current status is available. The last known timestamps are shown."
+  },
   "agents": {
     "title": "Agents",
     "description": "Manage enrolled Macs and durable jobs from one control plane.",
@@ -3076,7 +3093,6 @@
     "noSteps": "No steps have been reported for this job yet.",
     "loadMore": "Load more",
     "loadingMore": "Loading more…",
-    "loadMore": "Load more",
     "moreHistory": "More history remains. Load another batch to find older matching runs."
   },
   "githubAutomation": {
@@ -5952,6 +5968,26 @@
     "random": "Random selection",
     "assignSelected": "Assign selected ({count})",
     "existingReviewers": "Existing reviewers",
-    "existingReviewer": "Existing reviewer {name}"
+    "existingReviewer": "Existing reviewer {name}",
+    "status": {
+      "title": "Review details",
+      "open": "Review details for {request}",
+      "refresh": "Refresh review details",
+      "openProvider": "Open {request}",
+      "requestChanged": "The linked pull or merge request has changed. Refresh the worktree and reopen review details.",
+      "closed": "This pull or merge request is closed or merged.",
+      "approvers": "Approved reviewers",
+      "requested": "Requested reviewers",
+      "noApprovers": "No approvals to show.",
+      "noRequested": "No requested reviewers to show.",
+      "rules": "Approval rules and code owners",
+      "noRules": "No approval requirements or code-owner suggestions.",
+      "rulesUnavailable": "Approval requirements could not be fully verified.",
+      "suggested": "Suggested",
+      "progress": "{approved} of {required} approvals",
+      "requestedCount": "Requested: {count}",
+      "members": "Eligible reviewers ({count})",
+      "noMembers": "No eligible members could be resolved."
+    }
   }
 }

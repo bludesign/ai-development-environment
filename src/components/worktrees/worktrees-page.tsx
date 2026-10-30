@@ -68,6 +68,7 @@ import { CommandQuickActions } from "@/components/commands/command-quick-actions
 import { PipelineMenu } from "@/components/github/pipeline-menu";
 import { PullRequestMenu } from "@/components/github/pull-request-menu";
 import { AssignReviewersButton } from "@/components/reviewers/assign-reviewers-button";
+import { WorktreeReviewStatusPopover } from "@/components/reviewers/worktree-review-status-popover";
 import { MergeRequestMenu } from "@/components/gitlab/merge-request-menu";
 import { gitLabCommentsHref } from "@/components/gitlab/merge-request-links";
 import {
@@ -1270,7 +1271,6 @@ export function WorktreesPage({ appId }: { appId?: string }) {
             inspectionRefreshToken={inspectionRefreshToken}
             key={repositoryGroup.repository.id}
             layout={layout}
-            onError={setError}
             onManageTags={() => setTagManagerOpen(true)}
             onOpenTicket={(issueKey) => selectJiraIssue(issueKey)}
             onReload={load}
@@ -1289,7 +1289,6 @@ export function WorktreesPage({ appId }: { appId?: string }) {
             inspectionRefreshToken={inspectionRefreshToken}
             key={agentGroup.agent.id}
             layout={layout}
-            onError={setError}
             onManageTags={() => setTagManagerOpen(true)}
             onOpenTicket={(issueKey) => selectJiraIssue(issueKey)}
             onReload={load}
@@ -1552,7 +1551,6 @@ type WorktreeSectionProps = {
   inspectionRefreshToken: number;
   onReload: () => Promise<void>;
   onUpdate: (worktree: Worktree) => void;
-  onError: (error: string | null) => void;
   onManageTags: () => void;
   onOpenTicket: (issueKey: string) => void;
   overview: WorktreeOverview;
@@ -1700,12 +1698,13 @@ function FetchAge({
   );
 }
 
-function WorktreeCard(props: WorktreeItemProps) {
+function WorktreeCard(props: Omit<WorktreeItemProps, "onError">) {
   const { inspectionRefreshToken } = props;
   const { worktree, applyActivity, setUnstagedChanges } = useLiveWorktree(
     props.worktree,
   );
-  const liveProps = { ...props, worktree };
+  const [operationError, setOperationError] = useState<string | null>(null);
+  const liveProps = { ...props, worktree, onError: setOperationError };
   const [expanded, setExpanded] = useState(false);
   const [detail, setDetail] = useState<WorktreeDetail | null>(null);
   const [detailLoading, setDetailLoading] = useState(false);
@@ -1811,7 +1810,7 @@ function WorktreeCard(props: WorktreeItemProps) {
         <WorktreeRebaseConflictItem
           group={props.group}
           onCompleted={props.onReload}
-          onError={props.onError}
+          onError={setOperationError}
           worktree={worktree}
         />
         {detailLoading && (
@@ -1833,6 +1832,10 @@ function WorktreeCard(props: WorktreeItemProps) {
         className="flex-col items-stretch gap-2"
         data-worktree-navigation-ignore
       >
+        <WorktreeErrorAlert
+          error={operationError}
+          onDismiss={() => setOperationError(null)}
+        />
         <ActionRow
           {...liveProps}
           onCompleted={async () => {
@@ -2236,9 +2239,17 @@ export function PullRequestBadges({
             repositoryUrl={worktree.pullRequest.repositoryUrl}
             requestSource="WORKTREES"
           />
-          <Badge className={reviewClass(worktree.pullRequest.reviewDecision)}>
-            {t(`review.${worktree.pullRequest.reviewDecision}`)}
-          </Badge>
+          <WorktreeReviewStatusPopover
+            key={`github:${worktree.id}:${worktree.pullRequest.id}`}
+            requestId={worktree.pullRequest.id}
+            requestLabel={`PR #${worktree.pullRequest.number}`}
+            requestUrl={worktree.pullRequest.url}
+            worktreeId={worktree.id}
+          >
+            <Badge className={reviewClass(worktree.pullRequest.reviewDecision)}>
+              {t(`review.${worktree.pullRequest.reviewDecision}`)}
+            </Badge>
+          </WorktreeReviewStatusPopover>
           <Badge
             asChild
             className={
@@ -2273,7 +2284,15 @@ export function PullRequestBadges({
       />
       {gitLabMergeRequest ? (
         <>
-          <GitLabApprovalBadge state={gitLabMergeRequest.approvalState} />
+          <WorktreeReviewStatusPopover
+            key={`gitlab:${worktree.id}:${gitLabMergeRequest.id}`}
+            requestId={gitLabMergeRequest.id}
+            requestLabel={`MR !${gitLabMergeRequest.number}`}
+            requestUrl={gitLabMergeRequest.url}
+            worktreeId={worktree.id}
+          >
+            <GitLabApprovalBadge state={gitLabMergeRequest.approvalState} />
+          </WorktreeReviewStatusPopover>
           {gitLabMergeRequest.projectId ? (
             <Badge
               asChild
@@ -3957,7 +3976,7 @@ function OperationMenuItem({
   );
 }
 
-function WorktreeTable(props: Omit<WorktreeItemProps, "worktree">) {
+function WorktreeTable(props: Omit<WorktreeItemProps, "worktree" | "onError">) {
   const t = useTranslations("worktrees");
   return (
     <div className="rounded-xl border">
@@ -3988,12 +4007,13 @@ function WorktreeTable(props: Omit<WorktreeItemProps, "worktree">) {
   );
 }
 
-function WorktreeTableRows(props: WorktreeItemProps) {
+function WorktreeTableRows(props: Omit<WorktreeItemProps, "onError">) {
   const { baseRepoDirectory, inspectionRefreshToken } = props;
   const { worktree, applyActivity, setUnstagedChanges } = useLiveWorktree(
     props.worktree,
   );
-  const liveProps = { ...props, worktree };
+  const [operationError, setOperationError] = useState<string | null>(null);
+  const liveProps = { ...props, worktree, onError: setOperationError };
   const t = useTranslations("worktrees");
   const router = useRouter();
   const [expanded, setExpanded] = useState(false);
@@ -4122,14 +4142,18 @@ function WorktreeTableRows(props: WorktreeItemProps) {
             <WorktreeRebaseConflictItem
               group={props.group}
               onCompleted={props.onReload}
-              onError={props.onError}
+              onError={setOperationError}
               worktree={worktree}
             />
           </TableCell>
         </TableRow>
       )}
       <TableRow className={cn(highlight)}>
-        <TableCell colSpan={8}>
+        <TableCell className="space-y-2" colSpan={8}>
+          <WorktreeErrorAlert
+            error={operationError}
+            onDismiss={() => setOperationError(null)}
+          />
           <ActionRow
             {...liveProps}
             onCompleted={async () => {

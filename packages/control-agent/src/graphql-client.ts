@@ -7,6 +7,7 @@ import { createClient, type Client } from "graphql-ws";
 import WebSocket from "ws";
 
 import type { AgentConfig } from "./config.js";
+import { AgentRequestError } from "./request-errors.js";
 import type { AgentInventory } from "./inventory.js";
 import type { ProcessLog } from "./process-runner.js";
 import type {
@@ -200,7 +201,10 @@ export type AgentCodebaseConfiguration = {
   codebases: AgentCodebaseRegistration[];
 };
 
-type GraphQLResponse<T> = { data?: T; errors?: Array<{ message: string }> };
+type GraphQLResponse<T> = {
+  data?: T;
+  errors?: Array<{ message: string; extensions?: { code?: string } }>;
+};
 
 const RUN_COMMAND_FIELDS = `
   id runId agentId sequence type payload status error
@@ -279,8 +283,9 @@ export class AgentGraphQLClient {
     }
     if (!response.ok || typeof body?.mode !== "string") {
       const detail = `HTTP ${response.status} ${response.statusText}`.trim();
-      throw new Error(
+      throw new AgentRequestError(
         !body && raw ? `${detail}: ${raw.slice(0, 500)}` : detail,
+        response.status,
       );
     }
     return { mode: body.mode };
@@ -315,8 +320,12 @@ export class AgentGraphQLClient {
       const detail =
         body?.errors?.map((error) => error.message).join("; ") ||
         `HTTP ${response.status} ${response.statusText}`.trim();
-      throw new Error(
+      throw new AgentRequestError(
         !body && raw ? `${detail}: ${raw.slice(0, 500)}` : detail,
+        response.status,
+        body?.errors?.flatMap(({ extensions }) =>
+          extensions?.code ? [extensions.code] : [],
+        ),
       );
     }
     return body.data;

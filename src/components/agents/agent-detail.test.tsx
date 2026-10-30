@@ -197,6 +197,13 @@ describe("AgentDetail", () => {
     render(<AgentDetail agentId="agent-1" />);
 
     expect(await screen.findByText("M4 Pro")).toBeDefined();
+    expect(screen.getByText("Online")).toBeDefined();
+    expect(
+      screen.getByRole("button", { name: "Agent WebSocket: Unknown" }),
+    ).toBeDefined();
+    expect(
+      screen.getByRole("button", { name: "Browser WebSocket: Unknown" }),
+    ).toBeDefined();
     expect(screen.getByText("Project Atlas")).toBeDefined();
     expect(screen.getByText("/Users/test/atlas")).toBeDefined();
     const buildsDirectory = screen.getByText("Builds directory");

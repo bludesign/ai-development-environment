@@ -6,6 +6,7 @@ import { canAssignReviewers, createReviewerResolvers } from "./reviewers";
 test("reviewer operations reject agent credentials", () => {
   const service = {
     repositoryCodeReviewers: vi.fn(),
+    worktreeReviewStatus: vi.fn(),
     worktreeReviewerAssignment: vi.fn(),
     previewRandomWorktreeReviewers: vi.fn(),
     saveRepositoryCodeReviewers: vi.fn(),
@@ -15,6 +16,9 @@ test("reviewer operations reject agent credentials", () => {
     service as unknown as ReviewersService,
   );
   const context = { agentId: "agent" } as GraphQLContext;
+  expect(() =>
+    resolver.Query.worktreeReviewStatus(null, { worktreeId: "w" }, context),
+  ).toThrow("control-plane");
   expect(() =>
     resolver.Query.repositoryCodeReviewers(
       null,
@@ -52,6 +56,22 @@ test("reviewer operations reject agent credentials", () => {
   ).toThrow("control-plane");
   for (const method of Object.values(service))
     expect(method).not.toHaveBeenCalled();
+});
+
+test("review status delegates read-only discovery for control-plane users", () => {
+  const status = { requestId: "request" };
+  const service = { worktreeReviewStatus: vi.fn().mockReturnValue(status) };
+  const resolver = createReviewerResolvers(
+    service as unknown as ReviewersService,
+  );
+  expect(
+    resolver.Query.worktreeReviewStatus(
+      null,
+      { worktreeId: "w" },
+      {} as GraphQLContext,
+    ),
+  ).toBe(status);
+  expect(service.worktreeReviewStatus).toHaveBeenCalledWith("w");
 });
 
 test("availability only needs an open request and saved configuration", () => {

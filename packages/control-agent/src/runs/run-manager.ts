@@ -1,4 +1,5 @@
 import { execFile } from "node:child_process";
+import { createHash } from "node:crypto";
 import { mkdir, rm } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { promisify } from "node:util";
@@ -10,6 +11,11 @@ import type {
   RunRecord,
 } from "../graphql-client.js";
 import { configPath } from "../config.js";
+import {
+  isRetryableAgentError,
+  MAX_AGENT_REQUEST_ATTEMPTS,
+  waitForAgentRetry,
+} from "../request-errors.js";
 import {
   captureGitCheckpoint,
   compareGitCheckpoint,
@@ -87,14 +93,18 @@ export class RunManager {
     "PAUSED" | "CANCELLED"
   >();
   private importTimer?: ReturnType<typeof setTimeout>;
+  private importTask?: Promise<void>;
+  private readonly importedSnapshots = new Map<string, string>();
   private commandTimer?: ReturnType<typeof setTimeout>;
   private stopped = false;
+  private readonly shutdown = new AbortController();
 
   constructor(private readonly client: AgentGraphQLClient) {}
 
   async start(): Promise<void> {
     if (typeof this.client.pendingRunCommands !== "function") return;
-    await this.syncImports();
+    // Historical imports must not hold up command recovery or the WebSocket.
+    void this.syncImports();
     try {
       const commands = await this.client.pendingRunCommands();
       await Promise.all(commands.map((command) => this.execute(command, true)));
@@ -464,7 +474,14 @@ export class RunManager {
       journal,
       adapter,
       baseline,
-    );
+    ).catch((error) => {
+      if (!this.stopped) {
+        console.error(
+          `Run ${run.id} finalization failed:`,
+          error instanceof Error ? error.message : error,
+        );
+      }
+    });
     const requestedAfterStart = this.interruptionRequests.get(run.id);
     if (requestedAfterStart)
       await this.interruptActive(active, requestedAfterStart);
@@ -494,7 +511,7 @@ export class RunManager {
           baseline,
           finalCheckpoint,
         );
-        await this.retry(() =>
+        await this.retryFinalization(() =>
           this.client.reportRunCheckpoint(run.id, attemptId, {
             ...finalCheckpoint,
             diffPatch: comparison.rollbackPatch,
@@ -514,14 +531,14 @@ export class RunManager {
             .catch(() => undefined);
         }
       }
-      await this.retry(() =>
+      await this.retryFinalization(() =>
         this.client.finishRunAttempt(attemptId, {
           status: completion.status,
           finalOutput: completion.finalOutput,
           error: completion.error,
         }),
       );
-      await this.retry(() =>
+      await this.retryFinalization(() =>
         this.client.completeRunCommand(
           command.id,
           completion.status === "FAILED" ? "FAILED" : "SUCCEEDED",
@@ -529,13 +546,14 @@ export class RunManager {
         ),
       );
     } catch (error) {
-      await this.retry(() =>
+      if (this.stopped) return;
+      await this.retryFinalization(() =>
         this.client.finishRunAttempt(attemptId, {
           status: "FAILED",
           error: error instanceof Error ? error.message : String(error),
         }),
       );
-      await this.retry(() =>
+      await this.retryFinalization(() =>
         this.client.completeRunCommand(
           command.id,
           "FAILED",
@@ -857,10 +875,23 @@ export class RunManager {
     return null;
   }
 
-  private async syncImports(): Promise<void> {
+  private syncImports(): Promise<void> {
+    if (this.stopped) return Promise.resolve();
+    if (!this.importTask) {
+      this.importTask = this.syncImportsInternal().finally(() => {
+        this.importTask = undefined;
+      });
+    }
+    return this.importTask;
+  }
+
+  private async syncImportsInternal(): Promise<void> {
     if (this.stopped) return;
+    if (this.importTimer) clearTimeout(this.importTimer);
+    this.importTimer = undefined;
     try {
       const codebases = await this.client.agentCodebases();
+      if (this.stopped) return;
       const worktrees: ProviderImportWorktree[] = codebases.flatMap(
         (codebase) =>
           codebase.worktrees.map((worktree) => ({
@@ -870,31 +901,66 @@ export class RunManager {
           })),
       );
       for (const adapter of this.adapters.values()) {
+        if (this.stopped) return;
         try {
           const catalog = await adapter.catalog?.(worktrees);
+          if (this.stopped) return;
           await this.client.reportRunProviderImportStatus(
             adapter.key,
             "SYNCING",
             undefined,
             { ...catalog, capabilities: adapter.capabilities },
           );
+          if (this.stopped) return;
           const runs = await adapter.discover(worktrees);
+          if (this.stopped) return;
           // Activity snapshots can be much larger than list metadata. Keep
           // requests bounded across sessions without truncating any history.
           let batch: Array<Record<string, unknown>> = [];
           let batchBytes = 0;
+          let snapshots: Array<[string, string]> = [];
+          const upload = async () => {
+            await this.client.importProviderRuns(adapter.key, batch);
+            // Failed requests must be retried on the next scan, including
+            // requests whose acknowledgement was lost after persistence.
+            for (const [key, digest] of snapshots) {
+              this.importedSnapshots.set(key, digest);
+            }
+            batch = [];
+            batchBytes = 0;
+            snapshots = [];
+          };
           for (const run of runs) {
-            const bytes = Buffer.byteLength(JSON.stringify(run), "utf8");
+            if (this.stopped) return;
+            const serialized = JSON.stringify(run);
+            const key = JSON.stringify([
+              adapter.key,
+              run.nativeId,
+              run.worktreeId,
+            ]);
+            const digest = createHash("sha256")
+              .update(serialized)
+              .digest("hex");
+            const active = [
+              "ACTIVE",
+              "RUNNING",
+              "STARTING",
+              "IN_PROGRESS",
+              "WAITING_FOR_ANSWER",
+            ].includes(run.status?.toUpperCase() ?? "");
+            // Active imports also reconcile collisions with managed sessions.
+            if (!active && this.importedSnapshots.get(key) === digest) continue;
+            const bytes = Buffer.byteLength(serialized, "utf8");
             if (batch.length && batchBytes + bytes > 4 * 1024 * 1024) {
-              await this.client.importProviderRuns(adapter.key, batch);
-              batch = [];
-              batchBytes = 0;
+              await upload();
             }
             batch.push(run as unknown as Record<string, unknown>);
             batchBytes += bytes;
+            snapshots.push([key, digest]);
           }
-          await this.client.importProviderRuns(adapter.key, batch);
+          await upload();
         } catch (error) {
+          if (this.stopped) return;
           await this.client
             .reportRunProviderImportStatus(
               adapter.key,
@@ -909,10 +975,12 @@ export class RunManager {
         }
       }
     } catch (error) {
-      console.error(
-        "Provider history sync failed:",
-        error instanceof Error ? error.message : error,
-      );
+      if (!this.stopped) {
+        console.error(
+          "Provider history sync failed:",
+          error instanceof Error ? error.message : error,
+        );
+      }
     } finally {
       if (!this.stopped) {
         this.importTimer = setTimeout(
@@ -924,17 +992,29 @@ export class RunManager {
     }
   }
 
+  private retryFinalization<T>(operation: () => Promise<T>): Promise<T> {
+    // Completion must survive transient outages without replaying the provider
+    // or changing its result. Permanent errors and shutdown still stop retries.
+    return this.retry(operation, Infinity);
+  }
+
   private async retry<T>(
     operation: () => Promise<T>,
-    attempts = Infinity,
+    attempts = MAX_AGENT_REQUEST_ATTEMPTS,
   ): Promise<T> {
     let delay = 1_000;
     for (let attempt = 1; ; attempt += 1) {
       try {
         return await operation();
       } catch (error) {
-        if (this.stopped || attempt >= attempts) throw error;
-        await new Promise((resolve) => setTimeout(resolve, delay));
+        if (
+          this.stopped ||
+          attempt >= attempts ||
+          !isRetryableAgentError(error)
+        )
+          throw error;
+        await waitForAgentRetry(delay, this.shutdown.signal);
+        if (this.stopped) throw error;
         delay = Math.min(delay * 2, 30_000);
       }
     }
@@ -956,13 +1036,15 @@ export class RunManager {
 
   async close(): Promise<void> {
     this.stopped = true;
+    this.shutdown.abort();
     if (this.importTimer) clearTimeout(this.importTimer);
     if (this.commandTimer) clearTimeout(this.commandTimer);
     for (const active of this.active.values()) {
       await active.handle.interrupt("PAUSED").catch(() => undefined);
     }
-    await Promise.allSettled(
-      this.adapters.values().map((adapter) => adapter.close?.()),
-    );
+    await Promise.allSettled([
+      this.importTask,
+      ...this.adapters.values().map((adapter) => adapter.close?.()),
+    ]);
   }
 }

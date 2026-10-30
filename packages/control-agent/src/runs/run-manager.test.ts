@@ -1,7 +1,13 @@
-import { describe, expect, test, vi } from "vitest";
+import { afterEach, describe, expect, test, vi } from "vitest";
 
 import type { RunCommand } from "../graphql-client.js";
 import { RunManager } from "./run-manager.js";
+import { AgentRequestError } from "../request-errors.js";
+
+afterEach(() => {
+  vi.restoreAllMocks();
+  vi.useRealTimers();
+});
 
 function command(id: string, type: string): RunCommand {
   return {
@@ -137,6 +143,86 @@ describe("RunManager command priority", () => {
 });
 
 describe("RunManager history sync", () => {
+  test("shutdown awaits an in-flight import without starting another provider", async () => {
+    const codebases = Promise.withResolvers<unknown[]>();
+    const client = { agentCodebases: vi.fn(() => codebases.promise) };
+    const manager = new RunManager(client as never);
+    const testable = manager as unknown as {
+      adapters: { values(): unknown[] };
+      syncImports(): Promise<void>;
+    };
+    const discover = vi.fn();
+    vi.spyOn(testable.adapters, "values").mockReturnValue([
+      { key: "CODEX", capabilities: {}, discover },
+    ]);
+    const importing = testable.syncImports();
+    const closing = manager.close();
+    codebases.resolve([]);
+    await Promise.all([importing, closing]);
+    expect(discover).not.toHaveBeenCalled();
+  });
+
+  test("starts command recovery without waiting for historical imports", async () => {
+    const imported = Promise.withResolvers<void>();
+    const client = { pendingRunCommands: vi.fn().mockResolvedValue([]) };
+    const manager = new RunManager(client as never);
+    const testable = manager as unknown as { syncImports(): Promise<void> };
+    vi.spyOn(testable, "syncImports").mockReturnValue(imported.promise);
+    try {
+      await manager.start();
+      expect(client.pendingRunCommands).toHaveBeenCalledOnce();
+    } finally {
+      imported.resolve();
+      await manager.close();
+    }
+  });
+
+  test("sends only changed snapshots and retries snapshots after a failed upload", async () => {
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    const initial = {
+      nativeId: "thread-1",
+      worktreeId: "worktree-1",
+      prompt: "initial",
+    };
+    const discover = vi.fn().mockResolvedValue([initial]);
+    const client = {
+      agentCodebases: vi.fn().mockResolvedValue([]),
+      reportRunProviderImportStatus: vi.fn().mockResolvedValue({}),
+      importProviderRuns: vi.fn().mockResolvedValue({}),
+    };
+    const manager = new RunManager(client as never);
+    const testable = manager as unknown as {
+      adapters: { values(): unknown[] };
+      syncImports(): Promise<void>;
+    };
+    vi.spyOn(testable.adapters, "values").mockReturnValue([
+      { key: "CODEX", capabilities: {}, discover },
+    ]);
+    try {
+      await testable.syncImports();
+      await testable.syncImports();
+      expect(
+        client.importProviderRuns.mock.calls.map(([, batch]) => batch),
+      ).toEqual([[initial], []]);
+      const changed = { ...initial, prompt: "changed" };
+      discover.mockResolvedValue([changed]);
+      client.importProviderRuns.mockRejectedValueOnce(new Error("offline"));
+      await testable.syncImports();
+      await testable.syncImports();
+      expect(
+        client.importProviderRuns.mock.calls.slice(2).map(([, batch]) => batch),
+      ).toEqual([[changed], [changed]]);
+      await testable.syncImports();
+      expect(client.importProviderRuns).toHaveBeenLastCalledWith("CODEX", []);
+      discover.mockResolvedValue([{ ...changed, status: "IN_PROGRESS" }]);
+      await testable.syncImports();
+      await testable.syncImports();
+      expect(client.importProviderRuns.mock.calls.at(-1)![1]).toHaveLength(1);
+    } finally {
+      await manager.close();
+    }
+  });
+
   test("splits large snapshots across requests without truncating a session", async () => {
     const records = ["thread-1", "thread-2"].map((nativeId) => ({
       nativeId,
@@ -168,5 +254,26 @@ describe("RunManager history sync", () => {
     } finally {
       await manager.close();
     }
+  });
+});
+
+describe("RunManager request retries", () => {
+  test("bounds retries and stops on permanent errors", async () => {
+    vi.useFakeTimers();
+    const manager = new RunManager({} as never);
+    const testable = manager as unknown as {
+      retry(operation: () => Promise<unknown>): Promise<unknown>;
+    };
+    const operation = vi.fn().mockRejectedValue(new Error("offline"));
+    const failed = expect(testable.retry(operation)).rejects.toThrow("offline");
+    await vi.runAllTimersAsync();
+    await failed;
+    expect(operation).toHaveBeenCalledTimes(5);
+    operation
+      .mockClear()
+      .mockRejectedValue(new AgentRequestError("Unauthorized", 401));
+    await expect(testable.retry(operation)).rejects.toThrow("Unauthorized");
+    expect(operation).toHaveBeenCalledOnce();
+    await manager.close();
   });
 });

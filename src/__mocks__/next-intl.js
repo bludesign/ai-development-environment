@@ -4,6 +4,7 @@
 const React = require("react");
 
 const mockTranslations = {
+  webSocketStatus: require("../../messages/en.json").webSocketStatus,
   mcpOAuth: require("../../messages/en.json").mcpOAuth,
   serverUrls: require("../../messages/en.json").serverUrls,
   activeAgent: {

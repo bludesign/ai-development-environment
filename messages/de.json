@@ -1257,6 +1257,23 @@
     "readOnlyNotice": "Diese Installation hat nur Lesezugriff auf Vault, daher kann dieses Geheimnis hier nicht geändert werden. Aktualisieren Sie es über eine Installation mit Schreibzugriff.",
     "adopted": "{count} Anmeldedaten wurden beim Serverstart aus dem externen Backend übernommen."
   },
+  "webSocketStatus": {
+    "agent": "Agent-WebSocket",
+    "browser": "Browser-WebSocket",
+    "unknown": "Unbekannt",
+    "connecting": "Verbindung wird hergestellt",
+    "connected": "Verbunden",
+    "reconnecting": "Verbindung wird wiederhergestellt",
+    "disconnected": "Getrennt",
+    "lastVerified": "Zuletzt überprüft",
+    "lastChanged": "Zuletzt geändert",
+    "connectedSince": "Verbunden seit",
+    "lastDisconnected": "Zuletzt getrennt",
+    "never": "Nie",
+    "agentDescription": "Zeigt das authentifizierte Abonnement für Auftragsbenachrichtigungen auf diesem Server. Stille Verbindungsfehler werden nach bis zu etwa 24 Sekunden erkannt.",
+    "browserDescription": "Zeigt die Verbindung dieses Browsers für Live-Aktualisierungen. Stille Verbindungsfehler werden nach bis zu etwa 15 Sekunden erkannt.",
+    "unknownDescription": "Ein aktueller Status ist nicht verfügbar. Die zuletzt bekannten Zeitpunkte werden angezeigt."
+  },
   "agents": {
     "title": "Agenten",
     "description": "Registrierte Macs und dauerhafte Aufträge zentral verwalten.",
@@ -3076,7 +3093,6 @@
     "noSteps": "Für diesen Job wurden noch keine Schritte gemeldet.",
     "loadMore": "Mehr laden",
     "loadingMore": "Weitere werden geladen…",
-    "loadMore": "Mehr laden",
     "moreHistory": "Weiterer Verlauf ist vorhanden. Lade weitere ältere passende Ausführungen."
   },
   "githubAutomation": {
@@ -5952,6 +5968,26 @@
     "random": "Zufällige Auswahl",
     "assignSelected": "Ausgewählte zuweisen ({count})",
     "existingReviewers": "Bereits zugewiesene Reviewer",
-    "existingReviewer": "Bereits zugewiesener Reviewer {name}"
+    "existingReviewer": "Bereits zugewiesener Reviewer {name}",
+    "status": {
+      "title": "Review-Details",
+      "open": "Review-Details für {request}",
+      "refresh": "Review-Details aktualisieren",
+      "openProvider": "{request} öffnen",
+      "requestChanged": "Der verknüpfte Pull- oder Merge-Request hat sich geändert. Aktualisiere den Worktree und öffne die Review-Details erneut.",
+      "closed": "Dieser Pull- oder Merge-Request wurde geschlossen oder zusammengeführt.",
+      "approvers": "Reviewer mit Genehmigung",
+      "requested": "Angefragte Reviewer",
+      "noApprovers": "Keine Genehmigungen anzuzeigen.",
+      "noRequested": "Keine angefragten Reviewer anzuzeigen.",
+      "rules": "Genehmigungsregeln und Code-Verantwortliche",
+      "noRules": "Keine Genehmigungsanforderungen oder Vorschläge für Code-Verantwortliche.",
+      "rulesUnavailable": "Die Genehmigungsanforderungen konnten nicht vollständig überprüft werden.",
+      "suggested": "Vorgeschlagen",
+      "progress": "{approved} von {required} Genehmigungen",
+      "requestedCount": "Angefragt: {count}",
+      "members": "Berechtigte Reviewer ({count})",
+      "noMembers": "Es konnten keine berechtigten Mitglieder ermittelt werden."
+    }
   }
 }

@@ -50,6 +50,11 @@ import {
 import { AgentDirectoryBrowser } from "@/components/agents/agent-directory-browser";
 import { JobMonitor } from "@/components/agents/job-monitor";
 import { StatusBadge } from "@/components/agents/status-badge";
+import { useAgentWebSocketConnections } from "./use-agent-websocket-connections";
+import {
+  BrowserWebSocketStatus,
+  WebSocketStatusBadge,
+} from "./websocket-status";
 import { ResourceUsage } from "@/components/agents/resource-usage";
 import { CommandQuickActions } from "@/components/commands/command-quick-actions";
 import { CommandResourcePanel } from "@/components/commands/command-resource-panel";
@@ -160,6 +165,7 @@ export function AgentDetail({ agentId }: { agentId: string }) {
   const locale = useLocale();
   const router = useRouter();
   const [agent, setAgent] = useState<Agent | null>(null);
+  const webSockets = useAgentWebSocketConnections(agent ? [agentId] : []);
   useBreadcrumbLabel(["dashboard", "agents", agent?.id], agent?.name);
   const agentRevision = useRef(0);
   const applyAgent = useCallback((value: Agent) => {
@@ -582,6 +588,11 @@ export function AgentDetail({ agentId }: { agentId: string }) {
               </form>
             )}
             <StatusBadge status={agent.connectionStatus} />
+            <WebSocketStatusBadge
+              kind="agent"
+              snapshot={webSockets.get(agentId)}
+            />
+            <BrowserWebSocketStatus />
           </div>
           {renameError && (
             <p className="mt-1 text-sm text-destructive">{renameError}</p>

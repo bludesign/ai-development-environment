@@ -25,6 +25,7 @@ export interface GraphQLContext {
   agentId: string | null;
   ipAddress: string | null;
   requestOrigin: string | null;
+  webSocketConnectionId?: string;
 }
 
 export type HeaderSource =

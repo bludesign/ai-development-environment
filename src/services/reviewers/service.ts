@@ -142,6 +142,8 @@ export function reviewerAssignmentView(
         {
           id: "general-reviewers",
           name: "General reviewers",
+          isRequired: false,
+          patterns: [],
           poolKeys: [general.key],
           eligibleReviewerIds: general.candidates.map((person) => person.id),
           approvedReviewerIds,
@@ -209,6 +211,72 @@ export function reviewerAssignmentView(
 }
 
 export type ReviewerAssignment = ReturnType<typeof reviewerAssignmentView>;
+
+export function worktreeReviewStatusView(
+  worktreeId: string,
+  discovery: ReviewerDiscovery,
+) {
+  const request = discovery.request;
+  if (!request) throw new Error("Pull or merge request was not found");
+  const currentReviewerIds = unique(
+    request.currentReviewers.map((person) => person.id),
+  );
+  const approvedReviewerIds = unique(
+    request.approvedReviewers.map((person) => person.id),
+  );
+  const pools = new Map(discovery.pools.map((pool) => [pool.key, pool]));
+  const people = new Map(
+    [
+      ...discovery.pools.flatMap((pool) => pool.candidates),
+      ...request.currentReviewers,
+      ...request.approvedReviewers,
+    ].map((person) => [person.id, person]),
+  );
+  const requirements = discovery.requirements.map((rule) => {
+    const eligible = new Set(
+      rule.eligibleReviewerIds.filter(
+        (id) => discovery.provider !== "GITHUB" || id !== request.authorId,
+      ),
+    );
+    return {
+      id: rule.id,
+      name: rule.name,
+      isRequired: rule.isRequired,
+      patterns: rule.patterns,
+      // Assignment targets include optional suggestions; status reports policy only.
+      requiredApprovals: rule.isRequired ? rule.requiredApprovals : 0,
+      groups: unique(rule.poolKeys).flatMap((key) => {
+        const pool = pools.get(key);
+        return pool ? [{ key, name: pool.name, kind: pool.kind }] : [];
+      }),
+      eligibleReviewerIds: [...eligible],
+      approvedReviewerIds: unique(
+        rule.approvedReviewerIds.filter((id) => eligible.has(id)),
+      ),
+      requestedReviewerIds: currentReviewerIds.filter((id) => eligible.has(id)),
+    };
+  });
+  const referencedPeople = new Set([
+    ...currentReviewerIds,
+    ...approvedReviewerIds,
+    ...requirements.flatMap((rule) => rule.eligibleReviewerIds),
+  ]);
+  return {
+    worktreeId,
+    requestId: request.id,
+    requestUrl: request.url,
+    provider: discovery.provider,
+    requestOpen: request.open,
+    reviewers: [...people.values()].filter((person) =>
+      referencedPeople.has(person.id),
+    ),
+    currentReviewerIds,
+    approvedReviewerIds,
+    requirements,
+    issues: discovery.issues,
+    discoveryComplete: discovery.discoveryComplete,
+  };
+}
 
 export function randomReviewerPreview(
   assignment: ReviewerAssignment,
@@ -526,7 +594,7 @@ export class ReviewersService {
     await this.updateConfiguredFlag(tx, repositoryId);
   }
 
-  private async context(worktreeId: string) {
+  private async context(worktreeId: string, requirePreferences = true) {
     const prisma = await getPrismaClient();
     const worktree = await prisma.worktree.findUnique({
       where: { id: worktreeId },
@@ -538,7 +606,7 @@ export class ReviewersService {
     });
     if (!worktree) throw new Error("Worktree not found");
     const repository = worktree.codebase.repository;
-    if (!repository.hasConfiguredCodeReviewers)
+    if (requirePreferences && !repository.hasConfiguredCodeReviewers)
       throw new Error("Configure code reviewers in repository settings first");
     const mr = worktree.gitLabMergeRequest;
     const pr = worktree.pullRequest;
@@ -551,7 +619,7 @@ export class ReviewersService {
         repository.canonicalOrigin.toLowerCase()
     ) {
       throw new Error(
-        "The worktree branch or repository has changed; refresh the linked pull or merge request before assigning reviewers",
+        "The worktree branch or repository has changed; refresh the linked pull or merge request",
       );
     }
     const locator = mr
@@ -560,35 +628,50 @@ export class ReviewersService {
         ? { id: pr.githubId, number: pr.number }
         : null;
     if (!locator)
-      throw new Error("Worktree does not have an open pull or merge request");
+      throw new Error("Worktree does not have a linked pull or merge request");
     return { worktree, repository, locator };
   }
 
-  private async live(worktreeId: string) {
-    const context = await this.context(worktreeId);
+  private async discoverRequest(worktreeId: string, requirePreferences = true) {
+    const context = await this.context(worktreeId, requirePreferences);
     const discovery = await this.providers.discover(
       context.repository,
       undefined,
       context.locator,
       true,
     );
-    const current = await this.context(worktreeId);
+    const current = await this.context(worktreeId, requirePreferences);
     if (
       current.locator.id !== context.locator.id ||
+      current.locator.number !== context.locator.number ||
+      current.locator.projectId !== context.locator.projectId ||
       current.repository.id !== context.repository.id ||
+      current.repository.canonicalOrigin.toLowerCase() !==
+        context.repository.canonicalOrigin.toLowerCase() ||
       current.worktree.branch !== context.worktree.branch
     ) {
       throw new Error(
-        "The linked pull or merge request has changed; reload reviewer options before assigning",
+        "The linked pull or merge request has changed; reload review details",
       );
     }
+    return { ...current, discovery };
+  }
+
+  async worktreeReviewStatus(worktreeId: string) {
+    const { discovery } = await this.discoverRequest(worktreeId, false);
+    return worktreeReviewStatusView(worktreeId, discovery);
+  }
+
+  private async live(worktreeId: string) {
+    const current = await this.discoverRequest(worktreeId);
+    const { discovery } = current;
     const saved = await this.saved(current.repository.id);
     const assignment = reviewerAssignmentView(worktreeId, discovery, saved);
     if (!assignment.requestOpen)
       throw new Error(
         "Pull or merge request is no longer open; refresh this worktree",
       );
-    return { ...current, discovery, assignment };
+    return { ...current, assignment };
   }
 
   async worktreeReviewerAssignment(worktreeId: string) {

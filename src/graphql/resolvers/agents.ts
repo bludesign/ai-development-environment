@@ -19,6 +19,11 @@ import {
   agentJobLogTopic,
 } from "@/services/agent-control";
 import type { GraphQLContext } from "@/services/graphql-server/graphql-server.service";
+import {
+  AGENT_WEBSOCKET_CHANGED_TOPIC,
+  agentWebSocketRegistry,
+  type AgentWebSocketConnection,
+} from "@/services/agent-control/websocket-registry";
 
 type JsonRecord = Record<string, unknown>;
 
@@ -109,6 +114,8 @@ export const createAgentResolvers = (
 ) => ({
   JSON: jsonScalar,
   Agent: {
+    webSocketConnection: (agent: { id: string }) =>
+      agentWebSocketRegistry.snapshot(agent.id),
     capabilities: (agent: { capabilitiesJson: string }) =>
       parseJson(agent.capabilitiesJson),
     connectionStatus: (agent: {
@@ -462,7 +469,46 @@ export const createAgentResolvers = (
         if (requireAgent(context) !== agentId) {
           throw new Error("An agent may only subscribe to its own events");
         }
-        return agentEventBus.iterate(agentEventsTopic(agentId));
+        const events = agentEventBus.iterate(agentEventsTopic(agentId));
+        const release = context.webSocketConnectionId
+          ? agentWebSocketRegistry.subscribe(
+              context.webSocketConnectionId,
+              agentId,
+            )
+          : () => undefined;
+        return {
+          [Symbol.asyncIterator]() {
+            return this;
+          },
+          next: () => events.next(),
+          return: () => {
+            release();
+            return events.return!();
+          },
+          throw: (error: unknown) => {
+            release();
+            return events.throw!(error);
+          },
+        };
+      },
+    },
+    agentWebSocketConnectionChanged: {
+      subscribe: (
+        _root: unknown,
+        { agentId }: { agentId?: string },
+        context: GraphQLContext,
+      ) => {
+        if (agentId) requireOwnedAgent(context, agentId);
+        else requireControlPlane(context);
+        return agentEventBus.iterate<{
+          agentWebSocketConnectionChanged: AgentWebSocketConnection;
+        }>(
+          AGENT_WEBSOCKET_CHANGED_TOPIC,
+          agentId
+            ? (event) =>
+                event.agentWebSocketConnectionChanged.agentId === agentId
+            : undefined,
+        );
       },
     },
     agentChanged: {

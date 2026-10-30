@@ -4,12 +4,57 @@ import type { AgentControlService } from "@/services/agent-control";
 import type { GraphQLContext } from "@/services/graphql-server/graphql-server.service";
 
 import { createAgentResolvers } from "./agents";
+import { agentWebSocketRegistry } from "@/services/agent-control/websocket-registry";
 
 function context(agentId: string | null): GraphQLContext {
   return { agentId } as GraphQLContext;
 }
 
 describe("agent read ownership", () => {
+  test("tracks only authorized agent notification subscriptions", async () => {
+    const resolvers = createAgentResolvers({} as AgentControlService);
+    agentWebSocketRegistry.open("test-socket");
+    const agentContext = {
+      ...context("agent-1"),
+      webSocketConnectionId: "test-socket",
+    };
+    expect(() =>
+      resolvers.Subscription.agentEvents.subscribe(
+        {},
+        { agentId: "agent-2" },
+        agentContext,
+      ),
+    ).toThrow("only subscribe to its own events");
+    expect(resolvers.Agent.webSocketConnection({ id: "agent-2" }).status).toBe(
+      "DISCONNECTED",
+    );
+    const stream = resolvers.Subscription.agentEvents.subscribe(
+      {},
+      { agentId: "agent-1" },
+      agentContext,
+    );
+    expect(resolvers.Agent.webSocketConnection({ id: "agent-1" }).status).toBe(
+      "CONNECTED",
+    );
+    await stream.return();
+    expect(resolvers.Agent.webSocketConnection({ id: "agent-1" }).status).toBe(
+      "DISCONNECTED",
+    );
+    agentWebSocketRegistry.close("test-socket");
+  });
+
+  test("protects WebSocket status subscriptions with resource ownership", async () => {
+    const subscribe = createAgentResolvers({} as AgentControlService)
+      .Subscription.agentWebSocketConnectionChanged.subscribe;
+    expect(() => subscribe({}, {}, context("agent-1"))).toThrow(
+      "control-plane",
+    );
+    expect(() =>
+      subscribe({}, { agentId: "agent-2" }, context("agent-1")),
+    ).toThrow("own resources");
+    const stream = subscribe({}, { agentId: "agent-1" }, context("agent-1"));
+    await stream.return?.();
+  });
   test("derives the build folder from the base repository directory", () => {
     const service = {} as AgentControlService;
     const resolver =

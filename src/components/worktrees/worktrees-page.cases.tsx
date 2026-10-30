@@ -682,6 +682,21 @@ export function registerWorktreesPageTests(
           };
           await changeBranch();
           await screen.findByText(branchError, undefined, { timeout: 3_000 });
+          const branchButton = screen.getByRole("button", {
+            name: "feature/AIDE-24",
+          });
+          const branchAlert = screen
+            .getByText(branchError)
+            .closest('[role="alert"]');
+          if (layout === "cards") {
+            expect(branchAlert?.closest('[data-slot="card"]')).toBe(
+              branchButton.closest('[data-slot="card"]'),
+            );
+          } else {
+            expect(branchAlert?.closest("tr")).toBe(
+              branchButton.closest("tr")?.nextElementSibling,
+            );
+          }
 
           inspectionFails = true;
           await act(async () => invalidateInspection());
@@ -1348,6 +1363,101 @@ export function registerWorktreesPageTests(
           ),
         );
       });
+
+      test.each(["cards", "table"])(
+        "keeps action errors local and independently dismissible in %s",
+        async (layout) => {
+          const response = (await request("query Fixture")) as unknown as {
+            worktreeOverview: WorktreeOverview;
+          };
+          const group = response.worktreeOverview.agents[0]!.codebases[0]!;
+          group.worktrees.push({
+            ...group.worktrees[0]!,
+            id: "worktree-2",
+            branch: "feature/AIDE-25",
+            folder: "/workspaces/repo-aide-25",
+            relativePath: "repo-aide-25",
+            primary: false,
+            ticketKey: null,
+            ticketTitle: null,
+            ticketStatus: null,
+            pullRequest: null,
+            latestBuild: null,
+          });
+          const failures = new Map([["worktree-1", "First push failed"]]);
+          request.mockImplementation(async (query, variables) => {
+            if (query.includes("query CommandTargetSummaries")) {
+              const { targets } = variables as {
+                targets: { resourceKind: string; resourceId: string }[];
+              };
+              return {
+                commandTargetSummaries: targets.map((target) => ({
+                  ...target,
+                  commands: [],
+                  activeRuns: [],
+                  recentRuns: [],
+                })),
+              } as never;
+            }
+            if (query.includes("mutation RunWorktreeOperation")) {
+              const { input } = variables as {
+                input: { worktreeId: string };
+              };
+              const failure = failures.get(input.worktreeId);
+              if (failure) throw new Error(failure);
+              return { runWorktreeOperation: { id: "push-job" } } as never;
+            }
+            return response as never;
+          });
+          window.localStorage.setItem("worktrees-layout", layout);
+          render(<WorktreesPage />);
+          const firstBranch = await screen.findByRole("button", {
+            name: "feature/AIDE-24",
+          });
+          const secondBranch = screen.getByRole("button", {
+            name: "feature/AIDE-25",
+          });
+          const actionsFor = (branch: HTMLElement) =>
+            (layout === "cards"
+              ? branch.closest('[data-slot="card"]')
+              : branch.closest("tr")?.nextElementSibling) as HTMLElement;
+          const firstActions = within(actionsFor(firstBranch));
+          const secondActions = within(actionsFor(secondBranch));
+
+          fireEvent.click(firstActions.getByRole("button", { name: "Push" }));
+          await firstActions.findByText("First push failed");
+          expect(firstBranch.getAttribute("aria-expanded")).toBe("false");
+          expect(secondActions.queryByRole("alert")).toBeNull();
+          expect(screen.getAllByRole("alert")).toHaveLength(1);
+
+          // A successful action on another worktree must preserve this error.
+          await act(async () =>
+            fireEvent.click(
+              secondActions.getByRole("button", { name: "Push" }),
+            ),
+          );
+          expect(firstActions.getByText("First push failed")).toBeDefined();
+
+          failures.set("worktree-2", "Second push failed");
+          fireEvent.click(secondActions.getByRole("button", { name: "Push" }));
+          await secondActions.findByText("Second push failed");
+          expect(screen.getAllByRole("alert")).toHaveLength(2);
+          fireEvent.click(
+            firstActions.getByRole("button", { name: "Dismiss error" }),
+          );
+          expect(screen.queryByText("First push failed")).toBeNull();
+          expect(secondActions.getByText("Second push failed")).toBeDefined();
+          expect(navigation.push).not.toHaveBeenCalled();
+
+          failures.delete("worktree-2");
+          await act(async () =>
+            fireEvent.click(
+              secondActions.getByRole("button", { name: "Push" }),
+            ),
+          );
+          expect(screen.queryByRole("alert")).toBeNull();
+        },
+      );
 
       test("clears a worktree index lock after confirmation", async () => {
         render(<WorktreesPage />);
@@ -2115,6 +2225,84 @@ export function registerWorktreesPageTests(
         expect(screen.getByText("—")).toBeDefined();
         expect(screen.queryByRole("button", { name: "Commits: 0" })).toBeNull();
       });
+
+      test.each(["GITHUB", "GITLAB"] as const)(
+        "opens %s review details from a worktree card without navigating",
+        async (provider) => {
+          const response = (await request("query Fixture")) as unknown as {
+            worktreeOverview: WorktreeOverview;
+          };
+          const worktree =
+            response.worktreeOverview.agents[0]!.codebases[0]!.worktrees[0]!;
+          const pr = worktree.pullRequest!;
+          if (provider === "GITLAB") {
+            worktree.pullRequest = null;
+            worktree.sourceControlRequest = {
+              provider,
+              id: "MR_24",
+              number: 24,
+              title: "Change",
+              url: "https://gitlab.example/acme/repo/-/merge_requests/24",
+              isDraft: false,
+              headRefName: worktree.branch!,
+              headRefOid: "abc",
+              createdAt: new Date(0).toISOString(),
+              projectId: "project-1",
+              state: "OPENED",
+              approvalState: "APPROVED",
+            };
+          }
+          request.mockClear();
+          request.mockImplementation(async (query) =>
+            query.includes("query WorktreeReviewStatus")
+              ? ({
+                  worktreeReviewStatus: {
+                    worktreeId: worktree.id,
+                    requestId: provider === "GITHUB" ? pr.id : "MR_24",
+                    provider,
+                    requestUrl:
+                      provider === "GITHUB"
+                        ? pr.url
+                        : worktree.sourceControlRequest!.url,
+                    requestOpen: true,
+                    reviewers: [
+                      {
+                        id: "alice",
+                        username: "alice",
+                        name: "Alice Approver",
+                        avatarUrl: null,
+                        url: null,
+                      },
+                    ],
+                    approvedReviewerIds: ["alice"],
+                    currentReviewerIds: [],
+                    requirements: [],
+                    issues: [],
+                    discoveryComplete: true,
+                  },
+                } as never)
+              : (response as never),
+          );
+          render(<WorktreesPage />);
+          const label = provider === "GITHUB" ? `PR #${pr.number}` : "MR !24";
+          const badge = await screen.findByRole("button", {
+            name: `Review details for ${label}`,
+          });
+          expect(
+            request.mock.calls.some(([query]) =>
+              query.includes("query WorktreeReviewStatus"),
+            ),
+          ).toBe(false);
+          fireEvent.click(badge);
+          expect(await screen.findByText("Alice Approver")).toBeDefined();
+          expect(navigation.push).not.toHaveBeenCalled();
+          expect(
+            screen
+              .getByRole("link", { name: `Open ${label}` })
+              .getAttribute("href"),
+          ).toContain(provider === "GITHUB" ? "github" : "gitlab");
+        },
+      );
 
       test("shows GitLab merge requests and pipelines for the worktree", async () => {
         const response = (await request("query Fixture")) as unknown as {

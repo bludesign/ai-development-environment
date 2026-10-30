@@ -18,6 +18,7 @@ import { AgentsList } from "./agents-list";
 vi.mock("@/lib/control-plane-client", () => ({
   controlPlaneRequest: vi.fn(),
   controlPlaneSubscriptions: vi.fn(),
+  onControlPlaneRecovery: () => () => undefined,
 }));
 
 const requestMock = vi.mocked(controlPlaneRequest);
@@ -37,6 +38,51 @@ afterEach(() => {
 });
 
 describe("AgentsList", () => {
+  test("shows both WebSocket indicators separately from Online", async () => {
+    subscriptionsMock.mockReturnValue({
+      subscribe: vi.fn(() => vi.fn()),
+    } as never);
+    requestMock.mockImplementation(async (query) => {
+      if (query.includes("AgentWebSocketStatus"))
+        return {
+          agent: {
+            webSocketConnection: {
+              agentId: "agent-1",
+              status: "DISCONNECTED",
+              connectedAt: null,
+              lastVerifiedAt: null,
+              disconnectedAt: null,
+              changedAt: null,
+            },
+          },
+        } as never;
+      return {
+        agents: [
+          {
+            id: "agent-1",
+            name: "Test Mac",
+            hostname: "test.local",
+            version: "1.0.0",
+            architecture: "arm64",
+            capabilities: [],
+            connectionStatus: "ONLINE",
+            lastSeenAt: null,
+            createdAt: new Date(0).toISOString(),
+          },
+        ],
+      } as never;
+    });
+    render(<AgentsList />);
+    expect(await screen.findByText("Online")).toBeDefined();
+    expect(
+      await screen.findByRole("button", {
+        name: "Agent WebSocket: Disconnected",
+      }),
+    ).toBeDefined();
+    expect(
+      screen.getByRole("button", { name: "Browser WebSocket: Unknown" }),
+    ).toBeDefined();
+  });
   test("switches enrollment commands between shared Local, Remote, and Proxy", async () => {
     subscriptionsMock.mockReturnValue({
       subscribe: vi.fn(() => vi.fn()),

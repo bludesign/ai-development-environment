@@ -7,6 +7,7 @@ import {
   waitFor,
 } from "@testing-library/react";
 import type { AnchorHTMLAttributes, ReactNode } from "react";
+import type { Worktree } from "@/components/worktrees/types";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 
 import {
@@ -64,7 +65,11 @@ vi.mock("@/components/worktrees/worktrees-page", async (importOriginal) => ({
       typeof import("@/components/worktrees/worktrees-page")
     >()
   ).PrimaryWorktreeActions,
-  PullRequestBadges: () => null,
+  PullRequestBadges: (
+    await importOriginal<
+      typeof import("@/components/worktrees/worktrees-page")
+    >()
+  ).PullRequestBadges,
   displayedWorktreePath: (path: string) => path,
 }));
 
@@ -116,6 +121,8 @@ const entry = {
     availability: "AVAILABLE",
     hasStagedChanges: false,
     hasUnstagedChanges: false,
+    pullRequest: null as Worktree["pullRequest"],
+    sourceControlRequest: null as Worktree["sourceControlRequest"],
   },
 };
 
@@ -143,6 +150,88 @@ describe("RunWorktreeCards", () => {
   });
 
   afterEach(() => cleanup());
+
+  test.each(["GITHUB", "GITLAB"] as const)(
+    "opens %s review details from a run worktree card",
+    async (provider) => {
+      const worktree = { ...entry.worktree };
+      const url =
+        provider === "GITHUB"
+          ? "https://github.com/acme/repo/pull/42"
+          : "https://gitlab.example/acme/repo/-/merge_requests/42";
+      if (provider === "GITHUB")
+        worktree.pullRequest = {
+          id: "PR_42",
+          number: 42,
+          url,
+          reviewDecision: "APPROVED",
+          pipelineStatus: "NONE",
+          pipelines: [],
+          unresolvedReviewThreadCount: 0,
+          labels: [],
+          state: "OPEN",
+          repositoryNameWithOwner: "acme/repo",
+          repositoryGithubId: "repo-1",
+          repositoryUrl: "https://github.com/acme/repo",
+        } as unknown as NonNullable<Worktree["pullRequest"]>;
+      else
+        worktree.sourceControlRequest = {
+          provider,
+          id: "MR_42",
+          number: 42,
+          title: "Change",
+          url,
+          approvalState: "REVIEW_REQUIRED",
+          state: "OPENED",
+          isDraft: false,
+          headRefName: "feature/test",
+          headRefOid: "abc",
+          createdAt: new Date(0).toISOString(),
+        };
+      request.mockImplementation(async (query) => {
+        if (query.includes("query WorktreeDetailOverview"))
+          return {
+            worktreeOverview: {
+              entry: { ...entry, worktree },
+              agents: [
+                { agent: entry.agentGroup.agent, codebases: [entry.group] },
+              ],
+            },
+            builds: { items: [], nextCursor: null },
+          } as never;
+        if (query.includes("query WorktreeReviewStatus"))
+          return {
+            worktreeReviewStatus: {
+              worktreeId: worktree.id,
+              requestId: provider === "GITHUB" ? "PR_42" : "MR_42",
+              provider,
+              requestUrl: url,
+              requestOpen: true,
+              reviewers: [],
+              currentReviewerIds: [],
+              approvedReviewerIds: [],
+              requirements: [],
+              discoveryComplete: true,
+              issues: [],
+            },
+          } as never;
+        throw new Error(`Unexpected query: ${query}`);
+      });
+      render(<RunWorktreeCards worktreeId="worktree-1" />);
+      const label = provider === "GITHUB" ? "PR #42" : "MR !42";
+      fireEvent.click(
+        await screen.findByRole("button", {
+          name: `Review details for ${label}`,
+        }),
+      );
+      expect(await screen.findByText("No approvals to show.")).toBeDefined();
+      expect(
+        screen
+          .getByRole("link", { name: `Open ${label}` })
+          .getAttribute("href"),
+      ).toBe(url);
+    },
+  );
 
   test("refreshes every build row already loaded through pagination", async () => {
     const overviewVariables: unknown[] = [];

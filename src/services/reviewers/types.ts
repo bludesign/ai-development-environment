@@ -23,6 +23,8 @@ export type ReviewerPoolDiscovery = {
 export type ReviewerRequirementDiscovery = {
   id: string;
   name: string;
+  isRequired: boolean;
+  patterns: string[];
   poolKeys: string[];
   eligibleReviewerIds: string[];
   requiredApprovals: number;

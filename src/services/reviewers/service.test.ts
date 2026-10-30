@@ -18,7 +18,11 @@ vi.mock("@/data/prisma-client", () => ({
   getPrismaClient: mocks.getPrismaClient,
 }));
 import { PrismaClient } from "@/generated/prisma/client";
-import { randomReviewerPreview, ReviewersService } from "./service";
+import {
+  randomReviewerPreview,
+  ReviewersService,
+  worktreeReviewStatusView,
+} from "./service";
 import type { ReviewerDiscovery, ReviewerPerson } from "./types";
 
 const person = (id: string): ReviewerPerson => ({
@@ -86,6 +90,8 @@ beforeEach(async () => {
       {
         id: "approval",
         name: "Two approvals",
+        isRequired: true,
+        patterns: [],
         poolKeys: [key],
         eligibleReviewerIds: ["author", "alice", "bob", "carol"],
         requiredApprovals: 2,
@@ -220,6 +226,167 @@ test("migration starts unconfigured and saving/clearing pools updates availabili
     ).hasConfiguredCodeReviewers,
   ).toBe(false);
   expect(await prisma.repositoryReviewerMember.count()).toBe(0);
+});
+
+test("review status works without preferences and for closed requests, while assignment stays restricted", async () => {
+  await worktree();
+  discovery.request!.approvedReviewers = [person("alice")];
+  discovery.request!.currentReviewers = [person("bob")];
+  discovery.requirements[0].approvedReviewerIds = ["alice", "alice", "author"];
+  const status = await service.worktreeReviewStatus("worktree");
+  expect(status.approvedReviewerIds).toEqual(["alice"]);
+  expect(status.currentReviewerIds).toEqual(["bob"]);
+  expect(status.requirements[0].approvedReviewerIds).toEqual(["alice"]);
+  expect(status.requirements[0].eligibleReviewerIds).toEqual([
+    "alice",
+    "bob",
+    "carol",
+  ]);
+  expect(status.reviewers.map((person) => person.id)).toEqual([
+    "alice",
+    "bob",
+    "carol",
+  ]);
+  expect(discover).toHaveBeenCalledWith(
+    expect.anything(),
+    undefined,
+    { id: "pull-1", number: 1 },
+    true,
+  );
+  await expect(service.worktreeReviewerAssignment("worktree")).rejects.toThrow(
+    "Configure code reviewers",
+  );
+  discovery.request!.open = false;
+  expect((await service.worktreeReviewStatus("worktree")).requestOpen).toBe(
+    false,
+  );
+  await save();
+  await expect(
+    service.assignWorktreeReviewers({
+      worktreeId: "worktree",
+      requestId: "pull-1",
+      reviewerIds: ["bob"],
+    }),
+  ).rejects.toThrow("no longer open");
+  expect(assign).not.toHaveBeenCalled();
+});
+
+test("review status has no synthetic requirements and keeps suggested owners separate from required grouped rules", () => {
+  discovery.requirements = [];
+  expect(worktreeReviewStatusView("worktree", discovery).requirements).toEqual(
+    [],
+  );
+  discovery.pools.push({
+    key: "owners",
+    name: "@acme/platform",
+    kind: "CODEOWNERS",
+    candidates: [person("alice"), person("bob")],
+  });
+  discovery.requirements = [
+    {
+      id: "owners",
+      name: "Platform",
+      isRequired: false,
+      patterns: ["src/**", "tests/**"],
+      poolKeys: ["owners", "owners"],
+      eligibleReviewerIds: ["alice", "alice", "bob"],
+      requiredApprovals: 1,
+      approvedReviewerIds: ["alice", "alice"],
+    },
+  ];
+  const suggested = worktreeReviewStatusView("worktree", discovery)
+    .requirements[0];
+  expect(suggested).toMatchObject({
+    isRequired: false,
+    requiredApprovals: 0,
+    patterns: ["src/**", "tests/**"],
+    eligibleReviewerIds: ["alice", "bob"],
+  });
+  expect(suggested.groups).toEqual([
+    { key: "owners", name: "@acme/platform", kind: "CODEOWNERS" },
+  ]);
+  discovery.requirements[0].isRequired = true;
+  discovery.requirements[0].requiredApprovals = 2;
+  const required = worktreeReviewStatusView("worktree", discovery).requirements;
+  expect(required).toHaveLength(1);
+  expect(required[0]).toMatchObject({
+    isRequired: true,
+    requiredApprovals: 2,
+    approvedReviewerIds: ["alice"],
+  });
+});
+
+test("review status rejects stale associations before and after discovery", async () => {
+  await worktree();
+  discover.mockImplementationOnce(async () => {
+    await prisma.worktreePullRequest.update({
+      where: { worktreeId: "worktree" },
+      data: { githubId: "pull-2" },
+    });
+    return structuredClone(discovery);
+  });
+  await expect(service.worktreeReviewStatus("worktree")).rejects.toThrow(
+    "has changed",
+  );
+  await prisma.worktree.update({
+    where: { id: "worktree" },
+    data: { branch: "another-branch" },
+  });
+  discover.mockClear();
+  await expect(service.worktreeReviewStatus("worktree")).rejects.toThrow(
+    "branch or repository has changed",
+  );
+  expect(discover).not.toHaveBeenCalled();
+});
+
+test("review status honors GitLab's native eligible approvals independently of assignment exclusions", () => {
+  discovery.provider = "GITLAB";
+  discovery.request!.approvedReviewers = [person("author"), person("alice")];
+  discovery.requirements[0].approvedReviewerIds = ["author", "alice", "alice"];
+  const status = worktreeReviewStatusView("worktree", discovery);
+  expect(status.requirements[0].approvedReviewerIds).toEqual([
+    "author",
+    "alice",
+  ]);
+  expect(status.requirements[0].eligibleReviewerIds).toContain("author");
+});
+
+test("review status rejects repository origin changes during provider discovery", async () => {
+  await worktree();
+  discover.mockImplementationOnce(async () => {
+    const canonicalOrigin = "github.com/another/repo";
+    await prisma.codebaseRepository.update({
+      where: { id: "repo" },
+      data: { canonicalOrigin },
+    });
+    await prisma.worktree.update({
+      where: { id: "worktree" },
+      data: { pullRequestLookupOrigin: canonicalOrigin },
+    });
+    return structuredClone(discovery);
+  });
+  await expect(service.worktreeReviewStatus("worktree")).rejects.toThrow(
+    "has changed",
+  );
+});
+
+test("review status preserves partial discovery details and provider errors can be retried", async () => {
+  await worktree();
+  discovery.discoveryComplete = false;
+  discovery.issues = ["Code owner group members could not be loaded"];
+  discovery.request!.approvedReviewers = [person("alice")];
+  expect(await service.worktreeReviewStatus("worktree")).toMatchObject({
+    discoveryComplete: false,
+    issues: discovery.issues,
+    approvedReviewerIds: ["alice"],
+  });
+  discover.mockRejectedValueOnce(new Error("Provider unavailable"));
+  await expect(service.worktreeReviewStatus("worktree")).rejects.toThrow(
+    "Provider unavailable",
+  );
+  expect(
+    (await service.worktreeReviewStatus("worktree")).approvedReviewerIds,
+  ).toEqual(["alice"]);
 });
 
 test("discovery preserves preferences and marks unavailable members without selecting new members", async () => {

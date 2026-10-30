@@ -1257,6 +1257,23 @@
     "readOnlyNotice": "Cette installation dispose d'un accès en lecture seule à Vault ; ce secret ne peut donc pas être modifié ici. Mettez-le à jour depuis une installation disposant d'un accès en écriture.",
     "adopted": "{count} identifiant(s) ont été adoptés depuis le backend externe au démarrage du serveur."
   },
+  "webSocketStatus": {
+    "agent": "WebSocket de l’agent",
+    "browser": "WebSocket du navigateur",
+    "unknown": "Inconnu",
+    "connecting": "Connexion en cours",
+    "connected": "Connecté",
+    "reconnecting": "Reconnexion en cours",
+    "disconnected": "Déconnecté",
+    "lastVerified": "Dernière vérification",
+    "lastChanged": "Dernier changement",
+    "connectedSince": "Connecté depuis",
+    "lastDisconnected": "Dernière déconnexion",
+    "never": "Jamais",
+    "agentDescription": "Affiche l’abonnement authentifié aux notifications de tâches sur ce serveur. La détection des pertes de connexion silencieuses peut prendre environ 24 secondes.",
+    "browserDescription": "Affiche la connexion de mise à jour en direct de ce navigateur. La détection des pertes silencieuses peut prendre environ 15 secondes.",
+    "unknownDescription": "Aucun état actuel n’est disponible. Les dernières dates connues sont affichées."
+  },
   "agents": {
     "title": "Agents",
     "description": "Gérez les Macs inscrits et les tâches durables depuis un plan de contrôle unique.",
@@ -3076,7 +3093,6 @@
     "noSteps": "Aucune étape n’a encore été signalée pour cette tâche.",
     "loadMore": "Charger plus",
     "loadingMore": "Chargement…",
-    "loadMore": "Charger plus",
     "moreHistory": "Il reste de l’historique. Chargez un autre lot pour trouver les exécutions précédentes."
   },
   "githubAutomation": {
@@ -5952,6 +5968,26 @@
     "random": "Sélection aléatoire",
     "assignSelected": "Attribuer la sélection ({count})",
     "existingReviewers": "Relecteurs existants",
-    "existingReviewer": "Relecteur existant {name}"
+    "existingReviewer": "Relecteur existant {name}",
+    "status": {
+      "title": "Détails de la relecture",
+      "open": "Détails de la relecture pour {request}",
+      "refresh": "Actualiser les détails de la relecture",
+      "openProvider": "Ouvrir {request}",
+      "requestChanged": "La demande de tirage ou de fusion liée a changé. Actualisez l’arbre de travail et rouvrez les détails de la relecture.",
+      "closed": "Cette demande de tirage ou de fusion est fermée ou fusionnée.",
+      "approvers": "Relecteurs ayant approuvé",
+      "requested": "Relecteurs sollicités",
+      "noApprovers": "Aucune approbation à afficher.",
+      "noRequested": "Aucun relecteur sollicité à afficher.",
+      "rules": "Règles d’approbation et responsables du code",
+      "noRules": "Aucune exigence d’approbation ni suggestion de responsables du code.",
+      "rulesUnavailable": "Les exigences d’approbation n’ont pas pu être entièrement vérifiées.",
+      "suggested": "Suggéré",
+      "progress": "{approved} approbations sur {required}",
+      "requestedCount": "Sollicités : {count}",
+      "members": "Relecteurs éligibles ({count})",
+      "noMembers": "Aucun membre éligible n’a pu être identifié."
+    }
   }
 }
