@@ -564,6 +564,183 @@ describe("iOS destination and error parsing", () => {
     ).toEqual([expect.objectContaining({ id: "OFFLINE-1", available: false })]);
   });
 
+  describe.each(["modern", "legacy"])("%s physical device JSON", (format) => {
+    test.each([
+      {
+        connection: "connected",
+        paired: undefined,
+        transport: undefined,
+        available: true,
+        state: "Connected",
+      },
+      {
+        connection: "disconnected",
+        paired: "paired",
+        transport: "wired",
+        available: true,
+        state: "Available (paired)",
+      },
+      {
+        connection: "disconnected",
+        paired: "paired",
+        transport: "localNetwork",
+        available: true,
+        state: "Available (paired)",
+      },
+      {
+        connection: "unavailable",
+        paired: "paired",
+        transport: "wired",
+        available: true,
+        state: "Available (paired)",
+      },
+      {
+        connection: "disconnected",
+        paired: "paired",
+        transport: undefined,
+        available: false,
+        state: "Unavailable",
+      },
+      {
+        connection: "disconnected",
+        paired: "unpaired",
+        transport: "wired",
+        available: false,
+        state: "Unavailable",
+      },
+      {
+        connection: "disconnected",
+        paired: "paired",
+        transport: "newTransport",
+        available: false,
+        state: "Unavailable",
+      },
+      {
+        connection: undefined,
+        paired: undefined,
+        transport: undefined,
+        available: false,
+        state: "Unknown",
+      },
+      {
+        connection: "newState",
+        paired: undefined,
+        transport: undefined,
+        available: false,
+        state: "Unknown",
+      },
+    ])(
+      "reports $state for $connection / $paired / $transport",
+      ({ connection, paired, transport, available, state }) => {
+        const device =
+          format === "modern"
+            ? {
+                properties: {
+                  connection: {
+                    state: connection,
+                    pairingState: paired,
+                    transportType: transport,
+                  },
+                  hardware: {
+                    platform: "iOS",
+                    reality: "physical",
+                    udid: "HARDWARE-UDID",
+                  },
+                  state: { name: "Test iPhone" },
+                  software: { osVersionNumber: { stringValue: "27.0" } },
+                },
+              }
+            : {
+                connectionProperties: {
+                  tunnelState: connection,
+                  pairingState: paired,
+                  transportType: transport,
+                },
+                hardwareProperties: {
+                  platform: "iOS",
+                  reality: "physical",
+                  udid: "HARDWARE-UDID",
+                },
+                deviceProperties: {
+                  name: "Test iPhone",
+                  osVersionNumber: "27.0",
+                },
+              };
+        const value = {
+          result: { devices: [{ identifier: "CORE-DEVICE-ID", ...device }] },
+        };
+        const expected = {
+          type: "PHYSICAL_DEVICE",
+          id: "CORE-DEVICE-ID",
+          name: "Test iPhone",
+          platform: "iOS",
+          osVersion: "27.0",
+          available,
+          state,
+        };
+        expect(physicalDestinations(value, true)).toEqual([expected]);
+        expect(physicalDestinations(value)).toEqual(
+          available ? [expected] : [],
+        );
+      },
+    );
+  });
+
+  test("prefers modern properties while retaining per-field legacy fallbacks", () => {
+    expect(
+      physicalDestinations({
+        result: {
+          devices: [
+            {
+              identifier: "CORE-DEVICE-ID",
+              properties: {
+                hardware: { platform: "iPadOS", reality: "physical" },
+                connection: {
+                  state: "disconnected",
+                  pairingState: "paired",
+                  transportType: "localNetwork",
+                },
+                state: { name: "Current iPad" },
+              },
+              hardwareProperties: { platform: "macOS", udid: "LEGACY-UDID" },
+              connectionProperties: { tunnelState: "unavailable" },
+              deviceProperties: { name: "Old iPad", osVersionNumber: "26.0" },
+            },
+          ],
+        },
+      }),
+    ).toEqual([
+      expect.objectContaining({
+        id: "CORE-DEVICE-ID",
+        name: "Current iPad",
+        osVersion: "26.0",
+        available: true,
+        state: "Available (paired)",
+      }),
+    ]);
+  });
+
+  test.each([
+    { properties: { hardware: { platform: "iOS", reality: "simulated" } } },
+    { hardwareProperties: { platform: "iOS", reality: "simulated" } },
+    { visibilityClass: "simulators" },
+    { properties: { state: { visibilityClass: "simulators" } } },
+    { properties: { connection: { transportType: "sameMachine" } } },
+    { connectionProperties: { transportType: "sameMachine" } },
+    ...["macOS", "tvOS", "watchOS", "visionOS"].map((platform) => ({
+      properties: { hardware: { platform } },
+    })),
+  ])("excludes simulated devices and other platforms: %j", (device) => {
+    expect(
+      physicalDestinations(
+        {
+          result: { devices: [{ identifier: "NOT-PHYSICAL-IOS", ...device }] },
+        },
+        true,
+      ),
+    ).toEqual([]);
+  });
+
   test("opens the selected simulator UI without using a shell command", () => {
     expect(simulatorAppArguments("SIM-1")).toEqual([
       "-a",

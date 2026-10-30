@@ -1339,9 +1339,9 @@ export class BuildsService {
     });
     try {
       const result = this.result(await this.waitForJob(job.id));
-      return (Array.isArray(result.destinations) ? result.destinations : [])
-        .map((destination) => parseBuildDestination(destination))
-        .filter((destination) => destination.available !== false);
+      return (
+        Array.isArray(result.destinations) ? result.destinations : []
+      ).map((destination) => parseBuildDestination(destination));
     } finally {
       await prisma.agentJob.deleteMany({
         where: { id: job.id, visibility: "SYSTEM" },
@@ -1669,6 +1669,9 @@ export class BuildsService {
     const destination = parseBuildDestination(input.destination);
     if (!BUILD_DESTINATION_TYPES.includes(destination.type)) {
       throw new Error("Destination is invalid");
+    }
+    if (destination.available === false) {
+      throw new Error("The selected build destination is unavailable");
     }
     if (
       action === "ARCHIVE" &&
