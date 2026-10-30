@@ -843,15 +843,38 @@ export class WorktreesService {
     });
   }
 
-  async saveSettings(editorVariant: WorktreeEditorVariant) {
-    if (!["CODE", "CODE_INSIDERS", "NONE"].includes(editorVariant)) {
+  async saveSettings(
+    value:
+      | WorktreeEditorVariant
+      | {
+          editorVariant?: WorktreeEditorVariant | null;
+          autoAssignHighlightColor?: boolean | null;
+          highlightColorMode?: string | null;
+        },
+  ) {
+    const input = typeof value === "string" ? { editorVariant: value } : value;
+    const editorVariant = input.editorVariant ?? undefined;
+    if (
+      editorVariant &&
+      !["CODE", "CODE_INSIDERS", "NONE"].includes(editorVariant)
+    ) {
       throw new Error("Unknown editor setting");
     }
     const prisma = await getPrismaClient();
+    if (
+      input.highlightColorMode &&
+      !["SPREAD", "RANDOM"].includes(input.highlightColorMode)
+    )
+      throw new Error("Unknown highlight color mode");
+    const data = {
+      editorVariant,
+      autoAssignHighlightColor: input.autoAssignHighlightColor ?? undefined,
+      highlightColorMode: input.highlightColorMode ?? undefined,
+    };
     const settings = await prisma.worktreeSettings.upsert({
       where: { id: SETTINGS_ID },
-      create: { id: SETTINGS_ID, editorVariant },
-      update: { editorVariant },
+      create: { id: SETTINGS_ID, ...data },
+      update: data,
     });
     this.publish(null, null);
     return settings;
@@ -2184,7 +2207,10 @@ export class WorktreesService {
     const prisma = await getPrismaClient();
     const worktree = await prisma.worktree.update({
       where: { id },
-      data: { highlightColor: this.requireColor(colorValue) },
+      data: {
+        highlightColor: this.requireColor(colorValue),
+        initialHighlightApplied: true,
+      },
       include: worktreeInclude,
     });
     this.publish(id, worktree.codebaseId);
@@ -4370,6 +4396,43 @@ export class WorktreesService {
         },
       });
       worktreeId = projected.id;
+      if (!projected.initialHighlightApplied) {
+        const settings = await transaction.worktreeSettings.findUnique({
+          where: { id: SETTINGS_ID },
+        });
+        let color = projected.highlightColor;
+        if (!color && settings?.autoAssignHighlightColor !== false) {
+          const worktrees = await transaction.worktree.findMany({
+            where: {
+              codebaseId: job.codebaseId!,
+              missingAt: null,
+              availability: "AVAILABLE",
+            },
+            select: { highlightColor: true },
+          });
+          const counts = new Map<string, number>();
+          for (const entry of worktrees)
+            if (entry.highlightColor)
+              counts.set(
+                entry.highlightColor,
+                (counts.get(entry.highlightColor) ?? 0) + 1,
+              );
+          color =
+            settings?.highlightColorMode === "RANDOM"
+              ? WORKTREE_COLORS[
+                  Math.floor(Math.random() * WORKTREE_COLORS.length)
+                ]
+              : WORKTREE_COLORS.reduce((best, candidate) =>
+                  (counts.get(candidate) ?? 0) < (counts.get(best) ?? 0)
+                    ? candidate
+                    : best,
+                );
+        }
+        await transaction.worktree.update({
+          where: { id: projected.id },
+          data: { highlightColor: color, initialHighlightApplied: true },
+        });
+      }
     });
     this.publish(worktreeId ?? null, job.codebaseId);
     if (worktreeId) {

@@ -111,7 +111,11 @@ test("loads on demand, separates approvals from requests, and expands eligible m
   ).toBe(status().requestUrl);
   expect(request).toHaveBeenCalledOnce();
   expect(request.mock.calls[0][0]).toContain("query WorktreeReviewStatus");
-  expect(request.mock.calls[0][1]).toEqual({ worktreeId: "worktree" });
+  expect(request.mock.calls[0][1]).toEqual({
+    worktreeId: "worktree",
+    all: false,
+    refresh: false,
+  });
   expect(screen.queryByRole("button", { name: /Assign/ })).toBeNull();
 });
 

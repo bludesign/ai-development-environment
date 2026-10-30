@@ -186,7 +186,9 @@
     "showIntegrationCountsInSidebar": "Zähler für Pull-/Merge-Requests und Actions/Pipelines anzeigen",
     "showWorktreeCountsInSidebar": "Zähler für geänderte Worktrees und andere Branches anzeigen",
     "integrationCountsHelp": "Deaktiviert die separate CI-Abfrage der Seitenleiste. Action Center und Benachrichtigungen werden weiterhin aktualisiert.",
-    "saveSettings": "Einstellungen speichern"
+    "saveSettings": "Einstellungen speichern",
+    "hideUnapprovedRequestsInSidebar": "Nicht genehmigte Pull-/Merge-Requests in der Seitenleiste ausblenden",
+    "hideRunningPipelineRequestsInSidebar": "Pull-/Merge-Requests mit laufenden Pipelines in der Seitenleiste ausblenden"
   },
   "apps": {
     "title": "Apps",
@@ -1380,7 +1382,14 @@
     "showModels": "Modelle für {date} anzeigen",
     "hideModels": "Modelle für {date} ausblenden",
     "showAgents": "Agenten mit {model} anzeigen",
-    "hideAgents": "Agenten mit {model} ausblenden"
+    "hideAgents": "Agenten mit {model} ausblenden",
+    "sidebarTitle": "Nutzung der letzten 7 Tage",
+    "viewFullUsage": "Gesamte Nutzung anzeigen",
+    "sidebarLoading": "Nutzung wird geladen…",
+    "sidebarEmpty": "In den letzten sieben Tagen wurde keine Nutzung erfasst.",
+    "sidebarRetry": "Erneut versuchen",
+    "sidebarCollectedAt": "Erfasst am {date}",
+    "sidebarToday": "Heute"
   },
   "agentDetail": {
     "loading": "Agent wird geladen…",
@@ -5989,7 +5998,7 @@
     "saved": "Reviewer-Einstellungen gespeichert.",
     "assign": "Zuweisen",
     "assignReviewers": "Reviewer zuweisen",
-    "assignmentDescription": "Füge Reviewer aus deinen Repository-Einstellungen hinzu. Bestehende Review-Anfragen bleiben erhalten.",
+    "assignmentDescription": "Markiere Personen für eine Review-Anfrage oder entferne die Markierung, um die Anfrage zurückzuziehen. Lade alle Reviewer für weitere Auswahlmöglichkeiten.",
     "requestClosed": "Dieser Pull- oder Merge-Request ist nicht mehr offen. Lade den aktuellen Status neu.",
     "requirementCounts": "Erforderlich: {required} · Genehmigt: {approved} · Angefragt: {requested} · Ausgewählt: {selected}",
     "selectReviewer": "{name} für {group} auswählen",
@@ -6019,6 +6028,30 @@
       "requestedCount": "Angefragt: {count}",
       "members": "Berechtigte Reviewer ({count})",
       "noMembers": "Es konnten keine berechtigten Mitglieder ermittelt werden."
-    }
+    },
+    "loadAllReviewers": "Alle Reviewer laden",
+    "staleDirectory": "Zwischengespeicherte Mitgliedschaft wird angezeigt. Aktualisiere das Verzeichnis, um es erneut zu laden.",
+    "saveChanges": "Änderungen speichern",
+    "directoryTitle": "Reviewer-Verzeichnis",
+    "directoryDescription": "Mitgliedschaften werden standardmäßig 24 Stunden zwischengespeichert und bei Bedarf aktualisiert. Genehmigungen und Review-Anfragen werden immer aktuell geladen.",
+    "directoryEmpty": "Keine Reviewer-Verzeichnisse gespeichert. Öffne die Reviewer-Einstellungen oder lade alle Reviewer.",
+    "directoryMembers": "{count} Mitglieder",
+    "directoryFetched": "Geladen am {date}",
+    "directoryExpires": "Läuft ab am {date}",
+    "directoryFresh": "Aktuell",
+    "directoryStale": "Veraltet",
+    "directoryRefresh": "Verzeichnis aktualisieren",
+    "directoryDelete": "Verzeichnis löschen"
+  },
+  "worktreeSettings": {
+    "title": "Worktrees",
+    "description": "Wähle die Hervorhebung neu erstellter Worktrees.",
+    "autoColor": "Hervorhebungsfarbe automatisch zuweisen",
+    "autoColorHelp": "Gilt für über die App erstellte Worktrees, einschließlich Automatisierungen. Bestehende Worktrees bleiben unverändert.",
+    "colorMode": "Farbauswahl",
+    "spread": "Farben verteilen",
+    "random": "Zufällige Farben",
+    "save": "Einstellungen speichern",
+    "saved": "Worktree-Einstellungen gespeichert."
   }
 }

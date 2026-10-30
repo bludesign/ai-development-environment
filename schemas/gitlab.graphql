@@ -906,7 +906,25 @@ input GitLabPipelineVariableInput {
   value: String!
 }
 
+"Durable GitLab project reviewer-directory membership."
+type GitLabReviewerDirectory {
+  "GitLab project identifier."
+  id: ID!
+  "Repository path with namespace."
+  repository: String!
+  "Distinct members across cached pages."
+  memberCount: Int!
+  "Oldest page fetch time."
+  fetchedAt: String!
+  "Directory expiry according to its TTL."
+  expiresAt: String!
+  "Whether any cached page has expired."
+  stale: Boolean!
+}
+
 extend type Query {
+  "List durable reviewer membership cached separately from live approvals."
+  gitlabReviewerDirectories: [GitLabReviewerDirectory!]!
   "Source control integration state for Query."
   sourceControlIntegrationState: SourceControlIntegrationState!
   "Gitlab settings for Query."
@@ -1035,6 +1053,16 @@ extend type Query {
 }
 
 extend type Mutation {
+  "Refresh project reviewer membership on demand."
+  refreshGitLabReviewerDirectory(
+    "GitLab project identifier."
+    projectId: ID!
+  ): [GitLabReviewerDirectory!]!
+  "Delete cached membership so a subsequent full discovery reloads it."
+  deleteGitLabReviewerDirectory(
+    "GitLab project identifier."
+    projectId: ID!
+  ): Boolean!
   "Save git lab settings for Mutation."
   saveGitLabSettings(
     "Input used by saveGitLabSettings."

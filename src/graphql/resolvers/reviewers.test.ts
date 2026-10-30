@@ -71,7 +71,7 @@ test("review status delegates read-only discovery for control-plane users", () =
       {} as GraphQLContext,
     ),
   ).toBe(status);
-  expect(service.worktreeReviewStatus).toHaveBeenCalledWith("w");
+  expect(service.worktreeReviewStatus).toHaveBeenCalledWith("w", true, false);
 });
 
 test("availability only needs an open request and saved configuration", () => {

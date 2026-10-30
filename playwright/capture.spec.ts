@@ -57,6 +57,10 @@ async function scrollToLazyTarget(page: Page, selector: string) {
 test.describe("app screenshots", () => {
   for (const route of routes) {
     test(route.name, async ({ page }, testInfo) => {
+      test.skip(
+        route.desktopOnly === true &&
+          !testInfo.project.name.startsWith("desktop"),
+      );
       if (!route.anonymous) {
         await page.setExtraHTTPHeaders({
           Authorization: `Bearer ${screenshotSessionToken}`,
@@ -210,6 +214,53 @@ test.describe("app screenshots", () => {
             .click();
           await editor.getByText("Valid", { exact: true }).waitFor();
         }
+      }
+      if (route.usagePopover) {
+        await page.getByRole("button", { name: /^Usage today/ }).click();
+        await expect(
+          page.getByText("Usage over the last 7 days", { exact: true }),
+        ).toBeVisible();
+        await expect(
+          page.getByRole("link", { name: "View full usage" }),
+        ).toBeVisible();
+        await expect(
+          page.locator(".recharts-bar-rectangle").first(),
+        ).toBeVisible();
+      }
+      if (route.destinationPicker === "start") {
+        const dialog = page.getByRole("dialog");
+        await dialog.locator("summary").filter({ hasText: "Details" }).click();
+        await dialog
+          .getByText("Action", { exact: true })
+          .locator("..")
+          .getByRole("combobox")
+          .click();
+        await page.getByRole("option", { name: "Build", exact: true }).click();
+        await dialog
+          .getByRole("tab", { name: "Simulator", exact: true })
+          .click();
+        await dialog.locator("summary").filter({ hasText: "Details" }).click();
+        await page
+          .getByRole("combobox", { name: "Device", exact: true })
+          .click();
+        await expect(
+          page.getByRole("option", { name: /QA Phone.*iPhone 17 Pro/ }),
+        ).toBeVisible();
+        await expect(
+          page.getByRole("button", { name: /^Run on / }),
+        ).toHaveCount(0);
+      }
+      if (route.destinationPicker === "run") {
+        await page
+          .getByRole("button", { name: "Run", exact: true })
+          .first()
+          .click();
+        await expect(
+          page.getByRole("menuitemcheckbox", { name: /QA Phone/ }),
+        ).toBeVisible();
+        await expect(
+          page.getByRole("button", { name: "Run on QA Phone", exact: true }),
+        ).toBeVisible();
       }
       if (route.buildWorkflow === "script") {
         await page.getByRole("tab", { name: "Build Scripts" }).click();

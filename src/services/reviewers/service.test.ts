@@ -251,7 +251,8 @@ test("review status works without preferences and for closed requests, while ass
     expect.anything(),
     undefined,
     { id: "pull-1", number: 1 },
-    true,
+    false,
+    {},
   );
   await expect(service.worktreeReviewerAssignment("worktree")).rejects.toThrow(
     "Configure code reviewers",

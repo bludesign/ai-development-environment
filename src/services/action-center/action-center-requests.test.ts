@@ -124,6 +124,12 @@ describe("Action Center request discovery", () => {
       for (const sql of migration.split(";").filter((sql) => sql.trim()))
         await prisma.$executeRawUnsafe(sql);
     }
+    await prisma.$executeRawUnsafe(
+      'ALTER TABLE "ActionCenterSettings" ADD COLUMN "hideUnapprovedRequestsInSidebar" BOOLEAN NOT NULL DEFAULT true',
+    );
+    await prisma.$executeRawUnsafe(
+      'ALTER TABLE "ActionCenterSettings" ADD COLUMN "hideRunningPipelineRequestsInSidebar" BOOLEAN NOT NULL DEFAULT true',
+    );
     getPrismaClient.mockResolvedValue(prisma);
     github = githubStub();
     gitlab = gitlabStub();

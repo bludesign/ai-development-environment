@@ -7,6 +7,7 @@ export type BuildAction =
   | "TEST_WITHOUT_BUILDING";
 
 export type BuildDestination = {
+  deviceType?: string | null;
   type: "SIMULATOR" | "PHYSICAL_DEVICE";
   id: string;
   name: string;

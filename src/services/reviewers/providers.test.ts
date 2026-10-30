@@ -140,6 +140,8 @@ describe("GitHub reviewer adapter", () => {
       "/repos/acme/project",
       false,
       true,
+      true,
+      expect.any(Function),
     );
     expect(reviewerGraphql).toHaveBeenCalledWith(
       expect.any(String),
@@ -208,6 +210,7 @@ describe("GitHub reviewer adapter", () => {
       number: 8,
       expectedId: "PR_77",
       reviewers: [{ id: "3", username: "carol" }],
+      removeReviewers: [],
     });
   });
 
@@ -421,12 +424,14 @@ function gitlabFixture() {
     }),
     reviewerRest,
     reviewerGraphql,
+    reviewerEligibility: reviewerGraphql,
     addMergeRequestReviewers,
   } as unknown as GitLabService;
   return {
     provider: new GitLabReviewerProvider(service),
     reviewerRest,
     reviewerGraphql,
+    reviewerEligibility: reviewerGraphql,
     addMergeRequestReviewers,
     rule,
   };
@@ -626,6 +631,7 @@ describe("GitLab reviewer adapter", () => {
       iid: 8,
       expectedId: "77",
       reviewerIds: ["3"],
+      removeReviewerIds: [],
     });
   });
 });
@@ -637,4 +643,43 @@ test("owner pool identities ignore ordering and retain native provider identity"
   expect(ownerPoolKey("GITHUB:github.com:1", ["team:2"])).not.toBe(
     ownerPoolKey("GITHUB:github.com:2", ["team:2"]),
   );
+});
+
+test("GitLab summary loads live approvals without scanning any membership pages", async () => {
+  const { provider, reviewerRest, reviewerGraphql } = gitlabFixture();
+  await provider.discover(
+    { id: "repo", canonicalOrigin: "gitlab.example/acme/project" },
+    undefined,
+    { id: "77", number: 8, projectId: "10" },
+    false,
+    { people: [], summary: true },
+  );
+  expect(
+    reviewerRest.mock.calls.some(([path]) => /\/members(?:\/all)?$/.test(path)),
+  ).toBe(false);
+  expect(
+    reviewerRest.mock.calls.some(([path]) =>
+      path.includes("/repository/branches"),
+    ),
+  ).toBe(false);
+  expect(reviewerGraphql.mock.calls[0]?.[0]).not.toContain("eligibleApprovers");
+});
+
+test("GitLab saves revalidate rule eligibility live without scanning the membership directory", async () => {
+  const { provider, reviewerRest, reviewerGraphql } = gitlabFixture();
+  await provider.discover(
+    { id: "repo", canonicalOrigin: "gitlab.example/org/project" },
+    undefined,
+    { id: "77", number: 8, projectId: "10" },
+    true,
+    { people: [], summary: true, validateEligibility: true },
+  );
+  expect(
+    reviewerRest.mock.calls.some(([path]) => /\/members(?:\/all)?$/.test(path)),
+  ).toBe(false);
+  expect(
+    reviewerGraphql.mock.calls.some(([query]) =>
+      String(query).includes("CodeReviewerEligibility"),
+    ),
+  ).toBe(true);
 });

@@ -27,6 +27,8 @@ export const GITHUB_REST_OPERATIONS = {
   },
   reviewers: {
     discovery: "reviewers.discovery",
+    assign: "reviewers.assign",
+    remove: "reviewers.remove",
   },
   users: {
     listEmailsForAuthenticatedUser: "users.listEmailsForAuthenticatedUser",

@@ -438,6 +438,7 @@ vi.mock("@/services/credentials", async (importOriginal) => {
 vi.mock("@/data/prisma-client", () => ({
   getPrismaClient: async () => {
     const prisma = {
+      reviewerDirectorySnapshot: { deleteMany: async () => ({ count: 0 }) },
       gitHubSettings: {
         findUnique: async () => ({
           id: "default",

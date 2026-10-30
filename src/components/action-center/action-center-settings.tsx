@@ -1,4 +1,5 @@
 "use client";
+import { ListTodo } from "lucide-react";
 
 import { useEffect, useId, useState } from "react";
 import { useTranslations } from "next-intl";
@@ -17,8 +18,10 @@ import { Button } from "@/components/ui/button";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 
 const FIELDS =
-  "maximumRequestAgeDays showMyRequestsInSidebar showReviewRequestsInSidebar confirmClearAllNotifications showIntegrationCountsInSidebar showWorktreeCountsInSidebar";
+  "hideUnapprovedRequestsInSidebar hideRunningPipelineRequestsInSidebar maximumRequestAgeDays showMyRequestsInSidebar showReviewRequestsInSidebar confirmClearAllNotifications showIntegrationCountsInSidebar showWorktreeCountsInSidebar";
 type Settings = {
+  hideUnapprovedRequestsInSidebar: boolean;
+  hideRunningPipelineRequestsInSidebar: boolean;
   maximumRequestAgeDays: number;
   showMyRequestsInSidebar: boolean;
   showReviewRequestsInSidebar: boolean;
@@ -69,7 +72,10 @@ export function ActionCenterSettingsCard() {
   return (
     <Card id="action-center-settings">
       <CardHeader>
-        <CardTitle>{t("settingsTitle")}</CardTitle>
+        <CardTitle className="flex items-center gap-2">
+          <ListTodo className="size-5" />
+          {t("settingsTitle")}
+        </CardTitle>
         <CardDescription>{t("settingsDescription")}</CardDescription>
       </CardHeader>
       <CardContent className="space-y-4">
@@ -93,6 +99,8 @@ export function ActionCenterSettingsCard() {
         </div>
         {(
           [
+            "hideUnapprovedRequestsInSidebar",
+            "hideRunningPipelineRequestsInSidebar",
             "showMyRequestsInSidebar",
             "showReviewRequestsInSidebar",
             "confirmClearAllNotifications",

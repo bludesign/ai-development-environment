@@ -179,7 +179,19 @@ type WorktreeTag {
 }
 
 "Configurable settings for worktree."
+enum WorktreeHighlightColorMode {
+  "Choose a least-used color in this codebase."
+  SPREAD
+  "Choose a random palette color."
+  RANDOM
+}
+
+"Shared editor and automatic worktree highlighting preferences."
 type WorktreeSettings {
+  "Automatically highlight worktrees created through the app."
+  autoAssignHighlightColor: Boolean!
+  "How automatic highlight colors are chosen."
+  highlightColorMode: WorktreeHighlightColorMode!
   "The editor variant associated with this worktree settings."
   editorVariant: WorktreeEditorVariant!
   "ISO 8601 timestamp when this worktree settings was last updated."
@@ -1159,7 +1171,11 @@ extend type Mutation {
   "Saves worktree settings and returns the updated worktree settings."
   saveWorktreeSettings(
     "The editor variant used to filter or perform the operation."
-    editorVariant: WorktreeEditorVariant!
+    editorVariant: WorktreeEditorVariant
+    "Enable automatic colors for newly created worktrees."
+    autoAssignHighlightColor: Boolean
+    "Choose spread or random automatic colors."
+    highlightColorMode: WorktreeHighlightColorMode
   ): WorktreeSettings!
   "Purges a hidden worktree and reports whether the operation succeeded."
   purgeHiddenWorktree(

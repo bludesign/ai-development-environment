@@ -7,8 +7,8 @@ import { PrismaClient } from "@/generated/prisma/client";
 import { queryActionCenterIndex } from "./action-center-index";
 
 const TABLES = [
-  `CREATE TABLE ActionCenterSettings (id TEXT PRIMARY KEY, maximumRequestAgeDays INTEGER, showMyRequestsInSidebar BOOLEAN, showReviewRequestsInSidebar BOOLEAN)`,
-  `CREATE TABLE ActionCenterRequest (id TEXT PRIMARY KEY, resourceKind TEXT, reason TEXT, isMine BOOLEAN, requiresMyApproval BOOLEAN, createdAt DATETIME, updatedAt DATETIME)`,
+  `CREATE TABLE ActionCenterSettings (id TEXT PRIMARY KEY, maximumRequestAgeDays INTEGER, showMyRequestsInSidebar BOOLEAN, showReviewRequestsInSidebar BOOLEAN, hideUnapprovedRequestsInSidebar BOOLEAN DEFAULT 0, hideRunningPipelineRequestsInSidebar BOOLEAN DEFAULT 0)`,
+  `CREATE TABLE ActionCenterRequest (id TEXT PRIMARY KEY, resourceKind TEXT, reason TEXT, isMine BOOLEAN, requiresMyApproval BOOLEAN, createdAt DATETIME, updatedAt DATETIME, payloadJson TEXT DEFAULT '{"request":{"pipelineStatus":"SUCCESS","approvalStatus":"APPROVED"}}')`,
   `CREATE TABLE AgentRun (
     id TEXT PRIMARY KEY,
     kind TEXT NOT NULL,
@@ -279,7 +279,7 @@ describe("request visibility in the mixed index", () => {
       ["old", 1, 0, 31],
     ] as const) {
       await prisma.$executeRawUnsafe(
-        `INSERT INTO ActionCenterRequest VALUES (?, 'PULL_REQUEST', 'ACTIVE', ?, ?, ?, ?)`,
+        `INSERT INTO ActionCenterRequest (id, resourceKind, reason, isMine, requiresMyApproval, createdAt, updatedAt) VALUES (?, 'PULL_REQUEST', 'ACTIVE', ?, ?, ?, ?)`,
         id,
         mine,
         review,
@@ -300,7 +300,7 @@ describe("request visibility in the mixed index", () => {
     "sidebar mine=%s review=%s filters before counting",
     async (mine, review, count) => {
       await prisma.$executeRawUnsafe(
-        `INSERT INTO ActionCenterSettings VALUES ('default', 30, ?, ?)`,
+        `INSERT INTO ActionCenterSettings (id, maximumRequestAgeDays, showMyRequestsInSidebar, showReviewRequestsInSidebar) VALUES ('default', 30, ?, ?)`,
         mine,
         review,
       );
@@ -328,7 +328,7 @@ describe("request visibility in the mixed index", () => {
         ["too-old", "2025-12-31T23:59:59.999Z"],
       ]) {
         await prisma.$executeRawUnsafe(
-          `INSERT INTO ActionCenterRequest VALUES (?, 'MERGE_REQUEST', 'ACTIVE', 1, 0, ?, ?)`,
+          `INSERT INTO ActionCenterRequest (id, resourceKind, reason, isMine, requiresMyApproval, createdAt, updatedAt) VALUES (?, 'MERGE_REQUEST', 'ACTIVE', 1, 0, ?, ?)`,
           id,
           createdAt,
           createdAt,
@@ -347,7 +347,7 @@ describe("request visibility in the mixed index", () => {
 
   test("zero disables age filtering and kind filters affect totals", async () => {
     await prisma.$executeRawUnsafe(
-      `INSERT INTO ActionCenterSettings VALUES ('default', 0, 1, 1)`,
+      `INSERT INTO ActionCenterSettings (id, maximumRequestAgeDays, showMyRequestsInSidebar, showReviewRequestsInSidebar) VALUES ('default', 0, 1, 1)`,
     );
     expect(
       (await queryActionCenterIndex(prisma, { first: 10, cursor: null }))
@@ -363,4 +363,55 @@ describe("request visibility in the mixed index", () => {
       ).totalCount,
     ).toBe(0);
   });
+  test.each([
+    [true, true, "REVIEW_REQUIRED", "SUCCESS", false],
+    [true, false, "APPROVED", "RUNNING", true],
+    [false, true, "REVIEW_REQUIRED", "SUCCESS", true],
+    [true, true, "NONE", "SUCCESS", true],
+    [true, true, "NOT_REQUIRED", "NONE", true],
+    [true, true, "APPROVED", "QUEUED", false],
+    [true, true, "APPROVED", "WAITING_FOR_RESOURCE", false],
+    [true, true, "APPROVED", "WAITING_FOR_CALLBACK", false],
+    [true, true, "REVIEW_REQUIRED", "FAILED", true],
+    [true, true, "CHANGES_REQUESTED", "FAILURE", true],
+    [true, true, "REVIEW_REQUIRED", "ERROR", true],
+    [true, true, "REVIEW_REQUIRED", "TIMED_OUT", true],
+  ])(
+    "sidebar hide-unapproved=%s hide-running=%s approval=%s pipeline=%s visible=%s",
+    async (
+      hideUnapproved,
+      hideRunning,
+      approvalStatus,
+      pipelineStatus,
+      visible,
+    ) => {
+      await prisma.$executeRawUnsafe(
+        "INSERT INTO ActionCenterSettings (id, maximumRequestAgeDays, showMyRequestsInSidebar, showReviewRequestsInSidebar, hideUnapprovedRequestsInSidebar, hideRunningPipelineRequestsInSidebar) VALUES ('default', 30, 1, 1, ?, ?)",
+        hideUnapproved,
+        hideRunning,
+      );
+      await prisma.$executeRawUnsafe(
+        "UPDATE ActionCenterRequest SET payloadJson = ? WHERE id = 'mine'",
+        JSON.stringify({ request: { pipelineStatus, approvalStatus } }),
+      );
+      const sidebar = await queryActionCenterIndex(prisma, {
+        first: 1,
+        cursor: null,
+        surface: "SIDEBAR",
+      });
+      expect(sidebar.totalCount).toBe(visible ? 3 : 2);
+      const full = await queryActionCenterIndex(prisma, {
+        first: 50,
+        cursor: null,
+        surface: "FULL",
+      });
+      expect(full.totalCount).toBe(3);
+      const all = await queryActionCenterIndex(prisma, {
+        first: 50,
+        cursor: null,
+        surface: "SIDEBAR",
+      });
+      expect(all.rows.some((row) => row.resourceId === "mine")).toBe(visible);
+    },
+  );
 });

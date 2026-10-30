@@ -70,6 +70,10 @@ type ReviewerAssignmentRequirement {
 
 "Live reviewer options or a random selection preview."
 type WorktreeReviewerAssignment {
+  "Whether the full eligible membership was loaded, independently of discovery errors."
+  membersLoaded: Boolean!
+  "Whether a directory refresh failed and retained membership is being displayed."
+  directoryStale: Boolean!
   "Worktree being reviewed."
   worktreeId: ID!
   "Provider request identity to bind subsequent assignment."
@@ -132,6 +136,10 @@ type WorktreeReviewRequirement {
 
 "Read-only review details independent of saved reviewer preferences."
 type WorktreeReviewStatus {
+  "Whether the full eligible membership was loaded, independently of discovery errors."
+  membersLoaded: Boolean!
+  "Whether a directory refresh failed and retained membership is being displayed."
+  directoryStale: Boolean!
   "Worktree being inspected."
   worktreeId: ID!
   "Linked provider request identifier."
@@ -152,7 +160,7 @@ type WorktreeReviewStatus {
   requirements: [WorktreeReviewRequirement!]!
   "Provider discovery or capability issues."
   issues: [String!]!
-  "Whether all applicable rules and members could be verified."
+  "Whether the requested discovery scope completed without provider errors."
   discoveryComplete: Boolean!
 }
 
@@ -174,19 +182,27 @@ input SaveRepositoryCodeReviewersInput {
   pools: [CodeReviewerPoolInput!]!
 }
 
-"Add people to the existing reviewers of the loaded request."
+"Add reviewer requests and optionally remove existing individual requests."
 input AssignWorktreeReviewersInput {
+  "Existing individual reviewer requests to remove. Approvals are unaffected."
+  removeReviewerIds: [ID!]
+  "Allow additions from the full eligible directory without changing saved pools."
+  includeAllReviewers: Boolean = false
   "Worktree being reviewed."
   worktreeId: ID!
   "Expected provider request identity from reviewer options."
   requestId: ID!
-  "Configured eligible people to request."
+  "Eligible people to request, using preferred pools unless explicitly expanded."
   reviewerIds: [ID!]!
 }
 
 extend type Query {
   "Inspect a linked pull or merge request's live reviews without configuring reviewers."
   worktreeReviewStatus(
+    "Load the full eligible directory; false loads only needed people."
+    includeEligibleReviewers: Boolean = true
+    "Refresh cached directory data on demand."
+    refresh: Boolean = false
     "Worktree with a linked pull or merge request."
     worktreeId: ID!
   ): WorktreeReviewStatus!
@@ -201,6 +217,12 @@ extend type Query {
   ): RepositoryCodeReviewers!
   "Load live reviewer assignment options for an open request."
   worktreeReviewerAssignment(
+    "Allow manual selection outside preferred pools. Random selection still uses preferences."
+    includeAllReviewers: Boolean = false
+    "Load the full eligible directory; false loads only needed people."
+    includeEligibleReviewers: Boolean = true
+    "Refresh cached directory data on demand."
+    refresh: Boolean = false
     "Worktree with an open pull or merge request."
     worktreeId: ID!
   ): WorktreeReviewerAssignment!
@@ -221,9 +243,9 @@ extend type Mutation {
     "Displayed reviewer pools to update or clear."
     input: SaveRepositoryCodeReviewersInput!
   ): RepositoryCodeReviewers!
-  "Add selected reviewers while preserving existing requests."
+  "Apply additions and explicit removals while preserving unrelated requests and approvals."
   assignWorktreeReviewers(
-    "Expected request and preferred eligible people to add."
+    "Expected request, eligible additions, and optional removals."
     input: AssignWorktreeReviewersInput!
   ): WorktreeReviewerAssignment!
 }

@@ -514,6 +514,13 @@ export async function seedGitLab(prisma: PrismaClient): Promise<void> {
   await prisma.gitLabRestCacheEntry.createMany({
     data: [
       cacheEntry({
+        id: "gitlab-reviewer-directory",
+        operation: "GitLabReviewerDirectory",
+        path: `/projects/${PROJECT_ID}/members/all`,
+        query: { page: 1, per_page: 100 },
+        response: [user, reviewer],
+      }),
+      cacheEntry({
         id: "gitlab-cache-accessible-projects",
         operation: "GitLabAccessibleProjects",
         path: "/projects",

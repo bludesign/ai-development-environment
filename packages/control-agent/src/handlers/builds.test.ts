@@ -1545,3 +1545,37 @@ describe.skipIf(process.platform !== "darwin")("dSYM collection", () => {
     ).resolves.toBeNull();
   });
 });
+
+test("simulator destinations retain renamed devices and resolve their model separately", () => {
+  const devices = {
+    "com.apple.CoreSimulator.SimRuntime.iOS-26-0": [
+      {
+        udid: "sim-qa",
+        name: "QA Phone",
+        deviceTypeIdentifier:
+          "com.apple.CoreSimulator.SimDeviceType.iPhone-17-Pro",
+        state: "Booted",
+        isAvailable: true,
+      },
+    ],
+  };
+  expect(
+    simulatorDestinations({
+      devices,
+      devicetypes: [
+        {
+          identifier: "com.apple.CoreSimulator.SimDeviceType.iPhone-17-Pro",
+          name: "iPhone 17 Pro",
+        },
+      ],
+    })[0],
+  ).toMatchObject({
+    name: "QA Phone",
+    deviceType: "iPhone 17 Pro",
+    osVersion: "26.0",
+    state: "Booted",
+  });
+  expect(simulatorDestinations({ devices })[0]).not.toHaveProperty(
+    "deviceType",
+  );
+});

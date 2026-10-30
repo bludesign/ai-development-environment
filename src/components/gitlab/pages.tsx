@@ -24,6 +24,7 @@ import {
 import { useTranslations } from "next-intl";
 import { useCallback, useEffect, useRef, useState } from "react";
 
+import { ReviewerDirectoryCacheCard } from "./reviewer-directory-cache-card";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { JiraTicketDrawer } from "@/components/jira/ticket-drawer";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
@@ -1956,6 +1957,9 @@ export function GitLabCachePage() {
           ))}
         </CardContent>
       </Card>
+      <ReviewerDirectoryCacheCard
+        refreshKey={entries.map((entry) => entry.id).join(",")}
+      />
       <Card>
         <CardHeader>
           <CardTitle>{t("rateLimits")}</CardTitle>

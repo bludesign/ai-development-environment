@@ -1,3 +1,4 @@
+import { ids } from "../scripts/mock-data/ids";
 import type { Page } from "@playwright/test";
 
 import { CHANGED_COVERAGE_FILES } from "../scripts/mock-data/coverage";
@@ -256,19 +257,50 @@ export async function stubWorktreeAgent(page: Page): Promise<void> {
           xcodeVersion: "26.0",
         },
       });
-    if (query.includes("inspectBuildDestinations("))
+    if (query.includes("query BuildRunAgents"))
       return respond({
-        inspectBuildDestinations: [
+        buildRunAgents: [
           {
-            type: "SIMULATOR",
-            id: "sim-iphone-17",
-            name: "iPhone 17 Pro",
-            platform: "iOS Simulator",
-            osVersion: "26.0",
-            state: "Booted",
+            isBuildAgent: true,
+            available: true,
+            unavailableReason: null,
+            agent: {
+              id: ids.agents.studio,
+              name: "Build Mac",
+              hostname: "build.local",
+              osVersion: "macOS 26",
+              architecture: "arm64",
+              connectionStatus: "ONLINE",
+            },
           },
         ],
       });
+    if (
+      query.includes("inspectBuildDestinations(") ||
+      query.includes("inspectBuildRunDestinations(")
+    ) {
+      const key = query.includes("inspectBuildRunDestinations(")
+        ? "inspectBuildRunDestinations"
+        : "inspectBuildDestinations";
+      return respond({
+        [key]: [
+          {
+            type:
+              key === "inspectBuildRunDestinations"
+                ? "PHYSICAL_DEVICE"
+                : "SIMULATOR",
+            id: "sim-iphone-17",
+            name: "QA Phone",
+            deviceType: "iPhone 17 Pro",
+            platform:
+              key === "inspectBuildRunDestinations" ? "iOS" : "iOS Simulator",
+            osVersion: "26.0",
+            state:
+              key === "inspectBuildRunDestinations" ? "Connected" : "Booted",
+          },
+        ],
+      });
+    }
     if (query.includes("inspectWorktree(")) {
       return respond({
         inspectWorktree: {

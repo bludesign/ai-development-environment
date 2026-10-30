@@ -126,16 +126,14 @@ describe("AssignReviewersButton", () => {
       screen
         .getByRole("option", { name: "Select ada for Platform owners" })
         .getAttribute("aria-disabled"),
-    ).toBe("true");
+    ).toBe("false");
     fireEvent.click(ben);
     expect(
       screen
         .getByRole("option", { name: "Select ben for Security review" })
         .getAttribute("data-checked"),
     ).toBe("true");
-    fireEvent.click(
-      screen.getByRole("button", { name: "Assign selected (1)" }),
-    );
+    fireEvent.click(screen.getByRole("button", { name: "Save changes" }));
     await waitFor(() => expect(onCompleted).toHaveBeenCalledOnce());
     const mutation = request.mock.calls.find(([query]) =>
       query.includes("mutation AssignWorktreeReviewers"),
@@ -145,6 +143,8 @@ describe("AssignReviewersButton", () => {
         worktreeId: worktree.id,
         requestId: "github:repo:42",
         reviewerIds: ["ben"],
+        removeReviewerIds: [],
+        includeAllReviewers: false,
       },
     });
   });
@@ -152,7 +152,7 @@ describe("AssignReviewersButton", () => {
   test("random selection previews additions before explicit assignment", async () => {
     await openPicker();
     fireEvent.click(screen.getByRole("button", { name: "Random selection" }));
-    await screen.findByRole("button", { name: "Assign selected (1)" });
+    await screen.findByRole("button", { name: "Save changes" });
     expect(
       request.mock.calls.some(([query]) => query.includes("mutation")),
     ).toBe(false);
@@ -164,26 +164,33 @@ describe("AssignReviewersButton", () => {
     ).toEqual({
       worktreeId: worktree.id,
       requestId: "github:repo:42",
-      selectedReviewerIds: [],
+      selectedReviewerIds: ["ada"],
     });
   });
 
-  test("keeps selections after a failed assignment so it can be retried", async () => {
+  test("reloads provider state after a failed assignment before allowing a retry", async () => {
     const ben = await openPicker();
     request.mockRejectedValueOnce(new Error("Provider permission denied"));
     fireEvent.click(ben);
-    fireEvent.click(
-      screen.getByRole("button", { name: "Assign selected (1)" }),
+    fireEvent.click(screen.getByRole("button", { name: "Save changes" }));
+    await waitFor(() =>
+      expect(
+        request.mock.calls.filter(([query]) =>
+          query.includes("query WorktreeReviewerAssignment"),
+        ),
+      ).toHaveLength(2),
     );
-    expect(await screen.findByText("Provider permission denied")).toBeDefined();
-    expect(
-      screen
-        .getByRole("option", { name: "Select ben for Platform owners" })
-        .getAttribute("data-checked"),
-    ).toBe("true");
-    fireEvent.click(
-      screen.getByRole("button", { name: "Assign selected (1)" }),
+    await waitFor(() =>
+      expect(
+        screen
+          .getByRole("option", { name: "Select ben for Platform owners" })
+          .getAttribute("data-checked"),
+      ).toBe("false"),
     );
+    fireEvent.click(
+      screen.getByRole("option", { name: "Select ben for Platform owners" }),
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Save changes" }));
     await waitFor(() => expect(onCompleted).toHaveBeenCalledOnce());
   });
 
@@ -204,7 +211,7 @@ describe("AssignReviewersButton", () => {
     const outside = screen.getByRole("option", {
       name: "Existing reviewer outside",
     });
-    expect(outside.getAttribute("aria-disabled")).toBe("true");
+    expect(outside.getAttribute("aria-disabled")).toBe("false");
     expect(screen.getByText("Existing reviewers")).toBeDefined();
   });
 
@@ -221,8 +228,45 @@ describe("AssignReviewersButton", () => {
     ).toBe(true);
     expect(
       screen
-        .getByRole("button", { name: "Assign selected (0)" })
+        .getByRole("button", { name: "Save changes" })
         .hasAttribute("disabled"),
     ).toBe(true);
   });
+});
+
+test("initially checks requested reviewers and allows removing the last request", async () => {
+  await openPicker();
+  const ada = screen.getByRole("checkbox", {
+    name: "Select ada for Platform owners",
+  });
+  expect(ada.getAttribute("aria-checked")).toBe("true");
+  fireEvent.click(ada);
+  fireEvent.click(screen.getByRole("button", { name: "Save changes" }));
+  await waitFor(() => expect(onCompleted).toHaveBeenCalledOnce());
+  expect(
+    request.mock.calls.find(([query]) =>
+      query.includes("mutation AssignWorktreeReviewers"),
+    )?.[1],
+  ).toMatchObject({ input: { reviewerIds: [], removeReviewerIds: ["ada"] } });
+});
+test("loads all eligible people only on demand and retains pending selections", async () => {
+  const ben = await openPicker();
+  expect(request.mock.calls[0]?.[1]).toMatchObject({ all: false });
+  fireEvent.click(ben);
+  fireEvent.click(screen.getByRole("button", { name: "Load all reviewers" }));
+  await waitFor(() =>
+    expect(
+      request.mock.calls.filter(([query]) =>
+        query.includes("query WorktreeReviewerAssignment"),
+      ),
+    ).toHaveLength(2),
+  );
+  expect(request.mock.calls.at(-1)?.[1]).toMatchObject({ all: true });
+  await waitFor(() =>
+    expect(
+      screen
+        .getByRole("checkbox", { name: "Select ben for Platform owners" })
+        .getAttribute("aria-checked"),
+    ).toBe("true"),
+  );
 });

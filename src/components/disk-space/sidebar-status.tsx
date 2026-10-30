@@ -1,7 +1,6 @@
 "use client";
 
 import {
-  CircleDollarSign,
   ClipboardList,
   GitBranch,
   GitMerge,
@@ -18,6 +17,7 @@ import {
 import { useLocale, useTranslations } from "next-intl";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
+import { SidebarUsagePopover } from "@/components/usage/sidebar-usage-popover";
 import { useOptionalActionCenter } from "@/components/action-center/action-center-provider";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -355,24 +355,10 @@ export function SidebarStatusFooter() {
 
   return (
     <div className="space-y-2 border-t border-sidebar-border p-2">
-      <Link
-        className="flex items-center justify-between rounded-md px-2 py-1.5 text-xs hover:bg-sidebar-accent"
-        href="/ai/usage"
-        onClick={closeMobileNavigation}
-      >
-        <span className="flex items-center gap-2">
-          <CircleDollarSign className="size-3.5" />
-          {t("usageToday")}
-        </span>
-        <span className="font-medium tabular-nums">
-          {status?.usageToday.totalCost == null
-            ? "—"
-            : new Intl.NumberFormat(locale, {
-                style: "currency",
-                currency: "USD",
-              }).format(status.usageToday.totalCost)}
-        </span>
-      </Link>
+      <SidebarUsagePopover
+        totalCost={status?.usageToday.totalCost ?? null}
+        onNavigate={closeMobileNavigation}
+      />
       <div className="grid grid-cols-2 gap-1">
         {activity.map(({ key, href, icon: Icon, count }) => (
           <Link

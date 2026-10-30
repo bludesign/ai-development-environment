@@ -843,6 +843,18 @@ export function simulatorDestinations(
   const devices = (value as Record<string, unknown>).devices;
   if (!devices || typeof devices !== "object" || Array.isArray(devices))
     return [];
+  const rawTypes = (value as Record<string, unknown>).devicetypes;
+  const deviceTypes = new Map<string, string>();
+  if (Array.isArray(rawTypes))
+    for (const raw of rawTypes) {
+      if (
+        raw &&
+        typeof raw === "object" &&
+        typeof raw.identifier === "string" &&
+        typeof raw.name === "string"
+      )
+        deviceTypes.set(raw.identifier, raw.name);
+    }
   const result: BuildDestination[] = [];
   for (const [runtime, entries] of Object.entries(devices)) {
     if (!runtime.includes("SimRuntime.iOS-") || !Array.isArray(entries))
@@ -859,6 +871,10 @@ export function simulatorDestinations(
       )
         continue;
       result.push({
+        ...(typeof device.deviceTypeIdentifier === "string" &&
+        deviceTypes.has(device.deviceTypeIdentifier)
+          ? { deviceType: deviceTypes.get(device.deviceTypeIdentifier)! }
+          : {}),
         type: "SIMULATOR",
         id: device.udid,
         name: typeof device.name === "string" ? device.name : device.udid,
@@ -1049,7 +1065,7 @@ export const inspectBuildDestinations: AgentJobHandler = async (
   const [simulators, physical] = await Promise.all([
     command(
       "xcrun",
-      ["simctl", "list", "devices", "available", "-j"],
+      ["simctl", "list", "-j"],
       Math.min(timeoutMs, 30_000),
       signal,
       folder,
@@ -1078,7 +1094,7 @@ export const inspectBuildRunDestinations: AgentJobHandler = async (
   if (input.destinationType === "SIMULATOR") {
     const simulators = await command(
       "xcrun",
-      ["simctl", "list", "devices", "-j"],
+      ["simctl", "list", "-j"],
       Math.min(timeoutMs, 30_000),
       signal,
       folder,
@@ -1104,7 +1120,7 @@ export const inspectAgentBuildRunDestinations: AgentJobHandler = async (
   if (input.destinationType === "SIMULATOR") {
     const simulators = await command(
       "xcrun",
-      ["simctl", "list", "devices", "-j"],
+      ["simctl", "list", "-j"],
       Math.min(timeoutMs, 30_000),
       signal,
       process.cwd(),

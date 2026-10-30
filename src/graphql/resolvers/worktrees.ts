@@ -512,11 +512,15 @@ export const createWorktreeResolvers = (
     },
     saveWorktreeSettings: (
       _root: unknown,
-      { editorVariant }: { editorVariant: WorktreeEditorVariant },
+      args: {
+        editorVariant?: WorktreeEditorVariant | null;
+        autoAssignHighlightColor?: boolean | null;
+        highlightColorMode?: string | null;
+      },
       context: GraphQLContext,
     ) => {
       requireControlPlane(context);
-      return service.saveSettings(editorVariant);
+      return service.saveSettings(args);
     },
     purgeHiddenWorktree: (
       _root: unknown,

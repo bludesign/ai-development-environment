@@ -7,7 +7,11 @@ import {
   parseCcusageJobResult,
 } from "@ai-development-environment/agent-contract";
 
-import { aggregateUsage } from "@/components/usage/aggregate-usage";
+import {
+  filterUsageByDays,
+  usagePeriodForDate,
+  aggregateUsage,
+} from "@/components/usage/aggregate-usage";
 import { getPrismaClient } from "@/data/prisma-client";
 import {
   agentEventBus,
@@ -137,6 +141,29 @@ export class SystemStatusService {
     } finally {
       await this.removeCollection(id);
     }
+  }
+
+  async usageHistory() {
+    const prisma = await getPrismaClient();
+    const [retained, summary] = await Promise.all([
+      this.ccusage.retainedUsage(),
+      prisma.sidebarUsageSummary.findUnique({ where: { id: "default" } }),
+    ]);
+    const usage = filterUsageByDays(retained, 7);
+    const byPeriod = new Map(
+      usage.days.map((day) => [day.period, day.totalCost]),
+    );
+    const days = Array.from({ length: 7 }, (_, index) => {
+      const date = new Date();
+      date.setDate(date.getDate() - (6 - index));
+      const period = usagePeriodForDate(date);
+      return { period, totalCost: byPeriod.get(period) ?? 0 };
+    });
+    return {
+      days,
+      hasUsage: usage.days.length > 0,
+      collectedAt: summary?.collectedAt.toISOString() ?? null,
+    };
   }
 
   private async persistUsage(

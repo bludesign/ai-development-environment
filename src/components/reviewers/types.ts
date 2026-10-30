@@ -38,6 +38,8 @@ export type ReviewerAssignmentRequirement = {
 };
 
 export type WorktreeReviewerAssignment = {
+  membersLoaded?: boolean;
+  directoryStale?: boolean;
   worktreeId: string;
   requestId: string;
   requestUrl: string;
@@ -68,6 +70,8 @@ export type WorktreeReviewRequirement = {
 };
 
 export type WorktreeReviewStatus = {
+  membersLoaded?: boolean;
+  directoryStale?: boolean;
   worktreeId: string;
   requestId: string;
   requestUrl: string;
@@ -82,7 +86,7 @@ export type WorktreeReviewStatus = {
 };
 
 export const WORKTREE_REVIEW_STATUS_FIELDS = `
-  worktreeId requestId requestUrl provider requestOpen
+  worktreeId requestId requestUrl provider requestOpen membersLoaded directoryStale
   currentReviewerIds approvedReviewerIds issues discoveryComplete
   reviewers { ${CODE_REVIEWER_PERSON_FIELDS} }
   requirements {
@@ -99,7 +103,7 @@ export const REPOSITORY_CODE_REVIEWERS_FIELDS = `
   }
 `;
 export const WORKTREE_REVIEWER_ASSIGNMENT_FIELDS = `
-  worktreeId requestId requestUrl provider requestOpen authorId
+  worktreeId requestId requestUrl provider requestOpen authorId membersLoaded directoryStale
   currentReviewerIds approvedReviewerIds selectedReviewerIds issues discoveryComplete
   reviewers { ${CODE_REVIEWER_PERSON_FIELDS} }
   requirements {

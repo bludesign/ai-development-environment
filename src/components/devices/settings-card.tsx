@@ -18,7 +18,13 @@ import { SettingsHelpLink } from "@/components/settings-help-link";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent } from "@/components/ui/card";
+import {
+  Card,
+  CardContent,
+  CardHeader,
+  CardTitle,
+  CardDescription,
+} from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Spinner } from "@/components/ui/spinner";
@@ -236,15 +242,16 @@ export function IosDeviceSettingsCard() {
 
   return (
     <Card>
-      <CardContent className="space-y-6">
+      <CardHeader>
         <div className="flex items-center gap-2">
           <Apple className="size-5" />
           <div>
-            <h2 className="font-semibold">{t("title")}</h2>
-            <p className="text-xs text-muted-foreground">{t("description")}</p>
+            <CardTitle>{t("title")}</CardTitle>
+            <CardDescription>{t("description")}</CardDescription>
           </div>
         </div>
-
+      </CardHeader>
+      <CardContent className="space-y-6">
         {error && (
           <Alert variant="destructive">
             <AlertDescription>{error}</AlertDescription>

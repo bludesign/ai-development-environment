@@ -629,6 +629,7 @@ model Worktree {
   rebaseInProgress         Boolean                      @default(false)
   hasConflicts             Boolean                      @default(false)
   pushStatus               String                       @default("UNKNOWN")
+  initialHighlightApplied  Boolean                      @default(false)
   highlightColor           String?
   availability             String                       @default("AVAILABLE")
   statusError              String?
@@ -2242,14 +2243,16 @@ model SidebarUsageSummary {
 }
 
 model ActionCenterSettings {
-  id                             String   @id
-  maximumRequestAgeDays          Int      @default(30)
-  showMyRequestsInSidebar        Boolean  @default(true)
-  showReviewRequestsInSidebar    Boolean  @default(true)
-  confirmClearAllNotifications   Boolean  @default(true)
-  showIntegrationCountsInSidebar Boolean  @default(true)
-  showWorktreeCountsInSidebar    Boolean  @default(true)
-  updatedAt                      DateTime @updatedAt
+  id                                   String   @id
+  maximumRequestAgeDays                Int      @default(30)
+  showMyRequestsInSidebar              Boolean  @default(true)
+  showReviewRequestsInSidebar          Boolean  @default(true)
+  confirmClearAllNotifications         Boolean  @default(true)
+  showIntegrationCountsInSidebar       Boolean  @default(true)
+  showWorktreeCountsInSidebar          Boolean  @default(true)
+  hideUnapprovedRequestsInSidebar      Boolean  @default(true)
+  hideRunningPipelineRequestsInSidebar Boolean  @default(true)
+  updatedAt                            DateTime @updatedAt
 }
 
 model ActionCenterRequest {
@@ -2549,10 +2552,12 @@ model WorktreeTagAssignment {
 }
 
 model WorktreeSettings {
-  id            String   @id
-  editorVariant String   @default("CODE")
-  createdAt     DateTime @default(now())
-  updatedAt     DateTime @updatedAt
+  id                       String   @id
+  editorVariant            String   @default("CODE")
+  autoAssignHighlightColor Boolean  @default(true)
+  highlightColorMode       String   @default("SPREAD")
+  createdAt                DateTime @default(now())
+  updatedAt                DateTime @updatedAt
 }
 
 model ExternalMcpServer {
@@ -4242,4 +4247,15 @@ model McpAuthorization {
   user                User      @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@index([userId, clientId])
+}
+
+model ReviewerDirectorySnapshot {
+  id           String   @id
+  key          String   @unique
+  provider     String
+  endpoint     String
+  responseJson String
+  fetchedAt    DateTime
+
+  @@index([provider, fetchedAt])
 }

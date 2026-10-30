@@ -1,6 +1,10 @@
 import { publishIntegrationConfiguration } from "@/services/integration-configuration-events";
 import "server-only";
 import {
+  cachedReviewerDirectory,
+  clearReviewerDirectory,
+} from "@/services/reviewers/directory-cache";
+import {
   externalPipelineActionsService,
   eligibleExternalJob,
   activeStates,
@@ -1052,6 +1056,10 @@ export class GitLabService {
 
   private autoRetryTimer: ReturnType<typeof setTimeout> | null = null;
   private cacheGeneration = 0;
+  private readonly reviewerDirectoryRefreshes = new Map<
+    string,
+    Promise<Awaited<ReturnType<GitLabService["reviewerDirectories"]>>>
+  >();
   private readonly getRequests = new Map<
     string,
     Promise<RawResponse<unknown>>
@@ -1287,7 +1295,12 @@ export class GitLabService {
         update: {},
       }),
     ]);
-    return override?.ttlSeconds ?? settings.cacheTtlSeconds;
+    return (
+      override?.ttlSeconds ??
+      (operation === "GitLabReviewerDirectory"
+        ? 86400
+        : settings.cacheTtlSeconds)
+    );
   }
 
   private async get<T>(input: {
@@ -1513,11 +1526,17 @@ export class GitLabService {
 
   private async invalidateCache(projectId?: string): Promise<void> {
     this.invalidatePendingGets();
+    if (!projectId) await clearReviewerDirectory("GITLAB");
     const prisma = await getPrismaClient();
     await prisma.gitLabRestCacheEntry.deleteMany(
       projectId
         ? {
-            where: projectCacheInvalidation(projectId),
+            where: {
+              AND: [
+                projectCacheInvalidation(projectId),
+                { operation: { not: "GitLabReviewerDirectory" } },
+              ],
+            },
           }
         : undefined,
     );
@@ -2454,17 +2473,39 @@ export class GitLabService {
     query: Query = {},
     force = false,
     worktree = false,
+    directory = false,
+    onCache?: (stale: boolean) => void,
   ): Promise<T> {
-    return (
-      await this.get<T>({
-        path,
-        query,
-        operation: "GitLabReviewerDiscovery",
-        source: worktree ? "WORKTREES" : "GITLAB_SETTINGS",
-        force,
-        allowStaleOnError: false,
-      })
-    ).data;
+    const response = await this.get<T>({
+      path,
+      query,
+      operation: directory
+        ? "GitLabReviewerDirectory"
+        : "GitLabReviewerDiscovery",
+      source: worktree ? "WORKTREES" : "GITLAB_SETTINGS",
+      force,
+      allowStaleOnError: directory,
+    });
+    onCache?.(response.servedStale === true);
+    return response.data;
+  }
+
+  async reviewerEligibility<T>(
+    query: string,
+    variables: Record<string, unknown>,
+    refresh = false,
+    onCache?: (stale: boolean) => void,
+    ref = "",
+  ): Promise<T> {
+    const connection = await this.connection();
+    return cachedReviewerDirectory({
+      provider: "GITLAB",
+      scope: `${connection.baseUrl}:${connection.token}:${ref}`,
+      endpoint: JSON.stringify({ query, variables }),
+      force: refresh,
+      load: () => this.reviewerGraphql<T>(query, variables),
+      onCache,
+    });
   }
 
   /** GraphQL supplies CODEOWNERS section identity omitted by the REST API. */
@@ -2541,6 +2582,7 @@ export class GitLabService {
     iid: number;
     expectedId: string;
     reviewerIds: string[];
+    removeReviewerIds?: string[];
   }): Promise<void> {
     const path = `/projects/${encodeURIComponent(input.projectId)}/merge_requests/${input.iid}`;
     const current = (
@@ -2557,12 +2599,15 @@ export class GitLabService {
         "The merge request changed or is no longer open. Refresh before assigning reviewers.",
       );
     }
+    const removals = new Set(
+      (input.removeReviewerIds ?? []).map((id) => Number(id)),
+    );
     const reviewerIds = [
       ...new Set([
         ...(current.reviewers ?? []).map((user) => user.id),
         ...input.reviewerIds.map((id) => Number(id)),
       ]),
-    ];
+    ].filter((id) => !removals.has(id));
     if (reviewerIds.some((id) => !Number.isSafeInteger(id) || id <= 0)) {
       throw new Error("Reviewer IDs must be valid GitLab user IDs");
     }
@@ -3343,6 +3388,153 @@ export class GitLabService {
     );
   }
 
+  async reviewerDirectories() {
+    const prisma = await getPrismaClient();
+    const [entries, projects, ttl] = await Promise.all([
+      prisma.gitLabRestCacheEntry.findMany({
+        where: { operation: "GitLabReviewerDirectory" },
+      }),
+      prisma.gitLabProject.findMany(),
+      this.ttl("GitLabReviewerDirectory"),
+    ]);
+    const groups = new Map<string, { fetchedAt: Date; people: Set<string> }>();
+    for (const entry of entries) {
+      const request = json(entry.requestJson) as { path?: string };
+      const projectId = request.path?.match(
+        /^\/projects\/([^/]+)\/members\/all$/,
+      )?.[1];
+      if (!projectId) continue;
+      const group = groups.get(projectId) ?? {
+        fetchedAt: entry.fetchedAt,
+        people: new Set<string>(),
+      };
+      if (entry.fetchedAt < group.fetchedAt) group.fetchedAt = entry.fetchedAt;
+      const people = json(entry.responseJson);
+      if (Array.isArray(people))
+        for (const person of people)
+          if (person && typeof person === "object" && "id" in person)
+            group.people.add(String(person.id));
+      groups.set(projectId, group);
+    }
+    return [...groups].map(([id, group]) => ({
+      id,
+      repository:
+        projects.find((project) => project.id === id)?.pathWithNamespace ?? id,
+      memberCount: group.people.size,
+      fetchedAt: group.fetchedAt.toISOString(),
+      expiresAt: new Date(group.fetchedAt.getTime() + ttl * 1000).toISOString(),
+      stale: Date.now() - group.fetchedAt.getTime() >= ttl * 1000,
+    }));
+  }
+
+  async deleteReviewerDirectory(projectId: string) {
+    if (!/^[0-9]+$/.test(projectId))
+      throw new Error("Invalid GitLab project ID");
+    this.invalidatePendingGets();
+    const prisma = await getPrismaClient();
+    await prisma.gitLabRestCacheEntry.deleteMany({
+      where: {
+        operation: "GitLabReviewerDirectory",
+        endpoint: { contains: `/projects/${projectId}/` },
+      },
+    });
+    await clearReviewerDirectory("GITLAB");
+    return true;
+  }
+
+  async refreshReviewerDirectory(projectId: string) {
+    const connection = await this.connection();
+    const key = `${this.cacheGeneration}:${createHash("sha256").update(`${connection.baseUrl}:${connection.token}`).digest("hex")}:${projectId}`;
+    let pending = this.reviewerDirectoryRefreshes.get(key);
+    if (!pending) {
+      pending = this.refreshReviewerDirectoryNow(projectId);
+      this.reviewerDirectoryRefreshes.set(key, pending);
+      const settled = () => {
+        if (this.reviewerDirectoryRefreshes.get(key) === pending)
+          this.reviewerDirectoryRefreshes.delete(key);
+      };
+      void pending.then(settled, settled);
+    }
+    return pending;
+  }
+
+  private async refreshReviewerDirectoryNow(projectId: string) {
+    if (!/^[0-9]+$/.test(projectId))
+      throw new Error("Invalid GitLab project ID");
+    const connection = await this.connection();
+    const generation = this.cacheGeneration;
+    const path = `/projects/${projectId}/members/all`;
+    const operation = "GitLabReviewerDirectory";
+    const pages: Array<{
+      query: Query;
+      response: RawResponse<Array<{ id: number }>>;
+    }> = [];
+    for (let page = 1; ; page++) {
+      const query = { per_page: 100, page };
+      const startedAt = Date.now();
+      const response = await this.fetchRaw<Array<{ id: number }>>({
+        ...connection,
+        path,
+        query,
+      });
+      await Promise.all([
+        this.recordRateLimit(response.rateLimit),
+        this.logCall({
+          method: "GET",
+          endpoint: response.endpoint,
+          operation,
+          requestSource: "GITLAB_SETTINGS",
+          requestSummary: stableStringify({ path, query }),
+          source: "LIVE",
+          durationMs: Date.now() - startedAt,
+          statusCode: response.status,
+        }),
+      ]);
+      pages.push({ query, response });
+      if (response.data.length < 100) break;
+      if (page >= 1000)
+        throw new Error(
+          "GitLab reviewer directory exceeds the supported pagination limit",
+        );
+    }
+    if (generation !== this.cacheGeneration)
+      throw new Error(
+        "GitLab configuration or cache changed during directory refresh. Retry the refresh.",
+      );
+    const prisma = await getPrismaClient();
+    await prisma.$transaction(async (tx) => {
+      await tx.gitLabRestCacheEntry.deleteMany({
+        where: {
+          operation,
+          endpoint: { contains: `/projects/${projectId}/members/all?` },
+        },
+      });
+      for (const { query, response } of pages) {
+        const cacheKey = gitLabRestCacheKey({
+          baseUrl: connection.baseUrl,
+          operation,
+          path,
+          query,
+        });
+        const data = {
+          endpoint: response.endpoint,
+          operation,
+          requestJson: stableStringify({ path, query }),
+          responseJson: JSON.stringify(response.data),
+          responseHeadersJson: serializeGitLabResponseHeaders(response.headers),
+          fetchedAt: new Date(),
+        };
+        await tx.gitLabRestCacheEntry.upsert({
+          where: { cacheKey },
+          create: { id: randomUUID(), cacheKey, ...data },
+          update: data,
+        });
+      }
+    });
+    await clearReviewerDirectory("GITLAB");
+    return this.reviewerDirectories();
+  }
+
   async cachedEntries(
     limit = 50,
     offset = 0,
@@ -3422,6 +3614,7 @@ export class GitLabService {
   }
 
   async clearCache(): Promise<boolean> {
+    await clearReviewerDirectory("GITLAB");
     await this.invalidateCache();
     return true;
   }

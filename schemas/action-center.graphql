@@ -267,6 +267,10 @@ type ActionCenterRequest {
 
 "Shared Action Center request preferences."
 type ActionCenterSettings {
+  "Hide requests with queued or running pipelines in the sidebar, except failed pipelines."
+  hideRunningPipelineRequestsInSidebar: Boolean!
+  "Hide requests without required approval in the sidebar, except failed pipelines."
+  hideUnapprovedRequestsInSidebar: Boolean!
   "Ask for confirmation before clearing all sidebar notifications."
   confirmClearAllNotifications: Boolean!
   "Show provider request and CI counters and enable their dedicated polling."
@@ -283,6 +287,10 @@ type ActionCenterSettings {
 
 "Shared Action Center request preferences."
 input SaveActionCenterSettingsInput {
+  "Hide requests with queued or running pipelines in the sidebar, except failed pipelines."
+  hideRunningPipelineRequestsInSidebar: Boolean
+  "Hide requests without required approval in the sidebar, except failed pipelines."
+  hideUnapprovedRequestsInSidebar: Boolean
   "Ask for confirmation before clearing all sidebar notifications."
   confirmClearAllNotifications: Boolean
   "Show provider request and CI counters and enable their dedicated polling."

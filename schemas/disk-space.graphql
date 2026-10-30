@@ -252,7 +252,26 @@ type SidebarStatus {
   diskSummary: SidebarDiskSummary!
 }
 
+"Retained daily spend for the seven-day sidebar chart."
+type SidebarUsageDay {
+  "Calendar date in YYYY-MM-DD format."
+  period: String!
+  "Recorded cost in USD."
+  totalCost: Float!
+}
+"Read-only usage history; reading it never starts agent collection."
+type SidebarUsageHistory {
+  "Seven calendar days, oldest first."
+  days: [SidebarUsageDay!]!
+  "Whether retained observations exist in this range."
+  hasUsage: Boolean!
+  "Latest sidebar collection time."
+  collectedAt: String
+}
+
 extend type Query {
+  "Returns retained spend without dispatching collection jobs."
+  sidebarUsageHistory: SidebarUsageHistory!
   "Returns disk space settings."
   diskSpaceSettings: DiskSpaceSettings!
   "Returns a disk space overview."

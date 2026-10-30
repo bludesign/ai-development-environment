@@ -3695,7 +3695,7 @@ export function PrimaryWorktreeActions(
   props: Pick<
     WorktreeItemProps,
     "appId" | "group" | "overview" | "worktree"
-  > & { onCompleted: () => Promise<void> },
+  > & { onCompleted: () => Promise<void>; includeReviewers?: boolean },
 ) {
   const { worktree } = props;
   const { appId } = props;
@@ -3721,10 +3721,12 @@ export function PrimaryWorktreeActions(
     agent.connectionStatus !== "ONLINE";
   return (
     <div className="flex flex-wrap gap-2">
-      <AssignReviewersButton
-        onCompleted={props.onCompleted}
-        worktree={worktree}
-      />
+      {props.includeReviewers !== false && (
+        <AssignReviewersButton
+          onCompleted={props.onCompleted}
+          worktree={worktree}
+        />
+      )}
       <StartBuildButton
         buildSettingsHref={
           buildDisabledForSettings
@@ -3789,7 +3791,7 @@ export function ActionRow(
   const changeActions = worktreeChangeActionState(worktree);
   return (
     <div className="flex flex-wrap gap-2">
-      <PrimaryWorktreeActions {...props} />
+      <PrimaryWorktreeActions {...props} includeReviewers={false} />
       <OperationButton
         icon={<Download />}
         label={t("pull")}
@@ -3839,6 +3841,10 @@ export function ActionRow(
         disabled={unavailable}
         onCompleted={props.onCompleted}
         onError={props.onError}
+        worktree={worktree}
+      />
+      <AssignReviewersButton
+        onCompleted={props.onCompleted}
         worktree={worktree}
       />
       {/* The operations that discard or rewrite work, kept off the row itself. */}

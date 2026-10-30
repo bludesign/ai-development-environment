@@ -59,7 +59,7 @@ export function QuickActionsRow({
   });
   return (
     <div
-      className="flex w-full flex-wrap items-center gap-2"
+      className="flex w-full flex-wrap items-center gap-2 empty:hidden"
       ref={containerRef}
     >
       {first}

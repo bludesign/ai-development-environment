@@ -186,7 +186,9 @@
     "showIntegrationCountsInSidebar": "Show pull/merge request and Actions/Pipelines counters",
     "showWorktreeCountsInSidebar": "Show Dirty and Off Main counters",
     "integrationCountsHelp": "Turning this off stops dedicated sidebar CI polling. Action Center and notification polling continue.",
-    "saveSettings": "Save settings"
+    "saveSettings": "Save settings",
+    "hideUnapprovedRequestsInSidebar": "Hide unapproved pull/merge requests in the sidebar",
+    "hideRunningPipelineRequestsInSidebar": "Hide pull/merge requests with pipelines in progress in the sidebar"
   },
   "apps": {
     "title": "Apps",
@@ -1380,7 +1382,14 @@
     "showModels": "Show models for {date}",
     "hideModels": "Hide models for {date}",
     "showAgents": "Show agents using {model}",
-    "hideAgents": "Hide agents using {model}"
+    "hideAgents": "Hide agents using {model}",
+    "sidebarTitle": "Usage over the last 7 days",
+    "viewFullUsage": "View full usage",
+    "sidebarLoading": "Loading usage…",
+    "sidebarEmpty": "No usage recorded in the last seven days.",
+    "sidebarRetry": "Retry",
+    "sidebarCollectedAt": "Collected {date}",
+    "sidebarToday": "Today"
   },
   "agentDetail": {
     "loading": "Loading agent…",
@@ -5989,7 +5998,7 @@
     "saved": "Reviewer preferences saved.",
     "assign": "Assign",
     "assignReviewers": "Assign reviewers",
-    "assignmentDescription": "Add reviewers from your repository preferences. Existing review requests are preserved.",
+    "assignmentDescription": "Check people to request a review, or uncheck them to remove the request. Load all reviewers for more choices.",
     "requestClosed": "This pull or merge request is no longer open. Reload to check its current state.",
     "requirementCounts": "Required: {required} · Approved: {approved} · Requested: {requested} · Selected: {selected}",
     "selectReviewer": "Select {name} for {group}",
@@ -6019,6 +6028,30 @@
       "requestedCount": "Requested: {count}",
       "members": "Eligible reviewers ({count})",
       "noMembers": "No eligible members could be resolved."
-    }
+    },
+    "loadAllReviewers": "Load all reviewers",
+    "staleDirectory": "Showing cached reviewer membership. Refresh to retry updating the directory.",
+    "saveChanges": "Save changes",
+    "directoryTitle": "Reviewer directory",
+    "directoryDescription": "Membership is cached for 24 hours by default and refreshed on demand. Approvals and requested reviewers are always loaded live.",
+    "directoryEmpty": "No reviewer directories cached. Open reviewer settings or load all reviewers to populate them.",
+    "directoryMembers": "{count} members",
+    "directoryFetched": "Fetched {date}",
+    "directoryExpires": "Expires {date}",
+    "directoryFresh": "Fresh",
+    "directoryStale": "Stale",
+    "directoryRefresh": "Refresh directory",
+    "directoryDelete": "Delete directory"
+  },
+  "worktreeSettings": {
+    "title": "Worktrees",
+    "description": "Choose how newly created worktrees are highlighted.",
+    "autoColor": "Automatically assign a highlight color",
+    "autoColorHelp": "Applies to worktrees created through the app, including automations. Existing worktrees are unchanged.",
+    "colorMode": "Color selection",
+    "spread": "Spread colors",
+    "random": "Random colors",
+    "save": "Save settings",
+    "saved": "Worktree settings saved."
   }
 }

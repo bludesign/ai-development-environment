@@ -33,11 +33,20 @@ export const createReviewerResolvers = (service: ReviewersService) => ({
   Query: {
     worktreeReviewStatus: (
       _: unknown,
-      args: { worktreeId: string },
+      args: {
+        worktreeId: string;
+        includeEligibleReviewers?: boolean | null;
+        includeAllReviewers?: boolean | null;
+        refresh?: boolean | null;
+      },
       context: GraphQLContext,
     ) => {
       control(context);
-      return service.worktreeReviewStatus(args.worktreeId);
+      return service.worktreeReviewStatus(
+        args.worktreeId,
+        args.includeEligibleReviewers ?? true,
+        args.refresh ?? false,
+      );
     },
     repositoryCodeReviewers: (
       _: unknown,
@@ -57,11 +66,21 @@ export const createReviewerResolvers = (service: ReviewersService) => ({
     },
     worktreeReviewerAssignment: (
       _: unknown,
-      args: { worktreeId: string },
+      args: {
+        worktreeId: string;
+        includeEligibleReviewers?: boolean | null;
+        includeAllReviewers?: boolean | null;
+        refresh?: boolean | null;
+      },
       context: GraphQLContext,
     ) => {
       control(context);
-      return service.worktreeReviewerAssignment(args.worktreeId);
+      return service.worktreeReviewerAssignment(
+        args.worktreeId,
+        args.includeEligibleReviewers ?? true,
+        args.includeAllReviewers ?? false,
+        args.refresh ?? false,
+      );
     },
     previewRandomWorktreeReviewers: (
       _: unknown,
@@ -92,7 +111,13 @@ export const createReviewerResolvers = (service: ReviewersService) => ({
     assignWorktreeReviewers: (
       _: unknown,
       args: {
-        input: { worktreeId: string; requestId: string; reviewerIds: string[] };
+        input: {
+          worktreeId: string;
+          requestId: string;
+          reviewerIds: string[];
+          removeReviewerIds?: string[] | null;
+          includeAllReviewers?: boolean | null;
+        };
       },
       context: GraphQLContext,
     ) => {

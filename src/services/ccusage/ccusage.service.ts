@@ -623,6 +623,11 @@ export class CcusageService {
     }
   }
 
+  async retainedUsage() {
+    const history = await this.loadHistoryReports();
+    return aggregateUsage(history.reports);
+  }
+
   private async loadHistoryReports(): Promise<{
     reports: UsageReportSource[];
     hasStoredHistory: boolean;

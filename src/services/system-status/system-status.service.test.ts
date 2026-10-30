@@ -257,3 +257,35 @@ describe("SystemStatusService", () => {
     service.stopRuntime();
   });
 });
+
+test("the mini chart reads retained usage, fills missing days, and starts no collection", async () => {
+  vi.useFakeTimers();
+  vi.setSystemTime(new Date("2026-10-30T12:00:00"));
+  const { ccusage, diskSpace, polling } = dependencies();
+  const collect = vi.fn();
+  Object.assign(ccusage, {
+    retainedUsage: vi.fn().mockResolvedValue({
+      days: [{ period: "2026-10-30", totalCost: 12.5 }],
+      totals: {},
+    }),
+    collect,
+  });
+  getPrismaClient.mockResolvedValue({
+    sidebarUsageSummary: {
+      findUnique: vi
+        .fn()
+        .mockResolvedValue({ collectedAt: new Date("2026-10-30T11:55:00Z") }),
+    },
+  });
+  const result = await new SystemStatusService(
+    ccusage,
+    diskSpace,
+    polling,
+  ).usageHistory();
+  expect(result.days).toHaveLength(7);
+  expect(result.days[0]).toEqual({ period: "2026-10-24", totalCost: 0 });
+  expect(result.days[6]).toEqual({ period: "2026-10-30", totalCost: 12.5 });
+  expect(result.hasUsage).toBe(true);
+  expect(collect).not.toHaveBeenCalled();
+  vi.useRealTimers();
+});

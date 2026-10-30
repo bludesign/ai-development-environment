@@ -99,6 +99,11 @@ export const createGitLabResolvers = (
         canCancel: (job: GitLabJobView) => job.canCancel ?? false,
       },
       Query: {
+        gitlabReviewerDirectories: (
+          _: unknown,
+          _args: unknown,
+          context: GraphQLContext,
+        ) => checked(context, () => gitLabService.reviewerDirectories()),
         externalPipelineActions: (
           _: unknown,
           args: { repositoryId: string },
@@ -310,6 +315,22 @@ export const createGitLabResolvers = (
         ) => checked(context, () => gitLabService.autoRetryRules(projectId)),
       },
       Mutation: {
+        refreshGitLabReviewerDirectory: (
+          _: unknown,
+          args: { projectId: string },
+          context: GraphQLContext,
+        ) =>
+          checked(context, () =>
+            gitLabService.refreshReviewerDirectory(args.projectId),
+          ),
+        deleteGitLabReviewerDirectory: (
+          _: unknown,
+          args: { projectId: string },
+          context: GraphQLContext,
+        ) =>
+          checked(context, () =>
+            gitLabService.deleteReviewerDirectory(args.projectId),
+          ),
         saveExternalPipelineActions: (
           _: unknown,
           args: {

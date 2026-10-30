@@ -1,4 +1,5 @@
 "use client";
+import { Globe } from "lucide-react";
 import { useState } from "react";
 import { useTranslations } from "next-intl";
 import { Alert, AlertDescription } from "@/components/ui/alert";
@@ -28,7 +29,10 @@ export function ServerUrlsSettingsCard() {
   return (
     <Card id="server-urls">
       <CardHeader>
-        <CardTitle>{t("title")}</CardTitle>
+        <CardTitle className="flex items-center gap-2">
+          <Globe className="size-5" />
+          {t("title")}
+        </CardTitle>
       </CardHeader>
       <CardContent>
         <p>{error ?? t("loading")}</p>
@@ -93,7 +97,10 @@ function ServerUrlsSettingsForm({ settings }: { settings: ServerUrlSettings }) {
   return (
     <Card id="server-urls">
       <CardHeader>
-        <CardTitle>{t("title")}</CardTitle>
+        <CardTitle className="flex items-center gap-2">
+          <Globe className="size-5" />
+          {t("title")}
+        </CardTitle>
         <CardDescription>{t("description")}</CardDescription>
       </CardHeader>
       <CardContent className="space-y-4">

@@ -18,6 +18,7 @@ import {
   type ProviderUser,
 } from "./provider-utils";
 import type {
+  ReviewerDiscoveryOptions,
   ReviewerDiscovery,
   ReviewerPerson,
   ReviewerPoolDiscovery,
@@ -96,16 +97,77 @@ export class GitHubReviewerProvider {
     requestedRef?: string,
     locator?: ReviewerRequestLocator,
     refresh = false,
+    options: ReviewerDiscoveryOptions = {},
   ): Promise<ReviewerDiscovery> {
+    let directoryStale = false;
     const { owner, name, prefix } = this.parts(repository);
     const read = <T>(path: string) =>
-      this.service.reviewerRest<T>(path, Boolean(locator), refresh);
-    const all = <T>(path: string) =>
-      paginated<T>((page) =>
+      this.service.reviewerRest<T>(
+        path,
+        Boolean(locator),
+        refresh,
+        !/\/pulls\/|\/permission$|\/memberships\/|^\/users?\//.test(path),
+        (stale) => {
+          directoryStale ||= stale;
+        },
+      );
+    const all = async <T>(path: string): Promise<T[]> => {
+      if (options.people !== undefined) {
+        if (path.endsWith("/branches")) return [];
+        if (path.endsWith("/collaborators"))
+          return (
+            await mapIntegrationRequests(options.people, async (person) => {
+              try {
+                const permission = await read<{
+                  user: ProviderUser;
+                  permission: string;
+                }>(`${path}/${encodeURIComponent(person.username)}/permission`);
+                return {
+                  ...permission.user,
+                  permissions: {
+                    push: ["write", "admin", "maintain"].includes(
+                      permission.permission,
+                    ),
+                  },
+                } as T;
+              } catch (error) {
+                if (statusIs(error, 404)) return null;
+                throw error;
+              }
+            })
+          ).filter((person): person is T & {} => person !== null);
+        if (path.endsWith("/members"))
+          return (
+            await mapIntegrationRequests(
+              options.summary
+                ? uniquePeople([...currentReviewers, ...approvedReviewers])
+                : options.people,
+              async (person) => {
+                try {
+                  const membership = await read<{ state: string }>(
+                    `${path.slice(0, -8)}/memberships/${encodeURIComponent(person.username)}`,
+                  );
+                  return membership.state === "active"
+                    ? ({
+                        ...person,
+                        id: person.id,
+                        login: person.username,
+                      } as T)
+                    : null;
+                } catch (error) {
+                  if (statusIs(error, 404)) return null;
+                  throw error;
+                }
+              },
+            )
+          ).filter((person): person is T & {} => person !== null);
+      }
+      return paginated<T>((page) =>
         read(
           `${path}${path.includes("?") ? "&" : "?"}per_page=100&page=${page}`,
         ),
       );
+    };
     const metadata = await read<Repository>(prefix);
     const identity = `GITHUB:github.com:${metadata.id}`;
     const issues: string[] = [];
@@ -153,6 +215,13 @@ export class GitHubReviewerProvider {
       kind: "GENERAL",
       candidates: general,
     });
+    for (const pool of options.pools ?? [])
+      mergePool(pools, {
+        ...pool,
+        candidates: pool.candidates.filter((person) =>
+          generalById.has(person.id),
+        ),
+      });
     const refs = await all<{ name: string }>(`${prefix}/branches`)
       .then((branches) => branches.map((branch) => branch.name))
       .catch(() => [metadata.default_branch]);
@@ -239,7 +308,36 @@ export class GitHubReviewerProvider {
           .map((review) => providerPerson(review.user)),
       );
     }
-    const approvedIds = approvedReviewers.map((person) => person.id);
+    if (options.summary) {
+      const validated = await mapIntegrationRequests(
+        uniquePeople([...currentReviewers, ...approvedReviewers]),
+        async (person) => {
+          try {
+            const access = await read<{ permission: string }>(
+              `${prefix}/collaborators/${encodeURIComponent(person.username)}/permission`,
+            );
+            return ["write", "maintain", "admin"].includes(access.permission)
+              ? person
+              : null;
+          } catch (error) {
+            if (statusIs(error, 404)) return null;
+            unavailable(
+              "GitHub reviewer permissions could not be verified",
+              error,
+            );
+            return null;
+          }
+        },
+      );
+      for (const person of validated)
+        if (person) {
+          general.push(person);
+          generalById.set(person.id, person);
+        }
+    }
+    const approvedIds = approvedReviewers
+      .filter((person) => generalById.has(person.id))
+      .map((person) => person.id);
     const requirements: ReviewerRequirementDiscovery[] = [];
     const pullRules = branchRules.filter(
       (rule) => rule.type === "pull_request",
@@ -276,7 +374,9 @@ export class GitHubReviewerProvider {
         isRequired: true,
         patterns: [],
         poolKeys: [generalKey],
-        eligibleReviewerIds: general.map((person) => person.id),
+        eligibleReviewerIds: [
+          ...new Set([...general.map((person) => person.id), ...approvedIds]),
+        ],
         requiredApprovals: requiredCount,
         approvedReviewerIds: approvedIds,
       });
@@ -336,9 +436,23 @@ export class GitHubReviewerProvider {
         try {
           if (requirement.reviewer.type !== "Team")
             throw new Error("Unsupported required-reviewer type");
-          visibleTeams ??= all<Team>(
-            `/orgs/${encodeURIComponent(owner)}/teams`,
-          );
+          visibleTeams ??=
+            options.people === undefined
+              ? all<Team>(`/orgs/${encodeURIComponent(owner)}/teams`)
+              : (async () => {
+                  const organization = await read<{ id: number }>(
+                    `/orgs/${encodeURIComponent(owner)}`,
+                  );
+                  return mapIntegrationRequests(
+                    pullRules.flatMap(
+                      (rule) => rule.parameters?.required_reviewers ?? [],
+                    ),
+                    (item) =>
+                      read<Team>(
+                        `/organizations/${organization.id}/team/${item.reviewer.id}`,
+                      ),
+                  );
+                })();
           const native = (await visibleTeams).find(
             (candidate) => candidate.id === requirement.reviewer.id,
           );
@@ -446,7 +560,11 @@ export class GitHubReviewerProvider {
         return pending;
       };
       await mapIntegrationRequests(
-        entries.filter((entry) => entry.owners.length > 0),
+        entries.filter(
+          (entry) =>
+            entry.owners.length > 0 &&
+            (!options.summary || applicable.has(entry)),
+        ),
         async (entry) => {
           try {
             const resolved = await mapIntegrationRequests(
@@ -488,6 +606,8 @@ export class GitHubReviewerProvider {
       );
     }
     return {
+      membersLoaded: options.people === undefined,
+      directoryStale,
       provider: "GITHUB",
       repositoryIdentity: identity,
       ref,
@@ -515,10 +635,24 @@ export class GitHubReviewerProvider {
     };
   }
 
+  async resolvePeople(ids: string[]) {
+    return mapIntegrationRequests(ids, async (id) => {
+      const user = await this.service.reviewerRest<ProviderUser>(
+        `/user/${encodeURIComponent(id)}`,
+        true,
+        true,
+      );
+      if (!eligibleHuman(user) || providerPerson(user).id !== id)
+        throw new Error("Reviewer identity is no longer available");
+      return providerPerson(user);
+    });
+  }
+
   async assign(
     repository: ReviewerRepository,
     locator: ReviewerRequestLocator,
     people: ReviewerPerson[],
+    removePeople: ReviewerPerson[] = [],
   ): Promise<void> {
     const { owner, name } = this.parts(repository);
     await this.service.addPullRequestReviewers({
@@ -527,6 +661,10 @@ export class GitHubReviewerProvider {
       number: locator.number,
       expectedId: locator.id,
       reviewers: people.map(({ id, username }) => ({ id, username })),
+      removeReviewers: removePeople.map(({ id, username }) => ({
+        id,
+        username,
+      })),
     });
   }
 }

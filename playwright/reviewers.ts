@@ -153,17 +153,36 @@ export async function stubReviewerCapture(
   };
 
   await page.route("**/api/graphql", async (route) => {
-    const body = route.request().postDataJSON() as { query?: string };
+    const body = route.request().postDataJSON() as {
+      query?: string;
+      variables?: { all?: boolean };
+    };
     const query = body.query ?? "";
     if (query.includes("query RepositoryCodeReviewers")) {
       await route.fulfill({
         json: { data: { repositoryCodeReviewers: settings } },
       });
     } else if (query.includes("query WorktreeReviewStatus")) {
-      await route.fulfill({ json: { data: { worktreeReviewStatus: status } } });
+      await route.fulfill({
+        json: {
+          data: {
+            worktreeReviewStatus: {
+              ...status,
+              membersLoaded: body.variables?.all === true,
+            },
+          },
+        },
+      });
     } else if (query.includes("query WorktreeReviewerAssignment")) {
       await route.fulfill({
-        json: { data: { worktreeReviewerAssignment: assignment } },
+        json: {
+          data: {
+            worktreeReviewerAssignment: {
+              ...assignment,
+              membersLoaded: body.variables?.all === true,
+            },
+          },
+        },
       });
     } else if (query.includes("query PreviewRandomWorktreeReviewers")) {
       await route.fulfill({
@@ -221,6 +240,7 @@ export async function openReviewerCapture(
     await trigger.click();
     const details = page.getByRole("dialog", { name: /^Review details for / });
     await expect(details.getByText("1 of 2 approvals")).toBeVisible();
+    await details.getByRole("button", { name: "Load all reviewers" }).click();
     await details.getByText("Eligible reviewers (3)", { exact: true }).click();
     await details.evaluate((element) => {
       element.scrollTop = 0;
@@ -240,7 +260,7 @@ export async function openReviewerCapture(
       .getByRole("button", { name: "Random selection", exact: true })
       .click();
     await page
-      .getByRole("button", { name: "Assign selected (1)", exact: true })
+      .getByRole("button", { name: "Save changes", exact: true })
       .waitFor();
     const picker = page.getByRole("dialog", {
       name: "Assign reviewers",
@@ -254,7 +274,7 @@ export async function openReviewerCapture(
       ratio: 1,
     });
     await expect(
-      picker.getByRole("button", { name: "Assign selected (1)", exact: true }),
+      picker.getByRole("button", { name: "Save changes", exact: true }),
     ).toBeInViewport({ ratio: 1 });
   }
 }

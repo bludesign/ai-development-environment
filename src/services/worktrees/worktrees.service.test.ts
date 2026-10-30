@@ -1425,8 +1425,11 @@ describe("WorktreesService", () => {
       },
     };
     const transaction = {
+      worktreeSettings: { findUnique: vi.fn().mockResolvedValue(null) },
       codebase: { update: vi.fn() },
       worktree: {
+        findMany: vi.fn().mockResolvedValue([]),
+        update: vi.fn(),
         upsert: vi.fn().mockResolvedValue({ id: projected.id }),
         updateMany: vi.fn().mockResolvedValue({ count: 1 }),
       },
@@ -2440,4 +2443,74 @@ describe("worktreeDisplayPath", () => {
       ),
     ).toBe("D:\\Worktrees\\feature");
   });
+  test.each([
+    [true, "SPREAD", null, "stone"],
+    [true, "RANDOM", null, "sky"],
+    [false, "SPREAD", null, null],
+    [true, "SPREAD", "red", "red"],
+  ])(
+    "automatic colors enabled=%s mode=%s preserve=%s",
+    async (enabled, mode, existing, expected) => {
+      vi.spyOn(Math, "random").mockReturnValue(0.5);
+      let complete:
+        ((job: Record<string, unknown>) => Promise<void>) | undefined;
+      const control = {
+        registerCompletionHandler: vi.fn((kind, handler) => {
+          if (kind === WORKTREE_BRANCH_JOB_KIND) complete = handler;
+        }),
+      } as unknown as AgentControlService;
+      const projected = {
+        id: "created",
+        highlightColor: existing,
+        initialHighlightApplied: false,
+      };
+      const update = vi.fn(async ({ data }) => {
+        Object.assign(projected, data);
+        return projected;
+      });
+      const tx = {
+        codebase: { update: vi.fn() },
+        worktreeSettings: {
+          findUnique: vi.fn().mockResolvedValue({
+            autoAssignHighlightColor: enabled,
+            highlightColorMode: mode,
+          }),
+        },
+        worktree: {
+          upsert: vi.fn().mockResolvedValue(projected),
+          update,
+          findMany: vi
+            .fn()
+            .mockResolvedValue([
+              { highlightColor: "gray" },
+              { highlightColor: "red" },
+            ]),
+        },
+      };
+      getPrismaClient.mockResolvedValue({
+        codebase: {
+          findUnique: vi.fn().mockResolvedValue({ localBranchesJson: "[]" }),
+        },
+        $transaction: vi.fn((callback) => callback(tx)),
+      });
+      service(control);
+      const job = {
+        codebaseId: "codebase-1",
+        worktreeId: null,
+        status: "SUCCEEDED",
+        resultJson: JSON.stringify({
+          worktree: report().worktrees[0],
+          baseBranch: "main",
+        }),
+      };
+      await complete!(job);
+      expect(projected.highlightColor).toBe(expected);
+      expect(projected.initialHighlightApplied).toBe(true);
+      projected.highlightColor = null;
+      await complete!(job);
+      expect(projected.highlightColor).toBeNull();
+      expect(update).toHaveBeenCalledOnce();
+      vi.restoreAllMocks();
+    },
+  );
 });
