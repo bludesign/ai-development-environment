@@ -467,15 +467,21 @@ type WorktreeOverview {
 
 "Optional metadata that can load independently of the saved worktrees."
 enum WorktreeEnrichmentKind {
+  "Refresh GitHub pull requests and their pipeline status."
   GITHUB
+  "Refresh GitLab merge requests and their optional summary details."
   GITLAB_MERGE_REQUESTS
+  "Refresh GitLab pipelines for the worktree commits."
   GITLAB_PIPELINES
+  "Refresh Jira ticket details associated with the worktrees."
   JIRA
 }
 
 "A worktree whose optional metadata could not be fully refreshed."
 type WorktreeEnrichmentWarning {
+  "Identifier of the worktree whose metadata could not be fully refreshed."
   worktreeId: ID!
+  "Description of the metadata refresh failure."
   message: String!
   "Keep these details from the same merge request revision when the refreshed value is unavailable."
   preserveFields: [GitLabMergeRequestSummaryField!]!
@@ -483,20 +489,27 @@ type WorktreeEnrichmentWarning {
 
 "Optional GitLab merge request details that can fail independently of discovery."
 enum GitLabMergeRequestSummaryField {
+  "The merge request approval state."
   APPROVAL_STATE
+  "The number of unresolved merge request discussions."
   UNRESOLVED_DISCUSSIONS_COUNT
 }
 
 "Metadata for the captured worktree identity. Only the requested kind is refreshed."
 type WorktreeEnrichmentUpdate {
+  "The worktree with refreshed metadata for the requested kind."
   worktree: Worktree!
+  "Canonical repository origin captured for this worktree update."
   canonicalOrigin: String!
 }
 
 "An independent worktree metadata load and its measured server duration."
 type WorktreeEnrichment {
+  "Worktrees whose requested metadata was successfully refreshed."
   updates: [WorktreeEnrichmentUpdate!]!
+  "Server time spent refreshing the requested metadata, in milliseconds."
   durationMs: Float!
+  "Failures encountered while refreshing optional worktree metadata."
   warnings: [WorktreeEnrichmentWarning!]!
 }
 
@@ -992,9 +1005,13 @@ extend type Query {
   ): WorktreeOverview!
   "Refresh one kind of optional metadata without blocking the worktree list."
   worktreeEnrichment(
+    "Identifier of an app whose assigned repositories should scope the results."
     appId: ID
+    "Scope to the repository containing this worktree, including sibling checkouts."
     worktreeId: ID
+    "The kind of optional metadata to refresh."
     kind: WorktreeEnrichmentKind!
+    "Whether to bypass cached GitLab pipeline data when refreshing pipelines."
     force: Boolean! = false
   ): WorktreeEnrichment!
   "Returns worktrees."

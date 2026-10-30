@@ -116,12 +116,14 @@ describe("Action Center request discovery", () => {
     prisma = new PrismaClient({
       adapter: new PrismaBetterSqlite3({ url: ":memory:" }),
     });
-    const migration = await readFile(
+    for (const path of [
       "prisma/migrations/20261027010000_action_center_requests/migration.sql",
-      "utf8",
-    );
-    for (const sql of migration.split(";").filter((sql) => sql.trim()))
-      await prisma.$executeRawUnsafe(sql);
+      "prisma/migrations/20261030120000_action_center_sidebar_preferences/migration.sql",
+    ]) {
+      const migration = await readFile(path, "utf8");
+      for (const sql of migration.split(";").filter((sql) => sql.trim()))
+        await prisma.$executeRawUnsafe(sql);
+    }
     getPrismaClient.mockResolvedValue(prisma);
     github = githubStub();
     gitlab = gitlabStub();
