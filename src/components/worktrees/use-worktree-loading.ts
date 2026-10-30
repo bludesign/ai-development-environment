@@ -14,6 +14,7 @@ import {
   type RefreshCoalescer,
 } from "@/lib/refresh-coalescer";
 import type { Worktree, WorktreeOverview } from "./types";
+import type { GitLabMergeRequestSummaryField } from "@/services/gitlab/types";
 import {
   PULL_REQUEST_FIELDS,
   SOURCE_CONTROL_REQUEST_FIELDS,
@@ -58,10 +59,15 @@ type Identity = Pick<
   canonicalOrigin: string;
 };
 type Update = { canonicalOrigin: string; worktree: Worktree };
+type EnrichmentWarning = {
+  worktreeId: string;
+  message: string;
+  preserveFields?: GitLabMergeRequestSummaryField[];
+};
 type Enrichment = {
   updates: Update[];
   durationMs: number;
-  warnings: Array<{ worktreeId: string; message: string }>;
+  warnings: EnrichmentWarning[];
 };
 
 function indexed(overview: WorktreeOverview | null) {
@@ -160,6 +166,7 @@ export function mergeWorktreeEnrichment(
   updates: Update[],
   kind: EnrichmentKind,
   requested: Map<string, Identity>,
+  warnings: EnrichmentWarning[] = [],
 ): WorktreeOverview {
   const byId = new Map(updates.map((update) => [update.worktree.id, update]));
   return {
@@ -189,7 +196,38 @@ export function mergeWorktreeEnrichment(
                 worktree.ticketKey !== identity.ticketKey))
           )
             return worktree;
-          return { ...worktree, ...metadata(update.worktree, kind) };
+          const refreshed = metadata(update.worktree, kind);
+          const previousRequest = worktree.sourceControlRequest;
+          const nextRequest = refreshed.sourceControlRequest;
+          if (
+            kind === "GITLAB_MERGE_REQUESTS" &&
+            previousRequest?.provider === "GITLAB" &&
+            nextRequest?.provider === "GITLAB" &&
+            previousRequest.id === nextRequest.id &&
+            previousRequest.projectId === nextRequest.projectId &&
+            previousRequest.headRefOid === nextRequest.headRefOid
+          ) {
+            const preserveFields = new Set(
+              warnings
+                .filter((warning) => warning.worktreeId === worktree.id)
+                .flatMap((warning) => warning.preserveFields ?? []),
+            );
+            refreshed.sourceControlRequest = {
+              ...nextRequest,
+              ...(preserveFields.has("APPROVAL_STATE") &&
+              nextRequest.approvalState == null
+                ? { approvalState: previousRequest.approvalState ?? null }
+                : {}),
+              ...(preserveFields.has("UNRESOLVED_DISCUSSIONS_COUNT") &&
+              nextRequest.unresolvedDiscussionsCount == null
+                ? {
+                    unresolvedDiscussionsCount:
+                      previousRequest.unresolvedDiscussionsCount ?? null,
+                  }
+                : {}),
+            };
+          }
+          return { ...worktree, ...refreshed };
         }),
       })),
     })),
@@ -285,7 +323,7 @@ export function useWorktreeLoading(
               }>(
                 `query WorktreeEnrichment($appId: ID, $kind: WorktreeEnrichmentKind!, $force: Boolean!) {
               worktreeEnrichment(appId: $appId, kind: $kind, force: $force) {
-                durationMs warnings { worktreeId message }
+                durationMs warnings { worktreeId message preserveFields }
                 updates { canonicalOrigin worktree { id codebaseId branch headSha ticketKey ${fields[kind]} } }
               }
             }`,
@@ -296,7 +334,13 @@ export function useWorktreeLoading(
               const { updates, warnings, durationMs } = worktreeEnrichment;
               setOverview((current) =>
                 lifetime.active && current
-                  ? mergeWorktreeEnrichment(current, updates, kind, requested)
+                  ? mergeWorktreeEnrichment(
+                      current,
+                      updates,
+                      kind,
+                      requested,
+                      warnings,
+                    )
                   : current,
               );
               mark(kind, {

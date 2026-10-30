@@ -2,7 +2,12 @@ import { act, cleanup, renderHook, waitFor } from "@testing-library/react";
 import { useState } from "react";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import { controlPlaneRequest } from "@/lib/control-plane-client";
-import type { Worktree, WorktreeOverview } from "./types";
+import type {
+  Worktree,
+  WorktreeOverview,
+  WorktreeSourceControlRequest,
+} from "./types";
+import type { GitLabMergeRequestSummaryField } from "@/services/gitlab/types";
 import {
   mergeWorktreeEnrichment,
   preserveWorktreeMetadata,
@@ -59,6 +64,20 @@ const identity = () =>
   new Map([
     ["w-1", { ...worktree(), canonicalOrigin: "gitlab.example/acme/app" }],
   ]);
+const mergeRequest: WorktreeSourceControlRequest = {
+  provider: "GITLAB",
+  id: "mr-1",
+  projectId: "42",
+  number: 1,
+  title: "New merge request",
+  url: "https://gitlab.example/acme/app/-/merge_requests/1",
+  isDraft: false,
+  headRefName: "feature/APP-1",
+  headRefOid: "head-1",
+  createdAt: "2026-10-30T12:00:00Z",
+  approvalState: "APPROVED",
+  unresolvedDiscussionsCount: 0,
+};
 
 beforeEach(() => {
   request.mockReset();
@@ -118,6 +137,105 @@ test("merges only the requested integration, including authoritative nulls", () 
   expect(first(updated).ticketTitle).toBeNull();
 });
 
+test.each([
+  {
+    field: "APPROVAL_STATE",
+    expected: { approvalState: "APPROVED", unresolvedDiscussionsCount: null },
+  },
+  {
+    field: "UNRESOLVED_DISCUSSIONS_COUNT",
+    expected: { approvalState: null, unresolvedDiscussionsCount: 0 },
+  },
+])(
+  "preserves only the failed $field from the same merge request revision",
+  ({ field, expected }) => {
+    const updated = mergeWorktreeEnrichment(
+      overview(worktree({ sourceControlRequest: mergeRequest })),
+      result(
+        worktree({
+          sourceControlRequest: {
+            ...mergeRequest,
+            title: "Updated title",
+            approvalState: null,
+            unresolvedDiscussionsCount: null,
+          },
+        }),
+      ).worktreeEnrichment.updates,
+      "GITLAB_MERGE_REQUESTS",
+      identity(),
+      [
+        {
+          worktreeId: "w-1",
+          message: "GitLab unavailable",
+          preserveFields: [field as GitLabMergeRequestSummaryField],
+        },
+      ],
+    );
+    expect(first(updated).sourceControlRequest).toMatchObject({
+      title: "Updated title",
+      ...expected,
+    });
+  },
+);
+
+test.each([
+  { id: "new-mr" },
+  { projectId: "other-project" },
+  { headRefOid: "new-commit" },
+])(
+  "does not preserve details for a different merge request revision: %j",
+  (changes) => {
+    const updated = mergeWorktreeEnrichment(
+      overview(worktree({ sourceControlRequest: mergeRequest })),
+      result(
+        worktree({
+          sourceControlRequest: {
+            ...mergeRequest,
+            ...changes,
+            approvalState: null,
+          },
+        }),
+      ).worktreeEnrichment.updates,
+      "GITLAB_MERGE_REQUESTS",
+      identity(),
+      [
+        {
+          worktreeId: "w-1",
+          message: "GitLab unavailable",
+          preserveFields: ["APPROVAL_STATE"],
+        },
+      ],
+    );
+    expect(first(updated).sourceControlRequest?.approvalState).toBeNull();
+  },
+);
+
+test("uses fresh requested-changes status even if the approvals endpoint fails", () => {
+  const updated = mergeWorktreeEnrichment(
+    overview(worktree({ sourceControlRequest: mergeRequest })),
+    result(
+      worktree({
+        sourceControlRequest: {
+          ...mergeRequest,
+          approvalState: "CHANGES_REQUESTED",
+        },
+      }),
+    ).worktreeEnrichment.updates,
+    "GITLAB_MERGE_REQUESTS",
+    identity(),
+    [
+      {
+        worktreeId: "w-1",
+        message: "GitLab unavailable",
+        preserveFields: ["APPROVAL_STATE"],
+      },
+    ],
+  );
+  expect(first(updated).sourceControlRequest?.approvalState).toBe(
+    "CHANGES_REQUESTED",
+  );
+});
+
 test("preserves last good metadata on saved refreshes but drops it after a commit changes", () => {
   const previous = overview(worktree({ ticketTitle: "Fresh title" }));
   expect(
@@ -138,6 +256,46 @@ function useLoader(appId?: string) {
   const loading = useWorktreeLoading(appId, setValue);
   return { value, setValue, loading };
 }
+
+test("shows a newly discovered merge request with a warning and retains it on saved refreshes", async () => {
+  request.mockImplementation(
+    async (_query, variables) =>
+      ({
+        worktreeEnrichment:
+          variables?.kind === "GITLAB_MERGE_REQUESTS"
+            ? {
+                ...result(
+                  worktree({
+                    sourceControlRequest: {
+                      ...mergeRequest,
+                      approvalState: null,
+                    },
+                  }),
+                ).worktreeEnrichment,
+                warnings: [
+                  {
+                    worktreeId: "w-1",
+                    message: "Could not refresh approvals",
+                    preserveFields: ["APPROVAL_STATE"],
+                  },
+                ],
+              }
+            : { updates: [], warnings: [], durationMs: 1 },
+      }) as never,
+  );
+  const { result: hook } = renderHook(() => useLoader());
+  act(() => hook.current.loading.saved(overview()));
+  await waitFor(() =>
+    expect(hook.current.loading.timings.GITLAB_MERGE_REQUESTS.status).toBe(
+      "warning",
+    ),
+  );
+  expect(first(hook.current.value!).sourceControlRequest?.id).toBe("mr-1");
+  expect(
+    first(preserveWorktreeMetadata(hook.current.value!, overview()))
+      .sourceControlRequest?.id,
+  ).toBe("mr-1");
+});
 
 test("slow pipelines do not block Jira, saved refreshes, or other integration timings", async () => {
   const gate = Promise.withResolvers<ReturnType<typeof result>>();

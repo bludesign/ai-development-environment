@@ -151,6 +151,37 @@ describe("GitLab merge request metadata", () => {
     expect(items[0].approvalState).toBe("NOT_REQUIRED");
   });
 
+  test("identifies failed summary fields without discarding successful details", async () => {
+    const { service } = setup({ approval: new Error("Forbidden") });
+    const { items } = await service.mergeRequests({ scope: "MINE" });
+    const onWarning = vi.fn();
+    const summary = await service.mergeRequestSummary(items[0], onWarning);
+    expect(summary).toMatchObject({
+      title: mergeRequest.title,
+      approvalState: null,
+      unresolvedDiscussionsCount: 0,
+    });
+    expect(onWarning).toHaveBeenCalledExactlyOnceWith(
+      expect.stringContaining("approvals"),
+      ["APPROVAL_STATE"],
+    );
+  });
+
+  test("identifies a failed discussion lookup while keeping successful approval data", async () => {
+    const { service } = setup({ discussions: new Error("GitLab unavailable") });
+    const { items } = await service.mergeRequests({ scope: "MINE" });
+    const onWarning = vi.fn();
+    const summary = await service.mergeRequestSummary(items[0], onWarning);
+    expect(summary).toMatchObject({
+      approvalState: "NOT_REQUIRED",
+      unresolvedDiscussionsCount: null,
+    });
+    expect(onWarning).toHaveBeenCalledExactlyOnceWith(
+      expect.stringContaining("discussions"),
+      ["UNRESOLVED_DISCUSSIONS_COUNT"],
+    );
+  });
+
   test("counts unresolved discussions rather than notes, and preserves requested changes without approval data", async () => {
     const note = {
       id: 1,

@@ -79,6 +79,7 @@ import { jiraBranchCandidates } from "@/services/jira";
 import type {
   GitLabService,
   GitLabMergeRequestView,
+  GitLabMergeRequestSummaryField,
   GitLabPipelineView,
 } from "@/services/gitlab";
 import type { SkillsService } from "@/services/skills";
@@ -225,10 +226,15 @@ type PullRequestTarget = {
 };
 export type WorktreeEnrichmentKind =
   "GITHUB" | "GITLAB_MERGE_REQUESTS" | "GITLAB_PIPELINES" | "JIRA";
-type EnrichmentWarning = { worktreeId: string; message: string };
+type EnrichmentWarning = {
+  worktreeId: string;
+  message: string;
+  preserveFields: GitLabMergeRequestSummaryField[];
+};
 type EnrichmentReporter = (
   worktree: PullRequestTarget,
   message: string,
+  preserveFields?: GitLabMergeRequestSummaryField[],
 ) => void;
 
 function repositoryScope(appId?: string | null, worktreeId?: string | null) {
@@ -1313,13 +1319,17 @@ export class WorktreesService {
         worktree.gitLabMergeRequest =
           await this.gitLabService!.mergeRequestSummary(
             worktree.gitLabMergeRequest,
-            warn ? (message) => warn(worktree, message) : undefined,
+            warn
+              ? (message, preserveFields) =>
+                  warn(worktree, message, preserveFields)
+              : undefined,
           );
       } catch {
         // Approval and discussion summaries are optional in worktree responses.
         warn?.(
           worktree,
           "Could not refresh GitLab approval and discussion details. Try again.",
+          ["APPROVAL_STATE", "UNRESOLVED_DISCUSSIONS_COUNT"],
         );
       }
     });
@@ -1460,13 +1470,22 @@ export class WorktreesService {
           )
         : views;
     const warnings: EnrichmentWarning[] = [];
-    const warn: EnrichmentReporter = (worktree, message) => {
-      warnings.push({ worktreeId: worktree.id, message });
+    const failedIds = new Set<string>();
+    const warn: EnrichmentReporter = (
+      worktree,
+      message,
+      preserveFields = [],
+    ) => {
+      warnings.push({ worktreeId: worktree.id, message, preserveFields });
+    };
+    const fail: EnrichmentReporter = (worktree, message) => {
+      failedIds.add(worktree.id);
+      warn(worktree, message);
     };
     try {
       const projects =
         kind.startsWith("GITLAB") && this.gitLabService
-          ? await this.gitLabProjects(targets, warn)
+          ? await this.gitLabProjects(targets, fail)
           : new Map<string, { id: string } | null>();
       if (kind.startsWith("GITLAB"))
         targets = targets.filter((view) =>
@@ -1474,27 +1493,27 @@ export class WorktreesService {
         );
       switch (kind) {
         case "GITHUB":
-          await this.synchronizePullRequests(targets, warn);
+          await this.synchronizePullRequests(targets, fail);
           await this.hydratePullRequestPipelines(targets);
           break;
         case "GITLAB_MERGE_REQUESTS":
-          await this.synchronizeGitLabMergeRequests(targets, warn, projects);
+          await this.synchronizeGitLabMergeRequests(targets, fail, projects);
+          // Optional summary failures must not discard a successful discovery.
           await this.hydrateGitLabMergeRequestSummaries(targets, warn);
           break;
         case "GITLAB_PIPELINES":
-          await this.hydrateGitLabPipelines(targets, warn, force, projects);
+          await this.hydrateGitLabPipelines(targets, fail, force, projects);
           break;
         case "JIRA":
-          await this.hydrateJira(targets, false, warn);
+          await this.hydrateJira(targets, false, fail);
           break;
         default:
           throw new Error("Unknown worktree enrichment kind");
       }
     } catch {
       for (const target of targets)
-        warn(target, "Could not refresh optional metadata. Try again.");
+        fail(target, "Could not refresh optional metadata. Try again.");
     }
-    const failedIds = new Set(warnings.map((warning) => warning.worktreeId));
     return {
       updates: targets
         .filter((view) => !failedIds.has(view.id))

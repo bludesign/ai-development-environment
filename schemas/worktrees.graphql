@@ -477,6 +477,14 @@ enum WorktreeEnrichmentKind {
 type WorktreeEnrichmentWarning {
   worktreeId: ID!
   message: String!
+  "Keep these details from the same merge request revision when the refreshed value is unavailable."
+  preserveFields: [GitLabMergeRequestSummaryField!]!
+}
+
+"Optional GitLab merge request details that can fail independently of discovery."
+enum GitLabMergeRequestSummaryField {
+  APPROVAL_STATE
+  UNRESOLVED_DISCUSSIONS_COUNT
 }
 
 "Metadata for the captured worktree identity. Only the requested kind is refreshed."

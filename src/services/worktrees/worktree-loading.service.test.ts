@@ -2,6 +2,7 @@ import { beforeEach, expect, test, vi } from "vitest";
 import type { AgentControlService } from "@/services/agent-control";
 import type { GitHubService } from "@/services/github";
 import type { GitLabService } from "@/services/gitlab";
+import type { GitLabMergeRequestView } from "@/services/gitlab/types";
 import type { JiraService } from "@/services/jira";
 import { WorktreesService } from "./worktrees.service";
 
@@ -49,6 +50,36 @@ const github = {
 };
 const snapshot = { snapshots: vi.fn() };
 const findMany = vi.fn();
+const mergeRequest: GitLabMergeRequestView = {
+  id: "mr-1",
+  iid: 1,
+  projectId: "42",
+  title: "New merge request",
+  description: "",
+  state: "opened",
+  draft: false,
+  webUrl: "https://gitlab.example/acme/app/-/merge_requests/1",
+  sourceBranch: "feature/APP-1",
+  targetBranch: "main",
+  sha: "head-1",
+  author: {
+    id: "7",
+    username: "alex",
+    name: "Alex",
+    avatarUrl: null,
+    webUrl: "https://gitlab.example/alex",
+  },
+  reviewers: [],
+  labels: [],
+  detailedMergeStatus: "mergeable",
+  mergeWhenPipelineSucceeds: false,
+  squashOnMerge: false,
+  hasConflicts: false,
+  blockingDiscussionsResolved: true,
+  createdAt: "2026-10-30T12:00:00Z",
+  updatedAt: "2026-10-30T12:00:00Z",
+  mergedAt: null,
+};
 function service() {
   return new WorktreesService(
     { registerCompletionHandler: vi.fn() } as unknown as AgentControlService,
@@ -64,7 +95,16 @@ function service() {
 beforeEach(() => {
   vi.resetAllMocks();
   findMany.mockResolvedValue([row()]);
+  const transaction = {
+    worktree: { update: vi.fn() },
+    worktreePullRequest: { deleteMany: vi.fn() },
+    worktreeGitLabMergeRequest: { upsert: vi.fn(), deleteMany: vi.fn() },
+  };
   getPrismaClient.mockResolvedValue({
+    $transaction: vi.fn(
+      async (callback: (client: typeof transaction) => Promise<unknown>) =>
+        callback(transaction),
+    ),
     worktree: {
       findMany,
       deleteMany: vi.fn(),
@@ -91,6 +131,59 @@ beforeEach(() => {
   );
   jira.summary.mockResolvedValue({ summary: "Current ticket", status: "Done" });
   snapshot.snapshots.mockResolvedValue([]);
+});
+
+test.each([
+  { detail: "approval", preserveFields: ["APPROVAL_STATE"] },
+  { detail: "discussion", preserveFields: ["UNRESOLVED_DISCUSSIONS_COUNT"] },
+])(
+  "returns a newly discovered merge request when its optional $detail lookup fails",
+  async ({ detail, preserveFields }) => {
+    gitlab.mergeRequestForBranch.mockResolvedValue(mergeRequest);
+    gitlab.mergeRequestSummary.mockImplementation(
+      async (request, onWarning) => {
+        onWarning(`Could not refresh ${detail} details.`, preserveFields);
+        return {
+          ...request,
+          approvalState: null,
+          unresolvedDiscussionsCount: null,
+        };
+      },
+    );
+    const result = await service().enrichment({
+      kind: "GITLAB_MERGE_REQUESTS",
+    });
+    expect(result.warnings).toHaveLength(1);
+    expect(result.warnings[0]?.preserveFields).toEqual(preserveFields);
+    expect(result.updates).toHaveLength(1);
+    expect(result.updates[0]?.worktree.sourceControlRequest).toMatchObject({
+      id: "mr-1",
+      title: "New merge request",
+    });
+  },
+);
+
+test("returns the discovered merge request even when its entire optional summary fails", async () => {
+  gitlab.mergeRequestForBranch.mockResolvedValue(mergeRequest);
+  gitlab.mergeRequestSummary.mockRejectedValue(new Error("GitLab unavailable"));
+  const result = await service().enrichment({ kind: "GITLAB_MERGE_REQUESTS" });
+  expect(result.warnings).toHaveLength(1);
+  expect(result.warnings[0]?.preserveFields).toEqual([
+    "APPROVAL_STATE",
+    "UNRESOLVED_DISCUSSIONS_COUNT",
+  ]);
+  expect(result.updates[0]?.worktree.sourceControlRequest).toMatchObject({
+    id: "mr-1",
+  });
+});
+
+test("does not clear client metadata when merge request discovery itself fails", async () => {
+  gitlab.mergeRequestForBranch.mockRejectedValue(
+    new Error("GitLab unavailable"),
+  );
+  const result = await service().enrichment({ kind: "GITLAB_MERGE_REQUESTS" });
+  expect(result.updates).toEqual([]);
+  expect(result.warnings).toHaveLength(1);
 });
 
 test("saved-only overview reads saved pipeline and Jira data without any external calls", async () => {
@@ -186,6 +279,7 @@ test("bounds pipeline fan-out and preserves successful results when one commit f
     {
       worktreeId: "worktree-0",
       message: expect.stringContaining("GitLab pipelines"),
+      preserveFields: [],
     },
   ]);
 });
@@ -205,6 +299,7 @@ test("reports stale pipeline fallback and does not overwrite the last good clien
   expect(result.warnings[0]).toEqual({
     worktreeId: "worktree-1",
     message: "GitLab timed out; showing saved status",
+    preserveFields: [],
   });
   expect(findMany).toHaveBeenCalledWith(
     expect.objectContaining({

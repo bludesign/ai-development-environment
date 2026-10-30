@@ -54,6 +54,7 @@ import type {
   GitLabMergeRequestDetailView,
   GitLabMergeRequestScope,
   GitLabMergeRequestState,
+  GitLabMergeRequestSummaryField,
   GitLabMergeRequestView,
   SubmitGitLabMergeRequestMergeInput,
   GitLabPipelineMergeRequestView,
@@ -968,7 +969,10 @@ export class GitLabService {
   private async enrichMergeRequest(
     mr: GitLabMergeRequestView,
     discussions?: GitLabDiscussionView[],
-    onWarning?: (message: string) => void,
+    onWarning?: (
+      message: string,
+      preserveFields?: GitLabMergeRequestSummaryField[],
+    ) => void,
   ) {
     if (!discussions)
       mr = {
@@ -993,7 +997,9 @@ export class GitLabService {
       })
         .then((r) => r.data)
         .catch(() => {
-          onWarning?.("Could not refresh GitLab approvals. Try again.");
+          onWarning?.("Could not refresh GitLab approvals. Try again.", [
+            "APPROVAL_STATE",
+          ]);
           return null;
         }),
       discussions
@@ -1005,7 +1011,9 @@ export class GitLabService {
           })
             .then((items) => items.map(mapGitLabDiscussion))
             .catch(() => {
-              onWarning?.("Could not refresh GitLab discussions. Try again.");
+              onWarning?.("Could not refresh GitLab discussions. Try again.", [
+                "UNRESOLVED_DISCUSSIONS_COUNT",
+              ]);
               return null;
             }),
       this.mergeCoordinator?.summary(mr).catch(() => ({})) ??
@@ -1821,7 +1829,10 @@ export class GitLabService {
 
   async mergeRequestSummary(
     mergeRequest: GitLabMergeRequestView,
-    onWarning?: (message: string) => void,
+    onWarning?: (
+      message: string,
+      preserveFields?: GitLabMergeRequestSummaryField[],
+    ) => void,
   ): Promise<GitLabMergeRequestView> {
     return this.enrichMergeRequest(mergeRequest, undefined, onWarning);
   }
