@@ -145,17 +145,24 @@ async function handle(request: Request): Promise<Response> {
         return denied;
       }
     }
+    // Only a validated API-key request uses the tunnel's authentication. Other
+    // connections retain their existing OAuth discovery and consent metadata.
+    const authentication =
+      context.authentication === "apiKey" ? "noauth" : "oauth2";
     const handler = createMcpHandler(
       () =>
         toolSnapshot
-          ? createScopedMcpServer(toolSnapshot, (entry, args, signal) =>
-              tools.callSnapshotTool(
-                entry,
-                args,
-                context,
-                runRepositoryId,
-                AbortSignal.any([signal, request.signal]),
-              ),
+          ? createScopedMcpServer(
+              toolSnapshot,
+              (entry, args, signal) =>
+                tools.callSnapshotTool(
+                  entry,
+                  args,
+                  context,
+                  runRepositoryId,
+                  AbortSignal.any([signal, request.signal]),
+                ),
+              authentication,
             )
           : createBuiltInMcpServer(
               tools.builtInTools,
@@ -169,6 +176,7 @@ async function handle(request: Request): Promise<Response> {
                       context,
                     ),
               allowedToolNames,
+              authentication,
             ),
       { legacy: "stateless" },
     );

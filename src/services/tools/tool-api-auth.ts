@@ -61,6 +61,7 @@ export async function authorizeToolRequest(
       if ("response" in result) return result;
       return {
         context: {
+          authentication: "oauth",
           caller: `oauth:user:${result.principal.userId}:client:${encodeURIComponent(result.principal.clientId)}@${requestAddress(request)}`,
           correlationId: requestCorrelationId(request),
           source: endpoint,
@@ -87,6 +88,7 @@ export async function authorizeToolRequest(
         : `api-key:${principal.apiKeyId}`;
     return {
       context: {
+        authentication: principal.kind === "apiKey" ? "apiKey" : "session",
         caller: `${caller}@${requestAddress(request)}`,
         correlationId: requestCorrelationId(request),
         source: endpoint,
@@ -122,6 +124,7 @@ export async function authorizeRunMcpRequest(
     return {
       agentId: principal.agentId,
       context: {
+        authentication: "agent",
         caller: `agent:${principal.agentId}@${requestAddress(request)}`,
         correlationId: requestCorrelationId(request),
         source: "MCP",

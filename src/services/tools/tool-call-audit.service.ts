@@ -10,6 +10,7 @@ import type { ToolCallAuditView } from "./types";
 import type { McpOAuthPrincipal } from "@/services/auth/mcp-oauth";
 
 export type ToolInvocationContext = {
+  authentication?: "apiKey" | "oauth" | "session" | "agent";
   oauthPrincipal?: McpOAuthPrincipal;
   caller: string;
   correlationId: string;
