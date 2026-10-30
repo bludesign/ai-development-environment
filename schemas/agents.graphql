@@ -482,7 +482,10 @@ type Subscription {
   "Emits an agent whenever agent changes."
   agentChanged("Identifier of the agent." agentId: ID): Agent!
   "Emits agent WebSocket lifecycle changes and successful liveness checks."
-  agentWebSocketConnectionChanged(agentId: ID): AgentWebSocketConnection!
+  agentWebSocketConnectionChanged(
+    "Restricts events to this agent when provided; omit to receive events for all agents."
+    agentId: ID
+  ): AgentWebSocketConnection!
   "Emits an agent job whenever agent job changes."
   agentJobChanged("Identifier of the job." jobId: ID!): AgentJob!
   "Emits an agent job log whenever agent job log is added."
