@@ -3819,6 +3819,11 @@ export class WorktreesService {
     }
   }
 
+  async refreshBaseBranchWatch(worktreeId: string, codebaseId: string) {
+    this.publish(worktreeId, codebaseId);
+    await this.restartWatch(worktreeId);
+  }
+
   private async restartWatch(worktreeId: string) {
     const previous = this.watchDemand.get(worktreeId);
     if (!previous) return;

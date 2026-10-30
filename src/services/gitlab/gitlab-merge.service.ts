@@ -1,4 +1,10 @@
 import "server-only";
+import {
+  mergeBaseBranchUpdateOptions,
+  prepareBaseBranchUpdates,
+  completeBaseBranchUpdates,
+  baseBranchUpdateResults,
+} from "@/services/worktrees/merge-base-branch-updates";
 
 import { randomUUID } from "node:crypto";
 import { normalizeGitOrigin } from "@ai-development-environment/agent-contract/codebases";
@@ -34,6 +40,7 @@ export function gitLabMergeOperationView(
 ): GitLabMergeOperationView {
   return {
     id: row.id,
+    baseBranchUpdateResults: baseBranchUpdateResults(row.baseBranchUpdatesJson),
     state: row.state,
     autoMerge: row.autoMerge,
     worktreeId: row.worktreeId,
@@ -254,6 +261,10 @@ export class GitLabMergeService {
     return {
       projectId,
       iid,
+      baseBranchUpdateOptions: await mergeBaseBranchUpdateOptions(
+        context.worktree,
+        saved?.baseBranchUpdatesJson,
+      ),
       title: mr.title,
       state: mr.state,
       sha: mr.sha,
@@ -353,6 +364,11 @@ export class GitLabMergeService {
             "The squash option no longer matches project policy.",
           );
         validateMergeFollowUps(input, options, "merge request");
+        const baseBranchUpdatesJson = await prepareBaseBranchUpdates(
+          options.worktreeId,
+          input.baseBranchUpdate,
+          saved?.baseBranchUpdatesJson,
+        );
         const mr = await this.gitlab.mergeRequestState(
           input.projectId,
           input.iid,
@@ -363,6 +379,7 @@ export class GitLabMergeService {
           : options.removeSourceBranch;
         const data = {
           state: "PREPARING",
+          baseBranchUpdatesJson,
           sourceProjectId: mr.sourceProjectId ?? null,
           sourceOrigin: context.sourceOrigin,
           branch: mr.sourceBranch,
@@ -553,6 +570,18 @@ export class GitLabMergeService {
       ) {
         throw new Error(
           "GitLab merged a different source project, branch or commit. The selected follow-ups require manual review.",
+        );
+      }
+      if (row.baseBranchUpdatesJson) {
+        const context = await this.context(confirmed);
+        if (!context.sourceOrigin)
+          throw new Error(
+            "The merged source repository is unavailable for base updates",
+          );
+        await completeBaseBranchUpdates(
+          { provider: "GITLAB", id: row.id },
+          { origin: context.sourceOrigin, branch: confirmed.sourceBranch },
+          this.worktrees,
         );
       }
       if (row.moveTicketToDone && row.ticketKey && !row.ticketMovedAt) {

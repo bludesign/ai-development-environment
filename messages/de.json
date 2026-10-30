@@ -2810,6 +2810,12 @@
     }
   },
   "pullRequests": {
+    "targetingWorktrees": "Zielende Worktrees aktualisieren",
+    "targetingWorktreesDescription": "Wähle Worktrees, deren Basis nach diesem Merge geändert werden soll. Auto Sync folgt der neuen Basis.",
+    "baseUpdateUnavailable": "Für den zusammenzuführenden Worktree ist kein Basisbranch verfügbar.",
+    "baseUpdateInvalid": "Dieses Ziel ist nicht verfügbar oder entspricht dem eigenen Branch des Worktrees.",
+    "baseUpdateSkipped": "Basisaktualisierung übersprungen, da der Worktree geändert oder entfernt wurde.",
+    "baseUpdateCompleted": "Basisbranch aktualisiert.",
     "allRepositories": "Alle Repositories",
     "title": "GitHub Pull Requests",
     "description": "Prüfe deine GitHub Pull Requests und überwachten Repositories an einem Ort.",

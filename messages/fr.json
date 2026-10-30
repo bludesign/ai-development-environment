@@ -2810,6 +2810,12 @@
     }
   },
   "pullRequests": {
+    "targetingWorktrees": "Mettre à jour les worktrees dépendants",
+    "targetingWorktreesDescription": "Sélectionnez les worktrees dont la base doit changer après la fusion. Auto Sync utilisera la nouvelle base.",
+    "baseUpdateUnavailable": "Le worktree à fusionner ne dispose pas de branche de base disponible.",
+    "baseUpdateInvalid": "Cette destination est indisponible ou correspond à la branche du worktree.",
+    "baseUpdateSkipped": "Mise à jour ignorée car le worktree a changé ou a été supprimé.",
+    "baseUpdateCompleted": "Branche de base mise à jour.",
     "allRepositories": "Tous les dépôts",
     "title": "Demandes de tirage GitHub",
     "description": "Consultez vos demandes GitHub et les dépôts surveillés au même endroit.",

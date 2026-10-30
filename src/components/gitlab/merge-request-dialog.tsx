@@ -4,7 +4,10 @@ import { GitMerge, RefreshCw } from "lucide-react";
 import { useTranslations } from "next-intl";
 import { useCallback, useEffect, useId, useRef, useState } from "react";
 
-import { MergeFollowUpFields } from "@/components/github/merge-follow-up-fields";
+import {
+  MergeFollowUpFields,
+  BASE_BRANCH_UPDATE_FIELDS,
+} from "@/components/github/merge-follow-up-fields";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -36,7 +39,7 @@ import {
   gitLabStatusColors,
 } from "./merge-request-status";
 
-const OPTIONS_FIELDS = `projectId iid title state sha sourceBranch targetBranch mergeMethod squashPolicy squash removeSourceBranch
+const OPTIONS_FIELDS = `${BASE_BRANCH_UPDATE_FIELDS} projectId iid title state sha sourceBranch targetBranch mergeMethod squashPolicy squash removeSourceBranch
   canRemoveSourceBranch canMerge canAutoMerge canCancelAutoMerge autoMergeEnabled mergeBlockedReason autoMergeBlockedReason
   mergeCommitMessage squashCommitMessage worktreeId worktreeFolder canDeleteWorktree ticketKey ticketDoneStatusConfigured
   defaultMoveTicketToDone defaultDeleteWorktree operation { ${GITLAB_MERGE_OPERATION_FIELDS} }`;
@@ -56,6 +59,7 @@ export function MergeRequestDialog({
   open: boolean;
 }) {
   const t = useTranslations("gitlabPages");
+  const tp = useTranslations("pullRequests");
   const id = useId();
   const generation = useRef(0);
   const actionInFlight = useRef(false);
@@ -70,6 +74,7 @@ export function MergeRequestDialog({
   const [customSquash, setCustomSquash] = useState(false);
   const [mergeMessage, setMergeMessage] = useState("");
   const [squashMessage, setSquashMessage] = useState("");
+  const [selectedWorktreeIds, setSelectedWorktreeIds] = useState<string[]>([]);
   const [deleteWorktree, setDeleteWorktree] = useState(false);
   const [moveTicketToDone, setMoveTicketToDone] = useState(false);
 
@@ -93,6 +98,9 @@ export function MergeRequestDialog({
       if (generation.current !== current) return;
       const next = data.gitlabMergeRequestMergeOptions;
       setOptions(next);
+      setSelectedWorktreeIds(
+        next.baseBranchUpdateOptions?.selectedWorktreeIds ?? [],
+      );
       setResult(null);
       setSquash(next.squash);
       setRemoveSourceBranch(next.removeSourceBranch);
@@ -130,6 +138,7 @@ export function MergeRequestDialog({
   }, [cancelLoad, load, open]);
 
   const operation = result?.operation ?? options?.operation;
+  const baseUpdateResults = operation?.baseBranchUpdateResults ?? [];
   const confirmed =
     result?.mergeRequest.state === "MERGED" ||
     options?.state === "MERGED" ||
@@ -196,6 +205,16 @@ export function MergeRequestDialog({
               squashCommitMessage:
                 squash && customSquash ? squashMessage.trim() : null,
               worktreeId: worktreeId ?? options.worktreeId,
+              ...(selectedWorktreeIds.length &&
+              options?.baseBranchUpdateOptions?.destinationBaseBranch
+                ? {
+                    baseBranchUpdate: {
+                      worktreeIds: selectedWorktreeIds,
+                      destinationBaseBranch:
+                        options.baseBranchUpdateOptions.destinationBaseBranch,
+                    },
+                  }
+                : {}),
               deleteWorktree,
               moveTicketToDone,
             },
@@ -412,6 +431,8 @@ export function MergeRequestDialog({
                   </p>
                   <MergeFollowUpFields
                     options={options}
+                    selectedWorktreeIds={selectedWorktreeIds}
+                    onSelectedWorktreeIdsChange={setSelectedWorktreeIds}
                     disabled={disabled}
                     deleteWorktree={deleteWorktree}
                     moveTicketToDone={moveTicketToDone}
@@ -440,6 +461,19 @@ export function MergeRequestDialog({
             </div>
           )
         )}
+        {baseUpdateResults.map((result) => (
+          <p
+            key={result.worktreeId}
+            className="break-all text-xs text-muted-foreground"
+          >
+            {result.folder}:{" "}
+            {tp(
+              result.status === "SKIPPED"
+                ? "baseUpdateSkipped"
+                : "baseUpdateCompleted",
+            )}
+          </p>
+        ))}
         <DialogFooter className="flex-wrap">
           <Button
             disabled={busy}

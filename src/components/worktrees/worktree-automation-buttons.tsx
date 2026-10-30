@@ -450,6 +450,7 @@ function GitHubAutoMergeButton({
   const [headline, setHeadline] = useState("");
   const [body, setBody] = useState("");
   const [authorEmail, setAuthorEmail] = useState(DEFAULT_EMAIL);
+  const [selectedWorktreeIds, setSelectedWorktreeIds] = useState<string[]>([]);
   const [deleteWorktree, setDeleteWorktree] = useState(false);
   const [moveTicketToDone, setMoveTicketToDone] = useState(false);
 
@@ -490,6 +491,9 @@ function GitHubAutoMergeButton({
           if (!active) return;
           const next = data.githubPullRequestMergeOptions;
           setOptions(next);
+          setSelectedWorktreeIds(
+            next.baseBranchUpdateOptions?.selectedWorktreeIds ?? [],
+          );
           setMethod(next.defaultMethod ?? next.availableMethods[0] ?? "");
           setHeadline(next.defaultCommitHeadline);
           setBody(next.defaultCommitBody);
@@ -575,6 +579,16 @@ function GitHubAutoMergeButton({
             commitHeadline: headline,
             commitBody: body,
             authorEmail: authorEmail === DEFAULT_EMAIL ? null : authorEmail,
+            ...(selectedWorktreeIds.length &&
+            options?.baseBranchUpdateOptions?.destinationBaseBranch
+              ? {
+                  baseBranchUpdate: {
+                    worktreeIds: selectedWorktreeIds,
+                    destinationBaseBranch:
+                      options.baseBranchUpdateOptions.destinationBaseBranch,
+                  },
+                }
+              : {}),
             deleteWorktree,
             moveTicketToDone,
           },
@@ -728,6 +742,8 @@ function GitHubAutoMergeButton({
                   </div>
                   <MergeFollowUpFields
                     options={options}
+                    selectedWorktreeIds={selectedWorktreeIds}
+                    onSelectedWorktreeIdsChange={setSelectedWorktreeIds}
                     disabled={busy || postMerge}
                     deleteWorktree={deleteWorktree}
                     moveTicketToDone={moveTicketToDone}

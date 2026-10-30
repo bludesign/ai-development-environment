@@ -1,3 +1,4 @@
+import { baseBranchUpdateResults } from "@/services/worktrees/merge-base-branch-updates";
 import {
   JIRA_BRANCH_GENERATE_JOB_KIND,
   validGitBranchName,
@@ -60,10 +61,18 @@ export const createWorktreeResolvers = (
             updatedAt: value.autoSync.updatedAt.toISOString(),
           }
         : null,
-    autoMerge: (value: { autoMerge?: { updatedAt: Date } | null }) =>
+    autoMerge: (value: {
+      autoMerge?: {
+        updatedAt: Date;
+        baseBranchUpdatesJson?: string | null;
+      } | null;
+    }) =>
       value.autoMerge
         ? {
             ...value.autoMerge,
+            baseBranchUpdateResults: baseBranchUpdateResults(
+              value.autoMerge.baseBranchUpdatesJson,
+            ),
             updatedAt: value.autoMerge.updatedAt.toISOString(),
           }
         : null,
@@ -581,6 +590,9 @@ export const createWorktreeResolvers = (
           authorEmail?: string | null;
           deleteWorktree: boolean;
           moveTicketToDone: boolean;
+          baseBranchUpdate?:
+            | import("@/services/worktrees/merge-base-branch-updates").MergeBaseBranchUpdateInput
+            | null;
         };
       },
       context: GraphQLContext,

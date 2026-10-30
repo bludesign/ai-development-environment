@@ -1213,6 +1213,8 @@ extend type Subscription {
 
 "Persisted merge intent and independently retryable follow-ups."
 type GitLabMergeOperation {
+  "Recorded outcomes for selected targeting worktrees."
+  baseBranchUpdateResults: [MergeBaseBranchUpdateResult!]!
   "Stable identifier of the saved merge operation."
   id: ID!
   "Current merge-request state or durable merge-operation lifecycle state."
@@ -1237,6 +1239,8 @@ type GitLabMergeOperation {
 
 "Current GitLab project policy, readiness, defaults and linked follow-ups."
 type GitLabMergeOptions {
+  "Targeting worktrees and the reviewed destination for post-merge base updates."
+  baseBranchUpdateOptions: MergeBaseBranchUpdateOptions
   "Numeric GitLab target project identifier."
   projectId: ID!
   "Project-scoped merge-request number."
@@ -1307,6 +1311,8 @@ type GitLabMergeResult {
 
 "Submit the SHA reviewed in the merge sheet. Omitted messages use GitLab defaults."
 input SubmitGitLabMergeRequestMergeInput {
+  "Selected targeting worktrees to update only after the merge is confirmed."
+  baseBranchUpdate: MergeBaseBranchUpdateInput
   "Numeric GitLab target project identifier."
   projectId: ID!
   "Project-scoped merge-request number."

@@ -1,3 +1,8 @@
+import type {
+  MergeBaseBranchUpdateInput,
+  MergeBaseBranchUpdateOptions,
+  MergeBaseBranchUpdateResult,
+} from "@/services/worktrees/merge-base-branch-updates";
 export type SourceControlProvider = "GITHUB" | "GITLAB";
 
 export type GitLabRequestSource =
@@ -229,6 +234,7 @@ export type GitLabMergeRequestView = {
 };
 
 export type GitLabMergeOperationView = {
+  baseBranchUpdateResults?: MergeBaseBranchUpdateResult[];
   id: string;
   state: string;
   autoMerge: boolean;
@@ -242,6 +248,7 @@ export type GitLabMergeOperationView = {
 };
 
 export type GitLabMergeOptions = {
+  baseBranchUpdateOptions?: MergeBaseBranchUpdateOptions | null;
   projectId: string;
   iid: number;
   title: string;
@@ -273,6 +280,7 @@ export type GitLabMergeOptions = {
 };
 
 export type SubmitGitLabMergeRequestMergeInput = {
+  baseBranchUpdate?: MergeBaseBranchUpdateInput | null;
   projectId: string;
   iid: number;
   sha: string;
