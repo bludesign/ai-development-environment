@@ -54,6 +54,43 @@ export type WorktreeReviewerAssignment = {
 };
 
 export const CODE_REVIEWER_PERSON_FIELDS = "id username name avatarUrl url";
+
+export type WorktreeReviewRequirement = {
+  id: string;
+  name: string;
+  isRequired: boolean;
+  patterns: string[];
+  requiredApprovals: number;
+  groups: Array<{ key: string; name: string; kind: string }>;
+  eligibleReviewerIds: string[];
+  approvedReviewerIds: string[];
+  requestedReviewerIds: string[];
+};
+
+export type WorktreeReviewStatus = {
+  worktreeId: string;
+  requestId: string;
+  requestUrl: string;
+  provider: string;
+  requestOpen: boolean;
+  reviewers: CodeReviewerPerson[];
+  currentReviewerIds: string[];
+  approvedReviewerIds: string[];
+  requirements: WorktreeReviewRequirement[];
+  issues: string[];
+  discoveryComplete: boolean;
+};
+
+export const WORKTREE_REVIEW_STATUS_FIELDS = `
+  worktreeId requestId requestUrl provider requestOpen
+  currentReviewerIds approvedReviewerIds issues discoveryComplete
+  reviewers { ${CODE_REVIEWER_PERSON_FIELDS} }
+  requirements {
+    id name isRequired patterns requiredApprovals
+    groups { key name kind }
+    eligibleReviewerIds approvedReviewerIds requestedReviewerIds
+  }
+`;
 export const REPOSITORY_CODE_REVIEWERS_FIELDS = `
   repositoryId provider ref defaultRef refs discoveryComplete issues
   pools {

@@ -2226,6 +2226,84 @@ export function registerWorktreesPageTests(
         expect(screen.queryByRole("button", { name: "Commits: 0" })).toBeNull();
       });
 
+      test.each(["GITHUB", "GITLAB"] as const)(
+        "opens %s review details from a worktree card without navigating",
+        async (provider) => {
+          const response = (await request("query Fixture")) as unknown as {
+            worktreeOverview: WorktreeOverview;
+          };
+          const worktree =
+            response.worktreeOverview.agents[0]!.codebases[0]!.worktrees[0]!;
+          const pr = worktree.pullRequest!;
+          if (provider === "GITLAB") {
+            worktree.pullRequest = null;
+            worktree.sourceControlRequest = {
+              provider,
+              id: "MR_24",
+              number: 24,
+              title: "Change",
+              url: "https://gitlab.example/acme/repo/-/merge_requests/24",
+              isDraft: false,
+              headRefName: worktree.branch!,
+              headRefOid: "abc",
+              createdAt: new Date(0).toISOString(),
+              projectId: "project-1",
+              state: "OPENED",
+              approvalState: "APPROVED",
+            };
+          }
+          request.mockClear();
+          request.mockImplementation(async (query) =>
+            query.includes("query WorktreeReviewStatus")
+              ? ({
+                  worktreeReviewStatus: {
+                    worktreeId: worktree.id,
+                    requestId: provider === "GITHUB" ? pr.id : "MR_24",
+                    provider,
+                    requestUrl:
+                      provider === "GITHUB"
+                        ? pr.url
+                        : worktree.sourceControlRequest!.url,
+                    requestOpen: true,
+                    reviewers: [
+                      {
+                        id: "alice",
+                        username: "alice",
+                        name: "Alice Approver",
+                        avatarUrl: null,
+                        url: null,
+                      },
+                    ],
+                    approvedReviewerIds: ["alice"],
+                    currentReviewerIds: [],
+                    requirements: [],
+                    issues: [],
+                    discoveryComplete: true,
+                  },
+                } as never)
+              : (response as never),
+          );
+          render(<WorktreesPage />);
+          const label = provider === "GITHUB" ? `PR #${pr.number}` : "MR !24";
+          const badge = await screen.findByRole("button", {
+            name: `Review details for ${label}`,
+          });
+          expect(
+            request.mock.calls.some(([query]) =>
+              query.includes("query WorktreeReviewStatus"),
+            ),
+          ).toBe(false);
+          fireEvent.click(badge);
+          expect(await screen.findByText("Alice Approver")).toBeDefined();
+          expect(navigation.push).not.toHaveBeenCalled();
+          expect(
+            screen
+              .getByRole("link", { name: `Open ${label}` })
+              .getAttribute("href"),
+          ).toContain(provider === "GITHUB" ? "github" : "gitlab");
+        },
+      );
+
       test("shows GitLab merge requests and pipelines for the worktree", async () => {
         const response = (await request("query Fixture")) as unknown as {
           worktreeOverview: WorktreeOverview;

@@ -211,6 +211,69 @@ describe("GitHub reviewer adapter", () => {
     });
   });
 
+  test("marks unenforced owners as suggestions while retaining assignment targets", async () => {
+    const { provider, reviewerRest, reviewerGraphql } = githubFixture();
+    const read = reviewerRest.getMockImplementation()!;
+    reviewerRest.mockImplementation(async (url) =>
+      url.split("?")[0].endsWith("/rules/branches/main") ? [] : read(url),
+    );
+    reviewerGraphql.mockResolvedValue({
+      repository: {
+        ref: {
+          branchProtectionRule: {
+            id: "BP_1",
+            requiresApprovingReviews: false,
+            requiredApprovingReviewCount: 0,
+            requiresCodeOwnerReviews: false,
+          },
+        },
+      },
+    });
+    const snapshot = await provider.discover(
+      { id: "repo", canonicalOrigin: "github.com/acme/project" },
+      undefined,
+      { id: "PR_77", number: 8 },
+    );
+    expect(snapshot.requirements).toHaveLength(2);
+    expect(snapshot.requirements).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          isRequired: false,
+          patterns: ["src/"],
+          requiredApprovals: 1,
+        }),
+        expect.objectContaining({
+          isRequired: false,
+          patterns: ["/docs/"],
+          requiredApprovals: 1,
+        }),
+      ]),
+    );
+  });
+
+  test("keeps reviews available when file discovery fails", async () => {
+    const { provider, reviewerRest } = githubFixture();
+    const read = reviewerRest.getMockImplementation()!;
+    reviewerRest.mockImplementation(async (url) => {
+      if (url.split("?")[0].endsWith("/files"))
+        throw new Error("Files unavailable");
+      return read(url);
+    });
+    const snapshot = await provider.discover(
+      { id: "repo", canonicalOrigin: "github.com/acme/project" },
+      undefined,
+      { id: "PR_77", number: 8 },
+    );
+    expect(snapshot.discoveryComplete).toBe(false);
+    expect(snapshot.issues.join(" ")).toContain("Files unavailable");
+    expect(
+      snapshot.request?.approvedReviewers.map((person) => person.id),
+    ).toEqual(["1"]);
+    expect(
+      snapshot.request?.currentReviewers.map((person) => person.id),
+    ).toEqual(["2"]);
+  });
+
   test("rejects stale requests and flags truncated changed-file lists", async () => {
     const { provider, pr } = githubFixture();
     await expect(
@@ -402,6 +465,8 @@ describe("GitLab reviewer adapter", () => {
     expect(snapshot.discoveryComplete).toBe(true);
     expect(snapshot.requirements).toHaveLength(2);
     expect(snapshot.requirements[0]).toMatchObject({
+      isRequired: true,
+      patterns: ["src/", "tests/"],
       requiredApprovals: 2,
       approvedReviewerIds: ["1"],
     });
@@ -518,9 +583,27 @@ describe("GitLab reviewer adapter", () => {
     expect(snapshot.requirements).toHaveLength(1);
     expect(snapshot.requirements[0]).toMatchObject({
       name: "Suggested code owners · src/",
+      isRequired: false,
+      patterns: ["src/"],
       requiredApprovals: 1,
       eligibleReviewerIds: ["1", "2"],
     });
+  });
+
+  test("marks optional native codeowner rules as suggestions", async () => {
+    const { provider, rule } = gitlabFixture();
+    rule.approvalsRequired = 0;
+    const snapshot = await provider.discover(
+      { id: "repo", canonicalOrigin: "gitlab.example/org/project" },
+      undefined,
+      { id: "77", number: 8, projectId: "10" },
+    );
+    expect(snapshot.requirements[0]).toMatchObject({
+      isRequired: false,
+      requiredApprovals: 1,
+      patterns: ["src/", "tests/"],
+    });
+    expect(snapshot.requirements[1].isRequired).toBe(true);
   });
 
   test("routes additions through the fresh union-preserving GitLab mutation", async () => {

@@ -3093,7 +3093,6 @@
     "noSteps": "Für diesen Job wurden noch keine Schritte gemeldet.",
     "loadMore": "Mehr laden",
     "loadingMore": "Weitere werden geladen…",
-    "loadMore": "Mehr laden",
     "moreHistory": "Weiterer Verlauf ist vorhanden. Lade weitere ältere passende Ausführungen."
   },
   "githubAutomation": {
@@ -5969,6 +5968,26 @@
     "random": "Zufällige Auswahl",
     "assignSelected": "Ausgewählte zuweisen ({count})",
     "existingReviewers": "Bereits zugewiesene Reviewer",
-    "existingReviewer": "Bereits zugewiesener Reviewer {name}"
+    "existingReviewer": "Bereits zugewiesener Reviewer {name}",
+    "status": {
+      "title": "Review-Details",
+      "open": "Review-Details für {request}",
+      "refresh": "Review-Details aktualisieren",
+      "openProvider": "{request} öffnen",
+      "requestChanged": "Der verknüpfte Pull- oder Merge-Request hat sich geändert. Aktualisiere den Worktree und öffne die Review-Details erneut.",
+      "closed": "Dieser Pull- oder Merge-Request wurde geschlossen oder zusammengeführt.",
+      "approvers": "Reviewer mit Genehmigung",
+      "requested": "Angefragte Reviewer",
+      "noApprovers": "Keine Genehmigungen anzuzeigen.",
+      "noRequested": "Keine angefragten Reviewer anzuzeigen.",
+      "rules": "Genehmigungsregeln und Code-Verantwortliche",
+      "noRules": "Keine Genehmigungsanforderungen oder Vorschläge für Code-Verantwortliche.",
+      "rulesUnavailable": "Die Genehmigungsanforderungen konnten nicht vollständig überprüft werden.",
+      "suggested": "Vorgeschlagen",
+      "progress": "{approved} von {required} Genehmigungen",
+      "requestedCount": "Angefragt: {count}",
+      "members": "Berechtigte Reviewer ({count})",
+      "noMembers": "Es konnten keine berechtigten Mitglieder ermittelt werden."
+    }
   }
 }

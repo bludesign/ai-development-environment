@@ -31,6 +31,14 @@ export const createReviewerResolvers = (service: ReviewersService) => ({
   },
   Worktree: { canAssignReviewers },
   Query: {
+    worktreeReviewStatus: (
+      _: unknown,
+      args: { worktreeId: string },
+      context: GraphQLContext,
+    ) => {
+      control(context);
+      return service.worktreeReviewStatus(args.worktreeId);
+    },
     repositoryCodeReviewers: (
       _: unknown,
       args: {

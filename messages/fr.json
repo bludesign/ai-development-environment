@@ -3093,7 +3093,6 @@
     "noSteps": "Aucune étape n’a encore été signalée pour cette tâche.",
     "loadMore": "Charger plus",
     "loadingMore": "Chargement…",
-    "loadMore": "Charger plus",
     "moreHistory": "Il reste de l’historique. Chargez un autre lot pour trouver les exécutions précédentes."
   },
   "githubAutomation": {
@@ -5969,6 +5968,26 @@
     "random": "Sélection aléatoire",
     "assignSelected": "Attribuer la sélection ({count})",
     "existingReviewers": "Relecteurs existants",
-    "existingReviewer": "Relecteur existant {name}"
+    "existingReviewer": "Relecteur existant {name}",
+    "status": {
+      "title": "Détails de la relecture",
+      "open": "Détails de la relecture pour {request}",
+      "refresh": "Actualiser les détails de la relecture",
+      "openProvider": "Ouvrir {request}",
+      "requestChanged": "La demande de tirage ou de fusion liée a changé. Actualisez l’arbre de travail et rouvrez les détails de la relecture.",
+      "closed": "Cette demande de tirage ou de fusion est fermée ou fusionnée.",
+      "approvers": "Relecteurs ayant approuvé",
+      "requested": "Relecteurs sollicités",
+      "noApprovers": "Aucune approbation à afficher.",
+      "noRequested": "Aucun relecteur sollicité à afficher.",
+      "rules": "Règles d’approbation et responsables du code",
+      "noRules": "Aucune exigence d’approbation ni suggestion de responsables du code.",
+      "rulesUnavailable": "Les exigences d’approbation n’ont pas pu être entièrement vérifiées.",
+      "suggested": "Suggéré",
+      "progress": "{approved} approbations sur {required}",
+      "requestedCount": "Sollicités : {count}",
+      "members": "Relecteurs éligibles ({count})",
+      "noMembers": "Aucun membre éligible n’a pu être identifié."
+    }
   }
 }

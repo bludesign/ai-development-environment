@@ -98,6 +98,64 @@ type WorktreeReviewerAssignment {
   discoveryComplete: Boolean!
 }
 
+"An ownership group or approval pool contributing to a request's review rule."
+type WorktreeReviewGroup {
+  "Provider-scoped group key."
+  key: String!
+  "Provider group or pool name."
+  name: String!
+  "GENERAL, CODEOWNERS, or APPROVAL_RULE."
+  kind: String!
+}
+
+"An applicable provider approval rule or suggested ownership review."
+type WorktreeReviewRequirement {
+  "Provider-scoped rule identifier."
+  id: ID!
+  "Provider rule description."
+  name: String!
+  "Whether this rule enforces an approval requirement."
+  isRequired: Boolean!
+  "Applicable ownership or review file patterns."
+  patterns: [String!]!
+  "Distinct approvals required by policy; zero for suggestions."
+  requiredApprovals: Int!
+  "Groups contributing eligible reviewers, without splitting the rule's quota."
+  groups: [WorktreeReviewGroup!]!
+  "People eligible to approve under this rule."
+  eligibleReviewerIds: [ID!]!
+  "Distinct eligible people whose approvals are valid."
+  approvedReviewerIds: [ID!]!
+  "Eligible people currently requested to review."
+  requestedReviewerIds: [ID!]!
+}
+
+"Read-only review details independent of saved reviewer preferences."
+type WorktreeReviewStatus {
+  "Worktree being inspected."
+  worktreeId: ID!
+  "Linked provider request identifier."
+  requestId: ID!
+  "Pull or merge request URL."
+  requestUrl: String!
+  "Connected source control provider."
+  provider: String!
+  "Whether the request remains open."
+  requestOpen: Boolean!
+  "People referenced by current reviews and applicable rules."
+  reviewers: [CodeReviewerPerson!]!
+  "Existing individual review requests."
+  currentReviewerIds: [ID!]!
+  "People whose approvals are currently valid."
+  approvedReviewerIds: [ID!]!
+  "Applicable rules, preserving provider grouping."
+  requirements: [WorktreeReviewRequirement!]!
+  "Provider discovery or capability issues."
+  issues: [String!]!
+  "Whether all applicable rules and members could be verified."
+  discoveryComplete: Boolean!
+}
+
 "Preferred people for one discovered group; an empty list clears its pool."
 input CodeReviewerPoolInput {
   "Discovered stable pool key."
@@ -127,6 +185,11 @@ input AssignWorktreeReviewersInput {
 }
 
 extend type Query {
+  "Inspect a linked pull or merge request's live reviews without configuring reviewers."
+  worktreeReviewStatus(
+    "Worktree with a linked pull or merge request."
+    worktreeId: ID!
+  ): WorktreeReviewStatus!
   "Discover eligible reviewer groups and load saved preferences."
   repositoryCodeReviewers(
     "Canonical repository identifier."

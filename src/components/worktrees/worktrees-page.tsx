@@ -68,6 +68,7 @@ import { CommandQuickActions } from "@/components/commands/command-quick-actions
 import { PipelineMenu } from "@/components/github/pipeline-menu";
 import { PullRequestMenu } from "@/components/github/pull-request-menu";
 import { AssignReviewersButton } from "@/components/reviewers/assign-reviewers-button";
+import { WorktreeReviewStatusPopover } from "@/components/reviewers/worktree-review-status-popover";
 import { MergeRequestMenu } from "@/components/gitlab/merge-request-menu";
 import { gitLabCommentsHref } from "@/components/gitlab/merge-request-links";
 import {
@@ -2238,9 +2239,17 @@ export function PullRequestBadges({
             repositoryUrl={worktree.pullRequest.repositoryUrl}
             requestSource="WORKTREES"
           />
-          <Badge className={reviewClass(worktree.pullRequest.reviewDecision)}>
-            {t(`review.${worktree.pullRequest.reviewDecision}`)}
-          </Badge>
+          <WorktreeReviewStatusPopover
+            key={`github:${worktree.id}:${worktree.pullRequest.id}`}
+            requestId={worktree.pullRequest.id}
+            requestLabel={`PR #${worktree.pullRequest.number}`}
+            requestUrl={worktree.pullRequest.url}
+            worktreeId={worktree.id}
+          >
+            <Badge className={reviewClass(worktree.pullRequest.reviewDecision)}>
+              {t(`review.${worktree.pullRequest.reviewDecision}`)}
+            </Badge>
+          </WorktreeReviewStatusPopover>
           <Badge
             asChild
             className={
@@ -2275,7 +2284,15 @@ export function PullRequestBadges({
       />
       {gitLabMergeRequest ? (
         <>
-          <GitLabApprovalBadge state={gitLabMergeRequest.approvalState} />
+          <WorktreeReviewStatusPopover
+            key={`gitlab:${worktree.id}:${gitLabMergeRequest.id}`}
+            requestId={gitLabMergeRequest.id}
+            requestLabel={`MR !${gitLabMergeRequest.number}`}
+            requestUrl={gitLabMergeRequest.url}
+            worktreeId={worktree.id}
+          >
+            <GitLabApprovalBadge state={gitLabMergeRequest.approvalState} />
+          </WorktreeReviewStatusPopover>
           {gitLabMergeRequest.projectId ? (
             <Badge
               asChild

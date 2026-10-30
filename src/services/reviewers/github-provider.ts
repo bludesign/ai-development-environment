@@ -195,11 +195,20 @@ export class GitHubReviewerProvider {
       const [files, requested, reviews] = await Promise.all([
         all<{ filename: string; previous_filename?: string }>(
           `${prefix}/pulls/${pr.number}/files`,
-        ),
+        ).catch((error) => {
+          unavailable("GitHub changed files could not be loaded", error);
+          return [];
+        }),
         read<{ users: ProviderUser[] }>(
           `${prefix}/pulls/${pr.number}/requested_reviewers`,
-        ),
-        all<Review>(`${prefix}/pulls/${pr.number}/reviews`),
+        ).catch((error) => {
+          unavailable("GitHub requested reviewers could not be loaded", error);
+          return { users: [] };
+        }),
+        all<Review>(`${prefix}/pulls/${pr.number}/reviews`).catch((error) => {
+          unavailable("GitHub current approvals could not be loaded", error);
+          return [];
+        }),
       ]);
       paths = [
         ...new Set(
@@ -264,6 +273,8 @@ export class GitHubReviewerProvider {
       requirements.push({
         id: "github:required-approvals",
         name: "Required approvals",
+        isRequired: true,
+        patterns: [],
         poolKeys: [generalKey],
         eligibleReviewerIds: general.map((person) => person.id),
         requiredApprovals: requiredCount,
@@ -347,6 +358,8 @@ export class GitHubReviewerProvider {
             requirements.push({
               id: `${key}:${requirements.length}`,
               name: `${native.name}${requirement.minimum_approvals ? " approval rule" : " (optional review)"}`,
+              isRequired: requirement.minimum_approvals > 0,
+              patterns: requirement.file_patterns,
               poolKeys: [key],
               eligibleReviewerIds: resolved.people.map((person) => person.id),
               requiredApprovals: requirement.minimum_approvals,
@@ -458,6 +471,8 @@ export class GitHubReviewerProvider {
               requirements.push({
                 id: `github:codeowners:${entry.pattern}`,
                 name: `${requiresCodeowners ? "Code owners" : "Suggested code owners"} · ${entry.pattern}`,
+                isRequired: requiresCodeowners,
+                patterns: [entry.pattern],
                 poolKeys: [key],
                 eligibleReviewerIds: candidates.map((person) => person.id),
                 requiredApprovals: 1,
