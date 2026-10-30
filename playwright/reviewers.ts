@@ -3,12 +3,13 @@ import { expect, type Page } from "@playwright/test";
 import { ids } from "../scripts/mock-data/ids";
 import type {
   RepositoryCodeReviewers,
+  WorktreeReviewStatus,
   WorktreeReviewerAssignment,
 } from "../src/components/reviewers/types";
 
 export type ReviewerCapture = {
   provider: "GITHUB" | "GITLAB";
-  view: "settings" | "assignment";
+  view: "settings" | "assignment" | "status";
 };
 
 /** Bounded reviewer fixtures keep captures independent of private team membership. */
@@ -111,6 +112,45 @@ export async function stubReviewerCapture(
     issues: [],
     discoveryComplete: true,
   };
+  const status: WorktreeReviewStatus = {
+    worktreeId,
+    requestId: assignment.requestId,
+    requestUrl: assignment.requestUrl,
+    provider: capture.provider,
+    requestOpen: true,
+    reviewers: people,
+    currentReviewerIds: ["priya"],
+    approvedReviewerIds: ["alex"],
+    discoveryComplete: true,
+    issues: [],
+    requirements: [
+      {
+        id: "platform",
+        name: "Platform code owners",
+        isRequired: true,
+        patterns: ["src/**", "packages/**"],
+        requiredApprovals: 2,
+        groups: [
+          { key: "platform", name: "@acme/platform", kind: "CODEOWNERS" },
+          { key: "shared", name: "@acme/shared", kind: "CODEOWNERS" },
+        ],
+        eligibleReviewerIds: ["alex", "priya", "mateo"],
+        approvedReviewerIds: ["alex"],
+        requestedReviewerIds: ["priya"],
+      },
+      {
+        id: "docs",
+        name: "Documentation owners",
+        isRequired: false,
+        patterns: ["docs/**"],
+        requiredApprovals: 0,
+        groups: [{ key: "docs", name: "@acme/docs", kind: "CODEOWNERS" }],
+        eligibleReviewerIds: ["mateo"],
+        approvedReviewerIds: [],
+        requestedReviewerIds: [],
+      },
+    ],
+  };
 
   await page.route("**/api/graphql", async (route) => {
     const body = route.request().postDataJSON() as { query?: string };
@@ -119,6 +159,8 @@ export async function stubReviewerCapture(
       await route.fulfill({
         json: { data: { repositoryCodeReviewers: settings } },
       });
+    } else if (query.includes("query WorktreeReviewStatus")) {
+      await route.fulfill({ json: { data: { worktreeReviewStatus: status } } });
     } else if (query.includes("query WorktreeReviewerAssignment")) {
       await route.fulfill({
         json: { data: { worktreeReviewerAssignment: assignment } },
@@ -140,7 +182,15 @@ export async function stubReviewerCapture(
       for (const agent of result.data?.worktreeOverview?.agents ?? []) {
         for (const group of agent.codebases ?? []) {
           for (const worktree of group.worktrees ?? []) {
-            if (worktree.id === worktreeId) worktree.canAssignReviewers = true;
+            if (worktree.id === worktreeId) {
+              worktree.canAssignReviewers = true;
+              const request =
+                worktree.pullRequest ?? worktree.sourceControlRequest;
+              if (request) {
+                status.requestId = request.id;
+                status.requestUrl = request.url;
+              }
+            }
           }
         }
       }
@@ -162,6 +212,26 @@ export async function openReviewerCapture(
     await page
       .getByRole("checkbox", { name: "Choose alex-chen for Platform owners" })
       .waitFor();
+  } else if (capture.view === "status") {
+    const trigger = page.getByRole("button", { name: /^Review details for / });
+    await trigger.evaluate((element) => {
+      element.style.scrollMarginTop = "6rem";
+      element.scrollIntoView({ block: "start", behavior: "instant" });
+    });
+    await trigger.click();
+    const details = page.getByRole("dialog", { name: /^Review details for / });
+    await expect(details.getByText("1 of 2 approvals")).toBeVisible();
+    await details.getByText("Eligible reviewers (3)", { exact: true }).click();
+    await details.evaluate((element) => {
+      element.scrollTop = 0;
+    });
+    await expect(
+      details.getByText("Suggested", { exact: true }),
+    ).toBeAttached();
+    await expect(details).toBeInViewport({ ratio: 1 });
+    await expect(
+      details.getByText("Review details", { exact: true }),
+    ).toBeInViewport({ ratio: 1 });
   } else {
     await page
       .getByRole("button", { name: "Assign reviewers", exact: true })

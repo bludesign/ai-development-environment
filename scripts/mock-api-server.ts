@@ -443,12 +443,17 @@ const reviewThreadComment = (
  * Every review thread carries the pull request it belongs to — the Comments page groups by it,
  * and the detail page reads `headRepository` off it to match the thread to a local worktree.
  */
+const pullRequestBranch = (seed: PullRequestSeed) =>
+  seed.repository === "web-app" && seed.number === 42
+    ? "feature/quick-search"
+    : `feature/pr-${seed.number}`;
+
 const threadPullRequest = (seed: PullRequestSeed) => ({
   id: `PR_${seed.repository}_${seed.number}`,
   number: seed.number,
   title: seed.title,
   url: `https://github.com/${OWNER}/${seed.repository}/pull/${seed.number}`,
-  headRefName: `feature/pr-${seed.number}`,
+  headRefName: pullRequestBranch(seed),
   headRepository: { nameWithOwner: `${OWNER}/${seed.repository}` },
   repository: { nameWithOwner: `${OWNER}/${seed.repository}` },
 });
@@ -592,7 +597,7 @@ const pullRequestNode = (seed: PullRequestSeed) => ({
   updatedAt: ago(seed.updatedMinutesAgo),
   state: seed.state,
   mergedAt: seed.state === "MERGED" ? ago(seed.updatedMinutesAgo) : null,
-  headRefName: `feature/pr-${seed.number}`,
+  headRefName: pullRequestBranch(seed),
   headRefOid: `${seed.number}`.padStart(4, "0").repeat(10).slice(0, 40),
   headRepository: { nameWithOwner: `${OWNER}/${seed.repository}` },
   repository: repositoryNode(seed.repository),
@@ -703,6 +708,19 @@ function graphqlData(query: string, variables: Record<string, unknown>) {
         ),
       ),
     };
+    // Worktree discovery batches refs under branch0/branch1 aliases.
+    for (const [alias, ref] of Object.entries(variables)) {
+      if (!/^branch\d+$/.test(alias)) continue;
+      (data.repository as Record<string, unknown>)[alias] = {
+        associatedPullRequests: connection(
+          PULL_REQUESTS.filter(
+            (item) =>
+              item.repository === name &&
+              `refs/heads/${pullRequestBranch(item)}` === ref,
+          ).map(pullRequestNode),
+        ),
+      };
+    }
   }
 
   if (/\bviewer\s*{[^}]*email/.test(query)) {
@@ -764,7 +782,20 @@ function graphqlData(query: string, variables: Record<string, unknown>) {
         (item) => `PR_${item.repository}_${item.number}` === id,
       );
       if (!seed) return null;
-      return { id, reviewThreads: connection(reviewThreads(seed)) };
+      return {
+        ...pullRequestNode(seed),
+        repository: {
+          ...repositoryNode(seed.repository),
+          viewerPermission: "ADMIN",
+          mergeCommitAllowed: true,
+          rebaseMergeAllowed: true,
+          squashMergeAllowed: true,
+        },
+        reviews: connection(
+          seed.reviewDecision === "APPROVED" ? [{ state: "APPROVED" }] : [],
+        ),
+        reviewThreads: connection(reviewThreads(seed)),
+      };
     });
   }
 

@@ -157,6 +157,20 @@ export const routes: RouteEntry[] = [
     stubWorktree: true,
   },
   {
+    name: "worktree-review-status-github",
+    path: `/dashboard/worktrees/${ids.worktrees.webFeature}`,
+    fullPage: false,
+    reviewerCapture: { provider: "GITHUB", view: "status" },
+    stubWorktree: true,
+  },
+  {
+    name: "worktree-review-status-gitlab",
+    path: `/dashboard/worktrees/${ids.worktrees.gitlabRetry}`,
+    fullPage: false,
+    reviewerCapture: { provider: "GITLAB", view: "status" },
+    stubWorktree: true,
+  },
+  {
     name: "repository-external-actions",
     path: "/dashboard/codebases/repositories/repo-acme-gitlab-platform",
     clickTab: "External pipeline actions",
