@@ -121,6 +121,8 @@ export function NotificationsSidebar() {
   const [arrivingIds, setArrivingIds] = useState<Set<string>>(new Set());
   const [soundEnabled, setSoundEnabled] = useState(false);
   const [loaded, setLoaded] = useState(false);
+  const [confirmClearAll, setConfirmClearAll] = useState(true);
+  const settingsRevision = useRef(0);
   const soundEnabledRef = useRef(false);
   const timers = useRef<Map<string, number>>(new Map());
 
@@ -139,17 +141,24 @@ export function NotificationsSidebar() {
   const fetchNotifications = useCallback(
     async (signal: AbortSignal) => {
       const revision = snapshotRevision.current;
+      const preferencesRevision = settingsRevision.current;
       try {
         const data = await controlPlaneRequest<{
           sidebarNotifications: AppNotificationView[];
+          actionCenterSettings: { confirmClearAllNotifications: boolean };
         }>(
           `query SidebarNotifications {
         sidebarNotifications(limit: 50) { ${APP_NOTIFICATION_FIELDS} }
+        actionCenterSettings { confirmClearAllNotifications }
       }`,
           undefined,
           { signal },
         );
         if (signal.aborted) return;
+        if (preferencesRevision === settingsRevision.current)
+          setConfirmClearAll(
+            data.actionCenterSettings?.confirmClearAllNotifications ?? true,
+          );
         if (revision !== snapshotRevision.current) {
           void load();
           return;
@@ -181,6 +190,24 @@ export function NotificationsSidebar() {
       soundEnabledRef.current = enabled;
     }, 0);
     const initial = window.setTimeout(() => void load(), 0);
+    const unsubscribeSettings = controlPlaneSubscriptions().subscribe<{
+      actionCenterSettingsChanged: { confirmClearAllNotifications: boolean };
+    }>(
+      {
+        query:
+          "subscription NotificationClearSettingsChanged { actionCenterSettingsChanged { confirmClearAllNotifications } }",
+      },
+      {
+        next: (result) => {
+          const settings = result.data?.actionCenterSettingsChanged;
+          if (!settings) return;
+          ++settingsRevision.current;
+          setConfirmClearAll(settings.confirmClearAllNotifications);
+        },
+        error: () => undefined,
+        complete: () => undefined,
+      },
+    );
     const unsubscribe = controlPlaneSubscriptions().subscribe(
       {
         query: `subscription NotificationsSidebarChanged {
@@ -269,6 +296,7 @@ export function NotificationsSidebar() {
       window.clearTimeout(initial);
       window.clearTimeout(initializeSound);
       unsubscribe();
+      unsubscribeSettings();
       recover();
       owner.dispose();
       if (ownerRef.current === owner) ownerRef.current = null;
@@ -334,6 +362,20 @@ export function NotificationsSidebar() {
     }
   };
 
+  const clearAllButton = (
+    <Button
+      aria-label={t("clearAll")}
+      disabled={!notifications.length}
+      onClick={confirmClearAll ? undefined : () => void dismissAll()}
+      size="icon-sm"
+      title={t("clearAll")}
+      type="button"
+      variant="ghost"
+    >
+      <ListX />
+    </Button>
+  );
+
   return (
     <Sidebar
       collapsible="offcanvas"
@@ -359,32 +401,27 @@ export function NotificationsSidebar() {
           >
             {soundEnabled ? <Volume2 /> : <VolumeX />}
           </Button>
-          <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <Button
-                aria-label={t("clearAll")}
-                disabled={!notifications.length}
-                size="icon-sm"
-                title={t("clearAll")}
-                type="button"
-                variant="ghost"
-              >
-                <ListX />
-              </Button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="end" className="w-64">
-              <DropdownMenuLabel className="font-normal whitespace-normal leading-snug">
-                {t("clearSidebarDescription")}
-              </DropdownMenuLabel>
-              <DropdownMenuSeparator />
-              <DropdownMenuItem
-                onSelect={() => void dismissAll()}
-                variant="destructive"
-              >
-                <ListX /> {t("clearSidebar")}
-              </DropdownMenuItem>
-            </DropdownMenuContent>
-          </DropdownMenu>
+          {confirmClearAll ? (
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                {clearAllButton}
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end" className="w-64">
+                <DropdownMenuLabel className="font-normal whitespace-normal leading-snug">
+                  {t("clearSidebarDescription")}
+                </DropdownMenuLabel>
+                <DropdownMenuSeparator />
+                <DropdownMenuItem
+                  onSelect={() => void dismissAll()}
+                  variant="destructive"
+                >
+                  <ListX /> {t("clearSidebar")}
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
+          ) : (
+            clearAllButton
+          )}
           <MobileClose />
         </div>
       </SidebarHeader>

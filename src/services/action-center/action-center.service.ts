@@ -12,6 +12,7 @@ import { getPrismaClient } from "@/data/prisma-client";
 import {
   agentEventBus,
   ACTION_CENTER_CHANGED_TOPIC,
+  ACTION_CENTER_SETTINGS_CHANGED_TOPIC,
   SIDEBAR_STATUS_CHANGED_TOPIC,
 } from "@/services/agent-control";
 import { getSessionValue } from "@/lib/workflows/session";
@@ -269,6 +270,9 @@ export class ActionCenterService {
     maximumRequestAgeDays: number;
     showMyRequestsInSidebar: boolean;
     showReviewRequestsInSidebar: boolean;
+    confirmClearAllNotifications?: boolean | null;
+    showIntegrationCountsInSidebar?: boolean | null;
+    showWorktreeCountsInSidebar?: boolean | null;
   }) {
     if (
       !Number.isInteger(input.maximumRequestAgeDays) ||
@@ -276,10 +280,25 @@ export class ActionCenterService {
     )
       throw new Error("Maximum request age must be a non-negative integer");
     const prisma = await getPrismaClient();
+    const preferences = {
+      ...input,
+      confirmClearAllNotifications:
+        input.confirmClearAllNotifications ?? undefined,
+      showIntegrationCountsInSidebar:
+        input.showIntegrationCountsInSidebar ?? undefined,
+      showWorktreeCountsInSidebar:
+        input.showWorktreeCountsInSidebar ?? undefined,
+    };
     const result = await prisma.actionCenterSettings.upsert({
       where: { id: "default" },
-      create: { id: "default", ...input },
-      update: input,
+      create: { id: "default", ...preferences },
+      update: preferences,
+    });
+    agentEventBus.publish(ACTION_CENTER_SETTINGS_CHANGED_TOPIC, {
+      actionCenterSettingsChanged: result,
+    });
+    agentEventBus.publish(SIDEBAR_STATUS_CHANGED_TOPIC, {
+      sidebarStatusChanged: true,
     });
     agentEventBus.publish(ACTION_CENTER_CHANGED_TOPIC, {
       actionCenterChanged: true,
@@ -771,5 +790,9 @@ export class ActionCenterService {
 
   subscribe() {
     return agentEventBus.iterate(ACTION_CENTER_CHANGED_TOPIC);
+  }
+
+  subscribeSettings() {
+    return agentEventBus.iterate(ACTION_CENTER_SETTINGS_CHANGED_TOPIC);
   }
 }

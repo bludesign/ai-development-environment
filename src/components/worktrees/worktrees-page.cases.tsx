@@ -40,6 +40,10 @@ const request = vi.mocked(controlPlaneRequest);
 const subscriptions = vi.mocked(controlPlaneSubscriptions);
 const navigation = vi.hoisted(() => ({ push: vi.fn() }));
 
+vi.mock("next/navigation", () => ({
+  useSearchParams: () => new URLSearchParams(window.location.search),
+}));
+
 vi.mock("@/i18n/navigation", () => ({
   Link: ({
     href,
@@ -2607,6 +2611,110 @@ export function registerWorktreesPageTests(
           await screen.findByRole("option", { name: "Clean worktrees" }),
         );
         expect(await screen.findByText("feature/AIDE-24")).toBeDefined();
+      });
+
+      test.each([
+        [
+          "changes=dirty&branches=all",
+          "Dirty worktrees",
+          "All branches",
+          false,
+        ],
+        [
+          "changes=all&branches=non-default",
+          "All worktrees",
+          "Not on default branch",
+          true,
+        ],
+      ] as const)(
+        "opens counter link filters over remembered selections: %s",
+        async (params, changes, branches, visible) => {
+          window.localStorage.setItem(
+            "worktrees-filters",
+            JSON.stringify({
+              changes: "clean",
+              branches: "open-pull-requests",
+            }),
+          );
+          window.history.replaceState(
+            null,
+            "",
+            `/dashboard/worktrees?${params}`,
+          );
+          render(<WorktreesPage />);
+          expect(
+            (await screen.findByRole("combobox", { name: "Filter by changes" }))
+              .textContent,
+          ).toContain(changes);
+          expect(
+            screen.getByRole("combobox", { name: "Filter by branch" })
+              .textContent,
+          ).toContain(branches);
+          if (visible)
+            expect(await screen.findByText("feature/AIDE-24")).toBeDefined();
+          else
+            expect(
+              await screen.findByText("No matching worktrees"),
+            ).toBeDefined();
+        },
+      );
+
+      test("switches counter filters while Worktrees is already open", async () => {
+        const page = render(<WorktreesPage />);
+        await screen.findByText("feature/AIDE-24");
+        window.history.pushState(
+          null,
+          "",
+          "/dashboard/worktrees?changes=dirty&branches=all",
+        );
+        page.rerender(<WorktreesPage />);
+        expect(await screen.findByText("No matching worktrees")).toBeDefined();
+        window.history.pushState(
+          null,
+          "",
+          "/dashboard/worktrees?changes=all&branches=non-default",
+        );
+        page.rerender(<WorktreesPage />);
+        expect(await screen.findByText("feature/AIDE-24")).toBeDefined();
+        expect(
+          screen.getByRole("combobox", { name: "Filter by changes" })
+            .textContent,
+        ).toContain("All worktrees");
+        expect(
+          screen.getByRole("combobox", { name: "Filter by branch" })
+            .textContent,
+        ).toContain("Not on default branch");
+      });
+
+      test("allows changing a linked filter and applying the counter link again", async () => {
+        window.history.replaceState(
+          null,
+          "",
+          "/dashboard/worktrees?changes=dirty&branches=all&view=worktrees",
+        );
+        const page = render(<WorktreesPage />);
+        await screen.findByText("No matching worktrees");
+        fireEvent.pointerDown(
+          screen.getByRole("combobox", { name: "Filter by changes" }),
+          { button: 0, ctrlKey: false, pointerType: "mouse" },
+        );
+        fireEvent.click(
+          await screen.findByRole("option", { name: "Clean worktrees" }),
+        );
+        expect(await screen.findByText("feature/AIDE-24")).toBeDefined();
+        expect(new URLSearchParams(window.location.search).get("changes")).toBe(
+          "clean",
+        );
+        expect(new URLSearchParams(window.location.search).get("view")).toBe(
+          "worktrees",
+        );
+        window.history.pushState(
+          null,
+          "",
+          "/dashboard/worktrees?changes=dirty&branches=all",
+        );
+        page.rerender(<WorktreesPage />);
+        expect(await screen.findByText("No matching worktrees")).toBeDefined();
       });
 
       test("remembers the open pull requests filter independently for app views", async () => {

@@ -81,6 +81,13 @@ describe("Action Center resolvers", () => {
       resolvers.Query.actionCenterSettings({}, {}, context("agent-1")),
     ).toThrow("Agent credentials");
     expect(() =>
+      resolvers.Subscription.actionCenterSettingsChanged.subscribe(
+        {},
+        {},
+        context("agent-1"),
+      ),
+    ).toThrow("Agent credentials");
+    expect(() =>
       resolvers.Mutation.refreshActionCenter({}, {}, context("agent-1")),
     ).toThrow("Agent credentials");
     expect(() =>

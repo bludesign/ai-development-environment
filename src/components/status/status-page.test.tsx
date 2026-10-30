@@ -16,6 +16,7 @@ import { StatusPage } from "./status-page";
 vi.mock("@/lib/control-plane-client", () => ({
   controlPlaneRequest: vi.fn(),
   controlPlaneSubscriptions: vi.fn(),
+  onControlPlaneRecovery: vi.fn(() => vi.fn()),
 }));
 
 const request = vi.mocked(controlPlaneRequest);
@@ -24,7 +25,7 @@ const subscriptions = vi.mocked(controlPlaneSubscriptions);
 describe("StatusPage", () => {
   beforeEach(() => {
     subscriptions.mockReturnValue({ subscribe: vi.fn(() => vi.fn()) } as never);
-    request.mockResolvedValue({
+    const installation = {
       installationStatus: {
         version: "2.4.0",
         dependencies: [{ name: "Next.js", version: "16.2.10" }],
@@ -60,7 +61,23 @@ describe("StatusPage", () => {
           },
         ],
       },
-    } as never);
+    };
+    request.mockImplementation(async (query) => {
+      if (query.includes("AgentWebSocketStatus"))
+        return {
+          agent: {
+            webSocketConnection: {
+              agentId: "agent-1",
+              status: "CONNECTED",
+              connectedAt: null,
+              lastVerifiedAt: null,
+              disconnectedAt: null,
+              changedAt: null,
+            },
+          },
+        } as never;
+      return installation as never;
+    });
   });
 
   afterEach(() => {
@@ -79,14 +96,24 @@ describe("StatusPage", () => {
       screen.getByRole("button", { name: "CLI health check settings" }),
     ).toBeDefined();
     expect(screen.getByRole("button", { name: "Run checks" })).toBeDefined();
+    expect(
+      screen.getByRole("button", { name: "Browser WebSocket: Unknown" }),
+    ).toBeDefined();
+    expect(
+      await screen.findByRole("button", { name: "Agent WebSocket: Connected" }),
+    ).toBeDefined();
   });
 
   test("dispatches a manual run for the selected agent", async () => {
     render(<StatusPage />);
     fireEvent.click(await screen.findByRole("button", { name: "Run checks" }));
 
-    await waitFor(() => expect(request).toHaveBeenCalledTimes(2));
-    expect(request.mock.calls[1]?.[1]).toEqual({ agentId: "agent-1" });
+    await waitFor(() =>
+      expect(request).toHaveBeenCalledWith(
+        expect.stringContaining("mutation RunCliHealthChecks"),
+        { agentId: "agent-1" },
+      ),
+    );
   });
 
   test("renders request errors", async () => {

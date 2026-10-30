@@ -117,6 +117,8 @@ export const runQuestionTopic = (runId: string) => `run.${runId}.question`;
 export const POLLING_CHANGED_TOPIC = "polling.changed";
 export const DISK_SPACE_CHANGED_TOPIC = "disk-space.changed";
 export const ACTION_CENTER_CHANGED_TOPIC = "action-center.changed";
+export const ACTION_CENTER_SETTINGS_CHANGED_TOPIC =
+  "action-center.settings.changed";
 export const SIDEBAR_STATUS_CHANGED_TOPIC = "sidebar-status.changed";
 export const GITHUB_ACTIONS_COUNT_CHANGED_TOPIC =
   "github-actions-count.changed";

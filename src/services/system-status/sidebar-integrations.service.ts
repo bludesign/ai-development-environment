@@ -3,6 +3,7 @@ import "server-only";
 import { getPrismaClient } from "@/data/prisma-client";
 import {
   ACTION_CENTER_CHANGED_TOPIC,
+  ACTION_CENTER_SETTINGS_CHANGED_TOPIC,
   GITHUB_ACTIONS_COUNT_CHANGED_TOPIC,
   INTEGRATION_CONFIGURATION_CHANGED_TOPIC,
   SIDEBAR_STATUS_CHANGED_TOPIC,
@@ -53,6 +54,8 @@ export class SidebarIntegrationsService {
   private readonly streams: AsyncIterableIterator<unknown>[] = [];
   private running: Promise<void> | null = null;
   private active = false;
+  private enabled = true;
+  private settingsRevision = 0;
   private readonly pending = new Set<Provider>();
   private readonly refreshDeadlines = new Map<Provider, number>();
   private lastStarted = -Infinity;
@@ -106,11 +109,16 @@ export class SidebarIntegrationsService {
       this.requestRefresh(false, ["gitlab"]),
     );
     this.observe(GITHUB_ACTIONS_COUNT_CHANGED_TOPIC, () => {
+      if (!this.enabled) return;
       const generation = this.snapshots.github.generation;
       void this.github
         .cachedActiveActionsCount()
         .then((count) => {
-          if (!this.active || generation !== this.snapshots.github.generation)
+          if (
+            !this.active ||
+            !this.enabled ||
+            generation !== this.snapshots.github.generation
+          )
             return;
           if (count !== null && this.snapshots.github.configured)
             this.snapshots.github.count = count;
@@ -120,6 +128,17 @@ export class SidebarIntegrationsService {
     });
     // Reconciliation and age-setting changes affect request totals without scanning CI again.
     this.observe(ACTION_CENTER_CHANGED_TOPIC, () => this.publish());
+    this.observe(ACTION_CENTER_SETTINGS_CHANGED_TOPIC, (event) => {
+      const { actionCenterSettingsChanged: settings } = event as {
+        actionCenterSettingsChanged: {
+          showIntegrationCountsInSidebar: boolean;
+        };
+      };
+      ++this.settingsRevision;
+      const wasEnabled = this.enabled;
+      this.setEnabled(settings.showIntegrationCountsInSidebar);
+      if (!wasEnabled && this.enabled) this.requestRefresh(true);
+    });
     void this.refresh();
   }
 
@@ -144,11 +163,26 @@ export class SidebarIntegrationsService {
     })();
   }
 
+  private setEnabled(enabled: boolean): void {
+    this.enabled = enabled;
+    this.polling.configure(POLL_ID, { enabled });
+    if (!enabled) {
+      if (this.timer) clearTimeout(this.timer);
+      this.timer = undefined;
+      this.refreshDeadlines.clear();
+      this.pending.clear();
+      for (const snapshot of Object.values(this.snapshots)) {
+        ++snapshot.generation;
+        snapshot.count = null;
+      }
+    }
+  }
+
   private schedule(
     delay: number,
     providers: Provider[] = ["github", "gitlab"],
   ): void {
-    if (!this.active) return;
+    if (!this.active || !this.enabled) return;
     const deadline = Date.now() + delay;
     for (const provider of providers)
       this.refreshDeadlines.set(
@@ -175,6 +209,7 @@ export class SidebarIntegrationsService {
     immediate = false,
     providers: Provider[] = ["github", "gitlab"],
   ): void {
+    if (!this.active || !this.enabled) return;
     if (this.running) {
       for (const provider of providers) this.pending.add(provider);
       return;
@@ -224,21 +259,28 @@ export class SidebarIntegrationsService {
     this.polling.schedule(POLL_ID, null);
     this.running = this.polling
       .run(POLL_ID, async () => {
+        const revision = this.settingsRevision;
+        const settings = await actionCenterSettings();
+        if (revision === this.settingsRevision)
+          this.setEnabled(settings.showIntegrationCountsInSidebar);
+        if (!this.active || !this.enabled) return;
         const failures: string[] = [];
         // Each provider bounds its scan to four requests; sequential scans preserve that global limit.
         for (const provider of providers) {
+          if (!this.active || !this.enabled) return;
           const previous = this.snapshots[provider].count;
           const beforeConfiguration = this.snapshots[provider].generation;
           try {
             const snapshot = await this.configuration(provider);
-            if (!this.active) return;
+            if (!this.active || !this.enabled) return;
             const generation = snapshot.generation;
             if (snapshot.configured) {
               const count =
                 provider === "github"
                   ? await this.github.activeActionsCount()
                   : await this.gitlab.activePipelinesCount();
-              if (!this.active || generation !== snapshot.generation) continue;
+              if (!this.active || !this.enabled) return;
+              if (generation !== snapshot.generation) continue;
               snapshot.count = count;
             }
           } catch (error) {
@@ -276,10 +318,12 @@ export class SidebarIntegrationsService {
   }
 
   async counts(): Promise<SidebarIntegrationCounts> {
-    const [github, gitlab, settings, prisma] = await Promise.all([
+    const settings = await actionCenterSettings();
+    if (!settings.showIntegrationCountsInSidebar)
+      return EMPTY_INTEGRATION_COUNTS;
+    const [github, gitlab, prisma] = await Promise.all([
       this.configuration("github").catch(() => this.snapshots.github),
       this.configuration("gitlab").catch(() => this.snapshots.gitlab),
-      actionCenterSettings(),
       getPrismaClient(),
     ]);
     const cutoff = actionCenterRequestCutoff(settings.maximumRequestAgeDays);

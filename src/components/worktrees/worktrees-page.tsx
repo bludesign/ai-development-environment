@@ -163,6 +163,7 @@ import {
 } from "@/lib/control-plane-client";
 import { cn } from "@/lib/utils";
 import { Link, useRouter } from "@/i18n/navigation";
+import { useSearchParams } from "next/navigation";
 import type { JiraTicketDetail } from "@/services/jira/types";
 
 import {
@@ -644,6 +645,7 @@ function reviewClass(value: string) {
 
 export function WorktreesPage({ appId }: { appId?: string }) {
   const t = useTranslations("worktrees");
+  const searchParams = useSearchParams();
   const [jiraIssueKey, setJiraIssueKey] = useState<string | null>(() => {
     if (typeof window === "undefined") return null;
     return new URLSearchParams(window.location.search).get("issue");
@@ -675,8 +677,37 @@ export function WorktreesPage({ appId }: { appId?: string }) {
   const [repositoryFilter, setRepositoryFilter] = useState(
     storedFilters.repositoryId,
   );
-  const [changesFilter, setChangesFilter] = useState(storedFilters.changes);
-  const [branchFilter, setBranchFilter] = useState(storedFilters.branches);
+  const [savedChangesFilter, setChangesFilter] = useState(
+    storedFilters.changes,
+  );
+  const [savedBranchFilter, setBranchFilter] = useState(storedFilters.branches);
+  const requestedChanges = searchParams.get("changes");
+  const requestedBranches = searchParams.get("branches");
+  const changesFilter =
+    requestedChanges === "all"
+      ? ALL_FILTER_VALUE
+      : requestedChanges === DIRTY_FILTER_VALUE ||
+          requestedChanges === CLEAN_FILTER_VALUE
+        ? requestedChanges
+        : savedChangesFilter;
+  const branchFilter =
+    requestedBranches === "all"
+      ? ALL_FILTER_VALUE
+      : requestedBranches === NON_DEFAULT_BRANCH_FILTER_VALUE ||
+          requestedBranches === OPEN_PULL_REQUEST_FILTER_VALUE
+        ? requestedBranches
+        : savedBranchFilter;
+
+  const updateLinkedFilter = (key: "changes" | "branches", value: string) => {
+    if (!searchParams.has(key)) return;
+    const params = new URLSearchParams(window.location.search);
+    params.set(key, value === ALL_FILTER_VALUE ? "all" : value);
+    window.history.replaceState(
+      null,
+      "",
+      `${window.location.pathname}?${params}${window.location.hash}`,
+    );
+  };
   const latestLoad = useRef(0);
   const {
     timings,
@@ -1204,7 +1235,13 @@ export function WorktreesPage({ appId }: { appId?: string }) {
             />
           </div>
           <div className="min-w-0 flex-[1_1_12rem]">
-            <Select onValueChange={setChangesFilter} value={changesFilter}>
+            <Select
+              onValueChange={(value) => {
+                setChangesFilter(value);
+                updateLinkedFilter("changes", value);
+              }}
+              value={changesFilter}
+            >
               <SelectTrigger
                 aria-label={t("filterByChanges")}
                 className="w-full"
@@ -1225,7 +1262,13 @@ export function WorktreesPage({ appId }: { appId?: string }) {
             </Select>
           </div>
           <div className="min-w-0 flex-[1_1_12rem]">
-            <Select onValueChange={setBranchFilter} value={branchFilter}>
+            <Select
+              onValueChange={(value) => {
+                setBranchFilter(value);
+                updateLinkedFilter("branches", value);
+              }}
+              value={branchFilter}
+            >
               <SelectTrigger
                 aria-label={t("filterByBranch")}
                 className="w-full"

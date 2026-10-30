@@ -48,6 +48,12 @@ describe("SystemStatusService", () => {
     const workflowCount = vi.fn().mockResolvedValue(5);
     const commandCount = vi.fn().mockResolvedValue(6);
     getPrismaClient.mockResolvedValue({
+      actionCenterSettings: { findUnique: vi.fn().mockResolvedValue(null) },
+      $queryRaw: vi
+        .fn()
+        .mockResolvedValue([
+          { dirtyWorktrees: BigInt(7), offMainWorktrees: BigInt(8) },
+        ]),
       sidebarUsageSummary: {
         findUnique: vi.fn().mockResolvedValue({
           period: "2026-07-25",
@@ -78,6 +84,8 @@ describe("SystemStatusService", () => {
       actions: null,
       mergeRequests: null,
       pipelines: null,
+      dirtyWorktrees: 7,
+      offMainWorktrees: 8,
     });
     expect(agentRunCount).toHaveBeenNthCalledWith(1, {
       where: {

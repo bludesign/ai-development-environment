@@ -4,6 +4,7 @@ import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { PrismaClient } from "@/generated/prisma/client";
 import {
   ACTION_CENTER_CHANGED_TOPIC,
+  ACTION_CENTER_SETTINGS_CHANGED_TOPIC,
   GITHUB_ACTIONS_COUNT_CHANGED_TOPIC,
   GITHUB_PIPELINE_STATUS_CHANGED_TOPIC,
   INTEGRATION_CONFIGURATION_CHANGED_TOPIC,
@@ -37,6 +38,7 @@ function dependencies() {
   };
   const polling = {
     register: vi.fn(),
+    configure: vi.fn(),
     schedule: vi.fn(),
     run: vi.fn(async (_id: string, work: () => Promise<unknown>) => work()),
   };
@@ -62,7 +64,7 @@ describe("sidebar integration request counts", () => {
       adapter: new PrismaBetterSqlite3({ url: ":memory:" }),
     });
     await prisma.$executeRawUnsafe(
-      `CREATE TABLE ActionCenterSettings (id TEXT PRIMARY KEY, maximumRequestAgeDays INTEGER, showMyRequestsInSidebar BOOLEAN, showReviewRequestsInSidebar BOOLEAN, updatedAt DATETIME)`,
+      `CREATE TABLE ActionCenterSettings (id TEXT PRIMARY KEY, maximumRequestAgeDays INTEGER, showMyRequestsInSidebar BOOLEAN, showReviewRequestsInSidebar BOOLEAN, confirmClearAllNotifications BOOLEAN NOT NULL DEFAULT true, showIntegrationCountsInSidebar BOOLEAN NOT NULL DEFAULT true, showWorktreeCountsInSidebar BOOLEAN NOT NULL DEFAULT true, updatedAt DATETIME)`,
     );
     await prisma.$executeRawUnsafe(
       `CREATE TABLE ActionCenterRequest (id TEXT PRIMARY KEY, provider TEXT, accountKey TEXT, resourceKind TEXT, reason TEXT, isMine BOOLEAN, requiresMyApproval BOOLEAN, payloadJson TEXT, createdAt DATETIME, updatedAt DATETIME)`,
@@ -177,6 +179,21 @@ describe("sidebar integration request counts", () => {
     });
   });
 
+  test("disabled counters skip provider configuration and request aggregation", async () => {
+    const { service, github, gitlab } = dependencies();
+    await prisma.actionCenterSettings.create({
+      data: { id: "default", showIntegrationCountsInSidebar: false },
+    });
+    expect(await service.counts()).toEqual({
+      pullRequests: null,
+      actions: null,
+      mergeRequests: null,
+      pipelines: null,
+    });
+    expect(github.getSettings).not.toHaveBeenCalled();
+    expect(gitlab.getSettings).not.toHaveBeenCalled();
+  });
+
   test("never counts rows from a previous account or an unresolved new account", async () => {
     const { service, requests } = dependencies();
     requests.currentAccountKey.mockReturnValue(undefined);
@@ -206,6 +223,84 @@ describe("sidebar CI refresh lifecycle", () => {
     current.service.stop();
     vi.restoreAllMocks();
     vi.useRealTimers();
+  });
+
+  test("does not scan providers when the saved preference is off at startup", async () => {
+    getPrismaClient.mockResolvedValue({
+      actionCenterSettings: {
+        findUnique: vi
+          .fn()
+          .mockResolvedValue({ showIntegrationCountsInSidebar: false }),
+      },
+    });
+    current.service.start();
+    await current.service.refresh();
+    await vi.advanceTimersByTimeAsync(180_000);
+    expect(current.github.activeActionsCount).not.toHaveBeenCalled();
+    expect(current.gitlab.activePipelinesCount).not.toHaveBeenCalled();
+    expect(current.polling.configure).toHaveBeenCalledWith(
+      "sidebar-integrations",
+      { enabled: false },
+    );
+  });
+
+  test("stops scans on disable and resumes when re-enabled", async () => {
+    const { service, github, gitlab } = current;
+    service.start();
+    await service.refresh();
+    agentEventBus.publish(ACTION_CENTER_SETTINGS_CHANGED_TOPIC, {
+      actionCenterSettingsChanged: { showIntegrationCountsInSidebar: false },
+    });
+    await vi.advanceTimersByTimeAsync(0);
+    agentEventBus.publish(INTEGRATION_CONFIGURATION_CHANGED_TOPIC, {
+      integrationConfigurationChanged: "ALL",
+    });
+    agentEventBus.publish(GITLAB_PIPELINE_STATUS_CHANGED_TOPIC, {});
+    await vi.advanceTimersByTimeAsync(180_000);
+    expect(github.activeActionsCount).toHaveBeenCalledOnce();
+    expect(gitlab.activePipelinesCount).toHaveBeenCalledOnce();
+    agentEventBus.publish(ACTION_CENTER_SETTINGS_CHANGED_TOPIC, {
+      actionCenterSettingsChanged: { showIntegrationCountsInSidebar: true },
+    });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(github.activeActionsCount).toHaveBeenCalledTimes(2);
+    expect(gitlab.activePipelinesCount).toHaveBeenCalledTimes(2);
+  });
+
+  test("disabling during a scan discards its result and skips the next provider", async () => {
+    const { service, github, gitlab } = current;
+    let finish: (count: number) => void = () => undefined;
+    github.activeActionsCount.mockImplementationOnce(
+      () =>
+        new Promise<number>((resolve) => {
+          finish = resolve;
+        }),
+    );
+    service.start();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(github.activeActionsCount).toHaveBeenCalledOnce();
+    getPrismaClient.mockResolvedValue({
+      actionCenterSettings: {
+        findUnique: vi
+          .fn()
+          .mockResolvedValue({ showIntegrationCountsInSidebar: false }),
+      },
+    });
+    agentEventBus.publish(ACTION_CENTER_SETTINGS_CHANGED_TOPIC, {
+      actionCenterSettingsChanged: { showIntegrationCountsInSidebar: false },
+    });
+    await vi.advanceTimersByTimeAsync(0);
+    finish(99);
+    await service.refresh();
+    await vi.advanceTimersByTimeAsync(120_000);
+    expect(gitlab.activePipelinesCount).not.toHaveBeenCalled();
+    expect(github.activeActionsCount).toHaveBeenCalledOnce();
+    expect(await service.counts()).toEqual({
+      pullRequests: null,
+      actions: null,
+      mergeRequests: null,
+      pipelines: null,
+    });
   });
 
   test("refreshes at startup and every minute; provider errors preserve the last successful total", async () => {

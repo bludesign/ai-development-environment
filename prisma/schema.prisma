@@ -2242,11 +2242,14 @@ model SidebarUsageSummary {
 }
 
 model ActionCenterSettings {
-  id                          String   @id
-  maximumRequestAgeDays       Int      @default(30)
-  showMyRequestsInSidebar     Boolean  @default(true)
-  showReviewRequestsInSidebar Boolean  @default(true)
-  updatedAt                   DateTime @updatedAt
+  id                             String   @id
+  maximumRequestAgeDays          Int      @default(30)
+  showMyRequestsInSidebar        Boolean  @default(true)
+  showReviewRequestsInSidebar    Boolean  @default(true)
+  confirmClearAllNotifications   Boolean  @default(true)
+  showIntegrationCountsInSidebar Boolean  @default(true)
+  showWorktreeCountsInSidebar    Boolean  @default(true)
+  updatedAt                      DateTime @updatedAt
 }
 
 model ActionCenterRequest {

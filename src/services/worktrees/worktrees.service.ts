@@ -62,6 +62,7 @@ import {
   agentEventBus,
   agentJobChangedTopic,
   WORKTREE_CHANGED_TOPIC,
+  SIDEBAR_STATUS_CHANGED_TOPIC,
   worktreeInspectionTopic,
 } from "@/services/agent-control";
 import {
@@ -3807,6 +3808,9 @@ export class WorktreesService {
   }
 
   private publish(worktreeId: string | null, codebaseId: string | null) {
+    agentEventBus.publish(SIDEBAR_STATUS_CHANGED_TOPIC, {
+      sidebarStatusChanged: true,
+    });
     agentEventBus.publish(WORKTREE_CHANGED_TOPIC, {
       worktreeOverviewChanged: { worktreeId, codebaseId },
     });
