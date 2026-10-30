@@ -1,5 +1,5 @@
 import { McpServer, type CallToolResult } from "@modelcontextprotocol/server";
-import { mcpScopeMetadata } from "./mcp-permissions";
+import { mcpScopeMetadata, type McpSecurityScheme } from "./mcp-permissions";
 import type { McpToolSnapshot, McpToolSnapshotEntry } from "./types";
 
 /** JSON Schema is forwarded exactly; remote tools are not approximated as Zod. */
@@ -10,6 +10,7 @@ export function createScopedMcpServer(
     args: Record<string, unknown>,
     signal: AbortSignal,
   ) => Promise<CallToolResult>,
+  authentication: McpSecurityScheme = "oauth2",
 ): McpServer {
   const server = new McpServer(
     { name: "ai-development-environment", version: "0.1.0" },
@@ -28,20 +29,25 @@ export function createScopedMcpServer(
         outputSchema,
         annotations,
         reference,
-      }) => ({
-        name,
-        _meta: mcpScopeMetadata(
+      }) => {
+        const metadata = mcpScopeMetadata(
           reference.name,
           reference.source === "EXTERNAL",
-        ),
-        ...(title ? { title } : {}),
-        ...(description ? { description } : {}),
-        inputSchema: { type: "object" as const, ...inputSchema },
-        ...(outputSchema
-          ? { outputSchema: { type: "object" as const, ...outputSchema } }
-          : {}),
-        ...(annotations ? { annotations } : {}),
-      }),
+          authentication,
+        );
+        return {
+          name,
+          securitySchemes: metadata.securitySchemes,
+          _meta: metadata,
+          ...(title ? { title } : {}),
+          ...(description ? { description } : {}),
+          inputSchema: { type: "object" as const, ...inputSchema },
+          ...(outputSchema
+            ? { outputSchema: { type: "object" as const, ...outputSchema } }
+            : {}),
+          ...(annotations ? { annotations } : {}),
+        };
+      },
     ),
   }));
   server.server.setRequestHandler("tools/call", async (request, extra) => {

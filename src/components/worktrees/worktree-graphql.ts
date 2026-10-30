@@ -1,7 +1,20 @@
 export const PULL_REQUEST_FIELDS =
   "id number title url repositoryGithubId repositoryNameWithOwner repositoryUrl labels jiraKey pipelineStatus pipelineRevision pipelines { id name status url checkSuiteId canRetry retryUnavailableReason jobs { id name status url canRetry retryUnavailableReason steps { number name status } } } reviewDecision unresolvedReviewThreadCount state isDraft mergeable mergeStateStatus autoMergeEnabled viewerCanEnableAutoMerge viewerCanDisableAutoMerge headRefOid headRefName createdAt";
 
-export const WORKTREE_FIELDS = `
+export const SOURCE_CONTROL_REQUEST_FIELDS = `
+  provider id number title url isDraft headRefName headRefOid createdAt
+  ... on GitLabMergeRequest {
+    projectId state worktreeId detailedMergeStatus approvalState unresolvedDiscussionsCount
+  }
+`;
+
+export const GITLAB_PIPELINE_STATUS_FIELDS = `
+  id projectId iid ref branch sha source status webUrl
+  mergeRequests { projectId iid title webUrl sourceBranch }
+  worktreeId worktreeHighlightColor startedAt createdAt updatedAt finishedAt duration queuedDuration
+`;
+
+const worktreeFields = (pipelineFields: string) => `
   id canAssignReviewers codebaseId gitDirectory folder relativePath primary branch headSha upstream ahead behind syncState
   baseBranch baseBranchOverride baseAhead baseBehind hasStagedChanges hasUnstagedChanges rebaseInProgress hasConflicts highlightColor availability statusError
   pushStatus
@@ -11,22 +24,20 @@ export const WORKTREE_FIELDS = `
   autoSync { worktreeId state conflictWorkflowId conflictWorkflowChoice lastError pauseReason lastSyncedAt updatedAt }
   autoMerge { worktreeId state repositoryNameWithOwner pullRequestNumber branch mergeMethod commitHeadline commitBody authorEmail deleteWorktree moveTicketToDone ticketKey lastError updatedAt }
   pullRequest { ${PULL_REQUEST_FIELDS} }
-  sourceControlRequest {
-    provider id number title url isDraft headRefName headRefOid createdAt
-    ... on GitLabMergeRequest {
-      projectId state worktreeId detailedMergeStatus approvalState unresolvedDiscussionsCount
-    }
-  }
-  gitLabPipelines {
-    id projectId iid ref branch sha source status webUrl canRetry canCancel
-    mergeRequests { projectId iid title webUrl sourceBranch }
-    worktreeId worktreeHighlightColor startedAt createdAt updatedAt finishedAt duration queuedDuration
-  }
+  sourceControlRequest { ${SOURCE_CONTROL_REQUEST_FIELDS} }
+  gitLabPipelines { ${pipelineFields} }
   latestBuild {
     id status action destinationType destination outOfDate createdAt
     artifacts { id kind }
   }
 `;
+
+export const WORKTREE_FIELDS = worktreeFields(
+  `${GITLAB_PIPELINE_STATUS_FIELDS} canRetry canCancel`,
+);
+export const WORKTREE_LIST_FIELDS = worktreeFields(
+  GITLAB_PIPELINE_STATUS_FIELDS,
+);
 
 export const CODEBASE_FIELDS = `
   id folder observedOrigin branch headSha upstream ahead behind syncState availability statusError

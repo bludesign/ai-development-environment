@@ -51,6 +51,8 @@
     "pullRequests": "Solicitudes de extracción",
     "mergeRequests": "Solicitudes de fusión",
     "pullReqs": "Solic. extracción",
+    "dirtyWorktrees": "Modificados",
+    "offMainWorktrees": "Fuera de principal",
     "mergeReqs": "Solic. fusión",
     "actions": "Acciones",
     "pipelines": "Canalizaciones",
@@ -175,11 +177,15 @@
     "notApproved": "No aprobado",
     "merge": "Fusionar",
     "settingsTitle": "Centro de acciones",
-    "settingsDescription": "Configuración compartida de solicitudes para las aplicaciones web e iOS.",
+    "settingsDescription": "Gestiona las preferencias de solicitudes, la confirmación de notificaciones y los contadores de la barra lateral.",
     "maximumAge": "Antigüedad máxima de solicitudes (días)",
     "maximumAgeHelp": "Desde la fecha de creación. Introduce 0 para mostrar todas las solicitudes.",
     "showMyRequestsInSidebar": "Mostrar mis solicitudes abiertas en la barra lateral",
     "showReviewRequestsInSidebar": "Mostrar solicitudes pendientes de mi aprobación en la barra lateral",
+    "confirmClearAllNotifications": "Confirmar antes de borrar todas las notificaciones",
+    "showIntegrationCountsInSidebar": "Mostrar contadores de solicitudes y Actions/Pipelines",
+    "showWorktreeCountsInSidebar": "Mostrar contadores de árboles modificados y fuera de la rama principal",
+    "integrationCountsHelp": "Al desactivarlo se detienen las consultas de CI de la barra lateral. El Centro de acciones y las notificaciones siguen actualizándose.",
     "saveSettings": "Guardar configuración"
   },
   "apps": {
@@ -2469,7 +2475,8 @@
     "cancelJob": "Cancelar {job}",
     "externalActionResults": "Resultados de acciones externas",
     "nativeRequest": "Solicitud nativa",
-    "externalRequest": "Solicitud externa"
+    "externalRequest": "Solicitud externa",
+    "checkingActions": "Comprobando acciones…"
   },
   "gitlabSettings": {
     "title": "Credenciales de GitLab",
@@ -3723,7 +3730,28 @@
     "aiBranchSubmitHelp": "Genera y edita un nombre, o envía para generarlo automáticamente.",
     "generatingBranchName": "Generando nombre de rama…",
     "generateBranchName": "Generar nombre de rama",
-    "regenerateBranchName": "Volver a generar nombre de rama"
+    "regenerateBranchName": "Volver a generar nombre de rama",
+    "loadingStatus": {
+      "SAVED": "Worktrees guardados",
+      "GITHUB": "Pull requests de GitHub",
+      "GITLAB_MERGE_REQUESTS": "Merge requests de GitLab",
+      "GITLAB_PIPELINES": "Pipelines de GitLab",
+      "JIRA": "Resúmenes de Jira",
+      "loading": "Cargando: {stages}",
+      "updating": "Actualizando detalles: {stages}",
+      "starting": "Preparando worktrees…",
+      "updated": "Worktrees actualizados",
+      "warning": "Actualizado con advertencias",
+      "details": "Detalles de carga",
+      "explanation": "Los worktrees se cargan primero. Los detalles opcionales se actualizan por separado. El tiempo transcurrido incluye la cola y la red; el tiempo del servidor mide el procesamiento.",
+      "elapsed": "Transcurrido: {time}",
+      "server": "Servidor: {time}",
+      "pending": "En espera",
+      "running": "Cargando",
+      "complete": "Completado",
+      "failed": "Error",
+      "retry": "Reintentar"
+    }
   },
   "worktreeDetail": {
     "loading": "Cargando detalles del worktree…",
@@ -4291,6 +4319,9 @@
     "searchDevices": "Buscar dispositivos…",
     "noCompatibleDevices": "No se encontraron dispositivos compatibles.",
     "noDevicesMatchSearch": "Ningún dispositivo coincide con la búsqueda.",
+    "connected": "Conectado",
+    "availablePaired": "Disponible (emparejado)",
+    "unknownDeviceState": "Desconocido",
     "available": "Disponible",
     "unavailable": "No disponible",
     "runOnDevice": "Ejecutar en {name}",

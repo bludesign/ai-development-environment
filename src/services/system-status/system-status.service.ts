@@ -17,6 +17,7 @@ import type { CcusageService } from "@/services/ccusage";
 import type { CcusageCollectionSnapshot } from "@/services/ccusage";
 import type { DiskSpaceService } from "@/services/disk-space";
 import type { PollingService } from "@/services/polling";
+import { actionCenterSettings } from "@/services/action-center/action-center-requests";
 import {
   EMPTY_INTEGRATION_COUNTS,
   type SidebarIntegrationsService,
@@ -232,6 +233,7 @@ export class SystemStatusService {
 
   async status(includeDiskSpace = true) {
     const prisma = await getPrismaClient();
+    const settings = await actionCenterSettings();
     const period = localDay();
     const [
       storedUsage,
@@ -242,6 +244,7 @@ export class SystemStatusService {
       commands,
       diskSpace,
       integrations,
+      worktrees,
     ] = await Promise.all([
       prisma.sidebarUsageSummary.findUnique({ where: { id: "default" } }),
       prisma.agentRun.count({
@@ -281,6 +284,18 @@ export class SystemStatusService {
       }),
       includeDiskSpace ? this.diskSpace.overview() : Promise.resolve(undefined),
       this.integrations?.counts() ?? Promise.resolve(EMPTY_INTEGRATION_COUNTS),
+      settings.showWorktreeCountsInSidebar
+        ? prisma.$queryRaw<
+            Array<{ dirtyWorktrees: bigint; offMainWorktrees: bigint }>
+          >`
+            SELECT
+              COALESCE(SUM(CASE WHEN w.hasStagedChanges OR w.hasUnstagedChanges THEN 1 ELSE 0 END), 0) AS dirtyWorktrees,
+              COALESCE(SUM(CASE WHEN c.defaultBranch IS NOT NULL AND c.defaultBranch != ''
+                AND (w.branch IS NULL OR w.branch != c.defaultBranch) THEN 1 ELSE 0 END), 0) AS offMainWorktrees
+            FROM Worktree w JOIN Codebase c ON c.id = w.codebaseId
+            WHERE w.missingAt IS NULL
+          `
+        : Promise.resolve(null),
     ]);
     let usageToday =
       storedUsage?.period === period
@@ -313,7 +328,12 @@ export class SystemStatusService {
         workflows,
         commands,
         ...integrations,
+        dirtyWorktrees: worktrees ? Number(worktrees[0].dirtyWorktrees) : null,
+        offMainWorktrees: worktrees
+          ? Number(worktrees[0].offMainWorktrees)
+          : null,
       },
+      settings,
       diskSpace,
     };
   }

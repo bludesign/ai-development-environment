@@ -189,6 +189,9 @@ export type GitLabCommentPageView = {
   warnings: string[];
 };
 
+export type GitLabMergeRequestSummaryField =
+  "APPROVAL_STATE" | "UNRESOLVED_DISCUSSIONS_COUNT";
+
 export type GitLabMergeRequestView = {
   projectPath?: string | null;
   sourceProjectId?: string | null;

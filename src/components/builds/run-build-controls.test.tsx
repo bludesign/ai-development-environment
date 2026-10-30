@@ -155,6 +155,56 @@ describe("RunBuildControls", () => {
     expect(completed).toHaveBeenCalledOnce();
   });
 
+  test("allows running on an idle paired physical device and searching its status", async () => {
+    const idle = {
+      type: "PHYSICAL_DEVICE",
+      id: "DEVICE-1",
+      name: "Idle iPhone",
+      platform: "iOS",
+      osVersion: "27.0",
+      state: "Available (paired)",
+      available: true,
+    };
+    request.mockImplementation(async (query) => {
+      const operation = String(query);
+      if (operation.includes("BuildRunAgents"))
+        return { buildRunAgents } as never;
+      if (operation.includes("BuildRunDestinations"))
+        return { inspectBuildRunDestinations: [idle] } as never;
+      if (operation.includes("RunCompletedBuild"))
+        return { runBuild: [] } as never;
+      throw new Error(`Unexpected operation: ${operation}`);
+    });
+    render(
+      <RunBuildControls
+        buildId="build-1"
+        destinationType="PHYSICAL_DEVICE"
+        onError={vi.fn()}
+      />,
+    );
+    fireEvent.pointerDown(screen.getByRole("button", { name: "Run" }), {
+      button: 0,
+      ctrlKey: false,
+    });
+    const row = await screen.findByRole("menuitemcheckbox", {
+      name: /Idle iPhone.*Available \(paired\)/,
+    });
+    expect(row.hasAttribute("disabled")).toBe(false);
+    fireEvent.change(screen.getByRole("searchbox"), {
+      target: { value: "paired" },
+    });
+    expect(
+      screen.getByRole("menuitemcheckbox", { name: /Idle iPhone/ }),
+    ).toBeDefined();
+    fireEvent.click(screen.getByRole("button", { name: "Run on Idle iPhone" }));
+    await waitFor(() =>
+      expect(request).toHaveBeenCalledWith(
+        expect.stringContaining("RunCompletedBuild"),
+        { input: expect.objectContaining({ destinations: [idle] }) },
+      ),
+    );
+  });
+
   test("supports row selection, quick run, select all, clear, and unavailable devices", async () => {
     request.mockImplementation(async (query) => {
       const operation = String(query);

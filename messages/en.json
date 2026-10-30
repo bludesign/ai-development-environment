@@ -51,6 +51,8 @@
     "pullRequests": "Pull Requests",
     "mergeRequests": "Merge Requests",
     "pullReqs": "Pull Reqs",
+    "dirtyWorktrees": "Dirty",
+    "offMainWorktrees": "Off Main",
     "mergeReqs": "Merge Reqs",
     "actions": "Actions",
     "pipelines": "Pipelines",
@@ -175,11 +177,15 @@
     "notApproved": "Not Approved",
     "merge": "Merge",
     "settingsTitle": "Action Center",
-    "settingsDescription": "Shared pull request settings for the web and iOS apps.",
+    "settingsDescription": "Manage shared request preferences, notification confirmation, and sidebar counters.",
     "maximumAge": "Maximum request age (days)",
     "maximumAgeHelp": "Based on creation date. Enter 0 to show requests of every age.",
     "showMyRequestsInSidebar": "Show my open requests in sidebar",
     "showReviewRequestsInSidebar": "Show requests awaiting my approval in sidebar",
+    "confirmClearAllNotifications": "Confirm before clearing all notifications",
+    "showIntegrationCountsInSidebar": "Show pull/merge request and Actions/Pipelines counters",
+    "showWorktreeCountsInSidebar": "Show Dirty and Off Main counters",
+    "integrationCountsHelp": "Turning this off stops dedicated sidebar CI polling. Action Center and notification polling continue.",
     "saveSettings": "Save settings"
   },
   "apps": {
@@ -2469,7 +2475,8 @@
     "cancelJob": "Cancel {job}",
     "externalActionResults": "External action results",
     "nativeRequest": "Native request",
-    "externalRequest": "External request"
+    "externalRequest": "External request",
+    "checkingActions": "Checking actions…"
   },
   "gitlabSettings": {
     "title": "GitLab credentials",
@@ -3723,7 +3730,28 @@
     "aiBranchSubmitHelp": "Generate and edit a name, or submit to generate it automatically.",
     "generatingBranchName": "Generating branch name…",
     "generateBranchName": "Generate branch name",
-    "regenerateBranchName": "Regenerate branch name"
+    "regenerateBranchName": "Regenerate branch name",
+    "loadingStatus": {
+      "SAVED": "Saved worktrees",
+      "GITHUB": "GitHub pull requests",
+      "GITLAB_MERGE_REQUESTS": "GitLab merge requests",
+      "GITLAB_PIPELINES": "GitLab pipelines",
+      "JIRA": "Jira summaries",
+      "loading": "Loading: {stages}",
+      "updating": "Updating details: {stages}",
+      "starting": "Preparing worktrees…",
+      "updated": "Worktrees updated",
+      "warning": "Updated with warnings",
+      "details": "Loading details",
+      "explanation": "Worktrees load first. Optional details update independently. Elapsed time includes the request queue and network; server time measures processing.",
+      "elapsed": "Elapsed: {time}",
+      "server": "Server: {time}",
+      "pending": "Waiting",
+      "running": "Loading",
+      "complete": "Complete",
+      "failed": "Failed",
+      "retry": "Try again"
+    }
   },
   "worktreeDetail": {
     "loading": "Loading worktree details…",
@@ -4291,6 +4319,9 @@
     "searchDevices": "Search devices…",
     "noCompatibleDevices": "No compatible devices were found.",
     "noDevicesMatchSearch": "No devices match your search.",
+    "connected": "Connected",
+    "availablePaired": "Available (paired)",
+    "unknownDeviceState": "Unknown",
     "available": "Available",
     "unavailable": "Unavailable",
     "runOnDevice": "Run on {name}",

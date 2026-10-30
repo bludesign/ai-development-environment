@@ -73,6 +73,9 @@ export const ACTION_CENTER_DEFAULTS = {
   maximumRequestAgeDays: 30,
   showMyRequestsInSidebar: true,
   showReviewRequestsInSidebar: true,
+  confirmClearAllNotifications: true,
+  showIntegrationCountsInSidebar: true,
+  showWorktreeCountsInSidebar: true,
 };
 
 export function actionCenterRequestCutoff(maximumRequestAgeDays: number) {

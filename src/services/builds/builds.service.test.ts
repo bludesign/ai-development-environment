@@ -1155,7 +1155,7 @@ describe("BuildsService", () => {
     );
   });
 
-  test("returns generic and connected build targets from the agent preflight", async () => {
+  test("returns generic, idle paired, and unavailable build targets from the agent preflight", async () => {
     const createJob = vi.fn().mockResolvedValue({ id: "destinations-job" });
     const genericSimulator = {
       type: "SIMULATOR",
@@ -1175,6 +1175,27 @@ describe("BuildsService", () => {
       state: null,
       generic: true,
     };
+    const idlePhysical = {
+      ...genericPhysical,
+      id: "IDLE-DEVICE",
+      name: "Idle iPhone",
+      generic: false,
+      state: "Available (paired)",
+      available: true,
+    };
+    const offlinePhysical = {
+      ...idlePhysical,
+      id: "OFFLINE-DEVICE",
+      state: "Unavailable",
+      available: false,
+    };
+    const destinations = [
+      genericSimulator,
+      genericPhysical,
+      destination,
+      idlePhysical,
+      offlinePhysical,
+    ];
     getPrismaClient.mockResolvedValue({
       worktree: { findUnique: vi.fn().mockResolvedValue(worktree()) },
       buildConfiguration: {
@@ -1189,7 +1210,7 @@ describe("BuildsService", () => {
         id: "destinations-job",
         status: "SUCCEEDED",
         resultJson: JSON.stringify({
-          destinations: [genericSimulator, genericPhysical, destination],
+          destinations,
         }),
         error: null,
       }),
@@ -1202,7 +1223,7 @@ describe("BuildsService", () => {
         action: "BUILD",
         requestId: "generic-destinations",
       }),
-    ).resolves.toEqual([genericSimulator, genericPhysical, destination]);
+    ).resolves.toEqual(destinations);
     expect(createJob).toHaveBeenCalledWith(
       expect.objectContaining({
         kind: IOS_DESTINATIONS_JOB_KIND,
@@ -1239,101 +1260,150 @@ describe("BuildsService", () => {
     });
   });
 
-  test("reuses a deployment retry when destination metadata changes", async () => {
-    const selectedDestination = { ...destination, state: "Shutdown" };
-    const refreshedDestination = { ...destination, state: "Booted" };
-    const buildWorktree = worktree();
-    buildWorktree.codebase.agent.capabilitiesJson = JSON.stringify([
-      IOS_DEPLOY_JOB_KIND,
-    ]);
-    const deployment = {
-      id: "deployment-1",
-      buildId: "build-1",
-      requestId: "run-1",
-      destinationJson: JSON.stringify(selectedDestination),
-      destinationKey: "SIMULATOR:SIM-1",
-      status: "RUNNING",
-    };
-    const findDeployment = vi.fn().mockResolvedValue(deployment);
-    const createDeployment = vi.fn();
-    const updateMany = vi.fn().mockResolvedValue({ count: 1 });
-    getPrismaClient.mockResolvedValue({
-      build: {
-        findUnique: vi.fn().mockResolvedValue({
-          id: "build-1",
-          status: "SUCCEEDED",
-          destinationType: "SIMULATOR",
-          artifactDirectory: "/agent/builds/build-1",
-          artifacts: [
-            {
-              id: "artifact-1",
-              kind: "RUNNABLE_APP",
-              relativePath: "products/App.app",
-              metadataJson: JSON.stringify({
-                bundleIdentifier: "com.example.app",
-              }),
-            },
-          ],
-          worktree: buildWorktree,
-        }),
+  test.each([
+    {
+      name: "simulator",
+      selectedDestination: { ...destination, state: "Shutdown" },
+      refreshedDestination: { ...destination, state: "Booted" },
+    },
+    {
+      name: "idle paired physical device",
+      selectedDestination: {
+        ...destination,
+        type: "PHYSICAL_DEVICE" as const,
+        id: "DEVICE-1",
+        platform: "iOS",
+        state: "Connected",
+        available: true,
       },
-      worktree: { findUnique: vi.fn().mockResolvedValue(buildWorktree) },
-      buildDeployment: {
-        findUnique: findDeployment,
-        create: createDeployment,
-        updateMany,
-        findMany: vi.fn().mockResolvedValue([deployment]),
+      refreshedDestination: {
+        ...destination,
+        type: "PHYSICAL_DEVICE" as const,
+        id: "DEVICE-1",
+        platform: "iOS",
+        state: "Available (paired)",
+        available: true,
       },
-    });
-    const createJob = vi.fn().mockResolvedValue({ id: "deployment-job" });
-    const service = new BuildsService(control(createJob));
-    const refreshDestinations = vi
-      .spyOn(service, "destinationsForBuild")
-      .mockResolvedValue([refreshedDestination]);
-
-    await expect(
-      service.runBuild({
+    },
+  ])(
+    "reuses a $name deployment retry after refreshing status",
+    async ({ selectedDestination, refreshedDestination }) => {
+      const buildWorktree = worktree();
+      buildWorktree.codebase.agent.capabilitiesJson = JSON.stringify([
+        IOS_DEPLOY_JOB_KIND,
+      ]);
+      const deployment = {
+        id: "deployment-1",
         buildId: "build-1",
-        destinations: [selectedDestination],
         requestId: "run-1",
-      }),
-    ).resolves.toEqual([deployment]);
-
-    expect(findDeployment).toHaveBeenCalledWith({
-      where: {
-        buildId_requestId_targetAgentId_destinationKey: {
-          buildId: "build-1",
-          requestId: "run-1",
-          targetAgentId: "agent-1",
-          destinationKey: "SIMULATOR:SIM-1",
+        destinationJson: JSON.stringify(selectedDestination),
+        destinationKey: `${selectedDestination.type}:${selectedDestination.id}`,
+        status: "RUNNING",
+      };
+      const findDeployment = vi.fn().mockResolvedValue(deployment);
+      const createDeployment = vi.fn();
+      const updateMany = vi.fn().mockResolvedValue({ count: 1 });
+      getPrismaClient.mockResolvedValue({
+        build: {
+          findUnique: vi.fn().mockResolvedValue({
+            id: "build-1",
+            status: "SUCCEEDED",
+            destinationType: selectedDestination.type,
+            artifactDirectory: "/agent/builds/build-1",
+            artifacts: [
+              {
+                id: "artifact-1",
+                kind: "RUNNABLE_APP",
+                relativePath: "products/App.app",
+                metadataJson: JSON.stringify({
+                  bundleIdentifier: "com.example.app",
+                }),
+              },
+            ],
+            worktree: buildWorktree,
+          }),
         },
+        worktree: { findUnique: vi.fn().mockResolvedValue(buildWorktree) },
+        buildDeployment: {
+          findUnique: findDeployment,
+          create: createDeployment,
+          updateMany,
+          findMany: vi.fn().mockResolvedValue([deployment]),
+        },
+      });
+      const createJob = vi.fn().mockResolvedValue({ id: "deployment-job" });
+      const service = new BuildsService(control(createJob));
+      const refreshDestinations = vi
+        .spyOn(service, "destinationsForBuild")
+        .mockResolvedValue([refreshedDestination]);
+
+      await expect(
+        service.runBuild({
+          buildId: "build-1",
+          destinations: [selectedDestination],
+          requestId: "run-1",
+        }),
+      ).resolves.toEqual([deployment]);
+
+      expect(findDeployment).toHaveBeenCalledWith({
+        where: {
+          buildId_requestId_targetAgentId_destinationKey: {
+            buildId: "build-1",
+            requestId: "run-1",
+            targetAgentId: "agent-1",
+            destinationKey: `${selectedDestination.type}:${selectedDestination.id}`,
+          },
+        },
+      });
+      expect(createDeployment).not.toHaveBeenCalled();
+      expect(createJob).toHaveBeenCalledWith(
+        expect.objectContaining({
+          payload: expect.objectContaining({
+            deployments: [
+              { id: "deployment-1", destination: refreshedDestination },
+            ],
+          }),
+        }),
+      );
+      expect(updateMany).toHaveBeenCalledWith({
+        where: { id: { in: ["deployment-1"] } },
+        data: { jobId: "deployment-job" },
+      });
+
+      refreshDestinations.mockResolvedValueOnce([
+        { ...refreshedDestination, available: false },
+      ]);
+      await expect(
+        service.runBuild({
+          buildId: "build-1",
+          destinations: [selectedDestination],
+          requestId: "run-offline",
+        }),
+      ).rejects.toThrow("no longer available");
+    },
+  );
+
+  test("rejects an explicitly unavailable build destination before queuing work", async () => {
+    const createJob = vi.fn();
+    getPrismaClient.mockResolvedValue({
+      build: { findUnique: vi.fn().mockResolvedValue(null) },
+      worktree: { findUnique: vi.fn().mockResolvedValue(worktree()) },
+      buildConfiguration: {
+        findUnique: vi.fn().mockResolvedValue(configuration()),
+      },
+      buildSourceObservation: {
+        findUnique: vi.fn().mockResolvedValue(observation()),
       },
     });
-    expect(createDeployment).not.toHaveBeenCalled();
-    expect(createJob).toHaveBeenCalledWith(
-      expect.objectContaining({
-        payload: expect.objectContaining({
-          deployments: [
-            { id: "deployment-1", destination: refreshedDestination },
-          ],
-        }),
-      }),
-    );
-    expect(updateMany).toHaveBeenCalledWith({
-      where: { id: { in: ["deployment-1"] } },
-      data: { jobId: "deployment-job" },
-    });
-
-    refreshDestinations.mockResolvedValueOnce([
-      { ...refreshedDestination, available: false },
-    ]);
     await expect(
-      service.runBuild({
-        buildId: "build-1",
-        destinations: [selectedDestination],
-        requestId: "run-offline",
+      new BuildsService(control(createJob)).startBuild({
+        worktreeId: "worktree-1",
+        configurationId: "configuration-1",
+        destination: { ...destination, available: false },
+        requestId: "unavailable-build",
       }),
-    ).rejects.toThrow("no longer available");
+    ).rejects.toThrow("The selected build destination is unavailable");
+    expect(createJob).not.toHaveBeenCalled();
   });
 
   test("fails cross-agent deployments when job queuing stops midway", async () => {

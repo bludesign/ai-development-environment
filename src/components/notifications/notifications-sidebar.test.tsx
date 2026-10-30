@@ -140,6 +140,52 @@ function renderSidebar() {
 }
 
 describe("NotificationsSidebar", () => {
+  test("clears immediately when confirmation is disabled in saved settings", async () => {
+    const defaultRequest = request.getMockImplementation()!;
+    request.mockImplementation(async (...args) => {
+      const data = await defaultRequest(...args);
+      return {
+        ...(data as object),
+        actionCenterSettings: { confirmClearAllNotifications: false },
+      } as never;
+    });
+    renderSidebar();
+    await screen.findByText("Example · Debug · main");
+    fireEvent.click(screen.getByRole("button", { name: "Clear all" }));
+    await waitFor(() =>
+      expect(request).toHaveBeenCalledWith(
+        expect.stringContaining("mutation DismissAllSidebarNotifications"),
+      ),
+    );
+    expect(
+      screen.queryByRole("menuitem", { name: "Clear sidebar" }),
+    ).toBeNull();
+    await waitFor(() =>
+      expect(screen.queryByText("Example · Debug · main")).toBeNull(),
+    );
+  });
+
+  test("applies confirmation preference changes without reloading the page", async () => {
+    renderSidebar();
+    await screen.findByText("Example · Debug · main");
+    const subscribe = vi.mocked(subscriptions().subscribe);
+    const index = subscribe.mock.calls.findIndex(([op]) =>
+      op.query.includes("NotificationClearSettingsChanged"),
+    );
+    await act(async () =>
+      subscribe.mock.calls[index]?.[1].next({
+        data: {
+          actionCenterSettingsChanged: { confirmClearAllNotifications: false },
+        },
+      }),
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Clear all" }));
+    await waitFor(() =>
+      expect(request).toHaveBeenCalledWith(
+        expect.stringContaining("mutation DismissAllSidebarNotifications"),
+      ),
+    );
+  });
   test("reserves an independently scrollable two-thirds notification feed and one-third action center", () => {
     renderSidebar();
 

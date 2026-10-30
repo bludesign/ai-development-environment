@@ -93,8 +93,20 @@ function renderFooter() {
 }
 
 const sidebarStatus = {
+  settings: {
+    showIntegrationCountsInSidebar: true,
+    showWorktreeCountsInSidebar: true,
+  },
   usageToday: { totalCost: 1.25, collectedAt: null },
-  activity: { plans: 1, sessions: 2, builds: 3, workflows: 4, commands: 5 },
+  activity: {
+    plans: 1,
+    sessions: 2,
+    builds: 3,
+    workflows: 4,
+    commands: 5,
+    dirtyWorktrees: 7,
+    offMainWorktrees: 9,
+  },
   diskSpace: {
     settings: {
       normalThresholdGiB: 40,
@@ -141,6 +153,10 @@ const sidebarStatus = {
 
 describe("SidebarStatusFooter", () => {
   beforeEach(() => {
+    sidebarStatus.settings = {
+      showIntegrationCountsInSidebar: true,
+      showWorktreeCountsInSidebar: true,
+    };
     setViewportWidth(1280);
     integrationState = {
       github: { configured: false },
@@ -249,6 +265,53 @@ describe("SidebarStatusFooter", () => {
     expect(
       screen.getByRole("link", { name: /Commands/ }).textContent,
     ).toContain("5");
+  });
+
+  test("shows saved worktree counts at the end of the activity grid", async () => {
+    renderFooter();
+    await screen.findByText("$1.25");
+    const dirty = screen.getByRole("link", { name: /^Dirty/ });
+    const offMain = screen.getByRole("link", { name: /^Off Main/ });
+    expect(dirty.textContent).toContain("7");
+    expect(offMain.textContent).toContain("9");
+    expect(dirty.getAttribute("href")).toBe(
+      "/dashboard/worktrees?changes=dirty&branches=all",
+    );
+    expect(offMain.getAttribute("href")).toBe(
+      "/dashboard/worktrees?changes=all&branches=non-default",
+    );
+    expect(dirty.nextElementSibling).toBe(offMain);
+    expect(offMain.nextElementSibling).toBeNull();
+  });
+
+  test("hides all provider counters and worktree counters independently", async () => {
+    integrationState = {
+      github: { configured: true },
+      gitlab: { configured: true },
+    };
+    sidebarStatus.settings.showIntegrationCountsInSidebar = false;
+    renderFooter();
+    await screen.findByText("$1.25");
+    for (const label of ["Pull Reqs", "Merge Reqs", "Pipelines"])
+      expect(
+        screen.queryByRole("link", { name: new RegExp(`^${label}`) }),
+      ).toBeNull();
+    expect(document.querySelector('a[href="/github/actions"]')).toBeNull();
+    expect(screen.getByRole("link", { name: /^Dirty/ })).toBeDefined();
+    sidebarStatus.settings.showIntegrationCountsInSidebar = true;
+    sidebarStatus.settings.showWorktreeCountsInSidebar = false;
+    const subscribe = vi.mocked(subscriptions().subscribe);
+    const index = subscribe.mock.calls.findIndex(([op]) =>
+      op.query.includes("SidebarStatusChanged"),
+    );
+    await act(async () =>
+      subscribe.mock.calls[index]?.[1].next({
+        data: { sidebarStatusChanged: true },
+      }),
+    );
+    await screen.findByRole("link", { name: /^Pull Reqs/ });
+    expect(screen.queryByRole("link", { name: /^Dirty/ })).toBeNull();
+    expect(screen.queryByRole("link", { name: /^Off Main/ })).toBeNull();
   });
 
   test.each([

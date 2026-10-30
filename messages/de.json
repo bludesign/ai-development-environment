@@ -51,6 +51,8 @@
     "pullRequests": "Pull Requests",
     "mergeRequests": "Merge Requests",
     "pullReqs": "Pull Reqs",
+    "dirtyWorktrees": "Geändert",
+    "offMainWorktrees": "Abseits von Main",
     "mergeReqs": "Merge Reqs",
     "actions": "Actions",
     "pipelines": "CI/CD-Pipelines",
@@ -175,11 +177,15 @@
     "notApproved": "Nicht genehmigt",
     "merge": "Zusammenführen",
     "settingsTitle": "Aktionszentrale",
-    "settingsDescription": "Gemeinsame Pull-Request-Einstellungen für die Web- und iOS-Apps.",
+    "settingsDescription": "Gemeinsame Anfrageeinstellungen, Benachrichtigungsbestätigung und Seitenleistenzähler verwalten.",
     "maximumAge": "Maximales Alter der Anfragen (Tage)",
     "maximumAgeHelp": "Ab Erstellungsdatum. Mit 0 werden Anfragen jeden Alters angezeigt.",
     "showMyRequestsInSidebar": "Meine offenen Anfragen in der Seitenleiste anzeigen",
     "showReviewRequestsInSidebar": "Anfragen, die auf meine Freigabe warten, in der Seitenleiste anzeigen",
+    "confirmClearAllNotifications": "Vor dem Löschen aller Benachrichtigungen bestätigen",
+    "showIntegrationCountsInSidebar": "Zähler für Pull-/Merge-Requests und Actions/Pipelines anzeigen",
+    "showWorktreeCountsInSidebar": "Zähler für geänderte Worktrees und andere Branches anzeigen",
+    "integrationCountsHelp": "Deaktiviert die separate CI-Abfrage der Seitenleiste. Action Center und Benachrichtigungen werden weiterhin aktualisiert.",
     "saveSettings": "Einstellungen speichern"
   },
   "apps": {
@@ -2469,7 +2475,8 @@
     "cancelJob": "{job} abbrechen",
     "externalActionResults": "Ergebnisse externer Aktionen",
     "nativeRequest": "Native Anfrage",
-    "externalRequest": "Externe Anfrage"
+    "externalRequest": "Externe Anfrage",
+    "checkingActions": "Aktionen werden geprüft…"
   },
   "gitlabSettings": {
     "title": "GitLab-Zugangsdaten",
@@ -3723,7 +3730,28 @@
     "aiBranchSubmitHelp": "Generieren und bearbeiten Sie einen Namen oder senden Sie ab, um ihn automatisch zu generieren.",
     "generatingBranchName": "Branchname wird generiert…",
     "generateBranchName": "Branchnamen generieren",
-    "regenerateBranchName": "Branchnamen erneut generieren"
+    "regenerateBranchName": "Branchnamen erneut generieren",
+    "loadingStatus": {
+      "SAVED": "Gespeicherte Worktrees",
+      "GITHUB": "GitHub-Pull-Requests",
+      "GITLAB_MERGE_REQUESTS": "GitLab-Merge-Requests",
+      "GITLAB_PIPELINES": "GitLab-Pipelines",
+      "JIRA": "Jira-Zusammenfassungen",
+      "loading": "Wird geladen: {stages}",
+      "updating": "Details werden aktualisiert: {stages}",
+      "starting": "Worktrees werden vorbereitet…",
+      "updated": "Worktrees aktualisiert",
+      "warning": "Mit Warnungen aktualisiert",
+      "details": "Ladedetails",
+      "explanation": "Worktrees werden zuerst geladen. Optionale Details werden unabhängig aktualisiert. Die verstrichene Zeit umfasst Warteschlange und Netzwerk; die Serverzeit misst die Verarbeitung.",
+      "elapsed": "Verstrichen: {time}",
+      "server": "Server: {time}",
+      "pending": "Wartet",
+      "running": "Wird geladen",
+      "complete": "Abgeschlossen",
+      "failed": "Fehlgeschlagen",
+      "retry": "Erneut versuchen"
+    }
   },
   "worktreeDetail": {
     "loading": "Worktree-Details werden geladen…",
@@ -4291,6 +4319,9 @@
     "searchDevices": "Geräte suchen…",
     "noCompatibleDevices": "Keine kompatiblen Geräte gefunden.",
     "noDevicesMatchSearch": "Keine Geräte entsprechen Ihrer Suche.",
+    "connected": "Verbunden",
+    "availablePaired": "Verfügbar (gekoppelt)",
+    "unknownDeviceState": "Unbekannt",
     "available": "Verfügbar",
     "unavailable": "Nicht verfügbar",
     "runOnDevice": "Auf {name} ausführen",

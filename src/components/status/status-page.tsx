@@ -5,6 +5,11 @@ import { useTranslations } from "next-intl";
 import { useCallback, useEffect, useState } from "react";
 
 import { Alert, AlertDescription } from "@/components/ui/alert";
+import { useAgentWebSocketConnections } from "@/components/agents/use-agent-websocket-connections";
+import {
+  BrowserWebSocketStatus,
+  WebSocketStatusBadge,
+} from "@/components/agents/websocket-status";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -35,6 +40,9 @@ export function StatusPage() {
   const [runningAgent, setRunningAgent] = useState<string | "all" | null>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const connections = useAgentWebSocketConnections(
+    status?.agents.map((agent) => agent.agentId) ?? [],
+  );
   const load = useCallback(async () => {
     try {
       const data = await controlPlaneRequest<{
@@ -106,6 +114,7 @@ export function StatusPage() {
           <h1 className="text-2xl font-semibold tracking-tight">
             {t("title")}
           </h1>
+          <BrowserWebSocketStatus />
           <p className="mt-1 text-sm text-muted-foreground">
             {t("description")}
           </p>
@@ -181,15 +190,21 @@ export function StatusPage() {
                             {t("agentVersion", { version: agent.version })}
                           </CardDescription>
                         </div>
-                        <Badge
-                          variant={
-                            agent.connectionStatus === "ONLINE"
-                              ? "secondary"
-                              : "outline"
-                          }
-                        >
-                          {t(`connections.${agent.connectionStatus}`)}
-                        </Badge>
+                        <div className="flex flex-wrap items-center gap-2">
+                          <WebSocketStatusBadge
+                            kind="agent"
+                            snapshot={connections.get(agent.agentId)}
+                          />
+                          <Badge
+                            variant={
+                              agent.connectionStatus === "ONLINE"
+                                ? "secondary"
+                                : "outline"
+                            }
+                          >
+                            {t(`connections.${agent.connectionStatus}`)}
+                          </Badge>
+                        </div>
                       </div>
                     </CardHeader>
                     <CardContent>

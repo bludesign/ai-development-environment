@@ -25,6 +25,7 @@ type RequestInput = {
   source: "PIPELINES_PAGE";
   force?: boolean;
   allowStaleOnError?: boolean;
+  maxAgeSeconds?: number;
 };
 type ServiceInternals = {
   activePipelinesCount(): Promise<number>;
@@ -226,6 +227,79 @@ test("keeps valid cache hits local and lets forced reads refresh upstream", asyn
     { id: 1 },
   ]);
   expect(upstream).toHaveBeenCalledOnce();
+});
+
+test("caps worktree pipeline caching at 30 seconds while respecting shorter TTLs", async () => {
+  const now = Date.now();
+  const instance = service();
+  vi.mocked(instance.ttl).mockResolvedValue(300);
+  cache.findUnique.mockResolvedValue({
+    fetchedAt: new Date(now - 29_000),
+    responseJson: "[]",
+  });
+  const clock = vi.spyOn(Date, "now").mockReturnValue(now);
+  const upstream = vi.spyOn(instance, "fetchRaw").mockResolvedValue(response());
+  try {
+    await instance.get({ ...request, maxAgeSeconds: 30 });
+    expect(upstream).not.toHaveBeenCalled();
+    clock.mockReturnValue(now + 2_000);
+    await instance.get({ ...request, maxAgeSeconds: 30 });
+    expect(upstream).toHaveBeenCalledOnce();
+    vi.mocked(instance.ttl).mockResolvedValue(5);
+    clock.mockReturnValue(now);
+    await instance.get({ ...request, maxAgeSeconds: 30 });
+    expect(upstream).toHaveBeenCalledTimes(2);
+  } finally {
+    clock.mockRestore();
+  }
+});
+
+test("GitLab read deadlines cover slow response bodies and do not change mutation signals", async () => {
+  const controller = new AbortController();
+  const deadline = vi
+    .spyOn(AbortSignal, "timeout")
+    .mockReturnValue(controller.signal);
+  const fetch = vi.fn(async (_url: unknown, init: RequestInit) => ({
+    status: 200,
+    ok: true,
+    headers: new Headers(),
+    text: () =>
+      init.signal
+        ? new Promise((_resolve, reject) =>
+            init.signal!.addEventListener(
+              "abort",
+              () => reject(init.signal!.reason),
+              { once: true },
+            ),
+          )
+        : Promise.resolve("{}"),
+  }));
+  vi.stubGlobal("fetch", fetch);
+  try {
+    const instance = service();
+    const pending = instance.fetchRaw({
+      baseUrl: "https://gitlab.example",
+      token: "test-token",
+      path: "/projects/1/pipelines",
+    });
+    await vi.waitFor(() => expect(fetch).toHaveBeenCalledOnce());
+    expect(deadline).toHaveBeenCalledWith(30_000);
+    const outcome = expect(pending).rejects.toThrow("timed out");
+    controller.abort(new Error("GitLab read timed out"));
+    await outcome;
+    deadline.mockClear();
+    await instance.fetchRaw({
+      baseUrl: "https://gitlab.example",
+      token: "test-token",
+      path: "/projects/1/pipelines/2/retry",
+      method: "POST",
+    });
+    expect(deadline).not.toHaveBeenCalled();
+    expect(fetch.mock.calls[1]?.[1].signal).toBeUndefined();
+  } finally {
+    deadline.mockRestore();
+    vi.unstubAllGlobals();
+  }
 });
 
 test("explicit comments refresh replaces a cached system-only page with new human comments", async () => {

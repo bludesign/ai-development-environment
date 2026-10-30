@@ -158,6 +158,7 @@ export type WorktreeAgentGroup = {
 };
 
 export type WorktreeOverview = {
+  durationMs?: number;
   agents: WorktreeAgentGroup[];
   tags: WorktreeTag[];
   settings: {

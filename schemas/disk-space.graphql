@@ -182,6 +182,10 @@ input UpdateDiskSpaceSettingsInput {
 
 "Represents sidebar activity counts in the GraphQL API."
 type SidebarActivityCounts {
+  "Worktrees with staged or unstaged changes, excluding missing worktrees. Null when counters are disabled."
+  dirtyWorktrees: Int
+  "Non-missing worktrees off a known repository default branch, including detached HEADs. Null when counters are disabled."
+  offMainWorktrees: Int
   "Open GitHub Mine requests and requests awaiting personal approval, within the Action Center age limit. Null when GitHub is not configured."
   pullRequests: Int
   "Running and queued GitHub Actions workflow runs across managed repositories. Null before a successful refresh or when GitHub is not configured."
@@ -236,6 +240,8 @@ type SidebarDiskSummary {
 
 "Disk and usage summaries for the shared sidebar."
 type SidebarStatus {
+  "Saved Action Center and sidebar preferences."
+  settings: ActionCenterSettings!
   "The usage today associated with this sidebar status."
   usageToday: SidebarUsageToday!
   "The activity associated with this sidebar status."

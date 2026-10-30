@@ -40,6 +40,10 @@ const request = vi.mocked(controlPlaneRequest);
 const subscriptions = vi.mocked(controlPlaneSubscriptions);
 const navigation = vi.hoisted(() => ({ push: vi.fn() }));
 
+vi.mock("next/navigation", () => ({
+  useSearchParams: () => new URLSearchParams(window.location.search),
+}));
+
 vi.mock("@/i18n/navigation", () => ({
   Link: ({
     href,
@@ -430,6 +434,7 @@ export function registerWorktreesPageTests(
         subscribe: vi.fn(() => vi.fn()),
       } as never);
       request.mockResolvedValue({
+        worktreeEnrichment: { updates: [], warnings: [], durationMs: 1 },
         worktreeOverview: {
           hiddenCount: 0,
           activeMoves: [],
@@ -595,6 +600,72 @@ export function registerWorktreesPageTests(
     });
 
     if (section === "fetch") {
+      test.each([undefined, "app-1"])(
+        "shows worktrees and Jira details while GitLab pipelines are blocked for %s",
+        async (appId) => {
+          const initial = (await request.getMockImplementation()!(
+            "fixture",
+          )) as { worktreeOverview: WorktreeOverview };
+          const gate = Promise.withResolvers<unknown>();
+          const source = initial.worktreeOverview.agents[0]!.codebases[0]!;
+          request.mockImplementation(async (query, variables) => {
+            if (query.includes("query WorktreeEnrichment")) {
+              if (variables?.kind === "GITLAB_PIPELINES")
+                return gate.promise as never;
+              if (variables?.kind === "JIRA")
+                return {
+                  worktreeEnrichment: {
+                    durationMs: 4,
+                    warnings: [],
+                    updates: [
+                      {
+                        canonicalOrigin: source.repository.canonicalOrigin,
+                        worktree: {
+                          ...source.worktrees[0],
+                          ticketTitle: "Fresh Jira summary",
+                        },
+                      },
+                    ],
+                  },
+                } as never;
+              return {
+                worktreeEnrichment: {
+                  durationMs: 2,
+                  warnings: [],
+                  updates: [],
+                },
+              } as never;
+            }
+            return initial as never;
+          });
+          render(<WorktreesPage appId={appId} />);
+          expect(await screen.findByText("feature/AIDE-24")).toBeDefined();
+          expect(
+            await screen.findByText("AIDE-24 — Fresh Jira summary"),
+          ).toBeDefined();
+          expect(
+            screen.getByTestId("worktree-loading-status").textContent,
+          ).toContain("GitLab pipelines");
+          const baseQuery = request.mock.calls.find(([query]) =>
+            query.includes("query WorktreeOverview"),
+          )!;
+          expect(baseQuery[0]).toContain("savedOnly: true");
+          expect(baseQuery[1]).toEqual({ appId: appId ?? null });
+          expect(baseQuery[0].split("gitLabPipelines {")[1]).not.toContain(
+            "canRetry",
+          );
+          await act(async () =>
+            gate.resolve({
+              worktreeEnrichment: { durationMs: 10, updates: [], warnings: [] },
+            }),
+          );
+          expect(await screen.findByText("Worktrees updated")).toBeDefined();
+          expect(
+            screen.getByTestId("worktree-loading-status").className,
+          ).toContain("h-10");
+        },
+      );
+
       test.each([
         { appId: undefined, layout: "cards", clearError: "dismiss" },
         { appId: "app-1", layout: "table", clearError: "retry" },
@@ -2413,7 +2484,7 @@ export function registerWorktreesPageTests(
           { projectId: "project-1", pipelineId: "pipeline-42" },
         );
         expect(request).toHaveBeenCalledWith(
-          expect.stringMatching(/gitLabPipelines\s*\{[^}]*\bcanRetry\b/),
+          expect.stringContaining("savedOnly: true"),
           { appId: null },
           expect.objectContaining({ signal: expect.any(AbortSignal) }),
         );
@@ -2540,6 +2611,110 @@ export function registerWorktreesPageTests(
           await screen.findByRole("option", { name: "Clean worktrees" }),
         );
         expect(await screen.findByText("feature/AIDE-24")).toBeDefined();
+      });
+
+      test.each([
+        [
+          "changes=dirty&branches=all",
+          "Dirty worktrees",
+          "All branches",
+          false,
+        ],
+        [
+          "changes=all&branches=non-default",
+          "All worktrees",
+          "Not on default branch",
+          true,
+        ],
+      ] as const)(
+        "opens counter link filters over remembered selections: %s",
+        async (params, changes, branches, visible) => {
+          window.localStorage.setItem(
+            "worktrees-filters",
+            JSON.stringify({
+              changes: "clean",
+              branches: "open-pull-requests",
+            }),
+          );
+          window.history.replaceState(
+            null,
+            "",
+            `/dashboard/worktrees?${params}`,
+          );
+          render(<WorktreesPage />);
+          expect(
+            (await screen.findByRole("combobox", { name: "Filter by changes" }))
+              .textContent,
+          ).toContain(changes);
+          expect(
+            screen.getByRole("combobox", { name: "Filter by branch" })
+              .textContent,
+          ).toContain(branches);
+          if (visible)
+            expect(await screen.findByText("feature/AIDE-24")).toBeDefined();
+          else
+            expect(
+              await screen.findByText("No matching worktrees"),
+            ).toBeDefined();
+        },
+      );
+
+      test("switches counter filters while Worktrees is already open", async () => {
+        const page = render(<WorktreesPage />);
+        await screen.findByText("feature/AIDE-24");
+        window.history.pushState(
+          null,
+          "",
+          "/dashboard/worktrees?changes=dirty&branches=all",
+        );
+        page.rerender(<WorktreesPage />);
+        expect(await screen.findByText("No matching worktrees")).toBeDefined();
+        window.history.pushState(
+          null,
+          "",
+          "/dashboard/worktrees?changes=all&branches=non-default",
+        );
+        page.rerender(<WorktreesPage />);
+        expect(await screen.findByText("feature/AIDE-24")).toBeDefined();
+        expect(
+          screen.getByRole("combobox", { name: "Filter by changes" })
+            .textContent,
+        ).toContain("All worktrees");
+        expect(
+          screen.getByRole("combobox", { name: "Filter by branch" })
+            .textContent,
+        ).toContain("Not on default branch");
+      });
+
+      test("allows changing a linked filter and applying the counter link again", async () => {
+        window.history.replaceState(
+          null,
+          "",
+          "/dashboard/worktrees?changes=dirty&branches=all&view=worktrees",
+        );
+        const page = render(<WorktreesPage />);
+        await screen.findByText("No matching worktrees");
+        fireEvent.pointerDown(
+          screen.getByRole("combobox", { name: "Filter by changes" }),
+          { button: 0, ctrlKey: false, pointerType: "mouse" },
+        );
+        fireEvent.click(
+          await screen.findByRole("option", { name: "Clean worktrees" }),
+        );
+        expect(await screen.findByText("feature/AIDE-24")).toBeDefined();
+        expect(new URLSearchParams(window.location.search).get("changes")).toBe(
+          "clean",
+        );
+        expect(new URLSearchParams(window.location.search).get("view")).toBe(
+          "worktrees",
+        );
+        window.history.pushState(
+          null,
+          "",
+          "/dashboard/worktrees?changes=dirty&branches=all",
+        );
+        page.rerender(<WorktreesPage />);
+        expect(await screen.findByText("No matching worktrees")).toBeDefined();
       });
 
       test("remembers the open pull requests filter independently for app views", async () => {

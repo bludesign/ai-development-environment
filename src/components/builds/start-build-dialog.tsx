@@ -70,6 +70,7 @@ import type {
 } from "./types";
 import { CollectDsymsSelect } from "./collect-dsyms-select";
 import { ConfigurationIcon } from "./configuration-icon";
+import { buildDestinationState } from "./build-format";
 import {
   DEFAULT_EXPORT_SETTINGS,
   ExportSettingsForm,
@@ -499,28 +500,32 @@ function StartBuildDialog({
     selectedAction: BuildAction,
     preserveSelection: boolean,
   ) => {
+    const selectable = next.filter(
+      (destination) => destination.available !== false,
+    );
     const defaultType: BuildDestination["type"] =
       selectedAction === "ARCHIVE"
         ? "PHYSICAL_DEVICE"
-        : next.some((destination) => destination.type === "SIMULATOR")
+        : selectable.some((destination) => destination.type === "SIMULATOR")
           ? "SIMULATOR"
           : "PHYSICAL_DEVICE";
     const nextType =
       preserveSelection &&
-      next.some(
+      selectable.some(
         (destination) => destination.type === destinationTypeRef.current,
       )
         ? destinationTypeRef.current
         : defaultType;
     const nextId =
       preserveSelection &&
-      next.some(
+      selectable.some(
         (destination) =>
           destination.id === destinationIdRef.current &&
           destination.type === nextType,
       )
         ? destinationIdRef.current
-        : (next.find((destination) => destination.type === nextType)?.id ?? "");
+        : (selectable.find((destination) => destination.type === nextType)
+            ?.id ?? "");
     destinationTypeRef.current = nextType;
     destinationIdRef.current = nextId;
     setDestinations(next);
@@ -685,13 +690,21 @@ function StartBuildDialog({
       ),
     [destinations, destinationType],
   );
-  const destination = destinations.find((entry) => entry.id === destinationId);
+  const destination = destinations.find(
+    (entry) => entry.id === destinationId && entry.type === destinationType,
+  );
   const preview = configuration
     ? `xcrun xcodebuild ${configuration.source.kind === "PROJECT" ? `-project ${configuration.source.relativePath}` : configuration.source.kind === "WORKSPACE" ? `-workspace ${configuration.source.relativePath}` : ""} -scheme ${JSON.stringify(configuration.scheme)} -configuration ${JSON.stringify(configuration.buildConfiguration)} -destination ${JSON.stringify(destination?.name ?? "<destination>")} -hideShellScriptEnvironment ${action.toLowerCase().replaceAll("_", "-")}${action === "TEST_WITHOUT_BUILDING" && selectedPriorBuildId ? ` · ${t("priorBuildSummary", { id: selectedPriorBuildId })}` : ""}`
     : "";
 
   const start = async () => {
-    if (!configuration || !destination || !serverUrls) return;
+    if (
+      !configuration ||
+      !destination ||
+      destination.available === false ||
+      !serverUrls
+    )
+      return;
     setStarting(true);
     setError(null);
     try {
@@ -904,8 +917,11 @@ function StartBuildDialog({
                           destinationTypeRef.current = type;
                           setDestinationType(type);
                           const id =
-                            destinations.find((entry) => entry.type === type)
-                              ?.id ?? "";
+                            destinations.find(
+                              (entry) =>
+                                entry.type === type &&
+                                entry.available !== false,
+                            )?.id ?? "";
                           destinationIdRef.current = id;
                           setDestinationId(id);
                         }}
@@ -951,13 +967,20 @@ function StartBuildDialog({
                         </SelectTrigger>
                         <SelectContent>
                           {filteredDestinations.map((entry) => (
-                            <SelectItem key={entry.id} value={entry.id}>
+                            <SelectItem
+                              key={entry.id}
+                              value={entry.id}
+                              disabled={entry.available === false}
+                            >
                               {entry.generic
                                 ? entry.type === "SIMULATOR"
                                   ? t("anySimulator")
                                   : t("anyPhysicalDevice")
                                 : entry.name}
                               {entry.osVersion ? ` · ${entry.osVersion}` : ""}
+                              {!entry.generic
+                                ? ` · ${buildDestinationState(entry, t)}`
+                                : ""}
                             </SelectItem>
                           ))}
                         </SelectContent>
@@ -1372,6 +1395,7 @@ function StartBuildDialog({
                       defaultServerUrlKind(serverUrls, destinationType)),
                 ) ||
                 !destination ||
+                destination.available === false ||
                 (action === "TEST_WITHOUT_BUILDING" && !selectedPriorBuildId)
               }
               onClick={() => void start()}

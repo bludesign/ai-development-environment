@@ -82,6 +82,12 @@ export const createActionCenterResolvers = (service: ActionCenterService) => ({
     },
   },
   Subscription: {
+    actionCenterSettingsChanged: {
+      subscribe: (_root: unknown, _args: unknown, context: GraphQLContext) => {
+        requireControlPlane(context);
+        return service.subscribeSettings();
+      },
+    },
     actionCenterChanged: {
       subscribe: (_root: unknown, _args: unknown, context: GraphQLContext) => {
         requireControlPlane(context);

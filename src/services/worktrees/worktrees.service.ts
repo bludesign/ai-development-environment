@@ -43,6 +43,7 @@ import {
 } from "@ai-development-environment/agent-contract/worktrees";
 
 import { getPrismaClient } from "@/data/prisma-client";
+import { mapIntegrationRequests } from "@/services/integration-request";
 import { compileRe2 } from "@/lib/re2.server";
 import type { Prisma } from "@/generated/prisma/client";
 import {
@@ -61,6 +62,7 @@ import {
   agentEventBus,
   agentJobChangedTopic,
   WORKTREE_CHANGED_TOPIC,
+  SIDEBAR_STATUS_CHANGED_TOPIC,
   worktreeInspectionTopic,
 } from "@/services/agent-control";
 import {
@@ -77,6 +79,7 @@ import { jiraBranchCandidates } from "@/services/jira";
 import type {
   GitLabService,
   GitLabMergeRequestView,
+  GitLabMergeRequestSummaryField,
   GitLabPipelineView,
 } from "@/services/gitlab";
 import type { SkillsService } from "@/services/skills";
@@ -221,6 +224,27 @@ type PullRequestTarget = {
   gitLabPipelines: GitLabPipelineView[];
   codebase: { repository: { canonicalOrigin: string } };
 };
+export type WorktreeEnrichmentKind =
+  "GITHUB" | "GITLAB_MERGE_REQUESTS" | "GITLAB_PIPELINES" | "JIRA";
+type EnrichmentWarning = {
+  worktreeId: string;
+  message: string;
+  preserveFields: GitLabMergeRequestSummaryField[];
+};
+type EnrichmentReporter = (
+  worktree: PullRequestTarget,
+  message: string,
+  preserveFields?: GitLabMergeRequestSummaryField[],
+) => void;
+
+function repositoryScope(appId?: string | null, worktreeId?: string | null) {
+  return {
+    ...(appId ? { apps: { some: { appId } } } : {}),
+    ...(worktreeId
+      ? { codebases: { some: { worktrees: { some: { id: worktreeId } } } } }
+      : {}),
+  };
+}
 type WorktreePayloadSource = {
   id: string;
   codebaseId: string;
@@ -855,6 +879,20 @@ export class WorktreesService {
   private view(worktree: WorktreeRecord, defaultRegex = "") {
     const pattern =
       worktree.codebase.repository.jiraBranchRegex ?? defaultRegex;
+    const associationMatches =
+      (!worktree.pullRequestLookupOrigin &&
+        !worktree.pullRequestLookupBranch) ||
+      (worktree.pullRequestLookupOrigin?.toLowerCase() ===
+        worktree.codebase.repository.canonicalOrigin.toLowerCase() &&
+        worktree.pullRequestLookupBranch === worktree.branch);
+    const pullRequest =
+      associationMatches && worktree.pullRequest
+        ? storedPullRequestView(worktree.pullRequest)
+        : null;
+    const gitLabMergeRequest =
+      associationMatches && worktree.gitLabMergeRequest
+        ? storedGitLabMergeRequestView(worktree.gitLabMergeRequest)
+        : null;
     return {
       ...worktree,
       relativePath: worktreeDisplayPath(
@@ -871,17 +909,9 @@ export class WorktreesService {
       ticketKey: ticketKey(worktree.branch, String(pattern)),
       ticketTitle: null as string | null,
       ticketStatus: null as string | null,
-      pullRequest: worktree.pullRequest
-        ? storedPullRequestView(worktree.pullRequest)
-        : null,
-      gitLabMergeRequest: worktree.gitLabMergeRequest
-        ? storedGitLabMergeRequestView(worktree.gitLabMergeRequest)
-        : null,
-      sourceControlRequest: worktree.gitLabMergeRequest
-        ? storedGitLabMergeRequestView(worktree.gitLabMergeRequest)
-        : worktree.pullRequest
-          ? storedPullRequestView(worktree.pullRequest)
-          : null,
+      pullRequest,
+      gitLabMergeRequest,
+      sourceControlRequest: gitLabMergeRequest ?? pullRequest,
       gitLabPipelines: [] as GitLabPipelineView[],
       latestBuild: worktree.builds?.[0]
         ? {
@@ -992,6 +1022,7 @@ export class WorktreesService {
 
   private async synchronizePullRequests(
     worktrees: PullRequestTarget[],
+    warn?: EnrichmentReporter,
   ): Promise<void> {
     const prisma = await getPrismaClient();
     const retryAfterMs =
@@ -1054,6 +1085,11 @@ export class WorktreesService {
           }
         }
       } catch {
+        for (const worktree of linked)
+          warn?.(
+            worktree,
+            "Could not refresh GitHub pull request status. Try again.",
+          );
         // Stored PR state remains usable when the optional live refresh fails.
       }
     }
@@ -1116,6 +1152,11 @@ export class WorktreesService {
             if (fallback) target.pullRequest = fallback;
           }
           // Discovery is optional in an overview; a manual refresh surfaces errors.
+          for (const target of targets)
+            warn?.(
+              target,
+              "Could not discover GitHub pull requests. Try again.",
+            );
         }
       }),
     );
@@ -1123,58 +1164,54 @@ export class WorktreesService {
 
   private async synchronizeGitLabMergeRequests(
     worktrees: PullRequestTarget[],
+    warn?: EnrichmentReporter,
+    projectMap?: Map<string, { id: string } | null>,
   ): Promise<void> {
     if (!this.gitLabService) return;
     const now = Date.now();
     const retryAfterMs = 5 * 60 * 1_000;
-    await Promise.all(
-      worktrees.map(async (worktree) => {
-        if (!worktree.branch) return;
-        const origin = worktree.codebase.repository.canonicalOrigin;
-        let project;
-        try {
-          project = await this.gitLabService!.projectForCanonicalOrigin(origin);
-        } catch {
-          return;
-        }
-        if (!project) return;
-        const lookupMatches =
-          worktree.pullRequestLookupOrigin?.toLowerCase() ===
-            origin.toLowerCase() &&
-          worktree.pullRequestLookupBranch === worktree.branch;
-        const pipelineReadinessPending =
-          worktree.gitLabMergeRequest?.detailedMergeStatus ===
-          "ci_still_running";
-        if (
-          lookupMatches &&
-          worktree.pullRequestLookupAt &&
-          now - worktree.pullRequestLookupAt.getTime() < retryAfterMs &&
-          !pipelineReadinessPending
-        ) {
-          return;
-        }
-        try {
-          const mergeRequest = await this.gitLabService!.mergeRequestForBranch(
-            project.id,
-            worktree.branch,
-            pipelineReadinessPending,
-          );
-          await this.storeGitLabMergeRequest(
-            worktree.id,
-            origin,
-            worktree.branch,
-            mergeRequest,
-          );
-          worktree.gitLabMergeRequest = mergeRequest;
-          worktree.pullRequest = null;
-          worktree.pullRequestLookupOrigin = origin;
-          worktree.pullRequestLookupBranch = worktree.branch;
-          worktree.pullRequestLookupAt = new Date();
-        } catch {
-          // Provider discovery is optional in overview responses.
-        }
-      }),
-    );
+    const projects = projectMap ?? (await this.gitLabProjects(worktrees, warn));
+    await mapIntegrationRequests(worktrees, async (worktree) => {
+      if (!worktree.branch) return;
+      const origin = worktree.codebase.repository.canonicalOrigin;
+      const project = projects.get(origin);
+      if (!project) return;
+      const lookupMatches =
+        worktree.pullRequestLookupOrigin?.toLowerCase() ===
+          origin.toLowerCase() &&
+        worktree.pullRequestLookupBranch === worktree.branch;
+      const pipelineReadinessPending =
+        worktree.gitLabMergeRequest?.detailedMergeStatus === "ci_still_running";
+      if (
+        lookupMatches &&
+        worktree.pullRequestLookupAt &&
+        now - worktree.pullRequestLookupAt.getTime() < retryAfterMs &&
+        !pipelineReadinessPending
+      ) {
+        return;
+      }
+      try {
+        const mergeRequest = await this.gitLabService!.mergeRequestForBranch(
+          project.id,
+          worktree.branch,
+          pipelineReadinessPending,
+        );
+        await this.storeGitLabMergeRequest(
+          worktree.id,
+          origin,
+          worktree.branch,
+          mergeRequest,
+        );
+        worktree.gitLabMergeRequest = mergeRequest;
+        worktree.pullRequest = null;
+        worktree.pullRequestLookupOrigin = origin;
+        worktree.pullRequestLookupBranch = worktree.branch;
+        worktree.pullRequestLookupAt = new Date();
+      } catch {
+        // Provider discovery is optional in overview responses.
+        warn?.(worktree, "Could not refresh GitLab merge requests. Try again.");
+      }
+    });
   }
 
   private async hydratePullRequestPipelines(
@@ -1216,49 +1253,280 @@ export class WorktreesService {
 
   private async hydrateGitLabPipelines(
     worktrees: PullRequestTarget[],
+    warn?: EnrichmentReporter,
+    force = true,
+    projectMap?: Map<string, { id: string } | null>,
   ): Promise<void> {
     if (!this.gitLabService) return;
-    await Promise.all(
-      worktrees.map(async (worktree) => {
-        if (!worktree.headSha) return;
+    const projects = projectMap ?? (await this.gitLabProjects(worktrees, warn));
+    const groups = new Map<
+      string,
+      { projectId: string; headSha: string; targets: PullRequestTarget[] }
+    >();
+    for (const worktree of worktrees) {
+      const project = projects.get(
+        worktree.codebase.repository.canonicalOrigin,
+      );
+      if (!project || !worktree.headSha) continue;
+      const key = `${project.id}\0${worktree.headSha}`;
+      const group = groups.get(key) ?? {
+        projectId: project.id,
+        headSha: worktree.headSha,
+        targets: [],
+      };
+      group.targets.push(worktree);
+      groups.set(key, group);
+    }
+    await mapIntegrationRequests(
+      [...groups.values()],
+      async ({ projectId, headSha, targets }) => {
         try {
-          const project = await this.gitLabService!.projectForCanonicalOrigin(
-            worktree.codebase.repository.canonicalOrigin,
-          );
-          if (!project) return;
           const pipelines = await this.gitLabService!.pipelinesForCommit(
-            project.id,
-            worktree.headSha,
+            projectId,
+            headSha,
+            {
+              force,
+              onWarning: (message) =>
+                targets.forEach((target) => warn?.(target, message)),
+            },
           );
-          worktree.gitLabPipelines = pipelines.map((pipeline) => ({
-            ...pipeline,
-            worktreeId: worktree.id,
-            worktreeHighlightColor: worktree.highlightColor,
-          }));
+          for (const worktree of targets)
+            worktree.gitLabPipelines = pipelines.map((pipeline) => ({
+              ...pipeline,
+              worktreeId: worktree.id,
+              worktreeHighlightColor: worktree.highlightColor,
+            }));
         } catch {
           // GitLab pipeline metadata is optional in worktree responses.
+          for (const target of targets)
+            warn?.(
+              target,
+              "Could not refresh GitLab pipelines; saved status is still available. Try again.",
+            );
         }
-      }),
+      },
     );
   }
 
   private async hydrateGitLabMergeRequestSummaries(
     worktrees: PullRequestTarget[],
+    warn?: EnrichmentReporter,
   ): Promise<void> {
     if (!this.gitLabService) return;
-    await Promise.all(
-      worktrees.map(async (worktree) => {
-        if (!worktree.gitLabMergeRequest) return;
+    await mapIntegrationRequests(worktrees, async (worktree) => {
+      if (!worktree.gitLabMergeRequest) return;
+      try {
+        worktree.gitLabMergeRequest =
+          await this.gitLabService!.mergeRequestSummary(
+            worktree.gitLabMergeRequest,
+            warn
+              ? (message, preserveFields) =>
+                  warn(worktree, message, preserveFields)
+              : undefined,
+          );
+      } catch {
+        // Approval and discussion summaries are optional in worktree responses.
+        warn?.(
+          worktree,
+          "Could not refresh GitLab approval and discussion details. Try again.",
+          ["APPROVAL_STATE", "UNRESOLVED_DISCUSSIONS_COUNT"],
+        );
+      }
+    });
+  }
+
+  private async gitLabProjects(
+    worktrees: PullRequestTarget[],
+    warn?: EnrichmentReporter,
+  ) {
+    const origins = [
+      ...new Set(
+        worktrees.map((item) => item.codebase.repository.canonicalOrigin),
+      ),
+    ];
+    return new Map(
+      await mapIntegrationRequests(origins, async (origin) => {
         try {
-          worktree.gitLabMergeRequest =
-            await this.gitLabService!.mergeRequestSummary(
-              worktree.gitLabMergeRequest,
-            );
+          return [
+            origin,
+            await this.gitLabService!.projectForCanonicalOrigin(origin),
+          ] as const;
         } catch {
-          // Approval and discussion summaries are optional in worktree responses.
+          for (const target of worktrees)
+            if (target.codebase.repository.canonicalOrigin === origin)
+              warn?.(
+                target,
+                "Could not read GitLab project settings. Check the GitLab connection and try again.",
+              );
+          return [origin, null] as const;
         }
       }),
     );
+  }
+
+  private async hydrateJira(
+    views: Array<ReturnType<WorktreesService["view"]>>,
+    savedOnly: boolean,
+    warn?: EnrichmentReporter,
+  ) {
+    const keys = [
+      ...new Set(
+        views.flatMap((item) => (item.ticketKey ? [item.ticketKey] : [])),
+      ),
+    ];
+    const tickets = savedOnly
+      ? await this.jiraService.storedSummaries(keys)
+      : new Map(
+          await mapIntegrationRequests(keys, async (key) => {
+            try {
+              return [key, await this.jiraService.summary(key, true)] as const;
+            } catch {
+              for (const view of views)
+                if (view.ticketKey === key)
+                  warn?.(
+                    view,
+                    "Could not refresh this Jira summary. Try again.",
+                  );
+              return [key, null] as const;
+            }
+          }),
+        );
+    for (const view of views) {
+      const ticket = view.ticketKey ? tickets.get(view.ticketKey) : null;
+      view.ticketTitle = ticket?.summary ?? null;
+      view.ticketStatus = ticket?.status ?? null;
+    }
+  }
+
+  private async hydrateStoredMetadata(
+    views: Array<ReturnType<WorktreesService["view"]>>,
+  ) {
+    await Promise.all([
+      this.hydratePullRequestPipelines(views),
+      this.hydrateJira(views, true),
+      (async () => {
+        if (!this.gitLabService) return;
+        const projects = await this.gitLabProjects(views);
+        const keys = new Map<string, { projectId: string; headSha: string }>();
+        for (const view of views) {
+          const project = projects.get(
+            view.codebase.repository.canonicalOrigin,
+          );
+          if (project && view.headSha)
+            keys.set(`${project.id}\0${view.headSha}`, {
+              projectId: project.id,
+              headSha: view.headSha,
+            });
+        }
+        const stored = await this.gitLabService.storedPipelines([
+          ...keys.values(),
+        ]);
+        for (const view of views) {
+          const project = projects.get(
+            view.codebase.repository.canonicalOrigin,
+          );
+          view.gitLabPipelines = (
+            stored.get(`${project?.id}\0${view.headSha}`) ?? []
+          ).map((pipeline) => ({
+            ...pipeline,
+            worktreeId: view.id,
+            worktreeHighlightColor: view.highlightColor,
+          }));
+        }
+      })(),
+    ]);
+  }
+
+  async enrichment({
+    appId,
+    worktreeId,
+    kind,
+    force = false,
+  }: {
+    appId?: string | null;
+    worktreeId?: string | null;
+    kind: WorktreeEnrichmentKind;
+    force?: boolean;
+  }) {
+    const started = performance.now();
+    const prisma = await getPrismaClient();
+    const [rows, settings] = await Promise.all([
+      prisma.worktree.findMany({
+        where: {
+          missingAt: null,
+          codebase: { repository: repositoryScope(appId, worktreeId) },
+        },
+        include: worktreeInclude,
+      }),
+      prisma.codebaseSettings.findUnique({ where: { id: "default" } }),
+    ]);
+    const views = rows.map((row) =>
+      this.view(row, settings?.defaultJiraBranchRegex ?? ""),
+    );
+    let targets =
+      kind === "GITHUB"
+        ? views.filter((view) =>
+            /^github\.com\//i.test(view.codebase.repository.canonicalOrigin),
+          )
+        : views;
+    const warnings: EnrichmentWarning[] = [];
+    const failedIds = new Set<string>();
+    const warn: EnrichmentReporter = (
+      worktree,
+      message,
+      preserveFields = [],
+    ) => {
+      warnings.push({ worktreeId: worktree.id, message, preserveFields });
+    };
+    const fail: EnrichmentReporter = (worktree, message) => {
+      failedIds.add(worktree.id);
+      warn(worktree, message);
+    };
+    try {
+      const projects =
+        kind.startsWith("GITLAB") && this.gitLabService
+          ? await this.gitLabProjects(targets, fail)
+          : new Map<string, { id: string } | null>();
+      if (kind.startsWith("GITLAB"))
+        targets = targets.filter((view) =>
+          projects.get(view.codebase.repository.canonicalOrigin),
+        );
+      switch (kind) {
+        case "GITHUB":
+          await this.synchronizePullRequests(targets, fail);
+          await this.hydratePullRequestPipelines(targets);
+          break;
+        case "GITLAB_MERGE_REQUESTS":
+          await this.synchronizeGitLabMergeRequests(targets, fail, projects);
+          // Optional summary failures must not discard a successful discovery.
+          await this.hydrateGitLabMergeRequestSummaries(targets, warn);
+          break;
+        case "GITLAB_PIPELINES":
+          await this.hydrateGitLabPipelines(targets, fail, force, projects);
+          break;
+        case "JIRA":
+          await this.hydrateJira(targets, false, fail);
+          break;
+        default:
+          throw new Error("Unknown worktree enrichment kind");
+      }
+    } catch {
+      for (const target of targets)
+        fail(target, "Could not refresh optional metadata. Try again.");
+    }
+    return {
+      updates: targets
+        .filter((view) => !failedIds.has(view.id))
+        .map((view) => ({
+          worktree: {
+            ...view,
+            sourceControlRequest: view.gitLabMergeRequest ?? view.pullRequest,
+          },
+          canonicalOrigin: view.codebase.repository.canonicalOrigin,
+        })),
+      durationMs: performance.now() - started,
+      warnings,
+    };
   }
 
   private async hydratedView(worktree: WorktreeRecord, defaultRegex = "") {
@@ -1366,15 +1634,15 @@ export class WorktreesService {
     return matches.length;
   }
 
-  async overview(appId?: string | null, worktreeId?: string | null) {
+  async overview(
+    appId?: string | null,
+    worktreeId?: string | null,
+    savedOnly = false,
+  ) {
+    const started = performance.now();
     await this.cleanupExpired();
     const prisma = await getPrismaClient();
-    const repositoryScope = {
-      ...(appId ? { apps: { some: { appId } } } : {}),
-      ...(worktreeId
-        ? { codebases: { some: { worktrees: { some: { id: worktreeId } } } } }
-        : {}),
-    };
+    const scope = repositoryScope(appId, worktreeId);
     const [
       worktrees,
       tags,
@@ -1389,7 +1657,7 @@ export class WorktreesService {
           ...(appId || worktreeId
             ? {
                 codebase: {
-                  repository: repositoryScope,
+                  repository: scope,
                 },
               }
             : {}),
@@ -1412,7 +1680,7 @@ export class WorktreesService {
           ...(appId || worktreeId
             ? {
                 codebase: {
-                  repository: repositoryScope,
+                  repository: scope,
                 },
               }
             : {}),
@@ -1473,41 +1741,20 @@ export class WorktreesService {
       }),
     );
 
-    await this.synchronizePullRequests(views);
-    await this.synchronizeGitLabMergeRequests(views);
-    await Promise.all([
-      this.hydratePullRequestPipelines(views),
-      this.hydrateGitLabPipelines(views),
-      this.hydrateGitLabMergeRequestSummaries(views),
-    ]);
-    for (const item of views) {
+    if (savedOnly) {
+      await this.hydrateStoredMetadata(views);
+    } else {
+      await this.synchronizePullRequests(views);
+      await this.synchronizeGitLabMergeRequests(views);
+      await Promise.all([
+        this.hydratePullRequestPipelines(views),
+        this.hydrateGitLabPipelines(views),
+        this.hydrateGitLabMergeRequestSummaries(views),
+        this.hydrateJira(views, false),
+      ]);
+    }
+    for (const item of views)
       item.sourceControlRequest = item.gitLabMergeRequest ?? item.pullRequest;
-    }
-    const keys = [
-      ...new Set(views.map((item) => item.ticketKey).filter(Boolean)),
-    ] as string[];
-    const tickets = new Map<string, { title: string; status: string | null }>();
-    await Promise.all(
-      keys.map(async (key) => {
-        try {
-          const ticket = await this.jiraService.summary(key, true);
-          tickets.set(key, {
-            title: ticket.summary,
-            status: ticket.status,
-          });
-        } catch {
-          // Jira is optional on this page.
-        }
-      }),
-    );
-    for (const item of views) {
-      item.ticketTitle = item.ticketKey
-        ? (tickets.get(item.ticketKey)?.title ?? null)
-        : null;
-      item.ticketStatus = item.ticketKey
-        ? (tickets.get(item.ticketKey)?.status ?? null)
-        : null;
-    }
 
     type View = (typeof views)[number];
     type CodebaseGroup = {
@@ -1576,6 +1823,7 @@ export class WorktreesService {
       settings,
       hiddenCount,
       activeMoves: scopedActiveMoves,
+      durationMs: performance.now() - started,
     };
   }
 
@@ -3579,6 +3827,9 @@ export class WorktreesService {
   }
 
   private publish(worktreeId: string | null, codebaseId: string | null) {
+    agentEventBus.publish(SIDEBAR_STATUS_CHANGED_TOPIC, {
+      sidebarStatusChanged: true,
+    });
     agentEventBus.publish(WORKTREE_CHANGED_TOPIC, {
       worktreeOverviewChanged: { worktreeId, codebaseId },
     });

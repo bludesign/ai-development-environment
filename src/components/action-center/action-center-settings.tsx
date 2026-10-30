@@ -17,11 +17,14 @@ import { Button } from "@/components/ui/button";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 
 const FIELDS =
-  "maximumRequestAgeDays showMyRequestsInSidebar showReviewRequestsInSidebar";
+  "maximumRequestAgeDays showMyRequestsInSidebar showReviewRequestsInSidebar confirmClearAllNotifications showIntegrationCountsInSidebar showWorktreeCountsInSidebar";
 type Settings = {
   maximumRequestAgeDays: number;
   showMyRequestsInSidebar: boolean;
   showReviewRequestsInSidebar: boolean;
+  confirmClearAllNotifications: boolean;
+  showIntegrationCountsInSidebar: boolean;
+  showWorktreeCountsInSidebar: boolean;
 };
 export function ActionCenterSettingsCard() {
   const t = useTranslations("actionCenter");
@@ -89,7 +92,13 @@ export function ActionCenterSettingsCard() {
           <p className="text-xs text-muted-foreground">{t("maximumAgeHelp")}</p>
         </div>
         {(
-          ["showMyRequestsInSidebar", "showReviewRequestsInSidebar"] as const
+          [
+            "showMyRequestsInSidebar",
+            "showReviewRequestsInSidebar",
+            "confirmClearAllNotifications",
+            "showIntegrationCountsInSidebar",
+            "showWorktreeCountsInSidebar",
+          ] as const
         ).map((key) => (
           <div className="flex items-center gap-2" key={key}>
             <Checkbox
@@ -103,7 +112,14 @@ export function ActionCenterSettingsCard() {
                 )
               }
             />
-            <Label htmlFor={`${id}-${key}`}>{t(key)}</Label>
+            <div className="space-y-1">
+              <Label htmlFor={`${id}-${key}`}>{t(key)}</Label>
+              {key === "showIntegrationCountsInSidebar" && (
+                <p className="text-xs text-muted-foreground">
+                  {t("integrationCountsHelp")}
+                </p>
+              )}
+            </div>
           </div>
         ))}
         <Button

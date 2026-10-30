@@ -907,21 +907,77 @@ export function physicalDestinations(
     if (!raw || typeof raw !== "object" || Array.isArray(raw)) return [];
     const id = nestedString(raw, [
       ["identifier"],
+      ["properties", "hardware", "udid"],
       ["hardwareProperties", "udid"],
       ["deviceProperties", "identifier"],
     ]);
     const platform = nestedString(raw, [
+      ["properties", "hardware", "platform"],
       ["hardwareProperties", "platform"],
       ["deviceProperties", "osType"],
     ]);
-    if (!id || (platform && !platform.toLowerCase().includes("ios"))) return [];
-    const state = nestedString(raw, [
+    if (
+      !id ||
+      (platform && !["ios", "ipados"].includes(platform.trim().toLowerCase()))
+    )
+      return [];
+    const reality = nestedString(raw, [
+      ["properties", "hardware", "reality"],
+      ["hardwareProperties", "reality"],
+    ])
+      ?.trim()
+      .toLowerCase();
+    const transport = nestedString(raw, [
+      ["properties", "connection", "transportType"],
+      ["connectionProperties", "transportType"],
+    ])
+      ?.trim()
+      .toLowerCase();
+    const visibility = nestedString(raw, [
+      ["visibilityClass"],
+      ["properties", "state", "visibilityClass"],
+    ])
+      ?.trim()
+      .toLowerCase();
+    if (
+      reality === "simulated" ||
+      (!reality && (visibility === "simulators" || transport === "samemachine"))
+    )
+      return [];
+    const connectionState = nestedString(raw, [
+      ["properties", "connection", "state"],
       ["connectionProperties", "tunnelState"],
       ["deviceProperties", "connectionState"],
-    ]);
-    const available = !(
-      state && /(disconnected|unavailable|not.?connected|offline)/i.test(state)
-    );
+    ])
+      ?.trim()
+      .toLowerCase();
+    const paired =
+      nestedString(raw, [
+        ["properties", "connection", "pairingState"],
+        ["connectionProperties", "pairingState"],
+      ])
+        ?.trim()
+        .toLowerCase() === "paired";
+    // An idle device can have a detected transport without an active tunnel.
+    const connected = connectionState === "connected";
+    const available =
+      connected ||
+      (paired && (transport === "wired" || transport === "localnetwork"));
+    const state = connected
+      ? "Connected"
+      : available
+        ? "Available (paired)"
+        : connectionState &&
+            [
+              "disconnected",
+              "unavailable",
+              "offline",
+              "notconnected",
+              "not_connected",
+              "not connected",
+            ].includes(connectionState)
+          ? "Unavailable"
+          : "Unknown";
     if (!available && !includeUnavailable) {
       return [];
     }
@@ -929,9 +985,16 @@ export function physicalDestinations(
       {
         type: "PHYSICAL_DEVICE",
         id,
-        name: nestedString(raw, [["deviceProperties", "name"], ["name"]]) ?? id,
+        name:
+          nestedString(raw, [
+            ["properties", "state", "name"],
+            ["deviceProperties", "name"],
+            ["name"],
+          ]) ?? id,
         platform: "iOS",
         osVersion: nestedString(raw, [
+          ["properties", "software", "osVersionNumber", "stringValue"],
+          ["properties", "software", "osVersionNumber"],
           ["deviceProperties", "osVersionNumber"],
           ["deviceProperties", "osVersion"],
         ]),
@@ -991,7 +1054,7 @@ export const inspectBuildDestinations: AgentJobHandler = async (
       signal,
       folder,
     ),
-    listPhysicalDevices(timeoutMs, signal),
+    listPhysicalDevices(timeoutMs, signal, true),
   ]);
   return {
     ...successfulProcess,

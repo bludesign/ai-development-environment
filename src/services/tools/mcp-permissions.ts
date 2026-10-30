@@ -602,10 +602,19 @@ export function requiredMcpScopes(
   return MCP_PERMISSION_SCOPES[permission];
 }
 
-export function mcpScopeMetadata(name: string, external = false) {
+export type McpSecurityScheme = "oauth2" | "noauth";
+
+export function mcpScopeMetadata(
+  name: string,
+  external = false,
+  authentication: McpSecurityScheme = "oauth2",
+) {
   const scopes = [...requiredMcpScopes(name, external)];
   return {
     "aide/requiredScopes": scopes,
-    securitySchemes: [{ type: "oauth2", scopes }],
+    securitySchemes:
+      authentication === "noauth"
+        ? [{ type: "noauth" as const }]
+        : [{ type: "oauth2" as const, scopes }],
   };
 }

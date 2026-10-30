@@ -1,4 +1,35 @@
-import type { BuildRecord } from "./types";
+import { formatEnumLabel } from "@/lib/enum-label";
+
+import type { BuildDestination, BuildRecord } from "./types";
+
+export function buildDestinationState(
+  destination: BuildDestination,
+  translate: (
+    key:
+      | "connected"
+      | "availablePaired"
+      | "unknownDeviceState"
+      | "available"
+      | "unavailable",
+  ) => string,
+): string {
+  switch (destination.state?.trim().toLowerCase()) {
+    case "connected":
+      return translate("connected");
+    case "available (paired)":
+      return translate("availablePaired");
+    case "unknown":
+      return translate("unknownDeviceState");
+    case "unavailable":
+      return translate("unavailable");
+    default:
+      return destination.state
+        ? formatEnumLabel(destination.state)
+        : translate(
+            destination.available === false ? "unavailable" : "available",
+          );
+  }
+}
 
 export function buildStatusVariant(status: BuildRecord["status"]) {
   return status === "FAILED"

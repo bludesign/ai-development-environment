@@ -6,6 +6,8 @@ import {
   GitBranch,
   GitMerge,
   GitPullRequest,
+  FolderGit2,
+  GitFork,
   Hammer,
   ListTodo,
   MessagesSquare,
@@ -47,6 +49,10 @@ import { createRefreshCoalescer } from "@/lib/refresh-coalescer";
 import { diskStatusColor, formatDiskBytes, VolumeBar } from "./volume-bar";
 
 type SidebarStatusData = {
+  settings: {
+    showIntegrationCountsInSidebar: boolean;
+    showWorktreeCountsInSidebar: boolean;
+  };
   usageToday: { totalCost: number | null; collectedAt: string | null };
   activity: {
     plans: number;
@@ -58,6 +64,8 @@ type SidebarStatusData = {
     actions: number | null;
     mergeRequests: number | null;
     pipelines: number | null;
+    dirtyWorktrees: number | null;
+    offMainWorktrees: number | null;
   };
   diskSummary: {
     agents: Array<
@@ -138,8 +146,9 @@ export function SidebarStatusFooter() {
         }>(
           `query SidebarStatus {
           sidebarStatus {
+            settings { showIntegrationCountsInSidebar showWorktreeCountsInSidebar }
             usageToday { totalCost collectedAt }
-            activity { plans sessions builds workflows commands pullRequests actions mergeRequests pipelines }
+            activity { plans sessions builds workflows commands pullRequests actions mergeRequests pipelines dirtyWorktrees offMainWorktrees }
             diskSummary { agents { agent { id name } enabled status volumes { id totalBytes freeBytes roles paths status effectiveThresholdBytes monitored } } }
           }
           sourceControlIntegrationState {
@@ -283,7 +292,8 @@ export function SidebarStatusFooter() {
       icon: Terminal,
       count: status?.activity.commands ?? 0,
     },
-    ...(integrations?.github.configured
+    ...(status?.settings?.showIntegrationCountsInSidebar !== false &&
+    integrations?.github.configured
       ? ([
           {
             key: "pullReqs",
@@ -299,7 +309,8 @@ export function SidebarStatusFooter() {
           },
         ] as const)
       : []),
-    ...(integrations?.gitlab.configured
+    ...(status?.settings?.showIntegrationCountsInSidebar !== false &&
+    integrations?.gitlab.configured
       ? ([
           {
             key: "mergeReqs",
@@ -312,6 +323,22 @@ export function SidebarStatusFooter() {
             href: "/gitlab/pipelines",
             icon: GitBranch,
             count: status?.activity.pipelines,
+          },
+        ] as const)
+      : []),
+    ...(status?.settings?.showWorktreeCountsInSidebar !== false
+      ? ([
+          {
+            key: "dirtyWorktrees",
+            href: "/dashboard/worktrees?changes=dirty&branches=all",
+            icon: FolderGit2,
+            count: status?.activity.dirtyWorktrees,
+          },
+          {
+            key: "offMainWorktrees",
+            href: "/dashboard/worktrees?changes=all&branches=non-default",
+            icon: GitFork,
+            count: status?.activity.offMainWorktrees,
           },
         ] as const)
       : []),

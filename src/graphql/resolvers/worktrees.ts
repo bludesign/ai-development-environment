@@ -157,11 +157,24 @@ export const createWorktreeResolvers = (
       {
         appId,
         worktreeId,
-      }: { appId?: string | null; worktreeId?: string | null },
+        savedOnly,
+      }: {
+        appId?: string | null;
+        worktreeId?: string | null;
+        savedOnly?: boolean;
+      },
       context: GraphQLContext,
     ) => {
       requireControlPlane(context);
-      return service.overview(appId, worktreeId);
+      return service.overview(appId, worktreeId, savedOnly);
+    },
+    worktreeEnrichment: (
+      _root: unknown,
+      args: Parameters<WorktreesService["enrichment"]>[0],
+      context: GraphQLContext,
+    ) => {
+      requireControlPlane(context);
+      return service.enrichment(args);
     },
     hiddenWorktrees: (
       _root: unknown,

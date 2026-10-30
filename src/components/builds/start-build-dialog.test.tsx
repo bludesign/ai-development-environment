@@ -669,6 +669,164 @@ describe("StartBuildDialog", () => {
     expect(device.textContent).toContain("iPhone 17 Pro");
   });
 
+  test("shows idle paired physical devices as selectable and unavailable devices as disabled", async () => {
+    const idle: BuildDestination = {
+      type: "PHYSICAL_DEVICE",
+      id: "IDLE-DEVICE",
+      name: "Idle iPhone",
+      platform: "iOS",
+      osVersion: "27.0",
+      state: "Available (paired)",
+      available: true,
+    };
+    const offline = {
+      ...idle,
+      id: "OFFLINE-DEVICE",
+      name: "Offline iPhone",
+      state: "Unavailable",
+      available: false,
+    };
+    const unknown = {
+      ...offline,
+      id: "UNKNOWN-DEVICE",
+      name: "Unknown iPhone",
+      state: "Unknown",
+    };
+    const defaultImplementation = request.getMockImplementation()!;
+    request.mockImplementation(async (query, variables) => {
+      if (String(query).includes("mutation InspectStartBuildDestinations")) {
+        return { inspectBuildDestinations: [offline, unknown, idle] } as never;
+      }
+      return defaultImplementation(query, variables);
+    });
+    render(
+      <StartBuildButton codebaseId="codebase-1" worktreeId="worktree-1" />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Build" }));
+    const device = await screen.findByRole("combobox", { name: "Device" });
+    await waitFor(() => expect(device.getAttribute("aria-busy")).toBe("false"));
+    fireEvent.click(screen.getByRole("tab", { name: "Physical Device" }));
+    fireEvent.pointerDown(device, {
+      button: 0,
+      ctrlKey: false,
+      pointerType: "mouse",
+    });
+    expect(
+      (
+        await screen.findByRole("option", {
+          name: /Offline iPhone.*Unavailable/,
+        })
+      ).getAttribute("aria-disabled"),
+    ).toBe("true");
+    expect(
+      screen
+        .getByRole("option", { name: /Unknown iPhone.*Unknown/ })
+        .getAttribute("aria-disabled"),
+    ).toBe("true");
+    const option = screen.getByRole("option", {
+      name: /Idle iPhone.*Available \(paired\)/,
+    });
+    expect(option.getAttribute("aria-disabled")).not.toBe("true");
+    fireEvent.click(option);
+    fireEvent.click(screen.getByRole("button", { name: "Start Build" }));
+    await waitFor(() =>
+      expect(request).toHaveBeenCalledWith(
+        expect.stringContaining("mutation StartIosBuild"),
+        { input: expect.objectContaining({ destination: idle }) },
+      ),
+    );
+  });
+
+  test("skips unavailable defaults and clears a device that becomes unavailable during refresh", async () => {
+    const idle: BuildDestination = {
+      type: "PHYSICAL_DEVICE",
+      id: "IDLE-DEVICE",
+      name: "Idle iPhone",
+      platform: "iOS",
+      osVersion: "27.0",
+      state: "Available (paired)",
+      available: true,
+    };
+    const refresh = Promise.withResolvers<DestinationResponse>();
+    const defaultImplementation = request.getMockImplementation()!;
+    let refreshCount = 0;
+    request.mockImplementation(async (query, variables) => {
+      const operation = String(query);
+      if (operation.includes("query StartBuildProject")) {
+        const data = (await defaultImplementation(query, variables)) as {
+          iosAppProject: IosAppProject;
+        };
+        data.iosAppProject.configurations[0]!.defaultAction = "TEST";
+        return data as never;
+      }
+      if (operation.includes("mutation InspectStartBuildDestinations")) {
+        refreshCount += 1;
+        if (refreshCount > 1) return (await refresh.promise) as never;
+        return {
+          inspectBuildDestinations: [
+            {
+              ...idle,
+              id: "OFFLINE-DEVICE",
+              name: "Offline iPhone",
+              state: "Unavailable",
+              available: false,
+            },
+            idle,
+          ],
+        } as never;
+      }
+      return defaultImplementation(query, variables);
+    });
+    render(
+      <StartBuildButton codebaseId="codebase-1" worktreeId="worktree-1" />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Build" }));
+    await waitFor(() =>
+      expect(
+        screen.getByRole("combobox", { name: "Device" }).textContent,
+      ).toContain("Idle iPhone"),
+    );
+    expect(
+      screen
+        .getByRole("button", { name: "Start Build" })
+        .hasAttribute("disabled"),
+    ).toBe(false);
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    fireEvent.click(screen.getByRole("button", { name: "Build" }));
+    await screen.findByRole("status", { name: "Loading devices…" });
+    const device = screen.getByRole("combobox", { name: "Device" });
+    expect(device.textContent).toContain("Idle iPhone");
+    await act(async () => {
+      refresh.resolve({
+        inspectBuildDestinations: [
+          { ...idle, state: "Unavailable", available: false },
+        ],
+      });
+    });
+    expect(device.textContent).not.toContain("Idle iPhone");
+    expect(
+      screen
+        .getByRole("button", { name: "Start Build" })
+        .hasAttribute("disabled"),
+    ).toBe(true);
+    fireEvent.click(screen.getByRole("button", { name: "Start Build" }));
+    expect(
+      request.mock.calls.some(([query]) =>
+        String(query).includes("mutation StartIosBuild"),
+      ),
+    ).toBe(false);
+    fireEvent.pointerDown(device, {
+      button: 0,
+      ctrlKey: false,
+      pointerType: "mouse",
+    });
+    expect(
+      (
+        await screen.findByRole("option", { name: /Idle iPhone.*Unavailable/ })
+      ).getAttribute("aria-disabled"),
+    ).toBe("true");
+  });
+
   test("loads prior builds only when Test Without Building is selected", async () => {
     render(
       <StartBuildButton codebaseId="codebase-1" worktreeId="worktree-1" />,

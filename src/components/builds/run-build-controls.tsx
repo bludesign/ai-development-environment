@@ -15,7 +15,7 @@ import { Input } from "@/components/ui/input";
 import { Spinner } from "@/components/ui/spinner";
 import { createClientId } from "@/lib/browser-utils";
 import { controlPlaneRequest } from "@/lib/control-plane-client";
-import { formatEnumLabel } from "@/lib/enum-label";
+import { buildDestinationState } from "./build-format";
 
 import type { BuildDestination, BuildRecord, BuildRunAgent } from "./types";
 
@@ -81,11 +81,7 @@ export function RunBuildControls({
     if (!query) return destinations;
 
     return destinations.filter((destination) => {
-      const state = destination.state
-        ? formatEnumLabel(destination.state)
-        : destination.available === false
-          ? t("unavailable")
-          : t("available");
+      const state = buildDestinationState(destination, t);
       return [
         destination.name,
         destination.platform,
@@ -353,11 +349,7 @@ export function RunBuildControls({
             const detail = [destination.platform, destination.osVersion]
               .filter(Boolean)
               .join(" ");
-            const state = destination.state
-              ? formatEnumLabel(destination.state)
-              : available
-                ? t("available")
-                : t("unavailable");
+            const state = buildDestinationState(destination, t);
             return (
               <div
                 className="flex items-stretch gap-1 rounded-md p-0.5 hover:bg-accent"

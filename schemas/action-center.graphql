@@ -217,6 +217,8 @@ extend type Mutation {
 }
 
 extend type Subscription {
+  "Emits the saved preferences whenever Action Center settings change."
+  actionCenterSettingsChanged: ActionCenterSettings!
   "Emits a change signal whenever action center changes."
   actionCenterChanged: Boolean!
 }
@@ -265,6 +267,12 @@ type ActionCenterRequest {
 
 "Shared Action Center request preferences."
 type ActionCenterSettings {
+  "Ask for confirmation before clearing all sidebar notifications."
+  confirmClearAllNotifications: Boolean!
+  "Show provider request and CI counters and enable their dedicated polling."
+  showIntegrationCountsInSidebar: Boolean!
+  "Show dirty worktree and non-default branch counters in the sidebar."
+  showWorktreeCountsInSidebar: Boolean!
   "Exclude requests created more than this many days ago; zero disables the cutoff."
   maximumRequestAgeDays: Int!
   "Include the connected account’s open requests in the sidebar."
@@ -275,6 +283,12 @@ type ActionCenterSettings {
 
 "Shared Action Center request preferences."
 input SaveActionCenterSettingsInput {
+  "Ask for confirmation before clearing all sidebar notifications."
+  confirmClearAllNotifications: Boolean
+  "Show provider request and CI counters and enable their dedicated polling."
+  showIntegrationCountsInSidebar: Boolean
+  "Show dirty worktree and non-default branch counters in the sidebar."
+  showWorktreeCountsInSidebar: Boolean
   "Exclude requests created more than this many days ago; zero disables the cutoff."
   maximumRequestAgeDays: Int!
   "Include the connected account’s open requests in the sidebar."
