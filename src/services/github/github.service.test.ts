@@ -622,6 +622,7 @@ function rawPullRequest(
     mergedAt?: string | null;
     pipeline?: string | null;
     reviewDecision?: string | null;
+    requestedReviewerCount?: number;
     state?: "OPEN" | "CLOSED" | "MERGED";
   } = {},
 ) {
@@ -681,6 +682,7 @@ function rawPullRequest(
         }
       : null,
     reviewDecision: options.reviewDecision ?? null,
+    reviewRequests: { totalCount: options.requestedReviewerCount ?? 0 },
     reviewThreads: {
       nodes: [{ isResolved: false }, { isResolved: true }],
       pageInfo: {
@@ -2239,6 +2241,7 @@ describe("GitHub service", () => {
                       hasMoreThreads: true,
                       pipeline: "SUCCESS",
                       reviewDecision: "APPROVED",
+                      requestedReviewerCount: 2,
                     }),
                   ]
                 : [
@@ -2246,6 +2249,7 @@ describe("GitHub service", () => {
                       hasMoreThreads: true,
                       pipeline: "SUCCESS",
                       reviewDecision: "APPROVED",
+                      requestedReviewerCount: 2,
                     }),
                     rawPullRequest("pull-request-2", "Maintenance"),
                   ],
@@ -2278,12 +2282,14 @@ describe("GitHub service", () => {
         },
       ],
       reviewDecision: "APPROVED",
+      requestedReviewerCount: 2,
       unresolvedReviewThreadCount: 2,
     });
     expect(result.items[1]).toMatchObject({
       jiraKey: null,
       pipelineStatus: "NONE",
       reviewDecision: "NONE",
+      requestedReviewerCount: 0,
     });
     const authorizationHeaders = fetchMock.mock.calls.map(
       ([, init]) => (init?.headers as Record<string, string>).authorization,
@@ -2974,6 +2980,9 @@ describe("GitHub service", () => {
         variables: Record<string, unknown>;
       };
       expect(body.query).toContain("query GitHubWorktreePullRequestStatuses");
+      expect(body.query).toMatch(
+        /reviewRequests\(first:\s*1\)\s*{\s*totalCount\s*}/,
+      );
       expect(body.query).toContain("nodes(ids: $ids)");
       expect(body.query).not.toContain("title");
       expect(body.variables).toEqual({ ids: ["pull-request-1"] });
@@ -2983,6 +2992,7 @@ describe("GitHub service", () => {
             rawPullRequest("pull-request-1", "ignored", {
               pipeline: "SUCCESS",
               reviewDecision: "APPROVED",
+              requestedReviewerCount: 1,
             }),
           ],
         },
@@ -3000,6 +3010,7 @@ describe("GitHub service", () => {
       id: "pull-request-1",
       pipelineStatus: "SUCCESS",
       reviewDecision: "APPROVED",
+      requestedReviewerCount: 1,
       unresolvedReviewThreadCount: 1,
       state: "OPEN",
     });

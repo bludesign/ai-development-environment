@@ -424,6 +424,7 @@ function storedPullRequestView(
     pipelineRevision: pipelineSnapshot?.revision ?? 0,
     reviewDecision:
       value.reviewDecision as GitHubPullRequestView["reviewDecision"],
+    requestedReviewerCount: value.requestedReviewerCount,
     unresolvedReviewThreadCount: value.unresolvedReviewThreadCount,
     state: value.state as GitHubPullRequestView["state"],
     isDraft: value.isDraft,
@@ -452,6 +453,7 @@ function pullRequestData(value: GitHubPullRequestView) {
     labelsJson: JSON.stringify(value.labels),
     jiraKey: value.jiraKey,
     reviewDecision: value.reviewDecision,
+    requestedReviewerCount: value.requestedReviewerCount ?? 0,
     unresolvedReviewThreadCount: value.unresolvedReviewThreadCount,
     state: value.state,
     isDraft: value.isDraft,
@@ -469,6 +471,7 @@ function pullRequestData(value: GitHubPullRequestView) {
 function pullRequestLiveData(value: GitHubPullRequestLiveStatus) {
   return {
     reviewDecision: value.reviewDecision,
+    requestedReviewerCount: value.requestedReviewerCount ?? 0,
     unresolvedReviewThreadCount: value.unresolvedReviewThreadCount,
     state: value.state,
     isDraft: value.isDraft,

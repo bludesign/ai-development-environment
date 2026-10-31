@@ -119,7 +119,13 @@ export function GitLabMergeReadinessBadge({
   return <Badge className={color}>{t(`readiness.${key}`)}</Badge>;
 }
 
-export function GitLabApprovalBadge({ state }: { state?: string | null }) {
+export function GitLabApprovalBadge({
+  state,
+  reviewRequested = false,
+}: {
+  state?: string | null;
+  reviewRequested?: boolean;
+}) {
   const t = useTranslations("gitlabPages");
   const known = [
     "APPROVED",
@@ -127,7 +133,12 @@ export function GitLabApprovalBadge({ state }: { state?: string | null }) {
     "CHANGES_REQUESTED",
     "NOT_REQUIRED",
   ].includes(state ?? "");
-  const key = known ? state : "UNKNOWN";
+  const key =
+    state === "REVIEW_REQUIRED" && reviewRequested
+      ? "REVIEW_REQUESTED"
+      : known
+        ? state
+        : "UNKNOWN";
   const color =
     state === "APPROVED"
       ? gitLabStatusColors.success

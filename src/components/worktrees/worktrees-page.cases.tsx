@@ -975,6 +975,92 @@ export function registerWorktreesPageTests(
     }
 
     if (section === "cards") {
+      test.each([
+        ["QUEUED", "Queued"],
+        ["PREPARING", "Preparing"],
+        ["RUNNING", "Running"],
+        ["SUCCEEDED", "Succeeded"],
+        ["FAILED", "Failed"],
+        ["CANCELLED", "Canceled"],
+      ] as const)(
+        "links the %s build badge to build details",
+        async (status, label) => {
+          const response = (await request("query Fixture")) as unknown as {
+            worktreeOverview: WorktreeOverview;
+          };
+          const build =
+            response.worktreeOverview.agents[0]!.codebases[0]!.worktrees[0]!
+              .latestBuild!;
+          build.status = status;
+          request.mockClear();
+
+          render(<WorktreesPage />);
+          const badge = await screen.findByRole("link", { name: label });
+          expect(badge.getAttribute("href")).toBe("/dashboard/builds/build-1");
+          fireEvent.click(badge, { button: 0 });
+          expect(navigation.push).not.toHaveBeenCalled();
+          const row = screen.getByText("Latest build").parentElement!;
+          expect(
+            within(row).getByRole("button", { name: "Build" }),
+          ).toBeDefined();
+        },
+      );
+
+      test.each(["GITHUB", "GITLAB"] as const)(
+        "distinguishes required and requested %s reviews",
+        async (provider) => {
+          const response = (await request("query Fixture")) as unknown as {
+            worktreeOverview: WorktreeOverview;
+          };
+          const worktree =
+            response.worktreeOverview.agents[0]!.codebases[0]!.worktrees[0]!;
+          const pullRequest = worktree.pullRequest!;
+          if (provider === "GITLAB") {
+            worktree.pullRequest = null;
+            worktree.sourceControlRequest = {
+              provider,
+              id: "merge-request-24",
+              number: 24,
+              title: "Change",
+              url: "https://gitlab.com/acme/repo/-/merge_requests/24",
+              isDraft: false,
+              headRefName: worktree.branch!,
+              headRefOid: "abc",
+              createdAt: new Date(0).toISOString(),
+              projectId: "project-1",
+              state: "OPENED",
+              approvalState: "REVIEW_REQUIRED",
+              reviewers: [],
+            };
+          } else {
+            pullRequest.reviewDecision = "REVIEW_REQUIRED";
+            pullRequest.requestedReviewerCount = 0;
+          }
+          request.mockClear();
+          render(<WorktreesPage />);
+          expect(await screen.findByText("Review required")).toBeDefined();
+
+          cleanup();
+          if (provider === "GITHUB") pullRequest.requestedReviewerCount = 1;
+          else worktree.sourceControlRequest!.reviewers = [{ id: "alice" }];
+          render(<WorktreesPage />);
+          expect(await screen.findByText("Review requested")).toBeDefined();
+          expect(screen.queryByText("Review required")).toBeNull();
+
+          for (const [state, label] of [
+            ["APPROVED", "Approved"],
+            ["CHANGES_REQUESTED", "Changes requested"],
+          ] as const) {
+            cleanup();
+            if (provider === "GITHUB") pullRequest.reviewDecision = state;
+            else worktree.sourceControlRequest!.approvalState = state;
+            render(<WorktreesPage />);
+            expect(await screen.findByText(label)).toBeDefined();
+            expect(screen.queryByText("Review requested")).toBeNull();
+          }
+        },
+      );
+
       test("renders the primary worktree card with Jira and tag metadata", async () => {
         render(<WorktreesPage />);
         expect(await screen.findByText("feature/AIDE-24")).toBeDefined();

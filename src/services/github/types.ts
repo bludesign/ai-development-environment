@@ -498,6 +498,7 @@ export type GitHubPullRequestView = {
   pipelines: GitHubPipelineView[];
   pipelineRevision?: number;
   reviewDecision: GitHubReviewDecision;
+  requestedReviewerCount?: number | null;
   unresolvedReviewThreadCount: number;
   state: GitHubPullRequestState;
   isDraft: boolean;
@@ -520,6 +521,7 @@ export type GitHubPullRequestLiveStatus = Pick<
   | "pipelines"
   | "pipelineRevision"
   | "reviewDecision"
+  | "requestedReviewerCount"
   | "unresolvedReviewThreadCount"
   | "state"
   | "isDraft"

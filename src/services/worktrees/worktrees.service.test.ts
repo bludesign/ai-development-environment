@@ -679,6 +679,54 @@ describe("WorktreesService", () => {
     );
   });
 
+  test("persists reviewer assignment changes even when the review decision stays required", async () => {
+    const current = githubPullRequest({
+      reviewDecision: "REVIEW_REQUIRED",
+      requestedReviewerCount: 0,
+    });
+    const updated = { ...current, requestedReviewerCount: 1 };
+    const updateMany = vi.fn().mockResolvedValue({ count: 1 });
+    getPrismaClient.mockResolvedValue({
+      worktreePullRequest: { updateMany },
+    });
+    const worktrees = new WorktreesService(
+      { registerCompletionHandler: vi.fn() } as unknown as AgentControlService,
+      {} as JiraService,
+      {
+        pullRequestLiveStatuses: vi
+          .fn()
+          .mockResolvedValue(new Map([["pull-request-1", updated]])),
+        effectiveCacheTtlSeconds: vi.fn().mockResolvedValue(300),
+      } as unknown as GitHubService,
+    );
+    const target = {
+      id: "worktree-1",
+      branch: "feature/AIDE-24",
+      pullRequestLookupOrigin: "github.com/acme/widgets",
+      pullRequestLookupBranch: "feature/AIDE-24",
+      pullRequestLookupAt: new Date(),
+      pullRequest: current,
+      codebase: {
+        repository: { canonicalOrigin: "github.com/acme/widgets" },
+      },
+    };
+
+    await (
+      worktrees as unknown as {
+        synchronizePullRequests(values: unknown[]): Promise<void>;
+      }
+    ).synchronizePullRequests([target]);
+
+    expect(target.pullRequest).toMatchObject({ requestedReviewerCount: 1 });
+    expect(updateMany).toHaveBeenCalledWith({
+      where: { worktreeId: "worktree-1" },
+      data: expect.objectContaining({
+        reviewDecision: "REVIEW_REQUIRED",
+        requestedReviewerCount: 1,
+      }),
+    });
+  });
+
   test("replaces a terminal pull request in the same synchronization cycle", async () => {
     const current = githubPullRequest();
     const replacement = githubPullRequest({

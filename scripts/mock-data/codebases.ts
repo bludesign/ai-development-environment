@@ -386,6 +386,7 @@ export async function seedCodebases(prisma: PrismaClient): Promise<void> {
         labelsJson: JSON.stringify(["enhancement", "frontend"]),
         jiraKey: ids.jira.issueKey,
         reviewDecision: "REVIEW_REQUIRED",
+        requestedReviewerCount: 2,
         unresolvedReviewThreadCount: 2,
         state: "OPEN",
         isDraft: false,
