@@ -1,5 +1,5 @@
 import { workflowQueueUsesWorktree } from "./workflow-queue-scope";
-import { workflowRunIdsForAgent } from "./workflow-run-agent-filter";
+import { workflowRunPageForAgent } from "./workflow-run-agent-filter";
 import { filterAsyncIterator } from "@/lib/filter-async-iterator";
 import "server-only";
 import { observeDirtyDuration } from "@/lib/workflows/dirty-duration";
@@ -1623,13 +1623,17 @@ export class WorkflowsService {
         : archive === "ARCHIVED"
           ? { archivedAt: { not: null } }
           : { archivedAt: null };
-    const agentWhere = input.agentId
-      ? { id: { in: await workflowRunIdsForAgent(prisma, input.agentId) } }
-      : {};
+    const agentPage = input.agentId
+      ? await workflowRunPageForAgent(prisma, {
+          ...input,
+          agentId: input.agentId,
+          first,
+        })
+      : null;
     const items = await prisma.workflowRun.findMany({
       where: {
         ...archiveWhere,
-        ...agentWhere,
+        ...(agentPage ? { id: { in: agentPage.ids } } : {}),
         ...(input.workflowId ? { workflowId: input.workflowId } : {}),
         ...(input.status ? { status: input.status.toUpperCase() } : {}),
         ...(Number.isInteger(searchNumber) && searchNumber > 0
@@ -1646,18 +1650,21 @@ export class WorkflowsService {
       },
       orderBy: [{ createdAt: "desc" }, { id: "desc" }],
       take: first + 1,
-      ...(input.after ? { cursor: { id: input.after }, skip: 1 } : {}),
+      ...(!agentPage && input.after
+        ? { cursor: { id: input.after }, skip: 1 }
+        : {}),
     });
     return {
       items: items.slice(0, first),
       nextCursor: items.length > first ? items[first - 1]!.id : null,
-      totalCount: await prisma.workflowRun.count({
-        where: {
-          ...archiveWhere,
-          ...agentWhere,
-          ...(input.workflowId ? { workflowId: input.workflowId } : {}),
-        },
-      }),
+      totalCount:
+        agentPage?.totalCount ??
+        (await prisma.workflowRun.count({
+          where: {
+            ...archiveWhere,
+            ...(input.workflowId ? { workflowId: input.workflowId } : {}),
+          },
+        })),
     };
   }
 
