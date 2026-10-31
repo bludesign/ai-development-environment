@@ -1228,6 +1228,8 @@ type GitHubPullRequestDetail {
 
 "Represents GitHub pull request merge options in the GraphQL API."
 type GitHubPullRequestMergeOptions {
+  "Targeting worktrees and the reviewed destination for post-merge base updates."
+  baseBranchUpdateOptions: MergeBaseBranchUpdateOptions
   "The merge method selected by default. May be null when the repository has no available merge method."
   defaultMethod: GitHubMergeMethod
   "Whether moving the linked Jira ticket to Done is selected by default."
@@ -1356,6 +1358,8 @@ input UpdateGitHubRepositoryInput {
 
 "Values used to merge a GitHub pull request."
 input MergeGitHubPullRequestInput {
+  "Selected targeting worktrees to update only after the merge is confirmed."
+  baseBranchUpdate: MergeBaseBranchUpdateInput
   "Identifier of the linked worktree to use for validation and post-merge actions."
   worktreeId: ID
   "Whether to move the linked Jira ticket to its configured Done status after merge."

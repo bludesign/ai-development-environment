@@ -29,7 +29,7 @@ import { SettingsHelpLink } from "@/components/settings-help-link";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent } from "@/components/ui/card";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Spinner } from "@/components/ui/spinner";
@@ -235,11 +235,11 @@ function JiraWebhookCard() {
 
   return (
     <Card>
-      <CardContent className="space-y-5">
+      <CardHeader>
         <div className="flex items-center justify-between gap-3">
           <div className="flex items-center gap-2">
             <Webhook className="size-5" />
-            <h2 className="font-semibold">{t("webhookTitle")}</h2>
+            <CardTitle>{t("webhookTitle")}</CardTitle>
           </div>
           <Badge
             className={
@@ -255,6 +255,8 @@ function JiraWebhookCard() {
                 : t("webhookNotConfigured")}
           </Badge>
         </div>
+      </CardHeader>
+      <CardContent className="space-y-5">
         <p className="text-sm text-muted-foreground">
           {t("webhookDescription")}
         </p>
@@ -627,11 +629,11 @@ export function JiraSettingsPage({
       ) : (
         <form onSubmit={save}>
           <Card>
-            <CardContent className="space-y-5">
+            <CardHeader>
               <div className="flex items-center justify-between gap-3">
                 <div className="flex items-center gap-2">
                   <KeyRound className="size-5" />
-                  <h2 className="font-semibold">{t("credentials")}</h2>
+                  <CardTitle>{t("credentials")}</CardTitle>
                 </div>
                 <Badge
                   className={
@@ -645,6 +647,8 @@ export function JiraSettingsPage({
                     : t("notConfigured")}
                 </Badge>
               </div>
+            </CardHeader>
+            <CardContent className="space-y-5">
               {error && (
                 <Alert variant="destructive">
                   <AlertDescription>{error}</AlertDescription>

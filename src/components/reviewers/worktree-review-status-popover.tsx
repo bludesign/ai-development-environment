@@ -83,6 +83,7 @@ export function WorktreeReviewStatusPopover({
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [revision, setRevision] = useState(0);
+  const [loadAll, setLoadAll] = useState(false);
   const requestChangedMessage = t("status.requestChanged");
 
   useEffect(() => {
@@ -92,10 +93,10 @@ export function WorktreeReviewStatusPopover({
       setLoading(true);
       setError(null);
       void controlPlaneRequest<{ worktreeReviewStatus: WorktreeReviewStatus }>(
-        `query WorktreeReviewStatus($worktreeId: ID!) {
-          worktreeReviewStatus(worktreeId: $worktreeId) { ${WORKTREE_REVIEW_STATUS_FIELDS} }
+        `query WorktreeReviewStatus($worktreeId: ID!, $all: Boolean!, $refresh: Boolean!) {
+          worktreeReviewStatus(worktreeId: $worktreeId, includeEligibleReviewers: $all, refresh: $refresh) { ${WORKTREE_REVIEW_STATUS_FIELDS} }
         }`,
-        { worktreeId },
+        { worktreeId, all: loadAll, refresh: revision > 0 },
         { signal: controller.signal },
       )
         .then((result) => {
@@ -121,7 +122,7 @@ export function WorktreeReviewStatusPopover({
       window.clearTimeout(timer);
       controller.abort();
     };
-  }, [open, worktreeId, requestId, revision, requestChangedMessage]);
+  }, [open, worktreeId, requestId, revision, loadAll, requestChangedMessage]);
 
   // Also hide a previous snapshot synchronously when the linked request changes.
   const details =
@@ -138,6 +139,8 @@ export function WorktreeReviewStatusPopover({
       open={open}
       onOpenChange={(value) => {
         if (value) {
+          setLoadAll(false);
+          setRevision(0);
           setData(null);
           setError(null);
           setLoading(true);
@@ -199,6 +202,21 @@ export function WorktreeReviewStatusPopover({
           <Alert variant="destructive">
             <AlertDescription>{error}</AlertDescription>
           </Alert>
+        )}
+        {!loadAll && (
+          <Button
+            variant="outline"
+            size="sm"
+            disabled={loading}
+            onClick={() => setLoadAll(true)}
+          >
+            {t("loadAllReviewers")}
+          </Button>
+        )}
+        {details?.directoryStale && (
+          <p className="text-xs text-amber-700 dark:text-amber-300">
+            {t("staleDirectory")}
+          </p>
         )}
         {details && (
           <>
@@ -304,32 +322,36 @@ export function WorktreeReviewStatusPopover({
                       })}
                     </p>
                   )}
-                  <p className="text-xs text-muted-foreground">
-                    {t("status.requestedCount", {
-                      count: new Set(rule.requestedReviewerIds).size,
-                    })}
-                  </p>
-                  <details className="text-xs">
-                    <summary className="cursor-pointer rounded-sm focus-visible:outline-ring">
-                      {t("status.members", {
-                        count: rule.eligibleReviewerIds.length,
+                  {details.membersLoaded !== false && (
+                    <p className="text-xs text-muted-foreground">
+                      {t("status.requestedCount", {
+                        count: new Set(rule.requestedReviewerIds).size,
                       })}
-                    </summary>
-                    <div className="pt-3">
-                      {rule.eligibleReviewerIds.length ? (
-                        <ReviewPeople
-                          ids={rule.eligibleReviewerIds}
-                          people={people}
-                          approvedIds={rule.approvedReviewerIds}
-                          requestedIds={rule.requestedReviewerIds}
-                        />
-                      ) : (
-                        <p className="text-muted-foreground">
-                          {t("status.noMembers")}
-                        </p>
-                      )}
-                    </div>
-                  </details>
+                    </p>
+                  )}
+                  {details.membersLoaded !== false && (
+                    <details className="text-xs">
+                      <summary className="cursor-pointer rounded-sm focus-visible:outline-ring">
+                        {t("status.members", {
+                          count: rule.eligibleReviewerIds.length,
+                        })}
+                      </summary>
+                      <div className="pt-3">
+                        {rule.eligibleReviewerIds.length ? (
+                          <ReviewPeople
+                            ids={rule.eligibleReviewerIds}
+                            people={people}
+                            approvedIds={rule.approvedReviewerIds}
+                            requestedIds={rule.requestedReviewerIds}
+                          />
+                        ) : (
+                          <p className="text-muted-foreground">
+                            {t("status.noMembers")}
+                          </p>
+                        )}
+                      </div>
+                    </details>
+                  )}
                 </section>
               ))}
             </section>

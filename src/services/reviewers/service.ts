@@ -12,6 +12,7 @@ import type {
   ReviewerPerson,
   ReviewerProviderAdapter,
   SaveReviewerPoolsInput,
+  ReviewerDiscoveryOptions,
 } from "./types";
 
 type StoredPool = Prisma.RepositoryReviewerPoolGetPayload<{
@@ -95,6 +96,7 @@ export function reviewerAssignmentView(
   worktreeId: string,
   discovery: ReviewerDiscovery,
   saved: StoredPool[],
+  includeAllReviewers = false,
 ) {
   const request = discovery.request;
   if (!request) throw new Error("Pull or merge request was not found");
@@ -152,6 +154,23 @@ export function reviewerAssignmentView(
       ];
     }
   }
+  if (includeAllReviewers) {
+    const general = discovery.pools.find((pool) => pool.kind === "GENERAL");
+    if (general)
+      discoveredRequirements = [
+        ...discoveredRequirements,
+        {
+          id: "all-eligible-reviewers",
+          name: "All eligible reviewers",
+          isRequired: false,
+          patterns: [],
+          poolKeys: [general.key],
+          eligibleReviewerIds: general.candidates.map((person) => person.id),
+          approvedReviewerIds,
+          requiredApprovals: 0,
+        },
+      ];
+  }
   const requirements = discoveredRequirements.map((rule) => {
     const eligible = new Set(
       rule.eligibleReviewerIds.filter((id) => id !== request.authorId),
@@ -162,7 +181,9 @@ export function reviewerAssignmentView(
     return {
       ...rule,
       eligibleReviewerIds: [...eligible],
-      candidateReviewerIds: [...preferred].filter(
+      candidateReviewerIds: [
+        ...(includeAllReviewers ? eligible : preferred),
+      ].filter(
         (id) =>
           eligible.has(id) &&
           people.has(id) &&
@@ -206,6 +227,8 @@ export function reviewerAssignmentView(
           ]
         : []),
     ],
+    membersLoaded: discovery.membersLoaded !== false,
+    directoryStale: discovery.directoryStale === true,
     discoveryComplete: discovery.discoveryComplete,
   };
 }
@@ -274,6 +297,8 @@ export function worktreeReviewStatusView(
     approvedReviewerIds,
     requirements,
     issues: discovery.issues,
+    membersLoaded: discovery.membersLoaded !== false,
+    directoryStale: discovery.directoryStale === true,
     discoveryComplete: discovery.discoveryComplete,
   };
 }
@@ -281,17 +306,19 @@ export function worktreeReviewStatusView(
 export function randomReviewerPreview(
   assignment: ReviewerAssignment,
   selectedReviewerIds: string[] = [],
+  removeReviewerIds: string[] = [],
   random = Math.random,
 ): ReviewerAssignment {
+  const removed = new Set(removeReviewerIds);
   const candidates = unique(
     assignment.requirements.flatMap((rule) => rule.candidateReviewerIds),
-  );
+  ).filter((id) => !removed.has(id));
   const allowed = new Set(candidates);
   const selected = new Set(selectedReviewerIds.filter((id) => allowed.has(id)));
   const covered = (rule: ReviewerAssignment["requirements"][number]) =>
     new Set([
       ...rule.approvedReviewerIds,
-      ...rule.requestedReviewerIds,
+      ...rule.requestedReviewerIds.filter((id) => !removed.has(id)),
       ...[...selected].filter((id) => rule.eligibleReviewerIds.includes(id)),
     ]).size;
   for (let index = candidates.length - 1; index > 0; index--) {
@@ -632,13 +659,19 @@ export class ReviewersService {
     return { worktree, repository, locator };
   }
 
-  private async discoverRequest(worktreeId: string, requirePreferences = true) {
+  private async discoverRequest(
+    worktreeId: string,
+    requirePreferences = true,
+    options: ReviewerDiscoveryOptions = {},
+    refresh = false,
+  ) {
     const context = await this.context(worktreeId, requirePreferences);
     const discovery = await this.providers.discover(
       context.repository,
       undefined,
       context.locator,
-      true,
+      refresh,
+      options,
     );
     const current = await this.context(worktreeId, requirePreferences);
     if (
@@ -657,16 +690,68 @@ export class ReviewersService {
     return { ...current, discovery };
   }
 
-  async worktreeReviewStatus(worktreeId: string) {
-    const { discovery } = await this.discoverRequest(worktreeId, false);
+  async worktreeReviewStatus(
+    worktreeId: string,
+    includeEligibleReviewers = true,
+    refresh = false,
+  ) {
+    const { discovery } = await this.discoverRequest(
+      worktreeId,
+      false,
+      includeEligibleReviewers ? {} : { people: [], summary: true },
+      refresh,
+    );
     return worktreeReviewStatusView(worktreeId, discovery);
   }
 
-  private async live(worktreeId: string) {
-    const current = await this.discoverRequest(worktreeId);
+  private async live(
+    worktreeId: string,
+    includeEligibleReviewers = true,
+    includeAllReviewers = false,
+    refresh = false,
+    additionalPeople: ReviewerPerson[] = [],
+  ) {
+    const context = await this.context(worktreeId);
+    const saved = await this.saved(context.repository.id);
+    const preferredPools = saved
+      .filter(
+        (pool) =>
+          pool.key.startsWith(`${pool.provider}:`) && pool.repositoryIdentity,
+      )
+      .map((pool) => ({
+        key: pool.key,
+        name: pool.name,
+        kind: pool.kind as "GENERAL" | "CODEOWNERS" | "APPROVAL_RULE",
+        candidates: pool.members.map(personFromMember),
+      }));
+    const preferredPeople = [
+      ...new Map(
+        [
+          ...preferredPools.flatMap((pool) => pool.candidates),
+          ...additionalPeople,
+        ].map((person) => [person.id, person]),
+      ).values(),
+    ];
+    const current = await this.discoverRequest(
+      worktreeId,
+      true,
+      includeEligibleReviewers
+        ? {}
+        : {
+            people: preferredPeople,
+            pools: preferredPools,
+            validateEligibility: refresh,
+          },
+      refresh,
+    );
     const { discovery } = current;
-    const saved = await this.saved(current.repository.id);
-    const assignment = reviewerAssignmentView(worktreeId, discovery, saved);
+    const latestSaved = await this.saved(current.repository.id);
+    const assignment = reviewerAssignmentView(
+      worktreeId,
+      discovery,
+      latestSaved,
+      includeAllReviewers,
+    );
     if (!assignment.requestOpen)
       throw new Error(
         "Pull or merge request is no longer open; refresh this worktree",
@@ -674,18 +759,35 @@ export class ReviewersService {
     return { ...current, assignment };
   }
 
-  async worktreeReviewerAssignment(worktreeId: string) {
-    return (await this.live(worktreeId)).assignment;
+  async worktreeReviewerAssignment(
+    worktreeId: string,
+    includeEligibleReviewers = true,
+    includeAllReviewers = false,
+    refresh = false,
+  ) {
+    return (
+      await this.live(
+        worktreeId,
+        includeEligibleReviewers,
+        includeAllReviewers,
+        refresh,
+      )
+    ).assignment;
   }
 
   async previewRandomWorktreeReviewers(
     worktreeId: string,
     requestId: string,
     selectedReviewerIds?: string[] | null,
+    removeReviewerIds?: string[] | null,
   ) {
-    const { assignment } = await this.live(worktreeId);
+    const { assignment } = await this.live(worktreeId, false);
     this.requireRequest(assignment, requestId);
-    return randomReviewerPreview(assignment, selectedReviewerIds ?? []);
+    return randomReviewerPreview(
+      assignment,
+      selectedReviewerIds ?? [],
+      removeReviewerIds ?? [],
+    );
   }
 
   private requireRequest(assignment: ReviewerAssignment, requestId: string) {
@@ -699,6 +801,8 @@ export class ReviewersService {
     worktreeId: string;
     requestId: string;
     reviewerIds: string[];
+    removeReviewerIds?: string[] | null;
+    includeAllReviewers?: boolean | null;
   }) {
     // Serialize this control plane's additive writes for the same worktree.
     const previous =
@@ -706,13 +810,30 @@ export class ReviewersService {
     const task = previous
       .catch(() => undefined)
       .then(async () => {
+        const context = await this.context(input.worktreeId);
+        const ids = unique(input.reviewerIds);
+        const removals = unique(input.removeReviewerIds ?? []);
+        if (
+          ids.length + removals.length === 0 ||
+          ids.length + removals.length > 1000 ||
+          ids.some((id) => removals.includes(id))
+        )
+          throw new Error(
+            "Select between 1 and 1,000 reviewer changes without overlapping additions and removals",
+          );
+        const additional = input.includeAllReviewers
+          ? ((await this.providers.resolvePeople?.(context.repository, ids)) ??
+            [])
+          : [];
         const { repository, locator, assignment } = await this.live(
           input.worktreeId,
+          false,
+          input.includeAllReviewers === true,
+          true,
+          additional,
         );
         this.requireRequest(assignment, input.requestId);
-        const ids = unique(input.reviewerIds);
-        if (!ids.length || ids.length > 1000)
-          throw new Error("Select between 1 and 1,000 reviewers");
+
         const candidates = new Set(
           assignment.requirements.flatMap((rule) => rule.candidateReviewerIds),
         );
@@ -722,25 +843,41 @@ export class ReviewersService {
             "A selected reviewer is no longer eligible; reload reviewer options before assigning",
           );
         const additions = ids.filter((id) => !existing.has(id));
-        if (additions.length) {
-          await this.providers.assign(
-            repository,
-            locator,
-            assignment.reviewers.filter((person) =>
-              additions.includes(person.id),
-            ),
-          );
+        if (additions.length || removals.length) {
+          try {
+            await this.providers.assign(
+              repository,
+              locator,
+              assignment.reviewers.filter((person) =>
+                additions.includes(person.id),
+              ),
+              assignment.reviewers.filter(
+                (person) =>
+                  removals.includes(person.id) && existing.has(person.id),
+              ),
+            );
+          } catch (error) {
+            await this.refreshWorktree?.(input.worktreeId).catch(
+              () => undefined,
+            );
+            this.publish(repository.id, input.worktreeId);
+            throw error;
+          }
         }
         // A successful provider write must not be reported as failed solely because overview hydration failed.
         await this.refreshWorktree?.(input.worktreeId).catch(() => undefined);
         this.publish(repository.id, input.worktreeId);
         try {
-          return await this.worktreeReviewerAssignment(input.worktreeId);
+          return await this.worktreeReviewerAssignment(
+            input.worktreeId,
+            false,
+            input.includeAllReviewers === true,
+          );
         } catch {
           const currentReviewerIds = unique([
             ...assignment.currentReviewerIds,
             ...additions,
-          ]);
+          ]).filter((id) => !removals.includes(id));
           return {
             ...assignment,
             currentReviewerIds,

@@ -155,7 +155,9 @@ const CANDIDATES_SQL = `
   request_settings AS (
     SELECT COALESCE((SELECT maximumRequestAgeDays FROM ActionCenterSettings WHERE id = 'default'), 30) AS ageDays,
       COALESCE((SELECT showMyRequestsInSidebar FROM ActionCenterSettings WHERE id = 'default'), 1) AS showMine,
-      COALESCE((SELECT showReviewRequestsInSidebar FROM ActionCenterSettings WHERE id = 'default'), 1) AS showReviews
+      COALESCE((SELECT showReviewRequestsInSidebar FROM ActionCenterSettings WHERE id = 'default'), 1) AS showReviews,
+      COALESCE((SELECT hideUnapprovedRequestsInSidebar FROM ActionCenterSettings WHERE id = 'default'), 1) AS hideUnapproved,
+      COALESCE((SELECT hideRunningPipelineRequestsInSidebar FROM ActionCenterSettings WHERE id = 'default'), 1) AS hideRunning
   ),
   request_candidates AS (
     SELECT request.resourceKind, request.id AS resourceId, request.resourceKind || ':' || request.id AS key,
@@ -163,7 +165,15 @@ const CANDIDATES_SQL = `
     FROM ActionCenterRequest AS request CROSS JOIN request_settings AS settings
     WHERE (request.isMine = 1 OR request.requiresMyApproval = 1)
       AND (settings.ageDays = 0 OR julianday(request.createdAt) >= julianday(?) - settings.ageDays)
-      AND (? = 0 OR (settings.showMine = 1 AND request.isMine = 1) OR (settings.showReviews = 1 AND request.requiresMyApproval = 1))
+      AND (CASE WHEN ? = 0 THEN 1 ELSE
+        ((settings.showMine = 1 AND request.isMine = 1) OR (settings.showReviews = 1 AND request.requiresMyApproval = 1))
+        AND (
+          UPPER(COALESCE(json_extract(request.payloadJson, '$.request.pipelineStatus'), 'NONE')) IN ('FAILURE', 'FAILED', 'ERROR', 'TIMED_OUT', 'STARTUP_FAILURE')
+          OR (
+            (settings.hideUnapproved = 0 OR UPPER(COALESCE(json_extract(request.payloadJson, '$.request.approvalStatus'), 'UNKNOWN')) IN ('APPROVED', 'NONE', 'NOT_REQUIRED'))
+            AND (settings.hideRunning = 0 OR UPPER(COALESCE(json_extract(request.payloadJson, '$.request.pipelineStatus'), 'NONE')) NOT IN ('EXPECTED', 'QUEUED', 'PENDING', 'PREPARING', 'IN_PROGRESS', 'RUNNING', 'CREATED', 'SCHEDULED', 'WAITING_FOR_RESOURCE', 'WAITING_FOR_CALLBACK', 'CANCELING'))
+          )
+        ) END)
   ),
   candidates AS (
     SELECT * FROM agent_candidates

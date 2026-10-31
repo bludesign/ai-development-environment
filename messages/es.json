@@ -186,7 +186,9 @@
     "showIntegrationCountsInSidebar": "Mostrar contadores de solicitudes y Actions/Pipelines",
     "showWorktreeCountsInSidebar": "Mostrar contadores de árboles modificados y fuera de la rama principal",
     "integrationCountsHelp": "Al desactivarlo se detienen las consultas de CI de la barra lateral. El Centro de acciones y las notificaciones siguen actualizándose.",
-    "saveSettings": "Guardar configuración"
+    "saveSettings": "Guardar configuración",
+    "hideUnapprovedRequestsInSidebar": "Ocultar solicitudes pull/merge sin aprobar en la barra lateral",
+    "hideRunningPipelineRequestsInSidebar": "Ocultar solicitudes pull/merge con pipelines en curso en la barra lateral"
   },
   "apps": {
     "title": "Apps",
@@ -1380,7 +1382,14 @@
     "showModels": "Mostrar modelos del {date}",
     "hideModels": "Ocultar modelos del {date}",
     "showAgents": "Mostrar agentes que usan {model}",
-    "hideAgents": "Ocultar agentes que usan {model}"
+    "hideAgents": "Ocultar agentes que usan {model}",
+    "sidebarTitle": "Uso de los últimos 7 días",
+    "viewFullUsage": "Ver todo el uso",
+    "sidebarLoading": "Cargando uso…",
+    "sidebarEmpty": "No se registró uso en los últimos siete días.",
+    "sidebarRetry": "Reintentar",
+    "sidebarCollectedAt": "Recopilado: {date}",
+    "sidebarToday": "Hoy"
   },
   "agentDetail": {
     "loading": "Cargando agente…",
@@ -2801,6 +2810,12 @@
     }
   },
   "pullRequests": {
+    "targetingWorktrees": "Actualizar worktrees dependientes",
+    "targetingWorktreesDescription": "Selecciona los worktrees cuya base debe cambiar tras la fusión. Auto Sync seguirá la nueva base.",
+    "baseUpdateUnavailable": "El worktree que se va a fusionar no tiene una rama base disponible.",
+    "baseUpdateInvalid": "Este destino no está disponible o es la propia rama del worktree.",
+    "baseUpdateSkipped": "Actualización omitida porque el worktree cambió o se eliminó.",
+    "baseUpdateCompleted": "Rama base actualizada.",
     "allRepositories": "Todos los repositorios",
     "title": "Solicitudes de extracción de GitHub",
     "description": "Revisa tus solicitudes de GitHub y los repositorios supervisados en un solo lugar.",
@@ -5989,7 +6004,7 @@
     "saved": "Preferencias de revisores guardadas.",
     "assign": "Asignar",
     "assignReviewers": "Asignar revisores",
-    "assignmentDescription": "Añade revisores desde las preferencias de tu repositorio. Se conservan las solicitudes de revisión existentes.",
+    "assignmentDescription": "Marca personas para solicitar una revisión o desmárcalas para retirar la solicitud. Carga todos los revisores para ampliar las opciones.",
     "requestClosed": "Esta solicitud de extracción o fusión ya no está abierta. Vuelve a cargar para consultar su estado actual.",
     "requirementCounts": "Necesarios: {required} · Aprobados: {approved} · Solicitados: {requested} · Seleccionados: {selected}",
     "selectReviewer": "Seleccionar a {name} para {group}",
@@ -6019,6 +6034,30 @@
       "requestedCount": "Solicitados: {count}",
       "members": "Revisores elegibles ({count})",
       "noMembers": "No se pudieron identificar miembros elegibles."
-    }
+    },
+    "loadAllReviewers": "Cargar todos los revisores",
+    "staleDirectory": "Se muestran los miembros en caché. Actualiza el directorio para intentar cargarlo de nuevo.",
+    "saveChanges": "Guardar cambios",
+    "directoryTitle": "Directorio de revisores",
+    "directoryDescription": "Los miembros se guardan en caché durante 24 horas de forma predeterminada y se actualizan bajo demanda. Las aprobaciones y solicitudes de revisión se cargan en tiempo real.",
+    "directoryEmpty": "No hay directorios en caché. Abre los ajustes de revisores o carga todos los revisores.",
+    "directoryMembers": "{count} miembros",
+    "directoryFetched": "Obtenido: {date}",
+    "directoryExpires": "Caduca: {date}",
+    "directoryFresh": "Actualizado",
+    "directoryStale": "Desactualizado",
+    "directoryRefresh": "Actualizar directorio",
+    "directoryDelete": "Eliminar directorio"
+  },
+  "worktreeSettings": {
+    "title": "Árboles de trabajo",
+    "description": "Elige cómo resaltar los nuevos árboles de trabajo.",
+    "autoColor": "Asignar automáticamente un color de resaltado",
+    "autoColorHelp": "Se aplica a los árboles creados desde la app, incluidas las automatizaciones. Los existentes no cambian.",
+    "colorMode": "Selección de color",
+    "spread": "Distribuir colores",
+    "random": "Colores aleatorios",
+    "save": "Guardar ajustes",
+    "saved": "Ajustes del árbol de trabajo guardados."
   }
 }

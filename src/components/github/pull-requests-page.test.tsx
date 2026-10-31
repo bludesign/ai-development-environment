@@ -13,6 +13,13 @@ import { controlPlaneRequest } from "@/lib/control-plane-client";
 
 import { PullRequestsPage } from "./pull-requests-page";
 
+const navigation = vi.hoisted(() => ({ push: vi.fn() }));
+
+vi.mock("@/i18n/navigation", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/i18n/navigation")>()),
+  useRouter: () => navigation,
+}));
+
 vi.mock("next/navigation", () => ({
   useSearchParams: () => new URLSearchParams(window.location.search),
 }));
@@ -130,6 +137,7 @@ Object.defineProperties(HTMLElement.prototype, {
 });
 
 beforeEach(() => {
+  navigation.push.mockReset();
   global.ResizeObserver = ResizeObserverMock;
   global.IntersectionObserver =
     IntersectionObserverMock as unknown as typeof IntersectionObserver;
@@ -260,6 +268,42 @@ function configureRequests() {
 }
 
 describe("PullRequestsPage", () => {
+  test.each(["mouse", "keyboard"])(
+    "opens and uses the merge dialog from the %s menu without navigating to the pull request",
+    async (activation) => {
+      configureRequests();
+      render(<PullRequestsPage />);
+      const row = await screen.findByRole("row", {
+        name: /APP-42 Add the API/,
+      });
+      const trigger = within(row).getByRole("button", {
+        name: "Actions: #17",
+      });
+      fireEvent.pointerDown(trigger, { button: 0, ctrlKey: false });
+      fireEvent.click(trigger);
+      const merge = screen.getByRole("menuitem", { name: "Merge" });
+      if (activation === "keyboard") fireEvent.keyDown(merge, { key: "Enter" });
+      else fireEvent.click(merge);
+      expect(navigation.push).not.toHaveBeenCalled();
+
+      const dialog = await screen.findByRole("dialog");
+      const title = await within(dialog).findByDisplayValue(pullRequest.title);
+      fireEvent.click(title);
+      fireEvent.change(title, { target: { value: "Updated merge title" } });
+      fireEvent.click(
+        within(dialog).getByRole("heading", { name: "Merge pull request" }),
+      );
+      fireEvent.click(within(dialog).getByRole("button", { name: "Cancel" }));
+      await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+      expect(navigation.push).not.toHaveBeenCalled();
+
+      fireEvent.click(row);
+      expect(navigation.push).toHaveBeenCalledExactlyOnceWith(
+        "/github/pull-requests/acme/widgets/17",
+      );
+    },
+  );
+
   test("filters Mine and Review requests by repository without changing their scope or mixing pagination", async () => {
     configureRequests();
     render(<PullRequestsPage />);

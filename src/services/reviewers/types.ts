@@ -31,7 +31,15 @@ export type ReviewerRequirementDiscovery = {
   approvedReviewerIds: string[];
 };
 
+export type ReviewerDiscoveryOptions = {
+  people?: ReviewerPerson[];
+  summary?: boolean;
+  validateEligibility?: boolean;
+  pools?: ReviewerPoolDiscovery[];
+};
 export type ReviewerDiscovery = {
+  membersLoaded?: boolean;
+  directoryStale?: boolean;
   provider: "GITHUB" | "GITLAB";
   repositoryIdentity: string;
   ref: string;
@@ -55,16 +63,22 @@ export type ReviewerDiscovery = {
 };
 
 export interface ReviewerProviderAdapter {
+  resolvePeople?(
+    repository: ReviewerRepository,
+    ids: string[],
+  ): Promise<ReviewerPerson[]>;
   discover(
     repository: ReviewerRepository,
     ref?: string,
     request?: ReviewerRequestLocator,
     refresh?: boolean,
+    options?: ReviewerDiscoveryOptions,
   ): Promise<ReviewerDiscovery>;
   assign(
     repository: ReviewerRepository,
     request: ReviewerRequestLocator,
     people: ReviewerPerson[],
+    removePeople?: ReviewerPerson[],
   ): Promise<void>;
 }
 

@@ -131,6 +131,7 @@ beforeEach(async () => {
 });
 afterEach(async () => {
   await prisma.$disconnect();
+  vi.restoreAllMocks();
   vi.clearAllMocks();
 });
 
@@ -251,7 +252,8 @@ test("review status works without preferences and for closed requests, while ass
     expect.anything(),
     undefined,
     { id: "pull-1", number: 1 },
-    true,
+    false,
+    {},
   );
   await expect(service.worktreeReviewerAssignment("worktree")).rejects.toThrow(
     "Configure code reviewers",
@@ -479,7 +481,7 @@ test("random fills two distinct slots, excludes the author and never sends reque
   await worktree();
   const options = await service.worktreeReviewerAssignment("worktree");
   expect(options.requirements[0].candidateReviewerIds).not.toContain("author");
-  const preview = randomReviewerPreview(options, [], () => 0);
+  const preview = randomReviewerPreview(options, [], [], () => 0);
   expect(new Set(preview.selectedReviewerIds).size).toBe(2);
   expect(preview.selectedReviewerIds).not.toContain("author");
   expect(assign).not.toHaveBeenCalled();
@@ -502,6 +504,34 @@ test("existing approvals and pending requests count once even outside preferred 
     "bob",
   ]);
 });
+
+test.each([
+  [true, false],
+  [false, false],
+  [true, true],
+])(
+  "random preview honors removals with requested=%s approved=%s without changing provider state",
+  async (requested, approved) => {
+    vi.spyOn(Math, "random").mockReturnValue(0.999);
+    await save(["alice", "bob"]);
+    await worktree();
+    discovery.requirements[0].requiredApprovals = 1;
+    discovery.request!.currentReviewers = requested ? [person("alice")] : [];
+    discovery.request!.approvedReviewers = approved ? [person("alice")] : [];
+    discovery.requirements[0].approvedReviewerIds = approved ? ["alice"] : [];
+    const preview = await service.previewRandomWorktreeReviewers(
+      "worktree",
+      "pull-1",
+      [],
+      ["alice"],
+    );
+    expect(preview.selectedReviewerIds).toEqual(approved ? [] : ["bob"]);
+    expect(preview.currentReviewerIds).toEqual(requested ? ["alice"] : []);
+    expect(preview.approvedReviewerIds).toEqual(approved ? ["alice"] : []);
+    expect(preview.issues).toEqual([]);
+    expect(assign).not.toHaveBeenCalled();
+  },
+);
 
 test("overlapping rules reuse a person and insufficient pools report shortages", async () => {
   await save(["alice"]);

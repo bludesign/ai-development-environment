@@ -64,7 +64,7 @@ describe("sidebar integration request counts", () => {
       adapter: new PrismaBetterSqlite3({ url: ":memory:" }),
     });
     await prisma.$executeRawUnsafe(
-      `CREATE TABLE ActionCenterSettings (id TEXT PRIMARY KEY, maximumRequestAgeDays INTEGER, showMyRequestsInSidebar BOOLEAN, showReviewRequestsInSidebar BOOLEAN, confirmClearAllNotifications BOOLEAN NOT NULL DEFAULT true, showIntegrationCountsInSidebar BOOLEAN NOT NULL DEFAULT true, showWorktreeCountsInSidebar BOOLEAN NOT NULL DEFAULT true, updatedAt DATETIME)`,
+      `CREATE TABLE ActionCenterSettings (id TEXT PRIMARY KEY, maximumRequestAgeDays INTEGER, showMyRequestsInSidebar BOOLEAN, showReviewRequestsInSidebar BOOLEAN, confirmClearAllNotifications BOOLEAN NOT NULL DEFAULT true, showIntegrationCountsInSidebar BOOLEAN NOT NULL DEFAULT true, showWorktreeCountsInSidebar BOOLEAN NOT NULL DEFAULT true, hideUnapprovedRequestsInSidebar BOOLEAN NOT NULL DEFAULT true, hideRunningPipelineRequestsInSidebar BOOLEAN NOT NULL DEFAULT true, updatedAt DATETIME)`,
     );
     await prisma.$executeRawUnsafe(
       `CREATE TABLE ActionCenterRequest (id TEXT PRIMARY KEY, provider TEXT, accountKey TEXT, resourceKind TEXT, reason TEXT, isMine BOOLEAN, requiresMyApproval BOOLEAN, payloadJson TEXT, createdAt DATETIME, updatedAt DATETIME)`,

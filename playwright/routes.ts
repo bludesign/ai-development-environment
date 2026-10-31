@@ -48,9 +48,27 @@ export type RouteEntry = {
   mcpAiPrompt?: boolean;
   mcpAuthorizationReview?: boolean;
   reviewerCapture?: ReviewerCapture;
+  usagePopover?: boolean;
+  destinationPicker?: "start" | "run";
+  desktopOnly?: boolean;
 };
 
 export const routes: RouteEntry[] = [
+  {
+    name: "settings-worktrees",
+    path: "/system/settings",
+    scrollTo: 'main [data-slot="card"]:has(#worktree-auto-color)',
+  },
+  {
+    name: "settings-action-center",
+    path: "/system/settings",
+    scrollTo: "#action-center-settings",
+  },
+  {
+    name: "gitlab-reviewer-directory",
+    path: "/gitlab/cache",
+    scrollTo: 'main [data-slot="card"]:has-text("Reviewer directory")',
+  },
   { name: "sign-in", path: "/sign-in", anonymous: true },
   { name: "register", path: "/register", anonymous: true },
   // Overview / action center
@@ -61,6 +79,12 @@ export const routes: RouteEntry[] = [
     scrollTo: 'main [data-slot="action-center-request-status"] >> nth=0',
   },
 
+  {
+    name: "sidebar-usage",
+    path: "/dashboard/action-center",
+    usagePopover: true,
+    desktopOnly: true,
+  },
   // Apps
   {
     name: "apps",
@@ -243,6 +267,21 @@ export const routes: RouteEntry[] = [
     path: `/dashboard/apps/${ids.apps.mobileSuite}`,
     stubWorktree: true,
     buildWorkflow: "start",
+  },
+  {
+    name: "build-start-devices",
+    path: `/dashboard/apps/${ids.apps.mobileSuite}`,
+    stubWorktree: true,
+    buildWorkflow: "start",
+    destinationPicker: "start",
+    desktopOnly: true,
+  },
+  {
+    name: "build-run-devices",
+    path: `/dashboard/builds/${ids.builds.archive}`,
+    stubWorktree: true,
+    destinationPicker: "run",
+    desktopOnly: true,
   },
   {
     name: "build-custom",

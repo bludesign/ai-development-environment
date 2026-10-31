@@ -14,6 +14,7 @@ import {
   type ProviderUser,
 } from "./provider-utils";
 import type {
+  ReviewerDiscoveryOptions,
   ReviewerDiscovery,
   ReviewerPerson,
   ReviewerPoolDiscovery,
@@ -75,7 +76,9 @@ export class GitLabReviewerProvider {
     requestedRef?: string,
     locator?: ReviewerRequestLocator,
     refresh = false,
+    options: ReviewerDiscoveryOptions = {},
   ): Promise<ReviewerDiscovery> {
+    let directoryStale = false;
     const project = await this.service.projectForCanonicalOrigin(
       repository.canonicalOrigin,
     );
@@ -93,13 +96,46 @@ export class GitLabReviewerProvider {
       this.service.reviewerRest<T>(
         path,
         query,
-        refresh || Boolean(locator),
+        !path.includes("/merge_requests") &&
+          !/\/members(?:\/all)?\/[^/]+$/.test(path)
+          ? refresh
+          : refresh || Boolean(locator),
         Boolean(locator),
+        !path.includes("/merge_requests") &&
+          !/\/members(?:\/all)?\/[^/]+$/.test(path),
+        (stale) => {
+          directoryStale ||= stale;
+        },
       );
-    const all = <T>(
+    const all = async <T>(
       path: string,
       query: Record<string, string | number> = {},
-    ) => paginated<T>((page) => read(path, { ...query, per_page: 100, page }));
+    ): Promise<T[]> => {
+      if (options.people !== undefined) {
+        if (/\/members(?:\/all)?$/.test(path)) {
+          return (
+            await mapIntegrationRequests(options.people, async (person) => {
+              try {
+                return await read<T>(
+                  `${path}/${encodeURIComponent(person.id)}`,
+                );
+              } catch (error) {
+                if (statusIs(error, 404)) return null;
+                throw error;
+              }
+            })
+          ).filter((person): person is T & {} => person !== null);
+        }
+        if (
+          path.endsWith("/repository/branches") ||
+          path.endsWith("/approval_rules")
+        )
+          return [];
+      }
+      return paginated<T>((page) =>
+        read(path, { ...query, per_page: 100, page }),
+      );
+    };
     const [settings, metadata] = await Promise.all([
       this.service.getSettings(),
       read<Project>(prefix),
@@ -161,6 +197,15 @@ export class GitLabReviewerProvider {
       kind: "GENERAL",
       candidates: general,
     });
+    for (const pool of (options.pools ?? []).filter(
+      (pool) => pool.kind === "APPROVAL_RULE",
+    ))
+      mergePool(pools, {
+        ...pool,
+        candidates: pool.candidates.filter((person) =>
+          memberById.has(person.id),
+        ),
+      });
     for (const rule of projectRules) {
       const candidates =
         rule.rule_type === "any_approver"
@@ -177,11 +222,9 @@ export class GitLabReviewerProvider {
     }
 
     let contents: string | undefined;
-    for (const path of [
-      "CODEOWNERS",
-      "docs/CODEOWNERS",
-      ".gitlab/CODEOWNERS",
-    ]) {
+    for (const path of options.summary
+      ? []
+      : ["CODEOWNERS", "docs/CODEOWNERS", ".gitlab/CODEOWNERS"]) {
       try {
         const file = await read<{ content: string; encoding: string }>(
           `${prefix}/repository/files/${encodeURIComponent(path)}`,
@@ -356,7 +399,6 @@ export class GitLabReviewerProvider {
             project(fullPath: $path) { mergeRequest(iid: $iid) { approvalState { rules {
               id name type section ${groupedPatterns ? "patterns" : ""} approvalsRequired approved
               sourceRule { id }
-              eligibleApprovers { id username name avatarUrl webUrl bot state }
               approvedBy(first: 100) { nodes { id username name avatarUrl webUrl } pageInfo { hasNextPage } }
             } } } }
           }`,
@@ -367,6 +409,42 @@ export class GitLabReviewerProvider {
         throw new Error(
           "GitLab did not return the merge request approval rules",
         );
+      if (options.people === undefined || options.validateEligibility) {
+        type Eligibility = {
+          project: {
+            mergeRequest: {
+              approvalState: {
+                rules: Array<{ id: string; eligibleApprovers: ProviderUser[] }>;
+              };
+            };
+          };
+        };
+        const query = `query CodeReviewerEligibility($path: ID!, $iid: String!) { project(fullPath: $path) { mergeRequest(iid: $iid) { approvalState { rules { id eligibleApprovers { id username name avatarUrl webUrl bot state } } } } } }`;
+        const variables = {
+          path: metadata.path_with_namespace,
+          iid: String(iid),
+        };
+        // Saves revalidate the rule's actual eligibility, independently of daily directory snapshots.
+        const eligibility = options.validateEligibility
+          ? await this.service.reviewerGraphql<Eligibility>(query, variables)
+          : await this.service.reviewerEligibility<Eligibility>(
+              query,
+              variables,
+              refresh,
+              (stale) => {
+                directoryStale ||= stale;
+              },
+              ref,
+            );
+        const eligible = new Map(
+          eligibility.project?.mergeRequest?.approvalState.rules.map((rule) => [
+            rule.id,
+            rule.eligibleApprovers,
+          ]),
+        );
+        for (const rule of rules)
+          rule.eligibleApprovers = eligible.get(rule.id) ?? [];
+      }
       return rules;
     };
     const approvalPoolKey = (rule: Rule, requestId: number) => {
@@ -381,7 +459,7 @@ export class GitLabReviewerProvider {
         const rules = await approvalRules(mr.iid);
         for (const rule of rules) {
           const type = rule.type.toLowerCase();
-          const eligible =
+          let eligible =
             type === "any_approver"
               ? general
               : (rule.eligibleApprovers ?? [])
@@ -414,7 +492,7 @@ export class GitLabReviewerProvider {
                 }),
               ),
             ];
-            if (keys.length === 0)
+            if (keys.length === 0 && !options.summary)
               unavailable(
                 `Code owner rule ${rule.name} cannot be mapped`,
                 new Error("Refresh the target branch CODEOWNERS configuration"),
@@ -433,6 +511,11 @@ export class GitLabReviewerProvider {
             });
             keys = [key];
           }
+          if (options.people !== undefined && !options.validateEligibility)
+            eligible = uniquePeople([
+              ...keys.flatMap((key) => pools.get(key)?.candidates ?? []),
+              ...approved,
+            ]);
           // Keep the provider's grouped requirement intact: preferences from
           // contributing owner pools filter choices without creating quotas.
           requirements.push({
@@ -555,6 +638,8 @@ export class GitLabReviewerProvider {
       }
     }
     return {
+      membersLoaded: options.people === undefined,
+      directoryStale,
       provider: "GITLAB",
       repositoryIdentity: identity,
       ref,
@@ -584,10 +669,25 @@ export class GitLabReviewerProvider {
     };
   }
 
+  async resolvePeople(ids: string[]) {
+    return mapIntegrationRequests(ids, async (id) => {
+      const user = await this.service.reviewerRest<ProviderUser>(
+        `/users/${encodeURIComponent(id)}`,
+        {},
+        true,
+        true,
+      );
+      if (!eligibleHuman(user) || providerPerson(user).id !== id)
+        throw new Error("Reviewer identity is no longer available");
+      return providerPerson(user);
+    });
+  }
+
   async assign(
     repository: ReviewerRepository,
     request: ReviewerRequestLocator,
     people: ReviewerPerson[],
+    removePeople: ReviewerPerson[] = [],
   ): Promise<void> {
     const project = await this.service.projectForCanonicalOrigin(
       repository.canonicalOrigin,
@@ -599,6 +699,7 @@ export class GitLabReviewerProvider {
       iid: request.number,
       expectedId: nativeId(request.id),
       reviewerIds: people.map((person) => person.id),
+      removeReviewerIds: removePeople.map((person) => person.id),
     });
   }
 }

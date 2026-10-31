@@ -6,6 +6,7 @@ import type { GitLabService } from "@/services/gitlab";
 import { GitHubReviewerProvider } from "./github-provider";
 import { GitLabReviewerProvider } from "./gitlab-provider";
 import type {
+  ReviewerDiscoveryOptions,
   ReviewerPerson,
   ReviewerProviderAdapter,
   ReviewerRepository,
@@ -26,19 +27,27 @@ export class ReviewerProviders implements ReviewerProviderAdapter {
     ref?: string,
     request?: ReviewerRequestLocator,
     refresh = false,
+    options: ReviewerDiscoveryOptions = {},
   ) {
     return /^github\.com\//i.test(repository.canonicalOrigin)
-      ? this.github.discover(repository, ref, request, refresh)
-      : this.gitlab.discover(repository, ref, request, refresh);
+      ? this.github.discover(repository, ref, request, refresh, options)
+      : this.gitlab.discover(repository, ref, request, refresh, options);
+  }
+
+  resolvePeople(repository: ReviewerRepository, ids: string[]) {
+    return /^github\.com\//i.test(repository.canonicalOrigin)
+      ? this.github.resolvePeople(ids)
+      : this.gitlab.resolvePeople(ids);
   }
 
   assign(
     repository: ReviewerRepository,
     request: ReviewerRequestLocator,
     people: ReviewerPerson[],
+    removePeople: ReviewerPerson[] = [],
   ) {
     return /^github\.com\//i.test(repository.canonicalOrigin)
-      ? this.github.assign(repository, request, people)
-      : this.gitlab.assign(repository, request, people);
+      ? this.github.assign(repository, request, people, removePeople)
+      : this.gitlab.assign(repository, request, people, removePeople);
   }
 }

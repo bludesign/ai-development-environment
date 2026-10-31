@@ -1,3 +1,4 @@
+import { baseBranchUpdateOptions } from "./merge-base-fixture";
 import { mkdir } from "node:fs/promises";
 import { expect, test } from "@playwright/test";
 import { screenshotSessionToken } from "../scripts/mock-data/auth";
@@ -8,6 +9,13 @@ import {
 } from "./screenshot-time";
 
 const mergeOptions = {
+  baseBranchUpdateOptions: {
+    ...baseBranchUpdateOptions,
+    worktrees: baseBranchUpdateOptions.worktrees.map((worktree) => ({
+      ...worktree,
+      baseBranch: "feature/retry-diagnostics",
+    })),
+  },
   projectId: ids.gitlab.projectId,
   iid: ids.gitlab.mergeRequestIid,
   title: "Improve pipeline retry diagnostics",
@@ -76,7 +84,13 @@ test("gitlab merge sheet shows project policy and deferred follow-ups", async ({
   await expect(
     sheet.getByRole("button", { name: "Enable auto-merge", exact: true }),
   ).toBeEnabled();
-  await expect(sheet.getByText(/AIDE-145/)).toBeVisible();
+  await expect(
+    sheet.getByRole("checkbox", { name: /Move AIDE-145/ }),
+  ).toBeVisible();
+  await expect(
+    sheet.getByRole("checkbox", { name: /search-filters/ }),
+  ).not.toBeChecked();
+  await sheet.getByRole("checkbox", { name: /search-filters/ }).check();
   await mkdir(`screenshots/${info.project.name}`, { recursive: true });
   await page.screenshot({
     animations: "disabled",

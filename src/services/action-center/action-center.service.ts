@@ -267,6 +267,8 @@ export class ActionCenterService {
   }
 
   async saveSettings(input: {
+    hideUnapprovedRequestsInSidebar?: boolean | null;
+    hideRunningPipelineRequestsInSidebar?: boolean | null;
     maximumRequestAgeDays: number;
     showMyRequestsInSidebar: boolean;
     showReviewRequestsInSidebar: boolean;
@@ -282,6 +284,10 @@ export class ActionCenterService {
     const prisma = await getPrismaClient();
     const preferences = {
       ...input,
+      hideRunningPipelineRequestsInSidebar:
+        input.hideRunningPipelineRequestsInSidebar ?? undefined,
+      hideUnapprovedRequestsInSidebar:
+        input.hideUnapprovedRequestsInSidebar ?? undefined,
       confirmClearAllNotifications:
         input.confirmClearAllNotifications ?? undefined,
       showIntegrationCountsInSidebar:

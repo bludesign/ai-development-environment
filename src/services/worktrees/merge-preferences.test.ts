@@ -32,7 +32,10 @@ function setup() {
     autoMerge: null as Record<string, unknown> | null,
   };
   const prisma = {
-    worktree: { findFirst: vi.fn().mockResolvedValue(worktree) },
+    worktree: {
+      findFirst: vi.fn().mockResolvedValue(worktree),
+      findMany: vi.fn().mockResolvedValue([]),
+    },
     gitHubRepository: { findMany: vi.fn().mockResolvedValue([]) },
     jiraProject: {
       findUnique: vi.fn().mockResolvedValue({ doneStatusId: "done" }),

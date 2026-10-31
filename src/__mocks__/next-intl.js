@@ -834,6 +834,17 @@ const mockTranslations = {
       "The App ID, installation ID, and private key will be removed. Pull request credentials and managed repositories will be kept.",
   },
   pullRequests: {
+    targetingWorktrees: "Update targeting worktrees",
+    targetingWorktreesDescription:
+      "Select worktrees whose base should change after this merge completes. Existing Auto Sync will follow the new base.",
+    baseUpdateUnavailable:
+      "The merging worktree has no available destination base branch.",
+    baseUpdateInvalid:
+      "This destination is unavailable or would target the worktree’s own branch.",
+    baseUpdateSkipped:
+      "Base update skipped because the worktree changed or was removed.",
+    baseUpdateCompleted: "Base branch updated.",
+
     title: "Pull Requests",
     description:
       "Review your GitHub pull requests and monitored repositories in one place.",

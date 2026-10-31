@@ -68,9 +68,9 @@ import type {
   BuildSourceObservation,
   IosAppProject,
 } from "./types";
+import { BuildDestinationPicker } from "./destination-picker";
 import { CollectDsymsSelect } from "./collect-dsyms-select";
 import { ConfigurationIcon } from "./configuration-icon";
-import { buildDestinationState } from "./build-format";
 import {
   DEFAULT_EXPORT_SETTINGS,
   ExportSettingsForm,
@@ -951,40 +951,16 @@ function StartBuildDialog({
                           />
                         )}
                       </div>
-                      <Select
-                        disabled={!filteredDestinations.length}
-                        onValueChange={(value) => {
+                      <BuildDestinationPicker
+                        id={deviceId}
+                        destinations={filteredDestinations}
+                        value={destinationId}
+                        loading={destinationsLoading}
+                        onChange={(value) => {
                           destinationIdRef.current = value;
                           setDestinationId(value);
                         }}
-                        value={destinationId}
-                      >
-                        <SelectTrigger
-                          aria-busy={destinationsLoading}
-                          id={deviceId}
-                        >
-                          <SelectValue placeholder={t("selectDevice")} />
-                        </SelectTrigger>
-                        <SelectContent>
-                          {filteredDestinations.map((entry) => (
-                            <SelectItem
-                              key={entry.id}
-                              value={entry.id}
-                              disabled={entry.available === false}
-                            >
-                              {entry.generic
-                                ? entry.type === "SIMULATOR"
-                                  ? t("anySimulator")
-                                  : t("anyPhysicalDevice")
-                                : entry.name}
-                              {entry.osVersion ? ` · ${entry.osVersion}` : ""}
-                              {!entry.generic
-                                ? ` · ${buildDestinationState(entry, t)}`
-                                : ""}
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
+                      />
                     </div>
                   </div>
 

@@ -6,7 +6,10 @@ const cache = vi.hoisted(() => ({
   deleteMany: vi.fn(),
 }));
 vi.mock("@/data/prisma-client", () => ({
-  getPrismaClient: async () => ({ gitLabRestCacheEntry: cache }),
+  getPrismaClient: async () => ({
+    gitLabRestCacheEntry: cache,
+    reviewerDirectorySnapshot: { deleteMany: vi.fn() },
+  }),
 }));
 
 import { GitLabService } from "./gitlab.service";
@@ -398,14 +401,19 @@ test("project invalidation also expires global merge-request discovery", async (
   await instance.invalidateCache("21");
   expect(cache.deleteMany).toHaveBeenCalledWith({
     where: {
-      OR: [
-        { endpoint: { contains: "/projects/21/" } },
+      AND: [
         {
-          operation: {
-            in: ["GitLabMergeRequests", "GitLabCommentMergeRequests"],
-          },
-          endpoint: { contains: "/api/v4/merge_requests?" },
+          OR: [
+            { endpoint: { contains: "/projects/21/" } },
+            {
+              operation: {
+                in: ["GitLabMergeRequests", "GitLabCommentMergeRequests"],
+              },
+              endpoint: { contains: "/api/v4/merge_requests?" },
+            },
+          ],
         },
+        { operation: { not: "GitLabReviewerDirectory" } },
       ],
     },
   });

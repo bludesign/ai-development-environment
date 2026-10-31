@@ -186,7 +186,9 @@
     "showIntegrationCountsInSidebar": "Afficher les compteurs de requêtes et Actions/Pipelines",
     "showWorktreeCountsInSidebar": "Afficher les compteurs de worktrees modifiés et hors branche principale",
     "integrationCountsHelp": "La désactivation arrête les requêtes CI dédiées à la barre latérale. Le Centre d’actions et les notifications continuent de s’actualiser.",
-    "saveSettings": "Enregistrer les paramètres"
+    "saveSettings": "Enregistrer les paramètres",
+    "hideUnapprovedRequestsInSidebar": "Masquer les demandes pull/merge non approuvées dans la barre latérale",
+    "hideRunningPipelineRequestsInSidebar": "Masquer les demandes pull/merge dont les pipelines sont en cours dans la barre latérale"
   },
   "apps": {
     "title": "Apps",
@@ -1380,7 +1382,14 @@
     "showModels": "Afficher les modèles du {date}",
     "hideModels": "Masquer les modèles du {date}",
     "showAgents": "Afficher les agents utilisant {model}",
-    "hideAgents": "Masquer les agents utilisant {model}"
+    "hideAgents": "Masquer les agents utilisant {model}",
+    "sidebarTitle": "Utilisation des 7 derniers jours",
+    "viewFullUsage": "Voir toute l’utilisation",
+    "sidebarLoading": "Chargement de l’utilisation…",
+    "sidebarEmpty": "Aucune utilisation enregistrée au cours des sept derniers jours.",
+    "sidebarRetry": "Réessayer",
+    "sidebarCollectedAt": "Collecté le {date}",
+    "sidebarToday": "Aujourd’hui"
   },
   "agentDetail": {
     "loading": "Chargement de l’agent…",
@@ -2801,6 +2810,12 @@
     }
   },
   "pullRequests": {
+    "targetingWorktrees": "Mettre à jour les worktrees dépendants",
+    "targetingWorktreesDescription": "Sélectionnez les worktrees dont la base doit changer après la fusion. Auto Sync utilisera la nouvelle base.",
+    "baseUpdateUnavailable": "Le worktree à fusionner ne dispose pas de branche de base disponible.",
+    "baseUpdateInvalid": "Cette destination est indisponible ou correspond à la branche du worktree.",
+    "baseUpdateSkipped": "Mise à jour ignorée car le worktree a changé ou a été supprimé.",
+    "baseUpdateCompleted": "Branche de base mise à jour.",
     "allRepositories": "Tous les dépôts",
     "title": "Demandes de tirage GitHub",
     "description": "Consultez vos demandes GitHub et les dépôts surveillés au même endroit.",
@@ -5989,7 +6004,7 @@
     "saved": "Préférences des relecteurs enregistrées.",
     "assign": "Attribuer",
     "assignReviewers": "Attribuer des relecteurs",
-    "assignmentDescription": "Ajoutez des relecteurs à partir des préférences de votre dépôt. Les demandes de relecture existantes sont conservées.",
+    "assignmentDescription": "Cochez des personnes pour demander une révision ou décochez-les pour retirer la demande. Chargez tous les réviseurs pour élargir les choix.",
     "requestClosed": "Cette pull request ou merge request n’est plus ouverte. Rechargez pour vérifier son état actuel.",
     "requirementCounts": "Requis : {required} · Approuvés : {approved} · Demandés : {requested} · Sélectionnés : {selected}",
     "selectReviewer": "Sélectionner {name} pour {group}",
@@ -6019,6 +6034,30 @@
       "requestedCount": "Sollicités : {count}",
       "members": "Relecteurs éligibles ({count})",
       "noMembers": "Aucun membre éligible n’a pu être identifié."
-    }
+    },
+    "loadAllReviewers": "Charger tous les réviseurs",
+    "staleDirectory": "Les membres en cache sont affichés. Actualisez le répertoire pour réessayer le chargement.",
+    "saveChanges": "Enregistrer les modifications",
+    "directoryTitle": "Répertoire des réviseurs",
+    "directoryDescription": "Les membres sont mis en cache pendant 24 heures par défaut et actualisés à la demande. Les approbations et demandes de révision sont toujours chargées en direct.",
+    "directoryEmpty": "Aucun répertoire en cache. Ouvrez les réglages des réviseurs ou chargez tous les réviseurs.",
+    "directoryMembers": "{count} membres",
+    "directoryFetched": "Chargé le {date}",
+    "directoryExpires": "Expire le {date}",
+    "directoryFresh": "À jour",
+    "directoryStale": "Périmé",
+    "directoryRefresh": "Actualiser le répertoire",
+    "directoryDelete": "Supprimer le répertoire"
+  },
+  "worktreeSettings": {
+    "title": "Arbres de travail",
+    "description": "Choisissez la mise en évidence des nouveaux arbres de travail.",
+    "autoColor": "Attribuer automatiquement une couleur",
+    "autoColorHelp": "Concerne les arbres créés dans l’application, y compris par les automatisations. Les arbres existants restent inchangés.",
+    "colorMode": "Choix des couleurs",
+    "spread": "Répartir les couleurs",
+    "random": "Couleurs aléatoires",
+    "save": "Enregistrer les réglages",
+    "saved": "Réglages de l’arbre de travail enregistrés."
   }
 }

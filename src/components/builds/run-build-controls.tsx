@@ -1,6 +1,6 @@
 "use client";
 
-import { CheckSquare2, ChevronDown, Play, Search, Square } from "lucide-react";
+import { ChevronDown, Play } from "lucide-react";
 import { useTranslations } from "next-intl";
 import { useMemo, useRef, useState } from "react";
 
@@ -11,11 +11,14 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { Input } from "@/components/ui/input";
+import {
+  DestinationRow,
+  DestinationSearch,
+  filterDestinations,
+} from "./destination-picker";
 import { Spinner } from "@/components/ui/spinner";
 import { createClientId } from "@/lib/browser-utils";
 import { controlPlaneRequest } from "@/lib/control-plane-client";
-import { buildDestinationState } from "./build-format";
 
 import type { BuildDestination, BuildRecord, BuildRunAgent } from "./types";
 
@@ -77,19 +80,7 @@ export function RunBuildControls({
   >(null);
 
   const filteredDestinations = useMemo(() => {
-    const query = destinationSearch.trim().toLocaleLowerCase();
-    if (!query) return destinations;
-
-    return destinations.filter((destination) => {
-      const state = buildDestinationState(destination, t);
-      return [
-        destination.name,
-        destination.platform,
-        destination.osVersion,
-        destination.state,
-        state,
-      ].some((value) => value?.toLocaleLowerCase().includes(query));
-    });
+    return filterDestinations(destinations, destinationSearch, t);
   }, [destinationSearch, destinations, t]);
   const tabStopAgentId =
     runAgents.find(
@@ -320,21 +311,10 @@ export function RunBuildControls({
         })}
       </div>
       <DropdownMenuSeparator />
-      <div className="relative p-1.5">
-        <Search
-          aria-hidden="true"
-          className="pointer-events-none absolute top-1/2 left-4 size-3.5 -translate-y-1/2 text-muted-foreground"
-        />
-        <Input
-          aria-label={t("searchDevices")}
-          className="h-7 pl-7 text-xs"
-          onChange={(event) => setDestinationSearch(event.target.value)}
-          onKeyDown={(event) => event.stopPropagation()}
-          placeholder={t("searchDevices")}
-          type="search"
-          value={destinationSearch}
-        />
-      </div>
+      <DestinationSearch
+        value={destinationSearch}
+        onChange={setDestinationSearch}
+      />
       <DropdownMenuSeparator />
       {loadingDestinations && (
         <div className="flex justify-center p-3 text-muted-foreground">
@@ -346,37 +326,18 @@ export function RunBuildControls({
           filteredDestinations.map((destination) => {
             const available = destination.available !== false;
             const selected = selectedDestinations.has(destination.id);
-            const detail = [destination.platform, destination.osVersion]
-              .filter(Boolean)
-              .join(" ");
-            const state = buildDestinationState(destination, t);
             return (
               <div
                 className="flex items-stretch gap-1 rounded-md p-0.5 hover:bg-accent"
                 key={`${destination.type}:${destination.id}`}
               >
-                <button
-                  aria-checked={selected}
-                  className="flex min-w-0 flex-1 items-center gap-2 rounded-sm px-2 py-1.5 text-left outline-hidden focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50"
+                <DestinationRow
+                  destination={destination}
+                  selected={selected}
                   disabled={!available || running}
-                  onClick={() => toggleDestination(destination)}
-                  role="menuitemcheckbox"
-                  type="button"
-                >
-                  {selected ? (
-                    <CheckSquare2 className="size-4 shrink-0" />
-                  ) : (
-                    <Square className="size-4 shrink-0" />
-                  )}
-                  <span className="min-w-0 flex-1">
-                    <span className="block truncate text-sm font-medium">
-                      {destination.name}
-                    </span>
-                    <span className="block truncate text-xs text-muted-foreground">
-                      {detail ? `${detail} · ${state}` : state}
-                    </span>
-                  </span>
-                </button>
+                  onSelect={() => toggleDestination(destination)}
+                  multiple
+                />
                 <Button
                   aria-label={t("runOnDevice", { name: destination.name })}
                   disabled={!available || running}

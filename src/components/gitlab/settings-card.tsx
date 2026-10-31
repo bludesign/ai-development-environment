@@ -15,7 +15,13 @@ import { ConfirmationDialog } from "@/components/confirmation-dialog";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent } from "@/components/ui/card";
+import {
+  Card,
+  CardContent,
+  CardHeader,
+  CardTitle,
+  CardDescription,
+} from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Spinner } from "@/components/ui/spinner";
@@ -142,15 +148,13 @@ export function GitLabSettingsCard() {
   return (
     <form onSubmit={save}>
       <Card>
-        <CardContent className="space-y-5">
+        <CardHeader>
           <div className="flex items-center justify-between gap-3">
             <div className="flex items-center gap-2">
               <GitFork className="size-5" />
               <div>
-                <h2 className="font-semibold">{t("title")}</h2>
-                <p className="text-xs text-muted-foreground">
-                  {t("description")}
-                </p>
+                <CardTitle>{t("title")}</CardTitle>
+                <CardDescription>{t("description")}</CardDescription>
               </div>
             </div>
             <Badge
@@ -163,7 +167,8 @@ export function GitLabSettingsCard() {
               {settings?.configured ? t("configured") : t("notConfigured")}
             </Badge>
           </div>
-
+        </CardHeader>
+        <CardContent className="space-y-5">
           {loading ? (
             <p className="flex items-center gap-2 text-sm text-muted-foreground">
               <Spinner /> {t("loading")}

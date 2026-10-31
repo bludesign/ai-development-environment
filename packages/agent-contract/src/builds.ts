@@ -123,6 +123,7 @@ export type BuildSourceSnapshot = {
 };
 
 export type BuildDestination = {
+  deviceType?: string | null;
   type: BuildDestinationType;
   id: string;
   name: string;
@@ -493,6 +494,14 @@ export function parseBuildDestination(value: unknown): BuildDestination {
       BUILD_DESTINATION_TYPES,
       "build destination.type",
     ),
+    ...(destination.deviceType === undefined
+      ? {}
+      : {
+          deviceType: nullableString(
+            destination.deviceType,
+            "build destination.deviceType",
+          ),
+        }),
     id: stringValue(destination.id, "build destination.id"),
     name: stringValue(destination.name, "build destination.name"),
     platform: stringValue(destination.platform, "build destination.platform"),

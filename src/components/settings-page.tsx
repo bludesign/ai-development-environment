@@ -1,6 +1,6 @@
 "use client";
 import { ActionCenterSettingsCard } from "@/components/action-center/action-center-settings";
-import { ConnectedApplicationsLink } from "@/components/auth/connected-applications";
+import { WorktreeSettingsCard } from "@/components/worktrees/worktree-settings-card";
 import { ServerUrlsSettingsCard } from "@/components/server-urls/server-urls-settings-card";
 import {
   ServerUrlActionNotice,
@@ -47,7 +47,13 @@ import { GitLabSettingsCard } from "@/components/gitlab/settings-card";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent } from "@/components/ui/card";
+import {
+  Card,
+  CardContent,
+  CardHeader,
+  CardTitle,
+  CardDescription,
+} from "@/components/ui/card";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -115,7 +121,7 @@ export function SettingsPage() {
             <ServerUrlsSettingsCard />
             <EditorSettingsCard />
             <ActionCenterSettingsCard />
-            <ConnectedApplicationsLink />
+            <WorktreeSettingsCard />
           </SettingsGroup>
           <SettingsGroup
             description={t("appleGroupDescription")}
@@ -227,14 +233,16 @@ function EditorSettingsCard() {
 
   return (
     <Card>
-      <CardContent className="space-y-4">
+      <CardHeader>
         <div className="flex items-center gap-2">
           <Code2 className="size-5" />
           <div>
-            <h2 className="font-semibold">{t("title")}</h2>
-            <p className="text-xs text-muted-foreground">{t("description")}</p>
+            <CardTitle>{t("title")}</CardTitle>
+            <CardDescription>{t("description")}</CardDescription>
           </div>
         </div>
+      </CardHeader>
+      <CardContent className="space-y-4">
         {error && (
           <Alert variant="destructive">
             <AlertDescription>{error}</AlertDescription>
@@ -464,15 +472,13 @@ function GitHubAppSettingsCard() {
   return (
     <form onSubmit={save}>
       <Card>
-        <CardContent className="space-y-5">
+        <CardHeader>
           <div className="flex items-center justify-between gap-3">
             <div className="flex items-center gap-2">
               <ShieldCheck className="size-5" />
               <div>
-                <h2 className="font-semibold">{t("title")}</h2>
-                <p className="text-xs text-muted-foreground">
-                  {t("description")}
-                </p>
+                <CardTitle>{t("title")}</CardTitle>
+                <CardDescription>{t("description")}</CardDescription>
               </div>
             </div>
             <Badge
@@ -485,7 +491,8 @@ function GitHubAppSettingsCard() {
               {settings?.configured ? t("verified") : t("notConfigured")}
             </Badge>
           </div>
-
+        </CardHeader>
+        <CardContent className="space-y-5">
           {loading ? (
             <div className="flex items-center gap-2 text-sm text-muted-foreground">
               <Spinner />
@@ -943,15 +950,13 @@ function GitHubSettingsCard() {
   return (
     <form onSubmit={save}>
       <Card>
-        <CardContent className="space-y-5">
+        <CardHeader>
           <div className="flex items-center justify-between gap-3">
             <div className="flex items-center gap-2">
               <GitPullRequest className="size-5" />
               <div>
-                <h2 className="font-semibold">{t("title")}</h2>
-                <p className="text-xs text-muted-foreground">
-                  {t("description")}
-                </p>
+                <CardTitle>{t("title")}</CardTitle>
+                <CardDescription>{t("description")}</CardDescription>
               </div>
             </div>
             <Badge
@@ -964,6 +969,8 @@ function GitHubSettingsCard() {
               {settings?.tokenConfigured ? t("configured") : t("notConfigured")}
             </Badge>
           </div>
+        </CardHeader>
+        <CardContent className="space-y-5">
           {loading ? (
             <div className="flex items-center gap-2 text-sm text-muted-foreground">
               <Spinner />

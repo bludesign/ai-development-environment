@@ -1,3 +1,7 @@
+import type {
+  MergeBaseBranchUpdateInput,
+  MergeBaseBranchUpdateOptions,
+} from "@/services/worktrees/merge-base-branch-updates";
 export type GitHubPullRequestScope = "MINE" | "REVIEW_REQUESTED" | "REPOSITORY";
 
 export type GitHubPullRequestState = "OPEN" | "CLOSED" | "MERGED";
@@ -611,6 +615,7 @@ export type GitHubPullRequestDetail = GitHubPullRequestView & {
 };
 
 export type GitHubPullRequestMergeOptions = {
+  baseBranchUpdateOptions?: MergeBaseBranchUpdateOptions | null;
   defaultMethod: GitHubMergeMethod | null;
   defaultMoveTicketToDone: boolean;
   defaultDeleteWorktree: boolean;
@@ -651,6 +656,7 @@ export type GitHubPullRequestAutomationState = {
 };
 
 export type GitHubPullRequestMergeInput = {
+  baseBranchUpdate?: MergeBaseBranchUpdateInput | null;
   owner: string;
   name: string;
   number: number;

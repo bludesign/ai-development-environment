@@ -629,6 +629,7 @@ model Worktree {
   rebaseInProgress         Boolean                      @default(false)
   hasConflicts             Boolean                      @default(false)
   pushStatus               String                       @default("UNKNOWN")
+  initialHighlightApplied  Boolean                      @default(false)
   highlightColor           String?
   availability             String                       @default("AVAILABLE")
   statusError              String?
@@ -823,6 +824,7 @@ model WorktreeAutoSync {
 }
 
 model WorktreeAutoMerge {
+  baseBranchUpdatesJson   String?
   worktreeId              String    @id
   state                   String    @default("ACTIVE")
   repositoryNameWithOwner String
@@ -2242,14 +2244,16 @@ model SidebarUsageSummary {
 }
 
 model ActionCenterSettings {
-  id                             String   @id
-  maximumRequestAgeDays          Int      @default(30)
-  showMyRequestsInSidebar        Boolean  @default(true)
-  showReviewRequestsInSidebar    Boolean  @default(true)
-  confirmClearAllNotifications   Boolean  @default(true)
-  showIntegrationCountsInSidebar Boolean  @default(true)
-  showWorktreeCountsInSidebar    Boolean  @default(true)
-  updatedAt                      DateTime @updatedAt
+  id                                   String   @id
+  maximumRequestAgeDays                Int      @default(30)
+  showMyRequestsInSidebar              Boolean  @default(true)
+  showReviewRequestsInSidebar          Boolean  @default(true)
+  confirmClearAllNotifications         Boolean  @default(true)
+  showIntegrationCountsInSidebar       Boolean  @default(true)
+  showWorktreeCountsInSidebar          Boolean  @default(true)
+  hideUnapprovedRequestsInSidebar      Boolean  @default(true)
+  hideRunningPipelineRequestsInSidebar Boolean  @default(true)
+  updatedAt                            DateTime @updatedAt
 }
 
 model ActionCenterRequest {
@@ -2549,10 +2553,12 @@ model WorktreeTagAssignment {
 }
 
 model WorktreeSettings {
-  id            String   @id
-  editorVariant String   @default("CODE")
-  createdAt     DateTime @default(now())
-  updatedAt     DateTime @updatedAt
+  id                       String   @id
+  editorVariant            String   @default("CODE")
+  autoAssignHighlightColor Boolean  @default(true)
+  highlightColorMode       String   @default("SPREAD")
+  createdAt                DateTime @default(now())
+  updatedAt                DateTime @updatedAt
 }
 
 model ExternalMcpServer {
@@ -3948,33 +3954,34 @@ model SseHistorySavedFilter {
 
 // Separate from GitHub worktree automation: an MR can have Jira follow-ups without a checkout.
 model GitLabMergeOperation {
-  id                  String    @id
-  instanceUrl         String
-  projectId           String
-  iid                 Int
-  state               String    @default("PREPARING")
-  sourceProjectId     String?
-  sourceOrigin        String?
-  branch              String
-  sha                 String
-  autoMerge           Boolean   @default(false)
-  squash              Boolean   @default(false)
-  removeSourceBranch  Boolean   @default(false)
-  mergeCommitMessage  String?
-  squashCommitMessage String?
-  worktreeId          String?
-  worktreeFolder      String?
-  deleteWorktree      Boolean   @default(false)
-  moveTicketToDone    Boolean   @default(false)
-  ticketKey           String?
-  mergeConfirmedAt    DateTime?
-  ticketMovedAt       DateTime?
-  worktreeDeletedAt   DateTime?
-  deleteJobId         String?
-  deleteRequestId     String?
-  lastError           String?
-  createdAt           DateTime  @default(now())
-  updatedAt           DateTime  @updatedAt
+  baseBranchUpdatesJson String?
+  id                    String    @id
+  instanceUrl           String
+  projectId             String
+  iid                   Int
+  state                 String    @default("PREPARING")
+  sourceProjectId       String?
+  sourceOrigin          String?
+  branch                String
+  sha                   String
+  autoMerge             Boolean   @default(false)
+  squash                Boolean   @default(false)
+  removeSourceBranch    Boolean   @default(false)
+  mergeCommitMessage    String?
+  squashCommitMessage   String?
+  worktreeId            String?
+  worktreeFolder        String?
+  deleteWorktree        Boolean   @default(false)
+  moveTicketToDone      Boolean   @default(false)
+  ticketKey             String?
+  mergeConfirmedAt      DateTime?
+  ticketMovedAt         DateTime?
+  worktreeDeletedAt     DateTime?
+  deleteJobId           String?
+  deleteRequestId       String?
+  lastError             String?
+  createdAt             DateTime  @default(now())
+  updatedAt             DateTime  @updatedAt
 
   @@unique([instanceUrl, projectId, iid])
   @@index([state, updatedAt])
@@ -4242,4 +4249,15 @@ model McpAuthorization {
   user                User      @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@index([userId, clientId])
+}
+
+model ReviewerDirectorySnapshot {
+  id           String   @id
+  key          String   @unique
+  provider     String
+  endpoint     String
+  responseJson String
+  fetchedAt    DateTime
+
+  @@index([provider, fetchedAt])
 }

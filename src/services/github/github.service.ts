@@ -1,3 +1,7 @@
+import {
+  cachedReviewerDirectory,
+  clearReviewerDirectory,
+} from "@/services/reviewers/directory-cache";
 import { publishIntegrationConfiguration } from "@/services/integration-configuration-events";
 import { createHash, randomBytes, randomUUID } from "node:crypto";
 
@@ -1563,6 +1567,7 @@ export class GitHubService {
     token: string,
     requestSource: GitHubRequestSource,
     body: Record<string, unknown>,
+    method: "POST" | "DELETE" = "POST",
   ): Promise<void> {
     this.invalidateRestRequests();
     try {
@@ -1572,6 +1577,7 @@ export class GitHubService {
         token,
         requestSource,
         body,
+        method,
       );
     } finally {
       this.invalidateRestRequests();
@@ -1584,6 +1590,7 @@ export class GitHubService {
     token: string,
     requestSource: GitHubRequestSource,
     body: Record<string, unknown>,
+    method: "POST" | "DELETE" = "POST",
   ): Promise<void> {
     await assertGitHubRestRateLimitAvailable("PAT");
     const startedAt = Date.now();
@@ -1595,7 +1602,7 @@ export class GitHubService {
       this.cache
         .recordRestCall({
           authentication: "PAT",
-          method: "POST",
+          method,
           endpoint: url,
           operation,
           requestSource,
@@ -1606,7 +1613,7 @@ export class GitHubService {
     let response: Response;
     try {
       response = await fetch(url, {
-        method: "POST",
+        method,
         headers: {
           accept: "application/vnd.github+json",
           authorization: `Bearer ${token}`,
@@ -2014,7 +2021,11 @@ export class GitHubService {
     return this.cache.updateTtl(ttlMinutes, () => this.getSettings());
   }
 
-  async clearCache(repositoryNameWithOwner?: string): Promise<boolean> {
+  async clearCache(
+    repositoryNameWithOwner?: string,
+    preserveReviewerDirectory = false,
+  ): Promise<boolean> {
+    if (!preserveReviewerDirectory) await clearReviewerDirectory("GITHUB");
     this.invalidateRestRequests(repositoryNameWithOwner);
     try {
       return await this.cache.clear();
@@ -6567,6 +6578,8 @@ export class GitHubService {
     path: string,
     worktree = false,
     refresh = false,
+    directory = false,
+    onCache?: (stale: boolean) => void,
   ): Promise<T> {
     const root = new URL(`${GITHUB_API_BASE_URL}/`);
     const url = new URL(path.replace(/^\//, ""), root);
@@ -6579,6 +6592,23 @@ export class GitHubService {
         "GitHub reviewer requests must stay within the configured API",
       );
     }
+    const token = await this.requireToken();
+    if (directory)
+      return cachedReviewerDirectory({
+        provider: "GITHUB",
+        scope: token,
+        endpoint: url.toString(),
+        force: refresh,
+        onCache,
+        load: () =>
+          this.restRequest<T>(
+            url.toString(),
+            GITHUB_REST_OPERATIONS.reviewers.discovery,
+            token,
+            worktree ? "WORKTREES" : "CODEBASE_REPOSITORY",
+            { force: true },
+          ),
+      });
     return this.restRequest<T>(
       url.toString(),
       GITHUB_REST_OPERATIONS.reviewers.discovery,
@@ -6614,6 +6644,7 @@ export class GitHubService {
     number: number;
     expectedId: string;
     reviewers: Array<{ id: string; username: string }>;
+    removeReviewers?: Array<{ id: string; username: string }>;
   }): Promise<void> {
     const { owner, name } = normalizeGitHubRepositoryName(
       `${input.owner}/${input.name}`,
@@ -6650,6 +6681,29 @@ export class GitHubService {
         return user.node_id;
       },
     );
+    if (input.removeReviewers !== undefined) {
+      const endpoint = `https://api.github.com/repos/${encodeURIComponent(owner)}/${encodeURIComponent(name)}/pulls/${input.number}/requested_reviewers`;
+      const token = await this.requireToken();
+      if (input.removeReviewers.length)
+        await this.restMutation(
+          endpoint,
+          GITHUB_REST_OPERATIONS.reviewers.remove,
+          token,
+          "WORKTREES",
+          { reviewers: input.removeReviewers.map((person) => person.username) },
+          "DELETE",
+        );
+      if (input.reviewers.length)
+        await this.restMutation(
+          endpoint,
+          GITHUB_REST_OPERATIONS.reviewers.assign,
+          token,
+          "WORKTREES",
+          { reviewers: input.reviewers.map((person) => person.username) },
+        );
+      await this.clearCache(undefined, true).catch(() => undefined);
+      return;
+    }
     await this.request(
       `mutation AssignWorktreeCodeReviewers($pullRequestId: ID!, $userIds: [ID!]!) {
         requestReviews(input: { pullRequestId: $pullRequestId, userIds: $userIds, union: true }) { pullRequest { id } }
@@ -6660,7 +6714,7 @@ export class GitHubService {
     );
     // The external write succeeded. A cache maintenance failure must not invite
     // a repeated request or be presented as an assignment failure.
-    await this.clearCache().catch(() => undefined);
+    await this.clearCache(undefined, true).catch(() => undefined);
   }
 
   async dispatchWorkflow(input: {

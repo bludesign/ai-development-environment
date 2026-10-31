@@ -152,3 +152,74 @@ test("GitLab ownership GraphQL reads keep credentials private and use bounded fr
   );
   expect(JSON.stringify(log.mock.calls)).not.toContain("private-token");
 });
+
+test("GitLab removals preserve reviewers added externally and can clear the last request", async () => {
+  const service = new GitLabService();
+  const internal = service as unknown as GitLabInternals;
+  const get = vi.spyOn(internal, "get").mockResolvedValue({
+    data: { id: 77, state: "opened", reviewers: [{ id: 2 }, { id: 9 }] },
+  });
+  const mutate = vi.spyOn(internal, "mutate").mockResolvedValue({});
+  await service.addMergeRequestReviewers({
+    projectId: "10",
+    iid: 8,
+    expectedId: "77",
+    reviewerIds: ["3"],
+    removeReviewerIds: ["2"],
+  });
+  expect(mutate).toHaveBeenLastCalledWith(
+    expect.objectContaining({ body: { reviewer_ids: [9, 3] } }),
+  );
+  get.mockResolvedValue({
+    data: { id: 77, state: "opened", reviewers: [{ id: 9 }] },
+  });
+  await service.addMergeRequestReviewers({
+    projectId: "10",
+    iid: 8,
+    expectedId: "77",
+    reviewerIds: [],
+    removeReviewerIds: ["9"],
+  });
+  expect(mutate).toHaveBeenLastCalledWith(
+    expect.objectContaining({ body: { reviewer_ids: [] } }),
+  );
+});
+test("GitHub applies explicit removals and additions without replacing other users or teams", async () => {
+  const service = new GitHubService();
+  const internal = service as unknown as GitHubInternals & {
+    restMutation(...args: unknown[]): Promise<void>;
+  };
+  vi.spyOn(internal, "reviewerRest").mockImplementation(async (path) =>
+    path.includes("/pulls/")
+      ? { id: 77, node_id: "PR_77", state: "open" }
+      : { id: 3, node_id: "USER_3" },
+  );
+  vi.spyOn(internal, "requireToken").mockResolvedValue("token");
+  vi.spyOn(internal, "clearCache").mockResolvedValue(true);
+  const write = vi.spyOn(internal, "restMutation").mockResolvedValue(undefined);
+  await service.addPullRequestReviewers({
+    owner: "acme",
+    name: "project",
+    number: 8,
+    expectedId: "77",
+    reviewers: [{ id: "3", username: "carol" }],
+    removeReviewers: [{ id: "2", username: "bob" }],
+  });
+  expect(write).toHaveBeenNthCalledWith(
+    1,
+    expect.stringContaining("/requested_reviewers"),
+    "reviewers.remove",
+    "token",
+    "WORKTREES",
+    { reviewers: ["bob"] },
+    "DELETE",
+  );
+  expect(write).toHaveBeenNthCalledWith(
+    2,
+    expect.any(String),
+    "reviewers.assign",
+    "token",
+    "WORKTREES",
+    { reviewers: ["carol"] },
+  );
+});

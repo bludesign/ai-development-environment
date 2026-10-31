@@ -1,4 +1,5 @@
 "use client";
+import { Bell } from "lucide-react";
 
 import {
   CheckCircle2,
@@ -218,7 +219,10 @@ export function PushNotificationSettingsCard() {
   return (
     <Card>
       <CardHeader>
-        <CardTitle>{t("title")}</CardTitle>
+        <CardTitle className="flex items-center gap-2">
+          <Bell className="size-5" />
+          {t("title")}
+        </CardTitle>
       </CardHeader>
       <CardContent className="space-y-6">
         {error && (

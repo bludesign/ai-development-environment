@@ -906,7 +906,25 @@ input GitLabPipelineVariableInput {
   value: String!
 }
 
+"Durable GitLab project reviewer-directory membership."
+type GitLabReviewerDirectory {
+  "GitLab project identifier."
+  id: ID!
+  "Repository path with namespace."
+  repository: String!
+  "Distinct members across cached pages."
+  memberCount: Int!
+  "Oldest page fetch time."
+  fetchedAt: String!
+  "Directory expiry according to its TTL."
+  expiresAt: String!
+  "Whether any cached page has expired."
+  stale: Boolean!
+}
+
 extend type Query {
+  "List durable reviewer membership cached separately from live approvals."
+  gitlabReviewerDirectories: [GitLabReviewerDirectory!]!
   "Source control integration state for Query."
   sourceControlIntegrationState: SourceControlIntegrationState!
   "Gitlab settings for Query."
@@ -1035,6 +1053,16 @@ extend type Query {
 }
 
 extend type Mutation {
+  "Refresh project reviewer membership on demand."
+  refreshGitLabReviewerDirectory(
+    "GitLab project identifier."
+    projectId: ID!
+  ): [GitLabReviewerDirectory!]!
+  "Delete cached membership so a subsequent full discovery reloads it."
+  deleteGitLabReviewerDirectory(
+    "GitLab project identifier."
+    projectId: ID!
+  ): Boolean!
   "Save git lab settings for Mutation."
   saveGitLabSettings(
     "Input used by saveGitLabSettings."
@@ -1185,6 +1213,8 @@ extend type Subscription {
 
 "Persisted merge intent and independently retryable follow-ups."
 type GitLabMergeOperation {
+  "Recorded outcomes for selected targeting worktrees."
+  baseBranchUpdateResults: [MergeBaseBranchUpdateResult!]!
   "Stable identifier of the saved merge operation."
   id: ID!
   "Current merge-request state or durable merge-operation lifecycle state."
@@ -1209,6 +1239,8 @@ type GitLabMergeOperation {
 
 "Current GitLab project policy, readiness, defaults and linked follow-ups."
 type GitLabMergeOptions {
+  "Targeting worktrees and the reviewed destination for post-merge base updates."
+  baseBranchUpdateOptions: MergeBaseBranchUpdateOptions
   "Numeric GitLab target project identifier."
   projectId: ID!
   "Project-scoped merge-request number."
@@ -1279,6 +1311,8 @@ type GitLabMergeResult {
 
 "Submit the SHA reviewed in the merge sheet. Omitted messages use GitLab defaults."
 input SubmitGitLabMergeRequestMergeInput {
+  "Selected targeting worktrees to update only after the merge is confirmed."
+  baseBranchUpdate: MergeBaseBranchUpdateInput
   "Numeric GitLab target project identifier."
   projectId: ID!
   "Project-scoped merge-request number."

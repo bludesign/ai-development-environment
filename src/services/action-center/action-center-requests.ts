@@ -70,6 +70,8 @@ type GitHubRequestChange = {
 };
 
 export const ACTION_CENTER_DEFAULTS = {
+  hideUnapprovedRequestsInSidebar: true,
+  hideRunningPipelineRequestsInSidebar: true,
   maximumRequestAgeDays: 30,
   showMyRequestsInSidebar: true,
   showReviewRequestsInSidebar: true,

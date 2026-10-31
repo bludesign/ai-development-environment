@@ -75,6 +75,7 @@ export function MergePullRequestButton({
   const [commitHeadline, setCommitHeadline] = useState("");
   const [commitBody, setCommitBody] = useState("");
   const [authorEmail, setAuthorEmail] = useState(DEFAULT_EMAIL);
+  const [selectedWorktreeIds, setSelectedWorktreeIds] = useState<string[]>([]);
   const [deleteWorktree, setDeleteWorktree] = useState(false);
   const [moveTicketToDone, setMoveTicketToDone] = useState(false);
   const [mergedResult, setMergedResult] =
@@ -147,6 +148,9 @@ export function MergePullRequestButton({
           if (!active) return;
           const next = data.githubPullRequestMergeOptions;
           setOptions(next);
+          setSelectedWorktreeIds(
+            next.baseBranchUpdateOptions?.selectedWorktreeIds ?? [],
+          );
           setMethod(next.defaultMethod ?? next.availableMethods[0] ?? "");
           setDeleteWorktree(
             Boolean(next.canDeleteWorktree && next.defaultDeleteWorktree),
@@ -205,6 +209,16 @@ export function MergePullRequestButton({
             commitBody,
             authorEmail: authorEmail === DEFAULT_EMAIL ? null : authorEmail,
             worktreeId: worktreeId ?? options.worktreeId,
+            ...(selectedWorktreeIds.length &&
+            options?.baseBranchUpdateOptions?.destinationBaseBranch
+              ? {
+                  baseBranchUpdate: {
+                    worktreeIds: selectedWorktreeIds,
+                    destinationBaseBranch:
+                      options.baseBranchUpdateOptions.destinationBaseBranch,
+                  },
+                }
+              : {}),
             deleteWorktree,
             moveTicketToDone,
           },
@@ -341,6 +355,8 @@ export function MergePullRequestButton({
                   </div>
                   <MergeFollowUpFields
                     options={options}
+                    selectedWorktreeIds={selectedWorktreeIds}
+                    onSelectedWorktreeIdsChange={setSelectedWorktreeIds}
                     disabled={merging}
                     deleteWorktree={deleteWorktree}
                     moveTicketToDone={moveTicketToDone}

@@ -20,6 +20,14 @@ export const createDiskSpaceResolvers = (
   systemStatus: SystemStatusService,
 ) => ({
   Query: {
+    sidebarUsageHistory: (
+      _root: unknown,
+      _args: unknown,
+      context: GraphQLContext,
+    ) => {
+      requireControlPlane(context);
+      return systemStatus.usageHistory();
+    },
     diskSpaceSettings: (
       _root: unknown,
       _args: unknown,

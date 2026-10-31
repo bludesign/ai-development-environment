@@ -25,6 +25,12 @@ beforeEach(async () => {
   );
   for (const statement of migration.split(";").filter((sql) => sql.trim()))
     await prisma.$executeRawUnsafe(statement);
+  await prisma.$executeRawUnsafe(
+    'ALTER TABLE "ActionCenterSettings" ADD COLUMN "hideUnapprovedRequestsInSidebar" BOOLEAN NOT NULL DEFAULT true',
+  );
+  await prisma.$executeRawUnsafe(
+    'ALTER TABLE "ActionCenterSettings" ADD COLUMN "hideRunningPipelineRequestsInSidebar" BOOLEAN NOT NULL DEFAULT true',
+  );
   getPrismaClient.mockResolvedValue(prisma);
 });
 afterEach(async () => {
