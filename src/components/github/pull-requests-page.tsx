@@ -96,6 +96,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Link, useRouter } from "@/i18n/navigation";
 import { controlPlaneRequest } from "@/lib/control-plane-client";
 import { dayKey, formatDateValue } from "@/lib/date-format";
+import { isRowActivation } from "@/lib/row-activation";
 import { cn } from "@/lib/utils";
 import {
   worktreeHighlightBackgroundClasses,
@@ -786,9 +787,10 @@ function PullRequestTable({
                       highlight &&
                         worktreeHighlightBackgroundClasses[highlight],
                     )}
-                    onClick={() =>
-                      router.push(pullRequestDetailHref(pullRequest))
-                    }
+                    onClick={(event) => {
+                      if (isRowActivation(event))
+                        router.push(pullRequestDetailHref(pullRequest));
+                    }}
                   >
                     <TableCell
                       className={cn(

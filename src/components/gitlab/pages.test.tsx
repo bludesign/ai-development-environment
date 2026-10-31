@@ -12,6 +12,13 @@ import { controlPlaneRequest } from "@/lib/control-plane-client";
 
 import { GitLabMergeRequestsPage, GitLabPipelinesPage } from "./pages";
 
+const navigation = vi.hoisted(() => ({ push: vi.fn() }));
+
+vi.mock("@/i18n/navigation", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/i18n/navigation")>()),
+  useRouter: () => navigation,
+}));
+
 vi.mock("@/lib/control-plane-client", () => ({
   controlPlaneSubscriptions: vi.fn(() => ({ subscribe: vi.fn(() => vi.fn()) })),
   onControlPlaneRecovery: vi.fn(() => vi.fn()),
@@ -81,6 +88,7 @@ const mergeRequest = {
 };
 
 beforeEach(() => {
+  navigation.push.mockReset();
   requestMock.mockReset();
   window.history.replaceState(null, "", "/gitlab/merge-requests");
   global.ResizeObserver = class {
@@ -211,9 +219,13 @@ describe("GitLabMergeRequestsPage", () => {
     expect(
       screen.getByRole("tab", { name: "Mine" }).getAttribute("aria-selected"),
     ).toBe("true");
+    fireEvent.click(screen.getByText("Add the API").closest("tr")!);
+    expect(navigation.push).toHaveBeenCalledExactlyOnceWith(
+      "/gitlab/merge-requests/project-1/17",
+    );
   });
 
-  test("keeps failed merge follow-ups available after the Open list removes the merged request", async () => {
+  test.each(["mouse", "keyboard"])("%s merge stays on page", async (via) => {
     let merged = false;
     const operation = {
       id: "merge-operation-1",
@@ -300,7 +312,10 @@ describe("GitLabMergeRequestsPage", () => {
       await screen.findByRole("button", { name: "Actions: !17" }),
       { button: 0, ctrlKey: false },
     );
-    fireEvent.click(screen.getByRole("menuitem", { name: "Merge" }));
+    const merge = screen.getByRole("menuitem", { name: "Merge" });
+    if (via === "keyboard") fireEvent.keyDown(merge, { key: "Enter" });
+    else fireEvent.click(merge);
+    expect(navigation.push).not.toHaveBeenCalled();
     fireEvent.click(await screen.findByRole("button", { name: "Merge now" }));
 
     await screen.findByText("No merge requests match these filters.");
@@ -313,6 +328,7 @@ describe("GitLabMergeRequestsPage", () => {
     fireEvent.click(screen.getByRole("button", { name: "Retry follow-ups" }));
 
     await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+    expect(navigation.push).not.toHaveBeenCalled();
     expect(
       requestMock.mock.calls.filter(([query]) =>
         query.includes("mutation SubmitGitLabMergeRequestMerge"),
