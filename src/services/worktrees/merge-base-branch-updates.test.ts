@@ -1,11 +1,19 @@
 // @vitest-environment node
 import { existsSync, readFileSync, readdirSync } from "node:fs";
-import { mkdtemp, rm } from "node:fs/promises";
+import { copyFile, mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import Database from "better-sqlite3";
 import { PrismaBetterSqlite3 } from "@prisma/adapter-better-sqlite3";
-import { afterEach, beforeEach, expect, test, vi } from "vitest";
+import {
+  afterAll,
+  afterEach,
+  beforeAll,
+  beforeEach,
+  expect,
+  test,
+  vi,
+} from "vitest";
 import { PrismaClient } from "@/generated/prisma/client";
 import type { WorktreesService } from "./worktrees.service";
 const mock = vi.hoisted(() => ({ getPrismaClient: vi.fn() }));
@@ -19,6 +27,8 @@ import {
 
 let prisma: PrismaClient;
 let directory: string;
+let templateDatabasePath: string;
+let databaseCount = 0;
 const refreshed = vi.fn();
 const worktrees = {
   refreshBaseBranchWatch: refreshed,
@@ -47,16 +57,29 @@ async function save(ids = ["child"]) {
     },
   });
 }
+beforeAll(async () => {
+  directory = await mkdtemp(join(tmpdir(), "aide-merge-bases-"));
+  templateDatabasePath = join(directory, "template.db");
+  // Migrate once in memory so CI does not sync every schema statement to disk.
+  // Each test still uses an isolated on-disk copy with real transactions.
+  const db = new Database(":memory:");
+  try {
+    for (const migration of readdirSync("prisma/migrations").sort()) {
+      const path = join("prisma/migrations", migration, "migration.sql");
+      if (existsSync(path)) db.exec(readFileSync(path, "utf8"));
+    }
+    await db.backup(templateDatabasePath);
+  } finally {
+    db.close();
+  }
+});
+afterAll(async () => {
+  await rm(directory, { recursive: true, force: true });
+});
 beforeEach(async () => {
   refreshed.mockReset();
-  directory = await mkdtemp(join(tmpdir(), "aide-merge-bases-"));
-  const path = join(directory, "test.db");
-  const db = new Database(path);
-  for (const migration of readdirSync("prisma/migrations").sort()) {
-    const path = join("prisma/migrations", migration, "migration.sql");
-    if (existsSync(path)) db.exec(readFileSync(path, "utf8"));
-  }
-  db.close();
+  const path = join(directory, `test-${++databaseCount}.db`);
+  await copyFile(templateDatabasePath, path);
   prisma = new PrismaClient({
     adapter: new PrismaBetterSqlite3({ url: path }),
   });
@@ -123,7 +146,6 @@ beforeEach(async () => {
 });
 afterEach(async () => {
   await prisma.$disconnect();
-  await rm(directory, { recursive: true, force: true });
 });
 
 test("discovers explicit and inherited targets across agents, with no initial selections", async () => {
