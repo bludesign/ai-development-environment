@@ -26,6 +26,7 @@ export type WorktreeSourceControlRequest = {
   worktreeId?: string | null;
   detailedMergeStatus?: string;
   approvalState?: string | null;
+  reviewers?: Array<{ id: string }>;
   unresolvedDiscussionsCount?: number | null;
 };
 

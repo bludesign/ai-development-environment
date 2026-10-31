@@ -2161,17 +2161,11 @@ function LatestBuildRow({
           </DropdownMenuItem>
         </DropdownMenuContent>
       </DropdownMenu>
-      {build.status === "SUCCEEDED" ? (
-        <Badge asChild variant={buildStatusVariant(build.status)}>
-          <Link href={`/dashboard/builds/${build.id}`}>
-            {buildsT(`statuses.${build.status}`)}
-          </Link>
-        </Badge>
-      ) : (
-        <Badge variant={buildStatusVariant(build.status)}>
+      <Badge asChild variant={buildStatusVariant(build.status)}>
+        <Link href={`/dashboard/builds/${build.id}`}>
           {buildsT(`statuses.${build.status}`)}
-        </Badge>
-      )}
+        </Link>
+      </Badge>
       {build.outOfDate && (
         <OutOfDateBadge
           buildId={build.id}
@@ -2321,7 +2315,14 @@ export function PullRequestBadges({
             worktreeId={worktree.id}
           >
             <Badge className={reviewClass(worktree.pullRequest.reviewDecision)}>
-              {t(`review.${worktree.pullRequest.reviewDecision}`)}
+              {t(
+                `review.${
+                  worktree.pullRequest.reviewDecision === "REVIEW_REQUIRED" &&
+                  (worktree.pullRequest.requestedReviewerCount ?? 0) > 0
+                    ? "REVIEW_REQUESTED"
+                    : worktree.pullRequest.reviewDecision
+                }`,
+              )}
             </Badge>
           </WorktreeReviewStatusPopover>
           <Badge
@@ -2365,7 +2366,10 @@ export function PullRequestBadges({
             requestUrl={gitLabMergeRequest.url}
             worktreeId={worktree.id}
           >
-            <GitLabApprovalBadge state={gitLabMergeRequest.approvalState} />
+            <GitLabApprovalBadge
+              state={gitLabMergeRequest.approvalState}
+              reviewRequested={Boolean(gitLabMergeRequest.reviewers?.length)}
+            />
           </WorktreeReviewStatusPopover>
           {gitLabMergeRequest.projectId ? (
             <Badge

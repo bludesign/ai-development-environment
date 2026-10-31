@@ -698,6 +698,7 @@ model WorktreePullRequest {
   labelsJson                  String
   jiraKey                     String?
   reviewDecision              String
+  requestedReviewerCount      Int      @default(0)
   unresolvedReviewThreadCount Int
   state                       String
   isDraft                     Boolean

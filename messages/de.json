@@ -2404,6 +2404,7 @@
     "approvalStates": {
       "APPROVED": "Genehmigt",
       "REVIEW_REQUIRED": "Review erforderlich",
+      "REVIEW_REQUESTED": "Review angefordert",
       "CHANGES_REQUESTED": "Änderungen angefordert",
       "NOT_REQUIRED": "Nicht erforderlich",
       "UNKNOWN": "Nicht verfügbar"
@@ -3729,6 +3730,7 @@
       "APPROVED": "Genehmigt",
       "CHANGES_REQUESTED": "Änderungen angefordert",
       "REVIEW_REQUIRED": "Prüfung erforderlich",
+      "REVIEW_REQUESTED": "Review angefordert",
       "NONE": "Keine Entscheidung"
     },
     "comments": "Kommentare: {count}",

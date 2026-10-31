@@ -1,10 +1,10 @@
 export const PULL_REQUEST_FIELDS =
-  "id number title url repositoryGithubId repositoryNameWithOwner repositoryUrl labels jiraKey pipelineStatus pipelineRevision pipelines { id name status url checkSuiteId canRetry retryUnavailableReason jobs { id name status url canRetry retryUnavailableReason steps { number name status } } } reviewDecision unresolvedReviewThreadCount state isDraft mergeable mergeStateStatus autoMergeEnabled viewerCanEnableAutoMerge viewerCanDisableAutoMerge headRefOid headRefName createdAt";
+  "id number title url repositoryGithubId repositoryNameWithOwner repositoryUrl labels jiraKey pipelineStatus pipelineRevision pipelines { id name status url checkSuiteId canRetry retryUnavailableReason jobs { id name status url canRetry retryUnavailableReason steps { number name status } } } reviewDecision requestedReviewerCount unresolvedReviewThreadCount state isDraft mergeable mergeStateStatus autoMergeEnabled viewerCanEnableAutoMerge viewerCanDisableAutoMerge headRefOid headRefName createdAt";
 
 export const SOURCE_CONTROL_REQUEST_FIELDS = `
   provider id number title url isDraft headRefName headRefOid createdAt
   ... on GitLabMergeRequest {
-    projectId state worktreeId detailedMergeStatus approvalState unresolvedDiscussionsCount
+    projectId state worktreeId detailedMergeStatus approvalState reviewers { id } unresolvedDiscussionsCount
   }
 `;
 

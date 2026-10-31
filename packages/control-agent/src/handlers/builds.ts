@@ -2883,7 +2883,7 @@ export const runIosBuild: AgentJobHandler = async (
           args: xcodeBuildSettingsArguments(input, folder),
           cwd: folder,
           env: xcodeEnvironment(),
-          timeoutMs: Math.min(timeoutMs, 60_000),
+          timeoutMs: Math.min(timeoutMs, 180_000),
           signal,
           logger,
           phase: "PREFLIGHT",

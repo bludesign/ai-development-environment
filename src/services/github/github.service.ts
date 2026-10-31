@@ -212,6 +212,7 @@ type RawPullRequest = {
     contexts: RawConnection<RawPipelineContext>;
   } | null;
   reviewDecision: string | null;
+  reviewRequests?: { totalCount: number } | null;
   reviewThreads: RawConnection<{ isResolved: boolean }>;
   isDraft: boolean;
   mergeable: "CONFLICTING" | "MERGEABLE" | "UNKNOWN";
@@ -229,6 +230,7 @@ type RawPullRequestLiveStatus = Pick<
   | "mergedAt"
   | "statusCheckRollup"
   | "reviewDecision"
+  | "reviewRequests"
   | "reviewThreads"
   | "isDraft"
   | "mergeable"
@@ -535,6 +537,7 @@ const PULL_REQUEST_BASE_FIELDS = `
       }
     }
     reviewDecision
+    reviewRequests(first: 1) { totalCount }
     isDraft
     mergeable
     mergeStateStatus
@@ -569,6 +572,7 @@ const PULL_REQUEST_LIVE_FRAGMENT = `
       }
     }
     reviewDecision
+    reviewRequests(first: 1) { totalCount }
     reviewThreads(first: 100) {
       nodes { isResolved }
       pageInfo { hasNextPage endCursor }
@@ -4869,6 +4873,7 @@ export class GitHubService {
       pipelines: canonical.snapshot.pipelines,
       pipelineRevision: canonical.snapshot.revision,
       reviewDecision: reviewDecision(pullRequest.reviewDecision),
+      requestedReviewerCount: pullRequest.reviewRequests?.totalCount ?? 0,
       unresolvedReviewThreadCount,
       state: pullRequest.mergedAt ? "MERGED" : pullRequest.state,
       isDraft: pullRequest.isDraft,

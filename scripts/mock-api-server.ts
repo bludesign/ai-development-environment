@@ -94,6 +94,7 @@ type PullRequestSeed = {
   state: "OPEN" | "MERGED" | "CLOSED";
   isDraft: boolean;
   reviewDecision: "APPROVED" | "CHANGES_REQUESTED" | "REVIEW_REQUIRED" | null;
+  requestedReviewerCount?: number;
   rollup: "SUCCESS" | "FAILURE" | "PENDING";
   labels: string[];
   additions: number;
@@ -168,6 +169,7 @@ const PULL_REQUESTS: PullRequestSeed[] = [
     state: "OPEN",
     isDraft: false,
     reviewDecision: "REVIEW_REQUIRED",
+    requestedReviewerCount: 1,
     rollup: "SUCCESS",
     labels: ["ios", "build"],
     additions: 132,
@@ -607,6 +609,7 @@ const pullRequestNode = (seed: PullRequestSeed) => ({
     contexts: connection(pipelineContexts(seed)),
   },
   reviewDecision: seed.reviewDecision,
+  reviewRequests: { totalCount: seed.requestedReviewerCount ?? 0 },
   isDraft: seed.isDraft,
   mergeable: seed.rollup === "FAILURE" ? "CONFLICTING" : "MERGEABLE",
   mergeStateStatus: seed.rollup === "FAILURE" ? "BLOCKED" : "CLEAN",

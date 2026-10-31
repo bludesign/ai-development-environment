@@ -576,6 +576,8 @@ type GitHubPullRequest implements SourceControlRequest {
   pipelineRevision: Int!
   "The review decision associated with this GitHub pull request."
   reviewDecision: GitHubReviewDecision!
+  "Number of pending reviewer or team review requests, when available."
+  requestedReviewerCount: Int
   "Number of unresolved review threads."
   unresolvedReviewThreadCount: Int!
   "Current state of this GitHub pull request."
@@ -1182,6 +1184,8 @@ type GitHubPullRequestDetail {
   pipelineRevision: Int!
   "The review decision associated with this GitHub pull request detail."
   reviewDecision: GitHubReviewDecision!
+  "Number of pending reviewer or team review requests, when available."
+  requestedReviewerCount: Int
   "Number of unresolved review threads."
   unresolvedReviewThreadCount: Int!
   "ISO 8601 timestamp when this GitHub pull request detail was created."
