@@ -139,9 +139,11 @@ export class GitHubReviewerProvider {
         if (path.endsWith("/members"))
           return (
             await mapIntegrationRequests(
-              options.summary
-                ? uniquePeople([...currentReviewers, ...approvedReviewers])
-                : options.people,
+              uniquePeople([
+                ...options.people,
+                ...currentReviewers,
+                ...approvedReviewers,
+              ]),
               async (person) => {
                 try {
                   const membership = await read<{ state: string }>(
@@ -308,16 +310,23 @@ export class GitHubReviewerProvider {
           .map((review) => providerPerson(review.user)),
       );
     }
-    if (options.summary) {
+    if (options.people !== undefined) {
       const validated = await mapIntegrationRequests(
-        uniquePeople([...currentReviewers, ...approvedReviewers]),
+        uniquePeople([...currentReviewers, ...approvedReviewers]).filter(
+          (person) => !generalById.has(person.id),
+        ),
         async (person) => {
           try {
-            const access = await read<{ permission: string }>(
+            const access = await read<{
+              permission: string;
+              user: ProviderUser;
+            }>(
               `${prefix}/collaborators/${encodeURIComponent(person.username)}/permission`,
             );
-            return ["write", "maintain", "admin"].includes(access.permission)
-              ? person
+            return eligibleHuman(access.user) &&
+              String(access.user.id) === person.id &&
+              ["write", "maintain", "admin"].includes(access.permission)
+              ? providerPerson(access.user)
               : null;
           } catch (error) {
             if (statusIs(error, 404)) return null;
@@ -334,6 +343,12 @@ export class GitHubReviewerProvider {
           general.push(person);
           generalById.set(person.id, person);
         }
+      mergePool(pools, {
+        key: generalKey,
+        name: "General reviewers",
+        kind: "GENERAL",
+        candidates: general,
+      });
     }
     const approvedIds = approvedReviewers
       .filter((person) => generalById.has(person.id))

@@ -88,3 +88,26 @@ test("availability only needs an open request and saved configuration", () => {
   expect(canAssignReviewers({ pullRequest: { state: "OPEN" } })).toBe(false);
   expect(canAssignReviewers({ codebase })).toBe(false);
 });
+
+test("random previews forward pending removals for control-plane users", () => {
+  const service = { previewRandomWorktreeReviewers: vi.fn() };
+  const resolver = createReviewerResolvers(
+    service as unknown as ReviewersService,
+  );
+  resolver.Query.previewRandomWorktreeReviewers(
+    null,
+    {
+      worktreeId: "w",
+      requestId: "p",
+      selectedReviewerIds: [],
+      removeReviewerIds: ["existing"],
+    },
+    {} as GraphQLContext,
+  );
+  expect(service.previewRandomWorktreeReviewers).toHaveBeenCalledWith(
+    "w",
+    "p",
+    [],
+    ["existing"],
+  );
+});

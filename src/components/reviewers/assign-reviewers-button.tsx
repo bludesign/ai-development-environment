@@ -66,7 +66,6 @@ export function AssignReviewersButton({
     const controller = new AbortController();
     const timer = window.setTimeout(() => {
       setLoading(true);
-      setError(null);
 
       void controlPlaneRequest<{
         worktreeReviewerAssignment: WorktreeReviewerAssignment;
@@ -116,8 +115,8 @@ export function AssignReviewersButton({
       const result = await controlPlaneRequest<{
         previewRandomWorktreeReviewers: WorktreeReviewerAssignment;
       }>(
-        `query PreviewRandomWorktreeReviewers($worktreeId: ID!, $requestId: ID!, $selectedReviewerIds: [ID!]) {
-          previewRandomWorktreeReviewers(worktreeId: $worktreeId, requestId: $requestId, selectedReviewerIds: $selectedReviewerIds) {
+        `query PreviewRandomWorktreeReviewers($worktreeId: ID!, $requestId: ID!, $selectedReviewerIds: [ID!], $removeReviewerIds: [ID!]) {
+          previewRandomWorktreeReviewers(worktreeId: $worktreeId, requestId: $requestId, selectedReviewerIds: $selectedReviewerIds, removeReviewerIds: $removeReviewerIds) {
             ${WORKTREE_REVIEWER_ASSIGNMENT_FIELDS}
           }
         }`,
@@ -125,6 +124,9 @@ export function AssignReviewersButton({
           worktreeId: worktree.id,
           requestId: data.requestId,
           selectedReviewerIds: selected,
+          removeReviewerIds: data.currentReviewerIds.filter(
+            (id) => !selected.includes(id),
+          ),
         },
       );
       setData(
@@ -217,6 +219,7 @@ export function AssignReviewersButton({
         initialized.current = false;
         setData(null);
         setSelected([]);
+        setError(null);
         setLoadAll(false);
         setRevision(0);
       }
@@ -258,7 +261,10 @@ export function AssignReviewersButton({
         <Button
           aria-label={t("reload")}
           disabled={loading || busy}
-          onClick={() => setRevision((value) => value + 1)}
+          onClick={() => {
+            setError(null);
+            setRevision((value) => value + 1);
+          }}
           size="icon-sm"
           type="button"
           variant="ghost"
@@ -282,7 +288,10 @@ export function AssignReviewersButton({
           variant="outline"
           size="sm"
           disabled={loading || busy}
-          onClick={() => setLoadAll(true)}
+          onClick={() => {
+            setError(null);
+            setLoadAll(true);
+          }}
         >
           {t("loadAllReviewers")}
         </Button>

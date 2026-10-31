@@ -306,17 +306,19 @@ export function worktreeReviewStatusView(
 export function randomReviewerPreview(
   assignment: ReviewerAssignment,
   selectedReviewerIds: string[] = [],
+  removeReviewerIds: string[] = [],
   random = Math.random,
 ): ReviewerAssignment {
+  const removed = new Set(removeReviewerIds);
   const candidates = unique(
     assignment.requirements.flatMap((rule) => rule.candidateReviewerIds),
-  );
+  ).filter((id) => !removed.has(id));
   const allowed = new Set(candidates);
   const selected = new Set(selectedReviewerIds.filter((id) => allowed.has(id)));
   const covered = (rule: ReviewerAssignment["requirements"][number]) =>
     new Set([
       ...rule.approvedReviewerIds,
-      ...rule.requestedReviewerIds,
+      ...rule.requestedReviewerIds.filter((id) => !removed.has(id)),
       ...[...selected].filter((id) => rule.eligibleReviewerIds.includes(id)),
     ]).size;
   for (let index = candidates.length - 1; index > 0; index--) {
@@ -777,10 +779,15 @@ export class ReviewersService {
     worktreeId: string,
     requestId: string,
     selectedReviewerIds?: string[] | null,
+    removeReviewerIds?: string[] | null,
   ) {
     const { assignment } = await this.live(worktreeId, false);
     this.requireRequest(assignment, requestId);
-    return randomReviewerPreview(assignment, selectedReviewerIds ?? []);
+    return randomReviewerPreview(
+      assignment,
+      selectedReviewerIds ?? [],
+      removeReviewerIds ?? [],
+    );
   }
 
   private requireRequest(assignment: ReviewerAssignment, requestId: string) {

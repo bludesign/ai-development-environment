@@ -165,6 +165,7 @@ describe("AssignReviewersButton", () => {
       worktreeId: worktree.id,
       requestId: "github:repo:42",
       selectedReviewerIds: ["ada"],
+      removeReviewerIds: [],
     });
   });
 
@@ -187,6 +188,7 @@ describe("AssignReviewersButton", () => {
           .getAttribute("data-checked"),
       ).toBe("false"),
     );
+    expect(screen.getByText("Provider permission denied")).toBeDefined();
     fireEvent.click(
       screen.getByRole("option", { name: "Select ben for Platform owners" }),
     );
@@ -248,6 +250,44 @@ test("initially checks requested reviewers and allows removing the last request"
       query.includes("mutation AssignWorktreeReviewers"),
     )?.[1],
   ).toMatchObject({ input: { reviewerIds: [], removeReviewerIds: ["ada"] } });
+});
+
+test("random selection passes pending removals and saves the replacement", async () => {
+  await openPicker();
+  fireEvent.click(
+    screen.getByRole("checkbox", {
+      name: "Select ada for Platform owners",
+    }),
+  );
+  fireEvent.click(screen.getByRole("button", { name: "Random selection" }));
+  await waitFor(() =>
+    expect(
+      screen
+        .getByRole("checkbox", {
+          name: "Select ben for Platform owners",
+        })
+        .getAttribute("aria-checked"),
+    ).toBe("true"),
+  );
+  expect(
+    request.mock.calls.find(([query]) =>
+      query.includes("query PreviewRandomWorktreeReviewers"),
+    )?.[1],
+  ).toEqual({
+    worktreeId: worktree.id,
+    requestId: "github:repo:42",
+    selectedReviewerIds: [],
+    removeReviewerIds: ["ada"],
+  });
+  fireEvent.click(screen.getByRole("button", { name: "Save changes" }));
+  await waitFor(() => expect(onCompleted).toHaveBeenCalledOnce());
+  expect(
+    request.mock.calls.find(([query]) =>
+      query.includes("mutation AssignWorktreeReviewers"),
+    )?.[1],
+  ).toMatchObject({
+    input: { reviewerIds: ["ben"], removeReviewerIds: ["ada"] },
+  });
 });
 test("loads all eligible people only on demand and retains pending selections", async () => {
   const ben = await openPicker();

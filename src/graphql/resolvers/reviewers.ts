@@ -88,6 +88,7 @@ export const createReviewerResolvers = (service: ReviewersService) => ({
         worktreeId: string;
         requestId: string;
         selectedReviewerIds?: string[] | null;
+        removeReviewerIds?: string[] | null;
       },
       context: GraphQLContext,
     ) => {
@@ -96,6 +97,7 @@ export const createReviewerResolvers = (service: ReviewersService) => ({
         args.worktreeId,
         args.requestId,
         args.selectedReviewerIds,
+        args.removeReviewerIds,
       );
     },
   },

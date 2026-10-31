@@ -234,6 +234,8 @@ extend type Query {
     requestId: ID!
     "Manual selections to keep while filling outstanding slots."
     selectedReviewerIds: [ID!]
+    "Pending reviewer request removals to exclude from coverage and selection. Approvals are unaffected."
+    removeReviewerIds: [ID!]
   ): WorktreeReviewerAssignment!
 }
 

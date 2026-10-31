@@ -5,7 +5,7 @@ import type { GitLabService } from "@/services/gitlab";
 
 import { GitHubReviewerProvider } from "./github-provider";
 import { GitLabReviewerProvider } from "./gitlab-provider";
-import { ownerPoolKey } from "./provider-utils";
+import { ownerPoolKey, providerPerson } from "./provider-utils";
 
 const user = (id: number, username: string, extra = {}) => ({
   id,
@@ -54,6 +54,12 @@ function githubFixture() {
         user(20, "robot", { type: "Bot" }),
         user(21, "reader", { permissions: { push: false } }),
       ],
+      ...Object.fromEntries(
+        [alice, bob, carol].map((person) => [
+          `/repos/acme/project/collaborators/${person.login}/permission`,
+          { user: person, permission: "write" },
+        ]),
+      ),
       "/repos/acme/project/branches": [{ name: "main" }, { name: "release" }],
       "/repos/acme/project/rules/branches/main": [
         {
@@ -89,11 +95,23 @@ function githubFixture() {
         "src/ @acme/backend\nother/ @acme/backend\n/docs/ @alice @carol",
       ),
       "/orgs/acme/teams": [{ id: 100, slug: "backend", name: "Backend" }],
+      "/orgs/acme": { id: 200 },
+      "/organizations/200/team/100": {
+        id: 100,
+        slug: "backend",
+        name: "Backend",
+      },
       "/orgs/acme/teams/backend": { id: 100, slug: "backend", name: "Backend" },
       "/orgs/acme/teams/backend/repos/acme/project": {
         permissions: { push: true },
       },
       "/orgs/acme/teams/backend/members": [alice, bob, carol],
+      ...Object.fromEntries(
+        [alice, bob, carol].map((person) => [
+          `/orgs/acme/teams/backend/memberships/${person.login}`,
+          { state: "active" },
+        ]),
+      ),
       "/users/alice": alice,
       "/users/carol": carol,
     };
@@ -213,6 +231,86 @@ describe("GitHub reviewer adapter", () => {
       removeReviewers: [],
     });
   });
+
+  test("preferred-only discovery retains eligible existing reviewers in general and owner rules", async () => {
+    const { provider, reviewerRest } = githubFixture();
+    const preferred = providerPerson(carol);
+    const snapshot = await provider.discover(
+      { id: "repo", canonicalOrigin: "github.com/acme/project" },
+      undefined,
+      { id: "PR_77", number: 8 },
+      false,
+      {
+        people: [preferred],
+        pools: [
+          {
+            key: "GITHUB:github.com:10:general",
+            name: "General reviewers",
+            kind: "GENERAL",
+            candidates: [preferred],
+          },
+        ],
+      },
+    );
+    expect(snapshot.discoveryComplete).toBe(true);
+    expect(snapshot.membersLoaded).toBe(false);
+    expect(
+      snapshot.pools
+        .find((pool) => pool.kind === "GENERAL")
+        ?.candidates.map((person) => person.id),
+    ).toEqual(["1", "2", "3"]);
+    expect(snapshot.requirements).toHaveLength(4);
+    for (const rule of snapshot.requirements) {
+      expect(rule.approvedReviewerIds).toEqual(["1"]);
+      expect(rule.eligibleReviewerIds).toContain("1");
+    }
+    expect(
+      snapshot.requirements.find(
+        (rule) => rule.name === "Backend approval rule",
+      )?.eligibleReviewerIds,
+    ).toContain("2");
+    expect(
+      reviewerRest.mock.calls.some(([path]) =>
+        /\/(?:collaborators|members)(?:\?|$)/.test(path),
+      ),
+    ).toBe(false);
+  });
+
+  test.each(["read-only", "unavailable", "bot", "identity-changed"])(
+    "preferred-only discovery does not count a %s approver",
+    async (reason) => {
+      const { provider, reviewerRest } = githubFixture();
+      const read = reviewerRest.getMockImplementation()!;
+      reviewerRest.mockImplementation(async (url) => {
+        if (url.endsWith("/collaborators/alice/permission")) {
+          if (reason === "unavailable")
+            throw new Error("Permissions unavailable");
+          return {
+            user: {
+              ...alice,
+              id: reason === "identity-changed" ? 99 : alice.id,
+              type: reason === "bot" ? "Bot" : "User",
+            },
+            permission: reason === "read-only" ? "read" : "write",
+          };
+        }
+        return read(url);
+      });
+      const snapshot = await provider.discover(
+        { id: "repo", canonicalOrigin: "github.com/acme/project" },
+        undefined,
+        { id: "PR_77", number: 8 },
+        false,
+        { people: [providerPerson(carol)] },
+      );
+      expect(
+        snapshot.requirements.find(
+          (rule) => rule.id === "github:required-approvals",
+        )?.approvedReviewerIds,
+      ).toEqual([]);
+      expect(snapshot.discoveryComplete).toBe(reason !== "unavailable");
+    },
+  );
 
   test("marks unenforced owners as suggestions while retaining assignment targets", async () => {
     const { provider, reviewerRest, reviewerGraphql } = githubFixture();
