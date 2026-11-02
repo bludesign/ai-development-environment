@@ -16,8 +16,11 @@ import { GITLAB_PIPELINE_STATUS_CHANGED_TOPIC } from "@/services/gitlab/gitlab.s
 import { gitLabMergeBlocker } from "@/services/gitlab/gitlab-merge.service";
 import { mapIntegrationRequests } from "@/services/integration-request";
 import type { PollingService } from "@/services/polling";
+import type { NotificationsService } from "@/services/notifications";
 
 export type ActionCenterRequestView = {
+  behindCount?: number | null;
+  needsRebase?: boolean;
   provider: "GITHUB" | "GITLAB";
   repositoryId: string;
   repositoryName: string;
@@ -53,6 +56,8 @@ export function actionCenterMergeReady(
 }
 
 type Candidate = {
+  approvalRevision?: number;
+  lastKnownApprovalStatus?: string;
   id: string;
   label: string;
   createdAt: string;
@@ -116,6 +121,7 @@ export class ActionCenterRequests {
     private readonly github: GitHubService,
     private readonly gitlab: GitLabService,
     private readonly polling: PollingService,
+    private readonly notifications?: NotificationsService,
   ) {}
 
   getWarnings() {
@@ -243,13 +249,15 @@ export class ActionCenterRequests {
 
   refresh(
     providers: RequestProvider[] = ["GITHUB", "GITLAB"],
+    force = false,
   ): Promise<boolean> {
     if (this.running) {
+      if (force) return this.running.then(() => this.refresh(providers, true));
       for (const provider of providers) this.requested.add(provider);
       return this.running;
     }
     this.running = this.polling
-      .run("server:action-center-requests", () => this.scan(providers))
+      .run("server:action-center-requests", () => this.scan(providers, force))
       .finally(() => {
         this.running = null;
         if (this.requested.size) {
@@ -378,9 +386,13 @@ export class ActionCenterRequests {
           true,
         );
         if (generation !== this.accountGenerations.GITHUB) return;
-        for (const [index, candidate] of candidates.entries()) {
+        for (const candidate of candidates) {
           const state = states.get(candidate.id)!;
           const request = candidate.request;
+          request.approvalStatus =
+            state.approvalStatus ?? request.approvalStatus;
+          request.behindCount = state.behindCount ?? null;
+          request.needsRebase = state.needsRebase ?? false;
           request.requiresMyApproval =
             state.viewerReviewState === "DISMISSED" ||
             (request.requiresMyApproval && !state.viewerHasApproved);
@@ -391,18 +403,12 @@ export class ActionCenterRequests {
             request.draft,
           );
           request.mergeBlockedReason = state.mergeBlockedReason;
-          await prisma.actionCenterRequest.updateMany({
-            where: { id: rows[index].id, payloadJson: rows[index].payloadJson },
-            data: {
-              requiresMyApproval: request.requiresMyApproval,
-              payloadJson: JSON.stringify(candidate),
-              reason: request.requiresMyApproval
-                ? "REVIEW_REQUIRED"
-                : request.canMerge
-                  ? "READY_TO_MERGE"
-                  : "ACTIVE",
-            },
-          });
+          await this.persistCandidate(
+            "GITHUB",
+            accountKey,
+            candidate,
+            () => generation === this.accountGenerations.GITHUB,
+          );
         }
         agentEventBus.publish(ACTION_CENTER_CHANGED_TOPIC, {
           actionCenterChanged: true,
@@ -447,11 +453,50 @@ export class ActionCenterRequests {
       );
     }
     if (!valid()) return;
-    const operations = [...candidates.values()].map((candidate) => {
+    await mapIntegrationRequests([...candidates.values()], (candidate) =>
+      this.persistCandidate(provider, accountKey, candidate, valid),
+    );
+    // A partial scan may update known rows but must never remove unseen requests.
+    if (complete) {
+      const ids = [...candidates.keys()].map(
+        (id) =>
+          `${provider}:${createHash("sha256").update(accountKey).digest("hex").slice(0, 16)}:${id}`,
+      );
+      await prisma.actionCenterRequest.deleteMany({
+        where: { provider, accountKey, id: { notIn: ids } },
+      });
+    }
+  }
+
+  private async persistCandidate(
+    provider: string,
+    accountKey: string,
+    candidate: Candidate,
+    valid: () => boolean = () => true,
+  ) {
+    const prisma = await getPrismaClient();
+    const notification = await prisma.$transaction(async (transaction) => {
       const resourceKind =
         provider === "GITHUB" ? "PULL_REQUEST" : "MERGE_REQUEST";
       const request = candidate.request;
       const id = `${provider}:${createHash("sha256").update(accountKey).digest("hex").slice(0, 16)}:${candidate.id}`;
+      const row = await transaction.actionCenterRequest.findUnique({
+        where: { id },
+      });
+      if (!valid()) return null;
+      const previous = row ? (JSON.parse(row.payloadJson) as Candidate) : null;
+      const previousApproval =
+        previous?.lastKnownApprovalStatus ?? previous?.request.approvalStatus;
+      const authoritative = !["UNKNOWN", ""].includes(
+        request.approvalStatus.toUpperCase(),
+      );
+      candidate.lastKnownApprovalStatus = authoritative
+        ? request.approvalStatus
+        : previousApproval;
+      const changed =
+        authoritative && previousApproval !== request.approvalStatus;
+      candidate.approvalRevision =
+        (previous?.approvalRevision ?? 0) + (changed ? 1 : 0);
       const data = {
         provider,
         accountKey,
@@ -467,26 +512,45 @@ export class ActionCenterRequests {
         createdAt: new Date(candidate.createdAt),
         updatedAt: new Date(candidate.updatedAt),
       };
-      return prisma.actionCenterRequest.upsert({
+      await transaction.actionCenterRequest.upsert({
         where: { id },
         create: { id, ...data },
         update: data,
       });
-    });
-    // A partial scan may update known rows but must never remove unseen requests.
-    await prisma.$transaction(operations);
-    if (complete) {
-      const ids = [...candidates.keys()].map(
-        (id) =>
-          `${provider}:${createHash("sha256").update(accountKey).digest("hex").slice(0, 16)}:${id}`,
-      );
-      await prisma.actionCenterRequest.deleteMany({
-        where: { provider, accountKey, id: { notIn: ids } },
+      if (
+        !this.notifications ||
+        !previous ||
+        request.approvalStatus !== "APPROVED" ||
+        ![
+          "REVIEW_REQUIRED",
+          "CHANGES_REQUESTED",
+          "NOT_APPROVED",
+          "PENDING",
+          "DISMISSED",
+        ].includes(previousApproval ?? "")
+      )
+        return null;
+      return this.notifications.recordInTransaction(transaction, {
+        typeKey:
+          provider === "GITHUB"
+            ? "GITHUB_PULL_REQUEST_APPROVED"
+            : "GITLAB_MERGE_REQUEST_APPROVED",
+        dedupeKey: `${id}:approved:${candidate.approvalRevision}`,
+        title: `${provider === "GITHUB" ? "Pull" : "Merge"} request approved`,
+        body: `${request.repositoryName} ${provider === "GITHUB" ? "#" : "!"}${request.number}: ${candidate.label}`,
+        href:
+          provider === "GITHUB"
+            ? `/github/pull-requests/${request.repositoryName.split("/").map(encodeURIComponent).join("/")}/${request.number}`
+            : `/gitlab/merge-requests/${encodeURIComponent(request.repositoryId)}/${request.number}`,
+        resourceKind,
+        resourceId: candidate.id,
+        worktreeId: candidate.worktreeId,
       });
-    }
+    });
+    this.notifications?.created(notification);
   }
 
-  private async scan(providers: RequestProvider[]) {
+  private async scan(providers: RequestProvider[], force = false) {
     this.warnings = this.warnings.filter(
       (warning) =>
         !providers.some((provider) => warning.startsWith(`${provider}:`)),
@@ -539,6 +603,7 @@ export class ActionCenterRequests {
                       createdAfter: remoteCutoff?.toISOString() ?? null,
                       reviewedByViewer: scope === "REVIEWED",
                       requestSource: "ACTION_CENTER_REQUESTS",
+                      force,
                     },
                   );
                   for (const pr of page.items) {
@@ -582,6 +647,7 @@ export class ActionCenterRequests {
             const states = await this.github.actionCenterRequestStates(
               [...discovered.values()].map(({ pr }) => pr),
               login!,
+              force,
             );
             for (const { pr, scopes } of discovered.values()) {
               const state = states.get(pr.id)!;
@@ -596,7 +662,9 @@ export class ActionCenterRequests {
                 draft: pr.isDraft,
                 pipelineStatus: pr.pipelineStatus,
                 pipelineUrl: pr.pipelines[0]?.url ?? null,
-                approvalStatus: pr.reviewDecision,
+                approvalStatus: state.approvalStatus ?? pr.reviewDecision,
+                behindCount: state.behindCount ?? null,
+                needsRebase: state.needsRebase ?? false,
                 isMine: scopes.has("MINE"),
                 requiresMyApproval:
                   (scopes.has("REVIEW_REQUESTED") &&
@@ -606,7 +674,7 @@ export class ActionCenterRequests {
                 canMerge: actionCenterMergeReady(
                   state.canMerge,
                   pr.pipelineStatus,
-                  pr.reviewDecision,
+                  state.approvalStatus ?? pr.reviewDecision,
                   pr.isDraft,
                 ),
                 mergeBlockedReason: state.mergeBlockedReason,
@@ -638,67 +706,81 @@ export class ActionCenterRequests {
             : null;
         if (this.accountKeys.get("GITLAB") !== account)
           this.accountKeys.delete("GITLAB");
-        await this.reconcile("GITLAB", account, async (add) => {
-          for (const scope of ["MINE", "REVIEW_REQUESTED"] as const) {
-            let pageNumber: number | null = 1;
-            do {
-              const page = await this.gitlab.mergeRequests({
-                scope,
-                state: "OPENED",
-                page: pageNumber,
-                perPage: 25,
-                createdAfter: cutoff,
-              });
-              await mapIntegrationRequests(page.items, async (mr) => {
-                if (mr.state !== "OPENED" || (cutoff && mr.createdAt < cutoff))
-                  return;
-                const [state, approved] = await Promise.all([
-                  this.gitlab.mergeReadiness(mr.projectId, mr.iid, false),
-                  this.gitlab.actionCenterApproval(
-                    mr.projectId,
-                    mr.iid,
-                    config.viewer!.id,
-                  ),
-                ]);
-                const blockedReason = gitLabMergeBlocker(
-                  state.mr,
-                  state.canMerge,
-                );
-                const request: ActionCenterRequestView = {
-                  provider: "GITLAB",
-                  repositoryId: mr.projectId,
-                  repositoryName: mr.projectPath ?? mr.projectId,
-                  number: mr.iid,
-                  branch: mr.sourceBranch,
-                  headSha: mr.sha,
-                  url: mr.webUrl,
-                  draft: mr.draft,
-                  pipelineStatus: mr.headPipeline?.status ?? "NONE",
-                  pipelineUrl: mr.headPipeline?.webUrl ?? null,
-                  approvalStatus: mr.approvalState ?? "UNKNOWN",
-                  isMine: scope === "MINE",
-                  requiresMyApproval: scope === "REVIEW_REQUESTED" && !approved,
-                  canMerge: actionCenterMergeReady(
-                    blockedReason === null && state.mr.sha === mr.sha,
-                    mr.headPipeline?.status ?? "NONE",
-                    mr.approvalState ?? "UNKNOWN",
-                    mr.draft,
-                  ),
-                  mergeBlockedReason: blockedReason,
-                };
-                add({
-                  id: `${mr.projectId}:${mr.iid}`,
-                  label: mr.title,
-                  createdAt: mr.createdAt,
-                  updatedAt: mr.updatedAt,
-                  worktreeId: mr.worktreeId ?? null,
-                  request,
+        await this.reconcile(
+          "GITLAB",
+          account,
+          async (add) => {
+            for (const scope of ["MINE", "REVIEW_REQUESTED"] as const) {
+              let pageNumber: number | null = 1;
+              do {
+                const page = await this.gitlab.mergeRequests({
+                  scope,
+                  state: "OPENED",
+                  page: pageNumber,
+                  perPage: 25,
+                  createdAfter: cutoff,
+                  force,
+                  projectScope: "ALL",
                 });
-              });
-              pageNumber = page.nextPage;
-            } while (pageNumber);
-          }
-        });
+                await mapIntegrationRequests(page.items, async (mr) => {
+                  if (
+                    mr.state !== "OPENED" ||
+                    (cutoff && mr.createdAt < cutoff)
+                  )
+                    return;
+                  const [state, approved] = await Promise.all([
+                    this.gitlab.mergeReadiness(mr.projectId, mr.iid, force),
+                    this.gitlab.actionCenterApproval(
+                      mr.projectId,
+                      mr.iid,
+                      config.viewer!.id,
+                      force,
+                    ),
+                  ]);
+                  const blockedReason = gitLabMergeBlocker(
+                    state.mr,
+                    state.canMerge,
+                  );
+                  const request: ActionCenterRequestView = {
+                    provider: "GITLAB",
+                    repositoryId: mr.projectId,
+                    repositoryName: mr.projectPath ?? mr.projectId,
+                    number: mr.iid,
+                    branch: mr.sourceBranch,
+                    headSha: mr.sha,
+                    url: mr.webUrl,
+                    draft: mr.draft,
+                    pipelineStatus: mr.headPipeline?.status ?? "NONE",
+                    pipelineUrl: mr.headPipeline?.webUrl ?? null,
+                    approvalStatus: mr.approvalState ?? "UNKNOWN",
+                    behindCount: state.mr.behindCount ?? null,
+                    needsRebase: state.mr.detailedMergeStatus === "need_rebase",
+                    isMine: scope === "MINE",
+                    requiresMyApproval:
+                      scope === "REVIEW_REQUESTED" && !approved,
+                    canMerge: actionCenterMergeReady(
+                      blockedReason === null && state.mr.sha === mr.sha,
+                      mr.headPipeline?.status ?? "NONE",
+                      mr.approvalState ?? "UNKNOWN",
+                      mr.draft,
+                    ),
+                    mergeBlockedReason: blockedReason,
+                  };
+                  add({
+                    id: `${mr.projectId}:${mr.iid}`,
+                    label: mr.title,
+                    createdAt: mr.createdAt,
+                    updatedAt: mr.updatedAt,
+                    worktreeId: mr.worktreeId ?? null,
+                    request,
+                  });
+                });
+                pageNumber = page.nextPage;
+              } while (pageNumber);
+            }
+          },
+          () => generation === this.accountGenerations.GITLAB,
+        );
         if (generation === this.accountGenerations.GITLAB)
           this.accountKeys.set("GITLAB", account);
       })(),

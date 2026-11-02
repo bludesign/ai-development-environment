@@ -1820,10 +1820,10 @@ model TelemetryEntry {
   highlightColor           String?
   separatorKind            String?
   separatorName            String?
+  separatorKey             String?  @unique
   createdAt                DateTime @default(now())
   updatedAt                DateTime @updatedAt
 
-  @@unique([separatorKind, buildId])
   @@index([entryType, clientTime, receivedAt])
   @@index([clientTime, receivedAt])
   @@index([level])
@@ -2020,6 +2020,7 @@ model TelemetryViewSettings {
   view                 String   @unique
   columnsJson          String
   timeFormat           String   @default("12")
+  showBuildRunSeparators Boolean @default(true)
   activeColumnPresetId String?
   activeSavedFilterId  String?
   createdAt            DateTime @default(now())
@@ -2069,6 +2070,7 @@ model BuildDeployment {
   error              String?
   createdAt          DateTime               @default(now())
   startedAt          DateTime?
+  launchedAt         DateTime?
   finishedAt         DateTime?
   updatedAt          DateTime               @updatedAt
   build              Build                  @relation(fields: [buildId], references: [id], onDelete: Cascade)
@@ -2755,6 +2757,7 @@ model JiraProject {
   completedStatusIdsJson String       @default("[]")
   excludedStatusIdsJson  String       @default("[]")
   doneStatusId           String?
+  defaultResolutionId    String?
   branchNamingMode       String       @default("JAVASCRIPT")
   branchNamingProvider   String?
   branchNamingModel      String?

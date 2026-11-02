@@ -4,7 +4,7 @@ import PDFDocument from "pdfkit";
 
 import { formatDateValue } from "@/lib/date-format";
 
-import { telemetryFields } from "./fields";
+import { telemetryFields, telemetryPathLabel } from "./fields";
 import {
   DEFAULT_TELEMETRY_COLUMNS,
   type TelemetryEntryView,
@@ -236,7 +236,9 @@ function parameterText(entry: TelemetryEntryView): string {
         key.startsWith("additionalParameters.") ||
         key.startsWith("additionalParameters["),
     )
-    .map(([key, value]) => `${key}: ${stableDisplay(value)}`)
+    .map(
+      ([key, value]) => `${telemetryPathLabel(key)}: ${stableDisplay(value)}`,
+    )
     .join(" • ");
 }
 
@@ -283,11 +285,12 @@ function safeFields(input: TelemetryExportInput): string[] {
 
 function label(field: string): string {
   if (LABELS[field]) return LABELS[field];
-  return field
-    .replace(/^attributes[.[]/, "")
-    .replace(/^defaultParameters[.[]/, "Default: ")
-    .replace(/^additionalParameters[.[]/, "Additional: ")
-    .replace(/]$/g, "");
+  const prefix = /^defaultParameters(?:\.|\[)/.test(field)
+    ? "Default: "
+    : /^additionalParameters(?:\.|\[)/.test(field)
+      ? "Additional: "
+      : "";
+  return `${prefix}${telemetryPathLabel(field)}`;
 }
 
 function pdfColumnWeight(field: string): number {

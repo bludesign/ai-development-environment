@@ -188,7 +188,10 @@
     "integrationCountsHelp": "Deaktiviert die separate CI-Abfrage der Seitenleiste. Action Center und Benachrichtigungen werden weiterhin aktualisiert.",
     "saveSettings": "Einstellungen speichern",
     "hideUnapprovedRequestsInSidebar": "Nicht genehmigte Pull-/Merge-Requests in der Seitenleiste ausblenden",
-    "hideRunningPipelineRequestsInSidebar": "Pull-/Merge-Requests mit laufenden Pipelines in der Seitenleiste ausblenden"
+    "hideRunningPipelineRequestsInSidebar": "Pull-/Merge-Requests mit laufenden Pipelines in der Seitenleiste ausblenden",
+    "refreshPullRequests": "Pull Requests aktualisieren",
+    "needsRebase": "Rebase erforderlich",
+    "behindTarget": "Hinter dem Zielbranch"
   },
   "apps": {
     "title": "Apps",
@@ -1109,6 +1112,22 @@
       "WORKFLOW_RECOVERY_PAUSED": {
         "title": "Workflow nach Wiederherstellung pausiert",
         "description": "Ein Workflow pausiert, während dauerhafte Arbeit wiederhergestellt wird."
+      },
+      "WORKTREE_CREATED": {
+        "title": "Worktree erstellt",
+        "description": "Ein neuer verwalteter Worktree wird erstellt."
+      },
+      "WORKTREE_CLEANUP_FAILED": {
+        "title": "Bereinigung der Worktree-Builddaten fehlgeschlagen",
+        "description": "Xcode-Builddaten eines gelöschten Worktrees konnten nicht entfernt werden."
+      },
+      "GITHUB_PULL_REQUEST_APPROVED": {
+        "title": "Pull Request genehmigt",
+        "description": "Ein GitHub-Pull-Request wechselt von ausstehender Genehmigung zu genehmigt."
+      },
+      "GITLAB_MERGE_REQUEST_APPROVED": {
+        "title": "Merge Request genehmigt",
+        "description": "Ein GitLab-Merge-Request wechselt von ausstehender Genehmigung zu genehmigt."
       }
     },
     "categories": {
@@ -1117,7 +1136,8 @@
       "GITHUB": "GitHub",
       "GITLAB": "GitLab",
       "RUNS": "Pläne und Sitzungen",
-      "WORKFLOWS": "Workflows"
+      "WORKFLOWS": "Workflows",
+      "WORKTREES": "Arbeitsbäume"
     },
     "apnsChannel": "Nativ",
     "nativeApns": "Native Benachrichtigungen",
@@ -1867,7 +1887,10 @@
     "aiBranchNamingHelp": "Verwenden Sie das gewählte Modell auf dem Agenten der Codebasis statt der JavaScript-Funktion. Beide Konfigurationen werden getrennt gespeichert.",
     "aiBranchPrompt": "Anweisung für Branchnamen",
     "aiBranchTokensHelp": "Fügen Sie Ticketvariablen ein, um die übermittelten Daten auszuwählen. Die Beschreibung wird nur bei Verwendung ihrer Variable geladen und geteilt.",
-    "saveAiBranchNaming": "Modus und KI-Einstellungen speichern"
+    "saveAiBranchNaming": "Modus und KI-Einstellungen speichern",
+    "defaultResolution": "Standardlösung",
+    "noDefaultResolution": "Jira-Standardwerte verwenden",
+    "defaultResolutionDescription": "Wird nur verwendet, wenn eine erforderliche Lösung keinen Jira-Standardwert hat. Der gewählte Wert muss beim Ticketübergang zulässig sein."
   },
   "jiraTicketDetail": {
     "loading": "Jira-Vorgang wird geladen…",
@@ -2486,7 +2509,11 @@
     "externalActionResults": "Ergebnisse externer Aktionen",
     "nativeRequest": "Native Anfrage",
     "externalRequest": "Externe Anfrage",
-    "checkingActions": "Aktionen werden geprüft…"
+    "checkingActions": "Aktionen werden geprüft…",
+    "managedProjects": "Verwaltete Projekte",
+    "pipelineScope": "Pipeline-Umfang",
+    "relevantPipelines": "Meine Merge Requests und ausgecheckte Branches",
+    "myMergeRequestPipelines": "Nur meine Merge Requests"
   },
   "gitlabSettings": {
     "title": "GitLab-Zugangsdaten",
@@ -4853,7 +4880,10 @@
       "NO_REGEX_MATCH": "entspricht nicht dem regulären Ausdruck",
       "IS_EMPTY": "ist leer",
       "IS_NOT_EMPTY": "ist nicht leer"
-    }
+    },
+    "showBuildRunSeparators": "Trennlinien für Build-Ausführungen anzeigen",
+    "buildCreated": "Build erstellt",
+    "buildRun": "Build-Ausführung"
   },
   "crashes": {
     "title": "Abstürze",
@@ -5861,7 +5891,8 @@
     "unknownAuthor": "Unbekannter Autor",
     "focusedDiscussion": "Eine verlinkte Diskussion wird angezeigt.",
     "showAllDiscussions": "Alle Diskussionen für diesen Merge Request anzeigen",
-    "fileComment": "Dateikommentar"
+    "fileComment": "Dateikommentar",
+    "includeOtherAuthors": "Andere Autoren in verwalteten Projekten einbeziehen"
   },
   "serverUrls": {
     "title": "Server-URLs",

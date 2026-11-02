@@ -83,6 +83,12 @@ export class JobExecutor {
               ),
             reportBuildProgress: (input) =>
               this.client.reportBuildProgress(input),
+            reportBuildDeploymentLaunched: (deploymentId, launchedAt) =>
+              this.client.reportBuildDeploymentLaunched(
+                claimed.id,
+                deploymentId,
+                launchedAt,
+              ),
             appendBuildLogChunks: (buildId, chunks) =>
               this.client.appendBuildLogChunks(buildId, chunks),
             uploadBuildArtifact: (input) =>

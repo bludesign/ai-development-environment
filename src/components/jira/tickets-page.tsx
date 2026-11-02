@@ -93,7 +93,7 @@ import type {
 } from "@/services/jira/types";
 
 const SOURCE_FIELDS = "id projectId name kind value boardId position";
-const PROJECT_FIELDS = `id jiraId key name avatarUrl position ticketAssignmentFilter hideCompletedTickets completedStatusIds excludedStatusIds doneStatusId branchNamingScript branchNamingMode branchNamingProvider branchNamingModel branchNamingEffort branchNamingPrompt sources { ${SOURCE_FIELDS} }`;
+const PROJECT_FIELDS = `id jiraId key name avatarUrl position ticketAssignmentFilter hideCompletedTickets completedStatusIds excludedStatusIds doneStatusId defaultResolutionId branchNamingScript branchNamingMode branchNamingProvider branchNamingModel branchNamingEffort branchNamingPrompt sources { ${SOURCE_FIELDS} }`;
 const SUMMARY_FIELDS =
   "id key summary statusId status statusCategory issueType priority assignee assigneeAccountId assigneeAvatarUrl projectKey updatedAt";
 const CACHE_FIELDS = "source stale fetchedAt";
@@ -396,8 +396,9 @@ export function JiraTicketsPage() {
       ) : (
         <>
           <div className="flex min-w-0 items-center gap-3">
-            <div className="min-w-0 overflow-x-auto">
+            <div className="min-w-0 flex-1">
               <Tabs
+                className="min-w-0"
                 value={selectedProject?.id ?? "all"}
                 onValueChange={(projectId) => {
                   const project = projects.find(
@@ -410,10 +411,22 @@ export function JiraTicketsPage() {
                   });
                 }}
               >
-                <TabsList aria-label={t("projectTabs")}>
-                  <TabsTrigger value="all">{t("allProjects")}</TabsTrigger>
+                <TabsList
+                  aria-label={t("projectTabs")}
+                  className="flex min-w-0 w-full justify-start gap-1 overflow-x-auto overflow-y-hidden p-1 group-data-horizontal/tabs:h-auto"
+                >
+                  <TabsTrigger
+                    className="h-7 flex-none px-2.5 after:hidden"
+                    value="all"
+                  >
+                    {t("allProjects")}
+                  </TabsTrigger>
                   {projects.map((project) => (
-                    <TabsTrigger key={project.id} value={project.id}>
+                    <TabsTrigger
+                      className="h-7 flex-none px-2.5 after:hidden"
+                      key={project.id}
+                      value={project.id}
+                    >
                       {project.key}
                     </TabsTrigger>
                   ))}
@@ -443,16 +456,25 @@ export function JiraTicketsPage() {
           </div>
 
           {selectedProject && selectedProject.sources.length > 1 ? (
-            <div className="overflow-x-auto border-b pb-3">
+            <div className="min-w-0 border-b pb-3">
               <Tabs
+                className="min-w-0"
                 value={selectedSource?.id}
                 onValueChange={(sourceId) =>
                   replaceParams({ source: sourceId, issue: null })
                 }
               >
-                <TabsList aria-label={t("sourceTabs")} variant="line">
+                <TabsList
+                  aria-label={t("sourceTabs")}
+                  className="flex min-w-0 w-full justify-start gap-1 overflow-x-auto overflow-y-hidden p-1 group-data-horizontal/tabs:h-auto"
+                  variant="line"
+                >
                   {selectedProject.sources.map((source) => (
-                    <TabsTrigger key={source.id} value={source.id}>
+                    <TabsTrigger
+                      className="h-7 flex-none px-2.5 after:hidden"
+                      key={source.id}
+                      value={source.id}
+                    >
                       {source.name}
                     </TabsTrigger>
                   ))}
@@ -781,6 +803,12 @@ function JiraManagerDialog({
   const [completedStatusIds, setCompletedStatusIds] = useState<string[]>([]);
   const [excludedStatusIds, setExcludedStatusIds] = useState<string[]>([]);
   const [doneStatusId, setDoneStatusId] = useState<string | null>(null);
+  const [defaultResolutionId, setDefaultResolutionId] = useState<string | null>(
+    null,
+  );
+  const [resolutions, setResolutions] = useState<
+    Array<{ id: string | null; name: string }>
+  >([]);
   const [branchNamingScript, setBranchNamingScript] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -800,17 +828,20 @@ function JiraManagerDialog({
       setCompletedStatusIds(selectedProject.completedStatusIds);
       setExcludedStatusIds(selectedProject.excludedStatusIds ?? []);
       setDoneStatusId(selectedProject.doneStatusId);
+      setDefaultResolutionId(selectedProject.defaultResolutionId ?? null);
       setBranchNamingScript(selectedProject.branchNamingScript ?? "");
       setStatusesLoading(true);
       try {
         const data = await controlPlaneRequest<{
           jiraProjectStatuses: JiraProjectStatus[];
+          jiraResolutions: Array<{ id: string | null; name: string }>;
         }>(
-          "query JiraProjectStatuses($projectId: ID!) { jiraProjectStatuses(projectId: $projectId) { id name category } }",
+          "query JiraProjectStatuses($projectId: ID!) { jiraProjectStatuses(projectId: $projectId) { id name category } jiraResolutions { id name } }",
           { projectId: selectedProject.id },
         );
         if (cancelled) return;
         setStatuses(data.jiraProjectStatuses);
+        setResolutions(data.jiraResolutions ?? []);
         setError(null);
       } catch (value) {
         if (cancelled) return;
@@ -957,6 +988,7 @@ function JiraManagerDialog({
         completedStatusIds,
         excludedStatusIds,
         doneStatusId,
+        defaultResolutionId,
       };
       const data = await controlPlaneRequest<{
         updateJiraProjectDisplaySettings: JiraProjectView[];
@@ -1330,6 +1362,48 @@ function JiraManagerDialog({
                   </Select>
                   <p className="mt-1 text-xs text-muted-foreground">
                     {t("doneStatusDescription")}
+                  </p>
+                </div>
+                <div>
+                  <Label
+                    className="mb-1 block text-xs font-medium"
+                    htmlFor="jira-default-resolution"
+                  >
+                    {t("defaultResolution")}
+                  </Label>
+                  <Select
+                    value={defaultResolutionId ?? "__none__"}
+                    onValueChange={(value) =>
+                      setDefaultResolutionId(
+                        value === "__none__" ? null : value,
+                      )
+                    }
+                    disabled={statusesLoading}
+                  >
+                    <SelectTrigger
+                      className="w-full"
+                      id="jira-default-resolution"
+                    >
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent className="z-60">
+                      <SelectItem value="__none__">
+                        {t("noDefaultResolution")}
+                      </SelectItem>
+                      {resolutions
+                        .filter((resolution) => resolution.id)
+                        .map((resolution) => (
+                          <SelectItem
+                            key={resolution.id}
+                            value={resolution.id!}
+                          >
+                            {resolution.name}
+                          </SelectItem>
+                        ))}
+                    </SelectContent>
+                  </Select>
+                  <p className="mt-1 text-xs text-muted-foreground">
+                    {t("defaultResolutionDescription")}
                   </p>
                 </div>
                 <div className="flex justify-end">

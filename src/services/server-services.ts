@@ -201,6 +201,7 @@ function createServerServices(): ServerServices {
     workflowEventsService,
     gitHubPipelineStatusService,
     gitLabService,
+    notificationsService,
   );
   const reviewersService = new ReviewersService(
     new ReviewerProviders(gitHubService, gitLabService),
@@ -210,6 +211,7 @@ function createServerServices(): ServerServices {
     gitHubService,
     gitLabService,
     pollingService,
+    notificationsService,
   );
   const systemStatusService = new SystemStatusService(
     ccusageService,

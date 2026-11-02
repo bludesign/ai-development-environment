@@ -188,7 +188,10 @@
     "integrationCountsHelp": "Al desactivarlo se detienen las consultas de CI de la barra lateral. El Centro de acciones y las notificaciones siguen actualizándose.",
     "saveSettings": "Guardar configuración",
     "hideUnapprovedRequestsInSidebar": "Ocultar solicitudes pull/merge sin aprobar en la barra lateral",
-    "hideRunningPipelineRequestsInSidebar": "Ocultar solicitudes pull/merge con pipelines en curso en la barra lateral"
+    "hideRunningPipelineRequestsInSidebar": "Ocultar solicitudes pull/merge con pipelines en curso en la barra lateral",
+    "refreshPullRequests": "Actualizar solicitudes de extracción",
+    "needsRebase": "Necesita rebase",
+    "behindTarget": "Por detrás del destino"
   },
   "apps": {
     "title": "Apps",
@@ -1109,6 +1112,22 @@
       "WORKFLOW_RECOVERY_PAUSED": {
         "title": "Flujo de trabajo en pausa tras la recuperación",
         "description": "Un flujo de trabajo se pausa mientras recupera trabajo duradero."
+      },
+      "WORKTREE_CREATED": {
+        "title": "Worktree creado",
+        "description": "Se crea un nuevo worktree administrado."
+      },
+      "WORKTREE_CLEANUP_FAILED": {
+        "title": "Error al limpiar los datos de compilación del worktree",
+        "description": "No se pudieron eliminar los datos de compilación de Xcode de un worktree eliminado."
+      },
+      "GITHUB_PULL_REQUEST_APPROVED": {
+        "title": "Solicitud de extracción aprobada",
+        "description": "Una solicitud de extracción de GitHub pasa de pendiente de aprobación a aprobada."
+      },
+      "GITLAB_MERGE_REQUEST_APPROVED": {
+        "title": "Solicitud de fusión aprobada",
+        "description": "Una solicitud de fusión de GitLab pasa de pendiente de aprobación a aprobada."
       }
     },
     "categories": {
@@ -1117,7 +1136,8 @@
       "GITHUB": "GitHub",
       "GITLAB": "GitLab",
       "RUNS": "Planes y sesiones",
-      "WORKFLOWS": "Flujos de trabajo"
+      "WORKFLOWS": "Flujos de trabajo",
+      "WORKTREES": "Árboles de trabajo"
     },
     "apnsChannel": "Nativa",
     "nativeApns": "Notificaciones nativas",
@@ -1867,7 +1887,10 @@
     "aiBranchNamingHelp": "Usa el modelo seleccionado en el agente del código base en lugar de la función JavaScript. Ambas configuraciones se guardan por separado.",
     "aiBranchPrompt": "Instrucciones para nombrar ramas",
     "aiBranchTokensHelp": "Inserta variables del ticket para elegir qué recibe el modelo. La descripción solo se obtiene y comparte al usar su variable.",
-    "saveAiBranchNaming": "Guardar modo y configuración de IA"
+    "saveAiBranchNaming": "Guardar modo y configuración de IA",
+    "defaultResolution": "Resolución predeterminada",
+    "noDefaultResolution": "Usar valores predeterminados de Jira",
+    "defaultResolutionDescription": "Se usa solo cuando una resolución obligatoria no tiene un valor predeterminado en Jira. La transición del ticket debe permitir el valor seleccionado."
   },
   "jiraTicketDetail": {
     "loading": "Cargando incidencia de Jira…",
@@ -2297,7 +2320,7 @@
     "autoRetry": "Reintentos automáticos",
     "enableAutoRetry": "Activar para todas las canalizaciones",
     "noAutoRetryRules": "No hay reglas de reintento automático configuradas para este proyecto.",
-    "allPipelines": "Todas las canalizaciones",
+    "allPipelines": "Todos los pipelines",
     "attempts": "Hasta {count} intentos",
     "cacheControls": "Controles de caché",
     "saveDefaultTtl": "Guardar TTL predeterminado (minutos)",
@@ -2486,7 +2509,11 @@
     "externalActionResults": "Resultados de acciones externas",
     "nativeRequest": "Solicitud nativa",
     "externalRequest": "Solicitud externa",
-    "checkingActions": "Comprobando acciones…"
+    "checkingActions": "Comprobando acciones…",
+    "managedProjects": "Proyectos administrados",
+    "pipelineScope": "Ámbito de pipelines",
+    "relevantPipelines": "Mis solicitudes de fusión y ramas extraídas",
+    "myMergeRequestPipelines": "Solo mis solicitudes de fusión"
   },
   "gitlabSettings": {
     "title": "Credenciales de GitLab",
@@ -4853,7 +4880,10 @@
       "NO_REGEX_MATCH": "no coincide con la expresión regular",
       "IS_EMPTY": "está vacío",
       "IS_NOT_EMPTY": "no está vacío"
-    }
+    },
+    "showBuildRunSeparators": "Mostrar separadores de ejecuciones de compilación",
+    "buildCreated": "Compilación creada",
+    "buildRun": "Ejecución de compilación"
   },
   "crashes": {
     "title": "Fallos",
@@ -5861,7 +5891,8 @@
     "unknownAuthor": "Autor desconocido",
     "focusedDiscussion": "Se muestra una discusión enlazada.",
     "showAllDiscussions": "Mostrar todas las discusiones de esta solicitud de fusión",
-    "fileComment": "Comentario de archivo"
+    "fileComment": "Comentario de archivo",
+    "includeOtherAuthors": "Incluir otros autores de proyectos administrados"
   },
   "serverUrls": {
     "title": "URLs del servidor",

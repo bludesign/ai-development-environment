@@ -167,6 +167,10 @@ export type AgentJobHandlerContext = {
     errorCode?: string;
     error?: string;
   }) => Promise<unknown>;
+  reportBuildDeploymentLaunched?: (
+    deploymentId: string,
+    launchedAt: string,
+  ) => Promise<unknown>;
   appendBuildLogChunks?: (
     buildId: string,
     chunks: BuildLogChunk[],

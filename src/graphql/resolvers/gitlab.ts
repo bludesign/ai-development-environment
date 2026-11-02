@@ -138,6 +138,7 @@ export const createGitLabResolvers = (
         gitlabComments: (
           _root: unknown,
           args: {
+            includeOtherAuthors?: boolean | null;
             projectId?: string | null;
             iid?: number | null;
             discussionId?: string | null;
@@ -217,6 +218,7 @@ export const createGitLabResolvers = (
         gitlabMergeRequests: (
           _root: unknown,
           args: {
+            projectScope?: "MANAGED" | "ALL";
             scope: GitLabMergeRequestScope;
             projectId?: string | null;
             state?: GitLabMergeRequestState | null;
@@ -236,6 +238,7 @@ export const createGitLabResolvers = (
         gitlabPipelines: (
           _root: unknown,
           args: {
+            scope?: "RELEVANT" | "MINE" | "ALL";
             projectId: string;
             page?: number;
             perPage?: number;

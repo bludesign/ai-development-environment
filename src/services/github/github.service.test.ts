@@ -1151,6 +1151,60 @@ describe("GitHub service", () => {
     );
   });
 
+  test("detects ordinary behind status without blocking an otherwise mergeable PR and caches immutable comparisons", async () => {
+    let baseSha = "base-1";
+    const fetchMock = vi.fn(async (url: string) =>
+      url.includes("/compare/")
+        ? response({ behind_by: 3 })
+        : response({
+            data: {
+              nodes: [
+                {
+                  id: "pr",
+                  state: "OPEN",
+                  isDraft: false,
+                  mergeable: "MERGEABLE",
+                  mergeStateStatus: "CLEAN",
+                  headRefOid: "fork-head",
+                  baseRef: { target: { oid: baseSha } },
+                  reviewDecision: "APPROVED",
+                  repository: {
+                    nameWithOwner: "acme/app",
+                    viewerPermission: "WRITE",
+                    squashMergeAllowed: true,
+                  },
+                  reviews: { nodes: [] },
+                },
+              ],
+            },
+          }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    const service = new GitHubService();
+    const prs = [{ id: "pr", headRefOid: "fork-head" }];
+    const first = await service.actionCenterRequestStates(prs, "alice");
+    expect(first.get("pr")).toMatchObject({
+      behindCount: 3,
+      needsRebase: false,
+      canMerge: true,
+      approvalStatus: "APPROVED",
+    });
+    await service.actionCenterRequestStates(prs, "alice", true);
+    expect(
+      fetchMock.mock.calls.filter(([url]) => url.includes("/compare/")),
+    ).toHaveLength(1);
+    baseSha = "base-2";
+    await service.actionCenterRequestStates(prs, "alice", true);
+    expect(
+      fetchMock.mock.calls.filter(([url]) => url.includes("/compare/")),
+    ).toHaveLength(2);
+    expect(
+      fetchMock.mock.calls.some(([url]) =>
+        url.endsWith("/compare/base-1...fork-head?per_page=1"),
+      ),
+    ).toBe(true);
+  });
+
   test("caches repository reviewer reads and missing CODEOWNERS, with live refresh and worktree validation", async () => {
     const clock = vi.spyOn(Date, "now").mockReturnValue(Date.now());
     const fetchMock = vi.fn(async (url: string) =>

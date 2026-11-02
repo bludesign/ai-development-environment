@@ -188,7 +188,10 @@
     "integrationCountsHelp": "Turning this off stops dedicated sidebar CI polling. Action Center and notification polling continue.",
     "saveSettings": "Save settings",
     "hideUnapprovedRequestsInSidebar": "Hide unapproved pull/merge requests in the sidebar",
-    "hideRunningPipelineRequestsInSidebar": "Hide pull/merge requests with pipelines in progress in the sidebar"
+    "hideRunningPipelineRequestsInSidebar": "Hide pull/merge requests with pipelines in progress in the sidebar",
+    "refreshPullRequests": "Refresh Pull Requests",
+    "needsRebase": "Needs rebase",
+    "behindTarget": "Behind target"
   },
   "apps": {
     "title": "Apps",
@@ -1109,6 +1112,22 @@
       "WORKFLOW_RECOVERY_PAUSED": {
         "title": "Workflow paused after recovery",
         "description": "A workflow pauses while recovering durable work."
+      },
+      "WORKTREE_CREATED": {
+        "title": "Worktree created",
+        "description": "A new managed worktree is created."
+      },
+      "WORKTREE_CLEANUP_FAILED": {
+        "title": "Worktree build data cleanup failed",
+        "description": "A deleted worktree has Xcode build data that could not be removed."
+      },
+      "GITHUB_PULL_REQUEST_APPROVED": {
+        "title": "Pull request approved",
+        "description": "A GitHub pull request changes from awaiting approval to approved."
+      },
+      "GITLAB_MERGE_REQUEST_APPROVED": {
+        "title": "Merge request approved",
+        "description": "A GitLab merge request changes from awaiting approval to approved."
       }
     },
     "categories": {
@@ -1117,7 +1136,8 @@
       "GITHUB": "GitHub",
       "GITLAB": "GitLab",
       "RUNS": "Plans and Sessions",
-      "WORKFLOWS": "Workflows"
+      "WORKFLOWS": "Workflows",
+      "WORKTREES": "Worktrees"
     },
     "apnsChannel": "Native",
     "nativeApns": "Native notifications",
@@ -1867,7 +1887,10 @@
     "aiBranchNamingHelp": "Use the selected model on the codebase’s agent instead of the JavaScript function. Both configurations are saved independently.",
     "aiBranchPrompt": "Branch naming prompt",
     "aiBranchTokensHelp": "Insert ticket tokens to choose what the model receives. The description is fetched and shared only when its token is used.",
-    "saveAiBranchNaming": "Save naming mode and AI settings"
+    "saveAiBranchNaming": "Save naming mode and AI settings",
+    "defaultResolution": "Default Resolution",
+    "noDefaultResolution": "Use Jira defaults",
+    "defaultResolutionDescription": "Used only when a required Resolution has no Jira default. The selected value must be allowed by the ticket’s transition."
   },
   "jiraTicketDetail": {
     "loading": "Loading Jira ticket…",
@@ -2486,7 +2509,11 @@
     "externalActionResults": "External action results",
     "nativeRequest": "Native request",
     "externalRequest": "External request",
-    "checkingActions": "Checking actions…"
+    "checkingActions": "Checking actions…",
+    "managedProjects": "Managed projects",
+    "pipelineScope": "Pipeline scope",
+    "relevantPipelines": "My merge requests and checked-out branches",
+    "myMergeRequestPipelines": "My merge requests only"
   },
   "gitlabSettings": {
     "title": "GitLab credentials",
@@ -4853,7 +4880,10 @@
       "NO_REGEX_MATCH": "no regex match",
       "IS_EMPTY": "is empty",
       "IS_NOT_EMPTY": "is not empty"
-    }
+    },
+    "showBuildRunSeparators": "Show build run separators",
+    "buildCreated": "Build created",
+    "buildRun": "Build run"
   },
   "crashes": {
     "title": "Crashes",
@@ -5861,7 +5891,8 @@
     "unknownAuthor": "Unknown author",
     "focusedDiscussion": "Showing a linked discussion.",
     "showAllDiscussions": "Show all discussions for this merge request",
-    "fileComment": "File comment"
+    "fileComment": "File comment",
+    "includeOtherAuthors": "Include other authors in managed projects"
   },
   "serverUrls": {
     "title": "Server URLs",

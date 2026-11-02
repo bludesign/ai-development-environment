@@ -68,6 +68,11 @@ export function RequestStatus({
         {t(approved ? "approved" : "notApproved")}
       </Badge>
       {children}
+      {(request.needsRebase || (request.behindCount ?? 0) > 0) && (
+        <Badge variant="outline" className={cn(badgeClassName, warning)}>
+          {t(request.needsRebase ? "needsRebase" : "behindTarget")}
+        </Badge>
+      )}
     </div>
   );
 }

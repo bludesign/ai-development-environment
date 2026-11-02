@@ -933,10 +933,19 @@ export function BuildDetailPage({
                       )}
                     </div>
                     <Badge
+                      className={
+                        execution.status === "RUNNING"
+                          ? "border-blue-500/30 bg-blue-500/10 text-blue-700 dark:text-blue-300"
+                          : ["QUEUED", "PENDING"].includes(execution.status)
+                            ? "border-amber-500/30 bg-amber-500/10 text-amber-700 dark:text-amber-300"
+                            : undefined
+                      }
                       variant={
                         execution.status === "FAILED"
                           ? "destructive"
-                          : "outline"
+                          : execution.status === "SUCCEEDED"
+                            ? "success"
+                            : "secondary"
                       }
                     >
                       {humanizeConstant(execution.status)}

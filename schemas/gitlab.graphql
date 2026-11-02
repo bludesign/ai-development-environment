@@ -48,7 +48,25 @@ type SourceControlIntegrationState {
   gitlab: SourceControlProviderState!
 }
 
-"GitLabMergeRequestScope values exposed by the GitLab integration."
+"Selects managed projects or all accessible projects for merge request discovery."
+enum GitLabProjectScope {
+  "Only projects managed by this installation."
+  MANAGED
+  "All projects accessible to the connected account."
+  ALL
+}
+
+"The requests and checked-out branches whose pipelines are included."
+enum GitLabPipelineScope {
+  "The current user's merge requests and checked-out branches."
+  RELEVANT
+  "Only the current user's merge requests."
+  MINE
+  "All pipelines in the selected project."
+  ALL
+}
+
+"Selects merge requests by their relationship to the connected GitLab user."
 enum GitLabMergeRequestScope {
   "Represents the mine value."
   MINE
@@ -953,6 +971,8 @@ extend type Query {
   ): GitLabProjectCandidatePage!
   "Load human comments from relevant open requests or a directly selected request."
   gitlabComments(
+    "Include other authors' requests in managed projects."
+    includeOtherAuthors: Boolean = false
     "Optional project filter; required when selecting a request directly."
     projectId: ID
     "Select a request directly, including merged or closed requests."
@@ -968,6 +988,8 @@ extend type Query {
   ): GitLabCommentPage!
   "Gitlab merge requests for Query."
   gitlabMergeRequests(
+    "Restrict discovery to managed projects by default."
+    projectScope: GitLabProjectScope = MANAGED
     "Scope used by gitlabMergeRequests."
     scope: GitLabMergeRequestScope!
     "Project id used by gitlabMergeRequests."
@@ -988,6 +1010,8 @@ extend type Query {
   ): GitLabMergeRequestDetail!
   "Gitlab pipelines for Query."
   gitlabPipelines(
+    "Default to the current user's requests and checked-out branches."
+    scope: GitLabPipelineScope = RELEVANT
     "Project id used by gitlabPipelines."
     projectId: ID!
     "Page used by gitlabPipelines."

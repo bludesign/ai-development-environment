@@ -3380,6 +3380,7 @@ async function deployPreparedIosBuild(
       const logPath = join(directory, "deployment.log");
       const started = Date.now();
       let failure: string | null = null;
+      let launchedAt: string | null = null;
       try {
         if (deployment.destination.type === "SIMULATOR") {
           if (deployment.destination.state !== "Booted") {
@@ -3430,7 +3431,9 @@ async function deployPreparedIosBuild(
               logPath,
             });
             if (bootStatus.exitCode !== 0)
-              failure = cleanError(bootStatus.output);
+              failure = cleanError(
+                bootStatus.output || "Simulator did not finish booting",
+              );
           }
           if (!failure) {
             const install = await runSimpleLogged(logger, {
@@ -3442,7 +3445,10 @@ async function deployPreparedIosBuild(
               scopeId: deployment.id,
               logPath,
             });
-            if (install.exitCode !== 0) failure = cleanError(install.output);
+            if (install.exitCode !== 0)
+              failure = cleanError(
+                install.output || "Could not install the app",
+              );
           }
           if (!failure) {
             const launch = await runSimpleLogged(logger, {
@@ -3459,7 +3465,9 @@ async function deployPreparedIosBuild(
               scopeId: deployment.id,
               logPath,
             });
-            if (launch.exitCode !== 0) failure = cleanError(launch.output);
+            if (launch.exitCode !== 0)
+              failure = cleanError(launch.output || "Could not launch the app");
+            else launchedAt = new Date().toISOString();
           }
         } else {
           const verify = await runLoggedCommand({
@@ -3495,7 +3503,10 @@ async function deployPreparedIosBuild(
               scopeId: deployment.id,
               logPath,
             });
-            if (install.exitCode !== 0) failure = cleanError(install.output);
+            if (install.exitCode !== 0)
+              failure = cleanError(
+                install.output || "Could not install the app",
+              );
           }
           if (!failure) {
             const launch = await runSimpleLogged(logger, {
@@ -3516,7 +3527,9 @@ async function deployPreparedIosBuild(
               scopeId: deployment.id,
               logPath,
             });
-            if (launch.exitCode !== 0) failure = cleanError(launch.output);
+            if (launch.exitCode !== 0)
+              failure = cleanError(launch.output || "Could not launch the app");
+            else launchedAt = new Date().toISOString();
           }
         }
       } catch (deploymentError) {
@@ -3529,10 +3542,28 @@ async function deployPreparedIosBuild(
           deployment.id,
         );
       }
+      if (launchedAt && context?.reportBuildDeploymentLaunched) {
+        try {
+          await context.reportBuildDeploymentLaunched(
+            deployment.id,
+            launchedAt,
+          );
+        } catch (error) {
+          // The completion result repairs a missed report without failing a successful launch.
+          logger.emit(
+            "LAUNCH",
+            "SYSTEM",
+            `Launch reporting will be retried on completion: ${cleanError(error)}`,
+            "DEPLOYMENT",
+            deployment.id,
+          );
+        }
+      }
       outcomes.push({
         id: deployment.id,
         status: signal.aborted ? "CANCELLED" : failure ? "FAILED" : "SUCCEEDED",
         error: failure,
+        launchedAt,
         durationMs: Date.now() - started,
         outputRelativePath: relative(input.artifactDirectory, logPath),
       });

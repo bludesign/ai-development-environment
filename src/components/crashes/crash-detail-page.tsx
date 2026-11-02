@@ -369,8 +369,8 @@ export function CrashDetailPage({ crashId }: { crashId: string }) {
         </CardContent>
       </Card>
 
-      <Tabs defaultValue="threads">
-        <TabsList className="flex-wrap">
+      <Tabs className="min-w-0" defaultValue="threads">
+        <TabsList className="flex min-w-0 w-full justify-start gap-1 overflow-x-auto overflow-y-hidden p-1 group-data-horizontal/tabs:h-auto [&>[data-slot=tabs-trigger]]:h-7 [&>[data-slot=tabs-trigger]]:flex-none [&>[data-slot=tabs-trigger]]:px-2.5 [&>[data-slot=tabs-trigger]]:after:hidden">
           <TabsTrigger value="threads">{t("threads")}</TabsTrigger>
           {crash.lastExceptionBacktrace?.length ? (
             <TabsTrigger value="exception">

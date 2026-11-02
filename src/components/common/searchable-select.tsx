@@ -1,7 +1,7 @@
 "use client";
 
 import { ChevronsUpDown } from "lucide-react";
-import { useCallback, useState } from "react";
+import { useCallback, useState, type ReactNode } from "react";
 
 import { Spinner } from "@/components/ui/spinner";
 import { Button } from "@/components/ui/button";
@@ -50,6 +50,8 @@ export function SearchableSelect({
   clearLabel,
   onOpenChange,
   loading = false,
+  header,
+  selectedOption,
 }: {
   value: string;
   onValueChange: (value: string) => void;
@@ -66,6 +68,10 @@ export function SearchableSelect({
   clearLabel?: string;
   onOpenChange?: (open: boolean) => void;
   loading?: boolean;
+  /** Optional filtering controls above the search field. */
+  header?: ReactNode;
+  /** Keeps the current label visible when an independent filter hides its option. */
+  selectedOption?: SearchableSelectOption;
 }) {
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
@@ -77,7 +83,9 @@ export function SearchableSelect({
       node.addEventListener("wheel", (e) => e.stopPropagation());
     }
   }, []);
-  const selected = options.find((option) => option.value === value);
+  const selected =
+    options.find((option) => option.value === value) ??
+    (selectedOption?.value === value ? selectedOption : undefined);
   const displayValue = selected?.label ?? (value || placeholder);
   const customValue = query.trim();
   const showCustomValue =
@@ -151,6 +159,7 @@ export function SearchableSelect({
         align="start"
         className="z-70 max-h-[min(24rem,var(--radix-popover-content-available-height))] w-(--radix-popover-trigger-width) max-w-[calc(100vw-2rem)] overflow-hidden p-0"
       >
+        {header}
         <Command className="min-h-0" label={searchPlaceholder}>
           <CommandInput
             aria-label={searchPlaceholder}

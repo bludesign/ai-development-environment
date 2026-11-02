@@ -16,6 +16,46 @@ describe("APNs validation", () => {
     expect(normalizeDeviceToken(base64, "BASE64")).toBe(tokenHex);
   });
 
+  test.each([1, 16, 32, 64, 128])(
+    "normalizes %i-byte tokens consistently",
+    (length) => {
+      const bytes = Buffer.alloc(length, 0xfb);
+      const expected = bytes.toString("hex").toUpperCase();
+      expect(normalizeDeviceToken(bytes.toString("hex"), "HEX")).toBe(expected);
+      expect(normalizeDeviceToken(bytes.toString("base64"), "BASE64")).toBe(
+        expected,
+      );
+      expect(normalizeDeviceToken(bytes.toString("base64url"), "BASE64")).toBe(
+        expected,
+      );
+      expect(normalizeDeviceToken(`<${bytes.toString("hex")}>`, "HEX")).toBe(
+        expected,
+      );
+    },
+  );
+
+  test.each(["", " ", "<>", "A", "ABC", "GG", "AA-BB", "AA!B"])(
+    "rejects malformed hexadecimal %j",
+    (token) => {
+      expect(() => normalizeDeviceToken(token, "HEX")).toThrow(/hexadecimal/);
+    },
+  );
+
+  test.each([
+    "",
+    "=",
+    "A",
+    "AQ=",
+    "AQ===",
+    "A===",
+    "AB==",
+    "AAA==",
+    "AA!A",
+    "AA AA",
+  ])("rejects malformed Base64 %j", (token) => {
+    expect(() => normalizeDeviceToken(token, "BASE64")).toThrow(/Base64/);
+  });
+
   test("requires PushMagic for MDM registrations", () => {
     expect(() =>
       parseApnsRegistrationInput({
@@ -29,6 +69,24 @@ describe("APNs validation", () => {
       }),
     ).toThrow("pushMagic");
   });
+
+  test.each([1, 16, 64, 128])(
+    "normalizes variable-length %i-byte registrations from Base64",
+    (length) => {
+      const token = Buffer.alloc(length, 0xab);
+      expect(
+        parseApnsRegistrationInput({
+          clientRegistrationId: "installation-1",
+          token: token.toString("base64"),
+          tokenEncoding: "BASE64",
+          topic: "com.example.app",
+          environment: "PRODUCTION",
+          supportedPushTypes: ["alert"],
+          displayName: "iPhone",
+        }).token,
+      ).toBe(token.toString("hex").toUpperCase());
+    },
+  );
 
   test.each(APNS_PUSH_TYPES)("validates the %s push type", (pushType) => {
     const suffixes: Partial<Record<(typeof APNS_PUSH_TYPES)[number], string>> =

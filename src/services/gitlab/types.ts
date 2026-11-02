@@ -19,6 +19,8 @@ export type GitLabRequestSource =
   | "WEBHOOK_MANAGEMENT";
 
 export type GitLabCallSource = "LIVE" | "CACHE" | "ERROR";
+export type GitLabProjectScope = "MANAGED" | "ALL";
+export type GitLabPipelineScope = "RELEVANT" | "MINE" | "ALL";
 export type GitLabMergeRequestScope =
   "MINE" | "REVIEW_REQUESTED" | "PROJECT" | "ALL";
 export type GitLabMergeRequestState = "OPENED" | "CLOSED" | "MERGED" | "ALL";
@@ -224,6 +226,7 @@ export type GitLabMergeRequestView = {
   reviewers: GitLabUserView[];
   labels: string[];
   detailedMergeStatus: string;
+  behindCount?: number | null;
   mergeWhenPipelineSucceeds: boolean;
   squashOnMerge: boolean;
   hasConflicts: boolean;

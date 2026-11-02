@@ -83,13 +83,37 @@ function setup(projectIds = ["21"]) {
 afterEach(() => vi.useRealTimers());
 
 describe("GitLab comments pagination", () => {
-  test("deduplicates authored, assigned, review-requested and managed-project discovery without enriching MR details", async () => {
+  test("defaults to authored requests without loading assigned, reviewed or other managed requests", async () => {
+    const { feed, context, read } = setup(["21", "22"]);
+    await feed.load({}, context, read);
+    expect(
+      read.discover.mock.calls.map(([source]) => ({
+        scope: source.scope,
+        projectId: source.projectId,
+      })),
+    ).toEqual([{ scope: "created_by_me", projectId: null }]);
+  });
+  test("rejects continuation reuse after changing the author scope", async () => {
     const { feed, context, read } = setup();
-    const result = await feed.load({}, context, read);
+    read.discover.mockResolvedValue({ items: [mr(1)], nextPage: 2 });
+    const first = await feed.load({}, context, read);
+    await expect(
+      feed.load(
+        { after: first.endCursor, includeOtherAuthors: true },
+        context,
+        read,
+      ),
+    ).rejects.toThrow("selection changed");
+  });
+  test("deduplicates own and opted-in managed-project discovery without enriching MR details", async () => {
+    const { feed, context, read } = setup();
+    const result = await feed.load(
+      { includeOtherAuthors: true },
+      context,
+      read,
+    );
     expect(read.discover.mock.calls.map(([source]) => source.scope)).toEqual([
       "created_by_me",
-      "assigned_to_me",
-      "reviews_for_me",
       "all",
     ]);
     expect(read.discussions).toHaveBeenCalledTimes(1);
@@ -117,7 +141,11 @@ describe("GitLab comments pagination", () => {
       items: [discussion("system-only", true), thread],
       nextPage: null,
     });
-    const result = await feed.load({}, context, read);
+    const result = await feed.load(
+      { includeOtherAuthors: true },
+      context,
+      read,
+    );
     expect(result.threads.map((value) => value.discussion.id)).toEqual([
       "human",
     ]);
@@ -138,14 +166,18 @@ describe("GitLab comments pagination", () => {
     const ids: string[] = [];
     let after: string | null = null;
     do {
-      const result = await feed.load({ after, first: 20 }, context, read);
+      const result = await feed.load(
+        { includeOtherAuthors: true, after, first: 20 },
+        context,
+        read,
+      );
       expect(result.threads.length).toBeLessThanOrEqual(20);
       ids.push(...result.threads.map((thread) => thread.id));
       after = result.endCursor;
     } while (after);
     expect(ids).toHaveLength(123);
     expect(new Set(ids).size).toBe(123);
-    expect(read.discover).toHaveBeenCalledTimes(4);
+    expect(read.discover).toHaveBeenCalledTimes(2);
     expect(read.discussions).toHaveBeenCalledTimes(3);
   });
 
@@ -232,10 +264,18 @@ describe("GitLab comments pagination", () => {
       items: [mr(source.page!)],
       nextPage: source.page === 1 ? 2 : null,
     }));
-    const first = await feed.load({ refresh: true }, context, read);
-    const second = await feed.load({ after: first.endCursor }, context, read);
+    const first = await feed.load(
+      { includeOtherAuthors: true, refresh: true },
+      context,
+      read,
+    );
+    const second = await feed.load(
+      { includeOtherAuthors: true, after: first.endCursor },
+      context,
+      read,
+    );
     expect(second.threads[0].mergeRequest.iid).toBe(2);
-    expect(read.discover.mock.calls).toHaveLength(8);
+    expect(read.discover.mock.calls).toHaveLength(4);
     expect(read.discover.mock.calls.every(([, refresh]) => refresh)).toBe(true);
     expect(read.discussions.mock.calls.every(([, , refresh]) => refresh)).toBe(
       true,
@@ -254,7 +294,11 @@ describe("GitLab comments pagination", () => {
     do {
       const discoveryBefore = read.discover.mock.calls.length;
       const discussionBefore = read.discussions.mock.calls.length;
-      const result = await feed.load({ after }, context, read);
+      const result = await feed.load(
+        { includeOtherAuthors: true, after },
+        context,
+        read,
+      );
       expect(
         read.discover.mock.calls.length - discoveryBefore,
       ).toBeLessThanOrEqual(4);
@@ -289,11 +333,15 @@ describe("GitLab comments pagination", () => {
   test("keeps successful comments and retains failed sources for a later retry", async () => {
     const { feed, context, read } = setup();
     read.discover.mockRejectedValueOnce(new Error("408 timeout"));
-    const first = await feed.load({}, context, read);
+    const first = await feed.load({ includeOtherAuthors: true }, context, read);
     expect(first.threads).toHaveLength(1);
     expect(first.partial).toBe(true);
     expect(first.hasNextPage).toBe(true);
-    const second = await feed.load({ after: first.endCursor }, context, read);
+    const second = await feed.load(
+      { includeOtherAuthors: true, after: first.endCursor },
+      context,
+      read,
+    );
     expect(second.partial).toBe(false);
     expect(second.hasNextPage).toBe(false);
     expect(second.threads).toHaveLength(0);
@@ -306,10 +354,14 @@ describe("GitLab comments pagination", () => {
       nextPage: null,
     });
     read.discussions.mockRejectedValueOnce(new Error("Forbidden"));
-    let result = await feed.load({}, context, read);
+    let result = await feed.load({ includeOtherAuthors: true }, context, read);
     expect(result.partial).toBe(true);
     expect(result.threads).toHaveLength(3);
-    result = await feed.load({ after: result.endCursor }, context, read);
+    result = await feed.load(
+      { includeOtherAuthors: true, after: result.endCursor },
+      context,
+      read,
+    );
     expect(result.threads).toHaveLength(3);
     expect(result.hasNextPage).toBe(false);
   });
@@ -336,7 +388,11 @@ describe("GitLab comments pagination", () => {
     do {
       const discoveryBefore = read.discover.mock.calls.length;
       const discussionBefore = read.discussions.mock.calls.length;
-      const result = await feed.load({ after }, context, read);
+      const result = await feed.load(
+        { includeOtherAuthors: true, after },
+        context,
+        read,
+      );
       expect(
         read.discover.mock.calls.length - discoveryBefore,
       ).toBeLessThanOrEqual(4);
@@ -347,12 +403,16 @@ describe("GitLab comments pagination", () => {
       after = result.endCursor;
       expect(result.hasNextPage).toBe(true);
       expect(++pages).toBeLessThan(10);
-    } while (read.discover.mock.calls.length < 16);
+    } while (read.discover.mock.calls.length < 12);
 
     expect(ids).toContain("25:2:d-2");
     expect(ids).toHaveLength(10);
     denied = false;
-    const recovered = await feed.load({ after }, context, read);
+    const recovered = await feed.load(
+      { includeOtherAuthors: true, after },
+      context,
+      read,
+    );
     expect(recovered.threads.map((thread) => thread.id).sort()).toEqual([
       "21:1:d-1",
       "personal:1:d-1",
@@ -371,12 +431,32 @@ describe("GitLab comments pagination", () => {
       items: [discussion("one"), discussion("two")],
       nextPage: null,
     });
-    const first = await feed.load({ first: 1 }, context, read);
-    const second = await feed.load({ after: first.endCursor }, context, read);
-    const repeated = await feed.load({ after: first.endCursor }, context, read);
+    const first = await feed.load(
+      { includeOtherAuthors: true, first: 1 },
+      context,
+      read,
+    );
+    const second = await feed.load(
+      { includeOtherAuthors: true, after: first.endCursor },
+      context,
+      read,
+    );
+    const repeated = await feed.load(
+      { includeOtherAuthors: true, after: first.endCursor },
+      context,
+      read,
+    );
     expect(repeated.threads).toEqual(second.threads);
     await expect(
-      feed.load({ after: first.endCursor, projectId: "other" }, context, read),
+      feed.load(
+        {
+          includeOtherAuthors: true,
+          after: first.endCursor,
+          projectId: "other",
+        },
+        context,
+        read,
+      ),
     ).rejects.toThrow("selection changed");
     await expect(
       feed.load(
@@ -387,7 +467,11 @@ describe("GitLab comments pagination", () => {
     ).rejects.toThrow("selection changed");
     vi.advanceTimersByTime(31 * 60_000);
     await expect(
-      feed.load({ after: first.endCursor }, context, read),
+      feed.load(
+        { includeOtherAuthors: true, after: first.endCursor },
+        context,
+        read,
+      ),
     ).rejects.toThrow("expired");
   });
 
@@ -397,7 +481,11 @@ describe("GitLab comments pagination", () => {
       items: [discussion("one")],
       nextPage: 1,
     });
-    const result = await feed.load({}, context, read);
+    const result = await feed.load(
+      { includeOtherAuthors: true },
+      context,
+      read,
+    );
     expect(result.partial).toBe(true);
     expect(result.warnings.join(" ")).toContain("repeated discussion page");
     expect(result.hasNextPage).toBe(false);
@@ -405,11 +493,15 @@ describe("GitLab comments pagination", () => {
 
   test("requires complete direct-selection context", async () => {
     const { feed, context, read } = setup();
-    await expect(feed.load({ iid: 3 }, context, read)).rejects.toThrow(
-      "Select a project",
-    );
     await expect(
-      feed.load({ discussionId: "id" }, context, read),
+      feed.load({ includeOtherAuthors: true, iid: 3 }, context, read),
+    ).rejects.toThrow("Select a project");
+    await expect(
+      feed.load(
+        { includeOtherAuthors: true, discussionId: "id" },
+        context,
+        read,
+      ),
     ).rejects.toThrow("Select a project");
     expect(read.discover).not.toHaveBeenCalled();
   });

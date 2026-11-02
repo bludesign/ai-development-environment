@@ -72,6 +72,7 @@ import {
   validateJiraBranchNamingScript,
 } from "./branch-naming";
 import { jiraTextInputToAdf, normalizeJiraRichText } from "./text-format";
+import { resolveTransitionFields } from "./transition-fields";
 
 type JsonRecord = Record<string, unknown>;
 
@@ -796,6 +797,7 @@ export class JiraService {
       completedStatusIds: parseStringArray(project.completedStatusIdsJson),
       excludedStatusIds: parseStringArray(project.excludedStatusIdsJson),
       doneStatusId: project.doneStatusId,
+      defaultResolutionId: project.defaultResolutionId,
       branchNamingScript:
         project.branchNamingScript ?? DEFAULT_JIRA_BRANCH_NAMING_SCRIPT,
       branchNamingMode: project.branchNamingMode === "AI" ? "AI" : "JAVASCRIPT",
@@ -806,6 +808,33 @@ export class JiraService {
         project.branchNamingPrompt ?? DEFAULT_JIRA_BRANCH_NAMING_PROMPT,
       sources: project.sources.map(sourceView),
     }));
+  }
+
+  async resolutions(): Promise<JiraNamedValue[]> {
+    const result = await this.cachedCall({
+      operation: "RESOLUTIONS",
+      params: {},
+      requestSummary: "Available Jira Resolution values",
+      fetcher: async () => {
+        const settings = await this.requireCredentials();
+        const response = await fetch(
+          `${settings.siteUrl}/rest/api/3/resolution`,
+          {
+            headers: {
+              Accept: "application/json",
+              Authorization: `Basic ${Buffer.from(`${settings.email}:${settings.apiToken}`).toString("base64")}`,
+            },
+            signal: AbortSignal.timeout(15_000),
+          },
+        );
+        if (!response.ok)
+          throw new Error(
+            `Could not load Jira Resolutions (${response.status}).`,
+          );
+        return response.json();
+      },
+    });
+    return editableValues(result.value);
   }
 
   async projectStatuses(projectId: string): Promise<JiraProjectStatus[]> {
@@ -855,6 +884,7 @@ export class JiraService {
     completedStatusIds: string[];
     excludedStatusIds?: string[] | null;
     doneStatusId?: string | null;
+    defaultResolutionId?: string | null;
   }): Promise<JiraProjectView[]> {
     if (!TICKET_ASSIGNMENT_FILTERS.has(input.ticketAssignmentFilter)) {
       throw new Error("Invalid Jira ticket assignment filter");
@@ -877,6 +907,20 @@ export class JiraService {
         throw new Error("The selected Jira done status is not available");
       }
     }
+    const defaultResolutionId =
+      input.defaultResolutionId === undefined
+        ? undefined
+        : input.defaultResolutionId?.trim() || null;
+    if (
+      defaultResolutionId &&
+      !(await this.resolutions()).some(
+        (resolution) => resolution.id === defaultResolutionId,
+      )
+    ) {
+      throw new Error(
+        "The selected Jira Resolution is not available. Refresh the project settings and choose an available Resolution.",
+      );
+    }
     await prisma.jiraProject.update({
       where: { id: input.projectId },
       data: {
@@ -897,6 +941,7 @@ export class JiraService {
               ),
             }),
         ...(doneStatusId === undefined ? {} : { doneStatusId }),
+        ...(defaultResolutionId === undefined ? {} : { defaultResolutionId }),
       },
     });
     return this.listProjects();
@@ -1643,7 +1688,7 @@ export class JiraService {
       itemCount: (value) => asArray(asRecord(value).transitions).length,
     });
     await this.linkCacheEntryToIssue(key, result.entryId);
-    return asArray(asRecord(result.value).transitions)
+    const transitions = asArray(asRecord(result.value).transitions)
       .map(asRecord)
       .filter((transition) => transition.isAvailable !== false)
       .flatMap((transition) => {
@@ -1660,6 +1705,18 @@ export class JiraService {
           );
         return [
           {
+            fields: Object.entries(asRecord(transition.fields)).map(
+              ([fieldId, rawField]) => {
+                const field = asRecord(rawField);
+                return {
+                  id: fieldId,
+                  name: asString(field.name) ?? fieldId,
+                  required: asBoolean(field.required),
+                  defaultValue: field.defaultValue,
+                  allowedValues: editableValues(field.allowedValues),
+                };
+              },
+            ),
             id,
             name,
             toStatusId: asString(destination.id),
@@ -1670,6 +1727,27 @@ export class JiraService {
           },
         ];
       });
+    const resolutionId = transitions.some((transition) =>
+      transition.fields.some(
+        (field) => field.id === "resolution" && field.required,
+      ),
+    )
+      ? ((
+          await (
+            await getPrismaClient()
+          ).jiraProject.findUnique({
+            where: { key: key.split("-")[0] },
+            select: { defaultResolutionId: true },
+          })
+        )?.defaultResolutionId ?? null)
+      : null;
+    return transitions.map((transition) => ({
+      ...transition,
+      unresolvedRequiredFields: resolveTransitionFields(
+        transition.fields,
+        resolutionId,
+      ).unresolved,
+    }));
   }
 
   async ticketEditFields(issueKey: string): Promise<JiraEditField[]> {
@@ -1941,9 +2019,24 @@ export class JiraService {
       (item) => item.id === transitionId,
     );
     if (!transition) throw new Error("The Jira transition is not available");
-    if (transition.requiredFields.length > 0) {
+    const resolutionId = transition.fields?.some(
+      (field) => field.id === "resolution" && field.required,
+    )
+      ? ((
+          await (
+            await getPrismaClient()
+          ).jiraProject.findUnique({
+            where: { key: key.split("-")[0] },
+            select: { defaultResolutionId: true },
+          })
+        )?.defaultResolutionId ?? null)
+      : null;
+    const resolved = transition.fields
+      ? resolveTransitionFields(transition.fields, resolutionId)
+      : { values: {}, unresolved: transition.requiredFields };
+    if (resolved.unresolved.length > 0) {
       throw new Error(
-        `This transition requires fields that must be completed in Jira: ${transition.requiredFields.join(", ")}`,
+        `Cannot transition ${key}: required Jira fields need values: ${resolved.unresolved.join(", ")}. Configure a fallback Resolution in project ${key.split("-")[0]} settings, or complete these fields in Jira.`,
       );
     }
     return this.mutateTicket(key, "TRANSITION_ISSUE", async () => {
@@ -1951,6 +2044,9 @@ export class JiraService {
       await cloud.issues.doTransition({
         issueIdOrKey: key,
         transition: { id: transition.id },
+        ...(Object.keys(resolved.values).length
+          ? { fields: resolved.values }
+          : {}),
       });
     });
   }
@@ -1976,7 +2072,8 @@ export class JiraService {
       .filter((item) => item.toStatusId === project.doneStatusId)
       .sort(
         (first, second) =>
-          first.requiredFields.length - second.requiredFields.length,
+          (first.unresolvedRequiredFields ?? first.requiredFields).length -
+          (second.unresolvedRequiredFields ?? second.requiredFields).length,
       )[0];
     if (!transition) {
       throw new Error(

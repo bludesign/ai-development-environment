@@ -7,6 +7,7 @@ import {
   telemetryFields,
   validateTelemetryQuery,
 } from "./matching";
+import { telemetryPathLabel } from "./fields";
 
 const entry: TelemetryEntryView = {
   id: "log-1",
@@ -42,6 +43,27 @@ const query = (
 });
 
 describe("telemetry matching", () => {
+  test("shows readable object keys without changing canonical filter paths", () => {
+    const attributes = {
+      "local timestamp": "12:34",
+      "nested group": { "literal.key": true },
+    };
+    const fields = flattenTelemetryObject("attributes", attributes);
+    expect(Object.keys(fields).map(telemetryPathLabel)).toEqual([
+      "local timestamp",
+      "nested group.literal.key",
+    ]);
+    expect(Object.keys(fields)).toContain('attributes["local timestamp"]');
+    expect(
+      matchesTelemetryQuery(
+        { ...entry, attributes },
+        query({ quickFilters: { 'attributes["local timestamp"]': ["12:34"] } }),
+      ),
+    ).toBe(true);
+    expect(telemetryPathLabel('attributes["invalid\\q"]')).toBe(
+      '["invalid\\q"]',
+    );
+  });
   test("flattens nested object paths while retaining arrays and unsafe keys", () => {
     expect(flattenTelemetryObject("attributes", entry.attributes)).toEqual({
       "attributes.device.model": "iPhone 17",

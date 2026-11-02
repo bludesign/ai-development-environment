@@ -67,7 +67,11 @@ export const pushNotificationsOpenApiDocument = {
         ],
         properties: {
           clientRegistrationId: { type: "string", maxLength: 200 },
-          token: { type: "string", description: "32-byte APNs token" },
+          token: {
+            type: "string",
+            description:
+              "Nonempty APNs token encoded as even-length hexadecimal or valid Base64; token length may vary",
+          },
           tokenEncoding: { type: "string", enum: ["HEX", "BASE64"] },
           topic: { type: "string", maxLength: 255 },
           environment: { type: "string", enum: ["SANDBOX", "PRODUCTION"] },

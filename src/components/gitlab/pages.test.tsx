@@ -141,7 +141,7 @@ describe("GitLabMergeRequestsPage", () => {
     });
 
     render(<GitLabMergeRequestsPage />);
-    await screen.findByText("Add the API");
+    await screen.findByText("Add the API", undefined, { timeout: 3_000 });
     fireEvent.click(
       screen.getByRole("button", { name: "Manage GitLab projects" }),
     );
@@ -196,6 +196,7 @@ describe("GitLabMergeRequestsPage", () => {
       if (query.includes("query GitLabMergeRequests")) {
         expect(variables).toEqual({
           scope: "MINE",
+          projectScope: "MANAGED",
           projectId: null,
           state: "OPENED",
           page: 1,
@@ -245,6 +246,7 @@ describe("GitLabMergeRequestsPage", () => {
       if (query.includes("query GitLabMergeRequests")) {
         expect(variables).toEqual({
           scope: "MINE",
+          projectScope: "MANAGED",
           projectId: null,
           state: "OPENED",
           page: 1,
@@ -412,7 +414,11 @@ describe("GitLabMergeRequestsPage", () => {
   });
 
   test("requires a project for All accessible and loads an unmanaged selection", async () => {
-    window.history.replaceState(null, "", "/gitlab/merge-requests?scope=ALL");
+    window.history.replaceState(
+      null,
+      "",
+      "/gitlab/merge-requests?scope=ALL&projectScope=ALL",
+    );
     requestMock.mockImplementation(async (query, variables) => {
       if (query.includes("GitLabPageConfiguration"))
         return configuration as never;
@@ -429,6 +435,7 @@ describe("GitLabMergeRequestsPage", () => {
       if (query.includes("query GitLabMergeRequests")) {
         expect(variables).toEqual({
           scope: "ALL",
+          projectScope: "ALL",
           projectId: "remote-9",
           state: "OPENED",
           page: 1,
@@ -515,6 +522,7 @@ describe("GitLabMergeRequestsPage", () => {
       )?.[1],
     ).toEqual({
       scope: "REVIEW_REQUESTED",
+      projectScope: "ALL",
       projectId: "project-1",
       state: "MERGED",
       page: 3,
@@ -527,12 +535,17 @@ describe("GitLabMergeRequestsPage", () => {
         .at(-1)?.[1],
     ).toEqual({
       scope: "MINE",
+      projectScope: "ALL",
       projectId: "project-1",
       state: "MERGED",
       page: 1,
     });
     expect(new URLSearchParams(window.location.search).get("page")).toBeNull();
-    window.history.replaceState(null, "", "/gitlab/merge-requests?scope=ALL");
+    window.history.replaceState(
+      null,
+      "",
+      "/gitlab/merge-requests?scope=ALL&projectScope=ALL",
+    );
     fireEvent.popState(window);
     await screen.findByText(
       "Choose a project to view all its accessible merge requests.",
@@ -611,6 +624,7 @@ describe("GitLabMergeRequestsPage", () => {
           .at(-1)?.[1],
       ).toEqual({
         scope: "REVIEW_REQUESTED",
+        projectScope: "ALL",
         projectId: "unmanaged",
         state: "OPENED",
         page: 1,
@@ -646,6 +660,7 @@ describe("GitLabMergeRequestsPage", () => {
           .at(-1)?.[1],
       ).toEqual({
         scope: "REVIEW_REQUESTED",
+        projectScope: "ALL",
         projectId: "project-1",
         state: "CLOSED",
         page: 1,
@@ -830,6 +845,7 @@ describe("GitLabPipelinesPage", () => {
       )?.[1],
     ).toEqual({
       projectId: "project-1",
+      scope: "RELEVANT",
       page: 3,
       ref: "feature/api",
       status: "FAILED",

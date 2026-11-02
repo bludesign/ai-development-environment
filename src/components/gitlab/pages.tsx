@@ -336,7 +336,9 @@ function mergeRequestFiltersFromUrl(search: string): MergeRequestFilters {
         : scope === "REVIEW_REQUESTED"
           ? scope
           : "MINE",
-    projectId: params.get("project") ?? "",
+    projectId:
+      params.get("project") ??
+      (params.get("projectScope") === "ALL" ? "" : "__managed__"),
     state:
       state === "MERGED" || state === "CLOSED" || state === "ALL"
         ? state
@@ -381,7 +383,7 @@ export function GitLabMergeRequestsPage({
   >([]);
   const [filters, setFilters] = useState<MergeRequestFilters>({
     scope: "MINE",
-    projectId: "",
+    projectId: "__managed__",
     state: "OPENED",
     page: 1,
   });
@@ -423,7 +425,8 @@ export function GitLabMergeRequestsPage({
     const params = new URLSearchParams(window.location.search);
     for (const [key, value] of Object.entries({
       scope: next.scope === "MINE" ? "" : next.scope,
-      project: next.projectId,
+      project: next.projectId === "__managed__" ? "" : next.projectId,
+      projectScope: next.projectId === "" ? "ALL" : "",
       state: next.state === "OPENED" ? "" : next.state,
       page: next.page > 1 ? String(next.page) : "",
     })) {
@@ -459,12 +462,18 @@ export function GitLabMergeRequestsPage({
       const data = await controlPlaneRequest<{
         gitlabMergeRequests: Paginated<GitLabMergeRequestView>;
       }>(
-        `query GitLabMergeRequests($scope: GitLabMergeRequestScope!, $projectId: ID, $state: GitLabMergeRequestState!, $page: Int!) {
-          gitlabMergeRequests(scope: $scope, projectId: $projectId, state: $state, page: $page) {
+        `query GitLabMergeRequests($scope: GitLabMergeRequestScope!, $projectId: ID, $projectScope: GitLabProjectScope!, $state: GitLabMergeRequestState!, $page: Int!) {
+          gitlabMergeRequests(scope: $scope, projectId: $projectId, projectScope: $projectScope, state: $state, page: $page) {
             total page perPage nextPage items { ${MR} }
           }
         }`,
-        { scope, projectId: projectId || null, state, page },
+        {
+          scope,
+          projectId: projectId === "__managed__" ? null : projectId || null,
+          projectScope: projectId === "__managed__" ? "MANAGED" : "ALL",
+          state,
+          page,
+        },
         { signal: controller.signal },
       );
       if (controller.signal.aborted) return;
@@ -540,6 +549,7 @@ export function GitLabMergeRequestsPage({
       <div className="space-y-2">
         <div className="flex flex-wrap items-center gap-3">
           <GitLabAccessibleProjectSelect
+            allowManaged
             allowAll={scope !== "ALL"}
             value={projectId}
             onChange={(value) => changeFilters({ projectId: value })}
@@ -1178,6 +1188,9 @@ export function GitLabPipelinesPage() {
     error: configurationError,
   } = useConfiguration();
   const [projectId, setProjectId] = useState("");
+  const [pipelineScope, setPipelineScope] = useState<
+    "RELEVANT" | "MINE" | "ALL"
+  >("RELEVANT");
   const [pipelines, setPipelines] = useState<GitLabPipelineView[]>([]);
   const [page, setPage] = useState(1);
   const [pagination, setPagination] = useState<GitLabPagination | null>(null);
@@ -1194,7 +1207,7 @@ export function GitLabPipelinesPage() {
   const [actionBusy, setActionBusy] = useState(false);
   const actionInFlight = useRef(false);
   const [error, setError] = useState<string | null>(null);
-  const currentScope = `${projectId}:${page}:${branch}:${status}:${source}`;
+  const currentScope = `${projectId}:${page}:${branch}:${status}:${source}:${pipelineScope}`;
   const scopeRef = useRef(currentScope);
   useEffect(() => {
     scopeRef.current = currentScope;
@@ -1209,6 +1222,12 @@ export function GitLabPipelinesPage() {
         projects.find((item) => item.id === params.get("project")) ??
         projects[0];
       setProjectId(project.id);
+      const requestedScope = params.get("scope");
+      setPipelineScope(
+        requestedScope === "MINE" || requestedScope === "ALL"
+          ? requestedScope
+          : "RELEVANT",
+      );
       setRef(project.defaultBranch ?? "main");
       setBranch(params.get("branch")?.trim() ?? "");
       setBranchInput(params.get("branch")?.trim() ?? "");
@@ -1240,6 +1259,8 @@ export function GitLabPipelinesPage() {
     if (!projectId) return;
     const params = new URLSearchParams(window.location.search);
     params.set("project", projectId);
+    if (pipelineScope !== "RELEVANT") params.set("scope", pipelineScope);
+    else params.delete("scope");
     if (branch) params.set("branch", branch);
     else params.delete("branch");
     if (status !== "all") params.set("status", status);
@@ -1253,7 +1274,7 @@ export function GitLabPipelinesPage() {
       "",
       `${window.location.pathname}?${params.toString()}`,
     );
-  }, [branch, page, projectId, source, status]);
+  }, [branch, page, projectId, source, status, pipelineScope]);
 
   const loadController = useRef<AbortController | null>(null);
   const load = useCallback(async () => {
@@ -1267,12 +1288,13 @@ export function GitLabPipelinesPage() {
         gitlabPipelines: Paginated<GitLabPipelineView>;
         gitlabAutoRetryRules: GitLabAutoRetryRuleView[];
       }>(
-        `query GitLabPipelines($projectId: ID!, $page: Int!, $ref: String, $status: GitLabPipelineStatus, $source: String) {
-        gitlabPipelines(projectId: $projectId, page: $page, ref: $ref, status: $status, source: $source) { total page perPage nextPage items { ${PIPELINE} } }
+        `query GitLabPipelines($projectId: ID!, $page: Int!, $ref: String, $status: GitLabPipelineStatus, $source: String, $scope: GitLabPipelineScope!) {
+        gitlabPipelines(projectId: $projectId, page: $page, ref: $ref, status: $status, source: $source, scope: $scope) { total page perPage nextPage items { ${PIPELINE} } }
         gitlabAutoRetryRules(projectId: $projectId) { id projectId pipelineId enabled maxAttempts attempts lastError lastAttemptAt createdAt updatedAt executions { id pipelineId attempt status lastError createdAt updatedAt } }
       }`,
         {
           projectId,
+          scope: pipelineScope,
           page,
           ref: branch || null,
           status: status === "all" ? null : status,
@@ -1291,7 +1313,7 @@ export function GitLabPipelinesPage() {
     } finally {
       if (!controller.signal.aborted) setBusy(false);
     }
-  }, [branch, page, projectId, source, status]);
+  }, [branch, page, projectId, source, status, pipelineScope]);
 
   useEffect(() => {
     const timeout = window.setTimeout(() => void load(), 0);
@@ -1433,6 +1455,26 @@ export function GitLabPipelinesPage() {
               projects={configuration.projects}
               value={projectId}
             />
+            <Select
+              value={pipelineScope}
+              onValueChange={(value) => {
+                setPipelineScope(value as typeof pipelineScope);
+                setPage(1);
+              }}
+            >
+              <SelectTrigger aria-label={t("pipelineScope")} className="w-64">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="RELEVANT">
+                  {t("relevantPipelines")}
+                </SelectItem>
+                <SelectItem value="MINE">
+                  {t("myMergeRequestPipelines")}
+                </SelectItem>
+                <SelectItem value="ALL">{t("allPipelines")}</SelectItem>
+              </SelectContent>
+            </Select>
             <Input
               aria-label={t("filterBranch")}
               className="max-w-64"
@@ -1842,7 +1884,7 @@ export function GitLabCachePage() {
           <div className="flex flex-wrap gap-2">
             <Input
               className="max-w-40"
-              min={1}
+              min={0}
               max={1440}
               onChange={(event) => setTtlMinutes(event.target.value)}
               type="number"
@@ -1865,7 +1907,7 @@ export function GitLabCachePage() {
             />
             <Input
               className="max-w-40"
-              min={1}
+              min={0}
               max={86400}
               onChange={(event) => setOverrideSeconds(event.target.value)}
               type="number"

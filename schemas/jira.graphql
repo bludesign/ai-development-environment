@@ -134,6 +134,8 @@ type JiraProject {
   excludedStatusIds: [ID!]!
   "Identifier of the related done status. May be null when unavailable or not applicable."
   doneStatusId: ID
+  "Fallback Resolution used when a transition does not declare its own default."
+  defaultResolutionId: ID
   "The branch naming script associated with this Jira project."
   branchNamingScript: String!
   "Active strategy for naming ticket branches."
@@ -330,6 +332,8 @@ type JiraEditField {
 
 "Represents a Jira transition in the GraphQL API."
 type JiraTransition {
+  "Required fields that cannot be supplied from Jira defaults or project settings."
+  unresolvedRequiredFields: [String!]!
   "Stable identifier for this Jira transition."
   id: ID!
   "Display name of this Jira transition."
@@ -720,6 +724,8 @@ input UpdateJiraSourceInput {
 
 "Values used to update Jira project display settings."
 input UpdateJiraProjectDisplaySettingsInput {
+  "Fallback Resolution ID; null clears the fallback."
+  defaultResolutionId: ID
   "Identifier of the project to use."
   projectId: ID!
   "The ticket assignment filter to use for the request."
@@ -879,6 +885,8 @@ type JiraTicketChange {
 }
 
 extend type Query {
+  "Available Jira Resolution values for per-project fallback selection."
+  jiraResolutions: [JiraNamedValue!]!
   "Returns Jira settings."
   jiraSettings: JiraSettings!
   "Returns the Jira webhook configuration."

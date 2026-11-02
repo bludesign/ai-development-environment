@@ -37,6 +37,7 @@ import {
   type TelemetryEntryType,
   type TelemetryEntryView,
   type TelemetryFacets,
+  type TelemetryIdFacets,
   type TelemetryFilterDefinition,
   type TelemetryJsonObject,
   type TelemetryQueryInput,
@@ -597,6 +598,7 @@ export class TelemetryService {
       let hasMore = false;
       let lastEntry: TelemetryEntryView | null = null;
       let segmentHasCollectedEntry = false;
+      let runSeparators = 0;
       const entryTypes = {
         entryType: { in: [...sourcesForView(view), "SEPARATOR"] },
       };
@@ -604,7 +606,23 @@ export class TelemetryService {
         after ? { AND: [entryTypes, olderThanCursorWhere(after)] } : entryTypes,
         (entry) => {
           if (entry.entryType === "SEPARATOR") {
-            if (segmentHasCollectedEntry) items.push(entry);
+            if (
+              input.showBuildRunSeparators === false &&
+              entry.separatorKind === "BUILD_RUN"
+            )
+              return;
+            if (entry.separatorKind === "BUILD_RUN") {
+              if (runSeparators >= first) {
+                hasMore = true;
+                return false;
+              }
+              runSeparators += 1;
+              items.push(entry);
+              lastEntry = entry;
+            } else if (segmentHasCollectedEntry) {
+              items.push(entry);
+              lastEntry = entry;
+            }
             segmentHasCollectedEntry = false;
             return;
           }
@@ -622,7 +640,7 @@ export class TelemetryService {
       );
       if (!lastEntry) {
         return {
-          items: [],
+          items,
           nextCursor: null,
           matchingCount: totalCount,
           totalCount,
@@ -654,6 +672,11 @@ export class TelemetryService {
         : { entryType: { in: [...sourcesForView(view), "SEPARATOR"] } },
       (entry) => {
         if (entry.entryType === "SEPARATOR") {
+          if (
+            input.showBuildRunSeparators === false &&
+            entry.separatorKind === "BUILD_RUN"
+          )
+            return;
           const afterCursor = !after || olderThan(entry, after);
           if (
             afterCursor &&
@@ -880,6 +903,32 @@ export class TelemetryService {
     );
   }
 
+  async idFacets(viewValue: string): Promise<TelemetryIdFacets> {
+    const view = requireView(viewValue);
+    const prisma = await getPrismaClient();
+    const groups = await Promise.all(
+      (["buildId", "sessionId"] as const).map((field) =>
+        prisma.telemetryEntry.groupBy({
+          by: [field],
+          where: { ...sourceWhere(view), [field]: { not: null } },
+          _min: { clientTime: true },
+        }),
+      ),
+    );
+    const values = (index: number, field: "buildId" | "sessionId") =>
+      groups[index]!.flatMap((row) => {
+        const value = row[field];
+        const time = row._min.clientTime;
+        return value && time
+          ? [{ value, firstSeenAt: time.toISOString() }]
+          : [];
+      }).sort((left, right) => left.value.localeCompare(right.value));
+    return {
+      buildIds: values(0, "buildId"),
+      sessionIds: values(1, "sessionId"),
+    };
+  }
+
   async fields(viewValue: string): Promise<string[]> {
     const view = requireView(viewValue);
     const fields = new Set<string>();
@@ -905,34 +954,6 @@ export class TelemetryService {
       },
     });
     this.publish([entry.id], "SEPARATOR_ADDED");
-    return viewEntry(entry);
-  }
-
-  async addBuildSeparator(input: {
-    buildId: string;
-    name: string;
-    clientTime?: Date;
-  }): Promise<TelemetryEntryView> {
-    const prisma = await getPrismaClient();
-    const entry = await prisma.telemetryEntry.upsert({
-      where: {
-        separatorKind_buildId: {
-          separatorKind: "BUILD",
-          buildId: input.buildId,
-        },
-      },
-      create: {
-        id: randomUUID(),
-        entryType: "SEPARATOR",
-        clientTime: input.clientTime ?? new Date(),
-        receivedAt: new Date(),
-        separatorKind: "BUILD",
-        separatorName: input.name.slice(0, 100),
-        buildId: input.buildId,
-      },
-      update: {},
-    });
-    this.publish([entry.id], "BUILD_SEPARATOR_ADDED");
     return viewEntry(entry);
   }
 
@@ -1029,6 +1050,11 @@ export class TelemetryService {
         if (ranges.length > 0 && matchingRanges.length === 0) return;
         if (excluded.has(entry.id)) return;
         if (entry.entryType === "SEPARATOR") {
+          if (
+            selection.query?.showBuildRunSeparators === false &&
+            entry.separatorKind === "BUILD_RUN"
+          )
+            return;
           if (
             selection.includeSeparators ||
             matchingRanges.some((range) => range.includeSeparators)
@@ -1159,6 +1185,7 @@ export class TelemetryService {
       view,
       columns: parseColumns(settings.columnsJson, view),
       timeFormat: settings.timeFormat === "24" ? "24" : "12",
+      showBuildRunSeparators: settings.showBuildRunSeparators ?? true,
       activeColumnPresetId: settings.activeColumnPresetId,
       activeSavedFilterId: settings.activeSavedFilterId,
     };
@@ -1168,6 +1195,7 @@ export class TelemetryService {
     view: string;
     columns?: string[] | null;
     timeFormat?: string | null;
+    showBuildRunSeparators?: boolean | null;
     activeColumnPresetId?: string | null;
     activeSavedFilterId?: string | null;
   }): Promise<TelemetryViewSettingsView> {
@@ -1183,6 +1211,8 @@ export class TelemetryService {
         view,
         columnsJson: serializeColumns(input.columns ?? current.columns),
         timeFormat: input.timeFormat ?? current.timeFormat,
+        showBuildRunSeparators:
+          input.showBuildRunSeparators ?? current.showBuildRunSeparators,
         activeColumnPresetId: input.activeColumnPresetId ?? null,
         activeSavedFilterId: input.activeSavedFilterId ?? null,
       },
@@ -1191,6 +1221,7 @@ export class TelemetryService {
           ? serializeColumns(input.columns)
           : undefined,
         timeFormat: input.timeFormat ?? undefined,
+        showBuildRunSeparators: input.showBuildRunSeparators ?? undefined,
         activeColumnPresetId:
           input.activeColumnPresetId === undefined
             ? undefined

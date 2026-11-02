@@ -4,6 +4,8 @@ import {
   ServerUrlSettingsLink,
 } from "@/components/server-urls/server-url-controls";
 import { useServerUrlSettings } from "@/hooks/use-server-url-settings";
+import { DateTime } from "@/components/common/date-time";
+import { Link } from "@/i18n/navigation";
 
 import { createRefreshCoalescer } from "@/lib/refresh-coalescer";
 import { readCursorWindow } from "@/lib/read-cursor-window";
@@ -104,6 +106,7 @@ import { formatDateValue } from "@/lib/date-format";
 import { cn } from "@/lib/utils";
 import {
   flattenTelemetryObject,
+  telemetryPathLabel,
   telemetryFields,
 } from "@/services/telemetry/fields";
 import {
@@ -113,6 +116,8 @@ import {
   type TelemetryColumnPresetView,
   type TelemetryEntryView,
   type TelemetryFacets,
+  type TelemetryIdFacets,
+  type TelemetryIdFacet,
   type TelemetryFilterCondition,
   type TelemetryFilterDefinition,
   type TelemetryQueryInput,
@@ -215,6 +220,7 @@ const SWATCH_CLASSES: Record<string, string> = {
 };
 
 type Configuration = {
+  idFacets?: TelemetryIdFacets;
   settings: TelemetrySettingsView;
   viewSettings: TelemetryViewSettingsView;
   presets: TelemetryColumnPresetView[];
@@ -295,12 +301,7 @@ function parameterSummary(entry: TelemetryEntryView) {
     .join(" • ");
 }
 
-export function telemetryPathLabel(path: string): string {
-  return path.replace(
-    /^(?:attributes|defaultParameters|additionalParameters)(?:\.|(?=\[))/,
-    "",
-  );
-}
+export { telemetryPathLabel } from "@/services/telemetry/fields";
 
 function columnLabel(column: string, t: ReturnType<typeof useTranslations>) {
   const known: Record<string, string> = {
@@ -381,9 +382,12 @@ export function TelemetryPage({ view }: { view: TelemetryView }) {
   const columns =
     configuration?.viewSettings.columns ?? DEFAULT_TELEMETRY_COLUMNS[view];
   const timeFormat = configuration?.viewSettings.timeFormat ?? "12";
+  const showBuildRunSeparators =
+    configuration?.viewSettings.showBuildRunSeparators ?? true;
   const queryInput = useMemo<TelemetryQueryInput>(
     () => ({
       view,
+      showBuildRunSeparators,
       first: 200,
       search: search || null,
       searchMode,
@@ -391,7 +395,15 @@ export function TelemetryPage({ view }: { view: TelemetryView }) {
       quickFilters,
       advancedFilter: advancedFilter.conditions.length ? advancedFilter : null,
     }),
-    [advancedFilter, caseSensitive, quickFilters, search, searchMode, view],
+    [
+      advancedFilter,
+      caseSensitive,
+      quickFilters,
+      search,
+      searchMode,
+      view,
+      showBuildRunSeparators,
+    ],
   );
 
   const loadConfiguration = useCallback(async () => {
@@ -402,6 +414,7 @@ export function TelemetryPage({ view }: { view: TelemetryView }) {
       telemetryColumnPresets: TelemetryColumnPresetView[];
       telemetrySavedFilters: TelemetrySavedFilterView[];
       telemetryFacets: TelemetryFacets;
+      telemetryIdFacets: TelemetryIdFacets;
       telemetryFields: string[];
     }>(
       `query TelemetryConfiguration($view: TelemetryView!, $origin: String) {
@@ -411,7 +424,7 @@ export function TelemetryPage({ view }: { view: TelemetryView }) {
           effectiveLocalBaseUrl effectiveRemoteBaseUrl updatedAt
         }
         telemetryViewSettings(view: $view) {
-          view columns timeFormat activeColumnPresetId activeSavedFilterId
+          view columns timeFormat showBuildRunSeparators activeColumnPresetId activeSavedFilterId
         }
         telemetryColumnPresets(view: $view) {
           id view name columns isDefault createdAt updatedAt
@@ -420,6 +433,7 @@ export function TelemetryPage({ view }: { view: TelemetryView }) {
           id view name definition createdAt updatedAt
         }
         telemetryFacets(view: $view)
+        telemetryIdFacets(view: $view) { buildIds { value firstSeenAt } sessionIds { value firstSeenAt } }
         telemetryFields(view: $view)
       }`,
       { view, origin },
@@ -430,6 +444,7 @@ export function TelemetryPage({ view }: { view: TelemetryView }) {
       presets: data.telemetryColumnPresets,
       savedFilters: data.telemetrySavedFilters,
       facets: data.telemetryFacets,
+      idFacets: data.telemetryIdFacets,
       fields: data.telemetryFields,
     });
     if (!initializedConfiguration.current) {
@@ -639,7 +654,7 @@ export function TelemetryPage({ view }: { view: TelemetryView }) {
     }>(
       `mutation SaveTelemetryViewSettings($input: SaveTelemetryViewSettingsInput!) {
         saveTelemetryViewSettings(input: $input) {
-          view columns timeFormat activeColumnPresetId activeSavedFilterId
+          view columns timeFormat showBuildRunSeparators activeColumnPresetId activeSavedFilterId
         }
       }`,
       { input: { view, ...input } },
@@ -1007,6 +1022,23 @@ export function TelemetryPage({ view }: { view: TelemetryView }) {
           >
             <Columns3 /> {t("columnsAction")}
           </Button>
+          {view !== "CONSOLE" && (
+            <label className="flex items-center gap-2 text-sm">
+              <Checkbox
+                checked={showBuildRunSeparators}
+                onCheckedChange={(value) => {
+                  void saveViewSettings({
+                    showBuildRunSeparators: Boolean(value),
+                  }).catch((value) =>
+                    setError(
+                      value instanceof Error ? value.message : String(value),
+                    ),
+                  );
+                }}
+              />
+              {t("showBuildRunSeparators")}
+            </label>
+          )}
           <Button
             onClick={() => setExportOpen(true)}
             size="sm"
@@ -1049,7 +1081,22 @@ export function TelemetryPage({ view }: { view: TelemetryView }) {
                   }))
                 }
                 selected={quickFilters[field] ?? []}
-                values={facetValues(configuration?.facets ?? {}, field)}
+                metadata={
+                  field === "buildId"
+                    ? configuration?.idFacets?.buildIds
+                    : field === "sessionId"
+                      ? configuration?.idFacets?.sessionIds
+                      : undefined
+                }
+                values={
+                  field === "buildId" && configuration?.idFacets
+                    ? configuration.idFacets.buildIds.map((item) => item.value)
+                    : field === "sessionId" && configuration?.idFacets
+                      ? configuration.idFacets.sessionIds.map(
+                          (item) => item.value,
+                        )
+                      : facetValues(configuration?.facets ?? {}, field)
+                }
               />
             ))}
           </div>
@@ -1285,10 +1332,22 @@ export function TelemetryPage({ view }: { view: TelemetryView }) {
                             className="px-2 py-1.5 text-xs font-medium text-muted-foreground"
                           >
                             <span className="flex items-center gap-2">
-                              {entry.separatorName || t("separator")}
-                              {entry.separatorKind === "BUILD" &&
-                              entry.buildId ? (
-                                <Badge>{entry.buildId}</Badge>
+                              {entry.separatorKind === "BUILD_CREATED" ||
+                              entry.separatorKind === "BUILD"
+                                ? t("buildCreated")
+                                : entry.separatorKind === "BUILD_RUN"
+                                  ? t("buildRun")
+                                  : entry.separatorName || t("separator")}
+                              {["BUILD", "BUILD_CREATED", "BUILD_RUN"].includes(
+                                entry.separatorKind ?? "",
+                              ) && entry.buildId ? (
+                                <Badge asChild className="font-mono">
+                                  <Link
+                                    href={`/dashboard/builds/${encodeURIComponent(entry.buildId)}`}
+                                  >
+                                    {entry.buildId}
+                                  </Link>
+                                </Badge>
                               ) : null}
                               <Button
                                 aria-label={t("deleteSeparator", {
@@ -1485,12 +1544,14 @@ function QuickFilter({
   field,
   label,
   values,
+  metadata,
   selected,
   onChange,
 }: {
   field: string;
   label: string;
   values: string[];
+  metadata?: TelemetryIdFacet[];
   selected: string[];
   onChange: (values: string[]) => void;
 }) {
@@ -1504,7 +1565,14 @@ function QuickFilter({
           <ChevronDown />
         </Button>
       </DropdownMenuTrigger>
-      <DropdownMenuContent className="w-64" align="start">
+      <DropdownMenuContent
+        className={cn(
+          "w-64",
+          ["buildId", "sessionId"].includes(field) &&
+            "w-[min(38rem,calc(100vw-2rem))]",
+        )}
+        align="start"
+      >
         <DropdownMenuLabel>{label}</DropdownMenuLabel>
         {selected.length > 0 && (
           <DropdownMenuItem onSelect={() => onChange([])}>
@@ -1525,8 +1593,27 @@ function QuickFilter({
                 )
               }
             >
-              <span className="truncate" title={value}>
-                {value}
+              <span className="min-w-0 py-0.5">
+                <span
+                  className={cn(
+                    "block",
+                    ["buildId", "sessionId"].includes(field)
+                      ? "break-all font-mono"
+                      : "truncate",
+                  )}
+                  title={value}
+                >
+                  {value}
+                </span>
+                {metadata?.find((item) => item.value === value)?.firstSeenAt ? (
+                  <DateTime
+                    className="block text-xs text-muted-foreground"
+                    value={
+                      metadata.find((item) => item.value === value)!.firstSeenAt
+                    }
+                    hover={false}
+                  />
+                ) : null}
               </span>
             </DropdownMenuCheckboxItem>
           ))
@@ -1687,6 +1774,7 @@ function TelemetryRow({
                     className={cn(
                       ["message", "detail", "parameters"].includes(column) &&
                         "line-clamp-3 break-words whitespace-normal",
+                      ["buildId", "sessionId"].includes(column) && "font-mono",
                     )}
                   >
                     {value || "—"}
@@ -1847,7 +1935,16 @@ function ExpandedEntry({
         {metadata.map(([label, value]) => (
           <div key={label}>
             <dt className="text-xs text-muted-foreground">{label}</dt>
-            <dd className="mt-0.5 break-all font-medium">{value}</dd>
+            <dd
+              className={cn(
+                "mt-0.5 break-all font-medium",
+                [t("columns.buildId"), t("columns.sessionId")].includes(
+                  label!,
+                ) && "font-mono",
+              )}
+            >
+              {value}
+            </dd>
           </div>
         ))}
       </dl>

@@ -1171,6 +1171,7 @@ function normalizeReviewThreadState(thread: {
 }
 
 export class GitHubService {
+  private readonly actionCenterComparisons = new Map<string, number>();
   private activeCountFlight: { key: string; request: Promise<number> } | null =
     null;
   private autoRetryService: GitHubAutoRetryService | null = null;
@@ -2777,6 +2778,9 @@ export class GitHubService {
     force = false,
   ) {
     type State = {
+      approvalStatus?: string;
+      behindCount?: number | null;
+      needsRebase?: boolean;
       viewerHasApproved: boolean;
       viewerReviewState: string | null;
       canMerge: boolean;
@@ -2793,8 +2797,11 @@ export class GitHubService {
       const data = await this.request<{
         nodes: Array<
           | (RawPullRequestMergeState & {
+              reviewDecision?: string | null;
+              baseRef?: { target?: { oid?: string } | null } | null;
               reviews: { nodes: Array<{ state: string }> };
               repository: {
+                nameWithOwner: string;
                 viewerPermission: RepositoryPermission | null;
                 mergeCommitAllowed: boolean;
                 rebaseMergeAllowed: boolean;
@@ -2806,10 +2813,11 @@ export class GitHubService {
       }>(
         `query GitHubActionCenterRequestStates($ids: [ID!]!, $login: String!) {
           nodes(ids: $ids) { ... on PullRequest {
-            id title body url state isDraft mergeable mergeStateStatus headRefOid headRefName
+            id title body url state isDraft mergeable mergeStateStatus headRefOid headRefName reviewDecision
+            baseRef { target { oid } }
             headRepository { nameWithOwner } mergedAt autoMergeRequest { enabledAt }
             viewerCanEnableAutoMerge viewerCanDisableAutoMerge
-            repository { viewerPermission mergeCommitAllowed rebaseMergeAllowed squashMergeAllowed }
+            repository { nameWithOwner viewerPermission mergeCommitAllowed rebaseMergeAllowed squashMergeAllowed }
             reviews(author: $login, last: 1, states: [APPROVED, CHANGES_REQUESTED, DISMISSED]) { nodes { state } }
           } }
         }`,
@@ -2821,7 +2829,7 @@ export class GitHubService {
           force,
         },
       );
-      for (const pr of batch) {
+      await mapIntegrationRequests(batch, async (pr) => {
         const node = data.nodes.find((node) => node?.id === pr.id);
         if (!node)
           throw new Error("Pull request approval state is unavailable");
@@ -2834,13 +2842,45 @@ export class GitHubService {
             ? null
             : "No merge method is available.");
         const review = node.reviews.nodes[0]?.state ?? null;
+        let behindCount: number | null = null;
+        const baseSha = node.baseRef?.target?.oid;
+        if (baseSha && repository.nameWithOwner) {
+          const cacheKey = `${createHash("sha256").update(token).digest("hex")}:${repository.nameWithOwner}:${baseSha}:${node.headRefOid}`;
+          behindCount = this.actionCenterComparisons.get(cacheKey) ?? null;
+          if (behindCount === null) {
+            try {
+              const comparison = await this.restRequest<{ behind_by: number }>(
+                `${GITHUB_API_BASE_URL}/repos/${repository.nameWithOwner.split("/").map(encodeURIComponent).join("/")}/compare/${encodeURIComponent(baseSha)}...${encodeURIComponent(node.headRefOid)}?per_page=1`,
+                GITHUB_REST_OPERATIONS.repos.compareCommits,
+                token,
+                "ACTION_CENTER_REQUESTS",
+              );
+              if (
+                Number.isInteger(comparison.behind_by) &&
+                comparison.behind_by >= 0
+              ) {
+                behindCount = comparison.behind_by;
+                this.actionCenterComparisons.set(cacheKey, behindCount);
+                if (this.actionCenterComparisons.size > 2_000)
+                  this.actionCenterComparisons.delete(
+                    this.actionCenterComparisons.keys().next().value!,
+                  );
+              }
+            } catch {
+              /* Behind status is supplementary to provider merge policy. */
+            }
+          }
+        }
         result.set(pr.id, {
+          approvalStatus: node.reviewDecision ?? undefined,
+          behindCount,
+          needsRebase: node.mergeStateStatus === "BEHIND",
           viewerHasApproved: review === "APPROVED",
           viewerReviewState: review,
           canMerge: blockedReason === null && node.headRefOid === pr.headRefOid,
           mergeBlockedReason: blockedReason,
         });
-      }
+      });
     }
     return result;
   }
@@ -4543,12 +4583,14 @@ export class GitHubService {
     token: string,
     after: string | null,
     requestSource: GitHubRequestSource,
+    force = false,
   ): Promise<RawConnection<RawPullRequest>> {
     return (
       await this.searchPullRequestPages(
         [{ query, after }],
         token,
         requestSource,
+        force,
       )
     )[0]!;
   }
@@ -4557,6 +4599,7 @@ export class GitHubService {
     requests: Array<{ query: string; after: string | null }>,
     token: string,
     requestSource: GitHubRequestSource,
+    force = false,
   ): Promise<RawConnection<RawPullRequest>[]> {
     if (requests.length === 1) {
       const data = await this.request<{
@@ -4576,7 +4619,7 @@ export class GitHubService {
         ${PULL_REQUEST_FRAGMENT}`,
         requests[0]!,
         token,
-        { requestSource },
+        { requestSource, force, allowStaleOnError: !force },
       );
       return [data.search];
     }
@@ -4611,7 +4654,7 @@ export class GitHubService {
       ${PULL_REQUEST_FRAGMENT}`,
       variables,
       token,
-      { requestSource },
+      { requestSource, force, allowStaleOnError: !force },
     );
     return requests.map((_, index) => data[`search${index}`]!);
   }
@@ -5001,6 +5044,7 @@ export class GitHubService {
     scope: GitHubPullRequestScope,
     repositoryId?: string | null,
     options: {
+      force?: boolean;
       includePipelineJobs?: boolean;
       createdAfter?: string | null;
       reviewedByViewer?: boolean;
@@ -5093,6 +5137,7 @@ export class GitHubService {
               })),
               token,
               requestSource,
+              options.force,
             );
             batch.forEach((item, index) => item.resolve(pages[index]!));
           } catch (error) {
@@ -5127,7 +5172,13 @@ export class GitHubService {
           "sort:updated-desc",
         );
         loaders.set("review", (after) =>
-          this.searchPullRequestPage(query, token, after, requestSource),
+          this.searchPullRequestPage(
+            query,
+            token,
+            after,
+            requestSource,
+            options.force,
+          ),
         );
       } else if (scope === "MINE") {
         const authoredQuery = pullRequestSearchQuery(
@@ -5280,6 +5331,7 @@ export class GitHubService {
           token,
           appConfigured,
           requestSource,
+          { force: options.force, allowStaleOnError: !options.force },
         );
         const highlight = pullRequestWorktreeHighlight(pullRequest, highlights);
         return {

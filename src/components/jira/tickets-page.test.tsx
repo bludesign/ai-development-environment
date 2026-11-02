@@ -530,6 +530,8 @@ describe("JiraTicketsPage", () => {
         {
           input: {
             projectId: "project-2",
+            defaultResolutionId: null,
+            doneStatusId: undefined,
             ticketAssignmentFilter: "SELF_IN_PROGRESS",
             hideCompletedTickets: true,
             completedStatusIds: ["done"],

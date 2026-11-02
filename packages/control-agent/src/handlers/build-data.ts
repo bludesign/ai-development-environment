@@ -8,7 +8,14 @@ import {
   statfs,
 } from "node:fs/promises";
 import { homedir } from "node:os";
-import { basename, dirname, isAbsolute, join, resolve } from "node:path";
+import {
+  basename,
+  dirname,
+  isAbsolute,
+  join,
+  relative,
+  resolve,
+} from "node:path";
 
 import {
   buildDataScanPayload,
@@ -17,6 +24,8 @@ import {
   type BuildDataDeleteResult,
   type BuildDataScanEntry,
   type BuildDataSizeResult,
+  type BuildDataTarget,
+  type DerivedDataLocationMode,
 } from "@ai-development-environment/agent-contract/build-data";
 import { parsePlist } from "@ai-development-environment/agent-contract/plist";
 import type {
@@ -227,6 +236,74 @@ export const scanBuildData: AgentJobHandler = async (
   if (deviceSupport.warning) warnings.push(deviceSupport.warning);
   return { ...successfulProcess, entries, warnings };
 };
+
+/** Resolve ownership before Git removes the workspace and its metadata. */
+export async function ownedWorktreeBuildData(
+  folder: string,
+  configuration: { mode: DerivedDataLocationMode; path: string | null },
+  timeoutMs: number,
+  signal: AbortSignal,
+): Promise<{ targets: BuildDataTarget[]; warnings: string[] }> {
+  const within = (parent: string, child: string) => {
+    const path = relative(parent, child);
+    return (
+      path === "" ||
+      (!path.startsWith(`..${process.platform === "win32" ? "\\" : "/"}`) &&
+        path !== ".." &&
+        !isAbsolute(path))
+    );
+  };
+  const roots = await configuredRoots({
+    ...configuration,
+    worktrees: [{ id: "deleted-worktree", folder }],
+  });
+  const targets: BuildDataTarget[] = [];
+  const warnings: string[] = [];
+  for (const root of new Set(roots)) {
+    const report = await scanRoot(root, timeoutMs, signal);
+    if (report.warning) warnings.push(report.warning);
+    for (const entry of report.entries) {
+      if (
+        entry.kind !== "PROJECT" ||
+        !entry.workspacePath ||
+        !isAbsolute(entry.workspacePath) ||
+        entry.name.toLowerCase().endsWith(".noindex")
+      )
+        continue;
+      if (
+        !within(folder, resolve(entry.workspacePath)) ||
+        within(folder, entry.path)
+      )
+        continue;
+      try {
+        const workspace = await realpath(entry.workspacePath);
+        if (!within(folder, workspace)) continue;
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
+          warnings.push(`${entry.path}: ${errorMessage(error)}`);
+          continue;
+        }
+        // A stale project path still belongs to its worktree, but never follow a linked parent.
+        let ancestor = dirname(entry.workspacePath);
+        while (within(folder, ancestor) && ancestor !== folder) {
+          try {
+            if (!within(folder, await realpath(ancestor))) ancestor = "";
+            break;
+          } catch (parentError) {
+            if ((parentError as NodeJS.ErrnoException).code !== "ENOENT") {
+              ancestor = "";
+              break;
+            }
+            ancestor = dirname(ancestor);
+          }
+        }
+        if (!ancestor) continue;
+      }
+      targets.push({ path: entry.path, rootPath: entry.rootPath });
+    }
+  }
+  return { targets, warnings };
+}
 
 function assertDirectChild(rootPath: string, path: string): void {
   if (!isAbsolute(rootPath) || !isAbsolute(path)) {

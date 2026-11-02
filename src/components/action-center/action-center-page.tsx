@@ -2,6 +2,7 @@
 
 import { ListTodo, RefreshCw } from "lucide-react";
 import { useTranslations } from "next-intl";
+import { useState } from "react";
 
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
@@ -21,6 +22,7 @@ import { useActionCenter } from "./action-center-provider";
 
 export function ActionCenterPage() {
   const t = useTranslations("actionCenter");
+  const [refreshingPullRequests, setRefreshingPullRequests] = useState(false);
   const {
     items,
     totalCount,
@@ -47,16 +49,33 @@ export function ActionCenterPage() {
             {t("description")}
           </p>
         </div>
-        <Button
-          aria-label={t("refresh")}
-          disabled={loading}
-          onClick={() => void refreshRequests()}
-          size="icon"
-          title={t("refresh")}
-          variant="outline"
-        >
-          {loading ? <Spinner /> : <RefreshCw />}
-        </Button>
+        <div className="flex flex-wrap items-center gap-2">
+          <Button
+            disabled={refreshingPullRequests}
+            variant="outline"
+            onClick={async () => {
+              setRefreshingPullRequests(true);
+              try {
+                await refreshRequests(true);
+              } finally {
+                setRefreshingPullRequests(false);
+              }
+            }}
+          >
+            {refreshingPullRequests ? <Spinner /> : <RefreshCw />}
+            {t("refreshPullRequests")}
+          </Button>
+          <Button
+            aria-label={t("refresh")}
+            disabled={loading}
+            onClick={() => void refreshRequests()}
+            size="icon"
+            title={t("refresh")}
+            variant="outline"
+          >
+            {loading ? <Spinner /> : <RefreshCw />}
+          </Button>
+        </div>
       </div>
 
       <div className="flex flex-wrap gap-2">

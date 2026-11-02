@@ -227,8 +227,6 @@ describe("GitLab accessible discovery", () => {
     });
     expect(read.mock.calls.map(([input]) => input.operation)).toEqual([
       "GitLabCommentMergeRequests",
-      "GitLabCommentMergeRequests",
-      "GitLabCommentMergeRequests",
       "GitLabCommentDiscussions",
     ]);
     expect(

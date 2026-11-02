@@ -33,11 +33,13 @@ export function GitLabAccessibleProjectSelect({
   onChange,
   knownProjects = [],
   allowAll = true,
+  allowManaged = false,
 }: {
   value: string;
   onChange: (value: string) => void;
   knownProjects?: GitLabProjectOption[];
   allowAll?: boolean;
+  allowManaged?: boolean;
 }) {
   const t = useTranslations("gitlabPages");
   const [open, setOpen] = useState(false);
@@ -135,9 +137,13 @@ export function GitLabAccessibleProjectSelect({
     setItems([]);
     setNextPage(null);
   };
-  const selectedLabel = value
-    ? (known.get(value)?.pathWithNamespace ?? t("projectWithId", { id: value }))
-    : t(allowAll ? "allProjects" : "chooseProject");
+  const selectedLabel =
+    value === "__managed__" && allowManaged
+      ? t("managedProjects")
+      : value
+        ? (known.get(value)?.pathWithNamespace ??
+          t("projectWithId", { id: value }))
+        : t(allowAll ? "allProjects" : "chooseProject");
 
   return (
     <Popover
@@ -192,6 +198,17 @@ export function GitLabAccessibleProjectSelect({
               <CommandEmpty>{t("noAccessibleProjects")}</CommandEmpty>
             )}
             <CommandGroup>
+              {allowManaged && (
+                <CommandItem
+                  value="__managed__"
+                  onSelect={() => {
+                    onChange("__managed__");
+                    setOpen(false);
+                  }}
+                >
+                  {t("managedProjects")}
+                </CommandItem>
+              )}
               {allowAll && value && (
                 <CommandItem
                   value="__all_projects__"

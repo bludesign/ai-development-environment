@@ -1010,6 +1010,15 @@ extend type Query {
 }
 
 extend type Mutation {
+  "Reports a successful device or simulator launch from the owning deployment agent."
+  reportBuildDeploymentLaunched(
+    "Identifier of the agent job performing the deployment."
+    jobId: ID!
+    "Identifier of the successfully launched deployment."
+    deploymentId: ID!
+    "ISO 8601 timestamp when the launch succeeded."
+    launchedAt: String!
+  ): Boolean!
   "Removes an iOS project and its configurations, preserving completed build history. Active builds prevent removal."
   deleteIosAppProject("Project identifier." id: ID!): Boolean!
   "Creates an iOS app project and returns a codebase project."

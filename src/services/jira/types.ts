@@ -42,6 +42,7 @@ export type JiraProjectView = JiraBranchNamingSettings & {
   completedStatusIds: string[];
   excludedStatusIds: string[];
   doneStatusId: string | null;
+  defaultResolutionId?: string | null;
   branchNamingScript: string;
   sources: JiraSourceView[];
 };
@@ -157,6 +158,14 @@ export type JiraEditField = {
 };
 
 export type JiraTransition = {
+  fields?: Array<{
+    id: string;
+    name: string;
+    required: boolean;
+    defaultValue?: unknown;
+    allowedValues: JiraNamedValue[];
+  }>;
+  unresolvedRequiredFields?: string[];
   id: string;
   name: string;
   toStatusId: string | null;

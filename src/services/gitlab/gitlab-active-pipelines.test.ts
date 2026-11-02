@@ -64,7 +64,7 @@ describe("GitLab active pipeline counts", () => {
       };
     });
 
-    expect(await service.activePipelinesCount()).toBe(328);
+    expect(await service.allActivePipelinesCount()).toBe(328);
     expect(read).toHaveBeenCalledTimes(14);
     expect(maximumRunning).toBeLessThanOrEqual(4);
   });
@@ -73,7 +73,7 @@ describe("GitLab active pipeline counts", () => {
     "returns zero without provider reads when configured=%s and no projects",
     async (configured) => {
       const { service, read } = setup(configured, []);
-      expect(await service.activePipelinesCount()).toBe(0);
+      expect(await service.allActivePipelinesCount()).toBe(0);
       expect(read).not.toHaveBeenCalled();
     },
   );
@@ -99,7 +99,7 @@ describe("GitLab active pipeline counts", () => {
       };
     });
 
-    expect(await service.activePipelinesCount()).toBe(102);
+    expect(await service.allActivePipelinesCount()).toBe(102);
     expect(
       read.mock.calls
         .filter(([input]) => input.query.status === "running")
@@ -126,7 +126,7 @@ describe("GitLab active pipeline counts", () => {
         headers: new Headers(),
       };
     });
-    expect(await service.activePipelinesCount()).toBe(100);
+    expect(await service.allActivePipelinesCount()).toBe(100);
     expect(read.mock.calls).toContainEqual([
       expect.objectContaining({
         query: { status: "pending", page: 2, per_page: 100 },
@@ -140,7 +140,7 @@ describe("GitLab active pipeline counts", () => {
       data: [{ id: 1 }],
       headers: new Headers({ "x-next-page": query.per_page === 1 ? "2" : "1" }),
     }));
-    await expect(service.activePipelinesCount()).rejects.toThrow(
+    await expect(service.allActivePipelinesCount()).rejects.toThrow(
       "invalid pipeline pagination cursor",
     );
   });
@@ -151,7 +151,7 @@ describe("GitLab active pipeline counts", () => {
       if (query.status === "running") throw new Error("GitLab unavailable");
       return { data: [], headers: new Headers({ "x-total": "4" }) };
     });
-    await expect(service.activePipelinesCount()).rejects.toThrow(
+    await expect(service.allActivePipelinesCount()).rejects.toThrow(
       "GitLab unavailable",
     );
   });

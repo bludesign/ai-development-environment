@@ -528,6 +528,11 @@ export const createBuildResolvers = (service: BuildsService) => ({
         telemetryRequestOrigin: context.requestOrigin,
       });
     },
+    reportBuildDeploymentLaunched: (
+      _root: unknown,
+      input: { jobId: string; deploymentId: string; launchedAt: string },
+      context: GraphQLContext,
+    ) => service.reportDeploymentLaunched(requireAgent(context), input),
     reportBuildProgress: (
       _root: unknown,
       { input }: { input: never },

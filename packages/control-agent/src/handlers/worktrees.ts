@@ -43,6 +43,8 @@ import {
   type WorktreePreparationResult,
 } from "./worktree-preparations.js";
 import type { AgentJobHandler, AgentJobHandlerContext } from "./index.js";
+import { deleteBuildData, ownedWorktreeBuildData } from "./build-data.js";
+import type { BuildDataDeleteResult } from "@ai-development-environment/agent-contract/build-data";
 
 const successfulProcess = {
   exitCode: 0,
@@ -2668,6 +2670,28 @@ export const deleteWorktree: AgentJobHandler = async (
       requireSuccess(remote, `Could not inspect origin/${branch}`);
     }
   }
+  const buildDataCleanup: BuildDataDeleteResult & { warnings: string[] } = {
+    deleted: [],
+    warnings: [],
+  };
+  let buildDataTargets: Awaited<
+    ReturnType<typeof ownedWorktreeBuildData>
+  >["targets"] = [];
+  try {
+    const owned = await ownedWorktreeBuildData(
+      folder,
+      input.derivedData,
+      timeoutMs,
+      signal,
+    );
+    buildDataTargets = owned.targets;
+    buildDataCleanup.warnings.push(...owned.warnings);
+  } catch (error) {
+    signal.throwIfAborted();
+    buildDataCleanup.warnings.push(
+      `Could not inspect Xcode build data: ${error instanceof Error ? error.message : String(error)}`,
+    );
+  }
   requireSuccess(
     await git(
       rootFolder,
@@ -2677,6 +2701,30 @@ export const deleteWorktree: AgentJobHandler = async (
     ),
     "Could not remove the worktree",
   );
+  if (buildDataTargets.length) {
+    try {
+      const result = (await deleteBuildData(
+        { targets: buildDataTargets },
+        timeoutMs,
+        signal,
+        async () => undefined,
+      )) as unknown as BuildDataDeleteResult;
+      buildDataCleanup.deleted.push(...result.deleted);
+      buildDataCleanup.warnings.push(
+        ...result.deleted
+          .filter((entry) => !entry.deleted)
+          .map(
+            (entry) =>
+              `${entry.path}: ${entry.error ?? "Could not remove Xcode build data"}`,
+          ),
+      );
+    } catch (error) {
+      // The Git folder is already gone; report cleanup failure without retaining a ghost worktree.
+      buildDataCleanup.warnings.push(
+        `Could not remove Xcode build data: ${error instanceof Error ? error.message : String(error)}`,
+      );
+    }
+  }
   if (
     branch &&
     (await refExists(rootFolder, `refs/heads/${branch}`, timeoutMs, signal))
@@ -2692,6 +2740,7 @@ export const deleteWorktree: AgentJobHandler = async (
     deleted: true,
     branch,
     remoteBranchDeleted: input.deleteRemoteBranch,
+    buildDataCleanup,
   };
 };
 

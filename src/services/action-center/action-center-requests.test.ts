@@ -6,6 +6,7 @@ import { PrismaClient } from "@/generated/prisma/client";
 import type { GitHubService } from "@/services/github";
 import type { GitLabService } from "@/services/gitlab";
 import type { PollingService } from "@/services/polling";
+import type { NotificationsService } from "@/services/notifications";
 import {
   agentEventBus,
   GITHUB_PIPELINE_STATUS_CHANGED_TOPIC,
@@ -106,11 +107,12 @@ describe("Action Center request discovery", () => {
     schedule: vi.fn(),
     run: (_id: string, fn: () => Promise<boolean>) => fn(),
   } as unknown as PollingService;
-  const service = () =>
+  const service = (notifications?: NotificationsService) =>
     new ActionCenterRequests(
       github as unknown as GitHubService,
       gitlab as unknown as GitLabService,
       polling,
+      notifications,
     );
   beforeEach(async () => {
     prisma = new PrismaClient({
@@ -139,6 +141,68 @@ describe("Action Center request discovery", () => {
     vi.restoreAllMocks();
     vi.useRealTimers();
     await prisma.$disconnect();
+  });
+
+  test("forces discovery and provider readiness reads when explicitly requested", async () => {
+    const index = service();
+    await index.refresh(undefined, true);
+    expect(
+      github.pullRequests.mock.calls.every(
+        (call) => (call[2] as { force?: boolean }).force,
+      ),
+    ).toBe(true);
+    expect(
+      (
+        github.actionCenterRequestStates.mock.calls[0] as unknown as [
+          unknown,
+          string,
+          boolean,
+        ]
+      )[2],
+    ).toBe(true);
+    expect(gitlab.mergeRequests).toHaveBeenCalledWith(
+      expect.objectContaining({ force: true }),
+    );
+  });
+
+  test("notifies only observed approval transitions and deduplicates repeated scans", async () => {
+    const notifications = {
+      recordInTransaction: vi.fn().mockResolvedValue(null),
+      created: vi.fn(),
+    };
+    const index = service(notifications as unknown as NotificationsService);
+    github.pullRequests.mockImplementation(async (scope) => ({
+      items:
+        scope === "MINE"
+          ? [request("mine", { reviewDecision: "REVIEW_REQUIRED" })]
+          : [],
+      hasNextPage: false,
+      endCursor: null,
+    }));
+    await index.refresh(["GITHUB"]);
+    expect(notifications.recordInTransaction).not.toHaveBeenCalled();
+    github.pullRequests.mockImplementation(async (scope) => ({
+      items:
+        scope === "MINE"
+          ? [request("mine", { reviewDecision: "UNKNOWN" })]
+          : [],
+      hasNextPage: false,
+      endCursor: null,
+    }));
+    await index.refresh(["GITHUB"]);
+
+    github.pullRequests.mockImplementation(async (scope) => ({
+      items: scope === "MINE" ? [request("mine")] : [],
+      hasNextPage: false,
+      endCursor: null,
+    }));
+    await index.refresh(["GITHUB"]);
+    await index.refresh(["GITHUB"]);
+    expect(notifications.recordInTransaction).toHaveBeenCalledOnce();
+    expect(notifications.recordInTransaction.mock.calls[0][1]).toMatchObject({
+      typeKey: "GITHUB_PULL_REQUEST_APPROVED",
+      resourceId: "mine",
+    });
   });
 
   test("keeps GitHub search cutoffs stable while enforcing the exact age boundary locally", async () => {

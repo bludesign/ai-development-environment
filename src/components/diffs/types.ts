@@ -19,6 +19,8 @@ export type DiffWorktreeOption = {
   baseBranch: string | null;
   availability: string;
   codebaseName: string;
+  agentId: string;
+  agentName: string;
   pullRequest: {
     number: number;
     title: string;

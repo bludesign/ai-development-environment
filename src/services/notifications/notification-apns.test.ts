@@ -92,10 +92,11 @@ describe("parseNotificationDeviceInput", () => {
     });
   });
 
-  test("rejects a token that is not 32 bytes", () => {
-    expect(() =>
-      parseNotificationDeviceInput({ ...valid, token: "AABB" }),
-    ).toThrow(/32 bytes/);
+  test.each([1, 16, 32, 64, 128])("accepts a %i-byte token", (length) => {
+    expect(
+      parseNotificationDeviceInput({ ...valid, token: "ab".repeat(length) })
+        .token,
+    ).toBe("AB".repeat(length));
   });
 
   test("rejects an unknown environment and unsupported fields", () => {

@@ -9,6 +9,7 @@ import type {
 } from "./types";
 
 export type GitLabCommentsInput = {
+  includeOtherAuthors?: boolean | null;
   projectId?: string | null;
   iid?: number | null;
   discussionId?: string | null;
@@ -96,6 +97,7 @@ export class GitLabCommentsFeed {
       input.projectId ?? null,
       input.iid ?? null,
       input.discussionId ?? null,
+      input.includeOtherAuthors === true,
     ]);
     for (const [key, value] of this.cursors)
       if (value.expires <= Date.now()) this.cursors.delete(key);
@@ -117,20 +119,26 @@ export class GitLabCommentsFeed {
           input.iid != null
             ? []
             : input.projectId
-              ? [{ scope: "all", projectId: input.projectId, page: 1 }]
-              : [
-                  ...(
-                    [
-                      "created_by_me",
-                      "assigned_to_me",
-                      "reviews_for_me",
-                    ] as const
-                  ).map((scope) => ({ scope, projectId: null, page: 1 })),
-                  ...context.projectIds.map((projectId) => ({
-                    scope: "all" as const,
-                    projectId,
+              ? [
+                  {
+                    scope:
+                      input.includeOtherAuthors &&
+                      context.projectIds.includes(input.projectId)
+                        ? "all"
+                        : "created_by_me",
+                    projectId: input.projectId,
                     page: 1,
-                  })),
+                  },
+                ]
+              : [
+                  { scope: "created_by_me", projectId: null, page: 1 },
+                  ...(input.includeOtherAuthors
+                    ? context.projectIds.map((projectId) => ({
+                        scope: "all" as const,
+                        projectId,
+                        page: 1,
+                      }))
+                    : []),
                 ],
         sourceTurn: 0,
         pending: [],

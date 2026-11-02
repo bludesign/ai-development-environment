@@ -40,7 +40,7 @@ type ActionCenterContextValue = {
   error: string | null;
   hasMore: boolean;
   refresh: () => Promise<void>;
-  refreshRequests: () => Promise<void>;
+  refreshRequests: (forcePullRequests?: boolean) => Promise<void>;
   loadMore: () => Promise<void>;
   answerQuestion: (
     item: ActionCenterItem,
@@ -127,16 +127,20 @@ export function ActionCenterProvider({
     await refreshOwner.current?.refresh();
   }, []);
 
-  const refreshRequests = useCallback(async () => {
-    try {
-      await controlPlaneRequest(
-        "mutation RefreshActionCenter { refreshActionCenter }",
-      );
-      await refresh();
-    } catch (value) {
-      setError(value instanceof Error ? value.message : String(value));
-    }
-  }, [refresh]);
+  const refreshRequests = useCallback(
+    async (forcePullRequests = false) => {
+      try {
+        await controlPlaneRequest(
+          "mutation RefreshActionCenter($forcePullRequests: Boolean!) { refreshActionCenter(forcePullRequests: $forcePullRequests) }",
+          { forcePullRequests },
+        );
+        await refresh();
+      } catch (value) {
+        setError(value instanceof Error ? value.message : String(value));
+      }
+    },
+    [refresh],
+  );
 
   const loadMore = useCallback(async () => {
     if (!nextCursor || loadingMore || pageRequest.current) return;

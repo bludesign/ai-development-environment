@@ -3,6 +3,10 @@ import type {
   CodebaseStashDiff,
   CodebaseSyncState,
 } from "./codebases.ts";
+import {
+  parseDerivedDataLocationMode,
+  type DerivedDataLocationMode,
+} from "@ai-development-environment/agent-contract/build-data";
 
 export const WORKTREE_INSPECT_JOB_KIND = "worktree.inspect";
 export const WORKTREE_OPERATION_JOB_KIND = "worktree.operation";
@@ -17,6 +21,8 @@ export const JIRA_BRANCH_GENERATE_JOB_KIND = "jira.branch.generate";
 export const WORKTREE_MOVE_PUSH_JOB_KIND = "worktree.move.push";
 export const WORKTREE_MOVE_CHECKOUT_JOB_KIND = "worktree.move.checkout";
 export const WORKTREE_DELETE_JOB_KIND = "worktree.delete";
+export const WORKTREE_DELETE_BUILD_DATA_CAPABILITY =
+  "worktree.delete.xcode-cleanup";
 export const WORKTREE_DIFF_JOB_KIND = "worktree.diff.inspect";
 export const WORKTREE_DIFF_ASSET_JOB_KIND = "worktree.diff.asset";
 export const WORKTREE_JOB_KINDS = [
@@ -940,6 +946,7 @@ export function worktreeMoveCheckoutJobPayload(value: unknown): {
 }
 
 export function worktreeDeleteJobPayload(value: unknown): {
+  derivedData: { mode: DerivedDataLocationMode; path: string | null };
   moveId: string | null;
   codebaseId: string;
   rootFolder: string;
@@ -954,6 +961,7 @@ export function worktreeDeleteJobPayload(value: unknown): {
 } {
   const payload = objectValue(value, "worktree delete payload");
   const allowed = new Set([
+    "derivedData",
     "moveId",
     "codebaseId",
     "rootFolder",
@@ -990,7 +998,23 @@ export function worktreeDeleteJobPayload(value: unknown): {
   if (payload.requireClean && !expectedHeadSha) {
     throw new Error("Clean worktree deletion requires an expected HEAD");
   }
+  const derivedData =
+    payload.derivedData === undefined
+      ? { mode: "DEFAULT", path: null }
+      : objectValue(payload.derivedData, "worktree delete payload.derivedData");
+  const unexpectedDerivedData = Object.keys(derivedData).find(
+    (key) => !["mode", "path"].includes(key),
+  );
+  if (unexpectedDerivedData)
+    throw new Error(`Unexpected derived data field: ${unexpectedDerivedData}`);
   return {
+    derivedData: {
+      mode: parseDerivedDataLocationMode(derivedData.mode),
+      path: nullableString(
+        derivedData.path,
+        "worktree delete payload.derivedData.path",
+      ),
+    },
     moveId: nullableString(payload.moveId, "worktree delete payload.moveId"),
     codebaseId: stringValue(
       payload.codebaseId,
