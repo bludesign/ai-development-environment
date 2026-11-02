@@ -257,7 +257,13 @@ export function AppDetailPage({
       {view === "repositories" && <AppRepositories app={app} />}
       {view === "sync" && <AppSyncPanel appId={app.id} />}
       {view === "worktrees" && (
-        <WorktreesPage appId={app.id} key={`${scopeKey}:worktrees`} />
+        <WorktreesPage
+          appId={app.id}
+          key={`${scopeKey}:worktrees`}
+          scopeRepositoryIds={app.repositories.map(
+            (repository) => repository.id,
+          )}
+        />
       )}
       {view === "plans" && (
         <RunsPage appId={app.id} key={`${scopeKey}:plans`} kind="PLAN" />

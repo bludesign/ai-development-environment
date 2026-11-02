@@ -1410,6 +1410,40 @@ describe("WorktreesService", () => {
     );
   });
 
+  test("binds reviewer ticket lookup to the expected branch in the same database snapshot", async () => {
+    const findFirst = vi.fn().mockResolvedValue({
+      branch: "feature/aide-42-workflow-support",
+      codebase: { repository: { jiraBranchRegex: "([a-z]+-\\d+)" } },
+    });
+    getPrismaClient.mockResolvedValue({
+      worktree: { findFirst },
+      codebaseSettings: { findUnique: vi.fn().mockResolvedValue(null) },
+    });
+    await expect(
+      service().ticketKeyForWorktree(
+        "worktree-1",
+        "feature/aide-42-workflow-support",
+      ),
+    ).resolves.toBe("AIDE-42");
+    findFirst.mockResolvedValue({
+      branch: "feature/aide-99",
+      codebase: { repository: { jiraBranchRegex: "([a-z]+-\\d+)" } },
+    });
+    await expect(
+      service().ticketKeyForWorktree(
+        "worktree-1",
+        "feature/aide-42-workflow-support",
+      ),
+    ).rejects.toThrow("worktree branch changed");
+    findFirst.mockResolvedValue(null);
+    await expect(
+      service().ticketKeyForWorktree(
+        "worktree-1",
+        "feature/aide-42-workflow-support",
+      ),
+    ).rejects.toThrow("worktree branch changed");
+  });
+
   test("falls back to the default branch regex when the repo has none", async () => {
     const findUnique = vi
       .fn()

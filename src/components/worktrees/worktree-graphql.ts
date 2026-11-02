@@ -44,6 +44,15 @@ export const CODEBASE_FIELDS = `
   defaultBranch localBranches remoteBranches lastCheckedAt lastFetchedAt lastFetchAttemptAt lastFetchError createdAt updatedAt
 `;
 
+export const WORKTREE_SYNC_BATCH_FIELDS = `
+  id status appId agentId createdAt updatedAt finishedAt
+  items {
+    id worktreeId codebaseId agentId agentName repositoryId repositoryName
+    branch baseBranch folder ticketKey ticketTitle baseBehind status jobId error
+    createdAt startedAt finishedAt
+  }
+`;
+
 export const INSPECT_WORKTREE_MUTATION = `mutation InspectWorktree($id: ID!, $requestId: ID!) {
   inspectWorktree(id: $id, requestId: $requestId) {
     commits { sha subject message authorName authoredAt additions deletions }

@@ -51,6 +51,7 @@ export type WorktreeReviewerAssignment = {
   currentReviewerIds: string[];
   approvedReviewerIds: string[];
   selectedReviewerIds: string[];
+  ticketTransitionError?: string | null;
   issues: string[];
   discoveryComplete: boolean;
 };
@@ -104,7 +105,7 @@ export const REPOSITORY_CODE_REVIEWERS_FIELDS = `
 `;
 export const WORKTREE_REVIEWER_ASSIGNMENT_FIELDS = `
   worktreeId requestId requestUrl provider requestOpen authorId membersLoaded directoryStale
-  currentReviewerIds approvedReviewerIds selectedReviewerIds issues discoveryComplete
+  currentReviewerIds approvedReviewerIds selectedReviewerIds ticketTransitionError issues discoveryComplete
   reviewers { ${CODE_REVIEWER_PERSON_FIELDS} }
   requirements {
     id name poolKeys requiredApprovals eligibleReviewerIds candidateReviewerIds

@@ -48,6 +48,7 @@ export type RouteEntry = {
   mcpAiPrompt?: boolean;
   mcpAuthorizationReview?: boolean;
   reviewerCapture?: ReviewerCapture;
+  jiraProjectSettings?: boolean;
   usagePopover?: boolean;
   destinationPicker?: "start" | "run";
   desktopOnly?: boolean;
@@ -178,6 +179,12 @@ export const routes: RouteEntry[] = [
     name: "worktree-assign-reviewers-gitlab",
     path: `/dashboard/worktrees/${ids.worktrees.gitlabRetry}`,
     reviewerCapture: { provider: "GITLAB", view: "assignment" },
+    stubWorktree: true,
+  },
+  {
+    name: "worktree-assign-reviewers-jira-warning",
+    path: `/dashboard/worktrees/${ids.worktrees.webFeature}`,
+    reviewerCapture: { provider: "GITHUB", view: "assignment-warning" },
     stubWorktree: true,
   },
   {
@@ -442,6 +449,11 @@ export const routes: RouteEntry[] = [
     path: "/jira/tickets",
     readyGraphqlOperation: "JiraAllTickets",
     readyTexts: ["Improve deployment health checks"],
+  },
+  {
+    name: "jira-project-in-review-status",
+    path: "/jira/tickets",
+    jiraProjectSettings: true,
   },
   {
     name: "jira-tickets-filtered",

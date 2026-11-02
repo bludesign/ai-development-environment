@@ -850,13 +850,15 @@ export async function seedGitLab(prisma: PrismaClient): Promise<void> {
           ),
         }),
       ]),
-      ...pipelines.map((pipeline, index) =>
+      ...pipelines.map((pipeline) =>
         cacheEntry({
           id: `gitlab-cache-pipeline-merge-requests-${pipeline.id}`,
           operation: "GitLabPipelineMergeRequests",
           path: `/projects/${PROJECT_ID}/repository/commits/${pipeline.sha}/merge_requests`,
           query: { per_page: 100, page: 1 },
-          response: index === 0 ? [mergeRequests[0]] : [],
+          response: mergeRequests.filter(
+            (request) => request.sha === pipeline.sha,
+          ),
         }),
       ),
     ],

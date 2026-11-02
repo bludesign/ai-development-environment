@@ -37,6 +37,15 @@ export const createWorktreeResolvers = (
   service: WorktreesService,
   automation: WorktreeAutomationService,
 ) => ({
+  WorktreeOverview: {
+    activeSyncBatches: (value: {
+      syncScope?: { appId?: string | null; worktreeId?: string | null };
+    }) =>
+      service.syncBatches.active(
+        value.syncScope?.appId,
+        value.syncScope?.worktreeId,
+      ),
+  },
   WorktreeLatestBuild: {
     destination: (value: { destinationJson: string }) =>
       JSON.parse(value.destinationJson) as unknown,
@@ -153,6 +162,14 @@ export const createWorktreeResolvers = (
     },
   },
   Query: {
+    worktreeSyncBatch: (
+      _root: unknown,
+      args: { id: string },
+      context: GraphQLContext,
+    ) => {
+      requireControlPlane(context);
+      return service.syncBatches.batch(args.id);
+    },
     worktreePreparationOverview: (
       _root: unknown,
       _args: unknown,
@@ -255,6 +272,14 @@ export const createWorktreeResolvers = (
     },
   },
   Mutation: {
+    startWorktreeSyncBatch: (
+      _root: unknown,
+      args: { input: Parameters<WorktreesService["syncBatches"]["start"]>[0] },
+      context: GraphQLContext,
+    ) => {
+      requireControlPlane(context);
+      return service.syncBatches.start(args.input);
+    },
     generateWorktreeTicketBranch: (
       _root: unknown,
       {

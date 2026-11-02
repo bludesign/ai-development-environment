@@ -94,6 +94,8 @@ type WorktreeReviewerAssignment {
   currentReviewerIds: [ID!]!
   "People whose approvals are currently valid."
   approvedReviewerIds: [ID!]!
+  "A Jira transition failure after reviewer assignment succeeded; null when no failure occurred."
+  ticketTransitionError: String
   "Proposed additions; populated by random preview."
   selectedReviewerIds: [ID!]!
   "Discovery issues and unmet assignment targets."

@@ -219,6 +219,7 @@ export function reviewerAssignmentView(
     currentReviewerIds,
     approvedReviewerIds,
     selectedReviewerIds: [] as string[],
+    ticketTransitionError: null as string | null,
     issues: [
       ...discovery.issues,
       ...(!discovery.discoveryComplete && !discovery.requirements.length
@@ -359,6 +360,10 @@ export class ReviewersService {
   constructor(
     private readonly providers: ReviewerProviderAdapter,
     private readonly refreshWorktree?: (id: string) => Promise<unknown>,
+    private readonly onReviewersAssigned?: (
+      id: string,
+      expectedBranch: string,
+    ) => Promise<unknown>,
   ) {}
 
   private async repository(id: string) {
@@ -825,7 +830,7 @@ export class ReviewersService {
           ? ((await this.providers.resolvePeople?.(context.repository, ids)) ??
             [])
           : [];
-        const { repository, locator, assignment } = await this.live(
+        const { repository, locator, assignment, worktree } = await this.live(
           input.worktreeId,
           false,
           input.includeAllReviewers === true,
@@ -864,15 +869,42 @@ export class ReviewersService {
             throw error;
           }
         }
+        let ticketTransitionError: string | null = null;
+        if (additions.length) {
+          try {
+            if (this.onReviewersAssigned) {
+              const current = await this.context(input.worktreeId);
+              if (
+                current.worktree.branch !== worktree.branch ||
+                current.locator.id !== locator.id ||
+                current.repository.id !== repository.id
+              ) {
+                throw new Error(
+                  "The worktree changed after reviewers were assigned. Open its Jira ticket to update the status.",
+                );
+              }
+              await this.onReviewersAssigned(
+                input.worktreeId,
+                worktree.branch!,
+              );
+            }
+          } catch (error) {
+            ticketTransitionError =
+              error instanceof Error ? error.message : String(error);
+          }
+        }
         // A successful provider write must not be reported as failed solely because overview hydration failed.
         await this.refreshWorktree?.(input.worktreeId).catch(() => undefined);
         this.publish(repository.id, input.worktreeId);
         try {
-          return await this.worktreeReviewerAssignment(
-            input.worktreeId,
-            false,
-            input.includeAllReviewers === true,
-          );
+          return {
+            ...(await this.worktreeReviewerAssignment(
+              input.worktreeId,
+              false,
+              input.includeAllReviewers === true,
+            )),
+            ticketTransitionError,
+          };
         } catch {
           const currentReviewerIds = unique([
             ...assignment.currentReviewerIds,
@@ -880,6 +912,7 @@ export class ReviewersService {
           ]).filter((id) => !removals.includes(id));
           return {
             ...assignment,
+            ticketTransitionError,
             currentReviewerIds,
             requirements: assignment.requirements.map((rule) => ({
               ...rule,

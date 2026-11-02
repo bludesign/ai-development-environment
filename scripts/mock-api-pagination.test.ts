@@ -6,6 +6,7 @@ import { describe, expect, test, vi } from "vitest";
 import { mockActionsRuns } from "./mock-api-pagination";
 import { mockGitLabApi } from "./mock-gitlab-api";
 import { ids } from "./mock-data/ids";
+import { gitlabMockData } from "./mock-data/gitlab";
 
 describe("screenshot provider API fixtures", () => {
   test("filters Actions before counting and paginates independently of total count", () => {
@@ -76,6 +77,21 @@ describe("screenshot provider API fixtures", () => {
         new URLSearchParams(),
       ).payload,
     ).toMatchObject({ approvals_left: 0, approved_by: [{ user: { id: 27 } }] });
+  });
+
+  test("associates active pipelines with their authored merge requests for the sidebar relevance filter", () => {
+    const request = gitlabMockData.mergeRequests[1]!;
+    const base = `/projects/${ids.gitlab.projectId}/repository/commits`;
+    expect(
+      mockGitLabApi(
+        `${base}/${request.sha}/merge_requests`,
+        new URLSearchParams(),
+      ).payload,
+    ).toMatchObject([{ iid: 41, source_branch: "docs/release-pipeline" }]);
+    expect(
+      mockGitLabApi(`${base}/unknown-sha/merge_requests`, new URLSearchParams())
+        .payload,
+    ).toEqual([]);
   });
 
   test("redirects only the fixture GitLab API while preserving request credentials and options", async () => {

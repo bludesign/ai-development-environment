@@ -797,6 +797,7 @@ export class JiraService {
       completedStatusIds: parseStringArray(project.completedStatusIdsJson),
       excludedStatusIds: parseStringArray(project.excludedStatusIdsJson),
       doneStatusId: project.doneStatusId,
+      inReviewStatusId: project.inReviewStatusId,
       defaultResolutionId: project.defaultResolutionId,
       branchNamingScript:
         project.branchNamingScript ?? DEFAULT_JIRA_BRANCH_NAMING_SCRIPT,
@@ -884,6 +885,7 @@ export class JiraService {
     completedStatusIds: string[];
     excludedStatusIds?: string[] | null;
     doneStatusId?: string | null;
+    inReviewStatusId?: string | null;
     defaultResolutionId?: string | null;
   }): Promise<JiraProjectView[]> {
     if (!TICKET_ASSIGNMENT_FILTERS.has(input.ticketAssignmentFilter)) {
@@ -901,10 +903,23 @@ export class JiraService {
       input.doneStatusId === undefined
         ? undefined
         : input.doneStatusId?.trim() || null;
-    if (doneStatusId) {
+    const inReviewStatusId =
+      input.inReviewStatusId === undefined
+        ? undefined
+        : input.inReviewStatusId?.trim() || null;
+    if (doneStatusId || inReviewStatusId) {
       const available = await this.projectStatuses(input.projectId);
-      if (!available.some((status) => status.id === doneStatusId)) {
+      if (
+        doneStatusId &&
+        !available.some((status) => status.id === doneStatusId)
+      ) {
         throw new Error("The selected Jira done status is not available");
+      }
+      if (
+        inReviewStatusId &&
+        !available.some((status) => status.id === inReviewStatusId)
+      ) {
+        throw new Error("The selected Jira in review status is not available");
       }
     }
     const defaultResolutionId =
@@ -941,6 +956,7 @@ export class JiraService {
               ),
             }),
         ...(doneStatusId === undefined ? {} : { doneStatusId }),
+        ...(inReviewStatusId === undefined ? {} : { inReviewStatusId }),
         ...(defaultResolutionId === undefined ? {} : { defaultResolutionId }),
       },
     });
@@ -2049,6 +2065,34 @@ export class JiraService {
           : {}),
       });
     });
+  }
+
+  async transitionTicketToConfiguredInReview(
+    issueKey: string,
+  ): Promise<JiraTicketDetail | null> {
+    const key = normalizeIssueKey(issueKey);
+    const projectKey = key.split("-")[0] ?? "";
+    const prisma = await getPrismaClient();
+    const project = await prisma.jiraProject.findUnique({
+      where: { key: projectKey },
+      select: { inReviewStatusId: true },
+    });
+    if (!project?.inReviewStatusId) return null;
+    const ticket = await this.ticket(key);
+    if (ticket.statusId === project.inReviewStatusId) return ticket;
+    const transition = (await this.ticketTransitions(key))
+      .filter((item) => item.toStatusId === project.inReviewStatusId)
+      .sort(
+        (first, second) =>
+          (first.unresolvedRequiredFields ?? first.requiredFields).length -
+          (second.unresolvedRequiredFields ?? second.requiredFields).length,
+      )[0];
+    if (!transition) {
+      throw new Error(
+        `Jira does not currently offer a transition to the configured in review status for ${key}. Open the ticket to update its status.`,
+      );
+    }
+    return this.transitionTicket(key, transition.id);
   }
 
   async transitionTicketToConfiguredDone(

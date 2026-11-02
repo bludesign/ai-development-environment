@@ -168,6 +168,48 @@ export type WorktreeOverview = {
   };
   hiddenCount: number;
   activeMoves: WorktreeMove[];
+  activeSyncBatches?: WorktreeSyncBatch[];
+};
+
+export type WorktreeSyncItemStatus =
+  | "PENDING"
+  | "RUNNING"
+  | "SUCCEEDED"
+  | "FAILED"
+  | "SKIPPED"
+  | "ATTENTION_REQUIRED";
+
+export type WorktreeSyncBatchItem = {
+  id: string;
+  worktreeId: string;
+  codebaseId: string;
+  agentId: string;
+  agentName: string;
+  repositoryId: string;
+  repositoryName: string;
+  branch: string;
+  baseBranch: string;
+  folder: string;
+  ticketKey: string | null;
+  ticketTitle: string | null;
+  baseBehind: number;
+  status: WorktreeSyncItemStatus;
+  jobId: string | null;
+  error: string | null;
+  createdAt: string;
+  startedAt: string | null;
+  finishedAt: string | null;
+};
+
+export type WorktreeSyncBatch = {
+  id: string;
+  status: "ACTIVE" | "COMPLETED";
+  appId: string | null;
+  agentId: string | null;
+  createdAt: string;
+  updatedAt: string;
+  finishedAt: string | null;
+  items: WorktreeSyncBatchItem[];
 };
 
 export type WorktreeMove = {

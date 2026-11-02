@@ -93,7 +93,7 @@ import type {
 } from "@/services/jira/types";
 
 const SOURCE_FIELDS = "id projectId name kind value boardId position";
-const PROJECT_FIELDS = `id jiraId key name avatarUrl position ticketAssignmentFilter hideCompletedTickets completedStatusIds excludedStatusIds doneStatusId defaultResolutionId branchNamingScript branchNamingMode branchNamingProvider branchNamingModel branchNamingEffort branchNamingPrompt sources { ${SOURCE_FIELDS} }`;
+const PROJECT_FIELDS = `id jiraId key name avatarUrl position ticketAssignmentFilter hideCompletedTickets completedStatusIds excludedStatusIds doneStatusId inReviewStatusId defaultResolutionId branchNamingScript branchNamingMode branchNamingProvider branchNamingModel branchNamingEffort branchNamingPrompt sources { ${SOURCE_FIELDS} }`;
 const SUMMARY_FIELDS =
   "id key summary statusId status statusCategory issueType priority assignee assigneeAccountId assigneeAvatarUrl projectKey updatedAt";
 const CACHE_FIELDS = "source stale fetchedAt";
@@ -802,6 +802,7 @@ function JiraManagerDialog({
   const [hideCompletedTickets, setHideCompletedTickets] = useState(false);
   const [completedStatusIds, setCompletedStatusIds] = useState<string[]>([]);
   const [excludedStatusIds, setExcludedStatusIds] = useState<string[]>([]);
+  const [inReviewStatusId, setInReviewStatusId] = useState<string | null>(null);
   const [doneStatusId, setDoneStatusId] = useState<string | null>(null);
   const [defaultResolutionId, setDefaultResolutionId] = useState<string | null>(
     null,
@@ -828,6 +829,7 @@ function JiraManagerDialog({
       setCompletedStatusIds(selectedProject.completedStatusIds);
       setExcludedStatusIds(selectedProject.excludedStatusIds ?? []);
       setDoneStatusId(selectedProject.doneStatusId);
+      setInReviewStatusId(selectedProject.inReviewStatusId ?? null);
       setDefaultResolutionId(selectedProject.defaultResolutionId ?? null);
       setBranchNamingScript(selectedProject.branchNamingScript ?? "");
       setStatusesLoading(true);
@@ -988,6 +990,7 @@ function JiraManagerDialog({
         completedStatusIds,
         excludedStatusIds,
         doneStatusId,
+        inReviewStatusId,
         defaultResolutionId,
       };
       const data = await controlPlaneRequest<{
@@ -1362,6 +1365,41 @@ function JiraManagerDialog({
                   </Select>
                   <p className="mt-1 text-xs text-muted-foreground">
                     {t("doneStatusDescription")}
+                  </p>
+                </div>
+                <div>
+                  <Label
+                    className="mb-1 block text-xs font-medium"
+                    htmlFor="jira-in-review-status"
+                  >
+                    {t("inReviewStatus")}
+                  </Label>
+                  <Select
+                    disabled={statusesLoading}
+                    onValueChange={(value) =>
+                      setInReviewStatusId(value === "__none__" ? null : value)
+                    }
+                    value={inReviewStatusId ?? "__none__"}
+                  >
+                    <SelectTrigger
+                      className="w-full"
+                      id="jira-in-review-status"
+                    >
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent className="z-60">
+                      <SelectItem value="__none__">
+                        {t("noInReviewStatus")}
+                      </SelectItem>
+                      {statuses.map((status) => (
+                        <SelectItem key={status.id} value={status.id}>
+                          {status.name}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  <p className="mt-1 text-xs text-muted-foreground">
+                    {t("inReviewStatusDescription")}
                   </p>
                 </div>
                 <div>

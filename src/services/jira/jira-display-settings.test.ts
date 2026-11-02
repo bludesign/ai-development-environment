@@ -13,6 +13,7 @@ const mocks = vi.hoisted(() => ({
     completedStatusIdsJson: '["done"]',
     excludedStatusIdsJson: '["backlog"]',
     doneStatusId: null,
+    inReviewStatusId: null as string | null,
     branchNamingScript: null,
     sources: [],
   },
@@ -32,6 +33,9 @@ import { filterJiraTicketBoard, JiraService } from "./jira.service";
 import type { JiraTicketBoard, JiraTicketSummary } from "./types";
 
 beforeEach(() => {
+  vi.restoreAllMocks();
+  mocks.project.inReviewStatusId = null;
+  mocks.update.mockClear();
   mocks.project.excludedStatusIdsJson = '["backlog"]';
   mocks.update.mockImplementation(async ({ data }) =>
     Object.assign(mocks.project, data),
@@ -131,5 +135,57 @@ describe("Jira default status exclusions", () => {
         "me",
       ).tickets.map((item) => item.key),
     ).toEqual(["doing", "done"]);
+  });
+});
+
+describe("Jira reviewer assignment status", () => {
+  test("validates, trims, saves, preserves omission, and clears the in review status", async () => {
+    const service = new JiraService();
+    const statuses = vi
+      .spyOn(service, "projectStatuses")
+      .mockResolvedValue([
+        { id: "review", name: "In review", category: "indeterminate" },
+      ]);
+    const input = {
+      projectId: "p",
+      ticketAssignmentFilter: "ALL" as const,
+      hideCompletedTickets: false,
+      completedStatusIds: [],
+    };
+    expect(
+      (
+        await service.updateProjectDisplaySettings({
+          ...input,
+          inReviewStatusId: " review ",
+        })
+      )[0].inReviewStatusId,
+    ).toBe("review");
+    expect(statuses).toHaveBeenCalledWith("p");
+    expect(
+      (await service.updateProjectDisplaySettings(input))[0].inReviewStatusId,
+    ).toBe("review");
+    await expect(
+      service.updateProjectDisplaySettings({
+        ...input,
+        inReviewStatusId: "removed",
+      }),
+    ).rejects.toThrow("in review status is not available");
+    expect(mocks.update).toHaveBeenCalledTimes(2);
+    expect(
+      (
+        await service.updateProjectDisplaySettings({
+          ...input,
+          inReviewStatusId: null,
+        })
+      )[0].inReviewStatusId,
+    ).toBeNull();
+    expect(
+      (
+        await service.updateProjectDisplaySettings({
+          ...input,
+          inReviewStatusId: "   ",
+        })
+      )[0].inReviewStatusId,
+    ).toBeNull();
   });
 });

@@ -2505,6 +2505,51 @@ model BuildDataDeleteProjection {
   projectedAt DateTime @default(now())
 }
 
+// Snapshots deliberately survive deletion of the original checkout, agent, or app.
+model WorktreeSyncBatch {
+  id         String             @id
+  requestId  String             @unique
+  appId      String?
+  agentId    String?
+  status     String             @default("ACTIVE")
+  createdAt  DateTime           @default(now())
+  updatedAt  DateTime           @updatedAt
+  finishedAt DateTime?
+  items      WorktreeSyncItem[]
+
+  @@index([status, createdAt])
+}
+
+model WorktreeSyncItem {
+  id             String            @id
+  batchId        String
+  position       Int
+  worktreeId     String
+  codebaseId     String
+  agentId        String
+  agentName      String
+  repositoryId   String
+  repositoryName String
+  branch         String
+  baseBranch     String
+  folder         String
+  gitDirectory   String
+  expectedOrigin String
+  ticketKey      String?
+  ticketTitle    String?
+  baseBehind     Int
+  status         String            @default("PENDING")
+  jobId          String?           @unique
+  error          String?
+  createdAt      DateTime          @default(now())
+  startedAt      DateTime?
+  finishedAt     DateTime?
+  batch          WorktreeSyncBatch @relation(fields: [batchId], references: [id], onDelete: Cascade)
+
+  @@unique([batchId, worktreeId])
+  @@index([status, codebaseId, createdAt])
+}
+
 model WorktreeMove {
   id               String    @id
   requestId        String
@@ -2757,6 +2802,7 @@ model JiraProject {
   completedStatusIdsJson String       @default("[]")
   excludedStatusIdsJson  String       @default("[]")
   doneStatusId           String?
+  inReviewStatusId       String?
   defaultResolutionId    String?
   branchNamingMode       String       @default("JAVASCRIPT")
   branchNamingProvider   String?

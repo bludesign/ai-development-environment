@@ -134,6 +134,8 @@ type JiraProject {
   excludedStatusIds: [ID!]!
   "Identifier of the related done status. May be null when unavailable or not applicable."
   doneStatusId: ID
+  "Status used after reviewers are assigned from a worktree; null disables the transition."
+  inReviewStatusId: ID
   "Fallback Resolution used when a transition does not declare its own default."
   defaultResolutionId: ID
   "The branch naming script associated with this Jira project."
@@ -738,6 +740,8 @@ input UpdateJiraProjectDisplaySettingsInput {
   excludedStatusIds: [ID!]
   "Identifier of the done status to use."
   doneStatusId: ID
+  "Status used after reviewers are assigned from a worktree; null disables the transition."
+  inReviewStatusId: ID
 }
 
 "Input values for Jira text."

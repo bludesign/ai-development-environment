@@ -50,6 +50,13 @@ export function mockGitLabApi(path: string, search: URLSearchParams) {
       ),
     );
   }
+  const commitRequests = path.match(
+    new RegExp(`^${project}/repository/commits/([^/]+)/merge_requests$`),
+  );
+  if (commitRequests) {
+    const sha = decodeURIComponent(commitRequests[1]!);
+    return paged(data.mergeRequests.filter((request) => request.sha === sha));
+  }
   const mrMatch = path.match(
     new RegExp(
       `^${project}/merge_requests/(\\d+)(?:/(approvals|commits|discussions|pipelines))?$`,

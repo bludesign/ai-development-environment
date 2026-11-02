@@ -310,3 +310,39 @@ test("loads all eligible people only on demand and retains pending selections", 
     ).toBe("true"),
   );
 });
+
+test("keeps successful reviewer changes visible and surfaces Jira transition failures", async () => {
+  const ben = await openPicker();
+  request.mockResolvedValueOnce({
+    assignWorktreeReviewers: {
+      ...assignment(),
+      currentReviewerIds: ["ada", "ben"],
+      ticketTransitionError: "Complete required field: Comment",
+    },
+  } as never);
+  fireEvent.click(ben);
+  fireEvent.click(screen.getByRole("button", { name: "Save changes" }));
+  expect(
+    await screen.findByText(
+      "Reviewers were assigned, but the Jira ticket could not be moved to in review: Complete required field: Comment",
+    ),
+  ).toBeDefined();
+  await waitFor(() => expect(onCompleted).toHaveBeenCalledOnce());
+  expect(
+    screen
+      .getByRole("option", { name: "Select ben for Platform owners" })
+      .getAttribute("data-checked"),
+  ).toBe("true");
+  expect(screen.getByRole("button", { name: "Save changes" })).toHaveProperty(
+    "disabled",
+    true,
+  );
+  fireEvent.click(screen.getByRole("button", { name: /^Close$/ }));
+  await waitFor(() =>
+    expect(
+      screen.queryByText(
+        "Reviewers were assigned, but the Jira ticket could not be moved to in review: Complete required field: Comment",
+      ),
+    ).toBeNull(),
+  );
+});

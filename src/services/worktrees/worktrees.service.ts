@@ -91,6 +91,7 @@ import type {
 import type { WorkflowEventsService } from "@/services/workflows/workflow-events.service";
 import { buildOutOfDate } from "@/services/builds/build-freshness";
 import { overallPreparationState, preparationPayload } from "./preparations";
+import { WorktreeSyncService } from "./worktree-sync.service";
 
 const SETTINGS_ID = "default";
 const ACTIVE_STATUSES = ["QUEUED", "RUNNING"];
@@ -537,6 +538,15 @@ function resultObject(job: {
 }
 
 export class WorktreesService {
+  private syncService?: WorktreeSyncService;
+
+  get syncBatches(): WorktreeSyncService {
+    return (this.syncService ??= new WorktreeSyncService(
+      this,
+      this.agentControl,
+    ));
+  }
+
   private readonly preparationInspections = new Map<
     string,
     ReturnType<AgentControlService["createJob"]>
@@ -1855,6 +1865,7 @@ export class WorktreesService {
       settings,
       hiddenCount,
       activeMoves: scopedActiveMoves,
+      syncScope: { appId, worktreeId },
       durationMs: performance.now() - started,
     };
   }
@@ -2525,7 +2536,10 @@ export class WorktreesService {
    * the overview, but as a focused lookup so callers (e.g. workflow triggers)
    * can seed the linked ticket without loading the full worktree payload.
    */
-  async ticketKeyForWorktree(worktreeId: string): Promise<string | null> {
+  async ticketKeyForWorktree(
+    worktreeId: string,
+    expectedBranch?: string,
+  ): Promise<string | null> {
     const prisma = await getPrismaClient();
     const [worktree, settings] = await Promise.all([
       prisma.worktree.findFirst({
@@ -2539,6 +2553,11 @@ export class WorktreesService {
       }),
       prisma.codebaseSettings.findUnique({ where: { id: SETTINGS_ID } }),
     ]);
+    if (expectedBranch !== undefined && worktree?.branch !== expectedBranch) {
+      throw new Error(
+        "The worktree branch changed after reviewers were assigned. Open the original Jira ticket to update its status.",
+      );
+    }
     if (!worktree) return null;
     const pattern =
       worktree.codebase.repository.jiraBranchRegex ??
@@ -3440,12 +3459,31 @@ export class WorktreesService {
     expectedBranch: string,
     requestId: string,
     forcePreparations = false,
+    expectedIdentity?: {
+      codebaseId: string;
+      agentId: string;
+      folder: string;
+      gitDirectory: string;
+      baseBranch: string;
+      expectedOrigin: string;
+    },
   ) {
     const worktree = await this.requireRunnable(
       id,
       WORKTREE_AUTO_SYNC_JOB_KIND,
     );
     const payload = this.payload(worktree);
+    if (
+      expectedIdentity &&
+      (worktree.branch !== expectedBranch ||
+        worktree.codebaseId !== expectedIdentity.codebaseId ||
+        worktree.codebase.agentId !== expectedIdentity.agentId ||
+        payload.folder !== expectedIdentity.folder ||
+        payload.gitDirectory !== expectedIdentity.gitDirectory ||
+        payload.baseBranch !== expectedIdentity.baseBranch ||
+        payload.expectedOrigin !== expectedIdentity.expectedOrigin)
+    )
+      throw new Error("Worktree changed before Bulk Sync could be dispatched");
     if (!payload.baseBranch)
       throw new Error("Auto Sync requires a base branch");
     if (
@@ -3477,7 +3515,7 @@ export class WorktreesService {
   }
 
   publishAutomationChange(
-    worktreeId: string,
+    worktreeId: string | null,
     codebaseId: string | null = null,
   ): void {
     this.publish(worktreeId, codebaseId);
