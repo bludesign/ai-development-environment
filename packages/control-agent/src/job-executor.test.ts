@@ -9,6 +9,7 @@ vi.mock("./handlers/index.js", () => ({
     "worktree.git.inspect": vi.fn(),
     "codebase.git.inspect": vi.fn(),
     "worktree.diff.asset": vi.fn(),
+    "ios.build.run": vi.fn(),
   },
 }));
 vi.mock("./handlers/worktrees.js", () => ({
@@ -34,6 +35,89 @@ const job: AgentJob = {
 };
 
 describe("JobExecutor", () => {
+  test.each([
+    "worktree.inspect",
+    "worktree.diff.inspect",
+    "worktree.git.inspect",
+    "codebase.git.inspect",
+    "worktree.diff.asset",
+  ])(
+    "runs %s during a build with a mutation waiting behind it",
+    async (kind) => {
+      const buildStarted = Promise.withResolvers<void>();
+      const finishBuild = Promise.withResolvers<void>();
+      const result = {
+        exitCode: 0,
+        signal: null,
+        timedOut: false,
+        cancelled: false,
+      };
+      const build: AgentJob = {
+        ...job,
+        id: "build-1",
+        kind: "ios.build.run",
+        payload: { codebaseId: "checkout", folder: "/repo" },
+      };
+      const mutation: AgentJob = {
+        ...build,
+        id: "mutation-1",
+        kind: "codebase.branches.delete",
+      };
+      const inspection: AgentJob = { ...build, id: "inspection-1", kind };
+      const jobs = new Map(
+        [build, mutation, inspection].map((entry) => [entry.id, entry]),
+      );
+      vi.mocked(handlers[build.kind]!).mockImplementation(async () => {
+        buildStarted.resolve();
+        await finishBuild.promise;
+        return result;
+      });
+      const mutate = vi.mocked(handlers[mutation.kind]!);
+      mutate.mockClear().mockResolvedValue(result);
+      vi.mocked(handlers[kind]!).mockResolvedValue(result);
+      const api = {
+        claimJob: vi.fn(async (id: string) => jobs.get(id)),
+        completeJob: vi.fn().mockResolvedValue({}),
+      };
+      const coordinator = new RepositoryCoordinator();
+      const queuedMutation = vi.spyOn(coordinator, "run");
+      const executor = new JobExecutor(
+        api as unknown as AgentGraphQLClient,
+        coordinator,
+      );
+      try {
+        executor.execute(build);
+        await buildStarted.promise;
+        executor.execute(mutation);
+        await vi.waitFor(() => expect(queuedMutation).toHaveBeenCalledOnce());
+        executor.execute(inspection);
+        await vi.waitFor(() => {
+          expect(api.completeJob).toHaveBeenCalledWith(
+            inspection.id,
+            "SUCCEEDED",
+            result,
+            undefined,
+          );
+        });
+        expect(mutate).not.toHaveBeenCalled();
+        expect(api.completeJob).toHaveBeenCalledOnce();
+
+        finishBuild.resolve();
+        await vi.waitFor(() => {
+          expect(api.completeJob).toHaveBeenCalledWith(
+            mutation.id,
+            "SUCCEEDED",
+            result,
+            undefined,
+          );
+        });
+      } finally {
+        finishBuild.resolve();
+        await executor.cancelAll();
+      }
+    },
+  );
+
   test.each([
     "worktree.inspect",
     "worktree.diff.inspect",

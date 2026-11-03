@@ -1012,6 +1012,89 @@ export function registerWorktreesPageTests(
     }
 
     if (section === "cards") {
+      test.each(["cards", "table"])(
+        "keeps an active conflict quick action visible after the rebase in %s",
+        async (layout) => {
+          const response = (await request("query Fixture")) as unknown as {
+            worktreeOverview: WorktreeOverview;
+          };
+          const group = response.worktreeOverview.agents[0]!.codebases[0]!;
+          group.worktrees[0]!.hasConflicts = false;
+          group.worktrees[0]!.rebaseInProgress = false;
+          group.mergeConflictQuickActions = [
+            {
+              id: "resolve-conflicts",
+              name: "Resolve conflicts",
+              description: "Resolve the rebase conflicts",
+              quickActionIconKey: "git-merge",
+              quickActionButtonVariant: "secondary",
+            },
+            {
+              id: "other-resolution",
+              name: "Other resolution",
+              description: "Another conflict workflow",
+              quickActionIconKey: "git-merge",
+              quickActionButtonVariant: "secondary",
+            },
+          ];
+          request.mockImplementation(async (query, variables) => {
+            if (query.includes("WorkflowTargetSummaries")) {
+              const { targets } = variables as {
+                targets: { resourceKind: string; resourceId: string }[];
+              };
+              return {
+                workflowTargetSummaries: targets.map((target) => ({
+                  ...target,
+                  activeRuns: [
+                    {
+                      id: "run-resolve-conflicts",
+                      workflowId: "resolve-conflicts",
+                      displayNumber: 1,
+                      status: "RUNNING",
+                    },
+                  ],
+                })),
+              } as never;
+            }
+            if (query.includes("CommandTargetSummaries")) {
+              const { targets } = variables as {
+                targets: { resourceKind: string; resourceId: string }[];
+              };
+              return {
+                commandTargetSummaries: targets.map((target) => ({
+                  ...target,
+                  commands: [],
+                  activeRuns: [],
+                  recentRuns: [],
+                })),
+              } as never;
+            }
+            return response as never;
+          });
+          window.localStorage.setItem("worktrees-layout", layout);
+
+          render(<WorktreesPage />);
+
+          const spinnerButton = await screen.findByRole("button", {
+            name: "Manage running Resolve conflicts",
+          });
+          const action = screen.getByRole("button", {
+            name: "Resolve conflicts",
+          });
+          expect(
+            spinnerButton.querySelector('[data-slot="spinner"]'),
+          ).not.toBeNull();
+          expect(spinnerButton.parentElement).toBe(action.parentElement);
+          expect(
+            screen.queryByRole("button", { name: "Other resolution" }),
+          ).toBeNull();
+          expect(screen.queryByText("Rebase paused")).toBeNull();
+          expect(
+            screen.queryByRole("button", { name: "Cancel rebase" }),
+          ).toBeNull();
+        },
+      );
+
       test.each([
         ["QUEUED", "Queued"],
         ["PREPARING", "Preparing"],

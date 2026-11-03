@@ -1036,9 +1036,28 @@ export const WORKFLOW_STEP_CATALOG: readonly WorkflowCatalogEntry[] = [
     ["worktree.*"],
     {
       description:
-        "Reads the worktree's Git status — dirty flag, ahead/behind counts, push status, conflicts — into `worktree.*`.",
+        "Reads the worktree's dirty flag, branches, and stashes into `worktree.*`.",
       details:
-        "Read-only and the cheap way to branch on repository state: gate a commit on `worktree.dirty`, or a sync on the worktree being behind. Use Inspect worktree when you need the actual commits and diffs.",
+        "Read-only. Refreshes `worktree.dirty`, `worktree.branches`, and `worktree.stashes`, along with branch and stash truncation flags. Use Refresh worktree before conditions on fresh conflict, merge, or rebase state. Use Inspect worktree when you need the actual commits and diffs.",
+    },
+  ),
+  step(
+    "WORKTREE_REFRESH_STATE",
+    "Worktrees",
+    "Refresh worktree",
+    "SERVER",
+    ["worktree.id"],
+    [
+      "worktree.dirty",
+      "worktree.hasConflicts",
+      "worktree.rebaseInProgress",
+      "worktree.mergeInProgress",
+    ],
+    {
+      description:
+        "Refreshes working-tree changes, conflicts, and unfinished merge or rebase state from Git into the workflow session.",
+      details:
+        "Reads live Git state on the owning agent and waits for the result before continuing. Updates `worktree.dirty`, `worktree.hasConflicts`, `worktree.rebaseInProgress`, and `worktree.mergeInProgress`, including false values after successful resolution. Follow with If / else to require all four flags to equal false. Includes staged, unstaged, and untracked changes. The agent must be online. This read does not fetch or change the repository.",
     },
   ),
   step(

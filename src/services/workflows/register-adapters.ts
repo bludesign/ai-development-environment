@@ -316,6 +316,7 @@ function normalizeTicket(ticketValue: unknown): Record<string, unknown> {
     ...ticket,
     key: ticket.key,
     title: ticket.summary ?? ticket.title,
+    url: ticket.jiraUrl ?? ticket.url,
     type: issueType.name ?? ticket.type,
     status: status.name ?? ticket.status,
     statusCategory: status.category ?? ticket.statusCategory,
@@ -2686,6 +2687,23 @@ function registerWorktreeAdapters(
     return {
       output: state,
       sessionPatch: { worktree: { ...state } },
+      links: [worktreeLink(id)],
+    };
+  });
+  executor.register("WORKTREE_REFRESH_STATE", async (context) => {
+    const id = worktreeId(context);
+    if (id !== getSessionValue(context.sessionData, "worktree.id")) {
+      throw new Error(
+        "Refresh worktree must target the current workflow worktree",
+      );
+    }
+    const state = await services.worktrees.refreshGitState(
+      id,
+      requestId(context, "refresh-git"),
+    );
+    return {
+      output: state,
+      sessionPatch: { worktree: { id, ...state } },
       links: [worktreeLink(id)],
     };
   });

@@ -70,6 +70,12 @@ export const WORKTREE_GIT_OPERATIONS = [
 export type WorktreeGitOperation = (typeof WORKTREE_GIT_OPERATIONS)[number];
 export type WorktreeGitState = CodebaseGitState;
 export type WorktreeStashDiff = CodebaseStashDiff;
+export type WorktreeRefreshState = {
+  dirty: boolean;
+  hasConflicts: boolean;
+  rebaseInProgress: boolean;
+  mergeInProgress: boolean;
+};
 
 export const DEFAULT_WORKTREE_FETCH_INTERVAL_SECONDS = 300;
 export const MIN_WORKTREE_FETCH_INTERVAL_SECONDS = 60;
@@ -1404,9 +1410,27 @@ export function worktreePreparationJobPayload(value: unknown): {
   return { ...common, worktrees };
 }
 
+export function parseWorktreeRefreshState(
+  value: unknown,
+): WorktreeRefreshState {
+  const state = objectValue(value, "worktree refresh state");
+  const booleanField = (key: keyof WorktreeRefreshState): boolean => {
+    if (typeof state[key] !== "boolean") {
+      throw new Error(`worktree refresh state.${key} must be a boolean`);
+    }
+    return state[key];
+  };
+  return {
+    dirty: booleanField("dirty"),
+    hasConflicts: booleanField("hasConflicts"),
+    rebaseInProgress: booleanField("rebaseInProgress"),
+    mergeInProgress: booleanField("mergeInProgress"),
+  };
+}
+
 export function worktreeGitInspectPayload(value: unknown):
   | {
-      action: "STATE";
+      action: "STATE" | "REFRESH";
       codebaseId: string;
       folder: string;
       gitDirectory: string;
@@ -1435,7 +1459,11 @@ export function worktreeGitInspectPayload(value: unknown):
       `Unexpected worktree Git inspect payload field: ${unexpected}`,
     );
   }
-  if (payload.action !== "STATE" && payload.action !== "STASH_DIFF") {
+  if (
+    payload.action !== "STATE" &&
+    payload.action !== "REFRESH" &&
+    payload.action !== "STASH_DIFF"
+  ) {
     throw new Error("worktree Git inspect payload.action is invalid");
   }
   const common = {
@@ -1453,9 +1481,9 @@ export function worktreeGitInspectPayload(value: unknown):
       "worktree Git inspect payload.expectedOrigin",
     ),
   };
-  if (payload.action === "STATE") {
+  if (payload.action === "STATE" || payload.action === "REFRESH") {
     if (payload.stashOid !== undefined) {
-      throw new Error("STATE inspection cannot include stashOid");
+      throw new Error(`${payload.action} inspection cannot include stashOid`);
     }
     return { action: payload.action, ...common };
   }

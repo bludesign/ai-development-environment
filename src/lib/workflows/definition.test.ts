@@ -736,6 +736,30 @@ describe("workflow catalog", () => {
     expect(handles("CUSTOM_COMMAND")).toEqual(["success", "failure", "match"]);
   });
 
+  test("offers a targeted live worktree refresh for Git completion conditions", () => {
+    const refresh = WORKFLOW_STEP_CATALOG.find(
+      (entry) => entry.kind === "WORKTREE_REFRESH_STATE",
+    );
+    expect(refresh).toMatchObject({
+      label: "Refresh worktree",
+      category: "Worktrees",
+      execution: "SERVER",
+      capabilityFlags: ["SERVER"],
+      requiredPaths: ["worktree.id"],
+      providedPaths: [
+        "worktree.dirty",
+        "worktree.hasConflicts",
+        "worktree.rebaseInProgress",
+        "worktree.mergeInProgress",
+      ],
+      mutatesWorktree: false,
+      mutatesExternal: false,
+    });
+    expect(refresh?.configSchema).toMatchObject({
+      properties: { worktreeId: expect.any(Object) },
+    });
+  });
+
   test("validates command match configuration and isolated routing", () => {
     const definition = emptyWorkflowDefinition("Command matching");
     const command = node("command", "CUSTOM_COMMAND");

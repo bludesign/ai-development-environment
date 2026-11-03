@@ -8,10 +8,12 @@ import { randomUUID } from "node:crypto";
 import { posix, win32 } from "node:path";
 
 import { parseCodebaseGitState } from "@ai-development-environment/agent-contract/codebases";
+import { IOS_BUILD_JOB_KIND } from "@ai-development-environment/agent-contract/builds";
 import {
   parseCodebaseWorktreeReport,
   parseWorktreeActivityReport,
   parseWorktreeInventoryItem,
+  parseWorktreeRefreshState,
   validGitBranchName,
   WORKTREE_BRANCH_JOB_KIND,
   WORKTREE_COMMIT_JOB_KIND,
@@ -3516,6 +3518,18 @@ export class WorktreesService {
       id,
       WORKTREE_AUTO_SYNC_JOB_KIND,
     );
+    const prisma = await getPrismaClient();
+    const activeBuild = await prisma.agentJob.findFirst({
+      where: {
+        codebaseId: worktree.codebaseId,
+        kind: IOS_BUILD_JOB_KIND,
+        status: { in: ACTIVE_STATUSES },
+      },
+    });
+    // Builds hold the agent's codebase queue for their entire run. Defer sync
+    // before dispatch so it cannot appear to be running while waiting on a build.
+    if (activeBuild)
+      throw new CodebaseBusyError("A build is active for this codebase");
     const payload = this.payload(worktree);
     if (
       mergeGuard &&
@@ -3572,6 +3586,40 @@ export class WorktreesService {
     codebaseId: string | null = null,
   ): void {
     this.publish(worktreeId, codebaseId);
+  }
+
+  async refreshGitState(id: string, requestId: string) {
+    if (!requestId.trim()) throw new Error("requestId is required");
+    const worktree = await this.requireRunnable(
+      id,
+      WORKTREE_GIT_INSPECT_JOB_KIND,
+      true,
+    );
+    const job = await this.createSerializedCodebaseJob({
+      agentId: worktree.codebase.agentId,
+      codebaseId: worktree.codebaseId,
+      worktreeId: worktree.id,
+      kind: WORKTREE_GIT_INSPECT_JOB_KIND,
+      payload: {
+        action: "REFRESH",
+        codebaseId: worktree.codebaseId,
+        folder: worktree.folder,
+        gitDirectory: worktree.gitDirectory,
+        expectedOrigin: worktree.codebase.repository.canonicalOrigin,
+      },
+      idempotencyKey: `worktree:git:refresh:${requestId}:${id}`,
+      timeoutSeconds: 30,
+      visibility: "SYSTEM",
+    });
+    try {
+      const completed = await this.waitForJob(job.id);
+      return parseWorktreeRefreshState(resultObject(completed).state);
+    } finally {
+      const prisma = await getPrismaClient();
+      await prisma.agentJob.deleteMany({
+        where: { id: job.id, visibility: "SYSTEM" },
+      });
+    }
   }
 
   async inspectGitState(id: string, requestId: string) {

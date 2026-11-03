@@ -429,6 +429,10 @@ export const SESSION_NAMESPACE_FIELDS: Record<string, NamespaceField[]> = {
       name: "rebaseInProgress",
       description: "Whether a rebase is in progress",
     },
+    {
+      name: "mergeInProgress",
+      description: "Whether a merge is in progress",
+    },
     { name: "hasConflicts", description: "Whether Git reports conflicts" },
     {
       name: "conflicted",

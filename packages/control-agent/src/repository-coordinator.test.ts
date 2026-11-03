@@ -3,6 +3,200 @@ import { describe, expect, test, vi } from "vitest";
 import { RepositoryCoordinator } from "./repository-coordinator.js";
 
 describe("RepositoryCoordinator", () => {
+  test("keeps inspections responsive during a build even behind queued mutations and reconciliation", async () => {
+    const coordinator = new RepositoryCoordinator();
+    const buildStarted = Promise.withResolvers<void>();
+    const finishBuild = Promise.withResolvers<void>();
+    const mutationStarted = Promise.withResolvers<void>();
+    const finishMutation = Promise.withResolvers<void>();
+    const events: string[] = [];
+    const build = coordinator.runBuild("repo", async () => {
+      buildStarted.resolve();
+      await finishBuild.promise;
+      events.push("build finished");
+    });
+    await buildStarted.promise;
+    const mutation = coordinator.run("repo", async () => {
+      events.push("mutation started");
+      mutationStarted.resolve();
+      await finishMutation.promise;
+    });
+    const reconcile = vi.fn(async () => {
+      events.push("reconciliation");
+    });
+    const reconciliation = coordinator.runReconciliation("repo", reconcile);
+    const inspection = coordinator.runInspection("repo", async () => {
+      events.push("inspection");
+      return "detail";
+    });
+
+    try {
+      await expect(inspection).resolves.toBe("detail");
+      expect(events).toEqual(["inspection"]);
+      expect(reconcile).not.toHaveBeenCalled();
+
+      finishBuild.resolve();
+      await build;
+      await mutationStarted.promise;
+      const laterInspect = vi.fn(async () => "later detail");
+      const laterInspection = coordinator.runInspection("repo", laterInspect);
+      await Promise.resolve();
+      expect(laterInspect).not.toHaveBeenCalled();
+
+      finishMutation.resolve();
+      await Promise.all([mutation, reconciliation, laterInspection]);
+      expect(events).toEqual([
+        "inspection",
+        "build finished",
+        "mutation started",
+        "reconciliation",
+      ]);
+      expect(laterInspect).toHaveBeenCalledOnce();
+    } finally {
+      finishBuild.resolve();
+      finishMutation.resolve();
+      await Promise.allSettled([build, mutation, reconciliation]);
+    }
+  });
+
+  test.each(["mutation", "reconciliation"] as const)(
+    "waits for an active %s before starting a build",
+    async (kind) => {
+      const coordinator = new RepositoryCoordinator();
+      const started = Promise.withResolvers<void>();
+      const finish = Promise.withResolvers<void>();
+      const task = async () => {
+        started.resolve();
+        await finish.promise;
+      };
+      const blocker =
+        kind === "mutation"
+          ? coordinator.run("repo", task)
+          : coordinator.runReconciliation("repo", task);
+      await started.promise;
+      const runBuild = vi.fn(async () => "built");
+      const build = coordinator.runBuild("repo", runBuild);
+      await Promise.resolve();
+      expect(runBuild).not.toHaveBeenCalled();
+
+      finish.resolve();
+      await blocker;
+      await expect(build).resolves.toBe("built");
+    },
+  );
+
+  test("serializes builds while allowing inspections and independent repositories", async () => {
+    const coordinator = new RepositoryCoordinator();
+    const started = Promise.withResolvers<void>();
+    const finish = Promise.withResolvers<void>();
+    const firstBuild = coordinator.runBuild("repo", async () => {
+      started.resolve();
+      await finish.promise;
+    });
+    await started.promise;
+    const second = vi.fn(async () => "second build");
+    const secondBuild = coordinator.runBuild("repo", second);
+
+    try {
+      await expect(
+        coordinator.runInspection("repo", async () => "detail"),
+      ).resolves.toBe("detail");
+      await expect(
+        coordinator.run("another-repo", async () => "independent"),
+      ).resolves.toBe("independent");
+      expect(second).not.toHaveBeenCalled();
+    } finally {
+      finish.resolve();
+      await firstBuild;
+    }
+    await expect(secondBuild).resolves.toBe("second build");
+  });
+
+  test("keeps a cancelled build's lease until cleanup settles and active inspections finish", async () => {
+    const coordinator = new RepositoryCoordinator();
+    const controller = new AbortController();
+    const started = Promise.withResolvers<void>();
+    const finish = Promise.withResolvers<void>();
+    const build = coordinator.runBuild(
+      "repo",
+      async () => {
+        started.resolve();
+        await finish.promise;
+      },
+      controller.signal,
+    );
+    await started.promise;
+    const mutate = vi.fn(async () => "updated");
+    const mutation = coordinator.run("repo", mutate);
+    controller.abort();
+    const inspectionStarted = Promise.withResolvers<void>();
+    const finishInspection = Promise.withResolvers<void>();
+    const inspection = coordinator.runInspection("repo", async () => {
+      inspectionStarted.resolve();
+      await finishInspection.promise;
+    });
+
+    try {
+      await inspectionStarted.promise;
+      expect(mutate).not.toHaveBeenCalled();
+      finish.resolve();
+      await build;
+      expect(mutate).not.toHaveBeenCalled();
+      finishInspection.resolve();
+      await inspection;
+      await expect(mutation).resolves.toBe("updated");
+    } finally {
+      finish.resolve();
+      finishInspection.resolve();
+      await Promise.allSettled([build, inspection, mutation]);
+    }
+  });
+
+  test("removes a cancelled queued build without running it or retaining its lease", async () => {
+    const coordinator = new RepositoryCoordinator();
+    const started = Promise.withResolvers<void>();
+    const finish = Promise.withResolvers<void>();
+    const mutation = coordinator.run("repo", async () => {
+      started.resolve();
+      await finish.promise;
+    });
+    await started.promise;
+    const controller = new AbortController();
+    const runBuild = vi.fn(async () => {});
+    const build = coordinator.runBuild("repo", runBuild, controller.signal);
+    const cancelled = expect(build).rejects.toMatchObject({
+      name: "AbortError",
+    });
+    const inspection = coordinator.runInspection("repo", async () => "detail");
+
+    controller.abort();
+    await cancelled;
+    finish.resolve();
+    await mutation;
+    await expect(inspection).resolves.toBe("detail");
+    expect(runBuild).not.toHaveBeenCalled();
+    await expect(
+      coordinator.runBuild("repo", async () => "next"),
+    ).resolves.toBe("next");
+  });
+
+  test("releases a failed build so queued repository work can proceed", async () => {
+    const coordinator = new RepositoryCoordinator();
+    const started = Promise.withResolvers<void>();
+    const finish = Promise.withResolvers<void>();
+    const build = coordinator.runBuild("repo", async () => {
+      started.resolve();
+      await finish.promise;
+      throw new Error("build failed");
+    });
+    const rejected = expect(build).rejects.toThrow("build failed");
+    await started.promise;
+    const mutation = coordinator.run("repo", async () => "recovered");
+    finish.resolve();
+    await rejected;
+    await expect(mutation).resolves.toBe("recovered");
+  });
+
   test("removes a cancelled queued mutation so readers can proceed during a slow fetch", async () => {
     const coordinator = new RepositoryCoordinator();
     const started = Promise.withResolvers<void>();

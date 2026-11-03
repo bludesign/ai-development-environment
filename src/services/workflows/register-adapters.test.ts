@@ -1,5 +1,8 @@
 import { describe, expect, test, vi } from "vitest";
 
+import { mergeSessionData } from "@/lib/workflows/session";
+import { evaluateWorkflowCondition } from "@/lib/workflows/session.server";
+
 import type { WorkflowExecutionContext } from "./step-executor";
 import { WorkflowStepExecutor } from "./step-executor";
 import {
@@ -87,6 +90,145 @@ const diskSnapshot = {
 };
 
 describe("workflow run adapters", () => {
+  test.each([
+    null,
+    "dirty",
+    "hasConflicts",
+    "rebaseInProgress",
+    "mergeInProgress",
+  ] as const)(
+    "refreshes Git flags before the final condition when %s remains",
+    async (remainingFlag) => {
+      const state = {
+        dirty: false,
+        hasConflicts: false,
+        rebaseInProgress: false,
+        mergeInProgress: false,
+        ...(remainingFlag ? { [remainingFlag]: true } : {}),
+      };
+      const refresh = Promise.withResolvers<typeof state>();
+      const refreshGitState = vi.fn(() => refresh.promise);
+      const executor = new WorkflowStepExecutor();
+      registerWorkflowAdapters(
+        { registerWaitPoller: vi.fn() } as unknown as WorkflowsService,
+        executor,
+        {
+          worktrees: { refreshGitState },
+        } as unknown as WorkflowAdapterServices,
+      );
+      const input = context("actual-worktree");
+      input.node = {
+        ...input.node,
+        id: "refresh",
+        kind: "WORKTREE_REFRESH_STATE",
+        config: remainingFlag === null ? { worktreeId: "actual-worktree" } : {},
+      };
+      input.sessionData = {
+        worktree: {
+          id: "actual-worktree",
+          branch: "feature/AIDE-175",
+          dirty: true,
+          hasConflicts: true,
+          rebaseInProgress: true,
+          mergeInProgress: true,
+        },
+      };
+
+      const execution = executor.execute(input);
+      await vi.waitFor(() =>
+        expect(refreshGitState).toHaveBeenCalledWith(
+          "actual-worktree",
+          "workflow-run:attempt:refresh-git",
+        ),
+      );
+      refresh.resolve(state);
+      const result = await execution;
+      const sessionData = mergeSessionData(
+        input.sessionData,
+        result.sessionPatch!,
+      );
+
+      expect(result.output).toEqual(state);
+      expect(sessionData.worktree).toEqual({
+        id: "actual-worktree",
+        branch: "feature/AIDE-175",
+        ...state,
+      });
+      expect(
+        evaluateWorkflowCondition(
+          {
+            op: "ALL",
+            conditions: Object.keys(state).map((flag) => ({
+              op: "EQ",
+              left: { source: "SESSION", path: `worktree.${flag}` },
+              right: false,
+            })),
+          },
+          sessionData,
+        ),
+      ).toBe(remainingFlag === null);
+      expect(result.links).toContainEqual(
+        expect.objectContaining({
+          kind: "WORKTREE",
+          resourceId: "actual-worktree",
+        }),
+      );
+    },
+  );
+
+  test("fails the refresh step when live Git inspection fails", async () => {
+    const refreshGitState = vi
+      .fn()
+      .mockRejectedValue(new Error("Agent offline"));
+    const executor = new WorkflowStepExecutor();
+    registerWorkflowAdapters(
+      { registerWaitPoller: vi.fn() } as unknown as WorkflowsService,
+      executor,
+      { worktrees: { refreshGitState } } as unknown as WorkflowAdapterServices,
+    );
+    const input = context("actual-worktree");
+    input.node = {
+      ...input.node,
+      kind: "WORKTREE_REFRESH_STATE",
+      config: {},
+    };
+
+    await expect(executor.execute(input)).rejects.toThrow("Agent offline");
+  });
+
+  test("rejects refreshing a different worktree before reading Git", async () => {
+    const refreshGitState = vi.fn();
+    const executor = new WorkflowStepExecutor();
+    registerWorkflowAdapters(
+      { registerWaitPoller: vi.fn() } as unknown as WorkflowsService,
+      executor,
+      { worktrees: { refreshGitState } } as unknown as WorkflowAdapterServices,
+    );
+    const input = context("actual-worktree");
+    input.node = {
+      ...input.node,
+      kind: "WORKTREE_REFRESH_STATE",
+      config: { worktreeId: "other-worktree" },
+    };
+    input.sessionData = {
+      worktree: {
+        id: "actual-worktree",
+        path: "/worktrees/actual-worktree",
+        branch: "feature/AIDE-175",
+      },
+    };
+
+    await expect(executor.execute(input)).rejects.toThrow(
+      "Refresh worktree must target the current workflow worktree",
+    );
+    expect(refreshGitState).not.toHaveBeenCalled();
+    expect(input.sessionData.worktree).toEqual({
+      id: "actual-worktree",
+      path: "/worktrees/actual-worktree",
+      branch: "feature/AIDE-175",
+    });
+  });
+
   test("dispatches and waits for a worktree preparation action", async () => {
     const runPreparations = vi.fn().mockResolvedValue({
       jobs: [{ id: "prepare-job", timeoutSeconds: 600 }],
@@ -290,40 +432,53 @@ describe("workflow run adapters", () => {
     ]);
   });
 
-  test("links Jira actions to the affected ticket", async () => {
-    const executor = new WorkflowStepExecutor();
-    registerWorkflowAdapters(
-      { registerWaitPoller: vi.fn() } as unknown as WorkflowsService,
-      executor,
-      {
-        jira: {
-          ticket: vi.fn().mockResolvedValue({
-            key: "AIDE-42",
-            summary: "Resource navigation",
-            issueType: { name: "Task" },
-            status: { name: "In Progress" },
-          }),
+  test.each(["jiraUrl", "url"] as const)(
+    "loads Jira ticket %s into session data and links the ticket",
+    async (urlField) => {
+      const executor = new WorkflowStepExecutor();
+      registerWorkflowAdapters(
+        { registerWaitPoller: vi.fn() } as unknown as WorkflowsService,
+        executor,
+        {
+          jira: {
+            ticket: vi.fn().mockResolvedValue({
+              key: "AIDE-42",
+              summary: "Resource navigation",
+              issueType: { name: "Task" },
+              status: { name: "In Progress" },
+              [urlField]: "https://jira.example.com/browse/AIDE-42",
+            }),
+          },
+        } as unknown as WorkflowAdapterServices,
+      );
+      const input = context("actual-worktree");
+      input.node = {
+        ...input.node,
+        id: "ticket",
+        kind: "JIRA_LOAD_TICKET",
+        config: { issueKey: "AIDE-42" },
+      };
+
+      const result = await executor.execute(input);
+
+      expect(result.output).toMatchObject({
+        url: "https://jira.example.com/browse/AIDE-42",
+      });
+      expect(result.sessionPatch).toMatchObject({
+        ticket: {
+          key: "AIDE-42",
+          url: "https://jira.example.com/browse/AIDE-42",
         },
-      } as unknown as WorkflowAdapterServices,
-    );
-    const input = context("actual-worktree");
-    input.node = {
-      ...input.node,
-      id: "ticket",
-      kind: "JIRA_LOAD_TICKET",
-      config: { issueKey: "AIDE-42" },
-    };
-
-    const result = await executor.execute(input);
-
-    expect(result.links).toEqual([
-      {
-        kind: "JIRA_TICKET",
-        resourceId: "AIDE-42",
-        label: "Resource navigation",
-      },
-    ]);
-  });
+      });
+      expect(result.links).toEqual([
+        {
+          kind: "JIRA_TICKET",
+          resourceId: "AIDE-42",
+          label: "Resource navigation",
+        },
+      ]);
+    },
+  );
 
   test("refreshes ticket session data after adding a comment", async () => {
     const executor = new WorkflowStepExecutor();
@@ -337,6 +492,7 @@ describe("workflow run adapters", () => {
             summary: "Resource navigation",
             issueType: { name: "Task" },
             status: { name: "In Progress" },
+            jiraUrl: "https://jira.example.com/browse/AIDE-42",
           }),
         },
       } as unknown as WorkflowAdapterServices,
@@ -357,6 +513,7 @@ describe("workflow run adapters", () => {
         title: "Resource navigation",
         type: "Task",
         status: "In Progress",
+        url: "https://jira.example.com/browse/AIDE-42",
       },
     });
   });

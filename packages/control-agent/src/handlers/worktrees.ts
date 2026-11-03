@@ -27,6 +27,7 @@ import {
   type WorktreeDiffFile,
   type WorktreeInventoryItem,
   type WorktreePushStatus,
+  type WorktreeRefreshState,
 } from "@ai-development-environment/agent-contract/worktrees";
 
 import { captureCommand, type CaptureResult } from "../capture-command.js";
@@ -132,6 +133,73 @@ async function rebaseInProgress(
     }
   }
   return false;
+}
+
+async function gitStatePathExists(
+  folder: string,
+  name: string,
+  timeoutMs: number,
+  signal: AbortSignal,
+): Promise<boolean> {
+  const result = requireSuccess(
+    await git(
+      folder,
+      ["rev-parse", "--path-format=absolute", "--git-path", name],
+      timeoutMs,
+      signal,
+    ),
+    `Could not resolve Git state path ${name}`,
+  );
+  const candidate = result.stdout.trim();
+  if (!candidate || result.outputTruncated) {
+    throw new Error(`Could not resolve Git state path ${name}`);
+  }
+  try {
+    await stat(candidate);
+    return true;
+  } catch (error) {
+    if (error instanceof Error && "code" in error && error.code === "ENOENT") {
+      return false;
+    }
+    throw error;
+  }
+}
+
+async function inspectWorktreeRefreshState(
+  folder: string,
+  timeoutMs: number,
+  signal: AbortSignal,
+): Promise<WorktreeRefreshState> {
+  const [status, rebaseMerge, rebaseApply, mergeInProgress] = await Promise.all(
+    [
+      git(
+        folder,
+        [
+          "--no-optional-locks",
+          "status",
+          "--porcelain=v1",
+          "-z",
+          "--untracked-files=all",
+          "--ignore-submodules=none",
+        ],
+        timeoutMs,
+        signal,
+      ),
+      gitStatePathExists(folder, "rebase-merge", timeoutMs, signal),
+      gitStatePathExists(folder, "rebase-apply", timeoutMs, signal),
+      gitStatePathExists(folder, "MERGE_HEAD", timeoutMs, signal),
+    ],
+  );
+  requireSuccess(status, "Could not refresh worktree Git status");
+  if (status.outputTruncated) {
+    throw new Error("Worktree Git status exceeded the output limit");
+  }
+  return {
+    dirty: Boolean(status.stdout),
+    hasConflicts: statusChangeState(status.stdout).hasConflicts,
+    rebaseInProgress: rebaseMerge || rebaseApply,
+    mergeInProgress,
+  };
 }
 
 async function rebaseBranch(
@@ -1623,10 +1691,13 @@ export const inspectWorktreeGit: AgentJobHandler = async (
 ) => {
   const input = worktreeGitInspectPayload(payload);
   const folder = await validateWorktree(input, timeoutMs, signal);
-  if (input.action === "STATE") {
+  if (input.action !== "STASH_DIFF") {
     return {
       ...successfulProcess,
-      state: await inspectCodebaseGitState(folder, timeoutMs, signal),
+      state:
+        input.action === "REFRESH"
+          ? await inspectWorktreeRefreshState(folder, timeoutMs, signal)
+          : await inspectCodebaseGitState(folder, timeoutMs, signal),
     };
   }
   return {

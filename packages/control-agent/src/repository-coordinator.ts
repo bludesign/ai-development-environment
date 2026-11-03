@@ -1,4 +1,4 @@
-type OperationKind = "exclusive" | "inspection" | "reconciliation";
+type OperationKind = "exclusive" | "inspection" | "reconciliation" | "build";
 
 type ReconciliationContext = {
   runExclusive: <T>(task: () => Promise<T>) => Promise<T>;
@@ -8,6 +8,7 @@ type RepositoryQueue = {
   inspections: number;
   reconciliation: boolean;
   exclusive: boolean;
+  build: boolean;
   exclusiveReconciliationPhase: (() => void) | null;
   pending: Array<{ kind: OperationKind; start: () => void }>;
 };
@@ -23,7 +24,16 @@ export class RepositoryCoordinator {
     return this.enqueue(key, "exclusive", () => task(), signal);
   }
 
-  /** Only read-only worktree inspection jobs may overlap reconciliation. */
+  /** Keep source files stable during builds while allowing live inspections. */
+  runBuild<T>(
+    key: string,
+    task: () => Promise<T>,
+    signal?: AbortSignal,
+  ): Promise<T> {
+    return this.enqueue(key, "build", () => task(), signal);
+  }
+
+  /** Read-only worktree inspections may overlap builds and reconciliation. */
   runInspection<T>(
     key: string,
     task: () => Promise<T>,
@@ -95,6 +105,7 @@ export class RepositoryCoordinator {
         inspections: 0,
         reconciliation: false,
         exclusive: false,
+        build: false,
         exclusiveReconciliationPhase: null,
         pending: [],
       };
@@ -107,6 +118,7 @@ export class RepositoryCoordinator {
         if (kind === "inspection") repositoryQueue.inspections -= 1;
         else if (kind === "reconciliation")
           repositoryQueue.reconciliation = false;
+        else if (kind === "build") repositoryQueue.build = false;
         else repositoryQueue.exclusive = false;
         this.drain(key, repositoryQueue);
       };
@@ -159,11 +171,12 @@ export class RepositoryCoordinator {
       }
       return;
     }
-    while (!queue.exclusive && queue.pending.length) {
+    while (!queue.exclusive && !queue.build && queue.pending.length) {
       const next = queue.pending[0]!;
       if (
         (next.kind === "exclusive" &&
           (queue.inspections > 0 || queue.reconciliation)) ||
+        (next.kind === "build" && queue.reconciliation) ||
         (next.kind === "reconciliation" && queue.reconciliation)
       ) {
         // Preserve queue order so incoming inspections cannot starve a writer.
@@ -172,11 +185,27 @@ export class RepositoryCoordinator {
       queue.pending.shift();
       if (next.kind === "inspection") queue.inspections += 1;
       else if (next.kind === "reconciliation") queue.reconciliation = true;
+      else if (next.kind === "build") queue.build = true;
       else queue.exclusive = true;
       next.start();
     }
+    if (queue.build) {
+      // Mutations can wait for a long build. Let inspections pass them until
+      // the build settles, then resume FIFO ordering so writers cannot starve.
+      const inspections = queue.pending.filter(
+        (operation) => operation.kind === "inspection",
+      );
+      queue.pending = queue.pending.filter(
+        (operation) => operation.kind !== "inspection",
+      );
+      for (const inspection of inspections) {
+        queue.inspections += 1;
+        inspection.start();
+      }
+    }
     if (
       !queue.exclusive &&
+      !queue.build &&
       !queue.reconciliation &&
       queue.inspections === 0 &&
       queue.pending.length === 0
