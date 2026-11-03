@@ -7,9 +7,9 @@ import {
 } from "@/services/worktrees/merge-base-branch-updates";
 
 import { randomUUID } from "node:crypto";
-import { WORKTREE_AUTO_SYNC_JOB_KIND } from "@ai-development-environment/agent-contract/worktrees";
 import { normalizeGitOrigin } from "@ai-development-environment/agent-contract/codebases";
 import { getPrismaClient } from "@/data/prisma-client";
+import { isCodebaseBusyError } from "@/lib/codebase-busy";
 import type { GitLabMergeOperation } from "@/generated/prisma/client";
 import {
   validateMergeFollowUps,
@@ -25,6 +25,8 @@ import {
   MergeSyncNotSubmittedError,
   cancelMergeSync,
   MANAGED_MERGE_STATES,
+  LEGACY_CODEBASE_BUSY_MESSAGE,
+  isTransientMergeError,
   mergeSyncUnavailableReason,
   prepareMergeSync,
   withMergeSyncLock,
@@ -134,8 +136,9 @@ export class GitLabMergeService {
   ) {
     gitlab.setMergeCoordinator(this);
     agents.registerCompletionObserver(async (job) => {
-      if (job.kind === WORKTREE_AUTO_SYNC_JOB_KIND) this.wake();
+      if (job.codebaseId) this.wake();
     });
+    agents.registerConnectionHandler(async () => this.wake());
   }
 
   startRuntime() {
@@ -780,6 +783,7 @@ export class GitLabMergeService {
         data: { state: "COMPLETED", lastError: null },
       });
     } catch (error) {
+      if (isCodebaseBusyError(error)) return;
       await prisma.gitLabMergeOperation.update({
         where: { id: row.id },
         data: {
@@ -863,7 +867,16 @@ export class GitLabMergeService {
     try {
       const prisma = await getPrismaClient();
       const rows = await prisma.gitLabMergeOperation.findMany({
-        where: { state: { in: ACTIVE_STATES } },
+        where: {
+          OR: [
+            { state: { in: ACTIVE_STATES } },
+            {
+              state: "ACTION_REQUIRED",
+              lastError: LEGACY_CODEBASE_BUSY_MESSAGE,
+              mergeConfirmedAt: { not: null },
+            },
+          ],
+        },
       });
       if (!rows.length) return;
       const instanceUrl = await this.instance().catch(() => null);
@@ -872,10 +885,16 @@ export class GitLabMergeService {
           `${row.instanceUrl}:${row.projectId}:${row.iid}`,
           async () => {
             // Reload after acquiring the lock: a user action may have completed while we waited.
-            const current = await prisma.gitLabMergeOperation.findUnique({
+            const saved = await prisma.gitLabMergeOperation.findUnique({
               where: { id: row.id },
             });
-            if (!current || !ACTIVE_STATES.includes(current.state)) return;
+            if (!saved) return;
+            let current = saved;
+            const recoverBusy =
+              current.state === "ACTION_REQUIRED" &&
+              current.lastError === LEGACY_CODEBASE_BUSY_MESSAGE &&
+              Boolean(current.mergeConfirmedAt);
+            if (!ACTIVE_STATES.includes(current.state) && !recoverBusy) return;
             if (current.instanceUrl !== instanceUrl) {
               await prisma.gitLabMergeOperation.update({
                 where: { id: row.id },
@@ -888,6 +907,21 @@ export class GitLabMergeService {
               return;
             }
             try {
+              if (recoverBusy) {
+                const confirmed = await this.gitlab.mergeRequestState(
+                  current.projectId,
+                  current.iid,
+                );
+                if (
+                  confirmed.state !== "MERGED" ||
+                  !this.matchesReviewedSource(current, confirmed)
+                )
+                  return;
+                current = await prisma.gitLabMergeOperation.update({
+                  where: { id: current.id },
+                  data: { state: "POST_MERGE", lastError: null },
+                });
+              }
               if (current.autoSync && !current.mergeConfirmedAt) {
                 const merged = await advanceMergeSync({
                   ...current,
@@ -956,6 +990,12 @@ export class GitLabMergeService {
               );
               if (updated.mergeConfirmedAt) await this.followUps(updated);
             } catch (error) {
+              if (
+                current.state === "ACTION_REQUIRED" &&
+                current.lastError === LEGACY_CODEBASE_BUSY_MESSAGE &&
+                isTransientMergeError(error)
+              )
+                return;
               await prisma.gitLabMergeOperation.update({
                 where: { id: row.id },
                 data: {

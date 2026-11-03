@@ -89,12 +89,44 @@ describe("AppsPage", () => {
     expect(within(dirtyCard!).queryByText("Plans")).toBeNull();
     expect(within(dirtyCard!).queryByText("Sessions")).toBeNull();
     expect(
-      within(cleanCard!).getByRole("link", { name: "0 Worktrees off main" }),
-    ).toBeDefined();
+      within(cleanCard!).queryByRole("link", { name: "0 Worktrees off main" }),
+    ).toBeNull();
     expect(
       within(cleanCard!).getByRole("link", { name: "0 Open PRs" }),
     ).toBeDefined();
   });
+
+  test.each([
+    [0, 0, 2],
+    [1, 0, 3],
+    [0, 1, 3],
+    [1, 1, 4],
+  ])(
+    "fits the visible counts when dirty=%s and off-main=%s",
+    async (dirtyWorktrees, nonMainWorktrees, columns) => {
+      request.mockResolvedValue({
+        apps: [
+          app("app-1", "Example app", {
+            worktrees: 2,
+            dirtyWorktrees,
+            nonMainWorktrees,
+          }),
+        ],
+      } as never);
+      render(<AppsPage />);
+      const card = (
+        await screen.findByText("Example app")
+      ).closest<HTMLElement>('[data-slot="card"]')!;
+      const counts = within(card)
+        .getByText("Worktrees")
+        .closest("a")!.parentElement!;
+      expect(counts.children).toHaveLength(columns);
+      expect(counts.className.split(/\s+/)).toContain(`grid-cols-${columns}`);
+      expect(within(card).queryByText("Worktrees off main") !== null).toBe(
+        nonMainWorktrees > 0,
+      );
+    },
+  );
 
   test("anchors each footer to the bottom of its stretched grid card", async () => {
     request.mockResolvedValue({

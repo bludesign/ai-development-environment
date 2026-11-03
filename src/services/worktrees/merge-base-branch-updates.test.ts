@@ -351,6 +351,7 @@ test("GitHub waits for merge confirmation and updates bases before parent cleanu
     {} as import("@/services/workflows").WorkflowsService,
     {
       registerCompletionObserver: vi.fn(),
+      registerConnectionHandler: vi.fn(),
     } as unknown as import("@/services/agent-control").AgentControlService,
   );
   const internal = service as unknown as {
@@ -383,6 +384,7 @@ test("GitHub closed requests never apply saved base updates", async () => {
     {} as import("@/services/workflows").WorkflowsService,
     {
       registerCompletionObserver: vi.fn(),
+      registerConnectionHandler: vi.fn(),
     } as unknown as import("@/services/agent-control").AgentControlService,
   );
   await (
@@ -435,6 +437,7 @@ test("GitLab saves updated outcomes before completing merge follow-ups", async (
     {} as import("@/services/jira").JiraService,
     {
       registerCompletionObserver: vi.fn(),
+      registerConnectionHandler: vi.fn(),
     } as unknown as import("@/services/agent-control").AgentControlService,
   );
   const internal = service as unknown as {

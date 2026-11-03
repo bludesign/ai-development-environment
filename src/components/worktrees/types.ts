@@ -9,7 +9,10 @@ import type {
   CodebaseRepository,
 } from "@/components/codebases/types";
 import type { GitHubPullRequestView } from "@/services/github/types";
-import type { GitLabPipelineView } from "@/services/gitlab/types";
+import type {
+  GitLabMergeOperationView,
+  GitLabPipelineView,
+} from "@/services/gitlab/types";
 
 export type WorktreeSourceControlRequest = {
   provider: "GITHUB" | "GITLAB";
@@ -25,6 +28,11 @@ export type WorktreeSourceControlRequest = {
   state?: string;
   worktreeId?: string | null;
   detailedMergeStatus?: string;
+  mergeWhenPipelineSucceeds?: boolean;
+  mergeOperation?: Pick<
+    GitLabMergeOperationView,
+    "autoMerge" | "autoSync" | "state" | "worktreeId"
+  > | null;
   approvalState?: string | null;
   reviewers?: Array<{ id: string }>;
   unresolvedDiscussionsCount?: number | null;

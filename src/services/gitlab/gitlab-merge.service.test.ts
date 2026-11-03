@@ -25,6 +25,8 @@ vi.mock("@/services/integration-configuration-events", () => ({
   publishIntegrationConfiguration: vi.fn(),
 }));
 import { GitLabMergeService, gitLabMergeBlocker } from "./gitlab-merge.service";
+import { CodebaseBusyError } from "@/lib/codebase-busy";
+import { LEGACY_CODEBASE_BUSY_MESSAGE } from "@/services/worktrees/merge-branch-sync";
 
 const mr: GitLabMergeRequestView = {
   id: "101",
@@ -123,6 +125,7 @@ function setup() {
   };
   const agents = {
     registerCompletionObserver: vi.fn(),
+    registerConnectionHandler: vi.fn(),
     getJob: vi.fn().mockResolvedValue({ id: "job-1", status: "RUNNING" }),
   };
   const service = new GitLabMergeService(
@@ -448,6 +451,51 @@ test("refuses cleanup when the linked checkout no longer matches the fork source
     }),
   );
 });
+
+test.each([false, true])(
+  "cleanup waits and recovers legacy=%s without repeating Jira",
+  async (legacy) => {
+    const { service, worktrees, jira, gitlab } = setup();
+    vi.mocked(service.options).mockResolvedValue({
+      ...options,
+      worktreeId: "w1",
+      canDeleteWorktree: true,
+    });
+    database.worktree.findUnique.mockResolvedValue({
+      id: "w1",
+      primary: false,
+      missingAt: null,
+      branch: mr.sourceBranch,
+      headSha: mr.sha,
+      codebase: { repository: { canonicalOrigin: "gitlab.test/fork/repo" } },
+    });
+    worktrees.deleteWorktree.mockRejectedValueOnce(new CodebaseBusyError());
+    await service.submit({
+      ...input,
+      deleteWorktree: true,
+      moveTicketToDone: true,
+    });
+    expect(database.row?.state).toBe("POST_MERGE");
+    if (legacy) {
+      Object.assign(database.row!, {
+        state: "ACTION_REQUIRED",
+        lastError: LEGACY_CODEBASE_BUSY_MESSAGE,
+      });
+      gitlab.mergeRequestState.mockRejectedValueOnce(
+        new Error("network timeout"),
+      );
+      await service.reconcile();
+      expect(database.row).toMatchObject({
+        state: "ACTION_REQUIRED",
+        lastError: LEGACY_CODEBASE_BUSY_MESSAGE,
+      });
+    }
+    await service.reconcile();
+    expect(database.row?.state).toBe("POST_MERGE");
+    expect(worktrees.deleteWorktree).toHaveBeenCalledTimes(2);
+    expect(jira.transitionTicketToConfiguredDone).toHaveBeenCalledOnce();
+  },
+);
 
 test("never transitions Jira for a different merged head, including on follow-up retry", async () => {
   const { service, gitlab, jira } = setup();

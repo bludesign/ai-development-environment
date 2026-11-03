@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, test, vi } from "vitest";
 import type { AgentControlService } from "@/services/agent-control";
 import type { WorktreesService } from "./worktrees.service";
+import { CodebaseBusyError } from "@/lib/codebase-busy";
 import { WORKTREE_REVIEWED_SYNC_CAPABILITY } from "@ai-development-environment/agent-contract/worktrees";
 
 const db = vi.hoisted(() => ({
@@ -265,6 +266,20 @@ describe("managed branch sync", () => {
     await f.tick();
     expect(f.row.state).toBe("SYNCING");
     expect(readMergeSync(f.row.syncStateJson).requestId).toBe(requestId);
+  });
+  test("codebase contention preserves its dispatch request and resumes automatically", async () => {
+    const f = fixture();
+    await f.start();
+    await f.tick();
+    const requestId = readMergeSync(f.row.syncStateJson).requestId;
+    f.worktrees.createAutoSyncJob.mockRejectedValueOnce(
+      new CodebaseBusyError(),
+    );
+    await f.tick();
+    expect(f.row.state).toBe("SYNCING");
+    expect(readMergeSync(f.row.syncStateJson).requestId).toBe(requestId);
+    await f.tick();
+    expect(readMergeSync(f.row.syncStateJson).jobId).toBe("job");
   });
   test("requires a capable matching worktree and leaves standalone settings intact", async () => {
     const f = fixture();

@@ -50,6 +50,11 @@ import type {
   WorktreeQuickAction,
 } from "./types";
 import { waitForWorktreeJob } from "./worktree-jobs";
+import {
+  currentWorktreeAutoMerge,
+  nativeWorktreeAutoMergeEnabled,
+  worktreeAutoMergeStatus,
+} from "./worktree-auto-merge-status";
 
 const NONE = "__none__";
 const DEFAULT_EMAIL = "__github_account_default__";
@@ -390,21 +395,42 @@ function GitLabAutoMergeButton({
   disabled,
   onCompleted,
 }: AutomationButtonProps) {
-  const t = useTranslations("gitlabPages");
+  const t = useTranslations("worktrees");
+  const tg = useTranslations("gitlabPages");
   const [open, setOpen] = useState(false);
   const request = worktree.sourceControlRequest;
   if (!request?.projectId) return null;
   const canMergeNow = directlyMergeableGitLab(worktree);
+  const status = worktreeAutoMergeStatus(worktree);
+  const paused = status === "paused";
+  const completed = status === "completed";
+  const active = status === "active";
   return (
     <>
       <Button
+        className={
+          active || completed
+            ? "bg-emerald-600 text-white hover:bg-emerald-700"
+            : undefined
+        }
         size="sm"
-        variant="outline"
-        disabled={disabled}
-        onClick={() => setOpen(true)}
+        variant={
+          paused ? "destructive" : active || completed ? "default" : "outline"
+        }
+        disabled={completed || (disabled && status === "inactive")}
+        onClick={(event) => {
+          event.stopPropagation();
+          setOpen(true);
+        }}
       >
         <GitMerge />
-        {t(canMergeNow ? "merge" : "autoMerge")}
+        {completed
+          ? t("autoMergeComplete")
+          : paused
+            ? t("autoMergePaused")
+            : active
+              ? t("autoMerging")
+              : tg(canMergeNow ? "merge" : "autoMerge")}
       </Button>
       <MergeRequestDialog
         mergeRequest={{
@@ -430,16 +456,9 @@ function GitHubAutoMergeButton({
   const t = useTranslations("worktrees");
   const tp = useTranslations("pullRequests");
   const pullRequest = worktree.pullRequest;
-  const rule = worktree.autoMerge;
-  const currentRule =
-    rule &&
-    rule.branch === worktree.branch &&
-    (!pullRequest ||
-      (rule.pullRequestNumber === pullRequest.number &&
-        rule.repositoryNameWithOwner.toLowerCase() ===
-          pullRequest.repositoryNameWithOwner.toLowerCase()))
-      ? rule
-      : null;
+  const currentRule = currentWorktreeAutoMerge(worktree);
+  const status = worktreeAutoMergeStatus(worktree);
+  const nativeAutoMergeEnabled = nativeWorktreeAutoMergeEnabled(worktree);
   const [open, setOpen] = useState(false);
   const [manualOpen, setManualOpen] = useState(false);
   const repositoryName = pullRequest?.repositoryNameWithOwner;
@@ -524,8 +543,8 @@ function GitHubAutoMergeButton({
     pullRequest &&
     (manualOpen ||
       (!open &&
-        !currentRule?.autoSync &&
-        currentRule?.state !== "COMPLETED" &&
+        !currentRule &&
+        !nativeAutoMergeEnabled &&
         directlyMergeable(worktree)))
   ) {
     return (
@@ -635,17 +654,20 @@ function GitHubAutoMergeButton({
     }
   };
 
-  const paused = currentRule?.state === "ACTION_REQUIRED";
-  const completed = currentRule?.state === "COMPLETED";
+  const paused = status === "paused";
+  const completed = status === "completed";
+  const active = status === "active";
   return (
     <>
       <Button
         className={
-          currentRule && !paused
+          active || completed
             ? "bg-emerald-600 text-white hover:bg-emerald-700"
             : undefined
         }
-        disabled={!pullRequest || (disabled && !currentRule) || completed}
+        disabled={
+          !pullRequest || (disabled && status === "inactive") || completed
+        }
         onClick={(event) => {
           event.stopPropagation();
           setLoading(true);
@@ -655,14 +677,16 @@ function GitHubAutoMergeButton({
         }}
         size="sm"
         type="button"
-        variant={paused ? "destructive" : currentRule ? "default" : "outline"}
+        variant={
+          paused ? "destructive" : active || completed ? "default" : "outline"
+        }
       >
         <GitMerge />
         {completed
           ? t("autoMergeComplete")
           : paused
             ? t("autoMergePaused")
-            : currentRule
+            : active
               ? t("autoMerging")
               : t("autoMerge")}
       </Button>
@@ -775,9 +799,11 @@ function GitHubAutoMergeButton({
             </div>
           )}
           <DialogFooter>
-            {currentRule && (
+            {(currentRule || nativeAutoMergeEnabled) && (
               <Button
-                disabled={busy}
+                disabled={
+                  busy || (!currentRule && !options?.viewerCanDisableAutoMerge)
+                }
                 onClick={() => void cancel()}
                 type="button"
                 variant="destructive"

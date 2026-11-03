@@ -167,9 +167,13 @@ export function AppsPage() {
                 <div
                   className={cn(
                     "grid gap-3 text-center",
-                    app.counts.dirtyWorktrees > 0
+                    app.counts.dirtyWorktrees > 0 &&
+                      app.counts.nonMainWorktrees > 0
                       ? "grid-cols-4"
-                      : "grid-cols-3",
+                      : app.counts.dirtyWorktrees > 0 ||
+                          app.counts.nonMainWorktrees > 0
+                        ? "grid-cols-3"
+                        : "grid-cols-2",
                   )}
                 >
                   {app.counts.dirtyWorktrees > 0 && (
@@ -187,13 +191,15 @@ export function AppsPage() {
                     value={app.counts.worktrees}
                     view="worktrees"
                   />
-                  <AppListCount
-                    appId={app.id}
-                    label={t("nonMainWorktrees")}
-                    value={app.counts.nonMainWorktrees}
-                    view="worktrees"
-                    warning
-                  />
+                  {app.counts.nonMainWorktrees > 0 && (
+                    <AppListCount
+                      appId={app.id}
+                      label={t("nonMainWorktrees")}
+                      value={app.counts.nonMainWorktrees}
+                      view="worktrees"
+                      warning
+                    />
+                  )}
                   <AppListCount
                     appId={app.id}
                     label={t("openRequests")}

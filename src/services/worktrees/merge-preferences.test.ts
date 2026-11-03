@@ -69,7 +69,10 @@ function setup() {
     github as unknown as GitHubService,
     jira as unknown as JiraService,
     {} as WorkflowsService,
-    { registerCompletionObserver: vi.fn() } as unknown as AgentControlService,
+    {
+      registerCompletionObserver: vi.fn(),
+      registerConnectionHandler: vi.fn(),
+    } as unknown as AgentControlService,
   );
   vi.spyOn(
     service as unknown as { changed(): void },

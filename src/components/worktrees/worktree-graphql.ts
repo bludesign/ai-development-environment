@@ -5,6 +5,7 @@ export const SOURCE_CONTROL_REQUEST_FIELDS = `
   provider id number title url isDraft headRefName headRefOid createdAt
   ... on GitLabMergeRequest {
     projectId state worktreeId detailedMergeStatus approvalState reviewers { id } unresolvedDiscussionsCount
+    mergeWhenPipelineSucceeds mergeOperation { autoMerge autoSync state worktreeId }
   }
 `;
 

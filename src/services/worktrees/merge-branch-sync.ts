@@ -5,6 +5,7 @@ import {
   WORKTREE_REVIEWED_SYNC_CAPABILITY,
 } from "@ai-development-environment/agent-contract/worktrees";
 import { getPrismaClient } from "@/data/prisma-client";
+import { isCodebaseBusyError } from "@/lib/codebase-busy";
 import type { AgentControlService } from "@/services/agent-control";
 import type { WorktreesService } from "./worktrees.service";
 
@@ -17,6 +18,25 @@ export const MANAGED_MERGE_STATES = [
 const FINISHED = ["COMPLETED", "CANCELED"];
 const TERMINAL = new Set(["SUCCEEDED", "FAILED", "CANCELLED", "TIMED_OUT"]);
 const locks = new Map<string, Promise<void>>();
+
+// Older coordinators mistook this specific dispatch error for a permanent failure.
+export const LEGACY_CODEBASE_BUSY_MESSAGE =
+  "Another operation is active for this codebase";
+
+export function isTransientMergeError(error: unknown): boolean {
+  const message = error instanceof Error ? error.message : String(error);
+  const status =
+    (error as { statusCode?: number; status?: number } | null)?.statusCode ??
+    (error as { status?: number } | null)?.status;
+  return (
+    isCodebaseBusyError(error) ||
+    /offline|busy|another operation|active job|temporar|fetch failed|ECONN|network|rate limit|timeout|timed out/i.test(
+      message,
+    ) ||
+    status === 429 ||
+    Boolean(status && status >= 500)
+  );
+}
 
 /** Provider readiness changed before a merge mutation was sent; it is safe to recheck. */
 export class MergeSyncNotSubmittedError extends Error {}
@@ -422,15 +442,7 @@ export async function advanceMergeSync(input: {
       );
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
-      const status =
-        (error as { statusCode?: number; status?: number } | null)
-          ?.statusCode ?? (error as { status?: number } | null)?.status;
-      const transient =
-        /offline|busy|another operation|active job|temporar|fetch failed|ECONN|network|rate limit|timeout|timed out/i.test(
-          message,
-        ) ||
-        status === 429 ||
-        Boolean(status && status >= 500);
+      const transient = isTransientMergeError(error);
       await save(
         error instanceof MergeSyncNotSubmittedError
           ? "WAITING_REQUIREMENTS"

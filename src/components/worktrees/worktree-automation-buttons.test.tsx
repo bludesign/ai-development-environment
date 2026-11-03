@@ -42,6 +42,7 @@ function worktreeForLaterPullRequest(
       number: 18,
       repositoryNameWithOwner: "acme/widgets",
       state: "OPEN",
+      headRefName: "feature/widgets",
       isDraft: false,
       mergeable,
       mergeStateStatus: mergeable === "MERGEABLE" ? "CLEAN" : "BLOCKED",
@@ -77,6 +78,8 @@ function gitLabWorktree(
       projectId: "42",
       number: 17,
       title: "Improve API",
+      state: "OPENED",
+      headRefName: "feature/widgets",
       isDraft: false,
       detailedMergeStatus,
     },
@@ -85,6 +88,206 @@ function gitLabWorktree(
 }
 
 describe("AutoMergeButton", () => {
+  test.each(["native", "managed"])(
+    "keeps %s GitHub Auto Merge green when the PR is directly mergeable",
+    (kind) => {
+      const worktree = worktreeForLaterPullRequest("MERGEABLE");
+      if (kind === "native") {
+        worktree.autoMerge = null;
+        worktree.pullRequest!.autoMergeEnabled = true;
+      } else {
+        worktree.autoMerge = {
+          ...worktree.autoMerge!,
+          pullRequestNumber: 18,
+          state: "ACTIVE",
+          autoSync: false,
+        };
+      }
+      render(
+        <AutoMergeButton
+          conflictWorkflows={[]}
+          disabled={true}
+          onCompleted={vi.fn()}
+          onError={vi.fn()}
+          worktree={worktree}
+        />,
+      );
+      const button = screen.getByRole("button", { name: "Auto Merging" });
+      expect(button.className).toContain("bg-emerald-600");
+      expect(button.hasAttribute("disabled")).toBe(false);
+      expect(screen.queryByRole("button", { name: "Manual merge" })).toBeNull();
+    },
+  );
+
+  test("can cancel native GitHub Auto Merge without a persisted rule", async () => {
+    const worktree = worktreeForLaterPullRequest("MERGEABLE");
+    worktree.autoMerge = null;
+    worktree.pullRequest!.autoMergeEnabled = true;
+    request.mockResolvedValue({
+      githubPullRequestMergeOptions: {
+        availableMethods: ["SQUASH"],
+        defaultCommitHeadline: "Improve widgets",
+        defaultCommitBody: "",
+        commitEmails: [],
+        viewerCanDisableAutoMerge: true,
+      },
+    } as never);
+    const onCompleted = vi.fn(async () => undefined);
+    render(
+      <AutoMergeButton
+        conflictWorkflows={[]}
+        disabled={false}
+        onCompleted={onCompleted}
+        onError={vi.fn()}
+        worktree={worktree}
+      />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Auto Merging" }));
+    await screen.findByDisplayValue("Improve widgets");
+    fireEvent.click(screen.getByRole("button", { name: "Cancel Auto Merge" }));
+    await waitFor(() =>
+      expect(request).toHaveBeenCalledWith(
+        expect.stringContaining("mutation CancelWorktreeAutoMerge"),
+        { worktreeId: worktree.id },
+      ),
+    );
+    expect(onCompleted).toHaveBeenCalledOnce();
+  });
+
+  test.each(["native", "managed"])(
+    "shows green %s GitLab Auto Merge before the mergeable action",
+    (kind) => {
+      const worktree = gitLabWorktree("mergeable", "SUCCESS");
+      if (kind === "native") {
+        worktree.sourceControlRequest!.mergeWhenPipelineSucceeds = true;
+      } else {
+        worktree.sourceControlRequest!.mergeOperation = {
+          state: "WAITING_CI",
+          autoMerge: true,
+          autoSync: true,
+          worktreeId: worktree.id,
+        };
+      }
+      render(
+        <AutoMergeButton
+          conflictWorkflows={[]}
+          disabled={false}
+          onCompleted={vi.fn()}
+          onError={vi.fn()}
+          worktree={worktree}
+        />,
+      );
+      expect(
+        screen.getByRole("button", { name: "Auto Merging" }).className,
+      ).toContain("bg-emerald-600");
+      expect(screen.queryByRole("button", { name: "Merge" })).toBeNull();
+    },
+  );
+
+  test.each([
+    ["ACTION_REQUIRED", "OPENED", "Auto Merge paused", "destructive", false],
+    ["COMPLETED", "MERGED", "Auto Merge Complete", "default", true],
+    ["CANCELED", "OPENED", "Merge", "outline", false],
+  ] as const)(
+    "reflects GitLab %s without implying enabled automation",
+    (state, requestState, label, variant, disabled) => {
+      const worktree = gitLabWorktree("mergeable", "SUCCESS");
+      worktree.sourceControlRequest!.state = requestState;
+      worktree.sourceControlRequest!.mergeOperation = {
+        state,
+        autoMerge: true,
+        worktreeId: worktree.id,
+      };
+      render(
+        <AutoMergeButton
+          conflictWorkflows={[]}
+          disabled={false}
+          onCompleted={vi.fn()}
+          onError={vi.fn()}
+          worktree={worktree}
+        />,
+      );
+      const button = screen.getByRole("button", { name: label });
+      expect(button.getAttribute("data-variant")).toBe(variant);
+      expect(button.hasAttribute("disabled")).toBe(disabled);
+    },
+  );
+
+  test.each(["GITHUB", "GITLAB"])(
+    "does not show enabled %s automation for a previous branch",
+    (provider) => {
+      const worktree =
+        provider === "GITLAB"
+          ? gitLabWorktree("mergeable", "SUCCESS")
+          : worktreeForLaterPullRequest("MERGEABLE");
+      worktree.branch = "feature/different-branch";
+      if (provider === "GITLAB") {
+        worktree.sourceControlRequest!.mergeWhenPipelineSucceeds = true;
+        worktree.sourceControlRequest!.mergeOperation = {
+          state: "WAITING_CI",
+          autoMerge: true,
+          autoSync: true,
+          worktreeId: worktree.id,
+        };
+      } else {
+        worktree.pullRequest!.autoMergeEnabled = true;
+      }
+      render(
+        <AutoMergeButton
+          conflictWorkflows={[]}
+          disabled={false}
+          onCompleted={vi.fn()}
+          onError={vi.fn()}
+          worktree={worktree}
+        />,
+      );
+      expect(screen.queryByRole("button", { name: "Auto Merging" })).toBeNull();
+    },
+  );
+
+  test("ignores a GitLab automation linked to a different worktree", () => {
+    const worktree = gitLabWorktree("mergeable", "SUCCESS");
+    worktree.sourceControlRequest!.mergeOperation = {
+      state: "WAITING_CI",
+      autoMerge: true,
+      autoSync: true,
+      worktreeId: "other-worktree",
+    };
+    render(
+      <AutoMergeButton
+        conflictWorkflows={[]}
+        disabled={false}
+        onCompleted={vi.fn()}
+        onError={vi.fn()}
+        worktree={worktree}
+      />,
+    );
+    expect(screen.getByRole("button", { name: "Merge" })).toBeDefined();
+    expect(screen.queryByRole("button", { name: "Auto Merging" })).toBeNull();
+  });
+
+  test("ignores a GitHub rule when the linked PR source branch changes", () => {
+    const worktree = worktreeForLaterPullRequest("MERGEABLE");
+    worktree.autoMerge = {
+      ...worktree.autoMerge!,
+      state: "ACTIVE",
+      pullRequestNumber: 18,
+    };
+    worktree.pullRequest!.headRefName = "feature/renamed-source";
+    worktree.pullRequest!.autoMergeEnabled = true;
+    render(
+      <AutoMergeButton
+        conflictWorkflows={[]}
+        disabled={false}
+        onCompleted={vi.fn()}
+        onError={vi.fn()}
+        worktree={worktree}
+      />,
+    );
+    expect(screen.getByRole("button", { name: "Manual merge" })).toBeDefined();
+    expect(screen.queryByRole("button", { name: "Auto Merging" })).toBeNull();
+  });
+
   test("opens the GitLab merge sheet with the linked checkout and never loads GitHub options", async () => {
     const worktree = gitLabWorktree("ci_still_running", "RUNNING");
     request.mockRejectedValue(new Error("GitLab options unavailable"));

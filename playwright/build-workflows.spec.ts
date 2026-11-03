@@ -144,7 +144,13 @@ test("terminal tails, prepends 6005 chunks, reconciles late output, and preserve
   await expect(rows).toContainText("line-05005");
   await expect(rows).not.toContainText("line-04005");
   await expect(rows).not.toContainText("── Build ──");
-  const reading = await rows.innerText();
+  let reading = "";
+  await expect
+    .poll(async () => {
+      reading = await rows.innerText();
+      return reading;
+    })
+    .toContain("line-05005");
   await expect.poll(() => !!pushLive).toBe(true);
   const live = chunk(6005);
   chunks.push(live);
