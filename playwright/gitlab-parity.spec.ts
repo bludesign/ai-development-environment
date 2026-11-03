@@ -29,10 +29,13 @@ const mergeOptions = {
   removeSourceBranch: true,
   canRemoveSourceBranch: true,
   canMerge: false,
-  canAutoMerge: true,
+  canAutoMerge: false,
+  canAutoMergeWithSync: true,
+  autoSyncBlockedReason: null,
+  defaultAutoSync: false,
   canCancelAutoMerge: false,
   autoMergeEnabled: false,
-  mergeBlockedReason: "The pipeline is still running.",
+  mergeBlockedReason: "Rebase the source branch before merging.",
   autoMergeBlockedReason: null,
   mergeCommitMessage: null,
   squashCommitMessage: null,
@@ -74,7 +77,15 @@ test("gitlab merge sheet shows project policy and deferred follow-ups", async ({
     .getByRole("button", { name: "Merge", exact: true })
     .click();
   const sheet = page.getByRole("dialog");
-  await expect(sheet.getByText("The pipeline is still running.")).toBeVisible();
+  await expect(
+    sheet.getByText("Rebase the source branch before merging."),
+  ).toBeVisible();
+  await expect(
+    sheet.getByRole("button", { name: "Enable auto-merge", exact: true }),
+  ).toBeDisabled();
+  await sheet
+    .getByRole("checkbox", { name: "Auto sync branch", exact: true })
+    .check();
   await expect(
     sheet.getByRole("checkbox", { name: "Squash commits", exact: true }),
   ).toBeDisabled();
