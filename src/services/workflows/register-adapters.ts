@@ -316,6 +316,7 @@ function normalizeTicket(ticketValue: unknown): Record<string, unknown> {
     ...ticket,
     key: ticket.key,
     title: ticket.summary ?? ticket.title,
+    url: ticket.jiraUrl ?? ticket.url,
     type: issueType.name ?? ticket.type,
     status: status.name ?? ticket.status,
     statusCategory: status.category ?? ticket.statusCategory,

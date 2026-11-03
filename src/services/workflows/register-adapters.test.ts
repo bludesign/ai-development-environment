@@ -290,40 +290,53 @@ describe("workflow run adapters", () => {
     ]);
   });
 
-  test("links Jira actions to the affected ticket", async () => {
-    const executor = new WorkflowStepExecutor();
-    registerWorkflowAdapters(
-      { registerWaitPoller: vi.fn() } as unknown as WorkflowsService,
-      executor,
-      {
-        jira: {
-          ticket: vi.fn().mockResolvedValue({
-            key: "AIDE-42",
-            summary: "Resource navigation",
-            issueType: { name: "Task" },
-            status: { name: "In Progress" },
-          }),
+  test.each(["jiraUrl", "url"] as const)(
+    "loads Jira ticket %s into session data and links the ticket",
+    async (urlField) => {
+      const executor = new WorkflowStepExecutor();
+      registerWorkflowAdapters(
+        { registerWaitPoller: vi.fn() } as unknown as WorkflowsService,
+        executor,
+        {
+          jira: {
+            ticket: vi.fn().mockResolvedValue({
+              key: "AIDE-42",
+              summary: "Resource navigation",
+              issueType: { name: "Task" },
+              status: { name: "In Progress" },
+              [urlField]: "https://jira.example.com/browse/AIDE-42",
+            }),
+          },
+        } as unknown as WorkflowAdapterServices,
+      );
+      const input = context("actual-worktree");
+      input.node = {
+        ...input.node,
+        id: "ticket",
+        kind: "JIRA_LOAD_TICKET",
+        config: { issueKey: "AIDE-42" },
+      };
+
+      const result = await executor.execute(input);
+
+      expect(result.output).toMatchObject({
+        url: "https://jira.example.com/browse/AIDE-42",
+      });
+      expect(result.sessionPatch).toMatchObject({
+        ticket: {
+          key: "AIDE-42",
+          url: "https://jira.example.com/browse/AIDE-42",
         },
-      } as unknown as WorkflowAdapterServices,
-    );
-    const input = context("actual-worktree");
-    input.node = {
-      ...input.node,
-      id: "ticket",
-      kind: "JIRA_LOAD_TICKET",
-      config: { issueKey: "AIDE-42" },
-    };
-
-    const result = await executor.execute(input);
-
-    expect(result.links).toEqual([
-      {
-        kind: "JIRA_TICKET",
-        resourceId: "AIDE-42",
-        label: "Resource navigation",
-      },
-    ]);
-  });
+      });
+      expect(result.links).toEqual([
+        {
+          kind: "JIRA_TICKET",
+          resourceId: "AIDE-42",
+          label: "Resource navigation",
+        },
+      ]);
+    },
+  );
 
   test("refreshes ticket session data after adding a comment", async () => {
     const executor = new WorkflowStepExecutor();
@@ -337,6 +350,7 @@ describe("workflow run adapters", () => {
             summary: "Resource navigation",
             issueType: { name: "Task" },
             status: { name: "In Progress" },
+            jiraUrl: "https://jira.example.com/browse/AIDE-42",
           }),
         },
       } as unknown as WorkflowAdapterServices,
@@ -357,6 +371,7 @@ describe("workflow run adapters", () => {
         title: "Resource navigation",
         type: "Task",
         status: "In Progress",
+        url: "https://jira.example.com/browse/AIDE-42",
       },
     });
   });
