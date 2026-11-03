@@ -192,6 +192,7 @@ describe("OpenCode 2 discovery", () => {
       finalOutput: "Done",
       estimatedCost: 0.2,
       usage: [{ inputTokens: 10, outputTokens: 2 }],
+      sessionInfo: { workingDirectory: "/workspace" },
     });
     expect(api.message.list).toHaveBeenLastCalledWith(
       { sessionID: session.id, limit: 200, cursor: "messages" },
@@ -360,7 +361,9 @@ describe("OpenCode 2 execution", () => {
       status: "COMPLETED",
       finalOutput: "Done",
     });
-    expect(cb.onNativeId).toHaveBeenCalledWith(session.id, "2.1.1");
+    expect(cb.onNativeId).toHaveBeenCalledWith(session.id, "2.1.1", {
+      workingDirectory: "/workspace",
+    });
     expect(cb.onUsage).toHaveBeenCalledWith(
       expect.objectContaining({ estimatedCost: 0.2, inputTokens: 10 }),
     );

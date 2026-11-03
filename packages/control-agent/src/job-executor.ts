@@ -1,3 +1,11 @@
+import {
+  WORKTREE_DIFF_ASSET_JOB_KIND,
+  WORKTREE_DIFF_JOB_KIND,
+  WORKTREE_GIT_INSPECT_JOB_KIND,
+  WORKTREE_INSPECT_JOB_KIND,
+} from "@ai-development-environment/agent-contract/worktrees";
+import { CODEBASE_GIT_INSPECT_JOB_KIND } from "@ai-development-environment/agent-contract/codebases";
+
 import { AgentGraphQLClient, type AgentJob } from "./graphql-client.js";
 import { handlers } from "./handlers/index.js";
 import { closeAllWorktreeWatches } from "./handlers/worktrees.js";
@@ -62,8 +70,9 @@ export class JobExecutor {
       const handler = handlers[claimed.kind];
       if (!handler)
         throw new Error(`No local handler is registered for ${claimed.kind}`);
-      const runHandler = () =>
-        handler(
+      const runHandler = () => {
+        controller.signal.throwIfAborted();
+        return handler(
           claimed.payload,
           claimed.timeoutSeconds * 1_000,
           controller.signal,
@@ -106,6 +115,7 @@ export class JobExecutor {
               this.client.appendCommandOutput(claimed.id, attemptId, chunks),
           },
         );
+      };
       const codebaseId =
         claimed.payload &&
         typeof claimed.payload === "object" &&
@@ -114,9 +124,28 @@ export class JobExecutor {
           "string"
           ? String((claimed.payload as Record<string, unknown>).codebaseId)
           : null;
-      result = codebaseId
-        ? await this.repositoryCoordinator.run(codebaseId, runHandler)
-        : await runHandler();
+      if (!codebaseId) result = await runHandler();
+      else if (
+        claimed.kind === WORKTREE_INSPECT_JOB_KIND ||
+        claimed.kind === WORKTREE_DIFF_JOB_KIND ||
+        claimed.kind === WORKTREE_DIFF_ASSET_JOB_KIND ||
+        claimed.kind === WORKTREE_GIT_INSPECT_JOB_KIND ||
+        claimed.kind === CODEBASE_GIT_INSPECT_JOB_KIND
+      ) {
+        // A background fetch can update live refs while these read them, just
+        // as an external Git process can. User mutations remain exclusive.
+        result = await this.repositoryCoordinator.runInspection(
+          codebaseId,
+          runHandler,
+          controller.signal,
+        );
+      } else {
+        result = await this.repositoryCoordinator.run(
+          codebaseId,
+          runHandler,
+          controller.signal,
+        );
+      }
       status = result.cancelled
         ? "CANCELLED"
         : result.timedOut

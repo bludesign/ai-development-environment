@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, test, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 
 const getPrismaClient = vi.hoisted(() => vi.fn());
 vi.mock("@/data/prisma-client", () => ({ getPrismaClient }));
@@ -17,6 +17,7 @@ import {
 } from "@ai-development-environment/agent-contract/worktrees";
 import {
   agentEventBus,
+  agentJobChangedTopic,
   WORKTREE_CHANGED_TOPIC,
 } from "@/services/agent-control";
 import type { GitHubService } from "@/services/github";
@@ -2101,6 +2102,330 @@ describe("WorktreesService", () => {
     expect(deleteMany).toHaveBeenCalledWith({
       where: { id: "inspect-1", visibility: "SYSTEM" },
     });
+  });
+
+  describe("inspection job notifications", () => {
+    beforeEach(() => vi.useFakeTimers());
+    afterEach(() => vi.useRealTimers());
+
+    function inspection() {
+      const getJob = vi.fn().mockResolvedValue({
+        id: "inspect-1",
+        status: "RUNNING",
+      });
+      const cancelJob = vi.fn().mockResolvedValue({});
+      const createJob = vi.fn().mockResolvedValue({ id: "inspect-1" });
+      const findFirst = vi.fn().mockResolvedValue(null);
+      getPrismaClient.mockResolvedValue({
+        worktree: {
+          findUnique: vi.fn().mockResolvedValue({
+            id: "worktree-1",
+            codebaseId: "codebase-1",
+            folder: "/repo",
+            gitDirectory: "/repo/.git",
+            baseBranchOverride: null,
+            missingAt: null,
+            availability: "AVAILABLE",
+            codebase: {
+              agentId: "agent-1",
+              defaultBranch: "main",
+              agent: {
+                lastSeenAt: new Date(),
+                disconnectedAt: null,
+                capabilitiesJson: JSON.stringify(["worktree.inspect"]),
+              },
+              repository: { canonicalOrigin: "github.com/openai/codex" },
+            },
+          }),
+        },
+        agentJob: {
+          findFirst,
+          deleteMany: vi.fn().mockResolvedValue({ count: 1 }),
+        },
+      });
+      const control = {
+        registerCompletionHandler: vi.fn(),
+        getJob,
+        cancelJob,
+        createJob,
+      } as unknown as AgentControlService;
+      const completed = {
+        id: "inspect-1",
+        status: "SUCCEEDED",
+        resultJson: JSON.stringify({ detail: { commits: [], changes: [] } }),
+        error: null,
+      };
+      return { control, getJob, cancelJob, createJob, findFirst, completed };
+    }
+
+    test("loads completed inspection results when the completion event is missed", async () => {
+      const { control, getJob, cancelJob, completed } = inspection();
+      const result = service(control).inspect("worktree-1", "request-1");
+      await vi.advanceTimersByTimeAsync(0);
+      expect(getJob).toHaveBeenCalledOnce();
+
+      getJob.mockResolvedValue(completed);
+      await vi.advanceTimersByTimeAsync(1_000);
+
+      await expect(result).resolves.toMatchObject({ commits: [], changes: [] });
+      expect(cancelJob).not.toHaveBeenCalled();
+      expect(vi.getTimerCount()).toBe(0);
+    });
+
+    test("continues behind a finished blocking job without a completion event", async () => {
+      const { control, getJob, createJob, findFirst, completed } = inspection();
+      findFirst.mockResolvedValueOnce({
+        id: "blocking-job",
+        idempotencyKey: "another-request",
+        kind: "worktree.operation",
+      });
+      const result = service(control).inspect("worktree-1", "request-1");
+      await vi.advanceTimersByTimeAsync(0);
+      expect(createJob).not.toHaveBeenCalled();
+
+      getJob.mockResolvedValue(completed);
+      await vi.advanceTimersByTimeAsync(1_000);
+
+      await expect(result).resolves.toMatchObject({ commits: [], changes: [] });
+      expect(createJob).toHaveBeenCalledOnce();
+      expect(vi.getTimerCount()).toBe(0);
+    });
+
+    test("uses the final persisted result at the deadline before cancelling", async () => {
+      const { control, getJob, cancelJob, completed } = inspection();
+      const deadline = Date.now() + 30_000;
+      getJob.mockImplementation(() =>
+        Promise.resolve(
+          Date.now() >= deadline
+            ? completed
+            : { id: "inspect-1", status: "RUNNING" },
+        ),
+      );
+      const result = service(control).inspect("worktree-1", "request-1");
+
+      await vi.advanceTimersByTimeAsync(30_000);
+
+      await expect(result).resolves.toMatchObject({ commits: [], changes: [] });
+      expect(cancelJob).not.toHaveBeenCalled();
+      expect(vi.getTimerCount()).toBe(0);
+    });
+
+    test("still responds immediately to events after a fallback poll", async () => {
+      const { control, getJob, completed } = inspection();
+      const result = service(control).inspect("worktree-1", "request-1");
+      await vi.advanceTimersByTimeAsync(1_000);
+
+      getJob.mockResolvedValue(completed);
+      agentEventBus.publish(agentJobChangedTopic("inspect-1"), {});
+      await vi.advanceTimersByTimeAsync(0);
+
+      await expect(result).resolves.toMatchObject({ commits: [], changes: [] });
+      expect(vi.getTimerCount()).toBe(0);
+    });
+  });
+
+  describe("concurrent read-only inspections", () => {
+    function inspection() {
+      const runnable = {
+        id: "worktree-1",
+        codebaseId: "codebase-1",
+        folder: "/repo",
+        gitDirectory: "/repo/.git",
+        branch: "feature/one",
+        headSha: "head-1",
+        codeStateHash: "state-1",
+        baseBranchOverride: null as string | null,
+        missingAt: null,
+        availability: "AVAILABLE",
+        codebase: {
+          agentId: "agent-1",
+          defaultBranch: "main",
+          agent: {
+            lastSeenAt: new Date(),
+            disconnectedAt: null,
+            capabilitiesJson: JSON.stringify([
+              "worktree.git.inspect",
+              "worktree.diff.inspect",
+            ]),
+          },
+          repository: { canonicalOrigin: "github.com/acme/widgets" },
+        },
+      };
+      const state = {
+        dirty: true,
+        branches: [],
+        branchesTruncated: false,
+        stashes: [],
+        stashesTruncated: false,
+      };
+      const diff = { patch: "+ready" };
+      const completed = {
+        status: "SUCCEEDED",
+        resultJson: JSON.stringify({ state, diff }),
+        error: null,
+      };
+      const completion = Promise.withResolvers<typeof completed>();
+      const getJob = vi.fn(() => completion.promise);
+      const createJob = vi.fn().mockResolvedValue({ id: "inspection-job" });
+      const findUnique = vi.fn(async () => structuredClone(runnable));
+      const deleteMany = vi.fn().mockResolvedValue({ count: 1 });
+      getPrismaClient.mockResolvedValue({
+        worktree: { findUnique },
+        agentJob: { findFirst: vi.fn().mockResolvedValue(null), deleteMany },
+      });
+      const control = {
+        registerCompletionHandler: vi.fn(),
+        createJob,
+        getJob,
+      } as unknown as AgentControlService;
+      const instance = service(control);
+      const read = (kind: "state" | "diff", requestId: string) =>
+        kind === "state"
+          ? instance.inspectGitState("worktree-1", requestId)
+          : instance.inspectDiff("worktree-1", { scope: "BRANCH" }, requestId);
+      return {
+        instance,
+        read,
+        runnable,
+        state,
+        diff,
+        completed,
+        completion,
+        getJob,
+        createJob,
+        findUnique,
+        deleteMany,
+      };
+    }
+
+    test.each(["state", "diff"] as const)(
+      "shares concurrent %s reads and cleans up once without caching results",
+      async (kind) => {
+        const fixture = inspection();
+        const first = fixture.read(kind, "first-request");
+        const second =
+          kind === "state"
+            ? fixture.read(kind, "second-request")
+            : fixture.instance.inspectDiff(
+                "worktree-1",
+                {
+                  scope: "BRANCH",
+                  path: null,
+                  previousPath: null,
+                  commitSha: null,
+                },
+                "second-request",
+              );
+        await vi.waitFor(() => expect(fixture.getJob).toHaveBeenCalledOnce());
+        expect(fixture.findUnique).toHaveBeenCalledTimes(2);
+        expect(fixture.createJob).toHaveBeenCalledOnce();
+
+        fixture.completion.resolve(fixture.completed);
+        await expect(Promise.all([first, second])).resolves.toEqual([
+          fixture[kind],
+          fixture[kind],
+        ]);
+        expect(fixture.deleteMany).toHaveBeenCalledOnce();
+
+        await fixture.read(kind, "fresh-request");
+        expect(fixture.createJob).toHaveBeenCalledTimes(2);
+        expect(fixture.deleteMany).toHaveBeenCalledTimes(2);
+      },
+    );
+
+    test.each(["state", "diff"] as const)(
+      "rechecks availability before joining an in-flight %s read",
+      async (kind) => {
+        const fixture = inspection();
+        const first = fixture.read(kind, "first-request");
+        await vi.waitFor(() => expect(fixture.getJob).toHaveBeenCalledOnce());
+        fixture.runnable.availability = "UNAVAILABLE";
+
+        await expect(fixture.read(kind, "second-request")).rejects.toThrow(
+          "Worktree is unavailable",
+        );
+        fixture.completion.resolve(fixture.completed);
+        await first;
+        expect(fixture.createJob).toHaveBeenCalledOnce();
+      },
+    );
+
+    test.each(["state", "diff"] as const)(
+      "releases failed %s reads so later requests can retry",
+      async (kind) => {
+        const fixture = inspection();
+        const results = Promise.allSettled([
+          fixture.read(kind, "first-request"),
+          fixture.read(kind, "second-request"),
+        ]);
+        await vi.waitFor(() => expect(fixture.getJob).toHaveBeenCalledOnce());
+        fixture.completion.reject(new Error("Agent connection failed"));
+        expect((await results).map((result) => result.status)).toEqual([
+          "rejected",
+          "rejected",
+        ]);
+        expect(fixture.deleteMany).toHaveBeenCalledOnce();
+
+        fixture.getJob.mockResolvedValue(fixture.completed);
+        await fixture.read(kind, "retry-request");
+        expect(fixture.createJob).toHaveBeenCalledTimes(2);
+      },
+    );
+
+    test.each(["state", "diff"] as const)(
+      "keeps %s reads separate when checkout identity changes",
+      async (kind) => {
+        for (const field of [
+          "id",
+          "codebaseId",
+          "folder",
+          "gitDirectory",
+          "branch",
+          "headSha",
+          "codeStateHash",
+          "baseBranchOverride",
+        ] as const) {
+          const fixture = inspection();
+          const first = fixture.read(kind, "first-request");
+          await vi.waitFor(() => expect(fixture.getJob).toHaveBeenCalledOnce());
+          fixture.runnable[field] = "changed";
+          const second = fixture.read(kind, "second-request");
+          await vi.waitFor(() =>
+            expect(fixture.createJob).toHaveBeenCalledTimes(2),
+          );
+          fixture.completion.resolve(fixture.completed);
+          await Promise.all([first, second]);
+          expect(fixture.deleteMany).toHaveBeenCalledTimes(2);
+        }
+      },
+    );
+
+    test.each([
+      { scope: "STAGED" },
+      { scope: "BRANCH", path: "after.swift" },
+      { scope: "BRANCH", previousPath: "before.swift" },
+      { scope: "BRANCH", commitSha: "commit-2" },
+    ] satisfies Array<Parameters<WorktreesService["inspectDiff"]>[1]>)(
+      "keeps diff selections separate: %j",
+      async (selection) => {
+        const fixture = inspection();
+        const first = fixture.instance.inspectDiff(
+          "worktree-1",
+          { scope: "BRANCH" },
+          "first-request",
+        );
+        const second = fixture.instance.inspectDiff(
+          "worktree-1",
+          selection,
+          "second-request",
+        );
+        await vi.waitFor(() =>
+          expect(fixture.createJob).toHaveBeenCalledTimes(2),
+        );
+        fixture.completion.resolve(fixture.completed);
+        await Promise.all([first, second]);
+      },
+    );
   });
 
   test("waits for a racing diff job and retries lazy diff inspection", async () => {

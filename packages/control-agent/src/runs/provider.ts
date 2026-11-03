@@ -1,5 +1,6 @@
 import type { RunRecord } from "../graphql-client.js";
 import type { RunQuestionField } from "@ai-development-environment/agent-contract/run-forms";
+import type { RunSessionInfo } from "@ai-development-environment/agent-contract/runs";
 
 export type StagedAttachment = {
   id: string;
@@ -64,7 +65,11 @@ export type ProviderCapabilities = {
 };
 
 export type ProviderCallbacks = {
-  onNativeId: (nativeId: string, providerVersion?: string) => Promise<void>;
+  onNativeId: (
+    nativeId: string,
+    providerVersion?: string,
+    sessionInfo?: RunSessionInfo,
+  ) => Promise<void>;
   onEvent: (event: ProviderEvent) => Promise<void>;
   onQuestion: (
     nativeRequestId: string,
@@ -132,6 +137,7 @@ export type ProviderImportedRun = {
   createdAt?: string;
   updatedAt?: string;
   rawMetadata?: unknown;
+  sessionInfo?: RunSessionInfo;
   events?: Array<ProviderEvent & { id: string; sequence: number }>;
   usage?: ProviderUsage[];
   estimatedCost?: number;

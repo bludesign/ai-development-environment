@@ -76,6 +76,26 @@ type RunInput {
   createdAt: String!
 }
 
+"Known session locations on the agent host."
+type RunSessionInfo {
+  "Path to the provider's standalone session transcript, when available."
+  nativeTranscriptPath: String
+  "Path to AIDE's activity journal for a managed run."
+  activityLogPath: String
+  "Working directory recorded for this native session."
+  workingDirectory: String
+}
+
+"Session locations reported by the owning agent. Omitted fields preserve known values."
+input RunSessionInfoInput {
+  "Path to the provider's standalone session transcript."
+  nativeTranscriptPath: String
+  "Path to the managed run's AIDE activity journal."
+  activityLogPath: String
+  "Working directory recorded for this native session."
+  workingDirectory: String
+}
+
 "Represents a run attempt in the GraphQL API."
 type RunAttempt {
   "Stable identifier for this run attempt."
@@ -84,6 +104,8 @@ type RunAttempt {
   generation: Int!
   "Identifier of the related native. May be null when unavailable or not applicable."
   nativeId: String
+  "Known session locations on the owning agent."
+  sessionInfo: RunSessionInfo
   "Current status of this run attempt."
   status: String!
   "The resume strategy associated with this run attempt. May be null when unavailable or not applicable."
@@ -770,6 +792,8 @@ input ImportedRunInput {
   updatedAt: String
   "The raw metadata to use for the request."
   rawMetadata: JSON
+  "Known session locations on the owning agent."
+  sessionInfo: RunSessionInfoInput
   "Complete stored activity snapshot; omitted when history is unavailable."
   events: [RunEventInput!]
   "Token usage totals grouped by the model actually recorded in the transcript."
@@ -1018,6 +1042,8 @@ extend type Mutation {
     nativeId: String!
     "The provider version used to filter or perform the operation."
     providerVersion: String
+    "Known session locations; omitted fields preserve previously reported values."
+    sessionInfo: RunSessionInfoInput
   ): RunAttempt!
   "Appends run events and returns run events."
   appendRunEvents(

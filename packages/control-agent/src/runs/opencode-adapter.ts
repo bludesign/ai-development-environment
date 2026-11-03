@@ -315,7 +315,9 @@ export class OpenCodeAdapter implements ProviderAdapter {
       initial = new Set(
         (await openCodeMessages(client, nativeId)).map((entry) => entry.id),
       );
-      await callbacks.onNativeId(nativeId, runtime.version);
+      await callbacks.onNativeId(nativeId, runtime.version, {
+        workingDirectory: cwd,
+      });
     } catch (error) {
       await cleanup();
       throw error;
@@ -836,6 +838,7 @@ export class OpenCodeAdapter implements ProviderAdapter {
           createdAt: opencodeTimestamp(session.time.created),
           updatedAt: opencodeTimestamp(session.time.updated),
           rawMetadata: session,
+          sessionInfo: { workingDirectory: session.location.directory },
         });
       }
     }

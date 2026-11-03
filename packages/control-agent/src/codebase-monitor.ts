@@ -50,131 +50,142 @@ export class CodebaseMonitor {
         const batch = codebases.slice(index, index + CONCURRENCY);
         await Promise.all(
           batch.map((codebase) =>
-            this.repositoryCoordinator.run(codebase.id, async () => {
-              let snapshot = await inspectCodebase(
-                codebase.folder,
-                INSPECTION_TIMEOUT_MS,
-                signal,
-                codebase.canonicalOrigin,
-              );
-              let fetchAttemptedAt: string | null = null;
-              let fetchError: string | null = null;
-              const fetchedAt = Math.max(
-                snapshot.fetchedAt ? new Date(snapshot.fetchedAt).getTime() : 0,
-                codebase.lastFetchAttemptAt
-                  ? new Date(codebase.lastFetchAttemptAt).getTime()
-                  : 0,
-              );
-              const fetchDue =
-                snapshot.availability === "AVAILABLE" &&
-                Date.now() - fetchedAt >=
-                  configuration.fetchIntervalSeconds * 1_000;
-              if (fetchDue && !signal.aborted) {
-                fetchAttemptedAt = new Date().toISOString();
-                const fetchResult = await captureCommand({
-                  command: "git",
-                  args: ["-C", codebase.folder, "fetch", "origin"],
-                  timeoutMs: 300_000,
+            this.repositoryCoordinator.runReconciliation(
+              codebase.id,
+              async ({ runExclusive }) => {
+                let snapshot = await inspectCodebase(
+                  codebase.folder,
+                  INSPECTION_TIMEOUT_MS,
                   signal,
-                  env: {
-                    ...process.env,
-                    GIT_TERMINAL_PROMPT: "0",
-                    GIT_OPTIONAL_LOCKS: "0",
-                  },
-                });
-                if (fetchResult.exitCode === 0) {
-                  if (
-                    codebase.keepBaseBranchUpToDate &&
-                    codebase.defaultBranch
-                  ) {
-                    await updateBaseBranchAfterFetch(
+                  codebase.canonicalOrigin,
+                );
+                let fetchAttemptedAt: string | null = null;
+                let fetchError: string | null = null;
+                const fetchedAt = Math.max(
+                  snapshot.fetchedAt
+                    ? new Date(snapshot.fetchedAt).getTime()
+                    : 0,
+                  codebase.lastFetchAttemptAt
+                    ? new Date(codebase.lastFetchAttemptAt).getTime()
+                    : 0,
+                );
+                const fetchDue =
+                  snapshot.availability === "AVAILABLE" &&
+                  Date.now() - fetchedAt >=
+                    configuration.fetchIntervalSeconds * 1_000;
+                if (fetchDue && !signal.aborted) {
+                  fetchAttemptedAt = new Date().toISOString();
+                  const fetchResult = await captureCommand({
+                    command: "git",
+                    args: ["-C", codebase.folder, "fetch", "origin"],
+                    timeoutMs: 300_000,
+                    signal,
+                    env: {
+                      ...process.env,
+                      GIT_TERMINAL_PROMPT: "0",
+                      GIT_OPTIONAL_LOCKS: "0",
+                    },
+                  });
+                  if (fetchResult.exitCode === 0) {
+                    if (
+                      codebase.keepBaseBranchUpToDate &&
+                      codebase.defaultBranch
+                    ) {
+                      const baseBranch = codebase.defaultBranch;
+                      await runExclusive(() =>
+                        updateBaseBranchAfterFetch(
+                          codebase.folder,
+                          baseBranch,
+                          INSPECTION_TIMEOUT_MS,
+                          signal,
+                        ),
+                      );
+                    }
+                    snapshot = await inspectCodebase(
                       codebase.folder,
-                      codebase.defaultBranch,
                       INSPECTION_TIMEOUT_MS,
                       signal,
+                      codebase.canonicalOrigin,
                     );
+                  } else {
+                    fetchError = (fetchResult.stderr || "Git fetch failed")
+                      .replace(/([a-z][a-z0-9+.-]*:\/\/)[^\s/@]+@/gi, "$1")
+                      .slice(0, 2_000);
                   }
-                  snapshot = await inspectCodebase(
+                }
+                let inventory: Omit<
+                  CodebaseWorktreeReport,
+                  "codebaseId" | "fetchedAt" | "fetchAttemptedAt" | "fetchError"
+                >;
+                try {
+                  inventory = await discoverWorktrees(
+                    codebase.folder,
+                    new Map(
+                      codebase.worktrees.map((worktree) => [
+                        worktree.gitDirectory,
+                        worktree.baseBranchOverride,
+                      ]),
+                    ),
+                    codebase.defaultBranch,
+                    INSPECTION_TIMEOUT_MS,
+                    signal,
+                  );
+                } catch (error) {
+                  inventory = {
+                    complete: false,
+                    defaultBranch: null,
+                    localBranches: [],
+                    remoteBranches: [],
+                    worktrees: [],
+                  };
+                  fetchError ??=
+                    error instanceof Error
+                      ? error.message.slice(0, 2_000)
+                      : String(error);
+                }
+                // Keep persistence under the repository lock too: a delayed
+                // inventory report must not overwrite a newer manual fetch.
+                const localBranchInventoryAttemptedAt =
+                  new Date().toISOString();
+                let localBranchInventory = null;
+                let localBranchInventoryError = null;
+                try {
+                  if (snapshot.availability !== "AVAILABLE")
+                    throw new Error(
+                      snapshot.error || "Codebase is unavailable",
+                    );
+                  localBranchInventory = await scanLocalBranches(
                     codebase.folder,
                     INSPECTION_TIMEOUT_MS,
                     signal,
-                    codebase.canonicalOrigin,
                   );
-                } else {
-                  fetchError = (fetchResult.stderr || "Git fetch failed")
-                    .replace(/([a-z][a-z0-9+.-]*:\/\/)[^\s/@]+@/gi, "$1")
-                    .slice(0, 2_000);
+                } catch (error) {
+                  localBranchInventoryError =
+                    error instanceof Error
+                      ? error.message.slice(0, 2_000)
+                      : String(error).slice(0, 2_000);
                 }
-              }
-              let inventory: Omit<
-                CodebaseWorktreeReport,
-                "codebaseId" | "fetchedAt" | "fetchAttemptedAt" | "fetchError"
-              >;
-              try {
-                inventory = await discoverWorktrees(
-                  codebase.folder,
-                  new Map(
-                    codebase.worktrees.map((worktree) => [
-                      worktree.gitDirectory,
-                      worktree.baseBranchOverride,
-                    ]),
-                  ),
-                  codebase.defaultBranch,
-                  INSPECTION_TIMEOUT_MS,
-                  signal,
-                );
-              } catch (error) {
-                inventory = {
-                  complete: false,
-                  defaultBranch: null,
-                  localBranches: [],
-                  remoteBranches: [],
-                  worktrees: [],
-                };
-                fetchError ??=
-                  error instanceof Error
-                    ? error.message.slice(0, 2_000)
-                    : String(error);
-              }
-              // Keep persistence under the repository lock too: a delayed
-              // inventory report must not overwrite a newer manual fetch.
-              const localBranchInventoryAttemptedAt = new Date().toISOString();
-              let localBranchInventory = null;
-              let localBranchInventoryError = null;
-              try {
-                if (snapshot.availability !== "AVAILABLE")
-                  throw new Error(snapshot.error || "Codebase is unavailable");
-                localBranchInventory = await scanLocalBranches(
-                  codebase.folder,
-                  INSPECTION_TIMEOUT_MS,
-                  signal,
-                );
-              } catch (error) {
-                localBranchInventoryError =
-                  error instanceof Error
-                    ? error.message.slice(0, 2_000)
-                    : String(error).slice(0, 2_000);
-              }
-              if (signal.aborted) return;
-              await this.client.reportCodebaseStatuses([
-                {
-                  codebaseId: codebase.id,
-                  snapshot,
-                  localBranchInventory,
-                  localBranchInventoryError,
-                  localBranchInventoryAttemptedAt,
-                },
-              ]);
-              await this.client.reportWorktrees([
-                {
-                  codebaseId: codebase.id,
-                  ...inventory,
-                  fetchedAt: snapshot.fetchedAt,
-                  fetchAttemptedAt,
-                  fetchError,
-                },
-              ]);
-            }),
+                if (signal.aborted) return;
+                await this.client.reportCodebaseStatuses([
+                  {
+                    codebaseId: codebase.id,
+                    snapshot,
+                    localBranchInventory,
+                    localBranchInventoryError,
+                    localBranchInventoryAttemptedAt,
+                  },
+                ]);
+                await this.client.reportWorktrees([
+                  {
+                    codebaseId: codebase.id,
+                    ...inventory,
+                    fetchedAt: snapshot.fetchedAt,
+                    fetchAttemptedAt,
+                    fetchError,
+                  },
+                ]);
+              },
+            ),
           ),
         );
       }

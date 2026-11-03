@@ -38,7 +38,11 @@ beforeEach(() => {
   mocks.captureGitCheckpoint.mockImplementation(async (_folder, _id, kind) => ({
     kind,
   }));
-  mocks.compareGitCheckpoint.mockResolvedValue({ rollbackPatch: "patch" });
+  mocks.compareGitCheckpoint.mockResolvedValue({
+    worktreePatch: "worktree patch",
+    worktreeSummary: "worktree summary",
+    rollbackPatch: "rollback patch",
+  });
   mocks.flush.mockResolvedValue(undefined);
   mocks.rm.mockResolvedValue(undefined);
   vi.spyOn(console, "error").mockImplementation(() => {});
@@ -86,6 +90,43 @@ function setup() {
 }
 
 describe("RunManager finalization", () => {
+  test.each([
+    { worktreePatch: "net patch", worktreeSummary: "net summary" },
+    { worktreePatch: "", worktreeSummary: "" },
+  ])(
+    "reports only net content changes in FINAL checkpoints: %j",
+    async (changes) => {
+      const { manager, client, command, completion } = setup();
+      mocks.captureGitCheckpoint.mockImplementation(
+        async (_folder, _id, kind) => ({
+          kind,
+          diffPatch: "HEAD patch",
+          diffSummary: "HEAD summary",
+        }),
+      );
+      mocks.compareGitCheckpoint.mockResolvedValue({
+        ...changes,
+        rollbackPatch: "worktree and index rollback patch",
+      });
+      manager.execute(command);
+      await vi.advanceTimersByTimeAsync(0);
+      completion.resolve({ status: "COMPLETED", finalOutput: "result" });
+      await vi.advanceTimersByTimeAsync(0);
+
+      expect(client.reportRunCheckpoint).toHaveBeenLastCalledWith(
+        "run-1",
+        "attempt-1",
+        {
+          kind: "FINAL",
+          diffPatch: changes.worktreePatch || null,
+          diffSummary: changes.worktreeSummary || null,
+        },
+      );
+      expect(client.finishRunAttempt).toHaveBeenCalledOnce();
+      await manager.close();
+    },
+  );
+
   test.each([
     "reportRunCheckpoint",
     "finishRunAttempt",

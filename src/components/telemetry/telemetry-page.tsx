@@ -106,6 +106,7 @@ import { formatDateValue } from "@/lib/date-format";
 import { cn } from "@/lib/utils";
 import {
   flattenTelemetryObject,
+  telemetryDisplay,
   telemetryPathLabel,
   telemetryFields,
 } from "@/services/telemetry/fields";
@@ -776,7 +777,6 @@ export function TelemetryPage({ view }: { view: TelemetryView }) {
         { field, operator: "IS", value: filterValue, caseSensitive: true },
       ],
     }));
-    setFilterOpen(true);
   };
 
   const updateHighlight = async (
@@ -1697,6 +1697,7 @@ function TelemetryRow({
   filterByValue: (field: string, value: string) => void;
   t: ReturnType<typeof useTranslations>;
 }) {
+  const fields = telemetryFields(entry);
   return (
     <>
       <TableRow
@@ -1745,6 +1746,7 @@ function TelemetryRow({
         </TableCell>
         {columns.map((column) => {
           const value = cellValue(entry, column, locale, timeFormat);
+          const rawValue = fields[column];
           return (
             <TableCell
               className={cn(
@@ -1757,6 +1759,9 @@ function TelemetryRow({
               <ValueContext
                 field={column}
                 filterByValue={filterByValue}
+                filterValue={
+                  rawValue == null ? null : telemetryDisplay(rawValue)
+                }
                 label={columnLabel(column, t)}
                 value={value}
               >
@@ -1841,12 +1846,14 @@ function ValueContext({
   field,
   label,
   value,
+  filterValue,
   filterByValue,
   children,
 }: {
   field: string;
   label: string;
   value: string;
+  filterValue: string | null;
   filterByValue: (field: string, value: string) => void;
   children: ReactNode;
 }) {
@@ -1865,8 +1872,10 @@ function ValueContext({
         </ContextMenuItem>
         <ContextMenuSeparator />
         <ContextMenuItem
-          disabled={!value}
-          onSelect={() => filterByValue(field, value)}
+          disabled={filterValue === null}
+          onSelect={() => {
+            if (filterValue !== null) filterByValue(field, filterValue);
+          }}
         >
           <Filter /> {t("filterByValue")}
         </ContextMenuItem>
@@ -1897,56 +1906,66 @@ function ExpandedEntry({
   filterByValue: (field: string, value: string) => void;
   t: ReturnType<typeof useTranslations>;
 }) {
+  const fields = telemetryFields(entry);
   const metadata = [
-    [t("columns.time"), formatTime(entry.clientTime, locale, timeFormat, true)],
-    [
-      t("columns.receivedAt"),
-      formatTime(entry.receivedAt, locale, timeFormat, true),
-    ],
-    [t("columns.deviceIp"), entry.deviceIp ?? "—"],
-    [t("columns.buildId"), entry.buildId ?? "—"],
-    [t("columns.sessionId"), entry.sessionId ?? "—"],
+    "time",
+    "receivedAt",
+    "deviceIp",
+    "buildId",
+    "sessionId",
     ...(entry.entryType === "CONSOLE"
-      ? [
-          [t("columns.level"), entry.level ?? "—"],
-          [t("columns.category"), entry.category ?? "—"],
-        ]
-      : [
-          [t("columns.kind"), entry.eventKind ?? "—"],
-          [t("columns.name"), entry.eventName ?? "—"],
-          [t("columns.screenName"), entry.screenName ?? "—"],
-        ]),
+      ? ["level", "category"]
+      : ["eventKind", "eventName", "screenName"]),
   ];
+  const detailField = entry.entryType === "CONSOLE" ? "message" : "detail";
+  const detail = display(fields[detailField]);
   return (
     <div className="space-y-4 border-t bg-muted/15 p-4">
-      <div className="min-w-0 px-3">
-        <p className="text-xs font-medium text-muted-foreground">
-          {entry.entryType === "CONSOLE"
-            ? t("columns.message")
-            : t("columns.detail")}
-        </p>
-        <p className="mt-1 whitespace-pre-wrap break-words">
-          {entry.entryType === "CONSOLE"
-            ? entry.message
-            : `${entry.eventName} (${entry.screenName})`}
-        </p>
-      </div>
+      <ValueContext
+        field={detailField}
+        filterByValue={filterByValue}
+        filterValue={fields[detailField] == null ? null : detail}
+        label={columnLabel(detailField, t)}
+        value={detail}
+      >
+        <div className="min-w-0 px-3">
+          <p className="text-xs font-medium text-muted-foreground">
+            {columnLabel(detailField, t)}
+          </p>
+          <p className="mt-1 whitespace-pre-wrap break-words">{detail}</p>
+        </div>
+      </ValueContext>
       <dl className="grid gap-3 rounded-lg border bg-background/70 p-3 text-sm sm:grid-cols-2 lg:grid-cols-4">
-        {metadata.map(([label, value]) => (
-          <div key={label}>
-            <dt className="text-xs text-muted-foreground">{label}</dt>
-            <dd
-              className={cn(
-                "mt-0.5 break-all font-medium",
-                [t("columns.buildId"), t("columns.sessionId")].includes(
-                  label!,
-                ) && "font-mono",
-              )}
+        {metadata.map((field) => {
+          const rawValue = fields[field];
+          const label = columnLabel(field, t);
+          const value =
+            rawValue == null
+              ? "—"
+              : ["time", "receivedAt"].includes(field)
+                ? formatTime(String(rawValue), locale, timeFormat, true)
+                : display(rawValue);
+          return (
+            <ValueContext
+              field={field}
+              filterByValue={filterByValue}
+              filterValue={rawValue == null ? null : telemetryDisplay(rawValue)}
+              key={field}
+              label={label}
+              value={value}
             >
-              {value}
-            </dd>
-          </div>
-        ))}
+              <dt className="text-xs text-muted-foreground">{label}</dt>
+              <dd
+                className={cn(
+                  "mt-0.5 break-all font-medium",
+                  ["buildId", "sessionId"].includes(field) && "font-mono",
+                )}
+              >
+                {value}
+              </dd>
+            </ValueContext>
+          );
+        })}
       </dl>
       {entry.entryType === "CONSOLE" ? (
         <DictionaryBlock
@@ -2053,11 +2072,13 @@ function DictionaryBlock({
             <dl className="space-y-1 text-xs">
               {Object.entries(fields).map(([key, item]) => {
                 const text = display(item);
+                const filterValue = telemetryDisplay(item);
                 const displayKey = telemetryPathLabel(key);
                 return (
                   <ParameterContext
                     field={key}
                     filterByValue={filterByValue}
+                    filterValue={filterValue}
                     key={key}
                     label={displayKey}
                     value={text}
@@ -2074,7 +2095,7 @@ function DictionaryBlock({
                     <Button
                       aria-label={t("filterParameter", { key: displayKey })}
                       className="size-5 opacity-60 group-hover:opacity-100"
-                      onClick={() => filterByValue(key, text)}
+                      onClick={() => filterByValue(key, filterValue)}
                       size="icon-sm"
                       variant="ghost"
                     >
@@ -2109,24 +2130,29 @@ function ParameterContext({
   field,
   label,
   value,
+  filterValue,
   filterByValue,
   children,
 }: {
   field: string;
   label: string;
   value: string;
+  filterValue: string;
   filterByValue: (field: string, value: string) => void;
   children: ReactNode;
 }) {
   const t = useTranslations("telemetry");
   return (
     <ContextMenu>
-      <ContextMenuTrigger asChild>
+      <ContextMenuTrigger
+        asChild
+        onContextMenu={(event) => event.stopPropagation()}
+      >
         <div className="group grid grid-cols-[1.25rem_1.25rem_minmax(0,max-content)_minmax(0,1fr)] items-start gap-x-0">
           {children}
         </div>
       </ContextMenuTrigger>
-      <ContextMenuContent>
+      <ContextMenuContent onClick={(event) => event.stopPropagation()}>
         <ContextMenuItem onSelect={() => void copyText(`${label}: ${value}`)}>
           <Clipboard /> {t("copyParameterValue", { key: label })}
         </ContextMenuItem>
@@ -2134,7 +2160,7 @@ function ParameterContext({
           <Clipboard /> {t("copyValue")}
         </ContextMenuItem>
         <ContextMenuSeparator />
-        <ContextMenuItem onSelect={() => filterByValue(field, value)}>
+        <ContextMenuItem onSelect={() => filterByValue(field, filterValue)}>
           <Filter /> {t("filterByValue")}
         </ContextMenuItem>
       </ContextMenuContent>

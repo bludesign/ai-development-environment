@@ -160,7 +160,12 @@ export function ActionCenterItem({
   };
 
   const actions = (
-    <div className="flex shrink-0 flex-wrap items-center gap-2">
+    <div
+      className={cn(
+        "flex shrink-0 flex-wrap items-center",
+        compact ? "gap-1" : "gap-2",
+      )}
+    >
       {item.request && <RequestMergeAction item={item} compact={compact} />}
       {item.buildRun && (
         <RunBuildControls

@@ -27,6 +27,77 @@ export type RunSessionReadResult = {
   contentBase64: string;
 };
 
+/** Known locations on the agent host, reported without exposing provider metadata. */
+export type RunSessionInfo = {
+  nativeTranscriptPath?: string | null;
+  activityLogPath?: string | null;
+  workingDirectory?: string | null;
+};
+
+/** Accept old JSON metadata as well as the objects received from agents. */
+export function runMetadataRecord(value: unknown): Record<string, unknown> {
+  if (typeof value === "string") {
+    try {
+      return runMetadataRecord(JSON.parse(value));
+    } catch {
+      return {};
+    }
+  }
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : {};
+}
+
+/** Only these fields are safe to expose as session information. */
+export function normalizeRunSessionInfo(value: unknown): RunSessionInfo {
+  const record = runMetadataRecord(value);
+  const result: RunSessionInfo = {};
+  for (const key of [
+    "nativeTranscriptPath",
+    "activityLogPath",
+    "workingDirectory",
+  ] as const) {
+    const entry = record[key];
+    if (entry === null || (typeof entry === "string" && entry.trim())) {
+      result[key] = entry;
+    }
+  }
+  return result;
+}
+
+/** Project historical Codex/Claude/OpenCode metadata as well as normalized reports. */
+export function getRunSessionInfo(value: unknown): RunSessionInfo | null {
+  const metadata = runMetadataRecord(value);
+  const location = runMetadataRecord(metadata.location);
+  const legacy = normalizeRunSessionInfo({
+    nativeTranscriptPath: metadata.path,
+    workingDirectory: metadata.cwd ?? location.directory,
+  });
+  const result = {
+    ...legacy,
+    ...normalizeRunSessionInfo(metadata.aideSessionInfo),
+  };
+  return Object.keys(result).length ? result : null;
+}
+
+/** Omitted fields retain their known values; explicit null clears one field. */
+export function mergeRunSessionInfo(
+  metadata: unknown,
+  update?: RunSessionInfo | null,
+): Record<string, unknown> {
+  const record = runMetadataRecord(metadata);
+  const sessionInfo = {
+    ...getRunSessionInfo(record),
+    ...normalizeRunSessionInfo(update),
+  };
+  return {
+    ...record,
+    ...(Object.keys(sessionInfo).length
+      ? { aideSessionInfo: sessionInfo }
+      : {}),
+  };
+}
+
 function objectValue(value: unknown, name: string): Record<string, unknown> {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
     throw new Error(`${name} must be an object`);

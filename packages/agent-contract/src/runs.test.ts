@@ -1,6 +1,11 @@
 import { describe, expect, test } from "vitest";
 
-import { parseRunSessionReadPayload } from "./runs";
+import {
+  getRunSessionInfo,
+  mergeRunSessionInfo,
+  normalizeRunSessionInfo,
+  parseRunSessionReadPayload,
+} from "./runs";
 
 describe("run session read payload contract", () => {
   test("accepts a well-formed Claude/Codex request", () => {
@@ -50,5 +55,84 @@ describe("run session read payload contract", () => {
     expect(() =>
       parseRunSessionReadPayload({ provider: "CLAUDE", nativeId: "abc" }),
     ).toThrow(/folder/);
+  });
+});
+
+describe("run session information", () => {
+  test.each([
+    [
+      { path: "/custom/codex/archived_sessions/session.jsonl", cwd: "/repo" },
+      {
+        nativeTranscriptPath: "/custom/codex/archived_sessions/session.jsonl",
+        workingDirectory: "/repo",
+      },
+    ],
+    [
+      { cwd: "/claude/repo", sessionId: "claude-session" },
+      { workingDirectory: "/claude/repo" },
+    ],
+    [
+      { location: { directory: "/opencode/repo" }, id: "session" },
+      { workingDirectory: "/opencode/repo" },
+    ],
+  ])(
+    "projects known historical provider fields without exposing other metadata",
+    (raw, expected) => {
+      expect(
+        getRunSessionInfo(JSON.stringify({ ...raw, secret: "private" })),
+      ).toEqual(expected);
+    },
+  );
+
+  test.each([
+    null,
+    undefined,
+    "not json",
+    "null",
+    "[]",
+    { aideSessionInfo: [] },
+  ])("handles missing or malformed metadata (%s)", (value) =>
+    expect(getRunSessionInfo(value)).toBeNull(),
+  );
+
+  test("preserves exact paths and ignores unknown or invalid fields", () => {
+    expect(
+      normalizeRunSessionInfo({
+        nativeTranscriptPath: "/a directory/session.jsonl",
+        activityLogPath: 123,
+        workingDirectory: "",
+        secret: "private",
+      }),
+    ).toEqual({ nativeTranscriptPath: "/a directory/session.jsonl" });
+  });
+
+  test("partial reports preserve known locations and internal import digests", () => {
+    const metadata = {
+      importedHistoryDigest: "history",
+      importedSnapshotDigest: "snapshot",
+      aideSessionInfo: {
+        nativeTranscriptPath: "/sessions/session.jsonl",
+        workingDirectory: "/repo",
+      },
+    };
+    expect(
+      mergeRunSessionInfo(JSON.stringify(metadata), {
+        activityLogPath: "/aide/events.jsonl",
+      }),
+    ).toEqual({
+      ...metadata,
+      aideSessionInfo: {
+        ...metadata.aideSessionInfo,
+        activityLogPath: "/aide/events.jsonl",
+      },
+    });
+    expect(
+      getRunSessionInfo(
+        mergeRunSessionInfo(
+          { path: "/old/session.jsonl" },
+          { nativeTranscriptPath: null },
+        ),
+      ),
+    ).toEqual({ nativeTranscriptPath: null });
   });
 });

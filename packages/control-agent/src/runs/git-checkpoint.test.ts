@@ -56,6 +56,82 @@ afterEach(async () => {
 });
 
 describe("Git run checkpoints", () => {
+  test("reports two staged files once in net changes and preserves index rollback details", async () => {
+    const cwd = await repository();
+    const baseline = await captureGitCheckpoint(cwd, "staged-run", "START");
+    await writeFile(join(cwd, "staged.txt"), "changed staged\n");
+    await writeFile(join(cwd, "unstaged.txt"), "also staged\n");
+    await git(cwd, "add", "staged.txt", "unstaged.txt");
+    const final = await captureGitCheckpoint(cwd, "staged-run", "FINAL");
+
+    const comparison = await compareGitCheckpoint(cwd, baseline, final);
+
+    expect(comparison.worktreePatch.match(/^diff --git /gm)).toHaveLength(2);
+    expect(comparison.worktreePatch).toContain("+changed staged");
+    expect(comparison.worktreePatch).toContain("+also staged");
+    expect(comparison.worktreeSummary).toContain("2 files changed");
+    expect(comparison.rollbackPatch).toContain(
+      "Worktree changes that will be undone:",
+    );
+    expect(comparison.rollbackPatch).toContain(
+      "Index changes that will be undone:",
+    );
+    expect(comparison.rollbackPatch.match(/^diff --git /gm)).toHaveLength(4);
+  });
+
+  test("shows full final content once for a partially staged file", async () => {
+    const cwd = await repository();
+    const baseline = await captureGitCheckpoint(cwd, "partial-run", "START");
+    await writeFile(join(cwd, "staged.txt"), "index content\n");
+    await git(cwd, "add", "staged.txt");
+    await writeFile(join(cwd, "staged.txt"), "final worktree content\n");
+    const final = await captureGitCheckpoint(cwd, "partial-run", "FINAL");
+
+    const comparison = await compareGitCheckpoint(cwd, baseline, final);
+
+    expect(comparison.worktreePatch.match(/^diff --git /gm)).toHaveLength(1);
+    expect(comparison.worktreePatch).toContain("+final worktree content");
+    expect(comparison.worktreePatch).not.toContain("+index content");
+    expect(comparison.rollbackPatch).toContain("+index content");
+    expect(comparison.worktreeSummary).toContain("1 file changed");
+  });
+
+  test("does not count staging pre-existing edits as session content changes", async () => {
+    const cwd = await repository();
+    await writeFile(join(cwd, "staged.txt"), "pre-existing content\n");
+    const baseline = await captureGitCheckpoint(cwd, "index-only-run", "START");
+    await git(cwd, "add", "staged.txt");
+    const final = await captureGitCheckpoint(cwd, "index-only-run", "FINAL");
+
+    const comparison = await compareGitCheckpoint(cwd, baseline, final);
+
+    expect(comparison.worktreePatch).toBe("");
+    expect(comparison.worktreeSummary).toBe("");
+    expect(comparison.rollbackPatch).not.toContain(
+      "Worktree changes that will be undone:",
+    );
+    expect(comparison.rollbackPatch).toContain(
+      "Index changes that will be undone:",
+    );
+    expect(comparison.rollbackPatch).toContain("+pre-existing content");
+  });
+
+  test("compares to the run baseline when pre-existing changes are reverted", async () => {
+    const cwd = await repository();
+    await writeFile(join(cwd, "staged.txt"), "pre-existing content\n");
+    const baseline = await captureGitCheckpoint(cwd, "reverted-run", "START");
+    await git(cwd, "restore", "staged.txt");
+    const final = await captureGitCheckpoint(cwd, "reverted-run", "FINAL");
+
+    const comparison = await compareGitCheckpoint(cwd, baseline, final);
+
+    expect(final.diffPatch).toBeNull();
+    expect(final.diffSummary).toBeNull();
+    expect(comparison.worktreePatch).toContain("-pre-existing content");
+    expect(comparison.worktreePatch).toContain("+base staged");
+    expect(comparison.worktreeSummary).toContain("1 file changed");
+  });
+
   test("restores HEAD, index, tracked files, symlinks, and non-ignored untracked files", async () => {
     const cwd = await repository();
     const baseHead = await git(cwd, "rev-parse", "HEAD");

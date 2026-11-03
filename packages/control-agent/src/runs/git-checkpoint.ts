@@ -163,7 +163,12 @@ export async function compareGitCheckpoint(
   cwd: string,
   target: GitCheckpointReference,
   current: GitCheckpointReference,
-): Promise<{ rollbackPatch: string; pushedCommitWarning: string | null }> {
+): Promise<{
+  worktreePatch: string;
+  worktreeSummary: string;
+  rollbackPatch: string;
+  pushedCommitWarning: string | null;
+}> {
   if (!target.worktreeTree || !current.worktreeTree) {
     throw new Error("The worktree checkpoint is incomplete");
   }
@@ -177,6 +182,17 @@ export async function compareGitCheckpoint(
       current.worktreeTree,
     ],
     PATCH_LIMIT,
+  );
+  const worktreeSummary = await cappedGit(
+    cwd,
+    [
+      "diff",
+      "--stat",
+      "--find-renames",
+      target.worktreeTree,
+      current.worktreeTree,
+    ],
+    SUMMARY_LIMIT,
   );
   const indexPatch =
     target.indexTree && current.indexTree
@@ -204,6 +220,8 @@ export async function compareGitCheckpoint(
         )
       : 0;
   return {
+    worktreePatch,
+    worktreeSummary,
     rollbackPatch: [
       worktreePatch &&
         `Worktree changes that will be undone:\n\n${worktreePatch}`,

@@ -40,6 +40,7 @@ describe("RunJournal", () => {
 
   test("reads only unacknowledged bytes, including after a restart and with Unicode", async () => {
     const { journal, eventsPath } = await setup("incremental");
+    expect(journal.eventsPath).toBe(eventsPath);
     const appendRunEvents = vi.fn().mockResolvedValue({});
     const client = { appendRunEvents } as unknown as AgentGraphQLClient;
     await journal.append({ type: "SYSTEM", summary: "日本語 🎉" });

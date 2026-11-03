@@ -29,6 +29,35 @@ afterEach(async () => {
 });
 
 describe("AgentGraphQLClient", () => {
+  test("uploads session info with native session identity", async () => {
+    const fetchMock = vi.fn<
+      (url: string, init?: RequestInit) => Promise<Response>
+    >(async () =>
+      Response.json({
+        data: {
+          updateRunAttemptNativeId: { id: "attempt-1", nativeId: "native-1" },
+        },
+      }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    const sessionInfo = {
+      nativeTranscriptPath: "/custom/provider/session.jsonl",
+      activityLogPath: "/custom/aide/events.jsonl",
+      workingDirectory: "/workspace",
+    };
+    await new AgentGraphQLClient(
+      "https://control.test",
+    ).updateRunAttemptNativeId("attempt-1", "native-1", "1.0.0", sessionInfo);
+    const payload = JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body));
+    expect(payload.variables).toEqual({
+      attemptId: "attempt-1",
+      nativeId: "native-1",
+      providerVersion: "1.0.0",
+      sessionInfo,
+    });
+    expect(payload.query).toContain("$sessionInfo: RunSessionInfoInput");
+  });
+
   test.each([
     [401, undefined, false],
     [404, undefined, false],
@@ -228,6 +257,77 @@ describe("AgentGraphQLClient", () => {
         }),
       }),
     );
+  });
+
+  test("bounds artifact uploads by their upload timeout", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "control-agent-upload-"));
+    temporaryDirectories.push(directory);
+    const path = join(directory, "diff.png");
+    await writeFile(path, "image");
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(
+        (_url: string, init: RequestInit) =>
+          new Promise((_resolve, reject) => {
+            init.signal!.addEventListener(
+              "abort",
+              () => reject(init.signal!.reason),
+              { once: true },
+            );
+          }),
+      ),
+    );
+    const client = new AgentGraphQLClient("https://control.test");
+
+    await expect(
+      client.uploadBuildArtifact({
+        uploadId: "diff-upload",
+        path,
+        filename: "diff.png",
+        contentType: "image/png",
+        timeoutMs: 50,
+      }),
+    ).rejects.toMatchObject({ name: "TimeoutError" });
+  });
+
+  test("cancels an in-flight artifact upload when its job is canceled", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "control-agent-upload-"));
+    temporaryDirectories.push(directory);
+    const path = join(directory, "diff.png");
+    await writeFile(path, "image");
+    const started = Promise.withResolvers<AbortSignal>();
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(
+        (_url: string, init: RequestInit) =>
+          new Promise((_resolve, reject) => {
+            const signal = init.signal!;
+            signal.addEventListener("abort", () => reject(signal.reason), {
+              once: true,
+            });
+            started.resolve(signal);
+          }),
+      ),
+    );
+    const controller = new AbortController();
+    const client = new AgentGraphQLClient("https://control.test");
+    const upload = client.uploadBuildArtifact({
+      uploadId: "diff-upload",
+      path,
+      filename: "diff.png",
+      contentType: "image/png",
+      signal: controller.signal,
+      timeoutMs: 60_000,
+    });
+    const canceled = expect(upload).rejects.toMatchObject({
+      name: "AbortError",
+    });
+    const requestSignal = await started.promise;
+
+    controller.abort();
+
+    await canceled;
+    expect(requestSignal.aborted).toBe(true);
   });
 
   test("uploads artifacts larger than 100 MB without exceeding 16 MiB per request", async () => {
