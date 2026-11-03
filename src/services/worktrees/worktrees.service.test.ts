@@ -2224,6 +2224,131 @@ describe("WorktreesService", () => {
     });
   });
 
+  describe("workflow Git state refresh", () => {
+    function refreshFixture() {
+      const runnable = {
+        id: "worktree-1",
+        codebaseId: "codebase-1",
+        folder: "/repo/linked",
+        gitDirectory: "/repo/.git/worktrees/linked",
+        missingAt: null,
+        availability: "AVAILABLE",
+        hasConflicts: true,
+        rebaseInProgress: true,
+        codebase: {
+          agentId: "agent-1",
+          agent: {
+            lastSeenAt: new Date(),
+            disconnectedAt: null,
+            capabilitiesJson: JSON.stringify([WORKTREE_GIT_INSPECT_JOB_KIND]),
+          },
+          repository: { canonicalOrigin: "github.com/acme/widgets" },
+        },
+      };
+      const state = {
+        dirty: false,
+        hasConflicts: false,
+        rebaseInProgress: false,
+        mergeInProgress: false,
+      };
+      const completed = {
+        status: "SUCCEEDED",
+        resultJson: JSON.stringify({ state }),
+        error: null,
+      };
+      const createJob = vi.fn().mockResolvedValue({ id: "refresh-job" });
+      const getJob = vi.fn().mockResolvedValue(completed);
+      const deleteMany = vi.fn().mockResolvedValue({ count: 1 });
+      getPrismaClient.mockResolvedValue({
+        worktree: { findUnique: vi.fn().mockResolvedValue(runnable) },
+        agentJob: {
+          findFirst: vi.fn().mockResolvedValue(null),
+          deleteMany,
+        },
+      });
+      const instance = service({
+        registerCompletionHandler: vi.fn(),
+        createJob,
+        getJob,
+      } as unknown as AgentControlService);
+      return { instance, state, completed, createJob, getJob, deleteMany };
+    }
+
+    test("waits for a fresh agent read instead of returning persisted flags", async () => {
+      const fixture = refreshFixture();
+      const completion = Promise.withResolvers<typeof fixture.completed>();
+      fixture.getJob.mockReturnValueOnce(completion.promise);
+
+      const refreshing = fixture.instance.refreshGitState(
+        "worktree-1",
+        "workflow-request",
+      );
+      await vi.waitFor(() => expect(fixture.getJob).toHaveBeenCalledOnce());
+      expect(fixture.deleteMany).not.toHaveBeenCalled();
+      completion.resolve(fixture.completed);
+
+      await expect(refreshing).resolves.toEqual(fixture.state);
+      expect(fixture.createJob).toHaveBeenCalledWith(
+        expect.objectContaining({
+          agentId: "agent-1",
+          codebaseId: "codebase-1",
+          worktreeId: "worktree-1",
+          kind: WORKTREE_GIT_INSPECT_JOB_KIND,
+          payload: {
+            action: "REFRESH",
+            codebaseId: "codebase-1",
+            folder: "/repo/linked",
+            gitDirectory: "/repo/.git/worktrees/linked",
+            expectedOrigin: "github.com/acme/widgets",
+          },
+          visibility: "SYSTEM",
+        }),
+      );
+      expect(fixture.deleteMany).toHaveBeenCalledWith({
+        where: { id: "refresh-job", visibility: "SYSTEM" },
+      });
+    });
+
+    test("reads again after an earlier refresh succeeds", async () => {
+      const fixture = refreshFixture();
+      await fixture.instance.refreshGitState("worktree-1", "first-request");
+      const changed = { ...fixture.state, dirty: true, hasConflicts: true };
+      fixture.getJob.mockResolvedValue({
+        ...fixture.completed,
+        resultJson: JSON.stringify({ state: changed }),
+      });
+
+      await expect(
+        fixture.instance.refreshGitState("worktree-1", "next-request"),
+      ).resolves.toEqual(changed);
+      expect(fixture.createJob).toHaveBeenCalledTimes(2);
+      expect(fixture.deleteMany).toHaveBeenCalledTimes(2);
+    });
+
+    test.each([
+      {
+        status: "FAILED",
+        resultJson: null,
+        error: "Agent could not read Git status",
+        message: "Agent could not read Git status",
+      },
+      {
+        status: "SUCCEEDED",
+        resultJson: JSON.stringify({ state: { dirty: false } }),
+        error: null,
+        message: "hasConflicts",
+      },
+    ])("fails closed and cleans up incomplete reads: $status", async (job) => {
+      const fixture = refreshFixture();
+      fixture.getJob.mockResolvedValue(job);
+
+      await expect(
+        fixture.instance.refreshGitState("worktree-1", "workflow-request"),
+      ).rejects.toThrow(job.message);
+      expect(fixture.deleteMany).toHaveBeenCalledOnce();
+    });
+  });
+
   describe("concurrent read-only inspections", () => {
     function inspection() {
       const runnable = {

@@ -12,6 +12,7 @@ import {
   parseCodebaseWorktreeReport,
   parseWorktreeActivityReport,
   parseWorktreeInventoryItem,
+  parseWorktreeRefreshState,
   validGitBranchName,
   WORKTREE_BRANCH_JOB_KIND,
   WORKTREE_COMMIT_JOB_KIND,
@@ -3572,6 +3573,40 @@ export class WorktreesService {
     codebaseId: string | null = null,
   ): void {
     this.publish(worktreeId, codebaseId);
+  }
+
+  async refreshGitState(id: string, requestId: string) {
+    if (!requestId.trim()) throw new Error("requestId is required");
+    const worktree = await this.requireRunnable(
+      id,
+      WORKTREE_GIT_INSPECT_JOB_KIND,
+      true,
+    );
+    const job = await this.createSerializedCodebaseJob({
+      agentId: worktree.codebase.agentId,
+      codebaseId: worktree.codebaseId,
+      worktreeId: worktree.id,
+      kind: WORKTREE_GIT_INSPECT_JOB_KIND,
+      payload: {
+        action: "REFRESH",
+        codebaseId: worktree.codebaseId,
+        folder: worktree.folder,
+        gitDirectory: worktree.gitDirectory,
+        expectedOrigin: worktree.codebase.repository.canonicalOrigin,
+      },
+      idempotencyKey: `worktree:git:refresh:${requestId}:${id}`,
+      timeoutSeconds: 30,
+      visibility: "SYSTEM",
+    });
+    try {
+      const completed = await this.waitForJob(job.id);
+      return parseWorktreeRefreshState(resultObject(completed).state);
+    } finally {
+      const prisma = await getPrismaClient();
+      await prisma.agentJob.deleteMany({
+        where: { id: job.id, visibility: "SYSTEM" },
+      });
+    }
   }
 
   async inspectGitState(id: string, requestId: string) {

@@ -733,6 +733,13 @@ const STEP_CONFIG_DESCRIPTORS: StepConfigDescriptors = {
   WORKTREE_INSPECT_GIT: {
     fields: [resource("worktreeId", "Worktree", "worktree")],
   },
+  WORKTREE_REFRESH_STATE: {
+    fields: [
+      resource("worktreeId", "Worktree", "worktree", {
+        help: "Must match the current workflow worktree. Leave empty to use worktree.id.",
+      }),
+    ],
+  },
   WORKTREE_GIT_OPERATION: {
     fields: [
       resource("worktreeId", "Worktree", "worktree"),

@@ -2690,6 +2690,23 @@ function registerWorktreeAdapters(
       links: [worktreeLink(id)],
     };
   });
+  executor.register("WORKTREE_REFRESH_STATE", async (context) => {
+    const id = worktreeId(context);
+    if (id !== getSessionValue(context.sessionData, "worktree.id")) {
+      throw new Error(
+        "Refresh worktree must target the current workflow worktree",
+      );
+    }
+    const state = await services.worktrees.refreshGitState(
+      id,
+      requestId(context, "refresh-git"),
+    );
+    return {
+      output: state,
+      sessionPatch: { worktree: { id, ...state } },
+      links: [worktreeLink(id)],
+    };
+  });
   executor.register("WORKTREE_GIT_OPERATION", async (context) => {
     const operation = String(
       context.node.config.operation ?? "PULL_BRANCH",
