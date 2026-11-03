@@ -8,6 +8,7 @@ import { randomUUID } from "node:crypto";
 import { posix, win32 } from "node:path";
 
 import { parseCodebaseGitState } from "@ai-development-environment/agent-contract/codebases";
+import { IOS_BUILD_JOB_KIND } from "@ai-development-environment/agent-contract/builds";
 import {
   parseCodebaseWorktreeReport,
   parseWorktreeActivityReport,
@@ -3517,6 +3518,18 @@ export class WorktreesService {
       id,
       WORKTREE_AUTO_SYNC_JOB_KIND,
     );
+    const prisma = await getPrismaClient();
+    const activeBuild = await prisma.agentJob.findFirst({
+      where: {
+        codebaseId: worktree.codebaseId,
+        kind: IOS_BUILD_JOB_KIND,
+        status: { in: ACTIVE_STATUSES },
+      },
+    });
+    // Builds hold the agent's codebase queue for their entire run. Defer sync
+    // before dispatch so it cannot appear to be running while waiting on a build.
+    if (activeBuild)
+      throw new CodebaseBusyError("A build is active for this codebase");
     const payload = this.payload(worktree);
     if (
       mergeGuard &&

@@ -4,6 +4,7 @@ const getPrismaClient = vi.hoisted(() => vi.fn());
 vi.mock("@/data/prisma-client", () => ({ getPrismaClient }));
 
 import type { AgentControlService } from "@/services/agent-control";
+import { IOS_BUILD_JOB_KIND } from "@ai-development-environment/agent-contract/builds";
 import {
   WORKTREE_BRANCH_JOB_KIND,
   WORKTREE_COMMIT_JOB_KIND,
@@ -24,6 +25,7 @@ import type { GitHubService } from "@/services/github";
 import type { GitLabService } from "@/services/gitlab";
 import type { JiraService } from "@/services/jira";
 import type { NotificationsService } from "@/services/notifications";
+import { CodebaseBusyError } from "@/lib/codebase-busy";
 
 import { WorktreesService, worktreeDisplayPath } from "./worktrees.service";
 
@@ -158,6 +160,28 @@ function storedWorktreeRecord() {
         canonicalOrigin: "github.com/acme/widgets",
         jiraBranchRegex: null,
       },
+    },
+  };
+}
+
+function autoSyncWorktreeRecord() {
+  return {
+    id: "worktree-1",
+    codebaseId: "codebase-1",
+    folder: "/repo",
+    gitDirectory: "/repo/.git",
+    baseBranchOverride: null,
+    missingAt: null,
+    availability: "AVAILABLE",
+    codebase: {
+      agentId: "agent-1",
+      defaultBranch: "main",
+      agent: {
+        lastSeenAt: new Date(),
+        disconnectedAt: null,
+        capabilitiesJson: JSON.stringify([WORKTREE_AUTO_SYNC_JOB_KIND]),
+      },
+      repository: { canonicalOrigin: "github.com/openai/codex" },
     },
   };
 }
@@ -347,52 +371,154 @@ describe("WorktreesService", () => {
     ]);
   });
 
-  test("pins Auto Sync jobs to the configured branch", async () => {
-    const runnable = {
-      id: "worktree-1",
-      codebaseId: "codebase-1",
-      folder: "/repo",
-      gitDirectory: "/repo/.git",
-      baseBranchOverride: null,
-      missingAt: null,
-      availability: "AVAILABLE",
-      codebase: {
-        agentId: "agent-1",
-        defaultBranch: "main",
-        agent: {
-          lastSeenAt: new Date(),
-          disconnectedAt: null,
-          capabilitiesJson: JSON.stringify([WORKTREE_AUTO_SYNC_JOB_KIND]),
+  test.each(["SYNC", "FINALIZE"] as const)(
+    "pins %s Auto Sync jobs to the configured branch when no build is active",
+    async (phase) => {
+      const runnable = autoSyncWorktreeRecord();
+      const findFirst = vi.fn().mockResolvedValue(null);
+      getPrismaClient.mockResolvedValue({
+        worktree: { findUnique: vi.fn().mockResolvedValue(runnable) },
+        agentJob: { findFirst },
+        worktreeMove: { findFirst: vi.fn().mockResolvedValue(null) },
+      });
+      const createJob = vi.fn().mockResolvedValue({ id: "job-1" });
+      const control = {
+        registerCompletionHandler: vi.fn(),
+        createJob,
+      } as unknown as AgentControlService;
+
+      await service(control).createAutoSyncJob(
+        "worktree-1",
+        phase,
+        "feature/configured",
+        "request-1",
+      );
+
+      expect(createJob).toHaveBeenCalledWith(
+        expect.objectContaining({
+          kind: WORKTREE_AUTO_SYNC_JOB_KIND,
+          payload: expect.objectContaining({
+            expectedBranch: "feature/configured",
+            phase,
+          }),
+        }),
+      );
+      expect(findFirst).toHaveBeenCalledWith({
+        where: {
+          codebaseId: "codebase-1",
+          kind: IOS_BUILD_JOB_KIND,
+          status: { in: ["QUEUED", "RUNNING"] },
         },
-        repository: { canonicalOrigin: "github.com/openai/codex" },
+      });
+    },
+  );
+
+  test.each([
+    ["QUEUED", "SYNC"],
+    ["RUNNING", "SYNC"],
+    ["QUEUED", "FINALIZE"],
+    ["RUNNING", "FINALIZE"],
+  ] as const)(
+    "defers %s builds before creating a %s Auto Sync job in the same codebase",
+    async (status, phase) => {
+      const runnable = autoSyncWorktreeRecord();
+      const findFirst = vi.fn(async ({ where }) =>
+        where.kind === IOS_BUILD_JOB_KIND
+          ? {
+              id: "build-job",
+              codebaseId: runnable.codebaseId,
+              worktreeId: "sibling-worktree",
+              kind: IOS_BUILD_JOB_KIND,
+              status,
+            }
+          : null,
+      );
+      getPrismaClient.mockResolvedValue({
+        worktree: { findUnique: vi.fn().mockResolvedValue(runnable) },
+        agentJob: { findFirst },
+        worktreeMove: { findFirst: vi.fn().mockResolvedValue(null) },
+      });
+      const createJob = vi.fn().mockResolvedValue({ id: "sync-job" });
+      const control = {
+        registerCompletionHandler: vi.fn(),
+        createJob,
+      } as unknown as AgentControlService;
+      const worktrees = service(control);
+
+      await expect(
+        worktrees.createAutoSyncJob(
+          runnable.id,
+          phase,
+          "feature/configured",
+          "request-1",
+        ),
+      ).rejects.toBeInstanceOf(CodebaseBusyError);
+
+      expect(createJob).not.toHaveBeenCalled();
+      expect(findFirst).toHaveBeenCalledWith({
+        where: {
+          codebaseId: runnable.codebaseId,
+          kind: IOS_BUILD_JOB_KIND,
+          status: { in: ["QUEUED", "RUNNING"] },
+        },
+      });
+
+      findFirst.mockResolvedValue(null);
+      await expect(
+        worktrees.createAutoSyncJob(
+          runnable.id,
+          phase,
+          "feature/configured",
+          "request-2",
+        ),
+      ).resolves.toEqual({ id: "sync-job" });
+      expect(createJob).toHaveBeenCalledOnce();
+    },
+  );
+
+  test("allows Auto Sync when this codebase's build has finished and another codebase is building", async () => {
+    const runnable = autoSyncWorktreeRecord();
+    const builds = [
+      {
+        codebaseId: runnable.codebaseId,
+        kind: IOS_BUILD_JOB_KIND,
+        status: "SUCCEEDED",
       },
-    };
+      {
+        codebaseId: "other-codebase",
+        kind: IOS_BUILD_JOB_KIND,
+        status: "RUNNING",
+      },
+    ];
+    const findFirst = vi.fn(async ({ where }) =>
+      builds.find(
+        (build) =>
+          build.codebaseId === where.codebaseId &&
+          build.kind === where.kind &&
+          where.status.in.includes(build.status),
+      ),
+    );
     getPrismaClient.mockResolvedValue({
       worktree: { findUnique: vi.fn().mockResolvedValue(runnable) },
-      agentJob: { findFirst: vi.fn().mockResolvedValue(null) },
+      agentJob: { findFirst },
       worktreeMove: { findFirst: vi.fn().mockResolvedValue(null) },
     });
-    const createJob = vi.fn().mockResolvedValue({ id: "job-1" });
+    const createJob = vi.fn().mockResolvedValue({ id: "sync-job" });
     const control = {
       registerCompletionHandler: vi.fn(),
       createJob,
     } as unknown as AgentControlService;
 
-    await service(control).createAutoSyncJob(
-      "worktree-1",
-      "SYNC",
-      "feature/configured",
-      "request-1",
-    );
+    await expect(
+      service(control).createAutoSyncJob(
+        runnable.id,
+        "SYNC",
+        "feature/configured",
+        "request-1",
+      ),
+    ).resolves.toEqual({ id: "sync-job" });
 
-    expect(createJob).toHaveBeenCalledWith(
-      expect.objectContaining({
-        kind: WORKTREE_AUTO_SYNC_JOB_KIND,
-        payload: expect.objectContaining({
-          expectedBranch: "feature/configured",
-        }),
-      }),
-    );
+    expect(createJob).toHaveBeenCalledOnce();
   });
 
   test("batches preparation worktrees under one codebase-serialized job", async () => {
