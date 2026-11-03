@@ -896,12 +896,22 @@ export async function seedRuns(prisma: PrismaClient): Promise<void> {
       startedAt: daysAgo(5),
       finishedAt: daysAgo(5),
       createdAt: daysAgo(5),
+      updatedAt: daysAgo(5),
       attempts: {
         create: [
           {
             id: "attempt-plan-search-1",
             generation: 1,
             nativeId: "claude-plan-abc123",
+            rawMetadataJson: JSON.stringify({
+              aideSessionInfo: {
+                nativeTranscriptPath:
+                  "/Users/acme/.claude/projects/-Users-acme-Repositories-web-app-quick-search/claude-plan-abc123.jsonl",
+                activityLogPath: `/Users/acme/.config/control-agent/runs/${ids.runs.planSearch}/events.jsonl`,
+                workingDirectory:
+                  "/Users/acme/Repositories/web-app-quick-search",
+              },
+            }),
             status: "COMPLETED",
             startedAt: daysAgo(5),
             finishedAt: daysAgo(5),
@@ -1015,12 +1025,22 @@ export async function seedRuns(prisma: PrismaClient): Promise<void> {
       startedAt: daysAgo(4),
       finishedAt: daysAgo(4),
       createdAt: daysAgo(4),
+      updatedAt: daysAgo(4),
       attempts: {
         create: [
           {
             id: "attempt-session-search-1",
             generation: 1,
             nativeId: "claude-session-def456",
+            rawMetadataJson: JSON.stringify({
+              aideSessionInfo: {
+                nativeTranscriptPath:
+                  "/Users/acme/.claude/projects/-Users-acme-Repositories-web-app-quick-search/claude-session-def456.jsonl",
+                activityLogPath: `/Users/acme/.config/control-agent/runs/${ids.runs.sessionSearch}/events.jsonl`,
+                workingDirectory:
+                  "/Users/acme/Repositories/web-app-quick-search",
+              },
+            }),
             status: "COMPLETED",
             startedAt: daysAgo(4),
             finishedAt: daysAgo(4),

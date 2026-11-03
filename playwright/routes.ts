@@ -139,8 +139,26 @@ export const routes: RouteEntry[] = [
   // Runs
   { name: "sessions", path: "/ai/sessions" },
   { name: "session-detail", path: `/ai/sessions/${ids.runs.sessionSearch}` },
+  {
+    name: "session-info",
+    path: `/ai/sessions/${ids.runs.sessionSearch}`,
+    readyGraphqlOperation: "AgentRunDetail",
+    readyTexts: ["Session info"],
+    scrollTo:
+      'main [data-slot="card"]:has([data-slot="card-title"]:text-is("Session info"))',
+    desktopOnly: true,
+  },
   { name: "plans", path: "/ai/plans" },
   { name: "plan-detail", path: `/ai/plans/${ids.runs.planSearch}` },
+  {
+    name: "plan-info",
+    path: `/ai/plans/${ids.runs.planSearch}`,
+    readyGraphqlOperation: "AgentRunDetail",
+    readyTexts: ["Plan info"],
+    scrollTo:
+      'main [data-slot="card"]:has([data-slot="card-title"]:text-is("Plan info"))',
+    desktopOnly: true,
+  },
   { name: "drafts", path: "/ai/drafts" },
   { name: "run-new", path: "/ai/drafts/new" },
 
