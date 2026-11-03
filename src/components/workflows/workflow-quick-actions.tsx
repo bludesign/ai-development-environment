@@ -41,6 +41,7 @@ type WorkflowQuickActionsProps = {
   sessionData: Record<string, unknown>;
   workflows: QuickActionWorkflow[];
   className?: string;
+  activeOnly?: boolean;
 };
 
 export function WorkflowQuickActions(props: WorkflowQuickActionsProps) {
@@ -53,6 +54,7 @@ function WorkflowQuickActionButtons({
   sessionData,
   workflows,
   className,
+  activeOnly = false,
 }: WorkflowQuickActionsProps) {
   const t = useTranslations("workflows");
   const summary = useWorkflowTargetSummary({
@@ -117,11 +119,17 @@ function WorkflowQuickActionButtons({
   };
 
   const displayedError = error ?? summary.error;
+  const visibleWorkflows = activeOnly
+    ? workflows.filter(
+        (workflow) => active[workflow.id]?.length || triggering === workflow.id,
+      )
+    : workflows;
+  if (!visibleWorkflows.length) return null;
 
   return (
     <div className={cn("w-full space-y-2", className)}>
       <div className="flex flex-wrap gap-2">
-        {workflows.map((workflow) => {
+        {visibleWorkflows.map((workflow) => {
           const runs = active[workflow.id] ?? [];
           const busy = runs.length > 0 || triggering === workflow.id;
           return (

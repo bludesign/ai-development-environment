@@ -4238,20 +4238,14 @@ function WorktreeTableRows(props: Omit<WorktreeItemProps, "onError">) {
           </div>
         </TableCell>
       </TableRow>
-      {worktree.rebaseInProgress && (
-        <TableRow className={cn(highlight)}>
-          <TableCell colSpan={8}>
-            <WorktreeRebaseConflictItem
-              group={props.group}
-              onCompleted={props.onReload}
-              onError={setOperationError}
-              worktree={worktree}
-            />
-          </TableCell>
-        </TableRow>
-      )}
       <TableRow className={cn(highlight)}>
         <TableCell className="space-y-2" colSpan={8}>
+          <WorktreeRebaseConflictItem
+            group={props.group}
+            onCompleted={props.onReload}
+            onError={setOperationError}
+            worktree={worktree}
+          />
           <WorktreeErrorAlert
             error={operationError}
             onDismiss={() => setOperationError(null)}
