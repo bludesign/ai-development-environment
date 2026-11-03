@@ -3062,49 +3062,195 @@ export class GitLabService {
   private async scopedPipelineRows(
     projectId: string,
     scope: "RELEVANT" | "MINE",
+    limit: number,
+    filters: {
+      ref?: string | null;
+      status?: GitLabPipelineStatus | null;
+      source?: string | null;
+    },
   ) {
     const { requests, branches } = await this.pipelineScopeContext(
       projectId,
       scope,
     );
-    const sources = [
-      ...requests.map((mr) => ({
-        path: `/projects/${encodeURIComponent(projectId)}/merge_requests/${mr.iid}/pipelines`,
-        branch: mr.source_branch,
-        query: {} as Query,
-      })),
-      ...[...branches].map((ref) => ({
-        path: `/projects/${encodeURIComponent(projectId)}/pipelines`,
-        branch: ref,
-        query: { ref } as Query,
-      })),
-    ];
-    const pages = await mapIntegrationRequests(sources, async (source) =>
-      (
-        await this.allPages<RawGitLabPipeline>({
-          path: source.path,
-          query: source.query,
+    if (!requests.length && !branches.size)
+      return { rows: [], totalIsExact: true };
+    const ownRequests = new Map(
+      requests.map((mr) => [`${mr.project_id}:${mr.iid}`, mr]),
+    );
+    const projectIds = new Set([
+      projectId,
+      ...requests.flatMap((mr) =>
+        mr.source_project_id == null ? [] : [String(mr.source_project_id)],
+      ),
+    ]);
+    const streams = [...projectIds].map((id) => ({
+      projectId: id,
+      nextPage: 1 as number | null,
+      rows: [] as RawGitLabPipeline[],
+      offset: 0,
+      seenPages: new Set<number>(),
+    }));
+    const readHead = async (stream: (typeof streams)[number]) => {
+      while (stream.offset === stream.rows.length && stream.nextPage !== null) {
+        const page = stream.nextPage;
+        if (stream.seenPages.has(page))
+          throw new Error("GitLab returned a repeated pagination cursor");
+        stream.seenPages.add(page);
+        const response = await this.get<RawGitLabPipeline[]>({
+          path: `/projects/${encodeURIComponent(stream.projectId)}/pipelines`,
           operation: "GitLabScopedPipelines",
           source: "PIPELINES_PAGE",
-          force: true,
           allowStaleOnError: false,
-        })
-      ).map((pipeline) => ({ ...pipeline, scope_branch: source.branch })),
-    );
-    return [
-      ...new Map(
-        pages.flat().map((pipeline) => {
-          const row = {
-            ...pipeline,
-            project_id: pipeline.project_id ?? Number(projectId),
-          };
-          return [`${row.project_id}:${row.id}`, row] as const;
-        }),
-      ).values(),
-    ].sort(
-      (a, b) =>
-        b.id - a.id || String(a.project_id).localeCompare(String(b.project_id)),
-    );
+          query: {
+            page,
+            per_page: MAX_PAGE_SIZE,
+            order_by: "id",
+            sort: "desc",
+            status: filters.status?.toLowerCase(),
+            source: filters.source || undefined,
+          },
+        }).catch((error: unknown) => {
+          // MR pipelines can remain readable in either project after CI access
+          // to the other changes. Only checked-out target branches require its CI.
+          if (
+            (stream.projectId !== projectId || branches.size === 0) &&
+            error instanceof GitLabRequestError &&
+            [403, 404].includes(error.statusCode ?? 0)
+          )
+            return { data: [], headers: new Headers({ "x-next-page": "" }) };
+          throw error;
+        });
+        stream.rows = response.data.map((pipeline) => ({
+          ...pipeline,
+          project_id: pipeline.project_id ?? Number(stream.projectId),
+        }));
+        stream.offset = 0;
+        const nextHeader = response.headers.get("x-next-page");
+        stream.nextPage =
+          pageValue(nextHeader) ??
+          (nextHeader === null && response.data.length === MAX_PAGE_SIZE
+            ? page + 1
+            : null);
+      }
+    };
+    const rows: RawGitLabPipeline[] = [];
+    const seen = new Set<string>();
+    // Merge recent provider pages, stopping after one matching row beyond the
+    // requested page. Historical requests never cause a pipeline-history fan-out.
+    while (rows.length < limit) {
+      await mapIntegrationRequests(streams, readHead);
+      const stream = streams
+        .filter((entry) => entry.offset < entry.rows.length)
+        .sort((a, b) => {
+          const left = a.rows[a.offset];
+          const right = b.rows[b.offset];
+          return (
+            right.id - left.id ||
+            String(left.project_id).localeCompare(String(right.project_id))
+          );
+        })[0];
+      if (!stream) break;
+      const pipeline = stream.rows[stream.offset++];
+      const id = `${pipeline.project_id}:${pipeline.id}`;
+      if (seen.has(id)) continue;
+      seen.add(id);
+      // Keep filtering locally too, for instances that omit a provider filter.
+      if (
+        (filters.status && pipeline.status.toUpperCase() !== filters.status) ||
+        (filters.source && pipeline.source !== filters.source)
+      )
+        continue;
+      const mrRef = /^refs\/merge-requests\/(\d+)\//.exec(pipeline.ref);
+      const directRequest = mrRef
+        ? ownRequests.get(`${pipeline.project_id}:${mrRef[1]}`)
+        : undefined;
+      let scopeBranches = directRequest ? [directRequest.source_branch] : [];
+      const checkedOut =
+        String(pipeline.project_id) === projectId && branches.has(pipeline.ref);
+      if (!directRequest && !checkedOut && requests.length) {
+        const associations = await this.pipelineMergeRequests(
+          String(pipeline.project_id),
+          pipeline.sha,
+          true,
+        );
+        scopeBranches = associations
+          .filter((mr) => {
+            const own = ownRequests.get(`${mr.projectId}:${mr.iid}`);
+            return (
+              own?.source_project_id === pipeline.project_id &&
+              own.source_branch === pipeline.ref
+            );
+          })
+          .map((mr) => mr.sourceBranch);
+        // Commit associations can omit old force-pushed heads. Check only MRs
+        // matching this candidate, rather than enumerating every MR's history.
+        if (!scopeBranches.length) {
+          const candidates = requests.filter(
+            (mr) =>
+              ((mr.source_branch === pipeline.ref ||
+                (pipeline.source === "merge_request_event" &&
+                  associations.some(
+                    (associated) =>
+                      associated.projectId === String(mr.project_id) &&
+                      associated.iid === mr.iid,
+                  ))) &&
+                mr.source_project_id === pipeline.project_id) ||
+              (mrRef &&
+                mr.iid === Number(mrRef[1]) &&
+                (mr.project_id === pipeline.project_id ||
+                  mr.source_project_id === pipeline.project_id)),
+          );
+          for (const mr of candidates) {
+            let nextPage: number | null = 1;
+            const seenPages = new Set<number>();
+            while (nextPage !== null) {
+              const page: number = nextPage;
+              if (seenPages.has(page))
+                throw new Error("GitLab returned a repeated pagination cursor");
+              seenPages.add(page);
+              const response = await this.get<RawGitLabPipeline[]>({
+                path: `/projects/${encodeURIComponent(String(mr.project_id))}/merge_requests/${mr.iid}/pipelines`,
+                operation: "GitLabScopedPipelines",
+                source: "PIPELINES_PAGE",
+                allowStaleOnError: false,
+                query: { page, per_page: MAX_PAGE_SIZE },
+              });
+              if (response.data.some((row) => row.id === pipeline.id)) {
+                scopeBranches.push(mr.source_branch);
+                break;
+              }
+              const nextHeader = response.headers.get("x-next-page");
+              nextPage =
+                pageValue(nextHeader) ??
+                (nextHeader === null && response.data.length === MAX_PAGE_SIZE
+                  ? page + 1
+                  : null);
+            }
+            if (scopeBranches.length) break;
+          }
+        }
+      }
+      if (!checkedOut && !scopeBranches.length) continue;
+      if (
+        filters.ref &&
+        pipeline.ref !== filters.ref &&
+        pipeline.ref !== `refs/heads/${filters.ref}` &&
+        !scopeBranches.includes(filters.ref)
+      )
+        continue;
+      rows.push({
+        ...pipeline,
+        scope_branch: filters.ref ?? scopeBranches[0] ?? pipeline.ref,
+      });
+    }
+    return {
+      rows,
+      totalIsExact: streams.every(
+        (stream) =>
+          stream.offset === stream.rows.length && stream.nextPage === null,
+      ),
+    };
   }
 
   /** Read active provider pages first; historical MR and branch pipelines never enter sidebar polling. */
@@ -3257,19 +3403,13 @@ export class GitLabService {
   ): Promise<Paginated<GitLabPipelineView>> {
     const size = Math.max(1, Math.min(MAX_PAGE_SIZE, perPage));
     if (filters.scope && filters.scope !== "ALL") {
-      const rows = (
-        await this.scopedPipelineRows(projectId, filters.scope)
-      ).filter(
-        (pipeline) =>
-          (!filters.ref ||
-            pipeline.scope_branch === filters.ref ||
-            pipeline.ref === filters.ref ||
-            pipeline.ref === `refs/heads/${filters.ref}`) &&
-          (!filters.status ||
-            pipeline.status.toUpperCase() === filters.status) &&
-          (!filters.source || pipeline.source === filters.source),
-      );
       const offset = (Math.max(1, page) - 1) * size;
+      const { rows, totalIsExact } = await this.scopedPipelineRows(
+        projectId,
+        filters.scope,
+        offset + size + 1,
+        filters,
+      );
       const grouped = new Map<string, GitLabPipelineView[]>();
       for (const row of rows.slice(offset, offset + size)) {
         const mapped = mapPipeline(row);
@@ -3296,6 +3436,7 @@ export class GitLabService {
       return {
         items,
         total: rows.length,
+        totalIsExact,
         page,
         perPage: size,
         nextPage: offset + size < rows.length ? page + 1 : null,

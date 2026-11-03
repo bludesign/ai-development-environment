@@ -548,8 +548,10 @@ type GitLabPipeline {
 type GitLabPipelinePage {
   "Items for GitLabPipelinePage."
   items: [GitLabPipeline!]!
-  "Total for GitLabPipelinePage."
+  "Matching pipelines found; a lower bound when totalIsExact is false."
   total: Int!
+  "False when additional pipeline history remains to be scanned."
+  totalIsExact: Boolean
   "Page for GitLabPipelinePage."
   page: Int!
   "Per page for GitLabPipelinePage."

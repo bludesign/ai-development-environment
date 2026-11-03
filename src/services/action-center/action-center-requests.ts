@@ -388,26 +388,37 @@ export class ActionCenterRequests {
         if (generation !== this.accountGenerations.GITHUB) return;
         for (const candidate of candidates) {
           const state = states.get(candidate.id)!;
-          const request = candidate.request;
-          request.approvalStatus =
-            state.approvalStatus ?? request.approvalStatus;
-          request.behindCount = state.behindCount ?? null;
-          request.needsRebase = state.needsRebase ?? false;
-          request.requiresMyApproval =
-            state.viewerReviewState === "DISMISSED" ||
-            (request.requiresMyApproval && !state.viewerHasApproved);
-          request.canMerge = actionCenterMergeReady(
-            state.canMerge,
-            request.pipelineStatus,
-            request.approvalStatus,
-            request.draft,
-          );
-          request.mergeBlockedReason = state.mergeBlockedReason;
           await this.persistCandidate(
             "GITHUB",
             accountKey,
             candidate,
             () => generation === this.accountGenerations.GITHUB,
+            (current) => {
+              if (current.request.headSha !== candidate.request.headSha)
+                return null;
+              const request = current.request;
+              const approvalStatus =
+                state.approvalStatus ?? request.approvalStatus;
+              return {
+                ...current,
+                request: {
+                  ...request,
+                  approvalStatus,
+                  behindCount: state.behindCount ?? null,
+                  needsRebase: state.needsRebase ?? false,
+                  requiresMyApproval:
+                    state.viewerReviewState === "DISMISSED" ||
+                    (request.requiresMyApproval && !state.viewerHasApproved),
+                  canMerge: actionCenterMergeReady(
+                    state.canMerge,
+                    request.pipelineStatus,
+                    approvalStatus,
+                    request.draft,
+                  ),
+                  mergeBlockedReason: state.mergeBlockedReason,
+                },
+              };
+            },
           );
         }
         agentEventBus.publish(ACTION_CENTER_CHANGED_TOPIC, {
@@ -473,18 +484,26 @@ export class ActionCenterRequests {
     accountKey: string,
     candidate: Candidate,
     valid: () => boolean = () => true,
+    updateCurrent?: (current: Candidate) => Candidate | null,
   ) {
     const prisma = await getPrismaClient();
     const notification = await prisma.$transaction(async (transaction) => {
       const resourceKind =
         provider === "GITHUB" ? "PULL_REQUEST" : "MERGE_REQUEST";
-      const request = candidate.request;
       const id = `${provider}:${createHash("sha256").update(accountKey).digest("hex").slice(0, 16)}:${candidate.id}`;
       const row = await transaction.actionCenterRequest.findUnique({
         where: { id },
       });
       if (!valid()) return null;
       const previous = row ? (JSON.parse(row.payloadJson) as Candidate) : null;
+      if (updateCurrent) {
+        // A review lookup can outlive a pipeline observation. Merge its fields
+        // into the current row so readiness uses the latest pipeline state.
+        const updated = previous ? updateCurrent(previous) : null;
+        if (!updated) return null;
+        candidate = updated;
+      }
+      const request = candidate.request;
       const previousApproval =
         previous?.lastKnownApprovalStatus ?? previous?.request.approvalStatus;
       const authoritative = !["UNKNOWN", ""].includes(

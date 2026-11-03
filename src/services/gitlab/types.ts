@@ -389,6 +389,7 @@ export type GitLabAutoRetryRuleView = {
 export type Paginated<T> = {
   items: T[];
   total: number;
+  totalIsExact?: boolean;
   page: number;
   perPage: number;
   nextPage: number | null;

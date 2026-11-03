@@ -2259,6 +2259,7 @@
     "previous": "Previous",
     "next": "Next",
     "pageSummary": "Page {page} · {total} total",
+    "pageSummaryLowerBound": "Page {page} · at least {total} total",
     "noMergeRequests": "No merge requests match these filters.",
     "openInGitLab": "Open in GitLab",
     "description": "Description",

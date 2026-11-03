@@ -110,7 +110,7 @@ type Configuration = {
 
 type GitLabPagination = Pick<
   Paginated<unknown>,
-  "total" | "page" | "perPage" | "nextPage"
+  "total" | "totalIsExact" | "page" | "perPage" | "nextPage"
 >;
 
 const ALL_PROJECTS_VALUE = "__all_projects__";
@@ -176,10 +176,12 @@ function PaginationControls({
   return (
     <div className="flex flex-wrap items-center justify-between gap-3 text-sm">
       <span className="text-muted-foreground">
-        {t("pageSummary", {
-          page: pagination.page,
-          total: pagination.total,
-        })}
+        {t(
+          pagination.totalIsExact === false
+            ? "pageSummaryLowerBound"
+            : "pageSummary",
+          { page: pagination.page, total: pagination.total },
+        )}
       </span>
       <div className="flex gap-2">
         <Button
@@ -1289,7 +1291,7 @@ export function GitLabPipelinesPage() {
         gitlabAutoRetryRules: GitLabAutoRetryRuleView[];
       }>(
         `query GitLabPipelines($projectId: ID!, $page: Int!, $ref: String, $status: GitLabPipelineStatus, $source: String, $scope: GitLabPipelineScope!) {
-        gitlabPipelines(projectId: $projectId, page: $page, ref: $ref, status: $status, source: $source, scope: $scope) { total page perPage nextPage items { ${PIPELINE} } }
+        gitlabPipelines(projectId: $projectId, page: $page, ref: $ref, status: $status, source: $source, scope: $scope) { total totalIsExact page perPage nextPage items { ${PIPELINE} } }
         gitlabAutoRetryRules(projectId: $projectId) { id projectId pipelineId enabled maxAttempts attempts lastError lastAttemptAt createdAt updatedAt executions { id pipelineId attempt status lastError createdAt updatedAt } }
       }`,
         {

@@ -871,4 +871,36 @@ describe("GitLabPipelinesPage", () => {
     );
     expect(new URLSearchParams(window.location.search).get("page")).toBeNull();
   });
+
+  test("labels incremental pipeline totals until the remaining history is exhausted", async () => {
+    requestMock.mockImplementation(async (query, variables) => {
+      if (query.includes("GitLabPageConfiguration"))
+        return configuration as never;
+      if (query.includes("query GitLabPipelines")) {
+        expect(query).toContain("totalIsExact");
+        const page = (variables as { page: number }).page;
+        return {
+          gitlabPipelines: {
+            items: [pipeline],
+            total: 26,
+            totalIsExact: page === 2,
+            page,
+            perPage: 25,
+            nextPage: page === 1 ? 2 : null,
+          },
+          gitlabAutoRetryRules: [],
+        } as never;
+      }
+      throw new Error(`Unexpected operation: ${query}`);
+    });
+
+    render(<GitLabPipelinesPage />);
+    await screen.findByText("Page 1 · at least 26 total");
+    fireEvent.click(screen.getByRole("button", { name: "Next" }));
+    await screen.findByText("Page 2 · 26 total");
+    expect(
+      (screen.getByRole("button", { name: "Next" }) as HTMLButtonElement)
+        .disabled,
+    ).toBe(true);
+  });
 });

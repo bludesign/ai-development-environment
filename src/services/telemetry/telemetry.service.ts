@@ -1399,6 +1399,11 @@ export class TelemetryService {
       { entryType: { in: [...sourcesForView(input.query.view), "SEPARATOR"] } },
       (entry) => {
         if (entry.entryType === "SEPARATOR") {
+          if (
+            input.query.showBuildRunSeparators === false &&
+            entry.separatorKind === "BUILD_RUN"
+          )
+            return;
           if (!filtersActive || segmentHasMatch) entries.push(entry);
           segmentHasMatch = false;
         } else if (matchesTelemetryQuery(entry, input.query)) {

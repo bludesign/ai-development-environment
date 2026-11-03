@@ -160,6 +160,71 @@ describe("TelemetryService", () => {
       expect(visible.items.map((entry) => entry.id)).toContain("run");
     },
   );
+  test.each(
+    [undefined, "message"].flatMap((search) =>
+      [undefined, true, false].map((showBuildRunSeparators) => ({
+        search,
+        showBuildRunSeparators,
+      })),
+    ),
+  )(
+    "exports visible separators with search $search and run visibility $showBuildRunSeparators",
+    async ({ search, showBuildRunSeparators }) => {
+      const rows = [
+        raw("log-new", "CONSOLE", "2026-07-20T16:40:00Z"),
+        {
+          ...raw("run", "SEPARATOR", "2026-07-20T16:39:00Z"),
+          separatorKind: "BUILD_RUN",
+        },
+        raw("log-middle", "CONSOLE", "2026-07-20T16:38:00Z"),
+        {
+          ...raw("created", "SEPARATOR", "2026-07-20T16:37:00Z"),
+          separatorKind: "BUILD_CREATED",
+        },
+        raw("log-old", "CONSOLE", "2026-07-20T16:36:00Z"),
+        raw("manual", "SEPARATOR", "2026-07-20T16:35:00Z"),
+      ];
+      getPrismaClient.mockResolvedValue({
+        telemetryEntry: { findMany: vi.fn().mockResolvedValue(rows) },
+      });
+      const entries = await new TelemetryService().exportEntries({
+        query: { view: "CONSOLE", search, showBuildRunSeparators },
+        selection: null,
+      });
+      expect(entries.map((entry) => entry.id)).toEqual(
+        showBuildRunSeparators === false
+          ? ["log-new", "log-middle", "created", "log-old", "manual"]
+          : rows.map((entry) => entry.id),
+      );
+    },
+  );
+  test.each(["MANUAL", "BUILD_CREATED"])(
+    "keeps a matching export segment across a hidden run before a %s separator",
+    async (separatorKind) => {
+      const rows = [
+        raw("log", "CONSOLE", "2026-07-20T16:40:00Z"),
+        {
+          ...raw("run", "SEPARATOR", "2026-07-20T16:39:00Z"),
+          separatorKind: "BUILD_RUN",
+        },
+        {
+          ...raw("boundary", "SEPARATOR", "2026-07-20T16:38:00Z"),
+          separatorKind,
+        },
+      ];
+      getPrismaClient.mockResolvedValue({
+        telemetryEntry: { findMany: vi.fn().mockResolvedValue(rows) },
+      });
+      const entries = await new TelemetryService().exportEntries({
+        query: {
+          view: "CONSOLE",
+          search: "message",
+          showBuildRunSeparators: false,
+        },
+      });
+      expect(entries.map((entry) => entry.id)).toEqual(["log", "boundary"]);
+    },
+  );
   test("detects reachability-aware local and remote origins", () => {
     expect(
       detectTelemetryOrigins({

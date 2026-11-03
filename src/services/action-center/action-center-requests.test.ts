@@ -269,6 +269,99 @@ describe("Action Center request discovery", () => {
     expect(gitlab.mergeRequests).not.toHaveBeenCalled();
   });
 
+  test.each([
+    { initial: "SUCCESS", observed: "PENDING", canMerge: false },
+    { initial: "SUCCESS", observed: "FAILURE", canMerge: false },
+    { initial: "PENDING", observed: "SUCCESS", canMerge: true },
+  ])(
+    "preserves a concurrent $observed pipeline observation when a review refresh completes",
+    async ({ initial, observed, canMerge }) => {
+      const notifications = {
+        recordInTransaction: vi.fn().mockResolvedValue(null),
+        created: vi.fn(),
+      };
+      const index = service(notifications as unknown as NotificationsService);
+      github.pullRequests.mockImplementation(async (scope) => ({
+        items:
+          scope === "MINE"
+            ? [
+                request("mine", {
+                  reviewDecision: "REVIEW_REQUIRED",
+                  pipelineStatus: initial,
+                }),
+              ]
+            : [],
+        hasNextPage: false,
+        endCursor: null,
+      }));
+      await index.refresh(["GITHUB"]);
+      const started = deferred<void>();
+      const states =
+        deferred<
+          Awaited<ReturnType<GitHubService["actionCenterRequestStates"]>>
+        >();
+      github.actionCenterRequestStates.mockImplementationOnce(() => {
+        started.resolve();
+        return states.promise;
+      });
+      const updates = index as unknown as {
+        applyGitHubRequest(event: unknown): Promise<void>;
+        applyGitHubPipeline(event: unknown): Promise<void>;
+      };
+      const reviewEvent = {
+        repositoryName: "acme/app",
+        number: 42,
+        action: "submitted",
+        event: "pull_request_review",
+      };
+      const refresh = updates.applyGitHubRequest(reviewEvent);
+      await started.promise;
+      const pipelineUrl = "https://github.com/acme/app/actions/runs/123";
+      await updates.applyGitHubPipeline({
+        githubPipelineStatusChanged: {
+          snapshot: {
+            repositoryGithubId: "repo",
+            headSha: "sha",
+            pipelineStatus: observed,
+            pipelines: [{ url: pipelineUrl }],
+          },
+        },
+      });
+      const approved = new Map([
+        [
+          "mine",
+          {
+            approvalStatus: "APPROVED",
+            viewerHasApproved: true,
+            viewerReviewState: "APPROVED",
+            canMerge: true,
+            mergeBlockedReason: null,
+          },
+        ],
+      ]);
+      states.resolve(approved);
+      await refresh;
+      const row = await prisma.actionCenterRequest.findFirstOrThrow();
+      expect(JSON.parse(row.payloadJson).request).toMatchObject({
+        approvalStatus: "APPROVED",
+        requiresMyApproval: false,
+        pipelineStatus: observed,
+        pipelineUrl,
+        canMerge,
+      });
+      expect(row.reason).toBe(canMerge ? "READY_TO_MERGE" : "ACTIVE");
+      expect(notifications.recordInTransaction).toHaveBeenCalledOnce();
+      expect(notifications.recordInTransaction.mock.calls[0][1]).toMatchObject({
+        typeKey: "GITHUB_PULL_REQUEST_APPROVED",
+        resourceId: "mine",
+      });
+
+      github.actionCenterRequestStates.mockResolvedValueOnce(approved);
+      await updates.applyGitHubRequest(reviewEvent);
+      expect(notifications.recordInTransaction).toHaveBeenCalledOnce();
+    },
+  );
+
   test("closes known GitHub requests locally and fences stale discovery results", async () => {
     const index = service();
     await index.refresh(["GITHUB"]);

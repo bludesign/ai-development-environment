@@ -2259,6 +2259,7 @@
     "previous": "Anterior",
     "next": "Siguiente",
     "pageSummary": "Página {page} · {total} en total",
+    "pageSummaryLowerBound": "Página {page} · al menos {total} en total",
     "noMergeRequests": "Ninguna solicitud de fusión coincide con estos filtros.",
     "openInGitLab": "Abrir en GitLab",
     "description": "Descripción",
