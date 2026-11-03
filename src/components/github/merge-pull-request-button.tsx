@@ -47,6 +47,7 @@ export function MergePullRequestButton({
   onMerged,
   size = "sm",
   variant = "outline",
+  className,
   open: controlledOpen,
   onOpenChange,
   showTrigger = true,
@@ -62,6 +63,7 @@ export function MergePullRequestButton({
   size?: "default" | "sm" | "xs" | "icon" | "icon-sm" | "icon-xs";
   variant?:
     "default" | "outline" | "secondary" | "ghost" | "destructive" | "link";
+  className?: string;
   open?: boolean;
   onOpenChange?: (open: boolean) => void;
   showTrigger?: boolean;
@@ -320,6 +322,7 @@ export function MergePullRequestButton({
     <>
       {showTrigger && (
         <Button
+          className={className}
           onClick={(event) => {
             event.stopPropagation();
             setOpen(true);

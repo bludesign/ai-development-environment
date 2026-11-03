@@ -187,7 +187,7 @@ describe("AutoMergeButton", () => {
   test.each([
     ["ACTION_REQUIRED", "OPENED", "Auto Merge paused", "destructive", false],
     ["COMPLETED", "MERGED", "Auto Merge Complete", "default", true],
-    ["CANCELED", "OPENED", "Merge", "outline", false],
+    ["CANCELED", "OPENED", "Merge", "default", false],
   ] as const)(
     "reflects GitLab %s without implying enabled automation",
     (state, requestState, label, variant, disabled) => {

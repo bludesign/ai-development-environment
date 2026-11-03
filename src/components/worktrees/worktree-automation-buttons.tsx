@@ -405,17 +405,22 @@ function GitLabAutoMergeButton({
   const paused = status === "paused";
   const completed = status === "completed";
   const active = status === "active";
+  const mergeReady = canMergeNow && status === "inactive";
   return (
     <>
       <Button
         className={
-          active || completed
+          active || completed || mergeReady
             ? "bg-emerald-600 text-white hover:bg-emerald-700"
             : undefined
         }
         size="sm"
         variant={
-          paused ? "destructive" : active || completed ? "default" : "outline"
+          paused
+            ? "destructive"
+            : active || completed || mergeReady
+              ? "default"
+              : "outline"
         }
         disabled={completed || (disabled && status === "inactive")}
         onClick={(event) => {
@@ -459,6 +464,7 @@ function GitHubAutoMergeButton({
   const currentRule = currentWorktreeAutoMerge(worktree);
   const status = worktreeAutoMergeStatus(worktree);
   const nativeAutoMergeEnabled = nativeWorktreeAutoMergeEnabled(worktree);
+  const canMergeNow = directlyMergeable(worktree);
   const [open, setOpen] = useState(false);
   const [manualOpen, setManualOpen] = useState(false);
   const repositoryName = pullRequest?.repositoryNameWithOwner;
@@ -542,19 +548,22 @@ function GitHubAutoMergeButton({
   if (
     pullRequest &&
     (manualOpen ||
-      (!open &&
-        !currentRule &&
-        !nativeAutoMergeEnabled &&
-        directlyMergeable(worktree)))
+      (!open && !currentRule && !nativeAutoMergeEnabled && canMergeNow))
   ) {
     return (
       <MergePullRequestButton
+        className={
+          canMergeNow
+            ? "bg-emerald-600 text-white hover:bg-emerald-700"
+            : undefined
+        }
         onMerged={() => onCompleted()}
         onOpenChange={setManualOpen}
         open={manualOpen}
         worktreeId={worktree.id}
         pullRequest={pullRequest}
         requestSource="WORKTREE_AUTOMATION"
+        variant={canMergeNow ? "default" : "outline"}
       />
     );
   }
