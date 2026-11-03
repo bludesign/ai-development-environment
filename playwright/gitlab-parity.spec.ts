@@ -29,10 +29,13 @@ const mergeOptions = {
   removeSourceBranch: true,
   canRemoveSourceBranch: true,
   canMerge: false,
-  canAutoMerge: true,
+  canAutoMerge: false,
+  canAutoMergeWithSync: true,
+  autoSyncBlockedReason: null,
+  defaultAutoSync: false,
   canCancelAutoMerge: false,
   autoMergeEnabled: false,
-  mergeBlockedReason: "The pipeline is still running.",
+  mergeBlockedReason: "Rebase the source branch before merging.",
   autoMergeBlockedReason: null,
   mergeCommitMessage: null,
   squashCommitMessage: null,
@@ -74,7 +77,15 @@ test("gitlab merge sheet shows project policy and deferred follow-ups", async ({
     .getByRole("button", { name: "Merge", exact: true })
     .click();
   const sheet = page.getByRole("dialog");
-  await expect(sheet.getByText("The pipeline is still running.")).toBeVisible();
+  await expect(
+    sheet.getByText("Rebase the source branch before merging."),
+  ).toBeVisible();
+  await expect(
+    sheet.getByRole("button", { name: "Enable auto-merge", exact: true }),
+  ).toBeDisabled();
+  await sheet
+    .getByRole("checkbox", { name: "Auto sync branch", exact: true })
+    .check();
   await expect(
     sheet.getByRole("checkbox", { name: "Squash commits", exact: true }),
   ).toBeDisabled();
@@ -296,7 +307,11 @@ test("gitlab pipeline expands stages and retry history", async ({
 test("gitlab scopes require a project only for All accessible and search unmanaged projects", async ({
   page,
 }, info) => {
-  const requests: { scope: string; projectId?: string }[] = [];
+  const requests: {
+    scope: string;
+    projectId?: string;
+    projectScope?: string;
+  }[] = [];
   await page.route("**/api/graphql", async (route) => {
     const { query, variables } = route.request().postDataJSON();
     if (query?.includes("query GitLabMergeRequests(")) requests.push(variables);
@@ -337,6 +352,10 @@ test("gitlab scopes require a project only for All accessible and search unmanag
       .getByText("Improve pipeline retry diagnostics", { exact: true }),
   ).toBeVisible();
   await expect.poll(() => requests.at(-1)?.scope).toBe("MINE");
+  await expect.poll(() => requests.at(-1)?.projectScope).toBe("MANAGED");
+  await page.getByRole("combobox", { name: "Project", exact: true }).click();
+  await page.getByRole("option", { name: "All projects", exact: true }).click();
+  await expect.poll(() => requests.at(-1)?.projectScope).toBe("ALL");
   await page.getByRole("tab", { name: "All accessible", exact: true }).click();
   await expect(
     page.getByRole("button", { name: "Refresh", exact: true }),

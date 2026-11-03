@@ -684,3 +684,119 @@ test("branch changes and reviewer revocations during provider discovery are chec
   ).rejects.toThrow("no longer eligible");
   expect(assign).not.toHaveBeenCalled();
 });
+
+test.each(["GITHUB", "GITLAB"] as const)(
+  "%s transitions the linked Jira ticket after successful reviewer additions, once per real change",
+  async (provider) => {
+    discovery.provider = provider;
+    const afterAssignment = vi.fn().mockResolvedValue(undefined);
+    service = new ReviewersService(
+      { discover, assign },
+      refresh,
+      afterAssignment,
+    );
+    await save();
+    await worktree();
+    const input = {
+      worktreeId: "worktree",
+      requestId: "pull-1",
+      reviewerIds: ["alice"],
+    };
+    const result = await service.assignWorktreeReviewers(input);
+    expect(result.ticketTransitionError).toBeNull();
+    expect(afterAssignment).toHaveBeenCalledWith("worktree", "feature");
+    expect(assign.mock.invocationCallOrder[0]).toBeLessThan(
+      afterAssignment.mock.invocationCallOrder[0],
+    );
+    await service.assignWorktreeReviewers(input);
+    expect(afterAssignment).toHaveBeenCalledOnce();
+  },
+);
+
+test("does not transition tickets when a provider reviewer write fails", async () => {
+  const afterAssignment = vi.fn();
+  service = new ReviewersService(
+    { discover, assign },
+    refresh,
+    afterAssignment,
+  );
+  await save();
+  await worktree();
+  assign.mockRejectedValueOnce(new Error("Provider denied"));
+  await expect(
+    service.assignWorktreeReviewers({
+      worktreeId: "worktree",
+      requestId: "pull-1",
+      reviewerIds: ["alice"],
+    }),
+  ).rejects.toThrow("Provider denied");
+  expect(afterAssignment).not.toHaveBeenCalled();
+});
+
+test("does not transition tickets when reviewer requests are only removed", async () => {
+  const afterAssignment = vi.fn();
+  service = new ReviewersService(
+    { discover, assign },
+    refresh,
+    afterAssignment,
+  );
+  await save();
+  await worktree();
+  discovery.request!.currentReviewers = [person("alice")];
+  await service.assignWorktreeReviewers({
+    worktreeId: "worktree",
+    requestId: "pull-1",
+    reviewerIds: [],
+    removeReviewerIds: ["alice"],
+  });
+  expect(afterAssignment).not.toHaveBeenCalled();
+});
+
+test("returns a Jira transition error without losing successful reviewer assignments", async () => {
+  const afterAssignment = vi
+    .fn()
+    .mockRejectedValue(new Error("Complete required field: Comment"));
+  service = new ReviewersService(
+    { discover, assign },
+    refresh,
+    afterAssignment,
+  );
+  await save();
+  await worktree();
+  const result = await service.assignWorktreeReviewers({
+    worktreeId: "worktree",
+    requestId: "pull-1",
+    reviewerIds: ["alice"],
+  });
+  expect(result.currentReviewerIds).toContain("alice");
+  expect(result.ticketTransitionError).toBe("Complete required field: Comment");
+  expect(assign).toHaveBeenCalledOnce();
+});
+
+test("does not move a different ticket when the worktree changes after reviewers are assigned", async () => {
+  const afterAssignment = vi.fn();
+  service = new ReviewersService(
+    { discover, assign },
+    refresh,
+    afterAssignment,
+  );
+  await save();
+  await worktree();
+  assign.mockImplementationOnce(async () => {
+    discovery.request!.currentReviewers = [person("alice")];
+    await prisma.worktree.update({
+      where: { id: "worktree" },
+      data: { branch: "feature/APP-2" },
+    });
+  });
+  const result = await service.assignWorktreeReviewers({
+    worktreeId: "worktree",
+    requestId: "pull-1",
+    reviewerIds: ["alice"],
+  });
+  expect(result.currentReviewerIds).toContain("alice");
+  expect(result.ticketTransitionError).toContain(
+    "refresh the linked pull or merge request",
+  );
+  expect(afterAssignment).not.toHaveBeenCalled();
+});

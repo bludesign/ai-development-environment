@@ -144,6 +144,8 @@ type TelemetryViewSettings {
   columns: [String!]!
   "The time format associated with this telemetry view settings."
   timeFormat: String!
+  "Whether successful build run separators are visible. Historical creation and manual separators remain visible."
+  showBuildRunSeparators: Boolean!
   "Identifier of the related active column preset. May be null when unavailable or not applicable."
   activeColumnPresetId: ID
   "Identifier of the related active saved filter. May be null when unavailable or not applicable."
@@ -224,6 +226,8 @@ input TelemetryAdvancedFilterInput {
 input TelemetryTimelineInput {
   "The view to use for the request."
   view: TelemetryView!
+  "Whether to show successful build run separators."
+  showBuildRunSeparators: Boolean = true
   "The first to use for the request."
   first: Int = 200
   "The after to use for the request."
@@ -262,6 +266,8 @@ input SaveTelemetryViewSettingsInput {
   columns: [String!]
   "The time format to use for the request."
   timeFormat: String
+  "Whether to show successful build run separators."
+  showBuildRunSeparators: Boolean
   "Identifier of the active column preset to use."
   activeColumnPresetId: ID
   "Identifier of the active saved filter to use."
@@ -294,7 +300,28 @@ input SaveTelemetryFilterInput {
   definition: TelemetryAdvancedFilterInput!
 }
 
+"A build or session identifier and its earliest retained event time."
+type TelemetryIdFacet {
+  "The full identifier used to filter telemetry."
+  value: String!
+  "ISO 8601 client timestamp of the earliest retained event in this view."
+  firstSeenAt: String!
+}
+
+"Build and session identifiers available in a telemetry view."
+type TelemetryIdFacets {
+  "Build identifiers with their earliest retained event times."
+  buildIds: [TelemetryIdFacet!]!
+  "Session identifiers with their earliest retained event times."
+  sessionIds: [TelemetryIdFacet!]!
+}
+
 extend type Query {
+  "Returns build and session identifiers with first-seen event timestamps."
+  telemetryIdFacets(
+    "The view whose retained events determine the available identifiers."
+    view: TelemetryView!
+  ): TelemetryIdFacets!
   "Returns a telemetry timeline page."
   telemetryTimeline(
     "Values for the requested operation."

@@ -47,6 +47,7 @@ const SCOPES: DiffScope[] = [
 type OverviewResponse = {
   worktreeOverview: {
     agents: Array<{
+      agent: { id: string; name: string };
       codebases: Array<{
         repository: { id: string; name: string; displayOrigin: string } | null;
         codebase: { id: string; folder: string; defaultBranch: string | null };
@@ -71,6 +72,8 @@ function flattenWorktrees(data: OverviewResponse): DiffWorktreeOption[] {
     agent.codebases.flatMap((entry) =>
       entry.worktrees.map((worktree) => ({
         ...worktree,
+        agentId: agent.agent.id,
+        agentName: agent.agent.name,
         codebaseName:
           entry.repository?.name ??
           entry.codebase.folder.split("/").at(-1) ??
@@ -138,9 +141,11 @@ export function DiffsPage({
   initial?: DiffsPageInitialState;
 }) {
   const t = useTranslations("diffs");
+  const agentT = useTranslations("activeAgent");
 
   const [worktrees, setWorktrees] = useState<DiffWorktreeOption[]>([]);
   const [worktreeId, setWorktreeId] = useState(initial.worktreeId ?? "");
+  const [agentId, setAgentId] = useState("");
   const [scope, setScope] = useState<DiffScope>(() =>
     SCOPES.includes(initial.scope as DiffScope)
       ? (initial.scope as DiffScope)
@@ -179,6 +184,14 @@ export function DiffsPage({
   const [sheetOpen, setSheetOpen] = useState(false);
 
   const worktree = worktrees.find((entry) => entry.id === worktreeId) ?? null;
+  const agentOptions = [
+    ...new Map(
+      worktrees.map((entry) => [entry.agentId, entry.agentName]),
+    ).entries(),
+  ];
+  const filteredWorktrees = agentId
+    ? worktrees.filter((entry) => entry.agentId === agentId)
+    : worktrees;
   const detail =
     loadedDetail?.worktreeId === worktreeId ? loadedDetail.detail : null;
   const branchFiles =
@@ -434,19 +447,47 @@ export function DiffsPage({
             ariaLabel={t("selectWorktree")}
             className="w-72"
             emptyMessage={t("noWorktrees")}
+            header={
+              <div
+                aria-label={agentT("filterLabel")}
+                className="flex gap-1 overflow-x-auto overflow-y-hidden border-b p-1.5"
+                role="group"
+              >
+                {[["", agentT("allAgents")], ...agentOptions].map(
+                  ([id, name]) => (
+                    <Button
+                      aria-pressed={agentId === id}
+                      className="shrink-0"
+                      key={id}
+                      onClick={() => setAgentId(id)}
+                      size="sm"
+                      type="button"
+                      variant={agentId === id ? "secondary" : "ghost"}
+                    >
+                      {name}
+                    </Button>
+                  ),
+                )}
+              </div>
+            }
             onValueChange={(value) => {
               setWorktreeId(value);
               setSelectedPath("");
               setCommitSha("");
             }}
-            options={worktrees.map((entry) => ({
+            options={filteredWorktrees.map((entry) => ({
               value: entry.id,
               label: entry.branch,
               description: entry.codebaseName,
-              secondaryDescription: entry.relativePath,
-              keywords: `${entry.relativePath} ${entry.folder}`,
+              secondaryDescription: entry.agentName,
+              keywords: `${entry.relativePath} ${entry.folder} ${entry.agentName}`,
             }))}
             placeholder={t("selectWorktree")}
+            selectedOption={
+              worktree
+                ? { value: worktree.id, label: worktree.branch }
+                : undefined
+            }
             searchPlaceholder={t("searchWorktrees")}
             value={worktreeId}
           />

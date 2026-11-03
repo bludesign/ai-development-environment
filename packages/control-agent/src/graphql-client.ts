@@ -523,6 +523,19 @@ export class AgentGraphQLClient {
     );
   }
 
+  reportBuildDeploymentLaunched(
+    jobId: string,
+    deploymentId: string,
+    launchedAt: string,
+  ) {
+    return this.request<{ reportBuildDeploymentLaunched: boolean }>(
+      `mutation ReportBuildDeploymentLaunched($jobId: ID!, $deploymentId: ID!, $launchedAt: String!) {
+        reportBuildDeploymentLaunched(jobId: $jobId, deploymentId: $deploymentId, launchedAt: $launchedAt)
+      }`,
+      { jobId, deploymentId, launchedAt },
+    );
+  }
+
   reportBuildProgress(input: {
     buildId: string;
     status: "PREPARING" | "RUNNING";

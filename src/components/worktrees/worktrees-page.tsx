@@ -184,6 +184,7 @@ import {
   CODEBASE_FIELDS,
   WORKTREE_FIELDS,
   WORKTREE_LIST_FIELDS,
+  WORKTREE_SYNC_BATCH_FIELDS,
 } from "./worktree-graphql";
 import {
   inspectWorktree,
@@ -199,6 +200,7 @@ import {
 } from "./worktree-jobs";
 import { WorktreeErrorAlert } from "./worktree-error-alert";
 import { WorktreeRebaseConflictItem } from "./worktree-rebase-conflict-item";
+import { WorktreeBulkSync } from "./worktree-bulk-sync";
 import {
   shouldNavigateWorktreeSurface,
   worktreeDetailHref,
@@ -643,7 +645,13 @@ function reviewClass(value: string) {
   return "border-amber-500/30 bg-amber-500/10 text-amber-700 dark:text-amber-300";
 }
 
-export function WorktreesPage({ appId }: { appId?: string }) {
+export function WorktreesPage({
+  appId,
+  scopeRepositoryIds,
+}: {
+  appId?: string;
+  scopeRepositoryIds?: string[];
+}) {
   const t = useTranslations("worktrees");
   const searchParams = useSearchParams();
   const [jiraIssueKey, setJiraIssueKey] = useState<string | null>(() => {
@@ -757,6 +765,7 @@ export function WorktreesPage({ appId }: { appId?: string }) {
               branch headSha deleteSource status sourceJobId targetJobId cleanupJobId error warning
               createdAt updatedAt finishedAt
             }
+            activeSyncBatches { ${WORKTREE_SYNC_BATCH_FIELDS} }
             agents {
               agent { id name hostname capabilities baseRepoDirectory connectionStatus }
               codebases {
@@ -1089,6 +1098,15 @@ export function WorktreesPage({ appId }: { appId?: string }) {
               ? t(`fetchProgress.${fetchOperation.batch.phase}`)
               : t("fetchNow")}
           </Button>
+          <WorktreeBulkSync
+            agentId={globalAgent.activeAgentId}
+            appId={appId}
+            disabled={busy || fetchOperation.active || !overview?.agents.length}
+            key={`${appId ?? "all"}:${globalAgent.activeAgentId ?? "all"}`}
+            onReload={refreshPage}
+            overview={overview}
+            scopeRepositoryIds={scopeRepositoryIds}
+          />
           <Button onClick={() => setHiddenOpen(true)} variant="outline">
             <Archive /> {t("hidden", { count: overview?.hiddenCount ?? 0 })}
           </Button>

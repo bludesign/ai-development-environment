@@ -520,6 +520,7 @@ describe("JiraTicketsPage", () => {
       await screen.findByRole("menuitemcheckbox", { name: /Released/ }),
     );
     fireEvent.keyDown(document, { key: "Escape" });
+    await chooseSelectOption("In review ticket status", "Released");
     fireEvent.click(
       await screen.findByRole("button", { name: "Save display settings" }),
     );
@@ -530,6 +531,9 @@ describe("JiraTicketsPage", () => {
         {
           input: {
             projectId: "project-2",
+            defaultResolutionId: null,
+            doneStatusId: undefined,
+            inReviewStatusId: "done",
             ticketAssignmentFilter: "SELF_IN_PROGRESS",
             hideCompletedTickets: true,
             completedStatusIds: ["done"],

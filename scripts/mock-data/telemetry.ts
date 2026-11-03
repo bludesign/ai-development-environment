@@ -1,6 +1,7 @@
 import type { PrismaClient } from "../../src/generated/prisma/client";
 
 import { atTime, minutesAgo } from "./time";
+import { ids } from "./ids";
 
 const DEVICE_IP = "203.0.113.42";
 const SESSION_ID = "8f14e45f-ceea-467a-9a3c-acme00000001";
@@ -122,6 +123,7 @@ export async function seedTelemetry(prisma: PrismaClient): Promise<void> {
       category: ["network", "auth", "checkout", "ui"][index % 4],
       message,
       sessionId: SESSION_ID,
+      buildId: ids.builds.archive,
       searchText: `${level} ${message}`.toLowerCase(),
     };
   });
@@ -138,6 +140,7 @@ export async function seedTelemetry(prisma: PrismaClient): Promise<void> {
       category: row.category,
       message: row.message,
       sessionId: SESSION_ID,
+      buildId: ids.builds.archive,
       searchText: `${row.level} ${row.message}`.toLowerCase(),
     };
   });
@@ -185,6 +188,7 @@ export async function seedTelemetry(prisma: PrismaClient): Promise<void> {
     eventKind: event.kind,
     screenName: event.screen,
     sessionId: SESSION_ID,
+    buildId: ids.builds.archive,
     defaultParametersJson: JSON.stringify({
       appVersion: "3.4.1",
       platform: "iOS",
@@ -194,6 +198,40 @@ export async function seedTelemetry(prisma: PrismaClient): Promise<void> {
   }));
 
   await prisma.telemetryEntry.createMany({
-    data: [...consoleEntries, ...fixedConsoleEntries, ...analyticsEntries],
+    data: [
+      ...consoleEntries,
+      ...fixedConsoleEntries,
+      ...analyticsEntries,
+      {
+        id: "telemetry-build-created",
+        entryType: "SEPARATOR",
+        separatorKind: "BUILD_CREATED",
+        separatorKey: `build-created:${ids.builds.archive}`,
+        separatorName: "Build created",
+        buildId: ids.builds.archive,
+        clientTime: minutesAgo(190),
+        receivedAt: minutesAgo(190),
+      },
+      {
+        id: "telemetry-build-run-first",
+        entryType: "SEPARATOR",
+        separatorKind: "BUILD_RUN",
+        separatorKey: "build-run:mock-run-first",
+        separatorName: "Build run",
+        buildId: ids.builds.archive,
+        clientTime: minutesAgo(95),
+        receivedAt: minutesAgo(95),
+      },
+      {
+        id: "telemetry-build-run-latest",
+        entryType: "SEPARATOR",
+        separatorKind: "BUILD_RUN",
+        separatorKey: "build-run:mock-run-latest",
+        separatorName: "Build run",
+        buildId: ids.builds.archive,
+        clientTime: minutesAgo(24),
+        receivedAt: minutesAgo(24),
+      },
+    ],
   });
 }

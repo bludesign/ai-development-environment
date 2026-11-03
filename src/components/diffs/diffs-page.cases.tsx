@@ -53,6 +53,7 @@ const overview = {
   worktreeOverview: {
     agents: [
       {
+        agent: { id: "agent-1", name: "Mac Studio" },
         codebases: [
           {
             repository: { id: "r1", name: "Acme Web", displayOrigin: "acme" },
@@ -550,6 +551,65 @@ export function registerDiffsPageTests(section: DiffsPageTestSection): void {
     }
 
     if (section === "state") {
+      test("filters worktree choices by agent while retaining the active checkout", async () => {
+        const fallback = request.getMockImplementation()!;
+        const first = overview.worktreeOverview.agents[0]!;
+        request.mockImplementation(async (query, variables, options) => {
+          if (String(query).includes("query DiffWorktrees"))
+            return {
+              worktreeOverview: {
+                agents: [
+                  first,
+                  {
+                    agent: { id: "agent-2", name: "MacBook Pro" },
+                    codebases: [
+                      {
+                        ...first.codebases[0]!,
+                        worktrees: [
+                          {
+                            ...first.codebases[0]!.worktrees[0]!,
+                            id: "w2",
+                            branch: "feature/mobile",
+                          },
+                        ],
+                      },
+                    ],
+                  },
+                ],
+              },
+            } as never;
+          return fallback(query, variables, options);
+        });
+        render(<DiffsPage />);
+        await fileList();
+        const picker = screen.getByRole("combobox", {
+          name: "Select a worktree",
+        });
+        fireEvent.click(picker);
+        expect(
+          await screen.findByRole("option", {
+            name: "feature/search, Acme Web, Mac Studio",
+          }),
+        ).toBeTruthy();
+        fireEvent.click(screen.getByRole("button", { name: "MacBook Pro" }));
+        expect(
+          screen.queryByRole("option", {
+            name: "feature/search, Acme Web, Mac Studio",
+          }),
+        ).toBeNull();
+        expect(
+          screen.getByRole("option", {
+            name: "feature/mobile, Acme Web, MacBook Pro",
+          }),
+        ).toBeTruthy();
+        expect(picker.textContent).toContain("feature/search");
+        expect(
+          request.mock.calls.filter(([query]) =>
+            String(query).includes("mutation DiffWorktreeDetail"),
+          ),
+        ).toHaveLength(1);
+      });
+
       test("flags changed working-tree contents even when HEAD has not moved", async () => {
         request.mockImplementation(async (query) => {
           const operation = String(query);
@@ -623,6 +683,7 @@ export function registerDiffsPageTests(section: DiffsPageTestSection): void {
           worktreeOverview: {
             agents: [
               {
+                agent: { id: "agent-1", name: "Mac Studio" },
                 codebases: [
                   {
                     ...firstWorktree,

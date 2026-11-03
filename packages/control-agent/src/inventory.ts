@@ -15,7 +15,11 @@ import {
   CODEBASE_JOB_KINDS,
   CODEBASE_RECONCILE_EVENT_CAPABILITY,
 } from "@ai-development-environment/agent-contract/codebases";
-import { WORKTREE_JOB_KINDS } from "@ai-development-environment/agent-contract/worktrees";
+import {
+  WORKTREE_JOB_KINDS,
+  WORKTREE_REVIEWED_SYNC_CAPABILITY,
+  WORKTREE_DELETE_BUILD_DATA_CAPABILITY,
+} from "@ai-development-environment/agent-contract/worktrees";
 import { SKILL_JOB_KINDS } from "@ai-development-environment/agent-contract/skills";
 import { RUN_SESSION_READ_JOB_KIND } from "@ai-development-environment/agent-contract/runs";
 import { IOS_BUILD_JOB_KINDS } from "@ai-development-environment/agent-contract/builds";
@@ -40,6 +44,7 @@ const PORTABLE_AGENT_CAPABILITIES = [
   ...CODEBASE_JOB_KINDS,
   CODEBASE_RECONCILE_EVENT_CAPABILITY,
   ...WORKTREE_JOB_KINDS,
+  WORKTREE_REVIEWED_SYNC_CAPABILITY,
   ...SKILL_JOB_KINDS,
   ...COVERAGE_JOB_KINDS,
   "runs.protocol.v1",
@@ -51,6 +56,7 @@ const PORTABLE_AGENT_CAPABILITIES = [
 ] as const;
 
 const MACOS_AGENT_CAPABILITIES = [
+  WORKTREE_DELETE_BUILD_DATA_CAPABILITY,
   ...BUILD_DATA_JOB_KINDS,
   ...IOS_BUILD_JOB_KINDS,
   ...SIGNING_ASSET_JOB_KINDS,

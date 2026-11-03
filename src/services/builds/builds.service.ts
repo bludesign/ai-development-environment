@@ -1597,25 +1597,7 @@ export class BuildsService {
       where: { requestKey },
       include: buildInclude,
     });
-    if (existing) {
-      if (this.telemetry) {
-        const snapshot = parseJson(existing.snapshotJson, {}) as JsonObject;
-        const configurationSnapshot = objectValue(
-          snapshot.configuration ?? {},
-          "build configuration snapshot",
-        );
-        const destinationSnapshot = objectValue(
-          snapshot.destination ?? {},
-          "build destination snapshot",
-        );
-        await this.telemetry.addBuildSeparator({
-          buildId: existing.id,
-          name: `Build · ${String(configurationSnapshot.name ?? "iOS")} · ${String(destinationSnapshot.name ?? "Destination")}`,
-          clientTime: existing.createdAt,
-        });
-      }
-      return existing;
-    }
+    if (existing) return existing;
     const worktree = await this.requireWorktree(
       input.worktreeId,
       IOS_BUILD_JOB_KIND,
@@ -2012,30 +1994,7 @@ export class BuildsService {
         },
       },
     });
-    if (this.telemetry) {
-      const separatorId = randomUUID();
-      await prisma.$transaction([
-        buildCreation,
-        prisma.telemetryEntry.create({
-          data: {
-            id: separatorId,
-            entryType: "SEPARATOR",
-            clientTime: buildCreatedAt,
-            receivedAt: buildCreatedAt,
-            separatorKind: "BUILD",
-            separatorName:
-              `Build · ${configuration.name} · ${destination.name}`.slice(
-                0,
-                100,
-              ),
-            buildId,
-          },
-        }),
-      ]);
-      this.telemetry.notifyChange([separatorId], "BUILD_SEPARATOR_ADDED");
-    } else {
-      await buildCreation;
-    }
+    await buildCreation;
     try {
       const job = await this.agentControl.createJob({
         agentId: worktree.codebase.agentId,
@@ -3200,20 +3159,26 @@ export class BuildsService {
     const worktree = sameAgent
       ? await this.requireWorktree(build.worktree!.id, IOS_DEPLOY_JOB_KIND)
       : null;
-    const batchId = randomUUID();
-    const rows = [];
-    for (const destination of destinations) {
-      const key = destinationKey(destination);
-      const existing = await prisma.buildDeployment.findUnique({
-        where: {
-          buildId_requestId_targetAgentId_destinationKey: {
-            buildId: build.id,
-            requestId: input.requestId,
-            targetAgentId,
-            destinationKey: key,
+    const existingDeployments = await Promise.all(
+      destinations.map((destination) =>
+        prisma.buildDeployment.findUnique({
+          where: {
+            buildId_requestId_targetAgentId_destinationKey: {
+              buildId: build.id,
+              requestId: input.requestId,
+              targetAgentId,
+              destinationKey: destinationKey(destination),
+            },
           },
-        },
-      });
+        }),
+      ),
+    );
+    const batchId =
+      existingDeployments.find((row) => row)?.batchId ?? randomUUID();
+    const rows = [];
+    for (const [index, destination] of destinations.entries()) {
+      const key = destinationKey(destination);
+      const existing = existingDeployments[index];
       rows.push(
         existing ??
           (await prisma.buildDeployment.create({
@@ -3860,11 +3825,86 @@ export class BuildsService {
     this.publish(buildId);
   }
 
+  async reportDeploymentLaunched(
+    agentId: string,
+    input: {
+      jobId: string;
+      deploymentId: string;
+      launchedAt: string;
+    },
+  ): Promise<boolean> {
+    const launchedAt = new Date(input.launchedAt);
+    if (
+      !/T.*(?:Z|[+-]\d{2}:\d{2})$/i.test(input.launchedAt) ||
+      !Number.isFinite(launchedAt.getTime())
+    ) {
+      throw new Error(
+        "Launch time must be an ISO 8601 timestamp with a UTC offset",
+      );
+    }
+    const prisma = await getPrismaClient();
+    const separatorId = await prisma.$transaction(async (transaction) => {
+      const deployment = await transaction.buildDeployment.findUnique({
+        where: { id: input.deploymentId },
+        include: { job: { select: { agentId: true, kind: true } } },
+      });
+      if (
+        !deployment ||
+        deployment.jobId !== input.jobId ||
+        deployment.job?.agentId !== agentId ||
+        ![IOS_DEPLOY_JOB_KIND, IOS_REMOTE_DEPLOY_JOB_KIND].includes(
+          deployment.job.kind,
+        )
+      ) {
+        throw new Error("Deployment not found for this agent job");
+      }
+      return this.persistDeploymentLaunch(transaction, deployment, launchedAt);
+    });
+    if (separatorId)
+      this.telemetry?.notifyChange([separatorId], "BUILD_RUN_SEPARATOR_ADDED");
+    return true;
+  }
+
+  private async persistDeploymentLaunch(
+    transaction: Prisma.TransactionClient,
+    deployment: { id: string; buildId: string; batchId: string },
+    launchedAt: Date,
+  ): Promise<string | null> {
+    await transaction.buildDeployment.updateMany({
+      where: {
+        id: deployment.id,
+        OR: [{ launchedAt: null }, { launchedAt: { gt: launchedAt } }],
+      },
+      data: { launchedAt },
+    });
+    if (!this.telemetry) return null;
+    const separatorKey = `build-run:${deployment.batchId}`;
+    const separator = await transaction.telemetryEntry.upsert({
+      where: { separatorKey },
+      create: {
+        id: randomUUID(),
+        entryType: "SEPARATOR",
+        separatorKind: "BUILD_RUN",
+        separatorKey,
+        separatorName: "Build run",
+        buildId: deployment.buildId,
+        clientTime: launchedAt,
+      },
+      update: {},
+    });
+    await transaction.telemetryEntry.updateMany({
+      where: { separatorKey, clientTime: { gt: launchedAt } },
+      data: { clientTime: launchedAt },
+    });
+    return separator.id;
+  }
+
   private async projectDeploymentCompletion(job: {
     id: string;
     status: string;
     resultJson: string | null;
     error: string | null;
+    finishedAt?: Date | null;
   }) {
     const prisma = await getPrismaClient();
     const rows = await prisma.buildDeployment.findMany({
@@ -3882,22 +3922,42 @@ export class BuildsService {
       const outcome = outcomes
         .map((value) => objectValue(value, "deployment outcome"))
         .find((value) => value.id === row.id);
+      const status =
+        typeof outcome?.status === "string"
+          ? outcome.status
+          : buildStatusFromJob(job.status);
       await prisma.buildDeployment.update({
         where: { id: row.id },
         data: {
-          status:
-            typeof outcome?.status === "string"
-              ? outcome.status
-              : buildStatusFromJob(job.status),
+          status,
           error: typeof outcome?.error === "string" ? outcome.error : job.error,
           outputRelativePath:
             typeof outcome?.outputRelativePath === "string"
               ? outcome.outputRelativePath
               : null,
           startedAt: row.startedAt ?? new Date(),
-          finishedAt: new Date(),
+          finishedAt: job.finishedAt ?? new Date(),
         },
       });
+      if (status === "SUCCEEDED") {
+        const reportedTime =
+          typeof outcome?.launchedAt === "string"
+            ? new Date(outcome.launchedAt)
+            : null;
+        const launchedAt =
+          row.launchedAt ??
+          (reportedTime && Number.isFinite(reportedTime.getTime())
+            ? reportedTime
+            : (job.finishedAt ?? new Date()));
+        const separatorId = await prisma.$transaction((transaction) =>
+          this.persistDeploymentLaunch(transaction, row, launchedAt),
+        );
+        if (separatorId)
+          this.telemetry?.notifyChange(
+            [separatorId],
+            "BUILD_RUN_SEPARATOR_ADDED",
+          );
+      }
     }
     const transferIds = [
       ...new Set(

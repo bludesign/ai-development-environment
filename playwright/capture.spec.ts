@@ -9,6 +9,10 @@ import { stubJiraCacheTicket } from "./jira-cache-stub";
 import { stubWorktreeAgent } from "./worktree-stub";
 import { openRepositoryTransfer } from "./repository-transfer";
 import { openReviewerCapture, stubReviewerCapture } from "./reviewers";
+import {
+  openJiraProjectSettings,
+  stubJiraProjectSettings,
+} from "./jira-settings";
 import { screenshotSessionToken } from "../scripts/mock-data/auth";
 
 async function waitForVisualSettle(page: Page): Promise<void> {
@@ -76,6 +80,7 @@ test.describe("app screenshots", () => {
       if (route.stubWorktree) await stubWorktreeAgent(page);
       if (route.reviewerCapture)
         await stubReviewerCapture(page, route.reviewerCapture);
+      if (route.jiraProjectSettings) await stubJiraProjectSettings(page);
       if (route.stubJiraCacheTicket) await stubJiraCacheTicket(page);
       const readyResponse = route.readyGraphqlOperation
         ? page.waitForResponse(
@@ -117,6 +122,7 @@ test.describe("app screenshots", () => {
       }
       if (route.reviewerCapture)
         await openReviewerCapture(page, route.reviewerCapture);
+      if (route.jiraProjectSettings) await openJiraProjectSettings(page);
       if (route.clickButton) {
         await page.getByRole("button", { name: route.clickButton }).click();
         await page.getByRole("dialog").waitFor({ state: "visible" });

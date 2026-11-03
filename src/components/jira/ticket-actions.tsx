@@ -64,7 +64,7 @@ export function JiraTicketActions({
       }>(
         `query JiraTicketTransitions($issueKey: ID!) {
           jiraTicketTransitions(issueKey: $issueKey) {
-            id name toStatusId toStatus toStatusCategory hasScreen requiredFields
+            id name toStatusId toStatus toStatusCategory hasScreen requiredFields unresolvedRequiredFields
           }
         }`,
         { issueKey: ticket.key },
@@ -237,12 +237,16 @@ export function JiraTicketActions({
             <SelectContent>
               {transitions.map((item) => (
                 <SelectItem
-                  disabled={item.requiredFields.length > 0}
+                  disabled={
+                    (item.unresolvedRequiredFields ?? item.requiredFields)
+                      .length > 0
+                  }
                   key={item.id}
                   value={item.id}
                 >
                   {item.toStatus}
-                  {item.requiredFields.length > 0
+                  {(item.unresolvedRequiredFields ?? item.requiredFields)
+                    .length > 0
                     ? ` · ${t("requiresJira")}`
                     : ""}
                 </SelectItem>

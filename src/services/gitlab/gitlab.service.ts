@@ -26,6 +26,7 @@ import {
 import { normalizeGitOrigin } from "@ai-development-environment/agent-contract/codebases";
 
 import { getPrismaClient } from "@/data/prisma-client";
+import type { MergeSyncReadiness } from "@/services/worktrees/merge-branch-sync";
 import { mapIntegrationRequests } from "@/services/integration-request";
 import {
   CREDENTIALS,
@@ -77,7 +78,7 @@ import type {
 
 const SETTINGS_ID = "default";
 const MIN_GITLAB_VERSION = { major: 19, minor: 2 };
-const MIN_TTL_SECONDS = 1;
+const MIN_TTL_SECONDS = 0;
 const MAX_TTL_SECONDS = 24 * 60 * 60;
 const MAX_PAGE_SIZE = 100;
 const WEBHOOK_REPLAY_WINDOW_SECONDS = 5 * 60;
@@ -152,6 +153,7 @@ type RawGitLabProject = {
 };
 
 type RawGitLabPipeline = {
+  scope_branch?: string;
   id: number;
   iid?: number | null;
   project_id: number;
@@ -209,6 +211,7 @@ type RawGitLabMergeRequest = {
   reviewers?: RawGitLabUser[];
   labels?: string[];
   detailed_merge_status?: string;
+  diverged_commits_count?: number | null;
   merge_when_pipeline_succeeds?: boolean;
   squash_on_merge?: boolean;
   has_conflicts?: boolean;
@@ -372,7 +375,7 @@ function mapPipeline(pipeline: RawGitLabPipeline): GitLabPipelineView {
     projectId: String(pipeline.project_id),
     iid: pipeline.iid == null ? null : String(pipeline.iid),
     ref: pipeline.ref,
-    branch: pipeline.ref,
+    branch: pipeline.scope_branch ?? pipeline.ref,
     sha: pipeline.sha,
     source: pipeline.source,
     status: mapGitLabPipelineStatus(pipeline.status),
@@ -469,6 +472,7 @@ function mapMergeRequest(mr: RawGitLabMergeRequest): GitLabMergeRequestView {
     reviewers: (mr.reviewers ?? []).map(mapUser),
     labels: mr.labels ?? [],
     detailedMergeStatus: mr.detailed_merge_status ?? "unchecked",
+    behindCount: mr.diverged_commits_count ?? null,
     mergeWhenPipelineSucceeds: mr.merge_when_pipeline_succeeds ?? false,
     squashOnMerge: mr.squash_on_merge ?? mr.squash ?? false,
     hasConflicts: mr.has_conflicts ?? false,
@@ -833,6 +837,7 @@ export class GitLabService {
     projectId: string,
     iid: number,
     viewerId: string,
+    force = false,
   ): Promise<boolean> {
     const response = await this.get<{
       user_has_approved?: boolean;
@@ -842,6 +847,7 @@ export class GitLabService {
       operation: "GitLabMergeRequestApprovals",
       source: "MERGE_REQUESTS_PAGE",
       allowStaleOnError: false,
+      force,
     });
     return (
       response.data.user_has_approved ??
@@ -880,7 +886,10 @@ export class GitLabService {
         path: `/projects/${encodeURIComponent(projectId)}/merge_requests/${iid}`,
         operation: "GitLabMergeReadiness",
         source: "MERGE_REQUEST_DETAILS",
-        query: { include_rebase_in_progress: true },
+        query: {
+          include_rebase_in_progress: true,
+          include_diverged_commits_count: true,
+        },
         force,
         allowStaleOnError: false,
       })
@@ -923,6 +932,82 @@ export class GitLabService {
     );
   }
 
+  async managedMergeReadiness(
+    projectId: string,
+    iid: number,
+  ): Promise<MergeSyncReadiness> {
+    const { mr, project, canMerge } = await this.mergeReadiness(projectId, iid);
+    const source = mr.sourceProjectId
+      ? await this.mergeProject(mr.sourceProjectId)
+      : null;
+    const targetOrigin = normalizeGitOrigin(project.web_url).canonicalOrigin;
+    const branch = (
+      await this.get<{ commit: { id: string } }>({
+        path: `/projects/${encodeURIComponent(projectId)}/repository/branches/${encodeURIComponent(mr.targetBranch)}`,
+        operation: "GitLabMergeTargetRevision",
+        source: "MERGE_REQUEST_DETAILS",
+        force: true,
+        allowStaleOnError: false,
+      })
+    ).data;
+    const pipeline = mr.headPipeline;
+    let ciPassed = pipeline?.status === "SUCCESS" && pipeline.sha === mr.sha;
+    if (
+      pipeline?.status === "SUCCESS" &&
+      pipeline.sha !== mr.sha &&
+      pipeline.source === "merge_request_event"
+    ) {
+      const commit = (
+        await this.get<{ parent_ids: string[] }>({
+          path: `/projects/${encodeURIComponent(projectId)}/repository/commits/${encodeURIComponent(pipeline.sha)}`,
+          operation: "GitLabMergePipelineParents",
+          source: "MERGE_REQUEST_DETAILS",
+          force: true,
+          allowStaleOnError: false,
+        })
+      ).data;
+      ciPassed =
+        commit.parent_ids.includes(mr.sha) &&
+        commit.parent_ids.includes(branch.commit.id);
+    }
+    const permanent = !canMerge
+      ? "Your GitLab account cannot merge this request."
+      : mr.draft
+        ? "Mark this merge request ready before merging."
+        : mr.hasConflicts || mr.detailedMergeStatus === "conflict"
+          ? "Resolve merge conflicts before resuming Auto Merge."
+          : ["policies_denied", "requested_changes"].includes(
+                mr.detailedMergeStatus,
+              )
+            ? "GitLab policy or requested changes block this merge."
+            : null;
+    return {
+      state:
+        mr.state === "OPENED"
+          ? "OPEN"
+          : mr.state === "MERGED"
+            ? "MERGED"
+            : "CLOSED",
+      headSha: mr.sha,
+      sourceOrigin: source
+        ? normalizeGitOrigin(source.web_url).canonicalOrigin
+        : "",
+      sourceBranch: mr.sourceBranch,
+      targetOrigin,
+      targetUrl: `${project.web_url.replace(/\/$/, "")}.git`,
+      targetBranch: mr.targetBranch,
+      targetSha: branch.commit.id,
+      ciPassed,
+      canMerge:
+        canMerge &&
+        mr.detailedMergeStatus === "mergeable" &&
+        !mr.draft &&
+        !mr.hasConflicts,
+      blocker: permanent,
+      nativeAutoMerge: mr.mergeWhenPipelineSucceeds,
+    };
+  }
+
   async mergeProject(projectId: string) {
     return (
       await this.get<RawGitLabProject>({
@@ -950,6 +1035,7 @@ export class GitLabService {
     query?: Query;
     force?: boolean;
     allowStaleOnError?: boolean;
+    inferPagination?: boolean;
   }) {
     const items: T[] = [];
     let page = 1;
@@ -961,7 +1047,14 @@ export class GitLabService {
         query: { ...input.query, per_page: 100, page },
       });
       items.push(...response.data);
-      const next = pageValue(response.headers.get("x-next-page"));
+      const nextHeader = response.headers.get("x-next-page");
+      const next =
+        pageValue(nextHeader) ??
+        (input.inferPagination &&
+        nextHeader === null &&
+        response.data.length === 100
+          ? page + 1
+          : null);
       if (!next) break;
       if (seen.has(next))
         throw new Error("GitLab returned a repeated pagination cursor");
@@ -977,11 +1070,12 @@ export class GitLabService {
       message: string,
       preserveFields?: GitLabMergeRequestSummaryField[],
     ) => void,
+    force = false,
   ) {
     if (!discussions)
       mr = {
         ...mr,
-        ...(await this.mergeRequestState(mr.projectId, mr.iid, false).catch(
+        ...(await this.mergeRequestState(mr.projectId, mr.iid, force).catch(
           () => {
             onWarning?.("Could not refresh GitLab merge readiness. Try again.");
             return mr;
@@ -998,6 +1092,8 @@ export class GitLabService {
         path: `${prefix}/approvals`,
         operation: "GitLabMergeRequestApprovals",
         source: "MERGE_REQUESTS_PAGE",
+        force,
+        allowStaleOnError: !force,
       })
         .then((r) => r.data)
         .catch(() => {
@@ -1012,6 +1108,8 @@ export class GitLabService {
             path: `${prefix}/discussions`,
             operation: "GitLabMergeRequestDiscussions",
             source: "MERGE_REQUESTS_PAGE",
+            force,
+            allowStaleOnError: !force,
           })
             .then((items) => items.map(mapGitLabDiscussion))
             .catch(() => {
@@ -1297,7 +1395,7 @@ export class GitLabService {
     ]);
     return (
       override?.ttlSeconds ??
-      (operation === "GitLabReviewerDirectory"
+      (operation === "GitLabReviewerDirectory" && settings.cacheTtlSeconds > 0
         ? 86400
         : settings.cacheTtlSeconds)
     );
@@ -1327,13 +1425,14 @@ export class GitLabService {
       query: input.query,
     });
     const prisma = await getPrismaClient();
-    const cached = await prisma.gitLabRestCacheEntry.findUnique({
-      where: { cacheKey },
-    });
     const ttl = Math.min(
       await this.ttl(input.operation),
       input.maxAgeSeconds ?? Infinity,
     );
+    const cached =
+      ttl > 0
+        ? await prisma.gitLabRestCacheEntry.findUnique({ where: { cacheKey } })
+        : null;
     if (
       cached &&
       input.force !== true &&
@@ -1376,7 +1475,7 @@ export class GitLabService {
           await Promise.all([
             // A mutation, webhook, or credential change may have invalidated this
             // read while GitLab was answering. Do not resurrect its cache entry.
-            generation === this.cacheGeneration
+            ttl > 0 && generation === this.cacheGeneration
               ? prisma.gitLabRestCacheEntry.upsert({
                   where: { cacheKey },
                   create: {
@@ -1429,7 +1528,7 @@ export class GitLabService {
     } catch (error) {
       const statusCode =
         error instanceof GitLabRequestError ? error.statusCode : null;
-      if (cached && input.allowStaleOnError !== false) {
+      if (ttl > 0 && cached && input.allowStaleOnError !== false) {
         await this.logCall({
           method: "GET",
           endpoint,
@@ -2284,6 +2383,8 @@ export class GitLabService {
 
   async mergeRequests(input: {
     scope: GitLabMergeRequestScope;
+    projectScope?: "MANAGED" | "ALL";
+    force?: boolean;
     projectId?: string | null;
     state?: GitLabMergeRequestState | null;
     page?: number;
@@ -2292,6 +2393,60 @@ export class GitLabService {
   }): Promise<Paginated<GitLabMergeRequestView>> {
     const page = Math.max(1, input.page ?? 1);
     const perPage = Math.max(1, Math.min(MAX_PAGE_SIZE, input.perPage ?? 25));
+    if (input.projectScope === "MANAGED" && !input.projectId) {
+      const projects = (await this.projects()).filter(
+        (project) => project.enabled,
+      );
+      const pages = await mapIntegrationRequests(projects, (project) =>
+        this.allPages<RawGitLabMergeRequest>({
+          path: `/projects/${encodeURIComponent(project.id)}/merge_requests`,
+          operation: "GitLabMergeRequests",
+          source: "MERGE_REQUESTS_PAGE",
+          force: input.force,
+          allowStaleOnError: !input.force,
+          query: {
+            scope:
+              input.scope === "MINE"
+                ? "created_by_me"
+                : input.scope === "REVIEW_REQUESTED"
+                  ? "reviews_for_me"
+                  : "all",
+            state:
+              input.state && input.state !== "ALL"
+                ? input.state.toLowerCase()
+                : "all",
+            order_by: "updated_at",
+            sort: "desc",
+            created_after: input.createdAfter ?? undefined,
+          },
+        }),
+      );
+      const items = pages
+        .flat()
+        .sort(
+          (a, b) =>
+            b.updated_at.localeCompare(a.updated_at) ||
+            String(a.project_id).localeCompare(String(b.project_id)) ||
+            b.iid - a.iid,
+        );
+      const offset = (page - 1) * perPage;
+      return {
+        items: await mapIntegrationRequests(
+          items.slice(offset, offset + perPage),
+          (mr) =>
+            this.enrichMergeRequest(
+              mapMergeRequest(mr),
+              undefined,
+              undefined,
+              input.force,
+            ),
+        ),
+        total: items.length,
+        page,
+        perPage,
+        nextPage: offset + perPage < items.length ? page + 1 : null,
+      };
+    }
     if (input.scope === "PROJECT" && !input.projectId) {
       throw new Error(
         "A project is required for project-scoped merge requests",
@@ -2310,6 +2465,8 @@ export class GitLabService {
       path,
       operation: "GitLabMergeRequests",
       source: "MERGE_REQUESTS_PAGE",
+      force: input.force,
+      allowStaleOnError: !input.force,
       query: {
         scope,
         state:
@@ -2325,7 +2482,12 @@ export class GitLabService {
     });
     return {
       items: await mapIntegrationRequests(response.data, (mr) =>
-        this.enrichMergeRequest(mapMergeRequest(mr)),
+        this.enrichMergeRequest(
+          mapMergeRequest(mr),
+          undefined,
+          undefined,
+          input.force,
+        ),
       ),
       total:
         positiveInt(response.headers.get("x-total")) ?? response.data.length,
@@ -2734,6 +2896,7 @@ export class GitLabService {
   private async pipelineMergeRequests(
     projectId: string,
     sha: string,
+    strict = false,
   ): Promise<GitLabPipelineMergeRequestView[]> {
     try {
       const response = await this.allPages<RawGitLabMergeRequest>({
@@ -2741,6 +2904,7 @@ export class GitLabService {
         operation: "GitLabPipelineMergeRequests",
         source: "PIPELINES_PAGE",
         query: { per_page: 100 },
+        allowStaleOnError: !strict,
       });
       return response.map((mergeRequest) => ({
         projectId: String(mergeRequest.project_id),
@@ -2755,7 +2919,8 @@ export class GitLabService {
             : String(mergeRequest.source_project_id),
         targetProjectId: String(mergeRequest.project_id),
       }));
-    } catch {
+    } catch (error) {
+      if (strict) throw error;
       // Commit association is supplementary; keep the pipeline visible when
       // the endpoint is unavailable or the token cannot read the repository.
       return [];
@@ -2932,8 +3097,313 @@ export class GitLabService {
     });
   }
 
-  /** Count all active project pipelines without enriching or observing them. */
+  private async pipelineScopeContext(
+    projectId: string,
+    scope: "RELEVANT" | "MINE",
+  ) {
+    const requests = await this.allPages<RawGitLabMergeRequest>({
+      path: `/projects/${encodeURIComponent(projectId)}/merge_requests`,
+      operation: "GitLabPipelineScopeRequests",
+      source: "PIPELINES_PAGE",
+      allowStaleOnError: false,
+      query: { scope: "created_by_me", state: "all" },
+    });
+    const branches = new Set<string>();
+    if (scope === "RELEVANT") {
+      const prisma = await getPrismaClient();
+      const project = await prisma.gitLabProject.findUnique({
+        where: { id: projectId },
+        select: { webUrl: true },
+      });
+      if (project) {
+        const canonicalOrigin = normalizeGitOrigin(
+          project.webUrl,
+        ).canonicalOrigin;
+        const codebases = await prisma.codebase.findMany({
+          where: { repository: { canonicalOrigin } },
+          select: {
+            branch: true,
+            worktrees: { where: { missingAt: null }, select: { branch: true } },
+          },
+        });
+        for (const codebase of codebases) {
+          if (codebase.branch) branches.add(codebase.branch);
+          for (const worktree of codebase.worktrees)
+            if (worktree.branch) branches.add(worktree.branch);
+        }
+      }
+    }
+    return { requests, branches };
+  }
+
+  private async scopedPipelineRows(
+    projectId: string,
+    scope: "RELEVANT" | "MINE",
+    limit: number,
+    filters: {
+      ref?: string | null;
+      status?: GitLabPipelineStatus | null;
+      source?: string | null;
+    },
+  ) {
+    const { requests, branches } = await this.pipelineScopeContext(
+      projectId,
+      scope,
+    );
+    if (!requests.length && !branches.size)
+      return { rows: [], totalIsExact: true };
+    const ownRequests = new Map(
+      requests.map((mr) => [`${mr.project_id}:${mr.iid}`, mr]),
+    );
+    const projectIds = new Set([
+      projectId,
+      ...requests.flatMap((mr) =>
+        mr.source_project_id == null ? [] : [String(mr.source_project_id)],
+      ),
+    ]);
+    const streams = [...projectIds].map((id) => ({
+      projectId: id,
+      nextPage: 1 as number | null,
+      rows: [] as RawGitLabPipeline[],
+      offset: 0,
+      seenPages: new Set<number>(),
+    }));
+    const readHead = async (stream: (typeof streams)[number]) => {
+      while (stream.offset === stream.rows.length && stream.nextPage !== null) {
+        const page = stream.nextPage;
+        if (stream.seenPages.has(page))
+          throw new Error("GitLab returned a repeated pagination cursor");
+        stream.seenPages.add(page);
+        const response = await this.get<RawGitLabPipeline[]>({
+          path: `/projects/${encodeURIComponent(stream.projectId)}/pipelines`,
+          operation: "GitLabScopedPipelines",
+          source: "PIPELINES_PAGE",
+          allowStaleOnError: false,
+          query: {
+            page,
+            per_page: MAX_PAGE_SIZE,
+            order_by: "id",
+            sort: "desc",
+            status: filters.status?.toLowerCase(),
+            source: filters.source || undefined,
+          },
+        }).catch((error: unknown) => {
+          // MR pipelines can remain readable in either project after CI access
+          // to the other changes. Only checked-out target branches require its CI.
+          if (
+            (stream.projectId !== projectId || branches.size === 0) &&
+            error instanceof GitLabRequestError &&
+            [403, 404].includes(error.statusCode ?? 0)
+          )
+            return { data: [], headers: new Headers({ "x-next-page": "" }) };
+          throw error;
+        });
+        stream.rows = response.data.map((pipeline) => ({
+          ...pipeline,
+          project_id: pipeline.project_id ?? Number(stream.projectId),
+        }));
+        stream.offset = 0;
+        const nextHeader = response.headers.get("x-next-page");
+        stream.nextPage =
+          pageValue(nextHeader) ??
+          (nextHeader === null && response.data.length === MAX_PAGE_SIZE
+            ? page + 1
+            : null);
+      }
+    };
+    const rows: RawGitLabPipeline[] = [];
+    const seen = new Set<string>();
+    // Merge recent provider pages, stopping after one matching row beyond the
+    // requested page. Historical requests never cause a pipeline-history fan-out.
+    while (rows.length < limit) {
+      await mapIntegrationRequests(streams, readHead);
+      const stream = streams
+        .filter((entry) => entry.offset < entry.rows.length)
+        .sort((a, b) => {
+          const left = a.rows[a.offset];
+          const right = b.rows[b.offset];
+          return (
+            right.id - left.id ||
+            String(left.project_id).localeCompare(String(right.project_id))
+          );
+        })[0];
+      if (!stream) break;
+      const pipeline = stream.rows[stream.offset++];
+      const id = `${pipeline.project_id}:${pipeline.id}`;
+      if (seen.has(id)) continue;
+      seen.add(id);
+      // Keep filtering locally too, for instances that omit a provider filter.
+      if (
+        (filters.status && pipeline.status.toUpperCase() !== filters.status) ||
+        (filters.source && pipeline.source !== filters.source)
+      )
+        continue;
+      const mrRef = /^refs\/merge-requests\/(\d+)\//.exec(pipeline.ref);
+      const directRequest = mrRef
+        ? ownRequests.get(`${pipeline.project_id}:${mrRef[1]}`)
+        : undefined;
+      let scopeBranches = directRequest ? [directRequest.source_branch] : [];
+      const checkedOut =
+        String(pipeline.project_id) === projectId && branches.has(pipeline.ref);
+      if (!directRequest && !checkedOut && requests.length) {
+        const associations = await this.pipelineMergeRequests(
+          String(pipeline.project_id),
+          pipeline.sha,
+          true,
+        );
+        scopeBranches = associations
+          .filter((mr) => {
+            const own = ownRequests.get(`${mr.projectId}:${mr.iid}`);
+            return (
+              own?.source_project_id === pipeline.project_id &&
+              own.source_branch === pipeline.ref
+            );
+          })
+          .map((mr) => mr.sourceBranch);
+        // Commit associations can omit old force-pushed heads. Check only MRs
+        // matching this candidate, rather than enumerating every MR's history.
+        if (!scopeBranches.length) {
+          const candidates = requests.filter(
+            (mr) =>
+              ((mr.source_branch === pipeline.ref ||
+                (pipeline.source === "merge_request_event" &&
+                  associations.some(
+                    (associated) =>
+                      associated.projectId === String(mr.project_id) &&
+                      associated.iid === mr.iid,
+                  ))) &&
+                mr.source_project_id === pipeline.project_id) ||
+              (mrRef &&
+                mr.iid === Number(mrRef[1]) &&
+                (mr.project_id === pipeline.project_id ||
+                  mr.source_project_id === pipeline.project_id)),
+          );
+          for (const mr of candidates) {
+            let nextPage: number | null = 1;
+            const seenPages = new Set<number>();
+            while (nextPage !== null) {
+              const page: number = nextPage;
+              if (seenPages.has(page))
+                throw new Error("GitLab returned a repeated pagination cursor");
+              seenPages.add(page);
+              const response = await this.get<RawGitLabPipeline[]>({
+                path: `/projects/${encodeURIComponent(String(mr.project_id))}/merge_requests/${mr.iid}/pipelines`,
+                operation: "GitLabScopedPipelines",
+                source: "PIPELINES_PAGE",
+                allowStaleOnError: false,
+                query: { page, per_page: MAX_PAGE_SIZE },
+              });
+              if (response.data.some((row) => row.id === pipeline.id)) {
+                scopeBranches.push(mr.source_branch);
+                break;
+              }
+              const nextHeader = response.headers.get("x-next-page");
+              nextPage =
+                pageValue(nextHeader) ??
+                (nextHeader === null && response.data.length === MAX_PAGE_SIZE
+                  ? page + 1
+                  : null);
+            }
+            if (scopeBranches.length) break;
+          }
+        }
+      }
+      if (!checkedOut && !scopeBranches.length) continue;
+      if (
+        filters.ref &&
+        pipeline.ref !== filters.ref &&
+        pipeline.ref !== `refs/heads/${filters.ref}` &&
+        !scopeBranches.includes(filters.ref)
+      )
+        continue;
+      rows.push({
+        ...pipeline,
+        scope_branch: filters.ref ?? scopeBranches[0] ?? pipeline.ref,
+      });
+    }
+    return {
+      rows,
+      totalIsExact: streams.every(
+        (stream) =>
+          stream.offset === stream.rows.length && stream.nextPage === null,
+      ),
+    };
+  }
+
+  /** Read active provider pages first; historical MR and branch pipelines never enter sidebar polling. */
   async activePipelinesCount(): Promise<number> {
+    const settings = await this.getSettings();
+    if (!settings.configured) return 0;
+    const projects = (await this.projects()).filter(
+      (project) => project.enabled !== false,
+    );
+    const contexts = await mapIntegrationRequests(
+      projects,
+      async (project) => ({
+        projectId: project.id,
+        ...(await this.pipelineScopeContext(project.id, "RELEVANT")),
+      }),
+    );
+    const ownRequests = new Set(
+      contexts.flatMap((context) =>
+        context.requests.map((mr) => `${mr.project_id}:${mr.iid}`),
+      ),
+    );
+    const projectIds = new Set([
+      ...projects.map((project) => project.id),
+      ...contexts.flatMap((context) =>
+        context.requests.flatMap((mr) =>
+          mr.source_project_id == null ? [] : [String(mr.source_project_id)],
+        ),
+      ),
+    ]);
+    const reads = [...projectIds].flatMap((projectId) =>
+      ACTIVE_GITLAB_PIPELINE_STATUSES.map((status) => ({ projectId, status })),
+    );
+    const pages = await mapIntegrationRequests(
+      reads,
+      async ({ projectId, status }) =>
+        this.allPages<RawGitLabPipeline>({
+          path: `/projects/${encodeURIComponent(projectId)}/pipelines`,
+          operation: "GitLabPipelines",
+          source: "PIPELINES_PAGE",
+          allowStaleOnError: false,
+          inferPagination: true,
+          query: { status: status.toLowerCase() },
+        }),
+    );
+    const active = new Set<string>(ACTIVE_GITLAB_PIPELINE_STATUSES);
+    const unique = [
+      ...new Map(
+        pages
+          .flat()
+          .filter((pipeline) => active.has(pipeline.status.toUpperCase()))
+          .map(
+            (pipeline) =>
+              [`${pipeline.project_id}:${pipeline.id}`, pipeline] as const,
+          ),
+      ).values(),
+    ];
+    const relevant = await mapIntegrationRequests(unique, async (pipeline) => {
+      const projectId = String(pipeline.project_id);
+      const context = contexts.find((item) => item.projectId === projectId);
+      if (context?.branches.has(pipeline.ref)) return true;
+      const mrRef = /^refs\/merge-requests\/(\d+)\//.exec(pipeline.ref);
+      if (mrRef && ownRequests.has(`${projectId}:${mrRef[1]}`)) return true;
+      const associations = await this.pipelineMergeRequests(
+        projectId,
+        pipeline.sha,
+        true,
+      );
+      return associations.some((mr) =>
+        ownRequests.has(`${mr.projectId}:${mr.iid}`),
+      );
+    });
+    return relevant.filter(Boolean).length;
+  }
+
+  /** Count all project pipelines for consumers explicitly opting into all users. */
+  async allActivePipelinesCount(): Promise<number> {
     if (!(await this.getSettings()).configured) return 0;
     const projects = await this.projects();
     const requests = projects.flatMap(({ id }) =>
@@ -3002,12 +3472,53 @@ export class GitLabService {
     page = 1,
     perPage = 25,
     filters: {
+      scope?: "RELEVANT" | "MINE" | "ALL";
       ref?: string | null;
       status?: GitLabPipelineStatus | null;
       source?: string | null;
     } = {},
   ): Promise<Paginated<GitLabPipelineView>> {
     const size = Math.max(1, Math.min(MAX_PAGE_SIZE, perPage));
+    if (filters.scope && filters.scope !== "ALL") {
+      const offset = (Math.max(1, page) - 1) * size;
+      const { rows, totalIsExact } = await this.scopedPipelineRows(
+        projectId,
+        filters.scope,
+        offset + size + 1,
+        filters,
+      );
+      const grouped = new Map<string, GitLabPipelineView[]>();
+      for (const row of rows.slice(offset, offset + size)) {
+        const mapped = mapPipeline(row);
+        grouped.set(mapped.projectId, [
+          ...(grouped.get(mapped.projectId) ?? []),
+          mapped,
+        ]);
+      }
+      const enriched = (
+        await mapIntegrationRequests([...grouped], ([id, pipelines]) =>
+          this.enrichPipelines(id, pipelines),
+        )
+      ).flat();
+      const byId = new Map(
+        enriched.map((pipeline) => [
+          `${pipeline.projectId}:${pipeline.id}`,
+          pipeline,
+        ]),
+      );
+      const items = rows
+        .slice(offset, offset + size)
+        .map((pipeline) => byId.get(`${pipeline.project_id}:${pipeline.id}`)!);
+      await this.observePipelines(items);
+      return {
+        items,
+        total: rows.length,
+        totalIsExact,
+        page,
+        perPage: size,
+        nextPage: offset + size < rows.length ? page + 1 : null,
+      };
+    }
     const response = await this.get<RawGitLabPipeline[]>({
       path: `/projects/${encodeURIComponent(projectId)}/pipelines`,
       operation: "GitLabPipelines",
@@ -3632,10 +4143,12 @@ export class GitLabService {
     const ttlSeconds = ttlMinutes * 60;
     if (
       !Number.isInteger(ttlMinutes) ||
-      ttlSeconds < MIN_TTL_SECONDS ||
+      ttlSeconds < 0 ||
       ttlSeconds > MAX_TTL_SECONDS
     ) {
-      throw new Error("GitLab cache TTL must be from 1 second to 24 hours");
+      throw new Error(
+        "GitLab cache TTL must be an integer from 0 to 1440 minutes (0 disables caching)",
+      );
     }
     const prisma = await getPrismaClient();
     await prisma.gitLabSettings.upsert({
@@ -3750,7 +4263,9 @@ export class GitLabService {
       ttlSeconds < MIN_TTL_SECONDS ||
       ttlSeconds > MAX_TTL_SECONDS
     ) {
-      throw new Error("GitLab cache TTL must be from 1 second to 24 hours");
+      throw new Error(
+        "GitLab cache TTL must be an integer from 0 to 86400 seconds (0 disables caching)",
+      );
     }
     const prisma = await getPrismaClient();
     await prisma.gitLabRestCacheTtlOverride.upsert({

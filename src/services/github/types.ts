@@ -617,6 +617,14 @@ export type GitHubPullRequestDetail = GitHubPullRequestView & {
 };
 
 export type GitHubPullRequestMergeOptions = {
+  canAutoMergeWithSync?: boolean;
+  autoSyncBlockedReason?: string | null;
+  defaultAutoSync?: boolean;
+  autoMergeOperation?: {
+    autoSync: boolean;
+    state: string;
+    lastError: string | null;
+  } | null;
   baseBranchUpdateOptions?: MergeBaseBranchUpdateOptions | null;
   defaultMethod: GitHubMergeMethod | null;
   defaultMoveTicketToDone: boolean;

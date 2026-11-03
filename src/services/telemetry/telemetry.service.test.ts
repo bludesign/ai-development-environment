@@ -52,6 +52,179 @@ function raw(
 beforeEach(() => vi.clearAllMocks());
 
 describe("TelemetryService", () => {
+  test("shows successful runs before telemetry arrives and paginates consecutive runs without duplicates", async () => {
+    const first = {
+      ...raw("run-first", "SEPARATOR", "2026-07-20T16:40:00Z"),
+      separatorKind: "BUILD_RUN",
+    };
+    const second = {
+      ...raw("run-second", "SEPARATOR", "2026-07-20T16:39:00Z"),
+      separatorKind: "BUILD_RUN",
+    };
+    const findMany = vi
+      .fn()
+      .mockResolvedValueOnce([first, second])
+      .mockResolvedValueOnce([second])
+      .mockResolvedValueOnce([first, second]);
+    getPrismaClient.mockResolvedValue({
+      telemetryEntry: { count: vi.fn().mockResolvedValue(0), findMany },
+    });
+    const service = new TelemetryService();
+    const page = await service.timeline({ view: "ANALYTICS", first: 1 });
+    expect(page.items.map((entry) => entry.id)).toEqual([first.id]);
+    expect(page.matchingCount).toBe(0);
+    expect(page.nextCursor).toBeTruthy();
+    const next = await service.timeline({
+      view: "ANALYTICS",
+      first: 1,
+      after: page.nextCursor,
+    });
+    expect(next.items.map((entry) => entry.id)).toEqual([second.id]);
+    expect(next.nextCursor).toBeNull();
+    expect(
+      (
+        await service.timeline({
+          view: "ANALYTICS",
+          showBuildRunSeparators: false,
+        })
+      ).items,
+    ).toEqual([]);
+  });
+  test("returns first-seen metadata scoped to retained events in the requested view", async () => {
+    const firstSeenAt = new Date("2026-07-20T08:00:00Z");
+    const groupBy = vi
+      .fn()
+      .mockResolvedValueOnce([
+        { buildId: "build-z", _min: { clientTime: firstSeenAt } },
+        { buildId: "", _min: { clientTime: firstSeenAt } },
+        { buildId: "build-a", _min: { clientTime: firstSeenAt } },
+      ])
+      .mockResolvedValueOnce([
+        { sessionId: "session-1", _min: { clientTime: firstSeenAt } },
+      ]);
+    getPrismaClient.mockResolvedValue({ telemetryEntry: { groupBy } });
+    expect(await new TelemetryService().idFacets("ANALYTICS")).toEqual({
+      buildIds: [
+        { value: "build-a", firstSeenAt: firstSeenAt.toISOString() },
+        { value: "build-z", firstSeenAt: firstSeenAt.toISOString() },
+      ],
+      sessionIds: [
+        { value: "session-1", firstSeenAt: firstSeenAt.toISOString() },
+      ],
+    });
+    expect(groupBy).toHaveBeenCalledWith({
+      by: ["buildId"],
+      where: { entryType: { in: ["ANALYTICS"] }, buildId: { not: null } },
+      _min: { clientTime: true },
+    });
+  });
+
+  test.each([undefined, "message"])(
+    "hides only run separators with search %s",
+    async (search) => {
+      const rows = [
+        raw("log-new", "CONSOLE", "2026-07-20T16:40:00Z"),
+        {
+          ...raw("run", "SEPARATOR", "2026-07-20T16:39:00Z"),
+          separatorKind: "BUILD_RUN",
+        },
+        raw("log-middle", "CONSOLE", "2026-07-20T16:38:00Z"),
+        {
+          ...raw("created", "SEPARATOR", "2026-07-20T16:37:00Z"),
+          separatorKind: "BUILD_CREATED",
+        },
+        raw("log-old", "CONSOLE", "2026-07-20T16:36:00Z"),
+        raw("manual", "SEPARATOR", "2026-07-20T16:35:00Z"),
+      ];
+      getPrismaClient.mockResolvedValue({
+        telemetryEntry: {
+          count: vi.fn().mockResolvedValue(3),
+          findMany: vi.fn().mockResolvedValue(rows),
+        },
+      });
+      const service = new TelemetryService();
+      const hidden = await service.timeline({
+        view: "CONSOLE",
+        search,
+        showBuildRunSeparators: false,
+      });
+      expect(hidden.items.map((entry) => entry.id)).toEqual([
+        "log-new",
+        "log-middle",
+        "created",
+        "log-old",
+        "manual",
+      ]);
+      expect(hidden.matchingCount).toBe(3);
+      const visible = await service.timeline({ view: "CONSOLE", search });
+      expect(visible.items.map((entry) => entry.id)).toContain("run");
+    },
+  );
+  test.each(
+    [undefined, "message"].flatMap((search) =>
+      [undefined, true, false].map((showBuildRunSeparators) => ({
+        search,
+        showBuildRunSeparators,
+      })),
+    ),
+  )(
+    "exports visible separators with search $search and run visibility $showBuildRunSeparators",
+    async ({ search, showBuildRunSeparators }) => {
+      const rows = [
+        raw("log-new", "CONSOLE", "2026-07-20T16:40:00Z"),
+        {
+          ...raw("run", "SEPARATOR", "2026-07-20T16:39:00Z"),
+          separatorKind: "BUILD_RUN",
+        },
+        raw("log-middle", "CONSOLE", "2026-07-20T16:38:00Z"),
+        {
+          ...raw("created", "SEPARATOR", "2026-07-20T16:37:00Z"),
+          separatorKind: "BUILD_CREATED",
+        },
+        raw("log-old", "CONSOLE", "2026-07-20T16:36:00Z"),
+        raw("manual", "SEPARATOR", "2026-07-20T16:35:00Z"),
+      ];
+      getPrismaClient.mockResolvedValue({
+        telemetryEntry: { findMany: vi.fn().mockResolvedValue(rows) },
+      });
+      const entries = await new TelemetryService().exportEntries({
+        query: { view: "CONSOLE", search, showBuildRunSeparators },
+        selection: null,
+      });
+      expect(entries.map((entry) => entry.id)).toEqual(
+        showBuildRunSeparators === false
+          ? ["log-new", "log-middle", "created", "log-old", "manual"]
+          : rows.map((entry) => entry.id),
+      );
+    },
+  );
+  test.each(["MANUAL", "BUILD_CREATED"])(
+    "keeps a matching export segment across a hidden run before a %s separator",
+    async (separatorKind) => {
+      const rows = [
+        raw("log", "CONSOLE", "2026-07-20T16:40:00Z"),
+        {
+          ...raw("run", "SEPARATOR", "2026-07-20T16:39:00Z"),
+          separatorKind: "BUILD_RUN",
+        },
+        {
+          ...raw("boundary", "SEPARATOR", "2026-07-20T16:38:00Z"),
+          separatorKind,
+        },
+      ];
+      getPrismaClient.mockResolvedValue({
+        telemetryEntry: { findMany: vi.fn().mockResolvedValue(rows) },
+      });
+      const entries = await new TelemetryService().exportEntries({
+        query: {
+          view: "CONSOLE",
+          search: "message",
+          showBuildRunSeparators: false,
+        },
+      });
+      expect(entries.map((entry) => entry.id)).toEqual(["log", "boundary"]);
+    },
+  );
   test("detects reachability-aware local and remote origins", () => {
     expect(
       detectTelemetryOrigins({

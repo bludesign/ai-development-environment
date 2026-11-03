@@ -1,5 +1,10 @@
 import { beforeEach, expect, test, vi } from "vitest";
 
+const configuration = vi.hoisted(() => ({
+  ttl: 300,
+  override: null as number | null,
+}));
+const overrides = vi.hoisted(() => ({ upsert: vi.fn() }));
 const cache = vi.hoisted(() => ({
   findUnique: vi.fn(),
   upsert: vi.fn(),
@@ -8,6 +13,17 @@ const cache = vi.hoisted(() => ({
 vi.mock("@/data/prisma-client", () => ({
   getPrismaClient: async () => ({
     gitLabRestCacheEntry: cache,
+    gitLabSettings: {
+      upsert: vi.fn(async () => ({ cacheTtlSeconds: configuration.ttl })),
+    },
+    gitLabRestCacheTtlOverride: {
+      upsert: overrides.upsert,
+      findUnique: vi.fn(async () =>
+        configuration.override === null
+          ? null
+          : { ttlSeconds: configuration.override },
+      ),
+    },
     reviewerDirectorySnapshot: { deleteMany: vi.fn() },
   }),
 }));
@@ -31,7 +47,7 @@ type RequestInput = {
   maxAgeSeconds?: number;
 };
 type ServiceInternals = {
-  activePipelinesCount(): Promise<number>;
+  allActivePipelinesCount(): Promise<number>;
   getSettings(): Promise<{ configured: boolean }>;
   projects(): Promise<Array<{ id: string }>>;
   get(input: RequestInput): Promise<ResponseView>;
@@ -68,7 +84,7 @@ function service() {
     baseUrl: "https://gitlab.example",
     token: "test-token",
   });
-  vi.spyOn(instance, "ttl").mockResolvedValue(0);
+  vi.spyOn(instance, "ttl").mockResolvedValue(1);
   vi.spyOn(instance, "logCall").mockResolvedValue();
   vi.spyOn(instance, "recordRateLimit").mockResolvedValue();
   return instance;
@@ -130,15 +146,15 @@ test("sidebar pipeline counts reuse the configured cache until expiry and after 
       headers: new Headers({ "x-total": "5" }),
     }));
   try {
-    expect(await instance.activePipelinesCount()).toBe(35);
+    expect(await instance.allActivePipelinesCount()).toBe(35);
     clock.mockReturnValue(now + 60_000);
-    expect(await instance.activePipelinesCount()).toBe(35);
+    expect(await instance.allActivePipelinesCount()).toBe(35);
     expect(upstream).toHaveBeenCalledTimes(7);
     clock.mockReturnValue(now + 300_000);
-    expect(await instance.activePipelinesCount()).toBe(35);
+    expect(await instance.allActivePipelinesCount()).toBe(35);
     expect(upstream).toHaveBeenCalledTimes(14);
     await instance.clearCache();
-    await instance.activePipelinesCount();
+    await instance.allActivePipelinesCount();
     expect(upstream).toHaveBeenCalledTimes(21);
   } finally {
     vi.restoreAllMocks();
@@ -452,4 +468,45 @@ test("deduplicates GitLab enrichment SHAs and caps parallel associations while p
   );
   expect(associations).toHaveBeenCalledTimes(7);
   expect(peak).toBe(4);
+});
+
+test("zero effective TTL disables cache reads, writes and stale fallback", async () => {
+  const instance = service();
+  vi.mocked(instance.ttl).mockResolvedValue(0);
+  const upstream = vi.spyOn(instance, "fetchRaw").mockResolvedValue(response());
+  cache.findUnique.mockResolvedValue({
+    responseJson: "[]",
+    fetchedAt: new Date(),
+  });
+  await instance.get(request);
+  expect(cache.findUnique).not.toHaveBeenCalled();
+  expect(cache.upsert).not.toHaveBeenCalled();
+  upstream.mockRejectedValueOnce(new Error("offline"));
+  await expect(instance.get(request)).rejects.toThrow("offline");
+});
+
+test("zero inherited TTL disables the implicit reviewer default while explicit operation overrides remain enabled", async () => {
+  const instance = new GitLabService() as unknown as ServiceInternals;
+  configuration.ttl = 0;
+  configuration.override = null;
+  expect(await instance.ttl("GitLabReviewerDirectory")).toBe(0);
+  configuration.override = 120;
+  expect(await instance.ttl("GitLabReviewerDirectory")).toBe(120);
+  configuration.override = null;
+  configuration.ttl = 300;
+  expect(await instance.ttl("GitLabReviewerDirectory")).toBe(86400);
+});
+
+test("accepts a disabled per-operation cache override and rejects negative TTLs", async () => {
+  const instance = new GitLabService();
+  vi.spyOn(instance, "cacheTtlOverrides").mockResolvedValue([]);
+  await instance.saveCacheTtlOverride("GitLabPipelines", 0);
+  expect(overrides.upsert).toHaveBeenCalledWith({
+    where: { operation: "GitLabPipelines" },
+    create: { operation: "GitLabPipelines", ttlSeconds: 0 },
+    update: { ttlSeconds: 0 },
+  });
+  await expect(
+    instance.saveCacheTtlOverride("GitLabPipelines", -1),
+  ).rejects.toThrow("0 to 86400 seconds");
 });

@@ -203,7 +203,10 @@ extend type Mutation {
     input: SaveActionCenterSettingsInput!
   ): ActionCenterSettings!
   "Refreshes the local request index using the configured provider caches."
-  refreshActionCenter: Boolean!
+  refreshActionCenter(
+    "Bypass provider caches for pull request discovery, approvals and checks."
+    forcePullRequests: Boolean = false
+  ): Boolean!
   "Acknowledges an action center item and reports whether the operation succeeded."
   acknowledgeActionCenterItem(
     "Values for the requested operation."
@@ -233,6 +236,10 @@ enum ActionCenterSurface {
 
 "A provider-qualified request and its current status."
 type ActionCenterRequest {
+  "Commits missing from the current target branch, or null when unavailable."
+  behindCount: Int
+  "Whether the provider requires updating the source branch before merging."
+  needsRebase: Boolean!
   "The provider reported for this request."
   provider: SourceControlProvider!
   "The repositoryId reported for this request."

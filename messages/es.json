@@ -188,7 +188,10 @@
     "integrationCountsHelp": "Al desactivarlo se detienen las consultas de CI de la barra lateral. El Centro de acciones y las notificaciones siguen actualizándose.",
     "saveSettings": "Guardar configuración",
     "hideUnapprovedRequestsInSidebar": "Ocultar solicitudes pull/merge sin aprobar en la barra lateral",
-    "hideRunningPipelineRequestsInSidebar": "Ocultar solicitudes pull/merge con pipelines en curso en la barra lateral"
+    "hideRunningPipelineRequestsInSidebar": "Ocultar solicitudes pull/merge con pipelines en curso en la barra lateral",
+    "refreshPullRequests": "Actualizar solicitudes de extracción",
+    "needsRebase": "Necesita rebase",
+    "behindTarget": "Por detrás del destino"
   },
   "apps": {
     "title": "Apps",
@@ -1109,6 +1112,22 @@
       "WORKFLOW_RECOVERY_PAUSED": {
         "title": "Flujo de trabajo en pausa tras la recuperación",
         "description": "Un flujo de trabajo se pausa mientras recupera trabajo duradero."
+      },
+      "WORKTREE_CREATED": {
+        "title": "Worktree creado",
+        "description": "Se crea un nuevo worktree administrado."
+      },
+      "WORKTREE_CLEANUP_FAILED": {
+        "title": "Error al limpiar los datos de compilación del worktree",
+        "description": "No se pudieron eliminar los datos de compilación de Xcode de un worktree eliminado."
+      },
+      "GITHUB_PULL_REQUEST_APPROVED": {
+        "title": "Solicitud de extracción aprobada",
+        "description": "Una solicitud de extracción de GitHub pasa de pendiente de aprobación a aprobada."
+      },
+      "GITLAB_MERGE_REQUEST_APPROVED": {
+        "title": "Solicitud de fusión aprobada",
+        "description": "Una solicitud de fusión de GitLab pasa de pendiente de aprobación a aprobada."
       }
     },
     "categories": {
@@ -1117,7 +1136,8 @@
       "GITHUB": "GitHub",
       "GITLAB": "GitLab",
       "RUNS": "Planes y sesiones",
-      "WORKFLOWS": "Flujos de trabajo"
+      "WORKFLOWS": "Flujos de trabajo",
+      "WORKTREES": "Árboles de trabajo"
     },
     "apnsChannel": "Nativa",
     "nativeApns": "Notificaciones nativas",
@@ -1780,6 +1800,9 @@
     "doneStatus": "Estado final de Auto Merge",
     "noDoneStatus": "Sin configurar",
     "doneStatusDescription": "Auto Merge mueve los tickets vinculados a este estado después de que GitHub fusione la solicitud.",
+    "inReviewStatus": "Estado del ticket en revisión",
+    "noInReviewStatus": "Desactivado",
+    "inReviewStatusDescription": "Al asignar revisores desde un worktree, su ticket de Jira vinculado pasa a este estado.",
     "loadingStatuses": "Cargando estados…",
     "selectCompletedStatuses": "Seleccionar estados completados",
     "saveDisplaySettings": "Guardar configuración de visualización",
@@ -1867,7 +1890,10 @@
     "aiBranchNamingHelp": "Usa el modelo seleccionado en el agente del código base en lugar de la función JavaScript. Ambas configuraciones se guardan por separado.",
     "aiBranchPrompt": "Instrucciones para nombrar ramas",
     "aiBranchTokensHelp": "Inserta variables del ticket para elegir qué recibe el modelo. La descripción solo se obtiene y comparte al usar su variable.",
-    "saveAiBranchNaming": "Guardar modo y configuración de IA"
+    "saveAiBranchNaming": "Guardar modo y configuración de IA",
+    "defaultResolution": "Resolución predeterminada",
+    "noDefaultResolution": "Usar valores predeterminados de Jira",
+    "defaultResolutionDescription": "Se usa solo cuando una resolución obligatoria no tiene un valor predeterminado en Jira. La transición del ticket debe permitir el valor seleccionado."
   },
   "jiraTicketDetail": {
     "loading": "Cargando incidencia de Jira…",
@@ -2233,6 +2259,7 @@
     "previous": "Anterior",
     "next": "Siguiente",
     "pageSummary": "Página {page} · {total} en total",
+    "pageSummaryLowerBound": "Página {page} · al menos {total} en total",
     "noMergeRequests": "Ninguna solicitud de fusión coincide con estos filtros.",
     "openInGitLab": "Abrir en GitLab",
     "description": "Descripción",
@@ -2297,7 +2324,7 @@
     "autoRetry": "Reintentos automáticos",
     "enableAutoRetry": "Activar para todas las canalizaciones",
     "noAutoRetryRules": "No hay reglas de reintento automático configuradas para este proyecto.",
-    "allPipelines": "Todas las canalizaciones",
+    "allPipelines": "Todos los pipelines",
     "attempts": "Hasta {count} intentos",
     "cacheControls": "Controles de caché",
     "saveDefaultTtl": "Guardar TTL predeterminado (minutos)",
@@ -2421,7 +2448,11 @@
       "POST_MERGE": "Ejecutando acciones posteriores",
       "COMPLETED": "Completada",
       "ACTION_REQUIRED": "Acción necesaria",
-      "CANCELED": "Cancelada"
+      "CANCELED": "Cancelada",
+      "SYNCING": "Sincronizando rama",
+      "WAITING_CI": "Esperando CI",
+      "WAITING_REQUIREMENTS": "Esperando requisitos de fusión",
+      "MERGING": "Fusionando"
     },
     "pipelineStatuses": {
       "CREATED": "Creado",
@@ -2486,7 +2517,11 @@
     "externalActionResults": "Resultados de acciones externas",
     "nativeRequest": "Solicitud nativa",
     "externalRequest": "Solicitud externa",
-    "checkingActions": "Comprobando acciones…"
+    "checkingActions": "Comprobando acciones…",
+    "managedProjects": "Proyectos administrados",
+    "pipelineScope": "Ámbito de pipelines",
+    "relevantPipelines": "Mis solicitudes de fusión y ramas extraídas",
+    "myMergeRequestPipelines": "Solo mis solicitudes de fusión"
   },
   "gitlabSettings": {
     "title": "Credenciales de GitLab",
@@ -2955,7 +2990,20 @@
     "moveTicketToDoneAfterMerge": "Mover {ticket} al estado de finalización configurado del proyecto",
     "jiraDoneStatusRequired": "Configura el estado de finalización de este proyecto de Jira antes de usar esta opción.",
     "mergedFollowUpFailed": "Solicitud fusionada, pero falló una acción posterior.",
-    "closeMergeResult": "Cerrar"
+    "closeMergeResult": "Cerrar",
+    "autoSyncBranch": "Sincronizar rama automáticamente",
+    "autoSyncBranchDescription": "Rebasar y enviar esta rama cuando cambie el destino, y fusionar cuando la CI y los requisitos de fusión se cumplan. Los conflictos requieren resolución manual.",
+    "enableAutoMerge": "Activar fusión automática",
+    "resumeAutoMerge": "Reanudar fusión automática",
+    "cancelAutoMerge": "Cancelar fusión automática",
+    "refreshMergeOptions": "Actualizar opciones de fusión",
+    "syncStates": {
+      "SYNCING": "Sincronizando rama",
+      "WAITING_CI": "Esperando CI",
+      "WAITING_REQUIREMENTS": "Esperando requisitos de fusión",
+      "MERGING": "Fusionando",
+      "ACTION_REQUIRED": "Acción requerida"
+    }
   },
   "githubComments": {
     "title": "Comentarios de GitHub",
@@ -3768,6 +3816,45 @@
       "complete": "Completado",
       "failed": "Error",
       "retry": "Reintentar"
+    },
+    "bulkSync": {
+      "button": "Sincronización masiva",
+      "description": "Selecciona los worktrees desactualizados para obtener los cambios, rebasar sobre su rama base y enviar con force-with-lease. Los worktrees bloqueados aparecen abajo.",
+      "selection": "Worktrees desactualizados",
+      "empty": "No hay worktrees desactualizados en este ámbito.",
+      "selectAll": "Seleccionar todos",
+      "deselectAll": "Deseleccionar todos",
+      "selectWorktree": "Seleccionar {branch}",
+      "behindBase": "{count} commits detrás de {branch}",
+      "background": "Todo el lote seleccionado continúa en segundo plano al cerrar este panel o salir de la página.",
+      "close": "Cerrar",
+      "start": "Sincronizar seleccionados ({count})",
+      "running": "Sincronización masiva en curso",
+      "completed": "Sincronización masiva completada",
+      "progress": "{completed} de {total} worktrees procesados en esta vista",
+      "job": "Ver registros del trabajo",
+      "monitoring": "Las actualizaciones de progreso no están disponibles temporalmente. Reconectando…",
+      "missingBatch": "El lote de sincronización no está disponible temporalmente.",
+      "blocked": {
+        "unavailable": "Este worktree no está disponible.",
+        "offline": "El agente está desconectado.",
+        "unsupported": "Actualiza el agente para admitir la sincronización masiva.",
+        "activeSync": "Este worktree ya está en cola para la sincronización masiva.",
+        "busy": "Hay otra operación en curso en este checkout.",
+        "conflicts": "Resuelve primero el rebase actual o los conflictos.",
+        "dirty": "Guarda o confirma los cambios antes de sincronizar.",
+        "missingBranch": "Se requiere una rama extraída.",
+        "missingUpstream": "Publica esta rama antes de sincronizar.",
+        "missingBase": "Selecciona una rama base antes de sincronizar."
+      },
+      "status": {
+        "PENDING": "En cola",
+        "RUNNING": "Sincronizando",
+        "SUCCEEDED": "Sincronizado",
+        "FAILED": "Fallido",
+        "SKIPPED": "Omitido",
+        "ATTENTION_REQUIRED": "Requiere atención"
+      }
     }
   },
   "worktreeDetail": {
@@ -4853,7 +4940,10 @@
       "NO_REGEX_MATCH": "no coincide con la expresión regular",
       "IS_EMPTY": "está vacío",
       "IS_NOT_EMPTY": "no está vacío"
-    }
+    },
+    "showBuildRunSeparators": "Mostrar separadores de ejecuciones de compilación",
+    "buildCreated": "Compilación creada",
+    "buildRun": "Ejecución de compilación"
   },
   "crashes": {
     "title": "Fallos",
@@ -5861,7 +5951,8 @@
     "unknownAuthor": "Autor desconocido",
     "focusedDiscussion": "Se muestra una discusión enlazada.",
     "showAllDiscussions": "Mostrar todas las discusiones de esta solicitud de fusión",
-    "fileComment": "Comentario de archivo"
+    "fileComment": "Comentario de archivo",
+    "includeOtherAuthors": "Incluir otros autores de proyectos administrados"
   },
   "serverUrls": {
     "title": "URLs del servidor",
@@ -6007,6 +6098,8 @@
     "assign": "Asignar",
     "assignReviewers": "Asignar revisores",
     "assignmentDescription": "Marca personas para solicitar una revisión o desmárcalas para retirar la solicitud. Carga todos los revisores para ampliar las opciones.",
+    "close": "Cerrar",
+    "ticketTransitionFailed": "Se asignaron los revisores, pero el ticket de Jira no pudo pasar a revisión: {error}",
     "requestClosed": "Esta solicitud de extracción o fusión ya no está abierta. Vuelve a cargar para consultar su estado actual.",
     "requirementCounts": "Necesarios: {required} · Aprobados: {approved} · Solicitados: {requested} · Seleccionados: {selected}",
     "selectReviewer": "Seleccionar a {name} para {group}",

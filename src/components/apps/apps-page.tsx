@@ -192,6 +192,7 @@ export function AppsPage() {
                     label={t("nonMainWorktrees")}
                     value={app.counts.nonMainWorktrees}
                     view="worktrees"
+                    warning
                   />
                   <AppListCount
                     appId={app.id}
@@ -231,9 +232,11 @@ function AppListCount({
   value,
   view,
   destructive = false,
+  warning = false,
 }: {
   appId: string;
   destructive?: boolean;
+  warning?: boolean;
   label: string;
   value: number;
   view: AppDetailView;
@@ -244,7 +247,9 @@ function AppListCount({
         "block rounded-lg p-2 transition-colors focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none",
         destructive
           ? "bg-destructive/10 text-destructive hover:bg-destructive/15"
-          : "bg-muted/50 hover:bg-muted",
+          : warning
+            ? "bg-yellow-500/10 text-yellow-700 hover:bg-yellow-500/15 dark:text-yellow-400"
+            : "bg-muted/50 hover:bg-muted",
       )}
       href={`/dashboard/apps/${appId}?view=${view}`}
     >
@@ -252,7 +257,11 @@ function AppListCount({
       <div
         className={cn(
           "text-xs",
-          destructive ? "text-destructive" : "text-muted-foreground",
+          destructive
+            ? "text-destructive"
+            : warning
+              ? "text-yellow-700 dark:text-yellow-400"
+              : "text-muted-foreground",
         )}
       >
         {label}

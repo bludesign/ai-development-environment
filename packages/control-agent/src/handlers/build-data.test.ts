@@ -25,6 +25,7 @@ import {
 import { captureCommand } from "../capture-command.js";
 import {
   collectAgentDiskSpace,
+  ownedWorktreeBuildData,
   deleteBuildData,
   scanBuildData,
   sizeBuildData,
@@ -81,6 +82,88 @@ const signal = () => new AbortController().signal;
 const log = async () => undefined;
 
 describe("Build Data agent handlers", () => {
+  test("deletes only Xcode project data owned by the removed worktree", async () => {
+    const root = await realpath(await temporaryDirectory());
+    const folder = await realpath(await temporaryDirectory());
+    const other = await realpath(await temporaryDirectory());
+    await mkdir(join(folder, "App.xcodeproj"));
+    await mkdir(join(other, "Other.xcodeproj"));
+    await symlink(
+      join(other, "Other.xcodeproj"),
+      join(folder, "Linked.xcodeproj"),
+    );
+    const workspaceByName = new Map([
+      ["Owned", join(folder, "App.xcodeproj")],
+      ["Sibling", join(`${folder}-sibling`, "App.xcodeproj")],
+      ["Other", join(other, "Other.xcodeproj")],
+      ["Symlinked", join(folder, "Linked.xcodeproj")],
+      ["Cache.noindex", join(folder, "App.xcodeproj")],
+    ]);
+    for (const name of workspaceByName.keys()) await mkdir(join(root, name));
+    capture.mockImplementation(async ({ args }) => {
+      const entry = [...workspaceByName].find(
+        ([name]) => args.at(-1) === join(root, name, "info.plist"),
+      );
+      return {
+        exitCode: entry ? 0 : 1,
+        signal: null,
+        timedOut: false,
+        cancelled: false,
+        stdout: entry?.[1] ?? "",
+        stderr: "",
+        outputTruncated: false,
+      };
+    });
+    const owned = await ownedWorktreeBuildData(
+      folder,
+      { mode: "ABSOLUTE", path: root },
+      10_000,
+      signal(),
+    );
+    expect(owned).toEqual({
+      targets: [{ path: join(root, "Owned"), rootPath: root }],
+      warnings: [],
+    });
+    await deleteBuildData({ targets: owned.targets }, 10_000, signal(), log);
+    await expect(lstat(join(root, "Owned"))).rejects.toMatchObject({
+      code: "ENOENT",
+    });
+    expect((await lstat(join(root, "Other"))).isDirectory()).toBe(true);
+    expect((await lstat(join(root, "Cache.noindex"))).isDirectory()).toBe(true);
+  });
+
+  test("treats absent Xcode build roots as no cleanup and leaves relative data to worktree removal", async () => {
+    const folder = await realpath(await temporaryDirectory());
+    expect(
+      await ownedWorktreeBuildData(
+        folder,
+        { mode: "ABSOLUTE", path: join(folder, "missing") },
+        10_000,
+        signal(),
+      ),
+    ).toEqual({ targets: [], warnings: [] });
+    await mkdir(join(folder, "App.xcodeproj"));
+    await mkdir(join(folder, "DerivedData", "Owned"), { recursive: true });
+    capture.mockResolvedValue({
+      exitCode: 0,
+      signal: null,
+      timedOut: false,
+      cancelled: false,
+      stdout: join(folder, "App.xcodeproj"),
+      stderr: "",
+      outputTruncated: false,
+    });
+    expect(
+      (
+        await ownedWorktreeBuildData(
+          folder,
+          { mode: "RELATIVE", path: "DerivedData" },
+          10_000,
+          signal(),
+        )
+      ).targets,
+    ).toEqual([]);
+  });
   test("scans project, pending, and shared-cache directories without following directory symlinks", async () => {
     const root = await temporaryDirectory();
     const project = join(root, "App-abcdef");

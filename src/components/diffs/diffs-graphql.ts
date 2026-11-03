@@ -6,6 +6,7 @@
 export const DIFF_WORKTREES_QUERY = `query DiffWorktrees {
   worktreeOverview {
     agents {
+      agent { id name }
       codebases {
         repository { id name displayOrigin }
         codebase { id folder defaultBranch }

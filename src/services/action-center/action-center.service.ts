@@ -313,8 +313,10 @@ export class ActionCenterService {
     return result;
   }
 
-  async refresh() {
-    return this.requests ? this.requests.refresh() : true;
+  async refresh(forcePullRequests = false) {
+    return this.requests
+      ? this.requests.refresh(undefined, forcePullRequests)
+      : true;
   }
 
   async list(

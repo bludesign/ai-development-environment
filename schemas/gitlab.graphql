@@ -48,7 +48,25 @@ type SourceControlIntegrationState {
   gitlab: SourceControlProviderState!
 }
 
-"GitLabMergeRequestScope values exposed by the GitLab integration."
+"Selects managed projects or all accessible projects for merge request discovery."
+enum GitLabProjectScope {
+  "Only projects managed by this installation."
+  MANAGED
+  "All projects accessible to the connected account."
+  ALL
+}
+
+"The requests and checked-out branches whose pipelines are included."
+enum GitLabPipelineScope {
+  "The current user's merge requests and checked-out branches."
+  RELEVANT
+  "Only the current user's merge requests."
+  MINE
+  "All pipelines in the selected project."
+  ALL
+}
+
+"Selects merge requests by their relationship to the connected GitLab user."
 enum GitLabMergeRequestScope {
   "Represents the mine value."
   MINE
@@ -530,8 +548,10 @@ type GitLabPipeline {
 type GitLabPipelinePage {
   "Items for GitLabPipelinePage."
   items: [GitLabPipeline!]!
-  "Total for GitLabPipelinePage."
+  "Matching pipelines found; a lower bound when totalIsExact is false."
   total: Int!
+  "False when additional pipeline history remains to be scanned."
+  totalIsExact: Boolean
   "Page for GitLabPipelinePage."
   page: Int!
   "Per page for GitLabPipelinePage."
@@ -953,6 +973,8 @@ extend type Query {
   ): GitLabProjectCandidatePage!
   "Load human comments from relevant open requests or a directly selected request."
   gitlabComments(
+    "Include other authors' requests in managed projects."
+    includeOtherAuthors: Boolean = false
     "Optional project filter; required when selecting a request directly."
     projectId: ID
     "Select a request directly, including merged or closed requests."
@@ -968,6 +990,8 @@ extend type Query {
   ): GitLabCommentPage!
   "Gitlab merge requests for Query."
   gitlabMergeRequests(
+    "Restrict discovery to managed projects by default."
+    projectScope: GitLabProjectScope = MANAGED
     "Scope used by gitlabMergeRequests."
     scope: GitLabMergeRequestScope!
     "Project id used by gitlabMergeRequests."
@@ -988,6 +1012,8 @@ extend type Query {
   ): GitLabMergeRequestDetail!
   "Gitlab pipelines for Query."
   gitlabPipelines(
+    "Default to the current user's requests and checked-out branches."
+    scope: GitLabPipelineScope = RELEVANT
     "Project id used by gitlabPipelines."
     projectId: ID!
     "Page used by gitlabPipelines."
@@ -1213,6 +1239,8 @@ extend type Subscription {
 
 "Persisted merge intent and independently retryable follow-ups."
 type GitLabMergeOperation {
+  "Whether AIDE syncs the linked branch before merging."
+  autoSync: Boolean!
   "Recorded outcomes for selected targeting worktrees."
   baseBranchUpdateResults: [MergeBaseBranchUpdateResult!]!
   "Stable identifier of the saved merge operation."
@@ -1239,6 +1267,12 @@ type GitLabMergeOperation {
 
 "Current GitLab project policy, readiness, defaults and linked follow-ups."
 type GitLabMergeOptions {
+  "Whether the linked worktree supports managed sync and merge."
+  canAutoMergeWithSync: Boolean!
+  "Reason branch syncing is unavailable."
+  autoSyncBlockedReason: String
+  "Previously selected branch syncing setting."
+  defaultAutoSync: Boolean!
   "Targeting worktrees and the reviewed destination for post-merge base updates."
   baseBranchUpdateOptions: MergeBaseBranchUpdateOptions
   "Numeric GitLab target project identifier."
@@ -1311,6 +1345,8 @@ type GitLabMergeResult {
 
 "Submit the SHA reviewed in the merge sheet. Omitted messages use GitLab defaults."
 input SubmitGitLabMergeRequestMergeInput {
+  "Rebase and push the linked branch before waiting for passing CI and merging."
+  autoSync: Boolean = false
   "Selected targeting worktrees to update only after the merge is confirmed."
   baseBranchUpdate: MergeBaseBranchUpdateInput
   "Numeric GitLab target project identifier."

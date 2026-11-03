@@ -336,6 +336,7 @@ export function createGitLabAdministrationTools(
       "Merge or enable auto-merge for the reviewed SHA, preserving safe worktree cleanup and Jira follow-ups.",
       projectRequest.extend({
         sha: z.string().min(1).max(128),
+        autoSync: z.boolean().optional(),
         autoMerge: z.boolean().optional(),
         squash: z.boolean().optional(),
         removeSourceBranch: z.boolean().optional(),
@@ -353,7 +354,7 @@ export function createGitLabAdministrationTools(
     operation(
       service,
       "gitlab_cancel_auto_merge",
-      "Cancel a GitLab merge request's native auto-merge request.",
+      "Cancel a GitLab merge request's native or managed auto-merge request and its pending branch sync.",
       projectRequest,
       "cancelAutoMerge",
       ({ projectId, iid }) => [projectId, iid],

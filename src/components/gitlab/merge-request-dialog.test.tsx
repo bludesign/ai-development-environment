@@ -69,6 +69,157 @@ afterEach(async () => {
 });
 
 describe("GitLab merge options", () => {
+  test("queues branch syncing when a rebase blocks native auto-merge", async () => {
+    request.mockImplementation(async (query) => {
+      if (query.includes("query GitLabMergeRequestMergeOptions"))
+        return {
+          gitlabMergeRequestMergeOptions: {
+            ...options,
+            canMerge: false,
+            canAutoMerge: false,
+            canAutoMergeWithSync: true,
+            autoSyncBlockedReason: null,
+            mergeBlockedReason: "Rebase the source branch before merging.",
+          },
+        } as never;
+      return {
+        submitGitLabMergeRequestMerge: {
+          mergeRequest: {
+            ...target,
+            state: "OPENED",
+            mergeWhenPipelineSucceeds: false,
+          },
+          operation: {
+            ...operation,
+            autoSync: true,
+            state: "SYNCING",
+            mergeConfirmedAt: null,
+            lastError: null,
+          },
+          postMergeError: null,
+        },
+      } as never;
+    });
+    show();
+    await screen.findByRole("checkbox", { name: "Auto sync branch" });
+    expect(
+      (
+        screen.getByRole("button", {
+          name: "Enable auto-merge",
+        }) as HTMLButtonElement
+      ).disabled,
+    ).toBe(true);
+    fireEvent.click(screen.getByRole("checkbox", { name: "Auto sync branch" }));
+    fireEvent.click(screen.getByRole("button", { name: "Enable auto-merge" }));
+    await waitFor(() =>
+      expect(request).toHaveBeenCalledWith(
+        expect.stringContaining("mutation SubmitGitLabMergeRequestMerge"),
+        expect.objectContaining({
+          input: expect.objectContaining({
+            autoMerge: true,
+            autoSync: true,
+            sha: options.sha,
+            worktreeId: options.worktreeId,
+          }),
+        }),
+      ),
+    );
+  });
+
+  test("shows and cancels managed progress even when native auto-merge is off", async () => {
+    request.mockImplementation(async (query) => {
+      if (query.includes("query GitLabMergeRequestMergeOptions"))
+        return {
+          gitlabMergeRequestMergeOptions: {
+            ...options,
+            defaultAutoSync: true,
+            canCancelAutoMerge: true,
+            operation: {
+              ...operation,
+              autoSync: true,
+              state: "WAITING_CI",
+              mergeConfirmedAt: null,
+              lastError: null,
+            },
+          },
+        } as never;
+      return {
+        cancelGitLabAutoMerge: {
+          mergeRequest: {
+            ...target,
+            state: "OPENED",
+            mergeWhenPipelineSucceeds: false,
+          },
+          operation: {
+            ...operation,
+            autoSync: true,
+            state: "CANCELED",
+            mergeConfirmedAt: null,
+            lastError: null,
+          },
+          postMergeError: null,
+        },
+      } as never;
+    });
+    show();
+    await screen.findAllByText("Waiting for CI");
+    expect(screen.getByRole("status").textContent).toBe("Waiting for CI");
+    fireEvent.click(screen.getByRole("button", { name: "Cancel auto-merge" }));
+    await waitFor(() =>
+      expect(request).toHaveBeenCalledWith(
+        expect.stringContaining("mutation CancelGitLabAutoMerge"),
+        { projectId: target.projectId, iid: target.iid },
+      ),
+    );
+  });
+
+  test("resumes only with the currently reviewed SHA", async () => {
+    request.mockImplementation(async (query) => {
+      if (query.includes("query GitLabMergeRequestMergeOptions"))
+        return {
+          gitlabMergeRequestMergeOptions: {
+            ...options,
+            sha: "new-reviewed-sha",
+            defaultAutoSync: true,
+            canAutoMergeWithSync: true,
+            operation: { ...operation, autoSync: true, mergeConfirmedAt: null },
+          },
+        } as never;
+      return {
+        submitGitLabMergeRequestMerge: {
+          mergeRequest: {
+            ...target,
+            state: "OPENED",
+            mergeWhenPipelineSucceeds: false,
+          },
+          operation: {
+            ...operation,
+            autoSync: true,
+            state: "SYNCING",
+            mergeConfirmedAt: null,
+            lastError: null,
+          },
+          postMergeError: null,
+        },
+      } as never;
+    });
+    show();
+    fireEvent.click(
+      await screen.findByRole("button", { name: "Resume Auto Merge" }),
+    );
+    await waitFor(() =>
+      expect(request).toHaveBeenCalledWith(
+        expect.stringContaining("mutation SubmitGitLabMergeRequestMerge"),
+        expect.objectContaining({
+          input: expect.objectContaining({
+            autoSync: true,
+            sha: "new-reviewed-sha",
+          }),
+        }),
+      ),
+    );
+  });
+
   test("submits selected native settings and follow-ups with the reviewed SHA", async () => {
     request.mockImplementation(async (query) => {
       if (query.includes("query GitLabMergeRequestMergeOptions"))

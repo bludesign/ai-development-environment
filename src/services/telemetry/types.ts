@@ -63,6 +63,7 @@ export type TelemetryFilterDefinition = {
 
 export type TelemetryQueryInput = {
   view: TelemetryView;
+  showBuildRunSeparators?: boolean | null;
   first?: number | null;
   after?: string | null;
   search?: string | null;
@@ -126,6 +127,12 @@ export type TelemetrySeparatorPage = {
 
 export type TelemetryFacets = Record<string, string[]>;
 
+export type TelemetryIdFacet = { value: string; firstSeenAt: string };
+export type TelemetryIdFacets = {
+  buildIds: TelemetryIdFacet[];
+  sessionIds: TelemetryIdFacet[];
+};
+
 export type TelemetrySettingsView = {
   localBaseUrlOverride: string | null;
   remoteBaseUrlOverride: string | null;
@@ -180,6 +187,7 @@ export type TelemetryViewSettingsView = {
   view: TelemetryView;
   columns: string[];
   timeFormat: "12" | "24";
+  showBuildRunSeparators: boolean;
   activeColumnPresetId: string | null;
   activeSavedFilterId: string | null;
 };

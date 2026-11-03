@@ -22,6 +22,25 @@ function segment(key: string): string {
   return SAFE_SEGMENT.test(key) ? `.${key}` : `[${JSON.stringify(key)}]`;
 }
 
+/** A display label only; canonical paths remain unchanged for filtering. */
+export function telemetryPathLabel(path: string): string {
+  return path
+    .replace(
+      /^(?:attributes|defaultParameters|additionalParameters)(?:\.|(?=\[))/,
+      "",
+    )
+    .replace(
+      /\[("(?:\\.|[^"\\])*")\]/g,
+      (match, quoted: string, offset: number) => {
+        try {
+          return `${offset === 0 ? "" : "."}${JSON.parse(quoted) as string}`;
+        } catch {
+          return match;
+        }
+      },
+    );
+}
+
 export function flattenTelemetryObject(
   prefix: string,
   value: TelemetryJsonObject,

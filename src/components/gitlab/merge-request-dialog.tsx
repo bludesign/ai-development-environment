@@ -24,6 +24,10 @@ import { Label } from "@/components/ui/label";
 import { Spinner } from "@/components/ui/spinner";
 import { Textarea } from "@/components/ui/textarea";
 import { controlPlaneRequest } from "@/lib/control-plane-client";
+import {
+  MergeSyncFields,
+  MergeSyncStatus,
+} from "@/components/github/merge-sync-fields";
 import type {
   GitLabMergeOptions,
   GitLabMergeRequestView,
@@ -40,7 +44,7 @@ import {
 } from "./merge-request-status";
 
 const OPTIONS_FIELDS = `${BASE_BRANCH_UPDATE_FIELDS} projectId iid title state sha sourceBranch targetBranch mergeMethod squashPolicy squash removeSourceBranch
-  canRemoveSourceBranch canMerge canAutoMerge canCancelAutoMerge autoMergeEnabled mergeBlockedReason autoMergeBlockedReason
+  canRemoveSourceBranch canMerge canAutoMerge canAutoMergeWithSync autoSyncBlockedReason defaultAutoSync canCancelAutoMerge autoMergeEnabled mergeBlockedReason autoMergeBlockedReason
   mergeCommitMessage squashCommitMessage worktreeId worktreeFolder canDeleteWorktree ticketKey ticketDoneStatusConfigured
   defaultMoveTicketToDone defaultDeleteWorktree operation { ${GITLAB_MERGE_OPERATION_FIELDS} }`;
 const RESULT_FIELDS = `mergeRequest { ${GITLAB_MERGE_REQUEST_FIELDS} } operation { ${GITLAB_MERGE_OPERATION_FIELDS} } postMergeError`;
@@ -77,6 +81,7 @@ export function MergeRequestDialog({
   const [selectedWorktreeIds, setSelectedWorktreeIds] = useState<string[]>([]);
   const [deleteWorktree, setDeleteWorktree] = useState(false);
   const [moveTicketToDone, setMoveTicketToDone] = useState(false);
+  const [autoSync, setAutoSync] = useState(false);
 
   const load = useCallback(async () => {
     const current = ++generation.current;
@@ -98,6 +103,7 @@ export function MergeRequestDialog({
       if (generation.current !== current) return;
       const next = data.gitlabMergeRequestMergeOptions;
       setOptions(next);
+      setAutoSync(next.defaultAutoSync ?? false);
       setSelectedWorktreeIds(
         next.baseBranchUpdateOptions?.selectedWorktreeIds ?? [],
       );
@@ -143,9 +149,18 @@ export function MergeRequestDialog({
     result?.mergeRequest.state === "MERGED" ||
     options?.state === "MERGED" ||
     Boolean(operation?.mergeConfirmedAt);
-  const autoMergeEnabled = result
-    ? Boolean(result.mergeRequest.mergeWhenPipelineSucceeds && !confirmed)
-    : options?.autoMergeEnabled;
+  const managedPending = Boolean(
+    operation?.autoSync &&
+    !confirmed &&
+    ["SYNCING", "WAITING_CI", "WAITING_REQUIREMENTS", "MERGING"].includes(
+      operation.state,
+    ),
+  );
+  const autoMergeEnabled =
+    managedPending ||
+    (result
+      ? Boolean(result.mergeRequest.mergeWhenPipelineSucceeds && !confirmed)
+      : options?.autoMergeEnabled);
   const mergeMessageApplicable = options?.mergeMethod !== "ff";
   const invalidMessages =
     (mergeMessageApplicable && customMerge && !mergeMessage.trim()) ||
@@ -194,6 +209,7 @@ export function MergeRequestDialog({
               iid: options.iid,
               sha: options.sha,
               autoMerge: action === "auto",
+              ...(action === "auto" && autoSync ? { autoSync: true } : {}),
               squash,
               removeSourceBranch: options.canRemoveSourceBranch
                 ? removeSourceBranch
@@ -296,6 +312,8 @@ export function MergeRequestDialog({
                     ? t("followUpsPending")
                     : t("mergeCompleted")}
                 </p>
+              ) : managedPending ? (
+                <MergeSyncStatus state={operation?.state} />
               ) : autoMergeEnabled ? (
                 <p role="status" className="text-sm">
                   {t("mergeWaiting")}
@@ -429,6 +447,12 @@ export function MergeRequestDialog({
                   <p className="text-xs text-muted-foreground">
                     {t("useProjectMessage")}
                   </p>
+                  <MergeSyncFields
+                    checked={autoSync}
+                    onChange={setAutoSync}
+                    disabled={disabled}
+                    unavailableReason={options.autoSyncBlockedReason}
+                  />
                   <MergeFollowUpFields
                     options={options}
                     selectedWorktreeIds={selectedWorktreeIds}
@@ -444,12 +468,13 @@ export function MergeRequestDialog({
                       {t("mergeMessagesRequired")}
                     </p>
                   )}
-                  {options.mergeBlockedReason && (
+                  {!autoSync && options.mergeBlockedReason && (
                     <p className="text-sm text-muted-foreground">
                       {options.mergeBlockedReason}
                     </p>
                   )}
-                  {options.autoMergeBlockedReason &&
+                  {!autoSync &&
+                    options.autoMergeBlockedReason &&
                     options.autoMergeBlockedReason !==
                       options.mergeBlockedReason && (
                       <p className="text-sm text-muted-foreground">
@@ -475,6 +500,17 @@ export function MergeRequestDialog({
           </p>
         ))}
         <DialogFooter className="flex-wrap">
+          {operation?.autoSync &&
+            operation.state === "ACTION_REQUIRED" &&
+            !confirmed && (
+              <Button
+                variant="destructive"
+                disabled={disabled}
+                onClick={() => void perform("cancel")}
+              >
+                {t("cancelAutoMerge")}
+              </Button>
+            )}
           <Button
             disabled={busy}
             variant="outline"
@@ -511,18 +547,23 @@ export function MergeRequestDialog({
                 <Button
                   disabled={
                     disabled ||
-                    !options.canAutoMerge ||
+                    !(autoSync
+                      ? options.canAutoMergeWithSync
+                      : options.canAutoMerge) ||
                     invalidMessages ||
                     invalidFollowUp
                   }
                   variant="outline"
                   onClick={() => void perform("auto")}
                 >
-                  {t("enableAutoMerge")}
+                  {operation?.autoSync && operation.state === "ACTION_REQUIRED"
+                    ? tp("resumeAutoMerge")
+                    : t("enableAutoMerge")}
                 </Button>
                 <Button
                   disabled={
                     disabled ||
+                    autoSync ||
                     !options.canMerge ||
                     invalidMessages ||
                     invalidFollowUp

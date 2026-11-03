@@ -96,6 +96,14 @@ export const createJiraResolvers = (
           requireControlPlane(context);
           return jiraService.listProjects();
         },
+        jiraResolutions: (
+          _root: unknown,
+          _args: unknown,
+          context: GraphQLContext,
+        ) => {
+          requireControlPlane(context);
+          return jiraService.resolutions();
+        },
         jiraProjectStatuses: (
           _root: unknown,
           { projectId }: { projectId: string },
@@ -375,6 +383,8 @@ export const createJiraResolvers = (
               completedStatusIds: string[];
               excludedStatusIds?: string[] | null;
               doneStatusId?: string | null;
+              inReviewStatusId?: string | null;
+              defaultResolutionId?: string | null;
             };
           },
           context: GraphQLContext,

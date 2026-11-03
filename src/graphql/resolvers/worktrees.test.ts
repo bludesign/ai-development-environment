@@ -12,6 +12,43 @@ const context = (agentId: string | null) =>
   ({ agentId }) as unknown as GraphQLContext;
 
 describe("worktree resolvers", () => {
+  test("starts and reads scoped Bulk Sync batches only for control-plane callers", async () => {
+    const start = vi.fn().mockResolvedValue({ id: "batch" });
+    const batch = vi.fn().mockResolvedValue({ id: "batch" });
+    const active = vi.fn().mockResolvedValue([]);
+    const resolvers = createWorktreeResolvers(
+      { syncBatches: { start, batch, active } } as unknown as WorktreesService,
+      {} as WorktreeAutomationService,
+    );
+    const input = {
+      worktreeIds: ["worktree"],
+      requestId: "request",
+      appId: "app",
+      agentId: "agent",
+    };
+    await expect(
+      resolvers.Mutation.startWorktreeSyncBatch({}, { input }, context(null)),
+    ).resolves.toEqual({ id: "batch" });
+    expect(start).toHaveBeenCalledWith(input);
+    await resolvers.Query.worktreeSyncBatch({}, { id: "batch" }, context(null));
+    expect(batch).toHaveBeenCalledWith("batch");
+    await resolvers.WorktreeOverview.activeSyncBatches({
+      syncScope: { appId: "app", worktreeId: "worktree" },
+    });
+    expect(active).toHaveBeenCalledWith("app", "worktree");
+    expect(() =>
+      resolvers.Mutation.startWorktreeSyncBatch(
+        {},
+        { input },
+        context("agent"),
+      ),
+    ).toThrow("control-plane");
+    expect(() =>
+      resolvers.Query.worktreeSyncBatch({}, { id: "batch" }, context("agent")),
+    ).toThrow("control-plane");
+    expect(start).toHaveBeenCalledOnce();
+    expect(batch).toHaveBeenCalledOnce();
+  });
   test("forwards saved-only and scoped enrichment reads and rejects agent credentials", async () => {
     const overview = vi.fn().mockResolvedValue({ agents: [] });
     const enrichment = vi.fn().mockResolvedValue({ updates: [] });

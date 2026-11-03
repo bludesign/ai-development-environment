@@ -601,6 +601,43 @@ export function registerWorktreesPageTests(
 
     if (section === "fetch") {
       test.each([undefined, "app-1"])(
+        "offers Bulk Sync after Fetch now and includes worktrees hidden by local filters for %s",
+        async (appId) => {
+          const response = (await request("query Fixture")) as unknown as {
+            worktreeOverview: WorktreeOverview;
+          };
+          response.worktreeOverview.agents[0]!.agent.capabilities.push(
+            "worktree.auto-sync",
+          );
+          response.worktreeOverview.agents[0]!.codebases[0]!.worktrees[0]!.baseBehind = 3;
+          render(<WorktreesPage appId={appId} />);
+          await screen.findByText("feature/AIDE-24");
+          const fetchButton = screen.getByRole("button", { name: "Fetch now" });
+          const bulkButton = screen.getByRole("button", { name: "Bulk Sync" });
+          expect(fetchButton.nextElementSibling).toBe(bulkButton);
+          fireEvent.change(
+            screen.getByRole("searchbox", { name: "Search worktrees" }),
+            {
+              target: { value: "does-not-match" },
+            },
+          );
+          expect(screen.getByText("No matching worktrees")).toBeDefined();
+          fireEvent.click(bulkButton);
+          const sheet = screen.getByRole("dialog", { name: "Bulk Sync" });
+          expect(
+            within(sheet)
+              .getByRole("checkbox", { name: "Select feature/AIDE-24" })
+              .getAttribute("data-state"),
+          ).toBe("checked");
+          expect(
+            request.mock.calls.find(([query]) =>
+              query.includes("query WorktreeOverview"),
+            )?.[0],
+          ).toContain("activeSyncBatches");
+        },
+      );
+
+      test.each([undefined, "app-1"])(
         "shows worktrees and Jira details while GitLab pipelines are blocked for %s",
         async (appId) => {
           const initial = (await request.getMockImplementation()!(

@@ -22,7 +22,7 @@ const worktreeFields = (pipelineFields: string) => `
   tags { id name color createdAt updatedAt }
   activeJob { id agentId kind payload status idempotencyKey result error timeoutSeconds createdAt startedAt finishedAt updatedAt }
   autoSync { worktreeId state conflictWorkflowId conflictWorkflowChoice lastError pauseReason lastSyncedAt updatedAt }
-  autoMerge { worktreeId state repositoryNameWithOwner pullRequestNumber branch mergeMethod commitHeadline commitBody authorEmail deleteWorktree moveTicketToDone ticketKey lastError updatedAt }
+  autoMerge { autoSync worktreeId state repositoryNameWithOwner pullRequestNumber branch mergeMethod commitHeadline commitBody authorEmail deleteWorktree moveTicketToDone ticketKey lastError updatedAt }
   pullRequest { ${PULL_REQUEST_FIELDS} }
   sourceControlRequest { ${SOURCE_CONTROL_REQUEST_FIELDS} }
   gitLabPipelines { ${pipelineFields} }
@@ -42,6 +42,15 @@ export const WORKTREE_LIST_FIELDS = worktreeFields(
 export const CODEBASE_FIELDS = `
   id folder observedOrigin branch headSha upstream ahead behind syncState availability statusError
   defaultBranch localBranches remoteBranches lastCheckedAt lastFetchedAt lastFetchAttemptAt lastFetchError createdAt updatedAt
+`;
+
+export const WORKTREE_SYNC_BATCH_FIELDS = `
+  id status appId agentId createdAt updatedAt finishedAt
+  items {
+    id worktreeId codebaseId agentId agentName repositoryId repositoryName
+    branch baseBranch folder ticketKey ticketTitle baseBehind status jobId error
+    createdAt startedAt finishedAt
+  }
 `;
 
 export const INSPECT_WORKTREE_MUTATION = `mutation InspectWorktree($id: ID!, $requestId: ID!) {

@@ -31,6 +31,16 @@ import {
   completeMergeTicketFollowUp,
 } from "./merge-follow-ups";
 import type { WorktreesService } from "./worktrees.service";
+import {
+  advanceMergeSync,
+  cancelMergeSync,
+  managedMergeOwnsWorktree,
+  MANAGED_MERGE_STATES,
+  mergeSyncUnavailableReason,
+  prepareMergeSync,
+  readMergeSync,
+  withMergeSyncLock,
+} from "./merge-branch-sync";
 
 const POLLING_OPERATION_ID = "server:worktree-automations";
 const POLL_SECONDS = 60;
@@ -112,6 +122,7 @@ function syncView(rule: {
 }
 
 function mergeView(rule: {
+  autoSync?: boolean;
   baseBranchUpdatesJson?: string | null;
   worktreeId: string;
   state: string;
@@ -130,6 +141,7 @@ function mergeView(rule: {
 }) {
   return {
     ...rule,
+    autoSync: rule.autoSync ?? false,
     mergeMethod: rule.mergeMethod as GitHubMergeMethod,
     baseBranchUpdateResults: baseBranchUpdateResults(
       rule.baseBranchUpdatesJson,
@@ -349,6 +361,26 @@ export class WorktreeAutomationService {
     return rule ? mergeView(rule) : null;
   }
 
+  private pullRequestState(rule: {
+    repositoryNameWithOwner: string;
+    pullRequestNumber: number;
+    autoSync?: boolean;
+  }) {
+    const { owner, name } = repositoryParts(rule.repositoryNameWithOwner);
+    return rule.autoSync
+      ? this.github.pullRequestAutomationState(
+          owner,
+          name,
+          rule.pullRequestNumber,
+          true,
+        )
+      : this.github.pullRequestAutomationState(
+          owner,
+          name,
+          rule.pullRequestNumber,
+        );
+  }
+
   async pullRequestMergeOptions(
     owner: string,
     name: string,
@@ -426,8 +458,16 @@ export class WorktreeAutomationService {
         `${owner}/${name}`.toLowerCase()
         ? rule
         : null;
+    const autoSyncBlockedReason = await mergeSyncUnavailableReason(
+      worktree?.id,
+    );
     return {
       ...options,
+      canAutoMergeWithSync:
+        !autoSyncBlockedReason && Boolean(options.canAutoMergeWithSync),
+      autoSyncBlockedReason,
+      defaultAutoSync: saved?.autoSync ?? false,
+      autoMergeOperation: saved?.autoSync ? mergeView(saved) : null,
       baseBranchUpdateOptions: await mergeBaseBranchUpdateOptions(
         worktree,
         saved?.baseBranchUpdatesJson,
@@ -544,6 +584,8 @@ export class WorktreeAutomationService {
   }
 
   async configureAutoMerge(input: {
+    autoSync?: boolean | null;
+    expectedHeadSha?: string | null;
     baseBranchUpdate?: MergeBaseBranchUpdateInput | null;
     worktreeId: string;
     repositoryNameWithOwner: string;
@@ -630,6 +672,103 @@ export class WorktreeAutomationService {
           input.repositoryNameWithOwner.toLowerCase() ||
           existing.pullRequestNumber !== input.pullRequestNumber),
       );
+      if (input.autoSync) {
+        return withMergeSyncLock(worktree.id, async () => {
+          if (
+            existing?.autoSync &&
+            !retargeting &&
+            MANAGED_MERGE_STATES.includes(existing.state)
+          )
+            return mergeView(existing);
+          if (existing?.autoSync)
+            await cancelMergeSync(existing.syncStateJson, this.agentControl);
+          const ready = await this.github.managedMergeReadiness(
+            repository.owner,
+            repository.name,
+            input.pullRequestNumber,
+          );
+          if (!input.expectedHeadSha || ready.headSha !== input.expectedHeadSha)
+            throw new Error(
+              "The source commit changed. Refresh and review it before enabling Auto Merge.",
+            );
+          if (ready.state !== "OPEN" || ready.blocker)
+            throw new Error(
+              ready.blocker ?? "Only open pull requests can use Auto Merge.",
+            );
+          const choices = await this.github.pullRequestMergeOptions(
+            repository.owner,
+            repository.name,
+            input.pullRequestNumber,
+            "WORKTREE_AUTOMATION",
+          );
+          if (!choices.availableMethods.includes(input.method))
+            throw new Error("The selected merge method is not available.");
+          if (!input.commitHeadline.trim())
+            throw new Error("A commit message is required");
+          const syncStateJson = await prepareMergeSync(worktree.id, ready, {
+            provider: "GITHUB",
+            id: worktree.id,
+          });
+          const data = {
+            autoSync: true,
+            syncStateJson,
+            state: "SYNCING",
+            repositoryNameWithOwner: input.repositoryNameWithOwner,
+            pullRequestNumber: input.pullRequestNumber,
+            branch: worktree.branch!,
+            mergeMethod: input.method,
+            commitHeadline: input.commitHeadline.trim(),
+            commitBody: input.commitBody,
+            authorEmail: input.authorEmail?.trim() || null,
+            baseBranchUpdatesJson,
+            deleteWorktree: input.deleteWorktree,
+            moveTicketToDone: input.moveTicketToDone,
+            ticketKey,
+            ticketMovedAt: null,
+            deleteJobId: null,
+            lastError: null,
+          };
+          const rule = await prisma.worktreeAutoMerge.upsert({
+            where: { worktreeId: worktree.id },
+            create: { worktreeId: worktree.id, ...data },
+            update: data,
+          });
+          try {
+            if (retargeting && existing) {
+              await this.github.disablePullRequestAutoMerge(
+                {
+                  ...repositoryParts(existing.repositoryNameWithOwner),
+                  number: existing.pullRequestNumber,
+                },
+                "WORKTREE_AUTOMATION",
+              );
+            }
+            if (ready.nativeAutoMerge)
+              await this.github.disablePullRequestAutoMerge(
+                { ...repository, number: input.pullRequestNumber },
+                "WORKTREE_AUTOMATION",
+              );
+          } catch (error) {
+            await prisma.worktreeAutoMerge.update({
+              where: { worktreeId: worktree.id },
+              data: { state: "ACTION_REQUIRED", lastError: String(error) },
+            });
+            this.worktrees.publishAutomationChange(
+              worktree.id,
+              worktree.codebaseId,
+            );
+            throw error;
+          }
+          this.worktrees.publishAutomationChange(
+            worktree.id,
+            worktree.codebaseId,
+          );
+          this.changed();
+          return mergeView(rule);
+        });
+      }
+      if (existing?.autoSync)
+        await cancelMergeSync(existing.syncStateJson, this.agentControl);
       let previousAutoMergeDisabled = false;
       let newAutoMergeAttempted = false;
       try {
@@ -672,6 +811,7 @@ export class WorktreeAutomationService {
           where: { worktreeId: worktree.id },
           create: {
             worktreeId: worktree.id,
+            autoSync: false,
             repositoryNameWithOwner: input.repositoryNameWithOwner,
             pullRequestNumber: input.pullRequestNumber,
             branch: worktree.branch,
@@ -686,6 +826,8 @@ export class WorktreeAutomationService {
           },
           update: {
             state: "ACTIVE",
+            autoSync: false,
+            syncStateJson: null,
             repositoryNameWithOwner: input.repositoryNameWithOwner,
             pullRequestNumber: input.pullRequestNumber,
             branch: worktree.branch,
@@ -779,29 +921,45 @@ export class WorktreeAutomationService {
   }
 
   async cancelAutoMerge(worktreeId: string): Promise<boolean> {
-    const prisma = await getPrismaClient();
-    const rule = await prisma.worktreeAutoMerge.findUnique({
-      where: { worktreeId },
+    return this.withMergeLock(async () => {
+      const prisma = await getPrismaClient();
+      const rule = await prisma.worktreeAutoMerge.findUnique({
+        where: { worktreeId },
+      });
+      if (!rule) return false;
+      if (rule.autoSync)
+        await cancelMergeSync(rule.syncStateJson, this.agentControl);
+      const repository = repositoryParts(rule.repositoryNameWithOwner);
+      const state = await this.pullRequestState(rule);
+      if (state.state === "OPEN" && state.autoMergeEnabled) {
+        await this.github.disablePullRequestAutoMerge(
+          {
+            ...repository,
+            number: rule.pullRequestNumber,
+          },
+          "WORKTREE_AUTOMATION",
+        );
+      }
+      if (rule.autoSync && state.state === "MERGED") {
+        const intent = readMergeSync(rule.syncStateJson);
+        if (
+          state.headRefOid !== intent.headSha ||
+          state.headRefName !== intent.sourceBranch ||
+          `github.com/${state.headRepositoryNameWithOwner?.toLowerCase()}` !==
+            intent.sourceOrigin.toLowerCase()
+        )
+          throw new Error(
+            "A different source commit merged. Review follow-ups manually.",
+          );
+        await prisma.worktreeAutoMerge.update({
+          where: { worktreeId },
+          data: { state: "POST_MERGE", lastError: null },
+        });
+        this.changed();
+      } else await prisma.worktreeAutoMerge.delete({ where: { worktreeId } });
+      this.worktrees.publishAutomationChange(worktreeId);
+      return true;
     });
-    if (!rule) return false;
-    const repository = repositoryParts(rule.repositoryNameWithOwner);
-    const state = await this.github.pullRequestAutomationState(
-      repository.owner,
-      repository.name,
-      rule.pullRequestNumber,
-    );
-    if (state.state === "OPEN" && state.autoMergeEnabled) {
-      await this.github.disablePullRequestAutoMerge(
-        {
-          ...repository,
-          number: rule.pullRequestNumber,
-        },
-        "WORKTREE_AUTOMATION",
-      );
-    }
-    await prisma.worktreeAutoMerge.delete({ where: { worktreeId } });
-    this.worktrees.publishAutomationChange(worktreeId);
-    return true;
   }
 
   async retryAutoMerge(worktreeId: string) {
@@ -809,12 +967,11 @@ export class WorktreeAutomationService {
     const existing = await prisma.worktreeAutoMerge.findUniqueOrThrow({
       where: { worktreeId },
     });
-    const repository = repositoryParts(existing.repositoryNameWithOwner);
-    const pullRequest = await this.github.pullRequestAutomationState(
-      repository.owner,
-      repository.name,
-      existing.pullRequestNumber,
-    );
+    const pullRequest = await this.pullRequestState(existing);
+    if (existing.autoSync && pullRequest.state !== "MERGED")
+      throw new Error(
+        "Refresh and review the current source commit, then resume Auto Merge from its configuration.",
+      );
     const state = pullRequest.state === "MERGED" ? "POST_MERGE" : "ACTIVE";
     const rule = await prisma.worktreeAutoMerge.update({
       where: { worktreeId },
@@ -860,87 +1017,76 @@ export class WorktreeAutomationService {
       include: { worktree: { select: { codebaseId: true } } },
     });
     for (const rule of rules) {
-      try {
-        const current = await prisma.worktree.findUnique({
-          where: { id: rule.worktreeId },
-          select: { branch: true },
-        });
-        if (current?.branch !== rule.branch) {
-          throw new Error(
-            "Auto Sync paused because the worktree branch changed",
-          );
-        }
-        if (rule.state === "ACTIVE") {
-          const job = await this.worktrees.createAutoSyncJob(
-            rule.worktreeId,
-            "SYNC",
-            rule.branch,
-            randomUUID(),
-          );
-          await prisma.worktreeAutoSync.update({
-            where: { worktreeId: rule.worktreeId },
-            data: {
-              state: "SYNCING",
-              activeJobId: job.id,
-              lastError: null,
-              pauseReason: null,
-            },
+      await withMergeSyncLock(rule.worktreeId, async () => {
+        try {
+          if (await managedMergeOwnsWorktree(rule.worktreeId)) return;
+          const current = await prisma.worktree.findUnique({
+            where: { id: rule.worktreeId },
+            select: { branch: true },
           });
-          continue;
-        }
-        if (rule.state === "RESOLVING") {
-          if (!rule.workflowRunId) {
-            throw new Error("The conflict workflow run is missing");
-          }
-          const run = await this.workflows.run(rule.workflowRunId);
-          if (!run || !TERMINAL_WORKFLOW_STATUSES.has(run.status)) continue;
-          if (run.status !== "SUCCEEDED") {
+          if (current?.branch !== rule.branch) {
             throw new Error(
-              `The conflict workflow ${run.status.toLowerCase()}`,
+              "Auto Sync paused because the worktree branch changed",
             );
           }
-          const job = await this.worktrees.createAutoSyncJob(
-            rule.worktreeId,
-            "FINALIZE",
-            rule.branch,
-            randomUUID(),
-          );
-          await prisma.worktreeAutoSync.update({
-            where: { worktreeId: rule.worktreeId },
-            data: {
-              state: "SYNCING",
-              activeJobId: job.id,
-              workflowRunId: null,
-              pauseReason: null,
-            },
-          });
-          continue;
-        }
-        if (!rule.activeJobId) throw new Error("The Auto Sync job is missing");
-        const job = await this.agentControl.getJob(rule.activeJobId);
-        if (!job || !TERMINAL_JOB_STATUSES.has(job.status)) continue;
-        if (job.status !== "SUCCEEDED") {
-          throw new Error(job.error || `Auto Sync ${job.status.toLowerCase()}`);
-        }
-        const outcome = resultOutcome(job.resultJson);
-        if (outcome === "PREPARATION_CONFLICT") {
-          const paths = resultPreparationConflictPaths(job.resultJson);
-          await prisma.worktreeAutoSync.update({
-            where: { worktreeId: rule.worktreeId },
-            data: {
-              state: "PAUSED",
-              activeJobId: null,
-              workflowRunId: null,
-              lastError:
-                "Auto Sync paused because repository preparations block the rebase" +
-                (paths.length ? `: ${paths.join(", ")}` : ""),
-              pauseReason: "PREPARATION_CONFLICT",
-            },
-          });
-          continue;
-        }
-        if (outcome === "CONFLICT") {
-          if (!rule.conflictWorkflowId) {
+          if (rule.state === "ACTIVE") {
+            const job = await this.worktrees.createAutoSyncJob(
+              rule.worktreeId,
+              "SYNC",
+              rule.branch,
+              randomUUID(),
+            );
+            await prisma.worktreeAutoSync.update({
+              where: { worktreeId: rule.worktreeId },
+              data: {
+                state: "SYNCING",
+                activeJobId: job.id,
+                lastError: null,
+                pauseReason: null,
+              },
+            });
+            return;
+          }
+          if (rule.state === "RESOLVING") {
+            if (!rule.workflowRunId) {
+              throw new Error("The conflict workflow run is missing");
+            }
+            const run = await this.workflows.run(rule.workflowRunId);
+            if (!run || !TERMINAL_WORKFLOW_STATUSES.has(run.status)) return;
+            if (run.status !== "SUCCEEDED") {
+              throw new Error(
+                `The conflict workflow ${run.status.toLowerCase()}`,
+              );
+            }
+            const job = await this.worktrees.createAutoSyncJob(
+              rule.worktreeId,
+              "FINALIZE",
+              rule.branch,
+              randomUUID(),
+            );
+            await prisma.worktreeAutoSync.update({
+              where: { worktreeId: rule.worktreeId },
+              data: {
+                state: "SYNCING",
+                activeJobId: job.id,
+                workflowRunId: null,
+                pauseReason: null,
+              },
+            });
+            return;
+          }
+          if (!rule.activeJobId)
+            throw new Error("The Auto Sync job is missing");
+          const job = await this.agentControl.getJob(rule.activeJobId);
+          if (!job || !TERMINAL_JOB_STATUSES.has(job.status)) return;
+          if (job.status !== "SUCCEEDED") {
+            throw new Error(
+              job.error || `Auto Sync ${job.status.toLowerCase()}`,
+            );
+          }
+          const outcome = resultOutcome(job.resultJson);
+          if (outcome === "PREPARATION_CONFLICT") {
+            const paths = resultPreparationConflictPaths(job.resultJson);
             await prisma.worktreeAutoSync.update({
               where: { worktreeId: rule.worktreeId },
               data: {
@@ -948,74 +1094,92 @@ export class WorktreeAutomationService {
                 activeJobId: null,
                 workflowRunId: null,
                 lastError:
-                  "Auto Sync paused because the rebase has merge conflicts",
-                pauseReason: "REBASE_CONFLICT",
+                  "Auto Sync paused because repository preparations block the rebase" +
+                  (paths.length ? `: ${paths.join(", ")}` : ""),
+                pauseReason: "PREPARATION_CONFLICT",
               },
             });
-            continue;
+            return;
           }
-          const run = await this.workflows.trigger({
-            workflowId: rule.conflictWorkflowId,
-            resourceKind: "WORKTREE",
-            resourceId: rule.worktreeId,
-            subjectKey: `auto-sync:${rule.worktreeId}:${job.id}`,
-            choice: rule.conflictWorkflowChoice,
-          });
-          if (!run) throw new Error("The conflict workflow did not start");
+          if (outcome === "CONFLICT") {
+            if (!rule.conflictWorkflowId) {
+              await prisma.worktreeAutoSync.update({
+                where: { worktreeId: rule.worktreeId },
+                data: {
+                  state: "PAUSED",
+                  activeJobId: null,
+                  workflowRunId: null,
+                  lastError:
+                    "Auto Sync paused because the rebase has merge conflicts",
+                  pauseReason: "REBASE_CONFLICT",
+                },
+              });
+              return;
+            }
+            const run = await this.workflows.trigger({
+              workflowId: rule.conflictWorkflowId,
+              resourceKind: "WORKTREE",
+              resourceId: rule.worktreeId,
+              subjectKey: `auto-sync:${rule.worktreeId}:${job.id}`,
+              choice: rule.conflictWorkflowChoice,
+            });
+            if (!run) throw new Error("The conflict workflow did not start");
+            await prisma.worktreeAutoSync.update({
+              where: { worktreeId: rule.worktreeId },
+              data: {
+                state: "RESOLVING",
+                activeJobId: null,
+                workflowRunId: run.id,
+                lastError: null,
+                pauseReason: null,
+              },
+            });
+            return;
+          }
+          if (outcome === "UNRESOLVED") {
+            throw new Error(
+              "The conflict workflow did not fully resolve the rebase",
+            );
+          }
+          if (outcome !== "SYNCED" && outcome !== "NO_CHANGE") {
+            throw new Error("The Auto Sync job returned an unknown result");
+          }
           await prisma.worktreeAutoSync.update({
             where: { worktreeId: rule.worktreeId },
             data: {
-              state: "RESOLVING",
+              state: "ACTIVE",
               activeJobId: null,
-              workflowRunId: run.id,
+              workflowRunId: null,
               lastError: null,
               pauseReason: null,
+              ...(outcome === "SYNCED" ? { lastSyncedAt: new Date() } : {}),
             },
           });
-          continue;
-        }
-        if (outcome === "UNRESOLVED") {
-          throw new Error(
-            "The conflict workflow did not fully resolve the rebase",
+        } catch (error) {
+          const message =
+            error instanceof Error ? error.message : String(error);
+          const transient =
+            /offline|busy|already has an active job|temporarily/i.test(message);
+          const pauseReason = /branch changed/i.test(message)
+            ? "BRANCH_CHANGED"
+            : "ERROR";
+          await prisma.worktreeAutoSync.updateMany({
+            where: { worktreeId: rule.worktreeId },
+            data: {
+              state: transient ? "ACTIVE" : "PAUSED",
+              activeJobId: null,
+              workflowRunId: null,
+              lastError: message,
+              pauseReason: transient ? null : pauseReason,
+            },
+          });
+        } finally {
+          this.worktrees.publishAutomationChange(
+            rule.worktreeId,
+            rule.worktree.codebaseId,
           );
         }
-        if (outcome !== "SYNCED" && outcome !== "NO_CHANGE") {
-          throw new Error("The Auto Sync job returned an unknown result");
-        }
-        await prisma.worktreeAutoSync.update({
-          where: { worktreeId: rule.worktreeId },
-          data: {
-            state: "ACTIVE",
-            activeJobId: null,
-            workflowRunId: null,
-            lastError: null,
-            pauseReason: null,
-            ...(outcome === "SYNCED" ? { lastSyncedAt: new Date() } : {}),
-          },
-        });
-      } catch (error) {
-        const message = error instanceof Error ? error.message : String(error);
-        const transient =
-          /offline|busy|already has an active job|temporarily/i.test(message);
-        const pauseReason = /branch changed/i.test(message)
-          ? "BRANCH_CHANGED"
-          : "ERROR";
-        await prisma.worktreeAutoSync.updateMany({
-          where: { worktreeId: rule.worktreeId },
-          data: {
-            state: transient ? "ACTIVE" : "PAUSED",
-            activeJobId: null,
-            workflowRunId: null,
-            lastError: message,
-            pauseReason: transient ? null : pauseReason,
-          },
-        });
-      } finally {
-        this.worktrees.publishAutomationChange(
-          rule.worktreeId,
-          rule.worktree.codebaseId,
-        );
-      }
+      });
     }
   }
 
@@ -1026,7 +1190,9 @@ export class WorktreeAutomationService {
   private async reconcileAutoMergeRules(): Promise<void> {
     const prisma = await getPrismaClient();
     const rules = await prisma.worktreeAutoMerge.findMany({
-      where: { state: { in: ["ACTIVE", "POST_MERGE"] } },
+      where: {
+        state: { in: ["ACTIVE", "POST_MERGE", ...MANAGED_MERGE_STATES] },
+      },
       include: {
         worktree: {
           select: {
@@ -1044,12 +1210,48 @@ export class WorktreeAutomationService {
     for (const rule of rules) {
       try {
         const repository = repositoryParts(rule.repositoryNameWithOwner);
+        if (rule.autoSync && rule.state !== "POST_MERGE") {
+          const merged = await advanceMergeSync({
+            ...rule,
+            worktrees: this.worktrees,
+            agents: this.agentControl,
+            readiness: () =>
+              this.github.managedMergeReadiness(
+                repository.owner,
+                repository.name,
+                rule.pullRequestNumber,
+              ),
+            save: ({ acceptedHeadSha: _head, ...data }) =>
+              prisma.worktreeAutoMerge.update({
+                where: { worktreeId: rule.worktreeId },
+                data,
+              }),
+            merge: (sha, targetSha) =>
+              this.github.mergePullRequest(
+                {
+                  ...repository,
+                  number: rule.pullRequestNumber,
+                  method: rule.mergeMethod as GitHubMergeMethod,
+                  commitHeadline: rule.commitHeadline,
+                  commitBody: rule.commitBody,
+                  authorEmail: rule.authorEmail,
+                  expectedHeadSha: sha,
+                  expectedTargetSha: targetSha,
+                },
+                "WORKTREE_AUTOMATION",
+              ),
+          });
+          if (merged) {
+            await prisma.worktreeAutoMerge.update({
+              where: { worktreeId: rule.worktreeId },
+              data: { state: "POST_MERGE", lastError: null },
+            });
+            this.rerunRequested = true;
+          }
+          continue;
+        }
         if (rule.state === "ACTIVE") {
-          const pullRequest = await this.github.pullRequestAutomationState(
-            repository.owner,
-            repository.name,
-            rule.pullRequestNumber,
-          );
+          const pullRequest = await this.pullRequestState(rule);
           if (pullRequest.state === "MERGED") {
             await prisma.worktreeAutoMerge.update({
               where: { worktreeId: rule.worktreeId },
@@ -1064,11 +1266,7 @@ export class WorktreeAutomationService {
           continue;
         }
         if (rule.baseBranchUpdatesJson) {
-          const confirmed = await this.github.pullRequestAutomationState(
-            repository.owner,
-            repository.name,
-            rule.pullRequestNumber,
-          );
+          const confirmed = await this.pullRequestState(rule);
           if (
             confirmed.state !== "MERGED" ||
             !confirmed.headRepositoryNameWithOwner
@@ -1106,11 +1304,7 @@ export class WorktreeAutomationService {
           throw new Error("The primary worktree cannot be deleted");
         }
         if (!rule.deleteJobId) {
-          const pullRequest = await this.github.pullRequestAutomationState(
-            repository.owner,
-            repository.name,
-            rule.pullRequestNumber,
-          );
+          const pullRequest = await this.pullRequestState(rule);
           if (pullRequest.state !== "MERGED") {
             throw new Error("The pull request is no longer merged");
           }

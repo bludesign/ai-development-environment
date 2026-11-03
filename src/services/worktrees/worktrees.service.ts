@@ -16,7 +16,9 @@ import {
   WORKTREE_BRANCH_JOB_KIND,
   WORKTREE_COMMIT_JOB_KIND,
   WORKTREE_AUTO_SYNC_JOB_KIND,
+  WORKTREE_REVIEWED_SYNC_CAPABILITY,
   WORKTREE_DELETE_JOB_KIND,
+  WORKTREE_DELETE_BUILD_DATA_CAPABILITY,
   WORKTREE_GIT_INSPECT_JOB_KIND,
   WORKTREE_GIT_OPERATION_JOB_KIND,
   WORKTREE_GIT_OPERATIONS,
@@ -34,6 +36,7 @@ import {
   type CodebaseWorktreeReport,
   type WorktreeActivityReport,
   type WorktreeAutoSyncPhase,
+  type WorktreeMergeSyncGuard,
   type WorktreeEditorVariant,
   type WorktreeGitOperation,
   type WorktreeOperation,
@@ -83,9 +86,14 @@ import type {
   GitLabPipelineView,
 } from "@/services/gitlab";
 import type { SkillsService } from "@/services/skills";
+import type {
+  NotificationsService,
+  NotificationRecord,
+} from "@/services/notifications";
 import type { WorkflowEventsService } from "@/services/workflows/workflow-events.service";
 import { buildOutOfDate } from "@/services/builds/build-freshness";
 import { overallPreparationState, preparationPayload } from "./preparations";
+import { WorktreeSyncService } from "./worktree-sync.service";
 
 const SETTINGS_ID = "default";
 const ACTIVE_STATUSES = ["QUEUED", "RUNNING"];
@@ -532,6 +540,15 @@ function resultObject(job: {
 }
 
 export class WorktreesService {
+  private syncService?: WorktreeSyncService;
+
+  get syncBatches(): WorktreeSyncService {
+    return (this.syncService ??= new WorktreeSyncService(
+      this,
+      this.agentControl,
+    ));
+  }
+
   private readonly preparationInspections = new Map<
     string,
     ReturnType<AgentControlService["createJob"]>
@@ -546,6 +563,7 @@ export class WorktreesService {
     private readonly workflowEvents?: WorkflowEventsService,
     private readonly pipelineStatus = new GitHubPipelineStatusService(),
     private readonly gitLabService?: GitLabService,
+    private readonly notifications?: NotificationsService,
   ) {
     this.agentControl.registerCompletionHandler(
       WORKTREE_OPERATION_JOB_KIND,
@@ -1849,6 +1867,7 @@ export class WorktreesService {
       settings,
       hiddenCount,
       activeMoves: scopedActiveMoves,
+      syncScope: { appId, worktreeId },
       durationMs: performance.now() - started,
     };
   }
@@ -2519,7 +2538,10 @@ export class WorktreesService {
    * the overview, but as a focused lookup so callers (e.g. workflow triggers)
    * can seed the linked ticket without loading the full worktree payload.
    */
-  async ticketKeyForWorktree(worktreeId: string): Promise<string | null> {
+  async ticketKeyForWorktree(
+    worktreeId: string,
+    expectedBranch?: string,
+  ): Promise<string | null> {
     const prisma = await getPrismaClient();
     const [worktree, settings] = await Promise.all([
       prisma.worktree.findFirst({
@@ -2533,6 +2555,11 @@ export class WorktreesService {
       }),
       prisma.codebaseSettings.findUnique({ where: { id: SETTINGS_ID } }),
     ]);
+    if (expectedBranch !== undefined && worktree?.branch !== expectedBranch) {
+      throw new Error(
+        "The worktree branch changed after reviewers were assigned. Open the original Jira ticket to update its status.",
+      );
+    }
     if (!worktree) return null;
     const pattern =
       worktree.codebase.repository.jiraBranchRegex ??
@@ -3110,6 +3137,17 @@ export class WorktreesService {
         moveId: null,
         codebaseId: worktree.codebaseId,
         rootFolder: worktree.codebase.folder,
+        ...(capabilities(worktree.codebase.agent).includes(
+          WORKTREE_DELETE_BUILD_DATA_CAPABILITY,
+        )
+          ? {
+              derivedData: {
+                mode:
+                  worktree.codebase.agent.derivedDataLocationMode ?? "DEFAULT",
+                path: worktree.codebase.agent.derivedDataPath ?? null,
+              },
+            }
+          : {}),
         folder: worktree.folder,
         gitDirectory: worktree.gitDirectory,
         expectedOrigin: worktree.codebase.repository.canonicalOrigin,
@@ -3423,13 +3461,41 @@ export class WorktreesService {
     expectedBranch: string,
     requestId: string,
     forcePreparations = false,
+    expectedIdentity?: {
+      codebaseId: string;
+      agentId: string;
+      folder: string;
+      gitDirectory: string;
+      baseBranch?: string;
+      expectedOrigin: string;
+    },
+    mergeGuard?: WorktreeMergeSyncGuard,
   ) {
     const worktree = await this.requireRunnable(
       id,
       WORKTREE_AUTO_SYNC_JOB_KIND,
     );
     const payload = this.payload(worktree);
-    if (!payload.baseBranch)
+    if (
+      mergeGuard &&
+      !capabilities(worktree.codebase.agent).includes(
+        WORKTREE_REVIEWED_SYNC_CAPABILITY,
+      )
+    )
+      throw new Error("Update the agent to use Auto Merge branch syncing");
+    if (
+      expectedIdentity &&
+      (worktree.branch !== expectedBranch ||
+        worktree.codebaseId !== expectedIdentity.codebaseId ||
+        worktree.codebase.agentId !== expectedIdentity.agentId ||
+        payload.folder !== expectedIdentity.folder ||
+        payload.gitDirectory !== expectedIdentity.gitDirectory ||
+        (expectedIdentity.baseBranch !== undefined &&
+          payload.baseBranch !== expectedIdentity.baseBranch) ||
+        payload.expectedOrigin !== expectedIdentity.expectedOrigin)
+    )
+      throw new Error("Worktree changed before Bulk Sync could be dispatched");
+    if (!payload.baseBranch && !mergeGuard)
       throw new Error("Auto Sync requires a base branch");
     if (
       (worktree.codebase.repository.preparations?.length ?? 0) > 0 &&
@@ -3447,7 +3513,8 @@ export class WorktreesService {
       payload: {
         ...payload,
         expectedBranch,
-        baseBranch: payload.baseBranch,
+        baseBranch: mergeGuard?.targetBranch ?? payload.baseBranch,
+        ...(mergeGuard ? { mergeGuard } : {}),
         phase,
         forcePreparations,
         preparations: (worktree.codebase.repository.preparations ?? []).map(
@@ -3460,7 +3527,7 @@ export class WorktreesService {
   }
 
   publishAutomationChange(
-    worktreeId: string,
+    worktreeId: string | null,
     codebaseId: string | null = null,
   ): void {
     this.publish(worktreeId, codebaseId);
@@ -4036,6 +4103,7 @@ export class WorktreesService {
     const branches = new Set(parseBranches(codebase.localBranchesJson));
     if (item.branch) branches.add(item.branch);
     let targetWorktreeId = move.targetWorktreeId;
+    let notification: NotificationRecord | null = null;
     await prisma.$transaction(async (transaction) => {
       await transaction.codebase.update({
         where: { id: move.targetCodebaseId },
@@ -4083,12 +4151,19 @@ export class WorktreesService {
           },
         });
         targetWorktreeId = projected.id;
+        notification = await this.worktreeCreatedNotification(
+          transaction,
+          projected.id,
+          item,
+          projected.highlightColor,
+        );
       }
       await transaction.worktreeMove.update({
         where: { id: move.id },
         data: { targetWorktreeId },
       });
     });
+    this.notifications?.created(notification);
     this.publish(targetWorktreeId ?? null, move.targetCodebaseId);
     await this.skillsService?.requestAutoReconcile();
     return targetWorktreeId!;
@@ -4126,6 +4201,17 @@ export class WorktreesService {
           moveId: move.id,
           codebaseId: source.codebaseId,
           rootFolder: source.codebase.folder,
+          ...(capabilities(source.codebase.agent).includes(
+            WORKTREE_DELETE_BUILD_DATA_CAPABILITY,
+          )
+            ? {
+                derivedData: {
+                  mode:
+                    source.codebase.agent.derivedDataLocationMode ?? "DEFAULT",
+                  path: source.codebase.agent.derivedDataPath ?? null,
+                },
+              }
+            : {}),
           folder: source.folder,
           gitDirectory: source.gitDirectory,
           expectedOrigin: source.codebase.repository.canonicalOrigin,
@@ -4238,7 +4324,20 @@ export class WorktreesService {
     worktreeId: string | null;
     status: string;
     error: string | null;
+    resultJson?: string | null;
   }) {
+    let cleanupWarnings: string[] = [];
+    try {
+      const result = JSON.parse(job.resultJson ?? "{}");
+      if (Array.isArray(result?.buildDataCleanup?.warnings)) {
+        cleanupWarnings = result.buildDataCleanup.warnings.filter(
+          (warning: unknown): warning is string =>
+            typeof warning === "string" && warning.length > 0,
+        );
+      }
+    } catch {
+      // Older agents do not report build-data cleanup results.
+    }
     const payload: unknown = JSON.parse(job.payloadJson);
     const moveId =
       payload &&
@@ -4279,7 +4378,13 @@ export class WorktreesService {
         prisma.worktree.deleteMany({ where: { id: move.sourceWorktreeId } }),
         prisma.worktreeMove.update({
           where: { id: move.id },
-          data: { status: "SUCCEEDED", finishedAt: new Date() },
+          data: {
+            status: cleanupWarnings.length
+              ? "SUCCEEDED_WITH_WARNING"
+              : "SUCCEEDED",
+            warning: cleanupWarnings.length ? cleanupWarnings.join("\n") : null,
+            finishedAt: new Date(),
+          },
         }),
       ]);
       this.publish(move.sourceWorktreeId, move.sourceCodebaseId);
@@ -4288,10 +4393,33 @@ export class WorktreesService {
     if (job.status !== "SUCCEEDED" || !job.worktreeId) return;
     const worktree = await prisma.worktree.findUnique({
       where: { id: job.worktreeId },
-      select: { codebaseId: true },
+      select: { codebaseId: true, branch: true, highlightColor: true },
     });
     await prisma.worktree.deleteMany({ where: { id: job.worktreeId } });
     this.publish(job.worktreeId, worktree?.codebaseId ?? null);
+    if (cleanupWarnings.length && this.notifications) {
+      try {
+        const notification = await prisma.$transaction((transaction) =>
+          this.notifications!.recordInTransaction(transaction, {
+            dedupeKey: `worktree-cleanup-warning:${job.id}`,
+            typeKey: "WORKTREE_CLEANUP_FAILED",
+            title: "Worktree deleted; build data cleanup needs attention",
+            body: [worktree?.branch, ...cleanupWarnings]
+              .filter(Boolean)
+              .join(" · ")
+              .slice(0, 1_000),
+            href: `/dashboard/jobs/${encodeURIComponent(job.id)}`,
+            resourceKind: "AGENT_JOB",
+            resourceId: job.id,
+            highlightColor: worktree?.highlightColor ?? null,
+          }),
+        );
+        this.notifications.created(notification);
+      } catch (error) {
+        if (process.env.NODE_ENV !== "test")
+          console.error("Worktree cleanup warning notification failed:", error);
+      }
+    }
   }
 
   private async projectOperation(job: {
@@ -4361,6 +4489,7 @@ export class WorktreesService {
     const branchSet = new Set(parseBranches(codebase.localBranchesJson));
     if (item.branch) branchSet.add(item.branch);
     let worktreeId = job.worktreeId;
+    let notification: NotificationRecord | null = null;
     await prisma.$transaction(async (transaction) => {
       await transaction.codebase.update({
         where: { id: job.codebaseId! },
@@ -4404,6 +4533,7 @@ export class WorktreesService {
         },
       });
       worktreeId = projected.id;
+      let highlightColor = projected.highlightColor;
       if (!projected.initialHighlightApplied) {
         const settings = await transaction.worktreeSettings.findUnique({
           where: { id: SETTINGS_ID },
@@ -4440,8 +4570,16 @@ export class WorktreesService {
           where: { id: projected.id },
           data: { highlightColor: color, initialHighlightApplied: true },
         });
+        highlightColor = color;
       }
+      notification = await this.worktreeCreatedNotification(
+        transaction,
+        projected.id,
+        item,
+        highlightColor,
+      );
     });
+    this.notifications?.created(notification);
     this.publish(worktreeId ?? null, job.codebaseId);
     if (worktreeId) {
       await this.projectPreparationResults(worktreeId, job.resultJson);
@@ -4562,6 +4700,27 @@ export class WorktreesService {
         },
       });
     }
+  }
+
+  private async worktreeCreatedNotification(
+    transaction: Prisma.TransactionClient,
+    worktreeId: string,
+    item: { branch: string | null; relativePath: string },
+    highlightColor: string | null,
+  ): Promise<NotificationRecord | null> {
+    return (
+      this.notifications?.recordInTransaction(transaction, {
+        dedupeKey: `worktree-created:${worktreeId}`,
+        typeKey: "WORKTREE_CREATED",
+        title: "Worktree created",
+        body: (item.branch || item.relativePath).slice(0, 1_000),
+        href: `/dashboard/worktrees/${encodeURIComponent(worktreeId)}`,
+        resourceKind: "WORKTREE",
+        resourceId: worktreeId,
+        worktreeId,
+        highlightColor,
+      }) ?? null
+    );
   }
 
   private async recordWorktreeCreated(worktreeId: string): Promise<void> {

@@ -19,6 +19,14 @@ function detection(requestOrigin?: string | null) {
 
 export const createTelemetryResolvers = (service: TelemetryService) => ({
   Query: {
+    telemetryIdFacets: (
+      _root: unknown,
+      { view }: { view: string },
+      context: GraphQLContext,
+    ) => {
+      requireControlPlane(context);
+      return service.idFacets(view);
+    },
     telemetryTimeline: (
       _root: unknown,
       { input }: { input: TelemetryQueryInput },

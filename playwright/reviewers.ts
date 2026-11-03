@@ -9,7 +9,7 @@ import type {
 
 export type ReviewerCapture = {
   provider: "GITHUB" | "GITLAB";
-  view: "settings" | "assignment" | "status";
+  view: "settings" | "assignment" | "assignment-warning" | "status";
 };
 
 /** Bounded reviewer fixtures keep captures independent of private team membership. */
@@ -109,6 +109,7 @@ export async function stubReviewerCapture(
     currentReviewerIds: ["alex"],
     approvedReviewerIds: [],
     selectedReviewerIds: [],
+    ticketTransitionError: null,
     issues: [],
     discoveryComplete: true,
   };
@@ -195,6 +196,30 @@ export async function stubReviewerCapture(
           },
         },
       });
+    } else if (query.includes("mutation AssignWorktreeReviewers")) {
+      assignment.currentReviewerIds = ["alex", "priya"];
+      assignment.requirements = assignment.requirements.map((requirement) => ({
+        ...requirement,
+        candidateReviewerIds: requirement.candidateReviewerIds.filter(
+          (id) => id !== "priya",
+        ),
+        requestedReviewerIds: assignment.currentReviewerIds.filter((id) =>
+          requirement.eligibleReviewerIds.includes(id),
+        ),
+      }));
+      await route.fulfill({
+        json: {
+          data: {
+            assignWorktreeReviewers: {
+              ...assignment,
+              ticketTransitionError:
+                capture.view === "assignment-warning"
+                  ? "Complete the required Comment field on the Jira ticket, then choose In Review."
+                  : null,
+            },
+          },
+        },
+      });
     } else if (query.includes("query WorktreeDetailOverview")) {
       const response = await route.fetch();
       const result = await response.json();
@@ -266,6 +291,23 @@ export async function openReviewerCapture(
       name: "Assign reviewers",
       exact: true,
     });
+    if (capture.view === "assignment-warning") {
+      await picker
+        .getByRole("button", { name: "Save changes", exact: true })
+        .click();
+      await expect(picker.getByRole("alert")).toContainText(
+        "Reviewers were assigned, but the Jira ticket could not be moved to in review:",
+      );
+      await expect(
+        picker.getByRole("option", {
+          name: "Select priya-nair for Platform owners",
+          exact: true,
+        }),
+      ).toHaveAttribute("data-checked", "true");
+      await expect(
+        picker.getByRole("button", { name: "Save changes", exact: true }),
+      ).toBeDisabled();
+    }
     await expect(picker).toBeInViewport({ ratio: 1 });
     await expect(
       picker.getByRole("heading", { name: "Assign reviewers", exact: true }),

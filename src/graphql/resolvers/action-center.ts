@@ -12,6 +12,10 @@ function requireControlPlane(context: GraphQLContext): void {
 }
 
 export const createActionCenterResolvers = (service: ActionCenterService) => ({
+  ActionCenterRequest: {
+    needsRebase: (request: { needsRebase?: boolean }) =>
+      request.needsRebase ?? false,
+  },
   ActionCenterWorktree: {
     relativePath: (worktree: {
       folder: string;
@@ -58,11 +62,11 @@ export const createActionCenterResolvers = (service: ActionCenterService) => ({
     },
     refreshActionCenter: (
       _root: unknown,
-      _args: unknown,
+      args: { forcePullRequests?: boolean },
       context: GraphQLContext,
     ) => {
       requireControlPlane(context);
-      return service.refresh();
+      return service.refresh(args.forcePullRequests ?? false);
     },
     acknowledgeActionCenterItem: (
       _root: unknown,

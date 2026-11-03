@@ -323,9 +323,33 @@ export function ActionCenterItem({
           </div>
           <div className="min-w-0 flex-1">
             <CardTitle className="min-w-0 text-base">
-              <Link className="block truncate hover:underline" href={item.href}>
-                {title}
-              </Link>
+              {item.request ? (
+                <span className="flex min-w-0 gap-1.5">
+                  <a
+                    className="shrink-0 hover:underline"
+                    href={item.request.url}
+                    target="_blank"
+                    rel="noreferrer"
+                  >
+                    {item.request.provider === "GITHUB" ? "#" : "!"}
+                    {item.request.number}
+                  </a>
+                  <Link
+                    aria-label={title}
+                    className="min-w-0 truncate hover:underline"
+                    href={item.href}
+                  >
+                    {item.label}
+                  </Link>
+                </span>
+              ) : (
+                <Link
+                  className="block truncate hover:underline"
+                  href={item.href}
+                >
+                  {title}
+                </Link>
+              )}
             </CardTitle>
             <CardDescription
               className={cn(

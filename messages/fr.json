@@ -188,7 +188,10 @@
     "integrationCountsHelp": "La désactivation arrête les requêtes CI dédiées à la barre latérale. Le Centre d’actions et les notifications continuent de s’actualiser.",
     "saveSettings": "Enregistrer les paramètres",
     "hideUnapprovedRequestsInSidebar": "Masquer les demandes pull/merge non approuvées dans la barre latérale",
-    "hideRunningPipelineRequestsInSidebar": "Masquer les demandes pull/merge dont les pipelines sont en cours dans la barre latérale"
+    "hideRunningPipelineRequestsInSidebar": "Masquer les demandes pull/merge dont les pipelines sont en cours dans la barre latérale",
+    "refreshPullRequests": "Actualiser les pull requests",
+    "needsRebase": "Rebase nécessaire",
+    "behindTarget": "En retard sur la cible"
   },
   "apps": {
     "title": "Apps",
@@ -1109,6 +1112,22 @@
       "WORKFLOW_RECOVERY_PAUSED": {
         "title": "Workflow en pause après récupération",
         "description": "Un workflow se met en pause pendant la récupération de son travail durable."
+      },
+      "WORKTREE_CREATED": {
+        "title": "Worktree créé",
+        "description": "Un nouveau worktree géré est créé."
+      },
+      "WORKTREE_CLEANUP_FAILED": {
+        "title": "Échec du nettoyage des données de build du worktree",
+        "description": "Les données de build Xcode d’un worktree supprimé n’ont pas pu être effacées."
+      },
+      "GITHUB_PULL_REQUEST_APPROVED": {
+        "title": "Pull request approuvée",
+        "description": "Une pull request GitHub passe de l’attente d’approbation à l’état approuvé."
+      },
+      "GITLAB_MERGE_REQUEST_APPROVED": {
+        "title": "Demande de fusion approuvée",
+        "description": "Une demande de fusion GitLab passe de l’attente d’approbation à l’état approuvé."
       }
     },
     "categories": {
@@ -1117,7 +1136,8 @@
       "GITHUB": "GitHub",
       "GITLAB": "GitLab",
       "RUNS": "Plans et sessions",
-      "WORKFLOWS": "Workflows"
+      "WORKFLOWS": "Workflows",
+      "WORKTREES": "Arbres de travail"
     },
     "apnsChannel": "Native",
     "nativeApns": "Notifications natives",
@@ -1780,6 +1800,9 @@
     "doneStatus": "Statut terminé d’Auto Merge",
     "noDoneStatus": "Non configuré",
     "doneStatusDescription": "Auto Merge déplace les tickets liés vers ce statut après la fusion GitHub.",
+    "inReviewStatus": "Statut du ticket en révision",
+    "noInReviewStatus": "Désactivé",
+    "inReviewStatusDescription": "L’attribution de réviseurs depuis un worktree déplace le ticket Jira lié vers ce statut.",
     "loadingStatuses": "Chargement des statuts…",
     "selectCompletedStatuses": "Sélectionner les statuts terminés",
     "saveDisplaySettings": "Enregistrer les paramètres d’affichage",
@@ -1867,7 +1890,10 @@
     "aiBranchNamingHelp": "Utilisez le modèle choisi sur l’agent de la base de code à la place de la fonction JavaScript. Les deux configurations sont conservées séparément.",
     "aiBranchPrompt": "Instructions de nommage des branches",
     "aiBranchTokensHelp": "Insérez des variables du ticket pour choisir les données reçues par le modèle. La description est chargée et partagée uniquement si sa variable est utilisée.",
-    "saveAiBranchNaming": "Enregistrer le mode et les réglages IA"
+    "saveAiBranchNaming": "Enregistrer le mode et les réglages IA",
+    "defaultResolution": "Résolution par défaut",
+    "noDefaultResolution": "Utiliser les valeurs par défaut Jira",
+    "defaultResolutionDescription": "Utilisée uniquement lorsqu’une résolution obligatoire n’a pas de valeur par défaut Jira. La transition du ticket doit autoriser la valeur sélectionnée."
   },
   "jiraTicketDetail": {
     "loading": "Chargement du ticket Jira…",
@@ -2233,6 +2259,7 @@
     "previous": "Précédent",
     "next": "Suivant",
     "pageSummary": "Page {page} · {total} au total",
+    "pageSummaryLowerBound": "Page {page} · au moins {total} au total",
     "noMergeRequests": "Aucune demande de fusion ne correspond à ces filtres.",
     "openInGitLab": "Ouvrir dans GitLab",
     "description": "Description",
@@ -2297,7 +2324,7 @@
     "autoRetry": "Nouvelles tentatives automatiques",
     "enableAutoRetry": "Activer pour toutes les pipelines",
     "noAutoRetryRules": "Aucune règle de nouvelle tentative automatique n’est configurée pour ce projet.",
-    "allPipelines": "Toutes les pipelines",
+    "allPipelines": "Tous les pipelines",
     "attempts": "Jusqu’à {count} tentatives",
     "cacheControls": "Contrôles du cache",
     "saveDefaultTtl": "Enregistrer le TTL par défaut (minutes)",
@@ -2421,7 +2448,11 @@
       "POST_MERGE": "Actions suivantes en cours",
       "COMPLETED": "Terminée",
       "ACTION_REQUIRED": "Action requise",
-      "CANCELED": "Annulée"
+      "CANCELED": "Annulée",
+      "SYNCING": "Synchronisation de la branche",
+      "WAITING_CI": "En attente de la CI",
+      "WAITING_REQUIREMENTS": "En attente des conditions de fusion",
+      "MERGING": "Fusion en cours"
     },
     "pipelineStatuses": {
       "CREATED": "Créé",
@@ -2486,7 +2517,11 @@
     "externalActionResults": "Résultats des actions externes",
     "nativeRequest": "Requête native",
     "externalRequest": "Requête externe",
-    "checkingActions": "Vérification des actions…"
+    "checkingActions": "Vérification des actions…",
+    "managedProjects": "Projets gérés",
+    "pipelineScope": "Périmètre des pipelines",
+    "relevantPipelines": "Mes demandes de fusion et branches extraites",
+    "myMergeRequestPipelines": "Mes demandes de fusion uniquement"
   },
   "gitlabSettings": {
     "title": "Identifiants GitLab",
@@ -2955,7 +2990,20 @@
     "moveTicketToDoneAfterMerge": "Déplacer {ticket} vers le statut terminé configuré du projet",
     "jiraDoneStatusRequired": "Configurez le statut terminé de ce projet Jira avant d’utiliser cette option.",
     "mergedFollowUpFailed": "Pull request fusionnée, mais une action ultérieure a échoué.",
-    "closeMergeResult": "Fermer"
+    "closeMergeResult": "Fermer",
+    "autoSyncBranch": "Synchroniser automatiquement la branche",
+    "autoSyncBranchDescription": "Rebaser et pousser cette branche lorsque la cible change, puis fusionner après la réussite de la CI et la satisfaction des conditions de fusion. Les conflits nécessitent une résolution manuelle.",
+    "enableAutoMerge": "Activer la fusion automatique",
+    "resumeAutoMerge": "Reprendre la fusion automatique",
+    "cancelAutoMerge": "Annuler la fusion automatique",
+    "refreshMergeOptions": "Actualiser les options de fusion",
+    "syncStates": {
+      "SYNCING": "Synchronisation de la branche",
+      "WAITING_CI": "En attente de la CI",
+      "WAITING_REQUIREMENTS": "En attente des conditions de fusion",
+      "MERGING": "Fusion en cours",
+      "ACTION_REQUIRED": "Action requise"
+    }
   },
   "githubComments": {
     "title": "Commentaires GitHub",
@@ -3768,6 +3816,45 @@
       "complete": "Terminé",
       "failed": "Échec",
       "retry": "Réessayer"
+    },
+    "bulkSync": {
+      "button": "Synchronisation groupée",
+      "description": "Sélectionnez les worktrees obsolètes pour récupérer les changements, rebaser sur leur branche de base et pousser avec force-with-lease. Les worktrees bloqués sont affichés ci-dessous.",
+      "selection": "Worktrees obsolètes",
+      "empty": "Aucun worktree obsolète dans ce périmètre.",
+      "selectAll": "Tout sélectionner",
+      "deselectAll": "Tout désélectionner",
+      "selectWorktree": "Sélectionner {branch}",
+      "behindBase": "{count} commits de retard sur {branch}",
+      "background": "Tout le lot sélectionné continue en arrière-plan lorsque vous fermez ce panneau ou quittez la page.",
+      "close": "Fermer",
+      "start": "Synchroniser la sélection ({count})",
+      "running": "Synchronisation groupée en cours",
+      "completed": "Synchronisation groupée terminée",
+      "progress": "{completed} worktrees traités sur {total} dans cette vue",
+      "job": "Voir les journaux de la tâche",
+      "monitoring": "Les mises à jour de progression sont temporairement indisponibles. Reconnexion…",
+      "missingBatch": "Le lot de synchronisation est temporairement indisponible.",
+      "blocked": {
+        "unavailable": "Ce worktree est indisponible.",
+        "offline": "L’agent est hors ligne.",
+        "unsupported": "Mettez à jour l’agent pour la synchronisation groupée.",
+        "activeSync": "Ce worktree est déjà en attente de synchronisation groupée.",
+        "busy": "Une autre opération est en cours dans ce checkout.",
+        "conflicts": "Résolvez d’abord le rebase en cours ou les conflits.",
+        "dirty": "Remisez ou validez les changements avant la synchronisation.",
+        "missingBranch": "Une branche extraite est requise.",
+        "missingUpstream": "Publiez cette branche avant la synchronisation.",
+        "missingBase": "Sélectionnez une branche de base avant la synchronisation."
+      },
+      "status": {
+        "PENDING": "En attente",
+        "RUNNING": "Synchronisation",
+        "SUCCEEDED": "Synchronisé",
+        "FAILED": "Échec",
+        "SKIPPED": "Ignoré",
+        "ATTENTION_REQUIRED": "Action requise"
+      }
     }
   },
   "worktreeDetail": {
@@ -4853,7 +4940,10 @@
       "NO_REGEX_MATCH": "ne correspond pas à l’expression régulière",
       "IS_EMPTY": "est vide",
       "IS_NOT_EMPTY": "n’est pas vide"
-    }
+    },
+    "showBuildRunSeparators": "Afficher les séparateurs d’exécution des builds",
+    "buildCreated": "Build créé",
+    "buildRun": "Exécution du build"
   },
   "crashes": {
     "title": "Plantages",
@@ -5861,7 +5951,8 @@
     "unknownAuthor": "Auteur inconnu",
     "focusedDiscussion": "Affichage d’une discussion liée.",
     "showAllDiscussions": "Afficher toutes les discussions de cette demande de fusion",
-    "fileComment": "Commentaire sur un fichier"
+    "fileComment": "Commentaire sur un fichier",
+    "includeOtherAuthors": "Inclure les autres auteurs des projets gérés"
   },
   "serverUrls": {
     "title": "URL du serveur",
@@ -6007,6 +6098,8 @@
     "assign": "Attribuer",
     "assignReviewers": "Attribuer des relecteurs",
     "assignmentDescription": "Cochez des personnes pour demander une révision ou décochez-les pour retirer la demande. Chargez tous les réviseurs pour élargir les choix.",
+    "close": "Fermer",
+    "ticketTransitionFailed": "Les réviseurs ont été attribués, mais le ticket Jira n’a pas pu passer en révision : {error}",
     "requestClosed": "Cette pull request ou merge request n’est plus ouverte. Rechargez pour vérifier son état actuel.",
     "requirementCounts": "Requis : {required} · Approuvés : {approved} · Demandés : {requested} · Sélectionnés : {selected}",
     "selectReviewer": "Sélectionner {name} pour {group}",

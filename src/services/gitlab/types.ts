@@ -19,6 +19,8 @@ export type GitLabRequestSource =
   | "WEBHOOK_MANAGEMENT";
 
 export type GitLabCallSource = "LIVE" | "CACHE" | "ERROR";
+export type GitLabProjectScope = "MANAGED" | "ALL";
+export type GitLabPipelineScope = "RELEVANT" | "MINE" | "ALL";
 export type GitLabMergeRequestScope =
   "MINE" | "REVIEW_REQUESTED" | "PROJECT" | "ALL";
 export type GitLabMergeRequestState = "OPENED" | "CLOSED" | "MERGED" | "ALL";
@@ -224,6 +226,7 @@ export type GitLabMergeRequestView = {
   reviewers: GitLabUserView[];
   labels: string[];
   detailedMergeStatus: string;
+  behindCount?: number | null;
   mergeWhenPipelineSucceeds: boolean;
   squashOnMerge: boolean;
   hasConflicts: boolean;
@@ -234,6 +237,7 @@ export type GitLabMergeRequestView = {
 };
 
 export type GitLabMergeOperationView = {
+  autoSync?: boolean;
   baseBranchUpdateResults?: MergeBaseBranchUpdateResult[];
   id: string;
   state: string;
@@ -248,6 +252,9 @@ export type GitLabMergeOperationView = {
 };
 
 export type GitLabMergeOptions = {
+  canAutoMergeWithSync?: boolean;
+  autoSyncBlockedReason?: string | null;
+  defaultAutoSync?: boolean;
   baseBranchUpdateOptions?: MergeBaseBranchUpdateOptions | null;
   projectId: string;
   iid: number;
@@ -280,6 +287,7 @@ export type GitLabMergeOptions = {
 };
 
 export type SubmitGitLabMergeRequestMergeInput = {
+  autoSync?: boolean | null;
   baseBranchUpdate?: MergeBaseBranchUpdateInput | null;
   projectId: string;
   iid: number;
@@ -386,6 +394,7 @@ export type GitLabAutoRetryRuleView = {
 export type Paginated<T> = {
   items: T[];
   total: number;
+  totalIsExact?: boolean;
   page: number;
   perPage: number;
   nextPage: number | null;

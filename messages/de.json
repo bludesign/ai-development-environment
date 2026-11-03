@@ -188,7 +188,10 @@
     "integrationCountsHelp": "Deaktiviert die separate CI-Abfrage der Seitenleiste. Action Center und Benachrichtigungen werden weiterhin aktualisiert.",
     "saveSettings": "Einstellungen speichern",
     "hideUnapprovedRequestsInSidebar": "Nicht genehmigte Pull-/Merge-Requests in der Seitenleiste ausblenden",
-    "hideRunningPipelineRequestsInSidebar": "Pull-/Merge-Requests mit laufenden Pipelines in der Seitenleiste ausblenden"
+    "hideRunningPipelineRequestsInSidebar": "Pull-/Merge-Requests mit laufenden Pipelines in der Seitenleiste ausblenden",
+    "refreshPullRequests": "Pull Requests aktualisieren",
+    "needsRebase": "Rebase erforderlich",
+    "behindTarget": "Hinter dem Zielbranch"
   },
   "apps": {
     "title": "Apps",
@@ -1109,6 +1112,22 @@
       "WORKFLOW_RECOVERY_PAUSED": {
         "title": "Workflow nach Wiederherstellung pausiert",
         "description": "Ein Workflow pausiert, während dauerhafte Arbeit wiederhergestellt wird."
+      },
+      "WORKTREE_CREATED": {
+        "title": "Worktree erstellt",
+        "description": "Ein neuer verwalteter Worktree wird erstellt."
+      },
+      "WORKTREE_CLEANUP_FAILED": {
+        "title": "Bereinigung der Worktree-Builddaten fehlgeschlagen",
+        "description": "Xcode-Builddaten eines gelöschten Worktrees konnten nicht entfernt werden."
+      },
+      "GITHUB_PULL_REQUEST_APPROVED": {
+        "title": "Pull Request genehmigt",
+        "description": "Ein GitHub-Pull-Request wechselt von ausstehender Genehmigung zu genehmigt."
+      },
+      "GITLAB_MERGE_REQUEST_APPROVED": {
+        "title": "Merge Request genehmigt",
+        "description": "Ein GitLab-Merge-Request wechselt von ausstehender Genehmigung zu genehmigt."
       }
     },
     "categories": {
@@ -1117,7 +1136,8 @@
       "GITHUB": "GitHub",
       "GITLAB": "GitLab",
       "RUNS": "Pläne und Sitzungen",
-      "WORKFLOWS": "Workflows"
+      "WORKFLOWS": "Workflows",
+      "WORKTREES": "Arbeitsbäume"
     },
     "apnsChannel": "Nativ",
     "nativeApns": "Native Benachrichtigungen",
@@ -1780,6 +1800,9 @@
     "doneStatus": "Auto-Merge-Abschlussstatus",
     "noDoneStatus": "Nicht konfiguriert",
     "doneStatusDescription": "Auto Merge verschiebt verknüpfte Tickets nach dem GitHub-Merge in diesen Status.",
+    "inReviewStatus": "Ticketstatus für die Review",
+    "noInReviewStatus": "Deaktiviert",
+    "inReviewStatusDescription": "Wenn du einem Worktree Reviewer zuweist, wird das verknüpfte Jira-Ticket in diesen Status versetzt.",
     "loadingStatuses": "Status werden geladen…",
     "selectCompletedStatuses": "Abgeschlossene Status auswählen",
     "saveDisplaySettings": "Anzeigeeinstellungen speichern",
@@ -1867,7 +1890,10 @@
     "aiBranchNamingHelp": "Verwenden Sie das gewählte Modell auf dem Agenten der Codebasis statt der JavaScript-Funktion. Beide Konfigurationen werden getrennt gespeichert.",
     "aiBranchPrompt": "Anweisung für Branchnamen",
     "aiBranchTokensHelp": "Fügen Sie Ticketvariablen ein, um die übermittelten Daten auszuwählen. Die Beschreibung wird nur bei Verwendung ihrer Variable geladen und geteilt.",
-    "saveAiBranchNaming": "Modus und KI-Einstellungen speichern"
+    "saveAiBranchNaming": "Modus und KI-Einstellungen speichern",
+    "defaultResolution": "Standardlösung",
+    "noDefaultResolution": "Jira-Standardwerte verwenden",
+    "defaultResolutionDescription": "Wird nur verwendet, wenn eine erforderliche Lösung keinen Jira-Standardwert hat. Der gewählte Wert muss beim Ticketübergang zulässig sein."
   },
   "jiraTicketDetail": {
     "loading": "Jira-Vorgang wird geladen…",
@@ -2233,6 +2259,7 @@
     "previous": "Zurück",
     "next": "Weiter",
     "pageSummary": "Seite {page} · {total} insgesamt",
+    "pageSummaryLowerBound": "Seite {page} · mindestens {total} insgesamt",
     "noMergeRequests": "Keine Merge-Requests entsprechen diesen Filtern.",
     "openInGitLab": "In GitLab öffnen",
     "description": "Beschreibung",
@@ -2421,7 +2448,11 @@
       "POST_MERGE": "Folgeaktionen laufen",
       "COMPLETED": "Abgeschlossen",
       "ACTION_REQUIRED": "Aktion erforderlich",
-      "CANCELED": "Abgebrochen"
+      "CANCELED": "Abgebrochen",
+      "SYNCING": "Branch wird synchronisiert",
+      "WAITING_CI": "Warten auf CI",
+      "WAITING_REQUIREMENTS": "Warten auf Merge-Anforderungen",
+      "MERGING": "Zusammenführen"
     },
     "pipelineStatuses": {
       "CREATED": "Erstellt",
@@ -2486,7 +2517,11 @@
     "externalActionResults": "Ergebnisse externer Aktionen",
     "nativeRequest": "Native Anfrage",
     "externalRequest": "Externe Anfrage",
-    "checkingActions": "Aktionen werden geprüft…"
+    "checkingActions": "Aktionen werden geprüft…",
+    "managedProjects": "Verwaltete Projekte",
+    "pipelineScope": "Pipeline-Umfang",
+    "relevantPipelines": "Meine Merge Requests und ausgecheckte Branches",
+    "myMergeRequestPipelines": "Nur meine Merge Requests"
   },
   "gitlabSettings": {
     "title": "GitLab-Zugangsdaten",
@@ -2955,7 +2990,20 @@
     "moveTicketToDoneAfterMerge": "{ticket} in den konfigurierten Abschlussstatus des Projekts verschieben",
     "jiraDoneStatusRequired": "Konfigurieren Sie zuerst den Abschlussstatus dieses Jira-Projekts.",
     "mergedFollowUpFailed": "Pull Request zusammengeführt, aber eine Folgeaktion ist fehlgeschlagen.",
-    "closeMergeResult": "Schließen"
+    "closeMergeResult": "Schließen",
+    "autoSyncBranch": "Branch automatisch synchronisieren",
+    "autoSyncBranchDescription": "Diesen Branch bei Änderungen am Ziel rebasen und pushen, dann nach erfolgreicher CI und erfüllten Merge-Anforderungen zusammenführen. Konflikte erfordern eine manuelle Lösung.",
+    "enableAutoMerge": "Auto Merge aktivieren",
+    "resumeAutoMerge": "Auto Merge fortsetzen",
+    "cancelAutoMerge": "Auto Merge abbrechen",
+    "refreshMergeOptions": "Merge-Optionen aktualisieren",
+    "syncStates": {
+      "SYNCING": "Branch wird synchronisiert",
+      "WAITING_CI": "Warten auf CI",
+      "WAITING_REQUIREMENTS": "Warten auf Merge-Anforderungen",
+      "MERGING": "Zusammenführen",
+      "ACTION_REQUIRED": "Aktion erforderlich"
+    }
   },
   "githubComments": {
     "title": "GitHub-Kommentare",
@@ -3768,6 +3816,45 @@
       "complete": "Abgeschlossen",
       "failed": "Fehlgeschlagen",
       "retry": "Erneut versuchen"
+    },
+    "bulkSync": {
+      "button": "Massen-Synchronisierung",
+      "description": "Wähle veraltete Worktrees aus, um Änderungen abzurufen, auf den Basisbranch zu rebasen und mit force-with-lease zu pushen. Blockierte Worktrees werden unten angezeigt.",
+      "selection": "Veraltete Worktrees",
+      "empty": "Keine veralteten Worktrees in diesem Bereich.",
+      "selectAll": "Alle auswählen",
+      "deselectAll": "Alle abwählen",
+      "selectWorktree": "{branch} auswählen",
+      "behindBase": "{count} Commits hinter {branch}",
+      "background": "Der gesamte ausgewählte Stapel läuft im Hintergrund weiter, wenn du dieses Fenster schließt oder die Seite verlässt.",
+      "close": "Schließen",
+      "start": "Auswahl synchronisieren ({count})",
+      "running": "Massen-Synchronisierung läuft",
+      "completed": "Massen-Synchronisierung abgeschlossen",
+      "progress": "{completed} von {total} Worktrees in dieser Ansicht verarbeitet",
+      "job": "Job-Protokolle anzeigen",
+      "monitoring": "Fortschrittsmeldungen sind vorübergehend nicht verfügbar. Verbindung wird wiederhergestellt…",
+      "missingBatch": "Der Synchronisierungsstapel ist vorübergehend nicht verfügbar.",
+      "blocked": {
+        "unavailable": "Dieser Worktree ist nicht verfügbar.",
+        "offline": "Der Agent ist offline.",
+        "unsupported": "Aktualisiere den Agent für die Massen-Synchronisierung.",
+        "activeSync": "Dieser Worktree ist bereits zur Massen-Synchronisierung vorgemerkt.",
+        "busy": "In diesem Checkout läuft ein anderer Vorgang.",
+        "conflicts": "Löse zuerst den laufenden Rebase oder die Konflikte.",
+        "dirty": "Änderungen vor dem Synchronisieren stashen oder committen.",
+        "missingBranch": "Ein ausgecheckter Branch ist erforderlich.",
+        "missingUpstream": "Veröffentliche diesen Branch vor dem Synchronisieren.",
+        "missingBase": "Wähle vor dem Synchronisieren einen Basisbranch aus."
+      },
+      "status": {
+        "PENDING": "Vorgemerkt",
+        "RUNNING": "Wird synchronisiert",
+        "SUCCEEDED": "Synchronisiert",
+        "FAILED": "Fehlgeschlagen",
+        "SKIPPED": "Übersprungen",
+        "ATTENTION_REQUIRED": "Aktion erforderlich"
+      }
     }
   },
   "worktreeDetail": {
@@ -4853,7 +4940,10 @@
       "NO_REGEX_MATCH": "entspricht nicht dem regulären Ausdruck",
       "IS_EMPTY": "ist leer",
       "IS_NOT_EMPTY": "ist nicht leer"
-    }
+    },
+    "showBuildRunSeparators": "Trennlinien für Build-Ausführungen anzeigen",
+    "buildCreated": "Build erstellt",
+    "buildRun": "Build-Ausführung"
   },
   "crashes": {
     "title": "Abstürze",
@@ -5861,7 +5951,8 @@
     "unknownAuthor": "Unbekannter Autor",
     "focusedDiscussion": "Eine verlinkte Diskussion wird angezeigt.",
     "showAllDiscussions": "Alle Diskussionen für diesen Merge Request anzeigen",
-    "fileComment": "Dateikommentar"
+    "fileComment": "Dateikommentar",
+    "includeOtherAuthors": "Andere Autoren in verwalteten Projekten einbeziehen"
   },
   "serverUrls": {
     "title": "Server-URLs",
@@ -6007,6 +6098,8 @@
     "assign": "Zuweisen",
     "assignReviewers": "Reviewer zuweisen",
     "assignmentDescription": "Markiere Personen für eine Review-Anfrage oder entferne die Markierung, um die Anfrage zurückzuziehen. Lade alle Reviewer für weitere Auswahlmöglichkeiten.",
+    "close": "Schließen",
+    "ticketTransitionFailed": "Reviewer wurden zugewiesen, aber das Jira-Ticket konnte nicht in den Review-Status versetzt werden: {error}",
     "requestClosed": "Dieser Pull- oder Merge-Request ist nicht mehr offen. Lade den aktuellen Status neu.",
     "requirementCounts": "Erforderlich: {required} · Genehmigt: {approved} · Angefragt: {requested} · Ausgewählt: {selected}",
     "selectReviewer": "{name} für {group} auswählen",

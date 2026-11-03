@@ -7,6 +7,7 @@ import {
 } from "@/services/worktrees/merge-base-branch-updates";
 
 import { randomUUID } from "node:crypto";
+import { WORKTREE_AUTO_SYNC_JOB_KIND } from "@ai-development-environment/agent-contract/worktrees";
 import { normalizeGitOrigin } from "@ai-development-environment/agent-contract/codebases";
 import { getPrismaClient } from "@/data/prisma-client";
 import type { GitLabMergeOperation } from "@/generated/prisma/client";
@@ -19,6 +20,15 @@ import type { JiraService } from "@/services/jira";
 import type { AgentControlService } from "@/services/agent-control";
 import { publishIntegrationConfiguration } from "@/services/integration-configuration-events";
 import { GitLabRequestError, type GitLabService } from "./gitlab.service";
+import {
+  advanceMergeSync,
+  MergeSyncNotSubmittedError,
+  cancelMergeSync,
+  MANAGED_MERGE_STATES,
+  mergeSyncUnavailableReason,
+  prepareMergeSync,
+  withMergeSyncLock,
+} from "@/services/worktrees/merge-branch-sync";
 import type {
   GitLabMergeOptions,
   GitLabMergeOperationView,
@@ -27,7 +37,12 @@ import type {
   SubmitGitLabMergeRequestMergeInput,
 } from "./types";
 
-const ACTIVE_STATES = ["PREPARING", "WAITING", "POST_MERGE"];
+const ACTIVE_STATES = [
+  "PREPARING",
+  "WAITING",
+  "POST_MERGE",
+  ...MANAGED_MERGE_STATES,
+];
 const TERMINAL_JOBS = new Set([
   "SUCCEEDED",
   "FAILED",
@@ -43,6 +58,7 @@ export function gitLabMergeOperationView(
     baseBranchUpdateResults: baseBranchUpdateResults(row.baseBranchUpdatesJson),
     state: row.state,
     autoMerge: row.autoMerge,
+    autoSync: row.autoSync ?? false,
     worktreeId: row.worktreeId,
     ticketKey: row.ticketKey,
     lastError: row.lastError,
@@ -117,6 +133,9 @@ export class GitLabMergeService {
     private readonly agents: AgentControlService,
   ) {
     gitlab.setMergeCoordinator(this);
+    agents.registerCompletionObserver(async (job) => {
+      if (job.kind === WORKTREE_AUTO_SYNC_JOB_KIND) this.wake();
+    });
   }
 
   startRuntime() {
@@ -258,7 +277,23 @@ export class GitLabMergeService {
       );
     const squashPolicy = project.squash_option ?? "default_off";
     const editable = squashPolicy !== "always" && squashPolicy !== "never";
+    const autoSyncBlockedReason = await mergeSyncUnavailableReason(
+      context.worktree?.id,
+    );
+    const managed = Boolean(
+      saved?.autoSync &&
+      !["COMPLETED", "CANCELED"].includes(saved.state) &&
+      !saved.mergeConfirmedAt,
+    );
     return {
+      canAutoMergeWithSync:
+        !autoSyncBlockedReason &&
+        canMerge &&
+        mr.state === "OPENED" &&
+        !mr.draft &&
+        !mr.hasConflicts,
+      autoSyncBlockedReason,
+      defaultAutoSync: saved?.autoSync ?? false,
       projectId,
       iid,
       baseBranchUpdateOptions: await mergeBaseBranchUpdateOptions(
@@ -283,7 +318,8 @@ export class GitLabMergeService {
       canMerge: !gitLabMergeBlocker(mr, canMerge),
       canAutoMerge: !gitLabMergeBlocker(mr, canMerge, true),
       canCancelAutoMerge:
-        mr.state === "OPENED" && mr.mergeWhenPipelineSucceeds && canCancel,
+        mr.state === "OPENED" &&
+        (managed || (mr.mergeWhenPipelineSucceeds && canCancel)),
       autoMergeEnabled: mr.mergeWhenPipelineSucceeds,
       mergeBlockedReason: gitLabMergeBlocker(mr, canMerge),
       autoMergeBlockedReason: gitLabMergeBlocker(mr, canMerge, true),
@@ -348,11 +384,21 @@ export class GitLabMergeService {
           throw new Error(
             "The source commit changed. Refresh the merge sheet and review the new commit before merging.",
           );
-        if (input.autoMerge ? !options.canAutoMerge : !options.canMerge)
+        if (input.autoSync && !input.autoMerge)
+          throw new Error("Branch syncing requires Auto Merge.");
+        if (
+          input.autoSync
+            ? !options.canAutoMergeWithSync
+            : input.autoMerge
+              ? !options.canAutoMerge
+              : !options.canMerge
+        )
           throw new Error(
-            (input.autoMerge
-              ? options.autoMergeBlockedReason
-              : options.mergeBlockedReason) ??
+            (input.autoSync
+              ? options.autoSyncBlockedReason
+              : input.autoMerge
+                ? options.autoMergeBlockedReason
+                : options.mergeBlockedReason) ??
               "GitLab cannot merge this request.",
           );
         const squash = input.squash ?? options.squash;
@@ -379,6 +425,8 @@ export class GitLabMergeService {
           : options.removeSourceBranch;
         const data = {
           state: "PREPARING",
+          autoSync: false,
+          syncStateJson: null as string | null,
           baseBranchUpdatesJson,
           sourceProjectId: mr.sourceProjectId ?? null,
           sourceOrigin: context.sourceOrigin,
@@ -401,6 +449,73 @@ export class GitLabMergeService {
           deleteRequestId: null,
           lastError: null,
         };
+        if (input.autoSync) {
+          if (!options.worktreeId)
+            throw new Error(
+              "A matching linked worktree is required to sync before merging.",
+            );
+          return withMergeSyncLock(options.worktreeId, async () => {
+            if (saved?.autoSync)
+              await cancelMergeSync(saved.syncStateJson, this.agents);
+            const ready = await this.gitlab.managedMergeReadiness(
+              input.projectId,
+              input.iid,
+            );
+            if (
+              ready.headSha !== input.sha ||
+              ready.state !== "OPEN" ||
+              ready.blocker
+            )
+              throw new Error(
+                ready.blocker ?? "The reviewed source commit changed.",
+              );
+            const syncStateJson = await prepareMergeSync(
+              options.worktreeId!,
+              ready,
+              { provider: "GITLAB", id: saved?.id ?? "new" },
+            );
+            const managedData = {
+              ...data,
+              autoSync: true,
+              syncStateJson,
+              state: "SYNCING",
+            };
+            const row = await prisma.gitLabMergeOperation.upsert({
+              where: {
+                instanceUrl_projectId_iid: {
+                  instanceUrl,
+                  projectId: input.projectId,
+                  iid: input.iid,
+                },
+              },
+              create: {
+                id: randomUUID(),
+                instanceUrl,
+                projectId: input.projectId,
+                iid: input.iid,
+                ...managedData,
+              },
+              update: managedData,
+            });
+            try {
+              if (ready.nativeAutoMerge)
+                await this.gitlab.cancelAutoMergeDirect(
+                  input.projectId,
+                  input.iid,
+                );
+            } catch (error) {
+              await prisma.gitLabMergeOperation.update({
+                where: { id: row.id },
+                data: { state: "ACTION_REQUIRED", lastError: String(error) },
+              });
+              this.changed(row);
+              throw error;
+            }
+            this.changed(row);
+            this.wake();
+            return this.result(input.projectId, input.iid);
+          });
+        }
         let row = await prisma.gitLabMergeOperation.upsert({
           where: {
             instanceUrl_projectId_iid: {
@@ -681,6 +796,9 @@ export class GitLabMergeService {
     const instanceUrl = await this.instance();
     return this.locked(`${instanceUrl}:${projectId}:${iid}`, async () => {
       let row = await this.record(projectId, iid);
+      if (row?.autoSync && !row.mergeConfirmedAt) {
+        await cancelMergeSync(row.syncStateJson, this.agents);
+      }
       let failure: unknown;
       try {
         await this.gitlab.cancelAutoMergeDirect(projectId, iid);
@@ -770,6 +888,68 @@ export class GitLabMergeService {
               return;
             }
             try {
+              if (current.autoSync && !current.mergeConfirmedAt) {
+                const merged = await advanceMergeSync({
+                  ...current,
+                  worktreeId: current.worktreeId!,
+                  worktrees: this.worktrees,
+                  agents: this.agents,
+                  readiness: () =>
+                    this.gitlab.managedMergeReadiness(
+                      current.projectId,
+                      current.iid,
+                    ),
+                  save: ({ acceptedHeadSha, ...data }) =>
+                    prisma.gitLabMergeOperation.update({
+                      where: { id: current.id },
+                      data: {
+                        ...data,
+                        ...(acceptedHeadSha ? { sha: acceptedHeadSha } : {}),
+                      },
+                    }),
+                  merge: async (sha, targetSha) => {
+                    const ready = await this.gitlab.managedMergeReadiness(
+                      current.projectId,
+                      current.iid,
+                    );
+                    if (
+                      ready.headSha !== sha ||
+                      ready.targetSha !== targetSha ||
+                      !ready.ciPassed ||
+                      !ready.canMerge ||
+                      ready.nativeAutoMerge
+                    )
+                      throw new MergeSyncNotSubmittedError(
+                        "The reviewed source, target or CI changed before merging.",
+                      );
+                    return this.gitlab.mergeMergeRequestDirect({
+                      projectId: current.projectId,
+                      iid: current.iid,
+                      autoMerge: false,
+                      sha,
+                      squash: current.squash,
+                      removeSourceBranch: current.removeSourceBranch,
+                      mergeCommitMessage: current.mergeCommitMessage,
+                      squashCommitMessage: current.squashCommitMessage,
+                    });
+                  },
+                });
+                if (merged) {
+                  const saved =
+                    await prisma.gitLabMergeOperation.findUniqueOrThrow({
+                      where: { id: current.id },
+                    });
+                  const observed = await this.observe(
+                    saved,
+                    await this.gitlab.mergeRequestState(
+                      current.projectId,
+                      current.iid,
+                    ),
+                  );
+                  if (observed.mergeConfirmedAt) await this.followUps(observed);
+                }
+                return;
+              }
               const updated = await this.observe(
                 current,
                 await this.gitlab.mergeRequestState(row.projectId, row.iid),

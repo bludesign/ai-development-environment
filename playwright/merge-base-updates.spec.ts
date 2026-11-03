@@ -25,6 +25,10 @@ const mergeOptions = {
   defaultCommitBody: "",
   canMerge: true,
   canEnableAutoMerge: true,
+  canAutoMergeWithSync: true,
+  autoSyncBlockedReason: null,
+  defaultAutoSync: false,
+  autoMergeOperation: null,
   autoMergeEnabled: false,
   viewerCanDisableAutoMerge: true,
   mergeStateStatus: "CLEAN",
@@ -93,6 +97,14 @@ for (const automatic of [false, true]) {
       .first()
       .click();
     const dialog = page.getByRole("dialog");
+    if (automatic) {
+      await dialog
+        .getByRole("checkbox", { name: "Auto sync branch", exact: true })
+        .check();
+      await expect(
+        dialog.getByRole("button", { name: "Enable Auto Merge", exact: true }),
+      ).toBeEnabled();
+    }
     await expect(dialog.getByText("Update targeting worktrees")).toBeVisible();
     const first = dialog.getByRole("checkbox", { name: /search-filters/ });
     await expect(first).not.toBeChecked();

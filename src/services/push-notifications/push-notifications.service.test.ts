@@ -28,44 +28,59 @@ describe("PushNotificationsService direct delivery", () => {
     vi.clearAllMocks();
   });
 
-  test("keeps a one-off Live Activity token outside the history payload", async () => {
-    const create = vi.fn().mockImplementation(({ data }) => ({
-      id: data.id,
-      ...data,
-      deliveries: [],
-    }));
-    getPrismaClient.mockResolvedValue({
-      pushNotificationBatch: {
-        findUnique: vi.fn().mockResolvedValue(null),
-        findMany: vi.fn().mockResolvedValue([]),
-        create,
-        updateMany: vi.fn().mockResolvedValue({ count: 0 }),
-      },
-    });
-    const service = new PushNotificationsService();
-    const token = "ab".repeat(32);
+  test.each(
+    [1, 32, 64, 128].flatMap((length) =>
+      (["HEX", "BASE64"] as const).map(
+        (encoding) => [length, encoding] as const,
+      ),
+    ),
+  )(
+    "keeps a %i-byte %s Live Activity token outside the history payload",
+    async (length, encoding) => {
+      const create = vi.fn().mockImplementation(({ data }) => ({
+        id: data.id,
+        ...data,
+        deliveries: [],
+      }));
+      getPrismaClient.mockResolvedValue({
+        pushNotificationBatch: {
+          findUnique: vi.fn().mockResolvedValue(null),
+          findMany: vi.fn().mockResolvedValue([]),
+          create,
+          updateMany: vi.fn().mockResolvedValue({ count: 0 }),
+        },
+      });
+      const service = new PushNotificationsService();
+      const tokenHex = "ab".repeat(length);
+      const token =
+        encoding === "HEX"
+          ? tokenHex
+          : Buffer.from(tokenHex, "hex").toString("base64");
 
-    await service.send({
-      requestId: "request-1",
-      editor: liveActivityEditor,
-      targetMode: "DIRECT",
-      directToken: token,
-      directTokenEncoding: "HEX",
-      directEnvironment: "PRODUCTION",
-    });
+      await service.send({
+        requestId: "request-1",
+        editor: liveActivityEditor,
+        targetMode: "DIRECT",
+        directToken: token,
+        directTokenEncoding: encoding,
+        directEnvironment: "PRODUCTION",
+      });
 
-    const data = create.mock.calls[0]?.[0].data;
-    expect(data.targetMode).toBe("DIRECT");
-    expect(data.editorJson).not.toContain(token);
-    expect(data.payloadJson).not.toContain(token);
-    expect(data.headersJson).not.toContain(token);
-    expect(data.deliveries.create[0]).toMatchObject({
-      environment: "PRODUCTION",
-      topic: "com.example.app.push-type.liveactivity",
-      recipientSecret: { create: { token: token.toUpperCase() } },
-    });
-    expect(data.deliveries.create[0].tokenHash).not.toBe(token.toUpperCase());
-  });
+      const data = create.mock.calls[0]?.[0].data;
+      expect(data.targetMode).toBe("DIRECT");
+      expect(data.editorJson).not.toContain(token);
+      expect(data.payloadJson).not.toContain(token);
+      expect(data.headersJson).not.toContain(token);
+      expect(data.deliveries.create[0]).toMatchObject({
+        environment: "PRODUCTION",
+        topic: "com.example.app.push-type.liveactivity",
+        recipientSecret: { create: { token: tokenHex.toUpperCase() } },
+      });
+      expect(data.deliveries.create[0].tokenHash).not.toBe(
+        tokenHex.toUpperCase(),
+      );
+    },
+  );
 
   test("rejects direct-token delivery for non-Live Activity payloads", async () => {
     getPrismaClient.mockResolvedValue({

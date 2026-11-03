@@ -321,6 +321,8 @@ extend type AgentJob {
 
 "Represents a worktree auto merge in the GraphQL API."
 type WorktreeAutoMerge {
+  "Whether AIDE syncs the linked branch and waits for passing CI before merging."
+  autoSync: Boolean!
   "Recorded outcomes for selected targeting worktrees."
   baseBranchUpdateResults: [MergeBaseBranchUpdateResult!]!
   "Identifier of the related worktree."
@@ -477,6 +479,119 @@ type WorktreeOverview {
   hiddenCount: Int!
   "Active moves associated with this worktree overview."
   activeMoves: [WorktreeMove!]!
+  "Background Bulk Sync batches started from this page scope."
+  activeSyncBatches: [WorktreeSyncBatch!]!
+}
+
+"Whether a Bulk Sync batch still has work to attempt."
+enum WorktreeSyncBatchStatus {
+  "The batch has pending or running worktrees."
+  ACTIVE
+  "Every worktree has a final outcome, including failures or skipped worktrees."
+  COMPLETED
+}
+
+"Progress or final outcome for an individual Bulk Sync worktree."
+enum WorktreeSyncItemStatus {
+  "Waiting for its codebase to become available."
+  PENDING
+  "A guarded sync job has been submitted."
+  RUNNING
+  "The worktree was synchronized or was already current."
+  SUCCEEDED
+  "The sync job failed."
+  FAILED
+  "The worktree became ineligible before dispatch."
+  SKIPPED
+  "A preparation or rebase conflict requires manual attention."
+  ATTENTION_REQUIRED
+}
+
+"A durable Bulk Sync batch that continues after leaving the screen."
+type WorktreeSyncBatch {
+  "Stable batch identifier."
+  id: ID!
+  "App scope, or null for the global worktrees page."
+  appId: ID
+  "Global agent focus when the batch was started."
+  agentId: ID
+  "Current batch progress."
+  status: WorktreeSyncBatchStatus!
+  "Worktrees selected for this batch in submission order."
+  items: [WorktreeSyncItem!]!
+  "ISO 8601 creation timestamp."
+  createdAt: String!
+  "ISO 8601 last progress timestamp."
+  updatedAt: String!
+  "ISO 8601 completion timestamp."
+  finishedAt: String
+}
+
+"A snapshotted checkout and its Bulk Sync outcome, retained after checkout deletion."
+type WorktreeSyncItem {
+  "Stable item identifier."
+  id: ID!
+  "Original checkout identifier."
+  worktreeId: ID!
+  "Original codebase identifier."
+  codebaseId: ID!
+  "Original agent identifier."
+  agentId: ID!
+  "Agent name captured when selected."
+  agentName: String!
+  "Original repository identifier."
+  repositoryId: ID!
+  "Repository name captured when selected."
+  repositoryName: String!
+  "Expected branch captured when selected."
+  branch: String!
+  "Expected base branch captured when selected."
+  baseBranch: String!
+  "Checkout path captured when selected."
+  folder: String!
+  "Linked Jira key captured when selected."
+  ticketKey: String
+  "Linked Jira title captured when selected."
+  ticketTitle: String
+  "Number of commits behind the base when selected."
+  baseBehind: Int!
+  "Current progress or final outcome."
+  status: WorktreeSyncItemStatus!
+  "Submitted agent job identifier."
+  jobId: ID
+  "Failure, skip, or attention details."
+  error: String
+  "ISO 8601 creation timestamp."
+  createdAt: String!
+  "ISO 8601 dispatch timestamp."
+  startedAt: String
+  "ISO 8601 completion timestamp."
+  finishedAt: String
+}
+
+"A selected set of worktrees to sync once in the background."
+input StartWorktreeSyncBatchInput {
+  "Selected checkout identifiers."
+  worktreeIds: [ID!]!
+  "Idempotency identifier for this exact selection and scope."
+  requestId: ID!
+  "App scope, or null for the global page."
+  appId: ID
+  "Active global agent focus, if any."
+  agentId: ID
+}
+
+extend type Query {
+  "Load progress and retained outcomes of a Bulk Sync batch."
+  worktreeSyncBatch("Batch identifier." id: ID!): WorktreeSyncBatch
+}
+
+extend type Mutation {
+  "Persist and start a background Bulk Sync batch."
+  startWorktreeSyncBatch(
+    "Selection and page scope."
+    input: StartWorktreeSyncBatchInput!
+  ): WorktreeSyncBatch!
 }
 
 "Optional metadata that can load independently of the saved worktrees."
@@ -985,6 +1100,10 @@ input ConfigureWorktreeAutoSyncInput {
 
 "Values used to configure a worktree auto merge."
 input ConfigureWorktreeAutoMergeInput {
+  "Rebase and push the linked branch before waiting for passing CI and merging."
+  autoSync: Boolean = false
+  "Reviewed source revision, required when autoSync is selected."
+  expectedHeadSha: String
   "Selected targeting worktrees to update only after the merge is confirmed."
   baseBranchUpdate: MergeBaseBranchUpdateInput
   "Identifier of the worktree to use."

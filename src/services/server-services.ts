@@ -201,15 +201,25 @@ function createServerServices(): ServerServices {
     workflowEventsService,
     gitHubPipelineStatusService,
     gitLabService,
+    notificationsService,
   );
   const reviewersService = new ReviewersService(
     new ReviewerProviders(gitHubService, gitLabService),
     (id) => worktreesService.refreshPullRequest(id),
+    async (id, expectedBranch) => {
+      const ticketKey = await worktreesService.ticketKeyForWorktree(
+        id,
+        expectedBranch,
+      );
+      if (ticketKey)
+        await jiraService.transitionTicketToConfiguredInReview(ticketKey);
+    },
   );
   const actionCenterRequests = new ActionCenterRequests(
     gitHubService,
     gitLabService,
     pollingService,
+    notificationsService,
   );
   const systemStatusService = new SystemStatusService(
     ccusageService,
@@ -349,6 +359,7 @@ function createServerServices(): ServerServices {
   workflowEventBridge.start();
   workflowsService.startRuntime();
   worktreeAutomationService.startRuntime();
+  worktreesService.syncBatches.startRuntime(pollingService);
   new GitLabMergeService(
     gitLabService,
     worktreesService,

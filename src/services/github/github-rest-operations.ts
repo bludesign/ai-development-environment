@@ -22,6 +22,7 @@ export const GITHUB_REST_OPERATIONS = {
     updateWebhookConfigForApp: "apps.updateWebhookConfigForApp",
   },
   repos: {
+    compareCommits: "repos.compareCommits",
     listPullRequestsAssociatedWithCommit:
       "repos.listPullRequestsAssociatedWithCommit",
   },

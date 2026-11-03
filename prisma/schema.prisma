@@ -825,6 +825,8 @@ model WorktreeAutoSync {
 }
 
 model WorktreeAutoMerge {
+  autoSync                Boolean   @default(false)
+  syncStateJson           String?
   baseBranchUpdatesJson   String?
   worktreeId              String    @id
   state                   String    @default("ACTIVE")
@@ -1820,10 +1822,10 @@ model TelemetryEntry {
   highlightColor           String?
   separatorKind            String?
   separatorName            String?
+  separatorKey             String?  @unique
   createdAt                DateTime @default(now())
   updatedAt                DateTime @updatedAt
 
-  @@unique([separatorKind, buildId])
   @@index([entryType, clientTime, receivedAt])
   @@index([clientTime, receivedAt])
   @@index([level])
@@ -2020,6 +2022,7 @@ model TelemetryViewSettings {
   view                 String   @unique
   columnsJson          String
   timeFormat           String   @default("12")
+  showBuildRunSeparators Boolean @default(true)
   activeColumnPresetId String?
   activeSavedFilterId  String?
   createdAt            DateTime @default(now())
@@ -2069,6 +2072,7 @@ model BuildDeployment {
   error              String?
   createdAt          DateTime               @default(now())
   startedAt          DateTime?
+  launchedAt         DateTime?
   finishedAt         DateTime?
   updatedAt          DateTime               @updatedAt
   build              Build                  @relation(fields: [buildId], references: [id], onDelete: Cascade)
@@ -2503,6 +2507,51 @@ model BuildDataDeleteProjection {
   projectedAt DateTime @default(now())
 }
 
+// Snapshots deliberately survive deletion of the original checkout, agent, or app.
+model WorktreeSyncBatch {
+  id         String             @id
+  requestId  String             @unique
+  appId      String?
+  agentId    String?
+  status     String             @default("ACTIVE")
+  createdAt  DateTime           @default(now())
+  updatedAt  DateTime           @updatedAt
+  finishedAt DateTime?
+  items      WorktreeSyncItem[]
+
+  @@index([status, createdAt])
+}
+
+model WorktreeSyncItem {
+  id             String            @id
+  batchId        String
+  position       Int
+  worktreeId     String
+  codebaseId     String
+  agentId        String
+  agentName      String
+  repositoryId   String
+  repositoryName String
+  branch         String
+  baseBranch     String
+  folder         String
+  gitDirectory   String
+  expectedOrigin String
+  ticketKey      String?
+  ticketTitle    String?
+  baseBehind     Int
+  status         String            @default("PENDING")
+  jobId          String?           @unique
+  error          String?
+  createdAt      DateTime          @default(now())
+  startedAt      DateTime?
+  finishedAt     DateTime?
+  batch          WorktreeSyncBatch @relation(fields: [batchId], references: [id], onDelete: Cascade)
+
+  @@unique([batchId, worktreeId])
+  @@index([status, codebaseId, createdAt])
+}
+
 model WorktreeMove {
   id               String    @id
   requestId        String
@@ -2755,6 +2804,8 @@ model JiraProject {
   completedStatusIdsJson String       @default("[]")
   excludedStatusIdsJson  String       @default("[]")
   doneStatusId           String?
+  inReviewStatusId       String?
+  defaultResolutionId    String?
   branchNamingMode       String       @default("JAVASCRIPT")
   branchNamingProvider   String?
   branchNamingModel      String?
@@ -3955,6 +4006,8 @@ model SseHistorySavedFilter {
 
 // Separate from GitHub worktree automation: an MR can have Jira follow-ups without a checkout.
 model GitLabMergeOperation {
+  autoSync              Boolean   @default(false)
+  syncStateJson         String?
   baseBranchUpdatesJson String?
   id                    String    @id
   instanceUrl           String

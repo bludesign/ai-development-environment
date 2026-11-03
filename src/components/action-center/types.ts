@@ -79,7 +79,7 @@ export type ActionCenterPageView = {
 export const ACTION_CENTER_ITEM_FIELDS = `
   key resourceKind reason resourceId href displayNumber label summary status phase error
   createdAt updatedAt failureFingerprint dismissalFingerprint
-  request { provider repositoryId repositoryName number branch headSha url draft pipelineStatus pipelineUrl approvalStatus isMine requiresMyApproval canMerge mergeBlockedReason }
+  request { provider repositoryId repositoryName number branch headSha url draft pipelineStatus pipelineUrl approvalStatus isMine requiresMyApproval canMerge mergeBlockedReason behindCount needsRebase }
   worktree { id folder relativePath branch highlightColor }
   questionBatches {
     id sourceKind createdAt

@@ -175,9 +175,17 @@ export function AssignReviewersButton({
         },
       );
       setData(result.assignWorktreeReviewers);
-      setSelected([]);
-      setOpen(false);
-      await onCompleted();
+      setSelected(result.assignWorktreeReviewers.currentReviewerIds);
+      if (result.assignWorktreeReviewers.ticketTransitionError) {
+        setError(
+          t("ticketTransitionFailed", {
+            error: result.assignWorktreeReviewers.ticketTransitionError,
+          }),
+        );
+      } else {
+        setOpen(false);
+      }
+      await onCompleted().catch(() => undefined);
     } catch (value) {
       setError(value instanceof Error ? value.message : String(value));
       initialized.current = false;
@@ -486,6 +494,16 @@ export function AssignReviewersButton({
             >
               {busy ? <Spinner /> : <Shuffle />} {t("random")}
             </Button>
+            {data.ticketTransitionError && (
+              <Button
+                onClick={() => setOpen(false)}
+                size="sm"
+                type="button"
+                variant="outline"
+              >
+                {t("close")}
+              </Button>
+            )}
             <Button
               disabled={
                 requestUnavailable ||

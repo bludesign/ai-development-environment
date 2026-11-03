@@ -68,8 +68,8 @@ const ALL_REQUESTS = "__all_merge_requests__";
 const USER_FIELDS = "id username name avatarUrl webUrl";
 const REQUEST_FIELDS = `id projectId iid projectPath title webUrl state draft sourceBranch targetBranch sha worktreeId worktreeHighlightColor author { ${USER_FIELDS} }`;
 const DISCUSSION_FIELDS = `id individualNote notes { id body createdAt updatedAt system resolvable resolved webUrl filePath oldLine newLine author { ${USER_FIELDS} } resolvedBy { ${USER_FIELDS} } }`;
-const COMMENTS_QUERY = `query GitLabComments($projectId: ID, $iid: Int, $discussionId: ID, $after: String, $first: Int!, $refresh: Boolean) {
-  gitlabComments(projectId: $projectId, iid: $iid, discussionId: $discussionId, after: $after, first: $first, refresh: $refresh) {
+const COMMENTS_QUERY = `query GitLabComments($projectId: ID, $iid: Int, $discussionId: ID, $after: String, $first: Int!, $refresh: Boolean, $includeOtherAuthors: Boolean!) {
+  gitlabComments(projectId: $projectId, iid: $iid, discussionId: $discussionId, after: $after, first: $first, refresh: $refresh, includeOtherAuthors: $includeOtherAuthors) {
     viewerId viewerUsername endCursor hasNextPage partial warnings
     mergeRequests { ${REQUEST_FIELDS} }
     threads { id mergeRequest { ${REQUEST_FIELDS} } discussion { ${DISCUSSION_FIELDS} } }
@@ -124,7 +124,8 @@ export function GitLabCommentsPage({
   const [selection, setSelection] = useState<Selection | null>(() =>
     selectionFromValues(initialProjectId, initialIid, initialDiscussionId),
   );
-  const scope = JSON.stringify(selection);
+  const [includeOtherAuthors, setIncludeOtherAuthors] = useState(false);
+  const scope = JSON.stringify([selection, includeOtherAuthors]);
   const [data, setData] = useState<{
     scope: string;
     page: GitLabCommentPageView;
@@ -232,6 +233,7 @@ export function GitLabCommentsPage({
             discussionId: selection?.discussionId ?? null,
             after: append ? cursor.current : null,
             first: 25,
+            includeOtherAuthors,
             ...(refresh ? { refresh: true } : {}),
           },
           { signal: current.signal },
@@ -282,7 +284,7 @@ export function GitLabCommentsPage({
         }
       }
     },
-    [configured, scope, selection],
+    [configured, scope, selection, includeOtherAuthors],
   );
 
   useEffect(() => {
@@ -466,6 +468,13 @@ export function GitLabCommentsPage({
           </p>
         </div>
         <div className="flex items-center gap-2">
+          <Button
+            variant={includeOtherAuthors ? "secondary" : "outline"}
+            aria-pressed={includeOtherAuthors}
+            onClick={() => setIncludeOtherAuthors((value) => !value)}
+          >
+            {t("includeOtherAuthors")}
+          </Button>
           <Button
             disabled={
               configured === false ||

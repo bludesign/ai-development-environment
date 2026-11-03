@@ -69,15 +69,18 @@ export function normalizeDeviceToken(
   let bytes: Buffer;
   if (encoding === "HEX") {
     const compact = token.replace(/[\s<>]/g, "");
-    if (!/^[A-Fa-f0-9]{64}$/.test(compact)) {
+    if (!/^(?:[A-Fa-f0-9]{2})+$/.test(compact)) {
       throw new Error(
-        "token must contain exactly 32 bytes of hexadecimal data",
+        "token must contain nonempty, even-length hexadecimal data",
       );
     }
     bytes = Buffer.from(compact, "hex");
   } else {
     const compact = token.trim();
-    if (!/^[A-Za-z0-9+/_-]+={0,2}$/.test(compact)) {
+    if (
+      !/^[A-Za-z0-9+/_-]+={0,2}$/.test(compact) ||
+      (compact.includes("=") && compact.length % 4 !== 0)
+    ) {
       throw new Error("token is not valid Base64");
     }
     try {
@@ -95,8 +98,8 @@ export function normalizeDeviceToken(
       throw new Error("token is not valid Base64");
     }
   }
-  if (bytes.length !== 32) {
-    throw new Error("token must decode to exactly 32 bytes");
+  if (!bytes.length) {
+    throw new Error("token must decode to nonempty data");
   }
   return bytes.toString("hex").toUpperCase();
 }

@@ -22,6 +22,7 @@ import {
 import type { GitHubService } from "@/services/github";
 import type { GitLabService } from "@/services/gitlab";
 import type { JiraService } from "@/services/jira";
+import type { NotificationsService } from "@/services/notifications";
 
 import { WorktreesService, worktreeDisplayPath } from "./worktrees.service";
 
@@ -162,6 +163,133 @@ function storedWorktreeRecord() {
 
 describe("WorktreesService", () => {
   beforeEach(() => vi.clearAllMocks());
+
+  test("notifies after a successful new worktree projection with a worktree link", async () => {
+    let complete: ((job: Record<string, unknown>) => Promise<void>) | undefined;
+    const control = {
+      registerCompletionHandler: vi.fn((kind, handler) => {
+        if (kind === WORKTREE_BRANCH_JOB_KIND) complete = handler;
+      }),
+    } as unknown as AgentControlService;
+    const notification = { id: "notification-created" };
+    const notifications = {
+      recordInTransaction: vi.fn().mockResolvedValue(notification),
+      created: vi.fn(),
+    };
+    const tx = {
+      codebase: { update: vi.fn() },
+      worktree: {
+        upsert: vi.fn().mockResolvedValue({
+          id: "new-worktree",
+          highlightColor: "amber",
+          initialHighlightApplied: true,
+        }),
+        updateMany: vi.fn().mockResolvedValue({ count: 1 }),
+      },
+    };
+    getPrismaClient.mockResolvedValue({
+      codebase: {
+        findUnique: vi.fn().mockResolvedValue({ localBranchesJson: "[]" }),
+      },
+      $transaction: vi.fn((callback) => callback(tx)),
+    });
+    new WorktreesService(
+      control,
+      {} as JiraService,
+      {} as GitHubService,
+      undefined,
+      undefined,
+      pipelineStatus,
+      undefined,
+      notifications as unknown as NotificationsService,
+    );
+    const job = {
+      codebaseId: "codebase-1",
+      worktreeId: null,
+      status: "SUCCEEDED",
+      resultJson: JSON.stringify({
+        worktree: report().worktrees[0],
+        baseBranch: "main",
+      }),
+    };
+    await complete!(job);
+    expect(notifications.recordInTransaction).toHaveBeenCalledWith(
+      tx,
+      expect.objectContaining({
+        dedupeKey: "worktree-created:new-worktree",
+        typeKey: "WORKTREE_CREATED",
+        href: "/dashboard/worktrees/new-worktree",
+        worktreeId: "new-worktree",
+        highlightColor: "amber",
+      }),
+    );
+    expect(notifications.created).toHaveBeenCalledWith(notification);
+    notifications.recordInTransaction.mockClear();
+    await complete!({ ...job, worktreeId: "existing-worktree" });
+    await complete!({ ...job, status: "FAILED" });
+    expect(notifications.recordInTransaction).not.toHaveBeenCalled();
+  });
+
+  test("removes a deleted worktree even when Xcode cleanup or its warning delivery fails", async () => {
+    let complete: ((job: Record<string, unknown>) => Promise<void>) | undefined;
+    const control = {
+      registerCompletionHandler: vi.fn((kind, handler) => {
+        if (kind === "worktree.delete") complete = handler;
+      }),
+    } as unknown as AgentControlService;
+    const deleteMany = vi.fn().mockResolvedValue({ count: 1 });
+    const notifications = {
+      recordInTransaction: vi
+        .fn()
+        .mockRejectedValue(new Error("notification unavailable")),
+      created: vi.fn(),
+    };
+    getPrismaClient.mockResolvedValue({
+      worktree: {
+        findUnique: vi.fn().mockResolvedValue({
+          codebaseId: "codebase-1",
+          branch: "feature/test",
+          highlightColor: "amber",
+        }),
+        deleteMany,
+      },
+      $transaction: vi.fn((callback) => callback({})),
+    });
+    new WorktreesService(
+      control,
+      {} as JiraService,
+      {} as GitHubService,
+      undefined,
+      undefined,
+      pipelineStatus,
+      undefined,
+      notifications as unknown as NotificationsService,
+    );
+    await complete!({
+      id: "delete-job",
+      worktreeId: "deleted-worktree",
+      status: "SUCCEEDED",
+      error: null,
+      payloadJson: JSON.stringify({ moveId: null }),
+      resultJson: JSON.stringify({
+        deleted: true,
+        buildDataCleanup: {
+          warnings: ["Permission denied removing DerivedData"],
+        },
+      }),
+    });
+    expect(deleteMany).toHaveBeenCalledWith({
+      where: { id: "deleted-worktree" },
+    });
+    expect(notifications.recordInTransaction).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        typeKey: "WORKTREE_CLEANUP_FAILED",
+        href: "/dashboard/jobs/delete-job",
+        body: expect.stringContaining("Permission denied"),
+      }),
+    );
+  });
 
   test("shows an active job only for a Git operation on that worktree", () => {
     const record = storedWorktreeRecord();
@@ -431,7 +559,12 @@ describe("WorktreesService", () => {
         agent: {
           lastSeenAt: new Date(),
           disconnectedAt: null,
-          capabilitiesJson: JSON.stringify(["worktree.delete"]),
+          capabilitiesJson: JSON.stringify([
+            "worktree.delete",
+            "worktree.delete.xcode-cleanup",
+          ]),
+          derivedDataLocationMode: "ABSOLUTE",
+          derivedDataPath: "/Volumes/Builds/DerivedData",
         },
         repository: { canonicalOrigin: "github.com/openai/codex" },
       },
@@ -483,6 +616,10 @@ describe("WorktreesService", () => {
         payload: expect.objectContaining({
           branch: "feature/AIDE-71",
           expectedHeadSha: "pr-head",
+          derivedData: {
+            mode: "ABSOLUTE",
+            path: "/Volumes/Builds/DerivedData",
+          },
         }),
       }),
     );
@@ -1271,6 +1408,40 @@ describe("WorktreesService", () => {
     await expect(service().ticketKeyForWorktree("worktree-1")).resolves.toBe(
       "AIDE-42",
     );
+  });
+
+  test("binds reviewer ticket lookup to the expected branch in the same database snapshot", async () => {
+    const findFirst = vi.fn().mockResolvedValue({
+      branch: "feature/aide-42-workflow-support",
+      codebase: { repository: { jiraBranchRegex: "([a-z]+-\\d+)" } },
+    });
+    getPrismaClient.mockResolvedValue({
+      worktree: { findFirst },
+      codebaseSettings: { findUnique: vi.fn().mockResolvedValue(null) },
+    });
+    await expect(
+      service().ticketKeyForWorktree(
+        "worktree-1",
+        "feature/aide-42-workflow-support",
+      ),
+    ).resolves.toBe("AIDE-42");
+    findFirst.mockResolvedValue({
+      branch: "feature/aide-99",
+      codebase: { repository: { jiraBranchRegex: "([a-z]+-\\d+)" } },
+    });
+    await expect(
+      service().ticketKeyForWorktree(
+        "worktree-1",
+        "feature/aide-42-workflow-support",
+      ),
+    ).rejects.toThrow("worktree branch changed");
+    findFirst.mockResolvedValue(null);
+    await expect(
+      service().ticketKeyForWorktree(
+        "worktree-1",
+        "feature/aide-42-workflow-support",
+      ),
+    ).rejects.toThrow("worktree branch changed");
   });
 
   test("falls back to the default branch regex when the repo has none", async () => {

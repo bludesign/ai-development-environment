@@ -1,4 +1,5 @@
 "use client";
+import { formatEnumLabel } from "@/lib/enum-label";
 import { useServerUrlSettings } from "@/hooks/use-server-url-settings";
 import {
   defaultServerUrlKind,
@@ -1242,7 +1243,7 @@ function StartBuildDialog({
                                 "DISABLE_AUTOMATIC",
                               ].map((value) => (
                                 <SelectItem key={value} value={value}>
-                                  {value}
+                                  {formatEnumLabel(value)}
                                 </SelectItem>
                               ))}
                             </SelectContent>

@@ -188,7 +188,10 @@
     "integrationCountsHelp": "Turning this off stops dedicated sidebar CI polling. Action Center and notification polling continue.",
     "saveSettings": "Save settings",
     "hideUnapprovedRequestsInSidebar": "Hide unapproved pull/merge requests in the sidebar",
-    "hideRunningPipelineRequestsInSidebar": "Hide pull/merge requests with pipelines in progress in the sidebar"
+    "hideRunningPipelineRequestsInSidebar": "Hide pull/merge requests with pipelines in progress in the sidebar",
+    "refreshPullRequests": "Refresh Pull Requests",
+    "needsRebase": "Needs rebase",
+    "behindTarget": "Behind target"
   },
   "apps": {
     "title": "Apps",
@@ -1109,6 +1112,22 @@
       "WORKFLOW_RECOVERY_PAUSED": {
         "title": "Workflow paused after recovery",
         "description": "A workflow pauses while recovering durable work."
+      },
+      "WORKTREE_CREATED": {
+        "title": "Worktree created",
+        "description": "A new managed worktree is created."
+      },
+      "WORKTREE_CLEANUP_FAILED": {
+        "title": "Worktree build data cleanup failed",
+        "description": "A deleted worktree has Xcode build data that could not be removed."
+      },
+      "GITHUB_PULL_REQUEST_APPROVED": {
+        "title": "Pull request approved",
+        "description": "A GitHub pull request changes from awaiting approval to approved."
+      },
+      "GITLAB_MERGE_REQUEST_APPROVED": {
+        "title": "Merge request approved",
+        "description": "A GitLab merge request changes from awaiting approval to approved."
       }
     },
     "categories": {
@@ -1117,7 +1136,8 @@
       "GITHUB": "GitHub",
       "GITLAB": "GitLab",
       "RUNS": "Plans and Sessions",
-      "WORKFLOWS": "Workflows"
+      "WORKFLOWS": "Workflows",
+      "WORKTREES": "Worktrees"
     },
     "apnsChannel": "Native",
     "nativeApns": "Native notifications",
@@ -1780,6 +1800,9 @@
     "doneStatus": "Auto Merge done status",
     "noDoneStatus": "Not configured",
     "doneStatusDescription": "Auto Merge moves linked tickets to this status after GitHub merges the pull request.",
+    "inReviewStatus": "In review ticket status",
+    "noInReviewStatus": "Disabled",
+    "inReviewStatusDescription": "Assigning reviewers from a worktree moves its linked Jira ticket to this status.",
     "loadingStatuses": "Loading statuses…",
     "selectCompletedStatuses": "Select completed statuses",
     "saveDisplaySettings": "Save display settings",
@@ -1867,7 +1890,10 @@
     "aiBranchNamingHelp": "Use the selected model on the codebase’s agent instead of the JavaScript function. Both configurations are saved independently.",
     "aiBranchPrompt": "Branch naming prompt",
     "aiBranchTokensHelp": "Insert ticket tokens to choose what the model receives. The description is fetched and shared only when its token is used.",
-    "saveAiBranchNaming": "Save naming mode and AI settings"
+    "saveAiBranchNaming": "Save naming mode and AI settings",
+    "defaultResolution": "Default Resolution",
+    "noDefaultResolution": "Use Jira defaults",
+    "defaultResolutionDescription": "Used only when a required Resolution has no Jira default. The selected value must be allowed by the ticket’s transition."
   },
   "jiraTicketDetail": {
     "loading": "Loading Jira ticket…",
@@ -2233,6 +2259,7 @@
     "previous": "Previous",
     "next": "Next",
     "pageSummary": "Page {page} · {total} total",
+    "pageSummaryLowerBound": "Page {page} · at least {total} total",
     "noMergeRequests": "No merge requests match these filters.",
     "openInGitLab": "Open in GitLab",
     "description": "Description",
@@ -2421,7 +2448,11 @@
       "POST_MERGE": "Running follow-ups",
       "COMPLETED": "Completed",
       "ACTION_REQUIRED": "Action required",
-      "CANCELED": "Canceled"
+      "CANCELED": "Canceled",
+      "SYNCING": "Syncing branch",
+      "WAITING_CI": "Waiting for CI",
+      "WAITING_REQUIREMENTS": "Waiting for merge requirements",
+      "MERGING": "Merging"
     },
     "pipelineStatuses": {
       "CREATED": "Created",
@@ -2486,7 +2517,11 @@
     "externalActionResults": "External action results",
     "nativeRequest": "Native request",
     "externalRequest": "External request",
-    "checkingActions": "Checking actions…"
+    "checkingActions": "Checking actions…",
+    "managedProjects": "Managed projects",
+    "pipelineScope": "Pipeline scope",
+    "relevantPipelines": "My merge requests and checked-out branches",
+    "myMergeRequestPipelines": "My merge requests only"
   },
   "gitlabSettings": {
     "title": "GitLab credentials",
@@ -2955,7 +2990,20 @@
     "moveTicketToDoneAfterMerge": "Move {ticket} to the project’s configured done status",
     "jiraDoneStatusRequired": "Configure this Jira project’s done status before using this option.",
     "mergedFollowUpFailed": "Pull request merged, but a follow-up action failed.",
-    "closeMergeResult": "Close"
+    "closeMergeResult": "Close",
+    "autoSyncBranch": "Auto sync branch",
+    "autoSyncBranchDescription": "Rebase and push this branch when the target changes, then merge after CI and merge requirements pass. Conflicts pause for manual resolution.",
+    "enableAutoMerge": "Enable Auto Merge",
+    "resumeAutoMerge": "Resume Auto Merge",
+    "cancelAutoMerge": "Cancel Auto Merge",
+    "refreshMergeOptions": "Refresh merge options",
+    "syncStates": {
+      "SYNCING": "Syncing branch",
+      "WAITING_CI": "Waiting for CI",
+      "WAITING_REQUIREMENTS": "Waiting for merge requirements",
+      "MERGING": "Merging",
+      "ACTION_REQUIRED": "Action required"
+    }
   },
   "githubComments": {
     "title": "GitHub Comments",
@@ -3768,6 +3816,45 @@
       "complete": "Complete",
       "failed": "Failed",
       "retry": "Try again"
+    },
+    "bulkSync": {
+      "button": "Bulk Sync",
+      "description": "Select out-of-date worktrees to fetch, rebase onto their base branch, and push with force-with-lease. Blocked worktrees are shown below.",
+      "selection": "Out-of-date worktrees",
+      "empty": "No out-of-date worktrees in this scope.",
+      "selectAll": "Select all",
+      "deselectAll": "Deselect all",
+      "selectWorktree": "Select {branch}",
+      "behindBase": "{count} commits behind {branch}",
+      "background": "The entire selected batch continues in the background when you close this sheet or leave the page.",
+      "close": "Close",
+      "start": "Sync selected ({count})",
+      "running": "Bulk Sync running",
+      "completed": "Bulk Sync completed",
+      "progress": "{completed} of {total} worktrees processed in this view",
+      "job": "View job logs",
+      "monitoring": "Progress updates are temporarily unavailable. Reconnecting…",
+      "missingBatch": "The sync batch is temporarily unavailable.",
+      "blocked": {
+        "unavailable": "This worktree is unavailable.",
+        "offline": "The agent is offline.",
+        "unsupported": "Update the agent to support Bulk Sync.",
+        "activeSync": "This worktree is already queued for Bulk Sync.",
+        "busy": "Another operation is running in this checkout.",
+        "conflicts": "Resolve the current rebase or conflicts first.",
+        "dirty": "Stash or commit changes before syncing.",
+        "missingBranch": "A checked-out branch is required.",
+        "missingUpstream": "Publish this branch before syncing.",
+        "missingBase": "Select a base branch before syncing."
+      },
+      "status": {
+        "PENDING": "Queued",
+        "RUNNING": "Syncing",
+        "SUCCEEDED": "Synced",
+        "FAILED": "Failed",
+        "SKIPPED": "Skipped",
+        "ATTENTION_REQUIRED": "Needs attention"
+      }
     }
   },
   "worktreeDetail": {
@@ -4853,7 +4940,10 @@
       "NO_REGEX_MATCH": "no regex match",
       "IS_EMPTY": "is empty",
       "IS_NOT_EMPTY": "is not empty"
-    }
+    },
+    "showBuildRunSeparators": "Show build run separators",
+    "buildCreated": "Build created",
+    "buildRun": "Build run"
   },
   "crashes": {
     "title": "Crashes",
@@ -5861,7 +5951,8 @@
     "unknownAuthor": "Unknown author",
     "focusedDiscussion": "Showing a linked discussion.",
     "showAllDiscussions": "Show all discussions for this merge request",
-    "fileComment": "File comment"
+    "fileComment": "File comment",
+    "includeOtherAuthors": "Include other authors in managed projects"
   },
   "serverUrls": {
     "title": "Server URLs",
@@ -6007,6 +6098,8 @@
     "assign": "Assign",
     "assignReviewers": "Assign reviewers",
     "assignmentDescription": "Check people to request a review, or uncheck them to remove the request. Load all reviewers for more choices.",
+    "close": "Close",
+    "ticketTransitionFailed": "Reviewers were assigned, but the Jira ticket could not be moved to in review: {error}",
     "requestClosed": "This pull or merge request is no longer open. Reload to check its current state.",
     "requirementCounts": "Required: {required} · Approved: {approved} · Requested: {requested} · Selected: {selected}",
     "selectReviewer": "Select {name} for {group}",
