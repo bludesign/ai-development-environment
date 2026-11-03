@@ -2579,6 +2579,16 @@ function registerWorktreeAdapters(
         throw new Error("Merge method is invalid");
       }
       autoMerge = await services.worktreeAutomations.configureAutoMerge({
+        ...(context.node.config.autoSync === true
+          ? {
+              autoSync: true,
+              expectedHeadSha: optionalText(
+                context.node.config.expectedHeadSha ??
+                  getSessionValue(context.sessionData, "pr.headRefOid"),
+                200,
+              ),
+            }
+          : {}),
         worktreeId: id,
         repositoryNameWithOwner: text(
           context.node.config.repositoryNameWithOwner ??

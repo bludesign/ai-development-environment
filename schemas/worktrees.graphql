@@ -321,6 +321,8 @@ extend type AgentJob {
 
 "Represents a worktree auto merge in the GraphQL API."
 type WorktreeAutoMerge {
+  "Whether AIDE syncs the linked branch and waits for passing CI before merging."
+  autoSync: Boolean!
   "Recorded outcomes for selected targeting worktrees."
   baseBranchUpdateResults: [MergeBaseBranchUpdateResult!]!
   "Identifier of the related worktree."
@@ -1098,6 +1100,10 @@ input ConfigureWorktreeAutoSyncInput {
 
 "Values used to configure a worktree auto merge."
 input ConfigureWorktreeAutoMergeInput {
+  "Rebase and push the linked branch before waiting for passing CI and merging."
+  autoSync: Boolean = false
+  "Reviewed source revision, required when autoSync is selected."
+  expectedHeadSha: String
   "Selected targeting worktrees to update only after the merge is confirmed."
   baseBranchUpdate: MergeBaseBranchUpdateInput
   "Identifier of the worktree to use."

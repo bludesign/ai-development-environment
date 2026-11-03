@@ -33,6 +33,7 @@ function setup() {
   };
   const prisma = {
     worktree: {
+      findUnique: vi.fn().mockResolvedValue(null),
       findFirst: vi.fn().mockResolvedValue(worktree),
       findMany: vi.fn().mockResolvedValue([]),
     },

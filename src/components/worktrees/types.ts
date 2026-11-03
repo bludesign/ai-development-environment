@@ -63,6 +63,7 @@ export type WorktreeAutoSync = {
 };
 
 export type WorktreeAutoMerge = {
+  autoSync?: boolean;
   worktreeId: string;
   state: string;
   repositoryNameWithOwner: string;

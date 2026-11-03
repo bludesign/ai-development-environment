@@ -36,6 +36,100 @@ afterEach(async () => {
 });
 
 describe("MergePullRequestButton", () => {
+  test("configures managed Auto Merge from a linked merge sheet", async () => {
+    request.mockImplementation(async (query) => {
+      if (query.includes("query GitHubPullRequestMergeOptions"))
+        return {
+          githubPullRequestMergeOptions: {
+            availableMethods: ["SQUASH"],
+            commitEmails: [],
+            defaultCommitEmail: null,
+            defaultCommitHeadline: "APP-42 Add API",
+            defaultCommitBody: "",
+            canMerge: false,
+            blockedReason: "The branch is behind.",
+            worktreeId: "wt",
+            headRefOid: "reviewed",
+            canAutoMergeWithSync: true,
+            autoSyncBlockedReason: null,
+          },
+        } as never;
+      return {
+        configureWorktreeAutoMerge: {
+          worktreeId: "wt",
+          state: "SYNCING",
+          autoSync: true,
+        },
+      } as never;
+    });
+    render(
+      <MergePullRequestButton
+        pullRequest={pullRequest}
+        requestSource="PULL_REQUEST_DETAILS"
+        open
+      />,
+    );
+    fireEvent.click(
+      await screen.findByRole("checkbox", { name: "Auto sync branch" }),
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Enable Auto Merge" }));
+    await waitFor(() =>
+      expect(request).toHaveBeenCalledWith(
+        expect.stringContaining("mutation ConfigureWorktreeAutoMerge"),
+        expect.objectContaining({
+          input: expect.objectContaining({
+            worktreeId: "wt",
+            autoSync: true,
+            expectedHeadSha: "reviewed",
+            method: "SQUASH",
+          }),
+        }),
+      ),
+    );
+    expect(
+      request.mock.calls.some(([query]) =>
+        query.includes("mutation MergeGitHubPullRequest"),
+      ),
+    ).toBe(false);
+  });
+
+  test("shows managed progress and offers cancellation", async () => {
+    request.mockResolvedValue({
+      githubPullRequestMergeOptions: {
+        availableMethods: ["SQUASH"],
+        commitEmails: [],
+        defaultCommitEmail: null,
+        defaultCommitHeadline: "APP-42 Add API",
+        defaultCommitBody: "",
+        canMerge: false,
+        worktreeId: "wt",
+        defaultAutoSync: true,
+        autoMergeOperation: {
+          autoSync: true,
+          state: "WAITING_REQUIREMENTS",
+          lastError: null,
+        },
+      },
+    } as never);
+    render(
+      <MergePullRequestButton
+        pullRequest={pullRequest}
+        requestSource="PULL_REQUEST_DETAILS"
+        open
+      />,
+    );
+    expect(
+      await screen.findByText("Waiting for merge requirements"),
+    ).toBeDefined();
+    fireEvent.click(screen.getByRole("button", { name: "Cancel Auto Merge" }));
+    await waitFor(() =>
+      expect(request).toHaveBeenCalledWith(
+        expect.stringContaining("mutation CancelWorktreeAutoMerge"),
+        { worktreeId: "wt" },
+      ),
+    );
+  });
+
   test("shows only enabled methods and submits the selected commit details", async () => {
     const onMerged = vi.fn();
     request.mockImplementation(async (query, variables) => {

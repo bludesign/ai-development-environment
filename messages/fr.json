@@ -2448,7 +2448,11 @@
       "POST_MERGE": "Actions suivantes en cours",
       "COMPLETED": "Terminée",
       "ACTION_REQUIRED": "Action requise",
-      "CANCELED": "Annulée"
+      "CANCELED": "Annulée",
+      "SYNCING": "Synchronisation de la branche",
+      "WAITING_CI": "En attente de la CI",
+      "WAITING_REQUIREMENTS": "En attente des conditions de fusion",
+      "MERGING": "Fusion en cours"
     },
     "pipelineStatuses": {
       "CREATED": "Créé",
@@ -2986,7 +2990,20 @@
     "moveTicketToDoneAfterMerge": "Déplacer {ticket} vers le statut terminé configuré du projet",
     "jiraDoneStatusRequired": "Configurez le statut terminé de ce projet Jira avant d’utiliser cette option.",
     "mergedFollowUpFailed": "Pull request fusionnée, mais une action ultérieure a échoué.",
-    "closeMergeResult": "Fermer"
+    "closeMergeResult": "Fermer",
+    "autoSyncBranch": "Synchroniser automatiquement la branche",
+    "autoSyncBranchDescription": "Rebaser et pousser cette branche lorsque la cible change, puis fusionner après la réussite de la CI et la satisfaction des conditions de fusion. Les conflits nécessitent une résolution manuelle.",
+    "enableAutoMerge": "Activer la fusion automatique",
+    "resumeAutoMerge": "Reprendre la fusion automatique",
+    "cancelAutoMerge": "Annuler la fusion automatique",
+    "refreshMergeOptions": "Actualiser les options de fusion",
+    "syncStates": {
+      "SYNCING": "Synchronisation de la branche",
+      "WAITING_CI": "En attente de la CI",
+      "WAITING_REQUIREMENTS": "En attente des conditions de fusion",
+      "MERGING": "Fusion en cours",
+      "ACTION_REQUIRED": "Action requise"
+    }
   },
   "githubComments": {
     "title": "Commentaires GitHub",

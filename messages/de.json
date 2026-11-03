@@ -2448,7 +2448,11 @@
       "POST_MERGE": "Folgeaktionen laufen",
       "COMPLETED": "Abgeschlossen",
       "ACTION_REQUIRED": "Aktion erforderlich",
-      "CANCELED": "Abgebrochen"
+      "CANCELED": "Abgebrochen",
+      "SYNCING": "Branch wird synchronisiert",
+      "WAITING_CI": "Warten auf CI",
+      "WAITING_REQUIREMENTS": "Warten auf Merge-Anforderungen",
+      "MERGING": "Zusammenführen"
     },
     "pipelineStatuses": {
       "CREATED": "Erstellt",
@@ -2986,7 +2990,20 @@
     "moveTicketToDoneAfterMerge": "{ticket} in den konfigurierten Abschlussstatus des Projekts verschieben",
     "jiraDoneStatusRequired": "Konfigurieren Sie zuerst den Abschlussstatus dieses Jira-Projekts.",
     "mergedFollowUpFailed": "Pull Request zusammengeführt, aber eine Folgeaktion ist fehlgeschlagen.",
-    "closeMergeResult": "Schließen"
+    "closeMergeResult": "Schließen",
+    "autoSyncBranch": "Branch automatisch synchronisieren",
+    "autoSyncBranchDescription": "Diesen Branch bei Änderungen am Ziel rebasen und pushen, dann nach erfolgreicher CI und erfüllten Merge-Anforderungen zusammenführen. Konflikte erfordern eine manuelle Lösung.",
+    "enableAutoMerge": "Auto Merge aktivieren",
+    "resumeAutoMerge": "Auto Merge fortsetzen",
+    "cancelAutoMerge": "Auto Merge abbrechen",
+    "refreshMergeOptions": "Merge-Optionen aktualisieren",
+    "syncStates": {
+      "SYNCING": "Branch wird synchronisiert",
+      "WAITING_CI": "Warten auf CI",
+      "WAITING_REQUIREMENTS": "Warten auf Merge-Anforderungen",
+      "MERGING": "Zusammenführen",
+      "ACTION_REQUIRED": "Aktion erforderlich"
+    }
   },
   "githubComments": {
     "title": "GitHub-Kommentare",

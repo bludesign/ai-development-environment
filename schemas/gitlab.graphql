@@ -1239,6 +1239,8 @@ extend type Subscription {
 
 "Persisted merge intent and independently retryable follow-ups."
 type GitLabMergeOperation {
+  "Whether AIDE syncs the linked branch before merging."
+  autoSync: Boolean!
   "Recorded outcomes for selected targeting worktrees."
   baseBranchUpdateResults: [MergeBaseBranchUpdateResult!]!
   "Stable identifier of the saved merge operation."
@@ -1265,6 +1267,12 @@ type GitLabMergeOperation {
 
 "Current GitLab project policy, readiness, defaults and linked follow-ups."
 type GitLabMergeOptions {
+  "Whether the linked worktree supports managed sync and merge."
+  canAutoMergeWithSync: Boolean!
+  "Reason branch syncing is unavailable."
+  autoSyncBlockedReason: String
+  "Previously selected branch syncing setting."
+  defaultAutoSync: Boolean!
   "Targeting worktrees and the reviewed destination for post-merge base updates."
   baseBranchUpdateOptions: MergeBaseBranchUpdateOptions
   "Numeric GitLab target project identifier."
@@ -1337,6 +1345,8 @@ type GitLabMergeResult {
 
 "Submit the SHA reviewed in the merge sheet. Omitted messages use GitLab defaults."
 input SubmitGitLabMergeRequestMergeInput {
+  "Rebase and push the linked branch before waiting for passing CI and merging."
+  autoSync: Boolean = false
   "Selected targeting worktrees to update only after the merge is confirmed."
   baseBranchUpdate: MergeBaseBranchUpdateInput
   "Numeric GitLab target project identifier."

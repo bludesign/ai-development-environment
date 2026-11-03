@@ -9,6 +9,10 @@ import {
   MERGE_FOLLOW_UP_FIELDS,
 } from "@/components/github/merge-follow-up-fields";
 import { MergePullRequestButton } from "@/components/github/merge-pull-request-button";
+import {
+  MergeSyncFields,
+  MergeSyncStatus,
+} from "@/components/github/merge-sync-fields";
 import { MergeRequestDialog } from "@/components/gitlab/merge-request-dialog";
 import { isActiveGitLabPipeline } from "@/components/gitlab/pipeline-format";
 import { Alert, AlertDescription } from "@/components/ui/alert";
@@ -448,6 +452,7 @@ function GitHubAutoMergeButton({
   );
   const [method, setMethod] = useState<GitHubMergeMethod | "">("");
   const [headline, setHeadline] = useState("");
+  const [autoSync, setAutoSync] = useState(false);
   const [body, setBody] = useState("");
   const [authorEmail, setAuthorEmail] = useState(DEFAULT_EMAIL);
   const [selectedWorktreeIds, setSelectedWorktreeIds] = useState<string[]>([]);
@@ -481,7 +486,7 @@ function GitHubAutoMergeButton({
           ${MERGE_FOLLOW_UP_FIELDS}
           availableMethods commitEmails defaultCommitEmail
           defaultCommitHeadline defaultCommitBody canMerge
-          canEnableAutoMerge autoMergeEnabled viewerCanDisableAutoMerge
+          canEnableAutoMerge autoMergeEnabled viewerCanDisableAutoMerge canAutoMergeWithSync autoSyncBlockedReason defaultAutoSync
           mergeStateStatus headRefOid blockedReason
         }
       }`,
@@ -491,6 +496,7 @@ function GitHubAutoMergeButton({
           if (!active) return;
           const next = data.githubPullRequestMergeOptions;
           setOptions(next);
+          setAutoSync(next.defaultAutoSync ?? false);
           setSelectedWorktreeIds(
             next.baseBranchUpdateOptions?.selectedWorktreeIds ?? [],
           );
@@ -518,6 +524,7 @@ function GitHubAutoMergeButton({
     pullRequest &&
     (manualOpen ||
       (!open &&
+        !currentRule?.autoSync &&
         currentRule?.state !== "COMPLETED" &&
         directlyMergeable(worktree)))
   ) {
@@ -568,11 +575,15 @@ function GitHubAutoMergeButton({
             worktreeId state repositoryNameWithOwner pullRequestNumber
             mergeMethod commitHeadline commitBody authorEmail deleteWorktree
             moveTicketToDone ticketKey lastError updatedAt
+            autoSync
           }
         }`,
         {
           input: {
             worktreeId: worktree.id,
+            ...(autoSync
+              ? { autoSync: true, expectedHeadSha: options?.headRefOid }
+              : {}),
             repositoryNameWithOwner: pullRequest.repositoryNameWithOwner,
             pullRequestNumber: pullRequest.number,
             method,
@@ -676,6 +687,15 @@ function GitHubAutoMergeButton({
               )}
               {options && (
                 <>
+                  {currentRule?.autoSync && (
+                    <MergeSyncStatus state={currentRule.state} />
+                  )}
+                  <MergeSyncFields
+                    checked={autoSync}
+                    onChange={setAutoSync}
+                    disabled={busy || postMerge}
+                    unavailableReason={options.autoSyncBlockedReason}
+                  />
                   <div>
                     <Label className="mb-1.5 block">{tp("mergeType")}</Label>
                     <Select
@@ -777,12 +797,23 @@ function GitHubAutoMergeButton({
               disabled={
                 loading ||
                 busy ||
+                Boolean(
+                  currentRule?.autoSync &&
+                  [
+                    "SYNCING",
+                    "WAITING_CI",
+                    "WAITING_REQUIREMENTS",
+                    "MERGING",
+                  ].includes(currentRule.state),
+                ) ||
                 !method ||
                 !headline.trim() ||
                 (!postMerge &&
                   moveTicketToDone &&
                   !options?.ticketDoneStatusConfigured) ||
-                (!currentRule && !options?.canEnableAutoMerge)
+                (autoSync
+                  ? !options?.canAutoMergeWithSync
+                  : !currentRule && !options?.canEnableAutoMerge)
               }
               onClick={() => void save()}
               type="button"

@@ -16,6 +16,7 @@ import {
   WORKTREE_BRANCH_JOB_KIND,
   WORKTREE_COMMIT_JOB_KIND,
   WORKTREE_AUTO_SYNC_JOB_KIND,
+  WORKTREE_REVIEWED_SYNC_CAPABILITY,
   WORKTREE_DELETE_JOB_KIND,
   WORKTREE_DELETE_BUILD_DATA_CAPABILITY,
   WORKTREE_GIT_INSPECT_JOB_KIND,
@@ -35,6 +36,7 @@ import {
   type CodebaseWorktreeReport,
   type WorktreeActivityReport,
   type WorktreeAutoSyncPhase,
+  type WorktreeMergeSyncGuard,
   type WorktreeEditorVariant,
   type WorktreeGitOperation,
   type WorktreeOperation,
@@ -3464,9 +3466,10 @@ export class WorktreesService {
       agentId: string;
       folder: string;
       gitDirectory: string;
-      baseBranch: string;
+      baseBranch?: string;
       expectedOrigin: string;
     },
+    mergeGuard?: WorktreeMergeSyncGuard,
   ) {
     const worktree = await this.requireRunnable(
       id,
@@ -3474,17 +3477,25 @@ export class WorktreesService {
     );
     const payload = this.payload(worktree);
     if (
+      mergeGuard &&
+      !capabilities(worktree.codebase.agent).includes(
+        WORKTREE_REVIEWED_SYNC_CAPABILITY,
+      )
+    )
+      throw new Error("Update the agent to use Auto Merge branch syncing");
+    if (
       expectedIdentity &&
       (worktree.branch !== expectedBranch ||
         worktree.codebaseId !== expectedIdentity.codebaseId ||
         worktree.codebase.agentId !== expectedIdentity.agentId ||
         payload.folder !== expectedIdentity.folder ||
         payload.gitDirectory !== expectedIdentity.gitDirectory ||
-        payload.baseBranch !== expectedIdentity.baseBranch ||
+        (expectedIdentity.baseBranch !== undefined &&
+          payload.baseBranch !== expectedIdentity.baseBranch) ||
         payload.expectedOrigin !== expectedIdentity.expectedOrigin)
     )
       throw new Error("Worktree changed before Bulk Sync could be dispatched");
-    if (!payload.baseBranch)
+    if (!payload.baseBranch && !mergeGuard)
       throw new Error("Auto Sync requires a base branch");
     if (
       (worktree.codebase.repository.preparations?.length ?? 0) > 0 &&
@@ -3502,7 +3513,8 @@ export class WorktreesService {
       payload: {
         ...payload,
         expectedBranch,
-        baseBranch: payload.baseBranch,
+        baseBranch: mergeGuard?.targetBranch ?? payload.baseBranch,
+        ...(mergeGuard ? { mergeGuard } : {}),
         phase,
         forcePreparations,
         preparations: (worktree.codebase.repository.preparations ?? []).map(

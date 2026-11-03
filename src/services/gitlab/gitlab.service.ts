@@ -26,6 +26,7 @@ import {
 import { normalizeGitOrigin } from "@ai-development-environment/agent-contract/codebases";
 
 import { getPrismaClient } from "@/data/prisma-client";
+import type { MergeSyncReadiness } from "@/services/worktrees/merge-branch-sync";
 import { mapIntegrationRequests } from "@/services/integration-request";
 import {
   CREDENTIALS,
@@ -929,6 +930,82 @@ export class GitLabService {
         })
       ).data,
     );
+  }
+
+  async managedMergeReadiness(
+    projectId: string,
+    iid: number,
+  ): Promise<MergeSyncReadiness> {
+    const { mr, project, canMerge } = await this.mergeReadiness(projectId, iid);
+    const source = mr.sourceProjectId
+      ? await this.mergeProject(mr.sourceProjectId)
+      : null;
+    const targetOrigin = normalizeGitOrigin(project.web_url).canonicalOrigin;
+    const branch = (
+      await this.get<{ commit: { id: string } }>({
+        path: `/projects/${encodeURIComponent(projectId)}/repository/branches/${encodeURIComponent(mr.targetBranch)}`,
+        operation: "GitLabMergeTargetRevision",
+        source: "MERGE_REQUEST_DETAILS",
+        force: true,
+        allowStaleOnError: false,
+      })
+    ).data;
+    const pipeline = mr.headPipeline;
+    let ciPassed = pipeline?.status === "SUCCESS" && pipeline.sha === mr.sha;
+    if (
+      pipeline?.status === "SUCCESS" &&
+      pipeline.sha !== mr.sha &&
+      pipeline.source === "merge_request_event"
+    ) {
+      const commit = (
+        await this.get<{ parent_ids: string[] }>({
+          path: `/projects/${encodeURIComponent(projectId)}/repository/commits/${encodeURIComponent(pipeline.sha)}`,
+          operation: "GitLabMergePipelineParents",
+          source: "MERGE_REQUEST_DETAILS",
+          force: true,
+          allowStaleOnError: false,
+        })
+      ).data;
+      ciPassed =
+        commit.parent_ids.includes(mr.sha) &&
+        commit.parent_ids.includes(branch.commit.id);
+    }
+    const permanent = !canMerge
+      ? "Your GitLab account cannot merge this request."
+      : mr.draft
+        ? "Mark this merge request ready before merging."
+        : mr.hasConflicts || mr.detailedMergeStatus === "conflict"
+          ? "Resolve merge conflicts before resuming Auto Merge."
+          : ["policies_denied", "requested_changes"].includes(
+                mr.detailedMergeStatus,
+              )
+            ? "GitLab policy or requested changes block this merge."
+            : null;
+    return {
+      state:
+        mr.state === "OPENED"
+          ? "OPEN"
+          : mr.state === "MERGED"
+            ? "MERGED"
+            : "CLOSED",
+      headSha: mr.sha,
+      sourceOrigin: source
+        ? normalizeGitOrigin(source.web_url).canonicalOrigin
+        : "",
+      sourceBranch: mr.sourceBranch,
+      targetOrigin,
+      targetUrl: `${project.web_url.replace(/\/$/, "")}.git`,
+      targetBranch: mr.targetBranch,
+      targetSha: branch.commit.id,
+      ciPassed,
+      canMerge:
+        canMerge &&
+        mr.detailedMergeStatus === "mergeable" &&
+        !mr.draft &&
+        !mr.hasConflicts,
+      blocker: permanent,
+      nativeAutoMerge: mr.mergeWhenPipelineSucceeds,
+    };
   }
 
   async mergeProject(projectId: string) {

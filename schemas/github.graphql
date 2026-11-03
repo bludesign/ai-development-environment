@@ -1232,6 +1232,14 @@ type GitHubPullRequestDetail {
 
 "Represents GitHub pull request merge options in the GraphQL API."
 type GitHubPullRequestMergeOptions {
+  "Whether the linked worktree supports managed sync and merge."
+  canAutoMergeWithSync: Boolean!
+  "Reason branch syncing is unavailable."
+  autoSyncBlockedReason: String
+  "Previously selected branch syncing setting."
+  defaultAutoSync: Boolean!
+  "Saved merge operation for the linked worktree."
+  autoMergeOperation: WorktreeAutoMerge
   "Targeting worktrees and the reviewed destination for post-merge base updates."
   baseBranchUpdateOptions: MergeBaseBranchUpdateOptions
   "The merge method selected by default. May be null when the repository has no available merge method."

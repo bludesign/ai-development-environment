@@ -606,6 +606,8 @@ export const createWorktreeResolvers = (
         input,
       }: {
         input: {
+          autoSync?: boolean | null;
+          expectedHeadSha?: string | null;
           worktreeId: string;
           repositoryNameWithOwner: string;
           pullRequestNumber: number;

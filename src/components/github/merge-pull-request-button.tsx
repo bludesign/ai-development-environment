@@ -1,6 +1,6 @@
 "use client";
 
-import { GitMerge } from "lucide-react";
+import { GitMerge, RefreshCw } from "lucide-react";
 import { useTranslations } from "next-intl";
 import { useEffect, useState } from "react";
 
@@ -31,6 +31,7 @@ import {
 import { Spinner } from "@/components/ui/spinner";
 import { Textarea } from "@/components/ui/textarea";
 import { controlPlaneRequest } from "@/lib/control-plane-client";
+import { MergeSyncFields, MergeSyncStatus } from "./merge-sync-fields";
 import type {
   GitHubMergeMethod,
   GitHubPullRequestMergeOptions,
@@ -83,6 +84,8 @@ export function MergePullRequestButton({
   const [loading, setLoading] = useState(false);
   const [merging, setMerging] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [autoSync, setAutoSync] = useState(false);
+  const [refresh, setRefresh] = useState(0);
   const [owner = "", name = ""] = pullRequest.repositoryNameWithOwner.split(
     "/",
     2,
@@ -133,6 +136,8 @@ export function MergePullRequestButton({
             defaultCommitHeadline
             defaultCommitBody
             canMerge
+            headRefOid canAutoMergeWithSync autoSyncBlockedReason defaultAutoSync
+            autoMergeOperation { autoSync state lastError }
             blockedReason
           }
         }`,
@@ -148,6 +153,7 @@ export function MergePullRequestButton({
           if (!active) return;
           const next = data.githubPullRequestMergeOptions;
           setOptions(next);
+          setAutoSync(next.defaultAutoSync ?? false);
           setSelectedWorktreeIds(
             next.baseBranchUpdateOptions?.selectedWorktreeIds ?? [],
           );
@@ -174,12 +180,29 @@ export function MergePullRequestButton({
       active = false;
       window.clearTimeout(timeout);
     };
-  }, [name, open, owner, pullRequest.number, requestSource, worktreeId]);
+  }, [
+    name,
+    open,
+    owner,
+    pullRequest.number,
+    requestSource,
+    worktreeId,
+    refresh,
+  ]);
+
+  const operation = options?.autoMergeOperation;
+  const activeManaged = Boolean(
+    operation?.autoSync &&
+    ["SYNCING", "WAITING_CI", "WAITING_REQUIREMENTS", "MERGING"].includes(
+      operation.state,
+    ),
+  );
 
   const merge = async () => {
     if (
+      !options ||
       !method ||
-      !options?.canMerge ||
+      !(autoSync ? options?.canAutoMergeWithSync : options?.canMerge) ||
       !commitHeadline.trim() ||
       mergedResult ||
       (moveTicketToDone && !options.ticketDoneStatusConfigured)
@@ -188,6 +211,40 @@ export function MergePullRequestButton({
     setMerging(true);
     setError(null);
     try {
+      if (autoSync && options?.worktreeId) {
+        await controlPlaneRequest(
+          `mutation ConfigureWorktreeAutoMerge($input: ConfigureWorktreeAutoMergeInput!) {
+          configureWorktreeAutoMerge(input: $input) { worktreeId state autoSync }
+        }`,
+          {
+            input: {
+              worktreeId: options.worktreeId,
+              repositoryNameWithOwner: pullRequest.repositoryNameWithOwner,
+              pullRequestNumber: pullRequest.number,
+              autoSync: true,
+              expectedHeadSha: options.headRefOid,
+              method,
+              commitHeadline,
+              commitBody,
+              authorEmail: authorEmail === DEFAULT_EMAIL ? null : authorEmail,
+              deleteWorktree,
+              moveTicketToDone,
+              ...(selectedWorktreeIds.length &&
+              options.baseBranchUpdateOptions?.destinationBaseBranch
+                ? {
+                    baseBranchUpdate: {
+                      worktreeIds: selectedWorktreeIds,
+                      destinationBaseBranch:
+                        options.baseBranchUpdateOptions.destinationBaseBranch,
+                    },
+                  }
+                : {}),
+            },
+          },
+        );
+        setOpen(false);
+        return;
+      }
       const data = await controlPlaneRequest<{
         mergeGitHubPullRequest: GitHubPullRequestMergeResult;
       }>(
@@ -238,7 +295,27 @@ export function MergePullRequestButton({
     }
   };
 
-  const blockedReason = options?.blockedReason ?? null;
+  const cancelManaged = async () => {
+    if (!options?.worktreeId || merging) return;
+    setMerging(true);
+    setError(null);
+    try {
+      await controlPlaneRequest(
+        `mutation CancelWorktreeAutoMerge($worktreeId: ID!) { cancelWorktreeAutoMerge(worktreeId: $worktreeId) }`,
+        { worktreeId: options.worktreeId },
+      );
+      setRefresh((value) => value + 1);
+    } catch (value) {
+      setError(value instanceof Error ? value.message : String(value));
+    } finally {
+      setMerging(false);
+    }
+  };
+
+  const blockedReason =
+    operation?.lastError ??
+    (autoSync ? options?.autoSyncBlockedReason : options?.blockedReason) ??
+    null;
   return (
     <>
       {showTrigger && (
@@ -298,8 +375,17 @@ export function MergePullRequestButton({
                   <AlertDescription>{error || blockedReason}</AlertDescription>
                 </Alert>
               )}
-              {options && (
+              {operation?.autoSync && (
+                <MergeSyncStatus state={operation.state} />
+              )}
+              {options && !activeManaged && (
                 <>
+                  <MergeSyncFields
+                    checked={autoSync}
+                    onChange={setAutoSync}
+                    disabled={merging}
+                    unavailableReason={options.autoSyncBlockedReason}
+                  />
                   <div>
                     <Label className="mb-1.5 block" htmlFor="merge-method">
                       {t("mergeType")}
@@ -393,6 +479,26 @@ export function MergePullRequestButton({
           )}
 
           <DialogFooter>
+            {operation?.autoSync && (
+              <Button
+                variant="outline"
+                size="icon"
+                aria-label={t("refreshMergeOptions")}
+                disabled={merging || loading}
+                onClick={() => setRefresh((value) => value + 1)}
+              >
+                <RefreshCw />
+              </Button>
+            )}
+            {operation?.autoSync && operation.state === "ACTION_REQUIRED" && (
+              <Button
+                variant="destructive"
+                disabled={merging}
+                onClick={() => void cancelManaged()}
+              >
+                {t("cancelAutoMerge")}
+              </Button>
+            )}
             <Button
               disabled={merging}
               onClick={() => setOpen(false)}
@@ -403,19 +509,33 @@ export function MergePullRequestButton({
             </Button>
             <Button
               disabled={
-                Boolean(mergedResult) ||
-                (moveTicketToDone && !options?.ticketDoneStatusConfigured) ||
                 loading ||
                 merging ||
-                !options?.canMerge ||
-                !method ||
-                !commitHeadline.trim()
+                (!activeManaged &&
+                  (Boolean(mergedResult) ||
+                    (moveTicketToDone &&
+                      !options?.ticketDoneStatusConfigured) ||
+                    !(autoSync
+                      ? options?.canAutoMergeWithSync
+                      : options?.canMerge) ||
+                    !method ||
+                    !commitHeadline.trim()))
               }
-              onClick={() => void merge()}
+              onClick={() => void (activeManaged ? cancelManaged() : merge())}
               type="button"
             >
               {merging ? <Spinner /> : <GitMerge />}
-              {merging ? t("merging") : t("mergePullRequest")}
+              {activeManaged
+                ? t("cancelAutoMerge")
+                : autoSync
+                  ? t(
+                      operation?.state === "ACTION_REQUIRED"
+                        ? "resumeAutoMerge"
+                        : "enableAutoMerge",
+                    )
+                  : merging
+                    ? t("merging")
+                    : t("mergePullRequest")}
             </Button>
           </DialogFooter>
         </DialogContent>

@@ -2448,7 +2448,11 @@
       "POST_MERGE": "Ejecutando acciones posteriores",
       "COMPLETED": "Completada",
       "ACTION_REQUIRED": "Acción necesaria",
-      "CANCELED": "Cancelada"
+      "CANCELED": "Cancelada",
+      "SYNCING": "Sincronizando rama",
+      "WAITING_CI": "Esperando CI",
+      "WAITING_REQUIREMENTS": "Esperando requisitos de fusión",
+      "MERGING": "Fusionando"
     },
     "pipelineStatuses": {
       "CREATED": "Creado",
@@ -2986,7 +2990,20 @@
     "moveTicketToDoneAfterMerge": "Mover {ticket} al estado de finalización configurado del proyecto",
     "jiraDoneStatusRequired": "Configura el estado de finalización de este proyecto de Jira antes de usar esta opción.",
     "mergedFollowUpFailed": "Solicitud fusionada, pero falló una acción posterior.",
-    "closeMergeResult": "Cerrar"
+    "closeMergeResult": "Cerrar",
+    "autoSyncBranch": "Sincronizar rama automáticamente",
+    "autoSyncBranchDescription": "Rebasar y enviar esta rama cuando cambie el destino, y fusionar cuando la CI y los requisitos de fusión se cumplan. Los conflictos requieren resolución manual.",
+    "enableAutoMerge": "Activar fusión automática",
+    "resumeAutoMerge": "Reanudar fusión automática",
+    "cancelAutoMerge": "Cancelar fusión automática",
+    "refreshMergeOptions": "Actualizar opciones de fusión",
+    "syncStates": {
+      "SYNCING": "Sincronizando rama",
+      "WAITING_CI": "Esperando CI",
+      "WAITING_REQUIREMENTS": "Esperando requisitos de fusión",
+      "MERGING": "Fusionando",
+      "ACTION_REQUIRED": "Acción requerida"
+    }
   },
   "githubComments": {
     "title": "Comentarios de GitHub",

@@ -237,6 +237,7 @@ export type GitLabMergeRequestView = {
 };
 
 export type GitLabMergeOperationView = {
+  autoSync?: boolean;
   baseBranchUpdateResults?: MergeBaseBranchUpdateResult[];
   id: string;
   state: string;
@@ -251,6 +252,9 @@ export type GitLabMergeOperationView = {
 };
 
 export type GitLabMergeOptions = {
+  canAutoMergeWithSync?: boolean;
+  autoSyncBlockedReason?: string | null;
+  defaultAutoSync?: boolean;
   baseBranchUpdateOptions?: MergeBaseBranchUpdateOptions | null;
   projectId: string;
   iid: number;
@@ -283,6 +287,7 @@ export type GitLabMergeOptions = {
 };
 
 export type SubmitGitLabMergeRequestMergeInput = {
+  autoSync?: boolean | null;
   baseBranchUpdate?: MergeBaseBranchUpdateInput | null;
   projectId: string;
   iid: number;

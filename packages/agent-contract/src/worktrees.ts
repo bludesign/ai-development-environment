@@ -12,6 +12,14 @@ export const WORKTREE_INSPECT_JOB_KIND = "worktree.inspect";
 export const WORKTREE_OPERATION_JOB_KIND = "worktree.operation";
 export const WORKTREE_COMMIT_JOB_KIND = "worktree.commit";
 export const WORKTREE_AUTO_SYNC_JOB_KIND = "worktree.auto-sync";
+export const WORKTREE_REVIEWED_SYNC_CAPABILITY =
+  "worktree.auto-sync.reviewed-head";
+export type WorktreeMergeSyncGuard = {
+  expectedHeadSha: string;
+  targetUrl: string;
+  targetBranch: string;
+  targetSha: string;
+};
 export const WORKTREE_PREPARATION_JOB_KIND = "worktree.prepare";
 export const WORKTREE_GIT_INSPECT_JOB_KIND = "worktree.git.inspect";
 export const WORKTREE_GIT_OPERATION_JOB_KIND = "worktree.git.operation";
@@ -1198,6 +1206,7 @@ export function worktreeAutoSyncJobPayload(value: unknown): {
   phase: WorktreeAutoSyncPhase;
   forcePreparations: boolean;
   preparations: WorktreePreparationDefinition[];
+  mergeGuard?: WorktreeMergeSyncGuard;
 } {
   const payload = objectValue(value, "worktree auto sync payload");
   const allowed = new Set([
@@ -1210,6 +1219,7 @@ export function worktreeAutoSyncJobPayload(value: unknown): {
     "phase",
     "forcePreparations",
     "preparations",
+    "mergeGuard",
   ]);
   const unexpected = Object.keys(payload).find((key) => !allowed.has(key));
   if (unexpected) {
@@ -1227,6 +1237,27 @@ export function worktreeAutoSyncJobPayload(value: unknown): {
     throw new Error(
       "worktree auto sync payload.forcePreparations must be a boolean",
     );
+  }
+  let mergeGuard: WorktreeMergeSyncGuard | undefined;
+  if (payload.mergeGuard !== undefined) {
+    const guard = objectValue(payload.mergeGuard, "merge sync guard");
+    mergeGuard = {
+      expectedHeadSha: stringValue(
+        guard.expectedHeadSha,
+        "merge sync expected head",
+      ),
+      targetUrl: stringValue(guard.targetUrl, "merge sync target URL"),
+      targetBranch: stringValue(guard.targetBranch, "merge sync target branch"),
+      targetSha: stringValue(guard.targetSha, "merge sync target SHA"),
+    };
+    if (!/^[a-f0-9]{40,64}$/i.test(mergeGuard.expectedHeadSha))
+      throw new Error("Invalid merge sync source SHA");
+    if (!/^[a-f0-9]{40,64}$/i.test(mergeGuard.targetSha))
+      throw new Error("Invalid merge sync target SHA");
+    if (!validGitBranchName(mergeGuard.targetBranch))
+      throw new Error("Invalid merge sync target branch");
+    if (payload.phase !== "SYNC")
+      throw new Error("Reviewed sync requires the SYNC phase");
   }
   return {
     codebaseId: stringValue(
@@ -1251,6 +1282,7 @@ export function worktreeAutoSyncJobPayload(value: unknown): {
       "worktree auto sync payload.baseBranch",
     ),
     phase: payload.phase,
+    ...(mergeGuard ? { mergeGuard } : {}),
     forcePreparations: payload.forcePreparations === true,
     preparations: preparationDefinitions(
       payload.preparations ?? [],

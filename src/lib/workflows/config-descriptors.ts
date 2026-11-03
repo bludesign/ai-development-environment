@@ -687,6 +687,8 @@ const STEP_CONFIG_DESCRIPTORS: StepConfigDescriptors = {
   },
   WORKTREE_SET_AUTO_MERGE: {
     fields: [
+      bool("autoSync", "Auto sync branch before merging"),
+      text("expectedHeadSha", "Reviewed source commit"),
       resource("worktreeId", "Worktree", "worktree"),
       enumField(
         "action",

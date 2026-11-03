@@ -3119,6 +3119,165 @@ export const operateWorktree: AgentJobHandler = async (
   };
 };
 
+/** Sync only the reviewed revision. Never lease against a newly fetched, unreviewed head. */
+async function syncReviewedBranch(
+  input: ReturnType<typeof worktreeAutoSyncJobPayload>,
+  folder: string,
+  timeoutMs: number,
+  signal: AbortSignal,
+) {
+  const guard = input.mergeGuard!;
+  const run = async (args: string[], message: string) => {
+    const result = await git(folder, args, timeoutMs, signal);
+    if (result.exitCode !== 0)
+      throw new Error(
+        `${message}: ${cleanError(result.stderr || result.stdout)}`,
+      );
+    return result;
+  };
+  const head = async () =>
+    (await run(["rev-parse", "HEAD"], "Could not read HEAD")).stdout.trim();
+  const clean = async () => {
+    if (
+      (
+        await run(
+          ["status", "--porcelain=v1", "-z"],
+          "Could not inspect changes",
+        )
+      ).stdout
+    )
+      throw new Error("Stash or commit changes before Auto Merge can sync");
+  };
+  if ((await head()) !== guard.expectedHeadSha)
+    throw new Error(
+      "The worktree source commit changed. Review it before resuming Auto Merge.",
+    );
+  await clean();
+  const remoteHead = (
+    await run(
+      [
+        "ls-remote",
+        "--heads",
+        "--",
+        "origin",
+        `refs/heads/${input.expectedBranch}`,
+      ],
+      "Could not read the remote source revision",
+    )
+  ).stdout
+    .trim()
+    .split(/\s+/)[0];
+  if (remoteHead !== guard.expectedHeadSha)
+    throw new Error(
+      "The remote source commit changed. Review it before resuming Auto Merge.",
+    );
+  // Fetch the provider-reviewed target object without depending on shared FETCH_HEAD.
+  const targetOrigin = normalizeGitOrigin(guard.targetUrl).canonicalOrigin;
+  let targetTransport =
+    targetOrigin === input.expectedOrigin ? "origin" : guard.targetUrl;
+  if (targetTransport !== "origin" && /^https?:/.test(guard.targetUrl)) {
+    const sourceUrl = (
+      await run(["remote", "get-url", "origin"], "Could not read origin")
+    ).stdout.trim();
+    const targetUrl = new URL(guard.targetUrl);
+    if (sourceUrl.startsWith("ssh://")) {
+      const source = new URL(sourceUrl);
+      if (source.hostname === targetUrl.hostname) {
+        source.pathname = targetUrl.pathname;
+        targetTransport = source.toString();
+      }
+    } else {
+      const source = /^([^@]+@([^:]+)):/.exec(sourceUrl);
+      if (source?.[2] === targetUrl.hostname)
+        targetTransport = `${source[1]}:${targetUrl.pathname.replace(/^\//, "")}`;
+    }
+  }
+  await run(
+    [
+      "fetch",
+      "--no-tags",
+      "--no-write-fetch-head",
+      "--",
+      targetTransport,
+      guard.targetSha,
+    ],
+    "Could not fetch the merge target",
+  );
+  const syncedTargetSha = guard.targetSha;
+  const ancestor = await git(
+    folder,
+    ["merge-base", "--is-ancestor", syncedTargetSha, "HEAD"],
+    timeoutMs,
+    signal,
+  );
+  if (ancestor.exitCode !== 0 && ancestor.exitCode !== 1)
+    throw new Error("Could not compare the merge target");
+  const result = async (outcome: string) => ({
+    ...successfulProcess,
+    outcome,
+    previousHeadSha: guard.expectedHeadSha,
+    syncedHeadSha: await head(),
+    syncedTargetSha,
+    checkedAt: new Date().toISOString(),
+    preparations: await executeWorktreePreparations(
+      folder,
+      input.preparations,
+      "INSPECT",
+      timeoutMs,
+      signal,
+    ),
+    worktree: await inspectWorktreeItem(
+      folder,
+      folder,
+      input.baseBranch,
+      false,
+      Math.min(timeoutMs, 30_000),
+      signal,
+    ),
+  });
+  if ((await head()) !== guard.expectedHeadSha)
+    throw new Error("The worktree source commit changed during sync");
+  await clean();
+  if (ancestor.exitCode === 0) return result("NO_CHANGE");
+  const paths = await preparationConflictPaths(
+    folder,
+    input.preparations,
+    syncedTargetSha,
+    timeoutMs,
+    signal,
+  );
+  if (paths.length)
+    return {
+      ...(await result("PREPARATION_CONFLICT")),
+      preparationConflictPaths: paths,
+    };
+  const rebase = await git(
+    folder,
+    ["rebase", syncedTargetSha],
+    timeoutMs,
+    signal,
+  );
+  if (rebase.exitCode !== 0) {
+    if (await rebaseInProgress(folder, timeoutMs, signal))
+      return result("CONFLICT");
+    throw new Error(cleanError(rebase.stderr || "Auto Merge rebase failed"));
+  }
+  const syncedHeadSha = await head();
+  await clean();
+  await run(
+    [
+      "push",
+      `--force-with-lease=refs/heads/${input.expectedBranch}:${guard.expectedHeadSha}`,
+      "origin",
+      `${syncedHeadSha}:refs/heads/${input.expectedBranch}`,
+    ],
+    "Auto Merge push failed; review the local and remote revisions before resuming",
+  );
+  if ((await head()) !== syncedHeadSha)
+    throw new Error("The worktree source commit changed during push");
+  return result("SYNCED");
+}
+
 export const autoSyncWorktree: AgentJobHandler = async (
   payload,
   timeoutMs,
@@ -3168,6 +3327,8 @@ export const autoSyncWorktree: AgentJobHandler = async (
       `Auto Sync expected branch ${input.expectedBranch}, but found ${branch ?? "detached HEAD"}`,
     );
   }
+  if (input.mergeGuard)
+    return syncReviewedBranch(input, folder, timeoutMs, signal);
   const upstreamResult = branch
     ? await git(
         folder,

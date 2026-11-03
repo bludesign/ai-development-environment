@@ -6,6 +6,8 @@ import { publishIntegrationConfiguration } from "@/services/integration-configur
 import { createHash, randomBytes, randomUUID } from "node:crypto";
 
 import { getPrismaClient } from "@/data/prisma-client";
+import type { MergeSyncReadiness } from "@/services/worktrees/merge-branch-sync";
+import { MergeSyncNotSubmittedError } from "@/services/worktrees/merge-branch-sync";
 import { mapIntegrationRequests } from "@/services/integration-request";
 import { compileRe2 } from "@/lib/re2.server";
 import type { Prisma } from "@/generated/prisma/client";
@@ -396,6 +398,9 @@ type RawPullRequestMergeState = {
   mergeable: "CONFLICTING" | "MERGEABLE" | "UNKNOWN";
   mergeStateStatus: string;
   headRefOid: string;
+  baseRefName?: string;
+  baseRefOid?: string;
+  statusCheckRollup?: RawPullRequest["statusCheckRollup"];
   headRefName: string;
   headRepository: { nameWithOwner: string } | null;
   mergedAt: string | null;
@@ -5860,6 +5865,7 @@ export class GitHubService {
     token: string,
     requestSource: GitHubRequestSource,
     force = false,
+    includeSyncReadiness = false,
   ): Promise<{
     pullRequest: RawPullRequestMergeState;
     availableMethods: GitHubMergeMethod[];
@@ -5890,6 +5896,7 @@ export class GitHubService {
           pullRequest(number: $number) {
             id title body url state isDraft mergeable mergeStateStatus
             headRefOid headRefName headRepository { nameWithOwner } mergedAt
+            ${includeSyncReadiness ? `baseRefName baseRefOid statusCheckRollup { state contexts(first: 100) { nodes { ${PIPELINE_CONTEXT_FIELDS} } pageInfo { hasNextPage endCursor } } }` : ""}
             autoMergeRequest { enabledAt }
             viewerCanEnableAutoMerge
             viewerCanDisableAutoMerge
@@ -6002,6 +6009,15 @@ export class GitHubService {
       defaultCommitBody: settings.emptyMergeCommitDescription
         ? ""
         : state.pullRequest.body,
+      canAutoMergeWithSync:
+        state.pullRequest.state === "OPEN" &&
+        !state.pullRequest.isDraft &&
+        state.pullRequest.mergeable !== "CONFLICTING" &&
+        Boolean(
+          state.viewerPermission &&
+          ["ADMIN", "MAINTAIN", "WRITE"].includes(state.viewerPermission),
+        ) &&
+        state.availableMethods.length > 0,
       canMerge: blockedReason === null,
       canEnableAutoMerge:
         state.pullRequest.state === "OPEN" &&
@@ -6023,6 +6039,7 @@ export class GitHubService {
     ownerValue: string,
     nameValue: string,
     number: number,
+    force = false,
   ) {
     const { owner, name } = normalizeGitHubRepositoryName(
       `${ownerValue}/${nameValue}`,
@@ -6034,8 +6051,78 @@ export class GitHubService {
       number,
       token,
       "WORKTREE_AUTOMATION",
+      force,
     );
     return this.automationStateView(pullRequest);
+  }
+
+  async managedMergeReadiness(
+    owner: string,
+    name: string,
+    number: number,
+  ): Promise<MergeSyncReadiness> {
+    const token = await this.requireToken();
+    const state = await this.mergeState(
+      owner,
+      name,
+      number,
+      token,
+      "WORKTREE_AUTOMATION",
+      true,
+      true,
+    );
+    const pr = state.pullRequest;
+    const contexts = pr.statusCheckRollup
+      ? connectionNodes(pr.statusCheckRollup.contexts)
+      : [];
+    if (
+      pr.statusCheckRollup?.contexts.pageInfo.hasNextPage &&
+      pr.statusCheckRollup.contexts.pageInfo.endCursor
+    )
+      contexts.push(
+        ...(await this.remainingPipelineContexts(
+          pr.id,
+          pr.statusCheckRollup.contexts.pageInfo.endCursor,
+          token,
+          "WORKTREE_AUTOMATION",
+          { force: true, allowStaleOnError: false },
+        )),
+      );
+    const statuses = contexts.map((value) =>
+      value.__typename === "CheckRun"
+        ? normalizePipelineState(value.status, value.conclusion)
+        : normalizePipelineState(value.state),
+    );
+    const ciPassed =
+      pr.statusCheckRollup?.state === "SUCCESS" &&
+      statuses.includes("SUCCESS") &&
+      statuses.every((status) =>
+        ["SUCCESS", "NEUTRAL", "SKIPPED"].includes(status),
+      );
+    const permanent = pr.isDraft
+      ? "Mark this pull request ready before merging."
+      : !state.viewerPermission ||
+          !["ADMIN", "MAINTAIN", "WRITE"].includes(state.viewerPermission)
+        ? "Your GitHub account cannot merge this request."
+        : pr.mergeable === "CONFLICTING"
+          ? "Resolve merge conflicts before resuming Auto Merge."
+          : null;
+    return {
+      state: pr.mergedAt ? "MERGED" : pr.state,
+      headSha: pr.headRefOid,
+      sourceBranch: pr.headRefName,
+      sourceOrigin: `github.com/${pr.headRepository?.nameWithOwner.toLowerCase() ?? ""}`,
+      targetOrigin: `github.com/${owner.toLowerCase()}/${name.toLowerCase()}`,
+      targetUrl: `https://github.com/${owner}/${name}.git`,
+      targetBranch: pr.baseRefName ?? "",
+      targetSha: pr.baseRefOid ?? "",
+      ciPassed,
+      canMerge:
+        !this.mergeBlockedReason(pr, state.viewerPermission) &&
+        state.availableMethods.length > 0,
+      blocker: permanent,
+      nativeAutoMerge: Boolean(pr.autoMergeRequest),
+    };
   }
 
   private automationStateView(pullRequest: RawPullRequestMergeState) {
@@ -6222,6 +6309,8 @@ export class GitHubService {
       commitHeadline: string;
       commitBody: string;
       authorEmail?: string | null;
+      expectedHeadSha?: string;
+      expectedTargetSha?: string;
     },
     requestSource: GitHubRequestSource = "PULL_REQUEST_DETAILS",
   ): Promise<GitHubPullRequestMergeResult> {
@@ -6246,7 +6335,24 @@ export class GitHubService {
       state.pullRequest,
       state.viewerPermission,
     );
-    if (blockedReason) throw new Error(blockedReason);
+    if (blockedReason)
+      throw input.expectedHeadSha
+        ? new MergeSyncNotSubmittedError(blockedReason)
+        : new Error(blockedReason);
+    if (input.expectedHeadSha) {
+      const ready = await this.managedMergeReadiness(owner, name, input.number);
+      if (
+        state.pullRequest.headRefOid !== input.expectedHeadSha ||
+        ready.headSha !== input.expectedHeadSha ||
+        ready.targetSha !== input.expectedTargetSha ||
+        !ready.ciPassed ||
+        !ready.canMerge ||
+        ready.nativeAutoMerge
+      )
+        throw new MergeSyncNotSubmittedError(
+          "The reviewed source, merge target, or CI changed before merging.",
+        );
+    }
     if (!state.availableMethods.includes(input.method)) {
       throw new Error(
         "The selected merge method is not enabled for this repository.",

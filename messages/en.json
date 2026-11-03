@@ -2448,7 +2448,11 @@
       "POST_MERGE": "Running follow-ups",
       "COMPLETED": "Completed",
       "ACTION_REQUIRED": "Action required",
-      "CANCELED": "Canceled"
+      "CANCELED": "Canceled",
+      "SYNCING": "Syncing branch",
+      "WAITING_CI": "Waiting for CI",
+      "WAITING_REQUIREMENTS": "Waiting for merge requirements",
+      "MERGING": "Merging"
     },
     "pipelineStatuses": {
       "CREATED": "Created",
@@ -2986,7 +2990,20 @@
     "moveTicketToDoneAfterMerge": "Move {ticket} to the project’s configured done status",
     "jiraDoneStatusRequired": "Configure this Jira project’s done status before using this option.",
     "mergedFollowUpFailed": "Pull request merged, but a follow-up action failed.",
-    "closeMergeResult": "Close"
+    "closeMergeResult": "Close",
+    "autoSyncBranch": "Auto sync branch",
+    "autoSyncBranchDescription": "Rebase and push this branch when the target changes, then merge after CI and merge requirements pass. Conflicts pause for manual resolution.",
+    "enableAutoMerge": "Enable Auto Merge",
+    "resumeAutoMerge": "Resume Auto Merge",
+    "cancelAutoMerge": "Cancel Auto Merge",
+    "refreshMergeOptions": "Refresh merge options",
+    "syncStates": {
+      "SYNCING": "Syncing branch",
+      "WAITING_CI": "Waiting for CI",
+      "WAITING_REQUIREMENTS": "Waiting for merge requirements",
+      "MERGING": "Merging",
+      "ACTION_REQUIRED": "Action required"
+    }
   },
   "githubComments": {
     "title": "GitHub Comments",

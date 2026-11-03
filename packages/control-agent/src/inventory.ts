@@ -17,6 +17,7 @@ import {
 } from "@ai-development-environment/agent-contract/codebases";
 import {
   WORKTREE_JOB_KINDS,
+  WORKTREE_REVIEWED_SYNC_CAPABILITY,
   WORKTREE_DELETE_BUILD_DATA_CAPABILITY,
 } from "@ai-development-environment/agent-contract/worktrees";
 import { SKILL_JOB_KINDS } from "@ai-development-environment/agent-contract/skills";
@@ -43,6 +44,7 @@ const PORTABLE_AGENT_CAPABILITIES = [
   ...CODEBASE_JOB_KINDS,
   CODEBASE_RECONCILE_EVENT_CAPABILITY,
   ...WORKTREE_JOB_KINDS,
+  WORKTREE_REVIEWED_SYNC_CAPABILITY,
   ...SKILL_JOB_KINDS,
   ...COVERAGE_JOB_KINDS,
   "runs.protocol.v1",

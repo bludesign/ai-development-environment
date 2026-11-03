@@ -22,6 +22,7 @@ const AutoSyncSchema = z.object({
 });
 
 const AutoMergeSchema = z.object({
+  autoSync: z.boolean(),
   worktreeId: z.string(),
   state: z.string(),
   repositoryNameWithOwner: z.string(),
@@ -128,6 +129,8 @@ export function createWorktreeAutomationToolGroup(
           method: z.enum(["MERGE", "REBASE", "SQUASH"]),
           commitHeadline: z.string().min(1),
           commitBody: z.string(),
+          autoSync: z.boolean().optional(),
+          expectedHeadSha: z.string().nullable().optional(),
           authorEmail: z.string().email().nullable().optional(),
           deleteWorktree: z.boolean(),
           moveTicketToDone: z.boolean(),

@@ -433,7 +433,9 @@ test("GitLab saves updated outcomes before completing merge follow-ups", async (
     } as unknown as import("@/services/gitlab/gitlab.service").GitLabService,
     worktrees,
     {} as import("@/services/jira").JiraService,
-    {} as import("@/services/agent-control").AgentControlService,
+    {
+      registerCompletionObserver: vi.fn(),
+    } as unknown as import("@/services/agent-control").AgentControlService,
   );
   const internal = service as unknown as {
     context: () => Promise<unknown>;

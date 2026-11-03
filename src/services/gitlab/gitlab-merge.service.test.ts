@@ -122,6 +122,7 @@ function setup() {
     deleteWorktree: vi.fn().mockResolvedValue({ id: "job-1" }),
   };
   const agents = {
+    registerCompletionObserver: vi.fn(),
     getJob: vi.fn().mockResolvedValue({ id: "job-1", status: "RUNNING" }),
   };
   const service = new GitLabMergeService(
