@@ -19,7 +19,10 @@ export const RUN_DETAIL_FIELDS = `
   cacheReadTokens cacheWriteTokens toolCallCount parentRunId parentRunNumber
   parentRun { ${RUN_LINK_FIELDS} }
   followUps { ${RUN_LINK_FIELDS} }
-  attempts { id generation nativeId status resumeStrategy startedAt finishedAt supersededAt }
+  attempts {
+    id generation nativeId status resumeStrategy startedAt finishedAt supersededAt
+    sessionInfo { nativeTranscriptPath activityLogPath workingDirectory }
+  }
   inputs {
     id sequence kind prompt createdAt
     attachments { id filename contentType size sha256 downloadPath createdAt }

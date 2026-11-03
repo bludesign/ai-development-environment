@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { homedir } from "node:os";
+import type { RunSessionInfo } from "@ai-development-environment/agent-contract/runs";
 import { findClaudeSessionFile } from "../handlers/runs.js";
 import {
   claudeImportedHistory,
@@ -355,7 +356,18 @@ export class ClaudeAdapter implements ProviderAdapter {
               typeof record.claude_code_version === "string"
                 ? record.claude_code_version
                 : undefined;
-            await callbacks.onNativeId(sessionId, version);
+            const path = await findClaudeSessionFile(
+              sessionId,
+              homedir(),
+              process.env.CLAUDE_CONFIG_DIR,
+            ).catch(() => null);
+            await callbacks.onNativeId(sessionId, version, {
+              workingDirectory:
+                typeof record.cwd === "string" && record.cwd
+                  ? record.cwd
+                  : input.run.worktree!.folder,
+              ...(path ? { nativeTranscriptPath: path } : {}),
+            });
           }
           const messageText = firstString(
             record.message ?? record.result ?? record.summary,
@@ -451,16 +463,20 @@ export class ClaudeAdapter implements ProviderAdapter {
         const lastModifiedKey = `${session.lastModified ?? ""}:${session.fileSize ?? ""}`;
         const cached = this.hydrationCache.get(session.sessionId);
         let history: Partial<ProviderImportedRun> = {};
+        const path = await findClaudeSessionFile(
+          session.sessionId,
+          homedir(),
+          process.env.CLAUDE_CONFIG_DIR,
+        ).catch(() => null);
+        const sessionInfo: RunSessionInfo = {
+          workingDirectory: session.cwd || worktree.folder,
+          ...(path ? { nativeTranscriptPath: path } : {}),
+        };
         if (cached && cached.lastModified === lastModifiedKey) {
           history = cached.history;
         } else {
           let transcript: unknown[] = [];
           try {
-            const path = await findClaudeSessionFile(
-              session.sessionId,
-              homedir(),
-              process.env.CLAUDE_CONFIG_DIR,
-            );
             if (path) transcript = await readClaudeTranscript(path);
             history = claudeTranscriptMetadata(transcript);
           } catch {
@@ -497,6 +513,7 @@ export class ClaudeAdapter implements ProviderAdapter {
             : undefined,
           updatedAt: new Date(session.lastModified).toISOString(),
           rawMetadata: session,
+          sessionInfo,
         });
       }
     }

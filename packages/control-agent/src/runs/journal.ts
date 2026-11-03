@@ -45,7 +45,7 @@ export class RunJournal {
     return join(dirname(configPath()), "runs", this.runId);
   }
 
-  private get eventsPath(): string {
+  get eventsPath(): string {
     return join(this.directory, "events.jsonl");
   }
 

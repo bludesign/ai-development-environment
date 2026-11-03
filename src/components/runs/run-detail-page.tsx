@@ -105,6 +105,7 @@ import {
   onControlPlaneRecovery,
 } from "@/lib/control-plane-client";
 import { formatProviderLabel } from "@/lib/enum-label";
+import { latestFinalCheckpoint } from "@/lib/run-checkpoint-changes";
 import { McpPresetPicker } from "@/components/tools/mcp-preset-picker";
 import { cn } from "@/lib/utils";
 import {
@@ -118,6 +119,7 @@ import { ToolCallGroups } from "./tool-call-groups";
 import { AttachmentPicker } from "./attachment-picker";
 import { MarkdownActions, MarkdownView } from "./markdown-view";
 import { RunWorktreeCards } from "./run-worktree-cards";
+import { RunInfoCard } from "./run-info-card";
 import {
   ModelEffortPicker,
   type ProviderCatalogEntry,
@@ -1238,9 +1240,8 @@ export function RunDetailPage({
       ? `${t("session")} #${run.playedSessionNumber}`
       : null,
   ].filter((value): value is string => Boolean(value));
-  const finalPatch = [...run.checkpoints]
-    .reverse()
-    .find(({ diffPatch }) => diffPatch)?.diffPatch;
+  const finalCheckpoint = latestFinalCheckpoint(run.checkpoints);
+  const finalPatch = finalCheckpoint?.diffPatch;
   const followCatalog = catalog.find(({ key }) => key === followProvider);
   const runCatalog = catalog.find(({ key }) => key === run.provider);
   /**
@@ -1924,6 +1925,11 @@ export function RunDetailPage({
             {finalPatch && (
               <MultiFileDiffView labels={diffLabels} patch={finalPatch} />
             )}
+            {finalCheckpoint && !finalPatch && (
+              <p className="text-sm text-muted-foreground">
+                {t("noFinalChanges")}
+              </p>
+            )}
             {run.checkpoints.map((checkpoint) => (
               <details className="rounded-lg border p-3" key={checkpoint.id}>
                 <summary className="cursor-pointer">
@@ -1950,7 +1956,9 @@ export function RunDetailPage({
                       {checkpoint.diffSummary}
                     </pre>
                   ) : (
-                    <p className="text-muted-foreground">{t("noChanges")}</p>
+                    <p className="text-muted-foreground">
+                      {t("noFinalChanges")}
+                    </p>
                   )}
                   {checkpoint.stashRef && (
                     <p className="font-mono text-xs">
@@ -1968,6 +1976,8 @@ export function RunDetailPage({
           </CardContent>
         </Card>
       )}
+
+      <RunInfoCard run={run} />
 
       <ConfirmationDialog
         actionLabel={t("delete")}

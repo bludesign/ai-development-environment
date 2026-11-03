@@ -356,12 +356,17 @@ export class RunManager {
     }
 
     const callbacks: ProviderCallbacks = {
-      onNativeId: async (nativeId, providerVersion) => {
+      onNativeId: async (nativeId, providerVersion, sessionInfo) => {
         await this.retry(() =>
           this.client.updateRunAttemptNativeId(
             attempt.id,
             nativeId,
             providerVersion,
+            {
+              workingDirectory: run.worktree!.folder,
+              ...sessionInfo,
+              activityLogPath: journal.eventsPath,
+            },
           ),
         );
       },
@@ -514,7 +519,8 @@ export class RunManager {
         await this.retryFinalization(() =>
           this.client.reportRunCheckpoint(run.id, attemptId, {
             ...finalCheckpoint,
-            diffPatch: comparison.rollbackPatch,
+            diffPatch: comparison.worktreePatch || null,
+            diffSummary: comparison.worktreeSummary || null,
           }),
         );
       }

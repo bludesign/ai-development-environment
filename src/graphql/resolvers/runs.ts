@@ -1,4 +1,9 @@
 import type { GraphQLContext } from "@/services/graphql-server/graphql-server.service";
+import {
+  getRunSessionInfo,
+  type RunSessionInfo,
+} from "@ai-development-environment/agent-contract/runs";
+import { normalizeCheckpointChanges } from "@/lib/run-checkpoint-changes";
 import type {
   ImportedRunInput,
   RunConfigurationInput,
@@ -39,6 +44,8 @@ export const createRunResolvers = (service: RunsService) => ({
     updatedAt: (value: { updatedAt: Date }) => value.updatedAt.toISOString(),
   },
   RunAttempt: {
+    sessionInfo: (value: { rawMetadataJson?: string | null }) =>
+      getRunSessionInfo(value.rawMetadataJson),
     startedAt: (value: { startedAt: Date }) => value.startedAt.toISOString(),
     finishedAt: (value: { finishedAt?: Date | null }) => iso(value.finishedAt),
     supersededAt: (value: { supersededAt?: Date | null }) =>
@@ -84,6 +91,16 @@ export const createRunResolvers = (service: RunsService) => ({
       iso(value.revisionPreparedAt),
   },
   RunCheckpoint: {
+    diffPatch: (value: {
+      kind: string;
+      diffPatch: string | null;
+      diffSummary: string | null;
+    }) => normalizeCheckpointChanges(value).diffPatch,
+    diffSummary: (value: {
+      kind: string;
+      diffPatch: string | null;
+      diffSummary: string | null;
+    }) => normalizeCheckpointChanges(value).diffSummary,
     createdAt: (value: { createdAt: Date }) => value.createdAt.toISOString(),
   },
   RunDraft: {
@@ -405,6 +422,7 @@ export const createRunResolvers = (service: RunsService) => ({
         attemptId: string;
         nativeId: string;
         providerVersion?: string | null;
+        sessionInfo?: RunSessionInfo | null;
       },
       context: GraphQLContext,
     ) =>
@@ -413,6 +431,7 @@ export const createRunResolvers = (service: RunsService) => ({
         args.attemptId,
         args.nativeId,
         args.providerVersion,
+        args.sessionInfo,
       ),
     appendRunEvents: (
       _root: unknown,

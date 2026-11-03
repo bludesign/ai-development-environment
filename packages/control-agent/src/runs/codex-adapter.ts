@@ -8,6 +8,7 @@ import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 import { createInterface } from "node:readline";
 import { promisify } from "node:util";
+import type { RunSessionInfo } from "@ai-development-environment/agent-contract/runs";
 
 import { findCodexSessionFile } from "../handlers/runs.js";
 import {
@@ -43,6 +44,25 @@ type JsonRpcMessage = {
 };
 
 const execFileAsync = promisify(execFile);
+
+async function codexSessionInfo(
+  thread: Record<string, unknown>,
+  cwd: string,
+): Promise<RunSessionInfo> {
+  const path =
+    typeof thread.path === "string" && thread.path
+      ? thread.path
+      : await findCodexSessionFile(
+          String(thread.id),
+          homedir(),
+          process.env.CODEX_HOME,
+        ).catch(() => null);
+  return {
+    workingDirectory:
+      typeof thread.cwd === "string" && thread.cwd ? thread.cwd : cwd,
+    ...(path ? { nativeTranscriptPath: path } : {}),
+  };
+}
 
 export function codexAppServerArgs(modelCatalogPath: string): string[] {
   return [
@@ -525,6 +545,7 @@ export class CodexAdapter implements ProviderAdapter {
     await callbacks.onNativeId(
       nativeId,
       typeof thread.cliVersion === "string" ? thread.cliVersion : undefined,
+      await codexSessionInfo(thread, cwd),
     );
 
     let turnId = "";
@@ -732,6 +753,8 @@ export class CodexAdapter implements ProviderAdapter {
             const thread = asRecord(value);
             const updatedAtKey = String(thread.updatedAt ?? "");
             const cached = this.hydrationCache.get(String(thread.id));
+            // Archiving can move the transcript without changing updatedAt.
+            const sessionInfo = await codexSessionInfo(thread, worktree.folder);
             let history: Partial<ProviderImportedRun> = {};
             // Active threads can grow within one updatedAt second.
             const active = asRecord(thread.status).type === "active";
@@ -756,14 +779,7 @@ export class CodexAdapter implements ProviderAdapter {
                 // Preserve previous enrichment when stored history is unavailable.
               }
               try {
-                const path =
-                  typeof thread.path === "string"
-                    ? thread.path
-                    : await findCodexSessionFile(
-                        String(thread.id),
-                        homedir(),
-                        process.env.CODEX_HOME,
-                      );
+                const path = sessionInfo.nativeTranscriptPath;
                 if (path)
                   Object.assign(
                     history,
@@ -808,6 +824,7 @@ export class CodexAdapter implements ProviderAdapter {
                 ? new Date(Number(thread.updatedAt) * 1_000).toISOString()
                 : undefined,
               rawMetadata: thread,
+              sessionInfo,
             });
           }
           cursor = typeof page.nextCursor === "string" ? page.nextCursor : null;

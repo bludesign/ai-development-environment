@@ -21,7 +21,14 @@ import {
   runQuestionTopic,
 } from "@/services/agent-control";
 import type { AgentControlService } from "@/services/agent-control";
-import { RUN_SESSION_READ_JOB_KIND } from "@ai-development-environment/agent-contract/runs";
+import {
+  RUN_SESSION_READ_JOB_KIND,
+  getRunSessionInfo,
+  mergeRunSessionInfo,
+  normalizeRunSessionInfo,
+  runMetadataRecord,
+  type RunSessionInfo,
+} from "@ai-development-environment/agent-contract/runs";
 import {
   parseRunQuestionField,
   runFormAnswers,
@@ -130,6 +137,7 @@ export type ImportedRunInput = {
   createdAt?: string | null;
   updatedAt?: string | null;
   rawMetadata?: unknown;
+  sessionInfo?: RunSessionInfo | null;
   events?: RunEventInput[] | null;
   usage?: Array<Parameters<RunsService["reportUsage"]>[3]> | null;
   estimatedCost?: number | null;
@@ -2292,6 +2300,7 @@ export class RunsService {
     attemptId: string,
     nativeId: string,
     providerVersion?: string | null,
+    sessionInfo?: RunSessionInfo | null,
   ) {
     const prisma = await getPrismaClient();
     const updated = await prisma.$transaction(async (transaction) => {
@@ -2316,7 +2325,17 @@ export class RunsService {
       }
       const result = await transaction.runAttempt.update({
         where: { id: attemptId },
-        data: { nativeId, nativeKey },
+        data: {
+          nativeId,
+          nativeKey,
+          ...(sessionInfo
+            ? {
+                rawMetadataJson: JSON.stringify(
+                  mergeRunSessionInfo(attempt.rawMetadataJson, sessionInfo),
+                ),
+              }
+            : {}),
+        },
       });
       if (providerVersion) {
         await transaction.agentRun.update({
@@ -3170,6 +3189,16 @@ export class RunsService {
     for (const record of records) {
       const prompt = record.prompt?.trim() || undefined;
       const nativeKey = `${agentId}:${provider}:${requiredText(record.nativeId, "Native ID", 500)}`;
+      const existing = await prisma.runAttempt.findUnique({
+        where: { nativeKey },
+        include: { run: true },
+      });
+      const previousMetadata = runMetadataRecord(existing?.rawMetadataJson);
+      const incomingMetadata = runMetadataRecord(record.rawMetadata);
+      const incomingSessionInfo = {
+        ...getRunSessionInfo(incomingMetadata),
+        ...normalizeRunSessionInfo(record.sessionInfo),
+      };
       const historyDigest =
         record.events || record.usage || record.estimatedCost !== undefined
           ? createHash("sha256")
@@ -3183,10 +3212,20 @@ export class RunsService {
               )
               .digest("hex")
           : undefined;
-      const metadata =
-        record.rawMetadata && typeof record.rawMetadata === "object"
-          ? record.rawMetadata
-          : {};
+      const metadata = mergeRunSessionInfo(
+        { ...previousMetadata, ...incomingMetadata },
+        {
+          ...getRunSessionInfo(previousMetadata),
+          ...incomingSessionInfo,
+        },
+      );
+      // A new history digest is committed only after its snapshot is persisted.
+      delete metadata.importedHistoryDigest;
+      delete metadata.importedSnapshotDigest;
+      const providerVersion =
+        provider === "CODEX" && typeof incomingMetadata.cliVersion === "string"
+          ? optionalText(incomingMetadata.cliVersion, 200)
+          : null;
       // Include list metadata as well as history: a prompt, archive flag or
       // status can change without any transcript events changing.
       const snapshotDigest = createHash("sha256")
@@ -3200,7 +3239,12 @@ export class RunsService {
         .digest("hex");
       const rawMetadataJson = JSON.stringify({
         ...metadata,
-        ...(historyDigest ? { importedHistoryDigest: historyDigest } : {}),
+        ...(historyDigest || previousMetadata.importedHistoryDigest
+          ? {
+              importedHistoryDigest:
+                historyDigest ?? previousMetadata.importedHistoryDigest,
+            }
+          : {}),
         importedSnapshotDigest: snapshotDigest,
       });
       const importedStatus = (() => {
@@ -3220,13 +3264,8 @@ export class RunsService {
         if (["FAILED", "ERROR", "SYSTEMERROR"].includes(value)) return "FAILED";
         return "COMPLETED";
       })();
-      const existing = await prisma.runAttempt.findUnique({
-        where: { nativeKey },
-        include: { run: true },
-      });
       if (existing) {
         if (existing.run.origin === "IMPORTED") {
-          const previousMetadata = JSON.parse(existing.rawMetadataJson ?? "{}");
           const collision =
             existing.run.kind === "SESSION" && importedStatus === "IN_PROGRESS"
               ? await prisma.worktreeRunLease.findFirst({
@@ -3266,6 +3305,7 @@ export class RunsService {
               data: {
                 status: importedStatus,
                 phase,
+                ...(providerVersion ? { providerVersion } : {}),
                 ...(prompt
                   ? {
                       initialPrompt: prompt,
@@ -3308,6 +3348,54 @@ export class RunsService {
             });
           }
           publishRun(existing.runId);
+        } else {
+          // Discovery may locate an older managed run's native transcript, but
+          // its provider snapshot must never replace AIDE's managed history.
+          const managedMetadata = mergeRunSessionInfo(
+            previousMetadata,
+            incomingSessionInfo,
+          );
+          if (
+            !isDeepStrictEqual(previousMetadata, managedMetadata) ||
+            (providerVersion && !existing.run.providerVersion)
+          ) {
+            const changed = await prisma.$transaction(async (transaction) => {
+              // A startup report may have supplied a journal path since the
+              // discovery lookup. Merge against the latest row atomically.
+              const current = await transaction.runAttempt.findUnique({
+                where: { id: existing.id },
+                include: { run: true },
+              });
+              if (!current) return false;
+              const currentMetadata = runMetadataRecord(
+                current.rawMetadataJson,
+              );
+              const merged = mergeRunSessionInfo(
+                currentMetadata,
+                incomingSessionInfo,
+              );
+              const metadataChanged = !isDeepStrictEqual(
+                currentMetadata,
+                merged,
+              );
+              const versionChanged =
+                providerVersion && !current.run.providerVersion;
+              if (metadataChanged) {
+                await transaction.runAttempt.update({
+                  where: { id: current.id },
+                  data: { rawMetadataJson: JSON.stringify(merged) },
+                });
+              }
+              if (versionChanged) {
+                await transaction.agentRun.update({
+                  where: { id: current.runId },
+                  data: { providerVersion },
+                });
+              }
+              return metadataChanged || versionChanged;
+            });
+            if (changed) publishRun(existing.runId);
+          }
         }
         continue;
       }
@@ -3344,6 +3432,7 @@ export class RunsService {
           phase: collision ? "IMPORTED_ACTIVE_COLLISION" : "IMPORTED_SYNCED",
           origin: "IMPORTED",
           provider,
+          providerVersion,
           worktreeId: worktree.id,
           repositoryId: worktree.codebase.repository.id,
           agentId,

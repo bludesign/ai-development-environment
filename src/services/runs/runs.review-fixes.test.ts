@@ -64,6 +64,47 @@ describe("run review regressions", () => {
     });
   });
 
+  test("partial native session reports preserve prior locations and metadata", async () => {
+    const run = { id: "run-1", agentId: "agent-1", provider: "CODEX" };
+    const current = {
+      id: "attempt-1",
+      runId: run.id,
+      run,
+      rawMetadataJson: JSON.stringify({
+        importedHistoryDigest: "existing-digest",
+        aideSessionInfo: {
+          nativeTranscriptPath: "/codex/sessions/native-1.jsonl",
+          workingDirectory: "/repo",
+        },
+      }),
+    };
+    const update = vi.fn(async ({ data }) => ({ ...current, ...data }));
+    const transaction = {
+      runAttempt: { findUnique: vi.fn().mockResolvedValue(current), update },
+      agentRun: { update: vi.fn() },
+    };
+    mocks.getPrismaClient.mockResolvedValue({
+      $transaction: vi.fn(async (callback) => callback(transaction)),
+    });
+    const result = await new RunsService().updateAttemptNativeId(
+      "agent-1",
+      current.id,
+      "native-1",
+      undefined,
+      {
+        activityLogPath: "/aide/run-1/events.jsonl",
+      },
+    );
+    expect(JSON.parse(result.rawMetadataJson!)).toEqual({
+      importedHistoryDigest: "existing-digest",
+      aideSessionInfo: {
+        nativeTranscriptPath: "/codex/sessions/native-1.jsonl",
+        workingDirectory: "/repo",
+        activityLogPath: "/aide/run-1/events.jsonl",
+      },
+    });
+  });
+
   test("supersedes pending questions as soon as a pause is requested", async () => {
     const run = {
       id: "run-1",

@@ -1,4 +1,5 @@
 import type { RunQuestionField } from "@ai-development-environment/agent-contract/run-forms";
+import type { RunSessionInfo } from "@ai-development-environment/agent-contract/runs";
 
 export type RunWorktreeRef = {
   id: string;
@@ -78,6 +79,7 @@ export type AgentRunView = RunLinkView & {
     id: string;
     generation: number;
     nativeId: string | null;
+    sessionInfo?: RunSessionInfo | null;
     status: string;
     resumeStrategy: string | null;
     startedAt: string;

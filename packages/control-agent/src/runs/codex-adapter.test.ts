@@ -1,7 +1,8 @@
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, rename, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { describe, expect, test, vi } from "vitest";
+import { afterEach, describe, expect, test, vi } from "vitest";
+import type { ProviderCallbacks, ProviderStartInput } from "./provider.js";
 
 import {
   CodexAdapter,
@@ -10,7 +11,57 @@ import {
   codexRunConfig,
 } from "./codex-adapter.js";
 
+afterEach(() => {
+  vi.restoreAllMocks();
+  vi.unstubAllEnvs();
+});
+
 describe("Codex app-server", () => {
+  test("reports the native transcript and working directory when starting a run", async () => {
+    const adapter = new CodexAdapter();
+    const server = (
+      adapter as unknown as {
+        server: { request(method: string): Promise<unknown> };
+      }
+    ).server;
+    vi.spyOn(server, "request").mockImplementation(async (method) =>
+      method === "thread/start"
+        ? {
+            thread: {
+              id: "thread-1",
+              cwd: "/workspace",
+              path: "/custom/codex/rollout.jsonl",
+              cliVersion: "0.166.0",
+            },
+          }
+        : { turn: { id: "turn-1" } },
+    );
+    const callbacks: ProviderCallbacks = {
+      onNativeId: vi.fn(),
+      onEvent: vi.fn(),
+      onUsage: vi.fn(),
+      onQuestion: vi.fn(),
+    };
+    await adapter.start(
+      {
+        run: {
+          kind: "SESSION",
+          model: "default",
+          effort: null,
+          webSearchEnabled: false,
+          worktree: { folder: "/workspace" },
+        },
+        prompt: "Fix imports",
+        attachments: [],
+      } satisfies ProviderStartInput,
+      callbacks,
+    );
+    expect(callbacks.onNativeId).toHaveBeenCalledWith("thread-1", "0.166.0", {
+      nativeTranscriptPath: "/custom/codex/rollout.jsonl",
+      workingDirectory: "/workspace",
+    });
+  });
+
   test("merges the run-scoped AIDE MCP server into thread configuration", () => {
     expect(
       codexRunConfig({
@@ -165,6 +216,10 @@ describe("Codex history discovery", () => {
         }),
       );
       expect(imported).toMatchObject({
+        sessionInfo: {
+          nativeTranscriptPath: path,
+          workingDirectory: directory,
+        },
         model: "model-a",
         effort: "high",
         finalOutput: "Done",
@@ -262,5 +317,114 @@ describe("Codex history discovery", () => {
     expect((await adapter.discover(worktrees))[0]?.status).toBe("FAILED");
     thread.status.type = "systemError";
     expect((await adapter.discover(worktrees))[0]?.status).toBe("FAILED");
+  });
+});
+
+describe("Codex transcript location discovery", () => {
+  test("refreshes an archived path even when transcript hydration stays cached", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "codex-moving-transcript-"));
+    vi.stubEnv("CODEX_HOME", directory);
+    try {
+      const sessions = join(directory, "sessions");
+      const archive = join(directory, "archived_sessions");
+      await mkdir(sessions);
+      await mkdir(archive);
+      const filename = "rollout-2026-thread-moving.jsonl";
+      const originalPath = join(sessions, filename);
+      const archivedPath = join(archive, filename);
+      await writeFile(
+        originalPath,
+        [
+          {
+            type: "turn_context",
+            payload: { model: "model-a", turn_id: "turn" },
+          },
+          {
+            type: "token_usage_record",
+            payload: {
+              turn_id: "turn",
+              response_id: "response",
+              usage: { input_tokens: 10 },
+            },
+          },
+        ]
+          .map((record) => JSON.stringify(record))
+          .join("\n"),
+      );
+      let archived = false;
+      const thread = { id: "thread-moving", updatedAt: 200 };
+      const adapter = new CodexAdapter();
+      const server = (
+        adapter as unknown as {
+          server: {
+            request(
+              method: string,
+              params: Record<string, unknown>,
+            ): Promise<unknown>;
+          };
+        }
+      ).server;
+      const request = vi
+        .spyOn(server, "request")
+        .mockImplementation(async (method, params) =>
+          method === "thread/list"
+            ? { data: params.archived === archived ? [thread] : [] }
+            : { thread: { ...thread, turns: [] } },
+        );
+      const worktrees = [{ id: "wt", folder: "/workspace", branch: null }];
+      expect(
+        (await adapter.discover(worktrees))[0]?.sessionInfo
+          ?.nativeTranscriptPath,
+      ).toBe(originalPath);
+      await rename(originalPath, archivedPath);
+      archived = true;
+      expect(
+        (await adapter.discover(worktrees))[0]?.sessionInfo
+          ?.nativeTranscriptPath,
+      ).toBe(archivedPath);
+      expect(
+        request.mock.calls.filter(([method]) => method === "thread/read"),
+      ).toHaveLength(1);
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
+  test("locates archived transcripts under a custom Codex home", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "codex-custom-home-"));
+    vi.stubEnv("CODEX_HOME", directory);
+    try {
+      const archived = join(directory, "archived_sessions");
+      await mkdir(archived);
+      const path = join(archived, "rollout-2026-thread-archived.jsonl");
+      await writeFile(path, "");
+      const adapter = new CodexAdapter();
+      const server = (
+        adapter as unknown as {
+          server: {
+            request(
+              method: string,
+              params: Record<string, unknown>,
+            ): Promise<unknown>;
+          };
+        }
+      ).server;
+      vi.spyOn(server, "request").mockImplementation(async (method, params) =>
+        method === "thread/list"
+          ? {
+              data: params.archived ? [{ id: "thread-archived" }] : [],
+            }
+          : { thread: { id: "thread-archived", turns: [] } },
+      );
+      const [run] = await adapter.discover([
+        { id: "wt", folder: "/workspace", branch: null },
+      ]);
+      expect(run?.sessionInfo).toEqual({
+        nativeTranscriptPath: path,
+        workingDirectory: "/workspace",
+      });
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
   });
 });

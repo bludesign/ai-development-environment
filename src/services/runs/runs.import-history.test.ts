@@ -62,6 +62,7 @@ function database(origin = "IMPORTED") {
     ),
   };
   mocks.getPrismaClient.mockResolvedValue(prisma);
+  Object.assign(transaction, { runAttempt: prisma.runAttempt });
   return { prisma, transaction, attempt };
 }
 
@@ -321,6 +322,92 @@ describe("imported run history", () => {
     ]);
     expect(transaction.runEvent.deleteMany).not.toHaveBeenCalled();
     expect(prisma.agentRun.update).not.toHaveBeenCalled();
+  });
+
+  test("enriches managed session locations without importing lifecycle or history", async () => {
+    const { transaction, prisma, attempt } = database("MANAGED");
+    attempt.rawMetadataJson = JSON.stringify({
+      importedHistoryDigest: "retained-history",
+      aideSessionInfo: { activityLogPath: "/aide/run-1/events.jsonl" },
+    });
+    const input = {
+      ...record,
+      status: "FAILED",
+      prompt: "Imported prompt",
+      rawMetadata: {
+        path: "/codex/archived_sessions/native-1.jsonl",
+        cwd: "/repo",
+        secret: "not imported",
+      },
+    };
+    const service = new RunsService();
+    await service.importRuns("agent-1", "CODEX", [input]);
+    expect(JSON.parse(attempt.rawMetadataJson)).toEqual({
+      importedHistoryDigest: "retained-history",
+      aideSessionInfo: {
+        activityLogPath: "/aide/run-1/events.jsonl",
+        nativeTranscriptPath: "/codex/archived_sessions/native-1.jsonl",
+        workingDirectory: "/repo",
+      },
+    });
+    expect(prisma.agentRun.update).not.toHaveBeenCalled();
+    expect(transaction.runEvent.deleteMany).not.toHaveBeenCalled();
+    expect(transaction.runModelUsage.deleteMany).not.toHaveBeenCalled();
+    vi.clearAllMocks();
+    await service.importRuns("agent-1", "CODEX", [input]);
+    expect(prisma.runAttempt.update).not.toHaveBeenCalled();
+  });
+
+  test("preserves known imported locations and history digest when enrichment omits fields", async () => {
+    const { attempt } = database();
+    const service = new RunsService();
+    await service.importRuns("agent-1", "CODEX", [
+      {
+        ...record,
+        rawMetadata: { cwd: "/repo", cliVersion: "1.2.3" },
+        sessionInfo: {
+          nativeTranscriptPath: "/custom/sessions/native-1.jsonl",
+        },
+      },
+    ]);
+    const digest = JSON.parse(attempt.rawMetadataJson).importedHistoryDigest;
+    await service.importRuns("agent-1", "CODEX", [
+      {
+        nativeId: "native-1",
+        worktreeId: "worktree-1",
+        sessionInfo: { workingDirectory: "/new/repo" },
+      },
+    ]);
+    expect(JSON.parse(attempt.rawMetadataJson)).toEqual(
+      expect.objectContaining({
+        importedHistoryDigest: digest,
+        aideSessionInfo: {
+          nativeTranscriptPath: "/custom/sessions/native-1.jsonl",
+          workingDirectory: "/new/repo",
+        },
+      }),
+    );
+    expect(attempt.run).toHaveProperty("providerVersion", "1.2.3");
+  });
+
+  test("discovery enrichment retains a startup journal report written after its lookup", async () => {
+    const { prisma, attempt } = database("MANAGED");
+    const discoverySnapshot = { ...attempt, rawMetadataJson: "{}" };
+    attempt.rawMetadataJson = JSON.stringify({
+      aideSessionInfo: { activityLogPath: "/aide/run-1/events.jsonl" },
+    });
+    prisma.runAttempt.findUnique.mockResolvedValueOnce(discoverySnapshot);
+    await new RunsService().importRuns("agent-1", "CODEX", [
+      {
+        nativeId: "native-1",
+        worktreeId: "worktree-1",
+        sessionInfo: { nativeTranscriptPath: "/sessions/native-1.jsonl" },
+      },
+    ]);
+    expect(JSON.parse(attempt.rawMetadataJson).aideSessionInfo).toEqual({
+      activityLogPath: "/aide/run-1/events.jsonl",
+      nativeTranscriptPath: "/sessions/native-1.jsonl",
+    });
   });
 
   test("does not record success before history persistence succeeds", async () => {

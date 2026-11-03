@@ -1,4 +1,6 @@
-import { beforeEach, describe, expect, test, vi } from "vitest";
+import { homedir } from "node:os";
+import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
+import type { ProviderCallbacks, ProviderStartInput } from "./provider.js";
 
 const sdk = vi.hoisted(() => ({
   listSessions: vi.fn(),
@@ -48,7 +50,82 @@ beforeEach(() => {
   files.findClaudeSessionFile.mockResolvedValue(null);
 });
 
+afterEach(() => {
+  vi.unstubAllEnvs();
+});
+
+describe("Claude session info", () => {
+  test("reports a managed session's actual transcript from a custom config directory", async () => {
+    vi.stubEnv("CLAUDE_CONFIG_DIR", "/custom/claude");
+    files.findClaudeSessionFile.mockResolvedValue(
+      "/custom/claude/projects/workspace/session-1.jsonl",
+    );
+    sdk.query.mockReturnValue(
+      (async function* () {
+        yield {
+          type: "system",
+          subtype: "init",
+          session_id: "session-1",
+          cwd: "/workspace",
+          claude_code_version: "2.1.0",
+        };
+        yield { type: "result", result: "Done" };
+      })(),
+    );
+    const callbacks: ProviderCallbacks = {
+      onNativeId: vi.fn(),
+      onEvent: vi.fn(),
+      onUsage: vi.fn(),
+      onQuestion: vi.fn(),
+    };
+    const handle = await new ClaudeAdapter().start(
+      {
+        run: {
+          kind: "SESSION",
+          model: "default",
+          effort: null,
+          webSearchEnabled: false,
+          worktree: { folder: "/workspace" },
+        },
+        prompt: "Fix imports",
+        attachments: [],
+      } satisfies ProviderStartInput,
+      callbacks,
+    );
+    expect(await handle.completion).toMatchObject({ status: "COMPLETED" });
+    expect(files.findClaudeSessionFile).toHaveBeenCalledWith(
+      "session-1",
+      homedir(),
+      "/custom/claude",
+    );
+    expect(callbacks.onNativeId).toHaveBeenCalledWith("session-1", "2.1.0", {
+      workingDirectory: "/workspace",
+      nativeTranscriptPath: "/custom/claude/projects/workspace/session-1.jsonl",
+    });
+  });
+});
+
 describe("Claude history discovery", () => {
+  test("refreshes moved transcript locations without rehydrating unchanged history", async () => {
+    files.findClaudeSessionFile
+      .mockResolvedValueOnce("/previous/session-1.jsonl")
+      .mockResolvedValueOnce("/moved/session-1.jsonl")
+      .mockResolvedValueOnce(null);
+    files.readClaudeTranscript.mockResolvedValue([]);
+    const adapter = new ClaudeAdapter();
+    expect(
+      (await adapter.discover(worktrees))[0]?.sessionInfo?.nativeTranscriptPath,
+    ).toBe("/previous/session-1.jsonl");
+    expect(
+      (await adapter.discover(worktrees))[0]?.sessionInfo?.nativeTranscriptPath,
+    ).toBe("/moved/session-1.jsonl");
+    expect((await adapter.discover(worktrees))[0]?.sessionInfo).toEqual({
+      workingDirectory: "/workspace",
+    });
+    expect(sdk.getSessionMessages).toHaveBeenCalledOnce();
+    expect(files.readClaudeTranscript).toHaveBeenCalledOnce();
+  });
+
   test("hydrates complete history with transcript effort, prompt and reported cost", async () => {
     const user = {
       type: "user",
@@ -93,6 +170,10 @@ describe("Claude history discovery", () => {
       finalOutput: "Done",
       estimatedCost: 0.2,
       pricingSource: "claude-transcript",
+      sessionInfo: {
+        workingDirectory: "/workspace",
+        nativeTranscriptPath: "/transcript.jsonl",
+      },
       usage: [{ inputTokens: 10, estimatedCost: 0.2 }],
     });
     expect(imported?.events).toHaveLength(502);
@@ -106,6 +187,10 @@ describe("Claude history discovery", () => {
     });
     await adapter.discover(worktrees);
     expect(sdk.getSessionMessages).toHaveBeenCalledOnce();
+    expect((await adapter.discover(worktrees))[0]?.sessionInfo).toEqual({
+      workingDirectory: "/workspace",
+      nativeTranscriptPath: "/transcript.jsonl",
+    });
     sdk.listSessions.mockResolvedValue([{ ...session, fileSize: 1_001 }]);
     await adapter.discover(worktrees);
     expect(sdk.getSessionMessages).toHaveBeenCalledTimes(2);
@@ -118,6 +203,7 @@ describe("Claude history discovery", () => {
       model: "claude-sonnet-5",
       finalOutput: "Done",
       usage: [{ inputTokens: 10, outputTokens: 20 }],
+      sessionInfo: { workingDirectory: "/workspace" },
     });
     expect(imported).not.toHaveProperty("estimatedCost");
   });

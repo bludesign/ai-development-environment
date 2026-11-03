@@ -356,6 +356,7 @@ describe("RunDetailPage", () => {
       "Worktree Status",
       "Builds",
       "Changes",
+      "Session info",
     ];
     expect(ordered.map((title) => titles.indexOf(title))).toEqual(
       [...ordered.map((title) => titles.indexOf(title))].sort((a, b) => a - b),
@@ -366,6 +367,146 @@ describe("RunDetailPage", () => {
     expect(screen.getByRole("button", { name: "Build" })).toBeDefined();
     expect(screen.getByRole("link", { name: "New plan" })).toBeDefined();
     expect(screen.getByRole("link", { name: "New session" })).toBeDefined();
+  });
+
+  test.each(["SESSION", "PLAN"] as const)(
+    "%s keeps an empty final diff authoritative and checkpoint history collapsed",
+    async (kind) => {
+      const checkpoint = {
+        id: "start",
+        kind: "START",
+        headSha: "abcdef",
+        branch: null,
+        upstreamSha: null,
+        indexTree: null,
+        worktreeTree: null,
+        refName: null,
+        diffSummary: null,
+        diffPatch:
+          "diff --git a/old.ts b/old.ts\n--- a/old.ts\n+++ b/old.ts\n@@ -1 +1 @@\n-before\n+after\n",
+        stashRef: null,
+        createdAt: failedRun.createdAt,
+      };
+      runData = {
+        ...failedRun,
+        kind,
+        worktreeId: null,
+        checkpoints: [
+          checkpoint,
+          { ...checkpoint, id: "final", kind: "FINAL", diffPatch: null },
+        ],
+      };
+      render(<RunDetailPage runId={runData.id} />);
+      const card = (
+        await screen.findByText("Changes", {
+          selector: '[data-slot="card-title"]',
+        })
+      ).closest('[data-slot="card"]')! as HTMLElement;
+      expect(
+        within(card)
+          .queryAllByRole("button", { name: /old.ts/ })
+          .filter((button) => !button.closest("details")),
+      ).toHaveLength(0);
+      expect(
+        within(card).getAllByText("No file content changes.").length,
+      ).toBeGreaterThan(0);
+      expect(
+        screen.queryByText(
+          "This read-only Plan unexpectedly changed the selected worktree.",
+        ),
+      ).toBeNull();
+      expect(
+        Array.from(card.querySelectorAll("details")).every(
+          (details) => !details.open,
+        ),
+      ).toBe(true);
+      fireEvent.click(card.querySelector("summary")!);
+      expect(
+        within(card).getByRole("button", { name: /old.ts/ }),
+      ).toBeDefined();
+    },
+  );
+
+  test("does not promote a START diff to plan changes before a final checkpoint exists", async () => {
+    runData = {
+      ...failedRun,
+      kind: "PLAN",
+      worktreeId: null,
+      checkpoints: [
+        {
+          id: "start-only",
+          kind: "START",
+          headSha: "abcdef",
+          branch: null,
+          upstreamSha: null,
+          indexTree: null,
+          worktreeTree: null,
+          refName: null,
+          diffSummary: null,
+          diffPatch:
+            "diff --git a/existing.ts b/existing.ts\n--- a/existing.ts\n+++ b/existing.ts\n@@ -1 +1 @@\n-before\n+after\n",
+          stashRef: null,
+          createdAt: failedRun.createdAt,
+        },
+      ],
+    };
+    render(<RunDetailPage runId={runData.id} />);
+    await screen.findByText("Plan info");
+    expect(
+      screen
+        .queryAllByRole("button", { name: /existing.ts/ })
+        .filter((button) => !button.closest("details")),
+    ).toHaveLength(0);
+    expect(
+      screen.queryByText(
+        "This read-only Plan unexpectedly changed the selected worktree.",
+      ),
+    ).toBeNull();
+  });
+
+  test("shows final plan changes once above collapsed snapshots and warns about mutation", async () => {
+    runData = {
+      ...failedRun,
+      kind: "PLAN",
+      worktreeId: null,
+      checkpoints: [
+        {
+          id: "final-plan",
+          kind: "FINAL",
+          headSha: "abcdef",
+          branch: null,
+          upstreamSha: null,
+          indexTree: null,
+          worktreeTree: null,
+          refName: null,
+          diffSummary: null,
+          diffPatch: ["one.ts", "two.ts"]
+            .map(
+              (path) =>
+                `diff --git a/${path} b/${path}\n--- a/${path}\n+++ b/${path}\n@@ -1 +1 @@\n-before\n+after\n`,
+            )
+            .join(""),
+          stashRef: null,
+          createdAt: failedRun.createdAt,
+        },
+      ],
+    };
+    render(<RunDetailPage runId={runData.id} />);
+    expect(
+      await screen.findByText(
+        "This read-only Plan unexpectedly changed the selected worktree.",
+      ),
+    ).toBeDefined();
+    expect(
+      screen
+        .getAllByRole("button", { name: /one.ts/ })
+        .filter((button) => !button.closest("details")),
+    ).toHaveLength(1);
+    expect(
+      screen
+        .getAllByRole("button", { name: /two.ts/ })
+        .filter((button) => !button.closest("details")),
+    ).toHaveLength(1);
   });
 
   test("omits worktree cards when the run has no worktree", async () => {

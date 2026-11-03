@@ -20,6 +20,7 @@ import type {
 } from "@ai-development-environment/agent-contract/worktrees";
 import type { CommandOutputChunk } from "@ai-development-environment/agent-contract/commands";
 import type { BuildLogChunk } from "@ai-development-environment/agent-contract/builds";
+import type { RunSessionInfo } from "@ai-development-environment/agent-contract/runs";
 import type {
   AgentDiskSpaceConfiguration,
   AgentDiskSpaceReport,
@@ -1000,14 +1001,15 @@ export class AgentGraphQLClient {
     attemptId: string,
     nativeId: string,
     providerVersion?: string,
+    sessionInfo?: RunSessionInfo,
   ) {
     return this.request<{
       updateRunAttemptNativeId: { id: string; nativeId: string };
     }>(
-      `mutation UpdateRunAttemptNativeId($attemptId: ID!, $nativeId: String!, $providerVersion: String) {
-        updateRunAttemptNativeId(attemptId: $attemptId, nativeId: $nativeId, providerVersion: $providerVersion) { id nativeId }
+      `mutation UpdateRunAttemptNativeId($attemptId: ID!, $nativeId: String!, $providerVersion: String, $sessionInfo: RunSessionInfoInput) {
+        updateRunAttemptNativeId(attemptId: $attemptId, nativeId: $nativeId, providerVersion: $providerVersion, sessionInfo: $sessionInfo) { id nativeId }
       }`,
-      { attemptId, nativeId, providerVersion },
+      { attemptId, nativeId, providerVersion, sessionInfo },
     );
   }
 

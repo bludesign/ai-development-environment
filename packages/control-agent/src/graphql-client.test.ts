@@ -29,6 +29,35 @@ afterEach(async () => {
 });
 
 describe("AgentGraphQLClient", () => {
+  test("uploads session info with native session identity", async () => {
+    const fetchMock = vi.fn<
+      (url: string, init?: RequestInit) => Promise<Response>
+    >(async () =>
+      Response.json({
+        data: {
+          updateRunAttemptNativeId: { id: "attempt-1", nativeId: "native-1" },
+        },
+      }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    const sessionInfo = {
+      nativeTranscriptPath: "/custom/provider/session.jsonl",
+      activityLogPath: "/custom/aide/events.jsonl",
+      workingDirectory: "/workspace",
+    };
+    await new AgentGraphQLClient(
+      "https://control.test",
+    ).updateRunAttemptNativeId("attempt-1", "native-1", "1.0.0", sessionInfo);
+    const payload = JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body));
+    expect(payload.variables).toEqual({
+      attemptId: "attempt-1",
+      nativeId: "native-1",
+      providerVersion: "1.0.0",
+      sessionInfo,
+    });
+    expect(payload.query).toContain("$sessionInfo: RunSessionInfoInput");
+  });
+
   test.each([
     [401, undefined, false],
     [404, undefined, false],
