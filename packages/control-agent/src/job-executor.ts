@@ -5,6 +5,7 @@ import {
   WORKTREE_INSPECT_JOB_KIND,
 } from "@ai-development-environment/agent-contract/worktrees";
 import { CODEBASE_GIT_INSPECT_JOB_KIND } from "@ai-development-environment/agent-contract/codebases";
+import { IOS_BUILD_JOB_KIND } from "@ai-development-environment/agent-contract/builds";
 
 import { AgentGraphQLClient, type AgentJob } from "./graphql-client.js";
 import { handlers } from "./handlers/index.js";
@@ -125,7 +126,13 @@ export class JobExecutor {
           ? String((claimed.payload as Record<string, unknown>).codebaseId)
           : null;
       if (!codebaseId) result = await runHandler();
-      else if (
+      else if (claimed.kind === IOS_BUILD_JOB_KIND) {
+        result = await this.repositoryCoordinator.runBuild(
+          codebaseId,
+          runHandler,
+          controller.signal,
+        );
+      } else if (
         claimed.kind === WORKTREE_INSPECT_JOB_KIND ||
         claimed.kind === WORKTREE_DIFF_JOB_KIND ||
         claimed.kind === WORKTREE_DIFF_ASSET_JOB_KIND ||
