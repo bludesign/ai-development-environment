@@ -152,6 +152,7 @@ function fixture(provider: "GITHUB" | "GITLAB") {
   };
   const agents = {
     registerCompletionObserver: vi.fn(),
+    registerConnectionHandler: vi.fn(),
     getJob: vi.fn(async () => job),
     cancelJob: vi.fn(),
   };

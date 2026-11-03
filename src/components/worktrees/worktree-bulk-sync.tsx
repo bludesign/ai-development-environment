@@ -11,13 +11,13 @@ import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Label } from "@/components/ui/label";
 import {
-  Sheet,
-  SheetContent,
-  SheetDescription,
-  SheetFooter,
-  SheetHeader,
-  SheetTitle,
-} from "@/components/ui/sheet";
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { Spinner } from "@/components/ui/spinner";
 import { Link } from "@/i18n/navigation";
 import { createClientId } from "@/lib/browser-utils";
@@ -320,12 +320,12 @@ export function WorktreeBulkSync({
         {t("button")}
         {activeCount > 0 && <Badge variant="secondary">{activeCount}</Badge>}
       </Button>
-      <Sheet onOpenChange={changeOpen} open={open}>
-        <SheetContent className="gap-0 data-[side=right]:w-full data-[side=right]:sm:max-w-2xl">
-          <SheetHeader className="border-b pr-12">
-            <SheetTitle>{t("button")}</SheetTitle>
-            <SheetDescription>{t("description")}</SheetDescription>
-          </SheetHeader>
+      <Dialog onOpenChange={changeOpen} open={open}>
+        <DialogContent className="flex max-h-[85dvh] w-[calc(100%-2rem)] flex-col gap-0 overflow-hidden p-0 sm:max-w-2xl">
+          <DialogHeader className="shrink-0 border-b p-4 pr-12">
+            <DialogTitle>{t("button")}</DialogTitle>
+            <DialogDescription>{t("description")}</DialogDescription>
+          </DialogHeader>
           <div className="min-h-0 flex-1 space-y-6 overflow-y-auto p-4">
             {error && (
               <Alert variant="destructive">
@@ -436,7 +436,7 @@ export function WorktreeBulkSync({
               )}
             </section>
           </div>
-          <SheetFooter className="border-t">
+          <DialogFooter className="m-0 shrink-0 flex-col sm:flex-col">
             <p className="text-xs text-muted-foreground">{t("background")}</p>
             <div className="flex flex-wrap justify-end gap-2">
               <Button onClick={() => changeOpen(false)} variant="outline">
@@ -450,9 +450,9 @@ export function WorktreeBulkSync({
                 {t("start", { count: selectedIds.length })}
               </Button>
             </div>
-          </SheetFooter>
-        </SheetContent>
-      </Sheet>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </>
   );
 }

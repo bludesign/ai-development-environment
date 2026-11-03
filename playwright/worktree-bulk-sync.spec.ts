@@ -204,7 +204,17 @@ for (const [scope, path, appId] of [
       animations: "disabled",
     });
     const bounds = await sheet.boundingBox();
-    expect(bounds?.width).toBe(Math.min(page.viewportSize()!.width, 672));
+    expect(bounds).not.toBeNull();
+    const viewport = page.viewportSize()!;
+    expect(bounds!.width).toBe(Math.min(viewport.width - 32, 672));
+    expect(
+      Math.abs(bounds!.x + bounds!.width / 2 - viewport.width / 2),
+    ).toBeLessThan(1);
+    expect(
+      Math.abs(bounds!.y + bounds!.height / 2 - viewport.height / 2),
+    ).toBeLessThan(1);
+    expect(bounds!.y).toBeGreaterThanOrEqual(0);
+    expect(bounds!.y + bounds!.height).toBeLessThanOrEqual(viewport.height);
     await sheet.getByRole("button", { name: "Sync selected (1)" }).click();
     await expect(
       sheet.getByText("Bulk Sync running", { exact: true }),
