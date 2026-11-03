@@ -218,6 +218,61 @@ describe("CodebaseMonitor", () => {
     expect(client.agentCodebaseConfiguration).toHaveBeenCalledTimes(1);
   });
 
+  test("keeps commits and changes inspectable while an automatic fetch is slow", async () => {
+    const fetchStarted = Promise.withResolvers<void>();
+    const finishFetch = Promise.withResolvers<void>();
+    const coordinator = new RepositoryCoordinator();
+    const client = {
+      agentCodebaseConfiguration: vi.fn().mockResolvedValue({
+        refreshIntervalSeconds: 30,
+        fetchIntervalSeconds: 10,
+        codebases: [
+          {
+            id: "a",
+            folder: "/a",
+            canonicalOrigin: "example.com/a",
+            defaultBranch: "main",
+            keepBaseBranchUpToDate: true,
+            lastFetchedAt: null,
+            lastFetchAttemptAt: null,
+            worktrees: [],
+          },
+        ],
+      }),
+      reportCodebaseStatuses: vi.fn().mockResolvedValue({}),
+      reportWorktrees: vi.fn().mockResolvedValue({}),
+    } as unknown as AgentGraphQLClient;
+    inspect.mockResolvedValue(snapshot);
+    capture.mockImplementation(async () => {
+      fetchStarted.resolve();
+      await finishFetch.promise;
+      return {
+        stdout: "",
+        stderr: "",
+        exitCode: 0,
+        signal: null,
+        timedOut: false,
+        cancelled: false,
+        outputTruncated: false,
+      };
+    });
+    const monitor = new CodebaseMonitor(client, coordinator);
+    const reconciliation = monitor.reconcile(new AbortController().signal);
+    await fetchStarted.promise;
+    const loadDetail = vi.fn(async () => ({ commits: [], changes: [] }));
+    const inspection = coordinator.runInspection("a", loadDetail);
+    try {
+      await vi.waitFor(() => expect(loadDetail).toHaveBeenCalledOnce());
+      await expect(inspection).resolves.toEqual({ commits: [], changes: [] });
+      expect(client.reportWorktrees).not.toHaveBeenCalled();
+    } finally {
+      finishFetch.resolve();
+      await reconciliation;
+    }
+    expect(updateBaseBranch).toHaveBeenCalled();
+    expect(client.reportWorktrees).toHaveBeenCalledOnce();
+  });
+
   test("updates the configured base branch after a successful automatic fetch", async () => {
     const client = {
       agentCodebaseConfiguration: vi.fn().mockResolvedValue({
@@ -261,7 +316,10 @@ describe("CodebaseMonitor", () => {
     );
   });
 
-  test("does not update the base branch when the repository setting is off", async () => {
+  test("keeps read inspections available during the post-fetch snapshot when base updates are off", async () => {
+    const snapshotStarted = Promise.withResolvers<void>();
+    const finishSnapshot = Promise.withResolvers<void>();
+    const coordinator = new RepositoryCoordinator();
     const client = {
       agentCodebaseConfiguration: vi.fn().mockResolvedValue({
         refreshIntervalSeconds: 30,
@@ -282,7 +340,11 @@ describe("CodebaseMonitor", () => {
       reportCodebaseStatuses: vi.fn().mockResolvedValue({}),
       reportWorktrees: vi.fn().mockResolvedValue({}),
     } as unknown as AgentGraphQLClient;
-    inspect.mockResolvedValue(snapshot);
+    inspect.mockResolvedValueOnce(snapshot).mockImplementationOnce(async () => {
+      snapshotStarted.resolve();
+      await finishSnapshot.promise;
+      return snapshot;
+    });
     capture.mockResolvedValue({
       stdout: "",
       stderr: "",
@@ -293,8 +355,22 @@ describe("CodebaseMonitor", () => {
       outputTruncated: false,
     });
 
-    await new CodebaseMonitor(client).reconcile(new AbortController().signal);
+    const reconciliation = new CodebaseMonitor(client, coordinator).reconcile(
+      new AbortController().signal,
+    );
+    await snapshotStarted.promise;
+    const loadDetail = vi.fn(async () => ({ commits: [], changes: [] }));
+    const inspection = coordinator.runInspection("a", loadDetail);
+    try {
+      await vi.waitFor(() => expect(loadDetail).toHaveBeenCalledOnce());
+      await expect(inspection).resolves.toEqual({ commits: [], changes: [] });
+      expect(client.reportWorktrees).not.toHaveBeenCalled();
+    } finally {
+      finishSnapshot.resolve();
+      await Promise.all([inspection, reconciliation]);
+    }
 
     expect(updateBaseBranch).not.toHaveBeenCalled();
+    expect(client.reportWorktrees).toHaveBeenCalledOnce();
   });
 });

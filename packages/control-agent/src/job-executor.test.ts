@@ -1,7 +1,15 @@
 import { afterEach, describe, expect, test, vi } from "vitest";
 
 vi.mock("./handlers/index.js", () => ({
-  handlers: { "codebase.fetch": vi.fn(), "codebase.branches.delete": vi.fn() },
+  handlers: {
+    "codebase.fetch": vi.fn(),
+    "codebase.branches.delete": vi.fn(),
+    "worktree.inspect": vi.fn(),
+    "worktree.diff.inspect": vi.fn(),
+    "worktree.git.inspect": vi.fn(),
+    "codebase.git.inspect": vi.fn(),
+    "worktree.diff.asset": vi.fn(),
+  },
 }));
 vi.mock("./handlers/worktrees.js", () => ({
   closeAllWorktreeWatches: vi.fn(),
@@ -26,6 +34,112 @@ const job: AgentJob = {
 };
 
 describe("JobExecutor", () => {
+  test.each([
+    "worktree.inspect",
+    "worktree.diff.inspect",
+    "worktree.git.inspect",
+    "codebase.git.inspect",
+    "worktree.diff.asset",
+  ])("runs %s without waiting for background reconciliation", async (kind) => {
+    const coordinator = new RepositoryCoordinator();
+    const reconciliationStarted = Promise.withResolvers<void>();
+    const finishReconciliation = Promise.withResolvers<void>();
+    const reconciliation = coordinator.runReconciliation(
+      "checkout",
+      async () => {
+        reconciliationStarted.resolve();
+        await finishReconciliation.promise;
+      },
+    );
+    await reconciliationStarted.promise;
+    const inspection = {
+      ...job,
+      kind,
+      payload: { codebaseId: "checkout", folder: "/repo" },
+    };
+    const result = {
+      exitCode: 0,
+      signal: null,
+      timedOut: false,
+      cancelled: false,
+    };
+    vi.mocked(handlers[kind]!).mockResolvedValue(result);
+    const api = {
+      claimJob: vi.fn().mockResolvedValue(inspection),
+      completeJob: vi.fn().mockResolvedValue({}),
+    };
+    const executor = new JobExecutor(
+      api as unknown as AgentGraphQLClient,
+      coordinator,
+    );
+    try {
+      executor.execute(inspection);
+      await vi.waitFor(() => {
+        expect(api.completeJob).toHaveBeenCalledWith(
+          inspection.id,
+          "SUCCEEDED",
+          result,
+          undefined,
+        );
+      });
+    } finally {
+      finishReconciliation.resolve();
+      await reconciliation;
+      await executor.cancelAll();
+    }
+  });
+
+  test("shutdown cancels a queued job without waiting for background reconciliation", async () => {
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    const coordinator = new RepositoryCoordinator();
+    const started = Promise.withResolvers<void>();
+    const finish = Promise.withResolvers<void>();
+    const reconciliation = coordinator.runReconciliation(
+      "checkout",
+      async () => {
+        started.resolve();
+        await finish.promise;
+      },
+    );
+    await started.promise;
+    const queued = vi.spyOn(coordinator, "run");
+    const cleanupJob = {
+      ...job,
+      kind: "codebase.branches.delete",
+      payload: { codebaseId: "checkout", folder: "/repo" },
+    };
+    const handler = vi.mocked(handlers[cleanupJob.kind]!);
+    handler.mockClear();
+    const api = {
+      claimJob: vi.fn().mockResolvedValue(cleanupJob),
+      completeJob: vi.fn().mockResolvedValue({}),
+    };
+    const executor = new JobExecutor(
+      api as unknown as AgentGraphQLClient,
+      coordinator,
+    );
+    let shutdown: Promise<void> | undefined;
+    try {
+      executor.execute(cleanupJob);
+      await vi.waitFor(() => expect(queued).toHaveBeenCalledOnce());
+      shutdown = executor.cancelAll();
+      await vi.waitFor(() => {
+        expect(api.completeJob).toHaveBeenCalledWith(
+          cleanupJob.id,
+          "CANCELLED",
+          undefined,
+          expect.any(String),
+        );
+      });
+      await shutdown;
+      expect(handler).not.toHaveBeenCalled();
+    } finally {
+      finish.resolve();
+      await reconciliation;
+      await (shutdown ?? executor.cancelAll());
+    }
+  });
+
   test("serializes cleanup with other operations on the same codebase while retaining per-branch results", async () => {
     const entered = Promise.withResolvers<void>();
     const release = Promise.withResolvers<void>();

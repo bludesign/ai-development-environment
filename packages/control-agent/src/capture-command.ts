@@ -42,6 +42,7 @@ export function captureCommand(options: {
     let timedOut = false;
     let cancelled = false;
     let settled = false;
+    let terminating = false;
     let killTimer: ReturnType<typeof setTimeout> | null = null;
     const detached = process.platform !== "win32";
     const child = spawn(options.command, options.args, {
@@ -114,10 +115,14 @@ export function captureCommand(options: {
       }
     };
     const terminate = () => {
-      if (child.exitCode !== null || child.killed) return;
+      if (settled || terminating) return;
+      terminating = true;
+      // The direct child can exit while a helper still holds stdout/stderr
+      // open. Until close arrives, terminate the whole group even if that
+      // child's exitCode is already set.
       sendSignal("SIGTERM");
       killTimer = setTimeout(() => {
-        if (child.exitCode === null) sendSignal("SIGKILL");
+        if (!settled) sendSignal("SIGKILL");
       }, 5_000);
       killTimer.unref();
     };

@@ -3231,6 +3231,8 @@ export const downloadIosBuildArtifact: AgentJobHandler = async (
       path: uploadPath,
       filename,
       contentType,
+      signal,
+      timeoutMs,
     });
     return successfulProcess;
   } finally {

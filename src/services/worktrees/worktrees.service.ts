@@ -118,6 +118,31 @@ const ACTIVE_MOVE_STATUSES = [
 ];
 const MISSING_RETENTION_MS = 7 * 24 * 60 * 60 * 1_000;
 const INTERACTIVE_TIMEOUT_MS = 30_000;
+const JOB_STATUS_POLL_INTERVAL_MS = 1_000;
+
+async function waitForJobUpdate(
+  nextEvent: Promise<unknown>,
+  deadline: number,
+): Promise<boolean> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      nextEvent.then(() => true),
+      new Promise<boolean>((resolve) => {
+        timer = setTimeout(
+          () => resolve(false),
+          Math.min(
+            JOB_STATUS_POLL_INTERVAL_MS,
+            Math.max(0, deadline - Date.now()),
+          ),
+        );
+      }),
+    ]);
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 export const WORKTREE_COLORS = [
   "gray",
   "stone",
@@ -553,6 +578,11 @@ export class WorktreesService {
     string,
     ReturnType<AgentControlService["createJob"]>
   >();
+  private readonly gitStateInspections = new Map<
+    string,
+    Promise<ReturnType<typeof parseCodebaseGitState>>
+  >();
+  private readonly diffInspections = new Map<string, Promise<object>>();
   private readonly watchDemand = new Map<string, WorktreeWatchDemand>();
 
   constructor(
@@ -3288,38 +3318,49 @@ export class WorktreesService {
     );
     const identity = this.payload(worktree);
     if (!identity.baseBranch) throw new Error("A base branch is required");
-    const job = await this.createSerializedCodebaseJob({
-      agentId: worktree.codebase.agentId,
-      codebaseId: worktree.codebaseId,
-      worktreeId: worktree.id,
-      kind: WORKTREE_DIFF_JOB_KIND,
-      payload: {
-        ...identity,
-        baseBranch: identity.baseBranch,
-        scope: input.scope,
-        path: input.path ?? null,
-        previousPath: input.previousPath ?? null,
-        commitSha: input.commitSha ?? null,
-        uploadId: null,
-        side: null,
-      },
-      idempotencyKey: `worktree:diff:${requestId}:${id}`,
-      timeoutSeconds: 30,
-      visibility: "SYSTEM",
-    });
-    try {
-      const completed = await this.waitForJob(job.id);
-      const diff = resultObject(completed).diff;
-      if (!diff || typeof diff !== "object") {
-        throw new Error("Invalid worktree diff result");
-      }
-      return diff;
-    } finally {
-      const prisma = await getPrismaClient();
-      await prisma.agentJob.deleteMany({
-        where: { id: job.id, visibility: "SYSTEM" },
+    const payload = {
+      ...identity,
+      baseBranch: identity.baseBranch,
+      scope: input.scope,
+      path: input.path ?? null,
+      previousPath: input.previousPath ?? null,
+      commitSha: input.commitSha ?? null,
+      uploadId: null,
+      side: null,
+    };
+    const key = JSON.stringify([
+      worktree.codebase.agentId,
+      worktree.id,
+      worktree.branch,
+      worktree.headSha,
+      worktree.codeStateHash,
+      payload,
+    ]);
+    return this.coalesceInspection(this.diffInspections, key, async () => {
+      const job = await this.createSerializedCodebaseJob({
+        agentId: worktree.codebase.agentId,
+        codebaseId: worktree.codebaseId,
+        worktreeId: worktree.id,
+        kind: WORKTREE_DIFF_JOB_KIND,
+        payload,
+        idempotencyKey: `worktree:diff:${requestId}:${id}`,
+        timeoutSeconds: 30,
+        visibility: "SYSTEM",
       });
-    }
+      try {
+        const completed = await this.waitForJob(job.id);
+        const diff = resultObject(completed).diff;
+        if (!diff || typeof diff !== "object") {
+          throw new Error("Invalid worktree diff result");
+        }
+        return diff;
+      } finally {
+        const prisma = await getPrismaClient();
+        await prisma.agentJob.deleteMany({
+          where: { id: job.id, visibility: "SYSTEM" },
+        });
+      }
+    });
   }
 
   async prepareDiffAsset(
@@ -3540,31 +3581,56 @@ export class WorktreesService {
       WORKTREE_GIT_INSPECT_JOB_KIND,
       true,
     );
-    const job = await this.createSerializedCodebaseJob({
-      agentId: worktree.codebase.agentId,
-      codebaseId: worktree.codebaseId,
-      worktreeId: worktree.id,
-      kind: WORKTREE_GIT_INSPECT_JOB_KIND,
-      payload: {
-        action: "STATE",
+    const key = JSON.stringify([
+      worktree.codebase.agentId,
+      worktree.id,
+      worktree.branch,
+      worktree.headSha,
+      worktree.codeStateHash,
+      this.payload(worktree),
+    ]);
+    return this.coalesceInspection(this.gitStateInspections, key, async () => {
+      const job = await this.createSerializedCodebaseJob({
+        agentId: worktree.codebase.agentId,
         codebaseId: worktree.codebaseId,
-        folder: worktree.folder,
-        gitDirectory: worktree.gitDirectory,
-        expectedOrigin: worktree.codebase.repository.canonicalOrigin,
-      },
-      idempotencyKey: `worktree:git:state:${requestId}:${id}`,
-      timeoutSeconds: 30,
-      visibility: "SYSTEM",
-    });
-    try {
-      const completed = await this.waitForJob(job.id);
-      return parseCodebaseGitState(resultObject(completed).state);
-    } finally {
-      const prisma = await getPrismaClient();
-      await prisma.agentJob.deleteMany({
-        where: { id: job.id, visibility: "SYSTEM" },
+        worktreeId: worktree.id,
+        kind: WORKTREE_GIT_INSPECT_JOB_KIND,
+        payload: {
+          action: "STATE",
+          codebaseId: worktree.codebaseId,
+          folder: worktree.folder,
+          gitDirectory: worktree.gitDirectory,
+          expectedOrigin: worktree.codebase.repository.canonicalOrigin,
+        },
+        idempotencyKey: `worktree:git:state:${requestId}:${id}`,
+        timeoutSeconds: 30,
+        visibility: "SYSTEM",
       });
-    }
+      try {
+        const completed = await this.waitForJob(job.id);
+        return parseCodebaseGitState(resultObject(completed).state);
+      } finally {
+        const prisma = await getPrismaClient();
+        await prisma.agentJob.deleteMany({
+          where: { id: job.id, visibility: "SYSTEM" },
+        });
+      }
+    });
+  }
+
+  /** Share active reads; the owner alone creates and cleans up the agent job. */
+  private coalesceInspection<T>(
+    inspections: Map<string, Promise<T>>,
+    key: string,
+    inspect: () => Promise<T>,
+  ): Promise<T> {
+    const existing = inspections.get(key);
+    if (existing) return existing;
+    const pending = inspect().finally(() => {
+      if (inspections.get(key) === pending) inspections.delete(key);
+    });
+    inspections.set(key, pending);
+    return pending;
   }
 
   async runGitOperation(input: {
@@ -3664,18 +3730,17 @@ export class WorktreesService {
 
   private async waitForCodebaseJob(jobId: string, deadline: number) {
     const events = agentEventBus.iterate(agentJobChangedTopic(jobId));
+    let nextEvent = events.next();
     try {
-      while (Date.now() < deadline) {
+      while (true) {
         const job = await this.agentControl.getJob(jobId);
         if (!job || !ACTIVE_STATUSES.includes(job.status)) return;
-        await Promise.race([
-          events.next(),
-          new Promise((resolve) =>
-            setTimeout(resolve, Math.max(0, deadline - Date.now())),
-          ),
-        ]);
+        if (Date.now() >= deadline) throw new CodebaseBusyError();
+        // Events are process-local; re-read persisted status if a notification
+        // is missed or completion was handled by another server process.
+        if (await waitForJobUpdate(nextEvent, deadline))
+          nextEvent = events.next();
       }
-      throw new CodebaseBusyError();
     } finally {
       await events.return?.();
     }
@@ -4737,9 +4802,10 @@ export class WorktreesService {
 
   private async waitForJob(jobId: string) {
     const events = agentEventBus.iterate(agentJobChangedTopic(jobId));
+    let nextEvent = events.next();
     const deadline = Date.now() + INTERACTIVE_TIMEOUT_MS;
     try {
-      while (Date.now() < deadline) {
+      while (true) {
         const job = await this.agentControl.getJob(jobId);
         if (!job) throw new Error("Worktree job disappeared");
         if (
@@ -4747,13 +4813,15 @@ export class WorktreesService {
         ) {
           return job;
         }
-        await Promise.race([
-          events.next(),
-          new Promise((resolve) => setTimeout(resolve, deadline - Date.now())),
-        ]);
+        // Check the database at the deadline before cancelling: a completed job
+        // must still succeed even when its completion notification was lost.
+        if (Date.now() >= deadline) {
+          await this.agentControl.cancelJob(jobId);
+          throw new Error("Agent did not respond in time");
+        }
+        if (await waitForJobUpdate(nextEvent, deadline))
+          nextEvent = events.next();
       }
-      await this.agentControl.cancelJob(jobId);
-      throw new Error("Agent did not respond in time");
     } finally {
       await events.return?.();
     }

@@ -565,28 +565,47 @@ export class AgentGraphQLClient {
     path: string;
     filename: string;
     contentType: string;
+    signal?: AbortSignal;
+    timeoutMs?: number;
   }) {
+    const timeoutMs = input.timeoutMs ?? this.requestTimeoutMs;
+    if (timeoutMs <= 0)
+      throw new DOMException("Artifact upload timed out", "TimeoutError");
+    const timeout = AbortSignal.timeout(timeoutMs);
+    const signal = input.signal
+      ? AbortSignal.any([input.signal, timeout])
+      : timeout;
+    signal.throwIfAborted();
     const information = await stat(input.path);
-    const response = await fetch(
-      `${this.server}/api/build-artifact-uploads/${encodeURIComponent(input.uploadId)}`,
-      {
-        method: "POST",
-        headers: mergeHeaders(this.headers, {
-          ...(this.credential
-            ? { authorization: `Bearer ${this.credential}` }
-            : {}),
-          "content-length": String(information.size),
-          "content-type": input.contentType,
-          "x-artifact-filename": encodeURIComponent(input.filename),
-        }),
-        body: Readable.toWeb(createReadStream(input.path)),
-        duplex: "half",
-      } as RequestInit & { duplex: "half" },
-    );
-    if (!response.ok) {
-      throw new Error(
-        `Artifact upload failed: HTTP ${response.status} ${await response.text()}`,
+    signal.throwIfAborted();
+    const source = createReadStream(input.path);
+    try {
+      const response = await fetch(
+        `${this.server}/api/build-artifact-uploads/${encodeURIComponent(input.uploadId)}`,
+        {
+          method: "POST",
+          headers: mergeHeaders(this.headers, {
+            ...(this.credential
+              ? { authorization: `Bearer ${this.credential}` }
+              : {}),
+            "content-length": String(information.size),
+            "content-type": input.contentType,
+            "x-artifact-filename": encodeURIComponent(input.filename),
+          }),
+          body: Readable.toWeb(source),
+          duplex: "half",
+          signal,
+        } as RequestInit & { duplex: "half" },
       );
+      if (!response.ok) {
+        throw new Error(
+          `Artifact upload failed: HTTP ${response.status} ${await response.text()}`,
+        );
+      }
+    } finally {
+      // A failed or canceled request must not keep a source file open while
+      // its handler waits to release the repository or removes a temp file.
+      source.destroy();
     }
   }
 

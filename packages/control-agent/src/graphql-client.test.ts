@@ -230,6 +230,77 @@ describe("AgentGraphQLClient", () => {
     );
   });
 
+  test("bounds artifact uploads by their upload timeout", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "control-agent-upload-"));
+    temporaryDirectories.push(directory);
+    const path = join(directory, "diff.png");
+    await writeFile(path, "image");
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(
+        (_url: string, init: RequestInit) =>
+          new Promise((_resolve, reject) => {
+            init.signal!.addEventListener(
+              "abort",
+              () => reject(init.signal!.reason),
+              { once: true },
+            );
+          }),
+      ),
+    );
+    const client = new AgentGraphQLClient("https://control.test");
+
+    await expect(
+      client.uploadBuildArtifact({
+        uploadId: "diff-upload",
+        path,
+        filename: "diff.png",
+        contentType: "image/png",
+        timeoutMs: 50,
+      }),
+    ).rejects.toMatchObject({ name: "TimeoutError" });
+  });
+
+  test("cancels an in-flight artifact upload when its job is canceled", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "control-agent-upload-"));
+    temporaryDirectories.push(directory);
+    const path = join(directory, "diff.png");
+    await writeFile(path, "image");
+    const started = Promise.withResolvers<AbortSignal>();
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(
+        (_url: string, init: RequestInit) =>
+          new Promise((_resolve, reject) => {
+            const signal = init.signal!;
+            signal.addEventListener("abort", () => reject(signal.reason), {
+              once: true,
+            });
+            started.resolve(signal);
+          }),
+      ),
+    );
+    const controller = new AbortController();
+    const client = new AgentGraphQLClient("https://control.test");
+    const upload = client.uploadBuildArtifact({
+      uploadId: "diff-upload",
+      path,
+      filename: "diff.png",
+      contentType: "image/png",
+      signal: controller.signal,
+      timeoutMs: 60_000,
+    });
+    const canceled = expect(upload).rejects.toMatchObject({
+      name: "AbortError",
+    });
+    const requestSignal = await started.promise;
+
+    controller.abort();
+
+    await canceled;
+    expect(requestSignal.aborted).toBe(true);
+  });
+
   test("uploads artifacts larger than 100 MB without exceeding 16 MiB per request", async () => {
     const directory = await mkdtemp(join(tmpdir(), "control-agent-transfer-"));
     temporaryDirectories.push(directory);

@@ -180,6 +180,8 @@ export type AgentJobHandlerContext = {
     path: string;
     filename: string;
     contentType: string;
+    signal?: AbortSignal;
+    timeoutMs?: number;
   }) => Promise<unknown>;
   uploadBuildArtifactTransfer?: (input: {
     transferId: string;

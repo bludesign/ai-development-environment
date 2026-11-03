@@ -1523,6 +1523,8 @@ export const downloadWorktreeDiffAsset: AgentJobHandler = async (
       path: uploadPath,
       filename: basename(input.path),
       contentType: imageContentType(input.path),
+      signal,
+      timeoutMs,
     });
     return successfulProcess;
   } finally {
