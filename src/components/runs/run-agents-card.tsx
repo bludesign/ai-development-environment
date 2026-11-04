@@ -426,7 +426,7 @@ function RunAgentsContents({
                         </Button>
                       )}
                       <div className="max-h-[24rem] overflow-y-auto">
-                        <Table className="table-fixed">
+                        <Table className="min-w-[32rem] table-fixed">
                           <TableHeader className="sticky top-0 z-10 bg-card">
                             <TableRow>
                               <TableHead className="h-7 w-10" />

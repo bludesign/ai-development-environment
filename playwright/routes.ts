@@ -52,6 +52,8 @@ export type RouteEntry = {
   usagePopover?: boolean;
   destinationPicker?: "start" | "run";
   desktopOnly?: boolean;
+  /** Expand two independent Claude child conversations in the session Agents card. */
+  sessionAgents?: boolean;
 };
 
 export const routes: RouteEntry[] = [
@@ -138,7 +140,21 @@ export const routes: RouteEntry[] = [
 
   // Runs
   { name: "sessions", path: "/ai/sessions" },
-  { name: "session-detail", path: `/ai/sessions/${ids.runs.sessionSearch}` },
+  {
+    name: "session-detail",
+    path: `/ai/sessions/${ids.runs.sessionSearch}`,
+    readyGraphqlOperation: "RunSubagents",
+    readyTexts: ["Build the command palette"],
+    scrollTo: '[data-testid="run-agents-card"]',
+  },
+  {
+    name: "session-agents",
+    path: `/ai/sessions/${ids.runs.sessionSearch}`,
+    readyGraphqlOperation: "RunSubagents",
+    readyTexts: ["Build the command palette"],
+    scrollTo: '[data-testid="run-agents-card"]',
+    sessionAgents: true,
+  },
   {
     name: "session-info",
     path: `/ai/sessions/${ids.runs.sessionSearch}`,
