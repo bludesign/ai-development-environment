@@ -9,6 +9,7 @@ import {
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 
 import { controlPlaneRequest } from "@/lib/control-plane-client";
+import { formatDateValue } from "@/lib/date-format";
 
 import { RunAgentsCard } from "./run-agents-card";
 import type {
@@ -278,11 +279,19 @@ describe("RunAgentsCard", () => {
   });
 
   test("shows nested agent relationships and start times in collapsed rows", async () => {
-    agents = [agent(1), agent(2, { parentNativeId: "native-1" })];
+    const nestedAgent = agent(2, {
+      parentNativeId: "native-1",
+      startedAt: "2026-11-04T16:13:24.000Z",
+    });
+    agents = [agent(1), nestedAgent];
     render(<RunAgentsCard refreshKey={0} runId="run-1" />);
     const child = await screen.findByRole("button", { name: /Swift picker 2/ });
     expect(within(child).getByText("Spawned by Swift picker 1")).toBeDefined();
-    expect(within(child).getByText("11:13:23 AM")).toBeDefined();
+    const startTime = child.querySelector("time");
+    expect(startTime?.getAttribute("datetime")).toBe(nestedAgent.startedAt);
+    expect(startTime?.textContent).toBe(
+      formatDateValue(nestedAgent.startedAt, "time", { locale: "en" }),
+    );
     expect(child.getAttribute("aria-expanded")).toBe("false");
   });
 
