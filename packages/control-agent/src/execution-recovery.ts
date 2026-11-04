@@ -25,7 +25,7 @@ type ExecutionIdentity = {
 };
 type ExecutionJournal = ExecutionIdentity & {
   version: 1;
-  state: "RUNNING" | "SETTLED";
+  state: "RUNNING" | "SETTLING" | "SETTLED";
   marker: string;
   groups: number[];
 };
@@ -114,6 +114,8 @@ export const spawnExecutionProcess: typeof nativeSpawn = ((
 ) => {
   const journal = executions.getStore();
   if (!journal) return nativeSpawn(command, args, options);
+  if (journal.state !== "RUNNING")
+    throw new Error("Cannot start a process after execution cleanup begins");
   if (options.shell)
     throw new Error(
       "Execution recovery requires an explicit command interpreter",
@@ -162,6 +164,10 @@ export const spawnExecutionProcess: typeof nativeSpawn = ((
   };
   child.once("spawn", () => {
     if (!child.pid || child.killed || wasSignalled) return;
+    if (journal.state !== "RUNNING") {
+      child.kill("SIGTERM");
+      return;
+    }
     try {
       journal.groups.push(child.pid);
       persist(journal);
@@ -328,7 +334,10 @@ async function cleanupGroups(
 
 export async function withExecutionJournal<T>(
   identity: ExecutionIdentity,
-  task: () => Promise<T>,
+  task: (execution: {
+    cleanupProcesses: () => Promise<void>;
+    settle: () => Promise<void>;
+  }) => Promise<T>,
 ): Promise<T> {
   const journal: ExecutionJournal = {
     ...identity,
@@ -338,12 +347,27 @@ export async function withExecutionJournal<T>(
     groups: [],
   };
   persist(journal);
+  let settling: Promise<void> | undefined;
+  const settle = (): Promise<void> => {
+    if (journal.state === "SETTLED") return Promise.resolve();
+    return (settling ??= (async () => {
+      // Inherited async callbacks must not start another process while the
+      // final cleanup is proving that this execution has stopped.
+      journal.state = "SETTLING";
+      persist(journal);
+      await cleanupGroups(journal);
+      journal.state = "SETTLED";
+      persist(journal);
+    })().finally(() => {
+      settling = undefined;
+    }));
+  };
   try {
-    return await executions.run(journal, task);
+    return await executions.run(journal, () =>
+      task({ cleanupProcesses: () => cleanupGroups(journal), settle }),
+    );
   } finally {
-    await cleanupGroups(journal);
-    journal.state = "SETTLED";
-    persist(journal);
+    await settle();
   }
 }
 

@@ -1,3 +1,4 @@
+import { SETTLED_AGENT_JOB_WHERE } from "@/services/agent-control/job-cleanup";
 import { beforeEach, describe, expect, test, vi } from "vitest";
 
 const getPrismaClient = vi.hoisted(() => vi.fn());
@@ -59,6 +60,7 @@ describe("CodebasesService", () => {
 
     expect(deleteMany).toHaveBeenCalledWith({
       where: {
+        AND: [SETTLED_AGENT_JOB_WHERE],
         visibility: "SYSTEM",
         kind: { in: [...CODEBASE_JOB_KINDS] },
         finishedAt: { lt: expect.any(Date) },
@@ -704,7 +706,11 @@ describe("CodebasesService", () => {
       }),
     );
     expect(prisma.agentJob.deleteMany).toHaveBeenCalledWith({
-      where: { id: "job-codebase-1", visibility: "SYSTEM" },
+      where: {
+        id: "job-codebase-1",
+        visibility: "SYSTEM",
+        AND: [SETTLED_AGENT_JOB_WHERE],
+      },
     });
   });
 

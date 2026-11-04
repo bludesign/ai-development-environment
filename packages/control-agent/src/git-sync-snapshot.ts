@@ -6,6 +6,7 @@ import { captureCommand } from "./capture-command.js";
 import { withRepositoryMetadata } from "./repository-metadata.js";
 
 export type PushLease = {
+  version: 2;
   branch: string;
   remote: string;
   ref: string;
@@ -17,6 +18,7 @@ async function git(
   args: string[],
   timeoutMs: number,
   signal: AbortSignal,
+  allowMissing = false,
 ): Promise<string> {
   const result = await captureCommand({
     command: "git",
@@ -25,6 +27,13 @@ async function git(
     signal,
     env: { ...process.env, GIT_OPTIONAL_LOCKS: "0", GIT_TERMINAL_PROMPT: "0" },
   });
+  if (
+    allowMissing &&
+    result.exitCode === 1 &&
+    !result.cancelled &&
+    !result.timedOut
+  )
+    return "";
   if (result.cancelled || result.timedOut || result.exitCode !== 0)
     throw new Error(
       result.stderr || `Could not ${args[0]} while pinning Git references`,
@@ -45,29 +54,85 @@ async function pushLease(
   );
   const remote = await git(
     folder,
-    ["config", "--get", `branch.${branch}.remote`],
+    ["for-each-ref", "--format=%(push:remotename)", `refs/heads/${branch}`],
     timeoutMs,
     signal,
   );
-  const ref = await git(
+  const pushUrls = await git(
     folder,
-    ["config", "--get", `branch.${branch}.merge`],
+    ["remote", "get-url", "--push", "--all", remote],
     timeoutMs,
     signal,
   );
-  const sha = await git(
+  if (!remote || pushUrls.split("\n").length !== 1)
+    throw new Error(
+      "Configure a single push destination before syncing or force pushing",
+    );
+  // Let Git apply push.default, pushRemote, pushDefault and configured refspecs.
+  // Avoid running pre-push hooks twice; the real push still runs them normally.
+  const preview = await git(
     folder,
-    ["rev-parse", "@{upstream}"],
+    ["push", "--dry-run", "--porcelain", "--force-with-lease", "--no-verify"],
     timeoutMs,
     signal,
   );
+  const updates = preview.split("\n").flatMap((line) => {
+    const match = /^[ =*+!-]\t([^:\t]*):([^\t]+)\t/.exec(line);
+    return match ? [{ source: match[1]!, ref: match[2]! }] : [];
+  });
+  const update = updates[0];
   if (
-    !remote ||
-    !ref.startsWith("refs/heads/") ||
-    !/^[a-f\d]{40,64}$/i.test(sha)
+    updates.length !== 1 ||
+    (update?.source !== `refs/heads/${branch}` && update?.source !== "HEAD") ||
+    !update.ref.startsWith("refs/heads/")
   )
+    throw new Error(
+      "Configure a single push refspec for the current branch before syncing or force pushing",
+    );
+  const ref = update.ref;
+  // Use the same local tracking ref as Git's implicit lease. Reading the remote
+  // tip here would strengthen the lease to include commits we have not fetched.
+  const fetchRefspecs = await git(
+    folder,
+    ["config", "--get-all", `remote.${remote}.fetch`],
+    timeoutMs,
+    signal,
+    true,
+  );
+  let trackingRef: string | undefined;
+  for (const refspec of fetchRefspecs.split("\n")) {
+    const [source, destination] = refspec.replace(/^\+/, "").split(":");
+    if (!source || !destination || source.startsWith("^")) continue;
+    const wildcard = source.indexOf("*");
+    if (wildcard < 0) {
+      if (source !== ref) continue;
+      trackingRef = destination;
+    } else {
+      const prefix = source.slice(0, wildcard);
+      const suffix = source.slice(wildcard + 1);
+      if (
+        ref.length < prefix.length + suffix.length ||
+        !ref.startsWith(prefix) ||
+        !ref.endsWith(suffix)
+      )
+        continue;
+      const matched = ref.slice(prefix.length, ref.length - suffix.length);
+      trackingRef = destination.replace("*", matched);
+    }
+    break;
+  }
+  const sha = trackingRef
+    ? await git(
+        folder,
+        ["rev-parse", "--verify", "--quiet", trackingRef],
+        timeoutMs,
+        signal,
+        true,
+      )
+    : "";
+  if (sha && !/^[a-f\d]{40,64}$/i.test(sha))
     throw new Error("The branch has no usable push lease");
-  return { branch, remote, ref, sha };
+  return { version: 2, branch, remote, ref, sha };
 }
 
 export function pinnedForcePushArguments(lease: PushLease): string[] {
@@ -161,13 +226,14 @@ export async function readSyncPushLease(
     );
   }
   if (
+    lease.version !== 2 ||
     lease.branch !== branch ||
     typeof lease.remote !== "string" ||
     !lease.remote ||
     typeof lease.ref !== "string" ||
     !lease.ref.startsWith("refs/heads/") ||
     typeof lease.sha !== "string" ||
-    !/^[a-f\d]{40,64}$/i.test(lease.sha)
+    (lease.sha !== "" && !/^[a-f\d]{40,64}$/i.test(lease.sha))
   )
     throw new Error(
       "The original Sync push lease is invalid; sync again before pushing",

@@ -1,3 +1,4 @@
+import { SETTLED_AGENT_JOB_WHERE } from "@/services/agent-control/job-cleanup";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 
 const getPrismaClient = vi.hoisted(() => vi.fn());
@@ -2467,7 +2468,11 @@ describe("WorktreesService", () => {
       service(control).inspect("worktree-1", "request-1"),
     ).rejects.toThrow("Inspection failed");
     expect(deleteMany).toHaveBeenCalledWith({
-      where: { id: "inspect-1", visibility: "SYSTEM" },
+      where: {
+        id: "inspect-1",
+        visibility: "SYSTEM",
+        AND: [SETTLED_AGENT_JOB_WHERE],
+      },
     });
   });
 
@@ -2672,7 +2677,11 @@ describe("WorktreesService", () => {
         }),
       );
       expect(fixture.deleteMany).toHaveBeenCalledWith({
-        where: { id: "refresh-job", visibility: "SYSTEM" },
+        where: {
+          id: "refresh-job",
+          visibility: "SYSTEM",
+          AND: [SETTLED_AGENT_JOB_WHERE],
+        },
       });
     });
 
@@ -2993,7 +3002,11 @@ describe("WorktreesService", () => {
     ).resolves.toEqual({ patch: "+ready" });
     expect(createJob).toHaveBeenCalledTimes(2);
     expect(deleteMany).toHaveBeenCalledWith({
-      where: { id: "diff-2", visibility: "SYSTEM" },
+      where: {
+        id: "diff-2",
+        visibility: "SYSTEM",
+        AND: [SETTLED_AGENT_JOB_WHERE],
+      },
     });
   });
 
@@ -3131,7 +3144,11 @@ describe("WorktreesService", () => {
       }),
     );
     expect(deleteMany).toHaveBeenCalledWith({
-      where: { id: "asset-job", visibility: "SYSTEM" },
+      where: {
+        id: "asset-job",
+        visibility: "SYSTEM",
+        AND: [SETTLED_AGENT_JOB_WHERE],
+      },
     });
   });
 

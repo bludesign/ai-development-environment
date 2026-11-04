@@ -1,3 +1,4 @@
+import { SETTLED_AGENT_JOB_WHERE } from "@/services/agent-control/job-cleanup";
 import { createHash, randomUUID } from "node:crypto";
 
 import {
@@ -109,7 +110,11 @@ export class SigningAssetsService {
     const timer = setTimeout(() => {
       void getPrismaClient().then((prisma) =>
         prisma.agentJob.deleteMany({
-          where: { id: jobId, visibility: "SYSTEM" },
+          where: {
+            AND: [SETTLED_AGENT_JOB_WHERE],
+            id: jobId,
+            visibility: "SYSTEM",
+          },
         }),
       );
     }, 30_000);
@@ -599,7 +604,11 @@ export class SigningAssetsService {
       throw new Error("Timed out reading provisioning profile");
     } finally {
       await prisma.agentJob.deleteMany({
-        where: { id: job.id, visibility: "SYSTEM" },
+        where: {
+          AND: [SETTLED_AGENT_JOB_WHERE],
+          id: job.id,
+          visibility: "SYSTEM",
+        },
       });
     }
   }

@@ -8,6 +8,7 @@ import { captureCommand } from "./capture-command.js";
 import {
   forgetExecution,
   recoverExecution,
+  spawnExecutionProcess,
   withExecutionJournal,
 } from "./execution-recovery.js";
 
@@ -30,6 +31,36 @@ const moduleUrl = new URL("./execution-recovery.ts", import.meta.url).href;
 describe.skipIf(process.platform === "win32")(
   "execution process recovery",
   () => {
+    test("does not open a pending process gate once final cleanup starts", async () => {
+      const output = join(directory, "must-not-exist");
+      await withExecutionJournal(identity, async (execution) => {
+        const child = spawnExecutionProcess(process.execPath, [
+          "-e",
+          `require('node:fs').writeFileSync(${JSON.stringify(output)},'unsafe')`,
+        ]);
+        const closed = once(child, "close");
+        await execution.settle();
+        await closed;
+      });
+      await expect(stat(output)).rejects.toMatchObject({ code: "ENOENT" });
+    });
+
+    test("prevents inherited callbacks from starting processes after final cleanup", async () => {
+      const output = join(directory, "must-not-exist");
+      await withExecutionJournal(identity, async (execution) => {
+        await execution.settle();
+        expect(() =>
+          spawnExecutionProcess(process.execPath, [
+            "-e",
+            `require('node:fs').writeFileSync(${JSON.stringify(output)},'unsafe')`,
+          ]),
+        ).toThrow("Cannot start a process after execution cleanup begins");
+        forgetExecution(identity);
+      });
+      await expect(stat(output)).rejects.toMatchObject({ code: "ENOENT" });
+      expect(await readdir(join(directory, "executions"))).toEqual([]);
+    });
+
     test("runs journaled commands and acknowledges only after their groups settle", async () => {
       const result = await withExecutionJournal(identity, () =>
         captureCommand({

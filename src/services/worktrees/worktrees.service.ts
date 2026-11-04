@@ -1,3 +1,4 @@
+import { SETTLED_AGENT_JOB_WHERE } from "@/services/agent-control/job-cleanup";
 import {
   JIRA_BRANCH_GENERATE_JOB_KIND,
   jiraBranchNameCandidates,
@@ -3469,7 +3470,11 @@ export class WorktreesService {
     } finally {
       const prisma = await getPrismaClient();
       await prisma.agentJob.deleteMany({
-        where: { id: job.id, visibility: "SYSTEM" },
+        where: {
+          AND: [SETTLED_AGENT_JOB_WHERE],
+          id: job.id,
+          visibility: "SYSTEM",
+        },
       });
     }
   }
@@ -3533,7 +3538,11 @@ export class WorktreesService {
       } finally {
         const prisma = await getPrismaClient();
         await prisma.agentJob.deleteMany({
-          where: { id: job.id, visibility: "SYSTEM" },
+          where: {
+            AND: [SETTLED_AGENT_JOB_WHERE],
+            id: job.id,
+            visibility: "SYSTEM",
+          },
         });
       }
     });
@@ -3584,7 +3593,11 @@ export class WorktreesService {
     } finally {
       const prisma = await getPrismaClient();
       await prisma.agentJob.deleteMany({
-        where: { id: job.id, visibility: "SYSTEM" },
+        where: {
+          AND: [SETTLED_AGENT_JOB_WHERE],
+          id: job.id,
+          visibility: "SYSTEM",
+        },
       });
     }
   }
@@ -3804,7 +3817,11 @@ export class WorktreesService {
     } finally {
       const prisma = await getPrismaClient();
       await prisma.agentJob.deleteMany({
-        where: { id: job.id, visibility: "SYSTEM" },
+        where: {
+          AND: [SETTLED_AGENT_JOB_WHERE],
+          id: job.id,
+          visibility: "SYSTEM",
+        },
       });
     }
   }
@@ -3850,7 +3867,11 @@ export class WorktreesService {
       } finally {
         const prisma = await getPrismaClient();
         await prisma.agentJob.deleteMany({
-          where: { id: job.id, visibility: "SYSTEM" },
+          where: {
+            AND: [SETTLED_AGENT_JOB_WHERE],
+            id: job.id,
+            visibility: "SYSTEM",
+          },
         });
       }
     });
@@ -4196,7 +4217,11 @@ export class WorktreesService {
     } finally {
       const prisma = await getPrismaClient();
       await prisma.agentJob.deleteMany({
-        where: { id: job.id, visibility: "SYSTEM" },
+        where: {
+          AND: [SETTLED_AGENT_JOB_WHERE],
+          id: job.id,
+          visibility: "SYSTEM",
+        },
       });
     }
   }

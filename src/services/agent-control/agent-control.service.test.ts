@@ -16,6 +16,7 @@ vi.mock("@/data/prisma-client", () => ({
       .mockResolvedValue({ capabilitiesJson: "[]" });
     prisma.operationHolder ??= {
       findUnique: vi.fn().mockResolvedValue(null),
+      findFirst: vi.fn().mockResolvedValue(null),
       upsert: vi.fn(async ({ create }) => ({
         ...create,
         state: "REQUESTED",
@@ -23,6 +24,7 @@ vi.mock("@/data/prisma-client", () => ({
         createdAt: new Date(),
       })),
       update: vi.fn(),
+      updateMany: vi.fn().mockResolvedValue({ count: 0 }),
     };
     prisma.$transaction ??= async (body: (transaction: unknown) => unknown) =>
       body(prisma);

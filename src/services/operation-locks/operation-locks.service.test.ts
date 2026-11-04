@@ -19,6 +19,8 @@ import {
   type OperationDescriptor,
 } from "@ai-development-environment/agent-contract/operation-resources";
 import { AgentControlService } from "@/services/agent-control/agent-control.service";
+import { SETTLED_AGENT_JOB_WHERE } from "@/services/agent-control/job-cleanup";
+import { WorktreesService } from "@/services/worktrees/worktrees.service";
 import {
   admitOperation,
   recoverMergeReservations,
@@ -184,6 +186,219 @@ async function enqueue(
 }
 
 describe("durable worktree admission with real SQLite", () => {
+  test("preserves execution acknowledgements when an agent is deleted", async () => {
+    const service = new AgentControlService();
+    await enqueue("agent-deletion", "a", "WRITE");
+    await service.claimJob("agent", "agent-deletion", "execution-owner");
+    await expect(service.deleteAgent("agent")).rejects.toBeInstanceOf(
+      ResourceBusyError,
+    );
+    expect(
+      await prisma.agentJob.findUnique({ where: { id: "agent-deletion" } }),
+    ).toMatchObject({
+      status: "RUNNING",
+      executionToken: "execution-owner",
+    });
+    await service.completeJob(
+      "agent",
+      "agent-deletion",
+      "CANCELLED",
+      undefined,
+      null,
+      "execution-owner",
+    );
+    await expect(
+      prisma.$transaction((tx) =>
+        admitOperation(
+          tx,
+          "TEST_WRITE",
+          "after-agent-deletion",
+          descriptor("a", "WRITE"),
+          "writer",
+        ),
+      ),
+    ).resolves.toMatchObject({ state: "HELD" });
+  });
+
+  test("retires queued reservations when their agent is deleted", async () => {
+    await prisma.agent.create({
+      data: {
+        id: "removable-agent",
+        name: "Removable",
+        capabilitiesJson: "[]",
+        hostname: "test",
+        version: "test",
+        osVersion: "test",
+        architecture: "arm64",
+        secretHash: "removable-test",
+      },
+    });
+    const resources: OperationDescriptor = {
+      version: 1,
+      resources: [
+        {
+          kind: "AGENT",
+          key: "agent:removable-agent",
+          mode: "WRITE",
+          agentId: "removable-agent",
+        },
+        {
+          ...sourceBranchResource("github.com/acme/app", "feature/a"),
+          agentId: "removable-agent",
+        },
+      ],
+    };
+    try {
+      await prisma.$transaction((tx) =>
+        requestOperation(tx, "AGENT_JOB", "removable-job", resources),
+      );
+      await new AgentControlService().deleteAgent("removable-agent");
+      expect(
+        await prisma.operationHolder.findUnique({
+          where: {
+            ownerKind_ownerId: {
+              ownerKind: "AGENT_JOB",
+              ownerId: "removable-job",
+            },
+          },
+        }),
+      ).toMatchObject({ state: "RELEASED" });
+      await expect(
+        prisma.$transaction((tx) =>
+          admitOperation(
+            tx,
+            "MERGE_SUBMISSION",
+            "after-deletion",
+            {
+              version: 1,
+              resources: [
+                sourceBranchResource(
+                  "github.com/acme/app",
+                  "feature/a",
+                  "WRITE",
+                ),
+              ],
+            },
+            "merge",
+          ),
+        ),
+      ).resolves.toMatchObject({ state: "HELD" });
+    } finally {
+      await prisma.agent.deleteMany({ where: { id: "removable-agent" } });
+    }
+  });
+
+  test("retains a timed-out inspection until the agent acknowledges cancellation", async () => {
+    const service = new AgentControlService();
+    const worktrees = new WorktreesService(service, {} as never, {} as never);
+    await prisma.agent.update({
+      where: { id: "agent" },
+      data: {
+        capabilitiesJson: '["operation.resources.v1","worktree.git.inspect"]',
+        lastSeenAt: new Date(),
+      },
+    });
+    const claimed = Promise.withResolvers<string>();
+    const createJob = service.createJob.bind(service);
+    const spy = vi
+      .spyOn(service, "createJob")
+      .mockImplementationOnce(async (input) => {
+        const job = await createJob(input);
+        await service.claimJob("agent", job.id, "inspection-owner");
+        claimed.resolve(job.id);
+        return job;
+      });
+    vi.useFakeTimers();
+    try {
+      const timeout = expect(
+        worktrees.refreshGitState("a", "inspection-timeout"),
+      ).rejects.toThrow("Agent did not respond in time");
+      const jobId = await claimed.promise;
+      await vi.advanceTimersByTimeAsync(30_001);
+      await timeout;
+      expect(
+        await prisma.agentJob.findUnique({ where: { id: jobId } }),
+      ).toMatchObject({
+        status: "CANCELLING",
+        executionToken: "inspection-owner",
+      });
+      await expect(
+        prisma.$transaction((tx) =>
+          admitOperation(
+            tx,
+            "TEST_WRITE",
+            "after-inspection",
+            descriptor("a", "WRITE"),
+            "writer",
+          ),
+        ),
+      ).rejects.toBeInstanceOf(ResourceBusyError);
+
+      await service.completeJob(
+        "agent",
+        jobId,
+        "CANCELLED",
+        undefined,
+        null,
+        "inspection-owner",
+      );
+      await expect(
+        prisma.$transaction((tx) =>
+          admitOperation(
+            tx,
+            "TEST_WRITE",
+            "after-inspection",
+            descriptor("a", "WRITE"),
+            "writer",
+          ),
+        ),
+      ).resolves.toMatchObject({ state: "HELD" });
+      expect(
+        await prisma.agentJob.deleteMany({
+          where: { id: jobId, AND: [SETTLED_AGENT_JOB_WHERE] },
+        }),
+      ).toMatchObject({ count: 1 });
+    } finally {
+      vi.useRealTimers();
+      spy.mockRestore();
+    }
+  });
+
+  test("does not prune terminal jobs while execution cleanup is still pending", async () => {
+    const service = new AgentControlService();
+    await enqueue("terminal-inspection", "a", "READ");
+    await service.claimJob("agent", "terminal-inspection", "inspection-owner");
+    await prisma.agentJob.update({
+      where: { id: "terminal-inspection" },
+      data: { status: "TIMED_OUT", finishedAt: new Date() },
+    });
+    const where = { id: "terminal-inspection", AND: [SETTLED_AGENT_JOB_WHERE] };
+    expect(await prisma.agentJob.deleteMany({ where })).toMatchObject({
+      count: 0,
+    });
+    await service.completeJob(
+      "agent",
+      "terminal-inspection",
+      "CANCELLED",
+      undefined,
+      null,
+      "inspection-owner",
+    );
+    expect(await prisma.agentJob.deleteMany({ where })).toMatchObject({
+      count: 1,
+    });
+    expect(
+      await prisma.operationHolder.findUnique({
+        where: {
+          ownerKind_ownerId: {
+            ownerKind: "AGENT_JOB",
+            ownerId: "terminal-inspection",
+          },
+        },
+      }),
+    ).toMatchObject({ state: "RELEASED" });
+  });
+
   test("long session readers cannot bypass an earlier repository barrier", async () => {
     await enqueue("build", "a");
     await new AgentControlService().claimJob("agent", "build", "build");

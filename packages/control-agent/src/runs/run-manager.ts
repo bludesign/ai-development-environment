@@ -433,26 +433,34 @@ export class RunManager {
 
   private async startRun(command: RunCommand): Promise<void> {
     const identity = this.providerExecutions.get(command.id);
-    if (!identity) return this.startRunWithProvider(command);
+    if (!identity) {
+      await this.startRunWithProvider(command);
+      return;
+    }
     const resource = await this.runStabilityResource(command);
     const started = Promise.withResolvers<void>();
-    const cleanedCompletion =
-      Promise.withResolvers<Awaited<ProviderHandle["completion"]>>();
-    // The provider-facing completion is delayed until all owned processes and
-    // detached helpers are verified stopped; only then may the server release.
+    // Startup, provider cleanup, and final checkpoints share one journal and
+    // source lease. Completion is acknowledged only after final cleanup.
     const lifecycle = this.repositoryCoordinator.withResources(
       [resource],
       async () => {
         try {
-          return await withExecutionJournal(identity, async () => {
-            let physicalCompletion: ProviderHandle["completion"] | undefined;
-            await this.startRunWithProvider(command, (handle) => {
-              physicalCompletion = handle.completion;
-              return {
+          return await withExecutionJournal(identity, async (execution) => {
+            const active = await this.startRunWithProvider(
+              command,
+              (handle) => ({
                 get nativeId() {
                   return handle.nativeId;
                 },
-                completion: cleanedCompletion.promise,
+                completion: (async () => {
+                  try {
+                    return await handle.completion;
+                  } finally {
+                    // The final checkpoint needs a stable source, but its Git
+                    // processes must remain recoverable under this grant.
+                    await execution.cleanupProcesses();
+                  }
+                })(),
                 interrupt: (reason) => handle.interrupt(reason),
                 steer: (prompt, attachments) =>
                   handle.steer(prompt, attachments),
@@ -463,10 +471,11 @@ export class RunManager {
                         handle.cancelQuestion!(id),
                     }
                   : {}),
-              };
-            });
+              }),
+              execution.settle,
+            );
             started.resolve();
-            return physicalCompletion ? await physicalCompletion : undefined;
+            await active?.settled;
           });
         } catch (error) {
           // A failed cleanup retains the durable source claim and is retried;
@@ -491,24 +500,21 @@ export class RunManager {
       this.shutdown.signal,
     );
     void lifecycle.then(
-      (completion) => {
+      () => {
         started.resolve();
-        if (completion) cleanedCompletion.resolve(completion);
       },
       (error) => {
         started.reject(error);
-        cleanedCompletion.reject(error);
       },
     );
-    // Avoid an unhandled rejection when startup fails before a handle exists.
-    void cleanedCompletion.promise.catch(() => undefined);
     await started.promise;
   }
 
   private async startRunWithProvider(
     command: RunCommand,
     protect?: (handle: ProviderHandle) => ProviderHandle,
-  ): Promise<void> {
+    beforeCompletion?: () => Promise<void>,
+  ): Promise<ActiveRun | undefined> {
     const { run } = command;
     if (!run.worktree) throw new Error("Run worktree is unavailable");
     if (this.active.has(run.id)) throw new Error("Run is already active");
@@ -569,6 +575,7 @@ export class RunManager {
 
     const interruption = this.interruptionRequests.get(run.id);
     if (interruption) {
+      await beforeCompletion?.();
       await this.retry(
         () =>
           this.client.finishRunAttempt(attempt.id, {
@@ -710,6 +717,7 @@ export class RunManager {
       journal,
       adapter,
       baseline,
+      beforeCompletion,
     ).catch((error) => {
       if (!this.stopped) {
         console.error(
@@ -722,6 +730,7 @@ export class RunManager {
     if (requestedAfterStart)
       await this.interruptActive(active, requestedAfterStart);
     void active.settled;
+    return active;
   }
 
   private async finishRun(
@@ -731,6 +740,7 @@ export class RunManager {
     journal: RunJournal,
     adapter: ProviderAdapter,
     baseline: GitCheckpointReference,
+    beforeCompletion?: () => Promise<void>,
   ): Promise<void> {
     const { run } = command;
     try {
@@ -768,6 +778,7 @@ export class RunManager {
             .catch(() => undefined);
         }
       }
+      await beforeCompletion?.();
       await this.retryFinalization(() =>
         this.client.finishRunAttempt(attemptId, {
           status: completion.status,
@@ -784,6 +795,7 @@ export class RunManager {
       );
     } catch (error) {
       if (this.stopped) return;
+      await beforeCompletion?.();
       await this.retryFinalization(() =>
         this.client.finishRunAttempt(attemptId, {
           status: "FAILED",

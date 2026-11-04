@@ -937,12 +937,29 @@ export class AgentControlService {
 
   async deleteAgent(id: string) {
     const prisma = await getPrismaClient();
-    const agent = await prisma.agent.findUnique({ where: { id } });
-    if (!agent) return false;
-    // Cascading foreign keys remove this agent's jobs, codebase registrations,
-    // usage/build-data links, skill installations, and audit events.
-    await prisma.agent.delete({ where: { id } });
-    return true;
+    return prisma.$transaction(async (transaction) => {
+      const agent = await transaction.agent.findUnique({ where: { id } });
+      if (!agent) return false;
+      const execution = await transaction.operationHolder.findFirst({
+        where: {
+          state: { in: ["HELD", "RELEASING"] },
+          resources: { some: { agentId: id } },
+        },
+      });
+      if (execution)
+        throw new ResourceBusyError(
+          "Wait for this agent's active executions to finish cleanup before deleting it",
+          execution.id,
+        );
+      // Queued work cannot execute after its agent is removed. Retire its
+      // reservations atomically with the cascading deletion of the jobs.
+      await transaction.operationHolder.updateMany({
+        where: { state: "REQUESTED", resources: { some: { agentId: id } } },
+        data: { state: "RELEASED" },
+      });
+      await transaction.agent.delete({ where: { id } });
+      return true;
+    });
   }
 
   async renameAgent(agentId: string, name: string) {

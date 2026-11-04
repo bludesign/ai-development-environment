@@ -1,3 +1,4 @@
+import { SETTLED_AGENT_JOB_WHERE } from "@/services/agent-control/job-cleanup";
 import { filterAsyncIterator } from "@/lib/filter-async-iterator";
 import { randomUUID } from "node:crypto";
 
@@ -454,7 +455,9 @@ export class CodebasesService {
       resultObject(completed).listing,
     );
     const prisma = await getPrismaClient();
-    await prisma.agentJob.deleteMany({ where: { id: job.id } });
+    await prisma.agentJob.deleteMany({
+      where: { AND: [SETTLED_AGENT_JOB_WHERE], id: job.id },
+    });
     return listing;
   }
 
@@ -573,7 +576,11 @@ export class CodebasesService {
     });
     this.publish(confirmed.id, confirmed.repositoryId);
     await prisma.agentJob.deleteMany({
-      where: { id: input.inspectionJobId, visibility: "SYSTEM" },
+      where: {
+        AND: [SETTLED_AGENT_JOB_WHERE],
+        id: input.inspectionJobId,
+        visibility: "SYSTEM",
+      },
     });
     await this.agentControl.requestCodebaseReconcile([confirmed.agentId]);
     await this.skillsService?.requestAutoReconcile();
@@ -958,7 +965,11 @@ export class CodebasesService {
       return parseCodebaseGitState(resultObject(completed).state);
     } finally {
       await prisma.agentJob.deleteMany({
-        where: { id: job.id, visibility: "SYSTEM" },
+        where: {
+          AND: [SETTLED_AGENT_JOB_WHERE],
+          id: job.id,
+          visibility: "SYSTEM",
+        },
       });
     }
   }
@@ -990,7 +1001,11 @@ export class CodebasesService {
       return parseCodebaseStashDiff(resultObject(completed).diff);
     } finally {
       await prisma.agentJob.deleteMany({
-        where: { id: job.id, visibility: "SYSTEM" },
+        where: {
+          AND: [SETTLED_AGENT_JOB_WHERE],
+          id: job.id,
+          visibility: "SYSTEM",
+        },
       });
     }
   }
@@ -1428,6 +1443,7 @@ export class CodebasesService {
     const prisma = await getPrismaClient();
     await prisma.agentJob.deleteMany({
       where: {
+        AND: [SETTLED_AGENT_JOB_WHERE],
         visibility: "SYSTEM",
         kind: { in: [...CODEBASE_JOB_KINDS] },
         finishedAt: { lt: new Date(Date.now() - INSPECTION_MAX_AGE_MS) },

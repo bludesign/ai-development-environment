@@ -1,3 +1,4 @@
+import { SETTLED_AGENT_JOB_WHERE } from "@/services/agent-control/job-cleanup";
 import "server-only";
 
 import { randomUUID } from "node:crypto";
@@ -240,7 +241,9 @@ export class SystemStatusService {
 
   private async removeCollection(id: string): Promise<void> {
     const prisma = await getPrismaClient();
-    await prisma.agentJob.deleteMany({ where: { ccusageCollectionId: id } });
+    await prisma.agentJob.deleteMany({
+      where: { AND: [SETTLED_AGENT_JOB_WHERE], ccusageCollectionId: id },
+    });
     await prisma.ccusageCollection.deleteMany({ where: { id } });
   }
 
@@ -253,7 +256,10 @@ export class SystemStatusService {
     if (!collections.length) return;
     const ids = collections.map(({ id }) => id);
     await prisma.agentJob.deleteMany({
-      where: { ccusageCollectionId: { in: ids } },
+      where: {
+        AND: [SETTLED_AGENT_JOB_WHERE],
+        ccusageCollectionId: { in: ids },
+      },
     });
     await prisma.ccusageCollection.deleteMany({ where: { id: { in: ids } } });
   }

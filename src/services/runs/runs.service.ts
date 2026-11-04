@@ -1,3 +1,4 @@
+import { SETTLED_AGENT_JOB_WHERE } from "@/services/agent-control/job-cleanup";
 import { OPERATION_RESOURCES_CAPABILITY } from "@ai-development-environment/agent-contract/operation-resources";
 import { workflowQueueUsesWorktree } from "@/services/workflows/workflow-queue-scope";
 import { filterAsyncIterator } from "@/lib/filter-async-iterator";
@@ -667,7 +668,11 @@ export class RunsService {
       };
     } finally {
       await prisma.agentJob.deleteMany({
-        where: { id: job.id, visibility: "SYSTEM" },
+        where: {
+          AND: [SETTLED_AGENT_JOB_WHERE],
+          id: job.id,
+          visibility: "SYSTEM",
+        },
       });
     }
   }

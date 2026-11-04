@@ -1,3 +1,4 @@
+import { SETTLED_AGENT_JOB_WHERE } from "@/services/agent-control/job-cleanup";
 import { serverUrlSettingsService } from "@/services/server-urls/server-urls.service";
 import type { ServerUrlKind } from "@/lib/server-urls";
 import { BUILD_ENDPOINT_PATHS } from "@ai-development-environment/agent-contract/builds";
@@ -1144,7 +1145,11 @@ export class BuildsService {
     } finally {
       const prisma = await getPrismaClient();
       await prisma.agentJob.deleteMany({
-        where: { id: job.id, visibility: "SYSTEM" },
+        where: {
+          AND: [SETTLED_AGENT_JOB_WHERE],
+          id: job.id,
+          visibility: "SYSTEM",
+        },
       });
     }
   }
@@ -1254,7 +1259,11 @@ export class BuildsService {
       });
     } finally {
       await prisma.agentJob.deleteMany({
-        where: { id: job.id, visibility: "SYSTEM" },
+        where: {
+          AND: [SETTLED_AGENT_JOB_WHERE],
+          id: job.id,
+          visibility: "SYSTEM",
+        },
       });
     }
   }
@@ -1308,7 +1317,11 @@ export class BuildsService {
     } finally {
       const prisma = await getPrismaClient();
       await prisma.agentJob.deleteMany({
-        where: { id: job.id, visibility: "SYSTEM" },
+        where: {
+          AND: [SETTLED_AGENT_JOB_WHERE],
+          id: job.id,
+          visibility: "SYSTEM",
+        },
       });
     }
   }
@@ -1360,7 +1373,11 @@ export class BuildsService {
       ).map((destination) => parseBuildDestination(destination));
     } finally {
       await prisma.agentJob.deleteMany({
-        where: { id: job.id, visibility: "SYSTEM" },
+        where: {
+          AND: [SETTLED_AGENT_JOB_WHERE],
+          id: job.id,
+          visibility: "SYSTEM",
+        },
       });
     }
   }
@@ -1411,7 +1428,11 @@ export class BuildsService {
       };
     } finally {
       await prisma.agentJob.deleteMany({
-        where: { id: job.id, visibility: "SYSTEM" },
+        where: {
+          AND: [SETTLED_AGENT_JOB_WHERE],
+          id: job.id,
+          visibility: "SYSTEM",
+        },
       });
     }
   }
@@ -1545,7 +1566,11 @@ export class BuildsService {
           );
       } finally {
         await prisma.agentJob.deleteMany({
-          where: { id: job.id, visibility: "SYSTEM" },
+          where: {
+            AND: [SETTLED_AGENT_JOB_WHERE],
+            id: job.id,
+            visibility: "SYSTEM",
+          },
         });
       }
     }
@@ -1586,7 +1611,11 @@ export class BuildsService {
         );
     } finally {
       await prisma.agentJob.deleteMany({
-        where: { id: job.id, visibility: "SYSTEM" },
+        where: {
+          AND: [SETTLED_AGENT_JOB_WHERE],
+          id: job.id,
+          visibility: "SYSTEM",
+        },
       });
     }
   }
@@ -2531,7 +2560,11 @@ export class BuildsService {
       });
     } finally {
       await prisma.agentJob.deleteMany({
-        where: { id: job.id, visibility: "SYSTEM" },
+        where: {
+          AND: [SETTLED_AGENT_JOB_WHERE],
+          id: job.id,
+          visibility: "SYSTEM",
+        },
       });
     }
   }
@@ -2829,7 +2862,11 @@ export class BuildsService {
       this.result(await this.waitForJob(job.id, timeoutMs));
     } finally {
       await prisma.agentJob.deleteMany({
-        where: { id: job.id, visibility: "SYSTEM" },
+        where: {
+          AND: [SETTLED_AGENT_JOB_WHERE],
+          id: job.id,
+          visibility: "SYSTEM",
+        },
       });
     }
   }
