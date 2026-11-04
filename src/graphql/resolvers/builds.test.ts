@@ -1,4 +1,4 @@
-import { buildASTSchema, parse, subscribe, validate } from "graphql";
+import { buildASTSchema, execute, parse, subscribe, validate } from "graphql";
 import { schemaDefinitions } from "@/generated/schema-definitions";
 import { agentEventBus, buildTopic } from "@/services/agent-control";
 import { describe, expect, test, vi } from "vitest";
@@ -175,6 +175,57 @@ describe("build resolver authorization", () => {
     ]);
   });
 });
+
+test.each([
+  { name: "legacy", scriptExecutions: undefined },
+  {
+    name: "live scripts",
+    scriptExecutions: [
+      {
+        phase: "PRE_BUILD",
+        position: 0,
+        status: "FAILED",
+        exitCode: 1,
+        durationMs: 150,
+        causedBuildFailure: false,
+        outputRelativePath: "hooks/pre/000-script-1.log",
+        error: "Optional hook failed",
+      },
+    ],
+  },
+])(
+  "accepts $name build progress through GraphQL",
+  async ({ scriptExecutions }) => {
+    const service = {
+      reportProgress: vi.fn().mockResolvedValue({ id: "build-1" }),
+    } as unknown as BuildsService;
+    const resolvers = createBuildResolvers(service);
+    const schema = buildASTSchema(parse(schemaDefinitions.join("\n")), {
+      assumeValidSDL: true,
+    });
+    Object.assign(schema.getMutationType()!.getFields().reportBuildProgress, {
+      resolve: resolvers.Mutation.reportBuildProgress,
+    });
+    const input = {
+      buildId: "build-1",
+      status: "RUNNING",
+      ...(scriptExecutions ? { scriptExecutions } : {}),
+    };
+    const result = await execute({
+      schema,
+      document: parse(`
+        mutation ReportBuildProgress($input: BuildProgressInput!) {
+          reportBuildProgress(input: $input) { id }
+        }
+      `),
+      variableValues: { input },
+      contextValue: context("agent-1"),
+    });
+    expect(result.errors).toBeUndefined();
+    expect(result.data).toEqual({ reportBuildProgress: { id: "build-1" } });
+    expect(service.reportProgress).toHaveBeenCalledWith("agent-1", input);
+  },
+);
 
 test("executes the additive full build snapshot subscription while retaining the legacy invalidation", async () => {
   const service = {

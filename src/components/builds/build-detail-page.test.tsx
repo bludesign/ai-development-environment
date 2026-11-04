@@ -938,6 +938,93 @@ describe("BuildDetailPage", () => {
     ).toContain("text-amber-700");
   });
 
+  test("updates completed pre-build script statuses from a running build snapshot", async () => {
+    const preparingBuild = {
+      ...build,
+      status: "PREPARING",
+      finishedAt: null,
+      scriptExecutions: ["Generate assets", "Check formatting"].map(
+        (nameSnapshot, position) => ({
+          id: `script-${position}`,
+          phase: "PRE_BUILD",
+          position,
+          nameSnapshot,
+          status: "PENDING",
+          exitCode: null,
+          durationMs: null,
+          causedBuildFailure: false,
+          outputRelativePath: null,
+          error: null,
+        }),
+      ),
+    };
+    const buildSubscription: { next: (snapshot: unknown) => void } = {
+      next: (_snapshot: unknown) => {
+        throw new Error("Build snapshot subscription is not connected");
+      },
+    };
+    subscriptions.mockReturnValue({
+      subscribe: vi.fn((operation, sink) => {
+        if (String(operation.query).includes("subscription BuildChanged")) {
+          buildSubscription.next = (snapshot) =>
+            sink.next({ data: { buildSnapshotChanged: snapshot } } as never);
+        }
+        return vi.fn();
+      }),
+    } as never);
+    request.mockImplementation(async (query) => {
+      if (String(query).includes("query BuildDetail")) {
+        return { build: preparingBuild } as never;
+      }
+      if (String(query).includes("query BuildLogChunks")) {
+        return { buildLogChunks: [] } as never;
+      }
+      throw new Error(`Unexpected request: ${query}`);
+    });
+
+    render(<BuildDetailPage buildId="build-1" publicOrigin={null} />);
+
+    const scriptsCard = (
+      await screen.findByText("Build scripts")
+    ).closest<HTMLElement>('[data-slot="card"]')!;
+    expect(within(scriptsCard).getAllByText("Pending")).toHaveLength(2);
+    expect(
+      within(screen.getByTestId("build-summary")).getByText("Preparing"),
+    ).toBeDefined();
+    const requestCount = request.mock.calls.length;
+
+    act(() => {
+      buildSubscription.next({
+        ...preparingBuild,
+        status: "RUNNING",
+        scriptExecutions: preparingBuild.scriptExecutions.map(
+          (execution, position) => ({
+            ...execution,
+            status: position === 0 ? "SUCCEEDED" : "FAILED",
+            exitCode: position,
+            durationMs: 100,
+            error: position === 0 ? null : "Formatting check failed",
+          }),
+        ),
+      });
+    });
+
+    expect(
+      within(screen.getByTestId("build-summary")).getByText("Running"),
+    ).toBeDefined();
+    expect(within(scriptsCard).queryByText("Pending")).toBeNull();
+    expect(
+      within(scriptsCard).getByText("Succeeded").getAttribute("data-variant"),
+    ).toBe("success");
+    expect(
+      within(scriptsCard).getByText("Failed").getAttribute("data-variant"),
+    ).toBe("destructive");
+    expect(
+      within(scriptsCard).getByText("Formatting check failed"),
+    ).toBeDefined();
+    expect(request.mock.calls).toHaveLength(requestCount);
+  });
+
   test("polls while a build or deployment is still active", async () => {
     const interval = vi.spyOn(window, "setInterval");
     request.mockImplementation(async (query) => {

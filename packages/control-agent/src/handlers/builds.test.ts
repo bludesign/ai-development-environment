@@ -22,6 +22,7 @@ import {
   DEFAULT_BUILD_ADVANCED_SETTINGS,
   type BuildJobPayload,
   type BuildLogChunk,
+  type BuildProgressReport,
 } from "@ai-development-environment/agent-contract/builds";
 import { normalizeGitOrigin } from "@ai-development-environment/agent-contract/codebases";
 
@@ -1249,6 +1250,182 @@ export default async function hook() { await writeFile(${JSON.stringify(hookMark
     }
   });
 
+  test.each([
+    {
+      scenario: "continued failure",
+      failureBehavior: "CONTINUE",
+      expectedStatus: "FAILED",
+      compilationStarted: true,
+    },
+    {
+      scenario: "blocking failure",
+      failureBehavior: "FAIL_BUILD",
+      expectedStatus: "FAILED",
+      compilationStarted: false,
+    },
+    {
+      scenario: "timeout",
+      failureBehavior: "FAIL_BUILD",
+      expectedStatus: "TIMED_OUT",
+      compilationStarted: false,
+    },
+    {
+      scenario: "cancellation",
+      failureBehavior: "FAIL_BUILD",
+      expectedStatus: "CANCELLED",
+      compilationStarted: false,
+    },
+    {
+      scenario: "progress report failure",
+      failureBehavior: "FAIL_BUILD",
+      expectedStatus: "SUCCEEDED",
+      compilationStarted: true,
+    },
+  ] as const)(
+    "reports live hook status after $scenario and preserves build behavior",
+    async ({
+      scenario,
+      failureBehavior,
+      expectedStatus,
+      compilationStarted,
+    }) => {
+      const root = await mkdtemp(join(tmpdir(), "ios-build-live-hooks-"));
+      temporaryDirectories.push(root);
+      const folder = join(root, "source");
+      const bin = join(root, "bin");
+      await mkdir(join(folder, "App.xcworkspace"), { recursive: true });
+      await mkdir(bin);
+      await execute("git", ["init", "-b", "main", folder]);
+      await execute("git", [
+        "-C",
+        folder,
+        "remote",
+        "add",
+        "origin",
+        "https://github.com/example/app.git",
+      ]);
+      const xcrun = join(bin, "xcrun");
+      await writeFile(
+        xcrun,
+        '#!/bin/sh\ncase " $* " in *" -showBuildSettings "*) printf "[]" ;; *) touch build-started ;; esac\n',
+      );
+      await chmod(xcrun, 0o755);
+      const originalPath = process.env.PATH;
+      process.env.PATH = `${bin}:${originalPath ?? ""}`;
+      const controller = new AbortController();
+      const reports: BuildProgressReport[] = [];
+      try {
+        const result = await runIosBuild(
+          payload({
+            folder,
+            gitDirectory: await realpath(join(folder, ".git")),
+            artifactDirectory: join(root, "builds", "build-1"),
+            scripts: [
+              {
+                id: "first",
+                name: "First",
+                position: 0,
+                timeoutSeconds: 1,
+                failureBehavior,
+                preBuildScript:
+                  scenario === "timeout"
+                    ? "export default async () => new Promise((resolve) => setTimeout(resolve, 30_000));"
+                    : scenario === "progress report failure"
+                      ? "export default async () => {};"
+                      : 'export default async () => { throw new Error("Hook failed"); };',
+                postBuildScript:
+                  'import { writeFile } from "node:fs/promises"; export default async () => writeFile("cleanup-finished", "true");',
+              },
+              {
+                id: "second",
+                name: "Second",
+                position: 1,
+                timeoutSeconds: 10,
+                failureBehavior: "FAIL_BUILD",
+                preBuildScript:
+                  'import { writeFile } from "node:fs/promises"; export default async () => writeFile("second-finished", "true");',
+                postBuildScript: null,
+              },
+            ],
+          }),
+          30_000,
+          controller.signal,
+          async () => undefined,
+          {
+            agentId: "agent-1",
+            reportWorktreeActivity: async () => undefined,
+            reportBuildProgress: async (report) => {
+              reports.push(report);
+              if (
+                scenario === "cancellation" &&
+                report.scriptExecutions?.some(
+                  (execution) =>
+                    execution.phase === "PRE_BUILD" &&
+                    execution.status === "RUNNING",
+                )
+              ) {
+                controller.abort();
+              }
+              if (scenario === "progress report failure") {
+                throw new Error("Progress unavailable");
+              }
+            },
+          },
+        );
+        const firstResult = reports
+          .flatMap((report) => report.scriptExecutions ?? [])
+          .find(
+            (execution) =>
+              execution.phase === "PRE_BUILD" &&
+              execution.position === 0 &&
+              execution.status !== "RUNNING",
+          );
+        expect(firstResult).toMatchObject({ status: expectedStatus });
+        if (expectedStatus === "FAILED") {
+          expect(firstResult).toMatchObject({
+            causedBuildFailure: failureBehavior === "FAIL_BUILD",
+            error: expect.stringContaining("Hook failed"),
+          });
+        }
+        expect(existsSync(join(folder, "build-started"))).toBe(
+          compilationStarted,
+        );
+        expect(existsSync(join(folder, "second-finished"))).toBe(
+          compilationStarted,
+        );
+        expect(await readFile(join(folder, "cleanup-finished"), "utf8")).toBe(
+          "true",
+        );
+        const cleanupReports = reports.filter((report) =>
+          report.scriptExecutions?.some(
+            (execution) => execution.phase === "POST_BUILD",
+          ),
+        );
+        expect(cleanupReports.map(({ status }) => status)).toEqual([
+          compilationStarted ? "RUNNING" : "PREPARING",
+          compilationStarted ? "RUNNING" : "PREPARING",
+        ]);
+        if (compilationStarted) {
+          const compilationReport = reports.find(
+            (report) => report.status === "RUNNING",
+          );
+          expect(compilationReport?.scriptExecutions).toEqual([
+            firstResult,
+            expect.objectContaining({ position: 1, status: "SUCCEEDED" }),
+          ]);
+          expect(result.exitCode).toBe(0);
+        } else {
+          expect(reports.some((report) => report.status === "RUNNING")).toBe(
+            false,
+          );
+        }
+        expect(result.cancelled).toBe(scenario === "cancellation");
+      } finally {
+        process.env.PATH = originalPath;
+      }
+    },
+  );
+
   test("runs hooks in deterministic order, redacts output, and finalizes the raw log artifact", async () => {
     const root = await mkdtemp(join(tmpdir(), "ios-build-agent-"));
     temporaryDirectories.push(root);
@@ -1278,7 +1455,7 @@ export default async function hook() { await writeFile(${JSON.stringify(hookMark
     const xcrun = join(bin, "xcrun");
     await writeFile(
       xcrun,
-      "#!/bin/sh\ncase \" $* \" in *\" -showBuildSettings \"*) printf '[]' ;; *) printf '\\033[31mprogress 10%%\\rprogress 100%%\\033[0m\\n' ;; esac\n",
+      "#!/bin/sh\ncase \" $* \" in *\" -showBuildSettings \"*) printf '[]' ;; *) touch build-started; printf '\\033[31mprogress 10%%\\rprogress 100%%\\033[0m\\n' ;; esac\n",
     );
     await chmod(xcrun, 0o755);
     const originalPath = process.env.PATH;
@@ -1287,6 +1464,11 @@ export default async function hook() { await writeFile(${JSON.stringify(hookMark
     process.env.TEST_API_TOKEN = "integration-secret";
     const artifactDirectory = join(builds, "build-ordered");
     const events: BuildLogChunk[] = [];
+    const progress: Array<{
+      report: BuildProgressReport;
+      hookOrder: string;
+      compilationStarted: boolean;
+    }> = [];
     const hookSource = (value: string, includeSecret = false) =>
       `import { appendFile } from "node:fs/promises";
 export default async function hook(build) {
@@ -1351,7 +1533,16 @@ export default async function hook(build) {
         {
           agentId: "agent-1",
           reportWorktreeActivity: async () => undefined,
-          reportBuildProgress: async () => undefined,
+          reportBuildProgress: async (report) => {
+            const orderPath = join(repository, "hook-order.txt");
+            progress.push({
+              report,
+              hookOrder: existsSync(orderPath)
+                ? await readFile(orderPath, "utf8")
+                : "",
+              compilationStarted: existsSync(join(repository, "build-started")),
+            });
+          },
           withOperationResources: async (_resources, run) => {
             await new Promise((resolve) => setTimeout(resolve, 5));
             return run();
@@ -1367,6 +1558,38 @@ export default async function hook(build) {
       };
 
       expect(result.exitCode).toBe(0);
+      expect(
+        progress.map(({ report, compilationStarted }) => [
+          report.status,
+          report.scriptExecutions?.map(({ phase, position, status }) => [
+            phase,
+            position,
+            status,
+          ]),
+          compilationStarted,
+        ]),
+      ).toEqual([
+        ["PREPARING", undefined, false],
+        ["PREPARING", [["PRE_BUILD", 1, "RUNNING"]], false],
+        ["PREPARING", [["PRE_BUILD", 1, "SUCCEEDED"]], false],
+        ["PREPARING", [["PRE_BUILD", 2, "RUNNING"]], false],
+        ["PREPARING", [["PRE_BUILD", 2, "SUCCEEDED"]], false],
+        [
+          "RUNNING",
+          [
+            ["PRE_BUILD", 1, "SUCCEEDED"],
+            ["PRE_BUILD", 2, "SUCCEEDED"],
+          ],
+          false,
+        ],
+        ["RUNNING", [["POST_BUILD", 2, "RUNNING"]], true],
+        ["RUNNING", [["POST_BUILD", 2, "SUCCEEDED"]], true],
+        ["RUNNING", [["POST_BUILD", 1, "RUNNING"]], true],
+        ["RUNNING", [["POST_BUILD", 1, "SUCCEEDED"]], true],
+      ]);
+      expect(progress[1]?.hookOrder).toBe("");
+      expect(progress[2]?.hookOrder).toBe("pre-first\n");
+      expect(progress[4]?.hookOrder).toBe("pre-first\npre-second\n");
       expect(await readFile(join(repository, "hook-order.txt"), "utf8")).toBe(
         "pre-first\npre-second\npost-second\npost-first\n",
       );

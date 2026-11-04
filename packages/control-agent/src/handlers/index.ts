@@ -7,6 +7,7 @@ import {
   BUILD_DATA_SCAN_JOB_KIND,
   BUILD_DATA_SIZE_JOB_KIND,
 } from "@ai-development-environment/agent-contract/build-data";
+import type { BuildProgressReport } from "@ai-development-environment/agent-contract/builds";
 import {
   CODEBASE_BROWSE_JOB_KIND,
   CODEBASE_BRANCHES_DELETE_JOB_KIND,
@@ -169,13 +170,7 @@ export type AgentJobHandlerContext = {
   ) => Promise<unknown>;
   reportWorktreeActivity: (input: WorktreeActivityReport) => Promise<unknown>;
   refreshFetchedCodebase?: (input: FetchedCodebaseRefresh) => Promise<string>;
-  reportBuildProgress?: (input: {
-    buildId: string;
-    status: "PREPARING" | "RUNNING";
-    startedAt?: string;
-    errorCode?: string;
-    error?: string;
-  }) => Promise<unknown>;
+  reportBuildProgress?: (input: BuildProgressReport) => Promise<unknown>;
   reportBuildDeploymentLaunched?: (
     deploymentId: string,
     launchedAt: string,

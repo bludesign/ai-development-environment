@@ -20,7 +20,10 @@ import type {
   WorktreeActivityReport,
 } from "@ai-development-environment/agent-contract/worktrees";
 import type { CommandOutputChunk } from "@ai-development-environment/agent-contract/commands";
-import type { BuildLogChunk } from "@ai-development-environment/agent-contract/builds";
+import type {
+  BuildLogChunk,
+  BuildProgressReport,
+} from "@ai-development-environment/agent-contract/builds";
 import type { RunSessionInfo } from "@ai-development-environment/agent-contract/runs";
 import type {
   AgentDiskSpaceConfiguration,
@@ -549,13 +552,7 @@ export class AgentGraphQLClient {
     );
   }
 
-  reportBuildProgress(input: {
-    buildId: string;
-    status: "PREPARING" | "RUNNING";
-    startedAt?: string;
-    errorCode?: string;
-    error?: string;
-  }) {
+  reportBuildProgress(input: BuildProgressReport) {
     return this.request<{ reportBuildProgress: { id: string } }>(
       `mutation ReportBuildProgress($input: BuildProgressInput!) {
         reportBuildProgress(input: $input) { id }
