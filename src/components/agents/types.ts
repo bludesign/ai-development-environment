@@ -28,6 +28,7 @@ export type AgentJob = {
   id: string;
   agentId: string;
   kind: string;
+  commandName?: string | null;
   payload: Record<string, unknown>;
   status:
     | "QUEUED"

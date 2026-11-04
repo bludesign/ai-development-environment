@@ -143,6 +143,8 @@ export const createAgentResolvers = (
     updatedAt: (agent: { updatedAt: Date }) => agent.updatedAt.toISOString(),
   },
   AgentJob: {
+    commandName: (job: { id: string; kind: string }) =>
+      agentControlService.getJobCommandName(job),
     blockedReason: (job: { id: string; status: string }) =>
       job.status === "QUEUED" ? jobBlockedReason(job.id) : null,
     branchDeletionResults: (job: {

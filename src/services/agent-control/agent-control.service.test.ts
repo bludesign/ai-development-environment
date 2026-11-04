@@ -48,6 +48,55 @@ function persistedJob(status: string, resultJson: string | null = null) {
   };
 }
 
+describe("AgentControlService.getJobCommandName", () => {
+  beforeEach(() => vi.clearAllMocks());
+
+  test("uses the run's original name after the command definition is renamed", async () => {
+    const attempt = {
+      run: {
+        snapshotName: "Run tests",
+        command: { name: "Renamed test command" },
+      },
+    };
+    const findUnique = vi.fn().mockResolvedValue(attempt);
+    getPrismaClient.mockResolvedValue({ commandRunAttempt: { findUnique } });
+
+    await expect(
+      new AgentControlService().getJobCommandName({
+        id: "command-job",
+        kind: "command.run",
+      }),
+    ).resolves.toBe("Run tests");
+    expect(findUnique).toHaveBeenCalledWith({
+      where: { agentJobId: "command-job" },
+      select: { run: { select: { snapshotName: true } } },
+    });
+  });
+
+  test("returns null when the command run relation is unavailable", async () => {
+    getPrismaClient.mockResolvedValue({
+      commandRunAttempt: { findUnique: vi.fn().mockResolvedValue(null) },
+    });
+
+    await expect(
+      new AgentControlService().getJobCommandName({
+        id: "missing-command-job",
+        kind: "command.run",
+      }),
+    ).resolves.toBeNull();
+  });
+
+  test("does not query command runs for other operations", async () => {
+    await expect(
+      new AgentControlService().getJobCommandName({
+        id: "build-job",
+        kind: "ios.build.run",
+      }),
+    ).resolves.toBeNull();
+    expect(getPrismaClient).not.toHaveBeenCalled();
+  });
+});
+
 describe("AgentControlService branch deletion progress", () => {
   beforeEach(() => vi.clearAllMocks());
   test("publishes durable outcomes only for the owning agent and selected local targets, without replacing replays", async () => {

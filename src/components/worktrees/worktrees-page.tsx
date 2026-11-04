@@ -1,6 +1,7 @@
 "use client";
 
 import { OutOfDateBadge } from "@/components/builds/out-of-date-badge";
+import { WorktreeActiveOperations } from "./worktree-active-operations";
 
 import { useActiveAgent } from "@/components/active-agent/active-agent-provider";
 
@@ -3812,7 +3813,7 @@ export function ActionRow(
     worktree.rebaseInProgress;
   const changeActions = worktreeChangeActionState(worktree);
   return (
-    <div className="flex flex-wrap gap-2">
+    <div className="flex flex-wrap items-center gap-2">
       <PrimaryWorktreeActions {...props} includeReviewers={false} />
       <OperationButton
         icon={<Download />}
@@ -3921,20 +3922,7 @@ export function ActionRow(
           />
         </DropdownMenuContent>
       </DropdownMenu>
-      {(
-        worktree.activeJobs ?? (worktree.activeJob ? [worktree.activeJob] : [])
-      ).map((job) => (
-        <Link
-          key={job.id}
-          href={`/dashboard/jobs/${job.id}`}
-          title={job.kind}
-          className="flex items-center gap-1 text-xs text-muted-foreground hover:underline"
-        >
-          <Spinner />{" "}
-          {job.kind === "ios.build.run" ? t("build") : t("operationRunning")} ·{" "}
-          {job.status}
-        </Link>
-      ))}
+      <WorktreeActiveOperations worktree={worktree} />
     </div>
   );
 }

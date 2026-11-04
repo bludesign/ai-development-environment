@@ -10,6 +10,33 @@ function context(agentId: string | null): GraphQLContext {
   return { agentId } as GraphQLContext;
 }
 
+describe("agent job command names", () => {
+  test("resolves the command name through the job's saved command run", async () => {
+    const service = {
+      getJobCommandName: vi.fn().mockResolvedValue("Run tests"),
+    } as unknown as AgentControlService;
+    const job = { id: "command-job", kind: "command.run" };
+
+    await expect(
+      createAgentResolvers(service).AgentJob.commandName(job),
+    ).resolves.toBe("Run tests");
+    expect(service.getJobCommandName).toHaveBeenCalledWith(job);
+  });
+
+  test("preserves unavailable command names as null", async () => {
+    const service = {
+      getJobCommandName: vi.fn().mockResolvedValue(null),
+    } as unknown as AgentControlService;
+
+    await expect(
+      createAgentResolvers(service).AgentJob.commandName({
+        id: "missing-command-job",
+        kind: "command.run",
+      }),
+    ).resolves.toBeNull();
+  });
+});
+
 describe("agent read ownership", () => {
   test("tracks only authorized agent notification subscriptions", async () => {
     const resolvers = createAgentResolvers({} as AgentControlService);

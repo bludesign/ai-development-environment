@@ -1122,6 +1122,19 @@ export class AgentControlService {
     return prisma.agentJob.findUnique({ where: { id } });
   }
 
+  async getJobCommandName(job: {
+    id: string;
+    kind: string;
+  }): Promise<string | null> {
+    if (job.kind !== COMMAND_RUN_JOB_KIND) return null;
+    const prisma = await getPrismaClient();
+    const attempt = await prisma.commandRunAttempt.findUnique({
+      where: { agentJobId: job.id },
+      select: { run: { select: { snapshotName: true } } },
+    });
+    return attempt?.run.snapshotName ?? null;
+  }
+
   async createJob(input: {
     agentId: string;
     kind: string;

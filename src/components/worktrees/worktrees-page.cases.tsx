@@ -1012,6 +1012,78 @@ export function registerWorktreesPageTests(
     }
 
     if (section === "cards") {
+      test.each(
+        ["cards", "table"].flatMap((layout) =>
+          [0, 1, 2, 8].map((count) => ({ layout, count })),
+        ),
+      )(
+        "shows $count active operations in $layout without navigating the worktree",
+        async ({ layout, count }) => {
+          const response = (await request("query Fixture")) as unknown as {
+            worktreeOverview: WorktreeOverview;
+          };
+          const worktree =
+            response.worktreeOverview.agents[0]!.codebases[0]!.worktrees[0]!;
+          worktree.activeJobs = Array.from({ length: count }, (_, index) => ({
+            id: `active-command-${index}`,
+            agentId: "agent-1",
+            kind: "command.run",
+            commandName: `Task ${index + 1}`,
+            payload: {},
+            status: "RUNNING" as const,
+            result: null,
+            error: null,
+            timeoutSeconds: 0,
+            createdAt: new Date(0).toISOString(),
+            startedAt: new Date(0).toISOString(),
+            finishedAt: null,
+            updatedAt: new Date(0).toISOString(),
+          }));
+          request.mockResolvedValue(response);
+          window.localStorage.setItem("worktrees-layout", layout);
+
+          render(<WorktreesPage />);
+          await screen.findByText("feature/AIDE-24");
+
+          if (count < 2) {
+            expect(
+              screen.queryByRole("button", { name: /^\d+ operations$/ }),
+            ).toBeNull();
+            const link = screen.queryByRole("link", {
+              name: "Command: Task 1",
+            });
+            if (count === 0) expect(link).toBeNull();
+            else
+              expect(link?.getAttribute("href")).toBe(
+                "/dashboard/jobs/active-command-0",
+              );
+            return;
+          }
+
+          expect(
+            screen.queryByRole("link", { name: "Command: Task 1 Running" }),
+          ).toBeNull();
+          fireEvent.click(
+            screen.getByRole("button", { name: `${count} operations` }),
+          );
+          const popover = await screen.findByRole("dialog", {
+            name: "Active operations",
+          });
+          expect(within(popover).getAllByRole("link")).toHaveLength(count);
+          for (let index = 0; index < count; index++) {
+            expect(
+              within(popover)
+                .getByRole("link", {
+                  name: `Command: Task ${index + 1} Running`,
+                })
+                .getAttribute("href"),
+            ).toBe(`/dashboard/jobs/active-command-${index}`);
+          }
+          fireEvent.click(popover);
+          expect(navigation.push).not.toHaveBeenCalled();
+        },
+      );
+
       test.each(["cards", "table"])(
         "keeps an active conflict quick action visible after the rebase in %s",
         async (layout) => {
