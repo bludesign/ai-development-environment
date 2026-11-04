@@ -108,7 +108,7 @@ const PROJECT_FIELDS = `
   }
   allowedScripts {
     position
-    script { id name iconKey preBuildScript postBuildScript enabledByDefault timeoutSeconds failureBehavior }
+    script { id name iconKey preBuildScript postBuildScript enabledByDefault timeoutSeconds failureBehavior lockScope }
   }
 `;
 

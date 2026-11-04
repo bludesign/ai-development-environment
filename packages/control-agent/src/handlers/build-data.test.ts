@@ -82,6 +82,60 @@ const signal = () => new AbortController().signal;
 const log = async () => undefined;
 
 describe("Build Data agent handlers", () => {
+  test("discovers and deletes only the removed worktree's managed cache without an Xcode plist", async () => {
+    const root = await realpath(await temporaryDirectory());
+    const folder = await realpath(await temporaryDirectory());
+    const sibling = await realpath(await temporaryDirectory());
+    const managedRoot = join(root, ".worktree-derived-data");
+    for (const [id, source] of [
+      ["worktree-a", folder],
+      ["worktree-b", sibling],
+    ]) {
+      await mkdir(join(managedRoot, id!), { recursive: true });
+      await writeFile(
+        join(managedRoot, id!, ".aide-worktree.json"),
+        JSON.stringify({ version: 1, worktreeId: id, folder: source }),
+      );
+    }
+    const configuration = {
+      mode: "ABSOLUTE" as const,
+      path: join(root, "legacy"),
+      managedRoot,
+    };
+    const scan = (await scanBuildData(
+      { ...configuration, worktrees: [] },
+      10_000,
+      signal(),
+      log,
+    )) as unknown as {
+      entries: Array<{ path: string; workspacePath: string; kind: string }>;
+    };
+    expect(scan.entries).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          path: join(managedRoot, "worktree-a"),
+          workspacePath: folder,
+          kind: "PROJECT",
+        }),
+      ]),
+    );
+    const owned = await ownedWorktreeBuildData(
+      folder,
+      configuration,
+      10_000,
+      signal(),
+    );
+    expect(owned.targets).toEqual([
+      { path: join(managedRoot, "worktree-a"), rootPath: managedRoot },
+    ]);
+    await deleteBuildData({ targets: owned.targets }, 10_000, signal(), log);
+    expect(
+      await readFile(
+        join(managedRoot, "worktree-b", ".aide-worktree.json"),
+        "utf8",
+      ),
+    ).toContain("worktree-b");
+  });
   test("deletes only Xcode project data owned by the removed worktree", async () => {
     const root = await realpath(await temporaryDirectory());
     const folder = await realpath(await temporaryDirectory());

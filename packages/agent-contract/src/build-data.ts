@@ -189,10 +189,15 @@ function deleteTarget(value: unknown, index: number): BuildDataDeleteTarget {
 export function buildDataScanPayload(value: unknown): {
   mode: DerivedDataLocationMode;
   path: string | null;
+  managedRoot?: string | null;
   worktrees: BuildDataWorktreeRoot[];
 } {
   const payload = objectValue(value, "build data scan payload");
-  exactKeys(payload, ["mode", "path", "worktrees"], "build data scan payload");
+  exactKeys(
+    payload,
+    ["mode", "path", "managedRoot", "worktrees"],
+    "build data scan payload",
+  );
   if (!Array.isArray(payload.worktrees)) {
     throw new Error("build data scan payload.worktrees must be an array");
   }
@@ -207,6 +212,14 @@ export function buildDataScanPayload(value: unknown): {
   return {
     mode,
     path,
+    ...(payload.managedRoot === undefined
+      ? {}
+      : {
+          managedRoot: optionalNullableString(
+            payload.managedRoot,
+            "build data scan payload.managedRoot",
+          ),
+        }),
     worktrees: payload.worktrees.map(worktreeRoot),
   };
 }

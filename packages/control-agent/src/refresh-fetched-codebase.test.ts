@@ -110,6 +110,7 @@ describe("refreshFetchedCodebase", () => {
       {
         ...inventory,
         codebaseId: input.codebaseId,
+        observedAt: expect.any(String),
         fetchedAt: snapshot.fetchedAt,
         fetchAttemptedAt: input.fetchAttemptedAt,
         fetchError: null,

@@ -2,12 +2,16 @@ import { beforeEach, describe, expect, test, vi } from "vitest";
 import type { ProviderCallbacks, ProviderStartInput } from "./provider.js";
 
 const runtime = vi.hoisted(() => ({
+  executionEnv: {} as Record<string, string>,
   clients: [] as unknown[],
   instances: [] as Array<{
     isolated: boolean;
     close: ReturnType<typeof vi.fn>;
   }>,
   shared: vi.fn(),
+}));
+vi.mock("../execution-recovery.js", () => ({
+  executionEnvironment: () => runtime.executionEnv,
 }));
 vi.mock("./opencode-runtime.js", () => ({
   OpenCodeRuntime: class {
@@ -168,6 +172,7 @@ function executionClient(api: ReturnType<typeof client>) {
   api.message.list.mockResolvedValueOnce({ data: [], cursor: {} });
 }
 beforeEach(() => {
+  runtime.executionEnv = {};
   vi.clearAllMocks();
   runtime.clients.length = 0;
   runtime.instances.length = 0;
@@ -280,6 +285,22 @@ describe("OpenCode 2 discovery", () => {
 });
 
 describe("OpenCode 2 execution", () => {
+  test("isolates journalled provider sessions even when no MCP server is configured", async () => {
+    const { adapter } = prepare();
+    const isolated = client();
+    executionClient(isolated);
+    runtime.clients.push(isolated);
+    runtime.executionEnv = { AIDE_EXECUTION_MARKER: "managed-session" };
+    const handle = await adapter.start(input(), callbacks());
+    await handle.completion;
+    expect(
+      runtime.instances.filter((instance) => instance.isolated),
+    ).toHaveLength(1);
+    expect(
+      runtime.instances.find((instance) => instance.isolated)?.close,
+    ).toHaveBeenCalledOnce();
+  });
+
   test.each([
     ["Allow once", "once"],
     ["Always allow", "always"],

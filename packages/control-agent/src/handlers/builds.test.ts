@@ -29,6 +29,7 @@ import type { ProcessResult } from "../process-runner.js";
 
 import {
   classifyFailure,
+  effectiveBuildOutputPaths,
   createRemoteBuildStagingDirectory,
   createRedactor,
   dependentSigningTargetNamesFromPbxProject,
@@ -62,7 +63,7 @@ function payload(overrides: Partial<BuildJobPayload> = {}): BuildJobPayload {
     folder: "/tmp/App",
     gitDirectory: "/tmp/App/.git",
     expectedOrigin: "github.com/example/app",
-    headSha: "abc123",
+    headSha: null,
     buildId: "build-1",
     artifactDirectory: "/tmp/Builds/build-1",
     source: { kind: "WORKSPACE", relativePath: "App.xcworkspace" },
@@ -92,6 +93,31 @@ afterEach(async () => {
 });
 
 describe("iOS build command construction", () => {
+  test("uses the same managed cache for preflight and compilation and isolates custom output roots", () => {
+    const derivedDataPath = "/Builds/.worktree-derived-data/worktree-1";
+    for (const args of [
+      xcodeBuildArguments(payload({ derivedDataPath })),
+      xcodeBuildSettingsArguments(payload({ derivedDataPath })),
+    ]) {
+      expect(args[args.indexOf("-derivedDataPath") + 1]).toBe(derivedDataPath);
+    }
+    expect(
+      effectiveBuildOutputPaths(
+        JSON.stringify([
+          {
+            buildSettings: {
+              OBJROOT: `${derivedDataPath}/Build/Intermediates.noindex`,
+              BUILD_DIR: "/Shared/Products",
+              TARGET_BUILD_DIR: "/Shared/Products/Debug-iphonesimulator",
+              SYMROOT: "custom-output",
+            },
+          },
+        ]),
+        "/Source",
+        derivedDataPath,
+      ),
+    ).toEqual(["/Shared/Products", "/Source/custom-output"]);
+  });
   test("canonicalizes remote build staging beneath a symlinked temporary directory", async () => {
     const realTemporaryRoot = await mkdtemp(
       join(tmpdir(), "remote-build-staging-real-"),
@@ -779,6 +805,147 @@ describe("iOS destination and error parsing", () => {
 });
 
 describe("iOS build hooks and logs", () => {
+  test("rejects a queued build after its branch or commit changes, before hooks or Xcode run", async () => {
+    const root = await mkdtemp(join(tmpdir(), "ios-build-stale-source-"));
+    temporaryDirectories.push(root);
+    await mkdir(join(root, "App.xcworkspace"));
+    await execute("git", ["init", "-b", "main", root]);
+    await execute("git", [
+      "-C",
+      root,
+      "remote",
+      "add",
+      "origin",
+      "https://github.com/example/app.git",
+    ]);
+    const commit = () =>
+      execute("git", [
+        "-C",
+        root,
+        "-c",
+        "user.name=Build Test",
+        "-c",
+        "user.email=build@example.com",
+        "commit",
+        "--allow-empty",
+        "-m",
+        "test",
+      ]);
+    await commit();
+    const headSha = (
+      await execute("git", ["-C", root, "rev-parse", "HEAD"])
+    ).stdout.trim();
+    const input = payload({
+      folder: root,
+      gitDirectory: await realpath(join(root, ".git")),
+      branch: "main",
+      headSha,
+      artifactDirectory: join(root, "builds", "build-1"),
+    });
+    await execute("git", ["-C", root, "checkout", "-b", "changed"]);
+    await expect(
+      runIosBuild(
+        input,
+        10_000,
+        new AbortController().signal,
+        async () => undefined,
+      ),
+    ).rejects.toThrow("branch or commit changed");
+    await execute("git", ["-C", root, "checkout", "main"]);
+    await expect(
+      runIosBuild(
+        { ...input, branch: null },
+        10_000,
+        new AbortController().signal,
+        async () => undefined,
+      ),
+    ).rejects.toThrow("branch or commit changed");
+    await commit();
+    await expect(
+      runIosBuild(
+        input,
+        10_000,
+        new AbortController().signal,
+        async () => undefined,
+      ),
+    ).rejects.toThrow("branch or commit changed");
+    expect(existsSync(input.artifactDirectory)).toBe(false);
+  });
+  test("runs post-hook cleanup when cancelled while waiting for shared outputs", async () => {
+    const root = await mkdtemp(join(tmpdir(), "ios-build-output-wait-"));
+    temporaryDirectories.push(root);
+    const folder = join(root, "source");
+    const bin = join(root, "bin");
+    await mkdir(join(folder, "App.xcworkspace"), { recursive: true });
+    await mkdir(bin);
+    await execute("git", ["init", "-b", "main", folder]);
+    await execute("git", [
+      "-C",
+      folder,
+      "remote",
+      "add",
+      "origin",
+      "https://github.com/example/app.git",
+    ]);
+    const output = join(root, "shared-products");
+    const xcrun = join(bin, "xcrun");
+    await writeFile(
+      xcrun,
+      `#!/bin/sh\nprintf '%s' '${JSON.stringify([{ buildSettings: { BUILD_DIR: output } }])}'\n`,
+    );
+    await chmod(xcrun, 0o755);
+    const originalPath = process.env.PATH;
+    process.env.PATH = `${bin}:${originalPath ?? ""}`;
+    const controller = new AbortController();
+    let acquisitions = 0;
+    try {
+      const result = await runIosBuild(
+        payload({
+          folder,
+          gitDirectory: await realpath(join(folder, ".git")),
+          buildId: "cancelled-output-wait",
+          artifactDirectory: join(root, "builds", "cancelled-output-wait"),
+          scripts: [
+            {
+              id: "cleanup",
+              name: "Cleanup",
+              position: 0,
+              timeoutSeconds: 10,
+              failureBehavior: "FAIL_BUILD",
+              preBuildScript:
+                'import { writeFile } from "node:fs/promises"; export default async () => writeFile("pre-hook", "started");',
+              postBuildScript:
+                'import { writeFile } from "node:fs/promises"; export default async (build) => writeFile("post-hook", String(build.cancelled));',
+            },
+          ],
+        }),
+        30_000,
+        controller.signal,
+        async () => undefined,
+        {
+          agentId: "agent-1",
+          reportWorktreeActivity: async () => undefined,
+          withOperationResources: async (resources, run) => {
+            if (++acquisitions === 2) {
+              expect(
+                resources.some((resource) => resource.path === output),
+              ).toBe(true);
+              controller.abort();
+              throw new Error(
+                "Cancelled while waiting for shared build outputs",
+              );
+            }
+            return run();
+          },
+        },
+      );
+      expect(result).toMatchObject({ cancelled: true });
+      expect(await readFile(join(folder, "pre-hook"), "utf8")).toBe("started");
+      expect(await readFile(join(folder, "post-hook"), "utf8")).toBe("true");
+    } finally {
+      process.env.PATH = originalPath;
+    }
+  });
   test("atomically persists normalized test and coverage reports", async () => {
     const root = await mkdtemp(join(tmpdir(), "ios-build-report-"));
     temporaryDirectories.push(root);
@@ -991,6 +1158,10 @@ esac
         async () => undefined,
         {
           agentId: "agent-1",
+          withOperationResources: async (_resources, run) => {
+            await new Promise((resolve) => setTimeout(resolve, 5));
+            return run();
+          },
           reportWorktreeActivity: async () => undefined,
           uploadBuildArtifact: async (input) => {
             expect(input).toMatchObject({
@@ -1091,6 +1262,13 @@ export default async function hook() { await writeFile(${JSON.stringify(hookMark
     await execute("git", [
       "-C",
       repository,
+      "symbolic-ref",
+      "HEAD",
+      "refs/heads/feature/hooks",
+    ]);
+    await execute("git", [
+      "-C",
+      repository,
       "remote",
       "add",
       "origin",
@@ -1174,6 +1352,10 @@ export default async function hook(build) {
           agentId: "agent-1",
           reportWorktreeActivity: async () => undefined,
           reportBuildProgress: async () => undefined,
+          withOperationResources: async (_resources, run) => {
+            await new Promise((resolve) => setTimeout(resolve, 5));
+            return run();
+          },
           appendBuildLogChunks: async (_buildId, batch) => {
             events.push(...batch);
           },
@@ -1249,6 +1431,14 @@ export default async function hook(build) {
         ["POST_BUILD", 1],
       ]);
       const rawLog = join(artifactDirectory, "build.log");
+      const cache = join(builds, ".worktree-derived-data", "worktree-1");
+      expect(
+        JSON.parse(await readFile(join(cache, ".aide-worktree.json"), "utf8")),
+      ).toMatchObject({
+        worktreeId: "worktree-1",
+        folder: await realpath(repository),
+      });
+      expect(await readFile(rawLog, "utf8")).toContain(JSON.stringify(cache));
       const rawArtifact = result.artifacts.find(
         ({ kind }) => kind === "RAW_LOG",
       );

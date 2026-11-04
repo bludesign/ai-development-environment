@@ -10,6 +10,7 @@ import {
   BUILD_CONFIGURATION_ICON_KEYS,
   BUILD_DESTINATION_TYPES,
   BUILD_SCRIPT_FAILURE_BEHAVIORS,
+  BUILD_SCRIPT_LOCK_SCOPES,
   DEFAULT_BUILD_ADVANCED_SETTINGS,
   GENERIC_BUILD_DESTINATION_ACTIONS,
   IOS_BUILD_JOB_KIND,
@@ -68,7 +69,10 @@ import type {
   NotificationsService,
 } from "@/services/notifications";
 
-import { effectiveBuildsDirectory } from "./build-directory";
+import {
+  effectiveBuildsDirectory,
+  worktreeDerivedDataDirectory,
+} from "./build-directory";
 import { cachedArtifact } from "./artifact-cache";
 import {
   buildArtifactFileChecksum,
@@ -261,6 +265,7 @@ function commandPreview(input: {
   action: BuildAction;
   advancedSettings: BuildAdvancedSettings;
   artifactDirectory: string;
+  derivedDataPath?: string;
 }): string {
   const settings = input.advancedSettings;
   const usesCapturedTestProducts = input.action === "TEST_WITHOUT_BUILDING";
@@ -284,6 +289,9 @@ function commandPreview(input: {
     "-hideShellScriptEnvironment",
     "-resultBundlePath",
     join(input.artifactDirectory, "result.xcresult"),
+    ...(input.derivedDataPath
+      ? ["-derivedDataPath", input.derivedDataPath]
+      : []),
   ];
   if (!usesCapturedTestProducts) {
     if (settings.packageResolution === "RESOLVED_ONLY") {
@@ -437,6 +445,7 @@ export type SaveBuildScriptInput = {
   enabledByDefault: boolean;
   timeoutSeconds?: number | null;
   failureBehavior: "FAIL_BUILD" | "CONTINUE";
+  lockScope?: "WORKTREE" | "CODEBASE" | "AGENT" | null;
 };
 
 export type CustomBuildConfigurationInput = {
@@ -951,6 +960,12 @@ export class BuildsService {
     if (!BUILD_SCRIPT_FAILURE_BEHAVIORS.includes(input.failureBehavior)) {
       throw new Error("Script failure behavior is invalid");
     }
+    if (
+      input.lockScope != null &&
+      !BUILD_SCRIPT_LOCK_SCOPES.includes(input.lockScope)
+    ) {
+      throw new Error("Script lock scope is invalid");
+    }
     const prisma = await getPrismaClient();
     const id = input.id ?? randomUUID();
     const iconKey = input.iconKey?.trim() || null;
@@ -979,6 +994,7 @@ export class BuildsService {
           enabledByDefault: input.enabledByDefault,
           timeoutSeconds,
           failureBehavior: input.failureBehavior,
+          ...(input.lockScope == null ? {} : { lockScope: input.lockScope }),
           ...(input.iconKey !== undefined ? { iconKey } : {}),
         };
         const saved = await tx.buildScript.upsert({
@@ -1851,6 +1867,10 @@ export class BuildsService {
     if (!buildRoot)
       throw new Error("The agent builds directory is unavailable");
     const artifactDirectory = join(buildRoot, buildId);
+    const derivedDataPath = worktreeDerivedDataDirectory(
+      buildRoot,
+      worktree.id,
+    );
     const source = {
       kind: configuration.source.kind as BuildSourceKind,
       relativePath: configuration.source.relativePath,
@@ -1864,6 +1884,7 @@ export class BuildsService {
       action,
       advancedSettings,
       artifactDirectory,
+      derivedDataPath,
     });
     const scripts = selected.map(({ script, position }) => ({
       id: script.id,
@@ -1872,6 +1893,8 @@ export class BuildsService {
       postBuildScript: script.postBuildScript,
       timeoutSeconds: script.timeoutSeconds,
       failureBehavior: script.failureBehavior as "FAIL_BUILD" | "CONTINUE",
+      lockScope: (script.lockScope ?? "WORKTREE") as
+        "WORKTREE" | "CODEBASE" | "AGENT",
       position,
     }));
     const server = await serverUrlSettingsService.buildSettings(
@@ -2005,6 +2028,7 @@ export class BuildsService {
           ...this.identity(worktree),
           buildId,
           artifactDirectory,
+          derivedDataPath,
           source,
           scheme: configuration.scheme,
           configuration: configuration.buildConfiguration,

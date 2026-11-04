@@ -239,7 +239,7 @@ test("validates selected app and global agent scope", async () => {
   expect(await service().active("another-app")).toEqual([]);
 });
 
-test("serializes each codebase across batches while independent codebases progress", async () => {
+test("dispatches sibling worktrees and independent codebases concurrently across batches", async () => {
   const sync = service();
   const first = await sync.start({
     requestId: "one",
@@ -253,17 +253,47 @@ test("serializes each codebase across batches while independent codebases progre
   expect(createAutoSyncJob.mock.calls.map((args) => args[0]).sort()).toEqual([
     "first",
     "other",
-  ]);
-  expect((await sync.batch(second.id))?.items[0]?.status).toBe("PENDING");
-  const running = await sync.batch(first.id);
-  await complete(
-    running!.items.find((item) => item.worktreeId === "first")!.jobId!,
-  );
-  await sync.reconcile();
-  expect(createAutoSyncJob.mock.calls.map((args) => args[0])).toContain(
     "second",
-  );
+  ]);
+  expect(
+    (await sync.batch(first.id))?.items.every(
+      (item) => item.status === "RUNNING",
+    ),
+  ).toBe(true);
   expect((await sync.batch(second.id))?.items[0]?.status).toBe("RUNNING");
+});
+
+test("keeps repeated requests for the same worktree ordered across batches", async () => {
+  const sync = service();
+  const first = await sync.start({
+    requestId: "first-batch",
+    worktreeIds: ["first"],
+  });
+  const second = await sync.start({
+    requestId: "second-batch",
+    worktreeIds: ["first", "second"],
+  });
+  await sync.reconcile();
+  expect(createAutoSyncJob.mock.calls.map((args) => args[0]).sort()).toEqual([
+    "first",
+    "second",
+  ]);
+  expect(
+    (await sync.batch(second.id))?.items.find(
+      (item) => item.worktreeId === "first",
+    )?.status,
+  ).toBe("PENDING");
+  const running = await sync.batch(first.id);
+  await complete(running!.items[0]!.jobId!);
+  await sync.reconcile();
+  expect(
+    createAutoSyncJob.mock.calls.filter((args) => args[0] === "first"),
+  ).toHaveLength(2);
+  expect(
+    (await sync.batch(second.id))?.items.find(
+      (item) => item.worktreeId === "first",
+    )?.status,
+  ).toBe("RUNNING");
 });
 
 test("recovers an inserted job without item linkage before checking changed eligibility", async () => {

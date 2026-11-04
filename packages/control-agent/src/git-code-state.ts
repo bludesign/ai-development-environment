@@ -2,7 +2,7 @@ import { createHash, type Hash } from "node:crypto";
 import { createReadStream } from "node:fs";
 import { lstat, readlink } from "node:fs/promises";
 import { isAbsolute, relative, resolve, sep } from "node:path";
-import { spawn } from "node:child_process";
+import { spawnExecutionProcess as spawn } from "./execution-recovery.js";
 
 import { captureCommand } from "./capture-command.js";
 

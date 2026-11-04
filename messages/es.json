@@ -4302,6 +4302,13 @@
     "postBuildScriptHelp": "Exporta de forma predeterminada una función que también reciba buildFolder, failed, cancelled, errorCode, error y la misma instantánea de URL de telemetría.",
     "timeout": "Tiempo límite en segundos",
     "failureBehavior": "Comportamiento ante fallos",
+    "scriptLockScope": "Proteger recursos",
+    "scriptLockScopeHelp": "Elige un ámbito más amplio si este script modifica archivos compartidos con otros worktrees o repositorios.",
+    "scriptLockScopes": {
+      "WORKTREE": "Este worktree",
+      "CODEBASE": "Todos los worktrees de este código base",
+      "AGENT": "Todos los worktrees de este agente"
+    },
     "enabledByDefault": "Preseleccionar este script para las compilaciones",
     "save": "Guardar",
     "cancel": "Cancelar",

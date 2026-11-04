@@ -26,6 +26,11 @@ import {
 import { normalizeGitOrigin } from "@ai-development-environment/agent-contract/codebases";
 
 import { getPrismaClient } from "@/data/prisma-client";
+import {
+  hasLocalSourceWorktrees,
+  recoverMergeReservations,
+  withMergeReservation,
+} from "@/services/operation-locks/operation-locks.service";
 import type { MergeSyncReadiness } from "@/services/worktrees/merge-branch-sync";
 import { mapIntegrationRequests } from "@/services/integration-request";
 import {
@@ -2875,22 +2880,89 @@ export class GitLabService {
     mergeCommitMessage?: string | null;
     squashCommitMessage?: string | null;
   }): Promise<GitLabMergeRequestView> {
-    const data = await this.mutate<RawGitLabMergeRequest>({
-      method: "PUT",
-      path: `/projects/${encodeURIComponent(input.projectId)}/merge_requests/${input.iid}/merge`,
-      operation: "GitLabMergeMergeRequest",
-      source: "MERGE_REQUEST_DETAILS",
-      body: {
-        squash: input.squash ?? undefined,
-        should_remove_source_branch: input.removeSourceBranch ?? undefined,
-        auto_merge: input.autoMerge ?? undefined,
-        sha: input.sha ?? undefined,
-        merge_commit_message: input.mergeCommitMessage?.trim() || undefined,
-        squash_commit_message: input.squashCommitMessage?.trim() || undefined,
+    const mr = await this.mergeRequestState(input.projectId, input.iid);
+    if (!mr.sourceProjectId)
+      throw new Error("The merge request source project is unavailable.");
+    const source = await this.mergeProject(mr.sourceProjectId);
+    const sourceOrigin = normalizeGitOrigin(source.web_url).canonicalOrigin;
+    await recoverMergeReservations(
+      sourceOrigin,
+      mr.sourceBranch,
+      async (recovery?: {
+        provider?: string;
+        projectId?: string;
+        iid?: number;
+      }) =>
+        recovery?.provider === "GITLAB" &&
+        recovery.projectId === input.projectId &&
+        recovery.iid === input.iid &&
+        mr.state !== "OPENED",
+    );
+    if (
+      input.autoMerge &&
+      (await hasLocalSourceWorktrees(sourceOrigin, mr.sourceBranch))
+    )
+      throw new Error("Use managed Auto Merge for a linked worktree.");
+    return withMergeReservation(
+      sourceOrigin,
+      mr.sourceBranch,
+      async (reservation) => {
+        const fresh = await this.mergeRequestState(input.projectId, input.iid);
+        if (
+          fresh.sourceProjectId !== mr.sourceProjectId ||
+          fresh.sourceBranch !== mr.sourceBranch ||
+          fresh.sha !== mr.sha
+        )
+          throw new Error("The merge request source changed before merging.");
+        await reservation.markSubmitted();
+        try {
+          const data = await this.mutate<RawGitLabMergeRequest>({
+            method: "PUT",
+            path: `/projects/${encodeURIComponent(input.projectId)}/merge_requests/${input.iid}/merge`,
+            operation: "GitLabMergeMergeRequest",
+            source: "MERGE_REQUEST_DETAILS",
+            body: {
+              squash: input.squash ?? undefined,
+              should_remove_source_branch:
+                input.removeSourceBranch ?? undefined,
+              auto_merge: input.autoMerge ?? undefined,
+              sha: input.sha ?? fresh.sha,
+              merge_commit_message:
+                input.mergeCommitMessage?.trim() || undefined,
+              squash_commit_message:
+                input.squashCommitMessage?.trim() || undefined,
+            },
+            invalidateProjectId: input.projectId,
+          });
+          return mapMergeRequest(data);
+        } catch (error) {
+          const status =
+            error instanceof GitLabRequestError ? error.statusCode : null;
+          if (status !== null && status < 500 && status !== 408) throw error;
+          try {
+            const observed = await this.mergeRequestState(
+              input.projectId,
+              input.iid,
+            );
+            if (observed.state === "MERGED") return observed;
+          } catch {
+            /* Keep the reservation until provider state can be verified. */
+          }
+          const uncertain =
+            error instanceof Error ? error : new Error(String(error));
+          Object.assign(uncertain, {
+            mergeOutcomeUnknown: true,
+            mergeRecovery: {
+              provider: "GITLAB",
+              projectId: input.projectId,
+              iid: input.iid,
+            },
+          });
+          throw uncertain;
+        }
       },
-      invalidateProjectId: input.projectId,
-    });
-    return mapMergeRequest(data);
+      { provider: "GITLAB", projectId: input.projectId, iid: input.iid },
+    );
   }
 
   private async pipelineMergeRequests(

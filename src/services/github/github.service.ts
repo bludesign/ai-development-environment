@@ -6,6 +6,12 @@ import { publishIntegrationConfiguration } from "@/services/integration-configur
 import { createHash, randomBytes, randomUUID } from "node:crypto";
 
 import { getPrismaClient } from "@/data/prisma-client";
+import {
+  hasLocalSourceWorktrees,
+  mergeReservationBlockedReason,
+  recoverMergeReservations,
+  withMergeReservation,
+} from "@/services/operation-locks/operation-locks.service";
 import type { MergeSyncReadiness } from "@/services/worktrees/merge-branch-sync";
 import { MergeSyncNotSubmittedError } from "@/services/worktrees/merge-branch-sync";
 import { mapIntegrationRequests } from "@/services/integration-request";
@@ -5980,11 +5986,33 @@ export class GitHubService {
       state.viewerEmail,
       requestSource,
     );
+    if (state.pullRequest.headRepository?.nameWithOwner)
+      await recoverMergeReservations(
+        `github.com/${state.pullRequest.headRepository.nameWithOwner.toLowerCase()}`,
+        state.pullRequest.headRefName,
+        async (recovery?: {
+          provider?: string;
+          owner?: string;
+          name?: string;
+          number?: number;
+        }) =>
+          recovery?.provider === "GITHUB" &&
+          recovery.owner?.toLowerCase() === owner &&
+          recovery.name?.toLowerCase() === name &&
+          recovery.number === number &&
+          state.pullRequest.state !== "OPEN",
+      );
+    const localBlockedReason = state.pullRequest.headRepository?.nameWithOwner
+      ? await mergeReservationBlockedReason(
+          `github.com/${state.pullRequest.headRepository.nameWithOwner.toLowerCase()}`,
+          state.pullRequest.headRefName,
+        )
+      : null;
     const blockedReason =
       this.mergeBlockedReason(state.pullRequest, state.viewerPermission) ??
       (state.availableMethods.length === 0
         ? "This repository does not have an available merge method."
-        : null);
+        : localBlockedReason);
     const settings = await this.getSettings();
     return {
       defaultMethod: state.availableMethods.includes(
@@ -6171,6 +6199,14 @@ export class GitHubService {
         "Only an open, non-draft pull request can use Auto Merge",
       );
     }
+    if (
+      state.pullRequest.headRepository?.nameWithOwner &&
+      (await hasLocalSourceWorktrees(
+        `github.com/${state.pullRequest.headRepository.nameWithOwner.toLowerCase()}`,
+        state.pullRequest.headRefName,
+      ))
+    )
+      throw new Error("Use managed Auto Merge for a linked worktree.");
     if (!state.availableMethods.includes(input.method)) {
       throw new Error(
         "The selected merge method is not enabled for this repository.",
@@ -6371,17 +6407,50 @@ export class GitHubService {
         );
       }
     }
-    const data = await this.request<{
-      mergePullRequest: {
-        pullRequest: {
-          id: string;
-          state: "OPEN" | "CLOSED" | "MERGED";
-          url: string;
-          mergedAt: string | null;
-        } | null;
-      };
-    }>(
-      `mutation MergeGitHubPullRequest(
+    const sourceOrigin = state.pullRequest.headRepository?.nameWithOwner
+      ? `github.com/${state.pullRequest.headRepository.nameWithOwner.toLowerCase()}`
+      : null;
+    if (!sourceOrigin)
+      throw new Error("The pull request head repository is unavailable");
+    return withMergeReservation(
+      sourceOrigin,
+      state.pullRequest.headRefName,
+      async (reservation) => {
+        const fresh = await this.mergeState(
+          owner,
+          name,
+          input.number,
+          token,
+          requestSource,
+          true,
+        );
+        if (
+          fresh.pullRequest.headRefOid !== state.pullRequest.headRefOid ||
+          fresh.pullRequest.headRefName !== state.pullRequest.headRefName ||
+          fresh.pullRequest.headRepository?.nameWithOwner?.toLowerCase() !==
+            state.pullRequest.headRepository?.nameWithOwner?.toLowerCase()
+        )
+          throw new MergeSyncNotSubmittedError(
+            "The pull request source changed before merging.",
+          );
+        const freshBlocker = this.mergeBlockedReason(
+          fresh.pullRequest,
+          fresh.viewerPermission,
+        );
+        if (freshBlocker) throw new MergeSyncNotSubmittedError(freshBlocker);
+        await reservation.markSubmitted();
+        try {
+          const data = await this.request<{
+            mergePullRequest: {
+              pullRequest: {
+                id: string;
+                state: "OPEN" | "CLOSED" | "MERGED";
+                url: string;
+                mergedAt: string | null;
+              } | null;
+            };
+          }>(
+            `mutation MergeGitHubPullRequest(
         $pullRequestId: ID!
         $method: PullRequestMergeMethod!
         $commitHeadline: String!
@@ -6400,21 +6469,60 @@ export class GitHubService {
           pullRequest { id state url mergedAt }
         }
       }`,
-      {
-        pullRequestId: state.pullRequest.id,
-        method: input.method,
-        commitHeadline,
-        commitBody: input.commitBody,
-        authorEmail,
-        expectedHeadOid: state.pullRequest.headRefOid,
+            {
+              pullRequestId: state.pullRequest.id,
+              method: input.method,
+              commitHeadline,
+              commitBody: input.commitBody,
+              authorEmail,
+              expectedHeadOid: state.pullRequest.headRefOid,
+            },
+            token,
+            { requestSource },
+          );
+          const pullRequest = data.mergePullRequest.pullRequest;
+          if (!pullRequest)
+            throw new Error("GitHub did not return the merged pull request");
+          return pullRequest;
+        } catch (error) {
+          const status =
+            error instanceof GitHubRequestError ? error.statusCode : null;
+          if (status !== null && status < 500 && status !== 408) throw error;
+          try {
+            const observed = await this.mergeState(
+              owner,
+              name,
+              input.number,
+              token,
+              requestSource,
+              true,
+            );
+            if (observed.pullRequest.state === "MERGED")
+              return {
+                id: observed.pullRequest.id,
+                state: observed.pullRequest.state,
+                url: observed.pullRequest.url,
+                mergedAt: observed.pullRequest.mergedAt,
+              };
+          } catch {
+            /* Keep the reservation until a fresh provider read resolves it. */
+          }
+          const uncertain =
+            error instanceof Error ? error : new Error(String(error));
+          Object.assign(uncertain, {
+            mergeOutcomeUnknown: true,
+            mergeRecovery: {
+              provider: "GITHUB",
+              owner,
+              name,
+              number: input.number,
+            },
+          });
+          throw uncertain;
+        }
       },
-      token,
-      { requestSource },
+      { provider: "GITHUB", owner, name, number: input.number },
     );
-    const pullRequest = data.mergePullRequest.pullRequest;
-    if (!pullRequest)
-      throw new Error("GitHub did not return the merged pull request");
-    return pullRequest;
   }
 
   async createPullRequest(input: {

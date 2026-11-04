@@ -2,6 +2,18 @@ import {
   JIRA_BRANCH_GENERATE_JOB_KIND,
   jiraBranchGenerationPayload,
 } from "@ai-development-environment/agent-contract/worktrees";
+import {
+  OPERATION_RESOURCES_CAPABILITY,
+  parseOperationDescriptor,
+} from "@ai-development-environment/agent-contract/operation-resources";
+import { jobOperationDescriptor } from "@/services/operation-locks/job-resources";
+import {
+  admitOperation,
+  requestOperation,
+  releaseOperation,
+  ResourceBusyError,
+  storedDescriptor,
+} from "@/services/operation-locks/operation-locks.service";
 import { createHash, randomBytes, randomUUID } from "node:crypto";
 import { posix, win32 } from "node:path";
 
@@ -241,6 +253,7 @@ type CompletionHandler = (job: {
   buildDataCollectionId: string | null;
   kind: string;
   payloadJson: string;
+  operationResourcesJson?: string | null;
   status: string;
   resultJson: string | null;
   error: string | null;
@@ -565,6 +578,9 @@ export class AgentControlService {
   private readonly completionHandlers = new Map<string, CompletionHandler>();
   private readonly completionObservers = new Set<CompletionHandler>();
   private readonly connectionHandlers = new Set<ConnectionHandler>();
+  private readonly buildAdmissionGuards = new Set<
+    (worktreeId: string) => Promise<void>
+  >();
   private readonly signingSecretTransfers = new Map<
     string,
     {
@@ -630,6 +646,12 @@ export class AgentControlService {
 
   registerConnectionHandler(handler: ConnectionHandler): void {
     this.connectionHandlers.add(handler);
+  }
+
+  registerBuildAdmissionGuard(
+    guard: (worktreeId: string) => Promise<void>,
+  ): void {
+    this.buildAdmissionGuards.add(guard);
   }
 
   private async notifyConnected(agentId: string): Promise<void> {
@@ -1038,8 +1060,32 @@ export class AgentControlService {
 
   async listJobs(agentId: string, limit = 50, includeSystem = false) {
     const prisma = await getPrismaClient();
+    if (includeSystem) {
+      const [active, cancellations] = await Promise.all([
+        prisma.agentJob.findMany({
+          where: {
+            agentId,
+            OR: [
+              { status: { in: ACTIVE_JOB_STATUSES } },
+              { executionToken: { not: null } },
+            ],
+          },
+          orderBy: { createdAt: "asc" },
+        }),
+        prisma.agentJob.findMany({
+          where: { agentId, status: "CANCELLED" },
+          orderBy: { updatedAt: "desc" },
+          take: 200,
+        }),
+      ]);
+      return [
+        ...new Map(
+          [...active, ...cancellations].map((job) => [job.id, job]),
+        ).values(),
+      ].sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime());
+    }
     return prisma.agentJob.findMany({
-      where: { agentId, ...(includeSystem ? {} : { visibility: "USER" }) },
+      where: { agentId, visibility: "USER" },
       orderBy: { createdAt: "desc" },
       take: Math.max(1, Math.min(limit, 200)),
     });
@@ -1122,23 +1168,41 @@ export class AgentControlService {
       return existing;
     }
     let job;
+    const agent = await prisma.agent.findUnique({
+      where: { id: input.agentId },
+      select: { capabilitiesJson: true },
+    });
+    const capable = agentCapabilities(agent?.capabilitiesJson ?? "[]").includes(
+      OPERATION_RESOURCES_CAPABILITY,
+    );
+    const descriptor = await jobOperationDescriptor(input, capable);
     try {
-      job = await prisma.agentJob.create({
-        data: {
-          id: randomUUID(),
-          agentId: input.agentId,
-          kind: input.kind,
-          payloadJson: JSON.stringify(input.payload),
-          status: "QUEUED",
-          idempotencyKey: input.idempotencyKey,
-          timeoutSeconds,
-          ccusageCollectionId: input.ccusageCollectionId ?? null,
-          buildDataCollectionId: input.buildDataCollectionId ?? null,
-          codebaseId: input.codebaseId ?? null,
-          worktreeId: input.worktreeId ?? null,
-          visibility: input.visibility ?? "USER",
-          blocksGitOperations: input.blocksGitOperations ?? false,
-        },
+      job = await prisma.$transaction(async (transaction) => {
+        const created = await transaction.agentJob.create({
+          data: {
+            id: randomUUID(),
+            agentId: input.agentId,
+            kind: input.kind,
+            payloadJson: JSON.stringify(input.payload),
+            status: "QUEUED",
+            idempotencyKey: input.idempotencyKey,
+            timeoutSeconds,
+            ccusageCollectionId: input.ccusageCollectionId ?? null,
+            buildDataCollectionId: input.buildDataCollectionId ?? null,
+            codebaseId: input.codebaseId ?? null,
+            worktreeId: input.worktreeId ?? null,
+            visibility: input.visibility ?? "USER",
+            blocksGitOperations: input.blocksGitOperations ?? false,
+            operationResourcesJson: capable ? JSON.stringify(descriptor) : null,
+          },
+        });
+        await requestOperation(
+          transaction,
+          "AGENT_JOB",
+          created.id,
+          descriptor,
+        );
+        return created;
       });
     } catch (error) {
       const concurrent = await prisma.agentJob.findUnique({
@@ -1183,17 +1247,39 @@ export class AgentControlService {
     return job;
   }
 
-  async claimJob(agentId: string, jobId: string) {
+  async claimJob(
+    agentId: string,
+    jobId: string,
+    executionToken?: string | null,
+  ) {
     const prisma = await getPrismaClient();
     await prisma.derivedDataCleanupLease.deleteMany({
       where: { jobId: null, expiresAt: { lte: new Date() } },
     });
     const queued = await prisma.agentJob.findUnique({
       where: { id: jobId },
-      select: { agentId: true, status: true, worktreeId: true, kind: true },
     });
     if (!queued || queued.agentId !== agentId) {
       throw new Error("Job not found for this agent");
+    }
+    if (queued.operationResourcesJson && !executionToken)
+      throw new Error(
+        "This job requires a resource-aware agent execution token; update the agent before claiming it",
+      );
+    if (
+      queued.status === "QUEUED" &&
+      queued.kind === IOS_BUILD_JOB_KIND &&
+      queued.worktreeId
+    ) {
+      for (const guard of this.buildAdmissionGuards) {
+        try {
+          await guard(queued.worktreeId);
+        } catch (error) {
+          throw new ResourceBusyError(
+            `Waiting for Auto Merge safety check: ${error instanceof Error ? error.message : String(error)}`,
+          );
+        }
+      }
     }
     if (queued.status === "QUEUED" && queued.worktreeId) {
       const lease = await prisma.derivedDataCleanupLease.findUnique({
@@ -1240,17 +1326,152 @@ export class AgentControlService {
         }
       }
     }
-    const claimed = await prisma.agentJob.updateMany({
-      where: { id: jobId, agentId, status: "QUEUED" },
-      data: { status: "RUNNING", startedAt: new Date() },
+    const token = executionToken ?? queued.executionToken ?? `legacy:${jobId}`;
+    const targetError = await prisma.$transaction(async (transaction) => {
+      const fresh = await transaction.agentJob.findUnique({
+        where: { id: jobId },
+      });
+      if (
+        !fresh ||
+        fresh.agentId !== agentId ||
+        !["QUEUED", "RUNNING"].includes(fresh.status)
+      )
+        throw new Error(`Job cannot be claimed from status ${fresh?.status}`);
+      const stored = await transaction.operationHolder.findUnique({
+        where: {
+          ownerKind_ownerId: { ownerKind: "AGENT_JOB", ownerId: jobId },
+        },
+        include: { resources: true },
+      });
+      const descriptor = stored
+        ? storedDescriptor(stored.resources)
+        : fresh.operationResourcesJson
+          ? parseOperationDescriptor(JSON.parse(fresh.operationResourcesJson))
+          : await jobOperationDescriptor(
+              { ...fresh, payload: JSON.parse(fresh.payloadJson) },
+              false,
+            );
+      const payload = JSON.parse(fresh.payloadJson) as { moveId?: string };
+      let parentId: string | undefined;
+      if (fresh.status === "QUEUED" && fresh.operationResourcesJson) {
+        try {
+          const current = await jobOperationDescriptor(
+            {
+              ...fresh,
+              payload,
+              blocksGitOperations: fresh.blocksGitOperations,
+            },
+            true,
+            transaction,
+          );
+          const identity = (value: typeof current) =>
+            JSON.stringify(
+              value.resources
+                .map((resource) => [
+                  resource.kind,
+                  resource.key,
+                  resource.mode,
+                  resource.agentId ?? null,
+                  resource.codebaseId ?? null,
+                  resource.path ?? null,
+                ])
+                .sort((a, b) => String(a[1]).localeCompare(String(b[1]))),
+            );
+          if (identity(current) !== identity(descriptor))
+            throw new Error(
+              "Job worktree identity or branch changed while queued; submit it again",
+            );
+          if (payload.moveId) {
+            const move = await transaction.worktreeMove.findUnique({
+              where: { id: payload.moveId },
+            });
+            if (
+              !move ||
+              ![
+                "PUSHING",
+                "CHECKING_OUT",
+                "AWAITING_STASH",
+                "CLEANING_UP",
+              ].includes(move.status)
+            )
+              throw new Error("The worktree move is no longer active");
+            const source =
+              fresh.codebaseId === move.sourceCodebaseId &&
+              fresh.worktreeId === move.sourceWorktreeId;
+            const target =
+              fresh.codebaseId === move.targetCodebaseId &&
+              fresh.worktreeId === move.targetWorktreeId;
+            const stage =
+              (fresh.kind === WORKTREE_MOVE_PUSH_JOB_KIND &&
+                source &&
+                fresh.idempotencyKey === `worktree:move:push:${move.id}` &&
+                (!move.sourceJobId || move.sourceJobId === fresh.id)) ||
+              (fresh.kind === WORKTREE_MOVE_CHECKOUT_JOB_KIND &&
+                target &&
+                [
+                  `worktree:move:checkout:${move.id}:initial`,
+                  `worktree:move:checkout:${move.id}:stash`,
+                ].includes(fresh.idempotencyKey) &&
+                (!move.targetJobId || move.targetJobId === fresh.id)) ||
+              (fresh.kind === WORKTREE_DELETE_JOB_KIND &&
+                source &&
+                fresh.idempotencyKey === `worktree:move:cleanup:${move.id}` &&
+                (!move.cleanupJobId || move.cleanupJobId === fresh.id));
+            if (!stage)
+              throw new Error(
+                "Job is not the registered stage of this worktree move",
+              );
+            if (move.operationHolderId) {
+              const parent = await transaction.operationHolder.findUnique({
+                where: { id: move.operationHolderId },
+              });
+              if (parent?.state !== "HELD")
+                throw new Error(
+                  "The worktree move reservation is no longer held",
+                );
+              parentId = move.id;
+            }
+          }
+        } catch (error) {
+          const reason = error instanceof Error ? error.message : String(error);
+          await transaction.agentJob.update({
+            where: { id: jobId },
+            data: { status: "FAILED", error: reason, finishedAt: new Date() },
+          });
+          await releaseOperation("AGENT_JOB", jobId, undefined, transaction);
+          return reason;
+        }
+      }
+      await admitOperation(
+        transaction,
+        "AGENT_JOB",
+        jobId,
+        descriptor,
+        token,
+        parentId,
+      );
+      const claimed = await transaction.agentJob.updateMany({
+        where: { id: jobId, agentId, status: "QUEUED" },
+        data: {
+          status: "RUNNING",
+          startedAt: new Date(),
+          executionToken: executionToken ? token : null,
+        },
+      });
+      if (claimed.count !== 1 && fresh.status !== "RUNNING")
+        throw new ResourceBusyError();
+      return null;
     });
     const job = await prisma.agentJob.findUnique({ where: { id: jobId } });
     if (!job || job.agentId !== agentId)
       throw new Error("Job not found for this agent");
-    if (claimed.count !== 1 && job.status !== "RUNNING") {
-      throw new Error(`Job cannot be claimed from status ${job.status}`);
-    }
     publishJob(job);
+    if (targetError) {
+      await this.projectCompletion(job);
+      const error = new Error(targetError);
+      error.name = "JOB_TARGET_CHANGED";
+      throw error;
+    }
     return job;
   }
 
@@ -1356,6 +1577,7 @@ export class AgentControlService {
     status: string,
     result: unknown,
     error: string | null,
+    executionToken?: string | null,
   ) {
     if (!FINAL_JOB_STATUSES.has(status))
       throw new Error("A final job status is required");
@@ -1363,9 +1585,34 @@ export class AgentControlService {
     const job = await prisma.agentJob.findUnique({ where: { id: jobId } });
     if (!job || job.agentId !== agentId)
       throw new Error("Job not found for this agent");
+    if (job.executionToken && job.executionToken !== executionToken)
+      throw new Error("Job execution token does not match its owner");
+    if (
+      !job.executionToken &&
+      job.codebaseId &&
+      ["RUNNING", "CANCELLING"].includes(job.status) &&
+      (error?.startsWith("Agent service restarted") ||
+        (status === "CANCELLED" && result === undefined && !error))
+    ) {
+      throw new ResourceBusyError(
+        "Legacy execution cleanup cannot be verified after restart; let the original agent finish its work before upgrading",
+      );
+    }
     if (FINAL_JOB_STATUSES.has(job.status)) {
       await this.projectCompletion(job);
-      return job;
+      await releaseOperation(
+        "AGENT_JOB",
+        jobId,
+        executionToken ?? (job.executionToken ? undefined : `legacy:${jobId}`),
+      );
+      const acknowledged = job.executionToken
+        ? await prisma.agentJob.update({
+            where: { id: jobId },
+            data: { executionToken: null },
+          })
+        : job;
+      publishJob(acknowledged);
+      return acknowledged;
     }
     const completed = await prisma.agentJob.updateMany({
       where: { id: jobId, agentId, status: { in: ACTIVE_JOB_STATUSES } },
@@ -1388,13 +1635,35 @@ export class AgentControlService {
     if (completed.count !== 1) {
       if (FINAL_JOB_STATUSES.has(updated.status)) {
         await this.projectCompletion(updated);
+        await releaseOperation(
+          "AGENT_JOB",
+          jobId,
+          executionToken ??
+            (job.executionToken ? undefined : `legacy:${jobId}`),
+        );
+        if (updated.executionToken)
+          return prisma.agentJob.update({
+            where: { id: jobId },
+            data: { executionToken: null },
+          });
         return updated;
       }
       throw new Error(`Job cannot be completed from status ${updated.status}`);
     }
     await this.projectCompletion(updated);
-    publishJob(updated);
-    return updated;
+    await releaseOperation(
+      "AGENT_JOB",
+      jobId,
+      executionToken ?? (job.executionToken ? undefined : `legacy:${jobId}`),
+    );
+    const acknowledged = updated.executionToken
+      ? await prisma.agentJob.update({
+          where: { id: jobId },
+          data: { executionToken: null },
+        })
+      : updated;
+    publishJob(acknowledged);
+    return acknowledged;
   }
 
   async cancelJob(jobId: string) {
@@ -1402,7 +1671,12 @@ export class AgentControlService {
     const job = await prisma.agentJob.findUnique({ where: { id: jobId } });
     if (!job) throw new Error("Job not found");
     if (!ACTIVE_JOB_STATUSES.includes(job.status)) return job;
-    const commandCancellation = job.kind === COMMAND_RUN_JOB_KIND;
+    const commandCancellation =
+      job.kind === COMMAND_RUN_JOB_KIND ||
+      Boolean(
+        job.status !== "QUEUED" &&
+        (job.executionToken || job.codebaseId || job.operationResourcesJson),
+      );
     const updated = await prisma.agentJob.update({
       where: { id: jobId },
       data: commandCancellation
@@ -1410,6 +1684,11 @@ export class AgentControlService {
         : { status: "CANCELLED", finishedAt: new Date() },
     });
     if (updated.status === "CANCELLED") {
+      await releaseOperation(
+        "AGENT_JOB",
+        jobId,
+        job.executionToken ?? `legacy:${jobId}`,
+      );
       await this.projectCompletion(updated);
     }
     publishJob(updated);

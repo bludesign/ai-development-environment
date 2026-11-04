@@ -33,6 +33,10 @@ import { WorkflowsService } from "@/services/workflows/workflows.service";
 import { RunsService } from "./runs.service";
 import { agentEventBus } from "@/services/agent-control/event-bus";
 import { workflowQueueUsesWorktree } from "@/services/workflows/workflow-queue-scope";
+import {
+  admitOperation,
+  releaseOperation,
+} from "@/services/operation-locks/operation-locks.service";
 
 describe("durable worktree run queues", () => {
   // Stays on disk: seeding `:memory:` would mean replaying every migration
@@ -168,6 +172,145 @@ describe("durable worktree run queues", () => {
     });
     return id;
   };
+
+  test("atomically excludes builds from active Session executions and keeps protection through pause", async () => {
+    const run = await service.create(input("SESSION", "Edit the source"));
+    const command = await prisma.runCommand.findFirstOrThrow({
+      where: { runId: run!.id },
+    });
+    const build = {
+      version: 1 as const,
+      resources: [
+        {
+          kind: "WORKTREE" as const,
+          key: "agent-1:build-stability:/tmp/queue/.git",
+          mode: "WRITE" as const,
+          agentId: "agent-1",
+          codebaseId: "codebase-1",
+        },
+      ],
+    };
+    const results = await Promise.allSettled([
+      prisma.$transaction((tx) =>
+        admitOperation(tx, "TEST_BUILD", "race", build, "build-token"),
+      ),
+      service.claimCommand("agent-1", command.id, "session-token"),
+    ]);
+    expect(
+      results.filter((result) => result.status === "fulfilled"),
+    ).toHaveLength(1);
+    if (results[0]!.status === "fulfilled") {
+      await releaseOperation("TEST_BUILD", "race", "build-token");
+      await service.claimCommand("agent-1", command.id, "session-token");
+    }
+    const attempt = await service.beginAttempt("agent-1", run!.id);
+    await service.lifecycle(run!.id, "PAUSE");
+    await expect(
+      prisma.$transaction((tx) =>
+        admitOperation(tx, "TEST_BUILD", "blocked", build, "build-token"),
+      ),
+    ).rejects.toMatchObject({ name: "ResourceBusyError" });
+    await service.finishAttempt("agent-1", attempt.id, { status: "PAUSED" });
+    await expect(
+      prisma.$transaction((tx) =>
+        admitOperation(tx, "TEST_BUILD", "blocked", build, "build-token"),
+      ),
+    ).rejects.toMatchObject({ name: "ResourceBusyError" });
+    await expect(
+      service.completeCommand(
+        "agent-1",
+        command.id,
+        "SUCCEEDED",
+        null,
+        "wrong-token",
+      ),
+    ).rejects.toMatchObject({ name: "ResourceBusyError" });
+    await service.completeCommand(
+      "agent-1",
+      command.id,
+      "SUCCEEDED",
+      null,
+      "session-token",
+    );
+    await expect(
+      prisma.$transaction((tx) =>
+        admitOperation(tx, "TEST_BUILD", "after-pause", build, "build-token"),
+      ),
+    ).resolves.toMatchObject({ state: "HELD" });
+  });
+
+  test("requires execution identity from capable agents before starting a managed Session", async () => {
+    await prisma.agent.update({
+      where: { id: "agent-1" },
+      data: {
+        capabilitiesJson: JSON.stringify([
+          "runs.provider.codex",
+          "operation.resources.v1",
+        ]),
+      },
+    });
+    const run = await service.create(input("SESSION", "Edit files"));
+    const command = await prisma.runCommand.findFirstOrThrow({
+      where: { runId: run!.id },
+    });
+    await expect(service.claimCommand("agent-1", command.id)).rejects.toThrow(
+      "execution token is required",
+    );
+    expect(
+      await prisma.operationHolder.count({ where: { ownerKind: "AGENT_RUN" } }),
+    ).toBe(0);
+    await expect(
+      service.claimCommand("agent-1", command.id, "unique-execution"),
+    ).resolves.toMatchObject({ status: "RUNNING" });
+  });
+
+  test("retains Session protection through orphan reaping and blind restart acknowledgements", async () => {
+    const run = await service.create(input("SESSION", "Edit the source"));
+    const command = await prisma.runCommand.findFirstOrThrow({
+      where: { runId: run!.id },
+    });
+    await service.claimCommand("agent-1", command.id, "session-token");
+    await prisma.agent.update({
+      where: { id: "agent-1" },
+      data: { lastSeenAt: new Date(0), disconnectedAt: new Date(0) },
+    });
+    await service.reapOrphanedRuns();
+    expect(
+      (await service.pendingCommands("agent-1")).map((entry) => entry.id),
+    ).toContain(command.id);
+    await expect(
+      service.claimCommand("agent-1", command.id, "other-process"),
+    ).rejects.toMatchObject({ name: "ResourceBusyError" });
+    await service.claimCommand("agent-1", command.id, "session-token");
+    await service.completeCommand(
+      "agent-1",
+      command.id,
+      "FAILED",
+      "Control agent restarted; destructive work was not replayed",
+      "session-token",
+    );
+    expect(
+      await prisma.operationHolder.findUniqueOrThrow({
+        where: {
+          ownerKind_ownerId: { ownerKind: "AGENT_RUN", ownerId: command.id },
+        },
+      }),
+    ).toMatchObject({ state: "HELD" });
+    await service.completeCommand(
+      "agent-1",
+      command.id,
+      "FAILED",
+      "Interrupted provider processes stopped and verified",
+      "session-token",
+    );
+    expect(
+      await prisma.operationHolder.findUniqueOrThrow({
+        where: {
+          ownerKind_ownerId: { ownerKind: "AGENT_RUN", ownerId: command.id },
+        },
+      }),
+    ).toMatchObject({ state: "RELEASED" });
+  });
 
   test("queues a second default Session, hides its command, and promotes it FIFO", async () => {
     const first = await service.create(input("SESSION", "First session"));

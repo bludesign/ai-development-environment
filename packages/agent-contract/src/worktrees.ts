@@ -195,6 +195,7 @@ export type WorktreeInventoryItem = {
 
 export type CodebaseWorktreeReport = {
   codebaseId: string;
+  observedAt?: string | null;
   complete: boolean;
   defaultBranch: string | null;
   localBranches: string[];
@@ -675,6 +676,14 @@ export function parseCodebaseWorktreeReport(
   }
   return {
     codebaseId: stringValue(report.codebaseId, "worktree report.codebaseId"),
+    ...(report.observedAt !== undefined
+      ? {
+          observedAt: nullableDate(
+            report.observedAt,
+            "worktree report.observedAt",
+          ),
+        }
+      : {}),
     complete: report.complete,
     defaultBranch: nullableString(
       report.defaultBranch,
@@ -960,7 +969,11 @@ export function worktreeMoveCheckoutJobPayload(value: unknown): {
 }
 
 export function worktreeDeleteJobPayload(value: unknown): {
-  derivedData: { mode: DerivedDataLocationMode; path: string | null };
+  derivedData: {
+    mode: DerivedDataLocationMode;
+    path: string | null;
+    managedRoot?: string | null;
+  };
   moveId: string | null;
   codebaseId: string;
   rootFolder: string;
@@ -1017,13 +1030,21 @@ export function worktreeDeleteJobPayload(value: unknown): {
       ? { mode: "DEFAULT", path: null }
       : objectValue(payload.derivedData, "worktree delete payload.derivedData");
   const unexpectedDerivedData = Object.keys(derivedData).find(
-    (key) => !["mode", "path"].includes(key),
+    (key) => !["mode", "path", "managedRoot"].includes(key),
   );
   if (unexpectedDerivedData)
     throw new Error(`Unexpected derived data field: ${unexpectedDerivedData}`);
   return {
     derivedData: {
       mode: parseDerivedDataLocationMode(derivedData.mode),
+      ...(derivedData.managedRoot !== undefined
+        ? {
+            managedRoot: nullableString(
+              derivedData.managedRoot,
+              "worktree delete payload.derivedData.managedRoot",
+            ),
+          }
+        : {}),
       path: nullableString(
         derivedData.path,
         "worktree delete payload.derivedData.path",

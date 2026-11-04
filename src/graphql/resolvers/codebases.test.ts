@@ -10,6 +10,67 @@ function context(agentId: string | null): GraphQLContext {
 }
 
 describe("codebase Git management resolvers", () => {
+  test("projects only source blockers on the primary checkout", () => {
+    const resolvers = createCodebaseResolvers({} as CodebasesService);
+    const target = {
+      id: "cb",
+      agentId: "agent",
+      worktrees: [{ id: "main", codebaseId: "cb", gitDirectory: "/repo/.git" }],
+    };
+    const job = (id: string, resources: unknown[]) => ({
+      id,
+      status: "RUNNING",
+      kind: "worktree.operation",
+      codebaseId: "cb",
+      operationResourcesJson: JSON.stringify({ version: 1, resources }),
+    });
+    const resource = (key: string, mode: string, kind = "WORKTREE") => ({
+      kind,
+      key,
+      mode,
+      agentId: "agent",
+      codebaseId: "cb",
+    });
+    const sibling = job("sibling", [
+      resource("agent:worktree:/repo/.git/worktrees/sibling", "WRITE"),
+    ]);
+    const inspection = job("inspect", [
+      resource("agent:worktree:/repo/.git", "READ"),
+    ]);
+    const artifact = job("artifact", [
+      {
+        kind: "PATH",
+        key: "/builds/artifact",
+        path: "/builds/artifact",
+        agentId: "agent",
+        codebaseId: "cb",
+        mode: "WRITE",
+      },
+    ]);
+    expect(
+      resolvers.Codebase.activeJob({
+        ...target,
+        jobs: [sibling, inspection, artifact],
+      }),
+    ).toBeNull();
+    const building = job("build", [
+      resource("agent:worktree:/repo/.git", "BUILD"),
+    ]);
+    expect(
+      resolvers.Codebase.activeJob({ ...target, jobs: [sibling, building] }),
+    ).toBe(building);
+    const barrier = job("agent-barrier", [
+      resource("agent:agent", "WRITE", "AGENT"),
+    ]);
+    expect(
+      resolvers.Codebase.activeJob({
+        ...target,
+        jobs: [sibling],
+        agent: { jobs: [barrier] },
+      }),
+    ).toBe(barrier);
+  });
+
   test("keeps cleanup on the control plane and exposes only validated cached local inventory", async () => {
     const service = {
       deleteBranches: vi.fn().mockResolvedValue({ jobs: [], skipped: [] }),

@@ -1,4 +1,4 @@
-import { spawn } from "node:child_process";
+import { spawnExecutionProcess as spawn } from "../execution-recovery.js";
 import { chmod, mkdtemp, realpath, rm, writeFile } from "node:fs/promises";
 import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";

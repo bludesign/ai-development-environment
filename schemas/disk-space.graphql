@@ -112,6 +112,8 @@ type AgentDiskSpaceWorktree {
 
 "Configuration for agent disk space."
 type AgentDiskSpaceConfiguration {
+  "Managed worktree Derived Data cache root."
+  managedDerivedDataRoot: String
   "Whether this agent disk space configuration is enabled."
   enabled: Boolean!
   "Poll interval, in seconds."

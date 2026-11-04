@@ -1,3 +1,4 @@
+import { executionEnvironment } from "../execution-recovery.js";
 import { resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import { setTimeout as delay } from "node:timers/promises";
@@ -217,7 +218,10 @@ export class OpenCodeAdapter implements ProviderAdapter {
     input: ProviderStartInput,
     callbacks: ProviderCallbacks,
   ): Promise<ProviderHandle> {
-    const isolated = input.mcpServer ? new OpenCodeRuntime(true) : undefined;
+    const isolated =
+      input.mcpServer || executionEnvironment().AIDE_EXECUTION_MARKER
+        ? new OpenCodeRuntime(true)
+        : undefined;
     if (isolated) this.isolated.add(isolated);
     let closed = false;
     const cleanup = async () => {

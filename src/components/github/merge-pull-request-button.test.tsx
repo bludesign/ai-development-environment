@@ -93,42 +93,47 @@ describe("MergePullRequestButton", () => {
     ).toBe(false);
   });
 
-  test("shows managed progress and offers cancellation", async () => {
-    request.mockResolvedValue({
-      githubPullRequestMergeOptions: {
-        availableMethods: ["SQUASH"],
-        commitEmails: [],
-        defaultCommitEmail: null,
-        defaultCommitHeadline: "APP-42 Add API",
-        defaultCommitBody: "",
-        canMerge: false,
-        worktreeId: "wt",
-        defaultAutoSync: true,
-        autoMergeOperation: {
-          autoSync: true,
-          state: "WAITING_REQUIREMENTS",
-          lastError: null,
+  test.each([true, false])(
+    "shows managed progress and offers cancellation (sync=%s)",
+    async (autoSync) => {
+      request.mockResolvedValue({
+        githubPullRequestMergeOptions: {
+          availableMethods: ["SQUASH"],
+          commitEmails: [],
+          defaultCommitEmail: null,
+          defaultCommitHeadline: "APP-42 Add API",
+          defaultCommitBody: "",
+          canMerge: false,
+          worktreeId: "wt",
+          defaultAutoSync: autoSync,
+          autoMergeOperation: {
+            autoSync,
+            state: "WAITING_REQUIREMENTS",
+            lastError: null,
+          },
         },
-      },
-    } as never);
-    render(
-      <MergePullRequestButton
-        pullRequest={pullRequest}
-        requestSource="PULL_REQUEST_DETAILS"
-        open
-      />,
-    );
-    expect(
-      await screen.findByText("Waiting for merge requirements"),
-    ).toBeDefined();
-    fireEvent.click(screen.getByRole("button", { name: "Cancel Auto Merge" }));
-    await waitFor(() =>
-      expect(request).toHaveBeenCalledWith(
-        expect.stringContaining("mutation CancelWorktreeAutoMerge"),
-        { worktreeId: "wt" },
-      ),
-    );
-  });
+      } as never);
+      render(
+        <MergePullRequestButton
+          pullRequest={pullRequest}
+          requestSource="PULL_REQUEST_DETAILS"
+          open
+        />,
+      );
+      expect(
+        await screen.findByText("Waiting for merge requirements"),
+      ).toBeDefined();
+      fireEvent.click(
+        screen.getByRole("button", { name: "Cancel Auto Merge" }),
+      );
+      await waitFor(() =>
+        expect(request).toHaveBeenCalledWith(
+          expect.stringContaining("mutation CancelWorktreeAutoMerge"),
+          { worktreeId: "wt" },
+        ),
+      );
+    },
+  );
 
   test("shows only enabled methods and submits the selected commit details", async () => {
     const onMerged = vi.fn();

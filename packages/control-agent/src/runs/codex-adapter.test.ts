@@ -4,6 +4,14 @@ import { join } from "node:path";
 import { afterEach, describe, expect, test, vi } from "vitest";
 import type { ProviderCallbacks, ProviderStartInput } from "./provider.js";
 
+const executionScope = vi.hoisted(() => ({
+  env: {} as Record<string, string>,
+}));
+vi.mock("../execution-recovery.js", async (original) => ({
+  ...(await original<typeof import("../execution-recovery.js")>()),
+  executionEnvironment: () => executionScope.env,
+}));
+
 import {
   CodexAdapter,
   codexAppServerArgs,
@@ -14,9 +22,73 @@ import {
 afterEach(() => {
   vi.restoreAllMocks();
   vi.unstubAllEnvs();
+  executionScope.env = {};
 });
 
 describe("Codex app-server", () => {
+  test("uses a private owned app-server for a tracked provider command and closes it after the turn", async () => {
+    executionScope.env = { AIDE_EXECUTION_MARKER: "private-command" };
+    const adapter = new CodexAdapter();
+    type Server = {
+      request(method: string): Promise<unknown>;
+      listen(
+        id: string,
+        callback: (message: { method: string; params: unknown }) => void,
+      ): () => void;
+      close(): Promise<void>;
+    };
+    const shared = (adapter as unknown as { server: Server }).server;
+    const prototype = Object.getPrototypeOf(shared) as Server;
+    const used = new Set<Server>();
+    let notify!: (message: { method: string; params: unknown }) => void;
+    vi.spyOn(prototype, "request").mockImplementation(async function (
+      this: Server,
+      method,
+    ) {
+      used.add(this);
+      return method === "thread/start"
+        ? {
+            thread: {
+              id: "thread",
+              path: "/workspace/transcript.jsonl",
+              cwd: "/workspace",
+            },
+          }
+        : { turn: { id: "turn" } };
+    });
+    vi.spyOn(prototype, "listen").mockImplementation((_id, callback) => {
+      notify = callback;
+      return () => undefined;
+    });
+    const close = vi.spyOn(prototype, "close").mockResolvedValue(undefined);
+    const handle = await adapter.start(
+      {
+        run: {
+          kind: "SESSION",
+          model: "default",
+          effort: null,
+          webSearchEnabled: false,
+          worktree: { folder: "/workspace" },
+        },
+        prompt: "Edit",
+        attachments: [],
+      },
+      {
+        onNativeId: vi.fn(),
+        onEvent: vi.fn(),
+        onUsage: vi.fn(),
+        onQuestion: vi.fn(),
+      },
+    );
+    expect(used.size).toBe(1);
+    expect(used.has(shared)).toBe(false);
+    notify({
+      method: "turn/completed",
+      params: { turn: { status: "completed" } },
+    });
+    await handle.completion;
+    expect(close).toHaveBeenCalledOnce();
+  });
   test("reports the native transcript and working directory when starting a run", async () => {
     const adapter = new CodexAdapter();
     const server = (

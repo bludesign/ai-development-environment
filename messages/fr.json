@@ -4302,6 +4302,13 @@
     "postBuildScriptHelp": "Exportez par défaut une fonction qui reçoit aussi buildFolder, failed, cancelled, errorCode, error et le même instantané des URL de télémétrie.",
     "timeout": "Délai en secondes",
     "failureBehavior": "Comportement en cas d’échec",
+    "scriptLockScope": "Protéger les ressources",
+    "scriptLockScopeHelp": "Choisissez une portée plus large si ce script modifie des fichiers partagés avec d’autres worktrees ou dépôts.",
+    "scriptLockScopes": {
+      "WORKTREE": "Ce worktree",
+      "CODEBASE": "Tous les worktrees de cette base de code",
+      "AGENT": "Tous les worktrees de cet agent"
+    },
     "enabledByDefault": "Présélectionner ce script pour les builds",
     "save": "Enregistrer",
     "cancel": "Annuler",

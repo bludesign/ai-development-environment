@@ -82,10 +82,10 @@ const PROJECT_FIELDS = `
   }
   allowedScripts {
     position
-    script { id name iconKey preBuildScript postBuildScript enabledByDefault timeoutSeconds failureBehavior }
+    script { id name iconKey preBuildScript postBuildScript enabledByDefault timeoutSeconds failureBehavior lockScope }
   }
 `;
-const SCRIPT_FIELDS = `id name iconKey preBuildScript postBuildScript enabledByDefault timeoutSeconds failureBehavior`;
+const SCRIPT_FIELDS = `id name iconKey preBuildScript postBuildScript enabledByDefault timeoutSeconds failureBehavior lockScope`;
 type SourceCandidate = {
   kind: "PROJECT" | "WORKSPACE" | "PACKAGE";
   relativePath: string;

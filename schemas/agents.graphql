@@ -191,6 +191,12 @@ type AgentJob {
   kind: String!
   "Structured payload associated with this agent job."
   payload: JSON!
+  "Versioned execution resources used for worktree-scoped scheduling."
+  operationResources: JSON
+  "The resource currently keeping this queued job from executing."
+  blockedReason: String
+  "Ownership token returned to the executing agent."
+  executionToken: String
   "Current status of this agent job."
   status: AgentJobStatus!
   "The idempotency key associated with this agent job."
@@ -403,7 +409,12 @@ type Mutation {
     input: CreateAgentJobInput!
   ): AgentJob!
   "Claims an agent job and returns an agent job."
-  claimAgentJob("Identifier of the job." jobId: ID!): AgentJob!
+  claimAgentJob(
+    "Identifier of the job."
+    jobId: ID!
+    "Stable ownership token for this agent execution."
+    executionToken: String
+  ): AgentJob!
   "Claims a signing secret transfer and returns a signing secret transfer."
   claimSigningSecretTransfer(
     "Identifier of the transfer."
@@ -426,6 +437,8 @@ type Mutation {
     result: JSON
     "The error used to filter or perform the operation."
     error: String
+    "Ownership token for the executing agent session."
+    executionToken: String
   ): AgentJob!
   "Cancels an agent job and returns an agent job."
   cancelAgentJob("Identifier of the job." jobId: ID!): AgentJob!

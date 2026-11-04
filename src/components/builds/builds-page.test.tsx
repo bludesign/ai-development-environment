@@ -362,6 +362,14 @@ describe("BuildsPage", () => {
     fireEvent.change(within(dialog).getByLabelText("Pre-build JavaScript"), {
       target: { value: "console.log('updated')" },
     });
+    fireEvent.click(
+      within(dialog).getByRole("combobox", { name: "Protect resources" }),
+    );
+    fireEvent.click(
+      await screen.findByRole("option", {
+        name: "All worktrees on this agent",
+      }),
+    );
     fireEvent.click(within(dialog).getByRole("button", { name: "Save" }));
 
     await waitFor(() =>
@@ -377,6 +385,7 @@ describe("BuildsPage", () => {
             enabledByDefault: true,
             timeoutSeconds: 60,
             failureBehavior: "FAIL_BUILD",
+            lockScope: "AGENT",
           },
         },
       ),

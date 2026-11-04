@@ -1,3 +1,4 @@
+import { OPERATION_RESOURCES_CAPABILITY } from "@ai-development-environment/agent-contract/operation-resources";
 import { workflowQueueUsesWorktree } from "@/services/workflows/workflow-queue-scope";
 import { filterAsyncIterator } from "@/lib/filter-async-iterator";
 import "server-only";
@@ -7,6 +8,11 @@ import { isDeepStrictEqual } from "node:util";
 
 import type { Prisma } from "@/generated/prisma/client";
 import type { McpToolSnapshot } from "@/services/tools/types";
+import {
+  admitOperation,
+  releaseOperation,
+  ResourceBusyError,
+} from "@/services/operation-locks/operation-locks.service";
 import { getPrismaClient } from "@/data/prisma-client";
 import {
   RUNS_CHANGED_TOPIC,
@@ -41,6 +47,13 @@ import {
   cloneRunAttachments,
   removeRunAttachmentFiles,
 } from "./attachment-store";
+
+const SOURCE_EXECUTION_COMMANDS = new Set([
+  "START",
+  "PLAY_PLAN",
+  "CONTINUE",
+  "REVISE_ANSWER",
+]);
 
 const RUN_KINDS = ["PLAN", "SESSION"] as const;
 const PROVIDERS = ["CODEX", "CLAUDE", "OPENCODE"] as const;
@@ -2105,11 +2118,20 @@ export class RunsService {
   async pendingCommands(agentId: string) {
     await this.reconcileQueuedRuns(agentId);
     const prisma = await getPrismaClient();
+    const retained = await prisma.operationHolder.findMany({
+      where: {
+        ownerKind: "AGENT_RUN",
+        state: { in: ["HELD", "RELEASING"] },
+        resources: { some: { agentId } },
+      },
+      select: { ownerId: true },
+    });
     return prisma.runCommand.findMany({
       where: {
         agentId,
         OR: [
           { status: "RUNNING" },
+          { id: { in: retained.map((holder) => holder.ownerId) } },
           { status: "QUEUED", run: { status: { not: "QUEUED" } } },
         ],
       },
@@ -2119,7 +2141,11 @@ export class RunsService {
     });
   }
 
-  async claimCommand(agentId: string, commandId: string) {
+  async claimCommand(
+    agentId: string,
+    commandId: string,
+    executionToken?: string | null,
+  ) {
     const prisma = await getPrismaClient();
     const queued = await prisma.runCommand.findUnique({
       where: { id: commandId },
@@ -2127,7 +2153,9 @@ export class RunsService {
         agentId: true,
         status: true,
         type: true,
-        run: { select: { worktreeId: true, status: true } },
+        run: {
+          select: { worktreeId: true, status: true, kind: true, origin: true },
+        },
       },
     });
     if (!queued || queued.agentId !== agentId) {
@@ -2145,9 +2173,83 @@ export class RunsService {
     if (queued.status === "QUEUED" && queued.run.worktreeId) {
       await this.diskSpace?.assertWorktreeCanStart(queued.run.worktreeId);
     }
-    await prisma.runCommand.updateMany({
-      where: { id: commandId, agentId, status: "QUEUED" },
-      data: { status: "RUNNING", claimedAt: new Date() },
+    const token = executionToken?.trim() || `run:${agentId}:${commandId}`;
+    let recovering = false;
+    await prisma.$transaction(async (transaction) => {
+      const current = await transaction.runCommand.findUnique({
+        where: { id: commandId },
+        include: { run: true },
+      });
+      if (!current || current.agentId !== agentId)
+        throw new Error("Run command not found");
+      if (
+        current.status === "QUEUED" &&
+        current.run.status === "QUEUED" &&
+        SOURCE_EXECUTION_COMMANDS.has(current.type)
+      )
+        throw new ResourceBusyError("Run command is waiting for the worktree");
+      if (
+        current.run.kind === "SESSION" &&
+        current.run.origin === "MANAGED" &&
+        current.run.worktreeId &&
+        SOURCE_EXECUTION_COMMANDS.has(current.type)
+      ) {
+        if (current.status === "QUEUED" && !executionToken?.trim()) {
+          const agent = await transaction.agent.findUnique({
+            where: { id: agentId },
+            select: { capabilitiesJson: true },
+          });
+          if (
+            agent &&
+            agentCapabilities(agent).includes(OPERATION_RESOURCES_CAPABILITY)
+          )
+            throw new Error(
+              "An execution token is required for managed Session commands; update the control agent.",
+            );
+        }
+        const worktree = await transaction.worktree.findUnique({
+          where: { id: current.run.worktreeId },
+        });
+        if (!worktree) throw new Error("Run worktree is unavailable");
+        const existing = await transaction.operationHolder.findUnique({
+          where: {
+            ownerKind_ownerId: { ownerKind: "AGENT_RUN", ownerId: commandId },
+          },
+        });
+        recovering = Boolean(
+          existing &&
+          ["HELD", "RELEASING"].includes(existing.state) &&
+          current.status !== "QUEUED",
+        );
+        await admitOperation(
+          transaction,
+          "AGENT_RUN",
+          commandId,
+          {
+            version: 1,
+            resources: [
+              {
+                kind: "WORKTREE",
+                key: `${agentId}:build-stability:${worktree.gitDirectory}`,
+                mode: "READ",
+                agentId,
+                codebaseId: worktree.codebaseId,
+              },
+            ],
+          },
+          token,
+        );
+      }
+      if (!recovering && !["QUEUED", "RUNNING"].includes(current.status))
+        throw new Error("Run command cannot be claimed");
+      const changed = await transaction.runCommand.updateMany({
+        where: { id: commandId, agentId, status: "QUEUED" },
+        data: { status: "RUNNING", claimedAt: new Date() },
+      });
+      if (current.status === "QUEUED" && changed.count !== 1)
+        throw new ResourceBusyError(
+          "Run command changed before execution admission",
+        );
     });
     const command = await prisma.runCommand.findUnique({
       where: { id: commandId },
@@ -2155,7 +2257,7 @@ export class RunsService {
     });
     if (!command || command.agentId !== agentId)
       throw new Error("Run command not found");
-    if (command.status !== "RUNNING")
+    if (command.status !== "RUNNING" && !recovering)
       throw new Error("Run command cannot be claimed");
     return command;
   }
@@ -2165,14 +2267,33 @@ export class RunsService {
     commandId: string,
     status: string,
     error?: string | null,
+    executionToken?: string | null,
   ) {
     const prisma = await getPrismaClient();
     const command = await prisma.runCommand.findUnique({
       where: { id: commandId },
-      include: { run: { select: { worktreeId: true, kind: true } } },
+      include: {
+        run: { select: { worktreeId: true, kind: true, origin: true } },
+      },
     });
     if (!command || command.agentId !== agentId)
       throw new Error("Run command not found");
+    const ownsSource =
+      command.run.kind === "SESSION" &&
+      command.run.origin === "MANAGED" &&
+      SOURCE_EXECUTION_COMMANDS.has(command.type);
+    const token = executionToken?.trim() || `run:${agentId}:${commandId}`;
+    if (ownsSource) {
+      const holder = await prisma.operationHolder.findUnique({
+        where: {
+          ownerKind_ownerId: { ownerKind: "AGENT_RUN", ownerId: commandId },
+        },
+      });
+      if (holder?.executionToken && holder.executionToken !== token)
+        throw new ResourceBusyError(
+          "Run execution token does not match its owner",
+        );
+    }
     const updated = await prisma.runCommand.update({
       where: { id: commandId },
       data: {
@@ -2251,6 +2372,10 @@ export class RunsService {
         });
       }
     }
+    // A startup acknowledgement without provider cleanup proof must retain
+    // source stability until the execution has actually been stopped.
+    if (ownsSource && !updated.error?.startsWith("Control agent restarted"))
+      await releaseOperation("AGENT_RUN", commandId, token);
     publishRun(updated.runId);
     if (
       command.run.worktreeId &&

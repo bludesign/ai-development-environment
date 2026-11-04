@@ -7,6 +7,7 @@ const mocks = vi.hoisted(() => ({
   pendingJobs: vi.fn(),
   completeJob: vi.fn(),
   execute: vi.fn(),
+  recover: vi.fn(),
   cancel: vi.fn(),
   cancelAll: vi.fn(),
   subscribe: vi.fn(),
@@ -14,6 +15,12 @@ const mocks = vi.hoisted(() => ({
   dispose: vi.fn(),
   codebaseReconcile: vi.fn(),
   codebaseIntervalMs: 30_000,
+}));
+
+vi.mock("./agent-leadership.js", () => ({
+  acquireAgentLeadership: vi.fn(async () => ({
+    release: async () => undefined,
+  })),
 }));
 
 vi.mock("./graphql-client.js", () => ({
@@ -52,6 +59,9 @@ vi.mock("./job-executor.js", () => ({
     execute(...args: unknown[]) {
       mocks.execute(...args);
     }
+    recover(...args: unknown[]) {
+      return mocks.recover(...args);
+    }
     cancel(...args: unknown[]) {
       mocks.cancel(...args);
     }
@@ -89,6 +99,7 @@ vi.mock("./inventory.js", () => ({
 
 import type { AgentConfig } from "./config.js";
 import { runAgent } from "./agent-runtime.js";
+import { RunManager } from "./runs/run-manager.js";
 
 const config: AgentConfig = {
   server: "http://control.test",
@@ -110,6 +121,7 @@ beforeEach(() => {
   });
   mocks.pendingJobs.mockResolvedValue([]);
   mocks.completeJob.mockResolvedValue({});
+  mocks.recover.mockResolvedValue(undefined);
   mocks.cancelAll.mockResolvedValue(undefined);
   mocks.dispose.mockResolvedValue(undefined);
   mocks.codebaseReconcile.mockResolvedValue(undefined);
@@ -122,6 +134,92 @@ beforeEach(() => {
 afterEach(() => vi.useRealTimers());
 
 describe("runAgent startup reconciliation", () => {
+  test("waits for managed-session legacy drain before starting jobs or maintenance", async () => {
+    vi.useFakeTimers();
+    const readiness = vi
+      .spyOn(RunManager.prototype, "isStartupRecoveryPending")
+      .mockReturnValue(true);
+    const queued = { id: "queued-build", status: "QUEUED" };
+    mocks.pendingJobs.mockResolvedValue([queued]);
+    const controller = new AbortController();
+    const running = runAgent(config, controller.signal);
+    try {
+      await vi.advanceTimersByTimeAsync(0);
+      expect(mocks.execute).not.toHaveBeenCalled();
+      expect(mocks.codebaseReconcile).not.toHaveBeenCalled();
+      readiness.mockReturnValue(false);
+      await vi.advanceTimersByTimeAsync(15_000);
+      expect(mocks.execute).toHaveBeenCalledWith(queued);
+      expect(mocks.codebaseReconcile).toHaveBeenCalledOnce();
+    } finally {
+      controller.abort();
+      await running;
+      readiness.mockRestore();
+    }
+  });
+  test("drains protected legacy work without acknowledging unverifiable cleanup", async () => {
+    vi.useFakeTimers();
+    const legacy = {
+      id: "legacy-build",
+      kind: "ios.build.run",
+      payload: { codebaseId: "repo" },
+      status: "RUNNING",
+    };
+    const queued = { id: "queued", status: "QUEUED" };
+    mocks.pendingJobs
+      .mockResolvedValueOnce([legacy, queued])
+      .mockResolvedValue([queued]);
+    const controller = new AbortController();
+    const running = runAgent(config, controller.signal);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(mocks.completeJob).not.toHaveBeenCalled();
+    expect(mocks.recover).not.toHaveBeenCalled();
+    expect(mocks.execute).not.toHaveBeenCalled();
+    expect(mocks.codebaseReconcile).not.toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(15_000);
+    expect(mocks.execute).toHaveBeenCalledWith(queued);
+    controller.abort();
+    await running;
+  });
+  test("verifies protected interrupted and terminal executions before acknowledging them", async () => {
+    const jobs = [
+      { id: "interrupted", status: "RUNNING", executionToken: "running-token" },
+      { id: "timed-out", status: "TIMED_OUT", executionToken: "timeout-token" },
+      { id: "cancelled", status: "CANCELLED", executionToken: "cancel-token" },
+    ];
+    mocks.cancel.mockReturnValue(false);
+    mocks.pendingJobs.mockResolvedValueOnce(jobs);
+    const controller = new AbortController();
+    const running = runAgent(config, controller.signal);
+    await vi.waitFor(() => expect(mocks.subscribe).toHaveBeenCalledOnce());
+    expect(mocks.recover).toHaveBeenCalledWith(jobs[0], "FAILED", true);
+    expect(mocks.recover).toHaveBeenCalledWith(jobs[1], "TIMED_OUT", true);
+    expect(mocks.recover).toHaveBeenCalledWith(jobs[2], "CANCELLED", true);
+    expect(mocks.completeJob).not.toHaveBeenCalled();
+    expect(mocks.execute).not.toHaveBeenCalled();
+    controller.abort();
+    await running;
+  });
+
+  test("finishes all startup cleanup before dispatching jobs with unknown shared outputs", async () => {
+    const cleanup = Promise.withResolvers<void>();
+    const orphan = { id: "orphan", status: "RUNNING", executionToken: "token" };
+    const queued = { id: "queued", status: "QUEUED" };
+    mocks.pendingJobs.mockResolvedValueOnce([orphan, queued]);
+    mocks.recover.mockImplementationOnce(() => cleanup.promise);
+    const controller = new AbortController();
+    const running = runAgent(config, controller.signal);
+    await vi.waitFor(() =>
+      expect(mocks.recover).toHaveBeenCalledWith(orphan, "FAILED", true),
+    );
+    expect(mocks.execute).not.toHaveBeenCalled();
+    expect(mocks.codebaseReconcile).not.toHaveBeenCalled();
+    cleanup.resolve();
+    await vi.waitFor(() => expect(mocks.subscribe).toHaveBeenCalledOnce());
+    expect(mocks.execute).toHaveBeenCalledWith(queued);
+    controller.abort();
+    await running;
+  });
   test("runs heartbeats and durable job reconciliation on independent cadences", async () => {
     vi.useFakeTimers();
     mocks.cadenceSettings.mockResolvedValue({
@@ -134,7 +232,7 @@ describe("runAgent startup reconciliation", () => {
     const controller = new AbortController();
     const running = runAgent(config, controller.signal);
 
-    for (let index = 0; index < 10; index += 1) await Promise.resolve();
+    await vi.advanceTimersByTimeAsync(0);
     expect(mocks.heartbeat).toHaveBeenCalledTimes(1);
     expect(mocks.pendingJobs).toHaveBeenCalledTimes(1);
     await vi.advanceTimersByTimeAsync(20_000);
@@ -167,7 +265,7 @@ describe("runAgent startup reconciliation", () => {
       });
     const controller = new AbortController();
     const running = runAgent(config, controller.signal);
-    for (let index = 0; index < 10; index += 1) await Promise.resolve();
+    await vi.advanceTimersByTimeAsync(0);
     const onEvent = mocks.subscribe.mock.calls[0]?.[2] as (event: {
       type: string;
       job: null;
@@ -189,13 +287,25 @@ describe("runAgent startup reconciliation", () => {
   });
 
   test("stays running when the initial durable-job query fails", async () => {
+    vi.useFakeTimers();
     mocks.pendingJobs.mockRejectedValueOnce(
       new Error("control plane starting"),
     );
     const controller = new AbortController();
     const running = runAgent(config, controller.signal);
 
-    await vi.waitFor(() => expect(mocks.subscribe).toHaveBeenCalledOnce());
+    await vi.advanceTimersByTimeAsync(0);
+    expect(mocks.subscribe).toHaveBeenCalledOnce();
+    const onEvent = mocks.subscribe.mock.calls[0]?.[2] as (
+      event: unknown,
+    ) => void;
+    const queued = { id: "pushed-during-recovery", status: "QUEUED" };
+    onEvent({ type: "JOB_AVAILABLE", job: queued });
+    expect(mocks.execute).not.toHaveBeenCalled();
+    expect(mocks.codebaseReconcile).not.toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(15_000);
+    expect(mocks.execute).toHaveBeenCalledWith(queued);
+    expect(mocks.codebaseReconcile).toHaveBeenCalledOnce();
     controller.abort();
     await expect(running).resolves.toBeUndefined();
   });
@@ -227,7 +337,7 @@ describe("runAgent startup reconciliation", () => {
     const controller = new AbortController();
     const running = runAgent(config, controller.signal);
 
-    for (let index = 0; index < 10; index += 1) await Promise.resolve();
+    await vi.advanceTimersByTimeAsync(0);
     expect(mocks.codebaseReconcile).toHaveBeenCalledTimes(1);
     await vi.advanceTimersByTimeAsync(119_999);
     expect(mocks.codebaseReconcile).toHaveBeenCalledTimes(1);
@@ -243,7 +353,7 @@ describe("runAgent startup reconciliation", () => {
     const controller = new AbortController();
     const running = runAgent(config, controller.signal);
 
-    for (let index = 0; index < 10; index += 1) await Promise.resolve();
+    await vi.advanceTimersByTimeAsync(0);
     expect(mocks.codebaseReconcile).toHaveBeenCalledTimes(1);
     const onEvent = mocks.subscribe.mock.calls[0]?.[2] as (event: {
       type: string;

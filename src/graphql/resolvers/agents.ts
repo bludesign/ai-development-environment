@@ -1,6 +1,7 @@
 import { prependAsyncIterator } from "@/lib/filter-async-iterator";
 import { GraphQLScalarType, Kind, type ValueNode } from "graphql";
 import { COMMAND_RUN_JOB_KIND } from "@ai-development-environment/agent-contract/commands";
+import { jobBlockedReason } from "@/services/operation-locks/operation-locks.service";
 import {
   CODEBASE_BRANCHES_DELETE_JOB_KIND,
   parseBranchDeletionOutcomes,
@@ -142,6 +143,8 @@ export const createAgentResolvers = (
     updatedAt: (agent: { updatedAt: Date }) => agent.updatedAt.toISOString(),
   },
   AgentJob: {
+    blockedReason: (job: { id: string; status: string }) =>
+      job.status === "QUEUED" ? jobBlockedReason(job.id) : null,
     branchDeletionResults: (job: {
       kind: string;
       resultJson: string | null;
@@ -154,6 +157,8 @@ export const createAgentResolvers = (
         : null;
     },
     payload: (job: { payloadJson: string }) => parseJson(job.payloadJson),
+    operationResources: (job: { operationResourcesJson?: string | null }) =>
+      parseJson(job.operationResourcesJson ?? null),
     result: (job: { resultJson: string | null }) => parseJson(job.resultJson),
     createdAt: (job: { createdAt: Date }) => job.createdAt.toISOString(),
     startedAt: (job: { startedAt: Date | null }) =>
@@ -301,9 +306,17 @@ export const createAgentResolvers = (
     },
     claimAgentJob: (
       _root: unknown,
-      { jobId }: { jobId: string },
+      {
+        jobId,
+        executionToken,
+      }: { jobId: string; executionToken?: string | null },
       context: GraphQLContext,
-    ) => agentControlService.claimJob(requireAgent(context), jobId),
+    ) =>
+      agentControlService.claimJob(
+        requireAgent(context),
+        jobId,
+        executionToken,
+      ),
     claimSigningSecretTransfer: (
       _root: unknown,
       { transferId }: { transferId: string },
@@ -338,6 +351,7 @@ export const createAgentResolvers = (
         status: string;
         result?: unknown;
         error?: string | null;
+        executionToken?: string | null;
       },
       context: GraphQLContext,
     ) =>
@@ -347,6 +361,7 @@ export const createAgentResolvers = (
         args.status,
         args.result,
         args.error ?? null,
+        args.executionToken,
       ),
     cancelAgentJob: (
       _root: unknown,

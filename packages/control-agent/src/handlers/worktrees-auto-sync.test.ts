@@ -54,60 +54,89 @@ describe("worktree Auto Sync", () => {
     expect((await git(folder, "diff")).stdout).toBe(changes);
   });
 
-  test("pauses Auto Sync for conflicts and finalizes after a workflow resolves them", async () => {
-    const folder = await repository();
-    const remote = await localRemote();
-    const remoteUrl = `ssh://git@example.test${remote}`;
-    await useHostedRemote(folder, remote, remoteUrl);
-    await git(folder, "push", "-u", "origin", "main");
-    const linked = `${folder}-auto-sync`;
-    temporaryDirectories.push(linked);
-    await git(folder, "worktree", "add", "-b", "feature/auto-sync", linked);
-    await writeFile(join(linked, "README.md"), "feature change\n");
-    await git(linked, "add", "README.md");
-    await git(linked, "commit", "-m", "Change feature readme");
-    await git(linked, "push", "-u", "origin", "feature/auto-sync");
-    await writeFile(join(folder, "README.md"), "base change\n");
-    await git(folder, "add", "README.md");
-    await git(folder, "commit", "-m", "Change base readme");
-    await git(folder, "push", "origin", "main");
-    const gitDirectory = await realpath(
-      (
-        await git(linked, "rev-parse", "--path-format=absolute", "--git-dir")
-      ).stdout.trim(),
-    );
-    const payload = {
-      codebaseId: "codebase-1",
-      folder: linked,
-      gitDirectory,
-      expectedOrigin: normalizeGitOrigin(remoteUrl).canonicalOrigin,
-      expectedBranch: "feature/auto-sync",
-      baseBranch: "main",
-    };
+  test.each([false, true])(
+    "preserves the original push lease across conflict resolution (concurrent remote update: %s)",
+    async (remoteChanges) => {
+      const folder = await repository();
+      const remote = await localRemote();
+      const remoteUrl = `ssh://git@example.test${remote}`;
+      await useHostedRemote(folder, remote, remoteUrl);
+      await git(folder, "push", "-u", "origin", "main");
+      const linked = `${folder}-auto-sync`;
+      temporaryDirectories.push(linked);
+      await git(folder, "worktree", "add", "-b", "feature/auto-sync", linked);
+      await writeFile(join(linked, "README.md"), "feature change\n");
+      await git(linked, "add", "README.md");
+      await git(linked, "commit", "-m", "Change feature readme");
+      await git(linked, "push", "-u", "origin", "feature/auto-sync");
+      await writeFile(join(folder, "README.md"), "base change\n");
+      await git(folder, "add", "README.md");
+      await git(folder, "commit", "-m", "Change base readme");
+      await git(folder, "push", "origin", "main");
+      const gitDirectory = await realpath(
+        (
+          await git(linked, "rev-parse", "--path-format=absolute", "--git-dir")
+        ).stdout.trim(),
+      );
+      const payload = {
+        codebaseId: "codebase-1",
+        folder: linked,
+        gitDirectory,
+        expectedOrigin: normalizeGitOrigin(remoteUrl).canonicalOrigin,
+        expectedBranch: "feature/auto-sync",
+        baseBranch: "main",
+      };
 
-    const conflicted = (await autoSyncWorktree(
-      { ...payload, phase: "SYNC" },
-      10_000,
-      new AbortController().signal,
-      async () => undefined,
-    )) as unknown as { outcome: string };
-    expect(conflicted.outcome).toBe("CONFLICT");
+      const conflicted = (await autoSyncWorktree(
+        { ...payload, phase: "SYNC" },
+        10_000,
+        new AbortController().signal,
+        async () => undefined,
+      )) as unknown as { outcome: string };
+      expect(conflicted.outcome).toBe("CONFLICT");
 
-    await writeFile(join(linked, "README.md"), "resolved change\n");
-    const finalized = (await autoSyncWorktree(
-      { ...payload, phase: "FINALIZE" },
-      10_000,
-      new AbortController().signal,
-      async () => undefined,
-    )) as unknown as { outcome: string };
+      const newRemoteTip = (
+        await git(folder, "rev-parse", "HEAD")
+      ).stdout.trim();
+      if (remoteChanges) {
+        await git(
+          remote,
+          "update-ref",
+          "refs/heads/feature/auto-sync",
+          newRemoteTip,
+        );
+        // A sibling fetch must not strengthen the lease used by Finalize.
+        await git(folder, "fetch", "origin");
+      }
 
-    expect(finalized.outcome).toBe("SYNCED");
-    expect((await git(linked, "rev-parse", "HEAD")).stdout.trim()).toBe(
-      (
-        await git(remote, "rev-parse", "refs/heads/feature/auto-sync")
-      ).stdout.trim(),
-    );
-  }, 15_000);
+      await writeFile(join(linked, "README.md"), "resolved change\n");
+      const finalizing = autoSyncWorktree(
+        { ...payload, phase: "FINALIZE" },
+        10_000,
+        new AbortController().signal,
+        async () => undefined,
+      );
+
+      if (remoteChanges) {
+        await expect(finalizing).rejects.toThrow(/stale info|failed to push/i);
+        expect(
+          (
+            await git(remote, "rev-parse", "refs/heads/feature/auto-sync")
+          ).stdout.trim(),
+        ).toBe(newRemoteTip);
+        return;
+      }
+      const finalized = (await finalizing) as unknown as { outcome: string };
+
+      expect(finalized.outcome).toBe("SYNCED");
+      expect((await git(linked, "rev-parse", "HEAD")).stdout.trim()).toBe(
+        (
+          await git(remote, "rev-parse", "refs/heads/feature/auto-sync")
+        ).stdout.trim(),
+      );
+    },
+    15_000,
+  );
 
   test.each(["SYNC", "FINALIZE"] as const)(
     "rejects an Auto Sync %s job after the configured branch changes",

@@ -9,6 +9,12 @@ import {
   type CodebaseBranchTarget,
 } from "@ai-development-environment/agent-contract/codebases";
 
+import { parseOperationDescriptor } from "@ai-development-environment/agent-contract/operation-resources";
+import {
+  jobConflictsWithWorktree,
+  jobHasRepositoryBarrier,
+} from "@/lib/operation-availability";
+
 import type { CodebasesService } from "@/services/codebases";
 import type { GraphQLContext } from "@/services/graphql-server/graphql-server.service";
 import { getPrismaClient } from "@/data/prisma-client";
@@ -125,7 +131,41 @@ export const createCodebaseResolvers = (service: CodebasesService) => ({
     },
     createdAt: (value: { createdAt: Date }) => value.createdAt.toISOString(),
     updatedAt: (value: { updatedAt: Date }) => value.updatedAt.toISOString(),
-    activeJob: (value: { jobs?: unknown[] }) => value.jobs?.[0] ?? null,
+    activeJob: (value: {
+      id?: string;
+      agentId?: string;
+      jobs?: Array<Parameters<typeof jobConflictsWithWorktree>[0]>;
+      agent?: { jobs?: Array<Parameters<typeof jobConflictsWithWorktree>[0]> };
+      worktrees?: Array<{
+        id: string;
+        codebaseId: string;
+        gitDirectory: string;
+      }>;
+    }) => {
+      const primary = value.worktrees?.[0];
+      const jobs = [...(value.jobs ?? []), ...(value.agent?.jobs ?? [])];
+      return (
+        jobs.find((job) => {
+          if (job.operationResourcesJson) {
+            const descriptor = parseOperationDescriptor(
+              JSON.parse(job.operationResourcesJson),
+            );
+            if (
+              !descriptor.resources.some((resource) =>
+                ["WRITE", "BUILD"].includes(resource.mode),
+              )
+            )
+              return false;
+          }
+          return primary && value.agentId
+            ? jobConflictsWithWorktree(job, {
+                ...primary,
+                codebase: { agentId: value.agentId },
+              })
+            : jobHasRepositoryBarrier(job);
+        }) ?? null
+      );
+    },
   },
   AgentCodebaseRegistration: {
     canonicalOrigin: (value: { repository: { canonicalOrigin: string } }) =>

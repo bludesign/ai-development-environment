@@ -150,7 +150,7 @@ export function MergeRequestDialog({
     options?.state === "MERGED" ||
     Boolean(operation?.mergeConfirmedAt);
   const managedPending = Boolean(
-    operation?.autoSync &&
+    operation?.autoMerge &&
     !confirmed &&
     ["SYNCING", "WAITING_CI", "WAITING_REQUIREMENTS", "MERGING"].includes(
       operation.state,
@@ -500,7 +500,7 @@ export function MergeRequestDialog({
           </p>
         ))}
         <DialogFooter className="flex-wrap">
-          {operation?.autoSync &&
+          {operation?.autoMerge &&
             operation.state === "ACTION_REQUIRED" &&
             !confirmed && (
               <Button
@@ -556,7 +556,7 @@ export function MergeRequestDialog({
                   variant="outline"
                   onClick={() => void perform("auto")}
                 >
-                  {operation?.autoSync && operation.state === "ACTION_REQUIRED"
+                  {operation?.autoMerge && operation.state === "ACTION_REQUIRED"
                     ? tp("resumeAutoMerge")
                     : t("enableAutoMerge")}
                 </Button>

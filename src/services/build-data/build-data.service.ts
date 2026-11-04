@@ -1,4 +1,5 @@
 import { createHash, randomUUID } from "node:crypto";
+import { OPERATION_RESOURCES_CAPABILITY } from "@ai-development-environment/agent-contract/operation-resources";
 
 import {
   BUILD_DATA_DELETE_JOB_KIND,
@@ -21,6 +22,10 @@ import {
   buildDataCollectionChangedTopic,
 } from "@/services/agent-control";
 import { worktreeDisplayPath } from "@/services/worktrees/worktrees.service";
+import {
+  effectiveBuildsDirectory,
+  managedDerivedDataRoot,
+} from "@/services/builds/build-directory";
 import {
   executingResourcesByWorktree,
   type DerivedDataActiveResource,
@@ -404,6 +409,17 @@ export class BuildDataService {
           payload: {
             mode: member.agent.derivedDataLocationMode,
             path: member.agent.derivedDataPath,
+            ...(capabilities(member.agent).includes(
+              OPERATION_RESOURCES_CAPABILITY,
+            )
+              ? {
+                  managedRoot: effectiveBuildsDirectory(member.agent)
+                    ? managedDerivedDataRoot(
+                        effectiveBuildsDirectory(member.agent)!,
+                      )
+                    : null,
+                }
+              : {}),
             worktrees,
           },
           idempotencyKey: `build-data:scan:${collectionId}`,

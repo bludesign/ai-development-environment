@@ -4302,6 +4302,13 @@
     "postBuildScriptHelp": "Exportieren Sie standardmäßig eine Funktion, die zusätzlich buildFolder, failed, cancelled, errorCode, error und denselben Telemetrie-URL-Snapshot empfängt.",
     "timeout": "Zeitlimit in Sekunden",
     "failureBehavior": "Verhalten bei Fehlern",
+    "scriptLockScope": "Ressourcen schützen",
+    "scriptLockScopeHelp": "Wähle einen größeren Bereich, wenn dieses Skript gemeinsam genutzte Dateien anderer Worktrees oder Repositories ändert.",
+    "scriptLockScopes": {
+      "WORKTREE": "Dieser Worktree",
+      "CODEBASE": "Alle Worktrees dieser Codebasis",
+      "AGENT": "Alle Worktrees dieses Agenten"
+    },
     "enabledByDefault": "Dieses Skript für Builds vorauswählen",
     "save": "Speichern",
     "cancel": "Abbrechen",

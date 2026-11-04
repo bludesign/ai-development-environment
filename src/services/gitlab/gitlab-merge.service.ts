@@ -9,6 +9,10 @@ import {
 import { randomUUID } from "node:crypto";
 import { normalizeGitOrigin } from "@ai-development-environment/agent-contract/codebases";
 import { getPrismaClient } from "@/data/prisma-client";
+import {
+  mergeReservationBlockedReason,
+  recoverMergeReservations,
+} from "@/services/operation-locks/operation-locks.service";
 import { isCodebaseBusyError } from "@/lib/codebase-busy";
 import type { GitLabMergeOperation } from "@/generated/prisma/client";
 import {
@@ -139,6 +143,9 @@ export class GitLabMergeService {
       if (job.codebaseId) this.wake();
     });
     agents.registerConnectionHandler(async () => this.wake());
+    agents.registerBuildAdmissionGuard?.((id) =>
+      this.adoptNativeAutoMergeForWorktree(id),
+    );
   }
 
   startRuntime() {
@@ -284,10 +291,31 @@ export class GitLabMergeService {
       context.worktree?.id,
     );
     const managed = Boolean(
-      saved?.autoSync &&
+      saved?.autoMerge &&
+      saved.worktreeId &&
       !["COMPLETED", "CANCELED"].includes(saved.state) &&
       !saved.mergeConfirmedAt,
     );
+    if (context.sourceOrigin)
+      await recoverMergeReservations(
+        context.sourceOrigin,
+        mr.sourceBranch,
+        async (recovery?: {
+          provider?: string;
+          projectId?: string;
+          iid?: number;
+        }) =>
+          recovery?.provider === "GITLAB" &&
+          recovery.projectId === projectId &&
+          recovery.iid === iid &&
+          mr.state !== "OPENED",
+      );
+    const localBlocker = context.sourceOrigin
+      ? await mergeReservationBlockedReason(
+          context.sourceOrigin,
+          mr.sourceBranch,
+        )
+      : null;
     return {
       canAutoMergeWithSync:
         !autoSyncBlockedReason &&
@@ -318,13 +346,17 @@ export class GitLabMergeService {
         (saved?.removeSourceBranch ?? removeSourceBranch),
       canRemoveSourceBranch:
         !forceRemoveSourceBranch && Boolean(mr.sourceProjectId),
-      canMerge: !gitLabMergeBlocker(mr, canMerge),
-      canAutoMerge: !gitLabMergeBlocker(mr, canMerge, true),
+      canMerge: !gitLabMergeBlocker(mr, canMerge) && !localBlocker,
+      canAutoMerge: !gitLabMergeBlocker(
+        context.worktree ? { ...mr, mergeWhenPipelineSucceeds: false } : mr,
+        canMerge,
+        true,
+      ),
       canCancelAutoMerge:
         mr.state === "OPENED" &&
         (managed || (mr.mergeWhenPipelineSucceeds && canCancel)),
       autoMergeEnabled: mr.mergeWhenPipelineSucceeds,
-      mergeBlockedReason: gitLabMergeBlocker(mr, canMerge),
+      mergeBlockedReason: gitLabMergeBlocker(mr, canMerge) ?? localBlocker,
       autoMergeBlockedReason: gitLabMergeBlocker(mr, canMerge, true),
       mergeCommitMessage: saved?.mergeCommitMessage ?? null,
       squashCommitMessage: saved?.squashCommitMessage ?? null,
@@ -518,6 +550,45 @@ export class GitLabMergeService {
             this.wake();
             return this.result(input.projectId, input.iid);
           });
+        }
+        if (input.autoMerge && options.worktreeId) {
+          let remote = mr;
+          if (remote.mergeWhenPipelineSucceeds) {
+            await this.gitlab.cancelAutoMergeDirect(input.projectId, input.iid);
+            remote = await this.gitlab.mergeRequestState(
+              input.projectId,
+              input.iid,
+            );
+            if (remote.mergeWhenPipelineSucceeds)
+              throw new Error(
+                "Native Auto Merge is still enabled for this worktree.",
+              );
+          }
+          let row = await prisma.gitLabMergeOperation.upsert({
+            where: {
+              instanceUrl_projectId_iid: {
+                instanceUrl,
+                projectId: input.projectId,
+                iid: input.iid,
+              },
+            },
+            create: {
+              id: randomUUID(),
+              instanceUrl,
+              projectId: input.projectId,
+              iid: input.iid,
+              ...data,
+              state: "WAITING_REQUIREMENTS",
+            },
+            update: { ...data, state: "WAITING_REQUIREMENTS" },
+          });
+          if (remote.state === "MERGED") {
+            row = await this.observe(row, remote);
+            if (row.mergeConfirmedAt) await this.followUps(row);
+          }
+          this.changed(row);
+          this.wake();
+          return this.result(input.projectId, input.iid);
         }
         let row = await prisma.gitLabMergeOperation.upsert({
           where: {
@@ -796,6 +867,126 @@ export class GitLabMergeService {
     }
   }
 
+  /** Disarm old provider-owned auto merges before admitting a local build. */
+  async adoptNativeAutoMergeForWorktree(worktreeId: string): Promise<void> {
+    const prisma = await getPrismaClient();
+    const worktree = await prisma.worktree.findUnique({
+      where: { id: worktreeId },
+      include: {
+        gitLabMergeRequest: true,
+        codebase: { include: { repository: true } },
+      },
+    });
+    if (!worktree?.branch) return;
+    await recoverMergeReservations(
+      worktree.codebase.repository.canonicalOrigin,
+      worktree.branch,
+      async (recovery?: {
+        provider?: string;
+        projectId?: string;
+        iid?: number;
+      }) => {
+        if (
+          recovery?.provider !== "GITLAB" ||
+          !recovery.projectId ||
+          !recovery.iid
+        )
+          return false;
+        const remote = await this.gitlab.mergeRequestState(
+          recovery.projectId,
+          recovery.iid,
+        );
+        return remote.state !== "OPENED";
+      },
+    );
+    const rows = await prisma.gitLabMergeOperation.findMany({
+      where: {
+        sourceOrigin: worktree.codebase.repository.canonicalOrigin,
+        branch: worktree.branch,
+        autoMerge: true,
+        mergeConfirmedAt: null,
+        state: { in: ACTIVE_STATES },
+      },
+    });
+    for (const row of rows)
+      await this.locked(
+        `${row.instanceUrl}:${row.projectId}:${row.iid}`,
+        async () => {
+          let remote = await this.gitlab.mergeRequestState(
+            row.projectId,
+            row.iid,
+          );
+          await recoverMergeReservations(
+            worktree.codebase.repository.canonicalOrigin,
+            worktree.branch!,
+            async (recovery?: {
+              provider?: string;
+              projectId?: string;
+              iid?: number;
+            }) =>
+              recovery?.provider === "GITLAB" &&
+              recovery.projectId === row.projectId &&
+              recovery.iid === row.iid &&
+              remote.state !== "OPENED",
+          );
+          if (remote.state === "OPENED" && remote.mergeWhenPipelineSucceeds) {
+            await this.gitlab.cancelAutoMergeDirect(row.projectId, row.iid);
+            remote = await this.gitlab.mergeRequestState(
+              row.projectId,
+              row.iid,
+            );
+            if (remote.mergeWhenPipelineSucceeds)
+              throw new Error(
+                "Native Auto Merge is still enabled for this worktree.",
+              );
+          }
+          if (remote.state === "MERGED") {
+            await this.observe(row, remote);
+          } else if (!row.autoSync) {
+            await prisma.gitLabMergeOperation.update({
+              where: { id: row.id },
+              data: {
+                state: "WAITING_REQUIREMENTS",
+                lastError: null,
+                ...(!row.worktreeId
+                  ? { worktreeId: worktree.id, worktreeFolder: worktree.folder }
+                  : {}),
+              },
+            });
+          }
+        },
+      );
+    const linked = worktree.gitLabMergeRequest;
+    if (
+      linked &&
+      !rows.some(
+        (row) => row.projectId === linked.projectId && row.iid === linked.iid,
+      )
+    ) {
+      const remote = await this.gitlab.mergeRequestState(
+        linked.projectId,
+        linked.iid,
+      );
+      await recoverMergeReservations(
+        worktree.codebase.repository.canonicalOrigin,
+        worktree.branch,
+        async (recovery?: {
+          provider?: string;
+          projectId?: string;
+          iid?: number;
+        }) =>
+          recovery?.provider === "GITLAB" &&
+          recovery.projectId === linked.projectId &&
+          recovery.iid === linked.iid &&
+          remote.state !== "OPENED",
+      );
+      if (remote.state === "OPENED" && remote.mergeWhenPipelineSucceeds)
+        throw new Error(
+          "Disable the provider's native Auto Merge before building this worktree.",
+        );
+    }
+  }
+
   async cancel(projectId: string, iid: number): Promise<GitLabMergeResult> {
     const instanceUrl = await this.instance();
     return this.locked(`${instanceUrl}:${projectId}:${iid}`, async () => {
@@ -922,6 +1113,85 @@ export class GitLabMergeService {
                   data: { state: "POST_MERGE", lastError: null },
                 });
               }
+              if (
+                !current.autoSync &&
+                current.autoMerge &&
+                current.worktreeId &&
+                !current.mergeConfirmedAt
+              ) {
+                let readiness = await this.gitlab.mergeReadiness(
+                  current.projectId,
+                  current.iid,
+                );
+                let remote = readiness.mr;
+                if (
+                  remote.sourceProjectId !== current.sourceProjectId ||
+                  remote.sourceBranch !== current.branch
+                )
+                  throw new Error(
+                    "The merge request source no longer matches the reviewed branch.",
+                  );
+                if (remote.state === "MERGED") {
+                  const observed = await this.observe(current, remote);
+                  if (observed.mergeConfirmedAt) await this.followUps(observed);
+                  return;
+                }
+                if (remote.state !== "OPENED")
+                  throw new Error("The merge request closed without merging.");
+                if (remote.mergeWhenPipelineSucceeds) {
+                  await this.gitlab.cancelAutoMergeDirect(
+                    current.projectId,
+                    current.iid,
+                  );
+                  readiness = await this.gitlab.mergeReadiness(
+                    current.projectId,
+                    current.iid,
+                  );
+                  remote = readiness.mr;
+                  if (remote.mergeWhenPipelineSucceeds)
+                    throw new Error(
+                      "Native Auto Merge is still enabled for this worktree.",
+                    );
+                  if (remote.state === "MERGED") {
+                    const observed = await this.observe(current, remote);
+                    if (observed.mergeConfirmedAt)
+                      await this.followUps(observed);
+                    return;
+                  }
+                }
+                const blocker =
+                  gitLabMergeBlocker(remote, readiness.canMerge) ??
+                  (current.sourceOrigin
+                    ? await mergeReservationBlockedReason(
+                        current.sourceOrigin,
+                        current.branch,
+                      )
+                    : "The source repository is unavailable.");
+                if (blocker) {
+                  await prisma.gitLabMergeOperation.update({
+                    where: { id: current.id },
+                    data: { state: "WAITING_REQUIREMENTS", lastError: blocker },
+                  });
+                  return;
+                }
+                current = await prisma.gitLabMergeOperation.update({
+                  where: { id: current.id },
+                  data: { state: "MERGING", sha: remote.sha, lastError: null },
+                });
+                const merged = await this.gitlab.mergeMergeRequestDirect({
+                  projectId: current.projectId,
+                  iid: current.iid,
+                  autoMerge: false,
+                  sha: remote.sha,
+                  squash: current.squash,
+                  removeSourceBranch: current.removeSourceBranch,
+                  mergeCommitMessage: current.mergeCommitMessage,
+                  squashCommitMessage: current.squashCommitMessage,
+                });
+                const observed = await this.observe(current, merged);
+                if (observed.mergeConfirmedAt) await this.followUps(observed);
+                return;
+              }
               if (current.autoSync && !current.mergeConfirmedAt) {
                 const merged = await advanceMergeSync({
                   ...current,
@@ -990,6 +1260,23 @@ export class GitLabMergeService {
               );
               if (updated.mergeConfirmedAt) await this.followUps(updated);
             } catch (error) {
+              if (
+                isCodebaseBusyError(error) ||
+                (!current.autoSync &&
+                  current.autoMerge &&
+                  !current.mergeConfirmedAt &&
+                  isTransientMergeError(error))
+              ) {
+                await prisma.gitLabMergeOperation.update({
+                  where: { id: current.id },
+                  data: {
+                    state: "WAITING_REQUIREMENTS",
+                    lastError:
+                      error instanceof Error ? error.message : String(error),
+                  },
+                });
+                return;
+              }
               if (
                 current.state === "ACTION_REQUIRED" &&
                 current.lastError === LEGACY_CODEBASE_BUSY_MESSAGE &&

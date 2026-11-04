@@ -1,4 +1,4 @@
-import { spawn } from "node:child_process";
+import { spawnExecutionProcess as spawn } from "./execution-recovery.js";
 
 import type { ProcessResult } from "./process-runner.js";
 

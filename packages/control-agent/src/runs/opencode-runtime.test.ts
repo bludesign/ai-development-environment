@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, test, vi } from "vitest";
 const mocks = vi.hoisted(() => ({
+  executionEnv: {} as Record<string, string>,
   execute: vi.fn(),
   ensure: vi.fn(),
   stop: vi.fn(),
@@ -8,6 +9,9 @@ const mocks = vi.hoisted(() => ({
   make: vi.fn(),
   lookup: vi.fn(),
   info: vi.fn(),
+}));
+vi.mock("../execution-recovery.js", () => ({
+  executionEnvironment: () => mocks.executionEnv,
 }));
 vi.mock("node:child_process", () => ({
   execFile: Object.assign(vi.fn(), {
@@ -35,6 +39,7 @@ import {
 } from "./opencode-runtime.js";
 beforeEach(() => {
   vi.clearAllMocks();
+  mocks.executionEnv = {};
   vi.unstubAllEnvs();
   mocks.lookup.mockReturnValue("/opt/homebrew/bin/opencode");
   mocks.execute.mockResolvedValue({ stdout: "opencode v2.1.1\n" });
@@ -48,6 +53,22 @@ beforeEach(() => {
   mocks.stop.mockResolvedValue(undefined);
 });
 describe("OpenCode runtime ownership", () => {
+  test("passes only the execution-owned marker to its private service without changing global env", async () => {
+    const original = process.env.AIDE_EXECUTION_MARKER;
+    mocks.executionEnv = { AIDE_EXECUTION_MARKER: "owned-run-marker" };
+    const runtime = new OpenCodeRuntime(true);
+    await runtime.client();
+    expect(mocks.ensure).toHaveBeenCalledWith(
+      expect.objectContaining({
+        env: expect.objectContaining({
+          AIDE_EXECUTION_MARKER: "owned-run-marker",
+        }),
+      }),
+    );
+    expect(process.env.AIDE_EXECUTION_MARKER).toBe(original);
+    await runtime.close();
+  });
+
   test("restarts an owned service after a cached connection stops responding", async () => {
     const runtime = new OpenCodeRuntime();
     await runtime.client();

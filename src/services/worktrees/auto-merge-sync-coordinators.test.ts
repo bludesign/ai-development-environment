@@ -11,6 +11,11 @@ import type { WorkflowsService } from "@/services/workflows";
 import type { WorktreesService } from "./worktrees.service";
 import { WORKTREE_REVIEWED_SYNC_CAPABILITY } from "@ai-development-environment/agent-contract/worktrees";
 
+vi.mock("@/services/operation-locks/operation-locks.service", () => ({
+  mergeReservationBlockedReason: vi.fn(async () => null),
+  recoverMergeReservations: vi.fn(async () => {}),
+}));
+
 const db = vi.hoisted(() => ({
   github: null as WorktreeAutoMerge | null,
   gitlab: null as GitLabMergeOperation | null,
@@ -22,6 +27,7 @@ const db = vi.hoisted(() => ({
     findMany: vi.fn(),
     upsert: vi.fn(),
     update: vi.fn(),
+    updateMany: vi.fn(),
   },
   gitLabMergeOperation: {
     findUnique: vi.fn(),
@@ -93,6 +99,14 @@ beforeEach(() => {
         updatedAt: new Date(),
       }),
   );
+  db.worktreeAutoMerge.updateMany.mockImplementation(async ({ data }) => {
+    db.github = {
+      ...db.github,
+      ...data,
+      updatedAt: new Date(),
+    } as WorktreeAutoMerge;
+    return { count: 1 };
+  });
   db.gitLabMergeOperation.update.mockImplementation(
     async ({ data }) =>
       (db.gitlab = { ...db.gitlab, ...data, updatedAt: new Date() }),
@@ -153,6 +167,7 @@ function fixture(provider: "GITHUB" | "GITLAB") {
   const agents = {
     registerCompletionObserver: vi.fn(),
     registerConnectionHandler: vi.fn(),
+    registerBuildAdmissionGuard: vi.fn(),
     getJob: vi.fn(async () => job),
     cancelJob: vi.fn(),
   };
@@ -183,9 +198,12 @@ function fixture(provider: "GITHUB" | "GITLAB") {
       autoMergeEnabled: ready.nativeAutoMerge,
     })),
     managedMergeReadiness: vi.fn(async () => ({ ...ready })),
-    pullRequestMergeOptions: vi
-      .fn()
-      .mockResolvedValue({ availableMethods: ["SQUASH"] }),
+    pullRequestMergeOptions: vi.fn(async () => ({
+      availableMethods: ["SQUASH"],
+      canAutoMergeWithSync: true,
+      canMerge: ready.canMerge,
+      blockedReason: ready.canMerge ? null : "Waiting for checks",
+    })),
     enablePullRequestAutoMerge: nativeEnable,
     disablePullRequestAutoMerge: nativeDisable,
     mergePullRequest: merge,
@@ -196,7 +214,20 @@ function fixture(provider: "GITHUB" | "GITLAB") {
       .mockResolvedValue({ configured: true, baseUrl: "https://gitlab.test" }),
     setMergeCoordinator: vi.fn(),
     managedMergeReadiness: vi.fn(async () => ({ ...ready })),
-    mergeRequestState: vi.fn(async () => ({ ...mr })),
+    mergeRequestState: vi.fn(async () => ({
+      ...mr,
+      mergeWhenPipelineSucceeds: ready.nativeAutoMerge,
+    })),
+    mergeReadiness: vi.fn(async () => ({
+      mr: {
+        ...mr,
+        draft: false,
+        hasConflicts: false,
+        mergeWhenPipelineSucceeds: ready.nativeAutoMerge,
+        detailedMergeStatus: ready.canMerge ? "mergeable" : "ci_still_running",
+      },
+      canMerge: true,
+    })),
     mergeMergeRequestDirect: merge,
     cancelAutoMergeDirect: nativeDisable,
   };
@@ -223,7 +254,7 @@ function fixture(provider: "GITHUB" | "GITLAB") {
     sha: head,
     canAutoMergeWithSync: true,
     canMerge: false,
-    canAutoMerge: false,
+    canAutoMerge: true,
     squashPolicy: "default_off",
     squash: false,
     canRemoveSourceBranch: true,
@@ -234,7 +265,7 @@ function fixture(provider: "GITHUB" | "GITLAB") {
     gitlabService as unknown as { context(): Promise<unknown> },
     "context",
   ).mockResolvedValue({ sourceOrigin: origin, worktree });
-  const configure = () =>
+  const configure = (autoSync = true) =>
     provider === "GITHUB"
       ? githubService.configureAutoMerge({
           worktreeId: "wt",
@@ -245,7 +276,7 @@ function fixture(provider: "GITHUB" | "GITLAB") {
           commitBody: "",
           deleteWorktree: false,
           moveTicketToDone: false,
-          autoSync: true,
+          autoSync,
           expectedHeadSha: head,
         })
       : gitlabService.submit({
@@ -253,7 +284,7 @@ function fixture(provider: "GITHUB" | "GITLAB") {
           iid: 1,
           sha: head,
           autoMerge: true,
-          autoSync: true,
+          autoSync,
           worktreeId: "wt",
         });
   const tick = () =>
@@ -296,6 +327,77 @@ function fixture(provider: "GITHUB" | "GITLAB") {
 describe.each(["GITHUB", "GITLAB"] as const)(
   "%s managed Auto Merge",
   (provider) => {
+    test("manages linked Auto Merge without syncing or arming native automation", async () => {
+      const f = fixture(provider);
+      f.ready.nativeAutoMerge = true;
+      await f.configure(false);
+      expect(f.row()?.state).toBe("WAITING_REQUIREMENTS");
+      expect(f.nativeEnable).not.toHaveBeenCalled();
+      expect(f.nativeDisable).toHaveBeenCalledOnce();
+      await f.tick();
+      expect(f.merge).not.toHaveBeenCalled();
+      expect(f.worktrees.createAutoSyncJob).not.toHaveBeenCalled();
+      f.ready.canMerge = true;
+      await f.tick();
+      expect(f.merge).toHaveBeenCalledOnce();
+      expect(["POST_MERGE", "COMPLETED"]).toContain(f.row()?.state);
+    });
+
+    test("keeps no-sync Auto Merge pending while its source build holds the resource", async () => {
+      const f = fixture(provider);
+      await f.configure(false);
+      f.ready.canMerge = true;
+      f.merge.mockRejectedValueOnce(
+        Object.assign(new Error("A build is active on this source worktree"), {
+          name: "ResourceBusyError",
+        }),
+      );
+      await f.tick();
+      expect(f.row()?.state).toBe("WAITING_REQUIREMENTS");
+      expect(f.row()?.lastError).toContain("build is active");
+      await f.tick();
+      expect(f.merge).toHaveBeenCalledTimes(2);
+      expect(["POST_MERGE", "COMPLETED"]).toContain(f.row()?.state);
+      expect(f.worktrees.createAutoSyncJob).not.toHaveBeenCalled();
+    });
+
+    test("disarms an old native request before build admission", async () => {
+      const f = fixture(provider);
+      await f.configure(false);
+      f.ready.nativeAutoMerge = true;
+      const callback = f.agents.registerBuildAdmissionGuard.mock.calls[
+        provider === "GITHUB" ? 0 : 1
+      ]![0] as (id: string) => Promise<void>;
+      await callback("wt");
+      expect(f.nativeDisable).toHaveBeenCalledOnce();
+      expect(f.ready.nativeAutoMerge).toBe(false);
+      expect(f.row()?.state).toBe("WAITING_REQUIREMENTS");
+      expect(f.merge).not.toHaveBeenCalled();
+    });
+
+    test("fails build admission closed when native cancellation cannot be verified", async () => {
+      const f = fixture(provider);
+      await f.configure(false);
+      f.ready.nativeAutoMerge = true;
+      f.nativeDisable.mockRejectedValueOnce(new Error("Provider is offline"));
+      const callback = f.agents.registerBuildAdmissionGuard.mock.calls[
+        provider === "GITHUB" ? 0 : 1
+      ]![0] as (id: string) => Promise<void>;
+      await expect(callback("wt")).rejects.toThrow("offline");
+      expect(f.ready.nativeAutoMerge).toBe(true);
+      expect(f.merge).not.toHaveBeenCalled();
+    });
+
+    test("cancel after a managed no-sync merge preserves confirmed follow-ups", async () => {
+      const f = fixture(provider);
+      await f.configure(false);
+      f.ready.canMerge = true;
+      await f.tick();
+      await f.cancel();
+      expect(["POST_MERGE", "COMPLETED"]).toContain(f.row()?.state);
+      expect(f.merge).toHaveBeenCalledOnce();
+    });
+
     test("cancellation reconciles a merge accepted before a timeout", async () => {
       const f = fixture(provider);
       await f.configure();

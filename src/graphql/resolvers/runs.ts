@@ -1,4 +1,5 @@
 import type { GraphQLContext } from "@/services/graphql-server/graphql-server.service";
+import { getPrismaClient } from "@/data/prisma-client";
 import {
   getRunSessionInfo,
   type RunSessionInfo,
@@ -111,6 +112,18 @@ export const createRunResolvers = (service: RunsService) => ({
     updatedAt: (value: { updatedAt: Date }) => value.updatedAt.toISOString(),
   },
   RunCommand: {
+    executionToken: async (value: { id: string }) => {
+      const holder = await (
+        await getPrismaClient()
+      ).operationHolder.findUnique({
+        where: {
+          ownerKind_ownerId: { ownerKind: "AGENT_RUN", ownerId: value.id },
+        },
+      });
+      return holder && ["HELD", "RELEASING"].includes(holder.state)
+        ? holder.executionToken
+        : null;
+    },
     payload: (value: { payloadJson: string }) => JSON.parse(value.payloadJson),
     createdAt: (value: { createdAt: Date }) => value.createdAt.toISOString(),
     claimedAt: (value: { claimedAt?: Date | null }) => iso(value.claimedAt),
@@ -399,18 +412,31 @@ export const createRunResolvers = (service: RunsService) => ({
     },
     claimRunCommand: (
       _root: unknown,
-      { id }: { id: string },
+      { id, executionToken }: { id: string; executionToken?: string | null },
       context: GraphQLContext,
-    ) => service.claimCommand(requireAgent(context), id),
+    ) => service.claimCommand(requireAgent(context), id, executionToken),
     completeRunCommand: (
       _root: unknown,
       {
         id,
         status,
         error,
-      }: { id: string; status: string; error?: string | null },
+        executionToken,
+      }: {
+        id: string;
+        status: string;
+        error?: string | null;
+        executionToken?: string | null;
+      },
       context: GraphQLContext,
-    ) => service.completeCommand(requireAgent(context), id, status, error),
+    ) =>
+      service.completeCommand(
+        requireAgent(context),
+        id,
+        status,
+        error,
+        executionToken,
+      ),
     beginRunAttempt: (
       _root: unknown,
       { runId, nativeId }: { runId: string; nativeId?: string | null },

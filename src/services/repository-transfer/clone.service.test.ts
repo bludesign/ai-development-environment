@@ -396,17 +396,16 @@ describe("repository transfer clone persistence", () => {
       create([{ ...destination, relativePath: "another" }], "request"),
     ).rejects.toThrow("different transfer selections");
     expect(await prisma.repositoryTransferOperation.count()).toBe(1);
+    const rollbackDestination = {
+      ...(await preview("ios", "agent-2")),
+      codebaseId: "rollback-checkout",
+    };
     await expect(
       prisma.$transaction(async (transaction) => {
         await service.createOperation(transaction, {
           requestId: "rollback",
           kind: "SYNC",
-          destinations: [
-            {
-              ...(await preview("ios", "agent-2")),
-              codebaseId: "rollback-checkout",
-            },
-          ],
+          destinations: [rollbackDestination],
         });
         throw new Error("later config failure");
       }),

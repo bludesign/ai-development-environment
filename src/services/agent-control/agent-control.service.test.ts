@@ -7,7 +7,28 @@ import { CodebaseBusyError } from "@/lib/codebase-busy";
 
 const getPrismaClient = vi.hoisted(() => vi.fn());
 
-vi.mock("@/data/prisma-client", () => ({ getPrismaClient }));
+vi.mock("@/data/prisma-client", () => ({
+  getPrismaClient: async () => {
+    const prisma = await getPrismaClient();
+    prisma.agent ??= {};
+    prisma.agent.findUnique ??= vi
+      .fn()
+      .mockResolvedValue({ capabilitiesJson: "[]" });
+    prisma.operationHolder ??= {
+      findUnique: vi.fn().mockResolvedValue(null),
+      upsert: vi.fn(async ({ create }) => ({
+        ...create,
+        state: "REQUESTED",
+        resources: [],
+        createdAt: new Date(),
+      })),
+      update: vi.fn(),
+    };
+    prisma.$transaction ??= async (body: (transaction: unknown) => unknown) =>
+      body(prisma);
+    return prisma;
+  },
+}));
 
 import {
   AgentControlService,
@@ -127,6 +148,30 @@ describe("AgentControlService branch deletion progress", () => {
 describe("AgentControlService.completeJob", () => {
   beforeEach(() => vi.clearAllMocks());
 
+  test("rejects completion from a different execution owner before releasing its resources", async () => {
+    const holderUpdate = vi.fn();
+    getPrismaClient.mockResolvedValue({
+      agentJob: {
+        findUnique: vi.fn().mockResolvedValue({
+          ...persistedJob("RUNNING"),
+          executionToken: "current-owner",
+        }),
+      },
+      operationHolder: { update: holderUpdate },
+    });
+    await expect(
+      new AgentControlService().completeJob(
+        "agent-1",
+        "job-1",
+        "SUCCEEDED",
+        { exitCode: 0 },
+        null,
+        "stale-owner",
+      ),
+    ).rejects.toThrow("execution token");
+    expect(holderUpdate).not.toHaveBeenCalled();
+  });
+
   test("preserves the first terminal status and result on duplicate completion", async () => {
     const succeeded = persistedJob("SUCCEEDED", '{"exitCode":0}');
     const prisma = {
@@ -172,6 +217,30 @@ describe("AgentControlService.completeJob", () => {
     );
 
     expect(result).toBe(cancelled);
+  });
+});
+
+describe("AgentControlService protected cancellation", () => {
+  test("keeps an executing build in cancelling until its owner acknowledges cleanup", async () => {
+    const job = {
+      ...persistedJob("RUNNING"),
+      kind: "ios.build.run",
+      executionToken: "build-owner",
+    };
+    const update = vi.fn(async ({ data }) => ({ ...job, ...data }));
+    const holderUpdate = vi.fn();
+    getPrismaClient.mockResolvedValue({
+      agentJob: { findUnique: vi.fn().mockResolvedValue(job), update },
+      operationHolder: { update: holderUpdate },
+    });
+    expect(await new AgentControlService().cancelJob("job-1")).toMatchObject({
+      status: "CANCELLING",
+    });
+    expect(update).toHaveBeenCalledWith({
+      where: { id: "job-1" },
+      data: { status: "CANCELLING" },
+    });
+    expect(holderUpdate).not.toHaveBeenCalled();
   });
 });
 

@@ -425,6 +425,10 @@ type Worktree {
   tags: [WorktreeTag!]!
   "The active job associated with this worktree. May be null when unavailable or not applicable."
   activeJob: AgentJob
+  "An executing operation that conflicts with mutations on this worktree."
+  blockingJob: AgentJob
+  "Concurrent queued or executing jobs associated with this worktree."
+  activeJobs: [AgentJob!]!
   "The auto sync associated with this worktree. May be null when unavailable or not applicable."
   autoSync: WorktreeAutoSync
   "The auto merge associated with this worktree. May be null when unavailable or not applicable."
@@ -914,6 +918,8 @@ input WorktreeInventoryInput {
 
 "Input values for codebase worktree report."
 input CodebaseWorktreeReportInput {
+  "When this inventory snapshot began; prevents stale complete reports replacing newer state."
+  observedAt: String
   "Identifier of the codebase to use."
   codebaseId: ID!
   "Whether complete applies to the request."

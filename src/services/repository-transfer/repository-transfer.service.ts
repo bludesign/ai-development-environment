@@ -96,6 +96,7 @@ const workflowFields = [
   "quickActionButtonVariant",
 ];
 const scriptFields = [
+  "lockScope",
   "name",
   "iconKey",
   "preBuildScript",
@@ -1768,6 +1769,9 @@ export class RepositoryTransferService {
           throw new Error("At least one build script is required");
         return {
           ...pick(f, scriptFields),
+          lockScope: z
+            .enum(["WORKTREE", "CODEBASE", "AGENT"])
+            .parse(f.lockScope ?? "WORKTREE"),
           preBuildScript,
           postBuildScript,
           timeoutSeconds: z

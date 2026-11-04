@@ -22,6 +22,8 @@ const worktreeFields = (pipelineFields: string) => `
   ticketKey ticketTitle ticketStatus lastCheckedAt missingAt createdAt updatedAt
   tags { id name color createdAt updatedAt }
   activeJob { id agentId kind payload status idempotencyKey result error timeoutSeconds createdAt startedAt finishedAt updatedAt }
+  blockingJob { id agentId kind status error createdAt startedAt finishedAt updatedAt }
+  activeJobs { id agentId kind status error createdAt startedAt finishedAt updatedAt }
   autoSync { worktreeId state conflictWorkflowId conflictWorkflowChoice lastError pauseReason lastSyncedAt updatedAt }
   autoMerge { autoSync worktreeId state repositoryNameWithOwner pullRequestNumber branch mergeMethod commitHeadline commitBody authorEmail deleteWorktree moveTicketToDone ticketKey lastError updatedAt }
   pullRequest { ${PULL_REQUEST_FIELDS} }

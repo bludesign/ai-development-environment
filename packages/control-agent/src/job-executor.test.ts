@@ -10,6 +10,7 @@ vi.mock("./handlers/index.js", () => ({
     "codebase.git.inspect": vi.fn(),
     "worktree.diff.asset": vi.fn(),
     "ios.build.run": vi.fn(),
+    "worktree.auto-sync": vi.fn(),
   },
 }));
 vi.mock("./handlers/worktrees.js", () => ({
@@ -24,6 +25,7 @@ import { JobExecutor } from "./job-executor.js";
 import type { FetchedCodebaseRefresh } from "./refresh-fetched-codebase.js";
 import { RepositoryCoordinator } from "./repository-coordinator.js";
 import { AgentRequestError } from "./request-errors.js";
+import * as executionRecovery from "./execution-recovery.js";
 
 const job: AgentJob = {
   id: "job-1",
@@ -35,6 +37,211 @@ const job: AgentJob = {
 };
 
 describe("JobExecutor", () => {
+  test("keeps recovery resources until subprocess cleanup and acknowledgement finish", async () => {
+    const cleanup = Promise.withResolvers<void>();
+    vi.spyOn(executionRecovery, "recoverExecution").mockImplementation(
+      () => cleanup.promise,
+    );
+    const api = { completeJob: vi.fn().mockResolvedValue({}) };
+    const coordinator = new RepositoryCoordinator();
+    const executor = new JobExecutor(
+      api as unknown as AgentGraphQLClient,
+      coordinator,
+    );
+    const resource = {
+      kind: "WORKTREE" as const,
+      key: "a",
+      mode: "BUILD" as const,
+      agentId: "agent-1",
+      codebaseId: "repo",
+    };
+    const interrupted: AgentJob = {
+      ...job,
+      status: "TIMED_OUT",
+      executionToken: "recovery-token",
+      operationResources: { version: 1, resources: [resource] },
+    };
+    await executor.recover(interrupted, "TIMED_OUT");
+    const sameSource = vi.fn(async () => "safe after cleanup");
+    const waiting = coordinator.withResources(
+      [{ ...resource, mode: "WRITE" }],
+      sameSource,
+    );
+    await expect(
+      coordinator.withResources(
+        [{ ...resource, key: "b", mode: "WRITE" }],
+        async () => "sibling",
+      ),
+    ).resolves.toBe("sibling");
+    expect(sameSource).not.toHaveBeenCalled();
+    expect(api.completeJob).not.toHaveBeenCalled();
+    cleanup.resolve();
+    await waiting;
+    expect(api.completeJob).toHaveBeenCalledWith(
+      job.id,
+      "TIMED_OUT",
+      undefined,
+      expect.stringContaining("verified"),
+      "recovery-token",
+    );
+    await executor.cancelAll();
+  });
+
+  test("refuses to run when granted resources differ from its local reservation", async () => {
+    const queued: AgentJob = {
+      ...job,
+      kind: "worktree.auto-sync",
+      operationResources: {
+        version: 1,
+        resources: [{ kind: "WORKTREE", key: "a", mode: "WRITE" }],
+      },
+    };
+    const claimed = {
+      ...queued,
+      executionToken: "changed-resource-token",
+      operationResources: {
+        version: 1,
+        resources: [{ kind: "WORKTREE", key: "b", mode: "WRITE" }],
+      },
+    };
+    const api = {
+      claimJob: vi.fn().mockResolvedValue(claimed),
+      completeJob: vi.fn().mockResolvedValue({}),
+    };
+    const handler = vi.mocked(handlers["worktree.auto-sync"]!);
+    handler.mockClear();
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    const executor = new JobExecutor(api as unknown as AgentGraphQLClient);
+    executor.execute(queued);
+    await vi.waitFor(() =>
+      expect(api.completeJob).toHaveBeenCalledWith(
+        job.id,
+        "FAILED",
+        undefined,
+        expect.stringContaining("resources changed"),
+        "changed-resource-token",
+      ),
+    );
+    expect(handler).not.toHaveBeenCalled();
+    await executor.cancelAll();
+  });
+  test("reserves resources before claiming and runs sibling build/sync jobs concurrently", async () => {
+    const started = Promise.withResolvers<void>();
+    const finish = Promise.withResolvers<void>();
+    const result = {
+      exitCode: 0,
+      signal: null,
+      timedOut: false,
+      cancelled: false,
+    };
+    const resourceJob = (
+      id: string,
+      kind: string,
+      target: string,
+      mode: "BUILD" | "WRITE",
+    ): AgentJob => ({
+      ...job,
+      id,
+      kind,
+      payload: { codebaseId: "repo", folder: `/${target}` },
+      operationResources: {
+        version: 1,
+        resources: [
+          {
+            kind: "WORKTREE",
+            key: target,
+            mode,
+            agentId: "agent-1",
+            codebaseId: "repo",
+          },
+        ],
+      },
+    });
+    const first = resourceJob("first", "ios.build.run", "a", "BUILD");
+    const sibling = resourceJob("sibling", "ios.build.run", "b", "BUILD");
+    const blocked = resourceJob("blocked", "worktree.auto-sync", "a", "WRITE");
+    const sync = resourceJob("sync", "worktree.auto-sync", "c", "WRITE");
+    const jobs = new Map(
+      [first, sibling, blocked, sync].map((entry) => [entry.id, entry]),
+    );
+    vi.mocked(handlers["ios.build.run"]!).mockImplementation(
+      async (payload) => {
+        if ((payload as { folder: string }).folder === "/a") {
+          started.resolve();
+          await finish.promise;
+        }
+        return result;
+      },
+    );
+    vi.mocked(handlers["worktree.auto-sync"]!).mockResolvedValue(result);
+    const api = {
+      claimJob: vi.fn(async (id: string, executionToken: string) => ({
+        ...jobs.get(id),
+        executionToken,
+      })),
+      completeJob: vi.fn().mockResolvedValue({}),
+    };
+    const executor = new JobExecutor(api as unknown as AgentGraphQLClient);
+    try {
+      executor.execute(first);
+      await started.promise;
+      executor.execute(blocked);
+      executor.execute(sibling);
+      executor.execute(sync);
+      await vi.waitFor(() => expect(api.completeJob).toHaveBeenCalledTimes(2));
+      expect(api.claimJob.mock.calls.map(([id]) => id)).toEqual([
+        "first",
+        "sibling",
+        "sync",
+      ]);
+      expect(api.completeJob).toHaveBeenCalledWith(
+        "sibling",
+        "SUCCEEDED",
+        result,
+        undefined,
+        expect.any(String),
+      );
+      finish.resolve();
+      await vi.waitFor(() => expect(api.completeJob).toHaveBeenCalledTimes(4));
+      expect(api.claimJob.mock.calls.map(([id]) => id)).toEqual([
+        "first",
+        "sibling",
+        "sync",
+        "blocked",
+      ]);
+    } finally {
+      finish.resolve();
+      await executor.cancelAll();
+    }
+  });
+
+  test("leaves a resource-busy claim queued without running or completing it", async () => {
+    const api = {
+      claimJob: vi
+        .fn()
+        .mockRejectedValue(
+          new AgentRequestError("Another operation owns these resources", 200, [
+            "RESOURCE_BUSY",
+          ]),
+        ),
+      completeJob: vi.fn(),
+    };
+    const handler = vi.mocked(handlers["worktree.auto-sync"]!);
+    handler.mockClear();
+    const reportError = vi.spyOn(console, "error").mockImplementation(() => {});
+    const executor = new JobExecutor(api as unknown as AgentGraphQLClient);
+    executor.execute({
+      ...job,
+      kind: "worktree.auto-sync",
+      operationResources: { version: 1, resources: [] },
+    });
+    await vi.waitFor(() => expect(api.claimJob).toHaveBeenCalledOnce());
+    await executor.cancelAll();
+    expect(handler).not.toHaveBeenCalled();
+    expect(api.completeJob).not.toHaveBeenCalled();
+    expect(reportError).not.toHaveBeenCalled();
+  });
+
   test.each([
     "worktree.inspect",
     "worktree.diff.inspect",

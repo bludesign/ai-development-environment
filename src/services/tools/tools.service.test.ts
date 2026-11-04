@@ -14,6 +14,75 @@ import { CREDENTIALS } from "@/services/credentials";
 afterEach(() => vi.unstubAllGlobals());
 
 describe("external MCP configuration", () => {
+  test("rejects a managed Session building its own source while allowing sibling and manual builds", async () => {
+    getPrismaClient.mockResolvedValue({
+      agentRun: {
+        findUnique: vi.fn().mockResolvedValue({
+          kind: "SESSION",
+          origin: "MANAGED",
+          worktreeId: "source",
+        }),
+      },
+      build: {
+        findUnique: vi.fn().mockResolvedValue({ worktreeId: "source" }),
+      },
+    });
+    const startBuild = vi
+      .fn()
+      .mockResolvedValue({ id: "build", status: "QUEUED" });
+    const service = new ToolsService(
+      {} as never,
+      { startBuild } as unknown as BuildsService,
+      {},
+      undefined,
+      {
+        execute: async (_context: unknown, operation: () => Promise<unknown>) =>
+          operation(),
+      } as never,
+    );
+    const args = {
+      worktreeId: "source",
+      configurationId: "config",
+      destination: { type: "SIMULATOR", id: "sim" },
+      requestId: "request",
+    };
+    const context = {
+      runId: "session",
+      caller: "agent:test",
+      correlationId: "call",
+      source: "MCP" as const,
+    };
+    await expect(
+      service.callBuiltInTool("start_build", args, context),
+    ).rejects.toThrow("Pause or finish this Session");
+    await expect(
+      service.callBuiltInTool(
+        "rebuild_build",
+        { buildId: "old", requestId: "request" },
+        context,
+      ),
+    ).rejects.toThrow("Pause or finish this Session");
+    await expect(
+      service.callBuiltInTool(
+        "start_worktree_coverage",
+        { input: args },
+        context,
+      ),
+    ).rejects.toThrow("Pause or finish this Session");
+    expect(startBuild).not.toHaveBeenCalled();
+    await expect(
+      service.callBuiltInTool(
+        "start_build",
+        { ...args, worktreeId: "sibling" },
+        context,
+      ),
+    ).resolves.toBeDefined();
+    await expect(
+      service.callBuiltInTool("start_build", args),
+    ).resolves.toBeDefined();
+    expect(startBuild).toHaveBeenCalledTimes(2);
+  });
+
   test("exposes and invokes the built-in Builds group", async () => {
     getPrismaClient.mockResolvedValue({
       externalMcpServer: { findMany: vi.fn().mockResolvedValue([]) },

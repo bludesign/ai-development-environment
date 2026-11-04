@@ -1,6 +1,7 @@
 import type { CodebaseSnapshot } from "@ai-development-environment/agent-contract/codebases";
 
 import type { AgentGraphQLClient } from "./graphql-client.js";
+import type { WorktreeInventoryItem } from "@ai-development-environment/agent-contract/worktrees";
 import { discoverWorktrees } from "./handlers/worktrees.js";
 
 export type FetchedCodebaseRefresh = {
@@ -19,8 +20,14 @@ export async function refreshFetchedCodebase(
   input: FetchedCodebaseRefresh,
   timeoutMs: number,
   signal: AbortSignal,
+  withInspection?: (
+    gitDirectory: string,
+    task: () => Promise<WorktreeInventoryItem>,
+    folder: string,
+  ) => Promise<WorktreeInventoryItem>,
 ): Promise<string> {
   signal.throwIfAborted();
+  const observedAt = new Date().toISOString();
   const registration = (await client.agentCodebases()).find(
     (codebase) => codebase.id === input.codebaseId,
   );
@@ -40,6 +47,7 @@ export async function refreshFetchedCodebase(
     registration.defaultBranch,
     Math.min(timeoutMs, 30_000),
     signal,
+    ...(withInspection ? ([withInspection] as const) : []),
   );
   if (!inventory.complete) {
     throw new Error("Worktree inventory refresh was incomplete");
@@ -53,6 +61,7 @@ export async function refreshFetchedCodebase(
     {
       codebaseId: input.codebaseId,
       ...inventory,
+      observedAt,
       fetchedAt: input.snapshot.fetchedAt,
       fetchAttemptedAt: input.fetchAttemptedAt,
       fetchError: input.fetchError,

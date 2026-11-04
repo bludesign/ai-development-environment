@@ -11,6 +11,27 @@ import {
   githubWebhookCoverageKey,
 } from "./github-actions-inventory";
 
+const mergeLocks = vi.hoisted(() => ({
+  blockedReason: vi.fn(async () => null as string | null),
+  hasLocal: vi.fn(async () => false),
+  reserve: vi.fn(
+    async (
+      _origin: string,
+      _branch: string,
+      task: (reservation: {
+        markSubmitted(): Promise<void>;
+      }) => Promise<unknown>,
+    ) => task({ markSubmitted: async () => {} }),
+  ),
+  recover: vi.fn(async () => {}),
+}));
+vi.mock("@/services/operation-locks/operation-locks.service", () => ({
+  mergeReservationBlockedReason: mergeLocks.blockedReason,
+  hasLocalSourceWorktrees: mergeLocks.hasLocal,
+  withMergeReservation: mergeLocks.reserve,
+  recoverMergeReservations: mergeLocks.recover,
+}));
+
 const inventory = vi.hoisted(() => ({
   states: new Map<
     string,
@@ -809,6 +830,9 @@ function rawReviewThread(
 }
 
 beforeEach(() => {
+  mergeLocks.blockedReason.mockReset().mockResolvedValue(null);
+  mergeLocks.hasLocal.mockReset().mockResolvedValue(false);
+  mergeLocks.reserve.mockClear();
   inventory.states.clear();
   inventory.counts.clear();
   inventory.observe.mockClear();
@@ -3936,6 +3960,8 @@ describe("GitHub service", () => {
                 mergeable: "MERGEABLE",
                 mergeStateStatus: "CLEAN",
                 headRefOid: "head-oid-1",
+                headRefName: "feature",
+                headRepository: { nameWithOwner: "acme/widgets" },
                 mergedAt: null,
                 autoMergeRequest: null,
                 viewerCanEnableAutoMerge: false,
@@ -4071,6 +4097,8 @@ describe("GitHub service", () => {
                   mergeStateStatus:
                     dialogLoaded && change === "blocked" ? "BLOCKED" : "CLEAN",
                   headRefOid: dialogLoaded ? "new-head" : "dialog-head",
+                  headRefName: "feature",
+                  headRepository: { nameWithOwner: "acme/widgets" },
                   mergedAt: null,
                 },
               },

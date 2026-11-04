@@ -21,6 +21,8 @@ import {
 import { captureCommand, type CaptureResult } from "../capture-command.js";
 import type { AgentJobHandler } from "./index.js";
 import { localBranchReport } from "./local-branches.js";
+import { withRepositoryMetadata } from "../repository-metadata.js";
+import { fetchPinnedRef } from "../git-sync-snapshot.js";
 
 const successfulProcess = {
   exitCode: 0,
@@ -52,17 +54,21 @@ async function git(
   timeoutMs: number,
   signal: AbortSignal,
 ): Promise<CaptureResult> {
-  const result = await captureCommand({
-    command: "git",
-    args: ["-C", folder, ...args],
-    timeoutMs,
-    signal,
-    env: {
-      ...process.env,
-      GIT_TERMINAL_PROMPT: "0",
-      GIT_OPTIONAL_LOCKS: "0",
-    },
-  });
+  const execute = () =>
+    captureCommand({
+      command: "git",
+      args: ["-C", folder, ...args],
+      timeoutMs,
+      signal,
+      env: {
+        ...process.env,
+        GIT_TERMINAL_PROMPT: "0",
+        GIT_OPTIONAL_LOCKS: "0",
+      },
+    });
+  const result = await (args[0] === "fetch"
+    ? withRepositoryMetadata(folder, execute, signal)
+    : execute());
   if (result.cancelled || result.timedOut) {
     throw new InterruptedGitInspection(result);
   }
@@ -75,13 +81,18 @@ async function mutatingGit(
   timeoutMs: number,
   signal: AbortSignal,
 ): Promise<CaptureResult> {
-  const result = await captureCommand({
-    command: "git",
-    args: ["-C", folder, ...args],
-    timeoutMs,
+  const result = await withRepositoryMetadata(
+    folder,
+    () =>
+      captureCommand({
+        command: "git",
+        args: ["-C", folder, ...args],
+        timeoutMs,
+        signal,
+        env: { ...process.env, GIT_TERMINAL_PROMPT: "0" },
+      }),
     signal,
-    env: { ...process.env, GIT_TERMINAL_PROMPT: "0" },
-  });
+  );
   if (result.cancelled || result.timedOut) {
     throw new InterruptedGitInspection(result);
   }
@@ -443,6 +454,10 @@ export async function updateBaseBranchAfterFetch(
       signal,
     );
     if (remoteExists.exitCode !== 0) return false;
+    const remoteTip = requireSuccess(
+      await git(folder, ["rev-parse", remoteRef], timeoutMs, signal),
+      "Could not pin the fetched base branch",
+    ).stdout.trim();
 
     const currentBranch = await git(
       folder,
@@ -456,7 +471,7 @@ export async function updateBaseBranchAfterFetch(
     ) {
       const merged = await git(
         folder,
-        ["merge", "--ff-only", remoteRef],
+        ["merge", "--ff-only", remoteTip],
         timeoutMs,
         signal,
       );
@@ -472,7 +487,7 @@ export async function updateBaseBranchAfterFetch(
     if (localExists.exitCode === 0) {
       const fastForward = await git(
         folder,
-        ["merge-base", "--is-ancestor", localRef, remoteRef],
+        ["merge-base", "--is-ancestor", localRef, remoteTip],
         timeoutMs,
         signal,
       );
@@ -483,7 +498,7 @@ export async function updateBaseBranchAfterFetch(
 
     const updated = await git(
       folder,
-      ["branch", "--force", baseBranch, remoteRef],
+      ["branch", "--force", baseBranch, remoteTip],
       timeoutMs,
       signal,
     );
@@ -541,12 +556,45 @@ export const fetchCodebase: AgentJobHandler = async (
     input.baseBranch
   ) {
     await log("Updating the base branch where it can be fast-forwarded");
-    const updated = await updateBaseBranchAfterFetch(
-      input.folder,
-      input.baseBranch,
-      timeoutMs,
-      signal,
-    );
+    const update = () =>
+      updateBaseBranchAfterFetch(
+        input.folder,
+        input.baseBranch!,
+        timeoutMs,
+        signal,
+      );
+    const gitDirectory = requireSuccess(
+      await git(
+        input.folder,
+        ["rev-parse", "--path-format=absolute", "--git-dir"],
+        timeoutMs,
+        signal,
+      ),
+      "Could not resolve base worktree",
+    ).stdout.trim();
+    const grant = context?.tryWithOperationResources
+      ? await context.tryWithOperationResources(
+          [
+            {
+              kind: "WORKTREE",
+              key: `${context.agentId}:worktree:${await realpath(gitDirectory)}`,
+              agentId: context.agentId,
+              codebaseId: input.codebaseId,
+              mode: "WRITE",
+            },
+            {
+              kind: "PATH",
+              key: input.folder,
+              path: input.folder,
+              agentId: context.agentId,
+              codebaseId: input.codebaseId,
+              mode: "WRITE",
+            },
+          ],
+          update,
+        )
+      : { ran: true as const, result: await update() };
+    const updated = grant.ran && grant.result;
     await log(
       updated
         ? "Base branch updated"
@@ -993,9 +1041,12 @@ export async function pullCodebaseBranch(
   timeoutMs: number,
   signal: AbortSignal,
 ) {
-  requireSuccess(
-    await mutatingGit(folder, ["fetch", "origin"], timeoutMs, signal),
-    "Could not fetch origin",
+  const remoteSha = await fetchPinnedRef(
+    folder,
+    "origin",
+    `refs/remotes/origin/${branch}`,
+    timeoutMs,
+    signal,
   );
   const state = await inspectCodebaseGitState(folder, timeoutMs, signal);
   const selected = branchFromState(state, branch);
@@ -1011,10 +1062,9 @@ export async function pullCodebaseBranch(
     throw new Error("Stash or commit changes before pulling");
   }
   const localRef = `refs/heads/${branch}`;
-  const remoteRef = `refs/remotes/origin/${branch}`;
   const ancestry = await git(
     folder,
-    ["merge-base", "--is-ancestor", localRef, remoteRef],
+    ["merge-base", "--is-ancestor", localRef, remoteSha],
     timeoutMs,
     signal,
   );
@@ -1026,8 +1076,8 @@ export async function pullCodebaseBranch(
     await mutatingGit(
       folder,
       selected.current
-        ? ["merge", "--ff-only", remoteRef]
-        : ["branch", "--force", "--", branch, remoteRef],
+        ? ["merge", "--ff-only", remoteSha]
+        : ["branch", "--force", "--", branch, remoteSha],
       timeoutMs,
       signal,
     ),
@@ -1134,20 +1184,26 @@ export async function runCodebaseGitOperation(
       );
       break;
     case "DELETE_STASH": {
-      const selector = await resolveStashSelector(
+      await withRepositoryMetadata(
         folder,
-        input.stashOid!,
-        timeoutMs,
+        async () => {
+          const selector = await resolveStashSelector(
+            folder,
+            input.stashOid!,
+            timeoutMs,
+            signal,
+          );
+          requireSuccess(
+            await mutatingGit(
+              folder,
+              ["stash", "drop", selector],
+              timeoutMs,
+              signal,
+            ),
+            "Could not delete the stash",
+          );
+        },
         signal,
-      );
-      requireSuccess(
-        await mutatingGit(
-          folder,
-          ["stash", "drop", selector],
-          timeoutMs,
-          signal,
-        ),
-        "Could not delete the stash",
       );
       break;
     }

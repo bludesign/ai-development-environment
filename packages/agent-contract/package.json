@@ -10,6 +10,7 @@
     "./builds": "./src/builds.ts",
     "./codebases": "./src/codebases.ts",
     "./commands": "./src/commands.ts",
+    "./operation-resources": "./src/operation-resources.ts",
     "./cli-health": "./src/cli-health.ts",
     "./coverage": "./src/coverage.ts",
     "./crashes": "./src/crashes.ts",

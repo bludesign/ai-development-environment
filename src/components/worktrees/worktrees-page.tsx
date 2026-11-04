@@ -2626,18 +2626,12 @@ function moveTargets(props: WorktreeItemProps): MoveTargetEntry[] {
   );
 }
 
-function targetAvailable(entry: MoveTargetEntry, overview: WorktreeOverview) {
-  const busyMove = overview.activeMoves.some(
-    (move) =>
-      move.sourceCodebaseId === entry.group.codebase.id ||
-      move.targetCodebaseId === entry.group.codebase.id,
-  );
+function targetAvailable(entry: MoveTargetEntry) {
   return (
     entry.agentGroup.agent.connectionStatus === "ONLINE" &&
     entry.agentGroup.agent.capabilities.includes("worktree.move.checkout") &&
     entry.group.codebase.availability === "AVAILABLE" &&
-    !entry.group.blockingJob &&
-    !busyMove
+    !entry.group.blockingJob
   );
 }
 
@@ -2661,11 +2655,12 @@ function moveDisabledReason(
   if (
     props.worktree.availability !== "AVAILABLE" ||
     props.group.blockingJob ||
+    props.worktree.blockingJob ||
     props.worktree.rebaseInProgress ||
     props.overview.activeMoves.some(
       (move) =>
-        move.sourceCodebaseId === props.group.codebase.id ||
-        move.targetCodebaseId === props.group.codebase.id,
+        move.sourceWorktreeId === props.worktree.id ||
+        move.targetWorktreeId === props.worktree.id,
     )
   ) {
     return t("moveBlocked.busy");
@@ -2689,7 +2684,7 @@ function moveDisabledReason(
   if (props.worktree.pushStatus !== "READY") {
     return t("moveBlocked.unknown");
   }
-  if (!targets.some((entry) => targetAvailable(entry, props.overview))) {
+  if (!targets.some((entry) => targetAvailable(entry))) {
     return t("moveBlocked.destination");
   }
   return null;
@@ -2736,12 +2731,12 @@ export function WorktreeMenus(
     sourceAgent.agent.connectionStatus !== "ONLINE" ||
     !sourceAgent.agent.capabilities.includes("worktree.delete") ||
     worktree.availability !== "AVAILABLE" ||
-    Boolean(props.group.blockingJob) ||
+    Boolean(props.group.blockingJob || props.worktree.blockingJob) ||
     worktree.rebaseInProgress ||
     props.overview.activeMoves.some(
       (move) =>
-        move.sourceCodebaseId === props.group.codebase.id ||
-        move.targetCodebaseId === props.group.codebase.id,
+        move.sourceWorktreeId === props.worktree.id ||
+        move.targetWorktreeId === props.worktree.id,
     );
   const assigned = new Set(worktree.tags.map((tag) => tag.id));
   const assign = async (tagId: string, checked: boolean) => {
@@ -2848,7 +2843,7 @@ export function WorktreeMenus(
   const branchChangeDisabled =
     !props.branchManagementEnabled ||
     worktree.availability !== "AVAILABLE" ||
-    Boolean(props.group.blockingJob) ||
+    Boolean(props.group.blockingJob || props.worktree.blockingJob) ||
     worktree.rebaseInProgress;
   const changeToDefaultBranch = async () => {
     if (!defaultBranch) return;
@@ -2952,7 +2947,9 @@ export function WorktreeMenus(
             <DropdownMenuItem
               disabled={
                 worktree.availability !== "AVAILABLE" ||
-                Boolean(props.group.blockingJob) ||
+                Boolean(
+                  props.group.blockingJob || props.worktree.blockingJob,
+                ) ||
                 worktree.rebaseInProgress ||
                 !sourceAgent?.agent.capabilities.includes("worktree.commit") ||
                 (!worktree.hasStagedChanges && !worktree.hasUnstagedChanges)
@@ -2970,7 +2967,7 @@ export function WorktreeMenus(
                     : t("openCode")
                 }
                 operation="OPEN_EDITOR"
-                disabled={Boolean(props.group.blockingJob)}
+                disabled={worktree.availability !== "AVAILABLE"}
                 // The editor opens on the agent, so the menu's own reload is
                 // all there is to wait for.
                 props={{ ...props, onCompleted: props.onReload }}
@@ -3138,9 +3135,7 @@ export function WorktreeMenus(
           onOpenChange={setMoveOpen}
           open={moveOpen}
           props={props}
-          targets={targets.filter((entry) =>
-            targetAvailable(entry, props.overview),
-          )}
+          targets={targets.filter((entry) => targetAvailable(entry))}
         />
       )}
       {commitOpen && (
@@ -3529,8 +3524,9 @@ function MoveWorktreeDialog({
                       .map((worktree) => (
                         <SelectItem
                           disabled={
-                            Boolean(branchHolder) &&
-                            branchHolder!.id !== worktree.id
+                            Boolean(worktree.blockingJob) ||
+                            (Boolean(branchHolder) &&
+                              branchHolder!.id !== worktree.id)
                           }
                           key={worktree.id}
                           value={worktree.id}
@@ -3586,7 +3582,11 @@ function MoveWorktreeDialog({
             {awaitingMove ? t("cancelMove") : t("cancel")}
           </Button>
           <Button
-            disabled={busy || (!awaitingMove && !selected)}
+            disabled={
+              busy ||
+              (!awaitingMove &&
+                (!selected || Boolean(selectedWorktree?.blockingJob)))
+            }
             onClick={() => (awaitingMove ? void retry() : void start())}
           >
             {busy && <Spinner />}
@@ -3808,7 +3808,7 @@ export function ActionRow(
   const t = useTranslations("worktrees");
   const unavailable =
     worktree.availability !== "AVAILABLE" ||
-    Boolean(props.group.blockingJob) ||
+    Boolean(props.group.blockingJob || props.worktree.blockingJob) ||
     worktree.rebaseInProgress;
   const changeActions = worktreeChangeActionState(worktree);
   return (
@@ -3921,11 +3921,20 @@ export function ActionRow(
           />
         </DropdownMenuContent>
       </DropdownMenu>
-      {worktree.activeJob && (
-        <span className="flex items-center gap-1 text-xs text-muted-foreground">
-          <Spinner /> {t("operationRunning")}
-        </span>
-      )}
+      {(
+        worktree.activeJobs ?? (worktree.activeJob ? [worktree.activeJob] : [])
+      ).map((job) => (
+        <Link
+          key={job.id}
+          href={`/dashboard/jobs/${job.id}`}
+          title={job.kind}
+          className="flex items-center gap-1 text-xs text-muted-foreground hover:underline"
+        >
+          <Spinner />{" "}
+          {job.kind === "ios.build.run" ? t("build") : t("operationRunning")} ·{" "}
+          {job.status}
+        </Link>
+      ))}
     </div>
   );
 }

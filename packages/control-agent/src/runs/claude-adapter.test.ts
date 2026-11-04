@@ -3,6 +3,8 @@ import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import type { ProviderCallbacks, ProviderStartInput } from "./provider.js";
 
 const sdk = vi.hoisted(() => ({
+  executionEnv: {} as Record<string, string>,
+  gatedSpawn: vi.fn(),
   listSessions: vi.fn(),
   getSessionMessages: vi.fn(),
   query: vi.fn(),
@@ -11,6 +13,10 @@ const sdk = vi.hoisted(() => ({
 const files = vi.hoisted(() => ({
   findClaudeSessionFile: vi.fn(),
   readClaudeTranscript: vi.fn(),
+}));
+vi.mock("../execution-recovery.js", () => ({
+  executionEnvironment: () => sdk.executionEnv,
+  spawnExecutionProcess: sdk.gatedSpawn,
 }));
 vi.mock("@anthropic-ai/claude-agent-sdk", () => sdk);
 vi.mock("../handlers/runs.js", () => ({
@@ -45,6 +51,7 @@ const reply = {
 
 beforeEach(() => {
   vi.resetAllMocks();
+  sdk.executionEnv = {};
   sdk.listSessions.mockResolvedValue([{ ...session }]);
   sdk.getSessionMessages.mockResolvedValue([reply]);
   files.findClaudeSessionFile.mockResolvedValue(null);
@@ -55,6 +62,58 @@ afterEach(() => {
 });
 
 describe("Claude session info", () => {
+  test("routes the SDK process through the ownership gate and closes it before acknowledging a tracked session", async () => {
+    sdk.executionEnv = { AIDE_EXECUTION_MARKER: "owned-session" };
+    const close = vi.fn();
+    const stream = Object.assign(
+      (async function* () {
+        yield { type: "result", result: "Done" };
+      })(),
+      { close },
+    );
+    sdk.query.mockReturnValue(stream);
+    const handle = await new ClaudeAdapter().start(
+      {
+        run: {
+          kind: "SESSION",
+          model: "default",
+          effort: null,
+          webSearchEnabled: false,
+          worktree: { folder: "/workspace" },
+        },
+        prompt: "Edit",
+        attachments: [],
+      },
+      {
+        onNativeId: vi.fn(),
+        onEvent: vi.fn(),
+        onUsage: vi.fn(),
+        onQuestion: vi.fn(),
+      },
+    );
+    await handle.completion;
+    const options = sdk.query.mock.calls[0]![0].options;
+    expect(options.env).toMatchObject({
+      AIDE_EXECUTION_MARKER: "owned-session",
+    });
+    options.spawnClaudeCodeProcess({
+      command: "claude",
+      args: ["--sdk"],
+      cwd: "/workspace",
+      env: options.env,
+    });
+    expect(sdk.gatedSpawn).toHaveBeenCalledWith(
+      "claude",
+      ["--sdk"],
+      expect.objectContaining({
+        cwd: "/workspace",
+        env: options.env,
+        stdio: ["pipe", "pipe", "pipe"],
+      }),
+    );
+    expect(close).toHaveBeenCalledOnce();
+  });
+
   test("reports a managed session's actual transcript from a custom config directory", async () => {
     vi.stubEnv("CLAUDE_CONFIG_DIR", "/custom/claude");
     files.findClaudeSessionFile.mockResolvedValue(

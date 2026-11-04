@@ -1,6 +1,6 @@
 import { execFile } from "node:child_process";
-import { createHash } from "node:crypto";
-import { mkdir, rm } from "node:fs/promises";
+import { createHash, randomUUID } from "node:crypto";
+import { mkdir, rm, realpath } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { promisify } from "node:util";
 
@@ -33,6 +33,19 @@ import type {
   StagedAttachment,
 } from "./provider.js";
 
+import { RepositoryCoordinator } from "../repository-coordinator.js";
+import {
+  withExecutionJournal,
+  recoverExecution,
+  forgetExecution,
+} from "../execution-recovery.js";
+import type { OperationResource } from "@ai-development-environment/agent-contract/operation-resources";
+
+type RunExecutionIdentity = {
+  agentId: string;
+  jobId: string;
+  executionToken: string;
+};
 const execFileAsync = promisify(execFile);
 const IMPORT_INTERVAL_MS = 5 * 60 * 1_000;
 const COMMAND_RECONCILIATION_INTERVAL_MS = 10_000;
@@ -98,16 +111,26 @@ export class RunManager {
   private commandTimer?: ReturnType<typeof setTimeout>;
   private stopped = false;
   private readonly shutdown = new AbortController();
+  private startupRecoveryPending = true;
+  private readonly unverifiedProviderRecoveries = new Set<string>();
 
-  constructor(private readonly client: AgentGraphQLClient) {}
+  private readonly providerExecutions = new Map<string, RunExecutionIdentity>();
+
+  constructor(
+    private readonly client: AgentGraphQLClient,
+    private readonly repositoryCoordinator = new RepositoryCoordinator(),
+  ) {}
 
   async start(): Promise<void> {
-    if (typeof this.client.pendingRunCommands !== "function") return;
+    if (typeof this.client.pendingRunCommands !== "function") {
+      this.startupRecoveryPending = false;
+      return;
+    }
     // Historical imports must not hold up command recovery or the WebSocket.
     void this.syncImports();
     try {
       const commands = await this.client.pendingRunCommands();
-      await Promise.all(commands.map((command) => this.execute(command, true)));
+      await this.reconcilePendingCommands(commands, true);
     } catch (error) {
       console.error(
         "Initial run command reconciliation failed; continuing:",
@@ -115,6 +138,55 @@ export class RunManager {
       );
     }
     this.scheduleCommandReconciliation();
+  }
+
+  isStartupRecoveryPending(): boolean {
+    return this.startupRecoveryPending;
+  }
+
+  private updateStartupRecovery(commands: RunCommand[]): boolean {
+    const pending = new Set(
+      commands
+        .filter((command) => command.executionToken)
+        .map((command) => command.id),
+    );
+    for (const id of this.unverifiedProviderRecoveries)
+      if (!pending.has(id)) this.unverifiedProviderRecoveries.delete(id);
+    const legacy = commands.some(
+      (command) =>
+        !this.executingCommands.has(command.id) &&
+        command.run.kind === "SESSION" &&
+        command.run.origin === "MANAGED" &&
+        command.executionToken?.startsWith("run:") &&
+        ["START", "PLAY_PLAN", "CONTINUE", "REVISE_ANSWER"].includes(
+          command.type,
+        ),
+    );
+    this.startupRecoveryPending =
+      legacy || this.unverifiedProviderRecoveries.size > 0;
+    return legacy;
+  }
+
+  private async reconcilePendingCommands(
+    commands: RunCommand[],
+    startup: boolean,
+  ): Promise<void> {
+    if (this.updateStartupRecovery(commands)) return;
+    const recovery = commands.filter(
+      (command) =>
+        !this.executingCommands.has(command.id) &&
+        (Boolean(command.executionToken) ||
+          (startup && command.status === "RUNNING")),
+    );
+    if (recovery.length) {
+      this.startupRecoveryPending = true;
+      await Promise.all(recovery.map((command) => this.execute(command, true)));
+    }
+    this.updateStartupRecovery(commands);
+    if (this.startupRecoveryPending) return;
+    const recovered = new Set(recovery.map((command) => command.id));
+    for (const command of commands)
+      if (!recovered.has(command.id)) this.execute(command);
   }
 
   private scheduleCommandReconciliation(): void {
@@ -129,7 +201,7 @@ export class RunManager {
   private async reconcileCommands(): Promise<void> {
     try {
       const commands = await this.client.pendingRunCommands();
-      for (const command of commands) this.execute(command);
+      await this.reconcilePendingCommands(commands, false);
     } catch (error) {
       console.error(
         "Run command reconciliation failed; retrying:",
@@ -140,8 +212,14 @@ export class RunManager {
     }
   }
 
-  execute(command: RunCommand, startup = false): void {
+  execute(command: RunCommand, startup = false): Promise<void> | undefined {
     if (this.stopped || this.executingCommands.has(command.id)) return;
+    if (
+      !startup &&
+      this.startupRecoveryPending &&
+      typeof this.client.pendingRunCommands === "function"
+    )
+      return;
     this.executingCommands.add(command.id);
     const interruption =
       command.type === "CANCEL"
@@ -186,16 +264,37 @@ export class RunManager {
         }
       });
     if (!priority) this.runQueues.set(command.runId, running);
+    return running;
   }
 
   private async runCommand(
     command: RunCommand,
     startup: boolean,
   ): Promise<void> {
-    const claimed = await this.client.claimRunCommand(command.id);
+    const protectedStart =
+      process.platform !== "win32" &&
+      command.run.kind === "SESSION" &&
+      command.run.origin === "MANAGED" &&
+      ["START", "PLAY_PLAN", "CONTINUE", "REVISE_ANSWER"].includes(
+        command.type,
+      );
+    const token =
+      command.executionToken ?? (protectedStart ? randomUUID() : undefined);
+    const claimed = token
+      ? await this.client.claimRunCommand(command.id, token)
+      : await this.client.claimRunCommand(command.id);
+    if (claimed.executionToken && !claimed.executionToken.startsWith("run:"))
+      this.providerExecutions.set(command.id, {
+        agentId: command.agentId,
+        jobId: `provider:${command.id}`,
+        executionToken: claimed.executionToken,
+      });
+    const recoveringExecution = Boolean(
+      command.executionToken &&
+      this.active.get(command.runId)?.commandId !== command.id,
+    );
     if (
-      startup &&
-      command.status === "RUNNING" &&
+      ((startup && command.status === "RUNNING") || recoveringExecution) &&
       [
         "START",
         "PLAY_PLAN",
@@ -209,6 +308,21 @@ export class RunManager {
         "PREPARE_ANSWER_REVISION",
       ].includes(command.type)
     ) {
+      const identity = this.providerExecutions.get(command.id);
+      if (claimed.executionToken?.startsWith("run:"))
+        throw new Error(
+          "Legacy provider cleanup cannot be verified automatically; the source worktree remains protected",
+        );
+      if (identity) {
+        this.unverifiedProviderRecoveries.add(command.id);
+        const resource = await this.runStabilityResource(claimed);
+        await this.repositoryCoordinator.withResources(
+          [resource],
+          () => recoverExecution(identity, this.shutdown.signal),
+          this.shutdown.signal,
+        );
+        this.unverifiedProviderRecoveries.delete(command.id);
+      }
       const latest = [...claimed.run.attempts].sort(
         (left, right) => right.generation - left.generation,
       )[0];
@@ -224,7 +338,9 @@ export class RunManager {
       await this.completeCommand(
         claimed.id,
         "FAILED",
-        "Control agent restarted; destructive work was not replayed",
+        identity
+          ? "Interrupted provider processes stopped and verified; execution was not replayed"
+          : "Control agent restarted; destructive work was not replayed",
       );
       return;
     }
@@ -269,6 +385,17 @@ export class RunManager {
           throw new Error(`Unsupported run command ${claimed.type}`);
       }
     } catch (error) {
+      const identity = this.providerExecutions.get(claimed.id);
+      if (identity) {
+        // Preparation can spawn Git mutators before a provider handle exists.
+        // An error acknowledgement is safe only after those processes settle.
+        try {
+          await recoverExecution(identity, this.shutdown.signal);
+        } catch (cleanupError) {
+          this.unverifiedProviderRecoveries.add(claimed.id);
+          throw cleanupError;
+        }
+      }
       await this.completeCommand(
         claimed.id,
         "FAILED",
@@ -278,7 +405,110 @@ export class RunManager {
     }
   }
 
+  private async runStabilityResource(
+    command: RunCommand,
+  ): Promise<OperationResource> {
+    const worktree = command.run.worktree;
+    if (!worktree) throw new Error("Run worktree is unavailable");
+    const gitDirectory =
+      worktree.gitDirectory ??
+      (
+        await execFileAsync("git", [
+          "-C",
+          worktree.folder,
+          "rev-parse",
+          "--path-format=absolute",
+          "--git-dir",
+        ])
+      ).stdout.trim();
+    const canonicalGitDirectory = await realpath(gitDirectory);
+    return {
+      kind: "WORKTREE",
+      key: `${command.agentId}:build-stability:${canonicalGitDirectory}`,
+      mode: "READ",
+      agentId: command.agentId,
+      ...(worktree.codebaseId ? { codebaseId: worktree.codebaseId } : {}),
+    };
+  }
+
   private async startRun(command: RunCommand): Promise<void> {
+    const identity = this.providerExecutions.get(command.id);
+    if (!identity) return this.startRunWithProvider(command);
+    const resource = await this.runStabilityResource(command);
+    const started = Promise.withResolvers<void>();
+    const cleanedCompletion =
+      Promise.withResolvers<Awaited<ProviderHandle["completion"]>>();
+    // The provider-facing completion is delayed until all owned processes and
+    // detached helpers are verified stopped; only then may the server release.
+    const lifecycle = this.repositoryCoordinator.withResources(
+      [resource],
+      async () => {
+        try {
+          return await withExecutionJournal(identity, async () => {
+            let physicalCompletion: ProviderHandle["completion"] | undefined;
+            await this.startRunWithProvider(command, (handle) => {
+              physicalCompletion = handle.completion;
+              return {
+                get nativeId() {
+                  return handle.nativeId;
+                },
+                completion: cleanedCompletion.promise,
+                interrupt: (reason) => handle.interrupt(reason),
+                steer: (prompt, attachments) =>
+                  handle.steer(prompt, attachments),
+                answer: (id, answers) => handle.answer(id, answers),
+                ...(handle.cancelQuestion
+                  ? {
+                      cancelQuestion: (id: string) =>
+                        handle.cancelQuestion!(id),
+                    }
+                  : {}),
+              };
+            });
+            started.resolve();
+            return physicalCompletion ? await physicalCompletion : undefined;
+          });
+        } catch (error) {
+          // A failed cleanup retains the durable source claim and is retried;
+          // process death or a terminal status is not a cleanup acknowledgement.
+          while (!this.stopped) {
+            try {
+              await recoverExecution(identity, this.shutdown.signal);
+              break;
+            } catch (cleanupError) {
+              console.error(
+                `Run ${command.runId} cleanup is not verified; source protection remains held:`,
+                cleanupError instanceof Error
+                  ? cleanupError.message
+                  : String(cleanupError),
+              );
+              await waitForAgentRetry(1_000, this.shutdown.signal);
+            }
+          }
+          throw error;
+        }
+      },
+      this.shutdown.signal,
+    );
+    void lifecycle.then(
+      (completion) => {
+        started.resolve();
+        if (completion) cleanedCompletion.resolve(completion);
+      },
+      (error) => {
+        started.reject(error);
+        cleanedCompletion.reject(error);
+      },
+    );
+    // Avoid an unhandled rejection when startup fails before a handle exists.
+    void cleanedCompletion.promise.catch(() => undefined);
+    await started.promise;
+  }
+
+  private async startRunWithProvider(
+    command: RunCommand,
+    protect?: (handle: ProviderHandle) => ProviderHandle,
+  ): Promise<void> {
     const { run } = command;
     if (!run.worktree) throw new Error("Run worktree is unavailable");
     if (this.active.has(run.id)) throw new Error("Run is already active");
@@ -463,6 +693,7 @@ export class RunManager {
       );
       throw error;
     }
+    if (protect) handle = protect(handle);
     const active: ActiveRun = {
       handle,
       attemptId: attempt.id,
@@ -545,7 +776,7 @@ export class RunManager {
         }),
       );
       await this.retryFinalization(() =>
-        this.client.completeRunCommand(
+        this.completeProviderCommand(
           command.id,
           completion.status === "FAILED" ? "FAILED" : "SUCCEEDED",
           completion.error,
@@ -560,7 +791,7 @@ export class RunManager {
         }),
       );
       await this.retryFinalization(() =>
-        this.client.completeRunCommand(
+        this.completeProviderCommand(
           command.id,
           "FAILED",
           error instanceof Error ? error.message : String(error),
@@ -741,41 +972,46 @@ export class RunManager {
   }
 
   private async reviseAnswer(command: RunCommand): Promise<void> {
-    if (!command.run.worktree) throw new Error("Run worktree is unavailable");
-    if (command.payload.rollback === false) {
-      const preserved = await captureGitCheckpoint(
-        command.run.worktree.folder,
+    const worktree = command.run.worktree;
+    if (!worktree) throw new Error("Run worktree is unavailable");
+    const prepare = async () => {
+      if (command.payload.rollback === false) {
+        const preserved = await captureGitCheckpoint(
+          worktree.folder,
+          command.runId,
+          "ANSWER_ROLLBACK",
+        );
+        await this.retry(
+          () => this.client.reportRunCheckpoint(command.runId, null, preserved),
+          5,
+        );
+        return;
+      }
+      const stashRef = await restoreGitCheckpoint(
+        worktree.folder,
+        this.checkpointFromCommand(command),
+        {
+          stash: Boolean(command.payload.stash),
+          message: `AIDE run ${command.runId} before answer revision`,
+        },
+      );
+      const restored = await captureGitCheckpoint(
+        worktree.folder,
         command.runId,
         "ANSWER_ROLLBACK",
       );
       await this.retry(
-        () => this.client.reportRunCheckpoint(command.runId, null, preserved),
+        () =>
+          this.client.reportRunCheckpoint(command.runId, null, {
+            ...restored,
+            stashRef,
+          }),
         5,
       );
-      await this.startRun(command);
-      return;
-    }
-    const stashRef = await restoreGitCheckpoint(
-      command.run.worktree.folder,
-      this.checkpointFromCommand(command),
-      {
-        stash: Boolean(command.payload.stash),
-        message: `AIDE run ${command.runId} before answer revision`,
-      },
-    );
-    const restored = await captureGitCheckpoint(
-      command.run.worktree.folder,
-      command.runId,
-      "ANSWER_ROLLBACK",
-    );
-    await this.retry(
-      () =>
-        this.client.reportRunCheckpoint(command.runId, null, {
-          ...restored,
-          stashRef,
-        }),
-      5,
-    );
+    };
+    const identity = this.providerExecutions.get(command.id);
+    if (identity) await withExecutionJournal(identity, prepare);
+    else await prepare();
     await this.startRun(command);
   }
 
@@ -1026,18 +1262,39 @@ export class RunManager {
     }
   }
 
+  private completeProviderCommand(
+    id: string,
+    status: "SUCCEEDED" | "FAILED",
+    error?: string,
+  ): Promise<unknown> {
+    return this.providerExecutions.has(id)
+      ? this.completeCommand(id, status, error)
+      : this.client.completeRunCommand(id, status, error);
+  }
+
   private completeCommand(
     id: string,
     status: "SUCCEEDED" | "FAILED",
     error?: string,
   ): Promise<unknown> {
-    return this.retry(
-      () =>
-        error === undefined
-          ? this.client.completeRunCommand(id, status)
-          : this.client.completeRunCommand(id, status, error),
-      5,
-    );
+    return this.retry(async () => {
+      const identity = this.providerExecutions.get(id);
+      const result = identity
+        ? await this.client.completeRunCommand(
+            id,
+            status,
+            error,
+            identity.executionToken,
+          )
+        : error === undefined
+          ? await this.client.completeRunCommand(id, status)
+          : await this.client.completeRunCommand(id, status, error);
+      if (identity) {
+        forgetExecution(identity);
+        this.providerExecutions.delete(id);
+      }
+      return result;
+    }, 5);
   }
 
   async close(): Promise<void> {

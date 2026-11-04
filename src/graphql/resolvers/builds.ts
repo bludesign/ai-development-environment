@@ -1,4 +1,5 @@
 import { serverUrlSettingsService } from "@/services/server-urls/server-urls.service";
+import { jobBlockedReason } from "@/services/operation-locks/operation-locks.service";
 import { serverBaseUrl, type ServerUrlKind } from "@/lib/server-urls";
 import { signArtifactToken } from "@/lib/artifact-token";
 import type { GraphQLContext } from "@/services/graphql-server/graphql-server.service";
@@ -191,6 +192,10 @@ export const createBuildResolvers = (service: BuildsService) => ({
     finishedAt: (value: { finishedAt: Date | null }) => iso(value.finishedAt),
   },
   Build: {
+    blockedReason: (value: { status: string; jobId: string | null }) =>
+      value.status === "QUEUED" && value.jobId
+        ? jobBlockedReason(value.jobId)
+        : null,
     reports: (
       value: { id: string; reports?: Array<{ kind?: string }> },
       args: { kind?: "TEST_RESULTS" | "CODE_COVERAGE" | null } = {},

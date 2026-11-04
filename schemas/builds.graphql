@@ -78,6 +78,16 @@ enum BuildScriptFailureBehavior {
   CONTINUE
 }
 
+"Resources protected for builds that run this script."
+enum BuildScriptLockScope {
+  "Protect only the selected worktree."
+  WORKTREE
+  "Protect all worktrees in the selected codebase."
+  CODEBASE
+  "Protect all worktrees on the selected agent."
+  AGENT
+}
+
 "Represents a build source observation in the GraphQL API."
 type BuildSourceObservation {
   "Stable identifier for this build source observation."
@@ -150,6 +160,8 @@ type BuildConfiguration {
 
 "Represents a build script in the GraphQL API."
 type BuildScript {
+  "Resources protected for builds using this script."
+  lockScope: BuildScriptLockScope!
   "Optional icon from the build configuration icon library."
   iconKey: String
   "Repositories where this script is allowed."
@@ -536,6 +548,8 @@ type BuildExport {
 
 "Represents a build in the GraphQL API."
 type Build {
+  "Why a queued build is waiting for a conflicting resource."
+  blockedReason: String
   "Stable identifier for this build."
   id: ID!
   "Identifier of the related request."
@@ -689,6 +703,8 @@ input SaveBuildConfigurationInput {
 
 "Values used to save a build script."
 input SaveBuildScriptInput {
+  "Resources protected for builds using this script. Omit to preserve the current scope."
+  lockScope: BuildScriptLockScope
   "Optional icon. Omit to preserve the current icon; null clears it."
   iconKey: String
   "Replace repository assignments. Omit to preserve them; an empty list clears them."

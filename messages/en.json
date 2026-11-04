@@ -4302,6 +4302,13 @@
     "postBuildScriptHelp": "Default-export a function that also receives buildFolder, failed, cancelled, errorCode, error, and the same telemetry URL snapshot.",
     "timeout": "Timeout in seconds",
     "failureBehavior": "Failure behavior",
+    "scriptLockScope": "Protect resources",
+    "scriptLockScopeHelp": "Choose a wider scope when this script changes files shared by other worktrees or repositories.",
+    "scriptLockScopes": {
+      "WORKTREE": "This worktree",
+      "CODEBASE": "All worktrees in this codebase",
+      "AGENT": "All worktrees on this agent"
+    },
     "enabledByDefault": "Preselect this script for builds",
     "save": "Save",
     "cancel": "Cancel",

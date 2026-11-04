@@ -591,8 +591,8 @@ function LoadedWorktreeDetail({
   );
   const activeMove = overview.activeMoves.some(
     (move) =>
-      move.sourceCodebaseId === entry.group.codebase.id ||
-      move.targetCodebaseId === entry.group.codebase.id,
+      move.sourceWorktreeId === worktree.id ||
+      move.targetWorktreeId === worktree.id,
   );
   const canInspect =
     entry.agentGroup.agent.connectionStatus === "ONLINE" &&

@@ -30,6 +30,10 @@ import {
   SIDEBAR_STATUS_CHANGED_TOPIC,
 } from "@/services/agent-control";
 import { worktreeDisplayPath } from "@/services/worktrees/worktrees.service";
+import {
+  effectiveBuildsDirectory,
+  managedDerivedDataRoot,
+} from "@/services/builds/build-directory";
 
 import { executingResourcesByWorktree } from "./executing-work";
 import { diskSpaceSessionData, type DiskSpaceSessionData } from "./snapshot";
@@ -315,6 +319,9 @@ export class DiskSpaceService {
       baseRepoDirectory: agent.baseRepoDirectory,
       derivedDataLocationMode: agent.derivedDataLocationMode,
       derivedDataPath: agent.derivedDataPath,
+      managedDerivedDataRoot: effectiveBuildsDirectory(agent)
+        ? managedDerivedDataRoot(effectiveBuildsDirectory(agent)!)
+        : null,
       worktrees,
     };
   }

@@ -89,7 +89,7 @@ import { RunBuildControls } from "./run-build-controls";
 import { useBuildTimeTicker } from "./use-build-time-ticker";
 
 const SCRIPT_FIELDS = `
-  id name iconKey repositories { id name } preBuildScript postBuildScript enabledByDefault timeoutSeconds failureBehavior createdAt updatedAt
+  id name iconKey repositories { id name } preBuildScript postBuildScript enabledByDefault timeoutSeconds failureBehavior lockScope createdAt updatedAt
 `;
 
 const PRE_BUILD_TEMPLATE = `export default async function preBuild({
@@ -920,6 +920,9 @@ function BuildScriptDialog({
   const [failure, setFailure] = useState<"FAIL_BUILD" | "CONTINUE">(
     script?.failureBehavior ?? "FAIL_BUILD",
   );
+  const [lockScope, setLockScope] = useState<"WORKTREE" | "CODEBASE" | "AGENT">(
+    script?.lockScope ?? "WORKTREE",
+  );
   const [busy, setBusy] = useState(false);
 
   const save = async () => {
@@ -943,6 +946,7 @@ function BuildScriptDialog({
             enabledByDefault: enabled,
             timeoutSeconds: timeout,
             failureBehavior: failure,
+            lockScope,
           },
         },
       );
@@ -1075,6 +1079,31 @@ function BuildScriptDialog({
                 </SelectContent>
               </Select>
             </div>
+          </div>
+          <div className="space-y-2">
+            <Label>{t("scriptLockScope")}</Label>
+            <p className="text-xs text-muted-foreground">
+              {t("scriptLockScopeHelp")}
+            </p>
+            <Select
+              value={lockScope}
+              onValueChange={(value) => setLockScope(value as typeof lockScope)}
+            >
+              <SelectTrigger aria-label={t("scriptLockScope")}>
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="WORKTREE">
+                  {t("scriptLockScopes.WORKTREE")}
+                </SelectItem>
+                <SelectItem value="CODEBASE">
+                  {t("scriptLockScopes.CODEBASE")}
+                </SelectItem>
+                <SelectItem value="AGENT">
+                  {t("scriptLockScopes.AGENT")}
+                </SelectItem>
+              </SelectContent>
+            </Select>
           </div>
           <label className="flex items-center gap-2">
             <Checkbox
