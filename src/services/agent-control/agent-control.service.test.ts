@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, test, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 
 import { IOS_ARTIFACT_DOWNLOAD_JOB_KIND } from "@ai-development-environment/agent-contract/builds";
 import { CODEBASE_BRANCHES_DELETE_JOB_KIND } from "@ai-development-environment/agent-contract/codebases";
@@ -37,7 +37,12 @@ import {
   SUPPORTED_AGENT_JOBS,
   validateJob,
 } from "./agent-control.service";
-import { agentEventBus, agentEventsTopic } from "./event-bus";
+import {
+  WORKTREE_CHANGED_TOPIC,
+  agentEventBus,
+  agentEventsTopic,
+  agentJobChangedTopic,
+} from "./event-bus";
 
 function persistedJob(status: string, resultJson: string | null = null) {
   return {
@@ -94,6 +99,167 @@ describe("AgentControlService.getJobCommandName", () => {
       }),
     ).resolves.toBeNull();
     expect(getPrismaClient).not.toHaveBeenCalled();
+  });
+});
+
+describe("AgentControlService worktree job updates", () => {
+  beforeEach(() => vi.clearAllMocks());
+  afterEach(() => vi.restoreAllMocks());
+
+  test.each([
+    { worktreeId: "worktree-1", codebaseId: "codebase-1" },
+    { worktreeId: null, codebaseId: "codebase-1" },
+    { worktreeId: "worktree-1", codebaseId: null },
+  ])(
+    "invalidates the affected worktree scope when a command is cancelled: %j",
+    async (scope) => {
+      const job = {
+        ...persistedJob("RUNNING"),
+        ...scope,
+        kind: "command.run",
+      };
+      getPrismaClient.mockResolvedValue({
+        agentJob: {
+          findUnique: vi.fn().mockResolvedValue(job),
+          update: vi.fn(async ({ data }) => ({ ...job, ...data })),
+        },
+      });
+      const publish = vi.spyOn(agentEventBus, "publish");
+
+      await expect(
+        new AgentControlService().cancelJob(job.id),
+      ).resolves.toMatchObject({ status: "CANCELLING" });
+
+      expect(publish).toHaveBeenCalledWith(WORKTREE_CHANGED_TOPIC, {
+        worktreeOverviewChanged: scope,
+      });
+    },
+  );
+
+  test("keeps unscoped agent jobs from invalidating the worktree overview", async () => {
+    const job = {
+      ...persistedJob("RUNNING"),
+      kind: "command.run",
+      worktreeId: null,
+      codebaseId: null,
+    };
+    getPrismaClient.mockResolvedValue({
+      agentJob: {
+        findUnique: vi.fn().mockResolvedValue(job),
+        update: vi.fn(async ({ data }) => ({ ...job, ...data })),
+      },
+    });
+    const publish = vi.spyOn(agentEventBus, "publish");
+
+    await new AgentControlService().cancelJob(job.id);
+
+    expect(publish).not.toHaveBeenCalledWith(
+      WORKTREE_CHANGED_TOPIC,
+      expect.anything(),
+    );
+  });
+
+  test.each([1, 0])(
+    "publishes completion after releasing the execution owner, including a concurrent completion (%s updated)",
+    async (updatedCount) => {
+      let job = {
+        ...persistedJob("CANCELLING"),
+        kind: "command.run",
+        worktreeId: "worktree-1",
+        codebaseId: "codebase-1",
+        executionToken: "execution-owner" as string | null,
+      };
+      let holderState = "HELD";
+      getPrismaClient.mockResolvedValue({
+        agentJob: {
+          findUnique: vi.fn(async () => job),
+          updateMany: vi.fn(async () => {
+            // A competing completion can win the status update while this
+            // request still owns the cleanup acknowledgement.
+            job = { ...job, status: "CANCELLED" };
+            return { count: updatedCount };
+          }),
+          update: vi.fn(async ({ data }) => {
+            job = { ...job, ...data };
+            return job;
+          }),
+        },
+        operationHolder: {
+          findUnique: vi.fn(async () => ({
+            id: "holder-1",
+            state: holderState,
+            executionToken: "execution-owner",
+          })),
+          update: vi.fn(async ({ data }) => {
+            holderState = data.state;
+          }),
+        },
+      });
+      const originalPublish = agentEventBus.publish.bind(agentEventBus);
+      const publish = vi.spyOn(agentEventBus, "publish");
+      const cleanupAtPublication: unknown[] = [];
+      publish.mockImplementation((topic, value) => {
+        if (topic === WORKTREE_CHANGED_TOPIC)
+          cleanupAtPublication.push({
+            executionToken: job.executionToken,
+            holderState,
+          });
+        originalPublish(topic, value);
+      });
+
+      await expect(
+        new AgentControlService().completeJob(
+          job.agentId,
+          job.id,
+          "CANCELLED",
+          { exitCode: null },
+          null,
+          "execution-owner",
+        ),
+      ).resolves.toMatchObject({
+        status: "CANCELLED",
+        executionToken: null,
+      });
+
+      expect(cleanupAtPublication).toEqual([
+        { executionToken: null, holderState: "RELEASED" },
+      ]);
+      expect(publish).toHaveBeenCalledWith(agentJobChangedTopic(job.id), {
+        agentJobChanged: job,
+      });
+    },
+  );
+
+  test("invalidates the codebase overview after persisting a queued operation", async () => {
+    getPrismaClient.mockResolvedValue({
+      agentJob: {
+        findUnique: vi.fn().mockResolvedValue(null),
+        create: vi.fn(async ({ data }) => data),
+      },
+      agentAuditEvent: { create: vi.fn() },
+    });
+    const publish = vi.spyOn(agentEventBus, "publish");
+
+    const job = await new AgentControlService().createJob({
+      agentId: "agent-1",
+      codebaseId: "codebase-1",
+      kind: "codebase.git.inspect",
+      payload: {
+        action: "STATE",
+        codebaseId: "codebase-1",
+        folder: "/repo",
+        expectedOrigin: "github.com/openai/codex",
+      },
+      idempotencyKey: "worktree-overview-queued-operation",
+    });
+
+    expect(job.status).toBe("QUEUED");
+    expect(publish).toHaveBeenCalledWith(WORKTREE_CHANGED_TOPIC, {
+      worktreeOverviewChanged: {
+        worktreeId: null,
+        codebaseId: "codebase-1",
+      },
+    });
   });
 });
 

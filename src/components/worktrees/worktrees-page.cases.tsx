@@ -1014,6 +1014,116 @@ export function registerWorktreesPageTests(
     if (section === "cards") {
       test.each(
         ["cards", "table"].flatMap((layout) =>
+          [1, 2].map((count) => ({ layout, count })),
+        ),
+      )(
+        "updates $count command operations through cancellation events in $layout",
+        async ({ layout, count }) => {
+          const response = (await request("query Fixture")) as unknown as {
+            worktreeOverview: WorktreeOverview;
+          };
+          const worktree =
+            response.worktreeOverview.agents[0]!.codebases[0]!.worktrees[0]!;
+          const jobs = Array.from({ length: count }, (_, index) => ({
+            id: `command-job-${index}`,
+            agentId: "agent-1",
+            kind: "command.run",
+            commandName: index === 0 ? "Run dev" : "Run tests",
+            payload: {},
+            status: "RUNNING" as const,
+            result: null,
+            error: null,
+            timeoutSeconds: 0,
+            createdAt: new Date(0).toISOString(),
+            startedAt: new Date(0).toISOString(),
+            finishedAt: null,
+            updatedAt: new Date(0).toISOString(),
+          }));
+          worktree.activeJobs = jobs;
+          request.mockImplementation(async (query, variables) => {
+            if (query.includes("CommandTargetSummaries")) {
+              const { targets } = variables as {
+                targets: { resourceKind: string; resourceId: string }[];
+              };
+              return {
+                commandTargetSummaries: targets.map((target) => ({
+                  ...target,
+                  commands: [],
+                  activeRuns: [],
+                  recentRuns: [],
+                })),
+              } as never;
+            }
+            return structuredClone(response) as never;
+          });
+          let invalidateOverview!: () => void;
+          subscriptions.mockReturnValue({
+            subscribe: vi.fn(
+              (
+                operation: { query: string },
+                sink: { next: (value: unknown) => void },
+              ) => {
+                if (operation.query.includes("subscription WorktreesChanged"))
+                  invalidateOverview = () =>
+                    sink.next({
+                      data: {
+                        worktreeOverviewChanged: {
+                          worktreeId: "worktree-1",
+                          codebaseId: "codebase-1",
+                        },
+                      },
+                    });
+                return vi.fn();
+              },
+            ),
+          } as never);
+          window.localStorage.setItem("worktrees-layout", layout);
+          render(<WorktreesPage />);
+          await screen.findByText("feature/AIDE-24");
+          if (count > 1) {
+            fireEvent.click(
+              screen.getByRole("button", { name: "2 operations" }),
+            );
+            await screen.findByRole("dialog", { name: "Active operations" });
+          }
+          expect(
+            screen.getByRole("link", {
+              name:
+                count === 1 ? "Command: Run dev" : "Command: Run dev Running",
+            }),
+          ).toBeDefined();
+
+          worktree.activeJobs = [
+            { ...jobs[0]!, status: "CANCELLING" },
+            ...jobs.slice(1),
+          ];
+          await act(async () => invalidateOverview());
+          expect(
+            await screen.findByRole("link", {
+              name: "Command: Run dev Cancelling",
+            }),
+          ).toBeDefined();
+
+          worktree.activeJobs = jobs.slice(1);
+          await act(async () => invalidateOverview());
+          await waitFor(() =>
+            expect(
+              screen.queryByRole("link", { name: /Command: Run dev/ }),
+            ).toBeNull(),
+          );
+          expect(
+            screen.queryByRole("dialog", { name: "Active operations" }),
+          ).toBeNull();
+          if (count > 1)
+            expect(
+              screen.getByRole("link", { name: "Command: Run tests" }),
+            ).toBeDefined();
+          expect(navigation.push).not.toHaveBeenCalled();
+        },
+      );
+
+      test.each(
+        ["cards", "table"].flatMap((layout) =>
           [0, 1, 2, 8].map((count) => ({ layout, count })),
         ),
       )(
