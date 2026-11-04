@@ -13,12 +13,10 @@ const context = (agentId: string | null) => ({ agentId }) as GraphQLContext;
 describe("build resolver authorization", () => {
   test("updates iOS project defaults only on the control plane", async () => {
     const service = {
-      updateProject: vi
-        .fn()
-        .mockResolvedValue({
-          id: "project-1",
-          defaultDestinationType: "PHYSICAL_DEVICE",
-        }),
+      updateProject: vi.fn().mockResolvedValue({
+        id: "project-1",
+        defaultDestinationType: "PHYSICAL_DEVICE",
+      }),
     } as unknown as BuildsService;
     const mutation = createBuildResolvers(service).Mutation;
     const input = {
