@@ -59,6 +59,7 @@ import { formatDateValue } from "@/lib/date-format";
 import type {
   BuildAction,
   BuildConfiguration,
+  BuildDestination,
   BuildScript,
   IosAppProject,
 } from "./types";
@@ -74,7 +75,7 @@ import {
 } from "./export-settings-form";
 
 const PROJECT_FIELDS = `
-  id type
+  id type defaultDestinationType
   configurations {
   id name iconKey scheme buildConfiguration defaultAction advancedSettings autoExport exportSettings createdAt updatedAt
     source { id kind relativePath }
@@ -248,6 +249,39 @@ export function IosProjectSection({
     }
   };
 
+  const updateDefaultDestinationType = async (
+    defaultDestinationType: BuildDestination["type"],
+  ) => {
+    if (!project) return;
+    setBusy(true);
+    setError(null);
+    try {
+      const data = await controlPlaneRequest<{
+        updateIosAppProject: {
+          defaultDestinationType: BuildDestination["type"];
+        };
+      }>(
+        `mutation UpdateIosAppProject($id: ID!, $defaultDestinationType: BuildDestinationType!) {
+          updateIosAppProject(id: $id, defaultDestinationType: $defaultDestinationType) { id defaultDestinationType }
+        }`,
+        { id: project.id, defaultDestinationType },
+      );
+      setProject((current) =>
+        current
+          ? {
+              ...current,
+              defaultDestinationType:
+                data.updateIosAppProject.defaultDestinationType,
+            }
+          : current,
+      );
+    } catch (value) {
+      setError(value instanceof Error ? value.message : String(value));
+    } finally {
+      setBusy(false);
+    }
+  };
+
   if (loading) {
     return (
       <p className="flex items-center gap-2 text-muted-foreground">
@@ -332,6 +366,41 @@ export function IosProjectSection({
               {t("removeProject")}
             </Button>
           </div>
+          <Card>
+            <CardHeader>
+              <CardTitle>{t("iosAppSettings")}</CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-2">
+              <Label htmlFor="default-destination-type">
+                {t("defaultDestinationType")}
+              </Label>
+              <Select
+                disabled={busy}
+                value={project.defaultDestinationType}
+                onValueChange={(value) =>
+                  void updateDefaultDestinationType(
+                    value as BuildDestination["type"],
+                  )
+                }
+              >
+                <SelectTrigger
+                  id="default-destination-type"
+                  className="w-full sm:w-72"
+                >
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="PHYSICAL_DEVICE">
+                    {t("physicalDevice")}
+                  </SelectItem>
+                  <SelectItem value="SIMULATOR">{t("simulator")}</SelectItem>
+                </SelectContent>
+              </Select>
+              <p className="text-xs text-muted-foreground">
+                {t("defaultDestinationTypeDescription")}
+              </p>
+            </CardContent>
+          </Card>
           <Card>
             <CardHeader className="flex-row items-center justify-between">
               <CardTitle>{t("buildConfigurations")}</CardTitle>

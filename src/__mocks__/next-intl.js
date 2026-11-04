@@ -2050,6 +2050,10 @@ const mockTranslations = {
     automatic: "Automatic",
     manual: "Manual",
     iosApp: "iOS App",
+    iosAppSettings: "iOS App settings",
+    defaultDestinationType: "Default destination type",
+    defaultDestinationTypeDescription:
+      "Choose the destination type initially selected for builds. Archive always uses a physical device. Changes are saved automatically.",
     parseCheckout: "Checkout used for parsing",
     parseCheckoutDescription:
       "Saved configurations are repository-wide. Source discovery, validation, and parse status use the selected agent checkout.",

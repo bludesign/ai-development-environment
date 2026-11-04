@@ -31,6 +31,7 @@ beforeEach(() => {
         iosAppProject: {
           id: "project-1",
           type: "IOS_APP",
+          defaultDestinationType: "SIMULATOR",
           configurations: [
             {
               id: "configuration-1",
@@ -100,6 +101,44 @@ afterEach(() => {
 });
 
 describe("iOS project source card", () => {
+  test("saves the repository default destination type and retains it on failure", async () => {
+    const original = request.getMockImplementation()!;
+    let saves = 0;
+    request.mockImplementation(async (query, variables) => {
+      if (String(query).includes("mutation UpdateIosAppProject")) {
+        saves += 1;
+        if (saves > 1) throw new Error("Could not save destination");
+        return {
+          updateIosAppProject: { defaultDestinationType: "PHYSICAL_DEVICE" },
+        } as never;
+      }
+      return original(query, variables);
+    });
+    render(<IosProjectSection codebaseId="codebase-1" />);
+    const selector = await screen.findByRole("combobox", {
+      name: "Default destination type",
+    });
+    expect(selector.textContent).toContain("Simulator");
+    fireEvent.click(selector);
+    fireEvent.click(
+      await screen.findByRole("option", { name: "Physical Device" }),
+    );
+    await waitFor(() =>
+      expect(selector.textContent).toContain("Physical Device"),
+    );
+    expect(request).toHaveBeenCalledWith(
+      expect.stringContaining("mutation UpdateIosAppProject"),
+      {
+        id: "project-1",
+        defaultDestinationType: "PHYSICAL_DEVICE",
+      },
+    );
+    fireEvent.click(selector);
+    fireEvent.click(await screen.findByRole("option", { name: "Simulator" }));
+    expect(await screen.findByText("Could not save destination")).toBeDefined();
+    expect(selector.textContent).toContain("Physical Device");
+  });
+
   test("uses a wide configuration dialog with labeled icon previews", async () => {
     render(<IosProjectSection codebaseId="codebase-1" />);
 

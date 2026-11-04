@@ -819,6 +819,24 @@ export class BuildsService {
     return this.project(codebaseId);
   }
 
+  async updateProject(id: string, defaultDestinationType: string) {
+    if (
+      defaultDestinationType !== "SIMULATOR" &&
+      defaultDestinationType !== "PHYSICAL_DEVICE"
+    ) {
+      throw new Error(
+        "Default destination type must be SIMULATOR or PHYSICAL_DEVICE",
+      );
+    }
+    const prisma = await getPrismaClient();
+    const project = await prisma.codebaseProject.update({
+      where: { id, type: "IOS_APP" },
+      data: { defaultDestinationType },
+    });
+    this.publishRepository(project.repositoryId);
+    return this.repositoryProject(project.repositoryId);
+  }
+
   async projectForWorktree(worktreeId: string) {
     const prisma = await getPrismaClient();
     const worktree = await prisma.worktree.findUnique({

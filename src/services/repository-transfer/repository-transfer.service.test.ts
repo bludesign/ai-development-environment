@@ -630,6 +630,70 @@ describe("portable repository transfers", () => {
 });
 
 describe("complete repository settings", () => {
+  test("round trips iOS defaults without saved configurations and preserves omitted preferences", async () => {
+    await prisma.codebaseProject.create({
+      data: {
+        id: "source-project",
+        repositoryId: "source",
+        type: "IOS_APP",
+        defaultDestinationType: "PHYSICAL_DEVICE",
+      },
+    });
+    const imported = await input();
+    expect(
+      (imported.payload as TransferPackage).entities.find(
+        (entity) => entity.kind === "REPOSITORY",
+      )?.fields.iosAppSettings,
+    ).toEqual({ defaultDestinationType: "PHYSICAL_DEVICE" });
+    await apply(imported);
+    expect(
+      await prisma.codebaseProject.findUnique({
+        where: {
+          repositoryId_type: { repositoryId: "destination", type: "IOS_APP" },
+        },
+      }),
+    ).toMatchObject({ defaultDestinationType: "PHYSICAL_DEVICE" });
+
+    const older = await input();
+    delete (older.payload as TransferPackage).entities.find(
+      (entity) => entity.kind === "REPOSITORY",
+    )!.fields.iosAppSettings;
+    await apply(older, "older-package");
+    expect(
+      await prisma.codebaseProject.findUnique({
+        where: {
+          repositoryId_type: { repositoryId: "destination", type: "IOS_APP" },
+        },
+      }),
+    ).toMatchObject({ defaultDestinationType: "PHYSICAL_DEVICE" });
+
+    await prisma.codebaseProject.update({
+      where: { id: "source-project" },
+      data: { defaultDestinationType: "SIMULATOR" },
+    });
+    const excluded = await input();
+    excluded.excludedKeys = ["repository:source/field/iosAppSettings"];
+    await apply(excluded, "excluded-setting");
+    expect(
+      await prisma.codebaseProject.findUnique({
+        where: {
+          repositoryId_type: { repositoryId: "destination", type: "IOS_APP" },
+        },
+      }),
+    ).toMatchObject({ defaultDestinationType: "PHYSICAL_DEVICE" });
+  });
+
+  test("blocks unsupported iOS default destination types before import", async () => {
+    const invalid = await input();
+    (invalid.payload as TransferPackage).entities.find(
+      (entity) => entity.kind === "REPOSITORY",
+    )!.fields.iosAppSettings = { defaultDestinationType: "HOST" };
+    expect((await service.preview(invalid)).blockers.join(" ")).toContain(
+      "SIMULATOR",
+    );
+    expect(await prisma.codebaseProject.count()).toBe(0);
+  });
+
   test("imports iOS configuration by relative source without requiring a checkout", async () => {
     await prisma.codebaseProject.create({
       data: {
@@ -668,6 +732,7 @@ describe("complete repository settings", () => {
       scheme: "Mobile",
       source: { relativePath: "Mobile.xcodeproj" },
     });
+    expect(project?.defaultDestinationType).toBe("SIMULATOR");
     expect(await prisma.codebase.count()).toBe(0);
   });
   test("maps skill groups, imports paused retry rules, and preserves unlisted scripts", async () => {

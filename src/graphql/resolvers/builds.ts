@@ -357,6 +357,17 @@ export const createBuildResolvers = (service: BuildsService) => ({
       requireControlPlane(context);
       return service.createProject(codebaseId);
     },
+    updateIosAppProject: (
+      _root: unknown,
+      {
+        id,
+        defaultDestinationType,
+      }: { id: string; defaultDestinationType: string },
+      context: GraphQLContext,
+    ) => {
+      requireControlPlane(context);
+      return service.updateProject(id, defaultDestinationType);
+    },
     saveBuildConfiguration: (
       _root: unknown,
       { input }: { input: SaveBuildConfigurationInput },

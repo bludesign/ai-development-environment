@@ -89,6 +89,7 @@ export type BuildScript = {
 export type IosAppProject = {
   id: string;
   type: "IOS_APP";
+  defaultDestinationType: BuildDestination["type"];
   configurations: BuildConfiguration[];
   allowedScripts: Array<{ position: number; script: BuildScript }>;
 };

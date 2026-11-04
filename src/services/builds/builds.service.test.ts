@@ -132,6 +132,37 @@ describe("BuildsService", () => {
     cachedArtifact.mockResolvedValue(null);
   });
 
+  test("updates the shared iOS project destination default and rejects non-device destinations", async () => {
+    const update = vi.fn().mockResolvedValue({ repositoryId: "repository-1" });
+    const stored = {
+      id: "project-1",
+      defaultDestinationType: "PHYSICAL_DEVICE",
+    };
+    getPrismaClient.mockResolvedValue({ codebaseProject: { update } });
+    const service = new BuildsService(control());
+    const project = vi
+      .spyOn(service, "repositoryProject")
+      .mockResolvedValue(stored as never);
+    const publish = vi.spyOn(agentEventBus, "publish");
+
+    await expect(
+      service.updateProject("project-1", "PHYSICAL_DEVICE"),
+    ).resolves.toEqual(stored);
+    expect(update).toHaveBeenCalledWith({
+      where: { id: "project-1", type: "IOS_APP" },
+      data: { defaultDestinationType: "PHYSICAL_DEVICE" },
+    });
+    expect(project).toHaveBeenCalledWith("repository-1");
+    expect(publish).toHaveBeenCalled();
+
+    update.mockClear();
+    await expect(service.updateProject("project-1", "HOST")).rejects.toThrow(
+      "SIMULATOR or PHYSICAL_DEVICE",
+    );
+    expect(update).not.toHaveBeenCalled();
+    publish.mockRestore();
+  });
+
   test("orders run agents and explains cross-agent eligibility", async () => {
     const agent = (
       id: string,

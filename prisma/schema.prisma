@@ -1570,14 +1570,15 @@ model SkillSyncItem {
 }
 
 model CodebaseProject {
-  id             String               @id
-  repositoryId   String
-  type           String
-  createdAt      DateTime             @default(now())
-  updatedAt      DateTime             @updatedAt
-  repository     CodebaseRepository   @relation(fields: [repositoryId], references: [id], onDelete: Cascade)
-  sources        BuildSource[]
-  configurations BuildConfiguration[]
+  id                     String               @id
+  repositoryId           String
+  type                   String
+  defaultDestinationType String               @default("SIMULATOR")
+  createdAt              DateTime             @default(now())
+  updatedAt              DateTime             @updatedAt
+  repository             CodebaseRepository   @relation(fields: [repositoryId], references: [id], onDelete: Cascade)
+  sources                BuildSource[]
+  configurations         BuildConfiguration[]
 
   @@unique([repositoryId, type])
   @@index([repositoryId])
