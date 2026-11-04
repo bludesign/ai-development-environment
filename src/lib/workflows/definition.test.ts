@@ -8,6 +8,7 @@ import {
   resourceManualSeedPaths,
   sanitizeWorkflowExportDefinition,
   validateWorkflowDefinition,
+  workflowConnectionSummary,
   workflowTriggerChoices,
   WORKFLOW_STEP_CATALOG,
   WORKFLOW_STEP_KINDS,
@@ -77,6 +78,134 @@ describe("workflow definition validation", () => {
         expect.objectContaining({ code: "SCHEMA_INVALID", severity: "ERROR" }),
       ]),
     );
+  });
+
+  test("schema errors retain the affected graph row and field", () => {
+    const value = definition([node("load")]);
+    value.nodes[0]!.name = "";
+    value.triggers[0]!.name = "";
+    value.edges[0]!.sourceHandle = "";
+
+    expect(validateWorkflowDefinition(value).diagnostics).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          code: "SCHEMA_INVALID",
+          nodeId: "load",
+          path: "nodes.0.name",
+        }),
+        expect.objectContaining({
+          code: "SCHEMA_INVALID",
+          triggerId: "manual",
+          path: "triggers.0.name",
+        }),
+        expect.objectContaining({
+          code: "SCHEMA_INVALID",
+          edgeId: "edge-start",
+          path: "edges.0.sourceHandle",
+        }),
+      ]),
+    );
+    const malformedId = {
+      ...value,
+      edges: [{ ...value.edges[0], id: 42 }],
+    };
+    expect(validateWorkflowDefinition(malformedId).diagnostics).toContainEqual(
+      expect.objectContaining({ code: "SCHEMA_INVALID", path: "edges.0.id" }),
+    );
+    expect(
+      validateWorkflowDefinition(malformedId).diagnostics.find(
+        ({ path }) => path === "edges.0.id",
+      ),
+    ).not.toHaveProperty("edgeId");
+  });
+
+  test("connection errors identify their endpoints and exact edge row", () => {
+    const value = definition([node("load")]);
+    value.triggers[0]!.name = "Start release";
+    value.nodes[0]!.name = "Load ticket";
+    value.edges.push(
+      { ...value.edges[0]!, target: "missing-step" },
+      { ...value.edges[0]!, id: "back-to-trigger", target: "manual" },
+    );
+
+    expect(validateWorkflowDefinition(value).diagnostics).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          code: "DUPLICATE_EDGE_ID",
+          edgeId: "edge-start",
+          path: "edges.1",
+          message: expect.stringContaining(
+            "Start release (Success) → Missing node (missing-step)",
+          ),
+        }),
+        expect.objectContaining({
+          code: "EDGE_ENDPOINT_MISSING",
+          edgeId: "edge-start",
+          path: "edges.1",
+          message: expect.stringContaining("missing-step"),
+        }),
+        expect.objectContaining({
+          code: "TRIGGER_HAS_INPUT",
+          triggerId: "manual",
+          edgeId: "back-to-trigger",
+          path: "edges.2",
+        }),
+      ]),
+    );
+  });
+
+  test("duplicate graph IDs retain row locations and trigger targets", () => {
+    const value = definition([node("load")]);
+    value.triggers.push({ ...value.triggers[0]! });
+    value.nodes.push({ ...value.nodes[0]! });
+
+    expect(validateWorkflowDefinition(value).diagnostics).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          code: "DUPLICATE_NODE_ID",
+          triggerId: "manual",
+          path: "triggers.1.id",
+        }),
+        expect.objectContaining({
+          code: "DUPLICATE_NODE_ID",
+          nodeId: "load",
+          path: "nodes.1.id",
+        }),
+      ]),
+    );
+  });
+
+  test("connection summaries resolve authored names, catalog names, and choices", () => {
+    const value = definition([node("notify", "NOTIFICATION_SEND")]);
+    value.triggers[0] = {
+      ...value.triggers[0]!,
+      name: "Release menu",
+      kind: "MANUAL_CHOICE",
+      config: { choices: [{ key: "ship", label: "Ship release" }] },
+    };
+    value.nodes[0]!.name = "Announce release";
+    const edge = { ...value.edges[0]!, sourceHandle: "ship" };
+
+    expect(workflowConnectionSummary(value, edge)).toBe(
+      "Release menu (Ship release) → Announce release",
+    );
+    delete value.nodes[0]!.name;
+    expect(workflowConnectionSummary(value, edge)).toContain(
+      WORKFLOW_STEP_CATALOG.find(({ kind }) => kind === "NOTIFICATION_SEND")!
+        .label,
+    );
+    expect(
+      workflowConnectionSummary(value, { ...edge, sourceHandle: "removed" }),
+    ).toContain('Release menu (Removed option "removed")');
+    expect(
+      workflowConnectionSummary(value, { ...edge, source: "missing-trigger" }),
+    ).toContain("Missing node (missing-trigger)");
+    expect(
+      workflowConnectionSummary(
+        { nodes: [{ id: "custom", kind: "UNKNOWN_KIND" }], triggers: [] },
+        { source: "custom", target: "custom", sourceHandle: "success" },
+      ),
+    ).toBe("custom (Success) → custom");
   });
 
   test("rejects cycles and unreachable nodes", () => {
@@ -476,7 +605,12 @@ describe("workflow definition validation", () => {
     expect(validateWorkflowDefinition(value).diagnostics).toEqual(
       expect.arrayContaining([
         expect.objectContaining({ code: "TRIGGER_CHOICES_REQUIRED" }),
-        expect.objectContaining({ code: "TRIGGER_CHOICE_HANDLE_UNKNOWN" }),
+        expect.objectContaining({
+          code: "TRIGGER_CHOICE_HANDLE_UNKNOWN",
+          edgeId: "edge-start",
+          path: "edges.0.sourceHandle",
+          message: expect.stringContaining('Removed option "success"'),
+        }),
       ]),
     );
   });

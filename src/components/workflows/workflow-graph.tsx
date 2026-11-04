@@ -11,6 +11,7 @@ import {
   useReactFlow,
   useStore,
   useStoreApi,
+  useUpdateNodeInternals,
   type Dimensions,
   type Edge,
   type Node,
@@ -18,6 +19,7 @@ import {
   type NodeProps,
 } from "@xyflow/react";
 import {
+  AlertTriangle,
   Copy,
   ExternalLink,
   History,
@@ -48,6 +50,7 @@ import {
 import { cn } from "@/lib/utils";
 import {
   isChoiceTriggerKind,
+  workflowConnectionSummary,
   workflowStaticSourceHandles,
   workflowTriggerChoices,
 } from "@/lib/workflows/definition";
@@ -73,7 +76,7 @@ import {
 } from "./basic-layout";
 
 /** One source connector on a card, in the order it is laid out along the edge. */
-type WorkflowSourceHandle = { id: string; label: string };
+type WorkflowSourceHandle = { id: string; label: string; invalid?: boolean };
 
 type WorkflowNodeData = {
   label: string;
@@ -137,8 +140,22 @@ export function workflowStatusVariant(status: string) {
   return "outline" as const;
 }
 
-function statusClass(status: string | null, diagnostic: boolean): string {
-  if (diagnostic) return "border-destructive ring-2 ring-destructive/20";
+function diagnosticSeverity(diagnostics: WorkflowDiagnostic[]) {
+  return diagnostics.some(({ severity }) => severity === "ERROR")
+    ? "ERROR"
+    : diagnostics.length
+      ? "WARNING"
+      : null;
+}
+
+function statusClass(
+  status: string | null,
+  severity: WorkflowDiagnostic["severity"] | null,
+): string {
+  if (severity === "ERROR")
+    return "border-destructive ring-2 ring-destructive/20";
+  if (severity === "WARNING")
+    return "border-amber-500 ring-2 ring-amber-500/20";
   if (status === "FAILED" || status === "BLOCKED") return "border-destructive";
   if (status === "RUNNING") return "border-blue-500 ring-2 ring-blue-500/20";
   if (status === "WAITING") return "border-amber-500 ring-2 ring-amber-500/20";
@@ -170,7 +187,16 @@ function WorkflowCard({ data, id, selected }: NodeProps<WorkflowFlowNode>) {
   const t = useTranslations("workflows");
   const actions = useContext(WorkflowNodeActionsContext);
   const store = useStoreApi();
+  const updateNodeInternals = useUpdateNodeInternals();
   const handles = data.handles;
+  const handleSignature = JSON.stringify([data.handleLayout, handles]);
+  useEffect(() => {
+    updateNodeInternals(id);
+  }, [handleSignature, id, updateNodeInternals]);
+  const severity = diagnosticSeverity(data.diagnostics);
+  const diagnostic =
+    data.diagnostics.find(({ severity }) => severity === "ERROR") ??
+    data.diagnostics[0];
   const vertical = data.handleLayout === "TOP_BOTTOM";
   // A choice trigger's outputs are user-named, so they are drawn as labelled
   // rows with the connector on each row rather than as anonymous dots. Only the
@@ -182,7 +208,7 @@ function WorkflowCard({ data, id, selected }: NodeProps<WorkflowFlowNode>) {
     <div
       className={cn(
         "relative min-w-52 rounded-xl border bg-card p-3 text-card-foreground shadow-sm",
-        statusClass(data.status, data.diagnostics.length > 0),
+        statusClass(data.status, severity),
         selected && "ring-2 ring-primary/35",
         data.currentPage &&
           "bg-primary/5 outline-2 outline-offset-2 outline-primary/70",
@@ -250,9 +276,18 @@ function WorkflowCard({ data, id, selected }: NodeProps<WorkflowFlowNode>) {
           )}
         </div>
       )}
-      {data.diagnostics.length > 0 && (
-        <p className="mt-2 max-w-56 text-[10px] leading-snug text-destructive">
-          {data.diagnostics[0]!.message}
+      {diagnostic && (
+        <p
+          className={cn(
+            "mt-2 flex max-w-56 items-start gap-1 text-[10px] leading-snug",
+            severity === "ERROR" ? "text-destructive" : "text-amber-600",
+          )}
+        >
+          <AlertTriangle
+            aria-hidden="true"
+            className="mt-0.5 size-3 shrink-0"
+          />
+          {diagnostic.message}
         </p>
       )}
       {data.provides.length > 0 && (
@@ -276,14 +311,27 @@ function WorkflowCard({ data, id, selected }: NodeProps<WorkflowFlowNode>) {
         <div className="mt-2 space-y-1">
           {handles.map((handle) => (
             <div
-              className="relative rounded-md bg-muted px-2 py-1 text-[10px] text-muted-foreground"
+              className={cn(
+                "relative rounded-md px-2 py-1 text-[10px]",
+                handle.invalid
+                  ? "bg-destructive/10 text-destructive"
+                  : "bg-muted text-muted-foreground",
+              )}
               key={handle.id}
             >
-              <span className="block truncate">{handle.label}</span>
+              <span className="block truncate">
+                {handle.invalid
+                  ? t("removedChoiceHandle", { handle: handle.label })
+                  : handle.label}
+              </span>
               {inlineChoiceHandles && (
                 <Handle
-                  className="size-3! border-2! border-background! bg-primary!"
+                  className={cn(
+                    "size-3! border-2! border-background!",
+                    handle.invalid ? "bg-destructive!" : "bg-primary!",
+                  )}
                   id={handle.id}
+                  isConnectable={handle.invalid ? false : undefined}
                   position={Position.Right}
                   /* The row sits inside the card's p-3, so pushing the
                      connector out by that padding lands it on the card edge
@@ -302,11 +350,12 @@ function WorkflowCard({ data, id, selected }: NodeProps<WorkflowFlowNode>) {
           <Handle
             className={cn(
               "size-3! border-2! border-background!",
-              handle.id === "failure" || handle.id === "catch"
+              handle.invalid || handle.id === "failure" || handle.id === "catch"
                 ? "bg-destructive!"
                 : "bg-primary!",
             )}
             id={handle.id}
+            isConnectable={handle.invalid ? false : undefined}
             key={handle.id}
             position={vertical ? Position.Bottom : Position.Right}
             /* The outcomes share one edge of the card, so they are spread
@@ -536,6 +585,178 @@ function displayedAttempt(
   return executions.at(-1);
 }
 
+type WorkflowEdgePresentation = Pick<
+  Edge,
+  | "style"
+  | "markerEnd"
+  | "ariaLabel"
+  | "label"
+  | "labelStyle"
+  | "labelShowBg"
+  | "labelBgStyle"
+  | "labelBgPadding"
+  | "labelBgBorderRadius"
+>;
+
+function edgeIdentity(edge: Edge) {
+  return JSON.stringify([
+    edge.id,
+    edge.source,
+    edge.target,
+    edge.sourceHandle ?? null,
+    edge.targetHandle ?? null,
+  ]);
+}
+
+/**
+ * Layers validation onto live elements without replacing their position,
+ * selection, or measured dimensions. Kept separate from graph construction so
+ * a validation result arriving during a drag cannot move the card back.
+ */
+export function applyWorkflowDiagnostics(
+  definition: WorkflowDefinition,
+  nodes: WorkflowFlowNode[],
+  edges: Edge[],
+  diagnostics: WorkflowDiagnostic[],
+): { nodes: WorkflowFlowNode[]; edges: Edge[] } {
+  const nodeDiagnostics = new Map<string, WorkflowDiagnostic[]>();
+  const edgeDiagnostics = new Map<string, WorkflowDiagnostic[]>();
+  const presentNodeIds = new Set(nodes.map(({ id }) => id));
+  for (const diagnostic of diagnostics) {
+    const nodeIds = new Set(
+      [diagnostic.nodeId, diagnostic.triggerId].filter((id): id is string =>
+        Boolean(id),
+      ),
+    );
+    const nodePath = /^(nodes|triggers)\.(\d+)(?:\.|$)/.exec(
+      diagnostic.path ?? "",
+    );
+    if (nodePath) {
+      const entries =
+        nodePath[1] === "nodes" ? definition.nodes : definition.triggers;
+      const entry = entries[Number(nodePath[2])];
+      if (entry) nodeIds.add(entry.id);
+    }
+    const edgePath = /^edges\.(\d+)(?:\.|$)/.exec(diagnostic.path ?? "");
+    const indexedEdge = edgePath
+      ? definition.edges[Number(edgePath[1])]
+      : undefined;
+    const matchingEdges =
+      indexedEdge && diagnostic.code !== "DUPLICATE_EDGE_ID"
+        ? [indexedEdge]
+        : diagnostic.edgeId
+          ? definition.edges.filter(({ id }) => id === diagnostic.edgeId)
+          : [];
+    for (const edge of matchingEdges) {
+      const key = edgeIdentity(edge);
+      edgeDiagnostics.set(key, [
+        ...(edgeDiagnostics.get(key) ?? []),
+        diagnostic,
+      ]);
+      // A dangling connection cannot be drawn. Its surviving endpoint still
+      // needs a visible indication of what is wrong.
+      if (
+        !presentNodeIds.has(edge.source) ||
+        !presentNodeIds.has(edge.target)
+      ) {
+        if (presentNodeIds.has(edge.source)) nodeIds.add(edge.source);
+        if (presentNodeIds.has(edge.target)) nodeIds.add(edge.target);
+      }
+    }
+    for (const nodeId of nodeIds) {
+      nodeDiagnostics.set(nodeId, [
+        ...(nodeDiagnostics.get(nodeId) ?? []),
+        diagnostic,
+      ]);
+    }
+  }
+
+  return {
+    nodes: nodes.map((node) => {
+      const entry = node.data.trigger
+        ? definition.triggers.find(({ id }) => id === node.id)
+        : definition.nodes.find(({ id }) => id === node.id);
+      const handles = entry
+        ? workflowSourceHandles(entry.kind, entry.config)
+        : node.data.handles.filter(({ invalid }) => !invalid);
+      if (node.data.trigger && isChoiceTriggerKind(node.data.kind)) {
+        const knownHandles = new Set(handles.map(({ id }) => id));
+        for (const edge of definition.edges) {
+          if (edge.source !== node.id || knownHandles.has(edge.sourceHandle))
+            continue;
+          // Keep a removed option drawable so its invalid connection can be
+          // selected and deleted. It cannot be used to make a new connection.
+          handles.push({
+            id: edge.sourceHandle,
+            label: edge.sourceHandle,
+            invalid: true,
+          });
+          knownHandles.add(edge.sourceHandle);
+        }
+      }
+      return {
+        ...node,
+        data: {
+          ...node.data,
+          handles,
+          diagnostics: nodeDiagnostics.get(node.id) ?? [],
+        },
+      };
+    }),
+    edges: edges.map((edge) => {
+      const related = edgeDiagnostics.get(edgeIdentity(edge)) ?? [];
+      const previous = edge.data?.workflowDiagnosticPresentation as
+        WorkflowEdgePresentation | undefined;
+      if (!related.length) {
+        if (!previous) return edge;
+        const data = { ...edge.data };
+        delete data.workflowDiagnosticPresentation;
+        return { ...edge, ...previous, data };
+      }
+      const baseline: WorkflowEdgePresentation = previous ?? {
+        style: edge.style,
+        markerEnd: edge.markerEnd,
+        ariaLabel: edge.ariaLabel,
+        label: edge.label,
+        labelStyle: edge.labelStyle,
+        labelShowBg: edge.labelShowBg,
+        labelBgStyle: edge.labelBgStyle,
+        labelBgPadding: edge.labelBgPadding,
+        labelBgBorderRadius: edge.labelBgBorderRadius,
+      };
+      const color =
+        diagnosticSeverity(related) === "ERROR"
+          ? "var(--destructive)"
+          : "var(--color-amber-500)";
+      const summary = workflowConnectionSummary(definition, edge);
+      return {
+        ...edge,
+        data: {
+          ...edge.data,
+          workflowDiagnosticPresentation: baseline,
+        },
+        style: { ...baseline.style, opacity: 1, stroke: color, strokeWidth: 3 },
+        markerEnd:
+          baseline.markerEnd && typeof baseline.markerEnd !== "string"
+            ? { ...baseline.markerEnd, color }
+            : baseline.markerEnd,
+        label: `⚠ ${summary}`,
+        labelStyle: {
+          ...baseline.labelStyle,
+          fill: color,
+          fontSize: 10,
+          fontWeight: 600,
+        },
+        labelShowBg: true,
+        labelBgStyle: { fill: "var(--card)" },
+        labelBgPadding: [6, 4] as [number, number],
+        labelBgBorderRadius: 4,
+        ariaLabel: `${summary}: ${related.map(({ message }) => message).join("; ")}`,
+      };
+    }),
+  };
+}
+
 export function workflowFlowElements(
   definition: WorkflowDefinition,
   options: {
@@ -647,7 +868,7 @@ export function workflowFlowElements(
       },
     };
   });
-  return { nodes, edges };
+  return applyWorkflowDiagnostics(definition, nodes, edges, diagnostics);
 }
 
 export function WorkflowGraph({

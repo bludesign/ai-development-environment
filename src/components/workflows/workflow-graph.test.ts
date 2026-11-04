@@ -1,12 +1,56 @@
 import { describe, expect, test } from "vitest";
 
 import {
+  applyWorkflowDiagnostics,
   workflowBasicHorizontalWheelDelta,
   workflowConstrainViewportAxis,
   workflowFlowElements,
   workflowSourceHandles,
 } from "./workflow-graph";
-import { emptyDefinition, type WorkflowAttempt } from "./types";
+import {
+  emptyDefinition,
+  type WorkflowAttempt,
+  type WorkflowDiagnostic,
+} from "./types";
+
+function diagnosticGraph() {
+  const definition = emptyDefinition("Diagnostics");
+  definition.triggers[0]!.name = "Start";
+  definition.nodes.push({
+    id: "notify",
+    kind: "NOTIFICATION_SEND",
+    name: "Notify team",
+    position: { x: 200, y: 100 },
+    config: {},
+    requiredPaths: [],
+    providedPaths: [],
+    retry: { maxAttempts: 1, strategy: "FIXED", delaySeconds: 1 },
+    failurePolicy: "FAIL",
+  });
+  definition.edges.push({
+    id: "start-notify",
+    source: "manual",
+    target: "notify",
+    sourceHandle: "success",
+    targetHandle: "input",
+  });
+  return definition;
+}
+
+function connectionDiagnostic(
+  patch: Partial<WorkflowDiagnostic> = {},
+): WorkflowDiagnostic {
+  return {
+    severity: "ERROR",
+    code: "EDGE_ENDPOINT_MISSING",
+    message: "The connection has a problem",
+    edgeId: "start-notify",
+    nodeId: null,
+    triggerId: null,
+    path: "edges.0",
+    ...patch,
+  };
+}
 
 describe("workflow run graph projection", () => {
   test("renders the command match connector", () => {
@@ -303,6 +347,140 @@ describe("workflow run graph projection", () => {
     expect(
       result.nodes.find(({ id }) => id === "blocked")?.data.diagnostics,
     ).toHaveLength(1);
+  });
+
+  test("highlights named connections while preserving live canvas state", () => {
+    const definition = diagnosticGraph();
+    definition.edges.push({ ...definition.edges[0]!, id: "unrelated" });
+    const elements = workflowFlowElements(definition);
+    elements.nodes[1] = {
+      ...elements.nodes[1]!,
+      position: { x: 500, y: 600 },
+      selected: true,
+      dragging: true,
+      measured: { width: 240, height: 130 },
+    };
+    elements.edges[0] = {
+      ...elements.edges[0]!,
+      selected: true,
+      animated: true,
+      style: { stroke: "purple", opacity: 0.3, strokeDasharray: "4" },
+      label: "Original label",
+      data: { retained: true },
+    };
+    const highlighted = applyWorkflowDiagnostics(
+      definition,
+      elements.nodes,
+      elements.edges,
+      [connectionDiagnostic()],
+    );
+
+    expect(highlighted.nodes[1]).toMatchObject({
+      position: { x: 500, y: 600 },
+      selected: true,
+      dragging: true,
+      measured: { width: 240, height: 130 },
+    });
+    expect(highlighted.edges[0]).toMatchObject({
+      selected: true,
+      animated: true,
+      style: {
+        stroke: "var(--destructive)",
+        opacity: 1,
+        strokeWidth: 3,
+        strokeDasharray: "4",
+      },
+      label: "⚠ Start (Success) → Notify team",
+      ariaLabel: "Start (Success) → Notify team: The connection has a problem",
+      data: { retained: true },
+    });
+    expect(highlighted.edges[1]).toBe(elements.edges[1]);
+    expect(elements.edges[0].style?.stroke).toBe("purple");
+
+    const cleared = applyWorkflowDiagnostics(
+      definition,
+      highlighted.nodes,
+      highlighted.edges,
+      [],
+    );
+    expect(cleared.edges[0]).toMatchObject({
+      style: elements.edges[0].style,
+      label: "Original label",
+      data: { retained: true },
+    });
+    expect(cleared.edges[0]?.data).not.toHaveProperty(
+      "workflowDiagnosticPresentation",
+    );
+    expect(cleared.edges[0]?.ariaLabel).toBeUndefined();
+  });
+
+  test("distinguishes warnings and gives errors precedence", () => {
+    const definition = diagnosticGraph();
+    const warning = connectionDiagnostic({ severity: "WARNING" });
+    const warned = workflowFlowElements(definition, { diagnostics: [warning] });
+    expect(warned.edges[0]?.style?.stroke).toBe("var(--color-amber-500)");
+    const failed = applyWorkflowDiagnostics(
+      definition,
+      warned.nodes,
+      warned.edges,
+      [warning, connectionDiagnostic()],
+    );
+    expect(failed.edges[0]?.style?.stroke).toBe("var(--destructive)");
+  });
+
+  test("uses indexed paths to locate errors and marks all duplicated IDs", () => {
+    const definition = diagnosticGraph();
+    definition.edges.push({
+      ...definition.edges[0]!,
+      sourceHandle: "failure",
+    });
+    const indexed = workflowFlowElements(definition, {
+      diagnostics: [connectionDiagnostic({ path: "edges.1.sourceHandle" })],
+    });
+    expect(indexed.edges[0]?.style?.stroke).toBeUndefined();
+    expect(indexed.edges[1]?.style?.stroke).toBe("var(--destructive)");
+    const duplicate = workflowFlowElements(definition, {
+      diagnostics: [
+        connectionDiagnostic({ code: "DUPLICATE_EDGE_ID", path: "edges.1" }),
+      ],
+    });
+    expect(duplicate.edges.map(({ style }) => style?.stroke)).toEqual([
+      "var(--destructive)",
+      "var(--destructive)",
+    ]);
+  });
+
+  test("highlights a dangling connection's surviving endpoint", () => {
+    const definition = diagnosticGraph();
+    definition.edges[0]!.target = "removed-step";
+    const result = workflowFlowElements(definition, {
+      diagnostics: [connectionDiagnostic()],
+    });
+    expect(result.nodes[0]?.data.diagnostics).toHaveLength(1);
+    expect(result.nodes[1]?.data.diagnostics).toEqual([]);
+  });
+
+  test("renders removed choices as disabled handles without changing the draft", () => {
+    const definition = diagnosticGraph();
+    definition.triggers[0] = {
+      ...definition.triggers[0]!,
+      kind: "MANUAL_CHOICE",
+      config: { choices: [{ key: "ready", label: "Ready for review" }] },
+    };
+    definition.edges[0]!.sourceHandle = "removed";
+    const original = JSON.stringify(definition);
+    const result = workflowFlowElements(definition);
+    expect(result.nodes[0]?.data.handles).toEqual([
+      { id: "ready", label: "Ready for review" },
+      { id: "removed", label: "removed", invalid: true },
+    ]);
+    expect(JSON.stringify(definition)).toBe(original);
+
+    definition.edges = [];
+    const cleared = applyWorkflowDiagnostics(definition, result.nodes, [], []);
+    expect(cleared.nodes[0]?.data.handles).toEqual([
+      { id: "ready", label: "Ready for review" },
+    ]);
   });
 
   test("gives a choice trigger one output per option, and steps the usual pair", () => {

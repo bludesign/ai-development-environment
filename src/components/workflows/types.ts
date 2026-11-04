@@ -98,6 +98,7 @@ export type WorkflowDiagnostic = {
   message: string;
   nodeId: string | null;
   triggerId: string | null;
+  edgeId?: string | null;
   path: string | null;
 };
 

@@ -261,7 +261,9 @@ type WorkflowDiagnostic {
   nodeId: ID
   "Identifier of the related trigger. May be null when unavailable or not applicable."
   triggerId: ID
-  "Filesystem path associated with this workflow diagnostic. May be null when unavailable or not applicable."
+  "Identifier of the related connection. May be null when unavailable or not applicable."
+  edgeId: ID
+  "Definition field or session-data path associated with this diagnostic. May be null when unavailable or not applicable."
   path: String
 }
 
