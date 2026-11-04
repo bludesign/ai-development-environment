@@ -36,6 +36,10 @@ type RunWorktreeRef {
   id: ID!
   "The folder associated with this run worktree ref."
   folder: String!
+  "The Git administrative directory for this worktree."
+  gitDirectory: String!
+  "Identifier of the codebase containing this worktree."
+  codebaseId: ID!
   "Git branch associated with this run worktree ref. May be null when unavailable or not applicable."
   branch: String
   "The highlight color associated with this run worktree ref. May be null when unavailable or not applicable."
