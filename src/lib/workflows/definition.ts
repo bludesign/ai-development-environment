@@ -2898,8 +2898,75 @@ export type WorkflowDiagnostic = {
   message: string;
   nodeId?: string;
   triggerId?: string;
+  edgeId?: string;
   path?: string;
 };
+
+/** A connection label that remains useful when a choice or endpoint was removed. */
+export function workflowConnectionSummary(
+  definition: {
+    nodes: readonly { id: string; kind: string; name?: string }[];
+    triggers: readonly {
+      id: string;
+      kind: string;
+      name?: string;
+      config?: unknown;
+    }[];
+  },
+  edge: { source: string; target: string; sourceHandle?: string | null },
+): string {
+  const endpointLabel = (id: string): string => {
+    const trigger = definition.triggers.find((entry) => entry.id === id);
+    if (trigger) {
+      return (
+        trigger.name?.trim() ||
+        WORKFLOW_TRIGGER_BY_KIND.get(trigger.kind as WorkflowTriggerKind)
+          ?.label ||
+        id
+      );
+    }
+    const node = definition.nodes.find((entry) => entry.id === id);
+    return node
+      ? node.name?.trim() ||
+          WORKFLOW_STEP_BY_KIND.get(node.kind as WorkflowStepKind)?.label ||
+          id
+      : `Missing node (${id})`;
+  };
+  const source = definition.triggers.find(({ id }) => id === edge.source);
+  const handle = edge.sourceHandle ?? "success";
+  const handleLabel =
+    source && isChoiceTriggerKind(source.kind)
+      ? (workflowTriggerChoices(source.config).find(({ key }) => key === handle)
+          ?.label ?? `Removed option "${handle}"`)
+      : handle.charAt(0).toUpperCase() + handle.slice(1).replaceAll("_", " ");
+  return `${endpointLabel(edge.source)} (${handleLabel}) → ${endpointLabel(edge.target)}`;
+}
+
+function workflowSchemaDiagnosticTarget(
+  value: unknown,
+  path: readonly PropertyKey[],
+): Pick<WorkflowDiagnostic, "nodeId" | "triggerId" | "edgeId"> {
+  const [collection, index] = path;
+  if (
+    !value ||
+    typeof value !== "object" ||
+    (collection !== "nodes" &&
+      collection !== "triggers" &&
+      collection !== "edges") ||
+    typeof index !== "number"
+  )
+    return {};
+  const rows = (value as Record<string, unknown>)[collection];
+  const row = Array.isArray(rows) ? rows[index] : null;
+  const id =
+    row && typeof row === "object" ? (row as { id?: unknown }).id : null;
+  if (typeof id !== "string" || !id) return {};
+  return collection === "nodes"
+    ? { nodeId: id }
+    : collection === "triggers"
+      ? { triggerId: id }
+      : { edgeId: id };
+}
 
 export function emptyWorkflowDefinition(
   name = "Untitled workflow",
@@ -2995,6 +3062,83 @@ function pathCovers(provided: string, required: string): boolean {
 
 function pathsOverlap(first: string, second: string): boolean {
   return pathCovers(first, second) || pathCovers(second, first);
+}
+
+type WorkflowExecutionCondition = ReadonlyMap<string, string>;
+
+/**
+ * Each condition describes one way a step can run. Keep alternatives through
+ * joins: "don't commit OR (commit AND clean)" is exclusive with "commit AND
+ * dirty", even though neither decision alone proves that exclusivity.
+ */
+function workflowExecutionConditions(
+  definition: WorkflowDefinition,
+  topological: readonly string[],
+): Map<string, WorkflowExecutionCondition[]> {
+  const conditions = new Map<string, WorkflowExecutionCondition[]>();
+  const decisions = new Map<string, ReadonlySet<string>>();
+  for (const trigger of definition.triggers) {
+    // The empty key cannot be a graph id; every run selects a single trigger.
+    conditions.set(trigger.id, [new Map([["", trigger.id]])]);
+    if (isChoiceTriggerKind(trigger.kind))
+      decisions.set(
+        trigger.id,
+        new Set(workflowTriggerChoices(trigger.config).map(({ key }) => key)),
+      );
+  }
+  for (const node of definition.nodes) {
+    if (node.kind === "CONTROL_IF")
+      decisions.set(node.id, new Set(["true", "false"]));
+  }
+  const incoming = new Map<string, WorkflowDefinition["edges"]>();
+  for (const edge of definition.edges) {
+    const edges = incoming.get(edge.target) ?? [];
+    edges.push(edge);
+    incoming.set(edge.target, edges);
+  }
+  const covers = (
+    left: WorkflowExecutionCondition,
+    right: WorkflowExecutionCondition,
+  ) => [...left].every(([id, choice]) => right.get(id) === choice);
+  for (const id of topological) {
+    let alternatives: WorkflowExecutionCondition[] = [];
+    paths: for (const edge of incoming.get(id) ?? []) {
+      for (const prior of conditions.get(edge.source) ?? [new Map()]) {
+        const next = new Map(prior);
+        if (decisions.get(edge.source)?.has(edge.sourceHandle)) {
+          if (
+            next.has(edge.source) &&
+            next.get(edge.source) !== edge.sourceHandle
+          )
+            continue;
+          next.set(edge.source, edge.sourceHandle);
+        }
+        if (alternatives.some((condition) => covers(condition, next))) continue;
+        alternatives = alternatives.filter(
+          (condition) => !covers(next, condition),
+        );
+        alternatives.push(next);
+        // Path counts can grow exponentially. Widen to unknown, rather than
+        // dropping paths and accidentally accepting a real write conflict.
+        if (alternatives.length > 64) {
+          alternatives = [new Map()];
+          break paths;
+        }
+      }
+    }
+    conditions.set(id, alternatives.length ? alternatives : [new Map()]);
+  }
+  return conditions;
+}
+
+function executionConditionsCompatible(
+  first: WorkflowExecutionCondition,
+  second: WorkflowExecutionCondition,
+): boolean {
+  for (const [id, choice] of first) {
+    if (second.has(id) && second.get(id) !== choice) return false;
+  }
+  return true;
 }
 
 function intersection(sets: Set<string>[]): Set<string> {
@@ -3250,45 +3394,62 @@ export function validateWorkflowDefinition(value: unknown): {
         code: "SCHEMA_INVALID",
         message: issue.message,
         path: issue.path.join("."),
+        ...workflowSchemaDiagnosticTarget(value, issue.path),
       })),
     };
   }
   const definition = migrateWorkflowDefinition(parsed.data);
   const diagnostics: WorkflowDiagnostic[] = [];
   const allIds = new Set<string>();
-  for (const item of [...definition.triggers, ...definition.nodes]) {
-    if (allIds.has(item.id)) {
-      diagnostics.push({
-        severity: "ERROR",
-        code: "DUPLICATE_NODE_ID",
-        message: `Duplicate graph id ${item.id}`,
-        nodeId: item.id,
-      });
+  for (const [collection, items] of [
+    ["triggers", definition.triggers],
+    ["nodes", definition.nodes],
+  ] as const) {
+    for (const [index, item] of items.entries()) {
+      if (allIds.has(item.id)) {
+        diagnostics.push({
+          severity: "ERROR",
+          code: "DUPLICATE_NODE_ID",
+          message: `Duplicate graph id ${item.id}`,
+          ...(collection === "triggers"
+            ? { triggerId: item.id }
+            : { nodeId: item.id }),
+          path: `${collection}.${index}.id`,
+        });
+      }
+      allIds.add(item.id);
     }
-    allIds.add(item.id);
   }
   const edgeIds = new Set<string>();
-  for (const edge of definition.edges) {
+  for (const [index, edge] of definition.edges.entries()) {
+    const path = `edges.${index}`;
+    const summary = () => workflowConnectionSummary(definition, edge);
     if (edgeIds.has(edge.id))
       diagnostics.push({
         severity: "ERROR",
         code: "DUPLICATE_EDGE_ID",
-        message: `Duplicate edge id ${edge.id}`,
+        message: `Connection ${summary()} has a duplicate connection ID (${edge.id})`,
+        edgeId: edge.id,
+        path,
       });
     edgeIds.add(edge.id);
     if (!allIds.has(edge.source) || !allIds.has(edge.target)) {
       diagnostics.push({
         severity: "ERROR",
         code: "EDGE_ENDPOINT_MISSING",
-        message: `Edge ${edge.id} references a missing endpoint`,
+        message: `Connection ${summary()} references a missing endpoint`,
+        edgeId: edge.id,
+        path,
       });
     }
     if (definition.triggers.some(({ id }) => id === edge.target)) {
       diagnostics.push({
         severity: "ERROR",
         code: "TRIGGER_HAS_INPUT",
-        message: "Triggers cannot have incoming edges",
+        message: `Connection ${summary()} enters a trigger, which cannot have incoming connections`,
         triggerId: edge.target,
+        edgeId: edge.id,
+        path,
       });
     }
   }
@@ -3561,14 +3722,16 @@ export function validateWorkflowDefinition(value: unknown): {
           triggerId: triggerDefinition.id,
         });
       const keys = new Set(choices.map(({ key }) => key));
-      for (const edge of definition.edges) {
+      for (const [index, edge] of definition.edges.entries()) {
         if (edge.source !== triggerDefinition.id) continue;
         if (keys.has(edge.sourceHandle)) continue;
         diagnostics.push({
           severity: "ERROR",
           code: "TRIGGER_CHOICE_HANDLE_UNKNOWN",
-          message: `Connection ${edge.id} leaves an option that no longer exists`,
+          message: `Connection ${workflowConnectionSummary(definition, edge)} leaves an option that no longer exists`,
           triggerId: triggerDefinition.id,
+          edgeId: edge.id,
+          path: `edges.${index}.sourceHandle`,
         });
       }
     }
@@ -3626,6 +3789,10 @@ export function validateWorkflowDefinition(value: unknown): {
     });
   }
 
+  const executionConditions = workflowExecutionConditions(
+    definition,
+    topological,
+  );
   for (
     let firstIndex = 0;
     firstIndex < definition.nodes.length;
@@ -3660,6 +3827,11 @@ export function validateWorkflowDefinition(value: unknown): {
       if (
         firstWrites.some((left) =>
           secondWrites.some((right) => pathsOverlap(left, right)),
+        ) &&
+        (executionConditions.get(first.id) ?? [new Map()]).some((left) =>
+          (executionConditions.get(second.id) ?? [new Map()]).some((right) =>
+            executionConditionsCompatible(left, right),
+          ),
         )
       )
         diagnostics.push({

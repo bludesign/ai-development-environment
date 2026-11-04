@@ -1,3 +1,7 @@
+import {
+  spawnExecutionProcess,
+  executionEnvironment,
+} from "../execution-recovery.js";
 import { randomUUID } from "node:crypto";
 import { homedir } from "node:os";
 import type { RunSessionInfo } from "@ai-development-environment/agent-contract/runs";
@@ -309,7 +313,14 @@ export class ClaudeAdapter implements ProviderAdapter {
           input.run.kind === "PLAN" ? "plan" : "bypassPermissions",
         allowDangerouslySkipPermissions: input.run.kind === "SESSION",
         includePartialMessages: true,
-        env: claudeEnvironment(),
+        env: { ...claudeEnvironment(), ...executionEnvironment() },
+        spawnClaudeCodeProcess: ({ command, args, cwd, env, signal }) =>
+          spawnExecutionProcess(command, args, {
+            cwd,
+            env,
+            signal,
+            stdio: ["pipe", "pipe", "pipe"],
+          }),
         disallowedTools: input.run.webSearchEnabled ? [] : ["WebSearch"],
         ...(input.mcpServer && !input.textOnly
           ? { mcpServers: claudeMcpServers(input.mcpServer) }
@@ -416,6 +427,7 @@ export class ClaudeAdapter implements ProviderAdapter {
             };
       } finally {
         messages.close();
+        if (executionEnvironment().AIDE_EXECUTION_MARKER) activeQuery?.close();
       }
     })();
 

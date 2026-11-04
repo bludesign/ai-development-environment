@@ -8,6 +8,7 @@ import {
   resourceManualSeedPaths,
   sanitizeWorkflowExportDefinition,
   validateWorkflowDefinition,
+  workflowConnectionSummary,
   workflowTriggerChoices,
   WORKFLOW_STEP_CATALOG,
   WORKFLOW_STEP_KINDS,
@@ -77,6 +78,134 @@ describe("workflow definition validation", () => {
         expect.objectContaining({ code: "SCHEMA_INVALID", severity: "ERROR" }),
       ]),
     );
+  });
+
+  test("schema errors retain the affected graph row and field", () => {
+    const value = definition([node("load")]);
+    value.nodes[0]!.name = "";
+    value.triggers[0]!.name = "";
+    value.edges[0]!.sourceHandle = "";
+
+    expect(validateWorkflowDefinition(value).diagnostics).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          code: "SCHEMA_INVALID",
+          nodeId: "load",
+          path: "nodes.0.name",
+        }),
+        expect.objectContaining({
+          code: "SCHEMA_INVALID",
+          triggerId: "manual",
+          path: "triggers.0.name",
+        }),
+        expect.objectContaining({
+          code: "SCHEMA_INVALID",
+          edgeId: "edge-start",
+          path: "edges.0.sourceHandle",
+        }),
+      ]),
+    );
+    const malformedId = {
+      ...value,
+      edges: [{ ...value.edges[0], id: 42 }],
+    };
+    expect(validateWorkflowDefinition(malformedId).diagnostics).toContainEqual(
+      expect.objectContaining({ code: "SCHEMA_INVALID", path: "edges.0.id" }),
+    );
+    expect(
+      validateWorkflowDefinition(malformedId).diagnostics.find(
+        ({ path }) => path === "edges.0.id",
+      ),
+    ).not.toHaveProperty("edgeId");
+  });
+
+  test("connection errors identify their endpoints and exact edge row", () => {
+    const value = definition([node("load")]);
+    value.triggers[0]!.name = "Start release";
+    value.nodes[0]!.name = "Load ticket";
+    value.edges.push(
+      { ...value.edges[0]!, target: "missing-step" },
+      { ...value.edges[0]!, id: "back-to-trigger", target: "manual" },
+    );
+
+    expect(validateWorkflowDefinition(value).diagnostics).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          code: "DUPLICATE_EDGE_ID",
+          edgeId: "edge-start",
+          path: "edges.1",
+          message: expect.stringContaining(
+            "Start release (Success) → Missing node (missing-step)",
+          ),
+        }),
+        expect.objectContaining({
+          code: "EDGE_ENDPOINT_MISSING",
+          edgeId: "edge-start",
+          path: "edges.1",
+          message: expect.stringContaining("missing-step"),
+        }),
+        expect.objectContaining({
+          code: "TRIGGER_HAS_INPUT",
+          triggerId: "manual",
+          edgeId: "back-to-trigger",
+          path: "edges.2",
+        }),
+      ]),
+    );
+  });
+
+  test("duplicate graph IDs retain row locations and trigger targets", () => {
+    const value = definition([node("load")]);
+    value.triggers.push({ ...value.triggers[0]! });
+    value.nodes.push({ ...value.nodes[0]! });
+
+    expect(validateWorkflowDefinition(value).diagnostics).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          code: "DUPLICATE_NODE_ID",
+          triggerId: "manual",
+          path: "triggers.1.id",
+        }),
+        expect.objectContaining({
+          code: "DUPLICATE_NODE_ID",
+          nodeId: "load",
+          path: "nodes.1.id",
+        }),
+      ]),
+    );
+  });
+
+  test("connection summaries resolve authored names, catalog names, and choices", () => {
+    const value = definition([node("notify", "NOTIFICATION_SEND")]);
+    value.triggers[0] = {
+      ...value.triggers[0]!,
+      name: "Release menu",
+      kind: "MANUAL_CHOICE",
+      config: { choices: [{ key: "ship", label: "Ship release" }] },
+    };
+    value.nodes[0]!.name = "Announce release";
+    const edge = { ...value.edges[0]!, sourceHandle: "ship" };
+
+    expect(workflowConnectionSummary(value, edge)).toBe(
+      "Release menu (Ship release) → Announce release",
+    );
+    delete value.nodes[0]!.name;
+    expect(workflowConnectionSummary(value, edge)).toContain(
+      WORKFLOW_STEP_CATALOG.find(({ kind }) => kind === "NOTIFICATION_SEND")!
+        .label,
+    );
+    expect(
+      workflowConnectionSummary(value, { ...edge, sourceHandle: "removed" }),
+    ).toContain('Release menu (Removed option "removed")');
+    expect(
+      workflowConnectionSummary(value, { ...edge, source: "missing-trigger" }),
+    ).toContain("Missing node (missing-trigger)");
+    expect(
+      workflowConnectionSummary(
+        { nodes: [{ id: "custom", kind: "UNKNOWN_KIND" }], triggers: [] },
+        { source: "custom", target: "custom", sourceHandle: "success" },
+      ),
+    ).toBe("custom (Success) → custom");
   });
 
   test("rejects cycles and unreachable nodes", () => {
@@ -476,7 +605,12 @@ describe("workflow definition validation", () => {
     expect(validateWorkflowDefinition(value).diagnostics).toEqual(
       expect.arrayContaining([
         expect.objectContaining({ code: "TRIGGER_CHOICES_REQUIRED" }),
-        expect.objectContaining({ code: "TRIGGER_CHOICE_HANDLE_UNKNOWN" }),
+        expect.objectContaining({
+          code: "TRIGGER_CHOICE_HANDLE_UNKNOWN",
+          edgeId: "edge-start",
+          path: "edges.0.sourceHandle",
+          message: expect.stringContaining('Removed option "success"'),
+        }),
       ]),
     );
   });
@@ -536,6 +670,230 @@ describe("workflow definition validation", () => {
       cwd: null,
       sessionPath: "ticket.key",
     });
+  });
+});
+
+describe("workflow parallel session writes", () => {
+  function connect(
+    value: WorkflowDefinition,
+    source: string,
+    target: string,
+    sourceHandle = "success",
+  ) {
+    value.edges.push({
+      id: `edge-${value.edges.length}`,
+      source,
+      target,
+      sourceHandle,
+      targetHandle: "input",
+    });
+  }
+
+  function conflicts(value: WorkflowDefinition) {
+    return validateWorkflowDefinition(value).diagnostics.filter(
+      ({ code }) => code === "PARALLEL_WRITE_CONFLICT",
+    );
+  }
+
+  test.each(["MANUAL_CHOICE", "RESOURCE_MANUAL_CHOICE"] as const)(
+    "allows alternative writers from %s",
+    (kind) => {
+      const value = definition([node("left"), node("right")]);
+      value.triggers[0] = {
+        ...value.triggers[0]!,
+        kind,
+        config: {
+          resourceKind: "WORKTREE",
+          choices: [
+            { key: "commit", label: "Commit" },
+            { key: "skip", label: "Don't commit" },
+          ],
+        },
+      };
+      value.edges = [];
+      connect(value, "manual", "left", "commit");
+      connect(value, "manual", "right", "skip");
+
+      expect(validateWorkflowDefinition(value).diagnostics).toEqual([]);
+    },
+  );
+
+  test("allows writers in opposite if branches", () => {
+    const value = definition([
+      node("condition", "CONTROL_IF"),
+      node("left"),
+      node("right"),
+    ]);
+    value.nodes[0]!.config = { condition: { op: "EQ", left: 1, right: 1 } };
+    connect(value, "condition", "left", "true");
+    connect(value, "condition", "right", "false");
+
+    expect(validateWorkflowDefinition(value).diagnostics).toEqual([]);
+  });
+
+  test("allows the commit-or-skip workflow with nested alternatives and joins", () => {
+    const value = definition([
+      node("dirty", "CONTROL_IF"),
+      node("stage", "WORKTREE_OPERATION"),
+      node("commit-ticket"),
+      node("commit", "RUN_CREATE_SESSION"),
+      node("skip", "CONTROL_JOIN"),
+      node("skip-ticket"),
+      node("join", "CONTROL_JOIN"),
+      node("push", "WORKTREE_OPERATION"),
+    ]);
+    value.triggers[0] = {
+      ...value.triggers[0]!,
+      kind: "RESOURCE_MANUAL_CHOICE",
+      config: {
+        resourceKind: "WORKTREE",
+        choices: [
+          { key: "commit", label: "Commit" },
+          { key: "skip", label: "Don't commit" },
+        ],
+      },
+    };
+    value.nodes[0]!.config = {
+      condition: {
+        op: "EQ",
+        left: { source: "SESSION", path: "worktree.dirty" },
+        right: true,
+      },
+    };
+    value.edges = [];
+    connect(value, "manual", "dirty", "commit");
+    connect(value, "manual", "skip", "skip");
+    connect(value, "dirty", "stage", "true");
+    connect(value, "stage", "commit-ticket");
+    connect(value, "commit-ticket", "commit");
+    connect(value, "dirty", "skip", "false");
+    connect(value, "skip", "skip-ticket");
+    connect(value, "commit", "join");
+    connect(value, "skip-ticket", "join");
+    connect(value, "join", "push");
+
+    expect(validateWorkflowDefinition(value).diagnostics).toEqual([]);
+  });
+
+  test("allows writers reached only from different triggers", () => {
+    const value = definition([node("left"), node("right")]);
+    value.triggers.push({ ...value.triggers[0]!, id: "other" });
+    connect(value, "other", "right");
+
+    expect(validateWorkflowDefinition(value).diagnostics).toEqual([]);
+
+    // A common trigger makes the same two writers concurrent again.
+    connect(value, "manual", "right");
+    expect(conflicts(value)).toHaveLength(1);
+  });
+
+  test.each(["true", "false"])(
+    "rejects conflicting fan-out within the same %s branch",
+    (handle) => {
+      const value = definition([
+        node("condition", "CONTROL_IF"),
+        node("left"),
+        node("right"),
+      ]);
+      connect(value, "condition", "left", handle);
+      connect(value, "condition", "right", handle);
+
+      expect(conflicts(value)).toHaveLength(1);
+    },
+  );
+
+  test("rejects conflicting fan-out from the same choice", () => {
+    const value = definition([node("left"), node("right")]);
+    value.triggers[0] = {
+      ...value.triggers[0]!,
+      kind: "MANUAL_CHOICE",
+      config: { choices: [{ key: "commit", label: "Commit" }] },
+    };
+    value.edges = [];
+    connect(value, "manual", "left", "commit");
+    connect(value, "manual", "right", "commit");
+
+    expect(conflicts(value)).toHaveLength(1);
+  });
+
+  test("keeps conflicts between separate if decisions", () => {
+    const value = definition([
+      node("first", "CONTROL_IF"),
+      node("second", "CONTROL_IF"),
+      node("left"),
+      node("right"),
+    ]);
+    connect(value, "manual", "second");
+    connect(value, "first", "left", "true");
+    connect(value, "second", "right", "false");
+
+    expect(conflicts(value)).toHaveLength(1);
+  });
+
+  test("keeps a conflict when an alternative branch has an independent entry", () => {
+    const value = definition([
+      node("condition", "CONTROL_IF"),
+      node("left"),
+      node("bypass", "CONTROL_JOIN"),
+      node("right"),
+    ]);
+    connect(value, "condition", "left", "true");
+    connect(value, "condition", "bypass", "false");
+    connect(value, "manual", "bypass");
+    connect(value, "bypass", "right");
+
+    expect(conflicts(value)).toHaveLength(1);
+  });
+
+  test("keeps conflicts after exclusive branches reconverge and fan out", () => {
+    const value = definition([
+      node("condition", "CONTROL_IF"),
+      node("join", "CONTROL_JOIN"),
+      node("left"),
+      node("right"),
+    ]);
+    connect(value, "condition", "join", "true");
+    connect(value, "condition", "join", "false");
+    connect(value, "join", "left");
+    connect(value, "join", "right");
+
+    expect(conflicts(value)).toHaveLength(1);
+  });
+
+  test("does not treat command matches and completion as exclusive", () => {
+    const value = definition([
+      node("command", "CUSTOM_COMMAND"),
+      node("left"),
+      node("right"),
+    ]);
+    value.nodes[0]!.config = { outputPattern: "ready" };
+    connect(value, "command", "left", "match");
+    connect(value, "command", "right");
+
+    expect(conflicts(value)).toHaveLength(1);
+  });
+
+  test("stays conservative when many alternative paths merge", () => {
+    const value = definition([
+      node("join", "CONTROL_JOIN"),
+      node("left"),
+      node("right"),
+    ]);
+    const choices = Array.from({ length: 100 }, (_, index) => ({
+      key: `choice-${index}`,
+      label: `Choice ${index}`,
+    }));
+    value.triggers[0] = {
+      ...value.triggers[0]!,
+      kind: "MANUAL_CHOICE",
+      config: { choices },
+    };
+    value.edges = [];
+    for (const { key } of choices) connect(value, "manual", "join", key);
+    connect(value, "join", "left");
+    connect(value, "manual", "right", choices.at(-1)!.key);
+
+    expect(conflicts(value)).toHaveLength(1);
   });
 });
 

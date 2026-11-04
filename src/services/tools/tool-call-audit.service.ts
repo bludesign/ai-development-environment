@@ -10,6 +10,8 @@ import type { ToolCallAuditView } from "./types";
 import type { McpOAuthPrincipal } from "@/services/auth/mcp-oauth";
 
 export type ToolInvocationContext = {
+  /** Server-authenticated managed run scope, never supplied by tool arguments. */
+  runId?: string;
   authentication?: "apiKey" | "oauth" | "session" | "agent";
   oauthPrincipal?: McpOAuthPrincipal;
   caller: string;

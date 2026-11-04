@@ -6,6 +6,9 @@ vi.mock("./handlers/codebases.js", () => ({
 }));
 vi.mock("./handlers/worktrees.js", () => ({ discoverWorktrees: vi.fn() }));
 vi.mock("./capture-command.js", () => ({ captureCommand: vi.fn() }));
+vi.mock("./repository-metadata.js", () => ({
+  withRepositoryMetadata: vi.fn(async (_folder, task) => task()),
+}));
 vi.mock("./handlers/local-branches.js", () => ({
   scanLocalBranches: vi
     .fn()
@@ -55,6 +58,85 @@ describe("CodebaseMonitor", () => {
       remoteBranches: ["main"],
       worktrees: [],
     });
+  });
+
+  test("fetches during a source build and defers only that base checkout update", async () => {
+    const registration = {
+      id: "repo",
+      folder: "/a",
+      canonicalOrigin: "example.com/a",
+      defaultBranch: "main",
+      keepBaseBranchUpToDate: true,
+      lastFetchedAt: null,
+      lastFetchAttemptAt: null,
+      worktrees: [
+        {
+          id: "main",
+          folder: "/a",
+          gitDirectory: "/a/.git",
+          branch: "main",
+          baseBranchOverride: null,
+        },
+      ],
+    };
+    const client = {
+      agentCodebaseConfiguration: vi.fn().mockResolvedValue({
+        refreshIntervalSeconds: 30,
+        fetchIntervalSeconds: 10,
+        codebases: [registration],
+      }),
+      reportCodebaseStatuses: vi.fn().mockResolvedValue({}),
+      reportWorktrees: vi.fn().mockResolvedValue({}),
+    };
+    inspect.mockResolvedValue(snapshot);
+    capture.mockResolvedValue({
+      stdout: "",
+      stderr: "",
+      exitCode: 0,
+      signal: null,
+      timedOut: false,
+      cancelled: false,
+      outputTruncated: false,
+    });
+    const coordinator = new RepositoryCoordinator();
+    const started = Promise.withResolvers<void>();
+    const finish = Promise.withResolvers<void>();
+    const build = coordinator.withResources(
+      [
+        {
+          kind: "WORKTREE",
+          key: "agent:worktree:/a/.git",
+          agentId: "agent",
+          codebaseId: "repo",
+          mode: "BUILD",
+        },
+      ],
+      async () => {
+        started.resolve();
+        await finish.promise;
+      },
+    );
+    await started.promise;
+    const monitor = new CodebaseMonitor(
+      client as unknown as AgentGraphQLClient,
+      coordinator,
+      "agent",
+    );
+    try {
+      await monitor.reconcile(new AbortController().signal);
+      expect(capture).toHaveBeenCalledWith(
+        expect.objectContaining({ args: ["-C", "/a", "fetch", "origin"] }),
+      );
+      expect(updateBaseBranch).not.toHaveBeenCalled();
+      expect(client.reportWorktrees).toHaveBeenCalledWith([
+        expect.objectContaining({ observedAt: expect.any(String) }),
+      ]);
+    } finally {
+      finish.resolve();
+      await build;
+    }
+    await monitor.reconcile(new AbortController().signal);
+    expect(updateBaseBranch).toHaveBeenCalledOnce();
   });
 
   test("inspects owned registrations and reports typed snapshots", async () => {

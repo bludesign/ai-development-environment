@@ -1,3 +1,4 @@
+import { SETTLED_AGENT_JOB_WHERE } from "@/services/agent-control/job-cleanup";
 import { beforeEach, describe, expect, test, vi } from "vitest";
 
 const getPrismaClient = vi.hoisted(() => vi.fn());
@@ -59,6 +60,7 @@ describe("CodebasesService", () => {
 
     expect(deleteMany).toHaveBeenCalledWith({
       where: {
+        AND: [SETTLED_AGENT_JOB_WHERE],
         visibility: "SYSTEM",
         kind: { in: [...CODEBASE_JOB_KINDS] },
         finishedAt: { lt: expect.any(Date) },
@@ -90,7 +92,11 @@ describe("CodebasesService", () => {
         where: { id: "repository-1" },
         include: expect.objectContaining({
           codebases: expect.objectContaining({
-            include: expect.objectContaining({ agent: true }),
+            include: expect.objectContaining({
+              agent: expect.objectContaining({
+                include: expect.objectContaining({ jobs: expect.any(Object) }),
+              }),
+            }),
           }),
         }),
       }),
@@ -582,23 +588,12 @@ describe("CodebasesService", () => {
         where: { id: "codebase-1" },
         include: expect.objectContaining({
           jobs: expect.objectContaining({
-            where: expect.objectContaining({
-              status: { in: ["QUEUED", "RUNNING"] },
-              NOT: { kind: { startsWith: "ios." } },
-              OR: expect.arrayContaining([
-                {
-                  kind: {
-                    notIn: ["command.run", "workflow.terminal.run"],
-                  },
-                },
-                {
-                  kind: {
-                    in: ["command.run", "workflow.terminal.run"],
-                  },
-                  blocksGitOperations: true,
-                },
-              ]),
-            }),
+            where: {
+              OR: [
+                { status: { in: ["QUEUED", "RUNNING", "CANCELLING"] } },
+                { executionToken: { not: null } },
+              ],
+            },
           }),
         }),
       }),
@@ -711,7 +706,11 @@ describe("CodebasesService", () => {
       }),
     );
     expect(prisma.agentJob.deleteMany).toHaveBeenCalledWith({
-      where: { id: "job-codebase-1", visibility: "SYSTEM" },
+      where: {
+        id: "job-codebase-1",
+        visibility: "SYSTEM",
+        AND: [SETTLED_AGENT_JOB_WHERE],
+      },
     });
   });
 

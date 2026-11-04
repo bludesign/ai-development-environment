@@ -1,4 +1,4 @@
-import { spawn } from "node:child_process";
+import { spawnExecutionProcess as spawn } from "./execution-recovery.js";
 
 export type ProcessLog = {
   sequence: number;

@@ -7,6 +7,11 @@ import type { JiraService } from "@/services/jira";
 import type { AgentControlService } from "@/services/agent-control";
 import type { GitLabMergeOptions, GitLabMergeRequestView } from "./types";
 
+vi.mock("@/services/operation-locks/operation-locks.service", () => ({
+  mergeReservationBlockedReason: vi.fn(async () => null),
+  recoverMergeReservations: vi.fn(async () => {}),
+}));
+
 const database = vi.hoisted(() => ({
   row: null as GitLabMergeOperation | null,
   gitLabMergeOperation: {

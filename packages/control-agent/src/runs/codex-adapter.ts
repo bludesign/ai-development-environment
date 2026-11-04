@@ -1,6 +1,5 @@
 import {
   execFile,
-  spawn,
   type ChildProcessWithoutNullStreams,
 } from "node:child_process";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
@@ -10,6 +9,10 @@ import { createInterface } from "node:readline";
 import { promisify } from "node:util";
 import type { RunSessionInfo } from "@ai-development-environment/agent-contract/runs";
 
+import {
+  spawnExecutionProcess as spawn,
+  executionEnvironment,
+} from "../execution-recovery.js";
 import { findCodexSessionFile } from "../handlers/runs.js";
 import {
   codexImportedHistory,
@@ -456,6 +459,7 @@ export class CodexAdapter implements ProviderAdapter {
     nativeDelete: true,
   } as const;
   private readonly server = new CodexAppServer();
+  private readonly isolatedServers = new Set<CodexAppServer>();
   private readonly hydrationCache = new Map<
     string,
     { updatedAt: string; history: Partial<ProviderImportedRun> }
@@ -494,13 +498,18 @@ export class CodexAdapter implements ProviderAdapter {
     input: ProviderStartInput,
     callbacks: ProviderCallbacks,
   ): Promise<ProviderHandle> {
+    const isolated = executionEnvironment().AIDE_EXECUTION_MARKER
+      ? new CodexAppServer()
+      : null;
+    const server = isolated ?? this.server;
+    if (isolated) this.isolatedServers.add(isolated);
     const cwd = input.run.worktree!.folder;
     const sandbox =
       input.run.kind === "PLAN" ? "read-only" : "danger-full-access";
     let savedConfig: Record<string, unknown> = {};
     if (input.textOnly) {
       const response = asRecord(
-        await this.server.request("config/read", { includeLayers: false, cwd }),
+        await server.request("config/read", { includeLayers: false, cwd }),
       );
       if (!response.config || typeof response.config !== "object")
         throw new Error(
@@ -511,7 +520,7 @@ export class CodexAdapter implements ProviderAdapter {
     const config = codexRunConfig(input, savedConfig);
     const threadResult = asRecord(
       input.resumeNativeId
-        ? await this.server.request(
+        ? await server.request(
             input.fork === false ? "thread/resume" : "thread/fork",
             {
               threadId: input.resumeNativeId,
@@ -522,7 +531,7 @@ export class CodexAdapter implements ProviderAdapter {
               config,
             },
           )
-        : await this.server.request("thread/start", {
+        : await server.request("thread/start", {
             cwd,
             model: input.run.model === "default" ? null : input.run.model,
             approvalPolicy: "never",
@@ -563,7 +572,7 @@ export class CodexAdapter implements ProviderAdapter {
       resolveCompletion = resolve;
     });
 
-    const unsubscribe = this.server.listen(nativeId, (message) => {
+    const unsubscribe = server.listen(nativeId, (message) => {
       void (async () => {
         const params = asRecord(message.params);
         if (message.method === "$/serverDisconnected") {
@@ -672,7 +681,7 @@ export class CodexAdapter implements ProviderAdapter {
         ? threadResult.model
         : input.run.model;
     const turnResult = asRecord(
-      await this.server.request("turn/start", {
+      await server.request("turn/start", {
         threadId: nativeId,
         input: textInput(input.prompt, input.attachments),
         model: input.run.model === "default" ? null : input.run.model,
@@ -699,11 +708,15 @@ export class CodexAdapter implements ProviderAdapter {
       }),
     );
     turnId = String(asRecord(turnResult.turn).id);
-    const server = this.server;
 
     return {
       nativeId,
-      completion,
+      completion: isolated
+        ? completion.finally(async () => {
+            this.isolatedServers.delete(isolated);
+            await isolated.close();
+          })
+        : completion,
       async interrupt(reason) {
         stopReason = reason;
         await server.request("turn/interrupt", { threadId: nativeId, turnId });
@@ -834,7 +847,11 @@ export class CodexAdapter implements ProviderAdapter {
     return results;
   }
 
-  close(): Promise<void> {
-    return this.server.close();
+  async close(): Promise<void> {
+    await Promise.all([
+      this.server.close(),
+      ...[...this.isolatedServers].map((server) => server.close()),
+    ]);
+    this.isolatedServers.clear();
   }
 }

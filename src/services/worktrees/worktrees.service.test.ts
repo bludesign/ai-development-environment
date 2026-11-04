@@ -1,9 +1,11 @@
+import { SETTLED_AGENT_JOB_WHERE } from "@/services/agent-control/job-cleanup";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 
 const getPrismaClient = vi.hoisted(() => vi.fn());
 vi.mock("@/data/prisma-client", () => ({ getPrismaClient }));
 
 import type { AgentControlService } from "@/services/agent-control";
+import { OPERATION_RESOURCES_CAPABILITY } from "@ai-development-environment/agent-contract/operation-resources";
 import { IOS_BUILD_JOB_KIND } from "@ai-development-environment/agent-contract/builds";
 import {
   WORKTREE_BRANCH_JOB_KIND,
@@ -345,6 +347,120 @@ describe("WorktreesService", () => {
     ).toBeNull();
   });
 
+  test("projects only each worktree's execution blockers while preserving artifact activity", () => {
+    const source = storedWorktreeRecord();
+    const descriptor = (gitDirectory: string) =>
+      JSON.stringify({
+        version: 1,
+        resources: [
+          {
+            kind: "WORKTREE",
+            key: `agent-1:worktree:${gitDirectory}`,
+            mode: "BUILD",
+            agentId: "agent-1",
+            codebaseId: "codebase-1",
+          },
+        ],
+      });
+    const own = {
+      id: "own-build",
+      kind: IOS_BUILD_JOB_KIND,
+      status: "RUNNING",
+      codebaseId: "codebase-1",
+      worktreeId: "worktree-1",
+      payloadJson: "{}",
+      operationResourcesJson: descriptor("/repo/.git"),
+    };
+    const sibling = {
+      ...own,
+      id: "sibling-build",
+      worktreeId: "worktree-2",
+      operationResourcesJson: descriptor("/repo/.git/worktrees/sibling"),
+    };
+    const record = {
+      ...source,
+      codebaseId: "codebase-1",
+      gitDirectory: "/repo/.git",
+      codebase: {
+        ...source.codebase,
+        agentId: "agent-1",
+        agent: {
+          ...source.codebase.agent,
+          id: "agent-1",
+          capabilitiesJson: JSON.stringify([OPERATION_RESOURCES_CAPABILITY]),
+        },
+        jobs: [own, sibling],
+      },
+    };
+    const project = (value: unknown) =>
+      (
+        service() as unknown as {
+          view(value: unknown): {
+            blockingJob: { id: string } | null;
+            activeJobs: Array<{ id: string }>;
+          };
+        }
+      ).view(value);
+    expect(project(record).blockingJob?.id).toBe("own-build");
+    expect(project(record).activeJobs.map(({ id }) => id)).toEqual([
+      "own-build",
+    ]);
+    expect(
+      project({
+        ...record,
+        id: "worktree-2",
+        gitDirectory: "/repo/.git/worktrees/sibling",
+      }).blockingJob?.id,
+    ).toBe("sibling-build");
+    const artifact = {
+      ...own,
+      id: "export",
+      kind: "ios.archive.export",
+      operationResourcesJson: JSON.stringify({
+        version: 1,
+        resources: [
+          {
+            kind: "PATH",
+            key: "/Builds/previous",
+            path: "/Builds/previous",
+            mode: "WRITE",
+            agentId: "agent-1",
+            codebaseId: "codebase-1",
+          },
+        ],
+      }),
+    };
+    const artifactsOnly = project({
+      ...record,
+      codebase: {
+        ...record.codebase,
+        jobs: [artifact, { ...own, status: "QUEUED" }],
+      },
+    });
+    expect(artifactsOnly.blockingJob).toBeNull();
+    expect(artifactsOnly.activeJobs).toHaveLength(2);
+    const interrupted = {
+      ...own,
+      status: "CANCELLED",
+      executionToken: "cleanup-owner",
+    };
+    expect(
+      project({
+        ...record,
+        codebase: { ...record.codebase, jobs: [interrupted] },
+      }).blockingJob?.id,
+    ).toBe("own-build");
+    expect(
+      project({
+        ...record,
+        codebase: {
+          ...record.codebase,
+          jobs: [{ ...interrupted, executionToken: null }],
+        },
+      }).blockingJob,
+    ).toBeNull();
+  });
+
   test("requests an immediate reconcile from every codebase agent", async () => {
     getPrismaClient.mockResolvedValue({
       codebase: {
@@ -473,6 +589,47 @@ describe("WorktreesService", () => {
         ),
       ).resolves.toEqual({ id: "sync-job" });
       expect(createJob).toHaveBeenCalledOnce();
+    },
+  );
+
+  test.each(["worktree-1", "sibling-worktree"])(
+    "queues modern Auto Sync beside a build on %s for resource admission",
+    async (buildWorktreeId) => {
+      const runnable = autoSyncWorktreeRecord();
+      runnable.codebase.agent.capabilitiesJson = JSON.stringify([
+        WORKTREE_AUTO_SYNC_JOB_KIND,
+        OPERATION_RESOURCES_CAPABILITY,
+      ]);
+      const findFirst = vi.fn().mockResolvedValue({
+        id: "build",
+        status: "RUNNING",
+        kind: IOS_BUILD_JOB_KIND,
+        worktreeId: buildWorktreeId,
+      });
+      getPrismaClient.mockResolvedValue({
+        worktree: { findUnique: vi.fn().mockResolvedValue(runnable) },
+        agentJob: { findFirst },
+        worktreeMove: { findFirst },
+      });
+      const createJob = vi.fn().mockResolvedValue({ id: "sync-job" });
+      await expect(
+        service({
+          registerCompletionHandler: vi.fn(),
+          createJob,
+        } as unknown as AgentControlService).createAutoSyncJob(
+          runnable.id,
+          "SYNC",
+          "feature/current",
+          "modern-request",
+        ),
+      ).resolves.toMatchObject({ id: "sync-job" });
+      expect(findFirst).not.toHaveBeenCalled();
+      expect(createJob).toHaveBeenCalledWith(
+        expect.objectContaining({
+          worktreeId: runnable.id,
+          kind: WORKTREE_AUTO_SYNC_JOB_KIND,
+        }),
+      );
     },
   );
 
@@ -768,6 +925,7 @@ describe("WorktreesService", () => {
     } as unknown as JiraService;
     const blockingJob = {
       id: "job-blocking",
+      status: "RUNNING",
       kind: "codebase.refresh",
       worktreeId: null,
       payloadJson: "{}",
@@ -897,20 +1055,9 @@ describe("WorktreesService", () => {
             include: expect.objectContaining({
               jobs: expect.objectContaining({
                 where: expect.objectContaining({
-                  status: { in: ["QUEUED", "RUNNING"] },
-                  NOT: { kind: { startsWith: "ios." } },
                   OR: expect.arrayContaining([
-                    {
-                      kind: {
-                        notIn: ["command.run", "workflow.terminal.run"],
-                      },
-                    },
-                    {
-                      kind: {
-                        in: ["command.run", "workflow.terminal.run"],
-                      },
-                      blocksGitOperations: true,
-                    },
+                    { status: { in: ["QUEUED", "RUNNING", "CANCELLING"] } },
+                    { executionToken: { not: null } },
                   ]),
                 }),
               }),
@@ -1990,6 +2137,101 @@ describe("WorktreesService", () => {
     });
   });
 
+  test.each([null, new Date(10).toISOString(), new Date(20).toISOString()])(
+    "ignores an inventory snapshot older than the accepted scan: %s",
+    async (observedAt) => {
+      const transaction = vi.fn();
+      getPrismaClient.mockResolvedValue({
+        codebase: {
+          findUnique: vi.fn().mockResolvedValue({
+            id: "codebase-1",
+            agentId: "agent-1",
+            worktreeInventoryObservedAt: new Date(20),
+          }),
+        },
+        worktree: {
+          findMany: vi.fn().mockResolvedValue([]),
+          deleteMany: vi.fn(),
+        },
+        $transaction: transaction,
+      });
+      await service().report("agent-1", [{ ...report(), observedAt }]);
+      expect(transaction).not.toHaveBeenCalled();
+    },
+  );
+
+  test("does not project a scan that loses its atomic inventory watermark race", async () => {
+    const transaction = {
+      codebase: {
+        updateMany: vi.fn().mockResolvedValue({ count: 0 }),
+        update: vi.fn(),
+      },
+      worktree: { upsert: vi.fn(), updateMany: vi.fn() },
+    };
+    getPrismaClient.mockResolvedValue({
+      codebase: {
+        findUnique: vi.fn().mockResolvedValue({
+          id: "codebase-1",
+          agentId: "agent-1",
+          worktreeInventoryObservedAt: new Date(1),
+        }),
+      },
+      worktree: {
+        findMany: vi.fn().mockResolvedValue([]),
+        deleteMany: vi.fn(),
+      },
+      $transaction: vi.fn((run) => run(transaction)),
+    });
+    await service().report("agent-1", [
+      { ...report(), observedAt: new Date(10).toISOString() },
+    ]);
+    expect(transaction.codebase.update).not.toHaveBeenCalled();
+    expect(transaction.worktree.upsert).not.toHaveBeenCalled();
+    expect(transaction.worktree.updateMany).not.toHaveBeenCalled();
+  });
+
+  test("keeps worktrees created or refreshed after a complete snapshot from being tombstoned", async () => {
+    const observedAt = new Date(10);
+    const transaction = {
+      codebase: {
+        updateMany: vi.fn().mockResolvedValue({ count: 1 }),
+        update: vi.fn(),
+      },
+      worktree: {
+        upsert: vi
+          .fn()
+          .mockResolvedValue({ id: "worktree-1", branch: "feature/AIDE-24" }),
+        updateMany: vi.fn().mockResolvedValue({ count: 1 }),
+      },
+    };
+    getPrismaClient.mockResolvedValue({
+      codebase: {
+        findUnique: vi
+          .fn()
+          .mockResolvedValue({ id: "codebase-1", agentId: "agent-1" }),
+      },
+      worktree: {
+        findMany: vi.fn().mockResolvedValue([]),
+        deleteMany: vi.fn(),
+      },
+      $transaction: vi.fn((run) => run(transaction)),
+    });
+    await service().report("agent-1", [
+      { ...report(), observedAt: observedAt.toISOString() },
+    ]);
+    expect(transaction.worktree.updateMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          codebaseId: "codebase-1",
+          missingAt: null,
+          createdAt: { lte: observedAt },
+          OR: [{ lastCheckedAt: null }, { lastCheckedAt: { lte: observedAt } }],
+        }),
+        data: { missingAt: expect.any(Date) },
+      }),
+    );
+  });
+
   test("does not tombstone saved worktrees after an incomplete scan", async () => {
     const transaction = {
       codebase: { update: vi.fn() },
@@ -2226,7 +2468,11 @@ describe("WorktreesService", () => {
       service(control).inspect("worktree-1", "request-1"),
     ).rejects.toThrow("Inspection failed");
     expect(deleteMany).toHaveBeenCalledWith({
-      where: { id: "inspect-1", visibility: "SYSTEM" },
+      where: {
+        id: "inspect-1",
+        visibility: "SYSTEM",
+        AND: [SETTLED_AGENT_JOB_WHERE],
+      },
     });
   });
 
@@ -2431,7 +2677,11 @@ describe("WorktreesService", () => {
         }),
       );
       expect(fixture.deleteMany).toHaveBeenCalledWith({
-        where: { id: "refresh-job", visibility: "SYSTEM" },
+        where: {
+          id: "refresh-job",
+          visibility: "SYSTEM",
+          AND: [SETTLED_AGENT_JOB_WHERE],
+        },
       });
     });
 
@@ -2752,7 +3002,11 @@ describe("WorktreesService", () => {
     ).resolves.toEqual({ patch: "+ready" });
     expect(createJob).toHaveBeenCalledTimes(2);
     expect(deleteMany).toHaveBeenCalledWith({
-      where: { id: "diff-2", visibility: "SYSTEM" },
+      where: {
+        id: "diff-2",
+        visibility: "SYSTEM",
+        AND: [SETTLED_AGENT_JOB_WHERE],
+      },
     });
   });
 
@@ -2890,7 +3144,11 @@ describe("WorktreesService", () => {
       }),
     );
     expect(deleteMany).toHaveBeenCalledWith({
-      where: { id: "asset-job", visibility: "SYSTEM" },
+      where: {
+        id: "asset-job",
+        visibility: "SYSTEM",
+        AND: [SETTLED_AGENT_JOB_WHERE],
+      },
     });
   });
 

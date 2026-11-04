@@ -84,6 +84,7 @@ beforeEach(() => {
         iosAppProject: {
           id: "project-1",
           type: "IOS_APP",
+          defaultDestinationType: "SIMULATOR",
           configurations: [
             {
               id: "configuration-1",
@@ -262,6 +263,55 @@ afterEach(() => {
 });
 
 describe("StartBuildDialog", () => {
+  test.each([
+    {
+      preferred: "PHYSICAL_DEVICE",
+      action: "BUILD",
+      selected: "Physical Device",
+    },
+    { preferred: "SIMULATOR", action: "BUILD", selected: "Simulator" },
+    { preferred: "SIMULATOR", action: "ARCHIVE", selected: "Physical Device" },
+    { preferred: "PHYSICAL_DEVICE", action: "TEST", selected: "Simulator" },
+  ] as const)(
+    "selects $selected for $action with $preferred preferred",
+    async ({ preferred, action, selected }) => {
+      const original = request.getMockImplementation()!;
+      request.mockImplementation(async (query, variables) => {
+        if (String(query).includes("query StartBuildProject")) {
+          const data = (await original(query, variables)) as {
+            iosAppProject: IosAppProject;
+          };
+          data.iosAppProject.defaultDestinationType = preferred;
+          data.iosAppProject.configurations[0]!.defaultAction = action;
+          return data as never;
+        }
+        if (
+          action === "TEST" &&
+          String(query).includes("mutation InspectStartBuildDestinations")
+        ) {
+          return { inspectBuildDestinations: [liveDestination] } as never;
+        }
+        return original(query, variables);
+      });
+      render(
+        <StartBuildButton
+          codebaseId="codebase-1"
+          worktreeId={`default-${preferred}-${action}`}
+        />,
+      );
+      fireEvent.click(screen.getByRole("button", { name: "Build" }));
+      const device = await screen.findByRole("combobox", { name: "Device" });
+      await waitFor(() =>
+        expect(device.getAttribute("aria-busy")).toBe("false"),
+      );
+      expect(
+        screen
+          .getByRole("tab", { name: selected })
+          .getAttribute("aria-selected"),
+      ).toBe("true");
+    },
+  );
+
   test("suggests destination defaults until a server URL is explicitly selected", async () => {
     urlSettings = {
       ...serverUrlFixture,

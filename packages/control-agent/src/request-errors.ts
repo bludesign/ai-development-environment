@@ -3,7 +3,11 @@ export const MAX_AGENT_REQUEST_ATTEMPTS = 5;
 export class AgentRequestError extends Error {
   readonly retryable: boolean;
 
-  constructor(message: string, status: number, codes: string[] = []) {
+  constructor(
+    message: string,
+    status: number,
+    readonly codes: string[] = [],
+  ) {
     super(message);
     this.name = "AgentRequestError";
     this.retryable =
@@ -15,6 +19,7 @@ export class AgentRequestError extends Error {
           "BAD_USER_INPUT",
           "GRAPHQL_VALIDATION_FAILED",
           "NOT_FOUND",
+          "RESOURCE_BUSY",
         ].includes(code),
       ) &&
       !/^(?:Job|Run|Run attempt|Run command) not found(?: for this agent)?$/.test(

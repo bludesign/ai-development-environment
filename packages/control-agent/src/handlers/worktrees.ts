@@ -4,7 +4,7 @@ import { createWriteStream, watch, type FSWatcher } from "node:fs";
 import { mkdtemp, open, readFile, realpath, rm, stat } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { basename, dirname, isAbsolute, join, relative } from "node:path";
-import { spawn } from "node:child_process";
+import { spawnExecutionProcess as spawn } from "../execution-recovery.js";
 
 import { normalizeGitOrigin } from "@ai-development-environment/agent-contract/codebases";
 import {
@@ -32,6 +32,16 @@ import {
 
 import { captureCommand, type CaptureResult } from "../capture-command.js";
 import { worktreeCodeStateHash } from "../git-code-state.js";
+import { withRepositoryMetadata } from "../repository-metadata.js";
+import {
+  fetchSyncSnapshot,
+  fetchPinnedRef,
+  snapshotPushLease,
+  pinnedForcePushArguments,
+  saveSyncPushLease,
+  readSyncPushLease,
+  clearSyncPushLease,
+} from "../git-sync-snapshot.js";
 import {
   inspectCodebaseGitState,
   inspectCodebaseStashDiff,
@@ -423,11 +433,15 @@ async function git(
   timeoutMs: number,
   signal: AbortSignal,
 ): Promise<CaptureResult> {
-  return command("git", ["-C", folder, ...args], timeoutMs, signal, {
-    ...process.env,
-    GIT_TERMINAL_PROMPT: "0",
-    GIT_OPTIONAL_LOCKS: "0",
-  });
+  const execute = () =>
+    command("git", ["-C", folder, ...args], timeoutMs, signal, {
+      ...process.env,
+      GIT_TERMINAL_PROMPT: "0",
+      GIT_OPTIONAL_LOCKS: "0",
+    });
+  return args[0] === "fetch" || args[0] === "stash"
+    ? withRepositoryMetadata(folder, execute, signal)
+    : execute();
 }
 
 function requireSuccess(
@@ -702,6 +716,11 @@ export async function discoverWorktrees(
   knownDefaultBranch: string | null,
   timeoutMs: number,
   signal: AbortSignal,
+  withInspection?: (
+    gitDirectory: string,
+    task: () => Promise<WorktreeInventoryItem>,
+    folder: string,
+  ) => Promise<WorktreeInventoryItem>,
 ): Promise<{
   complete: boolean;
   defaultBranch: string | null;
@@ -777,15 +796,19 @@ export async function discoverWorktrees(
     } catch {
       // inspectWorktreeItem reports the inaccessible entry.
     }
-    worktrees.push(
-      await inspectWorktreeItem(
+    const inspect = () =>
+      inspectWorktreeItem(
         entry.folder,
         rootFolder,
         (identity && baseOverrides.get(identity)) || defaultBranch,
         index === 0,
         timeoutMs,
         signal,
-      ),
+      );
+    worktrees.push(
+      await (identity && withInspection
+        ? withInspection(identity, inspect, entry.folder)
+        : inspect()),
     );
   }
   return {
@@ -2007,6 +2030,8 @@ export const branchWorktree: AgentJobHandler = async (
   payload,
   timeoutMs,
   signal,
+  _onLog,
+  context,
 ) => {
   const input = worktreeBranchJobPayload(payload);
   if (input.aiNaming) {
@@ -2055,6 +2080,42 @@ export const branchWorktree: AgentJobHandler = async (
         )
       : changeFolder!;
 
+  const execute = () =>
+    finishBranchWorktree(
+      input,
+      rootFolder,
+      targetFolder,
+      branch,
+      beforeBranch,
+      timeoutMs,
+      signal,
+    );
+  return context?.withOperationResources
+    ? context.withOperationResources(
+        [
+          {
+            kind: "PATH",
+            key: targetFolder,
+            path: targetFolder,
+            agentId: context.agentId,
+            codebaseId: input.codebaseId,
+            mode: "WRITE",
+          },
+        ],
+        execute,
+      )
+    : execute();
+};
+
+async function finishBranchWorktree(
+  input: ReturnType<typeof worktreeBranchJobPayload>,
+  rootFolder: string,
+  targetFolder: string,
+  branch: string,
+  beforeBranch: string | null,
+  timeoutMs: number,
+  signal: AbortSignal,
+) {
   if (input.action === "CREATE") {
     try {
       await stat(targetFolder);
@@ -2222,7 +2283,7 @@ export const branchWorktree: AgentJobHandler = async (
     checkedAt: new Date().toISOString(),
     preparations,
   };
-};
+}
 
 export const pushMovedWorktree: AgentJobHandler = async (
   payload,
@@ -2346,9 +2407,43 @@ export const checkoutMovedWorktree: AgentJobHandler = async (
   payload,
   timeoutMs,
   signal,
+  _onLog,
+  context,
 ) => {
   const input = worktreeMoveCheckoutJobPayload(payload);
   const rootFolder = await validateBranchRoot(input, timeoutMs, signal);
+  const targetFolder =
+    input.mode === "NEW"
+      ? join(
+          dirname(rootFolder),
+          `${basename(rootFolder)}-${input.branch.replaceAll("/", "-")}`,
+        )
+      : input.folder!;
+  const execute = () =>
+    finishMovedWorktree(input, rootFolder, timeoutMs, signal);
+  return context?.withOperationResources
+    ? context.withOperationResources(
+        [
+          {
+            kind: "PATH",
+            key: targetFolder,
+            path: targetFolder,
+            agentId: context.agentId,
+            codebaseId: input.codebaseId,
+            mode: "WRITE",
+          },
+        ],
+        execute,
+      )
+    : execute();
+};
+
+async function finishMovedWorktree(
+  input: ReturnType<typeof worktreeMoveCheckoutJobPayload>,
+  rootFolder: string,
+  timeoutMs: number,
+  signal: AbortSignal,
+) {
   const remoteRef = `refs/remotes/origin/${input.branch}`;
   requireSuccess(
     await git(
@@ -2597,7 +2692,7 @@ export const checkoutMovedWorktree: AgentJobHandler = async (
     checkedAt: new Date().toISOString(),
     preparations,
   };
-};
+}
 
 export const prepareWorktree: AgentJobHandler = async (
   payload,
@@ -2666,6 +2761,8 @@ export const deleteWorktree: AgentJobHandler = async (
   payload,
   timeoutMs,
   signal,
+  _onLog,
+  context,
 ) => {
   const input = worktreeDeleteJobPayload(payload);
   const rootFolder = await realpath(input.rootFolder);
@@ -2781,6 +2878,7 @@ export const deleteWorktree: AgentJobHandler = async (
         timeoutMs,
         signal,
         async () => undefined,
+        context,
       )) as unknown as BuildDataDeleteResult;
       buildDataCleanup.deleted.push(...result.deleted);
       buildDataCleanup.warnings.push(
@@ -2891,11 +2989,13 @@ export const operateWorktree: AgentJobHandler = async (
       );
       break;
     }
-    case "FORCE_PUSH":
+    case "FORCE_PUSH": {
       if (!branch || !upstream)
         throw new Error("Force Push requires a branch with an upstream");
-      await runGit(["push", "--force-with-lease"], "Force push failed");
+      const lease = await snapshotPushLease(folder, timeoutMs, signal);
+      await runGit(pinnedForcePushArguments(lease), "Force push failed");
       break;
+    }
     case "SYNC": {
       if (!branch || !upstream)
         throw new Error("Sync requires a branch with an upstream");
@@ -2906,8 +3006,16 @@ export const operateWorktree: AgentJobHandler = async (
       );
       if (statusResult.stdout.trim())
         throw new Error("Stash or commit changes before syncing");
-      await runGit(["fetch", "origin"], "Could not fetch origin");
-      const remoteBase = `refs/remotes/origin/${input.baseBranch}`;
+      const snapshot = await fetchSyncSnapshot(
+        folder,
+        `refs/remotes/origin/${input.baseBranch}`,
+        timeoutMs,
+        signal,
+        input.operation === "SYNC",
+      );
+      const remoteBase = snapshot.baseSha;
+      if (snapshot.lease)
+        await saveSyncPushLease(input.gitDirectory, snapshot.lease);
       const isCurrent = await git(
         folder,
         ["merge-base", "--is-ancestor", remoteBase, "HEAD"],
@@ -3006,7 +3114,7 @@ export const operateWorktree: AgentJobHandler = async (
       }
       const push = await git(
         folder,
-        ["push", "--force-with-lease"],
+        pinnedForcePushArguments(snapshot.lease!),
         timeoutMs,
         signal,
       );
@@ -3016,6 +3124,7 @@ export const operateWorktree: AgentJobHandler = async (
         }
         requireSuccess(push, "Sync push failed");
       }
+      await clearSyncPushLease(input.gitDirectory);
       preparationResults = input.forcePreparations
         ? await reapplyPreparations()
         : await inspectPreparations();
@@ -3030,8 +3139,16 @@ export const operateWorktree: AgentJobHandler = async (
       );
       if (statusResult.stdout.trim())
         throw new Error("Stash or commit changes before rebasing");
-      await runGit(["fetch", "origin"], "Could not fetch origin");
-      const remoteBase = `refs/remotes/origin/${input.baseBranch}`;
+      const snapshot = await fetchSyncSnapshot(
+        folder,
+        `refs/remotes/origin/${input.baseBranch}`,
+        timeoutMs,
+        signal,
+        false,
+      );
+      const remoteBase = snapshot.baseSha;
+      if (snapshot.lease)
+        await saveSyncPushLease(input.gitDirectory, snapshot.lease);
       const isCurrent = await git(
         folder,
         ["merge-base", "--is-ancestor", remoteBase, "HEAD"],
@@ -3138,6 +3255,7 @@ export const operateWorktree: AgentJobHandler = async (
         throw new Error("No rebase is in progress");
       }
       await runGit(["rebase", "--abort"], "Could not cancel rebase");
+      await clearSyncPushLease(input.gitDirectory);
       preparationResults = await reapplyPreparations();
       break;
     }
@@ -3145,11 +3263,17 @@ export const operateWorktree: AgentJobHandler = async (
       if (!branch || !upstream)
         throw new Error("Pull requires a branch with an upstream");
       const remote = upstream.split("/")[0] || "origin";
-      await runGit(["fetch", remote], `Could not fetch ${remote}`);
+      const upstreamSha = await fetchPinnedRef(
+        folder,
+        remote,
+        "@{upstream}",
+        timeoutMs,
+        signal,
+      );
       // A fast-forward only, rather than `git pull`, whose merge-or-rebase
       // behaviour follows the checkout's own config. Diverged branches stop
       // here with Git's own message; Sync and Rebase are the ways through.
-      await runGit(["merge", "--ff-only", "@{upstream}"], "Pull failed");
+      await runGit(["merge", "--ff-only", upstreamSha], "Pull failed");
       break;
     }
     case "PUSH":
@@ -3163,8 +3287,14 @@ export const operateWorktree: AgentJobHandler = async (
       if (!branch || !upstream)
         throw new Error("Reset requires a branch with an upstream");
       const remote = upstream.split("/")[0] || "origin";
-      await runGit(["fetch", remote], `Could not fetch ${remote}`);
-      await runGit(["reset", "--hard", "@{upstream}"], "Reset failed");
+      const upstreamSha = await fetchPinnedRef(
+        folder,
+        remote,
+        "@{upstream}",
+        timeoutMs,
+        signal,
+      );
+      await runGit(["reset", "--hard", upstreamSha], "Reset failed");
       await runGit(["clean", "-fd"], "Could not remove untracked files");
       break;
     }
@@ -3521,9 +3651,13 @@ export const autoSyncWorktree: AgentJobHandler = async (
         `Auto Sync expected branch ${input.expectedBranch} with an upstream`,
       );
     }
+    const lease = await readSyncPushLease(
+      input.gitDirectory,
+      input.expectedBranch,
+    );
     const push = await git(
       folder,
-      ["push", "--force-with-lease"],
+      pinnedForcePushArguments(lease),
       timeoutMs,
       signal,
     );
@@ -3531,6 +3665,7 @@ export const autoSyncWorktree: AgentJobHandler = async (
       await reapplyPreparations();
       requireSuccess(push, "Auto Sync push failed");
     }
+    await clearSyncPushLease(input.gitDirectory);
     const preparations = await reapplyPreparations();
     return {
       ...successfulProcess,
@@ -3555,8 +3690,14 @@ export const autoSyncWorktree: AgentJobHandler = async (
   if (status.stdout.trim()) {
     throw new Error("Stash or commit changes before Auto Sync can continue");
   }
-  await runGit(["fetch", "origin"], "Could not fetch origin");
-  const remoteBase = `refs/remotes/origin/${input.baseBranch}`;
+  const snapshot = await fetchSyncSnapshot(
+    folder,
+    `refs/remotes/origin/${input.baseBranch}`,
+    timeoutMs,
+    signal,
+  );
+  const remoteBase = snapshot.baseSha;
+  await saveSyncPushLease(input.gitDirectory, snapshot.lease!);
   const isCurrent = await git(
     folder,
     ["merge-base", "--is-ancestor", remoteBase, "HEAD"],
@@ -3582,7 +3723,11 @@ export const autoSyncWorktree: AgentJobHandler = async (
       );
     }
     if (upstreamContainsHead.exitCode !== 0) {
-      await runGit(["push", "--force-with-lease"], "Auto Sync push failed");
+      await runGit(
+        pinnedForcePushArguments(snapshot.lease!),
+        "Auto Sync push failed",
+      );
+      await clearSyncPushLease(input.gitDirectory);
       return {
         ...successfulProcess,
         outcome: "SYNCED",
@@ -3598,6 +3743,7 @@ export const autoSyncWorktree: AgentJobHandler = async (
         ),
       };
     }
+    await clearSyncPushLease(input.gitDirectory);
     return {
       ...successfulProcess,
       outcome: "NO_CHANGE",
@@ -3689,7 +3835,7 @@ export const autoSyncWorktree: AgentJobHandler = async (
   }
   const push = await git(
     folder,
-    ["push", "--force-with-lease"],
+    pinnedForcePushArguments(snapshot.lease!),
     timeoutMs,
     signal,
   );
@@ -3697,6 +3843,7 @@ export const autoSyncWorktree: AgentJobHandler = async (
     if (input.forcePreparations) await reapplyPreparations();
     requireSuccess(push, "Auto Sync push failed");
   }
+  await clearSyncPushLease(input.gitDirectory);
   preparationResults = input.forcePreparations
     ? await reapplyPreparations()
     : await inspectPreparations();

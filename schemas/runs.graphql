@@ -540,6 +540,8 @@ type RunProviderCatalogEntry {
 type RunCommand {
   "Stable identifier for this run command."
   id: ID!
+  "Token of the live provider execution, retained until its process cleanup is verified."
+  executionToken: String
   "Identifier of the related run."
   runId: ID!
   "Identifier of the related agent."
@@ -1017,6 +1019,8 @@ extend type Mutation {
   claimRunCommand(
     "Identifier of the resource to return or affect."
     id: ID!
+    "Unique identity of this provider execution; retries reuse the same token."
+    executionToken: String
   ): RunCommand!
   "Completes a run command and returns a run command."
   completeRunCommand(
@@ -1026,6 +1030,8 @@ extend type Mutation {
     status: String!
     "The error used to filter or perform the operation."
     error: String
+    "Execution token returned when this provider command was claimed."
+    executionToken: String
   ): RunCommand!
   "Begins a run attempt and returns a run attempt."
   beginRunAttempt(

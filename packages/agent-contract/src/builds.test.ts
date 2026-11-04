@@ -49,6 +49,39 @@ function buildPayload() {
 }
 
 describe("iOS build agent contract", () => {
+  test("preserves cache ownership and validates script resource scopes with legacy defaults", () => {
+    const script = {
+      id: "hook",
+      name: "Hook",
+      preBuildScript: "export default () => {}",
+      postBuildScript: null,
+      timeoutSeconds: 30,
+      failureBehavior: "FAIL_BUILD",
+      position: 0,
+    };
+    expect(
+      parseBuildJobPayload({
+        ...buildPayload(),
+        derivedDataPath: "/Builds/.worktree-derived-data/worktree-1",
+        scripts: [script],
+      }),
+    ).toMatchObject({
+      derivedDataPath: "/Builds/.worktree-derived-data/worktree-1",
+      scripts: [{ lockScope: "WORKTREE" }],
+    });
+    expect(
+      parseBuildJobPayload({
+        ...buildPayload(),
+        scripts: [{ ...script, lockScope: "AGENT" }],
+      }).scripts[0]?.lockScope,
+    ).toBe("AGENT");
+    expect(() =>
+      parseBuildJobPayload({
+        ...buildPayload(),
+        scripts: [{ ...script, lockScope: "ALL" }],
+      }),
+    ).toThrow("lockScope");
+  });
   test("accepts the expanded configuration icon catalog", () => {
     expect(BUILD_CONFIGURATION_ICON_KEYS).toContain("apple");
     expect(BUILD_CONFIGURATION_ICON_KEYS).toContain("terminal");

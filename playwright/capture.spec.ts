@@ -281,6 +281,9 @@ test.describe("app screenshots", () => {
         await page
           .getByRole("button", { name: "Remove iOS App project" })
           .waitFor();
+        await expect(
+          page.getByRole("combobox", { name: "Default destination type" }),
+        ).toContainText("Simulator");
       }
       if (route.transferWorkflow) {
         await openRepositoryTransfer(page, route.transferWorkflow);

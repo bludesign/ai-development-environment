@@ -36,7 +36,10 @@ export class CodebaseBusyError extends Error {
 }
 
 export function isCodebaseBusyError(error: unknown): boolean {
-  return error instanceof Error && error.name === "CodebaseBusyError";
+  return (
+    error instanceof Error &&
+    ["CodebaseBusyError", "ResourceBusyError"].includes(error.name)
+  );
 }
 
 /**

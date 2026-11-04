@@ -1,6 +1,8 @@
+import { SETTLED_AGENT_JOB_WHERE } from "@/services/agent-control/job-cleanup";
 import { filterAsyncIterator } from "@/lib/filter-async-iterator";
 import { randomUUID } from "node:crypto";
 
+import { OPERATION_RESOURCES_CAPABILITY } from "@ai-development-environment/agent-contract/operation-resources";
 import {
   CODEBASE_BROWSE_JOB_KIND,
   CODEBASE_BRANCHES_DELETE_JOB_KIND,
@@ -157,12 +159,38 @@ export class CodebasesService {
           ...(agentId ? { where: { agentId } } : {}),
           orderBy: { folder: "asc" },
           include: {
-            agent: true,
+            agent: {
+              include: {
+                jobs: {
+                  where: {
+                    OR: [
+                      { status: { in: ["QUEUED", "RUNNING", "CANCELLING"] } },
+                      { executionToken: { not: null } },
+                    ],
+                  },
+                  orderBy: { createdAt: "desc" },
+                },
+              },
+            },
+            worktrees: {
+              where: { primary: true, missingAt: null },
+              select: {
+                id: true,
+                codebaseId: true,
+                gitDirectory: true,
+                folder: true,
+              },
+              take: 1,
+            },
             repository: true,
             jobs: {
-              where: ACTIVE_CODEBASE_BLOCKING_JOB_WHERE,
+              where: {
+                OR: [
+                  { status: { in: ["QUEUED", "RUNNING", "CANCELLING"] } },
+                  { executionToken: { not: null } },
+                ],
+              },
               orderBy: { createdAt: "desc" },
-              take: 1,
             },
           },
         },
@@ -181,12 +209,38 @@ export class CodebasesService {
         codebases: {
           orderBy: [{ agent: { name: "asc" } }, { folder: "asc" }],
           include: {
-            agent: true,
+            agent: {
+              include: {
+                jobs: {
+                  where: {
+                    OR: [
+                      { status: { in: ["QUEUED", "RUNNING", "CANCELLING"] } },
+                      { executionToken: { not: null } },
+                    ],
+                  },
+                  orderBy: { createdAt: "desc" },
+                },
+              },
+            },
+            worktrees: {
+              where: { primary: true, missingAt: null },
+              select: {
+                id: true,
+                codebaseId: true,
+                gitDirectory: true,
+                folder: true,
+              },
+              take: 1,
+            },
             repository: true,
             jobs: {
-              where: ACTIVE_CODEBASE_BLOCKING_JOB_WHERE,
+              where: {
+                OR: [
+                  { status: { in: ["QUEUED", "RUNNING", "CANCELLING"] } },
+                  { executionToken: { not: null } },
+                ],
+              },
               orderBy: { createdAt: "desc" },
-              take: 1,
             },
           },
         },
@@ -213,12 +267,38 @@ export class CodebasesService {
     return prisma.codebase.findUnique({
       where: { id },
       include: {
-        agent: true,
+        agent: {
+          include: {
+            jobs: {
+              where: {
+                OR: [
+                  { status: { in: ["QUEUED", "RUNNING", "CANCELLING"] } },
+                  { executionToken: { not: null } },
+                ],
+              },
+              orderBy: { createdAt: "desc" },
+            },
+          },
+        },
+        worktrees: {
+          where: { primary: true, missingAt: null },
+          select: {
+            id: true,
+            codebaseId: true,
+            gitDirectory: true,
+            folder: true,
+          },
+          take: 1,
+        },
         repository: { include: { skillGroups: { include: { group: true } } } },
         jobs: {
-          where: ACTIVE_CODEBASE_BLOCKING_JOB_WHERE,
+          where: {
+            OR: [
+              { status: { in: ["QUEUED", "RUNNING", "CANCELLING"] } },
+              { executionToken: { not: null } },
+            ],
+          },
           orderBy: { createdAt: "desc" },
-          take: 1,
         },
       },
     });
@@ -375,7 +455,9 @@ export class CodebasesService {
       resultObject(completed).listing,
     );
     const prisma = await getPrismaClient();
-    await prisma.agentJob.deleteMany({ where: { id: job.id } });
+    await prisma.agentJob.deleteMany({
+      where: { AND: [SETTLED_AGENT_JOB_WHERE], id: job.id },
+    });
     return listing;
   }
 
@@ -494,7 +576,11 @@ export class CodebasesService {
     });
     this.publish(confirmed.id, confirmed.repositoryId);
     await prisma.agentJob.deleteMany({
-      where: { id: input.inspectionJobId, visibility: "SYSTEM" },
+      where: {
+        AND: [SETTLED_AGENT_JOB_WHERE],
+        id: input.inspectionJobId,
+        visibility: "SYSTEM",
+      },
     });
     await this.agentControl.requestCodebaseReconcile([confirmed.agentId]);
     await this.skillsService?.requestAutoReconcile();
@@ -774,7 +860,10 @@ export class CodebasesService {
     const jobs = [];
     const skipped: Array<{ codebaseId: string; reason: string }> = [];
     for (const codebase of codebases) {
-      if (codebase.jobs.length > 0) {
+      if (
+        codebase.jobs.length > 0 &&
+        !capabilities(codebase.agent).includes(OPERATION_RESOURCES_CAPABILITY)
+      ) {
         skipped.push({ codebaseId: codebase.id, reason: "ACTIVE_OPERATION" });
         continue;
       }
@@ -876,7 +965,11 @@ export class CodebasesService {
       return parseCodebaseGitState(resultObject(completed).state);
     } finally {
       await prisma.agentJob.deleteMany({
-        where: { id: job.id, visibility: "SYSTEM" },
+        where: {
+          AND: [SETTLED_AGENT_JOB_WHERE],
+          id: job.id,
+          visibility: "SYSTEM",
+        },
       });
     }
   }
@@ -908,7 +1001,11 @@ export class CodebasesService {
       return parseCodebaseStashDiff(resultObject(completed).diff);
     } finally {
       await prisma.agentJob.deleteMany({
-        where: { id: job.id, visibility: "SYSTEM" },
+        where: {
+          AND: [SETTLED_AGENT_JOB_WHERE],
+          id: job.id,
+          visibility: "SYSTEM",
+        },
       });
     }
   }
@@ -1284,7 +1381,10 @@ export class CodebasesService {
     if (codebase.availability !== "AVAILABLE") {
       throw new Error(codebase.statusError || "Codebase is unavailable");
     }
-    if (codebase.jobs.length) {
+    if (
+      codebase.jobs.length &&
+      !capabilities(codebase.agent).includes(OPERATION_RESOURCES_CAPABILITY)
+    ) {
       throw new Error("Another codebase operation is already running");
     }
     return codebase;
@@ -1343,6 +1443,7 @@ export class CodebasesService {
     const prisma = await getPrismaClient();
     await prisma.agentJob.deleteMany({
       where: {
+        AND: [SETTLED_AGENT_JOB_WHERE],
         visibility: "SYSTEM",
         kind: { in: [...CODEBASE_JOB_KINDS] },
         finishedAt: { lt: new Date(Date.now() - INSPECTION_MAX_AGE_MS) },

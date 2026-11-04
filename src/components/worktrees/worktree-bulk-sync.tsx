@@ -87,7 +87,9 @@ export function worktreeSyncCandidates(
                     ? "unsupported"
                     : syncing.has(worktree.id)
                       ? "activeSync"
-                      : group.blockingJob || worktree.activeJob
+                      : group.blockingJob ||
+                          worktree.blockingJob ||
+                          worktree.activeJob
                         ? "busy"
                         : worktree.rebaseInProgress || worktree.hasConflicts
                           ? "conflicts"

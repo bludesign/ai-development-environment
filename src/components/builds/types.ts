@@ -83,11 +83,13 @@ export type BuildScript = {
   enabledByDefault: boolean;
   timeoutSeconds: number;
   failureBehavior: "FAIL_BUILD" | "CONTINUE";
+  lockScope?: "WORKTREE" | "CODEBASE" | "AGENT";
 };
 
 export type IosAppProject = {
   id: string;
   type: "IOS_APP";
+  defaultDestinationType: BuildDestination["type"];
   configurations: BuildConfiguration[];
   allowedScripts: Array<{ position: number; script: BuildScript }>;
 };
@@ -117,6 +119,7 @@ export type BuildReport = {
 };
 
 export type BuildRecord = {
+  blockedReason?: string | null;
   id: string;
   requestId: string;
   jobId: string | null;

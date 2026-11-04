@@ -1,4 +1,5 @@
 import { statfsSync } from "node:fs";
+import { OPERATION_RESOURCES_CAPABILITY } from "@ai-development-environment/agent-contract/operation-resources";
 import {
   arch,
   cpus,
@@ -64,7 +65,10 @@ const MACOS_AGENT_CAPABILITIES = [
   ...CRASH_JOB_KINDS,
 ] as const;
 
-const UNIX_AGENT_CAPABILITIES = [...TAILSCALE_SERVE_JOB_KINDS] as const;
+const UNIX_AGENT_CAPABILITIES = [
+  OPERATION_RESOURCES_CAPABILITY,
+  ...TAILSCALE_SERVE_JOB_KINDS,
+] as const;
 
 export function capabilitiesForPlatform(
   targetPlatform: NodeJS.Platform,

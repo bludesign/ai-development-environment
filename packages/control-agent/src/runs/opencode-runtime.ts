@@ -5,6 +5,7 @@ import { dirname, join } from "node:path";
 import { promisify } from "node:util";
 import { OpenCode, type OpenCodeClient } from "@opencode/client";
 import { Service } from "@opencode/client/service";
+import { executionEnvironment } from "../execution-recovery.js";
 import { configPath } from "../config.js";
 import { findExecutable } from "../executable-lookup.js";
 
@@ -77,7 +78,7 @@ export class OpenCodeRuntime {
       // from XDG_STATE_HOME. Both must point to the same private registration.
       const endpoint = await Service.ensure({
         file: this.file,
-        env: { XDG_STATE_HOME: this.stateDirectory },
+        env: { XDG_STATE_HOME: this.stateDirectory, ...executionEnvironment() },
         // Replace an older owned service after a CLI upgrade, even when its
         // API version is still supported.
         version,

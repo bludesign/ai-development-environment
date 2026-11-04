@@ -1,4 +1,5 @@
 import { generateTicketBranch } from "../runs/branch-naming.js";
+import type { OperationResource } from "@ai-development-environment/agent-contract/operation-resources";
 import { JIRA_BRANCH_GENERATE_JOB_KIND } from "@ai-development-environment/agent-contract/worktrees";
 import { CCUSAGE_REPORT_JOB_KIND } from "@ai-development-environment/agent-contract";
 import {
@@ -155,6 +156,14 @@ import {
 
 export type AgentJobHandlerContext = {
   agentId: string;
+  withOperationResources?: <T>(
+    resources: readonly OperationResource[],
+    task: () => Promise<T>,
+  ) => Promise<T>;
+  tryWithOperationResources?: <T>(
+    resources: readonly OperationResource[],
+    task: () => Promise<T>,
+  ) => Promise<{ ran: false } | { ran: true; result: T }>;
   reportBranchDeletionResult?: (
     result: CodebaseBranchDeletionOutcome,
   ) => Promise<unknown>;

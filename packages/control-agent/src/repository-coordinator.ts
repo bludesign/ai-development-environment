@@ -1,3 +1,43 @@
+import { AsyncLocalStorage } from "node:async_hooks";
+import { lstat, readlink, realpath } from "node:fs/promises";
+import { basename, dirname, join, resolve } from "node:path";
+
+import {
+  normalizeOperationResources,
+  operationDescriptorsConflict,
+  type OperationDescriptor,
+  type OperationResource,
+} from "@ai-development-environment/agent-contract/operation-resources";
+
+type ResourceTask = {
+  descriptor: OperationDescriptor;
+  owner: symbol;
+  start: () => void;
+  fail: (error: Error) => void;
+};
+
+/** Resolve aliases even when a build's output directory has not been created. */
+export async function canonicalResourcePath(path: string): Promise<string> {
+  const absolute = resolve(path);
+  try {
+    return await realpath(absolute);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+    try {
+      if ((await lstat(absolute)).isSymbolicLink())
+        return canonicalResourcePath(
+          resolve(dirname(absolute), await readlink(absolute)),
+        );
+    } catch (linkError) {
+      if ((linkError as NodeJS.ErrnoException).code !== "ENOENT")
+        throw linkError;
+    }
+    const parent = dirname(absolute);
+    if (parent === absolute) throw error;
+    return join(await canonicalResourcePath(parent), basename(absolute));
+  }
+}
+
 type OperationKind = "exclusive" | "inspection" | "reconciliation" | "build";
 
 type ReconciliationContext = {
@@ -15,6 +55,211 @@ type RepositoryQueue = {
 
 export class RepositoryCoordinator {
   private readonly queues = new Map<string, RepositoryQueue>();
+  private readonly resourceOwners = new AsyncLocalStorage<symbol>();
+  private readonly resourceActive = new Set<ResourceTask>();
+  private readonly resourcePending: ResourceTask[] = [];
+
+  private async descriptor(
+    resources: readonly OperationResource[],
+  ): Promise<OperationDescriptor> {
+    return {
+      version: 1,
+      resources: normalizeOperationResources(
+        await Promise.all(
+          resources.map(async (resource) => {
+            if (resource.kind !== "PATH") return resource;
+            const path = await canonicalResourcePath(
+              resource.path ?? resource.key,
+            );
+            return { ...resource, key: path, path };
+          }),
+        ),
+      ),
+    };
+  }
+
+  /** Acquire an entire resource set atomically; unrelated waiters can proceed. */
+  async withResources<T>(
+    resources: readonly OperationResource[],
+    task: () => Promise<T>,
+    signal?: AbortSignal,
+  ): Promise<T> {
+    signal?.throwIfAborted();
+    const descriptor = await this.descriptor(resources);
+    signal?.throwIfAborted();
+    return this.enqueueResources(descriptor, task, signal);
+  }
+
+  /** Background checkout maintenance should skip a busy worktree, not wait. */
+  async tryWithResources<T>(
+    resources: readonly OperationResource[],
+    task: () => Promise<T>,
+    signal?: AbortSignal,
+  ): Promise<{ ran: false } | { ran: true; result: T }> {
+    const descriptor = await this.descriptor(resources);
+    const owner = this.resourceOwners.getStore();
+    if (
+      [...this.resourceActive, ...this.resourcePending].some(
+        (entry) =>
+          entry.owner !== owner &&
+          operationDescriptorsConflict(entry.descriptor, descriptor),
+      )
+    )
+      return { ran: false };
+    return {
+      ran: true,
+      result: await this.enqueueResources(descriptor, task, signal),
+    };
+  }
+
+  private enqueueResources<T>(
+    descriptor: OperationDescriptor,
+    task: () => Promise<T>,
+    signal?: AbortSignal,
+  ): Promise<T> {
+    const owner = this.resourceOwners.getStore() ?? Symbol("operation");
+    return new Promise<T>((resolve, reject) => {
+      let pending = true;
+      const abort = () => {
+        if (!pending) return;
+        pending = false;
+        const index = this.resourcePending.indexOf(entry);
+        if (index >= 0) this.resourcePending.splice(index, 1);
+        signal?.removeEventListener("abort", abort);
+        reject(signal?.reason);
+        this.drainResources();
+      };
+      const entry: ResourceTask = {
+        descriptor,
+        owner,
+        fail: (error) => {
+          pending = false;
+          signal?.removeEventListener("abort", abort);
+          reject(error);
+        },
+        start: () => {
+          pending = false;
+          signal?.removeEventListener("abort", abort);
+          this.resourceActive.add(entry);
+          void this.resourceOwners
+            .run(owner, async () => {
+              signal?.throwIfAborted();
+              return task();
+            })
+            .then(
+              (result) => {
+                this.resourceActive.delete(entry);
+                this.drainResources();
+                resolve(result);
+              },
+              (error: unknown) => {
+                this.resourceActive.delete(entry);
+                this.drainResources();
+                reject(error);
+              },
+            );
+        },
+      };
+      this.resourcePending.push(entry);
+      signal?.addEventListener("abort", abort, { once: true });
+      if (signal?.aborted) abort();
+      else this.drainResources();
+    });
+  }
+
+  private drainResources(): void {
+    for (let index = 0; index < this.resourcePending.length;) {
+      const next = this.resourcePending[index]!;
+      const active = [...this.resourceActive].filter(
+        (entry) => entry.owner !== next.owner,
+      );
+      if (
+        active.some((entry) =>
+          operationDescriptorsConflict(entry.descriptor, next.descriptor),
+        )
+      ) {
+        if (this.hasResourceWaitCycle(next.owner)) {
+          this.resourcePending.splice(index, 1);
+          next.fail(
+            new Error(
+              "Resource lock expansion would deadlock with another operation; use separate build output directories",
+            ),
+          );
+          continue;
+        }
+        index += 1;
+        continue;
+      }
+      const heldByOwner = [...this.resourceActive].filter(
+        (entry) => entry.owner === next.owner,
+      );
+      const blockedByEarlier = this.resourcePending
+        .slice(0, index)
+        .some((earlier) => {
+          if (
+            earlier.owner === next.owner ||
+            !operationDescriptorsConflict(earlier.descriptor, next.descriptor)
+          )
+            return false;
+          // A nested claim must not wait on a writer that is waiting for its owner.
+          if (
+            heldByOwner.some((held) =>
+              operationDescriptorsConflict(held.descriptor, earlier.descriptor),
+            )
+          )
+            return false;
+          // Keep inspections responsive while a build prevents the queued writer.
+          return !(
+            next.descriptor.resources.every(
+              (resource) =>
+                resource.mode === "READ" &&
+                !resource.key.includes(":build-stability:"),
+            ) &&
+            active.some(
+              (held) =>
+                held.descriptor.resources.some(
+                  (resource) => resource.mode === "BUILD",
+                ) &&
+                operationDescriptorsConflict(
+                  held.descriptor,
+                  earlier.descriptor,
+                ),
+            )
+          );
+        });
+      if (blockedByEarlier) {
+        index += 1;
+        continue;
+      }
+      this.resourcePending.splice(index, 1);
+      next.start();
+    }
+  }
+
+  private hasResourceWaitCycle(owner: symbol): boolean {
+    const edges = new Map<symbol, Set<symbol>>();
+    for (const pending of this.resourcePending) {
+      for (const active of this.resourceActive) {
+        if (
+          active.owner === pending.owner ||
+          !operationDescriptorsConflict(pending.descriptor, active.descriptor)
+        )
+          continue;
+        const waiting = edges.get(pending.owner) ?? new Set<symbol>();
+        waiting.add(active.owner);
+        edges.set(pending.owner, waiting);
+      }
+    }
+    const visit = (current: symbol, seen: Set<symbol>): boolean => {
+      if (seen.has(current)) return false;
+      seen.add(current);
+      for (const target of edges.get(current) ?? []) {
+        if (target === owner || visit(target, seen)) return true;
+      }
+      return false;
+    };
+    return visit(owner, new Set());
+  }
 
   run<T>(
     key: string,

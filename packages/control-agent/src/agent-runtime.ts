@@ -24,6 +24,7 @@ import { RepositoryCoordinator } from "./repository-coordinator.js";
 import { RunManager } from "./runs/run-manager.js";
 import { DISK_SPACE_POLL_INTERVAL_SECONDS } from "@ai-development-environment/agent-contract/disk-space";
 import { collectAgentDiskSpace } from "./handlers/build-data.js";
+import { acquireAgentLeadership } from "./agent-leadership.js";
 
 function configuredIntervalMs(
   value: number,
@@ -58,8 +59,16 @@ export async function runAgentSession(
   );
   const repositoryCoordinator = new RepositoryCoordinator();
   const executor = new JobExecutor(client, repositoryCoordinator);
-  const codebaseMonitor = new CodebaseMonitor(client, repositoryCoordinator);
-  const runManager = new RunManager(client);
+  let stoppingExecutor: Promise<void> | undefined;
+  const stopExecutor = () => (stoppingExecutor ??= executor.cancelAll());
+  if (signal.aborted) void stopExecutor();
+  else signal.addEventListener("abort", stopExecutor, { once: true });
+  const codebaseMonitor = new CodebaseMonitor(
+    client,
+    repositoryCoordinator,
+    config.agentId,
+  );
+  const runManager = new RunManager(client, repositoryCoordinator);
   let heartbeatIntervalMs = DEFAULT_AGENT_HEARTBEAT_INTERVAL_SECONDS * 1_000;
   let jobReconciliationIntervalMs =
     DEFAULT_AGENT_JOB_RECONCILIATION_INTERVAL_SECONDS * 1_000;
@@ -72,7 +81,26 @@ export async function runAgentSession(
   let diskSpaceRunning = false;
   let diskSpaceIntervalMs = DISK_SPACE_POLL_INTERVAL_SECONDS * 1_000;
   let startupRecoveryPending = true;
+  let backgroundServicesStarted = false;
+  let runManagerStarted = false;
+  const pendingJobEvents = new Map<
+    string,
+    import("./graphql-client.js").AgentJob
+  >();
+  const pendingRunEvents = new Map<
+    string,
+    import("./graphql-client.js").RunCommand
+  >();
+  const startManagedRuns = async () => {
+    if (signal.aborted) return false;
+    if (!runManagerStarted) {
+      runManagerStarted = true;
+      await runManager.start();
+    }
+    return !runManager.isStartupRecoveryPending();
+  };
   let heartbeatFailures = 0;
+  let legacyDrainReported = false;
   const interruptedJobs = new Set<string>();
 
   const reconcileJobs = async (recoverInterrupted: boolean) => {
@@ -86,15 +114,69 @@ export async function runAgentSession(
       );
       return false;
     }
+    const legacyActive = jobs.filter((job) => {
+      const payload =
+        job.payload && typeof job.payload === "object"
+          ? (job.payload as Record<string, unknown>)
+          : {};
+      return (
+        !job.executionToken &&
+        ["RUNNING", "CANCELLING"].includes(job.status) &&
+        (typeof payload.codebaseId === "string" ||
+          Boolean(job.worktreeId) ||
+          job.kind === "command.run")
+      );
+    });
+    if (recoverInterrupted && legacyActive.length) {
+      if (!legacyDrainReported)
+        console.error(
+          "Finish existing work on the original agent before upgrading; legacy executions have no cleanup journal, so queued jobs and repository maintenance remain paused:",
+          legacyActive.map((job) => job.id).join(", "),
+        );
+      legacyDrainReported = true;
+      return false;
+    }
+    legacyDrainReported = false;
+    const recovered = new Set<string>();
+    if (recoverInterrupted) {
+      // Dynamic build output paths are learned after admission. Reap every
+      // prior execution before any new job can touch an unknown shared path.
+      await Promise.all(
+        jobs
+          .filter((job) => job.executionToken && job.status !== "QUEUED")
+          .map(async (job) => {
+            recovered.add(job.id);
+            await executor.recover(
+              job,
+              job.status === "RUNNING"
+                ? "FAILED"
+                : job.status === "CANCELLING"
+                  ? "CANCELLED"
+                  : job.status,
+              true,
+            );
+          }),
+      );
+      if (!(await startManagedRuns())) return false;
+    }
     await Promise.all(
       jobs.map(async (job) => {
+        if (recovered.has(job.id) || signal.aborted) return;
+        if (
+          job.executionToken &&
+          !["QUEUED", "RUNNING", "CANCELLING"].includes(job.status)
+        ) {
+          if (!executor.cancel(job.id)) await executor.recover(job, job.status);
+          return;
+        }
         if (job.status === "CANCELLED") {
           executor.cancel(job.id);
           return;
         }
         if (job.status === "CANCELLING") {
           if (!executor.cancel(job.id)) {
-            await client.completeJob(job.id, "CANCELLED");
+            if (job.executionToken) await executor.recover(job, "CANCELLED");
+            else await client.completeJob(job.id, "CANCELLED");
           }
           return;
         }
@@ -106,12 +188,17 @@ export async function runAgentSession(
           return;
         }
         interruptedJobs.add(job.id);
+        if (job.executionToken) {
+          await executor.recover(job, "FAILED");
+          return;
+        }
         try {
           await client.completeJob(
             job.id,
             "FAILED",
             undefined,
             "Agent service restarted while this job was running",
+            ...(job.executionToken ? ([job.executionToken] as const) : []),
           );
           interruptedJobs.delete(job.id);
         } catch (error) {
@@ -195,7 +282,17 @@ export async function runAgentSession(
     jobReconciliationTimer = undefined;
     try {
       if (await reconcileJobs(startupRecoveryPending)) {
+        const recoveredStartup = startupRecoveryPending;
         startupRecoveryPending = false;
+        if (recoveredStartup) {
+          await startManagedRuns();
+          for (const job of pendingJobEvents.values()) executor.execute(job);
+          pendingJobEvents.clear();
+          for (const command of pendingRunEvents.values())
+            runManager.execute(command);
+          pendingRunEvents.clear();
+          if (backgroundServicesStarted) requestCodebaseReconcile();
+        }
       }
     } finally {
       jobReconciliationRunning = false;
@@ -206,10 +303,15 @@ export async function runAgentSession(
   let codebaseReconciling = false;
   let codebaseReconcilePending = false;
   const reconcileCodebases = async () => {
+    if (startupRecoveryPending) {
+      codebaseReconcilePending = true;
+      return;
+    }
     if (codebaseReconciling) {
       codebaseReconcilePending = true;
       return;
     }
+    codebaseReconcilePending = false;
     codebaseReconciling = true;
     if (codebaseTimer) clearTimeout(codebaseTimer);
     codebaseTimer = undefined;
@@ -281,7 +383,7 @@ export async function runAgentSession(
   await refreshCadence();
   await heartbeat();
   await runJobReconciliation();
-  await runManager.start();
+  backgroundServicesStarted = true;
   void reconcileCodebases();
   void runDiskSpacePoll();
 
@@ -290,13 +392,19 @@ export async function runAgentSession(
     subscriptionClient,
     config.agentId,
     (event) => {
-      if (event.type === "JOB_AVAILABLE") executor.execute(event.job);
-      else if (event.type === "JOB_CANCEL_REQUESTED") {
+      if (event.type === "JOB_AVAILABLE") {
+        if (startupRecoveryPending)
+          pendingJobEvents.set(event.job.id, event.job);
+        else executor.execute(event.job);
+      } else if (event.type === "JOB_CANCEL_REQUESTED") {
+        pendingJobEvents.delete(event.job.id);
         executor.cancel(event.job.id);
       } else if (event.type === "CODEBASE_RECONCILE_REQUESTED") {
         requestCodebaseReconcile();
       } else if (event.type === "RUN_COMMAND_AVAILABLE") {
-        runManager.execute(event.runCommand);
+        if (startupRecoveryPending)
+          pendingRunEvents.set(event.runCommand.id, event.runCommand);
+        else runManager.execute(event.runCommand);
       } else if (event.type === "DISK_SPACE_POLL_REQUESTED") {
         void runDiskSpacePoll();
       } else {
@@ -321,7 +429,8 @@ export async function runAgentSession(
   if (diskSpaceTimer) clearTimeout(diskSpaceTimer);
   unsubscribe();
   await subscriptionClient.dispose();
-  await executor.cancelAll();
+  signal.removeEventListener("abort", stopExecutor);
+  await stopExecutor();
   await runManager.close();
 }
 
@@ -332,6 +441,18 @@ export async function runAgentSession(
  * responding *and* the other one is confirmed to be answering.
  */
 export async function runAgent(
+  config: AgentConfig,
+  signal: AbortSignal,
+): Promise<void> {
+  const leadership = await acquireAgentLeadership(config.agentId);
+  try {
+    await runAgentAsLeader(config, signal);
+  } finally {
+    await leadership.release();
+  }
+}
+
+async function runAgentAsLeader(
   config: AgentConfig,
   signal: AbortSignal,
 ): Promise<void> {

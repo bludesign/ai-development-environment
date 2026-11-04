@@ -505,12 +505,12 @@ export class WorktreeSyncService {
           });
           const lanes = new Map<string, WorktreeSyncItem>();
           for (const item of items) {
-            const previous = lanes.get(item.codebaseId);
+            const previous = lanes.get(item.worktreeId);
             if (
               !previous ||
               (previous.status !== "RUNNING" && item.status === "RUNNING")
             )
-              lanes.set(item.codebaseId, item);
+              lanes.set(item.worktreeId, item);
           }
           // Collect all results before surfacing a coordinator error, so an
           // independent repository still makes progress when another is broken.

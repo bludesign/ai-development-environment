@@ -15,6 +15,7 @@ import {
   ReactFlowProvider,
   useEdgesState,
   useNodesState,
+  useReactFlow,
   useStore,
   useStoreApi,
   type Connection,
@@ -24,6 +25,7 @@ import {
   type ReactFlowInstance,
 } from "@xyflow/react";
 import {
+  AlertTriangle,
   Copy,
   Download,
   Eye,
@@ -43,6 +45,7 @@ import { useTranslations } from "next-intl";
 import {
   useCallback,
   useEffect,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -118,6 +121,8 @@ import { controlPlaneRequest } from "@/lib/control-plane-client";
 import {
   computeWorkflowPathAvailability,
   resourceManualSeedPaths,
+  validateWorkflowDefinition,
+  workflowConnectionSummary,
 } from "@/lib/workflows/definition";
 import {
   expandSessionPaths,
@@ -136,6 +141,7 @@ import {
 } from "./workflow-fit-lock";
 import {
   MINIMAP_NODE_RADIUS,
+  applyWorkflowDiagnostics,
   WorkflowGraph,
   workflowFlowElements,
   WorkflowNodeActionsContext,
@@ -165,6 +171,51 @@ import {
 import { WorkflowReadonlyInspector } from "./workflow-readonly-inspector";
 
 import { loadWorkflowCatalog } from "./workflow-catalog";
+import {
+  mergeWorkflowDiagnostics,
+  normalizeWorkflowDiagnostics,
+  workflowDiagnosticTarget,
+  workflowRenderableDefinition,
+  workflowSemanticKey,
+} from "./workflow-diagnostics";
+
+type DiagnosticResult = { key: string; diagnostics: WorkflowDiagnostic[] };
+type DiagnosticFocus = {
+  nodeIds: string[];
+  inspectorId: string | null;
+  sequence: number;
+};
+
+function WorkflowDiagnosticFocus({
+  request,
+  onFocused,
+}: {
+  request: DiagnosticFocus | null;
+  onFocused: (request: DiagnosticFocus) => void;
+}) {
+  const { fitView } = useReactFlow();
+  const initialized = useStore((state) => state.nodesInitialized);
+  useEffect(() => {
+    if (!request || (request.nodeIds.length > 0 && !initialized)) return;
+    let active = true;
+    void Promise.resolve(
+      request.nodeIds.length > 0
+        ? fitView({
+            nodes: request.nodeIds.map((id) => ({ id })),
+            padding: 0.3,
+            maxZoom: 1,
+            duration: 250,
+          })
+        : undefined,
+    ).then(() => {
+      if (active) onFocused(request);
+    });
+    return () => {
+      active = false;
+    };
+  }, [fitView, initialized, onFocused, request]);
+  return null;
+}
 
 const DEFINITION_QUERY = `
   query WorkflowEditorDefinition($id: ID!) {
@@ -312,6 +363,7 @@ function WorkflowEditorInner({ workflowId }: { workflowId?: string | null }) {
   const labels = useWorkflowLabels();
   const router = useRouter();
   const wrapperRef = useRef<HTMLDivElement>(null);
+  const issuesRef = useRef<HTMLDivElement>(null);
   const fileRef = useRef<HTMLInputElement>(null);
   const [workflow, setWorkflow] = useState<WorkflowSummary | null>(null);
   useBreadcrumbLabel(["dashboard", "workflows", workflow?.id], workflow?.name);
@@ -340,7 +392,53 @@ function WorkflowEditorInner({ workflowId }: { workflowId?: string | null }) {
     Boolean(error) || (!loading && !workflow),
   );
   const [notice, setNotice] = useState<string | null>(null);
-  const [diagnostics, setDiagnostics] = useState<WorkflowDiagnostic[]>([]);
+  const [localValidation, setLocalValidation] =
+    useState<DiagnosticResult | null>(null);
+  const [serverValidation, setServerValidation] =
+    useState<DiagnosticResult | null>(null);
+  const [revealIssues, setRevealIssues] = useState(0);
+  const [focusRequest, setFocusRequest] = useState<DiagnosticFocus | null>(
+    null,
+  );
+  const focusSequence = useRef(0);
+  const operationInFlight = useRef(false);
+  const definitionRef = useRef(definition);
+  const semanticKey = useMemo(
+    () => workflowSemanticKey(definition),
+    [definition],
+  );
+  const semanticRevision = useRef({ key: semanticKey, revision: 0 });
+  useLayoutEffect(() => {
+    definitionRef.current = definition;
+    if (semanticRevision.current.key !== semanticKey) {
+      semanticRevision.current = {
+        key: semanticKey,
+        revision: semanticRevision.current.revision + 1,
+      };
+    }
+  }, [definition, semanticKey]);
+  useEffect(() => {
+    if (loading) return;
+    const timeout = setTimeout(() => {
+      const result = validateWorkflowDefinition(definitionRef.current);
+      setLocalValidation({
+        key: semanticKey,
+        diagnostics: normalizeWorkflowDiagnostics(result.diagnostics),
+      });
+    }, 200);
+    return () => clearTimeout(timeout);
+  }, [loading, semanticKey]);
+  const diagnostics = useMemo(
+    () =>
+      mergeWorkflowDiagnostics(
+        localValidation?.key === semanticKey ? localValidation.diagnostics : [],
+        serverValidation?.key === semanticKey
+          ? serverValidation.diagnostics
+          : [],
+      ),
+    [localValidation, semanticKey, serverValidation],
+  );
+  const checking = localValidation?.key !== semanticKey;
   const [overlapPolicy, setOverlapPolicy] = useState("QUEUE");
   const [overlapScope, setOverlapScope] = useState("WORKTREE");
   const [maxConcurrentRuns, setMaxConcurrentRuns] = useState(1);
@@ -373,9 +471,8 @@ function WorkflowEditorInner({ workflowId }: { workflowId?: string | null }) {
   );
 
   const rebuildGraph = useCallback(
-    (nextDefinition: WorkflowDefinition, nextDiagnostics = diagnostics) => {
+    (nextDefinition: WorkflowDefinition) => {
       const elements = workflowFlowElements(nextDefinition, {
-        diagnostics: nextDiagnostics,
         categories,
         provides: providesByNodeMap(
           computeWorkflowPathAvailability(
@@ -387,9 +484,10 @@ function WorkflowEditorInner({ workflowId }: { workflowId?: string | null }) {
       setNodes(elements.nodes);
       setEdges(elements.edges);
     },
-    [catalog, categories, diagnostics, setEdges, setNodes],
+    [catalog, categories, setEdges, setNodes],
   );
 
+  const invalidDefinitionMessage = t("invalidImport");
   useEffect(() => {
     const controller = new AbortController();
     void Promise.all([
@@ -404,6 +502,8 @@ function WorkflowEditorInner({ workflowId }: { workflowId?: string | null }) {
         if (controller.signal.aborted) return;
         const data = { ...result, workflowCatalog };
         const next = data.workflow?.draftDefinition ?? emptyDefinition();
+        if (!workflowRenderableDefinition(next))
+          throw new Error(invalidDefinitionMessage);
         setCatalog(data.workflowCatalog);
         setWorkflow(data.workflow);
         setDefinition(next);
@@ -443,7 +543,7 @@ function WorkflowEditorInner({ workflowId }: { workflowId?: string | null }) {
         if (!controller.signal.aborted) setLoading(false);
       });
     return () => controller.abort();
-  }, [setEdges, setNodes, workflowId]);
+  }, [invalidDefinitionMessage, setEdges, setNodes, workflowId]);
 
   const selectedNode =
     definition.nodes.find(({ id }) => id === selectedId) ?? null;
@@ -514,6 +614,7 @@ function WorkflowEditorInner({ workflowId }: { workflowId?: string | null }) {
 
   const commitDefinition = useCallback(
     (next: WorkflowDefinition) => {
+      setFocusRequest(null);
       setDefinition(next);
       rebuildGraph(next);
     },
@@ -602,6 +703,7 @@ function WorkflowEditorInner({ workflowId }: { workflowId?: string | null }) {
       onDelete: (id) => removeItems([id]),
       onDuplicate: (id) => duplicateItem(id),
       onEdit: (id) => {
+        setFocusRequest(null);
         setSelectedEdgeId(null);
         setSelectedId(id);
       },
@@ -624,6 +726,7 @@ function WorkflowEditorInner({ workflowId }: { workflowId?: string | null }) {
 
   const onConnect = useCallback(
     (connection: Connection) => {
+      setFocusRequest(null);
       if (!connection.source || !connection.target) return;
       const edge = {
         id: clientId("edge"),
@@ -650,6 +753,7 @@ function WorkflowEditorInner({ workflowId }: { workflowId?: string | null }) {
         ),
       );
       if (removedIds.size === 0) return;
+      setFocusRequest(null);
       setDefinition((current) => ({
         ...current,
         edges: current.edges.filter(({ id }) => !removedIds.has(id)),
@@ -663,6 +767,7 @@ function WorkflowEditorInner({ workflowId }: { workflowId?: string | null }) {
 
   const removeEdges = useCallback(
     (ids: string[]) => {
+      setFocusRequest(null);
       const removedIds = new Set(ids);
       setEdges((current) => current.filter(({ id }) => !removedIds.has(id)));
       setDefinition((current) => ({
@@ -676,82 +781,96 @@ function WorkflowEditorInner({ workflowId }: { workflowId?: string | null }) {
     [setEdges],
   );
 
-  const save = async (): Promise<boolean> => {
+  // Persist a captured draft without replacing newer local edits with the response.
+  const persistSnapshot = async (snapshot: WorkflowDefinition) => {
+    const fields = `id name description draftDefinition activeVersionId enabled overlapPolicy overlapScope maxConcurrentRuns completionNotificationsEnabled exclusiveWorktree worktreeConcurrency blocksGitOperations archivedAt versionCount runCount createdAt updatedAt`;
+    const input = {
+      definition: snapshot,
+      overlapPolicy,
+      overlapScope,
+      maxConcurrentRuns,
+      completionNotificationsEnabled,
+      worktreeConcurrency,
+      blocksGitOperations,
+    };
+    let saved: WorkflowSummary;
+    if (workflow) {
+      const data = await controlPlaneRequest<{
+        saveWorkflowDraft: WorkflowSummary;
+      }>(
+        `mutation SaveWorkflow($input: SaveWorkflowDraftInput!) { saveWorkflowDraft(input: $input) { ${fields} } }`,
+        { input: { ...input, id: workflow.id } },
+      );
+      saved = data.saveWorkflowDraft;
+    } else {
+      const data = await controlPlaneRequest<{
+        createWorkflow: WorkflowSummary;
+      }>(
+        `mutation CreateWorkflow($input: CreateWorkflowInput!) { createWorkflow(input: $input) { ${fields} } }`,
+        {
+          input: {
+            ...input,
+            name: snapshot.name,
+            description: snapshot.description,
+          },
+        },
+      );
+      saved = data.createWorkflow;
+    }
+    setWorkflow(saved);
+    if (!workflow) {
+      const url = new URL(window.location.href);
+      const newRoute = /\/workflows\/new\/?$/;
+      if (newRoute.test(url.pathname)) {
+        url.pathname = url.pathname.replace(
+          newRoute,
+          `/workflows/${encodeURIComponent(saved.id)}/edit`,
+        );
+        // Navigating to the edit page would remount the editor and discard
+        // edits made while creating the draft, along with validation results.
+        window.history.replaceState(null, "", url);
+      } else {
+        router.replace(`/dashboard/workflows/${saved.id}/edit`);
+      }
+    }
+    return saved;
+  };
+
+  const runDraftAction = async (action: "save" | "validate" | "publish") => {
+    if (operationInFlight.current) return;
+    if (action === "publish" && !workflow) {
+      setError(t("saveBeforePublish"));
+      return;
+    }
+    operationInFlight.current = true;
     setSaving(true);
     setError(null);
     setNotice(null);
+    const snapshot = definitionRef.current;
+    const submitted = { ...semanticRevision.current };
+    const isCurrent = () =>
+      semanticRevision.current.revision === submitted.revision &&
+      semanticRevision.current.key === submitted.key;
     try {
-      const next = definition;
-      if (workflow) {
-        const data = await controlPlaneRequest<{
-          saveWorkflowDraft: WorkflowSummary;
-        }>(
-          `mutation SaveWorkflow($input: SaveWorkflowDraftInput!) {
-            saveWorkflowDraft(input: $input) {
-              id name description draftDefinition activeVersionId enabled overlapPolicy overlapScope maxConcurrentRuns completionNotificationsEnabled exclusiveWorktree worktreeConcurrency blocksGitOperations archivedAt
-              versionCount runCount createdAt updatedAt
-            }
-          }`,
-          {
-            input: {
-              id: workflow.id,
-              definition: next,
-              overlapPolicy,
-              overlapScope,
-              maxConcurrentRuns,
-              completionNotificationsEnabled,
-              worktreeConcurrency,
-              blocksGitOperations,
-            },
-          },
-        );
-        setWorkflow(data.saveWorkflowDraft);
-        setDefinition(data.saveWorkflowDraft.draftDefinition);
-        setNotice(t("saved"));
-      } else {
-        const data = await controlPlaneRequest<{
-          createWorkflow: WorkflowSummary;
-        }>(
-          `mutation CreateWorkflow($input: CreateWorkflowInput!) {
-            createWorkflow(input: $input) {
-              id name description draftDefinition activeVersionId enabled overlapPolicy overlapScope maxConcurrentRuns completionNotificationsEnabled exclusiveWorktree worktreeConcurrency blocksGitOperations archivedAt
-              versionCount runCount createdAt updatedAt
-            }
-          }`,
-          {
-            input: {
-              name: next.name,
-              description: next.description,
-              definition: next,
-              overlapPolicy,
-              overlapScope,
-              maxConcurrentRuns,
-              completionNotificationsEnabled,
-              worktreeConcurrency,
-              blocksGitOperations,
-            },
-          },
-        );
-        setWorkflow(data.createWorkflow);
-        setDefinition(data.createWorkflow.draftDefinition);
-        setNotice(t("saved"));
-        router.replace(`/dashboard/workflows/${data.createWorkflow.id}/edit`);
+      const local = validateWorkflowDefinition(snapshot);
+      setLocalValidation({
+        key: submitted.key,
+        diagnostics: normalizeWorkflowDiagnostics(local.diagnostics),
+      });
+      if (!local.definition) {
+        setSettingsOpen(false);
+        setRevealIssues((value) => value + 1);
+        return;
       }
-      return true;
-    } catch (value) {
-      setError(value instanceof Error ? value.message : String(value));
-      return false;
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  const validate = async () => {
-    if (!workflow) {
-      await save();
-      return;
-    }
-    try {
+      const saved = await persistSnapshot(snapshot);
+      if (action === "save") {
+        setNotice(isCurrent() ? t("saved") : t("savedDraftChanged"));
+        return;
+      }
+      if (!isCurrent()) {
+        setNotice(t("validationChanged"));
+        return;
+      }
       const data = await controlPlaneRequest<{
         validateWorkflowDraft: {
           valid: boolean;
@@ -759,42 +878,47 @@ function WorkflowEditorInner({ workflowId }: { workflowId?: string | null }) {
         };
       }>(
         `query ValidateWorkflow($id: ID!) {
-          validateWorkflowDraft(id: $id) { valid diagnostics { severity code message nodeId triggerId path } }
+          validateWorkflowDraft(id: $id) { valid diagnostics { severity code message nodeId triggerId edgeId path } }
         }`,
-        { id: workflow.id },
+        { id: saved.id },
       );
-      setDiagnostics(data.validateWorkflowDraft.diagnostics);
-      rebuildGraph(definition, data.validateWorkflowDraft.diagnostics);
-      setNotice(
-        data.validateWorkflowDraft.valid
-          ? t("validationPassed")
-          : t("validationFailed"),
-      );
+      if (!isCurrent()) {
+        setNotice(t("validationChanged"));
+        return;
+      }
+      const result = data.validateWorkflowDraft;
+      setServerValidation({
+        key: submitted.key,
+        diagnostics: result.diagnostics,
+      });
+      setSettingsOpen(false);
+      if (!result.valid) {
+        setRevealIssues((value) => value + 1);
+        return;
+      }
+      if (action === "publish") {
+        await controlPlaneRequest(
+          `mutation PublishWorkflow($id: ID!) { publishWorkflow(id: $id) { id version contentHash } }`,
+          { id: saved.id },
+        );
+        if (!isCurrent()) {
+          setNotice(t("publishedDraftChanged"));
+          return;
+        }
+        setNotice(t("published"));
+        router.push(`/dashboard/workflows/${saved.id}`);
+      }
     } catch (value) {
-      setError(value instanceof Error ? value.message : String(value));
-    }
-  };
-
-  const publish = async () => {
-    if (!workflow) {
-      setError(t("saveBeforePublish"));
-      return;
-    }
-    setSaving(true);
-    try {
-      if (!(await save())) return;
-      await controlPlaneRequest(
-        `mutation PublishWorkflow($id: ID!) { publishWorkflow(id: $id) { id version contentHash } }`,
-        { id: workflow.id },
-      );
-      setNotice(t("published"));
-      router.push(`/dashboard/workflows/${workflow.id}`);
-    } catch (value) {
-      setError(value instanceof Error ? value.message : String(value));
+      if (isCurrent())
+        setError(value instanceof Error ? value.message : String(value));
     } finally {
+      operationInFlight.current = false;
       setSaving(false);
     }
   };
+  const save = () => runDraftAction("save");
+  const validate = () => runDraftAction("validate");
+  const publish = () => runDraftAction("publish");
 
   const duplicateWorkflow = async () => {
     try {
@@ -861,10 +985,12 @@ function WorkflowEditorInner({ workflowId }: { workflowId?: string | null }) {
         typeof payload.workflow === "object"
           ? (payload.workflow as { definition?: WorkflowDefinition }).definition
           : payload;
-      if (!imported || typeof imported !== "object")
+      const parsed = validateWorkflowDefinition(imported);
+      const next = parsed.definition ?? imported;
+      if (!workflowRenderableDefinition(next))
         throw new Error(t("invalidImport"));
-      const next = imported as WorkflowDefinition;
       setBasicPreview(false);
+      setFocusRequest(null);
       setPreviewSelectedId(null);
       setDefinition(next);
       rebuildGraph(next);
@@ -924,20 +1050,68 @@ function WorkflowEditorInner({ workflowId }: { workflowId?: string | null }) {
       }|${showSessionData}`,
     [definition, showSessionData],
   );
+  const diagnosticElements = useMemo(
+    () => applyWorkflowDiagnostics(definition, nodes, edges, diagnostics),
+    [definition, nodes, edges, diagnostics],
+  );
   // The chips are an editing aid layered onto the same card the run and detail
   // views render, so they are dropped on the way to the canvas rather than left
   // out of the graph — the definition and its rebuilds stay untouched.
   const canvasNodes = useMemo(
     () =>
       showSessionData
-        ? nodes
-        : nodes.map((node) =>
+        ? diagnosticElements.nodes
+        : diagnosticElements.nodes.map((node) =>
             node.data.provides.length
               ? { ...node, data: { ...node.data, provides: [] } }
               : node,
           ),
-    [nodes, showSessionData],
+    [diagnosticElements.nodes, showSessionData],
   );
+  const selectedEdge = definition.edges.find(({ id }) => id === selectedEdgeId);
+  const focusDiagnostic = (diagnostic: WorkflowDiagnostic) => {
+    const target = workflowDiagnosticTarget(definition, diagnostic);
+    if (!target.nodeIds.length && target.edgeId === null) return;
+    setSettingsOpen(false);
+    setBasicPreview(false);
+    setPreviewSelectedId(null);
+    setSelectedId(null);
+    setSelectedEdgeId(target.edgeId);
+    setLocked(false);
+    setNodes((current) =>
+      current.map((node) => ({
+        ...node,
+        selected: target.nodeIds.includes(node.id),
+      })),
+    );
+    setEdges((current) =>
+      current.map((edge) => ({
+        ...edge,
+        selected: edge.id === target.edgeId,
+      })),
+    );
+    setFocusRequest({ ...target, sequence: ++focusSequence.current });
+  };
+  const finishDiagnosticFocus = useCallback((request: DiagnosticFocus) => {
+    setFocusRequest(null);
+    setSelectedId(request.inspectorId);
+  }, []);
+  useEffect(() => {
+    if (focusRequest && !basicPreview)
+      wrapperRef.current?.scrollIntoView({
+        block: "center",
+        behavior: "smooth",
+      });
+  }, [basicPreview, focusRequest]);
+  useEffect(() => {
+    if (revealIssues) {
+      issuesRef.current?.scrollIntoView({
+        block: "center",
+        behavior: "smooth",
+      });
+      issuesRef.current?.focus({ preventScroll: true });
+    }
+  }, [revealIssues]);
   const stepGroups = useMemo(
     () => [...groupByCategory(filteredSteps)],
     [filteredSteps],
@@ -948,6 +1122,7 @@ function WorkflowEditorInner({ workflowId }: { workflowId?: string | null }) {
   );
   const displayLayout = definition.editor.displayLayout ?? "REGULAR";
   const toggleBasicPreview = () => {
+    setFocusRequest(null);
     setBasicPreview((current) => !current);
     setSelectedId(null);
     setSelectedEdgeId(null);
@@ -989,6 +1164,18 @@ function WorkflowEditorInner({ workflowId }: { workflowId?: string | null }) {
           </div>
         </div>
         <div className="flex flex-wrap gap-2">
+          {diagnostics.length > 0 && (
+            <Button
+              onClick={() => {
+                setSettingsOpen(false);
+                setRevealIssues((value) => value + 1);
+              }}
+              variant="outline"
+            >
+              <AlertTriangle />{" "}
+              {t("workflowIssueCount", { count: diagnostics.length })}
+            </Button>
+          )}
           <input
             accept="application/json,.json"
             className="hidden"
@@ -1000,7 +1187,13 @@ function WorkflowEditorInner({ workflowId }: { workflowId?: string | null }) {
             ref={fileRef}
             type="file"
           />
-          <Button onClick={() => setSettingsOpen(true)} variant="outline">
+          <Button
+            onClick={() => {
+              setFocusRequest(null);
+              setSettingsOpen(true);
+            }}
+            variant="outline"
+          >
             <Settings /> {t("settings")}
           </Button>
           {displayLayout === "BASIC" && (
@@ -1047,6 +1240,22 @@ function WorkflowEditorInner({ workflowId }: { workflowId?: string | null }) {
           <AlertDescription>{notice}</AlertDescription>
         </Alert>
       )}
+      <p
+        className="text-sm text-muted-foreground"
+        aria-live={serverValidation?.key === semanticKey ? "polite" : "off"}
+      >
+        {checking
+          ? t("checkingWorkflow")
+          : serverValidation?.key === semanticKey
+            ? serverValidation.diagnostics.some(
+                ({ severity }) => severity === "ERROR",
+              )
+              ? t("validationFailed")
+              : t("validationPassed")
+            : diagnostics.length === 0
+              ? t("localValidationPassed")
+              : t("workflowIssueCount", { count: diagnostics.length })}
+      </p>
 
       <div className="grid gap-4 xl:grid-cols-[280px_minmax(0,1fr)]">
         <Card
@@ -1205,7 +1414,10 @@ function WorkflowEditorInner({ workflowId }: { workflowId?: string | null }) {
                         >
                           <button
                             aria-current={entry.id === selectedId}
-                            onClick={() => setSelectedId(entry.id)}
+                            onClick={() => {
+                              setFocusRequest(null);
+                              setSelectedId(entry.id);
+                            }}
                             type="button"
                           >
                             <ItemContent>
@@ -1262,27 +1474,49 @@ function WorkflowEditorInner({ workflowId }: { workflowId?: string | null }) {
               }}
               ref={wrapperRef}
             >
-              {selectedEdgeId && (
-                <Button
-                  className="absolute top-3 right-3 z-10 shadow-md"
-                  onClick={() => removeEdges([selectedEdgeId])}
-                  size="sm"
-                  variant="destructive"
-                >
-                  <Trash2 /> {t("deleteConnection")}
-                </Button>
+              {selectedEdge && (
+                <div className="absolute top-3 right-3 z-10 max-w-sm space-y-2 rounded-lg border bg-card p-3 shadow-md">
+                  <p className="text-xs text-muted-foreground">
+                    {t("selectedConnection")}
+                  </p>
+                  <p className="text-sm font-medium">
+                    {workflowConnectionSummary(definition, selectedEdge)}
+                  </p>
+                  {diagnostics
+                    .filter(({ edgeId }) => edgeId === selectedEdgeId)
+                    .map((diagnostic, index) => (
+                      <p
+                        className={
+                          diagnostic.severity === "ERROR"
+                            ? "text-xs text-destructive"
+                            : "text-xs text-amber-600"
+                        }
+                        key={`${diagnostic.code}-${index}`}
+                      >
+                        {diagnostic.message}
+                      </p>
+                    ))}
+                  <Button
+                    onClick={() => removeEdges([selectedEdge.id])}
+                    size="sm"
+                    variant="destructive"
+                  >
+                    <Trash2 /> {t("deleteConnection")}
+                  </Button>
+                </div>
               )}
               <WorkflowNodeActionsContext value={nodeActions}>
                 <ReactFlow
                   className={locked ? workflowFitLockPaneClass : undefined}
                   colorMode="system"
                   deleteKeyCode={["Backspace", "Delete"]}
-                  edges={edges}
+                  edges={diagnosticElements.edges}
                   fitView
                   nodeTypes={workflowNodeTypes}
                   nodes={canvasNodes}
                   onConnect={onConnect}
                   onEdgeClick={(_event, edge) => {
+                    setFocusRequest(null);
                     setSelectedId(null);
                     setSelectedEdgeId(edge.id);
                   }}
@@ -1293,6 +1527,7 @@ function WorkflowEditorInner({ workflowId }: { workflowId?: string | null }) {
                     )
                   }
                   onNodeClick={(event, node) => {
+                    setFocusRequest(null);
                     setSelectedEdgeId(null);
                     // A single click only picks the card up for dragging; opening
                     // the inspector takes a double click, so laying out a workflow
@@ -1302,6 +1537,7 @@ function WorkflowEditorInner({ workflowId }: { workflowId?: string | null }) {
                     if (touchLike(event)) setSelectedId(node.id);
                   }}
                   onNodeDoubleClick={(_event, node) => {
+                    setFocusRequest(null);
                     setSelectedEdgeId(null);
                     setSelectedId(node.id);
                   }}
@@ -1320,11 +1556,15 @@ function WorkflowEditorInner({ workflowId }: { workflowId?: string | null }) {
                       ),
                     }));
                   }}
+                  onNodeDragStart={() => setFocusRequest(null)}
                   onNodesChange={onNodesChange}
                   onNodesDelete={(removed) =>
                     removeItems(removed.map(({ id }) => id))
                   }
-                  onPaneClick={() => setSelectedEdgeId(null)}
+                  onPaneClick={() => {
+                    setFocusRequest(null);
+                    setSelectedEdgeId(null);
+                  }}
                   panOnDrag={!locked}
                   preventScrolling={!locked}
                   proOptions={{ hideAttribution: true }}
@@ -1353,6 +1593,10 @@ function WorkflowEditorInner({ workflowId }: { workflowId?: string | null }) {
                     />
                   </Controls>
                   <WorkflowFitLock locked={locked} signature={fitSignature} />
+                  <WorkflowDiagnosticFocus
+                    request={focusRequest}
+                    onFocused={finishDiagnosticFocus}
+                  />
                   {!locked && (
                     <MiniMap
                       className="overflow-hidden rounded-xl border"
@@ -1367,45 +1611,74 @@ function WorkflowEditorInner({ workflowId }: { workflowId?: string | null }) {
             </div>
           )}
           {diagnostics.length > 0 && (
-            <Card>
+            <Card ref={issuesRef} tabIndex={-1}>
               <CardHeader>
                 <CardTitle>{t("diagnostics")}</CardTitle>
               </CardHeader>
               <CardContent>
                 <ItemGroup className="gap-2">
-                  {diagnostics.map((diagnostic, index) => (
-                    <Item
-                      asChild
-                      key={`${diagnostic.code}-${index}`}
-                      size="sm"
-                      variant="outline"
-                    >
-                      <button
-                        className="text-left"
-                        onClick={() =>
-                          (basicPreview ? setPreviewSelectedId : setSelectedId)(
-                            diagnostic.nodeId ?? diagnostic.triggerId,
-                          )
-                        }
-                        type="button"
+                  {diagnostics.map((diagnostic, index) => {
+                    const target = workflowDiagnosticTarget(
+                      definition,
+                      diagnostic,
+                    );
+                    const navigable =
+                      target.nodeIds.length > 0 || target.edgeId !== null;
+                    const Element = navigable ? "button" : "div";
+                    return (
+                      <Item
+                        asChild
+                        key={`${diagnostic.code}-${index}`}
+                        size="sm"
+                        variant="outline"
                       >
-                        <ItemContent>
-                          <ItemTitle>{diagnostic.message}</ItemTitle>
-                        </ItemContent>
-                        <ItemActions>
-                          <Badge
-                            variant={
-                              diagnostic.severity === "ERROR"
-                                ? "destructive"
-                                : "outline"
-                            }
-                          >
-                            {labels.diagnosticCode(diagnostic.code)}
-                          </Badge>
-                        </ItemActions>
-                      </button>
-                    </Item>
-                  ))}
+                        <Element
+                          className="text-left"
+                          onClick={
+                            navigable
+                              ? () => focusDiagnostic(diagnostic)
+                              : undefined
+                          }
+                          type={navigable ? "button" : undefined}
+                        >
+                          <ItemMedia>
+                            <AlertTriangle
+                              aria-hidden="true"
+                              className={
+                                diagnostic.severity === "ERROR"
+                                  ? "size-4 text-destructive"
+                                  : "size-4 text-amber-600"
+                              }
+                            />
+                          </ItemMedia>
+                          <ItemContent>
+                            <ItemTitle>
+                              {navigable ? target.label : t("workflowError")}
+                            </ItemTitle>
+                            <ItemDescription>
+                              {diagnostic.message}
+                            </ItemDescription>
+                          </ItemContent>
+                          <ItemActions>
+                            <Badge
+                              variant={
+                                diagnostic.severity === "ERROR"
+                                  ? "destructive"
+                                  : "outline"
+                              }
+                            >
+                              {diagnostic.severity === "ERROR"
+                                ? t("validationError")
+                                : t("validationWarning")}
+                            </Badge>
+                            <Badge variant="outline">
+                              {labels.diagnosticCode(diagnostic.code)}
+                            </Badge>
+                          </ItemActions>
+                        </Element>
+                      </Item>
+                    );
+                  })}
                 </ItemGroup>
               </CardContent>
             </Card>
@@ -1680,6 +1953,7 @@ function WorkflowEditorInner({ workflowId }: { workflowId?: string | null }) {
             </FieldSet>
             <Button
               className="w-full"
+              disabled={saving}
               onClick={() => void validate()}
               variant="outline"
             >
@@ -1707,6 +1981,24 @@ function WorkflowEditorInner({ workflowId }: { workflowId?: string | null }) {
                 </SheetDescription>
               </SheetHeader>
               <FieldGroup className="gap-4 px-4">
+                {diagnostics
+                  .filter(
+                    ({ nodeId, triggerId }) =>
+                      nodeId === selected.id || triggerId === selected.id,
+                  )
+                  .map((diagnostic, index) => (
+                    <Alert
+                      key={`${diagnostic.code}-${index}`}
+                      variant={
+                        diagnostic.severity === "ERROR"
+                          ? "destructive"
+                          : "default"
+                      }
+                    >
+                      <AlertTriangle />
+                      <AlertDescription>{diagnostic.message}</AlertDescription>
+                    </Alert>
+                  ))}
                 {selectedEntry && (
                   <p className="rounded-lg border bg-muted/30 p-3 text-xs leading-relaxed text-muted-foreground">
                     {selectedEntry.details}

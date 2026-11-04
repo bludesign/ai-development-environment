@@ -99,6 +99,7 @@ describe("merge preferences and follow-up actions", () => {
       repositoryNameWithOwner: "acme/widgets",
       pullRequestNumber: 17,
       mergeMethod: "MERGE",
+      updatedAt: new Date(),
       commitHeadline: "Saved",
       commitBody: "",
       authorEmail: null,
@@ -289,8 +290,8 @@ describe("merge preferences and follow-up actions", () => {
       postMergeError: "Database unavailable",
     });
   });
-  test("reconciliation waits for a manual merge to persist its submitted actions", async () => {
-    const { service, prisma, github } = setup();
+  test("reconciliation reloads same-PR follow-ups after a manual merge saves them", async () => {
+    const { service, prisma, github, worktree, worktrees } = setup();
     let finish!: (value: unknown) => void;
     github.mergePullRequest.mockImplementation(
       () =>
@@ -298,9 +299,45 @@ describe("merge preferences and follow-up actions", () => {
           finish = resolve;
         }),
     );
-    const findMany = vi.fn().mockResolvedValue([]);
-    Object.assign(prisma.worktreeAutoMerge, { findMany });
-    const merging = service.mergePullRequest(input, "PULL_REQUEST_DETAILS");
+    let saved = {
+      worktreeId: worktree.id,
+      state: "POST_MERGE",
+      autoSync: false,
+      repositoryNameWithOwner: "acme/widgets",
+      pullRequestNumber: 17,
+      branch: worktree.branch,
+      deleteWorktree: false,
+      moveTicketToDone: false,
+      ticketKey: null,
+      ticketMovedAt: null,
+      deleteJobId: null,
+      worktree: { ...worktree, codebaseId: "cb", headSha: "head" },
+    };
+    const findMany = vi.fn(async () => [saved]);
+    Object.assign(prisma.worktreeAutoMerge, {
+      findMany,
+      update: vi.fn(async ({ data }) => (saved = { ...saved, ...data })),
+      updateMany: vi.fn(async ({ data }) => {
+        saved = { ...saved, ...data };
+        return { count: 1 };
+      }),
+    });
+    prisma.worktreeAutoMerge.upsert.mockImplementation(
+      async ({ update }) => (saved = { ...saved, ...update }),
+    );
+    const readiness = vi.fn().mockResolvedValue({
+      state: "MERGED",
+      headRefName: worktree.branch,
+      headRefOid: "head",
+      headRepositoryNameWithOwner: "acme/widgets",
+    });
+    Object.assign(github, { pullRequestAutomationState: readiness });
+    const cleanup = vi.fn().mockResolvedValue({ id: "delete" });
+    Object.assign(worktrees, { deleteWorktree: cleanup });
+    const merging = service.mergePullRequest(
+      { ...input, moveTicketToDone: false },
+      "PULL_REQUEST_DETAILS",
+    );
     await vi.waitFor(() =>
       expect(github.mergePullRequest).toHaveBeenCalledOnce(),
     );
@@ -308,12 +345,15 @@ describe("merge preferences and follow-up actions", () => {
       service as unknown as { reconcileAutoMerge(): Promise<void> }
     ).reconcileAutoMerge();
     await Promise.resolve();
-    expect(findMany).not.toHaveBeenCalled();
+    expect(findMany).toHaveBeenCalledOnce();
+    expect(readiness).not.toHaveBeenCalled();
     finish({ state: "MERGED" });
     await Promise.all([merging, reconciling]);
+    expect(findMany).toHaveBeenCalledTimes(2);
     expect(
       prisma.worktreeAutoMerge.upsert.mock.invocationCallOrder[0],
-    ).toBeLessThan(findMany.mock.invocationCallOrder[0]!);
+    ).toBeLessThan(readiness.mock.invocationCallOrder[0]!);
+    expect(cleanup).toHaveBeenCalledOnce();
   });
 
   test("failed Jira and dirty-worktree cleanup remain retryable without merging twice", async () => {

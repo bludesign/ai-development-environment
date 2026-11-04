@@ -78,6 +78,16 @@ enum BuildScriptFailureBehavior {
   CONTINUE
 }
 
+"Resources protected for builds that run this script."
+enum BuildScriptLockScope {
+  "Protect only the selected worktree."
+  WORKTREE
+  "Protect all worktrees in the selected codebase."
+  CODEBASE
+  "Protect all worktrees on the selected agent."
+  AGENT
+}
+
 "Represents a build source observation in the GraphQL API."
 type BuildSourceObservation {
   "Stable identifier for this build source observation."
@@ -150,6 +160,8 @@ type BuildConfiguration {
 
 "Represents a build script in the GraphQL API."
 type BuildScript {
+  "Resources protected for builds using this script."
+  lockScope: BuildScriptLockScope!
   "Optional icon from the build configuration icon library."
   iconKey: String
   "Repositories where this script is allowed."
@@ -188,6 +200,8 @@ type CodebaseProject {
   id: ID!
   "Category of this codebase project."
   type: CodebaseProjectType!
+  "Destination type initially selected for builds. Simulator or physical device; archive builds always use a physical device."
+  defaultDestinationType: BuildDestinationType!
   "The repository associated with this codebase project."
   repository: CodebaseRepository!
   "Configurations associated with this codebase project."
@@ -536,6 +550,8 @@ type BuildExport {
 
 "Represents a build in the GraphQL API."
 type Build {
+  "Why a queued build is waiting for a conflicting resource."
+  blockedReason: String
   "Stable identifier for this build."
   id: ID!
   "Identifier of the related request."
@@ -689,6 +705,8 @@ input SaveBuildConfigurationInput {
 
 "Values used to save a build script."
 input SaveBuildScriptInput {
+  "Resources protected for builds using this script. Omit to preserve the current scope."
+  lockScope: BuildScriptLockScope
   "Optional icon. Omit to preserve the current icon; null clears it."
   iconKey: String
   "Replace repository assignments. Omit to preserve them; an empty list clears them."
@@ -1025,6 +1043,13 @@ extend type Mutation {
   createIosAppProject(
     "Identifier of the codebase."
     codebaseId: ID!
+  ): CodebaseProject!
+  "Updates the shared iOS app project build defaults. HOST is not a supported default destination."
+  updateIosAppProject(
+    "Identifier of the iOS app project."
+    id: ID!
+    "Default destination type: SIMULATOR or PHYSICAL_DEVICE."
+    defaultDestinationType: BuildDestinationType!
   ): CodebaseProject!
   "Saves a build configuration and returns the updated build configuration."
   saveBuildConfiguration(

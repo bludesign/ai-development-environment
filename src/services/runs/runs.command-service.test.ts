@@ -21,6 +21,7 @@ describe("run command persistence", () => {
     mocks.getPrismaClient.mockResolvedValue({
       agentRun: { findMany: vi.fn().mockResolvedValue([]) },
       runCommand: { findMany },
+      operationHolder: { findMany: vi.fn().mockResolvedValue([]) },
     });
 
     await new RunsService().pendingCommands("agent-1");
@@ -31,6 +32,7 @@ describe("run command persistence", () => {
           agentId: "agent-1",
           OR: [
             { status: "RUNNING" },
+            { id: { in: [] } },
             { status: "QUEUED", run: { status: { not: "QUEUED" } } },
           ],
         },

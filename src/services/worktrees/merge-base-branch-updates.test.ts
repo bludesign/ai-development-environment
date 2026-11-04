@@ -324,10 +324,18 @@ test("GitHub waits for merge confirmation and updates bases before parent cleanu
     data: { deleteWorktree: true },
   });
   let state = "OPEN";
+  let native = true;
   const github = {
+    disablePullRequestAutoMerge: vi.fn(async () => {
+      native = false;
+    }),
+    pullRequestMergeOptions: vi.fn().mockResolvedValue({
+      canMerge: false,
+      blockedReason: "Waiting for checks",
+    }),
     pullRequestAutomationState: vi.fn(async () => ({
       state,
-      autoMergeEnabled: true,
+      autoMergeEnabled: native,
       headRefName: "parent",
       headRefOid: "sha",
       headRepositoryNameWithOwner: "acme/repo",

@@ -1,3 +1,4 @@
+import { SETTLED_AGENT_JOB_WHERE } from "@/services/agent-control/job-cleanup";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 
 const getPrismaClient = vi.hoisted(() => vi.fn());
@@ -186,7 +187,10 @@ describe("SystemStatusService", () => {
     const collectionId = collect.mock.calls[0]?.[0];
     expect(collectionId).toMatch(/^sidebar-usage:/);
     expect(jobDelete).toHaveBeenCalledWith({
-      where: { ccusageCollectionId: collectionId },
+      where: {
+        ccusageCollectionId: collectionId,
+        AND: [SETTLED_AGENT_JOB_WHERE],
+      },
     });
     expect(collectionDelete).toHaveBeenCalledWith({
       where: { id: collectionId },

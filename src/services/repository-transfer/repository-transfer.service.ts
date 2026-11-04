@@ -96,6 +96,7 @@ const workflowFields = [
   "quickActionButtonVariant",
 ];
 const scriptFields = [
+  "lockScope",
   "name",
   "iconKey",
   "preBuildScript",
@@ -263,9 +264,19 @@ export class RepositoryTransferService {
             },
           },
         });
+        const iosAppProject = repo.projects.find(
+          (project) => project.type === "IOS_APP",
+        );
         entity.name = repo.name;
         entity.fields = {
           ...pick(repo, repositoryFields),
+          ...(iosAppProject
+            ? {
+                iosAppSettings: {
+                  defaultDestinationType: iosAppProject.defaultDestinationType,
+                },
+              }
+            : {}),
           canonicalOrigin: repo.canonicalOrigin,
           remoteUrl: this.cloneUrl(
             repo.canonicalOrigin,
@@ -611,6 +622,7 @@ export class RepositoryTransferService {
           await p.codebaseRepository.findMany({
             orderBy: { id: "asc" },
             include: {
+              projects: { where: { type: "IOS_APP" } },
               reviewerPools: {
                 include: { members: true },
                 orderBy: { key: "asc" },
@@ -623,6 +635,14 @@ export class RepositoryTransferService {
           identity: { canonicalOrigin: v.canonicalOrigin },
           value: {
             ...pick(v, [...repositoryFields, "canonicalOrigin"]),
+            ...(v.projects[0]
+              ? {
+                  iosAppSettings: {
+                    defaultDestinationType:
+                      v.projects[0].defaultDestinationType,
+                  },
+                }
+              : {}),
             revision: v.updatedAt.toISOString(),
             reviewerPools: v.reviewerPools.map((pool) => ({
               key: pool.key,
@@ -1691,6 +1711,13 @@ export class RepositoryTransferService {
           f.reviewerPools = transferredReviewerPoolsSchema.parse(
             f.reviewerPools,
           );
+        if (Object.hasOwn(f, "iosAppSettings"))
+          f.iosAppSettings = z
+            .object({
+              defaultDestinationType: z.enum(["SIMULATOR", "PHYSICAL_DEVICE"]),
+            })
+            .strict()
+            .parse(f.iosAppSettings);
         return f;
       }
       case "PREPARATION": {
@@ -1768,6 +1795,9 @@ export class RepositoryTransferService {
           throw new Error("At least one build script is required");
         return {
           ...pick(f, scriptFields),
+          lockScope: z
+            .enum(["WORKTREE", "CODEBASE", "AGENT"])
+            .parse(f.lockScope ?? "WORKTREE"),
           preBuildScript,
           postBuildScript,
           timeoutSeconds: z
@@ -1980,7 +2010,10 @@ export class RepositoryTransferService {
         )) {
           const data = pick(
             e.fields,
-            repositoryFields.filter((field) => field !== "reviewerPools"),
+            repositoryFields.filter(
+              (field) =>
+                field !== "reviewerPools" && field !== "iosAppSettings",
+            ),
           ) as Prisma.CodebaseRepositoryUncheckedUpdateInput;
           await tx.codebaseRepository.upsert({
             where: { id: e.id },
@@ -1993,6 +2026,23 @@ export class RepositoryTransferService {
             } as Prisma.CodebaseRepositoryUncheckedCreateInput,
             update: data,
           });
+          if (Object.hasOwn(e.fields, "iosAppSettings")) {
+            const settings = e.fields.iosAppSettings as {
+              defaultDestinationType: string;
+            };
+            await tx.codebaseProject.upsert({
+              where: {
+                repositoryId_type: { repositoryId: e.id, type: "IOS_APP" },
+              },
+              create: {
+                id: randomUUID(),
+                repositoryId: e.id,
+                type: "IOS_APP",
+                ...settings,
+              },
+              update: settings,
+            });
+          }
           if (Object.hasOwn(e.fields, "reviewerPools")) {
             if (this.reviewers)
               await this.reviewers.applyTransferredPools(

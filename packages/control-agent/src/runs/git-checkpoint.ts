@@ -1,10 +1,8 @@
-import { execFile, spawn } from "node:child_process";
+import { spawnExecutionProcess as spawn } from "../execution-recovery.js";
+import { captureCommand } from "../capture-command.js";
 import { copyFile, mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { promisify } from "node:util";
-
-const execFileAsync = promisify(execFile);
 
 // The control plane rejects a checkpoint whose patch, summary, or manifest is
 // longer than these limits, so the agent stops reading git once it has enough
@@ -19,12 +17,17 @@ async function git(
   args: string[],
   env?: Record<string, string>,
 ): Promise<string> {
-  const result = await execFileAsync("git", args, {
+  const result = await captureCommand({
+    command: "git",
+    args,
     cwd,
     env: { ...process.env, ...env },
-    encoding: "utf8",
-    maxBuffer: 20 * 1024 * 1024,
+    timeoutMs: 120_000,
+    signal: new AbortController().signal,
+    maxOutputBytes: 20 * 1024 * 1024,
   });
+  if (result.exitCode !== 0)
+    throw new Error(result.stderr || "Git checkpoint command failed");
   return result.stdout.trim();
 }
 

@@ -45,6 +45,7 @@ export type AgentDiskSpaceConfiguration = {
   baseRepoDirectory: string | null;
   derivedDataLocationMode: DerivedDataLocationMode;
   derivedDataPath: string | null;
+  managedDerivedDataRoot?: string | null;
   worktrees: BuildDataWorktreeRoot[];
 };
 
@@ -132,6 +133,14 @@ export function parseAgentDiskSpaceConfiguration(
       input.derivedDataPath,
       "disk space configuration.derivedDataPath",
     ),
+    ...(input.managedDerivedDataRoot === undefined
+      ? {}
+      : {
+          managedDerivedDataRoot: nullableText(
+            input.managedDerivedDataRoot,
+            "disk space configuration.managedDerivedDataRoot",
+          ),
+        }),
     worktrees: input.worktrees.map((raw, index) => {
       const worktree = objectValue(raw, `disk space worktrees[${index}]`);
       return {

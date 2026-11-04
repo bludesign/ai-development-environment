@@ -124,6 +124,8 @@ export type Worktree = {
   latestBuild?: WorktreeLatestBuild | null;
   tags: WorktreeTag[];
   activeJob: AgentJob | null;
+  blockingJob?: AgentJob | null;
+  activeJobs?: AgentJob[];
   autoSync?: WorktreeAutoSync | null;
   autoMerge?: WorktreeAutoMerge | null;
   lastCheckedAt: string | null;

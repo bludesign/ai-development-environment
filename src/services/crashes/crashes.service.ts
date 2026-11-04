@@ -1,3 +1,4 @@
+import { SETTLED_AGENT_JOB_WHERE } from "@/services/agent-control/job-cleanup";
 import "server-only";
 
 import { createHash, randomUUID } from "node:crypto";
@@ -1975,6 +1976,7 @@ export class CrashesService {
     });
     await prisma.agentJob.deleteMany({
       where: {
+        AND: [SETTLED_AGENT_JOB_WHERE],
         kind: CRASH_SYMBOLICATE_JOB_KIND,
         status: { in: ["SUCCEEDED", "FAILED", "CANCELLED", "TIMED_OUT"] },
         finishedAt: { lt: new Date(Date.now() - FINISHED_JOB_RETENTION_MS) },

@@ -126,52 +126,57 @@ describe("GitLab merge options", () => {
     );
   });
 
-  test("shows and cancels managed progress even when native auto-merge is off", async () => {
-    request.mockImplementation(async (query) => {
-      if (query.includes("query GitLabMergeRequestMergeOptions"))
+  test.each([true, false])(
+    "shows managed progress while native auto-merge is off (sync=%s)",
+    async (autoSync) => {
+      request.mockImplementation(async (query) => {
+        if (query.includes("query GitLabMergeRequestMergeOptions"))
+          return {
+            gitlabMergeRequestMergeOptions: {
+              ...options,
+              defaultAutoSync: autoSync,
+              canCancelAutoMerge: true,
+              operation: {
+                ...operation,
+                autoSync,
+                state: "WAITING_CI",
+                mergeConfirmedAt: null,
+                lastError: null,
+              },
+            },
+          } as never;
         return {
-          gitlabMergeRequestMergeOptions: {
-            ...options,
-            defaultAutoSync: true,
-            canCancelAutoMerge: true,
+          cancelGitLabAutoMerge: {
+            mergeRequest: {
+              ...target,
+              state: "OPENED",
+              mergeWhenPipelineSucceeds: false,
+            },
             operation: {
               ...operation,
-              autoSync: true,
-              state: "WAITING_CI",
+              autoSync,
+              state: "CANCELED",
               mergeConfirmedAt: null,
               lastError: null,
             },
+            postMergeError: null,
           },
         } as never;
-      return {
-        cancelGitLabAutoMerge: {
-          mergeRequest: {
-            ...target,
-            state: "OPENED",
-            mergeWhenPipelineSucceeds: false,
-          },
-          operation: {
-            ...operation,
-            autoSync: true,
-            state: "CANCELED",
-            mergeConfirmedAt: null,
-            lastError: null,
-          },
-          postMergeError: null,
-        },
-      } as never;
-    });
-    show();
-    await screen.findAllByText("Waiting for CI");
-    expect(screen.getByRole("status").textContent).toBe("Waiting for CI");
-    fireEvent.click(screen.getByRole("button", { name: "Cancel auto-merge" }));
-    await waitFor(() =>
-      expect(request).toHaveBeenCalledWith(
-        expect.stringContaining("mutation CancelGitLabAutoMerge"),
-        { projectId: target.projectId, iid: target.iid },
-      ),
-    );
-  });
+      });
+      show();
+      await screen.findAllByText("Waiting for CI");
+      expect(screen.getByRole("status").textContent).toBe("Waiting for CI");
+      fireEvent.click(
+        screen.getByRole("button", { name: "Cancel auto-merge" }),
+      );
+      await waitFor(() =>
+        expect(request).toHaveBeenCalledWith(
+          expect.stringContaining("mutation CancelGitLabAutoMerge"),
+          { projectId: target.projectId, iid: target.iid },
+        ),
+      );
+    },
+  );
 
   test("resumes only with the currently reviewed SHA", async () => {
     request.mockImplementation(async (query) => {

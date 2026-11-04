@@ -6,6 +6,8 @@ import {
 } from "@ai-development-environment/agent-contract/worktrees";
 import { CODEBASE_GIT_INSPECT_JOB_KIND } from "@ai-development-environment/agent-contract/codebases";
 import { IOS_BUILD_JOB_KIND } from "@ai-development-environment/agent-contract/builds";
+import { parseOperationDescriptor } from "@ai-development-environment/agent-contract/operation-resources";
+import { randomUUID } from "node:crypto";
 
 import { AgentGraphQLClient, type AgentJob } from "./graphql-client.js";
 import { handlers } from "./handlers/index.js";
@@ -14,6 +16,26 @@ import type { ProcessResult } from "./process-runner.js";
 import { refreshFetchedCodebase } from "./refresh-fetched-codebase.js";
 import { RepositoryCoordinator } from "./repository-coordinator.js";
 import { isRetryableAgentError, waitForAgentRetry } from "./request-errors.js";
+import {
+  withExecutionJournal,
+  recoverExecution,
+  forgetExecution,
+} from "./execution-recovery.js";
+
+function resourceSignature(value: unknown): string {
+  return JSON.stringify(
+    parseOperationDescriptor(value).resources.map(
+      ({ kind, key, mode, agentId, codebaseId, path }) => [
+        kind,
+        key,
+        mode,
+        agentId ?? null,
+        codebaseId ?? null,
+        path ?? null,
+      ],
+    ),
+  );
+}
 
 export class JobExecutor {
   private readonly running = new Map<
@@ -43,6 +65,73 @@ export class JobExecutor {
     return Boolean(running);
   }
 
+  /** Hold source resources until interrupted subprocess cleanup is verified. */
+  async recover(
+    job: AgentJob,
+    status: AgentJob["status"],
+    waitForCompletion = false,
+  ): Promise<void> {
+    if (!job.executionToken) return;
+    const existing = this.running.get(job.id);
+    if (existing) {
+      if (waitForCompletion) await existing.task;
+      return;
+    }
+    const identity = {
+      agentId: job.agentId,
+      jobId: job.id,
+      executionToken: job.executionToken,
+    };
+    const controller = new AbortController();
+    const entered = Promise.withResolvers<void>();
+    const descriptor = job.operationResources
+      ? parseOperationDescriptor(job.operationResources)
+      : { version: 1 as const, resources: [] };
+    const task = this.repositoryCoordinator
+      .withResources(
+        descriptor.resources,
+        async () => {
+          entered.resolve();
+          let reported = false;
+          while (!this.shutdown.signal.aborted) {
+            try {
+              await recoverExecution(identity, this.shutdown.signal);
+              await this.client.completeJob(
+                job.id,
+                status,
+                undefined,
+                "Agent service restarted; interrupted processes were stopped and verified",
+                job.executionToken,
+              );
+              forgetExecution(identity);
+              return;
+            } catch (error) {
+              if (!reported) {
+                console.error(
+                  `Cleanup verification required for job ${job.id}; execution resources remain protected:`,
+                  error instanceof Error ? error.message : error,
+                );
+                reported = true;
+              }
+              await waitForAgentRetry(1_000, this.shutdown.signal);
+            }
+          }
+        },
+        this.shutdown.signal,
+      )
+      .catch((error: unknown) => {
+        entered.resolve();
+        if (!this.shutdown.signal.aborted)
+          console.error(
+            `Could not reserve recovery resources for ${job.id}:`,
+            error,
+          );
+      })
+      .finally(() => this.running.delete(job.id));
+    this.running.set(job.id, { controller, task });
+    await (waitForCompletion ? task : entered.promise);
+  }
+
   async cancelAll(): Promise<void> {
     this.stopping = true;
     this.shutdown.abort();
@@ -53,10 +142,40 @@ export class JobExecutor {
   }
 
   private async run(job: AgentJob, controller: AbortController): Promise<void> {
+    if (!job.operationResources) return this.runGranted(job, controller, false);
+    try {
+      const descriptor = parseOperationDescriptor(job.operationResources);
+      await this.repositoryCoordinator.withResources(
+        descriptor.resources,
+        () => this.runGranted(job, controller, true),
+        controller.signal,
+      );
+    } catch (error) {
+      if (!controller.signal.aborted)
+        console.error(`Could not schedule job ${job.id}:`, error);
+    }
+  }
+
+  private async runGranted(
+    job: AgentJob,
+    controller: AbortController,
+    resourceAware: boolean,
+  ): Promise<void> {
     let claimed: AgentJob;
     try {
-      claimed = await this.client.claimJob(job.id);
+      claimed = resourceAware
+        ? await this.client.claimJob(job.id, job.executionToken ?? randomUUID())
+        : await this.client.claimJob(job.id);
     } catch (error) {
+      if (
+        error instanceof Error &&
+        (error.name === "RESOURCE_BUSY" ||
+          /RESOURCE_BUSY|resources? (?:are |is )?busy/i.test(error.message) ||
+          ("codes" in error &&
+            Array.isArray(error.codes) &&
+            error.codes.includes("RESOURCE_BUSY")))
+      )
+        return;
       console.error(
         `Could not claim job ${job.id}; durable reconciliation will retry:`,
         error instanceof Error ? error.message : error,
@@ -68,6 +187,16 @@ export class JobExecutor {
     let result: ProcessResult | undefined;
     let completionError: string | undefined;
     try {
+      if (resourceAware && !claimed.executionToken)
+        throw new Error("The execution grant is missing its cleanup token");
+      if (
+        resourceAware &&
+        resourceSignature(job.operationResources) !==
+          resourceSignature(claimed.operationResources)
+      )
+        throw new Error(
+          "Execution resources changed after scheduling; retry this operation",
+        );
       const handler = handlers[claimed.kind];
       if (!handler)
         throw new Error(`No local handler is registered for ${claimed.kind}`);
@@ -80,6 +209,24 @@ export class JobExecutor {
           (log) => this.client.appendLog(claimed.id, log).then(() => undefined),
           {
             agentId: claimed.agentId,
+            withOperationResources: (resources, task) =>
+              this.repositoryCoordinator.withResources(
+                resources.map((resource) => ({
+                  ...resource,
+                  agentId: resource.agentId ?? claimed.agentId,
+                })),
+                task,
+                controller.signal,
+              ),
+            tryWithOperationResources: (resources, task) =>
+              this.repositoryCoordinator.tryWithResources(
+                resources.map((resource) => ({
+                  ...resource,
+                  agentId: resource.agentId ?? claimed.agentId,
+                })),
+                task,
+                controller.signal,
+              ),
             reportBranchDeletionResult: (result) =>
               this.client.reportBranchDeletionResult(claimed.id, result),
             reportWorktreeActivity: (input) =>
@@ -90,6 +237,28 @@ export class JobExecutor {
                 input,
                 claimed.timeoutSeconds * 1_000,
                 controller.signal,
+                (gitDirectory, task, folder) =>
+                  this.repositoryCoordinator.withResources(
+                    [
+                      {
+                        kind: "WORKTREE",
+                        key: `${claimed.agentId}:worktree:${gitDirectory}`,
+                        agentId: claimed.agentId,
+                        codebaseId: input.codebaseId,
+                        mode: "READ",
+                      },
+                      {
+                        kind: "PATH",
+                        key: folder,
+                        path: folder,
+                        agentId: claimed.agentId,
+                        codebaseId: input.codebaseId,
+                        mode: "READ",
+                      },
+                    ],
+                    task,
+                    controller.signal,
+                  ),
               ),
             reportBuildProgress: (input) =>
               this.client.reportBuildProgress(input),
@@ -125,7 +294,16 @@ export class JobExecutor {
           "string"
           ? String((claimed.payload as Record<string, unknown>).codebaseId)
           : null;
-      if (!codebaseId) result = await runHandler();
+      if (resourceAware)
+        result = await withExecutionJournal(
+          {
+            agentId: claimed.agentId,
+            jobId: claimed.id,
+            executionToken: claimed.executionToken!,
+          },
+          runHandler,
+        );
+      else if (!codebaseId) result = await runHandler();
       else if (claimed.kind === IOS_BUILD_JOB_KIND) {
         result = await this.repositoryCoordinator.runBuild(
           codebaseId,
@@ -174,12 +352,36 @@ export class JobExecutor {
     // Releasing this entry during an outage lets reconciliation rerun the handler.
     for (let attempt = 1; ; attempt++) {
       try {
-        await this.client.completeJob(
-          claimed.id,
-          status,
-          result,
-          completionError,
-        );
+        if (resourceAware && claimed.executionToken)
+          await recoverExecution(
+            {
+              agentId: claimed.agentId,
+              jobId: claimed.id,
+              executionToken: claimed.executionToken!,
+            },
+            this.shutdown.signal,
+          );
+        if (resourceAware)
+          await this.client.completeJob(
+            claimed.id,
+            status,
+            result,
+            completionError,
+            claimed.executionToken,
+          );
+        else
+          await this.client.completeJob(
+            claimed.id,
+            status,
+            result,
+            completionError,
+          );
+        if (resourceAware && claimed.executionToken)
+          forgetExecution({
+            agentId: claimed.agentId,
+            jobId: claimed.id,
+            executionToken: claimed.executionToken!,
+          });
         return;
       } catch (error) {
         if (this.stopping) return;

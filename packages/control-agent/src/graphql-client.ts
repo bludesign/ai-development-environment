@@ -7,6 +7,7 @@ import { createClient, type Client } from "graphql-ws";
 import WebSocket from "ws";
 
 import type { AgentConfig } from "./config.js";
+import type { OperationDescriptor } from "@ai-development-environment/agent-contract/operation-resources";
 import { AgentRequestError } from "./request-errors.js";
 import type { AgentInventory } from "./inventory.js";
 import type { ProcessLog } from "./process-runner.js";
@@ -29,6 +30,7 @@ import type {
 export type AgentJob = {
   id: string;
   agentId: string;
+  worktreeId?: string | null;
   kind: string;
   payload: unknown;
   status:
@@ -40,6 +42,8 @@ export type AgentJob = {
     | "CANCELLED"
     | "TIMED_OUT";
   timeoutSeconds: number;
+  operationResources?: OperationDescriptor | null;
+  executionToken?: string | null;
 };
 
 export type RunAttachment = {
@@ -61,7 +65,13 @@ export type RunRecord = {
   provider: "CODEX" | "CLAUDE" | "OPENCODE";
   worktreeId: string | null;
   agentId: string | null;
-  worktree: { id: string; folder: string; branch: string | null } | null;
+  worktree: {
+    id: string;
+    folder: string;
+    branch: string | null;
+    gitDirectory?: string;
+    codebaseId?: string;
+  } | null;
   model: string;
   effort: string | null;
   webSearchEnabled: boolean;
@@ -94,6 +104,7 @@ export type RunCommand = {
   payload: Record<string, unknown>;
   status: string;
   error: string | null;
+  executionToken?: string | null;
   run: RunRecord;
 };
 
@@ -208,10 +219,10 @@ type GraphQLResponse<T> = {
 };
 
 const RUN_COMMAND_FIELDS = `
-  id runId agentId sequence type payload status error
+  id runId agentId sequence type payload status error executionToken
   run {
     id kind displayNumber status phase origin provider worktreeId agentId
-    worktree { id folder branch }
+    worktree { id folder branch gitDirectory codebaseId }
     model effort webSearchEnabled mcpToolNames initialPrompt finalOutput
     inputs { id sequence kind prompt attachments { id filename contentType size sha256 downloadPath } }
     attempts { id generation nativeId status }
@@ -393,7 +404,7 @@ export class AgentGraphQLClient {
     }>(`query AgentDiskSpaceConfiguration {
       agentDiskSpaceConfiguration {
         enabled pollIntervalSeconds baseRepoDirectory
-        derivedDataLocationMode derivedDataPath
+        derivedDataLocationMode derivedDataPath managedDerivedDataRoot
         worktrees { id folder }
       }
     }`);
@@ -413,7 +424,7 @@ export class AgentGraphQLClient {
     const data = await this.request<{ agentJobs: AgentJob[] }>(
       `query PendingJobs($agentId: ID!) {
         agentJobs(agentId: $agentId, limit: 200) {
-          id agentId kind payload status timeoutSeconds
+          id agentId worktreeId kind payload status timeoutSeconds operationResources executionToken
         }
       }`,
       { agentId },
@@ -423,7 +434,8 @@ export class AgentGraphQLClient {
         job.status === "QUEUED" ||
         job.status === "RUNNING" ||
         job.status === "CANCELLING" ||
-        job.status === "CANCELLED",
+        job.status === "CANCELLED" ||
+        Boolean(job.executionToken),
     );
   }
 
@@ -445,12 +457,12 @@ export class AgentGraphQLClient {
     return data.agentCadenceSettings;
   }
 
-  async claimJob(jobId: string): Promise<AgentJob> {
+  async claimJob(jobId: string, executionToken?: string): Promise<AgentJob> {
     const data = await this.request<{ claimAgentJob: AgentJob }>(
-      `mutation ClaimJob($jobId: ID!) {
-        claimAgentJob(jobId: $jobId) { id agentId kind payload status timeoutSeconds }
+      `mutation ClaimJob($jobId: ID!, $executionToken: String) {
+        claimAgentJob(jobId: $jobId, executionToken: $executionToken) { id agentId worktreeId kind payload status timeoutSeconds operationResources executionToken }
       }`,
-      { jobId },
+      { jobId, ...(executionToken ? { executionToken } : {}) },
     );
     return data.claimAgentJob;
   }
@@ -944,12 +956,19 @@ export class AgentGraphQLClient {
     status: AgentJob["status"],
     result?: unknown,
     error?: string,
+    executionToken?: string | null,
   ) {
     return this.request<{ completeAgentJob: { id: string; status: string } }>(
-      `mutation CompleteJob($jobId: ID!, $status: AgentJobStatus!, $result: JSON, $error: String) {
-        completeAgentJob(jobId: $jobId, status: $status, result: $result, error: $error) { id status }
+      `mutation CompleteJob($jobId: ID!, $status: AgentJobStatus!, $result: JSON, $error: String, $executionToken: String) {
+        completeAgentJob(jobId: $jobId, status: $status, result: $result, error: $error, executionToken: $executionToken) { id status }
       }`,
-      { jobId, status, result, error },
+      {
+        jobId,
+        status,
+        result,
+        error,
+        ...(executionToken ? { executionToken } : {}),
+      },
     );
   }
 
@@ -962,12 +981,15 @@ export class AgentGraphQLClient {
     return data.pendingRunCommands;
   }
 
-  async claimRunCommand(id: string): Promise<RunCommand> {
+  async claimRunCommand(
+    id: string,
+    executionToken?: string,
+  ): Promise<RunCommand> {
     const data = await this.request<{ claimRunCommand: RunCommand }>(
-      `mutation ClaimRunCommand($id: ID!) {
-        claimRunCommand(id: $id) { ${RUN_COMMAND_FIELDS} }
+      `mutation ClaimRunCommand($id: ID!, $executionToken: String) {
+        claimRunCommand(id: $id, executionToken: $executionToken) { ${RUN_COMMAND_FIELDS} }
       }`,
-      { id },
+      { id, executionToken },
     );
     return data.claimRunCommand;
   }
@@ -976,12 +998,13 @@ export class AgentGraphQLClient {
     id: string,
     status: "SUCCEEDED" | "FAILED",
     error?: string,
+    executionToken?: string,
   ) {
     return this.request<{ completeRunCommand: { id: string; status: string } }>(
-      `mutation CompleteRunCommand($id: ID!, $status: String!, $error: String) {
-        completeRunCommand(id: $id, status: $status, error: $error) { id status }
+      `mutation CompleteRunCommand($id: ID!, $status: String!, $error: String, $executionToken: String) {
+        completeRunCommand(id: $id, status: $status, error: $error, executionToken: $executionToken) { id status }
       }`,
-      { id, status, error },
+      { id, status, error, executionToken },
     );
   }
 
@@ -1326,7 +1349,7 @@ export function subscribeToAgentEvents(
         query: `subscription AgentEvents($agentId: ID!) {
           agentEvents(agentId: $agentId) {
             type
-            job { id agentId kind payload status timeoutSeconds }
+            job { id agentId worktreeId kind payload status timeoutSeconds operationResources executionToken }
             runCommand { ${RUN_COMMAND_FIELDS} }
           }
         }`,

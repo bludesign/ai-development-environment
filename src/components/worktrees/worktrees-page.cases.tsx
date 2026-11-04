@@ -1525,7 +1525,6 @@ export function registerWorktreesPageTests(
           "Change branch",
           "Change branch to main",
           "Commit",
-          "Open in VS Code",
         ]) {
           expect(
             (await screen.findByRole("menuitem", { name })).hasAttribute(
@@ -1533,6 +1532,43 @@ export function registerWorktreesPageTests(
             ),
           ).toBe(true);
         }
+      });
+
+      test("a build blocks only its own worktree actions", async () => {
+        const response = (await request("query Fixture")) as unknown as {
+          worktreeOverview: WorktreeOverview;
+        };
+        const group = response.worktreeOverview.agents[0]!.codebases[0]!;
+        const first = group.worktrees[0]!;
+        group.blockingJob = null;
+        first.baseBehind = 2;
+        const sibling = structuredClone(first);
+        sibling.id = "worktree-sibling";
+        sibling.branch = "feature/sibling";
+        sibling.folder = "/workspaces/sibling";
+        sibling.relativePath = "sibling";
+        sibling.blockingJob = null;
+        first.blockingJob = {
+          id: "build-job",
+          kind: "ios.build.run",
+          status: "RUNNING",
+        } as never;
+        group.worktrees.push(sibling);
+        request.mockResolvedValue(response);
+        render(<WorktreesPage />);
+        await screen.findByText("feature/sibling");
+        const sync = screen.getAllByRole("button", {
+          name: "Sync",
+        }) as HTMLButtonElement[];
+        expect(sync).toHaveLength(2);
+        expect(sync[0]!.disabled).toBe(true);
+        expect(sync[1]!.disabled).toBe(false);
+        const merge = screen.getAllByRole("button", {
+          name: /^(Merge|Auto Merge)$/,
+        }) as HTMLButtonElement[];
+        expect(merge).toHaveLength(2);
+        expect(merge[0]!.disabled).toBe(true);
+        expect(merge[1]!.disabled).toBe(false);
       });
 
       test("starts a session or plan on the card's own worktree", async () => {

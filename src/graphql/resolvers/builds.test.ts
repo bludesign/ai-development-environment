@@ -11,6 +11,31 @@ import { createBuildResolvers } from "./builds";
 const context = (agentId: string | null) => ({ agentId }) as GraphQLContext;
 
 describe("build resolver authorization", () => {
+  test("updates iOS project defaults only on the control plane", async () => {
+    const service = {
+      updateProject: vi.fn().mockResolvedValue({
+        id: "project-1",
+        defaultDestinationType: "PHYSICAL_DEVICE",
+      }),
+    } as unknown as BuildsService;
+    const mutation = createBuildResolvers(service).Mutation;
+    const input = {
+      id: "project-1",
+      defaultDestinationType: "PHYSICAL_DEVICE",
+    };
+    expect(() =>
+      mutation.updateIosAppProject({}, input, context("agent-1")),
+    ).toThrow("cannot perform control-plane operations");
+    expect(service.updateProject).not.toHaveBeenCalled();
+    await expect(
+      mutation.updateIosAppProject({}, input, context(null)),
+    ).resolves.toEqual(input);
+    expect(service.updateProject).toHaveBeenCalledWith(
+      "project-1",
+      "PHYSICAL_DEVICE",
+    );
+  });
+
   test("resolves report relations and lazily selected report data", async () => {
     const service = {
       getBuild: vi.fn().mockResolvedValue({ id: "build-1" }),

@@ -1243,6 +1243,43 @@ export class ToolsService {
     const groupId = this.builtInTools.groupIdForName(name);
     if (!groupId) throw new Error(`Unknown built-in tool: ${name}`);
     await this.assertProviderToolConfigured(groupId);
+    if (
+      context?.runId &&
+      ["start_build", "rebuild_build", "start_worktree_coverage"].includes(name)
+    ) {
+      const prisma = await getPrismaClient();
+      const run = await prisma.agentRun.findUnique({
+        where: { id: context.runId },
+        select: { kind: true, origin: true, worktreeId: true },
+      });
+      const input =
+        args && typeof args === "object" && !Array.isArray(args)
+          ? (args as Record<string, unknown>)
+          : {};
+      let target = input.worktreeId;
+      if (name === "rebuild_build" && typeof input.buildId === "string")
+        target = (
+          await prisma.build.findUnique({
+            where: { id: input.buildId },
+            select: { worktreeId: true },
+          })
+        )?.worktreeId;
+      if (
+        name === "start_worktree_coverage" &&
+        input.input &&
+        typeof input.input === "object"
+      )
+        target = (input.input as Record<string, unknown>).worktreeId;
+      if (
+        run?.kind === "SESSION" &&
+        run.origin === "MANAGED" &&
+        run.worktreeId &&
+        target === run.worktreeId
+      )
+        throw new Error(
+          "A Session cannot build its own worktree while it is editing files. Pause or finish this Session, then start the build from the app, or build a different worktree.",
+        );
+    }
     const operation = () => this.builtInTools.callByName(name, args);
     return context
       ? this.audit.execute(

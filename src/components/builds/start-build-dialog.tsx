@@ -100,7 +100,7 @@ type DestinationCacheEntry = {
 const DESTINATION_CACHE_TTL_MS = 15_000;
 
 const PROJECT_FIELDS = `
-  id type
+  id type defaultDestinationType
   configurations {
   id name iconKey scheme buildConfiguration defaultAction advancedSettings autoExport exportSettings createdAt updatedAt
     source { id kind relativePath }
@@ -108,7 +108,7 @@ const PROJECT_FIELDS = `
   }
   allowedScripts {
     position
-    script { id name iconKey preBuildScript postBuildScript enabledByDefault timeoutSeconds failureBehavior }
+    script { id name iconKey preBuildScript postBuildScript enabledByDefault timeoutSeconds failureBehavior lockScope }
   }
 `;
 
@@ -504,12 +504,13 @@ function StartBuildDialog({
     const selectable = next.filter(
       (destination) => destination.available !== false,
     );
+    const preferredType = project?.defaultDestinationType ?? "SIMULATOR";
     const defaultType: BuildDestination["type"] =
       selectedAction === "ARCHIVE"
         ? "PHYSICAL_DEVICE"
-        : selectable.some((destination) => destination.type === "SIMULATOR")
-          ? "SIMULATOR"
-          : "PHYSICAL_DEVICE";
+        : selectable.some((destination) => destination.type === preferredType)
+          ? preferredType
+          : (selectable[0]?.type ?? destinationTypeRef.current);
     const nextType =
       preserveSelection &&
       selectable.some(

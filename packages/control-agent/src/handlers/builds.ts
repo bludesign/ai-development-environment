@@ -25,7 +25,7 @@ import {
   resolve,
   sep,
 } from "node:path";
-import { spawn } from "node:child_process";
+import { spawnExecutionProcess as spawn } from "../execution-recovery.js";
 
 import {
   parseBuildDeploymentPayload,
@@ -63,8 +63,10 @@ import { plistDocument } from "@ai-development-environment/agent-contract/plist"
 
 import { captureCommand, type CaptureResult } from "../capture-command.js";
 import { worktreeCodeStateHash } from "../git-code-state.js";
+import { withRepositoryMetadata } from "../repository-metadata.js";
 import type { ProcessResult } from "../process-runner.js";
 import type { AgentJobHandler, AgentJobHandlerContext } from "./index.js";
+import type { OperationResource } from "@ai-development-environment/agent-contract/operation-resources";
 
 const successfulProcess = {
   exitCode: 0,
@@ -84,6 +86,7 @@ const SKIP_DIRECTORIES = new Set([
 
 type CommandResult = ProcessResult & {
   output: string;
+  stdout?: string;
 };
 
 type Artifact = {
@@ -1337,6 +1340,7 @@ function runLoggedCommand(options: {
     let cancelled = false;
     let settled = false;
     let output = "";
+    let stdout = "";
     let killTimer: ReturnType<typeof setTimeout> | null = null;
     let extraStream: ReturnType<typeof createWriteStream> | undefined;
     if (options.additionalLogPath) {
@@ -1386,6 +1390,8 @@ function runLoggedCommand(options: {
           const record = remainder.slice(0, end);
           remainder = remainder.slice(end);
           output = `${output}${record}`.slice(-64_000);
+          if (kind === "STDOUT" && options.phase === "PREFLIGHT")
+            stdout += record;
           options.logger.write(
             options.phase,
             kind,
@@ -1442,6 +1448,7 @@ function runLoggedCommand(options: {
         timedOut,
         cancelled,
         output,
+        stdout,
       });
     });
   });
@@ -1592,6 +1599,9 @@ export function xcodeBuildArguments(input: BuildJobPayload): string[] {
     "-hideShellScriptEnvironment",
     "-resultBundlePath",
     resultBundle,
+    ...(input.derivedDataPath
+      ? ["-derivedDataPath", input.derivedDataPath]
+      : []),
     ...(usesCapturedTestProducts
       ? testArguments(input.advancedSettings)
       : advancedArguments(input.advancedSettings, input.action)),
@@ -1644,6 +1654,9 @@ export function xcodeBuildSettingsArguments(
     input.configuration,
     "-destination",
     destinationArgument(input.destination),
+    ...(input.derivedDataPath
+      ? ["-derivedDataPath", input.derivedDataPath]
+      : []),
     ...advancedArguments(input.advancedSettings, input.action),
     "-showBuildSettings",
     "-json",
@@ -2257,6 +2270,19 @@ export async function snapshotCoverageChanges(
   timeoutMs: number,
   signal: AbortSignal,
 ): Promise<CoverageChange[]> {
+  return withRepositoryMetadata(
+    folder,
+    () => snapshotCoverageChangesLocked(baseBranch, folder, timeoutMs, signal),
+    signal,
+  );
+}
+
+async function snapshotCoverageChangesLocked(
+  baseBranch: string | null | undefined,
+  folder: string,
+  timeoutMs: number,
+  signal: AbortSignal,
+): Promise<CoverageChange[]> {
   if (!baseBranch) throw new Error("A base branch is required");
   const base = requireSuccess(
     await gitCommand(
@@ -2790,12 +2816,147 @@ export const runIosBuild: AgentJobHandler = async (
   context,
 ) => {
   const input = parseBuildJobPayload(payload);
+  if (
+    !input.worktreeId ||
+    /[\\/\0]/.test(input.worktreeId) ||
+    input.worktreeId === "." ||
+    input.worktreeId === ".."
+  )
+    throw new Error("Invalid build worktree identifier");
+  const derivedDataPath =
+    input.derivedDataPath ??
+    join(
+      dirname(input.artifactDirectory),
+      ".worktree-derived-data",
+      input.worktreeId,
+    );
+  if (!isAbsolute(derivedDataPath))
+    throw new Error("Derived Data path must be absolute");
+  const run = () =>
+    runIosBuildWithPaths(
+      { ...(payload as Record<string, unknown>), derivedDataPath },
+      timeoutMs,
+      signal,
+      onLog,
+      context,
+    );
+  const resources: OperationResource[] = [
+    {
+      kind: "PATH",
+      key: derivedDataPath,
+      path: derivedDataPath,
+      mode: "WRITE",
+      agentId: context?.agentId,
+      codebaseId: input.codebaseId,
+    },
+  ];
+  return context?.withOperationResources
+    ? context.withOperationResources(resources, run)
+    : run();
+};
+
+/** Expanded Xcode output roots outside the worktree-owned cache need shared path protection. */
+export function effectiveBuildOutputPaths(
+  output: string,
+  folder: string,
+  derivedDataPath?: string,
+): string[] {
+  const keys = [
+    "BUILD_DIR",
+    "CONFIGURATION_BUILD_DIR",
+    "TARGET_BUILD_DIR",
+    "BUILT_PRODUCTS_DIR",
+    "OBJROOT",
+    "SYMROOT",
+    "PROJECT_TEMP_DIR",
+    "CONFIGURATION_TEMP_DIR",
+    "SHARED_PRECOMPS_DIR",
+    "DERIVED_FILE_DIR",
+    "DWARF_DSYM_FOLDER_PATH",
+  ];
+  const paths = new Set<string>();
+  for (const entry of parseBuildSettings(output)) {
+    for (const key of keys) {
+      const value = entry.buildSettings[key];
+      if (!value || value.includes("$(") || value.includes("${")) continue;
+      const path = resolve(folder, value);
+      if (derivedDataPath) {
+        const child = relative(resolve(derivedDataPath), path);
+        if (
+          child === "" ||
+          (child !== ".." &&
+            !child.startsWith(`..${sep}`) &&
+            !isAbsolute(child))
+        )
+          continue;
+      }
+      paths.add(path);
+    }
+  }
+  return [...paths]
+    .filter(
+      (path, _, all) =>
+        !all.some(
+          (parent) => parent !== path && path.startsWith(`${parent}${sep}`),
+        ),
+    )
+    .sort();
+}
+
+const runIosBuildWithPaths: AgentJobHandler = async (
+  payload,
+  timeoutMs,
+  signal,
+  onLog,
+  context,
+) => {
+  const input = parseBuildJobPayload(payload);
   const folder = await validateWorktree(
     input,
     Math.min(timeoutMs, 60_000),
     signal,
   );
+  const snapshot = payload as Record<string, unknown>;
+  await withRepositoryMetadata(
+    folder,
+    async () => {
+      const [branch, head] = await Promise.all([
+        command(
+          "git",
+          ["-C", folder, "symbolic-ref", "--quiet", "--short", "HEAD"],
+          Math.min(timeoutMs, 60_000),
+          signal,
+        ),
+        command(
+          "git",
+          ["-C", folder, "rev-parse", "--verify", "--quiet", "HEAD"],
+          Math.min(timeoutMs, 60_000),
+          signal,
+        ),
+      ]);
+      if (
+        (Object.hasOwn(snapshot, "branch") &&
+          (branch.exitCode === 0 ? branch.stdout.trim() : null) !==
+            (input.branch ?? null)) ||
+        (Object.hasOwn(snapshot, "headSha") &&
+          (head.exitCode === 0 ? head.stdout.trim() : null) !== input.headSha)
+      ) {
+        throw new Error(
+          "The build worktree branch or commit changed while queued; refresh and start a new build",
+        );
+      }
+    },
+    signal,
+  );
   await validateSource(folder, input.source);
+  if (input.derivedDataPath) {
+    await mkdir(input.derivedDataPath, { recursive: true, mode: 0o700 });
+    await writeFile(
+      join(input.derivedDataPath, ".aide-worktree.json"),
+      `${JSON.stringify({ version: 1, worktreeId: input.worktreeId, folder })}\n`,
+      { mode: 0o600 },
+    );
+  }
   if (input.action === "TEST_WITHOUT_BUILDING") {
     const testProductsPath = input.advancedSettings.priorTestProductsPath;
     const xctestrunPath = input.advancedSettings.priorXctestrunPath;
@@ -2821,9 +2982,9 @@ export const runIosBuild: AgentJobHandler = async (
   ) {
     throw new Error("Build artifact directory is invalid");
   }
-  const sourceStateHash = await worktreeCodeStateHash(
+  const sourceStateHash = await withRepositoryMetadata(
     folder,
-    Math.min(timeoutMs, 60_000),
+    () => worktreeCodeStateHash(folder, Math.min(timeoutMs, 60_000), signal),
     signal,
   );
   await mkdir(input.artifactDirectory, { recursive: true, mode: 0o700 });
@@ -2857,260 +3018,333 @@ export const runIosBuild: AgentJobHandler = async (
     let error: string | null = null;
     let failBuild = false;
     try {
-      try {
-        await context?.reportBuildProgress?.({
-          buildId: input.buildId,
-          status: "PREPARING",
-          startedAt: new Date().toISOString(),
-        });
-      } catch (progressError) {
-        logger.emit("PREPARING", "SYSTEM", cleanError(progressError));
-      }
-      logger.emit("PREPARING", "SYSTEM", `Preparing build in ${folder}`);
-      try {
-        await onLog({
-          sequence: 0,
-          stream: "SYSTEM",
-          message: "Preparing iOS build",
-          createdAt: new Date().toISOString(),
-        });
-      } catch (progressError) {
-        logger.emit("PREPARING", "SYSTEM", cleanError(progressError));
-      }
-      if (!signal.aborted) {
-        preflightResult = await runLoggedCommand({
-          command: "xcrun",
-          args: xcodeBuildSettingsArguments(input, folder),
-          cwd: folder,
-          env: xcodeEnvironment(),
-          timeoutMs: Math.min(timeoutMs, 180_000),
-          signal,
-          logger,
-          phase: "PREFLIGHT",
-        });
-        if (preflightResult.exitCode !== 0 && !preflightResult.cancelled) {
-          failBuild = true;
-          errorCode = preflightResult.timedOut
-            ? "TIMEOUT"
-            : classifyFailure(preflightResult.output);
-          error = cleanError(
-            preflightResult.output ||
-              "The saved scheme, configuration, or destination is unavailable",
-          );
-        }
-      }
-      if (!failBuild && !signal.aborted) {
-        for (const script of [...input.scripts].sort(
-          (a, b) => a.position - b.position,
-        )) {
-          if (!script.preBuildScript) continue;
-          const execution = await runHook({
-            input,
-            folder,
-            script,
-            phase: "PRE_BUILD",
-            source: script.preBuildScript,
-            contextPath,
-            hookContext: baseHookContext,
-            logger,
-            signal,
-          });
-          scriptExecutions.push(execution);
-          if (execution.causedBuildFailure) {
-            failBuild = true;
-            errorCode = "SCRIPT_FAILED";
-            error = execution.error;
-            break;
-          }
-          if (signal.aborted) break;
-        }
-      }
-      if (!failBuild && !signal.aborted) {
-        try {
-          await context?.reportBuildProgress?.({
-            buildId: input.buildId,
-            status: "RUNNING",
-          });
-        } catch (progressError) {
-          logger.emit("RUNNING", "SYSTEM", cleanError(progressError));
-        }
-        if (input.worktreeCoverage) {
-          try {
-            coverageChanges = await snapshotCoverageChanges(
-              input.baseBranch,
-              folder,
-              Math.min(timeoutMs, 60_000),
-              signal,
-            );
-          } catch (coverageError) {
-            logger.emit("COVERAGE", "STDERR", cleanError(coverageError));
-          }
-        }
-        const args = xcodeBuildArguments(input);
-        buildResult = await runLoggedCommand({
-          command: "xcrun",
-          args,
-          cwd: folder,
-          env: xcodeEnvironment(),
-          timeoutMs,
-          signal,
-          logger,
-          phase: "XCODEBUILD",
-        });
-        if (buildResult.exitCode !== 0 && !buildResult.cancelled) {
-          failBuild = true;
-          errorCode = buildResult.timedOut
-            ? "TIMEOUT"
-            : classifyFailure(buildResult.output);
-          error = cleanError(buildResult.output || "xcodebuild failed");
-        }
-      }
-    } finally {
-      const postSignal = new AbortController().signal;
-      for (const script of [...input.scripts].sort(
-        (a, b) => b.position - a.position,
-      )) {
-        if (!script.postBuildScript) continue;
-        try {
-          const execution = await runHook({
-            input,
-            folder,
-            script,
-            phase: "POST_BUILD",
-            source: script.postBuildScript,
-            contextPath,
-            hookContext: {
-              ...baseHookContext,
-              buildFolder: input.artifactDirectory,
-              failed:
-                failBuild ||
-                (!signal.aborted &&
-                  buildResult !== null &&
-                  buildResult.exitCode !== 0),
-              cancelled:
-                signal.aborted ||
-                preflightResult?.cancelled === true ||
-                buildResult?.cancelled === true,
-              errorCode,
-              error,
-            },
-            logger,
-            signal: postSignal,
-          });
-          scriptExecutions.push(execution);
-          if (execution.causedBuildFailure && !signal.aborted) {
-            failBuild = true;
-            errorCode ??= "SCRIPT_FAILED";
-            error ??= execution.error;
-          }
-        } catch (hookError) {
-          logger.emit("POST_BUILD", "STDERR", cleanError(hookError));
-          if (script.failureBehavior === "FAIL_BUILD" && !signal.aborted) {
-            failBuild = true;
-            errorCode ??= "SCRIPT_FAILED";
-            error ??= cleanError(hookError);
-          }
-        }
-      }
+      await context?.reportBuildProgress?.({
+        buildId: input.buildId,
+        status: "PREPARING",
+        startedAt: new Date().toISOString(),
+      });
+    } catch (progressError) {
+      logger.emit("PREPARING", "SYSTEM", cleanError(progressError));
     }
-    let artifacts: Artifact[] = [];
+    logger.emit("PREPARING", "SYSTEM", `Preparing build in ${folder}`);
     try {
-      artifacts = await captureArtifacts(
-        input,
-        folder,
-        new AbortController().signal,
-        !failBuild && !signal.aborted && buildResult?.exitCode === 0,
-      );
-    } catch (artifactError) {
-      logger.emit("ARTIFACTS", "STDERR", cleanError(artifactError));
+      await onLog({
+        sequence: 0,
+        stream: "SYSTEM",
+        message: "Preparing iOS build",
+        createdAt: new Date().toISOString(),
+      });
+    } catch (progressError) {
+      logger.emit("PREPARING", "SYSTEM", cleanError(progressError));
     }
-    const reports: GeneratedBuildReport[] = [];
-    const testAction = ["TEST", "TEST_WITHOUT_BUILDING"].includes(input.action);
-    const canGenerateReports = () =>
-      !signal.aborted &&
-      buildResult !== null &&
-      !buildResult.cancelled &&
-      !buildResult.timedOut;
-    if (
-      canGenerateReports() &&
-      testAction &&
-      input.advancedSettings.parseTestResults
-    ) {
-      const report = await writeJsonReport(
-        input,
-        "TEST_RESULTS",
-        Math.min(timeoutMs, 120_000),
+    if (!signal.aborted) {
+      preflightResult = await runLoggedCommand({
+        command: "xcrun",
+        args: xcodeBuildSettingsArguments(input, folder),
+        cwd: folder,
+        env: xcodeEnvironment(),
+        timeoutMs: Math.min(timeoutMs, 180_000),
         signal,
-      );
-      reports.push(report);
-      if (report.artifact) artifacts.push(report.artifact);
-      if (report.error) logger.emit("REPORTS", "STDERR", report.error);
+        logger,
+        phase: "PREFLIGHT",
+      });
+      if (preflightResult.exitCode !== 0 && !preflightResult.cancelled) {
+        failBuild = true;
+        errorCode = preflightResult.timedOut
+          ? "TIMEOUT"
+          : classifyFailure(preflightResult.output);
+        error = cleanError(
+          preflightResult.output ||
+            "The saved scheme, configuration, or destination is unavailable",
+        );
+      }
     }
-    if (canGenerateReports() && testAction && input.worktreeCoverage) {
-      let report = await writeJsonReport(
-        input,
-        "CODE_COVERAGE",
-        Math.min(timeoutMs, 120_000),
-        signal,
-      );
-      try {
-        report = await addChangedCoverage(
-          report,
-          coverageChanges,
+    if (!failBuild && !signal.aborted) {
+      for (const script of [...input.scripts].sort(
+        (a, b) => a.position - b.position,
+      )) {
+        if (!script.preBuildScript) continue;
+        const execution = await runHook({
           input,
           folder,
+          script,
+          phase: "PRE_BUILD",
+          source: script.preBuildScript,
+          contextPath,
+          hookContext: baseHookContext,
+          logger,
+          signal,
+        });
+        scriptExecutions.push(execution);
+        if (execution.causedBuildFailure) {
+          failBuild = true;
+          errorCode = "SCRIPT_FAILED";
+          error = execution.error;
+          break;
+        }
+        if (signal.aborted) break;
+      }
+    }
+    if (
+      !failBuild &&
+      !signal.aborted &&
+      input.scripts.some((script) => script.preBuildScript)
+    ) {
+      preflightResult = await runLoggedCommand({
+        command: "xcrun",
+        args: xcodeBuildSettingsArguments(input, folder),
+        cwd: folder,
+        env: xcodeEnvironment(),
+        timeoutMs: Math.min(timeoutMs, 180_000),
+        signal,
+        logger,
+        phase: "PREFLIGHT",
+      });
+      if (preflightResult.exitCode !== 0) {
+        failBuild = true;
+        errorCode = preflightResult.timedOut
+          ? "TIMEOUT"
+          : classifyFailure(preflightResult.output);
+        error = cleanError(
+          preflightResult.output ||
+            "Could not resolve build outputs after pre-build hooks",
+        );
+      }
+    }
+    const finishBuild = async () => {
+      try {
+        if (!failBuild && !signal.aborted) {
+          try {
+            await context?.reportBuildProgress?.({
+              buildId: input.buildId,
+              status: "RUNNING",
+            });
+          } catch (progressError) {
+            logger.emit("RUNNING", "SYSTEM", cleanError(progressError));
+          }
+          if (input.worktreeCoverage) {
+            try {
+              coverageChanges = await snapshotCoverageChanges(
+                input.baseBranch,
+                folder,
+                Math.min(timeoutMs, 60_000),
+                signal,
+              );
+            } catch (coverageError) {
+              logger.emit("COVERAGE", "STDERR", cleanError(coverageError));
+            }
+          }
+          const args = xcodeBuildArguments(input);
+          buildResult = await runLoggedCommand({
+            command: "xcrun",
+            args,
+            cwd: folder,
+            env: xcodeEnvironment(),
+            timeoutMs,
+            signal,
+            logger,
+            phase: "XCODEBUILD",
+          });
+          if (buildResult.exitCode !== 0 && !buildResult.cancelled) {
+            failBuild = true;
+            errorCode = buildResult.timedOut
+              ? "TIMEOUT"
+              : classifyFailure(buildResult.output);
+            error = cleanError(buildResult.output || "xcodebuild failed");
+          }
+        }
+      } finally {
+        const postSignal = new AbortController().signal;
+        for (const script of [...input.scripts].sort(
+          (a, b) => b.position - a.position,
+        )) {
+          if (!script.postBuildScript) continue;
+          try {
+            const execution = await runHook({
+              input,
+              folder,
+              script,
+              phase: "POST_BUILD",
+              source: script.postBuildScript,
+              contextPath,
+              hookContext: {
+                ...baseHookContext,
+                buildFolder: input.artifactDirectory,
+                failed:
+                  failBuild ||
+                  (!signal.aborted &&
+                    buildResult !== null &&
+                    buildResult.exitCode !== 0),
+                cancelled:
+                  signal.aborted ||
+                  preflightResult?.cancelled === true ||
+                  buildResult?.cancelled === true,
+                errorCode,
+                error,
+              },
+              logger,
+              signal: postSignal,
+            });
+            scriptExecutions.push(execution);
+            if (execution.causedBuildFailure && !signal.aborted) {
+              failBuild = true;
+              errorCode ??= "SCRIPT_FAILED";
+              error ??= execution.error;
+            }
+          } catch (hookError) {
+            logger.emit("POST_BUILD", "STDERR", cleanError(hookError));
+            if (script.failureBehavior === "FAIL_BUILD" && !signal.aborted) {
+              failBuild = true;
+              errorCode ??= "SCRIPT_FAILED";
+              error ??= cleanError(hookError);
+            }
+          }
+        }
+      }
+      let artifacts: Artifact[] = [];
+      try {
+        artifacts = await captureArtifacts(
+          input,
+          folder,
+          new AbortController().signal,
+          !failBuild && !signal.aborted && buildResult?.exitCode === 0,
+        );
+      } catch (artifactError) {
+        logger.emit("ARTIFACTS", "STDERR", cleanError(artifactError));
+      }
+      const reports: GeneratedBuildReport[] = [];
+      const testAction = ["TEST", "TEST_WITHOUT_BUILDING"].includes(
+        input.action,
+      );
+      const canGenerateReports = () =>
+        !signal.aborted &&
+        buildResult !== null &&
+        !buildResult.cancelled &&
+        !buildResult.timedOut;
+      if (
+        canGenerateReports() &&
+        testAction &&
+        input.advancedSettings.parseTestResults
+      ) {
+        const report = await writeJsonReport(
+          input,
+          "TEST_RESULTS",
           Math.min(timeoutMs, 120_000),
           signal,
         );
-      } catch (coverageError) {
-        logger.emit("COVERAGE", "STDERR", cleanError(coverageError));
+        reports.push(report);
+        if (report.artifact) artifacts.push(report.artifact);
+        if (report.error) logger.emit("REPORTS", "STDERR", report.error);
       }
-      reports.push(report);
-      if (report.artifact) artifacts.push(report.artifact);
-      if (report.additionalArtifacts) {
-        artifacts.push(...report.additionalArtifacts);
+      if (canGenerateReports() && testAction && input.worktreeCoverage) {
+        let report = await writeJsonReport(
+          input,
+          "CODE_COVERAGE",
+          Math.min(timeoutMs, 120_000),
+          signal,
+        );
+        try {
+          report = await addChangedCoverage(
+            report,
+            coverageChanges,
+            input,
+            folder,
+            Math.min(timeoutMs, 120_000),
+            signal,
+          );
+        } catch (coverageError) {
+          logger.emit("COVERAGE", "STDERR", cleanError(coverageError));
+        }
+        reports.push(report);
+        if (report.artifact) artifacts.push(report.artifact);
+        if (report.additionalArtifacts) {
+          artifacts.push(...report.additionalArtifacts);
+        }
+        if (report.error) logger.emit("REPORTS", "STDERR", report.error);
       }
-      if (report.error) logger.emit("REPORTS", "STDERR", report.error);
-    }
-    await logger.close();
-    if (await pathExists(rawLog)) {
-      artifacts.unshift(
-        await artifact(input.artifactDirectory, "RAW_LOG", rawLog),
+      await logger.close();
+      if (await pathExists(rawLog)) {
+        artifacts.unshift(
+          await artifact(input.artifactDirectory, "RAW_LOG", rawLog),
+        );
+      }
+      const cancelled =
+        signal.aborted ||
+        preflightResult?.cancelled === true ||
+        buildResult?.cancelled === true;
+      const timedOut =
+        preflightResult?.timedOut === true || buildResult?.timedOut === true;
+      const exitCode = cancelled
+        ? null
+        : failBuild || !buildResult
+          ? 1
+          : buildResult.exitCode;
+      const args = xcodeBuildArguments(input);
+      const finalSignal = new AbortController().signal;
+      const finalStateHash = await withRepositoryMetadata(
+        folder,
+        () =>
+          worktreeCodeStateHash(
+            folder,
+            Math.min(timeoutMs, 60_000),
+            finalSignal,
+          ),
+        finalSignal,
       );
-    }
-    const cancelled =
-      signal.aborted ||
-      preflightResult?.cancelled === true ||
-      buildResult?.cancelled === true;
-    const timedOut =
-      preflightResult?.timedOut === true || buildResult?.timedOut === true;
-    const exitCode = cancelled
-      ? null
-      : failBuild || !buildResult
-        ? 1
-        : buildResult.exitCode;
-    const args = xcodeBuildArguments(input);
-    const finalStateHash = await worktreeCodeStateHash(
-      folder,
-      Math.min(timeoutMs, 60_000),
-      new AbortController().signal,
-    );
-    const codeStateObservedAt = new Date().toISOString();
-    return {
-      exitCode,
-      signal: buildResult?.signal ?? preflightResult?.signal ?? null,
-      timedOut,
-      cancelled,
-      errorCode,
-      error,
-      commandSummary: commandSummary("xcrun", args),
-      artifacts,
-      reports,
-      scriptExecutions,
-      sourceStateHash,
-      finalStateHash,
-      codeStateObservedAt,
+      const codeStateObservedAt = new Date().toISOString();
+      return {
+        exitCode,
+        signal: buildResult?.signal ?? preflightResult?.signal ?? null,
+        timedOut,
+        cancelled,
+        errorCode,
+        error,
+        commandSummary: commandSummary("xcrun", args),
+        artifacts,
+        reports,
+        scriptExecutions,
+        sourceStateHash,
+        finalStateHash,
+        codeStateObservedAt,
+      };
     };
+    let enteredProtectedBuild = false;
+    try {
+      const outputPaths =
+        preflightResult?.exitCode === 0
+          ? effectiveBuildOutputPaths(
+              preflightResult.stdout ?? preflightResult.output,
+              folder,
+              input.derivedDataPath,
+            )
+          : [];
+      const runProtected = () => {
+        enteredProtectedBuild = true;
+        return finishBuild();
+      };
+      return await (context?.withOperationResources
+        ? context.withOperationResources(
+            outputPaths.map((path) => ({
+              kind: "PATH",
+              key: path,
+              path,
+              mode: "WRITE",
+              agentId: context.agentId,
+              codebaseId: input.codebaseId,
+            })),
+            runProtected,
+          )
+        : runProtected());
+    } catch (lockError) {
+      if (enteredProtectedBuild) throw lockError;
+      // Pre-build hooks may already have acquired external resources. Always
+      // execute their matching cleanup when output admission is cancelled.
+      failBuild = true;
+      errorCode = signal.aborted ? null : "RESOURCE_LOCK_FAILED";
+      error = cleanError(lockError);
+      logger.emit("PREPARING", "STDERR", error);
+      return await finishBuild();
+    }
   } finally {
     await logger.close();
   }

@@ -3,6 +3,7 @@ import {
   opendir,
   readdir,
   realpath,
+  readFile,
   rm,
   stat,
   statfs,
@@ -58,6 +59,18 @@ function safeRelativePath(value: string): boolean {
 }
 
 export async function configuredRoots(
+  payload: ReturnType<typeof buildDataScanPayload>,
+): Promise<string[]> {
+  const roots = await legacyConfiguredRoots(payload);
+  if (payload.managedRoot) {
+    if (!isAbsolute(payload.managedRoot))
+      throw new Error("Managed Derived Data root must be absolute");
+    roots.push(resolve(payload.managedRoot));
+  }
+  return [...new Set(roots)];
+}
+
+async function legacyConfiguredRoots(
   payload: ReturnType<typeof buildDataScanPayload>,
 ): Promise<string[]> {
   if (payload.mode === "DEFAULT") {
@@ -137,11 +150,25 @@ async function scanRoot(
     if (!child.isDirectory()) continue;
     const path = join(rootPath, child.name);
     const information = await lstat(path);
-    const projectPath = await workspacePath(
+    let projectPath = await workspacePath(
       join(path, "info.plist"),
       timeoutMs,
       signal,
     );
+    try {
+      const ownership = JSON.parse(
+        await readFile(join(path, ".aide-worktree.json"), "utf8"),
+      );
+      if (
+        ownership.version === 1 &&
+        ownership.worktreeId === child.name &&
+        typeof ownership.folder === "string" &&
+        isAbsolute(ownership.folder)
+      )
+        projectPath = ownership.folder;
+    } catch {
+      // Legacy Xcode caches identify ownership through info.plist instead.
+    }
     entries.push({
       path,
       rootPath,
@@ -240,7 +267,11 @@ export const scanBuildData: AgentJobHandler = async (
 /** Resolve ownership before Git removes the workspace and its metadata. */
 export async function ownedWorktreeBuildData(
   folder: string,
-  configuration: { mode: DerivedDataLocationMode; path: string | null },
+  configuration: {
+    mode: DerivedDataLocationMode;
+    path: string | null;
+    managedRoot?: string | null;
+  },
   timeoutMs: number,
   signal: AbortSignal,
 ): Promise<{ targets: BuildDataTarget[]; warnings: string[] }> {
@@ -384,25 +415,43 @@ export const deleteBuildData: AgentJobHandler = async (
   rawPayload,
   _timeoutMs,
   signal,
+  _onLog,
+  context,
 ) => {
   const payload = buildDataDeletePayload(rawPayload);
   const deleted: BuildDataDeleteResult["deleted"] = [];
   for (const target of payload.targets) {
     signal.throwIfAborted();
     try {
-      assertDirectChild(target.rootPath, target.path);
-      const rootPath = await realpath(target.rootPath);
-      if (
-        rootPath !== resolve(target.rootPath) ||
-        dirname(resolve(target.path)) !== rootPath
-      ) {
-        throw new Error("Build Data root changed since the scan");
-      }
-      const stats = await lstat(target.path);
-      if (!stats.isDirectory() || stats.isSymbolicLink()) {
-        throw new Error("Build Data target is not a directory");
-      }
-      await rm(target.path, { recursive: true, force: false, maxRetries: 3 });
+      const removeTarget = async () => {
+        assertDirectChild(target.rootPath, target.path);
+        const rootPath = await realpath(target.rootPath);
+        if (
+          rootPath !== resolve(target.rootPath) ||
+          dirname(resolve(target.path)) !== rootPath
+        ) {
+          throw new Error("Build Data root changed since the scan");
+        }
+        const stats = await lstat(target.path);
+        if (!stats.isDirectory() || stats.isSymbolicLink()) {
+          throw new Error("Build Data target is not a directory");
+        }
+        await rm(target.path, { recursive: true, force: false, maxRetries: 3 });
+      };
+      if (context?.withOperationResources)
+        await context.withOperationResources(
+          [
+            {
+              kind: "PATH",
+              key: target.path,
+              path: target.path,
+              mode: "WRITE",
+              agentId: context.agentId,
+            },
+          ],
+          removeTarget,
+        );
+      else await removeTarget();
       deleted.push({ path: target.path, deleted: true, error: null });
     } catch (error) {
       signal.throwIfAborted();
@@ -518,6 +567,7 @@ export async function collectAgentDiskSpace(
   const scanPayload = buildDataScanPayload({
     mode: configuration.derivedDataLocationMode,
     path: configuration.derivedDataPath,
+    managedRoot: configuration.managedDerivedDataRoot ?? null,
     worktrees: configuration.worktrees,
   });
   const roots = await configuredRoots(scanPayload);

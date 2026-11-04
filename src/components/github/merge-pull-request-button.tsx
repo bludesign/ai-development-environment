@@ -194,7 +194,7 @@ export function MergePullRequestButton({
 
   const operation = options?.autoMergeOperation;
   const activeManaged = Boolean(
-    operation?.autoSync &&
+    operation &&
     ["SYNCING", "WAITING_CI", "WAITING_REQUIREMENTS", "MERGING"].includes(
       operation.state,
     ),
@@ -378,9 +378,7 @@ export function MergePullRequestButton({
                   <AlertDescription>{error || blockedReason}</AlertDescription>
                 </Alert>
               )}
-              {operation?.autoSync && (
-                <MergeSyncStatus state={operation.state} />
-              )}
+              {operation && <MergeSyncStatus state={operation.state} />}
               {options && !activeManaged && (
                 <>
                   <MergeSyncFields
@@ -482,7 +480,7 @@ export function MergePullRequestButton({
           )}
 
           <DialogFooter>
-            {operation?.autoSync && (
+            {operation && (
               <Button
                 variant="outline"
                 size="icon"
@@ -493,7 +491,7 @@ export function MergePullRequestButton({
                 <RefreshCw />
               </Button>
             )}
-            {operation?.autoSync && operation.state === "ACTION_REQUIRED" && (
+            {operation && operation.state === "ACTION_REQUIRED" && (
               <Button
                 variant="destructive"
                 disabled={merging}

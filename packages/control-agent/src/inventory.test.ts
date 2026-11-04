@@ -44,4 +44,16 @@ describe("agent inventory", () => {
     expect(capabilities).toContain("codebase.refresh");
     expect(capabilities).toContain("runs.protocol.v1");
   });
+
+  test("advertises scoped execution only where process-group recovery is supported", () => {
+    expect(capabilitiesForPlatform("darwin")).toContain(
+      "operation.resources.v1",
+    );
+    expect(capabilitiesForPlatform("linux")).toContain(
+      "operation.resources.v1",
+    );
+    expect(capabilitiesForPlatform("win32")).not.toContain(
+      "operation.resources.v1",
+    );
+  });
 });

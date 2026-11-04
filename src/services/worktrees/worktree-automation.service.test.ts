@@ -1,9 +1,14 @@
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 
+vi.mock("@/services/operation-locks/operation-locks.service", () => ({
+  recoverMergeReservations: vi.fn(async () => {}),
+}));
+
 const getPrismaClient = vi.hoisted(() => vi.fn());
 vi.mock("@/data/prisma-client", () => ({ getPrismaClient }));
 
 import { WORKTREE_AUTO_SYNC_JOB_KIND } from "@ai-development-environment/agent-contract/worktrees";
+import type { WorktreeAutoMerge } from "@/generated/prisma/client";
 import type { AgentControlService } from "@/services/agent-control";
 import type { GitHubService } from "@/services/github";
 import type { JiraService } from "@/services/jira";
@@ -57,6 +62,115 @@ function completedJob(kind: string) {
     status: "SUCCEEDED",
     resultJson: "{}",
     error: null,
+  };
+}
+
+function retargetFixture() {
+  const worktree = {
+    id: "wt",
+    codebaseId: "cb",
+    primary: false,
+    branch: "feature",
+    headSha: "a".repeat(40),
+    codebase: { repository: { canonicalOrigin: "github.com/acme/widgets" } },
+  };
+  let rule: WorktreeAutoMerge = {
+    worktreeId: worktree.id,
+    state: "WAITING_REQUIREMENTS",
+    autoSync: false,
+    syncStateJson: null,
+    baseBranchUpdatesJson: null,
+    repositoryNameWithOwner: "acme/widgets",
+    pullRequestNumber: 17,
+    branch: worktree.branch,
+    mergeMethod: "SQUASH",
+    commitHeadline: "Old",
+    commitBody: "",
+    authorEmail: null,
+    deleteWorktree: false,
+    moveTicketToDone: false,
+    ticketKey: null,
+    ticketMovedAt: null,
+    deleteJobId: null,
+    lastError: null,
+    createdAt: new Date(0),
+    updatedAt: new Date(0),
+  };
+  const update = vi.fn(
+    async ({ data }: { data: Partial<WorktreeAutoMerge> }) =>
+      (rule = { ...rule, ...data }),
+  );
+  const upsert = vi.fn(
+    async ({ update }: { update: Partial<WorktreeAutoMerge> }) =>
+      (rule = { ...rule, ...update }),
+  );
+  getPrismaClient.mockResolvedValue({
+    worktree: { findFirst: vi.fn().mockResolvedValue(worktree) },
+    worktreeAutoMerge: {
+      findUnique: vi.fn(async () => ({ ...rule })),
+      findMany: vi.fn(async () => [{ ...rule, worktree }]),
+      upsert,
+      update,
+    },
+  });
+  const remote = {
+    state: "OPEN",
+    headRefName: worktree.branch,
+    headRefOid: worktree.headSha,
+    headRepositoryNameWithOwner: "acme/widgets",
+    autoMergeEnabled: false,
+  };
+  const github = {
+    pullRequestAutomationState: vi.fn(
+      async (_owner: string, _name: string, _number: number) => remote,
+    ),
+    pullRequestMergeOptions: vi.fn(
+      async (_owner: string, _name: string, _number: number) => ({
+        canMerge: true,
+        blockedReason: null,
+        canAutoMergeWithSync: true,
+        availableMethods: ["SQUASH"],
+      }),
+    ),
+    mergePullRequest: vi.fn(async () => ({ state: "MERGED" })),
+  };
+  const automation = new WorktreeAutomationService(
+    {
+      ticketKeyForWorktree: vi.fn().mockResolvedValue(null),
+      publishAutomationChange: vi.fn(),
+    } as unknown as WorktreesService,
+    github as unknown as GitHubService,
+    {} as JiraService,
+    {} as WorkflowsService,
+    {
+      registerCompletionObserver: vi.fn(),
+      registerConnectionHandler: vi.fn(),
+    } as unknown as AgentControlService,
+  );
+  vi.spyOn(
+    automation as unknown as { changed(): void },
+    "changed",
+  ).mockImplementation(() => {});
+  return {
+    automation,
+    github,
+    upsert,
+    current: () => rule,
+    remote,
+    reconcile: () =>
+      (
+        automation as unknown as { reconcileAutoMerge(): Promise<void> }
+      ).reconcileAutoMerge(),
+    input: {
+      worktreeId: worktree.id,
+      repositoryNameWithOwner: "acme/widgets",
+      pullRequestNumber: 22,
+      method: "SQUASH" as const,
+      commitHeadline: "New",
+      commitBody: "",
+      deleteWorktree: false,
+      moveTicketToDone: false,
+    },
   };
 }
 
@@ -160,6 +274,10 @@ describe("WorktreeAutomationService", () => {
       ),
       enablePullRequestAutoMerge,
       disablePullRequestAutoMerge,
+      pullRequestMergeOptions: vi.fn().mockResolvedValue({
+        canAutoMergeWithSync: true,
+        availableMethods: ["SQUASH"],
+      }),
     } as unknown as GitHubService;
     const worktrees = {
       ticketKeyForWorktree: vi.fn().mockResolvedValue(null),
@@ -200,12 +318,7 @@ describe("WorktreeAutomationService", () => {
       },
       "WORKTREE_AUTOMATION",
     );
-    expect(
-      disablePullRequestAutoMerge.mock.invocationCallOrder[0],
-    ).toBeLessThan(
-      enablePullRequestAutoMerge.mock.invocationCallOrder[0] ??
-        Number.POSITIVE_INFINITY,
-    );
+    expect(enablePullRequestAutoMerge).not.toHaveBeenCalled();
     expect(
       disablePullRequestAutoMerge.mock.invocationCallOrder[0],
     ).toBeLessThan(
@@ -216,6 +329,157 @@ describe("WorktreeAutomationService", () => {
         update: expect.not.objectContaining({ pauseReason: expect.anything() }),
       }),
     );
+  });
+
+  test("waits for the previous PR worker before retargeting its worktree", async () => {
+    const f = retargetFixture();
+    const reached = Promise.withResolvers<void>();
+    const proceed = Promise.withResolvers<void>();
+    f.github.pullRequestMergeOptions.mockImplementation(
+      async (_owner, _name, number) => {
+        if (number === 17) {
+          reached.resolve();
+          await proceed.promise;
+        }
+        return {
+          canMerge: true,
+          blockedReason: null,
+          canAutoMergeWithSync: true,
+          availableMethods: ["SQUASH"],
+        };
+      },
+    );
+    const worker = f.reconcile();
+    await reached.promise;
+    const retarget = f.automation.configureAutoMerge(f.input);
+    try {
+      await vi.advanceTimersByTimeAsync(0);
+      expect(f.upsert).not.toHaveBeenCalled();
+    } finally {
+      proceed.resolve();
+      await Promise.all([worker, retarget]);
+    }
+    expect(f.github.mergePullRequest).toHaveBeenCalledWith(
+      expect.objectContaining({ number: 17 }),
+      "WORKTREE_AUTOMATION",
+    );
+    expect(f.current()).toMatchObject({
+      pullRequestNumber: 22,
+      state: "WAITING_REQUIREMENTS",
+    });
+  });
+
+  test("ignores a discovered rule retargeted before its worker acquires the worktree", async () => {
+    const f = retargetFixture();
+    const reached = Promise.withResolvers<void>();
+    const proceed = Promise.withResolvers<void>();
+    f.github.pullRequestAutomationState.mockImplementation(
+      async (_owner, _name, number) => {
+        if (number === 22) {
+          reached.resolve();
+          await proceed.promise;
+        }
+        return f.remote;
+      },
+    );
+    const retarget = f.automation.configureAutoMerge(f.input);
+    await reached.promise;
+    const worker = f.reconcile();
+    try {
+      await vi.advanceTimersByTimeAsync(0);
+      expect(f.github.mergePullRequest).not.toHaveBeenCalled();
+    } finally {
+      proceed.resolve();
+      await Promise.all([retarget, worker]);
+    }
+    expect(f.github.mergePullRequest).not.toHaveBeenCalled();
+    expect(f.current()).toMatchObject({
+      pullRequestNumber: 22,
+      state: "WAITING_REQUIREMENTS",
+    });
+  });
+
+  test("unrelated pull requests can configure Auto Merge independently", async () => {
+    let unblock!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      unblock = resolve;
+    });
+    const upsert = vi.fn(async ({ create }) => ({
+      ...create,
+      updatedAt: new Date(),
+    }));
+    getPrismaClient.mockResolvedValue({
+      worktree: {
+        findFirst: vi.fn(async ({ where }) => ({
+          id: where.id,
+          primary: false,
+          branch: "feature",
+          codebaseId: "cb",
+          codebase: { repository: { canonicalOrigin: "github.com/team/repo" } },
+        })),
+      },
+      worktreeAutoMerge: {
+        findUnique: vi.fn().mockResolvedValue(null),
+        upsert,
+      },
+    });
+    const github = {
+      pullRequestAutomationState: vi.fn(async (_owner, _name, number) => {
+        if (number === 1) await gate;
+        return {
+          state: "OPEN",
+          headRefName: "feature",
+          headRepositoryNameWithOwner: "team/repo",
+          autoMergeEnabled: false,
+        };
+      }),
+      pullRequestMergeOptions: vi.fn().mockResolvedValue({
+        canAutoMergeWithSync: true,
+        availableMethods: ["SQUASH"],
+      }),
+    };
+    const automation = new WorktreeAutomationService(
+      {
+        ticketKeyForWorktree: vi.fn().mockResolvedValue(null),
+        publishAutomationChange: vi.fn(),
+      } as unknown as WorktreesService,
+      github as unknown as GitHubService,
+      {} as JiraService,
+      {} as WorkflowsService,
+      {
+        registerCompletionObserver: vi.fn(),
+        registerConnectionHandler: vi.fn(),
+      } as unknown as AgentControlService,
+    );
+    vi.spyOn(
+      automation as unknown as { changed(): void },
+      "changed",
+    ).mockImplementation(() => {});
+    const input = {
+      worktreeId: "first",
+      repositoryNameWithOwner: "team/repo",
+      pullRequestNumber: 1,
+      method: "SQUASH" as const,
+      commitHeadline: "Merge",
+      commitBody: "",
+      deleteWorktree: false,
+      moveTicketToDone: false,
+    };
+    const first = automation.configureAutoMerge(input);
+    try {
+      await expect(
+        automation.configureAutoMerge({
+          ...input,
+          worktreeId: "second",
+          pullRequestNumber: 2,
+        }),
+      ).resolves.toMatchObject({ worktreeId: "second" });
+      expect(upsert).toHaveBeenCalledOnce();
+    } finally {
+      unblock();
+      await first;
+    }
+    expect(upsert).toHaveBeenCalledTimes(2);
   });
 
   test.each([

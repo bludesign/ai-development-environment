@@ -102,6 +102,13 @@ export const BUILD_SCRIPT_FAILURE_BEHAVIORS = [
 export type BuildScriptFailureBehavior =
   (typeof BUILD_SCRIPT_FAILURE_BEHAVIORS)[number];
 
+export const BUILD_SCRIPT_LOCK_SCOPES = [
+  "WORKTREE",
+  "CODEBASE",
+  "AGENT",
+] as const;
+export type BuildScriptLockScope = (typeof BUILD_SCRIPT_LOCK_SCOPES)[number];
+
 export const APPROVED_BUILD_SETTING_OVERRIDES = [
   "ONLY_ACTIVE_ARCH",
   "SWIFT_ACTIVE_COMPILATION_CONDITIONS",
@@ -240,6 +247,7 @@ export type BuildScriptSnapshot = {
   postBuildScript: string | null;
   timeoutSeconds: number;
   failureBehavior: BuildScriptFailureBehavior;
+  lockScope?: BuildScriptLockScope;
   position: number;
 };
 
@@ -302,6 +310,8 @@ export type BuildAgentRunDestinationsPayload = {
 export type BuildJobPayload = BuildWorktreeIdentity & {
   buildId: string;
   artifactDirectory: string;
+  /** Stable, worktree-owned Xcode cache directory. Absent on legacy jobs. */
+  derivedDataPath?: string;
   source: BuildSourceSnapshot;
   scheme: string;
   configuration: string;
@@ -702,6 +712,11 @@ function parseScript(value: unknown, index: number): BuildScriptSnapshot {
       BUILD_SCRIPT_FAILURE_BEHAVIORS,
       `build scripts[${index}].failureBehavior`,
     ),
+    lockScope: enumValue(
+      script.lockScope ?? "WORKTREE",
+      BUILD_SCRIPT_LOCK_SCOPES,
+      `build scripts[${index}].lockScope`,
+    ),
     position,
   };
 }
@@ -892,6 +907,14 @@ export function parseBuildJobPayload(value: unknown): BuildJobPayload {
       input.artifactDirectory,
       "build job payload.artifactDirectory",
     ),
+    ...(input.derivedDataPath == null
+      ? {}
+      : {
+          derivedDataPath: stringValue(
+            input.derivedDataPath,
+            "build job payload.derivedDataPath",
+          ),
+        }),
     source: parseBuildSource(input.source),
     scheme: stringValue(input.scheme, "build job payload.scheme"),
     configuration: stringValue(

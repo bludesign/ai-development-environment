@@ -110,6 +110,7 @@ const DiagnosticSchema = z.object({
   message: z.string(),
   nodeId: z.string().nullable(),
   triggerId: z.string().nullable(),
+  edgeId: z.string().nullable(),
   path: z.string().nullable(),
 });
 
@@ -271,6 +272,7 @@ async function saveDraft(
       message: entry.message,
       nodeId: entry.nodeId ?? null,
       triggerId: entry.triggerId ?? null,
+      edgeId: entry.edgeId ?? null,
       path: entry.path ?? null,
     })),
     nodeId: created.nodeId ?? null,
@@ -1097,6 +1099,7 @@ export function createWorkflowToolGroup(workflows: Service): BuiltInToolGroup {
               message: entry.message,
               nodeId: entry.nodeId ?? null,
               triggerId: entry.triggerId ?? null,
+              edgeId: entry.edgeId ?? null,
               path: entry.path ?? null,
             })),
           };

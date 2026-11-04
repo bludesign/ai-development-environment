@@ -1,3 +1,4 @@
+import { SETTLED_AGENT_JOB_WHERE } from "@/services/agent-control/job-cleanup";
 import {
   JIRA_BRANCH_GENERATE_JOB_KIND,
   jiraBranchNameCandidates,
@@ -50,6 +51,20 @@ import {
 import { getPrismaClient } from "@/data/prisma-client";
 import { mapIntegrationRequests } from "@/services/integration-request";
 import { compileRe2 } from "@/lib/re2.server";
+import {
+  jobConflictsWithWorktree,
+  jobHasRepositoryBarrier,
+} from "@/lib/operation-availability";
+import { OPERATION_RESOURCES_CAPABILITY } from "@ai-development-environment/agent-contract/operation-resources";
+import {
+  sourceBranchResource,
+  type OperationDescriptor,
+} from "@ai-development-environment/agent-contract/operation-resources";
+import {
+  admitOperation,
+  releaseOperation,
+} from "@/services/operation-locks/operation-locks.service";
+import { worktreeOperationResource } from "@/services/operation-locks/job-resources";
 import type { Prisma } from "@/generated/prisma/client";
 import {
   ACTIVE_CODEBASE_BLOCKING_JOB_WHERE,
@@ -94,6 +109,10 @@ import type {
 } from "@/services/notifications";
 import type { WorkflowEventsService } from "@/services/workflows/workflow-events.service";
 import { buildOutOfDate } from "@/services/builds/build-freshness";
+import {
+  effectiveBuildsDirectory,
+  managedDerivedDataRoot,
+} from "@/services/builds/build-directory";
 import { overallPreparationState, preparationPayload } from "./preparations";
 import { WorktreeSyncService } from "./worktree-sync.service";
 
@@ -172,10 +191,23 @@ export const WORKTREE_COLORS = [
   "navy",
 ] as const;
 
+const activeWorktreeJobsWhere: Prisma.AgentJobWhereInput = {
+  OR: [
+    { status: { in: ["QUEUED", "RUNNING", "CANCELLING"] } },
+    { executionToken: { not: null } },
+  ],
+};
 const worktreeInclude = {
   codebase: {
     include: {
-      agent: true,
+      agent: {
+        include: {
+          jobs: {
+            where: activeWorktreeJobsWhere,
+            orderBy: { createdAt: "desc" as const },
+          },
+        },
+      },
       repository: {
         include: {
           projects: {
@@ -185,9 +217,8 @@ const worktreeInclude = {
         },
       },
       jobs: {
-        where: ACTIVE_CODEBASE_BLOCKING_JOB_WHERE,
+        where: activeWorktreeJobsWhere,
         orderBy: { createdAt: "desc" as const },
-        take: 1,
       },
     },
   },
@@ -619,15 +650,28 @@ export class WorktreesService {
     );
     this.agentControl.registerCompletionHandler(
       WORKTREE_MOVE_PUSH_JOB_KIND,
-      (job) => this.advanceMoveAfterPush(job),
+      async (job) => {
+        await this.advanceMoveAfterPush(job);
+        if (job.operationResourcesJson)
+          await this.releaseFinishedMoveResources(this.moveIdFromJob(job));
+      },
     );
     this.agentControl.registerCompletionHandler(
       WORKTREE_MOVE_CHECKOUT_JOB_KIND,
-      (job) => this.advanceMoveAfterCheckout(job),
+      async (job) => {
+        await this.advanceMoveAfterCheckout(job);
+        if (job.operationResourcesJson)
+          await this.releaseFinishedMoveResources(this.moveIdFromJob(job));
+      },
     );
     this.agentControl.registerCompletionHandler(
       WORKTREE_DELETE_JOB_KIND,
-      (job) => this.projectDeleteOperation(job),
+      async (job) => {
+        await this.projectDeleteOperation(job);
+        const payload = JSON.parse(job.payloadJson) as { moveId?: string };
+        if (job.operationResourcesJson && payload.moveId)
+          await this.releaseFinishedMoveResources(payload.moveId);
+      },
     );
     this.agentControl.registerCompletionHandler(
       WORKTREE_PREPARATION_JOB_KIND,
@@ -814,13 +858,19 @@ export class WorktreesService {
         });
         continue;
       }
-      runnableByCodebase.set(worktree.codebaseId, [
-        ...(runnableByCodebase.get(worktree.codebaseId) ?? []),
+      const lane = capabilities(worktree.codebase.agent).includes(
+        OPERATION_RESOURCES_CAPABILITY,
+      )
+        ? worktree.id
+        : worktree.codebaseId;
+      runnableByCodebase.set(lane, [
+        ...(runnableByCodebase.get(lane) ?? []),
         worktree,
       ]);
     }
-    for (const [codebaseId, targets] of runnableByCodebase) {
+    for (const [lane, targets] of runnableByCodebase) {
       const first = targets[0]!;
+      const codebaseId = first.codebaseId;
       try {
         jobs.push(
           await this.createPreparationJob(
@@ -843,7 +893,7 @@ export class WorktreesService {
                   gitDirectory: worktree.gitDirectory,
                 })),
               },
-              idempotencyKey: `worktree:prepare:${action.toLowerCase()}:${requestId}:${codebaseId}`,
+              idempotencyKey: `worktree:prepare:${action.toLowerCase()}:${requestId}:${lane}`,
               timeoutSeconds: 600,
             },
             action === "INSPECT",
@@ -980,6 +1030,16 @@ export class WorktreesService {
         worktree.codebase.jobs.find(
           (job) => job.worktreeId === worktree.id && isWorktreeGitJob(job),
         ) ?? null,
+      activeJobs: worktree.codebase.jobs.filter(
+        (job) =>
+          job.worktreeId === worktree.id ||
+          jobConflictsWithWorktree(job, worktree),
+      ),
+      blockingJob:
+        [
+          ...worktree.codebase.jobs,
+          ...(worktree.codebase.agent.jobs ?? []),
+        ].find((job) => jobConflictsWithWorktree(job, worktree)) ?? null,
       baseBranch:
         worktree.baseBranchOverride ?? worktree.codebase.defaultBranch ?? null,
       ticketKey: ticketKey(worktree.branch, String(pattern)),
@@ -1861,7 +1921,8 @@ export class WorktreesService {
           codebase: worktree.codebase,
           repository: worktree.codebase.repository,
           worktrees: [],
-          blockingJob: worktree.codebase.jobs[0] ?? null,
+          blockingJob:
+            worktree.codebase.jobs.find(jobHasRepositoryBarrier) ?? null,
           iosBuildConfigured:
             worktree.codebase.repository.projects?.some(
               (project) => project.type === "IOS_APP",
@@ -1943,6 +2004,12 @@ export class WorktreesService {
       if (!codebase || codebase.agentId !== agentId) {
         throw new Error("Codebase not found for this agent");
       }
+      const observedAt = report.observedAt ? new Date(report.observedAt) : null;
+      if (
+        codebase.worktreeInventoryObservedAt &&
+        (!observedAt || observedAt <= codebase.worktreeInventoryObservedAt)
+      )
+        continue;
       const inventory = report.worktrees
         .slice(0, 1_000)
         .map((item) => parseWorktreeInventoryItem(item));
@@ -1970,6 +2037,19 @@ export class WorktreesService {
               !reportedGitDirectories.has(item.gitDirectory),
           ));
       await prisma.$transaction(async (transaction) => {
+        if (observedAt) {
+          const accepted = await transaction.codebase.updateMany({
+            where: {
+              id: codebase.id,
+              OR: [
+                { worktreeInventoryObservedAt: null },
+                { worktreeInventoryObservedAt: { lt: observedAt } },
+              ],
+            },
+            data: { worktreeInventoryObservedAt: observedAt },
+          });
+          if (!accepted.count) return;
+        }
         await transaction.codebase.update({
           where: { id: codebase.id },
           data: {
@@ -2040,6 +2120,15 @@ export class WorktreesService {
             where: {
               codebaseId: codebase.id,
               missingAt: null,
+              ...(observedAt
+                ? {
+                    createdAt: { lte: observedAt },
+                    OR: [
+                      { lastCheckedAt: null },
+                      { lastCheckedAt: { lte: observedAt } },
+                    ],
+                  }
+                : {}),
               ...(identities.length
                 ? { gitDirectory: { notIn: identities } }
                 : {}),
@@ -3018,24 +3107,88 @@ export class WorktreesService {
       throw new Error("The destination default branch is unavailable");
     }
     const moveId = randomUUID();
+    const modernMove =
+      capabilities(source.codebase.agent).includes(
+        OPERATION_RESOURCES_CAPABILITY,
+      ) && capabilities(target.agent).includes(OPERATION_RESOURCES_CAPABILITY);
+    const destinationPaths = windowsPath(target.folder) ? win32 : posix;
+    const destinationFolder =
+      targetWorktree?.folder ??
+      destinationPaths.join(
+        destinationPaths.dirname(target.folder),
+        `${destinationPaths.basename(target.folder)}-${source.branch.replaceAll("/", "-")}`,
+      );
+    const moveResources: OperationDescriptor = {
+      version: 1,
+      resources: [
+        worktreeOperationResource(source, source.codebase.agentId, "WRITE"),
+        {
+          kind: "PATH",
+          key: `${source.codebase.agentId}:path:${source.folder}`,
+          path: source.folder,
+          mode: "WRITE",
+          agentId: source.codebase.agentId,
+          codebaseId: source.codebaseId,
+        },
+        ...(targetWorktree
+          ? [worktreeOperationResource(targetWorktree, target.agentId, "WRITE")]
+          : []),
+        {
+          kind: "PATH",
+          key: `${target.agentId}:path:${destinationFolder}`,
+          path: destinationFolder,
+          mode: "WRITE",
+          agentId: target.agentId,
+          codebaseId: target.id,
+        },
+        sourceBranchResource(
+          source.codebase.repository.canonicalOrigin,
+          source.branch,
+        ),
+        ...(targetWorktree?.branch
+          ? [
+              sourceBranchResource(
+                target.repository.canonicalOrigin,
+                targetWorktree.branch,
+              ),
+            ]
+          : []),
+      ],
+    };
     let move;
     try {
-      move = await prisma.worktreeMove.create({
-        data: {
-          id: moveId,
-          requestId: input.requestId,
-          sourceWorktreeId: source.id,
-          sourceCodebaseId: source.codebaseId,
-          targetCodebaseId: target.id,
-          targetWorktreeId: targetWorktree?.id ?? null,
-          destinationMode: targetWorktree ? "EXISTING" : "NEW",
-          branch: source.branch,
-          headSha: source.headSha,
-          baseBranch,
-          deleteSource: input.deleteSource,
-          status: "PUSHING",
-        },
-      });
+      const createMove = (transaction: Pick<typeof prisma, "worktreeMove">) =>
+        transaction.worktreeMove.create({
+          data: {
+            id: moveId,
+            requestId: input.requestId,
+            sourceWorktreeId: source.id,
+            sourceCodebaseId: source.codebaseId,
+            targetCodebaseId: target.id,
+            targetWorktreeId: targetWorktree?.id ?? null,
+            destinationMode: targetWorktree ? "EXISTING" : "NEW",
+            branch: source.branch!,
+            headSha: source.headSha!,
+            baseBranch,
+            deleteSource: input.deleteSource,
+            status: "PUSHING",
+            ...(modernMove
+              ? { operationHolderId: `WORKTREE_MOVE:${moveId}` }
+              : {}),
+          },
+        });
+      move = modernMove
+        ? await prisma.$transaction(async (transaction) => {
+            await admitOperation(
+              transaction,
+              "WORKTREE_MOVE",
+              moveId,
+              moveResources,
+              moveId,
+            );
+            return createMove(transaction);
+          })
+        : await createMove(prisma);
     } catch (error) {
       const concurrent = await prisma.worktreeMove.findUnique({
         where: {
@@ -3081,6 +3234,7 @@ export class WorktreesService {
           finishedAt: new Date(),
         },
       });
+      if (modernMove) await releaseOperation("WORKTREE_MOVE", move.id, move.id);
       throw error;
     }
   }
@@ -3123,6 +3277,8 @@ export class WorktreesService {
       where: { id },
       data: { status: "CANCELLED", finishedAt: new Date() },
     });
+    if (move.operationHolderId)
+      await releaseOperation("WORKTREE_MOVE", move.id, move.id);
     this.publish(move.sourceWorktreeId, move.sourceCodebaseId);
     return updated;
   }
@@ -3177,6 +3333,19 @@ export class WorktreesService {
                 mode:
                   worktree.codebase.agent.derivedDataLocationMode ?? "DEFAULT",
                 path: worktree.codebase.agent.derivedDataPath ?? null,
+                ...(capabilities(worktree.codebase.agent).includes(
+                  OPERATION_RESOURCES_CAPABILITY,
+                )
+                  ? {
+                      managedRoot: effectiveBuildsDirectory(
+                        worktree.codebase.agent,
+                      )
+                        ? managedDerivedDataRoot(
+                            effectiveBuildsDirectory(worktree.codebase.agent)!,
+                          )
+                        : null,
+                    }
+                  : {}),
               },
             }
           : {}),
@@ -3207,6 +3376,9 @@ export class WorktreesService {
       true,
     );
     const job = await this.createSerializedCodebaseJob({
+      resourceScheduling: capabilities(worktree.codebase.agent).includes(
+        OPERATION_RESOURCES_CAPABILITY,
+      ),
       agentId: worktree.codebase.agentId,
       codebaseId: worktree.codebaseId,
       worktreeId: worktree.id,
@@ -3298,7 +3470,11 @@ export class WorktreesService {
     } finally {
       const prisma = await getPrismaClient();
       await prisma.agentJob.deleteMany({
-        where: { id: job.id, visibility: "SYSTEM" },
+        where: {
+          AND: [SETTLED_AGENT_JOB_WHERE],
+          id: job.id,
+          visibility: "SYSTEM",
+        },
       });
     }
   }
@@ -3340,6 +3516,9 @@ export class WorktreesService {
     ]);
     return this.coalesceInspection(this.diffInspections, key, async () => {
       const job = await this.createSerializedCodebaseJob({
+        resourceScheduling: capabilities(worktree.codebase.agent).includes(
+          OPERATION_RESOURCES_CAPABILITY,
+        ),
         agentId: worktree.codebase.agentId,
         codebaseId: worktree.codebaseId,
         worktreeId: worktree.id,
@@ -3359,7 +3538,11 @@ export class WorktreesService {
       } finally {
         const prisma = await getPrismaClient();
         await prisma.agentJob.deleteMany({
-          where: { id: job.id, visibility: "SYSTEM" },
+          where: {
+            AND: [SETTLED_AGENT_JOB_WHERE],
+            id: job.id,
+            visibility: "SYSTEM",
+          },
         });
       }
     });
@@ -3384,6 +3567,9 @@ export class WorktreesService {
     const identity = this.payload(worktree);
     if (!identity.baseBranch) throw new Error("A base branch is required");
     const job = await this.createSerializedCodebaseJob({
+      resourceScheduling: capabilities(worktree.codebase.agent).includes(
+        OPERATION_RESOURCES_CAPABILITY,
+      ),
       agentId: worktree.codebase.agentId,
       codebaseId: worktree.codebaseId,
       worktreeId: worktree.id,
@@ -3407,7 +3593,11 @@ export class WorktreesService {
     } finally {
       const prisma = await getPrismaClient();
       await prisma.agentJob.deleteMany({
-        where: { id: job.id, visibility: "SYSTEM" },
+        where: {
+          AND: [SETTLED_AGENT_JOB_WHERE],
+          id: job.id,
+          visibility: "SYSTEM",
+        },
       });
     }
   }
@@ -3432,6 +3622,7 @@ export class WorktreesService {
     const worktree = await this.requireRunnable(
       id,
       WORKTREE_OPERATION_JOB_KIND,
+      operation === "OPEN_EDITOR",
     );
     const settings = await this.settings();
     const preparations = worktree.codebase.repository.preparations ?? [];
@@ -3518,18 +3709,24 @@ export class WorktreesService {
       id,
       WORKTREE_AUTO_SYNC_JOB_KIND,
     );
-    const prisma = await getPrismaClient();
-    const activeBuild = await prisma.agentJob.findFirst({
-      where: {
-        codebaseId: worktree.codebaseId,
-        kind: IOS_BUILD_JOB_KIND,
-        status: { in: ACTIVE_STATUSES },
-      },
-    });
-    // Builds hold the agent's codebase queue for their entire run. Defer sync
-    // before dispatch so it cannot appear to be running while waiting on a build.
-    if (activeBuild)
-      throw new CodebaseBusyError("A build is active for this codebase");
+    if (
+      !capabilities(worktree.codebase.agent).includes(
+        OPERATION_RESOURCES_CAPABILITY,
+      )
+    ) {
+      const prisma = await getPrismaClient();
+      const activeBuild = await prisma.agentJob.findFirst({
+        where: {
+          codebaseId: worktree.codebaseId,
+          kind: IOS_BUILD_JOB_KIND,
+          status: { in: ACTIVE_STATUSES },
+        },
+      });
+      if (activeBuild)
+        throw new CodebaseBusyError(
+          "A build is active for this codebase; update the agent for worktree-scoped concurrency",
+        );
+    }
     const payload = this.payload(worktree);
     if (
       mergeGuard &&
@@ -3596,6 +3793,9 @@ export class WorktreesService {
       true,
     );
     const job = await this.createSerializedCodebaseJob({
+      resourceScheduling: capabilities(worktree.codebase.agent).includes(
+        OPERATION_RESOURCES_CAPABILITY,
+      ),
       agentId: worktree.codebase.agentId,
       codebaseId: worktree.codebaseId,
       worktreeId: worktree.id,
@@ -3617,7 +3817,11 @@ export class WorktreesService {
     } finally {
       const prisma = await getPrismaClient();
       await prisma.agentJob.deleteMany({
-        where: { id: job.id, visibility: "SYSTEM" },
+        where: {
+          AND: [SETTLED_AGENT_JOB_WHERE],
+          id: job.id,
+          visibility: "SYSTEM",
+        },
       });
     }
   }
@@ -3639,6 +3843,9 @@ export class WorktreesService {
     ]);
     return this.coalesceInspection(this.gitStateInspections, key, async () => {
       const job = await this.createSerializedCodebaseJob({
+        resourceScheduling: capabilities(worktree.codebase.agent).includes(
+          OPERATION_RESOURCES_CAPABILITY,
+        ),
         agentId: worktree.codebase.agentId,
         codebaseId: worktree.codebaseId,
         worktreeId: worktree.id,
@@ -3660,7 +3867,11 @@ export class WorktreesService {
       } finally {
         const prisma = await getPrismaClient();
         await prisma.agentJob.deleteMany({
-          where: { id: job.id, visibility: "SYSTEM" },
+          where: {
+            AND: [SETTLED_AGENT_JOB_WHERE],
+            id: job.id,
+            visibility: "SYSTEM",
+          },
         });
       }
     });
@@ -3748,8 +3959,10 @@ export class WorktreesService {
   private async createSerializedCodebaseJob(
     input: Parameters<AgentControlService["createJob"]>[0] & {
       codebaseId: string;
+      resourceScheduling?: boolean;
     },
   ) {
+    if (input.resourceScheduling) return this.agentControl.createJob(input);
     const prisma = await getPrismaClient();
     const deadline = Date.now() + INTERACTIVE_TIMEOUT_MS;
     while (Date.now() < deadline) {
@@ -3822,7 +4035,12 @@ export class WorktreesService {
     if (!capabilities(worktree.codebase.agent).includes(capability)) {
       throw new Error("Agent must be updated to use worktrees");
     }
-    if (!allowBusy) {
+    if (
+      !allowBusy &&
+      !capabilities(worktree.codebase.agent).includes(
+        OPERATION_RESOURCES_CAPABILITY,
+      )
+    ) {
       const [active, activeMove] = await Promise.all([
         prisma.agentJob.findFirst({
           where: {
@@ -3870,6 +4088,8 @@ export class WorktreesService {
     ) {
       throw new Error("Agent must be updated to apply repository preparations");
     }
+    if (capabilities(codebase.agent).includes(OPERATION_RESOURCES_CAPABILITY))
+      return codebase;
     const [active, activeMove] = await Promise.all([
       prisma.agentJob.findFirst({
         where: { codebaseId: id, ...ACTIVE_CODEBASE_BLOCKING_JOB_WHERE },
@@ -3997,7 +4217,11 @@ export class WorktreesService {
     } finally {
       const prisma = await getPrismaClient();
       await prisma.agentJob.deleteMany({
-        where: { id: job.id, visibility: "SYSTEM" },
+        where: {
+          AND: [SETTLED_AGENT_JOB_WHERE],
+          id: job.id,
+          visibility: "SYSTEM",
+        },
       });
     }
   }
@@ -4069,6 +4293,13 @@ export class WorktreesService {
       data: { status: "FAILED", error, finishedAt: new Date() },
     });
     if (updated.count) this.publish(null, null);
+  }
+
+  private async releaseFinishedMoveResources(id: string) {
+    const prisma = await getPrismaClient();
+    const move = await prisma.worktreeMove.findUnique({ where: { id } });
+    if (move?.operationHolderId && !ACTIVE_MOVE_STATUSES.includes(move.status))
+      await releaseOperation("WORKTREE_MOVE", move.id, move.id);
   }
 
   private async createMoveCheckoutJob(
@@ -4200,6 +4431,7 @@ export class WorktreesService {
   private async projectMoveDestination(
     move: {
       id: string;
+      operationHolderId?: string | null;
       targetCodebaseId: string;
       targetWorktreeId: string | null;
       baseBranch: string;
@@ -4210,7 +4442,7 @@ export class WorktreesService {
     const prisma = await getPrismaClient();
     const codebase = await prisma.codebase.findUnique({
       where: { id: move.targetCodebaseId },
-      select: { localBranchesJson: true },
+      select: { localBranchesJson: true, agentId: true },
     });
     if (!codebase) throw new Error("Destination codebase no longer exists");
     const branches = new Set(parseBranches(codebase.localBranchesJson));
@@ -4221,6 +4453,9 @@ export class WorktreesService {
       await transaction.codebase.update({
         where: { id: move.targetCodebaseId },
         data: {
+          ...(move.operationHolderId
+            ? { worktreeInventoryObservedAt: new Date() }
+            : {}),
           localBranchesJson: JSON.stringify(
             [...branches].sort((first, second) => first.localeCompare(second)),
           ),
@@ -4270,6 +4505,48 @@ export class WorktreesService {
           item,
           projected.highlightColor,
         );
+      }
+      if (move.operationHolderId) {
+        const resource = worktreeOperationResource(
+          {
+            gitDirectory: item.gitDirectory,
+            codebaseId: move.targetCodebaseId,
+          },
+          codebase.agentId,
+          "WRITE",
+        );
+        const known = await transaction.operationResource.findFirst({
+          where: { holderId: move.operationHolderId, key: resource.key },
+        });
+        if (!known)
+          await transaction.operationResource.create({
+            data: {
+              id: randomUUID(),
+              holderId: move.operationHolderId,
+              ...resource,
+            },
+          });
+        const pathKey = `${codebase.agentId}:path:${item.folder}`;
+        const knownPath = await transaction.operationResource.findFirst({
+          where: {
+            holderId: move.operationHolderId,
+            kind: "PATH",
+            key: pathKey,
+          },
+        });
+        if (!knownPath)
+          await transaction.operationResource.create({
+            data: {
+              id: randomUUID(),
+              holderId: move.operationHolderId,
+              kind: "PATH",
+              key: pathKey,
+              path: item.folder,
+              mode: "WRITE",
+              agentId: codebase.agentId,
+              codebaseId: move.targetCodebaseId,
+            },
+          });
       }
       await transaction.worktreeMove.update({
         where: { id: move.id },
@@ -4322,6 +4599,19 @@ export class WorktreesService {
                   mode:
                     source.codebase.agent.derivedDataLocationMode ?? "DEFAULT",
                   path: source.codebase.agent.derivedDataPath ?? null,
+                  ...(capabilities(source.codebase.agent).includes(
+                    OPERATION_RESOURCES_CAPABILITY,
+                  )
+                    ? {
+                        managedRoot: effectiveBuildsDirectory(
+                          source.codebase.agent,
+                        )
+                          ? managedDerivedDataRoot(
+                              effectiveBuildsDirectory(source.codebase.agent)!,
+                            )
+                          : null,
+                      }
+                    : {}),
                 },
               }
             : {}),

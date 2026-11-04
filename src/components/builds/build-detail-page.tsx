@@ -84,7 +84,7 @@ import { RunBuildControls } from "./run-build-controls";
 import type { BuildLogChunk, BuildRecord, BuildReport } from "./types";
 
 const BUILD_DETAIL_FIELDS = `
-  id requestId jobId status action destinationType destination snapshot commandSummary artifactDirectory errorCode error outOfDate
+  id requestId jobId status action destinationType destination snapshot commandSummary artifactDirectory errorCode error outOfDate blockedReason
   createdAt startedAt finishedAt durationMs updatedAt
   worktree { id highlightColor }
   configuration {
@@ -709,6 +709,11 @@ export function BuildDetailPage({
             {build.errorCode ? `${build.errorCode}: ` : ""}
             {build.error}
           </AlertDescription>
+        </Alert>
+      )}
+      {build.status === "QUEUED" && build.blockedReason && (
+        <Alert>
+          <AlertDescription>{build.blockedReason}</AlertDescription>
         </Alert>
       )}
       <div

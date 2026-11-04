@@ -132,6 +132,37 @@ describe("BuildsService", () => {
     cachedArtifact.mockResolvedValue(null);
   });
 
+  test("updates the shared iOS project destination default and rejects non-device destinations", async () => {
+    const update = vi.fn().mockResolvedValue({ repositoryId: "repository-1" });
+    const stored = {
+      id: "project-1",
+      defaultDestinationType: "PHYSICAL_DEVICE",
+    };
+    getPrismaClient.mockResolvedValue({ codebaseProject: { update } });
+    const service = new BuildsService(control());
+    const project = vi
+      .spyOn(service, "repositoryProject")
+      .mockResolvedValue(stored as never);
+    const publish = vi.spyOn(agentEventBus, "publish");
+
+    await expect(
+      service.updateProject("project-1", "PHYSICAL_DEVICE"),
+    ).resolves.toEqual(stored);
+    expect(update).toHaveBeenCalledWith({
+      where: { id: "project-1", type: "IOS_APP" },
+      data: { defaultDestinationType: "PHYSICAL_DEVICE" },
+    });
+    expect(project).toHaveBeenCalledWith("repository-1");
+    expect(publish).toHaveBeenCalled();
+
+    update.mockClear();
+    await expect(service.updateProject("project-1", "HOST")).rejects.toThrow(
+      "SIMULATOR or PHYSICAL_DEVICE",
+    );
+    expect(update).not.toHaveBeenCalled();
+    publish.mockRestore();
+  });
+
   test("orders run agents and explains cross-agent eligibility", async () => {
     const agent = (
       id: string,
@@ -515,6 +546,8 @@ describe("BuildsService", () => {
         kind: IOS_BUILD_JOB_KIND,
         payload: expect.objectContaining({
           branch: "main",
+          derivedDataPath:
+            "/agent/repositories/Builds/.worktree-derived-data/worktree-1",
           destination: expect.objectContaining({
             id: "generic-ios-simulator",
             generic: true,
@@ -940,6 +973,7 @@ describe("BuildsService", () => {
               postBuildScript: null,
               timeoutSeconds: 60,
               failureBehavior: "FAIL_BUILD",
+              lockScope: "CODEBASE",
             },
           },
         ]),
@@ -1010,7 +1044,9 @@ describe("BuildsService", () => {
     expect(createInput.data.commandSummary).not.toContain("-workspace");
     expect(createInput.data.commandSummary).not.toContain("-scheme");
     expect(createInput.data.commandSummary).not.toContain("-configuration");
-    expect(createInput.data.commandSummary).not.toContain("derivedDataPath");
+    expect(createInput.data.commandSummary).toContain(
+      "-derivedDataPath /agent/repositories/Builds/.worktree-derived-data/worktree-1",
+    );
     const snapshot = JSON.parse(createInput.data.snapshotJson) as {
       configuration: {
         parse: { status: string };
@@ -1031,6 +1067,7 @@ describe("BuildsService", () => {
     expect(snapshot.scripts[0]?.preBuildScript).toBe(
       "console.log('snapshot source')",
     );
+    expect(snapshot.scripts[0]).toMatchObject({ lockScope: "CODEBASE" });
     expect(createInput.data.scriptExecutions.create[0]).toMatchObject({
       nameSnapshot: "Generate",
       sourceSnapshot: "console.log('snapshot source')",
@@ -2139,12 +2176,19 @@ describe("build workflow persistence", () => {
     expect(tx.buildScript.upsert.mock.calls[0][0].update).not.toHaveProperty(
       "iconKey",
     );
+    expect(tx.buildScript.upsert.mock.calls[0][0].update).not.toHaveProperty(
+      "lockScope",
+    );
     expect(tx.codebaseRepositoryBuildScript.deleteMany).not.toHaveBeenCalled();
     await service.saveScript({
       ...input,
       iconKey: "hammer",
+      lockScope: "AGENT",
       repositoryIds: ["repo-1"],
     });
+    expect(tx.buildScript.upsert.mock.calls.at(-1)![0].update.lockScope).toBe(
+      "AGENT",
+    );
     expect(tx.codebaseRepositoryBuildScript.create).toHaveBeenCalledWith({
       data: { repositoryId: "repo-1", scriptId: "script-1", position: 8 },
     });

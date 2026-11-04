@@ -5,10 +5,13 @@ import {
   mkdir,
   readFile,
   realpath,
+  rename,
   rm,
   writeFile,
 } from "node:fs/promises";
 import { dirname, isAbsolute, join, relative, resolve } from "node:path";
+import { randomUUID } from "node:crypto";
+import { withRepositoryMetadata } from "../repository-metadata.js";
 
 import type {
   WorktreePreparationAction,
@@ -244,6 +247,19 @@ async function reconcileExcludeFile(
   timeoutMs: number,
   signal: AbortSignal,
 ): Promise<void> {
+  return withRepositoryMetadata(
+    folder,
+    () => writeExcludeFile(folder, definitions, timeoutMs, signal),
+    signal,
+  );
+}
+
+async function writeExcludeFile(
+  folder: string,
+  definitions: WorktreePreparationDefinition[],
+  timeoutMs: number,
+  signal: AbortSignal,
+): Promise<void> {
   const path = await excludeFile(folder, timeoutMs, signal);
   let existing = "";
   try {
@@ -267,7 +283,13 @@ async function reconcileExcludeFile(
     : "";
   const next = [base, block].filter(Boolean).join("\n\n");
   await mkdir(dirname(path), { recursive: true });
-  await writeFile(path, next ? `${next}\n` : "", "utf8");
+  const temporary = `${path}.${randomUUID()}.tmp`;
+  try {
+    await writeFile(temporary, next ? `${next}\n` : "", "utf8");
+    await rename(temporary, path);
+  } finally {
+    await rm(temporary, { force: true });
+  }
 }
 
 function decodeContents(definition: WorktreePreparationDefinition): Buffer {

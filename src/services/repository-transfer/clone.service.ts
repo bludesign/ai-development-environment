@@ -1,3 +1,4 @@
+import { SETTLED_AGENT_JOB_WHERE } from "@/services/agent-control/job-cleanup";
 import { createHash, randomUUID } from "node:crypto";
 import { posix, win32 } from "node:path";
 
@@ -338,6 +339,7 @@ export class RepositoryCloneService {
       const prisma = await getPrismaClient();
       await prisma.agentJob.deleteMany({
         where: {
+          AND: [SETTLED_AGENT_JOB_WHERE],
           id: job.id,
           status: { in: [...terminal] },
           visibility: "SYSTEM",

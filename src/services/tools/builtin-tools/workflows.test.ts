@@ -360,6 +360,43 @@ describe("authoring tools", () => {
     );
   });
 
+  test.each(["validate_workflow", "add_workflow_step"])(
+    "%s retains connection diagnostic targets",
+    async (toolName) => {
+      const double = registry();
+      double.validateDraft.mockResolvedValueOnce({
+        valid: false,
+        diagnostics: [
+          {
+            severity: "ERROR",
+            code: "TRIGGER_CHOICE_HANDLE_UNKNOWN",
+            message: "A connection leaves a removed option",
+            triggerId: "manual",
+            edgeId: "edge-removed-choice",
+            path: "edges.2.sourceHandle",
+          },
+        ],
+      });
+
+      const result = await call(double.registry, toolName, {
+        workflowId: "wf-1",
+        ...(toolName === "add_workflow_step"
+          ? { kind: "NOTIFICATION_SEND" }
+          : {}),
+      });
+
+      expect(result.diagnostics).toContainEqual({
+        severity: "ERROR",
+        code: "TRIGGER_CHOICE_HANDLE_UNKNOWN",
+        message: "A connection leaves a removed option",
+        nodeId: null,
+        triggerId: "manual",
+        edgeId: "edge-removed-choice",
+        path: "edges.2.sourceHandle",
+      });
+    },
+  );
+
   test("connecting to a handle a step does not have fails loudly", async () => {
     const double = registry();
     const first = await call(double.registry, "add_workflow_step", {
