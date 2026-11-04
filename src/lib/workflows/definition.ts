@@ -2997,6 +2997,83 @@ function pathsOverlap(first: string, second: string): boolean {
   return pathCovers(first, second) || pathCovers(second, first);
 }
 
+type WorkflowExecutionCondition = ReadonlyMap<string, string>;
+
+/**
+ * Each condition describes one way a step can run. Keep alternatives through
+ * joins: "don't commit OR (commit AND clean)" is exclusive with "commit AND
+ * dirty", even though neither decision alone proves that exclusivity.
+ */
+function workflowExecutionConditions(
+  definition: WorkflowDefinition,
+  topological: readonly string[],
+): Map<string, WorkflowExecutionCondition[]> {
+  const conditions = new Map<string, WorkflowExecutionCondition[]>();
+  const decisions = new Map<string, ReadonlySet<string>>();
+  for (const trigger of definition.triggers) {
+    // The empty key cannot be a graph id; every run selects a single trigger.
+    conditions.set(trigger.id, [new Map([["", trigger.id]])]);
+    if (isChoiceTriggerKind(trigger.kind))
+      decisions.set(
+        trigger.id,
+        new Set(workflowTriggerChoices(trigger.config).map(({ key }) => key)),
+      );
+  }
+  for (const node of definition.nodes) {
+    if (node.kind === "CONTROL_IF")
+      decisions.set(node.id, new Set(["true", "false"]));
+  }
+  const incoming = new Map<string, WorkflowDefinition["edges"]>();
+  for (const edge of definition.edges) {
+    const edges = incoming.get(edge.target) ?? [];
+    edges.push(edge);
+    incoming.set(edge.target, edges);
+  }
+  const covers = (
+    left: WorkflowExecutionCondition,
+    right: WorkflowExecutionCondition,
+  ) => [...left].every(([id, choice]) => right.get(id) === choice);
+  for (const id of topological) {
+    let alternatives: WorkflowExecutionCondition[] = [];
+    paths: for (const edge of incoming.get(id) ?? []) {
+      for (const prior of conditions.get(edge.source) ?? [new Map()]) {
+        const next = new Map(prior);
+        if (decisions.get(edge.source)?.has(edge.sourceHandle)) {
+          if (
+            next.has(edge.source) &&
+            next.get(edge.source) !== edge.sourceHandle
+          )
+            continue;
+          next.set(edge.source, edge.sourceHandle);
+        }
+        if (alternatives.some((condition) => covers(condition, next))) continue;
+        alternatives = alternatives.filter(
+          (condition) => !covers(next, condition),
+        );
+        alternatives.push(next);
+        // Path counts can grow exponentially. Widen to unknown, rather than
+        // dropping paths and accidentally accepting a real write conflict.
+        if (alternatives.length > 64) {
+          alternatives = [new Map()];
+          break paths;
+        }
+      }
+    }
+    conditions.set(id, alternatives.length ? alternatives : [new Map()]);
+  }
+  return conditions;
+}
+
+function executionConditionsCompatible(
+  first: WorkflowExecutionCondition,
+  second: WorkflowExecutionCondition,
+): boolean {
+  for (const [id, choice] of first) {
+    if (second.has(id) && second.get(id) !== choice) return false;
+  }
+  return true;
+}
+
 function intersection(sets: Set<string>[]): Set<string> {
   if (!sets.length) return new Set();
   return new Set(
@@ -3626,6 +3703,10 @@ export function validateWorkflowDefinition(value: unknown): {
     });
   }
 
+  const executionConditions = workflowExecutionConditions(
+    definition,
+    topological,
+  );
   for (
     let firstIndex = 0;
     firstIndex < definition.nodes.length;
@@ -3660,6 +3741,11 @@ export function validateWorkflowDefinition(value: unknown): {
       if (
         firstWrites.some((left) =>
           secondWrites.some((right) => pathsOverlap(left, right)),
+        ) &&
+        (executionConditions.get(first.id) ?? [new Map()]).some((left) =>
+          (executionConditions.get(second.id) ?? [new Map()]).some((right) =>
+            executionConditionsCompatible(left, right),
+          ),
         )
       )
         diagnostics.push({

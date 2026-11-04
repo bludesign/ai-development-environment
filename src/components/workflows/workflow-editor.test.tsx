@@ -442,6 +442,137 @@ describe("workflow editor edge deletion", () => {
   });
 });
 
+describe("workflow editor validation", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    global.ResizeObserver = ResizeObserverMock;
+    canvas.selectedId = null;
+  });
+
+  function mockValidation(existing: boolean, failSave = false) {
+    const definition = emptyDefinition("Validation");
+    definition.nodes.push({
+      id: "session",
+      kind: "CONTROL_DELAY",
+      position: { x: 200, y: 100 },
+      config: {},
+      requiredPaths: [],
+      providedPaths: [],
+      retry: { maxAttempts: 1, strategy: "EXPONENTIAL", delaySeconds: 5 },
+      failurePolicy: "FAIL",
+    });
+    definition.edges.push({
+      id: "trigger-to-session",
+      source: "manual",
+      target: "session",
+      sourceHandle: "success",
+      targetHandle: "input",
+    });
+    const workflow = {
+      id: "workflow-1",
+      name: definition.name,
+      description: definition.description,
+      draftDefinition: definition,
+      activeVersionId: null,
+      enabled: false,
+      overlapPolicy: "QUEUE",
+      maxConcurrentRuns: 1,
+      archivedAt: null,
+      versionCount: 0,
+      runCount: 0,
+      createdAt: "2026-07-24T00:00:00.000Z",
+      updatedAt: "2026-07-24T00:00:00.000Z",
+    };
+
+    request.mockImplementation(async (query, variables) => {
+      if (
+        query.includes("workflowCatalog") ||
+        query.includes("query WorkflowEditorDefinition")
+      )
+        return {
+          workflowCatalog: {
+            schemaVersion: 1,
+            globalConcurrency: 1,
+            steps: [],
+            triggers: [],
+          },
+          workflow: existing ? workflow : null,
+        } as never;
+      if (query.includes("query ValidateWorkflow"))
+        return {
+          validateWorkflowDraft: { valid: true, diagnostics: [] },
+        } as never;
+      if (failSave) throw new Error("Unable to save draft.");
+      const input = (variables as { input: { definition: typeof definition } })
+        .input;
+      return {
+        [existing ? "saveWorkflowDraft" : "createWorkflow"]: {
+          ...workflow,
+          draftDefinition: input.definition,
+        },
+      } as never;
+    });
+  }
+
+  test.each([true, false])(
+    "saves the current canvas before validating an existing=%s workflow",
+    async (existing) => {
+      mockValidation(existing);
+      render(
+        <TooltipProvider>
+          <WorkflowEditor workflowId={existing ? "workflow-1" : null} />
+        </TooltipProvider>,
+      );
+      await screen.findByRole("button", { name: "Settings" });
+      if (existing)
+        fireEvent.click(
+          screen.getByRole("button", { name: "Remove test edge" }),
+        );
+      fireEvent.click(screen.getByRole("button", { name: "Settings" }));
+      fireEvent.change(screen.getByRole("textbox", { name: "Name" }), {
+        target: { value: "Updated canvas" },
+      });
+      fireEvent.click(screen.getByRole("button", { name: "Validate" }));
+
+      await screen.findByText("Validation passed.");
+      const saveIndex = request.mock.calls.findIndex(([query]) =>
+        query.includes(
+          existing ? "mutation SaveWorkflow" : "mutation CreateWorkflow",
+        ),
+      );
+      const validateIndex = request.mock.calls.findIndex(([query]) =>
+        query.includes("query ValidateWorkflow"),
+      );
+      expect(saveIndex).toBeGreaterThan(-1);
+      expect(validateIndex).toBeGreaterThan(saveIndex);
+      expect(request.mock.calls[saveIndex]?.[1]).toMatchObject({
+        input: { definition: { name: "Updated canvas", edges: [] } },
+      });
+      expect(request.mock.calls[validateIndex]?.[1]).toEqual({
+        id: "workflow-1",
+      });
+    },
+  );
+
+  test("does not validate a stale saved draft when saving the canvas fails", async () => {
+    mockValidation(true, true);
+    render(
+      <TooltipProvider>
+        <WorkflowEditor workflowId="workflow-1" />
+      </TooltipProvider>,
+    );
+    fireEvent.click(await screen.findByRole("button", { name: "Settings" }));
+    fireEvent.click(screen.getByRole("button", { name: "Validate" }));
+
+    await screen.findByText("Unable to save draft.");
+    expect(
+      request.mock.calls.some(([query]) =>
+        query.includes("query ValidateWorkflow"),
+      ),
+    ).toBe(false);
+  });
+});
+
 describe("workflow editor session data toggle", () => {
   beforeEach(() => {
     vi.clearAllMocks();

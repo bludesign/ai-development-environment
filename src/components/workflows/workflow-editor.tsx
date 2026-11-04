@@ -676,7 +676,7 @@ function WorkflowEditorInner({ workflowId }: { workflowId?: string | null }) {
     [setEdges],
   );
 
-  const save = async (): Promise<boolean> => {
+  const save = async (): Promise<WorkflowSummary | null> => {
     setSaving(true);
     setError(null);
     setNotice(null);
@@ -708,6 +708,7 @@ function WorkflowEditorInner({ workflowId }: { workflowId?: string | null }) {
         setWorkflow(data.saveWorkflowDraft);
         setDefinition(data.saveWorkflowDraft.draftDefinition);
         setNotice(t("saved"));
+        return data.saveWorkflowDraft;
       } else {
         const data = await controlPlaneRequest<{
           createWorkflow: WorkflowSummary;
@@ -736,21 +737,21 @@ function WorkflowEditorInner({ workflowId }: { workflowId?: string | null }) {
         setDefinition(data.createWorkflow.draftDefinition);
         setNotice(t("saved"));
         router.replace(`/dashboard/workflows/${data.createWorkflow.id}/edit`);
+        return data.createWorkflow;
       }
-      return true;
     } catch (value) {
       setError(value instanceof Error ? value.message : String(value));
-      return false;
+      return null;
     } finally {
       setSaving(false);
     }
   };
 
   const validate = async () => {
-    if (!workflow) {
-      await save();
-      return;
-    }
+    // Server validation reads the persisted draft. Save the current canvas
+    // first so diagnostics refer to the connections the author is looking at.
+    const saved = await save();
+    if (!saved) return;
     try {
       const data = await controlPlaneRequest<{
         validateWorkflowDraft: {
@@ -761,10 +762,13 @@ function WorkflowEditorInner({ workflowId }: { workflowId?: string | null }) {
         `query ValidateWorkflow($id: ID!) {
           validateWorkflowDraft(id: $id) { valid diagnostics { severity code message nodeId triggerId path } }
         }`,
-        { id: workflow.id },
+        { id: saved.id },
       );
       setDiagnostics(data.validateWorkflowDraft.diagnostics);
-      rebuildGraph(definition, data.validateWorkflowDraft.diagnostics);
+      rebuildGraph(
+        saved.draftDefinition,
+        data.validateWorkflowDraft.diagnostics,
+      );
       setNotice(
         data.validateWorkflowDraft.valid
           ? t("validationPassed")
