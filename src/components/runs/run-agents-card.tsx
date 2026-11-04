@@ -280,13 +280,13 @@ function RunAgentsContents({
         )}
         <Accordion
           onValueChange={(value) => {
+            const newlyExpanded = value.filter(
+              (id) => !expandedRef.current.includes(id),
+            );
             expandedRef.current = value;
             setExpanded(value);
-            for (const id of value) {
-              const transcript = transcriptsRef.current[id];
-              if (!transcript?.loaded && !transcript?.loading)
-                void loadMessages(id);
-            }
+            // Refresh reopened agents while preserving their cached history.
+            for (const id of newlyExpanded) void loadMessages(id);
           }}
           type="multiple"
           value={expanded}

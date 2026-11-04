@@ -128,7 +128,7 @@ describe("RunAgentsCard", () => {
     fireEvent.click(first);
     fireEvent.click(first);
     expect(screen.getByText("agent-1 activity")).toBeDefined();
-    expect(messageCalls()).toHaveLength(2);
+    expect(messageCalls()).toHaveLength(3);
     expect(messageCalls()[0]?.[1]).toEqual({
       runId: "run-1",
       subagentId: "agent-1",
@@ -192,6 +192,55 @@ describe("RunAgentsCard", () => {
         ([, variables]) => (variables as { subagentId: string }).subagentId,
       ),
     ).toEqual(["agent-1", "agent-1"]);
+  });
+
+  test("refreshes a cached transcript when reopened after completing while collapsed", async () => {
+    agents = [agent(1, { status: "RUNNING", finalOutput: null })];
+    const { rerender } = render(<RunAgentsCard refreshKey={0} runId="run-1" />);
+    fireEvent.click(
+      await screen.findByRole("button", { name: /Swift picker 1.*Running/ }),
+    );
+    expect(await screen.findByText("agent-1 activity")).toBeDefined();
+    fireEvent.click(screen.getByRole("button", { name: /Swift picker 1/ }));
+
+    agents = [agent(1, { messageCount: 4 })];
+    pages["agent-1:latest"] = {
+      events: [event("agent-1 activity"), event("agent-1 finished")],
+      nextCursor: null,
+    };
+    rerender(<RunAgentsCard refreshKey={1} runId="run-1" />);
+    const completed = await screen.findByRole("button", {
+      name: /Swift picker 1.*Completed/,
+    });
+    expect(completed.getAttribute("aria-expanded")).toBe("false");
+    expect(messageCalls()).toHaveLength(1);
+
+    fireEvent.click(completed);
+    expect(screen.getByText("agent-1 activity")).toBeDefined();
+    expect(await screen.findByText("agent-1 finished")).toBeDefined();
+    expect(messageCalls()).toHaveLength(2);
+  });
+
+  test("does not reload other expanded transcripts when an agent opens or closes", async () => {
+    agents = [agent(1), agent(2), agent(3)];
+    render(<RunAgentsCard refreshKey={0} runId="run-1" />);
+    fireEvent.click(
+      await screen.findByRole("button", { name: /Swift picker 1/ }),
+    );
+    expect(await screen.findByText("agent-1 activity")).toBeDefined();
+    fireEvent.click(screen.getByRole("button", { name: /Swift picker 2/ }));
+    expect(await screen.findByText("agent-2 activity")).toBeDefined();
+    fireEvent.click(screen.getByRole("button", { name: /Swift picker 2/ }));
+    fireEvent.click(screen.getByRole("button", { name: /Swift picker 3/ }));
+    expect(await screen.findByText("agent-3 activity")).toBeDefined();
+    fireEvent.click(screen.getByRole("button", { name: /Swift picker 3/ }));
+
+    expect(screen.getByText("agent-1 activity")).toBeDefined();
+    expect(
+      messageCalls().map(
+        ([, variables]) => (variables as { subagentId: string }).subagentId,
+      ),
+    ).toEqual(["agent-1", "agent-2", "agent-3"]);
   });
 
   test("fills a gap of more than one new page after reconnecting", async () => {
