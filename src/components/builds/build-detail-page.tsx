@@ -1111,7 +1111,9 @@ export function BuildDetailPage({
                         variant={
                           deployment.status === "FAILED"
                             ? "destructive"
-                            : "outline"
+                            : deployment.status === "SUCCEEDED"
+                              ? "success"
+                              : "outline"
                         }
                       >
                         {humanizeConstant(deployment.status)}
@@ -1178,7 +1180,11 @@ export function BuildDetailPage({
                     <div className="flex flex-col items-end gap-1">
                       <Badge
                         variant={
-                          entry.status === "FAILED" ? "destructive" : "outline"
+                          entry.status === "FAILED"
+                            ? "destructive"
+                            : entry.status === "SUCCEEDED"
+                              ? "success"
+                              : "outline"
                         }
                       >
                         {humanizeConstant(entry.status)}

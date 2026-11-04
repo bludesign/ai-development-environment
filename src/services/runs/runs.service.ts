@@ -35,6 +35,7 @@ import {
   normalizeRunSessionInfo,
   runMetadataRecord,
   type RunSessionInfo,
+  type RunSubagentSnapshot,
 } from "@ai-development-environment/agent-contract/runs";
 import {
   parseRunQuestionField,
@@ -48,6 +49,11 @@ import {
   cloneRunAttachments,
   removeRunAttachmentFiles,
 } from "./attachment-store";
+import {
+  projectClaudeSubagents,
+  subagentMessageEvents,
+  syncRunSubagents,
+} from "./subagents";
 
 const SOURCE_EXECUTION_COMMANDS = new Set([
   "START",
@@ -102,6 +108,8 @@ export type RunConfigurationInput = {
   worktreeConcurrencyLimit?: number | null;
   /** Internal owner used to admit steps launched by an exclusive workflow. */
   workflowRunId?: string | null;
+  /** Null inherits the owning workflow's current successful completion setting. */
+  completionNotificationsEnabled?: boolean | null;
 };
 
 export type SaveRunDraftInput = Omit<
@@ -113,6 +121,7 @@ export type SaveRunDraftInput = Omit<
   | "contextMode"
   | "worktreeConcurrencyLimit"
   | "workflowRunId"
+  | "completionNotificationsEnabled"
 > & { id?: string | null };
 
 export type RunEventInput = {
@@ -153,6 +162,7 @@ export type ImportedRunInput = {
   rawMetadata?: unknown;
   sessionInfo?: RunSessionInfo | null;
   events?: RunEventInput[] | null;
+  subagents?: RunSubagentSnapshot[] | null;
   usage?: Array<Parameters<RunsService["reportUsage"]>[3]> | null;
   estimatedCost?: number | null;
   pricingSource?: string | null;
@@ -895,6 +905,58 @@ export class RunsService {
     return descending ? rows.reverse() : rows;
   }
 
+  async subagents(runId: string) {
+    const prisma = await getPrismaClient();
+    const rows = await prisma.runSubagent.findMany({
+      where: { runId, attempt: { supersededAt: null } },
+      include: { _count: { select: { messages: true } } },
+      orderBy: [{ startedAt: "asc" }, { createdAt: "asc" }, { id: "asc" }],
+    });
+    return rows.map(({ _count, ...row }) => ({
+      ...row,
+      messageCount: _count.messages,
+    }));
+  }
+
+  async subagentMessages(input: {
+    runId: string;
+    subagentId: string;
+    before?: string | null;
+    first?: number | null;
+  }) {
+    const prisma = await getPrismaClient();
+    const subagent = await prisma.runSubagent.findFirst({
+      where: {
+        id: input.subagentId,
+        runId: input.runId,
+        attempt: { supersededAt: null },
+      },
+    });
+    if (!subagent) throw new Error("Subagent not found for this run");
+    if (input.before) {
+      const cursor = await prisma.runSubagentMessage.findFirst({
+        where: { id: input.before, subagentId: subagent.id },
+      });
+      if (!cursor) throw new Error("Subagent message cursor is invalid");
+    }
+    const first = Math.max(1, Math.min(input.first ?? 200, 500));
+    const messages = await prisma.runSubagentMessage.findMany({
+      where: { subagentId: subagent.id },
+      orderBy: [{ createdAt: "desc" }, { sequence: "desc" }, { id: "desc" }],
+      take: first + 1,
+      ...(input.before ? { cursor: { id: input.before }, skip: 1 } : {}),
+    });
+    return {
+      events: messages
+        .slice(0, first)
+        .reverse()
+        .flatMap((message) =>
+          subagentMessageEvents(message, input.runId, subagent.attemptId),
+        ),
+      nextCursor: messages.length > first ? messages[first - 1]!.id : null,
+    };
+  }
+
   async questions(input: {
     runId: string;
     first?: number | null;
@@ -1190,6 +1252,8 @@ export class RunsService {
             : null,
           worktreeConcurrencyLimit: concurrencyLimit,
           workflowRunId: input.workflowRunId ?? null,
+          completionNotificationsEnabled:
+            input.completionNotificationsEnabled ?? null,
           initialPrompt: prompt,
           sourcePlanId: sourcePlan?.id,
           sourcePlanNumber: sourcePlan?.displayNumber,
@@ -1258,6 +1322,7 @@ export class RunsService {
     mcpPresetIds: string[] = [],
     concurrencyLimit?: number | null,
     workflowRunId?: string | null,
+    completionNotificationsEnabled?: boolean | null,
   ) {
     const plan = await this.get(planId);
     if (!plan) throw new Error("Plan not found");
@@ -1280,6 +1345,7 @@ export class RunsService {
       mcpPresetIds,
       worktreeConcurrencyLimit: concurrencyLimit,
       workflowRunId,
+      completionNotificationsEnabled,
     });
   }
 
@@ -2052,6 +2118,9 @@ export class RunsService {
           model: batch.run.model,
           effort: batch.run.effort,
           webSearchEnabled: batch.run.webSearchEnabled,
+          workflowRunId: batch.run.workflowRunId,
+          completionNotificationsEnabled:
+            batch.run.completionNotificationsEnabled,
           worktreeConcurrencyLimit:
             batch.run.kind === "SESSION"
               ? batch.run.worktreeConcurrencyLimit
@@ -2555,6 +2624,14 @@ export class RunsService {
           });
         }
       }
+      if (run.provider === "CLAUDE" && attemptId) {
+        await projectClaudeSubagents(
+          transaction,
+          runId,
+          attemptId,
+          events.slice(0, 500).filter((event) => !existingIds.has(event.id)),
+        );
+      }
       return transaction.runEvent.findMany({
         where: { id: { in: eventRows.map((row) => row.id) } },
         orderBy: { sequence: "asc" },
@@ -2784,7 +2861,20 @@ export class RunsService {
     const result = await prisma.$transaction(async (transaction) => {
       const attempt = await transaction.runAttempt.findUnique({
         where: { id: attemptId },
-        include: { run: { include: { worktree: true } } },
+        include: {
+          run: {
+            include: {
+              worktree: true,
+              workflowRun: {
+                select: {
+                  workflow: {
+                    select: { completionNotificationsEnabled: true },
+                  },
+                },
+              },
+            },
+          },
+        },
       });
       if (!attempt || attempt.run.agentId !== agentId)
         throw new Error("Attempt not found");
@@ -2829,8 +2919,14 @@ export class RunsService {
               : input.phase === "RECOVERY_PAUSED"
                 ? "RUN_RECOVERY_PAUSED"
                 : null;
+      const completionNotificationsEnabled =
+        run.completionNotificationsEnabled ??
+        attempt.run.workflowRun?.workflow.completionNotificationsEnabled ??
+        true;
       const notification =
-        typeKey && this.notifications
+        typeKey &&
+        this.notifications &&
+        (typeKey !== "RUN_COMPLETED" || completionNotificationsEnabled)
           ? await this.notifications.recordInTransaction(transaction, {
               dedupeKey: `run:${run.id}:status:${persistedStatus}:${attempt.generation}`,
               typeKey,
@@ -3395,6 +3491,18 @@ export class RunsService {
         return "COMPLETED";
       })();
       if (existing) {
+        // Child histories are independent of managed root snapshots and their digests.
+        if (provider === "CLAUDE" && record.subagents?.length) {
+          const changed = await prisma.$transaction((transaction) =>
+            syncRunSubagents(
+              transaction,
+              existing.runId,
+              existing.id,
+              record.subagents!,
+            ),
+          );
+          if (changed) publishRun(existing.runId);
+        }
         if (existing.run.origin === "IMPORTED") {
           const collision =
             existing.run.kind === "SESSION" && importedStatus === "IN_PROGRESS"
@@ -3601,6 +3709,11 @@ export class RunsService {
           },
         },
       });
+      if (provider === "CLAUDE" && record.subagents?.length) {
+        await prisma.$transaction((transaction) =>
+          syncRunSubagents(transaction, id, attemptId, record.subagents!),
+        );
+      }
       if (historyDigest) {
         await this.importHistory(id, attemptId, record);
         await prisma.runAttempt.update({

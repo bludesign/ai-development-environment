@@ -842,13 +842,7 @@ export function GitLabMergeRequestDetailPage({
         )}
       >
         <div className="min-w-0">
-          <Link
-            className="text-sm text-muted-foreground hover:underline"
-            href="/gitlab/merge-requests"
-          >
-            {t("backToMergeRequests")}
-          </Link>
-          <h1 className="mt-2 text-2xl font-semibold break-words tracking-tight [overflow-wrap:anywhere]">
+          <h1 className="text-2xl font-semibold break-words tracking-tight [overflow-wrap:anywhere]">
             {mr.title}
           </h1>
           <p className="mt-1 text-sm text-muted-foreground">
@@ -971,7 +965,7 @@ export function GitLabMergeRequestDetailPage({
                 {t("reviewers")}
               </p>
               {mr.reviewers.length ? (
-                <div className="space-y-2">
+                <div className="flex flex-col items-start gap-2">
                   {mr.reviewers.map((user) => (
                     <GitLabPerson key={user.id} user={user} />
                   ))}

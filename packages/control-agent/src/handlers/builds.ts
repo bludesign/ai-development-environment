@@ -52,7 +52,9 @@ import {
   type BuildExportSettings,
   type BuildJobPayload,
   type BuildLogChunk,
+  type BuildProgressReport,
   type BuildReportKind,
+  type BuildScriptExecutionProgress,
   type BuildSigningRequirement,
   type BuildSourceSnapshot,
 } from "@ai-development-environment/agent-contract/builds";
@@ -1706,7 +1708,7 @@ export function classifyFailure(output: string): string {
 type ScriptExecutionResult = {
   phase: "PRE_BUILD" | "POST_BUILD";
   position: number;
-  status: string;
+  status: Exclude<BuildScriptExecutionProgress["status"], "RUNNING">;
   exitCode: number | null;
   durationMs: number;
   causedBuildFailure: boolean;
@@ -3017,15 +3019,42 @@ const runIosBuildWithPaths: AgentJobHandler = async (
     let errorCode: string | null = null;
     let error: string | null = null;
     let failBuild = false;
-    try {
-      await context?.reportBuildProgress?.({
-        buildId: input.buildId,
-        status: "PREPARING",
-        startedAt: new Date().toISOString(),
+    let progressStatus: BuildProgressReport["status"] = "PREPARING";
+    const reportProgress = async (
+      progress: Omit<BuildProgressReport, "buildId">,
+    ) => {
+      try {
+        await context?.reportBuildProgress?.({
+          ...progress,
+          buildId: input.buildId,
+        });
+      } catch (progressError) {
+        logger.emit(progress.status, "SYSTEM", cleanError(progressError));
+      }
+    };
+    const runReportedHook = async (options: Parameters<typeof runHook>[0]) => {
+      await reportProgress({
+        status: progressStatus,
+        scriptExecutions: [
+          {
+            phase: options.phase,
+            position: options.script.position,
+            status: "RUNNING",
+          },
+        ],
       });
-    } catch (progressError) {
-      logger.emit("PREPARING", "SYSTEM", cleanError(progressError));
-    }
+      const execution = await runHook(options);
+      scriptExecutions.push(execution);
+      await reportProgress({
+        status: progressStatus,
+        scriptExecutions: [execution],
+      });
+      return execution;
+    };
+    await reportProgress({
+      status: "PREPARING",
+      startedAt: new Date().toISOString(),
+    });
     logger.emit("PREPARING", "SYSTEM", `Preparing build in ${folder}`);
     try {
       await onLog({
@@ -3064,7 +3093,7 @@ const runIosBuildWithPaths: AgentJobHandler = async (
         (a, b) => a.position - b.position,
       )) {
         if (!script.preBuildScript) continue;
-        const execution = await runHook({
+        const execution = await runReportedHook({
           input,
           folder,
           script,
@@ -3075,7 +3104,6 @@ const runIosBuildWithPaths: AgentJobHandler = async (
           logger,
           signal,
         });
-        scriptExecutions.push(execution);
         if (execution.causedBuildFailure) {
           failBuild = true;
           errorCode = "SCRIPT_FAILED";
@@ -3114,14 +3142,11 @@ const runIosBuildWithPaths: AgentJobHandler = async (
     const finishBuild = async () => {
       try {
         if (!failBuild && !signal.aborted) {
-          try {
-            await context?.reportBuildProgress?.({
-              buildId: input.buildId,
-              status: "RUNNING",
-            });
-          } catch (progressError) {
-            logger.emit("RUNNING", "SYSTEM", cleanError(progressError));
-          }
+          progressStatus = "RUNNING";
+          await reportProgress({
+            status: progressStatus,
+            scriptExecutions: [...scriptExecutions],
+          });
           if (input.worktreeCoverage) {
             try {
               coverageChanges = await snapshotCoverageChanges(
@@ -3160,7 +3185,7 @@ const runIosBuildWithPaths: AgentJobHandler = async (
         )) {
           if (!script.postBuildScript) continue;
           try {
-            const execution = await runHook({
+            const execution = await runReportedHook({
               input,
               folder,
               script,
@@ -3185,7 +3210,6 @@ const runIosBuildWithPaths: AgentJobHandler = async (
               logger,
               signal: postSignal,
             });
-            scriptExecutions.push(execution);
             if (execution.causedBuildFailure && !signal.aborted) {
               failBuild = true;
               errorCode ??= "SCRIPT_FAILED";

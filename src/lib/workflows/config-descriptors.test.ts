@@ -128,6 +128,32 @@ describe("workflow config descriptors", () => {
     }
   });
 
+  test("offers inherited completion notifications on all run-producing steps", () => {
+    for (const kind of [
+      "RUN_CREATE_PLAN",
+      "RUN_CREATE_SESSION",
+      "RUN_PLAY_PLAN",
+      "RUN_FOLLOW_UP",
+    ]) {
+      expect(
+        getConfigDescriptor(kind, "step")?.fields.find(
+          ({ key }) => key === "completionNotifications",
+        ),
+      ).toMatchObject({
+        control: "enum",
+        default: "INHERIT",
+        options: {
+          kind: "static",
+          options: [
+            { value: "INHERIT", label: "Use workflow setting" },
+            { value: "ENABLED", label: "Enabled" },
+            { value: "DISABLED", label: "Disabled" },
+          ],
+        },
+      });
+    }
+  });
+
   test("uses kind-specific worktree concurrency defaults for AI runs", () => {
     const concurrency = (kind: string) =>
       getConfigDescriptor(kind, "step")?.fields.find(

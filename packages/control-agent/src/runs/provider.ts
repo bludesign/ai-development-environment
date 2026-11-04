@@ -1,6 +1,11 @@
 import type { RunRecord } from "../graphql-client.js";
 import type { RunQuestionField } from "@ai-development-environment/agent-contract/run-forms";
-import type { RunSessionInfo } from "@ai-development-environment/agent-contract/runs";
+import type {
+  RunSessionInfo,
+  RunSubagentSnapshot,
+} from "@ai-development-environment/agent-contract/runs";
+
+export type ProviderSubagentSnapshot = RunSubagentSnapshot;
 
 export type StagedAttachment = {
   id: string;
@@ -138,6 +143,7 @@ export type ProviderImportedRun = {
   updatedAt?: string;
   rawMetadata?: unknown;
   sessionInfo?: RunSessionInfo;
+  subagents?: ProviderSubagentSnapshot[];
   events?: Array<ProviderEvent & { id: string; sequence: number }>;
   usage?: ProviderUsage[];
   estimatedCost?: number;

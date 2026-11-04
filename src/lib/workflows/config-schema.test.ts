@@ -124,6 +124,24 @@ describe("configSchemaForKind", () => {
     }
   });
 
+  test("run-producing steps advertise completion notification overrides", () => {
+    for (const kind of [
+      "RUN_CREATE_PLAN",
+      "RUN_CREATE_SESSION",
+      "RUN_PLAY_PLAN",
+      "RUN_FOLLOW_UP",
+    ]) {
+      expect(properties(kind, "step").completionNotifications).toMatchObject({
+        type: "string",
+        enum: ["INHERIT", "ENABLED", "DISABLED"],
+        default: "INHERIT",
+      });
+      expect(configSchemaForKind(kind, "step").required ?? []).not.toContain(
+        "completionNotifications",
+      );
+    }
+  });
+
   test("run-producing steps constrain worktree concurrency limits", () => {
     const expectedDefaults: Record<string, number | undefined> = {
       RUN_CREATE_PLAN: 0,

@@ -161,6 +161,9 @@ describe("RunDetailPage", () => {
           ],
         } as never;
       }
+      if (operation.includes("query RunSubagents")) {
+        return { runSubagents: [] } as never;
+      }
       if (operation.includes("query RunActivity")) {
         const args = variables as
           | {

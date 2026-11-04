@@ -127,7 +127,7 @@ function EnumField({ field, value, onChange }: FieldProps) {
       </FieldLabel>
       <Select
         onValueChange={(next) => onChange(next)}
-        value={asString(literalValue(value))}
+        value={asString(literalValue(value) ?? field.default)}
       >
         <SelectTrigger className="w-full" id={id}>
           <SelectValue placeholder={t("selectPlaceholder")} />

@@ -3081,6 +3081,25 @@ function agentRunId(context: WorkflowExecutionContext): string {
   );
 }
 
+function runCompletionNotifications(
+  context: WorkflowExecutionContext,
+): boolean | null {
+  switch (context.node.config.completionNotifications) {
+    case undefined:
+    case null:
+    case "INHERIT":
+      return null;
+    case "ENABLED":
+      return true;
+    case "DISABLED":
+      return false;
+    default:
+      throw new Error(
+        "Successful completion notifications must be INHERIT, ENABLED, or DISABLED",
+      );
+  }
+}
+
 function createRunInput(
   context: WorkflowExecutionContext,
   kind: "PLAN" | "SESSION",
@@ -3111,6 +3130,7 @@ function createRunInput(
         ? configuredConcurrencyLimit
         : undefined,
     workflowRunId: context.run.id,
+    completionNotificationsEnabled: runCompletionNotifications(context),
   };
 }
 
@@ -3140,6 +3160,7 @@ function registerRunAdapters(
         ? configuredConcurrencyLimit
         : undefined,
       context.run.id,
+      runCompletionNotifications(context),
     );
     if (!run) throw new Error("Plan could not be played");
     return runResult(context, run as unknown as Record<string, unknown>, true);

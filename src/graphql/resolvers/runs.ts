@@ -66,6 +66,11 @@ export const createRunResolvers = (service: RunsService) => ({
     supersededAt: (value: { supersededAt?: Date | null }) =>
       iso(value.supersededAt),
   },
+  RunSubagent: {
+    startedAt: (value: { startedAt?: Date | null }) => iso(value.startedAt),
+    finishedAt: (value: { finishedAt?: Date | null }) => iso(value.finishedAt),
+    updatedAt: (value: { updatedAt: Date }) => value.updatedAt.toISOString(),
+  },
   RunToolCall: {
     input: (value: { inputJson?: string | null }) => json(value.inputJson),
     output: (value: { outputJson?: string | null }) => json(value.outputJson),
@@ -162,6 +167,22 @@ export const createRunResolvers = (service: RunsService) => ({
     ) => {
       requireControlPlane(context);
       return service.events(args);
+    },
+    runSubagents: (
+      _root: unknown,
+      { runId }: { runId: string },
+      context: GraphQLContext,
+    ) => {
+      requireControlPlane(context);
+      return service.subagents(runId);
+    },
+    runSubagentMessages: (
+      _root: unknown,
+      args: Parameters<RunsService["subagentMessages"]>[0],
+      context: GraphQLContext,
+    ) => {
+      requireControlPlane(context);
+      return service.subagentMessages(args);
     },
     runQuestionBatches: (
       _root: unknown,

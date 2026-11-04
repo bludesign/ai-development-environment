@@ -5,6 +5,7 @@ import { describe, expect, test } from "vitest";
 
 import {
   claudeImportedHistory,
+  claudeSubagentSnapshot,
   claudeTranscriptMetadata,
   readClaudeTranscript,
 } from "./claude-import.js";
@@ -32,6 +33,120 @@ function assistant(
 }
 
 describe("Claude imported history", () => {
+  test("uses the latest task run when a resumed agent's old lifecycle arrives late", () => {
+    const snapshot = claudeSubagentSnapshot(
+      "child",
+      [
+        {
+          ...assistant("old-result", "old-answer", [
+            { type: "text", text: "Previous answer" },
+          ]),
+          message: {
+            content: [{ type: "text", text: "Previous answer" }],
+            stop_reason: "end_turn",
+          },
+        },
+      ],
+      [
+        {
+          type: "system",
+          subtype: "task_notification",
+          task_id: "child",
+          run_id: "run-a",
+          status: "completed",
+        },
+        {
+          type: "system",
+          subtype: "task_started",
+          task_id: "child",
+          run_id: "run-b",
+        },
+        {
+          type: "system",
+          subtype: "task_notification",
+          task_id: "child",
+          run_id: "run-a",
+          status: "failed",
+        },
+      ],
+    );
+    expect(snapshot).toMatchObject({
+      nativeId: "child",
+      nativeRunId: "run-b",
+      status: "RUNNING",
+    });
+    expect(snapshot).not.toHaveProperty("finishedAt");
+    expect(snapshot).not.toHaveProperty("finalOutput");
+  });
+  test("normalizes a nested child conversation without transcript attachments or repeated messages", () => {
+    const child = claudeSubagentSnapshot(
+      "child-1",
+      [
+        {
+          type: "user",
+          uuid: "prompt",
+          parent_tool_use_id: "spawn",
+          parent_agent_id: "parent-1",
+          timestamp: "2026-11-04T16:00:00Z",
+          message: { content: "Find a file" },
+        },
+        {
+          type: "attachment",
+          uuid: "attachment",
+          message: { content: "Provider context" },
+        },
+        assistant("part-1", "answer", [{ type: "text", text: "Found it." }]),
+        assistant("part-1", "answer", [{ type: "text", text: "Found it." }]),
+        {
+          ...assistant("part-2", "answer", [
+            { type: "text", text: "Tests pass." },
+          ]),
+          message: {
+            id: "answer",
+            content: [{ type: "text", text: "Tests pass." }],
+            stop_reason: "end_turn",
+          },
+        },
+      ],
+      [
+        {
+          raw: {
+            type: "assistant",
+            message: {
+              content: [
+                {
+                  type: "tool_use",
+                  id: "spawn",
+                  name: "Agent",
+                  input: {
+                    description: "Inspect sources",
+                    subagent_type: "Explore",
+                  },
+                },
+              ],
+            },
+          },
+        },
+      ],
+    );
+    expect(child).toMatchObject({
+      nativeId: "child-1",
+      parentNativeId: "parent-1",
+      toolUseId: "spawn",
+      label: "Inspect sources",
+      agentType: "Explore",
+      prompt: "Find a file",
+      finalOutput: "Found it.\n\nTests pass.",
+      status: "COMPLETED",
+      transcriptStatus: "AVAILABLE",
+    });
+    expect(child.messages).toHaveLength(3);
+    expect(
+      child.messages?.every(
+        ({ raw }) => (raw as { agent_id: string }).agent_id === "child-1",
+      ),
+    ).toBe(true);
+  });
   test("retains every tool block, original prompts and final assistant text", () => {
     const user = {
       type: "user",

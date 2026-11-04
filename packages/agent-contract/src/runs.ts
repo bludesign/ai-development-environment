@@ -34,6 +34,28 @@ export type RunSessionInfo = {
   workingDirectory?: string | null;
 };
 
+/** A provider child conversation, kept separate from the owning run's journal. */
+export type RunSubagentSnapshot = {
+  nativeId: string;
+  nativeRunId?: string;
+  parentNativeId?: string;
+  toolUseId?: string;
+  label?: string;
+  agentType?: string;
+  status?: string;
+  prompt?: string;
+  finalOutput?: string;
+  startedAt?: string;
+  finishedAt?: string;
+  transcriptStatus: "AVAILABLE" | "PARTIAL" | "UNAVAILABLE";
+  transcriptError?: string;
+  messages?: Array<{
+    nativeId: string;
+    raw: unknown;
+    createdAt?: string;
+  }>;
+};
+
 /** Accept old JSON metadata as well as the objects received from agents. */
 export function runMetadataRecord(value: unknown): Record<string, unknown> {
   if (typeof value === "string") {

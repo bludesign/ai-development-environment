@@ -4,6 +4,7 @@ import { createInterface } from "node:readline";
 import {
   asRecord,
   type ProviderImportedRun,
+  type ProviderSubagentSnapshot,
   type ProviderUsage,
 } from "./provider.js";
 
@@ -43,6 +44,119 @@ function timestamp(value: unknown): string | undefined {
   return date && Number.isFinite(date.getTime())
     ? date.toISOString()
     : undefined;
+}
+
+/** Normalize only conversation messages; SDK history excludes transcript attachments. */
+export function claudeSubagentSnapshot(
+  nativeId: string,
+  values: unknown[],
+  metadataValues: unknown[] = [],
+  options: Pick<
+    ProviderSubagentSnapshot,
+    "transcriptStatus" | "transcriptError"
+  > = { transcriptStatus: "AVAILABLE" },
+): ProviderSubagentSnapshot {
+  const messages = new Map<string, Record<string, unknown>>();
+  for (const value of values) {
+    const record = asRecord(value);
+    if (
+      (record.type === "user" || record.type === "assistant") &&
+      typeof record.uuid === "string"
+    )
+      messages.set(record.uuid, { ...record, agent_id: nativeId });
+  }
+  const records = [...messages.values()];
+  const toolUseId = records
+    .map((record) => record.parent_tool_use_id)
+    .find((value): value is string => typeof value === "string" && !!value);
+  const parentNativeId = records
+    .map((record) => record.parent_agent_id)
+    .find((value): value is string => typeof value === "string" && !!value);
+  let label: string | undefined;
+  let agentType: string | undefined;
+  let status: string | undefined;
+  let nativeRunId: string | undefined;
+  for (const value of metadataValues) {
+    const envelope = asRecord(value);
+    const record = envelope.raw ? asRecord(envelope.raw) : envelope;
+    const content = asRecord(record.message).content;
+    for (const candidate of Array.isArray(content) ? content : []) {
+      const block = asRecord(candidate);
+      if (
+        block.type === "tool_use" &&
+        block.id === toolUseId &&
+        (block.name === "Agent" || block.name === "Task")
+      ) {
+        const input = asRecord(block.input);
+        if (typeof input.description === "string") label = input.description;
+        if (typeof input.subagent_type === "string")
+          agentType = input.subagent_type;
+      }
+    }
+    if (record.task_id !== nativeId) continue;
+    if (typeof record.description === "string") label ??= record.description;
+    if (typeof record.subagent_type === "string")
+      agentType = record.subagent_type;
+    const runId = typeof record.run_id === "string" ? record.run_id : undefined;
+    if (nativeRunId && (!runId || runId < nativeRunId)) continue;
+    if (runId && runId !== nativeRunId) {
+      nativeRunId = runId;
+      status = undefined;
+    }
+    const state =
+      record.status ??
+      asRecord(record.patch).status ??
+      (record.subtype === "task_started" || record.subtype === "task_progress"
+        ? "RUNNING"
+        : undefined);
+    if (typeof state === "string") status = state.toUpperCase();
+  }
+  const prompt = records
+    .filter((record) => record.type === "user")
+    .map((record) => textBlocks(asRecord(record.message).content))
+    .find(Boolean);
+  const replies = new Map<string, Map<string, string>>();
+  let finalReplyId: string | undefined;
+  for (const record of records) {
+    if (record.type !== "assistant") continue;
+    const message = asRecord(record.message);
+    const reply = textBlocks(message.content);
+    if (reply) {
+      const replyId = String(message.id ?? record.uuid);
+      const parts = replies.get(replyId) ?? new Map<string, string>();
+      parts.set(String(record.uuid), reply);
+      replies.set(replyId, parts);
+      finalReplyId = replyId;
+    }
+  }
+  const last = records.at(-1);
+  const finished =
+    options.transcriptStatus === "AVAILABLE" &&
+    status !== "RUNNING" &&
+    status !== "PAUSED" &&
+    last?.type === "assistant" &&
+    asRecord(last.message).stop_reason === "end_turn";
+  return {
+    nativeId,
+    ...(nativeRunId ? { nativeRunId } : {}),
+    ...(parentNativeId ? { parentNativeId } : {}),
+    ...(toolUseId ? { toolUseId } : {}),
+    ...(label ? { label } : {}),
+    ...(agentType ? { agentType } : {}),
+    ...(status || finished ? { status: status ?? "COMPLETED" } : {}),
+    ...(prompt ? { prompt } : {}),
+    ...(finalReplyId && status !== "RUNNING" && status !== "PAUSED"
+      ? { finalOutput: [...replies.get(finalReplyId)!.values()].join("\n\n") }
+      : {}),
+    startedAt: timestamp(records[0]?.timestamp),
+    ...(finished ? { finishedAt: timestamp(last?.timestamp) } : {}),
+    ...options,
+    messages: records.map((record) => ({
+      nativeId: String(record.uuid),
+      raw: record,
+      createdAt: timestamp(record.timestamp),
+    })),
+  };
 }
 
 /** Claude repeats a request's usage on multiple content blocks: count each message id once. */

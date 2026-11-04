@@ -201,6 +201,7 @@ import {
 
 import {
   AGENT_CHANGED_TOPIC,
+  WORKTREE_CHANGED_TOPIC,
   agentEventBus,
   agentEventsTopic,
   agentJobChangedTopic,
@@ -556,10 +557,20 @@ function publishAgent(agent: unknown): void {
 
 function publishJob(job: {
   id: string;
+  worktreeId?: string | null;
+  codebaseId?: string | null;
   ccusageCollectionId?: string | null;
   buildDataCollectionId?: string | null;
 }): void {
   agentEventBus.publish(agentJobChangedTopic(job.id), { agentJobChanged: job });
+  if (job.worktreeId || job.codebaseId) {
+    agentEventBus.publish(WORKTREE_CHANGED_TOPIC, {
+      worktreeOverviewChanged: {
+        worktreeId: job.worktreeId ?? null,
+        codebaseId: job.codebaseId ?? null,
+      },
+    });
+  }
   if (job.ccusageCollectionId) {
     agentEventBus.publish(
       ccusageCollectionChangedTopic(job.ccusageCollectionId),
@@ -1122,6 +1133,19 @@ export class AgentControlService {
     return prisma.agentJob.findUnique({ where: { id } });
   }
 
+  async getJobCommandName(job: {
+    id: string;
+    kind: string;
+  }): Promise<string | null> {
+    if (job.kind !== COMMAND_RUN_JOB_KIND) return null;
+    const prisma = await getPrismaClient();
+    const attempt = await prisma.commandRunAttempt.findUnique({
+      where: { agentJobId: job.id },
+      select: { run: { select: { snapshotName: true } } },
+    });
+    return attempt?.run.snapshotName ?? null;
+  }
+
   async createJob(input: {
     agentId: string;
     kind: string;
@@ -1658,12 +1682,14 @@ export class AgentControlService {
           executionToken ??
             (job.executionToken ? undefined : `legacy:${jobId}`),
         );
-        if (updated.executionToken)
-          return prisma.agentJob.update({
-            where: { id: jobId },
-            data: { executionToken: null },
-          });
-        return updated;
+        const acknowledged = updated.executionToken
+          ? await prisma.agentJob.update({
+              where: { id: jobId },
+              data: { executionToken: null },
+            })
+          : updated;
+        publishJob(acknowledged);
+        return acknowledged;
       }
       throw new Error(`Job cannot be completed from status ${updated.status}`);
     }

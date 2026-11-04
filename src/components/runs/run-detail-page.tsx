@@ -120,6 +120,7 @@ import { AttachmentPicker } from "./attachment-picker";
 import { MarkdownActions, MarkdownView } from "./markdown-view";
 import { RunWorktreeCards } from "./run-worktree-cards";
 import { RunInfoCard } from "./run-info-card";
+import { RunAgentsCard } from "./run-agents-card";
 import {
   ModelEffortPicker,
   type ProviderCatalogEntry,
@@ -658,6 +659,7 @@ export function RunDetailPage({
       : undefined,
   );
   const [events, setEvents] = useState<RunEventView[]>([]);
+  const [agentsRefreshKey, setAgentsRefreshKey] = useState(0);
   const [search, setSearch] = useState("");
   const latestSearch = useRef(search);
   useEffect(() => {
@@ -1004,6 +1006,7 @@ export function RunDetailPage({
           if (next) {
             ++detailRevision.current;
             setRun(next);
+            setAgentsRefreshKey((current) => current + 1);
           }
         },
         error: () => undefined,
@@ -1575,6 +1578,10 @@ export function RunDetailPage({
           )}
         </CardContent>
       </Card>
+
+      {run.provider === "CLAUDE" && (
+        <RunAgentsCard refreshKey={agentsRefreshKey} runId={runId} />
+      )}
 
       <Card className="gap-0 overflow-hidden py-0">
         <CardHeader className="border-b py-3">

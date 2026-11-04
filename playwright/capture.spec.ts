@@ -120,6 +120,52 @@ test.describe("app screenshots", () => {
       if (route.scrollTo) {
         await scrollToLazyTarget(page, route.scrollTo);
       }
+      if (route.sessionAgents) {
+        const agents = page.getByTestId("run-agents-card");
+        for (const label of [
+          "Build the command palette",
+          "Add keyboard navigation",
+        ]) {
+          const trigger = agents.getByRole("button", {
+            name: new RegExp(`^${label}`),
+          });
+          await trigger.click();
+          await expect(trigger).toHaveAttribute("aria-expanded", "true");
+        }
+        await expect(agents.getByRole("table")).toHaveCount(2);
+        await expect(
+          agents.getByRole("status", { name: "Loading agent session" }),
+        ).toHaveCount(0);
+        await expect(
+          agents.locator('[data-slot="card-title"] svg'),
+        ).toHaveCount(0);
+        await agents.evaluate((element) => {
+          for (const animation of element.getAnimations({ subtree: true })) {
+            if (animation.effect?.getTiming().iterations !== Infinity)
+              animation.finish();
+          }
+        });
+        await waitForVisualSettle(page);
+        // Keep the normal width while fitting both expanded sessions and the
+        // remaining compact rows inside the shell's scrolling viewport.
+        const bounds = await agents.boundingBox();
+        const viewport = page.viewportSize()!;
+        if (bounds && bounds.height > viewport.height - 120) {
+          await page.setViewportSize({
+            width: viewport.width,
+            height: Math.ceil(bounds.height) + 120,
+          });
+        }
+        await agents.evaluate((element) =>
+          element.scrollIntoView({ behavior: "instant", block: "start" }),
+        );
+        const finalRow = await agents
+          .getByRole("button", { name: /^Verify search tests/ })
+          .boundingBox();
+        expect(finalRow!.y + finalRow!.height).toBeLessThan(
+          page.viewportSize()!.height,
+        );
+      }
       if (route.reviewerCapture)
         await openReviewerCapture(page, route.reviewerCapture);
       if (route.jiraProjectSettings) await openJiraProjectSettings(page);

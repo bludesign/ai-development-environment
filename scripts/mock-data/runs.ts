@@ -1,6 +1,7 @@
 import type { PrismaClient } from "../../src/generated/prisma/client";
 
 import { displayNumbers, ids } from "./ids";
+import { seedRunSubagents } from "./run-subagents";
 import { daysAgo, hoursAgo, minutesAgo } from "./time";
 
 /**
@@ -1120,6 +1121,8 @@ export async function seedRuns(prisma: PrismaClient): Promise<void> {
       },
     },
   });
+
+  await seedRunSubagents(prisma);
 
   // In-progress session on another worktree.
   await prisma.agentRun.create({

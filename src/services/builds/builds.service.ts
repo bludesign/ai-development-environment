@@ -39,6 +39,7 @@ import {
   type BuildAction,
   type BuildAdvancedSettings,
   type BuildDestination,
+  type BuildProgressReport,
   type BuildReportKind,
   type BuildSigningRequirement,
   type BuildSourceKind,
@@ -3042,39 +3043,90 @@ export class BuildsService {
     return this.getBuild(id);
   }
 
-  async reportProgress(
-    agentId: string,
-    input: {
-      buildId: string;
-      status: string;
-      startedAt?: string | null;
-      errorCode?: string | null;
-      error?: string | null;
-    },
-  ) {
+  async reportProgress(agentId: string, input: BuildProgressReport) {
     if (!["PREPARING", "RUNNING"].includes(input.status)) {
       throw new Error("Build progress status is invalid");
     }
+    const executions = input.scriptExecutions ?? [];
+    if (
+      !Array.isArray(executions) ||
+      executions.some(
+        (execution) =>
+          !execution ||
+          !["PRE_BUILD", "POST_BUILD"].includes(execution.phase) ||
+          !Number.isInteger(execution.position) ||
+          execution.position < 0 ||
+          ![
+            "RUNNING",
+            "SUCCEEDED",
+            "FAILED",
+            "TIMED_OUT",
+            "CANCELLED",
+          ].includes(execution.status),
+      )
+    ) {
+      throw new Error("Build script execution progress is invalid");
+    }
     const prisma = await getPrismaClient();
-    const build = await prisma.build.findUnique({
-      where: { id: input.buildId },
-    });
-    if (!build || build.agentId !== agentId)
-      throw new Error("Build not found for agent");
-    if (!ACTIVE_BUILD_STATUSES.includes(build.status)) return build;
-    const updated = await prisma.build.update({
-      where: { id: input.buildId },
-      data: {
-        status: input.status,
-        startedAt:
-          build.startedAt ??
-          (input.startedAt ? new Date(input.startedAt) : new Date()),
-        errorCode: input.errorCode ?? undefined,
-        error: input.error ?? undefined,
+    const { build, changed } = await prisma.$transaction(
+      async (transaction) => {
+        const build = await transaction.build.findUnique({
+          where: { id: input.buildId },
+        });
+        if (!build || build.agentId !== agentId)
+          throw new Error("Build not found for agent");
+        if (!ACTIVE_BUILD_STATUSES.includes(build.status)) {
+          return { build, changed: false };
+        }
+        for (const execution of executions) {
+          const existing = await transaction.buildScriptExecution.findUnique({
+            where: {
+              buildId_phase_position: {
+                buildId: input.buildId,
+                phase: execution.phase,
+                position: execution.position,
+              },
+            },
+            select: { id: true },
+          });
+          if (!existing) throw new Error("Build script execution not found");
+        }
+        for (const execution of executions) {
+          await transaction.buildScriptExecution.updateMany({
+            where: {
+              buildId: input.buildId,
+              phase: execution.phase,
+              position: execution.position,
+              // Replayed progress must not overwrite an already completed hook.
+              status: { in: ["PENDING", "RUNNING"] },
+            },
+            data: {
+              status: execution.status,
+              exitCode: execution.exitCode,
+              durationMs: execution.durationMs,
+              causedBuildFailure: execution.causedBuildFailure ?? undefined,
+              outputRelativePath: execution.outputRelativePath,
+              error: execution.error,
+            },
+          });
+        }
+        const updated = await transaction.build.update({
+          where: { id: input.buildId },
+          data: {
+            // A delayed pre-build report can still carry useful script results.
+            status: build.status === "RUNNING" ? "RUNNING" : input.status,
+            startedAt:
+              build.startedAt ??
+              (input.startedAt ? new Date(input.startedAt) : new Date()),
+            errorCode: input.errorCode ?? undefined,
+            error: input.error ?? undefined,
+          },
+        });
+        return { build: updated, changed: true };
       },
-    });
-    this.publish(input.buildId);
-    return updated;
+    );
+    if (changed) this.publish(input.buildId);
+    return build;
   }
 
   async appendLogChunks(

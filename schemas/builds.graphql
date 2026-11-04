@@ -817,6 +817,26 @@ input ExportBuildArchiveInput {
   requestId: ID!
 }
 
+"A live update for an existing script execution in a build."
+input BuildScriptExecutionProgressInput {
+  "Script phase: PRE_BUILD or POST_BUILD."
+  phase: String!
+  "Zero-based position of the script in the build snapshot."
+  position: Int!
+  "Execution status: RUNNING, SUCCEEDED, FAILED, TIMED_OUT, or CANCELLED."
+  status: String!
+  "Exit code once execution finishes, if available."
+  exitCode: Int
+  "Execution duration in milliseconds, if available."
+  durationMs: Int
+  "Whether this script failure caused the build to fail."
+  causedBuildFailure: Boolean
+  "Relative path to the script output within the build artifact directory."
+  outputRelativePath: String
+  "Error reported by the script, if any."
+  error: String
+}
+
 "Input values for build progress."
 input BuildProgressInput {
   "Identifier of the build to use."
@@ -829,6 +849,8 @@ input BuildProgressInput {
   errorCode: String
   "The error to use for the request."
   error: String
+  "Live updates for script executions already present in this build."
+  scriptExecutions: [BuildScriptExecutionProgressInput!]
 }
 
 "Input values for build log chunk."

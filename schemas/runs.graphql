@@ -802,12 +802,102 @@ input ImportedRunInput {
   sessionInfo: RunSessionInfoInput
   "Complete stored activity snapshot; omitted when history is unavailable."
   events: [RunEventInput!]
+  "Provider child sessions, synchronized independently from root activity."
+  subagents: [RunSubagentSnapshotInput!]
   "Token usage totals grouped by the model actually recorded in the transcript."
   usage: [RunUsageInput!]
   "Total cost reported by the provider for this session, when available."
   estimatedCost: Float
   "Source of the reported session cost."
   pricingSource: String
+}
+
+"A provider-spawned agent within one run attempt."
+type RunSubagent {
+  "Stable identifier of this child session."
+  id: ID!
+  "Identifier of the owning run."
+  runId: ID!
+  "Identifier of the owning run attempt."
+  attemptId: ID!
+  "Provider identifier of the child agent."
+  nativeId: String!
+  "Provider identifier of its parent agent, when nested."
+  parentNativeId: String
+  "Provider tool call that spawned the agent."
+  toolUseId: String
+  "Human-readable task description."
+  label: String!
+  "Provider agent type, when known."
+  agentType: String
+  "Observed execution status, or UNKNOWN."
+  status: String!
+  "Initial task given to this agent."
+  prompt: String
+  "Final response produced by this agent."
+  finalOutput: String
+  "Time this agent started, when known."
+  startedAt: String
+  "Time this agent finished, when known."
+  finishedAt: String
+  "AVAILABLE, PARTIAL, or UNAVAILABLE transcript coverage."
+  transcriptStatus: String!
+  "Transcript collection error, when available."
+  transcriptError: String
+  "Number of stored provider messages."
+  messageCount: Int!
+  "Time this agent's stored session last changed."
+  updatedAt: String!
+}
+
+"A chronological page of agent activity derived from stored provider messages."
+type RunSubagentMessagePage {
+  "Activity entries for this page, including tools and results."
+  events: [RunEvent!]!
+  "Cursor for the next older page, or null when all messages are loaded."
+  nextCursor: ID
+}
+
+"A complete user or assistant message in a provider child transcript."
+input RunSubagentMessageInput {
+  "Native message UUID, used for idempotent synchronization."
+  nativeId: String!
+  "Provider user or assistant envelope and its content blocks."
+  raw: JSON!
+  "Native timestamp of this message, when known."
+  createdAt: String
+}
+
+"An agent-reported snapshot of one provider child session."
+input RunSubagentSnapshotInput {
+  "Provider identifier of this child agent."
+  nativeId: String!
+  "Ordered provider execution identifier; changes when the same child task resumes."
+  nativeRunId: String
+  "Provider identifier of its parent agent, when nested."
+  parentNativeId: String
+  "Tool call that spawned the agent."
+  toolUseId: String
+  "Human-readable task description."
+  label: String
+  "Provider agent type, when known."
+  agentType: String
+  "Observed execution status, when known."
+  status: String
+  "Initial task given to the agent."
+  prompt: String
+  "Final response produced by the agent."
+  finalOutput: String
+  "Time this agent started, when known."
+  startedAt: String
+  "Time this agent finished, when known."
+  finishedAt: String
+  "AVAILABLE, PARTIAL, or UNAVAILABLE transcript coverage."
+  transcriptStatus: String!
+  "Transcript collection error, when available."
+  transcriptError: String
+  "Stored provider messages; omitted when collection failed."
+  messages: [RunSubagentMessageInput!]
 }
 
 """
@@ -845,6 +935,19 @@ extend type Query {
   ): AgentRunPage!
   "Returns an agent run, or null when it cannot be found."
   agentRun("Identifier of the resource to return or affect." id: ID!): AgentRun
+  "Returns agent summaries independently of the main Activity page and search."
+  runSubagents("Identifier of the owning run." runId: ID!): [RunSubagent!]!
+  "Returns the newest stored child messages, or a page preceding the given cursor."
+  runSubagentMessages(
+    "Identifier of the owning run."
+    runId: ID!
+    "Identifier of the child session."
+    subagentId: ID!
+    "Cursor for an older page from this same child session."
+    before: ID
+    "Maximum number of provider messages to return."
+    first: Int = 200
+  ): RunSubagentMessagePage!
   "Returns run events."
   runEvents(
     "Identifier of the run."

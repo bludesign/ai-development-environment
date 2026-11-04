@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, test, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 
 const getPrismaClient = vi.hoisted(() => vi.fn());
 vi.mock("@/data/prisma-client", () => ({ getPrismaClient }));
@@ -651,7 +651,7 @@ describe("BuildsService", () => {
     },
   );
 
-  test("captures the pre-hook code state and restores the final worktree state on completion", async () => {
+  test("reconciles hook results and code state at completion without live progress reports", async () => {
     let completeBuild:
       | ((job: {
           id: string;
@@ -662,6 +662,16 @@ describe("BuildsService", () => {
       | undefined;
     const buildUpdate = vi.fn();
     const worktreeUpdate = vi.fn().mockResolvedValue({ count: 1 });
+    const finalScriptResult = {
+      phase: "PRE_BUILD",
+      position: 0,
+      status: "FAILED",
+      exitCode: 1,
+      durationMs: 125,
+      causedBuildFailure: false,
+      outputRelativePath: "hooks/pre/000-setup.log",
+      error: "Optional hook failed",
+    };
     const transaction = {
       build: { update: buildUpdate },
       worktree: { updateMany: worktreeUpdate },
@@ -698,7 +708,7 @@ describe("BuildsService", () => {
         finalStateHash: "state-after-post-hooks",
         codeStateObservedAt: "2026-07-18T20:00:00.000Z",
         artifacts: [],
-        scriptExecutions: [],
+        scriptExecutions: [finalScriptResult],
       }),
       error: null,
     });
@@ -711,6 +721,17 @@ describe("BuildsService", () => {
         }),
       }),
     );
+    expect(transaction.buildScriptExecution.updateMany).toHaveBeenCalledWith({
+      where: { buildId: "build-1", phase: "PRE_BUILD", position: 0 },
+      data: {
+        status: "FAILED",
+        exitCode: 1,
+        durationMs: 125,
+        causedBuildFailure: false,
+        outputRelativePath: "hooks/pre/000-setup.log",
+        error: "Optional hook failed",
+      },
+    });
     expect(worktreeUpdate).toHaveBeenCalledWith({
       where: {
         id: "worktree-1",
@@ -2206,6 +2227,336 @@ describe("build workflow persistence", () => {
       service.saveScript({ ...input, repositoryIds: ["missing"] }),
     ).rejects.toThrow("Repository not found");
   });
+});
+
+describe("live build script progress", () => {
+  type ProgressInput = Parameters<BuildsService["reportProgress"]>[1];
+  type Execution = {
+    id: string;
+    buildId: string;
+    phase: string;
+    position: number;
+    status: string;
+    exitCode: number | null;
+    durationMs: number | null;
+    causedBuildFailure: boolean;
+    outputRelativePath: string | null;
+    error: string | null;
+  };
+
+  function fixture() {
+    let state = {
+      build: {
+        id: "build-1",
+        agentId: "agent-1",
+        status: "PREPARING",
+        startedAt: null as Date | null,
+        errorCode: null as string | null,
+        error: null as string | null,
+      },
+      executions: ["PRE_BUILD", "POST_BUILD"].map((phase): Execution => ({
+        id: phase,
+        buildId: "build-1",
+        phase,
+        position: 0,
+        status: "PENDING",
+        exitCode: null,
+        durationMs: null,
+        causedBuildFailure: false,
+        outputRelativePath: null,
+        error: null,
+      })),
+    };
+    let draft = structuredClone(state);
+    const events: string[] = [];
+    const publishedStates: (typeof state)[] = [];
+    const buildUpdate = vi.fn(async ({ data }) => {
+      Object.assign(
+        draft.build,
+        Object.fromEntries(
+          Object.entries(data).filter(([, value]) => value !== undefined),
+        ),
+      );
+      return { ...draft.build };
+    });
+    const scriptFindUnique = vi.fn(async ({ where }) => {
+      const key = where.buildId_phase_position;
+      return (
+        draft.executions.find(
+          (row) =>
+            row.buildId === key.buildId &&
+            row.phase === key.phase &&
+            row.position === key.position,
+        ) ?? null
+      );
+    });
+    const scriptUpdateMany = vi.fn(async ({ where, data }) => {
+      let count = 0;
+      for (const row of draft.executions) {
+        if (
+          row.buildId === where.buildId &&
+          row.phase === where.phase &&
+          row.position === where.position &&
+          (!where.status || where.status.in.includes(row.status))
+        ) {
+          Object.assign(
+            row,
+            Object.fromEntries(
+              Object.entries(data).filter(([, value]) => value !== undefined),
+            ),
+          );
+          count += 1;
+        }
+      }
+      return { count };
+    });
+    const transaction = {
+      build: {
+        findUnique: vi.fn(async () => ({ ...draft.build })),
+        update: buildUpdate,
+      },
+      buildScriptExecution: {
+        findUnique: scriptFindUnique,
+        updateMany: scriptUpdateMany,
+      },
+    };
+    getPrismaClient.mockResolvedValue({
+      $transaction: vi.fn(async (callback) => {
+        draft = structuredClone(state);
+        events.push("begin");
+        const result = await callback(transaction);
+        state = draft;
+        events.push("commit");
+        return result;
+      }),
+    });
+    const publish = vi
+      .spyOn(agentEventBus, "publish")
+      .mockImplementation((topic) => {
+        if (topic === buildTopic("build-1")) {
+          events.push("publish");
+          publishedStates.push(structuredClone(state));
+        }
+      });
+    return {
+      service: new BuildsService(control()),
+      get state() {
+        return state;
+      },
+      events,
+      publishedStates,
+      publish,
+      buildUpdate,
+      scriptFindUnique,
+      scriptUpdateMany,
+    };
+  }
+
+  beforeEach(() => vi.clearAllMocks());
+  afterEach(() => vi.restoreAllMocks());
+
+  test("publishes completed pre-build results together with RUNNING only after commit", async () => {
+    const f = fixture();
+    const completed = {
+      phase: "PRE_BUILD" as const,
+      position: 0,
+      status: "SUCCEEDED" as const,
+      exitCode: 0,
+      durationMs: 125,
+      causedBuildFailure: false,
+      outputRelativePath: "hooks/pre/000-setup.log",
+      error: null,
+    };
+
+    await f.service.reportProgress("agent-1", {
+      buildId: "build-1",
+      status: "RUNNING",
+      scriptExecutions: [completed],
+    });
+
+    expect(f.state.build.status).toBe("RUNNING");
+    expect(f.state.executions[0]).toMatchObject(completed);
+    expect(f.state.executions[1].status).toBe("PENDING");
+    expect(f.events).toEqual(["begin", "commit", "publish"]);
+    expect(f.publishedStates).toEqual([f.state]);
+    expect(f.scriptFindUnique).toHaveBeenCalledWith({
+      where: {
+        buildId_phase_position: {
+          buildId: "build-1",
+          phase: "PRE_BUILD",
+          position: 0,
+        },
+      },
+      select: { id: true },
+    });
+  });
+
+  test.each(["SUCCEEDED", "FAILED", "TIMED_OUT", "CANCELLED"] as const)(
+    "retains terminal %s results when a late RUNNING report or replay arrives",
+    async (status) => {
+      const f = fixture();
+      const result = {
+        phase: "PRE_BUILD" as const,
+        position: 0,
+        status,
+        exitCode: status === "SUCCEEDED" ? 0 : 1,
+        durationMs: 125,
+        error: status === "SUCCEEDED" ? null : "Hook did not succeed",
+      };
+      await f.service.reportProgress("agent-1", {
+        buildId: "build-1",
+        status: "RUNNING",
+        scriptExecutions: [result],
+      });
+      await f.service.reportProgress("agent-1", {
+        buildId: "build-1",
+        status: "PREPARING",
+        scriptExecutions: [{ ...result, status: "RUNNING", error: null }],
+      });
+      await f.service.reportProgress("agent-1", {
+        buildId: "build-1",
+        status: "RUNNING",
+        scriptExecutions: [{ ...result, durationMs: 999 }],
+      });
+
+      expect(f.state.build.status).toBe("RUNNING");
+      expect(f.state.executions[0]).toMatchObject(result);
+    },
+  );
+
+  test("updates a post-build script while compilation results remain running", async () => {
+    const f = fixture();
+    f.state.build.status = "RUNNING";
+    await f.service.reportProgress("agent-1", {
+      buildId: "build-1",
+      status: "RUNNING",
+      scriptExecutions: [
+        { phase: "POST_BUILD", position: 0, status: "RUNNING" },
+      ],
+    });
+    expect(f.state.executions[1].status).toBe("RUNNING");
+    await f.service.reportProgress("agent-1", {
+      buildId: "build-1",
+      status: "RUNNING",
+      scriptExecutions: [
+        {
+          phase: "POST_BUILD",
+          position: 0,
+          status: "FAILED",
+          exitCode: 1,
+          causedBuildFailure: false,
+          error: "Cleanup failed but the build may continue",
+        },
+      ],
+    });
+    expect(f.state.build.status).toBe("RUNNING");
+    expect(f.state.executions[1]).toMatchObject({
+      status: "FAILED",
+      causedBuildFailure: false,
+      exitCode: 1,
+    });
+  });
+
+  test.each([undefined, null])(
+    "accepts legacy progress without script updates (%s)",
+    async (scriptExecutions) => {
+      const f = fixture();
+      const startedAt = "2026-11-04T15:00:00.000Z";
+      await f.service.reportProgress("agent-1", {
+        buildId: "build-1",
+        status: "PREPARING",
+        startedAt,
+        scriptExecutions,
+      });
+
+      expect(f.state.build.startedAt).toEqual(new Date(startedAt));
+      expect(f.scriptFindUnique).not.toHaveBeenCalled();
+      expect(f.scriptUpdateMany).not.toHaveBeenCalled();
+      expect(f.events).toEqual(["begin", "commit", "publish"]);
+    },
+  );
+
+  test("rejects another agent's report before changing any execution", async () => {
+    const f = fixture();
+    await expect(
+      f.service.reportProgress("other-agent", {
+        buildId: "build-1",
+        status: "RUNNING",
+        scriptExecutions: [
+          { phase: "PRE_BUILD", position: 0, status: "SUCCEEDED" },
+        ],
+      }),
+    ).rejects.toThrow("Build not found for agent");
+    expect(f.state.build.status).toBe("PREPARING");
+    expect(f.scriptUpdateMany).not.toHaveBeenCalled();
+    expect(f.buildUpdate).not.toHaveBeenCalled();
+    expect(f.publish).not.toHaveBeenCalled();
+  });
+
+  test.each([
+    { phase: "INVALID", position: 0, status: "RUNNING" },
+    { phase: "PRE_BUILD", position: -1, status: "RUNNING" },
+    { phase: "PRE_BUILD", position: 0.5, status: "RUNNING" },
+    { phase: "PRE_BUILD", position: 0, status: "PENDING" },
+  ])(
+    "rejects invalid execution progress %j without publishing",
+    async (execution) => {
+      const f = fixture();
+      await expect(
+        f.service.reportProgress("agent-1", {
+          buildId: "build-1",
+          status: "RUNNING",
+          scriptExecutions: [execution],
+        } as ProgressInput),
+      ).rejects.toThrow("Build script execution progress is invalid");
+      expect(f.state.build.status).toBe("PREPARING");
+      expect(f.scriptUpdateMany).not.toHaveBeenCalled();
+      expect(f.buildUpdate).not.toHaveBeenCalled();
+      expect(f.publish).not.toHaveBeenCalled();
+    },
+  );
+
+  test("rejects a batch containing an unknown execution before any writes", async () => {
+    const f = fixture();
+    await expect(
+      f.service.reportProgress("agent-1", {
+        buildId: "build-1",
+        status: "RUNNING",
+        scriptExecutions: [
+          { phase: "PRE_BUILD", position: 0, status: "SUCCEEDED" },
+          { phase: "PRE_BUILD", position: 1, status: "SUCCEEDED" },
+        ],
+      }),
+    ).rejects.toThrow("Build script execution not found");
+    expect(f.state.executions.map((row) => row.status)).toEqual([
+      "PENDING",
+      "PENDING",
+    ]);
+    expect(f.state.build.status).toBe("PREPARING");
+    expect(f.scriptUpdateMany).not.toHaveBeenCalled();
+    expect(f.buildUpdate).not.toHaveBeenCalled();
+    expect(f.publish).not.toHaveBeenCalled();
+  });
+
+  test.each(["SUCCEEDED", "FAILED", "CANCELLED"])(
+    "ignores late progress for a completed %s build",
+    async (status) => {
+      const f = fixture();
+      f.state.build.status = status;
+      await f.service.reportProgress("agent-1", {
+        buildId: "build-1",
+        status: "RUNNING",
+        scriptExecutions: [
+          { phase: "PRE_BUILD", position: 0, status: "RUNNING" },
+        ],
+      });
+
+      expect(f.state.build.status).toBe(status);
+      expect(f.scriptUpdateMany).not.toHaveBeenCalled();
+      expect(f.buildUpdate).not.toHaveBeenCalled();
+      expect(f.publish).not.toHaveBeenCalled();
+    },
+  );
 });
 
 vi.mock("@/services/server-urls/server-urls.service", () => ({

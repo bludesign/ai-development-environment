@@ -699,149 +699,158 @@ describe("run command persistence", () => {
     });
   });
 
-  test("creates a linked replacement Session for an edited answer", async () => {
-    let createdRun: Record<string, unknown> | null = null;
-    let createdRunId = "";
-    const sourceRun = {
-      id: "run-old",
-      kind: "SESSION",
-      displayNumber: 12,
-      agentId: "agent-1",
-      worktreeId: "worktree-1",
-      origin: "MANAGED",
-      provider: "CODEX",
-      jiraIssueKey: "AIDE-66",
-      repositoryName: "aide",
-      branch: "feature/questions",
-      model: "gpt-5.6-sol",
-      effort: "high",
-      webSearchEnabled: true,
-      worktreeConcurrencyLimit: 2,
-      inputs: [{ kind: "INITIAL", prompt: "Build the feature" }],
-      events: [
-        {
-          sequence: 1,
-          type: "QUESTION",
-          summary: "Choose an API",
-          detailMarkdown: null,
-          createdAt: new Date("2026-07-23T12:00:00.000Z"),
-        },
-      ],
-    };
-    const batch = {
-      id: "batch-1",
-      runId: sourceRun.id,
-      run: sourceRun,
-      status: "ANSWERED",
-      revisionPreparedAt: new Date(),
-      eventSequence: 1,
-      createdAt: new Date("2026-07-23T12:00:01.000Z"),
-      checkpoint: { id: "checkpoint-1", refName: "refs/aide/checkpoint" },
-      questions: [{ prompt: "Which API should we use?" }],
-      answerRevisions: [{ id: "revision-0" }],
-    };
-    const findLease = vi
-      .fn()
-      .mockResolvedValueOnce({
-        runId: sourceRun.id,
-        worktreeId: sourceRun.worktreeId,
-      })
-      .mockResolvedValueOnce(null);
-    const updateRun = vi.fn();
-    const transaction = {
-      runQuestionBatch: { findUnique: vi.fn().mockResolvedValue(batch) },
-      worktreeRunLease: {
-        findUnique: findLease,
-        update: vi.fn().mockResolvedValue({ id: "lease-1" }),
-        create: vi.fn().mockResolvedValue({ id: "lease-1" }),
-        deleteMany: vi.fn().mockResolvedValue({ count: 0 }),
-        count: vi.fn().mockResolvedValue(0),
-      },
-      worktreeAdmissionLane: { upsert: vi.fn().mockResolvedValue({}) },
-      worktreeRunConcurrencyLane: { upsert: vi.fn().mockResolvedValue({}) },
-      worktreeWorkflowLease: {
-        deleteMany: vi.fn().mockResolvedValue({ count: 0 }),
-        findUnique: vi.fn().mockResolvedValue(null),
-      },
-      workflowRun: { findFirst: vi.fn().mockResolvedValue(null) },
-      runAnswerRevision: {
-        create: vi.fn().mockResolvedValue({ id: "revision-1" }),
-      },
-      runNumberSequence: {
-        upsert: vi.fn().mockResolvedValue({ nextValue: 43 }),
-      },
-      agentRun: {
-        create: vi.fn(async ({ data }: { data: Record<string, unknown> }) => {
-          createdRun = data;
-          createdRunId = String(data.id);
-          return data;
-        }),
-        update: updateRun,
-        findMany: vi.fn().mockResolvedValue([]),
-        updateMany: vi.fn().mockResolvedValue({ count: 0 }),
-      },
-      runCommand: {
-        findFirst: vi.fn().mockResolvedValue(null),
-        create: vi.fn(async ({ data }: { data: Record<string, unknown> }) => ({
-          ...data,
-          run: createdRun,
-        })),
-      },
-    };
-    const prisma = {
-      $transaction: vi.fn(
-        async (callback: (value: typeof transaction) => unknown) =>
-          callback(transaction),
-      ),
-      agentRun: {
-        findUnique: vi.fn(async () => createdRun),
-      },
-    };
-    mocks.getPrismaClient.mockResolvedValue(prisma);
-
-    const replacement = await new RunsService().reviseAnswer(
-      "batch-1",
-      { "question-1": { answers: ["GraphQL"] } },
-      false,
-    );
-
-    expect(replacement).toEqual(createdRun);
-    expect(createdRun).toEqual(
-      expect.objectContaining({
+  test.each([null, false, true])(
+    "creates a linked replacement Session retaining completion notification override %s",
+    async (completionNotificationsEnabled) => {
+      let createdRun: Record<string, unknown> | null = null;
+      let createdRunId = "";
+      const sourceRun = {
+        id: "run-old",
         kind: "SESSION",
-        displayNumber: 42,
-        parentRunId: sourceRun.id,
-        parentRunNumber: sourceRun.displayNumber,
-        followUpMode: "ANSWER_REVISION",
-        phase: "ANSWER_REVISION_QUEUED",
+        displayNumber: 12,
+        agentId: "agent-1",
+        worktreeId: "worktree-1",
+        origin: "MANAGED",
+        provider: "CODEX",
+        jiraIssueKey: "AIDE-66",
+        repositoryName: "aide",
+        branch: "feature/questions",
+        model: "gpt-5.6-sol",
+        effort: "high",
+        webSearchEnabled: true,
         worktreeConcurrencyLimit: 2,
-      }),
-    );
-    expect(updateRun).toHaveBeenCalledWith({
-      where: { id: sourceRun.id },
-      data: {
-        status: "CANCELLED",
-        phase: "SUPERSEDED_BY_ANSWER_REVISION",
-        finishedAt: expect.any(Date),
-      },
-    });
-    expect(transaction.worktreeRunLease.update).toHaveBeenCalledWith({
-      where: { runId: sourceRun.id },
-      data: {
-        runId: createdRunId,
-        purpose: "RUN",
-        reservationKey: null,
-        acquiredAt: expect.any(Date),
-      },
-    });
-    expect(transaction.worktreeRunLease.create).not.toHaveBeenCalled();
-    expect(transaction.runCommand.create).toHaveBeenCalledWith(
-      expect.objectContaining({
-        data: expect.objectContaining({
-          runId: createdRunId,
-          type: "REVISE_ANSWER",
+        workflowRunId: "workflow-run",
+        completionNotificationsEnabled,
+        inputs: [{ kind: "INITIAL", prompt: "Build the feature" }],
+        events: [
+          {
+            sequence: 1,
+            type: "QUESTION",
+            summary: "Choose an API",
+            detailMarkdown: null,
+            createdAt: new Date("2026-07-23T12:00:00.000Z"),
+          },
+        ],
+      };
+      const batch = {
+        id: "batch-1",
+        runId: sourceRun.id,
+        run: sourceRun,
+        status: "ANSWERED",
+        revisionPreparedAt: new Date(),
+        eventSequence: 1,
+        createdAt: new Date("2026-07-23T12:00:01.000Z"),
+        checkpoint: { id: "checkpoint-1", refName: "refs/aide/checkpoint" },
+        questions: [{ prompt: "Which API should we use?" }],
+        answerRevisions: [{ id: "revision-0" }],
+      };
+      const findLease = vi
+        .fn()
+        .mockResolvedValueOnce({
+          runId: sourceRun.id,
+          worktreeId: sourceRun.worktreeId,
+        })
+        .mockResolvedValueOnce(null);
+      const updateRun = vi.fn();
+      const transaction = {
+        runQuestionBatch: { findUnique: vi.fn().mockResolvedValue(batch) },
+        worktreeRunLease: {
+          findUnique: findLease,
+          update: vi.fn().mockResolvedValue({ id: "lease-1" }),
+          create: vi.fn().mockResolvedValue({ id: "lease-1" }),
+          deleteMany: vi.fn().mockResolvedValue({ count: 0 }),
+          count: vi.fn().mockResolvedValue(0),
+        },
+        worktreeAdmissionLane: { upsert: vi.fn().mockResolvedValue({}) },
+        worktreeRunConcurrencyLane: { upsert: vi.fn().mockResolvedValue({}) },
+        worktreeWorkflowLease: {
+          deleteMany: vi.fn().mockResolvedValue({ count: 0 }),
+          findUnique: vi.fn().mockResolvedValue(null),
+        },
+        workflowRun: { findFirst: vi.fn().mockResolvedValue(null) },
+        runAnswerRevision: {
+          create: vi.fn().mockResolvedValue({ id: "revision-1" }),
+        },
+        runNumberSequence: {
+          upsert: vi.fn().mockResolvedValue({ nextValue: 43 }),
+        },
+        agentRun: {
+          create: vi.fn(async ({ data }: { data: Record<string, unknown> }) => {
+            createdRun = data;
+            createdRunId = String(data.id);
+            return data;
+          }),
+          update: updateRun,
+          findMany: vi.fn().mockResolvedValue([]),
+          updateMany: vi.fn().mockResolvedValue({ count: 0 }),
+        },
+        runCommand: {
+          findFirst: vi.fn().mockResolvedValue(null),
+          create: vi.fn(
+            async ({ data }: { data: Record<string, unknown> }) => ({
+              ...data,
+              run: createdRun,
+            }),
+          ),
+        },
+      };
+      const prisma = {
+        $transaction: vi.fn(
+          async (callback: (value: typeof transaction) => unknown) =>
+            callback(transaction),
+        ),
+        agentRun: {
+          findUnique: vi.fn(async () => createdRun),
+        },
+      };
+      mocks.getPrismaClient.mockResolvedValue(prisma);
+
+      const replacement = await new RunsService().reviseAnswer(
+        "batch-1",
+        { "question-1": { answers: ["GraphQL"] } },
+        false,
+      );
+
+      expect(replacement).toEqual(createdRun);
+      expect(createdRun).toEqual(
+        expect.objectContaining({
+          kind: "SESSION",
+          displayNumber: 42,
+          parentRunId: sourceRun.id,
+          parentRunNumber: sourceRun.displayNumber,
+          followUpMode: "ANSWER_REVISION",
+          phase: "ANSWER_REVISION_QUEUED",
+          worktreeConcurrencyLimit: 2,
+          workflowRunId: "workflow-run",
+          completionNotificationsEnabled,
         }),
-      }),
-    );
-  });
+      );
+      expect(updateRun).toHaveBeenCalledWith({
+        where: { id: sourceRun.id },
+        data: {
+          status: "CANCELLED",
+          phase: "SUPERSEDED_BY_ANSWER_REVISION",
+          finishedAt: expect.any(Date),
+        },
+      });
+      expect(transaction.worktreeRunLease.update).toHaveBeenCalledWith({
+        where: { runId: sourceRun.id },
+        data: {
+          runId: createdRunId,
+          purpose: "RUN",
+          reservationKey: null,
+          acquiredAt: expect.any(Date),
+        },
+      });
+      expect(transaction.worktreeRunLease.create).not.toHaveBeenCalled();
+      expect(transaction.runCommand.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            runId: createdRunId,
+            type: "REVISE_ANSWER",
+          }),
+        }),
+      );
+    },
+  );
 });

@@ -5,6 +5,50 @@ import type { GraphQLContext } from "@/services/graphql-server/graphql-server.se
 import { createRunResolvers } from "./runs";
 
 describe("run metadata resolvers", () => {
+  test("restricts child session reads to control-plane credentials and preserves run scoping", async () => {
+    const subagents = vi.fn().mockResolvedValue([]);
+    const subagentMessages = vi
+      .fn()
+      .mockResolvedValue({ events: [], nextCursor: null });
+    const resolvers = createRunResolvers({
+      subagents,
+      subagentMessages,
+    } as unknown as RunsService);
+    const context = { agentId: null } as GraphQLContext;
+    await resolvers.Query.runSubagents(null, { runId: "run" }, context);
+    await resolvers.Query.runSubagentMessages(
+      null,
+      {
+        runId: "run",
+        subagentId: "child",
+        before: "cursor",
+        first: 25,
+      },
+      context,
+    );
+    expect(subagents).toHaveBeenCalledWith("run");
+    expect(subagentMessages).toHaveBeenCalledWith({
+      runId: "run",
+      subagentId: "child",
+      before: "cursor",
+      first: 25,
+    });
+    const agentContext = { agentId: "agent" } as GraphQLContext;
+    expect(() =>
+      resolvers.Query.runSubagents(null, { runId: "run" }, agentContext),
+    ).toThrow("Agent credentials cannot manage runs");
+    expect(() =>
+      resolvers.Query.runSubagentMessages(
+        null,
+        {
+          runId: "run",
+          subagentId: "child",
+        },
+        agentContext,
+      ),
+    ).toThrow("Agent credentials cannot manage runs");
+  });
+
   test("projects only typed session information from raw attempt metadata", () => {
     const resolvers = createRunResolvers({} as RunsService);
     expect(

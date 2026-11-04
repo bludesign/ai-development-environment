@@ -189,6 +189,8 @@ type AgentJob {
   worktreeId: ID
   "Category of this agent job."
   kind: String!
+  "The saved command name captured when this job's command run started. Null for other jobs or unavailable runs."
+  commandName: String
   "Structured payload associated with this agent job."
   payload: JSON!
   "Versioned execution resources used for worktree-scoped scheduling."

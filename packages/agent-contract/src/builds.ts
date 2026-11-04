@@ -27,6 +27,26 @@ export type BuildLogChunk = {
   createdAt: string;
 };
 
+export type BuildScriptExecutionProgress = {
+  phase: "PRE_BUILD" | "POST_BUILD";
+  position: number;
+  status: "RUNNING" | "SUCCEEDED" | "FAILED" | "TIMED_OUT" | "CANCELLED";
+  exitCode?: number | null;
+  durationMs?: number | null;
+  causedBuildFailure?: boolean | null;
+  outputRelativePath?: string | null;
+  error?: string | null;
+};
+
+export type BuildProgressReport = {
+  buildId: string;
+  status: "PREPARING" | "RUNNING";
+  startedAt?: string | null;
+  errorCode?: string | null;
+  error?: string | null;
+  scriptExecutions?: BuildScriptExecutionProgress[] | null;
+};
+
 export const IOS_BUILD_JOB_KINDS = [
   IOS_SOURCE_DISCOVER_JOB_KIND,
   IOS_SOURCE_PARSE_JOB_KIND,

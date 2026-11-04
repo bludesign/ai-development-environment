@@ -123,6 +123,48 @@ describe("interactive step configuration", () => {
     expect(screen.getAllByText(/\{\{worktree\.baseBranch\}\}/).length).toBe(1);
   });
 
+  test.each([
+    "RUN_CREATE_PLAN",
+    "RUN_CREATE_SESSION",
+    "RUN_PLAY_PLAN",
+    "RUN_FOLLOW_UP",
+  ])("edits completion notifications for %s", (kind) => {
+    render(<Harness config={{}} kind={kind} />);
+
+    const selector = screen.getByRole("combobox", {
+      name: "Successful completion notifications",
+    });
+    expect(selector.textContent).toBe("Use workflow setting");
+    expect(config().completionNotifications).toBeUndefined();
+
+    for (const [label, value] of [
+      ["Disabled", "DISABLED"],
+      ["Enabled", "ENABLED"],
+      ["Use workflow setting", "INHERIT"],
+    ]) {
+      fireEvent.click(selector);
+      fireEvent.click(screen.getByRole("option", { name: label }));
+      expect(config().completionNotifications).toBe(value);
+      expect(selector.textContent).toBe(label);
+    }
+  });
+
+  test("loads a saved completion notification override", () => {
+    render(
+      <Harness
+        config={{ completionNotifications: "DISABLED" }}
+        kind="RUN_CREATE_SESSION"
+      />,
+    );
+
+    expect(
+      screen.getByRole("combobox", {
+        name: "Successful completion notifications",
+      }).textContent,
+    ).toBe("Disabled");
+    expect(config().completionNotifications).toBe("DISABLED");
+  });
+
   test("renders bounded integer worktree concurrency controls", () => {
     render(<Harness config={{}} kind="RUN_CREATE_SESSION" />);
 
