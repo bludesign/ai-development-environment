@@ -318,6 +318,21 @@ const modelField = (): ConfigFieldDescriptor => ({
   },
 });
 
+const runCompletionNotificationsField = (): ConfigFieldDescriptor =>
+  enumField(
+    "completionNotifications",
+    "Successful completion notifications",
+    listOptions([
+      { value: "INHERIT", label: "Use workflow setting" },
+      { value: "ENABLED", label: "Enabled" },
+      { value: "DISABLED", label: "Disabled" },
+    ]),
+    {
+      default: "INHERIT",
+      help: "Use the workflow's current completion notification setting, or override it for this AI run. Failure and attention notifications remain enabled.",
+    },
+  );
+
 const runInputFields = (
   kind: "PLAN" | "SESSION" | null,
 ): ConfigFieldDescriptor[] => [
@@ -328,6 +343,7 @@ const runInputFields = (
   modelField(),
   bool("webSearchEnabled", "Enable web search"),
   mcpPresets(kind),
+  runCompletionNotificationsField(),
   num("worktreeConcurrencyLimit", "Worktree concurrency limit", {
     default: kind === "PLAN" ? 0 : kind === "SESSION" ? 1 : undefined,
     minimum: 0,
@@ -1236,6 +1252,7 @@ const STEP_CONFIG_DESCRIPTORS: StepConfigDescriptors = {
     fields: [
       text("runId", "Plan run ID"),
       mcpPresets("SESSION"),
+      runCompletionNotificationsField(),
       num("worktreeConcurrencyLimit", "Worktree concurrency limit", {
         default: 1,
         minimum: 0,

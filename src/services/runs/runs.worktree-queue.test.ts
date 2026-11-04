@@ -173,6 +173,89 @@ describe("durable worktree run queues", () => {
     return id;
   };
 
+  test.each([true, false])(
+    "resolves inherited completion notifications after the workflow changes from %s",
+    async (initialSetting) => {
+      const definition = emptyWorkflowDefinition("Notification inheritance");
+      await prisma.workflow.create({
+        data: {
+          id: "notification-workflow",
+          name: definition.name,
+          draftDefinitionJson: JSON.stringify(definition),
+          completionNotificationsEnabled: initialSetting,
+        },
+      });
+      await prisma.workflowVersion.create({
+        data: {
+          id: "notification-version",
+          workflowId: "notification-workflow",
+          version: 1,
+          name: definition.name,
+          schemaVersion: definition.schemaVersion,
+          definitionJson: JSON.stringify(definition),
+          contentHash: "notification-inheritance",
+        },
+      });
+      await prisma.workflowRun.create({
+        data: {
+          id: "notification-workflow-run",
+          displayNumber: 0,
+          workflowId: "notification-workflow",
+          versionId: "notification-version",
+          idempotencyKey: "notification-workflow-run",
+          triggerKind: "MANUAL",
+          triggerSubjectKey: "manual",
+          triggerPayloadJson: "{}",
+          sessionDataJson: "{}",
+          status: "RUNNING",
+          worktreeId: "worktree-1",
+        },
+      });
+      const recordInTransaction = vi
+        .fn()
+        .mockResolvedValue({ id: "notification" });
+      const notifyingService = new RunsService({
+        recordInTransaction,
+        created: vi.fn(),
+      } as never);
+      const runs = [];
+      for (const override of [undefined, null, true, false]) {
+        const run = await notifyingService.create({
+          ...input("SESSION", "Workflow step", 0),
+          workflowRunId: "notification-workflow-run",
+          completionNotificationsEnabled: override,
+        });
+        if (!run) throw new Error("Expected a workflow child run");
+        expect(run.completionNotificationsEnabled).toBe(override ?? null);
+        runs.push(run);
+      }
+
+      await prisma.workflow.update({
+        where: { id: "notification-workflow" },
+        data: { completionNotificationsEnabled: !initialSetting },
+      });
+      for (const run of runs) {
+        const attempt = await notifyingService.beginAttempt("agent-1", run.id);
+        await notifyingService.finishAttempt("agent-1", attempt.id, {
+          status: "COMPLETED",
+        });
+      }
+
+      const expectedRunIds = runs
+        .filter((run) => run.completionNotificationsEnabled ?? !initialSetting)
+        .map((run) => run.id);
+      expect(
+        recordInTransaction.mock.calls.map(
+          ([, notification]) => notification.resourceId,
+        ),
+      ).toEqual(expectedRunIds);
+      expect(
+        await prisma.agentRun.count({ where: { status: "COMPLETED" } }),
+      ).toBe(4);
+      expect(await prisma.worktreeRunLease.count()).toBe(0);
+    },
+  );
+
   test("atomically excludes builds from active Session executions and keeps protection through pause", async () => {
     const run = await service.create(input("SESSION", "Edit the source"));
     const command = await prisma.runCommand.findFirstOrThrow({

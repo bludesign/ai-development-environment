@@ -387,7 +387,7 @@
     "blocksGitOperationsExclusiveHelp": "Exclusive workflows always block Git during command and terminal steps.",
     "blocksGitOperationsBadge": "Blocks Git operations",
     "completionNotifications": "Notify when this workflow completes successfully",
-    "completionNotificationsHelp": "Turn this off to suppress successful-run completion notifications. Failure and attention notifications remain enabled.",
+    "completionNotificationsHelp": "Controls successful completion notifications for this workflow and AI runs set to use the workflow setting. Each AI-run action can override it. Failure and attention notifications remain enabled.",
     "connectorLayout": "Step connectors",
     "connectorLayouts": {
       "SIDES": "On the sides",

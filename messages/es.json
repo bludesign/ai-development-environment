@@ -387,7 +387,7 @@
     "blocksGitOperationsExclusiveHelp": "Los flujos exclusivos siempre bloquean Git durante pasos de comando y terminal.",
     "blocksGitOperationsBadge": "Bloquea operaciones Git",
     "completionNotifications": "Notificar cuando este flujo de trabajo finalice correctamente",
-    "completionNotificationsHelp": "Desactiva esta opción para omitir las notificaciones de finalización correcta. Las notificaciones de errores y de atención permanecen activadas.",
+    "completionNotificationsHelp": "Controla las notificaciones de finalización correcta de este flujo de trabajo y de las ejecuciones de IA que usan su configuración. Cada acción de ejecución de IA puede anularla. Las notificaciones de errores y de atención permanecen activadas.",
     "connectorLayout": "Conectores de los pasos",
     "connectorLayouts": {
       "SIDES": "En los lados",

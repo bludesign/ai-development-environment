@@ -411,7 +411,94 @@ describe("workflow run adapters", () => {
 
     await executor.execute(input);
 
-    expect(playPlan).toHaveBeenCalledWith("plan-run", [], 0, "workflow-run");
+    expect(playPlan).toHaveBeenCalledWith(
+      "plan-run",
+      [],
+      0,
+      "workflow-run",
+      null,
+    );
+  });
+
+  describe.each([
+    "RUN_CREATE_PLAN",
+    "RUN_CREATE_SESSION",
+    "RUN_PLAY_PLAN",
+    "RUN_FOLLOW_UP",
+  ] as const)("%s completion notifications", (kind) => {
+    test.each([
+      { selection: undefined, expected: null },
+      { selection: "INHERIT", expected: null },
+      { selection: "ENABLED", expected: true },
+      { selection: "DISABLED", expected: false },
+    ])("forwards $selection as $expected", async ({ selection, expected }) => {
+      const run = { id: "agent-run", kind: "SESSION" };
+      const create = vi.fn().mockResolvedValue(run);
+      const playPlan = vi.fn().mockResolvedValue(run);
+      const followUp = vi.fn().mockResolvedValue(run);
+      const executor = new WorkflowStepExecutor();
+      registerWorkflowAdapters(
+        { registerWaitPoller: vi.fn() } as unknown as WorkflowsService,
+        executor,
+        {
+          runs: { create, playPlan, followUp },
+        } as unknown as WorkflowAdapterServices,
+      );
+      const input = context("actual-worktree");
+      input.node.kind = kind;
+      input.node.config.runId = "source-run";
+      if (selection !== undefined)
+        input.node.config.completionNotifications = selection;
+
+      const result = await executor.execute(input);
+
+      const expectedInput = expect.objectContaining({
+        completionNotificationsEnabled: expected,
+        workflowRunId: "workflow-run",
+      });
+      if (kind === "RUN_PLAY_PLAN") {
+        expect(playPlan).toHaveBeenCalledWith(
+          "source-run",
+          [],
+          undefined,
+          "workflow-run",
+          expected,
+        );
+      } else if (kind === "RUN_FOLLOW_UP") {
+        expect(followUp).toHaveBeenCalledWith("source-run", expectedInput);
+      } else {
+        expect(create).toHaveBeenCalledWith(expectedInput);
+      }
+      expect(result.wait).toMatchObject({
+        kind: "AGENT_RUN",
+        externalKey: "agent-run",
+      });
+    });
+
+    test("rejects an unknown notification selection before creating a run", async () => {
+      const create = vi.fn();
+      const playPlan = vi.fn();
+      const followUp = vi.fn();
+      const executor = new WorkflowStepExecutor();
+      registerWorkflowAdapters(
+        { registerWaitPoller: vi.fn() } as unknown as WorkflowsService,
+        executor,
+        {
+          runs: { create, playPlan, followUp },
+        } as unknown as WorkflowAdapterServices,
+      );
+      const input = context("actual-worktree");
+      input.node.kind = kind;
+      input.node.config.runId = "source-run";
+      input.node.config.completionNotifications = "INVALID";
+
+      await expect(executor.execute(input)).rejects.toThrow(
+        "Successful completion notifications must be INHERIT, ENABLED, or DISABLED",
+      );
+      expect(create).not.toHaveBeenCalled();
+      expect(playPlan).not.toHaveBeenCalled();
+      expect(followUp).not.toHaveBeenCalled();
+    });
   });
 
   test("links created runs to their internal detail pages", async () => {

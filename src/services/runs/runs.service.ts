@@ -108,6 +108,8 @@ export type RunConfigurationInput = {
   worktreeConcurrencyLimit?: number | null;
   /** Internal owner used to admit steps launched by an exclusive workflow. */
   workflowRunId?: string | null;
+  /** Null inherits the owning workflow's current successful completion setting. */
+  completionNotificationsEnabled?: boolean | null;
 };
 
 export type SaveRunDraftInput = Omit<
@@ -119,6 +121,7 @@ export type SaveRunDraftInput = Omit<
   | "contextMode"
   | "worktreeConcurrencyLimit"
   | "workflowRunId"
+  | "completionNotificationsEnabled"
 > & { id?: string | null };
 
 export type RunEventInput = {
@@ -1249,6 +1252,8 @@ export class RunsService {
             : null,
           worktreeConcurrencyLimit: concurrencyLimit,
           workflowRunId: input.workflowRunId ?? null,
+          completionNotificationsEnabled:
+            input.completionNotificationsEnabled ?? null,
           initialPrompt: prompt,
           sourcePlanId: sourcePlan?.id,
           sourcePlanNumber: sourcePlan?.displayNumber,
@@ -1317,6 +1322,7 @@ export class RunsService {
     mcpPresetIds: string[] = [],
     concurrencyLimit?: number | null,
     workflowRunId?: string | null,
+    completionNotificationsEnabled?: boolean | null,
   ) {
     const plan = await this.get(planId);
     if (!plan) throw new Error("Plan not found");
@@ -1339,6 +1345,7 @@ export class RunsService {
       mcpPresetIds,
       worktreeConcurrencyLimit: concurrencyLimit,
       workflowRunId,
+      completionNotificationsEnabled,
     });
   }
 
@@ -2111,6 +2118,9 @@ export class RunsService {
           model: batch.run.model,
           effort: batch.run.effort,
           webSearchEnabled: batch.run.webSearchEnabled,
+          workflowRunId: batch.run.workflowRunId,
+          completionNotificationsEnabled:
+            batch.run.completionNotificationsEnabled,
           worktreeConcurrencyLimit:
             batch.run.kind === "SESSION"
               ? batch.run.worktreeConcurrencyLimit
@@ -2851,7 +2861,20 @@ export class RunsService {
     const result = await prisma.$transaction(async (transaction) => {
       const attempt = await transaction.runAttempt.findUnique({
         where: { id: attemptId },
-        include: { run: { include: { worktree: true } } },
+        include: {
+          run: {
+            include: {
+              worktree: true,
+              workflowRun: {
+                select: {
+                  workflow: {
+                    select: { completionNotificationsEnabled: true },
+                  },
+                },
+              },
+            },
+          },
+        },
       });
       if (!attempt || attempt.run.agentId !== agentId)
         throw new Error("Attempt not found");
@@ -2896,8 +2919,14 @@ export class RunsService {
               : input.phase === "RECOVERY_PAUSED"
                 ? "RUN_RECOVERY_PAUSED"
                 : null;
+      const completionNotificationsEnabled =
+        run.completionNotificationsEnabled ??
+        attempt.run.workflowRun?.workflow.completionNotificationsEnabled ??
+        true;
       const notification =
-        typeKey && this.notifications
+        typeKey &&
+        this.notifications &&
+        (typeKey !== "RUN_COMPLETED" || completionNotificationsEnabled)
           ? await this.notifications.recordInTransaction(transaction, {
               dedupeKey: `run:${run.id}:status:${persistedStatus}:${attempt.generation}`,
               typeKey,

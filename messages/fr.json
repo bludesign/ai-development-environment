@@ -387,7 +387,7 @@
     "blocksGitOperationsExclusiveHelp": "Les workflows exclusifs bloquent toujours Git pendant les étapes de commande et de terminal.",
     "blocksGitOperationsBadge": "Bloque les opérations Git",
     "completionNotifications": "Notifier lorsque ce workflow se termine avec succès",
-    "completionNotificationsHelp": "Désactivez cette option pour supprimer les notifications de réussite. Les notifications d’échec et d’attention restent activées.",
+    "completionNotificationsHelp": "Contrôle les notifications de réussite de ce workflow et des exécutions d’IA qui utilisent son réglage. Chaque action d’exécution d’IA peut le remplacer. Les notifications d’échec et d’attention restent activées.",
     "connectorLayout": "Connecteurs d'étape",
     "connectorLayouts": {
       "SIDES": "Sur les côtés",
