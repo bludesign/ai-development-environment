@@ -83,9 +83,16 @@ describe.skipIf(process.platform === "win32")(
       expect(await readdir(join(directory, "executions"))).toEqual([]);
     });
 
-    test.each([false, true])(
-      "kills verified orphan commands, including detached helpers (%s)",
-      async (detached) => {
+    test.each([
+      { detached: false, personality: "linux" },
+      { detached: true, personality: "linux" },
+      { detached: true, personality: "posix" },
+    ])(
+      "kills verified orphan commands (detached=$detached, ps=$personality)",
+      async ({ detached, personality }) => {
+        // procps personalities differ in how they interpret mixed BSD and
+        // Unix options. The native macOS ps ignores this variable.
+        vi.stubEnv("PS_PERSONALITY", personality);
         const heartbeat = join(directory, "heartbeat");
         const ticker = `const fs=require('node:fs');setInterval(()=>fs.appendFileSync(${JSON.stringify(heartbeat)},'.'),20);`;
         const command = detached

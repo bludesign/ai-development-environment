@@ -194,9 +194,11 @@ type ProcessEntry = {
 };
 
 function processTable(environment = false): ProcessEntry[] {
+  // Keep BSD selection options together: procps rejects BSD `eww` combined
+  // with the macOS-style `-axo` selector, so cleanup must use `ax` on both.
   const args = environment
-    ? ["eww", "-axo", "pid=,pgid=,stat=,command="]
-    : ["-ww", "-axo", "pid=,pgid=,stat=,command="];
+    ? ["axeww", "-o", "pid=,pgid=,stat=,command="]
+    : ["axww", "-o", "pid=,pgid=,stat=,command="];
   const output = execFileSync("/bin/ps", args, {
     encoding: "utf8",
     timeout: 5_000,

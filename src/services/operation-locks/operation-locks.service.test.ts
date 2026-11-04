@@ -39,21 +39,27 @@ let file: string;
 beforeAll(async () => {
   directory = mkdtempSync(join(tmpdir(), "aide-operation-locks-"));
   file = join(directory, "test.db");
-  const database = new Database(file);
-  for (const migration of readdirSync("prisma/migrations", {
-    withFileTypes: true,
-  })
-    .filter((entry) => entry.isDirectory())
-    .map((entry) => entry.name)
-    .sort()) {
-    database.exec(
-      readFileSync(
-        join("prisma/migrations", migration, "migration.sql"),
-        "utf8",
-      ),
-    );
+  // Migrate in memory so CI does not sync every schema statement to disk.
+  // Prisma still uses the on-disk backup for real cross-connection locking.
+  const database = new Database(":memory:");
+  try {
+    for (const migration of readdirSync("prisma/migrations", {
+      withFileTypes: true,
+    })
+      .filter((entry) => entry.isDirectory())
+      .map((entry) => entry.name)
+      .sort()) {
+      database.exec(
+        readFileSync(
+          join("prisma/migrations", migration, "migration.sql"),
+          "utf8",
+        ),
+      );
+    }
+    await database.backup(file);
+  } finally {
+    database.close();
   }
-  database.close();
   prisma = new PrismaClient({
     adapter: new PrismaBetterSqlite3({ url: file }),
   });
