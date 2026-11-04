@@ -35,6 +35,7 @@ import {
   normalizeRunSessionInfo,
   runMetadataRecord,
   type RunSessionInfo,
+  type RunSubagentSnapshot,
 } from "@ai-development-environment/agent-contract/runs";
 import {
   parseRunQuestionField,
@@ -48,6 +49,11 @@ import {
   cloneRunAttachments,
   removeRunAttachmentFiles,
 } from "./attachment-store";
+import {
+  projectClaudeSubagents,
+  subagentMessageEvents,
+  syncRunSubagents,
+} from "./subagents";
 
 const SOURCE_EXECUTION_COMMANDS = new Set([
   "START",
@@ -153,6 +159,7 @@ export type ImportedRunInput = {
   rawMetadata?: unknown;
   sessionInfo?: RunSessionInfo | null;
   events?: RunEventInput[] | null;
+  subagents?: RunSubagentSnapshot[] | null;
   usage?: Array<Parameters<RunsService["reportUsage"]>[3]> | null;
   estimatedCost?: number | null;
   pricingSource?: string | null;
@@ -893,6 +900,58 @@ export class RunsService {
       take: first,
     });
     return descending ? rows.reverse() : rows;
+  }
+
+  async subagents(runId: string) {
+    const prisma = await getPrismaClient();
+    const rows = await prisma.runSubagent.findMany({
+      where: { runId, attempt: { supersededAt: null } },
+      include: { _count: { select: { messages: true } } },
+      orderBy: [{ startedAt: "asc" }, { createdAt: "asc" }, { id: "asc" }],
+    });
+    return rows.map(({ _count, ...row }) => ({
+      ...row,
+      messageCount: _count.messages,
+    }));
+  }
+
+  async subagentMessages(input: {
+    runId: string;
+    subagentId: string;
+    before?: string | null;
+    first?: number | null;
+  }) {
+    const prisma = await getPrismaClient();
+    const subagent = await prisma.runSubagent.findFirst({
+      where: {
+        id: input.subagentId,
+        runId: input.runId,
+        attempt: { supersededAt: null },
+      },
+    });
+    if (!subagent) throw new Error("Subagent not found for this run");
+    if (input.before) {
+      const cursor = await prisma.runSubagentMessage.findFirst({
+        where: { id: input.before, subagentId: subagent.id },
+      });
+      if (!cursor) throw new Error("Subagent message cursor is invalid");
+    }
+    const first = Math.max(1, Math.min(input.first ?? 200, 500));
+    const messages = await prisma.runSubagentMessage.findMany({
+      where: { subagentId: subagent.id },
+      orderBy: [{ createdAt: "desc" }, { sequence: "desc" }, { id: "desc" }],
+      take: first + 1,
+      ...(input.before ? { cursor: { id: input.before }, skip: 1 } : {}),
+    });
+    return {
+      events: messages
+        .slice(0, first)
+        .reverse()
+        .flatMap((message) =>
+          subagentMessageEvents(message, input.runId, subagent.attemptId),
+        ),
+      nextCursor: messages.length > first ? messages[first - 1]!.id : null,
+    };
   }
 
   async questions(input: {
@@ -2555,6 +2614,14 @@ export class RunsService {
           });
         }
       }
+      if (run.provider === "CLAUDE" && attemptId) {
+        await projectClaudeSubagents(
+          transaction,
+          runId,
+          attemptId,
+          events.slice(0, 500).filter((event) => !existingIds.has(event.id)),
+        );
+      }
       return transaction.runEvent.findMany({
         where: { id: { in: eventRows.map((row) => row.id) } },
         orderBy: { sequence: "asc" },
@@ -3395,6 +3462,18 @@ export class RunsService {
         return "COMPLETED";
       })();
       if (existing) {
+        // Child histories are independent of managed root snapshots and their digests.
+        if (provider === "CLAUDE" && record.subagents?.length) {
+          const changed = await prisma.$transaction((transaction) =>
+            syncRunSubagents(
+              transaction,
+              existing.runId,
+              existing.id,
+              record.subagents!,
+            ),
+          );
+          if (changed) publishRun(existing.runId);
+        }
         if (existing.run.origin === "IMPORTED") {
           const collision =
             existing.run.kind === "SESSION" && importedStatus === "IN_PROGRESS"
@@ -3601,6 +3680,11 @@ export class RunsService {
           },
         },
       });
+      if (provider === "CLAUDE" && record.subagents?.length) {
+        await prisma.$transaction((transaction) =>
+          syncRunSubagents(transaction, id, attemptId, record.subagents!),
+        );
+      }
       if (historyDigest) {
         await this.importHistory(id, attemptId, record);
         await prisma.runAttempt.update({

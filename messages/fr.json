@@ -689,6 +689,24 @@
     "deleteWorkflowDescription": "{count, plural, one {Ce flux de travail est supprimé définitivement. Les flux de travail ayant un historique d'exécutions doivent être archivés à la place.} other {Ces # flux de travail sont supprimés définitivement. Les flux de travail ayant un historique d'exécutions doivent être archivés à la place.}}"
   },
   "runs": {
+    "agents": {
+      "title": "Agents",
+      "description": "Développez un agent pour afficher sa demande, son résultat et son activité de session.",
+      "fallbackLabel": "Agent {number}",
+      "spawnedBy": "Créé par {name}",
+      "messageCount": "Messages : {count}",
+      "loadingTranscript": "Chargement de la session de l’agent",
+      "partialTranscript": "Seule une partie de la session de cet agent est disponible.",
+      "unavailableTranscript": "La transcription de la session de cet agent est indisponible.",
+      "retry": "Réessayer",
+      "status": {
+        "RUNNING": "En cours",
+        "COMPLETED": "Terminé",
+        "FAILED": "Échec",
+        "CANCELLED": "Annulé",
+        "UNKNOWN": "Inconnu"
+      }
+    },
     "info": {
       "sessionTitle": "Informations de session",
       "planTitle": "Informations du plan",

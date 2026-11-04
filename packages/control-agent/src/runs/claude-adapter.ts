@@ -3,11 +3,14 @@ import {
   executionEnvironment,
 } from "../execution-recovery.js";
 import { randomUUID } from "node:crypto";
+import { stat } from "node:fs/promises";
 import { homedir } from "node:os";
+import { dirname, join } from "node:path";
 import type { RunSessionInfo } from "@ai-development-environment/agent-contract/runs";
 import { findClaudeSessionFile } from "../handlers/runs.js";
 import {
   claudeImportedHistory,
+  claudeSubagentSnapshot,
   claudeTranscriptMetadata,
   readClaudeTranscript,
 } from "./claude-import.js";
@@ -15,7 +18,9 @@ import {
 import {
   deleteSession,
   getSessionMessages,
+  getSubagentMessages,
   listSessions,
+  listSubagents,
   query,
   type Query,
   type SDKUserMessage,
@@ -39,9 +44,41 @@ import {
   type ProviderImportWorktree,
   type ProviderQuestion,
   type ProviderStartInput,
+  type ProviderSubagentSnapshot,
   type ProviderUsage,
   type StagedAttachment,
 } from "./provider.js";
+
+const SUBAGENT_PAGE_SIZE = 500;
+const MAX_SUBAGENT_MESSAGES = 10_000;
+const MAX_SUBAGENT_BYTES = 8 * 1024 * 1024;
+const MAX_SESSION_SUBAGENT_BYTES = 32 * 1024 * 1024;
+const MAX_SUBAGENT_CACHE_BYTES = 64 * 1024 * 1024;
+
+type SubagentHistoryCacheEntry = {
+  fingerprint: string;
+  messages: unknown[];
+  bytes: number;
+};
+
+function claudeMessageSummary(record: Record<string, unknown>): string {
+  const message = asRecord(record.message);
+  const content = Array.isArray(message.content) ? message.content : [];
+  return (
+    content
+      .map(asRecord)
+      .map((block) =>
+        block.type === "tool_use"
+          ? String(block.name ?? "Tool call")
+          : block.type === "tool_result"
+            ? "Tool result"
+            : block.type === "thinking" || block.type === "redacted_thinking"
+              ? "Thinking"
+              : String(block.type ?? "Claude message"),
+      )
+      .join(", ") || `Claude ${String(record.type)}`
+  );
+}
 
 export function findClaudeCodeExecutable(
   options: ExecutableLookupOptions = {},
@@ -233,6 +270,31 @@ export class ClaudeAdapter implements ProviderAdapter {
     string,
     { lastModified: string; history: Partial<ProviderImportedRun> }
   >();
+  private readonly subagentHistoryCache = new Map<
+    string,
+    SubagentHistoryCacheEntry
+  >();
+  private subagentHistoryCacheBytes = 0;
+
+  private cacheSubagentHistory(
+    key: string,
+    entry?: SubagentHistoryCacheEntry,
+  ): void {
+    const previous = this.subagentHistoryCache.get(key);
+    if (previous) this.subagentHistoryCacheBytes -= previous.bytes;
+    this.subagentHistoryCache.delete(key);
+    if (entry) {
+      this.subagentHistoryCache.set(key, entry);
+      this.subagentHistoryCacheBytes += entry.bytes;
+    }
+    while (this.subagentHistoryCacheBytes > MAX_SUBAGENT_CACHE_BYTES) {
+      const oldest = this.subagentHistoryCache.keys().next().value;
+      if (oldest === undefined) break;
+      this.subagentHistoryCacheBytes -=
+        this.subagentHistoryCache.get(oldest)!.bytes;
+      this.subagentHistoryCache.delete(oldest);
+    }
+  }
 
   catalog(): Promise<ProviderCatalog> {
     this.catalogPromise ??= (async () => {
@@ -313,6 +375,7 @@ export class ClaudeAdapter implements ProviderAdapter {
           input.run.kind === "PLAN" ? "plan" : "bypassPermissions",
         allowDangerouslySkipPermissions: input.run.kind === "SESSION",
         includePartialMessages: true,
+        forwardSubagentText: true,
         env: { ...claudeEnvironment(), ...executionEnvironment() },
         spawnClaudeCodeProcess: ({ command, args, cwd, env, signal }) =>
           spawnExecutionProcess(command, args, {
@@ -356,11 +419,14 @@ export class ClaudeAdapter implements ProviderAdapter {
       try {
         for await (const message of activeQuery!) {
           const record = asRecord(message);
+          const childMessage =
+            typeof record.agent_id === "string" ||
+            typeof record.parent_tool_use_id === "string";
           const sessionId =
             typeof record.session_id === "string"
               ? record.session_id
               : undefined;
-          if (sessionId && sessionId !== nativeId) {
+          if (sessionId && sessionId !== nativeId && !childMessage) {
             nativeId = sessionId;
             const version =
               record.subtype === "init" &&
@@ -384,11 +450,18 @@ export class ClaudeAdapter implements ProviderAdapter {
             record.message ?? record.result ?? record.summary,
           );
           const type = String(record.type ?? "message").toUpperCase();
-          if (messageText) {
+          if (
+            messageText ||
+            record.type === "assistant" ||
+            record.type === "user"
+          ) {
             await callbacks.onEvent({
               type: type === "ASSISTANT" ? "ASSISTANT" : type,
-              summary: messageText.slice(0, 2_000),
-              detailMarkdown: messageText,
+              summary: (messageText || claudeMessageSummary(record)).slice(
+                0,
+                2_000,
+              ),
+              detailMarkdown: messageText || undefined,
               raw: message,
             });
           } else if (record.type === "system" && record.subtype) {
@@ -398,7 +471,7 @@ export class ClaudeAdapter implements ProviderAdapter {
               raw: message,
             });
           }
-          if (record.type === "result") {
+          if (record.type === "result" && !childMessage) {
             finalOutput =
               typeof record.result === "string" ? record.result : finalOutput;
             for (const usage of claudeModelUsages(record, input.run.model)) {
@@ -462,6 +535,143 @@ export class ClaudeAdapter implements ProviderAdapter {
     return deleteSession(nativeId, { dir: cwd });
   }
 
+  private async discoverSubagents(
+    sessionId: string,
+    folder: string,
+    history: Partial<ProviderImportedRun>,
+    transcriptPath?: string | null,
+  ): Promise<ProviderSubagentSnapshot[] | undefined> {
+    let ids: string[];
+    try {
+      ids = await listSubagents(sessionId, { dir: folder });
+    } catch {
+      // Omit a failed listing so previously imported children remain available.
+      return undefined;
+    }
+    const children: Array<{
+      nativeId: string;
+      messages: unknown[];
+      transcriptStatus: ProviderSubagentSnapshot["transcriptStatus"];
+      transcriptError?: string;
+    }> = [];
+    let sessionBytes = 0;
+    for (const nativeId of [...new Set(ids)]) {
+      const cacheKey = JSON.stringify([sessionId, folder, nativeId]);
+      let fingerprint: string | undefined;
+      if (transcriptPath && !/[/\\]/.test(nativeId)) {
+        try {
+          // The SDK documents this child location relative to its parent JSONL.
+          const childPath = join(
+            dirname(transcriptPath),
+            sessionId,
+            "subagents",
+            `agent-${nativeId}`,
+          );
+          const file = await stat(`${childPath}.jsonl`);
+          const metadata = await stat(`${childPath}.meta.json`).catch(
+            (error: unknown) => {
+              if ((error as NodeJS.ErrnoException).code === "ENOENT")
+                return null;
+              throw error;
+            },
+          );
+          if (file.isFile())
+            fingerprint = `${file.size}:${file.mtimeMs}:${metadata?.size ?? "missing"}:${metadata?.mtimeMs ?? "missing"}`;
+        } catch {
+          // Without a trustworthy file fingerprint, read through the SDK again.
+        }
+      }
+      const cached = this.subagentHistoryCache.get(cacheKey);
+      if (
+        cached &&
+        cached.fingerprint === fingerprint &&
+        sessionBytes + cached.bytes <= MAX_SESSION_SUBAGENT_BYTES
+      ) {
+        this.cacheSubagentHistory(cacheKey, cached);
+        children.push({
+          nativeId,
+          messages: cached.messages,
+          transcriptStatus: "AVAILABLE",
+        });
+        sessionBytes += cached.bytes;
+        continue;
+      }
+      this.cacheSubagentHistory(cacheKey);
+      const messages: unknown[] = [];
+      let transcriptStatus: ProviderSubagentSnapshot["transcriptStatus"] =
+        "AVAILABLE";
+      let transcriptError: string | undefined;
+      let offset = 0;
+      let childBytes = 0;
+      try {
+        while (offset < MAX_SUBAGENT_MESSAGES) {
+          if (sessionBytes >= MAX_SESSION_SUBAGENT_BYTES) {
+            transcriptStatus = messages.length ? "PARTIAL" : "UNAVAILABLE";
+            transcriptError = "Session subagent transcript size limit reached.";
+            break;
+          }
+          const limit = Math.min(
+            SUBAGENT_PAGE_SIZE,
+            MAX_SUBAGENT_MESSAGES - offset,
+          );
+          const page = await getSubagentMessages(sessionId, nativeId, {
+            dir: folder,
+            limit,
+            offset,
+          });
+          for (const message of page) {
+            const bytes = Buffer.byteLength(JSON.stringify(message));
+            if (
+              childBytes + bytes > MAX_SUBAGENT_BYTES ||
+              sessionBytes + bytes > MAX_SESSION_SUBAGENT_BYTES
+            ) {
+              transcriptStatus = messages.length ? "PARTIAL" : "UNAVAILABLE";
+              transcriptError = "Subagent transcript size limit reached.";
+              break;
+            }
+            messages.push(message);
+            childBytes += bytes;
+            sessionBytes += bytes;
+          }
+          if (transcriptError || page.length < limit) break;
+          offset += page.length;
+          if (offset >= MAX_SUBAGENT_MESSAGES) {
+            transcriptStatus = "PARTIAL";
+            transcriptError = "Subagent transcript message limit reached.";
+          }
+        }
+        if (!messages.length && !transcriptError) {
+          transcriptStatus = "UNAVAILABLE";
+          transcriptError = "Subagent transcript was not found.";
+        }
+      } catch (error) {
+        transcriptStatus = messages.length ? "PARTIAL" : "UNAVAILABLE";
+        transcriptError =
+          error instanceof Error
+            ? error.message
+            : "Subagent transcript failed.";
+      }
+      children.push({ nativeId, messages, transcriptStatus, transcriptError });
+      if (transcriptStatus === "AVAILABLE" && fingerprint) {
+        this.cacheSubagentHistory(cacheKey, {
+          fingerprint,
+          messages,
+          bytes: childBytes,
+        });
+      }
+    }
+    const metadata = [
+      ...(history.events ?? []),
+      ...children.flatMap((child) => child.messages),
+    ];
+    return children.map((child) =>
+      claudeSubagentSnapshot(child.nativeId, child.messages, metadata, {
+        transcriptStatus: child.transcriptStatus,
+        transcriptError: child.transcriptError,
+      }),
+    );
+  }
+
   async discover(
     worktrees: ProviderImportWorktree[],
   ): Promise<ProviderImportedRun[]> {
@@ -513,6 +723,13 @@ export class ClaudeAdapter implements ProviderAdapter {
             // Omit activity snapshots on failure so previous imports remain intact.
           }
         }
+        // Child transcripts grow independently of the parent's list metadata.
+        const subagents = await this.discoverSubagents(
+          session.sessionId,
+          worktree.folder,
+          history,
+          sessionInfo.nativeTranscriptPath,
+        );
         results.push({
           nativeId: session.sessionId,
           worktreeId: worktree.id,
@@ -526,6 +743,7 @@ export class ClaudeAdapter implements ProviderAdapter {
           updatedAt: new Date(session.lastModified).toISOString(),
           rawMetadata: session,
           sessionInfo,
+          ...(subagents === undefined ? {} : { subagents }),
         });
       }
     }

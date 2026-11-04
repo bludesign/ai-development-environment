@@ -913,6 +913,7 @@ model AgentRun {
   attempts                 RunAttempt[]
   inputs                   RunInput[]
   events                   RunEvent[]
+  subagents                RunSubagent[]
   toolCalls                RunToolCall[]
   modelUsage               RunModelUsage[]
   questionBatches          RunQuestionBatch[]
@@ -946,6 +947,7 @@ model RunAttempt {
   updatedAt       DateTime           @updatedAt
   run             AgentRun           @relation(fields: [runId], references: [id], onDelete: Cascade)
   events          RunEvent[]
+  subagents       RunSubagent[]
   toolCalls       RunToolCall[]
   modelUsage      RunModelUsage[]
   questionBatches RunQuestionBatch[]
@@ -1027,6 +1029,48 @@ model RunEvent {
 
   @@unique([runId, sequence])
   @@index([runId, supersededAt, sequence])
+}
+
+model RunSubagent {
+  id               String               @id
+  runId            String
+  attemptId        String
+  nativeId         String
+  nativeRunId      String?
+  parentNativeId   String?
+  toolUseId        String?
+  label            String
+  agentType        String?
+  status           String               @default("UNKNOWN")
+  prompt           String?
+  finalOutput      String?
+  startedAt        DateTime?
+  finishedAt       DateTime?
+  transcriptStatus String               @default("PARTIAL")
+  transcriptError  String?
+  snapshotDigest   String?
+  createdAt        DateTime             @default(now())
+  updatedAt        DateTime             @updatedAt
+  run              AgentRun             @relation(fields: [runId], references: [id], onDelete: Cascade)
+  attempt          RunAttempt           @relation(fields: [attemptId], references: [id], onDelete: Cascade)
+  messages         RunSubagentMessage[]
+
+  @@unique([attemptId, nativeId])
+  @@index([runId, startedAt])
+  @@index([attemptId, toolUseId])
+}
+
+model RunSubagentMessage {
+  id         String      @id
+  subagentId String
+  nativeId   String
+  sequence   Int
+  rawJson    String
+  createdAt  DateTime    @default(now())
+  subagent   RunSubagent @relation(fields: [subagentId], references: [id], onDelete: Cascade)
+
+  @@unique([subagentId, nativeId])
+  @@index([subagentId, createdAt, id])
 }
 
 model RunToolCall {

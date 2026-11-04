@@ -689,6 +689,24 @@
     "deleteWorkflowDescription": "{count, plural, one {This workflow is deleted permanently. Workflows with run history must be archived instead.} other {These # workflows are deleted permanently. Workflows with run history must be archived instead.}}"
   },
   "runs": {
+    "agents": {
+      "title": "Agents",
+      "description": "Expand an agent to view its prompt, result, and session activity.",
+      "fallbackLabel": "Agent {number}",
+      "spawnedBy": "Spawned by {name}",
+      "messageCount": "Messages: {count}",
+      "loadingTranscript": "Loading agent session",
+      "partialTranscript": "Only part of this agent's session is available.",
+      "unavailableTranscript": "This agent's session transcript is unavailable.",
+      "retry": "Try again",
+      "status": {
+        "RUNNING": "Running",
+        "COMPLETED": "Completed",
+        "FAILED": "Failed",
+        "CANCELLED": "Cancelled",
+        "UNKNOWN": "Unknown"
+      }
+    },
     "info": {
       "sessionTitle": "Session info",
       "planTitle": "Plan info",

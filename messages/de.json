@@ -689,6 +689,24 @@
     "deleteWorkflowDescription": "{count, plural, one {Dieser Workflow wird dauerhaft gelöscht. Workflows mit Ausführungsverlauf müssen stattdessen archiviert werden.} other {Diese # Workflows werden dauerhaft gelöscht. Workflows mit Ausführungsverlauf müssen stattdessen archiviert werden.}}"
   },
   "runs": {
+    "agents": {
+      "title": "Agenten",
+      "description": "Klappe einen Agenten auf, um seine Anfrage, sein Ergebnis und seine Sitzungsaktivität anzuzeigen.",
+      "fallbackLabel": "Agent {number}",
+      "spawnedBy": "Gestartet von {name}",
+      "messageCount": "Nachrichten: {count}",
+      "loadingTranscript": "Agentensitzung wird geladen",
+      "partialTranscript": "Nur ein Teil dieser Agentensitzung ist verfügbar.",
+      "unavailableTranscript": "Das Protokoll dieser Agentensitzung ist nicht verfügbar.",
+      "retry": "Erneut versuchen",
+      "status": {
+        "RUNNING": "Wird ausgeführt",
+        "COMPLETED": "Abgeschlossen",
+        "FAILED": "Fehlgeschlagen",
+        "CANCELLED": "Abgebrochen",
+        "UNKNOWN": "Unbekannt"
+      }
+    },
     "info": {
       "sessionTitle": "Sitzungsinformationen",
       "planTitle": "Planinformationen",

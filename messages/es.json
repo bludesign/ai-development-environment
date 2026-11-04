@@ -689,6 +689,24 @@
     "deleteWorkflowDescription": "{count, plural, one {Este flujo de trabajo se elimina de forma permanente. Los flujos de trabajo con historial de ejecuciones deben archivarse en su lugar.} other {Estos # flujos de trabajo se eliminan de forma permanente. Los flujos de trabajo con historial de ejecuciones deben archivarse en su lugar.}}"
   },
   "runs": {
+    "agents": {
+      "title": "Agentes",
+      "description": "Expande un agente para ver su solicitud, resultado y actividad de sesión.",
+      "fallbackLabel": "Agente {number}",
+      "spawnedBy": "Creado por {name}",
+      "messageCount": "Mensajes: {count}",
+      "loadingTranscript": "Cargando la sesión del agente",
+      "partialTranscript": "Solo está disponible una parte de la sesión de este agente.",
+      "unavailableTranscript": "La transcripción de la sesión de este agente no está disponible.",
+      "retry": "Volver a intentar",
+      "status": {
+        "RUNNING": "En ejecución",
+        "COMPLETED": "Completado",
+        "FAILED": "Fallido",
+        "CANCELLED": "Cancelado",
+        "UNKNOWN": "Desconocido"
+      }
+    },
     "info": {
       "sessionTitle": "Información de la sesión",
       "planTitle": "Información del plan",

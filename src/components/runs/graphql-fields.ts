@@ -56,6 +56,12 @@ export const RUN_EVENT_FIELDS = `
   id runId attemptId sequence type summary detailMarkdown raw createdAt supersededAt
 `;
 
+export const RUN_SUBAGENT_FIELDS = `
+  id runId attemptId nativeId parentNativeId toolUseId label agentType status
+  prompt finalOutput startedAt finishedAt transcriptStatus transcriptError
+  messageCount updatedAt
+`;
+
 export const RUN_DRAFT_FIELDS = `
   id kind worktreeId agentId worktree { id folder branch highlightColor }
   jiraIssueKey provider model effort webSearchEnabled mcpPresetIds prompt

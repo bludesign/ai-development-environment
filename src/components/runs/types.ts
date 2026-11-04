@@ -147,6 +147,31 @@ export type RunEventView = {
   supersededAt: string | null;
 };
 
+export type RunSubagentView = {
+  id: string;
+  runId: string;
+  attemptId: string | null;
+  nativeId: string;
+  parentNativeId: string | null;
+  toolUseId: string | null;
+  label: string;
+  agentType: string | null;
+  status: string;
+  prompt: string | null;
+  finalOutput: string | null;
+  startedAt: string | null;
+  finishedAt: string | null;
+  transcriptStatus: string;
+  transcriptError: string | null;
+  messageCount: number;
+  updatedAt: string;
+};
+
+export type RunSubagentMessagePageView = {
+  events: RunEventView[];
+  nextCursor: string | null;
+};
+
 export type RunQuestionBatchView = {
   error?: string | null;
   id: string;
